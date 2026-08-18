@@ -1893,6 +1893,30 @@ export const DIAGNOSTIC_MESSAGES = {
     `\`extern\` function, so the frontend renders nothing for it — in a text slot the ` +
     `content is silently DROPPED (\`Text(${p.name}(…))\` emits an empty element).  Check the ` +
     `spelling, declare a \`component ${p.name}(…)\`, or import it as an \`extern\` function.`,
+  "loom.unresolved-page-ref": (p: { where: unknown; name: unknown }) =>
+    `${p.where}: \`${p.name}\` in a rendered slot names no route parameter, \`state\` field, ` +
+    `\`derived\` binding, enclosing lambda parameter, or store field, so the frontend has ` +
+    `nothing to read — the walker emits a COMMENT in its place and the content is silently ` +
+    `DROPPED on every frontend (\`{/* ref: ${p.name} */}\` on React/Vue/Svelte/Angular, ` +
+    `\`Html.none\` on Feliz, \`SizedBox.shrink()\` on Flutter).  Check the spelling, or declare ` +
+    `\`${p.name}\` as page state / a route parameter.`,
+  "loom.page-primitive-extra-children": (p: {
+    where: unknown;
+    name: unknown;
+    max: unknown;
+    slots: unknown;
+  }) =>
+    `${p.where}: \`${p.name}\` takes ${p.max} positional arguments (${p.slots}) — it is a fixed ` +
+    `SLOT primitive, not a children container like \`Stack\` or \`Card\`, so every design pack ` +
+    `renders exactly those ${p.max} and the extra ones are silently DROPPED from the page ` +
+    `(while still landing in the message catalog).  Wrap the extra content in a \`Stack { … }\` ` +
+    `and pass that as the last slot.`,
+  "loom.page-primitive-extra-children#modal-op-form": (p: { where: unknown }) =>
+    `${p.where}: a \`Modal\` with an \`OperationForm\` child renders the TRIGGER button and the ` +
+    `operation's generated field set — nothing else.  The other positional children have no ` +
+    `slot in any design pack and are silently DROPPED.  Use the state-controlled shape ` +
+    `(\`Modal { …children, open: <stateBool> }\`), which IS a children container, or move the ` +
+    `extra markup out of the modal.`,
   "loom.slot-outside-component": (p: { where: unknown }) =>
     `${p.where}: \`Slot { }\` renders the children a CALLER passed in, so it only means ` +
     `something inside a \`component\` body.  A page has no caller and no children ` +

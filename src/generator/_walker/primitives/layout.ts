@@ -217,12 +217,23 @@ export function emitContainer(
 }
 
 export function emitTabs(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
-  // Tabs(Tab("Overview", body), Tab("Settings", body))
-  // Each positional child must be a `Tab(label, body)` call;
+  // Tabs(Tab("Overview", ...body), Tab("Settings", ...body))
+  // Each positional child must be a `Tab(label, ...children)` call;
   // anything else lands as a placeholder so the page still
   // compiles.  Tab labels must be string literals in v0; non-
   // literal labels fall back to indexed slugs `tab-1`, …
+  //
+  // The panel body used to be `tabPositionals[1]` ALONE, so
+  // `Tab { "Ovw", Text { "A" }, Text { "B" } }` rendered `A` and dropped `B`
+  // — and every sibling after it — without a word, on all seven targets (the
+  // dropped literal still reached `.loom/messages.en.json`, so translators got
+  // a key nothing renders).  A tab panel is a children container like
+  // `Stack`/`Card`; it joins its children the same way (#2567's class).
   const positionals = positionalArgs(call);
+  const innerIndent = "  ".repeat(depth + 2);
+  /** Join already-walked panel children the way every other container does. */
+  const joinBody = (parts: readonly string[]): string =>
+    parts.join(`${ctx.target.interChildSeparator ?? ""}\n${innerIndent}`);
   const tabs = positionals.map((arg, i) => {
     if (arg.kind !== "call" || arg.name !== "Tab") {
       // Bare positional (e.g. `Tabs(Card(...), Card(...))`) — treat it as
@@ -230,25 +241,33 @@ export function emitTabs(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
       // this fallback, the panel would emit a JSX comment as its only
       // child and tsc rejects it (Mantine's `TabsPanelProps` requires
       // a non-empty `children`).
+      const only = walk(arg, ctx, depth + 2);
       return {
         value: `tab-${i + 1}`,
         label: `Tab ${i + 1}`,
-        bodyJsx: walk(arg, ctx, depth + 2),
+        bodyJsx: only,
+        bodyChildren: [only],
       };
     }
     const tabPositionals = positionalArgs(arg);
     const labelArg = tabPositionals[0];
-    const bodyArg = tabPositionals[1];
+    const bodyArgs = tabPositionals.slice(1);
     const labelStr =
       labelArg && labelArg.kind === "literal" && labelArg.lit === "string"
         ? labelArg.value
         : `Tab ${i + 1}`;
+    const bodyParts = bodyArgs.map((e) => walk(e, ctx, depth + 2));
     return {
       value: slugify(labelStr) || `tab-${i + 1}`,
       label: ctx.target.escapeText(labelStr),
-      bodyJsx: bodyArg
-        ? walk(bodyArg, ctx, depth + 2)
-        : ctx.target.renderComment("missing tab body"),
+      bodyJsx:
+        bodyParts.length > 0 ? joinBody(bodyParts) : ctx.target.renderComment("missing tab body"),
+      // The same children UNJOINED, for the two packs that emit a PROGRAMMING
+      // LANGUAGE rather than markup: Feliz splices them into an offside-
+      // sensitive `prop.children [ … ]` list (`;`-separated) and Flutter needs
+      // ONE widget per `TabBarView` child, so several fold into a `Column`.
+      // The walker's `\n`-joined `bodyJsx` is a syntax hazard in both.
+      bodyChildren: bodyParts,
     };
   });
   // Record the first tab group's default so the shell can declare the

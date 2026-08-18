@@ -1487,7 +1487,11 @@ export function renderDestroyForm(
  *  gets a unique `tabs-<n>` id so its toggle selectors stay scoped. */
 export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let testid = "";
-  const tabs: Array<{ label: string; slug: string; body: ExprIR | undefined }> = [];
+  // `body` is EVERY panel child, not just the first: `Tab { "Ovw", Text { "A" },
+  // Text { "B" } }` used to read `pos[1]` alone and drop `B` (the JSX engine's
+  // twin defect — `_walker/primitives/layout.ts`).  A panel is a children
+  // container like `Card`, which this engine already walks correctly.
+  const tabs: Array<{ label: string; slug: string; body: ExprIR[] }> = [];
   let idx = 0;
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -1502,10 +1506,10 @@ export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
       const pos = arg.args.filter((_, j) => !arg.argNames?.[j]);
       const labelArg = pos[0];
       const label = labelArg && labelArg.kind === "literal" ? labelArg.value : `Tab ${idx}`;
-      tabs.push({ label, slug: snake(label) || `tab-${idx}`, body: pos[1] });
+      tabs.push({ label, slug: snake(label) || `tab-${idx}`, body: pos.slice(1) });
     } else {
       // Bare positional (e.g. `Tabs(Card(...), Card(...))`) — its own panel.
-      tabs.push({ label: `Tab ${idx}`, slug: `tab-${idx}`, body: arg });
+      tabs.push({ label: `Tab ${idx}`, slug: `tab-${idx}`, body: [arg] });
     }
   }
   if (tabs.length === 0) return `<!-- Tabs: no tabs -->`;
@@ -1525,7 +1529,7 @@ export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   const panels = tabs
     .map((t, i) => {
       const hidden = i === 0 ? "" : " hidden";
-      const body = t.body ? renderChild(t.body, ctx) : "";
+      const body = t.body.map((child) => renderChild(child, ctx)).join("\n");
       return `  <div role="tabpanel" id="${id}-panel-${t.slug}" data-tabs="${id}" class="tab-panel${hidden}">\n${indent(body, 4)}\n  </div>`;
     })
     .join("\n");

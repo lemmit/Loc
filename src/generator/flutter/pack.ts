@@ -704,10 +704,29 @@ function primitiveTabs(c: Ctx): string {
   // wrap the body in a scroll view where `Expanded` has no bound).  The walked
   // per-tab body widget arrives as `tabs[i].bodyJsx`.
   const tabs =
-    (c.tabs as unknown as { value: string; label: string; bodyJsx: string }[] | undefined) ?? [];
+    (c.tabs as unknown as
+      | {
+          value: string;
+          label: string;
+          bodyJsx: string;
+          bodyChildren?: readonly string[];
+        }[]
+      | undefined) ?? [];
   if (tabs.length === 0) return "const SizedBox.shrink()";
   const bar = tabs.map((t) => `Tab(text: '${dartStr(t.label)}')`).join(", ");
-  const views = tabs.map((t) => asWidget(t.bodyJsx)).join(", ");
+  // A `TabBarView` takes exactly ONE widget per tab, so a panel with several
+  // children folds into a `Column` — the walker's `,`-joined `bodyJsx` would
+  // be several list elements and shift every later tab onto the wrong panel.
+  // The children arrive unjoined (`bodyChildren`); a caller that only sets
+  // `bodyJsx` (the missing-body comment) still works.
+  const views = tabs
+    .map((t) => {
+      const kids = (t.bodyChildren ?? []).map((k) => asWidget(String(k)));
+      if (kids.length === 0) return asWidget(t.bodyJsx);
+      if (kids.length === 1) return kids[0]!;
+      return `Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[${kids.join(", ")}])`;
+    })
+    .join(", ");
   return `DefaultTabController(length: ${tabs.length}, child: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[ TabBar(tabs: <Widget>[ ${bar} ]), SizedBox(height: 360, child: TabBarView(children: <Widget>[ ${views} ])) ]))`;
 }
 
