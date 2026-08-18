@@ -1,0 +1,69 @@
+---
+name: loom-ci-gates
+description: >-
+  What each of Loom's ~65 GitHub Actions workflows gates, which tier it runs in (per-PR, draft-
+  gated, post-merge, nightly), and the `run-*` feature labels that force a post-merge-only gate to
+  run on your PR before merge. Use whenever the task involves CI — "which workflow catches X",
+  "why is <workflow>.yml red", "will this run on my PR", "force the obs/oidc/tenancy/channels/k8s
+  gate", "what does pr-gate require", "why did main go red after my PR merged" — or wiring a new
+  workflow to a label.
+---
+
+# Loom CI surface — what each workflow gates
+
+Every gate here also runs locally — **never push just to see a check's verdict.**
+The workflow -> local-command reverse index is
+[`docs/testing.md`](../../../docs/testing.md) -> "Running any CI gate locally";
+the tier design and the merge-queue runbook are
+[`docs/ci-gating.md`](../../../docs/ci-gating.md).
+
+## What each workflow gates
+
+- `test.yml` — the fast vitest suite (the same one `npm test` runs), **sharded 4 ways** via `vitest --shard` (the suite is evenly-spread CPU-bound work with no hot file, so it scales horizontally — not by optimising individual files). Each shard emits a `blob` report; the `coverage` job merges them (`vitest --merge-reports`) into one combined coverage summary. The `lint` job (check name `lint + web-tsc`) runs `biome ci` + `test:biome-gen` + `test:contrast` (per-pack WCAG-AA contrast) + the playground typecheck and `test:ddl` (folded in from the old separate `web-tsc` job to save a runner slot — so these now gate the rollup too). `tests-passed` is the single roll-up status for branch protection — require it, not the per-shard `test (shard i/4)` checks, so the shard count can change without touching branch-protection rules. `test.yml` runs unfiltered on every PR (the required floor); the rest of the per-PR fan-out is **draft-gated** — it fires when a PR is marked ready for review, while drafts get only the fast lane (`docs/ci-gating.md` → "Draft PRs and the runner queue"). Locally, `npm run test:gen` / `test:lang` / `test:ir` scope to a subtree.
+- `langium-generated.yml` — guards that `npm run langium:generate` produces deterministic output (drift between `ddd.langium` and the committed types).
+- **Generated-frontend build gates (per-PR):** `generated-react-build.yml` (matrix `{example × pack}`, `tsc --noEmit`), `generated-svelte-build.yml` (`svelte-check` + `vite build`), `generated-vue-build.yml` (`vue-tsc` + `vite build`), `generated-angular-build.yml` (`ng build`), `generated-feliz-build.yml` (dotnet + Fable build + Playwright over example/scaffold/authgate scenarios), `generated-flutter-build.yml` (`flutter analyze` + `flutter build web`). Catch generator drift invisible to IR-level tests.
+- **Generated-frontend runtime gates (post-merge only):** `generated-{react,vue,svelte,angular}-e2e.yml` — `vite build` + `vite preview` + the emitted Playwright smoke spec (pure client-side, no backend). `push: [main]` only, deliberately: the per-PR `generated-*-build` (tsc) + `behavioral-ui-e2e` cover the same emitters, and the route-driven smoke has caught nothing per-PR (see the react workflow's header).
+- `generated-a11y.yml` — axe-core WCAG-AA scan over generated frontends across an 11-pack matrix. Nightly / `a11y` label / dispatch.
+- **Generated-backend build gates (per-PR):** `hono-build.yml` (`tsc --noEmit` + `tsup`), `dotnet-build.yml` (`dotnet build /warnaserror`), `java-build.yml` (`gradle testClasses bootJar`, main + emitted JUnit sources), `python-build.yml` (`uv sync` + `ruff` + `mypy --strict` + `pytest`), `elixir-vanilla-build.yml` (`mix compile --warnings-as-errors` in an Elixir docker image).
+- `corpus-build.yml` — compiles EVERY corpus feature fixture (`test/fixtures/corpus/*.ddd`, list from `manifest.ts` minus per-backend `COMPILE_SKIP`) on tsc/dotnet/java/python as matrix jobs. Per-PR — the cross-feature compile-regression net. `corpus-elixir-build.yml` is the fifth leg (`mix compile` per feature in the `hexpm/elixir` image + `LOOM_HEX_MIRROR`, sharded via `LOOM_CORPUS_ELIXIR_CASE`), split out because it needs the Elixir docker image + hex egress.
+- **Behavioral gates (per-PR):** `behavioral-e2e.yml` (Hono on PGlite, headless — api + unit tiers), `behavioral-e2e-{dotnet,elixir,java,python}.yml` (same emitted api suite against the real booted backend + postgres sidecar), `behavioral-e2e-dapper.yml` (the .NET leg with `persistence: dapper` forced), `behavioral-e2e-mikroorm.yml` (the node/Hono backend on the MikroORM persistence adapter — booted against a real postgres sidecar since `@mikro-orm/postgresql` can't use PGlite; api tier), `behavioral-ui-e2e.yml` (React/Mantine `*.ui.spec.ts` Playwright round-trips against Hono-on-PGlite). `frontend-fullstack-e2e.yml` drives the NON-React frontends (vue/svelte/angular/feliz) through the same full round-trip — nightly / `frontend-fullstack` label. Every behavioral leg additionally enforces the **wire-golden differential** (M-T9.11) — a runtime-VALUE divergence from `test/behavioral/wire-golden/` fails that backend's leg per-PR, which is what moved cross-backend response equality off the nightly `differential-report.yml` (still the nightly DISCOVERY sweep over the wider compose stack).
+- **OIDC auth gates (main-push + dispatch + `run-oidc` label):** `{hono,dotnet,java,python,elixir}-oidc-e2e.yml` — native backend OIDC runtime e2e against dockerized Keycloak; `auth-oidc-compose-e2e.yml` — the full generated compose stack + bundled dev Keycloak, real token → User mapping. Each also asserts the **negative-authz** half (M-T3.13): a `requires`-gated find `403`s the authenticated-but-unauthorized caller and `401`s the unauthenticated one, so the emitted authz filter is proven to *enforce*, not just compile. All six answer to the one `run-oidc` label (see "Forcing a post-merge gate before merge" below).
+- `hono-obs-e2e.yml` / `dotnet-obs-e2e.yml` / `elixir-vanilla-obs-e2e.yml` / `java-obs-e2e.yml` / `python-obs-e2e.yml` — per-backend observability e2e (boots the generated backend, asserts the catalog envelope on stdout). Main-push + dispatch + `run-obs` label (one label fires all five).
+- `elixir-vanilla-vo-e2e.yml` — vanilla-Phoenix value-object wire round-trip against postgres (main-push + `run-e2e` label).
+- `context-integration-e2e.yml` — **per-PR (path-scoped)**: RUNS the emitted per-context integration test on all five backends against a throwaway postgres via each backend's native test runner (vitest / pytest / dotnet test / gradle test / mix test; `scripts/context-integration-e2e.sh`) — the create → operation → find round-trip tier the compile gates are blind to.
+- `email-e2e.yml` — workflow `mail.send(...)` delivery asserted against a Mailpit sidecar's REST inbox, 5-backend matrix. Main-push on broad pipeline paths + per-PR on the narrow mailer paths.
+- `api-call-e2e.yml` — typed in-system `api` call between deployables, caller-backend matrix. Main-push + dispatch + `run-api-call` label.
+- `channels-e2e.yml` — cross-deployable eventing runtime e2e (broker × backend legs). Main-push + dispatch + `run-channels` label.
+- `tenancy-e2e.yml` — now a **10-cell matrix: all five backends × {flat, hierarchy}** (`tenancy-owned.ddd` / `tenancy-hierarchy.ddd` over a postgres service) asserting cross-tenant isolation, registry self-scope/claim-less-signup bootstrap, and subtree scoping end-to-end. The runtime agreement between the per-PR structural filter/stamp pins that a boot alone can catch. Main-push + dispatch + `run-tenancy` label.
+- `migration-evolution-e2e.yml` — the runtime companion to the rename/baseline/data-migration language work (M-T2.13). Per SQL backend (5-cell matrix), against a postgres service: (1) migrate-chain schema ≡ fresh-create schema (order-independent fingerprint), and (2) seed v1 → regenerate `.ddd` to v2 → forward-migrate → the seeded row survives with correct values. Proves migrations **evolve** on data, not just emit/first-boot (the silent-data-loss class). Main-push + dispatch + the per-PR `run-migration-e2e` label.
+- `schemathesis.yml` — **nightly / `run-schemathesis` label / dispatch**: boots the generated **Hono** backend and feeds it its OWN emitted `/openapi.json` to [Schemathesis](https://schemathesis.readthedocs.io/), asserting it never 500s, never violates its own declared response schema, and honours the declared `required`/`format`/`enum`/bounds. Every other runtime gate drives EXAMPLE-shaped input, so the adversarial space (wrong verb, absent body, malformed fields, boundary numbers, non-UUID references) was only ever covered where a human wrote the case — the class behind #2485/#2440/#2442/#2472/#2500/#2261. Complements M-T9.11: the differential checks backends against *each other*, this checks each backend against *its own published contract*. Known findings are ratcheting root-cause rules in `test/behavioral/schemathesis-waivers.json` (an unattributed finding fails; a rule that stops reproducing fails too); the register is [`docs/audits/schemathesis-findings-2026-08.md`](docs/audits/schemathesis-findings-2026-08.md). The python/java/dotnet/elixir legs are follow-up slices.
+- `schema-load.yml` — **per-PR**: loads every corpus fixture's emitted migration chain into a real Postgres (`psql -f`, one db per deployable). The oracle the compile gates structurally lack — emitted schema is data, not code, so invalid DDL compiles green everywhere (G2). No build, no boot, <1min, so it runs on every PR rather than behind a label.
+- `k8s-build.yml` — `generate system --k8s` → `helm lint` + `helm template` | `kubeconform` (rendered chart + raw `k8s/`). Catches Helm/manifest emitter drift. See `docs/kubernetes.md`.
+- `k8s-e2e.yml` — heavier cluster smoke, fanned across backends as a matrix (hono/dotnet/python/java over `scripts/k8s-e2e/k8s-smoke.ddd` + phoenix over `examples/tasks-vanilla.ddd`): installs each chart into a `kind` cluster + throwaway postgres and asserts boot, `/ready`, and a real read + write round-trip. Nightly / `e2e-k8s` label / dispatch.
+- `pages.yml` — typecheck + smoke + build playground + deploy docs/playground to GitHub Pages (main only).
+- `playground-e2e.yml` — Playwright specs against the production-built playground (editor → generate → bundle → boot → preview). Post-merge / nightly / `run-e2e` label, because the bundle/boot specs hit esm.sh + jsdelivr. `playground-e2e-no-network.yml` is its **per-PR** sibling: the network-free subset (workspace/history/persistence, the system + mobile builders, requirements, editor) on every PR touching `web/**` or `src/**` — no npm mirror, no bundle/boot, 30-min cap.
+- `conformance-parity.yml` / `conformance-full.yml` — cross-backend OpenAPI / wire-shape parity (parity is the per-PR gate; full is the broader nightly / `run-conformance`-label run against a docker stack).
+- `workflow-lint.yml` — **per-PR** on `.github/workflows/**`: YAML-parses every workflow file + runs actionlint, so a malformed workflow can't merge and turn into a permanent silent `startup_failure` on main.
+- `playground-realm-check.yml` — **per-PR**: evaluates the playground's generated-backend bundle in a `vm` realm built from a measured browser-worker global set (`web/scripts/worker-globals.json`) — catches dependencies that read `process`/`Buffer` at module-evaluation time, which the in-Node smoke build is blind to and the real-worker `playground-e2e` only catches post-merge.
+- `ci-red-alarm.yml` — post-merge watchdog: when a main-push gate goes red it files/updates a single open issue labelled `ci-red` (deduped by label) instead of one issue per failure.
+- `cleanup-artifacts.yml` — scheduled tidy of test artefacts.
+
+**Forcing a post-merge gate before merge (labels).** Because those heavy gates trigger on `push: [main]` only, an agent can't otherwise see them until after landing. The escape hatch: each carries a `pull_request: types: [labeled]` trigger gated (job-level `if`) on **one feature label** — add the label to your PR and that gate runs against your branch *before* merge. Labels name a **feature/blast-radius**, reused across every backend of that feature (not one label per workflow):
+
+| Label | Fires |
+|---|---|
+| `run-obs` | all five `*-obs-e2e` |
+| `run-oidc` | all five `*-oidc-e2e` + `auth-oidc-compose-e2e` |
+| `run-tenancy` | `tenancy-e2e` (10-leg matrix) |
+| `run-api-call` | `api-call-e2e` (typed in-system call, caller-backend matrix) |
+| `run-migration-e2e` | `migration-evolution-e2e` (5 SQL backends) |
+| `run-conformance` | `conformance-full` |
+| `run-schemathesis` | `schemathesis` (spec-driven contract fuzzing, node/Hono) |
+| `run-channels` | `channels-e2e` |
+| `run-differential` | `differential-report` |
+| `run-e2e` | `phoenix-ui-e2e`, `playground-e2e`, `elixir-vanilla-vo-e2e` |
+| `frontend-fullstack` | `frontend-fullstack-e2e` |
+| `a11y` | `generated-a11y` |
+| `e2e-k8s` | `k8s-e2e` |
+
+This is a **manual pre-merge check**, not a replacement for the structural fix — `docs/ci-gating.md` positions the merge queue (triggers already present, switched off in branch protection) as the real answer; labels are the interim "80/20." When you add a new post-merge gate, wire it to the matching feature label (or mint a new `run-<feature>` one) and add a row here.
