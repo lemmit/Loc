@@ -515,14 +515,25 @@ the bare local. The `persist:` lifetime ladder **ships on the SPA frontends** �
 `store <Name> persist: memory|local|session|url { … }` is real grammar, and
 React / Vue / Svelte / Angular honour it, so the blanket
 `loom.store-lifetime-unsupported` is retired (a bad value is rejected earlier as
-`loom.store-lifetime-invalid`). Three targets do **not** implement the ladder,
-and each refuses a non-`memory` lifetime rather than degrading silently:
-Phoenix LiveView (`loom.store-lifetime-liveview-invalid` — a server-side
-per-process struct has no browser storage, and URL state belongs to the page's
-`handle_params`), and **Feliz and Flutter**
-(`loom.store-lifetime-target-unsupported` — both emitters build the store
-in-memory regardless; support is planned, tracked as a `gap` row in
-`src/diagnostics/unsupported-register.ts`). A `persist: url` store reflects its fields into
+`loom.store-lifetime-invalid`). **Feliz** honours it too, differently: a Feliz
+store has no module of its own — it folds into the single Elmish `Model`, so the
+ladder rides that fold (`generator/feliz/store-persist.ts`). `init` seeds each
+persisted field through a `StorePersist.load<Store><Field> ()` loader, an
+`updateWithPersist` wrapper mirrors the Model back after every message, and the
+`url` tier adds a `popstate` Elmish subscription so back/forward moves the state.
+Keys and shapes match the JS builders byte-for-byte (`loom.store.<Name>` + a JSON
+object keyed by the bare field name; one query param per field, empties dropped),
+so the same blob and the same URL round-trip across frontends. Two targets still
+do **not** implement the ladder, and each refuses a non-`memory` lifetime rather
+than degrading silently: Phoenix LiveView
+(`loom.store-lifetime-liveview-invalid` — a server-side per-process struct has no
+browser storage, and URL state belongs to the page's `handle_params`), and
+**Flutter** (`loom.store-lifetime-target-unsupported` — the emitter builds the
+store in-memory regardless; support is planned, tracked as a `gap` row in
+`src/diagnostics/unsupported-register.ts`). The same code also fires, field-scoped,
+on Feliz for a field type with no total F# conversion (datetime / duration / guid /
+enum / entity / value object, and arrays of them) — persistence there crosses the
+JS boundary per field. A `persist: url` store reflects its fields into
 query params, which carry only scalars, so an array / entity / value-object field
 there is rejected (`loom.store-url-field-invalid`). `sync:` remains reserved.
 Validator gates: a store action can't call a

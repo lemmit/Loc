@@ -272,6 +272,12 @@ export function renderInit(
   forms: readonly FormRecord[] = [],
   authUi = false,
   pageGate = false,
+  /** Model-field name → an init expression that REPLACES the field's declared
+   *  initializer.  Fed by the store-persistence layer (`persist: local|session|
+   *  url`), which seeds a persisted store field from its backing store instead
+   *  of from the `.ddd` default — the Feliz answer to Zustand's `persist`
+   *  hydration.  Empty on every other app, so their `init` is byte-identical. */
+  initOverrides: ReadonlyMap<string, string> = new Map(),
 ): string {
   const hasPageCmd = routed && reads.some((r) => r.single);
   const inits = [
@@ -293,8 +299,13 @@ export function renderInit(
         locals: new Set(),
         ...(routed ? { routeId: ROUTE_ID_FROM_URL } : {}),
       };
-      const v = f.init ? decimalLit(renderFsExpr(f.init, ctx), f.type) : stateFieldZero(f);
-      return `      ${upperFirst(f.name)} = ${v}`;
+      const modelField = upperFirst(f.name);
+      // A persisted store field hydrates from its backing store; the declared
+      // `= <init>` becomes the FALLBACK inside the loader, not the seed here.
+      const override = initOverrides.get(modelField);
+      const v =
+        override ?? (f.init ? decimalLit(renderFsExpr(f.init, ctx), f.type) : stateFieldZero(f));
+      return `      ${modelField} = ${v}`;
     }),
     ...reads.flatMap((r) => [
       `      ${r.field} = Loading`,
@@ -363,8 +374,13 @@ export function renderMsg(
   opActions: readonly FelizAction[] = [],
   boundState: readonly FelizBoundState[] = [],
   fileUploads: readonly FelizFileUpload[] = [],
+  /** The `StoreUrlChanged` case a `persist: url` store's `popstate`
+   *  subscription dispatches (`store-persist.ts`).  One case for the whole app
+   *  — every url store reads the same query string. */
+  urlStoreMsg?: string,
 ): string {
   const cases = [
+    ...(urlStoreMsg ? [`  | ${urlStoreMsg}`] : []),
     // Under a page gate the probe carries the decoded claims (None on 401);
     // otherwise it's a bare authenticated? boolean.
     ...(authUi ? [`  | SessionChecked of ${pageGate ? "CurrentUser option" : "bool"}`] : []),
@@ -602,6 +618,10 @@ export function renderUpdate(
   opActions: readonly FelizAction[] = [],
   boundState: readonly FelizBoundState[] = [],
   fileUploads: readonly FelizFileUpload[] = [],
+  /** The `| StoreUrlChanged -> …` arm re-seeding every `persist: url` store
+   *  field from the query string (`store-persist.ts`); undefined when the app
+   *  has no url store, so its `update` is byte-identical. */
+  storeUrlArm?: string,
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
   // An update arm runs outside every page view fn, so a body that reads the
@@ -849,6 +869,7 @@ export function renderUpdate(
   });
   const arms = [
     ...authArms,
+    ...(storeUrlArm ? [storeUrlArm] : []),
     ...routeArms,
     ...boundArms,
     ...fileUploadArms,

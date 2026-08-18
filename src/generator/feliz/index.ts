@@ -69,6 +69,15 @@ import { FELIZ_INTL_MESSAGEFORMAT, felizI18nEnabled, renderFelizI18nModule } fro
 import { felizPack } from "./pack.js";
 import { felizRealtimeRefetchAggregates, renderFelizRealtime } from "./realtime.js";
 import {
+  felizPersistedStores,
+  renderStorePersistModule,
+  renderStoreUrlSub,
+  renderUpdateWithPersist,
+  STORE_URL_MSG,
+  storePersistInitOverrides,
+  storeUrlUpdateArm,
+} from "./store-persist.js";
+import {
   msgCase,
   renderInit,
   renderModel,
@@ -254,6 +263,85 @@ function storeWrappers(
   return lines;
 }
 
+/** True when every `ref` in a page-`derived` expression resolves to something
+ *  the page view has in scope, so `renderFsExpr` spells it as real F# rather
+ *  than a bare undefined name.
+ *
+ *  In scope: the page's own `state {}` cells (Model fields), an EARLIER derived
+ *  (a `let` above), a lambda parameter (bound by the lambda itself), and a
+ *  dotted `<Store>.<field>` read (the namespaced Model field).  Anything else —
+ *  a read field's `Remote<'T>` envelope, `currentUser` outside a page gate, a
+ *  resource handle — would emit F# that names something absent, so the derived
+ *  keeps its pre-existing behaviour (no `let`, and the body read stays the
+ *  `(* ref: … *)` give-up comment) instead of turning a silent drop into a
+ *  build break. */
+function derivedResolvableInPageScope(
+  e: import("../../ir/types/loom-ir.js").ExprIR,
+  stateNames: ReadonlySet<string>,
+  locals: ReadonlySet<string>,
+): boolean {
+  if (e.kind === "ref") {
+    if (e.refKind === "store-field" && e.storeName) return true;
+    if (e.refKind === "lambda" || e.refKind === "enum-value") return true;
+    if (locals.has(e.name) || stateNames.has(e.name)) return true;
+    return false;
+  }
+  for (const [, v] of Object.entries(e)) {
+    if (Array.isArray(v)) {
+      for (const c of v) {
+        if (
+          c &&
+          typeof c === "object" &&
+          "kind" in c &&
+          !derivedResolvableInPageScope(c as never, stateNames, locals)
+        ) {
+          return false;
+        }
+      }
+    } else if (
+      v &&
+      typeof v === "object" &&
+      "kind" in v &&
+      !derivedResolvableInPageScope(v as never, stateNames, locals)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** One `let <name> = <F#>` per page `derived` binding, in declaration order so
+ *  a later one may read an earlier (F# resolves top-to-bottom) — the PAGE twin
+ *  of `component-emit.ts`'s `renderDerivedBinds`.  A `derived` is a pure
+ *  function of the page's `state {}` (Model fields) and of earlier derived, so
+ *  it needs no Msg case and no Model field: it is recomputed on every render,
+ *  which is exactly the Elmish equivalent of React's `useMemo`.
+ *
+ *  Returns the binding lines AND the names that actually bound — the walk gets
+ *  the latter as its `derivedNames`, so a read resolves to the bare local only
+ *  where a `let` really exists (`felizTarget.renderDerivedRead` spells the bare
+ *  name). */
+function pageDerivedBinds(page: PageIR): { binds: string[]; names: Set<string> } {
+  const stateNames = new Set(page.state.map((s) => s.name));
+  const locals = new Set<string>();
+  const binds: string[] = [];
+  for (const d of page.derived) {
+    if (!derivedResolvableInPageScope(d.expr, stateNames, locals)) continue;
+    let fs: string;
+    try {
+      fs = renderFsExpr(d.expr, { stateNames, locals });
+    } catch {
+      // `renderFsExpr` throws on a method it has no F# arm for; a derived that
+      // can't render keeps its pre-existing drop rather than breaking the build.
+      continue;
+    }
+    // Visible to the NEXT derived — as a bare local, which is what a `let` is.
+    locals.add(d.name);
+    binds.push(`    let ${d.name} = ${fs}`);
+  }
+  return { binds, names: locals };
+}
+
 /** Render one page's view function under `fnName` (`view` for a single-page
  *  ui, `<pageCamel>View` under routing).  Threads the ui's api params +
  *  reachable aggregates so the shared walker's api-hook detection fires on
@@ -311,6 +399,10 @@ function renderPageView(
   const head = `let ${fnName} (model: Model) (dispatch: Msg -> unit)${idParam} =`;
   if (!page.body) return `${head}\n    Html.none`;
   const stateNames = new Set(page.state.map((s) => s.name));
+  // `derived` first: pure over `state {}` + earlier derived, so it renders
+  // without walking anything — and the names that BOUND are what the walk may
+  // read bare (`renderDerivedRead`).
+  const derived = pageDerivedBinds(page);
   const result = walkBody(
     page.body,
     felizTarget,
@@ -326,7 +418,9 @@ function renderPageView(
     new Map(), // paramTypes
     new Map(), // pageRoutes
     externFunctionNames, // extern frontend function names
-    new Set(), // derivedNames (Feliz has no page-derived bindings)
+    // `derived` bindings — read BARE (the `let`s emitted in the preamble
+    // below), which is what `felizTarget.renderDerivedRead` spells.
+    derived.names,
     authUi, // gate `Action` buttons on currentUser-only op `requires`
     // i18n key prefix — `page.<Name>` matches the catalog (the scaffold's
     // role-scoped `page.name`, e.g. `List`, not the router emit name);
@@ -342,6 +436,11 @@ function renderPageView(
   const wrappers = [
     ...dispatchWrappers(page, result.usedActions ?? new Set(), asyncEffectActions),
     ...storeWrappers(page, ui, result.usedStores ?? new Map()),
+    // `derived` lets LAST in the preamble — the same order a component's
+    // declaration uses (action dispatchers, then the derived `let`s).  Neither
+    // reads the other: a derived's store read renders the namespaced Model
+    // field directly, not the wrapper local.
+    ...derived.binds,
   ];
   const body = indentBlock(result.tsx, 4);
   const preamble = wrappers.length > 0 ? `${wrappers.join("\n")}\n` : "";
@@ -1103,8 +1202,22 @@ function renderAppFs(
   // Controlled inputs (`Field`/`Toggle`/… via `bind:`, `Modal` via `open:`)
   // two-way-bind page `state` — each needs a `Set<Field>` Msg + update arm.
   const boundState = boundStateForUi(ui);
+  // Store persistence (`persist: local|session|url`) — the lifetime ladder rides
+  // the SAME fold: `init` seeds each persisted field from its backing store, and
+  // the `update` wrapper mirrors the Model back (`store-persist.ts`).
+  const persistedStores = felizPersistedStores(ui);
+  const storeUrlArm = storeUrlUpdateArm(persistedStores);
+  const storeUrlSub = renderStoreUrlSub(persistedStores);
   const model = renderModel(state, reads, routed, formRecords, authUi, pageGate);
-  const init = renderInit(state, reads, routed, formRecords, authUi, pageGate);
+  const init = renderInit(
+    state,
+    reads,
+    routed,
+    formRecords,
+    authUi,
+    pageGate,
+    storePersistInitOverrides(persistedStores),
+  );
   const msg = renderMsg(
     msgActions,
     reads,
@@ -1119,6 +1232,7 @@ function renderAppFs(
     opActions,
     boundState,
     fileUploads,
+    storeUrlArm ? STORE_URL_MSG : undefined,
   );
   const update = renderUpdate(
     actions,
@@ -1136,6 +1250,7 @@ function renderAppFs(
     opActions,
     boundState,
     fileUploads,
+    storeUrlArm,
   );
   const wire = hasWire
     ? renderWireTypes(
@@ -1315,7 +1430,11 @@ function renderAppFs(
     // `createObj` through `.JsInterop`.  (Caught by `feliz-build` on the
     // SCAFFOLD app, which carries neither a DataGrid nor realtime and so was the
     // first app to emit the i18n module with only `.JsInterop` opened.)
-    (hasRealtime || used.usesDataGrid || i18nEnabled) && "open Fable.Core",
+    // The store-persistence module reaches Web Storage / `URLSearchParams` /
+    // `history.replaceState` through the SAME `Emit` + `jsNative` escape hatch
+    // (no `Fable.Browser.*` package reference), so it needs `Fable.Core` too.
+    (hasRealtime || used.usesDataGrid || i18nEnabled || persistedStores.length > 0) &&
+      "open Fable.Core",
     (hasFileUploads || hasRealtime || used.usesDataGrid || i18nEnabled) &&
       "open Fable.Core.JsInterop",
     // Translation runtime (M-T1.11) — catalog + `t`/`tf`.  Ahead of everything
@@ -1382,6 +1501,9 @@ function renderAppFs(
     routed && renderRouting(pages, nameCtx, usesRouteIdFn(update, init)),
     "",
     model,
+    // Store persistence — AFTER `Model` (its `save` takes one) and BEFORE `init`
+    // (which calls its loaders); F# is order-sensitive.
+    ...renderStorePersistModule(persistedStores),
     "",
     msg,
     // `pageCmd` (byId reads only) fires a detail read on entry; sits after Msg
@@ -1392,6 +1514,12 @@ function renderAppFs(
     init,
     "",
     update,
+    // The persistence write-back wrapper + the `url` tier's `popstate`
+    // subscription — both reference `update` / `Msg`, so they follow it.
+    persistedStores.length > 0 ? "" : false,
+    persistedStores.length > 0 ? renderUpdateWithPersist() : false,
+    storeUrlSub ? "" : false,
+    storeUrlSub || undefined,
     // Realtime subscription module (channels.md Part I) — references `Msg`,
     // `Api`, and the reads' `Loaded` cases, so it sits after `update`.
     hasRealtime ? "" : false,
@@ -1412,8 +1540,18 @@ function renderAppFs(
     "",
     views.join("\n"),
     "",
-    "Program.mkProgram init update view",
-    hasRealtime ? "|> Program.withSubscription realtimeSub" : false,
+    // A persisting app runs `updateWithPersist` — `update` plus the storage /
+    // URL mirror — in place of `update`.
+    `Program.mkProgram init ${persistedStores.length > 0 ? "updateWithPersist" : "update"} view`,
+    // `Sub<'msg>` is a LIST of (id, start) pairs, so two subscriptions compose by
+    // concatenation — `withSubscription` itself takes only one.
+    hasRealtime && storeUrlSub
+      ? "|> Program.withSubscription (fun m -> realtimeSub m @ storeUrlSub m)"
+      : hasRealtime
+        ? "|> Program.withSubscription realtimeSub"
+        : storeUrlSub
+          ? "|> Program.withSubscription storeUrlSub"
+          : false,
     '|> Program.withReactSynchronous "root"',
     "|> Program.run",
     "",
