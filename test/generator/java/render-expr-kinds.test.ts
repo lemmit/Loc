@@ -245,6 +245,50 @@ describe("java renderJavaExpr — member + method-call", () => {
     );
   });
 
+  // A5 — the canonical order total.  Java used to type this through a PRIVATE
+  // duplicate probe (`sumElementType`'s own `binary` arm); that copy is gone
+  // and the type now comes from the shared `bodyTypeOf`, so this pins that the
+  // consolidation did not regress java's (already-correct) BigDecimal fold.
+  it("renders an ARITHMETIC money sum as a BigDecimal reduce (shared bodyTypeOf)", () => {
+    const sum: ExprIR = {
+      kind: "method-call",
+      receiver: thisProp("items"),
+      member: "sum",
+      args: [
+        {
+          kind: "lambda",
+          param: "l",
+          body: {
+            kind: "binary",
+            op: "*",
+            left: {
+              kind: "member",
+              receiver: { kind: "ref", name: "l", refKind: "lambda" },
+              member: "price",
+              receiverType: { kind: "entity", name: "LineItem" },
+              memberType: MONEY,
+            },
+            right: {
+              kind: "member",
+              receiver: { kind: "ref", name: "l", refKind: "lambda" },
+              member: "qty",
+              receiverType: { kind: "entity", name: "LineItem" },
+              memberType: INT,
+            },
+            leftType: MONEY,
+            rightType: INT,
+            resultType: MONEY,
+          },
+        },
+      ],
+      receiverType: { kind: "array", element: { kind: "entity", name: "LineItem" } },
+      isCollectionOp: true,
+    };
+    expect(renderJavaExpr(sum)).toBe(
+      "this.items.stream().map(l -> l.price().multiply(java.math.BigDecimal.valueOf(l.qty()))).reduce(BigDecimal.ZERO, BigDecimal::add)",
+    );
+  });
+
   it("renders int sum via mapToInt", () => {
     const sum: ExprIR = {
       kind: "method-call",
@@ -276,8 +320,14 @@ describe("java renderJavaExpr — member + method-call", () => {
     expect(renderJavaExpr(mc("sortBy", [idLambda]))).toBe(
       "this.items.stream().sorted(java.util.Comparator.comparing(x -> x)).toList()",
     );
+    // DESCENDING is the 2-arg `comparing(keyExtractor, keyComparator)` form.
+    // The `comparing(λ).reversed()` spelling this used to pin does NOT compile
+    // (javac: "inference variable U has incompatible bounds", because
+    // `.reversed()` takes the `comparing(…)` call out of target-typed position
+    // so `U` infers `Object` against `U extends Comparable<? super U>`).
+    // Audit finding A10 — verified with javac both ways.
     expect(renderJavaExpr(mc("sortBy", [idLambda, litBool("true")]))).toBe(
-      "this.items.stream().sorted(java.util.Comparator.comparing(x -> x).reversed()).toList()",
+      "this.items.stream().sorted(java.util.Comparator.comparing(x -> x, java.util.Comparator.reverseOrder())).toList()",
     );
     // `distinct` is property-style — a member node, not a method-call.
     expect(
@@ -514,6 +564,28 @@ describe("java renderJavaExpr — convert / match / list / lambda / object", () 
     );
   });
 
+  // A11 — `money`/`decimal` are `java.math.BigDecimal` on this backend, which
+  // has no unary-minus operator (javac: "bad operand type for unary operator
+  // '-'").  Route through `negate()`.
+  it("renders unary `-` on money/decimal via BigDecimal.negate() (A11)", () => {
+    expect(
+      renderJavaExpr({ kind: "unary", op: "-", operand: { ...thisProp("total"), type: MONEY } }),
+    ).toBe("this.total.negate()");
+    expect(
+      renderJavaExpr({
+        kind: "unary",
+        op: "-",
+        operand: { ...thisProp("rate"), type: { kind: "primitive", name: "decimal" } },
+      }),
+    ).toBe("this.rate.negate()");
+  });
+
+  it("keeps unary `-` on int/long native (A11 — only BigDecimal needs the method)", () => {
+    expect(
+      renderJavaExpr({ kind: "unary", op: "-", operand: { ...thisProp("qty"), type: INT } }),
+    ).toBe("-this.qty");
+  });
+
   it("renders single-expression lambdas with the Java arrow", () => {
     expect(renderJavaExpr({ kind: "lambda", param: "item", body: thisProp("active") })).toBe(
       "item -> this.active",
@@ -632,11 +704,62 @@ describe("java renderJavaStatements", () => {
 
   it("renders add / remove against the field directly", () => {
     const stmts: StmtIR[] = [
-      { kind: "add", target: { segments: ["tags"] }, value: litStr("a"), elementType: STRING },
-      { kind: "remove", target: { segments: ["tags"] }, value: litStr("a"), elementType: STRING },
+      {
+        kind: "add",
+        target: { segments: ["tags"] },
+        value: litStr("a"),
+        elementType: STRING,
+        collection: true,
+      },
+      {
+        kind: "remove",
+        target: { segments: ["tags"] },
+        value: litStr("a"),
+        elementType: STRING,
+        collection: true,
+      },
     ];
     expect(renderJavaStatements(stmts)).toBe(
       [`        this.tags.add("a");`, `        this.tags.remove("a");`].join("\n"),
+    );
+  });
+
+  // A13 — `codes -= v` over an `int[]` is a `List<Integer>` in Java, where
+  // `remove(int index)` and `remove(Object)` are BOTH applicable and overload
+  // resolution picks the INDEX one (phase 1, no boxing).  The unboxed spelling
+  // removes the wrong element or throws IndexOutOfBoundsException.
+  it("boxes an int element removal so `List.remove(Object)` binds, not remove(index)", () => {
+    const stmts: StmtIR[] = [
+      {
+        kind: "remove",
+        target: { segments: ["codes"] },
+        value: refParam("code"),
+        elementType: INT,
+        collection: true,
+      },
+    ];
+    expect(renderJavaStatements(stmts)).toBe(`        this.codes.remove(Integer.valueOf(code));`);
+  });
+
+  it("leaves a long/money/string element removal unboxed (already binds remove(Object))", () => {
+    const stmts: StmtIR[] = [
+      {
+        kind: "remove",
+        target: { segments: ["prices"] },
+        value: refParam("p"),
+        elementType: MONEY,
+        collection: true,
+      },
+      {
+        kind: "remove",
+        target: { segments: ["ids"] },
+        value: refParam("n"),
+        elementType: { kind: "primitive", name: "long" },
+        collection: true,
+      },
+    ];
+    expect(renderJavaStatements(stmts)).toBe(
+      [`        this.prices.remove(p);`, `        this.ids.remove(n);`].join("\n"),
     );
   });
 

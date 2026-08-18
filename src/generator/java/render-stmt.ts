@@ -120,7 +120,19 @@ function renderJavaStatement(
       return withProvCapture(base, s.prov, s.target, s.value, index, ctx);
     }
     case "remove": {
-      const base = `${INDENT}${renderPath(s.target)}.remove(${renderJavaExpr(s.value, ctx)});`;
+      // `codes -= v` over an `int[]` is a `List<Integer>` in Java, where
+      // `remove(int)` and `remove(Object)` are BOTH applicable — and overload
+      // resolution picks the primitive `remove(int index)` (phase 1, no
+      // boxing), so the statement removes the element AT INDEX v, or throws
+      // IndexOutOfBoundsException.  Box explicitly to reach the value
+      // overload.  Audit finding A13.  `long`/`money`/`string`/entity element
+      // types already bind `remove(Object)` and are left alone.
+      const value = renderJavaExpr(s.value, ctx);
+      const boxed =
+        s.collection && s.elementType.kind === "primitive" && s.elementType.name === "int"
+          ? `Integer.valueOf(${value})`
+          : value;
+      const base = `${INDENT}${renderPath(s.target)}.remove(${boxed});`;
       return withProvCapture(base, s.prov, s.target, s.value, index, ctx);
     }
     case "emit": {

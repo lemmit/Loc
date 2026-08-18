@@ -101,7 +101,13 @@ const TS_TARGET: ExprTarget<TsRenderContext> = {
   },
   newPart: renderNew,
   object: (fields) => `({ ${fields.map((f) => `${f.name}: ${f.value}`).join(", ")} })`,
-  unary: (op, operand) => `${op}${operand}`,
+  unary: (op, operand, e) =>
+    // `money` is a decimal.js `Decimal` here — `-d` coerces through
+    // `valueOf()` (a STRING) and types as `number`, so `-price` is both a
+    // TS2322 and a silently-wrong value.  Use `.neg()` (audit finding A11).
+    // Loom `decimal` is a plain JS `number` on this backend, so it keeps the
+    // native operator.
+    op === "-" && unaryOperandIsMoney(e) ? `${operand}.neg()` : `${op}${operand}`,
   binary: renderBinary,
   ternary: (cond, then, otherwise) => `${cond} ? ${then} : ${otherwise}`,
   convert: (value, e) => renderTsConvert(e.target, e.from, value),
@@ -291,9 +297,18 @@ function renderMember(recv: string, e: MemberExpr): string {
   // parentheses too — `lines.count` should compile to `.length`.
   if (e.receiverType.kind === "array" && e.member === "count") return `${recv}.length`;
   // `distinct` is property-style (no parens, like `count`) so it lowers to a
-  // member node — route it through the shared collection-op table.
+  // member node — route it through the shared collection-op table.  The table
+  // entry is receiver-type-aware (money dedupes by value, not identity), so
+  // hand it a method-call-shaped view of this member access.
   if (e.receiverType.kind === "array" && e.member === "distinct") {
-    return TS_COLLECTION_RENDERERS.distinct!(recv, []);
+    return TS_COLLECTION_RENDERERS.distinct!(recv, [], {
+      kind: "method-call",
+      receiver: e.receiver,
+      member: "distinct",
+      args: [],
+      receiverType: e.receiverType,
+      isCollectionOp: true,
+    });
   }
   return `${recv}.${e.member}`;
 }
@@ -401,7 +416,15 @@ export const TS_COLLECTION_RENDERERS: Record<
         : "ka < kb ? -1 : ka > kb ? 1 : 0";
     return `[...${recv}].sort((__a, __b) => { const ka = (${args[0]})(__a), kb = (${args[0]})(__b); return ${cmp}; })`;
   },
-  distinct: (recv) => `[...new Set(${recv})]`,
+  // `new Set` dedupes by SameValueZero — reference identity for objects — so a
+  // `money[]` (decimal.js `Decimal` instances) never dedupes at all: two
+  // value-equal `Decimal`s are distinct references.  Fall back to an
+  // `.eq`-keyed first-occurrence filter for money, the same money special-case
+  // the `contains`/`sum`/`sortBy`/`min`/`max` rows already carry (audit A14).
+  distinct: (recv, _args, e) =>
+    receiverElementIsMoney(e)
+      ? `${recv}.filter((__x, __i, __a) => __a.findIndex((__y) => __y.eq(__x)) === __i)`
+      : `[...new Set(${recv})]`,
   take: (recv, args) => `${recv}.slice(0, ${args[0]})`,
   skip: (recv, args) => `${recv}.slice(${args[0]})`,
   join: (recv, args) => `${recv}.join(${args[0]})`,
@@ -428,9 +451,17 @@ function projectionBodyIsMoney(e?: Extract<ExprIR, { kind: "method-call" }>): bo
   return bodyT?.kind === "primitive" && bodyT.name === "money";
 }
 
+/** True iff a unary `-`'s operand types as `money` — a decimal.js `Decimal`,
+ *  which has no native negation operator (`.neg()` instead). */
+function unaryOperandIsMoney(e: Extract<ExprIR, { kind: "unary" }>): boolean {
+  const t = bodyTypeOf(e.operand);
+  const unwrapped = t?.kind === "optional" ? t.inner : t;
+  return unwrapped?.kind === "primitive" && unwrapped.name === "money";
+}
+
 /** True iff a collection op's receiver element type is `money` — its elements
- *  are decimal.js `Decimal`s, so `contains` must use value equality (`.eq`)
- *  rather than `.includes` (reference identity). */
+ *  are decimal.js `Decimal`s, so `contains`/`distinct` must use value equality
+ *  (`.eq`) rather than `.includes`/`new Set` (reference identity). */
 function receiverElementIsMoney(e?: Extract<ExprIR, { kind: "method-call" }>): boolean {
   const rt = e?.receiverType;
   if (!rt) return false;
