@@ -331,8 +331,13 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     a11y: "presentational",
   },
   // --- Phase 6 — semantic anchor target + sticky-position wrapper -------
-  // HEEx renderer is intentionally absent: the Phoenix walker falls
-  // through to the visible "not supported" comment.
+  // Both Section and Sticky DO render on HEEx (`renderSectionHeex` /
+  // `renderStickyHeex` below) — a `<section>` and a `position: sticky`
+  // wrapper are plain markup with no LiveView divergence.  (This block used
+  // to read "HEEx renderer is intentionally absent: the Phoenix walker falls
+  // through to the visible 'not supported' comment"; the renderers landed and
+  // the note did not.  `KNOWN_HEEX_GAPS` in heex-parity.test.ts is the live
+  // list of TSX-without-HEEx primitives, and it holds only `DataGrid`.)
   // A `<section>` is a region landmark (when named) and increments the
   // heading-nesting depth.
   Section: {
@@ -544,8 +549,14 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
   // SVG / a `CustomPainter` with no library at all.  HEEx has its own renderer
   // below on the same terms: the rows are already server-side in an assign, so
   // the geometry is arithmetic (`renderChart` → the generated `LoomChart.chart/1`
-  // component).  Vue, Svelte and Angular stay behind the honest gate
-  // (`loom.chart-unsupported-target`).
+  // component).  Vue, Svelte and Angular render it too — one SHARED template
+  // per format (`vue/`, `sveltekit/`, `angular/` `primitive-chart.hbs`) that
+  // the loader merges into every pack of that format, which is why they carry
+  // no per-pack entry (see `CHART_PRIMITIVES` in
+  // `_packs/required-primitives.ts`).  So `CHART_FRAMEWORKS` lists all seven
+  // and `loom.chart-unsupported-target` gates only a not-yet-ported FUTURE
+  // frontend.  (This line used to say vue/svelte/angular "stay behind the
+  // honest gate" — stale since the shared templates landed.)
   // A chart is an image of data: `role="img"` + a derived `aria-label`.
   Chart: {
     group: "layout",
@@ -657,8 +668,11 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     a11y: { role: "dialog", modal: true, needsName: true, focus: "trap-restore" },
   },
   // --- Phase 3 — code/icon primitives ------------------------------------
-  // HEEx renderer is intentionally absent: the Phoenix walker falls
-  // through to the visible "not supported" comment.
+  // Both CodeBlock and Icon DO render on HEEx (`renderCodeBlockHeex` /
+  // `renderIconHeex` below).  Same correction as the Section/Sticky block
+  // above: the note claiming the HEEx renderer was "intentionally absent"
+  // outlived the renderers.  `KNOWN_HEEX_GAPS` (heex-parity.test.ts) is the
+  // authority on what actually lacks one — currently `DataGrid` alone.
   CodeBlock: {
     group: "layout",
     admissibleInSource: true,

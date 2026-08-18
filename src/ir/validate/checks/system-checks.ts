@@ -1608,8 +1608,12 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
 //
 //   - a RETURNING op (`: A or B`), an AUDITED op, a PROVENANCED op — all persist
 //     a pre-built changeset over struct columns inside a forced transaction;
-//   - COLLECTION mutation (`items += …`) — a document's contained parts are gated
-//     separately (`loom.vanilla-containment-unsupported`) anyway;
+//   - COLLECTION mutation (`items += …`).  This clause used to lean on "a
+//     document's contained parts are gated separately
+//     (`loom.vanilla-containment-unsupported`) anyway" — that gate is RETIRED
+//     (M-T6.2 Drain C landed relational part-in-part; the code has zero raise
+//     sites in `src/`), so the clause now stands on its own: the document path
+//     itself has no emitter for a containment mutation;
 //   - a body/filter that reads a VALUE-OBJECT sub-field, a DERIVED, or calls a
 //     `function` / value-object constructor — these need the loaded struct / list
 //     the jsonb map can't reconstruct in-place;
@@ -2181,9 +2185,16 @@ export function validateGuardPrincipalWithoutAuth(sys: SystemIR, diags: LoomDiag
 // (`<Target>IdJsonListConverter`, emitted in domain.ids) that unwraps the
 // `List<XId>` to its bare `value`s so the Jackson FormatMapper serialises
 // `["v1","v2"]` — the same physical jsonb shape .NET / node / elixir produce
-// — instead of the structured-JSON aggregate path that bypassed it.  (Was:
-// `loom.java-embedded-refcoll-unsupported`.)  Nested part-in-part
-// containments (single AND collection) likewise map (`directParentOf`).
+// — instead of the structured-JSON aggregate path that bypassed it.  Nested
+// part-in-part containments (single AND collection) likewise map
+// (`directParentOf`).
+//
+// The gate this replaced was `loom.java-embedded-refcoll-unsupported`.  It is
+// RETIRED — the code has zero raise sites in `src/`; the only surviving
+// mention is the negative pin in
+// `test/generator/java/generator-java-shapes.test.ts`, which asserts it is NOT
+// raised.  Named here only so a reader grepping the old code finds this note
+// instead of concluding the grep failed.
 
 // ---------------------------------------------------------------------------
 // Java read-model backstop gates.  Cross-aggregate `follows` and VO-typed
@@ -2314,8 +2325,9 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
     // RELATIONAL aggregate renders `current_user.<claim>` against an ambient
     // ContextVar accessor (`require_current_user()`) AND-ed into every root read
     // — the SQLAlchemy analogue of node's `requireCurrentUser()` weave / .NET's
-    // `HasQueryFilter`.  Non-relational (document/embedded) principal stays gated
-    // (`supportsPrincipalNonRelationalFilter` omits python).
+    // `HasQueryFilter`.  (The non-relational principal case has since landed
+    // too — `supportsPrincipalNonRelationalFilter` below lists python for BOTH
+    // `embedded` and `document`; it is no longer gated.)
     if (family === "python") return true;
     return false;
   };
@@ -2347,11 +2359,16 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // node/java/python.  That document arm did NOT exist until #2530: this
   // function asserted .NET filtered every shape while the emitter emitted no
   // document filter at all — a SILENT cross-tenant read (#2527's follow-up 1).
-  // A PRINCIPAL filter on a `document` shape is
-  // wired on node/Java **and now python** (DEBT-02 Slice B — the actor binds into
-  // the in-app predicate; see `supportsPrincipalNonRelationalFilter` below and the
-  // `document-tenancy.ddd` ts-/java-/python-build fixtures); it stays gated only
-  // for elixir (no `document` shape).
+  // A PRINCIPAL filter on a `document` shape is wired on node/Java/python
+  // **and dotnet** (DEBT-02 Slice B — the actor binds into the in-app
+  // predicate; see `supportsPrincipalNonRelationalFilter` below and the
+  // `document-tenancy.ddd` ts-/java-/python-build fixtures); it stays gated
+  // only for elixir (no `document` shape there).
+  //
+  // NET RESIDUE of this whole function, as of the two tables below: exactly
+  // ONE (family, shape) cell is unwired — **elixir + `document`**.  Every
+  // other pair is supported, so any wording here that generalises to
+  // "relational only" is wrong.
   const supportsNonRelationalFilter = (family: string, shp: string): boolean =>
     (family === "node" && (shp === "document" || shp === "embedded")) ||
     (family === "java" && (shp === "document" || shp === "embedded")) ||
@@ -2445,9 +2462,15 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
         // apply.  Otherwise it's a principal filter on a shape whose actor
         // intersection isn't wired (a `document` aggregate filters in-app, so a
         // principal predicate there needs in-app actor evaluation — Slice B).
+        // The ONLY unwired cell left in this whole function is elixir +
+        // `document` — every other (family, shape) pair is covered by
+        // `supportsNonRelationalFilter` / `supportsPrincipalNonRelationalFilter`
+        // above.  So the reason must name the SHAPE as the residue, not
+        // "relational only": elixir does wire `embedded`, and saying otherwise
+        // sends the reader to a workaround they do not need.
         const reason = nonRelationalUnsupported
-          ? `is persisted as shape(${shape}); capability filters are only wired for ` +
-            `relational aggregates on the ${fam} backend today`
+          ? `is persisted as shape(${shape}); the ${fam} backend wires capability filters on ` +
+            `relational and shape(embedded) aggregates, but not yet on shape(${shape}) ones`
           : nonRelational
             ? `references currentUser (e.g. a tenancy filter) on a shape(${shape}) aggregate; ` +
               `principal-referencing filters on ${shape} aggregates are not yet wired on the ` +
@@ -2462,9 +2485,12 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
             ctxName,
             aggName: agg.name,
             reason,
-            nonRelationalUnsupported: nonRelationalUnsupported
-              ? ""
-              : " (or a node / elixir deployable, which wire tenancy filters)",
+            hosts: nonRelationalUnsupported
+              ? `a node / dotnet / java / python deployable (all four wire capability filters ` +
+                `on shape(${shape}) aggregates), or change this aggregate's shape to ` +
+                `relational or embedded`
+              : `a backend that wires principal-referencing filters on shape(${shape}) ` +
+                `aggregates (node / dotnet / java / python)`,
           }),
           source: `${sys.name}/${dep.name}`,
           code: "loom.context-filter-unsupported",
