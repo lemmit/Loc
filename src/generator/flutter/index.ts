@@ -962,7 +962,11 @@ function renderPubspec(
   const launcher = usesAuth ? "\n  url_launcher: ^6.3.1" : "";
   // `package:web` backs the WEB half of the SSE transport (the browser's own
   // `EventSource`); the native half rides `package:http`, already present.
-  const webPkg = usesRealtime ? "\n  web: ^1.1.0" : "";
+  // `^1.0.0`, not `^1.1.0`: `flutter_web_plugins` pins `web` from the SDK, so a
+  // floor above what the installed Flutter carries makes `pub get` unsolvable
+  // before a line of the app is compiled.  `^1.0.0` accepts every 1.x the
+  // supported Flutter range ships.
+  const webPkg = usesRealtime ? "\n  web: ^1.0.0" : "";
   return `name: ${pkg}
 description: "Generated Flutter app for ${deployableName} (Loom)."
 publish_to: "none"

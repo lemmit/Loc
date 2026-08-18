@@ -142,7 +142,7 @@ describe("flutter realtime — the transport", () => {
   });
 
   it("pulls package:web only when a handler exists", async () => {
-    expect((await gen()).get("web_app/pubspec.yaml")!).toContain("web: ^1.1.0");
+    expect((await gen()).get("web_app/pubspec.yaml")!).toContain("web: ^1.0.0");
   });
 });
 
@@ -154,7 +154,7 @@ describe("flutter realtime — the honest-gap half stays honest", () => {
     const out = await gen("elixir");
     expect(out.has("web_app/lib/realtime.dart")).toBe(false);
     expect(out.has("web_app/lib/realtime_source.dart")).toBe(false);
-    expect(out.get("web_app/pubspec.yaml")!).not.toContain("web: ^1.1.0");
+    expect(out.get("web_app/pubspec.yaml")!).not.toContain("web: ^1.0.0");
     expect(out.get("web_app/lib/main.dart")!).not.toContain("LoomRealtime");
   });
 });

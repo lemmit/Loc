@@ -368,6 +368,114 @@ jobs:
           flutter test
           flutter build web --release
 
+      # APP-SHELL PARITY — `auth: ui` + realtime SSE + the `persist:` store
+      # ladder + `ProvenanceInfo`, the four features that all land in the SAME
+      # place: `main.dart`'s root and the per-page shell.  They compose (the
+      # session gate and the realtime subscription share `MaterialApp.builder`;
+      # the url store wraps `MaterialApp`; a gated page binds `currentUser`
+      # before its route args), and NOTHING above exercises any of them — the
+      # showcase is unauthenticated and store-free.  Each also pulls a pub
+      # package on demand (`url_launcher` / `web` / `shared_preferences`), so
+      # this leg is the only place a resolution conflict would surface.
+      - name: Generate the app-shell parity app (auth + realtime + persist + provenance)
+        run: |
+          mkdir -p ci-flutter-shell
+          cat > ci-flutter-shell/shell.ddd <<'DDD'
+          system Quartet {
+            user { id: string  role: string  permissions: string[] }
+            auth { provider: keycloak oidc { issuer: env("OIDC_ISSUER") clientId: env("OIDC_CLIENT_ID") } }
+            subdomain Sales {
+              context Orders {
+                aggregate Order {
+                  code: string
+                  quantity: int
+                  unitPrice: int
+                  total: int provenanced
+                  operation reprice(qty: int, price: int) {
+                    quantity := qty
+                    unitPrice := price
+                    total := qty * price
+                  }
+                  operation approve() requires currentUser.role == "admin" { code := code }
+                  derived display: string = code
+                }
+                repository Orders for Order { }
+                event OrderPlaced { order: Order id, at: datetime }
+                channel Lifecycle { carries: OrderPlaced  delivery: broadcast  retention: ephemeral }
+              }
+            }
+            api ShopApi from Sales
+            storage pg { type: postgres }
+            resource ordersState { for: Orders, kind: state, use: pg }
+            deployable api {
+              platform: node contexts: [Orders] dataSources: [ordersState] serves: ShopApi port: 3000 auth: required
+            }
+            ui MobileApp {
+              framework: flutter
+              api Shop: ShopApi
+              channel Live: Orders.Lifecycle
+              on Live.OrderPlaced(e) { toast("Order " + e.order + " placed") refetch(Order) }
+              store Cart persist: local {
+                state { lines: string[]  count: int = 0  subtotal: money }
+                action add(sku: string) { lines += sku  count += 1 }
+              }
+              store Recent persist: session {
+                state { lastCode: string = "" }
+                action remember(c: string) { lastCode := c }
+              }
+              store Filters persist: url {
+                state { q: string = ""  pageNo: int = 1  onlyOpen: bool = false }
+                action setQ(v: string) { q := v }
+              }
+              page Home {
+                route: "/"
+                body: Stack {
+                  Heading { "Orders", level: 1 },
+                  Text { currentUser.id },
+                  Text { Filters.q },
+                  Text { Recent.lastCode },
+                  For { each: Cart.lines, l => Card { l } },
+                  QueryView {
+                    of: Shop.Order.all,
+                    loading: Text { "Loading…" }, error: Text { "Failed" }, empty: Text { "None yet." },
+                    data: rows => Stack { For { each: rows, o => Card { o.code } } }
+                  }
+                }
+              }
+              page Admin {
+                route: "/admin"
+                requires currentUser.role == "admin"
+                body: Stack { Heading { "Admin", level: 1 } }
+              }
+              page OrderDetail {
+                route: "/orders/:id"
+                body: QueryView {
+                  of: Shop.Order.byId(id),
+                  loading: Text { "Loading…" }, error: Text { "Failed" }, empty: Text { "Not found." },
+                  data: o => Stack {
+                    Text { o.code },
+                    Text { o.total },
+                    ProvenanceInfo { of: o, field: "total" },
+                    Action { o.approve }
+                  }
+                }
+              }
+            }
+            deployable app { platform: flutter targets: api ui: MobileApp { Shop: api } port: 3006 auth: ui }
+          }
+          DDD
+          node bin/cli.js generate system ci-flutter-shell/shell.ddd -o ci-flutter-shell/out
+      - name: Locate the app-shell project
+        id: shproj
+        run: echo "dir=$(dirname "$(find ci-flutter-shell/out -name pubspec.yaml | head -1)")" >> "$GITHUB_OUTPUT"
+      - name: flutter analyze + test + build web (app shell)
+        working-directory: ${{ steps.shproj.outputs.dir }}
+        run: |
+          flutter pub get
+          flutter analyze --no-fatal-warnings --no-fatal-infos
+          flutter test
+          flutter build web --release
+
       # Native mobile surface (Phase 3) — prove the SAME kind of emitted Dart
       # source compiles for Android too.  `flutter build apk` is the native "is
       # the Dart real" gate.  It builds a SEPARATE, minimal Loom app (no
