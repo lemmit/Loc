@@ -1464,7 +1464,15 @@ describe("mikroorm — aggregate-inheritance participant + contained parts", () 
     expect(entities).toContain("export class SplitRow");
   });
 
-  it("still rejects an ABSTRACT inheritance base with its own contained parts (no repository owns it)", async () => {
+  // Promoted, not deleted.  This was the LAST `loom.mikroorm-unsupported` shape
+  // reject, and its argument named nothing adapter-specific: an abstract base
+  // owns no repository and concretes do not inherit its parts, so the part's
+  // table has no reader and no writer.  Generated on every other target, that
+  // held — the shape is silently dropped on drizzle / efcore / python / java,
+  // emitted as a dead FK'd table with no reader or writer on dapper, and
+  // half-built into a 500 on elixir.  So it is a target-neutral AST rule now
+  // (`loom.abstract-aggregate-contains`), and the adapter code is gone.
+  it("rejects an ABSTRACT inheritance base with its own contained parts — target-neutrally", async () => {
     const src = `system M {
   api A from S
   subdomain S {
@@ -1483,7 +1491,14 @@ describe("mikroorm — aggregate-inheritance participant + contained parts", () 
   deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
 }`;
     const { errors } = await emit(src);
-    expect(errors.some((e) => /abstract aggregate-inheritance base/.test(e))).toBe(true);
+    expect(
+      errors.some((e) => /cannot declare 'contains tags'/.test(e)),
+      `expected loom.abstract-aggregate-contains, got: ${errors.join(" | ")}`,
+    ).toBe(true);
+    // …and NOT under the adapter code any more: the same `.ddd` is refused with
+    // `persistence: drizzle` too (pinned in
+    // `test/language/parsing/aggregate-inheritance.test.ts`).
+    expect(errors.some((e) => /persistence: mikroorm/.test(e))).toBe(false);
   });
 });
 
