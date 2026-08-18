@@ -71,7 +71,6 @@ import {
   validateGuardPrincipalWithoutAuth,
   validateInheritanceStorage,
   validateJavaReadModelShapes,
-  validateMikroOrmSupport,
   validateNeedCapabilities,
   validatePagedQueryHandlerBackend,
   validatePermissions,
@@ -168,7 +167,6 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateStampSupport(sys, diags);
     validateGuardPrincipalWithoutAuth(sys, diags);
     validateDapperSupport(sys, diags);
-    validateMikroOrmSupport(sys, diags);
     validateFindPredicateAdapterSupport(sys, diags);
     validateNeedCapabilities(sys, diags);
     validateResourceConfig(sys, diags);
