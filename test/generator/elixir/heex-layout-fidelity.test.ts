@@ -169,7 +169,7 @@ describe("HEEx Table column headers are attribute-safe", () => {
     // A literal header rides the i18n slot (`columnHeader`, M-T1.11) through the
     // `{…}` expression-attribute form, so the hazard characters live inside an
     // ELIXIR string (`\"`, `\x3C`) rather than a quoted HTML attribute.
-    expect(heex).toContain('label={pgettext(');
+    expect(heex).toContain("label={pgettext(");
     expect(heex).toContain('"Na\\"me \\x3Cb\\x3E"');
     // The pre-fix shape closed the attribute mid-value and the template failed
     // to parse: `label="Na"me <b>"`.

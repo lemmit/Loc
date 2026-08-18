@@ -722,9 +722,7 @@ export function renderTableColumn(
   // (unsortable) header rather than emitting a sort key the server can't map.
   const sortField = sortActive ? columnSortField(expr) : undefined;
   const sortAttr = sortField ? ` sort_field="${sortField}"` : "";
-  const labelAttr = labelAttrValue
-    ? `label=${labelAttrValue}`
-    : `label="${escapeHeexAttr(label)}"`;
+  const labelAttr = labelAttrValue ? `label=${labelAttrValue}` : `label="${escapeHeexAttr(label)}"`;
   return `<:col :let={${renderColLetVar(accessor, ctx)}} ${labelAttr}${sortAttr}>${cellHeex}</:col>`;
 }
 
