@@ -1,3 +1,4 @@
+node_modules
 node_modules/
 # …and the SYMLINK form.  A worktree-isolated agent links the root install in
 # (`ln -sfn ../../node_modules ./node_modules`), and the trailing-slash pattern

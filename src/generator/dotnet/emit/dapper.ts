@@ -1075,27 +1075,54 @@ export function renderDapperRepository(
   // SELECT alongside the capability filters — the raw-SQL mirror of EF's
   // per-derived-type discriminator filter, so a concrete repo never reads a
   // sibling's rows out of the shared table.
-  const capabilityFilterSql: string | null =
-    capabilityFilters.length > 0
-      ? capabilityFilters
-          .map((p) => {
-            try {
-              return whereToSql(p, sqlCtx);
-            } catch {
-              throw new Error(
-                `dapper: capability filter on '${agg.name}' is outside the Dapper SQL subset; ` +
-                  `use 'persistence: efcore' or simplify the predicate.`,
-              );
-            }
-          })
-          .join(" AND ")
-      : null;
-  const filterSql: string | null =
-    [tph ? `kind = ${kindLiteral}` : null, capabilityFilterSql]
+  // Each capability predicate paired with the capability that CONTRIBUTED it
+  // (`agg.contextFilterOrigins`, index-aligned with `agg.contextFilters`) — the
+  // Dapper twin of the EF `(capability, filterName)` pairs in `emit/repository.ts`.
+  // The origin is what an `ignoring <Cap>` clause resolves against; a filter
+  // with no origin (a plain context filter) can only be dropped by `ignoring *`.
+  const filterOrigins = agg.contextFilterOrigins ?? [];
+  const capabilityFilterParts: { sql: string; origin: string | undefined }[] =
+    capabilityFilters.map((p, i) => {
+      try {
+        return { sql: whereToSql(p, sqlCtx), origin: filterOrigins[i] };
+      } catch {
+        throw new Error(
+          `dapper: capability filter on '${agg.name}' is outside the Dapper SQL subset; ` +
+            `use 'persistence: efcore' or simplify the predicate.`,
+        );
+      }
+    });
+  /** The capability predicates a read carrying `bypass` still applies
+   *  (named-filter-bypass.md §11).  `ignoring *` drops every one; `ignoring A,
+   *  B` drops the ones those capabilities contributed.  Dapper has no EF
+   *  `IgnoreQueryFilters`, so the bypass is expressed by OMITTING the conjunct
+   *  from the generated WHERE — the raw-SQL equivalent. */
+  const capabilityFilterSqlFor = (bypass?: {
+    bypassAll?: boolean;
+    bypassCaps?: string[];
+  }): string | null => {
+    if (bypass?.bypassAll) return null;
+    const caps = new Set(bypass?.bypassCaps ?? []);
+    const kept = capabilityFilterParts.filter((p) => !(p.origin != null && caps.has(p.origin)));
+    return kept.length > 0 ? kept.map((p) => p.sql).join(" AND ") : null;
+  };
+  const capabilityFilterSql: string | null = capabilityFilterSqlFor();
+  /** The full spliced WHERE fragment (TPH discriminator + surviving capability
+   *  predicates).  The TPH discriminator is NEVER bypassable: it is a type
+   *  mapping, not a query filter — EF's `IgnoreQueryFilters()` leaves it in
+   *  place too, so a concrete repo can never read a sibling's rows. */
+  const filterSqlFor = (bypass?: { bypassAll?: boolean; bypassCaps?: string[] }): string | null =>
+    [tph ? `kind = ${kindLiteral}` : null, capabilityFilterSqlFor(bypass)]
       .filter((s) => s !== null)
       .join(" AND ") || null;
-  const andFilter = (existingWhere: boolean): string =>
-    filterSql ? `${existingWhere ? " AND " : " WHERE "}${filterSql}` : "";
+  const filterSql: string | null = filterSqlFor();
+  const andFilter = (
+    existingWhere: boolean,
+    bypass?: { bypassAll?: boolean; bypassCaps?: string[] },
+  ): string => {
+    const sql = filterSqlFor(bypass);
+    return sql ? `${existingWhere ? " AND " : " WHERE "}${sql}` : "";
+  };
   // Principal-filter param bindings appended to every SELECT's parameter object
   // (`__cu_tenantId = RequestContext.Current!.CurrentUser!.TenantId`).  Empty
   // for a non-principal (or no) filter, so those SELECTs stay byte-identical.
@@ -1367,14 +1394,17 @@ export function renderDapperRepository(
         `        => throw new NotImplementedException("Dapper v1 does not support this find's predicate.");`,
       );
     }
-    const sql = `SELECT ${colList} FROM ${table}${where}${andFilter(where !== "")}`;
+    // An `ignoring` clause on the find (named-filter-bypass.md §11) is STATIC
+    // here — it is part of the declaration, so the bypassed capability's
+    // predicate is simply never spliced into this method's SQL.
+    const sql = `SELECT ${colList} FROM ${table}${where}${andFilter(where !== "", f)}`;
     // Paged-by-default findAll (M-T2.6): a COUNT + a whitelisted ORDER BY / LIMIT
     // / OFFSET page query returning the domain `Paged<Agg>` envelope (1-based).
     // The sort column is resolved from a fixed whitelist server-side (an unknown
     // key falls to `id`) so the interpolated column can't inject SQL; `dir` maps
     // to a literal ASC/DESC.
     if (pagedReturn(f.returnType)) {
-      const fromClause = `FROM ${table}${where}${andFilter(where !== "")}`;
+      const fromClause = `FROM ${table}${where}${andFilter(where !== "", f)}`;
       const sortArms = sortableFields(agg)
         .filter((wf) => wf !== "id")
         .map((wf) => `"${wf}" => "${snake(wf)}"`)
@@ -1471,7 +1501,30 @@ export function renderDapperRepository(
             .map((s) => `${snake(s.path[0]!.name)} ${s.direction === "desc" ? "DESC" : "ASC"}`)
             .join(", ")}`
         : "";
-    const baseSql = `SELECT ${colList} FROM ${table} WHERE ${whereSql}${filterSql ? ` AND ${filterSql}` : ""}${orderSql}`;
+    // A retrieval's `ignoring` clause arrives at RUNTIME (the `FilterBypass
+    // bypass` port param a workflow's inline `Repo.run(...) ignoring …` binds),
+    // so unlike the find path the SQL cannot be decided at emit time.  The
+    // non-bypassable head (`where` + the TPH discriminator) is baked; each
+    // capability predicate is appended only when the caller's `bypass` does not
+    // name its contributing capability — the raw-SQL twin of the adapter-side
+    // `IgnoreQueryFilters` translation in `emit/repository.ts`.  Paging is
+    // concatenated after, so the ORDER BY has to be concatenated too rather
+    // than baked into the head.
+    const headSql = `SELECT ${colList} FROM ${table} WHERE ${whereSql}${tph ? ` AND kind = ${kindLiteral}` : ""}`;
+    const bypassLines =
+      capabilityFilterParts.length > 0
+        ? [
+            `        var __caps = new List<string>();`,
+            ...capabilityFilterParts.map((part) => {
+              const guard =
+                part.origin != null
+                  ? `if (!bypass.All && bypass.Capabilities?.Contains(${JSON.stringify(part.origin)}) != true)`
+                  : `if (!bypass.All)`;
+              return `        ${guard} __caps.Add("${part.sql}");`;
+            }),
+            `        var sql = "${headSql}" + (__caps.Count > 0 ? " AND " + string.Join(" AND ", __caps) : "")${orderSql ? ` + "${orderSql}"` : ""};`,
+          ]
+        : [`        var sql = "${headSql}${orderSql}";`];
     const paramAdds = [
       ...r.params.map((p) => {
         const pt = p.type.kind === "optional" ? p.type.inner : p.type;
@@ -1489,7 +1542,7 @@ export function renderDapperRepository(
       `    public async Task<IReadOnlyList<${agg.name}>> Run${name}Async(${renderRetrievalParamsWithCt(r.params)})`,
       `    {`,
       `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
-      `        var sql = "${baseSql}";`,
+      ...bypassLines,
       `        var p = new DynamicParameters();`,
       ...paramAdds,
       `        if (page is { } pg)`,
