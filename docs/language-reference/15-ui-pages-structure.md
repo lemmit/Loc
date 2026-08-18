@@ -2,7 +2,7 @@
 
 The frontend surface: a `ui` block bound to a frontend deployable, holding `page`s (route + body), `component`s (reusable region trees), reactive `state` / `derived` / `action` members, an optional explicit `menu`, page-grouping `area`s, and the `with scaffold(...)` macro that synthesises CRUD pages from the domain. Reach for this chapter to learn exactly what a page or component emits — and where the five frontends diverge.
 
-> **Grammar:** `Ui`, `UiMember`, `Page`, `PageProp`, `Component`, `StateBlock`, `StateField`, `DerivedProp`, `ActionDecl`, `Area`, `MenuBlock`, `Layout` · **Validators:** `loom.react-deployable-missing-ui` · `loom.framework-mismatch` · `loom.ui-framework-unhostable` · `loom.component-missing-body` · `loom.slot-out-of-position` · **Docs:** [`../page-metamodel.md`](../page-metamodel.md), [`../scaffold-macros.md`](../scaffold-macros.md)
+> **Grammar:** `Ui`, `UiMember`, `Page`, `PageProp`, `Component`, `StateBlock`, `StateField`, `DerivedProp`, `ActionDecl`, `Area`, `MenuBlock`, `Layout` · **Validators:** `loom.react-deployable-missing-ui` · `loom.ui-framework-unhostable` · `loom.component-missing-body` · `loom.slot-out-of-position` · **Docs:** [`../page-metamodel.md`](../page-metamodel.md), [`../scaffold-macros.md`](../scaffold-macros.md)
 
 The page metamodel is **framework-neutral**: one `ui { … }` source lowers onto React (`react`), Vue 3 (`vue`), SvelteKit (`svelte`), or Angular (`angular`) by switching the bound deployable's `platform:` (or the ui's `framework:`). Every `frontend` tab below is **real generated output** from the same `.ddd` — only the host framework's idiom differs.
 
@@ -51,7 +51,7 @@ system Frontends {
 }
 ```
 
-The `framework:` key on the ui block sets its framework independently of the host (`ui Ops { framework: react }` on a `platform: static` host) — `loom.ui-framework-unhostable` rejects a framework the host can't serve, `loom.framework-mismatch` a host/ui contradiction.
+The `framework:` key on the ui block sets its framework independently of the host (`ui Ops { framework: react }` on a `platform: static` host) — `loom.ui-framework-unhostable` rejects a host/ui contradiction, i.e. a framework the host can't serve.
 
 ## `page` — route, title, body
 
