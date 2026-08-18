@@ -1408,6 +1408,122 @@ export function validateFieldDefaults(ctx: BoundedContextIR, diags: LoomDiagnost
   for (const vo of ctx.valueObjects) check(vo.name, vo.fields);
 }
 
+// ---------------------------------------------------------------------------
+// `loom.resource-op-outside-workflow` — a resource verb call may only appear
+// where a backend actually has the resource client in scope.
+//
+// A resource handle (`salesFiles`, `mail`, …) is AMBIENT over the whole
+// context: `lowerContext` seeds `resources` into the same `Env` an aggregate
+// body resolves against, and `lower-expr.ts` resolves the bare name ahead of
+// locals — so `salesFiles.put(k, v)` inside an aggregate `operation` lowers to
+// a perfectly well-formed `callKind: "resource-op"` with no complaint at all.
+//
+// Only the WORKFLOW / handler / domain-service emitters thread the resource
+// client map into their render context (`resourceClasses` on .NET+Java,
+// `resourceModules` on Phoenix, the client-module import on TS/Python).  An
+// aggregate member body has none of that, and the five backends fail five
+// different ways:
+//
+//   .NET / Java / Phoenix — `render-expr.ts` THROWS mid-generation ("reached
+//       the … renderer without a resource class mapping"), so `ddd generate`
+//       dies with a stack trace and writes nothing.
+//   TS / Python — emit an awaited helper call (`(await salesFiles$put(…))`)
+//       into a module that never imports it → TS2304 / `F821`.  Worse, the
+//       plain aggregate method renders `salesFiles.put(…)` unawaited against
+//       an unimported symbol.
+//
+// `docs/resources.md` § "Verb vocabulary" already states the rule ("workflows
+// only — resource-ops are not allowed in aggregate operations"); nothing
+// enforced it.  This is that enforcement, at the IR tier, once for all five
+// backends — the same shape as `loom.resource-op-in-transaction`, which is the
+// OTHER placement rule resource-ops carry.
+//
+// LIFECYCLE GUARDS ARE INCLUDED.  `structural-checks`'s
+// `lifecycleGuardIllegalReads` notes in passing that a `resource-op` "renders a
+// module- or class-qualified call — none of them touches the receiver", and
+// defers the question with "(A guard doing IO is a different objection, not
+// this one.)".  That deferral is settled here, empirically: a `create { requires
+// salesFiles.list("x").count == 0 }` CRASHES the .NET generator inside
+// `lifecycleGate`, and on Hono emits `(await salesFiles$list("x"))` into
+// `http/<agg>.routes.ts`, a file that imports no resource client → TS2304.  A
+// guard is rendered in a route/authz position, which is exactly where no
+// resource client is in scope.  So guards are gated too — and the walk gets
+// them for free, since a lifecycle `requires` is a statement in the
+// create/destroy body.
+//
+// The LEGAL sites are the three the `deriveNeeds` enrichment already scans for
+// usage-derived resource needs: workflow bodies, command/query handler bodies,
+// and domain-service operation bodies.  Everything else on an aggregate / part
+// / value object is rejected.
+// ---------------------------------------------------------------------------
+
+/** Push one diagnostic per (location, resource.verb) — an operation calling the
+ *  same verb twice is one authoring mistake, not two. */
+export function validateResourceOpPlacement(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  const seen = new Set<string>();
+  const flag = (location: string, expr: ExprIR | undefined): void => {
+    if (!expr) return;
+    walkExprDeep(expr, (e) => {
+      if (e.kind !== "call" || e.callKind !== "resource-op" || !e.resourceOp) return;
+      const { resourceName, verb } = e.resourceOp;
+      const key = `${location} ${resourceName}.${verb}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      diags.push({
+        severity: "error",
+        code: "loom.resource-op-outside-workflow",
+        message: diagMessage("loom.resource-op-outside-workflow", {
+          location,
+          resourceName,
+          verb,
+        }),
+        source: `${ctx.name}/${location}`,
+      });
+    });
+  };
+  const flagStmts = (location: string, stmts: readonly StmtIR[]): void => {
+    for (const s of stmts) walkExprsInStmt(s, (e) => flag(location, e));
+  };
+  // An aggregate / part / value object — every member surface that renders into
+  // domain (or route-gate) code.  `creates` / `destroys` are separate arrays
+  // from `operations`, and a lifecycle `requires` guard is a statement inside
+  // them, so walking all three statement lists covers guards too.
+  for (const agg of ctx.aggregates) {
+    for (const op of [...agg.operations, ...(agg.creates ?? []), ...(agg.destroys ?? [])]) {
+      flagStmts(`${agg.name}.${op.name || "create"}`, op.statements);
+      flag(`${agg.name}.${op.name || "create"}`, op.when);
+    }
+    for (const inv of agg.invariants) {
+      flag(`${agg.name}.invariant`, inv.expr);
+      flag(`${agg.name}.invariant`, inv.guard);
+    }
+    for (const d of agg.derived) flag(`${agg.name}.derived[${d.name}]`, d.expr);
+    for (const fn of agg.functions) flagFunctionBody(`${agg.name}.function[${fn.name}]`, fn, flag);
+    for (const part of agg.parts) {
+      for (const inv of part.invariants) {
+        flag(`${part.name}.invariant`, inv.expr);
+        flag(`${part.name}.invariant`, inv.guard);
+      }
+      for (const d of part.derived) flag(`${part.name}.derived[${d.name}]`, d.expr);
+      for (const fn of part.functions)
+        flagFunctionBody(`${part.name}.function[${fn.name}]`, fn, flag);
+    }
+  }
+  for (const vo of ctx.valueObjects) {
+    for (const inv of vo.invariants) {
+      flag(`${vo.name}.invariant`, inv.expr);
+      flag(`${vo.name}.invariant`, inv.guard);
+    }
+    for (const d of vo.derived) flag(`${vo.name}.derived[${d.name}]`, d.expr);
+    for (const fn of vo.functions) flagFunctionBody(`${vo.name}.function[${fn.name}]`, fn, flag);
+  }
+  // Repository find filters lower to SQL / a query predicate; a resource-op
+  // there has no renderable form on any backend either.
+  for (const repo of ctx.repositories) {
+    for (const f of repo.finds) flag(`repository[${repo.name}].find[${f.name}]`, f.filter);
+  }
+}
+
 /** Walk every expression inside an entity's invariants, derived
  *  properties, function bodies, and repository find
  *  filters; flag any `current-user` ref found there.  Uses the

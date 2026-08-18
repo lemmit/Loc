@@ -8,6 +8,7 @@ import {
   isRequiresStmt,
   isReturnStmt,
 } from "../../language/generated/ast.js";
+import { findVerb } from "../resource-verbs.js";
 import { typeKey, variantTag as unionVariantTag } from "../stdlib/unions.js";
 import type { ExprIR, PathIR, StmtIR, TypeIR } from "../types/loom-ir.js";
 import {
@@ -225,6 +226,40 @@ function lowerStatementInner(stmt: Statement, env: Env): { stmt: StmtIR; envAfte
           };
           return { stmt: { kind: "expression", expr }, envAfter: env };
         }
+      }
+      // `files.put(k, v)` — a verb call on an ambient resource handle written
+      // as a STATEMENT.  The EXPRESSION path (`applySuffixToRecv`) already
+      // lowers `let x = files.get(k)` to `callKind: "resource-op"`, but this
+      // statement path knew nothing about `env.resources`, so the bare form
+      // fell through to the generic chained-call arm below and lowered to a
+      // `method-call` on a `refKind: "unknown"` receiver — an IR node that
+      // claims to be resolved and isn't.  Every consumer then read it wrong:
+      // the TS backend emitted a bare `files.put(…)` against a symbol the file
+      // never imports, `deriveNeeds` derived no capability need for it, and the
+      // resource placement gate below could not see it at all.  Lowering it
+      // here restores the invariant that the IR is fully resolved, and the two
+      // spellings of one call now produce one IR shape.  (Workflow bodies take
+      // their own `resource-call` path in `lower-workflow.ts` and are
+      // unaffected.)
+      if (lv.call && lv.tail.length === 1 && env.resources?.has(lv.head)) {
+        const resourceKind = env.resources.get(lv.head)!;
+        const verb = lv.tail[0]!;
+        const args = (lv.args ?? []).map((a) => lowerExpr(a, env));
+        const verbDef = findVerb(resourceKind, verb);
+        const expr: ExprIR = {
+          kind: "call",
+          callKind: "resource-op",
+          name: verb,
+          args,
+          resourceOp: {
+            resourceName: lv.head,
+            resourceKind,
+            verb,
+            capability: verbDef?.capability ?? "",
+            ...(verbDef?.interfaceOverride ? { interface: verbDef.interfaceOverride } : {}),
+          },
+        };
+        return { stmt: { kind: "expression", expr }, envAfter: env };
       }
       // `a.b.c(args)` — chained call.  Two shapes share this path:
       //   - an e2e body chain (`api.orders.addLine(...)`) whose head is not an

@@ -1143,12 +1143,19 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
     const override = ctx.target.renderUserComponent?.(call, ctx, depth);
     return override ?? emitUserComponent(call, ctx, depth);
   }
-  // Registered primitive without a TSX renderer (e.g. `For`, `List`,
-  // `Detail` — source-admissible but unimplemented by the React
-  // walker).  Surface a comment so the gap is visible in generated
-  // output rather than silently producing nothing useful.
+  // Registered primitive without a `tsx` renderer.  Two ways to land here:
+  // a source-admissible primitive no target implements yet, or a `group: "sub"`
+  // primitive (`Tab`, `Column`) spelled outside the parent that consumes it
+  // inline — the latter is now rejected at the IR tier by
+  // `loom.sub-primitive-misplaced`, so this arm is the belt to that braces.
+  // Surface a comment either way, so the gap is visible in generated output
+  // rather than silently producing nothing useful.
+  //
+  // NOT "the React walker": this core is shared by React, Vue, Svelte, Angular,
+  // Feliz and Flutter through `WalkerTarget`, so the old wording put React's
+  // name in the Angular/Flutter output too.
   if (def) {
-    return ctx.target.renderComment(`${call.name}: not supported by the React walker yet`);
+    return ctx.target.renderComment(`${call.name}: not supported by the walker yet`);
   }
   return ctx.target.renderComment(`unknown layout component: ${call.name}`);
 }
