@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 // Optional money / decimal fields are `Decimal | null` / `number | null` on
 // the domain object, so the repository save row must guard the persist
@@ -34,9 +33,7 @@ const FIXTURE = `system Shop {
 
 describe("optional money/decimal persist (Hono repository save)", () => {
   it("null-guards the row projection of optional money and decimal fields", async () => {
-    const { model, errors } = await parseString(FIXTURE);
-    if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
-    const files = generateSystems(model).files;
+    const files = await generateSystemFiles(FIXTURE);
     let repo: string | undefined;
     for (const [k, v] of files) if (/\/db\/repositories\/invoice-repository\.ts$/.test(k)) repo = v;
     if (!repo) throw new Error("invoice-repository.ts not emitted");

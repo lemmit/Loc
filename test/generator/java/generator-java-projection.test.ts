@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // Java backend — projection read models (projection.md, v1).  A projection
@@ -33,9 +32,7 @@ const SRC = `system Shop { subdomain Sales { context Orders {
   deployable salesApi { platform: java contexts: [Orders] dataSources: [oState] port: 8080 } }`;
 
 async function build(): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(SRC);
-  if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
-  return generateSystems(model).files;
+  return await generateSystemFiles(SRC);
 }
 
 function file(files: Map<string, string>, suffix: string): string {

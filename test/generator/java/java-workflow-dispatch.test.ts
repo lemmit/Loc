@@ -6,10 +6,8 @@
 // events through Spring's ApplicationEventPublisher — ALWAYS, uniform with
 // .NET/Hono/Python/Elixir (audit §S5c: gating the publish on "context has a
 // subscriber" dropped an event whose context had none).
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `system S { subdomain O { context O {
   aggregate Order { status: string  operation place() { status := "P"  emit OrderPlaced { order: id } } }
@@ -37,9 +35,7 @@ const PLAIN = `system S { subdomain O { context O {
   deployable api { platform: java contexts: [O] serves: A dataSources: [oState] port: 8080 } }`;
 
 async function gen(src: string): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(src);
-  if (errors.length) throw new Error(errors.join("\n"));
-  return generateSystems(model).files;
+  return await generateSystemFiles(src);
 }
 
 describe("java saga dispatcher", () => {

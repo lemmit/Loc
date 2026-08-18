@@ -2,10 +2,8 @@
 // Python.  A `field := value` in a workflow body targeting one of the
 // workflow's OWN state fields writes onto the loaded correlation-state row
 // (`state.<snake>`) in app/dispatch.py — flushed at handler exit.
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseValid } from "../../_helpers/parse.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `
   system S {
@@ -34,7 +32,7 @@ const SRC = `
 
 describe("Python workflow own-state assignment", () => {
   it("writes the own-state field onto the saga row in the dispatcher", async () => {
-    const files = (await generateSystems(await parseValid(SRC))).files;
+    const files = await generateSystemFiles(SRC);
     const dispatch = [...files.entries()].find(([k]) => k.endsWith("app/dispatch.py"))?.[1];
     expect(dispatch, "dispatch.py not emitted").toBeDefined();
     expect(dispatch).toContain("state.attempts = 1");
@@ -74,14 +72,14 @@ const COMPOUND_SRC = `
 
 describe("Python workflow own-state compound assignment", () => {
   it("emits a read-modify-write for an int `attempts += 1`", async () => {
-    const files = (await generateSystems(await parseValid(COMPOUND_SRC))).files;
+    const files = await generateSystemFiles(COMPOUND_SRC);
     const dispatch = [...files.entries()].find(([k]) => k.endsWith("app/dispatch.py"))?.[1];
     expect(dispatch, "dispatch.py not emitted").toBeDefined();
     expect(dispatch).toContain("state.attempts = state.attempts + 1");
   });
 
   it("emits Decimal arithmetic for a money `total -= money(...)`", async () => {
-    const files = (await generateSystems(await parseValid(COMPOUND_SRC))).files;
+    const files = await generateSystemFiles(COMPOUND_SRC);
     const dispatch = [...files.entries()].find(([k]) => k.endsWith("app/dispatch.py"))?.[1];
     expect(dispatch).toContain('state.total = state.total - Decimal("5.00")');
   });

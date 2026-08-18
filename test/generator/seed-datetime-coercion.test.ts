@@ -6,10 +6,8 @@
 // serves /openapi.json, failing the conformance-parity gate at the spec
 // fetch.  Each backend must coerce the literal to a real datetime value
 // (.NET and Java have the same coercion, pinned in their own seed tests).
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../src/system/index.js";
-import { parseValid } from "../_helpers/parse.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
 const src = (platform: string, port: number): string => `
   system S {
@@ -33,7 +31,7 @@ const src = (platform: string, port: number): string => `
 `;
 
 async function build(platform: string, port: number): Promise<Map<string, string>> {
-  return generateSystems(await parseValid(src(platform, port))).files;
+  return await generateSystemFiles(src(platform, port));
 }
 
 function find(files: Map<string, string>, suffix: string): string {

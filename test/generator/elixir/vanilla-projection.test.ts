@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // Elixir-vanilla backend — projection read models (projection.md, v1).  A
@@ -45,9 +44,7 @@ const SRC_NO_PROJECTION = `system Shop { subdomain Sales { context Orders {
   deployable salesApi { platform: elixir contexts: [Orders] dataSources: [oState] port: 4000 } }`;
 
 async function build(src: string): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(src);
-  if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
-  return generateSystems(model).files;
+  return await generateSystemFiles(src);
 }
 
 function file(files: Map<string, string>, suffix: string): string {

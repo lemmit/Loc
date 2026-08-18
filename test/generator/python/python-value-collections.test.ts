@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // Python backend — value-object collections (`<VO>[]`).  Unlike a single VO
@@ -41,9 +40,7 @@ system Billing {
 `;
 
 async function build(): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(FIXTURE);
-  if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
-  return generateSystems(model).files;
+  return await generateSystemFiles(FIXTURE);
 }
 
 describe("python value-object collection — id-less child-table persistence", () => {
