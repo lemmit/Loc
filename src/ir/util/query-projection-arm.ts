@@ -15,9 +15,25 @@
 // That split is what the Dapper gate keys off.  Dapper writes its own SQL, so
 // a direct-table arm names COLUMNS — and an aggregate whose fields do not
 // exist as columns (a `shape: document` blob, an event-sourced stream with no
-// state table at all) has nothing for `sum(total)` to reach.  EF Core hides
-// that difference behind its own JSON translation; Dapper cannot, so it is the
-// one honest remaining boundary on this adapter (M-T6.25).
+// state table at all) has nothing for `sum(total)` to reach.  It is the one
+// honest remaining boundary on this adapter (M-T6.25).
+//
+// CORRECTION (verified by generating + compiling, 2026-08).  This header used
+// to claim "EF Core hides that difference behind its own JSON translation".
+// **It does not.**  A `shape: document` source under `persistence: efcore`
+// emits `_db.Orders.…Select(g => new { Revenue = g.Sum(o => o.Total) })` over a
+// `DbSet<OrderDocument>` and fails to compile:
+//
+//   error CS1061: 'OrderDocument' does not contain a definition for 'Total'
+//
+// and the node/drizzle backend emits `sum(schema.orders.total)` against a
+// `(id, data, version)` table — the same defect, a `tsc` error.  So the shape is
+// broken on the OTHER adapters too; Dapper is simply the only one that SAYS so.
+// Do not "drain" this gate by teaching Dapper to read the blob: that would make
+// Dapper the only backend where the shape works while the honest diagnostic
+// disappeared.  The real mission is the inverse — WIDEN the refusal to every
+// backend (or teach them all the jsonb/union read), which needs its own
+// backend-neutral diagnostic code and is out of this slice's scope.
 //
 // The classifier lives at IR level because BOTH halves need it and they may not
 // import each other: `ir/validate` raises the diagnostic, `generator/dotnet`
