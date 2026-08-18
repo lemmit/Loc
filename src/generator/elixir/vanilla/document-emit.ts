@@ -884,3 +884,6 @@ function docWireMap(
   ];
   return `%{${entries.join(", ")}}`;
 }
+
+// CLAIM (W2-elixir-document): in-app capability filtering on the document read
+// path — see the draft PR.
