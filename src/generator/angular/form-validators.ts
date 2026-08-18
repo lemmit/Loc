@@ -1,6 +1,7 @@
 import type { InvariantIR } from "../../ir/types/loom-ir.js";
 import type { SingleFieldPattern } from "../../ir/validate/invariant-classify.js";
 import { humanize } from "../../util/naming.js";
+import { asRegexLiteral } from "../_expr/regex-literal.js";
 import type { WalkContext } from "../_walker/walker-core.js";
 import { takeSingleFieldChain } from "../zod-refine.js";
 import { type AngularFormControlSpec, addNg } from "./form-fields.js";
@@ -110,8 +111,10 @@ function validatorsForPattern(p: SingleFieldPattern): string[] {
       return [`Validators.minLength(${p.lo})`, `Validators.maxLength(${p.hi})`];
     case "regex":
       // The pattern is a JS-compatible regex source (parse-time validated via
-      // `new RegExp`).  Render as a `/…/` literal, escaping forward slashes —
-      // identical to the zod `.regex(/…/)` chain.
-      return [`Validators.pattern(/${p.pattern.replace(/\//g, "\\/")}/)`];
+      // `new RegExp`).  Rendered through the SAME `asRegexLiteral` hardening
+      // the zod `.regex(…)` chain uses, so an empty / dangling-backslash /
+      // multi-line source falls back to `new RegExp("…")` instead of emitting
+      // a `//` that comments out the rest of the line.
+      return [`Validators.pattern(${asRegexLiteral(p.pattern)})`];
   }
 }
