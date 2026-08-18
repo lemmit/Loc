@@ -42,9 +42,12 @@ const SOURCE = `system MiniLiveView {
     }
   }
 
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
   deployable phoenixApp {
     platform: elixir,
     contexts: [Sales],
+    dataSources: [salesState],
     serves: SalesApi,
     ui: SalesAdmin,
     port: 4000
@@ -101,8 +104,10 @@ describe("Phoenix extern component rendering", () => {
     component OrderChart(caption: string) extern from "widgets/order_chart"
     page Home { route: "/" body: OrderChart(caption: "Q3") }
   }
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
   deployable phoenixApp {
-    platform: elixir, contexts: [Sales], serves: SalesApi, ui: SalesAdmin, port: 4000
+    platform: elixir, contexts: [Sales], dataSources: [salesState], serves: SalesApi, ui: SalesAdmin, port: 4000
   }
 }
 `;

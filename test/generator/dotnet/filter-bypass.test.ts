@@ -33,7 +33,9 @@ const SRC = `
       }
     }}
     storage primary { type: postgres }
-    deployable api { platform: dotnet  contexts: [C]  port: 3000 }
+    storage pg { type: postgres }
+    resource cState { for: C, kind: state, use: pg }
+    deployable api { platform: dotnet  contexts: [C]  dataSources: [cState]  port: 3000 }
   }
 `;
 
