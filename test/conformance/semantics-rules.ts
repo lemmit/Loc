@@ -927,7 +927,8 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
   },
   {
     id: "RS-31",
-    title: "A string `.length` bound counts Unicode code points, not the host's native string length",
+    title:
+      "A string `.length` bound counts Unicode code points, not the host's native string length",
     trigger:
       "any `.length` on a string \u2014 a `len-*` invariant/precondition (`code.length >= 3`, `label.length <= 16`) or a bare `.length` read in a domain rule \u2014 evaluated against a value containing an astral character",
     observable:

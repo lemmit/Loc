@@ -299,7 +299,11 @@ function renderMember(recv: string, e: MemberExpr): string {
   // A string's `.length` is CODE POINTS, not JS's UTF-16 code units — the
   // same count the wire validator and the published `minLength`/`maxLength`
   // use (src/generator/_expr/code-point.ts).
-  if (e.receiverType.kind === "primitive" && e.receiverType.name === "string" && e.member === "length") {
+  if (
+    e.receiverType.kind === "primitive" &&
+    e.receiverType.name === "string" &&
+    e.member === "length"
+  ) {
     return tsCodePointLength(recv);
   }
   return `${recv}.${e.member}`;

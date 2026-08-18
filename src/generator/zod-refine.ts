@@ -252,7 +252,11 @@ function renderMember(e: Extract<ExprIR, { kind: "member" }>): string {
   }
   // String `.length` is CODE POINTS, not UTF-16 code units — see
   // `codePointLength` below.
-  if (e.receiverType.kind === "primitive" && e.receiverType.name === "string" && e.member === "length") {
+  if (
+    e.receiverType.kind === "primitive" &&
+    e.receiverType.name === "string" &&
+    e.member === "length"
+  ) {
     return codePointLength(recv);
   }
   return `${recv}.${e.member}`;
