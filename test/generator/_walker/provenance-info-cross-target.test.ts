@@ -217,17 +217,38 @@ describe("ProvenanceInfo — HEEx renders a native `<details>` off the Ecto stru
   });
 });
 
-describe("ProvenanceInfo — not-yet-ported frontends degrade honestly (value only)", () => {
-  for (const frontend of ["flutter"]) {
-    it(`${frontend}: the "?" falls through to a comment and the lineage is not carried`, async () => {
-      const out = allFiles(await generateSystemFiles(provScaffoldSystem(frontend)));
-      // The primitive comments itself out — the value still renders.
-      expect(out).toContain(`provenance disclosure not yet supported on ${frontend}`);
-      // No lineage carrier on the FRONTEND: `provLineageSchema` is unique to the
-      // ported zod frontends — the backend's own lineage column/DTO
-      // (`total_provenance`, `ProvLineage`) is emitted regardless of frontend, so
-      // it's the camelCase schema name that must be absent here.
-      expect(out).not.toContain("provLineageSchema");
-    });
-  }
+describe("ProvenanceInfo — Flutter renders an ExpansionTile disclosure over the lineage", () => {
+  it("carries the lineage on the Dart wire model", async () => {
+    const out = allFiles(await generateSystemFiles(provScaffoldSystem("flutter")));
+    // The fixed lineage classes ship (the Dart analogue of `provLineageSchema` /
+    // Feliz's `ProvLineage` record) …
+    expect(out).toContain("class ProvLineage {");
+    expect(out).toContain("class ProvInput {");
+    expect(out).toContain("final String snapshotId;");
+    // … and the Order model carries the co-located, nullable sibling, decoded
+    // through it.
+    expect(out).toContain("final ProvLineage? total_provenance;");
+    expect(out).toContain(
+      "total_provenance: json['total_provenance'] == null ? null : ProvLineage.fromJson(json['total_provenance'] as Map<String, dynamic>),",
+    );
+  });
+
+  it("renders the disclosure on the scaffolded detail page", async () => {
+    const out = allFiles(await generateSystemFiles(provScaffoldSystem("flutter")));
+    // No fall-through comment any more — the seam owns the primitive.
+    expect(out).not.toContain("provenance disclosure not yet supported on flutter");
+    // A null-BINDING switch pattern (a property read off a model class is not
+    // type-promotable in Dart) into the Material disclosure.
+    expect(out).toMatch(/\(switch \([\w.]*\.total_provenance\) \{ final __p\? => ExpansionTile\(/);
+    expect(out).toContain("Semantics(label: 'How this value was computed'");
+    // Rule id + computed value + the input list, same three rows as every other
+    // frontend's disclosure.
+    expect(out).toContain("Text(__p.snapshotId)");
+    expect(out).toContain("Text(__p.computedValue)");
+    expect(out).toContain("...__p.inputs.map((__i) =>");
+    expect(out).toContain("Text(__i.path)");
+    // No lineage carrier: `provLineageSchema` is unique to the zod frontends —
+    // Dart decodes through its own class instead.
+    expect(out).not.toContain("provLineageSchema");
+  });
 });

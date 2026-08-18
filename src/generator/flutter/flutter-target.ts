@@ -627,6 +627,45 @@ export const flutterTarget: WalkerTarget = {
     return `(switch (${recv}) { final __f? => ${link}, _ => const Text(${dartString("—")}) })`;
   },
 
+  // `ProvenanceInfo(of: <record>, field: "<name>")` → a native disclosure over
+  // the co-located `<field>_provenance` (a `ProvLineage?` on the decoded model —
+  // `dart-model-emit.ts`).  Flutter forks the primitive because its "markup" is
+  // a Dart widget tree, not JSX: the `<details>`/`<summary>` pair becomes an
+  // `ExpansionTile` (the Material disclosure), and the `<dl>` a `Column` of
+  // label/value rows.  Same null-binding trick as `renderFileLink` — a property
+  // read off a model class is not type-promotable in Dart, so the switch pattern
+  // BINDS `__p` rather than naming `ProvLineage` (which a page file does not
+  // import).  A SINGLE-LINE expression: the walker does not re-indent seam
+  // output.
+  renderProvenanceInfo: (call, ctx) => {
+    if (call.kind !== "call") return null;
+    const argNames = call.argNames ?? [];
+    const ofIdx = argNames.indexOf("of");
+    const ofArg = ofIdx >= 0 ? call.args[ofIdx] : (call.args ?? []).find((_, i) => !argNames[i]);
+    const fieldIdx = argNames.indexOf("field");
+    const fieldArg = fieldIdx >= 0 ? call.args[fieldIdx] : undefined;
+    if (!ofArg || fieldArg?.kind !== "literal") {
+      return flutterTarget.renderComment("ProvenanceInfo: missing record or field");
+    }
+    const lineage = `${emitExpr(ofArg, ctx)}.${String(fieldArg.value)}_provenance`;
+    const row = (label: string, value: string) =>
+      `Row(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[` +
+      `Expanded(child: ${label}), Expanded(child: ${value})])`;
+    const rule = row(`const Text(${dartString("Rule")})`, "Text(__p.snapshotId)");
+    const value = row(`const Text(${dartString("Value")})`, "Text(__p.computedValue)");
+    const inputs = `...__p.inputs.map((__i) => ${row("Text(__i.path)", "Text(__i.value)")})`;
+    const body =
+      `Column(crossAxisAlignment: CrossAxisAlignment.start, ` +
+      `children: <Widget>[${rule}, ${value}, ${inputs}])`;
+    // The summary is the bare "?" affordance of the shared primitive; the
+    // screen-reader label the JSX targets put on `<summary aria-label=…>` rides
+    // `Semantics` here (Flutter's a11y seam — `a11y.test.ts` pins the idiom).
+    const tile =
+      `ExpansionTile(title: Semantics(label: ${dartString("How this value was computed")}, ` +
+      `child: const Text(${dartString("?")})), children: <Widget>[${body}])`;
+    return `(switch (${lineage}) { final __p? => ${tile}, _ => const SizedBox.shrink() })`;
+  },
+
   // `WorkflowForm(runs: <wf>)` → `const <Wf>WorkflowForm()` — a self-contained
   // form that POSTs the workflow params to `/workflows/<wf>` (a create form over
   // the command route).  The widget class is emitted into `lib/forms.dart` by
