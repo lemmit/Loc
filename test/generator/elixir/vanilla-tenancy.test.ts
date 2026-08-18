@@ -90,8 +90,12 @@ describe("vanilla tenancy — principal filter threaded + pinned", () => {
   it("extracts conn.assigns.current_user in the controller and passes it to reads", async () => {
     const ctrl = file(await gen(), "/controllers/account_controller.ex");
     expect(ctrl).toContain("current_user = Map.get(conn.assigns, :current_user)");
+    // The paging controls are bound by `with` clauses ahead of the read (audit
+    // A16 — an out-of-range window 422s instead of being clamped), so the call
+    // takes the BOUND values; `current_user` still rides last.
+    expect(ctrl).toContain('{:ok, page_arg} <- page_param(params, "page", 1, 1000000)');
     expect(ctrl).toContain(
-      'Ledger.list_accounts(page_param(params, "page", 1, 1000000), page_param(params, "pageSize", 20, 500), Map.get(params, "sort", "id"), Map.get(params, "dir", "asc"), current_user)',
+      'Ledger.list_accounts(page_arg, page_size_arg, Map.get(params, "sort", "id"), Map.get(params, "dir", "asc"), current_user)',
     );
     expect(ctrl).toContain("Ledger.get_account(id, current_user)");
   });

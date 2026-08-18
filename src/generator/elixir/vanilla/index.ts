@@ -71,6 +71,7 @@ import { emitExplicitHandlers, emitExplicitRoutesController } from "./explicit-h
 import { emitVanillaExternModules } from "./extern-emit.js";
 import { emitVanillaFilesController } from "./files-controller-emit.js";
 import { emitOpenApiSpec } from "./openapi-emit.js";
+import { contextsHavePagedReads } from "./page-param.js";
 import { renderVanillaProblemDetailsModule } from "./problem-details-emit.js";
 import {
   emitVanillaProjectionSchemas,
@@ -163,9 +164,14 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
   // M-T6.20 — does any aggregate operation carry a WIRE-RUNG denial (a messaged
   // `precondition` over the op's own params)?  Gates the extra
   // `validation_errors_response/2` responder; false ⇒ byte-identical.
-  const hasWireDenials = contexts.some((c) =>
-    c.aggregates.some((agg) => (agg.operations ?? []).some((op) => opHasWireDenial(op))),
-  );
+  // …OR a paged read: an out-of-range `page`/`pageSize` now answers the same
+  // `errors[]` 422 rather than being clamped past the bounds this app's own
+  // OpenAPI document publishes (page-param.ts), and it sends through the same
+  // responder.  An app with neither stays byte-identical.
+  const hasWireDenials =
+    contexts.some((c) =>
+      c.aggregates.some((agg) => (agg.operations ?? []).some((op) => opHasWireDenial(op))),
+    ) || contextsHavePagedReads(contexts);
   out.set(
     `lib/${appName}_web/problem_details.ex`,
     renderVanillaProblemDetailsModule(
