@@ -90,7 +90,8 @@ describe("java OpenApiCustomizer — list array wrappers", () => {
     // would force the bare array) — springdoc derives the envelope schema +
     // page/pageSize/sort/dir params natively.  The required set is pinned so the
     // parity gate sees all five envelope fields required.
-    expect(c).toContain('new Route("get", "/api/orders", null, new int[] {}, null)');
+    // …and it declares the 422 its parsed page controls answer (F6).
+    expect(c).toContain('new Route("get", "/api/orders", null, new int[] {422}, null)');
     expect(c).toContain(
       'new RequiredSet("OrderPaged", List.of("items", "page", "pageSize", "total", "totalPages"))',
     );
@@ -127,9 +128,10 @@ describe("java OpenApiCustomizer — RFC 7807 error responses", () => {
 
   it("getById → 404; destroy → 404, 409", async () => {
     const c = await customizer();
-    expect(c).toContain('new Route("get", "/api/orders/{id}", null, new int[] {404}, null)');
+    // Both parse a uuid `{id}`, so both declare the 422 they answer (F6).
+    expect(c).toContain('new Route("get", "/api/orders/{id}", null, new int[] {404, 422}, null)');
     expect(c).toContain(
-      'new Route("delete", "/api/orders/{id}", null, new int[] {404, 409}, null)',
+      'new Route("delete", "/api/orders/{id}", null, new int[] {404, 409, 422}, null)',
     );
   });
 
@@ -152,7 +154,10 @@ describe("java OpenApiCustomizer — RFC 7807 error responses", () => {
 
   it("an optional find → 404", async () => {
     const c = await customizer();
-    expect(c).toContain('new Route("get", "/api/orders/by_code", null, new int[] {404}, null)');
+    // The find declares a `code` query param, so it parses one — +422 (F6).
+    expect(c).toContain(
+      'new Route("get", "/api/orders/by_code", null, new int[] {404, 422}, null)',
+    );
   });
 });
 

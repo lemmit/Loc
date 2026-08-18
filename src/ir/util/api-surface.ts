@@ -54,6 +54,7 @@ import { API_BASE_PATH } from "../../util/api-base.js";
 import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { plural, snake } from "../../util/naming.js";
 import { emitsRestCreate, emitsRestDestroy } from "../enrich/wire-projection.js";
+import { pagedReturn } from "../stdlib/generics.js";
 import {
   type AggregateIR,
   type BoundedContextIR,
@@ -64,7 +65,7 @@ import {
   type TypeIR,
 } from "../types/loom-ir.js";
 import { lifecycleGates } from "./op-gates.js";
-import { errorStatuses } from "./openapi-errors.js";
+import { errorStatuses, UNPROCESSABLE_ENTITY } from "./openapi-errors.js";
 import {
   camelId,
   type OpIdTokens,
@@ -278,6 +279,24 @@ export function absenceUnionAbsent(
  * module declaring a status no backend publishes and recreating the two-truths
  * problem it exists to remove.
  */
+/** True when a find's route PARSES a request part, and can therefore answer the
+ *  wire-validation 422 (`UNPROCESSABLE_ENTITY`).
+ *
+ *  Two independent sources, and BOTH matter: the find's own declared params
+ *  (which ride the query string, each parsed against its declared type), and
+ *  the pagination controls a PAGED return injects even when nothing was
+ *  declared — `?page=0` on `GET /api/orders` is rejected by the emitted
+ *  `min(1)` bound, which is how a param-less `find all` came to answer a 422
+ *  its published `[200]` never mentioned (schemathesis F6).
+ *
+ *  Exported because the DECLARATION and the RUNTIME validator must be the same
+ *  predicate: Hono's `emitFindRoute` gates its `request: { query: … }` on this,
+ *  so a find cannot grow a validator without growing the declaration (or the
+ *  reverse). */
+export function findValidatesRequest(find: FindIR): boolean {
+  return find.params.length > 0 || pagedReturn(find.returnType) !== null;
+}
+
 function findErrorStatuses(
   find: FindIR,
   guarded: boolean,
@@ -294,6 +313,15 @@ function findErrorStatuses(
   // `mergeContexts` bug that opened this mission — an optional field whose
   // absence is indistinguishable from its default.
   const resolve = (name: string): number => resolveErrorStatus(name, denialOverridesFor(statuses));
+  // The wire-validation tier, when this find's route parses anything (see
+  // `findValidatesRequest`).  Added HERE rather than in the shared table for
+  // the same reason the absent-union status below is: it is a fact about this
+  // find's ROUTE SHAPE, which `OpErrorKind` alone cannot express — the three
+  // find kinds cover both a param-less `find recent(): Product[]` (validates
+  // nothing, declares nothing) and a paged `find all` (always parses `?page=`).
+  const validation = findValidatesRequest(find) ? [UNPROCESSABLE_ENTITY] : [];
+  const withValidation = (statusesOut: readonly number[]): number[] =>
+    [...new Set([...statusesOut, ...validation])].sort((a, b) => a - b);
   const absent = absenceUnionAbsent(find.returnType, aggName);
   if (absent) {
     // The `none` unit is the stdlib 404; an error payload answers its
@@ -303,18 +331,17 @@ function findErrorStatuses(
     // `requires` gate keeps its 403 on BOTH absence shapes (#2363's rung —
     // python's union arm declares it by hand; dropping it here would re-open
     // the exact "patched one arm, not the other" split that PR fixed).
-    if (absent.kind === "none") return errorStatuses("findOptional", guarded, resolve);
+    if (absent.kind === "none")
+      return withValidation(errorStatuses("findOptional", guarded, resolve));
     const set = new Set(guarded ? [resolve("Forbidden")] : []);
     set.add(resolveErrorStatus(absent.tag, statuses?.errorStatusOverrides));
-    return [...set].sort((a, b) => a - b);
+    return withValidation([...set]);
   }
   if (find.returnType?.kind === "optional") {
-    return errorStatuses("findOptional", guarded, resolve);
+    return withValidation(errorStatuses("findOptional", guarded, resolve));
   }
-  return errorStatuses(
-    collectionSuccess(find.returnType) ? "findList" : "findSingle",
-    guarded,
-    resolve,
+  return withValidation(
+    errorStatuses(collectionSuccess(find.returnType) ? "findList" : "findSingle", guarded, resolve),
   );
 }
 
