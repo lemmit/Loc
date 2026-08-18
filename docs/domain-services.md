@@ -116,6 +116,7 @@ workflow MoveMoney transactional {
 | A repository **write** (`save`/`insert`/`update`/`delete`/`add`/`remove`/`commit`) | `loom.domain-service-no-repo-write` |
 | Start a workflow in the same context | `loom.domain-service-no-workflow-start` |
 | Calling a **reading**/**mutating** service from an aggregate op / view body | `loom.domain-service-infra-call-from-aggregate` |
+| A **resource-op** (`files.put(…)`, `mail.send(…)`, …) — outbound I/O belongs to the orchestrator | `loom.resource-op-outside-workflow` |
 
 Repository **reads** are allowed (they lower to a `repo-read` Call, not a
 write); mutation of a **passed-in aggregate** via its own operation is

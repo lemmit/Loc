@@ -337,7 +337,13 @@ function deriveNeeds(subdomains: EnrichedSubdomainIR[]): NeedIR[] {
         for (const st of h.statements) walkWorkflowStmtExprsDeep(st, noteResourceOp);
         if (h.returnValue) walkExprDeep(h.returnValue, noteResourceOp);
       }
-      // Domain-service operation bodies (`StmtIR`).
+      // Domain-service operation bodies (`StmtIR`).  Phase ⑦ REJECTS a
+      // resource-op here (`loom.resource-op-outside-workflow` — no
+      // domain-service emitter threads the client in), so in a model that
+      // validates this scan finds nothing.  It stays because enrichment runs
+      // BEFORE validation: dropping it would make an invalid model derive an
+      // under-specified need set and trade the honest placement error for a
+      // confusing capability-coverage one.
       for (const ds of ctx.domainServices ?? []) {
         for (const op of ds.operations)
           for (const st of op.body) walkStmtExprsDeep(st, noteResourceOp);
