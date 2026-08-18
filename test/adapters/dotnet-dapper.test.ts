@@ -1346,10 +1346,15 @@ system D {
 
 // ---------------------------------------------------------------------------
 // M-T6.29 — the two `authz-filter` sentinels under `persistence: dapper`.
-// `deny` RENDERS (`1 = 0`, principal-free); the hierarchical `deep`/`global`
-// scope sentinel is an HONEST boundary.  Before this both fell through
-// `whereToSql`'s `default:` and CRASHED codegen — and the corpus map already
-// claimed the hierarchy case was validator-rejected, which it was not.
+// `deny` renders `1 = 0` (principal-free); the hierarchical `deep`/`global`
+// scope sentinel renders the materialized-path fragment.  Before M-T6.29 BOTH
+// fell through `whereToSql`'s `default:` and CRASHED codegen — and the corpus
+// map already claimed the hierarchy case was validator-rejected, which it was
+// not.  M-T6.29 made that claim true with a real gate; this slice DRAINS the
+// boundary instead: the fragment is ordinary SQL, and the only thing missing
+// was the `@__cu_*` binding for the claims living inside the sentinel's
+// decision (`collectFilterPrincipalRefs` did not descend into the node).
+// Detailed pins: `test/generator/dotnet/dapper-deep-scope.test.ts`.
 // ---------------------------------------------------------------------------
 describe("dapper — authz-filter sentinels", () => {
   const hierarchical = `
@@ -1374,16 +1379,19 @@ system H {
   deployable api { platform: dotnet { persistence: dapper }  contexts: [O]  dataSources: [s]  serves: A  port: 8080  auth: required }
 }`;
 
-  it("rejects a hierarchical scope filter with loom.dapper-unsupported instead of crashing", async () => {
-    const { errors } = await emit(hierarchical);
-    expect(
-      errors.some((e) => /hierarchical \(deep\/global\) tenancy scope filter/.test(e)),
-      `expected the deep-scope boundary diagnostic, got: ${errors.join(" | ")}`,
-    ).toBe(true);
-    // The generic `loom.dapper-unsupported` tail claims every surviving reject
-    // has no relational mapping on ANY adapter — false here, efcore renders it.
-    expect(errors.some((e) => /use 'persistence: efcore' on this deployable/.test(e))).toBe(true);
-    // And it must be a DIAGNOSTIC, not the old generator throw.
-    expect(errors.some((e) => /outside the Dapper SQL subset/.test(e))).toBe(false);
+  it("renders a hierarchical scope filter — no diagnostic, no crash", async () => {
+    const { files, errors } = await emit(hierarchical);
+    expect(errors, "the deep-scope boundary is drained; nothing should reject this").toEqual([]);
+    const key = [...files.keys()].find((k) =>
+      k.endsWith("Infrastructure/Repositories/AccountRepository.cs"),
+    );
+    expect(key, "AccountRepository.cs not emitted").toBeDefined();
+    const repo = files.get(key!)!;
+    // The descendant-or-self fragment, with both principal params BOUND (the
+    // half the compile tiers cannot see — see dapper-deep-scope.test.ts).
+    expect(repo).toContain("starts_with(data_key, @__cu_orgPath || '.')");
+    expect(repo).toContain("__cu_orgPath = RequestContext.Current!.CurrentUser!.OrgPath");
+    // And it must not be the old generator throw either.
+    expect(repo).not.toContain("outside the Dapper SQL subset");
   });
 });

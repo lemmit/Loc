@@ -159,8 +159,14 @@ const REGISTERED: Ratchet[] = [
     // kinds here rather than losing the find gate and the folded-projection
     // gate as per-fixture collateral.
     //
-    // 1 = `tenancy-hierarchy`, the one boundary left with a real witness.
-    max: 1,
+    // 1 -> 0.  `tenancy-hierarchy` was the last entry, and its rationale did not
+    // survive contact: the `deep`/`global` sentinel is SQL-expressible — what
+    // the adapter lacked was the `@__cu_*` PARAM BINDING, because
+    // `collectFilterPrincipalRefs` never descended into the `authz-filter`
+    // node.  Both halves landed together, the `loom.dapper-unsupported#deep-scope`
+    // gate (and its catalog message) are gone, and this register is EMPTY: the
+    // Dapper adapter now refuses nothing the corpus declares.
+    max: 0,
   },
   // Primitives exempt from the pack testid contract.
   {
