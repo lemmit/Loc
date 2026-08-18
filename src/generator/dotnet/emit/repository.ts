@@ -431,6 +431,17 @@ export function renderRepositoryImpl(
       ...versionGuardLines,
       ...saveDiffSyncLines,
       ...provFlushLines,
+      // Transactional outbox (dispatch-delivery-semantics.md §1): the pending
+      // events are drained and the DURABLE ones staged on the SAME change
+      // tracker BEFORE the single SaveChangesAsync below, so their
+      // __loom_outbox rows land in the same round trip — and therefore the same
+      // implicit transaction — as the aggregate write.  Previously the outbox
+      // insert ran from DispatchAsync AFTER the commit, on a second
+      // SaveChangesAsync: a crash in between silently lost an owed event.
+      // `__deferred` is what still needs dispatching post-commit (everything,
+      // when no durable channel is wired — the inline at-most-once path).
+      "        var __pending = aggregate.PullEvents();",
+      "        var __deferred = await _events.RecordDurableAsync(__pending, null, cancellationToken);",
       // tx_* (trace) — emitted ONLY under --trace.  EF's SaveChangesAsync
       // runs an implicit transaction; the trio (begin/commit/rollback)
       // brackets it so an operator can correlate a failed save with
@@ -476,7 +487,7 @@ export function renderRepositoryImpl(
               { name: "id", valueExpr: "aggregate.Id.Value" },
             ])}`,
           ]),
-      "        foreach (var ev in aggregate.PullEvents())",
+      "        foreach (var ev in __deferred)",
       "        {",
       // event_dispatched (info) per drained event.  `ev.GetType().Name`
       // gives the concrete DomainEvent subclass name — same identity

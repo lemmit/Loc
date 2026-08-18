@@ -1656,10 +1656,20 @@ export function renderDapperRepository(
       ...containSaveLines,
       ...provFlushLines,
       ...auditFlushLines,
+      // Transactional outbox (dispatch-delivery-semantics.md §1): the durable
+      // events' __loom_outbox rows are INSERTed on `__tx` — the same
+      // transaction the write set rides — so the commit below records them
+      // atomically with the state change.  Before this the outbox insert ran
+      // from DispatchAsync AFTER the commit, on its own pooled connection: a
+      // crash in between silently lost an owed event.  `__deferred` is what
+      // still needs dispatching post-commit (everything, when no durable
+      // channel is wired).
+      "        var __pending = aggregate.PullEvents();",
+      "        var __deferred = await _events.RecordDurableAsync(__pending, __tx, cancellationToken);",
       // Commit the write set atomically before events fire — a rolled-back save
       // (concurrency conflict throw, mid-replace crash) must not dispatch events.
       "        await __tx.CommitAsync(cancellationToken);",
-      "        foreach (var ev in aggregate.PullEvents())",
+      "        foreach (var ev in __deferred)",
       "        {",
       "            await _events.DispatchAsync(ev, cancellationToken);",
       "        }",

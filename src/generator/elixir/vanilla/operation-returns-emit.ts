@@ -32,7 +32,11 @@ import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixDomainOperation, renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import { type SourceMapSubRegion, statementSubRegions } from "../../_trace/sourcemap.js";
 import { MONEY_WIRE_SCALE } from "../../money-scale.js";
-import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js";
+import {
+  type ElixirChannelsCfg,
+  elixirDispatchCall,
+  opEmitsDurableEvent,
+} from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
@@ -532,12 +536,17 @@ export function renderReturningOpFunction(
   // body ending in a non-committing return) keeps the legacy inline emit.
   const hoistEmits = opEmitsEvent(op) && persists;
   const hasDispatcher = contextHasDispatcher(ctx as EnrichedBoundedContextIR, extraChannels);
+  // Transactional outbox (dispatch-delivery-semantics.md §1): a DURABLE emit is
+  // an `__loom_outbox` INSERT, not a fan-out, so it has to ride the SAME
+  // `Repo.transaction` as the persist — see the `txWrapEmits` tail below.  The
+  // dispatch lines then sit two columns deeper.
+  const txWrapEmits = hoistEmits && opEmitsDurableEvent(op, channels);
   const dispatchLines = hoistEmits
     ? renderEmitDispatchLines(
         op,
         renderCtx,
         hasDispatcher,
-        "        ",
+        txWrapEmits ? "          " : "        ",
         `${ctx.name}.${agg.name}.${op.name}`,
         opFragments,
         channels,
@@ -657,6 +666,26 @@ export function renderReturningOpFunction(
   const shapeCReturn = (): string =>
     renderReturningStmt(trailingReturn!, ctx, renderCtx, lastIdx).trimStart();
 
+  // Derived rows that must commit with the state change (provenance flush /
+  // audit record) — hoisted out of the prov/audit branch so the durable-outbox
+  // branch below can reuse the same transaction tail.
+  const txTail: string[] = [];
+  if (hasProv) txTail.push(`          ${appModule}.Provenance.flush(${appModule}.Repo)`);
+  if (hasAudit) {
+    txTail.push(
+      auditRecordCall({
+        appModule,
+        operationId: `${op.name}${aggPascal}`,
+        action: op.name,
+        targetType: aggPascal,
+        targetId: "saved.id",
+        before: "audit_before",
+        after: wireSnapshot("saved"),
+        indent: "          ",
+      }),
+    );
+  }
+
   let tailLines: string[];
   if (!persists) {
     // Non-committing: a pure read/return (or one ending in an unconditional ERROR
@@ -664,28 +693,49 @@ export function renderReturningOpFunction(
     // projection; an explicit `return` is rendered inline in `bodyLines`.
     // Byte-identical to pre-S12 for these shapes.
     tailLines = fallThrough ? [`    {:ok, ${wireMap("record", false)}}`] : [];
+  } else if (txWrapEmits) {
+    // Durable emit (dispatch-delivery-semantics.md §1): `Channels.dispatch/2`
+    // INSERTs an `__loom_outbox` row instead of fanning out, so persist + emit
+    // (+ any prov/audit rows) run in ONE `Repo.transaction` — commit records
+    // "this event is owed", rollback erases both.  The result is unwrapped
+    // post-commit so the returned tuple shape is unchanged.
+    const txBody = [
+      `    tx_result =`,
+      `      ${appModule}.Repo.transaction(fn ->`,
+      `      case ${repoMod}.persist_change(changeset) do`,
+      `        {:ok, saved} ->`,
+      ...txTail,
+      ...dispatchLines,
+      `          saved`,
+      ``,
+      `        {:error, reason} ->`,
+      `          ${appModule}.Repo.rollback(reason)`,
+      `      end`,
+      `    end)`,
+      ``,
+    ];
+    tailLines = [
+      `    changeset =`,
+      `      record`,
+      `      |> Ecto.Changeset.change(%{})${putBlock}${versionLock}`,
+      ``,
+      ...txBody,
+      `    case tx_result do`,
+      `      {:ok, saved} ->`,
+      ...(aggregateSuccess
+        ? [`        {:ok, ${wireMap("saved", mutatesRefColl)}}`]
+        : [`        record = saved`, `        ${shapeCReturn()}`]),
+      ``,
+      `      {:error, reason} ->`,
+      `        {:error, reason}`,
+      `    end`,
+    ];
   } else if (hasProv || hasAudit) {
     // Forced transaction: persist the assigned columns, flush provenance and/or
     // record the audit row — all in ONE transaction so the derived rows commit
     // atomically with the state change.  A persist failure rolls back to
     // `{:error, changeset}` (the controller's `_result/2` gains a matching
     // validation clause).
-    const txTail: string[] = [];
-    if (hasProv) txTail.push(`          ${appModule}.Provenance.flush(${appModule}.Repo)`);
-    if (hasAudit) {
-      txTail.push(
-        auditRecordCall({
-          appModule,
-          operationId: `${op.name}${aggPascal}`,
-          action: op.name,
-          targetType: aggPascal,
-          targetId: "saved.id",
-          before: "audit_before",
-          after: wireSnapshot("saved"),
-          indent: "          ",
-        }),
-      );
-    }
     tailLines = aggregateSuccess
       ? hoistEmits
         ? [

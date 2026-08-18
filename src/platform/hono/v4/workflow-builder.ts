@@ -1199,6 +1199,24 @@ function emitOutboxMachinery(durable: ReadonlySet<string>, usingMikro = false): 
   out.push(`      }`);
   out.push(`      await inner.dispatch(event);`);
   out.push(`    },`);
+  // The TRANSACTIONAL capture seam (design §1): the repository calls this from
+  // inside its save transaction and hands over that transaction's handle, so
+  // the outbox row is written by the same tx that writes the aggregate rows —
+  // commit records "this event is owed", rollback erases both.  The `dispatch`
+  // arm above stays as the non-transactional fallback (relay re-entry, timer /
+  // workflow emits that have no enclosing write tx).
+  out.push(
+    `    async recordDurable(events: readonly Events.DomainEvent[], tx: unknown): Promise<Events.DomainEvent[]> {`,
+  );
+  out.push(`      const durable = events.filter((e) => DURABLE_EVENT_TYPES.has(e.type));`);
+  out.push(`      if (durable.length > 0) {`);
+  out.push(`        const txDb = tx as NodePgDatabase<typeof schema>;`);
+  out.push(
+    `        await txDb.insert(schema.loomOutbox).values(durable.map((event) => ({ type: event.type, payload: event })));`,
+  );
+  out.push(`      }`);
+  out.push(`      return events.filter((e) => !DURABLE_EVENT_TYPES.has(e.type));`);
+  out.push(`    },`);
   out.push(`  };`);
   out.push(`}`);
   out.push(``);

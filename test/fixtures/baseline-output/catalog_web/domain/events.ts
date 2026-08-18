@@ -9,6 +9,16 @@ export type DomainEvent = never;
  */
 export interface DomainEventDispatcher {
   dispatch(event: DomainEvent): Promise<void>;
+  /**
+   * Transactional-outbox capture (dispatch-delivery-semantics.md §1).
+   * Called by a repository from INSIDE its save transaction, with that
+   * transaction's handle, so a durable event's outbox row commits
+   * atomically with the aggregate write.  Returns the events that still
+   * need in-process dispatch after the commit.  Optional: a dispatcher
+   * without a durable tier omits it and every event is dispatched
+   * post-commit (the at-most-once inline path).
+   */
+  recordDurable?(events: readonly DomainEvent[], tx: unknown): Promise<DomainEvent[]>;
 }
 
 export const NoopDomainEventDispatcher: DomainEventDispatcher = {

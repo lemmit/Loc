@@ -281,12 +281,21 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
     ? {
         appModule,
         brokerEvents: new Set(channelBindings.flatMap((b) => b.events)),
+        // The broker tee's `@durable_routing` set — the events whose dispatch
+        // is an outbox INSERT (design §5), so the emit site must open a
+        // transaction around persist + emit.
+        durableEvents: durableBrokerEvents,
         foreignEventModules: eventOwnerModule,
       }
     : standaloneOutbox
       ? // Route the emit seams through the standalone `<App>.Channels` tee (no
         // broker widening / foreign structs — every durable event is hosted).
-        { appModule, brokerEvents: new Set(), foreignEventModules: new Map() }
+        {
+          appModule,
+          brokerEvents: new Set(),
+          durableEvents: hostedDurable,
+          foreignEventModules: new Map(),
+        }
       : undefined;
 
   // Per-context emit: schema, changeset, repository, context module,
