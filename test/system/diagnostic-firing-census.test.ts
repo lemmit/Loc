@@ -231,6 +231,30 @@ system S {
   deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
   deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
 }`,
+
+  // --- backend-capability gates, driven by their UNHOSTED arm --------------
+  // These three read as "your backend can't do this", and the census read them
+  // as undrivable because every backend family IS in their capability set.
+  // But each carries a second arm their siblings don't: `!anyBackend` — no
+  // db-owning deployable hosts the context at all — and that arm is one
+  // deployable-less system away.  It is the arm that matters, too: it is what
+  // stops an event-sourced / provenanced / audited declaration from being
+  // written, parsed, and then hosted by nothing that could honour it.
+  "loom.event-sourcing-backend-unsupported":
+    repoOnly(`    event Opened { account: Account id, owner: string }
+    aggregate Account persistedAs: eventLog {
+      owner: string
+      create open(owner: string) { emit Opened { account: id, owner: owner } }
+      apply(e: Opened) { owner := e.owner }
+    }
+    repository Accounts for Account { }`),
+  "loom.provenanced-backend-unsupported": repoOnly(`    aggregate Order with crudish {
+      total: int provenanced
+    }`),
+  "loom.audited-backend-unsupported": repoOnly(`    aggregate Order with crudish {
+      code: string
+      operation dispatch() audited { code := "x" }
+    }`),
 };
 
 /**
@@ -240,7 +264,46 @@ system S {
  * in UNCOVERED.  Each entry must say what preempts the arm, so the next reader
  * can re-test the claim instead of inheriting it.
  */
-const UNREACHABLE_PINS: Record<string, string> = {};
+const UNREACHABLE_PINS: Record<string, string> = {
+  // The four below share ONE structure, and it is worth naming once: each gate
+  // filters the platforms hosting a context against a SUPPORTED set, and
+  // returns/skips when nothing is left over.  The hosting platforms come from
+  // `backendPlatformsHostingEachContext` (system-checks.ts), which admits only
+  // deployables whose descriptor has `needsDb: true` — exactly
+  // {node, dotnet, elixir, python, java} in `PLATFORM_DESCRIPTORS`
+  // (src/platform/metadata.ts), and always the bareword FAMILY, since
+  // `qualifyPlatform` strips a `family@version` pin before the IR stores it.
+  // So when a gate's supported set literal already lists all five families, the
+  // difference is empty for every parseable source and the arm cannot be
+  // reached.  Each pin below names the literal to re-test against: widen the
+  // platform roster (a sixth backend family) or narrow one of these sets, and
+  // the pin stops being true — which is the re-test the next reader is owed.
+  "loom.projection-query-time-unsupported":
+    "`PROJECTION_QT_SUPPORTED` (system-checks.ts) = {node, python, elixir, java, dotnet} — all " +
+    "five backend families, and `validateQueryTimeProjectionBackend` skips any deployable that " +
+    "is either not `platformOwnsBackend` or in that set, so no deployable can reach the push. " +
+    "It was the honest gate while the query-time read was being ported one backend at a time " +
+    "(node PR-C … dotnet PR-G); the port finished and left the arm latent.",
+  "loom.saving-shape-unsupported":
+    "`SavingShape` has exactly three members (loom-ir.ts: relational | embedded | document) and " +
+    "`PLATFORM_SAVING_SHAPES` (util/platform-axes.ts) gives every backend family all three once " +
+    "`validateSavingShapeSupport`'s elixir branch adds `document` to that family's " +
+    "{relational, embedded} — so `supported.includes(shape)` holds for every (family, shape) " +
+    "pair.  Delete the elixir widening, or add a fourth shape, and this fires again.",
+  "loom.union-unsupported":
+    "`SUPPORTED_UNION_BACKENDS` (structural-checks.ts, `validateUnionsUnimplemented`) = " +
+    "{node, dotnet, elixir, python, java} — all five families — and the function returns early " +
+    "on an empty `unsupported`, with no `no backend at all` arm (unlike its event-sourcing / " +
+    "audited / provenanced siblings, which DO fire on an unhosted context and are therefore " +
+    "driven by real fixtures above).  The staged rollout it gated (P4b hono, P4c dotnet, P4d " +
+    "phoenix) is complete.",
+  "loom.when-unsupported":
+    "`SUPPORTED_WHEN_BACKENDS` (structural-checks.ts, `validateWhenGateSupport`) = " +
+    "{node, dotnet, python, elixir, java} — all five families — and the function returns early " +
+    "on an empty `unsupported`.  Its own doc comment already calls the guard `latent`, kept as " +
+    "the safety net for a future backend that lands before its `when` emitter; this pin records " +
+    "that the net currently catches nothing.",
+};
 
 const catalogueCodes = (): string[] => [
   ...new Set(
@@ -251,8 +314,17 @@ const catalogueCodes = (): string[] => [
 ];
 
 /** UNCOVERED's size on 2026-08-13, the day the census was taken.  Shrink-only:
- *  lowering it is the drain; raising it is what this number exists to stop. */
-const UNCOVERED_BASELINE = 38;
+ *  lowering it is the drain; raising it is what this number exists to stop.
+ *
+ *  38 -> 31: four codes moved to UNREACHABLE_PINS (their capability-set literal
+ *  already lists every backend family, so the arm cannot be reached), and three
+ *  — event-sourcing / provenanced / audited backend-unsupported — turned out to
+ *  be drivable after all, through the `no db-owning deployable hosts this
+ *  context` arm their pinned siblings lack.  That split is the point: "every
+ *  backend supports it" is a reason to pin only when the gate has NO second
+ *  arm, and reading for the second arm is what separates a real pin from a
+ *  TODO. */
+const UNCOVERED_BASELINE = 31;
 
 describe("diagnostic firing census", () => {
   describe("every catalogued code is in exactly one bucket", () => {

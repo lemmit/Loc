@@ -28,14 +28,18 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-type Kind = "set" | "record";
+type Kind = "set" | "record" | "nested-record";
 
 interface Ratchet {
   /** Repo-relative file the allowlist lives in. */
   file: string;
   /** The `const NAME` the construct is bound to. */
   name: string;
-  /** `set` → `new Set([...])` of string entries; `record` → `{ key: … }` map. */
+  /** `set` → `new Set([...])` of string entries; `record` → `{ key: … }` map;
+   *  `nested-record` → `{ group: { key: … } }`, counted at the LEAF level.
+   *  The nested kind exists because counting a two-level register's top level
+   *  pins the number of GROUPS (platform clauses), not suppressions — a
+   *  ratchet that would sit still while the thing it guards tripled. */
   kind: Kind;
   /** Max entries allowed.  Lower it when you drain; raising it is a reviewed
    *  decision.  Every entry in the list must cite an open tracker. */
@@ -103,11 +107,22 @@ const REGISTERED: Ratchet[] = [
   // controller's raw-Npgsql port was the precedent they needed.  That port is
   // written: the four direct-table arms read through `NpgsqlDataSource` now, so
   // this map is DRAINED, not reclassified.
+  //
+  // 0 -> 1, and the raise is the reviewed line this ratchet asks for.
+  // `policy-document` joined the manifest's `dotnet` row (the EF document
+  // repository's capability filter + write-scope member landed), which enrolled
+  // it in THIS leg for the first time — and it found two more EF leaks in the
+  // Dapper adapter, of exactly the class the 2 -> 0 drain above closed:
+  // `EfOrgPathResolver.cs` is emitted whatever the adapter (CS0234/CS0246) and
+  // the Dapper document repository never got the EF twin's
+  // `GetByIdForWriteAsync` (CS0535).  So the count goes up while the repo's
+  // knowledge does too: the defects predate the entry, and were invisible
+  // because no dapper fixture had a `tenantRegistry` the compiler ever saw.
   {
     file: "test/e2e/corpus-dotnet-dapper-build.test.ts",
     name: "DAPPER_COMPILE_SKIP",
     kind: "record",
-    max: 0,
+    max: 1,
   },
   // Capability boundaries the validator states honestly (`loom.dapper-unsupported`),
   // not gaps — these never reach the compiler.  1 -> 5: the reclassification
@@ -158,11 +173,16 @@ const REGISTERED: Ratchet[] = [
   // what preempts it.  The census gate carries its own anti-slack check; this
   // registration is what makes the number visible from the one place that
   // lists every ratchet in the repo.
+  //
+  // 38 -> 31: four capability gates pinned UNREACHABLE (their supported-set
+  // literal already names every backend family, and they have no second arm),
+  // three driven by real fixtures through the `no db-owning deployable hosts
+  // this context` arm the pinned four lack.
   {
     file: "test/system/diagnostic-firing-census.data.ts",
     name: "UNCOVERED",
     kind: "set",
-    max: 38,
+    max: 31,
   },
   // The MikroORM behavioural leg's skip register.  It was NOT registered here
   // until `projection-join` (a query-time projection the adapter refuses) had to
@@ -196,17 +216,51 @@ const REGISTERED: Ratchet[] = [
     kind: "record",
     max: 2,
   },
+  // The behavioural tier's OWN per-(platform, case) skip register — the sibling
+  // of MIKRO_SKIP above, and unregistered for exactly as long.  It suppresses a
+  // whole case on a whole backend leg, which is the single heaviest suppression
+  // in the repo (a skipped case loses its CRUD round-trip, its RS-rule
+  // assertions AND its wire-golden comparison on that leg), and nothing bounded
+  // its size: the dapper cell alone had grown to three entries.
+  //
+  // 4 -> 1 in this PR.  The three `dotnet { persistence: dapper }` entries all
+  // asserted ONE boundary — "dapper emits no query-time projection reads" — and
+  // M-T6.25 removed it; the adapter's own oracle
+  // (`corpus-dotnet-dapper-build.test.ts`, `DAPPER_UNSUPPORTED`) had already
+  // ratcheted down to `tenancy-hierarchy` while these three stayed.  That
+  // divergence is what this registration exists to make visible.
+  //
+  // 1 = elixir/`seed-values` (B19 — the backend emits no seeder; M-T6.37 owns
+  // the drain, in flight as #2594).
+  //
+  // NOTE, as with MIKRO_SKIP: it lives in a `.mjs` runner, not a vitest file.
+  { file: "test/behavioral/cases.mjs", name: "BEHAVIOURAL_SKIP", kind: "nested-record", max: 1 },
+  // The Elixir corpus compile tier's skip map — the fifth leg of the per-backend
+  // set registered above (java / python / dotnet / tsc), left out only because
+  // it lives in its own workflow (`corpus-elixir-build.yml`, split off for the
+  // docker image + hex egress).  Empty today; registered so it cannot grow
+  // unwatched the way the four siblings cannot.
+  {
+    file: "test/e2e/corpus-elixir-build.test.ts",
+    name: "ELIXIR_COMPILE_SKIP",
+    kind: "record",
+    max: 0,
+  },
 ];
 
 /** Extract the balanced `[...]` (set) or `{...}` (record) literal bound to
- *  `const NAME`, and count its TOP-LEVEL entries — string-comment aware so a
- *  `:` or quote inside a comment/nested value never inflates the count.
+ *  `const NAME`, and count its entries — string-comment aware so a `:` or quote
+ *  inside a comment/nested value never inflates the count.  `set`/`record` count
+ *  the TOP level (depth 1); `nested-record` counts one level in (depth 2), i.e.
+ *  the leaves of a `{ group: { key: reason } }` register.
  *  Returns the entry count. */
 function countEntries(src: string, name: string, kind: Kind): number {
   const anchor = new RegExp(`\\bconst\\s+${name}\\b`).exec(src);
   if (!anchor) throw new Error(`allowlist '${name}' not found — did it move/rename?`);
   const opener = kind === "set" ? "[" : "{";
   const closer = kind === "set" ? "]" : "}";
+  /** The bracket depth an entry marker counts at. */
+  const entryDepth = kind === "nested-record" ? 2 : 1;
   // Seek the opener of the ASSIGNED VALUE, past the `=` — so an inline TYPE
   // annotation like `Record<string, { spec; why }[]>` (which contains its own
   // `{`) is skipped and we count the literal, not the type.
@@ -216,9 +270,8 @@ function countEntries(src: string, name: string, kind: Kind): number {
   if (i < 0) throw new Error(`opener '${opener}' for '${name}' not found`);
 
   // Walk the balanced region, tracking bracket depth while skipping over
-  // string / template / line- / block-comment spans.  At depth 1 (directly
-  // inside the outer literal) count entry markers: a string-literal start for a
-  // set, a `:` for a record key.
+  // string / template / line- / block-comment spans.  At `entryDepth` count
+  // entry markers: a string-literal start for a set, a `:` for a record key.
   let depth = 0;
   let count = 0;
   let sawEntryOnThisDepth1Slot = false;
@@ -235,8 +288,8 @@ function countEntries(src: string, name: string, kind: Kind): number {
       continue;
     }
     if (c === '"' || c === "'" || c === "`") {
-      // count a string literal as a set entry when it opens at depth 1
-      if (kind === "set" && depth === 1 && !sawEntryOnThisDepth1Slot) {
+      // count a string literal as a set entry when it opens at the entry depth
+      if (kind === "set" && depth === entryDepth && !sawEntryOnThisDepth1Slot) {
         count++;
         sawEntryOnThisDepth1Slot = true;
       }
@@ -257,8 +310,8 @@ function countEntries(src: string, name: string, kind: Kind): number {
       if (depth === 0) break; // closed the outer literal
       continue;
     }
-    if (depth === 1) {
-      if (kind === "record" && c === ":") count++;
+    if (depth === entryDepth) {
+      if ((kind === "record" || kind === "nested-record") && c === ":") count++;
       if (c === ",") sawEntryOnThisDepth1Slot = false; // next slot
     }
   }
