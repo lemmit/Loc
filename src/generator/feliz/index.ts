@@ -103,6 +103,7 @@ import {
   opHasForm,
   renderApiModule,
   renderAsyncOutcomeTypes,
+  renderAuditEntryType,
   renderEncoders,
   renderFileRefType,
   renderFormTypes,
@@ -1038,6 +1039,10 @@ function renderAppFs(
   }
   const hasReads = reads.length > 0;
   const hasPagedRead = reads.some((r) => r.paging);
+  // An entity-history read (docs/audit.md) decodes the fixed `AuditEntry`
+  // records — their type + decoders must ship ahead of the Model
+  // (`Remote<AuditEntry list>`) and the Api fn that reference them.
+  const hasHistoryRead = reads.some((r) => r.history);
   const hasForms = formRecords.length > 0;
   // Standalone `FileUpload(bind:)` fields across the ui — each drives an upload
   // Cmd (`Api.uploadFile` → multipart POST /files) + a `FileRef` result Msg.
@@ -1346,6 +1351,10 @@ function renderAppFs(
     // decodes to it.
     hasProvWire && "",
     hasProvWire && renderProvLineageType(),
+    // AuditEntry records + decoders (entity history, docs/audit.md) — before the
+    // Model / Api that reference them (F# is order-sensitive).
+    hasHistoryRead && "",
+    hasHistoryRead && renderAuditEntryType(),
     // Wire layer — domain records + decoders when there are reads OR async
     // effects; the `Remote` envelope is reads-only (async effects don't use it).
     hasWire && "",
