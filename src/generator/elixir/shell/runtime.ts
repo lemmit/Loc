@@ -19,6 +19,20 @@ export function renderApplication(
   // the backend does not accept traffic until it can verify tokens, matching
   // the other backends' fetch-on-first-verify.  Empty ⇒ byte-identical.
   preEndpointChildren: string[] = [],
+  // First-boot seed modules (`<App>.<Ctx>.Seeds`, database-seeding.md /
+  // M-T6.37) — supervision children spliced AFTER the Repo they query and
+  // BEFORE the Endpoint, so the rows are committed before the node accepts its
+  // first connection.  (Each `start_link` returns `:ignore`; the child slot
+  // buys the ORDERING, not a process.  Calling `run()` after
+  // `Supervisor.start_link/2` returns instead leaves a real window in which the
+  // Endpoint is listening over an unseeded table — measured on a live boot.)
+  // This is the elixir twin of the Hono entrypoint's post-migrate
+  // `runSeeds(db)` and java's `<Ctx>SeedRunner`: it runs on `mix phx.server`
+  // AND on the release (`bin/server` migrates, then starts), where a
+  // `priv/repo/seeds.exs` script would never be executed at all.  Ship-once per
+  // dataset via the `__loom_seed` marker, so re-boots are no-ops.
+  // Empty ⇒ byte-identical.
+  seedModules: readonly string[] = [],
 ): string {
   // Catalog server-lifecycle events.  Same identities Hono + .NET
   // emit so a cross-backend dashboard pivots on one event name.
@@ -57,7 +71,7 @@ defmodule ${appModule}.Application do
     children = [
       ${appModule}.Repo,
       {Phoenix.PubSub, name: ${appModule}.PubSub},
-      ${appModule}.Telemetry${preEndpointChildren.map((c) => `,\n      ${c}`).join("")},
+      ${appModule}.Telemetry${[...seedModules, ...preEndpointChildren].map((c) => `,\n      ${c}`).join("")},
       ${appModule}Web.Endpoint${schedulerChildren.map((c) => `,\n      ${c}`).join("")}
     ]
 

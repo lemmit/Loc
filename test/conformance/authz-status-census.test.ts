@@ -323,50 +323,55 @@ describe("M-T9.25 round 2, probe 2 — the 401 arm is a problem document on ALL 
   }
 });
 
-/** The 403 DETAIL on a declared-find `requires` gate.  node is the outlier: it
- *  hardcodes a bare "Forbidden" where the other four thread the find name into
- *  "Forbidden: find openOnes".  Pinned as (the outlier body) + (the consensus the
- *  other four share) so the ratchet fails the moment EITHER side moves. */
-const FIND_DETAIL: Record<Platform, { file: string; detail: string }> = {
-  node: { file: "http/item.routes.ts", detail: 'throw new ForbiddenError("Forbidden");' },
+/** The 403 DETAIL on a declared-find `requires` gate.  Since #2541 this AGREES
+ *  five-way — every backend threads the find name into "Forbidden: find
+ *  openOnes".  node used to be the lone outlier (a bare "Forbidden" on its read
+ *  gates while its OPERATION gates were already descriptive); #2541 made node's
+ *  read-side gates carry the source label like the other four, retiring the
+ *  ratchet this block used to hold.  Anchored on the full literal so it cannot
+ *  slide onto the OPERATION guard's string, mirroring OP_DETAIL. */
+const FIND_DETAIL: Record<Platform, { file: string; at: RegExp }> = {
+  node: {
+    file: "http/item.routes.ts",
+    at: /ForbiddenError\("(Forbidden: find openOnes)"\)/,
+  },
   python: {
     file: "http/item_routes.py",
-    detail: 'raise ForbiddenError("Forbidden: find openOnes")',
+    at: /ForbiddenError\("(Forbidden: find openOnes)"\)/,
   },
   dotnet: {
     file: "Queries/OpenOnesHandler.cs",
-    detail: 'throw new ForbiddenException("Forbidden: find openOnes");',
+    at: /ForbiddenException\("(Forbidden: find openOnes)"\)/,
   },
   java: {
     file: "items/ItemsController.java",
-    detail: 'throw new ForbiddenException("Forbidden: find openOnes");',
+    at: /ForbiddenException\("(Forbidden: find openOnes)"\)/,
   },
   elixir: {
     file: "controllers/item_controller.ex",
-    detail: 'problem_response(conn, 403, "Forbidden", "Forbidden: find openOnes")',
+    at: /"Forbidden", "(Forbidden: find openOnes)"/,
   },
 };
 
-describe("M-T9.25 round 2, probe 2 — the find-guard 403 detail: node is the outlier (ratchet)", () => {
-  it("node's declared-find `requires` gate STILL emits a bare `Forbidden`", async () => {
-    const src = await fileOf("node", FIND_DETAIL.node.file);
-    expect(
-      src,
-      "node's find-guard detail changed.  If it now threads the find name (matching the other four), " +
-        "delete this waiver and assert the find-guard detail agrees five-way like OP_DETAIL does.",
-    ).toContain(FIND_DETAIL.node.detail);
-  });
-
-  it("the other four agree on the descriptive `Forbidden: find openOnes` detail node diverges from", async () => {
-    const got = await Promise.all(
-      (["python", "dotnet", "java", "elixir"] as const).map(async (p) => {
-        const src = await fileOf(p, FIND_DETAIL[p].file);
-        return [p, src.includes(FIND_DETAIL[p].detail)] as const;
+describe("M-T9.25 round 2, probe 2 — the find-guard 403 detail agrees five-way (#2541)", () => {
+  it("cross-backend: the declared-find `requires` 403 detail is byte-identical on all five", async () => {
+    const details = await Promise.all(
+      PLATFORMS.map(async (p) => {
+        const spec = FIND_DETAIL[p];
+        const m = spec.at.exec(await fileOf(p, spec.file));
+        return [p, m ? m[1] : "<no find-gate detail found>"] as const;
       }),
     );
+    const expected = "Forbidden: find openOnes";
     expect(
-      Object.fromEntries(got),
-      "the descriptive find-guard consensus moved — re-census node against the new majority",
-    ).toEqual({ python: true, dotnet: true, java: true, elixir: true });
+      Object.fromEntries(details),
+      "a declared-find `requires` gate's 403 detail diverged — it threads the find name on every backend since #2541",
+    ).toEqual({
+      node: expected,
+      dotnet: expected,
+      java: expected,
+      python: expected,
+      elixir: expected,
+    });
   });
 });

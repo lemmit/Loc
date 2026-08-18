@@ -43,12 +43,14 @@ export interface RequiredSet {
    *  (entry point, package config, theme tokens, build config).
    *  Shared between formats. */
   shell: readonly string[];
-  /** Form-field templates per FieldIR type.  TSX only — LiveView's
-   *  `AshPhoenix.Form` generates inputs from the Ash resource at
-   *  compile time, so no Loom-side templates participate. */
+  /** Form-field templates per FieldIR type.  Not used by HEEx: the Ash
+   *  foundation (and its `AshPhoenix.Form`) was removed, and plain
+   *  Ecto/Phoenix renders inputs through the pack's `core-components`
+   *  shell template instead, so no per-field Loom-side templates
+   *  participate on that format. */
   fieldInput?: readonly string[];
-  /** Form-level templates (form-of-decls, op-decls, etc.).  TSX only,
-   *  same reason as `fieldInput`. */
+  /** Form-level templates (form-of-decls, op-decls, etc.).  Not used by
+   *  HEEx, same reason as `fieldInput`. */
   form?: readonly string[];
 }
 
@@ -122,10 +124,14 @@ const SHARED_PRIMITIVES: readonly string[] = [
 const TSX_ONLY_PRIMITIVES: readonly string[] = [
   "primitive-code-block",
   // The standalone `FileUpload { bind: … }` input.  Required on every
-  // JSX-family format (tsx / svelte / vue / angular — each spreads this list);
-  // HEEx is exempt (no HEEx renderer — `KNOWN_HEEX_GAPS.FileUpload` in
-  // heex-parity.test.ts pins the gap, and heex's required set is
-  // `SHARED_PRIMITIVES` only, so it never demands this template).
+  // JSX-family format (tsx / svelte / vue / angular — each spreads this list).
+  // HEEx is exempt for a TEMPLATE reason, NOT a rendering gap: `FileUpload`
+  // HAS a HEEx renderer (`renderFileUploadHeex`, wired in
+  // `_walker/registry.ts`, using LiveView's native
+  // `allow_upload`/`<.live_file_input>` flow), and `KNOWN_HEEX_GAPS` in
+  // heex-parity.test.ts no longer lists it — `DataGrid` is the sole entry.
+  // It is exempt because heex's required set is `SHARED_PRIMITIVES` only:
+  // HEEx packs own no call-site primitive templates at all.
   "primitive-file-upload",
   "primitive-icon",
   "primitive-modal",
@@ -234,16 +240,34 @@ const TSX_FORM: readonly string[] = [
 const DATA_GRID_PRIMITIVES: readonly string[] = ["primitive-data-grid"];
 
 // `Chart` — the line/bar chart over a grouped projection's LIST response
-// (M-T1.3 Phase 4).  TSX ONLY, and deliberately narrower than
-// `DATA_GRID_PRIMITIVES`: each pack binds its own charting library
+// (M-T1.3 Phase 4).  Required of the TSX packs ONLY, and that is a statement
+// about WHERE THE TEMPLATE LIVES, not about which frameworks can draw a chart.
+//
+// tsx is per-PACK because each tsx pack binds its own charting library
 // (`@mantine/charts`, `@mui/x-charts`, recharts for shadcn/chakra) as a
-// conditional dependency, and only the eight tsx packs have one.  Vue, Svelte
-// and Angular packs ship no chart template — their libraries were sketched in
-// the mission but not chosen — and Feliz/Flutter/HEEx have no JSX chart at all,
-// so every one of those stays an honest `loom.chart-unsupported-target` gap
-// rather than a blank page region.  Adding it to another format's `core` means
-// backfilling EVERY pack of that format first; the gate is what makes the
-// interim state honest.
+// conditional dependency — eight packs, eight different components, so each
+// must declare its own `primitive-chart`.
+//
+// Vue / Svelte / Angular need no per-pack entry because ONE shared template
+// serves every pack of the format: `vue/primitive-chart.hbs`,
+// `sveltekit/primitive-chart.hbs`, `angular/primitive-chart.hbs`.  `loader.ts`
+// merges the repo-root shared layers into the same template map a pack renders
+// from, so `pack.render("primitive-chart")` resolves on vuetify / shadcnVue /
+// flowbite / shadcnSvelte / angularMaterial / primeng / spartanNg with no pack
+// declaration.  Listing it in their `core` would demand a redundant per-pack
+// copy of a file that already exists.
+//
+// Feliz and Flutter render it through `renderChartData` + their PROCEDURAL
+// packs (inline SVG / a `CustomPainter`, no library); HEEx has its own
+// `renderChartHeex` (the rows are already in a server assign, so the geometry
+// is arithmetic).  Neither format has a `designs/` .hbs tree to require it in.
+//
+// So `Chart` reaches ALL SEVEN frameworks, which is why `CHART_FRAMEWORKS`
+// (`src/ir/validate/checks/system-checks.ts`) lists all seven and
+// `loom.chart-unsupported-target` no longer fires for anything that ships — it
+// is the seam a NEW frontend gates on until it ports, not a live gap.  (This
+// block used to say vue/svelte/angular "ship no chart template … so every one
+// of those stays an honest gap"; both halves were false.)
 const CHART_PRIMITIVES: readonly string[] = ["primitive-chart"];
 
 export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", RequiredSet> = {

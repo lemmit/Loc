@@ -645,11 +645,11 @@ export const angularTarget: WalkerTarget = {
     return renderJsVariantMatch(spec, mutate);
   },
 
-  // `renderStoreModule` is intentionally NOT implemented on `angularTarget`:
-  // like React (which emits its Zustand module directly in `react/index.ts`),
-  // the Angular orchestrator (`angular/index.ts`) emits each store's
-  // `@Injectable` signal service via `renderAngularStoreModule` — keeping the
-  // store-builder ↔ target dependency one-directional (the builder imports the
-  // target for its action-body sub-target; the target never imports the
-  // builder).
+  // The per-store MODULE is deliberately not a walker-target method here (or
+  // on any target — `WalkerTarget` no longer declares one): like React (which
+  // emits its Zustand module directly in `react/index.ts`), the Angular
+  // orchestrator (`angular/index.ts`) emits each store's `@Injectable` signal
+  // service via `renderAngularStoreModule` — keeping the store-builder ↔
+  // target dependency one-directional (the builder imports the target for its
+  // action-body sub-target; the target never imports the builder).
 };

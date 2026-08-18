@@ -411,6 +411,18 @@ export function renderEntity(
   // `User` type resolves; per-op signatures append a `User currentUser`
   // parameter (and the Mediator handler passes _currentUser.User).
   const anyOpUsesCurrentUser = operations.some(operationBodyUsesCurrentUser);
+  // The `when` state gate (canCommand, criterion.md) rendered at the DOMAIN
+  // method entry.  The Mediator command handler emits the same check post-load
+  // so the HTTP answer (409 + problem envelope) is produced before the
+  // aggregate is touched; this line is what makes the refusal a property of the
+  // DOMAIN rather than of one transport, so a workflow step, saga cascade or
+  // extern handler calling `aggregate.<Op>()` directly refuses too (M-T6.38).
+  const whenGate = (op: (typeof operations)[number]): string | null =>
+    op.when
+      ? `        if (!(${renderCsExpr(op.when, renderCtx)})) throw new DisallowedException(${JSON.stringify(
+          `operation '${op.name}' is not allowed in the current state of ${entity.name}.`,
+        )});`
+      : null;
   for (const op of operations) {
     const usesUser = operationBodyUsesCurrentUser(op);
     // The leading `requires` gates are hoisted to the calling handler
@@ -439,6 +451,8 @@ export function renderEntity(
       const retType = op.returnType ? renderCsType(op.returnType) : "void";
       opLines.push(`    public ${retType} ${upperFirst(op.name)}(${params})`);
       opLines.push("    {");
+      const externGate = whenGate(op);
+      if (externGate) opLines.push(externGate);
       const body = renderCsStatements(opBody, renderCtx, {
         emitTrace,
         aggregate: entity.name,
@@ -471,6 +485,8 @@ export function renderEntity(
     const retType = op.returnType ? renderCsType(op.returnType) : "void";
     opLines.push(`    ${visibility} ${retType} ${upperFirst(op.name)}(${params})`);
     opLines.push("    {");
+    const gate = whenGate(op);
+    if (gate) opLines.push(gate);
     // Chunked (one string per statement) rather than the pre-joined
     // `renderCsStatements` here — `renderCsStatements` IS `chunks.join("\n")`
     // by construction, so `body` below is byte-identical either way, but the

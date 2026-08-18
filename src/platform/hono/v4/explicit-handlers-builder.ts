@@ -659,11 +659,12 @@ export function buildExplicitRoutesFile(
   );
   body.push(
     // The state-gate rung.  Ordered before `DomainError` exactly as in the
-    // aggregate router.  NOTE on reachability: the emitted `when` gate is a
-    // ROUTE-layer check (`routes-builder.ts` `whenGateLine`), so an operation
-    // invoked from a handler here does not evaluate it — this arm answers a
-    // `DisallowedError` a user-authored extern impl raises.  The gate-bypass
-    // itself is a separate defect, recorded on M-T6.28.
+    // aggregate router.  Reachability: the `when` gate is emitted at the
+    // DOMAIN-METHOD entry (`typescript/emit/aggregate.ts`) as well as at the
+    // route, so an operation invoked from a handler here DOES evaluate it and
+    // this arm answers that refusal — plus any `DisallowedError` a user-authored
+    // extern impl raises.  (Before M-T6.38 the gate was route-only, so a write
+    // driven from here landed unrefused.)
     `    if (err instanceof DisallowedError) return problem(${exDisallowedStatus}, "Disallowed", err.message);`,
   );
   body.push(

@@ -17,6 +17,7 @@ import {
   wireType,
 } from "./dto-mapping.js";
 import { dotnetNotFoundThrow } from "./emit/common.js";
+import { sqlIdent } from "./emit/dapper.js";
 import { dapperProjectionColumns } from "./emit/dapper-workflow.js";
 import {
   projectionRowClass,
@@ -280,14 +281,14 @@ function renderProjectionsController(
           cols.map((c) => `        ${c.stateProp} = ${c.hydrate},`).join("\n") +
           `\n    };`,
       );
-      const selCols = cols.map((c) => c.col).join(", ");
+      const selCols = cols.map((c) => sqlIdent(c.col)).join(", ");
       listBody =
         `        await using var conn = await _db.OpenConnectionAsync();\n` +
-        `        var rows = (await conn.QueryAsync<${rowCls}>(new CommandDefinition("SELECT ${selCols} FROM ${table}"))).Select(${mapFn});\n` +
+        `        var rows = (await conn.QueryAsync<${rowCls}>(new CommandDefinition("SELECT ${selCols} FROM ${sqlIdent(table)}"))).Select(${mapFn});\n` +
         `        return Ok(rows.Select(x => new ${T}Response(${proj_("x")})));\n`;
       byIdBody =
         `        await using var conn = await _db.OpenConnectionAsync();\n` +
-        `        var __row = await conn.QuerySingleOrDefaultAsync<${rowCls}>(new CommandDefinition("SELECT ${selCols} FROM ${table} WHERE ${pkCol} = @key", new { key }));\n` +
+        `        var __row = await conn.QuerySingleOrDefaultAsync<${rowCls}>(new CommandDefinition("SELECT ${selCols} FROM ${sqlIdent(table)} WHERE ${sqlIdent(pkCol)} = @key", new { key }));\n` +
         // M-T6.31 — raise the shared carrier instead of `NotFound()`, so the app's
         // one 404 producer (`DomainExceptionFilter`) renders the envelope.  See
         // `dotnetNotFoundThrow`.

@@ -123,6 +123,19 @@ aggregate Order {
 
 `precondition` and `requires` are body statements; `when` is on the operation header. The body order is `requires` → `precondition` → rest, so a 403 wins over a 400 when both would fail.
 
+**Where the `when` gate runs.** It is a property of the **domain method**, not of the HTTP route: every backend emits the predicate as the first line of the generated operation method, so *every* caller evaluates it — the aggregate route, a workflow step, a saga cascade, an `extern` command handler, the LiveView action seam. The route additionally checks it post-load so the 409 answer is produced before the aggregate is touched; the two checks are the same predicate and the same message.
+
+```ts
+// domain/order.ts — the gate at the domain-method entry (node)
+public cancel(): void {
+  if (!(this.status !== St.Shipped)) throw new DisallowedError("operation 'cancel' is not allowed in the current state of Order.");
+  this._status = St.Cancelled;
+  this._assertInvariants();
+}
+```
+
+`requires` is the exception to this rule and deliberately so: its leading run is *hoisted* to the calling handler (`src/ir/util/op-gates.ts`), because authorization needs a principal the domain layer does not carry.
+
 ::: tabs backend
 == dotnet
 ```csharp

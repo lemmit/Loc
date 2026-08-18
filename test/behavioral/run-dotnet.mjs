@@ -142,7 +142,7 @@ export async function run() {
   // last and off the RECORDER (see __authzLadder) so it neither shifts wire
   // ordinals nor perturbs the tier it follows.
   const authz = AUTHZ_LADDER && UNAUTHORIZED_CREDS
-    ? await __authzLadder(AUTHZ_LADDER, { authorized: __authHeaders, unauthorized: UNAUTHORIZED_CREDS })
+    ? await __authzLadder(AUTHZ_LADDER, { authorized: __authHeaders, unauthorized: UNAUTHORIZED_CREDS }, dispatch)
     : [];
   return { results, authz, wire: __wire };
 }

@@ -130,6 +130,84 @@ const API_HEADERS = (token) => ({
   "x-github-api-version": "2022-11-28",
 });
 
+/** Attempts per API call (1 try + 3 retries). */
+export const API_MAX_ATTEMPTS = 4;
+
+/**
+ * Is this response status worth trying again?
+ *
+ * github.com is not a reliable dependency at this repo's request volume: an
+ * evaluation that hit a transient `503 No server is currently available to
+ * service your request` failed the whole job (observed 2026-08-17 on the
+ * scheduled sweep, which died on PR 6 of 12 and left the rest unreconciled) —
+ * a red that says nothing about the PRs it gates.  Retrying the CALL is the
+ * fix; failing the JOB is not, because the job IS the recovery mechanism for
+ * every other check.
+ *
+ * Retryable: 5xx (server-side, always transient here), 429 (secondary
+ * rate-limit, which GitHub explicitly asks callers to back off on).  NOT
+ * retryable: 4xx — a 401/403/404/422 is a real defect (bad token, missing
+ * permission, malformed body) and repeating it three times only delays the
+ * honest failure.
+ *
+ * @param {number} status
+ * @returns {boolean}
+ */
+export function isRetryableStatus(status) {
+  return status === 429 || status >= 500;
+}
+
+/**
+ * Backoff before attempt N+1: 1s, 2s, 4s.  Bounded on purpose — the whole
+ * point of v2 is that an evaluation is seconds long and never parks a runner
+ * slot, so the retry ladder tops out at ~7s of waiting, not minutes.
+ *
+ * @param {number} attempt - 1-based number of the attempt that just failed
+ * @returns {number} milliseconds to wait
+ */
+export function retryDelayMs(attempt) {
+  return 1000 * 2 ** (attempt - 1);
+}
+
+const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * `fetch` with the retry ladder above.  Returns the LAST response whatever it
+ * says — callers keep their own `res.ok` check and error message, so a
+ * non-retryable failure still throws exactly what it threw before.  A rejected
+ * fetch (DNS, reset socket) is retried on the same ladder and rethrown after
+ * the final attempt.
+ *
+ * @param {string} url
+ * @param {RequestInit} [init]
+ * @param {{fetchImpl?: typeof fetch, sleep?: (ms: number) => Promise<void>, attempts?: number, onRetry?: (msg: string) => void}} [opts]
+ * @returns {Promise<Response>}
+ */
+export async function apiFetch(url, init = {}, opts = {}) {
+  const {
+    fetchImpl = fetch,
+    sleep = sleepMs,
+    attempts = API_MAX_ATTEMPTS,
+    onRetry = (msg) => console.log(msg),
+  } = opts;
+  let lastErr;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const last = attempt === attempts;
+    try {
+      const res = await fetchImpl(url, init);
+      if (res.ok || !isRetryableStatus(res.status) || last) return res;
+      onRetry(`  pr-gate: ${res.status} from ${url} — retry ${attempt}/${attempts - 1}`);
+    } catch (err) {
+      if (last) throw err;
+      lastErr = err;
+      onRetry(`  pr-gate: ${lastErr} from ${url} — retry ${attempt}/${attempts - 1}`);
+    }
+    await sleep(retryDelayMs(attempt));
+  }
+  /* c8 ignore next -- unreachable: the loop always returns or throws on `last` */
+  throw lastErr;
+}
+
 /** Fetch every check run on `sha` (paginated).  `filter=latest` narrows to the
  *  newest attempt per name WITHIN EACH CHECK SUITE — a SHA carrying two suites
  *  still yields two runs per name, so `latestPerName` does the cross-suite
@@ -137,7 +215,7 @@ const API_HEADERS = (token) => ({
 async function fetchCheckRuns(repo, sha, token) {
   const runs = [];
   for (let page = 1; ; page += 1) {
-    const res = await fetch(
+    const res = await apiFetch(
       `https://api.github.com/repos/${repo}/commits/${sha}/check-runs?filter=latest&per_page=100&page=${page}`,
       { headers: API_HEADERS(token) },
     );
@@ -170,7 +248,7 @@ async function postCheck(repo, sha, token, v) {
       ? { status: "in_progress" }
       : { status: "completed", conclusion: v.state }),
   };
-  const res = await fetch(`https://api.github.com/repos/${repo}/check-runs`, {
+  const res = await apiFetch(`https://api.github.com/repos/${repo}/check-runs`, {
     method: "POST",
     headers: { ...API_HEADERS(token), "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -206,7 +284,7 @@ export function sweepShouldPost(current, fresh) {
 }
 
 async function fetchOpenPrHeads(repo, token) {
-  const res = await fetch(`https://api.github.com/repos/${repo}/pulls?state=open&per_page=100`, {
+  const res = await apiFetch(`https://api.github.com/repos/${repo}/pulls?state=open&per_page=100`, {
     headers: API_HEADERS(token),
   });
   if (!res.ok) throw new Error(`GitHub API ${res.status} listing open PRs: ${await res.text()}`);

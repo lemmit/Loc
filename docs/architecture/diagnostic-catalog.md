@@ -53,7 +53,7 @@ tightening rule. Document the promotion phase in the registry row.
 
 | Code | Severity | Meaning |
 |---|---|---|
-| `loom.framework-mismatch` | error | deployable platform/framework combination invalid |
+| `loom.ui-framework-unhostable` | error | the bound `ui`'s `framework:` is not in the host deployable's hostable set |
 | `loom.react-deployable-missing-ui` | error | react deployable with no `ui:` (post-#606) |
 | `loom.provenanced-never-written` | warning | `provenanced` field never assigned |
 | `loom.token-nullable` | error | nullable token field |
