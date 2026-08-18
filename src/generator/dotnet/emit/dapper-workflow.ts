@@ -537,6 +537,51 @@ public sealed class OutboxDomainEventDispatcher : IDomainEventDispatcher
         }
         await _inner.DispatchAsync(ev, cancellationToken);
     }
+
+    /// <summary>Transactional capture (design §1): INSERTs the durable events'
+    /// outbox rows on the caller's OPEN write transaction, so they commit
+    /// atomically with the aggregate rows instead of on a second, separately
+    /// pooled connection.  Returns the ephemeral remainder for post-commit
+    /// dispatch.  A null transaction (no enclosing write tx — relay re-entry,
+    /// timer emits) falls back to a dedicated connection.</summary>
+    public async Task<IReadOnlyList<IDomainEvent>> RecordDurableAsync(
+        IReadOnlyList<IDomainEvent> events,
+        System.Data.Common.DbTransaction? transaction = null,
+        CancellationToken cancellationToken = default)
+    {
+        var deferred = new List<IDomainEvent>();
+        var durable = new List<IDomainEvent>();
+        foreach (var ev in events)
+        {
+            if (DurableEventTypes.Contains(ev.GetType().Name)) durable.Add(ev);
+            else deferred.Add(ev);
+        }
+        if (durable.Count > 0)
+        {
+            if (transaction?.Connection is { } txConn)
+            {
+                foreach (var ev in durable)
+                {
+                    await txConn.ExecuteAsync(new CommandDefinition(
+                        "INSERT INTO __loom_outbox (type, payload) VALUES (@type, @payload::jsonb)",
+                        new { type = ev.GetType().Name, payload = JsonSerializer.Serialize((object)ev) },
+                        transaction: transaction, cancellationToken: cancellationToken));
+                }
+            }
+            else
+            {
+                await using var conn = await _db.OpenConnectionAsync(cancellationToken);
+                foreach (var ev in durable)
+                {
+                    await conn.ExecuteAsync(new CommandDefinition(
+                        "INSERT INTO __loom_outbox (type, payload) VALUES (@type, @payload::jsonb)",
+                        new { type = ev.GetType().Name, payload = JsonSerializer.Serialize((object)ev) },
+                        cancellationToken: cancellationToken));
+                }
+            }
+        }
+        return deferred;
+    }
 }
 `;
 }

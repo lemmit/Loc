@@ -327,6 +327,7 @@ ${idFieldEntries}
  *  (no-op / in-process / outbox) with this. */
 export function renderRealtimeDispatcher(ns: string): string {
   return `// Auto-generated.
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using ${ns}.Domain.Common;
@@ -354,6 +355,17 @@ public sealed class RealtimeDomainEventDispatcher : IDomainEventDispatcher
         _hub.Publish(ev);
         return _inner.DispatchAsync(ev, cancellationToken);
     }
+
+    /// <summary>Pass-through for the write-tx outbox capture (design §1): the
+    /// repository calls it inside its save transaction and the wrapped
+    /// dispatcher stages the row there.  Without this forward the interface
+    /// default would swallow it and silently demote the durable path back to a
+    /// second, post-commit transaction.</summary>
+    public Task<IReadOnlyList<IDomainEvent>> RecordDurableAsync(
+        IReadOnlyList<IDomainEvent> events,
+        System.Data.Common.DbTransaction? transaction = null,
+        CancellationToken cancellationToken = default)
+        => _inner.RecordDurableAsync(events, transaction, cancellationToken);
 }
 `;
 }

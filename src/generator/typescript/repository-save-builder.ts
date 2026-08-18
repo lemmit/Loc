@@ -217,14 +217,30 @@ export function saveMethod(
   const saveSig = aggregateIsVersioned(agg)
     ? `  async save(aggregate: ${agg.name}, expectedVersion?: number): Promise<void> {`
     : `  async save(aggregate: ${agg.name}): Promise<void> {`;
+  // Transactional outbox (dispatch-delivery-semantics.md §1, docs/channels.md):
+  // the pending events are drained BEFORE the write transaction opens so the
+  // dispatcher can record the DURABLE ones on the very `tx` handle the
+  // aggregate rows are written with — the outbox row then commits (or rolls
+  // back) atomically with the state change, closing the crash window between
+  // "aggregate saved" and "event owed".  `recordDurable` hands back the events
+  // that still need in-process delivery after commit; a dispatcher without the
+  // hook (no durable channel wired) returns every event, so the ephemeral
+  // at-most-once path is unchanged.
+  const drainLines = [
+    `    const pendingEvents = aggregate.pullEvents();`,
+    `    let dispatchAfterCommit = pendingEvents;`,
+  ];
+  const recordLine = `      dispatchAfterCommit = (await this.events.recordDurable?.(pendingEvents, tx)) ?? pendingEvents;`;
   return lines(
     saveSig,
+    ...drainLines,
     emitTrace
       ? [
           `    ${renderHonoStoreLogCall("txBegin", `aggregate: "${agg.name}", id: aggregate.id as string`)}`,
           `    try {`,
           `      await this.db.transaction(async (tx) => {`,
           ...body.map((l) => `  ${l}`),
+          `  ${recordLine}`,
           `      });`,
           `      ${renderHonoStoreLogCall("txCommit", `aggregate: "${agg.name}", id: aggregate.id as string`)}`,
           `    } catch (txErr) {`,
@@ -232,10 +248,10 @@ export function saveMethod(
           `      throw txErr;`,
           `    }`,
         ]
-      : [`    await this.db.transaction(async (tx) => {`, ...body, `    });`],
+      : [`    await this.db.transaction(async (tx) => {`, ...body, recordLine, `    });`],
     `    ${renderHonoStoreLogCall("repositorySave", `aggregate: "${agg.name}", id: aggregate.id as string`)}`,
     "",
-    `    for (const event of aggregate.pullEvents()) {`,
+    `    for (const event of dispatchAfterCommit) {`,
     // `(event as object).constructor.name` is the emitted DomainEvent
     // subclass name — reliable in TypeScript without depending on a
     // per-event `type` discriminator field.  The `as object` cast
