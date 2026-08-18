@@ -61,6 +61,12 @@ import { collectFlutterReads, renderAppConfig, renderReadProviders } from "./rea
 import { hasRiverpodState, renderRiverpod } from "./riverpod-emit.js";
 import { renderFlutterStores } from "./store-builder.js";
 import { storeProviderName } from "./store-names.js";
+import {
+  flutterPersistedStores,
+  renderStorePersistRuntime,
+  usesSharedPreferences,
+  usesUrlStores,
+} from "./store-persist.js";
 
 export interface GenerateFlutterOptions {
   apiBaseUrl?: string;
@@ -198,8 +204,17 @@ export function generateFlutterForContexts(
   // DECLARES a store, not only where one is used: an unused Dart top-level
   // declaration is inert (unlike an unused import), and the file is what the
   // page shells import.
-  const storesFile = ui ? renderFlutterStores(ui.stores, contexts) : undefined;
+  // `persist: local|session|url` (frontend-state-management.md §3.1) — the
+  // classification drives three things at once: the per-Notifier seed/mirror in
+  // `stores.dart`, the `lib/store_persist.dart` runtime, and the pubspec /
+  // `main()` wiring below.  Empty for an all-`memory` ui, which keeps every
+  // emitted file byte-identical to the pre-persistence output.
+  const persistedStores = flutterPersistedStores(ui);
+  const storesFile = ui ? renderFlutterStores(ui.stores, contexts, persistedStores) : undefined;
   if (storesFile) out.set("lib/stores.dart", storesFile);
+  if (persistedStores.length > 0) {
+    out.set("lib/store_persist.dart", renderStorePersistRuntime(persistedStores));
+  }
 
   if (ui && usedComponents.size > 0) {
     const componentsFile = renderComponentsFile(
@@ -229,17 +244,27 @@ export function generateFlutterForContexts(
     out.set("lib/chart.dart", renderFlutterChartRuntime());
   }
 
+  // `persist:` wiring for the app root: a web-storage tier must be loaded before
+  // the first Notifier `build()` (so a seed can read synchronously), and a `url`
+  // tier needs the back/forward observer around `MaterialApp`.
+  const persistBoot: PersistBoot = {
+    initPrefs: usesSharedPreferences(persistedStores),
+    urlSync: usesUrlStores(persistedStores),
+  };
   if (rendered.length > 0) {
     for (const r of rendered) {
       out.set(`lib/pages/${r.fileBase}.dart`, r.source);
     }
-    out.set("lib/main.dart", renderMainWithRoutes(title, rendered));
+    out.set("lib/main.dart", renderMainWithRoutes(title, rendered, persistBoot));
   } else {
-    out.set("lib/main.dart", renderMain(title));
+    out.set("lib/main.dart", renderMain(title, persistBoot));
     out.set("lib/pages/home_page.dart", renderHomePage(title, aggregates));
   }
 
-  out.set("pubspec.yaml", renderPubspec(pkg, deployable.name, usesFileUpload));
+  out.set(
+    "pubspec.yaml",
+    renderPubspec(pkg, deployable.name, usesFileUpload, usesSharedPreferences(persistedStores)),
+  );
   out.set("analysis_options.yaml", ANALYSIS_OPTIONS);
   // Web platform scaffold — `flutter build web` refuses a project with no
   // `web/index.html` ("This project is not configured for the web").  Emit the
@@ -714,19 +739,58 @@ function renderConsumerPage(
   )}\n`;
 }
 
+/** How a `persist:`-bearing ui changes the app root (`store-persist.ts`):
+ *  `initPrefs` makes `main()` async and awaits the shared_preferences load
+ *  BEFORE `runApp` (so every Notifier `build()` can seed synchronously);
+ *  `urlSync` wraps `MaterialApp` in the back/forward observer. */
+interface PersistBoot {
+  initPrefs: boolean;
+  urlSync: boolean;
+}
+
+const NO_PERSIST: PersistBoot = { initPrefs: false, urlSync: false };
+
+/** `main()` for a `persist:`-bearing app — the web-storage tier has to finish
+ *  loading before the first widget builds. */
+function mainFn(boot: PersistBoot): string[] {
+  if (!boot.initPrefs) return ["void main() {", "  runApp(const App());", "}"];
+  return [
+    "Future<void> main() async {",
+    "  // The stored blobs must be in memory before the first Notifier `build()`,",
+    "  // which seeds its cells synchronously (`store_persist.dart`).",
+    "  WidgetsFlutterBinding.ensureInitialized();",
+    "  await LoomStorePersist.init();",
+    "  runApp(const App());",
+    "}",
+  ];
+}
+
+/** The extra `main.dart` imports a `persist:`-bearing app pulls: the runtime
+ *  (`LoomStorePersist.init`) and/or the store providers the `url`-tier observer
+ *  `LoomUrlStoreSync` reaches through. */
+function persistMainImports(boot: PersistBoot): string[] {
+  const out: string[] = [];
+  if (boot.initPrefs) out.push("import 'store_persist.dart';");
+  if (boot.urlSync) out.push("import 'stores.dart';");
+  return out.length > 0 ? ["", ...out] : [];
+}
+
 /** `main.dart` for a multi-page ui: a `MaterialApp` with named routes, the first
  *  page as `initialRoute`. */
-function renderMainWithRoutes(title: string, pages: RenderedPage[]): string {
+function renderMainWithRoutes(
+  title: string,
+  pages: RenderedPage[],
+  boot: PersistBoot = NO_PERSIST,
+): string {
   const home = pages[0];
   return `${lines(
     "import 'package:flutter/material.dart';",
     "import 'package:flutter_riverpod/flutter_riverpod.dart';",
     "",
     pages.map((p) => `import 'pages/${p.fileBase}.dart';`),
+    persistMainImports(boot),
     "",
-    "void main() {",
-    "  runApp(const App());",
-    "}",
+    mainFn(boot),
     "",
     "class App extends StatelessWidget {",
     "  const App({super.key});",
@@ -736,23 +800,31 @@ function renderMainWithRoutes(title: string, pages: RenderedPage[]): string {
     // ProviderScope roots the Riverpod container for every stateful page's
     // Notifier; nested in App.build (not around runApp) so `runApp(const App())`
     // stays const-clean.
-    "    return ProviderScope(child: MaterialApp(",
+    `    return ProviderScope(child: ${boot.urlSync ? "LoomUrlStoreSync(child: " : ""}MaterialApp(`,
     `      title: '${escapeDart(title)}',`,
     "      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),",
     `      initialRoute: '${home.routePath}',`,
     "      routes: {",
     pages.map((p) => `        '${p.routePath}': (context) => const ${p.className}(),`),
     "      },",
-    "    ));",
+    `    )${boot.urlSync ? ")" : ""});`,
     "  }",
     "}",
   )}\n`;
 }
 
-function renderPubspec(pkg: string, deployableName: string, usesFileUpload: boolean): string {
+function renderPubspec(
+  pkg: string,
+  deployableName: string,
+  usesFileUpload: boolean,
+  usesPrefs: boolean,
+): string {
   // `file_picker` is only pulled when a FileUpload primitive is present, so a
   // File-free app's pubspec stays byte-identical.
   const filePicker = usesFileUpload ? "\n  file_picker: ^8.1.2" : "";
+  // `shared_preferences` backs `persist: local|session`; the `url` tier needs no
+  // package (`Uri.base` + `SystemNavigator` are core).
+  const prefs = usesPrefs ? "\n  shared_preferences: ^2.3.2" : "";
   return `name: ${pkg}
 description: "Generated Flutter app for ${deployableName} (Loom)."
 publish_to: "none"
@@ -766,7 +838,7 @@ dependencies:
     sdk: flutter
   http: ^1.2.0
   flutter_riverpod: ^2.5.1
-  intl: ^0.19.0${filePicker}
+  intl: ^0.19.0${filePicker}${prefs}
 
 dev_dependencies:
   flutter_test:
@@ -984,29 +1056,29 @@ CMD ["nginx", "-g", "daemon off;"]
 
 // --- Fallback (no ui pages) skeleton widgets --------------------------------
 
-function renderMain(title: string): string {
-  return `import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-import 'pages/home_page.dart';
-
-void main() {
-  runApp(const App());
-}
-
-class App extends StatelessWidget {
-  const App({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return ProviderScope(child: MaterialApp(
-      title: '${escapeDart(title)}',
-      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),
-      home: const HomePage(),
-    ));
-  }
-}
-`;
+function renderMain(title: string, boot: PersistBoot = NO_PERSIST): string {
+  return `${lines(
+    "import 'package:flutter/material.dart';",
+    "import 'package:flutter_riverpod/flutter_riverpod.dart';",
+    "",
+    "import 'pages/home_page.dart';",
+    persistMainImports(boot),
+    "",
+    mainFn(boot),
+    "",
+    "class App extends StatelessWidget {",
+    "  const App({super.key});",
+    "",
+    "  @override",
+    "  Widget build(BuildContext context) {",
+    `    return ProviderScope(child: ${boot.urlSync ? "LoomUrlStoreSync(child: " : ""}MaterialApp(`,
+    `      title: '${escapeDart(title)}',`,
+    "      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),",
+    "      home: const HomePage(),",
+    `    )${boot.urlSync ? ")" : ""});`,
+    "  }",
+    "}",
+  )}\n`;
 }
 
 function renderHomePage(title: string, aggregates: readonly string[]): string {

@@ -33,6 +33,7 @@
 import { diagMessage } from "../../../diagnostics/messages.js";
 import type { EnrichedLoomModel, StmtIR, StoreIR } from "../../types/loom-ir.js";
 import { classifyFelizAsyncEffect } from "../../util/feliz-async-effect.js";
+import { flutterPersistCodec } from "../../util/flutter-persist-codec.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 
 // View-scoped effect builtins — illegal inside a store action (§3.2).  Mirrors
@@ -43,7 +44,7 @@ const VIEW_EFFECT_BUILTINS = new Set<string>(["navigate", "toast"]);
  *  ladder and builds an in-memory store regardless (`loom.store-lifetime-
  *  target-unsupported`).  A RATCHET: when a platform implements the ladder its
  *  entry is deleted here in the same PR, so a stale allowance can't survive. */
-const LIFETIME_UNSUPPORTED_PLATFORMS: ReadonlySet<string> = new Set(["feliz", "flutter"]);
+const LIFETIME_UNSUPPORTED_PLATFORMS: ReadonlySet<string> = new Set(["feliz"]);
 
 /** Render a `StoreIR.lifetime` enum back to its `persist:` source keyword for
  *  diagnostics (`persistLocal` → `local`). */
@@ -282,25 +283,22 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
     }
 
     // loom.store-lifetime-target-unsupported — the SAME gap as the LiveView
-    // lifetime gate above, on the two frontends that don't ride the SPA store
-    // runtime either.
+    // lifetime gate above, on the one frontend left that doesn't ride the SPA
+    // store runtime either.
     //
-    //   flutter — `flutter/store-builder.ts` writes a `// TODO(flutter
-    //     full-parity): \`persist: <lifetime>\` is not implemented` comment and
-    //     then builds the store IN-MEMORY anyway.  A comment in emitted Dart is
-    //     not a diagnostic: `ddd parse` is clean, `flutter analyze` is clean,
-    //     and the author only discovers the cart didn't survive a restart at
-    //     runtime.
     //   feliz — `src/generator/feliz` contains ZERO references to
     //     `store.lifetime`.  The store folds into the single Elmish `Model`,
     //     which lives for exactly one program run; `local`/`session`/`url` are
     //     dropped without even a comment.
     //
-    // Both are IMPLEMENTABLE (shared_preferences + a router rewrite on Flutter;
-    // Browser.WebStorage + a Feliz.Router hook on Feliz) and are planned — this
-    // gate is the honest placeholder, and the wave-2 tasks that implement them
-    // DELETE their arm from `LIFETIME_UNSUPPORTED_PLATFORMS` rather than
-    // leaving a stale allowance behind.
+    // It is IMPLEMENTABLE (Browser.WebStorage + a Feliz.Router hook) and planned
+    // — this gate is the honest placeholder, and the task that implements it
+    // DELETES its arm from `LIFETIME_UNSUPPORTED_PLATFORMS` rather than leaving
+    // a stale allowance behind.  FLUTTER did exactly that: the ladder now ships
+    // there (`generator/flutter/store-persist.ts` — a shared_preferences seed +
+    // a `ref.listenSelf` mirror, and `Uri.base` / `SystemNavigator` for the
+    // `url` tier), so its arm is gone and only the narrower FIELD-scoped half of
+    // this same code (the `#flutter-field` message variant) below remains.
     //
     // Detected off `dep.platform`, not `uiFramework`, for the reason the Feliz
     // block below spells out: `platform: feliz` / `platform: flutter` each host
@@ -323,6 +321,41 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
             }),
             source: where,
           });
+        }
+      }
+    }
+
+    // loom.store-lifetime-target-unsupported (#flutter-field) — the residue of
+    // the Flutter `persist:` implementation.  Both directions cross an UNTYPED
+    // boundary per FIELD (a `dynamic` out of the decoded blob, or a raw `String`
+    // out of the query string), so a field type only persists when
+    // `flutterPersistCodec` has a TOTAL Dart conversion for it.  `json` spells
+    // `dynamic`, `File` spells the `FileRef?` object, `entity`/`valueobject`
+    // would need a per-record codec the store path does not emit, and an
+    // `optional` cell has no absent-vs-null distinction in a flat blob — so
+    // those cells would be silently dropped from the stored state.  Named
+    // loudly instead; the same ratchet applies (widen the codec table, delete
+    // the case here).
+    for (const dep of sys.deployables) {
+      if (dep.platform !== "flutter") continue;
+      const mounted = [dep.uiName, ...(dep.hostedUiNames ?? [])].filter((n): n is string => !!n);
+      for (const uiName of mounted) {
+        for (const store of storesByUi.get(uiName) ?? []) {
+          if (store.lifetime === "memory") continue;
+          for (const f of store.state) {
+            if (flutterPersistCodec(f.type)) continue;
+            const where = `store '${store.name}'`;
+            diags.push({
+              severity: "error",
+              code: "loom.store-lifetime-target-unsupported",
+              message: diagMessage("loom.store-lifetime-target-unsupported#flutter-field", {
+                where,
+                name: f.name,
+                lifetime: lifetimeKeyword(store.lifetime),
+              }),
+              source: where,
+            });
+          }
         }
       }
     }

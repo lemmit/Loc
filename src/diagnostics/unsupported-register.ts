@@ -288,8 +288,8 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
   {
     code: "loom.store-lifetime-target-unsupported",
     kind: "gap",
-    site: "src/ir/validate/checks/store-checks.ts:318",
-    what: "`persist: local|session|url` silently in-memory on feliz / flutter",
+    site: "src/ir/validate/checks/store-checks.ts:316",
+    what: "`persist:` in-memory on feliz; on flutter, a field type with no Dart codec",
     mission: "M-T1.20",
   },
   {

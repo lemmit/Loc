@@ -1,23 +1,25 @@
 // ---------------------------------------------------------------------------
 // `loom.store-lifetime-target-unsupported` — the `persist:` lifetime ladder is
-// gated on the two frontends that don't implement it.
+// gated on the frontend that doesn't implement it, and on the FIELD TYPES the
+// one that does can't carry.
 //
 // `store-checks.ts` already refuses a non-`memory` lifetime on LiveView
 // (`loom.store-lifetime-liveview-invalid`), because a server-rendered
-// per-process struct has no browser storage.  The SAME gap exists, ungated, on
-// two more targets:
+// per-process struct has no browser storage.  The SAME gap exists, ungated, on:
 //
-//   flutter — `flutter/store-builder.ts` writes a `// TODO(flutter
-//       full-parity)` comment and then builds the store IN-MEMORY anyway.  A
-//       comment in emitted Dart is not a diagnostic: `ddd parse` is clean and
-//       `flutter analyze` is clean.
 //   feliz   — `src/generator/feliz` contains ZERO references to
 //       `store.lifetime`; the store folds into the single Elmish `Model` and
 //       the lifetime is dropped without even a comment.
 //
-// Both are IMPLEMENTABLE and planned.  `LIFETIME_UNSUPPORTED_PLATFORMS` is a
-// RATCHET: the wave-2 task that implements a target deletes its entry (and the
-// matching case here), so a stale allowance cannot survive the fix.
+// `LIFETIME_UNSUPPORTED_PLATFORMS` is a RATCHET: the task that implements a
+// target deletes its entry (and the matching case here), so a stale allowance
+// cannot survive the fix.  FLUTTER did exactly that — `flutter/store-persist.ts`
+// ships the ladder (a shared_preferences seed + a `ref.listenSelf` mirror, and
+// `Uri.base` / `SystemNavigator` for the `url` tier), so the platform-wide arm
+// is gone and only the narrower FIELD-scoped half of the same code remains: the
+// Dart codec (`ir/util/flutter-persist-codec.ts`) has no total conversion for a
+// `json` / `File` / entity / value-object / optional cell, which would
+// otherwise be silently dropped from the stored state.
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it } from "vitest";
@@ -33,10 +35,11 @@ const CODE = "loom.store-lifetime-target-unsupported";
 /** `framework` and the web deployable's `platform` move together — a
  *  `platform: feliz` / `platform: flutter` deployable hosts only its own
  *  framework, which is why the gate keys on the PLATFORM. */
-const wrap = (framework: string, platform: string, lifetime: string) => `
+const wrap = (framework: string, platform: string, lifetime: string, cells = "count: int = 0") => `
 system Demo {
   subdomain S {
     context C {
+      valueobject Money { amount: int  currency: string }
       aggregate Customer { name: string }
       repository Customers for Customer { }
     }
@@ -46,7 +49,7 @@ system Demo {
     framework: ${framework}
     api C: A
     store Cart${lifetime ? ` persist: ${lifetime}` : ""} {
-      state { count: int = 0 }
+      state { ${cells} }
       action bump() { count := count + 1 }
     }
     page X { route: "/x"  body: Stack { Heading { Cart.count, level: 3 } } }
@@ -57,31 +60,72 @@ system Demo {
   deployable web { platform: ${platform}  targets: api  port: 3001  ui: Web { C: api } }
 }`;
 
-async function diagnostics(framework: string, platform: string, lifetime: string) {
-  const { model, errors } = await parseString(wrap(framework, platform, lifetime));
+async function diagnostics(framework: string, platform: string, lifetime: string, cells?: string) {
+  const { model, errors } = await parseString(wrap(framework, platform, lifetime, cells));
   if (errors.length) throw new Error(`unexpected parse/validation errors:\n${errors.join("\n")}`);
   return validateLoomModel(enrichLoomModel(lowerModel(model)));
 }
 
-const codes = async (framework: string, platform: string, lifetime: string): Promise<string[]> =>
-  (await diagnostics(framework, platform, lifetime)).map((d) => d.code);
+const codes = async (
+  framework: string,
+  platform: string,
+  lifetime: string,
+  cells?: string,
+): Promise<string[]> =>
+  (await diagnostics(framework, platform, lifetime, cells)).map((d) => d.code);
 
 describe("loom.store-lifetime-target-unsupported — the gate", () => {
-  for (const target of ["feliz", "flutter"] as const) {
-    for (const lifetime of ["local", "session", "url"] as const) {
-      it(`flags \`persist: ${lifetime}\` on a ${target}-hosted store`, async () => {
-        expect(await codes(target, target, lifetime)).toContain(CODE);
-      });
-    }
-
-    it(`is an error naming the store, the lifetime and ${target}`, async () => {
-      const d = (await diagnostics(target, target, "local")).find((x) => x.code === CODE);
-      expect(d?.severity).toBe("error");
-      expect(d?.message).toMatch(/store 'Cart'/);
-      expect(d?.message).toMatch(/persist: local/);
-      expect(d?.message).toMatch(new RegExp(target));
+  for (const lifetime of ["local", "session", "url"] as const) {
+    it(`flags \`persist: ${lifetime}\` on a feliz-hosted store`, async () => {
+      expect(await codes("feliz", "feliz", lifetime)).toContain(CODE);
     });
   }
+
+  it("is an error naming the store, the lifetime and feliz", async () => {
+    const d = (await diagnostics("feliz", "feliz", "local")).find((x) => x.code === CODE);
+    expect(d?.severity).toBe("error");
+    expect(d?.message).toMatch(/store 'Cart'/);
+    expect(d?.message).toMatch(/persist: local/);
+    expect(d?.message).toMatch(/feliz/);
+  });
+});
+
+describe("loom.store-lifetime-target-unsupported — the flutter FIELD-scoped half", () => {
+  // The ladder ships on flutter, so the platform-wide arm is gone …
+  for (const lifetime of ["local", "session", "url"] as const) {
+    it(`does NOT flag \`persist: ${lifetime}\` on a flutter-hosted store of covered cells`, async () => {
+      expect(await codes("flutter", "flutter", lifetime)).not.toContain(CODE);
+    });
+  }
+
+  // … but a cell whose Dart codec has no total conversion is still refused,
+  // because it would silently vanish from the stored state.
+  for (const [what, cells] of [
+    ["a value-object cell", "count: int = 0  price: Money"],
+    ["a File cell", "count: int = 0  doc: File"],
+    ["an optional cell", "count: int = 0  note: string?"],
+    ["a json cell", "count: int = 0  blob: json"],
+  ] as const) {
+    it(`flags ${what}`, async () => {
+      expect(await codes("flutter", "flutter", "local", cells)).toContain(CODE);
+    });
+  }
+
+  it("names the offending FIELD, not just the store", async () => {
+    const d = (
+      await diagnostics("flutter", "flutter", "local", "count: int = 0  price: Money")
+    ).find((x) => x.code === CODE);
+    expect(d?.severity).toBe("error");
+    expect(d?.message).toMatch(/store 'Cart'/);
+    expect(d?.message).toMatch(/field 'price'/);
+    expect(d?.message).toMatch(/flutter/);
+  });
+
+  it("POSITIVE CONTROL: every covered scalar + array cell passes", async () => {
+    const covered =
+      'count: int = 0  label: string = ""  flag: bool = false  amount: money  seenAt: datetime  tags: string[]';
+    expect(await codes("flutter", "flutter", "local", covered)).not.toContain(CODE);
+  });
 });
 
 describe("loom.store-lifetime-target-unsupported — what it must NOT flag", () => {
