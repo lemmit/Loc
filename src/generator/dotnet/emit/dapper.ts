@@ -1106,7 +1106,6 @@ export function renderDapperRepository(
     const kept = capabilityFilterParts.filter((p) => !(p.origin != null && caps.has(p.origin)));
     return kept.length > 0 ? kept.map((p) => p.sql).join(" AND ") : null;
   };
-  const capabilityFilterSql: string | null = capabilityFilterSqlFor();
   /** The full spliced WHERE fragment (TPH discriminator + surviving capability
    *  predicates).  The TPH discriminator is NEVER bypassable: it is a type
    *  mapping, not a query filter — EF's `IgnoreQueryFilters()` leaves it in
@@ -1115,7 +1114,6 @@ export function renderDapperRepository(
     [tph ? `kind = ${kindLiteral}` : null, capabilityFilterSqlFor(bypass)]
       .filter((s) => s !== null)
       .join(" AND ") || null;
-  const filterSql: string | null = filterSqlFor();
   const andFilter = (
     existingWhere: boolean,
     bypass?: { bypassAll?: boolean; bypassCaps?: string[] },
