@@ -2884,33 +2884,19 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // the EF AuditableInterceptor.  A principal stamp on a no-auth
         // deployable stays rejected by the category-A loom.stamp-principal-without-auth.
         //
-        // HIERARCHICAL TENANCY (M-T6.29).  The `deep`/`global` read level lowers
-        // to the materialized-path `authz-filter` sentinel, whose
-        // `currentUser.<claim>` sub-expressions the Dapper principal-param
-        // collector does not descend into — so it cannot bind the `@__cu_*`
-        // params the fragment would need.  This USED to escape the gate entirely
-        // and crash codegen (`capability filter … is outside the Dapper SQL
-        // subset`) — the corpus map claimed the validator rejected it, and it did
-        // not.  Now it is what that map always said: an honest boundary.  The
-        // `deny` sentinel is principal-free and DOES render (`1 = 0`), so it is
-        // deliberately not gated here.
-        for (const f of [...(a.contextFilters ?? []), a.writeScopeFilter].filter(
-          (x): x is ExprIR => x != null,
-        )) {
-          if (isDeepScopeFilter(f)) {
-            diags.push({
-              severity: "error",
-              message: diagMessage("loom.dapper-unsupported#deep-scope", {
-                name: dep.name,
-                subject: where,
-                reason: "carries a hierarchical (deep/global) tenancy scope filter",
-              }),
-              source: `${sys.name}/${dep.name}`,
-              code: "loom.dapper-unsupported",
-            });
-            break;
-          }
-        }
+        // HIERARCHICAL TENANCY is supported now (the M-T6.29 boundary is
+        // drained).  The `deep`/`global` read level lowers to the
+        // materialized-path `authz-filter` sentinel; `authzFilterToSql` renders
+        // it as the descendant-or-self fragment
+        // (`starts_with(data_key, @__cu_orgPath || '.')` with the NULL-dataKey
+        // tenant-floor fallback) and `collectFilterPrincipalRefs` descends into
+        // the decision's `anchorClaim` / `tenantClaim` members to bind the two
+        // `@__cu_*` params — the one thing that was missing, and the reason the
+        // gate existed.  Both halves are pinned together by
+        // `test/generator/dotnet/dapper-deep-scope.test.ts`: a fragment naming a
+        // param nothing binds is a RUNTIME Npgsql error, invisible to every
+        // compile tier.  The `deny` sentinel is principal-free and renders
+        // `1 = 0`, as it always did.
         // Capability filters are supported too (spliced into every SELECT's
         // WHERE); a principal-referencing one lowers `currentUser.<claim>` to a
         // `@__cu_<claim>` Dapper param bound from the same ambient principal.

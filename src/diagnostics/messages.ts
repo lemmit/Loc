@@ -1702,17 +1702,12 @@ export const DIAGNOSTIC_MESSAGES = {
     `The Dapper adapter is at full parity with EF Core (M-T6.9); the only shapes it now ` +
     `rejects have no relational persistence mapping at all (efcore included) — restructure ` +
     `the model as the message suggests.`,
-  // The hierarchical-tenancy boundary (M-T6.29) needs its OWN tail: the blanket
-  // message above claims every surviving Dapper reject has no relational mapping
-  // on any adapter, and that is not true here — `persistence: efcore` renders the
-  // deep-scope filter fine.  What Dapper lacks is the principal-param binding for
-  // the sentinel's `currentUser.<claim>` sub-expressions, so the way out is the
-  // sibling adapter, not a model restructure.
-  "loom.dapper-unsupported#deep-scope": (p: { name: unknown; subject: unknown; reason: unknown }) =>
-    `Deployable '${p.name}' selects 'persistence: dapper', but ${p.subject} ${p.reason}. ` +
-    `The Dapper adapter renders capability filters as raw SQL and cannot bind the ` +
-    `principal claims a hierarchical scope predicate reads — use 'persistence: efcore' ` +
-    `on this deployable, or flatten the tenancy to a non-hierarchical registry.`,
+  // (`loom.dapper-unsupported#deep-scope` lived here.  It was the M-T6.29
+  // hierarchical-tenancy boundary: the Dapper principal-param collector did not
+  // descend into the `authz-filter` sentinel, so a `deep`/`global` scope
+  // fragment had no `@__cu_*` params to bind.  Both halves landed — the SQL
+  // fragment and the param collection — so the boundary is gone and the message
+  // with it.)
   "loom.dapper-unsupported#feature": (p: {
     name: unknown;
     ctxName: unknown;

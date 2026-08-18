@@ -44,6 +44,14 @@ import {
 } from "../../../ir/util/inheritance.js";
 import { refCollectionFieldName } from "../../../ir/util/ref-collection.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
+import {
+  DATA_KEY_PATH_DELIMITER,
+  deepScopeAnchorClaim,
+  deepScopeTenantClaim,
+  guidFromStringSelfScope,
+  TENANT_OWNED_DATA_KEY_FIELD,
+  TENANT_OWNED_TENANT_ID_FIELD,
+} from "../../../ir/util/tenant-stance.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { intrinsicFor, intrinsicKey } from "../../../util/intrinsics.js";
@@ -815,6 +823,24 @@ export function whereToSql(e: ExprIR, sqlCtx?: WhereSqlCtx): string {
       if (e.op === "!") return `(NOT ${whereToSql(e.operand, sqlCtx)})`;
       throw new Error("dapper: unsupported unary in find");
     case "binary": {
+      // The `guid`-id registry SELF-SCOPE comparison (`this.id ==
+      // currentUser.<claim>`, multi-tenancy Phase 1b) is the one comparison
+      // whose two sides have different SQL types: a `uuid` column against a
+      // `string` claim.  Bound the generic way it produced `id = @__cu_tenantId`
+      // with a text parameter and every read of the registry answered
+      // `42883: operator does not exist: uuid = text` — a 500 on the tenancy
+      // bootstrap path, invisible to every compile tier.  A DISTINCT param name
+      // carries the parsed value (`@__cu_<claim>_uuid`, bound through
+      // `Guid.TryParse`), so the same claim can still bind as text elsewhere —
+      // which it does, on the tenant floor `tenant_id = @__cu_<claim>`.
+      // A malformed/absent claim binds NULL, so the filter fails CLOSED (no
+      // rows) instead of throwing — the same stance as EF's hoisted
+      // `Guid.TryParse(...) ? new <Agg>Id(g) : null` self-scope member.
+      const selfScope = guidFromStringSelfScope(e);
+      if (selfScope) {
+        const param = `@${guidSelfScopeParam(selfScope.claim)}`;
+        return selfScope.idOnLeft ? `(id = ${param})` : `(${param} = id)`;
+      }
       const op = SQL_BINOP[e.op];
       if (!op) throw new Error(`dapper: unsupported operator '${e.op}' in find`);
       return `(${whereToSql(e.left, sqlCtx)} ${op} ${whereToSql(e.right, sqlCtx)})`;
@@ -918,19 +944,40 @@ function authzFilterToSql(e: Extract<ExprIR, { kind: "authz-filter" }>): string 
     // and stay a valid standalone predicate in every SQL position.
     case "deny":
       return "1 = 0";
-    // `deep`/`global` read level (hierarchical tenancy) — the materialized-path
-    // descendant-or-self sentinel.  It is SQL-expressible in principle, but its
-    // `currentUser.<claim>` sub-expressions would have to reach
-    // `collectFilterPrincipalRefs` (which does not descend into this node) to
-    // bind the `@__cu_*` params.  Until that lands it is a DOCUMENTED capability
-    // boundary, not a crash: `validateDapperSupport` rejects a hierarchical
-    // scope filter under `persistence: dapper` with `loom.dapper-unsupported`
-    // before codegen runs, so this throw is unreachable defence-in-depth.
-    case "scope":
-      throw new Error(
-        `dapper: hierarchical tenancy scope filter on '${e.aggregate}' is outside the ` +
-          `Dapper SQL subset; use 'persistence: efcore'.`,
+    // `deep`/`global` read level (hierarchical tenancy P2.4/P2.5) — the
+    // materialized-path descendant-or-self sentinel, DEEP_SCOPE_SEMANTICS:
+    //
+    //   (data_key IS NOT NULL AND (data_key = @anchor OR starts_with(data_key, @anchor || '.')))
+    //   OR (data_key IS NULL AND tenant_id = @tenant)
+    //
+    // `starts_with(text, text)` rather than `LIKE @anchor || '.%'`: a claim
+    // carrying `%` or `_` would silently WIDEN a LIKE prefix into a wildcard —
+    // a cross-tenant read driven by a token value.  `starts_with` has no
+    // metacharacters, and it is the exact semantics of the relational twin's
+    // `StartsWith(..., StringComparison.Ordinal)` / EF `LIKE`.
+    //
+    // The NULL branch is the deliberate OR-fallback, not fail-closed: a row
+    // stamped before P2.3 (or by a principal-less save) has no `data_key`, and
+    // a bare prefix test would hide it from its own tenant.  It degrades to
+    // exactly the flat floor — never wider.
+    //
+    // The two `currentUser.<claim>` reads bind as ordinary `@__cu_*` params;
+    // `collectFilterPrincipalRefs` descends into this node's `anchorClaim` /
+    // `tenantClaim` members to declare them.  Both halves must move together —
+    // rendering the fragment without collecting the params yields SQL naming a
+    // parameter nothing binds (a runtime Npgsql error, not a compile one), so
+    // `dapper-deep-scope.test.ts` pins the pair.
+    case "scope": {
+      const anchor = `@${currentUserParam(deepScopeAnchorClaim(e))}`;
+      const tenant = `@${currentUserParam(deepScopeTenantClaim(e))}`;
+      const col = snake(TENANT_OWNED_DATA_KEY_FIELD);
+      const tenantCol = snake(TENANT_OWNED_TENANT_ID_FIELD);
+      const delim = `'${DATA_KEY_PATH_DELIMITER}'`;
+      return (
+        `((${col} IS NOT NULL AND (${col} = ${anchor} OR starts_with(${col}, ${anchor} || ${delim}))) ` +
+        `OR (${col} IS NULL AND ${tenantCol} = ${tenant}))`
       );
+    }
     default: {
       const _exhaustive: never = e.filter;
       throw new Error(`unhandled authz-filter kind: ${(_exhaustive as { kind: string }).kind}`);
@@ -945,6 +992,14 @@ function currentUserParam(member: string): string {
   return `__cu_${member}`;
 }
 
+/** Param name for the `guid`-id registry self-scope binding of a `string`
+ *  claim — deliberately DISTINCT from {@link currentUserParam}'s, because the
+ *  same claim binds as `uuid` here and as `text` on the tenant floor, and one
+ *  Dapper parameter cannot be both. */
+function guidSelfScopeParam(claim: string): string {
+  return `${currentUserParam(claim)}_uuid`;
+}
+
 /** A `currentUser.<claim>` reference found in a filter / find / retrieval
  *  predicate: the Dapper param name it lowers to (`__cu_<claim>`) and the
  *  principal claim property (PascalCased) read to bind it.  The accessor BASE
@@ -956,11 +1011,26 @@ function currentUserParam(member: string): string {
 export interface FilterPrincipalRef {
   param: string; // `__cu_tenantId`
   claimProp: string; // `TenantId`
+  /** The `guid`-id registry self-scope binding: the claim is declared `string`
+   *  but the column it is compared against is `uuid`, so the value is parsed at
+   *  the binding site and a malformed / absent claim binds NULL (fail-closed —
+   *  `id = NULL` matches nothing).  See `guidSelfScopeParam`. */
+  guidParse?: boolean;
 }
 
 /** `${param} = ${base}.${claimProp}` fields for a `new { … }` / DynamicParameters. */
 export function principalFields(refs: readonly FilterPrincipalRef[], base: string): string[] {
-  return refs.map((r) => `${r.param} = ${base}.${r.claimProp}`);
+  return refs.map((r) =>
+    r.guidParse
+      ? // `out _` (a DISCARD), not `out var __g` — two of these can land in one
+        // method body (the paged find's COUNT and its page query are separate
+        // parameter objects in the same scope), and a named `out var` collides
+        // there: CS0128.  A discard may repeat freely, and the second parse is
+        // a no-op read of the same property.
+        `${r.param} = Guid.TryParse(${base}.${r.claimProp}, out _) ` +
+        `? (Guid?)Guid.Parse(${base}.${r.claimProp}!) : null`
+      : `${r.param} = ${base}.${r.claimProp}`,
+  );
 }
 
 /** Collect the distinct `currentUser.<claim>` references across the given
@@ -984,10 +1054,48 @@ export function collectFilterPrincipalRefs(filters: readonly ExprIR[]): FilterPr
       case "unary":
         walk(e.operand);
         return;
-      case "binary":
+      case "binary": {
+        // The `guid`-id registry self-scope comparison binds its OWN parsed
+        // param (`@__cu_<claim>_uuid`) — see the matching arm in `whereToSql`.
+        // Both halves must agree or the SQL names a parameter nothing supplies.
+        const selfScope = guidFromStringSelfScope(e);
+        if (selfScope) {
+          const param = guidSelfScopeParam(selfScope.claim);
+          if (!byParam.has(param)) {
+            byParam.set(param, {
+              param,
+              claimProp: upperFirst(selfScope.claim),
+              guidParse: true,
+            });
+          }
+          return;
+        }
         walk(e.left);
         walk(e.right);
         return;
+      }
+      // The `authz-filter` sentinel is OPAQUE to the generic walk — its
+      // `currentUser.<claim>` reads live inside the decision, not in an
+      // ordinary expression tree.  Descending into them is what lets the
+      // hierarchical (deep/global) scope fragment bind its `@__cu_*` params;
+      // without it the fragment named parameters nothing supplied, which is why
+      // the adapter refused the whole feature (`loom.dapper-unsupported#deep-scope`)
+      // until M-T6.29's boundary was drained.  `deny` is principal-free and
+      // contributes nothing — the exhaustive switch keeps it that way.
+      case "authz-filter":
+        switch (e.filter.kind) {
+          case "scope":
+            walk(e.filter.anchorClaim);
+            walk(e.filter.tenantClaim);
+            return;
+          case "deny":
+            return;
+          default: {
+            const _exhaustive: never = e.filter;
+            void _exhaustive;
+            return;
+          }
+        }
       default:
         return;
     }
