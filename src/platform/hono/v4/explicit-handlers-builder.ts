@@ -237,7 +237,9 @@ function emitPagedRunHandler(
     `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
   out.push(
-    `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    `      ${resolveErrorStatus("NotFound", ctx.structuralErrorStatuses)}: { description: ${JSON.stringify(
+      problemTitle(resolveErrorStatus("NotFound", ctx.structuralErrorStatuses)),
+    )}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
   out.push(`    },`);
   out.push(`  }),`);
@@ -376,7 +378,9 @@ function emitRouteHandler(
     `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
   out.push(
-    `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    `      ${resolveErrorStatus("NotFound", ctx.structuralErrorStatuses)}: { description: ${JSON.stringify(
+      problemTitle(resolveErrorStatus("NotFound", ctx.structuralErrorStatuses)),
+    )}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
   // 415 only where there IS a body to refuse — declared under exactly the
   // condition the handler's `requireJsonContentType` guard is emitted.  Last
@@ -639,10 +643,14 @@ export function buildExplicitRoutesFile(
   const exDisallowedStatus = resolveErrorStatus("Disallowed", structuralMap);
   const exUniquenessStatus = resolveErrorStatus("UniquenessConflict", structuralMap);
   const exConcurrencyStatus = resolveErrorStatus("ConcurrencyConflict", structuralMap);
+  // The domain not-found rung — an extern/explicit handler that loads by id
+  // raises the same `AggregateNotFoundError` the aggregate routes do, so it
+  // must answer the same `httpStatus`-resolved status.
+  const exNotFoundStatus = resolveErrorStatus("NotFound", structuralMap);
   const exStatuses = new Set<number>([
     400,
     exForbiddenStatus,
-    404,
+    exNotFoundStatus,
     422,
     exDomainStatus,
     500,
@@ -671,7 +679,7 @@ export function buildExplicitRoutesFile(
     `    if (err instanceof DomainError) return problem(${exDomainStatus}, ${JSON.stringify(problemTitle(exDomainStatus))}, err.message);`,
   );
   body.push(
-    `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
+    `    if (err instanceof AggregateNotFoundError) return problem(${exNotFoundStatus}, ${JSON.stringify(problemTitle(exNotFoundStatus))}, err.message);`,
   );
   if (exHasUniqueKeys) {
     body.push(
