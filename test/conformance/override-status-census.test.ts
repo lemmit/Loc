@@ -299,7 +299,12 @@ const SITES: Record<Platform, Site[]> = {
       rung: "NotFound",
       what: "getById's DECLARED response set in the OpenAPI customizer",
       file: "config/OpenApiContractCustomizer.java",
-      at: /"\/api\/items\/\{id\}", null, new int\[\] \{(\d+)\}/,
+      // The array carries the wire-validation 422 alongside the rung (#2612 —
+      // a malformed `{id}` is parsed and refused), so the pattern must tolerate
+      // trailing entries.  Capture group 1 is the FIRST, which is the rung:
+      // the emitter sorts ascending and both 404 and the override sort below
+      // 422.
+      at: /"\/api\/items\/\{id\}", null, new int\[\] \{(\d+)(?:, \d+)*\}/,
     },
     {
       rung: "Disallowed",
