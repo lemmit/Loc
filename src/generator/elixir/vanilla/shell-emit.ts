@@ -629,7 +629,15 @@ function renderVanillaRouter(
   // `/openapi.json`, so they stay reachable without a token.  Bare paths splice
   // into `scope "/api"` as before.
   const rootApiRoutes = apiRoutes.filter((r) => r.path.startsWith("!root:"));
-  const scopedApiRoutes = apiRoutes.filter((r) => !r.path.startsWith("!root:"));
+  // `!sse:` — the realtime SSE stream (channels.md Part I).  It CANNOT ride the
+  // `:api` pipeline: `plug :accepts, ["json"]` answers 406 to the
+  // `Accept: text/event-stream` an `EventSource` sends.  Spliced into its own
+  // `:sse` pipeline at the router root instead (the path already carries the
+  // `/api` prefix, so the served URL is unchanged from the other backends').
+  const sseRoutes = apiRoutes.filter((r) => r.path.startsWith("!sse:"));
+  const scopedApiRoutes = apiRoutes.filter(
+    (r) => !r.path.startsWith("!root:") && !r.path.startsWith("!sse:"),
+  );
   const routeLines = scopedApiRoutes
     .map((r) => `    ${r.method} "${r.path}", ${r.controller}, ${r.action}`)
     .join("\n");
@@ -644,6 +652,28 @@ function renderVanillaRouter(
   scope "/" do
     pipe_through :api
 ${rootApiLines}
+  end
+`
+    : "";
+  // The SSE pipeline runs no `:accepts` negotiation (see above) and no Auth
+  // plug: an `EventSource` cannot send an `Authorization` header, and the wire
+  // carries no privileged payload — the authorized read stays the gate, exactly
+  // as on the Hono / python backends whose stream is likewise unauthenticated.
+  const sseLines = sseRoutes
+    .map((r) => {
+      const path = r.path.slice("!sse:".length);
+      return `    ${r.method} "${path}", ${appModule}Web.${r.controller}, ${r.action}`;
+    })
+    .join("\n");
+  const sseBlock = sseLines
+    ? `
+  pipeline :sse do
+    plug :fetch_query_params
+  end
+
+  scope "/" do
+    pipe_through :sse
+${sseLines}
   end
 `
     : "";
@@ -763,7 +793,7 @@ ${browserPipeline}${spaPipeline}
   scope "/metrics" do
     get "/", ${appModule}Web.MetricsController, :index
   end
-${rootApiScope}${liveScope}${authScope}${spaScope}
+${rootApiScope}${sseBlock}${liveScope}${authScope}${spaScope}
   scope "/api", ${appModule}Web do
     pipe_through :api
 ${routeLines}
