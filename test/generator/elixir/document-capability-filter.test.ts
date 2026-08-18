@@ -106,6 +106,18 @@ const NON_PRINCIPAL = `system SD {
   }
 }`;
 
+/** The emitted module with `#` comment lines stripped — for assertions about
+ *  what the generated CODE does, which must not be satisfied (or broken) by
+ *  prose in a generated comment.  The `fragment(` assertions below are exactly
+ *  that: the `__denied?/1` helper's comment names `fragment("false")` while
+ *  explaining why the in-app path cannot use it, and a raw substring check
+ *  cannot tell the two apart. */
+const codeOf = (src: string): string =>
+  src
+    .split("\n")
+    .filter((l) => !l.trimStart().startsWith("#"))
+    .join("\n");
+
 const THING_REPO = "d/lib/d/main/thing_repository.ex";
 const NOTE_REPO = "d/lib/d/main/note_repository.ex";
 const DOC_REPO = "d/lib/d/main/doc_repository.ex";
@@ -146,8 +158,10 @@ describe("elixir/vanilla — capability filter on a shape: document aggregate", 
   it("renders `allow deep` as the in-memory subtree scope, never an Ecto fragment", async () => {
     const repo = (await generateSystemFiles(DEEP_AND_DENY)).get(THING_REPO)!;
     // The sentinel must not reach the query renderer: `fragment(...)` is only
-    // legal inside an Ecto query, and a document read has none.
-    expect(repo).not.toContain("fragment(");
+    // legal inside an Ecto query, and a document read has none.  Asserted over
+    // CODE, not comments — the emitted `__denied?/1` doc comment cites
+    // `fragment("false")` when explaining why the SQL path needs no equivalent.
+    expect(codeOf(repo)).not.toContain("fragment(");
     // Descendant-or-self over the materialized path, with the NULL-dataKey
     // fallback to the flat tenant floor (DEEP_SCOPE_SEMANTICS).
     expect(repo).toContain("record.data_key != nil");
@@ -162,12 +176,17 @@ describe("elixir/vanilla — capability filter on a shape: document aggregate", 
     expect(repo).not.toContain('current_user.org_path) <> "."');
   });
 
-  it("renders `deny` as a plain false conjunct — the aggregate reads as invisible", async () => {
+  it("renders `deny` as an always-false conjunct — the aggregate reads as invisible", async () => {
     const repo = (await generateSystemFiles(DEEP_AND_DENY)).get(NOTE_REPO)!;
-    expect(repo).not.toContain("fragment(");
+    expect(codeOf(repo)).not.toContain("fragment(");
     // Tenant floor AND the always-false carve-out.
     expect(repo).toContain("record.tenant_id == (current_user && current_user.tenant_id)");
-    expect(repo).toContain("and (false)");
+    // NOT the literal `false`: the compiler folds it, and `… and false` is a
+    // typing violation whose narrowed return type also makes each CALLER's
+    // `{:ok, _}` branch dead code — both `--warnings-as-errors` failures.
+    expect(repo).toContain("and (__denied?(row))");
+    expect(repo).toContain("defp __denied?(row), do: Enum.member?([], row)");
+    expect(codeOf(repo)).not.toContain("and (false)");
   });
 
   it("is fail-closed for an actor-less read (a nil principal matches no rows)", async () => {

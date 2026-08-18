@@ -84,6 +84,7 @@ import {
   returningOpPersistsChangeset,
   wrapOpBodyWithGuards,
 } from "./operation-returns-emit.js";
+import { renderEctoDefault } from "./schema-emit.js";
 import { stampAssignmentPairs, stampUsesPrincipal, stampUsesPrincipalFor } from "./stamp-emit.js";
 
 /** True iff the aggregate's effective saving shape is `document` (binding-aware,
@@ -225,7 +226,17 @@ end
 function renderDocDataSchema(appModule: string, ctxModule: string, agg: AggregateIR): string {
   const dataMod = `${appModule}.${ctxModule}.${upperFirst(agg.name)}.Data`;
   const fields = docFields(agg);
-  const fieldLines = fields.map((f) => `    field :${snake(f.name)}, ${castType(f.type)}`);
+  // A declared Loom default (`total: int = 0`) becomes the embed's Ecto
+  // `default:`, exactly as the relational schema does it (`renderFieldLine`).
+  // Without it the document path DROPPED defaults on the floor: `cast/3` leaves
+  // an omitted key alone, the fresh `%<Agg>.Data{}` carried `nil`, and
+  // `validate_required` then rejected the create — a 422 whose top-level
+  // `errors` array is EMPTY, because the nested embed holds the error (B5).
+  // Every other backend applies the default and accepts the same request.
+  const fieldLines = fields.map((f) => {
+    const def = f.default ? renderEctoDefault(f.default) : null;
+    return `    field :${snake(f.name)}, ${castType(f.type)}${def ? `, default: ${def}` : ""}`;
+  });
   const containLines = agg.contains.map(
     (c) =>
       `    ${c.collection ? "embeds_many" : "embeds_one"} :${snake(c.name)}, ${appModule}.${ctxModule}.${upperFirst(c.partName)}`,
