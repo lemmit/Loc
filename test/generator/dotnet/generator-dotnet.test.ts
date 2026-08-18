@@ -1750,15 +1750,15 @@ describe(".NET generator", () => {
     it("emits an AbstractValidator per command with single-field invariants", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateDotnet(model);
-      // sales.ddd Customer: `invariant email.length > 0` →
-      // `RuleFor(x => x.Email).MinimumLength(1)`.
+      // sales.ddd Customer: `invariant email.length > 0` → a code-point
+      // length `.Must` on `RuleFor(x => x.Email)` (RS-31).
       const customerCreate = files.get(
         "Application/Customers/Commands/CreateCustomerCommandValidator.cs",
       )!;
       expect(customerCreate).toMatch(
         /public sealed class CreateCustomerCommandValidator : AbstractValidator<CreateCustomerCommand>/,
       );
-      expect(customerCreate).toMatch(/RuleFor\(x => x\.Email\)\.MinimumLength\(1\)/);
+      expect(customerCreate).toMatch(/RuleFor\(x => x\.Email\)\.Must\(v => v == null \|\| \(v\.Length - v\.Count\(char\.IsLowSurrogate\)\) >= 1\)/);
       expect(customerCreate).toMatch(/using FluentValidation;/);
     });
 
@@ -1767,11 +1767,11 @@ describe(".NET generator", () => {
       const files = generateDotnet(model);
       // M-T6.8/SYS-1: Customer's crudish `update` command validator now carries
       // the SAME field constraint as CreateCustomerCommandValidator —
-      // `invariant email.length > 0` → `MinimumLength(1)` — so an invalid update
+      // `invariant email.length > 0` → the same code-point length `.Must` — so an invalid update
       // fails FluentValidation instead of reaching the domain floor.
       const customerUpdate = files.get("Application/Customers/Commands/UpdateCommandValidator.cs")!;
       expect(customerUpdate).toBeDefined();
-      expect(customerUpdate).toMatch(/RuleFor\(x => x\.Email\)\.MinimumLength\(1\)/);
+      expect(customerUpdate).toMatch(/RuleFor\(x => x\.Email\)\.Must\(v => v == null \|\| \(v\.Length - v\.Count\(char\.IsLowSurrogate\)\) >= 1\)/);
     });
 
     it("emits an AbstractValidator per public op with single-field preconditions", async () => {
@@ -1965,7 +1965,7 @@ describe(".NET generator", () => {
       expect(files.has("Application/Users/Commands/CreateUserCommandValidator.cs")).toBe(false);
       // But the domain `AssertInvariants` still enforces it.
       const userClass = files.get("Domain/Users/User.cs")!;
-      expect(userClass).toMatch(/this\.Username\.Length >= 3/);
+      expect(userClass).toMatch(/\(this\.Username\.Length - this\.Username\.Count\(char\.IsLowSurrogate\)\) >= 3/);
     });
 
     it("emits cross-field invariants as `RuleFor(x => x).Must(...)` with `.WithName`", async () => {

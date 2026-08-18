@@ -5,7 +5,7 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 // Custom validation messages on the .NET backend — a messaged rule renders
 // through the FluentValidation `.Must(...).WithMessage(<text>)` carrier and the
 // `AssertInvariants` domain floor `DomainException(<text>)`; a message-less rule
-// keeps its native chain (`.MinimumLength(N)`) + derived default byte-identical.
+// keeps its native chain (a code-point `.Must`) + derived default unchanged.
 // ---------------------------------------------------------------------------
 
 const SOURCE = `
@@ -42,7 +42,7 @@ describe("dotnet — messaged rule → FluentValidation .WithMessage carrier", (
   it("routes a messaged invariant/check through .Must(...).WithMessage(text)", async () => {
     const { validator } = await gen();
     expect(validator).toContain(
-      "RuleFor(x => x).Must(x => x.Name.Length >= 2 && x.Name.Length <= 120)",
+      "RuleFor(x => x).Must(x => (x.Name.Length - x.Name.Count(char.IsLowSurrogate)) >= 2 && (x.Name.Length - x.Name.Count(char.IsLowSurrogate)) <= 120)",
     );
     expect(validator).toContain('.WithMessage("Name must be 2-120 characters")');
     expect(validator).toContain('.WithMessage("SKU is required")');
@@ -61,9 +61,11 @@ describe("dotnet — messaged rule → FluentValidation .WithMessage carrier", (
     expect(validator).not.toContain('.WithErrorCode("msg." +');
   });
 
-  it("keeps a message-LESS invariant as a byte-identical native chain", async () => {
+  it("keeps a message-LESS invariant on the native chain", async () => {
     const { validator } = await gen();
-    expect(validator).toContain("RuleFor(x => x.Sku).MinimumLength(1);");
+    // A string LENGTH bound is a code-point `.Must`, not FluentValidation's
+    // code-unit `.MinimumLength` (RS-31).
+    expect(validator).toContain(`RuleFor(x => x.Sku).Must(v => v == null || (v.Length - v.Count(char.IsLowSurrogate)) >= 1)`);
   });
 });
 

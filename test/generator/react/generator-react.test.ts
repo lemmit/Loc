@@ -742,8 +742,13 @@ describe("react generator", () => {
       const productApi = files.get("web_app/src/api/product.ts")!;
       // acme Money: invariant amount >= 0 + invariant currency.length == 3
       expect(productApi).toMatch(/amount: z\.number\(\)\.min\(0\)/);
-      expect(productApi).toMatch(/currency: z\.string\(\)\.length\(3\)/);
-      // No leftover refine on MoneySchema.
+      // A LENGTH bound is a code-point predicate, not zod's code-unit
+      // `.length(3)` (RS-31).  The frontend schema carries no `.openapi()`
+      // metadata — only the backend routes publish a JSON Schema.
+      expect(productApi).toMatch(
+        /currency: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length === 3\)/,
+      );
+      // No leftover object-level refine on MoneySchema.
       const moneyBlock = productApi.match(
         /export const MoneySchema = z\.object\(\{[\s\S]*?\}\)([^;]*);/,
       )!;
