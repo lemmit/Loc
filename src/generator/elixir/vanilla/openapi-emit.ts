@@ -568,7 +568,14 @@ ${pagingQueryParams()}
             200 => %OpenApiSpex.Response{
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${listRespRef}}}
-            }
+            }${statusResponseEntries(
+              withResolvedNotFound(
+                derivedOps.find((o) => o.kind === "find" && o.find?.name === "all")
+                  ?.errorStatuses ?? [],
+                notFoundStatus,
+              ),
+              schemasModule,
+            )}
           }
         }${createPost}
       }`,
