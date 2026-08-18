@@ -14,14 +14,15 @@
 // The positive control matters as much as the negative one: the SAME model
 // with `auth: ui` added must stay clean, or the gate is just noise.
 //
-// NOT covered here: a read inside a COMPONENT.  The check walks component
-// bodies (a component renders into a page, so the read is just as dangling),
-// but `lowerComponent` threads `user: undefined` where `lowerPage` threads the
-// system's user block, so a component's `currentUser` lowers to an unresolved
-// ref rather than `current-user` and never reaches the gate.  That is a
-// LOWERING gap, not a gate gap — when it is threaded, add the case here.
-// Nor is a missing `user { … }` block: without one the token never resolves to
-// a principal at all, and `loom.auth-no-user-block` already names it.
+// A read inside a COMPONENT is covered too, and is the reason this file grew a
+// third `where`: a component renders INTO a page, so the read is exactly as
+// dangling, but `lowerComponent` used to thread `user: undefined` where
+// `lowerPage` threads the system's user block — so the component's
+// `currentUser` lowered to an unresolved ref and never reached this gate
+// (audit finding A9).  The lowering threads it now; these cases pin that.
+//
+// NOT covered here: a missing `user { … }` block.  Without one the token never
+// resolves to a principal at all, and `loom.auth-no-user-block` already names it.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -38,14 +39,17 @@ async function currentUserErrors(source: string): Promise<string[]> {
 
 /** `where` places the `currentUser.email` read; `auth` is the frontend
  *  deployable's auth clause (`` = none). */
-function sys(opts: { where: "page" | "action"; auth?: string }): string {
+function sys(opts: { where: "page" | "action" | "component"; auth?: string }): string {
   const user = "user { id: string email: string }";
   const auth = opts.auth ? opts.auth : "";
   const read = "Text(`hello ${currentUser.email}`)";
   const uiBody =
     opts.where === "page"
       ? `page X { route: "/x"  body: Stack { ${read} } }`
-      : `page X {
+      : opts.where === "component"
+        ? `component Greeting() { body: Stack { ${read} } }
+           page X { route: "/x" body: Stack { Greeting() } }`
+        : `page X {
              route: "/x"
              state { greeting: string = "" }
              action greet() { greeting := currentUser.email }
@@ -75,10 +79,11 @@ system S {
 }
 
 describe("loom.current-user-needs-auth-ui", () => {
-  for (const where of ["page", "action"] as const) {
+  for (const where of ["page", "action", "component"] as const) {
     it(`rejects a currentUser read in a ${where} with no auth guard`, async () => {
       const errs = await currentUserErrors(sys({ where }));
       expect(errs.length, `expected the gate to fire for a ${where} read`).toBe(1);
+      if (where === "component") expect(errs[0]).toContain("component 'Greeting'");
       expect(errs[0]).toContain("'web'");
       expect(errs[0]).toContain("currentUser");
       // The message must name the fix, not just the symptom.

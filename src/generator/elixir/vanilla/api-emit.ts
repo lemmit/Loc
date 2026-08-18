@@ -18,13 +18,7 @@ import {
   createInputFields,
   emitsRestCreate as sharedEmitsRestCreate,
 } from "../../../ir/enrich/wire-projection.js";
-import {
-  PAGED_DEFAULT_PAGE,
-  PAGED_DEFAULT_PAGE_SIZE,
-  PAGED_MAX_PAGE,
-  PAGED_MAX_PAGE_SIZE,
-  pagedReturn,
-} from "../../../ir/stdlib/generics.js";
+import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -78,6 +72,7 @@ import {
   renderProblemVariantHelper,
   renderReturningOpControllerAction,
 } from "./operation-returns-emit.js";
+import { PAGE_CALL_ARGS, PAGE_WITH_CLAUSES, pagingElseArm } from "./page-param.js";
 import { hasRefColls } from "./ref-collection-emit.js";
 import { emitsRestDelete } from "./rest-surface.js";
 import { stampUsesPrincipal } from "./stamp-emit.js";
@@ -367,7 +362,10 @@ function renderController(
     (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name),
   );
   const indexPaged = !readOnly && (listAllFind ? !!pagedReturn(listAllFind.returnType) : false);
-  const pagedListArgs = `page_param(params, "page", ${PAGED_DEFAULT_PAGE}, ${PAGED_MAX_PAGE}), page_param(params, "pageSize", ${PAGED_DEFAULT_PAGE_SIZE}, ${PAGED_MAX_PAGE_SIZE}), Map.get(params, "sort", "id"), Map.get(params, "dir", "asc")${principal ? ", current_user" : ""}`;
+  // The paging controls are bound by the `with` clauses `PAGE_WITH_CLAUSES`
+  // prepends (page-param.ts), so an out-of-range window 422s before the read
+  // instead of being clamped into a page the caller never asked for.
+  const pagedListArgs = `${PAGE_CALL_ARGS.join(", ")}, Map.get(params, "sort", "id"), Map.get(params, "dir", "asc")${principal ? ", current_user" : ""}`;
   // The LIST read's authorization gate — 403 before the query, the same
   // contract `renderFindActions` gives every NAMED find.  `index` is emitted
   // here, outside that loop (the list endpoint has its own paged shape), which
@@ -382,8 +380,9 @@ function renderController(
       ? "    current_user = Map.get(conn.assigns, :current_user)\n"
       : "";
   const indexBody = indexPaged
-    ? `    with {:ok, result} <- ${ctxModule}.list_${aggSnake}s(${pagedListArgs}) do
+    ? `    with ${[...PAGE_WITH_CLAUSES, `{:ok, result} <- ${ctxModule}.list_${aggSnake}s(${pagedListArgs})`].join(",\n         ")} do
       json(conn, %{result | items: Enum.map(result.items, &serialize/1)})
+${pagingElseArm(`${appModule}Web.ProblemDetails`, "    ")}
     end`
     : `    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) do
       json(conn, Enum.map(records, &serialize/1))

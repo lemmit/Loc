@@ -583,11 +583,7 @@ export function validateCurrentUserNeedsAuthUi(sys: SystemIR, diags: LoomDiagnos
     if (d.auth?.ui || d.auth?.required) continue;
     for (const { ui } of mountedUis(sys, d)) {
       // Components are walked for the same reason charts and grids are — a
-      // read moved into one renders into the page all the same.  (Today a
-      // component's `currentUser` lowers to an UNRESOLVED ref, because
-      // `lowerComponent` threads `user: undefined` where `lowerPage` threads
-      // the system's user block; when that is threaded through, this arm
-      // starts biting with no edit here.)
+      // read moved into one renders into the page all the same.
       const hosts: { what: string; host: UiRenderHost }[] = [
         ...ui.pages.map((p) => ({ what: `page '${p.name}'`, host: p as UiRenderHost })),
         ...ui.components.map((c) => ({ what: `component '${c.name}'`, host: c as UiRenderHost })),

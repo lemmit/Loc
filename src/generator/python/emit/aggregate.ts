@@ -31,7 +31,12 @@ import {
 import { provColumn, provenancedFieldsOf } from "../emit/provenance.js";
 import { externHookCall, externHookModuleName } from "../extern-builder.js";
 import { emptyPyTypeImports, visitPyTypeImports } from "../py-type-imports.js";
-import { collectPyExprImports, renderPyExpr, renderPyType } from "../render-expr.js";
+import {
+  collectPyExprImports,
+  renderPyExpr,
+  renderPyNegatedGuard,
+  renderPyType,
+} from "../render-expr.js";
 import {
   renderPyStatementChunks,
   renderPyStatements,
@@ -655,11 +660,14 @@ function renderEntity(
     }
     if (inv.guard) {
       return [
-        `        if (${renderPyExpr(inv.guard)}) and not (${renderPyExpr(inv.expr)}):`,
+        `        if (${renderPyExpr(inv.guard)}) and ${renderPyNegatedGuard(inv.expr)}:`,
         `            raise DomainError(${msg})`,
       ];
     }
-    return [`        if not (${renderPyExpr(inv.expr)}):`, `            raise DomainError(${msg})`];
+    return [
+      `        if ${renderPyNegatedGuard(inv.expr)}:`,
+      `            raise DomainError(${msg})`,
+    ];
   });
   const assertInvariants = [
     "",
