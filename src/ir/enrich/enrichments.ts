@@ -72,6 +72,7 @@ import {
   TENANT_OWNED_CAPABILITY,
   TENANT_OWNED_TENANT_ID_FIELD,
   tenancyClaimBinding,
+  tenancyPrincipalClaim,
 } from "../util/tenant-stance.js";
 import { walkExprDeep, walkStmtExprsDeep, walkWorkflowStmtExprsDeep } from "../util/walk.js";
 import { buildCreateInput, wireFieldsForAggregate } from "./wire-projection.js";
@@ -471,15 +472,6 @@ function applyRegistrySelfScope(m: EnrichedSubdomainIR, sys: SystemIR): Enriched
 // as `tenantId` — which is every fixture that predates `tenancy-claim-name`.
 // ---------------------------------------------------------------------------
 
-/** The principal member the tenant floor compares against: the system's
- *  declared tenancy claim, falling back to the capability's own column name
- *  when the system declares no `tenancy by` (the status-quo shape — a
- *  `tenantOwned` aggregate without a tenancy declaration is a phase-⑦
- *  diagnostic, not something to silently re-point here). */
-function tenancyClaimField(sys: Pick<SystemIR, "tenancy">): string {
-  return sys.tenancy?.claimField ?? TENANT_OWNED_TENANT_ID_FIELD;
-}
-
 /** True when `e` reads `currentUser.<TENANT_OWNED_TENANT_ID_FIELD>` — the
  *  capability's hardcoded principal reference, and the only thing this pass
  *  rebinds. */
@@ -493,7 +485,7 @@ function isHardcodedTenantClaimRead(e: ExprIR): boolean {
 }
 
 function bindTenancyClaim(m: EnrichedSubdomainIR, sys: SystemIR): EnrichedSubdomainIR {
-  const claim = tenancyClaimField(sys);
+  const claim = tenancyPrincipalClaim(sys);
   if (claim === TENANT_OWNED_TENANT_ID_FIELD) return m;
   const rebind = (e: ExprIR): ExprIR => (e.kind === "member" ? { ...e, member: claim } : e);
   return {
@@ -562,7 +554,7 @@ function bindTenancyClaim(m: EnrichedSubdomainIR, sys: SystemIR): EnrichedSubdom
 function applyPolicyReadLevels(m: EnrichedSubdomainIR, sys: SystemIR): EnrichedSubdomainIR {
   const hierarchy = hierarchyRegistry(sys) !== undefined;
   // Which subtree filter (if any) a level rewrites the tenant floor to.
-  const claim = tenancyClaimField(sys);
+  const claim = tenancyPrincipalClaim(sys);
   const filterFor = (agg: AggregateIR, level: string): ExprIR | undefined => {
     if (level === "deep") return buildDeepScopeFilter(agg, claim);
     // `global` widens to the root subtree only under a hierarchy; otherwise it
@@ -617,7 +609,7 @@ const SCOPE_RANK: Record<string, number> = { local: 0, deep: 1, global: 2 };
 
 function applyPolicyWriteLevels(m: EnrichedSubdomainIR, sys: SystemIR): EnrichedSubdomainIR {
   const hierarchy = hierarchyRegistry(sys) !== undefined;
-  const claim = tenancyClaimField(sys);
+  const claim = tenancyPrincipalClaim(sys);
   // The write scope is derived whenever a tenant-owned aggregate's command load
   // (which reuses the read filter on every backend) could be WIDER than the
   // caller's write scope: either an explicit `allow write` rule, OR a widened

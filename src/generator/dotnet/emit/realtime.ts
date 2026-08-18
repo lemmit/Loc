@@ -21,8 +21,9 @@
 //   - Untenanted context (no `tenantOwned` aggregate): single-hop
 //     broadcast-to-all, byte-identical to the pre-rooms wire.
 //   - Tenant-owned context: delivery is scoped by the tenant DataKey
-//     (`currentUser.tenantId`, the equality part of the `tenantOwned` read
-//     policy).  A tenant-scoped event reaches only subscribers in the
+//     (`currentUser.<claim>`, the equality part of the `tenantOwned` read
+//     policy — the claim `tenancy by user.<claim>` bound, NOT the row column
+//     `tenantId`).  A tenant-scoped event reaches only subscribers in the
 //     emitter's tenant room — never cross-tenant.  A connection derives its
 //     room from the verified principal at connect (never a client value); an
 //     unauthenticated connection joins no room.
@@ -31,9 +32,10 @@
 // the API.
 // ---------------------------------------------------------------------------
 
-import type { BoundedContextIR } from "../../../ir/types/loom-ir.js";
+import type { BoundedContextIR, SystemIR } from "../../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../../ir/util/channels.js";
 import { type RealtimeRoomPlan, realtimeRoomPlan } from "../../../ir/util/realtime-rooms.js";
+import { upperFirst } from "../../../util/naming.js";
 
 /** The broadcast-carried (UI-observable) event names of a context, sorted. */
 export function realtimeTypesOf(ctx: BoundedContextIR): string[] {
@@ -43,8 +45,19 @@ export function realtimeTypesOf(ctx: BoundedContextIR): string[] {
 /** The realtime room plan for a context — `tenantScoped` when it hosts a
  *  `tenantOwned` aggregate whose events reach the broadcast wire.  The .NET
  *  emitter reads it exactly like the Hono one (shared derivation core). */
-export function realtimeRoomPlanOf(ctx: BoundedContextIR): RealtimeRoomPlan {
-  return realtimeRoomPlan(ctx);
+export function realtimeRoomPlanOf(
+  ctx: BoundedContextIR,
+  sys: Pick<SystemIR, "tenancy"> | undefined,
+): RealtimeRoomPlan {
+  return realtimeRoomPlan(ctx, sys);
+}
+
+/** The `User` record property carrying the tenant room key — the bound
+ *  `tenancy by user.<claim>`, Pascal-cased exactly as `auth-emit.ts` declares
+ *  the principal's properties (`upperFirst(f.name)`).  Never `TenantId` unless
+ *  that is the declared claim: that name is the ROW column. */
+export function realtimeTenantClaimProperty(plan: RealtimeRoomPlan): string {
+  return upperFirst(plan.tenantClaimField);
 }
 
 /** The subscriber hub + wire serializer.  Registered as a singleton so the
@@ -151,6 +164,7 @@ function renderRoomScopedHub(ns: string, types: string[], plan: RealtimeRoomPlan
   const typeList = types.map((t) => `"${t}"`).join(", ");
   const tenantTypes = [...plan.tenantEventTypes].sort();
   const tenantList = tenantTypes.map((t) => `"${t}"`).join(", ");
+  const claimProp = realtimeTenantClaimProperty(plan);
   const idFieldEntries = tenantTypes
     .map((t) => {
       const fields = plan.eventIdFields.get(t) ?? [];
@@ -172,7 +186,7 @@ namespace ${ns}.Infrastructure.Realtime;
 
 /// <summary>Realtime SSE hub (channels.md rooms + policy-derived routing v1):
 /// this context hosts tenant-owned aggregates, so delivery is scoped by the
-/// tenant DataKey (<c>currentUser.tenantId</c>, the equality part of the
+/// tenant DataKey (<c>currentUser.${plan.tenantClaimField}</c>, the equality part of the
 /// <c>tenantOwned</c> read policy).  A tenant-scoped event reaches only
 /// subscribers in the emitter's tenant room — never cross-tenant; the
 /// authorized read remains the gate.</summary>
@@ -181,8 +195,9 @@ public sealed class RealtimeHub
     /// <summary>Events carried by a broadcast channel — the UI-observable set.</summary>
     public static readonly IReadOnlySet<string> EventTypes = new HashSet<string> { ${typeList} };
 
-    /// <summary>Events whose payload references a <c>tenantOwned</c> aggregate —
-    /// routed to the emitter's tenant room only, never broadcast cross-tenant.</summary>
+    /// <summary>Events this tenant-owned context routes to the emitter's tenant
+    /// room only, never broadcast cross-tenant — everything it carries except the
+    /// events provably about <c>crossTenant</c> (shared) data.</summary>
     private static readonly HashSet<string> TenantScopedEventTypes = new() { ${tenantList} };
 
     /// <summary>Id-reference (<c>&lt;Agg&gt; id</c>) fields kept when a
@@ -198,8 +213,8 @@ ${idFieldEntries}
     /// <summary>Every live connection — receives tenant-agnostic (global)
     /// events and any broadcast refetch ticket.</summary>
     private readonly ConcurrentDictionary<Guid, Channel<string>> _subscribers = new();
-    /// <summary>Per-tenant rooms (key = <c>currentUser.tenantId</c>, the
-    /// tenantOwned DataKey) — a connection joins its own tenant's room at
+    /// <summary>Per-tenant rooms (key = <c>currentUser.${plan.tenantClaimField}</c>, the
+    /// bound tenancy claim) — a connection joins its own tenant's room at
     /// connect.</summary>
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<Guid, Channel<string>>> _rooms = new();
     /// <summary>Each connection's joined tenant, so Unsubscribe can leave the
@@ -265,7 +280,7 @@ ${idFieldEntries}
         // The writing request's tenant, off the ambient RequestContext — present
         // for inline-dispatched events (the write that caused them), null outside
         // a request (outbox relay drain / timer scheduler).
-        var tenant = RequestContext.Current?.CurrentUser is { } user ? user.TenantId.ToString() : null;
+        var tenant = RequestContext.Current?.CurrentUser is { } user ? user.${claimProp}.ToString() : null;
         if (tenant is not null)
         {
             if (_rooms.TryGetValue(tenant, out var room))

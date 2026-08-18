@@ -14,6 +14,8 @@
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
+import type { BoundedContextIR, SystemIR } from "../../src/ir/types/loom-ir.js";
+import { type RealtimeRoomPlan, realtimeRoomPlan } from "../../src/ir/util/realtime-rooms.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { parseString } from "../_helpers/parse.js";
 
@@ -148,5 +150,107 @@ describe("realtime rooms parity (`loom.realtime-tenant-broadcast` retired)", () 
     "node",
   ])("raises no tenant-broadcast warning on %s", async (backend) => {
     expect(await diags(tenantSys(backend), "loom.realtime-tenant-broadcast")).toEqual([]);
+  });
+});
+
+// ─── Fail-closed tenant classification (A4) ─────────────────────────────────
+//
+// `realtimeRoomPlan` used to mark an event tenant-scoped IFF it carried an
+// `<Agg> id` field pointing at a `tenantOwned` aggregate.  An event with a
+// scalar payload about tenant data but no id reference therefore landed in the
+// GLOBAL set — its full payload streamed to every connected tenant.  The
+// default is inverted now: inside a tenant-owned context an event is global
+// only on POSITIVE evidence that it is about `crossTenant` (shared) data.
+
+const CLASSIFY_SYS = `
+system Classify {
+  user { id: guid  orgId: string }
+  tenancy by user.orgId of Organization
+  subdomain Core {
+    context Billing {
+      aggregate Invoice with tenantOwned, crudish {
+        number: string
+        operation issue() { emit InvoiceIssued { invoice: id } }
+        // Carries no id reference at all — the fail-open case.
+        operation remind() { emit ReminderSent { note: number } }
+      }
+      repository Invoices for Invoice { }
+      aggregate Plan crossTenant with crudish {
+        title: string
+        operation publish() { emit PlanPublished { title: title } }
+      }
+      repository Plans for Plan { }
+      event InvoiceIssued { invoice: Invoice id }
+      event ReminderSent { note: string }
+      event PlanPublished { title: string }
+      channel Lifecycle {
+        carries: InvoiceIssued, ReminderSent, PlanPublished
+        delivery: broadcast
+        retention: ephemeral
+      }
+    }
+    context Accounts {
+      aggregate Organization with crudish { name: string }
+    }
+  }
+  api BillingApi from Core
+  storage primary { type: postgres }
+  resource billingSt { for: Billing, kind: state, use: primary }
+  resource acctSt { for: Accounts, kind: state, use: primary }
+  deployable backend {
+    platform: node
+    contexts: [Billing, Accounts]
+    dataSources: [billingSt, acctSt]
+    serves: BillingApi
+    port: 3000
+    auth: required
+  }
+}
+`;
+
+async function planFor(source: string, contextName: string): Promise<RealtimeRoomPlan> {
+  const { model } = await parseString(source, { validate: false });
+  const ir = enrichLoomModel(lowerModel(model));
+  const sys: SystemIR = ir.systems[0]!;
+  let ctx: BoundedContextIR | undefined;
+  for (const sub of sys.subdomains) {
+    const hit = sub.contexts.find((c) => c.name === contextName);
+    if (hit) ctx = hit;
+  }
+  expect(ctx, `context ${contextName} not found`).toBeDefined();
+  return realtimeRoomPlan(ctx as BoundedContextIR, sys);
+}
+
+describe("realtime tenant classification is fail-closed", () => {
+  it("an id-less event out of a tenant-owned context is NOT in the global set", async () => {
+    const plan = await planFor(CLASSIFY_SYS, "Billing");
+    expect(plan.tenantScoped).toBe(true);
+    expect(plan.tenantEventTypes.has("ReminderSent")).toBe(true);
+    // No id reference to keep — the ticket degrades to the `type` alone, which
+    // is the point: no scalar payload crosses a tenant boundary.
+    expect(plan.eventIdFields.get("ReminderSent")).toEqual([]);
+  });
+
+  it("an event referencing a tenantOwned aggregate stays tenant-scoped with its ids", async () => {
+    const plan = await planFor(CLASSIFY_SYS, "Billing");
+    expect(plan.tenantEventTypes.has("InvoiceIssued")).toBe(true);
+    expect(plan.eventIdFields.get("InvoiceIssued")).toEqual(["invoice"]);
+  });
+
+  it("an event out of a `crossTenant` aggregate stays global", async () => {
+    const plan = await planFor(CLASSIFY_SYS, "Billing");
+    expect(plan.tenantEventTypes.has("PlanPublished")).toBe(false);
+  });
+
+  it("carries the bound tenancy claim, never the row column", async () => {
+    const plan = await planFor(CLASSIFY_SYS, "Billing");
+    expect(plan.tenantClaimField).toBe("orgId");
+  });
+
+  it("an untenanted context keeps the v1 broadcast plan", async () => {
+    const untenanted = tenantSys("node").replace("with tenantOwned, crudish", "with crudish");
+    const plan = await planFor(untenanted, "Fulfillment");
+    expect(plan.tenantScoped).toBe(false);
+    expect(plan.tenantEventTypes.size).toBe(0);
   });
 });

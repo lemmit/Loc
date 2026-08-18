@@ -21,21 +21,25 @@
 //     authorized read — SSE carries payloads/tickets, the refetch decides
 //     what a client may see.
 //   - Tenant-owned context: delivery is scoped by the tenant DataKey
-//     (`currentUser.tenantId`, the equality part of the `tenantOwned` read
-//     policy).  A tenant-scoped event reaches only subscribers in the
+//     (`currentUser.<claim>`, the equality part of the `tenantOwned` read
+//     policy — the claim `tenancy by user.<claim>` bound, NOT the row column
+//     `tenantId`).  A tenant-scoped event reaches only subscribers in the
 //     emitter's tenant room — never cross-tenant.  A connection derives its
 //     room from the verified principal at connect (never a client-supplied
 //     value); an unauthenticated connection joins no room.
 
-import type { EnrichedBoundedContextIR } from "../../../ir/types/loom-ir.js";
+import type { EnrichedBoundedContextIR, SystemIR } from "../../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../../ir/util/channels.js";
 import { type RealtimeRoomPlan, realtimeRoomPlan } from "../../../ir/util/realtime-rooms.js";
 
-export function buildRealtimeFile(ctx: EnrichedBoundedContextIR): string | null {
+export function buildRealtimeFile(
+  ctx: EnrichedBoundedContextIR,
+  sys: Pick<SystemIR, "tenancy"> | undefined,
+): string | null {
   const types = [...realtimeEventTypes(ctx)].sort();
   if (types.length === 0) return null;
   const typeList = types.map((t) => JSON.stringify(t)).join(", ");
-  const plan = realtimeRoomPlan(ctx);
+  const plan = realtimeRoomPlan(ctx, sys);
   // A context with no tenant-owned aggregate keeps the v1 broadcast wire
   // byte-for-byte (fixture-gated) — rooms buy nothing when there is no
   // DataKey to scope by.
@@ -111,6 +115,9 @@ export function realtimeRoutes(): OpenAPIHono {
  *  (channels.md rooms + policy-derived routing v1). */
 function buildRoomScopedRealtime(typeList: string, plan: RealtimeRoomPlan): string {
   const tenantTypes = [...plan.tenantEventTypes].sort();
+  // The principal member carrying the room key — `tenancy by user.<claim>`.
+  // A TS identifier by grammar, so it reads as a bare property.
+  const claim = plan.tenantClaimField;
   const tenantList = tenantTypes.map((t) => JSON.stringify(t)).join(", ");
   // Event names are grammar `ID`s (valid JS identifiers), so bare object keys
   // — Biome's recommended `useLiteralKeys` rejects needless quoting.
@@ -125,7 +132,7 @@ function buildRoomScopedRealtime(typeList: string, plan: RealtimeRoomPlan): stri
 // Events carried by a \`delivery: broadcast\` channel stream to connected
 // browsers at GET /realtime/events.  This context hosts tenant-owned
 // aggregates, so delivery is scoped by the tenant DataKey
-// (\`currentUser.tenantId\`, the equality part of the \`tenantOwned\` read
+// (\`currentUser.${claim}\`, the equality part of the \`tenantOwned\` read
 // policy): a tenant-scoped event reaches only subscribers in the emitter's
 // tenant room — never cross-tenant.  The authorized read remains the gate;
 // clients refetch through it.
@@ -138,14 +145,16 @@ import { requestContext } from "../obs/als";
 /** Events carried by a broadcast channel — the UI-observable set. */
 export const REALTIME_EVENT_TYPES: ReadonlySet<string> = new Set([${typeList}]);
 
-/** Events whose payload references a \`tenantOwned\` aggregate — routed to the
- *  emitter's tenant room only, never broadcast cross-tenant. */
+/** Events this tenant-owned context routes to the emitter's tenant room only,
+ *  never broadcast cross-tenant — everything it carries except the events
+ *  provably about \`crossTenant\` (shared) data. */
 const TENANT_SCOPED_EVENT_TYPES: ReadonlySet<string> = new Set([${tenantList}]);
 
 /** Id-reference (\`<Agg> id\`) fields kept when a tenant-scoped event can't be
  *  tenant-routed (dispatched with no ambient request — outbox relay drain /
  *  timer scheduler): it degrades to a refetch ticket (type + ids, no scalar
- *  payload) and the authorized read re-gates on refetch. */
+ *  payload) and the authorized read re-gates on refetch.  An event with no id
+ *  reference degrades to its \`type\` alone. */
 const EVENT_ID_FIELDS: Record<string, readonly string[]> = {
 ${idFieldEntries}
 };
@@ -158,7 +167,7 @@ type Subscriber = (frame: RealtimeFrame) => void;
  *  broadcast refetch ticket. */
 const subscribers = new Set<Subscriber>();
 /** Per-tenant rooms — a connection joins its own tenant's room at connect
- *  (key = \`currentUser.tenantId\`, the tenantOwned DataKey). */
+ *  (key = \`currentUser.${claim}\`, the bound tenancy claim). */
 const rooms = new Map<string, Set<Subscriber>>();
 
 function roomFor(tenant: string): Set<Subscriber> {
@@ -174,8 +183,8 @@ function roomFor(tenant: string): Set<Subscriber> {
  *  present for inline-dispatched events (the write that caused them),
  *  undefined outside a request (outbox relay drain / timer scheduler). */
 function ambientTenant(): string | undefined {
-  const user = requestContext()?.currentUser as { tenantId?: unknown } | undefined;
-  return typeof user?.tenantId === "string" ? user.tenantId : undefined;
+  const user = requestContext()?.currentUser as { ${claim}?: unknown } | undefined;
+  return typeof user?.${claim} === "string" ? user.${claim} : undefined;
 }
 
 /** Strip a tenant-scoped event to a refetch ticket — its type plus the
@@ -234,9 +243,9 @@ export function realtimeRoutes(): OpenAPIHono {
   app.get("/events", (c) =>
     streamSSE(c, async (stream) => {
       const principal = (
-        c as unknown as { get(k: "currentUser"): { tenantId?: unknown } | undefined }
+        c as unknown as { get(k: "currentUser"): { ${claim}?: unknown } | undefined }
       ).get("currentUser");
-      const tenant = typeof principal?.tenantId === "string" ? principal.tenantId : undefined;
+      const tenant = typeof principal?.${claim} === "string" ? principal.${claim} : undefined;
       const sub: Subscriber = (frame) => {
         void stream.writeSSE({ data: JSON.stringify(frame), event: frame.type });
       };

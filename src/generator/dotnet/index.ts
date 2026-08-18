@@ -122,6 +122,7 @@ import {
 } from "./emit/provenance.js";
 import {
   realtimeRoomPlanOf,
+  realtimeTenantClaimProperty,
   realtimeTypesOf,
   renderRealtimeDispatcher,
   renderRealtimeHub,
@@ -569,8 +570,11 @@ function emitProjectFromContexts(
   // Rooms + policy-derived routing v1 (channels.md): a tenant-owned context's
   // SSE wire scopes delivery per tenant (never cross-tenant); an untenanted
   // one keeps the broadcast-to-all hub (byte-identical).
-  const realtimeRoomPlan = realtimeRoomPlanOf(merged);
+  const realtimeRoomPlan = realtimeRoomPlanOf(merged, system?.sys);
   const realtimeRoomScoped = hasRealtime && realtimeRoomPlan.tenantScoped;
+  // The `User` property the SSE endpoint reads the room key off — the bound
+  // `tenancy by user.<claim>`, never the row column `TenantId`.
+  const realtimeTenantClaim = realtimeTenantClaimProperty(realtimeRoomPlan);
   if (hasChannels && system) {
     out.set(
       "Infrastructure/Channels/ChannelTransport.cs",
@@ -1089,6 +1093,7 @@ function emitProjectFromContexts(
     hasOutbox,
     hasRealtime,
     realtimeRoomScoped,
+    realtimeTenantClaim,
     hasAudit,
     hasHistory,
     hasProvenance,
@@ -1833,6 +1838,9 @@ function emitProject(
      *  tenant-owned, so the SSE endpoint derives the connecting principal's
      *  tenant room (never a client value) and passes it to `hub.Subscribe`. */
     realtimeRoomScoped?: boolean;
+    /** The `User` property the SSE endpoint reads the room key off — the bound
+     *  `tenancy by user.<claim>`, Pascal-cased (see `realtimeTenantClaimProperty`). */
+    realtimeTenantClaim?: string;
     /** Per-operation audit (audit-and-logging.md): registers the scoped
      *  `IAuditWriter` → `AuditWriter` the audited command handlers depend on. */
     hasAudit?: boolean;
@@ -1908,6 +1916,7 @@ function emitProject(
       outboxNoopInner: !!options?.outboxNoopInner,
       hasRealtime: !!options?.hasRealtime,
       realtimeRoomScoped: !!options?.realtimeRoomScoped,
+      realtimeTenantClaim: options?.realtimeTenantClaim,
       hasAudit: !!options?.hasAudit,
       hasHistory: !!options?.hasHistory,
       fileUpload: options?.fileUpload,

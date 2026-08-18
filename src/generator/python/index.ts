@@ -592,7 +592,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     );
   }
   if (hasRealtime) {
-    const realtimeFile = buildPyRealtimeFile(merged);
+    const realtimeFile = buildPyRealtimeFile(merged, args.sys);
     if (realtimeFile) out.set("app/realtime.py", realtimeFile);
   }
   if (dispatchFile != null) {
