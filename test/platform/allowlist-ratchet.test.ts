@@ -126,11 +126,19 @@ const REGISTERED: Ratchet[] = [
   // `GetByIdForWriteAsync` (CS0535).  So the count goes up while the repo's
   // knowledge does too: the defects predate the entry, and were invisible
   // because no dapper fixture had a `tenantRegistry` the compiler ever saw.
+  //
+  // 1 -> 0 again: both leaks are fixed.  The hierarchy seam now emits ONE
+  // resolver per persistence adapter (`DapperOrgPathResolver.cs`, raw Npgsql
+  // over the registry's `data_key`), and the Dapper document repository carries
+  // the EF twin's `GetByIdForWriteAsync` — plus the in-app `_CapabilityVisible`
+  // read filter it had also never received, which was the SILENT half (a
+  // `tenantOwned` document aggregate read across tenants on this adapter).
+  // `policy-document` compiles clean here under /warnaserror.
   {
     file: "test/e2e/corpus-dotnet-dapper-build.test.ts",
     name: "DAPPER_COMPILE_SKIP",
     kind: "record",
-    max: 1,
+    max: 0,
   },
   // Capability boundaries the validator states honestly (`loom.dapper-unsupported`),
   // not gaps — these never reach the compiler.  1 -> 5: the reclassification

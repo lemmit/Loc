@@ -490,8 +490,8 @@ builder.Services.AddScoped<ICurrentUserAccessor, HttpContextCurrentUserAccessor>
 // Tenant hierarchy (multi-tenancy P2.2): the per-request \`orgPath\` resolver —
 // currentUser.orgPath = the caller org's materialized \`data_key\`, read once
 // per request by UserMiddleware and memoized on the principal (fail-safe to
-// the claim).  Scoped: it holds the request-scoped AppDbContext.
-builder.Services.AddScoped<IOrgPathResolver, EfOrgPathResolver>();`
+// the claim).  Scoped: it holds the request-scoped ${usingDapper ? "connection source" : "AppDbContext"}.
+builder.Services.AddScoped<IOrgPathResolver, ${usingDapper ? "DapperOrgPathResolver" : "EfOrgPathResolver"}>();`
           : ""
       }
 `

@@ -51,9 +51,13 @@
 // three document read paths, and emits the write-scope member.  The fixture now
 // compiles clean on dotnet under `/warnaserror`.
 //
-// The DAPPER adapter of that same backend is a different story and still has
-// two EF leaks this fixture is the first witness for — see the entry in
-// `test/e2e/corpus-dotnet-dapper-build.test.ts`'s DAPPER_COMPILE_SKIP.
+// The DAPPER adapter of that same backend was a different story: this fixture
+// is the first witness for two EF leaks it carried — `EfOrgPathResolver.cs`
+// emitted whatever the adapter (CS0234/CS0246) and no `GetByIdForWriteAsync` on
+// the document repository (CS0535) — plus a silent third, the in-app capability
+// read filter that repository never applied at all.  All three are closed, the
+// DAPPER_COMPILE_SKIP entry is gone, and the fixture compiles clean on the
+// dapper leg too (`test:dapper-corpus`, /warnaserror).
 system PolicyDocument {
   user { id: guid  role: string  tenantId: string }
 

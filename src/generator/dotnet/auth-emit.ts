@@ -9,7 +9,8 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { hierarchyRegistry } from "../../ir/util/tenant-stance.js";
 import { AUTH_BASE_PATH } from "../../util/api-base.js";
-import { plural, upperFirst } from "../../util/naming.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
+import { dapperAggregateTable } from "./emit/dapper.js";
 import { renderCsType } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -31,7 +32,12 @@ import { renderCsType } from "./render-expr.js";
 // fails fast at startup if no verifier is registered (Program.cs check).
 // ---------------------------------------------------------------------------
 
-export function emitAuthFiles(sys: SystemIR, ns: string, out: Map<string, string>): void {
+export function emitAuthFiles(
+  sys: SystemIR,
+  ns: string,
+  out: Map<string, string>,
+  usingDapper = false,
+): void {
   if (!sys.user) return;
   const orgPathClaim = sys.tenancy?.claimField;
   // Hierarchy (multi-tenancy P2.2): when the registry opts into
@@ -50,14 +56,25 @@ export function emitAuthFiles(sys: SystemIR, ns: string, out: Map<string, string
   out.set("Auth/HttpContextCurrentUserAccessor.cs", renderAccessorImpl(ns));
   out.set("Auth/UserMiddleware.cs", renderMiddleware(ns, !!sys.auth, orgPathClaimExpr));
   // The registry-lookup seam (P2.2): the interface lives in Auth (where the
-  // middleware calls it); the EF implementation lives in Infrastructure/
-  // Persistence (where the DbContext + registry entity are known).  Registered
-  // in Program.cs (AddScoped) under hierarchy only.
+  // middleware calls it); the IMPLEMENTATION lives in Infrastructure/Persistence
+  // (where the registry's storage is known).  Registered in Program.cs
+  // (AddScoped) under hierarchy only.
+  //
+  // ONE implementation per persistence adapter.  The EF file was emitted
+  // unconditionally until #2599 pinned the fallout: it opens
+  // `using Microsoft.EntityFrameworkCore;` and takes an `AppDbContext`, so a
+  // `persistence: dapper` deployable with a `tenantRegistry` TREE failed to
+  // compile (CS0234 + 2x CS0246) — generation and the IR validator both clean.
+  // The Dapper twin reads the same `data_key` with one raw Npgsql statement.
   if (registry) {
     out.set("Auth/IOrgPathResolver.cs", renderOrgPathResolverInterface(ns));
     out.set(
-      "Infrastructure/Persistence/EfOrgPathResolver.cs",
-      renderEfOrgPathResolver(ns, registry),
+      usingDapper
+        ? "Infrastructure/Persistence/DapperOrgPathResolver.cs"
+        : "Infrastructure/Persistence/EfOrgPathResolver.cs",
+      usingDapper
+        ? renderDapperOrgPathResolver(ns, registry)
+        : renderEfOrgPathResolver(ns, registry),
     );
   }
   out.set("Auth/DevStubUserVerifier.cs", renderDevStubVerifier(sys.user, ns));
@@ -1017,6 +1034,93 @@ ${wrap}
     }
 }
 `;
+}
+
+/** `Infrastructure/Persistence/DapperOrgPathResolver.cs` — the raw-Npgsql
+ *  `IOrgPathResolver` (multi-tenancy P2.2), the `persistence: dapper` twin of
+ *  `renderEfOrgPathResolver`.  Identical CONTRACT — read the caller org's
+ *  materialized `data_key` keyed by the tenancy claim, ignore the registry's
+ *  own self-scope filter (this is an explicit id lookup, and the Dapper
+ *  adapter's filters live in the repositories, not here), and yield `null` on
+ *  every failure path so the middleware falls back to the claim.  The EF file
+ *  used to be emitted whatever the adapter was, which does not compile on a
+ *  Dapper deployable: no `Microsoft.EntityFrameworkCore`, no `AppDbContext`. */
+function renderDapperOrgPathResolver(ns: string, registry: AggregateIR): string {
+  const table = dapperAggregateTable(registry.name);
+  const dataKeyColumn = snake("dataKey");
+  // The claim is bound as the RAW scalar (Dapper has no id-value-type handler),
+  // guarded so a malformed claim fails safe — the raw-parameter mirror of the
+  // EF path's `idWrapForClaim` strong-id wrap.
+  const wrap = rawIdWrapForClaim(registry.idValueType);
+  return `// Auto-generated.  Dapper \`IOrgPathResolver\` (persistence: dapper).
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Dapper;
+using Npgsql;
+using ${ns}.Auth;
+
+namespace ${ns}.Infrastructure.Persistence;
+
+/// <summary>Dapper-backed <see cref="IOrgPathResolver"/> (multi-tenancy Phase 2,
+/// P2.2).  Reads the caller org's materialized <c>${dataKeyColumn}</c> from the
+/// registry table keyed by the tenancy claim, memoized per request by
+/// UserMiddleware.  Returns <c>null</c> on any failure — an unparseable claim, a
+/// missing row, a null <c>${dataKeyColumn}</c>, or a DB error — so the caller
+/// falls back to the claim (the fail-safe root-segment path).</summary>
+public sealed class DapperOrgPathResolver : IOrgPathResolver
+{
+    private readonly NpgsqlDataSource _db;
+
+    public DapperOrgPathResolver(NpgsqlDataSource db) => _db = db;
+
+    public async Task<string?> ResolveAsync(string claim, CancellationToken cancellationToken)
+    {
+${wrap}
+        try
+        {
+            await using var conn = await _db.OpenConnectionAsync(cancellationToken);
+            return await conn.ExecuteScalarAsync<string?>(new CommandDefinition(
+                "SELECT ${dataKeyColumn} FROM ${table} WHERE id = @id",
+                new { id },
+                cancellationToken: cancellationToken));
+        }
+#pragma warning disable CA1031 // a lookup failure falls back to the claim, never 500
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            return null;
+        }
+    }
+}
+`;
+}
+
+/** The C# guard + `var id = …` binding the string tenancy claim to the RAW
+ *  scalar Dapper parameterizes with (the Dapper twin of `idWrapForClaim`, which
+ *  wraps into the strongly-typed id class EF's LINQ comparison needs).  Guarded
+ *  parses (guid / int / long) short-circuit to `null` on a bad claim; a string
+ *  id is the key verbatim. */
+function rawIdWrapForClaim(idValueType: string): string {
+  const parser =
+    idValueType === "guid"
+      ? "Guid.TryParse"
+      : idValueType === "int"
+        ? "int.TryParse"
+        : idValueType === "long"
+          ? "long.TryParse"
+          : null;
+  if (!parser) {
+    return `        if (string.IsNullOrEmpty(claim))
+        {
+            return null;
+        }
+        var id = claim;`;
+  }
+  return `        if (string.IsNullOrEmpty(claim) || !${parser}(claim, out var id))
+        {
+            return null;
+        }`;
 }
 
 /** The C# guard + `var id = …` that wraps the string tenancy claim to the
