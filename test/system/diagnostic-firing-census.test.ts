@@ -231,6 +231,44 @@ system S {
   deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
   deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
 }`,
+
+  // An unresolved bare ref in a rendered slot: the walker emits a comment and
+  // the content silently disappears on all six frontends (A17).
+  "loom.unresolved-page-ref": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: react
+    api C: Api
+    page Home { route: "/"  body: Text { nosuchthing } }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
+  // `Stat(label, value)` is a fixed two-slot shape, not a children container —
+  // a third positional is rendered by no design pack (A7's arity half).
+  "loom.page-primitive-extra-children": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: react
+    api C: Api
+    page Home { route: "/"  body: Stat { "Revenue", "10", Text { "extra" } } }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
 };
 
 /**

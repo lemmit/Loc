@@ -663,7 +663,13 @@ function primitiveIcon(c: Ctx): string {
  *  Each panel's body is an already-walked F# element (offside-safe on its own
  *  line inside the panel's `children [ … ]`). */
 function primitiveTabs(c: Ctx): string {
-  const tabs = (c.tabs as unknown as { value: string; label: string; bodyJsx: string }[]) ?? [];
+  const tabs =
+    (c.tabs as unknown as {
+      value: string;
+      label: string;
+      bodyJsx: string;
+      bodyChildren?: readonly string[];
+    }[]) ?? [];
   if (tabs.length === 0) return "Html.none";
   const group = `loom_tabs_${tabs.map((t) => t.value).join("_")}`;
   const parts = tabs.flatMap((t, i) => {
@@ -676,7 +682,14 @@ function primitiveTabs(c: Ctx): string {
       // The first tab is active by default (uncontrolled — CSS owns the switch).
       ...(i === 0 ? ["prop.defaultChecked true"] : []),
     ];
-    const body = asElement(t.bodyJsx);
+    // The panel's children arrive UNJOINED (`bodyChildren`): the walker's
+    // `bodyJsx` joins them with a bare newline, which inside this
+    // `prop.children [ … ]` list reads as function application, not a second
+    // element (§24 — "This value is not a function and cannot be applied").
+    // `;` is the list separator F# needs here.  A caller that only sets
+    // `bodyJsx` (the missing-body comment) still works.
+    const kids = t.bodyChildren ?? [t.bodyJsx];
+    const body = (kids.length > 0 ? kids : [t.bodyJsx]).map((k) => asElement(String(k))).join("; ");
     return [
       `    Html.input [ ${radioProps.join("; ")} ]`,
       `    Html.div [ prop.role "tabpanel"; prop.className "tab-content p-4"; prop.children [\n      ${body}\n    ] ]`,

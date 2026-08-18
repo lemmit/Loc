@@ -167,6 +167,8 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkInstanceEffectRouteId(page, aggNames, apiParamNames, diags);
         checkFrontendCollectionOps(page, pageWhere(page), mapRendered, diags);
         checkUnknownPageElements(page, pageWhere(page), callableNames, diags);
+        checkUnresolvedPageRefs(page, pageWhere(page), callableNames, diags);
+        checkFixedSlotArity(page, pageWhere(page), diags);
         checkSlotOutsideComponent(page, pageWhere(page), diags);
         checkDataGridSelection(page.body, page.state, pageWhere(page), diags);
         // The `of:` receiver must be an API HANDLE — the walker's Pattern H
@@ -207,6 +209,8 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkActionBodies(comp.actions, ctx, diags);
         checkFrontendCollectionOps(comp, `component '${comp.name}'`, mapRendered, diags);
         checkUnknownPageElements(comp, `component '${comp.name}'`, callableNames, diags);
+        checkUnresolvedPageRefs(comp, `component '${comp.name}'`, callableNames, diags);
+        checkFixedSlotArity(comp, `component '${comp.name}'`, diags);
         checkDataGridSelection(comp.body, comp.state, `component '${comp.name}'`, diags);
         checkChartArgs(
           comp.body,
@@ -496,6 +500,169 @@ function checkSlotOutsideComponent(page: PageIR, where: string, diags: LoomDiagn
         message: diagMessage("loom.slot-outside-component", { where }),
         source: where,
       });
+    });
+  }
+}
+
+// -------------------------------------------------------------------------
+// `loom.page-primitive-extra-children` — the ARITY twin of the multi-child
+// container sweep (#2567's `Card`, and `Tab` alongside this change).
+//
+// A container primitive (`Stack`, `Card`, `Tab`, …) renders EVERY positional
+// as a child.  A handful of primitives are not containers at all: they are
+// fixed SLOT shapes whose pack templates interpolate a known number of
+// positions and have nowhere to put an extra one —
+//
+//   Stat(label, value)          two stacked text elements, `{{{label}}}` +
+//                               `{{{value}}}` on all 15 packs
+//   KeyValueRow(label, value)   a `<dt>`/`<dd>` pair; the value cell takes ONE
+//                               already-walked element on Feliz/Flutter
+//   Modal(trigger:, OperationForm(…))
+//                               renders the TRIGGER button only — the dialog
+//                               body is the op-form's generated field set
+//
+// A third positional on the first two, or any non-`OperationForm` positional
+// on the op-form `Modal`, was read by nobody: the content vanished from every
+// frontend while still landing in `.loom/messages.en.json`, the same
+// translators-get-a-key-nothing-renders symptom `Tab` had.  Widening the
+// packs is not the fix here (there is no second value slot to widen INTO), so
+// this is the honest gate — the other half of #2567's fix-or-gate rule.
+// -------------------------------------------------------------------------
+
+/** Primitive → how many positionals its pack templates actually render. */
+const FIXED_SLOT_PRIMITIVES: Record<string, { readonly max: number; readonly slots: string }> = {
+  Stat: { max: 2, slots: "label and value" },
+  KeyValueRow: { max: 2, slots: "label and value" },
+};
+
+/** The positional args of a lowered call (named args carry an `argNames` entry
+ *  at the same index).  Mirrors the walker's `positionalArgs`, which lives in
+ *  the generator layer and cannot be imported here. */
+function positionalArgsOf(e: Extract<ExprIR, { kind: "call" }>): ExprIR[] {
+  return e.args.filter((_, i) => !e.argNames?.[i]);
+}
+
+/** Reject positionals no pack renders.  One diagnostic per (host, primitive):
+ *  a body over-filling `Stat` twice made one mistake. */
+function checkFixedSlotArity(
+  host: PageIR | ComponentIR,
+  where: string,
+  diags: LoomDiagnostic[],
+): void {
+  const flagged = new Set<string>();
+  for (const root of walkerRenderedExprs(host)) {
+    walkExprDeep(root, (e) => {
+      if (e.kind !== "call" || e.callKind !== "free") return;
+      const spec = FIXED_SLOT_PRIMITIVES[e.name];
+      if (spec) {
+        if (positionalArgsOf(e).length <= spec.max || flagged.has(e.name)) return;
+        flagged.add(e.name);
+        diags.push({
+          severity: "error",
+          code: "loom.page-primitive-extra-children",
+          message: diagMessage("loom.page-primitive-extra-children", {
+            where,
+            name: e.name,
+            max: spec.max,
+            slots: spec.slots,
+          }),
+          source: where,
+        });
+        return;
+      }
+      // The op-form `Modal` shape: `primitive-modal` emits the trigger button
+      // and nothing else, so every positional besides the `OperationForm`
+      // child is dropped.  The state-controlled shape (`open: <state>`) IS a
+      // children container and walks all of them — leave it alone.
+      if (e.name !== "Modal" || flagged.has("Modal")) return;
+      const positionals = positionalArgsOf(e);
+      const hasOpForm = positionals.some((a) => a.kind === "call" && a.name === "OperationForm");
+      if (!hasOpForm || positionals.length <= 1) return;
+      flagged.add("Modal");
+      diags.push({
+        severity: "error",
+        code: "loom.page-primitive-extra-children",
+        message: diagMessage("loom.page-primitive-extra-children#modal-op-form", { where }),
+        source: where,
+      });
+    });
+  }
+}
+
+// -------------------------------------------------------------------------
+// `loom.unresolved-page-ref` — the last silent-drop door in a page body.
+//
+// A bare name in a rendered position resolves at emit time against the route
+// params, the `state { }` fields, the `derived` bindings, an enclosing
+// lambda's parameter, a `<Store>.<field>` read, or a `let`.  Anything else
+// lowers to `refKind: "unknown"` and the walker emits a COMMENT —
+// `{/* ref: nosuchthing */}` on the four JS frontends, `Html.none` on Feliz,
+// `SizedBox.shrink()` on Flutter.  `Text { nosuchthing }` therefore compiles
+// green on all six with its content gone: a typo deletes the content, exactly
+// like the `Text(Fooo(x))` case `loom.unknown-page-element` closed for the
+// CALL spelling.  The REF spelling had no gate at any tier — this is it.
+//
+// Scope is deliberately the walker's own: the direct positional arguments of a
+// rendered call (and the operand/arm sub-expressions inside one), never a
+// member or method-call RECEIVER — `Status.Open` and `Shop.Thing.all` root at
+// an `unknown` ref by design (an enum name, an api handle), and those are
+// resolved by the member walk, not by the ref.
+// -------------------------------------------------------------------------
+
+/** Collect the refs a rendered slot resolves DIRECTLY, stopping at any
+ *  receiver-rooted shape (member / method-call / nested call). */
+function directlyRenderedRefs(e: ExprIR, out: Extract<ExprIR, { kind: "ref" }>[]): void {
+  switch (e.kind) {
+    case "ref":
+      out.push(e);
+      return;
+    case "paren":
+      directlyRenderedRefs(e.inner, out);
+      return;
+    case "unary":
+      directlyRenderedRefs(e.operand, out);
+      return;
+    case "binary":
+      directlyRenderedRefs(e.left, out);
+      directlyRenderedRefs(e.right, out);
+      return;
+    case "ternary":
+      directlyRenderedRefs(e.cond, out);
+      directlyRenderedRefs(e.then, out);
+      directlyRenderedRefs(e.otherwise, out);
+      return;
+    default:
+      return;
+  }
+}
+
+/** Reject an unresolved bare ref in a rendered slot.  One diagnostic per
+ *  (host, name): a page spelling the same typo three times made one mistake. */
+function checkUnresolvedPageRefs(
+  host: PageIR | ComponentIR,
+  where: string,
+  names: CallableNames,
+  diags: LoomDiagnostic[],
+): void {
+  const flagged = new Set<string>();
+  for (const root of walkerRenderedExprs(host)) {
+    walkExprDeep(root, (e) => {
+      if (e.kind !== "call" || e.callKind !== "free") return;
+      // Only calls the walker RENDERS: a stdlib primitive or a declared
+      // component.  Anything else is `loom.unknown-page-element`'s business.
+      if (!isWalkerPrimitive(e.name) && !names.components.has(e.name)) return;
+      const slots: Extract<ExprIR, { kind: "ref" }>[] = [];
+      for (const arg of positionalArgsOf(e)) directlyRenderedRefs(arg, slots);
+      for (const ref of slots) {
+        if (ref.refKind !== "unknown" || flagged.has(ref.name)) continue;
+        flagged.add(ref.name);
+        diags.push({
+          severity: "error",
+          code: "loom.unresolved-page-ref",
+          message: diagMessage("loom.unresolved-page-ref", { where, name: ref.name }),
+          source: where,
+        });
+      }
     });
   }
 }
