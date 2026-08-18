@@ -56,7 +56,7 @@ import type { ApiRoute } from "../api-emit.js";
  *  outside `scope "/api"`, so the prefix is explicit here).  `API_BASE_PATH` +
  *  `/realtime/events` is exactly what the frontend client opens
  *  (`${API_BASE_URL}/realtime/events`), so every backend serves the same URL. */
-export const REALTIME_SSE_PATH = `${API_BASE_PATH}/realtime/events`;
+const REALTIME_SSE_PATH = `${API_BASE_PATH}/realtime/events`;
 
 /** One carried event, resolved against its owning context (the event struct
  *  module is `<App>.<Ctx>.Events.<Event>`, so a multi-context deployable needs
@@ -155,7 +155,7 @@ function frameClause(
  * fed by `Phoenix.PubSub`.  Returns `null` when no hosted context declares a
  * `delivery: broadcast` channel (byte-identical wire-free output).
  */
-export function renderVanillaRealtimeController(
+function renderVanillaRealtimeController(
   appModule: string,
   contexts: readonly BoundedContextIR[],
 ): string | null {
