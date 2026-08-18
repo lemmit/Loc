@@ -17,8 +17,24 @@
 // trivial monaco-shaped hop (wrap in `{ resource, textEdit }`) and nothing else.
 // ---------------------------------------------------------------------------
 
-import type { CodeAction } from "vscode-languageserver-types";
 import { fixHintCodeActions, validate } from "../../../src/api/index.js";
+
+/** The part of an LSP `CodeAction` this boundary actually consumes.
+ *
+ *  Declared STRUCTURALLY rather than imported from `vscode-languageserver-types`
+ *  on purpose.  `web/` resolves its own copy of that package, and the two copies
+ *  disagree about `Diagnostic.message` (`string` vs `string | MarkupContent`),
+ *  so a nominal import makes the toolkit's `CodeAction[]` un-assignable to a
+ *  parameter typed from web's copy — a dual-package identity clash, not a real
+ *  shape mismatch.  Naming the four fields we read is both the smaller contract
+ *  and the honest one: this module is a boundary, and a boundary should state
+ *  what it needs. */
+interface LspCodeActionLike {
+  title: string;
+  isPreferred?: boolean;
+  diagnostics?: readonly { range: LspRange }[];
+  edit?: { changes?: Record<string, readonly { range: LspRange; newText: string }[]> };
+}
 
 /** An LSP range — 0-based line/character, end-exclusive. */
 export interface LspRange {
@@ -73,7 +89,7 @@ export function toEditorRange(range: LspRange): EditorRange {
  *  so a provider that grows from one action per diagnostic to several (a
  *  `choose`-kind hint fanned out one action per option) needs no change here.
  *  An action with no resolved text edit is dropped — there is nothing to apply. */
-export function toQuickFixes(actions: readonly CodeAction[]): LoomQuickFix[] {
+export function toQuickFixes(actions: readonly LspCodeActionLike[]): LoomQuickFix[] {
   const fixes: LoomQuickFix[] = [];
   for (const action of actions) {
     const changes = action.edit?.changes;
