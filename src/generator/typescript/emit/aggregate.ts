@@ -140,7 +140,17 @@ export function renderAggregate(
   const usesForbidden = agg.operations.some((op) =>
     operationBody(op).some((s) => s.kind === "requires"),
   );
-  const errorsImportList = [usesDomain && "DomainError", usesForbidden && "ForbiddenError"]
+  // DisallowedError — the `when` state gate (M-T6.38).  The gate used to be a
+  // ROUTE-layer check only, so a workflow step / saga cascade / extern handler
+  // calling the domain method directly slipped past it and the refused write
+  // landed silently.  It is now emitted at the domain-method entry too, so the
+  // import follows any `when`-carrying operation.
+  const usesDisallowed = agg.operations.some((op) => !!op.when);
+  const errorsImportList = [
+    usesDisallowed && "DisallowedError",
+    usesDomain && "DomainError",
+    usesForbidden && "ForbiddenError",
+  ]
     .filter(Boolean)
     .join(", ");
 
@@ -490,6 +500,18 @@ function renderEntity(
   // get the parameter conditionally so a non-auth op stays
   // un-burdened with a User param.
   const _anyOpUsesCurrentUser = e.operations.some(operationBodyUsesCurrentUser);
+  // The `when` state gate (canCommand, criterion.md) rendered at the DOMAIN
+  // method entry.  The route emits the same check pre-load so the HTTP answer
+  // (409 + problem envelope) is produced before the aggregate is touched; this
+  // line is what makes the refusal a property of the DOMAIN rather than of one
+  // transport, so a workflow step, saga cascade or extern handler that calls
+  // `aggregate.<op>()` directly refuses too (M-T6.38).
+  const whenGate = (op: (typeof e.operations)[number]): string | null =>
+    op.when
+      ? `    if (!(${renderTsExpr(op.when)})) throw new DisallowedError(${JSON.stringify(
+          `operation '${op.name}' is not allowed in the current state of ${e.name}.`,
+        )});`
+      : null;
   for (const op of e.operations) {
     const visibility = op.visibility === "public" ? "public" : "private";
     const usesUser = operationBodyUsesCurrentUser(op);
@@ -521,8 +543,10 @@ function renderEntity(
       if (checkBody.length > 0) ops.push(checkBody);
       ops.push("  }");
       ops.push("");
-      // The operation method — preconditions → hook → invariants.
+      // The operation method — state gate → preconditions → hook → invariants.
       ops.push(`  public ${lowerFirst(op.name)}(${params}): ${retType} {`);
+      const externGate = whenGate(op);
+      if (externGate) ops.push(externGate);
       ops.push(`    this.${checkName}(${callArgs});`);
       if (op.returnType) {
         ops.push(`    return this.${hookName}(${callArgs});`);
@@ -553,6 +577,8 @@ function renderEntity(
     // ends in `return`, so the trailing assert would be unreachable — skip it.
     const retType = op.returnType ? renderOperationReturnType(op.returnType, ctx) : "void";
     ops.push(`  ${visibility} ${lowerFirst(op.name)}(${params}): ${retType} {`);
+    const gate = whenGate(op);
+    if (gate) ops.push(gate);
     // Chunked (one string per statement) rather than the pre-joined
     // `renderTsStatements` here — `renderTsStatements` IS `chunks.join("\n")`
     // by construction, so `body` below is byte-identical either way, but the

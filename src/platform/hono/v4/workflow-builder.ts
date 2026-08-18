@@ -308,11 +308,13 @@ export function buildWorkflowsFile(
   );
   body.push(
     // The state-gate rung, ordered before `DomainError` as in the aggregate
-    // router.  Reachability note: the emitted `when` gate is a ROUTE-layer check
-    // (`routes-builder.ts` `whenGateLine`), so an operation invoked from a
-    // workflow step does not evaluate it — this arm answers a `DisallowedError`
-    // raised from user-authored code.  That bypass is a separate defect,
-    // recorded on M-T6.28.
+    // router.  Reachability: the `when` gate is emitted at the DOMAIN-METHOD
+    // entry (`_expr`-rendered in `typescript/emit/aggregate.ts`) as well as at
+    // the route, so an operation invoked from a workflow step DOES evaluate it
+    // and this arm answers that refusal — plus any `DisallowedError` raised
+    // from user-authored code.  (Before M-T6.38 the gate was route-only and a
+    // workflow-step write landed unrefused; this arm was then unreachable from
+    // generated code.)
     `    if (err instanceof DisallowedError) return problem(${wfDisallowedStatus}, "Disallowed", err.message);`,
   );
   body.push(
