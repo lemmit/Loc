@@ -19,15 +19,17 @@
 //      `not.toContain`s, because "byte-identical" is the actual promise.
 //
 // The frontend support matrix is asserted too, and it is NOT the same as
-// `Timeline`'s: the primitive renders on five targets, but a target must also
-// COLLECT the derived read.  Five do — the four JS-family frontends over the
-// api client, and Phoenix/HEEx over an in-process `audit_records` scan (a
-// LiveView hosts its contexts in the same OTP app, so it needs no client).
-// Feliz still binds every non-`byId` op to the `All<Plural>` Model field and
-// Flutter still skips it in `collectFlutterReads` while referencing a provider,
-// so on those two the whole view is skipped — now with a VISIBLE notice rather
-// than a source comment, because the section's frame renders either way
-// (`_walker/history-read.ts`).
+// `Timeline`'s: a target must also COLLECT the derived read, and all seven
+// render paths now do — the four JS-family frontends over the api client,
+// Phoenix/HEEx over an in-process `audit_records` scan (a LiveView hosts its
+// contexts in the same OTP app, so it needs no client), Feliz over a
+// page-entry-keyed `Remote<AuditEntry list>` fetch (`feliz/wire.ts`
+// `felizHistoryRead`; positives in
+// `test/generator/feliz/feliz-audit-history.test.ts`), and Flutter over a
+// Riverpod `.family` provider decoding the `AuditEntry` wire model
+// (`flutter/reads-emit.ts` + the `renderTimeline` fork in
+// `flutter/flutter-target.ts`; positives in
+// `test/generator/flutter/flutter-audit-history.test.ts`).
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it } from "vitest";
@@ -236,31 +238,45 @@ describe("non-audited aggregate — nothing new reaches its frontend", () => {
   });
 });
 
-describe("frontends that don't collect the read degrade honestly", () => {
-  // NOT the same set as `Timeline`'s: the primitive renders on HEEx too, and
-  // Phoenix now COLLECTS the read (its own in-process loader over
-  // `audit_records` — see the case below).  What remains is Feliz and Flutter,
-  // where the damage is the READ the surrounding QueryView registers, one level
-  // up from the primitive, so the whole view is skipped.
-  it.each([
-    [
-      "feliz",
-      `Html.p [ prop.className "loom-unsupported"; prop.text "History is not yet supported on feliz" ]`,
-    ],
-    ["flutter", `Text('History is not yet supported on flutter')`],
-  ])("%s: the view is skipped and SAYS SO on the page", async (frontend, notice) => {
-    const out = allFiles(await generateSystemFiles(scaffoldSystem(frontend, true)));
-    // The notice is a rendered widget, not a source comment.  The section's
-    // frame + heading render either way, so a comment left the reader a
-    // labelled EMPTY panel — indistinguishable from "never touched".
-    expect(out).toContain(notice);
+describe("every render path collects the read (the degrade-honestly set is empty)", () => {
+  // The honest-degradation contract (a VISIBLE "History is not yet supported
+  // on <framework>" widget, never a source comment) still guards any FUTURE
+  // frontend outside `HISTORY_CAPABLE_FRAMEWORKS` — the mechanism is pinned by
+  // the disposition test below.  Every shipped target now collects the read:
+  // the four JS-family frontends over the api client, Phoenix over its
+  // in-process loader, Feliz over `felizHistoryRead`, Flutter over the
+  // Riverpod `.family` provider.
+
+  it("feliz: collects the read and renders the trail natively", async () => {
+    const out = allFiles(await generateSystemFiles(scaffoldSystem("feliz", true)));
+    // The notice is gone — replaced by a real Model field + fetch + view.
+    expect(out).not.toContain("History is not yet supported on feliz");
+    // The read is COLLECTED into its own page-entry-keyed field — never the
+    // unfiltered list (the misbinding that excluded feliz).  The full wiring
+    // (Msg, decoder, Cmd.batch, Timeline markup) is pinned in
+    // `test/generator/feliz/feliz-audit-history.test.ts`.
+    expect(out).toContain("OrderHistory");
+    expect(out).toContain("/history");
     expect(out).toContain("orders-detail-history");
-    // Still no read registered: a dangling Model field / provider is what
-    // would fail `dotnet fable` / `flutter analyze`.
-    expect(out).not.toContain("orderHistory");
-    // And the old invisible shapes are gone.
-    expect(out).not.toContain("(* entity history");
-    expect(out).not.toContain("/* entity history");
+  });
+
+  it("flutter: collects the read and renders the trail natively", async () => {
+    const out = allFiles(await generateSystemFiles(scaffoldSystem("flutter", true)));
+    // The notice is gone — replaced by a real provider + a real widget.
+    expect(out).not.toContain("History is not yet supported on flutter");
+    // The read is COLLECTED: a `.family` provider keyed by the route id over
+    // the path-nested history route, watched by the page under the SAME name
+    // the walker's `buildHookUse` derives — the dangling-provider failure mode
+    // this file used to pin is now the linked pair.
+    expect(out).toContain("final orderHistoryProvider =");
+    expect(out).toContain("FutureProvider.family<List<AuditEntry>, String>((ref, id) async {");
+    expect(out).toContain("ref.watch(orderHistoryProvider(id))");
+    expect(out).toContain("/orders/$id/history");
+    // And the section renders through the `renderTimeline` fork, keyed for
+    // widget-test finders.  (The full per-entry markup is pinned in
+    // `test/generator/flutter/flutter-audit-history.test.ts`.)
+    expect(out).toContain("key: const Key('orders-detail-history')");
+    expect(out).toContain("key: const Key('orders-detail-history-timeline')");
   });
 
   it("phoenix/HEEx: serves the trail in-process rather than skipping it", async () => {
@@ -307,7 +323,7 @@ describe("frontends that don't collect the read degrade honestly", () => {
 
     /** Frameworks whose read layer does NOT collect `history(id)` — see the
      *  module header of `_walker/history-read.ts` for what each does wrong. */
-    const SKIPPED = ["feliz", "flutter"];
+    const SKIPPED: string[] = [];
 
     expect([...declared].sort()).toEqual([...HISTORY_CAPABLE_FRAMEWORKS, ...SKIPPED].sort());
     // And the predicate agrees with the table, rather than merely coexisting

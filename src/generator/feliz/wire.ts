@@ -48,10 +48,12 @@ import { typeIsFile } from "../../ir/util/file-field.js";
 import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { projectionReadShape } from "../../ir/util/projection-read.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
+import { AUDIT_HISTORY_FIND } from "../../util/audit-names.js";
 import { lines } from "../../util/code-builder.js";
 import { errorTypeUri } from "../../util/error-defaults.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
+import { isEntityHistoryRead } from "../_walker/history-read.js";
 import { isOfReadCall } from "../_walker/of-reads.js";
 import { isPagedQuery } from "../_walker/paged-query.js";
 import { boolNamed } from "../_walker/shared/args.js";
@@ -97,6 +99,15 @@ export interface FelizRead {
   /** For a byId read, the `Page` union case hosting it (`ProductDetail`) — the
    *  arm `pageCmd` fires the fetch from.  Undefined for list reads. */
   pageCase?: string;
+  /** The derived ENTITY-HISTORY read (docs/audit.md) — `<api>.<Agg>.history(id)`
+   *  over `GET /api/<aggs>/{id}/history`.  The one read where `single` and
+   *  `listShaped` are BOTH true, because the two facts genuinely come apart: it
+   *  is page-entry keyed off the route id like a byId (fired by `pageCmd`, reset
+   *  on `UrlChanged`) but its payload is a LIST of `AuditEntry` (matched by
+   *  `View.remoteList`).  Its fetch appends `/%s/history` to `route` and its
+   *  decoder is the fixed `auditEntryDecoder` (`renderAuditEntryType`), not a
+   *  domain decoder — `aggregate` is used for naming/record-emission only. */
+  history?: boolean;
   /** A query-time PROJECTION read (M-T1.3 Phase 1) rather than an aggregate
    *  read.  It is SINGLE-shaped like a byId (`Remote<'T option>`, rendered by
    *  `View.remoteOne`) but INIT-fired and id-less like a list read, which is
@@ -259,6 +270,34 @@ export function felizByIdRead(aggregate: string, pageCase: string): FelizRead {
     binding: lowerFirst(field),
     single: true,
     listShaped: false,
+    pageCase,
+  };
+}
+
+/** The Model field name for an entity-history read (`Order` → `OrderHistory`). */
+export function historyFieldName(aggregate: string): string {
+  return `${upperFirst(aggregate)}History`;
+}
+
+/** Build the `FelizRead` for the derived entity-history read of `aggregate`
+ *  (docs/audit.md), hosted by the `Page` case `pageCase`.  Page-entry keyed like
+ *  a byId read (`single: true` → fired by `pageCmd` off the route id) but
+ *  list-shaped (`Remote<AuditEntry list>` → `View.remoteList`); the loaded value
+ *  decodes through the fixed `auditEntryDecoder` (`renderAuditEntryType`). */
+export function felizHistoryRead(aggregate: string, pageCase: string): FelizRead {
+  const field = historyFieldName(aggregate);
+  return {
+    field,
+    msgCase: `${field}Loaded`,
+    apiFn: lowerFirst(field),
+    aggregate,
+    resultType: "AuditEntry list",
+    decoderExpr: "(Decode.list auditEntryDecoder)",
+    route: `${API_BASE_PATH}/${snake(plural(aggregate))}`,
+    binding: lowerFirst(field),
+    single: true,
+    listShaped: true,
+    history: true,
     pageCase,
   };
 }
@@ -1194,6 +1233,16 @@ function collectBodyReads(
       });
     else if (detected.operation === "byId" && pageCase !== undefined)
       read = felizByIdRead(detected.aggregateName, pageCase);
+    // The derived entity-history read (docs/audit.md) — page-entry keyed like a
+    // byId (it needs the route id, so a component body can't host one either),
+    // gated on the SHARED predicate so this collector and the walker's
+    // `skipsEntityHistoryRead` can never disagree about what a history read is.
+    else if (
+      detected.operation === AUDIT_HISTORY_FIND &&
+      pageCase !== undefined &&
+      isEntityHistoryRead(ofArg, aggregatesByName)
+    )
+      read = felizHistoryRead(detected.aggregateName, pageCase);
     if (!read) continue;
     // The same aggregate can be read twice on one page — a controlled list plus,
     // say, an FK-select's option source.  They share a Model field, so keep the
@@ -1587,6 +1636,68 @@ export function renderFileRefType(): string {
     '      key = get.Required.Field "key" Decode.string',
     '      contentType = get.Required.Field "contentType" Decode.string',
     '      size = get.Required.Field "size" Decode.int',
+    "    })",
+  );
+}
+
+/** The fixed `AuditEntry` / `AuditFieldChange` wire records + Thoth decoders —
+ *  the shape `GET /api/<aggs>/{id}/history` serves (docs/audit.md), emitted once
+ *  when a ui hosts an entity-history read, AHEAD of the Model
+ *  (`Remote<AuditEntry list>`) and the Api module that reference them.
+ *
+ *  `at` keeps the ISO datetime STRING (the Timeline renders it verbatim, like
+ *  the Angular arm).  `actor` is an arbitrary JSON principal blob and
+ *  `before`/`after` arbitrary JSON snapshot values, so they decode permissively:
+ *  `actor` through a stringify chain (the F# analogue of the JSX frontends'
+ *  `String(__e.actor)` over `z.unknown()`, extending `provAnyToString` with a
+ *  terminal `Decode.value` arm so a JSON OBJECT principal cannot fail the whole
+ *  list), `before`/`after` as raw `obj option` via `Decode.value` (`Optional`
+ *  folds JSON null to `None` — both sides are legitimately null: a create has
+ *  no before, a destroy no after). */
+export function renderAuditEntryType(): string {
+  return lines(
+    "// Entity history — the AuditEntry wire shape of GET /<aggs>/{id}/history.",
+    "type AuditFieldChange =",
+    "  {",
+    "    field: string",
+    "    before: obj option",
+    "    after: obj option",
+    "  }",
+    "",
+    "type AuditEntry =",
+    "  {",
+    "    auditId: string",
+    "    action: string",
+    "    at: string",
+    "    actor: string option",
+    "    changes: AuditFieldChange list",
+    "  }",
+    "",
+    "let private auditAnyToString : Decoder<string> =",
+    "  Decode.oneOf [",
+    "    Decode.string",
+    "    Decode.map string Decode.int",
+    "    Decode.map string Decode.float",
+    "    Decode.map string Decode.bool",
+    "    Decode.map string Decode.value",
+    "  ]",
+    "",
+    "let auditFieldChangeDecoder : Decoder<AuditFieldChange> =",
+    "  Decode.object (fun get ->",
+    "    {",
+    '      field = get.Required.Field "field" Decode.string',
+    '      before = get.Optional.Field "before" Decode.value',
+    '      after = get.Optional.Field "after" Decode.value',
+    "    })",
+    "",
+    "let auditEntryDecoder : Decoder<AuditEntry> =",
+    "  Decode.object (fun get ->",
+    "    {",
+    '      auditId = get.Required.Field "auditId" Decode.string',
+    '      action = get.Required.Field "action" Decode.string',
+    '      at = get.Required.Field "at" Decode.string',
+    '      actor = get.Optional.Field "actor" auditAnyToString',
+    '      changes = get.Required.Field "changes" (Decode.list auditFieldChangeDecoder)',
     "    })",
   );
 }
@@ -2343,6 +2454,24 @@ export function renderWireTypes(
  *  byId read takes `(id: string)`, fetches `GET /api/orders/<id>`, and folds a
  *  `404` to `Ok None` (the record is legitimately absent, not an error). */
 function renderApiFn(r: FelizRead): (string | undefined)[] {
+  // The entity-history read — `(id: string)`, `GET /<aggs>/<id>/history`,
+  // decoding the fixed `AuditEntry list`.  BEFORE the `single` branch: it is
+  // page-entry keyed (single) but its payload is a list, so the byId shape's
+  // `404 → Ok None` fold would not even typecheck against `'T list`.
+  if (r.history) {
+    return [
+      `  let ${r.apiFn} (id: string) : Async<Result<${r.resultType}, string>> =`,
+      "    async {",
+      `      let! (status, body) = Http.get (sprintf "${r.route}/%s/history" id)`,
+      "      if status = 200 then",
+      `        match Decode.fromString ${r.decoderExpr} body with`,
+      "        | Ok data -> return Ok data",
+      "        | Error e -> return Error e",
+      "      else",
+      '        return Error (sprintf "HTTP %d" status)',
+      "    }",
+    ];
+  }
   if (r.single) {
     return [
       `  let ${r.apiFn} (id: string) : Async<Result<${r.resultType}, string>> =`,

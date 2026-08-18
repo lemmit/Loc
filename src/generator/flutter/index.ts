@@ -85,17 +85,25 @@ export function generateFlutterForContexts(
 
   const ui = deployable.uiName ? sys.uis.find((u) => u.name === deployable.uiName) : undefined;
 
+  // Riverpod read providers — collected FIRST (ahead of the models emit)
+  // because an entity-history read pulls the `AuditEntry`/`AuditFieldChange`
+  // wire models into `lib/models.dart` (the `auditEntry` flag below).  The
+  // file itself is emitted further down, next to the other read wiring.
+  const reads = collectFlutterReads(ui, contexts);
+
   // Wire-model classes for every aggregate/VO/event reachable through this
   // deployable's contexts (Track A).  One `lib/models.dart` the pages import.
   // The fixed `FileRef` class is added only when a `File` field maps to it (the
   // base render then references `FileRef`) or the ui hosts a `FileUpload` — so
-  // File-free projects stay byte-identical.
+  // File-free projects stay byte-identical.  The audit-entry DTOs ride the same
+  // opt-in rule: only when a history read was collected.
   const usesFileUpload = uiUsesFileUpload(ui);
-  const baseModels = renderDartModels(contexts);
+  const auditEntry = reads.some((r) => r.history === true);
+  const baseModels = renderDartModels(contexts, { auditEntry });
   const needsFileRef = usesFileUpload || baseModels.includes("FileRef");
   out.set(
     "lib/models.dart",
-    needsFileRef ? renderDartModels(contexts, { fileRef: true }) : baseModels,
+    needsFileRef ? renderDartModels(contexts, { fileRef: true, auditEntry }) : baseModels,
   );
 
   // Aggregate + owning-bounded-context lookups, built once — threaded into the
@@ -125,9 +133,9 @@ export function generateFlutterForContexts(
   ];
 
   // Riverpod read providers — one `FutureProvider` per distinct QueryView read
-  // a page issues (fetch over `package:http` + Track A `fromJson`).  Emitted
-  // only when the ui issues reads, alongside the `AppConfig` api-base helper.
-  const reads = collectFlutterReads(ui, contexts);
+  // a page issues (fetch over `package:http` + Track A `fromJson`; collected
+  // above, ahead of the models emit).  Emitted only when the ui issues reads,
+  // alongside the `AppConfig` api-base helper.
   if (reads.length > 0) {
     out.set("lib/reads.dart", renderReadProviders(reads));
   }

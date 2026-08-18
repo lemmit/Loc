@@ -215,9 +215,22 @@ export function renderModel(
 export function renderPageCmd(reads: readonly FelizRead[] = []): string {
   const byId = reads.filter((r) => r.single);
   if (byId.length === 0) return "";
-  const arms = byId.map(
-    (r) => `  | ${r.pageCase} id -> Cmd.OfAsync.perform Api.${r.apiFn} id ${r.msgCase}`,
-  );
+  // Two page-entry reads can share ONE hosting `Page` case — a detail page's
+  // byId read plus its entity-history read.  One arm per CASE, batching the
+  // fetches: a second `| OrderDetail id ->` arm would be unreachable (FS0026)
+  // and its fetch would silently never fire.  A lone read keeps the unbatched
+  // arm, byte-identical to before.
+  const byCase = new Map<string, FelizRead[]>();
+  for (const r of byId) {
+    const key = r.pageCase ?? "";
+    byCase.set(key, [...(byCase.get(key) ?? []), r]);
+  }
+  const arms = [...byCase.entries()].map(([pageCase, rs]) => {
+    const cmds = rs.map((r) => `Cmd.OfAsync.perform Api.${r.apiFn} id ${r.msgCase}`);
+    return cmds.length === 1
+      ? `  | ${pageCase} id -> ${cmds[0]}`
+      : `  | ${pageCase} id -> Cmd.batch [ ${cmds.join("; ")} ]`;
+  });
   return `let pageCmd (page: Page) : Cmd<Msg> =\n  match page with\n${arms.join("\n")}\n  | _ -> Cmd.none`;
 }
 

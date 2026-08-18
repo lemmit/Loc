@@ -8,6 +8,7 @@
 // leaves forward to the shared F# leaf table (`FS_LEAVES`).
 
 import type { BoundedContextIR, ExprIR, FieldIR, ParamIR, TypeIR } from "../../ir/types/loom-ir.js";
+import { AUDIT_HISTORY_FIND } from "../../util/audit-names.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { stringNamed } from "../_walker/shared/args.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
@@ -36,6 +37,7 @@ import {
   fieldErrorFn,
   formTouchedField,
   formTouchMsg,
+  historyFieldName,
   idLabelsFrom,
   pageMetaFieldName,
   pageMetaMember,
@@ -310,13 +312,18 @@ export const felizTarget: WalkerTarget = {
       return { varName: field, hookName: lowerFirst(field), importFrom: "", argsRendered: [] };
     }
     // A `byId` read resolves to the `<Agg>ById` Model field (its `Remote<'T
-    // option>` envelope); `all` (and any other read) to `All<Plural>`.  The
-    // page-entry `Cmd` — not this call — issues the byId fetch, so the view
-    // only names the field it matches on.
+    // option>` envelope); the derived entity-history read (docs/audit.md) to its
+    // own `<Agg>History` field — NEVER the `All<Plural>` list, which was the
+    // misbinding that kept feliz out of `HISTORY_CAPABLE_FRAMEWORKS`; `all` (and
+    // any other read) to `All<Plural>`.  The page-entry `Cmd` — not this call —
+    // issues the byId/history fetch, so the view only names the field it
+    // matches on.
     const field =
       detected.operation === "byId"
         ? byIdFieldName(detected.aggregateName)
-        : readFieldName(detected.aggregateName);
+        : detected.operation === AUDIT_HISTORY_FIND
+          ? historyFieldName(detected.aggregateName)
+          : readFieldName(detected.aggregateName);
     return { varName: field, hookName: lowerFirst(field), importFrom: "", argsRendered: [] };
   },
   renderApiCall: (call) => call.varName ?? readFieldName(call.aggregateName),
@@ -437,6 +444,37 @@ export const felizTarget: WalkerTarget = {
     const details = `Html.details [ prop.className "loom-provenance"; prop.children [ Html.summary [ prop.text "?" ]; ${dl} ] ]`;
     const match = `(match ${lineage} with Some __p -> ${details} | None -> Html.none)`;
     return `Html.span [ prop.children [ ${match} ] ]`;
+  },
+
+  // `Timeline(of: <entries>)` → the entity audit trail (docs/audit.md) as a
+  // native ordered list, mirroring the React renderer semantically: per entry an
+  // action span, a `<time>` (the ISO `at`, verbatim — like the Angular arm), the
+  // actor when recorded, and a `<dl>` of field changes when non-empty ("—" for a
+  // null before/after: a create has no before, a destroy no after).  Feliz forks
+  // the shared primitive because its "markup" is F# (`Html.orderedList [ … ]`),
+  // not an HTML string.  The entries expression is the QueryView data-lambda
+  // binding — already the unwrapped `AuditEntry list` (the `Loaded` arm bound
+  // it), so no `?? []` guard is needed here.  SINGLE-LINE (the walker doesn't
+  // re-indent seam output); the entry header renders even when `changes` is
+  // empty — "someone ran `recalc` at 14:02" is information.
+  renderTimeline: (call, ctx) => {
+    if (call.kind !== "call") return null;
+    const argNames = call.argNames ?? [];
+    const named = argNames.indexOf("of");
+    const arg = named >= 0 ? call.args[named] : (call.args ?? []).find((_, i) => !argNames[i]);
+    if (!arg) return null;
+    const entries = emitExpr(arg, ctx);
+    const tid = stringNamed(call, "testid");
+    const tidP = tid ? `prop.custom("data-testid", "${tid}"); ` : "";
+    const side = (v: string): string =>
+      `(match __c.${v} with Some __v -> string __v | None -> "—")`;
+    const changeRow = `Html.div [ prop.children [ Html.dt [ prop.text __c.field ]; Html.dd [ prop.text (${side("before")} + " → " + ${side("after")}) ] ] ]`;
+    const changes = `(if List.isEmpty __e.changes then Html.none else Html.dl [ prop.className "loom-timeline-changes"; prop.children (__e.changes |> List.map (fun __c -> ${changeRow})) ])`;
+    const actor = `(match __e.actor with Some __a -> Html.span [ prop.className "loom-timeline-actor"; prop.text __a ] | None -> Html.none)`;
+    const time = `Html.time [ prop.custom("dateTime", __e.at); prop.text __e.at ]`;
+    const action = `Html.span [ prop.className "loom-timeline-action"; prop.text __e.action ]`;
+    const entry = `Html.li [ prop.className "loom-timeline-entry"; prop.children [ ${action}; ${time}; ${actor}; ${changes} ] ]`;
+    return `Html.orderedList [ ${tidP}prop.className "loom-timeline"; prop.children (${entries} |> List.map (fun (__e: AuditEntry) -> ${entry})) ]`;
   },
 
   // `Action { <instance>.<op> }` → a one-click operation button that DISPATCHES
