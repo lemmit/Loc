@@ -60,9 +60,9 @@ describe("dotnet — VO invariant → 422 at the wire", () => {
     // (RS-31).
     expect(v).toContain("class SkuRequestValidator : AbstractValidator<SkuRequest>");
     expect(v).toContain(
-      "RuleFor(x => x.Code).Must(v => v == null || (v.Length - v.Count(char.IsLowSurrogate)) >= 3)",
+      "RuleFor(x => x.Code).Must(v => v == null || v.EnumerateRunes().Count() >= 3)",
     );
-    expect(v).toContain("Must(v => v == null || (v.Length - v.Count(char.IsLowSurrogate)) <= 12)");
+    expect(v).toContain("Must(v => v == null || v.EnumerateRunes().Count() <= 12)");
     // Cross-field / messaged → `.Must(...)` carrier with the stable wire code.
     expect(v).toContain("class ExtentRequestValidator : AbstractValidator<ExtentRequest>");
     expect(v).toContain("RuleFor(x => x).Must(x => x.Lo < x.Hi)");

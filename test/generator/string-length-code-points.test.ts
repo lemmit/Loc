@@ -133,8 +133,8 @@ describe("string .length is code points — node/Hono", () => {
 describe("string .length is code points — .NET", () => {
   it("the FluentValidation chain counts code points, not MinimumLength/MaximumLength", async () => {
     const validators = await file("Products/Commands/CreateProductCommandValidator.cs");
-    expect(validators).toContain("(v.Length - v.Count(char.IsLowSurrogate)) >= 3");
-    expect(validators).toContain("(v.Length - v.Count(char.IsLowSurrogate)) <= 16");
+    expect(validators).toContain("v.EnumerateRunes().Count() >= 3");
+    expect(validators).toContain("v.EnumerateRunes().Count() <= 16");
     expect(validators).not.toContain("MinimumLength(3)");
     expect(validators).not.toContain("MaximumLength(16)");
   });
@@ -146,7 +146,7 @@ describe("string .length is code points — .NET", () => {
 
   it("the domain floor counts code points", async () => {
     const domain = await file("Domain/Products/Product.cs");
-    expect(domain).toContain("(this.Code.Length - this.Code.Count(char.IsLowSurrogate)) >= 3");
+    expect(domain).toContain("this.Code.EnumerateRunes().Count() >= 3");
     expect(domain).not.toContain("this.Code.Length >= 3");
   });
 });
@@ -154,13 +154,13 @@ describe("string .length is code points — .NET", () => {
 describe("string .length is code points — java", () => {
   it("the request validator uses codePointCount, not String.length()", async () => {
     const validator = await file("products/CreateProductValidator.java");
-    expect(validator).toContain("code.codePointCount(0, code.length()) >= 3");
-    expect(validator).toContain("code.codePointCount(0, code.length()) <= 16");
+    expect(validator).toContain("((int) code.codePoints().count()) >= 3");
+    expect(validator).toContain("((int) code.codePoints().count()) <= 16");
   });
 
   it("the domain floor counts code points", async () => {
     const domain = await file("products/Product.java");
-    expect(domain).toContain("codePointCount(0,");
+    expect(domain).toContain("codePoints().count()");
     expect(domain).not.toMatch(/\(code\.length\(\) >= 3\)/);
   });
 });

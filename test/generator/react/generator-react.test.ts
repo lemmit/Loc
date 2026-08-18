@@ -759,9 +759,11 @@ describe("react generator", () => {
       const model = await buildModel("examples/acme.ddd");
       const { files } = generateSystems(model);
       const productApi = files.get("web_app/src/api/product.ts")!;
-      // acme Product has `invariant sku.length > 0` — recognised as min(1).
+      // acme Product has `invariant sku.length > 0` — recognised as a length
+      // bound, which is a CODE-POINT predicate rather than zod's code-unit
+      // `.min(1)` (RS-31).
       expect(productApi).toMatch(
-        /CreateProductRequest = z\.object\(\{[\s\S]*sku: z\.string\(\)\.min\(1\)/,
+        /CreateProductRequest = z\.object\(\{[\s\S]*sku: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length >= 1\)/,
       );
       const createBlock = productApi.match(
         /export const CreateProductRequest = z\.object\(\{[\s\S]*?\}\)([^;]*);/,
@@ -899,9 +901,15 @@ describe("react generator", () => {
       );
       const { files } = generateSystems(doc.parseResult.value as Model);
       const productApi = files.get("web/src/api/product.ts")!;
-      // Both checks are absorbed into idiomatic chains.
-      expect(productApi).toMatch(/sku: z\.string\(\)\.min\(1\)\.max\(32\)/);
-      expect(productApi).toMatch(/name: z\.string\(\)\.max\(120\)/);
+      // Both checks are absorbed into the field's chain — as CODE-POINT
+      // predicates, not zod's code-unit `.min`/`.max` (RS-31).  The `>= 1 &&
+      // <= 32` pair folds into ONE refine (the `len-range` shape).
+      expect(productApi).toMatch(
+        /sku: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length >= 1 && \[\.\.\.s\]\.length <= 32\)/,
+      );
+      expect(productApi).toMatch(
+        /name: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length <= 120\)/,
+      );
     });
 
     it("`private invariant` is skipped from wire schemas (server-only)", async () => {

@@ -40,24 +40,26 @@ export function tsCodePointLength(recv: string): string {
   return `[...${recv}].length`;
 }
 
-/** C#: code units minus surrogate pairs.  Each astral code point is exactly
- *  one high + one low surrogate, so subtracting the low surrogates from
- *  `.Length` is the code-point count.  `Count(predicate)` is `System.Linq`,
- *  which every emitted project has via the csproj's
- *  `<ImplicitUsings>enable</ImplicitUsings>`.
+/** C#: `EnumerateRunes()` yields one `Rune` per Unicode scalar value.
+ *  `Count()` is `System.Linq`, which every emitted project has globally via
+ *  the csproj's `<ImplicitUsings>enable</ImplicitUsings>`.
  *
- *  Why not the more obvious `EnumerateRunes().Count()`: `s.length > 0` is a
- *  very common Loom invariant, and `Count() > 0` trips **CA1827** ("use Any()")
- *  — a build error under the emitted csproj's `latest-recommended` analysis
- *  level plus CI's `/warnaserror`.  The arithmetic form keeps `Count` out of a
- *  zero comparison.  The two differ only on an UNPAIRED surrogate (malformed
- *  UTF-16), which cannot reach a handler: `System.Text.Json` never produces
- *  one from a JSON body. */
+ *  `s.length > 0` is a very common Loom invariant and `Count() > 0` trips
+ *  **CA1827** ("use Any()") — a build error under the emitted csproj's
+ *  `latest-recommended` analysis level plus CI's `/warnaserror`.  It is
+ *  suppressed there (`NoWarn`, with this reason) rather than worked around
+ *  with `Length - Count(char.IsLowSurrogate)`: that arithmetic form evaluates
+ *  the receiver TWICE, which on a composed receiver (`s.drop(3).length`)
+ *  duplicates the whole sub-expression in the emitted source. */
 export function csCodePointLength(recv: string): string {
-  return `(${recv}.Length - ${recv}.Count(char.IsLowSurrogate))`;
+  return `${recv}.EnumerateRunes().Count()`;
 }
 
-/** Java: the JDK's own code-point counter — no import needed. */
+/** Java: `codePoints()` is the JDK's own code-point stream — no import needed.
+ *  Chosen over `codePointCount(0, s.length())` because that spells the
+ *  receiver twice; `.count()` is a `long`, so the result is cast back to the
+ *  `int` the IR gives `.length`, and self-parenthesized because the snippet
+ *  lands in arbitrary expression slots. */
 export function javaCodePointLength(recv: string): string {
-  return `${recv}.codePointCount(0, ${recv}.length())`;
+  return `((int) ${recv}.codePoints().count())`;
 }

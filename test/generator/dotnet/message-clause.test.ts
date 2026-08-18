@@ -42,7 +42,7 @@ describe("dotnet — messaged rule → FluentValidation .WithMessage carrier", (
   it("routes a messaged invariant/check through .Must(...).WithMessage(text)", async () => {
     const { validator } = await gen();
     expect(validator).toContain(
-      "RuleFor(x => x).Must(x => (x.Name.Length - x.Name.Count(char.IsLowSurrogate)) >= 2 && (x.Name.Length - x.Name.Count(char.IsLowSurrogate)) <= 120)",
+      "RuleFor(x => x).Must(x => x.Name.EnumerateRunes().Count() >= 2 && x.Name.EnumerateRunes().Count() <= 120)",
     );
     expect(validator).toContain('.WithMessage("Name must be 2-120 characters")');
     expect(validator).toContain('.WithMessage("SKU is required")');
@@ -66,7 +66,7 @@ describe("dotnet — messaged rule → FluentValidation .WithMessage carrier", (
     // A string LENGTH bound is a code-point `.Must`, not FluentValidation's
     // code-unit `.MinimumLength` (RS-31).
     expect(validator).toContain(
-      `RuleFor(x => x.Sku).Must(v => v == null || (v.Length - v.Count(char.IsLowSurrogate)) >= 1)`,
+      `RuleFor(x => x.Sku).Must(v => v == null || v.EnumerateRunes().Count() >= 1)`,
     );
   });
 });

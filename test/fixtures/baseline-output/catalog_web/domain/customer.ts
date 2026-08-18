@@ -46,8 +46,8 @@ export class Customer {
   private _assertInvariants(): void {
     if (!(this._username !== this._email)) throw new DomainError("Invariant violated: username != email");
     if (!(/^[a-z][a-z0-9_]*$/.test(this._username))) throw new DomainError("Invariant violated: username.matches(\"^[a-z][a-z0-9_]*$\")");
-    if (!(this._username.length >= 3 && this._username.length <= 32)) throw new DomainError("Invariant violated: username check username.length >= 3 && username.length <= 32");
-    if (!(/^[^@]+@[^@]+\.[^@]+$/.test(this._email) && this._email.length <= 120)) throw new DomainError("Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120");
+    if (!([...this._username].length >= 3 && [...this._username].length <= 32)) throw new DomainError("Invariant violated: username check username.length >= 3 && username.length <= 32");
+    if (!(/^[^@]+@[^@]+\.[^@]+$/.test(this._email) && [...this._email].length <= 120)) throw new DomainError("Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120");
     if (!(this._age >= 18 && this._age <= 150)) throw new DomainError("Invariant violated: age check age >= 18 && age <= 150");
   }
 
