@@ -83,3 +83,59 @@ describe("tenancy claim name — emitted principal reads follow the declaration"
     }
   });
 });
+
+// ─── The realtime room key (A2) ─────────────────────────────────────────────
+//
+// The four SSE backends key their per-tenant rooms off the PRINCIPAL, and all
+// four spelled `tenantId` literally — the row column, not the claim.  Under
+// this fixture's `tenancy by user.orgId` that member does not exist on the
+// emitted `User` shape: .NET/Java fail to compile, python raises per publish,
+// and node reads `undefined` through its cast, so every connection joins no
+// room and every tenant-scoped event degrades to a cross-tenant broadcast.
+// The claim now rides the shared plan (`realtimeRoomPlan`), cased per backend.
+
+describe("realtime room key — the SSE backends read the DECLARED claim", () => {
+  it("node: the ambient + connect-time room keys read `orgId`", async () => {
+    const rt = await emitted("node", /http\/realtime\.ts$/);
+    expect(rt).toContain("const user = requestContext()?.currentUser as { orgId?: unknown }");
+    expect(rt).toContain('typeof principal?.orgId === "string" ? principal.orgId : undefined');
+    expect(rt).not.toContain("tenantId");
+  });
+
+  it("dotnet: the hub and the SSE endpoint read `OrgId`", async () => {
+    const hub = await emitted("dotnet", /Infrastructure\/Realtime\/RealtimeHub\.cs$/);
+    expect(hub).toContain("user.OrgId.ToString()");
+    expect(hub).not.toContain("TenantId");
+    // Program.cs derives the connecting principal's room independently.
+    const program = await emitted("dotnet", /Program\.cs$/);
+    expect(program).toContain("__rtUser.OrgId.ToString()");
+    expect(program).not.toContain("__rtUser.TenantId");
+  });
+
+  it("java: the room-key accessor reads `orgId()`", async () => {
+    const rt = await emitted("java", /RealtimeController\.java$/);
+    expect(rt).toContain("user.orgId() == null ? null : String.valueOf(user.orgId())");
+    expect(rt).not.toContain("tenantId");
+  });
+
+  it("python: the room-key helper reads `org_id`", async () => {
+    const rt = await emitted("python", /app\/realtime\.py$/);
+    expect(rt).toContain(
+      "return None if user is None or user.org_id is None else str(user.org_id)",
+    );
+    expect(rt).not.toContain("tenant_id");
+  });
+
+  // The A4 half, asserted on the emitted artefact rather than the plan: the
+  // fixture's `InvoiceReminderSent` carries no `<Agg> id`, so the id-reference
+  // classifier put it in the GLOBAL set and streamed one tenant's invoice
+  // number to every connected tenant.
+  it("an id-less event out of the tenant-owned context is tenant-scoped, not global", async () => {
+    const rt = await emitted("node", /http\/realtime\.ts$/);
+    expect(rt).toContain(
+      'const TENANT_SCOPED_EVENT_TYPES: ReadonlySet<string> = new Set(["InvoiceIssued", "InvoiceReminderSent"]);',
+    );
+    // With no id reference the ticket degrades to the `type` alone.
+    expect(rt).toContain("InvoiceReminderSent: [],");
+  });
+});

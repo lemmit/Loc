@@ -779,7 +779,7 @@ export function generateTypeScriptForContexts(
   // module reads no `db` at all — `realtimeTee(inner)` decorates a dispatcher and
   // `realtimeRoutes()` takes no handle — so the wire is adapter-independent.
   {
-    const realtimeFile = buildRealtimeFile(merged);
+    const realtimeFile = buildRealtimeFile(merged, system?.sys);
     if (realtimeFile) out.set("http/realtime.ts", realtimeFile);
   }
 

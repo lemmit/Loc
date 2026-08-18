@@ -1387,7 +1387,11 @@ function emitProjectFromContexts(
   // controller tees off the always-present ApplicationEventPublisher bus; a
   // broadcast-free deployable emits nothing (byte-identical).  Derived over the
   // union of hosted contexts so a channel declared in one is served here.
-  const realtimeController = renderJavaRealtimeController(mergeContexts(contexts), basePkg);
+  const realtimeController = renderJavaRealtimeController(
+    mergeContexts(contexts),
+    basePkg,
+    system?.sys,
+  );
   if (realtimeController) {
     out.set(mainSourcePath(`${basePkg}.api`, "RealtimeController.java"), realtimeController);
   }
