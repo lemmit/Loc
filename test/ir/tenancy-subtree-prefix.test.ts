@@ -58,6 +58,12 @@ describe("hierarchical tenancy — the subtree test is anchored, not a LIKE patt
       " like ",
     ],
     ["elixir", "strpos(?, ? || '.') = 1", "LIKE ? || '.%'"],
+    // The SECOND node persistence adapter.  MikroORM's FilterQuery operators
+    // have no prefix test, so the predicate is a `raw()` SQL fragment used as a
+    // FilterQuery key — a different renderer with the same trap available to it,
+    // which is exactly why it needs its own cell here rather than riding the
+    // `node` row above.
+    ["node { persistence: mikroorm }", "starts_with(data_key, ?)", " like "],
   ])("%s emits the anchored prefix and no wildcard pattern", async (platform, anchored, wildcard) => {
     const src = await emitFor(platform);
     expect(src).toContain(anchored);
@@ -70,7 +76,7 @@ describe("hierarchical tenancy — the subtree test is anchored, not a LIKE patt
   // under the tenant root.  No emitted pattern may end in the `.%` suffix that
   // made the anchor a pattern in the first place.
   it("emits no `.%` pattern suffix on any SQL backend", async () => {
-    for (const platform of ["node", "python", "java", "elixir"]) {
+    for (const platform of ["node", "node { persistence: mikroorm }", "python", "java", "elixir"]) {
       expect(await emitFor(platform), platform).not.toContain(".%");
     }
   });
