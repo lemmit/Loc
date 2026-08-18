@@ -40,7 +40,7 @@ describe("Hono find requires gate", () => {
     const rf = await routesFile('requires currentUser.role == "agent" ');
     expect(rf).toContain('.get("currentUser")');
     expect(rf).toContain(
-      'if (!(currentUser.role === "agent")) throw new ForbiddenError("Forbidden");',
+      'if (!(currentUser.role === "agent")) throw new ForbiddenError("Forbidden: find openOnes");',
     );
     const gateIdx = rf.indexOf("throw new ForbiddenError");
     const queryIdx = rf.indexOf("await repo.openOnes(");

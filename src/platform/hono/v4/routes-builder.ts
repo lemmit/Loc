@@ -202,6 +202,10 @@ function emitHistoryRoute(agg: EnrichedAggregateIR, find: FindIR, usingMikro: bo
     );
   }
   if (find.requires) {
+    // Audit-history's 403 `detail` stays bare `Forbidden` for now: unlike the
+    // plain read gates below, the descriptive backends disagree on its LABEL
+    // (java/python `find history` vs elixir `history <Agg>`), so unifying it is
+    // #2540's audit-history mission, not this read-gate fix.
     out.push(`    if (!(${renderTsExpr(find.requires)})) throw new ForbiddenError("Forbidden");`);
   }
   // (2) above — capability scoping rides the entity read, because the audit
@@ -1914,9 +1918,14 @@ function emitFindRoute(
   // Authorization gate (default-deny): a 403 when the `requires` predicate
   // (evaluated against the in-scope currentUser) fails, BEFORE the query runs.
   // ForbiddenError is mapped to a 403 ProblemDetails by the file's onError
-  // filter — the read-side analogue of an operation `requires` gate.
+  // filter — the read-side analogue of an operation `requires` gate.  The 403
+  // `detail` carries the source label (`Forbidden: find <name>`) exactly as the
+  // operation gates and the other four backends do — node's read gates used to
+  // drop it, the lone bare-`Forbidden` outlier across all five backends.
   if (find.requires) {
-    out.push(`    if (!(${renderTsExpr(find.requires)})) throw new ForbiddenError("Forbidden");`);
+    out.push(
+      `    if (!(${renderTsExpr(find.requires)})) throw new ForbiddenError(${JSON.stringify(`Forbidden: find ${find.name}`)});`,
+    );
   }
   const baseArgs = find.params.map((p) => wireToDomainExpr(`params.${p.name}`, p.type, ctx));
   if (paged) {

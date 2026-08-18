@@ -34,7 +34,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { DEV_CLAIMS, featureCases, parseTrx, resetDatabase, sharedSystemCases } from "./cases.mjs";
+import { AUTHZ_LADDERS, DEV_CLAIMS, featureCases, parseTrx, resetDatabase, sharedSystemCases, unauthorizedCredentials } from "./cases.mjs";
 import { stopServer, waitForPort, waitForPortFree } from "./proc.mjs";
 import { makeWireGate, recorderPreamble } from "./wire-differential.mjs";
 import { startMockIssuer } from "./oidc-mock.mjs";
@@ -115,7 +115,7 @@ async function waitForReady(base, timeoutMs = 60_000) {
 
 /** The e2e-run entry (bundled by esbuild): loads the emitted api suite and
  *  dispatches each request over real HTTP at the booted .NET server. */
-function entrySource(e2eFile, bearerToken, hasAuth) {
+function entrySource(e2eFile, bearerToken, hasAuth, authzLadder, unauthorizedCreds) {
   const J = JSON.stringify;
   const bearerEnv = bearerToken ? `, E2E_BEARER_TOKEN: ${J(bearerToken)}` : "";
   return `
@@ -128,6 +128,8 @@ import { readFileSync } from "node:fs";
 const E2E_FILE = ${J(e2eFile)};
 const DEV_CLAIMS = ${J(DEV_CLAIMS)};
 const BEARER_ENV = { E2E_DEV_CLAIMS: DEV_CLAIMS${bearerEnv} };
+const AUTHZ_LADDER = ${J(authzLadder ?? null)};
+const UNAUTHORIZED_CREDS = ${J(unauthorizedCreds ?? null)};
 const BASE = ${J(BASE)};
 
 export async function run() {
@@ -151,7 +153,12 @@ export async function run() {
   // RS-9 — appended AFTER the tier so the probes never shift the ordinals the
   // golden aligns on, and so a failing tier is diagnosed on its own requests.
   await __frameworkProbes(dispatch, { auth: ${J(!!hasAuth)} });
-  return { results, wire: __wire };
+  // M-T9.11 / M-T9.28 — the authorization ladder, RECORDED (dispatch passed), so
+  // this adapter's 401/403/2xx are diffed against the node-oracle golden per-PR.
+  const authz = AUTHZ_LADDER && UNAUTHORIZED_CREDS
+    ? await __authzLadder(AUTHZ_LADDER, { authorized: __authHeaders, unauthorized: UNAUTHORIZED_CREDS }, dispatch)
+    : [];
+  return { results, authz, wire: __wire };
 }
 `;
 }
@@ -243,11 +250,20 @@ async function runCase(c) {
 
     const entry = join(workDir, "entry.mts");
     const bundle = join(workDir, "bundle.mjs");
-    writeFileSync(entry, entrySource(e2eFile, bearerToken, hasAuth));
+    writeFileSync(
+      entry,
+      entrySource(
+        e2eFile,
+        bearerToken,
+        hasAuth,
+        AUTHZ_LADDERS[c.name] ?? null,
+        unauthorizedCredentials(isOidc ? "oidc" : hasAuth ? "devstub" : "none", isOidc && oidc ? oidc.unauthorizedToken : null),
+      ),
+    );
     await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });
     const { run } = await import(pathToFileURL(bundle).href);
     const api = await run();
-    return { results: [...unitResults, ...api.results], wire: api.wire };
+    return { results: [...unitResults, ...api.results, ...(api.authz ?? [])], wire: api.wire };
   } finally {
     // AWAIT the exit — firing SIGTERM and moving on leaves the port occupied
     // into the next case, which then talks to the wrong app (see proc.mjs).
@@ -294,6 +310,7 @@ if (corpus.some((c) => /\n\s*auth\s*\{/.test(c.source))) {
 let pass = 0;
 let fail = 0;
 let errored = 0;
+let skipped = 0;
 // Cross-backend runtime wire differential (M-T9.11).  The persistence adapter
 // must not change the WIRE: this leg is byte-compared against the SAME
 // canonical golden the default-adapter legs are, so an adapter that serializes
@@ -310,6 +327,11 @@ for (const c of corpus) {
     continue;
   }
   for (const r of out.results) {
+    if (r.status === "skip") {
+      skipped++;
+      process.stdout.write(`  ○ [${r.tier ?? "api"}] ${r.name}\n`);
+      continue;
+    }
     const ok = r.status === "pass";
     ok ? pass++ : fail++;
     process.stdout.write(`  ${ok ? "✓" : "✗"} [${r.tier ?? "api"}] ${r.name}\n`);
@@ -322,5 +344,5 @@ await oidc?.stop();
 
 const wireBad = await wire.finish();
 
-process.stdout.write(`\n${pass} passed, ${fail} failed${errored ? `, ${errored} cases errored` : ""}\n`);
+process.stdout.write(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ""}${errored ? `, ${errored} cases errored` : ""}\n`);
 process.exit(fail > 0 || errored > 0 || wireBad > 0 ? 1 : 0);

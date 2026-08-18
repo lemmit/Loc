@@ -301,17 +301,7 @@ const __urls = [];
 // miss is 401; phoenix routes first, so it is 404).  Forwarding them keeps the
 // probe pointed at the thing it is meant to measure.
 let __authHeaders = {};
-// The UNWRAPPED dispatch, stashed as the recorder is installed.  The authz
-// ladder below deliberately goes through THIS rather than the recorded wrapper:
-// its requests are assertions about status codes, not part of the wire contract
-// the golden freezes, and routing them through the recorder would shift every
-// subsequent ordinal the golden aligns on — on the legs that adopt the ladder
-// but not on the ones that haven't yet, which would fail the differential for a
-// reason that has nothing to do with the wire.  (M-T9.11 can promote the ladder
-// to a recorded probe later; that is a golden rebaseline, deliberately taken.)
-let __rawDispatch = null;
 const __record = (dispatch) => {
-  __rawDispatch = dispatch;
   return async (req) => {
     const out = await dispatch(req);
     try {
@@ -468,26 +458,38 @@ const __absentReadProbes = async (dispatch) => {
 //
 // The middle rung is the one that needed the new principal, and the third rung
 // is what keeps the first two honest — a backend that 403s everything would pass
-// arms 1+2 alone.  All three requests go through the SAME dispatch chokepoint as
-// the tier, so the ladder is backend-agnostic: the HTTP runners hand it a base
-// URL and it never introspects a router.
+// arms 1+2 alone.  All three requests go through the SAME RECORDED dispatch the
+// tier uses (M-T9.11), so each 401/403/2xx response is captured, templated, and
+// diffed against the committed golden exactly like every other wire entry — the
+// 401/403 wire contract is now a per-PR five-backend gate at zero new boot cost.
+// The ladder runs LAST (after the tier and the framework probes) so its recorded
+// entries land at stable trailing ordinals rather than shifting the ones the
+// golden already aligns on.  It stays backend-agnostic: the HTTP runners hand it
+// a base URL and it never introspects a router.
 //
 // Credentials are supplied by the runner (\`creds\`), not derived here, because
 // what "unauthorized" means is auth-flavour-shaped: dev-stub → an
 // \`x-loom-dev-claims\` header carrying DEV_CLAIMS_UNAUTHORIZED; OIDC → a second
 // mock-issuer token.  \`authorized\` is whatever the tier itself just used, read
 // off the recorder — so it cannot drift from the credential the suite passed.
+// It is SNAPSHOTTED at entry below: the recorder folds every dispatched request's
+// headers into the shared \`__authHeaders\`, so without the copy the unauthorized
+// arm's non-granting claims would leak into the authorized arm that runs after it
+// and turn its 2xx into a 403.
 //
 // An arm whose expected status is \`null\` is SKIPPED and reported as skipped, not
 // silently passed: under the dev stub there is no anonymous caller to express
 // (the emitted verifier accepts every request and falls back to its built-in
 // identity), so that rung is unavailable rather than green.
-const __authzLadder = async (spec, creds) => {
-  if (!spec || !__rawDispatch) return [];
+const __authzLadder = async (spec, creds, dispatch) => {
+  if (!spec || !dispatch) return [];
   const first = __urls.map((u) => { try { return new URL(u); } catch { return null; } }).find(Boolean);
   if (!first) return [];
   const origin = first.origin;
-  const dispatch = __rawDispatch;
+  // Freeze the authorized credential before the first dispatch — see the note
+  // above on __authHeaders leakage through the recorder.
+  const authorized = { ...creds.authorized };
+  const unauthorized = creds.unauthorized;
   const json = (h) => ({ ...h, "content-type": "application/json" });
   const out = [];
   const push = (name, status, error) => out.push({ tier: "authz", name, status, error });
@@ -508,7 +510,7 @@ const __authzLadder = async (spec, creds) => {
     const r = await dispatch({
       method: step.method ?? "POST",
       url: origin + step.path.replace("{id}", id ?? ""),
-      headers: json(creds.authorized),
+      headers: json(authorized),
       ...withBody(step.method ?? "POST", step.body),
     });
     const st = r?.response?.status;
@@ -569,9 +571,22 @@ const __authzLadder = async (spec, creds) => {
   // arm cannot disturb the next surface's denial arms.
   for (const s of surfaces) {
     await arm(s, "unauthenticated", {}, s.arms.anonymous);
-    await arm(s, "authenticated-but-unauthorized", creds.unauthorized, s.arms.unauthorized);
-    await arm(s, "authorized", creds.authorized, s.arms.authorized);
+    await arm(s, "authenticated-but-unauthorized", unauthorized, s.arms.unauthorized);
+    await arm(s, "authorized", authorized, s.arms.authorized);
   }
   return out;
 };`;
+}
+
+// The shared invocation tail every runner splices AFTER `__frameworkProbes`.  It
+// records the ladder through the tier's own `dispatch` (so its 4xx entries enter
+// the wire recording) and appends the arm outcomes to the runner's results
+// array.  `AUTHZ_LADDER` / `UNAUTHORIZED_CREDS` are per-case consts the runner's
+// entry declares; `__authHeaders` is the authorized credential read off the
+// recorder.  A case with no ladder spec (or no expressible unauthorized
+// credential) is a no-op.
+export function authzLadderTail(resultsVar) {
+  return `if (AUTHZ_LADDER && UNAUTHORIZED_CREDS) {
+    for (const r of await __authzLadder(AUTHZ_LADDER, { authorized: __authHeaders, unauthorized: UNAUTHORIZED_CREDS }, dispatch)) ${resultsVar}.push(r);
+  }`;
 }
