@@ -93,6 +93,7 @@ export type FlutterInputKind =
   | "bool"
   | "enum"
   | "datetime"
+  | "file"
   | "fk-select"
   | "scalar-array"
   | "object-array";
@@ -221,6 +222,14 @@ function scalarInputKind(
         return "bool";
       case "datetime":
         return "datetime";
+      case "File":
+        // A `File` field is the fixed `FileRef` wire object
+        // (`{url,key,contentType,size}`) — NOT a string.  It renders as the same
+        // pick → multipart `POST /files` → `FileRef` write-back the standalone
+        // `FileUpload` page primitive ships (`pack.ts`), and submits the
+        // `FileRef` map.  Before this it fell through to `"text"` and posted a
+        // bare `String`, which every backend rejected with a 422.
+        return "file";
       default:
         return "text"; // string, guid, json
     }
@@ -717,6 +726,9 @@ function stateDecls(fields: readonly FlutterFormField[]): string[] {
       out.push(`  String? ${stateId(f.wireName)}${first ? ` = '${dartStr(first)}'` : ""};`);
     } else if (f.kind === "datetime") {
       out.push(`  DateTime? ${stateId(f.wireName)};`);
+    } else if (f.kind === "file") {
+      // The uploaded `FileRef` (null until the user picks + the upload lands).
+      out.push(`  FileRef? ${stateId(f.wireName)};`);
     } else if (f.kind === "fk-select") {
       out.push(`  String? ${stateId(f.wireName)};`);
       out.push(`  List<Map<String, dynamic>> ${optionsId(f.wireName)} = const [];`);
@@ -776,6 +788,61 @@ function fkLoaders(fields: readonly FlutterFormField[]): string[] {
   return out;
 }
 
+/** The pick-and-upload method name for a `file` field
+ *  (`avatar` → `_pickAvatar`). */
+function pickerId(wireName: string): string {
+  return `_pick${upperFirst(wireName)}`;
+}
+
+/** True when the form hosts at least one `file` input — drives the extra
+ *  `file_picker` / `models.dart` imports and the `file_picker` pubspec dep. */
+export function formHasFileField(spec: FlutterFormSpec): boolean {
+  return spec.fields.some((f) => f.kind === "file");
+}
+
+/** True when ANY collected form hosts a `file` input.  The pubspec/Makefile
+ *  gate: an in-form File field pulls `file_picker` exactly as a standalone
+ *  `FileUpload` primitive does. */
+export function formsUseFilePicker(forms: readonly FlutterFormSpec[]): boolean {
+  return forms.some(formHasFileField);
+}
+
+/** The per-`file`-field pick + upload methods.  Each picks a file (with bytes —
+ *  web needs `withData`), POSTs it as multipart to `/files`, and stores the
+ *  returned `FileRef` in state.  Same contract as the standalone `FileUpload`
+ *  page primitive (`pack.ts`), so both paths hit the one objectStore route. */
+function filePickers(fields: readonly FlutterFormField[]): string[] {
+  const out: string[] = [];
+  for (const f of fields) {
+    if (f.kind !== "file") continue;
+    const st = stateId(f.wireName);
+    out.push(
+      "",
+      `  Future<void> ${pickerId(f.wireName)}() async {`,
+      "    final picked = await FilePicker.platform.pickFiles(withData: true);",
+      "    if (picked == null || picked.files.isEmpty) return;",
+      "    final pf = picked.files.single;",
+      "    if (pf.bytes == null) return;",
+      "    try {",
+      "      final req = http.MultipartRequest('POST', apiUri('/files'))",
+      "        ..files.add(http.MultipartFile.fromBytes('file', pf.bytes!, filename: pf.name));",
+      "      final resp = await http.Response.fromStream(await req.send());",
+      "      if (!mounted) return;",
+      "      if (resp.statusCode >= 200 && resp.statusCode < 300) {",
+      `        setState(() => ${st} = FileRef.fromJson(jsonDecode(resp.body) as Map<String, dynamic>));`,
+      "      } else {",
+      // Escaped template literal — the `${resp.statusCode}` stays Dart interp.
+      `        setState(() => _error = 'Upload failed (\${resp.statusCode})');`,
+      "      }",
+      "    } catch (e) {",
+      "      if (mounted) setState(() => _error = '$e');",
+      "    }",
+      "  }",
+    );
+  }
+  return out;
+}
+
 /** The `dispose` overrides for text-backed controllers + scalar-array
  *  controller lists. */
 function disposeBody(fields: readonly FlutterFormField[]): string[] {
@@ -820,6 +887,9 @@ function fieldValueExpr(f: FlutterFormField): string {
       return stateId(f.wireName);
     case "datetime":
       return `${stateId(f.wireName)}?.toIso8601String()`;
+    case "file":
+      // The `{url,key,contentType,size}` object the backend's File column wants.
+      return `${stateId(f.wireName)}?.toJson()`;
     case "scalar-array": {
       const ctrls = arrayCtrlsId(f.wireName);
       if (f.elementKind === "number-int") {
@@ -926,6 +996,17 @@ function fieldWidget(f: FlutterFormField): string {
       const validator = f.required ? ", validator: (v) => v == null ? 'Required' : null" : "";
       return `DropdownButtonFormField<String>(initialValue: ${stateId(f.wireName)}, decoration: ${decoration}, isExpanded: true, items: ${items}, onChanged: (v) => setState(() => ${stateId(f.wireName)} = v)${validator})`;
     }
+    case "file":
+      // A pick button + the current selection.  Not a `FormField`, so the
+      // required check rides in `_submit` (`requiredFileGuards`) rather than the
+      // `Form`'s validator sweep.
+      return (
+        `Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Row(children: <Widget>[` +
+        `OutlinedButton.icon(icon: const Icon(Icons.upload_file), label: const Text(${label}), onPressed: ${pickerId(f.wireName)}), ` +
+        `const SizedBox(width: 12), ` +
+        `Expanded(child: Text(${stateId(f.wireName)}?.key ?? 'No file selected', overflow: TextOverflow.ellipsis)), ` +
+        `]))`
+      );
     case "datetime":
       return `InkWell(onTap: () async { final picked = await showDatePicker(context: context, initialDate: ${stateId(f.wireName)} ?? DateTime.now(), firstDate: DateTime(2000), lastDate: DateTime(2100)); if (picked != null) setState(() => ${stateId(f.wireName)} = picked); }, child: InputDecorator(decoration: ${decoration}, child: Text(${stateId(f.wireName)}?.toIso8601String() ?? 'Select date')))`;
     case "scalar-array": {
@@ -975,6 +1056,24 @@ function fieldWidget(f: FlutterFormField): string {
   }
 }
 
+/** The required-file guards for a form's `file` inputs.  A `file` input is not a
+ *  `FormField`, so the `Form`'s validator sweep never sees it — a required one is
+ *  enforced here instead, with the same visible `_error` banner a failed request
+ *  uses. */
+function requiredFileGuards(fields: readonly FlutterFormField[]): string[] {
+  const out: string[] = [];
+  for (const f of fields) {
+    if (f.kind !== "file" || !f.required) continue;
+    out.push(
+      `    if (${stateId(f.wireName)} == null) {`,
+      `      setState(() => _error = '${dartStr(f.label)} is required');`,
+      "      return;",
+      "    }",
+    );
+  }
+  return out;
+}
+
 /** The `_submit` method for a fields-bearing (create / operation) form. */
 function submitMethod(spec: FlutterFormSpec): string[] {
   const gate =
@@ -982,6 +1081,7 @@ function submitMethod(spec: FlutterFormSpec): string[] {
   return [
     "  Future<void> _submit() async {",
     ...(gate ? [gate] : []),
+    ...requiredFileGuards(spec.fields),
     "    setState(() {",
     "      _submitting = true;",
     "      _error = null;",
@@ -1102,6 +1202,7 @@ export function renderFormWidget(spec: FlutterFormSpec): string {
       : [];
 
   const submit = spec.kind === "destroy" ? destroySubmitMethod(spec) : submitMethod(spec);
+  const pickers = filePickers(spec.fields);
 
   return lines(
     // LOUD form-field drop markers (M-A) — Dart line comments, zero compile risk,
@@ -1122,6 +1223,7 @@ export function renderFormWidget(spec: FlutterFormSpec): string {
     ...disposeOverride,
     "",
     ...submit,
+    ...pickers,
     "",
     "  @override",
     "  Widget build(BuildContext context) {",
@@ -1136,6 +1238,10 @@ export function renderFormWidget(spec: FlutterFormSpec): string {
 export function renderFormsFile(forms: readonly FlutterFormSpec[]): string {
   if (forms.length === 0) return "";
   const blocks = forms.map(renderFormWidget);
+  // A `file` input picks through `file_picker` and reifies the uploaded
+  // `FileRef` from `models.dart`; a File-free form set keeps its old import
+  // list byte-identical.
+  const usesFile = formsUseFilePicker(forms);
   return `${lines(
     "// Form widgets — one self-contained StatefulWidget per CreateForm /",
     "// OperationForm / DestroyForm a ui hosts.  Each POSTs/DELETEs over",
@@ -1144,10 +1250,12 @@ export function renderFormsFile(forms: readonly FlutterFormSpec[]): string {
     "",
     "import 'dart:convert';",
     "",
+    ...(usesFile ? ["import 'package:file_picker/file_picker.dart';"] : []),
     "import 'package:flutter/material.dart';",
     "import 'package:http/http.dart' as http;",
     "",
     "import 'config.dart';",
+    ...(usesFile ? ["import 'models.dart';"] : []),
     "",
     ...blocks.flatMap((b, i) => (i === 0 ? [b] : ["", b])),
   )}\n`;

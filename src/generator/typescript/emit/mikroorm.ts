@@ -79,10 +79,12 @@ import {
   docFieldType,
   docTypeAlias,
   documentCapabilityBody,
+  documentWriteScopeBody,
   entityFromDocFn,
   entityToDocFn,
   findPredicate,
   serializeField,
+  writeScopeDeniesAll,
 } from "../repository-document-builder.js";
 import { hydrateConcreteFromSharedRow, hydrateRootExpr } from "../repository-find-builder.js";
 import { hydrateEntityExpr } from "../repository-find-hydrate.js";
@@ -1086,6 +1088,12 @@ function predicateEntry(e: ExprIR): string {
   // uuid`), so a malformed claim answers an ordinary bad token with a 500.
   // `{ id: null }` is MikroORM's `id IS NULL`, which no NOT NULL primary key
   // matches — the same empty read a foreign-but-well-formed claim gives.
+  // Authorization/tenancy filter sentinels (M-T9.9).  A DISCRIMINATED node, so
+  // a missing arm here is a `tsc` error rather than a fall-through to the
+  // `unsupported find predicate` throw at the bottom of this function — which
+  // is exactly how the `deny` carve-out used to be unreachable on this adapter
+  // (the whole point of giving the sentinel its own `ExprIR.kind`).
+  if (inner.kind === "authz-filter") return authzFilterEntry(inner);
   const selfScope = guidFromStringSelfScope(inner);
   if (selfScope) {
     const claim = `requireCurrentUser().${selfScope.claim}`;
@@ -1102,6 +1110,38 @@ function predicateEntry(e: ExprIR): string {
     return comparisonEntry(inner);
   }
   throw new Error(`mikroorm: unsupported find predicate '${inner.kind}'`);
+}
+
+/** The `authz-filter` sentinels as a MikroORM FilterQuery ENTRY (a `key: value`
+ *  fragment `predicateEntry`'s callers splice into an object literal) — the
+ *  MikroORM twin of Dapper's `authzFilterToSql` (`1 = 0`) and Drizzle's
+ *  `and(isNull(id), isNotNull(id))`. */
+function authzFilterEntry(e: Extract<ExprIR, { kind: "authz-filter" }>): string {
+  switch (e.filter.kind) {
+    // DENY carve-out (authorization Phase 4 — deny-wins).  The always-false
+    // term, ANDed into every read FilterQuery (and into the write-scope
+    // existence pre-guard).  A genuine CONTRADICTION on the always-present
+    // primary key rather than the bare `{ id: null }` this file uses elsewhere:
+    // self-contained, needs no column beyond `id`, and does not lean on the PK
+    // being NOT NULL.  `$and` keeps it ONE entry, so it composes with the
+    // sibling entries `flattenAnd` merges into the same object literal.
+    case "deny":
+      return `$and: [{ id: null }, { id: { $ne: null } }]`;
+    // `deep`/`global` read level (hierarchical tenancy) — the materialized-path
+    // descendant-or-self sentinel.  The FilterQuery subset cannot express the
+    // prefix test, so `validateMikroormSupport` refuses a hierarchical scope
+    // filter (read OR write) under `persistence: mikroorm` before codegen runs;
+    // this throw is unreachable defence-in-depth.
+    case "scope":
+      throw new Error(
+        `mikroorm: hierarchical tenancy scope filter on '${e.aggregate}' is outside the ` +
+          `MikroORM FilterQuery subset; use 'persistence: drizzle'.`,
+      );
+    default: {
+      const _exhaustive: never = e.filter;
+      throw new Error(`unhandled authz-filter kind: ${(_exhaustive as { kind: string }).kind}`);
+    }
+  }
 }
 
 /** Conjunctions merge into one object; `||` becomes `$or`.  Bare boolean
@@ -1232,6 +1272,89 @@ function withContextFilters(base: string, caps: string[]): string {
   if (caps.length === 0) return base;
   const parts = base === "{}" ? caps : [base, ...caps];
   return parts.length === 1 ? parts[0]! : `{ $and: [${parts.join(", ")}] }`;
+}
+
+// ---------------------------------------------------------------------------
+// Write-scope pre-guard (authorization Phase 3 P3.1 / Phase 4 deny-write).
+//
+// `agg.writeScopeFilter` is the predicate an INSTANCE mutation's command load
+// must satisfy when the write scope is strictly NARROWER than the read scope
+// (an `allow write local` under a widened read, or a `deny write` carve-out).
+// Every mutation route loads through `getById`, so that is where the narrowing
+// is enforced: a row the caller may READ but not WRITE is indistinguishable
+// from a missing one (404), and the ordinary `findById` read filter still
+// hydrates the row afterwards.
+//
+// Until this landed, `writeScopeFilter` had ZERO readers in this file — a
+// `deny write on X` (or a narrowed write ladder) generated clean on
+// `persistence: mikroorm` and the mutation SUCCEEDED.  Byte-identical (plain
+// `findById` + not-found throw) when the aggregate carries no narrowing.
+// ---------------------------------------------------------------------------
+
+/** The aggregate's `writeScopeFilter` as a MikroORM FilterQuery object-literal
+ *  string, or null when the write scope does not narrow the read scope. */
+function mikroWriteScopeFilter(agg: EnrichedAggregateIR): string | null {
+  if (!agg.writeScopeFilter) return null;
+  return whereToMikroFilter(agg.writeScopeFilter);
+}
+
+/** The `getById` body lines for a QUERYABLE-COLUMN shape (relational /
+ *  embedded): an existence pre-guard counting rows that match BOTH the id and
+ *  the write scope, then the ordinary `findById` load. */
+function mikroGetByIdLines(
+  agg: EnrichedAggregateIR,
+  idVar: string,
+  rowClass: string,
+): readonly string[] {
+  const writeFilter = mikroWriteScopeFilter(agg);
+  const guard = writeFilter
+    ? [
+        `    const em = this.em.fork({ keepTransactionContext: true });`,
+        `    const inScope = await em.count(${rowClass}, { $and: [{ id: id as string }, ${writeFilter}] });`,
+        `    if (inScope === 0) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
+      ]
+    : [];
+  return [
+    `  async getById(id: ${idVar}): Promise<${agg.name}> {`,
+    ...guard,
+    `    const found = await this.findById(id);`,
+    `    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
+    `    return found;`,
+    `  }`,
+  ];
+}
+
+/** The `getById` body lines for a BLOB shape (`shape: document`, event-sourced
+ *  stream): neither has queryable columns, so the write scope is checked
+ *  IN-APP over the loaded aggregate — the same place those shapes already
+ *  evaluate their capability read filters. */
+function mikroBlobGetByIdLines(agg: EnrichedAggregateIR, idVar: string): readonly string[] {
+  const notFound = `throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`;
+  // `deny write` → the in-app form is the constant `false`, so no row is ever
+  // writable: answer not-found without loading (and without emitting the
+  // `if (!(false))` a constant-condition lint would flag).
+  if (writeScopeDeniesAll(agg)) {
+    return [
+      `  async getById(id: ${idVar}): Promise<${agg.name}> {`,
+      `    // policy { deny write on ${agg.name} } — no row is in write scope.`,
+      `    ${notFound}`,
+      `  }`,
+    ];
+  }
+  const pred = documentWriteScopeBody(agg, "found");
+  const bind =
+    pred && exprUsesCurrentUser(agg.writeScopeFilter as ExprIR)
+      ? [`    const currentUser = requireCurrentUser();`]
+      : [];
+  return [
+    `  async getById(id: ${idVar}): Promise<${agg.name}> {`,
+    ...bind,
+    `    const found = await this.findById(id);`,
+    `    if (!found) ${notFound}`,
+    ...(pred ? [`    if (!(${pred})) ${notFound}`] : []),
+    `    return found;`,
+    `  }`,
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -2002,11 +2125,7 @@ export function renderMikroRepository(
     `    return loaded;`,
     `  }`,
     "",
-    `  async getById(id: Ids.${agg.name}Id): Promise<${agg.name}> {`,
-    `    const found = await this.findById(id);`,
-    `    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
-    `    return found;`,
-    `  }`,
+    ...mikroGetByIdLines(agg, `Ids.${agg.name}Id`, row),
     "",
     `  async findManyByIds(ids: Ids.${agg.name}Id[]): Promise<${agg.name}[]> {`,
     `    if (ids.length === 0) return [];`,
@@ -2323,11 +2442,7 @@ export function renderMikroEmbeddedRepository(
     `    return loaded;`,
     `  }`,
     "",
-    `  async getById(id: ${idVar}): Promise<${agg.name}> {`,
-    `    const found = await this.findById(id);`,
-    `    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
-    `    return found;`,
-    `  }`,
+    ...mikroGetByIdLines(agg, idVar, row),
     "",
     `  async findManyByIds(ids: ${idVar}[]): Promise<${agg.name}[]> {`,
     `    if (ids.length === 0) return [];`,
@@ -2545,11 +2660,7 @@ export function renderMikroDocumentRepository(
       : [`    return ${fromDocOf("row")};`]),
     `  }`,
     "",
-    `  async getById(id: ${idVar}): Promise<${agg.name}> {`,
-    `    const found = await this.findById(id);`,
-    `    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
-    `    return found;`,
-    `  }`,
+    ...mikroBlobGetByIdLines(agg, idVar),
     "",
     `  async findManyByIds(ids: ${idVar}[]): Promise<${agg.name}[]> {`,
     `    if (ids.length === 0) return [];`,
@@ -2764,11 +2875,7 @@ export function renderMikroEventSourcedRepository(
     "    );",
     "  }",
     "",
-    `  async getById(id: Ids.${agg.name}Id): Promise<${agg.name}> {`,
-    "    const found = await this.findById(id);",
-    `    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
-    "    return found;",
-    "  }",
+    ...mikroBlobGetByIdLines(agg, `Ids.${agg.name}Id`),
     "",
     `  async findManyByIds(ids: Ids.${agg.name}Id[]): Promise<${agg.name}[]> {`,
     "    if (ids.length === 0) return [];",

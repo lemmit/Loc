@@ -96,6 +96,22 @@ ${agg}
   deployable d { platform: node contexts: [Orders] dataSources: [st] port: 3000 }
 }`;
 
+/** A frontend SPA deployable that declares no `ui:` — the four
+ *  `loom.<platform>-deployable-missing-ui` codes differ only in the platform
+ *  they name, and stay four codes because the fix-hint registry dispatches on
+ *  them per platform (`src/language/fix-hints.ts` → `missingUiFix`). */
+const spaMissingUi = (platform: string) => `
+system P {
+  subdomain D { context Orders {
+    aggregate Order with crudish { name: string }
+    repository Orders for Order { }
+  } }
+  storage pg { type: postgres }
+  resource st { for: Orders, kind: state, use: pg }
+  deployable api { platform: node contexts: [Orders] dataSources: [st] port: 3000 }
+  deployable web { platform: ${platform} targets: api port: 3001 }
+}`;
+
 /**
  * code → the `.ddd` source that must raise it.
  *
@@ -356,6 +372,18 @@ system S {
   deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
   deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
 }`,
+  // --- frontend deployable without a `ui:` binding ------------------------
+  "loom.react-deployable-missing-ui": spaMissingUi("react"),
+  "loom.svelte-deployable-missing-ui": spaMissingUi("svelte"),
+  "loom.vue-deployable-missing-ui": spaMissingUi("vue"),
+  "loom.angular-deployable-missing-ui": spaMissingUi("angular"),
+
+  // `display`/`inspect` are reserved derived names that only mean something on
+  // an aggregate — on a value object they are rejected.
+  "loom.reserved-derived-on-vo": repoOnly(`    valueobject Money {
+      amount: int
+      derived display: string = "x"
+    }`),
 };
 
 /**

@@ -3025,7 +3025,17 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // system with `persistence: mikroorm` validates, generates and compiles
         // clean today and silently serves cross-tenant rows.  Refuse it until
         // the subtree predicate is expressible (M-T6.23's remaining half).
-        if ((a.contextFilters ?? []).some((f) => isDeepScopeFilter(f))) {
+        //
+        // `writeScopeFilter` is scanned alongside the read filters (as dapper's
+        // gate already does): a `deep` WRITE ladder derives the same subtree
+        // sentinel, and the write-scope pre-guard lowers it through the very
+        // same `whereToMikroFilter` — so an ungated one throws at codegen
+        // instead of being an honest refusal.
+        if (
+          [...(a.contextFilters ?? []), a.writeScopeFilter]
+            .filter((x): x is ExprIR => x != null)
+            .some((f) => isDeepScopeFilter(f))
+        ) {
           reject(
             `${where} carries a hierarchical tenancy scope (a 'deep'/'global' subtree read)`,
             `the descendant-or-self predicate that scopes it (the FilterQuery subset ` +

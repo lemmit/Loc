@@ -13,6 +13,7 @@
 
 import type { UiIR } from "../../../ir/types/loom-ir.js";
 import { AUTH_BASE_PATH } from "../../../util/api-base.js";
+import { lines } from "../../../util/code-builder.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { packChromeCatalog } from "../../_packs/pack-chrome.js";
 import type { ApiRoute } from "../api-emit.js";
@@ -86,6 +87,10 @@ export function emitVanillaShellFiles(
    *  Gettext backend + `priv/gettext` tree + hex dep on even for a
    *  JSON-API-only deployable, whose 422 handler resolves through them. */
   validationMessages: readonly { code: string; text: string }[] = [],
+  /** First-boot seed modules (`<App>.<Ctx>.Seeds`, M-T6.37) — appended to
+   *  `Application.start/2` after the supervision tree is up.  Empty ⇒ every
+   *  emitted file is byte-identical to pre-seeding. */
+  seedModules: readonly string[] = [],
 ): void {
   const hasLiveView = liveRoutes.length > 0 || hasSidebar;
   // Either source of translatable strings turns the runtime on.
@@ -123,8 +128,32 @@ export function emitVanillaShellFiles(
   // not lib/<app>_web/telemetry.ex).
   out.set(
     `lib/${appName}/application.ex`,
-    renderApplication(appName, appModule, schedulerChildren, preEndpointChildren),
+    renderApplication(appName, appModule, schedulerChildren, preEndpointChildren, seedModules),
   );
+  // `mix run priv/repo/seeds.exs` — the canonical Phoenix manual entry, over
+  // the SAME modules the boot path calls (so a hand-run and a boot can't
+  // disagree).  Emitted only when something actually seeds; the boot path is
+  // what the runtime relies on.
+  if (seedModules.length > 0) {
+    out.set(
+      "priv/repo/seeds.exs",
+      lines(
+        `# Auto-generated.  Do not edit by hand.`,
+        `#`,
+        `# Manual seeding entry: \`mix run priv/repo/seeds.exs\`.  The SERVER seeds`,
+        `# itself at boot (\`<App>.Application.start/2\` calls the same modules once`,
+        `# the Repo is supervised), so this script exists for the out-of-band case`,
+        `# — e.g. applying an opt-in dataset to an already-migrated database:`,
+        `#`,
+        `#     LOOM_SEED=demo mix run priv/repo/seeds.exs`,
+        `#`,
+        `# Ship-once per dataset via the \`__loom_seed\` marker, so re-running is a`,
+        `# no-op for datasets already applied.`,
+        ...seedModules.map((m) => `${m}.run()`),
+        ``,
+      ),
+    );
+  }
   out.set(`lib/${appName}/repo.ex`, renderVanillaRepo(appName, appModule));
   // Cross-backend log envelope — `<App>.LogFormatter` renders one JSON
   // line per Logger event preserving the catalog metadata (event,

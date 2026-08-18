@@ -63,11 +63,28 @@ function base(t: TypeIR): TypeIR {
   return t.kind === "optional" ? t.inner : t;
 }
 
+/** The Dart type spelling for a field — `dartType` of the peeled base, with the
+ *  `?` the `DartField.optional` flag carries appended ONLY when the base
+ *  spelling isn't already nullable.  A `File` primitive spells `FileRef?` on its
+ *  own (`dart-types.ts` — a File holds a FileRef-or-nothing), so blindly
+ *  appending produced the non-parsing `FileRef??`.  Mirrors the sibling
+ *  `buildStateFields` rule in `riverpod-emit.ts` (`dt.endsWith("?")`). */
+function dartFieldType(f: DartField): string {
+  const dt = dartType(base(f.type));
+  return f.optional && !dt.endsWith("?") ? `${dt}?` : dt;
+}
+
+/** Whether the field's DART type is nullable — the only correct test for
+ *  null-guarding `fromJson` / `toJson`.  The IR `optional` flag is NOT it: a
+ *  required `File` field is non-optional on the wire yet nullable in Dart, and
+ *  keying off `optional` emitted `blob.toJson()` on a nullable receiver. */
+function isNullableField(f: DartField): boolean {
+  return dartFieldType(f).endsWith("?");
+}
+
 /** The `final <type> <name>;` field declaration line. */
 function fieldDecl(f: DartField): string {
-  const b = base(f.type);
-  const t = dartType(b) + (f.optional ? "?" : "");
-  return `  final ${t} ${f.name};`;
+  return `  final ${dartFieldType(f)} ${f.name};`;
 }
 
 /** The constructor parameter for a field — `required this.x` for a required
@@ -79,7 +96,7 @@ function ctorParam(f: DartField): string {
 /** The `fromJson` entry decoding one field out of the JSON map. */
 function fromJsonEntry(f: DartField): string {
   const access = `json['${f.name}']`;
-  if (f.optional) {
+  if (isNullableField(f)) {
     return `        ${f.name}: ${access} == null ? null : ${dartFromJson(base(f.type), access)},`;
   }
   return `        ${f.name}: ${dartFromJson(f.type, access)},`;
@@ -87,7 +104,7 @@ function fromJsonEntry(f: DartField): string {
 
 /** The `toJson` entry encoding one field into the JSON map. */
 function toJsonEntry(f: DartField): string {
-  if (f.optional && !isIdentityJson(base(f.type))) {
+  if (isNullableField(f) && !isIdentityJson(base(f.type))) {
     return `        '${f.name}': ${f.name} == null ? null : ${dartToJson(base(f.type), `${f.name}!`)},`;
   }
   return `        '${f.name}': ${dartToJson(f.type, f.name)},`;
@@ -97,9 +114,8 @@ function toJsonEntry(f: DartField): string {
  *  omitted arg keeps `this` (`field ?? this.field`).  A field that is already
  *  optional keeps its single `?`. */
 function copyWithParam(f: DartField): string {
-  const b = base(f.type);
-  const t = dartType(b);
-  return `    ${t}? ${f.name},`;
+  const t = dartFieldType(f);
+  return `    ${t.endsWith("?") ? t : `${t}?`} ${f.name},`;
 }
 
 /** The `copyWith` body entry — `field: field ?? this.field`. */

@@ -227,7 +227,14 @@ export function renderPyAggregate(
     // run is hoisted to the calling handler, which owns the 403 (op-gates.ts).
     s.operations.some((op) => operationBody(op).some((st) => st.kind === "requires")),
   );
+  // DisallowedError — the `when` state gate (M-T6.38).  The gate used to be a
+  // ROUTE-layer check only, so the in-process workflow dispatcher (`dispatch.py`)
+  // or an extern handler calling the domain method directly slipped past it and
+  // the refused write landed silently.  It is now emitted at the domain-method
+  // entry too, so the import follows any `when`-carrying operation.
+  const usesDisallowed = shapes.some((s) => s.operations.some((op) => !!op.when));
   const errorNames = [
+    usesDisallowed ? "DisallowedError" : null,
     usesDomainError ? "DomainError" : null,
     usesForbidden ? "ForbiddenError" : null,
   ].filter((n): n is string => n != null);
@@ -529,6 +536,21 @@ function renderEntity(
     return ["", head, body];
   });
 
+  // The `when` state gate (canCommand, criterion.md) rendered at the DOMAIN
+  // method entry.  The route emits the same check post-load so the HTTP answer
+  // (409 + problem envelope) is produced before the aggregate is touched; this
+  // line is what makes the refusal a property of the DOMAIN rather than of one
+  // transport, so the in-process workflow dispatcher, a saga cascade or an
+  // extern handler calling `aggregate.<op>()` directly refuses too (M-T6.38).
+  const whenGate = (op: (typeof e.operations)[number]): string[] =>
+    op.when
+      ? [
+          `        if not (${renderPyExpr(op.when)}):`,
+          `            raise DisallowedError(${JSON.stringify(
+            `operation '${op.name}' is not allowed in the current state of ${e.name}.`,
+          )})`,
+        ]
+      : [];
   const ops = e.operations.flatMap((op) => {
     const params = ["self", ...op.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`)];
     // currentUser-gated ops pick up a trailing actor parameter — the
@@ -552,6 +574,7 @@ function renderEntity(
       return [
         "",
         `    def ${snake(op.name)}(${params.join(", ")}) -> ${retType}:`,
+        ...whenGate(op),
         ...(preconditions.length > 0 ? [preconditions] : []),
         hook,
         // A void extern op re-asserts invariants after the hook; a returning
@@ -583,6 +606,7 @@ function renderEntity(
     return [
       "",
       `    def ${prefix}${snake(op.name)}(${params.join(", ")}) -> ${retType}:`,
+      ...whenGate(op),
       ...(body.length > 0 ? [body] : []),
       // Void operations re-assert invariants on the way out; a returning
       // one ends in `return`, so the trailing assert would be unreachable.

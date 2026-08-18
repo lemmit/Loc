@@ -22,7 +22,10 @@ import { apiResourceBindings } from "../../../ir/util/api-resource-binding.js";
 import { durableEventTypes } from "../../../ir/util/channels.js";
 import { aggregateHasFileField } from "../../../ir/util/file-field.js";
 import type { PageNameCtx } from "../../../ir/util/page-kind.js";
-import { resolveContextSchema } from "../../../ir/util/resolve-datasource.js";
+import {
+  resolveContextSchema,
+  resolveDataSourceConfig,
+} from "../../../ir/util/resolve-datasource.js";
 import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { brokerChannelBindings } from "../../_channels/bindings.js";
@@ -88,6 +91,7 @@ import { emitVanillaRepositories } from "./repository-emit.js";
 import { emitVanillaRetrievals } from "./retrieval-emit.js";
 import { emitVanillaScheduler } from "./scheduler-emit.js";
 import { emitVanillaSchemas } from "./schema-emit.js";
+import { emitVanillaSeeds } from "./seed-emit.js";
 import { emitVanillaShellFiles } from "./shell-emit.js";
 import { emitVanillaValueCollectionSchemas } from "./value-collection-schema-emit.js";
 import { emitVanillaValueObjects } from "./valueobject-emit.js";
@@ -337,6 +341,9 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
   // (`current_user.<idKey>`), defaulting to `id` when no `user {}` block —
   // threaded into `renderStampChanges`.
   const principalIdKey = actorIdKey(sys.user);
+  // `<Ctx>.Seeds` modules, in hosted-context order — invoked at Application
+  // boot and from `priv/repo/seeds.exs`.
+  const seedModules: string[] = [];
   let hasDomainTests = false;
   for (const ctx of contexts) {
     emitVanillaSchemas(appModule, ctx, out, sys, sourcemap);
@@ -451,6 +458,16 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
       ...emitVanillaQueryProjectionModules(appName, appModule, ctx, out, sourcemap),
     );
     emitDispatch(appName, ctx, appModule, out, sys, sourcemap, channelsCfg, wiredForeignChannels);
+    // First-boot seed data (database-seeding.md, M-T6.37) — one
+    // `<Ctx>.Seeds` module per context that declares a `seed` block, run at
+    // Application boot right after the supervision tree is up (so the Repo is
+    // available) and also from `priv/repo/seeds.exs` for `mix run`.  Seedless
+    // contexts emit nothing (byte-identical).
+    const seedMod = emitVanillaSeeds(appName, appModule, ctx, out, (aggName) => {
+      const agg = ctx.aggregates.find((a) => a.name === aggName);
+      return agg ? resolveDataSourceConfig(agg, ctx, sys)?.schema : undefined;
+    });
+    if (seedMod) seedModules.push(seedMod.module);
     // Domain `test "..."` blocks → ExUnit (pure-subset; see tests-emit.ts).
     if (emitAggregateTests(ctx, appModule, out)) hasDomainTests = true;
   }
@@ -813,6 +830,10 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
     // The SECOND catalog source (M-T1.11) — turns the gettext runtime on even for
     // a JSON-API-only deployable with an authored `message "…"`.
     validationMessages,
+    // First-boot seeding (M-T6.37) — the `<Ctx>.Seeds` modules emitted above,
+    // called from `Application.start/2` once the Repo is supervised (and from
+    // the `priv/repo/seeds.exs` manual entry the shell emits alongside).
+    seedModules,
   );
 
   // Deployment + boot machinery — the Elixir release, Dockerfile, and Ecto
