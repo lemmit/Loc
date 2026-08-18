@@ -34,6 +34,7 @@ import {
   felizOperationForm,
   felizWorkflowForm,
   fieldErrorFn,
+  formFileSelectMsg,
   formTouchedField,
   formTouchMsg,
   idLabelsFrom,
@@ -110,6 +111,9 @@ function fieldTestid(base: string, fld: FelizFormField): string {
  *     bool `onChange` sets the string `"true"`/`"false"` (encoder reads that).
  *   - `select` — `Html.select` of `Html.option`s over the enum's values; an
  *     OPTIONAL enum leads with a blank option (its "" encodes to null).
+ *   - `file` — a daisyUI file picker; the pick dispatches the browser file, the
+ *     update arm uploads it (multipart POST /files) and the RESULT `FileRef`
+ *     lands in the form cell (so the form submits the object, not a string).
  *   - `text` — a plain text input.
  *  Rendered on ONE line so it stays offside-safe inside the form's Feliz
  *  children list.  (`type'` — Feliz's apostrophe-suffixed name, since `type` is
@@ -157,6 +161,18 @@ function renderFormInput(formField: string, fld: FelizFormField, base: string): 
     return wrap(
       `Html.select [ ${tidP}prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}${aria}; prop.children [ ${allOpts.join("; ")} ] ]`,
     );
+  }
+  if (fld.inputKind === "file") {
+    // A `File` cell holds the uploaded `FileRef option`, not a typed string, so
+    // there is nothing to bind `prop.value` to: the picker's typed `onChange
+    // (File -> unit)` overload dispatches the picked browser file, the update
+    // arm POSTs it (`Api.uploadFile` → multipart /files) and the result Msg
+    // writes `Some fileRef` into the cell.  The name of the file already chosen
+    // shows below the input, so a re-render after upload is visible.
+    const pick = formFileSelectMsg(formField, fld.wireName);
+    const chosen = `Html.span [ prop.className "label-text-alt"; prop.text (match model.${formField}.${fld.wireName} with | Some __f -> __f.key | None -> "") ]`;
+    const input = `Html.input [ ${tidP}prop.className "file-input file-input-bordered w-full"; prop.type'.file; prop.onChange (fun (file: Browser.Types.File) -> dispatch (${pick} file))${onBlur}${aria} ]`;
+    return wrap(`Html.div [ prop.className "w-full"; prop.children [ ${input}; ${chosen} ] ]`);
   }
   if (fld.inputKind === "idselect" && fld.idTarget) {
     // Options load at runtime from the target's `.all` (`View.idOptions` maps the

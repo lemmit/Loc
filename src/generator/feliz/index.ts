@@ -98,6 +98,7 @@ import {
   type FelizWorkflowForm,
   felizAllRead,
   formHasFieldErrors,
+  formsHaveFileField,
   idLabelsFrom,
   opHasForm,
   renderApiModule,
@@ -1026,7 +1027,12 @@ function renderAppFs(
   // Standalone `FileUpload(bind:)` fields across the ui — each drives an upload
   // Cmd (`Api.uploadFile` → multipart POST /files) + a `FileRef` result Msg.
   const fileUploads = fileUploadsForUi(ui);
-  const hasFileUploads = fileUploads.length > 0;
+  // An in-FORM `File` field runs the SAME multipart upload as a standalone
+  // `FileUpload(bind:)` — it just writes the returned `FileRef` into a form cell
+  // instead of a state cell — so it gates `Api.uploadFile` (and, below, the
+  // `FileRef` record) exactly the same way.
+  const hasFormFileField = formsHaveFileField(formRecords);
+  const hasFileUploads = fileUploads.length > 0 || hasFormFileField;
   // Any form with a message-bearing (required) field → the `View.fieldError`
   // helper must ship even on a form-only page that has no reads.
   const hasFieldErrors = formRecords.some(formHasFieldErrors);
@@ -1064,9 +1070,11 @@ function renderAppFs(
     s.state.map((f) => ({ name: storeModelField(s.name, f.name), type: f.type, init: f.init })),
   );
   const state = [...combinedState(ui), ...storeStateFields];
-  // Any `File`-typed state field → the `FileRef` record + decoder must ship (the
-  // field is a `FileRef option` in the Model, and `Api.uploadFile` decodes one).
-  const hasFileState = state.some((f) => typeIsFile(f.type));
+  // Any `File`-typed state field OR form field → the `FileRef` record +
+  // decoder + encoder must ship (a state cell is a `FileRef option` in the
+  // Model, a form cell one in the form record; `Api.uploadFile` decodes one and
+  // the form encoder encodes one).
+  const hasFileState = state.some((f) => typeIsFile(f.type)) || hasFormFileField;
   // Async-effect actions project to their own trigger/result Msg cases + update
   // arms, so they're excluded from the plain action Msg/update path.
   const actions = combinedActions(ui).filter((a) => !asyncEffectActions.has(a.name));
@@ -1659,7 +1667,13 @@ export function generateFelizForContexts(
   const hasEffects = asyncEffectsForUi(ui, contexts).length > 0;
   // A standalone `FileUpload(bind:)` POSTs bytes via `Api.uploadFile` (Http) and
   // needs `Browser.Types.File`/`FormData` (Fable.Browser.Dom).
-  const hasFileUploads = fileUploadsForUi(ui).length > 0;
+  const hasFileUploads =
+    fileUploadsForUi(ui).length > 0 ||
+    formsHaveFileField([
+      ...formsForUi(ui, contexts),
+      ...operationFormsForUi(ui, contexts).filter(opHasForm),
+      ...workflowFormsForUi(ui, contexts),
+    ]);
   const hasHttp =
     readsForUi(ui, contexts).length > 0 ||
     mutationsForUi(ui, contexts).length > 0 ||
