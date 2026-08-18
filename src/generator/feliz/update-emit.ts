@@ -31,6 +31,8 @@ import type {
 import {
   fileSelectMsg,
   fileUploadedMsg,
+  formFileSelectMsg,
+  formFileUploadedMsg,
   formHasFieldErrors,
   formTouchedField,
   formTouchMsg,
@@ -131,6 +133,43 @@ function refetchByControlField(reads: readonly FelizRead[]): Map<string, FelizRe
     for (const f of [c.pageField, c.sortDirField]) m.set(f, r);
   }
   return m;
+}
+
+/** The `Msg` cases a form's FLAT fields contribute.  A typeable field carries
+ *  its raw input `string` (`Set<Form><Field> of string`); a `File` field is not
+ *  typed at all, so it carries the PICKED browser file and, separately, the
+ *  upload RESULT — the same two-Msg shape a standalone `FileUpload(bind:)` uses,
+ *  scoped to the form cell.  Shared by create / operation / workflow forms so
+ *  the three can't drift. */
+function formFieldMsgs(f: FormRecord): string[] {
+  return f.fields.flatMap((fld) =>
+    fld.inputKind === "file"
+      ? [
+          `  | ${formFileSelectMsg(f.formType, fld.wireName)} of Browser.Types.File`,
+          `  | ${formFileUploadedMsg(f.formType, fld.wireName)} of Result<FileRef, string>`,
+        ]
+      : [`  | ${fld.setMsg} of string`],
+  );
+}
+
+/** The `update` arms a form's FLAT fields contribute — a functional record
+ *  update per typeable field, and for a `File` field the upload pair: the pick
+ *  fires the multipart `Cmd` (`Api.uploadFile` → POST /files) and the result
+ *  writes `Some fileRef` into the form cell (an error leaves the cell as it was,
+ *  so the required-guard keeps the submit disabled). */
+function formFieldSetterArms(f: FormRecord): string[] {
+  return f.fields.flatMap((fld) => {
+    const set = (v: string): string =>
+      `{ model with ${f.formField} = { model.${f.formField} with ${fld.wireName} = ${v} } }, Cmd.none`;
+    if (fld.inputKind !== "file") return [`  | ${fld.setMsg} v -> ${set("v")}`];
+    const pick = formFileSelectMsg(f.formType, fld.wireName);
+    const done = formFileUploadedMsg(f.formType, fld.wireName);
+    return [
+      `  | ${pick} file -> model, Cmd.OfAsync.perform Api.uploadFile file ${done}`,
+      `  | ${done} (Ok fileRef) -> ${set("Some fileRef")}`,
+      `  | ${done} (Error _) -> model, Cmd.none`,
+    ];
+  });
 }
 
 /** The `Msg` cases a form's dynamic-row fields contribute — an `Add`/`Remove of
@@ -370,7 +409,7 @@ export function renderMsg(
     ]),
     // A create form: one `Set` per field + a `Submit` trigger + a `Created` result.
     ...forms.flatMap((f) => [
-      ...f.fields.map((fld) => `  | ${fld.setMsg} of string`),
+      ...formFieldMsgs(f),
       ...(formHasFieldErrors(f) ? [`  | ${formTouchMsg(f.formType)} of string`] : []),
       ...fieldArrayMsgs(f),
       `  | ${f.submitMsg}`,
@@ -379,7 +418,7 @@ export function renderMsg(
     // An operation form: `Set` per param + a `Submit … of string` (carries the
     // route id) + a `Done` result (the op returns 204 → `unit`).
     ...operationForms.flatMap((f) => [
-      ...f.fields.map((fld) => `  | ${fld.setMsg} of string`),
+      ...formFieldMsgs(f),
       ...(formHasFieldErrors(f) ? [`  | ${formTouchMsg(f.formType)} of string`] : []),
       ...fieldArrayMsgs(f),
       `  | ${f.submitMsg} of string`,
@@ -387,7 +426,7 @@ export function renderMsg(
     ]),
     // A workflow form: `Set` per param + a PARAMLESS `Submit` + a `Done` result.
     ...workflowForms.flatMap((f) => [
-      ...f.fields.map((fld) => `  | ${fld.setMsg} of string`),
+      ...formFieldMsgs(f),
       ...(formHasFieldErrors(f) ? [`  | ${formTouchMsg(f.formType)} of string`] : []),
       ...fieldArrayMsgs(f),
       `  | ${f.submitMsg}`,
@@ -709,10 +748,7 @@ export function renderUpdate(
   // A create form: per-field setters (functional record update), a submit that
   // fires the POST `Cmd`, and a `Created` result that resets the form + navigates.
   const formArms = forms.map((f) => {
-    const setters = f.fields.map(
-      (fld) =>
-        `  | ${fld.setMsg} v -> { model with ${f.formField} = { model.${f.formField} with ${fld.wireName} = v } }, Cmd.none`,
-    );
+    const setters = formFieldSetterArms(f);
     // On success land on the NEW record's DETAIL page (`/<coll>/<id>`), not the
     // collection — the standard create→detail CRUD flow every other Loom frontend
     // follows.  The create Api fn resolves the new record's id (from the `{ id }`
@@ -733,10 +769,7 @@ export function renderUpdate(
   // POST `Cmd` (the api fn is curried `(id) (form)`), and a `Done` result that
   // resets the form + navigates.
   const operationArms = operationForms.map((f) => {
-    const setters = f.fields.map(
-      (fld) =>
-        `  | ${fld.setMsg} v -> { model with ${f.formField} = { model.${f.formField} with ${fld.wireName} = v } }, Cmd.none`,
-    );
+    const setters = formFieldSetterArms(f);
     const nav = `Cmd.navigatePath(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
     // A PARAM-LESS op (`confirm()`) has no form record: the submit posts `()`
     // (empty body) and the done arm doesn't reset a form field.
@@ -759,10 +792,7 @@ export function renderUpdate(
   // A workflow form: per-field setters, a PARAMLESS submit firing the POST
   // `Cmd`, and a `Done` result that resets + navigates.
   const workflowArms = workflowForms.map((f) => {
-    const setters = f.fields.map(
-      (fld) =>
-        `  | ${fld.setMsg} v -> { model with ${f.formField} = { model.${f.formField} with ${fld.wireName} = v } }, Cmd.none`,
-    );
+    const setters = formFieldSetterArms(f);
     const nav = `Cmd.navigatePath(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
     return [
       ...setters,

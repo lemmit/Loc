@@ -145,6 +145,11 @@ export const flutterTarget: WalkerTarget = {
   // Reads dereference the projected immutable state record the view holds
   // (`state.<field>`); the field keeps its source (camelCase) name.
   renderStateRead: (ref: StateRef, _pos: RenderPosition) => `state.${ref.name}`,
+  // A `derived` binding is NOT a member of the Riverpod state object — it is a
+  // getter on the widget (component) / a hoisted local, computed from params +
+  // state.  So it reads BARE; spelling it `state.<name>` (the pre-seam default)
+  // named a field the `<X>State` data class never declares.
+  renderDerivedRead: (ref: StateRef, _pos: RenderPosition) => ref.name,
   // A `state.<field> := <value>` write inside an event handler calls the
   // Notifier's generated `set<Field>` setter (emitted per state cell by
   // `riverpod-emit.ts`; the page shell binds `notifier`).

@@ -98,6 +98,7 @@ import {
   type FelizWorkflowForm,
   felizAllRead,
   formHasFieldErrors,
+  formsHaveFileField,
   idLabelsFrom,
   opHasForm,
   renderApiModule,
@@ -828,14 +829,25 @@ function workflowFormsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): Fel
   return out;
 }
 
-/** The page `state` fields a ui's controlled inputs two-way-bind, across ALL
- *  pages (deduped by name) — each gets a `Set<Field>` Msg + update arm so the
- *  input `onChange` can dispatch it. */
+/** Every body that contributes `state {}` / `action`s / controlled inputs to the
+ *  single Elmish program: the ui's pages AND its walked (non-`extern`)
+ *  components, which fold into the SAME flat Model/Msg the way stores do
+ *  (`component-emit.ts` header).  A component's body reads `model.<Field>` and
+ *  dispatches `<Msg>` exactly as a page's does, so every collector below has to
+ *  see it — otherwise the component's function names a field or a case the
+ *  emitted record / union never declares. */
+function stateBearingBodies(ui: UiIR): Pick<PageIR, "body" | "state">[] {
+  return [...ui.pages, ...ui.components.filter((c) => !c.extern)];
+}
+
+/** The `state` fields a ui's controlled inputs two-way-bind, across ALL pages
+ *  AND components (deduped by name) — each gets a `Set<Field>` Msg + update arm
+ *  so the input `onChange` can dispatch it. */
 function boundStateForUi(ui: UiIR): FelizBoundState[] {
   const seen = new Set<string>();
   const out: FelizBoundState[] = [];
-  for (const page of ui.pages)
-    for (const b of collectPageBoundState(page))
+  for (const body of stateBearingBodies(ui))
+    for (const b of collectPageBoundState(body))
       if (!seen.has(b.name)) {
         seen.add(b.name);
         out.push(b);
@@ -849,8 +861,8 @@ function boundStateForUi(ui: UiIR): FelizBoundState[] {
 function fileUploadsForUi(ui: UiIR): FelizFileUpload[] {
   const seen = new Set<string>();
   const out: FelizFileUpload[] = [];
-  for (const page of ui.pages)
-    for (const u of collectPageFileUploads(page))
+  for (const body of stateBearingBodies(ui))
+    for (const u of collectPageFileUploads(body))
       if (!seen.has(u.name)) {
         seen.add(u.name);
         out.push(u);
@@ -858,13 +870,16 @@ function fileUploadsForUi(ui: UiIR): FelizFileUpload[] {
   return out;
 }
 
-/** A ui's `state {}` fields across ALL pages, deduped by name (multi-page uis
- *  share one flat Model; distinct pages should use distinct field names). */
+/** A ui's `state {}` fields across ALL pages AND walked components, deduped by
+ *  name (one flat Model; distinct declarations should use distinct field
+ *  names).  A component's cells ride here rather than in a per-component
+ *  sub-model — see the `component-emit.ts` header for why, and for the
+ *  program-scoped-state consequence that follows. */
 function combinedState(ui: UiIR): PageIR["state"][number][] {
   const seen = new Set<string>();
   const out: PageIR["state"][number][] = [];
-  for (const page of ui.pages)
-    for (const f of page.state)
+  for (const owner of stateBearingBodies(ui))
+    for (const f of owner.state)
       if (!seen.has(f.name)) {
         seen.add(f.name);
         out.push(f);
@@ -872,12 +887,13 @@ function combinedState(ui: UiIR): PageIR["state"][number][] {
   return out;
 }
 
-/** A ui's named `action`s across ALL pages, deduped by name. */
+/** A ui's named `action`s across ALL pages AND walked components, deduped by
+ *  name — each becomes one `Msg` case + `update` arm. */
 function combinedActions(ui: UiIR): PageIR["actions"][number][] {
   const seen = new Set<string>();
   const out: PageIR["actions"][number][] = [];
-  for (const page of ui.pages)
-    for (const a of page.actions)
+  for (const owner of [...ui.pages, ...ui.components.filter((c) => !c.extern)])
+    for (const a of owner.actions)
       if (!seen.has(a.name)) {
         seen.add(a.name);
         out.push(a);
@@ -1031,7 +1047,12 @@ function renderAppFs(
   // Standalone `FileUpload(bind:)` fields across the ui — each drives an upload
   // Cmd (`Api.uploadFile` → multipart POST /files) + a `FileRef` result Msg.
   const fileUploads = fileUploadsForUi(ui);
-  const hasFileUploads = fileUploads.length > 0;
+  // An in-FORM `File` field runs the SAME multipart upload as a standalone
+  // `FileUpload(bind:)` — it just writes the returned `FileRef` into a form cell
+  // instead of a state cell — so it gates `Api.uploadFile` (and, below, the
+  // `FileRef` record) exactly the same way.
+  const hasFormFileField = formsHaveFileField(formRecords);
+  const hasFileUploads = fileUploads.length > 0 || hasFormFileField;
   // Any form with a message-bearing (required) field → the `View.fieldError`
   // helper must ship even on a form-only page that has no reads.
   const hasFieldErrors = formRecords.some(formHasFieldErrors);
@@ -1069,9 +1090,11 @@ function renderAppFs(
     s.state.map((f) => ({ name: storeModelField(s.name, f.name), type: f.type, init: f.init })),
   );
   const state = [...combinedState(ui), ...storeStateFields];
-  // Any `File`-typed state field → the `FileRef` record + decoder must ship (the
-  // field is a `FileRef option` in the Model, and `Api.uploadFile` decodes one).
-  const hasFileState = state.some((f) => typeIsFile(f.type));
+  // Any `File`-typed state field OR form field → the `FileRef` record +
+  // decoder + encoder must ship (a state cell is a `FileRef option` in the
+  // Model, a form cell one in the form record; `Api.uploadFile` decodes one and
+  // the form encoder encodes one).
+  const hasFileState = state.some((f) => typeIsFile(f.type)) || hasFormFileField;
   // Async-effect actions project to their own trigger/result Msg cases + update
   // arms, so they're excluded from the plain action Msg/update path.
   const actions = combinedActions(ui).filter((a) => !asyncEffectActions.has(a.name));
@@ -1668,7 +1691,13 @@ export function generateFelizForContexts(
   const hasEffects = asyncEffectsForUi(ui, contexts).length > 0;
   // A standalone `FileUpload(bind:)` POSTs bytes via `Api.uploadFile` (Http) and
   // needs `Browser.Types.File`/`FormData` (Fable.Browser.Dom).
-  const hasFileUploads = fileUploadsForUi(ui).length > 0;
+  const hasFileUploads =
+    fileUploadsForUi(ui).length > 0 ||
+    formsHaveFileField([
+      ...formsForUi(ui, contexts),
+      ...operationFormsForUi(ui, contexts).filter(opHasForm),
+      ...workflowFormsForUi(ui, contexts),
+    ]);
   const hasHttp =
     readsForUi(ui, contexts).length > 0 ||
     mutationsForUi(ui, contexts).length > 0 ||

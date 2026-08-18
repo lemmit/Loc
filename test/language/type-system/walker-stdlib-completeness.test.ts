@@ -18,11 +18,12 @@
 //     that's registered as a primitive but not flagged admissible.
 
 import { describe, expect, it } from "vitest";
-import { namesInGroup } from "../../../src/generator/_walker/registry.js";
+import { namesInGroup, WALKER_PRIMITIVES } from "../../../src/generator/_walker/registry.js";
 import {
   WALKER_LAYOUT_PRIMITIVES,
   WALKER_SUB_PRIMITIVES,
 } from "../../../src/language/walker-stdlib.js";
+import { WALKER_SUB_PRIMITIVE_PARENTS } from "../../../src/util/walker-primitive-names.js";
 
 describe("walker stdlib language↔generator alignment", () => {
   it("WALKER_LAYOUT_PRIMITIVES matches the registry's layout group", () => {
@@ -35,5 +36,27 @@ describe("walker stdlib language↔generator alignment", () => {
     const lang = [...WALKER_SUB_PRIMITIVES].sort();
     const gen = namesInGroup("sub");
     expect(lang).toEqual(gen);
+  });
+
+  // The PLACEMENT half of the same contract (`loom.sub-primitive-misplaced`).
+  // A sub-primitive has no top-level renderer, so it MUST declare which parents
+  // may consume it — otherwise the IR gate cannot tell a legal `Tab` from one
+  // that will silently degrade to a comment.  Both directions are pinned:
+  // every sub-primitive names its parents, and those parents are exactly the
+  // registry entries whose `a11y.owns` claims it.
+  it("every sub primitive declares its legal parents", () => {
+    expect([...WALKER_SUB_PRIMITIVE_PARENTS.keys()].sort()).toEqual(namesInGroup("sub"));
+  });
+
+  it("the declared parents are exactly the registry's `a11y.owns` claimants", () => {
+    const ownersFromRegistry = new Map<string, string[]>();
+    for (const [parent, def] of Object.entries(WALKER_PRIMITIVES)) {
+      const owned = typeof def.a11y === "object" ? def.a11y.owns : undefined;
+      if (!owned) continue;
+      ownersFromRegistry.set(owned, [...(ownersFromRegistry.get(owned) ?? []), parent].sort());
+    }
+    for (const [child, parents] of WALKER_SUB_PRIMITIVE_PARENTS) {
+      expect([...parents].sort()).toEqual(ownersFromRegistry.get(child) ?? []);
+    }
   });
 });

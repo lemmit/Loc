@@ -17,6 +17,7 @@ import { opActionGate } from "./auth-gate.js";
 import { FELIZ_GRID_ROW_VAR, renderFelizDataGridChild } from "./data-grid-child.js";
 import {
   FELIZ_CHILDREN_FIELD,
+  FELIZ_DISPATCH_PARAM,
   FELIZ_MODEL_PARAM,
   FS_LEAVES,
   fsString,
@@ -35,6 +36,7 @@ import {
   felizOperationForm,
   felizWorkflowForm,
   fieldErrorFn,
+  formFileSelectMsg,
   formTouchedField,
   formTouchMsg,
   historyFieldName,
@@ -112,6 +114,9 @@ function fieldTestid(base: string, fld: FelizFormField): string {
  *     bool `onChange` sets the string `"true"`/`"false"` (encoder reads that).
  *   - `select` — `Html.select` of `Html.option`s over the enum's values; an
  *     OPTIONAL enum leads with a blank option (its "" encodes to null).
+ *   - `file` — a daisyUI file picker; the pick dispatches the browser file, the
+ *     update arm uploads it (multipart POST /files) and the RESULT `FileRef`
+ *     lands in the form cell (so the form submits the object, not a string).
  *   - `text` — a plain text input.
  *  Rendered on ONE line so it stays offside-safe inside the form's Feliz
  *  children list.  (`type'` — Feliz's apostrophe-suffixed name, since `type` is
@@ -159,6 +164,18 @@ function renderFormInput(formField: string, fld: FelizFormField, base: string): 
     return wrap(
       `Html.select [ ${tidP}prop.className "select select-bordered w-full"; prop.value ${value}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v))${onBlur}${aria}; prop.children [ ${allOpts.join("; ")} ] ]`,
     );
+  }
+  if (fld.inputKind === "file") {
+    // A `File` cell holds the uploaded `FileRef option`, not a typed string, so
+    // there is nothing to bind `prop.value` to: the picker's typed `onChange
+    // (File -> unit)` overload dispatches the picked browser file, the update
+    // arm POSTs it (`Api.uploadFile` → multipart /files) and the result Msg
+    // writes `Some fileRef` into the cell.  The name of the file already chosen
+    // shows below the input, so a re-render after upload is visible.
+    const pick = formFileSelectMsg(formField, fld.wireName);
+    const chosen = `Html.span [ prop.className "label-text-alt"; prop.text (match model.${formField}.${fld.wireName} with | Some __f -> __f.key | None -> "") ]`;
+    const input = `Html.input [ ${tidP}prop.className "file-input file-input-bordered w-full"; prop.type'.file; prop.onChange (fun (file: Browser.Types.File) -> dispatch (${pick} file))${onBlur}${aria} ]`;
+    return wrap(`Html.div [ prop.className "w-full"; prop.children [ ${input}; ${chosen} ] ]`);
   }
   if (fld.inputKind === "idselect" && fld.idTarget) {
     // Options load at runtime from the target's `.all` (`View.idOptions` maps the
@@ -266,6 +283,11 @@ export const felizTarget: WalkerTarget = {
 
   // --- State seam — MVU model reads --------------------------------------
   renderStateRead: (ref: StateRef, _pos: RenderPosition) => `model.${upperFirst(ref.name)}`,
+  // A `derived` binding is NOT an Elmish Model field — it is a pure function of
+  // what is already in scope, emitted as an F# `let` ahead of the body (see
+  // `component-emit.ts`).  So it reads BARE; `model.<Name>` (the pre-seam
+  // default) named a record field the emitted `Model` never declares.
+  renderDerivedRead: (ref: StateRef, _pos: RenderPosition) => ref.name,
   // `currentUser.<claim>` in a body (D-AUTH-OIDC, the read-side of the gate) →
   // an option-match against the decoded claims on the Model; the None branch
   // (no session yet) yields the claim type's zero value so the expression stays
@@ -696,13 +718,21 @@ export const felizTarget: WalkerTarget = {
   renderUserComponent: (call, ctx, _depth) => {
     if (call.kind !== "call") return null;
     const declared = ctx.userComponents.get(call.name) ?? [];
-    // A READ-bearing component takes the `Model` as a leading curried argument
-    // rather than a props field (`component-emit.ts`'s `MODEL_PARAM` marker) —
-    // so drop the marker from the props assignment and prefix the application
-    // with the `model` the caller's page view was handed.
+    // A READ- or STATE-bearing component takes the `Model`, and an ACTION-bearing
+    // one the `dispatch`, as leading curried arguments rather than props fields
+    // (`component-emit.ts`'s `MODEL_PARAM` / `DISPATCH_PARAM` markers) — so drop
+    // the markers from the props assignment and prefix the application with the
+    // `model` / `dispatch` the caller's page view was handed.
     const takesModel = declared.some((p) => p.name === FELIZ_MODEL_PARAM);
-    const params = takesModel ? declared.filter((p) => p.name !== FELIZ_MODEL_PARAM) : declared;
-    const callee = takesModel ? `${call.name} model` : call.name;
+    const takesDispatch = declared.some((p) => p.name === FELIZ_DISPATCH_PARAM);
+    const params = declared.filter(
+      (p) => p.name !== FELIZ_MODEL_PARAM && p.name !== FELIZ_DISPATCH_PARAM,
+    );
+    const callee = [
+      call.name,
+      ...(takesModel ? ["model"] : []),
+      ...(takesDispatch ? ["dispatch"] : []),
+    ].join(" ");
     ctx.usedUserComponents.add(call.name);
     const argNames = call.argNames ?? [];
     const filledByName = new Set(argNames.filter((n): n is string => n !== undefined));

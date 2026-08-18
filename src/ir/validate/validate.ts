@@ -5,7 +5,10 @@ import { validateStampReadsBeforeFlush } from "./checks/capability-checks.js";
 import type { LoomDiagnostic } from "./checks/diagnostic.js";
 import { validateDomainServices } from "./checks/domain-service-checks.js";
 import { validateIndexSuggestions } from "./checks/index-suggestion-checks.js";
-import { validateMigrationDataSteps } from "./checks/migration-checks.js";
+import {
+  validateMigrationAdapterSupport,
+  validateMigrationDataSteps,
+} from "./checks/migration-checks.js";
 import { validateProjections } from "./checks/projection-checks.js";
 import {
   validateFindGates,
@@ -31,6 +34,7 @@ import {
   validateOperationReturnsUnimplemented,
   validatePermissionRefs,
   validateReservedStructuralErrorNames,
+  validateResourceOpPlacement,
   validateUnionFindShapes,
   validateUnionsUnimplemented,
   validateUniqueColumns,
@@ -249,6 +253,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateCurrentUserScope(c, diags);
     validateFieldDefaults(c, diags);
     validatePermissionRefs(c, diags);
+    validateResourceOpPlacement(c, diags);
     validateGenericInstancesUnimplemented(
       c,
       diags,
@@ -281,6 +286,10 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   // Migration-block data steps (M-T2.3): expression renderability / target /
   // type fit.
   validateMigrationDataSteps(loom, diags);
+  // A declared migration block on a SELF-PROVISIONING persistence adapter
+  // (dapper / mikroorm): both skip the phase-⑨ chain entirely, so the step
+  // would silently no-op (dapper) or drop+add the column (mikroorm).
+  validateMigrationAdapterSupport(loom, diags);
   // Explicit transport bindings (unfoldable-api-derivation.md, Layer 4): every
   // `route ... -> Context.Handler` target must resolve.  Whole-model (routes are
   // system-level, their targets cross-context).

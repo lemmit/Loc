@@ -151,3 +151,84 @@ describe("flutter read-bearing user components", () => {
     expect(page).toContain("unknown layout component: OneOrder");
   });
 });
+
+// ---------------------------------------------------------------------------
+// `derived`-bearing components.  A `derived total: T = expr` is a pure function
+// of the params (and, on a stateful component, of `state`), yet the whole
+// component used to be dropped: the walker rendered a derived read as
+// `state.<name>` — a field the `<Comp>Model` data class never declares — so
+// `candidates()` filtered every `derived`-bearing component out and each call
+// site became `const SizedBox.shrink() /* unknown layout component: … */`.
+// Valid Dart, missing UI, no diagnostic.
+//
+// The fix pairs the `renderDerivedRead` walker seam (bare name on Flutter) with
+// a Dart GETTER on the class whose scope the expression's names live in: the
+// widget for the stateless / consumer shapes, the `State` for a stateful one.
+// ---------------------------------------------------------------------------
+const DERIVED = `
+system S {
+  api A from D
+  subdomain D { context C {
+    aggregate Item { name: string }
+    repository Items for Item {}
+  } }
+  storage db { type: postgres }
+  resource st { for: C, kind: state, use: db }
+  ui App {
+    framework: flutter
+    api Shop: A
+    component TierBadge(score: int) {
+      derived tier: string = score > 90 ? "gold" : "silver"
+      derived shout: string = tier.toUpper()
+      body: Stack { Text { tier }, Text { shout } }
+    }
+    component Tally(step: int) {
+      state { n: int = 0 }
+      derived doubled: int = n * 2
+      action bump() { n := n + step }
+      body: Stack { Text { string(doubled) }, Button(label: "+", onClick: bump) }
+    }
+    page Home { route: "/" body: Stack { TierBadge(score: 95), Tally(step: 2) } }
+  }
+  deployable api1 { platform: node contexts: [C] dataSources: [st] serves: A port: 8081 }
+  deployable app { platform: flutter targets: api1 ui: App { Shop: api1 } port: 3006 }
+}
+`;
+
+describe("flutter derived-bearing user components", () => {
+  it("emits a stateless derived component with one getter per binding", async () => {
+    const files = await generateSystemFiles(DERIVED);
+    const src = [...files.entries()].find(([k]) => k.endsWith("lib/components.dart"))?.[1] ?? "";
+    expect(src, "no components.dart — the derived component was dropped whole").not.toBe("");
+    expect(src).toContain("class TierBadge extends StatelessWidget {");
+    // The getter is typed from the binding's declared type and reads the param
+    // as the widget's own final field.
+    expect(src).toContain("String get tier => ((score > 90) ? 'gold' : 'silver');");
+    // A later derived reads an earlier one BARE (a getter on the same class),
+    // not `state.tier` — the seam under test.
+    expect(src).toContain("String get shout => (tier.toUpperCase());");
+    // …and the body reads them bare too.
+    expect(src).toContain("Text('${tier}')");
+    expect(src).not.toContain("state.tier");
+  });
+
+  it("puts a stateful component's derived getter on the State, beside `state`", async () => {
+    const files = await generateSystemFiles(DERIVED);
+    const src = [...files.entries()].find(([k]) => k.endsWith("lib/components.dart"))![1];
+    // The getter lands in `_TallyState` (which owns `state` and the param
+    // getters), NOT on the widget class — `state.n` only resolves there.
+    const stateClass = src.slice(src.indexOf("class _TallyState"));
+    expect(stateClass).toContain("int get doubled => (state.n * 2);");
+    expect(
+      src.slice(src.indexOf("class Tally extends"), src.indexOf("class _TallyState")),
+    ).not.toContain("get doubled");
+  });
+
+  it("the call sites render the widgets instead of the give-up comment", async () => {
+    const files = await generateSystemFiles(DERIVED);
+    const page = [...files.entries()].find(([k]) => k.endsWith("home_page.dart"))![1];
+    expect(page).toContain("TierBadge(score: 95)");
+    expect(page).toContain("Tally(step: 2)");
+    expect(page).not.toContain("unknown layout component");
+  });
+});

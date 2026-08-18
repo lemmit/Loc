@@ -5130,3 +5130,75 @@ deliberately empty, so the answer was to scope the table to the statuses this
 layer actually raises, not to waive. Worth remembering before adding any
 standard vocabulary to emitted output: **the sentinel scanner does not know
 IANA from TODO.**
+
+## §86 — The both-green-separately merge pair is now the dominant main-red (4× in five days)
+
+The 2026-08-12..17 window broke `main` four times, and every break was the
+same shape: two PRs, each green on its own base, semantically colliding at
+merge. None was a code bug in either PR.
+
+1. **A fixture walked into an honest gate** (#2523's `read-gates` × the dapper
+   corpus matrix → #2546): the matrix generates every manifest feature, so a
+   new fixture inherits every adapter's refusals.
+2. **A self-retiring ratchet met its retirer** (#2500 × the bare-401 waiver
+   → #2550): the waiver pinned the pre-fix emission "until #2500 lands" — and
+   nothing connects the two at merge time.
+3. **An acceptance test met a validator minted an hour later** (#2519's
+   guarded-lifecycle fixtures × #2536's `guard-principal-without-auth`
+   → #2557).
+4. **A recorded case met a golden-required rule** (#2570 gave `read-gates`
+   its first caller, #2577 made a golden mandatory 40 minutes later → #2578).
+
+Each fix took minutes; each red blocked every open PR's pr-gate for hours,
+and the fixes themselves then queued behind the reds they were fixing. Two
+transferable rules: (a) when your PR mints a rule (a validator, a
+required-artifact gate, a matrix-fed fixture), grep the OPEN PR list for
+in-flight consumers of the surface it constrains — the collision is visible
+before merge, just not on your branch; (b) when triaging a red on your PR,
+run the failing thing on PRISTINE `main` before reading your own diff — all
+four of these masqueraded as PR failures first. The structural fix stays
+what `docs/ci-gating.md` says it is: the merge queue, whose workflow side is
+done and which four incidents in five days now argue for loudly.
+
+## §87 — Squash-merge cascades: mechanics that bit, twice each
+
+Running a 12-PR merge cascade (stacked PRs included) against a fast-moving
+main surfaced four repeatable mechanics:
+
+- **A stacked branch does not survive its parent's squash-merge.** After the
+  parent lands, `update-branch` 422s ("merge conflict") because the child
+  carries the parent's commits as different objects. Rebuild the child by
+  cherry-picking ONLY its own commits onto fresh main (`git log
+  parent..child` first) — never `rebase --onto` across the merge commits it
+  accumulated.
+- **Force-push + retarget-base races GitHub's `synchronize`.** Twice, a PR
+  force-pushed moments before its base retargeted ended with NO workflows
+  triggered — just a pr-gate evaluation `in_progress` forever on a wave that
+  never existed. After any forced update + retarget, CHECK that a wave
+  actually started; the fix is any branch update.
+- **The auto-merge echo pattern:** `update-branch` needs re-issuing after
+  every base movement only when a strict up-to-date rule exists — this repo
+  has none (verified: #2535 merged while behind), so wave-resetting updates
+  are pure waste unless there's a genuine conflict or a main-red fix to pull
+  in. Half this session's update-branch calls were unnecessary.
+- **A textually-clean merge is not a semantically-clean one** (the §86 class
+  applied to a single PR): main grew a new caller of a helper the branch
+  deletes → TS2304 in every job at toolchain build. `tsc -b` on the merged
+  tree before pushing a conflict resolution costs a minute and would have
+  caught it.
+
+## §88 — Mutation proofs measure the layer that RUNS, not the layer you edited
+
+Two same-day instances of a proof that proved nothing, both caught by the
+prover:
+
+- The `channels-e2e` tiers run the COMPILED `bin/cli.js`; a `src/`-only
+  mutation leaves the compiled emitters untouched, so the leg stays green and
+  blesses a broken emitter. Rebuild (`npx tsc -b`) between mutating and
+  running any tier that executes `out/`. (The SessionStart hook's "out/ is
+  older than src/" warning is the same fact wearing its other face.)
+- A vitest run that STRADDLES a branch switch loads one branch's test files
+  against the other's sources — its numbers are evidence for neither branch
+  (§59/§63's class: the check never reached the thing it names). A mid-run
+  monitor read that "looks done" is not a summary line; report "still
+  running" until the summary exists, and never a remembered figure.

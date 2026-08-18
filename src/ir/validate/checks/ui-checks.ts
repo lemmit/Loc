@@ -30,7 +30,10 @@
 
 import { diagMessage } from "../../../diagnostics/messages.js";
 import { isCollectionOp } from "../../../util/collection-ops.js";
-import { isWalkerPrimitive } from "../../../util/walker-primitive-names.js";
+import {
+  isWalkerPrimitive,
+  WALKER_SUB_PRIMITIVE_PARENTS,
+} from "../../../util/walker-primitive-names.js";
 import type {
   ActionIR,
   AggregateIR,
@@ -47,7 +50,12 @@ import type {
 import { allAggregates, allContexts } from "../../types/loom-ir.js";
 import { groupedProjectionNames, readableProjectionNames } from "../../util/projection-read.js";
 import { typeLabel } from "../../util/type-label.js";
-import { walkExprChildren, walkExprDeep, walkStmtChildren } from "../../util/walk.js";
+import {
+  walkExprChildren,
+  walkExprDeep,
+  walkStmtChildren,
+  walkStmtExprsDeep,
+} from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 
 // View-effect builtins (`navigate(…)`, `toast(…)`) lower to bare
@@ -168,6 +176,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkFrontendCollectionOps(page, pageWhere(page), mapRendered, diags);
         checkUnknownPageElements(page, pageWhere(page), callableNames, diags);
         checkSlotOutsideComponent(page, pageWhere(page), diags);
+        checkSubPrimitivePlacement(page, pageWhere(page), diags);
         checkDataGridSelection(page.body, page.state, pageWhere(page), diags);
         // The `of:` receiver must be an API HANDLE — the walker's Pattern H
         // (`<apiHandle>.<Projection>`) is the only shape that hoists the
@@ -207,6 +216,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkActionBodies(comp.actions, ctx, diags);
         checkFrontendCollectionOps(comp, `component '${comp.name}'`, mapRendered, diags);
         checkUnknownPageElements(comp, `component '${comp.name}'`, callableNames, diags);
+        checkSubPrimitivePlacement(comp, `component '${comp.name}'`, diags);
         checkDataGridSelection(comp.body, comp.state, `component '${comp.name}'`, diags);
         checkChartArgs(
           comp.body,
@@ -498,6 +508,71 @@ function checkSlotOutsideComponent(page: PageIR, where: string, diags: LoomDiagn
       });
     });
   }
+}
+
+// -------------------------------------------------------------------------
+// `loom.sub-primitive-misplaced` — `Tab` and `Column` are the walker's two
+// `group: "sub"` primitives: they have NO top-level renderer of their own.
+// Their parent consumes them inline — `emitTabs` scans its positional args for
+// `Tab(...)`, `emitTable` / `emitDataGrid` scan theirs for `Column(...)`.
+//
+// Spelled anywhere else (`Stack { Tab("x") }`, a bare `Column(…)` in a page
+// body, a `Column` under a `Tabs`) the call reaches the walker's own dispatch,
+// which finds a registered primitive with no `tsx` entry and emits a COMMENT:
+// `{/* Tab: not supported by the walker yet */}` on the JSX family (React /
+// Vue / Svelte / Angular / Feliz / Flutter), `<%!-- Tab: … --%>` on HEEx.  The
+// element — and everything nested inside it — silently disappears from the
+// rendered page.  Nothing compiles-errors, so no build gate sees it either.
+//
+// This is a PLACEMENT contract, not a per-target gap — exactly the shape of
+// `loom.slot-outside-component` above, and gated the same way: once, at the IR
+// tier, for all seven render targets.  The legal parents come from
+// `WALKER_SUB_PRIMITIVE_PARENTS`, which `walker-stdlib-completeness.test.ts`
+// pins against the registry's `a11y.owns`, so a new sub-primitive cannot land
+// without declaring where it belongs.
+// -------------------------------------------------------------------------
+
+/** Reject a sub-primitive call that is not a direct positional child of one of
+ *  its declared parents.  One diagnostic per (host, sub-primitive name): a body
+ *  misplacing three `Column`s made one mistake. */
+function checkSubPrimitivePlacement(
+  host: PageIR | ComponentIR,
+  where: string,
+  diags: LoomDiagnostic[],
+): void {
+  const flagged = new Set<string>();
+  /** Recursive descent carrying the name of the IMMEDIATELY enclosing call, so
+   *  the check keys on the parent/child edge the emitters actually read (a
+   *  direct positional arg), not on "somewhere under a Tabs". */
+  const visit = (e: ExprIR, parentCall: string | undefined): void => {
+    if (e.kind === "call" && e.callKind === "free") {
+      const parents = WALKER_SUB_PRIMITIVE_PARENTS.get(e.name);
+      if (parents && !(parentCall !== undefined && parents.has(parentCall))) {
+        if (!flagged.has(e.name)) {
+          flagged.add(e.name);
+          diags.push({
+            severity: "error",
+            code: "loom.sub-primitive-misplaced",
+            message: diagMessage("loom.sub-primitive-misplaced", {
+              where,
+              name: e.name,
+              parents: [...parents].map((p) => `'${p}'`).join(" or "),
+            }),
+            source: where,
+          });
+        }
+      }
+    }
+    // Only a free CALL can be a legal parent (`Tabs(Tab(…), Tab(…))`); anything
+    // else resets the parent to `undefined` so a sub-primitive smuggled through
+    // a lambda, a member access or a `match` arm is still reported.
+    const nextParent = e.kind === "call" ? e.name : undefined;
+    walkExprChildren(e, {
+      expr: (c) => visit(c, nextParent),
+      stmt: (s) => walkStmtExprsDeep(s, (c) => visit(c, undefined)),
+    });
+  };
+  for (const root of walkerRenderedExprs(host)) visit(root, undefined);
 }
 
 /** F3 — reject a stdlib collection op anywhere the frontend walker renders it.

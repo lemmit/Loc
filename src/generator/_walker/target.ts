@@ -550,6 +550,20 @@ export interface WalkerTarget {
    *  `socket.assigns.step` (handler). */
   renderStateRead(ref: StateRef, position: RenderPosition): string;
 
+  /** Render a read of a `derived <name>: T = expr` binding.  Optional: a target
+   *  that leaves it undefined falls back to `renderStateRead`, which is right
+   *  wherever a derived binding is spelled exactly like a state cell (the JSX
+   *  frontends hoist both as plain locals / computed refs, HEEx assigns both).
+   *
+   *  It is NOT right where the state idiom names a container the derived value
+   *  does not live in: Flutter reads state off the Riverpod model (`state.<f>`)
+   *  and Feliz off the Elmish Model (`model.<F>`), while a derived binding on
+   *  those targets is a plain in-scope binding (a class getter / an F# `let`).
+   *  Both therefore override this to the bare name — without it a
+   *  `derived`-bearing user component could not be emitted at all, because its
+   *  body would name a Model field nothing declares. */
+  renderDerivedRead?(ref: StateRef, position: RenderPosition): string;
+
   /** Render a `currentUser.<claim>` access in a body expression (D-AUTH-OIDC,
    *  the read-side of the auth gate) — the whole member access, since the
    *  session user may be loosely / optionally bound.  Optional: a target that
