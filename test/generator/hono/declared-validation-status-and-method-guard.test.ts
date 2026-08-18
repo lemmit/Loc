@@ -127,7 +127,7 @@ describe("hono static sub-paths — a wrong verb answers 405, not the {id} valid
       'const staticSubpathMethods: Record<string, string[]> = { by_qty: ["GET"], recent: ["GET"] };',
     );
     expect(order).toContain('app.use("/:__seg", async (c, next) => {');
-    expect(order).toContain("allow: allow.join(\", \")");
+    expect(order).toContain('allow: allow.join(", ")');
     expect(order).toContain("frameworkProblemBody(405,");
     // BEFORE the first route: the `@hono/zod-openapi` param validator runs
     // inside the matched route's own handler chain, so a guard registered after
@@ -144,10 +144,14 @@ describe("hono static sub-paths — a wrong verb answers 405, not the {id} valid
     // `allowedFor` builds its 405 probe from `app.routes` and SKIPS `ALL`
     // entries, so registering named verbs here would silently change what
     // `app.notFound` reports for every path in this router.
-    const guard = order.slice(order.indexOf("const staticSubpathMethods"));
-    expect(guard.slice(0, guard.indexOf("app.openapi("))).not.toMatch(
-      /app\.(all|on|delete|put|patch)\(/,
-    );
+    const from = order.indexOf("const staticSubpathMethods");
+    // Anchored: without this, dropping the guard makes `slice(-1)` an empty
+    // string and the `not.toMatch` below passes on nothing — a check that
+    // never reaches the thing it names.
+    expect(from, "the guard block must exist to be checked").toBeGreaterThan(-1);
+    const guard = order.slice(from, order.indexOf("  app.openapi(", from));
+    expect(guard).toContain("app.use(");
+    expect(guard).not.toMatch(/app\.(all|on|delete|put|patch)\(/);
   });
 
   it("an aggregate with no static sub-path emits no guard — nothing to discriminate", async () => {

@@ -316,7 +316,9 @@ function staticSubpathMethods(
 ): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   const add = (segment: string, method: string): void => {
-    (out[segment] ??= []).push(method);
+    const methods = out[segment] ?? [];
+    methods.push(method);
+    out[segment] = methods;
   };
   // `GET /prepare` — emitted on the same condition its route arm below is.
   if (emitCreate && serverSourcedDefaultFields(createInputFields(agg)).length > 0) {
