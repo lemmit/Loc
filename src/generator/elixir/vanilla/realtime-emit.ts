@@ -46,15 +46,17 @@
 import type { BoundedContextIR, EventIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../../ir/util/channels.js";
 import { realtimeRoomPlan } from "../../../ir/util/realtime-rooms.js";
+import { API_BASE_PATH } from "../../../util/api-base.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { MONEY_WIRE_SCALE } from "../../money-scale.js";
 import type { ApiRoute } from "../api-emit.js";
 
-/** The SSE endpoint, relative to the router root.  `API_BASE_PATH` + the
- *  frontend client's `${API_BASE_URL}/realtime/events` — every backend serves
- *  the stream at the same URL. */
-export const REALTIME_SSE_PATH = "/api/realtime/events";
+/** The SSE endpoint, spelled from the router ROOT (the `:sse` pipeline sits
+ *  outside `scope "/api"`, so the prefix is explicit here).  `API_BASE_PATH` +
+ *  `/realtime/events` is exactly what the frontend client opens
+ *  (`${API_BASE_URL}/realtime/events`), so every backend serves the same URL. */
+export const REALTIME_SSE_PATH = `${API_BASE_PATH}/realtime/events`;
 
 /** One carried event, resolved against its owning context (the event struct
  *  module is `<App>.<Ctx>.Events.<Event>`, so a multi-context deployable needs
