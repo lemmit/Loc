@@ -290,8 +290,10 @@ system S {
   deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
 }`,
 
-  // `persist: local|session|url` is dropped to in-memory by the feliz and
-  // flutter store emitters — an honest error until they implement the ladder.
+  // `persist: local|session|url` is dropped to in-memory by the feliz store
+  // emitter — an honest error until it implements the ladder.  (Flutter DID
+  // implement it, so its half of this code narrowed to the field-scoped
+  // `#flutter-field` variant; the platform-wide arm is feliz-only now.)
   "loom.store-lifetime-target-unsupported": `
 system S {
   subdomain Sub { context C {
@@ -299,7 +301,7 @@ system S {
   } }
   api Api from Sub
   ui WebApp {
-    framework: flutter
+    framework: feliz
     api C: Api
     store Cart persist: local { state { count: int = 0 } }
     page Home { route: "/"  body: Stack { Heading { Cart.count, level: 3 } } }
@@ -307,7 +309,7 @@ system S {
   storage pg { type: postgres }
   resource st { for: C, kind: state, use: pg }
   deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
-  deployable web { platform: flutter targets: api ui: WebApp { C: api } port: 3001 }
+  deployable web { platform: feliz targets: api ui: WebApp { C: api } port: 3001 }
 }`,
 
   // A resource handle is ambient over the whole context, but only workflow /

@@ -27,9 +27,13 @@
 //
 // The interactive-table seams (sort header / pager / client filter) and the
 // store seams (`renderStoreFieldRead` / `renderStoreActionCall`, over the
-// Riverpod store modules `store-builder.ts` emits) now ship too.  What a store
-// still does NOT carry here is the lifetime ladder — `persist: local|session|url`
-// emits an in-memory store under a visible TODO in `lib/stores.dart`.
+// Riverpod store modules `store-builder.ts` emits) now ship too, including the
+// `persist: local|session|url` lifetime ladder (`store-persist.ts`).
+//
+// Under `auth: ui` the claims seam (`renderCurrentUserAccess`) and `Action`
+// button gating read the non-null `currentUser` the page shell binds —
+// `auth-gate.ts` owns the session probe, the `AuthGate` wrapper and the gate
+// expression renderer.
 
 import { isConstructible } from "../../ir/enrich/wire-projection.js";
 import type { AggregateIR, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
@@ -37,6 +41,7 @@ import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/nami
 import { localizedNamedValue } from "../_walker/i18n-emit.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr, walk } from "../_walker/walker-core.js";
+import { opActionGate } from "./auth-gate.js";
 import {
   DART_LEAVES,
   dartString,
@@ -499,8 +504,10 @@ export const flutterTarget: WalkerTarget = {
   // (a QueryView row `p`, a byId record); its `.id` addresses the row.  The
   // page's http/config imports are added by index.ts when the body references
   // `apiUri(` (an Action-only signal).  A parameterised op → a diagnostic
-  // comment steering to OperationForm (never broken Dart).  Auth gating
-  // (currentUser `requires`) is deferred to the auth-ui slice.
+  // comment steering to OperationForm (never broken Dart).  Under `auth: ui`, a
+  // currentUser-only op `requires` HIDES the button (the action-level mirror of
+  // the page gate); a predicate that touches `this.<field>` / params isn't
+  // client-evaluable, so the button stays shown and the backend 403 enforces it.
   renderAction: (call, ctx) => {
     if (call.kind !== "call") return null;
     const argNames = call.argNames ?? [];
@@ -526,13 +533,22 @@ export const flutterTarget: WalkerTarget = {
     // Feliz, and sidesteps the QueryView data-param rename (`p` → the provider var).
     ctx.usesRouteId = true;
     const label = humanize(op.name);
-    return (
+    const button =
       `ElevatedButton(onPressed: () async { ` +
       `final res = await http.post(apiUri('/${coll}/\${id}/${opPath}')); ` +
       `if (res.statusCode >= 200 && res.statusCode < 300 && context.mounted) { ` +
       `ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(${dartString(`${label} done`)}))); ` +
-      `} }, child: Text(${dartString(label)}))`
-    );
+      `} }, child: Text(${dartString(label)}))`;
+    if (ctx.authUi) {
+      const gate = opActionGate(op);
+      if (gate) {
+        // The page shell binds `currentUser` (non-null — `AuthGate` guarantees a
+        // session before any page builds), so the claims read straight off it.
+        ctx.usesCurrentUser = true;
+        return `(${gate}) ? ${button} : const SizedBox.shrink()`;
+      }
+    }
+    return button;
   },
 
   // `Modal { trigger: Button("Label"), OperationForm(of: <Agg>, op: <op>) }` →
@@ -751,6 +767,12 @@ export const flutterTarget: WalkerTarget = {
   // zero-size widget carries the same diagnostic while keeping the file
   // compilable, which is the whole point of a sentinel: it must survive to be
   // read.  (A scaffolded detail page hit exactly this and would not build.)
+  // `currentUser.<claim>` — the verified session user (D-AUTH-OIDC).  The page
+  // shell binds a NON-NULL `currentUser` local (`AuthGate` gates the whole app,
+  // so a page never builds without a session), which is what lets a claim read
+  // sit in an ordinary expression position with no null hop.
+  renderCurrentUserAccess: (member: string) => `currentUser.${member}`,
+
   renderComment: (text: string) => `const SizedBox.shrink() /* ${text} */`,
   // Child-position interpolation → a `Text(…)` widget.  A provably-string value
   // is passed straight; anything else is coerced via Dart string interpolation

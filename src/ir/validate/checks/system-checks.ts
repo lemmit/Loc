@@ -94,13 +94,16 @@ import { validateE2ETest } from "./test-checks.js";
 // just a string/uuid and doesn't depend on a display label.
 // ---------------------------------------------------------------------------
 
-// `auth: ui` (the frontend OIDC guard) is emitted by the React, Vue, Svelte,
-// Angular and Feliz generators (`generator/feliz/auth-gate.ts` — the Elmish
-// session model + `AuthGate` view, driven end-to-end by the `authgate`
-// scenario in `generated-feliz-build.yml`).  A deployable whose resolved UI
-// framework is none of those (flutter) would silently emit no guard — reject
-// it loudly so the limitation is visible rather than a no-op.
-const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular", "feliz"]);
+// `auth: ui` (the frontend OIDC guard) is emitted by every shipped frontend
+// generator: React, Vue, Svelte, Angular, Feliz (`generator/feliz/auth-gate.ts`
+// — the Elmish session model + `AuthGate` view, driven end-to-end by the
+// `authgate` scenario in `generated-feliz-build.yml`) and Flutter
+// (`generator/flutter/auth-gate.ts` — the `sessionProvider` probe, the `AuthGate`
+// wrapper around `MaterialApp`, and the `ForbiddenView` page guard).  The set is
+// KEPT, not deleted: it is the seam a new frontend gates on until it ports, and
+// the diagnostic below is its message — a deployable whose resolved UI framework
+// is absent would otherwise silently emit no guard at all.
+const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular", "feliz", "flutter"]);
 
 // paged-run (paged-queryHandler): a `queryHandler H(...): <Agg> paged` is
 // emitted by each backend whose explicit-handler emitter has grown the paged

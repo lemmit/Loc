@@ -78,8 +78,8 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
   {
     code: "loom.auth-ui-unsupported-framework",
     kind: "gap",
-    site: "src/ir/validate/checks/system-checks.ts:544",
-    what: "`auth: ui` only on react/vue/svelte/angular/feliz; flutter open",
+    site: "src/ir/validate/checks/system-checks.ts:547",
+    what: "`auth: ui` ships on every frontend; the seam a NEW one gates on",
     mission: "M-T1.20",
   },
   {
