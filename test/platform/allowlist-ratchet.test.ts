@@ -212,9 +212,10 @@ const REGISTERED: Ratchet[] = [
   //           three without anyone noticing.
   //
   // `policy-deny` then drained too: the adapter grew the `authz-filter` arm the
-  // deny sentinel needed AND the write-scope pre-guard it had never read.  What
-  // remains is one gap: `prefix-filter` (the declared `MIKROORM_SUBSET`
-  // predicate narrowing — no scalar intrinsic in a find predicate).
+  // deny sentinel needed AND the write-scope pre-guard it had never read.  Then
+  // `prefix-filter`, the last one, when `MIKRO_INTRINSIC_SQL` gave the adapter a
+  // `raw()`-fragment arm for every `queryable` catalogue intrinsic — the
+  // register is EMPTY.
   //
   // NOTE it lives in a `.mjs` runner rather than a vitest file, which is also
   // why it has no per-adapter ORACLE like the dapper maps have — the asymmetry
@@ -223,9 +224,10 @@ const REGISTERED: Ratchet[] = [
     file: "test/behavioral/run-mikroorm.mjs",
     name: "MIKRO_SKIP",
     kind: "record",
-    // 2 → 1: `policy-deny` drained when the adapter grew an `authz-filter` arm
-    // and a write-scope pre-guard (the deny fixture now boots on this leg).
-    max: 1,
+    // 2 → 1 → 0.  `policy-deny` drained with the `authz-filter` arm + the
+    // write-scope pre-guard; `prefix-filter` with the intrinsic arm the entry
+    // itself named as its exit condition.
+    max: 0,
   },
   // The behavioural tier's OWN per-(platform, case) skip register — the sibling
   // of MIKRO_SKIP above, and unregistered for exactly as long.  It suppresses a
