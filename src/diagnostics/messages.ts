@@ -1559,8 +1559,10 @@ export const DIAGNOSTIC_MESSAGES = {
   "loom.vanilla-document-unsupported": (p: { ctxName: unknown; name: unknown; bits: unknown }) =>
     `aggregate '${p.ctxName}.${p.name}' is shape: document on elixir, which emits ` +
     `scalar custom finds + named operations but not ${p.bits} ` +
-    `(audited returning / provenanced ops, collection mutation, value-object/derived/` +
-    `function reads, or non-scalar find predicates). Simplify them to scalar form, host this ` +
+    `(provenanced ops, derived / dereferenced-entity reads, value-object METHOD calls, ` +
+    `or a collection op over a REFERENCE collection — 'X id[]' needs a join table a jsonb ` +
+    `blob has no equivalent for; a collection op over the aggregate's OWN containment or a ` +
+    `scalar array is fine). Simplify them to scalar form, host this ` +
     `aggregate on a backend with full document support (node / dotnet / python / java), ` +
     `or use shape: relational / shape: embedded.`,
   "loom.vanilla-op-call-position": (p: {

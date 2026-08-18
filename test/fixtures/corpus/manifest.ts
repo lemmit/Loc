@@ -77,6 +77,14 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "single-containment", title: "single (non-collection) containment — hidden `_parent`", doc: "language", backends: ALL },
   { id: "value-collections", title: "value-object array (`Money[]`) stored inline", doc: "language", backends: ALL },
   { id: "document", title: "`shape: document` — whole aggregate in one jsonb column", doc: "language", backends: ALL },
+  {
+    id: "document-collection-read",
+    title:
+      "collection READS over a `shape: document` aggregate's own lists — `lines.sum(λ)` / `.count` / `.any(λ)` over the containment, `.contains` over a scalar array",
+    doc: "language",
+    backends: ALL,
+    note: "Split from `document` because the ELIXIR half was validate-gated long after the emission became correct: Route A had already made the containment a real `embeds_many` and the scalar array an `{:array, _}` field, so the shared collection-op renderers worked verbatim, but `loom.vanilla-document-unsupported` still refused EVERY collection method.  A REFERENCE collection (`X id[]`) is deliberately absent — that one still needs the join table a jsonb blob has no equivalent for, and stays an honest error.",
+  },
   { id: "embedded", title: "`shape: embedded` — containments fold into jsonb columns", doc: "language", backends: ALL },
   { id: "embedded-optional", title: "shape: embedded — optional single containment (nullable jsonb)", doc: "language", backends: ALL },
   { id: "inheritance", title: "aggregate inheritance — TPH (sharedTable) + TPC (ownTable)", doc: "inheritance", backends: ALL },

@@ -1606,31 +1606,61 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
 // op/find shapes still need machinery the document path deliberately omits, and
 // those stay gated (an honest error rather than a mis-emit):
 //
-//   - a RETURNING op (`: A or B`), an AUDITED op, a PROVENANCED op — all persist
-//     a pre-built changeset over struct columns inside a forced transaction;
-//   - COLLECTION mutation (`items += …`).  This clause used to lean on "a
-//     document's contained parts are gated separately
-//     (`loom.vanilla-containment-unsupported`) anyway" — that gate is RETIRED
-//     (M-T6.2 Drain C landed relational part-in-part; the code has zero raise
-//     sites in `src/`), so the clause now stands on its own: the document path
-//     itself has no emitter for a containment mutation;
-//   - a body/filter that reads a VALUE-OBJECT sub-field, a DERIVED, or calls a
-//     `function` / value-object constructor — these need the loaded struct / list
-//     the jsonb map can't reconstruct in-place;
-//   - a PAGED or UNION-returning custom find (the wire-envelope / tagged-result
-//     shapes the document find path doesn't build).
+//   - a PROVENANCED op — it drains a per-write history buffer into co-located
+//     `<field>_provenance` COLUMNS, and a jsonb blob has none;
+//   - a body/filter that reads a DERIVED (not persisted, so no `data` key) or a
+//     *dereferenced-entity* member (a cross-aggregate `X id` → needs a join);
+//   - a value-object METHOD call, or a value-object / private-operation /
+//     domain-service / resource call — these need the loaded struct the blob
+//     stores as a plain map;
+//   - a collection op over a REFERENCE collection (`X id[]`): the relational
+//     path resolves it through a `many_to_many` join table, and a blob has no
+//     join to resolve.
 //
-// Everything else — scalar `assign` / `+=` / `-=` / `precondition` / `requires`
-// / `let` / `emit`, and scalar/convention/`where`-clause finds — is emitted.
+// Everything else is emitted — scalar `assign` / `+=` / `-=` / `precondition` /
+// `requires` / `let` / `emit`, value-object SUB-field reads, pure `function`
+// calls, RETURNING and AUDITED ops (the persist tail runs in a
+// `Repo.transaction`), containment mutation, paged and union finds, and
+// collection READS over the aggregate's own in-memory lists (Route A made a
+// containment a real `embeds_many` and a scalar array an `{:array, _}` field,
+// so `lines.sum(l => l.qty)` renders through the shared collection-op table
+// verbatim — see `docInMemoryList`).
 // ---------------------------------------------------------------------------
 const VANILLA_DOC_CRUD_OPS = new Set(["create", "update", "delete", "destroy", "list", "get"]);
 
+/** Is `e` a read of a list the DOCUMENT path holds IN MEMORY?
+ *
+ *  Route A made a containment a real `embeds_many` on the `<Agg>.Data` embed,
+ *  so `record.lines` rehydrates to a list of part STRUCTS and a scalar array is
+ *  an `{:array, _}` field — both are ordinary Elixir lists by the time an op
+ *  body or find predicate runs, which is exactly what the shared collection-op
+ *  renderers expect.
+ *
+ *  A REFERENCE collection (`X id[]`) is NOT one of these: the relational path
+ *  resolves it through a `many_to_many` join table (`__ref_id_list` /
+ *  `__resolve_refs`), and a jsonb blob has no join to resolve. */
+function docInMemoryList(e: ExprIR, agg: AggregateIR): boolean {
+  // Both spellings of the same read: the bare `lines` an op body writes
+  // (`refKind: "this-prop"`) and the explicit `this.lines`.
+  const field =
+    e.kind === "ref" && (e.refKind === "this-prop" || e.refKind === "this-vo-prop")
+      ? e.name
+      : e.kind === "member" && e.receiver.kind === "this"
+        ? e.member
+        : undefined;
+  if (field === undefined) return false;
+  if (agg.contains.some((c) => c.name === field)) return true;
+  const f = agg.fields.find((x) => x.name === field);
+  return !!f && f.type.kind === "array" && f.type.element.kind !== "id";
+}
+
 /** Does an expression reach a shape the vanilla document scalar path can't emit?
  *  A derived read, a *dereferenced-entity* member (cross-aggregate `X id` join),
- *  a collection METHOD (`.sum`/`.filter`/`.contains` — lambdas over jsonb maps),
- *  a constructor / match / lambda — anything beyond scalar arithmetic,
- *  whole-field / value-object-subfield / `.count` reads over the `data` map, and
- *  (when `allowFnCall`) calls to the aggregate's own pure `function`s.
+ *  a collection METHOD over anything but an in-memory list, a constructor /
+ *  match — anything beyond scalar arithmetic, whole-field /
+ *  value-object-subfield / `.count` reads over the `data` map, collection reads
+ *  over the aggregate's own containments, and (when `allowFnCall`) calls to the
+ *  aggregate's own pure `function`s.
  *
  *  `allowFnCall` is true when the aggregate's `function` members are all
  *  themselves doc-safe (verified once per aggregate) — then a `callKind:
@@ -1638,34 +1668,54 @@ const VANILLA_DOC_CRUD_OPS = new Set(["create", "update", "delete", "destroy", "
  *  It is also passed `true` while verifying each function body, so a function
  *  that calls a sibling function stays admissible (the sibling is verified too —
  *  the whole call graph is checked, no recursion needed here). */
-function docExprUnsupported(e: ExprIR, allowFnCall: boolean): boolean {
-  const bad = (x: ExprIR): boolean => docExprUnsupported(x, allowFnCall);
+function docExprUnsupported(e: ExprIR, allowFnCall: boolean, agg: AggregateIR): boolean {
+  const bad = (x: ExprIR): boolean => docExprUnsupported(x, allowFnCall, agg);
   switch (e.kind) {
     case "ref":
       // A `this-derived` read has no stored `data` key (derived aren't
       // persisted); every other ref (this-prop / this-vo-prop whole read / param
-      // / let / enum-value / current-user) is a plain scalar/map read.
+      // / let / enum-value / current-user / a lambda binding) is a plain read.
       return e.refKind === "this-derived";
     case "member":
       // Supported: `this.<scalar>` (receiver `this`, entity type → `data[k]`), a
       // value-object SUB-field (`this.money.amount` → `data["money"]["amount"]`),
-      // an array `.count`/`.length` (→ `Enum.count`).  NOT supported: a member off
-      // a *dereferenced* entity (a cross-aggregate ref → needs a join the document
-      // path can't do) — an entity receiver that isn't the aggregate's own `this`.
-      if (e.receiverType.kind === "entity" && e.receiver.kind !== "this") return true;
+      // an array `.count`/`.length` (→ `Enum.count`), and a field of a
+      // LAMBDA-BOUND containment element (`lines.sum(l => l.qty)` → `l.qty` over
+      // the `%OrderLine{}` structs the embed rehydrates to — the enclosing
+      // collection-op arm is what vouches for the list itself).  NOT supported:
+      // a member off a *dereferenced* entity (a cross-aggregate `X id` ref →
+      // needs a join the document path can't do).
+      if (
+        e.receiverType.kind === "entity" &&
+        e.receiver.kind !== "this" &&
+        !(e.receiver.kind === "ref" && e.receiver.refKind === "lambda")
+      ) {
+        return true;
+      }
       return bad(e.receiver);
     case "method-call":
-      // A collection op (`.sum`/`.filter`/`.contains`) runs a lambda over the
-      // jsonb list of string-keyed maps — the loaded-struct machinery the scalar
-      // path lacks; a value-object method is the same story.  A scalar-receiver
-      // method (string/number) is fine.
+      // A collection op over an IN-MEMORY list — the aggregate's own containment
+      // or a scalar array — renders through the shared collection-op table
+      // verbatim (`lines.sum(l => l.qty)` → `Enum.sum(Enum.map(record.lines, fn
+      // l -> l.qty end))`), because Route A already made those real lists on the
+      // rehydrated embed.  Over anything else it is still gated: a REFERENCE
+      // collection needs the join table a blob has no equivalent for, and a
+      // value-object method needs the loaded VO struct the blob stores as a map.
+      if (e.isCollectionOp) {
+        return !docInMemoryList(e.receiver, agg) || bad(e.receiver) || e.args.some(bad);
+      }
       return (
-        e.isCollectionOp ||
         e.receiverType.kind === "valueobject" ||
         e.receiverType.kind === "array" ||
         bad(e.receiver) ||
         e.args.some(bad)
       );
+    case "lambda":
+      // Only reachable as a collection-op argument (the arm above vouches for
+      // the receiver list); its body is checked like any other expression.  A
+      // statement-bodied lambda has no `body` expression — it is not a shape
+      // the document path emits.
+      return e.body === undefined || bad(e.body);
     case "call":
       // A pure aggregate `function` call is emittable when the aggregate's
       // functions are doc-safe; every other call kind (value-object ctor, private
@@ -1692,8 +1742,8 @@ function docExprUnsupported(e: ExprIR, allowFnCall: boolean): boolean {
     case "this":
       return false;
     default:
-      // new / object / match / lambda / list / *-call — all need the struct /
-      // list / tuple machinery the document scalar path omits.
+      // new / match / list / *-call — all need the struct / list / tuple
+      // machinery the document scalar path omits.
       return true;
   }
 }
@@ -1701,7 +1751,7 @@ function docExprUnsupported(e: ExprIR, allowFnCall: boolean): boolean {
 /** Does a pure `function` body reach a non-doc-safe shape?  Sibling-function
  *  calls are admitted (`allowFnCall` true) because every function is checked, so
  *  the whole graph is verified without recursing here. */
-function docFunctionUnsupported(fn: FunctionIR): boolean {
+function docFunctionUnsupported(fn: FunctionIR, agg: AggregateIR): boolean {
   const body = fn.body;
   const exprs: ExprIR[] = "expr" in body ? [body.expr] : [];
   if ("stmts" in body) {
@@ -1722,19 +1772,23 @@ function docFunctionUnsupported(fn: FunctionIR): boolean {
       }
     }
   }
-  return exprs.some((e) => docExprUnsupported(e, /* allowFnCall */ true));
+  return exprs.some((e) => docExprUnsupported(e, /* allowFnCall */ true, agg));
 }
 
 /** Is the value of a containment `+=`/`-=` a doc-safe part constructor?  Route A:
  *  `lines += OrderLine { sku: …, qty: … }` appends a part struct to the embed's
  *  `embeds_many` list, so the value must be a part ctor (`new`/`object`) whose
  *  field values are themselves doc-safe scalars/VOs. */
-function docContainmentValueUnsupported(e: ExprIR, allowFnCall: boolean): boolean {
+function docContainmentValueUnsupported(
+  e: ExprIR,
+  allowFnCall: boolean,
+  agg: AggregateIR,
+): boolean {
   if (e.kind === "new" || e.kind === "object") {
-    return e.fields.some((f) => docExprUnsupported(f.value, allowFnCall));
+    return e.fields.some((f) => docExprUnsupported(f.value, allowFnCall, agg));
   }
   // A `-=` may pass a bare element/predicate — fall back to the scalar check.
-  return docExprUnsupported(e, allowFnCall);
+  return docExprUnsupported(e, allowFnCall, agg);
 }
 
 /** Does an operation statement fall outside the vanilla document op surface?
@@ -1742,7 +1796,7 @@ function docContainmentValueUnsupported(e: ExprIR, allowFnCall: boolean): boolea
  *  CONTAINMENT collection (embeds_many — mutable on document, Route A) from a
  *  reference/value collection (still gated). */
 function docStmtUnsupported(s: StmtIR, allowFnCall: boolean, agg: AggregateIR): boolean {
-  const bad = (e: ExprIR): boolean => docExprUnsupported(e, allowFnCall);
+  const bad = (e: ExprIR): boolean => docExprUnsupported(e, allowFnCall, agg);
   switch (s.kind) {
     case "precondition":
     case "requires":
@@ -1766,7 +1820,9 @@ function docStmtUnsupported(s: StmtIR, allowFnCall: boolean, agg: AggregateIR): 
         const field = snake(s.target.segments[0] ?? "");
         const isContainment = agg.contains.some((c) => snake(c.name) === field);
         if (!isContainment) return true;
-        return s.target.segments.length > 1 || docContainmentValueUnsupported(s.value, allowFnCall);
+        return (
+          s.target.segments.length > 1 || docContainmentValueUnsupported(s.value, allowFnCall, agg)
+        );
       }
       return s.target.segments.length > 1 || bad(s.value);
     }
@@ -1811,7 +1867,7 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
         // aggregate is itself doc-safe (they render in the same `docMap` mode —
         // reading the jsonb `data` map); if any is not, a body that calls one is
         // gated.  Computed once here and threaded into the op/find checks.
-        const allowFnCall = (agg.functions ?? []).every((fn) => !docFunctionUnsupported(fn));
+        const allowFnCall = (agg.functions ?? []).every((fn) => !docFunctionUnsupported(fn, agg));
         // A custom find is unsupported only when its predicate reads a non-scalar
         // shape.  PAGED finds (Route A slice 4c) and UNION finds (Route A slice 4d)
         // are now supported: `renderDocFindFn` returns the single-get `{:ok, nil}`/
@@ -1821,7 +1877,7 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
           (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name)?.finds ?? []
         )
           .filter((f) => f.name !== "all")
-          .filter((f) => f.filter != null && docExprUnsupported(f.filter, allowFnCall));
+          .filter((f) => f.filter != null && docExprUnsupported(f.filter, allowFnCall, agg));
         const badOps = agg.operations
           .filter((op) => !VANILLA_DOC_CRUD_OPS.has(op.name))
           .filter((op) => docOpUnsupported(op, allowFnCall, agg));

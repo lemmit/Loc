@@ -1,0 +1,63 @@
+// Collection READS over a `shape: document` aggregate's own in-memory lists.
+//
+// Route A already made a document containment a real `embeds_many` on the
+// `<Agg>.Data` embed and a scalar array an `{:array, _}` field, so by the time
+// an op body runs, `record.lines` and `record.tags` are ordinary Elixir lists —
+// exactly what the shared collection-op renderers expect
+// (`lines.sum(l => l.qty)` → `Enum.sum(Enum.map(record.lines, fn l -> l.qty
+// end))`).  The vanilla document scope gate nevertheless refused EVERY
+// collection method (`loom.vanilla-document-unsupported`), because it was
+// written before those lists were real; it now admits a collection op whose
+// receiver is one of them.
+//
+// What stays gated, and is deliberately absent from this fixture: a collection
+// op over a REFERENCE collection (`X id[]`).  The relational path resolves
+// those through a `many_to_many` join table, and a jsonb blob has no join to
+// resolve — so that shape is still an honest error, not a mis-emit.
+//
+// Every backend already emitted this crossing; the fixture exists because the
+// ELIXIR half was validate-gated and is the one that had to be re-verified by
+// compiling.  Keeping it in the shared corpus means all five keep proving it.
+system DocCollectionRead {
+  subdomain Sales {
+    context Shop {
+      aggregate Order shape: document, with crudish {
+        reference: string
+        total: int = 0
+        lineCount: int = 0
+        tags: string[]
+        contains lines: OrderLine[]
+        entity OrderLine {
+          sku: string
+          qty: int
+        }
+
+        // A lambda over the containment list, folded to a scalar.
+        operation retotal() {
+          total := lines.sum(l => l.qty)
+        }
+        // A whole-list `.count` read (the member form) plus a filtered count.
+        operation recount() {
+          lineCount := lines.count
+        }
+        // A collection predicate in a guard, and a scalar-array membership test.
+        operation markBulk() {
+          precondition lines.any(l => l.qty > 10)
+          precondition tags.contains("bulk")
+          total := total + 1
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api ShopApi from Sales
+  storage primary { type: postgres }
+  resource shopState { for: Shop, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Shop]
+    dataSources: [shopState]
+    serves: ShopApi
+    port: 4000
+  }
+}

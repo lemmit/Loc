@@ -26,10 +26,16 @@
 // AUDITED op — named (slice 4e) or returning (slice 4f) — records its audit row
 // inside the persist transaction.  A mutating RETURNING op re-embeds + persists its
 // write, projecting the wire off the saved embed (#1774 — it previously dropped the
-// write).  The residual the document path can't express yet (provenanced ops — no
-// per-field prov columns on a jsonb blob; derived / dereferenced-entity /
-// collection-method reads; non-scalar find predicates) is gated at validate time
-// (`loom.vanilla-document-unsupported`) rather than misgenerated — see
+// write).  Collection READS over the aggregate's own in-memory lists work too —
+// Route A made a containment a real `embeds_many` and a scalar array an
+// `{:array, _}` field, so `lines.sum(l => l.qty)` renders through the shared
+// collection-op table verbatim.  Capability filters are applied IN-APP over the
+// same rehydrated embed (`vanillaDocCapabilityFilter`).  The residual the
+// document path can't express yet — provenanced ops (no per-field prov columns
+// on a jsonb blob), derived / dereferenced-entity reads, value-object METHOD
+// calls, and a collection op over a REFERENCE collection (`X id[]` resolves
+// through a join table a blob has no equivalent for) — is gated at validate
+// time (`loom.vanilla-document-unsupported`) rather than misgenerated; see
 // `validateVanillaDocumentScope`.
 // ---------------------------------------------------------------------------
 
