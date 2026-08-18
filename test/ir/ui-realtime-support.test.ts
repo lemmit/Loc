@@ -1,11 +1,11 @@
 // Honesty gate for `on <channel>.<Event>` live-event handlers (channels.md
-// Part I).  All five built-in frontends now consume the realtime SSE wire, so
-// the gate no longer bites them — but a handler still emits NOTHING when the
-// serving frontend can't reach a realtime source: an SSE-consuming frontend
-// pointed at a backend that doesn't serve the wire (the Phoenix/Elixir
-// backend), or a frontend framework with no realtime path at all (flutter).
-// Those cases warn (`loom.ui-realtime-unsupported`) rather than dropping the
-// handler silently.
+// Part I).  ALL SIX built-in frontends now consume the realtime SSE wire —
+// flutter was the last holdout and joined with `generator/flutter/realtime.ts`
+// — so the frontend-has-no-consumer half of the gate no longer bites any
+// shipped target; it stays as the seam a NEW frontend gates on.  What still
+// warns is the other half: an SSE-consuming frontend pointed at a backend that
+// does not serve the wire (the Phoenix/Elixir backend), where the handler would
+// subscribe to a route that isn't there.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -69,10 +69,15 @@ describe("ui realtime honesty gate (`loom.ui-realtime-unsupported`)", () => {
     expect(warns[0]).toContain("silently dropped");
   });
 
-  it("warns for a frontend framework with no realtime path (flutter → node)", async () => {
-    const warns = await realtimeWarnings(sys("flutter", "node"));
+  it("does not warn for flutter on a realtime-serving backend (flutter → node)", async () => {
+    expect(await realtimeWarnings(sys("flutter", "node"))).toEqual([]);
+  });
+
+  // …and the OTHER half still bites flutter: pointed at a backend with no SSE
+  // wire, the emitted subscription would connect to nothing.
+  it("warns for flutter targeting a backend without the wire (flutter → elixir)", async () => {
+    const warns = await realtimeWarnings(sys("flutter", "elixir"));
     expect(warns.length).toBe(1);
-    expect(warns[0]).toContain("no realtime consumption");
-    expect(warns[0]).toContain("silently dropped");
+    expect(warns[0]).toContain("does not serve the realtime SSE wire");
   });
 });

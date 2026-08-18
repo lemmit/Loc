@@ -1282,8 +1282,23 @@ export const DIAGNOSTIC_MESSAGES = {
     `${p.where}: \`persist: ${p.lifetime}\` is not implemented on the ${p.platform} frontend — ` +
     `the emitted store is IN-MEMORY regardless, so the state is lost on restart and not ` +
     `shareable by URL, with nothing in the build output to say so.  Use \`persist: memory\` ` +
-    `here, or host this ui on a SPA frontend (react / vue / svelte / angular).  Support is ` +
-    `planned; this gate exists so the degradation is honest until it lands.`,
+    `here, or host this ui on a frontend that implements the ladder (react / vue / svelte / ` +
+    `angular / flutter).  Support is planned; this gate exists so the degradation is honest ` +
+    `until it lands.`,
+  // The FIELD-scoped half of the same code: flutter implements the ladder, but
+  // persistence there crosses an untyped boundary per field, so a field type
+  // with no total Dart conversion still can't ride it.
+  "loom.store-lifetime-target-unsupported#flutter-field": (p: {
+    where: unknown;
+    name: unknown;
+    lifetime: unknown;
+  }) =>
+    `${p.where}: field '${p.name}' cannot be persisted on the flutter frontend — ` +
+    `\`persist: ${p.lifetime}\` crosses an untyped boundary per field, and the Dart codec ` +
+    `covers string / guid / id / enum / int / long / decimal / money / bool / datetime ` +
+    `fields plus arrays of those.  A json, File, entity, value-object or optional field ` +
+    `would be silently dropped from the stored state.  Give the field one of the covered ` +
+    `types, or use \`persist: memory\` for this store.`,
   "loom.store-cross-store-on-liveview-invalid": (p: {
     where: unknown;
     store: unknown;

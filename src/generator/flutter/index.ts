@@ -31,11 +31,13 @@ import type {
   UiIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
+import { backendServesRealtime } from "../../ir/util/channels.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { storeMemberLocal } from "../_walker/js-target-helpers.js";
 import type { ApiCallSite } from "../_walker/target.js";
 import { type ApiHookUse, walkBody } from "../_walker/walker-core.js";
+import { renderFlutterAuthModule, renderFlutterGate } from "./auth-gate.js";
 import { renderFlutterChartRuntime } from "./chart-runtime.js";
 import {
   type ComponentWalkCtx,
@@ -58,9 +60,23 @@ import { renderFlutterModalRuntime } from "./modal-runtime.js";
 import { flutterPack, usesIntl, usesMath } from "./pack.js";
 import { dartPackageName } from "./package-name.js";
 import { collectFlutterReads, renderAppConfig, renderReadProviders } from "./reads-emit.js";
+import {
+  flutterHasRealtimeHandlers,
+  REALTIME_EVENT_DART,
+  REALTIME_SOURCE_FACADE,
+  REALTIME_SOURCE_IO_DART,
+  REALTIME_SOURCE_WEB_DART,
+  renderFlutterRealtime,
+} from "./realtime.js";
 import { hasRiverpodState, renderRiverpod } from "./riverpod-emit.js";
 import { renderFlutterStores } from "./store-builder.js";
 import { storeProviderName } from "./store-names.js";
+import {
+  flutterPersistedStores,
+  renderStorePersistRuntime,
+  usesSharedPreferences,
+  usesUrlStores,
+} from "./store-persist.js";
 
 export interface GenerateFlutterOptions {
   apiBaseUrl?: string;
@@ -85,6 +101,12 @@ export function generateFlutterForContexts(
   const title = upperFirst(deployable.uiName ?? deployable.name ?? sys.name);
 
   const ui = deployable.uiName ? sys.uis.find((u) => u.name === deployable.uiName) : undefined;
+
+  // Auth gate (D-AUTH-OIDC, `auth: ui`): this flutter deployable opts in AND its
+  // target backend enforces auth AND the system declares a `user { }` claim
+  // shape — the same three-way conjunction every other frontend's `authUi` is.
+  const target = sys.deployables.find((d) => d.name === deployable.targetName);
+  const authUi = !!(deployable.auth?.ui && target?.auth?.required && sys.user);
 
   // Aggregate + owning-bounded-context lookups, built once — threaded into the
   // walker (form seams resolve the aggregate's create-input / op params + the
@@ -133,6 +155,22 @@ export function generateFlutterForContexts(
   const reads = collectFlutterReads(ui, contexts);
   if (reads.length > 0) {
     out.set("lib/reads.dart", renderReadProviders(reads));
+  }
+
+  // Realtime SSE handlers (channels.md Part I) — gated on BOTH halves: this ui
+  // declares `on <channel>.<Event>` handlers AND the target backend actually
+  // serves `GET /realtime/events`.  Without the second the subscription would
+  // connect to nothing, which is the silent drop `loom.ui-realtime-unsupported`
+  // exists to make honest.
+  const hasRealtime =
+    flutterHasRealtimeHandlers(ui) &&
+    backendServesRealtime(target?.platform ?? deployable.platform);
+  if (hasRealtime && ui) {
+    out.set("lib/realtime.dart", renderFlutterRealtime(ui, reads));
+    out.set("lib/realtime_event.dart", REALTIME_EVENT_DART);
+    out.set("lib/realtime_source.dart", REALTIME_SOURCE_FACADE);
+    out.set("lib/realtime_source_io.dart", REALTIME_SOURCE_IO_DART);
+    out.set("lib/realtime_source_web.dart", REALTIME_SOURCE_WEB_DART);
   }
 
   // i18n (M-T1.11 Flutter runtime): when this ui has extractable user-visible
@@ -188,6 +226,7 @@ export function generateFlutterForContexts(
       componentParams,
       i18nEnabled,
       storeMembers,
+      authUi,
     });
     for (const name of r.usedComponents) usedComponents.add(name);
     return { page, ...r };
@@ -198,8 +237,23 @@ export function generateFlutterForContexts(
   // DECLARES a store, not only where one is used: an unused Dart top-level
   // declaration is inert (unlike an unused import), and the file is what the
   // page shells import.
-  const storesFile = ui ? renderFlutterStores(ui.stores, contexts) : undefined;
+  // `persist: local|session|url` (frontend-state-management.md §3.1) — the
+  // classification drives three things at once: the per-Notifier seed/mirror in
+  // `stores.dart`, the `lib/store_persist.dart` runtime, and the pubspec /
+  // `main()` wiring below.  Empty for an all-`memory` ui, which keeps every
+  // emitted file byte-identical to the pre-persistence output.
+  // `lib/auth.dart` — the claims record, the session probe, the sign-in/out
+  // redirects and the two gate views.  Emitted whenever the app is gated, since
+  // `main.dart` wraps `MaterialApp` in `AuthGate` regardless of whether any page
+  // additionally carries a `requires`.
+  if (authUi && sys.user) out.set("lib/auth.dart", renderFlutterAuthModule(sys.user));
+
+  const persistedStores = flutterPersistedStores(ui);
+  const storesFile = ui ? renderFlutterStores(ui.stores, contexts, persistedStores) : undefined;
   if (storesFile) out.set("lib/stores.dart", storesFile);
+  if (persistedStores.length > 0) {
+    out.set("lib/store_persist.dart", renderStorePersistRuntime(persistedStores));
+  }
 
   if (ui && usedComponents.size > 0) {
     const componentsFile = renderComponentsFile(
@@ -215,7 +269,9 @@ export function generateFlutterForContexts(
   // `Action(<instance>.<op>)` buttons (which POST inline via `apiUri(`).  Emit it
   // when any of the three is present, so no page's import dangles.
   const usesActionHttp = rendered.some((r) => r.source.includes("apiUri("));
-  if (reads.length > 0 || forms.length > 0 || usesActionHttp) {
+  // `lib/auth.dart` is a fourth consumer — the session probe and the sign-in /
+  // sign-out redirects are both built with `apiUri`.
+  if (reads.length > 0 || forms.length > 0 || usesActionHttp || authUi || hasRealtime) {
     out.set("lib/config.dart", renderAppConfig());
   }
   // The controlled-Modal bridge — emitted only when a page opens one, matched to
@@ -229,17 +285,36 @@ export function generateFlutterForContexts(
     out.set("lib/chart.dart", renderFlutterChartRuntime());
   }
 
+  // `persist:` wiring for the app root: a web-storage tier must be loaded before
+  // the first Notifier `build()` (so a seed can read synchronously), and a `url`
+  // tier needs the back/forward observer around `MaterialApp`.
+  const persistBoot: AppBoot = {
+    initPrefs: usesSharedPreferences(persistedStores),
+    urlSync: usesUrlStores(persistedStores),
+    authGate: authUi && !!sys.user,
+    realtime: hasRealtime,
+  };
   if (rendered.length > 0) {
     for (const r of rendered) {
       out.set(`lib/pages/${r.fileBase}.dart`, r.source);
     }
-    out.set("lib/main.dart", renderMainWithRoutes(title, rendered));
+    out.set("lib/main.dart", renderMainWithRoutes(title, rendered, persistBoot));
   } else {
-    out.set("lib/main.dart", renderMain(title));
+    out.set("lib/main.dart", renderMain(title, persistBoot));
     out.set("lib/pages/home_page.dart", renderHomePage(title, aggregates));
   }
 
-  out.set("pubspec.yaml", renderPubspec(pkg, deployable.name, usesFileUpload));
+  out.set(
+    "pubspec.yaml",
+    renderPubspec(
+      pkg,
+      deployable.name,
+      usesFileUpload,
+      usesSharedPreferences(persistedStores),
+      persistBoot.authGate,
+      hasRealtime,
+    ),
+  );
   out.set("analysis_options.yaml", ANALYSIS_OPTIONS);
   // Web platform scaffold — `flutter build web` refuses a project with no
   // `web/index.html` ("This project is not configured for the web").  Emit the
@@ -307,9 +382,14 @@ function renderPage(
       string,
       { fields: ReadonlySet<string>; actions: ReadonlySet<string> }
     >;
+    /** True when this deployable is `auth: ui` (D-AUTH-OIDC) — the walk then
+     *  gates `Action` buttons on currentUser-only op `requires`, and the shell
+     *  binds the session claims + the page's own `requires` guard. */
+    authUi: boolean;
   },
 ): Omit<RenderedPage, "page"> {
-  const { workflowsByName, bcByWorkflow, componentParams, i18nEnabled, storeMembers } = workflows;
+  const { workflowsByName, bcByWorkflow, componentParams, i18nEnabled, storeMembers, authUi } =
+    workflows;
   const className = `${upperFirst(page.name)}Page`;
   const fileBase = `${snake(page.name)}_page`;
   const routePath = page.route ?? `/${snake(page.name)}`;
@@ -331,6 +411,7 @@ function renderPage(
   let usedApiHooks = new Map<string, ApiHookUse>();
   const usedComponents = new Set<string>();
   let usedStores = new Map<string, Set<string>>();
+  let usesCurrentUser = false;
   if (page.body) {
     const result = walkBody(
       page.body,
@@ -348,7 +429,7 @@ function renderPage(
       new Map(), // pageRoutes
       new Set(), // externFunctions
       new Set(), // derivedNames
-      false, // authUi — the Flutter frontend has no `auth: ui` gate yet
+      authUi, // gate `Action` buttons on currentUser-only op `requires`
       // i18n key prefix — `page.<Name>` matches the catalog (the scaffold's
       // role-scoped `page.name`, e.g. `List`, not the router emit name);
       // undefined when the ui has no extractable strings (byte-identical).
@@ -359,6 +440,7 @@ function renderPage(
     usesRouteId = result.usesRouteId;
     usedApiHooks = result.usedApiHooks;
     usedStores = result.usedStores ?? usedStores;
+    usesCurrentUser = result.usesCurrentUser;
     for (const a of result.usedActions ?? []) usedActions.add(a);
     for (const c of result.usedUserComponents) usedComponents.add(c);
   }
@@ -371,7 +453,11 @@ function renderPage(
   // A store read/call needs a `WidgetRef` too (`ref.watch(cartProvider…)`), so a
   // page whose only reactive input is a store is still a `ConsumerWidget` — the
   // StatelessWidget path has no `ref` to bind against.
-  const consumer = stateful || usedApiHooks.size > 0 || usedStores.size > 0;
+  // A gated page reads the session (`ref.watch(sessionProvider)`), so it needs a
+  // `WidgetRef` for the same reason a store-reading page does — a StatelessWidget
+  // has no `ref` to bind `currentUser` against.
+  const pageGate = authUi && (page.requires !== undefined || usesCurrentUser);
+  const consumer = stateful || usedApiHooks.size > 0 || usedStores.size > 0 || pageGate;
   const apiParamNames = new Map(ui.apiParams.map((p) => [p.name, p.apiName]));
   const usesComponent = usedComponents.size > 0;
   const source = consumer
@@ -389,6 +475,7 @@ function renderPage(
           usesComponent,
           usedStores,
           storeMembers,
+          pageGate,
         },
         bodyWidget,
         contexts,
@@ -448,6 +535,10 @@ interface ConsumerBindings {
   usedStores: ReadonlyMap<string, ReadonlySet<string>>;
   /** Per-store field / action split, so each used member binds the right way. */
   storeMembers: ReadonlyMap<string, { fields: ReadonlySet<string>; actions: ReadonlySet<string> }>;
+  /** True when this page reads the verified session (a `requires` gate, or a
+   *  `currentUser.<claim>` in its body) — the shell then binds `currentUser` and
+   *  wraps the body in the gate. */
+  pageGate: boolean;
 }
 
 /** Bind one local per used store member, matching the body's use site
@@ -579,7 +670,14 @@ function renderConsumerPage(
   const needsId = b.usesRouteId || usesAsyncEffect;
 
   const bindings: string[] = [];
-  // Route args first — a byId read's `ref.watch(<var>Provider(id))`, an
+  // The verified session FIRST (D-AUTH-OIDC): the page `requires` guard, a
+  // `currentUser.<claim>` body read and a gated `Action` button all reference
+  // this local.  Non-null by construction — `AuthGate` wraps the whole
+  // `MaterialApp`, so no page builds without a session.
+  if (b.pageGate) {
+    bindings.push("    final currentUser = ref.watch(sessionProvider).value!;");
+  }
+  // Route args next — a byId read's `ref.watch(<var>Provider(id))`, an
   // async-effect closure and any declared route param all read them.
   bindings.push(...routeArgBindings(b.routeParams, needsId));
   // Page STATE before the read hoists — a server-paged read watches a family
@@ -646,10 +744,20 @@ function renderConsumerPage(
       }
     }
   }
+  // A page `requires <gate>` renders `ForbiddenView` instead of its body when
+  // the predicate fails against the session claims — the client mirror of the
+  // backend 403.  The gate is currentUser-only by validator rule, so
+  // `renderFlutterGate` can always evaluate it.
+  const gate = b.pageGate && page.requires ? renderFlutterGate(page.requires, "currentUser") : "";
+  const guarded = gate
+    ? `(${gate})\n            ? ${indentContinuation(bodyWidget, 14)}\n            : const ForbiddenView()`
+    : indentContinuation(bodyWidget, 8);
+
   const imports = [
     "import 'package:flutter/material.dart';",
     "import 'package:flutter_riverpod/flutter_riverpod.dart';",
   ];
+  if (b.pageGate) imports.push("import '../auth.dart';");
   if (b.usedApiHooks.size > 0) imports.push("import '../reads.dart';");
   if (b.hostsForm) imports.push("import '../forms.dart';");
   if (b.usesComponent) imports.push("import '../components.dart';");
@@ -706,7 +814,7 @@ function renderConsumerPage(
     "    return Scaffold(",
     `      appBar: AppBar(title: const Text('${escapeDart(page.name)}')),`,
     "      body: SingleChildScrollView(",
-    `        child: ${indentContinuation(bodyWidget, 8)},`,
+    `        child: ${guarded},`,
     "      ),",
     "    );",
     "  }",
@@ -714,19 +822,103 @@ function renderConsumerPage(
   )}\n`;
 }
 
+/** What the app root has to do beyond mounting `MaterialApp`.
+ *  `initPrefs` makes `main()` async and awaits the shared_preferences load
+ *  BEFORE `runApp` (so every Notifier `build()` can seed synchronously);
+ *  `urlSync` wraps `MaterialApp` in the `persist: url` back/forward observer;
+ *  `authGate` wraps it in the session guard. */
+interface AppBoot {
+  initPrefs: boolean;
+  urlSync: boolean;
+  /** `auth: ui` (D-AUTH-OIDC) — wrap `MaterialApp` in `AuthGate`, so no page
+   *  builds until the session probe has answered. */
+  authGate: boolean;
+  /** Live-event handlers (channels.md Part I) — mount the SSE subscription for
+   *  as long as the app is running. */
+  realtime: boolean;
+}
+
+const NO_BOOT: AppBoot = {
+  initPrefs: false,
+  urlSync: false,
+  authGate: false,
+  realtime: false,
+};
+
+/** `main()` for a `persist:`-bearing app — the web-storage tier has to finish
+ *  loading before the first widget builds. */
+function mainFn(boot: AppBoot): string[] {
+  if (!boot.initPrefs) return ["void main() {", "  runApp(const App());", "}"];
+  return [
+    "Future<void> main() async {",
+    "  // The stored blobs must be in memory before the first Notifier `build()`,",
+    "  // which seeds its cells synchronously (`store_persist.dart`).",
+    "  WidgetsFlutterBinding.ensureInitialized();",
+    "  await LoomStorePersist.init();",
+    "  runApp(const App());",
+    "}",
+  ];
+}
+
+/** The extra `main.dart` imports a `persist:`-bearing app pulls: the runtime
+ *  (`LoomStorePersist.init`) and/or the store providers the `url`-tier observer
+ *  `LoomUrlStoreSync` reaches through. */
+function persistMainImports(boot: AppBoot): string[] {
+  const out: string[] = [];
+  if (boot.authGate) out.push("import 'auth.dart';");
+  if (boot.realtime) out.push("import 'realtime.dart';");
+  if (boot.initPrefs) out.push("import 'store_persist.dart';");
+  if (boot.urlSync) out.push("import 'stores.dart';");
+  return out.length > 0 ? ["", ...out] : [];
+}
+
+/** The wrapper between `ProviderScope` and `MaterialApp` — the `persist: url`
+ *  back/forward observer, which has to outlive route changes. */
+function appWrapOpen(boot: AppBoot): string {
+  return boot.urlSync ? "LoomUrlStoreSync(child: " : "";
+}
+
+function appWrapClose(boot: AppBoot): string {
+  return boot.urlSync ? ")" : "";
+}
+
+/** The session guard rides `MaterialApp.builder`, NOT a wrapper around the
+ *  `MaterialApp` itself.  Two reasons, both load-bearing: `AuthGate`'s spinner
+ *  and sign-in prompt are Material widgets and need the app's `Directionality` /
+ *  `Theme` ancestors, and an outer wrapper would REPLACE the `MaterialApp`
+ *  entirely while the probe is in flight — which the emitted boot smoke
+ *  (`find.byType(MaterialApp)`) would see as an app that never mounted. */
+function authGateBuilder(boot: AppBoot): string[] {
+  const wraps: string[] = [];
+  if (boot.authGate) wraps.push("AuthGate");
+  // Innermost, so a toast resolves the `ScaffoldMessenger` the route provides
+  // and an unauthenticated visitor never opens a subscription.
+  if (boot.realtime) wraps.push("LoomRealtime");
+  if (wraps.length === 0) return [];
+  const open = wraps.map((w) => `${w}(child: `).join("");
+  const close = ")".repeat(wraps.length);
+  return [
+    "      builder: (context, child) =>",
+    `          ${open}child ?? const SizedBox.shrink()${close},`,
+  ];
+}
+
 /** `main.dart` for a multi-page ui: a `MaterialApp` with named routes, the first
  *  page as `initialRoute`. */
-function renderMainWithRoutes(title: string, pages: RenderedPage[]): string {
+function renderMainWithRoutes(
+  title: string,
+  pages: RenderedPage[],
+  boot: AppBoot = NO_BOOT,
+): string {
   const home = pages[0];
   return `${lines(
     "import 'package:flutter/material.dart';",
     "import 'package:flutter_riverpod/flutter_riverpod.dart';",
     "",
     pages.map((p) => `import 'pages/${p.fileBase}.dart';`),
+    persistMainImports(boot),
     "",
-    "void main() {",
-    "  runApp(const App());",
-    "}",
+    mainFn(boot),
     "",
     "class App extends StatelessWidget {",
     "  const App({super.key});",
@@ -736,23 +928,45 @@ function renderMainWithRoutes(title: string, pages: RenderedPage[]): string {
     // ProviderScope roots the Riverpod container for every stateful page's
     // Notifier; nested in App.build (not around runApp) so `runApp(const App())`
     // stays const-clean.
-    "    return ProviderScope(child: MaterialApp(",
+    `    return ProviderScope(child: ${appWrapOpen(boot)}MaterialApp(`,
     `      title: '${escapeDart(title)}',`,
     "      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),",
+    authGateBuilder(boot),
     `      initialRoute: '${home.routePath}',`,
     "      routes: {",
     pages.map((p) => `        '${p.routePath}': (context) => const ${p.className}(),`),
     "      },",
-    "    ));",
+    `    )${appWrapClose(boot)});`,
     "  }",
     "}",
   )}\n`;
 }
 
-function renderPubspec(pkg: string, deployableName: string, usesFileUpload: boolean): string {
+function renderPubspec(
+  pkg: string,
+  deployableName: string,
+  usesFileUpload: boolean,
+  usesPrefs: boolean,
+  usesAuth: boolean,
+  usesRealtime: boolean,
+): string {
   // `file_picker` is only pulled when a FileUpload primitive is present, so a
   // File-free app's pubspec stays byte-identical.
   const filePicker = usesFileUpload ? "\n  file_picker: ^8.1.2" : "";
+  // `shared_preferences` backs `persist: local|session`; the `url` tier needs no
+  // package (`Uri.base` + `SystemNavigator` are core).
+  const prefs = usesPrefs ? "\n  shared_preferences: ^2.3.2" : "";
+  // `url_launcher` backs the `auth: ui` sign-in / sign-out REDIRECT — Dart's
+  // core SDK cannot navigate to an external URL.  Same use-driven rule as
+  // `file_picker`: an unauthenticated app's pubspec stays byte-identical.
+  const launcher = usesAuth ? "\n  url_launcher: ^6.3.1" : "";
+  // `package:web` backs the WEB half of the SSE transport (the browser's own
+  // `EventSource`); the native half rides `package:http`, already present.
+  // `^1.0.0`, not `^1.1.0`: `flutter_web_plugins` pins `web` from the SDK, so a
+  // floor above what the installed Flutter carries makes `pub get` unsolvable
+  // before a line of the app is compiled.  `^1.0.0` accepts every 1.x the
+  // supported Flutter range ships.
+  const webPkg = usesRealtime ? "\n  web: ^1.0.0" : "";
   return `name: ${pkg}
 description: "Generated Flutter app for ${deployableName} (Loom)."
 publish_to: "none"
@@ -766,7 +980,7 @@ dependencies:
     sdk: flutter
   http: ^1.2.0
   flutter_riverpod: ^2.5.1
-  intl: ^0.19.0${filePicker}
+  intl: ^0.19.0${filePicker}${prefs}${launcher}${webPkg}
 
 dev_dependencies:
   flutter_test:
@@ -984,29 +1198,30 @@ CMD ["nginx", "-g", "daemon off;"]
 
 // --- Fallback (no ui pages) skeleton widgets --------------------------------
 
-function renderMain(title: string): string {
-  return `import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-import 'pages/home_page.dart';
-
-void main() {
-  runApp(const App());
-}
-
-class App extends StatelessWidget {
-  const App({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return ProviderScope(child: MaterialApp(
-      title: '${escapeDart(title)}',
-      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),
-      home: const HomePage(),
-    ));
-  }
-}
-`;
+function renderMain(title: string, boot: AppBoot = NO_BOOT): string {
+  return `${lines(
+    "import 'package:flutter/material.dart';",
+    "import 'package:flutter_riverpod/flutter_riverpod.dart';",
+    "",
+    "import 'pages/home_page.dart';",
+    persistMainImports(boot),
+    "",
+    mainFn(boot),
+    "",
+    "class App extends StatelessWidget {",
+    "  const App({super.key});",
+    "",
+    "  @override",
+    "  Widget build(BuildContext context) {",
+    `    return ProviderScope(child: ${appWrapOpen(boot)}MaterialApp(`,
+    `      title: '${escapeDart(title)}',`,
+    "      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),",
+    authGateBuilder(boot),
+    "      home: const HomePage(),",
+    `    )${appWrapClose(boot)});`,
+    "  }",
+    "}",
+  )}\n`;
 }
 
 function renderHomePage(title: string, aggregates: readonly string[]): string {

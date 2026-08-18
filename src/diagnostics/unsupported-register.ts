@@ -78,8 +78,8 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
   {
     code: "loom.auth-ui-unsupported-framework",
     kind: "gap",
-    site: "src/ir/validate/checks/system-checks.ts:544",
-    what: "`auth: ui` only on react/vue/svelte/angular/feliz; flutter open",
+    site: "src/ir/validate/checks/system-checks.ts:547",
+    what: "`auth: ui` ships on every frontend; the seam a NEW one gates on",
     mission: "M-T1.20",
   },
   {
@@ -288,8 +288,8 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
   {
     code: "loom.store-lifetime-target-unsupported",
     kind: "gap",
-    site: "src/ir/validate/checks/store-checks.ts:318",
-    what: "`persist: local|session|url` silently in-memory on feliz / flutter",
+    site: "src/ir/validate/checks/store-checks.ts:316",
+    what: "`persist:` in-memory on feliz; on flutter, a field type with no Dart codec",
     mission: "M-T1.20",
   },
   {
@@ -309,8 +309,8 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
   {
     code: "loom.ui-realtime-unsupported",
     kind: "gap",
-    site: "src/ir/validate/checks/system-checks.ts:498",
-    what: "`on <channel>.<Event>` live-event handlers missing on some targets",
+    site: "src/ir/validate/checks/system-checks.ts:661",
+    what: "`on <channel>.<Event>` handlers vs. a backend that serves no SSE wire",
     mission: "M-T1.20",
   },
   {
