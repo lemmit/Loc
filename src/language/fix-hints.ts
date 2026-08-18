@@ -389,6 +389,13 @@ const PROVIDERS: Record<string, FixHintProvider> = {
   "loom.angular-deployable-missing-ui": missingUiFix,
 };
 
+/** Every `loom.*` code that carries a repair.  Exported so the coverage ratchet
+ *  (`test/language/fix-hint-coverage.test.ts`) can check the registry against
+ *  the wording catalog — a provider keyed to a code nothing emits is a fix no
+ *  user can reach, which is exactly how the editor shipped a dead quick fix for
+ *  `loom.framework-mismatch` through every green run. */
+export const FIX_HINT_CODES: readonly string[] = Object.keys(PROVIDERS);
+
 /**
  * Build a fix-hint for a CST-backed diagnostic, or `undefined` when no provider
  * is registered for its code (fixHints are optional — contract §3.3).

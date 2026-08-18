@@ -118,11 +118,6 @@ const TEMPLATE_CODE_DEBT: { file: string; code: string; why: string }[] = [
     code: "`loom.${kind}-name-conflict`",
     why: "lifecycle conflicts: two codes (create/destroy) behind one computed code; wording not catalogued.",
   },
-  {
-    file: path.join("src", "language", "validators", "structural.ts"),
-    code: "`loom.reserved-derived-on-vo`",
-    why: "static (substitution-free) template code, so newly visible to the scanner; wording not catalogued.",
-  },
 ];
 
 const isWaived = (file: string, codeText: string): boolean =>

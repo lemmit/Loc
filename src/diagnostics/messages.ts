@@ -585,6 +585,11 @@ export const DIAGNOSTIC_MESSAGES = {
     `it is only valid on value properties. Drop it (write 'contains ${p.name}: ${p.label}${
       p.array
     }' if you want the keyword explicit).`,
+  // Reserved derived names are aggregate-only — a value object participates in
+  // neither `string(x)` lowering nor host-language `ToString()`/`Inspect`
+  // emission, so `derived display` on one has nowhere to go.
+  "loom.reserved-derived-on-vo": (p: { name: unknown }) =>
+    `Reserved 'derived ${p.name}' is only allowed on aggregates, not value objects.`,
   "loom.entity-field-optional-collection": (p: { name: unknown; label: unknown }) =>
     `Field '${p.name}' contains entity '${p.label}' as both a collection and optional — ` +
     `an empty collection already encodes absence; drop the '?'.`,
