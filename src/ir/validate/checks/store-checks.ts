@@ -301,8 +301,8 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
     // a stale allowance behind.  FELIZ did exactly that: the ladder now ships
     // there (`generator/feliz/store-persist.ts` — Web Storage hydration at
     // `init`, a write-back `update` wrapper, and a `popstate` subscription for
-    // the `url` tier), so its arm is gone and only the narrower
-    // `loom.store-persist-field-unsupported` below remains.
+    // the `url` tier), so its arm is gone and only the narrower FIELD-scoped
+    // half of this same code (the `#field` message variant) below remains.
     //
     // Detected off `dep.platform`, not `uiFramework`, for the reason the Feliz
     // block below spells out: `platform: feliz` / `platform: flutter` each host
@@ -329,8 +329,8 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
       }
     }
 
-    // loom.store-persist-field-unsupported — the residue of the Feliz `persist:`
-    // implementation.  Persistence there crosses the JS boundary per FIELD (a
+    // loom.store-lifetime-target-unsupported (#field) — the residue of the Feliz
+    // `persist:` implementation.  It crosses the JS boundary per FIELD (a
     // raw string out of Web Storage / the query string, converted in F#), so a
     // field type only persists when `felizPersistCodec` has a TOTAL conversion
     // for it.  `datetime`/`duration`/`guid` spell .NET types with no total parse

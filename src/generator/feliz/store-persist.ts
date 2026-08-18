@@ -295,7 +295,11 @@ function writer(p: FelizPersistedStore): string[] {
       "(function(){try{var p=new URLSearchParams(window.location.search);" +
       params +
       "var qs=p.toString();window.history.replaceState(null,'',qs?('?'+qs):window.location.pathname);}catch(e){}})()";
-    const sig = p.fields.map(({ field }) => `(${field.name}: ${felizArgType(field)})`).join(" ");
+    // `<field>Arg`, not the bare field name: a DSL field may be spelled with an
+    // F# KEYWORD (`type`, `end`, `to`, `done`), which would not bind as a
+    // parameter.  The `[<Emit>]` body addresses arguments positionally (`$n`),
+    // so the name is for the reader only.
+    const sig = p.fields.map(({ field }) => `(${field.name}Arg: ${felizArgType(field)})`).join(" ");
     const args = p.fields
       .map(({ field }) => `model.${storeModelField(p.store.name, field.name)}`)
       .join(" ");
