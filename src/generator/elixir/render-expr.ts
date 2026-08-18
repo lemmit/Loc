@@ -92,12 +92,6 @@ export interface RenderCtx {
    *  parameters.  Off everywhere else (op / derived / invariant bodies use
    *  plain locals + the in-memory `Decimal.*` API). */
   filterArgs?: boolean;
-  /** Foundation the expression is rendered for.  `platform: elixir` only ever
-   *  emits the vanilla foundation (plain Ecto/Phoenix), so this is always
-   *  `"vanilla"`; the field is retained so the many vanilla call sites that
-   *  pass `foundation: "vanilla"` keep type-checking, but it no longer
-   *  selects a code path. */
-  foundation?: "vanilla";
   /** Renders the aggregate-`id` expression (`{kind:"id"}`) as this bare
    *  local instead of `<thisName>.id`.  Set by the event-sourced create
    *  command runner, where the new aggregate id is a freshly generated

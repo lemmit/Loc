@@ -1,4 +1,4 @@
-import { createOmissionValue, forCreateInput } from "../../../ir/enrich/wire-projection.js";
+import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,

@@ -1462,7 +1462,6 @@ function renderWorkflowModule(
   const renderCtx: RenderCtx = {
     thisName: "record",
     contextModule: contextModuleFq,
-    foundation: "vanilla",
     resourceModules,
     // Domain-service call wiring (domain-services.md rev. 4, Slice 1; Elixir
     // decision B).  A workflow that calls a `reading`-tier service (e.g.

@@ -480,8 +480,8 @@ ${updateProvHelper}${deleteBlock}  @doc "Persist a pre-built changeset (Slice 5c
 /** One custom-find function — a parameterised Ecto query under the
  *  `record` Ecto binding, returning `{:ok, _}` shaped per the find's
  *  declared return type.  Shares the retrieval shape from
- *  `retrieval-emit.ts` (filterArgs + foundation: "vanilla" → `^pin`
- *  syntax, enum strings).  Convention-finds without a `where` clause
+ *  `retrieval-emit.ts` (`filterArgs` → `^pin` syntax, enum
+ *  strings).  Convention-finds without a `where` clause
  *  (params match aggregate property names; e.g. `byCustomer(customerId)`)
  *  fall through to a per-param `record.<param> == ^<param>` predicate
  *  generated here, matching the source-level convention spelled out in
@@ -538,7 +538,6 @@ function renderFindFn(
   const renderCtx: RenderCtx = {
     thisName: "record",
     contextModule,
-    foundation: "vanilla",
     // Params bind via Ecto pin syntax (`^needle`) inside the `from
     // ... where: ...` macro.  See render-expr.ts:filterArgs.
     filterArgs: true,

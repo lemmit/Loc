@@ -393,7 +393,7 @@ ${pagingElseArm(`${appModule}Web.ProblemDetails`, "    ")}
   const indexParamArg = indexPaged ? "params" : "_params";
   const indexAction = indexGate
     ? `  def index(conn, ${indexParamArg}) do
-${cuBind}${indexCuBind}    if not (${renderElixirExpr(indexGate, { thisName: "record", contextModule: facadeMod, foundation: "vanilla" })}) do
+${cuBind}${indexCuBind}    if not (${renderElixirExpr(indexGate, { thisName: "record", contextModule: facadeMod })}) do
       ${denialResponse(
         "forbidden",
         JSON.stringify(`Forbidden: find ${listAllFind!.name}`),

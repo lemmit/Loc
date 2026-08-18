@@ -477,7 +477,6 @@ export function renderReturningOpFunction(
   const renderCtx: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
-    foundation: "vanilla",
     captureProvenance: hasProv,
     // The enriched aggregate, so the body renderer detects a reference-collection
     // (`X id[]` → `many_to_many`) add/remove and normalises it to an id-list local

@@ -397,7 +397,6 @@ function renderContextModule(
     const destroyGateRc: RenderCtx = {
       thisName: "record",
       contextModule: facadeMod,
-      foundation: "vanilla",
       agg: agg as EnrichedAggregateIR,
     };
     const destroyClauses = lifecycleEnsureClauses(agg.canonicalDestroy, destroyGateRc);
@@ -496,7 +495,6 @@ ${body}
               const rc: RenderCtx = {
                 thisName: "record",
                 contextModule: facadeMod,
-                foundation: "vanilla",
                 agg: agg as EnrichedAggregateIR,
               };
               return `\n
@@ -527,7 +525,6 @@ ${body}
     const createClauses = lifecycleEnsureClauses(agg.canonicalCreate, {
       thisName: "record",
       contextModule: facadeMod,
-      foundation: "vanilla",
       agg: agg as EnrichedAggregateIR,
     });
     const createStampsActor = stampUsesPrincipal(agg);
@@ -954,7 +951,6 @@ function renderExternOpFunction(
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
-    foundation: "vanilla",
     agg: agg as EnrichedAggregateIR,
   };
   // `when` state gate + preconditions → a leading `with :ok <- ensure(...)` chain
@@ -1040,7 +1036,6 @@ function renderNamedOpFunction(
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
-    foundation: "vanilla",
     captureProvenance: hasProv,
     // The enriched aggregate, so the body renderer can detect reference-
     // collection (`X id[]`) add/remove and normalise to id lists (the persist

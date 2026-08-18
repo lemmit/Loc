@@ -450,19 +450,9 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
     allQueryProjections.push(
       ...emitVanillaQueryProjectionModules(appName, appModule, ctx, out, sourcemap),
     );
-    emitDispatch(
-      appName,
-      ctx,
-      appModule,
-      out,
-      sys,
-      "vanilla",
-      sourcemap,
-      channelsCfg,
-      wiredForeignChannels,
-    );
+    emitDispatch(appName, ctx, appModule, out, sys, sourcemap, channelsCfg, wiredForeignChannels);
     // Domain `test "..."` blocks → ExUnit (pure-subset; see tests-emit.ts).
-    if (emitAggregateTests(ctx, appModule, "vanilla", out)) hasDomainTests = true;
+    if (emitAggregateTests(ctx, appModule, out)) hasDomainTests = true;
   }
   if (hasDomainTests) emitTestHelper(out);
   // One deployable-level ProjectionsController over every hosted context's
@@ -585,7 +575,6 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
       sys,
       appName,
       appModule,
-      foundation: "vanilla",
       sourcemap,
     });
     for (const [path, content] of liveFiles) out.set(path, content);

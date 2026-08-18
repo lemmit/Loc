@@ -16,6 +16,7 @@
 // ---------------------------------------------------------------------------
 
 import { lines } from "../../../util/code-builder.js";
+import { javaLogEvent } from "../../_obs/render-java.js";
 
 /** Spring Boot release the generated projects build against.  Bumping it
  *  is a single-constant change validated by `LOOM_JAVA_BUILD=1`. */
@@ -307,7 +308,7 @@ export function renderApplication(basePkg: string): string {
     `@SpringBootApplication`,
     `public class Application {`,
     `    public static void main(String[] args) {`,
-    `        CatalogLog.event("server_starting", "info");`,
+    `        CatalogLog.event(${javaLogEvent("serverStarting")});`,
     `        SpringApplication.run(Application.class, args);`,
     `    }`,
     `}`,

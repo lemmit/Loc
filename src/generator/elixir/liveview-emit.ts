@@ -86,10 +86,6 @@ export function emitLiveViewPages(args: {
   sys: SystemIR;
   appName: string;
   appModule: string;
-  /** Persistence foundation of the host deployable.  Always `"vanilla"`
-   *  (plain Ecto/Phoenix LiveView — no Ash).  Kept on the options shape only
-   *  so the caller's `foundation: "vanilla"` still type-checks; ignored. */
-  foundation?: "vanilla";
   /** Generate-time source-map recorder (`--sourcemap`).  Records one region
    *  per emitted LiveView module AND per Playwright page object, both
    *  against the page's `origin` — a scaffolded page's origin is a
@@ -182,7 +178,6 @@ export function emitLiveViewPages(args: {
           ? renderDomainExpr(proj.query.requires, {
               thisName: "record",
               contextModule: ctxModule,
-              foundation: "vanilla",
             })
           : null,
         fields: (proj.wireShape ?? []).map((f) => f.name),
@@ -207,7 +202,6 @@ export function emitLiveViewPages(args: {
           expr: renderDomainExpr(listGate, {
             thisName: "record",
             contextModule: ctxModule,
-            foundation: "vanilla",
           }),
           usesUser: exprUsesCurrentUser(listGate),
         });

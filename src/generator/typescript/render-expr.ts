@@ -6,6 +6,7 @@ import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapeTsIdent, lowerFirst, upperFirst, workflowFnCamel } from "../../util/naming.js";
 import { DURATION_UNIT_MS } from "../../util/temporal.js";
 import { JS_INTRINSIC_RENDERERS } from "../_expr/js-intrinsics.js";
+import { asRegexLiteral } from "../_expr/regex-literal.js";
 import {
   type ExprTarget,
   type MarkedText,
@@ -751,19 +752,6 @@ function renderUnionVariantTs(v: TypeIR): string {
   return `{ type: "${tag}"; value: ${renderTsType(v)} }`;
 }
 
-/** Convert a regex source string into a `/pattern/` literal.  Escapes the
- *  closing slash (`/` → `\/`); the value's other backslashes are part of the
- *  regex source and pass through unchanged.  Two edge cases can't sit in a
- *  `/…/` literal and fall back to the `RegExp` constructor (a plain string
- *  literal): an EMPTY pattern (bare `//` is a line comment) and a source that
- *  ends in a dangling odd backslash or contains a newline (the trailing `\`
- *  would escape our closing slash, breaking the file's parse). */
-function asRegexLiteral(source: string): string {
-  if (source === "") return 'new RegExp("")';
-  const escaped = source.replace(/\//g, "\\/");
-  const trailingBackslashes = /\\*$/.exec(escaped)?.[0].length ?? 0;
-  if (/[\n\r]/.test(escaped) || trailingBackslashes % 2 === 1) {
-    return `new RegExp(${JSON.stringify(source)})`;
-  }
-  return `/${escaped}/`;
-}
+// `asRegexLiteral` moved to `../_expr/regex-literal.ts` (imported above) so the
+// zod-refine and Angular emitters share this hardening instead of re-deriving a
+// bare slash-escape.
