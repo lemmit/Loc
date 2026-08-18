@@ -31,6 +31,7 @@ import type {
   UiIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
+import { backendServesRealtime } from "../../ir/util/channels.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { storeMemberLocal } from "../_walker/js-target-helpers.js";
@@ -59,6 +60,14 @@ import { renderFlutterModalRuntime } from "./modal-runtime.js";
 import { flutterPack, usesIntl, usesMath } from "./pack.js";
 import { dartPackageName } from "./package-name.js";
 import { collectFlutterReads, renderAppConfig, renderReadProviders } from "./reads-emit.js";
+import {
+  flutterHasRealtimeHandlers,
+  REALTIME_EVENT_DART,
+  REALTIME_SOURCE_FACADE,
+  REALTIME_SOURCE_IO_DART,
+  REALTIME_SOURCE_WEB_DART,
+  renderFlutterRealtime,
+} from "./realtime.js";
 import { hasRiverpodState, renderRiverpod } from "./riverpod-emit.js";
 import { renderFlutterStores } from "./store-builder.js";
 import { storeProviderName } from "./store-names.js";
@@ -146,6 +155,22 @@ export function generateFlutterForContexts(
   const reads = collectFlutterReads(ui, contexts);
   if (reads.length > 0) {
     out.set("lib/reads.dart", renderReadProviders(reads));
+  }
+
+  // Realtime SSE handlers (channels.md Part I) — gated on BOTH halves: this ui
+  // declares `on <channel>.<Event>` handlers AND the target backend actually
+  // serves `GET /realtime/events`.  Without the second the subscription would
+  // connect to nothing, which is the silent drop `loom.ui-realtime-unsupported`
+  // exists to make honest.
+  const hasRealtime =
+    flutterHasRealtimeHandlers(ui) &&
+    backendServesRealtime(target?.platform ?? deployable.platform);
+  if (hasRealtime && ui) {
+    out.set("lib/realtime.dart", renderFlutterRealtime(ui, reads));
+    out.set("lib/realtime_event.dart", REALTIME_EVENT_DART);
+    out.set("lib/realtime_source.dart", REALTIME_SOURCE_FACADE);
+    out.set("lib/realtime_source_io.dart", REALTIME_SOURCE_IO_DART);
+    out.set("lib/realtime_source_web.dart", REALTIME_SOURCE_WEB_DART);
   }
 
   // i18n (M-T1.11 Flutter runtime): when this ui has extractable user-visible
@@ -246,7 +271,7 @@ export function generateFlutterForContexts(
   const usesActionHttp = rendered.some((r) => r.source.includes("apiUri("));
   // `lib/auth.dart` is a fourth consumer — the session probe and the sign-in /
   // sign-out redirects are both built with `apiUri`.
-  if (reads.length > 0 || forms.length > 0 || usesActionHttp || authUi) {
+  if (reads.length > 0 || forms.length > 0 || usesActionHttp || authUi || hasRealtime) {
     out.set("lib/config.dart", renderAppConfig());
   }
   // The controlled-Modal bridge — emitted only when a page opens one, matched to
@@ -267,6 +292,7 @@ export function generateFlutterForContexts(
     initPrefs: usesSharedPreferences(persistedStores),
     urlSync: usesUrlStores(persistedStores),
     authGate: authUi && !!sys.user,
+    realtime: hasRealtime,
   };
   if (rendered.length > 0) {
     for (const r of rendered) {
@@ -286,6 +312,7 @@ export function generateFlutterForContexts(
       usesFileUpload,
       usesSharedPreferences(persistedStores),
       persistBoot.authGate,
+      hasRealtime,
     ),
   );
   out.set("analysis_options.yaml", ANALYSIS_OPTIONS);
@@ -806,9 +833,17 @@ interface AppBoot {
   /** `auth: ui` (D-AUTH-OIDC) — wrap `MaterialApp` in `AuthGate`, so no page
    *  builds until the session probe has answered. */
   authGate: boolean;
+  /** Live-event handlers (channels.md Part I) — mount the SSE subscription for
+   *  as long as the app is running. */
+  realtime: boolean;
 }
 
-const NO_BOOT: AppBoot = { initPrefs: false, urlSync: false, authGate: false };
+const NO_BOOT: AppBoot = {
+  initPrefs: false,
+  urlSync: false,
+  authGate: false,
+  realtime: false,
+};
 
 /** `main()` for a `persist:`-bearing app — the web-storage tier has to finish
  *  loading before the first widget builds. */
@@ -831,6 +866,7 @@ function mainFn(boot: AppBoot): string[] {
 function persistMainImports(boot: AppBoot): string[] {
   const out: string[] = [];
   if (boot.authGate) out.push("import 'auth.dart';");
+  if (boot.realtime) out.push("import 'realtime.dart';");
   if (boot.initPrefs) out.push("import 'store_persist.dart';");
   if (boot.urlSync) out.push("import 'stores.dart';");
   return out.length > 0 ? ["", ...out] : [];
@@ -853,12 +889,18 @@ function appWrapClose(boot: AppBoot): string {
  *  entirely while the probe is in flight — which the emitted boot smoke
  *  (`find.byType(MaterialApp)`) would see as an app that never mounted. */
 function authGateBuilder(boot: AppBoot): string[] {
-  return boot.authGate
-    ? [
-        "      builder: (context, child) =>",
-        "          AuthGate(child: child ?? const SizedBox.shrink()),",
-      ]
-    : [];
+  const wraps: string[] = [];
+  if (boot.authGate) wraps.push("AuthGate");
+  // Innermost, so a toast resolves the `ScaffoldMessenger` the route provides
+  // and an unauthenticated visitor never opens a subscription.
+  if (boot.realtime) wraps.push("LoomRealtime");
+  if (wraps.length === 0) return [];
+  const open = wraps.map((w) => `${w}(child: `).join("");
+  const close = ")".repeat(wraps.length);
+  return [
+    "      builder: (context, child) =>",
+    `          ${open}child ?? const SizedBox.shrink()${close},`,
+  ];
 }
 
 /** `main.dart` for a multi-page ui: a `MaterialApp` with named routes, the first
@@ -906,6 +948,7 @@ function renderPubspec(
   usesFileUpload: boolean,
   usesPrefs: boolean,
   usesAuth: boolean,
+  usesRealtime: boolean,
 ): string {
   // `file_picker` is only pulled when a FileUpload primitive is present, so a
   // File-free app's pubspec stays byte-identical.
@@ -917,6 +960,9 @@ function renderPubspec(
   // core SDK cannot navigate to an external URL.  Same use-driven rule as
   // `file_picker`: an unauthenticated app's pubspec stays byte-identical.
   const launcher = usesAuth ? "\n  url_launcher: ^6.3.1" : "";
+  // `package:web` backs the WEB half of the SSE transport (the browser's own
+  // `EventSource`); the native half rides `package:http`, already present.
+  const webPkg = usesRealtime ? "\n  web: ^1.1.0" : "";
   return `name: ${pkg}
 description: "Generated Flutter app for ${deployableName} (Loom)."
 publish_to: "none"
@@ -930,7 +976,7 @@ dependencies:
     sdk: flutter
   http: ^1.2.0
   flutter_riverpod: ^2.5.1
-  intl: ^0.19.0${filePicker}${prefs}${launcher}
+  intl: ^0.19.0${filePicker}${prefs}${launcher}${webPkg}
 
 dev_dependencies:
   flutter_test:

@@ -309,8 +309,8 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
   {
     code: "loom.ui-realtime-unsupported",
     kind: "gap",
-    site: "src/ir/validate/checks/system-checks.ts:498",
-    what: "`on <channel>.<Event>` live-event handlers missing on some targets",
+    site: "src/ir/validate/checks/system-checks.ts:661",
+    what: "`on <channel>.<Event>` handlers vs. a backend that serves no SSE wire",
     mission: "M-T1.20",
   },
   {

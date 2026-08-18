@@ -639,6 +639,10 @@ const SSE_REALTIME_FRONTENDS = new Set<string>([
   "svelte",
   "angular",
   "feliz",
+  // Flutter subscribes through `generator/flutter/realtime.ts` — the browser's
+  // own `EventSource` on the web, a line parser over a streamed `package:http`
+  // response natively, behind one conditional-import façade.
+  "flutter",
   "static",
 ]);
 // Frontends that realize realtime NATIVELY (Phoenix LiveView pushes over its
