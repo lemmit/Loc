@@ -43,7 +43,7 @@ import { type DartRecord, renderDartModel } from "./dart-model-emit.js";
  *  every wire model rides — so a claim's Dart spelling and its `fromJson` are
  *  derived exactly like an aggregate field's, with no second type mapper to
  *  drift. */
-export function renderCurrentUserClass(user: UserIR): string {
+function renderCurrentUserClass(user: UserIR): string {
   const record: DartRecord = {
     className: "CurrentUser",
     fields: user.fields.map((f) => ({
