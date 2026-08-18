@@ -41,6 +41,7 @@ import {
   renderJavaStatements,
   statementSubRegions,
 } from "../render-stmt.js";
+import { hbIdent } from "../sql-ident.js";
 import {
   jpaClassAnnotations,
   jpaContainmentAnnotations,
@@ -412,7 +413,7 @@ export function renderJavaEntity(
       fieldLines.push(`    @${audit.annotation}`);
       if (persistence) {
         fieldLines.push(
-          `    @Column(name = "${snake(f.name)}"${audit.createEvent ? ", updatable = false" : ""})`,
+          `    @Column(name = "${hbIdent(snake(f.name))}"${audit.createEvent ? ", updatable = false" : ""})`,
         );
       }
       fieldLines.push(`    ${renderJavaType(f.type)} ${f.name};`);
@@ -426,7 +427,7 @@ export function renderJavaEntity(
       // INSERT — same column semantics as the annotation path).
       if (persistence) {
         fieldLines.push(
-          `    @Column(name = "${snake(f.name)}"${claimColumn.createEvent ? ", updatable = false" : ""})`,
+          `    @Column(name = "${hbIdent(snake(f.name))}"${claimColumn.createEvent ? ", updatable = false" : ""})`,
         );
       }
       fieldLines.push(`    ${renderJavaType(f.type)} ${f.name};`);
@@ -455,7 +456,7 @@ export function renderJavaEntity(
     if (persistence?.embedded) {
       fieldLines.push(
         `    @JdbcTypeCode(SqlTypes.JSON)`,
-        `    @Column(name = "${snake(c.name)}", nullable = false)`,
+        `    @Column(name = "${hbIdent(snake(c.name))}", nullable = false)`,
       );
       fieldLines.push(
         c.collection
@@ -1185,7 +1186,7 @@ export function renderJavaAbstractBaseEntity(
     ...(persistence && options.tph
       ? [
           `@Entity`,
-          `@Table(name = "${plural(snake(base.name))}"${persistence.schema ? `, schema = "${persistence.schema}"` : ""})`,
+          `@Table(name = "${hbIdent(plural(snake(base.name)))}"${persistence.schema ? `, schema = "${persistence.schema}"` : ""})`,
           `@Inheritance(strategy = InheritanceType.SINGLE_TABLE)`,
           `@DiscriminatorColumn(name = "kind")`,
         ]
