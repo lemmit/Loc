@@ -424,7 +424,6 @@ function renderDocFindFn(f: FindIR, aggModule: string): string {
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: "",
-    foundation: "vanilla",
     docStruct: true,
   };
   const predicate = f.filter
@@ -540,7 +539,6 @@ function docOpStructBody(
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
-    foundation: "vanilla",
     docStruct: true,
     agg: agg as EnrichedAggregateIR,
   };

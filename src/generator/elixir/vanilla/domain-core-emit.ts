@@ -135,7 +135,7 @@ export function pureDerivedAccessorNames(
   agg: EnrichedAggregateIR,
 ): Set<string> {
   const names = new Set<string>();
-  const rc: RenderCtx = { thisName: "record", contextModule, foundation: "vanilla", agg };
+  const rc: RenderCtx = { thisName: "record", contextModule, agg };
   for (const d of agg.derived) {
     if (d.name === "inspect") continue; // the synthesized redaction derived (inspect-emit.ts owns it)
     try {
@@ -152,7 +152,7 @@ export function pureDerivedAccessorNames(
  *  (blank-line separated, schema-module body indent), mirroring `pureDerivedAccessorNames`. */
 function derivedAccessorLines(contextModule: string, agg: EnrichedAggregateIR): string[] {
   const emit = pureDerivedAccessorNames(contextModule, agg);
-  const rc: RenderCtx = { thisName: "record", contextModule, foundation: "vanilla", agg };
+  const rc: RenderCtx = { thisName: "record", contextModule, agg };
   const out: string[] = [];
   for (const d of agg.derived) {
     if (!emit.has(d.name)) continue;
@@ -178,7 +178,7 @@ function derivedAccessorLines(contextModule: string, agg: EnrichedAggregateIR): 
  *  context-facade copy. */
 function renderPureFunction(facadeMod: string, fn: FunctionIR): string[] {
   const fnSnake = snake(fn.name);
-  const rc: RenderCtx = { thisName: "record", contextModule: facadeMod, foundation: "vanilla" };
+  const rc: RenderCtx = { thisName: "record", contextModule: facadeMod };
   const params = fn.params.map((p) =>
     bodyUsesParam(fn.body, p.name) ? snake(p.name) : `_${snake(p.name)}`,
   );
@@ -202,7 +202,6 @@ function renderPureOp(
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: `${appModule}.${ctxModule}`,
-    foundation: "vanilla",
     // No lineage capture in the pure core — that's a persist-path effect; a
     // capture without the draining transaction would orphan the trace buffer.
     captureProvenance: false,

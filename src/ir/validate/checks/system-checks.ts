@@ -3081,9 +3081,11 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // via `$and`, honoring a read's `ignoring` bypass (the FilterQuery
         // analogue of drizzle's per-read predicate).  A predicate outside the
         // FilterQuery subset is caught by `validateFindPredicateAdapterSupport`
-        // (which already iterates contextFilters), and principal-referencing
-        // filters are rejected on Hono by `validatePrincipalContextFilterSupport`
-        // — so only closed, lowerable predicates reach codegen.
+        // (which already iterates contextFilters).  Principal-referencing
+        // filters (`currentUser.tenantId`) are APPLIED too, not rejected: the
+        // emitter lowers them against the ambient per-request principal
+        // (`requireCurrentUser()` on drizzle, `RequestContext` on mikroorm), so
+        // every predicate that reaches codegen is lowerable.
         // Server-managed access (`managed` / `token` / `internal` / `secret`)
         // is NO LONGER gated: like drizzle, the MikroORM data-mapper stores such
         // a field as an ordinary column that round-trips through the shared

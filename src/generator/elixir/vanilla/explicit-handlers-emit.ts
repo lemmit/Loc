@@ -360,7 +360,6 @@ function renderHandlerModule(
   const renderCtx: RenderCtx = {
     thisName: "record",
     contextModule: contextModuleFq,
-    foundation: "vanilla",
     resourceModules,
     recordParams: records,
   };

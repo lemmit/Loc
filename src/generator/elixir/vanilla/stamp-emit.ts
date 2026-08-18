@@ -135,7 +135,7 @@ export function stampPutChanges(
   principalIdKey: string,
   indent: string,
 ): string {
-  const ctx: RenderCtx = { thisName: "record", contextModule, foundation: "vanilla" };
+  const ctx: RenderCtx = { thisName: "record", contextModule };
   const lines = (agg.contextStamps ?? [])
     .filter((r) => events.includes(r.event))
     .flatMap((r) => r.assignments)

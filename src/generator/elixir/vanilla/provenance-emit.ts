@@ -2,7 +2,7 @@
 // Vanilla provenance runtime — the Elixir counterpart of the Hono
 // `domain/provenance.ts` SDK + the .NET `Domain/Common/ProvLineage.cs` +
 // `provenance_records` history table.  Emitted only when the project declares
-// at least one `provenanced` field on a `foundation: vanilla` deployable.
+// at least one `provenanced` field on a `platform: elixir` deployable.
 //
 //   - `<App>.Provenance` — the per-process trace buffer (`record/1` push,
 //     `drain/0` clear) + the transactional history flush (`flush/1`).  The BEAM
@@ -432,7 +432,6 @@ export function renderUpdateProvenanceCapture(agg: AggregateIR, contextModule: s
   const rc: RenderCtx = {
     thisName: "record",
     contextModule,
-    foundation: "vanilla",
     paramRenames,
   };
   const lineageVars: string[] = [];

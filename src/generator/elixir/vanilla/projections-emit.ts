@@ -184,7 +184,6 @@ function renderProjectionActions(
     ? renderExpr(proj.query.requires, {
         thisName: "record",
         contextModule,
-        foundation: "vanilla",
       })
     : null;
   const cuBind =

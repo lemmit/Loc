@@ -8,6 +8,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../../util/naming.js";
+import { javaLogEvent } from "../../_obs/render-java.js";
 import { renderSeedRowInsert } from "../../sql-pg.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
 
@@ -165,7 +166,7 @@ function renderDatasetFn(
     `        if (alreadySeeded(${JSON.stringify(dataset)})) return;`,
     ...rowLines,
     `        markSeeded(${JSON.stringify(dataset)});`,
-    `        CatalogLog.event("seed_applied", "info", "dataset", ${JSON.stringify(dataset)});`,
+    `        CatalogLog.event(${javaLogEvent("seedApplied")}, "dataset", ${JSON.stringify(dataset)});`,
     `    }`,
     ``,
   ];

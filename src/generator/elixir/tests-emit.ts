@@ -25,7 +25,6 @@ import {
 export function emitAggregateTests(
   ctx: EnrichedBoundedContextIR,
   appModule: string,
-  _foundation: "vanilla",
   out: Map<string, string>,
 ): boolean {
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;

@@ -165,7 +165,6 @@ function predicateCtx(appModule: string, ctx: BoundedContextIR, agg: AggregateIR
   return {
     thisName: "record",
     contextModule: `${appModule}.${upperFirst(ctx.name)}`,
-    foundation: "vanilla",
     agg: agg as EnrichedAggregateIR,
   };
 }

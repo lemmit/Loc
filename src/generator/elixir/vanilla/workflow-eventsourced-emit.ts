@@ -122,7 +122,7 @@ function renderFoldModule(contextModule: string, wf: WorkflowIR): string {
   const stateMod = `${contextModule}.Workflows.${upperFirst(wf.name)}State`;
   const eventsModule = `${contextModule}.Events`;
   const corr = wf.correlationField as string;
-  const renderCtx: RenderCtx = { thisName: "state", contextModule, foundation: "vanilla" };
+  const renderCtx: RenderCtx = { thisName: "state", contextModule };
 
   const seeds = [
     `${snake(corr)}: key`,
@@ -411,7 +411,6 @@ export function renderEsWorkflowHandler(
   const renderCtx: RenderCtx = {
     thisName: "state",
     contextModule,
-    foundation: "vanilla",
     paramRenames: { [sub.param]: "event" },
   };
 

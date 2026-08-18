@@ -231,7 +231,6 @@ ${cuLine}${innerBody}
       const gate = renderExpr(f.requires, {
         thisName: "record",
         contextModule,
-        foundation: "vanilla",
       });
       return `
   def ${findSnake}(conn, ${paramArg}) do
