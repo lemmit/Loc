@@ -14,13 +14,18 @@
 //     the 404 problem bodies.
 //   - this file reads a COLLECTION, which is the only route class that can see
 //     seed rows at all — and because the wire golden compares whole bodies, any
-//     leg whose table starts differently diverges on it.  `elixir` is that leg
-//     today: it emits no seeder whatsoever (B19; mission M-T6.37), so it is held
-//     off THIS case only, via `BEHAVIOURAL_SKIP` in test/behavioral/cases.mjs.
+//     leg whose table starts differently diverges on it.  `elixir` was that leg:
+//     it emitted no seeder whatsoever (B19), so this case alone was held off it
+//     via `BEHAVIOURAL_SKIP` in test/behavioral/cases.mjs.
 //
-// So the skip covers exactly the gap, and deleting it re-arms exactly what the
-// gap was hiding.  Keep the two files' seed datasets IDENTICAL in shape (default
-// = 2 rows, demo + wired opt-in) so a reader can compare them line for line.
+// THAT SKIP IS GONE — M-T6.37 landed the Ecto seeder, so this case now runs on
+// all five behavioural legs and the seeded rows below are asserted everywhere.
+// The split above is still the right shape (it is what kept `seeding`'s
+// five-backend CRUD coverage armed while one leg was odd), and it stays as the
+// cheap insurance for the next leg that starts differently.
+//
+// Keep the two files' seed datasets IDENTICAL in shape (default = 2 rows, demo
+// + wired opt-in) so a reader can compare them line for line.
 //
 // The deployable platform is substituted per leg (node/python/java/dotnet/elixir).
 system SeedValues {
