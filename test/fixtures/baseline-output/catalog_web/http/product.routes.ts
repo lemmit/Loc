@@ -47,6 +47,26 @@ export const ProductPaged = z.object({ items: z.array(ProductResponse), page: z.
 export function productRoutes(repo: ProductRepository): OpenAPIHono {
   const app = newApp();
 
+  // A STATIC sub-path is captured by the sibling `/{id}` route under any
+  // verb it does not itself serve, and the param validator then answers 422
+  // for a path that has no such method at all.  405 is the honest answer and
+  // the only one that can carry an `Allow` the caller can act on (RFC 9110
+  // §15.5.6).  Runs BEFORE the param validator, which is why it is a
+  // middleware; registered under method ALL, so the root router's
+  // method probe (http/index.ts) is unaffected.
+  const staticSubpathMethods: Record<string, string[]> = { by_sku: ["GET"] };
+  app.use("/:__seg", async (c, next) => {
+    const allow = staticSubpathMethods[c.req.path.slice(c.req.path.lastIndexOf("/") + 1)];
+    if (allow && !allow.includes(c.req.method)) {
+      return c.body(
+        frameworkProblemBody(405, `method ${c.req.method} is not supported for ${c.req.path}`, c.req.path),
+        405,
+        { "content-type": "application/problem+json", allow: allow.join(", ") },
+      );
+    }
+    await next();
+  });
+
   app.openapi(
     createRoute({
       method: "post",
@@ -87,6 +107,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
       responses: {
         200: { description: "OK", content: { "application/json": { schema: ProductResponse } } },
         404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
+        422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },
       },
     }),
     async (c) => {
@@ -107,6 +128,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
       responses: {
         200: { description: "OK", content: { "application/json": { schema: ProductResponse } } },
         404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
+        422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },
       },
     }),
     async (c) => {
@@ -128,6 +150,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
         204: { description: "No Content" },
         404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
         409: { description: "Conflict", content: { "application/problem+json": { schema: ProblemDetails } } },
+        422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },
       },
     }),
     async (c) => {
@@ -188,6 +211,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
       request: { query: AllQuery },
       responses: {
         200: { description: "OK", content: { "application/json": { schema: ProductPaged } } },
+        422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },
       },
     }),
     async (c) => {

@@ -47,6 +47,7 @@ public sealed class ProductsController : ControllerBase
     [HttpGet("{id}")]
     [ProducesResponseType(typeof(ProductResponse), 200)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
+    [ProducesResponseType(typeof(ProblemDetails), 422)]
     public async Task<ActionResult<ProductResponse>> GetProductById([FromRoute] Guid id)
     {
         var response = await _mediator.Send(new GetProductByIdQuery(new ProductId(id)));
@@ -58,6 +59,7 @@ public sealed class ProductsController : ControllerBase
     [ProducesResponseType(204)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
     [ProducesResponseType(typeof(ProblemDetails), 409)]
+    [ProducesResponseType(typeof(ProblemDetails), 422)]
     public async Task<IActionResult> DestroyProduct([FromRoute] Guid id)
     {
         try
@@ -94,6 +96,7 @@ public sealed class ProductsController : ControllerBase
 
     [HttpGet]
     [ProducesResponseType(typeof(Paged<ProductResponse>), 200)]
+    [ProducesResponseType(typeof(ProblemDetails), 422)]
     public async Task<ActionResult<Paged<ProductResponse>>> AllProduct([FromQuery] [System.ComponentModel.DataAnnotations.Range(1, 1000000)] int page = 1, [FromQuery] [System.ComponentModel.DataAnnotations.Range(1, 500)] int pageSize = 20, [FromQuery] string sort = "id", [FromQuery] string dir = "asc")
     {
         var result = await _mediator.Send(new AllQuery(page, pageSize, sort, dir));
@@ -103,6 +106,7 @@ public sealed class ProductsController : ControllerBase
     [HttpGet("by_sku")]
     [ProducesResponseType(typeof(ProductResponse), 200)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
+    [ProducesResponseType(typeof(ProblemDetails), 422)]
     public async Task<ActionResult<ProductResponse?>> BySkuProduct([FromQuery] [Microsoft.AspNetCore.Mvc.ModelBinding.BindRequired] string sku)
     {
         var result = await _mediator.Send(new BySkuQuery(sku));

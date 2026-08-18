@@ -244,6 +244,17 @@ A param-less, un-paged find (`find recent(): Product[]`) parses nothing and
 still declares nothing — the flag is route-shape-derived, not blanket. Waiver W4
 deleted.
 
+**Honest remainder, exactly as F1's 415 carried one.** The DECLARATION now agrees
+on all five backends, and node/python ANSWER it (hono's shared `defaultHook`,
+FastAPI's request validation). The other three answer their framework's own code
+for a malformed `{id}` — `[ApiController]` model-binding gives 400, Spring's
+`MethodArgumentTypeMismatchException` gives 400 — so on those the declared 422
+is currently wider than what they send, and the 400 they DO send is itself
+undeclared: F6's own shape, one backend over. Converging the runtime answer is
+the follow-up, and it is the right order — the parity gate diffs the specs, so
+the shared declaration has to move as one PR before any single backend's runtime
+arm can be changed without manufacturing a spec divergence.
+
 **Waiver:** ~~W4~~ · **Severity: medium** · ~17 operations per fixture — the single
 highest-count finding.
 
