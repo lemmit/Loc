@@ -7,6 +7,7 @@ import {
   singleFieldShape,
 } from "../ir/validate/invariant-classify.js";
 import { messageCode } from "../util/message-code.js";
+import { tsCodePointLength as codePointLength } from "./_expr/code-point.js";
 
 // ---------------------------------------------------------------------------
 // Zod-refine renderer for wire-boundary validators (frontend forms +
@@ -29,7 +30,14 @@ import { messageCode } from "../util/message-code.js";
 
 /** Chain idiomatic native zod methods onto a base inner schema for a
  *  recognised single-field pattern.  Caller picks the base
- *  (`z.string()`, `z.number()`, etc.); we just chain. */
+ *  (`z.string()`, `z.number()`, etc.); we just chain.
+ *
+ *  The `len-*` arms do NOT use zod's `.min`/`.max`/`.length`: those count
+ *  UTF-16 code units, while the `minLength`/`maxLength` this same constraint
+ *  publishes into the emitted JSON Schema are code points (see
+ *  `_expr/code-point.ts`).  They render an explicit code-point predicate
+ *  instead; a caller that also PUBLISHES a schema re-attaches the declaration
+ *  from `openapiLengthMeta` so the published bound survives the switch. */
 export function chainSingleFieldNative(inner: string, pattern: SingleFieldPattern): string {
   switch (pattern.kind) {
     case "min":
@@ -41,13 +49,13 @@ export function chainSingleFieldNative(inner: string, pattern: SingleFieldPatter
     case "between":
       return `${inner}.min(${pattern.lo}).max(${pattern.hi})`;
     case "len-min":
-      return `${inner}.min(${pattern.n})`;
+      return `${inner}.refine((s) => ${codePointLength("s")} >= ${pattern.n})`;
     case "len-max":
-      return `${inner}.max(${pattern.n})`;
+      return `${inner}.refine((s) => ${codePointLength("s")} <= ${pattern.n})`;
     case "len-eq":
-      return `${inner}.length(${pattern.n})`;
+      return `${inner}.refine((s) => ${codePointLength("s")} === ${pattern.n})`;
     case "len-range":
-      return `${inner}.min(${pattern.lo}).max(${pattern.hi})`;
+      return `${inner}.refine((s) => ${codePointLength("s")} >= ${pattern.lo} && ${codePointLength("s")} <= ${pattern.hi})`;
     case "regex":
       // The pattern is a JavaScript-compatible regex source (validated
       // at parse time via `new RegExp(...)`).  Render as a `/.../` literal
@@ -55,6 +63,45 @@ export function chainSingleFieldNative(inner: string, pattern: SingleFieldPatter
       // because the source string is already a JS regex source.
       return `${inner}.regex(/${pattern.pattern.replace(/\//g, "\\/")}/)`;
   }
+}
+
+/** The JSON-Schema length declaration a field's `len-*` patterns imply, or
+ *  null when it has none.  `chainSingleFieldNative` renders the `len-*` CHECK
+ *  as a code-point refine, which zod cannot describe — so a caller whose zod
+ *  schema is also published as OpenAPI (the Hono routes; NOT the frontend
+ *  forms) re-attaches the declaration with `.openapi({...})`.  Merged across
+ *  every pattern on the field so `min` and `max` land in ONE metadata call —
+ *  two chained `.openapi()`s would not reliably merge. */
+export function openapiLengthMeta(
+  patterns: readonly SingleFieldPattern[],
+): { minLength?: number; maxLength?: number } | null {
+  const meta: { minLength?: number; maxLength?: number } = {};
+  let any = false;
+  for (const p of patterns) {
+    switch (p.kind) {
+      case "len-min":
+        meta.minLength = p.n;
+        any = true;
+        break;
+      case "len-max":
+        meta.maxLength = p.n;
+        any = true;
+        break;
+      case "len-eq":
+        meta.minLength = p.n;
+        meta.maxLength = p.n;
+        any = true;
+        break;
+      case "len-range":
+        meta.minLength = p.lo;
+        meta.maxLength = p.hi;
+        any = true;
+        break;
+      default:
+        break;
+    }
+  }
+  return any ? meta : null;
 }
 
 /** When an invariant has a single-field shape AND the field is in
@@ -202,6 +249,11 @@ function renderMember(e: Extract<ExprIR, { kind: "member" }>): string {
   // `lines.count` style — collection length on an array-typed receiver.
   if (e.receiverType.kind === "array" && e.member === "count") {
     return `${recv}.length`;
+  }
+  // String `.length` is CODE POINTS, not UTF-16 code units — see
+  // `codePointLength` below.
+  if (e.receiverType.kind === "primitive" && e.receiverType.name === "string" && e.member === "length") {
+    return codePointLength(recv);
   }
   return `${recv}.${e.member}`;
 }

@@ -61,6 +61,33 @@ changeset
 The Elixir backend keeps invariants in the schema's `changeset/2` (changeset layer), not in a hand-written assert method. A predicate the classifier can reduce to a single-field comparison becomes a built-in (`validate_number`); everything else falls through to the closure form shown under [`when` guards](#when--a-conditional-invariant).
 ::: end
 
+### `.length` counts code points
+
+A string `.length` — in a domain rule, an invariant, a precondition, anywhere —
+is a count of **Unicode code points**, not of the host language's native
+string length. This is the unit the emitted JSON Schema already published as
+`minLength`/`maxLength`, so the rule the server enforces and the bound it
+advertises are the same number:
+
+| target | emitted for `s.length` |
+|---|---|
+| node/Hono | `[...s].length` |
+| .NET | `s.EnumerateRunes().Count()` |
+| java | `s.codePointCount(0, s.length())` |
+| python | `len(s)` |
+| elixir | `String.length(s)` — **graphemes**; see the note below |
+
+`"😀X"` is therefore **2**, not 3: the astral character is one code point (two
+UTF-16 code units). Before this was pinned, node/.NET/java counted code units
+and accepted a value their own published `maxLength` forbade
+(`docs/audits/schemathesis-findings-2026-08.md`, F5).
+
+> **Elixir counts grapheme clusters.** `String.length/1` and Ecto's
+> `validate_length/3` both count graphemes, which agree with code points on
+> every astral character and differ only on combining sequences (`"e\u0301"`
+> — one grapheme, two code points). Recorded as a signed residual in the F5
+> register entry.
+
 ### The wire layer
 
 A non-private invariant is **also** projected to the request-validation layer the HTTP boundary runs *before* a command reaches the domain — so a malformed body is rejected as a 422, not an unhandled domain throw. Simple single-field predicates lower to native validator constraints; anything the classifier can't reduce becomes a custom rule.
@@ -73,7 +100,9 @@ A non-private invariant is **also** projected to the request-validation layer th
 // http/order.routes.ts — Zod request/value-object schemas
 const MoneySchema = z.object({
   amount: z.coerce.number().min(0),
-  currency: z.string().length(3),
+  // `.length` counts CODE POINTS (see below), so the bound is an explicit
+  // predicate + the `minLength`/`maxLength` the OpenAPI schema publishes.
+  currency: z.string().refine((s) => [...s].length === 3).openapi({ minLength: 3, maxLength: 3 }),
 });
 const CreateOrderRequest = z.object({
   taxRate: z.coerce.number().min(0),

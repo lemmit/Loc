@@ -5,6 +5,7 @@ import { bodyTypeOf } from "../../util/expr-body-type.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapeTsIdent, lowerFirst, upperFirst, workflowFnCamel } from "../../util/naming.js";
 import { DURATION_UNIT_MS } from "../../util/temporal.js";
+import { tsCodePointLength } from "../_expr/code-point.js";
 import { JS_INTRINSIC_RENDERERS } from "../_expr/js-intrinsics.js";
 import {
   type ExprTarget,
@@ -287,13 +288,19 @@ function renderRef(e: RefExpr, ctx: TsRenderContext): string {
 }
 
 function renderMember(recv: string, e: MemberExpr): string {
-  // String length stays as `.length`; arrays expose collection ops without
-  // parentheses too — `lines.count` should compile to `.length`.
+  // Arrays expose collection ops without parentheses too — `lines.count`
+  // should compile to `.length`.
   if (e.receiverType.kind === "array" && e.member === "count") return `${recv}.length`;
   // `distinct` is property-style (no parens, like `count`) so it lowers to a
   // member node — route it through the shared collection-op table.
   if (e.receiverType.kind === "array" && e.member === "distinct") {
     return TS_COLLECTION_RENDERERS.distinct!(recv, []);
+  }
+  // A string's `.length` is CODE POINTS, not JS's UTF-16 code units — the
+  // same count the wire validator and the published `minLength`/`maxLength`
+  // use (src/generator/_expr/code-point.ts).
+  if (e.receiverType.kind === "primitive" && e.receiverType.name === "string" && e.member === "length") {
+    return tsCodePointLength(recv);
   }
   return `${recv}.${e.member}`;
 }

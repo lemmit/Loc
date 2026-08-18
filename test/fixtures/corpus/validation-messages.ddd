@@ -54,6 +54,19 @@ system MessagedRules {
           quantity := quantity - amount
         }
 
+        // The CODE-POINT half of `.length` (schemathesis F5 / waiver W6).  A
+        // string length bound counts Unicode code points — the unit the emitted
+        // JSON Schema publishes as `minLength`/`maxLength` — not the host
+        // language's native string length (UTF-16 code units on JS/C#/Java).
+        // Both length carriers are exercised, because they are DIFFERENT code
+        // paths: the messaged rule rides the refine/`Must`/predicate carrier,
+        // the message-less one rides each backend's native validator chain.
+        operation rename(label: string) {
+          precondition label.length >= 3 message "Label needs at least 3 characters"
+          precondition label.length <= 16
+          name := label
+        }
+
         test "restock adds to quantity" {
           let p = Product.create({ name: "Widget", sku: Sku { code: "WID" }, quantity: 2, reorderLevel: 1 })
           p.restock(3)
@@ -100,5 +113,22 @@ system MessagedRules {
     // `errors[].code` it carries is what the generated catalog is keyed by, and
     // what the server now resolves the message through.
     expect(api.products.restock(p, { amount: 0 })).toThrow(422)
+
+    // W6 — string length is measured in CODE POINTS, on both carriers, at
+    // runtime.  Deliberately last: `rename` changes the name the reads above
+    // filter on.
+    //
+    // "😀X" is THREE UTF-16 code units and TWO code points.  A backend
+    // counting code units passes it (3 >= 3) and answers 200; the code-point
+    // rule denies it with its authored text — the same 422 envelope the
+    // `restock` denial above already pins across all five backends.
+    expect(api.products.rename(p, { label: "😀X" })).toThrow(422)
+    // The other direction, on the message-less native chain: nine astral
+    // characters are EIGHTEEN UTF-16 code units but only nine code points, so
+    // `label.length <= 16` must ADMIT them — a code-unit chain wrongly denies.
+    // The value then has to survive the round-trip unmangled.
+    api.products.rename(p, { label: "😀😀😀😀😀😀😀😀😀" })
+    let renamed = api.products.getById(p)
+    expect(renamed.name).toBe("😀😀😀😀😀😀😀😀😀")
   }
 }

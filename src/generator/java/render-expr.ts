@@ -8,6 +8,7 @@ import {
   upperFirst,
   workflowFnCamel,
 } from "../../util/naming.js";
+import { javaCodePointLength } from "../_expr/code-point.js";
 import {
   type BinaryExpr,
   type CallExpr,
@@ -524,7 +525,9 @@ function renderMember(recv: string, e: MemberExpr, ctx: JavaRenderContext = DEFA
     e.receiverType.name === "string" &&
     e.member === "length"
   ) {
-    return `${recv}.length()`;
+    // CODE POINTS, not `String.length()`'s UTF-16 code units — see
+    // src/generator/_expr/code-point.ts.
+    return javaCodePointLength(recv);
   }
   // Record-style accessor — every generated domain type (record or
   // class) exposes `member()` readers.

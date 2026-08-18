@@ -22,6 +22,7 @@ import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import { aggHasFieldMask } from "../../../generator/typescript/repository-wire-builder.js";
 import {
   chainSingleFieldNative,
+  openapiLengthMeta,
   refineClauseFor,
   takeSingleFieldChain,
 } from "../../../generator/zod-refine.js";
@@ -2485,6 +2486,15 @@ export function emitWireSchema(
     const patterns = chainByField.get(f.name);
     if (patterns) {
       for (const p of patterns) schema = chainSingleFieldNative(schema, p);
+      // A `len-*` bound is CHECKED as a code-point refine, which zod cannot
+      // describe to the OpenAPI emitter — re-declare it so `/openapi.json`
+      // still publishes the `minLength`/`maxLength` it always did (and now
+      // publishes a bound the server actually enforces, per code-point.ts).
+      const lengths = openapiLengthMeta(patterns);
+      if (lengths) {
+        const entries = Object.entries(lengths).map(([k, v]) => `${k}: ${v}`);
+        schema = `${schema}.openapi({ ${entries.join(", ")} })`;
+      }
     }
     // `.default(...)` / `.optional()` last: each wraps the (now constrained)
     // schema in a ZodDefault / ZodOptional, so any `.min`/`.max` must already
