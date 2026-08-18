@@ -21,8 +21,10 @@ import {
   apiFetch,
   currentGateState,
   evaluate,
+  existingGateRunId,
   isRetryableStatus,
   latestPerName,
+  publishCheck,
   retryDelayMs,
   SELF_NAMES,
   sweepShouldPost,
@@ -466,6 +468,112 @@ describe("apiFetch — github.com's transient 5xx is not a verdict", () => {
     const src = readFileSync(path.join(repoRoot, "scripts/pr-gate.mjs"), "utf8");
     const bare = src.match(/await fetch\(/g) ?? [];
     expect(bare, "a call site still calls fetch directly instead of apiFetch").toEqual([]);
-    expect((src.match(/await apiFetch\(/g) ?? []).length).toBe(3);
+    // Three GitHub endpoints: list check runs, list open PRs, publish the
+    // check.  (Counted excluding `apiFetch`'s own definition.)
+    expect((src.match(/(?<!function )\bapiFetch\(/g) ?? []).length).toBe(3);
+  });
+});
+
+describe("publishCheck — one `pr-gate` run per SHA, updated in place", () => {
+  // The merge refusal on #2593: every component check green, and
+  //   405 Repository rule violations found
+  //   Required status check "pr-gate" is expected.
+  // The SHA carried THREE `pr-gate` runs — two stuck at "waiting on N/M"
+  // because v2 created a new run per evaluation and never completed the old
+  // ones, and one "all 8 triggered check(s) passed".  The draft→ready flip had
+  // split them across two check suites, and the required-check evaluation read
+  // a stale pending one.  Only a force-push to a fresh SHA cleared it.
+  const ok = { ok: true, status: 200, text: async () => "" } as Response;
+  const noSleep = async () => {};
+  const V = { state: "success" as const, summary: "all 8 triggered check(s) passed" };
+
+  const spy = (responses: Response[] = [ok]) => {
+    const calls: { method: string; url: string; body: Record<string, unknown> }[] = [];
+    const fetchImpl = async (url: string, init: RequestInit) => {
+      calls.push({
+        method: init.method as string,
+        url,
+        body: JSON.parse(init.body as string),
+      });
+      return responses[calls.length - 1] ?? ok;
+    };
+    return { calls, opts: { fetchImpl, sleep: noSleep, onRetry: () => {} } };
+  };
+
+  it("finds the run to reuse — newest per name, null when the gate never published", () => {
+    expect(
+      existingGateRunId([
+        { id: 1, name: "pr-gate", status: "in_progress", conclusion: null },
+        { id: 2, name: "pr-gate", status: "completed", conclusion: "success" },
+        { id: 3, name: "tests passed", status: "completed", conclusion: "success" },
+      ]),
+    ).toBe(2);
+    expect(existingGateRunId([green("tests passed")])).toBe(null);
+  });
+
+  it("UPDATES the existing run instead of leaving a stale pending sibling", async () => {
+    const { calls, opts } = spy();
+    await publishCheck("o/r", "deadbeef", "t", V, 4242, opts);
+    expect(calls.length).toBe(1);
+    expect(calls[0].method).toBe("PATCH");
+    expect(calls[0].url).toContain("/check-runs/4242");
+    // head_sha is create-only — PATCH 422s on it.
+    expect(calls[0].body.head_sha).toBeUndefined();
+    expect(calls[0].body.status).toBe("completed");
+    expect(calls[0].body.conclusion).toBe("success");
+  });
+
+  it("creates one the first time the gate publishes on a SHA", async () => {
+    const { calls, opts } = spy();
+    await publishCheck("o/r", "deadbeef", "t", V, null, opts);
+    expect(calls.length).toBe(1);
+    expect(calls[0].method).toBe("POST");
+    expect(calls[0].url).toMatch(/\/check-runs$/);
+    expect(calls[0].body.head_sha).toBe("deadbeef");
+    expect(calls[0].body.name).toBe("pr-gate");
+  });
+
+  it("a pending verdict updates the SAME run — that is the whole fix", async () => {
+    // Under v2 this call is what minted the run that later blocked the merge.
+    const { calls, opts } = spy();
+    await publishCheck(
+      "o/r",
+      "deadbeef",
+      "t",
+      { state: "pending", summary: "waiting on 2/8: tests passed, schema-load" },
+      4242,
+      opts,
+    );
+    expect(calls.map((c) => c.method)).toEqual(["PATCH"]);
+    expect(calls[0].body.status).toBe("in_progress");
+    expect(calls[0].body.conclusion).toBeUndefined();
+  });
+
+  it("falls back to creating when the run belongs to another app (403)", async () => {
+    // Only the app that created a check run may update it.  Better a duplicate
+    // than no verdict at all — and the log line says which happened.
+    const forbidden = { ok: false, status: 403, text: async () => "" } as Response;
+    const { calls, opts } = spy([forbidden, ok]);
+    await publishCheck("o/r", "deadbeef", "t", V, 4242, { ...opts, onRetry: () => {} });
+    expect(calls.map((c) => c.method)).toEqual(["PATCH", "POST"]);
+    expect(calls[1].body.head_sha).toBe("deadbeef");
+  });
+
+  it("BOTH call sites pass the id — a `null` there silently restores the bug", () => {
+    // publishCheck is correct in isolation and useless if a caller hands it
+    // `null`: the SHA grows a second run and the merge refusal comes back.
+    // The sweep is the call site that matters most — it is what finally
+    // published the green verdict on #2593 after the event was dropped.
+    const src = readFileSync(path.join(repoRoot, "scripts/pr-gate.mjs"), "utf8");
+    const wired = src.match(/publishCheck\([^)]*existingGateRunId\(runs\)\)/g) ?? [];
+    expect(wired.length, "a publishCheck call site is not passing existingGateRunId(runs)").toBe(2);
+  });
+
+  it("still throws the caller's message when publishing genuinely fails", async () => {
+    const bad = { ok: false, status: 422, text: async () => "Invalid request" } as Response;
+    const { opts } = spy([bad, bad]);
+    await expect(publishCheck("o/r", "deadbeef", "t", V, 4242, opts)).rejects.toThrow(
+      "GitHub API 422 posting check run",
+    );
   });
 });
