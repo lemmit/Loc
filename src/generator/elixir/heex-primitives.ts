@@ -697,10 +697,16 @@ export function renderTableColumn(
   const lambdaArg = expr.args.find((a, i) => !expr.argNames?.[i] && a.kind === "lambda");
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const labelArg = positionals[0];
-  const label =
-    labelArg?.kind === "literal" && labelArg.lit === "string"
-      ? labelArg.value
-      : `Column ${index + 1}`;
+  const isLiteralLabel = labelArg?.kind === "literal" && labelArg.lit === "string";
+  const label = isLiteralLabel ? labelArg.value : `Column ${index + 1}`;
+  // The header is a user-visible slot (`columnHeader`, M-T1.11): a plain literal
+  // rides `pgettext` through the `{…}` expression-attribute form the `<:col>`
+  // slot's `label` takes.  Off i18n it is the quoted literal — byte-identical.
+  // A NON-literal header keeps the escaped `Column N` fallback (HEEx has no
+  // attribute interpolation for an arbitrary expression here).
+  const labelAttrValue = isLiteralLabel
+    ? localizedHeexAttr(labelArg, ctx, "columnHeader")
+    : undefined;
   const accessor = lambdaArg ?? positionals[1];
   if (accessor && accessor.kind === "lambda" && accessor.body) {
     // The row variable is a :let={o} slot binding — a local variable, NOT
@@ -716,7 +722,10 @@ export function renderTableColumn(
   // (unsortable) header rather than emitting a sort key the server can't map.
   const sortField = sortActive ? columnSortField(expr) : undefined;
   const sortAttr = sortField ? ` sort_field="${sortField}"` : "";
-  return `<:col :let={${renderColLetVar(accessor, ctx)}} label="${escapeHeexAttr(label)}"${sortAttr}>${cellHeex}</:col>`;
+  const labelAttr = labelAttrValue
+    ? `label=${labelAttrValue}`
+    : `label="${escapeHeexAttr(label)}"`;
+  return `<:col :let={${renderColLetVar(accessor, ctx)}} ${labelAttr}${sortAttr}>${cellHeex}</:col>`;
 }
 
 /** The field a `sortable:` Column sorts by: the explicit `field:` string arg,
@@ -1579,7 +1588,14 @@ export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   // Text { "B" } }` used to read `pos[1]` alone and drop `B` (the JSX engine's
   // twin defect — `_walker/primitives/layout.ts`).  A panel is a children
   // container like `Card`, which this engine already walks correctly.
-  const tabs: Array<{ label: string; slug: string; body: ExprIR[] }> = [];
+  const tabs: Array<{
+    label: string;
+    /** The caption already rendered for HEEx TEXT position — a `<%= pgettext(…)
+     *  %>` call under i18n, undefined when the raw escaped label is right. */
+    labelHeex?: string;
+    slug: string;
+    body: ExprIR[];
+  }> = [];
   let idx = 0;
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -1594,7 +1610,16 @@ export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
       const pos = arg.args.filter((_, j) => !arg.argNames?.[j]);
       const labelArg = pos[0];
       const label = labelArg && labelArg.kind === "literal" ? labelArg.value : `Tab ${idx}`;
-      tabs.push({ label, slug: snake(label) || `tab-${idx}`, body: pos.slice(1) });
+      tabs.push({
+        label,
+        // The caption is a user-visible slot (`tabLabel`, M-T1.11): under i18n
+        // it renders through `pgettext`, else as the escaped literal.  The SLUG
+        // stays derived from the source literal — a per-locale anchor would
+        // break every `JS.show` selector this switcher is built on.
+        labelHeex: labelArg ? renderInTemplate(labelArg, ctx, "tabLabel") : undefined,
+        slug: snake(label) || `tab-${idx}`,
+        body: pos.slice(1),
+      });
     } else {
       // Bare positional (e.g. `Tabs(Card(...), Card(...))`) — its own panel.
       tabs.push({ label: `Tab ${idx}`, slug: `tab-${idx}`, body: [arg] });
@@ -1611,7 +1636,7 @@ export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
         ` |> JS.show(to: "#${id}-panel-${t.slug}")` +
         ` |> JS.remove_class("tab-active", to: "[data-tabs-tab='${id}']")` +
         ` |> JS.add_class("tab-active", to: "#${id}-tab-${t.slug}")`;
-      return `    <button type="button" role="tab" id="${id}-tab-${t.slug}" data-tabs-tab="${id}" class="tab${active}" phx-click={${js}}>${esc(t.label)}</button>`;
+      return `    <button type="button" role="tab" id="${id}-tab-${t.slug}" data-tabs-tab="${id}" class="tab${active}" phx-click={${js}}>${t.labelHeex ?? esc(t.label)}</button>`;
     })
     .join("\n");
   const panels = tabs
@@ -1644,6 +1669,7 @@ function controlledInput(
   type: "text" | "number" | "password" | "textarea" | "select" | "checkbox",
 ): string {
   let label = "";
+  let labelArg: ExprIR | undefined;
   let bind: string | undefined;
   let testid = "";
   let optionsExpr: ExprIR | undefined;
@@ -1652,13 +1678,26 @@ function controlledInput(
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (!name) {
-      if (!seenPositional && arg.kind === "literal") label = arg.value;
+      if (!seenPositional) {
+        labelArg = arg;
+        if (arg.kind === "literal") label = arg.value;
+      }
       seenPositional = true;
     } else if (name === "bind" && arg.kind === "ref") bind = arg.name;
     else if (name === "options") optionsExpr = arg;
     else if (name === "testid" && arg.kind === "literal") testid = arg.value;
   }
-  const labelAttr = label ? ` label="${label.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"` : "";
+  // The label is a user-visible slot (`inputLabel`, M-T1.11): a plain literal
+  // rides `pgettext` through the `{…}` expression-attribute form, so the
+  // most-read prose in any generated form translates like the `Select…`
+  // placeholder beside it already did.  Off i18n it is the quoted literal —
+  // byte-identical.
+  const labelValue = labelArg ? localizedHeexAttr(labelArg, ctx, "inputLabel") : undefined;
+  const labelAttr = labelValue
+    ? ` label=${labelValue}`
+    : label
+      ? ` label="${label.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"`
+      : "";
   const testidAttr = testid ? ` data-testid="${testid}"` : "";
   if (!bind || !ctx.stateNames.has(bind)) {
     const opt = type === "select" ? ` options={[]}` : "";
@@ -1736,7 +1775,7 @@ export function renderFileUpload(
   expr: Extract<ExprIR, { kind: "call" }>,
   ctx: WalkContext,
 ): string {
-  let label = "";
+  let labelArg: ExprIR | undefined;
   let bind: string | undefined;
   let testid = "";
   let seenPositional = false;
@@ -1744,12 +1783,15 @@ export function renderFileUpload(
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (!name) {
-      if (!seenPositional && arg.kind === "literal") label = arg.value;
+      if (!seenPositional) labelArg = arg;
       seenPositional = true;
     } else if (name === "bind" && arg.kind === "ref") bind = arg.name;
     else if (name === "testid" && arg.kind === "literal") testid = arg.value;
   }
-  const labelText = label ? escapeHeexText(label) : "";
+  // The label is a user-visible slot (`inputLabel`, M-T1.11) — rendered in TEXT
+  // position here (the `<label>` wraps the input), so it rides `renderInTemplate`,
+  // which yields `<%= pgettext(…) %>` under i18n and the escaped literal off it.
+  const labelText = labelArg ? renderInTemplate(labelArg, ctx, "inputLabel") : "";
   const testidAttr = testid ? ` data-testid="${escapeHeexAttr(testid)}"` : "";
   const field = bind ? snake(bind) : undefined;
   if (!field || !ctx.stateNames.has(field)) {

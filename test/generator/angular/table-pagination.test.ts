@@ -45,7 +45,12 @@ describe("Table client-side pagination (Angular)", () => {
     expect(content).toContain('(click)="pageNum.set(pageNum() - 1)"');
     expect(content).toContain('(click)="pageNum.set(pageNum() + 1)"');
     expect(content).toContain('[disabled]="pageNum() <= 1"');
-    expect(content).toContain("Page {{ pageNum() }} of {{ Math.max(1, Math.ceil(");
+    // One ICU chrome message: the fixture's `Column` headers are translatable
+    // text (the `columnHeader` slot), so the app has an i18n runtime and the
+    // pager binds through it instead of spelling the sentence in the template.
+    expect(content).toContain(
+      't("chrome.pageOf", "Page {page} of {pages}", { page: pageNum(), pages: Math.max(1, Math.ceil(',
+    );
     // The signal initialises to 1, and `Math` is re-exposed as a member.
     expect(content).toContain("readonly pageNum = signal(1);");
     expect(content).toContain("protected readonly Math = Math;");

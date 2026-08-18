@@ -53,7 +53,12 @@ describe("Table client-side pagination (React)", () => {
     expect(content).toContain("onClick={() => setPageNum(pageNum - 1)}");
     expect(content).toContain("onClick={() => setPageNum(pageNum + 1)}");
     // "Page N of M" label + last-page disable off the total row count.
-    expect(content).toContain("Page {pageNum} of {Math.max(1, Math.ceil(");
+    // The counter is ONE ICU chrome message (`chrome.pageOf`) rather than a
+    // hand-assembled sentence — this fixture now carries translatable text (its
+    // `Column` headers), so the i18n-on spelling is what it emits.
+    expect(content).toContain(
+      `t("chrome.pageOf", "Page {page} of {pages}", { page: pageNum, pages: Math.max(1, Math.ceil(`,
+    );
     expect(content).toContain(
       "disabled={pageNum >= Math.max(1, Math.ceil(((customerRecent.data) ?? []).length / 25))}",
     );

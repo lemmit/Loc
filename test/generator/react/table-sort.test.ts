@@ -71,8 +71,9 @@ describe("Table client-side sort (React)", () => {
         Column("Tier", o => o.tier),
         rows: rows, sortKey: sortKey, sortDir: sortDir) }`,
     );
-    // "Tier" header is plain text, not wrapped in a clickable span.
-    expect(content).toMatch(/>Tier</);
+    // "Tier" header is plain text (translated, per the `columnHeader` slot),
+    // not wrapped in a clickable sort button.
+    expect(content).toMatch(/>\{t\("page\.\w+\.columnHeader\.\w+", "Tier"\)\}</);
     expect(content).not.toMatch(/onClick=\{[^}]*"tier"/);
   });
 
@@ -94,6 +95,6 @@ describe("Table client-side sort (React)", () => {
     );
     expect(content).not.toContain(".sort((a, b)");
     expect(content).not.toMatch(/onClick=\{\(\) => \{ if \(sortKey/);
-    expect(content).toMatch(/>Name</);
+    expect(content).toMatch(/>\{t\("page\.\w+\.columnHeader\.\w+", "Name"\)\}</);
   });
 });

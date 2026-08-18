@@ -625,9 +625,21 @@ function boundRead(c: Ctx): string {
   return `state.${String(c.bind ?? "")}`;
 }
 
-/** A field's `InputDecoration(labelText: '…')` from the walked label. */
+/** An input LABEL as a Dart string expression: the walker's translation call
+ *  under i18n (`labelValue`, the `inputLabel` slot — M-T1.11), else the raw
+ *  label spelled as a Dart literal exactly as this pack always spelled it.
+ *
+ *  `InputDecoration(labelText:)` takes a `String`, so — unlike a child slot —
+ *  the WIDGET form `labelText` carries under i18n (`Text(t(…))`) cannot ride
+ *  here; it would not even type-check. */
+function labelExpr(c: Ctx): string {
+  const value = c.labelValue;
+  return value === undefined ? `'${dartStr(String(c.labelText ?? "").trim())}'` : String(value);
+}
+
+/** A field's `InputDecoration(labelText: …)` from the walked label. */
 function inputDecoration(c: Ctx): string {
-  return `InputDecoration(labelText: '${dartStr(String(c.labelText ?? "").trim())}')`;
+  return `InputDecoration(labelText: ${labelExpr(c)})`;
 }
 
 /** `onChanged` callback — a bare setter call, or `null` (disabled) with no bind.
@@ -652,9 +664,15 @@ function primitivePasswordField(c: Ctx): string {
 }
 
 function primitiveToggle(c: Ctx): string {
-  const label = dartStr(String(c.labelText ?? "").trim());
   const value = c.hasBind ? boundRead(c) : "false";
-  return `SwitchListTile(${arg(testidKey(c))}title: const Text('${label}'), value: ${value}, onChanged: ${onChangedSetter(c)})`;
+  return `SwitchListTile(${arg(testidKey(c))}title: ${constText(c)}, value: ${value}, onChanged: ${onChangedSetter(c)})`;
+}
+
+/** The label as a `Text` widget, `const` only when it really is constant — a
+ *  translated label is a runtime call, and `const Text(t(…))` does not compile.
+ *  With i18n off this is the exact `const Text('…')` the pack always emitted. */
+function constText(c: Ctx): string {
+  return c.labelValue === undefined ? `const Text(${labelExpr(c)})` : `Text(${labelExpr(c)})`;
 }
 
 function primitiveSelectField(c: Ctx): string {
@@ -676,9 +694,8 @@ function primitiveNumberField(c: Ctx): string {
 }
 
 function primitiveFileUpload(c: Ctx): string {
-  const label = dartStr(String(c.labelText ?? "").trim());
   const button = (onPressed: string) =>
-    `OutlinedButton.icon(${arg(testidKey(c))}icon: const Icon(Icons.upload_file), label: const Text('${label}'), onPressed: ${onPressed})`;
+    `OutlinedButton.icon(${arg(testidKey(c))}icon: const Icon(Icons.upload_file), label: ${constText(c)}, onPressed: ${onPressed})`;
   if (!c.hasBind) return button("null");
   // Pick a file (with bytes — web needs `withData`), POST it as multipart to
   // `/files`, and write the returned `FileRef` back through the setter.  The
@@ -708,12 +725,16 @@ function primitiveTabs(c: Ctx): string {
       | {
           value: string;
           label: string;
+          /** The caption as a Dart string expression — a translation call under
+           *  i18n (`tabLabel`, M-T1.11), the Dart literal otherwise.  `Tab(text:)`
+           *  takes a `String`, so the widget form `label` cannot ride it. */
+          labelExpr: string;
           bodyJsx: string;
           bodyChildren?: readonly string[];
         }[]
       | undefined) ?? [];
   if (tabs.length === 0) return "const SizedBox.shrink()";
-  const bar = tabs.map((t) => `Tab(text: '${dartStr(t.label)}')`).join(", ");
+  const bar = tabs.map((t) => `Tab(text: ${t.labelExpr})`).join(", ");
   // A `TabBarView` takes exactly ONE widget per tab, so a panel with several
   // children folds into a `Column` — the walker's `,`-joined `bodyJsx` would
   // be several list elements and shift every later tab onto the wrong panel.

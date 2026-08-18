@@ -55,8 +55,12 @@ describe("Tabs in walker stdlib", () => {
     expect(content).toMatch(/import \{ Tabs, Text, Title \} from "@mantine\/core";/);
     expect(content).toMatch(/<Tabs defaultValue="overview">/);
     expect(content).toMatch(/<Tabs\.List>/);
-    expect(content).toMatch(/<Tabs\.Tab value="overview">Overview<\/Tabs\.Tab>/);
-    expect(content).toMatch(/<Tabs\.Tab value="profile">Profile<\/Tabs\.Tab>/);
+    expect(content).toMatch(
+      /<Tabs\.Tab value="overview">\{t\("page\.\w+\.tabLabel\.\w+", "Overview"\)\}<\/Tabs\.Tab>/,
+    );
+    expect(content).toMatch(
+      /<Tabs\.Tab value="profile">\{t\("page\.\w+\.tabLabel\.\w+", "Profile"\)\}<\/Tabs\.Tab>/,
+    );
     expect(content).toMatch(/<Tabs\.Panel value="overview">/);
     expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Stats"\)\}<\/Title>/);
     expect(content).toMatch(/<Tabs\.Panel value="profile">/);
@@ -87,8 +91,12 @@ describe("Tabs in walker stdlib", () => {
     `);
     const content = files.get("web/src/pages/x.tsx")!;
     expect(content).toMatch(/<Tabs defaultValue="user-settings">/);
-    expect(content).toMatch(/<Tabs\.Tab value="user-settings">User Settings<\/Tabs\.Tab>/);
-    expect(content).toMatch(/<Tabs\.Tab value="audit-log">Audit Log<\/Tabs\.Tab>/);
+    expect(content).toMatch(
+      /<Tabs\.Tab value="user-settings">\{t\("page\.\w+\.tabLabel\.\w+", "User Settings"\)\}<\/Tabs\.Tab>/,
+    );
+    expect(content).toMatch(
+      /<Tabs\.Tab value="audit-log">\{t\("page\.\w+\.tabLabel\.\w+", "Audit Log"\)\}<\/Tabs\.Tab>/,
+    );
   });
 
   it("nested composition: Stack > Tabs > Stack stays clean", async () => {
@@ -150,7 +158,9 @@ describe("Tabs in walker stdlib", () => {
     `);
     const content = files.get("web/src/pages/mixed.tsx")!;
     // First (real) tab still renders.
-    expect(content).toMatch(/<Tabs\.Tab value="real">Real<\/Tabs\.Tab>/);
+    expect(content).toMatch(
+      /<Tabs\.Tab value="real">\{t\("page\.\w+\.tabLabel\.\w+", "Real"\)\}<\/Tabs\.Tab>/,
+    );
     // Second positional wasn't a Tab {} call → fallback indexed slug + walked body.
     // The Heading expression renders directly inside the auto-labelled panel.
     expect(content).toMatch(/<Tabs\.Tab value="tab-2">Tab 2<\/Tabs\.Tab>/);

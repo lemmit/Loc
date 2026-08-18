@@ -68,6 +68,7 @@ describe("Table client-side sort (Vue)", () => {
     const content = files.get("web/src/pages/x.vue")!;
     expect(content).not.toContain("sortRows(");
     expect(content).not.toContain("table-sort");
-    expect(content).toMatch(/>Name</);
+    // Plain (unsortable) header — still translated, per the `columnHeader` slot.
+    expect(content).toMatch(/>\{\{ t\("page\.\w+\.columnHeader\.\w+", "Name"\) \}\}</);
   });
 });

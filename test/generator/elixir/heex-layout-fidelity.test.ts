@@ -166,7 +166,11 @@ describe("HEEx Table column headers are attribute-safe", () => {
     const heex = await landingHeex(
       `Table { of: api.Doc.all, Column { "Na\\"me <b>", d => d.name } }`,
     );
-    expect(heex).toContain('label="Na&quot;me &lt;b&gt;"');
+    // A literal header rides the i18n slot (`columnHeader`, M-T1.11) through the
+    // `{…}` expression-attribute form, so the hazard characters live inside an
+    // ELIXIR string (`\"`, `\x3C`) rather than a quoted HTML attribute.
+    expect(heex).toContain('label={pgettext(');
+    expect(heex).toContain('"Na\\"me \\x3Cb\\x3E"');
     // The pre-fix shape closed the attribute mid-value and the template failed
     // to parse: `label="Na"me <b>"`.
     expect(heex).not.toContain('label="Na"me');
@@ -177,9 +181,12 @@ describe("HEEx Table column headers are attribute-safe", () => {
       `Table { of: api.Doc.all, Column { "First", d => d.name }, Column { q, d => d.name } }`,
       `state { q: string = "" }`,
     );
-    expect(heex).toContain('label="First"');
+    // The literal header translates; the non-literal one keeps the escaped
+    // static fallback (never the i18n form — there is nothing to key on).
+    expect(heex).toMatch(/label=\{pgettext\("[^"]+", "First"\)\}/);
     expect(heex).toContain('label="Column 2"');
     // The leak: the rendered Elixir expression spliced inside the quotes.
     expect(heex).not.toContain('label="@q"');
+    expect(heex).not.toContain("label={@q}");
   });
 });

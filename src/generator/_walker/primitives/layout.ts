@@ -4,7 +4,14 @@
 // via the shared walk helpers.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
-import { localizedAriaLabelAttr, localizedNamedValue, localizedText } from "../i18n-emit.js";
+import { escapeHtmlAttr } from "../a11y-emit.js";
+import {
+  localizedAriaLabelAttr,
+  localizedNamedValue,
+  localizedPositionalAttr,
+  localizedPositionalTranslation,
+  localizedText,
+} from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
 import { gridCols, positionalArgs, slugify, stringNamed } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
@@ -179,6 +186,48 @@ export function emitContainer(
   });
 }
 
+/** The four spellings of a `Tab`'s CAPTION — a user-visible slot (`tabLabel`,
+ *  M-T1.11) the packs render four different ways, so all four come from the
+ *  SAME `messageKey()` and the same translation decision:
+ *
+ *    `label`     — the markup TEXT token (`<Tabs.Tab>{{{label}}}</Tabs.Tab>`);
+ *    `labelAttr` — the complete bound ` label=…` attribute (MUI's `<Tab label=…/>`,
+ *                  Angular Material's `<mat-tab label=…>`, which needs the
+ *                  framework's own binding syntax, not a JSX brace);
+ *    `titleAttr` — the same fragment under the `title` name, for the one pack
+ *                  whose component spells the prop differently (flowbite's
+ *                  `<TabItem title=…>`).  Two names rather than one generic
+ *                  "attribute value" token because a Vue/Angular binding is
+ *                  `:title` / `[title]`, which a value-only token cannot spell;
+ *    `labelExpr` — the bare target-native EXPRESSION, always defined (the
+ *                  translation call under i18n, the target's string literal
+ *                  otherwise), for the packs that splice the caption into their
+ *                  own syntax: a Svelte object literal, Feliz's `prop.ariaLabel`,
+ *                  Flutter's `Tab(text: …)`.
+ *
+ *  `arg` is the `Tab(…)` call when its caption is a plain literal, `undefined`
+ *  for the two chrome fallbacks (a non-literal caption, a bare positional child)
+ *  — those are emitter-built `Tab N` text with no source string, so they carry
+ *  no catalog key and always render static. */
+function tabLabelForms(
+  arg: (ExprIR & { kind: "call" }) | undefined,
+  ctx: WalkContext,
+  labelStr: string,
+): { label: string; labelAttr: string; titleAttr: string; labelExpr: string } {
+  const translation = arg ? localizedPositionalTranslation(arg, ctx, "tabLabel") : undefined;
+  return {
+    label: arg ? localizedText(arg, ctx, "tabLabel", '""') : ctx.target.escapeText(labelStr),
+    labelAttr: arg
+      ? localizedPositionalAttr(arg, ctx, "tabLabel", "label")
+      : ` label="${escapeHtmlAttr(labelStr)}"`,
+    titleAttr: arg
+      ? localizedPositionalAttr(arg, ctx, "tabLabel", "title")
+      : ` title="${escapeHtmlAttr(labelStr)}"`,
+    labelExpr:
+      translation ?? ctx.target.renderStringLiteral?.(labelStr) ?? JSON.stringify(labelStr),
+  };
+}
+
 export function emitTabs(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   // Tabs(Tab("Overview", ...body), Tab("Settings", ...body))
   // Each positional child must be a `Tab(label, ...children)` call;
@@ -207,7 +256,7 @@ export function emitTabs(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
       const only = walk(arg, ctx, depth + 2);
       return {
         value: `tab-${i + 1}`,
-        label: `Tab ${i + 1}`,
+        ...tabLabelForms(undefined, ctx, `Tab ${i + 1}`),
         bodyJsx: only,
         bodyChildren: [only],
       };
@@ -215,14 +264,15 @@ export function emitTabs(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
     const tabPositionals = positionalArgs(arg);
     const labelArg = tabPositionals[0];
     const bodyArgs = tabPositionals.slice(1);
-    const labelStr =
-      labelArg && labelArg.kind === "literal" && labelArg.lit === "string"
-        ? labelArg.value
-        : `Tab ${i + 1}`;
+    const isLiteralLabel = labelArg?.kind === "literal" && labelArg.lit === "string";
+    const labelStr = isLiteralLabel ? labelArg.value : `Tab ${i + 1}`;
     const bodyParts = bodyArgs.map((e) => walk(e, ctx, depth + 2));
     return {
+      // The switcher's anchor is derived from the SOURCE literal, never from the
+      // translated caption — a `value:` that changed per locale would break
+      // every selector, e2e spec and deep link the moment a translation landed.
       value: slugify(labelStr) || `tab-${i + 1}`,
-      label: ctx.target.escapeText(labelStr),
+      ...tabLabelForms(isLiteralLabel ? arg : undefined, ctx, labelStr),
       bodyJsx:
         bodyParts.length > 0 ? joinBody(bodyParts) : ctx.target.renderComment("missing tab body"),
       // The same children UNJOINED, for the two packs that emit a PROGRAMMING
