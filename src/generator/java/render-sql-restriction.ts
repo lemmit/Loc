@@ -2,6 +2,7 @@ import type { ExprIR } from "../../ir/types/loom-ir.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { snake } from "../../util/naming.js";
 import { PG_INTRINSIC_SQL } from "../_expr/pg-intrinsics.js";
+import { sqlRestrictionIdent } from "./sql-ident.js";
 
 // ---------------------------------------------------------------------------
 // Capability-filter predicate → the static SQL fragment behind
@@ -82,7 +83,8 @@ export function renderSqlRestriction(e: ExprIR): string {
       throw unsupported(`method call '${e.member}'`);
     }
     case "ref":
-      if (e.refKind === "this-prop" || e.refKind === "this-vo-prop") return snake(e.name);
+      if (e.refKind === "this-prop" || e.refKind === "this-vo-prop")
+        return sqlRestrictionIdent(columnPath(e));
       if (e.refKind === "enum-value") return sqlString(e.name);
       throw unsupported(`ref '${e.refKind}' (only candidate fields and enum values are static)`);
     case "member": {
@@ -90,8 +92,7 @@ export function renderSqlRestriction(e: ExprIR): string {
       // sub-path (`this.audit.deletedAt` → audit_deleted_at), or an enum
       // value spelled `Enum.value`.
       if (e.receiverType.kind === "enum") return sqlString(e.member);
-      if (e.receiver.kind === "this") return snake(e.member);
-      return `${renderSqlRestriction(e.receiver)}_${snake(e.member)}`;
+      return sqlRestrictionIdent(columnPath(e));
     }
     case "literal":
       switch (e.lit) {
@@ -110,6 +111,24 @@ export function renderSqlRestriction(e: ExprIR): string {
     default:
       throw unsupported(`expression kind '${e.kind}'`);
   }
+}
+
+/** The UNQUOTED column a candidate path names — `this.isDeleted` → `is_deleted`,
+ *  the flattened VO sub-path `this.audit.deletedAt` → `audit_deleted_at`.
+ *
+ *  Built as one string and quoted ONCE by the caller.  Quoting the segments as
+ *  they are produced would put the quotes inside the flattened name
+ *  (`"order"_deleted_at`), which is why this is a separate walk rather than a
+ *  wrapper around `renderSqlRestriction`'s recursion. */
+function columnPath(e: ExprIR): string {
+  if (e.kind === "ref" && (e.refKind === "this-prop" || e.refKind === "this-vo-prop")) {
+    return snake(e.name);
+  }
+  if (e.kind === "member") {
+    if (e.receiver.kind === "this") return snake(e.member);
+    return `${columnPath(e.receiver)}_${snake(e.member)}`;
+  }
+  throw unsupported(`expression kind '${e.kind}' in a column position`);
 }
 
 function sqlString(s: string): string {

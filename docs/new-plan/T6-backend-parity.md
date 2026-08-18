@@ -606,7 +606,7 @@ Sources: M-T9.27 register rows; `system-checks.ts` `validateStampSupport`.
 No residue on this mission's axis. The ADAPTER axis is a different question and is tracked by M-T6.35.
 Sources: M-T9.27 register rows (the stale premise); overturned against the `EVENT_SOURCING_BACKENDS` / `EVENT_SOURCING_WORKFLOW_BACKENDS` literals in `system-checks.ts` and their `backend-parity-gates.test.ts` row.  (Cited by SYMBOL, not line: this file's own citations went stale the moment the cited file was edited.)
 
-## M-T6.43 — Java's JPA entities emit unquoted column names, so a reserved-word field 500s on insert — `open` · **S–M** · P1 ⭐ compiles green, boots green, fails on first write
+## M-T6.43 — Java's JPA entities emit unquoted column names, so a reserved-word field 500s on insert — `done` (2026-08-18) · **S–M** · P1 ⭐ compiles green, boots green, fails on first write
 
 Found 2026-08-17 while landing M-T6.42, by running the new `reserved-words`
 corpus fixture's behavioural leg against a real booted Spring Boot + Postgres.
@@ -657,6 +657,43 @@ every identifier it renders, so no raw name reaches the SQL).
 
 **Sources:** M-T6.42 (the sibling fix and the fixture), `sql-pg.ts`'s
 quote-always rule, the behavioural java leg.
+
+**Outcome.** Landed as described, with the shared-home step taken first: the
+word list moved out of the Dapper emitter into `src/generator/sql-reserved.ts`
+(one `isReservedIdent` predicate, no escaping — that stays per-backend), and
+re-deriving it from a live `postgres:16` for the second consumer immediately
+found the drift the mission predicted: **`right` was missing** from the
+Dapper-resident list, and `create table t (right int)` really is a syntax error.
+One word, found the first time the list was checked against the server rather
+than copied — which is the whole argument for the file.
+
+Java quotes with Hibernate's portable backtick at the `@Column` / `@Table` /
+`@AttributeOverride(column = …)` sites (`emit/jpa-annotations.ts`, plus the
+audit / claim / containment columns in `emit/entity.ts` and the correlation
+columns in `emit/workflow-state.ts` + `emit/projection-state.ts`), and with
+POSTGRES `"…"` in `render-sql-restriction.ts`, whose fragment Hibernate appends
+as raw SQL. That renderer needed one structural change beyond the wrapper: the
+flattened-VO arm built its column by concatenating rendered segments, so
+quoting in place would have produced `"order"_deleted_at`. The path is now
+built unquoted by `columnPath` and quoted once, at the end.
+
+Compound names the emitter derives (`<owner>_id`, `<field>_provenance`,
+pluralised tables) are deliberately NOT run through the predicate — they can
+never collide, and quoting them would move output for nothing.
+
+**Proof.** `node run-java.mjs reserved-words` passes and its recording matches
+the committed wire golden (node is the oracle). Mutation-proved: with `hbIdent`
+reverted to the identity function the same leg fails by name — *reserved-word
+columns round-trip through create, find and read against d* — with
+`POST /api/tickets → 500`, i.e. exactly the reported defect. Byte-identity
+checked by generating all 50 corpus fixtures before and after on BOTH affected
+backends: the Java tree differs in exactly one file (`reserved-words`'
+`Ticket.java`, three columns) and the Dapper tree is unchanged everywhere,
+confirming `right` has no witness in the corpus. `test/generator/java/java-reserved-identifiers.test.ts`
+is the fast per-PR pin, and one PRE-EXISTING assertion in
+`generator-java-projection.test.ts` had been pinning the broken spelling
+(`@Column(name = "order")` on a projection correlated by a field named `order`)
+— it now pins the quoted one.
 
 ## M-T6.42 — `persistence: dapper` emits unquoted identifiers, so a reserved-word column breaks the DDL — `done` (2026-08-17) · **M** · P1 ⭐ boots red, compiles green
 *(ID note: this row was minted as M-T6.41, colliding with the direct-table-aggregation row of the same number further up this file. Renumbered to **M-T6.42** on `main` while the fix was in flight — that is the id this PR already used, so the two agree. Fourth dup-ID incident; M-T9.32's automation remains the fix.)*

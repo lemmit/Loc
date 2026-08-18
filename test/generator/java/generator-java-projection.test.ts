@@ -51,7 +51,13 @@ describe("java projection runtime", () => {
     expect(row).toContain('@Table(name = "order_books", schema = "orders")');
     // correlation field is the @EmbeddedId
     expect(row).toContain("@EmbeddedId");
-    expect(row).toContain('@AttributeOverride(name = "value", column = @Column(name = "order"))');
+    // `order` is a Postgres RESERVED word, so the column name is backtick-quoted
+    // — Hibernate's portable quoting, which it re-renders as `"order"` on the
+    // Postgres dialect (M-T6.43).  This assertion pinned the BROKEN spelling
+    // until then: the row entity mapped a bare `order`, so every select
+    // Hibernate derived from it was a syntax error.  The `name = "value"` half
+    // is a Java property path, not an identifier, and stays unquoted.
+    expect(row).toContain('@AttributeOverride(name = "value", column = @Column(name = "`order`"))');
     expect(row).toContain("OrderId order;");
     // empty-seed allocate (every non-key column is nullable)
     expect(row).toContain("public static OrderBookRow _allocate(OrderId order) {");

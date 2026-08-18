@@ -50,6 +50,7 @@ import { intrinsicFor, intrinsicKey } from "../../../util/intrinsics.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { PG_INTRINSIC_SQL } from "../../_expr/pg-intrinsics.js";
 import { renderCreateTableIfNotExists } from "../../sql-pg.js";
+import { isReservedIdent } from "../../sql-reserved.js";
 import { unionFindAsOptionalTwin } from "../find-emit.js";
 import {
   AMBIENT_CURRENT_USER,
@@ -75,16 +76,10 @@ import { renderRetrievalParamsWithCt } from "./repository.js";
 // `end`)" — but this adapter provisions its own schema (`hasMigrations =
 // !usingDapper`, DbSchema.EnsureAsync) and never picked the rule up.
 //
-// WHY QUOTE ONLY THE RESERVED ONES rather than always, as `sql-pg.ts` does:
-// quote-always would move every byte of Dapper SQL in the tree for no
-// behavioural gain, and this emitter's output is pinned by a large body of
-// string-asserting tests plus the cross-backend goldens.  Reserved-only is a
-// hole closed, not a re-spelling — every existing emission is byte-identical
-// (proved by regenerating the whole corpus before/after).
-//
-// THE ESCAPING.  The identifier reaches C# through two different string
-// contexts, which is what made a partial fix worse than none (#2559 reverted
-// one for exactly this reason):
+// The WORD LIST is not ours: it lives once in `src/generator/sql-reserved.ts`,
+// shared with the Java backend's Hibernate quoting (M-T6.43).  Only the
+// ESCAPING is per-backend, and here it is per-CONTEXT, which is what made a
+// partial fix worse than none (#2559 reverted one for exactly this reason):
 //
 //   - `new CommandDefinition("SELECT …")` — a REGULAR literal, needs `\"`.
 //   - `DbSchema.cs`'s `public const string Sql = @"…"` — a VERBATIM literal,
@@ -95,114 +90,7 @@ import { renderRetrievalParamsWithCt } from "./repository.js";
 // the way in (`ddlToVerbatimLiteral`).  That way no call site has to know
 // which context it is in — the one that does is the one that can be read in
 // full.
-//
-// The set is Postgres' own `pg_get_keywords()` categories `R` (reserved) and
-// `T` (reserved, can be function or type name) — empirically the two a bare
-// column name cannot come from (`CREATE TABLE t (left int)` and `(is int)` are
-// both syntax errors; the non-reserved `name` is fine).
 // ---------------------------------------------------------------------------
-const PG_RESERVED_IDENTS: ReadonlySet<string> = new Set([
-  "all",
-  "analyse",
-  "analyze",
-  "and",
-  "any",
-  "array",
-  "as",
-  "asc",
-  "asymmetric",
-  "authorization",
-  "binary",
-  "both",
-  "case",
-  "cast",
-  "check",
-  "collate",
-  "collation",
-  "column",
-  "concurrently",
-  "constraint",
-  "create",
-  "cross",
-  "current_catalog",
-  "current_date",
-  "current_role",
-  "current_schema",
-  "current_time",
-  "current_timestamp",
-  "current_user",
-  "default",
-  "deferrable",
-  "desc",
-  "distinct",
-  "do",
-  "else",
-  "end",
-  "except",
-  "false",
-  "fetch",
-  "for",
-  "foreign",
-  "freeze",
-  "from",
-  "full",
-  "grant",
-  "group",
-  "having",
-  "ilike",
-  "in",
-  "initially",
-  "inner",
-  "intersect",
-  "into",
-  "is",
-  "isnull",
-  "join",
-  "lateral",
-  "leading",
-  "left",
-  "like",
-  "limit",
-  "localtime",
-  "localtimestamp",
-  "natural",
-  "not",
-  "notnull",
-  "null",
-  "offset",
-  "on",
-  "only",
-  "or",
-  "order",
-  "outer",
-  "overlaps",
-  "placing",
-  "primary",
-  "references",
-  "returning",
-  "select",
-  "session_user",
-  "similar",
-  "some",
-  "symmetric",
-  "system_user",
-  "table",
-  "tablesample",
-  "then",
-  "to",
-  "trailing",
-  "true",
-  "union",
-  "unique",
-  "user",
-  "using",
-  "variadic",
-  "verbose",
-  "when",
-  "where",
-  "window",
-  "with",
-]);
 
 /** One identifier in SQL position (a table or column name), quoted when it is a
  *  Postgres reserved word.  The quotes are written for a C# REGULAR string
@@ -213,7 +101,7 @@ const PG_RESERVED_IDENTS: ReadonlySet<string> = new Set([
  *  nor for the C# row-DTO property names, nor for derived names an identifier
  *  only seeds (an index name) — all three take the bare `col`. */
 export function sqlIdent(name: string): string {
-  return PG_RESERVED_IDENTS.has(name) ? `\\"${name}\\"` : name;
+  return isReservedIdent(name) ? `\\"${name}\\"` : name;
 }
 
 /** Re-encode a DDL fragment for `DbSchema.cs`'s VERBATIM (`@"…"`) literal.
