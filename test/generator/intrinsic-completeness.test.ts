@@ -36,6 +36,7 @@ import { JAVA_INTRINSIC_RENDERERS } from "../../src/generator/java/render-expr.j
 import { JPQL_INTRINSIC_SQL } from "../../src/generator/java/render-jpql.js";
 import { SQLALCHEMY_INTRINSIC_SQL } from "../../src/generator/python/find-predicate.js";
 import { PY_INTRINSIC_RENDERERS } from "../../src/generator/python/render-expr.js";
+import { MIKRO_INTRINSIC_SQL } from "../../src/generator/typescript/emit/mikroorm.js";
 import { TS_INTRINSIC_RENDERERS } from "../../src/generator/typescript/render-expr.js";
 import { DRIZZLE_INTRINSIC_SQL } from "../../src/generator/typescript/repository-find-predicate.js";
 import { INTRINSIC_SIGNATURES, intrinsicKey } from "../../src/util/intrinsics.js";
@@ -50,6 +51,12 @@ const IN_MEMORY_TABLES: Record<string, Record<string, unknown>> = {
 
 const SQL_TABLES: Record<string, Record<string, unknown>> = {
   "typescript/drizzle (DRIZZLE_INTRINSIC_SQL)": DRIZZLE_INTRINSIC_SQL,
+  // node's SECOND persistence adapter, and the reason its absence here was
+  // costly: `MIKROORM_SUBSET` declared "no scalar intrinsic" as a NARROWING, so
+  // a `startsWith` find was refused at validate time on this adapter while
+  // every other SQL renderer in this list had an arm for it.  A table listed
+  // here cannot fall behind the catalogue silently.
+  "typescript/mikroorm (MIKRO_INTRINSIC_SQL)": MIKRO_INTRINSIC_SQL,
   "postgres text — dapper + @SQLRestriction (PG_INTRINSIC_SQL)": PG_INTRINSIC_SQL,
   "java/jpql (JPQL_INTRINSIC_SQL)": JPQL_INTRINSIC_SQL,
   "java/criteria (JAVA_CRITERIA_INTRINSICS)": JAVA_CRITERIA_INTRINSICS,

@@ -108,20 +108,17 @@ const MIKRO_SKIP = {
   // canonical golden the drizzle leg produces.  That diff is the point: an
   // aggregate that coerced a numeric differently, or a filter that silently
   // stopped applying, is a VALUE divergence no compile tier can see.)
-  // Same class again, and the most honest entry in this map: the narrowing is
-  // DECLARED in the adapter's own capability descriptor.  `MIKROORM_SUBSET`
-  // (`src/ir/util/find-predicate-capability.ts`) lowers only comparisons, bare
-  // boolean columns, unary `!` and `&&`/`||` of them — no scalar intrinsic at
-  // all — so a `startsWith` predicate is refused at validation with
-  // `loom.find-predicate-unsupported` naming the shape and the subset.  Nothing
-  // is hidden by skipping: the fixture's whole point is a queryable intrinsic,
-  // and this adapter says up front it cannot lower one.  Widening the subset
-  // belongs to the remaining M-T6.23 mikroorm-emitter slices — slice 1 (#2516)
-  // landed the outbox/relay and did NOT touch the predicate lowerer — so delete
-  // this entry when `whereToMikroFilter` grows an intrinsic arm (and drop the
-  // `MIKROORM_SUBSET` narrowing that declares its absence in the same change).
-  "prefix-filter":
-    "mikroorm lowers no scalar intrinsic in a find/filter predicate — `MIKROORM_SUBSET` declares the narrowing and `loom.find-predicate-unsupported` refuses to generate (widen it in M-T6.23)",
+  // (`prefix-filter` was here, and its entry said to delete it "when
+  // `whereToMikroFilter` grows an intrinsic arm (and drop the `MIKROORM_SUBSET`
+  // narrowing that declares its absence in the same change)".  Both landed:
+  // `MIKRO_INTRINSIC_SQL` renders every `queryable` catalogue row as a `raw()`
+  // fragment — the same Postgres calls the drizzle twin makes, `starts_with`
+  // for the prefix match — and the table is now listed in
+  // `intrinsic-completeness.test.ts`, whose absence is what let the narrowing
+  // sit unexamined while every other SQL renderer had an arm.  The fixture
+  // boots here and its responses are diffed against the same canonical golden
+  // the drizzle leg produces — which is the point, since the delimiter and
+  // wildcard traps it asserts are VALUE divergences no compile tier can see.)
   // (`policy-deny` was here until the mikroorm authz slice: the adapter had no
   // `authz-filter` arm, so the deny sentinel could not lower and
   // `loom.find-predicate-unsupported` refused the whole system — while the deny
