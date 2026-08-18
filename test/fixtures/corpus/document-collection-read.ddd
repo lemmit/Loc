@@ -46,6 +46,11 @@ system DocCollectionRead {
           precondition tags.contains("bulk")
           total := total + 1
         }
+        // The only way to populate the containment over the wire — a create
+        // input carries root scalars, not contained parts.
+        operation addLine(sku: string, qty: int) {
+          lines += OrderLine { sku: sku, qty: qty }
+        }
       }
       repository Orders for Order { }
     }
@@ -59,5 +64,46 @@ system DocCollectionRead {
     dataSources: [shopState]
     serves: ShopApi
     port: 4000
+  }
+
+  // The reads FOLD, so the assertions are on the folded VALUES, not on a shape:
+  // a backend that filtered the wrong list, or lost the containment across the
+  // re-embed, lands a different number here.
+  test e2e "collection reads fold the document's own in-memory lists" against d {
+    let o = api.orders.create({ reference: "R1", tags: ["bulk", "rush"] })
+    api.orders.addLine(o, { sku: "A", qty: 4 })
+    api.orders.addLine(o, { sku: "B", qty: 11 })
+
+    // `lines.sum(l => l.qty)` over the containment the two appends built.
+    api.orders.retotal(o)
+    let totalled = api.orders.getById(o)
+    expect(totalled.total).toBe(15)
+
+    // `lines.count` — the whole-list member read, not a lambda fold.
+    api.orders.recount(o)
+    let counted = api.orders.getById(o)
+    expect(counted.lineCount).toBe(2)
+
+    // Two collection PREDICATES in guards: `.any(λ)` over the containment (the
+    // qty-11 line satisfies it) and `.contains` over the scalar array.  A
+    // backend that read either list wrong fails the precondition and 422s
+    // instead of reaching the increment.
+    api.orders.markBulk(o)
+    let bulked = api.orders.getById(o)
+    expect(bulked.total).toBe(16)
+    expect(bulked.lines.length).toBe(2)
+
+    let listed = api.orders.all()
+    expect(listed.length).toBe(1)
+
+    // The canonical update rewrites root scalars only — the containment the
+    // folds depend on must survive it (same trap `document.ddd` pins).
+    api.orders.update(o, { reference: "R2", total: 16, lineCount: 2, tags: ["bulk"] })
+    let updated = api.orders.getById(o)
+    expect(updated.reference).toBe("R2")
+    expect(updated.lines.length).toBe(2)
+
+    api.orders.destroy(o)
+    expect(api.orders.getById(o)).toThrow(404)
   }
 }
