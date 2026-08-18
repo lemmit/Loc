@@ -856,6 +856,21 @@ action-button gating on React / Vue / Svelte — only Angular still lacks an aut
 UI gate.  The client guard is **defence-in-depth** — the authoritative check is
 always the backend 403.
 
+**Scaffolded pages inherit the gate their route is guarded by.**  A `find all(…)
+requires` puts its gate on the scaffolded List page, and a `workflow … requires`
+header gate puts its gate on both instance pages — so the no-code path guards
+itself instead of firing a read that 403s.  Sound because both are
+`currentUser`-only by validation, which is exactly what a page gate can evaluate
+client-side.
+
+**Caveat — menu-link hiding is not automatic.**  A nav link is hidden from the
+page's OWN `requires`, and only for links derived from an explicit `menu { … }`
+block.  The DEFAULT sidebar is built from the aggregate/workflow lists rather
+than from the pages, so it stays visible even when the page behind it is gated:
+a denied principal sees the link, clicks it, and gets `<Forbidden/>`.  Write a
+`menu { … }` block if the link itself must disappear.  Tracked as **C3** in
+`docs/new-plan/missions/M-T3.15-read-surface-and-system-reads-plan.md`.
+
 `currentUser` is in scope wherever an expression evaluates **per
 request**:
 
