@@ -705,6 +705,26 @@ elixir generator via `pack.render`:
 | `tailwind-config` | `assets/tailwind.config.js` | `{ appName }` |
 | `package-json` | `assets/package.json` | `{ appName }` |
 
+Because a page renders through those component calls, `core-components`
+is a CONTRACT, not just a file: the walker emits `<.button>`,
+`<.table>`, `<.input>`, `<.modal>`, `<.badge>`, `<.empty>`, `<.pager>`,
+`<.header>`, `<.error>`, `<.label>`, `<.simple_form>`, `<.flash_group>`
+and `<.card>`, so a HEEx pack must define every one of them (with the
+attrs the walker passes — e.g. `<.button variant=…>`, `<.card
+title=… variant=… shadow=…>`).  A missing component or an undeclared
+attr is a `mix compile --warnings-as-errors` failure in the generated
+app, not a silent style regression.
+
+Where the line falls between walker and pack: the walker owns
+design-NEUTRAL geometry — `Stack`/`Group`/`Grid`/`Container`/`Toolbar`
+emit Tailwind flex/grid utilities inline, since daisyUI (and any other
+LiveView design system) adds a COMPONENT vocabulary, not a layout one,
+and both packs build Tailwind from the same content globs.  The pack
+owns anything a design system actually decides — the card surface's
+border/elevation/padding/title typography, a button's rank — which is
+why `Card`/`Paper` render through `<.card>` rather than a hardcoded
+class string.
+
 The assets files build into `priv/static/assets/app.{css,js}` via the
 generated `assets/package.json` (tailwind + esbuild) — the Dockerfile's
 `assets-build` stage runs it for images, `mix assets.build` for host

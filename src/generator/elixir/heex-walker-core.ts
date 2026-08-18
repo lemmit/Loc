@@ -1352,6 +1352,35 @@ export interface PrimitiveSpec {
    *  its own).  Without it the author's `label:` falls through the generic
    *  named-attr branch and lands as a bogus `label=` attribute on a `<div>`. */
   labelAsAriaLabel?: boolean;
+  /** Tailwind utility classes emitted as this tag's `class` attribute — the
+   *  LAYOUT of a layout primitive (`Stack` = a column flexbox, `Grid` = a CSS
+   *  grid, …).  Both shipping HEEx packs build Tailwind through the same assets
+   *  pipeline and scan the emitted `.*ex` sources, so a literal class string
+   *  here survives the production purge on either pack.
+   *
+   *  Layout utilities are design-NEUTRAL (daisyUI adds a COMPONENT vocabulary —
+   *  `btn`, `card`, `alert` — not a layout one), which is why they live in the
+   *  walker while the card SURFACE goes through the pack's `<.card>` function
+   *  component.  See `renderCard`. */
+  baseClass?: string;
+  /** Named args that legitimately become attributes on this tag — everything
+   *  else is DROPPED rather than spliced through as a bare HTML attribute.
+   *
+   *  A closed primitive's named args are its own vocabulary (`Grid`'s `cols:`,
+   *  `Container`'s `size:`, `Card`'s `variant:`), NOT markup attributes: the
+   *  generic fall-through emitted `cols={[3, 2, 1]}` (a LIST handed to
+   *  Phoenix's attribute escaper at RENDER time — see `isAttrRenderable`),
+   *  `size="lg"` on a `<div>` (invalid), and `variant="primary"` on
+   *  `<.button>` (an undeclared
+   *  attr on a function component ⇒ a `mix compile --warnings-as-errors`
+   *  failure).  Consumed-or-dropped is the only safe default; a knob that
+   *  SHOULD reach the markup is listed here, deliberately. */
+  passThroughAttrs?: readonly string[];
+  /** Wrap each rendered child in this tag (`Grid` → one `<div>` grid item per
+   *  child).  Mirrors the JSX packs' per-column wrapper: without it a child
+   *  that renders several roots (a `Table` plus its pager) would occupy two
+   *  grid cells instead of one. */
+  childWrapper?: string;
 }
 
 /** The attribute NAME of a rendered HEEx attribute fragment (`aria-label={…}` →
@@ -1410,7 +1439,7 @@ export function renderPrimitive(
         // special-case the generic else-branch below would emit a bare
         // `testid=` attribute which no test harness recognises.
         const value = renderAttrValue(arg, ctx, false);
-        namedAttrs.push(`data-testid=${value}`);
+        if (value !== undefined) namedAttrs.push(`data-testid=${value}`);
       } else if (name === "label" && spec.labelAsAriaLabel) {
         // A command button's / toolbar's `label:` is its accessible name
         // (aria-label), not a literal `label=` attribute — and a user-visible
@@ -1422,11 +1451,17 @@ export function renderPrimitive(
         const value =
           localizedHeexAttr(arg, ctx, namedRole(expr.name, "label")) ??
           renderAttrValue(arg, ctx, true);
-        namedAttrs.push(`aria-label=${value}`);
-      } else {
+        if (value !== undefined) namedAttrs.push(`aria-label=${value}`);
+      } else if (spec.passThroughAttrs?.includes(name)) {
         const value = renderAttrValue(arg, ctx, spec.staticAttrs?.includes(name) ?? false);
-        namedAttrs.push(`${snake(name)}=${value}`);
+        if (value !== undefined) namedAttrs.push(`${snake(name)}=${value}`);
       }
+      // Every other named arg is DROPPED — see `PrimitiveSpec.passThroughAttrs`.
+      // A closed primitive's knobs (`cols:`, `size:`, `variant:`, `gap:`) are
+      // consumed by its renderer (folded into `baseClass` / a pack component
+      // attribute) or deliberately ignored the way the JSX packs ignore the
+      // knobs they don't map; NONE of them may reach the markup as a bare
+      // attribute.
     } else {
       positional.push(arg);
     }
@@ -1436,6 +1471,10 @@ export function renderPrimitive(
   // so it lands before any other attributes for predictable output.
   const styleHeexAttr = styleIrToHeex(expr);
   if (styleHeexAttr) namedAttrs.unshift(styleHeexAttr);
+
+  // Layout classes lead the tag (`<div class="flex flex-col gap-4" …>`), the
+  // way the JSX packs' templates spell it — so unshifted LAST.
+  if (spec.baseClass) namedAttrs.unshift(`class="${escapeHeexAttr(spec.baseClass)}"`);
 
   // Contract-required static a11y attributes (e.g. Toolbar's role/name), as
   // DEFAULTS — an entry whose attribute a derived one already emitted is
@@ -1451,12 +1490,19 @@ export function renderPrimitive(
   // rendered with its catalog role; `childrenExprs` are nested markup and never
   // carry one.  The role table is the shared `USER_VISIBLE_SLOTS`, so the key
   // the walker emits equals the key the extraction pass put in the catalog.
-  const childrenHeex = [
+  const renderedChildren = [
     ...childrenExprs.map((c) => renderChild(c, ctx)),
     ...(spec.takesChildren
       ? positional.map((c, i) => renderChild(c, ctx, positionalRole(expr.name, i)))
       : []),
-  ].join("\n");
+  ];
+  const childrenHeex = (
+    spec.childWrapper
+      ? renderedChildren.map(
+          (c) => `<${spec.childWrapper}>\n${indent(c, 2)}\n</${spec.childWrapper}>`,
+        )
+      : renderedChildren
+  ).join("\n");
   const attrs = namedAttrs.length > 0 ? " " + namedAttrs.join(" ") : "";
   if (childrenHeex.length === 0) {
     return spec.tag.startsWith(".") ? `<${spec.tag}${attrs} />` : `<${spec.tag}${attrs} />`;
@@ -1517,11 +1563,20 @@ export function escapeHeexText(text: string): string {
 }
 
 /** Escape a `.ddd`-sourced literal string used as a quoted HEEx attribute
- *  value (`attr="…"`).  `"` closes the attribute and `&` opens an entity, so
- *  both are entity-escaped; the funnel that keeps literal `attrValue` /
- *  `renderAttrValue` well-formed. */
+ *  value (`attr="…"`) — the funnel that keeps literal `attrValue` /
+ *  `renderAttrValue` (and the `<:col label=…>` header) well-formed.
+ *
+ *  `"` and `&` are the two that BREAK the template (`"` closes the attribute
+ *  mid-value — `Column { "Na\"me" }` used to emit `label="Na"me"`, which
+ *  `mix compile` rejects with "missing space before attribute"; `&` opens an
+ *  entity).  `<`/`>` are escaped too so the emitted attribute matches what
+ *  `Phoenix.HTML.html_escape/1` would produce for the same string. */
 export function escapeHeexAttr(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 /** A literal user-visible slot, translated through the generated Gettext
@@ -1660,7 +1715,26 @@ export function renderInTemplate(arg: ExprIR, ctx: WalkContext, role?: string): 
   return `<%= ${renderExpr(arg, { ...ctx, position: "template" })} %>`;
 }
 
-function renderAttrValue(arg: ExprIR, ctx: WalkContext, isStatic: boolean): string {
+/** True when an authored value can be an HTML attribute value at all.
+ *
+ *  A LIST / OBJECT / LAMBDA is not a string and has no attribute spelling.  An
+ *  emitted `cols={[3, 2, 1]}` hands Phoenix's attribute escaper a list at
+ *  RENDER time — never at compile time, which is why every compile gate was
+ *  blind to it — and `Phoenix.HTML.Safe.List` reads it as IODATA: verified in
+ *  the generated app, `[3, 2, 1]` renders as the raw bytes `<<3, 2, 1>>`
+ *  (control characters in the attribute) and a list carrying anything that is
+ *  not a byte/binary/list raises "lists in Phoenix.HTML and templates may only
+ *  contain integers representing bytes, binaries or other lists".  Garbage or
+ *  a 500 — neither is an attribute.  The one seam every attribute value
+ *  funnels through refuses them, and the caller drops the attribute. */
+export function isAttrRenderable(arg: ExprIR): boolean {
+  return arg.kind !== "list" && arg.kind !== "object" && arg.kind !== "lambda";
+}
+
+/** Render an attribute VALUE, or `undefined` when the authored value cannot be
+ *  one (see {@link isAttrRenderable}) — callers must skip the attribute then. */
+function renderAttrValue(arg: ExprIR, ctx: WalkContext, isStatic: boolean): string | undefined {
+  if (!isAttrRenderable(arg)) return undefined;
   // Quote a literal attribute value with `"` / `&` entity-escaped so a
   // `.ddd`-sourced value can't close the attribute or open an entity
   // (`data-testid={"a\"b"}` would break the HEEx tokenizer).

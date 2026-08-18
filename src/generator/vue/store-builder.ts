@@ -27,8 +27,9 @@
 // source of truth (router-agnostic `window.location` + `history.replaceState`).
 //
 // This module is Vue-only.  The other fan-out frontends (React/Svelte/Angular)
-// wire their own store-module emitters; their `WalkerTarget.renderStoreModule`
-// emits its own container (the IR validator already gates LiveView).
+// each wire their own store-module emitter the same way, called from that
+// frontend's orchestrator rather than through a walker seam (the IR validator
+// already gates LiveView).
 // ---------------------------------------------------------------------------
 
 import type { ActionIR, StateFieldIR, StoreIR, TypeIR } from "../../ir/types/loom-ir.js";

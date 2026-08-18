@@ -54,10 +54,18 @@ const REGISTERED: Ratchet[] = [
     name: "ALLOWLIST",
     kind: "set",
     // 14: +ProjectionJoin +ProjectionSelect — the query-time projection
-    // comprehension grammar nodes (read-path-architecture.md rev.13).  Gated
-    // (`loom.projection-query-time-unsupported`) until the per-backend
-    // query-time emit lands, which owns draining these two (same lifecycle as
-    // the Projection/CommandHandler mid-flight entries).
+    // comprehension grammar nodes (read-path-architecture.md rev.13).
+    //
+    // NOT gated: `PROJECTION_QT_SUPPORTED` (`system-checks.ts`) is 5/5
+    // (node/python/elixir/java/dotnet), so
+    // `loom.projection-query-time-unsupported` fires only for a hypothetical
+    // un-ported future backend.  These two stay allowlisted for the SHOWCASE
+    // reason the allowlist itself gives (see the entries' comment in
+    // `showcase-completeness.test.ts`): the same parity/blast-radius grounds
+    // that keep folded `Projection` out of the shared single-file fixture, not
+    // a missing emitter.  Draining them means adding them to `showcase.ddd`
+    // and accepting the fan-out across every generator matrix — not waiting on
+    // a port.
     max: 14,
   },
   // Walker primitives with a TSX renderer but no HEEx one.  Empty: the last

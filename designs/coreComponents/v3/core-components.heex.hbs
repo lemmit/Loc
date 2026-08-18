@@ -69,6 +69,8 @@ defmodule {{webModule}}.CoreComponents do
   attr :type, :string, default: "button"
   attr :class, :string, default: nil
   attr :to, :string, default: nil, doc: "when set, renders as a navigation link"
+  attr :variant, :string, default: nil, values: ["primary", "secondary", "ghost", nil],
+    doc: "visual rank — the DSL Button's `variant:` named arg"
   attr :testid, :string, default: nil, doc: "data-testid forwarded to the root element"
   attr :rest, :global, include: ~w(form name value disabled phx-click phx-submit phx-disable-with)
   slot :inner_block, required: true
@@ -76,7 +78,12 @@ defmodule {{webModule}}.CoreComponents do
   def button(assigns) do
     classes =
       [
-        "inline-flex items-center justify-center rounded-md bg-zinc-900 px-3 py-2 text-sm font-semibold text-white hover:bg-zinc-700 disabled:opacity-50",
+        "inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-semibold disabled:opacity-50",
+        case assigns.variant do
+          "secondary" -> "border border-zinc-300 bg-white text-zinc-900 hover:bg-zinc-50"
+          "ghost" -> "text-zinc-900 hover:bg-zinc-100"
+          _ -> "bg-zinc-900 text-white hover:bg-zinc-700"
+        end,
         assigns.class
       ]
 
@@ -355,6 +362,48 @@ defmodule {{webModule}}.CoreComponents do
     </span>
     """
   end
+
+  @doc """
+  Card surface — the `Card` / `Paper` page primitives render through here.
+
+  The walker emits geometry (flex/grid utilities) inline because that is
+  design-neutral; the card SURFACE is this pack's vocabulary, so its border,
+  elevation, padding and title typography live here.  `variant`
+  (`raised`/`flat`/`outline`) and `shadow` (`none`/`sm`/`md`/`lg`) are the
+  DSL `Card`'s visual-rank knobs; `title` is its first positional slot
+  (already translated by the caller under i18n).
+  """
+  attr :title, :any, default: nil
+  attr :variant, :string, default: nil, values: ["raised", "flat", "outline", nil]
+  attr :shadow, :string, default: nil, values: ["none", "sm", "md", "lg", nil]
+  attr :class, :string, default: nil
+  attr :testid, :string, default: nil
+  slot :inner_block
+
+  def card(assigns) do
+    ~H"""
+    <section
+      class={[
+        "rounded-lg bg-white p-4",
+        @variant != "flat" && "border border-zinc-200",
+        card_shadow(@variant, @shadow),
+        @class
+      ]}
+      data-testid={@testid}
+    >
+      <h3 :if={@title} class="mb-3 text-base font-semibold leading-6 text-zinc-900">{@title}</h3>
+      {render_slot(@inner_block)}
+    </section>
+    """
+  end
+
+  defp card_shadow(_variant, "none"), do: nil
+  defp card_shadow(_variant, "sm"), do: "shadow-sm"
+  defp card_shadow(_variant, "md"), do: "shadow-md"
+  defp card_shadow(_variant, "lg"), do: "shadow-lg"
+  defp card_shadow("raised", _), do: "shadow-md"
+  defp card_shadow("flat", _), do: nil
+  defp card_shadow(_, _), do: "shadow-sm"
 
   @doc "Empty-state placeholder rendered when a list is empty."
   attr :class, :string, default: nil

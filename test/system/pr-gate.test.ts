@@ -17,9 +17,13 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error — plain-JS module without a declaration file; the runtime
 // shape is pinned by the assertions below.
 import {
+  API_MAX_ATTEMPTS,
+  apiFetch,
   currentGateState,
   evaluate,
+  isRetryableStatus,
   latestPerName,
+  retryDelayMs,
   SELF_NAMES,
   sweepShouldPost,
   verdict,
@@ -368,5 +372,100 @@ describe("sweep reconciliation — currentGateState / sweepShouldPost", () => {
     expect(sweepShouldPost("pending", { state: "pending" })).toBe(false);
     expect(sweepShouldPost("success", { state: "failure" })).toBe(true);
     expect(sweepShouldPost("absent", { state: "pending" })).toBe(true);
+  });
+});
+
+describe("apiFetch — github.com's transient 5xx is not a verdict", () => {
+  // Observed 2026-08-17: the scheduled sweep died on `503 No server is
+  // currently available to service your request` while posting PR 6 of 12 —
+  // a red `pr-gate` run that said nothing about any PR, and left the six
+  // unswept.  The gate is the recovery path for every other check, so an API
+  // blip must cost a retry, not the job.
+  const res = (status: number) =>
+    ({ ok: status >= 200 && status < 300, status, text: async () => "" }) as Response;
+  const noSleep = async () => {};
+
+  it("classifies what is worth retrying — transient yes, defect no", () => {
+    for (const s of [429, 500, 502, 503, 504]) expect(isRetryableStatus(s), `${s}`).toBe(true);
+    // A 401/403 is a bad token or a missing permission and a 422 is a malformed
+    // body; retrying those only delays the honest failure.
+    for (const s of [400, 401, 403, 404, 409, 422])
+      expect(isRetryableStatus(s), `${s}`).toBe(false);
+  });
+
+  it("backs off 1s, 2s, 4s — bounded, so an evaluation stays seconds long", () => {
+    expect([1, 2, 3].map(retryDelayMs)).toEqual([1000, 2000, 4000]);
+    // v2's whole claim is that a gate run never parks a runner slot.
+    let total = 0;
+    for (let a = 1; a < API_MAX_ATTEMPTS; a += 1) total += retryDelayMs(a);
+    expect(total).toBeLessThanOrEqual(10_000);
+  });
+
+  it("retries the 503 and returns the response that follows it", async () => {
+    const seen: number[] = [];
+    const statuses = [503, 503, 201];
+    const fetchImpl = async () => {
+      const s = statuses[seen.length];
+      seen.push(s);
+      return res(s);
+    };
+    const out = await apiFetch("u", {}, { fetchImpl, sleep: noSleep, onRetry: () => {} });
+    expect(out.status).toBe(201);
+    expect(seen).toEqual([503, 503, 201]);
+  });
+
+  it("does not retry a 422 — one call, and the caller still throws", async () => {
+    let calls = 0;
+    const fetchImpl = async () => {
+      calls += 1;
+      return res(422);
+    };
+    const out = await apiFetch("u", {}, { fetchImpl, sleep: noSleep, onRetry: () => {} });
+    expect(calls).toBe(1);
+    expect(out.ok).toBe(false);
+  });
+
+  it("gives up after the ladder and hands the failing response back to the caller", async () => {
+    let calls = 0;
+    const fetchImpl = async () => {
+      calls += 1;
+      return res(503);
+    };
+    const out = await apiFetch("u", {}, { fetchImpl, sleep: noSleep, onRetry: () => {} });
+    // Still a Response, not a swallowed error: the call site's own
+    // `if (!res.ok) throw` keeps producing its message unchanged.
+    expect(calls).toBe(API_MAX_ATTEMPTS);
+    expect(out.status).toBe(503);
+  });
+
+  it("retries a rejected fetch (reset socket / DNS) and rethrows on the last", async () => {
+    let calls = 0;
+    const flaky = async () => {
+      calls += 1;
+      if (calls < 3) throw new Error("ECONNRESET");
+      return res(200);
+    };
+    expect(
+      (await apiFetch("u", {}, { fetchImpl: flaky, sleep: noSleep, onRetry: () => {} })).ok,
+    ).toBe(true);
+
+    let always = 0;
+    const dead = async () => {
+      always += 1;
+      throw new Error("ENOTFOUND");
+    };
+    await expect(
+      apiFetch("u", {}, { fetchImpl: dead, sleep: noSleep, onRetry: () => {} }),
+    ).rejects.toThrow("ENOTFOUND");
+    expect(always).toBe(API_MAX_ATTEMPTS);
+  });
+
+  it("every GitHub call goes through it — a bare fetch would keep the old red", () => {
+    // The helper is worthless if a call site skips it, and the miss is
+    // invisible (the code reads fine and only fails during an outage).
+    const src = readFileSync(path.join(repoRoot, "scripts/pr-gate.mjs"), "utf8");
+    const bare = src.match(/await fetch\(/g) ?? [];
+    expect(bare, "a call site still calls fetch directly instead of apiFetch").toEqual([]);
+    expect((src.match(/await apiFetch\(/g) ?? []).length).toBe(3);
   });
 });

@@ -6,13 +6,7 @@
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
 import { localizedAriaLabelAttr, localizedNamedValue, localizedText } from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
-import {
-  namedArgValue,
-  numericNamed,
-  positionalArgs,
-  slugify,
-  stringNamed,
-} from "../shared/args.js";
+import { gridCols, positionalArgs, slugify, stringNamed } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import { positionalChildren, styleAttr, styleWith, testidAttr, walk } from "../walker-core.js";
 
@@ -70,37 +64,6 @@ export function emitGroup(
   });
 }
 
-/** Read the `cols:` named arg on a Grid call.
- *
- *  Accepts two forms:
- *    - Scalar int literal:  `cols: 3`  →  all three breakpoints use 3.
- *    - List literal:        `cols: [3, 2, 1]`  →  `[desktop, tablet, mobile]`.
- *
- *  When a breakpoint slot is missing in the list form, conservative
- *  defaults apply: `tablet = ceil(desktop/2)`, `mobile = 1`.  When the
- *  arg itself is absent, returns `undefined` and consumers fall back
- *  to their own non-responsive default. */
-function gridColsArg(
-  call: ExprIR & { kind: "call" },
-): { desktop: number; tablet: number; mobile: number } | undefined {
-  const scalar = numericNamed(call, "cols");
-  if (scalar !== undefined) return { desktop: scalar, tablet: scalar, mobile: scalar };
-  const raw = namedArgValue(call, "cols");
-  if (raw?.kind !== "list") return undefined;
-  const intElements: number[] = [];
-  for (const el of raw.elements) {
-    if (el.kind === "literal" && el.lit === "int") {
-      const n = Number(el.value);
-      if (Number.isFinite(n)) intElements.push(n);
-    }
-  }
-  if (intElements.length === 0) return undefined;
-  const desktop = intElements[0]!;
-  const tablet = intElements[1] ?? Math.max(1, Math.ceil(desktop / 2));
-  const mobile = intElements[2] ?? 1;
-  return { desktop, tablet, mobile };
-}
-
 export function emitGrid(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   // Each child wraps in a per-pack column container (Mantine's
   // <Grid.Col span="auto">; shadcn's plain `<div>` since gap is
@@ -111,7 +74,7 @@ export function emitGrid(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   const colIndent = "  ".repeat(depth + 1);
   const childIndent = "  ".repeat(depth + 2);
   const closeIndent = "  ".repeat(depth);
-  const cols = gridColsArg(call);
+  const cols = gridCols(call);
   // Translate column counts to Mantine/MUI `span` values out of 12.
   // `floor(12 / N)` matches the on-screen ratios users intend; an N
   // greater than 12 clamps to 1 so the math stays sane.
