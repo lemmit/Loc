@@ -42,7 +42,7 @@ import {
   workflowStateClass,
   workflowStateTable,
 } from "../workflow-state-emit.js";
-import { type DapperColumn, fieldColumn } from "./dapper.js";
+import { type DapperColumn, fieldColumn, sqlIdent } from "./dapper.js";
 import { eventRecordClass, renderEventRecordPoco } from "./event-store.js";
 
 /** A projection that persists a KEYED read-model row (the IReadModelStore /
@@ -119,8 +119,8 @@ function projectionColumns(proj: ProjectionIR, accBase = "s"): DapperColumn[] {
  *  the primary key column, the rest carry ` not null` unless nullable. */
 function keyedTableDdl(table: string, pkCol: string, cols: DapperColumn[]): string {
   const body = cols.map((c) => {
-    if (c.col === pkCol) return `    ${c.col} ${c.sql} primary key`;
-    return `    ${c.col} ${c.sql}${c.nullable ? "" : " not null"}`;
+    if (c.col === pkCol) return `    ${sqlIdent(c.col)} ${c.sql} primary key`;
+    return `    ${sqlIdent(c.col)} ${c.sql}${c.nullable ? "" : " not null"}`;
   });
   return `CREATE TABLE IF NOT EXISTS ${table} (\n${body.join(",\n")}\n);`;
 }
@@ -197,7 +197,7 @@ function rowClassAndMap(pocoClass: string, cols: DapperColumn[]): string[] {
 
 /** The SELECT column list + INSERT-upsert SQL fragments shared by the store. */
 function selectList(cols: DapperColumn[]): string {
-  return cols.map((c) => c.col).join(", ");
+  return cols.map((c) => sqlIdent(c.col)).join(", ");
 }
 
 /** A closed-generic Dapper store implementing `ISagaStateStore<TRow>` /
@@ -215,14 +215,14 @@ function renderRowStore(
   cols: DapperColumn[],
 ): string[] {
   const nonPk = cols.filter((c) => c.col !== pkCol);
-  const insertCols = cols.map((c) => c.col).join(", ");
+  const insertCols = cols.map((c) => sqlIdent(c.col)).join(", ");
   const insertVals = cols.map((c) => `@${c.col}${c.cast}`).join(", ");
-  const setClause = nonPk.map((c) => `${c.col} = excluded.${c.col}`).join(", ");
+  const setClause = nonPk.map((c) => `${sqlIdent(c.col)} = excluded.${sqlIdent(c.col)}`).join(", ");
   const bind = cols.map((c) => `${c.col} = ${c.save}`).join(", ");
   const upsert =
     setClause.length > 0
-      ? `INSERT INTO ${table} (${insertCols}) VALUES (${insertVals}) ON CONFLICT (${pkCol}) DO UPDATE SET ${setClause}`
-      : `INSERT INTO ${table} (${insertCols}) VALUES (${insertVals}) ON CONFLICT (${pkCol}) DO NOTHING`;
+      ? `INSERT INTO ${table} (${insertCols}) VALUES (${insertVals}) ON CONFLICT (${sqlIdent(pkCol)}) DO UPDATE SET ${setClause}`
+      : `INSERT INTO ${table} (${insertCols}) VALUES (${insertVals}) ON CONFLICT (${sqlIdent(pkCol)}) DO NOTHING`;
   return [
     `public sealed class ${storeClass} : ${iface}<${pocoClass}>`,
     "{",

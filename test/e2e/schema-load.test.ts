@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { generateSystems } from "../../src/system/index.js";
 import { parseString } from "../_helpers/parse.js";
-import { corpusSource } from "../fixtures/corpus/harness.js";
+import { corpusSource, corpusSourceFor, validateCorpusCase } from "../fixtures/corpus/harness.js";
 import { CORPUS } from "../fixtures/corpus/manifest.js";
 import {
   type PgServer,
@@ -126,6 +126,116 @@ describe.skipIf(!ENABLED)("emitted migration chains load into Postgres", () => {
             expect.fail(
               `${feature.id} (${deployable}): Postgres refused '${step.name}' — the ` +
                 `generated stack cannot start.\n${err.stderr?.toString() ?? err.message ?? String(e)}`,
+            );
+          }
+        }
+      }
+    }, 180_000);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The SECOND schema writer: `persistence: dapper`'s `DbSchema.Sql` (M-T6.42).
+//
+// The gate above deliberately runs ONE backend, because `MigrationsIR` and
+// `sql-pg.ts` are shared by every backend with a database.  The Dapper adapter
+// is the exception that reasoning does not cover: it emits NO migration chain
+// at all (`hasMigrations = !usingDapper` in the .NET orchestrator) and
+// provisions itself from a hand-rolled `CREATE TABLE IF NOT EXISTS` block that
+// `DbSchema.EnsureAsync` applies on boot.  So the shared renderer's guarantees
+// — quoted identifiers among them — say nothing about this DDL.
+//
+// That blind spot had a cost: the adapter emitted BARE identifiers, and a
+// `.ddd` field named `order` / `group` / `limit` produced
+//
+//     CREATE TABLE tickets (order integer not null, …)
+//
+// which Postgres refuses.  The C# compiled (the DDL is a string literal), the
+// corpus compile tier was green, and the failure waited until boot.  This is
+// the same cheap oracle applied to the same class of output: generate, then
+// `psql -f` what the adapter would run.
+//
+// It reads the DDL out of the emitted `DbSchema.cs` rather than re-deriving it,
+// so what is loaded here is byte-for-byte what `EnsureAsync` executes —
+// including the verbatim-literal `""` un-doubling, which is itself a step this
+// gate would catch getting wrong.
+// ---------------------------------------------------------------------------
+
+/** The DDL `DbSchema.EnsureAsync` would run, per deployable, for a corpus
+ *  feature generated under `persistence: dapper` — or an empty map when the
+ *  feature declares no .NET deployable. */
+async function dapperSchemas(featureId: string): Promise<Map<string, string>> {
+  const source = corpusSourceFor(featureId, "dotnet", "dapper");
+  const { model, errors } = await parseString(source);
+  if (errors.length > 0) throw new Error(`${featureId} failed to validate:\n${errors.join("\n")}`);
+  const files = generateSystems(model).files;
+  const out = new Map<string, string>();
+  for (const [p, cs] of files) {
+    const m = /^([^/]+)\/Infrastructure\/Persistence\/DbSchema\.cs$/.exec(p);
+    if (!m) continue;
+    // `public const string Sql = @"…";` — a C# VERBATIM literal, so a quote
+    // inside it is written `""`.  Un-double to recover the SQL itself.
+    const body = /public const string Sql = @"([\s\S]*?)\n";/.exec(cs);
+    if (!body) throw new Error(`${featureId}: ${p} has no 'public const string Sql' block`);
+    out.set(m[1]!, body[1]!.replace(/""/g, '"'));
+  }
+  return out;
+}
+
+describe.skipIf(!ENABLED)("the dapper adapter's self-applied DDL loads into Postgres", () => {
+  let server: PgServer;
+  let tmp: string;
+
+  beforeAll(async () => {
+    server = await startPgServer();
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dapper-schema-load-"));
+  }, 120_000);
+
+  afterAll(() => {
+    server?.stop();
+    if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  for (const feature of CORPUS.filter((f) => f.backends.includes("dotnet"))) {
+    it(`${feature.id}`, async () => {
+      // A feature the adapter honestly REFUSES (`loom.dapper-unsupported`)
+      // never reaches an emitter, so there is no DDL to load.  Asked of the
+      // validator rather than of a hand-kept list, so this cannot go stale
+      // against the boundary the way a duplicated map would.
+      const diags = await validateCorpusCase(feature.id, "dotnet", "dapper");
+      if (diags.some((d) => d.severity === "error" && d.code === "loom.dapper-unsupported")) {
+        console.log(`${feature.id}: refused under persistence: dapper — no DDL to load`);
+        return;
+      }
+
+      const schemas = await dapperSchemas(feature.id);
+      expect(
+        schemas.size,
+        `${feature.id}: no DbSchema.cs emitted under 'persistence: dapper' — this adapter ` +
+          "provisions its own schema, so an absent one means the stack cannot start.",
+      ).toBeGreaterThan(0);
+
+      for (const [deployable, ddl] of schemas) {
+        const db = `dsl_${feature.id}_${deployable}`.replace(/[^a-z0-9]/gi, "_").toLowerCase();
+        resetDatabase(server, db);
+        // `EnsureAsync` splits on `;` and runs one statement per round trip
+        // (a CREATE INDEX must not be PARSED before its table exists), so load
+        // it the same way rather than as one multi-statement file.
+        const statements = ddl
+          .split(";")
+          .map((x) => x.trim())
+          .filter((x) => x.length > 0);
+        for (const [i, stmt] of statements.entries()) {
+          const file = path.join(tmp, `${db}__${i}.sql`);
+          fs.writeFileSync(file, `${stmt};\n`);
+          try {
+            loadSql(server, db, file);
+          } catch (e) {
+            const err = e as { stderr?: Buffer; message?: string };
+            expect.fail(
+              `${feature.id} (${deployable}): Postgres refused a DbSchema statement — the ` +
+                `generated stack cannot start.\n${stmt}\n\n` +
+                `${err.stderr?.toString() ?? err.message ?? String(e)}`,
             );
           }
         }

@@ -29,6 +29,7 @@ import {
   dapperAggregateTable,
   fieldColumn,
   principalFields,
+  sqlIdent,
   whereToSql,
 } from "./emit/dapper.js";
 import { dapperProjectionColumns, dapperWorkflowStateColumns } from "./emit/dapper-workflow.js";
@@ -377,7 +378,7 @@ function sqlAggregate(agg: ProjectionAggregateIR): string {
       "internal: a whole-table aggregation argument must be a source column reference",
     );
   }
-  return `${agg.op}(${snake(arg.member)})::numeric`;
+  return `${agg.op}(${sqlIdent(snake(arg.member))})::numeric`;
 }
 
 /** The CLR type the aggregate's aliased column lands on. `count` is never
@@ -400,7 +401,7 @@ function sqlGroupKeyExpr(e: ExprIR, projName: string): string {
       `internal: projection ${projName}: a group-by column must be a bare source column`,
     );
   }
-  const col = snake(key.column);
+  const col = sqlIdent(snake(key.column));
   if (key.transform === undefined) return col;
   const snippet = PG_INTRINSIC_SQL[GROUP_KEY_TRANSFORM_INTRINSIC[key.transform]];
   if (!snippet) {
@@ -537,19 +538,21 @@ function renderAggregateHandler(
     // `QuerySingleAsync`, not `…OrDefault`.  Each aggregate is aliased to its
     // wire field's snake name, which is also the row property name, so Dapper's
     // column→property match is exact.
-    const cols = aggregates.map((s) => `${sqlAggregate(s.aggregate)} AS ${snake(s.field)}`);
+    const cols = aggregates.map(
+      (s) => `${sqlAggregate(s.aggregate)} AS ${sqlIdent(snake(s.field))}`,
+    );
     members = aggregates
       .map(
         (s) => `        public ${sqlAggregateRowCs(s.aggregate)} ${snake(s.field)} { get; set; }`,
       )
       .join("\n");
-    const sql = `SELECT ${cols.join(", ")} FROM ${dapperAggregateTable(source)}${
+    const sql = `SELECT ${cols.join(", ")} FROM ${sqlIdent(dapperAggregateTable(source))}${
       where ? ` WHERE ${where}` : ""
     }`;
     const args = aggregates.map((s) => csCoerce(s, `agg`, ctx, snake(s.field))).join(", ");
     body =
       `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);\n` +
-      `        var agg = await conn.QuerySingleAsync<AggRow>(new CommandDefinition(${JSON.stringify(sql)}${seam.paramArg}, cancellationToken: cancellationToken));\n` +
+      `        var agg = await conn.QuerySingleAsync<AggRow>(new CommandDefinition("${sql}"${seam.paramArg}, cancellationToken: cancellationToken));\n` +
       `        return new ${rowName}(${args});\n`;
   } else {
     // The anonymous projection the grouped query selects; each member is named
@@ -763,14 +766,14 @@ function renderGroupedHandler(
   const groupExprs = [...new Set(grouped.groupBy.map((e) => sqlGroupKeyExpr(e, proj.name)))];
   const selectSql = [
     ...grouped.keys.map((k) => {
-      const alias = snake(sqlGroupKeyAlias(k.expr, proj.name));
+      const alias = sqlIdent(snake(sqlGroupKeyAlias(k.expr, proj.name)));
       const expr = sqlGroupKeyExpr(k.expr, proj.name);
       return expr === alias ? alias : `${expr} AS ${alias}`;
     }),
-    ...grouped.aggregates.map((s) => `${sqlAggregate(s.aggregate)} AS ${snake(s.field)}`),
+    ...grouped.aggregates.map((s) => `${sqlAggregate(s.aggregate)} AS ${sqlIdent(snake(s.field))}`),
   ].join(", ");
   const groupSql =
-    `SELECT ${selectSql} FROM ${dapperAggregateTable(source)}` +
+    `SELECT ${selectSql} FROM ${sqlIdent(dapperAggregateTable(source))}` +
     `${where ? ` WHERE ${where}` : ""}` +
     ` GROUP BY ${groupExprs.join(", ")} ORDER BY ${groupExprs.join(", ")}`;
   const groupRowDecl = usingDapper
@@ -790,7 +793,7 @@ function renderGroupedHandler(
     : "";
   const groupBody = usingDapper
     ? `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);\n` +
-      `        var groups = await conn.QueryAsync<GroupRow>(new CommandDefinition(${JSON.stringify(groupSql)}${seam.paramArg}, cancellationToken: cancellationToken));\n` +
+      `        var groups = await conn.QueryAsync<GroupRow>(new CommandDefinition("${groupSql}"${seam.paramArg}, cancellationToken: cancellationToken));\n` +
       `        return groups.Select(r => new ${rowName}(${args.join(", ")})).ToList();\n`
     : `        var groups = await _db.${dbSet}.AsNoTracking()${where ? `.Where(o => ${where})` : ""}\n` +
       `            .GroupBy(o => new { ${cols.map((c) => c.decl).join(", ")} })\n` +
@@ -975,12 +978,12 @@ function renderWorkflowHandler(
   const rowDecl = usingDapper
     ? `${dapperRowClass("StateDbRow", stateCols)}\n${dapperRowMap("MapState", "StateDbRow", pocoFqn, stateCols)}\n\n`
     : "";
-  const stateSql = `SELECT ${stateCols.map((c) => c.col).join(", ")} FROM ${workflowStateTable(wf)}${
+  const stateSql = `SELECT ${stateCols.map((c) => sqlIdent(c.col)).join(", ")} FROM ${sqlIdent(workflowStateTable(wf))}${
     where ? ` WHERE ${where}` : ""
   }`;
   const body = usingDapper
     ? `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);\n` +
-      `        var __rows = await conn.QueryAsync<StateDbRow>(new CommandDefinition(${JSON.stringify(stateSql)}${seam.paramArg}, cancellationToken: cancellationToken));\n` +
+      `        var __rows = await conn.QueryAsync<StateDbRow>(new CommandDefinition("${stateSql}"${seam.paramArg}, cancellationToken: cancellationToken));\n` +
       `        return __rows.Select(MapState).Select(r => ${projection}).ToList();\n`
     : `        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r => ${where})` : ""}.ToListAsync(cancellationToken);\n` +
       `        return rows.Select(r => ${projection}).ToList();\n`;
@@ -1111,12 +1114,12 @@ function renderProjectionSourceHandler(
   const rowDecl = usingDapper
     ? `${dapperRowClass("SourceDbRow", srcCols)}\n${dapperRowMap("MapSource", "SourceDbRow", pocoFqn, srcCols)}\n\n`
     : "";
-  const srcSql = `SELECT ${srcCols.map((c) => c.col).join(", ")} FROM ${projectionRowTable(src)}${
+  const srcSql = `SELECT ${srcCols.map((c) => sqlIdent(c.col)).join(", ")} FROM ${sqlIdent(projectionRowTable(src))}${
     where ? ` WHERE ${where}` : ""
   }`;
   const body = usingDapper
     ? `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);\n` +
-      `        var __rows = await conn.QueryAsync<SourceDbRow>(new CommandDefinition(${JSON.stringify(srcSql)}${seam.paramArg}, cancellationToken: cancellationToken));\n` +
+      `        var __rows = await conn.QueryAsync<SourceDbRow>(new CommandDefinition("${srcSql}"${seam.paramArg}, cancellationToken: cancellationToken));\n` +
       `        return __rows.Select(MapSource).Select(r => ${projection}).ToList();\n`
     : `        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r => ${where})` : ""}.ToListAsync(cancellationToken);\n` +
       `        return rows.Select(r => ${projection}).ToList();\n`;

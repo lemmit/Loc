@@ -1,0 +1,193 @@
+{
+  "case": "reserved-words",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/tickets",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "POST",
+      "path": "/api/tickets",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 2,
+      "method": "GET",
+      "path": "/api/tickets/{id}",
+      "status": 200,
+      "body": {
+        "group": "alpha",
+        "id": "<volatile:key>",
+        "limit": 10,
+        "order": 2,
+        "total": "5.0000",
+        "version": 1
+      }
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/tickets/by_group?g=alpha",
+      "status": 200,
+      "body": [
+        {
+          "group": "alpha",
+          "id": "<volatile:key>",
+          "limit": 10,
+          "order": 2,
+          "total": "5.0000",
+          "version": 1
+        }
+      ]
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/tickets?dir=asc&sort=order",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "group": "beta",
+            "id": "<volatile:key>",
+            "limit": 0,
+            "order": 1,
+            "total": "7.5000",
+            "version": 1
+          },
+          {
+            "group": "alpha",
+            "id": "<volatile:key>",
+            "limit": 10,
+            "order": 2,
+            "total": "5.0000",
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 2,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/tickets?dir=asc&page=1&pageSize=1&sort=order",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "group": "beta",
+            "id": "<volatile:key>",
+            "limit": 0,
+            "order": 1,
+            "total": "7.5000",
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 1,
+        "total": 2,
+        "totalPages": 2
+      }
+    },
+    {
+      "seq": 6,
+      "method": "POST",
+      "path": "/api/tickets/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/tickets/{id}",
+      "status": 200,
+      "body": {
+        "group": "gamma",
+        "id": "<volatile:key>",
+        "limit": 3,
+        "order": 9,
+        "total": "5.0000",
+        "version": 2
+      }
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/api/tickets/by_group?g=alpha",
+      "status": 200,
+      "body": []
+    },
+    {
+      "seq": 9,
+      "method": "DELETE",
+      "path": "/api/tickets/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/api/tickets/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Ticket {id} not found",
+        "instance": "/api/tickets/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 11,
+      "method": "PATCH",
+      "path": "/api/tickets",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/tickets",
+        "instance": "/api/tickets",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 12,
+      "method": "GET",
+      "path": "/__loom_no_such_path",
+      "status": 404,
+      "body": {
+        "detail": "no route for GET /__loom_no_such_path",
+        "instance": "/__loom_no_such_path",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 13,
+      "method": "POST",
+      "path": "/api/tickets",
+      "status": 400,
+      "body": {
+        "detail": "Malformed JSON in request body",
+        "instance": "/api/tickets",
+        "status": 400,
+        "title": "Bad Request",
+        "type": "about:blank"
+      }
+    }
+  ]
+}
