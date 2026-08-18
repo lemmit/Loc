@@ -925,6 +925,45 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     // that can actually diverge.
     tier: "static",
   },
+  {
+    id: "RS-31",
+    title: "A string `.length` bound counts Unicode code points, not the host's native string length",
+    trigger:
+      "any `.length` on a string \u2014 a `len-*` invariant/precondition (`code.length >= 3`, `label.length <= 16`) or a bare `.length` read in a domain rule \u2014 evaluated against a value containing an astral character",
+    observable:
+      "the count is the number of Unicode CODE POINTS. `\u201c\ud83d\ude00X\u201d` is 2, not 3: the emoji is one code point and two UTF-16 code units. This is the unit the emitted JSON Schema already publishes as `minLength`/`maxLength`, so the bound a backend enforces and the bound it advertises are the same number.",
+    // The host primitives disagree about what a "character" is: JS `s.length`,
+    // C# `s.Length` and Java `s.length()` count UTF-16 CODE UNITS; python's
+    // `len` counts code points; elixir's `String.length/1` counts GRAPHEMES.
+    // Three of the five therefore accepted a value their OWN published
+    // `maxLength`/`minLength` forbade — the write side persisted data the read
+    // side could not legally serve (schemathesis F5).
+    //
+    // Both length CARRIERS are in scope, because they are separate code paths:
+    // a message-less single-field shape rides each backend's native validator
+    // chain (zod `.min`/`.max`, FluentValidation `.MinimumLength`, …), while a
+    // messaged rule and the domain floor ride the expression renderer.  A fix
+    // to one carrier alone leaves the other wrong, which is why the pinned case
+    // exercises both directions.
+    //
+    // ELIXIR IS A SIGNED RESIDUAL, not a conformer: graphemes agree with code
+    // points on every astral character (so it passes the pinned case) and
+    // diverge only on combining sequences, which nothing in the corpus reaches.
+    // Ecto's `validate_length/3` has no `:codepoints` count, so closing it means
+    // hand-rolling Ecto's error tuples — a unit of its own.
+    conforms: ["node", "dotnet", "java", "python"],
+    targets: ["elixir"],
+    provenance: [
+      "found 2026-08-06 by the M-T9.21 schemathesis leg (finding F5, waiver W6): a 2-code-point currency was accepted on write and then served back in violation of the `minLength: 3` the same server published",
+      "fixed on node/.NET/java via one shared definition, src/generator/_expr/code-point.ts, consumed by BOTH the domain rule renderer and the wire-boundary validator emitter so the two cannot drift; python was already correct",
+      "the Hono routes re-attach `.openapi({ minLength, maxLength })` because zod cannot describe a `.refine` to the OpenAPI emitter — the published bound is byte-identical to before",
+      "pinned in test/fixtures/corpus/validation-messages.ddd and recorded in wire-golden/validation-messages.json (a 2-code-point label DENIED by `>= 3`, a 9-code-point/18-code-unit label ADMITTED by `<= 16` and round-tripped); verified to fail with each half of the fix reverted independently",
+      "statically pinned per backend by test/generator/string-length-code-points.test.ts",
+    ],
+    // BEHAVIORAL: the golden records both directions, so every backend leg
+    // gates it per-PR.
+    tier: "behavioral",
+  },
 ];
 
 // ---------------------------------------------------------------------------

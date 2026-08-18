@@ -94,10 +94,10 @@ describe("string .length is code points — node/Hono", () => {
 });
 
 describe("string .length is code points — .NET", () => {
-  it("the FluentValidation chain uses EnumerateRunes, not MinimumLength/MaximumLength", async () => {
+  it("the FluentValidation chain counts code points, not MinimumLength/MaximumLength", async () => {
     const validators = await file("Products/Commands/CreateProductCommandValidator.cs");
-    expect(validators).toContain("v.EnumerateRunes().Count() >= 3");
-    expect(validators).toContain("v.EnumerateRunes().Count() <= 16");
+    expect(validators).toContain("(v.Length - v.Count(char.IsLowSurrogate)) >= 3");
+    expect(validators).toContain("(v.Length - v.Count(char.IsLowSurrogate)) <= 16");
     expect(validators).not.toContain("MinimumLength(3)");
     expect(validators).not.toContain("MaximumLength(16)");
   });
@@ -109,7 +109,7 @@ describe("string .length is code points — .NET", () => {
 
   it("the domain floor counts code points", async () => {
     const domain = await file("Domain/Products/Product.cs");
-    expect(domain).toContain("this.Code.EnumerateRunes().Count() >= 3");
+    expect(domain).toContain("(this.Code.Length - this.Code.Count(char.IsLowSurrogate)) >= 3");
     expect(domain).not.toContain("this.Code.Length >= 3");
   });
 });

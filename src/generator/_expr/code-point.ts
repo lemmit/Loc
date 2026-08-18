@@ -40,11 +40,21 @@ export function tsCodePointLength(recv: string): string {
   return `[...${recv}].length`;
 }
 
-/** C#: `EnumerateRunes()` yields one `Rune` per Unicode scalar value.
- *  `Count()` is `System.Linq`, which every emitted project has globally via
- *  the csproj's `<ImplicitUsings>enable</ImplicitUsings>`. */
+/** C#: code units minus surrogate pairs.  Each astral code point is exactly
+ *  one high + one low surrogate, so subtracting the low surrogates from
+ *  `.Length` is the code-point count.  `Count(predicate)` is `System.Linq`,
+ *  which every emitted project has via the csproj's
+ *  `<ImplicitUsings>enable</ImplicitUsings>`.
+ *
+ *  Why not the more obvious `EnumerateRunes().Count()`: `s.length > 0` is a
+ *  very common Loom invariant, and `Count() > 0` trips **CA1827** ("use Any()")
+ *  — a build error under the emitted csproj's `latest-recommended` analysis
+ *  level plus CI's `/warnaserror`.  The arithmetic form keeps `Count` out of a
+ *  zero comparison.  The two differ only on an UNPAIRED surrogate (malformed
+ *  UTF-16), which cannot reach a handler: `System.Text.Json` never produces
+ *  one from a JSON body. */
 export function csCodePointLength(recv: string): string {
-  return `${recv}.EnumerateRunes().Count()`;
+  return `(${recv}.Length - ${recv}.Count(char.IsLowSurrogate))`;
 }
 
 /** Java: the JDK's own code-point counter — no import needed. */
