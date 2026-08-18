@@ -184,7 +184,9 @@ describe("playground project loader (VFS-backed)", () => {
               repository Products for Product { }
             }
           }
-          deployable api { platform: node, contexts: [Catalog] }
+          storage pg { type: postgres }
+          resource catalogState { for: Catalog, kind: state, use: pg }
+          deployable api { platform: node, contexts: [Catalog], dataSources: [catalogState] }
         }
       `,
       "/workspace/shared/money.ddd": `

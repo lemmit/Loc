@@ -4,10 +4,8 @@
 // setter (`state.set<Field>(value)`) from the dispatcher — `repo.save(state)`
 // at handler exit flushes it.  The state fields are package-private, so a
 // cross-package direct write wouldn't compile — the setter is the seam.
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `
   system S {
@@ -35,9 +33,7 @@ const SRC = `
 `;
 
 async function gen(): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(SRC);
-  if (errors.length) throw new Error(errors.join("\n"));
-  return generateSystems(model).files;
+  return await generateSystemFiles(SRC);
 }
 
 const find = (files: Map<string, string>, suffix: string): string | undefined =>
@@ -79,7 +75,7 @@ const COMPOUND_SRC = `
           orderId: Order id
           attempts: int
           total: money
-          create(p: OrderPlaced) by p.order { attempts += 1  total -= 5.00 USD }
+          create(p: OrderPlaced) by p.order { attempts += 1  total -= money("5.00") }
         }
       }
     }
@@ -91,9 +87,7 @@ const COMPOUND_SRC = `
 `;
 
 async function genCompound(): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(COMPOUND_SRC);
-  if (errors.length) throw new Error(errors.join("\n"));
-  return generateSystems(model).files;
+  return await generateSystemFiles(COMPOUND_SRC);
 }
 
 describe("java workflow own-state compound assignment", () => {
@@ -104,7 +98,7 @@ describe("java workflow own-state compound assignment", () => {
     expect(dispatcher).toContain("state.setAttempts(state.attempts() + 1);");
   });
 
-  it("emits BigDecimal arithmetic for a money `total -= 5.00 USD`", async () => {
+  it("emits BigDecimal arithmetic for a money `total -= money(...)`", async () => {
     const dispatcher = find(await genCompound(), "workflows/CDispatcher.java");
     expect(dispatcher).toContain('state.setTotal(state.total().subtract(new BigDecimal("5.00")));');
   });

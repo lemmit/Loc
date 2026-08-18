@@ -339,7 +339,9 @@ describe("react generator", () => {
             }
           }
           ui WebApp with scaffold(subdomains: [M]) { }
-          deployable api { platform: node, contexts: [C], port: 3000 }
+          storage pg { type: postgres }
+          resource cState { for: C, kind: state, use: pg }
+          deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
           deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
         }
       `,
@@ -386,9 +388,11 @@ describe("react generator", () => {
             ${page}
           }
           storage primarySql { type: postgres }
+          resource sState { for: S, kind: state, use: primarySql }
           deployable api {
             platform: node
             contexts: [S]
+            dataSources: [sState]
             serves: SalesApi
             port: 3001
           }
@@ -480,7 +484,9 @@ describe("react generator", () => {
             }
           }
           ui WebApp with scaffold(subdomains: [M]) { }
-          deployable api { platform: dotnet, contexts: [C], port: 8080 }
+          storage pg { type: postgres }
+          resource cState { for: C, kind: state, use: pg }
+          deployable api { platform: dotnet, contexts: [C], dataSources: [cState], port: 8080 }
           deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
         }
       `,
@@ -711,7 +717,9 @@ describe("react generator", () => {
             }
           }
           ui WebApp with scaffold(subdomains: [M]) { }
-          deployable api { platform: dotnet, contexts: [C], port: 8080 }
+          storage pg { type: postgres }
+          resource cState { for: C, kind: state, use: pg }
+          deployable api { platform: dotnet, contexts: [C], dataSources: [cState], port: 8080 }
           deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           test e2e "bad" against web {
             ui.workflows.doesNotExist({})
@@ -823,7 +831,9 @@ describe("react generator", () => {
               }
             }
             ui WebApp with scaffold(subdomains: [M]) { }
-            deployable api { platform: dotnet, contexts: [Auth], port: 8080 }
+            storage pg { type: postgres }
+            resource authState { for: Auth, kind: state, use: pg }
+            deployable api { platform: dotnet, contexts: [Auth], dataSources: [authState], port: 8080 }
             deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           }
         `,
@@ -852,7 +862,9 @@ describe("react generator", () => {
               }
             }
             ui WebApp with scaffold(subdomains: [M]) { }
-            deployable api { platform: dotnet, contexts: [Auth], port: 8080 }
+            storage pg { type: postgres }
+            resource authState { for: Auth, kind: state, use: pg }
+            deployable api { platform: dotnet, contexts: [Auth], dataSources: [authState], port: 8080 }
             deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           }
         `,
@@ -886,7 +898,9 @@ describe("react generator", () => {
               }
             }
             ui WebApp with scaffold(subdomains: [M]) { }
-            deployable api { platform: dotnet, contexts: [Catalog], port: 8080 }
+            storage pg { type: postgres }
+            resource catalogState { for: Catalog, kind: state, use: pg }
+            deployable api { platform: dotnet, contexts: [Catalog], dataSources: [catalogState], port: 8080 }
             deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           }
         `,
@@ -917,7 +931,9 @@ describe("react generator", () => {
               }
             }
             ui WebApp with scaffold(subdomains: [M]) { }
-            deployable api { platform: dotnet, contexts: [Acct], port: 8080 }
+            storage pg { type: postgres }
+            resource acctState { for: Acct, kind: state, use: pg }
+            deployable api { platform: dotnet, contexts: [Acct], dataSources: [acctState], port: 8080 }
             deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
           }
         `,

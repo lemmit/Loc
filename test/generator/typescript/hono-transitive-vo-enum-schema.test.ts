@@ -11,10 +11,8 @@
 // rejects with "CountrySchema is not defined".  Mirrors the Acme ERP
 // `Address`/`Country` shape from shared/geo.ddd.  Sibling of the React-side
 // guard in test/generator/react/transitive-vo-enum-schema.test.ts.
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseValid } from "../../_helpers/parse.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `
   enum Country { US, GB, DE }
@@ -36,16 +34,18 @@ const SRC = `
       }
     }
     storage primary { type: postgres }
+    resource salesState { for: Sales, kind: state, use: primary }
     deployable api {
       platform: node
       contexts: [Sales]
+      dataSources: [salesState]
       port: 3000
     }
   }
 `;
 
 async function routesFile(): Promise<string> {
-  const files = (await generateSystems(await parseValid(SRC))).files;
+  const files = await generateSystemFiles(SRC);
   // The per-aggregate route module that emits the wire schemas.
   const path = [...files.keys()].find((k) => k.endsWith("/http/customer.routes.ts"));
   expect(path, "customer.routes.ts not emitted").toBeDefined();
