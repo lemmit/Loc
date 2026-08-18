@@ -16,7 +16,7 @@ const SRC = `system Shop { subdomain Sales { context Orders {
   aggregate Customer { name: string }
   aggregate Order {
     status: OrderStatus
-    create place(customer: Customer id) {}
+    create(customer: Customer id) {}
     operation ship() { emit OrderShipped { order: id } }
   }
   channel Lifecycle { carries: OrderPlaced, OrderShipped  retention: log  key: order }

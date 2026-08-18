@@ -46,7 +46,9 @@ const SRC = `
       }
     }
     api A from Core
-    deployable svc { platform: java  contexts: [Catalog]  serves: A  port: 8081 }
+    storage pg { type: postgres }
+    resource catalogState { for: Catalog, kind: state, use: pg }
+    deployable svc { platform: java  contexts: [Catalog]  serves: A  dataSources: [catalogState]  port: 8081 }
   }
 `;
 

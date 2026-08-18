@@ -26,7 +26,9 @@ const src = (platform: string, port: number): string => `
       }
     }
     api A from Core
-    deployable svc { platform: ${platform}  contexts: [Catalog]  serves: A  port: ${port} }
+    storage pg { type: postgres }
+    resource catalogState { for: Catalog, kind: state, use: pg }
+    deployable svc { platform: ${platform}  contexts: [Catalog]  serves: A  dataSources: [catalogState]  port: ${port} }
   }
 `;
 

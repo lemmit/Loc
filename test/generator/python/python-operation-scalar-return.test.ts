@@ -32,7 +32,9 @@ system Demo {
     }
   }
   api OrderApi from S
-  deployable pyApi { platform: python contexts: [C] serves: OrderApi port: 8000 }
+  storage pg { type: postgres }
+  resource cState { for: C, kind: state, use: pg }
+  deployable pyApi { platform: python contexts: [C] serves: OrderApi dataSources: [cState] port: 8000 }
 }
 `;
 

@@ -29,9 +29,12 @@ const FIXTURE = `system AcmeDel {
     }
   }
   api OpsApi from Ops
+  storage pg { type: postgres }
+  resource opsState { for: Ops, kind: state, use: pg }
   deployable opsApi {
     platform: node
     contexts: [Ops]
+    dataSources: [opsState]
     serves: OpsApi
     port: 3000
   }

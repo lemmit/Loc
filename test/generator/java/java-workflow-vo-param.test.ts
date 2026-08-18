@@ -30,7 +30,8 @@ const SRC = `system S { subdomain Core { context Wallet {
     }
   }
 } } api A from Core  storage pg { type: postgres }
-  deployable api { platform: java  contexts: [Wallet]  serves: A  port: 8080 } }`;
+  resource walletState { for: Wallet, kind: state, use: pg }
+  deployable api { platform: java  contexts: [Wallet]  serves: A  dataSources: [walletState]  port: 8080 } }`;
 
 async function gen(): Promise<Map<string, string>> {
   const { model, errors } = await parseString(SRC);

@@ -21,7 +21,9 @@ system S { subdomain O { context O {
   workflow OrderFulfillment { orderId: Order id  attempts: int
     create(p: OrderPlaced) by p.order { let s = Shipment.create({ orderRef: p.order, status: "P" }) emit ShipmentRequested { shipment: s.id, order: p.order } }
     on(s: ShipmentRequested) by s.order { let sh = Shipments.getById(s.shipment) sh.mark() } }
-} } api A from O  storage pg { type: postgres }  deployable api { platform: java  contexts: [O]  serves: A  port: 8080 } }
+} } api A from O  storage pg { type: postgres }
+  resource oState { for: O, kind: state, use: pg }
+  deployable api { platform: java  contexts: [O]  serves: A  dataSources: [oState]  port: 8080 } }
 `;
 
 const COMMAND = `
@@ -29,7 +31,9 @@ system S { subdomain O { context O {
   aggregate Customer { name: string  operation rename(n: string) { name := n } }
   repository Customers for Customer { }
   workflow renameCustomer { create(customerId: Customer id, newName: string) { let c = Customers.getById(customerId) c.rename(newName) } }
-} } api A from O  storage pg { type: postgres }  deployable api { platform: java  contexts: [O]  serves: A  port: 8080 } }
+} } api A from O  storage pg { type: postgres }
+  resource oState { for: O, kind: state, use: pg }
+  deployable api { platform: java  contexts: [O]  serves: A  dataSources: [oState]  port: 8080 } }
 `;
 
 async function gen(src: string): Promise<string[]> {

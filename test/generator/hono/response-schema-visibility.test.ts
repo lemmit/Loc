@@ -20,7 +20,9 @@ const SRC = `system S {
     }
   }
   api A from Core
-  deployable api { platform: node contexts: [C] serves: A port: 3000 }
+  storage pg { type: postgres }
+  resource cState { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] serves: A dataSources: [cState] port: 3000 }
 }`;
 
 async function routesFile(): Promise<string> {
