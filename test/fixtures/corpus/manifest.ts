@@ -76,6 +76,14 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "projection-aggregation", title: "whole-table aggregation — singleton query-time projection (count/sum/avg/min/max pushed to SQL)", doc: "language", backends: ALL },
   { id: "projection-groupby", title: "group by — grouped query-time projection (one row per group, key selects + per-group aggregates, GROUP BY/ORDER BY pushed to SQL)", doc: "language", backends: ALL },
   {
+    id: "projection-agg-filters",
+    title:
+      "aggregation × capability filters — tenantOwned + softDeletable source, whole-table and grouped aggregations scoped by the SAME predicates the row read applies (plus an `ignoring` witness)",
+    doc: "tenancy",
+    backends: ALL,
+    note: "minted by audit A1: the aggregation shapes read the source table DIRECTLY, so four backends applied only the projection's own `where` — a cross-tenant COUNT/SUM leak no fixture crossed",
+  },
+  {
     id: "projection-join",
     title:
       "projection join — the by-id follow (`join <Agg> as <alias> on <idRef>`), carrying the referenced row's fields onto each projection row",

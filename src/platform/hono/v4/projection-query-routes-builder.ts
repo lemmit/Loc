@@ -1,13 +1,20 @@
 import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
 import { MONEY_WIRE_SCALE } from "../../../generator/money-scale.js";
-import { whereToMikroFilter } from "../../../generator/typescript/emit/mikroorm.js";
+import {
+  mikroProjectionWhere,
+  whereToMikroFilter,
+} from "../../../generator/typescript/emit/mikroorm.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import {
+  combinePredicate,
+  contextFilterPredicate,
   DRIZZLE_INTRINSIC_SQL,
+  type FilterBypass,
   lowerToDrizzle,
 } from "../../../generator/typescript/repository-find-predicate.js";
 import { wireProjectionValue } from "../../../generator/typescript/repository-wire-builder.js";
 import type {
+  EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
   ProjectionAggregateIR,
@@ -89,6 +96,29 @@ import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 // BY is emitted as three separate `raw()` calls of the same SQL text.
 // ---------------------------------------------------------------------------
 
+/** The SOURCE AGGREGATE a query-time projection reads, or `undefined` when the
+ *  source is a raw table — a WORKFLOW's saga-state row or a folded projection's
+ *  `<Proj>Row` read model.  Only an aggregate carries capability filters. */
+function projectionSourceAggregate(
+  p: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+): EnrichedAggregateIR | undefined {
+  const q = p.query;
+  if (!q?.source) return undefined;
+  if (q.sourceKind === "workflow" || q.sourceKind === "projection") return undefined;
+  return ctx.aggregates.find((a) => a.name === q.source);
+}
+
+/** A projection's `ignoring <Cap>` / `ignoring *` stance as the bypass spec the
+ *  repository predicate builders take — the same one the synthesised source
+ *  find is threaded, so an aggregation and a row read drop the same filters. */
+function filterBypassOf(p: ProjectionIR): FilterBypass | undefined {
+  const q = p.query;
+  if (!q) return undefined;
+  if (!q.bypassAll && (q.bypassCaps?.length ?? 0) === 0) return undefined;
+  return { bypassAll: q.bypassAll, bypassCaps: q.bypassCaps };
+}
+
 export function buildQueryProjectionsFile(
   ctx: EnrichedBoundedContextIR,
   /** `persistence: mikroorm` — read the direct-table shapes through the
@@ -158,26 +188,42 @@ export function buildQueryProjectionsFile(
     // A COMPUTED grouping key (`group by o.placedAt.startOfDay()`) renders
     // through the Drizzle intrinsic snippets, which build a `sql` template.
     if ((grouped?.groupBy ?? []).some((e) => groupKeyOf(e)?.transform)) rawDrizzleOps.add("sql");
-    if (!p.query.filter) {
-      aggWheres.set(p.name, undefined);
-      continue;
-    }
-    const lowered = lowerToDrizzle(p.query.filter, lowerFirst(plural(p.query.source)), ctx);
-    if (lowered) {
-      aggWheres.set(p.name, lowered.expr);
-      for (const op of lowered.ops) rawDrizzleOps.add(op);
-    } else {
-      aggWheres.set(p.name, undefined);
-    }
+    const tableBare = lowerFirst(plural(p.query.source));
+    // The source aggregate's CAPABILITY filters (`tenantOwned`, `softDeletable`,
+    // any `filter <expr>`) ride this read too.  The row-shaped sibling goes
+    // through the synthesised repo find, which ANDs them in; a direct-table
+    // aggregation that applied only the projection's own `where` counted rows
+    // the row read excludes — a cross-tenant COUNT/SUM leak with `tenantOwned`,
+    // a wrong number with `softDeletable` alone.  Same helper, same
+    // `requireCurrentUser()` principal binding and same `ignoring` bypass the
+    // repository uses, so the two reads cannot disagree.
+    const srcAgg = projectionSourceAggregate(p, ctx);
+    const cap = srcAgg
+      ? contextFilterPredicate(srcAgg, tableBare, ctx, rawDrizzleOps, filterBypassOf(p))
+      : null;
+    const lowered = p.query.filter ? lowerToDrizzle(p.query.filter, tableBare, ctx) : undefined;
+    if (lowered) for (const op of lowered.ops) rawDrizzleOps.add(op);
+    if (lowered && cap) rawDrizzleOps.add("and");
+    const where = lowered ? combinePredicate(lowered.expr, cap) : (cap ?? undefined);
+    aggWheres.set(p.name, where);
   }
   // MikroORM WHERE lowering for the same direct-table shapes: a FilterQuery
   // object built by the shared `whereToMikroFilter` (the lowering every mikro
-  // find already uses), keyed per projection.  `undefined` = no filter.
+  // find already uses), keyed per projection.  `undefined` = no filter.  The
+  // capability filters join the AGGREGATION shapes only — a raw-table source
+  // (workflow saga state / folded `<Proj>Row`) has no source aggregate, and the
+  // repository-sourced shape is scoped by the repository itself.
   const mikroWheres = new Map<string, string | undefined>();
   if (usingMikro) {
     for (const p of projections) {
       const f = p.query?.filter;
-      mikroWheres.set(p.name, f ? mikroFilterFor(f) : undefined);
+      const base = f ? mikroFilterFor(f) : undefined;
+      const isAggregation = Boolean(groupedAggregates(p) ?? wholeTableAggregates(p));
+      const srcAgg = isAggregation ? projectionSourceAggregate(p, ctx) : undefined;
+      mikroWheres.set(
+        p.name,
+        srcAgg ? mikroProjectionWhere(base, srcAgg, filterBypassOf(p)) : base,
+      );
     }
   }
   const allAggs = new Set([...sourceAggs, ...followAggs]);
@@ -328,7 +374,19 @@ export function buildQueryProjectionsFile(
   lines.push("");
   lines.push(`  return app;`);
   lines.push(`}`);
-  const file = lines.join("\n");
+  let file = lines.join("\n");
+  // A PRINCIPAL capability filter (tenancy: `this.tenantId == currentUser.x`)
+  // renders against the ambient `requireCurrentUser()` accessor, exactly as it
+  // does inside the repository.  Body-scanned rather than predicted: only a
+  // direct-table aggregation over a principal-filtered aggregate emits it, so
+  // every other projection file keeps its import block byte-identical.
+  if (/\brequireCurrentUser\(/.test(file)) {
+    const authMarker = `import { type DomainEventDispatcher } from "../domain/events";`;
+    file = file.replace(
+      authMarker,
+      [authMarker, `import { requireCurrentUser } from "../auth/middleware";`].join("\n"),
+    );
+  }
   if (!usingMikro) return `${file}\n`;
   // Body-scan the emitted routes for the mikro-only names: `raw` (the SQL
   // fragments) and each Row entity class a direct-table shape reads.  A
