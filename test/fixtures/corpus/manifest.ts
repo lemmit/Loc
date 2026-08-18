@@ -117,7 +117,7 @@ export const CORPUS: readonly CorpusFeature[] = [
     title: "seed data read back — the seeder's rows through a collection read, and the opt-in dataset gate",
     doc: "language",
     backends: ALL,
-    note: "Split from `seeding` so the two halves can have different BEHAVIOURAL reach: this one reads a collection (the only route class that can see seed rows, and therefore the only one whose body differs on a leg that starts empty), so it is held off the elixir behavioural leg — which emits no seeder at all (B19 / M-T6.37) — via BEHAVIOURAL_SKIP, while `seeding` keeps its CRUD/FK/404 round-trip armed on all five. `backends` stays ALL because GENERATION (what this field gates) is clean everywhere, including elixir; only the boot lacks rows.",
+    note: "Split from `seeding` so the two halves can have different BEHAVIOURAL reach: this one reads a collection (the only route class that can see seed rows, and therefore the only one whose body differs on a leg that starts empty), so it was held off the elixir behavioural leg — which emitted no seeder at all (B19) — via BEHAVIOURAL_SKIP, while `seeding` kept its CRUD/FK/404 round-trip armed on all five. M-T6.37 landed the Ecto seeder and that skip is deleted, so this case now runs on all five legs too; the split stays because it is what kept the five-backend coverage armed while one leg was odd.",
   },
   { id: "resources", title: "external resources — objectStore / queue / http api / mailer (smtp) clients", doc: "resources", backends: ALL },
   {

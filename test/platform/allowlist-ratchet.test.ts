@@ -241,11 +241,16 @@ const REGISTERED: Ratchet[] = [
   // ratcheted down to `tenancy-hierarchy` while these three stayed.  That
   // divergence is what this registration exists to make visible.
   //
-  // 1 = elixir/`seed-values` (B19 — the backend emits no seeder; M-T6.37 owns
-  // the drain, in flight as #2594).
+  // 1 -> 0 in this PR.  The last entry was elixir/`seed-values` (B19 — the
+  // backend emitted no seeder at all, so every `seed` dataset was silently
+  // dropped and the rows that fixture reads back never existed).  M-T6.37
+  // lands the Ecto seeder here, so the skip is deleted and the pin follows it
+  // down in the same PR — the ratchet contract, and the reason this bound is
+  // an EXACT pin rather than a ceiling: leaving `max: 1` would bank slack for
+  // the next backend that wants to opt a whole case out of its leg.
   //
   // NOTE, as with MIKRO_SKIP: it lives in a `.mjs` runner, not a vitest file.
-  { file: "test/behavioral/cases.mjs", name: "BEHAVIOURAL_SKIP", kind: "nested-record", max: 1 },
+  { file: "test/behavioral/cases.mjs", name: "BEHAVIOURAL_SKIP", kind: "nested-record", max: 0 },
   // The Elixir corpus compile tier's skip map — the fifth leg of the per-backend
   // set registered above (java / python / dotnet / tsc), left out only because
   // it lives in its own workflow (`corpus-elixir-build.yml`, split off for the
