@@ -20,9 +20,12 @@ const FIXTURE = `system Shop {
     }
   }
   api SalesApi from Sales
+  storage pg { type: postgres }
+  resource billingState { for: Billing, kind: state, use: pg }
   deployable api {
     platform: node
     contexts: [Billing]
+    dataSources: [billingState]
     serves: SalesApi
     port: 3000
   }

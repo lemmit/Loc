@@ -48,9 +48,12 @@ system Sys {
     }
   }
   storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  resource invoicesState { for: Invoices, kind: state, use: primary }
   deployable api {
     platform: node
     contexts: [Orders, Invoices]
+    dataSources: [ordersState, invoicesState]
     port: 3000
   }
 }

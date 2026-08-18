@@ -31,7 +31,9 @@ system Demo {
     }
   }
   api ParcelApi from S
-  deployable svc { platform: ${platform} contexts: [C] serves: ParcelApi port: ${port} }
+  storage pg { type: postgres }
+  resource cState { for: C, kind: state, use: pg }
+  deployable svc { platform: ${platform} contexts: [C] serves: ParcelApi dataSources: [cState] port: ${port} }
 }
 `;
 

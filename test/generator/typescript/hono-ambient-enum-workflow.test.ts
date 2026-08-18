@@ -35,9 +35,11 @@ const SRC = `
       }
     }
     storage primary { type: postgres }
+    resource opsState { for: Ops, kind: state, use: primary }
     deployable api {
       platform: node
       contexts: [Ops]
+      dataSources: [opsState]
       port: 3000
     }
   }

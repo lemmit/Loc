@@ -15,7 +15,8 @@ function src(findClause: string): string {
       find openOnes(): Ticket[] ${findClause}where open == true
     }
   } } api A from Sales storage pg { type: postgres }
-  deployable api { platform: java contexts: [Tickets] serves: A port: 8080 auth: required } }`;
+  resource ticketsState { for: Tickets, kind: state, use: pg }
+  deployable api { platform: java contexts: [Tickets] serves: A dataSources: [ticketsState] port: 8080 auth: required } }`;
 }
 
 async function controller(findClause: string): Promise<string> {
