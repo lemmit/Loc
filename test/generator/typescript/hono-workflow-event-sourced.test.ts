@@ -4,10 +4,8 @@
 // the saga analogue of a `persistedAs: eventLog` aggregate — instead of a
 // mutable correlation-state row.  Asserts the shared stream table, the fold
 // helpers, and the fold-load / append-own-events dispatch seam.
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `system S { subdomain O { context O {
   aggregate Order { status: string  operation place() { status := "P"  emit OrderPlaced { order: id } } }
@@ -27,9 +25,7 @@ const SRC = `system S { subdomain O { context O {
   deployable api { platform: node contexts: [O] serves: A dataSources: [oState] port: 8080 } }`;
 
 async function gen(): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(SRC);
-  if (errors.length) throw new Error(errors.join("\n"));
-  return generateSystems(model).files;
+  return await generateSystemFiles(SRC);
 }
 
 const file = (files: Map<string, string>, suffix: string): string =>

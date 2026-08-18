@@ -10,10 +10,8 @@
 // not defined").  The wire form is the value name as a string literal,
 // which is both in scope and what `z.enum([...]).default(...)` expects.
 // Mirrors the Acme ERP `SalesOrder.status: SalesOrderStatus = Draft`.
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseValid } from "../../_helpers/parse.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `
   system Sys {
@@ -39,7 +37,7 @@ const SRC = `
 `;
 
 async function routesFile(): Promise<string> {
-  const files = (await generateSystems(await parseValid(SRC))).files;
+  const files = await generateSystemFiles(SRC);
   const path = [...files.keys()].find((k) => k.endsWith("/http/order.routes.ts"));
   expect(path, "order.routes.ts not emitted").toBeDefined();
   return files.get(path!)!;

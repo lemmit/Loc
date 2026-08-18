@@ -2,8 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { generateSystemFilesUnchecked, parseString } from "../../_helpers/index.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // Python backend — auth gate (plan S16, docs/auth.md).  An
@@ -23,9 +22,7 @@ const FIXTURE = fs.readFileSync(
 );
 
 async function build() {
-  const { model, errors } = await parseString(FIXTURE);
-  if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
-  return generateSystems(model).files;
+  return await generateSystemFiles(FIXTURE);
 }
 
 describe("python auth gate", () => {

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // BUG-003 (Python/FastAPI): a scalar (non-void, non-union) operation return
@@ -39,9 +38,7 @@ system Demo {
 `;
 
 async function routes(): Promise<string> {
-  const { model, errors } = await parseString(SRC);
-  if (errors.length) throw new Error(errors.join("\n"));
-  const files = generateSystems(model).files;
+  const files = await generateSystemFiles(SRC);
   const found = [...files.entries()].find(([k]) => /order_routes\.py$/i.test(k))?.[1];
   if (!found) throw new Error("order_routes.py not emitted");
   return found;

@@ -4,10 +4,8 @@
 // the write on the correlation-state row: saga state is a plain Ecto schema
 // (no Ash resource), so it rebinds `state` via an `Ecto.Changeset.change/2` +
 // `Repo.update!` in the dispatch start handler.
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `
   system S {
@@ -35,9 +33,7 @@ const SRC = `
 `;
 
 async function gen(): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(SRC);
-  if (errors.length) throw new Error(errors.join("\n"));
-  return generateSystems(model).files;
+  return await generateSystemFiles(SRC);
 }
 
 describe("phoenix/ash workflow own-state assignment", () => {
@@ -90,9 +86,7 @@ const COMPOUND_SRC = `
 `;
 
 async function genCompound(): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(COMPOUND_SRC);
-  if (errors.length) throw new Error(errors.join("\n"));
-  return generateSystems(model).files;
+  return await generateSystemFiles(COMPOUND_SRC);
 }
 
 describe("phoenix/ash workflow own-state compound assignment", () => {

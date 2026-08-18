@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // Custom validation messages on the Python/FastAPI backend — a messaged rule
@@ -32,9 +31,7 @@ const FIXTURE = `system S {
 `;
 
 async function gen() {
-  const { model, errors } = await parseString(FIXTURE);
-  if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
-  const files = generateSystems(model).files;
+  const files = await generateSystemFiles(FIXTURE);
   const key = (suffix: string) => [...files.keys()].find((k) => k.endsWith(suffix))!;
   return {
     domain: files.get(key("domain/product.py"))!,

@@ -11,10 +11,8 @@
 // `Normal` (TS2304 "Cannot find name 'Normal'", a bundle/runtime error).
 // `lowerProject` now indexes the project-global ambient enums so the value
 // resolves to `Priority.Normal` and the enum is imported.
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseValid } from "../../_helpers/parse.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `
   enum Priority { Low, Normal, High }
@@ -46,7 +44,7 @@ const SRC = `
 `;
 
 async function workflowsFile(): Promise<string> {
-  const files = (await generateSystems(await parseValid(SRC))).files;
+  const files = await generateSystemFiles(SRC);
   const path = [...files.keys()].find((k) => k.endsWith("/http/workflows.ts"));
   expect(path, "workflows.ts not emitted").toBeDefined();
   return files.get(path!)!;

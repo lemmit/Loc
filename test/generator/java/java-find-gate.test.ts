@@ -3,10 +3,8 @@
 // the find's controller action — the read-side twin of the view gate —
 // evaluated against the request's currentUser before delegating to the service.
 // ForbiddenException maps to 403 via the controller advice.  Ungated → no gate.
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 function src(findClause: string): string {
   return `system S { user { id: string  role: string } subdomain Sales { context Tickets {
@@ -20,9 +18,7 @@ function src(findClause: string): string {
 }
 
 async function controller(findClause: string): Promise<string> {
-  const { model, errors } = await parseString(src(findClause));
-  if (errors.length) throw new Error(errors.join("\n"));
-  const files = generateSystems(model).files;
+  const files = await generateSystemFiles(src(findClause));
   const entry = [...files.entries()].find(([k]) => k.endsWith("TicketsController.java"));
   expect(entry, "controller not emitted").toBeDefined();
   return entry![1];

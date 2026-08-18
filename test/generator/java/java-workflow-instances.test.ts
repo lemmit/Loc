@@ -4,10 +4,8 @@
 // GET workflows/<snake>/instances + .../instances/{id} over the persisted
 // <Wf>State saga row (read through its Spring Data repository) — the read-side
 // analogue of an aggregate's GET list / GET-by-id, parity with .NET / python.
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `system S { subdomain O { context O {
   aggregate Order { status: string  operation place() { status := "P"  emit OrderPlaced { order: id } } }
@@ -36,9 +34,7 @@ const PLAIN = `system S { subdomain O { context O {
   deployable api { platform: java contexts: [O] serves: A dataSources: [oState] port: 8080 } }`;
 
 async function gen(src: string): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(src);
-  if (errors.length) throw new Error(errors.join("\n"));
-  return generateSystems(model).files;
+  return await generateSystemFiles(src);
 }
 
 const find = (files: Map<string, string>, suffix: string): string | undefined =>

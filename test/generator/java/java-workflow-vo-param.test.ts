@@ -12,10 +12,8 @@
 //      to the typed `BigDecimal` literal in the workflow factory-let — Java
 //      emitted a raw `int 0` into a `BigDecimal` position and failed to
 //      compile.
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `system S { subdomain Core { context Wallet {
   valueobject Money { amount: decimal  currency: string  invariant amount >= 0 }
@@ -34,9 +32,7 @@ const SRC = `system S { subdomain Core { context Wallet {
   deployable api { platform: java  contexts: [Wallet]  serves: A  dataSources: [walletState]  port: 8080 } }`;
 
 async function gen(): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(SRC);
-  if (errors.length) throw new Error(errors.join("\n"));
-  return generateSystems(model).files;
+  return await generateSystemFiles(SRC);
 }
 
 function fileEndingWith(files: Map<string, string>, suffix: string): string {

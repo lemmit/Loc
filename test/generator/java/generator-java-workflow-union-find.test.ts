@@ -8,10 +8,8 @@
 //      type pattern ("cannot find symbol" otherwise).
 //   2. seed rows — a datetime string literal must parse to an `Instant`
 //      ("String cannot be converted to Instant" otherwise).
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseValid } from "../../_helpers/parse.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `
   system S {
@@ -53,7 +51,7 @@ const SRC = `
 `;
 
 async function build(): Promise<Map<string, string>> {
-  return generateSystems(await parseValid(SRC)).files;
+  return await generateSystemFiles(SRC);
 }
 
 function find(files: Map<string, string>, suffix: string): string {

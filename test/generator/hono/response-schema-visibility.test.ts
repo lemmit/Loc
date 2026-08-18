@@ -4,10 +4,8 @@
 // response, so the OpenAPI schema must not declare it either — declaring it
 // drifts the spec from the wire AND from the other backends (caught live by
 // conformance-parity as `SquadResponse: only-node=[isDeleted]`).
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `system S {
   subdomain Core {
@@ -26,9 +24,7 @@ const SRC = `system S {
 }`;
 
 async function routesFile(): Promise<string> {
-  const { model, errors } = await parseString(SRC);
-  if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
-  const files = generateSystems(model).files;
+  const files = await generateSystemFiles(SRC);
   return files.get("api/http/squad.routes.ts") ?? "";
 }
 
