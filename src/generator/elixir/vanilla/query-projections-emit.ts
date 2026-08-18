@@ -285,7 +285,7 @@ ${
     do: ndt |> DateTime.from_naive!("Etc/UTC") |> DateTime.truncate(:second)
 `
     : ""
-}${moneyWireHelper(grouped.aggregates)}end
+}${moneyWireHelper(grouped.aggregates, grouped.keys)}end
 `;
   }
 
@@ -447,11 +447,26 @@ end
  *  (`Decimal.round(Decimal.new("40.00"), 4)` → `"40.0000"`).  The non-Decimal
  *  clause catches the `|| 0` zero-default a non-optional field applies over an
  *  empty table, which must read `"0.0000"` and not a bare `"0"`. */
-function moneyWireHelper(aggregates: readonly AggregateSelect[]): string {
-  if (!aggregates.some((a) => aggregateCoercion(a).isMoney)) return "";
+function moneyWireHelper(
+  aggregates: readonly AggregateSelect[],
+  keys: readonly GroupKeySelect[] = [],
+): string {
+  const isMoneyType = (t: TypeIR): boolean => {
+    const inner = t.kind === "optional" ? t.inner : t;
+    return inner.kind === "primitive" && inner.name === "money";
+  };
+  // Keys count too: a projection that groups BY money without aggregating any
+  // still calls `__money_wire/1`, and the call without the helper is a
+  // `--warnings-as-errors` compile failure.
+  if (
+    !aggregates.some((a) => aggregateCoercion(a).isMoney) &&
+    !keys.some((k) => isMoneyType(k.type))
+  )
+    return "";
   return `
   # RS-12 money scale: a SQL aggregate echoes the scale its rows were STORED
-  # at, so pin the wire value to the canonical scale every other read uses.
+  # at, and a grouping KEY echoes the scale its row was WRITTEN at, so pin the
+  # wire value to the canonical scale every other read uses.
   defp __money_wire(%Decimal{} = dec), do: dec |> Decimal.round(${MONEY_WIRE_SCALE}) |> to_string()
 
   defp __money_wire(value), do: value |> Decimal.new() |> __money_wire()
@@ -530,9 +545,13 @@ function ectoKeyCoerce(k: GroupKeySelect, read: string, viaFragment = false): st
     return optional ? `if(is_nil(${read}), do: nil, else: ${norm})` : norm;
   }
   if (inner.kind === "primitive" && inner.name === "money") {
+    // The FIXED money scale (RS-12) — a grouping KEY reads the stored column,
+    // so a bare `to_string` shipped whatever scale the row was written at.  The
+    // group-key twin of the aggregate fix in #2549; `__money_wire/1` is the
+    // same helper, and `moneyWireHelper` now gates on keys as well as aggregates.
     return optional
-      ? `if(is_nil(${read}), do: nil, else: to_string(${read}))`
-      : `to_string(${read})`;
+      ? `if(is_nil(${read}), do: nil, else: __money_wire(${read}))`
+      : `__money_wire(${read})`;
   }
   if (inner.kind === "primitive" && inner.name === "decimal") {
     const num = `Decimal.to_float(Decimal.new(to_string(${read})))`;

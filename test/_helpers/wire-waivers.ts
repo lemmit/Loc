@@ -35,39 +35,17 @@
 // wire-translatable messaged precondition denies with `{:validation_failed,
 // errors}` rendered through the shared `errors[]` 422 sender.
 //
-// That drain took the registry back to empty on 2026-08-16; the single entry
-// below (#2563, .NET decimal precision) landed the same day and is the only
-// remaining waiver.  Empty stays the target state: a new divergence is a BUG
-// to fix on the diverging backend first, and a waiver only when fixing it is
-// a mission of its own with a named exit.
+// That drain took the registry back to empty on 2026-08-16, except for one
+// entry that landed the same day — #2563, .NET backing a wire `decimal` with
+// `System.Decimal` and so truncating a projection `avg` to ~15 significant
+// digits.  That is now fixed too (the RESPONSE field is a `double`, the
+// float64 the other four backends send), so the registry is EMPTY again.
+//
+// Empty is the target state, not a milestone: a new divergence is a BUG to fix
+// on the diverging backend first, and a waiver only when fixing it is a mission
+// of its own with a named exit.
 // ---------------------------------------------------------------------------
 
 import type { WireWaiver } from "./wire-record.js";
 
-export const WIRE_WAIVERS: readonly WireWaiver[] = [
-  // #2563 — a wire `decimal` is a float64 on four backends and a
-  // `System.Decimal` on .NET, so a value needing more than ~15 significant
-  // digits truncates.  `avg(o.lineCount)` over lineCounts 2/4/1 is 7/3:
-  // node/python/java/elixir all send the double's shortest round-trip
-  // spelling `2.3333333333333335`, .NET sends `2.33333333333333`.
-  //
-  // Found while fixing the money-scale divergence on this same path (#2549)
-  // and NOT folded into it: that was `money` losing its fixed wire SCALE and
-  // was fixable in each projection emitter's coercion, which is why all 22 of
-  // those divergences are gone and this one is not.  This is the numeric TYPE
-  // backing a wire `decimal` on .NET — the value cannot be recovered inside a
-  // `System.Decimal`, so closing it means deciding that representation
-  // globally (response records + OpenAPI schema), which is its own unit.
-  //
-  // Scoped to the one case and field that can reach it: `sum`/`min`/`max` over
-  // a decimal stay exact, and the singleton case's own `avgLines` is (2+4)/2 =
-  // 3, which both representations spell identically.
-  {
-    backends: ["dotnet"],
-    cases: ["projection-groupby"],
-    path: "$[*].avgLines",
-    kinds: ["value"],
-    reason:
-      "#2563 — .NET backs a wire `decimal` with System.Decimal, truncating a projection `avg` to ~15 significant digits where the other four send the float64 (RS-24 fixes the JSON type, not the precision)",
-  },
-];
+export const WIRE_WAIVERS: readonly WireWaiver[] = [];

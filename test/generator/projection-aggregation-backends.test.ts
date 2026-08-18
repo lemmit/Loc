@@ -120,7 +120,10 @@ describe("dotnet", () => {
     // is then `CS1503: cannot convert from 'double' to 'decimal'`.  Found by
     // the real compiler, not by a unit test.
     const handler = await fileEndingWith("dotnet", "Projections/SalesTotalsQpHandler.cs");
-    expect(handler).toContain("(decimal)(agg?.AvgLines ?? 0)");
+    // The row field is a `double` (#2563 — a wire `decimal` is the float64
+    // the other four backends send), so the LINQ `Average` result crosses
+    // unchanged rather than narrowing into a System.Decimal.
+    expect(handler).toContain("(double)(agg?.AvgLines ?? 0)");
     // money formats at the FIXED wire scale rather than echoing the aggregate's
     // own (RS-12 / #2549) — `"F4"`, not a bare `ToString`.
     expect(handler).toContain('(agg?.Revenue ?? 0m).ToString("F4", CultureInfo.InvariantCulture)');

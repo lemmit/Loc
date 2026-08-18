@@ -144,7 +144,24 @@ export function wireType(
   let s: string;
   switch (info.refKind) {
     case "primitive":
-      s = CS_WIRE_PRIMITIVE[info.primitive!];
+      // A plain `decimal` leaves the .NET wire as a `double` (#2563).  RS-24
+      // fixes it as a JSON NUMBER, and the other four backends all carry that
+      // number through an IEEE-754 double — node `Number(...)`, python
+      // `float(...)`, java's provider `Double`, elixir `Decimal.to_float` — so
+      // a value needing more than `System.Decimal`'s ~15 significant digits
+      // (any non-terminating `avg`) serialized differently on .NET alone:
+      // `2.33333333333333` against everyone else's `2.3333333333333335`.
+      //
+      // RESPONSE only.  On the REQUEST side `decimal` stays `decimal`: a
+      // `double` field would accept a JSON number outside decimal's range and
+      // then throw `OverflowException` converting it to the domain type — a 500
+      // where the current parse gives a 400.  The asymmetry costs nothing on
+      // the wire, since a client may send more precision than it reads back
+      // (which is already true of every other backend).
+      s =
+        dir === "response" && info.primitive === "decimal"
+          ? "double"
+          : CS_WIRE_PRIMITIVE[info.primitive!];
       break;
     case "id":
       // Pre-existing divergence: every id crosses the .NET wire as
@@ -391,6 +408,12 @@ export function projectToResponse(
         // byte-consistent with the other backends.  InvariantCulture pins the
         // decimal separator.
         return `${domainExpr}.ToString("F${MONEY_WIRE_SCALE}", System.Globalization.CultureInfo.InvariantCulture)`;
+      }
+      if (info.primitive === "decimal") {
+        // The domain keeps `System.Decimal`; the RESPONSE field is a `double`
+        // (#2563 — see `wireType`), so the narrowing happens here, once, at the
+        // wire boundary.
+        return `(double)${domainExpr}`;
       }
       return domainExpr;
     case "id":
