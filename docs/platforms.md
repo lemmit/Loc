@@ -120,11 +120,15 @@ available. The matured axis today is **`persistence:`**:
   embedded / event-sourced / inheritance (TPH+TPC) shape, containment (incl.
   recursive part-in-part), associations, filters, audit / provenance / managed
   fields, retrievals, seeds, and the workflow outbox all emit. `dapper` ≡ EF
-  Core; `mikroorm` ≡ Drizzle. `loom.dapper-unsupported` /
-  `loom.mikroorm-unsupported` now fire ONLY for one genuinely-impossible shape
-  each (Dapper: an un-owned by-value entity-array part *field*; MikroORM: an
-  abstract inheritance base owning its own `contains`) — fail-fast guards, not
-  subset boundaries. The alternates share the generated **domain layer**
+  Core; `mikroorm` ≡ Drizzle. Neither adapter rejects a SHAPE any more:
+  `loom.mikroorm-unsupported` now fires only for declared migration steps
+  (`orm.schema.updateSchema()` has no rename intent to consult), and its last
+  shape reject — an abstract inheritance base owning its own `contains` — turned
+  out to be impossible on every target and became the target-neutral
+  `loom.abstract-aggregate-contains` (see [`inheritance.md`](inheritance.md)).
+  The remaining adapter-specific narrowing is on the FIND-PREDICATE axis
+  (`loom.find-predicate-unsupported`): MikroORM lowers no reference-collection
+  membership subquery. The alternates share the generated **domain layer**
   with the default and only swap the persistence layer (Dapper SQL
   repositories / MikroORM `EntitySchema` + `EntityManager`), so a project
   can switch persistence without touching its domain code.
