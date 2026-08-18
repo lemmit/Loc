@@ -71,7 +71,7 @@ interface CarriedEvent {
 
 /** Collect the UI-observable events across every hosted context, ordered by
  *  event name so the emitted clause order is deterministic. */
-export function collectRealtimeEvents(contexts: readonly BoundedContextIR[]): CarriedEvent[] {
+function collectRealtimeEvents(contexts: readonly BoundedContextIR[]): CarriedEvent[] {
   const out: CarriedEvent[] = [];
   for (const ctx of contexts) {
     const carried = realtimeEventTypes(ctx);
@@ -89,13 +89,6 @@ export function collectRealtimeEvents(contexts: readonly BoundedContextIR[]): Ca
     }
   }
   return out.sort((a, b) => a.ev.name.localeCompare(b.ev.name));
-}
-
-/** True when the deployable serves the SSE wire — i.e. at least one hosted
- *  context declares a `delivery: broadcast` channel that carries an event.
- *  Gates the controller emit AND the router route. */
-export function hasVanillaRealtime(contexts: readonly BoundedContextIR[]): boolean {
-  return collectRealtimeEvents(contexts).length > 0;
 }
 
 /** Unwrap `optional`. */
