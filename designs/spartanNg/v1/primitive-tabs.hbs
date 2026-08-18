@@ -1,6 +1,6 @@
 {{#if hasTabs}}<div class="loom-tabs"{{{testidAttr}}}{{{styleAttr}}}>
 {{indent}}{{#each tabs}}<section class="loom-tab-panel">
-{{../innerIndent}}<div class="loom-tab-trigger" aria-selected="true">{{this.label}}</div>
+{{../innerIndent}}<div class="loom-tab-trigger" aria-selected="true">{{{this.label}}}</div>
 {{../innerIndent}}{{{this.bodyJsx}}}
 {{../indent}}</section>{{#unless @last}}
 {{../indent}}{{/unless}}{{/each}}

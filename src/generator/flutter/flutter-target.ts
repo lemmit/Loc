@@ -286,7 +286,10 @@ export const flutterTarget: WalkerTarget = {
     return (
       `InkWell(onTap: ${onTap}, child: Semantics(button: true, ` +
       `label: ${spec.sortByLabel ?? dartString(`Sort by ${header}`)}, child: Row(mainAxisSize: MainAxisSize.min, ` +
-      `children: <Widget>[Text(${dartString(header)}), ${arrow}])))`
+      // The caption is a user-visible slot (`columnHeader`): under i18n it
+      // arrives as a Dart translation EXPRESSION, otherwise as raw text this
+      // spells as a string literal — byte-identical to before.
+      `children: <Widget>[Text(${spec.headerValue ?? dartString(header)}), ${arrow}])))`
     );
   },
 

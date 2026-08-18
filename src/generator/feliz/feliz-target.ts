@@ -857,7 +857,10 @@ export const felizTarget: WalkerTarget = {
     // reading as a header rather than a control.
     return (
       `Html.button [ prop.className "btn btn-ghost btn-xs px-1 font-bold"; prop.type'.button; ` +
-      `prop.onClick (${onClick}); prop.text ("${header}" + ${indicator}) ]`
+      // The caption is a user-visible slot (`columnHeader`): under i18n it
+      // arrives as an F# translation EXPRESSION, otherwise as raw text this
+      // spells as a string literal — byte-identical to before.
+      `prop.onClick (${onClick}); prop.text (${spec.headerValue ?? `"${header}"`} + ${indicator}) ]`
     );
   },
 

@@ -894,7 +894,14 @@ describe("pack-chrome i18n — select placeholder", () => {
 // walk-context fact the target-agnostic extraction pass cannot see.  The last
 // two tests are that gate in both directions.
 
-/** A one-page system whose body is a client-paged `Table`. */
+/** A one-page system whose body is a client-paged `Table`.
+ *
+ *  The column header is a STATE ref rather than the literal `"Name"` it used to
+ *  be: a `Column` header became a user-visible slot (`columnHeader`, M-T1.11),
+ *  so a literal there is authored prose and would turn i18n on by itself —
+ *  which is exactly the switch the last three cases here need OFF.  A dynamic
+ *  header has no source string, so the fixture is string-less again and the
+ *  merge-gate assertions still test the gate rather than the header. */
 const PAGED_TABLE = (platform: string, design: string, extra = "", framework = "") => `
   system S {
     subdomain Sales {
@@ -910,9 +917,9 @@ const PAGED_TABLE = (platform: string, design: string, extra = "", framework = "
       api Sales: SalesApi
       page X {
         route: "/x"
-        state { pageNum: int = 1 }
+        state { pageNum: int = 1 colHeader: string = "Name" }
         body: Stack { ${extra}QueryView { of: Sales.Customer.recent, data: rows => Table(
-          Column("Name", o => o.name),
+          Column(colHeader, o => o.name),
           rows: rows,
           page: pageNum,
           pageSize: 5
