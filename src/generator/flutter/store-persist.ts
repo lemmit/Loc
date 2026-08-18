@@ -361,12 +361,15 @@ export function persistNotifierMembers(
   out.push("  }");
 
   if (p.tier === "url") {
+    // `copyWith`, not a full construction: it re-seeds exactly the PERSISTED
+    // cells and leaves any other at its current value, so the method stays
+    // correct if a store ever mixes persisted and unpersistable fields.
     out.push(
       "",
       "  /// Re-read the query string — the browser back/forward half of the `url`",
       "  /// tier, driven by `LoomUrlStoreSync`.",
       "  void hydrateFromUrl() {",
-      `    state = ${stateClass}(`,
+      "    state = state.copyWith(",
       ...p.fields.map(({ field }) => `      ${field.name}: _load${upperFirst(field.name)}(),`),
       "    );",
       "  }",
