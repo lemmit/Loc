@@ -1216,3 +1216,47 @@ nothing and the test passes vacuously.
   `union-find-absence.ddd`'s error payload to a multi-word field would promote
   it at no new CI boot cost, and is the highest-yield single golden change
   available.
+
+---
+
+### RS-31 · A string `.length` bound counts Unicode code points, not the host's native string length
+- **Guarantee.** `s.length` on a string — in an invariant, a precondition, or a
+  plain domain read — is a count of **Unicode code points**. `"😀X"` is **2**,
+  not 3: the emoji is one code point and two UTF-16 code units. This is the
+  unit the emitted JSON Schema already publishes as `minLength`/`maxLength`, so
+  the bound a backend *enforces* and the bound it *advertises* are the same
+  number.
+- **Trigger.** Any `len-*` bound (`code.length >= 3`, `label.length <= 16`,
+  `currency.length == 3`) fed a value containing an astral character.
+- **The split.** 3-vs-1-vs-1 before the fix: JS `s.length`, C# `s.Length` and
+  Java `s.length()` count UTF-16 **code units**; python's `len` counts **code
+  points**; elixir's `String.length/1` counts **graphemes**. The three
+  code-unit backends accepted a value their own published `maxLength`/
+  `minLength` forbade — the write side persisted data the read side could not
+  legally serve.
+- **Both carriers, or neither.** A message-less single-field bound rides each
+  backend's *native validator chain* (zod `.min`/`.max`, FluentValidation
+  `.MinimumLength`, …); a messaged rule and the domain floor ride the
+  *expression renderer*. They are separate code paths, so fixing one leaves the
+  other wrong — which is why the pinned case exercises both directions.
+- **The declaration survives.** zod cannot describe a `.refine` to the OpenAPI
+  emitter, so the Hono routes re-attach `.openapi({ minLength, maxLength })`.
+  The published bound is byte-identical to before; only what the server
+  enforces changed.
+- **Elixir is a signed residual, not a conformer.** Graphemes agree with code
+  points on every astral character (so it passes the pinned case) and diverge
+  only on combining sequences (`"e\u0301"` — one grapheme, two code points),
+  which nothing in the corpus reaches. Ecto's `validate_length/3` has no
+  `:codepoints` count, so closing it means hand-rolling Ecto's error tuples —
+  a unit of its own.
+- **Conforms.** node, dotnet, java, python. **Residual:** elixir.
+- **Provenance.** Found 2026-08-06 by the M-T9.21 schemathesis leg (finding F5,
+  waiver W6). Fixed via one shared definition,
+  `src/generator/_expr/code-point.ts`, consumed by both the domain rule
+  renderer and the wire-boundary validator emitter of each backend. Pinned in
+  `test/fixtures/corpus/validation-messages.ddd` and recorded in
+  `wire-golden/validation-messages.json` — a 2-code-point label DENIED by
+  `>= 3`, a 9-code-point / 18-code-unit label ADMITTED by `<= 16` and
+  round-tripped — verified to fail with each half of the fix reverted
+  independently. Statically pinned per backend by
+  `test/generator/string-length-code-points.test.ts`. Tier: **behavioral**.

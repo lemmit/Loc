@@ -15,6 +15,7 @@ import {
 import { lines } from "../../../util/code-builder.js";
 import { messageCode } from "../../../util/message-code.js";
 import { upperFirst } from "../../../util/naming.js";
+import { javaCodePointLength } from "../../_expr/code-point.js";
 import {
   collectJavaExprImports,
   collectJavaRegexLiterals,
@@ -427,14 +428,21 @@ function patternCheck(
       return [fail(cmp(pattern.exclusive ? "<" : "<=", pattern.n))];
     case "between":
       return [fail(`${cmp(">=", pattern.lo)} && ${cmp("<=", pattern.hi)}`)];
+    // CODE POINTS, not `String.length()`'s UTF-16 code units — the same count
+    // the emitted OpenAPI publishes as `minLength`/`maxLength`
+    // (src/generator/_expr/code-point.ts).
     case "len-min":
-      return [fail(`${field}.length() >= ${pattern.n}`)];
+      return [fail(`${javaCodePointLength(field)} >= ${pattern.n}`)];
     case "len-max":
-      return [fail(`${field}.length() <= ${pattern.n}`)];
+      return [fail(`${javaCodePointLength(field)} <= ${pattern.n}`)];
     case "len-eq":
-      return [fail(`${field}.length() == ${pattern.n}`)];
+      return [fail(`${javaCodePointLength(field)} == ${pattern.n}`)];
     case "len-range":
-      return [fail(`${field}.length() >= ${pattern.lo} && ${field}.length() <= ${pattern.hi}`)];
+      return [
+        fail(
+          `${javaCodePointLength(field)} >= ${pattern.lo} && ${javaCodePointLength(field)} <= ${pattern.hi}`,
+        ),
+      ];
     case "regex": {
       let name = regexFields.get(pattern.pattern);
       if (!name) {
