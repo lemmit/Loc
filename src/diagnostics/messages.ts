@@ -1392,7 +1392,7 @@ export const DIAGNOSTIC_MESSAGES = {
   }) =>
     `Deployable '${p.name}': ui '${p.uiName}' declares 'on <channel>.<Event>' live-event handler(s), but its ${
       p.target
-    } does not serve the realtime SSE wire, so the handlers are silently dropped. Target a realtime-serving backend (node, dotnet, java, python) or remove the handlers.`,
+    } does not serve the realtime SSE wire, so the handlers are silently dropped. Target a realtime-serving backend (node, dotnet, java, python, elixir) or remove the handlers.`,
   "loom.ui-realtime-unsupported#frontend-has-no-consumer": (p: {
     name: unknown;
     uiName: unknown;
