@@ -1241,16 +1241,14 @@ export function generateTypeScriptForContexts(
       // OIDC turnkey auth: register the generated verifier instead of the
       // dev stub.
       !!oidcAuth,
-      // Hierarchy (multi-tenancy P2.2): the drizzle table var for the tenant
-      // registry when it opts into `tenantRegistry` — boot registers the
-      // `orgPath` resolver (`SELECT data_key … WHERE id = <claim>`) that the
-      // auth middleware calls per request.  `undefined` for flat tenancy.
-      authRequired && system
-        ? (() => {
-            const reg = hierarchyRegistry(system.sys);
-            return reg ? lowerFirst(plural(reg.name)) : undefined;
-          })()
-        : undefined,
+      // Hierarchy (multi-tenancy P2.2): the tenant-registry AGGREGATE name when
+      // it opts into `tenantRegistry` — boot registers the `orgPath` resolver
+      // (`SELECT data_key … WHERE id = <claim>`) that the auth middleware calls
+      // per request, on both persistence adapters.  `undefined` for flat
+      // tenancy.  The aggregate name (not the drizzle table var) is what
+      // crosses the seam: each branch needs a different spelling of it (the
+      // `orgs` schema var vs the `OrgRow` entity class).
+      authRequired && system ? hierarchyRegistry(system.sys)?.name : undefined,
       // Timer scheduler (scheduling.md, M-T4.1): boot wires startTimerScheduler
       // into the same in-process dispatcher the outbox relay uses.
       hasTimers,
@@ -1551,7 +1549,7 @@ function renderProjectIndexTs(
   outboxRelay = false,
   hasRealtime = false,
   oidc = false,
-  orgPathRegistryTable?: string,
+  orgPathRegistryAgg?: string,
   hasTimers = false,
   hasChannels = false,
   hasChannelConsumers = false,
@@ -1592,17 +1590,36 @@ function renderProjectIndexTs(
     : oidc
       ? `\n// OIDC verifier (D-AUTH-OIDC) — validates the IdP's tokens against its\n// JWKS and maps claims onto the typed User.  Configure the issuer /\n// client via the env vars the \`auth { oidc }\` block referenced.\nregisterOidcVerifier();\nbaseLogger.info({ event: "auth_oidc_verifier_registered" });\n`
       : `\n// Dev-stub verifier (auth/dev-stub.ts) — accepts every request as a\n// built-in identity filling every field the \`user { … }\` block declares.\n// Dev-only: the Loom playground (or curl) can override the claims by\n// sending a base64-encoded JSON object in \`x-loom-dev-claims\`; absent the\n// header the built-in identity is used.  REPLACE for production by calling\n// registerUserVerifier(...) with a real JWT-decoding implementation.\nregisterDevStubVerifier();\nbaseLogger.warn({ event: "auth_dev_stub_registered" });\n`;
-  // Tenant-registry orgPath resolver (multi-tenancy P2.2) — wired only on the
-  // drizzle path (mikroorm hierarchy falls back to the claim via the
-  // unregistered-resolver path).  The auth middleware calls it per request;
-  // here we bind it to the db with a `SELECT data_key … WHERE id = <claim>`.
-  const wireOrgPath = !!orgPathRegistryTable && !usingMikro;
-  const orgPathImport = wireOrgPath
-    ? `import { eq } from "drizzle-orm";\nimport { registerOrgPathResolver } from "./auth/middleware";\n`
-    : "";
-  const orgPathRegistration = wireOrgPath
-    ? `\n// Register the tenant-registry \`orgPath\` resolver (multi-tenancy P2.2):\n// currentUser.orgPath = the caller org's materialized \`data_key\`, memoized\n// per request in the auth middleware; a missing row / dataKey falls back to\n// the claim (root-segment path) — fail-safe, never null/crash.\nregisterOrgPathResolver(async (claim) => {\n  const rows = await db\n    .select({ dataKey: schema.${orgPathRegistryTable}.dataKey })\n    .from(schema.${orgPathRegistryTable})\n    .where(eq(schema.${orgPathRegistryTable}.id, claim))\n    .limit(1);\n  return rows[0]?.dataKey ?? null;\n});\n`
-    : "";
+  // Tenant-registry orgPath resolver (multi-tenancy P2.2) — wired on BOTH
+  // persistence paths.  The auth middleware calls it per request; here we bind
+  // it to the db with a `SELECT data_key … WHERE id = <claim>`.
+  //
+  // It used to be drizzle-only, on the reasoning that "mikroorm hierarchy falls
+  // back to the claim via the unregistered-resolver path".  That fallback is
+  // fail-SAFE only in the flat sense: `orgPath` degrades to the bare claim, so
+  // a child org reads as its own root and the whole subtree ladder collapses —
+  // which was consistent while the adapter refused hierarchical tenancy outright,
+  // and is a silent wrong answer now that it renders the subtree predicate.  The
+  // mikro branch reads the registry Row through the EntityManager instead
+  // (`findOne(<Reg>Row, { id: claim })`), the same one-row lookup.
+  // The drizzle schema-table var (`orgs`) and the MikroORM Row entity class
+  // (`OrgRow`) for the same registry aggregate — one name in, both spellings
+  // derived here rather than at the call site, so the two persistence branches
+  // cannot drift apart.
+  const orgPathRegistryTable = orgPathRegistryAgg && lowerFirst(plural(orgPathRegistryAgg));
+  const orgPathRegistryRow = orgPathRegistryAgg && `${orgPathRegistryAgg}Row`;
+  const wireOrgPath = !!orgPathRegistryAgg;
+  const orgPathImport = !wireOrgPath
+    ? ""
+    : usingMikro
+      ? `import { registerOrgPathResolver } from "./auth/middleware";\nimport { ${orgPathRegistryRow} } from "./db/entities";\n`
+      : `import { eq } from "drizzle-orm";\nimport { registerOrgPathResolver } from "./auth/middleware";\n`;
+  const orgPathDoc = `\n// Register the tenant-registry \`orgPath\` resolver (multi-tenancy P2.2):\n// currentUser.orgPath = the caller org's materialized \`data_key\`, memoized\n// per request in the auth middleware; a missing row / dataKey falls back to\n// the claim (root-segment path) — fail-safe, never null/crash.\n`;
+  const orgPathRegistration = !wireOrgPath
+    ? ""
+    : usingMikro
+      ? `${orgPathDoc}registerOrgPathResolver(async (claim) => {\n  const row = await db.fork().findOne(${orgPathRegistryRow}, { id: claim });\n  return row?.dataKey ?? null;\n});\n`
+      : `${orgPathDoc}registerOrgPathResolver(async (claim) => {\n  const rows = await db\n    .select({ dataKey: schema.${orgPathRegistryTable}.dataKey })\n    .from(schema.${orgPathRegistryTable})\n    .where(eq(schema.${orgPathRegistryTable}.id, claim))\n    .limit(1);\n  return rows[0]?.dataKey ?? null;\n});\n`;
   // Event-dispatch / relay / scheduler imports — SHARED by both persistence
   // branches (M-T6.23 slice 1: the mikro adapter now emits the outbox relay
   // too, so this block can no longer live inside the drizzle arm).  Empty when
@@ -1643,7 +1660,7 @@ function renderProjectIndexTs(
     ? `import { serve } from "@hono/node-server";
 import { createApp } from "./http/index";
 ${MIKRO_INDEX_IMPORTS.join("\n")}
-${dispatcherImports}${seedImport}${authStubImport}import { baseLogger } from "./obs/log";
+${dispatcherImports}${seedImport}${authStubImport}${orgPathImport}import { baseLogger } from "./obs/log";
 import { shutdownTracing } from "./obs/tracing";`
     : `import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
