@@ -272,11 +272,15 @@ export function renderHttpIndex(
     "ConcurrencyConflict",
     ctx.structuralErrorStatuses,
   );
+  // The domain NOT-FOUND rung, resolved like every other one (M-T5.20 final
+  // slice).  Distinct from the FRAMEWORK 404 below it (`no route for …`), which
+  // is about the URL space and stays literal on all five backends.
+  const rootNotFoundStatus = resolveErrorStatus("NotFound", ctx.structuralErrorStatuses);
   const rootNeedsConcurrency = aggregatesNeedConcurrency(ctx.aggregates);
   const rootHasUniqueKeys = aggregatesHaveUniqueKeys(ctx.aggregates);
   const rootProblemStatuses = new Set<number>([
     rootForbiddenStatus,
-    404,
+    rootNotFoundStatus,
     rootDomainStatus,
     500,
     rootDisallowedStatus,
@@ -314,9 +318,9 @@ export function renderHttpIndex(
     `      return problem(${rootDomainStatus}, ${JSON.stringify(problemTitle(rootDomainStatus))}, err.message);`,
     "    }",
     "    if (err instanceof AggregateNotFoundError) {",
-    `      ${renderHonoBaseLogCall("notFound", "status: 404")}`,
+    `      ${renderHonoBaseLogCall("notFound", `status: ${rootNotFoundStatus}`)}`,
     '      recordDomainFault("not_found");',
-    '      return problem(404, "Not Found", err.message);',
+    `      return problem(${rootNotFoundStatus}, ${JSON.stringify(problemTitle(rootNotFoundStatus))}, err.message);`,
     "    }",
     ...(rootHasUniqueKeys
       ? [

@@ -1482,10 +1482,12 @@ function renderProblemPy(
   // N-place edit and `httpStatus DomainError -> 400` was inexpressible. The
   // title now derives from the RESOLVED status's IANA reason phrase, so the two
   // cannot disagree. Defaults: 422 "Unprocessable Entity" / 403 "Forbidden" —
-  // byte-identical. (The 404 arm stays literal — see the NotFound note in
-  // `src/ir/util/openapi-errors.ts`.)
+  // byte-identical.  The `NotFound` rung joined them in the follow-up slice; the
+  // FRAMEWORK 404 (`StarletteHTTPException` with `status_code == 404` — an
+  // unmatched path) is a different concern and stays literal.
   const domainStatus = resolveErrorStatus("DomainError", structuralErrorStatuses);
   const forbiddenStatus = resolveErrorStatus("Forbidden", structuralErrorStatuses);
+  const notFoundStatus = resolveErrorStatus("NotFound", structuralErrorStatuses);
   // JSON literals are valid Python for the value kinds used here (strings,
   // arrays, objects — no booleans/nulls cross).
   const responsesDict = JSON.stringify(Object.fromEntries(opUnions.map((u) => [u.path, u.name])));
@@ -1703,9 +1705,9 @@ def install_error_handlers(app: FastAPI) -> None:
 
 ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFoundError)
     async def _not_found(request: Request, err: AggregateNotFoundError) -> JSONResponse:
-        log("warn", "not_found", message=str(err), status=404)
+        log("warn", "not_found", message=str(err), status=${notFoundStatus})
         record_domain_fault("not_found")
-        return problem(request, 404, "Not Found", str(err))
+        return problem(request, ${notFoundStatus}, "${problemTitle(notFoundStatus)}", str(err))
 
     @app.exception_handler(RequestValidationError)
     async def _validation(request: Request, err: RequestValidationError) -> JSONResponse:
