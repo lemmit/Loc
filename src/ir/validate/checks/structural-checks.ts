@@ -1451,10 +1451,40 @@ export function validateFieldDefaults(ctx: BoundedContextIR, diags: LoomDiagnost
 // them for free, since a lifecycle `requires` is a statement in the
 // create/destroy body.
 //
-// The LEGAL sites are the three the `deriveNeeds` enrichment already scans for
-// usage-derived resource needs: workflow bodies, command/query handler bodies,
-// and domain-service operation bodies.  Everything else on an aggregate / part
-// / value object is rejected.
+// The LEGAL sites are workflow bodies and command/query handler bodies —
+// the application layer, which owns the transaction and all outbound I/O.
+// Everything else on an aggregate / part / value object is rejected.
+//
+// DOMAIN SERVICES ARE *NOT* A LEGAL SITE.  The first cut of this gate listed
+// `domainService` operation bodies as legal, matching the ambient-resource
+// `Env` and the three sites `deriveNeeds` scans.  No domain-service emitter
+// threads a resource client in, so the "legal" third site failed in the SAME
+// five ways the aggregate bodies did — re-verified against a `domainService
+// Archiver { operation archived(name: string): bool { let existing =
+// salesFiles.list("orders/" + name) … } }`:
+//
+//   .NET   — THROWS "reached the .NET renderer without a resource class
+//            mapping" out of `emit/domain-service.ts` → `renderOperation`.
+//   Java   — THROWS the Java twin out of `emit/domain-service.ts`.
+//   Phoenix— THROWS "reached the Phoenix renderer without a module mapping"
+//            out of `domain-service-emit.ts` → `renderOperation`.
+//   TS     — emits `(await salesFiles$list(…))` into `domain/services.ts`, a
+//            file importing no resource client, inside a NON-async
+//            `export function` → TS1308 + TS2304.
+//   Python — emits the same `await` into a bare `def` in
+//            `app/domain/services/<svc>.py` → SyntaxError + F821.
+//
+// And porting it is a LANGUAGE change, not plumbing.  `docs/domain-services.md`
+// defines a domain service as a stateless calculator whose only infrastructure
+// touch is a read-only repository query, with the `workflow` owning "the
+// transaction and all outbound I/O"; a resource-op is outbound I/O.  Admitting
+// one would also (1) re-open the aggregate hole this gate just closed — a
+// `pure`-tier op is callable from an aggregate `operation`, so the tier ladder
+// (`classifyDomainServiceTier`) would need a new tier plus a call-site gate,
+// (2) force async signatures onto the sync static/module shapes four of five
+// backends emit for the pure/reading tiers, and (3) let a resource-op hide from
+// `loom.resource-op-in-transaction`, which only walks the workflow span.  So
+// the honest answer is an error at the source, not five silent failures.
 // ---------------------------------------------------------------------------
 
 /** Push one diagnostic per (location, resource.verb) — an operation calling the
@@ -1521,6 +1551,14 @@ export function validateResourceOpPlacement(ctx: BoundedContextIR, diags: LoomDi
   // there has no renderable form on any backend either.
   for (const repo of ctx.repositories) {
     for (const f of repo.finds) flag(`repository[${repo.name}].find[${f.name}]`, f.filter);
+  }
+  // Domain-service operation bodies — see the DOMAIN SERVICES header note: the
+  // five emitters split 3 throws / 2 unimported-await-in-a-sync-function, so
+  // this is the same class, not a per-backend gap.
+  for (const svc of ctx.domainServices) {
+    for (const op of svc.operations) {
+      flagStmts(`domainService[${svc.name}].operation[${op.name}]`, op.body);
+    }
   }
 }
 
