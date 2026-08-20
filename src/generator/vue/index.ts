@@ -32,6 +32,7 @@ import {
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import { pageEmitPath } from "../_frontend/page-identity.js";
 import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import {
@@ -676,8 +677,11 @@ function renderShell(pack: LoadedPack, name: string, vm: unknown): string {
  *  `.vue` in place of `.tsx` (scaffold pages keep their conventional
  *  `src/pages/<plural>/list.vue` shape via `emitPath`). */
 function pagePath(page: PageIR): string {
-  if (page.emitPath) return page.emitPath.replace(/\.tsx$/, ".vue");
-  return `src/pages/${snake(page.name)}.vue`;
+  // One derivation, shared with every other frontend
+  // (`src/generator/_frontend/page-identity.ts`) — Vue was already the only
+  // frontend that got this family right, so it becomes the helper's caller
+  // rather than its own copy.
+  return pageEmitPath(page, ".vue");
 }
 
 /** Pascal component name for a page's router import, derived from its

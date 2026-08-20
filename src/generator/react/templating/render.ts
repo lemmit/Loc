@@ -94,6 +94,10 @@ export function renderAppShell(
   /** Whether this UI is i18n-enabled — threads to the shell chrome tokens +
    *  the `{ t }` import (M-T1.11, pack-chrome). */
   i18nEnabled = false,
+  /** Conventional-slot → emitted module specifier for this ui's pages
+   *  (`buildPageModuleIndex`).  Lets the shell import where each scaffold page
+   *  ACTUALLY landed instead of reconstructing the path by convention. */
+  pageModules: ReadonlyMap<string, string> = new Map(),
 ): string {
   return pack.render("app-shell", {
     hasRealtimeHandlers,
@@ -111,6 +115,7 @@ export function renderAppShell(
       hasWorkflowsIndex,
       authUi,
       i18nEnabled,
+      pageModules,
     ),
     // Router 7 (stack v3) renamed the package react-router-dom →
     // react-router; library mode keeps the v6 API so only the

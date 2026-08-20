@@ -49,6 +49,12 @@ const examples = [
   "web/src/examples/provenance-system.ddd",
   "web/src/examples/acme.ddd",
   "web/src/examples/dotnet-backend.ddd",
+  // Hand-authored NESTED `area { … }` blocks — the one picker entry that
+  // exercises them (every other area in the repo comes from `with scaffold`,
+  // which only emits flat single-level ones).  It was also the only picker
+  // entry with NO fast-suite gate at all, despite the header above claiming
+  // the three files gate the whole picker.
+  "web/src/examples/dashboard-system.ddd",
 ];
 
 async function loadExample(file: string) {

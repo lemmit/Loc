@@ -91,13 +91,81 @@ export function classifyPage(page: Pick<PageIR, "name" | "area">, ctx: PageNameC
  *  unique across aggregates and reads poorly as a component identifier, so the
  *  emitted name stays the aggregate-qualified `OrderList` form — reconstructed
  *  from the page's derived {@link PageKind}.  Matches the router imports
- *  (`<OrderList />` from `./pages/orders/list`). */
+ *  (`<OrderList />` from `./pages/orders/list`).
+ *
+ *  EVERY OTHER kind is qualified by its `area` path instead.  `page.name` is
+ *  unique only WITHIN one area scope (`checkPageScope`, Rule 7), so a bare
+ *  name is not an identity: two `area Ops { page Dashboard }` /
+ *  `area Finance { page Dashboard }` blocks both produced `Dashboard`, and
+ *  every consumer that keyed a component name, module stem, DU case or
+ *  page-object file on it collided — duplicate Angular imports (TS2300),
+ *  duplicate Feliz `Page` union cases, one Phoenix `DashboardLive` serving two
+ *  routes, one Flutter `ListPage` serving every aggregate.  Folding the area
+ *  path in (`OpsDashboard`) makes the name as unique as the page's emit path,
+ *  which is what the name was always standing in for.  An area-less page keeps
+ *  its bare name, so the whole existing corpus is byte-identical. */
 export function pageEmitName(page: PageIR, ctx: PageNameCtx): string {
   const k = classifyPage(page, ctx);
   if (k.kind === "aggregate-list") return `${upperFirst(k.aggregateName)}List`;
   if (k.kind === "aggregate-new") return `${upperFirst(k.aggregateName)}New`;
   if (k.kind === "aggregate-detail") return `${upperFirst(k.aggregateName)}Detail`;
-  return page.name;
+  return areaQualifiedName(page);
+}
+
+/** `page.name` prefixed by its snake-cased `area` path in PascalCase
+ *  (`["ops","billing"] + "Invoices"` → `OpsBillingInvoices`).  Area-less →
+ *  the bare name, unchanged. */
+export function areaQualifiedName(page: Pick<PageIR, "name" | "area">): string {
+  const segs = page.area ?? [];
+  if (segs.length === 0) return page.name;
+  return [...segs.map(pascalSegment), page.name].join("");
+}
+
+/** `ops_admin` → `OpsAdmin`.  Area segments are stored snake-cased (they come
+ *  through `snake(area.name)` in `lowerUi`), so re-Pascal-case each word. */
+function pascalSegment(seg: string): string {
+  return seg
+    .split(/[_\-\s]+/)
+    .filter((w) => w.length > 0)
+    .map(upperFirst)
+    .join("");
+}
+
+/** The CONVENTIONAL SLOT a classified page fills, or `undefined` for a
+ *  `custom` page (which has no slot — it is mounted by its own route).
+ *
+ *  Two consumers, at two layers, need the same answer, so it lives here beside
+ *  `classifyPage` rather than in either of them (CLAUDE.md — a shared helper
+ *  belongs at the layer its consumers live at):
+ *
+ *    - React's App-shell preparer emits its per-aggregate / per-workflow
+ *      imports from a loop over the DECLARATIONS, not over `ui.pages`, so it
+ *      needs to ask "which page fills aggregate Order's list slot, and where
+ *      did it actually land?" (`buildPageModuleIndex`).
+ *    - the IR check `loom.ui-page-slot-collision` needs to spot TWO pages
+ *      claiming one slot, which is exactly the ambiguity that made the first
+ *      question unanswerable. */
+export function pageSlotKey(kind: PageKind): string | undefined {
+  switch (kind.kind) {
+    case "aggregate-list":
+      return `agg:${kind.aggregateName}:list`;
+    case "aggregate-new":
+      return `agg:${kind.aggregateName}:new`;
+    case "aggregate-detail":
+      return `agg:${kind.aggregateName}:detail`;
+    case "workflow-form":
+      return `wf:${kind.workflowName}:form`;
+    case "workflow-instances-list":
+      return `wf:${kind.workflowName}:instances`;
+    case "workflow-instance-detail":
+      return `wf:${kind.workflowName}:instance-detail`;
+    case "workflows-index":
+      return "workflows-index";
+    case "home":
+      return "home";
+    default:
+      return undefined;
+  }
 }
 
 /** Dotted construct id for a page's `SourceMapRecorder.file(...)` call.

@@ -23,6 +23,16 @@
 //     scaffold grows the `Home` page a matching row of KPI tiles.  Both halves
 //     derive the projection name the same way, so a tile can never bind a
 //     projection the other half didn't emit.
+//
+// The hand-written pages live inside NESTED `area { … }` blocks, which is the
+// second thing this example is here to pin.  Until this file grew them, not one
+// `.ddd` in the repo hand-authored an `area` — every area came from
+// `with scaffold(...)`, which only ever emits flat single-level ones — so the
+// whole area code path shipped uncovered.  It was broken: a page inside an area
+// lands at `src/pages/<area-path>/<page>.tsx`, but React's router reconstructed
+// its import as `./pages/<page>` by convention, so the generated app did not
+// compile (TS2307).  `area Ops { page Dashboard … area Billing { page Invoices … } }`
+// keeps both depths — one level and two — in the per-PR React build matrix.
 
 system DashboardShop {
     subdomain Sales {
@@ -84,34 +94,48 @@ system DashboardShop {
     ui WebApp with scaffold(subdomains: [Sales]) {
         api Sales: SalesApi
 
-        page Dashboard {
-            route: "/dashboard"
-            title: "Sales dashboard"
-            body: Stack {
-                Heading { "Sales dashboard", level: 1 },
-                QueryView {
-                    of: Sales.SalesTotals,
-                    loading: Skeleton { count: 3 },
-                    error: Alert { "Couldn't load sales totals" },
-                    empty: Empty { "No confirmed orders yet." },
-                    data: t => Group {
-                        Stat { "Confirmed orders", t.orders },
-                        Stat { "Revenue", Money { t.revenue } },
-                        Stat { "Largest order", Money { t.biggest } },
-                        testid: "sales-totals"
+        area Ops {
+            page Dashboard {
+                route: "/dashboard"
+                title: "Sales dashboard"
+                body: Stack {
+                    Heading { "Sales dashboard", level: 1 },
+                    QueryView {
+                        of: Sales.SalesTotals,
+                        loading: Skeleton { count: 3 },
+                        error: Alert { "Couldn't load sales totals" },
+                        empty: Empty { "No confirmed orders yet." },
+                        data: t => Group {
+                            Stat { "Confirmed orders", t.orders },
+                            Stat { "Revenue", Money { t.revenue } },
+                            Stat { "Largest order", Money { t.biggest } },
+                            testid: "sales-totals"
+                        }
+                    },
+                    Divider { },
+                    QueryView {
+                        of: Sales.OrderVolume,
+                        data: v => Group {
+                            Stat { "All orders", v.total },
+                            Stat { "Avg lines", v.avgLines },
+                            Stat { "Smallest order", Money { v.smallest } },
+                            testid: "order-volume"
+                        }
+                    },
+                    testid: "dashboard"
+                }
+            }
+
+            area Billing {
+                page Invoices {
+                    route: "/ops/billing/invoices"
+                    title: "Invoices"
+                    body: Stack {
+                        Heading { "Invoices", level: 1 },
+                        Text { "Two areas deep — the router import must follow the file, not the page name." },
+                        testid: "invoices"
                     }
-                },
-                Divider { },
-                QueryView {
-                    of: Sales.OrderVolume,
-                    data: v => Group {
-                        Stat { "All orders", v.total },
-                        Stat { "Avg lines", v.avgLines },
-                        Stat { "Smallest order", Money { v.smallest } },
-                        testid: "order-volume"
-                    }
-                },
-                testid: "dashboard"
+                }
             }
         }
     }
