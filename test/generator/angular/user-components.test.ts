@@ -256,7 +256,9 @@ describe("user components — Angular", () => {
         ui WebApp {
           page Home { route: "/" body: Stack { Ribbon(label: "sale") } }
         }
-        deployable api { platform: node, contexts: [Sales], port: 3000 }
+        storage loomDb { type: postgres }
+        resource salesState { for: Sales, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [Sales], dataSources: [salesState], port: 3000 }
         deployable web { platform: angular, targets: api, port: 3001, ui: WebApp }
       }
     `);

@@ -32,7 +32,9 @@ const FIXTURE = `
         }
       }
     }
-    deployable api { platform: node, contexts: [Ops], serves: OpsApi, port: 3000 }
+    storage loomDb { type: postgres }
+    resource opsState { for: Ops, kind: state, use: loomDb }
+    deployable api { platform: node, contexts: [Ops], dataSources: [opsState], serves: OpsApi, port: 3000 }
     deployable web { platform: static, targets: api, ui: WebApp { Ops: api }, port: 3001 }
   }
 `;

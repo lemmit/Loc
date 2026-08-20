@@ -128,7 +128,7 @@ system Census {
         qty: int
         status: string
         unique (name)
-        create(name: string, qty: int) { status := "open" }
+        create(name: string, qty: int) { }
         operation bump() audited when status == "open" {
           qty := qty + 1
         }

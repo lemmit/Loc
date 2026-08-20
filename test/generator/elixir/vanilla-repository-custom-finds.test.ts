@@ -46,6 +46,10 @@ system Sales {
       }
       repository Customers for Customer {
         find byEmail(email: string): Customer? where this.email == email
+        // Non-nullable sibling: a workflow repo-let may only load a single
+        // NON-nullable aggregate (loom.workflow-load-nullable-unsupported), and
+        // the nullable byEmail above is what the repository tests pin.
+        find requireByEmail(email: string): Customer where this.email == email
       }
       repository Orders for Order {
         find byCustomer(customerId: Customer id): Order[]
@@ -54,7 +58,7 @@ system Sales {
 
       workflow tagFirstByEmail {
         create(needle: string) {
-          let c = Customers.byEmail(needle)
+          let c = Customers.requireByEmail(needle)
         }
       }
     }
@@ -190,12 +194,12 @@ describe("vanilla — context facade defdelegates custom finds", () => {
 });
 
 describe("vanilla — workflow `repo-let` routes a non-getById method through the context defdelegate", () => {
-  it("`let c = Customers.byEmail(needle)` lowers to a Context.by_email_customer with-clause", async () => {
+  it("`let c = Customers.requireByEmail(needle)` lowers to a Context.require_by_email_customer with-clause", async () => {
     const files = await load();
     const wf = files.get(
       [...files.keys()].find((k) => k.endsWith("/workflows/tag_first_by_email.ex"))!,
     )!;
-    expect(wf).toContain("{:ok, c} <- Context.by_email_customer(needle)");
+    expect(wf).toContain("{:ok, c} <- Context.require_by_email_customer(needle)");
   });
 
   it("the param ref (`needle`) is destructured off run/1 params", async () => {

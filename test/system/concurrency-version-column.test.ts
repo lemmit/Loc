@@ -47,9 +47,11 @@ const elixirSystem = (cap: string) => `
         repository Customers for Customer { }
       }
     }
+    storage loomDb { type: postgres }
+    resource orderingState { for: Ordering, kind: state, use: loomDb }
     deployable api {
       platform: elixir
-      contexts: [Ordering]
+      contexts: [Ordering] dataSources: [orderingState]
     }
   }
 `;

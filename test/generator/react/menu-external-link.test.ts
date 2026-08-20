@@ -31,9 +31,10 @@ system S {
     }
   }
   storage primarySql { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primarySql }
   deployable api {
     platform: node
-    contexts: [Sales]
+    contexts: [Sales] dataSources: [salesState]
     serves: SalesApi
     port: 3001
   }

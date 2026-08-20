@@ -909,6 +909,16 @@ function validateWorkflowBody(
           break;
         }
         const checkBranchOpCalls = (body: WorkflowStmtIR[]): void => {
+          // A `let` declared INSIDE the branch binds for the rest of that
+          // branch.  Registering it here is what makes
+          //
+          //     if let o = Orders.find(C) { let cu = Customers.getById(x)  cu.touch() }
+          //
+          // legal — the emitters already walk into the branch bodies and inject
+          // the repository for exactly this shape (dotnet-workflow-repo-find's
+          // "injects a repository first used inside an if-let branch body"), so
+          // without it the validator refused a form every backend emits.
+          const branchLocal: string[] = [];
           for (const inner of body) {
             if (inner.kind === "op-call") {
               mutated = true;
@@ -926,7 +936,15 @@ function validateWorkflowBody(
             } else if (inner.kind === "emit" || inner.kind === "factory-let") {
               mutated = true;
             }
+            if (
+              (inner.kind === "repo-let" || inner.kind === "factory-let") &&
+              !bindingAgg.has(inner.name)
+            ) {
+              bindingAgg.set(inner.name, inner.aggName);
+              branchLocal.push(inner.name);
+            }
           }
+          for (const n of branchLocal) bindingAgg.delete(n);
         };
         bindingAgg.set(st.var, st.aggName); // `var` bound only in the then-branch
         checkBranchOpCalls(st.thenBody);

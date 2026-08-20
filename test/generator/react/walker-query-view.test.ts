@@ -41,7 +41,9 @@ const ordersListBody = (queryViewBody: string) => `
       api Sales: SalesApi
       page OrdersList { route: "/orders"  body: ${queryViewBody} }
     }
-    deployable api { platform: node, contexts: [C], serves: SalesApi, port: 3000 }
+    storage loomDb { type: postgres }
+    resource cState { for: C, kind: state, use: loomDb }
+    deployable api { platform: node, contexts: [C], dataSources: [cState], serves: SalesApi, port: 3000 }
     deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
   }
 `;

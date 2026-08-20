@@ -32,9 +32,11 @@ system Demo {
     }
   }
   api ProjectsApi from Projects
-  deployable honoApi    { platform: node            contexts: [Catalog] serves: ProjectsApi port: 3000 }
-  deployable dotnetApi  { platform: dotnet          contexts: [Catalog] serves: ProjectsApi port: 8080 }
-  deployable phoenixApi { platform: elixir contexts: [Catalog] serves: ProjectsApi port: 4000 }
+  deployable honoApi    { platform: node            contexts: [Catalog] dataSources: [catalogState] serves: ProjectsApi port: 3000 }
+  deployable dotnetApi  { platform: dotnet          contexts: [Catalog] dataSources: [catalogState] serves: ProjectsApi port: 8080 }
+  storage loomDb { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: loomDb }
+  deployable phoenixApi { platform: elixir contexts: [Catalog] dataSources: [catalogState] serves: ProjectsApi port: 4000 }
 }
 `;
 

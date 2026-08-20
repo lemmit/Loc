@@ -112,7 +112,7 @@ const WF_SRC = `system EsFoldWf {
       event Refunded { order: Order id, amount: int }
       aggregate Order {
         status: string
-        create place() { status := "Placed"  emit OrderPlaced { order: id, at: now() } }
+        create() { }
       }
       repository Orders for Order { }
       channel Lifecycle { carries: OrderPlaced, LineAdded, Refunded  delivery: broadcast  retention: ephemeral }

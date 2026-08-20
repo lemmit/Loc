@@ -198,25 +198,32 @@ page Counter {
   route: "/counter"
   state { count: int = 0 }
   derived label: string = "Clicks: " + count
+  action bump() { count := count + 1 }
   body: Stack {
     Heading { label, level: 2 },
-    Button { "Increment", onClick: e => { count := count + 1 } }
+    Button { "Increment", onClick: bump }
   }
 }
 ```
 
+The write lives in a named `action`, referenced by name from the control. Writing
+it inline (`onClick: e => { count := count + 1 }`) is rejected by
+`loom.effect-in-lambda` — see [`actions.md`](../actions.md) for the read-vs-write
+split that rule enforces.
+
 ::: tabs frontend
 == react
 ```tsx
-// useState + useMemo; `:=` lowers to the setter
+// useState + useMemo; the action hoists to a const, `:=` lowers to the setter
 import { useState, useMemo } from "react";
 export default function Counter() {
   const [count, setCount] = useState<number>(0);
   const label = useMemo(() => ("Clicks: " + String(count)), [count]);
+  const bump = () => { setCount((count + 1)); };
   return (
     <Stack>
       <Title order={2}>{label}</Title>
-      <Button onClick={() => { setCount((count + 1)); }}>Increment</Button>
+      <Button onClick={bump}>Increment</Button>
     </Stack>
   );
 }
@@ -229,10 +236,11 @@ import { computed, ref } from "vue";
 const count = ref(0);
 const setCount = (v: typeof count.value) => { count.value = v; };
 const label = computed(() => ("Clicks: " + String(count.value)));
+const bump = () => { count.value = (count.value + 1); };
 </script>
 <template>
   <h2>{{ label }}</h2>
-  <v-btn @click='() => { count = (count + 1); }'>Increment</v-btn>
+  <v-btn @click='bump'>Increment</v-btn>
 </template>
 ```
 == svelte
@@ -241,9 +249,10 @@ const label = computed(() => ("Clicks: " + String(count.value)));
 <script lang="ts">
   let count = $state<number>(0);
   const label = $derived(("Clicks: " + String(count)));
+  const bump = () => { count = (count + 1); };
 </script>
 <h2 class="text-2xl font-semibold tracking-tight">{label}</h2>
-<button type="button" onclick={() => { count = (count + 1); }}>Increment</button>
+<button type="button" onclick={bump}>Increment</button>
 ```
 ::: end
 

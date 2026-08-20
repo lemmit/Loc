@@ -31,8 +31,10 @@ system DestroyDemo {
       body: Stack { Heading { "Widget" }, DestroyForm(of: Widget) }
     }
   }
+  storage loomDb { type: postgres }
+  resource inventoryState { for: Inventory, kind: state, use: loomDb }
   deployable phoenixApp {
-    platform: elixir, contexts: [Inventory],
+    platform: elixir, contexts: [Inventory], dataSources: [inventoryState],
     serves: InventoryApi, ui: Admin, port: 4000
   }
 }
@@ -70,8 +72,10 @@ system NoDestroy {
     }
   }
   api InvApi from S
+  storage loomDb { type: postgres }
+  resource invState { for: Inv, kind: state, use: loomDb }
   deployable phoenixApp {
-    platform: elixir, contexts: [Inv],
+    platform: elixir, contexts: [Inv], dataSources: [invState],
     serves: InvApi, port: 4000
   }
 }

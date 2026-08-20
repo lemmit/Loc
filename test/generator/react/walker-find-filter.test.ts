@@ -22,7 +22,9 @@ const SCAFFOLD_SRC = `
     ui WebApp with scaffold(subdomains: [Sub]) {
       api Sub: SalesApi
     }
-    deployable api { platform: node, contexts: [Sales], serves: SalesApi, port: 3000 }
+    storage loomDb { type: postgres }
+    resource salesState { for: Sales, kind: state, use: loomDb }
+    deployable api { platform: node, contexts: [Sales], dataSources: [salesState], serves: SalesApi, port: 3000 }
     deployable web { platform: static, targets: api, ui: WebApp { Sub: api }, port: 3001 }
   }
 `;
@@ -74,7 +76,9 @@ describe("find-filter list UI — scaffolded list pages", () => {
         ui WebApp with scaffold(subdomains: [Sub]) {
           api Sub: SalesApi
         }
-        deployable api { platform: node, contexts: [Sales], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource salesState { for: Sales, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [Sales], dataSources: [salesState], serves: SalesApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp { Sub: api }, port: 3001 }
       }
     `);

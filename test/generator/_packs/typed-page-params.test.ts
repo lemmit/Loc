@@ -60,7 +60,9 @@ describe("typed page parameters in walker-rendered pages", () => {
             body:  Stack { Heading { name }, Text { "Welcome." } }
           }
         }
-        deployable api { platform: node, contexts: [C], port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
         deployable web {
           platform: static
           targets: api
