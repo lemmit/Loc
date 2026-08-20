@@ -116,7 +116,6 @@ export interface OutlineContext {
   aggregates: OutlineDecl[];
   valueObjects: OutlineDecl[];
   workflows: string[];
-  pages: string[];
   enums: string[];
   events: string[];
   repositories: string[];
@@ -125,6 +124,14 @@ export interface OutlineContext {
 export interface OutlineSystem {
   name: string;
   contexts: OutlineContext[];
+  /** `ui` blocks and the surfaces inside them (pages — area path included in
+   *  the address — components, stores).
+   *
+   *  This used to be a `pages: string[]` on OutlineContext, which was always
+   *  EMPTY: the grammar only allows `Page` as a `UiMember`/`AreaMember`, never
+   *  as a context member, so nothing ever filled it.  Uis are system-scoped,
+   *  and the outline now says so. */
+  uis: OutlineDecl[];
   deployables: string[];
 }
 

@@ -307,6 +307,60 @@ describe("fix-hints", () => {
     expect(fixed).toContain("qty := qty + by");
   });
 
+  // The address space used to stop at an aggregate, so a typo anywhere else had
+  // no addressable enclosing declaration and silently got no fix.  (A page body
+  // is NOT among the newly-reachable cases for this code: `Ui` is in the
+  // unknown-name validator's SKIP_CONTAINERS, where bare identifiers are
+  // intentionally unresolved — see the ui-scoped case further down for the
+  // repair that ui land actually gained.)
+  it("unknown-name: fixes a typo inside a value object member (was unaddressable)", async () => {
+    const fixed = await closesTheLoop(
+      `context Sales {
+  valueobject Money {
+    amount: int
+    derived doubled: int = amountt * 2
+  }
+}`,
+      "loom.unknown-name",
+      { kind: "replace-text", op: "replace" },
+    );
+    expect(fixed).toContain("amount * 2");
+  });
+
+  // The ui subtree had NO addresses at all, so no diagnostic raised inside a
+  // page could carry a repair, however obvious the repair was.  This is that
+  // half of the address space becoming load-bearing.
+  it("bindable-input-value-arg: swaps 'value:' for 'bind:' inside a page", async () => {
+    const fixed = await closesTheLoop(
+      `system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate Order with crudish { name: string }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: Orders, kind: state, use: pg }
+  api ShopApi from Sales
+  ui Admin {
+    area Back {
+      page Board {
+        route: "/b"
+        state { draft: string = "" }
+        body: Field { value: draft }
+      }
+    }
+  }
+  deployable api { platform: node contexts: [Orders] dataSources: [st] serves: ShopApi port: 3000 }
+  deployable web { platform: react targets: api ui: Admin port: 3001 }
+}
+`,
+      "loom.bindable-input-value-arg",
+      { kind: "replace-text", op: "replace" },
+    );
+    expect(fixed).toContain("Field { bind: draft }");
+  });
+
   it("unknown-name: no hint when the validator computed no suggestion", async () => {
     // `zzzzzzzz` is nowhere near an in-scope name, so `suggest` returns
     // undefined, no `data` is attached, and the provider stays silent.

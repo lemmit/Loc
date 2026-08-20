@@ -17,7 +17,7 @@
 // Pure language-layer: parses in-memory and walks the AST; no `ir/` edge.
 // ---------------------------------------------------------------------------
 
-import { type AstNode, EmptyFileSystem, type LangiumDocument, URI } from "langium";
+import { type AstNode, AstUtils, EmptyFileSystem, type LangiumDocument, URI } from "langium";
 import type { ModelPatch } from "../diagnostics/contract.js";
 import { createDddServices } from "./ddd-module.js";
 import {
@@ -34,7 +34,7 @@ import {
   isWorkflow,
   type Model,
 } from "./generated/ast.js";
-import { addressOf } from "./print/outline.js";
+import { addressOf, isAddressable } from "./print/outline.js";
 
 export type { ModelPatch };
 
@@ -76,52 +76,28 @@ function isContainer(node: AstNode): boolean {
   return isBoundedContext(node) || isAggregate(node) || isValueObject(node) || isDeployable(node);
 }
 
-/** Walk the declaration tree (the same set `buildOutline` enumerates) building
- *  an address → node index.  Restricted to targetable declarations so a
- *  property's type sub-node can't shadow the aggregate's own address. */
-function indexTargets(model: Model): { map: Map<string, AstNode>; ambiguous: Set<string> } {
+/** Every addressable node in the document, indexed by its canonical address.
+ *
+ *  ONE walk, driven by the SAME predicate `addressOf` uses (`isAddressable`),
+ *  because the previous split — a hand-maintained list of containers here, an
+ *  independent qualifier rule there — is exactly what drifted.  That list
+ *  looked for pages under `BoundedContext.members`, where the grammar never
+ *  puts them, so every page address resolved to nothing while diagnostics went
+ *  on emitting them.  Deriving the index from the address rule makes the two
+ *  halves incapable of disagreeing about WHAT is addressable; that they agree
+ *  about the address ITSELF is gated by `test/language/address-round-trip.test.ts`.
+ *
+ *  Exported for that gate. */
+export function indexTargets(model: Model): { map: Map<string, AstNode>; ambiguous: Set<string> } {
   const map = new Map<string, AstNode>();
   const ambiguous = new Set<string>();
 
-  const put = (node: AstNode): string | undefined => {
-    const a = addressOf(node);
-    if (!a) return undefined;
-    if (map.has(a)) ambiguous.add(a);
-    else map.set(a, node);
-    return a;
-  };
-
-  // An entity-like declaration (aggregate / value object): index it and its
-  // members (skipping members that collapse to the entity's own address, e.g.
-  // unnamed invariants).
-  const indexEntity = (decl: { members: AstNode[] } & AstNode): void => {
-    const declAddr = put(decl);
-    for (const mem of decl.members) {
-      const memAddr = addressOf(mem);
-      if (memAddr && memAddr !== declAddr) put(mem);
-    }
-  };
-
-  const indexContext = (ctx: AstNode): void => {
-    put(ctx);
-    if (!("members" in ctx)) return;
-    for (const m of (ctx as { members: AstNode[] }).members) {
-      if (isAggregate(m) || isValueObject(m)) indexEntity(m);
-      else if (isWorkflow(m) || isPage(m)) put(m);
-      else if (isEnumDecl(m) || isEventDecl(m) || isRepository(m)) put(m);
-    }
-  };
-
-  for (const member of model.members) {
-    if (isSystem(member)) {
-      for (const sm of member.members) {
-        if (isBoundedContext(sm)) indexContext(sm);
-        else if (isSubdomain(sm)) for (const c of sm.contexts) indexContext(c);
-        else if (isDeployable(sm)) put(sm);
-      }
-    } else if (isBoundedContext(member)) {
-      indexContext(member);
-    }
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (!isAddressable(node)) continue;
+    const address = addressOf(node);
+    if (!address) continue;
+    if (map.has(address)) ambiguous.add(address);
+    else map.set(address, node);
   }
   return { map, ambiguous };
 }
