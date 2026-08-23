@@ -121,7 +121,9 @@ describe("walker-side e2e page-object emitter", () => {
             body:  CreateForm { of: Order }
           }
         }
-        deployable api { platform: node, contexts: [C], port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -151,7 +153,9 @@ describe("walker-side e2e page-object emitter", () => {
             body:  CreateForm { of: Order, testid: "place-order" }
           }
         }
-        deployable api { platform: node, contexts: [C], port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);
@@ -177,7 +181,9 @@ describe("walker-side e2e page-object emitter", () => {
         }
         ui WebApp with scaffold(aggregates: [Order]) {
         }
-        deployable api { platform: node, contexts: [C], port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
       }
     `);

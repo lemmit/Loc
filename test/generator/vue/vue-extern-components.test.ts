@@ -27,7 +27,9 @@ function sys(uiBody: string, pageBody = 'Heading { "hi" }'): string {
         ${uiBody}
         page Home { route: "/" body: ${pageBody} }
       }
-      deployable api { platform: node, contexts: [C], serves: SApi, port: 3000 }
+      storage loomDb { type: postgres }
+      resource cState { for: C, kind: state, use: loomDb }
+      deployable api { platform: node, contexts: [C], dataSources: [cState], serves: SApi, port: 3000 }
       api SApi from M
       deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
     }

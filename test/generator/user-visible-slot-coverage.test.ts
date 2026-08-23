@@ -312,8 +312,10 @@ const phoenixSystem = (t: Target, body: string, state: string): string => `
         body: ${body}
       }
     }
+    storage loomDb { type: postgres }
+    resource catState { for: Cat, kind: state, use: loomDb }
     deployable phoenixApp {
-      platform: elixir, contexts: [Cat], dataSources: [s], serves: ShopApi,
+      platform: elixir, contexts: [Cat], dataSources: [catState], serves: ShopApi,
       design: "${t.pack}", ui: WebApp { Shop: phoenixApp }, port: 4000
     }
   }

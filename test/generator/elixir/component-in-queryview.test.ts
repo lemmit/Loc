@@ -16,9 +16,11 @@ system Shop {
       repository Orders for Order { }
     }
   }
+  api SalesApi from Sales
   storage primary { type: postgres }
   resource st { for: Orders, kind: state, use: primary }
   ui WebApp {
+    api Orders: SalesApi
     component OrderPanel(order: Order) {
       body: Card { Heading { "Order" }, Text { order.status } }
     }
@@ -33,7 +35,7 @@ system Shop {
       }
     }
   }
-  deployable app { platform: elixir contexts: [Orders] dataSources: [st] ui: WebApp port: 4000 }
+  deployable app { platform: elixir contexts: [Orders] dataSources: [st] serves: SalesApi ui: WebApp { Orders: app } port: 4000 }
 }
 `;
 

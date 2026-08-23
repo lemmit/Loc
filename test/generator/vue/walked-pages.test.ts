@@ -108,7 +108,9 @@ describe("vue walker — scaffold pages", () => {
             body: QueryView { of: Sales.Order.byId(id), single: true, data: o => Text { o.customerId } }
           }
         }
-        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource ordersState { for: Orders, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
         deployable web { platform: vue, targets: api, ui: WebApp { Sales: api }, port: 3003 }
       }
     `);

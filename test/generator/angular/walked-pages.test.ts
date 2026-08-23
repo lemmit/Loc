@@ -163,9 +163,11 @@ const BUTTON_SOURCE = `
         route: "/"
         title: "Home"
         state { count: int = 0 }
+        action inc() { count := count + 1 }
+        action reset() { count := 0 }
         body: Stack {
-          Button { "Increment", onClick: e => { count := count + 1 }, variant: "primary", testid: "inc" },
-          Button { "Reset", onClick: e => { count := 0 }, testid: "reset" }
+          Button { "Increment", onClick: inc, variant: "primary", testid: "inc" },
+          Button { "Reset", onClick: reset, testid: "reset" }
         }
       }
     }
@@ -184,8 +186,14 @@ async function buttonPage(): Promise<string> {
 describe("angular generator — Button + event-handler seam", () => {
   it("binds the onClick handler as a STATEMENT, not a discarded arrow", async () => {
     const page = await buttonPage();
-    expect(page).toContain("(click)='count.set((count() + 1))'");
-    expect(page).toContain("(click)='count.set(0)'");
+    // The handler is a named `action` (the only form `loom.effect-in-lambda`
+    // admits), so it hoists to a component METHOD and the binding invokes it.
+    // Both halves matter: the binding is a statement, and the write it performs
+    // is the signal `.set` — not an arrow the template would discard.
+    expect(page).toContain("(click)='inc()'");
+    expect(page).toContain("(click)='reset()'");
+    expect(page).toContain("inc() { this.count.set((this.count() + 1)); }");
+    expect(page).toContain("reset() { this.count.set(0); }");
     // The JSX arrow wrapper must NOT survive into an Angular event binding.
     expect(page).not.toContain("() =>");
   });

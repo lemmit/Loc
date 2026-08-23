@@ -56,7 +56,7 @@ const COMPOUND_SRC = `
         workflow OrderFulfillment transactional {
           attempts: int
           total: money
-          create(n: int) { attempts += n  total -= 5.00 USD }
+          create(n: int) { attempts += n  total -= money("5.00") }
         }
       }
     }

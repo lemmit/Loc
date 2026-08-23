@@ -364,7 +364,18 @@ function renderHandlerModule(
     recordParams: records,
   };
 
-  const lines = lowerStatements(h.statements, contextModuleFq, renderCtx, ctx);
+  // The `return <expr>` is rendered into the with-chain's do-branch by
+  // `assembleHandlerBody`, so its refs are downstream READS of the body's
+  // bindings — pass it as the trailing read scope.  Without it a `let` whose
+  // only reader is the return got `_`-prefixed by the unused-bind rule
+  // (M-T6.21) and the do-branch referenced an undefined variable, a hard
+  // `** (CompileError)` rather than the warning the rule exists to silence.
+  const lines = lowerStatements(h.statements, contextModuleFq, renderCtx, ctx, {
+    trailing: h.returnValue ? [h.returnValue] : [],
+    // `assembleHandlerBody` closes with `{:ok, <return expr>}`, never with the
+    // last bound name — so no statement's bind is the result slot here.
+    ownResult: true,
+  });
   const resultExpr = h.returnValue ? renderExpr(h.returnValue, renderCtx) : ":ok";
   const body = assembleHandlerBody(lines, resultExpr);
   // Emit the `Context` alias iff the body actually references the context

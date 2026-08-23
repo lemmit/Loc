@@ -32,9 +32,11 @@ const SRC = `
     ui WebApp with scaffold(aggregates: [Order]) {
       api Sales: SalesApi
     }
+    storage loomDb { type: postgres }
+    resource salesState { for: Sales, kind: state, use: loomDb }
     deployable api {
       platform: node
-      contexts: [Sales]
+      contexts: [Sales] dataSources: [salesState]
       serves: SalesApi
       port: 3000
     }
@@ -116,7 +118,9 @@ const COMPONENT_SRC = `
       }
       page Home { route: "/" body: Text { "hi" } }
     }
-    deployable api { platform: node contexts: [Sales] serves: SalesApi port: 3000 }
+    storage loomDb { type: postgres }
+    resource salesState { for: Sales, kind: state, use: loomDb }
+    deployable api { platform: node contexts: [Sales] dataSources: [salesState] serves: SalesApi port: 3000 }
     deployable web {
       platform: static
       targets: api
@@ -176,7 +180,9 @@ const BARE_OPFORM_SRC = `
         }
       }
     }
-    deployable api { platform: node contexts: [Sales] serves: SalesApi port: 3000 }
+    storage loomDb { type: postgres }
+    resource salesState { for: Sales, kind: state, use: loomDb }
+    deployable api { platform: node contexts: [Sales] dataSources: [salesState] serves: SalesApi port: 3000 }
     deployable web {
       platform: static
       targets: api

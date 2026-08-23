@@ -42,8 +42,10 @@ async function landingHeex(uiBody: string, extra = ""): Promise<string> {
           body: ${uiBody}
         }
       }
+      storage loomDb { type: postgres }
+      resource cState { for: C, kind: state, use: loomDb }
       deployable phoenixApp {
-        platform: elixir, contexts: [C], serves: DemoApi, ui: DemoUi, port: 4000
+        platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi, ui: DemoUi, port: 4000
       }
     }
   `;
@@ -56,32 +58,45 @@ async function landingHeex(uiBody: string, extra = ""): Promise<string> {
 
 describe("HEEx page statement coverage (Bucket E2)", () => {
   it("scalar `+=` on a state field → pipe-assign with handler-scope read + arithmetic", async () => {
-    const heex = await landingHeex(`Stack { Button { "inc", onClick: e => { count += 1 } } }`);
+    const heex = await landingHeex(
+      `Stack { Button { "inc", onClick: act } }`,
+      `action act() { count += 1 }`,
+    );
     expect(heex).toContain("|> assign(:count, socket.assigns.count + 1)");
     expect(heex).not.toMatch(/# TODO/);
   });
 
   it("scalar `-=` on a state field → subtraction", async () => {
-    const heex = await landingHeex(`Stack { Button { "dec", onClick: e => { count -= 1 } } }`);
+    const heex = await landingHeex(
+      `Stack { Button { "dec", onClick: act } }`,
+      `action act() { count -= 1 }`,
+    );
     expect(heex).toContain("|> assign(:count, socket.assigns.count - 1)");
     expect(heex).not.toMatch(/# TODO/);
   });
 
   it("collection `+=` on a list state field → list append", async () => {
-    const heex = await landingHeex(`Stack { Button { "add", onClick: e => { picked += "x" } } }`);
+    const heex = await landingHeex(
+      `Stack { Button { "add", onClick: act } }`,
+      `action act() { picked += "x" }`,
+    );
     expect(heex).toContain('|> assign(:picked, socket.assigns.picked ++ ["x"])');
     expect(heex).not.toMatch(/# TODO/);
   });
 
   it("collection `-=` on a list state field → Enum.reject", async () => {
-    const heex = await landingHeex(`Stack { Button { "rm", onClick: e => { picked -= "x" } } }`);
+    const heex = await landingHeex(
+      `Stack { Button { "rm", onClick: act } }`,
+      `action act() { picked -= "x" }`,
+    );
     expect(heex).toContain('|> assign(:picked, Enum.reject(socket.assigns.picked, &(&1 == "x")))');
     expect(heex).not.toMatch(/# TODO/);
   });
 
   it("`precondition` in a handler → flash + halt the socket pipe (no TODO)", async () => {
     const heex = await landingHeex(
-      `Stack { Button { "go", onClick: e => { precondition count > 0 } } }`,
+      `Stack { Button { "go", onClick: act } }`,
+      `action act() { precondition count > 0 }`,
     );
     expect(heex).toContain(
       'then(fn socket -> if socket.assigns.count > 0, do: socket, else: put_flash(socket, :error, "Precondition failed: count > 0") end)',
@@ -91,14 +106,18 @@ describe("HEEx page statement coverage (Bucket E2)", () => {
 
   it("`requires` in a handler → forbidden flash (no TODO)", async () => {
     const heex = await landingHeex(
-      `Stack { Button { "go", onClick: e => { requires count > 0 } } }`,
+      `Stack { Button { "go", onClick: act } }`,
+      `action act() { requires count > 0 }`,
     );
     expect(heex).toContain('put_flash(socket, :error, "Forbidden: count > 0")');
     expect(heex).not.toMatch(/# TODO/);
   });
 
   it("never emits a TODO sentinel anywhere in the generated LiveView", async () => {
-    const heex = await landingHeex(`Stack { Button { "inc", onClick: e => { count += 1 } } }`);
+    const heex = await landingHeex(
+      `Stack { Button { "inc", onClick: act } }`,
+      `action act() { count += 1 }`,
+    );
     expect(heex).not.toContain("# TODO");
     expect(heex).not.toContain("TODO:");
   });

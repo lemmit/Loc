@@ -15,12 +15,15 @@ const sys = (stateDecl: string, handler: string): string => `
       page Form {
         route: "/form"
         state { ${stateDecl} }
+        action go() { ${handler} }
         body: Stack {
-          Button { "Go", onClick: e => { ${handler} } }
+          Button { "Go", onClick: go }
         }
       }
     }
-    deployable api { platform: node, contexts: [C], port: 3000 }
+    storage loomDb { type: postgres }
+    resource cState { for: C, kind: state, use: loomDb }
+    deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
     deployable web { platform: static
       targets: api
       ui: WebApp

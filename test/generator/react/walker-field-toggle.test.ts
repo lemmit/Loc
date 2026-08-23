@@ -97,12 +97,13 @@ describe("Field + Toggle with bind: state binding", () => {
               name:    string = ""
               welcome: bool   = false
             }
+            action reset() { name := "" }
             body: Stack {
               Heading { "Profile" },
               Field { "Your name", bind: name },
               Toggle { "Show welcome", bind: welcome },
               Text { \`Hello, {name}\` },
-              Button { "Reset", onClick: e => { name := "" } }
+              Button { "Reset", onClick: reset }
             }
           }
         }

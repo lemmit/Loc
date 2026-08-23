@@ -63,7 +63,7 @@ system Shop {
     context Cat {
       enum Status { active inactive }
       valueobject Contact { email: string  phone: string }
-      aggregate Category with crudish { name: string }
+      aggregate Category with crudish { name: string  derived display: string = name }
       aggregate Product with crudish {
         name:     string
         price:    money

@@ -26,6 +26,20 @@ const SRC = readFileSync("test/fixtures/corpus/tenancy-owned.ddd", "utf8").repla
   "dotnet",
 );
 
+// A guid claim and the `tenantOwned` capability are incompatible by
+// construction: the capability provides `tenantId: string`, and comparing that
+// to a guid claim mis-compiles the typed backends — `loom.tenant-owned-claim-type`
+// says so.  The REGISTRY's own comparison is same-typed against its guid id and
+// is fine, which is exactly what these cases exercise, so the guid variant drops
+// the tenant-OWNED aggregate rather than emitting from a rejected model.
+const guidClaim = (src: string): string =>
+  src
+    .replace("tenantId: string", "tenantId: guid")
+    .replace(
+      "aggregate Invoice with tenantOwned, crudish",
+      "aggregate Invoice crossTenant with crudish",
+    );
+
 describe("dotnet generator — derived registry self-scope filter", () => {
   it("installs the self-scope as a per-request HasQueryFilter reading a HOISTED, TryParse-guarded id member", async () => {
     const files = await generateSystemFiles(SRC);
@@ -60,7 +74,7 @@ describe("dotnet generator — derived registry self-scope filter", () => {
   });
 
   it("binds a same-typed guid claim without the parse (still hoisted)", async () => {
-    const files = await generateSystemFiles(SRC.replace("tenantId: string", "tenantId: guid"));
+    const files = await generateSystemFiles(guidClaim(SRC));
     const ctx = files.get("d/Infrastructure/Persistence/AppDbContext.cs")!;
     expect(ctx).toContain(
       "private OrganizationId? __SelfScopeId_Organization_0 => new OrganizationId(_currentUser.User.TenantId);",

@@ -13,7 +13,9 @@ system S { subdomain M { context C {
   api Api from M
   ui Web with scaffold(aggregates: [Order]) { api C: Api
     page NewOrder { route: "/orders/new" body: CreateForm { of: Order } } }
-  deployable api { platform: node, contexts: [C], serves: Api, port: ${port} }
+  storage loomDb { type: postgres }
+  resource cState { for: C, kind: state, use: loomDb }
+  deployable api { platform: node, contexts: [C], dataSources: [cState], serves: Api, port: ${port} }
   deployable web { platform: ${platform}, targets: api, ui: Web { C: api }, port: ${port + 1} } }`;
 
 describe("Angular default-seed parity", () => {

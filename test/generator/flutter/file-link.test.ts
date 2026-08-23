@@ -17,15 +17,17 @@ system Docs {
     aggregate Doc { name: string  blob: File }
     repository Docs for Doc { } } }
   api DocsApi from S
-  storage pg { type: postgres }
-  resource filesState { for: Files, kind: state, use: pg }
+  storage pg   { type: postgres }
+  storage disk { type: localDisk }
+  resource filesState { for: Files, kind: state,       use: pg }
+  resource fileBlobs  { for: Files, kind: objectStore, use: disk }
   ui App {
     api Docs: DocsApi
     page Detail { route: "/docs/:id"
       body: QueryView { of: Docs.Doc.byId(id), single: true,
         data: d => Stack { ${body} } } }
   }
-  deployable api { platform: node contexts: [Files] dataSources: [filesState] serves: DocsApi port: 3000 }
+  deployable api { platform: node contexts: [Files] dataSources: [filesState, fileBlobs] serves: DocsApi port: 3000 }
   deployable app { platform: flutter targets: api ui: App { Docs: api } port: 3006 }
 }`;
 
