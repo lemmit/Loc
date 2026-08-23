@@ -310,8 +310,9 @@ system S {
   deployable web { platform: flutter targets: api ui: WebApp { C: api } port: 3001 }
 }`,
 
-  // A resource handle is ambient over the whole context, but only workflow /
-  // handler / domain-service emitters have the resource client in scope.
+  // A resource handle is ambient over the whole context, but only the
+  // application-layer emitters (workflow / command+query handler) have the
+  // resource client in scope — a domainService body is rejected too.
   "loom.resource-op-outside-workflow": `
 system S {
   subdomain Sub { context C {
