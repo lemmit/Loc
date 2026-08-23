@@ -321,18 +321,42 @@ plumbing. The levels:
 | Level | Emitted scope |
 |---|---|
 | `local` | `tenantId == currentUser.tenantId` — the caller's own org node. **The default** (an omitted / `local` aggregate keeps today's flat floor). |
-| `deep` | descendant-or-self on the materialized path: `dataKey = orgPath OR dataKey LIKE orgPath \|\| '.%'` — the caller's org and every org beneath it. |
-| `global` | the caller's **root-org subtree** (P2.5): the same descendant-or-self prefix scan as `deep` but anchored at `currentUser.rootOrg` (the first `orgPath` segment) — `dataKey = rootOrg OR dataKey LIKE rootOrg \|\| '.%'`. Under flat tenancy `rootOrg == orgPath == the tenant floor`, so all three levels coincide (see the decision below). |
+| `deep` | descendant-or-self on the materialized path: `dataKey = orgPath OR dataKey` is under `orgPath || '.'` — the caller's org and every org beneath it. |
+| `global` | the caller's **root-org subtree** (P2.5): the same descendant-or-self prefix scan as `deep` but anchored at `currentUser.rootOrg` (the first `orgPath` segment). Under flat tenancy `rootOrg == orgPath == the tenant floor`, so all three levels coincide (see the decision below). |
+
+**The descendant test is two terms** — an escaped `LIKE` *prefilter* and an
+anchored *recheck*, in that order (M-T3.17):
+
+```sql
+data_key LIKE <escaped-anchor> || '.%' ESCAPE '!'   -- sargable: rides <table>_data_key_idx
+  AND strpos(data_key, <anchor> || '.') = 1         -- decides the row; no pattern language
+```
+
+The row is admitted by the **anchored** test, which has no pattern language at
+all — that is what keeps an org legitimately named `acme_corp` from reading
+`acmeXcorp.…` (#2562's `orgXa.leak` trap). The `LIKE` in front exists only so the
+planner can turn the pattern's fixed prefix into an index range over the
+`data_key text_pattern_ops` index instead of sequentially scanning the tenant's
+whole table; `!`, `%` and `_` in the anchor are escaped with `ESCAPE '!'`. The
+two-term split is deliberate: a mistake in the escaping can only make the
+prefilter *wider*, and the recheck still throws the extra rows away, so
+sargability can never cost isolation. `EXPLAIN` proof:
+`test/e2e/tenancy-subtree-explain.test.ts`.
 
 Generated `deep` filter, one line per backend (for `allow deep on Account`):
 
 | Backend | Emitted predicate |
 |---|---|
-| node (Hono/Drizzle) | `or(and(isNotNull(t.dataKey), or(eq(t.dataKey, p.orgPath), like(t.dataKey, p.orgPath + ".%"))), and(isNull(t.dataKey), eq(t.tenantId, p.tenantId)))` |
-| .NET (EF Core) | `(x.DataKey != null && (x.DataKey == u.OrgPath \|\| x.DataKey.StartsWith(u.OrgPath + "."))) \|\| (x.DataKey == null && x.TenantId == u.TenantId)` |
-| Python (SQLAlchemy) | `or_(and_(R.data_key.isnot(None), or_(R.data_key == u.org_path, R.data_key.startswith(u.org_path + "."))), and_(R.data_key.is_(None), R.tenant_id == u.tenant_id))` |
-| Java (JPA) | `(e.dataKey is not null and (e.dataKey = :#{…orgPath} or e.dataKey like concat(:#{…orgPath}, '.%'))) or (e.dataKey is null and e.tenantId = :#{…tenantId})` |
-| Elixir (Ecto) | `fragment("(? IS NOT NULL AND (? = ? OR ? LIKE ? \|\| '.%')) OR (? IS NULL AND ? = ?)", …)` with `^`-pinned fail-closed principal |
+| node (Hono/Drizzle) | ``or(and(isNotNull(t.dataKey), or(eq(t.dataKey, p.orgPath), and(sql`${t.dataKey} like ${esc(p.orgPath)} escape '!'`, sql`strpos(${t.dataKey}, ${p.orgPath + "."}) = 1`))), and(isNull(t.dataKey), eq(t.tenantId, p.tenantId)))`` |
+| node (Hono/MikroORM) | `raw("((data_key is not null and (data_key = ? or (data_key like ? escape '!' and strpos(data_key, ?) = 1))) or (data_key is null and tenant_id = ?))", […])` |
+| .NET (EF Core) | `(x.DataKey != null && (x.DataKey == u.OrgPath \|\| (EF.Functions.Like(x.DataKey, esc(u.OrgPath), "!") && x.DataKey.StartsWith(u.OrgPath + ".")))) \|\| (x.DataKey == null && x.TenantId == u.TenantId)` |
+| Python (SQLAlchemy) | `or_(and_(R.data_key.isnot(None), or_(R.data_key == u.org_path, and_(R.data_key.like(esc(u.org_path), escape="!"), func.strpos(R.data_key, u.org_path + ".") == 1))), and_(R.data_key.is_(None), R.tenant_id == u.tenant_id))` |
+| Java (JPA) | `(e.dataKey is not null and (e.dataKey = :#{…orgPath} or (e.dataKey like :#{…orgPath?.replace(…)?.concat('.%')} escape '!' and locate(concat(:#{…orgPath}, '.'), e.dataKey) = 1))) or (e.dataKey is null and e.tenantId = :#{…tenantId})` |
+| Elixir (Ecto) | `fragment("(? IS NOT NULL AND (? = ? OR (? LIKE ? ESCAPE '!' AND strpos(?, ? \|\| '.') = 1))) OR (? IS NULL AND ? = ?)", …)` with `^`-pinned fail-closed principal |
+
+(`esc(…)` above is each language's inline escape chain — `!`→`!!`, `%`→`!%`,
+`_`→`!_`, then `+ ".%"`. The five spellings live together in
+[`src/generator/_expr/subtree-like.ts`](../src/generator/_expr/subtree-like.ts).)
 
 **Three settled semantics decisions** (authorization.md §9 leaves them to P2.4):
 
@@ -344,9 +368,9 @@ Generated `deep` filter, one line per backend (for `allow deep on Account`):
    widening past it** (no cross-tenant leak). This preserves flat-tenancy
    correctness for legacy rows while the tree fills in.
 2. **Delimiter-correct prefix.** The descendant match is `path` exactly OR
-   `path || '.%'` (the `.` segment separator), so `org_a` never prefix-matches
-   `org_ab`. The full opclass/`text_pattern_ops` index discipline is P2.5; the
-   *correct* prefix ships here.
+   `path || '.'` + more (the `.` segment separator), so `org_a` never
+   prefix-matches `org_ab`. The `text_pattern_ops` opclass on `data_key` ships
+   as P2.5 and is what the escaped-`LIKE` prefilter rides (M-T3.17).
 3. **`global` = the caller's root-org subtree (P2.5).** authorization.md §2 says
    "all in my tenant, never the whole table." Under a hierarchy `global` is the
    full **root subtree** — every org descending from the caller's *root* org —

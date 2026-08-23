@@ -41,12 +41,10 @@ const ENABLED = process.env.LOOM_TENANCY_E2E === "1";
  *  only be measuring `enable_seqscan`. */
 const SEED_ROWS = 20_000;
 
-/** The caller's org path in the seeded tree, and the four values the generated
- *  repository binds for it: the anchor, the escaped LIKE pattern, the anchored
- *  needle, and the tenant claim.  `org_7` carries a `_`, so the pattern's
- *  escape (`org!_7.%`) is exercised, not just present. */
+/** The caller's org path in the seeded tree.  It carries a `_`, so the escaped
+ *  pattern (`org!_7.%`) is exercised, not merely present — an emitter that
+ *  stopped escaping would hand the planner `org_7.%` and a different prefix. */
 const ANCHOR = "org_7";
-const BINDS = ["org_7", "org!_7.%", "org_7.", "org_7"];
 
 interface Pg {
   psql: (sql: string) => string;
@@ -174,6 +172,37 @@ function findEctoFragment(text: string): { sql: string; args: string } | null {
   return null;
 }
 
+/** The contents of the bracketed group that OPENS at `open` in `text`. */
+function balancedSlice(text: string, open: number): string {
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = open; i < text.length; i++) {
+    const c = text[i]!;
+    if (quote) {
+      if (c === "\\") i++;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") quote = c;
+    else if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") {
+      depth--;
+      if (depth === 0) return text.slice(open + 1, i);
+    }
+  }
+  throw new Error("unbalanced group in the emitted fragment");
+}
+
+/** The literal to bind for one emitted parameter EXPRESSION, chosen by what
+ *  the expression is (a pattern / the anchored needle / the tenant claim /
+ *  the bare anchor) rather than by position — so the proof survives a change
+ *  in how many parameters the predicate takes. */
+function bindFor(param: string): string {
+  if (param.includes('".%"')) return `${ANCHOR.replace("_", "!_")}.%`;
+  if (param.includes('+ "."')) return `${ANCHOR}.`;
+  return ANCHOR; // the bare anchor, and the tenant claim (same value here)
+}
+
 /** Split a call's argument list on TOP-LEVEL commas. */
 function splitArgs(list: string): string[] {
   const out: string[] = [];
@@ -241,7 +270,7 @@ describe.skipIf(!ENABLED)(
           p.endsWith(`db${path.sep}repositories${path.sep}account-repository.ts`),
         );
         expect(repo, "mikroorm account repository not emitted").toBeDefined();
-        const frag = /raw\("((?:[^"\\]|\\.)*)"/.exec(repo![1]);
+        const frag = /raw\("((?:[^"\\]|\\.)*)",\s*\[/.exec(repo![1]);
         expect(frag, "no raw() SQL fragment in the emitted repository").not.toBeNull();
         const emitted = JSON.parse(`"${frag![1]}"`) as string;
         // Guard against measuring the wrong thing: this must be the subtree
@@ -251,15 +280,24 @@ describe.skipIf(!ENABLED)(
 
         let n = 0;
         const predicate = emitted.replace(/\?/g, () => `$${++n}`);
-        expect(n, "unexpected placeholder count in the emitted predicate").toBe(BINDS.length);
+        // Bind by reading the emitter's OWN parameter list rather than assuming
+        // an arity.  A hard-coded bind count would turn any change in the
+        // predicate's shape — including a revert to the unindexable
+        // `strpos`-only form — into a failure of THIS line, so the EXPLAIN
+        // assertion below would never run and the proof would be vacuous.
+        const paramList = splitArgs(
+          balancedSlice(repo![1], (frag!.index ?? 0) + frag![0].length - 1),
+        );
+        expect(paramList.length, "placeholder/param mismatch in the emitted fragment").toBe(n);
+        const binds = paramList.map(bindFor);
         // PREPARE + EXPLAIN EXECUTE in ONE psql session (a prepared statement
         // is session-scoped).  Going through PREPARE rather than inlining the
         // literals is the point: the generated repositories bind PARAMETERS, so
         // the plan under test is the parameterized one.
         const plan = pg.psql(
-          `PREPARE subtree(${BINDS.map(() => "text").join(",")}) AS ` +
+          `PREPARE subtree(${binds.map(() => "text").join(",")}) AS ` +
             `SELECT * FROM "books"."accounts" WHERE ${predicate};\n` +
-            `EXPLAIN EXECUTE subtree(${BINDS.map((b) => `'${b}'`).join(", ")});`,
+            `EXPLAIN EXECUTE subtree(${binds.map((b) => `'${b}'`).join(", ")});`,
         );
 
         // --- 4. the assertion this mission exists for -----------------------
@@ -292,7 +330,7 @@ describe.skipIf(!ENABLED)(
           const arg = ectoArgs[a++]!;
           const col = /^\w+\.(\w+)$/.exec(arg);
           if (col) return `"${col[1]}"`;
-          ectoBinds.push(BINDS[ectoBinds.length] ?? ANCHOR);
+          ectoBinds.push(bindFor(arg));
           return `$${ectoBinds.length}`;
         });
         expect(a, "argument list did not line up with the fragment's placeholders").toBe(
