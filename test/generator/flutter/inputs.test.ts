@@ -63,11 +63,13 @@ describe("flutter standalone inputs (generate system)", () => {
     expect(page).toContain("final setTitle = notifier.setTitle;");
 
     // Each widget reads state.<bind> and writes through the setter.
-    expect(page).toContain(
-      "SwitchListTile(title: const Text('Notifications'), value: state.enabled, onChanged: (v) => setEnabled(v))",
+    // The label is a user-visible slot (`inputLabel`, M-T1.11) — a translated
+    // caption is a runtime call, so the `const` follows the label away.
+    expect(page).toMatch(
+      /SwitchListTile\(title: Text\(t\('page\.\w+\.inputLabel\.\w+', 'Notifications'\)\), value: state\.enabled, onChanged: \(v\) => setEnabled\(v\)\)/,
     );
-    expect(page).toContain(
-      "TextFormField(initialValue: state.title, decoration: InputDecoration(labelText: 'Title'), onChanged: (v) => setTitle(v))",
+    expect(page).toMatch(
+      /TextFormField\(initialValue: state\.title, decoration: InputDecoration\(labelText: t\('page\.\w+\.inputLabel\.\w+', 'Title'\)\), onChanged: \(v\) => setTitle\(v\)\)/,
     );
     expect(page).toContain("obscureText: true"); // PasswordField
     expect(page).toContain("minLines: 3, maxLines: 5"); // MultilineField
@@ -127,13 +129,17 @@ describe("flutter NumberField + Tabs (generate system)", () => {
     expect(page).not.toContain("final setQty = notifier.setQty;");
 
     // NumberField widget: numeric keyboard + raw-string dispatch.
-    expect(page).toContain(
-      "TextFormField(initialValue: '${state.qty}', keyboardType: TextInputType.number, decoration: InputDecoration(labelText: 'Qty'), onChanged: (v) => setQtyText(v))",
+    expect(page).toMatch(
+      /TextFormField\(initialValue: '\$\{state\.qty\}', keyboardType: TextInputType\.number, decoration: InputDecoration\(labelText: t\('page\.\w+\.inputLabel\.\w+', 'Qty'\)\), onChanged: \(v\) => setQtyText\(v\)\)/,
     );
 
     // Tabs → DefaultTabController + TabBar + a bounded TabBarView.
     expect(page).toContain("DefaultTabController(length: 2");
-    expect(page).toContain("TabBar(tabs: <Widget>[ Tab(text: 'Numbers'), Tab(text: 'Info') ])");
+    // The tab captions are a user-visible slot (`tabLabel`) — `Tab(text:)` takes
+    // a String, so they arrive as the Dart translation call.
+    expect(page).toMatch(
+      /TabBar\(tabs: <Widget>\[ Tab\(text: t\('page\.\w+\.tabLabel\.\w+', 'Numbers'\)\), Tab\(text: t\('page\.\w+\.tabLabel\.\w+', 'Info'\)\) \]\)/,
+    );
     expect(page).toContain("SizedBox(height: 360, child: TabBarView(children:");
   });
 });

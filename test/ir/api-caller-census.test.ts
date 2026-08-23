@@ -64,6 +64,7 @@ import {
 import { platformFor } from "../../src/platform/registry.js";
 import { collectApiCallShapes } from "../../src/system/e2e-render.js";
 import { lowerFirst, plural, snake } from "../../src/util/naming.js";
+import { requiredGoldenCaseNames } from "../_helpers/golden-coverage.js";
 import { buildLoomModel } from "../_helpers/ir.js";
 import { corpusSource } from "../fixtures/corpus/harness.js";
 import { CORPUS } from "../fixtures/corpus/manifest.js";
@@ -377,18 +378,43 @@ interface WireGolden {
   entries: { method: string; path: string }[];
 }
 
+/** A census key is `<tier>/<case>`; the golden is keyed by the case alone. */
+const caseNameOf = (key: string): string => key.replace(/^[a-z]+\//, "");
+
 /** The wire golden for a case, if one exists (`test/behavioral/wire-golden/`). */
 function goldenFor(key: string): WireGolden | undefined {
-  const stem = key.replace(/^[a-z]+\//, "");
-  const p = path.join(REPO, "test/behavioral/wire-golden", `${stem}.json`);
+  const p = path.join(REPO, "test/behavioral/wire-golden", `${caseNameOf(key)}.json`);
   return fs.existsSync(p) ? (JSON.parse(fs.readFileSync(p, "utf8")) as WireGolden) : undefined;
 }
 
 const WITH_GOLDEN = POPULATION.filter((c) => goldenFor(c.key) !== undefined);
 
+/** The census cases a behavioural runner RECORDS, so a golden must exist for
+ *  each — derived from the runners' own case assembly, not counted by hand
+ *  (`test/_helpers/golden-coverage.ts`, the source `golden-coverage.test.ts`
+ *  gates). */
+const REQUIRED_GOLDEN = new Set(requiredGoldenCaseNames());
+const EXPECT_GOLDEN = POPULATION.filter((c) => REQUIRED_GOLDEN.has(caseNameOf(c.key)));
+
 describe("api caller census — cross-checked against the wire goldens", () => {
-  it("cross-checks a meaningful share of the population", () => {
-    expect(WITH_GOLDEN.length).toBeGreaterThanOrEqual(20);
+  it("cross-checks every census case the behavioural tier records", () => {
+    // Was `>= 20` against a population of 45+ — ~25 cases of slack, so a case
+    // that lost its golden (or never got one) silently dropped out of the
+    // cross-check while this stayed green.  The expectation is now DERIVED:
+    // exactly the census cases the runners record must carry a golden, so the
+    // set can only change when the case list does.
+    expect(
+      EXPECT_GOLDEN.length,
+      "no census case is expected to carry a golden — the derivation has broken",
+    ).toBeGreaterThan(20);
+    expect(
+      WITH_GOLDEN.map((c) => c.key).sort(),
+      "the census cases WITH a wire golden are no longer exactly the cases the behavioural " +
+        "runners record. A case that gained one belongs in the derivation " +
+        "(test/_helpers/golden-coverage.ts); a case that LOST one is a hole in the " +
+        "cross-check — capture it with `cd test/behavioral && LOOM_WIRE_UPDATE=1 node run.mjs " +
+        "<case>` (golden-coverage.test.ts names it too).",
+    ).toEqual(EXPECT_GOLDEN.map((c) => c.key).sort());
   });
 
   for (const c of WITH_GOLDEN) {

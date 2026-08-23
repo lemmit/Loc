@@ -1307,6 +1307,22 @@ function mikroContextFilters(agg: EnrichedAggregateIR, bypass?: FilterBypass): s
   return out;
 }
 
+/** The WHERE a query-time projection AGGREGATION reads `agg`'s table with: the
+ *  projection's own filter (`base`, already a FilterQuery literal) AND-ed with
+ *  the aggregate's applicable capability filters, honouring the read's
+ *  `ignoring` bypass.  An aggregation reads the table DIRECTLY rather than
+ *  through the repository, so without this it would count rows every repository
+ *  read excludes.  `undefined` ⇒ no predicate at all. */
+export function mikroProjectionWhere(
+  base: string | undefined,
+  agg: EnrichedAggregateIR,
+  bypass?: FilterBypass,
+): string | undefined {
+  const caps = mikroContextFilters(agg, bypass);
+  if (caps.length === 0) return base;
+  return withContextFilters(base ?? "{}", caps);
+}
+
 /** Merge a base FilterQuery object-literal with the aggregate's applicable
  *  capability filters (`$and`).  No filters → the base unchanged (byte-
  *  identical to the pre-filter output); a `{}` base is dropped from the AND. */

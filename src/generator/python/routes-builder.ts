@@ -958,7 +958,7 @@ function historyRoute(
     "    repo = _repo(session)",
     gateUsesUser ? "    current_user_ = current_user()" : null,
     find.requires
-      ? `    if not (${renderPyExpr(find.requires, { thisName: "self", currentUserExpr: "current_user_" })}):\n        raise ForbiddenError("Forbidden")`
+      ? `    if ${renderPyNegatedGuard(find.requires, { thisName: "self", currentUserExpr: "current_user_" })}:\n        raise ForbiddenError("Forbidden")`
       : null,
     // (2) — reachability, not a predicate on the audit table.
     `    await repo.get_by_id(${agg.name}Id(id))`,
@@ -1074,9 +1074,8 @@ function lifecycleGate(action: OperationIR | null | undefined, thisName?: string
 
 function whenGate(agg: EnrichedAggregateIR, op: OperationIR): string[] {
   if (!op.when) return [];
-  const pred = renderPyExpr(op.when, { thisName: "found" });
   return [
-    `    if not (${pred}):`,
+    `    if ${renderPyNegatedGuard(op.when, { thisName: "found" })}:`,
     `        raise DisallowedError(${JSON.stringify(
       `operation '${op.name}' is not allowed in the current state of ${agg.name}.`,
     )})`,

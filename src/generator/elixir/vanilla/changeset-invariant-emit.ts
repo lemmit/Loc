@@ -126,7 +126,7 @@ export function aggregateHasResidualInvariants(agg: AggregateIR): boolean {
 export function renderInvariantValidatorFn(agg: AggregateIR, contextModule: string): string {
   const residuals = residualInvariants(agg);
   if (residuals.length === 0) return "";
-  const rc: RenderCtx = { thisName: "data", contextModule, foundation: "vanilla" };
+  const rc: RenderCtx = { thisName: "data", contextModule };
   const fallbackField = agg.fields?.[0]?.name ?? "id";
 
   const checks = residuals.map((inv) => {

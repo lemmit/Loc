@@ -18,6 +18,14 @@
 //
 // Elixir keeps its own `collectVanillaLeaves` (a deliberately narrower switch)
 // but shares `leafPath`.
+//
+// `provTempNames` + `wrapProvCapture` below are the second half of the same
+// convergence: the four backends' provenance wraps agree on the `__prov_<i>` /
+// `__lin_<i>` temp names and on the ORDER — snapshot the leaf inputs BEFORE the
+// write, build the lineage and route it to both sinks AFTER — and diverge only
+// in the four rendered lines and in their entry guards.  The order is the
+// load-bearing part (a self-referential `x := x + n` must record the PRE-write
+// value), so it lives here rather than being restated four times.
 // ---------------------------------------------------------------------------
 
 import type { ExprIR } from "../../ir/types/loom-ir.js";
@@ -93,4 +101,34 @@ export function collectLeaves(
       break;
   }
   return out;
+}
+
+/** The temp names a provenanced write binds at statement index `i` — the
+ *  snapshot array (`__prov_<i>`) and the built lineage (`__lin_<i>`).  Shared so
+ *  the convention has one home; the `<i>` itself comes from the backend's
+ *  `StmtIndex.prov` (see `StmtIndexing` — node/.NET/java number positionally,
+ *  python per-kind). */
+export function provTempNames(index: number): { tmp: string; lin: string } {
+  return { tmp: `__prov_${index}`, lin: `__lin_${index}` };
+}
+
+/** The four backend-rendered lines a provenance wrap splices around the write. */
+export interface ProvCaptureLines {
+  /** Binds `__prov_<i>` to the snapshotted leaf inputs — emitted BEFORE the write. */
+  snapshot: string;
+  /** Binds `__lin_<i>` to the built `ProvLineage` — AFTER the write, so
+   *  `computedValue` reads the post-write value. */
+  lineage: string;
+  /** Writes `__lin_<i>` to the co-located per-field lineage slot on the root. */
+  colocated: string;
+  /** Pushes `__lin_<i>` onto the per-instance / per-request history buffer. */
+  sink: string;
+}
+
+/** Splice a provenance capture around an already-rendered write statement.
+ *  Owns only the ORDER (snapshot → write → lineage → both sinks); the entry
+ *  guards stay per-backend because they genuinely differ — see the
+ *  `withTrace` / `withProvCapture` / `withProv` call sites. */
+export function wrapProvCapture(base: string, l: ProvCaptureLines): string {
+  return [l.snapshot, base, l.lineage, l.colocated, l.sink].join("\n");
 }

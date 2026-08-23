@@ -56,6 +56,29 @@ export function bodyTypeOf(e: ExprIR): TypeIR | undefined {
       return { kind: "primitive", name: e.target };
     case "ternary":
       return bodyTypeOf(e.then);
+    // An ARITHMETIC lambda body — `sum(l => l.price * l.qty)`, the canonical
+    // order total.  `resultType` already carries the type-system's
+    // closed-money / numeric-widening verdict (`money * int → money`); fall
+    // back to the left operand's type for the synthetic binary nodes that
+    // leave `resultType` unpopulated (walker-primitive-expander & friends).
+    //
+    // Without this arm every money fold with an arithmetic body degraded to
+    // "not money" — node emitted `reduce(… , 0)` (tsc: `number + Decimal`),
+    // elixir `Enum.sum` over `%Decimal{}` (runtime ArithmeticError) and a
+    // `&<=/2` structural sorter (silently wrong ordering), python a
+    // `Decimal`-less `sum(...)`.  Audit finding A5.
+    //
+    // NOTE — no `method-call` arm: `MethodCallExpr` carries `receiverType`
+    // but no result type, so an intrinsic body (`l.price.abs()`) cannot be
+    // typed here without re-running inference.  Callers keep their element-
+    // type fallback for that shape.
+    case "binary":
+      return e.resultType ?? e.leftType;
+    // `-x` keeps `x`'s type; `!x` is `bool`.  Also the probe the money-aware
+    // unary arms (A11) read to decide `Decimal.neg()`/`BigDecimal.negate()`
+    // over a bare `-`.
+    case "unary":
+      return e.op === "!" ? { kind: "primitive", name: "bool" } : bodyTypeOf(e.operand);
     case "literal":
       switch (e.lit) {
         case "string":

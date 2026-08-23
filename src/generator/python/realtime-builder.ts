@@ -1,4 +1,4 @@
-import type { BoundedContextIR, EventIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type { BoundedContextIR, EventIR, SystemIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../ir/util/channels.js";
 import { type RealtimeRoomPlan, realtimeRoomPlan } from "../../ir/util/realtime-rooms.js";
 import { lines } from "../../util/code-builder.js";
@@ -26,7 +26,8 @@ import { snake } from "../../util/naming.js";
 // Two topologies (channels.md "Realtime topology" — rooms + policy-derived
 // routing v1), mirroring the Hono backend: an untenanted context is
 // broadcast-to-all (byte-identical); a tenant-owned context scopes delivery by
-// the tenant DataKey (`currentUser.tenant_id`), so a tenant-scoped event
+// the tenant DataKey (`currentUser.<claim>`, the bound `tenancy by
+// user.<claim>` — NOT the row column `tenantId`), so a tenant-scoped event
 // reaches only subscribers in the emitter's tenant room — never cross-tenant.
 // A connection derives its room from the verified principal at connect (never
 // a client value); an unauthenticated connection joins no room.  The
@@ -62,13 +63,16 @@ function frameArm(ev: EventIR, keyword: "if" | "elif"): string[] {
 /** The realtime module, or null when no `delivery: broadcast` channel carries
  *  an event (byte-identical wire-free output).  A tenant-owned context emits
  *  the room-scoped module; otherwise the v1 broadcast-to-all one. */
-export function buildPyRealtimeFile(ctx: BoundedContextIR): string | null {
+export function buildPyRealtimeFile(
+  ctx: BoundedContextIR,
+  sys: Pick<SystemIR, "tenancy"> | undefined,
+): string | null {
   const types = [...realtimeEventTypes(ctx)].sort();
   if (types.length === 0) return null;
   const events = types
     .map((t) => ctx.events.find((e) => e.name === t))
     .filter((e): e is EventIR => e != null);
-  const plan = realtimeRoomPlan(ctx);
+  const plan = realtimeRoomPlan(ctx, sys);
   return plan.tenantScoped
     ? buildRoomScopedRealtime(events, types, plan)
     : buildBroadcastRealtime(events, types);
@@ -190,6 +194,9 @@ function buildRoomScopedRealtime(
   const tenantEvents = tenantTypes
     .map((t) => events.find((e) => e.name === t))
     .filter((e): e is EventIR => e != null);
+  // The `User` dataclass attribute holding the room key — the bound `tenancy
+  // by user.<claim>`, snake_cased exactly as `auth-emit.ts` declares it.
+  const claim = snake(plan.tenantClaimField);
 
   return lines(
     `"""Realtime SSE wire (channels.md rooms + policy-derived routing v1).  Auto-generated.`,
@@ -197,7 +204,7 @@ function buildRoomScopedRealtime(
     "Events carried by a `delivery: broadcast` channel stream to connected",
     "browsers at GET /realtime/events.  This context hosts tenant-owned",
     "aggregates, so delivery is scoped by the tenant DataKey",
-    "(`currentUser.tenant_id`): a tenant-scoped event reaches only subscribers in",
+    `(\`currentUser.${claim}\`): a tenant-scoped event reaches only subscribers in`,
     "the emitter's tenant room — never cross-tenant.  The authorized read remains",
     "the gate — clients refetch through the API rather than trust payloads.",
     `"""`,
@@ -217,23 +224,24 @@ function buildRoomScopedRealtime(
     "# Events carried by a broadcast channel — the UI-observable set.",
     `REALTIME_EVENT_TYPES: frozenset[str] = frozenset({${typeSet}})`,
     "",
-    "# Events whose payload references a `tenantOwned` aggregate — routed to the",
-    "# emitter's tenant room only, never broadcast cross-tenant.",
+    "# Events this tenant-owned context routes to the emitter's tenant room only,",
+    "# never broadcast cross-tenant — everything it carries except the events",
+    "# provably about `crossTenant` (shared) data.",
     `TENANT_SCOPED_EVENT_TYPES: frozenset[str] = frozenset({${tenantSet}})`,
     "",
     "# Every live connection — receives tenant-agnostic (global) events and any",
     "# broadcast refetch ticket.",
     "_subscribers: set[asyncio.Queue[str]] = set()",
-    "# Per-tenant rooms (key = `currentUser.tenant_id`, the tenantOwned DataKey) —",
+    `# Per-tenant rooms (key = \`currentUser.${claim}\`, the bound tenancy claim) —`,
     "# a connection joins its own tenant's room at connect.",
     "_rooms: dict[str, set[asyncio.Queue[str]]] = {}",
     "",
     "",
     "def _tenant_of(user: User | None) -> str | None:",
     `    """The connecting/emitting principal's tenant room key`,
-    `    (\`currentUser.tenant_id\`, the tenantOwned DataKey), or None when there is`,
+    `    (\`currentUser.${claim}\`, the bound tenancy claim), or None when there is`,
     `    no authenticated principal."""`,
-    "    return None if user is None or user.tenant_id is None else str(user.tenant_id)",
+    `    return None if user is None or user.${claim} is None else str(user.${claim})`,
     "",
     "",
     "def _event_to_frame(event: DomainEvent) -> str | None:",

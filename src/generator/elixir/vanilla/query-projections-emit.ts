@@ -157,7 +157,6 @@ function renderQueryProjectionModule(
     thisName: "record",
     contextModule,
     typesModule,
-    foundation: "vanilla",
   };
   const queryCtx: RenderCtx = { ...renderCtx, filterArgs: true };
 
@@ -636,7 +635,6 @@ function renderQueryProjectionAction(
     ? renderExpr(proj.query.requires, {
         thisName: "record",
         contextModule,
-        foundation: "vanilla",
       })
     : null;
   if (gate) {

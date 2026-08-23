@@ -964,6 +964,17 @@ public sealed class ChannelPublishTeeDispatcher : IDomainEventDispatcher
         await _transports.ForAddress(address).PublishAsync(address, envelope);
         _log.LogInformation("{Event} {Address} {Type} {Id}", "channel_published", address, type, envelope.Id);
     }
+
+    /// <summary>Pass-through for the write-tx outbox capture (design §1): the
+    /// repository calls it inside its save transaction and the inner (outbox)
+    /// dispatcher stages the row there.  Without this forward the interface
+    /// default would swallow it and silently demote the durable path back to a
+    /// second, post-commit transaction.</summary>
+    public Task<IReadOnlyList<IDomainEvent>> RecordDurableAsync(
+        IReadOnlyList<IDomainEvent> events,
+        System.Data.Common.DbTransaction? transaction = null,
+        CancellationToken cancellationToken = default)
+        => ((IDomainEventDispatcher)_inner).RecordDurableAsync(events, transaction, cancellationToken);
 }
 ${relayPublisher}${consumer}`;
 }

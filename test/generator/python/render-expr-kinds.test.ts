@@ -265,6 +265,38 @@ describe("py renderPyExpr — collection ops", () => {
     expect(renderPyExpr(arr("sum"))).toBe("sum(self._lines)");
   });
 
+  // A5 — an ARITHMETIC λ body (`l.price * l.qty`, the canonical order total).
+  // A money sum needs the explicit `Decimal(0)` start: bare `sum(...)` seeds
+  // the int `0`, which mypy --strict rejects and which returns int `0` (not
+  // `Decimal("0")`) for an empty collection.  Before `bodyTypeOf` grew its
+  // `binary` arm this body typed as `undefined` and lost the start.
+  it("sum over an ARITHMETIC money selector gets the Decimal(0) start (A5)", () => {
+    const arith: ExprIR = lam({
+      kind: "binary",
+      op: "*",
+      left: {
+        kind: "member",
+        receiver: { kind: "ref", name: "l", refKind: "lambda" },
+        member: "price",
+        receiverType: { kind: "entity", name: "OrderLine" },
+        memberType: MONEY,
+      },
+      right: {
+        kind: "member",
+        receiver: { kind: "ref", name: "l", refKind: "lambda" },
+        member: "quantity",
+        receiverType: { kind: "entity", name: "OrderLine" },
+        memberType: INT,
+      },
+      leftType: MONEY,
+      rightType: INT,
+      resultType: MONEY,
+    });
+    expect(renderPyExpr(arr("sum", [arith]))).toBe(
+      "sum(((lambda l: l.price * l.quantity)(__x) for __x in self._lines), Decimal(0))",
+    );
+  });
+
   it("all / any → builtin folds", () => {
     expect(renderPyExpr(arr("all", [lam(litBool("true"))]))).toBe(
       "all((lambda l: True)(__x) for __x in self._lines)",
@@ -418,6 +450,16 @@ describe("py renderPyExpr — operators / ternary / match / convert", () => {
       "not active",
     );
     expect(renderPyExpr({ kind: "unary", op: "-", operand: litInt("5") })).toBe("-5");
+  });
+
+  // A11 — the audit flagged unary `-` on money as a bare `${op}${operand}` on
+  // four targets.  On python it is CORRECT as-is: `money` is a stdlib
+  // `decimal.Decimal`, which implements `__neg__`.  Pinned so the money-aware
+  // arms added to the TS/Java targets are not "fixed" here too.
+  it("keeps unary `-` on money native — Decimal implements __neg__ (A11)", () => {
+    expect(
+      renderPyExpr({ kind: "unary", op: "-", operand: { ...thisProp("total"), type: MONEY } }),
+    ).toBe("-self._total");
   });
 
   it("money arithmetic stays native (Decimal overloads operators)", () => {

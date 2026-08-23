@@ -441,6 +441,24 @@ export function deepScopeTenantClaim(e: ExprIR): string {
   return TENANT_OWNED_TENANT_ID_FIELD;
 }
 
+/** The PRINCIPAL member the tenant floor compares against — the system's
+ *  declared `tenancy by user.<claim>`, falling back to
+ *  {@link TENANT_OWNED_TENANT_ID_FIELD} when the system declares no tenancy
+ *  (the status-quo shape; a `tenantOwned` aggregate without a tenancy
+ *  declaration is a phase-⑦ diagnostic, not something to silently re-point).
+ *
+ *  The single source of truth every consumer reads instead of spelling
+ *  `tenantId`: that constant is the ROW column the `tenantOwned` capability
+ *  provides, and the two names coincide only when the claim happens to be
+ *  called `tenantId`.  Enrichment rebinds the capability's hardcoded principal
+ *  side through this (`bindTenancyClaim`); emitters that reference the
+ *  principal directly — the realtime room key on all four SSE backends — read
+ *  it off the derived plan.  Twin of {@link deepScopeTenantClaim}, which
+ *  answers the same question for a subtree sentinel. */
+export function tenancyPrincipalClaim(sys: Pick<SystemIR, "tenancy"> | undefined): string {
+  return sys?.tenancy?.claimField ?? TENANT_OWNED_TENANT_ID_FIELD;
+}
+
 export type TenantStance = "tenantOwned" | "crossTenant" | "registry" | "unscoped";
 
 /** True when the aggregate implements the `tenantOwned` prelude capability

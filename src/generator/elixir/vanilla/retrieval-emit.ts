@@ -20,7 +20,7 @@
 // so workflow `repo-run` lowerings (a follow-up slice) can call
 // `Context.run_<ret>_<agg>(args..., page: [limit:, offset:])`.
 //
-// The `where` predicate uses `filterArgs: true` + `foundation: "vanilla"`
+// The `where` predicate uses `filterArgs: true`
 // so a declared retrieval param renders as Ecto's `^name` pin form, and an
 // `enum-value` is the stored string column (`"confirmed"`), not an atom
 // (`:confirmed`).
@@ -84,7 +84,6 @@ function renderRetrievalModule(
   const renderCtx: RenderCtx = {
     thisName: "record",
     contextModule,
-    foundation: "vanilla",
     // Retrieval params bind via Ecto pin syntax (`^needle`) inside the
     // `from ... where: ...` macro.
     filterArgs: true,

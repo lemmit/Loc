@@ -352,15 +352,67 @@ function dapperFilterSeam(
   filter: ExprIR | undefined,
   ns: string,
   usings: Set<string>,
+  /** Source-aggregate capability filters spliced into the same SELECT (the
+   *  aggregation arms) — their principal claims bind through the same object. */
+  capabilityFilters: readonly ExprIR[] = [],
 ): { needsPrincipal: boolean; paramArg: string } {
-  if (!usingDapper || !filter) return { needsPrincipal: false, paramArg: "" };
-  const refs = collectFilterPrincipalRefs([filter]);
+  const preds = [...(filter ? [filter] : []), ...capabilityFilters];
+  if (!usingDapper || preds.length === 0) return { needsPrincipal: false, paramArg: "" };
+  const refs = collectFilterPrincipalRefs(preds);
   if (refs.length === 0) return { needsPrincipal: false, paramArg: "" };
   usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   return {
     needsPrincipal: true,
     paramArg: `, new { ${principalFields(refs, "currentUser").join(", ")} }`,
   };
+}
+
+/** The source aggregate's capability filters (`tenantOwned`, `softDeletable`,
+ *  any `filter <expr>`) that apply to an AGGREGATION read of `proj`, honouring
+ *  its `ignoring <Cap>` / `ignoring *` clause.
+ *
+ *  An aggregation reads the source TABLE directly rather than through the
+ *  repository, so on Dapper — which has no EF `HasQueryFilter` — nothing else
+ *  applies them: the read counted rows every repository read of the same table
+ *  excludes (cross-tenant with `tenantOwned`, a wrong number with
+ *  `softDeletable`).  The EF arm inherits the model-level query filter and needs
+ *  none of this.  A raw-table source (workflow saga state / folded `<Proj>Row`)
+ *  has no source aggregate and so contributes nothing. */
+function aggregationCapabilityFilters(proj: ProjectionIR, ctx: EnrichedBoundedContextIR): ExprIR[] {
+  const agg = ctx.aggregates.find((a) => a.name === proj.query?.source);
+  if (!agg) return [];
+  const q = proj.query!;
+  const bypassAll = q.bypassAll ?? false;
+  const bypassCaps = q.bypassCaps ?? [];
+  const origins = agg.contextFilterOrigins ?? [];
+  // Only a CAPABILITY-contributed filter is bypassable; a bare/hand-written
+  // one (`undefined` origin) always applies.
+  return (agg.contextFilters ?? []).filter((_, i) => {
+    const origin = origins[i];
+    if (origin === undefined) return true;
+    return !(bypassAll || bypassCaps.includes(origin));
+  });
+}
+
+/** The Dapper `WHERE` body for an aggregation: the projection's own filter
+ *  AND the applicable capability filters, each already parenthesised by
+ *  `whereToSql`.  `undefined` ⇒ no `WHERE` at all. */
+function dapperAggregationWhere(
+  proj: ProjectionIR,
+  capabilityFilters: readonly ExprIR[],
+): string | undefined {
+  const filter = proj.query!.filter;
+  const parts = [...(filter ? [filter] : []), ...capabilityFilters].map((p) => {
+    try {
+      return whereToSql(p);
+    } catch {
+      throw new Error(
+        `dapper: a filter on query-time projection '${proj.name}' is outside the Dapper SQL ` +
+          `subset; use 'persistence: efcore' or simplify the predicate.`,
+      );
+    }
+  });
+  return parts.length > 0 ? parts.join(" AND ") : undefined;
 }
 
 /** True when this aggregate's DECLARED wire field crosses as a float64.
@@ -518,11 +570,12 @@ function renderAggregateHandler(
   // SQL itself, through the one predicate→SQL lowering this adapter already
   // has (`whereToSql`, shared with every Dapper find / retrieval / capability
   // filter).  A second lowering here would be a second dialect to keep true.
-  const where = filter
-    ? usingDapper
-      ? whereToSql(filter)
-      : renderCsExpr(filter, { thisName: "o", efQuery: true })
-    : undefined;
+  const caps = usingDapper ? aggregationCapabilityFilters(proj, ctx) : [];
+  const where = usingDapper
+    ? dapperAggregationWhere(proj, caps)
+    : filter
+      ? renderCsExpr(filter, { thisName: "o", efQuery: true })
+      : undefined;
   if (filter && !usingDapper) collectCsExprUsings(filter, usings);
 
   const requires = proj.query!.requires;
@@ -532,7 +585,7 @@ function renderAggregateHandler(
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
-  const seam = dapperFilterSeam(usingDapper, filter, ns, usings);
+  const seam = dapperFilterSeam(usingDapper, filter, ns, usings, caps);
 
   const dbType = usingDapper ? "NpgsqlDataSource" : "AppDbContext";
   const fields: string[] = [`    private readonly ${dbType} _db;`];
@@ -702,11 +755,14 @@ function renderGroupedHandler(
 
   const usings = new Set<string>();
   const filter = proj.query!.filter;
-  const where = filter
-    ? usingDapper
-      ? whereToSql(filter)
-      : renderCsExpr(filter, { thisName: "o", efQuery: true })
-    : undefined;
+  // Same capability-filter splice as the singleton arm — see
+  // `aggregationCapabilityFilters`.
+  const caps = usingDapper ? aggregationCapabilityFilters(proj, ctx) : [];
+  const where = usingDapper
+    ? dapperAggregationWhere(proj, caps)
+    : filter
+      ? renderCsExpr(filter, { thisName: "o", efQuery: true })
+      : undefined;
   if (filter && !usingDapper) collectCsExprUsings(filter, usings);
 
   // Authorization gate (default-deny) — same shape as the singleton arm.
@@ -717,7 +773,7 @@ function renderGroupedHandler(
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
-  const seam = dapperFilterSeam(usingDapper, filter, ns, usings);
+  const seam = dapperFilterSeam(usingDapper, filter, ns, usings, caps);
 
   const dbType = usingDapper ? "NpgsqlDataSource" : "AppDbContext";
   const fields: string[] = [`    private readonly ${dbType} _db;`];

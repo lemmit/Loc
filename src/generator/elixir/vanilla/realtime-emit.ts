@@ -43,7 +43,7 @@
 //     payload.
 // ---------------------------------------------------------------------------
 
-import type { BoundedContextIR, EventIR, TypeIR } from "../../../ir/types/loom-ir.js";
+import type { BoundedContextIR, EventIR, SystemIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../../ir/util/channels.js";
 import { realtimeRoomPlan } from "../../../ir/util/realtime-rooms.js";
 import { API_BASE_PATH } from "../../../util/api-base.js";
@@ -73,12 +73,15 @@ interface CarriedEvent {
 
 /** Collect the UI-observable events across every hosted context, ordered by
  *  event name so the emitted clause order is deterministic. */
-function collectRealtimeEvents(contexts: readonly BoundedContextIR[]): CarriedEvent[] {
+function collectRealtimeEvents(
+  contexts: readonly BoundedContextIR[],
+  sys: Pick<SystemIR, "tenancy"> | undefined,
+): CarriedEvent[] {
   const out: CarriedEvent[] = [];
   for (const ctx of contexts) {
     const carried = realtimeEventTypes(ctx);
     if (carried.size === 0) continue;
-    const plan = realtimeRoomPlan(ctx);
+    const plan = realtimeRoomPlan(ctx, sys);
     for (const ev of ctx.events) {
       if (!carried.has(ev.name)) continue;
       const ticket = plan.tenantEventTypes.has(ev.name);
@@ -158,8 +161,9 @@ function frameClause(
 function renderVanillaRealtimeController(
   appModule: string,
   contexts: readonly BoundedContextIR[],
+  sys: Pick<SystemIR, "tenancy"> | undefined,
 ): string | null {
-  const carried = collectRealtimeEvents(contexts);
+  const carried = collectRealtimeEvents(contexts, sys);
   if (carried.length === 0) return null;
   const webModule = `${appModule}Web`;
   const typeList = carried.map((c) => `"${c.ev.name}"`).join(", ");
@@ -295,8 +299,9 @@ export function emitVanillaRealtime(
   appModule: string,
   contexts: readonly BoundedContextIR[],
   out: Map<string, string>,
+  sys: Pick<SystemIR, "tenancy"> | undefined,
 ): ApiRoute[] {
-  const content = renderVanillaRealtimeController(appModule, contexts);
+  const content = renderVanillaRealtimeController(appModule, contexts, sys);
   if (!content) return [];
   out.set(`lib/${appName}_web/controllers/realtime_controller.ex`, content);
   return [

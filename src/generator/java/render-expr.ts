@@ -1,5 +1,6 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
+import { bodyTypeOf } from "../../util/expr-body-type.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import {
   escapeJavaIdent,
@@ -381,7 +382,14 @@ const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
   // with a Map literal so unexpected uses still compile.
   object: (fields) =>
     `Map.of(${fields.map((f) => `${JSON.stringify(f.name)}, ${f.value}`).join(", ")})`,
-  unary: (op, operand) => `${op}${operand}`,
+  unary: (op, operand, e) =>
+    // money/decimal are `java.math.BigDecimal` here, which has no unary-minus
+    // operator — `-this.price` is "bad operand type for unary operator '-'".
+    // Route through `negate()` (audit finding A11; the elixir twin is
+    // `Decimal.negate/1`).
+    op === "-" && isMoneyLike(unwrapOptional(bodyTypeOf(e.operand)))
+      ? `${operand}.negate()`
+      : `${op}${operand}`,
   binary: renderBinary,
   ternary: (cond, then, otherwise) => `${cond} ? ${then} : ${otherwise}`,
   convert: (value, e) => renderJavaConvert(e.target, e.from, value),
@@ -638,42 +646,21 @@ function renderMethodCall(
   return `${recv}.${e.member}(${args.join(", ")})`;
 }
 
-/** Element type a `sum` reduces over: the receiver's element type for a
- *  bare `sum()`, or the projected type for `sum(x -> …)`.  The lambda
- *  body's own `memberType` is NOT always populated by lowering (C#'s
- *  generic `Sum` never needed it), so a member projection over the
- *  receiver's element entity resolves the field / derived type from the
- *  aggregate IR first.  Falls back to `int` — the generated-project
- *  compile gate catches a wrong guess loudly. */
-function sumElementType(e: MethodCallExpr, ctx: JavaRenderContext): TypeIR | undefined {
-  if (e.args.length === 0) {
-    return e.receiverType.kind === "array" ? e.receiverType.element : undefined;
-  }
-  const arg = e.args[0];
-  if (arg?.kind !== "lambda" || !arg.body) return undefined;
-  const body = arg.body;
-  if (body.kind === "member") {
-    // Authoritative path: the receiver collection's element entity is a
-    // part of (or is) the rendering aggregate — read the projected
-    // member's declared type straight off the IR.
-    const elem = e.receiverType.kind === "array" ? e.receiverType.element : undefined;
-    if (elem?.kind === "entity" && ctx.agg) {
-      const owner =
-        ctx.agg.name === elem.name ? ctx.agg : ctx.agg.parts.find((p) => p.name === elem.name);
-      const declared =
-        owner?.fields.find((f) => f.name === body.member)?.type ??
-        owner?.derived.find((d) => d.name === body.member)?.type;
-      if (declared) return declared;
-    }
-    return body.memberType;
-  }
-  if (body.kind === "binary") return body.leftType;
-  if (body.kind === "convert") return { kind: "primitive", name: body.target };
-  if (body.kind === "literal") {
-    if (body.lit === "decimal" || body.lit === "money" || body.lit === "long" || body.lit === "int")
-      return { kind: "primitive", name: body.lit };
-  }
-  return undefined;
+/** Element type a `sum` reduces over: the projected λ-body type for
+ *  `sum(x -> …)`, the receiver's element type for a bare `sum()`.
+ *
+ *  Identical shape to the sibling backends' `sumBodyIsMoney` /
+ *  `sumBodyIsDecimalStruct` / `sumIsMoney` probes — the λ-body typing is the
+ *  SHARED `bodyTypeOf` (`src/util/expr-body-type.ts`), not a java-local
+ *  re-implementation.  (It was one until audit finding A5: the duplicate
+ *  meant java alone typed an arithmetic body, so the arm was hoisted into
+ *  the shared helper and this copy deleted.)  `undefined` falls back to the
+ *  int reduce — the generated-project compile gate catches a wrong guess
+ *  loudly. */
+function sumElementType(e: MethodCallExpr): TypeIR | undefined {
+  const lam = e.args[0];
+  if (lam?.kind === "lambda" && lam.body) return bodyTypeOf(lam.body);
+  return e.receiverType.kind === "array" ? e.receiverType.element : undefined;
 }
 
 /** True iff `e.args[1]` is the boolean literal `true` (a `sortBy(λ, true)`
@@ -690,8 +677,8 @@ export const JAVA_COLLECTION_RENDERERS: Record<
   (recv: string, args: string[], e?: MethodCallExpr, ctx?: JavaRenderContext) => string
 > = {
   count: (recv) => `${recv}.size()`,
-  sum: (recv, args, e, ctx) => {
-    const elem = e && ctx ? unwrapOptional(sumElementType(e, ctx)) : undefined;
+  sum: (recv, args, e) => {
+    const elem = e ? unwrapOptional(sumElementType(e)) : undefined;
     const stream = args.length === 1 ? `${recv}.stream().map(${args[0]})` : `${recv}.stream()`;
     if (isMoneyLike(elem)) {
       return `${stream}.reduce(BigDecimal.ZERO, BigDecimal::add)`;
@@ -713,10 +700,18 @@ export const JAVA_COLLECTION_RENDERERS: Record<
   first: (recv) => `${recv}.get(0)`,
   firstOrNull: (recv) => `${recv}.stream().findFirst().orElse(null)`,
   map: (recv, args) => `${recv}.stream().map(${args[0]}).toList()`,
+  // Descending is the 2-arg `comparing(keyExtractor, keyComparator)` form, NOT
+  // `comparing(λ).reversed()`.  `.reversed()` takes the `comparing(…)` call out
+  // of target-typed position, so javac infers `U = Object` against the
+  // `U extends Comparable<? super U>` bound and REJECTS the whole expression
+  // ("inference variable U has incompatible bounds") — audit finding A10.  The
+  // 2-arg form stays inside `sorted(…)`'s target type, so `T`/`U` infer from
+  // the stream element and the λ's return type, and it works for every key
+  // (String, BigDecimal, Integer, Instant).
   sortBy: (recv, args, e) => {
     const cmp =
       e && isDescendingSort(e)
-        ? `java.util.Comparator.comparing(${args[0]}).reversed()`
+        ? `java.util.Comparator.comparing(${args[0]}, java.util.Comparator.reverseOrder())`
         : `java.util.Comparator.comparing(${args[0]})`;
     return `${recv}.stream().sorted(${cmp}).toList()`;
   },

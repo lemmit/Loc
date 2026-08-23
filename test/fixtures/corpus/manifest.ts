@@ -91,6 +91,14 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "projection-aggregation", title: "whole-table aggregation — singleton query-time projection (count/sum/avg/min/max pushed to SQL)", doc: "language", backends: ALL },
   { id: "projection-groupby", title: "group by — grouped query-time projection (one row per group, key selects + per-group aggregates, GROUP BY/ORDER BY pushed to SQL)", doc: "language", backends: ALL },
   {
+    id: "projection-agg-filters",
+    title:
+      "aggregation × capability filters — tenantOwned + softDeletable source, whole-table and grouped aggregations scoped by the SAME predicates the row read applies (plus an `ignoring` witness)",
+    doc: "tenancy",
+    backends: ALL,
+    note: "minted by audit A1: the aggregation shapes read the source table DIRECTLY, so four backends applied only the projection's own `where` — a cross-tenant COUNT/SUM leak no fixture crossed",
+  },
+  {
     id: "projection-join",
     title:
       "projection join — the by-id follow (`join <Agg> as <alias> on <idRef>`), carrying the referenced row's fields onto each projection row",
@@ -211,6 +219,14 @@ export const CORPUS: readonly CorpusFeature[] = [
     title: "stdlib macros — crudish (create/update/destroy) + softDeletable capability + softDelete ops",
     doc: "scaffold-macros",
     backends: ALL,
+  },
+  {
+    id: "collection-op-shapes",
+    title:
+      "collection-op / operator shapes no other fixture witnesses — arithmetic-λ `sum`, `distinct` over money, argless `any()`, DESCENDING `sortBy`, unary `-` on money, `-=` over an `int[]`",
+    doc: "stdlib",
+    backends: ALL,
+    note: "minted by the 2026-08-17 generator code review (A5/A10–A14): every one of these rendered wrong on at least one backend — java's descending sortBy did not COMPILE, node/elixir/python's money fold was broken by a missing `binary` arm in `bodyTypeOf`, elixir's argless `any()` was always false — and none appeared anywhere in the corpus, examples or journey/, so no compile gate could see them.  Writing it also surfaced an UNFILED .NET sibling of A13 (scalar-array mutation routed through a `_codes` backing field that does not exist → CS0103), fixed in the same change.  No `test e2e` block: this is a compile-tier witness, and adding one would mint recorded wire cases whose goldens cannot be captured from the fixture PR",
   },
   {
     id: "validation-messages",

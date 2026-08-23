@@ -162,7 +162,7 @@ describe("request hardening — the paged controls carry declared upper bounds (
     );
   });
 
-  it("elixir publishes minimum/maximum and clamps in page_param/4", async () => {
+  it("elixir publishes minimum/maximum and REJECTS out-of-range in page_param/4", async () => {
     const spec = await fileMatching(/api\/f_api_spec\.ex$/);
     expect(spec).toContain(
       `%OpenApiSpex.Schema{type: :integer, minimum: 1, maximum: ${PAGED_MAX_PAGE}}`,
@@ -171,9 +171,13 @@ describe("request hardening — the paged controls carry declared upper bounds (
       `%OpenApiSpex.Schema{type: :integer, minimum: 1, maximum: ${PAGED_MAX_PAGE_SIZE}}`,
     );
     const ctrl = await fileMatching(/shipment_controller\.ex$/);
+    // The declared bound is ENFORCED, not clamped — an out-of-range value
+    // answers the same `errors[]` 422 node/python send (generator review A16).
     expect(ctrl).toContain("defp page_param(params, key, default, limit) do");
-    expect(ctrl).toContain("{n, _} when n >= 1 -> min(n, limit)");
+    expect(ctrl).not.toContain("min(n, limit)");
     expect(ctrl).toContain(`page_param(params, "page", 1, ${PAGED_MAX_PAGE})`);
     expect(ctrl).toContain(`page_param(params, "pageSize", 20, ${PAGED_MAX_PAGE_SIZE})`);
+    expect(ctrl).toContain("{:error, {:invalid_paging, paging_errors}} ->");
+    expect(ctrl).toContain("ProblemDetails.validation_errors_response(conn, paging_errors)");
   });
 });

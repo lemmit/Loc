@@ -4,20 +4,46 @@
 // helpers are private to this module.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
-import { localizedChromeAttr, registerI18nImport } from "../i18n-emit.js";
+import {
+  localizedChromeAttr,
+  localizedPositionalAttr,
+  localizedPositionalTranslation,
+  localizedText,
+  registerI18nImport,
+} from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
-import { namedArgValue, unwrapAsAttr, unwrapTextLiteral } from "../shared/args.js";
+import { namedArgValue, positionalArgs } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
-import { emitExpr, firstPositionalContent, testidAttr } from "../walker-core.js";
+import { emitExpr, testidAttr } from "../walker-core.js";
 
+/** The three spellings of an input's LABEL — the most-read authored prose in
+ *  any generated form, and until M-T1.11's `inputLabel` slot the only one that
+ *  reached no catalog at all (the `Select…` placeholder beside it did).
+ *
+ *  The packs split three ways on how they render it, so all three forms come
+ *  from the SAME `messageKey()` and the same translation decision:
+ *
+ *    `labelText`  — the text/children token, for `<Label>{{{labelText}}}</Label>`;
+ *    `labelAttr`  — the complete bound attribute, for `<TextInput{{{labelAttr}}}>`
+ *                   (` label="Email"` off, ` label={t(…)}` / ` :label="t(…)"` on);
+ *    `labelValue` — the bare translation EXPRESSION, `undefined` when there is
+ *                   nothing to translate, for the two packs that splice the
+ *                   label into their own string syntax (Feliz's `prop.text "…"`,
+ *                   Flutter's `InputDecoration(labelText: '…')`).  They keep
+ *                   their raw spelling as the fallback, so i18n-off output is
+ *                   byte-identical by construction.
+ *
+ *  A missing label keeps its pre-i18n ` label=""` rather than dropping the
+ *  attribute — the degenerate case is not what this slot is about. */
 function inputLabelForms(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
-): { labelAttr: string; labelText: string } {
-  const raw = firstPositionalContent(call, ctx) ?? '""';
+): { labelAttr: string; labelText: string; labelValue: string | undefined } {
+  const labelArg = positionalArgs(call)[0];
   return {
-    labelAttr: unwrapAsAttr(raw),
-    labelText: unwrapTextLiteral(raw, ctx.target.escapeText),
+    labelAttr: labelArg ? localizedPositionalAttr(call, ctx, "inputLabel", "label") : ' label=""',
+    labelText: localizedText(call, ctx, "inputLabel", '""'),
+    labelValue: localizedPositionalTranslation(call, ctx, "inputLabel"),
   };
 }
 
@@ -65,13 +91,14 @@ export function emitField(
   // bound to a state field.  `bind:` required; without it the
   // input falls back to a label-only stub.
   void depth;
-  const { labelAttr, labelText } = inputLabelForms(call, ctx);
+  const { labelAttr, labelText, labelValue } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
   const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
   const error = inputErrorExpr(call, ctx);
   return renderPrimitive(ctx, "primitive-field", {
     labelAttr,
     labelText,
+    labelValue,
     bind,
     setter,
     hasBind: bind !== undefined,
@@ -88,13 +115,14 @@ export function emitToggle(
 ): string {
   // Toggle("Label", bind: <bool state>) — controlled bool input.
   void depth;
-  const { labelAttr, labelText } = inputLabelForms(call, ctx);
+  const { labelAttr, labelText, labelValue } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
   const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
   const error = inputErrorExpr(call, ctx);
   return renderPrimitive(ctx, "primitive-toggle", {
     labelAttr,
     labelText,
+    labelValue,
     bind,
     setter,
     hasBind: bind !== undefined,
@@ -114,13 +142,14 @@ export function emitNumberField(
   // ? v : 0` so binding stays type-safe across the
   // string-or-number onChange union.
   void depth;
-  const { labelAttr, labelText } = inputLabelForms(call, ctx);
+  const { labelAttr, labelText, labelValue } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
   const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
   const error = inputErrorExpr(call, ctx);
   return renderPrimitive(ctx, "primitive-number-field", {
     labelAttr,
     labelText,
+    labelValue,
     bind,
     setter,
     hasBind: bind !== undefined,
@@ -138,13 +167,14 @@ export function emitMultilineField(
   // MultilineField("Label", bind: <string state>) — controlled
   // multi-line text input (textarea).  Same bind-shape as Field.
   void depth;
-  const { labelAttr, labelText } = inputLabelForms(call, ctx);
+  const { labelAttr, labelText, labelValue } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
   const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
   const error = inputErrorExpr(call, ctx);
   return renderPrimitive(ctx, "primitive-multiline-field", {
     labelAttr,
     labelText,
+    labelValue,
     bind,
     setter,
     hasBind: bind !== undefined,
@@ -164,7 +194,7 @@ export function emitSelectField(
   // expression (a list literal, a state field, or any expression
   // rendering to `string[]`).  Same bind-shape as Field.
   void depth;
-  const { labelAttr, labelText } = inputLabelForms(call, ctx);
+  const { labelAttr, labelText, labelValue } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
   const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
   const error = inputErrorExpr(call, ctx);
@@ -173,6 +203,7 @@ export function emitSelectField(
   return renderPrimitive(ctx, "primitive-select-field", {
     labelAttr,
     labelText,
+    labelValue,
     bind,
     setter,
     hasBind: bind !== undefined,
@@ -211,13 +242,14 @@ export function emitFileUpload(
   // Flag the walk so the Angular page-shell wires the `onFileUploadTo`
   // component method + its imports (unread on the other frontends).
   ctx.usesFileUpload = true;
-  const { labelAttr, labelText } = inputLabelForms(call, ctx);
+  const { labelAttr, labelText, labelValue } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
   const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
   const error = inputErrorExpr(call, ctx);
   return renderPrimitive(ctx, "primitive-file-upload", {
     labelAttr,
     labelText,
+    labelValue,
     bind,
     setter,
     hasBind: bind !== undefined,
@@ -235,13 +267,14 @@ export function emitPasswordField(
   // PasswordField("Label", bind: <string state>) — visibility-
   // toggle text input.  Same bind-shape as Field.
   void depth;
-  const { labelAttr, labelText } = inputLabelForms(call, ctx);
+  const { labelAttr, labelText, labelValue } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
   const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
   const error = inputErrorExpr(call, ctx);
   return renderPrimitive(ctx, "primitive-password-field", {
     labelAttr,
     labelText,
+    labelValue,
     bind,
     setter,
     hasBind: bind !== undefined,

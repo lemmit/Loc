@@ -507,16 +507,24 @@ export function lowerToDrizzle(
 // EF Core installs these once via `HasQueryFilter` and applies them to
 // every query automatically.  Drizzle has no global query filter, so the
 // generated repository must AND each predicate into every root-table read
-// site (findById / findManyByIds / find*).  Principal-
-// referencing filters (tenancy: `currentUser.tenantId`) are deferred —
-// the IR validator (`validatePrincipalContextFilterSupport`) rejects them
-// on Hono — so only non-principal predicates reach codegen here.
+// site (findById / findManyByIds / find*).
+//
+// PRINCIPAL-REFERENCING filters (tenancy: `currentUser.tenantId`) are
+// APPLIED, not rejected: `contextFilterPredicate` below lowers them with
+// `{ principalAccessor: "requireCurrentUser()" }`, so the predicate reads
+// the ambient per-request principal and the read needs no `currentUser`
+// parameter (DEBT-01).  The only thing such a filter cannot do is REIFY
+// into a module-level `<name>Criterion(...)` fn — that fn has no
+// `currentUser` in scope — so it always inlines.
 // ---------------------------------------------------------------------------
 
-/** The non-principal capability-filter predicates for an aggregate, in
- *  declaration order.  Principal-referencing predicates are filtered out
- *  (the validator has already rejected them on Hono), so what remains
- *  always lowers to a closed Drizzle expression. */
+/** The capability-filter predicates for an aggregate that lower to a CLOSED
+ *  Drizzle expression — i.e. every predicate except the principal-referencing
+ *  ones, in declaration order.  Callers are the ones that need a predicate
+ *  with no ambient-principal dependency: the drizzle-op import walk (which
+ *  lowers each predicate without a `principalAccessor`) and the criterion
+ *  reifier.  Every root read still applies the FULL set — principal filters
+ *  included — via `contextFilterPredicate`. */
 export function nonPrincipalContextFilters(agg: EnrichedAggregateIR): ExprIR[] {
   return (agg.contextFilters ?? []).filter((p) => !exprUsesCurrentUser(p));
 }
