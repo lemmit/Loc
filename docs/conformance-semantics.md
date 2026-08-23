@@ -977,6 +977,28 @@ the conforming backends, and the fix that established it.
   > cause of the whole five-part story is that the emitted `test e2e` DSL has no
   > verb for "read a key that isn't there", so the probe manufactures one from
   > the URLs each tier already requested.
+  >
+  > **And a sixth, at the last by-key read of all (2026-08-23, M-T6.39 /
+  > [#2645](https://github.com/lemmit/Loc/pull/2645)).** `GET /files/{key}` —
+  > the root file-download route over a bound `objectStore` — was the one
+  > absent-read site outside all five discoveries above, and it was wrong on
+  > **all five backends at once**: node/python/elixir answered
+  > `{"error":"not found"}` as plain `application/json`, dotnet/java answered
+  > bodiless. The bodiless pair is the subtler half — neither stays empty on the
+  > wire, because `UseStatusCodePages` and the servlet container fill a bodiless
+  > 4xx with the FRAMEWORK-miss problem, whose `detail` reads `no route for GET
+  > /files/<key>`. That sentence is false: the route exists, the OBJECT does
+  > not, so a client cannot tell a mistyped URL from a deleted upload. All five
+  > now reach their one producer with `File <key> not found` — .NET through a
+  > new static responder on `DomainExceptionFilter`, because the route is a
+  > MINIMAL API and an `IExceptionFilter` never sees a throw from one. Same
+  > gating shape as the fifth discovery: a per-SITE pin
+  > (`test/conformance/files-absent-object-envelope-parity.test.ts`) plus an
+  > absent-FILE probe on the wire-golden dispatch. The reason it survived the
+  > 2026-08-11 sweep is the same reason RS-22 listed .NET and java as conforming
+  > through all of the above — **no golden reached the route**, and none could:
+  > the routes are emitted only for a system with BOTH a `File` field and an
+  > `objectStore`, and no corpus fixture had one until `file-download.ddd`.
 - **The real rule: don't hand-roll a 404.** This was not five backends inventing
   five strings. **Two agreed out of the box**, because on each the message comes
   from one shared producer — the repository's `getById`
