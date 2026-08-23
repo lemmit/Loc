@@ -272,3 +272,59 @@ The through-line for what remains: **the two self-hosting frontends carry most o
 Sources: M-T9.27 register rows (`src/diagnostics/unsupported-register.ts`). Relates to M-T1.3 (Chart, already missioned on the same axis) and M-T9.14 (Flutter runtime gates).
 
 **Progress — the store `persist:` ladder on Feliz is drained.** A sixth code sat on the same axis: `loom.store-lifetime-target-unsupported` refused `persist: local|session|url` on feliz AND flutter. The Feliz half now ships (`src/generator/feliz/store-persist.ts`): a Feliz store folds into the single Elmish `Model`, so persistence rides that fold — `init` seeds each field through a `StorePersist.load<Store><Field> ()` loader, an `updateWithPersist` wrapper mirrors the Model back after every message, and the `url` tier adds a `popstate` Elmish subscription. Keys and query-param shapes match the four JS store builders byte-for-byte. Its arm of `LIFETIME_UNSUPPORTED_PLATFORMS` was deleted with the fix; what survives on feliz is field-scoped (a type with no total F# conversion — datetime / duration / guid / enum / entity / value object) and fires the same code through a `#field` message variant. Flutter followed in the wave-2 quartet above (`generator/flutter/store-persist.ts`), which emptied `LIFETIME_UNSUPPORTED_PLATFORMS` and DELETED the platform arm outright — what is left of this code is field-scoped on both frontends (`#field` on feliz, `#flutter-field` on flutter). The same PR fixed page-level `derived` on Feliz (the page walk was handed an empty `derivedNames`, so a body read rendered a `(* ref: … *)` comment and the value silently vanished) — `generated-feliz-build.yml`'s showcase now carries all four lifetimes plus a page `derived`, so `dotnet fable` and the runtime smoke both cover them.
+
+## M-T1.21 — Flutter money is broken end-to-end: every read crashes, every submit is rejected — `open` · **M** · P1 ⭐ compiles green, dies on the first list page
+
+Found 2026-08-23 by the numeric-types audit ([F1](../audits/numeric-types-audit-2026-08-23.md)). Money crosses the wire as the RS-12 fixed-scale string (`"12.5000"`), but the generated Dart decodes it `(json['price'] as num).toDouble()` (`dartFromJson`, `src/generator/flutter/dart-types.ts`) — a runtime `type 'String' is not a subtype of type 'num'` on every list/detail/projection/dashboard read of a money-bearing model. Forms go wrong in the other direction: `double.tryParse` submits a JSON **number** (`src/generator/flutter/forms-emit.ts`), which every backend's string-typed money field rejects with 422/400.
+
+**Why every existing gate is green.** `generated-flutter-build.yml` is compile-only and its embedded fixture declares `price: int` plus a hand-rolled `valueobject Money { amount: int }` — the `money` *primitive* never reaches Flutter in any gate. Worse, the wrong decode is test-**pinned** in `test/generator/flutter/dart-model.test.ts`.
+
+**The fix** (proposed default, overridable in draft-PR review): money in Dart is the wire **string** with typed helpers — never `double` (which also caps money at ~15–17 significant digits against `NUMERIC(19,4)`). Decode takes the string as-is; forms keep text input and submit the string; display parses for formatting only. Re-pin `dart-model.test.ts` to the correct shape.
+
+**Verification when it lands.** The flutter CI fixture gains a money-primitive field (the F18 witness this class never had), the re-pinned suite is mutation-proved by restoring the `as num` decode, and M-T9.38's runtime leg is the eventual end-to-end proof.
+
+Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F1/F18, plan.json N1. Relates to M-T1.18 (Flutter residue), M-T9.38 (runtime leg).
+
+## M-T1.22 — Feliz numeric conformance: decimal encodes as a string, int `/` truncates, `long` is int32 — `open` · **M** · P1
+
+Found 2026-08-23 by the numeric-types audit ([F2](../audits/numeric-types-audit-2026-08-23.md)). Four defects, one target: (1) plain `decimal` request fields encode via Thoth `Encode.decimal`, which emits a JSON **string** — right for money, wrong for decimal (RS-24 says number) → 422 on node/.NET (`src/generator/feliz/wire.ts`; only the money arm is test-pinned). (2) `fs-expr.ts` has no `isIntDivWidenedToDecimal` arm, so a page-body `a / b` on ints **truncates** in F# where every other target yields 2.5. (3) `long` collapses to F# `int` + `Decode.int`, rejecting anything past int32. (4) No numeric validation runs before Fable's `int`/`decimal` conversion — a stray `2.5` in an int field throws an unhandled Elmish exception on submit.
+
+**Why every existing gate is green.** `generated-feliz-build.yml` is compile-only; all four defects are runtime- or wire-visible only. The Feliz *decode* side is actually the most precision-safe of the six frontends (F# `decimal` both ways) — the defects are all on the encode/expression side.
+
+**The fix:** split the encode arm (money string / decimal number); add the int-division widening arm to `FS_LEAVES`; decode `long` over the full int64 range; validate numeric text before conversion so bad input is a form error.
+
+**Verification when it lands.** `test/generator/feliz/createform.test.ts` gains the decimal-encode arm; an fs-expr division test; each arm mutation-proved.
+
+Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F2, plan.json N2. Relates to M-T1.16 (Feliz polish), M-T9.38 (runtime leg).
+
+## M-T1.23 — A money form input makes the generated React/Svelte app fail to build — `open` · **S–M** · P1 ⭐ duplicate `Decimal` import, hidden by a witness gap
+
+Found 2026-08-23 by the numeric-types audit ([F3](../audits/numeric-types-audit-2026-08-23.md)). The page shell emits `import Decimal from "decimal.js"` when a page binds Decimal (`src/generator/react/walker/page-shell.ts`, Svelte twin), while every pack's `field-input-money` template *also* declares `{from: "decimal.js", named: ["Decimal"]}` — both land in the emitted page: `TS2300: Duplicate identifier 'Decimal'`, reproduced with tsc on emitted output. The generated app does not build.
+
+**Why every existing gate is green.** No build-matrix example renders a money-primitive form field (acme's `Money` is a value object of `decimal amount`), so `generated-react-build`/`-svelte-build` never reach the shape.
+
+**The fix:** one import owner — the shell's import collector absorbs (or skips) what the active pack already declares. Add a money-primitive create form to a build-matrix example in the same PR (the F18 witness), so the gate reaches the shape forever.
+
+**Verification when it lands.** A walker test pins single-import on a money-form page; the matrix example compiles; mutation-proved by re-duplicating the import.
+
+Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F3/F18, plan.json N3. Conflicts with M-T1.24 in the shared walker tree — sequence or stack.
+
+## M-T1.24 — Money form values must be strings/Decimals, never JS numbers: three seams violate it — `open` · **M** · P1
+
+Found 2026-08-23 by the numeric-types audit ([F4+F5+F6](../audits/numeric-types-audit-2026-08-23.md)), grouped because they are one contract violated at three seams. (1) **Svelte**: `createForm`'s `$state(structuredClone(defaults))` (`src/generator/svelte/emit-templates.ts`) strips the prototype off the money seed `new Decimal("0")` (`src/generator/_frontend/form-helpers.ts`) — the input renders `[object Object]` and an untouched default can never pass `moneySchema` (node-reproduced). (2) **Shared walker**: money inside a `VO[]` dynamic-row form registers `{valueAsNumber: true}` with a numeric `0` default (`NUMERIC` set in `src/generator/_walker/form-fields-vm.ts`) — the row always fails validation, and would wire a JSON number if it passed; flat money fields are correct, the array path diverges. (3) **Angular**: the request interface says `price: string` but `controlInit` seeds `new FormControl(0)` behind a `type="number"` input (`src/generator/angular/form-fields.ts`) — `TS2345` under `ng build`, and a JSON number if suppressed.
+
+**Why every existing gate is green.** Same witness gap as M-T1.23 — no matrix example has a money-primitive form; (1) is additionally masked by M-T1.23's build break.
+
+**The fix:** Decimal-safe default cloning (or string seeds) on Svelte; move `field-input-money` out of the `valueAsNumber` array-row path with a string zero seed; Angular seeds a string control behind a text input. Record the register-annex pack inconsistencies (some packs `parseInt`-truncate int input, Mantine caps decimal entry at 2dp) as acceptance observations while in the files.
+
+**Verification when it lands.** Per-seam generator tests, each mutation-proved; the M-T1.23 matrix example then exercises the whole path in the build gate.
+
+Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F4/F5/F6 + annex, plan.json N4. Conflicts with M-T1.23/M-T1.25 in shared trees.
+
+## M-T1.25 — Money display fabricates "$"/USD and rounds to 2dp — `open` · **S** · P3
+
+Found 2026-08-23 by the numeric-types audit ([S6](../audits/numeric-types-audit-2026-08-23.md)). Every JSX/Angular/Vue/Svelte pack's `format-helpers` money formatter coerces through `Number(value)`, defaults `decimals=2`, and invents a currency symbol Loom money does not have (no currency dimension — M-T2.12 owns adding one). A wire `"12.3456"` displays `"$12.35"` and there is **no way to see the stored 4dp value in the UI**; Feliz shows the raw string, Flutter differs again — three display behaviors for one type.
+
+**The work:** stop fabricating the symbol; default display shows the wire value faithfully (4dp, locale-neutral); if a format knob is wanted it becomes a declared design decision, not a hardcode. Display-only — no wire change.
+
+Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) S6, plan.json N5. Relates to M-T2.12 (currency dimension). Conflicts with M-T1.24 in the pack trees.
