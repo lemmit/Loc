@@ -27,6 +27,45 @@ async function main() {
   await page.getByRole("button", { name: "+" }).click();
   await page.getByText("Clicks: 2").waitFor();
 
+  // 2b. Page-level `derived` (M-T1.20) — a pure function of `state`, hoisted as
+  // an F# `let` above the body and RECOMPUTED on every render.  Neither `dotnet
+  // fable` nor `vite build` can see this: before the fix the body read lowered
+  // to a `(* ref: doubled *)` comment, which compiles green and renders NOTHING.
+  await page.getByText("Doubled: 4").waitFor();
+
+  // 2c. Store persistence (M-T1.20) — the `persist:` tiers hydrate at `init` and
+  // mirror back through the `update` wrapper.  First load: the declared defaults
+  // (nothing stored yet), and the localStorage blob written on the first message
+  // is keyed `loom.store.Draft` with the SAME JSON shape the JS frontends write.
+  await page.getByText("Mode: dark").waitFor();
+  const draftBlob = await page.evaluate(() => localStorage.getItem("loom.store.Draft"));
+  const parsedDraft = JSON.parse(draftBlob ?? "null");
+  if (
+    parsedDraft === null ||
+    parsedDraft.note !== "" ||
+    parsedDraft.seen !== 0 ||
+    parsedDraft.ok !== false ||
+    !Array.isArray(parsedDraft.tags)
+  ) {
+    throw new Error(`store write-back missing/misshaped: ${draftBlob}`);
+  }
+  if ((await page.evaluate(() => sessionStorage.getItem("loom.store.Prefs"))) === null) {
+    throw new Error("session-tier store never wrote its blob");
+  }
+  // Hydration: seed the blob, reload, and the Model must come back from storage
+  // rather than from the declared default.
+  await page.evaluate(() =>
+    localStorage.setItem(
+      "loom.store.Draft",
+      JSON.stringify({ note: "hydrated", seen: 7, ok: true, price: "1.50", tags: ["a"] }),
+    ),
+  );
+  await page.goto(URL, { waitUntil: "networkidle" });
+  await page.getByText("Draft: hydrated").waitFor({ timeout: 10000 });
+  // The `url` tier reads the query string as untrusted input.
+  await page.goto(`${URL}?term=shoes`, { waitUntil: "networkidle" });
+  await page.getByText("Term: shoes").waitFor({ timeout: 10000 });
+
   // 3. Routing — navigate to the Products page (Feliz.Router path route).
   // Target the page HEADING specifically: the app-shell navbar also carries a
   // "Products" link, so a bare getByText would match two elements.
