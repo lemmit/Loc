@@ -206,6 +206,23 @@ Each half independently prevents the loss, which is why both stay: the entity ma
 
 **Hollow-cell note (feeds M-T9.8), corrected 2026-08-11.** The 2026-07-30 note claimed `channels-broker` and `outbox` were **passing** on the mikroorm behavioural leg with the feature absent. They were not passing — they were never **collected**: neither corpus fixture carries a `test e2e` block, so `featureCases` skips both on every backend, and the `MIKRO_SKIP` entries were silently **inert** (a register entry claiming a checked gap that nothing checks — hollower than the original diagnosis). `run-mikroorm.mjs` now ratchets its own register: a key naming no fixture fails the run, and a key whose fixture has no behavioural block prints `INERT` so the claim is visible. Giving `outbox.ddd` / `channels-broker.ddd` real `test e2e` blocks is its own mission-sized change (it arms five backend legs + the wire golden at once, like #2468) — **not** folded into slice 1, whose runtime proof is the booted check above.
 
+**Slice 6 — HIERARCHICAL TENANCY: DONE (2026-08-18).** The sixth gate, and the only one of the family that was ever a *shape* reject rather than an unwritten emitter. `whereToMikroFilter`'s FilterQuery OPERATORS have no prefix test, `mikroContextFilters` CAUGHT the resulting throw and left the predicate unapplied, and for a `deep`/`global` scope that is not a degraded read but NO tenant predicate at all — so the interim gate refused the shape outright (`loom.mikroorm-unsupported`, read filters + `writeScopeFilter`).
+
+The premise did not survive contact, exactly as on the Dapper twin (M-T6.29 → #2616): the operator vocabulary cannot express the test, but a FilterQuery **key** may be a `raw()` SQL fragment, and the predicate is ordinary SQL. `authzFilterEntry` now renders
+
+```ts
+{ [raw("((data_key is not null and (data_key = ? or starts_with(data_key, ?))) or (data_key is null and tenant_id = ?))",
+       [requireCurrentUser().orgPath, requireCurrentUser().orgPath + ".", requireCurrentUser().tenantId])]: [] }
+```
+
+`starts_with`, never `LIKE` — the anchor is a principal CLAIM, so `_`/`%` inside it are wildcards and `org_a` would match `orgXa.leak`; binding the value (which `raw`'s `?` does) stops injection, not pattern semantics. Same anchored-prefix stance as drizzle's `strpos(…) = 1` and Dapper's `starts_with`.
+
+Two halves had to move with it. (1) The boot-time **`orgPath` resolver** was drizzle-only (`wireOrgPath = … && !usingMikro`); unregistered, the middleware falls back to the bare claim, so every caller reads as its own root and the ladder collapses to the flat floor — a silent wrong answer. The mikro branch reads the registry Row through the EntityManager (`db.fork().findOne(OrgRow, { id: claim })`). (2) The silent `catch` in `mikroContextFilters` is **gone**: an unlowerable principal filter now crashes codegen rather than dropping a tenancy predicate.
+
+*Evidence.* `tsc --noEmit` clean on the generated mikro project for the `tenancy-hierarchy` corpus fixture. `test/generator/typescript/mikroorm-deep-scope.test.ts` pins the SQL text, the `?`-arity-vs-binding-count agreement, the `raw` import, the per-statement fragment construction (a `RawQueryFragment`'s cache key is consumed on first use, so the paged `count` and page query must build two), and the resolver. **Runtime, BOOTED** against real Postgres via a new `npm run test:tenancy-hierarchy-mikroorm` (a `node-mikroorm` cell in `tenancy-e2e.yml`) — the full hierarchy harness: subtree reads, the delimiter trap (`org_ab` ∉ `org_a`), the WILDCARD trap (`orgXa.leak`), the NULL-dataKey floor. Mutation-proved twice: render `like ? || '%'` instead of `starts_with` → the wildcard trap fires (`orgXa.leak` leaks into `org_a`'s read); restore `&& !usingMikro` on the resolver → the subtree collapses (`org_a.b` no longer sees `org_a.b.c`).
+
+*CI hole fixed alongside.* `tenancy-e2e.yml`'s `paths:` had no entry for `src/generator/typescript/emit/mikroorm.ts` — the file that owns this predicate — so a mikroorm-emitter-only change skipped the workflow that tests it. (Same class as slice 2's `channels-e2e.yml` finding.)
+
 Sources: found 2026-07-30 auditing the archived proposal corpus for unmapped work (R1 was the thread that led to the other four). Gate reproduced as a silent drop first (generate on mikroorm vs drizzle, file trees diffed), then as a diagnostic.
 
 ## M-T6.22 — Drain the M-T9.11 differential findings (RS-11/RS-12) — `done` (2026-07-28) · **M** · P2
@@ -572,14 +589,14 @@ The mission's own **first step was "re-verify"**, and the re-verify overturned i
 
 | Capability | Gate | Set literal | Emitters |
 |---|---|---|---|
-| `filter` capability | `loom.context-filter-unsupported` | `supportsNonRelationalFilter` / `supportsPrincipalNonRelationalFilter` | 5/5 on `relational` + `embedded`; 4/5 on `document` (node in-app over the rehydrated doc, java `findAll().stream()`, python `documentCapabilityBody`, .NET `_CapabilityVisible` in `renderDocumentRepositoryImpl` — landed #2530) |
+| `filter` capability | `loom.context-filter-unsupported` | *(none left — the deferral tables were deleted with the last unwired cell)* | **5/5 on every shape.** `relational` + `embedded` narrow a column; `document` filters IN-APP over the rehydrated instance on all five (node, java `findAll().stream()`, python `documentCapabilityBody`, .NET `_CapabilityVisible` — #2530, elixir `vanillaDocCapabilityFilter` over the `%<Agg>.Data{}` embed — #2625) |
 | `ignoring` bypass | `loom.filter-bypass-unsupported` | `FILTER_BYPASS_FAMILIES` = `dotnet, node, elixir, java, python` | EF `IgnoreQueryFilters`, Drizzle conjunct omission, Ecto `where:` omission, Hibernate named `@Filter` + `session.disableFilter`, SQLAlchemy static conjunct omission |
 | `audited` operations | `loom.audited-backend-unsupported` | `AUDIT_OP_BACKENDS` = all five | `audit_records` side table on each — pinned per backend by `test/platform/backend-parity-gates.test.ts` (`marker` per backend) |
 | `provenanced` fields | `loom.provenanced-backend-unsupported` | `PROVENANCE_BACKENDS` = all five | `provenance_records` on each — same test, `marker` per backend |
 
-**Two residues survive, and neither is on this mission's axis:**
+**One residue survives, and it is not on this mission's axis:**
 
-1. **elixir + `shape: document` capability filters** — the one unwired `(family, shape)` cell in `validateContextFilterSupport`. Everything else in that function is covered, which is why the diagnostic's own wording ("only wired for relational aggregates") was corrected in the same pass that closed this row.
+1. ~~**elixir + `shape: document` capability filters**~~ — **closed (#2625).** It was the one unwired `(family, shape)` cell in `validateContextFilterSupport`; `renderDocRepository` now AND-s the predicate into `list` / `find_by_id` / `find_by_id_for_write` / every custom find, evaluated over the rehydrated `%<Agg>.Data{}` embed, with the `deep` sentinel rendered by `renderDeepScopeInApp` and a `current_user != nil` guard keeping an actor-less read fail-closed. With the last cell wired, the three deferral tables (`supportsPrincipalFilter` / `supportsNonRelationalFilter` / `supportsPrincipalNonRelationalFilter`) and the `#unsupported-predicate` message they raised were **deleted** — `validateContextFilterSupport` is now only the shape-independent "a principal filter needs `auth: required` + a `user {}` block" rule. The `policy-document` corpus row runs on all five backends, and `backend-parity-gates.test.ts` gained a `shape: document` filter row with a per-backend in-app marker.
 2. **`ignoring` under `persistence: dapper`** — an ADAPTER cell, not a platform one. `FILTER_BYPASS_FAMILIES` is keyed by family, so `dotnet` passes the gate whatever its adapter; but `src/generator/dotnet/emit/dapper.ts` applies `agg.contextFilters` and contains **zero** occurrences of bypass handling, so an `ignoring` clause is silently not honoured there. Tracked on the adapter axis by **M-T6.35**; the dapper adapter is also under active work in the in-flight M-T6.42 PR.
 
 The general lesson is the one M-T6.33 already recorded one row over: a register row classified `gap` and never re-verified decays into a claim about the past. Both of this track's "re-verify first" missions were overturned by the re-verify.
@@ -608,7 +625,7 @@ Sources: M-T9.27 register rows; `system-checks.ts` `validateStampSupport`.
 No residue on this mission's axis. The ADAPTER axis is a different question and is tracked by M-T6.35.
 Sources: M-T9.27 register rows (the stale premise); overturned against the `EVENT_SOURCING_BACKENDS` / `EVENT_SOURCING_WORKFLOW_BACKENDS` literals in `system-checks.ts` and their `backend-parity-gates.test.ts` row.  (Cited by SYMBOL, not line: this file's own citations went stale the moment the cited file was edited.)
 
-## M-T6.43 — Java's JPA entities emit unquoted column names, so a reserved-word field 500s on insert — `open` · **S–M** · P1 ⭐ compiles green, boots green, fails on first write
+## M-T6.43 — Java's JPA entities emit unquoted column names, so a reserved-word field 500s on insert — `done` (2026-08-18) · **S–M** · P1 ⭐ compiles green, boots green, fails on first write
 
 Found 2026-08-17 while landing M-T6.42, by running the new `reserved-words`
 corpus fixture's behavioural leg against a real booted Spring Boot + Postgres.
@@ -659,6 +676,43 @@ every identifier it renders, so no raw name reaches the SQL).
 
 **Sources:** M-T6.42 (the sibling fix and the fixture), `sql-pg.ts`'s
 quote-always rule, the behavioural java leg.
+
+**Outcome.** Landed as described, with the shared-home step taken first: the
+word list moved out of the Dapper emitter into `src/generator/sql-reserved.ts`
+(one `isReservedIdent` predicate, no escaping — that stays per-backend), and
+re-deriving it from a live `postgres:16` for the second consumer immediately
+found the drift the mission predicted: **`right` was missing** from the
+Dapper-resident list, and `create table t (right int)` really is a syntax error.
+One word, found the first time the list was checked against the server rather
+than copied — which is the whole argument for the file.
+
+Java quotes with Hibernate's portable backtick at the `@Column` / `@Table` /
+`@AttributeOverride(column = …)` sites (`emit/jpa-annotations.ts`, plus the
+audit / claim / containment columns in `emit/entity.ts` and the correlation
+columns in `emit/workflow-state.ts` + `emit/projection-state.ts`), and with
+POSTGRES `"…"` in `render-sql-restriction.ts`, whose fragment Hibernate appends
+as raw SQL. That renderer needed one structural change beyond the wrapper: the
+flattened-VO arm built its column by concatenating rendered segments, so
+quoting in place would have produced `"order"_deleted_at`. The path is now
+built unquoted by `columnPath` and quoted once, at the end.
+
+Compound names the emitter derives (`<owner>_id`, `<field>_provenance`,
+pluralised tables) are deliberately NOT run through the predicate — they can
+never collide, and quoting them would move output for nothing.
+
+**Proof.** `node run-java.mjs reserved-words` passes and its recording matches
+the committed wire golden (node is the oracle). Mutation-proved: with `hbIdent`
+reverted to the identity function the same leg fails by name — *reserved-word
+columns round-trip through create, find and read against d* — with
+`POST /api/tickets → 500`, i.e. exactly the reported defect. Byte-identity
+checked by generating all 50 corpus fixtures before and after on BOTH affected
+backends: the Java tree differs in exactly one file (`reserved-words`'
+`Ticket.java`, three columns) and the Dapper tree is unchanged everywhere,
+confirming `right` has no witness in the corpus. `test/generator/java/java-reserved-identifiers.test.ts`
+is the fast per-PR pin, and one PRE-EXISTING assertion in
+`generator-java-projection.test.ts` had been pinning the broken spelling
+(`@Column(name = "order")` on a projection correlated by a field named `order`)
+— it now pins the quoted one.
 
 ## M-T6.42 — `persistence: dapper` emits unquoted identifiers, so a reserved-word column breaks the DDL — `done` (2026-08-17) · **M** · P1 ⭐ boots red, compiles green
 *(ID note: this row was minted as M-T6.41, colliding with the direct-table-aggregation row of the same number further up this file. Renumbered to **M-T6.42** on `main` while the fix was in flight — that is the id this PR already used, so the two agree. Fourth dup-ID incident; M-T9.32's automation remains the fix.)*

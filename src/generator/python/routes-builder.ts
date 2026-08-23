@@ -228,7 +228,7 @@ export function buildPyRoutesFile(
     // so the read surface cannot disagree with the gate / `ignoring` stance
     // enrichment resolved.
     historyFind
-      ? ["", "", renderPyHistoryMapper(agg), "", "", historyRoute(agg, historyFind)]
+      ? ["", "", renderPyHistoryMapper(agg), "", "", historyRoute(agg, historyFind, ctx)]
       : null,
     destroyOp ? ["", "", destroyRoute(agg, conflictResolver(ctx), destroyOp)] : null,
     ...opEntries.map((e) => ["", "", operationRoute(agg, e.operation!, ctx, e)]),
@@ -946,10 +946,14 @@ function byIdRoute(agg: EnrichedAggregateIR, apiOp: ApiOperationIR): string {
  *       caller cannot read 404s here rather than yielding a readable timeline;
  *    3. the per-caller mask, applied inside the mapper.
  */
-function historyRoute(agg: EnrichedAggregateIR, find: FindIR): string {
+function historyRoute(
+  agg: EnrichedAggregateIR,
+  find: FindIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
   const gateUsesUser = findGateUsesCurrentUser(find);
   return lines(
-    `@router.get("/{id}/history", response_model=AuditEntryListResponse, operation_id="${camelId(opFind(agg.name, "history"))}"${errorResponsesKwarg("getById")})`,
+    `@router.get("/{id}/history", response_model=AuditEntryListResponse, operation_id="${camelId(opFind(agg.name, "history"))}"${errorResponsesKwarg("getById", false, [], conflictResolver(ctx))})`,
     `async def history_${snake(agg.name)}(${ID_PARAM}, session: SessionDep) -> list[dict[str, object]]:`,
     "    repo = _repo(session)",
     gateUsesUser ? "    current_user_ = current_user()" : null,

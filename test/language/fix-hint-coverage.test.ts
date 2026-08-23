@@ -47,7 +47,7 @@ function loomCodesIn(rel: string): string[] {
 
 /** The count below is a FLOOR, not a target.  Raise it when you add providers;
  *  lowering it should be argued for in the PR that does it. */
-const COVERAGE_FLOOR = 14;
+const COVERAGE_FLOOR = 15;
 
 describe("fix-hint coverage", () => {
   it("every fix-hint provider names a code the catalog actually knows", () => {

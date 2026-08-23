@@ -131,7 +131,8 @@ describe("dotnet renderCsExpr — member + method-call", () => {
     }
   });
 
-  it("maps string `.length` to `.Length`", () => {
+  // CODE POINTS, not `string.Length`'s UTF-16 code units (RS-31).
+  it("maps string `.length` to a code-point count", () => {
     expect(
       renderCsExpr({
         kind: "member",
@@ -140,7 +141,7 @@ describe("dotnet renderCsExpr — member + method-call", () => {
         receiverType: STRING,
         memberType: INT,
       }),
-    ).toBe("this.Name.Length");
+    ).toBe("this.Name.EnumerateRunes().Count()");
   });
 
   it("renders `string.matches(literal)` as `Regex.IsMatch(recv, pattern)`", () => {

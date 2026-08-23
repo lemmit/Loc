@@ -22,6 +22,8 @@ import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import { aggHasFieldMask } from "../../../generator/typescript/repository-wire-builder.js";
 import {
   chainSingleFieldNative,
+  openapiLengthMeta,
+  orderSingleFieldPatterns,
   refineClauseFor,
   takeSingleFieldChain,
 } from "../../../generator/zod-refine.js";
@@ -169,7 +171,17 @@ function txWrapperCall(usingMikro: boolean): string {
  *  All three are needed: the gate alone leaks across tenants, reachability
  *  alone leaks masked fields to legitimate readers, and the mask alone leaves
  *  the endpoint open. */
-function emitHistoryRoute(agg: EnrichedAggregateIR, find: FindIR, usingMikro: boolean): string[] {
+function emitHistoryRoute(
+  agg: EnrichedAggregateIR,
+  find: FindIR,
+  usingMikro: boolean,
+  /** The `httpStatus`-resolved `NotFound` rung.  This route's declared set is
+   *  hand-rolled (the history find is `synthesized`, so `deriveContextOperations`
+   *  skips it — see `apiSurfaceCoverage.notLifted`), which is exactly why the
+   *  status has to be passed in rather than left a literal: the runtime answer
+   *  comes from the router's shared `AggregateNotFoundError` arm, which resolves. */
+  notFoundStatus: number,
+): string[] {
   const out: string[] = [];
   const aggSlug = snake(plural(agg.name));
   out.push(`app.openapi(`);
@@ -189,7 +201,7 @@ function emitHistoryRoute(agg: EnrichedAggregateIR, find: FindIR, usingMikro: bo
     );
   }
   out.push(
-    `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    `      ${notFoundStatus}: { description: ${JSON.stringify(httpStatusText(notFoundStatus))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
   // The `{id}` uuid parse — same wire-validation tier every other `{id}` route
   // declares.  Hand-rolled here (history is `apiSurfaceCoverage.notLifted`),
@@ -1033,7 +1045,14 @@ export function buildRoutesFile(
   // cannot be shadowed by the `/{id}` param route below the way a static
   // one-segment find can; registered here anyway to keep the reads together.
   if (historyFind) {
-    lines.push(...emitHistoryRoute(agg, historyFind, usingMikro).map((l) => `  ${l}`));
+    lines.push(
+      ...emitHistoryRoute(
+        agg,
+        historyFind,
+        usingMikro,
+        resolveErrorStatus("NotFound", ctx.structuralErrorStatuses),
+      ).map((l) => `  ${l}`),
+    );
     lines.push("");
   }
 
@@ -1259,13 +1278,18 @@ export function buildRoutesFile(
   // every mapped name, not just the four structural conflicts.
   const domainStatus = resolveErrorStatus("DomainError", ctx.structuralErrorStatuses);
   const forbiddenStatus = resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses);
+  // The domain NOT-FOUND rung — the last literal of the ladder (M-T5.20 final
+  // slice).  Resolved here and read by BOTH the `AggregateNotFoundError` arm
+  // below and the declared response sets, which come off the shared
+  // `errorStatuses` table and now resolve the same name.
+  const notFoundStatus = resolveErrorStatus("NotFound", ctx.structuralErrorStatuses);
   // The status literals this router's `problem()` helper is actually called
   // with — the always-present base set plus each structural-conflict status
   // whose arm is emitted (gated exactly as the arms below). With no override
   // every conflict is 409, so the union stays `403 | 404 | 409 | 422 | 500`.
   const emittedProblemStatuses = new Set<number>([
     forbiddenStatus,
-    404,
+    notFoundStatus,
     domainStatus,
     500,
     disallowedStatus,
@@ -1330,9 +1354,13 @@ export function buildRoutesFile(
   );
   lines.push(`    }`);
   lines.push(`    if (err instanceof AggregateNotFoundError) {`);
-  lines.push(`      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: 404`)}`);
+  lines.push(
+    `      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: ${notFoundStatus}`)}`,
+  );
   lines.push(`      recordDomainFault("not_found");`);
-  lines.push(`      return problem(404, "Not Found", err.message);`);
+  lines.push(
+    `      return problem(${notFoundStatus}, ${JSON.stringify(problemTitle(notFoundStatus))}, err.message);`,
+  );
   lines.push(`    }`);
   // PG unique_violation (SQLSTATE 23505) — a `unique (...)` domain invariant
   // was breached (the DB unique index is the enforcement contract,
@@ -2482,7 +2510,17 @@ export function emitWireSchema(
     let schema = f.base;
     const patterns = chainByField.get(f.name);
     if (patterns) {
-      for (const p of patterns) schema = chainSingleFieldNative(schema, p);
+      for (const p of orderSingleFieldPatterns(patterns))
+        schema = chainSingleFieldNative(schema, p);
+      // A `len-*` bound is CHECKED as a code-point refine, which zod cannot
+      // describe to the OpenAPI emitter — re-declare it so `/openapi.json`
+      // still publishes the `minLength`/`maxLength` it always did (and now
+      // publishes a bound the server actually enforces, per code-point.ts).
+      const lengths = openapiLengthMeta(patterns);
+      if (lengths) {
+        const entries = Object.entries(lengths).map(([k, v]) => `${k}: ${v}`);
+        schema = `${schema}.openapi({ ${entries.join(", ")} })`;
+      }
     }
     // `.default(...)` / `.optional()` last: each wraps the (now constrained)
     // schema in a ZodDefault / ZodOptional, so any `.min`/`.max` must already

@@ -2355,7 +2355,15 @@ function renderInstancesController(
         // (the correlation id is parsed), .NET was the only backend that did
         // not move and the 5-way OpenAPI parity diff caught it as
         // `node=[404,422], dotnet=[404]`.
-        errorStatuses("getById")
+        //
+        // The resolver is threaded because that same arm's 404 is the
+        // `httpStatus`-remappable `NotFound` rung; without it this route would
+        // publish a literal 404 while the router's `AggregateNotFoundException`
+        // arm answered the override — the declaration/runtime drift the matrix
+        // exists to remove.  (422 stays literal: it is a framework tier.)
+        errorStatuses("getById", false, (name) =>
+          resolveErrorStatus(name, ctx.structuralErrorStatuses),
+        )
           .map((s) => `    [ProducesResponseType(typeof(ProblemDetails), ${s})]\n`)
           .join("") +
         `    public async Task<IActionResult> ${upperFirst(camelId(opWorkflowInstanceById(wf.name)))}(${corrClr} id)\n` +

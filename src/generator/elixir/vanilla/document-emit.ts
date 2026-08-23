@@ -26,10 +26,16 @@
 // AUDITED op — named (slice 4e) or returning (slice 4f) — records its audit row
 // inside the persist transaction.  A mutating RETURNING op re-embeds + persists its
 // write, projecting the wire off the saved embed (#1774 — it previously dropped the
-// write).  The residual the document path can't express yet (provenanced ops — no
-// per-field prov columns on a jsonb blob; derived / dereferenced-entity /
-// collection-method reads; non-scalar find predicates) is gated at validate time
-// (`loom.vanilla-document-unsupported`) rather than misgenerated — see
+// write).  Collection READS over the aggregate's own in-memory lists work too —
+// Route A made a containment a real `embeds_many` and a scalar array an
+// `{:array, _}` field, so `lines.sum(l => l.qty)` renders through the shared
+// collection-op table verbatim.  Capability filters are applied IN-APP over the
+// same rehydrated embed (`vanillaDocCapabilityFilter`).  The residual the
+// document path can't express yet — provenanced ops (no per-field prov columns
+// on a jsonb blob), derived / dereferenced-entity reads, value-object METHOD
+// calls, and a collection op over a REFERENCE collection (`X id[]` resolves
+// through a join table a blob has no equivalent for) — is gated at validate
+// time (`loom.vanilla-document-unsupported`) rather than misgenerated; see
 // `validateVanillaDocumentScope`.
 // ---------------------------------------------------------------------------
 
@@ -49,6 +55,7 @@ import type {
   SystemIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { isDocumentShaped, resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import {
@@ -60,6 +67,13 @@ import { statementSubRegions } from "../../_trace/sourcemap.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
+import {
+  aggregateUsesPrincipalContextFilter,
+  DOC_DENY_HELPER,
+  DOC_DENY_PREDICATE,
+  vanillaDocCapabilityFilter,
+  vanillaDocWriteScopeFilter,
+} from "./capability-filter.js";
 import { NORMALIZE_KEYS_DEFP } from "./key-normalize.js";
 import { managedTimestampNames } from "./managed-timestamps.js";
 import {
@@ -70,6 +84,8 @@ import {
   returningOpPersistsChangeset,
   wrapOpBodyWithGuards,
 } from "./operation-returns-emit.js";
+import { renderEctoDefault } from "./schema-emit.js";
+import { stampAssignmentPairs, stampUsesPrincipal, stampUsesPrincipalFor } from "./stamp-emit.js";
 
 /** True iff the aggregate's effective saving shape is `document` (binding-aware,
  *  matching the migration + validator).  `sys` may be absent in a few legacy
@@ -80,12 +96,19 @@ export function isVanillaDocAgg(agg: AggregateIR, ctx: BoundedContextIR, sys?: S
   return isDocumentShaped(enriched, resolved);
 }
 
-/** The aggregate's stored document fields (declared fields minus `id` and any
- *  server-managed `createdAt`/`updatedAt` stamp/audit column), snake-cased — the
- *  schemaless-changeset cast/required allow-list.  A plain declared timestamp
- *  field stays in (cast like any column). */
+/** The aggregate's stored document fields (declared fields minus `id`),
+ *  snake-cased — the embed's schema / cast allow-list.
+ *
+ *  A server-managed `createdAt`/`updatedAt` STAYS IN, unlike on the relational
+ *  path.  There it is excluded from the cast because the stamp `put_change`s a
+ *  real column; a document aggregate HAS no such column — the root table is
+ *  `(id, data, version)` plus Ecto's own `inserted_at`/`updated_at` — so
+ *  dropping it left the field with nowhere to live: the stamp vanished, and the
+ *  controller's `serialize/1` (which reads `record.created_at` off the embed)
+ *  raised `KeyError` on every read.  It is cast here and supplied by
+ *  {@link docStampAttrs}; {@link docRequiredFields} keeps it OUT of
+ *  `validate_required` because the SERVER owns its value, not the caller. */
 function docFields(agg: AggregateIR): FieldIR[] {
-  const managedTs = managedTimestampNames(agg);
   // Drop `token`-access fields (the optimistic-concurrency `version`): the
   // document row stores `version` on the ROOT schema (`field :version`,
   // stamped by `document_changeset`), NOT inside the `:data` jsonb blob.  If it
@@ -94,8 +117,21 @@ function docFields(agg: AggregateIR): FieldIR[] {
   // never supplies `version`) fails the embed's `validate_required(:version)`,
   // surfacing as a 422 with an empty top-level `errors` array (the nested embed
   // carries the error).  B5.
-  return agg.fields.filter(
-    (f) => f.name !== "id" && !managedTs.has(f.name) && f.access !== "token",
+  return agg.fields.filter((f) => f.name !== "id" && f.access !== "token");
+}
+
+/** The embed's `validate_required` allow-list — the stored fields that the
+ *  CALLER must supply.  A required field whose value the server stamps
+ *  (`createdAt`/`updatedAt` under `auditable` / an explicit `stamp`) is
+ *  excluded: it is merged in by {@link docStampAttrs} at the write seam, and
+ *  requiring it of the caller would 422 every create. */
+function docRequiredFields(agg: AggregateIR): FieldIR[] {
+  const managedTs = managedTimestampNames(agg);
+  const stamped = new Set(
+    (agg.contextStamps ?? []).flatMap((r) => r.assignments.map((a) => a.field)),
+  );
+  return docFields(agg).filter(
+    (f) => !f.optional && !managedTs.has(f.name) && !stamped.has(f.name),
   );
 }
 
@@ -190,15 +226,24 @@ end
 function renderDocDataSchema(appModule: string, ctxModule: string, agg: AggregateIR): string {
   const dataMod = `${appModule}.${ctxModule}.${upperFirst(agg.name)}.Data`;
   const fields = docFields(agg);
-  const fieldLines = fields.map((f) => `    field :${snake(f.name)}, ${castType(f.type)}`);
+  // A declared Loom default (`total: int = 0`) becomes the embed's Ecto
+  // `default:`, exactly as the relational schema does it (`renderFieldLine`).
+  // Without it the document path DROPPED defaults on the floor: `cast/3` leaves
+  // an omitted key alone, the fresh `%<Agg>.Data{}` carried `nil`, and
+  // `validate_required` then rejected the create — a 422 whose top-level
+  // `errors` array is EMPTY, because the nested embed holds the error (B5).
+  // Every other backend applies the default and accepts the same request.
+  const fieldLines = fields.map((f) => {
+    const def = f.default ? renderEctoDefault(f.default) : null;
+    return `    field :${snake(f.name)}, ${castType(f.type)}${def ? `, default: ${def}` : ""}`;
+  });
   const containLines = agg.contains.map(
     (c) =>
       `    ${c.collection ? "embeds_many" : "embeds_one"} :${snake(c.name)}, ${appModule}.${ctxModule}.${upperFirst(c.partName)}`,
   );
   const schemaBody = [...fieldLines, ...containLines].join("\n");
   const castCols = fields.map((f) => `:${snake(f.name)}`).join(", ");
-  const requiredCols = fields
-    .filter((f) => !f.optional)
+  const requiredCols = docRequiredFields(agg)
     .map((f) => `:${snake(f.name)}`)
     .join(", ");
   const castEmbeds = agg.contains.map((c) => `    |> cast_embed(:${snake(c.name)})`).join("\n");
@@ -266,6 +311,12 @@ function ectoValidator(field: string, p: SingleFieldPattern, message?: string): 
         : `    |> validate_number(:${field}, less_than_or_equal_to: ${p.n}${m})`;
     case "between":
       return `    |> validate_number(:${field}, greater_than_or_equal_to: ${p.lo}, less_than_or_equal_to: ${p.hi}${m})`;
+    // `validate_length/3` counts GRAPHEMES, where every other backend counts
+    // CODE POINTS (RS-31 / src/generator/_expr/code-point.ts).  The two agree on
+    // every astral character and differ only on combining sequences; Ecto has no
+    // `:codepoints` count, so closing the gap means hand-rolling Ecto's error
+    // tuples and default message text.  Signed residual — see
+    // docs/audits/schemathesis-findings-2026-08.md § F5.
     case "len-min":
       return `    |> validate_length(:${field}, min: ${p.n}${m})`;
     case "len-max":
@@ -307,24 +358,133 @@ end
 // Repository — CRUD over the `(id, data, version)` row.
 // ---------------------------------------------------------------------------
 
+/** Does `pred` read the rehydrated embed?  A predicate that doesn't (an
+ *  unfiltered find → `true`, a `deny` carve-out → `false`, an id-only scope)
+ *  must NOT bind `record = row.data`: an unused binding trips
+ *  `mix compile --warnings-as-errors`. */
+function docPredReadsRecord(pred: string): boolean {
+  return /\brecord\b/.test(pred);
+}
+
+/** The `record = row.data` rehydration line an in-app predicate needs, or "". */
+function docBindRecord(pred: string, indent: string): string {
+  return docPredReadsRecord(pred) ? `${indent}record = row.data\n` : "";
+}
+
+/** The lambda parameter for an in-app `Enum.filter` — underscored when the
+ *  predicate reads neither the embed nor the row. */
+function docFilterLambdaArg(pred: string): string {
+  return docPredReadsRecord(pred) || /\brow\b/.test(pred) ? "row" : "_row";
+}
+
+/** Lifecycle stamps on the DOCUMENT write seam.
+ *
+ *  The relational path `put_change`s a real column; a document aggregate's
+ *  stamped fields live INSIDE the jsonb blob, so there is no column to change —
+ *  the values are merged into the inbound `attrs` BEFORE `document_changeset`
+ *  casts them into the embed.  Until this existed the stamps were dropped
+ *  entirely, which was not merely a missing value: `tenantOwned` never stamped
+ *  `tenant_id`/`data_key` (so a tenancy filter could never match), `auditable`
+ *  left its NOT-NULL `created_by` unset (422 on every create), and — because
+ *  the context facade emits `create_<agg>(attrs, current_user \\ nil)` off the
+ *  MODEL, not the shape — the delegate pointed at an `insert/1` that does not
+ *  exist (`mix compile --warnings-as-errors` failure).
+ *
+ *  Keys are normalised to strings first: `Ecto.Changeset.cast/3` refuses a
+ *  mixed-key map, and an in-process caller may pass atom-keyed attrs where the
+ *  controller passes string-keyed params. */
+function docStampAttrs(
+  agg: AggregateIR,
+  events: readonly ("create" | "update")[],
+  contextModule: string,
+  principalIdKey: string,
+): string {
+  const puts = stampAssignmentPairs(agg, events, contextModule, principalIdKey);
+  if (puts.length === 0) return "";
+  const body = puts
+    .map(([field, value]) => `      |> Map.put(${JSON.stringify(field)}, ${value})`)
+    .join("\n");
+  return (
+    "    # Lifecycle stamps land INSIDE the jsonb document (no root column to\n" +
+    "    # put_change), so they are merged into the attrs the embed casts.\n" +
+    "    attrs =\n" +
+    "      attrs\n" +
+    "      |> Map.new(fn {k, v} -> {to_string(k), v} end)\n" +
+    `${body}\n\n`
+  );
+}
+
 export function renderDocRepository(
   appModule: string,
   ctxModule: string,
   agg: AggregateIR,
   finds: readonly FindIR[] = [],
+  principalIdKey = "id",
 ): string {
   const aggModule = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
   const repoMod = `${aggModule}Repository`;
   const changesetMod = `${aggModule}Changeset`;
+  const contextModule = `${appModule}.${ctxModule}`;
   const versioned = aggregateIsVersioned(agg);
+
+  // Lifecycle stamps on the write seam.  The ARITY mirrors the relational
+  // repository exactly, because the context facade derives the delegate's
+  // arity from the model (`stampUsesPrincipal`) and cannot see the shape — a
+  // document repository that kept `insert/1` was an undefined-function break.
+  const stampPrincipal = stampUsesPrincipal(agg);
+  const stampActorParam = stampPrincipal ? ", current_user \\\\ nil" : "";
+  // The update seam keeps the arity but only USES the actor when an `onUpdate`
+  // stamp reads it — an onCreate-only principal stamp (`tenantOwned`) would
+  // otherwise leave `current_user` unused and fail `--warnings-as-errors`.
+  const updateStampActorParam = stampPrincipal
+    ? `, ${stampUsesPrincipalFor(agg, ["update"]) ? "" : "_"}current_user \\\\ nil`
+    : "";
+  // On insert BOTH onCreate and onUpdate stamps apply (so a required
+  // `updated_*` is filled on the initial insert); on update only onUpdate.
+  const insertStamps = docStampAttrs(agg, ["create", "update"], contextModule, principalIdKey);
+  const updateStamps = docStampAttrs(agg, ["update"], contextModule, principalIdKey);
+
+  // Capability `filter` on a DOCUMENT aggregate — the last (family, shape) cell
+  // the whole gate-set inventory had unwired.  There is no flattened column to
+  // AND an Ecto `where:` onto (the tree is one jsonb blob), so the predicate is
+  // evaluated IN-APP over the rehydrated `%<Agg>.Data{}` embed, exactly as
+  // node/java/python/dotnet do over their rehydrated instances.  `null` for an
+  // aggregate with no capability filter — every read then stays byte-identical
+  // to the pre-filter document repository.
+  const principal = aggregateUsesPrincipalContextFilter(agg);
+  const cap = vanillaDocCapabilityFilter(agg, contextModule, "row", { actor: principal });
+  // The WRITE-scope command-load filter (authorization Phase 3 P3.1): the
+  // context facade emits `get_<agg>_for_write` whenever `writeScopeFilter` is
+  // set, regardless of saving shape, so the document repository must define the
+  // `find_by_id_for_write` it delegates to.
+  const writeScope = vanillaDocWriteScopeFilter(agg, contextModule, "row");
+  const writeScopeUsesPrincipal =
+    agg.writeScopeFilter !== undefined && exprUsesCurrentUser(agg.writeScopeFilter);
+  // A `deny` carve-out renders as a call to the `__denied?/1` helper (see
+  // `DOC_DENY_HELPER`); emit that helper exactly when some predicate uses it,
+  // so a repository without a deny stays byte-identical.
+  const needsDenyHelper = [cap, writeScope].some((p) => p?.includes(DOC_DENY_PREDICATE));
+  const denyHelperBlock = needsDenyHelper ? `\n\n${DOC_DENY_HELPER}` : "";
+  // A principal filter threads the request actor exactly like the relational
+  // path (`current_user \\ nil`, so an in-process caller still compiles and
+  // reads fail-closed).  Non-principal aggregates keep the original arity.  The
+  // ARITY is the facade's (`principal`); whether the body actually READS the
+  // actor decides the underscore, or `--warnings-as-errors` trips on a denied
+  // aggregate's unused parameter.
+  const capActor = !!cap && /\bcurrent_user\b/.test(cap);
+  const actorParam = principal ? `${capActor ? "" : "_"}current_user \\\\ nil` : "";
 
   // Custom finds (DEBT-07).  A document row keeps every field inside the opaque
   // jsonb `data` blob, so a find can't push its predicate into an Ecto `where`
   // over flattened columns — it loads the table and filters IN MEMORY, rendering
   // the predicate against the normalised (string-keyed) `data` map via the
-  // struct-mode predicate (`record = row.data`).  `all` is dropped (the `list/0` CRUD seam
-  // already covers it).
-  const findFns = finds.filter((f) => f.name !== "all").map((f) => renderDocFindFn(f, aggModule));
+  // struct-mode predicate (`record = row.data`).  The capability filter is
+  // AND-ed into that same in-memory predicate, so the ladder narrows the
+  // author's own `where` and not only the auto-`findAll`.  `all` is dropped
+  // (the `list/0` CRUD seam already covers it).
+  const findFns = finds
+    .filter((f) => f.name !== "all")
+    .map((f) => renderDocFindFn(f, aggModule, cap, principal));
   const findBlock = findFns.length > 0 ? `\n\n${findFns.join("\n\n")}` : "";
 
   return `# Auto-generated.
@@ -332,28 +492,64 @@ defmodule ${repoMod} do
   @moduledoc "Document-shaped repository — CRUD over the (id, data, version) jsonb row."
   alias ${appModule}.Repo
 
-  @spec list() :: {:ok, [${aggModule}.t()]} | {:error, term()}
-  def list do
-    {:ok, Repo.all(${aggModule})}
+  @spec list(${principal ? "map() | nil" : ""}) :: {:ok, [${aggModule}.t()]} | {:error, term()}
+  def list${principal ? `(${actorParam})` : ""} do
+${
+  cap
+    ? `    {:ok,
+     ${aggModule}
+     |> Repo.all()
+     |> Enum.filter(fn ${docFilterLambdaArg(cap)} ->
+${docBindRecord(cap, "       ")}       ${cap}
+     end)}`
+    : `    {:ok, Repo.all(${aggModule})}`
+}
   end
 
-  @spec find_by_id(binary()) :: {:ok, ${aggModule}.t()} | {:error, :not_found}
-  def find_by_id(id) when is_binary(id) do
-    case Repo.get(${aggModule}, id) do
+  @spec find_by_id(binary()${principal ? ", map() | nil" : ""}) :: {:ok, ${aggModule}.t()} | {:error, :not_found}
+  def find_by_id(id${principal ? `, ${actorParam}` : ""}) when is_binary(id) do
+${
+  cap
+    ? `    case Repo.get(${aggModule}, id) do
+      nil ->
+        {:error, :not_found}
+
+      row ->
+${docBindRecord(cap, "        ")}        if ${cap}, do: {:ok, row}, else: {:error, :not_found}
+    end`
+    : `    case Repo.get(${aggModule}, id) do
       nil -> {:error, :not_found}
       record -> {:ok, record}
+    end`
+}
+  end
+${
+  writeScope
+    ? `
+  @doc "Command-load path (authorization Phase 3 P3.1): scope the by-id load to the WRITE scope; a readable-but-not-writable (or missing) row reads as :not_found → 404."
+  @spec find_by_id_for_write(binary(), map() | nil) :: {:ok, ${aggModule}.t()} | {:error, :not_found}
+  def find_by_id_for_write(id, ${writeScopeUsesPrincipal ? "current_user" : "_current_user"} \\\\ nil) when is_binary(id) do
+    case Repo.get(${aggModule}, id) do
+      nil ->
+        {:error, :not_found}
+
+      row ->
+${docBindRecord(writeScope, "        ")}        if ${writeScope}, do: {:ok, row}, else: {:error, :not_found}
     end
   end
-
-  @spec insert(map()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
-  def insert(attrs) when is_map(attrs) do
-    %${aggModule}{}
+`
+    : ""
+}
+  @spec insert(map()${stampActorParam ? ", map() | nil" : ""}) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
+  def insert(attrs${stampActorParam}) when is_map(attrs) do
+${insertStamps}    %${aggModule}{}
     |> ${changesetMod}.document_changeset(attrs, 1)
     |> Repo.insert()
   end
 
-  @spec update(${aggModule}.t(), map()${versioned ? ", integer() | nil" : ""}) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()${versioned ? " | :conflict" : ""}}
-  def update(%${aggModule}{} = record, attrs${versioned ? ", expected_version \\\\ nil" : ""}) when is_map(attrs) do
+  @spec update(${aggModule}.t(), map()${stampActorParam ? ", map() | nil" : ""}${versioned ? ", integer() | nil" : ""}) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()${versioned ? " | :conflict" : ""}}
+  def update(%${aggModule}{} = record, attrs${updateStampActorParam}${versioned ? ", expected_version \\\\ nil" : ""}) when is_map(attrs) do
+${updateStamps}
     # cast_embed(:data, on_replace: :update) casts the incoming (possibly
     # partial) attrs ONTO the existing embedded document, so unspecified fields
     # keep their stored values (the merge-on-update semantics the old manual
@@ -392,7 +588,7 @@ ${
           {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()${versioned ? " | :conflict" : ""}}
   def persist_change(%Ecto.Changeset{data: %${aggModule}{}} = changeset) do
     Repo.update(changeset)${versioned ? "\n  rescue\n    Ecto.StaleEntryError -> {:error, :conflict}" : ""}
-  end${findBlock}
+  end${findBlock}${denyHelperBlock}
 end
 `;
 }
@@ -415,8 +611,19 @@ function isDocSingleReturn(t: TypeIR): boolean {
  *  same relational renderer, no `docMap` fork.  A find with no `where` clause
  *  falls back to the per-param convention predicate (`record.<p> == <p>`).
  *  Single-return finds yield the first match (or `nil`); list finds yield every
- *  match. */
-function renderDocFindFn(f: FindIR, aggModule: string): string {
+ *  match.
+ *
+ *  `cap` is the aggregate's IN-APP capability predicate (already rendered over
+ *  the same `record`/`row` bindings) — AND-ed into the author's own `where` so
+ *  the ladder narrows a custom find, not only the auto-`findAll`.  A principal
+ *  filter adds the trailing `current_user \\ nil` the context facade's
+ *  defdelegate already declares. */
+function renderDocFindFn(
+  f: FindIR,
+  aggModule: string,
+  cap: string | null = null,
+  principal = false,
+): string {
   const fnName = snake(f.name);
   const argNames = f.params.map((p) => snake(p.name));
   const paged = pagedReturn(f.returnType) != null;
@@ -426,25 +633,34 @@ function renderDocFindFn(f: FindIR, aggModule: string): string {
     contextModule: "",
     docStruct: true,
   };
-  const predicate = f.filter
+  const authored = f.filter
     ? renderExpr(f.filter, rc)
     : argNames.length > 0
       ? argNames.map((n) => `record.${n} == ${n}`).join(" and ")
       : "true";
+  const predicate = cap ? `(${authored}) and (${cap})` : authored;
   // A predicate that doesn't read the embed (an unfiltered find → `true`) must
   // NOT bind `record = row.data` — an unused binding trips `--warnings-as-errors`.
-  const filter = /\brecord\b/.test(predicate)
+  const filter = docPredReadsRecord(predicate)
     ? `
       ${aggModule}
       |> Repo.all()
-      |> Enum.filter(fn row ->
+      |> Enum.filter(fn ${docFilterLambdaArg(predicate)} ->
         record = row.data
         ${predicate}
       end)`
     : `
       ${aggModule}
       |> Repo.all()
-      |> Enum.filter(fn _row -> ${predicate} end)`;
+      |> Enum.filter(fn ${docFilterLambdaArg(predicate)} -> ${predicate} end)`;
+  // The actor parameter the principal-scoped defdelegate threads.  It trails
+  // every declared/paged arg, matching `context-emit.ts`'s `findArgs` order.
+  // Underscored when the effective predicate never reads it (a `deny`-only
+  // filter), or `--warnings-as-errors` trips on the unused variable.
+  const actorArgs = principal
+    ? [`${/\bcurrent_user\b/.test(predicate) ? "" : "_"}current_user \\\\ nil`]
+    : [];
+  const actorSpec = principal ? ["map() | nil"] : [];
 
   if (paged) {
     // Paged WIRE ENVELOPE (`%{items, page, pageSize, total, totalPages}`) built
@@ -456,8 +672,13 @@ function renderDocFindFn(f: FindIR, aggModule: string): string {
       `page \\\\ ${PAGED_DEFAULT_PAGE}`,
       `page_size \\\\ ${PAGED_DEFAULT_PAGE_SIZE}`,
     ];
-    const argList = [...argNames, ...pageArgs].join(", ");
-    const specArgs = [...argNames.map(() => "term()"), "pos_integer()", "pos_integer()"].join(", ");
+    const argList = [...argNames, ...pageArgs, ...actorArgs].join(", ");
+    const specArgs = [
+      ...argNames.map(() => "term()"),
+      "pos_integer()",
+      "pos_integer()",
+      ...actorSpec,
+    ].join(", ");
     return `  @spec ${fnName}(${specArgs}) :: {:ok, map()} | {:error, term()}
   def ${fnName}(${argList}) do
     matched =${filter}
@@ -477,13 +698,13 @@ function renderDocFindFn(f: FindIR, aggModule: string): string {
   end`;
   }
 
-  const specArgs = argNames.map(() => "term()").join(", ");
+  const specArgs = [...argNames.map(() => "term()"), ...actorSpec].join(", ");
   const specTail = single
     ? `{:ok, ${aggModule}.t() | nil} | {:error, term()}`
     : `{:ok, [${aggModule}.t()]} | {:error, term()}`;
   const result = single ? "List.first(results)" : "results";
   return `  @spec ${fnName}(${specArgs}) :: ${specTail}
-  def ${fnName}(${argNames.join(", ")}) do
+  def ${fnName}(${[...argNames, ...actorArgs].join(", ")}) do
     results =${filter}
 
     {:ok, ${result}}
@@ -882,3 +1103,6 @@ function docWireMap(
   ];
   return `%{${entries.join(", ")}}`;
 }
+
+// CLAIM (W2-elixir-document): in-app capability filtering on the document read
+// path — see the draft PR.

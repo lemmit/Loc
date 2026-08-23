@@ -515,14 +515,25 @@ the bare local. The `persist:` lifetime ladder **ships on the SPA frontends** �
 `store <Name> persist: memory|local|session|url { … }` is real grammar, and
 React / Vue / Svelte / Angular honour it, so the blanket
 `loom.store-lifetime-unsupported` is retired (a bad value is rejected earlier as
-`loom.store-lifetime-invalid`). Three targets do **not** implement the ladder,
-and each refuses a non-`memory` lifetime rather than degrading silently:
-Phoenix LiveView (`loom.store-lifetime-liveview-invalid` — a server-side
-per-process struct has no browser storage, and URL state belongs to the page's
-`handle_params`), and **Feliz and Flutter**
-(`loom.store-lifetime-target-unsupported` — both emitters build the store
-in-memory regardless; support is planned, tracked as a `gap` row in
-`src/diagnostics/unsupported-register.ts`). A `persist: url` store reflects its fields into
+`loom.store-lifetime-invalid`). **Feliz** honours it too, differently: a Feliz
+store has no module of its own — it folds into the single Elmish `Model`, so the
+ladder rides that fold (`generator/feliz/store-persist.ts`). `init` seeds each
+persisted field through a `StorePersist.load<Store><Field> ()` loader, an
+`updateWithPersist` wrapper mirrors the Model back after every message, and the
+`url` tier adds a `popstate` Elmish subscription so back/forward moves the state.
+Keys and shapes match the JS builders byte-for-byte (`loom.store.<Name>` + a JSON
+object keyed by the bare field name; one query param per field, empties dropped),
+so the same blob and the same URL round-trip across frontends. Two targets still
+do **not** implement the ladder, and each refuses a non-`memory` lifetime rather
+than degrading silently: Phoenix LiveView
+(`loom.store-lifetime-liveview-invalid` — a server-side per-process struct has no
+browser storage, and URL state belongs to the page's `handle_params`), and
+**Flutter** (`loom.store-lifetime-target-unsupported` — the emitter builds the
+store in-memory regardless; support is planned, tracked as a `gap` row in
+`src/diagnostics/unsupported-register.ts`). The same code also fires, field-scoped,
+on Feliz for a field type with no total F# conversion (datetime / duration / guid /
+enum / entity / value object, and arrays of them) — persistence there crosses the
+JS boundary per field. A `persist: url` store reflects its fields into
 query params, which carry only scalars, so an array / entity / value-object field
 there is rejected (`loom.store-url-field-invalid`). `sync:` remains reserved.
 Validator gates: a store action can't call a
@@ -981,6 +992,7 @@ phoenix_app/
 └── lib/phoenix_app_web/
     ├── endpoint.ex                               # Phoenix.Endpoint
     ├── router.ex                                 # `live "<route>", <Page>Live` per PageIR
+    ├── controllers/realtime_controller.ex        # broadcast channels only: chunked SSE at GET /api/realtime/events
     ├── components/
     │   ├── core_components.ex                    # <.input>, <.button>, <.modal>, <.simple_form>, <.table>
     │   ├── layouts.ex                            # use Phoenix.Component
@@ -1009,6 +1021,7 @@ Aggregate IR maps onto Ecto/Phoenix:
 | `workflow placeOrder(...) { ... }` | a context function wrapping `Repo.transaction(fn -> with … end)` |
 | `emit OrderConfirmed { … }` | `Phoenix.PubSub.broadcast(<App>.PubSub, "events", %Events.OrderConfirmed{…})`; inside an in-process dispatch handler, `emit` re-enters `<Ctx>.Dispatcher.dispatch(%Events.OrderConfirmed{…})` so choreography chains run. |
 | `on(e: Event)` reactor / event-triggered `create(e: Event) by …` (channel-carried) | one `<Ctx>.Workflows.<Wf>.On<Event>` / `.Start<Event>` module with `handle(event)`, routed by a per-context `<Ctx>.Dispatcher` that pattern-matches each event struct. Correlation persists through a `<Wf>State` `Ecto.Schema` keyed by the correlation field (`create` loads-or-allocates, `on` routes-or-drops + logs `event_unrouted`). An event-triggered-only workflow emits no `run/2` / HTTP route / UI form page. See [`workflow.md`](workflow.md) §Triggers and [`channels.md`](old/proposals/channels.md). |
+| `channel X { delivery: broadcast }` (realtime SSE, for an SPA frontend) | `<App>Web.RealtimeController` — a chunked `text/event-stream` response at `GET /api/realtime/events`, subscribed to the SAME `"events"` PubSub topic every `emit` above already broadcasts on (so no dispatcher decorator is needed, unlike Hono's `realtimeTee`). One `frame/1` clause per carried event → `event: <Type>` + camelCase JSON `data:` carrying `type`; a 15s `event: ping` keep-alive. Routed through its own `:sse` router pipeline — the `:api` pipeline's `plug :accepts, ["json"]` would 406 an `EventSource`. A tenant-scoped event degrades to a refetch ticket (`type` + `<Agg> id` refs only). `queue`-only ⇒ nothing emitted (`vanilla/realtime-emit.ts`). |
 | `abstract aggregate Party` + `extends` (TPC) | base emits no schema; each concrete is a standalone `Ecto.Schema` on its own table; the context module gains `list_parties/0` (the union of the concrete `list_<concrete>/0` reads). |
 | `abstract aggregate Party` + `inheritanceUsing: sharedTable` (TPH) | the concretes share one table: each concrete `Ecto.Schema` declares `schema "<base_plural>"`, a `:kind` string field defaulted to its own name, and every read self-filters on `where: c.kind == "<Concrete>"` so it reads/writes only its rows. The base owns no schema; the context module gains the same polymorphic `list_parties/0` union reader. See [`phoenix-tph-emission.md`](old/proposals/phoenix-tph-emission.md). |
 | `persistedAs: eventLog` + `apply(...)` (event sourcing) | **Supported** (`src/generator/elixir/vanilla/eventsourced-emit.ts`): an append-only `<agg>_events` stream + `apply` fold + rehydrator, the elixir sibling of the node/.NET/python/java event stores. |

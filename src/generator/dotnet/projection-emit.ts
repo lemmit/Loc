@@ -344,7 +344,10 @@ function renderProjectionsController(
         `    [HttpGet("${slug}/{key}")]\n` +
         `    [ProducesResponseType(typeof(${T}Response), 200)]\n` +
         forbiddenAttr +
-        `    [ProducesResponseType(typeof(ProblemDetails), 404)]\n` +
+        `    [ProducesResponseType(typeof(ProblemDetails), ${resolveErrorStatus(
+          "NotFound",
+          ctx.structuralErrorStatuses,
+        )})]\n` +
         `    public async Task<IActionResult> Get${T}(${corrClr} key)\n` +
         `    {\n` +
         gateLines +

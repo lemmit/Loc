@@ -37,7 +37,12 @@ import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../ir/validate/invariant-classify.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { hookFnName } from "../_walker/js-target-helpers.js";
-import { chainSingleFieldNative, refineClauseFor, takeSingleFieldChain } from "../zod-refine.js";
+import {
+  chainSingleFieldNative,
+  orderSingleFieldPatterns,
+  refineClauseFor,
+  takeSingleFieldChain,
+} from "../zod-refine.js";
 import { serverSourcedDefaultFields } from "./server-default.js";
 import { AUDIT_ENTRY_LIST_TYPE, emitAuditEntrySchemas } from "./zod-schemas.js";
 
@@ -665,7 +670,8 @@ function emitObjectWithRefines(
     let schema = f.base;
     const patterns = chainByField.get(f.name);
     if (patterns) {
-      for (const p of patterns) schema = chainSingleFieldNative(schema, p);
+      for (const p of orderSingleFieldPatterns(patterns))
+        schema = chainSingleFieldNative(schema, p);
     }
     out.push(`  ${f.name}: ${schema},`);
   }

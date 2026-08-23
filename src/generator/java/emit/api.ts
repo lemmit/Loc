@@ -599,8 +599,13 @@ export function renderApiExceptionAdvice(
   // same literals, so output is byte-identical with no override.
   const domainStatus = resolveErrorStatus("DomainError", structuralErrorStatuses);
   const forbiddenStatus = resolveErrorStatus("Forbidden", structuralErrorStatuses);
+  // The domain not-found rung — the ladder's last literal.  The FRAMEWORK 404
+  // arm further down (`no route for <verb> <path>`) is a different concern and
+  // stays literal, on this backend and on the other four.
+  const notFoundStatus = resolveErrorStatus("NotFound", structuralErrorStatuses);
   const domainTitle = problemTitle(domainStatus);
   const forbiddenTitle = problemTitle(forbiddenStatus);
+  const notFoundTitle = problemTitle(notFoundStatus);
   return lines(
     `package ${basePkg}.api;`,
     ``,
@@ -762,9 +767,9 @@ export function renderApiExceptionAdvice(
     ],
     `    @ExceptionHandler(AggregateNotFoundException.class)`,
     `    public ResponseEntity<ProblemDetail> onNotFound(AggregateNotFoundException e, WebRequest request) {`,
-    `        CatalogLog.event(${javaLogEvent("notFound")}, "status", 404);`,
+    `        CatalogLog.event(${javaLogEvent("notFound")}, "status", ${notFoundStatus});`,
     `        httpMetrics.recordDomainFault("not_found");`,
-    `        return respond(problem(404, "Not Found", e.getMessage(), request), 404);`,
+    `        return respond(problem(${notFoundStatus}, "${notFoundTitle}", e.getMessage(), request), ${notFoundStatus});`,
     `    }`,
     ``,
     `    @ExceptionHandler(HttpMessageNotReadableException.class)`,

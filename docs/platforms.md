@@ -173,11 +173,16 @@ The document sub-case below is the one feature with a partial story:
 ¹ `vanilla` emits the document CRUD surface (an `(id, data, version)` jsonb
 table) plus **custom finds** (in-memory `Enum.filter` over the `data` map, incl.
 value-object-subfield reads), **named operations** (body over the `data` map →
-`update/2`), pure **functions** (over the `data` map), and **returning ops**
-(`: A or B` → tagged tuple) — DEBT-07. Only a small residual stays gated —
-audited/provenanced ops, collection mutation, derived / dereferenced-entity /
-collection-method reads, and paged/union finds; host those on
-node/dotnet/python/java.
+`update/2`), pure **functions** (over the `data` map), **returning ops**
+(`: A or B` → tagged tuple), paged and union finds, containment mutation, and
+**collection reads over the aggregate's own in-memory lists** (`lines.sum(l =>
+l.qty)` / `.count` / `.any(λ)` over a containment `embeds_many`, `.contains`
+over a scalar array) — DEBT-07 + Route A. It also applies **capability filters**
+(`filter` / `policy` / tenancy) on every document read, evaluated in-app over
+the rehydrated `%<Agg>.Data{}` embed. The residual that stays gated:
+provenanced ops, derived and dereferenced-entity reads, collection ops over a
+REFERENCE collection (`X id[]` — a join table a jsonb blob has no equivalent
+for), and value-object METHOD calls; host those on node/dotnet/python/java.
 
 ² An `apply(e: E) { … }` fold rebinds in-memory state (an ES aggregate has no
 state table), so EVERY fold shape emits — `src/generator/elixir/vanilla/fold-stmt-emit.ts`

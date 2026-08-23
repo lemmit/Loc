@@ -10,17 +10,17 @@ import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, E
 
 
 const CreateCustomerRequest = z.object({
-  username: z.string().min(3).max(32),
+  username: z.string().refine((s) => [...s].length >= 3 && [...s].length <= 32).openapi({ minLength: 3, maxLength: 32 }),
   email: z.string(),
   age: z.number().int().min(18).max(150),
-}).openapi("CreateCustomerRequest").refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && data.email.length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
+}).openapi("CreateCustomerRequest").refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && [...data.email].length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 const CreateCustomerResponse = z.object({ id: z.string() }).openapi("CreateCustomerResponse");
 
 const UpdateCustomerRequest = z.object({
-  username: z.string().min(3).max(32),
+  username: z.string().refine((s) => [...s].length >= 3 && [...s].length <= 32).openapi({ minLength: 3, maxLength: 32 }),
   email: z.string(),
   age: z.number().int().min(18).max(150),
-}).openapi("UpdateCustomerRequest").refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && data.email.length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
+}).openapi("UpdateCustomerRequest").refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && [...data.email].length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 
 const AllQuery = z.object({
   page: z.coerce.number().int().min(1).max(1000000).default(1),

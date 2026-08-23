@@ -87,6 +87,7 @@ import {
   emitVanillaQueryProjectionsController,
   type VanillaQueryProjectionRef,
 } from "./query-projections-emit.js";
+import { emitVanillaRealtime } from "./realtime-emit.js";
 import { emitVanillaRepositories } from "./repository-emit.js";
 import { emitVanillaRetrievals } from "./retrieval-emit.js";
 import { emitVanillaScheduler } from "./scheduler-emit.js";
@@ -472,6 +473,14 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
     if (emitAggregateTests(ctx, appModule, out)) hasDomainTests = true;
   }
   if (hasDomainTests) emitTestHelper(out);
+  // Realtime SSE wire (channels.md Part I) — one deployable-level
+  // `RealtimeController` streaming every hosted context's broadcast-carried
+  // events at GET /api/realtime/events, the same wire the other four backends
+  // serve and the SPA frontends' `EventSource` client consumes.  The tee is
+  // Phoenix's own PubSub: every domain `emit` already broadcasts the event
+  // struct on the shared "events" topic.  No broadcast channel ⇒ no controller,
+  // no route (byte-identical).
+  apiRoutes.push(...emitVanillaRealtime(appName, appModule, contexts, out));
   // One deployable-level ProjectionsController over every hosted context's
   // projections (the per-context schema emit above intentionally does NOT write
   // the controller — sibling of ViewsController).

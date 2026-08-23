@@ -135,18 +135,32 @@ export function stampPutChanges(
   principalIdKey: string,
   indent: string,
 ): string {
+  const lines = stampAssignmentPairs(agg, events, contextModule, principalIdKey).map(
+    ([field, value]) => `${indent}|> Ecto.Changeset.put_change(:${field}, ${value})`,
+  );
+  return lines.length > 0 ? `\n${lines.join("\n")}` : "";
+}
+
+/** The same stamp assignments as {@link stampPutChanges}, but as
+ *  `[snake_field, rendered_value]` pairs rather than `put_change` pipe lines.
+ *
+ *  The DOCUMENT write seam needs the pairs: its stamped fields live inside the
+ *  jsonb blob, so it merges them into the attrs the embed casts instead of
+ *  changing a column (`docStampAttrs` in `document-emit.ts`).  Sharing this
+ *  keeps the two seams' VALUES identical — the nil-safe principal read and the
+ *  `:utc_datetime` truncation are decided once, here. */
+export function stampAssignmentPairs(
+  agg: AggregateIR,
+  events: readonly ("create" | "update")[],
+  contextModule: string,
+  principalIdKey: string,
+): [string, string][] {
   const ctx: RenderCtx = { thisName: "record", contextModule };
-  const lines = (agg.contextStamps ?? [])
+  return (agg.contextStamps ?? [])
     .filter((r) => events.includes(r.event))
     .flatMap((r) => r.assignments)
-    .map(
-      (a) =>
-        `${indent}|> Ecto.Changeset.put_change(:${snake(a.field)}, ${renderStampValue(
-          a.value,
-          ctx,
-          principalIdKey,
-          stampFieldIsDatetime(agg, a.field),
-        )})`,
-    );
-  return lines.length > 0 ? `\n${lines.join("\n")}` : "";
+    .map((a) => [
+      snake(a.field),
+      renderStampValue(a.value, ctx, principalIdKey, stampFieldIsDatetime(agg, a.field)),
+    ]);
 }

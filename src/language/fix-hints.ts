@@ -45,15 +45,23 @@ import {
   type Property,
   type Workflow,
 } from "./generated/ast.js";
-import { addressOf } from "./print/outline.js";
+import { addressOf, isAddressable } from "./print/outline.js";
 
-/** The declaration node directly inside an aggregate that encloses `node`
- *  (a property, operation, …) — the unit a member-level patch replaces. */
+/** The tightest ADDRESSABLE declaration enclosing `node` — the unit a
+ *  member-level patch replaces.
+ *
+ *  This walked only as far as an `Aggregate` before, so a typo inside a page
+ *  action, a workflow handler, or a value object's members had no target and
+ *  got no fix.  That was not a policy choice: the address space simply did not
+ *  reach those nodes, so any target named here would have failed to resolve.
+ *  It reaches them now, and the tightest enclosing unit keeps the replacement
+ *  narrow — an `action`, not the whole page that holds it. */
 function enclosingMember(node: AstNode): AstNode | undefined {
-  let cur: AstNode | undefined = node;
-  while (cur?.$container) {
-    if (isAggregate(cur.$container)) return cur;
-    cur = cur.$container;
+  for (let cur: AstNode | undefined = node; cur; cur = cur.$container) {
+    // The node itself only counts when it is a declaration in its own right;
+    // a bare name reference is not, and must resolve to what encloses it.
+    if (cur === node && !isAddressable(cur)) continue;
+    if (isAddressable(cur) && cur.$cstNode && addressOf(cur)) return cur;
   }
   return undefined;
 }
@@ -358,15 +366,32 @@ const PROVIDERS: Record<string, FixHintProvider> = {
   // enclosing node (page, component, ui) can be a patch target.  It becomes
   // provideable when the address space grows a page/ui arm — not before.
 
+  // `Field { value: draft }` → `Field { bind: draft }`.  A bindable input binds
+  // to page state through `bind:`; `value:` is the React habit, and the walker
+  // silently drops it — the input renders uncontrolled and no state wires up.
+  // The diagnostic points at the argument NAME, so the repair is a one-token
+  // swap inside whatever page or component encloses it.
+  //
+  // This is the first repair offered for a diagnostic raised inside a `ui`.  It
+  // could not be offered before — not because the swap was unclear, but because
+  // nothing in the ui subtree HAD an address to patch: a page under an area
+  // carried no qualifying segments at all.
+  "loom.bindable-input-value-arg": (d, doc, node) => {
+    const host = enclosingMember(node);
+    if (!host) return undefined;
+    const r = flagged(d, doc, host);
+    if (!r || r.start === r.end) return undefined;
+    if (r.text.slice(r.start, r.end) !== "value") return undefined;
+    const source = `${r.text.slice(0, r.start)}bind${r.text.slice(r.end)}`;
+    return replaceNode(host, source, "Bind to page state — write 'bind:'.");
+  },
+
   // A bare name that resolves to nothing, where the validator already computed
   // a did-you-mean candidate and handed it over on the diagnostic's `data`
   // channel → swap the typo for the suggestion.
   //
-  // LIMITATION: `enclosingMember` only walks up to an `Aggregate`, so a typo
-  // inside a workflow / projection body (or a value object's members) has no
-  // addressable enclosing member here and gets no hint.  Widening the address
-  // space is its own slice; guessing a target `applyPatches` can't resolve
-  // would poison the whole batch, so those cases return `undefined`.
+  // Reaches page actions, workflow handlers, and value-object members too, now
+  // that the address space qualifies them (it once stopped at an aggregate).
   "loom.unknown-name": (d, doc, node) => {
     const suggestion = (d.data as { suggestion?: unknown } | undefined)?.suggestion;
     if (typeof suggestion !== "string" || suggestion === "") return undefined;

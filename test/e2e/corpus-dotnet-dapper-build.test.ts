@@ -44,42 +44,32 @@ const CASE = process.env.LOOM_CORPUS_DAPPER_CASE;
 // Each entry is a precise, reproducible bug report; widen the gate by FIXING
 // the emitter and dropping the entry.  Ratcheted by `allowlist-ratchet.test.ts`
 // so this map can only shrink.
-// Was EMPTY and DRAINED (both former entries were the same query-time-projection
-// bug, ported to raw Npgsql by M-T6.25).  0 -> 1: `policy-document` joined the
-// manifest's `dotnet` row once the EF document repository grew its capability
-// filter + write-scope member, and enrolling it here surfaced the SAME class of
-// bug on the Dapper adapter — silently, exactly like the pre-M-T6.25 one:
-// codegen is clean, the IR validator says nothing (`validateCorpusCase` under
-// `dapper` raises no diagnostic at all — the oracle below proves it), and only
-// the C# compiler objects.
-const DAPPER_COMPILE_SKIP: Record<string, string> = {
-  // Two independent EF leaks in the Dapper document/hierarchy path, both
-  // reproduced with `LOOM_DOTNET_BUILD=1 LOOM_CORPUS_DAPPER_CASE=policy-document`:
-  //
-  //   1. `Infrastructure/Persistence/EfOrgPathResolver.cs` is emitted whatever
-  //      the persistence adapter is — it opens `using Microsoft.EntityFrameworkCore;`
-  //      and takes an `AppDbContext`, neither of which a `persistence: dapper`
-  //      project has.  CS0234 + 2x CS0246.  This fixture is the adapter's first
-  //      witness: the resolver only appears with a `tenantRegistry` TREE, and
-  //      the only other fixture carrying one (`tenancy-hierarchy`) never
-  //      reaches the compiler here — it is in DAPPER_UNSUPPORTED below.
-  //   2. `Infrastructure/Repositories/ThingRepository.cs` (the DAPPER document
-  //      repository) does not implement `GetByIdForWriteAsync`, so the `allow`
-  //      ladder's write-scope port member is unimplemented — CS0535.  This is
-  //      the same defect the EF document repository fixed (`writeScopeMethod`
-  //      in `src/generator/dotnet/emit/repository.ts`); the fix simply never
-  //      reached the Dapper twin.
-  //
-  // Widen the gate by porting both to the Dapper adapter and dropping this
-  // entry.  Until then the fixture still gates the EF leg (`test:dotnet-corpus`
-  // compiles it clean under /warnaserror) and all four in-app-filter backends.
-  "policy-document":
-    "dapper leaks EF into the hierarchy/document path: EfOrgPathResolver.cs is emitted " +
-    "unconditionally and references Microsoft.EntityFrameworkCore + AppDbContext (CS0234/CS0246), " +
-    "and the dapper document repository omits the `GetByIdForWriteAsync` write-scope member the " +
-    "`allow` ladder adds (CS0535 — the EF twin's fix never reached this adapter).  Silent: " +
-    "generation and the IR validator are both clean.",
-};
+// History: 2 -> 0 (both former entries were the same query-time-projection bug,
+// ported to raw Npgsql by M-T6.25), then 0 -> 1 when `policy-document` joined
+// the manifest's `dotnet` row and surfaced the SAME class of bug on the Dapper
+// adapter — silently, exactly like the pre-M-T6.25 one: codegen clean, the IR
+// validator silent (`validateCorpusCase` under `dapper` raises no diagnostic at
+// all — the oracle below proves it), and only the C# compiler objecting.
+//
+// DRAINED again (1 -> 0).  The single entry was `policy-document`, carrying two
+// independent EF leaks in the Dapper document/hierarchy path.  Both are fixed:
+//
+//   1. `Infrastructure/Persistence/EfOrgPathResolver.cs` was emitted whatever
+//      the persistence adapter was — it opens `using Microsoft.EntityFrameworkCore;`
+//      and takes an `AppDbContext`, neither of which a `persistence: dapper`
+//      project has (CS0234 + 2x CS0246).  The hierarchy seam now emits ONE
+//      resolver per adapter; the Dapper twin (`DapperOrgPathResolver.cs`) reads
+//      the registry's `data_key` with one raw Npgsql statement, and Program.cs
+//      registers whichever one was emitted.
+//   2. The DAPPER document repository did not implement `GetByIdForWriteAsync`,
+//      so the `allow` ladder's write-scope port member was unimplemented
+//      (CS0535).  The EF twin's `writeScopeMethod` is ported — along with the
+//      in-app `_CapabilityVisible` read filter the Dapper document repository
+//      had also never received, which was the SILENT half of the same defect
+//      (a `tenantOwned` document aggregate read across tenants here).
+//
+// Structural pin: `test/generator/dotnet/dapper-document-authz.test.ts`.
+const DAPPER_COMPILE_SKIP: Record<string, string> = {};
 
 // Features the IR validator HONESTLY rejects under dapper — not a gap, a
 // documented capability boundary (`loom.dapper-unsupported`).  These never

@@ -162,14 +162,19 @@ workflow ArchiveOrder(order: Order id) {
 
 The vocabulary is registry-defined (`src/ir/resource-verbs.ts`). Rules:
 
-- **workflows only** — resource-ops are legal in a `workflow` body, a
-  command/query handler body, and a `domainService` operation body, and nowhere
-  else (`loom.resource-op-outside-workflow`). An aggregate `operation` /
-  `create` / `destroy` body, a lifecycle `requires` guard, an invariant, a
-  `derived`, an aggregate `function` and a repository `find` filter are all
-  rejected: only the first three render sites have the resource client in
-  scope, so elsewhere .NET/Java/Phoenix fail codegen outright and TS/Python
-  emit a call to a helper the file never imports;
+- **workflows only** — resource-ops are legal in a `workflow` body and a
+  command/query handler body, and nowhere else
+  (`loom.resource-op-outside-workflow`). An aggregate `operation` / `create` /
+  `destroy` body, a lifecycle `requires` guard, an invariant, a `derived`, an
+  aggregate `function`, a repository `find` filter **and a `domainService`
+  operation body** are all rejected: only the two application-layer render
+  sites have the resource client in scope, so elsewhere .NET/Java/Phoenix fail
+  codegen outright and TS/Python emit an `await` on a helper the file never
+  imports, from a function that isn't even async. A domain service is a
+  stateless calculator ([`domain-services.md`](domain-services.md)) — the
+  workflow owns the transaction and all outbound I/O — so its exclusion is the
+  contract, not a backend gap: load or write the blob in the orchestrator and
+  pass the value in;
 - **capability-gated** — a verb whose capability the bound sourceType doesn't
   offer is an error (`loom.resource-unknown-verb` / the need⊆sourceType check);
 - **not inside a transactional span** — an external effect can't roll back with

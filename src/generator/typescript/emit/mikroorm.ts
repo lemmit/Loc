@@ -67,7 +67,14 @@ import {
   tphConcretesOf,
 } from "../../../ir/util/inheritance.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
-import { guidFromStringSelfScope } from "../../../ir/util/tenant-stance.js";
+import {
+  DATA_KEY_PATH_DELIMITER,
+  deepScopeAnchorClaim,
+  deepScopeTenantClaim,
+  guidFromStringSelfScope,
+  TENANT_OWNED_DATA_KEY_FIELD,
+  TENANT_OWNED_TENANT_ID_FIELD,
+} from "../../../ir/util/tenant-stance.js";
 import { isValueCollectionType } from "../../../ir/util/value-collections.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
@@ -111,6 +118,22 @@ import { aggregateIsAudited, insertStampEntries, updateStampEntries } from "./au
  * rule — `typescript/repository-builder.ts`).  One helper rather than four
  * inline conditions, so the next variant cannot forget it independently.
  */
+/**
+ * Does an emitted repository body call MikroORM's `raw()` fragment helper?
+ *
+ * Body-scanned exactly like the `requireCurrentUser()` accessor, and for the
+ * same reason: a repository that emits no raw fragment must keep a
+ * byte-identical import list.  The only emitter that produces one today is the
+ * hierarchical (`deep`/`global`) tenancy subtree predicate in
+ * {@link authzFilterEntry} — a FilterQuery *key* built from raw SQL, since the
+ * operator vocabulary has no prefix test.
+ *
+ * The negative lookbehind excludes a METHOD named `raw` (`x.raw(...)`), which
+ * is not the imported helper.  The scan runs over the string-blanked body, so
+ * the word cannot come from a string literal.
+ */
+const usesRawFragment = (bodyScan: string): boolean => /(?<!\.)\braw\(/.test(bodyScan);
+
 const maskUserImport = (agg: EnrichedAggregateIR): string | false =>
   aggHasFieldMask(agg) && `import type { User } from "../../auth/user-types";`;
 
@@ -1127,16 +1150,51 @@ function authzFilterEntry(e: Extract<ExprIR, { kind: "authz-filter" }>): string 
     // sibling entries `flattenAnd` merges into the same object literal.
     case "deny":
       return `$and: [{ id: null }, { id: { $ne: null } }]`;
-    // `deep`/`global` read level (hierarchical tenancy) — the materialized-path
-    // descendant-or-self sentinel.  The FilterQuery subset cannot express the
-    // prefix test, so `validateMikroormSupport` refuses a hierarchical scope
-    // filter (read OR write) under `persistence: mikroorm` before codegen runs;
-    // this throw is unreachable defence-in-depth.
-    case "scope":
-      throw new Error(
-        `mikroorm: hierarchical tenancy scope filter on '${e.aggregate}' is outside the ` +
-          `MikroORM FilterQuery subset; use 'persistence: drizzle'.`,
-      );
+    // `deep`/`global` read level (hierarchical tenancy P2.4/P2.5) — the
+    // materialized-path descendant-or-self sentinel, DEEP_SCOPE_SEMANTICS:
+    //
+    //   (data_key IS NOT NULL AND (data_key = ? OR starts_with(data_key, ?)))
+    //   OR (data_key IS NULL AND tenant_id = ?)
+    //
+    // The FilterQuery *operator* vocabulary genuinely cannot express a prefix
+    // test — but MikroORM has a first-class escape hatch for exactly that, and
+    // the shape is ordinary SQL.  `raw(sql, params)` used as a FilterQuery KEY
+    // with an empty-array value (`{ [raw("…", […])]: [] }`) is the documented
+    // way to AND a bare SQL condition into a find (`RawQueryFragment`), and it
+    // composes with the sibling `$and` entries the same way every other entry
+    // here does.  It must be built INSIDE the object literal at each call site
+    // (never hoisted into a `const` shared by two queries): a raw fragment's
+    // cache key is consumed on use, so two statements need two fragments — the
+    // emitters splice this string per statement, which is what makes that true.
+    //
+    // `starts_with(text, text)` rather than `LIKE ? || '.%'`: the anchor is a
+    // principal CLAIM, i.e. data, and `_`/`%` inside it are LIKE wildcards — an
+    // org legitimately named `org_a` would match `orgXa.leak`, a cross-tenant
+    // read with no attacker involved.  Binding the value (which `raw`'s `?`
+    // does) stops injection, not pattern semantics.  Same anchored-prefix
+    // stance as the drizzle twin's `strpos(col, needle) = 1` and the Dapper
+    // twin's `starts_with`.
+    //
+    // The NULL branch is a deliberate OR-fallback, not fail-closed: a row
+    // stamped before P2.3 (or by a principal-less save) has no `data_key`, and
+    // a bare prefix test would hide it from its own tenant.  It degrades to
+    // exactly the flat floor — never wider.
+    //
+    // Columns are UNQUALIFIED (`data_key`, not `<alias>.data_key`), matching the
+    // Dapper twin: every statement this fragment lands in is single-table
+    // (`em.find`/`em.count` over one Row entity, or the QueryBuilder's direct
+    // read of the source table), so there is nothing to be ambiguous with.
+    case "scope": {
+      const anchor = `requireCurrentUser().${deepScopeAnchorClaim(e)}`;
+      const tenant = `requireCurrentUser().${deepScopeTenantClaim(e)}`;
+      const col = snake(TENANT_OWNED_DATA_KEY_FIELD);
+      const tenantCol = snake(TENANT_OWNED_TENANT_ID_FIELD);
+      const sql =
+        `((${col} is not null and (${col} = ? or starts_with(${col}, ?))) ` +
+        `or (${col} is null and ${tenantCol} = ?))`;
+      const params = `[${anchor}, ${anchor} + ${JSON.stringify(DATA_KEY_PATH_DELIMITER)}, ${tenant}]`;
+      return `[raw(${JSON.stringify(sql)}, ${params})]: []`;
+    }
     default: {
       const _exhaustive: never = e.filter;
       throw new Error(`unhandled authz-filter kind: ${(_exhaustive as { kind: string }).kind}`);
@@ -1230,20 +1288,20 @@ function mikroContextFilters(agg: EnrichedAggregateIR, bypass?: FilterBypass): s
     // bypassable; `ignoring *` drops every origin, a named `ignoring` the match.
     if (origin !== undefined && (bypass?.bypassAll || (bypass?.bypassCaps ?? []).includes(origin)))
       return;
-    if (exprUsesCurrentUser(pred)) {
-      // A principal filter is not gated for FilterQuery-lowerability by the
-      // adapter validator (`validateFindPredicateAdapterSupport` skips it), so
-      // guard the lowering: apply the flat `this.<field> == currentUser.<claim>`
-      // shape, and drop any shape outside the subset (e.g. a deep-scope subtree
-      // predicate) rather than throwing at generation — such a system is not
-      // generated on the mikro adapter today.
-      try {
-        out.push(whereToMikroFilter(pred));
-      } catch {
-        /* unlowerable principal filter — left unapplied (unreachable in-corpus) */
-      }
-      return;
-    }
+    // A principal filter takes the SAME path as any other: lower it, and let an
+    // unlowerable one THROW.
+    //
+    // This used to be wrapped in a `try { … } catch { /* drop */ }`, on the
+    // reasoning that a principal filter is not gated for FilterQuery-lowerability
+    // (`validateFindPredicateAdapterSupport` skips it) and the only shape that
+    // could fail — the deep-scope subtree predicate — "is not generated on the
+    // mikro adapter today".  That belief was load-bearing and wrong twice over:
+    // the deep-scope shape reached here for real (nothing stopped it until the
+    // capability gate was added), and DROPPING a tenancy predicate is not a
+    // degraded read — it is NO tenant predicate, i.e. every tenant's rows on
+    // every read.  A crash at generation is the strictly safer failure, and now
+    // that `authzFilterEntry` renders the subtree sentinel there is no known
+    // shape left to crash on.
     out.push(whereToMikroFilter(pred));
   });
   return out;
@@ -2187,6 +2245,7 @@ export function renderMikroRepository(
   }
   const usesDecimal = /new\s+Decimal\(/.test(bodyScan);
   const usesPrincipal = /\brequireCurrentUser\(/.test(bodyScan);
+  const usesRaw = usesRawFragment(bodyScan);
 
   return (
     lines(
@@ -2195,6 +2254,7 @@ export function renderMikroRepository(
       // Domain-side repository PORT this concrete implements (audit S7).
       repoPortImportLine(agg.name),
       usesPrincipal && `import { requireCurrentUser } from "../../auth/middleware";`,
+      usesRaw && `import { raw } from "@mikro-orm/core";`,
       `import { EntityManager } from "@mikro-orm/postgresql";`,
       maskUserImport(agg),
       // The aggregate Row + every `Id[]` association's pivot Row entity + each
@@ -2506,6 +2566,7 @@ export function renderMikroEmbeddedRepository(
   }
   const usesDecimal = /new\s+Decimal\(/.test(bodyScan);
   const usesPrincipal = /\brequireCurrentUser\(/.test(bodyScan);
+  const usesRaw = usesRawFragment(bodyScan);
 
   return (
     lines(
@@ -2513,6 +2574,7 @@ export function renderMikroEmbeddedRepository(
       usesDecimal && `import Decimal from "decimal.js";`,
       repoPortImportLine(agg.name),
       usesPrincipal && `import { requireCurrentUser } from "../../auth/middleware";`,
+      usesRaw && `import { raw } from "@mikro-orm/core";`,
       `import { EntityManager } from "@mikro-orm/postgresql";`,
       `import { ${row} } from "../entities";`,
       maskUserImport(agg),
@@ -2730,6 +2792,7 @@ export function renderMikroDocumentRepository(
   }
   const usesDecimal = /new\s+Decimal\(/.test(bodyScan);
   const usesPrincipal = /\brequireCurrentUser\(/.test(bodyScan);
+  const usesRaw = usesRawFragment(bodyScan);
 
   return (
     lines(
@@ -2737,6 +2800,7 @@ export function renderMikroDocumentRepository(
       usesDecimal && `import Decimal from "decimal.js";`,
       repoPortImportLine(agg.name),
       usesPrincipal && `import { requireCurrentUser } from "../../auth/middleware";`,
+      usesRaw && `import { raw } from "@mikro-orm/core";`,
       `import { EntityManager } from "@mikro-orm/postgresql";`,
       `import { ${row} } from "../entities";`,
       maskUserImport(agg),
@@ -2979,6 +3043,7 @@ export function renderMikroEventSourcedRepository(
   }
   const usesDecimal = /new\s+Decimal\(/.test(bodyScan);
   const usesPrincipal = /\brequireCurrentUser\(/.test(bodyScan);
+  const usesRaw = usesRawFragment(bodyScan);
 
   return (
     lines(
@@ -2987,6 +3052,7 @@ export function renderMikroEventSourcedRepository(
       // Domain-side repository PORT this concrete implements (audit S7).
       repoPortImportLine(agg.name),
       usesPrincipal && `import { requireCurrentUser } from "../../auth/middleware";`,
+      usesRaw && `import { raw } from "@mikro-orm/core";`,
       `import { EntityManager } from "@mikro-orm/postgresql";`,
       `import { ${eventRow} } from "../entities";`,
       // The aggregate root + any contained entity parts (folded in-memory from

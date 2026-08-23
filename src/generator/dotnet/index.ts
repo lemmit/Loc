@@ -665,7 +665,10 @@ function emitProjectFromContexts(
   // the auditable interceptor can rely on ICurrentUserAccessor.
   const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
   if (authRequired && system?.sys) {
-    emitAuthFiles(system.sys, ns, out);
+    // The persistence adapter picks the `IOrgPathResolver` implementation the
+    // hierarchy seam emits — the EF one references AppDbContext, which a
+    // `persistence: dapper` project does not have.
+    emitAuthFiles(system.sys, ns, out, system.deployable.persistence === "dapper");
   }
   // The principal's id property on the User record (PascalCased; the claim
   // named `id`, else the first field).  Drives the carrier's ActorId accessor

@@ -214,17 +214,25 @@ structural half.
   deployable; kafka topic ACLs and redis per-service ACLs are deferred.
 - **Browser delivery** (M-T1.10) — the edge relay / room topology consumes
   the same `ChannelTransport` seam but is a separate mission; realtime SSE now
-  ships on node/dotnet/java/python (`backendServesRealtime()`,
-  `src/ir/util/channels.ts:14`), plus native LiveView PubSub on elixir
-  (`src/generator/elixir/realtime-liveview.ts`), consumed by the
-  react/vue/svelte/angular/feliz frontends. **Tenant rooms now ship on all four
-  SSE backends** — node/dotnet/java/python each key subscribers by the tenant
-  DataKey from the shared `realtimeRoomPlan` derivation
-  (`src/ir/util/realtime-rooms.ts`), so a tenant-scoped event reaches only the
-  emitter's tenant room, never cross-tenant (the former
-  `loom.realtime-tenant-broadcast` honesty warning is retired). Remaining gap:
-  Flutter has no realtime consumer yet (warned via
-  `loom.ui-realtime-unsupported`).
+  ships on **all five backends** (`backendServesRealtime()`,
+  `src/ir/util/channels.ts`), consumed by the react/vue/svelte/angular/feliz
+  frontends. Elixir's stream is a chunked Phoenix controller
+  (`src/generator/elixir/vanilla/realtime-emit.ts`) fed by the same `"events"`
+  PubSub topic every domain `emit` already broadcasts on — so it needs no
+  dispatcher decorator, and a HEEx/LiveView ui keeps consuming that topic
+  in-process instead (`src/generator/elixir/realtime-liveview.ts`).
+  **Tenant rooms ship on the four registry-based SSE backends** —
+  node/dotnet/java/python each key subscribers by the tenant DataKey from the
+  shared `realtimeRoomPlan` derivation (`src/ir/util/realtime-rooms.ts`), so a
+  tenant-scoped event reaches only the emitter's tenant room, never
+  cross-tenant (the former `loom.realtime-tenant-broadcast` honesty warning is
+  retired). Elixir has no emitter room hop — its shared PubSub broadcast
+  carries the event struct alone, so the emitter's tenant is not observable at
+  the subscriber — and therefore takes the *refetch-ticket* degrade the other
+  four specify for a dispatch with no ambient tenant: a tenant-scoped event
+  ships `type` + its `<Agg> id` references only, never a scalar payload, and
+  the authorized read re-gates on refetch. Remaining gap: Flutter has no
+  realtime consumer yet (warned via `loom.ui-realtime-unsupported`).
 - **Elixir/java saga `last_event_id` dedup residual** — the column exists in
   migrations but hosted-durable consumer dedup is wired only on
   node/python/dotnet; elixir and java rely on broker ack semantics +

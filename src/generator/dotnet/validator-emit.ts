@@ -17,6 +17,7 @@ import {
 } from "../../ir/validate/invariant-classify.js";
 import { messageCode } from "../../util/message-code.js";
 import { plural, upperFirst } from "../../util/naming.js";
+import { csCodePointLength } from "../_expr/code-point.js";
 import { collectCsExprUsings } from "./render-expr.js";
 import { isNullableWireDefault } from "./wire-default.js";
 
@@ -381,6 +382,13 @@ ${classes.join("\n\n")}
 // Single-field pattern → idiomatic FluentValidation chain.
 // ---------------------------------------------------------------------------
 
+/** One code-point length rule: the `.Must` predicate plus a message in
+ *  FluentValidation's own voice (a bare `.Must` would otherwise degrade every
+ *  message-less length rule to "The specified condition was not met"). */
+function lengthMust(check: string, phrase: string): string {
+  return `.Must(v => v == null || ${check})\n            .WithMessage("'{PropertyName}' must be ${phrase}.")`;
+}
+
 function chainSingleFieldFluent(p: SingleFieldPattern): string {
   switch (p.kind) {
     case "min":
@@ -393,14 +401,25 @@ function chainSingleFieldFluent(p: SingleFieldPattern): string {
       return p.exclusive ? `.LessThan(${p.n}m)` : `.LessThanOrEqualTo(${p.n})`;
     case "between":
       return `.InclusiveBetween(${p.lo}, ${p.hi})`;
+    // FluentValidation's `.MinimumLength`/`.MaximumLength`/`.Length` count
+    // `string.Length` — UTF-16 code units — while the constraint they came
+    // from is defined in CODE POINTS (src/generator/_expr/code-point.ts), and
+    // so is the `minLength`/`maxLength` the emitted OpenAPI publishes for the
+    // same field.  `.Must` over the code-point count is the exact rendering;
+    // `v == null ||` reproduces FluentValidation's own null-skip (its length
+    // validators all return true for a null value) and keeps the lambda
+    // null-safe on an optional (`string?`) property.
     case "len-min":
-      return `.MinimumLength(${p.n})`;
+      return lengthMust(`${csCodePointLength("v")} >= ${p.n}`, `at least ${p.n} characters`);
     case "len-max":
-      return `.MaximumLength(${p.n})`;
+      return lengthMust(`${csCodePointLength("v")} <= ${p.n}`, `at most ${p.n} characters`);
     case "len-eq":
-      return `.Length(${p.n}, ${p.n})`;
+      return lengthMust(`${csCodePointLength("v")} == ${p.n}`, `exactly ${p.n} characters`);
     case "len-range":
-      return `.Length(${p.lo}, ${p.hi})`;
+      return lengthMust(
+        `${csCodePointLength("v")} >= ${p.lo} && ${csCodePointLength("v")} <= ${p.hi}`,
+        `between ${p.lo} and ${p.hi} characters`,
+      );
     case "regex":
       // FluentValidation's `.Matches` accepts a string regex; we
       // pass the literal verbatim (already validated as a valid
@@ -508,7 +527,9 @@ function renderMember(e: Extract<ExprIR, { kind: "member" }>): string {
     e.receiverType.name === "string" &&
     e.member === "length"
   ) {
-    return `${recv}.Length`;
+    // CODE POINTS, not `string.Length`'s UTF-16 code units — see
+    // src/generator/_expr/code-point.ts.
+    return csCodePointLength(recv);
   }
   return `${recv}.${upperFirst(e.member)}`;
 }
