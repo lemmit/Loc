@@ -7,6 +7,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { valueCollectionsFor } from "../../../ir/util/value-collections.js";
 import { snake } from "../../../util/naming.js";
+import { hbIdent } from "../sql-ident.js";
 
 // ---------------------------------------------------------------------------
 // JPA annotation lines for the generated domain classes.  The mapping is
@@ -39,7 +40,7 @@ export interface JpaOpts {
 const schemaAttr = (schema: string | undefined): string => (schema ? `, schema = "${schema}"` : "");
 
 export function jpaClassAnnotations(tableName: string, opts: JpaOpts): string[] {
-  return [`@Entity`, `@Table(name = "${tableName}"${schemaAttr(opts.schema)})`];
+  return [`@Entity`, `@Table(name = "${hbIdent(tableName)}"${schemaAttr(opts.schema)})`];
 }
 
 /** `@EmbeddedId` mapping the id record's `value` onto the `id` column. */
@@ -121,7 +122,7 @@ function voElementOverrides(voName: string, voLookup: JpaOpts["voLookup"]): stri
       return voOverrides(vf.name, snake(vf.name), base.name, voLookup);
     }
     return [
-      `    @AttributeOverride(name = "${vf.name}", column = @Column(name = "${snake(vf.name)}"))`,
+      `    @AttributeOverride(name = "${vf.name}", column = @Column(name = "${hbIdent(snake(vf.name))}"))`,
     ];
   });
 }
@@ -158,7 +159,7 @@ export function jpaFieldAnnotations(
       return [
         `    @Convert(converter = ${assoc.targetAgg}IdJsonListConverter.class)`,
         `    @JdbcTypeCode(SqlTypes.JSON)`,
-        `    @Column(name = "${col}"${f.optional ? "" : ", nullable = false"})`,
+        `    @Column(name = "${hbIdent(col)}"${f.optional ? "" : ", nullable = false"})`,
       ];
     }
     // `Target id[]` is contractually a set (membership only, no order), so
@@ -190,14 +191,14 @@ export function jpaFieldAnnotations(
 
   // Primitive / enum array → a native Postgres array column.
   if (t.kind === "array") {
-    return [`    @JdbcTypeCode(SqlTypes.ARRAY)`, `    @Column(name = "${col}")`];
+    return [`    @JdbcTypeCode(SqlTypes.ARRAY)`, `    @Column(name = "${hbIdent(col)}")`];
   }
 
   // `X id` reference → embedded id record over one column.
   if (t.kind === "id") {
     return [
       `    @Embedded`,
-      `    @AttributeOverride(name = "value", column = @Column(name = "${col}"))`,
+      `    @AttributeOverride(name = "value", column = @Column(name = "${hbIdent(col)}"))`,
     ];
   }
 
@@ -207,17 +208,17 @@ export function jpaFieldAnnotations(
   }
 
   if (t.kind === "enum") {
-    return [`    @Enumerated(EnumType.STRING)`, `    @Column(name = "${col}")`];
+    return [`    @Enumerated(EnumType.STRING)`, `    @Column(name = "${hbIdent(col)}")`];
   }
 
   if (t.kind === "primitive" && (t.name === "json" || t.name === "File")) {
     // A `File` field's FileRef persists as jsonb, exactly like `json` (M-T1.2);
     // Hibernate maps the `FileRef` record ⇄ JSON via @JdbcTypeCode.
-    return [`    @JdbcTypeCode(SqlTypes.JSON)`, `    @Column(name = "${col}")`];
+    return [`    @JdbcTypeCode(SqlTypes.JSON)`, `    @Column(name = "${hbIdent(col)}")`];
   }
 
   // Scalars (string / int / long / decimal / money / bool / datetime / guid).
-  return [`    @Column(name = "${col}")`];
+  return [`    @Column(name = "${hbIdent(col)}")`];
 }
 
 function associationFor(

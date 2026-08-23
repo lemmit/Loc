@@ -7,6 +7,7 @@ import type {
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { collectJavaTypeImports, renderJavaType } from "../render-expr.js";
+import { hbIdent } from "../sql-ident.js";
 import {
   jpaClassAnnotations,
   jpaFieldAnnotations,
@@ -102,7 +103,7 @@ export function renderProjectionRowEntity(
 
   const fieldLines: string[] = [
     `    @EmbeddedId`,
-    `    @AttributeOverride(name = "value", column = @Column(name = "${snake(corr)}"))`,
+    `    @AttributeOverride(name = "value", column = @Column(name = "${hbIdent(snake(corr))}"))`,
     `    ${idClass} ${corr};`,
   ];
   for (const f of stateOnly) {

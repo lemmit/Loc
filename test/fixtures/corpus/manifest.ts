@@ -31,11 +31,6 @@ const ALL: readonly Backend[] = BACKENDS;
  *  `GetByIdForWriteAsync` write-scope member whose absence was the CS0535. */
 const IN_APP_DOCUMENT_FILTER: readonly Backend[] = ["node", "java", "python", "dotnet"];
 
-/** Backends that quote a reserved-word column everywhere they name it.  Java is
- *  the one exclusion and it is a GAP, not a rejection — see `reserved-words`'
- *  note and M-T6.43.  Widening this back to `ALL` is that mission's ratchet. */
-const QUOTES_RESERVED_IDENTIFIERS: readonly Backend[] = ["node", "dotnet", "python", "vanilla"];
-
 export interface CorpusFeature {
   /** Matches `<id>.ddd` in this directory. */
   readonly id: string;
@@ -111,8 +106,8 @@ export const CORPUS: readonly CorpusFeature[] = [
     title:
       "field names that are POSTGRES RESERVED WORDS (`order` / `group` / `limit`) — every SQL writer has to quote its identifiers",
     doc: "language",
-    backends: QUOTES_RESERVED_IDENTIFIERS,
-    note: "Minted by M-T6.42.  The class was unexercised: no fixture named a reserved word, so the Dapper adapter's bare identifiers (DDL *and* DML) were invisible to every gate — the C# compiles because the SQL is a string literal, and `schema-load` covered only the MIGRATION chain, which that adapter does not use.  Covers four clause positions a partial fix would miss: CREATE TABLE, the SELECT/INSERT column lists, a `find` WHERE, a retrieval ORDER BY, and CREATE INDEX.  Deliberately NOT a host-language-keyword test (`is` / `default` / `class` break the generated DTO, a different class no backend claims).  JAVA IS EXCLUDED FOR A GAP, NOT A REJECTION: it generates and COMPILES, then 500s on the first insert, because the JPA entity emits `@Column(name = \"order\")` bare and Hibernate writes `insert into ... (order, group, limit, ...)`.  Found by running this fixture's behavioural leg on a real booted Spring Boot + Postgres while landing M-T6.42; tracked as M-T6.43, whose ratchet is widening this row back to ALL.  Declaring java here today would make the row a false coverage claim.",
+    backends: ALL,
+    note: "Minted by M-T6.42.  The class was unexercised: no fixture named a reserved word, so the Dapper adapter's bare identifiers (DDL *and* DML) were invisible to every gate — the C# compiles because the SQL is a string literal, and `schema-load` covered only the MIGRATION chain, which that adapter does not use.  Covers four clause positions a partial fix would miss: CREATE TABLE, the SELECT/INSERT column lists, a `find` WHERE, a retrieval ORDER BY, and CREATE INDEX.  Deliberately NOT a host-language-keyword test (`is` / `default` / `class` break the generated DTO, a different class no backend claims).  JAVA WAS EXCLUDED HERE UNTIL M-T6.43 — a gap, not a rejection: it generated and COMPILED, then 500d on the first insert, because the JPA entity emitted `@Column(name = \"order\")` bare and Hibernate derived `insert into ... (order, group, limit, ...)` from it.  Found by running this fixture's behavioural leg on a real booted Spring Boot + Postgres while landing M-T6.42.  Fixed by backtick-quoting the mapping annotations (Hibernate's portable quoting) off the SHARED word list in `src/generator/sql-reserved.ts`, and this row widening back to ALL is that mission's ratchet.",
   },
   {
     id: "vo-field-default",
