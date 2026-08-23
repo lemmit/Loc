@@ -64,6 +64,27 @@ describe("policy deep — node (Hono/Drizzle)", () => {
   });
 });
 
+// The SECOND node persistence adapter.  Not a sixth backend: the same Hono
+// backend on `persistence: mikroorm`, whose FilterQuery operator vocabulary has
+// no prefix test at all — so the predicate rides a `raw()` SQL fragment used as
+// a FilterQuery KEY instead of an operator tree.  Deeper pins (binding arity,
+// the `raw` import, the resolver) live in
+// `test/generator/typescript/mikroorm-deep-scope.test.ts`.
+describe("policy deep — node (Hono/MikroORM)", () => {
+  it("emits the descendant-or-self prefix + NULL fallback as a raw() fragment", async () => {
+    const text = await allText("node { persistence: mikroorm }", "deep");
+    expect(text).toContain('.orgPath + "."');
+    expect(text).toContain("starts_with(data_key, ?)");
+    expect(text).toContain("data_key is null and tenant_id = ?");
+  });
+
+  it("`local` keeps the flat tenantId floor (no prefix, no raw fragment)", async () => {
+    const text = await allText("node { persistence: mikroorm }", "local");
+    expect(text).not.toContain("starts_with(");
+    expect(text).not.toContain('.orgPath + "."');
+  });
+});
+
 describe("policy deep — .NET (EF Core)", () => {
   it("emits a static-expressible StartsWith prefix + NULL fallback", async () => {
     const text = await allText("dotnet", "deep");
@@ -112,6 +133,15 @@ describe("policy global — node (Hono/Drizzle)", () => {
     expect(text).not.toContain('.orgPath + "."');
     expect(text).toContain("isNotNull(");
     expect(text).toContain("isNull(");
+  });
+});
+
+describe("policy global — node (Hono/MikroORM)", () => {
+  it("emits the root-subtree raw() fragment anchored at rootOrg (not orgPath)", async () => {
+    const text = await allText("node { persistence: mikroorm }", "global");
+    expect(text).toContain('.rootOrg + "."');
+    expect(text).toContain("starts_with(data_key, ?)");
+    expect(text).not.toContain('.orgPath + "."');
   });
 });
 
