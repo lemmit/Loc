@@ -146,12 +146,16 @@ describe("flutter realtime — the transport", () => {
   });
 });
 
-describe("flutter realtime — the honest-gap half stays honest", () => {
-  it("emits nothing when the target backend serves no SSE wire", async () => {
-    // The elixir backend realizes realtime NATIVELY over its own socket, so it
-    // does not serve `GET /realtime/events` — a flutter ui pointed at it must
-    // not open a subscription to a route that isn't there.
-    const out = await gen("elixir");
+describe("flutter realtime — the emission gate", () => {
+  // The emitter gates on BOTH halves (`index.ts`): this ui declares `on
+  // <channel>.<Event>` handlers AND the serving deployable actually streams
+  // `GET /realtime/events`.  The SECOND half no longer has a reachable case —
+  // all five backends serve the wire (elixir joined last, with
+  // `vanilla/realtime-emit.ts`), and the only non-serving platforms are the
+  // frontends, which a `targets:` clause cannot name (`loom.frontend-targets-
+  // frontend`).  So what is drivable from a valid model is the FIRST half.
+  it("emits nothing for a ui with no live-event handler", async () => {
+    const out = await generateSystemFiles(SYS().replace(/^\s*on Live\.OrderPlaced.*$/m, ""));
     expect(out.has("web_app/lib/realtime.dart")).toBe(false);
     expect(out.has("web_app/lib/realtime_source.dart")).toBe(false);
     expect(out.get("web_app/pubspec.yaml")!).not.toContain("web: ^1.0.0");

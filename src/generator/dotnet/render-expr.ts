@@ -12,6 +12,7 @@ import {
 import { bodyTypeOf } from "../../util/expr-body-type.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapeCsharpIdent, upperFirst } from "../../util/naming.js";
+import { csCodePointLength } from "../_expr/code-point.js";
 import {
   type BinaryExpr,
   type CallExpr,
@@ -672,7 +673,9 @@ function renderMember(recv: string, e: MemberExpr): string {
     e.receiverType.name === "string" &&
     e.member === "length"
   ) {
-    return `${recv}.Length`;
+    // CODE POINTS, not `string.Length`'s UTF-16 code units — see
+    // src/generator/_expr/code-point.ts.
+    return csCodePointLength(recv);
   }
   return `${recv}.${upperFirst(e.member)}`;
 }

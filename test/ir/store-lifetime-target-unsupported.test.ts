@@ -1,25 +1,31 @@
 // ---------------------------------------------------------------------------
 // `loom.store-lifetime-target-unsupported` — the `persist:` lifetime ladder is
-// gated on the frontend that doesn't implement it, and on the FIELD TYPES the
-// one that does can't carry.
+// gated on the FIELD TYPES the frontends that implement it cannot carry.
 //
-// `store-checks.ts` already refuses a non-`memory` lifetime on LiveView
+// `store-checks.ts` refuses a non-`memory` lifetime on LiveView outright
 // (`loom.store-lifetime-liveview-invalid`), because a server-rendered
-// per-process struct has no browser storage.  The SAME gap exists, ungated, on:
+// per-process struct has no browser storage.  The SAME gap once existed,
+// ungated, on two SPA-adjacent targets — and both are DRAINED (M-T1.20):
 //
-//   feliz   — `src/generator/feliz` contains ZERO references to
-//       `store.lifetime`; the store folds into the single Elmish `Model` and
-//       the lifetime is dropped without even a comment.
+//   feliz   — `generator/feliz/store-persist.ts` implements the full ladder:
+//       Web Storage hydration at `init`, an `updateWithPersist` write-back
+//       wrapper, and a `popstate` Elmish subscription for the `url` tier.
+//   flutter — `generator/flutter/store-persist.ts` does the same: a
+//       shared_preferences seed + a `ref.listenSelf` mirror, and `Uri.base` /
+//       `SystemNavigator` for the `url` tier.
 //
-// `LIFETIME_UNSUPPORTED_PLATFORMS` is a RATCHET: the task that implements a
-// target deletes its entry (and the matching case here), so a stale allowance
-// cannot survive the fix.  FLUTTER did exactly that — `flutter/store-persist.ts`
-// ships the ladder (a shared_preferences seed + a `ref.listenSelf` mirror, and
-// `Uri.base` / `SystemNavigator` for the `url` tier), so the platform-wide arm
-// is gone and only the narrower FIELD-scoped half of the same code remains: the
-// Dart codec (`ir/util/flutter-persist-codec.ts`) has no total conversion for a
-// `json` / `File` / entity / value-object / optional cell, which would
-// otherwise be silently dropped from the stored state.
+// `LIFETIME_UNSUPPORTED_PLATFORMS` was the RATCHET behind the platform-wide
+// arm — each implementing task deleted its entry — so with both entries gone
+// the set drained to empty and the arm was deleted with it (an unfireable
+// gate is dead code, not a safety net).
+//
+// What SURVIVES on both is narrower and FIELD-scoped: persistence crosses an
+// untyped boundary per field, so a type with no total conversion in that
+// language's codec still cannot ride the ladder — on feliz datetime /
+// duration / guid / enum / entity / value object (and arrays of them), on
+// flutter json / File / entity / value object / optional.  Those fire the SAME
+// code through two message variants (`#field` for feliz, `#flutter-field` for
+// flutter) — one code, two scopes, so the register keeps one row.
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it } from "vitest";
@@ -50,9 +56,9 @@ system Demo {
     api C: A
     store Cart${lifetime ? ` persist: ${lifetime}` : ""} {
       state { ${cells} }
-      action bump() { count := count + 1 }
+      action bump() { }
     }
-    page X { route: "/x"  body: Stack { Heading { Cart.count, level: 3 } } }
+    page X { route: "/x"  body: Stack { Heading { "x", level: 3 } } }
   }
   storage primary { type: postgres }
   resource st { for: C, kind: state, use: primary }
@@ -74,24 +80,44 @@ const codes = async (
 ): Promise<string[]> =>
   (await diagnostics(framework, platform, lifetime, cells)).map((d) => d.code);
 
-describe("loom.store-lifetime-target-unsupported — the gate", () => {
+describe("loom.store-lifetime-target-unsupported — the feliz FIELD-scoped half", () => {
+  // The ladder ships on feliz, so the platform-wide arm is gone …
   for (const lifetime of ["local", "session", "url"] as const) {
-    it(`flags \`persist: ${lifetime}\` on a feliz-hosted store`, async () => {
-      expect(await codes("feliz", "feliz", lifetime)).toContain(CODE);
+    it(`does NOT flag \`persist: ${lifetime}\` on a feliz-hosted store of covered cells`, async () => {
+      expect(await codes("feliz", "feliz", lifetime)).not.toContain(CODE);
     });
   }
 
-  it("is an error naming the store, the lifetime and feliz", async () => {
-    const d = (await diagnostics("feliz", "feliz", "local")).find((x) => x.code === CODE);
+  // … but a cell with no total F# conversion is still refused.
+  it("flags a datetime cell in a persisted feliz store", async () => {
+    const d = (await diagnostics("feliz", "feliz", "local", "at: datetime")).find(
+      (x) => x.code === CODE,
+    );
     expect(d?.severity).toBe("error");
     expect(d?.message).toMatch(/store 'Cart'/);
-    expect(d?.message).toMatch(/persist: local/);
+    expect(d?.message).toMatch(/field 'at'/);
     expect(d?.message).toMatch(/feliz/);
+  });
+
+  it("does NOT flag the covered scalar / array types — they ride the ladder", async () => {
+    for (const cells of [
+      "count: int = 0",
+      'note: string = ""',
+      "ok: bool",
+      "price: money",
+      "tags: string[]",
+    ]) {
+      expect(await codes("feliz", "feliz", "local", cells)).not.toContain(CODE);
+    }
+  });
+
+  it("does NOT fire on a feliz `memory` store, whatever the cell type", async () => {
+    expect(await codes("feliz", "feliz", "", "at: datetime")).not.toContain(CODE);
   });
 });
 
 describe("loom.store-lifetime-target-unsupported — the flutter FIELD-scoped half", () => {
-  // The ladder ships on flutter, so the platform-wide arm is gone …
+  // The ladder ships on flutter too, so the platform-wide arm is gone …
   for (const lifetime of ["local", "session", "url"] as const) {
     it(`does NOT flag \`persist: ${lifetime}\` on a flutter-hosted store of covered cells`, async () => {
       expect(await codes("flutter", "flutter", lifetime)).not.toContain(CODE);
@@ -129,11 +155,15 @@ describe("loom.store-lifetime-target-unsupported — the flutter FIELD-scoped ha
 });
 
 describe("loom.store-lifetime-target-unsupported — what it must NOT flag", () => {
-  for (const target of ["feliz", "flutter"] as const) {
-    it(`POSITIVE CONTROL: an in-memory store on ${target} is clean`, async () => {
-      expect(await codes(target, target, "")).not.toContain(CODE);
-    });
-  }
+  it("POSITIVE CONTROL: an in-memory store on flutter is clean", async () => {
+    expect(await codes("flutter", "flutter", "")).not.toContain(CODE);
+  });
+
+  it("POSITIVE CONTROL: the ladder SHIPS on feliz now — a persisted store is clean", async () => {
+    expect(await codes("feliz", "feliz", "local")).not.toContain(CODE);
+    expect(await codes("feliz", "feliz", "session")).not.toContain(CODE);
+    expect(await codes("feliz", "feliz", "url")).not.toContain(CODE);
+  });
 
   it("POSITIVE CONTROL: `persist: local` on a SPA frontend is clean — it ships there", async () => {
     expect(await codes("react", "static", "local")).not.toContain(CODE);
@@ -143,7 +173,7 @@ describe("loom.store-lifetime-target-unsupported — what it must NOT flag", () 
   // A LiveView deployable is `platform: elixir` and takes no `targets:`, so
   // this one case is driven off a synthetic IR (the same shape the existing
   // `loom.store-lifetime-liveview-invalid` case in store.test.ts uses).  The
-  // point is that the new gate keys on the PLATFORM set and does not widen to
+  // point is that the gate keys on the PLATFORM set and does not widen to
   // cover a target the liveview-specific code already owns.
   it("does not double-report on LiveView — that stays the liveview-specific code", () => {
     const diags: LoomDiagnostic[] = [];

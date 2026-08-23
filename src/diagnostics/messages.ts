@@ -1274,20 +1274,26 @@ export const DIAGNOSTIC_MESSAGES = {
     `phoenixLiveView frontend — a LiveView store is a server-side per-process struct ` +
     `with no browser storage, and URL state is owned by the page's \`handle_params\`. ` +
     `Use \`persist: memory\` here; the persistence tiers ship on the SPA frontends.`,
-  "loom.store-lifetime-target-unsupported": (p: {
+  // `loom.store-lifetime-target-unsupported` is FIELD-SCOPED ONLY now.  The
+  // platform-wide arm (a frontend whose store emitter ignored `persist:` and
+  // built an in-memory store regardless) is gone with its last entry: the
+  // ladder ships on every frontend — the four JS store builders, feliz
+  // (`generator/feliz/store-persist.ts`) and flutter
+  // (`generator/flutter/store-persist.ts`).  What survives on those last two is
+  // narrower: persistence there crosses an UNTYPED boundary per FIELD, so a
+  // field type with no total conversion in that language's codec still can't
+  // ride it, and would be silently dropped from the stored state.
+  "loom.store-lifetime-target-unsupported#field": (p: {
     where: unknown;
+    name: unknown;
     lifetime: unknown;
-    platform: unknown;
   }) =>
-    `${p.where}: \`persist: ${p.lifetime}\` is not implemented on the ${p.platform} frontend — ` +
-    `the emitted store is IN-MEMORY regardless, so the state is lost on restart and not ` +
-    `shareable by URL, with nothing in the build output to say so.  Use \`persist: memory\` ` +
-    `here, or host this ui on a frontend that implements the ladder (react / vue / svelte / ` +
-    `angular / flutter).  Support is planned; this gate exists so the degradation is honest ` +
-    `until it lands.`,
-  // The FIELD-scoped half of the same code: flutter implements the ladder, but
-  // persistence there crosses an untyped boundary per field, so a field type
-  // with no total Dart conversion still can't ride it.
+    `${p.where}: field '${p.name}' cannot be persisted on the feliz frontend — ` +
+    `\`persist: ${p.lifetime}\` crosses the JS boundary per field, and the F# codec covers ` +
+    `string / int / long / bool / decimal / money / id fields plus arrays of ` +
+    `string / int / long / bool.  A datetime, duration, guid, enum, entity or value-object ` +
+    `field would be silently dropped from the stored blob.  Give the field one of the ` +
+    `covered types, or use \`persist: memory\` for this store.`,
   "loom.store-lifetime-target-unsupported#flutter-field": (p: {
     where: unknown;
     name: unknown;
@@ -1407,7 +1413,7 @@ export const DIAGNOSTIC_MESSAGES = {
   }) =>
     `Deployable '${p.name}': ui '${p.uiName}' declares 'on <channel>.<Event>' live-event handler(s), but its ${
       p.target
-    } does not serve the realtime SSE wire, so the handlers are silently dropped. Target a realtime-serving backend (node, dotnet, java, python) or remove the handlers.`,
+    } does not serve the realtime SSE wire, so the handlers are silently dropped. Target a realtime-serving backend (node, dotnet, java, python, elixir) or remove the handlers.`,
   "loom.ui-realtime-unsupported#frontend-has-no-consumer": (p: {
     name: unknown;
     uiName: unknown;
@@ -2525,7 +2531,7 @@ export const DIAGNOSTIC_MESSAGES = {
     resourceName: unknown;
     verb: unknown;
   }) =>
-    `resource operation '${p.resourceName}.${p.verb}(...)' is only available inside a workflow, a command/query handler, or a domainService operation — no backend has the resource client in scope anywhere else (.NET/Java/Phoenix fail codegen outright; TS/Python emit an unimported helper call). Found in ${p.location}; move the call into a workflow and have this member work on the value it produces.`,
+    `resource operation '${p.resourceName}.${p.verb}(...)' is only available inside a workflow or a command/query handler — no backend has the resource client in scope anywhere else, a domainService included (.NET/Java/Phoenix fail codegen outright; TS/Python emit an unimported helper call). Found in ${p.location}; move the call into a workflow and have this member work on the value it produces.`,
 
   // ----------------------------------------------------------------------
   // src/language/ddd-validator.ts

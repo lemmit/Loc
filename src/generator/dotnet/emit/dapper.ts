@@ -1958,6 +1958,57 @@ export function renderDapperDocumentRepository(
   // audit rows commit with the snapshot write.
   const audit = dapperAuditSeam(agg, ns);
 
+  // Capability read filter + write-scope narrowing, the Dapper twins of the EF
+  // document repository's (`renderDocumentRepositoryImpl`).  A document
+  // aggregate is ONE opaque jsonb column, so the filtered fields (`tenantId`,
+  // `dataKey`, `isDeleted`) have no column for a WHERE fragment to name — the
+  // predicate runs IN-APP over the rehydrated instance instead, exactly as the
+  // EF document path (and node/java/python) do.  Both were simply MISSING here:
+  // the read filter silently, so a `tenantOwned` document aggregate read across
+  // tenants under `persistence: dapper`; the write-scope member loudly, as
+  // CS0535 (the interface declares `GetByIdForWriteAsync` whenever the
+  // aggregate carries a `writeScopeFilter`).  #2599 pinned the compile half.
+  //
+  // Hoisted into private statics rather than inlined for the same two reasons
+  // the EF twin gives: the read paths must not drift, and a `deny` ladder
+  // renders the constant `false` — inlined that makes the next statement
+  // unreachable (CS0162 → an error under /warnaserror), while `=> false;` as a
+  // method body is clean.
+  const capPredicate =
+    (agg.contextFilters ?? []).length > 0
+      ? (agg.contextFilters ?? [])
+          .map(
+            (p) =>
+              `(${renderCsExpr(p, { thisName: "x", agg, currentUserExpr: AMBIENT_CURRENT_USER })})`,
+          )
+          .join(" && ")
+      : null;
+  const capFilter = capPredicate ? ".Where(_CapabilityVisible)" : "";
+  const capMethod = capPredicate
+    ? [
+        "",
+        "    /// <summary>Capability read filter (shape: document) — evaluated in-app over the",
+        "    /// rehydrated aggregate, since the filtered fields live inside the jsonb blob.</summary>",
+        `    private static bool _CapabilityVisible(${agg.name} x) => ${capPredicate};`,
+      ]
+    : [];
+  const writeScopeMethod = agg.writeScopeFilter
+    ? [
+        "",
+        `    public async Task<${agg.name}?> GetByIdForWriteAsync(${agg.name}Id id, CancellationToken cancellationToken = default)`,
+        "    {",
+        "        var __found = await GetByIdAsync(id, cancellationToken);",
+        "        if (__found == null) return null;",
+        "        return _WriteScopeAllows(__found) ? __found : null;",
+        "    }",
+        "",
+        `    private static bool _WriteScopeAllows(${agg.name} x) => ${renderCsExpr(
+          agg.writeScopeFilter,
+          { thisName: "x", agg, currentUserExpr: AMBIENT_CURRENT_USER },
+        )};`,
+      ]
+    : [];
+
   // SaveAsync upsert — CAS-guarded on `version` when the aggregate is
   // `versioned` (the same optimistic-concurrency shape the relational Dapper
   // repository uses), a blind version-bumping upsert otherwise.
@@ -1996,7 +2047,10 @@ export function renderDapperDocumentRepository(
       "    {",
       "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
       `        var __rows = await conn.QueryAsync<Row>(new CommandDefinition("SELECT id, data, version FROM ${table}", cancellationToken: cancellationToken));`,
-      `        var __all = __rows.Select(__d => ${deser});`,
+      // The capability filter narrows the visible set BEFORE the find's own
+      // predicate runs, so a find never returns a capability-hidden (foreign
+      // tenant, soft-deleted) document.
+      `        var __all = __rows.Select(__d => ${deser})${capFilter};`,
       `        return __all${filter}${projection};`,
       "    }",
     );
@@ -2063,16 +2117,27 @@ export function renderDapperDocumentRepository(
       "    {",
       "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
       `        var __d = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("SELECT id, data, version FROM ${table} WHERE id = @id", new { id = id.Value }, cancellationToken: cancellationToken));`,
-      `        return __d is null ? null : ${deser};`,
+      // With a capability filter, a row OUTSIDE the caller's scope reads as
+      // missing (→ 404), matching what the relational adapter's spliced WHERE
+      // does to the same lookup.
+      ...(capPredicate
+        ? [
+            "        if (__d is null) return null;",
+            `        var __rec = ${deser};`,
+            "        return _CapabilityVisible(__rec) ? __rec : null;",
+          ]
+        : [`        return __d is null ? null : ${deser};`]),
       "    }",
+      ...writeScopeMethod,
       "",
       `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken cancellationToken = default)`,
       "    {",
       `        if (ids.Count == 0) return Array.Empty<${agg.name}>();`,
       "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
       `        var __rows = await conn.QueryAsync<Row>(new CommandDefinition("SELECT id, data, version FROM ${table} WHERE id = ANY(@ids)", new { ids = ids.Select(x => x.Value).ToArray() }, cancellationToken: cancellationToken));`,
-      `        return __rows.Select(__d => ${deser}).ToList();`,
+      `        return __rows.Select(__d => ${deser})${capFilter}.ToList();`,
       "    }",
+      ...capMethod,
       "",
       `    public async Task SaveAsync(${agg.name} aggregate, CancellationToken cancellationToken = default)`,
       "    {",

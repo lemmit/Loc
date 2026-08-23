@@ -5,17 +5,17 @@ import { api } from "./client";
 
 export const MoneySchema = z.object({
   amount: z.number().min(0),
-  currency: z.string().length(3),
+  currency: z.string().refine((s) => [...s].length === 3),
 });
 
 export const CreateProductRequest = z.object({
-  sku: z.string().min(1),
+  sku: z.string().refine((s) => [...s].length >= 1),
   price: MoneySchema,
 });
 export type CreateProductRequest = z.infer<typeof CreateProductRequest>;
 
 export const UpdateProductRequest = z.object({
-  sku: z.string().min(1),
+  sku: z.string().refine((s) => [...s].length >= 1),
   price: MoneySchema,
 });
 export type UpdateProductRequest = z.infer<typeof UpdateProductRequest>;

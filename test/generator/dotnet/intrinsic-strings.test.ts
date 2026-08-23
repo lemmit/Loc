@@ -47,7 +47,9 @@ describe("dotnet generator — string intrinsics (stdlib A2 batch)", () => {
     expect(domain).toContain('.Contains("-", StringComparison.Ordinal)');
     // substring — clamping guard, 2-arg arity (invariant)
     expect(domain).toContain(
-      '(0 >= this.Name.Length ? "" : this.Name.Substring(0, Math.Min(3, this.Name.Length - 0))).Length <= 3',
+      // The trailing `.length` is the DSL's, so it is a CODE-POINT count
+      // (RS-31); the clamping guard's own `.Length` is C#'s, unchanged.
+      '(0 >= this.Name.Length ? "" : this.Name.Substring(0, Math.Min(3, this.Name.Length - 0))).EnumerateRunes().Count() <= 3',
     );
   });
 

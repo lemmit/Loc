@@ -187,6 +187,37 @@ jobs:
 
             ui WebApp {
               api Shop: ShopApi
+              // Store persistence (`persist:` — M-T1.20).  All four lifetimes, so
+              // `dotnet fable` actually compiles the `StorePersist` module: Web
+              // Storage hydration + write-back (local / session, incl. the int /
+              // bool / money / string[] codecs), the query-string mirror plus the
+              // `popstate` Elmish subscription (url), and a `memory` store as the
+              // untouched control.  The url store's only field defaults EMPTY, so
+              // the mirror writes no query param and the smoke's path routing is
+              // unaffected.
+              store Draft persist: local {
+                state {
+                  note:  string = ""
+                  seen:  int = 0
+                  ok:    bool
+                  price: money
+                  tags:  string[]
+                }
+                action write(t: string) { note := t }
+                action bump() { seen := seen + 1 }
+              }
+              store Prefs persist: session {
+                state { mode: string = "dark" }
+                action setMode(m: string) { mode := m }
+              }
+              store Filters persist: url {
+                state { term: string = "" }
+                action setTerm(q: string) { term := q }
+              }
+              store Cart {
+                state { items: int = 0 }
+                action add() { items := items + 1 }
+              }
               // User (non-extern) components — emitted as F# props functions
               // spliced ahead of the page views (`feliz/component-emit.ts`).
               // Two shapes, because they compile differently: SCALAR props
@@ -207,11 +238,24 @@ jobs:
               page Home {
                 route: "/"
                 state { count: int = 0 }
+                // A PAGE-level `derived` — a pure function of `state`, hoisted as
+                // an F# `let` above the body (the Elmish twin of React's
+                // `useMemo`).  Before M-T1.20 the page walk got an EMPTY
+                // `derivedNames`, so the body read below rendered as a
+                // `(* ref: doubled *)` give-up comment and the value silently
+                // vanished; `dotnet fable` cannot see that, only this smoke can.
+                derived doubled: int = count * 2
                 action inc() { count := count + 1 }
                 body: Stack {
                   Heading { "Storefront", level: 1 },
                   Badge { "beta" },
                   Text { `Clicks: {count}` },
+                  Text { `Doubled: {doubled}` },
+                  // Store reads — the persisted tiers' hydrated values.
+                  Text { `Draft: {Draft.note}` },
+                  Text { `Mode: {Prefs.mode}` },
+                  Text { `Term: {Filters.term}` },
+                  Text { `Items: {Cart.items}` },
                   Button { "+", onClick: inc },
                   Divider { },
                   PriceTag { label: "Deal of the day", cents: 250 },

@@ -651,10 +651,12 @@ const NATIVE_REALTIME_FRONTENDS = new Set<string>(["elixir", "phoenixLiveView"])
 
 /** Honesty gate for `on <channel>.<Event>` live-event handlers (channels.md
  *  Part I).  A handler on a ui whose serving frontend can't consume realtime
- *  — a framework with no realtime path (e.g. `flutter`), or an SSE-consuming
- *  frontend pointed at a backend that doesn't serve the SSE wire (e.g. a react
- *  ui targeting the Phoenix/Elixir backend) — compiles clean today but emits
- *  nothing.  Warn so the silent drop is a reviewed decision, not a surprise.
+ *  — a framework with no realtime path, or an SSE-consuming frontend pointed
+ *  at a serving deployable that doesn't stream the SSE wire — compiles clean
+ *  today but emits nothing.  Warn so the silent drop is a reviewed decision,
+ *  not a surprise.  Neither arm names a shipped pairing any more (all six
+ *  frontends consume, all five backends serve); both stay as the seam the
+ *  next target gates on.
  *
  *  Capability-driven (the two frontend sets + `backendServesRealtime`) rather
  *  than hard-coding a frontend list, so a future frontend without the wire
@@ -689,7 +691,10 @@ export function validateUiRealtimeSupport(sys: SystemIR, diags: LoomDiagnostic[]
         });
         continue;
       }
-      // Unknown / non-consuming frontend (e.g. flutter) — no realtime path.
+      // Unknown / non-consuming frontend — no realtime path.  No SHIPPED
+      // frontend sits here any more (flutter was the last, and joined
+      // `SSE_REALTIME_FRONTENDS`); this is the seam a new one warns on until it
+      // grows realtime consumption.
       diags.push({
         severity: "warning",
         code: "loom.ui-realtime-unsupported",
@@ -3024,36 +3029,28 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
       for (const agg of ctx.aggregates) {
         const a = agg as EnrichedAggregateIR;
         const where = `aggregate '${ctxName}.${agg.name}'`;
-        // (4) HIERARCHICAL tenancy scope.  `emitMikroContextFilters` lowers each
-        // capability filter through `whereToMikroFilter`, whose FilterQuery
-        // subset cannot express the descendant-or-self subtree predicate — and
-        // it CATCHES that failure and leaves the filter unapplied rather than
-        // throwing.  For a `deep`/`global` scope that is not a degraded read:
-        // it is NO tenant predicate at all, so every tenant's rows become
-        // readable on every read of this aggregate.  The adapter's own comment
-        // assumed the shape was unreachable here ("not generated on the mikro
-        // adapter today") — a belief, not a gate.  A `tenancy … of <Registry>`
-        // system with `persistence: mikroorm` validates, generates and compiles
-        // clean today and silently serves cross-tenant rows.  Refuse it until
-        // the subtree predicate is expressible (M-T6.23's remaining half).
+        // (4) HIERARCHICAL tenancy scope IS supported now (the boundary is
+        // drained).  It was gated here because `whereToMikroFilter`'s FilterQuery
+        // subset has no prefix test AND `mikroContextFilters` CAUGHT the
+        // resulting throw, leaving the filter unapplied — which for a
+        // `deep`/`global` scope is not a degraded read but NO tenant predicate
+        // at all, i.e. every tenant's rows readable on every read.
         //
-        // `writeScopeFilter` is scanned alongside the read filters (as dapper's
-        // gate already does): a `deep` WRITE ladder derives the same subtree
-        // sentinel, and the write-scope pre-guard lowers it through the very
-        // same `whereToMikroFilter` — so an ungated one throws at codegen
-        // instead of being an honest refusal.
-        if (
-          [...(a.contextFilters ?? []), a.writeScopeFilter]
-            .filter((x): x is ExprIR => x != null)
-            .some((f) => isDeepScopeFilter(f))
-        ) {
-          reject(
-            `${where} carries a hierarchical tenancy scope (a 'deep'/'global' subtree read)`,
-            `the descendant-or-self predicate that scopes it (the FilterQuery subset ` +
-              `cannot express it, and an unlowerable principal filter is dropped ` +
-              `silently) — leaving every tenant's rows readable`,
-          );
-        }
+        // The FilterQuery *operator vocabulary* still cannot express the
+        // subtree test, but MikroORM's `raw()` fragment can: `authzFilterEntry`
+        // renders the descendant-or-self predicate as a raw SQL FilterQuery key
+        // (`starts_with(data_key, ?)` with the NULL-dataKey tenant floor, the
+        // anchored-prefix twin of drizzle's `strpos(...) = 1` and Dapper's
+        // `starts_with`), the boot-time `orgPath` resolver is registered on this
+        // adapter too, and the silent catch is gone — an unlowerable principal
+        // filter now crashes codegen instead of vanishing.  Pinned by
+        // `test/generator/typescript/mikroorm-deep-scope.test.ts`; the runtime
+        // agreement (subtree, delimiter trap, wildcard trap, NULL floor) by
+        // `test/e2e/tenancy-hierarchy-mikroorm.test.ts`.
+        //
+        // `writeScopeFilter` derived the same sentinel and was scanned here for
+        // the same reason; it lowers through the same arm, so it needs no gate
+        // either.
         // Event sourcing IS supported on this adapter (appliers): the
         // `<agg>_events` stream + fold reuse the persistence-agnostic
         // domain/CQRS layer.  An event-sourced aggregate has no state table,

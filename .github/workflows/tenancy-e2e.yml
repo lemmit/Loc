@@ -69,6 +69,11 @@ on:
       - 'src/generator/elixir/vanilla/api-emit.ts'
       - 'src/generator/elixir/vanilla/openapi-emit.ts'
       - 'src/platform/hono/**'
+      # The MikroORM adapter's own emitter: it owns the hierarchical subtree
+      # predicate (a `raw()` FilterQuery key) that the `node-mikroorm` cell
+      # boots.  Missing from this list, a mikroorm-emitter-only change skipped
+      # the whole workflow.
+      - 'src/generator/typescript/emit/mikroorm.ts'
       - 'test/e2e/tenancy-isolation.test.ts'
       - 'test/e2e/tenancy-isolation-python.test.ts'
       - 'test/e2e/tenancy-isolation-java.test.ts'
@@ -79,6 +84,7 @@ on:
       - 'test/e2e/tenancy-hierarchy-java.test.ts'
       - 'test/e2e/tenancy-hierarchy-dotnet.test.ts'
       - 'test/e2e/tenancy-hierarchy-elixir.test.ts'
+      - 'test/e2e/tenancy-hierarchy-mikroorm.test.ts'
       - 'test/e2e/support/tenancy-isolation-harness.ts'
       - 'test/fixtures/corpus/tenancy-owned.ddd'
       - 'test/fixtures/corpus/tenancy-hierarchy.ddd'
@@ -147,6 +153,16 @@ jobs:
           - backend: elixir
             suite: hierarchy
             script: test:tenancy-hierarchy-elixir
+          # The SECOND node persistence adapter.  Not a sixth backend — the same
+          # Hono backend on `persistence: mikroorm`, whose subtree predicate is
+          # lowered by completely different machinery (a `raw()` SQL FilterQuery
+          # key, since the operator vocabulary has no prefix test) than the
+          # drizzle operator tree above.  A raw fragment's SQL text, `?` binding
+          # arity and single-use cache key are all invisible to `tsc`, so this
+          # boot is the only gate on them.
+          - backend: node-mikroorm
+            suite: hierarchy
+            script: test:tenancy-hierarchy-mikroorm
     name: tenancy-e2e (${{ matrix.backend }} / ${{ matrix.suite }})
     services:
       postgres:

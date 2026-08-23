@@ -35,6 +35,12 @@ export function ectoValidator(field: string, p: SingleFieldPattern, message?: st
         : `    |> validate_number(:${field}, less_than_or_equal_to: ${p.n}${m})`;
     case "between":
       return `    |> validate_number(:${field}, greater_than_or_equal_to: ${p.lo}, less_than_or_equal_to: ${p.hi}${m})`;
+    // `validate_length/3` counts GRAPHEMES, where every other backend counts
+    // CODE POINTS (RS-31 / src/generator/_expr/code-point.ts).  The two agree on
+    // every astral character and differ only on combining sequences; Ecto has no
+    // `:codepoints` count, so closing the gap means hand-rolling Ecto's error
+    // tuples and default message text.  Signed residual — see
+    // docs/audits/schemathesis-findings-2026-08.md § F5.
     case "len-min":
       return `    |> validate_length(:${field}, min: ${p.n}${m})`;
     case "len-max":

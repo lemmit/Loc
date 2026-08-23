@@ -119,17 +119,14 @@ const MIKROORM_SUBSET: FindPredicateCapability = (e) => {
       return `arithmetic '${inner.op}' — ${NOT_SUPPORTED}`;
     }
     if (inner.kind === "unary" && inner.op === "!") return walkPredicate(inner.operand);
-    // Authorization/tenancy sentinels (M-T9.9).  `deny` IS lowerable — the
-    // MikroORM adapter renders it as the always-false FilterQuery contradiction
-    // `$and: [{ id: null }, { id: { $ne: null } }]`, the twin of Dapper's
-    // `1 = 0`.  The `deep`/`global` SCOPE sentinel is not (no prefix test in the
-    // FilterQuery subset); it is separately refused by the mikroorm capability
-    // gate, and naming it here keeps this descriptor honest on its own.
-    if (inner.kind === "authz-filter") {
-      return inner.filter.kind === "deny"
-        ? null
-        : `a hierarchical ('deep'/'global') tenancy scope filter — ${NOT_SUPPORTED}`;
-    }
+    // Authorization/tenancy sentinels (M-T9.9).  BOTH lower now.  `deny` is the
+    // always-false FilterQuery contradiction `$and: [{ id: null }, { id: { $ne:
+    // null } }]` (the twin of Dapper's `1 = 0`); the `deep`/`global` SCOPE
+    // sentinel is the descendant-or-self subtree predicate, rendered through a
+    // `raw()` FilterQuery key because the operator vocabulary has no prefix
+    // test.  The scope arm used to be narrowed here and separately refused by
+    // the mikroorm capability gate — both are gone together.
+    if (inner.kind === "authz-filter") return null;
     if (isContainsMembership(inner))
       return `'this.<refColl>.contains(x)' membership — ${NOT_SUPPORTED}`;
     if (isBareBooleanColumn(inner)) return null;

@@ -47,7 +47,7 @@ public sealed class Product
 
     private void AssertInvariants()
     {
-        if (!(this.Sku.Length > 0)) throw new DomainException("Invariant violated: sku.length > 0");
+        if (!(this.Sku.EnumerateRunes().Count() > 0)) throw new DomainException("Invariant violated: sku.length > 0");
     }
 
     public sealed class State
