@@ -273,7 +273,6 @@ export function emitLiveViewPages(args: {
             ? renderDomainExpr(find.requires, {
                 thisName: "record",
                 contextModule: ctxModule,
-                foundation: "vanilla",
               })
             : null,
           gateUsesUser: !!find.requires && exprUsesCurrentUser(find.requires),
