@@ -126,7 +126,13 @@ describe("`persistence: dapper` — query-time projections emit; the column-less
   // way out the old message offered, and it never worked.
   it("routes the column-less refusal through the universal gate, not this adapter", async () => {
     const codesFor = async (clause: string) =>
-      (await diagsFor(clause, AGGREGATION_PROJECTION, "aggregate Order shape: document, with crudish"))
+      (
+        await diagsFor(
+          clause,
+          AGGREGATION_PROJECTION,
+          "aggregate Order shape: document, with crudish",
+        )
+      )
         .filter((d) => d.severity === "error")
         .map((d) => d.code);
     const onDapper = await codesFor("dotnet { persistence: dapper }");

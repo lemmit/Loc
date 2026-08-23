@@ -201,6 +201,43 @@ system S {
     expect(await codesFor(src)).toContain(CODE);
   });
 
+  it("does not refuse what `scaffoldDashboard` itself synthesises", async () => {
+    // The macro emits a whole-table aggregation PER AGGREGATE — a row count plus
+    // a sum per numeric field, plus a per-day grouped series — so a context
+    // mixing shapes is the one model that can put this gate in conflict with the
+    // scaffold that generated it.  `hasDashboardTable` / `fieldsAreColumns`
+    // (_dashboard-shared.ts) are what keep the two halves agreeing: the
+    // event-sourced aggregate gets no dashboard at all, the document one keeps
+    // only its row-count tile, the relational one keeps everything.
+    //
+    // A scaffold that emits a model the validator refuses is worse than the
+    // silent miscompile it replaced, so this is the case that has to pass.
+    const src = `
+system S {
+  subdomain Sales {
+    context Orders with scaffoldDashboard {
+      event OrderPlaced { total: int }
+      aggregate Relational { total: int  createdAt: datetime }
+      aggregate Doc shape: document, with crudish { total: int  createdAt: datetime }
+      aggregate Streamed persistedAs: eventLog {
+        total: int
+        operation place(t: int) { emit OrderPlaced { total: t } }
+        apply(e: OrderPlaced) { total := e.total }
+      }
+      repository Relationals for Relational { }
+      repository Docs for Doc { }
+      repository Streameds for Streamed { }
+    }
+  }
+  api A from Sales
+  storage pg { type: postgres }
+  resource s { for: Orders, kind: state, use: pg }
+  resource es { for: Orders, kind: eventLog, use: pg }
+  deployable d { platform: node, contexts: [Orders], dataSources: [s, es], serves: A, port: 4000 }
+}`;
+    expect(await codesFor(src)).not.toContain(CODE);
+  });
+
   it("names the offending column and the shape that lacks it", async () => {
     // The message has to say WHICH member has no column and WHY, or the author
     // cannot tell a document-shape problem from a typo.
@@ -217,7 +254,9 @@ system S {
   it("no longer routes the same refusal through the dapper adapter gate", async () => {
     // It used to be `loom.dapper-unsupported`, which told the author to switch
     // adapters — advice that could not work, since EF Core miscompiles it too.
-    const codes = await codesFor(SYS("dotnet { persistence: dapper }", DOCUMENT_AGG, SUM_PROJECTION));
+    const codes = await codesFor(
+      SYS("dotnet { persistence: dapper }", DOCUMENT_AGG, SUM_PROJECTION),
+    );
     expect(codes).toContain(CODE);
     expect(codes).not.toContain("loom.dapper-unsupported");
   });

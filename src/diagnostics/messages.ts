@@ -1148,11 +1148,7 @@ export const DIAGNOSTIC_MESSAGES = {
   // `shape: document` jsonb blob, a TPC abstract base with no table of its own
   // — produced code that did not compile on EVERY backend, silently.  Not an
   // adapter boundary: the way out is the shape of the read, not the deployable.
-  "loom.projection-columnless-source": (p: {
-    name: unknown;
-    ctxName: unknown;
-    reason: unknown;
-  }) =>
+  "loom.projection-columnless-source": (p: { name: unknown; ctxName: unknown; reason: unknown }) =>
     `Query-time projection '${p.ctxName}.${p.name}' ${p.reason}. The aggregating read is ` +
     `computed IN SQL — that is the point of the shape — so it can only name real columns. ` +
     `Drop the aggregation for the per-row read (which hydrates each row through the ` +

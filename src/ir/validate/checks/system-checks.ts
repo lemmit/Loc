@@ -226,10 +226,7 @@ export function validateGroupedProjectionBackend(sys: SystemIR, diags: LoomDiagn
 // the .NET emitter's arm classifier shares, so the gate and the emission arm
 // cannot drift.
 // ---------------------------------------------------------------------------
-export function validateColumnlessProjectionSources(
-  sys: SystemIR,
-  diags: LoomDiagnostic[],
-): void {
+export function validateColumnlessProjectionSources(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const sd of sys.subdomains) {
     for (const ctx of sd.contexts) {
       for (const p of ctx.projections ?? []) {
