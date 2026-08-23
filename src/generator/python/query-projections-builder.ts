@@ -22,7 +22,6 @@ import { snake } from "../../util/naming.js";
 import { responsePyType } from "./emit/http-models.js";
 import {
   contextFilterPredicate,
-  type FilterBypass,
   lowerProjectionFilterToSqlAlchemy,
   lowerToSqlAlchemy,
   lowerWorkflowFilterToSqlAlchemy,
@@ -33,22 +32,15 @@ import { rowClassName } from "./py-columns.js";
 import { renderPyExpr, renderPyNegatedGuard } from "./render-expr.js";
 import { authUserImport, wireValue } from "./repository-builder.js";
 
-/** A projection's `ignoring <Cap>` / `ignoring *` stance as the bypass spec the
- *  repository predicate builder takes — the same one the synthesised source
- *  find is threaded, so an aggregation and a row read drop the same filters. */
-function filterBypassOf(p: ProjectionIR): FilterBypass | undefined {
-  const q = p.query;
-  if (!q) return undefined;
-  if (!q.bypassAll && (q.bypassCaps?.length ?? 0) === 0) return undefined;
-  return { bypassAll: q.bypassAll, bypassCaps: q.bypassCaps };
-}
-
-/** AND two lowered predicates, either of which may be absent. */
-function conjoinPredicates(a: PyPredicate | null, b: PyPredicate | null): PyPredicate | null {
-  if (!a) return b;
-  if (!b) return a;
-  const ops = new Set<string>([...a.ops, ...b.ops, "and_"]);
-  return { expr: `and_(${a.expr}, ${b.expr})`, ops };
+/** Conjoin a projection's own `where` with the source aggregate's capability
+ *  filters — either may be absent; two present become one `and_(...)`. */
+function conjoinPy(own: PyPredicate | null, caps: PyPredicate | null): PyPredicate | null {
+  if (!own) return caps;
+  if (!caps) return own;
+  return {
+    expr: `and_(${own.expr}, ${caps.expr})`,
+    ops: new Set<string>([...own.ops, ...caps.ops, "and_"]),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -113,20 +105,25 @@ export function buildPyQueryProjectionsFile(
   // because the point of the shape is to materialise no source rows at all.
   // Its `where` lowers here so a filtered aggregation keeps its filter
   // (mirrors `rowLowered` above).
+  //
+  // The source aggregate's CAPABILITY filters ride along: they are what the
+  // repository-sourced arm applies for free (it reads through the synthesised
+  // find), so without them a `count()` over an aggregate answers a DIFFERENT
+  // number than its `.all` — soft-deleted rows counted, foreign tenants'
+  // counted.  A silent wrong answer, not a broken build.  A read's `ignoring`
+  // clause drops the capability predicates it names, as on the repository arm.
   const aggLowered = new Map<string, PyPredicate | null>();
   for (const p of projections) {
     if ((!wholeTableAggregates(p) && !groupedAggregates(p)) || !p.query?.source) continue;
     const agg = ctx.aggregates.find((a) => a.name === p.query!.source);
     const own = agg && p.query.filter ? lowerToSqlAlchemy(p.query.filter, agg, ctx) : null;
-    // The source aggregate's CAPABILITY filters (`tenantOwned`, `softDeletable`,
-    // any `filter <expr>`) ride the aggregation too.  The row-shaped sibling
-    // reads through the repository, which ANDs them into every root read; a
-    // direct-table aggregation applying only the projection's own `where`
-    // counted rows the repository excludes — cross-tenant with `tenantOwned`, a
-    // wrong number with `softDeletable`.  Same predicate builder, same
-    // `require_current_user()` binding, same `ignoring` bypass.
-    const cap = agg ? contextFilterPredicate(agg, ctx, filterBypassOf(p)) : null;
-    aggLowered.set(p.name, conjoinPredicates(own, cap));
+    const caps = agg
+      ? contextFilterPredicate(agg, ctx, {
+          bypassAll: p.query.bypassAll,
+          bypassCaps: p.query.bypassCaps,
+        })
+      : null;
+    aggLowered.set(p.name, conjoinPy(own, caps));
   }
   const routeBlocks = projections.map((p) => {
     const grouped = groupedAggregates(p);
@@ -223,9 +220,10 @@ export function buildPyQueryProjectionsFile(
     // A `requires` auth gate (or a currentUser-scoped where/select) binds the
     // request principal — `current_user: User` off the request scope — and a
     // failing gate raises `ForbiddenError` (→ 403) before the query runs.
-    // `require_current_user` — the ambient accessor a PRINCIPAL capability
-    // filter (tenancy) weaves into the direct-table aggregation read, exactly
-    // as the repository weaves it into every root read.
+    // A PRINCIPAL capability filter on a direct-table read weaves the ambient
+    // `require_current_user()` accessor into the query (the repository path's
+    // rule), so the import is gated on ACTUAL usage — an unused one is ruff
+    // F401 on the generated project.
     authUserImport(refersTo("User"), refersTo("require_current_user")),
     "from app.db.engine import get_session",
     // `iso()` — a `datetime` grouping key crosses the wire as its ISO-8601
