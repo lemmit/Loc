@@ -201,6 +201,40 @@ system S {
     expect(await codesFor(src)).toContain(CODE);
   });
 
+  it("does not read a CAPABILITY filter as a named column", async () => {
+    // The gate walks `query.filter`, which is the AUTHOR's `where`.  Capability
+    // predicates (`tenantOwned`'s scope, any `filter` capability) live on the
+    // context/aggregate, not in there — and the direct-table arms do not splice
+    // them into the SQL at all today.  A document-shaped `tenantOwned` aggregate
+    // therefore still counts fine, and must: a document table has no
+    // `tenant_id` column either, so if the injected predicate ever DID reach
+    // `query.filter` this row-count read would start being refused for a column
+    // nobody wrote.
+    const src = `
+system S {
+  user { id: guid  org: string }
+  tenancy by user.org of Tenant
+  subdomain Sales {
+    context Orders {
+      aggregate Tenant with tenantRegistry, crudish { slug: string }
+      aggregate Order shape: document, with tenantOwned, crudish { code: string  total: int }
+      repository Tenants for Tenant { }
+      repository Orders for Order { }
+      projection OrderVolume {
+        orders: int
+        from Order as o
+        select orders = count()
+      }
+    }
+  }
+  api A from Sales
+  storage pg { type: postgres }
+  resource s { for: Orders, kind: state, use: pg }
+  deployable d { platform: node, contexts: [Orders], dataSources: [s], serves: A, port: 4000, auth: required }
+}`;
+    expect(await codesFor(src)).not.toContain(CODE);
+  });
+
   it("does not refuse what `scaffoldDashboard` itself synthesises", async () => {
     // The macro emits a whole-table aggregation PER AGGREGATE — a row count plus
     // a sum per numeric field, plus a per-day grouped series — so a context
