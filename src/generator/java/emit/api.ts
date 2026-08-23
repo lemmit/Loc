@@ -11,7 +11,7 @@ import {
   isAllFind,
   relativeOpPath,
 } from "../../../ir/util/api-surface.js";
-import { problemTitle } from "../../../ir/util/openapi-errors.js";
+import { UNPROCESSABLE_ENTITY, problemTitle } from "../../../ir/util/openapi-errors.js";
 import { listReadFind } from "../../../ir/util/read-gates.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
@@ -632,6 +632,7 @@ export function renderApiExceptionAdvice(
     `import org.springframework.web.bind.annotation.ExceptionHandler;`,
     `import org.springframework.web.bind.annotation.RestControllerAdvice;`,
     `import org.springframework.web.context.request.WebRequest;`,
+    `import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;`,
     ``,
     `import ${basePkg}.domain.common.AggregateNotFoundException;`,
     `import ${basePkg}.domain.common.DisallowedException;`,
@@ -775,6 +776,32 @@ export function renderApiExceptionAdvice(
     `    @ExceptionHandler(HttpMessageNotReadableException.class)`,
     `    public ResponseEntity<ProblemDetail> onUnreadable(HttpMessageNotReadableException e, WebRequest request) {`,
     `        return respond(problem(400, "Bad Request", "Malformed JSON in request body", request), 400);`,
+    `    }`,
+    ``,
+    // A path `{id}` / typed query param that will not CONVERT — `GET
+    // /api/orders/not-a-uuid` against `@PathVariable UUID id`.  Spring raises
+    // MethodArgumentTypeMismatchException, which implements `ErrorResponse`
+    // with status 400, so without this arm it fell into `onUnhandled` below and
+    // answered 400 — while `errorStatuses("getById")` PUBLISHES 422 for exactly
+    // this failure ("a path `{id}` is parsed as a uuid … and a failure answers
+    // the same 422 the body tier does", src/ir/util/openapi-errors.ts) and
+    // Hono's `defaultHook` / .NET's `InvalidModelStateResponseFactory` already
+    // answer it.  A request-part parse failure is the wire-validation tier on
+    // every backend; keep it there on Java too, with the same `errors[]`
+    // pointer shape the body tier emits (`/id`, not the whole document).
+    `    @ExceptionHandler(MethodArgumentTypeMismatchException.class)`,
+    `    public ResponseEntity<ProblemDetail> onParamTypeMismatch(MethodArgumentTypeMismatchException e, WebRequest request) {`,
+    `        CatalogLog.event("domain_error", "warn", "message", "Validation failed", "status", ${UNPROCESSABLE_ENTITY});`,
+    `        httpMetrics.recordDomainFault("domain_error");`,
+    `        var problem = problem(${UNPROCESSABLE_ENTITY}, "Validation failed", "One or more fields are invalid.", request);`,
+    `        var entry = new java.util.LinkedHashMap<String, Object>();`,
+    `        entry.put("pointer", "/" + e.getName());`,
+    `        var required = e.getRequiredType();`,
+    `        entry.put("message", required != null`,
+    `            ? "Expected " + required.getSimpleName() + "."`,
+    `            : "Invalid value.");`,
+    `        problem.setProperty("errors", java.util.List.of(entry));`,
+    `        return respond(problem, ${UNPROCESSABLE_ENTITY});`,
     `    }`,
     ``,
     `    @ExceptionHandler(Exception.class)`,
