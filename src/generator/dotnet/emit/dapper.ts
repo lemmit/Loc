@@ -1033,6 +1033,76 @@ export function principalFields(refs: readonly FilterPrincipalRef[], base: strin
   );
 }
 
+/** A read's `ignoring` stance (named-filter-bypass.md §11): `ignoring *` drops
+ *  every capability predicate, `ignoring A, B` drops the ones those
+ *  capabilities contributed. */
+export interface DapperFilterBypass {
+  bypassAll?: boolean;
+  bypassCaps?: string[];
+}
+
+/** One of an aggregate's capability predicates: its raw SQL, the capability
+ *  that contributed it (what an `ignoring <Cap>` resolves against — `undefined`
+ *  for a plain context filter, droppable only by `ignoring *`), and the source
+ *  `ExprIR` so a caller can collect its principal params. */
+export interface DapperCapabilityPart {
+  sql: string;
+  origin: string | undefined;
+  expr: ExprIR;
+}
+
+/** Lower an aggregate's capability filters to raw SQL conjuncts — the raw-SQL
+ *  mirror of EF's per-request `HasQueryFilter`.  Shared by the repository
+ *  emitter and the DIRECT-TABLE query-time-projection arms, which SELECT over
+ *  the same table without going through the repository: applied there too, a
+ *  `count()` over an aggregate answers the same number its `.all` does, rather
+ *  than counting soft-deleted rows and foreign tenants'.
+ *
+ *  A predicate outside the Dapper SQL subset throws (loud) rather than silently
+ *  dropping the filter — half-applying a soft-delete / tenant filter is a
+ *  correctness hole, not a degradation. */
+export function dapperCapabilityFilterParts(
+  agg: EnrichedAggregateIR,
+  sqlCtx?: WhereSqlCtx,
+): DapperCapabilityPart[] {
+  const origins = agg.contextFilterOrigins ?? [];
+  return (agg.contextFilters ?? []).map((p, i) => {
+    try {
+      return { sql: whereToSql(p, sqlCtx), origin: origins[i], expr: p };
+    } catch {
+      throw new Error(
+        `dapper: capability filter on '${agg.name}' is outside the Dapper SQL subset; ` +
+          `use 'persistence: efcore' or simplify the predicate.`,
+      );
+    }
+  });
+}
+
+/** The surviving capability conjuncts for a read carrying `bypass`, ANDed.
+ *  Dapper has no EF `IgnoreQueryFilters`, so a bypass is expressed by OMITTING
+ *  the conjunct from the generated WHERE — the raw-SQL equivalent. */
+export function dapperCapabilityFilterSql(
+  parts: readonly DapperCapabilityPart[],
+  bypass?: DapperFilterBypass,
+): string | null {
+  const kept = keptCapabilityParts(parts, bypass);
+  return kept.length > 0 ? kept.map((p) => p.sql).join(" AND ") : null;
+}
+
+/** The same survivors as {@link dapperCapabilityFilterSql}, as `ExprIR` — so a
+ *  caller can feed them to `collectFilterPrincipalRefs` and bind exactly the
+ *  `@__cu_*` params the emitted SQL names.  A bypassed conjunct must not
+ *  contribute a param (an unused Dapper param is harmless, but a MISSING one is
+ *  a runtime error, so the two lists are derived from one filter). */
+export function keptCapabilityParts(
+  parts: readonly DapperCapabilityPart[],
+  bypass?: DapperFilterBypass,
+): DapperCapabilityPart[] {
+  if (bypass?.bypassAll) return [];
+  const caps = new Set(bypass?.bypassCaps ?? []);
+  return parts.filter((p) => !(p.origin != null && caps.has(p.origin)));
+}
+
 /** Collect the distinct `currentUser.<claim>` references across the given
  *  predicates (deduped by claim), so the repository can bind each
  *  `@__cu_<claim>` param from the principal on every SELECT. */
@@ -1361,32 +1431,9 @@ export function renderDapperRepository(
   // Dapper twin of the EF `(capability, filterName)` pairs in `emit/repository.ts`.
   // The origin is what an `ignoring <Cap>` clause resolves against; a filter
   // with no origin (a plain context filter) can only be dropped by `ignoring *`.
-  const filterOrigins = agg.contextFilterOrigins ?? [];
-  const capabilityFilterParts: { sql: string; origin: string | undefined }[] =
-    capabilityFilters.map((p, i) => {
-      try {
-        return { sql: whereToSql(p, sqlCtx), origin: filterOrigins[i] };
-      } catch {
-        throw new Error(
-          `dapper: capability filter on '${agg.name}' is outside the Dapper SQL subset; ` +
-            `use 'persistence: efcore' or simplify the predicate.`,
-        );
-      }
-    });
-  /** The capability predicates a read carrying `bypass` still applies
-   *  (named-filter-bypass.md §11).  `ignoring *` drops every one; `ignoring A,
-   *  B` drops the ones those capabilities contributed.  Dapper has no EF
-   *  `IgnoreQueryFilters`, so the bypass is expressed by OMITTING the conjunct
-   *  from the generated WHERE — the raw-SQL equivalent. */
-  const capabilityFilterSqlFor = (bypass?: {
-    bypassAll?: boolean;
-    bypassCaps?: string[];
-  }): string | null => {
-    if (bypass?.bypassAll) return null;
-    const caps = new Set(bypass?.bypassCaps ?? []);
-    const kept = capabilityFilterParts.filter((p) => !(p.origin != null && caps.has(p.origin)));
-    return kept.length > 0 ? kept.map((p) => p.sql).join(" AND ") : null;
-  };
+  const capabilityFilterParts = dapperCapabilityFilterParts(agg, sqlCtx);
+  const capabilityFilterSqlFor = (bypass?: DapperFilterBypass): string | null =>
+    dapperCapabilityFilterSql(capabilityFilterParts, bypass);
   const capabilityFilterSql: string | null = capabilityFilterSqlFor();
   /** The full spliced WHERE fragment (TPH discriminator + surviving capability
    *  predicates).  The TPH discriminator is NEVER bypassable: it is a type

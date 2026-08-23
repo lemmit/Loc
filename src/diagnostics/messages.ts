@@ -1282,8 +1282,22 @@ export const DIAGNOSTIC_MESSAGES = {
     `${p.where}: \`persist: ${p.lifetime}\` is not implemented on the ${p.platform} frontend — ` +
     `the emitted store is IN-MEMORY regardless, so the state is lost on restart and not ` +
     `shareable by URL, with nothing in the build output to say so.  Use \`persist: memory\` ` +
-    `here, or host this ui on a SPA frontend (react / vue / svelte / angular).  Support is ` +
-    `planned; this gate exists so the degradation is honest until it lands.`,
+    `here, or host this ui on a SPA frontend (react / vue / svelte / angular / feliz).  ` +
+    `Support is planned; this gate exists so the degradation is honest until it lands.`,
+  // The FIELD-scoped half of the same code: feliz implements the ladder, but
+  // persistence there crosses the JS boundary per field, so a field type with no
+  // total F# conversion still can't ride it.
+  "loom.store-lifetime-target-unsupported#field": (p: {
+    where: unknown;
+    name: unknown;
+    lifetime: unknown;
+  }) =>
+    `${p.where}: field '${p.name}' cannot be persisted on the feliz frontend — ` +
+    `\`persist: ${p.lifetime}\` crosses the JS boundary per field, and the F# codec covers ` +
+    `string / int / long / bool / decimal / money / id fields plus arrays of ` +
+    `string / int / long / bool.  A datetime, duration, guid, enum, entity or value-object ` +
+    `field would be silently dropped from the stored blob.  Give the field one of the ` +
+    `covered types, or use \`persist: memory\` for this store.`,
   "loom.store-cross-store-on-liveview-invalid": (p: {
     where: unknown;
     store: unknown;
@@ -1392,7 +1406,7 @@ export const DIAGNOSTIC_MESSAGES = {
   }) =>
     `Deployable '${p.name}': ui '${p.uiName}' declares 'on <channel>.<Event>' live-event handler(s), but its ${
       p.target
-    } does not serve the realtime SSE wire, so the handlers are silently dropped. Target a realtime-serving backend (node, dotnet, java, python) or remove the handlers.`,
+    } does not serve the realtime SSE wire, so the handlers are silently dropped. Target a realtime-serving backend (node, dotnet, java, python, elixir) or remove the handlers.`,
   "loom.ui-realtime-unsupported#frontend-has-no-consumer": (p: {
     name: unknown;
     uiName: unknown;
@@ -2505,7 +2519,7 @@ export const DIAGNOSTIC_MESSAGES = {
     resourceName: unknown;
     verb: unknown;
   }) =>
-    `resource operation '${p.resourceName}.${p.verb}(...)' is only available inside a workflow, a command/query handler, or a domainService operation — no backend has the resource client in scope anywhere else (.NET/Java/Phoenix fail codegen outright; TS/Python emit an unimported helper call). Found in ${p.location}; move the call into a workflow and have this member work on the value it produces.`,
+    `resource operation '${p.resourceName}.${p.verb}(...)' is only available inside a workflow or a command/query handler — no backend has the resource client in scope anywhere else, a domainService included (.NET/Java/Phoenix fail codegen outright; TS/Python emit an unimported helper call). Found in ${p.location}; move the call into a workflow and have this member work on the value it produces.`,
 
   // ----------------------------------------------------------------------
   // src/language/ddd-validator.ts

@@ -583,6 +583,29 @@
         "pinned by test/conformance/error-extension-casing.test.ts, verified to fail two of its three assertions with the fix reverted"
       ],
       "tier": "static"
+    },
+    {
+      "id": "RS-31",
+      "title": "A string `.length` bound counts Unicode code points, not the host's native string length",
+      "trigger": "any `.length` on a string — a `len-*` invariant/precondition (`code.length >= 3`, `label.length <= 16`) or a bare `.length` read in a domain rule — evaluated against a value containing an astral character",
+      "observable": "the count is the number of Unicode CODE POINTS. `“😀X”` is 2, not 3: the emoji is one code point and two UTF-16 code units. This is the unit the emitted JSON Schema already publishes as `minLength`/`maxLength`, so the bound a backend enforces and the bound it advertises are the same number.",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python"
+      ],
+      "targets": [
+        "elixir"
+      ],
+      "provenance": [
+        "found 2026-08-06 by the M-T9.21 schemathesis leg (finding F5, waiver W6): a 2-code-point currency was accepted on write and then served back in violation of the `minLength: 3` the same server published",
+        "fixed on node/.NET/java via one shared definition, src/generator/_expr/code-point.ts, consumed by BOTH the domain rule renderer and the wire-boundary validator emitter so the two cannot drift; python was already correct",
+        "the Hono routes re-attach `.openapi({ minLength, maxLength })` because zod cannot describe a `.refine` to the OpenAPI emitter — the published bound is byte-identical to before",
+        "pinned in test/fixtures/corpus/validation-messages.ddd and recorded in wire-golden/validation-messages.json (a 2-code-point label DENIED by `>= 3`, a 9-code-point/18-code-unit label ADMITTED by `<= 16` and round-tripped); verified to fail with each half of the fix reverted independently",
+        "statically pinned per backend by test/generator/string-length-code-points.test.ts"
+      ],
+      "tier": "behavioral"
     }
   ]
 }

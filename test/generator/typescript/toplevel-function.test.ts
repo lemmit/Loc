@@ -34,7 +34,8 @@ describe("typescript generator — Phase B top-level function", () => {
     // `taxed(net, 20)` inlined, paren-wrapped, args substituted.
     expect(domain).toContain("get gross(): number { return (this._net + this._net * 20 / 100); }");
     // `!isBlank(customerName)` inlined into the invariant guard.
-    expect(domain).toContain("this._customerName.trim().length === 0");
+    // `.length` on a string is a CODE-POINT count (RS-31).
+    expect(domain).toContain("[...this._customerName.trim()].length === 0");
     // No standalone helper method/function was emitted for the top-level
     // function (a param-signature would appear only if one were). The source
     // label `!isBlank(customerName)` does still echo in the invariant message.

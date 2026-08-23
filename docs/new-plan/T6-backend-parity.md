@@ -204,6 +204,23 @@ Each half independently prevents the loss, which is why both stay: the entity ma
 
 **Hollow-cell note (feeds M-T9.8), corrected 2026-08-11.** The 2026-07-30 note claimed `channels-broker` and `outbox` were **passing** on the mikroorm behavioural leg with the feature absent. They were not passing — they were never **collected**: neither corpus fixture carries a `test e2e` block, so `featureCases` skips both on every backend, and the `MIKRO_SKIP` entries were silently **inert** (a register entry claiming a checked gap that nothing checks — hollower than the original diagnosis). `run-mikroorm.mjs` now ratchets its own register: a key naming no fixture fails the run, and a key whose fixture has no behavioural block prints `INERT` so the claim is visible. Giving `outbox.ddd` / `channels-broker.ddd` real `test e2e` blocks is its own mission-sized change (it arms five backend legs + the wire golden at once, like #2468) — **not** folded into slice 1, whose runtime proof is the booted check above.
 
+**Slice 6 — HIERARCHICAL TENANCY: DONE (2026-08-18).** The sixth gate, and the only one of the family that was ever a *shape* reject rather than an unwritten emitter. `whereToMikroFilter`'s FilterQuery OPERATORS have no prefix test, `mikroContextFilters` CAUGHT the resulting throw and left the predicate unapplied, and for a `deep`/`global` scope that is not a degraded read but NO tenant predicate at all — so the interim gate refused the shape outright (`loom.mikroorm-unsupported`, read filters + `writeScopeFilter`).
+
+The premise did not survive contact, exactly as on the Dapper twin (M-T6.29 → #2616): the operator vocabulary cannot express the test, but a FilterQuery **key** may be a `raw()` SQL fragment, and the predicate is ordinary SQL. `authzFilterEntry` now renders
+
+```ts
+{ [raw("((data_key is not null and (data_key = ? or starts_with(data_key, ?))) or (data_key is null and tenant_id = ?))",
+       [requireCurrentUser().orgPath, requireCurrentUser().orgPath + ".", requireCurrentUser().tenantId])]: [] }
+```
+
+`starts_with`, never `LIKE` — the anchor is a principal CLAIM, so `_`/`%` inside it are wildcards and `org_a` would match `orgXa.leak`; binding the value (which `raw`'s `?` does) stops injection, not pattern semantics. Same anchored-prefix stance as drizzle's `strpos(…) = 1` and Dapper's `starts_with`.
+
+Two halves had to move with it. (1) The boot-time **`orgPath` resolver** was drizzle-only (`wireOrgPath = … && !usingMikro`); unregistered, the middleware falls back to the bare claim, so every caller reads as its own root and the ladder collapses to the flat floor — a silent wrong answer. The mikro branch reads the registry Row through the EntityManager (`db.fork().findOne(OrgRow, { id: claim })`). (2) The silent `catch` in `mikroContextFilters` is **gone**: an unlowerable principal filter now crashes codegen rather than dropping a tenancy predicate.
+
+*Evidence.* `tsc --noEmit` clean on the generated mikro project for the `tenancy-hierarchy` corpus fixture. `test/generator/typescript/mikroorm-deep-scope.test.ts` pins the SQL text, the `?`-arity-vs-binding-count agreement, the `raw` import, the per-statement fragment construction (a `RawQueryFragment`'s cache key is consumed on first use, so the paged `count` and page query must build two), and the resolver. **Runtime, BOOTED** against real Postgres via a new `npm run test:tenancy-hierarchy-mikroorm` (a `node-mikroorm` cell in `tenancy-e2e.yml`) — the full hierarchy harness: subtree reads, the delimiter trap (`org_ab` ∉ `org_a`), the WILDCARD trap (`orgXa.leak`), the NULL-dataKey floor. Mutation-proved twice: render `like ? || '%'` instead of `starts_with` → the wildcard trap fires (`orgXa.leak` leaks into `org_a`'s read); restore `&& !usingMikro` on the resolver → the subtree collapses (`org_a.b` no longer sees `org_a.b.c`).
+
+*CI hole fixed alongside.* `tenancy-e2e.yml`'s `paths:` had no entry for `src/generator/typescript/emit/mikroorm.ts` — the file that owns this predicate — so a mikroorm-emitter-only change skipped the workflow that tests it. (Same class as slice 2's `channels-e2e.yml` finding.)
+
 Sources: found 2026-07-30 auditing the archived proposal corpus for unmapped work (R1 was the thread that led to the other four). Gate reproduced as a silent drop first (generate on mikroorm vs drizzle, file trees diffed), then as a diagnostic.
 
 ## M-T6.22 — Drain the M-T9.11 differential findings (RS-11/RS-12) — `done` (2026-07-28) · **M** · P2

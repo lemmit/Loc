@@ -102,7 +102,7 @@ describe("java renderJavaExpr — member + method-call", () => {
     ).toBe("this.address.city()");
   });
 
-  it("maps array `.count`/`.length` to `.size()` and string `.length` to `.length()`", () => {
+  it("maps array `.count`/`.length` to `.size()` and string `.length` to a code-point count", () => {
     for (const member of ["count", "length"]) {
       expect(
         renderJavaExpr({
@@ -122,7 +122,8 @@ describe("java renderJavaExpr — member + method-call", () => {
         receiverType: STRING,
         memberType: INT,
       }),
-    ).toBe("this.name.length()");
+      // CODE POINTS, not `String.length()`'s UTF-16 code units (RS-31).
+    ).toBe("((int) this.name.codePoints().count())");
   });
 
   it("renders `string.matches` as find-anywhere Pattern…find() (NOT String.matches)", () => {

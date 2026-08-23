@@ -2,16 +2,6 @@
   "comment": "Ratcheting waivers for the schemathesis contract-fuzzing leg (M-T9.21). A rule names one ROOT CAUSE — a check plus a regex over the operation label — and points at the entry in docs/audits/schemathesis-findings-2026-08.md that explains it with a repro. The ratchet bites both ways: a finding no rule matches FAILS the run (a new bug, or a known one spreading to a surface no rule claimed), and a rule that matches nothing across the whole run ALSO fails it (fix the root cause, delete the rule and strike the register entry in the same PR). Rules are deliberately NOT machine-generated: an unexplained waiver is indistinguishable from a silent skip. `kind` is `bug` (a defect we are choosing not to fix in the discovery PR) or `by-design` (the check disagrees with a deliberate decision).",
   "waivers": [
     {
-      "id": "W6",
-      "findings": ["F5"],
-      "check": "response_schema_conformance",
-      "operations": ".",
-      "kind": "bug",
-      "intermittent": true,
-      "intermittentReason": "Reproducing it needs the fuzzer to BOTH persist an astral-character currency AND then read that row back inside the same run, so its absence from a given run is not evidence of a fix. It still absorbs its findings; it is only exempt from the staleness half of the ratchet. Graduating it to a pinned deterministic case (per the plan's 'every finding graduates to an RS-rule + wire golden') is the follow-up that removes this exemption.",
-      "reason": "F5 — `minLength`/`maxLength` are enforced by zod in UTF-16 CODE UNITS but declared in JSON Schema as CODE POINTS. A 3-code-unit / 2-code-point currency (an astral character plus one) is accepted on write and then served back in violation of the server's own published schema: the same value is simultaneously valid on the way in and invalid on the way out."
-    },
-    {
       "id": "W8",
       "findings": ["F9"],
       "check": "negative_data_rejection",
@@ -34,7 +24,7 @@
       "operations": "^POST /api/orders/\\{id\\}/add_line$",
       "kind": "bug",
       "intermittent": true,
-      "intermittentReason": "Reaching the overflow needs TWO independent things in one run: an out-of-int32 `qty` (the declared `{type: integer}` permits it) AND a path `{id}` that resolves to a row the fuzzer created earlier — a random uuid 404s before the column is ever written. So its absence from a given run is not evidence of a fix; it reproduced on the discovery run and not on the next. Removing this exemption means pinning it as a deterministic case, the same follow-up W6 carries.",
+      "intermittentReason": "Reaching the overflow needs TWO independent things in one run: an out-of-int32 `qty` (the declared `{type: integer}` permits it) AND a path `{id}` that resolves to a row the fuzzer created earlier — a random uuid 404s before the column is ever written. So its absence from a given run is not evidence of a fix; it reproduced on the discovery run and not on the next. Removing this exemption means pinning it as a deterministic case in the behavioral tier — the shape W6's fix took (#2615).",
       "reason": "F11 — an `int` body field publishes `{\"type\":\"integer\"}` with NO bound and validates as `z.number().int()` with no bound, while the column behind it is Postgres `int4`: a value the published contract permits (9543751572142) overflows and 500s. Same declared-vs-enforced family as F7, one level down — F7 was the declared type, this is the missing declared range. Scoped to the one operation it reproduces on deliberately: widening it is a decision, not a default. Uncovered when the over-broad W1 (`^POST /api/`) was deleted with F1's fix."
     },
     {

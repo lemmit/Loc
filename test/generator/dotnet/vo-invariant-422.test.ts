@@ -55,9 +55,14 @@ describe("dotnet — VO invariant → 422 at the wire", () => {
     // Single-field int `value > 0` → the sound inclusive `.GreaterThanOrEqualTo(1)`.
     expect(v).toContain("class QuantityRequestValidator : AbstractValidator<QuantityRequest>");
     expect(v).toContain("RuleFor(x => x.Value).GreaterThanOrEqualTo(1);");
-    // Two length invariants merge into one chain.
+    // Two length invariants merge into one chain.  A LENGTH bound is a
+    // code-point `.Must`, not FluentValidation's code-unit `.MinimumLength`
+    // (RS-31).
     expect(v).toContain("class SkuRequestValidator : AbstractValidator<SkuRequest>");
-    expect(v).toContain("RuleFor(x => x.Code).MinimumLength(3).MaximumLength(12);");
+    expect(v).toContain(
+      "RuleFor(x => x.Code).Must(v => v == null || v.EnumerateRunes().Count() >= 3)",
+    );
+    expect(v).toContain("Must(v => v == null || v.EnumerateRunes().Count() <= 12)");
     // Cross-field / messaged → `.Must(...)` carrier with the stable wire code.
     expect(v).toContain("class ExtentRequestValidator : AbstractValidator<ExtentRequest>");
     expect(v).toContain("RuleFor(x => x).Must(x => x.Lo < x.Hi)");

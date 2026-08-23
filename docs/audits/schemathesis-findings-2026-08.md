@@ -39,6 +39,11 @@ part declares the `422` it answers (shared matrix, so all five backends move
 together), and a wrong verb on a static sub-path answers `405` + `Allow` instead
 of the sibling `/{id}` validator's `422`. Their waivers (W4, W9) are deleted.
 
+**F5 landed on node, .NET and java (2026-08-18, PR #2615)** — a string
+`.length` bound counts Unicode code points on every backend, matching the
+`minLength`/`maxLength` the emitted JSON Schema publishes. Its waiver (W6) is
+deleted and a deterministic astral-character case is pinned in the wire golden.
+
 ---
 
 ## Class: server error (500)
@@ -177,7 +182,9 @@ computed offset), on all five backends.
 ## Class: response violates the server's own schema
 
 ### F5 — `minLength`/`maxLength` are enforced in UTF-16 code units but declared in code points
-**Waiver:** W6 (declared `intermittent` — see below) · **Severity: medium**
+**Status: FIXED (2026-08-18, PR #2615)** on node, .NET and java — python was
+already correct, elixir counts graphemes (residual, below). **Waiver W6 is
+deleted.**
 
 ```
 curl -X POST -H 'Content-Type: application/json' \
@@ -201,17 +208,58 @@ JSON Schema `minLength`/`maxLength` count code points. The value is therefore
 simultaneously valid on the way in and invalid on the way out — the write side
 persists data the read side cannot legally serve.
 
-**Fix shape:** count code points (`[...s].length`) in the emitted length
-refinements. Applies to every `minLength`/`maxLength`-carrying wire field, and
-the same question exists on the other four backends (Java/.NET count UTF-16
-too; Python counts code points — so this one is *already* a live cross-backend
-divergence worth a differential case).
+**The fix.** A `.ddd` string `.length` — and every `len-*` bound derived from
+it — is defined as a count of **Unicode code points**, the unit the published
+`minLength`/`maxLength` already used. The per-language snippets live in one
+place, `src/generator/_expr/code-point.ts`, and are consumed by BOTH the domain
+rule renderer and the wire-boundary validator emitter of each backend, so the
+two cannot drift:
 
-**Why W6 is `intermittent`:** reproducing it needs the fuzzer to both persist an
-astral-character value AND read that row back within the same run, so its
-absence from a given run is not evidence of a fix. It is exempt from the
-staleness half of the ratchet only; it still absorbs its findings. Graduating it
-to a pinned deterministic case is the follow-up that removes the exemption.
+| backend | before | after |
+|---|---|---|
+| node/Hono | `z.string().min/.max/.length` + `s.length` | `.refine((s) => [...s].length …)` + `[...s].length` |
+| .NET | `.MinimumLength/.MaximumLength/.Length` + `s.Length` | `.Must(v => v == null \|\| v.EnumerateRunes().Count() …)` + `s.EnumerateRunes().Count()` |
+| java | `s.length()` | `s.codePointCount(0, s.length())` |
+| python | `Field(min_length=…)` + `len(s)` | unchanged — already code points |
+| elixir | `String.length/1`, `validate_length` | unchanged — graphemes (residual, below) |
+
+zod cannot describe a `.refine` to the OpenAPI emitter, so the Hono routes
+re-attach the declaration with `.openapi({ minLength, maxLength })`
+(`openapiLengthMeta`, `src/generator/zod-refine.ts`) — the published bound is
+identical to before, and now matches what the server enforces:
+
+```ts
+// before
+currency: z.string().length(3),
+// after
+currency: z.string().refine((s) => [...s].length === 3).openapi({ minLength: 3, maxLength: 3 }),
+```
+
+**Residual — elixir counts GRAPHEMES, not code points.** `String.length/1` and
+Ecto's `validate_length/3` both count grapheme clusters, and Ecto offers no
+`:codepoints` count, so moving it means hand-rolling Ecto's error tuples and
+changing its default message text. Graphemes and code points agree on every
+astral character — the case that broke the other three, and the one the pinned
+runtime case below exercises — and diverge only on combining sequences
+(`"e\u0301"`: 1 grapheme, 2 code points), which nothing in the corpus reaches.
+Left as a signed residual rather than silently ignored.
+
+**Residual — Angular reactive forms.** `src/generator/angular/form-validators.ts`
+still emits `Validators.minLength/maxLength`, which count UTF-16 code units.
+That is client-side pre-flight only (the server is authoritative and now
+correct), and Angular ships no code-point length validator.
+
+**Pinned deterministic case (the waiver's stated exit).** W6 was `intermittent`
+because reproducing it needed the fuzzer to persist an astral value AND read
+that row back in the same run. `test/fixtures/corpus/validation-messages.ddd`
+now pins both directions in the behavioral tier — recorded in the wire golden,
+so all five backend legs gate on it per-PR:
+
+* `"😀X"` — 3 UTF-16 code units, 2 code points — must be **denied** by
+  `label.length >= 3` (the messaged/refine carrier), 422 with its authored text;
+* nine astral characters — 18 code units, 9 code points — must be **admitted**
+  by `label.length <= 16` (the message-less native-chain carrier) and round-trip
+  unmangled.
 
 ---
 

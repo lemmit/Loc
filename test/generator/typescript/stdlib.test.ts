@@ -32,8 +32,12 @@ describe("typescript generator — stdlib prelude", () => {
     const { model } = await parseString(SRC);
     const domain = generateHono(model).get("domain/order.ts")!;
     // isBlank / isPresent / truncate all inlined, paren-wrapped, args substituted.
-    expect(domain).toContain("get blank(): boolean { return (this._name.trim().length === 0); }");
-    expect(domain).toContain("this._name.trim().length > 0");
+    // `.length` on a string is a CODE-POINT count (RS-31), so the inlined
+    // prelude body spreads before measuring.
+    expect(domain).toContain(
+      "get blank(): boolean { return ([...this._name.trim()].length === 0); }",
+    );
+    expect(domain).toContain("[...this._name.trim()].length > 0");
     expect(domain).toContain("this._name.slice(0, (0) + (8))");
     // math (clamp) + temporal (isOverdue) inline too.
     expect(domain).toContain("get cl(): number { return (Math.min(Math.max(this._qty, 0), 10)); }");

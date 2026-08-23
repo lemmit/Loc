@@ -1,24 +1,32 @@
-// Hierarchical tenancy on `persistence: mikroorm` is REFUSED, not silently
-// unscoped.
+// Hierarchical tenancy on `persistence: mikroorm` is SUPPORTED — no diagnostic,
+// no silent unscoping.
 //
-// `emitMikroContextFilters` lowers each capability filter through
-// `whereToMikroFilter`, whose FilterQuery subset cannot express the
-// descendant-or-self subtree predicate — and it CATCHES that failure and leaves
-// the filter unapplied:
+// History, because this file is the record of both failure modes:
 //
-//     try { out.push(whereToMikroFilter(pred)); }
-//     catch { /* unlowerable principal filter — left unapplied */ }
+//  1. SILENT LEAK.  `mikroContextFilters` lowered each capability filter through
+//     `whereToMikroFilter` and CAUGHT the failure the subtree predicate caused:
 //
-// For a `deep`/`global` scope that is not a degraded read.  It is NO tenant
-// predicate at all, so every tenant's rows are readable on every read of the
-// aggregate.  Verified before the gate existed: generating
-// `tenancy-hierarchy.ddd` with `persistence: mikroorm` produced repositories
-// whose reads carried no `dataKey` / `tenantId` term whatsoever, while the same
-// fixture on the default adapter carries the scope predicate on every read.
+//         try { out.push(whereToMikroFilter(pred)); }
+//         catch { /* unlowerable principal filter — left unapplied */ }
 //
-// The adapter's comment asserted the shape was "not generated on the mikro
-// adapter today" — which was a belief about the corpus, not a gate, and the
-// combination validated, generated and compiled clean.  This pins the refusal.
+//     For a `deep`/`global` scope that is not a degraded read — it is NO tenant
+//     predicate at all, so every tenant's rows were readable on every read.
+//     Verified at the time: generating `tenancy-hierarchy.ddd` with
+//     `persistence: mikroorm` produced repositories whose reads carried no
+//     `dataKey` / `tenantId` term whatsoever.
+//  2. HONEST REFUSAL.  `validateMikroOrmSupport` grew a gate, so the shape was
+//     rejected instead of leaking.
+//  3. SUPPORTED (this).  The FilterQuery OPERATORS still cannot express a prefix
+//     test, but a FilterQuery KEY may be a `raw()` SQL fragment and the
+//     predicate is ordinary SQL.  `authzFilterEntry` renders the
+//     descendant-or-self test (`starts_with(data_key, ?)` + the NULL-dataKey
+//     tenant floor), the `orgPath` resolver is registered on this adapter too,
+//     and the silent catch is GONE — an unlowerable principal filter now crashes
+//     codegen rather than vanishing.
+//
+// So this file pins the absence of a diagnostic; the emitted shape is pinned by
+// `test/generator/typescript/mikroorm-deep-scope.test.ts`, and the runtime
+// agreement by `test/e2e/tenancy-hierarchy-mikroorm.test.ts`.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -37,16 +45,11 @@ async function errorsFor(platform: string): Promise<string[]> {
 }
 
 describe("hierarchical tenancy × the mikroorm adapter", () => {
-  it("is refused, naming the dropped predicate", async () => {
-    const codes = await errorsFor("node { persistence: mikroorm }");
-    // One per tenant-owned aggregate in the fixture; the registry itself is
-    // self-scoped by id, which the FilterQuery subset CAN express.
-    expect(codes).toContain("loom.mikroorm-unsupported");
-    expect(codes.filter((c) => c === "loom.mikroorm-unsupported").length).toBeGreaterThanOrEqual(1);
+  it("validates clean — the subtree predicate is expressible after all", async () => {
+    expect(await errorsFor("node { persistence: mikroorm }")).toEqual([]);
   });
 
   it("still generates clean on the default adapter", async () => {
-    // The gate is adapter-scoped: it must not reject the shape everywhere.
     expect(await errorsFor("node")).toEqual([]);
   });
 });

@@ -1,5 +1,6 @@
 import type {
   BoundedContextIR,
+  EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
   FieldIR,
@@ -27,7 +28,9 @@ import {
   collectFilterPrincipalRefs,
   type DapperColumn,
   dapperAggregateTable,
+  dapperCapabilityFilterParts,
   fieldColumn,
+  keptCapabilityParts,
   principalFields,
   sqlIdent,
   whereToSql,
@@ -349,12 +352,12 @@ function qpPersistenceUsings(usingDapper: boolean): string {
  *  binding is emitted here rather than gated away. */
 function dapperFilterSeam(
   usingDapper: boolean,
-  filter: ExprIR | undefined,
+  predicates: readonly ExprIR[],
   ns: string,
   usings: Set<string>,
 ): { needsPrincipal: boolean; paramArg: string } {
-  if (!usingDapper || !filter) return { needsPrincipal: false, paramArg: "" };
-  const refs = collectFilterPrincipalRefs([filter]);
+  if (!usingDapper || predicates.length === 0) return { needsPrincipal: false, paramArg: "" };
+  const refs = collectFilterPrincipalRefs(predicates);
   if (refs.length === 0) return { needsPrincipal: false, paramArg: "" };
   usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   return {
@@ -372,6 +375,46 @@ function aggregateLandsOnDouble(s: AggregateSelect, ctx: EnrichedBoundedContextI
   if (c.isCount || c.asString) return false;
   const target = wireType(s.type, ctx, "response");
   return target === "double" || target === "double?";
+}
+
+/** The WHERE a DIRECT-TABLE arm (`singleton` / `grouped`) selects under, and
+ *  the principal bindings it needs.
+ *
+ *  These two arms SELECT over the source aggregate's own table instead of going
+ *  through its repository — which is exactly why they must re-apply the
+ *  aggregate's CAPABILITY filters by hand.  EF gets them for free (the DbSet
+ *  carries `HasQueryFilter`); Dapper writes its own SQL, and until this it
+ *  wrote `SELECT count(*)::int AS total FROM orders` with no WHERE at all.  A
+ *  soft-deleted row was counted, a foreign tenant's row was counted, and a
+ *  `deny`-read aggregate reported its true size — so the aggregation answered a
+ *  DIFFERENT number than `.all` over the same aggregate.  A silent wrong
+ *  answer, and on the tenancy filters a cross-tenant disclosure.
+ *
+ *  A read's `ignoring` clause drops the capability predicates it names, exactly
+ *  as on the repository arm.  The kept ExprIRs — not the source list — feed the
+ *  principal-param collection, so the params bound are precisely the ones the
+ *  emitted SQL names. */
+function dapperDirectTableWhere(
+  proj: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+  usings: Set<string>,
+): { where: string | undefined; seam: { needsPrincipal: boolean; paramArg: string } } {
+  const filter = proj.query?.filter;
+  const source = proj.query?.source;
+  const agg = ctx.aggregates.find((a) => a.name === source) as EnrichedAggregateIR | undefined;
+  const kept = agg
+    ? keptCapabilityParts(
+        dapperCapabilityFilterParts(agg, { agg, table: dapperAggregateTable(agg.name) }),
+        { bypassAll: proj.query?.bypassAll, bypassCaps: proj.query?.bypassCaps },
+      )
+    : [];
+  const conjuncts = [...(filter ? [whereToSql(filter)] : []), ...kept.map((p) => p.sql)];
+  const predicates = [...(filter ? [filter] : []), ...kept.map((p) => p.expr)];
+  return {
+    where: conjuncts.length > 0 ? conjuncts.join(" AND ") : undefined,
+    seam: dapperFilterSeam(true, predicates, ns, usings),
+  };
 }
 
 /** The Postgres aggregate call for one `select` — the raw-SQL twin of
@@ -514,15 +557,20 @@ function renderAggregateHandler(
 
   const usings = new Set<string>();
   const filter = proj.query!.filter;
-  // EF hands the SAME C# predicate to its own translator; Dapper writes the
-  // SQL itself, through the one predicate→SQL lowering this adapter already
-  // has (`whereToSql`, shared with every Dapper find / retrieval / capability
-  // filter).  A second lowering here would be a second dialect to keep true.
-  const where = filter
-    ? usingDapper
-      ? whereToSql(filter)
-      : renderCsExpr(filter, { thisName: "o", efQuery: true })
-    : undefined;
+  // EF hands the SAME C# predicate to its own translator (and gets the source
+  // aggregate's capability filters for free — the DbSet carries
+  // `HasQueryFilter`); Dapper writes the SQL itself, through the one
+  // predicate→SQL lowering this adapter already has (`whereToSql`, shared with
+  // every Dapper find / retrieval / capability filter), and must therefore
+  // re-apply those capability filters by hand — see `dapperDirectTableWhere`.
+  const direct = usingDapper
+    ? dapperDirectTableWhere(proj, ctx, ns, usings)
+    : { where: undefined, seam: { needsPrincipal: false, paramArg: "" } };
+  const where = usingDapper
+    ? direct.where
+    : filter
+      ? renderCsExpr(filter, { thisName: "o", efQuery: true })
+      : undefined;
   if (filter && !usingDapper) collectCsExprUsings(filter, usings);
 
   const requires = proj.query!.requires;
@@ -532,7 +580,7 @@ function renderAggregateHandler(
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
-  const seam = dapperFilterSeam(usingDapper, filter, ns, usings);
+  const seam = direct.seam;
 
   const dbType = usingDapper ? "NpgsqlDataSource" : "AppDbContext";
   const fields: string[] = [`    private readonly ${dbType} _db;`];
@@ -702,11 +750,16 @@ function renderGroupedHandler(
 
   const usings = new Set<string>();
   const filter = proj.query!.filter;
-  const where = filter
-    ? usingDapper
-      ? whereToSql(filter)
-      : renderCsExpr(filter, { thisName: "o", efQuery: true })
-    : undefined;
+  // The other DIRECT-TABLE arm — same capability-filter obligation as the
+  // singleton one (`dapperDirectTableWhere`).
+  const direct = usingDapper
+    ? dapperDirectTableWhere(proj, ctx, ns, usings)
+    : { where: undefined, seam: { needsPrincipal: false, paramArg: "" } };
+  const where = usingDapper
+    ? direct.where
+    : filter
+      ? renderCsExpr(filter, { thisName: "o", efQuery: true })
+      : undefined;
   if (filter && !usingDapper) collectCsExprUsings(filter, usings);
 
   // Authorization gate (default-deny) — same shape as the singleton arm.
@@ -717,7 +770,7 @@ function renderGroupedHandler(
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
-  const seam = dapperFilterSeam(usingDapper, filter, ns, usings);
+  const seam = direct.seam;
 
   const dbType = usingDapper ? "NpgsqlDataSource" : "AppDbContext";
   const fields: string[] = [`    private readonly ${dbType} _db;`];
@@ -961,7 +1014,7 @@ function renderWorkflowHandler(
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
-  const seam = dapperFilterSeam(usingDapper, filter, ns, usings);
+  const seam = dapperFilterSeam(usingDapper, filter ? [filter] : [], ns, usings);
 
   // Project each state row through the `select` expressions, keyed by wire field.
   // A source-alias read (`f.orderId`) lowers to a member off the current row, so
@@ -1097,7 +1150,7 @@ function renderProjectionSourceHandler(
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
-  const seam = dapperFilterSeam(usingDapper, filter, ns, usings);
+  const seam = dapperFilterSeam(usingDapper, filter ? [filter] : [], ns, usings);
 
   // Project each source row through the `select` expressions, keyed by wire field.
   // A source-row read (`t.total`) lowers to a member off the current row, so
