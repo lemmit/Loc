@@ -48,6 +48,29 @@ describe("built-in capability prelude (typed-capabilities.md Phase 3)", () => {
     expect(errors).toEqual([]);
   });
 
+  it("a non-bool user `isDeleted` under softDeletable is refused (loom.softdelete-field-collision)", async () => {
+    // The G2 seam on the filter member (corpus-mutation M1.aggregate.isDeleted):
+    // `filter !this.isDeleted` would negate a string on every backend, and the
+    // node query-projection arm rightly cannot lower it — so the collision is
+    // refused at expansion, naming both ways out.
+    const { errors } = await parseString(`
+      system D { subdomain M { context C {
+        aggregate Order with softDeletable { isDeleted: string }
+      }}}
+    `);
+    expect(errors.some((e) => e.includes("isDeleted") && e.includes("softDeletable"))).toBe(true);
+  });
+
+  it("a BOOL user `isDeleted` under softDeletable is the spliced flag — accepted", async () => {
+    const ir = await buildLoomModel(`
+      system D { subdomain M { context C {
+        aggregate Order with softDeletable { isDeleted: bool }
+      }}}
+    `);
+    const agg = findAgg(ir, "Order");
+    expect(agg.contextFilters?.length).toBe(1);
+  });
+
   it("`with softDeletable` resolves the built-in (state + filter)", async () => {
     const ir = await buildLoomModel(`
       system D { subdomain M { context C {

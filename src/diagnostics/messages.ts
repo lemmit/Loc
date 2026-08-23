@@ -2558,6 +2558,10 @@ export const DIAGNOSTIC_MESSAGES = {
   "loom.version-field-collision": (p: { name: unknown; name2: unknown }) =>
     `field 'version' on aggregate '${p.name}' collides with Loom's optimistic-concurrency column, which is an 'int'. ` +
     `Rename this field (e.g. '${p.name2}Version'), or declare it 'version: int' if you meant the concurrency counter.`,
+  "loom.softdelete-field-collision": (p: { name: unknown; name2: unknown }) =>
+    `field 'isDeleted' on aggregate '${p.name}' collides with the 'softDeletable' capability's flag, which is a 'bool' ` +
+    `(the spliced 'filter !this.isDeleted' reads it). Rename this field (e.g. '${p.name2}Deleted'), or declare it ` +
+    `'isDeleted: bool' if you meant the soft-delete flag.`,
   "loom.unknown-macro#top-level": (p: { name: unknown; listMacroNames: unknown }) =>
     `Unknown macro or capability '${p.name}'.  Available macros: ${p.listMacroNames}.`,
   "loom.unknown-macro#nested": (p: {
