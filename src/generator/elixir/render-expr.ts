@@ -531,6 +531,13 @@ function renderMember(recv: string, e: MemberExpr, ctx: RenderCtx): string {
     e.receiverType.name === "string" &&
     e.member === "length"
   ) {
+    // GRAPHEMES, deliberately — the one backend that does not count code
+    // points (RS-31 / src/generator/_expr/code-point.ts).  Graphemes agree
+    // with code points on every astral character and diverge only on
+    // combining sequences; Ecto's `validate_length/3`, the changeset half of
+    // the same rule, offers no `:codepoints` count, so moving one without the
+    // other would make elixir disagree with ITSELF.  Signed residual, not an
+    // oversight — see docs/audits/schemathesis-findings-2026-08.md § F5.
     return `String.length(${recv})`;
   }
   // Value-object SUB-field read (`this.money.amount`) — issue #1660.  A value

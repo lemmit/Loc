@@ -13,7 +13,7 @@ public sealed record Money
         Amount = amount;
         Currency = currency;
         if (!(this.Amount >= 0m)) throw new DomainException("Invariant violated: amount >= 0");
-        if (!(this.Currency.Length == 3)) throw new DomainException("Invariant violated: currency.length == 3");
+        if (!(this.Currency.EnumerateRunes().Count() == 3)) throw new DomainException("Invariant violated: currency.length == 3");
     }
 
     /// <summary>Parameterless constructor reserved for EF Core / serializers.</summary>

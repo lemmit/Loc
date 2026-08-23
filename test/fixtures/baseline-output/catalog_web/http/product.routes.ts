@@ -11,17 +11,17 @@ import { Money } from "../domain/value-objects";
 
 const MoneySchema = z.object({
   amount: z.number().min(0),
-  currency: z.string().length(3),
+  currency: z.string().refine((s) => [...s].length === 3).openapi({ minLength: 3, maxLength: 3 }),
 }).openapi("Money");
 
 const CreateProductRequest = z.object({
-  sku: z.string().min(1),
+  sku: z.string().refine((s) => [...s].length >= 1).openapi({ minLength: 1 }),
   price: MoneySchema,
 }).openapi("CreateProductRequest");
 const CreateProductResponse = z.object({ id: z.string() }).openapi("CreateProductResponse");
 
 const UpdateProductRequest = z.object({
-  sku: z.string().min(1),
+  sku: z.string().refine((s) => [...s].length >= 1).openapi({ minLength: 1 }),
   price: MoneySchema,
 }).openapi("UpdateProductRequest");
 

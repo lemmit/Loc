@@ -231,7 +231,7 @@ describe("java generator — wire validators + advice (S5)", () => {
     expect(v).toContain("public final class CreateOrderValidator implements Validator {");
     expect(v).toContain("return CreateOrderRequest.class.equals(clazz);");
     expect(v).toContain(
-      'if (!(code.length() >= 1)) errors.rejectValue("code", "loom.invariant", "Invariant violated: code.length > 0");',
+      'if (!(((int) code.codePoints().count()) >= 1)) errors.rejectValue("code", "loom.invariant", "Invariant violated: code.length > 0");',
     );
     const ctrl = files_.get(`${ROOT}/features/orders/OrdersController.java`)!;
     expect(ctrl).toContain("@Valid @RequestBody CreateOrderRequest request");
@@ -270,7 +270,7 @@ system Demo {
 `;
     const out = await generateSystemFiles(src);
     const check =
-      'if (!(handle.length() >= 1)) errors.rejectValue("handle", "loom.invariant", "Invariant violated: handle.length > 0");';
+      'if (!(((int) handle.codePoints().count()) >= 1)) errors.rejectValue("handle", "loom.invariant", "Invariant violated: handle.length > 0");';
     const create = [...out.entries()].find(([k]) => /CreateAccountValidator\.java$/.test(k))?.[1];
     const update = [...out.entries()].find(([k]) => /UpdateAccountValidator\.java$/.test(k))?.[1];
     expect(create).toContain(check);
