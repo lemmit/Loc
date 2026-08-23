@@ -300,18 +300,21 @@ ${absentArm}
       // aggregate — `"<Agg> not found"` — which reads like the by-id sentence
       // but carries no id and matched no other backend; the first callers for
       // `by_email` / `by_reference` / `by_code` / `by_sku` are what surfaced it.
-      if (f.returnType.kind === "optional") {
-        return wrap(`    case ${call} do
+      //
+      // A NON-optional single find takes the SAME arm, and the sentence above
+      // is why: it has even less of an absent representation than the optional
+      // one.  The bare `: X` case used to keep `json(conn, nil)` — a 200 whose
+      // `null` body is not a valid `<Agg>Response`, i.e. the same violation of
+      // its own declared 200 this comment describes fixing for `X?` — and the
+      // reason recorded here was that `findSingle` declared no error status.
+      // It does now: the rung is a fact about the READ, not about the route's
+      // shape (F13), so the justification is gone and so is the divergence.
+      return wrap(`    case ${call} do
       {:ok, nil} ->
         ${denialResponse("notFound", '"not_found"', denialOverrides(ctx))}
 
       {:ok, record} ->
         json(conn, serialize(record))
-    end`);
-      }
-      return wrap(`    case ${call} do
-      {:ok, nil} -> json(conn, nil)
-      {:ok, record} -> json(conn, serialize(record))
     end`);
     }
     return wrap(`    with {:ok, records} <- ${call} do

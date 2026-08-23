@@ -188,5 +188,19 @@ function filterClauseFor(find: FindIR, agg: EnrichedAggregateIR, ctx?: BoundedCo
 function projectionClauseFor(t: TypeIR): string {
   if (t.kind === "array") return `.ToListAsync(cancellationToken)`;
   if (t.kind === "optional") return `.FirstOrDefaultAsync(cancellationToken)`;
-  return `.FirstAsync(cancellationToken)`;
+  // A NON-optional single find has no absent representation, so an empty result
+  // set is the domain not-found rung — the `?? throw` idiom this backend already
+  // uses for the same situation in a workflow body, landing on the
+  // `DomainExceptionFilter`'s `AggregateNotFoundException` arm and the 404 the
+  // shared table declares for `findSingle`.
+  //
+  // It used to be `.FirstAsync(cancellationToken)`, which throws EF's
+  // `InvalidOperationException("Sequence contains no elements")` — no filter arm
+  // matches it, so the route answered 500 where node/java/python answered 404
+  // and elixir answered `200 null`.  A four-way split on a route that all five
+  // agree about on the happy path, invisible to the wire differential (it GETs
+  // collections) and to the corpus (no case reads a single find that misses).
+  // `"not_found"` is the canonical find-miss detail token on every backend
+  // (RS-27 scopes the by-id sentence out of a find).
+  return `.FirstOrDefaultAsync(cancellationToken) ?? throw new AggregateNotFoundException("not_found")`;
 }

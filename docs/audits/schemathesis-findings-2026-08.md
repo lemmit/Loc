@@ -47,7 +47,9 @@ deleted and a deterministic astral-character case is pinned in the wire golden.
 **F10 and F13 landed on all five backends (2026-08-23, PR #2648)** — the
 not-found rung is published from the READ that produces it rather than from the
 route's shape, so a workflow whose body loads and a non-optional `find` route
-both declare the 404 they answer. W10 is deleted; F13 never had a waiver
+both declare the 404 they answer — and .NET (500) and elixir (`200 null`) now
+ANSWER it, where they had each diverged in their own direction. W10 is deleted;
+F13 never had a waiver
 (the fuzzer never reached it — it was found by hand under F10).
 
 ---
@@ -494,7 +496,24 @@ option — the declared return type is non-optional), and the aggregate router's
 variant rides that status by design); the NON-optional one, which reaches the
 same status by throwing, declares nothing.
 
-`findSingle` now declares the rung exactly as `findOptional` does.
+`findSingle` now declares the rung exactly as `findOptional` does — and forcing
+that question surfaced a RUNTIME half nobody had asked about. All five backends
+agree on the happy path and split four ways on a miss:
+
+| backend | answered on an absent row |
+|---|---|
+| node | 404 — the repository method throws the shared carrier |
+| java | 404 — the controller null-checks and throws |
+| python | 404 — the route null-checks and raises |
+| **.NET** | **500** — EF `FirstAsync` throws `InvalidOperationException("Sequence contains no elements")`, which no filter arm matches |
+| **elixir** | **200** with a `null` body — not a valid `<Agg>Response`, so it violates the 200 schema it publishes |
+
+Both are corrected with the declaration, or it would have been a second lie on
+two backends. The split was invisible to every existing gate: the wire
+differential GETs collection endpoints, and no corpus case reads a single find
+that misses. Elixir's emitter had even recorded the reason it kept `json(conn,
+nil)` — "`findSingle` declares no error status" — which is exactly the premise
+this finding removes.
 
 Together with F10 this names the root cause under both: the shared table
 publishes the not-found rung from the ROUTE SHAPE (does the path carry an

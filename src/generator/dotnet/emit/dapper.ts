@@ -1927,8 +1927,7 @@ export function renderDapperDocumentRepository(
     // documents, so the async EF operators become their LINQ-to-objects twins.
     const projection = (body?.projectionClause ?? ".ToListAsync(cancellationToken)")
       .replace(".ToListAsync(cancellationToken)", ".ToList()")
-      .replace(".FirstOrDefaultAsync(cancellationToken)", ".FirstOrDefault()")
-      .replace(".FirstAsync(cancellationToken)", ".First()");
+      .replace(".FirstOrDefaultAsync(cancellationToken)", ".FirstOrDefault()");
     const usesUser = findUsesCurrentUser(f);
     return lines(
       `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParams(f.params, [], usesUser)})`,
@@ -2091,8 +2090,7 @@ export function renderDapperEventSourcedRepository(
     // (the projection clause is built with `cancellationToken`).
     const projection = (body?.projectionClause ?? ".ToListAsync(cancellationToken)")
       .replace(".ToListAsync(cancellationToken)", ".ToList()")
-      .replace(".FirstOrDefaultAsync(cancellationToken)", ".FirstOrDefault()")
-      .replace(".FirstAsync(cancellationToken)", ".First()");
+      .replace(".FirstOrDefaultAsync(cancellationToken)", ".FirstOrDefault()");
     return [
       `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParams(f.params)})`,
       "    {",

@@ -12,6 +12,15 @@
 //   F10  POST /api/workflows/<wf>  whose body loads an aggregate
 //   F13  GET  /api/<aggs>/<find>   for a NON-optional declared find
 //
+// F13 also had a RUNTIME half, found once the declaration forced the question
+// "what does each backend actually answer here?".  All five agreed on the happy
+// path and split four ways on a miss: node / java / python reached the shared
+// not-found carrier, .NET called EF `FirstAsync` and answered 500 on
+// `InvalidOperationException("Sequence contains no elements")`, and elixir
+// answered `200` with a `null` body that is not a valid `<Agg>Response` — a
+// violation of the 200 schema it publishes.  Both are corrected here, so the
+// declaration below is a promise the emitters keep rather than a second lie.
+//
 // Both answered a 404 they never declared, on all five backends.  The fix is
 // one table plus one predicate, so it is pinned here in one place rather than
 // as five per-backend spot checks — and the NEGATIVE case is pinned with equal
@@ -209,6 +218,49 @@ describe("F10 — a workflow that reads declares the 404 it answers", () => {
       const ex = (await statuses.elixir(exPath)).filter((s) => s >= 400);
       expect({ py, net, java, ex }).toEqual({ py: node, net: node, java: node, ex: node });
     }
+  });
+});
+
+describe("F13 (runtime) — every backend ANSWERS the not-found rung on a miss", () => {
+  // The declaration half is only worth having if the code behind it agrees.
+  // These read the emitted handler, which is where the four-way split lived.
+  it("node throws the shared carrier from the repository method", async () => {
+    const repo = await fileMatching(/wallet-repository\.ts$/);
+    expect(repo).toMatch(
+      /async byRef\([^)]*\)[\s\S]*?if \(rootRows\.length === 0\) throw new AggregateNotFoundError/,
+    );
+  });
+
+  it("python raises it from the route", async () => {
+    const routes = await fileMatching(/wallet_routes\.py$/);
+    expect(routes).toMatch(
+      /found = await repo\.by_ref\(r\)\n\s+if found is None:\n\s+raise AggregateNotFoundError/,
+    );
+  });
+
+  it("java throws it from the controller", async () => {
+    const controller = await fileMatching(/WalletsController\.java$/);
+    expect(controller).toMatch(
+      /byRefWallet[\s\S]*?if \(response == null\) throw new AggregateNotFoundException/,
+    );
+  });
+
+  it("dotnet throws it instead of letting EF's FirstAsync 500", async () => {
+    // `FirstAsync` on an empty set throws `InvalidOperationException`, which no
+    // filter arm matches — a 500 on a route the other backends 404.
+    const repo = await fileMatching(/Infrastructure\/Repositories\/WalletRepository\.cs$/);
+    expect(repo).toMatch(
+      /ByRef[\s\S]*?FirstOrDefaultAsync\(cancellationToken\) \?\? throw new AggregateNotFoundException/,
+    );
+    expect(repo).not.toMatch(/\.FirstAsync\(cancellationToken\)/);
+  });
+
+  it("elixir answers the problem response instead of `200 null`", async () => {
+    const controller = await fileMatching(/wallet_controller\.ex$/);
+    expect(controller).toMatch(
+      /def by_ref[\s\S]*?\{:ok, nil\} ->\n\s+ProblemDetails\.problem_response\(conn, 404/,
+    );
+    expect(controller).not.toMatch(/\{:ok, nil\} -> json\(conn, nil\)/);
   });
 });
 
