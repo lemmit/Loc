@@ -780,15 +780,19 @@ export function renderApiExceptionAdvice(
     ``,
     // A path `{id}` / typed query param that will not CONVERT — `GET
     // /api/orders/not-a-uuid` against `@PathVariable UUID id`.  Spring raises
-    // MethodArgumentTypeMismatchException, which implements `ErrorResponse`
-    // with status 400, so without this arm it fell into `onUnhandled` below and
-    // answered 400 — while `errorStatuses("getById")` PUBLISHES 422 for exactly
-    // this failure ("a path `{id}` is parsed as a uuid … and a failure answers
-    // the same 422 the body tier does", src/ir/util/openapi-errors.ts) and
-    // Hono's `defaultHook` / .NET's `InvalidModelStateResponseFactory` already
-    // answer it.  A request-part parse failure is the wire-validation tier on
-    // every backend; keep it there on Java too, with the same `errors[]`
-    // pointer shape the body tier emits (`/id`, not the whole document).
+    // MethodArgumentTypeMismatchException, which — measured on a booted app,
+    // not assumed — does NOT implement `ErrorResponse`, so the 4xx branch of
+    // `onUnhandled` below never saw it and the catch-all answered
+    // `500 "internal"`: a CLIENT fault reported as a server fault, telling the
+    // caller to retry a request that can never succeed.
+    //
+    // `errorStatuses("getById")` PUBLISHES 422 for exactly this failure ("a
+    // path `{id}` is parsed as a uuid … and a failure answers the same 422 the
+    // body tier does", src/ir/util/openapi-errors.ts), and Hono's
+    // `defaultHook` / .NET's `InvalidModelStateResponseFactory` already answer
+    // it.  A request-part parse failure is the wire-validation tier on every
+    // backend; keep it there on Java too, with the same `errors[]` pointer
+    // shape the body tier emits (`/id`, not the whole document).
     `    @ExceptionHandler(MethodArgumentTypeMismatchException.class)`,
     `    public ResponseEntity<ProblemDetail> onParamTypeMismatch(MethodArgumentTypeMismatchException e, WebRequest request) {`,
     `        CatalogLog.event("domain_error", "warn", "message", "Validation failed", "status", ${UNPROCESSABLE_ENTITY});`,
