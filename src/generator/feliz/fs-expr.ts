@@ -460,27 +460,31 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       return renderFsMethodCall(e, r(e.receiver), e.args.map(r));
     case "match": {
       // Predicate-arm form only (`match { cond => value }`) — an F#
-      // `if/elif/else` chain.  A value-position match needs a total `else`;
-      // the variant-discriminating form (`match subject { … }`) belongs to the
-      // union/async subsystem and is gated at validation, not reached here.
+      // `if/elif/else` chain.  The variant-discriminating form
+      // (`match subject { … }`) belongs to the union/async subsystem and is
+      // gated at validation, not reached here.
       if (e.subject) {
         throw new Error(
           "feliz: variant-match expression in an F# action body is not rendered here — " +
             "it is gated at validation (loom.feliz-async-effect-unsupported).",
         );
       }
-      if (e.otherwise === undefined) {
+      // An `if/elif` chain in F# is an EXPRESSION, so it needs a total tail.
+      // With no `else` arm the LAST arm's value becomes it — the same right-fold
+      // promotion the shared view walker applies (walker-core's `match` arm), so
+      // the update path and the view path agree and a no-`else` value match
+      // renders instead of crashing codegen (the validator only warns about it).
+      if (e.arms.length === 0 && e.otherwise === undefined) {
         throw new Error(
-          "feliz: a `match` in a value position needs an `otherwise` arm to render a total " +
-            "F# if/elif/else expression.",
+          "feliz: a `match` with neither arms nor an `otherwise` arm has no value to render.",
         );
       }
-      const chain = e.arms.map(
+      const tail = e.otherwise ?? e.arms[e.arms.length - 1]!.value;
+      const tested = e.otherwise === undefined ? e.arms.slice(0, -1) : e.arms;
+      const chain = tested.map(
         (a, i) => `${i === 0 ? "if" : "elif"} ${r(a.cond)} then ${r(a.value)}`,
       );
-      return chain.length === 0
-        ? `(${r(e.otherwise)})`
-        : `(${chain.join(" ")} else ${r(e.otherwise)})`;
+      return chain.length === 0 ? `(${r(tail)})` : `(${chain.join(" ")} else ${r(tail)})`;
     }
     case "lambda":
       // Single-expression form (`x => expr`) → the shared F# lambda leaf.  A

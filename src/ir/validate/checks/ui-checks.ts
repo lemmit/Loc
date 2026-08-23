@@ -45,6 +45,7 @@ import type {
   ProjectionIR,
   StateFieldIR,
   StmtIR,
+  StoreIR,
   TypeIR,
 } from "../../types/loom-ir.js";
 import { allAggregates, allContexts } from "../../types/loom-ir.js";
@@ -235,6 +236,18 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
           aggNames,
           diags,
         );
+      }
+      // A `store`'s state initialisers and action bodies are the THIRD frontend
+      // expression surface — and the one the F3 gate originally missed.  A store
+      // action is emitted by each frontend's own store builder (`react`'s
+      // zustand slice, `flutter/store-builder.ts`'s Riverpod notifier, the Feliz
+      // Elmish `update` arm), and none of them renders a collection op either:
+      // `action tidy() { tags := tags.distinct() }` CRASHES the Feliz emitter
+      // (`feliz/fs-expr.ts` has no leaf for it) and emits uncompilable Dart
+      // (`state.tags.distinct()`) on Flutter — from a `.ddd` that validated
+      // clean.  Same vocabulary gap, same gate.
+      for (const store of ui.stores) {
+        checkFrontendCollectionOps(store, `store '${store.name}'`, mapRendered, diags);
       }
     }
   }
@@ -576,11 +589,21 @@ function checkSubPrimitivePlacement(
   for (const root of walkerRenderedExprs(host)) visit(root, undefined);
 }
 
+/** Every expression surface of a STORE a frontend emits: the state
+ *  initialisers.  (Its action bodies are walked separately, exactly as a
+ *  page's are.)  A store has no `body`/`title`/`derived`, so it cannot go
+ *  through `walkerRenderedExprs`. */
+function storeRenderedExprs(store: StoreIR): ExprIR[] {
+  const out: ExprIR[] = [];
+  for (const s of store.state) if (s.init) out.push(s.init);
+  return out;
+}
+
 /** F3 — reject a stdlib collection op anywhere the frontend walker renders it.
  *  One diagnostic per (host, op name): a body reading `rows.count` twice is one
  *  authoring mistake, not two. */
 function checkFrontendCollectionOps(
-  host: PageIR | ComponentIR,
+  host: PageIR | ComponentIR | StoreIR,
   where: string,
   mapRendered: boolean,
   diags: LoomDiagnostic[],
@@ -619,7 +642,9 @@ function checkFrontendCollectionOps(
     });
   };
   const empty: ReadonlySet<string> = new Set<string>();
-  for (const e of walkerRenderedExprs(host)) visit(e, empty);
+  // `lifetime` is StoreIR's discriminator — a page/component never carries one.
+  const roots = "lifetime" in host ? storeRenderedExprs(host) : walkerRenderedExprs(host);
+  for (const e of roots) visit(e, empty);
   for (const action of host.actions) for (const s of action.body) visitStmt(s, empty);
 }
 

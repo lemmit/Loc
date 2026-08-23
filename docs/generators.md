@@ -60,22 +60,27 @@ remaining gaps + sequencing are in
 | Feature | node | dotnet | java | python | elixir | Gate set |
 | --- | :-: | :-: | :-: | :-: | :-: | --- |
 | Event-sourced storage `persistedAs: eventLog` | ✓ | ✓ | ✓ | ✓ | ✓ | `EVENT_SOURCING_BACKENDS` |
-| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | 🚫 | `EVENT_SOURCING_WORKFLOW_BACKENDS` |
+| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | ✓ | `EVENT_SOURCING_WORKFLOW_BACKENDS` |
 | TPH inheritance `inheritanceUsing: sharedTable` | ✓ | ✓ | ✓ | ✓ | ✓ | `TPH_CAPABLE` |
 | TPC inheritance `inheritanceUsing: ownTable` | ✓ | ✓ | ✓ | ✓ | ✓ | (universal) |
 | Discriminated unions / generic carriers (`paged`/`envelope`) | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_UNION_BACKENDS` |
 | `when` canCommand gate + `can_<op>` query | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_WHEN_BACKENDS` |
 | Exception-less returns (`op(): X or NotFound`) | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_RETURN_BACKENDS` |
 | Capability `filter` — relational (non-principal) | ✓ | ✓ | ✓ | ✓ | ✓ | `LIMITED_FAMILIES` |
-| Capability `filter` — principal (`currentUser`/tenancy) | ✓ | ✓ | ✓ | 🚫 | ✓ | system-checks.ts |
+| Capability `filter` — principal (`currentUser`/tenancy) | ✓ | ✓ | ✓ | ✓ | ✓ | system-checks.ts |
 | Provenanced fields (runtime trace) | ✓ | ✓ | ✓ | ✓ | ✓ | `PROVENANCE_BACKENDS` |
-| Per-operation `audited` | ✓ | ✓ | 🚫 | 🚫 | 🚫 | `AUDIT_OP_BACKENDS` |
-| Audited **lifecycle** (`audited create`/`destroy`) | ✓ | 🚫 | 🚫 | 🚫 | 🚫 | `AUDIT_LIFECYCLE_BACKENDS` |
+| Per-operation `audited` | ✓ | ✓ | ✓ | ✓ | ✓ | `AUDIT_OP_BACKENDS` |
+| Audited **lifecycle** (`audited create`/`destroy`) | ✓ | ✓ | ✓ | ✓ | ✓ | `AUDIT_LIFECYCLE_BACKENDS` |
 | Audit/context stamping (`with audit`) | ✓ | ✓ | ✓ | ✓ | ✓ | (universal) |
 
-Open gaps (tracked in the plan): principal Python filters (W1b), per-op/
-lifecycle `audited` beyond node/dotnet (W3), and event-sourced workflow
-(saga applier) support on Elixir (W4).
+**Re-verified 2026-08-23 against `src/ir/validate/checks/system-checks.ts`: every
+gate set in this table now holds all five backends** — `EVENT_SOURCING_WORKFLOW_BACKENDS`,
+`LIMITED_FAMILIES` + `supportsPrincipalFilter`, `AUDIT_OP_BACKENDS` and
+`AUDIT_LIFECYCLE_BACKENDS` each list `node, dotnet, java, python, elixir`. The
+former open gaps (principal Python filters W1b, per-op/lifecycle `audited`
+beyond node/dotnet W3, event-sourced workflow on Elixir W4) are **closed**. The
+gaps that remain are language-level rather than per-backend — see
+[`audits/language-gaps-2026-08.md`](audits/language-gaps-2026-08.md).
 
 | Construct | TypeScript (Hono + Drizzle) | .NET (ASP.NET + EF + Mediator) | React (Vite + RQ + Mantine) |
 | --- | --- | --- | --- |
@@ -1027,7 +1032,7 @@ Aggregate IR maps onto Ecto/Phoenix:
 | `persistedAs: eventLog` + `apply(...)` (event sourcing) | **Supported** (`src/generator/elixir/vanilla/eventsourced-emit.ts`): an append-only `<agg>_events` stream + `apply` fold + rehydrator, the elixir sibling of the node/.NET/python/java event stores. |
 | `shape: document` persistence | **Supported (CRUD + finds/ops — DEBT-07; Route A)** — `src/generator/elixir/vanilla/document-emit.ts`: the whole aggregate persists as one jsonb blob in an `(id, data, version)` table, where `data` is a **typed `embeds_one :data, <Agg>.Data` embed** cast via `cast_embed` (the same `validate_required` / invariant validators the relational `base_changeset` runs); reads merge `data` back over the id. **Custom finds** filter in memory (`Repo.all |> Enum.filter`), **named operations** run their body, pure **`function`s** compile, and **returning ops** (`: A or B`) emit the tagged tuple — all in **struct mode** over the loaded `row.data` struct (Route A slices 1–2 deleted the old string-keyed `docMap` fork), incl. value-object-subfield reads. The residual (audited/provenanced ops, collection mutation, derived / dereferenced-entity / collection-method reads, paged/union finds) stays gated (`loom.vanilla-document-unsupported`). `shape: embedded` (DEBT-32, `src/generator/elixir/vanilla/schema-emit.ts`): each entity part is an Ecto `embedded_schema` module the root `embeds_many`s (value objects fold to `:map`), stored inline in the parent's jsonb column — a containment-mutating op (`lines += Line{…}`) appends the struct + `put_embed`s. `contains` on a *relational*-shape aggregate persists as child TABLES (§11c): each part is a table-backed schema the owner `has_many`s + `cast_assoc`s + preloads, INCLUDING **deep part-in-part** (M-T6.2 Drain C — a part's own `contains` becomes a `has_many` on its grandchild table, FK'd to the direct parent; the migration emitter's part tier now emits grandchild tables and the read/update preload nests `[lines: :tags]`; boot-verified). The `loom.vanilla-containment-unsupported` gate is **fully retired**. |
 | `test "…" { … }` | **ExUnit** → `test/<ctx>/<agg>_test.exs` (`use ExUnit.Case, async: true`) + a once-per-project `test/test_helper.exs`. (`src/generator/elixir/vanilla/tests-emit.ts`) ports the full Loom idiom onto a **pure domain core** emitted on the aggregate module (`domain-core-emit.ts`): `def create(attrs) = base_changeset \|> Ecto.Changeset.apply_action(:insert)` and `def <op>(record, params)` = precondition + in-memory mutation — both Repo-free. So `Agg.create({…})` → `{:ok, p} = Agg.create(%{…})`, `expect(create({bad})).toThrow()` → `assert {:error, _} = …`, `o.op(x)` → `o = Agg.op(o, %{…})`, precondition `toThrow` → `assert_raise`, field reads → `assert ==` (money/decimal via `Decimal`). Verified green under `mix test` with no DB. A **value-object construction invariant** (`expect(Money{…}).toThrow()`) lowers to the VO's validating constructor — `assert {:error, _} = Money.new(%{…})` (F5; `valueobject-emit.ts` emits `<VO>.new/1`, and the aggregate `base_changeset` runs it via `validate_vo` so the invariant is enforced at the real create/update path, not just in tests). A `config/test.exs` is emitted so `mix test` can load (never copied into the prod image). See [`docs/audits/test-parity-generated-backends.md`](audits/test-parity-generated-backends.md). |
-| `seed [name] [raw] { … }` | **NOT EMITTED — the one silent gap left in this table.** Every other backend emits a first-boot seeder and runs it after migrating (`db/seed.ts` / `app/db/seed.py` / `<Ctx>SeedRunner` / `Seed.cs`); on this backend nothing reads `ctx.seeds`, so a declared dataset is dropped with no diagnostic. The layout adapter reserves the `priv/repo/seeds.exs` slot but no emitter writes it. See [B19](audits/behavioral-parity-bugs-2026-07.md#b19--elixir--seed-datasets-emit-no-seeder-at-all-silently-dropped) and mission M-T6.37 (`docs/new-plan/T6-backend-parity.md`). |
+| `seed [name] [raw] { … }` | **Supported** (`src/generator/elixir/vanilla/seed-emit.ts`, M-T6.37) — one `<Ctx>.Seeds` module per context that declares a `seed` block, run at boot after migrating and also reachable manually via the emitted `priv/repo/seeds.exs` (`mix run priv/repo/seeds.exs`). Domain-path rows go through `<Agg>Repository.insert(%{…})` so the aggregate's `base_changeset` invariants run (a bad seed fails at boot rather than writing a corrupt row); `raw` rows bypass the domain and emit the shared cross-backend INSERT via `renderSeedRowInsert`, **schema-qualified** because Phoenix aggregates live in per-context Postgres schemas. Idempotent per D-SEED-IDEMPOTENCY: a `__loom_seed` marker table records each applied dataset (ship-once), `default` always runs and other datasets opt in via the `LOOM_SEED` env var. Closes [B19](audits/behavioral-parity-bugs-2026-07.md#b19--elixir--seed-datasets-emit-no-seeder-at-all-silently-dropped) — the last silent gap in this table (verified 2026-08-23). |
 
 ### Per-page detail
 

@@ -220,3 +220,90 @@ describe("persistence: mikroorm — the gates key on the ADAPTER, not the featur
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// The one shape where mikroorm is genuinely BEHIND drizzle rather than at
+// parity: a SCALAR COLLECTION field on the aggregate ROOT (`tags: string[]`,
+// `kinds: Status[]`).
+//
+// `columnsOf` (typescript/emit/mikroorm.ts) filters out the two collection
+// shapes it can map — `X id[]` (a pivot Row) and `<VO>[]` (one inline jsonb
+// column) — and routes the rest into `columnsForType`, whose arms are primitive
+// / enum / id / valueobject.  An `array` hits the default arm, which THROWS
+// `mikroorm: unsupported field kind 'array' … (validator gap)`.  Its own message
+// named the gap; nothing gated it, so `ddd generate system` aborted with a raw
+// Error on a `.ddd` that parsed and validated clean.  Drizzle emits a native
+// Postgres array for the same field.
+//
+// Scoped to the shapes that actually reach the root column emitter: `relational`
+// and `embedded` both do; `shape: document` folds the whole aggregate (arrays
+// included) into one jsonb blob, and an event-sourced aggregate has no state
+// table at all.
+// ---------------------------------------------------------------------------
+describe("persistence: mikroorm — root scalar-collection fields (the crash the gate closes)", () => {
+  /** A second aggregate carrying the field under test, appended to the shared
+   *  context so the rest of the model is the suite's usual one. */
+  const withField = (decl: string, shape = "") => `
+      enum Kind { A, B }
+      aggregate Bag ${shape} with crudish {
+        label: string
+        ${decl}
+      }
+      repository Bags for Bag { }`;
+
+  it("rejects `tags: string[]` — the reported codegen crash", async () => {
+    const msgs = await mikroDiags(withField("tags: string[]"));
+    expect(msgs.length).toBe(1);
+    expect(msgs[0]).toContain("tags");
+    expect(msgs[0]).toContain("string[]");
+    // The message must not repeat the generic "no relational mapping anywhere"
+    // tail — drizzle maps this fine, and the fix hint says so.
+    expect(msgs[0]).toContain("persistence: drizzle");
+  });
+
+  it("rejects an ENUM collection too (`kinds: Kind[]`)", async () => {
+    expect(await mikroDiags(withField("kinds: Kind[]"))).toHaveLength(1);
+  });
+
+  it("rejects the OPTIONAL spelling (`tags: string[]?`)", async () => {
+    expect(await mikroDiags(withField("tags: string[]?"))).toHaveLength(1);
+  });
+
+  it("rejects it under `shape: embedded` too — that shape uses the same root columns", async () => {
+    expect(await mikroDiags(withField("tags: string[]", "shape: embedded"))).toHaveLength(1);
+  });
+
+  it("does NOT fire under `shape: document` — the whole aggregate is one jsonb blob", async () => {
+    expect(await mikroDiags(withField("tags: string[]", "shape: document"))).toEqual([]);
+  });
+
+  it("does NOT fire for a value-object collection (`<VO>[]` → an inline jsonb column)", async () => {
+    expect(
+      await mikroDiags(`
+      valueobject Money { amount: int  currency: string }
+      ${withField("prices: Money[]")}`),
+    ).toEqual([]);
+  });
+
+  it("does NOT fire for a reference collection (`<Agg> id[]` → a pivot table)", async () => {
+    expect(await mikroDiags(withField("others: Order id[]"))).toEqual([]);
+  });
+
+  it("does NOT fire for a collection field on a contained PART (already one jsonb column)", async () => {
+    expect(
+      await mikroDiags(`
+      aggregate Bag with crudish {
+        label: string
+        contains lines: Line[]
+      }
+      entity Line { sku: string  tags: string[] }
+      repository Bags for Bag { }`),
+    ).toEqual([]);
+  });
+
+  it("keys on the ADAPTER — the same field is clean on drizzle", async () => {
+    expect(await drizzleErrorCodes(withField("tags: string[]"))).not.toContain(
+      "loom.mikroorm-unsupported",
+    );
+  });
+});

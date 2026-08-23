@@ -40,6 +40,7 @@ import {
   pagedReadCmd,
   readLoadedType,
   refetchMsgCase,
+  wfHasForm,
 } from "./wire.js";
 
 /** The F# Model type for a `state {}` field.  A `File`-typed field holds the
@@ -814,6 +815,15 @@ export function renderUpdate(
   const workflowArms = workflowForms.map((f) => {
     const setters = formFieldSetterArms(f);
     const nav = `Cmd.navigatePath(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
+    // A PARAM-LESS workflow (`run()`) has no form record: the submit posts `()`
+    // (empty body) and the done arm doesn't reset a form field.
+    if (!wfHasForm(f)) {
+      return [
+        `  | ${f.submitMsg} -> model, Cmd.OfAsync.perform Api.${f.apiFn} () ${f.doneMsg}`,
+        `  | ${f.doneMsg} (Ok ()) -> model, ${nav}`,
+        `  | ${f.doneMsg} (Error _) -> model, Cmd.none`,
+      ].join("\n");
+    }
     return [
       ...setters,
       ...touchArm(f),

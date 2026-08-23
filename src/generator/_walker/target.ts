@@ -1276,13 +1276,18 @@ export interface WalkerTarget {
    *  `Table`, even though it implements the control seams.  Server mode needs
    *  two things the client mode doesn't: a `totalPages` off the paged ENVELOPE,
    *  and a refetch that feeds the sort/page state back through the query's
-   *  `of:` args.  Feliz's wire layer decodes only the envelope's `items` into a
-   *  plain `'T list` (M-T2.6 left the Feliz envelope unwrap pinned), so
-   *  `rows.totalPages` doesn't type-check and a sortable header would write
-   *  state nothing refetches on.  Suppressing both there renders the table as
-   *  the plain, server-ORDERED page it already is — correct, just not
-   *  interactive — rather than emitting a control that lies.  Omitted → server
-   *  mode is supported (every JSX target). */
+   *  `of:` args.  Suppressing both renders the table as the plain,
+   *  server-ORDERED page it already is — correct, just not interactive —
+   *  rather than emitting a control that lies.
+   *
+   *  **NO TARGET SETS THIS TODAY.**  Feliz was the one that did (its wire layer
+   *  decoded only the envelope's `items`, so `rows.totalPages` didn't
+   *  type-check); M-T2.6's Feliz leg landed both halves — a controlled `.all`
+   *  decodes the page count into a sibling Model field and the control setters
+   *  refetch — and the flag came off (`test/generator/feliz/table-controls.test.ts`
+   *  §"feliz server-paged scaffold list").  The slot stays for the NEXT
+   *  non-JS target that arrives without an envelope unwrap.  Omitted → server
+   *  mode is supported, which is every target as things stand. */
   serverPagedControls?: boolean;
 
   /** Clamp the SERVER-supplied page count to at least 1.  Omitted → the JS
@@ -1439,10 +1444,13 @@ export interface WalkerTarget {
    *  no arm for it" and the caller falls through to its ordinary method-call
    *  emission — so a target may implement this partially.  The four JS targets
    *  supply the shared `_expr/js-intrinsics.ts` table via `jsExprLeaves`
-   *  (they emit the same language the TypeScript backend does).  Feliz /
-   *  Flutter leave it undefined for now and keep today's verbatim behaviour —
-   *  each needs its own leaf table (F# `.ToUpper()`, Dart `.toUpperCase()`),
-   *  which is tracked separately. */
+   *  (they emit the same language the TypeScript backend does).  **Feliz and
+   *  Flutter supply it too** — each routes to its own leaf table
+   *  (`renderFsIntrinsic` in `feliz/fs-expr.ts`, `renderDartIntrinsic` in
+   *  `flutter/dart-expr.ts`), deliberately the SAME table its non-view path
+   *  uses (the Feliz MVU `update` walk, the Flutter notifier/action walk), so
+   *  `s.replace(a, b)` cannot mean one thing in a page body and another in an
+   *  action body.  No target is left on the verbatim fallback. */
   renderIntrinsic?(
     receiverType: TypeIR,
     member: string,

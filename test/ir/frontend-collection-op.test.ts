@@ -360,3 +360,103 @@ system Demo {
     expect(d.message).toContain("Feliz");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The THIRD expression surface: a `store`.
+//
+// The gate originally walked pages and components only, so a collection op in a
+// STORE escaped it entirely — and a store is not a lesser surface: its action
+// bodies and state initialisers are emitted by every frontend's own store
+// builder (React's zustand slice, `flutter/store-builder.ts`'s Riverpod
+// notifier, the Feliz Elmish `update` arm), none of which has a collection-op
+// renderer either.  Measured on `store Cart { action tidy() { tags :=
+// tags.distinct() } }`: `ddd parse` clean, then the FELIZ generator CRASHES
+// (`feliz/fs-expr.ts` has no leaf for `distinct`) and FLUTTER emits
+// `state.tags.distinct()` — Dart that does not compile.  Same vocabulary gap as
+// a page body, so the same gate, at the same call site.
+// ---------------------------------------------------------------------------
+describe("loom.frontend-collection-op-unsupported — store surfaces", () => {
+  /** A store whose action body is the variable, plus a page so the ui renders. */
+  const storeUi = (member: string) => `
+  store Cart {
+    state { tags: string[] }
+    ${member}
+  }
+  page X { route: "/x"  body: Text("x") }`;
+
+  it("flags a collection op in a STORE ACTION body — the reported crash", async () => {
+    expect(await codes(storeUi("action tidy() { tags := tags.distinct() }"))).toContain(CODE);
+  });
+
+  it("flags it on feliz (crash) and flutter (uncompilable Dart) alike", async () => {
+    for (const [framework, platform] of [
+      ["feliz", "feliz"],
+      ["flutter", "flutter"],
+    ] as const) {
+      expect(
+        await codes(storeUi("action tidy() { tags := tags.distinct() }"), framework, platform),
+        `expected the store gate on ${framework}`,
+      ).toContain(CODE);
+    }
+  });
+
+  it("flags the property form and every other catalogue op in a store action", async () => {
+    for (const op of [
+      "tags.count",
+      "tags.first",
+      "tags.take(3)",
+      "tags.skip(3)",
+      "tags.sortBy(t => t)",
+      'tags.where(t => t != "").count',
+      'tags.join(", ")',
+    ]) {
+      expect(
+        await codes(storeUi(`state { n: int = 0 }  action tidy() { n := ${op} }`)),
+        `expected ${op} to be gated in a store action`,
+      ).toContain(CODE);
+    }
+  });
+
+  it("flags a collection op in a store STATE INITIALISER", async () => {
+    expect(
+      await codes(`
+  store Cart {
+    state { n: int = [1, 2, 3].count }
+  }
+  page X { route: "/x"  body: Text("x") }`),
+    ).toContain(CODE);
+  });
+
+  it("names the store as the source, so the diagnostic points at the right host", async () => {
+    const found = (await diags(storeUi("action tidy() { tags := tags.distinct() }"))).find(
+      (d) => d.code === CODE,
+    )!;
+    expect(found.source).toBe("store 'Cart'");
+    expect(found.message).toContain("`.distinct`");
+  });
+
+  it("leaves `.map(λ)` in a store alone on the frameworks that render it", async () => {
+    const mapStore = `
+  store Cart {
+    state { tags: string[] }
+    action shout() { tags := tags.map(t => t) }
+  }
+  page X { route: "/x"  body: Text("x") }`;
+    expect(await codes(mapStore, "react", "static")).not.toContain(CODE);
+    expect(await codes(mapStore, "flutter", "flutter")).not.toContain(CODE);
+    // …and keeps the Feliz carve-out, exactly as on a page body.
+    expect(await codes(mapStore, "feliz", "feliz")).toContain(CODE);
+  });
+
+  it("leaves an ordinary store action alone — no false positive", async () => {
+    expect(
+      await codes(`
+  store Cart {
+    state { tags: string[]  n: int = 0 }
+    action add(t: string) { tags += t  n += 1 }
+    action clear() { tags := [ ]  n := 0 }
+  }
+  page X { route: "/x"  body: Text("x") }`),
+    ).not.toContain(CODE);
+  });
+});

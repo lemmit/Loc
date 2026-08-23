@@ -67,6 +67,7 @@ import {
   resolveDataSourceConfig,
 } from "../../util/resolve-datasource.js";
 import { isDeepScopeFilter } from "../../util/tenant-stance.js";
+import { typeLabel } from "../../util/type-label.js";
 import { walkExprDeep, walkWorkflowStmtExprsDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { firstNonGateRef, GATE_ALLOWED_REFS } from "./query-checks.js";
@@ -611,9 +612,18 @@ export function validateCurrentUserNeedsAuthUi(sys: SystemIR, diags: LoomDiagnos
 
 /** The render-scope members a page and a component share — every place a
  *  `currentUser` read can hide in one.  (`PageIR` carries more; only these
- *  four are walked here.) */
+ *  five are walked here.)
+ *
+ *  `requires` is page-only (a component has no gate expression) and was the
+ *  member this shape originally omitted — the SECURITY-shaped hole, since
+ *  `page { requires currentUser.role == "admin" }` is precisely the place a
+ *  `currentUser` read is load-bearing.  Without a session binding the gate
+ *  expression renders against nothing (`_frontend/gate-expr.ts` emits the read
+ *  verbatim), so an unauthenticated ui shipped an access check that could never
+ *  evaluate — clean validation, no guard. */
 interface UiRenderHost {
   body?: ExprIR;
+  requires?: ExprIR;
   state: { init?: ExprIR }[];
   derived: { expr: ExprIR }[];
   actions: { body: StmtIR[] }[];
@@ -621,6 +631,7 @@ interface UiRenderHost {
 
 function hostReadsCurrentUser(host: UiRenderHost): boolean {
   if (exprUsesCurrentUser(host.body)) return true;
+  if (exprUsesCurrentUser(host.requires)) return true;
   if (host.state.some((s) => exprUsesCurrentUser(s.init))) return true;
   if (host.derived.some((d) => exprUsesCurrentUser(d.expr))) return true;
   return host.actions.some((a) => a.body.some(stmtUsesCurrentUser));
@@ -2902,6 +2913,49 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
       for (const agg of ctx.aggregates) {
         const a = agg as EnrichedAggregateIR;
         const where = `aggregate '${ctxName}.${agg.name}'`;
+        // (6) SCALAR COLLECTION field on the aggregate ROOT (`tags: string[]`,
+        // `kinds: Status[]`).  `columnsOf` (typescript/emit/mikroorm.ts) filters
+        // out the two collection shapes it CAN map — `X id[]` (a pivot Row) and
+        // `<VO>[]` (one inline jsonb column) — and routes everything else into
+        // `columnsForType`, whose four arms are primitive / enum / id / value
+        // object.  An `array` falls to the default arm, which THROWS
+        // `unsupported field kind 'array' … (validator gap)` — codegen aborts on
+        // a `.ddd` that parsed and validated clean.  The throw named the gap; it
+        // was never gated.  Drizzle stores the same field as a native Postgres
+        // array, so this is the one place mikroorm is genuinely BEHIND drizzle
+        // rather than at parity — hence its own `#scalar-array` message instead
+        // of the "no relational mapping anywhere" generic tail.
+        //
+        // Scoped to the shapes that actually reach the row emitter:
+        //   • `persistedAs: eventLog` — no state table; the collection folds
+        //     in-memory from the event stream, so `columnsOf` never runs.
+        //   • `shape: document` — the whole aggregate is one jsonb blob, arrays
+        //     included (verified: it generates).  `relational` and `embedded`
+        //     BOTH go through the root column emitter, so both are gated.
+        // The safe interim fix per the parity policy: an honest refusal now, and
+        // it drains when the emitter grows a jsonb (or PG-array) column arm —
+        // exactly the one a contained PART's collection field already gets.
+        const rootShape = effectiveSavingShape(a, resolveDataSourceConfig(a, ctx, sys));
+        if (a.persistedAs !== "eventLog" && rootShape !== "document") {
+          for (const f of a.fields) {
+            const t = f.type.kind === "optional" ? f.type.inner : f.type;
+            if (t.kind !== "array") continue;
+            // `X id[]` (pivot table) and `<VO>[]` (inline jsonb) are mapped —
+            // only a PRIMITIVE / ENUM element array has no column arm.
+            if (t.element.kind !== "primitive" && t.element.kind !== "enum") continue;
+            diags.push({
+              severity: "error",
+              code: "loom.mikroorm-unsupported",
+              message: diagMessage("loom.mikroorm-unsupported#scalar-array", {
+                name: dep.name,
+                subject: where,
+                field: f.name,
+                element: typeLabel(t.element),
+              }),
+              source: `${sys.name}/${dep.name}`,
+            });
+          }
+        }
         // (4) HIERARCHICAL tenancy scope IS supported now (the boundary is
         // drained).  It was gated here because `whereToMikroFilter`'s FilterQuery
         // subset has no prefix test AND `mikroContextFilters` CAUGHT the

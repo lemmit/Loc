@@ -33,10 +33,11 @@
  *  interpolates. */
 type MessageEntry = string | ((params: never) => string);
 
-/** The four `*-deployable-missing-ui` codes (`react`/`svelte`/`vue`/`angular`)
- *  say the same thing about a different platform — but they stay FOUR codes so
- *  the fix-hint registry can dispatch per platform (`src/language/fix-hints.ts`).
- *  One shared builder, four catalog entries: a key must resolve to exactly the
+/** The six `*-deployable-missing-ui` codes (`react`/`svelte`/`vue`/`angular`/
+ *  `feliz`/`flutter`) say the same thing about a different platform — but they
+ *  stay SIX codes so the fix-hint registry can dispatch per platform
+ *  (`src/language/fix-hints.ts`).
+ *  One shared builder, six catalog entries: a key must resolve to exactly the
  *  code its call site attaches (`codeOfMessageKey`, gated by
  *  `test/system/diagnostic-catalog.test.ts`), so a single shared key would be a
  *  hole in that invariant — and a key is never computed at a call site. */
@@ -261,6 +262,18 @@ export const DIAGNOSTIC_MESSAGES = {
   "loom.svelte-deployable-missing-ui": spaDeployableMissingUi("Svelte"),
   "loom.vue-deployable-missing-ui": spaDeployableMissingUi("Vue"),
   "loom.angular-deployable-missing-ui": spaDeployableMissingUi("Angular"),
+  // Feliz and Flutter are self-hosting frontends (own toolchain, own bundle);
+  // without a `ui:` the Feliz generator THREW a raw `Error: Feliz deployable
+  // 'web' has no ui binding` and the Flutter one emitted a placeholder app with
+  // exit 0 — both after `ddd parse` reported zero errors.
+  "loom.feliz-deployable-missing-ui": spaDeployableMissingUi("Feliz"),
+  "loom.flutter-deployable-missing-ui": spaDeployableMissingUi("Flutter"),
+  // Rule 3 — `ui:`/`hosts:` on a platform whose descriptor says `mountsUi:
+  // false` (today: `node`).  The platform menu is DERIVED from the descriptor
+  // table, never hand-listed, so it can't drift the way the inline literal did
+  // (it omitted angular, feliz and python for as long as they had existed).
+  "loom.ui-binding-unmountable-platform": (p: { platform: unknown; menu: unknown }) =>
+    `'ui:'/'hosts:' binding is only valid on platforms that mount a UI (${p.menu}); got '${p.platform}'.`,
   "loom.auth-ui-target-open": (p: { name: unknown; targetName: unknown }) =>
     `Frontend deployable '${p.name}' declares 'auth: ui' but its target '${p.targetName}' is not 'auth: required'; the guard has no session endpoint to probe.`,
   "loom.auth-ui-misplaced": (p: { name: unknown }) =>
@@ -1116,6 +1129,11 @@ export const DIAGNOSTIC_MESSAGES = {
     `projection '${p.name}': 'select ${p.field} = …' references '${p.unresolved}', which ` +
     `resolves to nothing — not a field of the '${p.source}' source, not a 'join' alias, ` +
     `not a parameter${p.hint}. It would be emitted as an undeclared identifier.`,
+  "loom.projection-where-not-queryable": (p: { name: unknown; offending: unknown }) =>
+    `projection '${p.name}': where-clause is not queryable (${p.offending}). ` +
+    `Allowed: comparisons, &&/||/!, parens, '<alias>.<column>' / '<alias>.<vo>.<sub>' refs, ` +
+    `parameter refs, literals — the 'where' is pushed down to SQL, so it carries the same ` +
+    `subset a repository 'find … where' does.`,
   "loom.projection-groupby-source-invalid": (p: { name: unknown; why: unknown }) =>
     `projection '${p.name}' declares 'group by', but ${p.why}. A grouped ` +
     `projection reads (and groups) an AGGREGATE source's table in SQL — ` +
@@ -1323,6 +1341,18 @@ export const DIAGNOSTIC_MESSAGES = {
     `(with or without params), one or more named success/error arms, and an optional ` +
     `\`else\`.  Otherwise host this ui on an SPA frontend (React/Vue/Svelte/Angular), or ` +
     `drive the op through a form primitive (CreateForm/OperationForm).  Tracked in M-T6.15.`,
+  "loom.flutter-async-effect-unsupported": (p: {
+    where: unknown;
+    uiName: unknown;
+    name: unknown;
+  }) =>
+    `${p.where}: \`match await …\` (an async effect) is used in a COMPONENT action on ui ` +
+    `'${p.uiName}', hosted by the Flutter deployable '${p.name}', but the Flutter component ` +
+    `emitter does not render one — an async effect needs the page shell's notifier and route ` +
+    `id.  A component carrying one is DROPPED: no widget is emitted for it and every call ` +
+    `site renders an empty \`SizedBox.shrink()\`.  Move the \`match await\` into a PAGE ` +
+    `action (Flutter renders it there), or drive the op through a form primitive ` +
+    `(CreateForm/OperationForm).  Tracked in M-T1.20.`,
 
   // ----------------------------------------------------------------------
   // src/ir/validate/checks/system-checks.ts
@@ -1781,6 +1811,24 @@ export const DIAGNOSTIC_MESSAGES = {
     `The MikroORM adapter is at full parity with Drizzle (M-T6.9); the only shapes it now ` +
     `rejects have no relational persistence mapping at all (drizzle included) — restructure ` +
     `the model as the message suggests.`,
+  // The ONE remaining shape where mikroorm is behind drizzle rather than at
+  // parity, so it gets its own message: the generic tail above ("no relational
+  // mapping at all, drizzle included") would be a lie here.
+  "loom.mikroorm-unsupported#scalar-array": (p: {
+    name: unknown;
+    subject: unknown;
+    field: unknown;
+    element: unknown;
+  }) =>
+    `Deployable '${p.name}' selects 'persistence: mikroorm', but ${p.subject} declares the ` +
+    `scalar collection field '${p.field}: ${p.element}[]'. The MikroORM row emitter maps a ` +
+    `root aggregate field to a column per declared kind (primitive / enum / id / value ` +
+    `object) and has no arm for an array of primitives or enum values, so generation would ` +
+    `abort. Drizzle stores it as a native Postgres array — use 'persistence: drizzle' on ` +
+    `this deployable, move the collection onto a contained entity part (parts fold a ` +
+    `collection field into one jsonb column on this adapter), or model it as a value-object ` +
+    `collection ('<VO>[]') or a reference collection ('<Agg> id[]'), both of which mikroorm ` +
+    `already persists.`,
   "loom.find-predicate-unsupported": (p: {
     name: unknown;
     adapter: unknown;

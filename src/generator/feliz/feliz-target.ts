@@ -638,7 +638,7 @@ export const felizTarget: WalkerTarget = {
   // (paramless) submit button dispatching `Submit<Wf>Form`.  The form state +
   // encoder + POST `/workflows/<wf>` Cmd live in `update`/`Api` (wired by
   // index.ts's `collectPageWorkflowForms`).  Falls through when `runs:` isn't a
-  // ref to a reachable workflow with scalar params.
+  // ref to a reachable workflow.
   renderWorkflowForm: (call, ctx) => {
     if (call.kind !== "call") return null;
     const names = call.argNames ?? [];
@@ -652,7 +652,11 @@ export const felizTarget: WalkerTarget = {
       idLabelsFrom(ctx.aggregatesByName.values()),
       vosFromBc(ctx.bcByWorkflow.get(wfName)),
     );
-    if (form.fields.length === 0 && form.fieldArrays.length === 0) return null;
+    // A PARAM-LESS workflow (`run()`) renders too — an empty form with just the
+    // submit (no inputs, no validity guard), matching `renderOperationForm`'s
+    // param-less op.  (Returning null here dropped the whole primitive: the
+    // shared fallback emits `primitive-form-of`, which the feliz pack has no
+    // renderer for, so the form vanished into a pack comment.)
     // Testid namespace: the scaffold's `testid:` arg (`workflow-place_order`) or
     // the `workflow-<snake(wf)>` default the workflow page-object builder computes.
     const base = stringNamed(call, "testid") ?? `workflow-${snake(wf.name)}`;

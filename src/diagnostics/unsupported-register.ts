@@ -160,6 +160,13 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     mission: "M-T6.35",
   },
   {
+    code: "loom.flutter-async-effect-unsupported",
+    kind: "gap",
+    site: "src/ir/validate/checks/store-checks.ts:466",
+    what: "`match await` in a COMPONENT action silently drops the whole widget on Flutter",
+    mission: "M-T1.20",
+  },
+  {
     code: "loom.flutter-primitive-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:562",

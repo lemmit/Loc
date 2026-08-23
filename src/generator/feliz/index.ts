@@ -3,9 +3,13 @@
 // PROJECTION off `state {}` + named `action`s (§2/§3b); the `view` rides the
 // shared `walkBody` with `felizTarget` + the procedural Feliz pack (§4).
 //
-// v1 scope: a single-page app (the first example is Counter-class).  Routing
-// across multiple pages is a follow-up; a >1-page ui emits every page's view
-// but wires only the first into `Program` (with a visible TODO).
+// Multi-page routing ships: a ui is `routed` when it has >1 page OR any page
+// carries a route param (`:1086`).  A routed ui emits the `Page` union +
+// `parseUrl` (`renderRouting`, `:446`) ahead of the Model, one `<page>View` per
+// page, and a `React.router` root that dispatches on the active `Page`; a detail
+// page's case carries its route param and the `routeId` accessor resolves an
+// `id` read from outside a page view fn (`update`/`init`).  A single-page ui
+// still emits the one flat root `view` with no routing table.
 
 import type {
   AggregateIR,
@@ -120,6 +124,7 @@ import {
   renderValidation,
   renderViewModule,
   renderWireTypes,
+  wfHasForm,
 } from "./wire.js";
 
 /** The `Remote<'T>` envelope every read's Model field carries — the MVU
@@ -1099,10 +1104,15 @@ function renderAppFs(
   const asyncEffectActions = new Map(asyncEffects.map((e) => [e.action, e] as const));
   const hasEffects = asyncEffects.length > 0;
   // Shared form-record wiring (Model field + `type <X>Form` + encoder).  A
-  // PARAM-LESS op (`confirm()`) has NO form record — it wires only a trigger +
-  // submit + empty-`{}` POST — so it's excluded here but still in `operationForms`
-  // for its Msg / update arm / Api fn / view.
-  const formRecords = [...forms, ...operationForms.filter(opHasForm), ...workflowForms];
+  // PARAM-LESS op (`confirm()`) or workflow (`run()`) has NO form record — it
+  // wires only a trigger + submit + empty-`{}` POST — so it's excluded here but
+  // still in `operationForms` / `workflowForms` for its Msg / update arm / Api
+  // fn / view.
+  const formRecords = [
+    ...forms,
+    ...operationForms.filter(opHasForm),
+    ...workflowForms.filter(wfHasForm),
+  ];
   // Foreign-key `idselect` fields need the target aggregate's `.all` loaded to
   // populate their options — an IMPLICIT list read per target, merged into the
   // page's read set (deduped against any explicit QueryView `.all` of it) so the
@@ -1143,6 +1153,12 @@ function renderAppFs(
   // (`Remote<AuditEntry list>`) and the Api fn that reference them.
   const hasHistoryRead = reads.some((r) => r.history);
   const hasForms = formRecords.length > 0;
+  // A PARAM-LESS op (`confirm()`) / workflow (`run()`) has NO form record, but it
+  // still POSTs through `Api` and navigates on success — so the Http + Router
+  // wiring keys off the full form LISTS, not just the records that survive
+  // `opHasForm` / `wfHasForm`.  (The Thoth open stays on `hasForms`: a param-less
+  // submit posts a literal `"{}"`, so it needs no encoder.)
+  const hasFormSubmits = hasForms || operationForms.length > 0 || workflowForms.length > 0;
   // Standalone `FileUpload(bind:)` fields across the ui — each drives an upload
   // Cmd (`Api.uploadFile` → multipart POST /files) + a `FileRef` result Msg.
   const fileUploads = fileUploadsForUi(ui);
@@ -1167,7 +1183,7 @@ function renderAppFs(
   const hasHttp =
     hasReads ||
     mutations.length > 0 ||
-    hasForms ||
+    hasFormSubmits ||
     authUi ||
     hasEffects ||
     pageGate ||
@@ -1416,7 +1432,7 @@ function renderAppFs(
     // Feliz.Router provides `React.router` (routed), `Cmd.navigate` (any form
     // navigates on success), and `Router.navigatePath` (a `to:` navigation
     // anywhere in a page body).
-    (routed || hasForms || viewsNavigate) && ROUTER_OPEN,
+    (routed || hasFormSubmits || viewsNavigate) && ROUTER_OPEN,
     "open Elmish",
     "open Elmish.React",
     // Thoth is needed for decoders (reads + async effects), encoders (forms),
@@ -1834,7 +1850,7 @@ export function generateFelizForContexts(
     formsHaveFileField([
       ...formsForUi(ui, contexts),
       ...operationFormsForUi(ui, contexts).filter(opHasForm),
-      ...workflowFormsForUi(ui, contexts),
+      ...workflowFormsForUi(ui, contexts).filter(wfHasForm),
     ]);
   const hasHttp =
     readsForUi(ui, contexts).length > 0 ||

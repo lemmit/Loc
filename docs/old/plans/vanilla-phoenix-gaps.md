@@ -569,13 +569,17 @@ cross-check run over all five backends in strict mode.
 - **Test:** `test/generator/elixir/vanilla-op-action-bang.test.ts`;
   `vanilla-auth-op-gate.ddd` promoted out of `pending/` — **verified green** under
   `mix compile --warnings-as-errors` (hex mirror).
-- **Known follow-on (runtime, not compile):** the LiveView `handle_event` calls the
-  gated bang as `<op>_<agg>!(record)` (arity-1), so `current_user` defaults to
-  `nil` there — the action-button auth gate isn't actor-threaded from
-  `socket.assigns` yet. The HTTP/controller path (the primary API auth) already
-  threads it (#1568). Threading the actor through the LiveView action is a small
-  follow-up (`liveview-emit.ts` ~`:397` → pass `socket.assigns[:current_user]` for
-  gated ops).
+- **Follow-on (LiveView action-button actor threading) — CLOSED (verified
+  2026-08-23 on fresh `main`).** Was: the LiveView `handle_event` called the gated
+  bang as `<op>_<agg>!(record)` (arity-1), so `current_user` defaulted to `nil`
+  there while the HTTP/controller path (the primary API auth) already threaded it
+  (#1568). Now wired in `src/generator/elixir/liveview-emit.ts` (~`:612–625`): the
+  action builder computes `actorArg = op && opUsesCurrentUser(op) ? ",
+  Map.get(socket.assigns, :current_user)" : ""` and appends it to the
+  `<Ctx>.<op>_<agg>!(record…)` call, and the `byId` (DestroyForm) arm binds
+  `current_user = Map.get(socket.assigns, :current_user)` when the destroy's
+  lifecycle gates read the principal (`destroyUsesUser`). Ops that don't read
+  `currentUser` stay byte-identical (empty `actorArg`).
 
 ## 14. Success-response wire shape — snake_case keys + leaked Ecto timestamps
 

@@ -58,6 +58,23 @@ function conjoinPy(own: PyPredicate | null, caps: PyPredicate | null): PyPredica
 // `projection-query-routes-builder.ts`.
 // ---------------------------------------------------------------------------
 
+/** A projection `where` that reached emission without lowering to SQLAlchemy.
+ *  The IR validator rejects a non-queryable projection `where`
+ *  (`loom.projection-where-not-queryable`, the twin of the find/retrieval
+ *  gates), so this is unreachable from valid input.  It THROWS rather than
+ *  emitting the route with no `.where(...)`: dropping the filter would serve
+ *  every row of the table from an endpoint the author scoped — a wrong answer
+ *  that generates, compiles and boots clean. */
+function requireLowered(proj: ProjectionIR, pred: PyPredicate | null): PyPredicate {
+  if (!pred) {
+    throw new Error(
+      `internal: where-clause for projection '${proj.name}' could not lower to SQLAlchemy, ` +
+        "but the validator should have caught this. Please file a bug.",
+    );
+  }
+  return pred;
+}
+
 export function buildPyQueryProjectionsFile(
   ctx: EnrichedBoundedContextIR,
   hasDispatch = false,
@@ -87,13 +104,15 @@ export function buildPyQueryProjectionsFile(
       const wf = wfByName.get(p.query!.source!)!;
       rowLowered.set(
         p.name,
-        p.query!.filter ? lowerWorkflowFilterToSqlAlchemy(p.query!.filter, wf) : null,
+        p.query!.filter
+          ? requireLowered(p, lowerWorkflowFilterToSqlAlchemy(p.query!.filter, wf))
+          : null,
       );
     } else if (isProjectionSourced(p)) {
       rowLowered.set(
         p.name,
         p.query!.filter
-          ? lowerProjectionFilterToSqlAlchemy(p.query!.filter, p.query!.source!)
+          ? requireLowered(p, lowerProjectionFilterToSqlAlchemy(p.query!.filter, p.query!.source!))
           : null,
       );
     }
@@ -116,7 +135,9 @@ export function buildPyQueryProjectionsFile(
   for (const p of projections) {
     if ((!wholeTableAggregates(p) && !groupedAggregates(p)) || !p.query?.source) continue;
     const agg = ctx.aggregates.find((a) => a.name === p.query!.source);
-    const own = agg && p.query.filter ? lowerToSqlAlchemy(p.query.filter, agg, ctx) : null;
+    const own = p.query.filter
+      ? requireLowered(p, agg ? lowerToSqlAlchemy(p.query.filter, agg, ctx) : null)
+      : null;
     const caps = agg
       ? contextFilterPredicate(agg, ctx, {
           bypassAll: p.query.bypassAll,

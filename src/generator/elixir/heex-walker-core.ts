@@ -774,7 +774,10 @@ function renderRef(expr: Extract<ExprIR, { kind: "ref" }>, ctx: WalkContext): st
     case "lambda":
       return snake(expr.name);
     case "enum-value":
-      return `:${snake(expr.name)}`;
+      // Declared casing, never snake: the loaded struct field is the
+      // declared-case `Ecto.Enum` atom (see render-expr.ts's enum-value arm) —
+      // `:public` would never equal `:Public`, silently failing the comparison.
+      return `:${expr.name}`;
     case "current-user":
       return ctx.position === "template" ? `@current_user` : `socket.assigns.current_user`;
     case "helper-fn":

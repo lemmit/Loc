@@ -462,5 +462,55 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
         }
       }
     }
+
+    // loom.flutter-async-effect-unsupported — the SAME component-host limitation
+    // as the Feliz arm above, on the frontend that fails it SILENTLY.
+    //
+    // `flutter/component-emit.ts`'s `candidates()` filters out every component
+    // with a `variant-match` action (`hasAsyncEffectAction`) because an async
+    // effect needs the page shell's notifier + route id.  A filtered component
+    // emits NO widget at all, and every call site of it renders
+    // `SizedBox.shrink() /* unknown layout component */` — the component, its
+    // body, and its effect vanish from the app with no diagnostic, no comment in
+    // the Dart, and a clean `flutter analyze`.  Feliz gates the identical
+    // limitation honestly; Flutter did not, so the same `.ddd` was refused on one
+    // target and silently emptied on the other.
+    //
+    // ONLY the component host gates: a PAGE-level `match await` renders fine on
+    // Flutter (the page notifier owns the effect), so — unlike the Feliz arm —
+    // there is no subject-shape classification here.  The Flutter filter keys on
+    // the statement KIND alone, and this gate mirrors exactly that.
+    //
+    // Detected off `dep.platform` for the reason the lifetime gate spells out:
+    // `platform: flutter` hosts only `framework: flutter`, and a bare declaration
+    // resolves `uiFramework` to the frontend default rather than `"flutter"`.
+    // Drains when the Flutter component emitter grows the async-effect path
+    // (M-T1.20), which deletes this arm.
+    for (const dep of sys.deployables) {
+      if (dep.platform !== "flutter") continue;
+      const mounted = [dep.uiName, ...(dep.hostedUiNames ?? [])].filter((n): n is string => !!n);
+      for (const uiName of mounted) {
+        const ui = sys.uis.find((u) => u.name === uiName);
+        if (!ui) continue;
+        for (const comp of ui.components) {
+          for (const action of comp.actions) {
+            forEachStmt(action.body, (s) => {
+              if (s.kind !== "variant-match") return;
+              const where = `component '${comp.name}' action '${action.name}'`;
+              diags.push({
+                severity: "error",
+                code: "loom.flutter-async-effect-unsupported",
+                message: diagMessage("loom.flutter-async-effect-unsupported", {
+                  where,
+                  uiName,
+                  name: dep.name,
+                }),
+                source: where,
+              });
+            });
+          }
+        }
+      }
+    }
   }
 }

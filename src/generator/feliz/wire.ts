@@ -1820,7 +1820,8 @@ function workflowFormRuns(body: ExprIR, workflowNames: ReadonlySet<string>): str
 }
 
 /** Collect the workflow forms a page hosts (`WorkflowForm(runs: X)`), deduped by
- *  workflow.  Skips workflows with no renderable scalar params. */
+ *  workflow.  A PARAM-LESS workflow IS collected — it wires a submit + empty-`{}`
+ *  POST (no form record); `wfHasForm` gates the record. */
 export function collectPageWorkflowForms(
   page: PageIR,
   workflowsByName: ReadonlyMap<string, WorkflowIR>,
@@ -1836,8 +1837,7 @@ export function collectPageWorkflowForms(
     const wf = workflowsByName.get(wfName);
     if (!wf) continue;
     const form = felizWorkflowForm(wf, enumsByName, idLabels, vosByName);
-    if ((form.fields.length === 0 && form.fieldArrays.length === 0) || seen.has(form.formType))
-      continue;
+    if (seen.has(form.formType)) continue;
     seen.add(form.formType);
     out.push(form);
   }
@@ -2663,13 +2663,25 @@ function renderOperationFn(f: FelizOperationForm): (string | undefined)[] {
   ];
 }
 
+/** Whether a workflow form carries any input — a form record is emitted only for
+ *  these.  A PARAM-LESS workflow (`run()`) has none: it is wired as a submit
+ *  (empty `{}` body), with no form state / encoder / record.  The workflow twin
+ *  of `opHasForm`. */
+export function wfHasForm(f: FelizWorkflowForm): boolean {
+  return f.fields.length > 0 || f.fieldArrays.length > 0;
+}
+
 /** One async workflow function — a PARAMLESS `POST /api/workflows/<wf>` with the
- *  Thoth-encoded form body; a 2xx is `Ok ()` (the workflow returns 204). */
+ *  Thoth-encoded form body; a 2xx is `Ok ()` (the workflow returns 204).  A
+ *  PARAM-LESS workflow takes `()` and posts an empty `{}` body (no form). */
 function renderWorkflowFn(f: FelizWorkflowForm): (string | undefined)[] {
+  const hasForm = wfHasForm(f);
   return [
-    `  let ${f.apiFn} (form: ${f.formType}) : Async<Result<unit, string>> =`,
+    `  let ${f.apiFn} ${hasForm ? `(form: ${f.formType})` : "()"} : Async<Result<unit, string>> =`,
     "    async {",
-    `      let body = Encode.toString 0 (Encoders.${f.encoderFn} form)`,
+    hasForm
+      ? `      let body = Encode.toString 0 (Encoders.${f.encoderFn} form)`
+      : '      let body = "{}"',
     "      let! response =",
     `        Http.request "${f.route}"`,
     "        |> Http.method POST",

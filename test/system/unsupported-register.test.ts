@@ -48,8 +48,17 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  rather than silent, which is exactly the trade this register exists to
  *  record: a gap that appears here is a gap that stopped shipping broken
  *  output.  Drained by the wave-2 tasks that implement the ladder on both
- *  targets, which delete the row and lower this back to 37. */
-const MAX_OPEN_GAPS = 38;
+ *  targets, which delete the row and lower this back to 37.
+ *
+ *  38 → 39: `loom.flutter-async-effect-unsupported`.  Same trade again — the gap
+ *  is not new (the Flutter component emitter has always filtered out a component
+ *  whose action carries a `match await`, emitting NO widget and rendering every
+ *  call site as `SizedBox.shrink()`), only the honesty is.  Feliz gated the
+ *  identical component-host limitation from the start; Flutter dropped it
+ *  silently.  Drained by the M-T1.20 slice that gives the Flutter component
+ *  emitter the notifier/route-id path, which deletes the row and lowers this
+ *  back to 38. */
+const MAX_OPEN_GAPS = 39;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
