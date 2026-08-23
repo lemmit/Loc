@@ -162,13 +162,27 @@ describe("python provenance runtime (W2)", () => {
     expect(repo).not.toContain("session.begin()");
   });
 
-  it("restores the lineage on hydrate and exposes it on the Pydantic response", async () => {
+  it("restores the lineage on hydrate and exposes the carrier on the Pydantic response", async () => {
     const files = await generateSystemFiles(SOURCE);
     const repo = file(files, "/order_repository.py");
     expect(repo).toContain("ProvLineage.from_wire(row.total_provenance)");
-    expect(repo).toContain('"total_provenance": (root.total_provenance.to_wire()');
+    // The PERSISTENCE row still writes the two columns apart — storage is
+    // unchanged by the wire fold (M-T6.12).
+    expect(repo).toContain('"total_provenance": (aggregate.total_provenance.to_wire()');
+    // `to_wire` folds them into the one carrier.
+    expect(repo).toContain(
+      '"total": {"value": root.total, "lineage": (root.total_provenance.to_wire() if root.total_provenance is not None else None)}',
+    );
+    // The response model types the field through the shared generic carrier —
+    // not a trailing `total_provenance` model field.
     const routes = file(files, "/app/http/order_routes.py");
-    expect(routes).toContain("total_provenance: dict[str, object] | None = None");
+    expect(routes).toContain("total: Provenanced[int]");
+    expect(routes).toContain("Provenanced");
+    expect(routes).not.toContain("total_provenance:");
+    const models = file(files, "/app/http/wire_models.py");
+    expect(models).toContain("class Provenanced(BaseModel, Generic[_ProvT]):");
+    expect(models).toContain("    value: _ProvT");
+    expect(models).toContain("    lineage: dict[str, object] | None = None");
   });
 
   it("emits the LATE provenance migration (co-located ALTER only)", async () => {

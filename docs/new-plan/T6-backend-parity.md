@@ -57,8 +57,14 @@ Sources: global-plan T2.d, [platform-realization-axes](../old/proposals/platform
 What is genuinely reserved-but-unwired is **three optional data slots on `ComposeServiceShape`**, undefined on every backend, which the compose orchestrator skips when absent: `auditSidecar` (a separate container draining audit-record events — M-T4.x audit), `policyInitCmd` (an entrypoint wrapper that loads/verifies compliance policies before the main service — M-T3.x authorization/compliance), and `i18nCatalogDir` (the in-container mount path for the i18n catalog — M-T1.11). Tenancy has no reservation at all: multi-tenant filtering ships through the capability/stance machinery ([`docs/tenancy.md`](../tenancy.md)), not a surface hook.
 Disposition unchanged: don't build speculatively — each slot fills when its owning feature reaches emission. Tracked here so they aren't forgotten or cargo-culted.
 
-## M-T6.12 — Provenanced wire pair — `open` · **M** · P3
-Fold provenanced value+lineage into one `Provenanced<T> = {value, lineage}` carrier in `wireShape` so all targets agree (today 3 backends bolt on an extra key). Phases 1–6 incl. the `.value` read-site unwrap via one `ExprTarget` leaf.
+## M-T6.12 — Provenanced wire pair — `done` (this session) · **M** · P3
+`Provenanced<T> = { value, lineage }` now lands ONCE, in `wireShape` (`wireTypeForField`, `src/ir/enrich/wire-projection.ts`), from ONE shape definition (`GENERIC_SHAPES.provenanced`, `src/ir/stdlib/generics.ts`) whose two member names live at `src/util/provenance-carrier.ts` so all four pipeline layers read the same strings. Eleven hand-rolled `<field>_provenance` SIBLING appends (five backend DTO emitters + six frontend api-type/decoder emitters) are deleted; each target now has ONE arm that builds the carrier off the shared member list.
+
+**Corrections to the proposal, both verified against the code:** (1) the premise "3 backends bolt on an extra key" was stale — all FIVE appended the sibling, so the divergence being fixed was the hand-rolled-in-eleven-places one, plus the artifact blindness. (2) The proposal's §6 read-site unwrap does NOT exist, because §7 of the same document is the binding constraint: storage and the in-memory domain object keep the pair SPLIT, so no domain expression ever reads a carrier and the planned `ExprTarget.refProvenanced` leaf would have been dead code. The unwraps that do exist are all on the WIRE side and are one arm per emitter, each reading `provenancedEntries` / `provenancedTypeMembers`. The read-site work that IS real landed in the scaffold macro (the detail/list value cell reads `<record>.<field>.value`) and in the HEEx walker, which drops that hop because LiveView renders off the Ecto struct.
+
+**Payoff beyond parity:** `.loom/wire-spec.json` now SEES the lineage (§1.2 of the proposal — the contract artifact was blind to it), the lineage rides `forApiRead` / `mask unless` like any other wire content, and the Phoenix OpenAPI document stops publishing a provenanced field as a bare `T` with no lineage at all.
+
+Wire-contract change: the provenance wire golden is rebaselined via the node oracle and the corpus fixture's e2e reads `.value`.
 Sources: [provenanced-wire-pair](../old/proposals/provenanced-wire-pair.md).
 
 ## M-T6.13 — OpenAPI tag grouping — `open` · **S–M** · P3

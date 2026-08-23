@@ -7,6 +7,7 @@ import type {
 import { resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
+import { provenancedTypeMembers } from "../../_payload/provenanced-wire.js";
 
 // ---------------------------------------------------------------------------
 // Provenance runtime — the Java / Spring counterpart of the Hono
@@ -124,6 +125,41 @@ export function renderProvLineageRecord(basePkg: string): string {
     `    ProvTarget target,`,
     `    List<ProvInput> inputs,`,
     `    Object computedValue) {`,
+    `}`,
+    ``,
+  );
+}
+
+/** The generic wire-carrier record's Java name. */
+export const JAVA_PROVENANCED_RECORD = "Provenanced";
+
+/** The DOMAIN-side lineage member beside a provenanced field's value — `total`
+ *  → `totalProvenance` (declared by `entity.ts`).  In memory and in storage the
+ *  pair stays split; only the wire folds it into `Provenanced<T>`, and the
+ *  folding DTO mapper has to name the member the entity named it. */
+export function javaProvSibling(fieldName: string): string {
+  return `${fieldName}Provenance`;
+}
+
+/** `Provenanced<T>` — the value + lineage wire carrier a `provenanced` field
+ *  ships as (M-T6.12).  A generic record so the value keeps its type in both
+ *  the Java DTO and the springdoc-published schema; the component NAMES come
+ *  from the shared carrier shape, so the JSON keys match every other target's
+ *  without a `@JsonProperty` rename. */
+export function renderProvenancedCarrier(basePkg: string): string {
+  const members = provenancedTypeMembers({ kind: "none" })
+    .map((m) => (m.type ? `    T ${m.name}` : `    ProvLineage ${m.name}`))
+    .join(",\n");
+  return lines(
+    `package ${basePkg}.domain.common;`,
+    ``,
+    `/** A provenanced field's value together with the lineage of the write that`,
+    ` *  produced it — the same { value, lineage } JSON object every other Loom`,
+    ` *  backend serves (docs/provenance.md).  Storage keeps the two apart (a`,
+    ` *  typed value column plus a jsonb lineage column); only the wire folds`,
+    ` *  them.  \`lineage\` is null for a field that has never been written. */`,
+    `public record ${JAVA_PROVENANCED_RECORD}<T>(`,
+    members + ") {",
     `}`,
     ``,
   );

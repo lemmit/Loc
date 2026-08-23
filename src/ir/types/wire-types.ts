@@ -72,7 +72,23 @@ export type WirePrimitive =
  *  `valueObject`/`entity`/`enum` indicate a user-defined name that the
  *  backend will join with its own suffix (`Request`, `Response`,
  *  `Schema`, …). */
-export type WireRefKind = "primitive" | "id" | "valueObject" | "entity" | "enum";
+export type WireRefKind =
+  | "primitive"
+  | "id"
+  | "valueObject"
+  | "entity"
+  | "enum"
+  /** The `Provenanced<T>` carrier (M-T6.12) — a `provenanced` field's wire
+   *  value is the object `{ value: T, lineage: json | null }`, not a bare `T`.
+   *  The carried `T` is on `carried`; the member names and the lineage's
+   *  nullability come from `GENERIC_SHAPES.provenanced`
+   *  (`src/ir/stdlib/generics.ts`), which is the shape's ONE definition.
+   *
+   *  Deliberately its own `refKind` rather than a flag beside the value's:
+   *  every wire consumer switches exhaustively on `refKind`, so a surface that
+   *  has not learned the carrier fails to COMPILE instead of silently shipping
+   *  the bare `T` its callers no longer receive. */
+  | "provenanced";
 
 /** Single-leaf summary of a `TypeIR` for wire-shape emission.
  *
@@ -109,6 +125,9 @@ export interface WireTypeInfo {
    *  ignores it (every id crosses the .NET wire as Guid for historical
    *  symmetry with the Hono path). */
   idValueType?: IdValueType;
+  /** Populated iff `refKind === "provenanced"`.  The type the carrier wraps —
+   *  the `value` member's type. */
+  carried?: TypeIR;
   /** Direction that produced this info — preserved so callers that
    *  build secondary expression strings (e.g. nested DTO names) can
    *  echo it without re-threading the argument. */
@@ -241,6 +260,21 @@ export function wireTypeInfo(t: TypeIR, dir: WireDirection): WireTypeInfo {
     case "slot":
       throw new Error("wireTypeInfo: 'slot' type is UI-only and has no wire representation.");
     case "genericInstance":
+      // `Provenanced<T>` is the one carrier that reaches a WIRE FIELD: the
+      // enrichment pass wraps every `provenanced` property in it
+      // (`wireTypeForField`).  `paged` / `envelope` only ever appear as a
+      // find/payload RETURN type, monomorphized to a named DTO long before a
+      // wire field sees them — so they still fall through to the throw.
+      if (cur.ctor === "provenanced") {
+        return {
+          base: "Provenanced",
+          refKind: "provenanced",
+          isCollection: collection,
+          isNullable: nullable,
+          carried: cur.arg,
+          dir,
+        };
+      }
       throw new Error(
         `wireTypeInfo: generic carrier '${cur.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
       );

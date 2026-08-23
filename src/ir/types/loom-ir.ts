@@ -160,13 +160,22 @@ export type TypeIR =
    *  callback argument type; undefined for a bare zero-arg `action`. */
   | { kind: "action"; arg?: TypeIR; sensitivity?: SensitivityTags };
 
-/** The blessed closed set of generic-payload **record** carriers — the ones
- *  that monomorphize to a `PayloadIR` record.  Kept in lockstep with the
- *  record arms of the `GenericCtor` grammar rule and the stdlib registry in
- *  `src/ir/stdlib/generics.ts`.  The grammar's third ctor, `option`, is a
- *  *union* carrier: `T option` lowers straight to `union[T, none]` rather than
- *  a `genericInstance`, so it never appears here. */
-export type GenericCtorName = "paged" | "envelope";
+/** The blessed closed set of generic-payload **record** carriers.  Kept in
+ *  lockstep with the record arms of the `GenericCtor` grammar rule and the
+ *  stdlib registry in `src/ir/stdlib/generics.ts`.  The grammar's third ctor,
+ *  `option`, is a *union* carrier: `T option` lowers straight to
+ *  `union[T, none]` rather than a `genericInstance`, so it never appears here.
+ *
+ *  `paged` / `envelope` are AUTHOR-WRITTEN (`customer paged`) and monomorphize
+ *  to a named `PayloadIR` record.  `provenanced` is the odd one out: it has no
+ *  grammar arm at all — nobody writes `int provenanced` as a *type*, they write
+ *  `total: int provenanced` as a field MODIFIER — and the enrichment pass
+ *  synthesizes the instance into `wireShape` from `FieldIR.provenanced`
+ *  (`wireTypeForField`, `src/ir/enrich/wire-projection.ts`).  It is also
+ *  rendered STRUCTURALLY (an inline `{ value, lineage }` object) rather than
+ *  monomorphized to a named DTO, so it never reaches
+ *  `monomorphizeGenericInstances`. */
+export type GenericCtorName = "paged" | "envelope" | "provenanced";
 
 export interface ParamIR {
   name: string;

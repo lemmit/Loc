@@ -55,6 +55,7 @@ import {
   opWorkflowInstances,
 } from "../../../ir/util/openapi-ids.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { PROVENANCE_VALUE_FIELD, provenancedEntries } from "../../_payload/provenanced-wire.js";
 import { unionMembers } from "../../_payload/union-wire.js";
 import type { ApiRoute } from "../api-emit.js";
 import { servedOperationEntries, servesHistory } from "./api-emit.js";
@@ -888,6 +889,20 @@ function openApiType(t: TypeIR, schemasModule: string): string {
       // Containment part → its `<Part>Response`, as a module atom so the
       // part schema is registered in components.
       return `${schemasModule}.${info.base}Response`;
+    case "provenanced": {
+      // The `Provenanced<T>` carrier (M-T6.12), inlined like a value object —
+      // the value's own schema plus the opaque nullable lineage object.  Before
+      // this arm the Phoenix spec published a provenanced field as a bare `T`
+      // and never mentioned the lineage at all, so its OpenAPI document
+      // disagreed with the JSON the controller actually served.
+      const props = provenancedEntries(
+        openApiType(info.carried!, schemasModule),
+        `${OPENAPI_PRIMITIVE.json}`,
+      )
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(", ");
+      return `%OpenApiSpex.Schema{type: :object, properties: %{${props}}, required: [:${PROVENANCE_VALUE_FIELD}]}`;
+    }
   }
 }
 

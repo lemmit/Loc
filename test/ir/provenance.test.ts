@@ -328,12 +328,20 @@ describe("provenanced — TypeScript emission", () => {
     expect(routes).toContain("const __prov = aggregate.drainProv();");
     expect(routes).toContain("for (const t of __prov) {");
     expect(routes).toContain("tx.insert(schema.provenanceRecords).values({");
-    // co-located lineage is part of the response DTO, via the shared schema
+    // The lineage rides INSIDE the provenanced field's own response key as the
+    // `Provenanced<T>` carrier (M-T6.12) — no trailing `total_provenance`
+    // sibling — over the shared nullable lineage schema.
     expect(routes).toContain("const ProvenanceLineage = z.object({");
-    expect(routes).toContain("total_provenance: ProvenanceLineage.nullable(),");
-    // toWire serialises the backing field
+    expect(routes).toContain(
+      "total: z.object({ value: z.number().int(), lineage: ProvenanceLineage.nullable() }),",
+    );
+    expect(routes).not.toContain("total_provenance: ProvenanceLineage");
+    // `toWire` folds the domain's split pair (value property + co-located
+    // lineage getter) into that one carrier.
     const repo = files.get("api/db/repositories/cart-repository.ts")!;
-    expect(repo).toContain("total_provenance: root.total_provenance");
+    expect(repo).toContain("total: { value: root.total, lineage: root.total_provenance ?? null }");
+    // The PERSISTENCE row still writes the two columns apart — storage is
+    // unchanged by the wire fold.
     expect(repo).toContain("total_provenance: aggregate.total_provenance");
   });
 

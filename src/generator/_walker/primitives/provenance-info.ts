@@ -1,9 +1,10 @@
 // ProvenanceInfo(of: <record>, field: "<name>") — a "?" disclosure that
 // reveals where a `provenanced` field's value came from.
 //
-// A provenanced field carries a co-located lineage sibling on the wire
-// (`<field>_provenance` — see docs/provenance.md and repository-wire-builder.ts),
-// surfaced to the frontend as the nullable `provLineageSchema` shape.  This
+// A provenanced field ships its value and its lineage as ONE wire carrier
+// (`{ value, lineage }` — see docs/provenance.md and the shared shape in
+// `_payload/provenanced-wire.ts`), the lineage half surfaced to the frontend as
+// the nullable `provLineageSchema`.  This
 // primitive renders a native `<details>`/`<summary>` disclosure (no design-pack
 // component, no client state — accessible by default) next to the value: the
 // "?" summary expands to the rule id, the computed value, and the input list
@@ -18,6 +19,7 @@
 // the `renderProvenanceInfo` WalkerTarget seam / the parallel HEEx walker.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { PROVENANCE_LINEAGE_FIELD } from "../../_payload/provenanced-wire.js";
 import { namedArgValue, positionalArgs, stringNamed } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import { emitExpr, testidAttr } from "../walker-core.js";
@@ -36,12 +38,12 @@ export function emitProvenanceInfo(
   if (!recordArg || !field) {
     return ctx.target.renderComment("ProvenanceInfo: missing record or field");
   }
-  // `<record>.<field>_provenance` — the co-located lineage sibling the frontend
-  // response schema carries as `provLineageSchema.nullish()`.  `emitExpr`
-  // resolves the record receiver per target (React `orderById.data`, Vue's
-  // query-data access), so the sibling access stays symmetric with the value
-  // cell the scaffold renders beside it.
-  const lineage = `${emitExpr(recordArg, ctx)}.${field}_provenance`;
+  // `<record>.<field>.lineage` — the lineage half of the `Provenanced<T>` wire
+  // carrier the response schema now carries (M-T6.12); the value half is
+  // `<record>.<field>.value`, which the scaffold renders in the cell beside
+  // this disclosure.  `emitExpr` resolves the record receiver per target (React
+  // `orderById.data`, Vue's query-data access), so the two stay symmetric.
+  const lineage = `${emitExpr(recordArg, ctx)}.${field}.${PROVENANCE_LINEAGE_FIELD}`;
   const testid = testidAttr(call, ctx);
 
   switch (ctx.target.framework) {

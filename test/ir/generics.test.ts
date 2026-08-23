@@ -107,7 +107,22 @@ describe("generics — stdlib shape registry (P3a)", () => {
   });
 
   it("exposes exactly the blessed closed set", () => {
-    expect(Object.keys(GENERIC_SHAPES).sort()).toEqual(["envelope", "paged"]);
+    // `paged` / `envelope` are AUTHOR-WRITTEN carriers with a `GenericCtor`
+    // grammar arm; `provenanced` (M-T6.12) is the compiler-synthesized wire
+    // carrier for a `provenanced` field — no grammar arm, stamped into
+    // `wireShape` by `wireTypeForField` and rendered structurally rather than
+    // monomorphized to a named payload.
+    expect(Object.keys(GENERIC_SHAPES).sort()).toEqual(["envelope", "paged", "provenanced"]);
+  });
+
+  it("shapes `provenanced` as the value + nullable-lineage carrier", () => {
+    const fields = GENERIC_SHAPES.provenanced.fields({ kind: "primitive", name: "int" });
+    expect(fields.map((f) => f.name)).toEqual(["value", "lineage"]);
+    // The value carries the wrapped type; the lineage is an opaque `json` blob
+    // (Loom does not model `ProvLineage`'s interior) and is optional, because a
+    // field that has never been written has no lineage yet.
+    expect(fields[0]).toMatchObject({ type: { kind: "primitive", name: "int" }, optional: false });
+    expect(fields[1]).toMatchObject({ type: { kind: "primitive", name: "json" }, optional: true });
   });
 });
 

@@ -19,9 +19,18 @@
  *                 1-based `page`; `totalPages` kept so clients don't recompute;
  *                 `hasNext`/`hasPrev` omitted (trivially derivable).
  *   envelope(T) → { id: string; ts: datetime; body: T }
+ *   provenanced(T) → { value: T; lineage: json | null }
+ *                 The `provenanced` field modifier's WIRE carrier (M-T6.12).
+ *                 Synthesized by enrichment, never written in `.ddd`, and
+ *                 rendered structurally rather than monomorphized — see the
+ *                 entry's comment below.
  */
 
 import { upperFirst } from "../../util/naming.js";
+import { PROVENANCE_LINEAGE_FIELD, PROVENANCE_VALUE_FIELD } from "../../util/provenance-carrier.js";
+
+export { PROVENANCE_LINEAGE_FIELD, PROVENANCE_VALUE_FIELD };
+
 import type { FieldIR, GenericCtorName, TypeIR } from "../types/loom-ir.js";
 
 /** A blessed generic-carrier shape: its single type-parameter name (for docs
@@ -38,6 +47,7 @@ export interface GenericShape {
 const intType: TypeIR = { kind: "primitive", name: "int" };
 const stringType: TypeIR = { kind: "primitive", name: "string" };
 const datetimeType: TypeIR = { kind: "primitive", name: "datetime" };
+const jsonType: TypeIR = { kind: "primitive", name: "json" };
 
 function field(name: string, type: TypeIR): FieldIR {
   return { name, type, optional: false };
@@ -63,7 +73,33 @@ export const GENERIC_SHAPES: Record<GenericCtorName, GenericShape> = {
     param: "P",
     fields: (arg) => [field("id", stringType), field("ts", datetimeType), field("body", arg)],
   },
+  // `Provenanced<T>` (M-T6.12) — the value + its lineage as ONE wire carrier.
+  // Unlike its two siblings this ctor has no grammar arm: `total: int
+  // provenanced` is a field MODIFIER, and the enrichment pass wraps the
+  // property's wire type in this instance (`wireTypeForField`).  It is rendered
+  // STRUCTURALLY (an inline `{ value, lineage }` object) by each wire consumer
+  // off THIS field list, not monomorphized to a named DTO — so the shape has
+  // exactly one definition and every backend/frontend agrees by construction.
+  provenanced: {
+    ctor: "provenanced",
+    param: "T",
+    fields: (arg) => [
+      field("value", arg),
+      // `json`, not a modelled record: `ProvLineage`'s interior is a runtime
+      // audit blob (`{ snapshotId, target, inputs, computedValue }`) each
+      // backend already emits its own typed class for.  Optional because a
+      // field that has never been written carries no lineage yet.
+      { name: PROVENANCE_LINEAGE_FIELD, type: jsonType, optional: true },
+    ],
+  },
 };
+
+/** If `t` is a `Provenanced<T>` carrier, return its carried type `arg`;
+ *  otherwise null.  The single recogniser every wire consumer uses to decide
+ *  "this field ships as `{ value, lineage }`, not as a bare `T`". */
+export function provenancedCarrier(t: TypeIR): TypeIR | null {
+  return t.kind === "genericInstance" && t.ctor === "provenanced" ? t.arg : null;
+}
 
 /** Look up a blessed shape by constructor name. */
 export function genericShape(ctor: GenericCtorName): GenericShape {

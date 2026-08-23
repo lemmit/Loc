@@ -144,10 +144,23 @@ describe("dotnet provenance runtime", () => {
     expect(repo).toContain("ParentId = RequestContext.Current?.ParentId,");
   });
 
-  it("exposes the current lineage on the response DTO", async () => {
-    const resp = (await files()).get("api/Application/Orders/Responses/OrderResponses.cs")!;
-    expect(resp).toContain("ProvLineage? TotalProvenance");
+  it("exposes the current lineage INSIDE the field's own carrier component", async () => {
+    const f = await files();
+    const resp = f.get("api/Application/Orders/Responses/OrderResponses.cs")!;
+    // M-T6.12 — one `Provenanced<int> Total` component, not a bare `int Total`
+    // plus a trailing `[JsonPropertyName("total_provenance")] ProvLineage?`.
+    expect(resp).toContain("Provenanced<int> Total");
+    expect(resp).not.toContain("TotalProvenance");
     expect(resp).toContain("using Api.Domain.Common;");
+    // The projection folds the domain's split pair into that one argument.
+    expect(resp + [...f.values()].join("\n")).toContain(
+      "new Provenanced<int>(found.Total, found.TotalProvenance)",
+    );
+    // The shared generic record ships beside `ProvLineage`.
+    const lineage = f.get("api/Domain/Common/ProvLineage.cs")!;
+    expect(lineage).toContain(
+      "public sealed record Provenanced<T>(T Value, ProvLineage? Lineage);",
+    );
   });
 
   it("adds the co-located column in a migration and takes the history table from MigrationsIR", async () => {
