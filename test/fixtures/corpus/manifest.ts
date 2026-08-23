@@ -142,6 +142,14 @@ export const CORPUS: readonly CorpusFeature[] = [
   },
   { id: "extern", title: "extern operations — preconditions gate a user handler", doc: "extern", backends: ALL },
   { id: "extern-handlers", title: "extern commandHandler / queryHandler — bodyless, scaffold-once user impl", backends: ALL },
+  {
+    id: "handler-resource-ops",
+    title:
+      "resource-op inside a commandHandler / queryHandler body — the second legal site for outbound I/O",
+    doc: "resources",
+    backends: ALL,
+    note: "Four of five emitters could not render this LEGAL site: node / python emitted the helper call with no import (TS2304 / F821), .NET and java THREW 'reached the renderer without a resource class mapping' at generate time; only elixir was correct (it fully-qualifies the module). The handler loads via a declared FIND rather than `byId`, so the fixture isolates the resource-op leg from the unrelated `Agg id` path-param coercion.",
+  },
   { id: "seeding", title: "seed datasets — default / demo / wired-raw", doc: "language", backends: ALL },
   {
     id: "seed-values",

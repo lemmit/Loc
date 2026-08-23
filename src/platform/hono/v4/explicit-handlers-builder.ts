@@ -61,6 +61,7 @@ import type {
   CommandHandlerIR,
   EnrichedBoundedContextIR,
   EnumIR,
+  ExprIR,
   QueryHandlerIR,
   RouteIR,
   TypeIR,
@@ -75,6 +76,7 @@ import {
 import { normalizeHandlerReturn, requestRecordFor } from "../../../ir/util/handler-contracts.js";
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
+import { walkExprDeep, walkWorkflowStmtExprsDeep } from "../../../ir/util/walk.js";
 import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../../util/scaffold-once.js";
@@ -504,6 +506,11 @@ export function buildExplicitRoutesFile(
   apiName: string,
   routes: readonly RouteIR[],
   contexts: readonly EnrichedBoundedContextIR[],
+  /** resourceName → sourceType, so a handler body's resource-ops can import
+   *  their `<resource>$<verb>` helpers from `../resources/<sourceType>` — the
+   *  same map (and the same derivation) the workflow leg gets.  Defaulted so a
+   *  caller with no system context stays byte-identical. */
+  resourceSourceTypes: Map<string, string> = new Map(),
 ): string | undefined {
   const byName = new Map(contexts.map((c) => [c.name, c] as const));
   const routeBlocks: string[][] = [];
@@ -518,6 +525,28 @@ export function buildExplicitRoutesFile(
   // file that exports them (the same import `http/views.ts` uses), so the typed
   // 200 body resolves in-scope without re-declaring the composite schema.
   const responseImports = new Map<string, string>();
+  // Resource-op verb helpers a routed handler body calls: `../resources/<st>`
+  // module → the `<resource>$<verb>` names to import from it.  Collected with
+  // the DEEP walker (a resource-op nested inside another expression is legal
+  // and would otherwise lose its import and fail `tsc`), mirroring the workflow
+  // leg's typed-api-helper scan.
+  const resourceHelperByModule = new Map<string, Set<string>>();
+  /** Typed in-system api helpers (`<resource>$<operationId>`) — one module. */
+  const apiHelpers = new Set<string>();
+  const collectResourceHelpers = (e: ExprIR): void => {
+    if (e.kind !== "call") return;
+    if (e.callKind === "remote-api-op" && e.remoteApiOp) {
+      apiHelpers.add(`${e.remoteApiOp.resourceName}$${e.remoteApiOp.operationId}`);
+      return;
+    }
+    if (e.callKind !== "resource-op" || !e.resourceOp) return;
+    const sourceType = resourceSourceTypes.get(e.resourceOp.resourceName);
+    if (!sourceType) return;
+    const mod = `../resources/${sourceType}`;
+    const set = resourceHelperByModule.get(mod) ?? new Set<string>();
+    set.add(`${e.resourceOp.resourceName}$${e.resourceOp.verb}`);
+    resourceHelperByModule.set(mod, set);
+  };
   for (const r of routes) {
     const ctx = byName.get(r.target.context);
     if (!ctx) continue;
@@ -525,6 +554,8 @@ export function buildExplicitRoutesFile(
     const qry = (ctx.queryHandlers ?? []).find((hd) => hd.name === r.target.handler);
     const h = cmd ?? qry;
     if (!h) continue;
+    for (const st of h.statements) walkWorkflowStmtExprsDeep(st, collectResourceHelpers);
+    if (h.returnValue) walkExprDeep(h.returnValue, collectResourceHelpers);
     const pathNames = new Set([...r.path.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!));
     // Seed the VO/enum wire-schema closure from every body-bound field.  A
     // record param contributes its individual field types (the body deserialises
@@ -789,6 +820,18 @@ export function buildExplicitRoutesFile(
   }
   if (voEnumReferenced.length > 0) {
     imports.push(`import { ${voEnumReferenced.join(", ")} } from "../domain/value-objects";`);
+  }
+  // Resource-op verb helpers (the handler-leg twin of workflow-builder's
+  // block).  Grouped by client module, one named import per (resource, verb)
+  // the routed handler bodies actually call — a routes file whose handlers do
+  // no resource I/O emits nothing here and stays byte-identical.
+  for (const [mod, helpers] of [...resourceHelperByModule].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    imports.push(`import { ${[...helpers].sort().join(", ")} } from "${mod}";`);
+  }
+  if (apiHelpers.size > 0) {
+    imports.push(
+      `import { ${[...apiHelpers].sort().join(", ")} } from "../resources/api-clients";`,
+    );
   }
 
   const schemaSection = schemaDecls.length > 0 ? [...schemaDecls, ""] : [];
