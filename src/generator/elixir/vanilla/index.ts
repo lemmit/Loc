@@ -526,7 +526,7 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
   // type + the transactional `record/2` insert) plus the late migration that
   // creates `audit_records`.  No-op unless an aggregate carries an audited
   // command action (operation / create / destroy) (audit-and-logging.md).
-  emitVanillaAudit(appName, appModule, contexts, out);
+  emitVanillaAudit(appName, appModule, contexts, out, sys);
 
   // --- LiveView pages --------------------------------------------------------
   // A deployable that mounts a HEEx `ui:` (not an embedded SPA) emits Phoenix

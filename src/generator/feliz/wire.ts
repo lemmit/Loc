@@ -23,7 +23,7 @@ import {
   wireFieldsForPart,
   wireFieldsForValueObject,
 } from "../../ir/enrich/wire-projection.js";
-import { PAGED_META_MEMBERS } from "../../ir/stdlib/generics.js";
+import { PAGED_META_MEMBERS, pagedReturn } from "../../ir/stdlib/generics.js";
 import { variantTag } from "../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
@@ -32,6 +32,7 @@ import type {
   EnrichedBoundedContextIR,
   ExprIR,
   FieldIR,
+  FindIR,
   OperationIR,
   PageIR,
   PayloadIR,
@@ -108,6 +109,12 @@ export interface FelizRead {
    *  decoder is the fixed `auditEntryDecoder` (`renderAuditEntryType`), not a
    *  domain decoder — `aggregate` is used for naming/record-emission only. */
   history?: boolean;
+  /** A USER-DECLARED repository find (`<api>.<Agg>.<find>(args)`) rather than a
+   *  lifecycle op.  Init-fired and id-less like a list read (so `single` stays
+   *  false), but its fetch carries the find's declared parameters as a query
+   *  string — which is exactly the fact that used to be unrepresentable here,
+   *  so EVERY non-`all`/`byId` read collapsed onto the `All<Plural>` field. */
+  find?: FelizFindRead;
   /** A query-time PROJECTION read (M-T1.3 Phase 1) rather than an aggregate
    *  read.  It is SINGLE-shaped like a byId (`Remote<'T option>`, rendered by
    *  `View.remoteOne`) but INIT-fired and id-less like a list read, which is
@@ -215,6 +222,58 @@ export function byIdFieldName(aggregate: string): string {
   return `${upperFirst(aggregate)}ById`;
 }
 
+/** The Model field name for a USER-DECLARED repository find read
+ *  (`Doc` + `byVis` → `DocByVis`).  Derived from the OPERATION, not just the
+ *  aggregate: two finds of one aggregate are two reads with two Model fields,
+ *  two `Msg` cases and two fetches.  Collapsing them onto `readFieldName` is
+ *  the misbinding this exists to prevent — it emitted `model.AllDocs` against a
+ *  Model that declared nothing, for a query that was never issued. */
+export function findFieldName(aggregate: string, findName: string): string {
+  return `${upperFirst(aggregate)}${upperFirst(findName)}`;
+}
+
+/** One declared parameter of a find read, projected to what the F# api fn needs:
+ *  the parameter's F# spelling and the expression that turns it into its query
+ *  string value. */
+export interface FelizFindParam {
+  /** Declared parameter name — also the query-string key the backends read
+   *  (`GET /<aggs>/<find>?<name>=…`, the contract the JS clients already call). */
+  name: string;
+  /** F# type of the parameter in the api fn signature (`string` / `int` / …),
+   *  spelled off the WIRE type so an enum arrives as its string name. */
+  fsType: string;
+  /** F# expression yielding the parameter's query-string value, in terms of
+   *  `name` (`vis`, `(string n)`, `(if flag then "true" else "false")`). */
+  queryValue: string;
+}
+
+/** A user-declared repository find read (`<api>.<Agg>.<find>(args)`).  Carries
+ *  the two halves that a lifecycle read does not have: the find's declared
+ *  PARAMETERS (the api fn's signature + query string) and the ARGUMENT
+ *  expressions the call site passed (rendered by the MVU layer, which is where
+ *  the model expression in scope is known — see `findReadCmd`). */
+export interface FelizFindRead {
+  /** The declared find name (`byVis`) — its route segment is `snake(name)`,
+   *  matching the `/<aggs>/<find_snake>` route every other frontend calls. */
+  name: string;
+  /** Declared parameters in source order. */
+  params: readonly FelizFindParam[];
+  /** Call-site argument expressions in source order, index-aligned with
+   *  `params`.  Held as IR (not pre-rendered) because the F# spelling of a
+   *  state ref depends on WHICH model expression is in scope at the emission
+   *  site — `__m` in `init`, `model` in an `update` arm. */
+  argExprs: readonly ExprIR[];
+}
+
+/** The `Cmd` that issues a find read, given its already-rendered arguments.
+ *  The one place the argument order is spelled, so `init` and any refetch arm
+ *  cannot drift apart from `renderApiFn`'s parameter list. */
+export function findReadCmd(r: FelizRead, renderedArgs: readonly string[]): string {
+  if (renderedArgs.length === 0) return `Cmd.OfAsync.perform Api.${r.apiFn} () ${r.msgCase}`;
+  const args = renderedArgs.map((a) => `(${a})`).join(" ");
+  return `Cmd.OfAsync.perform (fun () -> Api.${r.apiFn} ${args}) () ${r.msgCase}`;
+}
+
 /** How a `.all` read is consumed.  `paged` marks the `QueryView paged: true`
  *  envelope; `controls` the page/sort state its `of:` threads (only meaningful
  *  under `paged`). */
@@ -271,6 +330,135 @@ export function felizByIdRead(aggregate: string, pageCase: string): FelizRead {
     single: true,
     listShaped: false,
     pageCase,
+  };
+}
+
+/** Everything a find read needs that this module cannot see for itself. */
+const FIND_UNSUPPORTED_HINT =
+  "The Feliz frontend issues a find as `GET /<aggs>/<find>?<param>=…` and decodes the " +
+  "aggregate's own wire shape, so it can only carry SCALAR parameters and can only " +
+  "decode the aggregate (optionally in the `paged` envelope).";
+
+/** The F# expression that turns a find parameter into its query-string value.
+ *  A scalar-only surface, deliberately: the query string is text, and a
+ *  composite parameter has no agreed spelling in it on any backend.  An
+ *  unsupported parameter type THROWS rather than silently stringifying to
+ *  something no backend parses. */
+function findParamQueryValue(t: TypeIR, aggregate: string, findName: string, name: string): string {
+  const base = t.kind === "optional" ? t.inner : t;
+  switch (base.kind) {
+    case "primitive":
+      switch (base.name) {
+        case "int":
+        case "long":
+          return `(string ${name})`;
+        case "decimal":
+        case "money":
+          // Invariant culture: a comma decimal separator would reach the
+          // backend as a different number (or as two query values).
+          return `(${name}.ToString(System.Globalization.CultureInfo.InvariantCulture))`;
+        case "bool":
+          // F#'s `string true` is "True"; every backend's boolean query parser
+          // reads the lowercase JSON spelling.
+          return `(if ${name} then "true" else "false")`;
+        case "datetime":
+          return `(${name}.ToString("o"))`;
+        case "string":
+        case "guid":
+        case "json":
+          return name;
+        default:
+          break;
+      }
+      break;
+    // An `X id` is a string on the Feliz wire; an enum travels as its name.
+    case "id":
+    case "enum":
+      return name;
+    default:
+      break;
+  }
+  throw new Error(
+    `feliz: repository find '${aggregate}.${findName}' has a parameter '${name}' of an ` +
+      `unsupported type (${base.kind}${base.kind === "primitive" ? ` ${base.name}` : ""}) — ` +
+      `${FIND_UNSUPPORTED_HINT} Give the find a scalar parameter, or drop the read from ` +
+      `the Feliz ui.`,
+  );
+}
+
+/** Build the `FelizRead` for a user-declared repository find of `aggregate`.
+ *
+ *  Init-fired and id-less (so `single` is false — it is not `pageCmd`-keyed),
+ *  but parameterised: the api fn takes the find's declared parameters and sends
+ *  them as the query string the JS clients already call
+ *  (`GET /<aggs>/<find_snake>?<param>=…`).
+ *
+ *  FOUR return shapes are supported, and every other one throws rather than
+ *  emitting a decoder that cannot match the wire:
+ *    - `T[]`            → `Remote<T list>`   (`View.remoteList`)
+ *    - `T[] paged`      → `Remote<T list>` + the `PageMeta` sibling, exactly
+ *                         like an uncontrolled paged `.all` (the pager renders
+ *                         its counts; `Next` stays disabled because a find's
+ *                         arguments are its own parameters, not page controls)
+ *    - `T?`             → `Remote<T option>` (`View.remoteOne`, 404 → `Ok None`)
+ *    - `T`              → `Remote<T option>` via `Decode.map Some`, reusing the
+ *                         single-record matcher exactly as a projection does */
+export function felizFindRead(
+  aggregate: string,
+  find: FindIR,
+  argExprs: readonly ExprIR[],
+): FelizRead {
+  const agg = upperFirst(aggregate);
+  const field = findFieldName(aggregate, find.name);
+  const decoder = `Decoders.${lowerFirst(agg)}`;
+  const paged = pagedReturn(find.returnType);
+  const ret = paged ? paged.arg : find.returnType;
+  const inner = ret.kind === "optional" ? ret.inner : ret;
+  // `Doc paged` carries the AGGREGATE as its argument (the envelope supplies the
+  // collection), so a paged find is list-shaped whatever `arg` says.
+  const listShaped = paged !== null || inner.kind === "array";
+  const elem = inner.kind === "array" ? inner.element : inner;
+  if (elem.kind !== "entity" || upperFirst(elem.name) !== agg) {
+    throw new Error(
+      `feliz: repository find '${agg}.${find.name}' returns a shape the Feliz frontend ` +
+        `cannot decode (${find.returnType.kind}) — ${FIND_UNSUPPORTED_HINT} Declare the ` +
+        `find as '${agg}', '${agg}?', '${agg}[]' or '${agg} paged'.`,
+    );
+  }
+  const params = find.params.map((p) => ({
+    name: p.name,
+    fsType: wireFieldType(p.type),
+    queryValue: findParamQueryValue(p.type, agg, find.name, p.name),
+  }));
+  if (argExprs.length !== params.length) {
+    throw new Error(
+      `feliz: repository find '${agg}.${find.name}' was called with ${argExprs.length} ` +
+        `argument(s) but declares ${params.length} parameter(s) — the Feliz api fn is ` +
+        `generated from the declaration, so the two cannot disagree.`,
+    );
+  }
+  const items = `(Decode.field "items" (Decode.list ${decoder}))`;
+  return {
+    field,
+    msgCase: `${field}Loaded`,
+    apiFn: lowerFirst(field),
+    aggregate: agg,
+    resultType: listShaped ? `${agg} list` : `${agg} option`,
+    decoderExpr: paged
+      ? `(Decode.map2 (fun __items __meta -> (__items, __meta)) ${items} ${PAGE_META_DECODER})`
+      : listShaped
+        ? `(Decode.list ${decoder})`
+        : ret.kind === "optional"
+          ? `(Decode.option ${decoder})`
+          : // A REQUIRED single find still lands in an `option` so it can reuse
+            // `View.remoteOne` — the same lift a singleton projection read uses.
+            `(Decode.map Some ${decoder})`,
+    route: `${API_BASE_PATH}/${snake(plural(aggregate))}/${snake(find.name)}`,
+    binding: lowerFirst(field),
+    single: false,
+    listShaped,
+    ...(paged ? { paging: { metaField: pageMetaFieldName(field) } } : {}),
+    find: { name: find.name, params, argExprs },
   };
 }
 
@@ -1268,6 +1456,26 @@ function collectBodyReads(
       isEntityHistoryRead(ofArg, aggregatesByName)
     )
       read = felizHistoryRead(detected.aggregateName, pageCase);
+    // A USER-DECLARED repository find — the parameterised query.  Resolved
+    // against the aggregate's repository so the read carries the find's own
+    // Model field, route and parameter list.  Everything that reaches here and
+    // is NOT a declared find would previously have been mapped to
+    // `All<Plural>` by the target's `buildHookUse` — a Model field nothing
+    // declares, a fetch nothing issues — so it fails loudly instead.
+    else if (detected.operation !== "byId" && !isEntityHistoryRead(ofArg, aggregatesByName)) {
+      const find = findOnAggregate(bcByAggregate, detected.aggregateName, detected.operation);
+      if (!find) {
+        throw new Error(
+          `feliz: '${detected.aggregateName}.${detected.operation}' is read in a ui body, ` +
+            `but '${detected.operation}' is neither a lifecycle read (\`all\` / \`byId\`) nor ` +
+            `a find declared on the '${detected.aggregateName}' repository. The Feliz ` +
+            `frontend has no Model field to bind such a read to; declare the find, or use ` +
+            `\`all\` / \`byId\`.`,
+        );
+      }
+      read = felizFindRead(detected.aggregateName, find, detected.args);
+      assertFindArgsRenderable(read, host, detected.aggregateName);
+    }
     if (!read) continue;
     // The same aggregate can be read twice on one page — a controlled list plus,
     // say, an FK-select's option source.  They share a Model field, so keep the
@@ -1282,6 +1490,54 @@ function collectBodyReads(
     out.push(read);
   }
   return out;
+}
+
+/** The user-declared find `findName` on `aggregate`'s repository, or undefined.
+ *  Deliberately reads `finds` only: the derived history find sits BESIDE it
+ *  (`RepositoryIR.historyFind`) and has its own read shape. */
+function findOnAggregate(
+  bcByAggregate: ReadonlyMap<string, BoundedContextIR>,
+  aggregate: string,
+  findName: string,
+): FindIR | undefined {
+  const bc = bcByAggregate.get(aggregate);
+  const repo = bc?.repositories.find((r) => r.aggregateName === aggregate);
+  return repo?.finds.find((f) => f.name === findName);
+}
+
+/** Refs a find ARGUMENT may contain and still be renderable by the MVU layer.
+ *
+ *  A find read's fetch is built in `init` (and in a control's `update` arm),
+ *  where the ONLY things in scope are the model being built and the parsed
+ *  route.  So an argument may reference the hosting body's `state {}` cells, a
+ *  store field, or the route `id` — and nothing else.  `renderFsExpr`'s `ref`
+ *  arm falls through to the BARE name for anything it cannot resolve, which
+ *  would emit an F# identifier nothing binds; this is the gate that stops that
+ *  from being silent. */
+function assertFindArgsRenderable(
+  read: FelizRead,
+  host: { state: readonly { name: string }[] },
+  aggregate: string,
+): void {
+  const stateNames = new Set(host.state.map((s) => s.name));
+  const findName = read.find?.name ?? "";
+  const walk = (e: ExprIR): void => {
+    if (e.kind === "ref") {
+      const resolvable =
+        e.refKind === "store-field" || e.refKind === "enum-value" || stateNames.has(e.name);
+      if (!resolvable) {
+        throw new Error(
+          `feliz: the argument '${e.name}' passed to repository find ` +
+            `'${upperFirst(aggregate)}.${findName}' is not resolvable where the Feliz ` +
+            `frontend issues the query. A find read's fetch is built in \`init\` (and in a ` +
+            `control's \`update\` arm), so its arguments may only be literals, page ` +
+            `\`state {}\` cells, store fields or the route \`id\` — not '${e.name}'.`,
+        );
+      }
+    }
+    for (const c of exprChildren(e)) walk(c);
+  };
+  for (const a of read.find?.argExprs ?? []) walk(a);
 }
 
 /** Read the page/sort controls out of a server-paged `of:`.
@@ -2517,6 +2773,39 @@ export function renderWireTypes(
  *  byId read takes `(id: string)`, fetches `GET /api/orders/<id>`, and folds a
  *  `404` to `Ok None` (the record is legitimately absent, not an error). */
 function renderApiFn(r: FelizRead): (string | undefined)[] {
+  // A USER-DECLARED repository find — `GET /<aggs>/<find_snake>?<param>=…`, the
+  // same route the React / Vue / Svelte / Angular / Flutter clients call.  The
+  // signature is generated from the DECLARATION (one curried parameter per
+  // declared find parameter), so the call sites in `init` / a refetch arm
+  // cannot pass an argument list the fn does not accept.  BEFORE the `single`
+  // branch: a find read is never page-entry keyed, so `single` is false, but a
+  // single-RECORD find still folds `404` to `Ok None` like a byId.
+  if (r.find) {
+    const ps = r.find.params;
+    const sig = ps.length === 0 ? "()" : ps.map((p) => `(${p.name}: ${p.fsType})`).join(" ");
+    const url =
+      ps.length === 0
+        ? `"${r.route}"`
+        : `(sprintf "${r.route}?${ps.map((p) => `${p.name}=%s`).join("&")}" ${ps
+            .map((p) => p.queryValue)
+            .join(" ")})`;
+    return [
+      `  let ${r.apiFn} ${sig} : Async<Result<${readLoadedType(r)}, string>> =`,
+      "    async {",
+      `      let! (status, body) = Http.get ${url}`,
+      "      if status = 200 then",
+      `        match Decode.fromString ${r.decoderExpr} body with`,
+      "        | Ok data -> return Ok data",
+      "        | Error e -> return Error e",
+      // A single-record find answers `404` when nothing matches — the absence is
+      // the answer, not an error (identical to `byId`).  A LIST find's 404 is a
+      // genuine failure: an empty result is `[]`.
+      ...(r.listShaped ? [] : ["      elif status = 404 then", "        return Ok None"]),
+      "      else",
+      '        return Error (sprintf "HTTP %d" status)',
+      "    }",
+    ];
+  }
   // The entity-history read — `(id: string)`, `GET /<aggs>/<id>/history`,
   // decoding the fixed `AuditEntry list`.  BEFORE the `single` branch: it is
   // page-entry keyed (single) but its payload is a list, so the byId shape's

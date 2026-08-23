@@ -63,9 +63,18 @@ defmodule ${webModule}.FilesController do
         |> send_resp(200, body)
 
       nil ->
-        conn
-        |> put_status(404)
-        |> json(%{"error" => "not found"})
+        # RFC 7807 through the shared responder — this used to answer
+        # %{"error" => "not found"} as application/json, a second error contract
+        # on a wire already committed to problem+json (and a different one again
+        # on each of the other four backends).  The status stays a literal 404:
+        # a bucket key is not an aggregate id, so this is not the remappable
+        # \`NotFound\` rung.
+        ${webModule}.ProblemDetails.problem_response(
+          conn,
+          404,
+          "Not Found",
+          "No stored object for that key"
+        )
     end
   end
 end

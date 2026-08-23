@@ -31,6 +31,7 @@ import type {
 import {
   fileSelectMsg,
   fileUploadedMsg,
+  findReadCmd,
   formFileSelectMsg,
   formFileUploadedMsg,
   formHasFieldErrors,
@@ -94,7 +95,11 @@ function boundSetMsg(b: FelizBoundState): string {
  *  scaffolded list's `pageNum`/`sortKey`/`sortDir`): the arm then binds the
  *  updated model first and fires the read off THAT, so the request carries the
  *  new page/sort rather than the one it just replaced. */
-function boundSetArm(b: FelizBoundState, refetch?: FelizRead): string {
+function boundSetArm(
+  b: FelizBoundState,
+  refetch?: FelizRead,
+  renderFindArgs: (r: FelizRead) => string[] = () => [],
+): string {
   const field = upperFirst(b.name);
   const fs = typeToFs(b.type);
   const conv =
@@ -106,10 +111,16 @@ function boundSetArm(b: FelizBoundState, refetch?: FelizRead): string {
           ? "(match System.Decimal.TryParse v with | true, n -> n | _ -> 0m)"
           : "v";
   if (refetch) {
-    return (
-      `  | Set${field} v -> let __m = { model with ${field} = ${conv} } in ` +
-      `__m, ${pagedReadCmd(refetch, "__m")}`
-    );
+    // A find read's ARGUMENT is a control in exactly the way a paged read's
+    // page/sort cell is: change it and the query has to be re-issued off the
+    // UPDATED model, or the view keeps showing the answer to the previous
+    // question.  (Riverpod gets this for free — the Flutter `.family` provider
+    // is re-watched with the new argument — so this arm is what keeps the two
+    // frontends behaving the same.)
+    const cmd = refetch.find
+      ? findReadCmd(refetch, renderFindArgs(refetch))
+      : pagedReadCmd(refetch, "__m");
+    return `  | Set${field} v -> let __m = { model with ${field} = ${conv} } in __m, ${cmd}`;
   }
   return `  | Set${field} v -> { model with ${field} = ${conv} }, Cmd.none`;
 }
@@ -132,6 +143,18 @@ function refetchByControlField(reads: readonly FelizRead[]): Map<string, FelizRe
     const c = r.paging?.controls;
     if (!c) continue;
     for (const f of [c.pageField, c.sortDirField]) m.set(f, r);
+  }
+  // A user-declared find read is controlled by the state cells its ARGUMENTS
+  // name — `QueryView { of: K.Doc.byVis(chosen) }` beside a `Select(bind:
+  // chosen)`.  Registered after the paged controls so a cell that is both keeps
+  // the paged refetch (which re-issues the whole page/sort request), never two
+  // fetches for one keystroke.
+  for (const r of reads) {
+    for (const a of r.find?.argExprs ?? []) {
+      if (a.kind !== "ref") continue;
+      const f = upperFirst(a.name);
+      if (!m.has(f)) m.set(f, r);
+    }
   }
   return m;
 }
@@ -294,6 +317,20 @@ export function renderInit(
   initOverrides: ReadonlyMap<string, string> = new Map(),
 ): string {
   const hasPageCmd = routed && reads.some((r) => r.single);
+  // A user-declared find read is issued with its ARGUMENTS, and those are
+  // page `state {}` cells / store fields / the route id.  `init` binds the
+  // initial record as `__m` before building the `Cmd`s (the same trick a
+  // page/sort-controlled paged read already uses), so the arguments resolve
+  // against the record this very `init` is returning.
+  const findArgCtx: FsExprCtx = {
+    stateNames: new Set(state.map((f) => f.name)),
+    locals: new Set(),
+    modelExpr: "__m",
+    ...(routed ? { routeId: ROUTE_ID_FROM_URL } : {}),
+  };
+  const findArgs = (r: FelizRead): string[] =>
+    (r.find?.argExprs ?? []).map((a) => renderFsExpr(a, findArgCtx));
+  const hasFindArgs = reads.some((r) => (r.find?.argExprs.length ?? 0) > 0);
   const inits = [
     ...(authUi ? ["      Session = Checking"] : []),
     ...(pageGate ? ["      CurrentUser = None"] : []),
@@ -345,7 +382,9 @@ export function renderInit(
       // sort, so it can't disagree with what the pager renders.
       r.paging?.controls
         ? pagedReadCmd(r, "__m")
-        : `Cmd.OfAsync.perform Api.${r.apiFn} () ${r.msgCase}`,
+        : r.find
+          ? findReadCmd(r, findArgs(r))
+          : `Cmd.OfAsync.perform Api.${r.apiFn} () ${r.msgCase}`,
     );
   if (hasPageCmd) cmds.push("pageCmd page");
   // The auth gate probes the session at init (batched with the reads).
@@ -363,7 +402,7 @@ export function renderInit(
   // A paged read's init `Cmd` reads the model's own page/sort cells, so the
   // record has to be BOUND before the `Cmd` is built rather than returned
   // inline as the tuple's first element.
-  if (reads.some((r) => r.paging?.controls)) {
+  if (reads.some((r) => r.paging?.controls) || hasFindArgs) {
     const body = inits.map((l) => `  ${l}`).join("\n");
     return `${prefix}  let __m =\n    {\n${body}\n    }\n  __m, ${cmd}`;
   }
@@ -646,7 +685,20 @@ export function renderUpdate(
   // A control of a server-paged read turns its setter into a refetch; every
   // other bound input keeps the plain `Cmd.none` assignment.
   const refetches = refetchByControlField(reads);
-  const boundArms = boundState.map((b) => boundSetArm(b, refetches.get(upperFirst(b.name))));
+  // A refetched find read's arguments resolve against `__m` — the record the
+  // arm has just bound with the new control value — for the same reason
+  // `pagedReadCmd` is handed `"__m"` there.
+  const refetchArgCtx: FsExprCtx = {
+    stateNames,
+    locals: new Set(),
+    modelExpr: "__m",
+    ...armRouteId,
+  };
+  const boundArms = boundState.map((b) =>
+    boundSetArm(b, refetches.get(upperFirst(b.name)), (r) =>
+      (r.find?.argExprs ?? []).map((a) => renderFsExpr(a, refetchArgCtx)),
+    ),
+  );
   // Per standalone `FileUpload(bind:)`: the file-picked trigger fires the upload
   // `Cmd` (multipart POST /files), and the result sets the `File` Model field to
   // `Some ref` on success (an error is dropped — the field stays as it was).

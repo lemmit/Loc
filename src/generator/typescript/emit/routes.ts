@@ -238,7 +238,20 @@ export function renderHttpIndex(
         `  // File download — streams the stored object back with its contentType.`,
         `  app.get("/files/:key", async (c) => {`,
         `    const obj = await ${fileUpload.resource}$getBytes(c.req.param("key"));`,
-        `    if (!obj) return c.json({ error: "not found" }, 404);`,
+        // The blob-absence 404 answers RFC 7807 like every other fault on this
+        // wire.  It used to send `{"error":"not found"}` as application/json —
+        // a second error contract, and a different one again on each of the five
+        // backends (empty bodies on dotnet/java, `{"error":…}` here, on python
+        // and elixir).  Routed through the SHARED framework envelope so the
+        // title/type/instance members cannot drift from the root handlers'.
+        // The status stays a literal 404: this addresses a bucket key, not an
+        // aggregate id, so it is not the remappable `NotFound` rung
+        // (`ir/util/openapi-errors.ts`).
+        `    if (!obj) {`,
+        `      return c.body(frameworkProblemBody(404, "No stored object for that key", c.req.path), 404, {`,
+        `        "content-type": "application/problem+json",`,
+        `      });`,
+        `    }`,
         `    // Copy into a standalone ArrayBuffer — Hono's c.body() rejects a`,
         `    // Uint8Array whose backing buffer is only ArrayBufferLike.`,
         `    const ab = obj.body.buffer.slice(`,

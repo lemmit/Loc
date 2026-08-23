@@ -133,14 +133,18 @@ defmodule ${appModule}.Audit.History do
   on the way in, so only the derived \`changes\` output is a cross-backend
   contract.
 
-  The snake_case fallback is a wart of THIS backend's write side, recorded
-  rather than hidden: an audited \`create\`/\`destroy\` snapshots through the
-  controller's wire serializer (camelCase wire keys), while an audited
-  \`operation\` snapshots the Ecto struct directly (\`Map.from_struct\`, i.e. schema
-  column names).  Both spellings are consistent WITHIN a row — both sides of one
-  entry always come from the same projection — so falling back cannot invent a
-  change; it only stops a multi-word field from silently vanishing from the
-  timeline of every operation entry.
+  The snake_case fallback reads LEGACY rows only.  Every capture site now
+  snapshots through one projection — \`Audit.Wire.wire/1\`, the aggregate's
+  \`wireShape\` — so an audited \`operation\` writes the same camelCase keys an
+  audited \`create\`/\`destroy\` does, and the same keys the other four backends
+  write.  Before that, an \`operation\` dumped the Ecto struct
+  (\`Map.from_struct\`, i.e. schema column names), so rows written by an older
+  build of this app still carry snake_case keys; \`audit_records\` is append-only
+  history and survives redeploys, so those rows are still read here.  Both
+  spellings stay consistent WITHIN a row — both sides of one entry always come
+  from the same projection — so falling back cannot invent a change; it only
+  stops a multi-word field from vanishing from the timeline of a pre-existing
+  operation entry.
   """
   @spec snapshot_value(term(), String.t()) :: term()
   def snapshot_value(snapshot, key) when is_map(snapshot) do

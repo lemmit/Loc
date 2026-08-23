@@ -375,6 +375,27 @@ system S {
     port: 3000
   }
 }`,
+  // A domainService's `reading` tier is scoped to its OWN context: a body
+  // naming another context's repository never lowers to a `repo-read`, so all
+  // five backends render the unresolved receiver verbatim.
+  "loom.domain-service-cross-context-read": `
+system S {
+  subdomain Sub {
+    context Billing {
+      aggregate Customer { name: string }
+      repository Customers for Customer {
+        find byName(name: string): Customer? where this.name == name
+      }
+    }
+    context Ordering {
+      aggregate Order { ref: string }
+      repository Orders for Order { }
+      domainService Naming {
+        operation isFree(r: string): bool { return Customers.byName(r) == null }
+      }
+    }
+  }
+}`,
   // --- frontend deployable without a `ui:` binding ------------------------
   "loom.react-deployable-missing-ui": spaMissingUi("react"),
   "loom.svelte-deployable-missing-ui": spaMissingUi("svelte"),
@@ -430,6 +451,51 @@ system P {
   resource st { for: C, kind: state, use: pg }
   deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
   deployable app { platform: flutter targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
+  // A `slot` param on a WALKED component, on an Angular-hosted ui: the Angular
+  // component emitter filters such a component out entirely (no class file, and
+  // every call site keeps `<!-- unknown layout component: Panel -->`), because
+  // `ngComponentOutletInputs` sets INPUTS and has no content-projection channel.
+  "loom.user-component-deferred-target": `
+system P {
+  subdomain D { context C {
+    aggregate Order with crudish { customerId: string }
+  } }
+  api Api from D
+  ui WebApp {
+    api C: Api
+    component Panel(head: slot) { body: Card { head } }
+    page Home { route: "/" body: Stack { Panel(head: Text { "hi" }) } }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable app { platform: angular targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
+  // A `toast(<expr>)` outside the v1 message subset every realtime renderer
+  // implements — two-level member access off the event binding.  Without the
+  // gate this aborts `ddd generate system` with a raw Error from
+  // `renderMessageExpr` / `renderFsToastMessage` / `renderMessageExprElixir`.
+  "loom.toast-message-unsupported": `
+system P {
+  subdomain D { context C {
+    aggregate Order with crudish { customerId: string }
+    event OrderPlaced { order: Order id, at: datetime }
+    channel Lifecycle { carries: OrderPlaced  delivery: broadcast  retention: ephemeral }
+  } }
+  api Api from D
+  ui WebApp {
+    api C: Api
+    channel Live: C.Lifecycle
+    on Live.OrderPlaced(e) { toast(e.order.id) }
+    page Home { route: "/" body: Stack { Heading { "home" } } }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable app { platform: react targets: api ui: WebApp { C: api } port: 3001 }
 }`,
 
   // `display`/`inspect` are reserved derived names that only mean something on

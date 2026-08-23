@@ -117,9 +117,16 @@ workflow MoveMoney transactional {
 | Start a workflow in the same context | `loom.domain-service-no-workflow-start` |
 | Calling a **reading**/**mutating** service from an aggregate op / view body | `loom.domain-service-infra-call-from-aggregate` |
 | A **resource-op** (`files.put(…)`, `mail.send(…)`, …) — outbound I/O belongs to the orchestrator | `loom.resource-op-outside-workflow` |
+| Reading a repository of **another context** — the `reading` tier is scoped to the service's own context | `loom.domain-service-cross-context-read` |
 
 Repository **reads** are allowed (they lower to a `repo-read` Call, not a
-write); mutation of a **passed-in aggregate** via its own operation is
+write) — but only of the service's **own context**: lowering resolves reads
+against the enclosing context's repositories alone, so a cross-context name
+never becomes a `repo-read` and every backend would render the unresolved
+receiver verbatim (`Customers.byName(r)` with nothing defining `Customers`).
+Move the service into the other context, or have the orchestrating workflow do
+the read and pass the value in as a parameter. Mutation of a **passed-in
+aggregate** via its own operation is
 allowed in the `mutating` tier (it's a method-call, never the
 `no-mutation` statement gate). Plus an **anemic-domain warning**
 (`loom.domain-service-single-aggregate`) when every operation takes

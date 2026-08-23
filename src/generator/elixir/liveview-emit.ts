@@ -23,6 +23,7 @@ import type {
   DeployableIR,
   EnumIR,
   PageIR,
+  StateFieldIR,
   SystemIR,
   TypeIR,
   UiIR,
@@ -50,6 +51,8 @@ import { opUsesCurrentUser } from "./domain/predicates.js";
 import {
   type ActionBinding,
   type HandleEventClause,
+  hostStateAssign,
+  liftedStateAttrs,
   type QueryBinding,
   renderRequiresGuard,
   stateInitFor,
@@ -333,12 +336,15 @@ export function emitLiveViewPages(args: {
       contextModuleByAggName,
       contextByAggName,
       i18nEnabled ? `component.${c.name}` : undefined,
+      c.name,
     );
     componentInfo.set(c.name, {
       actionBindings: w.actionBindings,
       usedComponents: w.usedComponents,
       usedStores: w.usedStores,
       handlers: w.handlers,
+      state: c.state,
+      componentUses: w.componentUses,
     });
     anyChart ||= w.usesChart;
   }
@@ -498,13 +504,19 @@ interface ComponentActionInfo {
    *  so its mount seeds the `:store` assign + `alias` even when the store is
    *  only touched inside the (stateless) component. */
   usedStores: readonly string[];
-  /** The component's own `handle_event` clauses (named-action handlers) — a
-   *  store-mutating component action (`addOne() { Cart.add(...) }`) must hoist
-   *  its handler to the host page LiveView, since the component is a stateless
-   *  function component with no LiveView of its own.  Only store-touching
-   *  handlers are hoisted (see `gatherStoreHandlers`); the rest stay the
-   *  pre-existing component-named-action gap. */
+  /** The component's own `handle_event` clauses (named-action handlers, plus
+   *  any inline-lambda handler its body hoisted).  A HEEx function component is
+   *  a pure render function with no LiveView of its own, so EVERY one of these
+   *  must hoist to the host page LiveView or its `phx-click` names a clause
+   *  that does not exist — a `FunctionClauseError` on the first click.  See
+   *  `gatherComponentHandlers`. */
   handlers: readonly HandleEventClause[];
+  /** The component's `state { … }` fields, lifted into the host page's assigns
+   *  under `hostStateAssign(component, field)` (see `heex-walker-core.ts`). */
+  state: readonly StateFieldIR[];
+  /** How many times this component's body invokes each nested component —
+   *  multiplied along the render tree to count live instances. */
+  componentUses: ReadonlyMap<string, number>;
 }
 
 /** Transitive closure: every `ActionBinding` reachable from a page —
@@ -557,18 +569,28 @@ function gatherUsedStores(
   return [...stores];
 }
 
-/** The store-touching `handle_event` clauses from every component a page
- *  renders (transitively).  A component is a stateless function component, so a
- *  store-mutating component action (`addOne() { Cart.add(...) }`) only works if
- *  its handler is hoisted to the host page's LiveView (which owns the `:cart`
- *  assign).  Only clauses whose body references `update(:` (a store mutation)
- *  are hoisted — page-local component actions that mutate nothing the page owns
- *  stay the pre-existing component-named-action HEEx gap.  Deduped by name. */
-function gatherStoreHandlers(
+/** EVERY `handle_event` clause from every component a page renders
+ *  (transitively).  A component is a stateless function component, so a clause
+ *  it declares has nowhere of its own to live: the `phx-click="bump"` its
+ *  markup emits is dispatched to the HOST LiveView, and without the hoist that
+ *  click raises `FunctionClauseError`.  Component state referenced by these
+ *  bodies was lifted to host assigns by the walker, so the clause is
+ *  self-contained here.  Deduped by event name; a genuine collision between two
+ *  DIFFERENT bodies is raised rather than silently resolved, since keeping the
+ *  first would make the loser's button do the winner's work.
+ *
+ *  `ownHandlers` are the page's own clauses — passed in so a page action and a
+ *  component action sharing a name collide loudly here rather than emitting two
+ *  clauses of which Elixir can only ever reach the first. */
+function gatherComponentHandlers(
   seedComponents: readonly string[],
   componentInfo: ReadonlyMap<string, ComponentActionInfo>,
+  ownHandlers: readonly HandleEventClause[],
+  pageName: string,
 ): HandleEventClause[] {
   const byName = new Map<string, HandleEventClause>();
+  for (const h of ownHandlers) byName.set(h.name, h);
+  const hoisted = new Map<string, HandleEventClause>();
   const seen = new Set<string>();
   const queue = [...seedComponents];
   while (queue.length > 0) {
@@ -578,12 +600,81 @@ function gatherStoreHandlers(
     const info = componentInfo.get(name);
     if (!info) continue;
     for (const h of info.handlers) {
-      const touchesStore = h.body.some((l) => l.includes("update(:"));
-      if (touchesStore && !byName.has(h.name)) byName.set(h.name, h);
+      const clash = byName.get(h.name);
+      if (clash) {
+        if (clash.body.join("\n") !== h.body.join("\n")) {
+          throw new Error(
+            `platform: elixir — page '${pageName}' hoists two different \`${h.name}\` handlers into one LiveView (component '${name}' collides with another handler of that name). Rename one of the \`action\`s: a LiveView dispatches every \`phx-click\` by name, so only one of them could ever run.`,
+          );
+        }
+        continue;
+      }
+      byName.set(h.name, h);
+      hoisted.set(h.name, h);
     }
     queue.push(...info.usedComponents);
   }
-  return [...byName.values()];
+  return [...hoisted.values()];
+}
+
+/** The lifted state assigns a page must seed in `mount/3`: every state field of
+ *  every component it renders, transitively.  Ordered by component then
+ *  declaration so the emitted `mount` is stable. */
+function gatherLiftedState(
+  seedComponents: readonly string[],
+  componentInfo: ReadonlyMap<string, ComponentActionInfo>,
+): { assign: string; field: StateFieldIR }[] {
+  const out = new Map<string, { assign: string; field: StateFieldIR }>();
+  const seen = new Set<string>();
+  const queue = [...seedComponents];
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const info = componentInfo.get(name);
+    if (!info) continue;
+    for (const f of info.state) {
+      const assign = hostStateAssign(name, f.name);
+      if (!out.has(assign)) out.set(assign, { assign, field: f });
+    }
+    queue.push(...info.usedComponents);
+  }
+  return [...out.values()];
+}
+
+/** Guard the one slice lifting to host assigns genuinely cannot express: a
+ *  component that declares `state` and is rendered more than once on a page.
+ *  React gives each `<Counter/>` its own `useState`; one host assign per
+ *  component NAME gives them a shared cell, so two counters would move
+ *  together.  Fail at codegen rather than ship that.
+ *
+ *  Instance count is the product along the render tree — a component used twice
+ *  that itself renders a stateful child yields two of the child. */
+function assertSingleInstancePerStatefulComponent(
+  pageUses: ReadonlyMap<string, number>,
+  componentInfo: ReadonlyMap<string, ComponentActionInfo>,
+  pageName: string,
+): void {
+  const total = new Map<string, number>();
+  const walk = (uses: ReadonlyMap<string, number>, multiplier: number, chain: string[]): void => {
+    for (const [name, n] of uses) {
+      const count = n * multiplier;
+      total.set(name, (total.get(name) ?? 0) + count);
+      // A cycle is impossible in a well-formed component graph (the validator
+      // owns that); the chain guard keeps codegen finite regardless.
+      if (chain.includes(name)) continue;
+      const info = componentInfo.get(name);
+      if (info) walk(info.componentUses, count, [...chain, name]);
+    }
+  };
+  walk(pageUses, 1, []);
+  for (const [name, count] of total) {
+    if (count > 1 && (componentInfo.get(name)?.state.length ?? 0) > 0) {
+      throw new Error(
+        `platform: elixir — page '${pageName}' renders component '${name}' ${count} times, but '${name}' declares \`state\`. A HEEx function component holds no state of its own, so Loom lifts it into the host LiveView's assigns — one cell per component, which ${count} instances would share. Render it once, or move the state into a page \`state { … }\` field passed down as a param.`,
+      );
+    }
+  }
 }
 
 /** A hoisted `Action` `handle_event` clause: load the instance by id,
@@ -698,6 +789,11 @@ function renderLiveView(a: RenderArgs): { source: string; usesChart: boolean } {
   // domain `emit` topic on mount and handles each carried event natively via
   // `handle_info`.  A ui with no handlers keeps byte-identical output.
   const subscribeRealtime = (ui.notifications?.length ?? 0) > 0;
+  // Component-local `state { … }`, lifted into this page's assigns — a HEEx
+  // function component owns none of its own.  Guarded first: one assign per
+  // component name cannot serve two live instances.
+  assertSingleInstancePerStatefulComponent(walked.componentUses, componentInfo, page.name);
+  const liftedState = gatherLiftedState(walked.usedComponents, componentInfo);
   const mount = renderMount(
     page,
     walked.formBindings,
@@ -707,6 +803,7 @@ function renderLiveView(a: RenderArgs): { source: string; usesChart: boolean } {
     usedStores,
     walked.uploadBindings,
     subscribeRealtime ? appModule : null,
+    liftedState,
   );
   const handleParams = renderHandleParams(
     page,
@@ -727,17 +824,23 @@ function renderLiveView(a: RenderArgs): { source: string; usesChart: boolean } {
     contextModuleByAggName,
     aggregatesByName,
   );
-  // Store-mutating component named-action handlers (`addOne() { Cart.add(...) }`)
-  // hoist to the host page's LiveView — the component is a stateless function
-  // component, so its `phx-click="add_one"` needs the page to carry the clause
-  // (and the page already carries the `:cart` assign via gatherUsedStores).
-  const storeHandlers = gatherStoreHandlers(walked.usedComponents, componentInfo);
+  // Component named-action + inline-lambda handlers hoist to the host page's
+  // LiveView — the component is a stateless function component, so its
+  // `phx-click="add_one"` needs the page to carry the clause (and the page
+  // already carries the `:cart` assign via gatherUsedStores, and the lifted
+  // state assign via `liftedState` below).
+  const componentHandlers = gatherComponentHandlers(
+    walked.usedComponents,
+    componentInfo,
+    handlers,
+    page.name,
+  );
   // The list route a create-form success navigates back to — the create
   // ("new") page route with the trailing `/new` segment stripped
   // (`/customers/new` → `/customers`).
   const createSuccessRoute = page.route ? page.route.replace(/\/new$/, "") : null;
   const handleEventClauses =
-    renderHandleEventClauses([...handlers, ...actionHandlers, ...storeHandlers]) +
+    renderHandleEventClauses([...handlers, ...actionHandlers, ...componentHandlers]) +
     renderCreateEventClauses(
       walked.formBindings,
       contextModuleByAggName,
@@ -1017,6 +1120,11 @@ function renderMount(
    *  topic on connect (the ui declares `on` handlers), else `null` — a
    *  `null` keeps mount byte-identical to the pre-realtime output. */
   realtimeAppModule: string | null = null,
+  /** Lifted component state (`gatherLiftedState`) — one
+   *  `|> assign(:<component>_<field>, <init>)` each, seeded exactly like the
+   *  page's own state.  Empty ⇒ byte-identical to a page that renders no
+   *  stateful component. */
+  liftedState: readonly { assign: string; field: StateFieldIR }[] = [],
 ): string {
   // `if connected?(socket), do: subscribe` — only the live (websocket-
   // connected) mount subscribes; the initial static render skips it.  Prepended
@@ -1031,6 +1139,10 @@ function renderMount(
     // scaffold and custom pages, and across frontends (every other target
     // already honours `init`).
     assigns.push(`      |> assign(:${snake(f.name)}, ${stateInitFor(f)})`);
+  }
+  // Component state lifted into this page (heex-walker-core `hostStateAssign`).
+  for (const { assign, field } of liftedState) {
+    assigns.push(`      |> assign(:${assign}, ${stateInitFor(field)})`);
   }
   // Per-store assign — one `%<Store>{}` (struct defaults) per used store.
   for (const storeName of usedStores) {
@@ -1654,6 +1766,9 @@ function renderUiComponents(args: {
         params: c.params,
         state: c.state,
         derived: c.derived,
+        // The component's `action`s are in scope for its body — an
+        // action→action call inside one inlines the sibling's body.
+        actions: c.actions,
         body: c.body,
       } as PageIR;
       const walked = walkBodyToHeex(
@@ -1669,10 +1784,21 @@ function renderUiComponents(args: {
         contextModuleByAggName,
         args.bcByAggregate,
         args.i18nEnabled ? `component.${c.name}` : undefined,
+        c.name,
       );
-      const attrLines = c.params
-        .map((p) => `  attr :${snake(p.name)}, ${attrType(p.type)}, required: true`)
-        .join("\n");
+      // Lifted state arrives as an attr of the same namespaced name the host
+      // assigns under, so an intermediate component forwards it verbatim.  It
+      // carries the field's own initial value as the attr default: the host
+      // always passes it, and a default keeps a component rendered from
+      // somewhere unforeseen showing its declared initial value rather than
+      // failing to compile.
+      const attrLines = [
+        ...c.params.map((p) => `  attr :${snake(p.name)}, ${attrType(p.type)}, required: true`),
+        ...liftedStateAttrs(c, ui).map(
+          ({ assign, field }) =>
+            `  attr :${assign}, ${attrType(field.type)}, default: ${stateInitFor(field)}`,
+        ),
+      ].join("\n");
       // A `Slot()` in the body declares the `:inner_block` slot it renders via
       // `{render_slot(@inner_block)}` (walker sets `usesSlot`).
       const slotLine = walked.usesSlot ? "  slot :inner_block, required: true\n" : "";

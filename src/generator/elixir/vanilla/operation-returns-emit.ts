@@ -494,9 +494,11 @@ export function renderReturningOpFunction(
   // body rebinds any field (parity with the non-returning path + the other
   // backends' returning-op `__before` capture).  Relational only: a document
   // aggregate can't carry a named operation on vanilla (validate-gated by
-  // `loom.vanilla-document-unsupported`), so the struct-drop snapshot always
+  // `loom.vanilla-document-unsupported`), so the relational projection always
   // applies here.
-  const beforeBind = hasAudit ? [`    audit_before = ${wireSnapshot("record")}`] : [];
+  const beforeBind = hasAudit
+    ? [`    audit_before = ${wireSnapshot("record", false, appModule)}`]
+    : [];
   // A body that doesn't end in an explicit `return` falls through to its
   // aggregate success variant (`Order` in `Order or NotFound`) — the mutated
   // `record`.  That fall-through success branch is the only place a state change
@@ -681,7 +683,7 @@ export function renderReturningOpFunction(
           targetType: aggPascal,
           targetId: "saved.id",
           before: "audit_before",
-          after: wireSnapshot("saved"),
+          after: wireSnapshot("saved", false, appModule),
           indent: "          ",
         }),
       );

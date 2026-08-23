@@ -25,6 +25,7 @@
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { validate } from "../../../src/api/index.js";
 import { snake } from "../../../src/util/naming.js";
 import { generateSystemFiles, loadExample, parseString } from "../../_helpers/index.js";
 
@@ -235,6 +236,20 @@ const KNOWN_DEGRADATIONS: ReadonlyMap<string, string> = new Map([
   // EMPTY — and the "still real" test below keeps it honest in both
   // directions: a NEW sentinel fails the per-target scan above, and a
   // re-added entry that no longer fires fails as stale.
+  //
+  // EMPTY IS NOT THE SAME AS UNREACHABLE, and the gap between the two is worth
+  // stating because it is exactly where the two rows below were re-created in
+  // miniature.  This scan drives ONE fixture (`expression-showcase.ddd`), which
+  // declares no user components at all — so the ratchet cannot see the shapes
+  // that BOTH remaining component emitters still filter out (a `slot` /
+  // `action` / optional param, a Feliz body needing the route `id` or a store
+  // or a `byId` read, an Angular read fed by an `@Input()`).  Those are no
+  // longer silent: each is now an honest `loom.user-component-deferred-target`
+  // validation error, which is what keeps them out of this ratchet — the
+  // sentinel is unreachable from input the compiler ACCEPTS.  The gate's arms
+  // are pinned, one per (framework, shape), against the emitters' real output
+  // in `test/ir/user-component-deferred.test.ts`, and the linkage between the
+  // two files is asserted at the bottom of this one.
   //
   // The last two rows were "user components are not emitted on Angular /
   // Feliz": a declared `component TierBadge(…)` produced no component on
@@ -697,6 +712,67 @@ describe("frontend render degradation — the emitted page must not give up", ()
           `${target.framework}: Loom intrinsic spelling survived into the emitted page`,
         ).toEqual([]);
       }
+    }, 120_000);
+  }
+
+  // -------------------------------------------------------------------------
+  // The ratchet's blind spot, closed from the other side.
+  //
+  // An EMPTY ratchet says "the fixture degrades nowhere", not "nothing
+  // degrades".  Both remaining component emitters still FILTER shapes out of
+  // their emitted set (`emitFelizUserComponents` / `emitAngularUserComponents`),
+  // and a filtered component renders `unknown layout component: <Name>` at every
+  // call site — the exact sentinel the two deleted rows named.  This fixture
+  // declares no components, so the scan above can never see it.
+  //
+  // What keeps the emptiness honest is that those shapes are now REJECTED at
+  // validation (`loom.user-component-deferred-target`), so the sentinel is
+  // unreachable from input the compiler accepts.  This asserts BOTH halves of
+  // that claim per framework — the emitter still degrades, and the validator
+  // still refuses — so the day either side moves, this fails rather than the
+  // gap going quiet.  The full per-(framework, shape) matrix lives in
+  // `test/ir/user-component-deferred.test.ts`; this is the link, not a copy.
+  // -------------------------------------------------------------------------
+  const DEFERRED_COMPONENT_SHAPES = [
+    { framework: "feliz", platform: "feliz", pages: /App\.fs$/ },
+    { framework: "angular", platform: "angular", pages: /\/src\/app\// },
+  ] as const;
+
+  const slotComponentSystem = (platform: string) => `
+system S {
+  subdomain M { context Sales {
+    aggregate Order with crudish { customerId: string }
+    repository Orders for Order { }
+  } }
+  api SalesApi from M
+  ui WebApp {
+    api Sales: SalesApi
+    component Panel(head: slot) { body: Card { head } }
+    page Home { route: "/" body: Stack { Panel(head: Text { "hi" }) } }
+  }
+  storage primary { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primary }
+  deployable api { platform: node contexts: [Sales] serves: SalesApi dataSources: [salesState] port: 3000 }
+  deployable web { platform: ${platform} targets: api ui: WebApp { Sales: api } port: 3005 }
+}`;
+
+  for (const target of DEFERRED_COMPONENT_SHAPES) {
+    it(`${target.framework}: a deferred user component still degrades — and is now REJECTED, which is why the ratchet can be empty`, async () => {
+      const src = slotComponentSystem(target.platform);
+      const files = await generateSystemFiles(src);
+      const pages = [...files.entries()].filter(([k]) => target.pages.test(k));
+      expect(pages.length, `no page files matched for ${target.framework}`).toBeGreaterThan(0);
+      expect(
+        pages.some(([, c]) => c.includes("unknown layout component: Panel")),
+        `${target.framework}: the component emitter no longer defers a \`slot\` param — ` +
+          `delete the arm from ui-checks.ts (and this row) in the same PR`,
+      ).toBe(true);
+      const codes = (await validate(src)).diagnostics.map((d) => d.code);
+      expect(
+        codes,
+        `${target.framework}: the emitter drops this component but validation accepts it — ` +
+          `the sentinel is reachable from valid input again, so the ratchet's emptiness lies`,
+      ).toContain("loom.user-component-deferred-target");
     }, 120_000);
   }
 

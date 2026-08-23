@@ -152,3 +152,138 @@ describe("vanilla <Api>RoutesController serialize", () => {
     expect(c).toContain("defp serialize(other), do: other");
   });
 });
+
+// ---------------------------------------------------------------------------
+// NON-AGGREGATE handler results.
+//
+// A `commandHandler` / `queryHandler` may `return` a bare scalar or a value
+// object, and that value lands on this same `serialize/1`.  The `%_{} = struct`
+// fallback dumps ANY struct, which is not a projection for the two struct-shaped
+// scalars Ecto hands back:
+//
+//   * `%DateTime{}` → `Map.from_struct` yields the calendar internals including
+//     the `microsecond: {0, 6}` TUPLE, which Jason cannot encode — the route
+//     500s.  Untouched it encodes ISO-8601, what the aggregate read path
+//     (`"placedAt" => record.placed_at`) and the other four backends send.
+//   * `%Decimal{}` → `Map.from_struct` yields `%{coef:, exp:, sign:}` where
+//     every other backend sends the number (RS-24) / fixed-scale string (RS-12).
+//
+// A bare VALUE OBJECT is not a struct at all on this backend (VOs are
+// schemaless jsonb maps), so it fell past `%_{}` to `serialize(other), do:
+// other` and shipped its STORED keys — `currency_code` where the aggregate
+// read, and every other backend, ship `currencyCode`.
+// ---------------------------------------------------------------------------
+const SCALAR_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      valueobject Money { amount: decimal  currencyCode: string }
+      aggregate Order {
+        code: string
+        total: Money
+        placedAt: datetime
+        operation cancel() { code := "x" }
+      }
+      repository Orders for Order { }
+      queryHandler GetTotal(orderId: Order id): Money {
+        let o = Orders.getById(orderId)
+        return o.total
+      }
+      queryHandler GetPlacedAt(orderId: Order id): datetime {
+        let o = Orders.getById(orderId)
+        return o.placedAt
+      }
+      queryHandler GetAmount(orderId: Order id): decimal {
+        let o = Orders.getById(orderId)
+        return o.total.amount
+      }
+    }
+  }
+  api SalesApi from Sales {
+    route GET "/orders/{orderId}/total" -> Ordering.GetTotal
+    route GET "/orders/{orderId}/placed" -> Ordering.GetPlacedAt
+    route GET "/orders/{orderId}/amount" -> Ordering.GetAmount
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: elixir, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+// The same aggregate + routes, but every declared result is an aggregate — the
+// gate must leave such a system byte-identical (no scalar / VO clauses).
+const NO_SCALAR_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      valueobject Money { amount: decimal  currencyCode: string }
+      aggregate Order {
+        code: string
+        total: Money
+        placedAt: datetime
+        operation cancel() { code := "x" }
+      }
+      repository Orders for Order { }
+      queryHandler GetOrder(orderId: Order id): Order {
+        let o = Orders.getById(orderId)
+        return o
+      }
+    }
+  }
+  api SalesApi from Sales {
+    route GET "/orders/{orderId}" -> Ordering.GetOrder
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: elixir, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+describe("vanilla <Api>RoutesController serialize — non-aggregate declared results", () => {
+  it("hands a bare temporal result to Jason instead of exploding its calendar internals", async () => {
+    const c = await fileEndingWith(SCALAR_SRC, "controllers/sales_api_routes_controller.ex");
+    expect(c).toContain("defp serialize(%DateTime{} = value), do: value");
+    expect(c).toContain("defp serialize(%NaiveDateTime{} = value), do: value");
+    // Both must WIN over the struct-dump fallback.
+    const dtAt = c.indexOf("defp serialize(%DateTime{}");
+    const fallbackAt = c.indexOf("defp serialize(%_{} = struct)");
+    expect(dtAt).toBeGreaterThan(-1);
+    expect(fallbackAt).toBeGreaterThan(dtAt);
+  });
+
+  it("projects a bare decimal result as a JSON number (RS-24), not %{coef:, exp:, sign:}", async () => {
+    const c = await fileEndingWith(SCALAR_SRC, "controllers/sales_api_routes_controller.ex");
+    expect(c).toContain("defp serialize(%Decimal{} = value), do: Decimal.to_float(value)");
+    const decAt = c.indexOf("defp serialize(%Decimal{}");
+    expect(decAt).toBeGreaterThan(-1);
+    expect(c.indexOf("defp serialize(%_{} = struct)")).toBeGreaterThan(decAt);
+  });
+
+  it("dispatches a bare value-object result to its wireShape serializer (camelCase keys)", async () => {
+    const c = await fileEndingWith(SCALAR_SRC, "controllers/sales_api_routes_controller.ex");
+    // Both stored key shapes — atom-keyed off a struct field read, string-keyed
+    // straight off jsonb.
+    expect(c).toContain(
+      "defp serialize(%{amount: _, currency_code: _} = value), do: serialize_money_ordering_order(value)",
+    );
+    expect(c).toContain(
+      'defp serialize(%{"amount" => _, "currency_code" => _} = value), do: serialize_money_ordering_order(value)',
+    );
+    // The target helper projects the VO's camelCase wire keys.
+    expect(c).toContain('"currencyCode" => Map.get(record, :currency_code');
+    // The VO clauses sit AFTER `%_{}` — a struct matches a bare map pattern too,
+    // and the aggregate heads must keep winning — but BEFORE the pass-through.
+    const fallbackAt = c.indexOf("defp serialize(%_{} = struct)");
+    const voAt = c.indexOf("defp serialize(%{amount: _");
+    const otherAt = c.indexOf("defp serialize(other), do: other");
+    expect(voAt).toBeGreaterThan(fallbackAt);
+    expect(otherAt).toBeGreaterThan(voAt);
+  });
+
+  it("is gated: a system whose handlers all return aggregates emits no scalar/VO clauses", async () => {
+    const c = await fileEndingWith(NO_SCALAR_SRC, "controllers/sales_api_routes_controller.ex");
+    expect(c).not.toContain("%DateTime{}");
+    expect(c).not.toContain("%Decimal{} = value");
+    expect(c).not.toContain("defp serialize(%{amount: _");
+  });
+});

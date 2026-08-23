@@ -45,7 +45,6 @@ import { denialOverrides, denialResponse, denialTerm, disallowedTerm } from "./d
 import { renderFindActions } from "./find-controller.js";
 import { foldStmtsUseParam, renderFoldStatement } from "./fold-stmt-emit.js";
 import { renderProblemVariantHelper } from "./operation-returns-emit.js";
-import { hasRefColls } from "./ref-collection-emit.js";
 import { renderWireSerialize } from "./wire-serialize.js";
 
 /** Truth-kind predicate — an aggregate whose persistence is its event log. */
@@ -625,19 +624,34 @@ ${disallowedClause}  defp command_error(conn, {:forbidden, detail}) do
   // keys, matching the relational REST path + every other backend) instead of a
   // raw `Map.from_struct` dump (snake_case).  The ES struct's fields are exactly
   // `snake(wireShape.name)` (`structFields`), so `renderWireSerialize`'s
-  // `record.<snake>` reads line up.  A ref-collection field would need a
-  // `__ref_ids/1` helper whose Ecto-assoc semantics don't hold for the in-memory
-  // fold, so those (rare) aggregates keep the raw dump.
-  const wire = hasRefColls(agg)
-    ? null
-    : renderWireSerialize(agg, ctx, { contextModule: facadeMod });
-  const serializeBlock = wire
-    ? `${wire.serialize}${wire.helpers.length > 0 ? `\n\n${wire.helpers.join("\n\n")}` : ""}`
-    : `  defp serialize(record) do
-    record
-    |> Map.from_struct()
-    |> Map.drop([:__meta__, :__struct__])
-  end`;
+  // `record.<snake>` reads line up.
+  //
+  // A reference collection (`X id[]`) rides the SAME projection here as on the
+  // relational path — `renderWireSerialize` emits `__ref_ids(record.<field>)`
+  // for it — but the two backends hold different values in that field, so the
+  // helper differs.  Relationally the field is a loaded `many_to_many` assoc
+  // (a list of target STRUCTS, possibly `%Ecto.Association.NotLoaded{}`), so
+  // `api-emit`'s helper maps `& &1.id`.  An ES aggregate has no assoc at all:
+  // the applier fold appends the id VALUE (`crewIds += e.sailor`), so the field
+  // is already the id list the wire wants and the helper is the identity.
+  // Emitting the relational helper here would crash (`&1.id` on a binary);
+  // emitting neither is what kept these aggregates on the snake-cased raw dump.
+  const wire = renderWireSerialize(agg, ctx, { contextModule: facadeMod });
+  // Gated on the rendered text CALLING it, not on `hasRefColls`: the API-read
+  // projection drops `access: internal`/`secret` fields, so a declared ref
+  // collection may never reach the wire map — and an unreferenced private
+  // helper fails `mix compile --warnings-as-errors`.
+  const refIdsHelper = [wire.serialize, ...wire.helpers].some((t) => t.includes("__ref_ids("))
+    ? [
+        "  # An ES aggregate's `X id[]` field is folded IN MEMORY from the event",
+        "  # stream, so it already holds the id list (no Ecto association to load).",
+        "  defp __ref_ids(ids) when is_list(ids), do: ids",
+        "  defp __ref_ids(_), do: []",
+      ].join("\n")
+    : "";
+  const serializeBlock = [wire.serialize, ...wire.helpers, refIdsHelper]
+    .filter((s) => s !== "")
+    .join("\n\n");
 
   return `# Auto-generated.
 defmodule ${appModule}Web.${aggPascal}Controller do

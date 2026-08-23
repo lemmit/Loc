@@ -300,6 +300,13 @@ export interface FsExprCtx {
    *  resolve to — it renders as the empty string there, the F# analogue of
    *  React's absent `useParams()` entry. */
   routeId?: string;
+  /** The F# expression naming the model a state ref resolves against — `model`
+   *  by default (every `update` arm), but `__m` where the emission site has
+   *  BOUND the updated/initial record and must read the NEW values off it
+   *  (`init`'s find-read `Cmd`s, a control's refetch arm).  Same reason
+   *  `pagedReadCmd` takes a `modelExpr`: reading `model.<Field>` there would
+   *  issue the query with the value it just replaced. */
+  modelExpr?: string;
 }
 
 /** The empty route id — what an `id` read resolves to on a ui with no routing
@@ -396,15 +403,20 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       // A dotted `<Store>.<field>` read (page/component body) — resolved to the
       // namespaced Model field regardless of scope.
       if (e.refKind === "store-field" && e.storeName) {
-        return `model.${storeModelField(e.storeName, e.name)}`;
+        return `${ctx.modelExpr ?? "model"}.${storeModelField(e.storeName, e.name)}`;
       }
       // Inside a store action body the store's own fields are `let` locals; a
       // bare ref to one resolves to its namespaced Model field.
       if (ctx.storeScope?.fields.has(e.name)) {
-        return `model.${storeModelField(ctx.storeScope.store, e.name)}`;
+        return `${ctx.modelExpr ?? "model"}.${storeModelField(ctx.storeScope.store, e.name)}`;
       }
+      // An enum VALUE (`Visibility.Public`) is a string on the Feliz wire
+      // (`wireFieldType` spells every enum `string`), so it renders as its
+      // quoted name — the same answer `auth-gate.ts` gives.  The bare name this
+      // used to emit was an F# identifier nothing binds.
+      if (e.refKind === "enum-value") return JSON.stringify(e.name);
       if (ctx.locals.has(e.name)) return e.name;
-      if (ctx.stateNames.has(e.name)) return `model.${upperFirst(e.name)}`;
+      if (ctx.stateNames.has(e.name)) return `${ctx.modelExpr ?? "model"}.${upperFirst(e.name)}`;
       return e.name;
     case "binary": {
       const left = r(e.left);

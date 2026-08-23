@@ -1010,6 +1010,13 @@ export const DIAGNOSTIC_MESSAGES = {
     op: unknown;
   }) =>
     `${p.where}: call to domain service '${p.service}.${p.op}(…)' reaches beyond the aggregate boundary (a repository read, or mutating other passed-in aggregates), which the domain layer may not do from inside an aggregate operation.  Move the call into the orchestrating workflow / command handler, which loads the aggregates and owns the commit.`,
+  "loom.domain-service-cross-context-read": (p: {
+    where: unknown;
+    recvName: unknown;
+    ownContext: unknown;
+    otherContext: unknown;
+  }) =>
+    `${p.where}: repository '${p.recvName}' is declared in context '${p.otherContext}', not in this service's own context '${p.ownContext}' — a domain service may only read repositories of the context it belongs to. A cross-context name never resolves: it lowers to an unresolved receiver and every backend emits a dangling identifier (TS2304 / CS0103 / 'cannot find symbol' / NameError / "undefined variable"). Move the service into '${p.otherContext}', or have the orchestrating workflow read '${p.recvName}' and pass the value in as a parameter.`,
   "loom.domain-service-single-aggregate": (p: { name: unknown }) =>
     `domainService '${p.name}': every operation takes a single aggregate parameter — consider declaring the behaviour as an 'operation' on that aggregate instead of a domain service.`,
 
@@ -2155,6 +2162,31 @@ export const DIAGNOSTIC_MESSAGES = {
     `\`match await ${p.aggName}.${p.op}(…) { … }\` so its Result is handled ` +
     `(async-actions-and-effects.md Stage 2b — every remote call is explicitly awaited and its ` +
     `Result matched).`,
+  "loom.user-component-deferred-target": (p: {
+    name: unknown;
+    uiName: unknown;
+    framework: unknown;
+    dName: unknown;
+    reason: unknown;
+    emitter: unknown;
+  }) =>
+    `component '${p.name}' on ui '${p.uiName}': the ${p.framework} component emitter DEFERS ` +
+    `this component — ${p.reason} — so it is rendered by deployable '${p.dName}' as NOTHING: ` +
+    `no component is emitted for it, and every call site renders the walker's ` +
+    `\`unknown layout component: ${p.name}\` give-up comment.  The declaration and its uses ` +
+    `disappear together, with a clean build (${p.emitter}).  Change the component to a shape ` +
+    `this frontend emits, or host this ui on a frontend that renders it ` +
+    `(React / Vue / Svelte all do).`,
+  "loom.toast-message-unsupported": (p: { where: unknown; kind: unknown; detail: unknown }) =>
+    `${p.where}: the \`toast(…)\` message ${p.detail}.  Every realtime renderer implements the ` +
+    `same v1 message subset — a literal, the handler's event binding, a SINGLE-LEVEL member ` +
+    `access off that binding, parentheses, and binary operators between those — and THROWS on ` +
+    `anything else (\`unsupported expression kind '${p.kind}'\`): ` +
+    `src/generator/_frontend/realtime.ts (React/Vue/Svelte/Angular), ` +
+    `src/generator/feliz/realtime.ts (Feliz), src/generator/elixir/realtime-liveview.ts ` +
+    `(Phoenix LiveView).  So this \`.ddd\` validates and then CRASHES codegen.  Build the ` +
+    `message from a literal and \`<bind>.<field>\` parts (\`toast("Order " + e.order + ` +
+    `" placed")\`); compute anything richer server-side and carry it on the event.`,
 
   // ----------------------------------------------------------------------
   // src/ir/validate/checks/tenancy-checks.ts

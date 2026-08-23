@@ -232,10 +232,23 @@ app.MapPost("/files", async (IFormFile file) =>
     await ${fileUpload.putBytes}(key, bytes, contentType);
     return Results.Json(new { url = "/files/" + key, key, contentType, size = bytes.Length }, statusCode: 201);
 }).DisableAntiforgery();
-app.MapGet("/files/{key}", async (string key) =>
+app.MapGet("/files/{key}", async (HttpContext http, string key) =>
 {
     var obj = await ${fileUpload.getBytes}(key);
-    return obj is null ? Results.NotFound() : Results.File(obj.Value.Bytes, obj.Value.ContentType);
+    // RFC 7807 for the blob-absence 404.  A bare \`Results.NotFound\` writes NO
+    // body, so this route answered a bodiless second error contract on a wire
+    // already committed to application/problem+json — and DomainExceptionFilter
+    // never sees it (a minimal-API endpoint, not a controller action).  The
+    // status stays a literal 404: a bucket key is not an aggregate id, so it is
+    // not the remappable \`NotFound\` rung.
+    return obj is null
+        ? Results.Problem(
+            detail: "No stored object for that key",
+            instance: http.Request.Path,
+            statusCode: 404,
+            title: "Not Found",
+            type: "about:blank")
+        : Results.File(obj.Value.Bytes, obj.Value.ContentType);
 });
 `
     : "";

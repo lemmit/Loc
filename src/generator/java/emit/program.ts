@@ -414,7 +414,9 @@ export function renderFilesController(
     ``,
     `import java.io.IOException;`,
     `import java.util.UUID;`,
+    `import org.springframework.http.HttpStatus;`,
     `import org.springframework.http.MediaType;`,
+    `import org.springframework.http.ProblemDetail;`,
     `import org.springframework.http.ResponseEntity;`,
     `import org.springframework.web.bind.annotation.GetMapping;`,
     `import org.springframework.web.bind.annotation.PathVariable;`,
@@ -437,10 +439,25 @@ export function renderFilesController(
     `    }`,
     ``,
     `    @GetMapping("/files/{key}")`,
-    `    public ResponseEntity<byte[]> download(@PathVariable String key) {`,
+    `    public ResponseEntity<?> download(@PathVariable String key) {`,
     `        var obj = ${resourceClass}.${resourceName}GetBytes(key);`,
     `        if (obj == null) {`,
-    `            return ResponseEntity.notFound().build();`,
+    // `ResponseEntity.notFound().build()` writes NO body, and ApiExceptionAdvice
+    // never sees this: the advice fires on THROWN exceptions, and a plain return
+    // is not one.  So the blob-absence 404 answered a bodiless second error
+    // contract on a wire already committed to problem+json.  Built with the same
+    // `ProblemDetail` + `setProperty("type", …)` the advice's own responder uses
+    // (RS-9 — Spring's mixin suppresses the default about:blank `type` on
+    // getType(), so it has to ride as a property).  The status stays a literal
+    // 404: a bucket key is not an aggregate id, so it is not the remappable
+    // `NotFound` rung.
+    `            var problem = ProblemDetail.forStatus(HttpStatus.NOT_FOUND);`,
+    `            problem.setTitle("Not Found");`,
+    `            problem.setDetail("No stored object for that key");`,
+    `            problem.setProperty("type", "about:blank");`,
+    `            return ResponseEntity.status(404)`,
+    `                .contentType(MediaType.APPLICATION_PROBLEM_JSON)`,
+    `                .body(problem);`,
     `        }`,
     `        return ResponseEntity.ok().contentType(MediaType.parseMediaType(obj.contentType())).body(obj.bytes());`,
     `    }`,
