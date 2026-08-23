@@ -401,8 +401,11 @@ export function errorResponsesKwarg(
    *  `destroy` FK-restrict declaration (`ReferencedInUse`) moves with the
    *  `httpStatus` override; omitted ⇒ literal 409 (byte-identical default). */
   resolve?: (name: string) => number,
+  /** Body facts the `kind` cannot carry — `readsAggregate` for the workflow
+   *  arm's conditional not-found rung.  See `errorStatuses`. */
+  opts?: { readsAggregate?: boolean },
 ): string {
-  const statuses = [...new Set([...errorStatuses(kind, guarded, resolve), ...extra])].sort(
+  const statuses = [...new Set([...errorStatuses(kind, guarded, resolve, opts), ...extra])].sort(
     (a, b) => a - b,
   );
   if (statuses.length === 0) return "";

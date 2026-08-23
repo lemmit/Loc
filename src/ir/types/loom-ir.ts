@@ -29,7 +29,12 @@
 // `ir/types` → `ir/util`; the reverse edge (walk.ts → loom-ir.ts) is `import
 // type` only (erased at emit), so no runtime cycle forms.
 import type { DurationUnit } from "../../util/temporal.js";
-import { walkExprDeep, walkStmtExprsDeep, walkWorkflowStmtExprsDeep } from "../util/walk.js";
+import {
+  walkExprDeep,
+  walkStmtExprsDeep,
+  walkWorkflowStmtExprsDeep,
+  walkWorkflowStmtsDeep,
+} from "../util/walk.js";
 import type { OriginRef } from "./origin.js";
 
 export type IdValueType = "guid" | "int" | "long" | "string";
@@ -4013,6 +4018,78 @@ export function operationIsGuarded(op: OperationIR): boolean {
  *  contract as a guarded operation. */
 export function workflowIsGuarded(wf: WorkflowIR): boolean {
   return wf.statements.some((s) => s.kind === "requires");
+}
+
+/** True when the workflow's command route can answer the DOMAIN NOT-FOUND rung
+ *  — i.e. its body performs a repository read that THROWS when the row is
+ *  absent, so the route really sends that status and must declare it.
+ *
+ *  WHY A PREDICATE AND NOT A KIND.  `errorStatuses` publishes the not-found
+ *  rung per `OpErrorKind`, which works because for `getById` / `destroy` /
+ *  `operation` the rung follows from the ROUTE SHAPE: the path carries an
+ *  `{id}`, the handler loads it, an absent row is a 404 unconditionally.  A
+ *  workflow command route has no path id — the rung follows from what the BODY
+ *  does, and a workflow that touches no repository genuinely cannot send it.
+ *  Declaring 404 on every workflow would be as wrong in the other direction
+ *  (schemathesis' `status_code_conformance` reads an undeclared status and an
+ *  unreachable declared one with equal suspicion), so the shape the honest
+ *  contract needs is this predicate, threaded into the table.
+ *
+ *  WHAT THROWS.  Two producers, and only two:
+ *
+ *  1. A `repo-let` (`let w = Wallets.getById(id)` / `let w = Wallets.byRef(r)`).
+ *     Always throwing: `getById` throws by construction on every backend, and
+ *     a repo-let bound to a DECLARED find is validator-constrained to a
+ *     non-optional, non-array return (`loom.workflow-load-nullable-unsupported`
+ *     / `loom.workflow-load-array-unsupported`), which leaves the emitted
+ *     repository method no way to report an empty result except by throwing.
+ *  2. A NAMED read inside an expression — the `reading` domain-service tier
+ *     (`domain-services.md`), whose read port is threaded from this very
+ *     workflow.  Here optionality is NOT validator-constrained (the canonical
+ *     example compares the result to `null`), so the find's declared return
+ *     type decides: an optional or collection return answers with a value, a
+ *     non-optional one throws.
+ *
+ *  Everything else that reads is absence-shaped and cannot throw: `repo-run` /
+ *  `findAll` return arrays, `if-let` exists precisely to handle the empty case,
+ *  and a criterion `find` read renders as `[0] ?? null`. */
+export function workflowCanAnswerNotFound(
+  wf: WorkflowIR,
+  repositories: readonly RepositoryIR[],
+): boolean {
+  /** A named repository read throws on an absent row when the declared return
+   *  type leaves it nothing else to return.  An unresolvable method is not
+   *  evidence that it throws — a repository/method that does not exist is a
+   *  phase-⑦ error (`loom.workflow-unknown-repository{,-method}`), so the
+   *  declared set for a model that does not compile is moot either way. */
+  const readThrows = (repoName: string, method: string): boolean => {
+    if (method === "getById") return true;
+    const find = repositories
+      .find((r) => r.name === repoName)
+      ?.finds.find((f) => f.name === method);
+    if (!find) return false;
+    return find.returnType.kind !== "optional" && find.returnType.kind !== "array";
+  };
+
+  let canNotFound = false;
+  for (const top of wf.statements) {
+    // Producer 1 — the statement form.  Deep, so a read inside a `for-each`
+    // body or an `if-let` branch counts; a hand-rolled recursion here is the
+    // drifting copy `ir/util/walk.ts` exists to prevent.
+    walkWorkflowStmtsDeep(top, (s) => {
+      if (s.kind === "repo-let") canNotFound = true;
+    });
+    // Producer 2 — the expression form (a `reading` domain service's own
+    // repository read).  `walkWorkflowStmtExprsDeep` already descends through
+    // the nested bodies, so one pass per top-level statement is the whole body.
+    walkWorkflowStmtExprsDeep(top, (e) => {
+      if (e.kind !== "call" || e.callKind !== "repo-read") return;
+      const read = e.repoRead;
+      if (!read || read.readKind !== "named") return;
+      if (readThrows(read.repo, read.method)) canNotFound = true;
+    });
+  }
+  return canNotFound;
 }
 
 /** True when the workflow exposes an HTTP/UI command surface — its facade

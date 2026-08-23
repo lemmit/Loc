@@ -12,7 +12,11 @@ import type {
   TypeIR,
   WireField,
 } from "../../../ir/types/loom-ir.js";
-import { workflowEmitsCommandRoute, workflowIsGuarded } from "../../../ir/types/loom-ir.js";
+import {
+  workflowCanAnswerNotFound,
+  workflowEmitsCommandRoute,
+  workflowIsGuarded,
+} from "../../../ir/types/loom-ir.js";
 import {
   type ApiOperationIR,
   aggregateSegment,
@@ -430,7 +434,11 @@ export function buildJavaOpenApiContract(
       routes.push({
         method: "post",
         path: `${routePrefix}/workflows/${snake(wf.name)}`,
-        errors: err(errorStatuses("workflow", workflowIsGuarded(wf), resolveStatus)),
+        errors: err(
+          errorStatuses("workflow", workflowIsGuarded(wf), resolveStatus, {
+            readsAggregate: workflowCanAnswerNotFound(wf, ctx.repositories),
+          }),
+        ),
         // Workflow command operationId carries a `Workflow` suffix on the other
         // backends (`registerProjectWorkflow`); springdoc derives the bare name.
         operationId: `${lowerFirst(wf.name)}Workflow`,
