@@ -10,10 +10,21 @@ import type { BoundedContextIR, Platform } from "../types/loom-ir.js";
  *  frontend realtime client (`src/generator/_frontend/realtime.ts`) is
  *  byte-identical against every one of them, so its emit gate keys on this
  *  set rather than on a single backend.  Kept in one place so adding a
- *  realtime-serving backend flips both the backend emit and the client emit. */
+ *  realtime-serving backend flips both the backend emit and the client emit.
+ *
+ *  All five backends serve it: node (the hono packages' `realtime-builder.ts`),
+ *  dotnet + java (`emit/realtime.ts`), python (`realtime-builder.ts`), and
+ *  elixir (`src/generator/elixir/vanilla/realtime-emit.ts` — a chunked Phoenix
+ *  controller fed by the `"events"` PubSub topic every domain `emit` already
+ *  broadcasts on).  A HEEx/LiveView ui does NOT go through here at all: it
+ *  subscribes to that topic in-process (`elixir/realtime-liveview.ts`). */
 export function backendServesRealtime(platform: Platform | undefined): boolean {
   return (
-    platform === "node" || platform === "dotnet" || platform === "java" || platform === "python"
+    platform === "node" ||
+    platform === "dotnet" ||
+    platform === "java" ||
+    platform === "python" ||
+    platform === "elixir"
   );
 }
 
