@@ -222,9 +222,10 @@ export function validateGroupedProjectionBackend(sys: SystemIR, diags: LoomDiagn
 // an `id` column, so `select n = count()` over a document source emits and runs
 // on all five backends — and must keep doing so, since that is the row-count
 // tile `scaffoldDashboard` synthesises.  Only a reference to some OTHER member
-// is refused.  The condition is computed by `columnlessProjectionSource`, which
-// the .NET emitter's arm classifier shares, so the gate and the emission arm
-// cannot drift.
+// is refused.  The condition is `columnlessProjectionSource`, which keys off the
+// same `queryProjectionArm` classification the .NET emitter switches on
+// (`ir/util/query-projection-arm.ts`), so the gate and the emission arm cannot
+// disagree about WHICH arm is being refused.
 // ---------------------------------------------------------------------------
 export function validateColumnlessProjectionSources(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const sd of sys.subdomains) {
