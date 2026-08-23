@@ -448,6 +448,31 @@ touches no repository cannot send it — so the honest fix needs a
 "body reads an aggregate" predicate threaded into the shared table rather than
 an unconditional `404` on the kind. Fix it with F6, on all five backends.
 
+### F13 — a non-optional declared `find` route answers an undeclared 404 too
+**Waiver:** none — the fuzzer never reached it (neither fixture declares a
+non-optional `find`) · **Severity: medium** — found by hand while root-causing
+F10, and it is the SAME defect one route class over.
+
+```
+find byRef(r: string): Wallet where this.ownerRef == r     # non-optional
+→ GET /api/wallets/by_ref?r=nope   answers 404
+```
+
+but `errorStatuses("findSingle")` declares `{200, 422}`. The emitted repository
+method throws `AggregateNotFoundError` on an empty result set (it has no other
+option — the declared return type is non-optional), and the aggregate router's
+`onError` renders that as a 404. An OPTIONAL find declares its 404 (the absent
+variant rides that status by design); the NON-optional one, which reaches the
+same status by throwing, declares nothing.
+
+Together with F10 this names the root cause under both: the shared table
+publishes the not-found rung from the ROUTE SHAPE (does the path carry an
+`{id}`?), while the rung's real producer is the READ — every repository read
+returning a non-optional aggregate throws when the row is absent. Shape and
+read agree for `getById`/`destroy`/`operation`, and diverge in exactly the two
+places a non-optional read happens without a path id: a non-optional `find`
+route, and a workflow body that reads.
+
 ### F11 — an `int` field declares no range, and a value inside the declared range overflows the column
 **Waiver:** W11 (server error) + W12 (its status-conformance consequence), both
 `intermittent` · **Severity: high** — any body carrying an `int`.
