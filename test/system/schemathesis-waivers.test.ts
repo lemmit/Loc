@@ -60,8 +60,20 @@ const fixedFindings = new Set(
 describe("schemathesis waivers ↔ findings register", () => {
   it("the register was actually read", () => {
     // Guards the whole file against a rename silently emptying every set below.
+    // The register only GROWS (a fixed finding keeps its heading), so a floor on
+    // it is safe.  The WAIVER list is the opposite: it shrinks every time a root
+    // cause is fixed, so a count floor there is a countdown that has to be
+    // edited down by each fix — it would have blocked F6+F8's own PR, which is
+    // how it was found.  What that half actually needs to prove is that the file
+    // parsed into rules at all, so that is what it asserts.
     expect(registerFindings.size).toBeGreaterThan(5);
-    expect(waiverDoc.waivers.length).toBeGreaterThan(5);
+    expect(Array.isArray(waiverDoc.waivers)).toBe(true);
+    expect(
+      waiverDoc.waivers.length,
+      "the waiver file parsed to an empty rule list — a rename or a bad edit, " +
+        "not a drained register (an ACTUALLY drained register is fine here and " +
+        "is covered by the OPEN-finding check below)",
+    ).toBeGreaterThan(0);
   });
 
   for (const w of waiverDoc.waivers) {

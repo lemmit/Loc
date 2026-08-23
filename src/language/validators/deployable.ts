@@ -48,6 +48,46 @@ function isFrontendPlatform(platform: string | undefined): boolean {
   }
 }
 
+/** Rule 4b — one emitter per SPA frontend platform, for the
+ *  "frontend deployable declares no `ui:`" error.  The diagnostic code stays
+ *  PER-PLATFORM (`loom.react-deployable-missing-ui` and its `svelte`/`vue`/
+ *  `angular` siblings) so the fix-hint registry can dispatch on it
+ *  (`src/language/fix-hints.ts` → `missingUiFix`); the wording differs only in
+ *  the platform label and lives in the catalog under the matching key.
+ *
+ *  Why a table of emitters rather than one `accept` with a computed
+ *  `` code: `loom.${d.platform}-deployable-missing-ui` ``: a computed code is
+ *  invisible to the wording ratchet (`test/system/diagnostic-catalog.test.ts`
+ *  only records a site whose `code:` is statically known), which is exactly how
+ *  these four kept inline wording long after every sibling moved to the catalog.
+ *  Both the key and the code are spelled out here, once per platform. */
+const SPA_MISSING_UI: Record<string, (d: Deployable, accept: ValidationAcceptor) => void> = {
+  react: (d, accept) =>
+    accept("error", diagMessage("loom.react-deployable-missing-ui", { name: d.name }), {
+      node: d,
+      property: "name",
+      code: "loom.react-deployable-missing-ui",
+    }),
+  svelte: (d, accept) =>
+    accept("error", diagMessage("loom.svelte-deployable-missing-ui", { name: d.name }), {
+      node: d,
+      property: "name",
+      code: "loom.svelte-deployable-missing-ui",
+    }),
+  vue: (d, accept) =>
+    accept("error", diagMessage("loom.vue-deployable-missing-ui", { name: d.name }), {
+      node: d,
+      property: "name",
+      code: "loom.vue-deployable-missing-ui",
+    }),
+  angular: (d, accept) =>
+    accept("error", diagMessage("loom.angular-deployable-missing-ui", { name: d.name }), {
+      node: d,
+      property: "name",
+      code: "loom.angular-deployable-missing-ui",
+    }),
+};
+
 export function checkDeployable(
   d: Deployable,
   siblings: Deployable[],
@@ -91,26 +131,8 @@ export function checkDeployable(
   }
   // Rule 4b generalises to every frontend SPA platform (`react`,
   // `svelte`, `vue`, `angular`) — a frontend deployable without a `ui:`
-  // has no pages to render.  `static` keeps its own wording above.  The
-  // diagnostic code stays per-platform
-  // (`loom.react-deployable-missing-ui`,
-  // `loom.svelte-deployable-missing-ui`,
-  // `loom.vue-deployable-missing-ui`,
-  // `loom.angular-deployable-missing-ui`) so quick-fixes can dispatch.
-  const SPA_FRONTEND_LABELS: Record<string, string> = {
-    react: "React",
-    svelte: "Svelte",
-    vue: "Vue",
-    angular: "Angular",
-  };
-  if (d.platform in SPA_FRONTEND_LABELS && !hasUiBinding) {
-    const label = SPA_FRONTEND_LABELS[d.platform];
-    accept(
-      "error",
-      `${label} deployable '${d.name}' must declare a 'ui:' binding — every page now flows through the page metamodel. Add 'ui: <UiName>' (use 'ui <UiName> { with scaffold(subdomains: [...]) }' for the bulk-CRUD case).`,
-      { node: d, property: "name", code: `loom.${d.platform}-deployable-missing-ui` },
-    );
-  }
+  // has no pages to render.  `static` keeps its own wording above.
+  if (!hasUiBinding) SPA_MISSING_UI[d.platform]?.(d, accept);
   // Rule 13 (D-PHOENIX-SURFACE): when the referenced `ui { framework: … }`
   // declaration carries its own framework, the hosting deployable's
   // platform must be able to serve it — `framework ∈ host.hostableFrameworks`.

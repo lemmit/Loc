@@ -307,26 +307,13 @@ const BEHAVIOURAL_SKIP = {
     // these three RE-ARMS boots that had never run once on this leg.
   },
   elixir: {
-    // B19 — a SILENT gap the first collection read over seed data found (#2517):
-    // the Elixir backend emits NO seeder at all.  `priv/repo/seeds.exs` is listed
-    // in the Phoenix file map (docs/generators.md) and reserved as a layout slot
-    // (`elixir/adapters/by-feature-layout.ts` → "seeds"), but no emitter ever
-    // writes it, so every `seed` dataset is dropped and the tables start empty —
-    // while node/python/java/dotnet all seed at boot.  Invisible until something
-    // read a seeded row back: the fixtures compile green on all five backends.
-    //
-    // Scoped to `seed-values`, NOT to `seeding`, and the difference is the whole
-    // point: keying this by fixture id removes the WHOLE case from this leg, so
-    // pointing it at `seeding` would also have taken away that fixture's CRUD
-    // round-trip, enum write-back, cross-aggregate `Widget id` FK, FK-ORDERED
-    // DESTROYS (B10's exact class — an elixir bug fixed once already), 404 problem
-    // bodies and its wire-golden comparison.  `seed-values` carries only the
-    // collection reads that cannot pass without a seeder, so the skip now covers
-    // exactly the gap and deleting it re-arms exactly what was missing.
-    //
-    // Delete this entry when the Elixir seeder lands — M-T6.37 owns it.
-    "seed-values":
-      "elixir emits no seed runner — `seed` datasets are silently dropped, so the seeded rows this fixture reads back never exist (B19; `seeding`'s CRUD half stays armed here)",
+    // B19 (`seed-values`) is FIXED — M-T6.37 landed the Ecto seeder, so this leg
+    // now runs the collection reads over seeded rows like the other four:
+    // `<Ctx>.Seeds` (elixir/vanilla/seed-emit.ts) inserts domain rows through the
+    // aggregate's repository changeset, `raw` rows as schema-qualified INSERTs,
+    // ship-once per dataset behind the `__loom_seed` marker, invoked from
+    // `Application.start/2` on a SERVING node.  Its skip entry is deleted rather
+    // than re-worded: an allowlist ratchets, so the fix removes the waiver.
     // B5/B6/B7/B9/B10/B11 fixed; batch-5 (core-domain/document/inheritance) booted
     // green on elixir — no elixir skips remain. (B11: `T or <primitive>` union return
     // now mints a valid PascalCase module alias; openapi-emit.ts.)

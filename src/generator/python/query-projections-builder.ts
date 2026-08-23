@@ -515,7 +515,10 @@ function pyKeyCoerce(k: GroupKeySelect, expr: string): string {
   const optional = k.type.kind === "optional";
   const conv =
     inner.kind === "primitive" && inner.name === "money"
-      ? "str"
+      ? // The FIXED money scale (RS-12), not a bare `str`: a grouping KEY reads
+        // the stored column, so it shipped whatever scale the row was written
+        // at — the group-key twin of the aggregate fix in #2549.
+        "money_str"
       : inner.kind === "primitive" && inner.name === "decimal"
         ? "float"
         : // A `datetime` key reads back as an aware `datetime` off the driver,

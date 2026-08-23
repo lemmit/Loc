@@ -215,7 +215,13 @@ function renderPgType(t: ColumnType): string {
     case "bool":
       return "BOOLEAN";
     case "decimal":
-      return "DECIMAL";
+      // `money` carries the canonical NUMERIC(19,4) bounds; a plain `decimal`
+      // stays unconstrained.  An unbounded column stored whatever scale the
+      // writing backend produced, so the SAME value read back through two
+      // backends could differ (#2549).
+      return t.precision !== undefined && t.scale !== undefined
+        ? `DECIMAL(${t.precision}, ${t.scale})`
+        : "DECIMAL";
     case "datetime":
       return "TIMESTAMP WITH TIME ZONE";
     case "json":

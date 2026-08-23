@@ -18,12 +18,12 @@
 // (`operationIsGuarded` / `workflowIsGuarded`), so the three emitters stay
 // in lockstep.
 //   create  (POST /<aggs>)            → 400, 415, [403 if guarded], 422
-//   getById (GET  /<aggs>/{id})       → 404  (not found)
-//   destroy (DELETE /<aggs>/{id})     → [403 if guarded], 404, 409
+//   getById (GET  /<aggs>/{id})       → 404, 422
+//   destroy (DELETE /<aggs>/{id})     → [403 if guarded], 404, 409, 422
 //   operation (POST /<aggs>/{id}/op)  → 400, 415, [403 if guarded], 404, 422
-//   find (optional return)            → 404
+//   find (optional return)            → 404, [422 if it validates a request part]
 //   workflow (POST /workflows/<wf>)   → 400, 415, [403 if guarded], 422
-//   list / non-optional find          → (none beyond the universal 500)
+//   list / non-optional find          → [422 if it validates a request part]
 //
 // 415 (Unsupported Media Type, RFC 9110 §15.5.16) is declared on exactly the
 // BODY-CARRYING kinds — create / operation / workflow.  A request whose
@@ -40,6 +40,20 @@
 // consumed by the frontend ACL's `applyServerErrors` (#769).  500 is the
 // universal fallback every route can produce; like most specs we don't
 // enumerate it per operation (it would be noise on every path).
+//
+// It is declared by EVERY route that VALIDATES a request part, not only the
+// body-carrying ones (schemathesis F6).  A path `{id}` is parsed as a uuid and
+// a query parameter is parsed against its declared type, and a failure at
+// either answers the same 422 the body tier does — Hono's shared `defaultHook`,
+// FastAPI's request validation, and so on.  Until this table said so, `GET
+// /<aggs>/{id}` published `[200, 404]`, `DELETE /<aggs>/{id}` published
+// `[204, 404, 409]` and the collection GET published `[200]` alone, while all
+// three answered 422 for a malformed id / page number: a status every generated
+// client was blind to because the contract never mentioned it.  The read/delete
+// kinds below always carry a validated `{id}`, so they declare it
+// unconditionally; a FIND's request surface depends on its shape, so its arm is
+// decided by `findValidatesRequest` in `api-surface.ts` (a param-less,
+// un-paged find validates nothing and declares nothing).
 
 /** Media type for every RFC 7807 error body. */
 export const PROBLEM_JSON = "application/problem+json";
@@ -52,6 +66,17 @@ export const PROBLEM_SCHEMA = "ProblemDetails";
  *  produce the matching runtime arm (Hono's `requireJsonContentType`) can be
  *  found from this table by grep. */
 export const UNSUPPORTED_MEDIA_TYPE = 415;
+
+/** The wire-validation tier every route that PARSES a request part answers on
+ *  a parse failure — a malformed `{id}`, an out-of-range `?page=`, a body field
+ *  of the wrong type.  Named for the same reason `UNSUPPORTED_MEDIA_TYPE` is:
+ *  the emitters that produce the matching runtime arm (Hono's `defaultHook`,
+ *  FastAPI's request validation) are findable from this table by grep, and the
+ *  read/delete arms below now declare it rather than only the body-carrying
+ *  ones.  NOT remappable — like 400 it is a framework tier, not a denial-ladder
+ *  rung (the DOMAIN floor that shares the number by default is the separate,
+ *  resolvable `DomainError`). */
+export const UNPROCESSABLE_ENTITY = 422;
 
 /** Operation kinds that map to a distinct error-status set. */
 export type OpErrorKind =
@@ -123,8 +148,13 @@ export function errorStatuses(
       return guarded
         ? set(400, forbidden, UNSUPPORTED_MEDIA_TYPE, 422, domain)
         : set(400, UNSUPPORTED_MEDIA_TYPE, 422, domain);
+    // The `{id}` path param is parsed as a uuid, so a malformed one answers the
+    // wire-validation 422 exactly as a malformed body field does.  Declared
+    // here rather than per-backend: `getById` is also what the history read and
+    // the workflow-instance-by-id read declare against, and all three validate
+    // the same `{id}`.
     case "getById":
-      return [404];
+      return set(404, UNPROCESSABLE_ENTITY);
     // destroy (DELETE /<aggs>/{id}) → 404 (not found) + 409 (still
     // referenced: cross-aggregate `X id` FK is ON DELETE RESTRICT — the
     // `ReferencedInUse` structural conflict, remappable via `httpStatus`).
@@ -132,7 +162,9 @@ export function errorStatuses(
     // guard may read `this`), so the 403 lands between the two: an unreachable
     // id still answers 404, matching the operation routes.
     case "destroy":
-      return guarded ? set(forbidden, 404, referencedInUse) : set(404, referencedInUse);
+      return guarded
+        ? set(forbidden, 404, referencedInUse, UNPROCESSABLE_ENTITY)
+        : set(404, referencedInUse, UNPROCESSABLE_ENTITY);
     case "operation":
       return guarded
         ? set(400, forbidden, 404, UNSUPPORTED_MEDIA_TYPE, 422, domain)

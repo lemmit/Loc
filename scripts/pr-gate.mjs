@@ -9,8 +9,9 @@
 //
 // v2 never waits. `pr-gate.yml` triggers on `workflow_run: completed` of every
 // other workflow (list pinned by test/system/pr-gate.test.ts) plus the
-// pull_request events, and each run is one seconds-long EVALUATION that posts
-// a check run named `pr-gate` on the head SHA via the Checks API:
+// pull_request events, and each run is one seconds-long EVALUATION that
+// publishes the check run named `pr-gate` on the head SHA via the Checks API
+// — ONE run per SHA, updated in place (see `publishCheck`):
 //
 //   - any triggered check failed        -> completed/failure (culprits named);
 //   - checks still running / none yet   -> in_progress ("re-evaluates on the
@@ -233,13 +234,24 @@ async function fetchCheckRuns(repo, sha, token) {
   }));
 }
 
-/** Publish the verdict as a check run named `pr-gate` on the head SHA — the
- *  check branch protection requires.  A new run per evaluation is fine:
- *  GitHub surfaces the latest run per check name. */
-async function postCheck(repo, sha, token, v) {
-  const body = {
+/**
+ * The id of the newest `pr-gate` check run on this SHA, or null when the gate
+ * has never published here.  Same cross-suite collapse `evaluate` needs: the
+ * API lists every run, and the one worth reusing is the newest.
+ *
+ * @param {ReadonlyArray<{id?: number, name: string}>} runs
+ * @returns {number | null}
+ */
+export function existingGateRunId(runs) {
+  const gate = latestPerName(runs).find((r) => r.name === "pr-gate");
+  return gate?.id ?? null;
+}
+
+/** The check-run body for a verdict.  `head_sha` is create-only — PATCH
+ *  rejects it — so it is added by the caller on the POST path. */
+function checkBody(v) {
+  return {
     name: "pr-gate",
-    head_sha: sha,
     output: {
       title: v.state === "success" ? "all triggered checks passed" : v.summary.slice(0, 120),
       summary: v.summary,
@@ -248,11 +260,66 @@ async function postCheck(repo, sha, token, v) {
       ? { status: "in_progress" }
       : { status: "completed", conclusion: v.state }),
   };
-  const res = await apiFetch(`https://api.github.com/repos/${repo}/check-runs`, {
-    method: "POST",
-    headers: { ...API_HEADERS(token), "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+}
+
+/**
+ * Publish the verdict as the check run named `pr-gate` on the head SHA — the
+ * check branch protection requires — by UPDATING the run already on this SHA,
+ * and creating one only the first time.
+ *
+ * v2 created a new run per evaluation on the theory that "GitHub surfaces the
+ * latest run per check name".  That holds within one check suite and fails
+ * across two, and a SHA gets a second suite from the exact flow CLAUDE.md
+ * prescribes (open a draft, mark it ready).  Every intermediate "waiting on
+ * N/M" verdict is then a run that stays `in_progress` FOREVER, and the
+ * required-check evaluation reads one of those instead of the newest success:
+ *
+ *   405 Repository rule violations found
+ *   Required status check "pr-gate" is expected.
+ *
+ * — an unmergeable PR whose every component check is green (observed on #2593,
+ * which had three `pr-gate` runs on one SHA: two stuck at "waiting on …" and
+ * one "all 8 triggered check(s) passed").  Reusing the run means a SHA carries
+ * exactly ONE `pr-gate`, so there is no stale sibling to read.
+ *
+ * The PATCH can legitimately fail if the run was created by a different app
+ * (only its author may update it), so a failed update falls back to creating
+ * one — noisily, because that path resurrects the bug above.
+ */
+export async function publishCheck(repo, sha, token, v, existingId, opts = {}) {
+  const send = (method, url, body) =>
+    apiFetch(
+      url,
+      {
+        method,
+        headers: { ...API_HEADERS(token), "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      opts,
+    );
+
+  const create = () =>
+    send("POST", `https://api.github.com/repos/${repo}/check-runs`, {
+      ...checkBody(v),
+      head_sha: sha,
+    });
+
+  let res;
+  if (existingId) {
+    res = await send(
+      "PATCH",
+      `https://api.github.com/repos/${repo}/check-runs/${existingId}`,
+      checkBody(v),
+    );
+    if (!res.ok) {
+      console.log(
+        `  pr-gate: ${res.status} updating check run ${existingId} — creating a new one instead`,
+      );
+      res = await create();
+    }
+  } else {
+    res = await create();
+  }
   if (!res.ok) throw new Error(`GitHub API ${res.status} posting check run: ${await res.text()}`);
 }
 
@@ -266,9 +333,10 @@ async function postCheck(repo, sha, token, v) {
  * @returns {"success" | "failure" | "pending" | "absent"}
  */
 export function currentGateState(runs) {
-  // Deduped for the same reason `evaluate` is: the gate posts a NEW check run
-  // per evaluation, so a SHA accumulates many `pr-gate` runs and a bare `find`
-  // would answer from whichever the API happened to list first.
+  // Deduped for the same reason `evaluate` is.  `publishCheck` now keeps one
+  // run per SHA, but a SHA from before that change (or one whose PATCH fell
+  // back to a create) still carries several, and a bare `find` would answer
+  // from whichever the API happened to list first.
   const gate = latestPerName(runs).find((r) => r.name === "pr-gate");
   if (!gate) return "absent";
   if (gate.status !== "completed") return "pending";
@@ -277,8 +345,8 @@ export function currentGateState(runs) {
 
 /** Sweep-mode posting rule: publish only when the fresh verdict DISAGREES with
  *  what is already on the SHA.  The sweep is a safety net for dropped
- *  `workflow_run` events, not a second event stream — re-posting an identical
- *  verdict every cycle is churn with no information. */
+ *  `workflow_run` events, not a second event stream — re-publishing an
+ *  identical verdict every cycle is churn with no information. */
 export function sweepShouldPost(current, fresh) {
   return current !== fresh.state;
 }
@@ -308,7 +376,7 @@ async function sweep(repo, token) {
     const v = verdict(evaluate(runs, SELF_NAMES));
     const current = currentGateState(runs);
     if (sweepShouldPost(current, v)) {
-      await postCheck(repo, pr.sha, token, v);
+      await publishCheck(repo, pr.sha, token, v, existingGateRunId(runs));
       console.log(`  #${pr.number} ${pr.sha.slice(0, 8)}: ${current} -> ${v.state} — ${v.summary}`);
     } else {
       console.log(`  #${pr.number} ${pr.sha.slice(0, 8)}: ${current} (unchanged)`);
@@ -332,9 +400,9 @@ async function main() {
     return;
   }
 
-  const snapshot = evaluate(await fetchCheckRuns(repo, sha, token), SELF_NAMES);
-  const v = verdict(snapshot);
-  await postCheck(repo, sha, token, v);
+  const runs = await fetchCheckRuns(repo, sha, token);
+  const v = verdict(evaluate(runs, SELF_NAMES));
+  await publishCheck(repo, sha, token, v, existingGateRunId(runs));
   console.log(`pr-gate: ${v.state.toUpperCase()} — ${v.summary}`);
   // The verdict lives in the posted `pr-gate` check; this job succeeds as long
   // as it evaluated and published (an API failure above exits non-zero).

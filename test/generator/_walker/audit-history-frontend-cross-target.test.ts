@@ -19,12 +19,17 @@
 //      `not.toContain`s, because "byte-identical" is the actual promise.
 //
 // The frontend support matrix is asserted too, and it is NOT the same as
-// `Timeline`'s: the primitive renders on five targets, but only the four
-// JS-family frontends COLLECT the derived read.  Feliz binds every non-`byId`
-// op to the `All<Plural>` Model field, Flutter skips it in `collectFlutterReads`
-// while still referencing a provider, and Phoenix maps it onto `list_<aggs>` —
-// all three would emit a dangling or plainly wrong read, so the whole view is
-// skipped with a visible comment (`_walker/history-read.ts`).
+// `Timeline`'s: a target must also COLLECT the derived read, and all seven
+// render paths now do — the four JS-family frontends over the api client,
+// Phoenix/HEEx over an in-process `audit_records` scan (a LiveView hosts its
+// contexts in the same OTP app, so it needs no client), Feliz over a
+// page-entry-keyed `Remote<AuditEntry list>` fetch (`feliz/wire.ts`
+// `felizHistoryRead`; positives in
+// `test/generator/feliz/feliz-audit-history.test.ts`), and Flutter over a
+// Riverpod `.family` provider decoding the `AuditEntry` wire model
+// (`flutter/reads-emit.ts` + the `renderTimeline` fork in
+// `flutter/flutter-target.ts`; positives in
+// `test/generator/flutter/flutter-audit-history.test.ts`).
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it } from "vitest";
@@ -112,7 +117,7 @@ const HISTORY_MARKERS = [
   "AuditFieldChange",
   "loom-timeline",
   "orders-detail-history",
-  "entity history not yet supported",
+  "History is not yet supported on",
 ];
 
 describe("api client — `history(id)` on the four JS-family frontends", () => {
@@ -233,30 +238,65 @@ describe("non-audited aggregate — nothing new reaches its frontend", () => {
   });
 });
 
-describe("frontends that don't collect the read degrade honestly", () => {
-  // NOT the same set as `Timeline`'s: the primitive renders on HEEx too, but
-  // Phoenix's read layer maps `history(id)` onto `list_<aggs>` — the LIST.  The
-  // damage in all three cases is the READ the surrounding QueryView registers,
-  // one level up from the primitive, so the whole view is skipped.
-  it.each([
-    ["feliz", "feliz"],
-    ["flutter", "flutter"],
-  ])("%s: the view is skipped with a visible comment", async (frontend, label) => {
-    const out = allFiles(await generateSystemFiles(scaffoldSystem(frontend, true)));
-    expect(out).toContain(`entity history not yet supported on ${label}`);
-    // The section's frame still renders (the reader sees the heading), but no
-    // read is registered — a dangling Model field / provider is what would
-    // fail `dotnet fable` / `flutter analyze`.
+describe("every render path collects the read (the degrade-honestly set is empty)", () => {
+  // The honest-degradation contract (a VISIBLE "History is not yet supported
+  // on <framework>" widget, never a source comment) still guards any FUTURE
+  // frontend outside `HISTORY_CAPABLE_FRAMEWORKS` — the mechanism is pinned by
+  // the disposition test below.  Every shipped target now collects the read:
+  // the four JS-family frontends over the api client, Phoenix over its
+  // in-process loader, Feliz over `felizHistoryRead`, Flutter over the
+  // Riverpod `.family` provider.
+
+  it("feliz: collects the read and renders the trail natively", async () => {
+    const out = allFiles(await generateSystemFiles(scaffoldSystem("feliz", true)));
+    // The notice is gone — replaced by a real Model field + fetch + view.
+    expect(out).not.toContain("History is not yet supported on feliz");
+    // The read is COLLECTED into its own page-entry-keyed field — never the
+    // unfiltered list (the misbinding that excluded feliz).  The full wiring
+    // (Msg, decoder, Cmd.batch, Timeline markup) is pinned in
+    // `test/generator/feliz/feliz-audit-history.test.ts`.
+    expect(out).toContain("OrderHistory");
+    expect(out).toContain("/history");
     expect(out).toContain("orders-detail-history");
-    expect(out).not.toContain("orderHistory");
   });
 
-  it("phoenix/HEEx: the view is skipped rather than bound to `list_orders`", async () => {
+  it("flutter: collects the read and renders the trail natively", async () => {
+    const out = allFiles(await generateSystemFiles(scaffoldSystem("flutter", true)));
+    // The notice is gone — replaced by a real provider + a real widget.
+    expect(out).not.toContain("History is not yet supported on flutter");
+    // The read is COLLECTED: a `.family` provider keyed by the route id over
+    // the path-nested history route, watched by the page under the SAME name
+    // the walker's `buildHookUse` derives — the dangling-provider failure mode
+    // this file used to pin is now the linked pair.
+    expect(out).toContain("final orderHistoryProvider =");
+    expect(out).toContain("FutureProvider.family<List<AuditEntry>, String>((ref, id) async {");
+    expect(out).toContain("ref.watch(orderHistoryProvider(id))");
+    expect(out).toContain("/orders/$id/history");
+    // And the section renders through the `renderTimeline` fork, keyed for
+    // widget-test finders.  (The full per-entry markup is pinned in
+    // `test/generator/flutter/flutter-audit-history.test.ts`.)
+    expect(out).toContain("key: const Key('orders-detail-history')");
+    expect(out).toContain("key: const Key('orders-detail-history-timeline')");
+  });
+
+  it("phoenix/HEEx: serves the trail in-process rather than skipping it", async () => {
     const out = allFiles(await generateSystemFiles(heexSystem(true)));
-    expect(out).toContain("entity history not yet supported on phoenixLiveView");
+    expect(out).not.toContain("entity history not yet supported on phoenixLiveView");
     expect(out).toContain("orders-detail-history");
-    // The misbinding this gate exists to prevent: the trail is not the list.
-    expect(out).not.toContain("assign(socket, :entries");
+    // The trail is loaded by its own page-private loader over `audit_records`,
+    // NOT bound to the aggregate's list — the misbinding the skip existed to
+    // prevent, and the reason `source: "history"` is its own binding kind.
+    expect(out).toContain("defp load_order_history(_socket, id) do");
+    expect(out).toContain('Api.Audit.History.for_target(Api.Repo, "Order", id)');
+    expect(out).toContain("|> Enum.map(&order_audit_entry/1)");
+    // Guard 2 — reachability rides the ENTITY read, since `audit_records`
+    // carries no tenant column for a capability filter to scope.
+    expect(out).toContain("case Api.Ordering.get_order(id) do");
+    // And it renders through the same `Timeline` the JSX frontends use.
+    expect(out).toContain(
+      '<ol class="loom-timeline" data-testid="orders-detail-history-timeline">',
+    );
+    expect(out).toContain("<%= for e <- @order_history || [] do %>");
   });
 
   // The three cases above assert what today's three unported frontends DO.
@@ -283,7 +323,7 @@ describe("frontends that don't collect the read degrade honestly", () => {
 
     /** Frameworks whose read layer does NOT collect `history(id)` — see the
      *  module header of `_walker/history-read.ts` for what each does wrong. */
-    const SKIPPED = ["feliz", "flutter", "phoenixLiveView"];
+    const SKIPPED: string[] = [];
 
     expect([...declared].sort()).toEqual([...HISTORY_CAPABLE_FRAMEWORKS, ...SKIPPED].sort());
     // And the predicate agrees with the table, rather than merely coexisting

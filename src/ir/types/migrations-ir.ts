@@ -24,7 +24,12 @@ export type ColumnType =
   | { kind: "bigserial" }
   | { kind: "text" }
   | { kind: "bool" }
-  | { kind: "decimal" }
+  // A plain `decimal` is unconstrained Postgres `DECIMAL`; `money` carries the
+  // canonical `NUMERIC(19,4)` bounds (`MONEY_PRECISION`/`MONEY_WIRE_SCALE`).
+  // Both are the same column FAMILY, which is why they share a kind — but the
+  // bounds are load-bearing: without them the created column accepted whatever
+  // scale each backend happened to write, which is the storage half of #2549.
+  | { kind: "decimal"; precision?: number; scale?: number }
   | { kind: "datetime" }
   | { kind: "json" }
   | { kind: "array"; inner: ColumnType };

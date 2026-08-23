@@ -65,19 +65,24 @@ system Seeding {
     let updatedGadget = api.gadgets.getById(g)
     expect(updatedGadget.label).toBe("g2")
 
-    // NO `api.widgets.all()` / `api.gadgets.all()` here, and that absence is a
-    // finding rather than an omission — see `R.unseededOnElixir` in
-    // `test/ir/api-caller-census-pins.ts`.  A collection read is the only route
-    // class that can SEE seed data, and the wire golden compares whole bodies,
-    // so one here would be a divergence on any leg whose table starts
-    // differently.  The node leg used to be that leg (it composed `createApp`
-    // and never reached `runSeeds`); #2517 fixed it, and the same change found
-    // that **elixir emits no seeder at all** (B19 / M-T6.37) — so the odd leg
-    // out is now that one, and it stays odd until the Ecto seeder lands.
+    // NO `api.widgets.all()` / `api.gadgets.all()` here — see
+    // `R.seededListReadUnwritten` in `test/ir/api-caller-census-pins.ts`.  A
+    // collection read is the only route class that can SEE seed data, and the
+    // wire golden compares whole bodies, so one here would be a divergence on
+    // any leg whose table starts differently.  Two legs used to be odd in turn:
+    // node (it composed `createApp` and never reached `runSeeds`; #2517 fixed
+    // it), and then elixir, which emitted no seeder at all (B19).
+    //
+    // BOTH ARE FIXED — M-T6.37 landed the Ecto seeder, so all five legs now
+    // start from the same seeded table and these two calls are writable.  The
+    // absence is therefore no longer a finding, it is UNWRITTEN WORK, and the
+    // only thing between here and writing them is that adding them rebaselines
+    // this fixture's wire golden on every leg — a reviewed wire-contract change
+    // that wants its own PR rather than riding along on an emitter fix.
     //
     // What the seeded rows ARE asserted by lives in `seed-values.ddd`, a
-    // sibling fixture that carries only the collection reads and is held off the
-    // elixir behavioural leg alone.  That split is deliberate: this case keeps
+    // sibling fixture that carries only the collection reads and now runs on
+    // all five behavioural legs.  That split is deliberate: this case keeps
     // its CRUD, enum write-back, cross-aggregate FK round-trip, FK-ordered
     // destroys and 404 bodies armed on ALL FIVE backends — the coverage a
     // whole-case skip here would have silently taken away (the FK-ordering half

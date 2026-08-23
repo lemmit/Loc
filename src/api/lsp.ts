@@ -19,7 +19,12 @@ import {
   DiagnosticSeverity,
   type TextEdit,
 } from "vscode-languageserver-types";
-import type { JsonDiagnostic, JsonSeverity, ValidateReport } from "../diagnostics/contract.js";
+import type {
+  JsonDiagnostic,
+  JsonSeverity,
+  ModelPatch,
+  ValidateReport,
+} from "../diagnostics/contract.js";
 import { resolvePatchEdits } from "../language/model-patch.js";
 
 const SEVERITY: Record<JsonSeverity, DiagnosticSeverity> = {
@@ -50,9 +55,14 @@ export function toLspDiagnostics(report: ValidateReport): Diagnostic[] {
 
 /**
  * Quick-fix `CodeAction`s for every diagnostic in a report that carries a
- * `fixHint` patch.  Resolves each patch to LSP `TextEdit`s against `source` and
- * wraps it in a `WorkspaceEdit` keyed by `uri`, so the editor can apply the fix
- * directly.  Diagnostics whose patch fails to resolve are skipped.
+ * `fixHint`.  Resolves each patch to LSP `TextEdit`s against `source` and wraps
+ * it in a `WorkspaceEdit` keyed by `uri`, so the editor can apply the fix
+ * directly.  Patches that fail to resolve are skipped.
+ *
+ * Both hint shapes are honoured:
+ * - a hint carrying `patch` is THE repair — one action, `isPreferred`;
+ * - a `choose` hint expands to one action per `options[]` entry, none preferred
+ *   (several repairs are equally valid, so the author picks).
  */
 export async function fixHintCodeActions(
   report: ValidateReport,
@@ -61,18 +71,26 @@ export async function fixHintCodeActions(
 ): Promise<CodeAction[]> {
   const actions: CodeAction[] = [];
   for (const d of report.diagnostics) {
-    const patch = d.fixHint?.patch;
-    if (!patch) continue;
-    const resolved = await resolvePatchEdits(source, [patch]);
-    if (!resolved.ok || resolved.edits.length === 0) continue;
-    const lspDiag = toLspDiagnostic(d);
-    actions.push({
-      title: d.fixHint?.summary ?? "Apply fix",
-      kind: CodeActionKind.QuickFix,
-      diagnostics: lspDiag ? [lspDiag] : [],
-      isPreferred: true,
-      edit: { changes: { [uri]: resolved.edits as TextEdit[] } },
-    });
+    const hint = d.fixHint;
+    if (!hint) continue;
+    // [patch] for a single-patch hint, else one entry per `choose` option.
+    const candidates: { summary: string; patch: ModelPatch; preferred: boolean }[] = hint.patch
+      ? [{ summary: hint.summary, patch: hint.patch, preferred: true }]
+      : (hint.options ?? []).flatMap((o) =>
+          o.patch ? [{ summary: o.summary, patch: o.patch, preferred: false }] : [],
+        );
+    for (const c of candidates) {
+      const resolved = await resolvePatchEdits(source, [c.patch]);
+      if (!resolved.ok || resolved.edits.length === 0) continue;
+      const lspDiag = toLspDiagnostic(d);
+      actions.push({
+        title: c.summary ?? "Apply fix",
+        kind: CodeActionKind.QuickFix,
+        diagnostics: lspDiag ? [lspDiag] : [],
+        ...(c.preferred ? { isPreferred: true } : {}),
+        edit: { changes: { [uri]: resolved.edits as TextEdit[] } },
+      });
+    }
   }
   return actions;
 }

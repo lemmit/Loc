@@ -30,6 +30,7 @@ import {
   absenceUnionAbsent,
   apiSurfaceCoverage,
   deriveContextOperations,
+  findValidatesRequest,
   isAllFind,
   relativeOpPath,
   successStatus,
@@ -77,7 +78,8 @@ describe("api-surface — resolved error statuses", () => {
     `),
     );
     const find = opByKey(deriveContextOperations(orders(model)), "get", "/api/orders/by_code");
-    expect(find?.errorStatuses).toEqual([404]);
+    // …plus the 422 its `code` query parameter is parsed against (F6).
+    expect(find?.errorStatuses).toEqual([404, 422]);
   });
 
   it("keeps a requires-gate's 403 on an error-payload absence union (#2363's rung)", async () => {
@@ -95,7 +97,7 @@ describe("api-surface — resolved error statuses", () => {
     `),
     );
     const find = opByKey(deriveContextOperations(orders(model)), "get", "/api/orders/by_code");
-    expect(find?.errorStatuses).toEqual([403, 404]);
+    expect(find?.errorStatuses).toEqual([403, 404, 422]);
   });
 
   it("resolves the union-absent status through the api's httpStatus override", async () => {
@@ -112,7 +114,7 @@ describe("api-surface — resolved error statuses", () => {
       ),
     );
     const find = opByKey(deriveContextOperations(orders(model)), "get", "/api/orders/by_code");
-    expect(find?.errorStatuses).toEqual([410]);
+    expect(find?.errorStatuses).toEqual([410, 422]);
   });
 
   it("resolves destroy's ReferencedInUse and a when-gate's Disallowed through structuralErrorStatuses", async () => {
@@ -131,7 +133,9 @@ describe("api-surface — resolved error statuses", () => {
     );
     const ops = deriveContextOperations(orders(model));
     const destroy = opByKey(ops, "delete", "/api/orders/{id}");
-    expect(destroy?.errorStatuses).toEqual([404, 423]);
+    // 422 is the parsed-`{id}` tier and is NOT remappable — only the
+    // FK-restrict conflict moves with the override.
+    expect(destroy?.errorStatuses).toEqual([404, 422, 423]);
     const cancel = opByKey(ops, "post", "/api/orders/{id}/cancel");
     // Base operation set [400, 404, 422] plus the remapped Disallowed — and no
     // stray default 409, which is what the pre-fix hardcoding produced.
@@ -175,10 +179,73 @@ describe("api-surface — resolved error statuses", () => {
     `),
     );
     const ops = deriveContextOperations(orders(model));
-    expect(opByKey(ops, "delete", "/api/orders/{id}")?.errorStatuses).toEqual([404, 409]);
+    expect(opByKey(ops, "delete", "/api/orders/{id}")?.errorStatuses).toEqual([404, 409, 422]);
     expect(opByKey(ops, "post", "/api/orders/{id}/cancel")?.errorStatuses).toEqual([
       400, 404, 409, 415, 422,
     ]);
+  });
+});
+
+describe("api-surface — 422 follows the PARSED request part, not the kind (F6)", () => {
+  it("declares it on the by-id read, the destroy, and a paged or param-carrying find — and not on a find that parses nothing", async () => {
+    // The pre-fix sets were `[404]`, `[404, 409]`, `[]` and `[]`: every one of
+    // those routes parses something and answers 422 on a bad value, and none of
+    // them said so.  The last one is the honest half — `find recent(): Order[]`
+    // takes no parameter and is not paged, so it really cannot 422, and
+    // declaring it there would be the inverse defect.
+    const model = await buildLoomModel(
+      SYS(`
+      aggregate Order with crudish { code: string }
+      repository Orders for Order {
+        find byCode(code: string): Order[]
+        find recent(): Order[]
+      }
+    `),
+    );
+    const ops = deriveContextOperations(orders(model));
+    expect(opByKey(ops, "get", "/api/orders/{id}")?.errorStatuses).toEqual([404, 422]);
+    expect(opByKey(ops, "delete", "/api/orders/{id}")?.errorStatuses).toEqual([404, 409, 422]);
+    // The auto-`all` find is PAGED — its `?page=`/`?pageSize=` bounds are
+    // parsed even though the find declares no parameter of its own.
+    expect(opByKey(ops, "get", "/api/orders")?.errorStatuses).toEqual([422]);
+    expect(opByKey(ops, "get", "/api/orders/by_code")?.errorStatuses).toEqual([422]);
+    expect(opByKey(ops, "get", "/api/orders/recent")?.errorStatuses).toEqual([]);
+  });
+
+  it("findValidatesRequest is the predicate, and it keys on params OR paging", async () => {
+    const model = await buildLoomModel(
+      SYS(`
+      aggregate Order with crudish { code: string }
+      repository Orders for Order {
+        find byCode(code: string): Order[]
+        find recent(): Order[]
+      }
+    `),
+    );
+    const byName = new Map(
+      deriveContextOperations(orders(model))
+        .filter((o) => o.kind === "find")
+        .map((o) => [o.find?.name, o.find!]),
+    );
+    expect(findValidatesRequest(byName.get("byCode")!), "declares a param").toBe(true);
+    expect(findValidatesRequest(byName.get("all")!), "paged return").toBe(true);
+    expect(findValidatesRequest(byName.get("recent")!), "neither").toBe(false);
+  });
+
+  it("the gate probe declares it too — it parses the same {id}", async () => {
+    const model = await buildLoomModel(
+      SYS(`
+      aggregate Order {
+        code: string
+        status: string
+        create(code: string) { code := code }
+        operation cancel() when status == "Open" { status := "Cancelled" }
+      }
+      repository Orders for Order { }
+    `),
+    );
+    const ops = deriveContextOperations(orders(model));
+    expect(opByKey(ops, "get", "/api/orders/{id}/can_cancel")?.errorStatuses).toEqual([404, 422]);
   });
 });
 

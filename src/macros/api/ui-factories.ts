@@ -25,6 +25,7 @@ import type {
   PageMenuMeta,
   PageProp,
   PostfixChain,
+  RequiresProp,
   RouteProp,
   StateBlock,
   StateField,
@@ -50,6 +51,7 @@ import {
   mkPageMenuMeta,
   mkPostfixChain,
   mkPrimitiveType,
+  mkRequiresProp,
   mkRouteProp,
   mkStateBlock,
   mkStateField,
@@ -224,6 +226,23 @@ export function routeProp(value: string): RouteProp {
   return _tag(mkRouteProp({ $type: "RouteProp", value }), origin);
 }
 
+/** The `requires <expr>` gate on a page (grammar `RequiresProp`).
+ *
+ * Lowered to `PageIR.requires` and consumed by two seams: the frontend route
+ * guard, and `menu-emitter.ts`, which renders a nav link's visibility from
+ * THIS gate — so a page whose route the backend guards but which carries no
+ * `requires` shows a menu entry that 403s on click.  That is the whole reason
+ * the factory exists: the grammar has had `RequiresProp` all along, but no
+ * scaffold macro could emit one.
+ *
+ * `currentUser`-only, like every other read gate — see `GATE_ALLOWED_REFS`. */
+export function requiresProp(expr: Expression): RequiresProp {
+  const origin = _currentOrigin();
+  const rp: RequiresProp = _tag(mkRequiresProp({ $type: "RequiresProp", expr }), origin);
+  _setContainer(expr, rp, "expr");
+  return rp;
+}
+
 /** The `body: <expr>` prop on a page.  Wraps any Expression. */
 export function bodyProp(expr: Expression): BodyProp {
   const origin = _currentOrigin();
@@ -319,12 +338,17 @@ export function page(opts: {
   name: string;
   route: string;
   body: Expression;
+  /** The page's `requires` gate.  Pass the gate of whatever the page READS —
+   *  see `requiresProp`.  Must already be a clone (`cloneExpr`) when it comes
+   *  from another declaration: an AST node has one `$container`. */
+  requires?: Expression;
   menu?: Record<string, Expression>;
   state?: ReadonlyArray<string | StateFieldSpec>;
 }): Page & UiMember {
   const origin = _currentOrigin();
   const props: PageProp[] = [];
   props.push(routeProp(opts.route));
+  if (opts.requires) props.push(requiresProp(opts.requires));
   props.push(bodyProp(opts.body));
   if (opts.state && opts.state.length > 0) props.push(stateBlock(opts.state));
   if (opts.menu) props.push(pageMenuMeta(opts.menu));

@@ -77,7 +77,9 @@ describe("mask unless — .NET read redaction", () => {
   it("makes the masked response param nullable", async () => {
     const out = await files();
     const resp = [...out.entries()].find(([k]) => k.endsWith("PResponses.cs"))?.[1] ?? "";
-    expect(resp).toMatch(/decimal\?\s+Salary/);
+    // A wire `decimal` is a `double` on the .NET response (#2563) — the
+    // float64 the other four backends send.  Masking makes it nullable.
+    expect(resp).toMatch(/double\?\s+Salary/);
     // A non-masked field stays required.
     expect(resp).toMatch(/\[property: Required\] string Name/);
   });
@@ -88,7 +90,9 @@ describe("mask unless — .NET read redaction", () => {
     // fail-closed: null caller OR failed predicate → null.
     expect(handler).toMatch(/RequestContext\.Current\?\.CurrentUser is \{ \} __maskUser\d+/);
     expect(handler).toMatch(/\(__maskUser\d+\.Permissions\)\.Contains\("m\.unmask"\)/);
-    expect(handler).toMatch(/\?\s*\(decimal\?\)\(found\.Salary\)\s*:\s*null/);
+    // `(double?)((double)found.Salary)` — the mask's nullable cast composing
+    // with the #2563 narrowing that makes a wire `decimal` a float64.
+    expect(handler).toMatch(/\?\s*\(double\?\)\(\(double\)found\.Salary\)\s*:\s*null/);
     // the handler imports where RequestContext lives.
     expect(handler).toContain("using S.Domain.Common;");
   });

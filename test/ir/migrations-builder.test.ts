@@ -140,7 +140,9 @@ describe("schemaFromModule", () => {
     const snap = schemaFromModule(loom.systems[0]!.subdomains[0]!);
     const invoice = snap.tables.find((t) => t.name === "invoices")!;
     const subtotal = invoice.columns.find((c) => c.name === "subtotal")!;
-    expect(subtotal.type).toEqual({ kind: "decimal" });
+    // money is the BOUNDED member of the decimal family — NUMERIC(19,4), the
+    // scale every other layer already declares (#2549 storage half).
+    expect(subtotal.type).toEqual({ kind: "decimal", precision: 19, scale: 4 });
   });
 
   it("emits a uuid FK column + per-column index for `Target id` references", async () => {

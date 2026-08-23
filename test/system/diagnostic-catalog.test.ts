@@ -25,6 +25,17 @@ import {
 //      a copy-pasted call site actually gets wrong.
 //   3. No orphans — every catalog entry is reachable from a call site, so a
 //      deleted check takes its wording with it.
+//
+// A fourth invariant guards the SCANNER, not the catalog:
+//
+//   4. No dynamic `code:` — a site may not compute its code out of a template
+//      literal (`` code: `loom.${d.platform}-…` ``).  Such a site used to be
+//      SKIPPED, because the scanner only recorded a string-literal code — so it
+//      kept inline wording invisibly.  That is how the four
+//      `*-deployable-missing-ui` codes escaped all three invariants above (and
+//      the same hole, in its `code: backend.code` shape, is recorded in
+//      M-T9.27).  A template code is now constant-folded where that is possible
+//      and FAILS loudly where it is not.
 // ---------------------------------------------------------------------------
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -72,20 +83,102 @@ function isForwardedParam(message: ts.Expression, sf: ts.SourceFile): boolean {
   return false;
 }
 
-/** Every diagnostic construction site carrying a literal `loom.*` code — both
- *  shapes: Langium's `accept(sev, msg, { …, code })` and the IR checks' /
- *  macro expander's `{ severity, message, code, … }` object literal. */
-function sitesIn(file: string): Site[] {
+/** A `code:` the scanner recognises as a `loom.*` code but cannot resolve to a
+ *  static string — a template literal with a non-constant substitution.  Such a
+ *  site is reported, never skipped: skipping it is what let the four
+ *  `*-deployable-missing-ui` codes keep inline wording. */
+interface DynamicCodeSite {
+  file: string;
+  line: number;
+  /** The `code:` expression as source text. */
+  text: string;
+}
+
+/** A `code:` expression the scanner has only recently begun to see (template
+ *  literals — see invariant 4) whose wording has not been moved into the catalog
+ *  yet.  RATCHETING: every entry must still match a live site, so a fix deletes
+ *  its waiver in the same change; and a NEW dynamic/uncatalogued template code
+ *  fails the gate rather than joining the list silently.
+ *
+ *  `code` is the exact source text of the `code:` expression, so the entries
+ *  survive line drift. */
+const TEMPLATE_CODE_DEBT: { file: string; code: string; why: string }[] = [
+  {
+    file: path.join("src", "language", "validators", "structural.ts"),
+    code: "`loom.derived-${m.name}-not-string`",
+    why: "reserved-derived typing: two codes (display/inspect) behind one computed code; wording not catalogued.",
+  },
+  {
+    file: path.join("src", "language", "validators", "structural.ts"),
+    code: "`loom.canonical-${kind}-conflict`",
+    why: "lifecycle conflicts: two codes (create/destroy) behind one computed code; wording not catalogued.",
+  },
+  {
+    file: path.join("src", "language", "validators", "structural.ts"),
+    code: "`loom.${kind}-name-conflict`",
+    why: "lifecycle conflicts: two codes (create/destroy) behind one computed code; wording not catalogued.",
+  },
+];
+
+const isWaived = (file: string, codeText: string): boolean =>
+  TEMPLATE_CODE_DEBT.some((w) => w.file === file && w.code === codeText);
+
+/** The `loom.*` code a `code:` expression attaches, resolved statically.
+ *
+ *    - a string literal, or a substitution-free template literal → that string;
+ *    - a template literal whose substitutions are all string literals → the
+ *      folded string (the only case a set of possible codes is statically
+ *      enumerable without type information);
+ *    - any other template literal → `"dynamic"`, which FAILS invariant 4;
+ *    - anything else (an identifier / property access — the diagnostic-forwarding
+ *      sites in `validators/macros.ts`, which hard-code no wording of their own)
+ *      → `undefined`, i.e. not a site this scanner can speak about. */
+function resolveCode(codeNode: ts.Expression): string | "dynamic" | undefined {
+  if (ts.isStringLiteralLike(codeNode)) {
+    return codeNode.text.startsWith("loom.") ? codeNode.text : undefined;
+  }
+  if (!ts.isTemplateExpression(codeNode)) return undefined;
+  let folded = codeNode.head.text;
+  let isStatic = true;
+  for (const span of codeNode.templateSpans) {
+    if (ts.isStringLiteralLike(span.expression)) folded += span.expression.text;
+    else isStatic = false;
+    folded += span.literal.text;
+  }
+  if (isStatic) return folded.startsWith("loom.") ? folded : undefined;
+  // A non-constant substitution.  Treat any template `code:` at a diagnostic
+  // site as a loom code even when the static head does not start with `loom.`
+  // (`` `${prefix}-conflict` `` must not be able to hide either).
+  return "dynamic";
+}
+
+/** Every diagnostic construction site carrying a statically-resolvable `loom.*`
+ *  code — both shapes: Langium's `accept(sev, msg, { …, code })` and the IR
+ *  checks' / macro expander's `{ severity, message, code, … }` object literal.
+ *  Sites whose code is dynamic land in `dynamic` instead. */
+function sitesIn(file: string): { sites: Site[]; dynamic: DynamicCodeSite[] } {
   const src = fs.readFileSync(path.join(repoRoot, file), "utf8");
   const sf = ts.createSourceFile(file, src, ts.ScriptTarget.ESNext, true);
   const out: Site[] = [];
+  const dynamic: DynamicCodeSite[] = [];
   const push = (message: ts.Expression, codeNode: ts.Expression): void => {
-    if (!ts.isStringLiteral(codeNode) || !codeNode.text.startsWith("loom.")) return;
+    const resolved = resolveCode(codeNode);
+    if (resolved === undefined) return;
+    const codeText = codeNode.getText(sf);
+    if (isWaived(file, codeText)) return;
+    if (resolved === "dynamic") {
+      dynamic.push({
+        file,
+        line: sf.getLineAndCharacterOfPosition(codeNode.getStart(sf)).line + 1,
+        text: codeText.replace(/\s+/g, " "),
+      });
+      return;
+    }
     if (isForwardedParam(message, sf)) return;
     out.push({
       file,
       line: sf.getLineAndCharacterOfPosition(message.getStart(sf)).line + 1,
-      code: codeNode.text,
+      code: resolved,
       message,
       sf,
     });
@@ -113,10 +206,12 @@ function sitesIn(file: string): Site[] {
     ts.forEachChild(n, visit);
   };
   visit(sf);
-  return out;
+  return { sites: out, dynamic };
 }
 
-const ALL_SITES = catalogedSources().flatMap(sitesIn);
+const SCANNED = catalogedSources().map(sitesIn);
+const ALL_SITES = SCANNED.flatMap((s) => s.sites);
+const ALL_DYNAMIC = SCANNED.flatMap((s) => s.dynamic);
 
 /** The catalog key a site renders, or `undefined` when it does not go through
  *  the catalog at all. */
@@ -135,6 +230,42 @@ describe("validator diagnostic-message catalog", () => {
     // Guards the scanner itself: if the AST shapes above ever stop matching,
     // the invariants below would pass vacuously.
     expect(ALL_SITES.length).toBeGreaterThan(400);
+  });
+
+  it("has no dynamic `code:` — a computed code cannot hide a site from the ratchet", () => {
+    const offenders = ALL_DYNAMIC.map((d) => `${d.file}:${d.line} → ${d.text}`);
+    expect(
+      offenders,
+      "A diagnostic site must attach a string-literal `code:`. A computed code " +
+        "(`loom.${x}-…`) is invisible to the catalog ratchet, so the site keeps " +
+        "inline wording unnoticed. Spell out one site per code — see " +
+        "SPA_MISSING_UI in src/language/validators/deployable.ts for the shape.",
+    ).toEqual([]);
+  });
+
+  it("waives no template code that has since been fixed", () => {
+    // The debt list ratchets: an entry that no longer matches a live site is
+    // stale and must be deleted, so a fix cannot leave its waiver behind.
+    const live = new Set<string>();
+    for (const file of catalogedSources()) {
+      const sf = ts.createSourceFile(
+        file,
+        fs.readFileSync(path.join(repoRoot, file), "utf8"),
+        ts.ScriptTarget.ESNext,
+        true,
+      );
+      const visit = (n: ts.Node): void => {
+        if (ts.isPropertyAssignment(n) && n.name.getText(sf) === "code") {
+          live.add(`${file} ${n.initializer.getText(sf)}`);
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(sf);
+    }
+    const stale = TEMPLATE_CODE_DEBT.filter((w) => !live.has(`${w.file} ${w.code}`)).map(
+      (w) => `${w.file} → ${w.code}`,
+    );
+    expect(stale, "stale TEMPLATE_CODE_DEBT entry — delete it").toEqual([]);
   });
 
   it("has no inline wording — every coded diagnostic renders from the catalog", () => {
