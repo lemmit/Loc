@@ -5,6 +5,7 @@ import { diagMessage } from "../../diagnostics/messages.js";
 import type {
   ActionDecl,
   Api,
+  Area,
   Component,
   Layout,
   MenuBlock,
@@ -203,8 +204,31 @@ export function checkUi(ui: Ui, sys: System, accept: ValidationAcceptor): void {
   // error.  Recurses into nested areas.
   const checkPageScope = (members: readonly UiMember[], scopeLabel: string): void => {
     const seen = new Map<string, Page>();
+    // Area names are scoped the same way pages are, and for the same reason:
+    // the area path is what lowering turns into `page.emitPath`, so two
+    // same-named `area` blocks in one scope compute the SAME directory and
+    // their pages silently overwrite each other (`checkPageScope` used to scope
+    // page uniqueness per area NODE, so two `area Ops { page Dashboard … }`
+    // blocks parsed clean and one Dashboard vanished from the build).  The
+    // macro expander MERGES a synthesised area into a same-named explicit one —
+    // that is the override path, and it leaves exactly one node; two EXPLICIT
+    // same-named areas are the unintended case this rejects.
+    const seenAreas = new Map<string, Area>();
     for (const m of members) {
       if (m.$type === "Area") {
+        if (seenAreas.has(m.name)) {
+          accept(
+            "error",
+            diagMessage("loom.ui-duplicate-area", { name: m.name, scope: scopeLabel }),
+            {
+              node: m,
+              property: "name",
+              code: "loom.ui-duplicate-area",
+            },
+          );
+        } else {
+          seenAreas.set(m.name, m);
+        }
         checkPageScope(m.members, `area '${m.name}'`);
         continue;
       }

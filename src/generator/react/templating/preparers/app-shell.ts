@@ -112,7 +112,22 @@ export function prepareAppShellVM(
    *  when false every chrome token is the raw source string — byte-identical to
    *  the pre-i18n shell (M-T1.11, pack-chrome). */
   i18nEnabled: boolean = false,
+  /** Conventional-slot → module specifier, built from the ui's ACTUAL pages
+   *  (`buildPageModuleIndex`).  The per-aggregate / per-workflow loops below
+   *  reconstructed their imports by convention (`./pages/<plural>/list`) while
+   *  the page emitter wrote each file at `page.emitPath` — so a scaffold page
+   *  the author re-declared inside an `area { … }` landed at
+   *  `src/pages/sales/orders/list.tsx` and this shell went on importing the
+   *  scaffolded module: the author's page became a dead file, silently, with
+   *  no tsc error.  Consulting the index first makes the router import what
+   *  was actually emitted; the conventional string stays as the fallback for
+   *  callers with no ui. */
+  pageModules: ReadonlyMap<string, string> = new Map(),
 ): AppShellVM {
+  /** Where the page filling `slot` actually landed, else the conventional
+   *  path this preparer used to hard-code. */
+  const moduleFor = (slot: string, conventional: string): string =>
+    pageModules.get(slot) ?? conventional;
   const imports: ImportVM[] = [];
   const routes: RouteVM[] = [];
   // App.tsx sits at `src/App.tsx`, so the runtime shim is one hop away.
@@ -125,7 +140,7 @@ export function prepareAppShellVM(
   // no scaffold so the scaffold expander never synthesised Home.
   const userHasRootRoute = extraRoutes?.some((r) => r.route === "/") ?? false;
   if (!userHasRootRoute && hasScaffoldHome) {
-    imports.push({ specifier: "Home", from: "./pages/home" });
+    imports.push({ specifier: "Home", from: moduleFor("home", "./pages/home") });
     routes.push({ path: "/", elementJsx: "<Home />" });
   }
 
@@ -139,9 +154,19 @@ export function prepareAppShellVM(
     // `pages/<slug>/new` file is emitted.  Gate its import + route on the same
     // fact, else App.tsx imports a module that doesn't exist (tsc TS2307).
     const hasNew = emitsRestCreate(agg);
-    imports.push({ specifier: `${cap}List`, from: `./pages/${slug}/list` });
-    if (hasNew) imports.push({ specifier: `${cap}New`, from: `./pages/${slug}/new` });
-    imports.push({ specifier: `${cap}Detail`, from: `./pages/${slug}/detail` });
+    imports.push({
+      specifier: `${cap}List`,
+      from: moduleFor(`agg:${agg.name}:list`, `./pages/${slug}/list`),
+    });
+    if (hasNew)
+      imports.push({
+        specifier: `${cap}New`,
+        from: moduleFor(`agg:${agg.name}:new`, `./pages/${slug}/new`),
+      });
+    imports.push({
+      specifier: `${cap}Detail`,
+      from: moduleFor(`agg:${agg.name}:detail`, `./pages/${slug}/detail`),
+    });
     routes.push({ path: `/${slug}`, elementJsx: `<${cap}List />` });
     if (hasNew) routes.push({ path: `/${slug}/new`, elementJsx: `<${cap}New />` });
     routes.push({ path: `/${slug}/:id`, elementJsx: `<${cap}Detail />` });
@@ -151,13 +176,19 @@ export function prepareAppShellVM(
   // + per-workflow form.
   if (workflows.length > 0) {
     if (hasWorkflowsIndex) {
-      imports.push({ specifier: "WorkflowsIndex", from: "./pages/workflows/index" });
+      imports.push({
+        specifier: "WorkflowsIndex",
+        from: moduleFor("workflows-index", "./pages/workflows/index"),
+      });
       routes.push({ path: "/workflows", elementJsx: "<WorkflowsIndex />" });
     }
     for (const wf of workflows) {
       const slug = snake(wf.name);
       const cap = `${upperFirst(wf.name)}WorkflowPage`;
-      imports.push({ specifier: cap, from: `./pages/workflows/${slug}` });
+      imports.push({
+        specifier: cap,
+        from: moduleFor(`wf:${wf.name}:form`, `./pages/workflows/${slug}`),
+      });
       routes.push({ path: `/workflows/${slug}`, elementJsx: `<${cap} />` });
     }
   }
@@ -169,10 +200,13 @@ export function prepareAppShellVM(
   for (const wf of observableWorkflows) {
     const slug = snake(wf.name);
     const cap = upperFirst(wf.name);
-    imports.push({ specifier: `${cap}InstancesList`, from: `./pages/workflows/${slug}/instances` });
+    imports.push({
+      specifier: `${cap}InstancesList`,
+      from: moduleFor(`wf:${wf.name}:instances`, `./pages/workflows/${slug}/instances`),
+    });
     imports.push({
       specifier: `${cap}InstanceDetail`,
-      from: `./pages/workflows/${slug}/instance_detail`,
+      from: moduleFor(`wf:${wf.name}:instance-detail`, `./pages/workflows/${slug}/instance_detail`),
     });
     routes.push({ path: `/workflows/${slug}/instances`, elementJsx: `<${cap}InstancesList />` });
     routes.push({

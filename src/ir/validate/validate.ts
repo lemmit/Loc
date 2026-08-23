@@ -97,7 +97,7 @@ import {
   validateContextIntegrationTests,
 } from "./checks/test-checks.js";
 import { validateTimerSources } from "./checks/timer-checks.js";
-import { validateUiBodies } from "./checks/ui-checks.js";
+import { validateUiBodies, validateUiPageIdentity } from "./checks/ui-checks.js";
 import {
   validateEventChannelAmbiguous,
   validateEventConsumersCarried,
@@ -296,6 +296,9 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   validateRoutes(loom, diags);
   validateVariantMatch(loom, diags);
   validateUiBodies(loom, diags);
+  // Page EMIT IDENTITY — two pages resolving to one emit path / one scaffold
+  // archetype slot.  IR-level so it covers every frontend at once.
+  validateUiPageIdentity(loom, diags);
   validateStores(loom, diags);
   return diags;
 }

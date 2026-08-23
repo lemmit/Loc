@@ -99,13 +99,21 @@ function censusByFile(): Map<string, Map<string, number>> {
 // §82 shape. Entries leave by gaining a fixture, not by being deleted.
 // ---------------------------------------------------------------------------
 const UNAUTHORED_CLAUSES: Record<string, string> = {
-  // `area X { page … }` — the page-grouping clause, whose contained pages emit
-  // to `src/pages/<area-path>/<page>.tsx` (the path joins down the nesting) and
-  // which may nest sub-areas (`AreaMember: Page | Area`). Every area in the
-  // repo is SYNTHESIZED by `with scaffold(...)`, so the hand-authored form —
-  // and nesting in particular, which scaffold never produces — is emitted by
-  // nothing anyone has compiled.
-  Area: "no fixture authors an `area` block; every one in the repo comes from scaffold expansion",
+  // `Area` LEFT this register, the way an entry is supposed to: it gained a
+  // fixture, not a deletion. `web/src/examples/dashboard-system.ddd` now
+  // hand-authors `area Ops { page Dashboard … area Billing { page Invoices … } }`
+  // — one level AND two, since nesting is what scaffold never produces — and it
+  // is already in the per-PR React build matrix (`test/e2e/react-build-cases.ts`).
+  //
+  // The register was right about the risk. Compiling that fixture found SEVEN
+  // defects in the hand-authored path, all one root cause (page identity
+  // reconstructed by convention from `page.name` instead of derived from the
+  // `area`/`emitPath` lowering already computed): React's router imported a
+  // module the page emitter never wrote (TS2307), Angular and Feliz emitted
+  // duplicate identifiers, Phoenix and Flutter collapsed two pages onto one
+  // module, and the Playwright page objects silently dropped one of them. See
+  // `test/generator/page-emit-identity.test.ts` + `test/ir/ui-page-identity-gate.test.ts`.
+  //
   // Macro arguments of int / string kind. The stdlib macros in use take bools
   // and refs (`crudish(updateOnly: true)`, `scaffold(aggregates: [X])`), so the
   // two literal arms of `MacroArgValue` have never been parsed from a fixture.

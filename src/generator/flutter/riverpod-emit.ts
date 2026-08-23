@@ -462,10 +462,18 @@ export function renderRiverpod(
   page: PageIR,
   contexts: readonly EnrichedBoundedContextIR[],
   apiParamNames: ReadonlyMap<string, string> = new Map(),
+  /** The page's EMIT NAME (`pageEmitName` — `ProductList`, not the scaffold's
+   *  role-scoped `List`).  These three are TOP-LEVEL Dart declarations and
+   *  `main.dart` imports every page file, so naming them off `page.name` gave
+   *  each scaffolded aggregate its own `listProvider` / `ListNotifier` /
+   *  `ListState` in the same import scope — the same collision the page's file
+   *  base had.  Defaults to `page.name` so a caller with no name-context (the
+   *  unit tests) keeps the old identifiers. */
+  emitName: string = page.name,
 ): RiverpodProjection {
-  const stateClass = `${upperFirst(page.name)}State`;
-  const notifierClass = `${upperFirst(page.name)}Notifier`;
-  const providerName = `${lowerFirst(page.name)}Provider`;
+  const stateClass = `${upperFirst(emitName)}State`;
+  const notifierClass = `${upperFirst(emitName)}Notifier`;
+  const providerName = `${lowerFirst(emitName)}Provider`;
 
   const aggregatesByName = aggregateIndex(contexts);
   const stateNames = new Set(page.state.map((s) => s.name));

@@ -38,6 +38,7 @@ import {
   pageEmitName,
 } from "../../ir/util/page-kind.js";
 import { lowerFirst, snake } from "../../util/naming.js";
+import { pageEmitPath, pageFileBase, pageModuleSpecifier } from "../_frontend/page-identity.js";
 import { buildWorkflowPageObject } from "../_frontend/workflows-module.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
@@ -202,8 +203,16 @@ export function deriveExtraRoutesFromUi(
     if (classifyPage(page, nameCtx).kind !== "custom") continue;
     if (isWalkableLayoutBody(page.body, userComponents)) {
       const route: import("./templating/preparers/app-shell.js").ExtraPageRoute = {
-        componentName: page.name,
-        importFrom: `./pages/${snake(page.name)}`,
+        // Both halves come from the page's emit identity, NOT from `page.name`.
+        // The component name must match what `emitPagesForUi` writes into the
+        // module (`pageEmitName`), and the import must name the path the same
+        // pass wrote it to (`page.emitPath`).  Reconstructing either by
+        // convention diverged the router from the emitter the moment an
+        // `area { … }` existed: the file landed at `src/pages/ops/dashboard.tsx`
+        // while the router imported `./pages/dashboard` (TS2307), and two
+        // same-named pages in different areas imported one identifier twice.
+        componentName: pageEmitName(page, nameCtx),
+        importFrom: pageModuleSpecifier(page),
         route: page.route,
       };
       if (page.layout?.kind === "preset" && page.layout.name === "none") {
@@ -304,12 +313,14 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
     // (which get the walker-side per-page page-object).
     if (isWalkableLayoutBody(page.body, userComponents)) {
       // `page.emitPath` overrides the default
-      // `src/pages/<page-snake>.tsx` location.  Set by the
-      // scaffold expander to land rewritten pages at their
-      // conventional archetype path (`src/pages/<plural>/<arch>.tsx`)
-      // so URL/file shape stays stable when scaffold expansion becomes
-      // the default.
-      const emitPath = page.emitPath ?? `src/pages/${snake(page.name)}.tsx`;
+      // `src/pages/<page-snake>.tsx` location.  Set by lowering from the
+      // `area` containment path, or by the scaffold expander to land
+      // rewritten pages at their conventional archetype path
+      // (`src/pages/<plural>/<arch>.tsx`) so URL/file shape stays stable.
+      // Goes through the SHARED derivation so the router's import
+      // (`pageModuleSpecifier`, same helper) can never name a different
+      // module than the one written here.
+      const emitPath = pageEmitPath(page);
       // Relative-path prefix from the emitted TSX back
       // to `src/`.  Default-located walker pages (`src/pages/<x>.tsx`)
       // need 1 hop (`"../"`); scaffold-expanded pages at
@@ -590,12 +601,17 @@ export function emitPageObjectsForUi(
       ctx.aggregatesByName,
       bcByAggregate,
     );
-    const path = `e2e/pages/${snake(page.name)}.ts`;
+    // Keyed on the page's emit identity, not its bare name: two custom
+    // `page Dashboard` blocks in different areas both hashed to
+    // `e2e/pages/dashboard.ts`, and the `out.has` guard below silently DROPPED
+    // the second page object while `smoke.spec.ts` (route-keyed) still emitted
+    // both tests — so nothing went red.
+    const path = `e2e/pages/${pageFileBase(page, pageCtx)}.ts`;
     if (out.has(path)) continue;
     out.set(
       path,
       buildWalkerPageObject({
-        pageName: page.name,
+        pageName: pageEmitName(page, pageCtx),
         params: page.params,
         route: page.route ?? "",
         testids: collectedTestids,
