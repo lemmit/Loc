@@ -225,6 +225,27 @@ system S {
   }
 }`,
 
+  // A query-time projection whose direct-table arm aggregates a field that has
+  // no column: the source is `shape: document`, so `total` lives inside the
+  // `data` jsonb blob and `sum(o.total)` names nothing.  Universal, not
+  // per-backend — every backend emitted the missing reference.
+  "loom.projection-columnless-source": `
+system S {
+  subdomain Sales { context Orders {
+    aggregate Order shape: document, with crudish { code: string  total: int }
+    repository Orders for Order { }
+    projection OrderVolume {
+      revenue: int
+      from Order as o
+      select revenue = sum(o.total)
+    }
+  } }
+  api Api from Sales
+  storage pg { type: postgres }
+  resource st { for: Orders, kind: state, use: pg }
+  deployable d { platform: node contexts: [Orders] dataSources: [st] serves: Api port: 3000 }
+}`,
+
   // A frontend deployable whose ui READS `currentUser` while the ui is not
   // served under auth (`auth: ui` absent) — arrived on `main` mid-PR, same as
   // the three above.

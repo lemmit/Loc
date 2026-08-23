@@ -18,10 +18,17 @@
 // OPPOSITE: both shapes validate.
 //
 // What the file still pins is the discipline, unchanged: the gate keys on the
-// ADAPTER, both directions, and the boundary that SURVIVED still fires.  That
-// last one is the load-bearing case — narrowing a refusal is only honest if the
-// narrowed form still refuses something, or "we fixed it" has quietly become
-// "we deleted the check".
+// ADAPTER, both directions — narrowing a refusal is only honest if what is left
+// is actually adapter-shaped, or "we fixed it" has quietly become "we deleted
+// the check".
+//
+// Applying that test to the narrowed form is what moved the last case out.  The
+// boundary that survived #2498 — a direct-table arm over a source whose fields
+// are not columns — was NOT adapter-shaped: EF Core miscompiles it identically
+// (Loom maps a `shape: document` aggregate to a hand-rolled `<Agg>Document` row
+// type, so `o.Total` is CS1061 there too).  It is `loom.projection-columnless-
+// source` now, universal, and the case below pins that this adapter no longer
+// claims it AND that EF Core is no escape from it.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -86,7 +93,7 @@ const AGGREGATION_PROJECTION = `
         select orders = count(), revenue = sum(o.total)
       }`;
 
-describe("`persistence: dapper` — query-time projections emit, and the narrow boundary still refuses", () => {
+describe("`persistence: dapper` — query-time projections emit; the column-less refusal is universal", () => {
   for (const [name, body] of [
     ["per-row", PER_ROW_PROJECTION],
     ["whole-table aggregation", AGGREGATION_PROJECTION],
@@ -104,30 +111,30 @@ describe("`persistence: dapper` — query-time projections emit, and the narrow 
     });
   }
 
-  // THE SURVIVING BOUNDARY.  An aggregation names COLUMNS, and a `shape:
-  // document` aggregate keeps its fields inside one jsonb blob — `sum(total)`
-  // has no `total` to name.  EF Core hides the difference behind its own JSON
-  // translation; raw SQL cannot, so this stays an honest refusal.  No corpus
-  // fixture pairs the two shapes, which makes this the boundary's only witness.
-  it("still refuses an aggregation whose source keeps its fields in a jsonb blob", async () => {
-    const diags = await diagsFor(
-      "dotnet { persistence: dapper }",
-      AGGREGATION_PROJECTION,
-      "aggregate Order shape: document, with crudish",
-    );
-    const gate = diags.filter(
-      (d) => d.severity === "error" && d.code === "loom.dapper-unsupported",
-    );
-    expect(gate.length).toBeGreaterThan(0);
-    // The message has to name what the author must change — the adapter, the
-    // projection, and WHY this source cannot be aggregated in SQL.
-    expect(gate[0]?.message).toContain("persistence: dapper");
-    expect(gate[0]?.message).toContain("'Totals'");
-    expect(gate[0]?.message).toContain(
-      "'shape: document' aggregate 'Order', whose fields live inside one jsonb blob",
-    );
-    // …and the way out, since the same model generates on the default adapter.
-    expect(gate[0]?.message).toContain("EF Core");
+  // WHERE THE SURVIVING BOUNDARY WENT.  The refusal that outlived the blanket
+  // one — a direct-table arm over a source whose fields are not columns — was
+  // kept here as an ADAPTER boundary on the premise that "EF Core hides the
+  // difference behind its own JSON translation".  That premise was FALSE: Loom
+  // maps a `shape: document` aggregate to a hand-rolled `<Agg>Document` row
+  // type, so EF names the same missing column (`o.Total` → CS1061), and so does
+  // every other backend.  The refusal is therefore universal now
+  // (`loom.projection-columnless-source`, test/ir/projection-columnless-source
+  // .test.ts), and this adapter raises nothing of its own for it.
+  //
+  // What stays pinned HERE is the adapter claim: the same model is refused with
+  // the SAME code on dapper and on EF Core — because "switch adapters" was the
+  // way out the old message offered, and it never worked.
+  it("routes the column-less refusal through the universal gate, not this adapter", async () => {
+    const codesFor = async (clause: string) =>
+      (await diagsFor(clause, AGGREGATION_PROJECTION, "aggregate Order shape: document, with crudish"))
+        .filter((d) => d.severity === "error")
+        .map((d) => d.code);
+    const onDapper = await codesFor("dotnet { persistence: dapper }");
+    const onEfCore = await codesFor("dotnet");
+    expect(onDapper).toContain("loom.projection-columnless-source");
+    expect(onDapper).not.toContain("loom.dapper-unsupported");
+    // The load-bearing half: EF Core is NOT an escape hatch from it.
+    expect(onEfCore).toEqual(onDapper);
   });
 
   it("the per-row arm over that same document source is NOT refused", async () => {
@@ -141,7 +148,7 @@ describe("`persistence: dapper` — query-time projections emit, and the narrow 
         PER_ROW_PROJECTION,
         "aggregate Order shape: document, with crudish",
       )
-    ).filter((d) => d.severity === "error" && d.code === "loom.dapper-unsupported");
+    ).filter((d) => d.severity === "error");
     expect(errors.map((d) => d.message)).toEqual([]);
   });
 

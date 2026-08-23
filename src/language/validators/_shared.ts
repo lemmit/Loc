@@ -19,6 +19,8 @@
 
 import type { AstNode } from "langium";
 import { diagMessage } from "../../diagnostics/messages.js";
+import { aggregateServesHistory } from "../../util/audit-ast.js";
+import { AUDIT_HISTORY_FIND } from "../../util/audit-names.js";
 import {
   type Aggregate,
   type DerivedProp,
@@ -264,9 +266,20 @@ export function findAggregateInModule(mod: Subdomain, name: string): Aggregate |
  *  Repositories live at the BoundedContext level (peer to
  *  aggregates), declared as `repository <Name> for <Aggregate>`,
  *  so we walk the aggregate's container context to find ones
- *  pointing at this aggregate. */
+ *  pointing at this aggregate.
+ *
+ *  DERIVED reads count too.  This list runs at phase ④, over the AST, but the
+ *  api surface it describes is finalised at phase ⑥ — so a read the enrichment
+ *  synthesizes is real even though no `find` declares it.  The entity-history
+ *  read (`history(id)` on an `audited` aggregate) is the case that bit: the
+ *  scaffolded Detail page calls it through the bare aggregate path, which does
+ *  not come through here, so the HAND-WRITTEN spelling of the very same call
+ *  (`api.Product.history(id)`) was the only one rejected.  `audited` is an AST
+ *  flag, so membership is derived from it here rather than by deferring the
+ *  check to a later phase. */
 export function listValidApiOperations(agg: Aggregate): string[] {
   const ops = new Set<string>(["all", "byId", "create", "update", "delete"]);
+  if (aggregateServesHistory(agg)) ops.add(AUDIT_HISTORY_FIND);
   // Public `operation`s declared on the aggregate are exposed as api routes
   // (each gets a `use<Op><Agg>` frontend hook) — so a UI body may call them
   // off the api handle (`Sales.Order.placeOrder()`), including as the awaited

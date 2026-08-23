@@ -1142,6 +1142,22 @@ export const DIAGNOSTIC_MESSAGES = {
     `projection '${p.name}': 'select ${p.field} = …' is per-row but not one of the ` +
     `'group by' columns, so it has no single value per group. Select a grouping ` +
     `column directly, aggregate it (sum/min/max/…), or add it to the 'group by'.`,
+  // The direct-table arms (`select … = count()/sum(…)`, `group by`) push the
+  // aggregation into SQL, so they name COLUMNS on the source aggregate's own
+  // table.  A source that has no such columns — an event-sourced stream, a
+  // `shape: document` jsonb blob, a TPC abstract base with no table of its own
+  // — produced code that did not compile on EVERY backend, silently.  Not an
+  // adapter boundary: the way out is the shape of the read, not the deployable.
+  "loom.projection-columnless-source": (p: {
+    name: unknown;
+    ctxName: unknown;
+    reason: unknown;
+  }) =>
+    `Query-time projection '${p.ctxName}.${p.name}' ${p.reason}. The aggregating read is ` +
+    `computed IN SQL — that is the point of the shape — so it can only name real columns. ` +
+    `Drop the aggregation for the per-row read (which hydrates each row through the ` +
+    `aggregate's repository), fold the number into a materialized projection ('on(e: …)'), ` +
+    `or source the aggregation from a relationally-stored aggregate.`,
   "loom.projection-key-unknown": (p: { name: unknown; correlationField: unknown }) =>
     `projection '${p.name}' is keyed by '${p.correlationField}', ` +
     `which is not a declared state field.  Declare it as an id-shaped field, ` +
@@ -1742,17 +1758,6 @@ export const DIAGNOSTIC_MESSAGES = {
     `The Dapper adapter renders capability filters as raw SQL and cannot bind the ` +
     `principal claims a hierarchical scope predicate reads — use 'persistence: efcore' ` +
     `on this deployable, or flatten the tenancy to a non-hierarchical registry.`,
-  "loom.dapper-unsupported#feature": (p: {
-    name: unknown;
-    ctxName: unknown;
-    projection: unknown;
-    reason: unknown;
-  }) =>
-    `Deployable '${p.name}' selects 'persistence: dapper', but context '${p.ctxName}' declares ` +
-    `the query-time projection '${p.projection}', which ${p.reason}. The Dapper adapter writes ` +
-    `its own SQL, so an aggregation can only name real columns. Drop the 'persistence: dapper' ` +
-    `clause to use the default (EF Core) adapter, which translates the aggregation itself, or ` +
-    `host the projection on a different deployable.`,
   // The self-provisioning-adapter migration gate.  Neither blanket message
   // above fits: this is not "no relational mapping anywhere" — the sibling
   // adapter (efcore / drizzle) applies the very same migration chain fine.
