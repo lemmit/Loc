@@ -62,17 +62,14 @@ import { denialOverrides, denialStatus } from "./denial.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 import { emitsRestDelete } from "./rest-surface.js";
 
-/** Substitute the shared derivation's literal 404 with elixir's
- *  `httpStatus`-resolved `NotFound` status (M-T5.20, elixir leg — the
- *  `notFound` rung `denialStatus` already resolves for the RUNTIME arm via
- *  `not_found_response`/`problem_response`).  The shared `errorStatuses()`
- *  matrix (`src/ir/util/openapi-errors.ts`) deliberately leaves 404 a raw
- *  literal — `NotFound` has two producers on the four non-elixir backends
- *  (an exception-handler arm AND ~10 bare-404 return sites), so converting
- *  only the declaration there would document a status the runtime never
- *  answers.  Elixir has ONE producer (`ProblemDetails.not_found_response` /
- *  `problem_response`), already fully resolved, so its declared side can
- *  safely follow without that hazard. */
+/** Substitute a literal 404 with the `httpStatus`-resolved `NotFound` status.
+ *
+ *  `errorStatuses()` now resolves the rung itself on all five backends, so the
+ *  sets that come THROUGH it arrive already-resolved and this is a no-op on
+ *  them (there is no 404 left to substitute).  What it still does the work for
+ *  is the HAND-ROLLED sets beside them — the audit-history read and the
+ *  `?? [404]` fallback below, neither of which is lifted into
+ *  `deriveContextOperations` (`apiSurfaceCoverage.notLifted`). */
 function withResolvedNotFound(statuses: readonly number[], notFoundStatus: number): number[] {
   if (notFoundStatus === 404) return [...statuses];
   return [...new Set(statuses.map((s) => (s === 404 ? notFoundStatus : s)))].sort((a, b) => a - b);

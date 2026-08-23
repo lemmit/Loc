@@ -17,24 +17,26 @@ import { type Backend, BACKENDS } from "./backends.js";
 /** All backends — the common case for platform-agnostic domain features. */
 const ALL: readonly Backend[] = BACKENDS;
 
-/** The four backends that filter a `shape: document` aggregate IN-APP over the
- *  rehydrated instance (the jsonb blob is not per-field queryable).  Used by the
- *  document × authorization crossing; the row's `note` must say what the ONE
- *  remaining backend does instead, and whether that is an honest rejection or a
- *  gap.
+/** Every backend filters a `shape: document` aggregate IN-APP over the
+ *  rehydrated instance (the jsonb blob is not per-field queryable), so the
+ *  document × authorization crossing now runs on ALL five — this alias is kept
+ *  as the NAME of that property, and as the place its history is recorded.
  *
  *  3 -> 4: `dotnet` joined.  It was excluded for a compile gap + a silent
  *  unfiltered read, and BOTH are closed — `src/generator/dotnet/emit/repository.ts`
  *  now hoists the AND-ed capability predicate into `_CapabilityVisible(...)` and
  *  applies it on all three document read paths (`GetByIdAsync`,
  *  `FindManyByIdsAsync`, every emitted find), and emits the
- *  `GetByIdForWriteAsync` write-scope member whose absence was the CS0535. */
-const IN_APP_DOCUMENT_FILTER: readonly Backend[] = ["node", "java", "python", "dotnet"];
-
-/** Backends that quote a reserved-word column everywhere they name it.  Java is
- *  the one exclusion and it is a GAP, not a rejection — see `reserved-words`'
- *  note and M-T6.43.  Widening this back to `ALL` is that mission's ratchet. */
-const QUOTES_RESERVED_IDENTIFIERS: readonly Backend[] = ["node", "dotnet", "python", "vanilla"];
+ *  `GetByIdForWriteAsync` write-scope member whose absence was the CS0535.
+ *
+ *  4 -> 5: `elixir` joined.  It was the LAST unwired (family, shape) cell in
+ *  `supportsNonRelationalFilter`'s whole inventory — an honest, coded rejection
+ *  (`loom.context-filter-unsupported`), not a silent gap, but a rejection all
+ *  the same.  `renderDocRepository` now AND-s the capability predicate into
+ *  every document read (`list`, `find_by_id`, `find_by_id_for_write`, and each
+ *  custom find), evaluated over the rehydrated `%<Agg>.Data{}` embed with the
+ *  `deep` sentinel rendered by `renderDeepScopeInApp`. */
+const IN_APP_DOCUMENT_FILTER: readonly Backend[] = ALL;
 
 export interface CorpusFeature {
   /** Matches `<id>.ddd` in this directory. */
@@ -70,6 +72,14 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "single-containment", title: "single (non-collection) containment — hidden `_parent`", doc: "language", backends: ALL },
   { id: "value-collections", title: "value-object array (`Money[]`) stored inline", doc: "language", backends: ALL },
   { id: "document", title: "`shape: document` — whole aggregate in one jsonb column", doc: "language", backends: ALL },
+  {
+    id: "document-collection-read",
+    title:
+      "collection READS over a `shape: document` aggregate's own lists — `lines.sum(λ)` / `.count` / `.any(λ)` over the containment, `.contains` over a scalar array",
+    doc: "language",
+    backends: ALL,
+    note: "Split from `document` because the ELIXIR half was validate-gated long after the emission became correct: Route A had already made the containment a real `embeds_many` and the scalar array an `{:array, _}` field, so the shared collection-op renderers worked verbatim, but `loom.vanilla-document-unsupported` still refused EVERY collection method.  A REFERENCE collection (`X id[]`) is deliberately absent — that one still needs the join table a jsonb blob has no equivalent for, and stays an honest error.",
+  },
   { id: "embedded", title: "`shape: embedded` — containments fold into jsonb columns", doc: "language", backends: ALL },
   { id: "embedded-optional", title: "shape: embedded — optional single containment (nullable jsonb)", doc: "language", backends: ALL },
   { id: "inheritance", title: "aggregate inheritance — TPH (sharedTable) + TPC (ownTable)", doc: "inheritance", backends: ALL },
@@ -103,7 +113,7 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "tenancy-hierarchy", title: "tenancy hierarchy — `implements tenantRegistry` + `policy` deep/global/local read ladder", doc: "tenancy", backends: ALL },
   { id: "tenancy-claim-name", title: "tenancy claim not named `tenantId` — the declared claim binds the tenantOwned stamp/filter", doc: "tenancy", backends: ALL },
   { id: "policy-deny", title: "`policy { deny [write] on <Agg> }` — the deny-wins carve-out on both the read-filter and write-scope seams", doc: "auth", backends: ALL },
-  { id: "policy-document", title: "`policy { allow deep / deny }` on a `shape: document` aggregate — the authz ladder applied IN-APP, where it cannot be a column predicate", doc: "auth", backends: IN_APP_DOCUMENT_FILTER, note: "vanilla (elixir) is the ONE exclusion, and it REFUSES this crossing by name — `loom.context-filter-unsupported`, raised twice on this fixture (capability filters are wired for relational aggregates only).  An honest, coded rejection, not a gap." },
+  { id: "policy-document", title: "`policy { allow deep / deny }` on a `shape: document` aggregate — the authz ladder applied IN-APP, where it cannot be a column predicate", doc: "auth", backends: IN_APP_DOCUMENT_FILTER },
   { id: "stamps", title: "lifecycle stamps (audit timestamps via stamp blocks)", doc: "capabilities", backends: ALL },
   { id: "field-defaults", title: "field `= default` — omittable create input, declared value applied", doc: "language", backends: ALL },
   {
@@ -111,8 +121,8 @@ export const CORPUS: readonly CorpusFeature[] = [
     title:
       "field names that are POSTGRES RESERVED WORDS (`order` / `group` / `limit`) — every SQL writer has to quote its identifiers",
     doc: "language",
-    backends: QUOTES_RESERVED_IDENTIFIERS,
-    note: "Minted by M-T6.42.  The class was unexercised: no fixture named a reserved word, so the Dapper adapter's bare identifiers (DDL *and* DML) were invisible to every gate — the C# compiles because the SQL is a string literal, and `schema-load` covered only the MIGRATION chain, which that adapter does not use.  Covers four clause positions a partial fix would miss: CREATE TABLE, the SELECT/INSERT column lists, a `find` WHERE, a retrieval ORDER BY, and CREATE INDEX.  Deliberately NOT a host-language-keyword test (`is` / `default` / `class` break the generated DTO, a different class no backend claims).  JAVA IS EXCLUDED FOR A GAP, NOT A REJECTION: it generates and COMPILES, then 500s on the first insert, because the JPA entity emits `@Column(name = \"order\")` bare and Hibernate writes `insert into ... (order, group, limit, ...)`.  Found by running this fixture's behavioural leg on a real booted Spring Boot + Postgres while landing M-T6.42; tracked as M-T6.43, whose ratchet is widening this row back to ALL.  Declaring java here today would make the row a false coverage claim.",
+    backends: ALL,
+    note: "Minted by M-T6.42.  The class was unexercised: no fixture named a reserved word, so the Dapper adapter's bare identifiers (DDL *and* DML) were invisible to every gate — the C# compiles because the SQL is a string literal, and `schema-load` covered only the MIGRATION chain, which that adapter does not use.  Covers four clause positions a partial fix would miss: CREATE TABLE, the SELECT/INSERT column lists, a `find` WHERE, a retrieval ORDER BY, and CREATE INDEX.  Deliberately NOT a host-language-keyword test (`is` / `default` / `class` break the generated DTO, a different class no backend claims).  JAVA WAS EXCLUDED HERE UNTIL M-T6.43 — a gap, not a rejection: it generated and COMPILED, then 500d on the first insert, because the JPA entity emitted `@Column(name = \"order\")` bare and Hibernate derived `insert into ... (order, group, limit, ...)` from it.  Found by running this fixture's behavioural leg on a real booted Spring Boot + Postgres while landing M-T6.42.  Fixed by backtick-quoting the mapping annotations (Hibernate's portable quoting) off the SHARED word list in `src/generator/sql-reserved.ts`, and this row widening back to ALL is that mission's ratchet.",
   },
   {
     id: "vo-field-default",

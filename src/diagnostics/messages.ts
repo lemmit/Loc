@@ -1420,6 +1420,22 @@ export const DIAGNOSTIC_MESSAGES = {
     framework: unknown;
   }) =>
     `Deployable '${p.name}': ui '${p.uiName}' declares 'on <channel>.<Event>' live-event handler(s), but its frontend framework '${p.framework}' has no realtime consumption, so the handlers are silently dropped.`,
+  "loom.ui-duplicate-area": (p: { name: unknown; scope: unknown }) =>
+    `Duplicate area '${p.name}' in ${p.scope}. Areas within a scope must have unique names — the area path is what places every page inside it on disk, so two same-named blocks compute the same directory and one block's pages silently overwrite the other's. Merge them into a single 'area ${p.name} { … }'.`,
+  "loom.ui-page-path-collision": (p: {
+    ui: unknown;
+    first: unknown;
+    second: unknown;
+    path: unknown;
+  }) =>
+    `ui '${p.ui}': ${p.first} and ${p.second} both emit to '${p.path}'. A page's identity is its area path plus its name, so two pages that resolve to one path are indistinguishable to every frontend — the file map keeps whichever is written last and the other page's body vanishes from the build. Rename one page, or merge/rename the duplicate 'area' block they share.`,
+  "loom.ui-page-slot-collision": (p: {
+    ui: unknown;
+    first: unknown;
+    second: unknown;
+    slot: unknown;
+  }) =>
+    `ui '${p.ui}': ${p.first} and ${p.second} both claim ${p.slot}. Exactly one page can fill a scaffold archetype slot — the router imports one of them and the other becomes an unreachable file. To replace a scaffolded page, declare yours in the SAME scope as the scaffold's area (override-by-name displaces it); to add a second page, give it its own name and route.`,
   "loom.flutter-primitive-unsupported": (p: { where: unknown; name: unknown; dName: unknown }) =>
     `${p.where}: uses the '${p.name}' primitive, but the Flutter frontend has no renderer ` +
     `for it yet (FileUpload is the one deferred primitive — a standalone multipart upload ` +
@@ -1580,8 +1596,10 @@ export const DIAGNOSTIC_MESSAGES = {
   "loom.vanilla-document-unsupported": (p: { ctxName: unknown; name: unknown; bits: unknown }) =>
     `aggregate '${p.ctxName}.${p.name}' is shape: document on elixir, which emits ` +
     `scalar custom finds + named operations but not ${p.bits} ` +
-    `(audited returning / provenanced ops, collection mutation, value-object/derived/` +
-    `function reads, or non-scalar find predicates). Simplify them to scalar form, host this ` +
+    `(provenanced ops, derived / dereferenced-entity reads, value-object METHOD calls, ` +
+    `or a collection op over a REFERENCE collection — 'X id[]' needs a join table a jsonb ` +
+    `blob has no equivalent for; a collection op over the aggregate's OWN containment or a ` +
+    `scalar array is fine). Simplify them to scalar form, host this ` +
     `aggregate on a backend with full document support (node / dotnet / python / java), ` +
     `or use shape: relational / shape: embedded.`,
   "loom.vanilla-op-call-position": (p: {
@@ -1628,23 +1646,13 @@ export const DIAGNOSTIC_MESSAGES = {
     `currentUser (e.g. a tenancy filter), but the deployable has no auth — there is no ` +
     `request-scoped principal to scope reads by. Add 'auth: required' (and a system ` +
     `'user {}' block), or remove the principal-referencing filter.`,
-  "loom.context-filter-unsupported#unsupported-predicate": (p: {
-    name: unknown;
-    platform: unknown;
-    ctxName: unknown;
-    aggName: unknown;
-    reason: unknown;
-    // The remedy clause, composed at the call site: which hosts DO wire this
-    // (family, shape) pair.  Passed in rather than hardcoded here because the
-    // answer depends on the shape — naming one fixed backend (this used to say
-    // ".NET") goes stale the moment another backend ports the emitter.
-    hosts: unknown;
-  }) =>
-    `Deployable '${p.name}' (platform ${p.platform}) hosts aggregate ` +
-    `'${p.ctxName}.${p.aggName}' with a 'filter' capability predicate that ${p.reason}. ` +
-    `Host this aggregate on ${p.hosts}, or remove the unsupported capability filter. ` +
-    `Non-principal filters on relational and shape(embedded) aggregates ` +
-    `(e.g. 'filter !this.isDeleted') are emitted.`,
+  // (`loom.context-filter-unsupported#unsupported-predicate` lived here — the
+  //  "this backend cannot emit that filter" refusal.  It was DELETED with its
+  //  last reachable case: every backend family now wires capability filters on
+  //  every saving shape, elixir + `shape: document` being the final cell.  A
+  //  message with no reachable call site is an orphan the catalogue gate
+  //  rejects, and worse, it documents a limitation that no longer exists.  A
+  //  future unwired (family, shape) pair adds its own, naming itself.)
   "loom.filter-bypass-unsupported": (p: {
     name: unknown;
     platform: unknown;

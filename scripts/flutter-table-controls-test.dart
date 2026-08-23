@@ -16,7 +16,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:app/pages/list_page.dart';
+import 'package:app/pages/product_list_page.dart';
 import 'package:app/reads.dart';
 import 'package:app/models.dart';
 
@@ -42,32 +42,32 @@ void main() {
 
     await tester.pumpWidget(UncontrolledProviderScope(
       container: container,
-      child: const MaterialApp(home: ListPage()),
+      child: const MaterialApp(home: ProductListPage()),
     ));
     await tester.pumpAndSettle();
 
-    expect(container.read(listProvider).pageNum, 1);
-    expect(container.read(listProvider).sortKey, '');
+    expect(container.read(productListProvider).pageNum, 1);
+    expect(container.read(productListProvider).sortKey, '');
 
     // Tap the "Name" column header → sort key + ascending.
     await tester.tap(find.ancestor(of: find.text('Name'), matching: find.byType(InkWell)).first);
     await tester.pumpAndSettle();
-    expect(container.read(listProvider).sortKey, 'name');
-    expect(container.read(listProvider).sortDir, 'asc');
+    expect(container.read(productListProvider).sortKey, 'name');
+    expect(container.read(productListProvider).sortDir, 'asc');
 
     // Re-tap the SAME column → direction flips (not a second key change).
     await tester.tap(find.ancestor(of: find.text('Name'), matching: find.byType(InkWell)).first);
     await tester.pumpAndSettle();
-    expect(container.read(listProvider).sortKey, 'name');
-    expect(container.read(listProvider).sortDir, 'desc');
+    expect(container.read(productListProvider).sortKey, 'name');
+    expect(container.read(productListProvider).sortDir, 'desc');
 
     // Next / Prev move the page, and Prev is disabled on page 1.
     await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
-    expect(container.read(listProvider).pageNum, 2);
+    expect(container.read(productListProvider).pageNum, 2);
     await tester.tap(find.text('Prev'));
     await tester.pumpAndSettle();
-    expect(container.read(listProvider).pageNum, 1);
+    expect(container.read(productListProvider).pageNum, 1);
     final prev = tester.widget<TextButton>(
       find.ancestor(of: find.text('Prev'), matching: find.byType(TextButton)),
     );

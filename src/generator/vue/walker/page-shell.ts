@@ -16,6 +16,7 @@ import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/n
 import { coerceMoneyStateInit, usesDecimalBinding } from "../../_expr/js-intrinsics.js";
 import { componentPropTsType } from "../../_frontend/component-prop-type.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
+import { pageEmitPath } from "../../_frontend/page-identity.js";
 import type { ImportSpec, LoadedPack } from "../../_packs/loader.js";
 import { storeHookName, storeMemberLocal } from "../../_walker/js-target-helpers.js";
 import { addImportToMap, I18N_MODULE, needsPackChromeT } from "../../_walker/render-primitive.js";
@@ -797,9 +798,9 @@ function adjustDepth(importFrom: string, input: VuePageShellInput): string {
 }
 
 function pageDirDepth(page: PageIR): number {
-  const path = page.emitPath
-    ? page.emitPath.replace(/\.tsx$/, ".vue")
-    : `src/pages/${snake(page.name)}.vue`;
+  // Same shared derivation the router import and the file write use — see
+  // `src/generator/_frontend/page-identity.ts`.
+  const path = pageEmitPath(page, ".vue");
   // segments under src/ minus the filename = number of `../` hops
   // back to src/.
   return path.replace(/^src\//, "").split("/").length - 1;

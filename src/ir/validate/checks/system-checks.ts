@@ -1618,31 +1618,61 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
 // op/find shapes still need machinery the document path deliberately omits, and
 // those stay gated (an honest error rather than a mis-emit):
 //
-//   - a RETURNING op (`: A or B`), an AUDITED op, a PROVENANCED op — all persist
-//     a pre-built changeset over struct columns inside a forced transaction;
-//   - COLLECTION mutation (`items += …`).  This clause used to lean on "a
-//     document's contained parts are gated separately
-//     (`loom.vanilla-containment-unsupported`) anyway" — that gate is RETIRED
-//     (M-T6.2 Drain C landed relational part-in-part; the code has zero raise
-//     sites in `src/`), so the clause now stands on its own: the document path
-//     itself has no emitter for a containment mutation;
-//   - a body/filter that reads a VALUE-OBJECT sub-field, a DERIVED, or calls a
-//     `function` / value-object constructor — these need the loaded struct / list
-//     the jsonb map can't reconstruct in-place;
-//   - a PAGED or UNION-returning custom find (the wire-envelope / tagged-result
-//     shapes the document find path doesn't build).
+//   - a PROVENANCED op — it drains a per-write history buffer into co-located
+//     `<field>_provenance` COLUMNS, and a jsonb blob has none;
+//   - a body/filter that reads a DERIVED (not persisted, so no `data` key) or a
+//     *dereferenced-entity* member (a cross-aggregate `X id` → needs a join);
+//   - a value-object METHOD call, or a value-object / private-operation /
+//     domain-service / resource call — these need the loaded struct the blob
+//     stores as a plain map;
+//   - a collection op over a REFERENCE collection (`X id[]`): the relational
+//     path resolves it through a `many_to_many` join table, and a blob has no
+//     join to resolve.
 //
-// Everything else — scalar `assign` / `+=` / `-=` / `precondition` / `requires`
-// / `let` / `emit`, and scalar/convention/`where`-clause finds — is emitted.
+// Everything else is emitted — scalar `assign` / `+=` / `-=` / `precondition` /
+// `requires` / `let` / `emit`, value-object SUB-field reads, pure `function`
+// calls, RETURNING and AUDITED ops (the persist tail runs in a
+// `Repo.transaction`), containment mutation, paged and union finds, and
+// collection READS over the aggregate's own in-memory lists (Route A made a
+// containment a real `embeds_many` and a scalar array an `{:array, _}` field,
+// so `lines.sum(l => l.qty)` renders through the shared collection-op table
+// verbatim — see `docInMemoryList`).
 // ---------------------------------------------------------------------------
 const VANILLA_DOC_CRUD_OPS = new Set(["create", "update", "delete", "destroy", "list", "get"]);
 
+/** Is `e` a read of a list the DOCUMENT path holds IN MEMORY?
+ *
+ *  Route A made a containment a real `embeds_many` on the `<Agg>.Data` embed,
+ *  so `record.lines` rehydrates to a list of part STRUCTS and a scalar array is
+ *  an `{:array, _}` field — both are ordinary Elixir lists by the time an op
+ *  body or find predicate runs, which is exactly what the shared collection-op
+ *  renderers expect.
+ *
+ *  A REFERENCE collection (`X id[]`) is NOT one of these: the relational path
+ *  resolves it through a `many_to_many` join table (`__ref_id_list` /
+ *  `__resolve_refs`), and a jsonb blob has no join to resolve. */
+function docInMemoryList(e: ExprIR, agg: AggregateIR): boolean {
+  // Both spellings of the same read: the bare `lines` an op body writes
+  // (`refKind: "this-prop"`) and the explicit `this.lines`.
+  const field =
+    e.kind === "ref" && (e.refKind === "this-prop" || e.refKind === "this-vo-prop")
+      ? e.name
+      : e.kind === "member" && e.receiver.kind === "this"
+        ? e.member
+        : undefined;
+  if (field === undefined) return false;
+  if (agg.contains.some((c) => c.name === field)) return true;
+  const f = agg.fields.find((x) => x.name === field);
+  return !!f && f.type.kind === "array" && f.type.element.kind !== "id";
+}
+
 /** Does an expression reach a shape the vanilla document scalar path can't emit?
  *  A derived read, a *dereferenced-entity* member (cross-aggregate `X id` join),
- *  a collection METHOD (`.sum`/`.filter`/`.contains` — lambdas over jsonb maps),
- *  a constructor / match / lambda — anything beyond scalar arithmetic,
- *  whole-field / value-object-subfield / `.count` reads over the `data` map, and
- *  (when `allowFnCall`) calls to the aggregate's own pure `function`s.
+ *  a collection METHOD over anything but an in-memory list, a constructor /
+ *  match — anything beyond scalar arithmetic, whole-field /
+ *  value-object-subfield / `.count` reads over the `data` map, collection reads
+ *  over the aggregate's own containments, and (when `allowFnCall`) calls to the
+ *  aggregate's own pure `function`s.
  *
  *  `allowFnCall` is true when the aggregate's `function` members are all
  *  themselves doc-safe (verified once per aggregate) — then a `callKind:
@@ -1650,34 +1680,54 @@ const VANILLA_DOC_CRUD_OPS = new Set(["create", "update", "delete", "destroy", "
  *  It is also passed `true` while verifying each function body, so a function
  *  that calls a sibling function stays admissible (the sibling is verified too —
  *  the whole call graph is checked, no recursion needed here). */
-function docExprUnsupported(e: ExprIR, allowFnCall: boolean): boolean {
-  const bad = (x: ExprIR): boolean => docExprUnsupported(x, allowFnCall);
+function docExprUnsupported(e: ExprIR, allowFnCall: boolean, agg: AggregateIR): boolean {
+  const bad = (x: ExprIR): boolean => docExprUnsupported(x, allowFnCall, agg);
   switch (e.kind) {
     case "ref":
       // A `this-derived` read has no stored `data` key (derived aren't
       // persisted); every other ref (this-prop / this-vo-prop whole read / param
-      // / let / enum-value / current-user) is a plain scalar/map read.
+      // / let / enum-value / current-user / a lambda binding) is a plain read.
       return e.refKind === "this-derived";
     case "member":
       // Supported: `this.<scalar>` (receiver `this`, entity type → `data[k]`), a
       // value-object SUB-field (`this.money.amount` → `data["money"]["amount"]`),
-      // an array `.count`/`.length` (→ `Enum.count`).  NOT supported: a member off
-      // a *dereferenced* entity (a cross-aggregate ref → needs a join the document
-      // path can't do) — an entity receiver that isn't the aggregate's own `this`.
-      if (e.receiverType.kind === "entity" && e.receiver.kind !== "this") return true;
+      // an array `.count`/`.length` (→ `Enum.count`), and a field of a
+      // LAMBDA-BOUND containment element (`lines.sum(l => l.qty)` → `l.qty` over
+      // the `%OrderLine{}` structs the embed rehydrates to — the enclosing
+      // collection-op arm is what vouches for the list itself).  NOT supported:
+      // a member off a *dereferenced* entity (a cross-aggregate `X id` ref →
+      // needs a join the document path can't do).
+      if (
+        e.receiverType.kind === "entity" &&
+        e.receiver.kind !== "this" &&
+        !(e.receiver.kind === "ref" && e.receiver.refKind === "lambda")
+      ) {
+        return true;
+      }
       return bad(e.receiver);
     case "method-call":
-      // A collection op (`.sum`/`.filter`/`.contains`) runs a lambda over the
-      // jsonb list of string-keyed maps — the loaded-struct machinery the scalar
-      // path lacks; a value-object method is the same story.  A scalar-receiver
-      // method (string/number) is fine.
+      // A collection op over an IN-MEMORY list — the aggregate's own containment
+      // or a scalar array — renders through the shared collection-op table
+      // verbatim (`lines.sum(l => l.qty)` → `Enum.sum(Enum.map(record.lines, fn
+      // l -> l.qty end))`), because Route A already made those real lists on the
+      // rehydrated embed.  Over anything else it is still gated: a REFERENCE
+      // collection needs the join table a blob has no equivalent for, and a
+      // value-object method needs the loaded VO struct the blob stores as a map.
+      if (e.isCollectionOp) {
+        return !docInMemoryList(e.receiver, agg) || bad(e.receiver) || e.args.some(bad);
+      }
       return (
-        e.isCollectionOp ||
         e.receiverType.kind === "valueobject" ||
         e.receiverType.kind === "array" ||
         bad(e.receiver) ||
         e.args.some(bad)
       );
+    case "lambda":
+      // Only reachable as a collection-op argument (the arm above vouches for
+      // the receiver list); its body is checked like any other expression.  A
+      // statement-bodied lambda has no `body` expression — it is not a shape
+      // the document path emits.
+      return e.body === undefined || bad(e.body);
     case "call":
       // A pure aggregate `function` call is emittable when the aggregate's
       // functions are doc-safe; every other call kind (value-object ctor, private
@@ -1704,8 +1754,8 @@ function docExprUnsupported(e: ExprIR, allowFnCall: boolean): boolean {
     case "this":
       return false;
     default:
-      // new / object / match / lambda / list / *-call — all need the struct /
-      // list / tuple machinery the document scalar path omits.
+      // new / match / list / *-call — all need the struct / list / tuple
+      // machinery the document scalar path omits.
       return true;
   }
 }
@@ -1713,7 +1763,7 @@ function docExprUnsupported(e: ExprIR, allowFnCall: boolean): boolean {
 /** Does a pure `function` body reach a non-doc-safe shape?  Sibling-function
  *  calls are admitted (`allowFnCall` true) because every function is checked, so
  *  the whole graph is verified without recursing here. */
-function docFunctionUnsupported(fn: FunctionIR): boolean {
+function docFunctionUnsupported(fn: FunctionIR, agg: AggregateIR): boolean {
   const body = fn.body;
   const exprs: ExprIR[] = "expr" in body ? [body.expr] : [];
   if ("stmts" in body) {
@@ -1734,19 +1784,23 @@ function docFunctionUnsupported(fn: FunctionIR): boolean {
       }
     }
   }
-  return exprs.some((e) => docExprUnsupported(e, /* allowFnCall */ true));
+  return exprs.some((e) => docExprUnsupported(e, /* allowFnCall */ true, agg));
 }
 
 /** Is the value of a containment `+=`/`-=` a doc-safe part constructor?  Route A:
  *  `lines += OrderLine { sku: …, qty: … }` appends a part struct to the embed's
  *  `embeds_many` list, so the value must be a part ctor (`new`/`object`) whose
  *  field values are themselves doc-safe scalars/VOs. */
-function docContainmentValueUnsupported(e: ExprIR, allowFnCall: boolean): boolean {
+function docContainmentValueUnsupported(
+  e: ExprIR,
+  allowFnCall: boolean,
+  agg: AggregateIR,
+): boolean {
   if (e.kind === "new" || e.kind === "object") {
-    return e.fields.some((f) => docExprUnsupported(f.value, allowFnCall));
+    return e.fields.some((f) => docExprUnsupported(f.value, allowFnCall, agg));
   }
   // A `-=` may pass a bare element/predicate — fall back to the scalar check.
-  return docExprUnsupported(e, allowFnCall);
+  return docExprUnsupported(e, allowFnCall, agg);
 }
 
 /** Does an operation statement fall outside the vanilla document op surface?
@@ -1754,7 +1808,7 @@ function docContainmentValueUnsupported(e: ExprIR, allowFnCall: boolean): boolea
  *  CONTAINMENT collection (embeds_many — mutable on document, Route A) from a
  *  reference/value collection (still gated). */
 function docStmtUnsupported(s: StmtIR, allowFnCall: boolean, agg: AggregateIR): boolean {
-  const bad = (e: ExprIR): boolean => docExprUnsupported(e, allowFnCall);
+  const bad = (e: ExprIR): boolean => docExprUnsupported(e, allowFnCall, agg);
   switch (s.kind) {
     case "precondition":
     case "requires":
@@ -1778,7 +1832,9 @@ function docStmtUnsupported(s: StmtIR, allowFnCall: boolean, agg: AggregateIR): 
         const field = snake(s.target.segments[0] ?? "");
         const isContainment = agg.contains.some((c) => snake(c.name) === field);
         if (!isContainment) return true;
-        return s.target.segments.length > 1 || docContainmentValueUnsupported(s.value, allowFnCall);
+        return (
+          s.target.segments.length > 1 || docContainmentValueUnsupported(s.value, allowFnCall, agg)
+        );
       }
       return s.target.segments.length > 1 || bad(s.value);
     }
@@ -1823,7 +1879,7 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
         // aggregate is itself doc-safe (they render in the same `docMap` mode —
         // reading the jsonb `data` map); if any is not, a body that calls one is
         // gated.  Computed once here and threaded into the op/find checks.
-        const allowFnCall = (agg.functions ?? []).every((fn) => !docFunctionUnsupported(fn));
+        const allowFnCall = (agg.functions ?? []).every((fn) => !docFunctionUnsupported(fn, agg));
         // A custom find is unsupported only when its predicate reads a non-scalar
         // shape.  PAGED finds (Route A slice 4c) and UNION finds (Route A slice 4d)
         // are now supported: `renderDocFindFn` returns the single-get `{:ok, nil}`/
@@ -1833,7 +1889,7 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
           (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name)?.finds ?? []
         )
           .filter((f) => f.name !== "all")
-          .filter((f) => f.filter != null && docExprUnsupported(f.filter, allowFnCall));
+          .filter((f) => f.filter != null && docExprUnsupported(f.filter, allowFnCall, agg));
         const badOps = agg.operations
           .filter((op) => !VANILLA_DOC_CRUD_OPS.has(op.name))
           .filter((op) => docOpUnsupported(op, allowFnCall, agg));
@@ -2290,222 +2346,51 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
 
-  // Backends that gate one or both of the deferred capability-filter cases.
-  // .NET supports BOTH (EF `HasQueryFilter` on the mapped-column shapes, an
-  // in-app predicate on `document`), so it gates neither.
-  // Canonical families (D-NODE-PLATFORM / D-ELIXIR-PLATFORM): `node` (was
-  // `hono`), `elixir` (was `phoenix` / `phoenixLiveView`).
-  // `python` is included because it now emits the non-principal relational case
-  // (W1a), the PRINCIPAL relational case (DEBT-02), AND both `embedded` cases
-  // (DEBT-02 tail): `contextFilterPredicate` in
-  // `src/generator/python/find-predicate.ts` AND-s them into every root read
-  // (principal predicates render `current_user.<claim>` against the ambient
-  // `require_current_user()` accessor).  Only the `document` shape stays gated —
-  // `supportsNonRelationalFilter`/`supportsPrincipalNonRelationalFilter` admit
-  // python for `embedded` but not `document` — so it must be in this set for the
-  // per-case logic below to reject that one shape (and accept the relational +
-  // embedded cases, principal or not).
-  // .NET is included NOT because it has an unwired shape (EF `HasQueryFilter`
-  // supports every case — the `supports*` predicates below all return true for
-  // it) but so the PRINCIPAL-filter-needs-auth gate reaches it: a `currentUser`
-  // filter compiles to `HasQueryFilter(... RequestContext.Current!.CurrentUser!
-  // ...)`, which NREs on every read when the deployable has no auth.  Excluding
-  // .NET here skipped that gate entirely (finding 20 / B16).
-  const LIMITED_FAMILIES = new Set(["node", "elixir", "java", "python", "dotnet"]);
-  // Backends that now wire PRINCIPAL-referencing filters (`currentUser.x`) on
-  // relational aggregates — node/elixir/java/python all do.  python renders the
-  // predicate against the ambient `require_current_user()` accessor (a
-  // module-level `ContextVar[User | None]` set in the auth middleware) inside
-  // every root read (the SQLAlchemy analogue of node's `requireCurrentUser()`).
-  // node renders the
-  // predicate against the ambient `requireCurrentUser()` accessor inside every
-  // root read (the Drizzle analogue of .NET's `HasQueryFilter`).  elixir (plain
-  // Ecto) AND-s the predicate into each read as `^(current_user &&
-  // current_user.f)`.  **java** AND-s a SpEL-principal JPQL clause
-  // (`:#{@currentUserAccessor.user()?.f()}`) into every find/retrieval +
-  // the scoped `findAll`/`findById` overrides (the static `@SQLRestriction`
-  // still carries the non-principal filters).
-  const supportsPrincipalFilter = (family: string): boolean => {
-    if (family === "node") return true;
-    if (family === "elixir") return true;
-    if (family === "java") return true;
-    // .NET wires a principal relational filter via EF `HasQueryFilter`
-    // (`RequestContext.Current!.CurrentUser!.<claim>`); it's in LIMITED_FAMILIES
-    // only for the auth gate, so it must report as fully supported here.
-    if (family === "dotnet") return true;
-    // python (DEBT-02 last-backend parity): a principal capability filter on a
-    // RELATIONAL aggregate renders `current_user.<claim>` against an ambient
-    // ContextVar accessor (`require_current_user()`) AND-ed into every root read
-    // — the SQLAlchemy analogue of node's `requireCurrentUser()` weave / .NET's
-    // `HasQueryFilter`.  (The non-relational principal case has since landed
-    // too — `supportsPrincipalNonRelationalFilter` below lists python for BOTH
-    // `embedded` and `document`; it is no longer gated.)
-    if (family === "python") return true;
-    return false;
-  };
-  // Backends that wire a NON-principal capability filter into a NON-relational
-  // (document/embedded) aggregate.  node handles both shapes: a `document`
-  // aggregate filters in-app over the rehydrated doc; an `embedded` aggregate's
-  // root scalars are real columns, so the predicate AND-s into the SQL read like
-  // the relational path.  java handles BOTH too: a `document` aggregate's store
-  // filters every read in-app via `findAll().stream()`; an `embedded`
-  // aggregate's root entity is a real JPA table whose root scalars are columns,
-  // so the static non-principal predicate rides Hibernate's `@SQLRestriction`
-  // exactly like the relational path (`emit/entity.ts`).  elixir handles
-  // `embedded` (its only non-relational shape — `document` is unsupported there,
-  // gated by `validateSavingShapeSupport`): an embedded aggregate's root
-  // scalars are real columns, so the predicate AND-s into the Ecto read exactly
-  // like the relational path.  **python** handles `embedded` too (DEBT-02 tail):
-  // an embedded aggregate's root scalars are real columns, so
-  // `contextFilterPredicate` AND-s into the embedded SQL reads exactly like the
-  // relational path (`repository-embedded-builder.ts`).  **python also handles
-  // `document`** now (DEBT-02 tail complete): the blob is one JSONB column, not
-  // per-field queryable, so the predicate is evaluated IN-APP over the rehydrated
-  // instance (`documentCapabilityBody` → a list-comprehension filter in
-  // `repository-document-builder.ts`), mirroring node.  **.NET** handles all
-  // shapes too, but NOT all of them through EF: `relational`/`embedded` ride the
-  // EF `HasQueryFilter` (real mapped columns), while `document` — whose fields
-  // live inside one jsonb blob, so EF has no column to hang a filter on — is
-  // filtered IN-APP over the rehydrated aggregate (`_CapabilityVisible` in
-  // `emit/repository.ts`'s `renderDocumentRepositoryImpl`), exactly like
-  // node/java/python.  That document arm did NOT exist until #2530: this
-  // function asserted .NET filtered every shape while the emitter emitted no
-  // document filter at all — a SILENT cross-tenant read (#2527's follow-up 1).
-  // A PRINCIPAL filter on a `document` shape is wired on node/Java/python
-  // **and dotnet** (DEBT-02 Slice B — the actor binds into the in-app
-  // predicate; see `supportsPrincipalNonRelationalFilter` below and the
-  // `document-tenancy.ddd` ts-/java-/python-build fixtures); it stays gated
-  // only for elixir (no `document` shape there).
+  // Every backend family x every saving shape now wires capability filters, so
+  // the "this backend cannot emit that filter" half of this gate is GONE.  The
+  // deferral tables it used (supportsPrincipalFilter /
+  // supportsNonRelationalFilter / supportsPrincipalNonRelationalFilter) and the
+  // `#unsupported-predicate` message they raised were deleted together with the
+  // last unwired cell — elixir + `shape: document`, which now evaluates the
+  // predicate IN-APP over the rehydrated `%<Agg>.Data{}` embed on every read
+  // (`vanillaDocCapabilityFilter`).  A stale deferral table is worse than none:
+  // it reads as an authoritative statement of what a backend cannot do, and it
+  // sends the author to a workaround they do not need.
   //
-  // NET RESIDUE of this whole function, as of the two tables below: exactly
-  // ONE (family, shape) cell is unwired — **elixir + `document`**.  Every
-  // other pair is supported, so any wording here that generalises to
-  // "relational only" is wrong.
-  const supportsNonRelationalFilter = (family: string, shp: string): boolean =>
-    (family === "node" && (shp === "document" || shp === "embedded")) ||
-    (family === "java" && (shp === "document" || shp === "embedded")) ||
-    (family === "elixir" && shp === "embedded") ||
-    (family === "python" && (shp === "document" || shp === "embedded")) ||
-    // .NET filters every shape — `embedded` via the EF query filter (its root
-    // scalars are real columns), `document` in-app over the rehydrated
-    // aggregate (its fields are inside the jsonb blob).  It is in
-    // LIMITED_FAMILIES for the auth gate, not because a shape is unwired.
-    (family === "dotnet" && (shp === "document" || shp === "embedded"));
-  // PRINCIPAL (`currentUser.x`) filter on a NON-relational shape (DEBT-02, the
-  // actor + non-relational intersection).  An `embedded` aggregate's root
-  // scalars are real columns, so node/elixir/java reuse their relational
-  // principal path (node weaves `requireCurrentUser()` into the embedded SQL
-  // read; elixir AND-s the `current_user` predicate into the embedded Ecto
-  // read; java AND-s the SpEL-principal clause into the embedded scoped reads).
-  // A `document` aggregate filters IN-APP over the rehydrated
-  // doc, so a principal predicate there evaluates the actor in-app (Slice B):
-  // node binds `requireCurrentUser()` into the in-app predicate; java injects
-  // the `CurrentUserAccessor` bean and binds it before the `.stream().filter`;
-  // **python** binds `current_user = require_current_user()` before its
-  // list-comprehension filter (DEBT-02 tail complete).
-  // **python** also wires the embedded principal case: the embedded
-  // root scalars are real columns, so the `currentUser.<claim>` predicate renders
-  // against the ambient `require_current_user()` accessor and AND-s into the
-  // embedded SQL read like the relational principal path.  `document` stays off
-  // only for elixir (no `document` shape).
-  const supportsPrincipalNonRelationalFilter = (family: string, shp: string): boolean =>
-    (shp === "embedded" &&
-      (family === "node" ||
-        family === "elixir" ||
-        family === "java" ||
-        family === "python" ||
-        family === "dotnet")) ||
-    (shp === "document" &&
-      (family === "node" || family === "java" || family === "python" || family === "dotnet"));
+  // What REMAINS is shape- and backend-independent, and is why this check still
+  // exists: a principal-referencing filter needs a REQUEST PRINCIPAL to scope
+  // by.  Without `auth: required` on the deployable and a system `user {}`
+  // block there is no actor at all — node/python never emit the ambient
+  // `requireCurrentUser()` accessor, elixir has no `current_user` to thread,
+  // and .NET's `HasQueryFilter` NREs on `RequestContext.Current!.CurrentUser!`
+  // on every read (finding 20 / B16).  Mirrors the `validateStampSupport`
+  // precedent with a clear, actionable error.
+  //
+  // Scoped to the five DOMAIN backend families (canonical names per
+  // D-NODE-PLATFORM / D-ELIXIR-PLATFORM): a deployable with no database read
+  // path never carries a capability filter to begin with.
+  const DOMAIN_FAMILIES = new Set(["node", "elixir", "java", "python", "dotnet"]);
 
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);
-    if (!fam || !LIMITED_FAMILIES.has(fam)) continue;
+    if (!fam || !DOMAIN_FAMILIES.has(fam)) continue;
+    if (dep.auth?.required && sys.user) continue;
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
       for (const agg of ctx.aggregates) {
-        const enriched = agg as EnrichedAggregateIR;
-        const filters = enriched.contextFilters ?? [];
-        if (filters.length === 0) continue;
-        const usesPrincipal = filters.some((p) => exprUsesCurrentUser(p));
-        const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
-        const nonRelational = shape !== "relational";
-        // Does THIS family wire a principal filter on THIS shape?  Relational →
-        // `supportsPrincipalFilter`; non-relational → the `embedded`-only
-        // `supportsPrincipalNonRelationalFilter`.
-        const principalSupportedHere = nonRelational
-          ? supportsPrincipalNonRelationalFilter(fam, shape)
-          : supportsPrincipalFilter(fam);
-        // The shape itself must be wired (any filter); then, if the filter is
-        // principal-referencing, that intersection must be wired too.
-        const nonRelationalUnsupported = nonRelational && !supportsNonRelationalFilter(fam, shape);
-        const principalUnsupported = usesPrincipal && !principalSupportedHere;
-        // A principal filter on a backend that DOES wire it (incl. embedded on
-        // node/elixir/java) still needs a request principal to scope by — so the
-        // deployable must enforce auth (and the system must declare a `user {}`
-        // block).  Without it the ambient `requireCurrentUser()` accessor isn't
-        // even emitted.  Mirror the `validateStampSupport` precedent with a
-        // clear, actionable error.
-        if (
-          usesPrincipal &&
-          principalSupportedHere &&
-          !nonRelationalUnsupported &&
-          !(dep.auth?.required && sys.user)
-        ) {
-          diags.push({
-            severity: "error",
-            code: "loom.context-filter-unsupported",
-            message: diagMessage("loom.context-filter-unsupported#no-auth-user", {
-              name: dep.name,
-              platform: dep.platform,
-              ctxName,
-              aggName: agg.name,
-            }),
-            source: `${sys.name}/${dep.name}`,
-          });
-          continue;
-        }
-        // A non-relational shape gates on the families that don't yet wire it
-        // (DEBT-02); a principal filter gates where the actor intersection isn't
-        // wired (relational: python; non-relational: document everywhere).
-        if (!principalUnsupported && !nonRelationalUnsupported) continue;
-        // The unwired shape is the harder limitation — report it first when both
-        // apply.  Otherwise it's a principal filter on a shape whose actor
-        // intersection isn't wired (a `document` aggregate filters in-app, so a
-        // principal predicate there needs in-app actor evaluation — Slice B).
-        // The ONLY unwired cell left in this whole function is elixir +
-        // `document` — every other (family, shape) pair is covered by
-        // `supportsNonRelationalFilter` / `supportsPrincipalNonRelationalFilter`
-        // above.  So the reason must name the SHAPE as the residue, not
-        // "relational only": elixir does wire `embedded`, and saying otherwise
-        // sends the reader to a workaround they do not need.
-        const reason = nonRelationalUnsupported
-          ? `is persisted as shape(${shape}); the ${fam} backend wires capability filters on ` +
-            `relational and shape(embedded) aggregates, but not yet on shape(${shape}) ones`
-          : nonRelational
-            ? `references currentUser (e.g. a tenancy filter) on a shape(${shape}) aggregate; ` +
-              `principal-referencing filters on ${shape} aggregates are not yet wired on the ` +
-              `${fam} backend (they evaluate in-app, not as a column predicate)`
-            : `references currentUser (e.g. a tenancy filter); principal-referencing capability ` +
-              `filters are not yet wired on the ${fam} backend`;
+        const filters = (agg as EnrichedAggregateIR).contextFilters ?? [];
+        if (!filters.some((p) => exprUsesCurrentUser(p))) continue;
         diags.push({
           severity: "error",
-          message: diagMessage("loom.context-filter-unsupported#unsupported-predicate", {
+          code: "loom.context-filter-unsupported",
+          message: diagMessage("loom.context-filter-unsupported#no-auth-user", {
             name: dep.name,
             platform: dep.platform,
             ctxName,
             aggName: agg.name,
-            reason,
-            hosts: nonRelationalUnsupported
-              ? `a node / dotnet / java / python deployable (all four wire capability filters ` +
-                `on shape(${shape}) aggregates), or change this aggregate's shape to ` +
-                `relational or embedded`
-              : `a backend that wires principal-referencing filters on shape(${shape}) ` +
-                `aggregates (node / dotnet / java / python)`,
           }),
           source: `${sys.name}/${dep.name}`,
-          code: "loom.context-filter-unsupported",
         });
       }
     }

@@ -120,6 +120,30 @@ system P {
  * assertion is containment, not equality, because pinning the full diagnostic
  * set would turn every unrelated validator change into a failure here.
  */
+/** A ui-bearing system: the page-identity checks read the UI declaration AND
+ *  the react deployable that serves it, so neither half can be dropped.  The
+ *  `with` clause matters too — both collision codes fire when an AUTHORED page
+ *  lands on a slot/path the SCAFFOLD also fills, so the fixture needs both. */
+const uiPages = (withClause: string, uiBody: string) => `
+system S {
+  subdomain Sales { context Orders {
+    aggregate Order { code: string  derived display: string = code }
+    repository Orders for Order { }
+    workflow ship {
+      create(code: string) { precondition code.length > 0 }
+    }
+  } }
+  api SalesApi from Sales
+  storage pg { type: postgres }
+  resource st { for: Orders, kind: state, use: pg }
+  ui WebApp${withClause} {
+    api Sales: SalesApi
+${uiBody}
+  }
+  deployable api { platform: node, contexts: [Orders], dataSources: [st], serves: SalesApi, port: 8080 }
+  deployable web { platform: react, targets: api, ui: WebApp { Sales: api }, port: 3001 }
+}`;
+
 const FIRING_FIXTURES: Record<string, string> = {
   // --- structural ---------------------------------------------------------
   "loom.duplicate-find": repoOnly(`    aggregate Thing with crudish { name: string }
@@ -350,6 +374,55 @@ system S {
       amount: int
       derived display: string = "x"
     }`),
+
+  // --- hand-authored `area` identity (the clause census's `Area` fixture) --
+  // All three arrived with the page-identity fix and are the next instance of
+  // the pattern the lifecycle trio above records: a code landing on `main` with
+  // no proof it fires.  Shapes taken from `test/ir/ui-page-identity-gate.test.ts`.
+  //
+  // Two `area Ops` blocks in ONE scope: uniqueness was scoped per Area NODE, so
+  // both pages computed `src/pages/ops/…` and the second silently won.
+  "loom.ui-duplicate-area": uiPages(
+    "",
+    `    area Ops {
+      page Dashboard { route: "/ops/a" body: Stack { Heading { "A", level: 1 }, testid: "a" } }
+    }
+    area Ops {
+      page Overview { route: "/ops/b" body: Stack { Heading { "B", level: 1 }, testid: "b" } }
+    }`,
+  ),
+
+  // The author's `area Sales { area Orders { page List } }` and the SCAFFOLD's
+  // `area Orders { page List }` both classify as aggregate Order's list page.
+  // Only one can be routed; the other was emitted as an unreachable file.
+  //
+  // NOTE two sibling areas holding same-named pages is NOT this defect — that
+  // is the documented silent case, and using it here made the fixture raise
+  // nothing at all.
+  "loom.ui-page-slot-collision": uiPages(
+    " with scaffold(aggregates: [Order])",
+    `    area Sales {
+      area Orders {
+        page List {
+          route: "/orders"
+          body: Stack { Heading { "Mine", level: 1 }, testid: "mine" }
+        }
+      }
+    }`,
+  ),
+
+  // `area Workflows { page Ship }` lands on `src/pages/workflows/ship.tsx` —
+  // exactly where the scaffold's `ShipWorkflow` page goes.  The two classify
+  // DIFFERENTLY, so only the path check sees this one.
+  "loom.ui-page-path-collision": uiPages(
+    " with scaffold(workflows: [ship])",
+    `    area Workflows {
+      page Ship {
+        route: "/workflows/ship-custom"
+        body: Stack { Heading { "Ship", level: 1 }, testid: "ship" }
+      }
+    }`,
+  ),
 };
 
 /**

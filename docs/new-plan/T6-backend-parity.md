@@ -587,14 +587,14 @@ The mission's own **first step was "re-verify"**, and the re-verify overturned i
 
 | Capability | Gate | Set literal | Emitters |
 |---|---|---|---|
-| `filter` capability | `loom.context-filter-unsupported` | `supportsNonRelationalFilter` / `supportsPrincipalNonRelationalFilter` | 5/5 on `relational` + `embedded`; 4/5 on `document` (node in-app over the rehydrated doc, java `findAll().stream()`, python `documentCapabilityBody`, .NET `_CapabilityVisible` in `renderDocumentRepositoryImpl` — landed #2530) |
+| `filter` capability | `loom.context-filter-unsupported` | *(none left — the deferral tables were deleted with the last unwired cell)* | **5/5 on every shape.** `relational` + `embedded` narrow a column; `document` filters IN-APP over the rehydrated instance on all five (node, java `findAll().stream()`, python `documentCapabilityBody`, .NET `_CapabilityVisible` — #2530, elixir `vanillaDocCapabilityFilter` over the `%<Agg>.Data{}` embed — #2625) |
 | `ignoring` bypass | `loom.filter-bypass-unsupported` | `FILTER_BYPASS_FAMILIES` = `dotnet, node, elixir, java, python` | EF `IgnoreQueryFilters`, Drizzle conjunct omission, Ecto `where:` omission, Hibernate named `@Filter` + `session.disableFilter`, SQLAlchemy static conjunct omission |
 | `audited` operations | `loom.audited-backend-unsupported` | `AUDIT_OP_BACKENDS` = all five | `audit_records` side table on each — pinned per backend by `test/platform/backend-parity-gates.test.ts` (`marker` per backend) |
 | `provenanced` fields | `loom.provenanced-backend-unsupported` | `PROVENANCE_BACKENDS` = all five | `provenance_records` on each — same test, `marker` per backend |
 
-**Two residues survive, and neither is on this mission's axis:**
+**One residue survives, and it is not on this mission's axis:**
 
-1. **elixir + `shape: document` capability filters** — the one unwired `(family, shape)` cell in `validateContextFilterSupport`. Everything else in that function is covered, which is why the diagnostic's own wording ("only wired for relational aggregates") was corrected in the same pass that closed this row.
+1. ~~**elixir + `shape: document` capability filters**~~ — **closed (#2625).** It was the one unwired `(family, shape)` cell in `validateContextFilterSupport`; `renderDocRepository` now AND-s the predicate into `list` / `find_by_id` / `find_by_id_for_write` / every custom find, evaluated over the rehydrated `%<Agg>.Data{}` embed, with the `deep` sentinel rendered by `renderDeepScopeInApp` and a `current_user != nil` guard keeping an actor-less read fail-closed. With the last cell wired, the three deferral tables (`supportsPrincipalFilter` / `supportsNonRelationalFilter` / `supportsPrincipalNonRelationalFilter`) and the `#unsupported-predicate` message they raised were **deleted** — `validateContextFilterSupport` is now only the shape-independent "a principal filter needs `auth: required` + a `user {}` block" rule. The `policy-document` corpus row runs on all five backends, and `backend-parity-gates.test.ts` gained a `shape: document` filter row with a per-backend in-app marker.
 2. **`ignoring` under `persistence: dapper`** — an ADAPTER cell, not a platform one. `FILTER_BYPASS_FAMILIES` is keyed by family, so `dotnet` passes the gate whatever its adapter; but `src/generator/dotnet/emit/dapper.ts` applies `agg.contextFilters` and contains **zero** occurrences of bypass handling, so an `ignoring` clause is silently not honoured there. Tracked on the adapter axis by **M-T6.35**; the dapper adapter is also under active work in the in-flight M-T6.42 PR.
 
 The general lesson is the one M-T6.33 already recorded one row over: a register row classified `gap` and never re-verified decays into a claim about the past. Both of this track's "re-verify first" missions were overturned by the re-verify.
@@ -623,7 +623,7 @@ Sources: M-T9.27 register rows; `system-checks.ts` `validateStampSupport`.
 No residue on this mission's axis. The ADAPTER axis is a different question and is tracked by M-T6.35.
 Sources: M-T9.27 register rows (the stale premise); overturned against the `EVENT_SOURCING_BACKENDS` / `EVENT_SOURCING_WORKFLOW_BACKENDS` literals in `system-checks.ts` and their `backend-parity-gates.test.ts` row.  (Cited by SYMBOL, not line: this file's own citations went stale the moment the cited file was edited.)
 
-## M-T6.43 — Java's JPA entities emit unquoted column names, so a reserved-word field 500s on insert — `open` · **S–M** · P1 ⭐ compiles green, boots green, fails on first write
+## M-T6.43 — Java's JPA entities emit unquoted column names, so a reserved-word field 500s on insert — `done` (2026-08-18) · **S–M** · P1 ⭐ compiles green, boots green, fails on first write
 
 Found 2026-08-17 while landing M-T6.42, by running the new `reserved-words`
 corpus fixture's behavioural leg against a real booted Spring Boot + Postgres.
@@ -674,6 +674,43 @@ every identifier it renders, so no raw name reaches the SQL).
 
 **Sources:** M-T6.42 (the sibling fix and the fixture), `sql-pg.ts`'s
 quote-always rule, the behavioural java leg.
+
+**Outcome.** Landed as described, with the shared-home step taken first: the
+word list moved out of the Dapper emitter into `src/generator/sql-reserved.ts`
+(one `isReservedIdent` predicate, no escaping — that stays per-backend), and
+re-deriving it from a live `postgres:16` for the second consumer immediately
+found the drift the mission predicted: **`right` was missing** from the
+Dapper-resident list, and `create table t (right int)` really is a syntax error.
+One word, found the first time the list was checked against the server rather
+than copied — which is the whole argument for the file.
+
+Java quotes with Hibernate's portable backtick at the `@Column` / `@Table` /
+`@AttributeOverride(column = …)` sites (`emit/jpa-annotations.ts`, plus the
+audit / claim / containment columns in `emit/entity.ts` and the correlation
+columns in `emit/workflow-state.ts` + `emit/projection-state.ts`), and with
+POSTGRES `"…"` in `render-sql-restriction.ts`, whose fragment Hibernate appends
+as raw SQL. That renderer needed one structural change beyond the wrapper: the
+flattened-VO arm built its column by concatenating rendered segments, so
+quoting in place would have produced `"order"_deleted_at`. The path is now
+built unquoted by `columnPath` and quoted once, at the end.
+
+Compound names the emitter derives (`<owner>_id`, `<field>_provenance`,
+pluralised tables) are deliberately NOT run through the predicate — they can
+never collide, and quoting them would move output for nothing.
+
+**Proof.** `node run-java.mjs reserved-words` passes and its recording matches
+the committed wire golden (node is the oracle). Mutation-proved: with `hbIdent`
+reverted to the identity function the same leg fails by name — *reserved-word
+columns round-trip through create, find and read against d* — with
+`POST /api/tickets → 500`, i.e. exactly the reported defect. Byte-identity
+checked by generating all 50 corpus fixtures before and after on BOTH affected
+backends: the Java tree differs in exactly one file (`reserved-words`'
+`Ticket.java`, three columns) and the Dapper tree is unchanged everywhere,
+confirming `right` has no witness in the corpus. `test/generator/java/java-reserved-identifiers.test.ts`
+is the fast per-PR pin, and one PRE-EXISTING assertion in
+`generator-java-projection.test.ts` had been pinning the broken spelling
+(`@Column(name = "order")` on a projection correlated by a field named `order`)
+— it now pins the quoted one.
 
 ## M-T6.42 — `persistence: dapper` emits unquoted identifiers, so a reserved-word column breaks the DDL — `done` (2026-08-17) · **M** · P1 ⭐ boots red, compiles green
 *(ID note: this row was minted as M-T6.41, colliding with the direct-table-aggregation row of the same number further up this file. Renumbered to **M-T6.42** on `main` while the fix was in flight — that is the id this PR already used, so the two agree. Fourth dup-ID incident; M-T9.32's automation remains the fix.)*
@@ -767,7 +804,9 @@ Sources: M-T9.27 register rows. Relates to M-T6.23 (mikroorm) and M-T6.25 (dappe
 Two narrow Java-only rejections: `loom.java-projection-field-unsupported` (projection field shapes the emitter does not handle) and `loom.java-workflow-instance-field-unsupported` (workflow instance field shapes). Both name Java in the code identity, which M-T5.21 §Symptom 1 argues against — fold the target into the message when the shapes land.
 Sources: M-T9.27 register rows.
 
-## M-T6.37 — Elixir emits no seeder: `seed` datasets are silently dropped — `open` · **M** · P1 ⭐ silent gap in a feature claimed on five backends
+## M-T6.37 — Elixir emits no seeder: `seed` datasets are silently dropped — `shipped` ([#2594](https://github.com/lemmit/Loc/pull/2594)) · **M** · P1 ⭐ silent gap in a feature claimed on five backends
+**Shipped:** `src/generator/elixir/vanilla/seed-emit.ts` emits the Ecto seeder (domain rows through the context `create` path per D-SEED-PATH, schema-qualified raw INSERTs, the `__loom_seed` ship-once marker, `LOOM_SEED` gating), invoked at boot beside the migrations; `BEHAVIOURAL_SKIP.elixir["seed-values"]` was deleted in the same PR — the acceptance test below. Original record kept for the mechanism:
+
 `seed default { … }` / `seed <name> [raw] { … }` emits a first-boot seeder on four backends and **nothing at all** on `platform: elixir`: `priv/repo/seeds.exs` is listed in the Phoenix file map (`docs/generators.md`) and reserved as a layout slot (`elixir/adapters/by-feature-layout.ts` → `"seeds"`), but no emitter writes it and nothing reads `ctx.seeds`. So reference data an author declared simply does not exist there, with no diagnostic — while `manifest.ts` claims the `seeding` feature on all five backends and the corpus compile tier is green (there is nothing to fail to compile).
 
 Invisible until #2517 (M-T9.13) gave the fixture's collection reads their first callers: seed rows are only observable through a list read, and the node behavioural leg did not run its own seeder either. Registered honestly meanwhile as `BEHAVIOURAL_SKIP.elixir["seed-values"]` (the fixture that carries only the seeded-collection reads — `seeding`'s CRUD/FK/404 half stays armed on this backend) + [B19](../audits/behavioral-parity-bugs-2026-07.md#b19--elixir--seed-datasets-emit-no-seeder-at-all-silently-dropped); **deleting that entry is the acceptance test.**

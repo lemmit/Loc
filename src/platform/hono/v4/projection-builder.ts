@@ -281,6 +281,10 @@ function emitProjectionRoutes(
   ctx: EnrichedBoundedContextIR,
 ): string[] {
   const forbiddenStatus = resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses);
+  // RS-27: a projection row read by its correlation KEY is a by-id read, so its
+  // absence is the domain `NotFound` rung and follows a `httpStatus NotFound ->
+  // <code>` override — declaration and `onError` arm off the same resolved value.
+  const notFoundStatus = resolveErrorStatus("NotFound", ctx.structuralErrorStatuses);
   const anyGate = projections.some((p) => p.query?.requires);
   const out = [
     `export function projectionsRoutes(db: ${projDbType(usingMikro)}): OpenAPIHono {`,
@@ -345,7 +349,9 @@ function emitProjectionRoutes(
     );
     if (gated) out.push(forbiddenResponse);
     out.push(
-      `        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+      `        ${notFoundStatus}: { description: ${JSON.stringify(
+        problemTitle(notFoundStatus),
+      )}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
     out.push(`      },`);
     out.push(`    }),`);
@@ -382,7 +388,7 @@ function emitProjectionRoutes(
     `    const trace_id = (c as unknown as { get(k: "requestId"): string | undefined }).get("requestId") ?? "";`,
   );
   out.push(
-    `    const problem = (status: ${[...new Set(anyGate ? [forbiddenStatus, 404, 500] : [404, 500])].sort((a, b) => a - b).join(" | ")}, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
+    `    const problem = (status: ${[...new Set(anyGate ? [forbiddenStatus, notFoundStatus, 500] : [notFoundStatus, 500])].sort((a, b) => a - b).join(" | ")}, title: string, detail: string) => c.body(JSON.stringify({ type: "about:blank", title, status, detail, instance: c.req.path }), status, { "content-type": "application/problem+json", "x-request-id": trace_id });`,
   );
   if (anyGate) {
     out.push(
@@ -392,7 +398,9 @@ function emitProjectionRoutes(
     );
   }
   out.push(
-    `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
+    `    if (err instanceof AggregateNotFoundError) return problem(${notFoundStatus}, ${JSON.stringify(
+      problemTitle(notFoundStatus),
+    )}, err.message);`,
   );
   // Same tail as the query-projection router: an unexpected fault is logged and
   // answered as problem+json, never as hono's text/plain default.

@@ -116,8 +116,8 @@ export function errorStatuses(
    *  Originally only the structural conflicts (M-T3.4a: the destroy FK-restrict
    *  `ReferencedInUse`); M-T5.20 extended it to the `DomainError` domain floor
    *  and the `Forbidden` rung so the DECLARED response set moves in lockstep
-   *  with the runtime handler arm. (`NotFound` is deliberately excluded — see
-   *  the note below.) Omitted ⇒ the literal defaults (409 / 422 / 403 —
+   *  with the runtime handler arm; the follow-up slice added the last one,
+   *  `NotFound`. Omitted ⇒ the literal defaults (409 / 422 / 403 / 404 —
    *  byte-identical output). */
   resolve?: (name: string) => number,
 ): number[] {
@@ -128,14 +128,30 @@ export function errorStatuses(
   // the emitted set is unchanged.
   const domain = resolve?.("DomainError") ?? 422;
   const forbidden = resolve?.("Forbidden") ?? 403;
-  // NOTE the 404 rung is deliberately NOT resolved here (M-T5.20 gap): the
-  // aggregate-not-found 404 has TWO producers and they differ per backend — the
-  // exception handler (Hono's `AggregateNotFoundError` → onError) and a bare
-  // framework return (`NotFound()` / `ResponseEntity.notFound()` / a `None`
-  // check) on the find / getById / projection / workflow read paths.  Moving
-  // only the handler arm would make Hono's getById answer the override while
-  // .NET's answered 404, i.e. trade one drift for a worse cross-backend one.
-  // Closing it means converting every bare-404 return site too.
+  // The DOMAIN not-found rung — the aggregate/projection/workflow-instance a
+  // request addressed does not exist.  It was the LAST literal in this table,
+  // and the reason was the TWO-PRODUCER split: besides the exception-handler
+  // arm (`AggregateNotFoundError` → Hono's `onError`, `AggregateNotFoundException`
+  // → the .NET filter / the Spring advice, `AggregateNotFoundError` → FastAPI's
+  // handler), each backend used to answer some read paths with a BARE framework
+  // return (`NotFound()` / `ResponseEntity.notFound().build()` / a `None`
+  // check).  Resolving only the declaration would have published a status the
+  // bare-return paths never answer.
+  //
+  // M-T6.31 converted those bare returns into the shared not-found carrier on
+  // all four backends (they never reached the app's problem filter, so they
+  // were answering an EMPTY-bodied framework 404 rather than a ProblemDetails
+  // one — a separate bug with the same root).  With one producer per backend
+  // left, the rung resolves here like every other one, and the runtime arms
+  // below it read the same resolved value.
+  //
+  // Two 404s are deliberately NOT this rung and stay literal on all five
+  // backends (elixir included, so the reference stays the reference):
+  //   * the FRAMEWORK routing 404 — `no route for <verb> <path>` — which is
+  //     about the URL space, not about a domain record;
+  //   * the objectStore blob-absence 404 on a `resource … kind: objectStore`
+  //     download route, which addresses a bucket key, not an aggregate id.
+  const notFound = resolve?.("NotFound") ?? 404;
   const set = (...statuses: number[]): number[] => [...new Set(statuses)].sort((a, b) => a - b);
   switch (kind) {
     // 400 = a malformed/unparseable body; 422 = the wire-validation tier
@@ -154,7 +170,7 @@ export function errorStatuses(
     // the workflow-instance-by-id read declare against, and all three validate
     // the same `{id}`.
     case "getById":
-      return set(404, UNPROCESSABLE_ENTITY);
+      return set(notFound, UNPROCESSABLE_ENTITY);
     // destroy (DELETE /<aggs>/{id}) → 404 (not found) + 409 (still
     // referenced: cross-aggregate `X id` FK is ON DELETE RESTRICT — the
     // `ReferencedInUse` structural conflict, remappable via `httpStatus`).
@@ -163,12 +179,12 @@ export function errorStatuses(
     // id still answers 404, matching the operation routes.
     case "destroy":
       return guarded
-        ? set(forbidden, 404, referencedInUse, UNPROCESSABLE_ENTITY)
-        : set(404, referencedInUse, UNPROCESSABLE_ENTITY);
+        ? set(forbidden, notFound, referencedInUse, UNPROCESSABLE_ENTITY)
+        : set(notFound, referencedInUse, UNPROCESSABLE_ENTITY);
     case "operation":
       return guarded
-        ? set(400, forbidden, 404, UNSUPPORTED_MEDIA_TYPE, 422, domain)
-        : set(400, 404, UNSUPPORTED_MEDIA_TYPE, 422, domain);
+        ? set(400, forbidden, notFound, UNSUPPORTED_MEDIA_TYPE, 422, domain)
+        : set(400, notFound, UNSUPPORTED_MEDIA_TYPE, 422, domain);
     case "workflow":
       return guarded
         ? set(400, forbidden, UNSUPPORTED_MEDIA_TYPE, 422, domain)
@@ -182,7 +198,7 @@ export function errorStatuses(
     // existing gate: with no override `forbidden` IS 403, so default emission
     // cannot tell a resolved 403 from a hardcoded one.
     case "findOptional":
-      return guarded ? set(forbidden, 404) : [404];
+      return guarded ? set(forbidden, notFound) : [notFound];
     case "findList":
     case "findSingle":
       return guarded ? [forbidden] : [];
@@ -211,6 +227,11 @@ export function problemTitle(status: number): string {
       return "Not Found";
     case 409:
       return "Conflict";
+    // A natural retarget for the `NotFound` rung — `httpStatus NotFound -> 410`
+    // is the canonical "this id used to exist" remap, and without an entry here
+    // every backend titled it the generic "Error".
+    case 410:
+      return "Gone";
     // The body-carrying kinds' media-type refusal (see UNSUPPORTED_MEDIA_TYPE).
     case 415:
       return "Unsupported Media Type";

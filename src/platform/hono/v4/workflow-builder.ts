@@ -252,6 +252,7 @@ export function buildWorkflowsFile(
         wf,
         usingMikro,
         resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses),
+        resolveErrorStatus("NotFound", ctx.structuralErrorStatuses),
       ).map((l) => `  ${l}`),
     );
     body.push("");
@@ -287,10 +288,13 @@ export function buildWorkflowsFile(
     "ConcurrencyConflict",
     ctx.structuralErrorStatuses,
   );
+  // A workflow step's `Repo.getById(...)` miss and an instance-by-id miss are
+  // both the domain `NotFound` rung, so both follow the api's override.
+  const wfNotFoundStatus = resolveErrorStatus("NotFound", ctx.structuralErrorStatuses);
   const wfStatuses = new Set<number>([
     400,
     wfForbiddenStatus,
-    404,
+    wfNotFoundStatus,
     422,
     wfDomainStatus,
     500,
@@ -321,7 +325,7 @@ export function buildWorkflowsFile(
     `    if (err instanceof DomainError) return problem(${wfDomainStatus}, ${JSON.stringify(problemTitle(wfDomainStatus))}, err.message);`,
   );
   body.push(
-    `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
+    `    if (err instanceof AggregateNotFoundError) return problem(${wfNotFoundStatus}, ${JSON.stringify(problemTitle(wfNotFoundStatus))}, err.message);`,
   );
   if (wfHasUniqueKeys) {
     body.push(
@@ -920,6 +924,11 @@ function emitInstanceRoutes(
   wf: WorkflowIR,
   usingMikro: boolean,
   forbiddenStatus: number,
+  /** The `httpStatus`-resolved `NotFound` rung.  The instance-by-id read is not
+   *  lifted into `deriveContextOperations` (`apiSurfaceCoverage.notLifted`), so
+   *  its declared set is hand-rolled here and has to be handed the same resolved
+   *  status the router's `AggregateNotFoundError` arm answers with. */
+  notFoundStatus: number,
 ): string[] {
   const T = upperFirst(wf.name);
   // The instance-READ gate (`workflow X requires <expr>`).  Both routes below
@@ -1006,7 +1015,9 @@ function emitInstanceRoutes(
   );
   if (gate) out.push(forbiddenResponse);
   out.push(
-    `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    `      ${notFoundStatus}: { description: ${JSON.stringify(
+      problemTitle(notFoundStatus),
+    )}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
   // The correlation-id param is PARSED (uuid / coerced integer above), so a
   // malformed one answers the wire-validation 422 — the same set

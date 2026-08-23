@@ -245,6 +245,71 @@ system Shop {
     expect(await docScopeErrors(src)).toEqual([]);
   });
 
+  it("accepts collection READS over the aggregate's own containment / scalar array", async () => {
+    // Route A made a document containment a real `embeds_many` on the
+    // `<Agg>.Data` embed and a scalar array an `{:array, _}` field, so by the
+    // time an op body runs both are ordinary Elixir lists and the shared
+    // collection-op renderers work verbatim (`Enum.sum(Enum.map(record.lines,
+    // fn l -> l.qty end))`).  The gate refused every collection method until
+    // long after that became true.
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      aggregate Order shape: document with crudish {
+        total: int
+        tags: string[]
+        contains lines: OrderLine[]
+        entity OrderLine { sku: string  qty: int }
+        operation retotal() { total := lines.sum(l => l.qty) }
+        operation recount() { total := lines.count }
+        operation bulk() {
+          precondition lines.any(l => l.qty > 10)
+          precondition tags.contains("bulk")
+          total := total + 1
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], port: 4000 }
+}
+`;
+    expect(await docScopeErrors(src)).toEqual([]);
+  });
+
+  it("still rejects a collection op over a REFERENCE collection (`X id[]`)", async () => {
+    // The narrowing above admits IN-MEMORY lists only.  A reference collection
+    // is resolved through a `many_to_many` join table on the relational path,
+    // and a jsonb blob has no join to resolve — so this stays a coded refusal
+    // rather than a mis-emit against ids that were never dereferenced.
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      aggregate Tag shape: relational with crudish { label: string }
+      aggregate Order shape: document with crudish {
+        total: int
+        tagIds: Tag id[]
+        operation count() { total := tagIds.count }
+        operation weigh() { total := tagIds.filter(t => t != null).count }
+      }
+      repository Orders for Order { }
+      repository Tags for Tag { }
+    }
+  }
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], port: 4000 }
+}
+`;
+    const errs = await docScopeErrors(src);
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toContain("weigh");
+  });
+
   it("still rejects a DERIVED read in a document operation body", async () => {
     const src = `
 system Shop {
