@@ -867,8 +867,18 @@ the conforming backends, and the fix that established it.
   wire-validation failure, and each denial rung (403 / 409 / 422) keep their own
   status and their occurrence-specific `detail`. This rule governs only the arm
   none of them matched.
-- **Trigger.** A hand-written `extern` handler returning an unmodelled error, or
-  an unexpected fault escaping a workflow's `run`.
+- **Trigger.** A hand-written `extern` handler returning an unmodelled error, an
+  unexpected fault escaping a workflow's `run`, or — the case both of those
+  presuppose away — **a fault raised anywhere else in the app**, on a system that
+  declares neither. That last one is the reason each backend needs an
+  APP-GLOBAL handler and not only per-route arms: `app.onError` (hono),
+  `DomainExceptionFilter` (.NET), `ApiExceptionAdvice` (java),
+  `install_error_handlers` (python), `<App>Web.FaultHandler` (elixir). A rule
+  checked only on the paths a fixture reaches is checked on the paths that were
+  already fine — see M-T6.30, where elixir's arm existed solely inside the
+  workflow/extern `respond/2` dispatchers, so the most common system shape
+  (CRUD, no workflow) emitted none at all and answered an HTML debug page in dev
+  and the exception's own message as `detail` in prod.
 - **Why it hid.** Elixir answered `400` and `inspect/1`'d the term straight into
   `detail`. It survived RS-15's 400 → 422 sweep *precisely because it is not the
   domain floor*: RS-15 moved the rejections the domain **makes**, and this is the
@@ -891,7 +901,11 @@ the conforming backends, and the fix that established it.
 - **Provenance.** Found 2026-07-29 by grepping the vanilla Phoenix denial
   protocol's edges after #2300 centralised it (M-T6.24). Python divergence found
   2026-08-01 by verifying the proposed `conforms` list instead of accepting it.
-  Tier: **static** — promote to behavioral once a fixture reaches the arm.
+  The third trigger above (and elixir's floor for it) landed 2026-08-23 with
+  M-T6.30, gated per-file on a plain-CRUD fixture in
+  `test/conformance/internal-fault-parity.test.ts` and witnessed on a booted
+  Phoenix app. Tier: **static** — promote to behavioral once a fixture reaches
+  the arm.
 
 ### RS-27 · A 404-**by-id** carries the sentence `"<Aggregate> <id> not found"`
 - **Guarantee.** When a read addressed **by id** finds nothing, the RFC 9457
