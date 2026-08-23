@@ -32,6 +32,23 @@ export function hasBehaviouralBlock(src) {
   return /(^|\n)\s*test\s+e2e\s+"/.test(src) || /(^|\n)\s*test\s+"/.test(src);
 }
 
+/** True when this `.ddd` makes its backends mount the root `POST /files` +
+ *  `GET /files/{key}` pair (M-T1.2) — i.e. some declared field is `File`-typed
+ *  AND an `objectStore` resource is wired.  Both halves are required: the
+ *  emitters gate the routes on exactly that conjunction (an objectStore with no
+ *  `File` field — `resources.ddd` — emits no /files route at all).
+ *
+ *  Read off the SOURCE, like `hasBehaviouralBlock` above and each runner's
+ *  `authMode`, so all seven runner legs derive the same answer from the same
+ *  place and cannot drift apart.  It gates one thing only: whether the wire
+ *  differential fires its absent-file probe (M-T6.39).  A false positive would
+ *  merely record the framework miss; a false negative loses the probe — which
+ *  is why the conformance pin `files-absent-object-envelope-parity.test.ts`
+ *  asserts the emitters directly rather than trusting this predicate. */
+export function mountsFileRoutes(src) {
+  return /:\s*File(\?|\[\])?\s*(\/\/|$|\n)/m.test(src) && /kind:\s*objectStore/.test(src);
+}
+
 /** Per-(platform, case) behavioural skips: a corpus feature or shared system that
  *  GENERATES and COMPILES on a backend but whose RUNTIME behaviour has a known,
  *  tracked gap there.  Honest and documented (not a silent drop) — the case still

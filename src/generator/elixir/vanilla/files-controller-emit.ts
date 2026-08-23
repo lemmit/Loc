@@ -27,6 +27,8 @@ export function emitVanillaFilesController(
 defmodule ${webModule}.FilesController do
   use ${webModule}, :controller
 
+  alias ${webModule}.ProblemDetails
+
   @moduledoc """
   App-level file upload/download over the bound objectStore (M-T1.2).
   \`POST /files\` stores the uploaded bytes and returns a FileRef; \`GET /files/:key\`
@@ -63,9 +65,10 @@ defmodule ${webModule}.FilesController do
         |> send_resp(200, body)
 
       nil ->
-        conn
-        |> put_status(404)
-        |> json(%{"error" => "not found"})
+        # M-T6.39 — the absent object answers through the app's ONE 404
+        # producer, so it carries the same RFC 7807 envelope (and the same
+        # \`httpStatus NotFound -> <Code>\` override) as every other absent read.
+        ProblemDetails.not_found_response(conn, "File", key)
     end
   end
 end

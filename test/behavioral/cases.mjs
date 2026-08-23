@@ -18,9 +18,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import pg from "pg";
 // The pure registers live in a dependency-free module so the fast suite can
 // read them without test/behavioral/node_modules (see registers.mjs).
-import { BEHAVIOURAL_SKIP, hasBehaviouralBlock } from "./registers.mjs";
+import { BEHAVIOURAL_SKIP, hasBehaviouralBlock, mountsFileRoutes } from "./registers.mjs";
 
-export { BEHAVIOURAL_SKIP, hasBehaviouralBlock };
+export { BEHAVIOURAL_SKIP, hasBehaviouralBlock, mountsFileRoutes };
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "..", "..");
