@@ -4050,6 +4050,14 @@ export function workflowIsGuarded(wf: WorkflowIR): boolean {
  *     type decides: an optional or collection return answers with a value, a
  *     non-optional one throws.
  *
+ *     This arm is a FORWARD GUARD, not a currently-reachable path, and saying
+ *     so is the point: the reading tier's per-backend emission is still a later
+ *     slice (`ExprIR.repoRead` carries "Per-backend EMISSION is a later slice"
+ *     for the same reason), and today a `reading` service body emits a call
+ *     against a read-port handle that was never threaded.  When that lands, the
+ *     rung follows the read into it without anyone having to rediscover this
+ *     function — which is cheaper than the arm is dead-weight.
+ *
  *  Everything else that reads is absence-shaped and cannot throw: `repo-run` /
  *  `findAll` return arrays, `if-let` exists precisely to handle the empty case,
  *  and a criterion `find` read renders as `[0] ?? null`. */
