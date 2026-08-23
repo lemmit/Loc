@@ -17,7 +17,7 @@ import type { EnumIR, ExprIR, TypeIR, ValueObjectIR } from "../../ir/types/loom-
 import { humanize, plural, snake } from "../../util/naming.js";
 import { iconA11yAttr } from "../_walker/a11y-emit.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
-import { skipsEntityHistoryRead } from "../_walker/history-read.js";
+import { isEntityHistoryRead } from "../_walker/history-read.js";
 import { queryShape } from "../_walker/paged-query.js";
 import { simpleAccessorField } from "../_walker/primitives/data-grid-shape.js";
 import {
@@ -789,14 +789,17 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
     return a?.kind === "literal" && a.value === "true";
   };
   const ofNode = expr.args[names.indexOf("of")];
-  // Entity-history read: Phoenix maps the read onto `list_<aggs>` (the LIST,
-  // not the trail), so the whole view is skipped with a visible comment until
-  // the LiveView read layer learns the derived `history(id)` find.  See
-  // `_walker/history-read.ts` — one predicate, shared with the JSX walker, so
-  // the two engines can't disagree about which targets serve this read.
-  if (skipsEntityHistoryRead("phoenixLiveView", ofNode, ctx.aggregatesByName)) {
-    return `<%!-- entity history not yet supported on phoenixLiveView --%>`;
-  }
+  // Entity-history read (`<Agg>.history(id)`, docs/audit.md) — NOT an ordinary
+  // aggregate read: it scans `audit_records` for one target, so binding it as
+  // one would load `list_<aggs>` (the LIST, not the trail).  Tagged here and
+  // loaded by the LiveView's page-private `load_<agg>_history/2`, which is why
+  // `phoenixLiveView` is in `HISTORY_CAPABLE_FRAMEWORKS` and there is no skip
+  // branch here — the JSX walker still consults the shared predicate for the
+  // targets that have NOT ported the read.
+  const historyRead =
+    ofNode && isEntityHistoryRead(ofNode, ctx.aggregatesByName)
+      ? resolveQueryAggregate(ofNode)
+      : undefined;
   // Detector context, shared by the shape derivation and the Pattern H probe
   // below so the two can't answer from different name sets.
   const detectCtx = {
@@ -824,6 +827,11 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
   // one of them would assign `:t` and the last load would win: every tile
   // showing the same aggregate's numbers, with nothing to see in the diff.
   if (projectionRead) assignName = snake(projectionRead);
+  // A history read names its assign after the AGGREGATE (`:order_history`) for
+  // the same reason: the scaffold's `data:` lambda param is `entries`, which is
+  // a name any hand-written read could also pick — and a detail page carrying
+  // both would have the two loads fight over one assign.
+  if (historyRead) assignName = `${snake(historyRead)}_history`;
   // Flag OR fact: an author may still opt in explicitly (the scaffold does),
   // but omitting the flag no longer means "not paged" / "not single".
   const isSingle = litTrue(names.indexOf("single")) || shape.single;
@@ -855,7 +863,7 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
         // Map the lambda param name to a LiveView assign.
         // Convention: "rows" → @items (list pages), "data" → @data (detail pages)
         // A projection read already took its assign from the projection name.
-        if (!projectionRead) assignName = dataVar === "rows" ? "items" : dataVar;
+        if (!projectionRead && !historyRead) assignName = dataVar === "rows" ? "items" : dataVar;
         // Build a remapping so ref("rows") → @items, ref("data") → @data, etc.
         const remapping = new Map<string, string>([
           [dataVar, autoPaged ? `${assignName}.items` : assignName],
@@ -892,11 +900,25 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
       source: "projection",
     });
   }
-  const aggName = projectionRead
-    ? undefined
-    : ofArgNode
-      ? resolveQueryAggregate(ofArgNode)
-      : undefined;
+  if (historyRead) {
+    // The entity-history read.  `listArgs` carries the entity id the `of:` call
+    // passed (`socket.assigns.id` on a scaffolded detail page) — the loader
+    // takes it as an argument rather than reaching for `@id`, so a hand-written
+    // `history(someOtherId)` loads what it asked for.
+    ctx.queryBindings.push({
+      kind: "list",
+      assign: assignName,
+      aggregate: historyRead,
+      source: "history",
+      listArgs: queryCallArgs(ofArgNode, ctx),
+    });
+  }
+  const aggName =
+    projectionRead || historyRead
+      ? undefined
+      : ofArgNode
+        ? resolveQueryAggregate(ofArgNode)
+        : undefined;
   if (aggName) {
     ctx.queryBindings.push({
       kind: isSingle ? "single" : "list",
