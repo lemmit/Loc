@@ -20,7 +20,7 @@ import {
 import type { JsonRange, NavError } from "../diagnostics/contract.js";
 import { createDddServices } from "../language/ddd-module.js";
 import type { Model } from "../language/generated/ast.js";
-import { addressOf } from "../language/print/index.js";
+import { addressOf, isAddressable } from "../language/print/index.js";
 
 export type DddServices = ReturnType<typeof createDddServices>["Ddd"];
 
@@ -111,10 +111,14 @@ export function resolveSymbol(
 
   const hits: ResolvedSymbol[] = [];
   for (const node of AstUtils.streamAllContents(model)) {
-    // Only nodes with their OWN name are addressable by name — an unnamed
-    // member (create / destroy / apply / invariant) takes the enclosing
-    // entity's name as its address tail (`create Sales.Order`), which would
-    // otherwise collide with the entity itself when resolving `Order`.
+    // Two conditions, and BOTH matter.  The node must be addressable in its own
+    // right — a `Parameter` has a name but no address of its own, so it
+    // inherits the enclosing declaration's (`create Sales.Order`), whose tail
+    // segment would then answer to a symbol it has nothing to do with.  And it
+    // must carry its own name: an unnamed member (create / destroy / apply /
+    // invariant) takes the enclosing entity's name as its address tail, which
+    // would otherwise collide with the entity itself when resolving `Order`.
+    if (!isAddressable(node)) continue;
     const ownName = (node as { name?: unknown }).name;
     if (typeof ownName !== "string" || ownName.length === 0) continue;
     const address = addressOf(node);

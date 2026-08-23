@@ -5202,3 +5202,40 @@ prover:
   (§59/§63's class: the check never reached the thing it names). A mid-run
   monitor read that "looks done" is not a summary line; report "still
   running" until the summary exists, and never a remembered figure.
+
+## §89 — Two halves of one contract, computed independently, with no gate
+
+`addressOf` produces the address a diagnostic hands an agent; `indexTargets`
+resolves the address a patch names. Same address space, two separate
+traversals, and nothing checked they agreed. They didn't: the resolver looked
+for pages under `BoundedContext.members`, where the grammar has never put them,
+so **every page address was emitted into diagnostics and resolved by nothing**,
+and the `outline.contexts[].pages` field was permanently empty. Both survived
+every green run for as long as the code existed.
+
+Three things generalize:
+
+- **A producer/consumer pair of a shared format needs a round-trip gate, not two
+  careful implementations.** The gate here is three lines of intent — every
+  address resolves back to its own node, no two nodes share one, none falls back
+  to the placeholder — and it failed **77 / 1 / 50** the first time it ran. Write
+  it before the fix; the failure count IS the mutation proof, and it sizes the
+  work before you commit to a design.
+- **Prefer deriving the second half from the first over keeping them in sync.**
+  The fix deleted the hand-maintained container list and made the index one walk
+  over the same `isAddressable` predicate the address rule uses. The two can no
+  longer disagree about *what* is addressable — only about the address itself,
+  which is what the gate now pins. Drift you can't express is better than drift
+  you have to remember to check.
+- **A hardcoded slot count is a silent mis-classifier, not a missing feature.**
+  Two qualifier slots (context + aggregate) didn't *fail* on a page — it returned
+  a plausible, wrong, colliding address. Walking the container chain is both
+  shorter and total. When a rule enumerates positions, ask what it does with the
+  shape that has three.
+
+Sharper addresses also exposed a latent assumption one layer up: `resolveSymbol`
+took "node has a name" to mean "node is addressed BY that name", which a
+`Parameter` breaks — it has a name but inherits the enclosing `create`'s
+address. It had been resolving on inherited addresses all along; the fix was to
+gate it on the same predicate. Expect a precision improvement to surface the
+places that were relying on the imprecision.

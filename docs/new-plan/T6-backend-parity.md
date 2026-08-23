@@ -362,12 +362,16 @@ booted assertions invert (404→200, total 0→1, 404→204, balance 100→999).
 **Bonus — a stale `DAPPER_UNSUPPORTED` claim, verified false.** That map asserted
 `tenancy-hierarchy` was rejected by `loom.dapper-unsupported`. It was not: the deep-scope
 sentinel escaped `validateDapperSupport` exactly as the deny sentinel did, and the fixture
-crashed with the *same* "outside the Dapper SQL subset" throw. `validateDapperSupport` now
-gates it for real, under a dedicated `loom.dapper-unsupported#deep-scope` catalog message —
-the generic tail claims every surviving Dapper reject has no relational mapping on *any*
-adapter, which is untrue here (efcore renders it fine; what Dapper lacks is the
-principal-param binding for the sentinel's `currentUser.<claim>` sub-expressions).
-Pinned by `test/adapters/dotnet-dapper.test.ts`.
+crashed with the *same* "outside the Dapper SQL subset" throw. `validateDapperSupport` gated
+it for real under a dedicated `loom.dapper-unsupported#deep-scope` catalog message.
+**Superseded:** that boundary is now DRAINED — the fragment is ordinary SQL
+(`starts_with(data_key, @__cu_orgPath || '.')` with the NULL-dataKey tenant floor), and the
+one missing piece was the `@__cu_*` binding for the claims living inside the sentinel's
+decision, which `collectFilterPrincipalRefs` now descends into. The gate and its catalog
+message are gone, `DAPPER_UNSUPPORTED` is empty, and `tenancy-hierarchy` compiles and RUNS
+on the adapter (the full hierarchy isolation harness — subtree, delimiter trap, wildcard
+trap, NULL-dataKey floor — passes against a booted dapper backend). Pinned by
+`test/generator/dotnet/dapper-deep-scope.test.ts` and `test/adapters/dotnet-dapper.test.ts`.
 
 **Known residue (pre-existing, not introduced here).** `GetByIdForWriteAsync` is emitted by
 the RELATIONAL repository emitter only — on **both** adapters. A `shape: document` or
