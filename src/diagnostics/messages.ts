@@ -1274,19 +1274,15 @@ export const DIAGNOSTIC_MESSAGES = {
     `phoenixLiveView frontend — a LiveView store is a server-side per-process struct ` +
     `with no browser storage, and URL state is owned by the page's \`handle_params\`. ` +
     `Use \`persist: memory\` here; the persistence tiers ship on the SPA frontends.`,
-  "loom.store-lifetime-target-unsupported": (p: {
-    where: unknown;
-    lifetime: unknown;
-    platform: unknown;
-  }) =>
-    `${p.where}: \`persist: ${p.lifetime}\` is not implemented on the ${p.platform} frontend — ` +
-    `the emitted store is IN-MEMORY regardless, so the state is lost on restart and not ` +
-    `shareable by URL, with nothing in the build output to say so.  Use \`persist: memory\` ` +
-    `here, or host this ui on a SPA frontend (react / vue / svelte / angular / feliz).  ` +
-    `Support is planned; this gate exists so the degradation is honest until it lands.`,
-  // The FIELD-scoped half of the same code: feliz implements the ladder, but
-  // persistence there crosses the JS boundary per field, so a field type with no
-  // total F# conversion still can't ride it.
+  // `loom.store-lifetime-target-unsupported` is FIELD-SCOPED ONLY now.  The
+  // platform-wide arm (a frontend whose store emitter ignored `persist:` and
+  // built an in-memory store regardless) is gone with its last entry: the
+  // ladder ships on every frontend — the four JS store builders, feliz
+  // (`generator/feliz/store-persist.ts`) and flutter
+  // (`generator/flutter/store-persist.ts`).  What survives on those last two is
+  // narrower: persistence there crosses an UNTYPED boundary per FIELD, so a
+  // field type with no total conversion in that language's codec still can't
+  // ride it, and would be silently dropped from the stored state.
   "loom.store-lifetime-target-unsupported#field": (p: {
     where: unknown;
     name: unknown;
@@ -1298,6 +1294,17 @@ export const DIAGNOSTIC_MESSAGES = {
     `string / int / long / bool.  A datetime, duration, guid, enum, entity or value-object ` +
     `field would be silently dropped from the stored blob.  Give the field one of the ` +
     `covered types, or use \`persist: memory\` for this store.`,
+  "loom.store-lifetime-target-unsupported#flutter-field": (p: {
+    where: unknown;
+    name: unknown;
+    lifetime: unknown;
+  }) =>
+    `${p.where}: field '${p.name}' cannot be persisted on the flutter frontend — ` +
+    `\`persist: ${p.lifetime}\` crosses an untyped boundary per field, and the Dart codec ` +
+    `covers string / guid / id / enum / int / long / decimal / money / bool / datetime ` +
+    `fields plus arrays of those.  A json, File, entity, value-object or optional field ` +
+    `would be silently dropped from the stored state.  Give the field one of the covered ` +
+    `types, or use \`persist: memory\` for this store.`,
   "loom.store-cross-store-on-liveview-invalid": (p: {
     where: unknown;
     store: unknown;

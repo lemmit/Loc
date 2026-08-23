@@ -9,6 +9,10 @@
 // that module rather than re-derived, so a store cell and a page cell can never
 // disagree about how a Dart field / setter / `copyWith` is spelled.
 //
+// The `persist: local|session|url` lifetime ladder rides that same triad —
+// `build()` seeds each cell from its backing store and a `ref.listenSelf` mirror
+// writes the whole state back — and lives next door in `store-persist.ts`.
+//
 // The USE side lives in `flutter-target.ts` (`renderStoreFieldRead` /
 // `renderStoreActionCall`) and `index.ts` (the page shell binds one local per
 // used member).  Components stay excluded: a `StatelessWidget`/`StatefulWidget`
@@ -27,6 +31,13 @@ import {
   stateSetterMethods,
 } from "./riverpod-emit.js";
 import { storeProviderName } from "./store-names.js";
+import {
+  type FlutterPersistedStore,
+  persistBuildPrologue,
+  persistInitOverrides,
+  persistNotifierMembers,
+  renderUrlStoreSync,
+} from "./store-persist.js";
 
 /** The state data class for a store (`Cart` → `CartState`). */
 function storeStateClass(storeName: string): string {
@@ -52,7 +63,11 @@ function needsModels(stores: readonly StoreIR[]): boolean {
 
 /** Project one store into its `<Store>State` / `<Store>Notifier` / `<store>Provider`
  *  Dart source lines. */
-function renderStore(store: StoreIR, contexts: readonly EnrichedBoundedContextIR[]): string[] {
+function renderStore(
+  store: StoreIR,
+  contexts: readonly EnrichedBoundedContextIR[],
+  persisted: FlutterPersistedStore | undefined,
+): string[] {
   const stateClass = storeStateClass(store.name);
   const notifierClass = storeNotifierClass(store.name);
   const aggregatesByName = new Map(
@@ -68,34 +83,36 @@ function renderStore(store: StoreIR, contexts: readonly EnrichedBoundedContextIR
     locals: new Map(),
   });
   const { entries, constEligible } = buildStateInits(fields, initCtx);
+  // The lifetime ladder (frontend-state-management.md §3.1): a persisted cell's
+  // declared initializer becomes its FALLBACK and the seed comes from the
+  // backing store instead (`store-persist.ts`), so turning `memory` into `local`
+  // never changes the first-run value.  A `const` construction is off the table
+  // once any seed is a runtime call.
+  const overrides = persisted ? persistInitOverrides(persisted) : new Map<string, string>();
+  // `buildStateInits` builds each entry as exactly `<name>: <expr>`, so the
+  // declared-default EXPRESSION is the tail past the known-length prefix (never
+  // a `split(": ")`, which a map/record literal in the initializer would break).
+  const defaults = new Map(fields.map((f, i) => [f.name, entries[i]!.slice(f.name.length + 2)]));
+  const seeded = fields.map((f, i) =>
+    overrides.has(f.name) ? `${f.name}: ${overrides.get(f.name)}` : entries[i]!,
+  );
+  const isConst = constEligible && overrides.size === 0;
   const buildReturn =
     fields.length > 0
-      ? `${constEligible ? "const " : ""}${stateClass}(${entries.join(", ")})`
+      ? `${isConst ? "const " : ""}${stateClass}(${seeded.join(", ")})`
       : `const ${stateClass}()`;
 
-  // The lifetime ladder (frontend-state-management.md §3.1) is NOT ported: Dart
-  // has no `localStorage`/query-string equivalent in the core SDK, so
-  // `persist: local|session|url` would need `shared_preferences` + a router
-  // rewrite.  Downgrading to memory silently is the failure mode this whole
-  // pass exists to remove, so the divergence rides in the emitted source where
-  // a reader (and a grep) will find it.
-  const lifetimeNote =
-    store.lifetime === "memory"
-      ? []
-      : [
-          `// TODO(flutter full-parity): \`persist: ${store.lifetime}\` is not implemented —`,
-          "// this store is IN-MEMORY (state is lost on restart / not shareable by URL).",
-        ];
   const out: string[] = [
-    ...lifetimeNote,
     ...renderStateDataClass(stateClass, fields),
     "",
     `class ${notifierClass} extends Notifier<${stateClass}> {`,
     "  @override",
     `  ${stateClass} build() {`,
+    ...(persisted ? persistBuildPrologue(persisted) : []),
     `    return ${buildReturn};`,
     "  }",
   ];
+  if (persisted) out.push(...persistNotifierMembers(persisted, defaults, stateClass));
   for (const action of store.actions) {
     const param = action.params[0];
     const locals = new Map<string, string>();
@@ -133,16 +150,26 @@ function renderStore(store: StoreIR, contexts: readonly EnrichedBoundedContextIR
 export function renderFlutterStores(
   stores: readonly StoreIR[],
   contexts: readonly EnrichedBoundedContextIR[],
+  /** The `persist:` classification for this ui's stores (`store-persist.ts`) —
+   *  empty when every store is `memory`, which keeps the emitted file
+   *  byte-identical to the pre-persistence output. */
+  persisted: readonly FlutterPersistedStore[] = [],
 ): string | undefined {
   if (stores.length === 0) return undefined;
+  const byName = new Map(persisted.map((p) => [p.store.name, p]));
+  const urlSync = renderUrlStoreSync(persisted);
   const header = [
     "// Riverpod store modules — one `<Store>State` / `<Store>Notifier` /",
     "// `<store>Provider` per `store <Name> { … }`.  Generated by the Loom Flutter",
     "// target; do not edit.",
     "",
+    // `LoomUrlStoreSync` is a widget (`WidgetsBindingObserver`/`RouteInformation`),
+    // so the url tier — and only it — pulls the Material/widgets library in.
+    ...(urlSync.length > 0 ? ["import 'package:flutter/material.dart';"] : []),
     "import 'package:flutter_riverpod/flutter_riverpod.dart';",
   ];
+  if (persisted.length > 0) header.push("", "import 'store_persist.dart';");
   if (needsModels(stores)) header.push("", "import 'models.dart';");
-  const bodies = stores.map((s) => renderStore(s, contexts).join("\n"));
-  return `${[...header, "", bodies.join("\n\n")].join("\n")}\n`;
+  const bodies = stores.map((s) => renderStore(s, contexts, byName.get(s.name)).join("\n"));
+  return `${[...header, "", bodies.join("\n\n"), ...urlSync].join("\n")}\n`;
 }

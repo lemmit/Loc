@@ -94,13 +94,16 @@ import { validateE2ETest } from "./test-checks.js";
 // just a string/uuid and doesn't depend on a display label.
 // ---------------------------------------------------------------------------
 
-// `auth: ui` (the frontend OIDC guard) is emitted by the React, Vue, Svelte,
-// Angular and Feliz generators (`generator/feliz/auth-gate.ts` — the Elmish
-// session model + `AuthGate` view, driven end-to-end by the `authgate`
-// scenario in `generated-feliz-build.yml`).  A deployable whose resolved UI
-// framework is none of those (flutter) would silently emit no guard — reject
-// it loudly so the limitation is visible rather than a no-op.
-const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular", "feliz"]);
+// `auth: ui` (the frontend OIDC guard) is emitted by every shipped frontend
+// generator: React, Vue, Svelte, Angular, Feliz (`generator/feliz/auth-gate.ts`
+// — the Elmish session model + `AuthGate` view, driven end-to-end by the
+// `authgate` scenario in `generated-feliz-build.yml`) and Flutter
+// (`generator/flutter/auth-gate.ts` — the `sessionProvider` probe, the `AuthGate`
+// wrapper around `MaterialApp`, and the `ForbiddenView` page guard).  The set is
+// KEPT, not deleted: it is the seam a new frontend gates on until it ports, and
+// the diagnostic below is its message — a deployable whose resolved UI framework
+// is absent would otherwise silently emit no guard at all.
+const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular", "feliz", "flutter"]);
 
 // paged-run (paged-queryHandler): a `queryHandler H(...): <Agg> paged` is
 // emitted by each backend whose explicit-handler emitter has grown the paged
@@ -636,6 +639,10 @@ const SSE_REALTIME_FRONTENDS = new Set<string>([
   "svelte",
   "angular",
   "feliz",
+  // Flutter subscribes through `generator/flutter/realtime.ts` — the browser's
+  // own `EventSource` on the web, a line parser over a streamed `package:http`
+  // response natively, behind one conditional-import façade.
+  "flutter",
   "static",
 ]);
 // Frontends that realize realtime NATIVELY (Phoenix LiveView pushes over its
@@ -644,10 +651,12 @@ const NATIVE_REALTIME_FRONTENDS = new Set<string>(["elixir", "phoenixLiveView"])
 
 /** Honesty gate for `on <channel>.<Event>` live-event handlers (channels.md
  *  Part I).  A handler on a ui whose serving frontend can't consume realtime
- *  — a framework with no realtime path (e.g. `flutter`), or an SSE-consuming
- *  frontend pointed at a backend that doesn't serve the SSE wire (e.g. a react
- *  ui targeting the Phoenix/Elixir backend) — compiles clean today but emits
- *  nothing.  Warn so the silent drop is a reviewed decision, not a surprise.
+ *  — a framework with no realtime path, or an SSE-consuming frontend pointed
+ *  at a serving deployable that doesn't stream the SSE wire — compiles clean
+ *  today but emits nothing.  Warn so the silent drop is a reviewed decision,
+ *  not a surprise.  Neither arm names a shipped pairing any more (all six
+ *  frontends consume, all five backends serve); both stay as the seam the
+ *  next target gates on.
  *
  *  Capability-driven (the two frontend sets + `backendServesRealtime`) rather
  *  than hard-coding a frontend list, so a future frontend without the wire
@@ -682,7 +691,10 @@ export function validateUiRealtimeSupport(sys: SystemIR, diags: LoomDiagnostic[]
         });
         continue;
       }
-      // Unknown / non-consuming frontend (e.g. flutter) — no realtime path.
+      // Unknown / non-consuming frontend — no realtime path.  No SHIPPED
+      // frontend sits here any more (flutter was the last, and joined
+      // `SSE_REALTIME_FRONTENDS`); this is the seam a new one warns on until it
+      // grows realtime consumption.
       diags.push({
         severity: "warning",
         code: "loom.ui-realtime-unsupported",

@@ -314,8 +314,11 @@ system S {
   deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
 }`,
 
-  // `persist: local|session|url` is dropped to in-memory by the feliz and
-  // flutter store emitters — an honest error until they implement the ladder.
+  // The `persist:` ladder now ships on EVERY frontend, so the platform-wide arm
+  // of this code is gone; what remains is field-scoped.  Persistence on feliz
+  // and flutter crosses an untyped boundary per field, so a cell whose type has
+  // no total conversion in that language's codec (here a `datetime` on feliz)
+  // is refused rather than silently dropped from the stored blob.
   "loom.store-lifetime-target-unsupported": `
 system S {
   subdomain Sub { context C {
@@ -323,15 +326,15 @@ system S {
   } }
   api Api from Sub
   ui WebApp {
-    framework: flutter
+    framework: feliz
     api C: Api
-    store Cart persist: local { state { count: int = 0 } }
-    page Home { route: "/"  body: Stack { Heading { Cart.count, level: 3 } } }
+    store Cart persist: local { state { seenAt: datetime } }
+    page Home { route: "/"  body: Stack { Heading { "hi", level: 3 } } }
   }
   storage pg { type: postgres }
   resource st { for: C, kind: state, use: pg }
   deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
-  deployable web { platform: flutter targets: api ui: WebApp { C: api } port: 3001 }
+  deployable web { platform: feliz targets: api ui: WebApp { C: api } port: 3001 }
 }`,
 
   // A resource handle is ambient over the whole context, but only the
