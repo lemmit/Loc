@@ -168,7 +168,13 @@ function renderRoomScopedHub(ns: string, types: string[], plan: RealtimeRoomPlan
   const idFieldEntries = tenantTypes
     .map((t) => {
       const fields = plan.eventIdFields.get(t) ?? [];
-      return `        { "${t}", new[] { ${fields.map((f) => `"${f}"`).join(", ")} } },`;
+      // `new[] { }` is CS0826 (no best type) — an id-less tenant-scoped event
+      // (the fail-closed classification) needs the explicit empty array.
+      const arr =
+        fields.length > 0
+          ? `new[] { ${fields.map((f) => `"${f}"`).join(", ")} }`
+          : "System.Array.Empty<string>()";
+      return `        { "${t}", ${arr} },`;
     })
     .join("\n");
   return `// Auto-generated.
