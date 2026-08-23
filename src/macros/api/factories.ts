@@ -712,6 +712,79 @@ export function cloneTypeRef(t: TypeRef): TypeRef {
   return namedType((b as { target: { $refText: string } }).target.$refText, opts);
 }
 
+/**
+ * Deep-copy an author-written expression so a macro can attach it somewhere
+ * ELSE.
+ *
+ * A Langium AST node has exactly ONE `$container`, so re-using the author's
+ * node would RE-PARENT it — the expression would move to the macro's page and
+ * silently vanish from the declaration it was written on.  For a gate that is
+ * the worst possible failure: the propagated copy would look right while the
+ * original guard disappeared.
+ *
+ * Macros run at phase ② — BEFORE scope/link at ③ — so every cross-reference is
+ * still just `$refText`; the copy is rebuilt unresolved (`makeRef`'s own shape)
+ * and links normally alongside the original.  Langium bookkeeping (`$container`
+ * / `$containerProperty` / `$containerIndex` / `$cstNode` / `$document`) is
+ * dropped and re-derived for the copy's own children, so the clone carries no
+ * span from the node it was copied from.
+ *
+ * Generic rather than per-kind (the way `cloneTypeRef` above is): `Expression`
+ * spans 17 node kinds plus postfix suffixes, call args, lambdas and match arms,
+ * and a hand-written arm per kind is a list that silently rots when the grammar
+ * grows one — exactly the failure `print-completeness.test.ts` exists to stop
+ * for the printers.
+ */
+export function cloneExpr<T extends Expression>(e: T): T {
+  return _cloneAstNode(e as unknown as Record<string, unknown>) as unknown as T;
+}
+
+/** True for a Langium cross-reference — `{ $refText, ref }` (see `makeRef`). */
+function _isRefLike(v: Record<string, unknown>): boolean {
+  return typeof v.$refText === "string";
+}
+
+function _cloneAstValue(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(_cloneAstValue);
+  if (v === null || typeof v !== "object") return v;
+  const o = v as Record<string, unknown>;
+  // A cross-reference is rebuilt UNRESOLVED: copying a live `ref` would alias
+  // the original's resolution and survive a later re-link.
+  if (_isRefLike(o)) return { $refText: o.$refText as string, ref: undefined };
+  if (typeof o.$type === "string") return _cloneAstNode(o);
+  return { ...o };
+}
+
+function _cloneAstNode(node: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { $type: node.$type };
+  for (const [k, v] of Object.entries(node)) {
+    if (k.startsWith("$")) continue; // bookkeeping — re-derived below
+    out[k] = _cloneAstValue(v);
+  }
+  _tag(out, _currentOrigin());
+  for (const [k, v] of Object.entries(out)) {
+    if (k.startsWith("$")) continue;
+    if (Array.isArray(v)) {
+      v.forEach((child, i) => {
+        if (
+          child &&
+          typeof child === "object" &&
+          typeof (child as Record<string, unknown>).$type === "string"
+        ) {
+          _setContainer(child, out, k, i);
+        }
+      });
+    } else if (
+      v &&
+      typeof v === "object" &&
+      typeof (v as Record<string, unknown>).$type === "string"
+    ) {
+      _setContainer(v, out, k);
+    }
+  }
+  return out;
+}
+
 /** The AST twin of the IR wire-projection `forApiRead(wireShape)`
  * (`src/ir/enrich/wire-projection.ts` + `wireFieldsForAggregate` in
  * `enrichments.ts`): the ordered field list an aggregate's `<Agg>Response`

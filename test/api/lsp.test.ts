@@ -17,6 +17,37 @@ const BARE = `context Sales {
 }
 `;
 
+// A react deployable with no `ui:` binding and TWO system-scope `ui { … }`
+// blocks — `missingUiFix`'s ambiguous path, which yields `kind: "choose"`.
+const CHOOSE = `system Shop {
+  context Orders {
+    aggregate Order { name: string }
+    repository Orders for Order { }
+  }
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  api ShopApi from Orders
+  ui Admin {
+    area Back {
+      page AdminBoard {
+        route: "/admin"
+        body: Text { "admin" }
+      }
+    }
+  }
+  ui Storefront {
+    area Front {
+      page Shelf {
+        route: "/shelf"
+        body: Text { "shelf" }
+      }
+    }
+  }
+  deployable honoApi { platform: node contexts: [Orders] dataSources: [ordersState] serves: ShopApi port: 3000 }
+  deployable webApp { platform: react targets: honoApi port: 3001 }
+}
+`;
+
 /** Apply LSP TextEdits to a source (line/char → offset, end-to-start). */
 function applyTextEdits(
   source: string,
@@ -66,5 +97,34 @@ describe("LSP adapters", () => {
     // …and it matches what the patch applier produces from the same patch.
     const viaPatch = await applyPatches(BARE, [report.diagnostics[0]!.fixHint!.patch!]);
     expect(fixed).toBe(viaPatch.text);
+  });
+
+  it("fixHintCodeActions expands a `choose` hint into one action per option", async () => {
+    const report = await validate(CHOOSE);
+    const hint = report.diagnostics.find(
+      (d) => d.code === "loom.react-deployable-missing-ui",
+    )?.fixHint;
+    expect(hint?.kind, "fixture must produce the multi-option `choose` hint").toBe("choose");
+    expect(hint?.options?.length).toBe(2);
+
+    const actions = await fixHintCodeActions(report, CHOOSE, "file:///m.ddd");
+    const choose = actions.filter(
+      (a) => a.diagnostics?.[0]?.code === "loom.react-deployable-missing-ui",
+    );
+    expect(choose.map((a) => a.title)).toEqual(["ui: Admin", "ui: Storefront"]);
+    // No single right answer → nothing is marked preferred.
+    for (const a of choose) expect(a.isPreferred).toBeUndefined();
+
+    // Each option's WorkspaceEdit applies cleanly and binds the ui it names.
+    for (const [i, name] of ["Admin", "Storefront"].entries()) {
+      const edits = choose[i]?.edit?.changes?.["file:///m.ddd"] ?? [];
+      expect(edits.length).toBe(1);
+      const applied = applyTextEdits(CHOOSE, edits);
+      expect(applied).toContain(`ui: ${name}`);
+      expect(applied).toBe(
+        (await applyPatches(CHOOSE, [hint!.options![i]!.patch!])).text,
+        "editor edit must match the patch applier for the same option",
+      );
+    }
   });
 });

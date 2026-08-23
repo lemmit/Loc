@@ -11,6 +11,47 @@ import { parseString } from "../_helpers/parse.js";
 // self-suggesting-loop proof: diagnostic → fixHint → applyPatches → green.
 // ---------------------------------------------------------------------------
 
+/** The report for one source (the shape every case starts from). */
+async function reportFor(src: string) {
+  const { doc, model, diagnostics } = await parseString(src);
+  return buildValidateReport({
+    modelPath: "m.ddd",
+    langiumDiagnostics: diagnostics,
+    doc,
+    irDiagnostics: [],
+    model,
+  });
+}
+
+/**
+ * The whole point of a fix-hint: apply it and the model is CLEAN.
+ *
+ * Asserts the diagnostic carries a hint, applies the patch, re-parses, and
+ * requires (a) the diagnostic is GONE and (b) no error at all remains — every
+ * fixture below carries exactly one defect, so a leftover error is a new one
+ * the fix introduced.  Returns the patched source for per-case shape asserts.
+ */
+async function closesTheLoop(
+  src: string,
+  code: string,
+  expect_: { kind: string; op: string },
+): Promise<string> {
+  const report = await reportFor(src);
+  const hint = report.diagnostics.find((d) => d.code === code)?.fixHint;
+  expect(hint, `no fixHint on ${code}`).toBeDefined();
+  expect(hint?.kind).toBe(expect_.kind);
+  expect(hint?.patch?.op).toBe(expect_.op);
+
+  const applied = await applyPatches(src, [hint?.patch as ModelPatch]);
+  expect(applied.errors).toEqual([]);
+  expect(applied.ok).toBe(true);
+
+  const after = await parseString(applied.text);
+  expect(after.diagnostics.some((d) => d.code === code)).toBe(false);
+  expect(after.errors).toEqual([]);
+  return applied.text;
+}
+
 const BAD = `context Sales {
   aggregate Order {
     customer: Customer
@@ -221,5 +262,235 @@ describe("fix-hints", () => {
     const { diagnostics: after } = await parseString(applied.text);
     expect(after.some((d) => d.code === "loom.es-tph-forced-own-table")).toBe(false);
     expect(after.some((d) => (d.data as { code?: string })?.code === "parsing-error")).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // The `data` channel — a validator that already COMPUTED the repair hands it
+  // over as structured data, so the provider doesn't re-derive it (or scrape it
+  // back out of the message prose).
+  // -------------------------------------------------------------------------
+
+  const TYPO = `context Sales {
+  aggregate Order {
+    qty: int
+    operation bump(by: int) { qty := qtyy + by }
+  }
+}`;
+
+  it("unknown-name: the did-you-mean suggestion reaches the provider on `data`", async () => {
+    const { doc, model, diagnostics } = await parseString(TYPO);
+    // End to end: the validator's `data` survives onto the LSP Diagnostic …
+    const raw = diagnostics.find((d) => d.code === "loom.unknown-name");
+    expect(raw?.data).toEqual({ suggestion: "qty" });
+    // … and the provider turns it into a patch that swaps just the typo.
+    const report = buildValidateReport({
+      modelPath: "m.ddd",
+      langiumDiagnostics: diagnostics,
+      doc,
+      irDiagnostics: [],
+      model,
+    });
+    const hint = report.diagnostics.find((d) => d.code === "loom.unknown-name")?.fixHint;
+    expect(hint?.summary).toBe("Did you mean 'qty'?");
+    expect(hint?.patch).toMatchObject({
+      op: "replace",
+      target: "operation Sales.Order.bump",
+      source: "operation bump(by: int) { qty := qty + by }",
+    });
+  });
+
+  it("unknown-name: applying the suggestion closes the loop", async () => {
+    const fixed = await closesTheLoop(TYPO, "loom.unknown-name", {
+      kind: "replace-text",
+      op: "replace",
+    });
+    expect(fixed).toContain("qty := qty + by");
+  });
+
+  it("unknown-name: no hint when the validator computed no suggestion", async () => {
+    // `zzzzzzzz` is nowhere near an in-scope name, so `suggest` returns
+    // undefined, no `data` is attached, and the provider stays silent.
+    const report = await reportFor(`context Sales {
+  aggregate Order {
+    qty: int
+    operation bump(by: int) { qty := zzzzzzzz + by }
+  }
+}`);
+    const d = report.diagnostics.find((x) => x.code === "loom.unknown-name");
+    expect(d).toBeDefined();
+    expect(d?.fixHint).toBeUndefined();
+  });
+
+  // -------------------------------------------------------------------------
+  // Drop-the-rejected-marker batch
+  // -------------------------------------------------------------------------
+
+  it("entity-field-optional-collection: drops the '?' (round-trip clean)", async () => {
+    const fixed = await closesTheLoop(
+      `context Sales {
+  aggregate Order {
+    entity Line { qty: int }
+    lines: Line[]?
+  }
+}`,
+      "loom.entity-field-optional-collection",
+      { kind: "replace-text", op: "replace" },
+    );
+    expect(fixed).toContain("lines: Line[]");
+    expect(fixed).not.toContain("Line[]?");
+  });
+
+  it("entity-field-modifier: drops a flag modifier (round-trip clean)", async () => {
+    const fixed = await closesTheLoop(
+      `context Sales {
+  aggregate Order {
+    entity Line { qty: int }
+    line: Line provenanced
+  }
+}`,
+      "loom.entity-field-modifier",
+      { kind: "replace-text", op: "replace" },
+    );
+    expect(fixed).toContain("line: Line\n");
+    expect(fixed).not.toContain("provenanced");
+  });
+
+  it("entity-field-modifier: drops `= default` including the `=` (round-trip clean)", async () => {
+    // The diagnostic's range covers only the default EXPRESSION, so the cut has
+    // to extend back over the `=` or the remainder wouldn't parse.  (The
+    // companion "default has type int but the field is declared Line" error is
+    // the same defect seen by the type checker; it clears with the same fix.)
+    const fixed = await closesTheLoop(
+      `context Sales {
+  aggregate Order {
+    entity Line { qty: int }
+    line: Line = 1
+  }
+}`,
+      "loom.entity-field-modifier",
+      { kind: "replace-text", op: "replace" },
+    );
+    expect(fixed).toContain("line: Line\n");
+    expect(fixed).not.toContain("= 1");
+  });
+
+  it("entity-field-modifier: drops `check … message …` whole (round-trip clean)", async () => {
+    const fixed = await closesTheLoop(
+      `context Sales {
+  aggregate Order {
+    entity Line { qty: int }
+    line: Line check 1 > 0 message "nope"
+  }
+}`,
+      "loom.entity-field-modifier",
+      { kind: "replace-text", op: "replace" },
+    );
+    expect(fixed).toContain("line: Line\n");
+    expect(fixed).not.toMatch(/check|message/);
+  });
+
+  it("test-redundant-for: drops the redundant `for` head (round-trip clean)", async () => {
+    const fixed = await closesTheLoop(
+      `context Sales {
+  aggregate Order {
+    qty: int
+    test "keeps qty" for Order { expect(1).toBe(1) }
+  }
+}`,
+      "loom.test-redundant-for",
+      { kind: "replace-text", op: "replace" },
+    );
+    expect(fixed).toContain(`test "keeps qty" { expect(1).toBe(1) }`);
+  });
+
+  it("test-redundant-for: no hint for the context-nested variant (unaddressable)", async () => {
+    // A `test` sitting beside its aggregate in the context is not in the patch
+    // applier's address space, so the provider declines rather than emitting a
+    // target `applyPatches` would reject.
+    const report = await reportFor(`context Sales {
+  aggregate Order { qty: int }
+  test "hoisted" for Sales { expect(1).toBe(1) }
+}`);
+    const d = report.diagnostics.find((x) => x.code === "loom.test-redundant-for");
+    expect(d).toBeDefined();
+    expect(d?.fixHint).toBeUndefined();
+  });
+
+  it("cross-aggregate-entity-part is unreachable — a foreign part never links", async () => {
+    // Why there is no provider for it: the scope provider filters entity parts
+    // of OTHER aggregates out of every bare-name type position, so the
+    // reference fails linking and `checkTypeReferences` never sees a resolved
+    // foreign part.  Pinned so the drop is a fact, not an assumption.
+    const { diagnostics } = await parseString(`context Sales {
+  aggregate Order {
+    line: Line
+  }
+  aggregate Invoice {
+    entity Line { qty: int }
+  }
+}`);
+    expect(diagnostics.some((d) => d.code === "loom.cross-aggregate-entity-part")).toBe(false);
+    expect(diagnostics.some((d) => (d.data as { code?: string })?.code === "linking-error")).toBe(
+      true,
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // Insert-a-header-clause batch
+  // -------------------------------------------------------------------------
+
+  it("applier-on-non-event-sourced: inserts `persistedAs: eventLog` (round-trip clean)", async () => {
+    const fixed = await closesTheLoop(
+      `context Core {
+  event Bumped { counter: Counter id, by: int }
+  aggregate Counter {
+    total: int
+    operation bump(by: int) { emit Bumped { counter: id, by: by } }
+    apply(e: Bumped) { total += e.by }
+  }
+}`,
+      "loom.applier-on-non-event-sourced",
+      { kind: "insert-decl", op: "insert" },
+    );
+    expect(fixed).toContain("aggregate Counter persistedAs: eventLog {");
+  });
+
+  it("applier-on-non-event-sourced: no hint when a `with` clause holds the header slot", async () => {
+    // `header-end` splices just before the `{`, which would land AFTER the
+    // trailing `with …` clause and no longer parse.
+    const report = await reportFor(`context Core {
+  event Bumped { counter: Counter id, by: int }
+  aggregate Counter with auditable {
+    total: int
+    operation bump(by: int) { emit Bumped { counter: id, by: by } }
+    apply(e: Bumped) { total += e.by }
+  }
+}`);
+    const d = report.diagnostics.find((x) => x.code === "loom.applier-on-non-event-sourced");
+    expect(d).toBeDefined();
+    expect(d?.fixHint).toBeUndefined();
+  });
+
+  it("workflow-applier-on-non-event-sourced: inserts `eventSourced` (round-trip clean)", async () => {
+    const fixed = await closesTheLoop(
+      `context Core {
+  aggregate Job persistedAs: eventLog {
+    label: string
+    create start() { emit Started { job: id } }
+    apply(e: Started) { label := "" }
+  }
+  event Started { job: Job id }
+  event Ticked { job: Job id, by: int }
+  workflow Counter {
+    jobId: Job id
+    total: int
+    create(s: Started) by s.job { emit Ticked { job: s.job, by: 1 } }
+    apply(t: Ticked) { total := total + t.by }
+  }
+}`,
+      "loom.workflow-applier-on-non-event-sourced",
+      { kind: "insert-decl", op: "insert" },
+    );
+    expect(fixed).toContain("workflow Counter eventSourced {");
   });
 });

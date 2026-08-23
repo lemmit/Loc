@@ -572,6 +572,19 @@ export function renderJavaEntity(
   });
 
   // --- operations ------------------------------------------------------------
+  // The `when` state gate (canCommand, criterion.md) rendered at the DOMAIN
+  // method entry.  `OrderService.<op>` emits the same check post-load so the
+  // HTTP answer (409 + problem envelope) is produced before the aggregate is
+  // touched; this line is what makes the refusal a property of the DOMAIN
+  // rather than of one transport, so the `@EventListener` workflow dispatcher,
+  // a saga cascade or an extern handler calling `aggregate.<op>()` directly
+  // refuses too (M-T6.38).
+  const whenGate = (op: (typeof operations)[number]): string | null =>
+    op.when
+      ? `        if (!(${renderJavaExpr(op.when, renderCtx)})) throw new DisallowedException(${JSON.stringify(
+          `operation '${op.name}' is not allowed in the current state of ${entity.name}.`,
+        )});`
+      : null;
   const opLines: string[] = [];
   for (const op of operations) {
     const usesUser = operationBodyUsesCurrentUser(op);
@@ -591,6 +604,8 @@ export function renderJavaEntity(
       // flow as before, only *what the hook is* changed (from an injected
       // application-layer handler to a domain-internal extension point).
       opLines.push(`    public void ${op.name}(${params}) {`);
+      const externGate = whenGate(op);
+      if (externGate) opLines.push(externGate);
       const body = renderJavaStatements(opBody, renderCtx, traceCtx);
       if (body.length > 0) opLines.push(body);
       const hookArgs = [
@@ -612,6 +627,8 @@ export function renderJavaEntity(
     const retUnion = options.operationReturnUnions?.get(op.name);
     const retType = op.returnType ? renderJavaType(op.returnType) : "void";
     opLines.push(`    ${visibility} ${retType} ${op.name}(${params}) {`);
+    const gate = whenGate(op);
+    if (gate) opLines.push(gate);
     // Chunked (one string per statement) rather than the pre-joined
     // `renderJavaStatements` here — `renderJavaStatements` IS
     // `chunks.join("\n")` by construction, so `body` below is byte-identical

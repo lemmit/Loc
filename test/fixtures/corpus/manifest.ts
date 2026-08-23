@@ -31,6 +31,11 @@ const ALL: readonly Backend[] = BACKENDS;
  *  `GetByIdForWriteAsync` write-scope member whose absence was the CS0535. */
 const IN_APP_DOCUMENT_FILTER: readonly Backend[] = ["node", "java", "python", "dotnet"];
 
+/** Backends that quote a reserved-word column everywhere they name it.  Java is
+ *  the one exclusion and it is a GAP, not a rejection — see `reserved-words`'
+ *  note and M-T6.43.  Widening this back to `ALL` is that mission's ratchet. */
+const QUOTES_RESERVED_IDENTIFIERS: readonly Backend[] = ["node", "dotnet", "python", "vanilla"];
+
 export interface CorpusFeature {
   /** Matches `<id>.ddd` in this directory. */
   readonly id: string;
@@ -102,6 +107,14 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "stamps", title: "lifecycle stamps (audit timestamps via stamp blocks)", doc: "capabilities", backends: ALL },
   { id: "field-defaults", title: "field `= default` — omittable create input, declared value applied", doc: "language", backends: ALL },
   {
+    id: "reserved-words",
+    title:
+      "field names that are POSTGRES RESERVED WORDS (`order` / `group` / `limit`) — every SQL writer has to quote its identifiers",
+    doc: "language",
+    backends: QUOTES_RESERVED_IDENTIFIERS,
+    note: "Minted by M-T6.42.  The class was unexercised: no fixture named a reserved word, so the Dapper adapter's bare identifiers (DDL *and* DML) were invisible to every gate — the C# compiles because the SQL is a string literal, and `schema-load` covered only the MIGRATION chain, which that adapter does not use.  Covers four clause positions a partial fix would miss: CREATE TABLE, the SELECT/INSERT column lists, a `find` WHERE, a retrieval ORDER BY, and CREATE INDEX.  Deliberately NOT a host-language-keyword test (`is` / `default` / `class` break the generated DTO, a different class no backend claims).  JAVA IS EXCLUDED FOR A GAP, NOT A REJECTION: it generates and COMPILES, then 500s on the first insert, because the JPA entity emits `@Column(name = \"order\")` bare and Hibernate writes `insert into ... (order, group, limit, ...)`.  Found by running this fixture's behavioural leg on a real booted Spring Boot + Postgres while landing M-T6.42; tracked as M-T6.43, whose ratchet is widening this row back to ALL.  Declaring java here today would make the row a false coverage claim.",
+  },
+  {
     id: "vo-field-default",
     title:
       "VALUE-OBJECT-typed field default — the wire boundary renders a non-scalar default differently from a scalar one",
@@ -117,7 +130,7 @@ export const CORPUS: readonly CorpusFeature[] = [
     title: "seed data read back — the seeder's rows through a collection read, and the opt-in dataset gate",
     doc: "language",
     backends: ALL,
-    note: "Split from `seeding` so the two halves can have different BEHAVIOURAL reach: this one reads a collection (the only route class that can see seed rows, and therefore the only one whose body differs on a leg that starts empty), so it is held off the elixir behavioural leg — which emits no seeder at all (B19 / M-T6.37) — via BEHAVIOURAL_SKIP, while `seeding` keeps its CRUD/FK/404 round-trip armed on all five. `backends` stays ALL because GENERATION (what this field gates) is clean everywhere, including elixir; only the boot lacks rows.",
+    note: "Split from `seeding` so the two halves can have different BEHAVIOURAL reach: this one reads a collection (the only route class that can see seed rows, and therefore the only one whose body differs on a leg that starts empty), so it was held off the elixir behavioural leg — which emitted no seeder at all (B19) — via BEHAVIOURAL_SKIP, while `seeding` kept its CRUD/FK/404 round-trip armed on all five. M-T6.37 landed the Ecto seeder and that skip is deleted, so this case now runs on all five legs too; the split stays because it is what kept the five-backend coverage armed while one leg was odd.",
   },
   { id: "resources", title: "external resources — objectStore / queue / http api / mailer (smtp) clients", doc: "resources", backends: ALL },
   {

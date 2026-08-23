@@ -144,9 +144,13 @@ describe("python routes", () => {
     const routes = files.get("api/app/http/order_routes.py")!;
     // The implicit findAll is paged (M-T2.6) for this plain relational
     // aggregate — the list GET carries the `OrderPaged` envelope.
-    expect(routes).toContain('@router.get("", response_model=OrderPaged, operation_id="allOrder")');
+    // Both declare the 422 they answer for a bad `?page=` / a non-uuid `{id}`
+    // (schemathesis F6 — the shared matrix + `findValidatesRequest`).
     expect(routes).toContain(
-      '@router.get("/{id}", response_model=OrderResponse, operation_id="getOrderById", responses={404: {"model": ProblemDetails, "description": "Not Found"}})',
+      '@router.get("", response_model=OrderPaged, operation_id="allOrder", responses={422: {"model": ProblemDetails, "description": "Unprocessable Entity"}})',
+    );
+    expect(routes).toContain(
+      '@router.get("/{id}", response_model=OrderResponse, operation_id="getOrderById", responses={404: {"model": ProblemDetails, "description": "Not Found"}, 422: {"model": ProblemDetails, "description": "Unprocessable Entity"}})',
     );
     expect(routes).toContain("return repo.to_wire(await repo.get_by_id(OrderId(id)))");
   });

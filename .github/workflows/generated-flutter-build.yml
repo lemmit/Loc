@@ -128,6 +128,18 @@ jobs:
                 aggregate Product {
                   name: string  price: int  inStock: bool  status: Status  note: string?  cost: Money
                   category: Category id  tags: string[]  lines: LineItem[]
+                  // File as an AGGREGATE FIELD (not just page state).  `File`
+                  // already spells the NULLABLE `FileRef?` in Dart, so the model
+                  // emitter used to double the marker (`final FileRef?? spec;`,
+                  // `FileRef?? manual` in copyWith) and call `.toJson()` on a
+                  // nullable receiver — Dart that does not parse.  Both
+                  // optionalities are here because they took DIFFERENT wrong
+                  // turns.  The in-FORM half rides along: NewProduct's
+                  // CreateForm now hosts two `file` inputs (pick -> multipart
+                  // POST /files -> FileRef), which `flutter analyze` is what
+                  // proves compiles.  The old fixture had File only in page
+                  // state, so this whole class was unguarded.
+                  manual: File  spec: File?
                   operation rename(newName: string) { name := newName }
                   operation restock(): Product or OutOfStock { inStock := true }
                 }

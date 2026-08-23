@@ -369,8 +369,16 @@ export function emitQueryView(
   // view (see `_walker/history-read.ts`).  Bail BEFORE `emitExpr` below, which
   // is what registers the read: on Feliz/Flutter that registration is the
   // damage (a Model field / provider nothing emits), not the rendering.
+  //
+  // The notice is VISIBLE, not a comment.  The scaffolded History card renders
+  // its frame and its "History" heading regardless, so a comment left the
+  // reader an empty panel that reads as "this entity was never touched" —
+  // exactly the lie the `QueryView` wrapper exists to prevent for an in-flight
+  // read.  Say it on the page; the placeholder disappears when the target
+  // joins `HISTORY_CAPABLE_FRAMEWORKS`.
   if (skipsEntityHistoryRead(ctx.target.framework, ofArg, ctx.aggregatesByName)) {
-    return ctx.target.renderComment(`entity history not yet supported on ${ctx.target.framework}`);
+    const text = `History is not yet supported on ${ctx.target.framework}`;
+    return ctx.target.renderNotice?.(text) ?? ctx.target.renderComment(text);
   }
   // Render the query expression; this triggers `tryDetectApiHook`
   // so the page-shell registers the matching `useAll<X>()` (or

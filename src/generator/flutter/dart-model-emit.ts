@@ -36,7 +36,14 @@ import type {
   ProjectionIR,
   TypeIR,
   ValueObjectIR,
+  WireField,
 } from "../../ir/types/loom-ir.js";
+import {
+  AUDIT_ENTRY_TYPE,
+  AUDIT_FIELD_CHANGE_TYPE,
+  auditEntryWireShape,
+  auditFieldChangeWireShape,
+} from "../../ir/util/audit-history.js";
 import { isFrontendReadableProjection } from "../../ir/util/projection-read.js";
 import { lines } from "../../util/code-builder.js";
 import { upperFirst } from "../../util/naming.js";
@@ -56,6 +63,12 @@ export interface DartField {
 export interface DartRecord {
   className: string;
   fields: DartField[];
+  /** Read-only wire model — never the target of a nested page-state write, so
+   *  skip the `copyWith`.  Load-bearing for the audit models: `copyWith` spells
+   *  every param as the nullable `<T>?`, and a `json` field's Dart type is
+   *  `dynamic` — `dynamic?` is an `unnecessary_question_mark` analyzer error
+   *  under flutter_lints, not just noise. */
+  omitCopyWith?: boolean;
 }
 
 /** Peel a single `optional` layer (optionality is carried by `DartField`). */
@@ -63,11 +76,28 @@ function base(t: TypeIR): TypeIR {
   return t.kind === "optional" ? t.inner : t;
 }
 
+/** The Dart type spelling for a field — `dartType` of the peeled base, with the
+ *  `?` the `DartField.optional` flag carries appended ONLY when the base
+ *  spelling isn't already nullable.  A `File` primitive spells `FileRef?` on its
+ *  own (`dart-types.ts` — a File holds a FileRef-or-nothing), so blindly
+ *  appending produced the non-parsing `FileRef??`.  Mirrors the sibling
+ *  `buildStateFields` rule in `riverpod-emit.ts` (`dt.endsWith("?")`). */
+function dartFieldType(f: DartField): string {
+  const dt = dartType(base(f.type));
+  return f.optional && !dt.endsWith("?") ? `${dt}?` : dt;
+}
+
+/** Whether the field's DART type is nullable — the only correct test for
+ *  null-guarding `fromJson` / `toJson`.  The IR `optional` flag is NOT it: a
+ *  required `File` field is non-optional on the wire yet nullable in Dart, and
+ *  keying off `optional` emitted `blob.toJson()` on a nullable receiver. */
+function isNullableField(f: DartField): boolean {
+  return dartFieldType(f).endsWith("?");
+}
+
 /** The `final <type> <name>;` field declaration line. */
 function fieldDecl(f: DartField): string {
-  const b = base(f.type);
-  const t = dartType(b) + (f.optional ? "?" : "");
-  return `  final ${t} ${f.name};`;
+  return `  final ${dartFieldType(f)} ${f.name};`;
 }
 
 /** The constructor parameter for a field — `required this.x` for a required
@@ -79,7 +109,7 @@ function ctorParam(f: DartField): string {
 /** The `fromJson` entry decoding one field out of the JSON map. */
 function fromJsonEntry(f: DartField): string {
   const access = `json['${f.name}']`;
-  if (f.optional) {
+  if (isNullableField(f)) {
     return `        ${f.name}: ${access} == null ? null : ${dartFromJson(base(f.type), access)},`;
   }
   return `        ${f.name}: ${dartFromJson(f.type, access)},`;
@@ -87,7 +117,7 @@ function fromJsonEntry(f: DartField): string {
 
 /** The `toJson` entry encoding one field into the JSON map. */
 function toJsonEntry(f: DartField): string {
-  if (f.optional && !isIdentityJson(base(f.type))) {
+  if (isNullableField(f) && !isIdentityJson(base(f.type))) {
     return `        '${f.name}': ${f.name} == null ? null : ${dartToJson(base(f.type), `${f.name}!`)},`;
   }
   return `        '${f.name}': ${dartToJson(f.type, f.name)},`;
@@ -97,9 +127,8 @@ function toJsonEntry(f: DartField): string {
  *  omitted arg keeps `this` (`field ?? this.field`).  A field that is already
  *  optional keeps its single `?`. */
 function copyWithParam(f: DartField): string {
-  const b = base(f.type);
-  const t = dartType(b);
-  return `    ${t}? ${f.name},`;
+  const t = dartFieldType(f);
+  return `    ${t.endsWith("?") ? t : `${t}?`} ${f.name},`;
 }
 
 /** The `copyWith` body entry — `field: field ?? this.field`. */
@@ -144,7 +173,7 @@ export function renderDartModel(record: DartRecord): string {
     "  Map<String, dynamic> toJson() => {",
     ...fields.map(toJsonEntry),
     "      };",
-    ...copyWithMethod(className, fields),
+    ...(record.omitCopyWith ? [] : copyWithMethod(className, fields)),
     "}",
   );
 }
@@ -201,6 +230,48 @@ export function dartRecordForProjection(proj: ProjectionIR): DartRecord {
     className: `${upperFirst(proj.name)}Row`,
     fields: (proj.wireShape ?? []).map(toDartField),
   };
+}
+
+/** A history wire field → `DartField`.  One deviation from `toDartField`: a
+ *  `json` leaf spells `dynamic` in Dart, which is ALREADY nullable — carrying
+ *  the wire `optional` flag through would emit `dynamic?`, an
+ *  `unnecessary_question_mark` analyzer error under flutter_lints.  The decode
+ *  is unchanged either way (a `json` value passes through `fromJson`/`toJson`
+ *  as identity, null included). */
+function auditDartField(w: WireField): DartField {
+  const isJson = w.type.kind === "primitive" && w.type.name === "json";
+  return { name: w.name, type: w.type, optional: w.optional && !isJson };
+}
+
+/** The two entity-history wire models (docs/audit.md) — `AuditFieldChange` and
+ *  `AuditEntry`, built off the SAME canonical wire shapes every backend serves
+ *  (`auditEntryWireShape` / `auditFieldChangeWireShape` in
+ *  `ir/util/audit-history.ts`), so the Dart decode lines up with the
+ *  `GET /<coll>/{id}/history` route by construction.  `changes` is `json[]` on
+ *  the wire (TypeIR has no nested-record leaf); the client narrows the ELEMENT
+ *  to `AuditFieldChange` so `__c.field` resolves in the Timeline — the same
+ *  narrowing the JS clients' `z.array(AuditFieldChange)` does.  Both are
+ *  read-only (`omitCopyWith`) — see `DartRecord`. */
+export function dartAuditRecords(): DartRecord[] {
+  const changes: DartField = {
+    name: "changes",
+    type: { kind: "array", element: { kind: "entity", name: AUDIT_FIELD_CHANGE_TYPE } },
+    optional: false,
+  };
+  return [
+    {
+      className: AUDIT_FIELD_CHANGE_TYPE,
+      fields: auditFieldChangeWireShape().map(auditDartField),
+      omitCopyWith: true,
+    },
+    {
+      className: AUDIT_ENTRY_TYPE,
+      fields: auditEntryWireShape().map((w) =>
+        w.name === "changes" ? changes : auditDartField(w),
+      ),
+      omitCopyWith: true,
+    },
+  ];
 }
 
 /** The Dart wire model for a record-shaped payload (command / query / response /
@@ -338,7 +409,7 @@ const FILE_REF_CLASS = lines(
 
 export function renderDartModels(
   contexts: readonly BoundedContextIR[],
-  opts: { fileRef?: boolean } = {},
+  opts: { fileRef?: boolean; auditEntry?: boolean } = {},
 ): string {
   const seen = new Set<string>();
   const blocks: string[] = [];
@@ -348,6 +419,10 @@ export function renderDartModels(
     seen.add(r.className);
     blocks.push(renderDartModel(r));
   };
+  // The entity-history entry DTOs (docs/audit.md) — only when the ui collects a
+  // history read (the `history` flag on a `FlutterRead`), so audit-free
+  // projects stay byte-identical.
+  if (opts.auditEntry) for (const r of dartAuditRecords()) addRecord(r);
   const addUnion = (p: PayloadIR, ctx: BoundedContextIR): void => {
     const name = upperFirst(p.name);
     if (!p.variants || seen.has(name)) return;

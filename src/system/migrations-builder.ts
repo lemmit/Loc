@@ -1,3 +1,4 @@
+import { MONEY_PRECISION, MONEY_WIRE_SCALE } from "../generator/money-scale.js";
 import { renderSqlScalarExpr } from "../generator/sql-pg-expr.js";
 import type {
   AggregateIR,
@@ -2616,11 +2617,14 @@ function primitiveColumnType(name: string): ColumnType {
     case "decimal":
       return { kind: "decimal" };
     case "money":
-      // `money` is a precise decimal — same column family as `decimal`
-      // (Drizzle numeric(19,4), Postgres NUMERIC).  sql-pg already renders
-      // money/decimal literals identically; mirror that here so a system
-      // with a money-primitive field derives migrations instead of throwing.
-      return { kind: "decimal" };
+      // `money` is a precise decimal — same column family as `decimal`, but
+      // BOUNDED: the canonical `NUMERIC(19,4)` every other layer already
+      // declares (`money-scale.ts`, the Drizzle/SQLAlchemy/MikroORM models).
+      // The DDL used to drop those bounds and create a bare `DECIMAL`, so the
+      // table and the ORM model that reads it disagreed, and the column kept
+      // whatever scale each backend happened to write — the storage half of
+      // #2549, and the reason node/python only looked correct there.
+      return { kind: "decimal", precision: MONEY_PRECISION, scale: MONEY_WIRE_SCALE };
     case "string":
       return { kind: "text" };
     case "bool":

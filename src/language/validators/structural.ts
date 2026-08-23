@@ -776,11 +776,11 @@ export function checkValueObject(vo: ValueObject, accept: ValidationAcceptor): v
         // Reserved derived names are aggregate-only — VOs don't
         // participate in `string(x)` lowering or host-language
         // `ToString()`/`Inspect` emission.
-        accept(
-          "error",
-          `Reserved 'derived ${m.name}' is only allowed on aggregates, not value objects.`,
-          { node: m, property: "name", code: `loom.reserved-derived-on-vo` },
-        );
+        accept("error", diagMessage("loom.reserved-derived-on-vo", { name: m.name }), {
+          node: m,
+          property: "name",
+          code: "loom.reserved-derived-on-vo",
+        });
       }
     }
   }

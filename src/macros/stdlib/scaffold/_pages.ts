@@ -6,11 +6,12 @@
 // macros and the top-level composer share one source of truth.
 
 import { plural, snake, upperFirst } from "../../../util/naming.js";
-import type { Aggregate, Area, Page, Ui, Workflow } from "../../api/index.js";
-import { area, boolLit, callExpr, page, stringLit } from "../../api/index.js";
+import type { Aggregate, Area, Expression, Page, Ui, Workflow } from "../../api/index.js";
+import { area, boolLit, callExpr, cloneExpr, page, stringLit } from "../../api/index.js";
 import {
   filterFindsForAggregate,
   filterStateFields,
+  listReadGateForAggregate,
   scaffoldDetailsParts,
   scaffoldHome,
   scaffoldInstanceDetails,
@@ -47,17 +48,50 @@ export function areaForAggregate(agg: Aggregate, ui: Ui): Area {
   return area(plural(agg.name), pagesForAggregate(agg, ui));
 }
 
-/** Whether the aggregate's implicit `all` is the paged `Paged<T>` findAll
- *  (M-T2.6) rather than a bare `T[]`.  Macro-time mirror of the enrichment
- *  exclusion in `ensureFindAll` (src/ir/enrich/enrichments.ts): only a plain
- *  single-table relational aggregate pages; event-sourced, `shape: document` /
- *  `shape: embedded`, and inheritance-subtype (`extends`) aggregates keep the
- *  unbounded `T[]` (their read path can't be a plain SQL `LIMIT/OFFSET` page),
- *  so their scaffold list stays CLIENT-paged. */
+/** Whether the aggregate's `all` read is the paged `Paged<T>` findAll (M-T2.6)
+ *  rather than a bare `T[]` — the fact the whole scaffolded list body hangs
+ *  off: a server-paged list calls `all(pageNum, 10, sortKey, sortDir)` and
+ *  unwraps `.items`, a client-paged one calls a bare `all` over an array.
+ *
+ *  Two cases, and the ORDER matters:
+ *
+ *  1. The author DECLARED `find all` on the aggregate's repository.  Then the
+ *     enrichment's `ensureFindAll` leaves it alone and the shape is whatever
+ *     was written, so the only honest answer is that find's own return type —
+ *     read here exactly the way the backends read it (`pagedReturn`, i.e. the
+ *     outermost `paged` carrier).  Guessing instead is what emitted a
+ *     `list_<agg>s(page, size, sort, dir)` call against the bare 0-arity
+ *     `defdelegate list_<agg>s()` the declared `T[]` find produces — a project
+ *     that fails `mix compile` (M-T6.40), with the same shape on the JSX
+ *     frontends (`useAllOrders()` called with four arguments).
+ *  2. No declared `all` — the read is the SYNTHESISED findAll, so mirror
+ *     `ensureFindAll`'s own exclusions (src/ir/enrich/enrichments.ts): only a
+ *     plain single-table relational aggregate pages; event-sourced,
+ *     `shape: document` / `shape: embedded`, and inheritance-subtype
+ *     (`extends`) aggregates keep the unbounded `T[]` (their read path can't be
+ *     a plain SQL `LIMIT/OFFSET` page), so their scaffold list stays
+ *     CLIENT-paged. */
 function aggregateHasPagedFindAll(agg: Aggregate): boolean {
+  const declaredAll = declaredFindAll(agg);
+  if (declaredAll) return declaredAll.returnType.ctors?.includes("paged") ?? false;
   return (
     agg.persistedAs !== "eventLog" && (agg.shape ?? "relational") === "relational" && !agg.superType
   );
+}
+
+/** The aggregate's AUTHOR-DECLARED `find all`, if its context declares a
+ *  repository for it that spells one out.  Macro-time twin of the context
+ *  emitters' `(ctx.repositories ?? []).find(r => r.aggregateName === agg.name)
+ *  ?.finds?.find(f => f.name === "all")`, so the scaffolded call site and the
+ *  emitted delegate read the SAME declaration. */
+function declaredFindAll(agg: Aggregate): { returnType: { ctors?: string[] } } | undefined {
+  for (const m of agg.$container.members) {
+    if (m.$type !== "Repository") continue;
+    if (m.aggregate.ref?.name !== agg.name && m.aggregate.$refText !== agg.name) continue;
+    const all = m.finds.find((f) => f.name === "all");
+    if (all) return all;
+  }
+  return undefined;
 }
 
 export function pagesForAggregate(agg: Aggregate, ui: Ui): Page[] {
@@ -66,10 +100,18 @@ export function pagesForAggregate(agg: Aggregate, ui: Ui): Page[] {
   const labelPlural = humanize(plural(aggName));
   const apiHandle = firstApiHandle(ui);
   const filters = filterFindsForAggregate(agg);
+  // The `find all(): T[] requires …` gate guards `GET /<aggs>` — the very read
+  // this List page makes.  Same reasoning as the workflow-instance pages: the
+  // nav link's visibility is rendered from the PAGE's gate, so without this the
+  // entry shows for a principal the backend refuses.  A find gate is
+  // `currentUser`-only by validation (`loom.find-gate-not-current-user`), so it
+  // ports to the client unchanged.
+  const listGate = listReadGateForAggregate(agg);
   return [
     page({
       name: "List",
       route: `/${pluralSnake}`,
+      requires: listGate ? cloneExpr(listGate) : undefined,
       // The full Breadcrumbs/Toolbar/QueryView/Table tree, emitted directly as
       // unfoldable source (no IR-phase sentinel expansion).  The find-filter
       // inputs bind to page state named by `filterStateFields`.
@@ -174,10 +216,22 @@ export function workflowIsObservable(wf: Workflow): boolean {
 export function pagesForWorkflowInstances(wf: Workflow): Page[] {
   const slug = snake(wf.name);
   const wfName = wf.name;
+  // The workflow's HEADER gate guards `GET /workflows/<wf>/instances[/{id}]`
+  // (M-T3.15 §A2) — the exact two routes these pages read.  Propagate it, or
+  // the scaffold emits a visible nav entry that 403s on click: `menu-emitter`
+  // renders a link's visibility from the PAGE's own `requires`, and knows
+  // nothing about the route's.  Cloned per page — an AST node has one
+  // `$container`, so sharing would move the gate off the workflow.
+  //
+  // Sound because a workflow header gate is `currentUser`-only by validation
+  // (`loom.workflow-gate-not-current-user`), which is precisely the subset a
+  // page gate can evaluate client-side.
+  const gate = (): Expression | undefined => (wf.gate ? cloneExpr(wf.gate) : undefined);
   return [
     page({
       name: `${upperFirst(wfName)}InstancesList`,
       route: `/workflows/${slug}/instances`,
+      requires: gate(),
       body: scaffoldInstanceList(wf),
       menu: {
         section: stringLit("Workflows"),
@@ -187,6 +241,7 @@ export function pagesForWorkflowInstances(wf: Workflow): Page[] {
     page({
       name: `${upperFirst(wfName)}InstanceDetail`,
       route: `/workflows/${slug}/instances/:id`,
+      requires: gate(),
       body: scaffoldInstanceDetails(wf),
       menu: { hidden: boolLit(true) },
     }),

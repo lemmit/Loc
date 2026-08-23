@@ -2383,3 +2383,58 @@ target, rather than "not supported yet".
 `util/flutter-deferred-primitives.ts`; `generator/feliz/data-grid-child.ts`;
 [`page-metamodel.md` §9.1](page-metamodel.md); `new-plan/T1-ui-frontend.md`
 M-T1.1.
+
+## D-WHEN-GATE-DOMAIN — the `when` state gate is a domain-method property, not an HTTP-edge one
+
+**Status:** PINNED.
+
+**Problem.** `operation cancel() when <pred>` (criterion.md use site 2, the
+canCommand state gate) used to be emitted at the **route / command-handler layer
+only**. Every other caller of the domain method walked straight past it — a
+workflow step, a saga cascade, an `extern` command handler, the LiveView action
+seam all call `aggregate.cancel()` directly. The declared rule then silently did
+not run on the paths that reach the aggregate from *inside* the system: no
+`DisallowedError`, no 409, the write landed. It is the absence of a refusal, so
+no wire-shape differential can see it — the request that should have been refused
+is never made over HTTP at all.
+
+Two coherent answers were open (`new-plan/T6-backend-parity.md` M-T6.38):
+
+1. **Domain-layer gate** — the predicate is asserted by the aggregate's own
+   method, so every caller is gated.
+2. **Route-layer by design** — `when` stays an API-edge gate and the language
+   says so, leaving in-system callers deliberately ungated because the workflow
+   *is* the authority.
+
+**Decision.** (1). The `when` predicate renders as the first line of the
+generated operation method on all five backends. The route keeps its own
+post-load check so the HTTP answer (409 + the RFC 7807 envelope) is still
+produced before the aggregate is touched and the wire contract is unchanged;
+the two checks are the same predicate and the same message.
+
+**Rationale.**
+
+- `when` is written *on the aggregate*, in terms of the aggregate's own state,
+  and reads as a statement about when the operation is meaningful — not about
+  who may call it over HTTP. Answer 2 asks the reader to hold a rule whose
+  enforcement depends on the caller's transport, which nothing in the syntax
+  hints at.
+- It makes the gate uniform with `precondition` / `invariant`, which have always
+  been domain-method properties. `requires` stays the deliberate exception —
+  its leading run is hoisted to the calling handler (`ir/util/op-gates.ts`)
+  because authorization needs a principal the domain layer does not carry.
+- Phoenix was already doing this (its gate has always lived inside the context
+  function the workflow starter calls), so answer 2 would have meant *removing*
+  enforcement from a shipping backend to reach parity.
+- Cost is bounded: one line per gated operation in five domain emitters, and no
+  wire change — the route-layer check is retained precisely so no status,
+  envelope, or ordering moves.
+
+**Affects.** `generator/typescript/emit/aggregate.ts`,
+`generator/dotnet/emit/entity.ts`, `generator/java/emit/entity.ts`,
+`generator/python/emit/aggregate.ts` (elixir's
+`vanilla/context-emit.ts` already conformed); the route-layer checks in
+`platform/hono/v4/routes-builder.ts`, `generator/dotnet/cqrs/commands.ts`,
+`generator/java/emit/service.ts`, `generator/python/routes-builder.ts` are
+unchanged. Pinned by `test/generator/when-gate-domain-entry.test.ts`;
+documented in [`language-reference/06-behavior-and-statements.md`](language-reference/06-behavior-and-statements.md).

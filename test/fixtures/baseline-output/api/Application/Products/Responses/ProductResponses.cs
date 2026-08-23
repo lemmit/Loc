@@ -6,7 +6,7 @@ using Api.Domain.Enums;
 
 namespace Api.Application.Products.Responses;
 
-public sealed record MoneyResponse([property: Required] decimal Amount, [property: Required] string Currency);
+public sealed record MoneyResponse([property: Required] double Amount, [property: Required] string Currency);
 
 public sealed record ProductResponse([property: Required] Guid Id, [property: Required] string Sku, [property: Required] MoneyResponse Price, [property: Required] int Version, [property: Required] string Display);
 
