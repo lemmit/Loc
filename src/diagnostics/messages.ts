@@ -1016,7 +1016,7 @@ export const DIAGNOSTIC_MESSAGES = {
     ownContext: unknown;
     otherContext: unknown;
   }) =>
-    `${p.where}: repository '${p.recvName}' is declared in context '${p.otherContext}', not in this service's own context '${p.ownContext}' — a domain service may only read repositories of the context it belongs to. A cross-context name never resolves: it lowers to an unresolved receiver and every backend emits a dangling identifier (TS2304 / CS0103 / 'cannot find symbol' / NameError / "undefined variable"). Move the service into '${p.otherContext}', or have the orchestrating workflow read '${p.recvName}' and pass the value in as a parameter.`,
+    `${p.where}: repository '${p.recvName}' is declared in context '${p.otherContext}', not in this service's own context '${p.ownContext}' — a domain service is an internal detail of its context and may only read its own repositories. Cross-context data crosses at the context's PUBLIC surface instead: have the orchestrating workflow fetch it — through '${p.otherContext}''s api (a 'resource { kind: api }' binding gives a typed in-system call), or from a local projection folded over '${p.otherContext}''s published events (via a channel) — and pass the value into the service as a parameter. Or move the service into '${p.otherContext}'.`,
   "loom.domain-service-single-aggregate": (p: { name: unknown }) =>
     `domainService '${p.name}': every operation takes a single aggregate parameter — consider declaring the behaviour as an 'operation' on that aggregate instead of a domain service.`,
 
