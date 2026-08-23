@@ -304,7 +304,11 @@ export function wireToCommandArgument(
       (inner.refKind === "primitive" &&
         inner.primitive !== "string" &&
         inner.primitive !== "money" &&
-        inner.primitive !== "datetime");
+        inner.primitive !== "datetime" &&
+        // `File` crosses the wire as the `FileRef` RECORD, not a value type —
+        // `request.Doc!.Value` on it is CS1061 (M-T6.39; the sibling of the
+        // same omission in `csIsValueType` below).
+        inner.primitive !== "File");
     const unwrap = valueWire ? `${expr}!.Value` : `${expr}!`;
     return `(${expr} is null ? null : ${wireToCommandArgument(unwrap, innerT, ctx)})`;
   }
@@ -499,7 +503,17 @@ function csIsValueType(t: TypeIR): boolean {
   if (info.isCollection) return false;
   switch (info.refKind) {
     case "primitive":
-      return info.primitive !== "string";
+      // The question is about the DOMAIN representation, not the wire one:
+      // `money` and `datetime` render as wire strings but ARE `decimal` /
+      // `DateTime` in the domain, so `T?` is a `Nullable<T>` and `.Value`
+      // unwraps it. Two Loom primitives are reference types on the domain side
+      // and must be unwrapped with `!` instead:
+      //   • `string`
+      //   • `File` — the shared `FileRef` RECORD (see the CS_PRIMITIVE map
+      //     above). An optional `File?` field projected `.Value` on it, which
+      //     is CS1061; no fixture had a nullable `File` until `file-download`
+      //     (M-T6.39), so no compile tier had ever reached this arm.
+      return info.primitive !== "string" && info.primitive !== "File";
     case "id":
     case "enum":
       return true;

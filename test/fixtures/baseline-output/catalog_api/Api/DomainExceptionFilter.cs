@@ -169,4 +169,42 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             ContentTypes = { "application/problem+json" },
         };
     }
+
+    // M-T6.39 — the same 404 envelope, for the routes MVC cannot reach.
+    //
+    // This class is an `IExceptionFilter`: it only ever sees exceptions raised
+    // inside the MVC pipeline.  The root `/files/{key}` download is a MINIMAL
+    // API (Program.cs `app.MapGet`), so a throw from it bypasses this filter
+    // entirely and ASP.NET answers it bodiless — which `UseStatusCodePages`
+    // then fills with the FRAMEWORK-miss sentence ("no route for GET /files/…"),
+    // a lie: the route exists, the object does not.
+    //
+    // Rather than hand-build a second problem body in Program.cs, the minimal
+    // API calls this — one construction site, the same resolved
+    // `httpStatus NotFound -> <Code>` status and title as the
+    // `AggregateNotFoundException` arm above, the same header, the same log
+    // event and the same fault counter.
+    //
+    // `Results.Problem` is deliberately NOT used: it applies
+    // `ProblemDetailsDefaults`, which stamps the rfc9110 `type` URI and leaves
+    // `instance` null — the exact divergence `Problem(...)` above exists to
+    // avoid.
+    // (The logger parameter is spelled `_log` so the catalog log line below is
+    // the SAME rendered call as the filter arms above — one catalog renderer,
+    // one event shape, whether the 404 came through MVC or a minimal API.)
+    public static Microsoft.AspNetCore.Http.IResult NotFoundProblem(Microsoft.AspNetCore.Http.HttpContext http, ILogger<DomainExceptionFilter> _log, string detail)
+    {
+        var trace_id = Activity.Current?.TraceId.ToString() ?? "";
+        _log.LogWarning("{Event} status={Status}", "not_found", 404);
+        global::CatalogApi.Observability.HttpMetrics.RecordDomainFault("not_found");
+        http.Response.Headers["x-request-id"] = trace_id;
+        return Microsoft.AspNetCore.Http.Results.Json(new ProblemDetails
+        {
+            Type = "about:blank",
+            Title = "Not Found",
+            Status = 404,
+            Detail = detail,
+            Instance = http.Request.Path,
+        }, statusCode: 404, contentType: "application/problem+json");
+    }
 }

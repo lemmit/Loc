@@ -152,6 +152,14 @@ export const CORPUS: readonly CorpusFeature[] = [
   },
   { id: "resources", title: "external resources — objectStore / queue / http api / mailer (smtp) clients", doc: "resources", backends: ALL },
   {
+    id: "file-download",
+    title:
+      "a `File` field over an objectStore — the root `POST /files` + `GET /files/{key}` pair, and the absent-object 404",
+    doc: "resources",
+    backends: ALL,
+    note: "Split from `resources` (which binds an objectStore but declares no `File` field, so no backend emits the /files routes for it): the download route had NO golden on any backend, which is how its absent-object 404 stayed a fourth envelope shape on all five at once (M-T6.39). The 404 itself is not expressible in the `test e2e` DSL, so it rides the behavioral tier's absent-file probe in wire-differential.mjs.",
+  },
+  {
     id: "api-call",
     title: "typed in-system api call — `resource { kind: api, use: <Api> }` a sibling deployable serves",
     doc: "resources",

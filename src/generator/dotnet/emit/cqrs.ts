@@ -15,11 +15,21 @@ export function renderCommand(args: {
 }): string {
   const sig = args.returnType ? `ICommand<${args.returnType}>` : "ICommand";
   const extra = (args.extraUsings ?? []).map((u) => `using ${u};\n`).join("");
+  // `Domain.Common` joins the fixed preamble for the same reason the request /
+  // response records already carry it: a command parameter can be typed by a
+  // shared domain primitive that lives there rather than in ValueObjects — a
+  // `File` field renders `FileRef`, which is declared in `Domain.Common`.
+  // Without it, EVERY .NET project with a `File`-typed field failed to build
+  // (CS0246 on the create + update command records) and nothing caught it,
+  // because no corpus fixture declared one until `file-download.ddd` (M-T6.39).
+  // Unconditional, matching the three sibling usings above and the
+  // request/response emitters — the namespace is emitted for every project.
   return `// Auto-generated.
 using Mediator;
 using ${args.ns}.Domain.Ids;
 using ${args.ns}.Domain.ValueObjects;
 using ${args.ns}.Domain.Enums;
+using ${args.ns}.Domain.Common;
 ${extra}
 namespace ${args.ns}.Application.${plural(args.aggName)}.Commands;
 

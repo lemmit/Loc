@@ -237,8 +237,15 @@ export function renderHttpIndex(
         `  });`,
         `  // File download — streams the stored object back with its contentType.`,
         `  app.get("/files/:key", async (c) => {`,
-        `    const obj = await ${fileUpload.resource}$getBytes(c.req.param("key"));`,
-        `    if (!obj) return c.json({ error: "not found" }, 404);`,
+        `    const key = c.req.param("key");`,
+        `    const obj = await ${fileUpload.resource}$getBytes(key);`,
+        // M-T6.39 — an absent object raises the app's ONE 404 producer instead of
+        // hand-building a body.  This route is mounted on the ROOT app, which
+        // carries the domain ladder below (M-T6.28), so the throw is rendered as
+        // the same RFC 7807 envelope every other absent read answers with —
+        // including the `httpStatus NotFound -> <Code>` override, which used to
+        // move every 404 in the app EXCEPT this one.
+        "    if (!obj) throw new AggregateNotFoundError(`File ${key} not found`);",
         `    // Copy into a standalone ArrayBuffer — Hono's c.body() rejects a`,
         `    // Uint8Array whose backing buffer is only ArrayBufferLike.`,
         `    const ab = obj.body.buffer.slice(`,

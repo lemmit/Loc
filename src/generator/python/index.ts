@@ -307,6 +307,16 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // (Apache-2.0, the asyncio-native kafka client) speaks to the
   // apache/kafka sidecar.  Per-transport wiring-gated so a channel-less
   // (or single-transport) pyproject stays byte-identical.
+  // `POST /files` is a MULTIPART endpoint (`file: UploadFile`), and FastAPI
+  // refuses to even BUILD such a route without python-multipart — it raises at
+  // import time from `ensure_multipart_is_installed`, so the app never boots.
+  // `uv sync` + `ruff` + `mypy --strict` all pass regardless (the dependency is
+  // a RUNTIME import inside fastapi, invisible to every static tier), which is
+  // exactly why this shipped: no corpus fixture declared a `File` field until
+  // `file-download.ddd` (M-T6.39), so no python leg had ever booted one.
+  // Wiring-gated on the same flag that emits the routes, so a File-free project
+  // stays byte-identical.
+  const fileDeps = hasFileRoutes ? ["python-multipart>=0.0.20,<1"] : [];
   const channelDeps = [
     ...(channelBindings.some((b) => b.transport === "redis") ? ["redis>=5.2,<7"] : []),
     ...(channelBindings.some((b) => b.transport === "rabbitmq") ? ["aio-pika>=9.5,<10"] : []),
@@ -325,6 +335,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
         ...resources.deps,
         ...oidcDeps,
         ...timerDeps,
+        ...fileDeps,
         ...channelDeps,
         ...(apiClients ? ["httpx>=0.28,<1"] : []),
       ],
