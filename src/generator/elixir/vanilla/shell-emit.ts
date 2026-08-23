@@ -38,6 +38,7 @@ import {
 } from "../shell/runtime.js";
 import { renderLayouts } from "../shell/web.js";
 import { renderTelemetry } from "../telemetry-emit.js";
+import { renderGuardErrorModule } from "./denial.js";
 import { renderObanConfig } from "./scheduler-emit.js";
 
 export function emitVanillaShellFiles(
@@ -168,6 +169,12 @@ export function emitVanillaShellFiles(
   // Ambient execution-context carrier (Logger.metadata) — the Plug is mounted
   // in the endpoint after Plug.RequestId.
   out.set(`lib/${appName}/request_context.ex`, renderRequestContext(appModule));
+  // The typed guard denial a pure body (`function` / `domainService` /
+  // pure-core op) raises — `<App>.GuardError`, with the rung in its `:kind`
+  // field so the controller rescue routes on a FIELD rather than on the
+  // message prefix.  Domain layer, not `<App>Web.*`: `function-emit` /
+  // `domain-service-emit` render into `lib/<app>/` (M-T6.20).
+  out.set(`lib/${appName}/guard_error.ex`, renderGuardErrorModule(appModule));
   out.set(
     `lib/${appName}_web.ex`,
     // The TEMPLATE-side gate is the ui, not the merged catalog: `pgettext/2` in

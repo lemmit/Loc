@@ -27,8 +27,8 @@
 //
 // Operation bodies render through the shared statement/expression path —
 // parameters resolve as bare snake-cased locals (refKind `param`), there is no
-// `this`.  `precondition`/`requires` raise an `ArgumentError` guard (the exact
-// shape the aggregate-op body emits in render-stmt.ts).  An `or`-union return
+// `this`.  `precondition`/`requires` raise the typed `<App>.GuardError` guard
+// (the exact shape the aggregate-op body emits).  An `or`-union return
 // reuses the EXACT tagged-tuple convention the vanilla returning-op path emits
 // (`{:ok, value} | {:error, "<tag>", data_map}`) — no new union machinery; a
 // plain return is the bare value (Elixir's last-expression-is-the-result).
@@ -48,6 +48,7 @@ import {
 } from "../../ir/util/domain-service-tier.js";
 import { escapeElixirIdent, snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr, renderTypespec } from "./render-expr.js";
+import { appModuleOf, guardRaiseLine } from "./vanilla/denial.js";
 import { opCallParamFields } from "./vanilla/workflow-execution-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -470,13 +471,12 @@ function renderStatement(
     case "let":
       return `    ${escapeElixirIdent(snake(s.name))} = ${renderExpr(s.expr, rc)}`;
     case "precondition":
-      // Bug-shaped guard → raise (the same `ArgumentError` shape the aggregate
-      // operation body emits in render-stmt.ts).
-      // Derived message, NOT the author's `message "…"` — prefix-routed by
-      // `GUARD_RESCUE` at the controller.  See M-T6.20.
-      return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Precondition failed: ${s.source}`)})`;
     case "requires":
-      return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Forbidden: ${s.source}`)})`;
+      // Bug-shaped guard → raise the typed `<App>.GuardError` (the same shape
+      // the aggregate operation body emits).  The `:kind` field is the routing
+      // key the controller rescue reads, so `:message` carries the author's
+      // `message "…"` when there is one (M-T6.20).
+      return guardRaiseLine(s, renderExpr(s.expr, rc), appModuleOf(rc.contextModule));
     case "return": {
       const value = renderExpr(s.value, rc);
       if (!isUnion) {

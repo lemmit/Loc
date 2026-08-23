@@ -143,6 +143,92 @@ export function denialMessage(s: GuardStmt): string {
   return s.message ? s.message.text : `Precondition failed: ${s.source}`;
 }
 
+// ---------------------------------------------------------------------------
+// The RAISE path — the TYPED GUARD EXCEPTION (M-T6.20 path 2).
+//
+// The `ensure` chain above is only reachable from an HTTP-boundary operation.
+// A guard in a PURE body — an aggregate `function`, a `domainService`, the
+// pure-core operation form — has no `with` chain to short-circuit through, so
+// it RAISES, and a controller `rescue` maps the raise to a status.
+//
+// That rescue used to route by MESSAGE PREFIX: `raise(ArgumentError,
+// "Precondition failed: …")` and `String.starts_with?(guard_msg, "Precondition
+// failed: ")`.  Which made the message the ROUTING KEY — so an authored
+// `message "…"` could not be emitted at all: it would miss the prefix and
+// `reraise` into a 500.  Both raise sites carried a comment saying exactly
+// that, and the derived text shipped instead of the author's on this one
+// backend, on this one construct.
+//
+// The classification is now OUT OF BAND: one domain-layer `defexception`
+// carrying a `kind` field (`:forbidden` / `:precondition`) that the rescue
+// reads.  The `:message` is free text again, so `denialMessage(s)` — the SAME
+// rule the `ensure` path and the other four backends' `DomainException` /
+// `DomainError` use — can be spelled here verbatim.
+//
+// The module lives in the DOMAIN layer (`<App>.GuardError`, under
+// `lib/<app>/`), not `<App>Web.*`: `function-emit` / `domain-service-emit`
+// render into `lib/<app>/` and must not reference the Web namespace.
+//
+// ONE module with a `kind` field rather than two exception types, because the
+// generated ExUnit domain tests assert on it too (`assert_raise <App>.GuardError`
+// in `tests-emit.ts`) and cannot tell from a `toThrow()` expression which rung
+// the op will trip.
+// ---------------------------------------------------------------------------
+
+/** The app module a `<App>.<Ctx>` context module belongs to — the prefix
+ *  `RenderCtx.contextModule` carries at every raise site. */
+export function appModuleOf(contextModule: string): string {
+  return contextModule.split(".")[0] ?? contextModule;
+}
+
+/** `<App>.GuardError` — the typed exception a guard raises on the pure paths. */
+export function guardErrorModule(appModule: string): string {
+  return `${appModule}.GuardError`;
+}
+
+/** The `raise(<App>.GuardError, kind: …, message: …)` call a failed guard
+ *  raises.  `kind` is the routing key the controller rescue reads; `message` is
+ *  the author's `message "…"` when there is one, byte-identical to the string
+ *  the `ensure` path puts in the same denial's `detail`. */
+export function guardRaise(s: GuardStmt, appModule: string): string {
+  const kind = s.kind === "requires" ? ":forbidden" : ":precondition";
+  return `raise(${guardErrorModule(appModule)}, kind: ${kind}, message: ${JSON.stringify(
+    denialMessage(s),
+  )})`;
+}
+
+/** The whole `if not (<pred>), do: raise(…)` guard line, at the four-space body
+ *  indent every pure-body renderer emits at.  One helper so the three raise
+ *  sites (`operation-returns-emit` / `function-emit` / `domain-service-emit`)
+ *  cannot drift from each other or from the rescue that catches them. */
+export function guardRaiseLine(s: GuardStmt, predicate: string, appModule: string): string {
+  return `    if not (${predicate}), do: ${guardRaise(s, appModule)}`;
+}
+
+/** The `lib/<app>/guard_error.ex` source — the one `defexception` both the
+ *  raise sites and the controller rescue go through. */
+export function renderGuardErrorModule(appModule: string): string {
+  return `# Auto-generated.
+defmodule ${guardErrorModule(appModule)} do
+  @moduledoc """
+  A domain guard denial raised from a PURE body — an aggregate \`function\`, a
+  \`domainService\`, or the pure-core operation form, none of which has a
+  \`with\` chain to short-circuit through.
+
+  \`:kind\` is the ROUTING KEY the controller rescue reads to pick the HTTP
+  status (\`:forbidden\` -> 403, \`:precondition\` -> 422).  It used to read the
+  message PREFIX instead, which made the message unusable as a message: an
+  author's \`message "..."\` missed the prefix and reraised into a 500.  With
+  the classification out of band, \`:message\` is free text and carries exactly
+  what the other four backends put in their \`DomainException\` / \`DomainError\`.
+  """
+  defexception [:message, :kind]
+
+  @type kind :: :forbidden | :precondition
+end
+`;
+}
+
 /** The Elixir reason TERM a failed guard short-circuits to:
  *  `{:forbidden, "Forbidden: …"}` / `{:precondition_failed, "Precondition
  *  failed: …"}`.  Rendered into `ensure(<cond>, <term>)` and into the inline

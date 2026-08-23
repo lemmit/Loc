@@ -92,12 +92,11 @@ const FORBIDDEN_DETAIL = "Forbidden: currentUser.level > 2";
  *  here; its typed-denial path now shares one `denialMessage` rule with the
  *  other four.
  *
- *  Scoped to an OPERATION deliberately.  Elixir has a second denial path — the
- *  `raise(ArgumentError, …)` used by `function` / `domainService` / pure-core
- *  bodies — whose status is routed by MESSAGE PREFIX in `GUARD_RESCUE`, so an
- *  authored message there would miss the prefix and `reraise` into a 500.
- *  That path still emits the derived form on purpose; closing it needs the
- *  typed-exception reshape tracked as **M-T6.20**, not a string swap. */
+ *  This constant covers the OPERATION (HTTP-boundary) path.  Elixir has a
+ *  second denial path — the RAISE used by `function` / `domainService` /
+ *  pure-core bodies — which used to be routed by MESSAGE PREFIX and therefore
+ *  could not carry an authored message at all; it is pinned by its own
+ *  `describe` at the bottom of this file (M-T6.20 path 2). */
 const AUTHORED_DETAIL = "Repricing needs a positive amount";
 /** RS-17 — the 409 rung.  Elixir used to answer a fixed sentence with title
  *  "Conflict"; the denial reason is now a tuple carrying this message, and the
@@ -152,6 +151,74 @@ describe("RS-15 — domain-floor denials are 422 with an occurrence-specific det
         .filter((l) => /Bad Request/.test(l))
         .filter((l) => /domain|precondition|DomainE(rror|xception)|guard_msg/i.test(l));
       expect(domainBadRequest, "domain faults still mapping to 400").toEqual([]);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The RAISE path — the same DETAIL claim, on the denial path that has no HTTP
+// boundary to short-circuit through (M-T6.20 path 2).
+//
+// A guard inside an aggregate `function` (or a `domainService` operation) is
+// reached from a PURE body: there is no `with`/middleware chain, so every
+// backend THROWS and the framework's exception handler maps it.  Four of them
+// put the author's message straight into the thrown `DomainException` /
+// `DomainError`.  Elixir could not: its controller rescue routed the raise to
+// its status by MESSAGE PREFIX (`String.starts_with?(guard_msg, "Precondition
+// failed: ")`), so an authored message missed the prefix and reraised into a
+// 500 — and the emitter deliberately shipped the DERIVED text to keep the
+// routing intact.  The classification now rides a typed exception's `:kind`
+// field, so the message is free text on this path too.
+//
+// Separate fixture from `SOURCE` above so the operation-path assertions stay
+// exactly what they were; separate MESSAGE so a passing operation-path
+// assertion can never stand in for this one.
+// ---------------------------------------------------------------------------
+
+const RAISE_SOURCE = (platform: string) => `
+system Denials2 {
+  subdomain Sales {
+    context Sales {
+      aggregate Order with crudish {
+        total: int
+
+        function checkRepriceable(amount: int): bool {
+          precondition amount > 0 message "A pure function keeps its authored message"
+          return true
+        }
+
+        operation reprice(to: int) {
+          let ok = checkRepriceable(to)
+          total := to
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api SalesApi from Sales
+  storage primary { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primary }
+  deployable api {
+    platform: ${platform}
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    port: 8080
+  }
+}
+`;
+
+const FUNCTION_AUTHORED_DETAIL = "A pure function keeps its authored message";
+
+describe("RS-15 — the raise path carries the authored message too (M-T6.20 path 2)", () => {
+  for (const platform of ["node", "dotnet", "java", "python", "elixir"]) {
+    it(`${platform}: a function precondition's authored message reaches the thrown fault`, async () => {
+      const files = await generateSystemFiles(RAISE_SOURCE(platform));
+      const out = [...files.values()].join("\n");
+      expect(out).toContain(FUNCTION_AUTHORED_DETAIL);
+      expect(out, "derived detail emitted despite an authored message").not.toContain(
+        "Precondition failed: amount > 0",
+      );
     });
   }
 });

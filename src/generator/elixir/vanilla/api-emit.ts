@@ -487,7 +487,7 @@ ${cuBind}${indexBody}
   const opActions = memberOps
     .map((op) => {
       if (isReturningOperation(op)) {
-        return renderReturningOpControllerAction(ctxModule, agg, op, ctx);
+        return renderReturningOpControllerAction(appModule, ctxModule, agg, op, ctx);
       }
       const opSnake = snake(op.name);
       // An op whose guard/body references `currentUser` needs `current_user`
@@ -569,7 +569,7 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
       {:error, %Ecto.Changeset{} = changeset} ->
         ProblemDetails.validation_error_response(conn, changeset)${conflictArm}${denialArms}
     end
-${guardRescue(denialOverrides(ctx))}
+${guardRescue(appModule, denialOverrides(ctx))}
   end`;
     })
     .join("\n");

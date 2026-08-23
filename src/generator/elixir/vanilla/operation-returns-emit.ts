@@ -38,6 +38,7 @@ import { opUsesCurrentUser } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import {
+  appModuleOf,
   denialClause,
   denialOverrides,
   denialResponse,
@@ -45,6 +46,8 @@ import {
   disallowedResponse,
   disallowedTerm,
   type ErrorStatusMap,
+  guardErrorModule,
+  guardRaiseLine,
   opHasWireDenial,
   wireValidationResponse,
 } from "./denial.js";
@@ -971,20 +974,15 @@ export function renderReturningStmt(
     case "let":
       return `    ${escapeElixirIdent(snake(s.name))} = ${renderExpr(s.expr, rc)}`;
     case "precondition":
-      // Raise form — reached only by the pure-core / document / function paths
-      // (HTTP-boundary ops hoist guards to `with ensure(…)` for a 422 denial).
-      // NOTE the message is the DERIVED form even when the author wrote
-      // `message "…"`: `GUARD_RESCUE` below routes this raise to its status by
-      // MESSAGE PREFIX, so an authored message would miss the prefix and
-      // `reraise` into a 500.  The `ensure` path has no such coupling and does
-      // honour the clause.  Closing this needs the typed-exception reshape —
-      // M-T6.20.
-      return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Precondition failed: ${s.source}`)})`;
     case "requires":
       // Raise form — reached only by the pure-core / document / function paths
-      // (HTTP-boundary ops hoist guards to `with ensure(…)` for a 403 denial).
-      // Prefix-routed by `GUARD_RESCUE`, same coupling as the precondition arm.
-      return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Forbidden: ${s.source}`)})`;
+      // (HTTP-boundary ops hoist guards to `with ensure(…)` for a 422 / 403
+      // denial).  The typed `<App>.GuardError` carries the classification in its
+      // `:kind` field, so the `:message` is the SAME `denialMessage(s)` the
+      // `ensure` path emits — the author's `message "…"` when there is one
+      // (M-T6.20; it used to be forced to the derived form because `guardRescue`
+      // routed on the message prefix).
+      return guardRaiseLine(s, renderExpr(s.expr, rc), appModuleOf(rc.contextModule));
     case "assign": {
       // `field := value` → struct-update the threaded `record`, so the
       // fall-through success branch serialises the mutated aggregate.
@@ -1119,40 +1117,42 @@ function renderProvenancedAssign(
  *  load the aggregate, run the op, then translate the tagged result — a success
  *  to 200 + body, each error variant to its RFC-7807 ProblemDetails status. */
 // A rejected `requires` / `precondition` in an operation / function /
-// domain-service body RAISES `raise(ArgumentError, "Forbidden: …")` /
-// `"Precondition failed: …")` (the message prefixes here are the contract —
-// they must stay in lockstep with the `case "precondition"/"requires"` arms in
-// `renderStatement` above, and the `function-emit` / `domain-service-emit`
+// domain-service body RAISES the typed `<App>.GuardError` (`guardRaise` in
+// `denial.ts`, shared with the `function-emit` / `domain-service-emit`
 // siblings).  A controller action appends this `rescue` clause so the raise maps
 // to the same HTTP status the other backends return — `requires` → 403 (Hono
 // `ForbiddenError`), `precondition` → 422 (RS-15 — a domain-floor rejection is
 // well-formed-but-semantically-rejected, not malformed; the typed-denial path
 // below has always answered 422, so this rescue arm was the odd one out) —
-// instead of propagating to Phoenix's default 500.  Any other `ArgumentError`
-// reraises unchanged (still a 500 for a genuine bug).
-// The two prefixes below are the CONTRACT this `cond` routes on — do not
-// reword them without rewording the matching `raise(ArgumentError, …)` in
-// `renderStatement` / `function-emit` / `domain-service-emit`, or the raise
-// misses its prefix and `reraise`s into a 500.  Only the STATUS + TITLE are
-// resolved (M-T5.20); the message prefixes stay literal.
-export function guardRescue(overrides?: ErrorStatusMap): string {
+// instead of propagating to Phoenix's default 500.
+//
+// M-T6.20 — the ROUTING KEY is the exception's `:kind` FIELD, not its message.
+// It used to be a `cond` over `String.starts_with?(guard_msg, "Precondition
+// failed: ")`, which made the message load-bearing and therefore unwritable: an
+// author's `message "…"` missed the prefix and fell to the `reraise` → 500.
+// With the classification out of band the detail is free text, and no `reraise`
+// arm is needed either — an exception that is not a `<App>.GuardError` is
+// simply not rescued and propagates with its own stacktrace (still a 500 for a
+// genuine bug, one construct less to keep in lockstep).  Only the STATUS +
+// TITLE are resolved (M-T5.20).
+export function guardRescue(appModule: string, overrides?: ErrorStatusMap): string {
   return `  rescue
-    guard_error in ArgumentError ->
+    guard_error in ${guardErrorModule(appModule)} ->
       guard_msg = Exception.message(guard_error)
 
-      cond do
-        String.starts_with?(guard_msg, "Forbidden: ") ->
+      case guard_error.kind do
+        :forbidden ->
           ${denialResponse("forbidden", "guard_msg", overrides)}
 
-        String.starts_with?(guard_msg, "Precondition failed: ") ->
+        _ ->
           ${denialResponse("precondition", "guard_msg", overrides)}
-
-        true ->
-          reraise(guard_error, __STACKTRACE__)
       end`;
 }
 
 export function renderReturningOpControllerAction(
+  /** The APP module (`Api`), not the aliased context (`Sales`) — the rescue
+   *  below names `<App>.GuardError`, which lives in the domain root. */
+  appModule: string,
   ctxModule: string,
   agg: AggregateIR,
   op: OperationIR,
@@ -1268,7 +1268,7 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
       {:error, :not_found} ->
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
     end
-${guardRescue(denialOverrides(ctx))}
+${guardRescue(appModule, denialOverrides(ctx))}
   end
 
 ${resultClauses}`;
