@@ -397,8 +397,9 @@ function renderFieldLine(field: AggField, enumsByName: Map<string, EnumIR>): str
 /** Render a simple literal default to its Ecto `default:` value, or `null`
  *  for a non-literal default (skipped — keeps the field's struct default
  *  unset rather than emitting an expression Ecto can't evaluate at compile
- *  time). */
-function renderEctoDefault(e: ExprIR): string | null {
+ *  time).  Shared with the DOCUMENT embed (`document-emit.ts`), whose
+ *  `<Agg>.Data` fields need the same treatment for the same reason. */
+export function renderEctoDefault(e: ExprIR): string | null {
   if (e.kind !== "literal") return null;
   switch (e.lit) {
     case "string":

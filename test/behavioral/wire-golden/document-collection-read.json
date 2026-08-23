@@ -1,0 +1,262 @@
+{
+  "case": "document-collection-read",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "POST",
+      "path": "/api/orders/{id}/add_line",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/orders/{id}/add_line",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 3,
+      "method": "POST",
+      "path": "/api/orders/{id}/retotal",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "lineCount": 0,
+        "lines": [
+          {
+            "id": "<volatile:key>",
+            "qty": 4,
+            "sku": "A"
+          },
+          {
+            "id": "<volatile:key>",
+            "qty": 11,
+            "sku": "B"
+          }
+        ],
+        "reference": "R1",
+        "tags": [
+          "bulk",
+          "rush"
+        ],
+        "total": 15,
+        "version": 4
+      }
+    },
+    {
+      "seq": 5,
+      "method": "POST",
+      "path": "/api/orders/{id}/recount",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "lineCount": 2,
+        "lines": [
+          {
+            "id": "<volatile:key>",
+            "qty": 4,
+            "sku": "A"
+          },
+          {
+            "id": "<volatile:key>",
+            "qty": 11,
+            "sku": "B"
+          }
+        ],
+        "reference": "R1",
+        "tags": [
+          "bulk",
+          "rush"
+        ],
+        "total": 15,
+        "version": 5
+      }
+    },
+    {
+      "seq": 7,
+      "method": "POST",
+      "path": "/api/orders/{id}/mark_bulk",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "lineCount": 2,
+        "lines": [
+          {
+            "id": "<volatile:key>",
+            "qty": 4,
+            "sku": "A"
+          },
+          {
+            "id": "<volatile:key>",
+            "qty": 11,
+            "sku": "B"
+          }
+        ],
+        "reference": "R1",
+        "tags": [
+          "bulk",
+          "rush"
+        ],
+        "total": 16,
+        "version": 6
+      }
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/orders",
+      "status": 200,
+      "body": [
+        {
+          "id": "<volatile:key>",
+          "lineCount": 2,
+          "lines": [
+            {
+              "id": "<volatile:key>",
+              "qty": 4,
+              "sku": "A"
+            },
+            {
+              "id": "<volatile:key>",
+              "qty": 11,
+              "sku": "B"
+            }
+          ],
+          "reference": "R1",
+          "tags": [
+            "bulk",
+            "rush"
+          ],
+          "total": 16,
+          "version": 6
+        }
+      ]
+    },
+    {
+      "seq": 10,
+      "method": "POST",
+      "path": "/api/orders/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "lineCount": 2,
+        "lines": [
+          {
+            "id": "<volatile:key>",
+            "qty": 4,
+            "sku": "A"
+          },
+          {
+            "id": "<volatile:key>",
+            "qty": 11,
+            "sku": "B"
+          }
+        ],
+        "reference": "R2",
+        "tags": [
+          "bulk"
+        ],
+        "total": 16,
+        "version": 7
+      }
+    },
+    {
+      "seq": 12,
+      "method": "DELETE",
+      "path": "/api/orders/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 13,
+      "method": "GET",
+      "path": "/api/orders/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Order {id} not found",
+        "instance": "/api/orders/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 14,
+      "method": "PATCH",
+      "path": "/api/orders",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/orders",
+        "instance": "/api/orders",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 15,
+      "method": "GET",
+      "path": "/__loom_no_such_path",
+      "status": 404,
+      "body": {
+        "detail": "no route for GET /__loom_no_such_path",
+        "instance": "/__loom_no_such_path",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 16,
+      "method": "POST",
+      "path": "/api/orders",
+      "status": 400,
+      "body": {
+        "detail": "Malformed JSON in request body",
+        "instance": "/api/orders",
+        "status": 400,
+        "title": "Bad Request",
+        "type": "about:blank"
+      }
+    }
+  ]
+}

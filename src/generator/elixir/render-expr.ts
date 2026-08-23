@@ -766,6 +766,40 @@ export function renderDeepScopeEcto(
   return `fragment(${JSON.stringify(sql)}, ${dk}, ${dk}, ${org}, ${dk}, ${org}, ${dk}, ${tid}, ${tenant})`;
 }
 
+/** The `deep`/`global` read-level sentinel as an IN-MEMORY Elixir predicate —
+ *  the document-shape twin of {@link renderDeepScopeEcto}.  Same
+ *  `DEEP_SCOPE_SEMANTICS`, evaluated over the rehydrated `%<Agg>.Data{}` embed
+ *  (`recordVar`) because a jsonb blob has no column to hang a `where:` on.
+ *
+ *  Two differences from the SQL fragment, both about a NIL claim:
+ *
+ *    * Nothing is `^`-pinned (there is no query), so each claim reads through
+ *      the nil-safe `(current_user && current_user.<claim>)`.
+ *    * The descendant prefix is built by INTERPOLATION, not `<>`.  Elixir's
+ *      `nil <> "."` RAISES (an ArgumentError → a 500 for an ordinary token
+ *      missing the `orgPath` claim), while `"#{nil}."` is `"."`, which no
+ *      materialized path starts with — so a nil anchor makes the descendant
+ *      branch false and the read degrades to the tenant floor, exactly as
+ *      `strpos(?, NULL || '.')` does in SQL.
+ *
+ *  Already fail-closed on the principal side, so the caller must NOT run this
+ *  through the in-app principal guard again. */
+export function renderDeepScopeInApp(
+  recordVar: string,
+  anchorClaim = ORG_PATH_CLAIM_FIELD,
+  tenantClaim = TENANT_OWNED_TENANT_ID_FIELD,
+): string {
+  const dk = `${recordVar}.${snake(TENANT_OWNED_DATA_KEY_FIELD)}`;
+  const tid = `${recordVar}.${snake(TENANT_OWNED_TENANT_ID_FIELD)}`;
+  const org = `(current_user && current_user.${snake(anchorClaim)})`;
+  const tenant = `(current_user && current_user.${snake(tenantClaim)})`;
+  const descendant = `String.starts_with?(${dk}, "#{${org}}${DATA_KEY_PATH_DELIMITER}")`;
+  return (
+    `((${dk} != nil and (${dk} == ${org} or ${descendant})) or ` +
+    `(${dk} == nil and ${tid} == ${tenant}))`
+  );
+}
+
 /** The `"guid-from-string"` registry self-scope (`this.id ==
  *  currentUser.<claim>` — a `guid` id keyed by a `string` claim) as an Ecto
  *  `where:` predicate that survives a MALFORMED claim (M-T3.7(c)).
