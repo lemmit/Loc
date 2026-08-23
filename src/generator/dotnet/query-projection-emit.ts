@@ -363,14 +363,45 @@ function dapperFilterSeam(
   };
 }
 
+/** True when this aggregate's DECLARED wire field crosses as a float64.
+ *  #2563/RS-24: a `decimal` RESPONSE field is a JSON number, so .NET types it
+ *  `double` (`wireType`).  `count` is an `int` and money/guid go out as
+ *  formatted strings, so neither is affected. */
+function aggregateLandsOnDouble(s: AggregateSelect, ctx: EnrichedBoundedContextIR): boolean {
+  const c = aggregateCoercion(s);
+  if (c.isCount || c.asString) return false;
+  const target = wireType(s.type, ctx, "response");
+  return target === "double" || target === "double?";
+}
+
 /** The Postgres aggregate call for one `select` — the raw-SQL twin of
  *  `csAggregate`.  `count` counts ROWS (no column) and casts to `int` so it
- *  lands on the same CLR type EF's `g.Count()` produces; every other operator
- *  casts to `numeric`, which is what `csCoerce` then converts to the row's
- *  DECLARED wire type (`money` → an InvariantCulture string, `decimal`/`int`
- *  → a cast).  Casting uniformly is what keeps `avg` over an `int` column off
- *  the `double`-vs-`decimal` mismatch EF needed the same cast for. */
-function sqlAggregate(agg: ProjectionAggregateIR): string {
+ *  lands on the same CLR type EF's `g.Count()` produces.
+ *
+ *  Every other operator casts to the SQL type whose Npgsql mapping IS the row
+ *  DTO's CLR type, so nothing is converted in C#:
+ *
+ *    - a field that crosses as `double` (a declared `decimal`, #2563) casts to
+ *      `double precision`;
+ *    - everything else (money / guid → formatted string, `int`) casts to
+ *      `numeric` and lands on `decimal`.
+ *
+ *  The `double precision` arm is load-bearing, not tidiness.  `numeric` maps to
+ *  `System.Decimal`, and the `(double)` coercion that follows is a
+ *  decimal→double conversion, which .NET rounds to **15 significant digits**:
+ *  `avg` of 7/3 shipped `2.333333333333333` where every other backend ships the
+ *  true nearest double `2.3333333333333335`, failing the wire-golden
+ *  differential on the dapper leg alone (EF was green because its provider
+ *  materialises `Average` as a real `double`).  Casting in SQL hands Npgsql a
+ *  `float8` directly, and Postgres' own numeric→float8 conversion is correctly
+ *  rounded — the same path node takes (numeric result → JS number).
+ *
+ *  Note the aggregate itself still computes in `numeric` (`avg`/`sum` over an
+ *  `integer` or `numeric` column return `numeric`); only the RESULT is
+ *  converted.  Casting the argument instead would move the accumulation into
+ *  binary floating point and diverge from the other backends for real. */
+function sqlAggregate(s: AggregateSelect, ctx: EnrichedBoundedContextIR): string {
+  const agg = s.aggregate;
   if (agg.op === "count" || !agg.arg) return "count(*)::int";
   const arg = agg.arg;
   if (arg.kind !== "member") {
@@ -378,15 +409,19 @@ function sqlAggregate(agg: ProjectionAggregateIR): string {
       "internal: a whole-table aggregation argument must be a source column reference",
     );
   }
-  return `${agg.op}(${sqlIdent(snake(arg.member))})::numeric`;
+  const cast = aggregateLandsOnDouble(s, ctx) ? "double precision" : "numeric";
+  return `${agg.op}(${sqlIdent(snake(arg.member))})::${cast}`;
 }
 
-/** The CLR type the aggregate's aliased column lands on. `count` is never
- *  NULL (0 rows counts 0); every other aggregate is NULL over no rows, which
- *  `csCoerce` turns into the declared field's zero (or keeps as null for an
- *  optional field). */
-function sqlAggregateRowCs(agg: ProjectionAggregateIR): string {
-  return agg.op === "count" || !agg.arg ? "int" : "decimal?";
+/** The CLR type the aggregate's aliased column lands on — the Npgsql mapping of
+ *  the cast `sqlAggregate` emitted, so the two must move together. `count` is
+ *  never NULL (0 rows counts 0); every other aggregate is NULL over no rows,
+ *  which `csCoerce` turns into the declared field's zero (or keeps as null for
+ *  an optional field). */
+function sqlAggregateRowCs(s: AggregateSelect, ctx: EnrichedBoundedContextIR): string {
+  const agg = s.aggregate;
+  if (agg.op === "count" || !agg.arg) return "int";
+  return aggregateLandsOnDouble(s, ctx) ? "double?" : "decimal?";
 }
 
 /** One grouping key as raw Postgres SQL — the column, or the catalogued
@@ -538,13 +573,9 @@ function renderAggregateHandler(
     // `QuerySingleAsync`, not `…OrDefault`.  Each aggregate is aliased to its
     // wire field's snake name, which is also the row property name, so Dapper's
     // column→property match is exact.
-    const cols = aggregates.map(
-      (s) => `${sqlAggregate(s.aggregate)} AS ${sqlIdent(snake(s.field))}`,
-    );
+    const cols = aggregates.map((s) => `${sqlAggregate(s, ctx)} AS ${sqlIdent(snake(s.field))}`);
     members = aggregates
-      .map(
-        (s) => `        public ${sqlAggregateRowCs(s.aggregate)} ${snake(s.field)} { get; set; }`,
-      )
+      .map((s) => `        public ${sqlAggregateRowCs(s, ctx)} ${snake(s.field)} { get; set; }`)
       .join("\n");
     const sql = `SELECT ${cols.join(", ")} FROM ${sqlIdent(dapperAggregateTable(source))}${
       where ? ` WHERE ${where}` : ""
@@ -770,7 +801,7 @@ function renderGroupedHandler(
       const expr = sqlGroupKeyExpr(k.expr, proj.name);
       return expr === alias ? alias : `${expr} AS ${alias}`;
     }),
-    ...grouped.aggregates.map((s) => `${sqlAggregate(s.aggregate)} AS ${sqlIdent(snake(s.field))}`),
+    ...grouped.aggregates.map((s) => `${sqlAggregate(s, ctx)} AS ${sqlIdent(snake(s.field))}`),
   ].join(", ");
   const groupSql =
     `SELECT ${selectSql} FROM ${sqlIdent(dapperAggregateTable(source))}` +
@@ -783,7 +814,7 @@ function renderGroupedHandler(
           col: snake(s.field),
           sql: "",
           nullable: true,
-          rowCs: sqlAggregateRowCs(s.aggregate),
+          rowCs: sqlAggregateRowCs(s, ctx),
           cast: "",
           save: "",
           stateProp: "",
