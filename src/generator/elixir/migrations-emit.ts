@@ -495,7 +495,7 @@ function renderInitialValueCollectionFile(
       lines.push(`      add :${c.name}, ${ref}, null: ${c.nullable}${defaultClause}`);
     } else {
       lines.push(
-        `      add :${c.name}, ${ectoColumnType(c.type)}, null: ${c.nullable}${defaultClause}`,
+        `      add :${c.name}, ${ectoColumnType(c.type)}${ectoColumnOpts(c.type)}, null: ${c.nullable}${defaultClause}`,
       );
     }
   }
@@ -539,7 +539,7 @@ function renderInitialJoinFile(
     } else {
       const pk = pkSet.has(c.name) ? ", primary_key: true" : "";
       lines.push(
-        `      add :${c.name}, ${ectoColumnType(c.type)}, null: ${c.nullable}${pk}${defaultClause}`,
+        `      add :${c.name}, ${ectoColumnType(c.type)}${ectoColumnOpts(c.type)}, null: ${c.nullable}${pk}${defaultClause}`,
       );
     }
   }
@@ -593,7 +593,7 @@ export function renderEctoStep(step: MigrationStep): string[] {
       const prefix = prefixOpt(step.schema);
       const decl = step.fk
         ? `references(:${step.fk.refTable}${prefix}, type: ${ectoPrimaryKeyType(c.type)}, on_delete: :${step.fk.onDelete === "cascade" ? "delete_all" : "restrict"})`
-        : ectoColumnType(c.type);
+        : `${ectoColumnType(c.type)}${ectoColumnOpts(c.type)}`;
       return [
         `alter table(:${step.table}${prefix}) do`,
         `  add :${c.name}, ${decl}, null: ${c.nullable}`,
@@ -613,7 +613,7 @@ export function renderEctoStep(step: MigrationStep): string[] {
     case "alterColumnNullable":
       return [
         `alter table(:${step.table}${prefixOpt(step.schema)}) do`,
-        `  modify :${step.name}, ${ectoColumnType(step.type)}, null: ${step.nullable}`,
+        `  modify :${step.name}, ${ectoColumnType(step.type)}${ectoColumnOpts(step.type)}, null: ${step.nullable}`,
         `end`,
       ];
     case "alterColumnType":
@@ -714,7 +714,7 @@ function renderEctoColumn(c: ColumnShape, table: TableShape): string {
     const ref = `references(:${fk.refTable}${prefixOpt(table.schema)}, type: ${ectoPrimaryKeyType(c.type)}, on_delete: :${fk.onDelete === "cascade" ? "delete_all" : "restrict"})`;
     return `add :${c.name}, ${ref}, null: ${c.nullable}${defaultClause}`;
   }
-  return `add :${c.name}, ${ectoColumnType(c.type)}, null: ${c.nullable}${defaultClause}`;
+  return `add :${c.name}, ${ectoColumnType(c.type)}${ectoColumnOpts(c.type)}, null: ${c.nullable}${defaultClause}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -722,6 +722,17 @@ function renderEctoColumn(c: ColumnShape, table: TableShape): string {
 // Primary keys / FK references: text → :string (Ecto's string-PK
 // convention — varchar(255)), uuid → :uuid.
 // ---------------------------------------------------------------------------
+
+/** The bounded-numeric options an Ecto `add`/`modify` needs beyond the type
+ *  atom.  `money` is `NUMERIC(19,4)` (#2549 — an unbounded column stored
+ *  whatever scale the writing backend produced); a plain `decimal` stays
+ *  unconstrained.  Kept OUT of `ectoColumnType` because that atom is also
+ *  nested inside `{:array, …}`, where trailing options would not parse. */
+function ectoColumnOpts(t: ColumnType): string {
+  return t.kind === "decimal" && t.precision !== undefined && t.scale !== undefined
+    ? `, precision: ${t.precision}, scale: ${t.scale}`
+    : "";
+}
 
 function ectoColumnType(t: ColumnType): string {
   switch (t.kind) {

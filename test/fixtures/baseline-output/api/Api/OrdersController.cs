@@ -47,6 +47,7 @@ public sealed class OrdersController : ControllerBase
     [HttpGet("{id}")]
     [ProducesResponseType(typeof(OrderResponse), 200)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
+    [ProducesResponseType(typeof(ProblemDetails), 422)]
     public async Task<ActionResult<OrderResponse>> GetOrderById([FromRoute] Guid id)
     {
         var response = await _mediator.Send(new GetOrderByIdQuery(new OrderId(id)));
@@ -58,6 +59,7 @@ public sealed class OrdersController : ControllerBase
     [ProducesResponseType(204)]
     [ProducesResponseType(typeof(ProblemDetails), 404)]
     [ProducesResponseType(typeof(ProblemDetails), 409)]
+    [ProducesResponseType(typeof(ProblemDetails), 422)]
     public async Task<IActionResult> DestroyOrder([FromRoute] Guid id)
     {
         try
@@ -130,6 +132,7 @@ public sealed class OrdersController : ControllerBase
 
     [HttpGet]
     [ProducesResponseType(typeof(Paged<OrderResponse>), 200)]
+    [ProducesResponseType(typeof(ProblemDetails), 422)]
     public async Task<ActionResult<Paged<OrderResponse>>> AllOrder([FromQuery] [System.ComponentModel.DataAnnotations.Range(1, 1000000)] int page = 1, [FromQuery] [System.ComponentModel.DataAnnotations.Range(1, 500)] int pageSize = 20, [FromQuery] string sort = "id", [FromQuery] string dir = "asc")
     {
         var result = await _mediator.Send(new AllQuery(page, pageSize, sort, dir));
@@ -138,6 +141,7 @@ public sealed class OrdersController : ControllerBase
 
     [HttpGet("by_customer")]
     [ProducesResponseType(typeof(IReadOnlyList<OrderResponse>), 200)]
+    [ProducesResponseType(typeof(ProblemDetails), 422)]
     public async Task<ActionResult<IReadOnlyList<OrderResponse>>> ByCustomerOrder([FromQuery] [Microsoft.AspNetCore.Mvc.ModelBinding.BindRequired] string customerId)
     {
         var result = await _mediator.Send(new ByCustomerQuery(customerId));

@@ -49,6 +49,7 @@ import {
   collectFlutterWorkflowForms,
   collectPageForms,
   collectPageWorkflowForms,
+  formsUseFilePicker,
   renderFormsFile,
 } from "./forms-emit.js";
 import { flutterI18nEnabled, renderFlutterI18nModule } from "./i18n.js";
@@ -85,19 +86,6 @@ export function generateFlutterForContexts(
 
   const ui = deployable.uiName ? sys.uis.find((u) => u.name === deployable.uiName) : undefined;
 
-  // Wire-model classes for every aggregate/VO/event reachable through this
-  // deployable's contexts (Track A).  One `lib/models.dart` the pages import.
-  // The fixed `FileRef` class is added only when a `File` field maps to it (the
-  // base render then references `FileRef`) or the ui hosts a `FileUpload` — so
-  // File-free projects stay byte-identical.
-  const usesFileUpload = uiUsesFileUpload(ui);
-  const baseModels = renderDartModels(contexts);
-  const needsFileRef = usesFileUpload || baseModels.includes("FileRef");
-  out.set(
-    "lib/models.dart",
-    needsFileRef ? renderDartModels(contexts, { fileRef: true }) : baseModels,
-  );
-
   // Aggregate + owning-bounded-context lookups, built once — threaded into the
   // walker (form seams resolve the aggregate's create-input / op params + the
   // BC's enums / value objects) and the form projector.
@@ -124,10 +112,31 @@ export function generateFlutterForContexts(
     ...collectFlutterWorkflowForms(ui, workflowsByName, bcByWorkflow, aggregatesByName),
   ];
 
-  // Riverpod read providers — one `FutureProvider` per distinct QueryView read
-  // a page issues (fetch over `package:http` + Track A `fromJson`).  Emitted
-  // only when the ui issues reads, alongside the `AppConfig` api-base helper.
+  // Wire-model classes for every aggregate/VO/event reachable through this
+  // deployable's contexts (Track A).  One `lib/models.dart` the pages import.
+  // The fixed `FileRef` class is added only when a `File` field maps to it (the
+  // base render then references `FileRef`) or a `FileUpload` primitive / an
+  // in-FORM `File` input is present — so File-free projects stay byte-identical.
+  // An in-form File input pulls `file_picker` exactly as the standalone
+  // primitive does (both run pick → multipart `POST /files` → `FileRef`).
+  // The reads are collected FIRST because an entity-history read pulls the
+  // `AuditEntry`/`AuditFieldChange` wire models into `lib/models.dart` (the
+  // `auditEntry` flag riding the same opt-in rule); the providers file itself
+  // is emitted further down, next to the other read wiring.
   const reads = collectFlutterReads(ui, contexts);
+  const auditEntry = reads.some((r) => r.history === true);
+  const usesFileUpload = uiUsesFileUpload(ui) || formsUseFilePicker(forms);
+  const baseModels = renderDartModels(contexts, { auditEntry });
+  const needsFileRef = usesFileUpload || baseModels.includes("FileRef");
+  out.set(
+    "lib/models.dart",
+    needsFileRef ? renderDartModels(contexts, { fileRef: true, auditEntry }) : baseModels,
+  );
+
+  // Riverpod read providers — one `FutureProvider` per distinct QueryView read
+  // a page issues (fetch over `package:http` + Track A `fromJson`; collected
+  // above, ahead of the models emit).  Emitted only when the ui issues reads,
+  // alongside the `AppConfig` api-base helper.
   if (reads.length > 0) {
     out.set("lib/reads.dart", renderReadProviders(reads));
   }

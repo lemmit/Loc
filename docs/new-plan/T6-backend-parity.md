@@ -480,7 +480,7 @@ minting the corpus fixtures the scoping note asked for — they are pinned by
 that both read a store this adapter itself emits (so their columns are known),
 but a runtime witness for each is still owed and belongs with M-T9.x.
 
-**Found while landing it:** M-T6.41 below — the Dapper adapter emits UNQUOTED
+**Found while landing it:** M-T6.42 below — the Dapper adapter emits UNQUOTED
 identifiers, so a reserved-word column name makes its DDL a syntax error.
 
 ## M-T6.30 — Vanilla Phoenix has no app-global RFC 7807 arm — `open` · **M** · P2 ⭐ shape divergence, not a detail one
@@ -565,10 +565,23 @@ Originally: node installed no app-global handler — `api/http/index.ts` mounted
 
 Sources: M-T9.25 census sweep 3 (409/500). Twin of M-T6.25; relates to M-T6.26 (the same "read paths answer a different shape from write paths" defect on dotnet/java).
 
-## M-T6.32 — Capability emission: the four capabilities that gate honestly and emit nothing — `open` · **M** · P1 ⭐ silent-governance class
-Four capability-shaped features are declared in `.ddd`, accepted by the validator, and then **not emitted** by some backends — each with an honest gate standing in for the emitter: `loom.context-filter-unsupported` (a `filter` capability the backend never applies), `loom.filter-bypass-unsupported` (`ignoring`, the deliberate bypass), `loom.audited-backend-unsupported` (per-operation audit records), `loom.provenanced-backend-unsupported` (the provenance runtime — trace capture + history). The gates are the right failure mode; the emitters are the open half. Grouped because they share a shape — a capability the macro/prelude layer splices in, which every backend must then honour — so the per-backend work rhymes even though the four features don't.
-**First step is a re-verify:** the register rows are classified `gap` but unverified. Confirm against each emission site that the backend genuinely cannot emit (a gap) rather than that the combination is meaningless (which would make it a rename, per M-T9.27 slice 2).
-Sources: M-T9.27 register rows (`src/diagnostics/unsupported-register.ts`). Relates to M-T3.2 (`mask unless`, the same silent-governance class, already missioned).
+## M-T6.32 — ~~Capability emission: the four capabilities that gate honestly and emit nothing~~ — `closed on the platform axis` (2026-08-17, re-verify changed the answer) · **M** · P1 ⭐ silent-governance class
+The mission's own **first step was "re-verify"**, and the re-verify overturned it: all four capabilities emit on **all five backends**. Each set literal below is in `src/ir/validate/checks/system-checks.ts`; the gate each one feeds can no longer fire for a shipping backend, so it now guards a future un-ported one.
+
+| Capability | Gate | Set literal | Emitters |
+|---|---|---|---|
+| `filter` capability | `loom.context-filter-unsupported` | `supportsNonRelationalFilter` / `supportsPrincipalNonRelationalFilter` | 5/5 on `relational` + `embedded`; 4/5 on `document` (node in-app over the rehydrated doc, java `findAll().stream()`, python `documentCapabilityBody`, .NET `_CapabilityVisible` in `renderDocumentRepositoryImpl` — landed #2530) |
+| `ignoring` bypass | `loom.filter-bypass-unsupported` | `FILTER_BYPASS_FAMILIES` = `dotnet, node, elixir, java, python` | EF `IgnoreQueryFilters`, Drizzle conjunct omission, Ecto `where:` omission, Hibernate named `@Filter` + `session.disableFilter`, SQLAlchemy static conjunct omission |
+| `audited` operations | `loom.audited-backend-unsupported` | `AUDIT_OP_BACKENDS` = all five | `audit_records` side table on each — pinned per backend by `test/platform/backend-parity-gates.test.ts` (`marker` per backend) |
+| `provenanced` fields | `loom.provenanced-backend-unsupported` | `PROVENANCE_BACKENDS` = all five | `provenance_records` on each — same test, `marker` per backend |
+
+**Two residues survive, and neither is on this mission's axis:**
+
+1. **elixir + `shape: document` capability filters** — the one unwired `(family, shape)` cell in `validateContextFilterSupport`. Everything else in that function is covered, which is why the diagnostic's own wording ("only wired for relational aggregates") was corrected in the same pass that closed this row.
+2. **`ignoring` under `persistence: dapper`** — an ADAPTER cell, not a platform one. `FILTER_BYPASS_FAMILIES` is keyed by family, so `dotnet` passes the gate whatever its adapter; but `src/generator/dotnet/emit/dapper.ts` applies `agg.contextFilters` and contains **zero** occurrences of bypass handling, so an `ignoring` clause is silently not honoured there. Tracked on the adapter axis by **M-T6.35**; the dapper adapter is also under active work in the in-flight M-T6.42 PR.
+
+The general lesson is the one M-T6.33 already recorded one row over: a register row classified `gap` and never re-verified decays into a claim about the past. Both of this track's "re-verify first" missions were overturned by the re-verify.
+Sources: M-T9.27 register rows (the stale premise); overturned against the four set literals cited above and `backend-parity-gates.test.ts`. Relates to M-T3.2 (`mask unless`, the same silent-governance class, still missioned) and M-T6.35 (the adapter axis, where residue 2 lives).
 
 ## M-T6.33 — Lifecycle stamps: one rule wearing five names — `done` (2026-08-11) · **S–M** · P2 ⭐ the re-verify changed the answer
 **Verdict: they were never gaps.** The mission's first job was to re-verify the classification, and it overturned it. `loom.{node,dotnet,java,python,elixir}-stamp-unsupported` were five codes over one shared body, and reading that body settled both questions at once:
@@ -583,11 +596,70 @@ Sources: M-T9.27 register rows (`src/diagnostics/unsupported-register.ts`). Rela
 **Coverage gap found and closed:** the event-sourced arm was tested in only three of the five generator suites (dotnet and java asserted the principal arm only). With one shared body the arm belongs at the IR layer, so `test/ir/stamp-support.test.ts` now covers it per-family; mutation-proven (disabling the arm fails exactly those five cases and nothing else).
 Sources: M-T9.27 register rows; `system-checks.ts` `validateStampSupport`.
 
-## M-T6.34 — Event-sourced storage exists on one backend of five — `open` · **L** · P2
-`persistedAs: eventLog` emits storage on Hono only (`loom.event-sourcing-backend-unsupported`), and **event-sourced workflow storage — a per-correlation event stream folded into workflow state — exists nowhere** (`loom.event-sourced-workflow-unsupported`, rejected on all five). The aggregate half is a four-backend port of a shipped design; the workflow half is unbuilt everywhere and should be scoped before it is started. Sized L because the two halves are not the same work and the second may want its own mission once scoped.
-Sources: M-T9.27 register rows.
+## M-T6.34 — ~~Event-sourced storage exists on one backend of five~~ — `closed` (2026-08-17, premise overturned) · **L** · P2
+**The premise is false on current `main`: both halves are 5/5.** The mission was minted off M-T9.27 register rows and never re-verified; the ports landed in the interim and the row did not move.
 
-## M-T6.41 — `persistence: dapper` emits unquoted identifiers, so a reserved-word column breaks the DDL — `open` · **M** · P1 ⭐ boots red, compiles green
+- **Aggregate half.** `EVENT_SOURCING_BACKENDS` (`src/ir/validate/checks/system-checks.ts`) is `new Set(["node", "dotnet", "python", "java", "elixir"])`. `validateEventSourcedStorage` diffs the hosting backends against that set, so `loom.event-sourcing-backend-unsupported` cannot fire for any shipping backend — it fires only when NO backend hosts the context, or for a future un-ported one. The elixir entry is not a rubber stamp: plain Ecto/Phoenix hosts pure ES through the per-aggregate stream + fold-on-load data layer (D-VANILLA-ES-HOME).
+- **Workflow half** — the part the mission called "unbuilt everywhere". `EVENT_SOURCING_WORKFLOW_BACKENDS` (same file) is the same five-element set, and its own comment states the emitters: "the **node, .NET, Python, Java, and elixir backends all emit the event-sourced workflow runtime** (per-correlation `<wf>_events` stream, fold-on-load, emit→append-own-event dispatch)". `validateEventSourcedWorkflowStorage` returns early when `unsupported.length === 0`, which is always.
+- **Pinned, not just asserted.** `test/platform/backend-parity-gates.test.ts` drives the `loom.event-sourcing-backend-unsupported` row with a per-backend `emits` set of all five plus a per-backend output `marker`, so the claim is gated on emitted artefacts rather than on the set literal alone.
+
+No residue on this mission's axis. The ADAPTER axis is a different question and is tracked by M-T6.35.
+Sources: M-T9.27 register rows (the stale premise); overturned against the `EVENT_SOURCING_BACKENDS` / `EVENT_SOURCING_WORKFLOW_BACKENDS` literals in `system-checks.ts` and their `backend-parity-gates.test.ts` row.  (Cited by SYMBOL, not line: this file's own citations went stale the moment the cited file was edited.)
+
+## M-T6.43 — Java's JPA entities emit unquoted column names, so a reserved-word field 500s on insert — `open` · **S–M** · P1 ⭐ compiles green, boots green, fails on first write
+
+Found 2026-08-17 while landing M-T6.42, by running the new `reserved-words`
+corpus fixture's behavioural leg against a real booted Spring Boot + Postgres.
+The SAME class M-T6.42 fixed on the Dapper adapter, on a second backend.
+
+The JPA entity names the column bare:
+
+```java
+@Column(name = "order")
+int order;
+```
+
+Hibernate then writes `insert into orders.tickets (order, group, limit, …)` and
+Postgres refuses it. The request answers **500 `internal`**:
+
+```
+POST /api/tickets → 500 {"detail":"internal","title":"Internal Server Error", …}
+```
+
+**Why every existing gate is green.** The Java project COMPILES (`gradle
+testClasses bootJar` succeeds — the column name is an annotation string). The
+schema is fine, because Java's DDL comes from the SHARED `sql-pg.ts` migration
+renderer, which has quoted always since G2 — so `schema-load` passes and the app
+BOOTS. Only a write reaches the defect, which is why it needed a behavioural
+witness rather than a compile or schema one.
+
+**The fix** is Hibernate's portable quoting — a backtick-wrapped name, which
+Hibernate converts to the dialect's quote character — applied at the ~16
+dynamic `@Column(name = …)` sites (nearly all in
+`src/generator/java/emit/jpa-annotations.ts`), plus any `@SQLRestriction`
+predicate that names a column. The reserved-word set already exists as
+`PG_RESERVED_IDENTS` in `src/generator/dotnet/emit/dapper.ts`; landing this
+should LIFT it to a shared home (`src/generator/` or `src/util/`) rather than
+copy it — two lists of Postgres keywords is exactly the drift M-T6.42's own
+header warns about.
+
+**Verification when it lands.** `test/fixtures/corpus/reserved-words.ddd`
+already exists and already covers every clause position; the ratchet is widening
+its `backends:` row from `QUOTES_RESERVED_IDENTIFIERS` back to `ALL` in the same
+PR. `node run-java.mjs reserved-words` is the proof, and it fails today — it
+needs JDK 25 + Gradle 9.1+, which the sandbox host does not ship by default
+(see `docs/tools.md`).
+
+**Not affected, checked rather than assumed:** node/drizzle, python and .NET EF
+all round-trip the fixture against the golden; elixir is safe by construction
+(Ecto takes column names as ATOMS — `field :order` / `add :order` — and quotes
+every identifier it renders, so no raw name reaches the SQL).
+
+**Sources:** M-T6.42 (the sibling fix and the fixture), `sql-pg.ts`'s
+quote-always rule, the behavioural java leg.
+
+## M-T6.42 — `persistence: dapper` emits unquoted identifiers, so a reserved-word column breaks the DDL — `done` (2026-08-17) · **M** · P1 ⭐ boots red, compiles green
+*(ID note: this row was minted as M-T6.41, colliding with the direct-table-aggregation row of the same number further up this file. Renumbered to **M-T6.42** on `main` while the fix was in flight — that is the id this PR already used, so the two agree. Fourth dup-ID incident; M-T9.32's automation remains the fix.)*
 
 A `.ddd` field named `order` / `user` / `group` / `end` — any of Postgres'
 ~100 reserved words — makes the Dapper adapter's emitted schema a **syntax
@@ -629,6 +701,46 @@ would have caught this from the start, and the reason the class stayed invisible
 **Sources:** found while landing M-T6.25 (the port that first let `read-gates`
 generate under this adapter). Sibling of M-T6.35 — a persistence-ADAPTER gap,
 the axis the "five backends" framing hides.
+
+### Outcome (2026-08-17)
+
+`sqlIdent` (`emit/dapper.ts`) quotes the ~100 Postgres reserved words at every
+identifier position this adapter emits — CREATE TABLE / CREATE INDEX, the
+SELECT and INSERT column lists, the `ON CONFLICT … DO UPDATE SET` assignments,
+`whereToSql`'s column arm, a retrieval's ORDER BY, the join-table and
+child-table DDL, and the paged sort allowlist. Non-reserved emission is
+**byte-identical** — proved by regenerating every corpus fixture under
+`persistence: dapper` before and after and diffing to zero.
+
+**The escaping was the whole difficulty**, and the reason #2559 reverted an
+attempt rather than shipping one. The identifier reaches C# through two string
+contexts: ~47 `new CommandDefinition("…")` REGULAR literals (`\"order\"`) and
+exactly ONE verbatim `@"…"` in `DbSchema.cs` (`""order""`). `sqlIdent` emits
+the regular-literal form and the single verbatim funnel re-encodes on the way
+in (`ddlToVerbatimLiteral`), so no call site has to know which context it is in
+— and the one that does is small enough to read in full.
+
+**Two gates, because the two halves fail in different places.**
+
+- `schema-load` grew a dapper leg: it `psql -f`s the emitted `DbSchema.Sql`
+  into a real Postgres, statement by statement, the way `EnsureAsync` runs it.
+  That is the oracle whose absence hid this — the existing leg loads the
+  MIGRATION chain, which this adapter does not use.
+- `dapper-reserved-identifiers.test.ts` pins the DML half clause by clause,
+  because a C# string compiles whatever it contains and no per-PR tier boots
+  this adapter against a database. Mutation-proven that schema-load CANNOT see
+  a DML-only break — quoting the schema alone would have left every query
+  broken with every gate green, which is worse than the original defect.
+
+`test/fixtures/corpus/reserved-words.ddd` is the permanent witness, declared on
+all five backends, so the class stays exercised rather than depending on some
+other fixture happening to name a reserved word (the way `read-gates` did
+until it was renamed to `keyed by order_ref` and the witness silently
+disappeared).
+
+**Not covered, stated rather than implied:** a field named after a HOST-LANGUAGE
+keyword (`is`, `default`, `class`) still breaks the generated row DTO / entity
+on every backend. Different class, different fix, no backend claims it today.
 
 ## M-T6.35 — Persistence-adapter capability gaps — `open` · **M** · P2
 The non-default persistence adapters reject shapes their EF/Ecto siblings accept: `loom.dapper-unsupported` (features Dapper does not emit), `loom.find-predicate-unsupported` (a find predicate the active adapter cannot lower), `loom.persistence-mode-unsupported` (a `persistedAs`/`shape` pair the adapter cannot store), `loom.saving-shape-unsupported` (a `shape(...)` the hosting backend cannot persist), `loom.vanilla-document-unsupported` (`shape: document` only partly emitted on Elixir). The adapter axis is where "all targets support the whole surface" costs the most, because each adapter multiplies the matrix again — worth confirming per row whether the adapter *cannot* express the shape (a permanent limit, so a rename) or merely *does not yet* (a gap).

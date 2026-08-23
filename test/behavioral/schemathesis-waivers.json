@@ -2,14 +2,6 @@
   "comment": "Ratcheting waivers for the schemathesis contract-fuzzing leg (M-T9.21). A rule names one ROOT CAUSE — a check plus a regex over the operation label — and points at the entry in docs/audits/schemathesis-findings-2026-08.md that explains it with a repro. The ratchet bites both ways: a finding no rule matches FAILS the run (a new bug, or a known one spreading to a surface no rule claimed), and a rule that matches nothing across the whole run ALSO fails it (fix the root cause, delete the rule and strike the register entry in the same PR). Rules are deliberately NOT machine-generated: an unexplained waiver is indistinguishable from a silent skip. `kind` is `bug` (a defect we are choosing not to fix in the discovery PR) or `by-design` (the check disagrees with a deliberate decision).",
   "waivers": [
     {
-      "id": "W4",
-      "findings": ["F6"],
-      "check": "status_code_conformance",
-      "operations": "^(GET|DELETE) ",
-      "kind": "bug",
-      "reason": "F6 — every read/delete route validates its path and query parameters and answers 422 on a bad one, but the emitted OpenAPI declares only 200/404 (GET) and 204/404/409 (DELETE). The 422 is real, documented nowhere, and every client generated from this spec is blind to it."
-    },
-    {
       "id": "W6",
       "findings": ["F5"],
       "check": "response_schema_conformance",
@@ -26,14 +18,6 @@
       "operations": "^GET ",
       "kind": "by-design",
       "reason": "F9 — schemathesis counts an unknown QUERY parameter as a schema-violating request that the API accepted. Ignoring unrecognised query parameters is ordinary HTTP behaviour and deliberate here; recorded so the decision is visible rather than silently filtered out of the check set."
-    },
-    {
-      "id": "W9",
-      "findings": ["F8"],
-      "check": "unsupported_method",
-      "operations": ".",
-      "kind": "bug",
-      "reason": "F8 — a verb that is genuinely undeclared on a declared path correctly answers 405 (the #2485 fix holds). But a wrong verb on a STATIC sub-path is captured by the sibling `/{id}` route instead: `DELETE /api/customers/by_email` matches `DELETE /api/customers/{id}` with id=\"by_email\" and answers 422 Invalid UUID, when the path has no DELETE and 405 is the honest answer."
     },
     {
       "id": "W10",

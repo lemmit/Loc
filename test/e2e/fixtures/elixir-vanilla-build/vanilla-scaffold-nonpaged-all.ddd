@@ -1,0 +1,51 @@
+// A scaffolded LIST page over an AUTHOR-DECLARED, NON-paged `find all(): T[]`
+// (M-T6.40).  The uncompilable shape this fixture exists to gate:
+//
+//   defdelegate list_orders(), to: …OrderRepository, as: :list          # 0-arity
+//   case ShopArity.Shop.list_orders(socket.assigns.page_num, 10, …) do   # /4
+//
+// The scaffold's list body is SERVER-paged or CLIENT-paged depending on whether
+// the aggregate's `all` read pages, and the macro used to answer that purely
+// from the *implicit* findAll's exclusions — never asking whether the author had
+// already declared `find all` themselves.  A declared `T[]` therefore emitted a
+// four-argument call against a bare zero-arity delegate and `mix compile
+// --warnings-as-errors` failed on `undefined function list_orders/4`.  Nothing
+// in the pipeline compared the two, so it was silent everywhere else.
+//
+// Both branches are exercised: `Order` declares a NON-paged `all` (the bug's
+// shape) and `Invoice` declares a PAGED one, so a "fix" that just deleted the
+// four arguments unconditionally breaks the second aggregate here.
+system ShopArity {
+  subdomain Sales {
+    context Shop {
+      aggregate Order with crudish {
+        code: string
+        total: int
+      }
+      aggregate Invoice with crudish {
+        number: string
+        amount: int
+      }
+      repository Orders for Order {
+        find all(): Order[]
+      }
+      repository Invoices for Invoice {
+        find all(): Invoice paged
+      }
+    }
+  }
+  api ShopApi from Sales
+  ui Web with scaffold(aggregates: [Order, Invoice]) {
+    api Shop: ShopApi
+  }
+  storage primary { type: postgres }
+  resource shopState { for: Shop, kind: state, use: primary }
+  deployable api {
+    platform: elixir
+    contexts: [Shop]
+    dataSources: [shopState]
+    serves: ShopApi
+    ui: Web { Shop: api }
+    port: 4000
+  }
+}

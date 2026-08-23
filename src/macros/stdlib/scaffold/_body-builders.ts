@@ -1063,6 +1063,26 @@ export interface FilterFind {
  *  Filters the aggregate's repository finds to the bar-eligible ones — the repository
  *  is a sibling `ContextMember`, so it's reachable from the aggregate's AST
  *  without lowering. */
+/** The `requires` gate on an aggregate's author-declared `find all`, if it has
+ *  one — the gate guarding `GET /<aggs>`, which is exactly what the scaffolded
+ *  List page reads.
+ *
+ *  Returns the AUTHOR's node; the caller must `cloneExpr` it before attaching
+ *  it anywhere (an AST node has one `$container`).  There is nothing to find
+ *  when the aggregate relies on the enrichment-injected `all`: that one is
+ *  synthesised in phase ⑥, long after macros run, and carries no gate.
+ */
+export function listReadGateForAggregate(agg: Aggregate): Expression | undefined {
+  for (const m of agg.$container.members) {
+    if (m.$type !== "Repository") continue;
+    if (m.aggregate.ref?.name !== agg.name && m.aggregate.$refText !== agg.name) continue;
+    for (const f of m.finds) {
+      if (f.name === "all" && f.gate) return f.gate;
+    }
+  }
+  return undefined;
+}
+
 export function filterFindsForAggregate(agg: Aggregate): FilterFind[] {
   const out: FilterFind[] = [];
   for (const m of agg.$container.members) {

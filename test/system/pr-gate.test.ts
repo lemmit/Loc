@@ -17,9 +17,15 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error — plain-JS module without a declaration file; the runtime
 // shape is pinned by the assertions below.
 import {
+  API_MAX_ATTEMPTS,
+  apiFetch,
   currentGateState,
   evaluate,
+  existingGateRunId,
+  isRetryableStatus,
   latestPerName,
+  publishCheck,
+  retryDelayMs,
   SELF_NAMES,
   sweepShouldPost,
   verdict,
@@ -368,5 +374,206 @@ describe("sweep reconciliation — currentGateState / sweepShouldPost", () => {
     expect(sweepShouldPost("pending", { state: "pending" })).toBe(false);
     expect(sweepShouldPost("success", { state: "failure" })).toBe(true);
     expect(sweepShouldPost("absent", { state: "pending" })).toBe(true);
+  });
+});
+
+describe("apiFetch — github.com's transient 5xx is not a verdict", () => {
+  // Observed 2026-08-17: the scheduled sweep died on `503 No server is
+  // currently available to service your request` while posting PR 6 of 12 —
+  // a red `pr-gate` run that said nothing about any PR, and left the six
+  // unswept.  The gate is the recovery path for every other check, so an API
+  // blip must cost a retry, not the job.
+  const res = (status: number) =>
+    ({ ok: status >= 200 && status < 300, status, text: async () => "" }) as Response;
+  const noSleep = async () => {};
+
+  it("classifies what is worth retrying — transient yes, defect no", () => {
+    for (const s of [429, 500, 502, 503, 504]) expect(isRetryableStatus(s), `${s}`).toBe(true);
+    // A 401/403 is a bad token or a missing permission and a 422 is a malformed
+    // body; retrying those only delays the honest failure.
+    for (const s of [400, 401, 403, 404, 409, 422])
+      expect(isRetryableStatus(s), `${s}`).toBe(false);
+  });
+
+  it("backs off 1s, 2s, 4s — bounded, so an evaluation stays seconds long", () => {
+    expect([1, 2, 3].map(retryDelayMs)).toEqual([1000, 2000, 4000]);
+    // v2's whole claim is that a gate run never parks a runner slot.
+    let total = 0;
+    for (let a = 1; a < API_MAX_ATTEMPTS; a += 1) total += retryDelayMs(a);
+    expect(total).toBeLessThanOrEqual(10_000);
+  });
+
+  it("retries the 503 and returns the response that follows it", async () => {
+    const seen: number[] = [];
+    const statuses = [503, 503, 201];
+    const fetchImpl = async () => {
+      const s = statuses[seen.length];
+      seen.push(s);
+      return res(s);
+    };
+    const out = await apiFetch("u", {}, { fetchImpl, sleep: noSleep, onRetry: () => {} });
+    expect(out.status).toBe(201);
+    expect(seen).toEqual([503, 503, 201]);
+  });
+
+  it("does not retry a 422 — one call, and the caller still throws", async () => {
+    let calls = 0;
+    const fetchImpl = async () => {
+      calls += 1;
+      return res(422);
+    };
+    const out = await apiFetch("u", {}, { fetchImpl, sleep: noSleep, onRetry: () => {} });
+    expect(calls).toBe(1);
+    expect(out.ok).toBe(false);
+  });
+
+  it("gives up after the ladder and hands the failing response back to the caller", async () => {
+    let calls = 0;
+    const fetchImpl = async () => {
+      calls += 1;
+      return res(503);
+    };
+    const out = await apiFetch("u", {}, { fetchImpl, sleep: noSleep, onRetry: () => {} });
+    // Still a Response, not a swallowed error: the call site's own
+    // `if (!res.ok) throw` keeps producing its message unchanged.
+    expect(calls).toBe(API_MAX_ATTEMPTS);
+    expect(out.status).toBe(503);
+  });
+
+  it("retries a rejected fetch (reset socket / DNS) and rethrows on the last", async () => {
+    let calls = 0;
+    const flaky = async () => {
+      calls += 1;
+      if (calls < 3) throw new Error("ECONNRESET");
+      return res(200);
+    };
+    expect(
+      (await apiFetch("u", {}, { fetchImpl: flaky, sleep: noSleep, onRetry: () => {} })).ok,
+    ).toBe(true);
+
+    let always = 0;
+    const dead = async () => {
+      always += 1;
+      throw new Error("ENOTFOUND");
+    };
+    await expect(
+      apiFetch("u", {}, { fetchImpl: dead, sleep: noSleep, onRetry: () => {} }),
+    ).rejects.toThrow("ENOTFOUND");
+    expect(always).toBe(API_MAX_ATTEMPTS);
+  });
+
+  it("every GitHub call goes through it — a bare fetch would keep the old red", () => {
+    // The helper is worthless if a call site skips it, and the miss is
+    // invisible (the code reads fine and only fails during an outage).
+    const src = readFileSync(path.join(repoRoot, "scripts/pr-gate.mjs"), "utf8");
+    const bare = src.match(/await fetch\(/g) ?? [];
+    expect(bare, "a call site still calls fetch directly instead of apiFetch").toEqual([]);
+    // Three GitHub endpoints: list check runs, list open PRs, publish the
+    // check.  (Counted excluding `apiFetch`'s own definition.)
+    expect((src.match(/(?<!function )\bapiFetch\(/g) ?? []).length).toBe(3);
+  });
+});
+
+describe("publishCheck — one `pr-gate` run per SHA, updated in place", () => {
+  // The merge refusal on #2593: every component check green, and
+  //   405 Repository rule violations found
+  //   Required status check "pr-gate" is expected.
+  // The SHA carried THREE `pr-gate` runs — two stuck at "waiting on N/M"
+  // because v2 created a new run per evaluation and never completed the old
+  // ones, and one "all 8 triggered check(s) passed".  The draft→ready flip had
+  // split them across two check suites, and the required-check evaluation read
+  // a stale pending one.  Only a force-push to a fresh SHA cleared it.
+  const ok = { ok: true, status: 200, text: async () => "" } as Response;
+  const noSleep = async () => {};
+  const V = { state: "success" as const, summary: "all 8 triggered check(s) passed" };
+
+  const spy = (responses: Response[] = [ok]) => {
+    const calls: { method: string; url: string; body: Record<string, unknown> }[] = [];
+    const fetchImpl = async (url: string, init: RequestInit) => {
+      calls.push({
+        method: init.method as string,
+        url,
+        body: JSON.parse(init.body as string),
+      });
+      return responses[calls.length - 1] ?? ok;
+    };
+    return { calls, opts: { fetchImpl, sleep: noSleep, onRetry: () => {} } };
+  };
+
+  it("finds the run to reuse — newest per name, null when the gate never published", () => {
+    expect(
+      existingGateRunId([
+        { id: 1, name: "pr-gate", status: "in_progress", conclusion: null },
+        { id: 2, name: "pr-gate", status: "completed", conclusion: "success" },
+        { id: 3, name: "tests passed", status: "completed", conclusion: "success" },
+      ]),
+    ).toBe(2);
+    expect(existingGateRunId([green("tests passed")])).toBe(null);
+  });
+
+  it("UPDATES the existing run instead of leaving a stale pending sibling", async () => {
+    const { calls, opts } = spy();
+    await publishCheck("o/r", "deadbeef", "t", V, 4242, opts);
+    expect(calls.length).toBe(1);
+    expect(calls[0].method).toBe("PATCH");
+    expect(calls[0].url).toContain("/check-runs/4242");
+    // head_sha is create-only — PATCH 422s on it.
+    expect(calls[0].body.head_sha).toBeUndefined();
+    expect(calls[0].body.status).toBe("completed");
+    expect(calls[0].body.conclusion).toBe("success");
+  });
+
+  it("creates one the first time the gate publishes on a SHA", async () => {
+    const { calls, opts } = spy();
+    await publishCheck("o/r", "deadbeef", "t", V, null, opts);
+    expect(calls.length).toBe(1);
+    expect(calls[0].method).toBe("POST");
+    expect(calls[0].url).toMatch(/\/check-runs$/);
+    expect(calls[0].body.head_sha).toBe("deadbeef");
+    expect(calls[0].body.name).toBe("pr-gate");
+  });
+
+  it("a pending verdict updates the SAME run — that is the whole fix", async () => {
+    // Under v2 this call is what minted the run that later blocked the merge.
+    const { calls, opts } = spy();
+    await publishCheck(
+      "o/r",
+      "deadbeef",
+      "t",
+      { state: "pending", summary: "waiting on 2/8: tests passed, schema-load" },
+      4242,
+      opts,
+    );
+    expect(calls.map((c) => c.method)).toEqual(["PATCH"]);
+    expect(calls[0].body.status).toBe("in_progress");
+    expect(calls[0].body.conclusion).toBeUndefined();
+  });
+
+  it("falls back to creating when the run belongs to another app (403)", async () => {
+    // Only the app that created a check run may update it.  Better a duplicate
+    // than no verdict at all — and the log line says which happened.
+    const forbidden = { ok: false, status: 403, text: async () => "" } as Response;
+    const { calls, opts } = spy([forbidden, ok]);
+    await publishCheck("o/r", "deadbeef", "t", V, 4242, { ...opts, onRetry: () => {} });
+    expect(calls.map((c) => c.method)).toEqual(["PATCH", "POST"]);
+    expect(calls[1].body.head_sha).toBe("deadbeef");
+  });
+
+  it("BOTH call sites pass the id — a `null` there silently restores the bug", () => {
+    // publishCheck is correct in isolation and useless if a caller hands it
+    // `null`: the SHA grows a second run and the merge refusal comes back.
+    // The sweep is the call site that matters most — it is what finally
+    // published the green verdict on #2593 after the event was dropped.
+    const src = readFileSync(path.join(repoRoot, "scripts/pr-gate.mjs"), "utf8");
+    const wired = src.match(/publishCheck\([^)]*existingGateRunId\(runs\)\)/g) ?? [];
+    expect(wired.length, "a publishCheck call site is not passing existingGateRunId(runs)").toBe(2);
+  });
+
+  it("still throws the caller's message when publishing genuinely fails", async () => {
+    const bad = { ok: false, status: 422, text: async () => "Invalid request" } as Response;
+    const { opts } = spy([bad, bad]);
+    await expect(publishCheck("o/r", "deadbeef", "t", V, 4242, opts)).rejects.toThrow(
+      "GitHub API 422 posting check run",
+    );
   });
 });

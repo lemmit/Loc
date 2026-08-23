@@ -1,0 +1,140 @@
+// Field and aggregate names that are POSTGRES RESERVED WORDS.
+//
+// A `.ddd` author names a field after their domain, not after a SQL grammar —
+// `order`, `group`, `limit`, `check`, `end` are all perfectly ordinary domain
+// vocabulary and all reserved by Postgres.  A backend that writes its own SQL
+// has to quote them or emit a syntax error, and NO fixture named one, so the
+// whole class was unexercised across five backends and two .NET persistence
+// adapters.
+//
+// It was not hypothetical.  M-T6.42: the Dapper adapter emitted bare
+// identifiers everywhere — DDL and DML alike —
+//
+//     CREATE TABLE tickets (order integer not null, …)
+//     SELECT id, order, group FROM tickets WHERE id = @id
+//
+// and the generated stack could not start.  Every gate was blind: the C#
+// COMPILES (the SQL is a string literal), and the schema-load gate loaded the
+// MIGRATION chain, which that adapter does not use — it provisions itself from
+// `DbSchema.EnsureAsync`.  The shared migration renderer (`sql-pg.ts`) had
+// quoted always for exactly this reason since G2; the second SQL writer in the
+// tree never picked the rule up.
+//
+// WHAT THIS FIXTURE PINS, per backend, is that a reserved name survives the
+// whole round trip: the emitted DDL loads (schema-load, both the migration
+// chain and the Dapper `DbSchema.Sql`), the project compiles, and a `find`
+// whose WHERE names a reserved column is valid SQL.
+//
+// The names are chosen to be reserved in POSTGRES but ordinary elsewhere:
+//   - `order` / `group` / `limit` — reserved words a domain really does use;
+//   - each is also a valid identifier in C#, Java, Python, Elixir and
+//     TypeScript, so this stays a SQL-quoting test and does not smuggle in a
+//     host-language keyword-escaping test (that is a different class, and one
+//     no backend claims to handle — see the note at the bottom).
+// `Ticket.total` and `id` are the controls: unreserved, so their emission must
+// not change at all.
+system ReservedWords {
+  subdomain Sales {
+    context Orders {
+      aggregate Ticket with crudish {
+        // Every one of these is a Postgres reserved word.
+        order: int
+        group: string
+        limit: int
+        // The control — unreserved, must emit byte-identically to any other
+        // `money` field.
+        total: money
+      }
+
+      repository Tickets for Ticket {
+        // A `find` whose predicate NAMES a reserved column.  This is the arm
+        // the DDL fix alone would not have covered: a schema that loads and a
+        // SELECT that does not parse is strictly worse than neither working,
+        // which is why the fix had to reach `whereToSql` and not just the
+        // CREATE TABLE.
+        find byGroup(g: string): Ticket[] where group == g
+      }
+
+      // A reserved column in a SORT position, which lowers into ORDER BY — a
+      // third clause position, and the one a fix that only touched column
+      // LISTS would miss.  A `retrieval` rather than a second list `find`,
+      // because the repository is not where list queries accrete.
+      criterion Live of Ticket as t = t.limit > 0
+      retrieval OpenByOrder() of Ticket {
+        where: Live
+        sort:  [order asc]
+      }
+    }
+  }
+
+  api SalesApi from Sales
+  storage pg { type: postgres }
+  // The reserved names in an INDEX position too — a fourth clause the
+  // quoting has to reach (`CREATE INDEX … ON tickets ("group")`).
+  resource ticketState { for: Orders, kind: state, use: pg, index: [Ticket.group, Ticket.limit] }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Orders]
+    dataSources: [ticketState]
+    serves: SalesApi
+    port: 4000
+  }
+
+  // The DDL half is gated by `schema-load` (both chains), which needs no
+  // application to boot; this asserts the reserved names survive the WIRE and
+  // the query path too — a backend that quoted its DDL and then silently
+  // dropped the column from its SELECT list reads `null` here.
+  test e2e "reserved-word columns round-trip through create, find and read" against d {
+    let a = api.tickets.create({ order: 2, group: "alpha", limit: 10, total: money("5.00") })
+    let b = api.tickets.create({ order: 1, group: "beta", limit: 0, total: money("7.50") })
+
+    let readBack = api.tickets.getById(a)
+    expect(readBack.order).toBe(2)
+    expect(readBack.group).toBe("alpha")
+    expect(readBack.limit).toBe(10)
+    expect(decimal(readBack.total)).toBe(5)
+
+    // The `where` names a reserved column — the SELECT has to parse.
+    let alphas = api.tickets.byGroup({ g: "alpha" })
+    expect(alphas.count()).toBe(1)
+    expect(alphas.first().group).toBe("alpha")
+
+    // (`OpenByOrder` is a retrieval, not a route — it is consumed by
+    // `Repo.run`, so its reserved-column WHERE and ORDER BY are pinned by the
+    // COMPILE tier and by schema-load, not from here.)
+
+    // The LIST read, SORTED BY A RESERVED COLUMN.  This is the one clause
+    // position with no compile-time and no schema-time witness at all: the
+    // sort column is resolved from a server-side allowlist and interpolated
+    // into `ORDER BY {sortColumn}`, so an unquoted entry is valid C#, valid
+    // DDL, and a runtime syntax error on the first request that sorts by it.
+    let bySortedOrder = api.tickets.all({ sort: "order", dir: "asc" })
+    expect(bySortedOrder.total).toBe(2)
+    expect(bySortedOrder.items.length).toBe(2)
+    // `dir: asc` on `order` puts the 1 first — so the sort was APPLIED, not
+    // merely accepted.  A single page of one proves the ORDER BY reached the
+    // query rather than being ignored after an in-memory read.
+    let firstByOrder = api.tickets.all({ page: 1, pageSize: 1, sort: "order", dir: "asc" })
+    expect(firstByOrder.items.length).toBe(1)
+    expect(firstByOrder.total).toBe(2)
+    expect(firstByOrder.items.first().order).toBe(1)
+
+    // …and the reserved columns survive an UPDATE's full replacement, which is
+    // the upsert path (`ON CONFLICT … DO UPDATE SET "order" = excluded."order"`)
+    // rather than the insert one.
+    api.tickets.update(a, { order: 9, group: "gamma", limit: 3, total: money("5.00") })
+    let updated = api.tickets.getById(a)
+    expect(updated.order).toBe(9)
+    expect(updated.group).toBe("gamma")
+    expect(updated.limit).toBe(3)
+    expect(api.tickets.byGroup({ g: "alpha" }).count()).toBe(0)
+
+    api.tickets.destroy(b)
+    expect(api.tickets.getById(b)).toThrow(404)
+  }
+
+  // NOT covered here, deliberately: a field named after a HOST-LANGUAGE
+  // keyword (`is`, `default`, `class`).  That is a different class — it breaks
+  // the generated row DTO / entity, not the SQL — no backend claims to handle
+  // it, and pinning it here would turn one honest gate into two half-gates.
+}

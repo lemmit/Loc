@@ -67,6 +67,7 @@ import type {
   ProjectionSelect,
   Property,
   QueryHandler,
+  RequiresProp,
   ReturnStmt,
   Route,
   RouteProp,
@@ -292,6 +293,10 @@ export function mkRouteProp(shape: AstLiteral<RouteProp>): RouteProp {
 
 export function mkBodyProp(shape: AstLiteral<BodyProp>): BodyProp {
   return mkAst<BodyProp>(shape);
+}
+
+export function mkRequiresProp(shape: AstLiteral<RequiresProp>): RequiresProp {
+  return mkAst<RequiresProp>(shape);
 }
 
 export function mkMenuMetaEntry(shape: AstLiteral<MenuMetaEntry>): MenuMetaEntry {

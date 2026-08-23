@@ -33,6 +33,18 @@
  *  interpolates. */
 type MessageEntry = string | ((params: never) => string);
 
+/** The four `*-deployable-missing-ui` codes (`react`/`svelte`/`vue`/`angular`)
+ *  say the same thing about a different platform — but they stay FOUR codes so
+ *  the fix-hint registry can dispatch per platform (`src/language/fix-hints.ts`).
+ *  One shared builder, four catalog entries: a key must resolve to exactly the
+ *  code its call site attaches (`codeOfMessageKey`, gated by
+ *  `test/system/diagnostic-catalog.test.ts`), so a single shared key would be a
+ *  hole in that invariant — and a key is never computed at a call site. */
+const spaDeployableMissingUi =
+  (label: string) =>
+  (p: { name: unknown }): string =>
+    `${label} deployable '${p.name}' must declare a 'ui:' binding — every page now flows through the page metamodel. Add 'ui: <UiName>' (use 'ui <UiName> { with scaffold(subdomains: [...]) }' for the bulk-CRUD case).`;
+
 export const DIAGNOSTIC_MESSAGES = {
   // ----------------------------------------------------------------------
   // src/language/validators/_shared.ts
@@ -245,6 +257,10 @@ export const DIAGNOSTIC_MESSAGES = {
     menu: unknown;
   }) =>
     `Deployable '${p.name}' (platform '${p.platform}') cannot host ui '${p.uiName}' framework '${p.uiFramework}'. This platform hosts: ${p.menu}. A runtime-coupled framework (e.g. 'phoenixLiveView'/LiveView) can only run on its own runtime; a static-bundle framework (e.g. 'react') runs on any static-asset host.`,
+  "loom.react-deployable-missing-ui": spaDeployableMissingUi("React"),
+  "loom.svelte-deployable-missing-ui": spaDeployableMissingUi("Svelte"),
+  "loom.vue-deployable-missing-ui": spaDeployableMissingUi("Vue"),
+  "loom.angular-deployable-missing-ui": spaDeployableMissingUi("Angular"),
   "loom.auth-ui-target-open": (p: { name: unknown; targetName: unknown }) =>
     `Frontend deployable '${p.name}' declares 'auth: ui' but its target '${p.targetName}' is not 'auth: required'; the guard has no session endpoint to probe.`,
   "loom.auth-ui-misplaced": (p: { name: unknown }) =>
@@ -569,6 +585,11 @@ export const DIAGNOSTIC_MESSAGES = {
     `it is only valid on value properties. Drop it (write 'contains ${p.name}: ${p.label}${
       p.array
     }' if you want the keyword explicit).`,
+  // Reserved derived names are aggregate-only — a value object participates in
+  // neither `string(x)` lowering nor host-language `ToString()`/`Inspect`
+  // emission, so `derived display` on one has nowhere to go.
+  "loom.reserved-derived-on-vo": (p: { name: unknown }) =>
+    `Reserved 'derived ${p.name}' is only allowed on aggregates, not value objects.`,
   "loom.entity-field-optional-collection": (p: { name: unknown; label: unknown }) =>
     `Field '${p.name}' contains entity '${p.label}' as both a collection and optional — ` +
     `an empty collection already encodes absence; drop the '?'.`,
@@ -1606,14 +1627,17 @@ export const DIAGNOSTIC_MESSAGES = {
     ctxName: unknown;
     aggName: unknown;
     reason: unknown;
-    nonRelationalUnsupported: unknown;
+    // The remedy clause, composed at the call site: which hosts DO wire this
+    // (family, shape) pair.  Passed in rather than hardcoded here because the
+    // answer depends on the shape — naming one fixed backend (this used to say
+    // ".NET") goes stale the moment another backend ports the emitter.
+    hosts: unknown;
   }) =>
     `Deployable '${p.name}' (platform ${p.platform}) hosts aggregate ` +
     `'${p.ctxName}.${p.aggName}' with a 'filter' capability predicate that ${p.reason}. ` +
-    `Host this aggregate on a .NET deployable${
-      p.nonRelationalUnsupported
-    }, or remove the unsupported capability filter. ` +
-    `Non-principal filters on relational aggregates (e.g. 'filter !this.isDeleted') are emitted.`,
+    `Host this aggregate on ${p.hosts}, or remove the unsupported capability filter. ` +
+    `Non-principal filters on relational and shape(embedded) aggregates ` +
+    `(e.g. 'filter !this.isDeleted') are emitted.`,
   "loom.filter-bypass-unsupported": (p: {
     name: unknown;
     platform: unknown;

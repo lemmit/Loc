@@ -38,7 +38,7 @@ import {
   operationGates,
   operationGatesUseCurrentUser,
 } from "../../../ir/util/op-gates.js";
-import { problemTitle } from "../../../ir/util/openapi-errors.js";
+import { problemTitle, UNPROCESSABLE_ENTITY } from "../../../ir/util/openapi-errors.js";
 import {
   camelId,
   opOperation,
@@ -308,11 +308,13 @@ export function buildWorkflowsFile(
   );
   body.push(
     // The state-gate rung, ordered before `DomainError` as in the aggregate
-    // router.  Reachability note: the emitted `when` gate is a ROUTE-layer check
-    // (`routes-builder.ts` `whenGateLine`), so an operation invoked from a
-    // workflow step does not evaluate it — this arm answers a `DisallowedError`
-    // raised from user-authored code.  That bypass is a separate defect,
-    // recorded on M-T6.28.
+    // router.  Reachability: the `when` gate is emitted at the DOMAIN-METHOD
+    // entry (`_expr`-rendered in `typescript/emit/aggregate.ts`) as well as at
+    // the route, so an operation invoked from a workflow step DOES evaluate it
+    // and this arm answers that refusal — plus any `DisallowedError` raised
+    // from user-authored code.  (Before M-T6.38 the gate was route-only and a
+    // workflow-step write landed unrefused; this arm was then unreachable from
+    // generated code.)
     `    if (err instanceof DisallowedError) return problem(${wfDisallowedStatus}, "Disallowed", err.message);`,
   );
   body.push(
@@ -1005,6 +1007,13 @@ function emitInstanceRoutes(
   if (gate) out.push(forbiddenResponse);
   out.push(
     `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
+  // The correlation-id param is PARSED (uuid / coerced integer above), so a
+  // malformed one answers the wire-validation 422 — the same set
+  // `errorStatuses("getById")` publishes, which is exactly what the java and
+  // elixir emitters render for this route.
+  out.push(
+    `      ${UNPROCESSABLE_ENTITY}: { description: ${JSON.stringify(problemTitle(UNPROCESSABLE_ENTITY))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
   out.push(`    },`);
   out.push(`  }),`);

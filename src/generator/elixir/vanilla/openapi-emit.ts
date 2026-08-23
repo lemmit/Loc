@@ -568,7 +568,14 @@ ${pagingQueryParams()}
             200 => %OpenApiSpex.Response{
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${listRespRef}}}
-            }
+            }${statusResponseEntries(
+              withResolvedNotFound(
+                derivedOps.find((o) => o.kind === "find" && o.find?.name === "all")
+                  ?.errorStatuses ?? [],
+                notFoundStatus,
+              ),
+              schemasModule,
+            )}
           }
         }${createPost}
       }`,
@@ -633,9 +640,15 @@ ${pagingQueryParams()}
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: %OpenApiSpex.Schema{type: :array, items: ${schemasModule}.${AUDIT_ENTRY_TYPE}}}}
             }${statusResponseEntries(
               withResolvedNotFound(
+                // The by-id read's set comes from the SHARED matrix, not an
+                // inline 404: history parses the same `{id}` every other by-id
+                // route does, and hono / .NET / python all render
+                // `errorStatuses("getById")` here.  Spelling it inline is how
+                // this arm would have missed F6's 422 while the other three
+                // moved.
                 historyFind.requires
-                  ? [denialStatus("forbidden", denialOverrides(ctx)), 404]
-                  : [404],
+                  ? [denialStatus("forbidden", denialOverrides(ctx)), ...errorStatuses("getById")]
+                  : [...errorStatuses("getById")],
                 notFoundStatus,
               ),
               schemasModule,

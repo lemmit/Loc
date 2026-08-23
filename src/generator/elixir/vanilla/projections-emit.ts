@@ -203,7 +203,7 @@ ${cuBind}    if not (${gateExpr}) do
       ${denial}
     else
       data = Enum.map(${appModule}.Repo.all(${rowMod}), fn row -> %{${mapFields}} end)
-      json(conn, %{data: data})
+      json(conn, data)
     end
   end
 
@@ -225,7 +225,7 @@ ${cuBind}    if not (${gateExpr}) do
   return `  @doc "GET /api/projections/${slug}"
   def ${slug}_index(conn, _params) do
     data = Enum.map(${appModule}.Repo.all(${rowMod}), fn row -> %{${mapFields}} end)
-    json(conn, %{data: data})
+    json(conn, data)
   end
 
   @doc "GET /api/projections/${slug}/:key"

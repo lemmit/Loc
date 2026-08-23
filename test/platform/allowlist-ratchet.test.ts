@@ -54,10 +54,18 @@ const REGISTERED: Ratchet[] = [
     name: "ALLOWLIST",
     kind: "set",
     // 14: +ProjectionJoin +ProjectionSelect — the query-time projection
-    // comprehension grammar nodes (read-path-architecture.md rev.13).  Gated
-    // (`loom.projection-query-time-unsupported`) until the per-backend
-    // query-time emit lands, which owns draining these two (same lifecycle as
-    // the Projection/CommandHandler mid-flight entries).
+    // comprehension grammar nodes (read-path-architecture.md rev.13).
+    //
+    // NOT gated: `PROJECTION_QT_SUPPORTED` (`system-checks.ts`) is 5/5
+    // (node/python/elixir/java/dotnet), so
+    // `loom.projection-query-time-unsupported` fires only for a hypothetical
+    // un-ported future backend.  These two stay allowlisted for the SHOWCASE
+    // reason the allowlist itself gives (see the entries' comment in
+    // `showcase-completeness.test.ts`): the same parity/blast-radius grounds
+    // that keep folded `Projection` out of the shared single-file fixture, not
+    // a missing emitter.  Draining them means adding them to `showcase.ddd`
+    // and accepting the fan-out across every generator matrix — not waiting on
+    // a port.
     max: 14,
   },
   // Walker primitives with a TSX renderer but no HEEx one.  Empty: the last
@@ -203,9 +211,10 @@ const REGISTERED: Ratchet[] = [
   //           this line down; left at 5 the register could have re-grown by
   //           three without anyone noticing.
   //
-  // What remains is two INDEPENDENT gaps, so the next drain will not be
-  // wholesale: `prefix-filter` (the declared `MIKROORM_SUBSET` predicate
-  // narrowing) and `policy-deny` (the read-deny form outside that subset).
+  // `policy-deny` then drained too: the adapter grew the `authz-filter` arm the
+  // deny sentinel needed AND the write-scope pre-guard it had never read.  What
+  // remains is one gap: `prefix-filter` (the declared `MIKROORM_SUBSET`
+  // predicate narrowing — no scalar intrinsic in a find predicate).
   //
   // NOTE it lives in a `.mjs` runner rather than a vitest file, which is also
   // why it has no per-adapter ORACLE like the dapper maps have — the asymmetry
@@ -214,7 +223,9 @@ const REGISTERED: Ratchet[] = [
     file: "test/behavioral/run-mikroorm.mjs",
     name: "MIKRO_SKIP",
     kind: "record",
-    max: 2,
+    // 2 → 1: `policy-deny` drained when the adapter grew an `authz-filter` arm
+    // and a write-scope pre-guard (the deny fixture now boots on this leg).
+    max: 1,
   },
   // The behavioural tier's OWN per-(platform, case) skip register — the sibling
   // of MIKRO_SKIP above, and unregistered for exactly as long.  It suppresses a
@@ -230,11 +241,16 @@ const REGISTERED: Ratchet[] = [
   // ratcheted down to `tenancy-hierarchy` while these three stayed.  That
   // divergence is what this registration exists to make visible.
   //
-  // 1 = elixir/`seed-values` (B19 — the backend emits no seeder; M-T6.37 owns
-  // the drain, in flight as #2594).
+  // 1 -> 0 in this PR.  The last entry was elixir/`seed-values` (B19 — the
+  // backend emitted no seeder at all, so every `seed` dataset was silently
+  // dropped and the rows that fixture reads back never existed).  M-T6.37
+  // lands the Ecto seeder here, so the skip is deleted and the pin follows it
+  // down in the same PR — the ratchet contract, and the reason this bound is
+  // an EXACT pin rather than a ceiling: leaving `max: 1` would bank slack for
+  // the next backend that wants to opt a whole case out of its leg.
   //
   // NOTE, as with MIKRO_SKIP: it lives in a `.mjs` runner, not a vitest file.
-  { file: "test/behavioral/cases.mjs", name: "BEHAVIOURAL_SKIP", kind: "nested-record", max: 1 },
+  { file: "test/behavioral/cases.mjs", name: "BEHAVIOURAL_SKIP", kind: "nested-record", max: 0 },
   // The Elixir corpus compile tier's skip map — the fifth leg of the per-backend
   // set registered above (java / python / dotnet / tsc), left out only because
   // it lives in its own workflow (`corpus-elixir-build.yml`, split off for the

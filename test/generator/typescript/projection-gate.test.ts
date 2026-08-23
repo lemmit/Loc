@@ -54,7 +54,7 @@ describe("node/Hono projection `requires` gate emission", () => {
     const body = handlerBody(r, "AdminOrders");
     expect(body).toContain('.get("currentUser")');
     expect(body).toMatch(
-      /if \(!\(currentUser\.role === "admin"\)\) throw new ForbiddenError\("Forbidden"\);/,
+      /if \(!\(currentUser\.role === "admin"\)\) throw new ForbiddenError\("Forbidden: projection AdminOrders"\);/,
     );
     // The gate precedes the repo read.
     expect(body.indexOf("ForbiddenError")).toBeLessThan(body.indexOf("new OrderRepository"));
@@ -64,7 +64,8 @@ describe("node/Hono projection `requires` gate emission", () => {
     const r = await routes();
     // The shared onError block references `err instanceof ForbiddenError`; the
     // GATE is the only `throw new ForbiddenError`, and there is exactly one.
-    const throws = r.match(/throw new ForbiddenError\("Forbidden"\)/g) ?? [];
+    const throws =
+      r.match(/throw new ForbiddenError\("Forbidden: projection AdminOrders"\)/g) ?? [];
     expect(throws.length).toBe(1);
     // LiveOrders' handler (up to its repo read) carries no gate.
     const live = handlerBody(r, "LiveOrders");

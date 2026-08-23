@@ -83,3 +83,5 @@ Typed inter-deployable invocation (peer-URL IR, client emission, authn between s
 ## M-T4.11 — (withdrawn) Event-sourcing storage parity — see [M-T6.34](T6-backend-parity.md)
 Minted 2026-08-10 from M-T9.27 register unit 9, then found to duplicate **M-T6.34** (same scope, same two register codes, same source) — the cross-track duplicate this plan exists to prevent. M-T6.34 owns the gap; this ID is retired, kept as a tombstone so it is never re-minted.
 
+**2026-08-17:** M-T6.34 has since **closed on an overturned premise** — `EVENT_SOURCING_BACKENDS` and `EVENT_SOURCING_WORKFLOW_BACKENDS` are both 5/5, so there was no parity gap to own. Both halves of the withdrawn scope are therefore settled; nothing routes back here.
+

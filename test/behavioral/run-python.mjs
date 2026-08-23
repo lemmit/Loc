@@ -169,7 +169,7 @@ export async function run() {
   // \`results\` because the caller tags those \`tier: "api"\`, and these rows
   // carry their own tier.
   const authz = AUTHZ_LADDER && UNAUTHORIZED_CREDS
-    ? await __authzLadder(AUTHZ_LADDER, { authorized: __authHeaders, unauthorized: UNAUTHORIZED_CREDS })
+    ? await __authzLadder(AUTHZ_LADDER, { authorized: __authHeaders, unauthorized: UNAUTHORIZED_CREDS }, dispatch)
     : [];
   return { results, authz, wire: __wire };
 }

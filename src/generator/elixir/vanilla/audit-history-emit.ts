@@ -55,6 +55,15 @@ export function vanillaHistoryMapperName(agg: AggregateIR): string {
   return `${snake(agg.name)}_audit_entry`;
 }
 
+/** True when this aggregate's `principalSource: "param"` mapper takes the
+ *  trailing `current_user` argument — i.e. it has at least one `mask unless`
+ *  field to test it against.  Exposed so the LiveView caller emits the matching
+ *  arity: an unused parameter is a `--warnings-as-errors` failure, and a
+ *  missing one is an UndefinedFunctionError. */
+export function vanillaHistoryMapperTakesPrincipal(agg: AggregateIR): boolean {
+  return maskedHistoryFields(agg as EnrichedAggregateIR).length > 0;
+}
+
 /** The repository's enrichment-derived history find, when this aggregate serves
  *  one.  Read off `RepositoryIR.historyFind` rather than re-deriving "is this
  *  audited" — the derived find carries the gate and the `ignoring` stance
@@ -178,11 +187,25 @@ export function renderVanillaHistoryMapper(
   appModule: string,
   ctx: BoundedContextIR,
   agg: AggregateIR,
+  /** Where the mapper reads the principal its `mask unless` predicates test.
+   *
+   *  `"ambient"` (the controller) — `Process.get(:loom_current_user)`, stashed
+   *  by the Auth plug in the HTTP request process.
+   *
+   *  `"param"` (the LiveView) — a trailing `current_user` ARGUMENT.  A LiveView
+   *  is a separate socket process with its own `socket.assigns.current_user`,
+   *  so the ambient read is `nil` there and every masked entry would drop for a
+   *  caller entitled to see it.  Same reasoning (and same fix) as the context
+   *  gates' explicit principal argument — see `context-emit.ts`'s header. */
+  principalSource: "ambient" | "param" = "ambient",
 ): string {
   const unmasked = unmaskedHistoryFields(agg as EnrichedAggregateIR);
   const masked = maskedHistoryFields(agg as EnrichedAggregateIR);
   const history = `${appModule}.Audit.History`;
-  const lines: string[] = [`  defp ${vanillaHistoryMapperName(agg)}(row) do`];
+  const takesPrincipal = principalSource === "param" && masked.length > 0;
+  const lines: string[] = [
+    `  defp ${vanillaHistoryMapperName(agg)}(row${takesPrincipal ? ", current_user" : ""}) do`,
+  ];
   if (unmasked.length > 0) {
     const keys = unmasked.map((f) => JSON.stringify(f.name)).join(", ");
     lines.push(
@@ -202,7 +225,7 @@ export function renderVanillaHistoryMapper(
   } else {
     lines.push(`    changes = []`, ``);
   }
-  if (masked.length > 0) {
+  if (masked.length > 0 && !takesPrincipal) {
     // The ambient principal — the SAME one the redacting `serialize/1` masks
     // against, so history can never disclose a field the entity read hid.  An
     // unauthenticated caller has none, and every masked entry drops.

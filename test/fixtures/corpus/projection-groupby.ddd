@@ -90,6 +90,22 @@ system ProjectionGroupBySys {
                biggest = max(o.total),
                smallest = min(o.total)
       }
+      // A MONEY grouping KEY — the one shape the other three projections never
+      // reach.  A key is read off the STORED column rather than computed by a
+      // SQL aggregate, so it takes a different coercion in every emitter, and
+      // that coercion was shipping the scale the row happened to be written at
+      // (`String(r.total)` / `str(r[0])` / `to_string(row.total)`) while java
+      // and .NET already routed theirs through the money renderer.  Grouping by
+      // an amount is unusual on its own, but it is the only witness for a money
+      // KEY, and without one the divergence is invisible to every gate.
+      projection OrdersByTotal {
+        total: money
+        orders: int
+        from Order as o
+        group by o.total
+        select total = o.total,
+               orders = count()
+      }
     }
   }
 
@@ -164,6 +180,16 @@ system ProjectionGroupBySys {
     expect(globexRow.status).toBe("Draft")
     expect(globexRow.orders).toBe(1)
     expect(decimal(globexRow.biggest)).toBe(5)
+
+    // ── a MONEY grouping KEY ────────────────────────────────────────────────
+    // Three distinct amounts → three groups, ascending by the amount.  The
+    // numeric fold is the portable assertion (the FORM — the fixed 4dp money
+    // scale a KEY must carry just like an aggregate — is pinned by the
+    // wire-golden differential, which sees the raw response).
+    let byTotal = api.ordersByTotal.list()
+    expect(byTotal.count()).toBe(3)
+    expect(decimal(byTotal.first().total)).toBe(5)
+    expect(byTotal.first().orders).toBe(1)
 
     // ── the groups MOVE with the rows ───────────────────────────────────────
     // Promoting the Draft order to Confirmed moves it between buckets in BOTH

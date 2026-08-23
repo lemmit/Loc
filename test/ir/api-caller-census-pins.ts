@@ -10,22 +10,27 @@
 //
 // The reasons are shared constants rather than 18 hand-written sentences —
 // the gaps fall into a handful of classes, and the class is the honest
-// explanation.  EVERY remaining pin is now in a class that is NOT an
-// un-authored test: `tenantRegistryRow` (15), `unseededOnElixir` (2) and
-// `gateProbe` (1) name routes that **cannot be driven from the `test e2e`
-// surface as it stands**, so no amount of test writing drains them — each needs
-// a change to the harness, an emitter, or the DSL.  Keeping that distinction is
-// the point of writing the reason down: an un-authored pin is work, an
-// unreachable pin is a finding.
+// explanation.  Keeping that distinction is the point of writing the reason
+// down: an un-authored pin is work, an unreachable pin is a finding.
 //
-// `unseededListRead` exited by having its HARNESS fixed (#2517): the node leg now
-// runs the emitted first-boot seeder, so the ORACLE reads the same table as its
-// four peers.  Fixing it exposed the next leg along — elixir emits no seeder at
-// all (B19 / M-T6.37) — so the same two routes stay pinned under the successor
-// reason `unseededOnElixir`, with the seeded-value assertions living in the
-// sibling `corpus/seed-values` fixture that leg is held off.  Two harness/emitter
-// fixes therefore own 17 of the 18 pins: `tenantRegistryRow` (15) and the Elixir
-// seeder (2).
+// UNREACHABLE from the `test e2e` surface as it stands — no amount of test
+// writing drains these; each needs a change to the harness, an emitter, or the
+// DSL: `tenantRegistryRow` (15) and `gateProbe` (1).
+//
+// UN-AUTHORED — writable today, nobody has written them:
+// `seededListReadUnwritten` (2).
+//
+// That second class was empty until M-T6.37 and is the interesting movement
+// here.  `unseededListRead` exited by having its HARNESS fixed (#2517): the node
+// leg now runs the emitted first-boot seeder, so the ORACLE reads the same table
+// as its four peers.  Fixing it exposed the next leg along — elixir emitted no
+// seeder at all (B19) — and the same two routes stayed pinned as UNREACHABLE
+// under the successor reason, with the seeded-value assertions living in the
+// sibling `corpus/seed-values` fixture that leg was held off.  M-T6.37 has now
+// landed that seeder and deleted the `seed-values` skip, so all five legs seed
+// identically and the two routes became writable: they are RECLASSIFIED, not
+// re-caused.  Draining them rebaselines `corpus/seeding`'s wire golden on every
+// leg, which wants its own PR — see `seededListReadUnwritten`.
 //
 // `autoFindAll` and `destroy` USED to be in the unreachable class — 104 of the
 // 216 pins were those two routes, together the delete and list paths of every
@@ -108,7 +113,7 @@
 //      (a representation decision); the two sorted reads that hit it now sort by
 //      a timestamp instead, with the finding written down at both sites.
 //
-// WHAT IS LEFT, by class: tenantRegistryRow 15, unseededOnElixir 2, gateProbe 1.
+// WHAT IS LEFT, by class: tenantRegistryRow 15, seededListReadUnwritten 2, gateProbe 1.
 
 /** Why an operation is pinned.  Grouped by CLASS — see the header. */
 export const R = {
@@ -222,7 +227,7 @@ export const R = {
    * columns the seeder writes) plus the dataset GATE (`demo` / `wired raw` are
    * opt-in, so their rows must be absent) — but in a SIBLING fixture,
    * `corpus/seed-values`, because fixing node exposed a fifth leg that still
-   * starts empty: see `unseededOnElixir`, which is why `corpus/seeding`'s own two
+   * starts empty: see `seededListReadUnwritten`, which is why `corpus/seeding`'s own two
    * list routes stay pinned.
    *
    * What the drain found, and why this class was worth writing down twice:
@@ -255,17 +260,21 @@ export const R = {
   unseededListRead:
     "unreachable: the node leg never runs runSeeds, so a collection read starts from a different table than the other four legs",
   /**
-   * UNREACHABLE — the successor to `unseededListRead`, and the reason that class
-   * is at zero rather than gone.  A collection read is the only route class that
-   * can SEE seed data, and the wire golden compares whole bodies — so such a read
-   * belongs only in a fixture whose table starts the SAME on every leg that boots
-   * it.  Fixing the node leg's missing `runSeeds` (#2517) turned out to expose the
-   * next leg along: **elixir emits no seeder at all** (B19; mission M-T6.37), so
-   * its tables still start empty.
+   * UN-AUTHORED — the successor to `unseededListRead`.  A collection read is the
+   * only route class that can SEE seed data, and the wire golden compares whole
+   * bodies — so such a read belongs only in a fixture whose table starts the SAME
+   * on every leg that boots it.  Fixing the node leg's missing `runSeeds` (#2517)
+   * turned out to expose the next leg along: elixir emitted no seeder at all
+   * (B19), so its tables still started empty and these two reads stayed
+   * UNREACHABLE.
    *
-   * That is why the assertions live in the sibling `corpus/seed-values` — which
-   * carries ONLY the collection reads and is held off the elixir behavioural leg
-   * alone — while `corpus/seeding` keeps its list routes pinned here and its
+   * M-T6.37 closed that: the Ecto seeder ships, the `seed-values` behavioural
+   * skip is deleted, and all five legs now start from the same seeded table.  So
+   * the blocker is gone and the class changed — writable, unwritten.
+   *
+   * The assertions still live in the sibling `corpus/seed-values` — which carries
+   * ONLY the collection reads — while `corpus/seeding` keeps its list routes
+   * pinned here and its
    * CRUD / enum write-back / cross-aggregate FK / FK-ordered destroys / 404 bodies
    * armed on all five backends.  Skipping the whole of `corpus/seeding` on elixir
    * instead would have been the cheap move and a bad trade: `BEHAVIOURAL_SKIP` is
@@ -273,12 +282,22 @@ export const R = {
    * would have silently taken away is B10's exact class — an elixir bug already
    * found and fixed once.
    *
-   * Draining these two is M-T6.37's job, not a test's: once elixir seeds, the
-   * reads move back into `corpus/seeding` (or `seed-values` simply stops being
-   * skipped) and this reason returns to zero with its predecessor.
+   * The old note here said draining these two was M-T6.37's job and offered two
+   * exits — the reads move back into `corpus/seeding`, or `seed-values` simply
+   * stops being skipped.  M-T6.37 took the SECOND.  So the pins survive their
+   * cause, and the honest change is the CLASSIFICATION: no longer UNREACHABLE
+   * (a finding), now UN-AUTHORED (work) — `corpus/seeding` still declines to
+   * call `all()`, and nothing but the fixture stops it.
+   *
+   * Left pinned rather than drained in the seeder PR on purpose.  Adding the
+   * two calls rebaselines `seeding`'s wire golden on all five legs, and that
+   * is a reviewed wire-contract change (see test/behavioral/wire-golden/) that
+   * wants its own diff — not a rider on an emitter fix.  Renamed so the pin
+   * stops asserting something false in the meantime: the reason a reader acts
+   * on is now "write the calls", not "wait for the backend".
    */
-  unseededOnElixir:
-    "unreachable: elixir emits no seeder (B19/M-T6.37), so a collection read here would diverge from the golden on that leg — the assertions live in corpus/seed-values instead",
+  seededListReadUnwritten:
+    "un-authored: all five legs now seed identically (M-T6.37 landed the elixir seeder), so these two collection reads are writable — but adding them rebaselines corpus/seeding's wire golden on every leg, which wants its own PR",
   /**
    * UN-AUTHORED — the canonical destroy (`DELETE /api/<aggs>/{id}`, 204 empty).
    * Reachable since #2429 as `api.<aggs>.destroy(id)`.  Previously
@@ -372,10 +391,10 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
   // destroy); only the two list reads are held, and the seeded VALUES they would
   // assert are covered by the sibling `corpus/seed-values` — which is held off
   // the elixir leg alone rather than costing this fixture its five-backend CRUD /
-  // FK / 404 coverage.  See `R.unseededOnElixir`.
+  // FK / 404 coverage.  See `R.seededListReadUnwritten`.
   "corpus/seeding": {
-    allWidget: R.unseededOnElixir,
-    allGadget: R.unseededOnElixir,
+    allWidget: R.seededListReadUnwritten,
+    allGadget: R.seededListReadUnwritten,
   },
   // ── The DENY fixture's tenant registry ───────────────────────────────────
   // `policy-deny` declares `tenancy by user.tenantId of Org`, so `Org` is a
@@ -435,6 +454,10 @@ export const UNATTRIBUTED_CALLS: Record<string, readonly string[]> = {
   // The by-id-follow join's read — same `notLifted` class, third shape.
   "corpus/projection-join": ["api.orderWithCustomer.list (no such aggregate)"],
   "corpus/projection-groupby": [
+    // All four are projection READS — the not-yet-lifted route class this map
+    // exists for, not a call that fails to find its operation.  `ordersByTotal`
+    // joined them with the money-grouping-key witness (#2549 follow-up).
+    "api.ordersByTotal.list (no such aggregate)",
     "api.revenueByDay.list (no such aggregate)",
     "api.salesByStatus.list (no such aggregate)",
     "api.volumeByCustomerAndStatus.list (no such aggregate)",
