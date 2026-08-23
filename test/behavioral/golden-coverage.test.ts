@@ -34,7 +34,7 @@ import {
   optedOutCaseNames,
   requiredGoldenCases,
 } from "../_helpers/golden-coverage.js";
-import { BEHAVIOURAL_SKIP } from "./cases.mjs";
+import { BEHAVIOURAL_SKIP } from "./registers.mjs";
 
 const REQUIRED = requiredGoldenCases();
 

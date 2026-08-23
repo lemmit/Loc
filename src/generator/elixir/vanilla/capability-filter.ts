@@ -280,7 +280,6 @@ function renderDocPredicate(
   const ctx: RenderCtx = {
     thisName: "record",
     contextModule,
-    foundation: "vanilla",
     docStruct: true,
   };
   return guardPrincipalInApp(

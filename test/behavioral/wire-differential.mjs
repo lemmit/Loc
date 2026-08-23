@@ -37,6 +37,17 @@ const REPO = join(HERE, "..", "..");
 const GOLDEN_DIR = join(HERE, "wire-golden");
 const SYSTEMS_DIR = join(HERE, "systems");
 
+// Pure registers — kept dependency-free so the fast-suite golden-coverage gate
+// can import them without test/behavioral/node_modules (see registers.mjs).
+import {
+  GOLDEN_OPT_OUT,
+  goldenPath,
+  requiredGoldenCases,
+  sharedSystemGoldenCases,
+} from "./registers.mjs";
+
+export { GOLDEN_OPT_OUT, goldenPath, requiredGoldenCases, sharedSystemGoldenCases };
+
 export const WIRE_OFF = process.env.LOOM_WIRE_OFF === "1";
 export const WIRE_UPDATE = process.env.LOOM_WIRE_UPDATE === "1";
 
@@ -69,46 +80,6 @@ export function loadWireCore(workDir) {
   return corePromise;
 }
 
-/** The shared `systems/*.ddd` cases, DERIVED from the directory rather than a
- *  hand-list — a new shared system is gated the moment it lands, and a golden
- *  can't be deleted to dodge the gate. */
-export function sharedSystemGoldenCases() {
-  return readdirSync(SYSTEMS_DIR)
-    .filter((f) => f.endsWith(".ddd"))
-    .map((f) => f.replace(/\.ddd$/, ""))
-    .sort();
-}
-
-/**
- * Cases deliberately allowed to run with NO golden.
- *
- * EMPTY, and meant to stay that way.  Every case the tier records is compared;
- * an entry here is a signed decision to leave one uncompared, and it needs the
- * same thing a wire waiver needs — a reason and a named exit.
- *
- * This list exists because the alternative is what `main` did until this
- * change: a missing golden was only a failure for the shared systems, and for
- * every FEATURE case it returned `none` — no comparison, no message.  Four
- * cases (`field-mask`, `policy-deny`, `seed-values`, `vo-field-default`) had
- * been running that way on every backend leg, two of them authorization-shaped.
- * Nothing was wrong with them; nothing was checking them either.
- *
- * That is the failure mode the skip-outcome comment below already names — "a
- * silently-off gate is worse than an absent one" — so the missing-golden branch
- * now holds to the same standard: a new fixture fails with the capture command
- * until someone decides, rather than joining the tier ungated by default.
- *
- * @type {ReadonlyArray<{case: string, reason: string}>}
- */
-export const GOLDEN_OPT_OUT = [];
-
-/** Every case that must carry a golden: all of them, minus the signed opt-outs. */
-export function requiredGoldenCases() {
-  const optedOut = new Set(GOLDEN_OPT_OUT.map((o) => o.case));
-  return { optedOut, shared: sharedSystemGoldenCases() };
-}
-
-export const goldenPath = (caseName) => join(GOLDEN_DIR, `${caseName}.json`);
 
 function readGolden(caseName) {
   const p = goldenPath(caseName);

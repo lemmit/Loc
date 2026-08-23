@@ -480,7 +480,7 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
   // Phoenix's own PubSub: every domain `emit` already broadcasts the event
   // struct on the shared "events" topic.  No broadcast channel ⇒ no controller,
   // no route (byte-identical).
-  apiRoutes.push(...emitVanillaRealtime(appName, appModule, contexts, out));
+  apiRoutes.push(...emitVanillaRealtime(appName, appModule, contexts, out, sys));
   // One deployable-level ProjectionsController over every hosted context's
   // projections (the per-context schema emit above intentionally does NOT write
   // the controller — sibling of ViewsController).

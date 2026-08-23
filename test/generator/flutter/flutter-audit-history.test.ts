@@ -46,11 +46,20 @@ const fileOf = (files: Map<string, string>, suffix: string): string => {
   throw new Error(`no file ending in ${suffix}; got ${[...files.keys()].join(", ")}`);
 };
 
+/** The scaffolded detail page's emit path.  AGGREGATE-QUALIFIED: a page's file
+ *  is keyed on its area-qualified identity, not on its role-scoped name, so a
+ *  second aggregate in the same ui gets `product_detail_page.dart` rather than
+ *  silently overwriting this one's `detail_page.dart`.  (That collision routed
+ *  a two-aggregate scaffold's `/products` at the Customers list, and survived
+ *  CI because `flutter analyze` calls the duplicate import an `info`.)  Keep
+ *  the aggregate prefix here: without it this suffix matches nothing. */
+const DETAIL_PAGE = "web/lib/pages/order_detail_page.dart";
+
 describe("flutter entity-history — read provider + wire models + Timeline", () => {
   it("emits the history provider under the exact name the page watches", async () => {
     const files = await generateSystemFiles(scaffoldSystem(true));
     const reads = fileOf(files, "web/lib/reads.dart");
-    const detail = fileOf(files, "web/lib/pages/detail_page.dart");
+    const detail = fileOf(files, DETAIL_PAGE);
 
     // BOTH sides of the link, against one spelling — the provider…
     expect(reads).toContain(
@@ -97,7 +106,7 @@ describe("flutter entity-history — read provider + wire models + Timeline", ()
 
   it("renders the Timeline natively — no 'not yet supported' notice", async () => {
     const files = await generateSystemFiles(scaffoldSystem(true));
-    const detail = fileOf(files, "web/lib/pages/detail_page.dart");
+    const detail = fileOf(files, DETAIL_PAGE);
     // The section frame + the timeline itself, keyed for widget-test finders.
     expect(detail).toContain("key: const Key('orders-detail-history')");
     expect(detail).toContain("key: const Key('orders-detail-history-timeline')");
@@ -129,7 +138,7 @@ describe("flutter entity-history — read provider + wire models + Timeline", ()
     // (the pre-port failure mode) fails here by name.
     const files = await generateSystemFiles(scaffoldSystem(true));
     const reads = fileOf(files, "web/lib/reads.dart");
-    const detail = fileOf(files, "web/lib/pages/detail_page.dart");
+    const detail = fileOf(files, DETAIL_PAGE);
     const referenced = new Set(detail.match(/\b[a-z]\w*Provider\b/g) ?? []);
     expect(referenced).toContain("orderHistoryProvider");
     for (const name of referenced) {

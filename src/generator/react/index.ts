@@ -20,6 +20,7 @@ import { buildApiModule } from "../_frontend/api-module.js";
 import { AUTH_GATE_TSX, AUTH_SESSION_TS } from "../_frontend/auth-ui.js";
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
+import { buildPageModuleIndex } from "../_frontend/page-identity.js";
 import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { jsxChromeText as shellChromeText } from "../_frontend/shell-chrome.js";
@@ -430,6 +431,13 @@ export function generateReactForContexts(
       hasWorkflowsIndex,
       authUi,
       i18nEnabled,
+      // Where each conventional page ACTUALLY landed.  The shell's
+      // per-aggregate / -workflow loops used to rebuild `./pages/<plural>/list`
+      // by convention, which diverges from `page.emitPath` the moment the
+      // author re-declares a scaffold page inside an `area { … }` — the shell
+      // then imported the scaffolded module and the author's page became a
+      // silently unreachable file.
+      buildPageModuleIndex(ui, pageCtx),
     ),
   );
   // Home is synthesised by the scaffold expander whenever the

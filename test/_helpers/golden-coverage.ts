@@ -20,8 +20,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { BEHAVIOURAL_SKIP, hasBehaviouralBlock } from "../behavioral/cases.mjs";
-import { GOLDEN_OPT_OUT } from "../behavioral/wire-differential.mjs";
+import { BEHAVIOURAL_SKIP, GOLDEN_OPT_OUT, hasBehaviouralBlock } from "../behavioral/registers.mjs";
 import { PLATFORM_CLAUSE } from "../fixtures/corpus/backends.js";
 import { CORPUS } from "../fixtures/corpus/manifest.js";
 

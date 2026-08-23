@@ -1413,6 +1413,22 @@ export const DIAGNOSTIC_MESSAGES = {
     framework: unknown;
   }) =>
     `Deployable '${p.name}': ui '${p.uiName}' declares 'on <channel>.<Event>' live-event handler(s), but its frontend framework '${p.framework}' has no realtime consumption, so the handlers are silently dropped.`,
+  "loom.ui-duplicate-area": (p: { name: unknown; scope: unknown }) =>
+    `Duplicate area '${p.name}' in ${p.scope}. Areas within a scope must have unique names — the area path is what places every page inside it on disk, so two same-named blocks compute the same directory and one block's pages silently overwrite the other's. Merge them into a single 'area ${p.name} { … }'.`,
+  "loom.ui-page-path-collision": (p: {
+    ui: unknown;
+    first: unknown;
+    second: unknown;
+    path: unknown;
+  }) =>
+    `ui '${p.ui}': ${p.first} and ${p.second} both emit to '${p.path}'. A page's identity is its area path plus its name, so two pages that resolve to one path are indistinguishable to every frontend — the file map keeps whichever is written last and the other page's body vanishes from the build. Rename one page, or merge/rename the duplicate 'area' block they share.`,
+  "loom.ui-page-slot-collision": (p: {
+    ui: unknown;
+    first: unknown;
+    second: unknown;
+    slot: unknown;
+  }) =>
+    `ui '${p.ui}': ${p.first} and ${p.second} both claim ${p.slot}. Exactly one page can fill a scaffold archetype slot — the router imports one of them and the other becomes an unreachable file. To replace a scaffolded page, declare yours in the SAME scope as the scaffold's area (override-by-name displaces it); to add a second page, give it its own name and route.`,
   "loom.flutter-primitive-unsupported": (p: { where: unknown; name: unknown; dName: unknown }) =>
     `${p.where}: uses the '${p.name}' primitive, but the Flutter frontend has no renderer ` +
     `for it yet (FileUpload is the one deferred primitive — a standalone multipart upload ` +
