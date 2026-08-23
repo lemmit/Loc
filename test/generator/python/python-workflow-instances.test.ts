@@ -99,7 +99,7 @@ describe("python workflow-instance endpoints", () => {
   it("emits the by-id endpoint with a 404 over the correlation PK", async () => {
     const wf = (await build()).get("api/app/http/workflows_routes.py")!;
     expect(wf).toContain(
-      '@router.get("/order_fulfillment/instances/{id}", response_model=OrderFulfillmentInstanceResponse, operation_id="getOrderFulfillmentInstanceById", responses={404: {"model": ProblemDetails, "description": "Not Found"}})',
+      '@router.get("/order_fulfillment/instances/{id}", response_model=OrderFulfillmentInstanceResponse, operation_id="getOrderFulfillmentInstanceById", responses={404: {"model": ProblemDetails, "description": "Not Found"}, 422: {"model": ProblemDetails, "description": "Unprocessable Entity"}})',
     );
     // Correlation-id param carries the uuid format every backend declares
     // (paramTypeDiffs parity — same ID_PARAM the aggregate routes use).

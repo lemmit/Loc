@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import type { ExprIR, PageIR } from "../../src/ir/types/loom-ir.js";
 import { classifyPage, type PageNameCtx } from "../../src/ir/util/page-kind.js";
 import { buildLoomModel } from "../_helpers/index.js";
+import { parseString } from "../_helpers/parse.js";
 
 const SRC = `
   system Demo {
@@ -125,5 +126,101 @@ describe("scaffold — observable workflow instance pages", () => {
     expect(hasInstancesMember(detail.body)).toBe(true);
     expect(list.emitPath).toBe("src/pages/workflows/fulfillment/instances.tsx");
     expect(detail.emitPath).toBe("src/pages/workflows/fulfillment/instance_detail.tsx");
+  });
+});
+
+describe("the scaffolded pages inherit the gate their route is guarded by", () => {
+  // The workflow HEADER gate guards `GET /workflows/<wf>/instances[/{id}]`
+  // (M-T3.15 §A2) — the exact routes these pages read.  Without propagation
+  // the scaffold emits an UNGATED page over a gated route: the client fires
+  // the read and eats a 403 instead of rendering its own denial, and any
+  // menu-derived nav link to it (which reads the PAGE's gate, not the
+  // route's) stays visible to a principal the backend refuses.
+  const GATED = `
+    system Demo {
+      user { id: guid  role: string }
+      subdomain Sales {
+        context Orders {
+          aggregate Order with crudish { subject: string }
+          repository Orders for Order {
+            find all(): Order[] requires currentUser.role == "agent"
+          }
+          workflow Fulfillment requires currentUser.role == "supervisor" {
+            orderId: Order id
+            stage: string
+            create(o: Order id) { orderId := o  stage := "open" }
+          }
+        }
+      }
+      ui App with scaffold(subdomains: [Sales]) { }
+    }
+  `;
+
+  it("puts the workflow header gate on BOTH instance pages", async () => {
+    const loom = await buildLoomModel(GATED);
+    const pages = uiPages(loom);
+    for (const name of ["FulfillmentInstancesList", "FulfillmentInstanceDetail"]) {
+      const p = pages.find((q) => q.name === name);
+      expect(p, name).toBeDefined();
+      expect(p?.requires, `${name} carries no gate`).toBeDefined();
+    }
+  });
+
+  it("puts the `find all` gate on the aggregate List page", async () => {
+    const loom = await buildLoomModel(GATED);
+    const list = uiPages(loom).find((p) => p.name === "List" && p.route === "/orders");
+    expect(list?.requires).toBeDefined();
+  });
+
+  it("CLONES the gate — the author's node is not RE-PARENTED onto the page", async () => {
+    // The failure this guards is silent and severe: a Langium AST node has ONE
+    // `$container`, so attaching the AUTHOR's node to a page moves it there.
+    // Lowering still reads `wf.gate` by property, so the IR looks correct and
+    // an IR-level assertion passes — this was written that way first and a
+    // seeded aliasing bug sailed through it.  The damage is in the CONTAINER
+    // chain (what Langium links and scopes against), so that is what is
+    // asserted: every gate node must be contained by its own owner, and with
+    // two instance pages plus the declaration sharing one node, at most one of
+    // the three can be.
+    const { model } = await parseString(GATED, { validate: false });
+    type Node = {
+      $type: string;
+      name?: string;
+      members?: Node[];
+      props?: Node[];
+      expr?: { $container?: unknown };
+    };
+    const uis = ((model.members ?? []) as unknown as Node[])
+      .filter((m) => m.$type === "System")
+      .flatMap((sys) => sys.members ?? [])
+      .filter((m) => m.$type === "Ui" && m.name === "App");
+    // `pagesForAggregate` groups List/New/Detail under a per-aggregate `area`,
+    // so pages sit at two depths.
+    const members = uis.flatMap((u) => u.members ?? []);
+    const pages = [
+      ...members.filter((m) => m.$type === "Page"),
+      ...members.filter((m) => m.$type === "Area").flatMap((a) => a.members ?? []),
+    ].filter((m) => m.$type === "Page");
+    const gated = pages
+      .map((pg) => ({
+        name: pg.name,
+        prop: (pg.props ?? []).find((pr) => pr.$type === "RequiresProp"),
+      }))
+      .filter((x) => x.prop);
+    // List + the two instance pages.
+    expect(gated.map((g) => g.name).sort()).toEqual([
+      "FulfillmentInstanceDetail",
+      "FulfillmentInstancesList",
+      "List",
+    ]);
+    for (const g of gated) {
+      const prop = g.prop as Node;
+      expect(prop.expr?.$container, `${g.name}'s gate is parented elsewhere`).toBe(prop);
+    }
+  });
+
+  it("leaves an UNGATED scaffold ungated", async () => {
+    const loom = await buildLoomModel(SRC);
+    for (const p of uiPages(loom)) expect(p.requires).toBeUndefined();
   });
 });

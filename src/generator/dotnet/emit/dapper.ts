@@ -59,7 +59,178 @@ import {
 } from "../render-expr.js";
 import { renderRetrievalParamsWithCt } from "./repository.js";
 
-/** Postgres table for an aggregate — lowercase plural (e.g. `orders`). */
+// ---------------------------------------------------------------------------
+// Reserved-word identifier quoting (M-T6.42).
+//
+// This adapter writes its own SQL, so every table / column name it emits is a
+// BARE identifier — and a `.ddd` field named `order` / `group` / `limit` /
+// `end` is a Postgres RESERVED word, which makes both the emitted DDL and every
+// statement that names the column a syntax error:
+//
+//     CREATE TABLE tickets (order integer not null, …)
+//     SELECT id, order, group FROM tickets WHERE id = @id
+//
+// The migrations path settled this question the other way long ago —
+// `sql-pg.ts` quotes ALWAYS, "safe for reserved words (`order`, `user`,
+// `end`)" — but this adapter provisions its own schema (`hasMigrations =
+// !usingDapper`, DbSchema.EnsureAsync) and never picked the rule up.
+//
+// WHY QUOTE ONLY THE RESERVED ONES rather than always, as `sql-pg.ts` does:
+// quote-always would move every byte of Dapper SQL in the tree for no
+// behavioural gain, and this emitter's output is pinned by a large body of
+// string-asserting tests plus the cross-backend goldens.  Reserved-only is a
+// hole closed, not a re-spelling — every existing emission is byte-identical
+// (proved by regenerating the whole corpus before/after).
+//
+// THE ESCAPING.  The identifier reaches C# through two different string
+// contexts, which is what made a partial fix worse than none (#2559 reverted
+// one for exactly this reason):
+//
+//   - `new CommandDefinition("SELECT …")` — a REGULAR literal, needs `\"`.
+//   - `DbSchema.cs`'s `public const string Sql = @"…"` — a VERBATIM literal,
+//     where `\` is not an escape and a quote is written `""`.
+//
+// There are ~47 of the first and exactly ONE of the second, so `sqlIdent`
+// emits the regular-literal form and the single verbatim funnel translates on
+// the way in (`ddlToVerbatimLiteral`).  That way no call site has to know
+// which context it is in — the one that does is the one that can be read in
+// full.
+//
+// The set is Postgres' own `pg_get_keywords()` categories `R` (reserved) and
+// `T` (reserved, can be function or type name) — empirically the two a bare
+// column name cannot come from (`CREATE TABLE t (left int)` and `(is int)` are
+// both syntax errors; the non-reserved `name` is fine).
+// ---------------------------------------------------------------------------
+const PG_RESERVED_IDENTS: ReadonlySet<string> = new Set([
+  "all",
+  "analyse",
+  "analyze",
+  "and",
+  "any",
+  "array",
+  "as",
+  "asc",
+  "asymmetric",
+  "authorization",
+  "binary",
+  "both",
+  "case",
+  "cast",
+  "check",
+  "collate",
+  "collation",
+  "column",
+  "concurrently",
+  "constraint",
+  "create",
+  "cross",
+  "current_catalog",
+  "current_date",
+  "current_role",
+  "current_schema",
+  "current_time",
+  "current_timestamp",
+  "current_user",
+  "default",
+  "deferrable",
+  "desc",
+  "distinct",
+  "do",
+  "else",
+  "end",
+  "except",
+  "false",
+  "fetch",
+  "for",
+  "foreign",
+  "freeze",
+  "from",
+  "full",
+  "grant",
+  "group",
+  "having",
+  "ilike",
+  "in",
+  "initially",
+  "inner",
+  "intersect",
+  "into",
+  "is",
+  "isnull",
+  "join",
+  "lateral",
+  "leading",
+  "left",
+  "like",
+  "limit",
+  "localtime",
+  "localtimestamp",
+  "natural",
+  "not",
+  "notnull",
+  "null",
+  "offset",
+  "on",
+  "only",
+  "or",
+  "order",
+  "outer",
+  "overlaps",
+  "placing",
+  "primary",
+  "references",
+  "returning",
+  "select",
+  "session_user",
+  "similar",
+  "some",
+  "symmetric",
+  "system_user",
+  "table",
+  "tablesample",
+  "then",
+  "to",
+  "trailing",
+  "true",
+  "union",
+  "unique",
+  "user",
+  "using",
+  "variadic",
+  "verbose",
+  "when",
+  "where",
+  "window",
+  "with",
+]);
+
+/** One identifier in SQL position (a table or column name), quoted when it is a
+ *  Postgres reserved word.  The quotes are written for a C# REGULAR string
+ *  literal (`\"order\"`) — see the header: that is the context ~47 of the 48
+ *  emission sites are in, and the one exception translates centrally.
+ *
+ *  NOT for Dapper parameter names (`@order` is a parameter, not an identifier),
+ *  nor for the C# row-DTO property names, nor for derived names an identifier
+ *  only seeds (an index name) — all three take the bare `col`. */
+export function sqlIdent(name: string): string {
+  return PG_RESERVED_IDENTS.has(name) ? `\\"${name}\\"` : name;
+}
+
+/** Re-encode a DDL fragment for `DbSchema.cs`'s VERBATIM (`@"…"`) literal.
+ *
+ *  The fragments arrive carrying `sqlIdent`'s regular-literal escaping
+ *  (`\"order\"`), because that is what every other emission site needs.  In a
+ *  verbatim literal a backslash is just a backslash and a quote is doubled, so
+ *  strip the escape and double what is left.  Also doubles any quote the DDL
+ *  carried for other reasons, which is what this funnel always did. */
+function ddlToVerbatimLiteral(ddl: string): string {
+  return ddl.replace(/\\"/g, '"').replace(/"/g, '""');
+}
+
+/** Postgres table for an aggregate — lowercase plural (e.g. `orders`).  BARE:
+ *  callers quote it at the SQL position with `sqlIdent`, because the same
+ *  string also seeds derived names (a `CREATE INDEX` name) where a quote would
+ *  be wrong. */
 const tableOf = (aggName: string): string => plural(snake(aggName));
 
 /** The state table an aggregate's rows live in — the SAME derivation the
@@ -525,12 +696,14 @@ function partRowAndMap(pc: PartChild): string {
  *  `[rowsQuery]` / `[dict]`, whose concatenation reproduces the pre-recursion
  *  single-level output exactly. */
 function hydrateSubtree(pc: PartChild, parentIdsVar: string): { loads: string[]; dicts: string[] } {
-  const cols = ["id", pc.parentFk, ...pc.fieldCols.map((c) => c.col)].join(", ");
+  const cols = ["id", sqlIdent(pc.parentFk), ...pc.fieldCols.map((c) => sqlIdent(c.col))].join(
+    ", ",
+  );
   const rowsVar = `__${pc.cont.name}Rows`;
   const byOwner = `__${pc.cont.name}ByOwner`;
   const idsVar = `__${pc.cont.name}Ids`;
   const loads: string[] = [
-    `        var ${rowsVar} = (await conn.QueryAsync<${pc.part.name}Row>(new CommandDefinition("SELECT ${cols} FROM ${pc.table} WHERE ${pc.parentFk} = ANY(@ids) ORDER BY ${pc.parentFk}, id", new { ids = ${parentIdsVar} }, cancellationToken: cancellationToken))).ToList();`,
+    `        var ${rowsVar} = (await conn.QueryAsync<${pc.part.name}Row>(new CommandDefinition("SELECT ${cols} FROM ${sqlIdent(pc.table)} WHERE ${sqlIdent(pc.parentFk)} = ANY(@ids) ORDER BY ${sqlIdent(pc.parentFk)}, id", new { ids = ${parentIdsVar} }, cancellationToken: cancellationToken))).ToList();`,
   ];
   const childDicts: string[] = [];
   if (pc.children.length > 0) {
@@ -666,8 +839,8 @@ export function whereToSql(e: ExprIR, sqlCtx?: WhereSqlCtx): string {
         if (assoc) {
           const arg = whereToSql(e.args[0]!, sqlCtx);
           return (
-            `EXISTS (SELECT 1 FROM ${assoc.joinTable} __j ` +
-            `WHERE __j.${assoc.ownerFk} = ${sqlCtx.table}.id AND __j.${assoc.targetFk} = ${arg})`
+            `EXISTS (SELECT 1 FROM ${sqlIdent(assoc.joinTable)} __j ` +
+            `WHERE __j.${sqlIdent(assoc.ownerFk)} = ${sqlCtx.table}.id AND __j.${sqlIdent(assoc.targetFk)} = ${arg})`
           );
         }
       }
@@ -692,7 +865,7 @@ export function whereToSql(e: ExprIR, sqlCtx?: WhereSqlCtx): string {
     }
     case "member":
       // `this.<field>` → column.
-      if (e.receiver.kind === "this") return snake(e.member);
+      if (e.receiver.kind === "this") return sqlIdent(snake(e.member));
       // `currentUser.<claim>` → a Dapper named parameter bound from the ambient
       // request principal (`RequestContext.Current!.CurrentUser!.<Claim>`).  The
       // caller (a capability `filter`) binds `@__cu_<claim>` into every SELECT's
@@ -704,7 +877,7 @@ export function whereToSql(e: ExprIR, sqlCtx?: WhereSqlCtx): string {
       // A find/retrieval parameter → Dapper named parameter.
       if (e.refKind === "param") return `@${e.name}`;
       // A candidate field (criterion / retrieval `where`) → its column.
-      if (e.refKind === "this-prop") return snake(e.name);
+      if (e.refKind === "this-prop") return sqlIdent(snake(e.name));
       // An enum value (`Status.Confirmed`) → its text representation, matching
       // the `text` column the enum is stored as.
       if (e.refKind === "enum-value") return `'${e.name.replace(/'/g, "''")}'`;
@@ -931,16 +1104,16 @@ export function renderDapperRepository(
   tph?: { baseName: string; discriminator: string },
 ): string {
   const idClass = tph ? `${tph.baseName}Id` : `${agg.name}Id`;
-  const table = tableOf(tph ? tph.baseName : agg.name);
+  const table = sqlIdent(tableOf(tph ? tph.baseName : agg.name));
   const sqlCtx: WhereSqlCtx = { agg, table };
   const cols = columnsOf(agg, embedded, idClass);
-  const colList = cols.map((c) => c.col).join(", ");
+  const colList = cols.map((c) => sqlIdent(c.col)).join(", ");
   const insertVals = cols.map((c) => `@${c.col}${c.cast}`).join(", ");
   // TPH INSERT splices the `kind` discriminator literal right after `id` (the
   // SELECT `colList` stays discriminator-free — the discriminator lives in the
   // spliced WHERE filter, not the projected columns).
   const insertColList = tph
-    ? [cols[0]!.col, "kind", ...cols.slice(1).map((c) => c.col)].join(", ")
+    ? [sqlIdent(cols[0]!.col), "kind", ...cols.slice(1).map((c) => sqlIdent(c.col))].join(", ")
     : colList;
   const kindLiteral = tph ? `'${tph.discriminator.replace(/'/g, "''")}'` : "";
   // Lifecycle stamps (`stamp onCreate/onUpdate { field: expr }` →
@@ -967,7 +1140,7 @@ export function renderDapperRepository(
   const onUpdateCols = new Set(onUpdateStamps.map((a) => snake(a.field)));
   const upsertSet = cols
     .filter((c) => c.col !== "id" && !onCreateCols.has(c.col))
-    .map((c) => `${c.col} = excluded.${c.col}`)
+    .map((c) => `${sqlIdent(c.col)} = excluded.${sqlIdent(c.col)}`)
     .join(", ");
   const createLocal = (col: string): string => `__create_${col}`;
   const updateLocal = (col: string): string => `__stamp_${col}`;
@@ -1014,7 +1187,7 @@ export function renderDapperRepository(
   const versionCol = "version";
   const upsertSetNoVersion = cols
     .filter((c) => c.col !== "id" && c.col !== versionCol && !onCreateCols.has(c.col))
-    .map((c) => `${c.col} = excluded.${c.col}`)
+    .map((c) => `${sqlIdent(c.col)} = excluded.${sqlIdent(c.col)}`)
     .join(", ");
   const versionedInsertVals = cols
     .map((c) => (c.col === versionCol ? "1" : `@${c.col}${c.cast}`))
@@ -1200,7 +1373,7 @@ export function renderDapperRepository(
           const targetCs = idTypes(a.valueType).cs;
           const prop = upperFirst(a.fieldName);
           return [
-            `        var __${a.fieldName}Rows = (await conn.QueryAsync<(${ownerCs} owner, ${targetCs} target)>(new CommandDefinition("SELECT ${a.ownerFk}, ${a.targetFk} FROM ${a.joinTable} WHERE ${a.ownerFk} = ANY(@ids) ORDER BY ${a.ownerFk}, ${a.targetFk}", new { ids = __ids }, cancellationToken: cancellationToken))).ToList();`,
+            `        var __${a.fieldName}Rows = (await conn.QueryAsync<(${ownerCs} owner, ${targetCs} target)>(new CommandDefinition("SELECT ${sqlIdent(a.ownerFk)}, ${sqlIdent(a.targetFk)} FROM ${sqlIdent(a.joinTable)} WHERE ${sqlIdent(a.ownerFk)} = ANY(@ids) ORDER BY ${sqlIdent(a.ownerFk)}, ${sqlIdent(a.targetFk)}", new { ids = __ids }, cancellationToken: cancellationToken))).ToList();`,
             `        var __${a.fieldName}ByOwner = __${a.fieldName}Rows.GroupBy(t => t.owner).ToDictionary(g => g.Key, g => g.Select(t => new ${a.targetAgg}Id(t.target)).ToList());`,
             `        foreach (var __root in roots)`,
             `        {`,
@@ -1214,10 +1387,10 @@ export function renderDapperRepository(
   const assocSaveLines = associations.flatMap((a) => {
     const prop = upperFirst(a.fieldName);
     return [
-      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${a.joinTable} WHERE ${a.ownerFk} = @id", new { id = aggregate.Id.Value }, transaction: __tx, cancellationToken: cancellationToken));`,
+      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${sqlIdent(a.joinTable)} WHERE ${sqlIdent(a.ownerFk)} = @id", new { id = aggregate.Id.Value }, transaction: __tx, cancellationToken: cancellationToken));`,
       `        foreach (var __t in aggregate.${prop})`,
       "        {",
-      `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${a.joinTable} (${a.ownerFk}, ${a.targetFk}) VALUES (@o, @t)", new { o = aggregate.Id.Value, t = __t.Value }, transaction: __tx, cancellationToken: cancellationToken));`,
+      `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${sqlIdent(a.joinTable)} (${sqlIdent(a.ownerFk)}, ${sqlIdent(a.targetFk)}) VALUES (@o, @t)", new { o = aggregate.Id.Value, t = __t.Value }, transaction: __tx, cancellationToken: cancellationToken));`,
       "        }",
     ];
   });
@@ -1244,7 +1417,11 @@ export function renderDapperRepository(
   // in-memory object graph).  A leaf part emits just the loop + INSERT — the
   // exact single-level shape the pre-recursion emitter produced.
   const saveInsert = (pc: PartChild, ownerIdExpr: string, ownerAccessor: string): string[] => {
-    const insertCols = ["id", pc.parentFk, ...pc.fieldCols.map((c) => c.col)].join(", ");
+    const insertCols = [
+      "id",
+      sqlIdent(pc.parentFk),
+      ...pc.fieldCols.map((c) => sqlIdent(c.col)),
+    ].join(", ");
     const insertVals = [
       "@id",
       "@" + pc.parentFk,
@@ -1261,7 +1438,7 @@ export function renderDapperRepository(
     return [
       iter,
       "        {",
-      `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${pc.table} (${insertCols}) VALUES (${insertVals})", new { ${insertParams} }, transaction: __tx, cancellationToken: cancellationToken));`,
+      `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${sqlIdent(pc.table)} (${insertCols}) VALUES (${insertVals})", new { ${insertParams} }, transaction: __tx, cancellationToken: cancellationToken));`,
       ...pc.children.flatMap((gc) =>
         saveInsert(gc, `${pc.childVar}.Id.Value`, `${pc.childVar}.${upperFirst(gc.cont.name)}`),
       ),
@@ -1271,7 +1448,7 @@ export function renderDapperRepository(
   // Full-list replace per root containment: delete the owner's rows (ON DELETE
   // CASCADE clears any grandchildren) then re-insert the whole subtree.
   const containSaveLines = partChildren.flatMap((pc) => [
-    `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${pc.table} WHERE ${pc.parentFk} = @id", new { id = aggregate.Id.Value }, transaction: __tx, cancellationToken: cancellationToken));`,
+    `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${sqlIdent(pc.table)} WHERE ${sqlIdent(pc.parentFk)} = @id", new { id = aggregate.Id.Value }, transaction: __tx, cancellationToken: cancellationToken));`,
     ...saveInsert(pc, "aggregate.Id.Value", `aggregate.${upperFirst(pc.cont.name)}`),
   ]);
   // DeleteAsync is TRANSACTIONAL whenever it issues more than one statement, or
@@ -1292,13 +1469,13 @@ export function renderDapperRepository(
   const delTx = aggHasAuditedTarget(agg) || delMultiStatement ? "transaction: __tx, " : "";
   const assocDeleteLines = associations.map(
     (a) =>
-      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${a.joinTable} WHERE ${a.ownerFk} = @id", new { id = aggregate.Id.Value }, ${delTx}cancellationToken: cancellationToken));`,
+      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${sqlIdent(a.joinTable)} WHERE ${sqlIdent(a.ownerFk)} = @id", new { id = aggregate.Id.Value }, ${delTx}cancellationToken: cancellationToken));`,
   );
   // Delete only the root-level child tables by owner id; their FK ON DELETE
   // CASCADE removes every nested grandchild row.
   const containDeleteLines = partChildren.map(
     (pc) =>
-      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${pc.table} WHERE ${pc.parentFk} = @id", new { id = aggregate.Id.Value }, ${delTx}cancellationToken: cancellationToken));`,
+      `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${sqlIdent(pc.table)} WHERE ${sqlIdent(pc.parentFk)} = @id", new { id = aggregate.Id.Value }, ${delTx}cancellationToken: cancellationToken));`,
   );
   const containMembers = hasContains ? containmentMembers(agg, partChildren, idClass) : [];
 
@@ -1405,7 +1582,12 @@ export function renderDapperRepository(
       const fromClause = `FROM ${table}${where}${andFilter(where !== "", f)}`;
       const sortArms = sortableFields(agg)
         .filter((wf) => wf !== "id")
-        .map((wf) => `"${wf}" => "${snake(wf)}"`)
+        // The KEY is the wire sort name (matched against the request param, so
+        // bare); the VALUE is spliced into `ORDER BY {sortColumn}` and is
+        // therefore a SQL identifier — a reserved-word column sorted here
+        // emitted `ORDER BY order` and failed at RUNTIME, invisible to the
+        // compile tier because the whole thing is a string (M-T6.42).
+        .map((wf) => `"${wf}" => "${sqlIdent(snake(wf))}"`)
         .join(", ");
       return lines(
         `    public async Task<${ret}> ${name}(${renderParams(f.params, ["int page", "int pageSize", "string sort", "string dir"], usesUser)})`,
@@ -1496,7 +1678,10 @@ export function renderDapperRepository(
     const orderSql =
       r.sort.length > 0
         ? ` ORDER BY ${r.sort
-            .map((s) => `${snake(s.path[0]!.name)} ${s.direction === "desc" ? "DESC" : "ASC"}`)
+            .map(
+              (s) =>
+                `${sqlIdent(snake(s.path[0]!.name))} ${s.direction === "desc" ? "DESC" : "ASC"}`,
+            )
             .join(", ")}`
         : "";
     // A retrieval's `ignoring` clause arrives at RUNTIME (the `FilterBypass
@@ -1756,7 +1941,7 @@ export function renderDapperDocumentRepository(
   ns: string,
   findBodies: Array<{ name: string; filterClause: string; projectionClause: string }>,
 ): string {
-  const table = tableOf(agg.name);
+  const table = sqlIdent(tableOf(agg.name));
   const snap = `${agg.name}Snapshot`;
   const idCs = idTypes(agg.idValueType).cs;
   const versioned = aggregateIsVersioned(agg);
@@ -2138,10 +2323,10 @@ export function renderDapperSchema(
   const joinTablesFor = (agg: EnrichedAggregateIR): string[] =>
     (agg.associations ?? []).map((a) =>
       [
-        `CREATE TABLE IF NOT EXISTS ${a.joinTable} (`,
-        `    ${a.ownerFk} ${idTypes(agg.idValueType).sql} not null,`,
-        `    ${a.targetFk} ${idTypes(a.valueType).sql} not null,`,
-        `    primary key (${a.ownerFk}, ${a.targetFk})`,
+        `CREATE TABLE IF NOT EXISTS ${sqlIdent(a.joinTable)} (`,
+        `    ${sqlIdent(a.ownerFk)} ${idTypes(agg.idValueType).sql} not null,`,
+        `    ${sqlIdent(a.targetFk)} ${idTypes(a.valueType).sql} not null,`,
+        `    primary key (${sqlIdent(a.ownerFk)}, ${sqlIdent(a.targetFk)})`,
         ");",
       ].join("\n"),
     );
@@ -2154,17 +2339,17 @@ export function renderDapperSchema(
   const childTablesFor = (agg: EnrichedAggregateIR, ownerName: string): string[] =>
     flattenParts(partChildrenOf(agg, ownerName)).map((pc) => {
       const fieldCols = pc.fieldCols.map(
-        (c) => `    ${c.col} ${c.sql}${c.nullable ? "" : " not null"}`,
+        (c) => `    ${sqlIdent(c.col)} ${c.sql}${c.nullable ? "" : " not null"}`,
       );
       return [
-        `CREATE TABLE IF NOT EXISTS ${pc.table} (`,
+        `CREATE TABLE IF NOT EXISTS ${sqlIdent(pc.table)} (`,
         [
           `    id ${pc.partIdSql} primary key`,
-          `    ${pc.parentFk} ${pc.parentIdSql} not null references ${plural(snake(pc.fkOwner))} (id) on delete cascade`,
+          `    ${sqlIdent(pc.parentFk)} ${pc.parentIdSql} not null references ${sqlIdent(plural(snake(pc.fkOwner)))} (id) on delete cascade`,
           ...fieldCols,
         ].join(",\n"),
         ");",
-        `CREATE INDEX IF NOT EXISTS ${pc.table}_${pc.parentFk}_idx ON ${pc.table} (${pc.parentFk});`,
+        `CREATE INDEX IF NOT EXISTS ${pc.table}_${pc.parentFk}_idx ON ${sqlIdent(pc.table)} (${sqlIdent(pc.parentFk)});`,
       ].join("\n");
     });
 
@@ -2200,10 +2385,12 @@ export function renderDapperSchema(
       const ddlCols = [
         `    ${baseCols[0]!.col} ${baseCols[0]!.sql} primary key`,
         "    kind text not null",
-        ...baseCols.slice(1).map((c) => `    ${c.col} ${c.sql}${c.nullable ? "" : " not null"}`),
-        ...unionCols.map((c) => `    ${c.col} ${c.sql}`),
+        ...baseCols
+          .slice(1)
+          .map((c) => `    ${sqlIdent(c.col)} ${c.sql}${c.nullable ? "" : " not null"}`),
+        ...unionCols.map((c) => `    ${sqlIdent(c.col)} ${c.sql}`),
       ];
-      const shared = `CREATE TABLE IF NOT EXISTS ${tableOf(agg.name)} (\n${ddlCols.join(",\n")}\n);`;
+      const shared = `CREATE TABLE IF NOT EXISTS ${sqlIdent(tableOf(agg.name))} (\n${ddlCols.join(",\n")}\n);`;
       // A TPH base may itself declare `contains` / `X id[]` — its own child /
       // join tables FK the shared table (owner = the base).
       return [shared, ...childTablesFor(agg, agg.name), ...joinTablesFor(agg)];
@@ -2213,7 +2400,7 @@ export function renderDapperSchema(
     if (documentAggNames.has(agg.name)) {
       return [
         [
-          `CREATE TABLE IF NOT EXISTS ${tableOf(agg.name)} (`,
+          `CREATE TABLE IF NOT EXISTS ${sqlIdent(tableOf(agg.name))} (`,
           `    id ${idTypes(agg.idValueType).sql} primary key,`,
           "    data jsonb not null,",
           "    version int not null",
@@ -2227,9 +2414,9 @@ export function renderDapperSchema(
     const cols = columnsOf(agg, embedded).map((c, i) => {
       const pk = i === 0 ? " primary key" : "";
       const nn = c.nullable || i === 0 ? "" : " not null";
-      return `    ${c.col} ${c.sql}${pk}${nn}`;
+      return `    ${sqlIdent(c.col)} ${c.sql}${pk}${nn}`;
     });
-    const root = `CREATE TABLE IF NOT EXISTS ${tableOf(agg.name)} (\n${cols.join(",\n")}\n);`;
+    const root = `CREATE TABLE IF NOT EXISTS ${sqlIdent(tableOf(agg.name))} (\n${cols.join(",\n")}\n);`;
     return [root, ...joinTablesFor(agg), ...(embedded ? [] : childTablesFor(agg, agg.name))];
   });
   // The single per-context event log `<ctx>_events` (event-log-architecture.md):
@@ -2309,7 +2496,7 @@ export function renderDapperSchema(
       "public static class DbSchema",
       "{",
       '    public const string Sql = @"',
-      ddl.replace(/"/g, '""'),
+      ddlToVerbatimLiteral(ddl),
       '";',
       "",
       "    public static async Task EnsureAsync(NpgsqlDataSource db, CancellationToken cancellationToken = default)",

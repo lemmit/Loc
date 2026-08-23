@@ -31,6 +31,11 @@ const ALL: readonly Backend[] = BACKENDS;
  *  `GetByIdForWriteAsync` write-scope member whose absence was the CS0535. */
 const IN_APP_DOCUMENT_FILTER: readonly Backend[] = ["node", "java", "python", "dotnet"];
 
+/** Backends that quote a reserved-word column everywhere they name it.  Java is
+ *  the one exclusion and it is a GAP, not a rejection — see `reserved-words`'
+ *  note and M-T6.43.  Widening this back to `ALL` is that mission's ratchet. */
+const QUOTES_RESERVED_IDENTIFIERS: readonly Backend[] = ["node", "dotnet", "python", "vanilla"];
+
 export interface CorpusFeature {
   /** Matches `<id>.ddd` in this directory. */
   readonly id: string;
@@ -109,6 +114,14 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "policy-document", title: "`policy { allow deep / deny }` on a `shape: document` aggregate — the authz ladder applied IN-APP, where it cannot be a column predicate", doc: "auth", backends: IN_APP_DOCUMENT_FILTER, note: "vanilla (elixir) is the ONE exclusion, and it REFUSES this crossing by name — `loom.context-filter-unsupported`, raised twice on this fixture (capability filters are wired for relational aggregates only).  An honest, coded rejection, not a gap." },
   { id: "stamps", title: "lifecycle stamps (audit timestamps via stamp blocks)", doc: "capabilities", backends: ALL },
   { id: "field-defaults", title: "field `= default` — omittable create input, declared value applied", doc: "language", backends: ALL },
+  {
+    id: "reserved-words",
+    title:
+      "field names that are POSTGRES RESERVED WORDS (`order` / `group` / `limit`) — every SQL writer has to quote its identifiers",
+    doc: "language",
+    backends: QUOTES_RESERVED_IDENTIFIERS,
+    note: "Minted by M-T6.42.  The class was unexercised: no fixture named a reserved word, so the Dapper adapter's bare identifiers (DDL *and* DML) were invisible to every gate — the C# compiles because the SQL is a string literal, and `schema-load` covered only the MIGRATION chain, which that adapter does not use.  Covers four clause positions a partial fix would miss: CREATE TABLE, the SELECT/INSERT column lists, a `find` WHERE, a retrieval ORDER BY, and CREATE INDEX.  Deliberately NOT a host-language-keyword test (`is` / `default` / `class` break the generated DTO, a different class no backend claims).  JAVA IS EXCLUDED FOR A GAP, NOT A REJECTION: it generates and COMPILES, then 500s on the first insert, because the JPA entity emits `@Column(name = \"order\")` bare and Hibernate writes `insert into ... (order, group, limit, ...)`.  Found by running this fixture's behavioural leg on a real booted Spring Boot + Postgres while landing M-T6.42; tracked as M-T6.43, whose ratchet is widening this row back to ALL.  Declaring java here today would make the row a false coverage claim.",
+  },
   {
     id: "vo-field-default",
     title:

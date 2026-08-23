@@ -792,6 +792,20 @@ export interface WalkerTarget {
    *  HEEx: `<%!-- text --%>`. */
   renderComment(text: string): string;
 
+  /** OPTIONAL — render a VISIBLE degradation notice in markup-child position.
+   *
+   *  A comment is the right shape for a diagnostic aimed at whoever reads the
+   *  generated source.  It is the WRONG shape when the missing thing had a
+   *  visible frame around it: the scaffolded Detail page's History card renders
+   *  its border and its translated "History" heading either way, so a comment
+   *  leaves the reader an empty panel that says the entity was never touched —
+   *  a lie with no compile-time signal anywhere.  A target that cannot serve a
+   *  whole section implements this to say so on the page instead.
+   *
+   *  Defaults to `renderComment` for the targets whose every unported primitive
+   *  IS just a missing widget (the JSX family), so nothing changes for them. */
+  renderNotice?(text: string): string;
+
   /** Render a JS expression in markup TEXT/child position — the
    *  framework's inline interpolation.  TSX and Svelte share JSX's
    *  `{expr}`; Vue uses the mustache `\{\{ expr \}\}`; HEEx's own

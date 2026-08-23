@@ -22,10 +22,12 @@
 // `ref.watch(<var>Provider)` and the emitted `<var>Provider` always agree.
 
 import type { EnrichedBoundedContextIR, ExprIR, UiIR } from "../../ir/types/loom-ir.js";
+import { AUDIT_ENTRY_TYPE } from "../../ir/util/audit-history.js";
 import { groupedProjectionNames, readableProjectionNames } from "../../ir/util/projection-read.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
+import { isEntityHistoryRead } from "../_walker/history-read.js";
 import { isOfReadCall } from "../_walker/of-reads.js";
 import { bcByAggregateOf, isPagedQuery } from "../_walker/paged-query.js";
 import { dartType } from "./dart-types.js";
@@ -59,6 +61,14 @@ export interface FlutterRead {
    *  produced, so the generated project had a dangling `import '../reads.dart'`
    *  and would not pass `flutter analyze`. */
   params?: ReadonlyArray<{ name: string; dartType: string }>;
+  /** The derived entity-history read (`<api>.<Agg>.history(id)`, docs/audit.md)
+   *  — a `.family<List<AuditEntry>, String>` keyed by the route id, fetching
+   *  `GET <routePath>/$id/history`.  Its own flag because it fits no other
+   *  branch: path-nested like `byId` but LIST-shaped, and a BARE array on the
+   *  wire (never the paged `items` envelope — the JS clients parse
+   *  `z.array(AuditEntry)`).  `aggregate` carries `AuditEntry`, so the
+   *  `fromJson` call site needs no new branch. */
+  history?: boolean;
   /** A query-time PROJECTION read (M-T1.3 Phase 1) rather than an aggregate
    *  read.  Deliberately its own flag rather than a reuse of `single`: a
    *  SINGLETON projection is single-SHAPED (one object, no envelope) yet
@@ -84,6 +94,24 @@ function findOnAggregate(
       if (repo.aggregateName !== aggregateName) continue;
       const hit = repo.finds.find((f) => f.name === findName);
       if (hit) return hit;
+    }
+  }
+  return undefined;
+}
+
+/** The compiler-synthesized history find on the aggregate's repository
+ *  (`RepositoryIR.historyFind` — deliberately BESIDE `finds`, see the module
+ *  header of `_walker/history-read.ts`), or undefined for a non-audited
+ *  aggregate.  Also undefined when the author declared their own
+ *  `find history(...)`: that one WINS, lives in `finds`, and rides the generic
+ *  named-find path — exactly as on the JS frontends. */
+function historyFindOnAggregate(
+  contexts: readonly EnrichedBoundedContextIR[],
+  aggregateName: string,
+) {
+  for (const c of contexts) {
+    for (const repo of c.repositories) {
+      if (repo.aggregateName === aggregateName && repo.historyFind) return repo.historyFind;
     }
   }
   return undefined;
@@ -204,6 +232,33 @@ export function collectFlutterReads(
         continue;
       }
       if (detected?.kind !== "aggregate") continue;
+      // The derived entity-history read (docs/audit.md).  Not a lifecycle op
+      // and not in `repo.finds` (`historyFind` sits BESIDE it), so both the
+      // lifecycle branch and the named-find lookup below are blind to it —
+      // which is exactly what used to leave the walker referencing
+      // `<agg>HistoryProvider` for a provider this collector never emitted
+      // (the reason flutter sat outside `HISTORY_CAPABLE_FRAMEWORKS`).  Gated
+      // on the SHARED predicate the walker uses plus the repo actually
+      // carrying the derived find, so an author-declared `find history(...)`
+      // falls through to the named-find path, exactly as it wins on the JS
+      // frontends.
+      if (
+        isEntityHistoryRead(ofArg, aggregatesByName) &&
+        historyFindOnAggregate(contexts, detected.aggregateName)
+      ) {
+        const varName = readVarName(detected.aggregateName, detected.operation);
+        if (seen.has(varName)) continue;
+        seen.add(varName);
+        out.push({
+          varName,
+          aggregate: AUDIT_ENTRY_TYPE,
+          single: false,
+          routePath: `/${snake(plural(detected.aggregateName))}`,
+          paged: false,
+          history: true,
+        });
+        continue;
+      }
       const isLifecycle = detected.operation === "all" || detected.operation === "byId";
       // A PARAMETERIZED repository find (anything that is not `.all` / `.byId`)
       // resolves against the aggregate's repository.  Skipping it here is what
@@ -282,6 +337,29 @@ export function renderAppConfig(): string {
  *  `FutureProvider.family<T?, String>` (GET `/<coll>/$id`, 404 → `null`). */
 function renderReadProvider(read: FlutterRead): string {
   const { aggregate, varName, routePath } = read;
+  // The entity-history read — a `.family` keyed by the route id like `byId`,
+  // but LIST-shaped and path-nested (`GET /<coll>/$id/history` reads
+  // `audit_records`, not the aggregate table), and a BARE array on the wire
+  // (the JS clients parse `z.array(AuditEntry)` — never the paged `items`
+  // envelope), so neither the byId branch (returns `T?`) nor the list branch
+  // (unwraps the envelope) can serve it.  No 404 → null arm: an entity with no
+  // trail is an EMPTY array, which is what routes the QueryView to its
+  // "No history yet." branch.
+  if (read.history) {
+    return lines(
+      `final ${varName}Provider =`,
+      `    FutureProvider.family<List<${aggregate}>, String>((ref, id) async {`,
+      `  final res = await http.get(apiUri('${routePath}/$id/history'));`,
+      "  if (res.statusCode != 200) {",
+      `    throw Exception('GET ${routePath}/$id/history failed (\${res.statusCode})');`,
+      "  }",
+      "  final rows = jsonDecode(res.body) as List<dynamic>;",
+      "  return rows",
+      `      .map((e) => ${aggregate}.fromJson(e as Map<String, dynamic>))`,
+      "      .toList();",
+      "});",
+    );
+  }
   // A projection, or a named find that declares NO parameters.  Both fetch one
   // fixed URL with nothing to key on, so both are a PLAIN `FutureProvider` —
   // which is also what the call site already emits for them (`renderApiHoisting`

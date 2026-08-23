@@ -38,7 +38,7 @@ import {
   operationGates,
   operationGatesUseCurrentUser,
 } from "../../../ir/util/op-gates.js";
-import { problemTitle } from "../../../ir/util/openapi-errors.js";
+import { problemTitle, UNPROCESSABLE_ENTITY } from "../../../ir/util/openapi-errors.js";
 import {
   camelId,
   opOperation,
@@ -1007,6 +1007,13 @@ function emitInstanceRoutes(
   if (gate) out.push(forbiddenResponse);
   out.push(
     `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
+  // The correlation-id param is PARSED (uuid / coerced integer above), so a
+  // malformed one answers the wire-validation 422 — the same set
+  // `errorStatuses("getById")` publishes, which is exactly what the java and
+  // elixir emitters render for this route.
+  out.push(
+    `      ${UNPROCESSABLE_ENTITY}: { description: ${JSON.stringify(problemTitle(UNPROCESSABLE_ENTITY))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
   out.push(`    },`);
   out.push(`  }),`);

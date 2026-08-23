@@ -70,6 +70,7 @@ import {
   type ApiOperationIR,
   apiStatusContext,
   deriveAggregateOperations,
+  findValidatesRequest,
   isAllFind,
   relativeOpPath,
 } from "../../../ir/util/api-surface.js";
@@ -82,7 +83,7 @@ import {
   operationGates,
   operationGatesUseCurrentUser,
 } from "../../../ir/util/op-gates.js";
-import { problemTitle } from "../../../ir/util/openapi-errors.js";
+import { problemTitle, UNPROCESSABLE_ENTITY } from "../../../ir/util/openapi-errors.js";
 import {
   camelId,
   opCreate,
@@ -190,6 +191,13 @@ function emitHistoryRoute(agg: EnrichedAggregateIR, find: FindIR, usingMikro: bo
   out.push(
     `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
+  // The `{id}` uuid parse — same wire-validation tier every other `{id}` route
+  // declares.  Hand-rolled here (history is `apiSurfaceCoverage.notLifted`),
+  // but the SET is `errorStatuses("getById")`, which is literally what the
+  // .NET and python history routes render — so it moves with them.
+  out.push(
+    `      ${UNPROCESSABLE_ENTITY}: { description: ${JSON.stringify(problemTitle(UNPROCESSABLE_ENTITY))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
+  );
   out.push(`    },`);
   out.push(`  }),`);
   out.push(`  async (c) => {`);
@@ -283,6 +291,86 @@ function problemResponseLines(entry: ApiOperationIR, pad: string): string[] {
     (s) =>
       `${pad}${s}: { description: ${JSON.stringify(httpStatusText(s))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
+}
+
+/** The STATIC one-segment sub-paths an aggregate router mounts, each mapped to
+ *  the methods it actually serves — `{ by_email: ["GET"], prepare: ["GET"] }`.
+ *
+ *  These are exactly the paths the sibling `/{id}` route can swallow: hono keys
+ *  its router on (method, path), so `DELETE /api/customers/by_email` finds no
+ *  `delete /by_email` and matches `delete /{id}` with `id = "by_email"`.  The
+ *  `{id}` param validator then answers `422 Invalid UUID` for a path that has
+ *  no DELETE at all (schemathesis F8).  Registration order already fixes the
+ *  same-verb case (a static find is registered BEFORE `/{id}`, see the comment
+ *  at that loop); the WRONG-verb case needs the guard below.
+ *
+ *  Only one-segment statics are affected: `/{id}/history` and `/{id}/can_<op>`
+ *  are two segments, so nothing shadows them and a wrong verb there already
+ *  falls through to the root router's `app.notFound` 405 arm. */
+function staticSubpathMethods(
+  agg: EnrichedAggregateIR,
+  repo: RepositoryIR | undefined,
+  emitCreate: boolean,
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  const add = (segment: string, method: string): void => {
+    const methods = out[segment] ?? [];
+    methods.push(method);
+    out[segment] = methods;
+  };
+  // `GET /prepare` — emitted on the same condition its route arm below is.
+  if (emitCreate && serverSourcedDefaultFields(createInputFields(agg)).length > 0) {
+    add("prepare", "GET");
+  }
+  // `GET /<snake(find)>` — every named (non-`all`, non-synthesized) find.
+  for (const find of repo?.finds ?? []) {
+    if (find.name === "all" || find.synthesized) continue;
+    add(snake(find.name), "GET");
+  }
+  return out;
+}
+
+/** The router-level guard that turns a wrong verb on a static sub-path into the
+ *  honest 405 + `Allow` instead of the `/{id}` validator's 422.
+ *
+ *  It has to be a MIDDLEWARE, and it has to sit at the top of the router: the
+ *  `@hono/zod-openapi` param validator runs as part of the matched route's own
+ *  handler chain, so any check inside the `/{id}` handlers is already too late
+ *  — the 422 has been answered.  `app.use` registers under method `ALL`, which
+ *  the root router's `allowedFor` probe skips by construction, so `app.notFound`
+ *  keeps answering exactly what it answered before for every other path. */
+function emitStaticSubpathMethodGuard(statics: Record<string, string[]>): string[] {
+  if (Object.keys(statics).length === 0) return [];
+  // `snake(...)` segments are identifier-safe, and Biome's formatter strips a
+  // redundant quote from an object key — so emit the bare form it would.
+  const entries = Object.entries(statics)
+    .map(
+      ([segment, methods]) =>
+        `${/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(segment) ? segment : JSON.stringify(segment)}: ${JSON.stringify(methods)}`,
+    )
+    .join(", ");
+  return [
+    "  // A STATIC sub-path is captured by the sibling `/{id}` route under any",
+    "  // verb it does not itself serve, and the param validator then answers 422",
+    "  // for a path that has no such method at all.  405 is the honest answer and",
+    "  // the only one that can carry an `Allow` the caller can act on (RFC 9110",
+    "  // §15.5.6).  Runs BEFORE the param validator, which is why it is a",
+    "  // middleware; registered under method ALL, so the root router's",
+    "  // method probe (http/index.ts) is unaffected.",
+    `  const staticSubpathMethods: Record<string, string[]> = { ${entries} };`,
+    '  app.use("/:__seg", async (c, next) => {',
+    '    const allow = staticSubpathMethods[c.req.path.slice(c.req.path.lastIndexOf("/") + 1)];',
+    "    if (allow && !allow.includes(c.req.method)) {",
+    "      return c.body(",
+    "        frameworkProblemBody(405, `method ${c.req.method} is not supported for ${c.req.path}`, c.req.path),",
+    "        405,",
+    '        { "content-type": "application/problem+json", allow: allow.join(", ") },',
+    "      );",
+    "    }",
+    "    await next();",
+    "  });",
+    "",
+  ];
 }
 
 export function buildRoutesFile(
@@ -752,6 +840,7 @@ export function buildRoutesFile(
   // 422 ProblemDetails with `errors[]` for the frontend ACL.
   lines.push(`  const app = newApp();`);
   lines.push("");
+  lines.push(...emitStaticSubpathMethodGuard(staticSubpathMethods(agg, repo, emitCreate)));
 
   // Create — gated on `hasCreate` (no canonical create ⇒ no POST route).
   if (emitCreate && derivedCreate) {
@@ -1864,8 +1953,11 @@ function emitFindRoute(
       ? `${agg.name}ListResponse`
       : `${agg.name}Response`;
   // A paged find always carries a query (page/pageSize), even with no
-  // declared params.
-  const hasQuery = find.params.length > 0 || !!paged;
+  // declared params.  THE SAME predicate the derivation declares 422 with
+  // (`findValidatesRequest`), not a local copy: this `if` is what installs the
+  // validator that ANSWERS the 422, so the two must move together or the route
+  // goes back to answering a status its contract never mentions.
+  const hasQuery = findValidatesRequest(find);
   const out: string[] = [];
   out.push(`app.openapi(`);
   out.push(`  createRoute({`);

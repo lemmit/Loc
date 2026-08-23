@@ -36,7 +36,7 @@ import type { AggregateIR, ExprIR, LiteralKind, TypeIR } from "../../ir/types/lo
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { localizedNamedValue } from "../_walker/i18n-emit.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
-import { emitExpr, walk } from "../_walker/walker-core.js";
+import { emitExpr, testidAttr, walk } from "../_walker/walker-core.js";
 import {
   DART_LEAVES,
   dartString,
@@ -630,6 +630,56 @@ export const flutterTarget: WalkerTarget = {
     return `(switch (${recv}) { final __f? => ${link}, _ => const Text(${dartString("—")}) })`;
   },
 
+  // `Timeline(of: <entries>)` — the entity audit trail (docs/audit.md), the
+  // whole-primitive Dart fork of the shared JSX renderers
+  // (`_walker/primitives/timeline.ts`).  `entries` is the surrounding
+  // QueryView's `data:` binding for the `history(id)` read — inside the
+  // `.when(data: …)` callback it is a NON-nullable `List<AuditEntry>`, so
+  // unlike the JSX targets no `?? []` in-flight guard is emitted (against a
+  // non-nullable Dart list it would be a `dead_null_aware_expression` analyzer
+  // warning, and `flutter analyze` runs with fatal warnings).
+  //
+  // Semantics mirror the react renderer, entry for entry: a vertical list
+  // ordered as served (oldest first); each entry keeps its header even when
+  // `changes` is empty ("someone ran `recalc` at 14:02" is information); the
+  // timestamp formats through `DateFormat` (`at` decodes to a Dart `DateTime`,
+  // and the page's intl import rides the shared `usesIntl` content scan); the
+  // actor renders only when recorded (a collection-`if`, the Dart spelling of
+  // the JSX `!= null` guard); and each change is one "field: before → after"
+  // row with `—` standing in for the null side (a create has no before, a
+  // destroy no after).  Entries key by `auditId` and rows need no key (a plain
+  // `.map` spread) — the same identity the JSX targets use.  The lambda params
+  // are `e`/`c` rather than the JSX targets' `__e`/`__c`: Dart's
+  // `no_leading_underscores_for_local_identifiers` lint (in flutter_lints)
+  // flags the underscore form, and `flutter analyze` runs with fatal infos.
+  renderTimeline: (call, ctx) => {
+    if (call.kind !== "call") return null;
+    const argNames = call.argNames ?? [];
+    const ofIdx = argNames.indexOf("of");
+    const entriesArg =
+      (ofIdx >= 0 ? call.args[ofIdx] : undefined) ?? (call.args ?? []).find((_, i) => !argNames[i]);
+    if (!entriesArg) return null; // → the shared "Timeline: missing entries" comment
+    const entries = emitExpr(entriesArg, ctx);
+    // The `testid:` slot → a widget `Key`, the same translation the pack's
+    // `testidKey` applies (the walker hands the static form ` data-testid="x"`).
+    const tid = testidAttr(call, ctx)
+      .trim()
+      .match(/^data-testid="(.*)"$/);
+    const key = tid ? `key: const Key('${tid[1]}'), ` : "";
+    const changeRow = "Text('${c.field}: ${c.before ?? '—'} → ${c.after ?? '—'}')";
+    const entry =
+      `Padding(key: ValueKey(e.auditId), padding: const EdgeInsets.symmetric(vertical: 8), ` +
+      `child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[` +
+      `Text(e.action, style: const TextStyle(fontWeight: FontWeight.bold)), ` +
+      `Text(DateFormat.yMMMd().add_jm().format(e.at), style: Theme.of(context).textTheme.bodySmall), ` +
+      "if (e.actor != null) Text('${e.actor}'), " +
+      `...e.changes.map((c) => ${changeRow})]))`;
+    return (
+      `Column(${key}crossAxisAlignment: CrossAxisAlignment.start, ` +
+      `children: <Widget>[...${entries}.map((e) => ${entry})])`
+    );
+  },
+
   // `WorkflowForm(runs: <wf>)` → `const <Wf>WorkflowForm()` — a self-contained
   // form that POSTs the workflow params to `/workflows/<wf>` (a create form over
   // the command route).  The widget class is emitted into `lib/forms.dart` by
@@ -716,6 +766,12 @@ export const flutterTarget: WalkerTarget = {
   // compilable, which is the whole point of a sentinel: it must survive to be
   // read.  (A scaffolded detail page hit exactly this and would not build.)
   renderComment: (text: string) => `const SizedBox.shrink() /* ${text} */`,
+  // A VISIBLE degradation notice.  `renderComment` above renders NOTHING on the
+  // page (a zero-size widget), which is right for a missing widget and wrong
+  // for a missing SECTION: the scaffolded History card keeps its frame and its
+  // heading, so the reader gets a labelled empty panel.  `Text(…)` is the same
+  // widget every other text node in this target emits.
+  renderNotice: (text: string) => `Text(${dartString(text)})`,
   // Child-position interpolation → a `Text(…)` widget.  A provably-string value
   // is passed straight; anything else is coerced via Dart string interpolation
   // (`Text('${expr}')`), which stringifies any type.

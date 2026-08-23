@@ -2348,7 +2348,16 @@ function renderInstancesController(
         `    [HttpGet("${slug}/instances/{id}")]\n` +
         `    [ProducesResponseType(typeof(${T}InstanceResponse), 200)]\n` +
         forbiddenAttr +
-        `    [ProducesResponseType(typeof(ProblemDetails), 404)]\n` +
+        // The by-id read's declared set comes from the SHARED matrix, not a
+        // hand-written 404.  This is the one instance-route arm that spelled
+        // its status inline — hono, python, java and elixir all render
+        // `errorStatuses("getById")` here — so when F6 added 422 to that arm
+        // (the correlation id is parsed), .NET was the only backend that did
+        // not move and the 5-way OpenAPI parity diff caught it as
+        // `node=[404,422], dotnet=[404]`.
+        errorStatuses("getById")
+          .map((s) => `    [ProducesResponseType(typeof(ProblemDetails), ${s})]\n`)
+          .join("") +
         `    public async Task<IActionResult> ${upperFirst(camelId(opWorkflowInstanceById(wf.name)))}(${corrClr} id)\n` +
         `    {\n` +
         gateLines +
