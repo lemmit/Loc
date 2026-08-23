@@ -141,18 +141,24 @@ export function generateFlutterForContexts(
   // in-FORM `File` input is present — so File-free projects stay byte-identical.
   // An in-form File input pulls `file_picker` exactly as the standalone
   // primitive does (both run pick → multipart `POST /files` → `FileRef`).
+  // The reads are collected FIRST because an entity-history read pulls the
+  // `AuditEntry`/`AuditFieldChange` wire models into `lib/models.dart` (the
+  // `auditEntry` flag riding the same opt-in rule); the providers file itself
+  // is emitted further down, next to the other read wiring.
+  const reads = collectFlutterReads(ui, contexts);
+  const auditEntry = reads.some((r) => r.history === true);
   const usesFileUpload = uiUsesFileUpload(ui) || formsUseFilePicker(forms);
-  const baseModels = renderDartModels(contexts);
+  const baseModels = renderDartModels(contexts, { auditEntry });
   const needsFileRef = usesFileUpload || baseModels.includes("FileRef");
   out.set(
     "lib/models.dart",
-    needsFileRef ? renderDartModels(contexts, { fileRef: true }) : baseModels,
+    needsFileRef ? renderDartModels(contexts, { fileRef: true, auditEntry }) : baseModels,
   );
 
   // Riverpod read providers — one `FutureProvider` per distinct QueryView read
-  // a page issues (fetch over `package:http` + Track A `fromJson`).  Emitted
-  // only when the ui issues reads, alongside the `AppConfig` api-base helper.
-  const reads = collectFlutterReads(ui, contexts);
+  // a page issues (fetch over `package:http` + Track A `fromJson`; collected
+  // above, ahead of the models emit).  Emitted only when the ui issues reads,
+  // alongside the `AppConfig` api-base helper.
   if (reads.length > 0) {
     out.set("lib/reads.dart", renderReadProviders(reads));
   }

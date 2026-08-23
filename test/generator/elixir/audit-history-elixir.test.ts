@@ -45,6 +45,15 @@ const MASKED = `system S {
   deployable api { platform: elixir  contexts: [C]  dataSources: [st]  serves: A  port: 8080  auth: required }
 }`;
 
+/** The same system with a scaffolded LiveView ui mounted on the SAME elixir
+ *  deployable — the in-process read seam (`QueryView { of: <Agg>.history(id) }`
+ *  on the scaffolded Detail page), which has no HTTP request and therefore no
+ *  ambient principal. */
+const MASKED_UI = MASKED.replace(
+  "  api A from M",
+  "  ui W with scaffold(contexts: [C]) { }\n  api A from M",
+).replace("serves: A  port: 8080", "serves: A  ui: W  port: 8080");
+
 async function emit(src: string): Promise<Map<string, string>> {
   const { model } = await parseString(src);
   return generateSystems(model).files;
@@ -181,5 +190,82 @@ describe("entity history — aggregates that serve none", () => {
       "def history(conn",
     );
     expect(fileEndingWith(files, "lib/api_web/api/a_spec.ex")).not.toContain("/history");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The LiveView read seam.  A Phoenix deployable that also mounts the ui hosts
+// its contexts in the SAME OTP app, so the scaffolded Detail page's History
+// section reads `audit_records` in-process — no api client, no fetch.  Before
+// this, `HISTORY_CAPABLE_FRAMEWORKS` excluded `phoenixLiveView` and the whole
+// view was dropped, leaving a labelled EMPTY History card on every audited
+// aggregate with no compile-time signal anywhere.
+//
+// What has to hold is that the in-process seam applies the SAME three guards
+// the controller action does — a second front door authorized on one seam only
+// is exactly the hole the projection loader's gate exists to prevent.
+// ---------------------------------------------------------------------------
+describe("entity history — the LiveView (in-process) read seam", () => {
+  const liveView = async (): Promise<string> =>
+    fileEndingWith(await emit(MASKED_UI), "live/employee_detail_live.ex");
+
+  it("loads the trail through its own loader, not the aggregate's list", async () => {
+    const live = await liveView();
+    expect(live).toContain("load_employee_history(socket, socket.assigns.id)");
+    expect(live).toContain('Api.Audit.History.for_target(Api.Repo, "Employee", id)');
+    // The misbinding the skip existed to prevent: the trail is not the list.
+    expect(live).not.toContain("list_employees()");
+  });
+
+  it("carries guard 1 — the find's gate, evaluated BEFORE any query", async () => {
+    const live = await liveView();
+    const loader = live.slice(live.indexOf("defp load_employee_history"));
+    expect(loader).toContain('current_user.role == "hr"');
+    expect(loader.indexOf('current_user.role == "hr"')).toBeLessThan(
+      loader.indexOf("C.get_employee("),
+    );
+    // A denial takes the `:error` sentinel the view's error arm renders — the
+    // LiveView shape of the route's 403.
+    expect(loader).toContain(":error");
+  });
+
+  it("carries guard 2 — reachability rides the entity read", async () => {
+    const loader = (await liveView()).split("defp load_employee_history")[1] ?? "";
+    expect(loader).toContain("case Api.C.get_employee(id) do");
+    expect(loader.indexOf("Api.C.get_employee(id)")).toBeLessThan(
+      loader.indexOf("Audit.History.for_target"),
+    );
+  });
+
+  it("carries guard 3 — the mask, against the SOCKET's principal", async () => {
+    const live = await liveView();
+    // The controller reads the ambient principal the Auth plug stashes.  A
+    // LiveView is a separate socket process where that is `nil`, so an ambient
+    // mapper would drop every masked entry for a caller entitled to see it.
+    // The principal is threaded as an ARGUMENT instead.
+    expect(live).toContain("defp employee_audit_entry(row, current_user) do");
+    expect(live).toContain("fn row -> employee_audit_entry(row, current_user) end");
+    expect(live).toContain("current_user = Map.get(socket.assigns, :current_user)");
+    const loader = live.slice(live.indexOf("defp load_employee_history"));
+    expect(loader).not.toContain("Process.get(:loom_current_user)");
+    // …and it is a real mask: the predicate still guards the salary entry.
+    expect(live).toContain('changes ++ [%{"field" => "salary"');
+  });
+
+  it("renders the trail through the same Timeline the JSX frontends use", async () => {
+    const live = await liveView();
+    expect(live).toContain('<ol class="loom-timeline"');
+    expect(live).toContain("<%= for e <- @employee_history || [] do %>");
+    // The assign is named after the AGGREGATE, not the `data:` lambda param —
+    // two reads binding `entries` on one page would otherwise collide.
+    expect(live).toContain("assign(socket, :employee_history,");
+  });
+
+  it("emits neither loader nor mapper when nothing is audited", async () => {
+    const files = await emit(MASKED_UI.replace("aggregate Employee audited", "aggregate Employee"));
+    const live = fileEndingWith(files, "live/employee_detail_live.ex");
+    expect(live).not.toContain("load_employee_history");
+    expect(live).not.toContain("employee_audit_entry");
+    expect(live).not.toContain("loom-timeline");
   });
 });
