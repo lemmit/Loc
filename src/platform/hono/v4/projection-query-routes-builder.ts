@@ -324,8 +324,9 @@ export function buildQueryProjectionsFile(
   // fixtures carry no projection.  `denial-ladder-override-parity` now does.
   const projDomainStatus = resolveErrorStatus("DomainError", ctx.structuralErrorStatuses);
   const projForbiddenStatus = resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses);
+  const projNotFoundStatus = resolveErrorStatus("NotFound", ctx.structuralErrorStatuses);
   const projProblemUnion = [
-    ...new Set<number>([400, projForbiddenStatus, 404, 422, projDomainStatus, 500]),
+    ...new Set<number>([400, projForbiddenStatus, projNotFoundStatus, 422, projDomainStatus, 500]),
   ]
     .sort((a, b) => a - b)
     .join(" | ");
@@ -339,7 +340,7 @@ export function buildQueryProjectionsFile(
     `    if (err instanceof DomainError) return problem(${projDomainStatus}, ${JSON.stringify(problemTitle(projDomainStatus))}, err.message);`,
   );
   lines.push(
-    `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
+    `    if (err instanceof AggregateNotFoundError) return problem(${projNotFoundStatus}, ${JSON.stringify(problemTitle(projNotFoundStatus))}, err.message);`,
   );
   lines.push(
     // RS-28 — sanitized; the inner exception reaches the log, not the wire.

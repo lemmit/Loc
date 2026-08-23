@@ -469,7 +469,7 @@ export function renderController(
             ...(shape.historyAction.guarded
               ? ["    [ProducesResponseType(typeof(ProblemDetails), 403)]"]
               : []),
-            ...producesProblem("getById"),
+            ...producesProblem("getById", false, "    ", resolveStruct),
             `    public async Task<ActionResult<IReadOnlyList<AuditEntry>>> ${actionName(opFind(agg.name, "history"))}([FromRoute] ${shape.idClrType} id)`,
             "    {",
             `        var entries = await _mediator.Send(new Get${agg.name}HistoryQuery(new ${idClass}(id)));`,
@@ -724,6 +724,13 @@ export function renderExceptionFilter(
   // same literals, so output is byte-identical with no override.
   const domainStatus = resolveErrorStatus("DomainError", options?.structuralStatuses);
   const forbiddenStatus = resolveErrorStatus("Forbidden", options?.structuralStatuses);
+  // The last literal of the ladder — the domain not-found rung.  It stayed a
+  // hardcoded 404 while its four siblings resolved, so `httpStatus NotFound ->
+  // <code>` moved this filter's `Disallowed`/`DomainError`/`Forbidden` arms and
+  // silently not its `AggregateNotFoundException` one.  The FRAMEWORK 404 in
+  // `Program.cs` (`no route for <verb> <path>`) is a different concern and
+  // stays literal.
+  const notFoundStatus = resolveErrorStatus("NotFound", options?.structuralStatuses);
   // A project with no `unique (...)` key emits no 23505 → 409 arm, so a model
   // without uniqueness is byte-identical to before the feature (the proposal's
   // strict-additivity guarantee — only a `unique` index can raise 23505).
@@ -933,9 +940,9 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         }
         if (context.Exception is AggregateNotFoundException nf)
         {
-            ${renderDotnetLogCall("notFound", [{ name: "status", valueExpr: "404" }])}
+            ${renderDotnetLogCall("notFound", [{ name: "status", valueExpr: `${notFoundStatus}` }])}
             global::${ns}.Observability.HttpMetrics.RecordDomainFault("not_found");
-            context.Result = Problem(context, 404, "Not Found", nf.Message, trace_id);
+            context.Result = Problem(context, ${notFoundStatus}, "${problemTitle(notFoundStatus)}", nf.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }

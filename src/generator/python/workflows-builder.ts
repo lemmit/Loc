@@ -713,7 +713,7 @@ function instanceRoutes(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
   const listKwarg = errorResponsesKwarg("findList", !!gate, [], resolve);
   const byIdKwarg = gate
     ? errorResponsesKwarg("findOptional", true, [], resolve)
-    : errorResponsesKwarg("getById");
+    : errorResponsesKwarg("getById", false, [], resolve);
   const slug = snake(wf.name);
   const row = `${wf.name}Row`;
   const shape = wf.instanceWireShape ?? [];

@@ -28,6 +28,7 @@ import {
   problemTitle,
 } from "../../../ir/util/openapi-errors.js";
 import { lines } from "../../../util/code-builder.js";
+import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec, unionJsonSchema } from "../../_payload/union-wire.js";
 import { isPagedAutoAll, isPagedFind } from "./repository.js";
@@ -187,6 +188,16 @@ export function buildJavaOpenApiContract(
   for (const e of [...contexts.flatMap((c) => c.enums ?? [])]) allEnums.set(e.name, e);
 
   for (const ctx of contexts) {
+    // The `httpStatus` resolver for the HAND-ROLLED declared sets below.  The
+    // aggregate routes take theirs from `deriveContextOperations`, which
+    // resolves; the workflow-command and workflow-instance-by-id entries build
+    // theirs by calling `errorStatuses` directly and passed NO resolver, so an
+    // `httpStatus` clause moved the former and silently not the latter.
+    const resolveStatus = (name: string): number =>
+      resolveErrorStatus(name, {
+        ...ctx.errorStatusOverrides,
+        ...ctx.structuralErrorStatuses,
+      });
     const repoByAgg = new Map<string, RepositoryIR | undefined>(
       ctx.repositories.map((r) => [r.aggregateName, r]),
     );
@@ -410,7 +421,7 @@ export function buildJavaOpenApiContract(
         routes.push({
           method: "get",
           path: `${instancesPath}/{id}`,
-          errors: err(errorStatuses("getById")),
+          errors: err(errorStatuses("getById", false, resolveStatus)),
         });
         for (const f of wf.instanceWireShape) noteEnumRefs(f.type, f.name);
         setRequired(`${T}InstanceResponse`, requiredWireFields(wf.instanceWireShape));
@@ -419,7 +430,7 @@ export function buildJavaOpenApiContract(
       routes.push({
         method: "post",
         path: `${routePrefix}/workflows/${snake(wf.name)}`,
-        errors: err(errorStatuses("workflow", workflowIsGuarded(wf))),
+        errors: err(errorStatuses("workflow", workflowIsGuarded(wf), resolveStatus)),
         // Workflow command operationId carries a `Workflow` suffix on the other
         // backends (`registerProjectWorkflow`); springdoc derives the bare name.
         operationId: `${lowerFirst(wf.name)}Workflow`,
@@ -451,7 +462,7 @@ export function buildJavaOpenApiContract(
       routes.push({
         method: "get",
         path: `${instancesPath}/{id}`,
-        errors: err(errorStatuses("getById")),
+        errors: err(errorStatuses("getById", false, resolveStatus)),
       });
       for (const w of wf.instanceWireShape) noteEnumRefs(w.type, w.name);
       setRequired(
