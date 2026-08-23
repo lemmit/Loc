@@ -517,16 +517,7 @@ export function emitExplicitHandlers(
     }
     files.push({
       name: `${h.name}Handler.java`,
-      content: renderHandlerClass(
-        h,
-        kind,
-        basePkg,
-        appPkg,
-        ctx,
-        entityPkgOf,
-        repoPkgOf,
-        resources,
-      ),
+      content: renderHandlerClass(h, kind, basePkg, appPkg, ctx, entityPkgOf, repoPkgOf, resources),
     });
   };
   for (const h of ctx.commandHandlers ?? []) pushHandler(h, "command");

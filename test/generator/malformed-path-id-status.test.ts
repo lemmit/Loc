@@ -32,8 +32,8 @@
 // the PR body (booted .NET → 422, booted java → 422 with the arm and 500 with
 // it deleted).
 import { describe, expect, it } from "vitest";
+import { errorStatuses, UNPROCESSABLE_ENTITY } from "../../src/ir/util/openapi-errors.js";
 import { generateSystemFiles } from "../_helpers/generate.js";
-import { UNPROCESSABLE_ENTITY, errorStatuses } from "../../src/ir/util/openapi-errors.js";
 
 const src = (platform: string): string => `
 system MPI {
@@ -65,7 +65,10 @@ describe("a malformed path {id} answers the DECLARED 422, not a framework defaul
   });
 
   it("java: MethodArgumentTypeMismatchException gets its own 422 arm", async () => {
-    const advice = fileEndingWith(await generateSystemFiles(src("java")), "api/ApiExceptionAdvice.java");
+    const advice = fileEndingWith(
+      await generateSystemFiles(src("java")),
+      "api/ApiExceptionAdvice.java",
+    );
     // Without a dedicated arm this fell into the catch-all `onUnhandled` and
     // answered 500 — the exception does NOT implement `ErrorResponse`, so the
     // 4xx branch there never saw it.
@@ -83,13 +86,16 @@ describe("a malformed path {id} answers the DECLARED 422, not a framework defaul
     // The arm must sit BEFORE the catch-all in the file; Spring picks the most
     // specific handler, but ordering keeps the emitted file readable and makes
     // an accidental merge into `onUnhandled` obvious in review.
-    expect(advice.indexOf("@ExceptionHandler(MethodArgumentTypeMismatchException.class)")).toBeLessThan(
-      advice.indexOf("@ExceptionHandler(Exception.class)"),
-    );
+    expect(
+      advice.indexOf("@ExceptionHandler(MethodArgumentTypeMismatchException.class)"),
+    ).toBeLessThan(advice.indexOf("@ExceptionHandler(Exception.class)"));
   });
 
   it("python: the {id} path param ENFORCES the uuid format it publishes", async () => {
-    const routes = fileEndingWith(await generateSystemFiles(src("python")), "app/http/order_routes.py");
+    const routes = fileEndingWith(
+      await generateSystemFiles(src("python")),
+      "app/http/order_routes.py",
+    );
     // `json_schema_extra` alone was documentation: the param stayed a bare
     // `str` and a malformed id sailed through to the repository.
     expect(routes).toContain(
@@ -116,6 +122,6 @@ describe("a malformed path {id} answers the DECLARED 422, not a framework defaul
     expect(vp).toContain("StatusCode = 422,");
     // The 400 branch is reserved for an UNREADABLE BODY, which no path-param
     // failure can reach (its model-state key is the param name, not `$`).
-    expect(vp).toContain("Detail = \"Malformed JSON in request body\",");
+    expect(vp).toContain('Detail = "Malformed JSON in request body",');
   });
 });

@@ -89,9 +89,7 @@ describe("a resource-op in a commandHandler / queryHandler body reaches its clie
     expect(router).toContain("salesFiles$get(");
     // … each backed by an import from the right sourceType client module.
     // Both objectStore verbs share ONE import line (grouped by module).
-    expect(router).toContain(
-      'import { salesFiles$get, salesFiles$put } from "../resources/s3";',
-    );
+    expect(router).toContain('import { salesFiles$get, salesFiles$put } from "../resources/s3";');
     expect(router).toContain('import { salesJobs$enqueue } from "../resources/rabbitmq";');
     expect(router).toContain('import { mail$send } from "../resources/smtp";');
   });
