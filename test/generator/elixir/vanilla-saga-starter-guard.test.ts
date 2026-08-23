@@ -33,7 +33,7 @@ const PAIRED = `system S {
 
 const UNPAIRED = `system S {
   subdomain O { context O {
-    aggregate Order { status: string  create place() { status := "P"  emit OrderPlaced { order: id } } }
+    aggregate Order { status: string  create() { } }
     repository Orders for Order { }
     event OrderPlaced { order: Order id }
     event PaymentRegistered { order: Order id, amount: int }

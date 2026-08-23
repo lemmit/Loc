@@ -15,8 +15,9 @@ system Acme {
       route: "/confirm"
       title: "Confirm"
       state { archiveOpen: bool = false }
+      action openArchive() { archiveOpen := true }
       body: Stack {
-        Button { "Archive", onClick: e => { archiveOpen := true } },
+        Button { "Archive", onClick: openArchive },
         Modal { Text { "Confirm archive?" }, open: archiveOpen, title: "Archive" }
       }
     }

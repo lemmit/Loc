@@ -265,7 +265,8 @@ system Demo {
   }
   api AccountApi from S
   storage primary { type: postgres }
-  deployable api { platform: java contexts: [C] serves: AccountApi port: 8080 }
+  resource cState { for: C, kind: state, use: primary }
+  deployable api { platform: java contexts: [C] dataSources: [cState] serves: AccountApi port: 8080 }
 }
 `;
     const out = await generateSystemFiles(src);
@@ -374,7 +375,8 @@ system Abs {
   }
   api A from S
   storage primary { type: postgres }
-  deployable api { platform: java contexts: [C] serves: A port: 8080 }
+  resource cState { for: C, kind: state, use: primary }
+  deployable api { platform: java contexts: [C] dataSources: [cState] serves: A port: 8080 }
 }
 `;
 

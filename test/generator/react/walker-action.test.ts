@@ -35,9 +35,11 @@ const SRC = `
       }
       page OrderHome { route: "/order-home" body: Text { "home" } }
     }
+    storage loomDb { type: postgres }
+    resource salesState { for: Sales, kind: state, use: loomDb }
     deployable api {
       platform: node
-      contexts: [Sales]
+      contexts: [Sales] dataSources: [salesState]
       serves: SalesApi
       port: 3000
     }

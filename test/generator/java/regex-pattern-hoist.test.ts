@@ -88,7 +88,8 @@ system Reg {
   }
   api RegApi from S
   storage primary { type: postgres }
-  deployable api { platform: java contexts: [C] serves: RegApi port: 8080 }
+  resource cState { for: C, kind: state, use: primary }
+  deployable api { platform: java contexts: [C] dataSources: [cState] serves: RegApi port: 8080 }
 }
 `;
     const files = await generateSystemFiles(src);

@@ -116,7 +116,7 @@ describe("vanilla — workflow body lowering (repo-let / custom find routes thro
               }
             }
             repository Items for Item {
-              find byLabel(label: string): Item? where this.label == label
+              find byLabel(label: string): Item where this.label == label
             }
 
             workflow findThenMark transactional {

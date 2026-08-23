@@ -16,7 +16,7 @@
 // projection reads while the walker resolved them).
 
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/generate.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/generate.js";
 
 /** `select orders = count, revenue = sum(o.total)` — no `group by`, so ONE row. */
 const SINGLETON = `
@@ -96,6 +96,16 @@ const GROUPED = SINGLETON.replace(
 
 async function emitted(src: string): Promise<Map<string, string>> {
   return generateSystemFiles(src);
+}
+
+/** `emitted` for the UNREADABLE-projection case, whose whole premise is a
+ *  projection shape the validator refuses. */
+async function emittedUnchecked(src: string): Promise<Map<string, string>> {
+  return generateSystemFilesUnchecked(
+    src,
+    "an unreadable projection (non-id key + group by) is the input under test — " +
+      "correcting it into readability would delete the case",
+  );
 }
 
 function file(files: Map<string, string>, suffix: string): string {
@@ -228,7 +238,12 @@ describe("flutter forks the emitter, NOT the readability rule", () => {
       }
       projection SalesTotals {`,
     );
-    const files = await emitted(keyed);
+    // Deliberately invalid, and doubly so: `keyed by code` is not id-shaped
+    // (`loom.projection-key-not-id`) and pairing `keyed by` with `group by` is
+    // rejected outright (`loom.projection-groupby-keyed-invalid`).  An
+    // UNREADABLE projection is precisely the input this pins, so it must reach
+    // the emitter rather than be corrected into readability.
+    const files = await emittedUnchecked(keyed);
     expect(file(files, "lib/models.dart")).not.toContain("class ByCodeRow");
     expect(file(files, "lib/reads.dart")).not.toContain("byCodeReadProvider");
     // …and the readable sibling in the same context is unaffected.

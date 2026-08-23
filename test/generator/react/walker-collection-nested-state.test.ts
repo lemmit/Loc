@@ -21,10 +21,13 @@ const sys = (plat: string, state: string, handler: string): string => `
       page Form {
         route: "/form"
         state { ${state} }
-        body: Stack { Button { "Go", onClick: e => { ${handler} } } }
+        action go() { ${handler} }
+        body: Stack { Button { "Go", onClick: go } }
       }
     }
-    deployable api { platform: node, contexts: [C], port: 3000 }
+    storage loomDb { type: postgres }
+    resource cState { for: C, kind: state, use: loomDb }
+    deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
     deployable web { platform: ${plat}, targets: api, ui: WebApp, port: 3001 }
   }
 `;
@@ -54,10 +57,16 @@ describe("collection state mutation — append / remove (DEBT-10)", () => {
     );
   });
 
+  // Vue writes carry `.value`: the handler is a named `action`, which hoists to
+  // a `<script setup>` const.  (The inline-lambda form these fixtures used to
+  // carry rendered into the TEMPLATE, where the SFC compiler unwraps the ref —
+  // but that form is rejected by `loom.effect-in-lambda`.)
   it("Vue: += / -= reassign the ref with the spread / filtered list", async () => {
-    expect(await page("vue", `tags: string[]`, `tags += "x"`)).toContain('tags = [...tags, "x"];');
+    expect(await page("vue", `tags: string[]`, `tags += "x"`)).toContain(
+      'tags.value = [...tags.value, "x"];',
+    );
     expect(await page("vue", `tags: string[]`, `tags -= "x"`)).toContain(
-      'tags = tags.filter((__v) => __v !== "x");',
+      'tags.value = tags.value.filter((__v) => __v !== "x");',
     );
   });
 
@@ -72,7 +81,7 @@ describe("collection state mutation — append / remove (DEBT-10)", () => {
 
   it("scalar += stays arithmetic on every frontend (not append)", async () => {
     expect(await page("static", `n: int = 0`, `n += 1`)).toContain("setN(n + 1);");
-    expect(await page("vue", `n: int = 0`, `n += 1`)).toContain("n = n + 1;");
+    expect(await page("vue", `n: int = 0`, `n += 1`)).toContain("n.value = n.value + 1;");
     expect(await page("svelte", `n: int = 0`, `n += 1`)).toContain("n = n + 1;");
   });
 });
@@ -86,9 +95,9 @@ describe("nested state mutation — immutable spread vs in-place (DEBT-10)", () 
     );
   });
 
-  it("Vue mutates the ref in place (SFC compiler unwraps the root)", async () => {
+  it("Vue mutates the ref in place (no spread of the root)", async () => {
     const p = await page("vue", ADDR, `addr.zip := "90210"`);
-    expect(p).toContain('addr.zip = "90210";');
+    expect(p).toContain('addr.value.zip = "90210";');
     expect(p).not.toContain("...addr");
   });
 

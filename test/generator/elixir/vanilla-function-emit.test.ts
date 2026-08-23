@@ -112,8 +112,10 @@ system NoFns {
     }
   }
   api InvApi from S
+  storage loomDb { type: postgres }
+  resource invState { for: Inv, kind: state, use: loomDb }
   deployable api {
-    platform: elixir, contexts: [Inv],
+    platform: elixir, contexts: [Inv], dataSources: [invState],
     serves: InvApi, port: 4000
   }
 }

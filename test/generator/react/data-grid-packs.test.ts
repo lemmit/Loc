@@ -27,7 +27,8 @@ async function genPage(design: string): Promise<string> {
         api Sales: SalesApi
         page X { route: "/x"  body: ${GRID} }
       }
-      deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+      resource ordersState { for: Orders, kind: state, use: pg }
+      deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
       deployable web { platform: static, targets: api, port: 3001, ui: WebApp { Sales: api }, design: ${design} }
     }
   `);

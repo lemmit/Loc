@@ -17,7 +17,7 @@ const system = (platform: string, policy: string) => `
         aggregate Account with tenantOwned {
           balance: int
           operation adjust(delta: int) { balance := balance + delta }
-          destroy remove() { }
+          destroy() { }
         }
         aggregate Org {
           name: string

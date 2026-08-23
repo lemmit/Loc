@@ -47,10 +47,13 @@ const BANK_THREE_BACKEND = `
         repository Campaigns for Campaign { }
       }
     }
-    deployable honoApi { platform: node, contexts: [Banking], port: 3000 }
-    deployable dotnetApi { platform: dotnet, contexts: [Banking], port: 3001 }
-    deployable elixirApi { platform: elixir, contexts: [Banking], port: 4000 }
-    deployable marketingApi { platform: node, contexts: [Promo], port: 3010 }
+    deployable honoApi { platform: node, contexts: [Banking], dataSources: [bankingState], port: 3000 }
+    deployable dotnetApi { platform: dotnet, contexts: [Banking], dataSources: [bankingState], port: 3001 }
+    resource bankingState { for: Banking, kind: state, use: loomDb }
+    deployable elixirApi { platform: elixir, contexts: [Banking], dataSources: [bankingState], port: 4000 }
+    storage loomDb { type: postgres }
+    resource promoState { for: Promo, kind: state, use: loomDb }
+    deployable marketingApi { platform: node, contexts: [Promo], dataSources: [promoState], port: 3010 }
     ui WebUi with scaffold(subdomains: [Accounts]) { }
     deployable webApp { platform: static, targets: honoApi, ui: WebUi, port: 8080 }
 
@@ -143,7 +146,9 @@ const TO_THROW = `
         repository Accounts for Account { }
       }
     }
-    deployable honoApi { platform: node, contexts: [Banking], port: 3000 }
+    storage loomDb { type: postgres }
+    resource bankingState { for: Banking, kind: state, use: loomDb }
+    deployable honoApi { platform: node, contexts: [Banking], dataSources: [bankingState], port: 3000 }
 
     test e2e "negative balance is rejected" against honoApi {
       expect(api.accounts.create({ balance: -1 })).toThrow(400)
@@ -228,7 +233,9 @@ const SAME_INSTANT = `
         repository Entries for Entry { }
       }
     }
-    deployable honoApi { platform: node, contexts: [C], port: 3000 }
+    storage loomDb { type: postgres }
+    resource cState { for: C, kind: state, use: loomDb }
+    deployable honoApi { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
 
     test e2e "instant round-trips regardless of wire format" against honoApi {
       let e = api.entries.create({ at: "2024-01-01T00:00:00Z" })

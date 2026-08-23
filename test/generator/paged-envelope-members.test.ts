@@ -55,7 +55,8 @@ system S {
       }
     }
   }
-  deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+  resource ordersState { for: Orders, kind: state, use: pg }
+  deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
   deployable web { platform: ${hostFor(framework)}, targets: api, port: 3001, ui: WebApp { Sales: api } }
 }
 `;
@@ -172,7 +173,8 @@ system S {
       }
     }
   }
-  deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+  resource ordersState { for: Orders, kind: state, use: pg }
+  deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
   deployable web { platform: flutter, targets: api, port: 3001, ui: WebApp { Sales: api } }
 }
 `);

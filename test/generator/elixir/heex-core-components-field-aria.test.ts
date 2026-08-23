@@ -24,8 +24,10 @@ system Demo {
   ui DemoUi {
     page Landing { route: "/" body: Stack { Heading { "Docs", level: 1 } } }
   }
+  storage loomDb { type: postgres }
+  resource cState { for: C, kind: state, use: loomDb }
   deployable phoenixApp {
-    platform: elixir, contexts: [C], serves: DemoApi,
+    platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
     ui: DemoUi, port: 4000
   }
 }

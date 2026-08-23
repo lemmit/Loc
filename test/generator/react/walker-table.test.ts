@@ -53,7 +53,9 @@ describe("Table primitive", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [C], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], serves: SalesApi, port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -99,7 +101,9 @@ describe("Table primitive", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [C], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], serves: SalesApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
@@ -128,7 +132,9 @@ describe("Table primitive", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [C], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], serves: SalesApi, port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -164,7 +170,9 @@ describe("Table primitive", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [C], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], serves: SalesApi, port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -195,7 +203,9 @@ describe("Table primitive", () => {
             body:  Table { rows: Sales.Order.all }
           }
         }
-        deployable api { platform: node, contexts: [C], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], serves: SalesApi, port: 3000 }
         deployable web {
           platform: static
           targets: api
