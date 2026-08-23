@@ -663,7 +663,17 @@ function primitiveIcon(c: Ctx): string {
  *  Each panel's body is an already-walked F# element (offside-safe on its own
  *  line inside the panel's `children [ … ]`). */
 function primitiveTabs(c: Ctx): string {
-  const tabs = (c.tabs as unknown as { value: string; label: string; bodyJsx: string }[]) ?? [];
+  const tabs =
+    (c.tabs as unknown as {
+      value: string;
+      label: string;
+      /** The caption as an F# string expression — a translation call under i18n
+       *  (`tabLabel`, M-T1.11), the F# literal otherwise.  `prop.ariaLabel`
+       *  takes a `string`, so the element form `label` carries cannot ride it. */
+      labelExpr: string;
+      bodyJsx: string;
+      bodyChildren?: readonly string[];
+    }[]) ?? [];
   if (tabs.length === 0) return "Html.none";
   const group = `loom_tabs_${tabs.map((t) => t.value).join("_")}`;
   const parts = tabs.flatMap((t, i) => {
@@ -672,11 +682,18 @@ function primitiveTabs(c: Ctx): string {
       `prop.name "${group}"`,
       'prop.role "tab"',
       'prop.className "tab"',
-      `prop.ariaLabel "${t.label}"`,
+      `prop.ariaLabel ${t.labelExpr}`,
       // The first tab is active by default (uncontrolled — CSS owns the switch).
       ...(i === 0 ? ["prop.defaultChecked true"] : []),
     ];
-    const body = asElement(t.bodyJsx);
+    // The panel's children arrive UNJOINED (`bodyChildren`): the walker's
+    // `bodyJsx` joins them with a bare newline, which inside this
+    // `prop.children [ … ]` list reads as function application, not a second
+    // element (§24 — "This value is not a function and cannot be applied").
+    // `;` is the list separator F# needs here.  A caller that only sets
+    // `bodyJsx` (the missing-body comment) still works.
+    const kids = t.bodyChildren ?? [t.bodyJsx];
+    const body = (kids.length > 0 ? kids : [t.bodyJsx]).map((k) => asElement(String(k))).join("; ");
     return [
       `    Html.input [ ${radioProps.join("; ")} ]`,
       `    Html.div [ prop.role "tabpanel"; prop.className "tab-content p-4"; prop.children [\n      ${body}\n    ] ]`,
@@ -695,12 +712,24 @@ function primitiveTabs(c: Ctx): string {
 // no resolvable state bind (`hasBind` false) renders an uncontrolled stub so the
 // page still compiles.
 
+/** An input LABEL as an F# string expression: the walker's translation call
+ *  under i18n (`labelValue`, the `inputLabel` slot — M-T1.11), else the raw
+ *  label spelled as an F# literal exactly as this pack always spelled it.
+ *
+ *  `prop.text` takes a `string`, so — unlike a children slot — the element form
+ *  `labelText` carries under i18n (`Html.text (I18n.t …)`) cannot ride here; it
+ *  would be emitted as visible text. */
+function labelExpr(c: Ctx): string {
+  const value = c.labelValue;
+  return value === undefined ? `"${String(c.labelText ?? "")}"` : String(value);
+}
+
 /** The daisyUI label above a form-control input (skipped when the label is
  *  empty — e.g. a bare `Field(bind: x)`). */
-function inputLabel(labelText: string): string {
-  return labelText.trim() === ""
+function inputLabel(c: Ctx): string {
+  return String(c.labelText ?? "").trim() === ""
     ? ""
-    : `Html.label [ prop.className "label"; prop.children [ Html.span [ prop.className "label-text"; prop.text "${labelText}" ] ] ]`;
+    : `Html.label [ prop.className "label"; prop.children [ Html.span [ prop.className "label-text"; prop.text ${labelExpr(c)} ] ] ]`;
 }
 
 /** A stable id for a field's inline error element, derived from its bound state
@@ -737,9 +766,7 @@ function inputError(c: Ctx): string {
 /** Wrap a controlled input element in a daisyUI `form-control` with its label +
  *  optional inline error.  Multi-child, but single-line-safe (inputs are flat). */
 function formControl(c: Ctx, inputEl: string): string {
-  const parts = [inputLabel(String(c.labelText ?? "")), inputEl, inputError(c)].filter(
-    (p) => p !== "",
-  );
+  const parts = [inputLabel(c), inputEl, inputError(c)].filter((p) => p !== "");
   const tid = testidProp(c);
   const tidPart = tid ? `${tid}; ` : "";
   return `Html.div [ ${tidPart}prop.className "form-control w-full"; prop.children [ ${parts.join("; ")} ] ]`;
@@ -829,11 +856,10 @@ function primitiveToggle(c: Ctx): string {
   const input = t
     ? `Html.input [ prop.className "toggle"${fieldAriaProps(c)}; prop.type'.checkbox; prop.isChecked ${t.model}; prop.onChange (fun (v: bool) -> dispatch (${t.setMsg} v)) ]`
     : `Html.input [ prop.className "toggle"${fieldAriaProps(c)}; prop.type'.checkbox ]`;
-  const labelText = String(c.labelText ?? "");
   const span =
-    labelText.trim() === ""
+    String(c.labelText ?? "").trim() === ""
       ? ""
-      : `Html.span [ prop.className "label-text"; prop.text "${labelText}" ]; `;
+      : `Html.span [ prop.className "label-text"; prop.text ${labelExpr(c)} ]; `;
   const row = `Html.label [ prop.className "label cursor-pointer justify-start gap-3"; prop.children [ ${span}${input} ] ]`;
   if (!c.hasError)
     return `Html.div [ prop.className "form-control w-full"; prop.children [ ${row} ] ]`;

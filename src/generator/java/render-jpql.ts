@@ -38,6 +38,31 @@ export interface JpqlCtx {
   alias: string;
   /** Fully-qualified package of the generated enums (for enum literals). */
   enumsPkg: string;
+  /** When present, a `currentUser.<claim>` reference renders as a PLAIN JPQL
+   *  named parameter (`:__cuTenantId`) instead of the Spring Data SpEL bean
+   *  form, and the accessor it needs is recorded here for the caller to bind.
+   *  `EntityManager.createQuery` has no SpEL layer — `:#{…}` is not a legal
+   *  parameter name there — so the reads that build JPQL directly (query-time
+   *  projection aggregations) bind the principal themselves. */
+  principalAccessors?: Set<string>;
+}
+
+/** JPQL parameter name for a principal claim accessor under
+ *  `JpqlCtx.principalAccessors`.  Prefixed so it cannot collide with a
+ *  find's own `:param` bindings. */
+export function principalParamName(accessor: string): string {
+  return `__cu${accessor.charAt(0).toUpperCase()}${accessor.slice(1)}`;
+}
+
+/** Render a `currentUser.<accessor>` reference for `ctx`: a bound named
+ *  parameter when the caller opted into `principalAccessors`, else the Spring
+ *  Data SpEL bean read. */
+function renderPrincipal(accessor: string, ctx: JpqlCtx): string {
+  if (ctx.principalAccessors) {
+    ctx.principalAccessors.add(accessor);
+    return `:${principalParamName(accessor)}`;
+  }
+  return `:#{@${CURRENT_USER_BEAN}.user()?.${accessor}()}`;
 }
 
 // JPQL-side scalar-intrinsic snippets (src/util/intrinsics.ts) — how a
@@ -108,7 +133,7 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
       // `currentUser.<field>` → SpEL reading the ambient request principal off
       // the CurrentUserAccessor bean (null-safe → fail-closed).
       if (e.receiver.kind === "ref" && e.receiver.refKind === "current-user") {
-        return `:#{@${CURRENT_USER_BEAN}.user()?.${e.member}()}`;
+        return renderPrincipal(e.member, ctx);
       }
       // Property navigation: `this.shipTo.city` → `e.shipTo.city`
       // (embedded path).  JPQL navigates record components by name.
@@ -287,7 +312,7 @@ function renderBinary(e: Extract<ExprIR, { kind: "binary" }>, ctx: JpqlCtx): str
         idType.valueType === "guid" && claimIsString
           ? guidClaimAccessorName(claim.member)
           : claim.member;
-      const spel = `:#{@${CURRENT_USER_BEAN}.user()?.${accessor}()}`;
+      const spel = renderPrincipal(accessor, ctx);
       return idSide === e.left ? `${idPath} ${op} ${spel}` : `${spel} ${op} ${idPath}`;
     }
   }

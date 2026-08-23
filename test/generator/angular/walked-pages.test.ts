@@ -360,7 +360,9 @@ describe("angular generator — inline / media / layout primitives", () => {
   it("registers MatTabsModule + MatProgressSpinnerModule (Grid/Avatar etc. stay import-free)", async () => {
     const page = await inlinePage();
     expect(page).toContain("<mat-tab-group>");
-    expect(page).toContain('<mat-tab label="Overview">');
+    // The tab caption is a user-visible slot (`tabLabel`, M-T1.11), so Angular
+    // binds the translated value rather than baking the English into the prop.
+    expect(page).toContain(`<mat-tab [label]='t("page.Home.tabLabel.`);
     expect(page).toContain('<mat-progress-spinner mode="indeterminate"');
     expect(page).toContain('import { MatTabsModule } from "@angular/material/tabs";');
     expect(page).toContain(
@@ -698,7 +700,9 @@ describe("angular generator — standalone state-bound inputs", () => {
     expect(page).toContain('<textarea matInput [value]="bio()"');
     expect(page).toContain('<input matInput type="password" [value]="passcode()"');
     expect(page).toContain(
-      '<mat-slide-toggle [checked]="notify()" (change)="notify.set($event.checked)">Notify me</mat-slide-toggle>',
+      // The label is a user-visible slot (`inputLabel`, M-T1.11) — the caption
+      // resolves through the runtime, the binding around it is unchanged.
+      '<mat-slide-toggle [checked]="notify()" (change)="notify.set($event.checked)">{{ t("page.Settings.inputLabel.ec0di2", "Notify me") }}</mat-slide-toggle>',
     );
     expect(page).toContain(
       '<mat-select [value]="size()" (selectionChange)="size.set($event.value)">',

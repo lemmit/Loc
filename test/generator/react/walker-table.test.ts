@@ -68,8 +68,10 @@ describe("Table primitive", () => {
     expect(tsx).toBeDefined();
     expect(tsx).toMatch(/import \{[^}]*\bTable\b[^}]*\} from "@mantine\/core"/);
     expect(tsx).toMatch(/<Table\.Thead>/);
-    expect(tsx).toMatch(/<Table\.Th>ID<\/Table\.Th>/);
-    expect(tsx).toMatch(/<Table\.Th>Status<\/Table\.Th>/);
+    expect(tsx).toMatch(/<Table\.Th>\{t\("page\.\w+\.columnHeader\.\w+", "ID"\)\}<\/Table\.Th>/);
+    expect(tsx).toMatch(
+      /<Table\.Th>\{t\("page\.\w+\.columnHeader\.\w+", "Status"\)\}<\/Table\.Th>/,
+    );
     expect(tsx).toMatch(/<Table\.Tbody>/);
     // The auto-injected hook for `Sales.Order.all` becomes a local
     // `orderAll` (or similar); we just check that some hook variable

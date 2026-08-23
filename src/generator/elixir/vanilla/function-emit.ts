@@ -139,7 +139,6 @@ export function renderAggregateFunctions(
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
-    foundation: "vanilla",
     ...(doc ? { docStruct: true } : {}),
   };
   const out: string[] = [];

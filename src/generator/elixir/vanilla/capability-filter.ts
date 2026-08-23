@@ -107,7 +107,6 @@ export function vanillaCapabilityFilter(
   const ctx: RenderCtx = {
     thisName: "record",
     contextModule,
-    foundation: "vanilla",
     filterArgs: true,
   };
   const preds = (agg.contextFilters ?? [])
@@ -139,7 +138,6 @@ export function vanillaWriteScopeFilter(agg: AggregateIR, contextModule: string)
   const ctx: RenderCtx = {
     thisName: "record",
     contextModule,
-    foundation: "vanilla",
     filterArgs: true,
   };
   const p = agg.writeScopeFilter;
@@ -173,7 +171,6 @@ export function vanillaCapabilityFilterParts(
   const ctx: RenderCtx = {
     thisName: "record",
     contextModule,
-    foundation: "vanilla",
     filterArgs: true,
   };
   const parts: { origin: string | undefined; pred: string }[] = [];
@@ -283,7 +280,6 @@ function renderDocPredicate(
   const ctx: RenderCtx = {
     thisName: "record",
     contextModule,
-    foundation: "vanilla",
     docStruct: true,
   };
   return guardPrincipalInApp(

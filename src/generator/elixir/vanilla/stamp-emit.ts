@@ -155,7 +155,7 @@ export function stampAssignmentPairs(
   contextModule: string,
   principalIdKey: string,
 ): [string, string][] {
-  const ctx: RenderCtx = { thisName: "record", contextModule, foundation: "vanilla" };
+  const ctx: RenderCtx = { thisName: "record", contextModule };
   return (agg.contextStamps ?? [])
     .filter((r) => events.includes(r.event))
     .flatMap((r) => r.assignments)

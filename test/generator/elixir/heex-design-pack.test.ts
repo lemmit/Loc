@@ -94,12 +94,38 @@ describe("HEEx design-pack wiring", () => {
     }
 
     // The vocabulary itself: daisyui components, coreComponents utilities.
+    // (`btn-primary` is now the DEFAULT arm of `<.button>`'s `variant` case
+    // rather than a fixed `"btn btn-primary btn-sm"` literal — the pack owns
+    // the rank mapping so a `Button { variant: … }` reaches Phoenix instead of
+    // leaking as an undeclared attribute.)
     expect(daisy.get("phoenix_app/lib/phoenix_app_web/components/core_components.ex")).toContain(
-      "btn btn-primary",
+      "btn-primary",
     );
     expect(core.get("phoenix_app/lib/phoenix_app_web/components/core_components.ex")).toContain(
       "bg-zinc-900",
     );
+  });
+
+  it("the card SURFACE is pack vocabulary — both packs define `<.card>`, differently", async () => {
+    // The layout primitives (Stack/Group/Grid/Container/Toolbar) carry their
+    // Tailwind geometry in the WALKER — design-neutral, identical on both packs.
+    // The card surface is not: it is border/elevation/padding/title typography,
+    // i.e. exactly what a design system decides, so `Card`/`Paper` render
+    // through this pack-owned function component.  A HEEx pack that omits it
+    // emits pages that don't compile — which is the same contract `<.button>`,
+    // `<.table>`, `<.badge>` and `<.empty>` already have.
+    const core = await generate(SYSTEM("design: coreComponents"));
+    const daisy = await generate(SYSTEM("design: daisyui"));
+    const path = "phoenix_app/lib/phoenix_app_web/components/core_components.ex";
+
+    expect(core.get(path)).toContain("def card(assigns)");
+    expect(daisy.get(path)).toContain("def card(assigns)");
+    // daisyUI spells the surface with its component classes; coreComponents
+    // with neutral Tailwind utilities.
+    expect(daisy.get(path)).toContain("card-body");
+    expect(daisy.get(path)).toContain("card-title");
+    expect(core.get(path)).not.toContain("card-body");
+    expect(core.get(path)).toContain("rounded-lg bg-white");
   });
 
   it("bareword default is coreComponents — `design:` omitted ≡ design: coreComponents", async () => {

@@ -534,7 +534,7 @@ Split the problem by where the rule lives:
 | `Form { creates: T \| runs: workflow \| into: state, fields, onSubmit, then? }` | Input form bound to a typed request slice. |
 | `Dashboard(items: […])` | Composite read-only page; grid layout. |
 | `Review(of: T, onSubmit)` | Read-only summary view of a typed value, with a submit action. |
-| `Stack`, `Group`, `Grid`, `Tabs` (+ `Tab`), `Card`, `Toolbar`, `Container`, `Paper`, `Breadcrumbs`, `Divider`, `Section`, `Sticky` | Layout primitives. `Section` is a semantic anchor target; `Sticky` a sticky-position wrapper; `Tab` is the sub-element of `Tabs`. |
+| `Stack`, `Group`, `Grid`, `Tabs` (+ `Tab`), `Card`, `Toolbar`, `Container`, `Paper`, `Breadcrumbs`, `Divider`, `Section`, `Sticky` | Layout primitives. `Section` is a semantic anchor target; `Sticky` a sticky-position wrapper; `Tab` is the sub-element of `Tabs` — `Tab { <label>, …children }`, a children container like `Card`: every positional after the label renders in the panel. |
 | `Heading`, `Text`, `Bold`, `Italic`, `InlineCode`, `Badge`, `Stat`, `Empty`, `Anchor`, `Image`, `Avatar`, `Loader`, `Skeleton`, `Alert`, `KeyValueRow`, `Icon` | Display primitives. `Bold`/`Italic`/`InlineCode` are inline-emphasis spans; `Icon` is a builtin-name or `svg:` literal, decorative-by-default (`aria-hidden`) unless `label:` gives it meaning — which makes it a named `role="img"` and makes that name a user-visible slot, translated through the message catalog. |
 | `Field`, `NumberField`, `PasswordField`, `MultilineField`, `Toggle`, `SelectField { label, bind, options }`, `Select`, `Fieldset` | Bindable inputs. `MultilineField` is the textarea twin of `Field`; `SelectField` is a controlled single-select over a string-array `options:` expression. All accept an optional `error:` expression rendered in the pack's inline error slot (§8.2). |
 | `Action(operation, then?)`, `Button { label, on? }` | Action primitives. |
@@ -557,6 +557,26 @@ The narrative `Form { … }` snippets in §7 and the §12 wizard sketches
 predate that split — read them as the corresponding named-leaf form (the
 `into:` / `fields:` draft-binding shapes remain illustrative; multi-step
 draft forms are a §14 non-goal, not a shipped primitive).
+
+**Containers vs fixed slots.** A layout primitive (`Stack`, `Group`, `Card`,
+`Tab`, `Section`, `Toolbar`, `Container`, …) renders *every* positional as a
+child. A handful of display primitives are not containers but fixed SLOT
+shapes, and every design pack renders exactly their declared positions:
+`Stat { <label>, <value> }`, `KeyValueRow { <label>, <value> }`, and the
+op-form `Modal { trigger: …, OperationForm { … } }` (which renders the trigger
+button plus the operation's generated field set, and nothing else). An extra
+positional on one of those is rendered by nobody, so it is a validation error
+(`loom.page-primitive-extra-children`) rather than content that silently
+disappears — wrap the extra markup in a `Stack { … }` and pass that as the slot,
+or use the state-controlled `Modal { …children, open: <stateBool> }`, which *is*
+a children container.
+
+A bare name in a rendered slot must resolve to a route parameter, a `state`
+field, a `derived` binding, an enclosing lambda's parameter, or a store field.
+An unresolved one (`Text { nosuchthing }`) has nothing to read and used to emit
+a comment in its place — the content vanished from every frontend — so it is now
+rejected as `loom.unresolved-page-ref`, the ref-spelling twin of
+`loom.unknown-page-element`.
 
 `List` / `Detail` / `MasterDetail` were also retired: they were legacy
 archetype names that never had walker renderers (they silently degraded to a

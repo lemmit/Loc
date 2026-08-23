@@ -34,7 +34,7 @@ import { walkStmtExprsDeep } from "../../../ir/util/walk.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import { statementSubRegions } from "../../_trace/sourcemap.js";
-import type { ElixirChannelsCfg } from "../channels-emit.js";
+import { type ElixirChannelsCfg, opEmitsDurableEvent } from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import { renderReadingServiceContextFns } from "../domain-service-emit.js";
@@ -397,7 +397,6 @@ function renderContextModule(
     const destroyGateRc: RenderCtx = {
       thisName: "record",
       contextModule: facadeMod,
-      foundation: "vanilla",
       agg: agg as EnrichedAggregateIR,
     };
     const destroyClauses = lifecycleEnsureClauses(agg.canonicalDestroy, destroyGateRc);
@@ -496,7 +495,6 @@ ${body}
               const rc: RenderCtx = {
                 thisName: "record",
                 contextModule: facadeMod,
-                foundation: "vanilla",
                 agg: agg as EnrichedAggregateIR,
               };
               return `\n
@@ -527,7 +525,6 @@ ${body}
     const createClauses = lifecycleEnsureClauses(agg.canonicalCreate, {
       thisName: "record",
       contextModule: facadeMod,
-      foundation: "vanilla",
       agg: agg as EnrichedAggregateIR,
     });
     const createStampsActor = stampUsesPrincipal(agg);
@@ -954,7 +951,6 @@ function renderExternOpFunction(
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
-    foundation: "vanilla",
     agg: agg as EnrichedAggregateIR,
   };
   // `when` state gate + preconditions → a leading `with :ok <- ensure(...)` chain
@@ -1040,7 +1036,6 @@ function renderNamedOpFunction(
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
-    foundation: "vanilla",
     captureProvenance: hasProv,
     // The enriched aggregate, so the body renderer can detect reference-
     // collection (`X id[]`) add/remove and normalise to id lists (the persist
@@ -1070,12 +1065,20 @@ function renderNamedOpFunction(
   // persists, so the `{:ok, saved}` seam always exists.
   const emits = opEmitsEvent(op);
   const hasDispatcher = contextHasDispatcher(ctx as EnrichedBoundedContextIR, extraChannels);
+  // Transactional outbox (dispatch-delivery-semantics.md §1, docs/channels.md):
+  // when one of the emitted events is DURABLE, `<App>.Channels.dispatch/2` does
+  // not fan out — it INSERTs an `__loom_outbox` row, and that row has to commit
+  // with the aggregate change.  So the persist + emit pair is wrapped in one
+  // `Repo.transaction`; the emit lines then sit two columns deeper.  An
+  // ephemeral-only (or channel-less) op keeps the post-commit fan-out and its
+  // byte-identical layout.
+  const txWrapEmits = emits && opEmitsDurableEvent(op, channels);
   const dispatchLines = emits
     ? renderEmitDispatchLines(
         op,
         rc,
         hasDispatcher,
-        "        ",
+        txWrapEmits ? "          " : "        ",
         `${ctx.name}.${agg.name}.${op.name}`,
         opFragments,
         channels,
@@ -1208,7 +1211,27 @@ function renderNamedOpFunction(
   }
   const dispatchBlock = dispatchLines.join("\n");
   let persist: string;
-  if (hasProv || hasAudit) {
+  if (txWrapEmits) {
+    // Durable emit: the outbox INSERT rides `Repo.transaction` together with
+    // the persist (+ any prov/audit rows), so "aggregate saved" and "event
+    // owed" commit or roll back as one.  `Repo.transaction` already yields
+    // `{:ok, saved}` / `{:error, reason}`, so the outer result shape is
+    // unchanged.
+    persist = `    changeset =
+      ${persistBase}
+      |> Ecto.Changeset.change(%{})${putBlock6}${opLockPipe6}${invPipe6}
+
+    ${appModule}.Repo.transaction(fn ->
+      case ${repoMod}.persist_change(changeset) do
+        {:ok, saved} ->
+${txTail.length > 0 ? `${txTail.join("\n")}\n` : ""}${dispatchBlock}
+          saved
+
+        {:error, reason} ->
+          ${appModule}.Repo.rollback(reason)
+      end
+    end)`;
+  } else if (hasProv || hasAudit) {
     persist = emits
       ? // Emit + prov/audit: commit the state change (+ derived rows) in the
         // transaction, then dispatch AFTER commit (outside the tx fn) so a

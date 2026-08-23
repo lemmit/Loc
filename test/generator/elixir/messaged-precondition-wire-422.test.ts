@@ -178,13 +178,23 @@ describe("elixir/vanilla — messaged precondition answers the wire-validation 4
     expect(catchAllIdx).toBeGreaterThan(wireIdx);
   });
 
-  it("is gated: a project with no messaged param precondition emits no wire responder", async () => {
+  it("is gated: a project with no messaged param precondition tags no wire denial", async () => {
     const files = await generateSystemFiles(PLAIN);
-    const pd = file(files, "/problem_details.ex");
-    expect(pd).not.toContain("validation_errors_response");
-    expect(pd).not.toContain("render_wire_error");
     const ctrl = file(files, "/controllers/widget_controller.ex");
+    // The CONTROLLER side is what M-T6.20 gates: without a messaged, param-only
+    // precondition nothing is tagged `:validation_failed`, so nothing reaches
+    // the wire rung and the denial stays on the domain floor.
     expect(ctrl).not.toContain(":validation_failed");
+
+    // The RESPONDER, however, is no longer exclusive to this feature.  The
+    // paging-bounds refusal (audit A16 — an out-of-range `page`/`pageSize` now
+    // 422s instead of being clamped past the bounds the OpenAPI document
+    // publishes) sends through the SAME `validation_errors_response/2`, and the
+    // auto-`findAll` makes every non-abstract controller paged — so its
+    // presence no longer implies a messaged precondition.  Asserting its
+    // ABSENCE here would pin a coincidence, not the gate.
+    const pd = file(files, "/problem_details.ex");
+    expect(pd).toContain("def validation_errors_response(conn, errors) when is_list(errors) do");
   });
 });
 

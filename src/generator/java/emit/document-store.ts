@@ -7,6 +7,7 @@ import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
 import { desugarAuthzFilterInApp } from "../../_expr/authz-filter-inapp.js";
+import { javaLogEvent } from "../../_obs/render-java.js";
 import { bypassDrops, type FilterBypass } from "../capability-filter.js";
 import { collectJavaExprImports, renderJavaExpr, renderJavaType } from "../render-expr.js";
 import { javaNotFoundThrow } from "./common.js";
@@ -135,7 +136,7 @@ export function renderJavaDocumentRepositoryImpl(
   // count (paged → total, list → size, single → 0/1).  Mirrors the relational
   // repo + .NET/Hono document emission.
   const findExecutedLog = (name: string, rowsExpr: string): string =>
-    `        CatalogLog.event("find_executed", "debug", "aggregate", "${agg.name}", "find", "${name}", "rows", ${rowsExpr});`;
+    `        CatalogLog.event(${javaLogEvent("findExecuted")}, "aggregate", "${agg.name}", "find", "${name}", "rows", ${rowsExpr});`;
   const findLines = finds.flatMap((f) => {
     const params = f.params.map((p) => `${renderJavaType(p.type)} ${p.name}`);
     const ownFilter = f.filter
@@ -268,7 +269,7 @@ export function renderJavaDocumentRepositoryImpl(
     `        }`,
     // repository_save (debug) — after the upsert; (aggregate, id) prefix mirrors
     // the relational repo + .NET/Hono emission (children omitted).
-    `        CatalogLog.event("repository_save", "debug", "aggregate", "${agg.name}", "id", String.valueOf(aggregate.id().value()));`,
+    `        CatalogLog.event(${javaLogEvent("repositorySave")}, "aggregate", "${agg.name}", "id", String.valueOf(aggregate.id().value()));`,
     `        return aggregate;`,
     `    }`,
     ``,
@@ -290,7 +291,7 @@ export function renderJavaDocumentRepositoryImpl(
     `        var found = findById(id);`,
     // aggregate_loaded (debug) — `found` is a bool so a downstream filter can
     // grep failed loads by (event="aggregate_loaded", found=false).
-    `        CatalogLog.event("aggregate_loaded", "debug", "aggregate", "${agg.name}", "id", String.valueOf(id.value()), "found", found.isPresent());`,
+    `        CatalogLog.event(${javaLogEvent("aggregateLoaded")}, "aggregate", "${agg.name}", "id", String.valueOf(id.value()), "found", found.isPresent());`,
     `        return found.orElseThrow(() ->`,
     `            ${javaNotFoundThrow(agg.name)});`,
     `    }`,

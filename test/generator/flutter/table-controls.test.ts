@@ -40,6 +40,17 @@ const TABLE = `QueryView { of: Shop.Product.all,
     testid: "product-table") }`;
 const STATE = `state { sortKey: string = ""  sortDir: string = "asc"  pageNum: int = 1 }`;
 
+// The i18n-OFF fixture: a `Column` HEADER is a user-visible slot (`columnHeader`,
+// M-T1.11), so a literal one is authored prose and would turn i18n on by itself.
+// A dynamic header has no source string, which is what makes this page genuinely
+// string-less — the state the two byte-identity cases below are about.
+const OFF_TABLE = `QueryView { of: Shop.Product.all,
+  data: rows => Table(
+    Column(colHeader, p => p.name, sortable: true, field: "name"),
+    rows: rows, sortKey: sortKey, sortDir: sortDir, page: pageNum, pageSize: 3,
+    testid: "product-table") }`;
+const OFF_STATE = `state { sortKey: string = ""  sortDir: string = "asc"  pageNum: int = 1  colHeader: string = "Name" }`;
+
 const page = async (body = TABLE, state = STATE): Promise<string> =>
   (await generateSystemFiles(SYS(body, state))).get("app/lib/pages/list_page.dart")!;
 
@@ -74,11 +85,7 @@ describe("flutter Table controls — server-driven (M-T1.1)", () => {
     // runtime ships and the pager renders exactly what it did pre-i18n —
     // `const` included, which is the bit a naive "always bind" would silently
     // lose.
-    const dart = await page(`QueryView { of: Shop.Product.all,
-      data: rows => Table(
-        Column("Name", p => p.name, sortable: true),
-        rows: rows, sortKey: sortKey, sortDir: sortDir, page: pageNum, pageSize: 3,
-        testid: "product-table") }`);
+    const dart = await page(OFF_TABLE, OFF_STATE);
     expect(dart).toContain("child: const Text('Prev')");
     expect(dart).toContain("child: const Text('Next')");
     expect(dart).toContain("Text('Page ${state.pageNum} of ");
@@ -104,12 +111,11 @@ describe("flutter Table controls — server-driven (M-T1.1)", () => {
 
     // With nothing to translate the target keeps its own sentence — the
     // `undefined`-means-keep-yours contract, byte-identical by construction.
-    const off = await page(`QueryView { of: Shop.Product.all,
-      data: rows => Table(
-        Column("Name", p => p.name, sortable: true),
-        rows: rows, sortKey: sortKey, sortDir: sortDir, page: pageNum, pageSize: 3,
-        testid: "product-table") }`);
-    expect(off).toContain("label: 'Sort by Name'");
+    const off = await page(OFF_TABLE, OFF_STATE);
+    // The caption itself is dynamic here (that is what keeps the page
+    // string-less), so the sentence names the emitter's fallback — what this
+    // pins is that the target keeps ITS OWN sentence rather than binding.
+    expect(off).toMatch(/label: 'Sort by [^']+'/);
     expect(off).not.toContain("chrome.sortBy");
   });
 

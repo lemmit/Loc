@@ -1,4 +1,4 @@
-import type { BoundedContextIR, EventIR, TypeIR } from "../../../ir/types/loom-ir.js";
+import type { BoundedContextIR, EventIR, SystemIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../../ir/util/channels.js";
 import { type RealtimeRoomPlan, realtimeRoomPlan } from "../../../ir/util/realtime-rooms.js";
 import { lines } from "../../../util/code-builder.js";
@@ -20,8 +20,9 @@ import { lines } from "../../../util/code-builder.js";
 // Two topologies (channels.md "Realtime topology" — rooms + policy-derived
 // routing v1), mirroring the Hono backend: an untenanted context is
 // broadcast-to-all (byte-identical); a tenant-owned context scopes delivery by
-// the tenant DataKey (`currentUser.tenantId`), so a tenant-scoped event reaches
-// only subscribers in the emitter's tenant room — never cross-tenant.  A
+// the tenant DataKey (`currentUser.<claim>`, the bound `tenancy by
+// user.<claim>` — NOT the row column `tenantId`), so a tenant-scoped event
+// reaches only subscribers in the emitter's tenant room — never cross-tenant.  A
 // connection derives its room from the verified principal at connect (never a
 // client value); an unauthenticated connection joins no room.  The authorized
 // read stays the gate either way — clients refetch through the API.
@@ -61,13 +62,14 @@ function wireMapArm(ev: EventIR): string[] {
 export function renderJavaRealtimeController(
   ctx: BoundedContextIR,
   basePkg: string,
+  sys: Pick<SystemIR, "tenancy"> | undefined,
 ): string | null {
   const types = [...realtimeEventTypes(ctx)].sort();
   if (types.length === 0) return null;
   const events = types
     .map((t) => ctx.events.find((e) => e.name === t))
     .filter((e): e is EventIR => e != null);
-  const plan = realtimeRoomPlan(ctx);
+  const plan = realtimeRoomPlan(ctx, sys);
   return plan.tenantScoped
     ? renderRoomScopedController(events, types, plan, basePkg)
     : renderBroadcastController(events, types, basePkg);
@@ -185,6 +187,10 @@ function renderRoomScopedController(
   const typeSet = types.map((t) => `"${t}"`).join(", ");
   const tenantTypes = [...plan.tenantEventTypes].sort();
   const tenantSet = tenantTypes.map((t) => `"${t}"`).join(", ");
+  // The `User` record accessor holding the room key — the bound `tenancy by
+  // user.<claim>`.  `emit/auth.ts` declares record components under the
+  // field's own name, so the accessor is the claim verbatim.
+  const claim = plan.tenantClaimField;
   const idFieldEntries = tenantTypes
     .map((t) => {
       const fields = plan.eventIdFields.get(t) ?? [];
@@ -224,7 +230,7 @@ function renderRoomScopedController(
     `/** Realtime SSE wire (channels.md rooms + policy-derived routing v1):`,
     ` *  broadcast-channel events stream to connected browsers at`,
     ` *  GET /api/realtime/events.  This context hosts tenant-owned aggregates,`,
-    ` *  so delivery is scoped by the tenant DataKey (\`currentUser.tenantId\`): a`,
+    ` *  so delivery is scoped by the tenant DataKey (\`currentUser.${claim}\`): a`,
     ` *  tenant-scoped event reaches only subscribers in the emitter's tenant`,
     ` *  room — never cross-tenant.  The authorized read remains the gate.`,
     ` *  @Hidden keeps the SSE stream out of the springdoc OpenAPI document. */`,
@@ -234,8 +240,9 @@ function renderRoomScopedController(
     `    /** Events carried by a broadcast channel — the UI-observable set. */`,
     `    private static final Set<String> REALTIME_EVENT_TYPES = Set.of(${typeSet});`,
     ``,
-    `    /** Events whose payload references a \`tenantOwned\` aggregate — routed to`,
-    `     *  the emitter's tenant room only, never broadcast cross-tenant. */`,
+    `    /** Events this tenant-owned context routes to the emitter's tenant room`,
+    `     *  only, never broadcast cross-tenant — everything it carries except the`,
+    `     *  events provably about \`crossTenant\` (shared) data. */`,
     `    private static final Set<String> TENANT_SCOPED_EVENT_TYPES = Set.of(${tenantSet});`,
     ``,
     `    /** Id-reference (\`<Agg> id\`) fields kept when a tenant-scoped event`,
@@ -249,8 +256,8 @@ function renderRoomScopedController(
     `    /** Every live connection — receives tenant-agnostic (global) events and`,
     `     *  any broadcast refetch ticket. */`,
     `    private final CopyOnWriteArrayList<SseEmitter> emitters = new CopyOnWriteArrayList<>();`,
-    `    /** Per-tenant rooms (key = \`currentUser.tenantId\`, the tenantOwned`,
-    `     *  DataKey) — a connection joins its own tenant's room at connect. */`,
+    `    /** Per-tenant rooms (key = \`currentUser.${claim}\`, the bound tenancy`,
+    `     *  claim) — a connection joins its own tenant's room at connect. */`,
     `    private final ConcurrentHashMap<String, CopyOnWriteArrayList<SseEmitter>> rooms = new ConcurrentHashMap<>();`,
     `    /** Each connection's joined tenant, so cleanup can leave its room. */`,
     `    private final ConcurrentHashMap<SseEmitter, String> emitterTenant = new ConcurrentHashMap<>();`,
@@ -337,10 +344,10 @@ function renderRoomScopedController(
     `    }`,
     ``,
     `    /** The connecting/emitting principal's tenant room key (\`currentUser`,
-    `     *  .tenantId\`, the tenantOwned DataKey), or null when there is no`,
+    `     *  .${claim}\`, the bound tenancy claim), or null when there is no`,
     `     *  authenticated principal. */`,
     `    private static String tenantOf(User user) {`,
-    `        return user == null || user.tenantId() == null ? null : String.valueOf(user.tenantId());`,
+    `        return user == null || user.${claim}() == null ? null : String.valueOf(user.${claim}());`,
     `    }`,
     ``,
     `    /** Strip a tenant-scoped event to a refetch ticket — its \`type\` plus the`,

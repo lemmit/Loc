@@ -1,0 +1,112 @@
+// Query-time projection AGGREGATIONS × capability filters — the crossing no
+// other corpus fixture makes.  `projection-aggregation.ddd` and
+// `projection-groupby.ddd` cover the two aggregation SHAPES; `tenancy-owned.ddd`
+// and `tenancy-filter.ddd` cover the capability FILTER.  Neither pair crosses,
+// which is exactly why the aggregation arms of four backends read the source
+// table with only the projection's own `where` applied and never the source
+// aggregate's `contextFilters` — a cross-tenant COUNT/SUM leak on node
+// (drizzle + mikroorm), python and java, and on the .NET *dapper* adapter
+// (.NET/EF was correct all along: `HasQueryFilter` is global, so the
+// aggregation inherits it; elixir was correct too).
+//
+// With `softDeletable` alone the same leak is a plain WRONG NUMBER with no auth
+// involved: the aggregation counts rows `findAll` excludes.  `scaffoldDashboard`
+// emits exactly this shape, so a scaffolded dashboard on a multi-tenant system
+// showed GLOBAL totals.
+//
+// The aggregate below carries BOTH filter-contributing capabilities, so each
+// emitted aggregation read has to carry TWO predicates (tenant column AND
+// not-deleted) — a backend that applies one and drops the other fails the gate
+// as loudly as one that applies neither.  `Reading` is the `ignoring` witness:
+// `ignoring softDeletable` must drop the not-deleted conjunct and KEEP the
+// tenant one, exactly as the row-shaped repository path does.
+//
+// COMPILE-TIER ONLY — no `test e2e` block.  The runtime assertion this fixture
+// wants (a second tenant's rows are absent from the total) needs a two-principal
+// harness the behavioural runners do not have, and its wire goldens cannot be
+// captured without one; the structural gate (per-backend generator tests
+// asserting the predicate is in the emitted read) carries the proof instead.
+system ProjectionAggFilters {
+  user { id: guid  tenantId: string }
+
+  tenancy by user.tenantId of Organization
+
+  subdomain Sales {
+    context Orders {
+      enum OrderStatus { Draft Confirmed Cancelled }
+
+      aggregate Order with tenantOwned, softDeletable, crudish {
+        code: string
+        total: money
+        lineCount: int
+        status: OrderStatus
+        derived display: string = code
+      }
+
+      repository Orders for Order { }
+
+      criterion Confirmed of Order as o = o.status == OrderStatus.Confirmed
+
+      // WHOLE-TABLE aggregation over a doubly-filtered source: the emitted read
+      // must AND the tenant predicate and the not-deleted predicate into the
+      // SAME query as the criterion `where`.
+      projection SalesTotals {
+        orders: int
+        revenue: money
+        from Order as o
+        where Confirmed
+        select orders = count(),
+               revenue = sum(o.total)
+      }
+
+      // Unfiltered whole-table count — the smallest shape, and the one with no
+      // `where` at all, so the capability predicates are the ENTIRE WHERE clause
+      // (a backend that only ever appended to an existing `where` emits none).
+      projection OrderVolume {
+        total: int
+        from Order as o
+        select total = count()
+      }
+
+      // GROUPED aggregation — the same predicates must ride the grouped query.
+      projection SalesByStatus {
+        status: OrderStatus
+        orders: int
+        revenue: money
+        from Order as o
+        group by o.status
+        select status = o.status,
+               orders = count(),
+               revenue = sum(o.total)
+      }
+
+      // `ignoring` witness: the named capability's predicate is OMITTED for this
+      // read only; the tenant predicate it did not name stays.
+      projection AllTimeVolume {
+        total: int
+        from Order as o
+        ignoring softDeletable
+        select total = count()
+      }
+    }
+    context Accounts {
+      aggregate Organization with crudish {
+        name: string
+      }
+    }
+  }
+
+  api OrdersApi from Sales
+
+  storage pg { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: pg }
+  resource accountsState { for: Accounts, kind: state, use: pg }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Orders, Accounts]
+    dataSources: [ordersState, accountsState]
+    serves: OrdersApi
+    port: 4000
+    auth: required
+  }
+}

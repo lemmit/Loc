@@ -166,6 +166,44 @@ export function numericNamed(call: ExprIR & { kind: "call" }, name: string): num
   return undefined;
 }
 
+/** Read the `cols:` named arg on a `Grid` call into per-breakpoint column
+ *  counts.
+ *
+ *  Accepts two forms:
+ *    - Scalar int literal:  `cols: 3`  →  all three breakpoints use 3.
+ *    - List literal:        `cols: [3, 2, 1]`  →  `[desktop, tablet, mobile]`.
+ *
+ *  When a breakpoint slot is missing in the list form, conservative
+ *  defaults apply: `tablet = ceil(desktop/2)`, `mobile = 1`.  When the
+ *  arg itself is absent, returns `undefined` and consumers fall back
+ *  to their own non-responsive default.
+ *
+ *  Shared rather than per-frontend: the JSX walker (`primitives/layout.ts`)
+ *  and the HEEx walker (`elixir/heex-primitives.ts`) must agree on what
+ *  `cols: [3, 2, 1]` MEANS, or the same page lays out differently per
+ *  frontend.  It lives here — a pure IR reader with no walker context —
+ *  because both consumers sit at this layer. */
+export function gridCols(
+  call: ExprIR & { kind: "call" },
+): { desktop: number; tablet: number; mobile: number } | undefined {
+  const scalar = numericNamed(call, "cols");
+  if (scalar !== undefined) return { desktop: scalar, tablet: scalar, mobile: scalar };
+  const raw = namedArgValue(call, "cols");
+  if (raw?.kind !== "list") return undefined;
+  const intElements: number[] = [];
+  for (const el of raw.elements) {
+    if (el.kind === "literal" && el.lit === "int") {
+      const n = Number(el.value);
+      if (Number.isFinite(n)) intElements.push(n);
+    }
+  }
+  if (intElements.length === 0) return undefined;
+  const desktop = intElements[0]!;
+  const tablet = intElements[1] ?? Math.max(1, Math.ceil(desktop / 2));
+  const mobile = intElements[2] ?? 1;
+  return { desktop, tablet, mobile };
+}
+
 export function escapeJsxText(s: string): string {
   // Replace JSX-significant punctuation with HTML entity equivalents
   // so the emitted source compiles under `tsc --noEmit`.  `{` and

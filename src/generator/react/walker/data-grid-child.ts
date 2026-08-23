@@ -134,7 +134,10 @@ function renderGridComponent(spec: DataGridSpec, body: string): string {
     .map((c) => {
       const parts = [`id: ${JSON.stringify(c.id)}`];
       if (c.accessorKey) parts.push(`accessorKey: ${JSON.stringify(c.accessorKey)}`);
-      parts.push(`header: ${JSON.stringify(c.header)}`);
+      // The header is a user-visible slot (`columnHeader`): under i18n it
+      // arrives as a `t()` expression, otherwise it is quoted here exactly as
+      // before (byte-identical).
+      parts.push(`header: ${c.headerValue ?? JSON.stringify(c.header)}`);
       if (c.cell) {
         // A computed cell reads the row, so bind it — the pre-`cell: ({ row })`
         // shape emitted an UNBOUND `row` and failed `tsc` (found by compiling a

@@ -1,18 +1,21 @@
 import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
 import { escapePythonIdent, snake } from "../../util/naming.js";
-import { collectLeaves } from "../_stmt/leaves.js";
+import { collectLeaves, provTempNames, wrapProvCapture } from "../_stmt/leaves.js";
+import { renderStmtChunksWith, renderStmtsWith, type StmtTarget } from "../_stmt/target.js";
 import { renderPyExpr, renderPyNegatedGuard } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
-// Statement renderer for the Python backend.  Flat per-kind dispatch,
-// mirroring the TS/.NET `render-stmt.ts` shape (deliberately not
-// extracted into a shared dispatcher — the arms are shape-divergent
-// per backend).
+// Statement LEAF TABLE for the Python backend.  The 11-kind `StmtIR` dispatch,
+// the chunk/join pair and the `variant-match` guard live once in
+// `../_stmt/target.ts`; this file supplies only the per-kind spelling (audit
+// finding C1).
 //
-// Python's indentation is structural, so the renderer takes the
-// enclosing indent explicitly (method bodies sit at 8 spaces inside a
-// class).  Multi-line arms (remove, event-sourced emit) nest one level
-// below it.
+// Python's indentation is structural, so the renderer takes the enclosing
+// indent explicitly (method bodies sit at 8 spaces inside a class) and the leaf
+// table closes over it — the indent is a pure LEAF concern here, unlike
+// `WorkflowStmtTarget.indentUnit` (that spine indents nested bodies itself; the
+// backend-body `StmtIR` is flat, so this one never needs to).  Multi-line arms
+// (remove, event-sourced emit) nest one level below it.
 // ---------------------------------------------------------------------------
 
 export interface PyTraceCtx {
@@ -47,7 +50,7 @@ export function renderPyStatements(
   indent: string = METHOD_BODY_INDENT,
   ctx: PyStmtCtx = {},
 ): string {
-  return renderPyStatementChunks(stmts, indent, ctx).join("\n");
+  return renderStmtsWith(stmts, pyStmtTarget(indent, ctx));
 }
 
 /** Same rendering as `renderPyStatements`, but one (possibly multi-line)
@@ -56,26 +59,13 @@ export function renderPyStatements(
  *  byte-identical to it.  Lets a caller that owns the final file content
  *  (the Python aggregate emitter) recover each statement's own line span
  *  inside an operation body for `SourceMapRecorder.fragment` — see
- *  `statementSubRegions` in `src/generator/_trace/sourcemap.ts`.
- *
- *  Threads the SAME two running counters `renderPyStatements` always has
- *  (`preIndex` bumped only on a `precondition` statement, `provIndex` bumped
- *  only on a provenanced `assign`/`add`) — a chunk's `__pre_N_ok` / `__prov_N`
- *  temp names must match what the pre-joined renderer would have produced
- *  for the exact same statement at the exact same position, so this cannot
- *  be a plain positional index. */
+ *  `statementSubRegions` in `src/generator/_trace/sourcemap.ts`. */
 export function renderPyStatementChunks(
   stmts: StmtIR[],
   indent: string = METHOD_BODY_INDENT,
   ctx: PyStmtCtx = {},
 ): string[] {
-  let preIndex = 0;
-  let provIndex = 0;
-  return stmts.map((s) => {
-    const pre = s.kind === "precondition" ? preIndex++ : 0;
-    const pi = (s.kind === "assign" || s.kind === "add") && s.prov ? provIndex++ : 0;
-    return renderPyStatement(s, indent, ctx, pre, pi);
-  });
+  return renderStmtChunksWith(stmts, pyStmtTarget(indent, ctx));
 }
 
 export { statementSubRegions } from "../_trace/sourcemap.js";
@@ -87,7 +77,13 @@ export { statementSubRegions } from "../_trace/sourcemap.js";
  *  and route it to both sinks — the co-located `_<field>_provenance` backing
  *  field (current lineage, persisted on the row) and the per-request
  *  ContextVar buffer via `record(...)` (drained into the history table by
- *  the repository inside the save transaction).  Mirrors the TS `withTrace`. */
+ *  the repository inside the save transaction).  Mirrors the TS `withTrace`.
+ *
+ *  PRESERVED INCONSISTENCY (audit C1): python (like node) honours the
+ *  `emitProvenance` switch and captures at ANY path depth; .NET and java gate on
+ *  `prov` presence alone and skip write-throughs into a containment.  Kept
+ *  verbatim — reconciling them is a behaviour change on some backend, not a
+ *  refactor. */
 function withProv(
   base: string,
   prov: ProvSite | undefined,
@@ -98,20 +94,18 @@ function withProv(
   index: number,
 ): string {
   if (!emitProvenance || !prov) return base;
-  const tmp = `__prov_${index}`;
-  const lin = `__lin_${index}`;
+  const { tmp, lin } = provTempNames(index);
   const computed = renderPath(target);
   const field = prov.target.field;
   const inputs = collectLeaves(value, renderPyExpr)
     .map((l) => `ProvInput(path=${JSON.stringify(l.path)}, value=${l.value})`)
     .join(", ");
-  return [
-    `${i}${tmp} = [${inputs}]`,
-    base,
-    `${i}${lin} = ProvLineage(snapshot_id=${JSON.stringify(prov.snapshotId)}, target=ProvTarget(type=${JSON.stringify(prov.target.type)}, field=${JSON.stringify(field)}), inputs=${tmp}, computed_value=${computed})`,
-    `${i}self._${snake(field)}_provenance = ${lin}`,
-    `${i}record(${lin})`,
-  ].join("\n");
+  return wrapProvCapture(base, {
+    snapshot: `${i}${tmp} = [${inputs}]`,
+    lineage: `${i}${lin} = ProvLineage(snapshot_id=${JSON.stringify(prov.snapshotId)}, target=ProvTarget(type=${JSON.stringify(prov.target.type)}, field=${JSON.stringify(field)}), inputs=${tmp}, computed_value=${computed})`,
+    colocated: `${i}self._${snake(field)}_provenance = ${lin}`,
+    sink: `${i}record(${lin})`,
+  });
 }
 
 /** `log("trace", "<event>", <kwargs>)` — the domain-trace facade call. */
@@ -119,21 +113,28 @@ function traceLine(i: string, event: string, kwargs: string): string {
   return `${i}log("trace", ${JSON.stringify(event)}, ${kwargs})`;
 }
 
-function renderPyStatement(
-  s: StmtIR,
-  i: string,
-  ctx: PyStmtCtx,
-  preIndex: number,
-  provIndex: number,
-): string {
+/** The Python leaf table.  Built per call so the arms close over the
+ *  enclosing indent and the statement context instead of threading them
+ *  through the shared spine. */
+function pyStmtTarget(i: string, ctx: PyStmtCtx): StmtTarget {
   const sub = `${i}    `;
-  switch (s.kind) {
-    case "precondition": {
+  return {
+    backendName: "Python",
+    // PRESERVED INCONSISTENCY (audit C1): python numbers its statement temps
+    // PER KIND (`__pre_N_ok` counts only preconditions, `__prov_N` only
+    // provenanced writes), while node / .NET / java number them by the
+    // statement's POSITION in the body.  Both are correct — nothing depends on
+    // the numbering beyond uniqueness within a body — but they are
+    // inconsistent.  Normalising them moves generated bytes on some backend, so
+    // it stays a separate, deliberately-gated change.
+    indexing: "per-kind",
+
+    precondition: (s, ix) => {
       const thrown = `raise DomainError(${JSON.stringify(s.message ? s.message.text : `Precondition failed: ${s.source}`)})`;
       if (!ctx.trace) {
         return [`${i}if ${renderPyNegatedGuard(s.expr)}:`, `${sub}${thrown}`].join("\n");
       }
-      const ok = `__pre_${preIndex}_ok`;
+      const ok = `__pre_${ix.pre}_ok`;
       return [
         `${i}${ok} = (${renderPyExpr(s.expr)})`,
         traceLine(
@@ -144,22 +145,27 @@ function renderPyStatement(
         `${i}if not ${ok}:`,
         `${sub}${thrown}`,
       ].join("\n");
-    }
-    case "requires":
+    },
+
+    requires: (s) =>
       // Authorization gate — surfaces as 403 via the route-level
       // ForbiddenError handler (S16).
-      return [
+      [
         `${i}if ${renderPyNegatedGuard(s.expr)}:`,
         `${sub}raise ForbiddenError(${JSON.stringify(`Forbidden: ${s.source}`)})`,
-      ].join("\n");
-    case "let":
+      ].join("\n"),
+
+    let: (s) =>
       // `let`-names may collide with a Python keyword; escape the snake-cased
       // form consistently with the `refKind: "let"` use sites.
-      return `${i}${escapePythonIdent(snake(s.name))} = ${renderPyExpr(s.expr)}`;
-    case "assign": {
+      `${i}${escapePythonIdent(snake(s.name))} = ${renderPyExpr(s.expr)}`,
+
+    assign: (s, ix) => {
       let base = `${i}${renderPath(s.target)} = ${renderPyExpr(s.value)}`;
       // `value_computed` trace after a single-segment field assign (nested
       // paths are skipped, matching the Hono / .NET `withValueComputed`).
+      // NOTE the wrap ORDER: python (like .NET / java) puts `value_computed`
+      // INSIDE the provenance capture; node puts it outside.  Preserved.
       if (ctx.trace && s.target.segments.length === 1) {
         base = [
           base,
@@ -170,21 +176,24 @@ function renderPyStatement(
           ),
         ].join("\n");
       }
-      return withProv(base, s.prov, s.target, s.value, !!ctx.emitProvenance, i, provIndex);
-    }
-    case "add": {
+      return withProv(base, s.prov, s.target, s.value, !!ctx.emitProvenance, i, ix.prov);
+    },
+
+    add: (s, ix) => {
       const base = `${i}${renderPath(s.target)}.append(${renderPyExpr(s.value)})`;
-      return withProv(base, s.prov, s.target, s.value, !!ctx.emitProvenance, i, provIndex);
-    }
-    case "remove": {
+      return withProv(base, s.prov, s.target, s.value, !!ctx.emitProvenance, i, ix.prov);
+    },
+
+    remove: (s) => {
       const path = renderPath(s.target);
       return [
         `${i}__rm = ${renderPyExpr(s.value)}`,
         `${i}if __rm in ${path}:`,
         `${sub}${path}.remove(__rm)`,
       ].join("\n");
-    }
-    case "emit": {
+    },
+
+    emit: (s) => {
       const kwargs = s.fields.map((f) => `${snake(f.name)}=${renderPyExpr(f.value)}`).join(", ");
       const ev = `${s.eventName}(${kwargs})`;
       if (ctx.eventSourced) {
@@ -193,18 +202,20 @@ function renderPyStatement(
         );
       }
       return `${i}self._events.append(${ev})`;
-    }
-    case "call": {
+    },
+
+    call: (s) => {
       const args = s.args.map((a) => renderPyExpr(a)).join(", ");
       // A `function` is always a private method (`def _is_draft`); an operation
       // is a public method (`def reserve`) unless declared `private`.  So only
       // prefix `_` for a function or an actually-private operation.
       const prefix = s.target === "private-operation" && !s.targetPrivate ? "" : "_";
       return `${i}self.${prefix}${snake(s.name)}(${args})`;
-    }
-    case "expression":
-      return `${i}${renderPyExpr(s.expr)}`;
-    case "return": {
+    },
+
+    expression: (s) => `${i}${renderPyExpr(s.expr)}`,
+
+    return: (s) => {
       // Tagged union returns get their proper variant classes in S12;
       // until then the dict form carries the same wire keys.
       const v = renderPyExpr(s.value);
@@ -217,13 +228,8 @@ function renderPyStatement(
             ? `{"type": ${tag}, "value": ${v}}`
             : `{"type": ${tag}, **${v}}`;
       return `${i}return ${tagged}`;
-    }
-    case "variant-match":
-      // Frontend-only effect statement (Stage 2) — gated to action bodies.
-      throw new Error(
-        "variant-match statement is frontend-only; it must not reach the Python backend",
-      );
-  }
+    },
+  };
 }
 
 function renderPath(p: PathIR): string {

@@ -25,6 +25,7 @@ import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { upperFirst } from "../../../util/naming.js";
 import { isServerSourcedDefault } from "../../_frontend/server-default.js";
+import { javaLogEvent } from "../../_obs/render-java.js";
 import {
   collectJavaExprImports,
   collectJavaTypeImports,
@@ -187,7 +188,7 @@ export function renderJavaService(
         `            RequestContext.correlationId(),`,
         `            RequestContext.scopeId(),`,
         `            RequestContext.parentId()));`,
-        `        CatalogLog.event("audit_recorded", "debug", "action", "create", "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`,
+        `        CatalogLog.event(${javaLogEvent("auditRecorded")}, "action", "create", "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`,
       ]
     : [];
   // --- the canonical create / destroy authorization gate ----------------------
@@ -513,7 +514,7 @@ export function renderJavaService(
         audited ? `            RequestContext.scopeId(),` : null,
         audited ? `            RequestContext.parentId()));` : null,
         audited
-          ? `        CatalogLog.event("audit_recorded", "debug", "action", ${JSON.stringify(op.name)}, "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`
+          ? `        CatalogLog.event(${javaLogEvent("auditRecorded")}, "action", ${JSON.stringify(op.name)}, "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`
           : null,
         `        publishEvents(aggregate);`,
         spec
@@ -560,7 +561,7 @@ export function renderJavaService(
                 `            RequestContext.correlationId(),`,
                 `            RequestContext.scopeId(),`,
                 `            RequestContext.parentId()));`,
-                `        CatalogLog.event("audit_recorded", "debug", "action", "destroy", "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`,
+                `        CatalogLog.event(${javaLogEvent("auditRecorded")}, "action", "destroy", "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`,
               ]
             : []),
           `        repository.delete(aggregate);`,
@@ -666,7 +667,7 @@ export function renderJavaService(
     // The domain-event narrative line fires at the dispatch seam regardless of
     // whether the event has in-process subscribers — when it does, the in-VM
     // publish follows.
-    `            CatalogLog.event("event_dispatched", "info", "event_type", event.getClass().getSimpleName(), "aggregate", "${agg.name}");`,
+    `            CatalogLog.event(${javaLogEvent("eventDispatched")}, "event_type", event.getClass().getSimpleName(), "aggregate", "${agg.name}");`,
     dispatches ? `            eventPublisher.publishEvent(event);` : null,
     `        }`,
     `    }`,

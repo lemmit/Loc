@@ -64,6 +64,34 @@ describe("renderTsStatementChunks — join-equivalence with renderTsStatements",
   });
 });
 
+// A14 (second half) — `-=` over a money collection.
+//
+// decimal.js `Decimal` instances compare by REFERENCE under `===`, so
+// `prices -= p` used to scan with `findIndex((e) => e === (…))` and silently
+// remove nothing for a value-equal entry.  Same money special-case the
+// `contains`/`distinct` rows carry in render-expr.
+describe("ts `-=` element removal — money compares by value (A14)", () => {
+  const removeStmt = (elemName: "money" | "int"): StmtIR => ({
+    kind: "remove",
+    target: path("prices"),
+    value: thisProp("p"),
+    elementType: { kind: "primitive", name: elemName },
+    collection: true,
+  });
+
+  it("uses decimal.js `.eq` for a money[] element", () => {
+    expect(renderTsStatements([removeStmt("money")])).toBe(
+      "    { const idx = this._prices.findIndex((e) => e.eq(this._p)); if (idx >= 0) this._prices.splice(idx, 1); }",
+    );
+  });
+
+  it("keeps `===` identity for a non-money element (byte-identical)", () => {
+    expect(renderTsStatements([removeStmt("int")])).toBe(
+      "    { const idx = this._prices.findIndex((e) => e === (this._p)); if (idx >= 0) this._prices.splice(idx, 1); }",
+    );
+  });
+});
+
 describe("statementSubRegions", () => {
   it("assigns one relative line span per statement, advancing by each chunk's own line count", () => {
     const stmts: StmtIR[] = [

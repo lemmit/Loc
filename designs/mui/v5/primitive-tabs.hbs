@@ -1,6 +1,6 @@
 {{#if hasTabs}}<Box{{{testidAttr}}}>
 {{indent}}<Tabs value={{{json defaultValue}}}>
-{{innerIndent}}{{#each tabs}}<Tab value={{json this.value}} label={{json this.label}} />{{#unless @last}}
+{{innerIndent}}{{#each tabs}}<Tab value={{json this.value}}{{{this.labelAttr}}} />{{#unless @last}}
 {{../innerIndent}}{{/unless}}{{/each}}
 {{indent}}</Tabs>
 {{indent}}{{#each tabs}}<Box role="tabpanel" sx=\{{ pt: 2 }}>

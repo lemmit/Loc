@@ -490,6 +490,18 @@ export const UNATTRIBUTED_CALLS: Record<string, readonly string[]> = {
 // classes decide the ORDER of the remaining drain, and re-deriving them costs
 // the next agent an hour (#2517).
 export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
+  // COMPILE-TIER WITNESS (generator review A5/A10–A14) — the previously
+  // unwitnessed collection-op shapes (arithmetic-lambda `sum`, `distinct` over
+  // money, argless `any()`, descending `sortBy`, unary minus on money, `-=` on
+  // an int[]).  The bugs it pins were compile/runtime-value defects proven by
+  // the per-backend compile tiers; a behavioural block would add uncalled
+  // routes and unrecorded goldens for no additional oracle.
+  "collection-op-shapes",
+  // COMPILE-TIER WITNESS (generator review A1) — a projection aggregation over
+  // a `tenantOwned` + `softDeletable` source; pins that the emitted aggregation
+  // read carries the capability predicates.  The runtime half needs the
+  // two-principal harness (`tenancy-e2e.yml` owns that shape).
+  "projection-agg-filters",
   // TWO DEPLOYABLES — the caller's client is derived from the callee's served
   // operation set (see the manifest note), and the behavioural corpus requires
   // exactly one `platform: node` deployable per case so dispatch is unambiguous.

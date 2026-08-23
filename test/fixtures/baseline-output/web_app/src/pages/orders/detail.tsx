@@ -203,8 +203,8 @@ export default function OrderDetail() {
                 <Table striped highlightOnHover>
                   <Table.Thead>
                     <Table.Tr>
-                      <Table.Th>Product Id</Table.Th>
-                      <Table.Th>Quantity</Table.Th>
+                      <Table.Th>{t("page.Detail.columnHeader.fp4ch5", "Product Id")}</Table.Th>
+                      <Table.Th>{t("page.Detail.columnHeader.c75rso", "Quantity")}</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>

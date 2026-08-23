@@ -586,11 +586,7 @@ export function validateCurrentUserNeedsAuthUi(sys: SystemIR, diags: LoomDiagnos
     if (d.auth?.ui || d.auth?.required) continue;
     for (const { ui } of mountedUis(sys, d)) {
       // Components are walked for the same reason charts and grids are — a
-      // read moved into one renders into the page all the same.  (Today a
-      // component's `currentUser` lowers to an UNRESOLVED ref, because
-      // `lowerComponent` threads `user: undefined` where `lowerPage` threads
-      // the system's user block; when that is threaded through, this arm
-      // starts biting with no edit here.)
+      // read moved into one renders into the page all the same.
       const hosts: { what: string; host: UiRenderHost }[] = [
         ...ui.pages.map((p) => ({ what: `page '${p.name}'`, host: p as UiRenderHost })),
         ...ui.components.map((c) => ({ what: `component '${c.name}'`, host: c as UiRenderHost })),
@@ -3006,9 +3002,11 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
         // via `$and`, honoring a read's `ignoring` bypass (the FilterQuery
         // analogue of drizzle's per-read predicate).  A predicate outside the
         // FilterQuery subset is caught by `validateFindPredicateAdapterSupport`
-        // (which already iterates contextFilters), and principal-referencing
-        // filters are rejected on Hono by `validatePrincipalContextFilterSupport`
-        // — so only closed, lowerable predicates reach codegen.
+        // (which already iterates contextFilters).  Principal-referencing
+        // filters (`currentUser.tenantId`) are APPLIED too, not rejected: the
+        // emitter lowers them against the ambient per-request principal
+        // (`requireCurrentUser()` on drizzle, `RequestContext` on mikroorm), so
+        // every predicate that reaches codegen is lowerable.
         // Server-managed access (`managed` / `token` / `internal` / `secret`)
         // is NO LONGER gated: like drizzle, the MikroORM data-mapper stores such
         // a field as an ordinary column that round-trips through the shared

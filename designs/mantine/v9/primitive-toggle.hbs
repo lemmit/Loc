@@ -1,1 +1,1 @@
-{{#if hasBind}}<Switch label={{{labelAttr}}} checked={{expr bind}} onChange={(e) => {{setter}}(e.currentTarget.checked)}{{{testidAttr}}} />{{else}}<Switch label={{{labelAttr}}}{{{testidAttr}}} />{{/if}}
+{{#if hasBind}}<Switch{{{labelAttr}}} checked={{expr bind}} onChange={(e) => {{setter}}(e.currentTarget.checked)}{{{testidAttr}}} />{{else}}<Switch{{{labelAttr}}}{{{testidAttr}}} />{{/if}}

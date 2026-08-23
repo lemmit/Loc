@@ -17,10 +17,15 @@ import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 // the producer-side `<Ctx>.Dispatcher.dispatch/1` call sites when channels
 // are wired — an ephemeral broker-routed event encodes to the CloudEvents
 // envelope and publishes inline, never fanning out locally; a durable
-// (`work`) event lands in `__loom_outbox` inside the caller's Repo
-// transaction and the `OutboxRelay` publishes it on drain with the row id
-// as the envelope id (design §5); everything else forwards to the local
-// dispatcher (nil for a context without one).  The `<App>.ChannelConsumer`
+// (`work`) event lands in `__loom_outbox` — and because an aggregate-writing
+// emit site (a named / returning operation, see `opEmitsDurableEvent`) wraps
+// its persist AND its emit in one `Repo.transaction`, that row commits
+// atomically with the state change (design §1) — and the `OutboxRelay`
+// publishes it on drain with the row id as the envelope id (design §5).  An
+// emit site with no enclosing write (timer tick, relay re-entry) has no
+// transaction to join and inserts on its own checkout.  Everything else
+// forwards to the local dispatcher (nil for a context without one).
+// The `<App>.ChannelConsumer`
 // GenServer subscribes (Redix.PubSub for redis; a durable competing group
 // queue with manual ack + bounded retry + DLX parking for rabbit — §4) and
 // feeds decoded events into the LOCAL `<Ctx>.Dispatcher` directly
@@ -35,6 +40,14 @@ export interface ElixirChannelsCfg {
   appModule: string;
   /** Event type names carried by a wired broker-bound channel. */
   brokerEvents: ReadonlySet<string>;
+  /** Event type names the `<App>.Channels` tee routes to `record_durable/2` —
+   *  i.e. the ones whose dispatch is an `__loom_outbox` INSERT rather than a
+   *  fan-out.  The emit sites read this to decide whether the persist + emit
+   *  pair has to run inside one `Repo.transaction` (dispatch-delivery-
+   *  semantics.md §1: the outbox row commits with the aggregate change).
+   *  Empty on a purely ephemeral wiring, which keeps those emit sites
+   *  byte-identical. */
+  durableEvents: ReadonlySet<string>;
   /** Event name → owning-context module prefix (`<App>.<Ctx>`) for events
    *  consumed through a wired-but-foreign channel — the dispatcher and
    *  handler pattern-matches qualify the struct with the OWNING context. */
@@ -55,6 +68,22 @@ export function elixirDispatchCall(
     return `${channels.appModule}.Channels.dispatch(${evVar}, ${local})`;
   }
   return hasDispatcher ? `${contextModule}.Dispatcher.dispatch(${evVar})` : null;
+}
+
+/** Does this operation `emit` an event the `<App>.Channels` tee records in
+ *  `__loom_outbox`?  Such an emit site is an outbox INSERT, and design §1
+ *  requires it to ride the SAME `Repo.transaction` as the aggregate write —
+ *  so the persist tail wraps itself in one.  An op that emits only ephemeral
+ *  events (or none, or runs without channels) answers `false` and keeps the
+ *  plain post-commit fan-out. */
+export function opEmitsDurableEvent(
+  op: { statements: readonly { kind: string; eventName?: string }[] },
+  channels: ElixirChannelsCfg | undefined,
+): boolean {
+  if (!channels || channels.durableEvents.size === 0) return false;
+  return op.statements.some(
+    (s) => s.kind === "emit" && !!s.eventName && channels.durableEvents.has(s.eventName),
+  );
 }
 
 function uniqueBindings(bindings: BrokerBinding[]): BrokerBinding[] {
@@ -129,9 +158,16 @@ export interface ElixirConsumerRoute {
  *
  *   - `<App>.Channels.dispatch/2` (the same tee seam the emit sites already
  *     call) routes a DURABLE event to `record_durable/2` — an Ecto insert into
- *     `__loom_outbox` joining the caller's `Repo.transaction`, so it commits
- *     atomically with the aggregate change — instead of fanning it out inline
- *     (closing the crash window); ephemeral events dispatch locally as before.
+ *     `__loom_outbox` — instead of fanning it out inline (closing the crash
+ *     window); ephemeral events dispatch locally as before.  The atomicity half
+ *     is the CALLER's: an emit site that also writes the aggregate wraps its
+ *     `persist_change` AND its dispatch in one `<App>.Repo.transaction`, so the
+ *     insert genuinely joins that transaction and the row commits with the state
+ *     change (design §1 — see `opEmitsDurableEvent` and the persist tails in
+ *     `vanilla/context-emit.ts` / `vanilla/operation-returns-emit.ts`).  A
+ *     write-less emit site (timer tick, relay re-entry) has no transaction to
+ *     join; its insert is a standalone statement, which is all §1 asks for since
+ *     there is no aggregate change to be atomic with.
  *   - `<App>.LocalOutboxRelay` (a GenServer poll loop) drains undispatched rows,
  *     decodes each back to its struct, parks the row id on the process
  *     dictionary (the `last_event_id` saga marker dedups redelivery), and
@@ -169,9 +205,12 @@ export function emitElixirStandaloneOutbox(
     `lib/${appName}/channels.ex`,
     `# Auto-generated.  Standalone (no-broker) outbox tee
 # (dispatch-delivery-semantics.md §1): a durable event is recorded in
-# __loom_outbox inside the caller's Repo transaction instead of fanning out
-# inline; \`${appModule}.LocalOutboxRelay\` redelivers it post-commit.  Ephemeral
-# events dispatch to the local context dispatcher as before.
+# __loom_outbox instead of fanning out inline; \`${appModule}.LocalOutboxRelay\`
+# redelivers it post-commit.  The insert runs inside the CALLER's Repo
+# transaction — an aggregate-writing emit site wraps its \`persist_change\` and
+# its \`dispatch/2\` in one \`${appModule}.Repo.transaction\`, so the owed-event row
+# commits (or rolls back) with the state change.  Ephemeral events dispatch to
+# the local context dispatcher as before.
 defmodule ${appModule}.Channels do
   @durable MapSet.new(${JSON.stringify(durableNames)})
 
@@ -225,7 +264,9 @@ end
     `lib/${appName}/loom_outbox.ex`,
     `# Auto-generated.  One owed durable event (dispatch-delivery-semantics.md):
 # written by \`${appModule}.Channels.dispatch/2\` inside the caller's Repo
-# transaction, drained by \`${appModule}.LocalOutboxRelay\`.  Maps the shared
+# transaction (an aggregate-writing emit site opens one around persist+dispatch,
+# so the row commits with the state change), drained by
+# \`${appModule}.LocalOutboxRelay\`.  Maps the shared
 # __loom_outbox table the module migrations own.
 defmodule ${appModule}.LoomOutbox do
   use Ecto.Schema
@@ -331,7 +372,8 @@ export function emitElixirChannelFiles(
   routes: ElixirConsumerRoute[],
   /** M-T4.4 slice 7d: hosted durable events ride a broker-bound
    *  `queue`/`work` channel — the tee records them in `__loom_outbox`
-   *  (joining the caller's Repo transaction) and the OutboxRelay publishes
+   *  (joining the caller's Repo transaction, which an aggregate-writing emit
+   *  site opens around persist + dispatch) and the OutboxRelay publishes
    *  on drain with the row id as the envelope id (design §5).  False on
    *  consumers that don't host the durable channel's context. */
   opts: { durableBroker: boolean } = { durableBroker: false },
@@ -446,7 +488,9 @@ ${
     case Map.fetch(@durable_routing, type) do
       {:ok, _} ->
         # Design §5: durable (work) events land in __loom_outbox inside the
-        # caller's Repo transaction; the OutboxRelay publishes on drain.
+        # caller's Repo transaction — an aggregate-writing emit site wraps
+        # persist + dispatch in one, so the row commits with the state change
+        # (§1); the OutboxRelay publishes on drain.
         record_durable(type, ev)
 
       :error ->
@@ -760,7 +804,9 @@ end
       `lib/${appName}/loom_outbox.ex`,
       `# Auto-generated.  One owed durable event (dispatch-delivery-semantics.md):
 # written by \`${appModule}.Channels.dispatch/2\` inside the caller's Repo
-# transaction, drained by \`${appModule}.OutboxRelay\` (M-T4.4 design §5).
+# transaction (an aggregate-writing emit site opens one around persist+dispatch,
+# so the row commits with the state change), drained by
+# \`${appModule}.OutboxRelay\` (M-T4.4 design §5).
 # Maps the shared __loom_outbox table the module migrations own.
 defmodule ${appModule}.LoomOutbox do
   use Ecto.Schema
