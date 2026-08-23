@@ -505,11 +505,20 @@ agree on the happy path and split four ways on a miss:
 | node | 404 — the repository method throws the shared carrier |
 | java | 404 — the controller null-checks and throws |
 | python | 404 — the route null-checks and raises |
-| **.NET** | **500** — EF `FirstAsync` throws `InvalidOperationException("Sequence contains no elements")`, which no filter arm matches |
+| **.NET** | **500** — EF `FirstAsync` throws `InvalidOperationException("Sequence contains no elements")`, which no filter arm matches (and on `persistence: dapper`, it did not compile at all) |
 | **elixir** | **200** with a `null` body — not a valid `<Agg>Response`, so it violates the 200 schema it publishes |
 
-Both are corrected with the declaration, or it would have been a second lie on
-two backends. The split was invisible to every existing gate: the wire
+There is a third .NET path: `persistence: dapper` builds its own method bodies
+rather than riding the EF terminal, and returned a bare `null` from a declared
+`Task<Agg>` — which is not a runtime bug but a COMPILE one. `dotnet build
+/warnaserror` (the `dotnet-build` gate) rejects it with CS8603, so
+`persistence: dapper` paired with a non-optional find has never compiled; no
+fixture in that matrix pairs the two. Verified by building the emitted project
+in `mcr.microsoft.com/dotnet/sdk:10.0`: FAILED before, `0 Warning(s) 0 Error(s)`
+after, for the efcore, dapper and `shape: document` adapters alike.
+
+All of it is corrected with the declaration, or it would have been a second lie
+on two backends. The split was invisible to every existing gate: the wire
 differential GETs collection endpoints, and no corpus case reads a single find
 that misses. Elixir's emitter had even recorded the reason it kept `json(conn,
 nil)` — "`findSingle` declares no error status" — which is exactly the premise

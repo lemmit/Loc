@@ -263,7 +263,18 @@ export function renderRepositoryImpl(
     // catalog field is just "rows" (an integer count), so map both
     // arrays + singles to a number.
     const isArray = f.returnType.kind === "array";
-    const rowsExpr = isArray ? "result.Count" : "result == null ? 0 : 1";
+    // A NON-optional single find cannot reach this line with no row: its
+    // terminal is `.FirstOrDefaultAsync(…) ?? throw` (find-emit.ts), so a miss
+    // has already left as the not-found rung.  Saying `1` rather than
+    // `result == null ? 0 : 1` is not cosmetic — the null comparison makes the
+    // nullable flow analysis treat `result` as maybe-null from there on, and
+    // `return result;` below then fails `dotnet build /warnaserror` with
+    // CS8603 ("Possible null reference return").
+    const rowsExpr = isArray
+      ? "result.Count"
+      : f.returnType.kind === "optional"
+        ? "result == null ? 0 : 1"
+        : "1";
     return [
       `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)})`,
       "    {",
@@ -730,7 +741,18 @@ export function renderDocumentRepositoryImpl(
       .replace(".FirstAsync(cancellationToken)", ".First()");
     const usesUser = findUsesCurrentUser(f);
     const isArray = f.returnType.kind === "array";
-    const rowsExpr = isArray ? "result.Count" : "result == null ? 0 : 1";
+    // A NON-optional single find cannot reach this line with no row: its
+    // terminal is `.FirstOrDefaultAsync(…) ?? throw` (find-emit.ts), so a miss
+    // has already left as the not-found rung.  Saying `1` rather than
+    // `result == null ? 0 : 1` is not cosmetic — the null comparison makes the
+    // nullable flow analysis treat `result` as maybe-null from there on, and
+    // `return result;` below then fails `dotnet build /warnaserror` with
+    // CS8603 ("Possible null reference return").
+    const rowsExpr = isArray
+      ? "result.Count"
+      : f.returnType.kind === "optional"
+        ? "result == null ? 0 : 1"
+        : "1";
     return [
       `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)})`,
       "    {",
@@ -966,7 +988,18 @@ export function renderEventSourcedRepositoryImpl(
       .replace(".FirstAsync(cancellationToken)", ".First()");
     const usesUser = findUsesCurrentUser(f);
     const isArray = f.returnType.kind === "array";
-    const rowsExpr = isArray ? "result.Count" : "result == null ? 0 : 1";
+    // A NON-optional single find cannot reach this line with no row: its
+    // terminal is `.FirstOrDefaultAsync(…) ?? throw` (find-emit.ts), so a miss
+    // has already left as the not-found rung.  Saying `1` rather than
+    // `result == null ? 0 : 1` is not cosmetic — the null comparison makes the
+    // nullable flow analysis treat `result` as maybe-null from there on, and
+    // `return result;` below then fails `dotnet build /warnaserror` with
+    // CS8603 ("Possible null reference return").
+    const rowsExpr = isArray
+      ? "result.Count"
+      : f.returnType.kind === "optional"
+        ? "result == null ? 0 : 1"
+        : "1";
     return [
       `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)})`,
       "    {",

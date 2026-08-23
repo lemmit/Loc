@@ -255,6 +255,34 @@ describe("F13 (runtime) — every backend ANSWERS the not-found rung on a miss",
     expect(repo).not.toMatch(/\.FirstAsync\(cancellationToken\)/);
   });
 
+  it("dotnet's dapper adapter too — it did not even COMPILE before", async () => {
+    // A third path: `persistence: dapper` builds its own method bodies rather
+    // than riding the EF terminal, and emitted a bare `null` for BOTH find
+    // shapes.  For a non-optional one that is `return null` from a declared
+    // `Task<Agg>` — CS8603 under the `dotnet build /warnaserror` this repo
+    // gates with, so `persistence: dapper` + a non-optional find has never
+    // compiled.  Nothing caught it because no fixture in the dotnet-build
+    // matrix pairs the two.  Verified by compiling the emitted project in the
+    // sdk:10.0 container: FAILED before, `0 Warning(s) 0 Error(s)` after.
+    const files = await generateSystemFiles(
+      SRC.replace(
+        "deployable netApi  { platform: dotnet,",
+        "deployable netApi  { platform: dotnet { persistence: dapper },",
+      ),
+    );
+    const key = [...files.keys()].find((k) => /Repositories\/WalletRepository\.cs$/.test(k));
+    expect(key, "no dapper wallet repository emitted").toBeDefined();
+    const repo = files.get(key!)!;
+    // Slice the ONE method: the file also carries `MaybeByRef`, whose `null`
+    // return is correct (its declared type is `Wallet?`), so a file-wide
+    // negative would match the right code and read as a regression.
+    const at = repo.indexOf("public async Task<Wallet> ByRef(");
+    expect(at, "no non-optional ByRef method emitted").toBeGreaterThan(-1);
+    const body = repo.slice(at, repo.indexOf("\n    }", at));
+    expect(body).toMatch(/r is null \? throw new AggregateNotFoundException\("not_found"\)/);
+    expect(body).not.toMatch(/r is null \? null/);
+  });
+
   it("elixir answers the problem response instead of `200 null`", async () => {
     const controller = await fileMatching(/wallet_controller\.ex$/);
     expect(controller).toMatch(
