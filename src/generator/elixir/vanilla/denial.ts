@@ -14,9 +14,9 @@
 // So a denial is now a 2-TUPLE — `{:precondition_failed, "<message>"}` — and
 // the reason term flows through `{:error, reason}` catch-alls exactly as the
 // bare atom did.  The message is built by the SAME rule the other four
-// backends use (`renderStatement`'s `raise(ArgumentError, …)` path here, and
-// the `DomainError`/`DomainException` throws there): an explicit `message:` if
-// the statement declares one, else the derived `"<Prefix>: <source>"`.
+// backends use (the `raise(<App>.GuardError, …)` path below here, and the
+// `DomainError`/`DomainException` throws there): an explicit `message:` if the
+// statement declares one, else the derived `"<Prefix>: <source>"`.
 //
 // Every producer (`operation-returns-emit`, `eventsourced-emit`,
 // `workflow-execution-emit`, `workflow-eventsourced-emit`, `dispatch-emit`) and
