@@ -104,8 +104,12 @@ describe("node/Hono query-projection aggregations apply the source capability fi
   it("the WHOLE-TABLE aggregation ANDs the capability filters into the same query as its `where`", async () => {
     const r = await routes("node");
     expect(r).toContain(
+      // #2609's arm flattens the conjunction (one `and(...)`, own filter first)
+      // rather than nesting the capability pair — same predicate, one spelling.
       `const [row] = await db.select({ orders: count(), revenue: sum(schema.orders.total) })` +
-        `.from(schema.orders).where(and(eq(schema.orders.status, "Confirmed"), ${DRIZZLE_CAPS}));`,
+        `.from(schema.orders).where(and(eq(schema.orders.status, "Confirmed"), ` +
+        `eq(schema.orders.tenantId, requireCurrentUser().tenantId), ` +
+        `not(eq(schema.orders.isDeleted, true))));`,
     );
   });
 

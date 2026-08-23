@@ -413,6 +413,7 @@ function dapperAggregationWhere(
     }
   });
   return parts.length > 0 ? parts.join(" AND ") : undefined;
+}
 
 /** True when this aggregate's DECLARED wire field crosses as a float64.
  *  #2563/RS-24: a `decimal` RESPONSE field is a JSON number, so .NET types it
