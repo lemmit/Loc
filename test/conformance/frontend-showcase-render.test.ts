@@ -244,6 +244,7 @@ const FRONTENDS: ReadonlyArray<Frontend> = [
         serves: ProjectsApi, DeliveryApi, AccountsApi
         ${UIS[ui]!.selfBind}
         port: 3900
+        auth: required
     }`,
     // A Phoenix deployable emits the WHOLE backend under `fe_cell/`, not just
     // rendered markup — and one of those backend files legitimately contains a
