@@ -171,10 +171,13 @@ describe("drizzle: a value-on-left comparison commutes with its operator", () =>
   });
 });
 
-// The other three positions `lowerToDrizzle` reaches: a capability `filter`
+// Three more of the positions `lowerToDrizzle` reaches: a capability `filter`
 // (which rides EVERY read, including findById), a `criterion` body, and a
 // `retrieval` where.  A filter inverted here fails OPEN — it admits exactly
-// the rows it was written to exclude.
+// the rows it was written to exclude.  The fourth caller — the write-scope
+// predicate (`projection-query-routes-builder.ts`) — inherits the commute by
+// construction, since the normalizer lives inside `lowerToDrizzle` itself; it
+// is not separately exercised here.
 const POSITIONS = `
         criterion Cheap of Item = 10 > this.qty
         aggregate Item with crudish {
@@ -189,7 +192,7 @@ const POSITIONS = `
         }
 `;
 
-describe("drizzle: every lowering position commutes", () => {
+describe("drizzle: the other lowering positions commute", () => {
   it("validates", async () => {
     expect(await errors(system(POSITIONS, "drizzle"))).toEqual([]);
   });
