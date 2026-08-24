@@ -1,6 +1,7 @@
 import type { TypeIR } from "../../../ir/types/loom-ir.js";
 import { MONEY_WIRE_SCALE } from "../../money-scale.js";
 import { javaValueTypeForId } from "../render-expr.js";
+import { JAVA_PROVENANCED_RECORD } from "./provenance.js";
 
 // ---------------------------------------------------------------------------
 // Wire-type mapping for the Java DTO layer.  The cross-backend wire
@@ -60,6 +61,15 @@ export function wireJavaType(t: TypeIR, dir: WireDir, boxed = false): string {
       return `List<${wireJavaType(t.element, dir, true)}>`;
     case "optional":
       return wireJavaType(t.inner, dir, true);
+    case "genericInstance":
+      // `Provenanced<Integer>` (M-T6.12).  The carried type is BOXED — a Java
+      // generic argument cannot be a primitive — which is also why the value
+      // keeps its identity in the published schema instead of collapsing to
+      // the `Object` the default arm would have produced.
+      if (t.ctor === "provenanced") {
+        return `${JAVA_PROVENANCED_RECORD}<${wireJavaType(t.arg, dir, true)}>`;
+      }
+      return "Object";
     default:
       return "Object";
   }
@@ -82,6 +92,11 @@ export function collectWireImports(t: TypeIR, into: Set<string>): Set<string> {
       return collectWireImports(t.element, into);
     case "optional":
       return collectWireImports(t.inner, into);
+    case "genericInstance":
+      // The carrier itself is a generated `domain.common` record — imported by
+      // the DTO emitter, which knows the base package.  Only its ARGUMENT can
+      // pull in a java.* import.
+      return collectWireImports(t.arg, into);
     default:
       return into;
   }

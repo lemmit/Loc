@@ -1,3 +1,4 @@
+import { provenancedTypeMembers } from "../generator/_payload/provenanced-wire.js";
 import { wireFieldsFor } from "../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
@@ -255,6 +256,28 @@ export function jsonPropertyForType(t: TypeIR, ref: RefResolver = bareRef): Json
         "jsonPropertyForType: 'slot' type is UI-only and has no wire-spec representation.",
       );
     case "genericInstance":
+      // `Provenanced<T>` (M-T6.12) — the one carrier that reaches a wire field.
+      // Modelled explicitly (rather than as an opaque `json`) precisely so the
+      // contract diff SEES the lineage: while the lineage was a per-backend
+      // bolt-on sibling, `wire-spec.json` — built purely from `wireShape` —
+      // was blind to it, and the one artifact meant to detect wire drift could
+      // not detect a change to the lineage half at all.
+      if (t.ctor === "provenanced") {
+        const properties: Record<string, JsonSchemaProperty> = {};
+        for (const m of provenancedTypeMembers(t.arg)) {
+          // No `type`: the lineage is an opaque `ProvLineage` audit blob, the
+          // same freeform-object treatment the `json` primitive gets above.
+          properties[m.name] = m.type ? jsonPropertyForType(m.type, ref) : { type: "object" };
+        }
+        return {
+          type: "object",
+          properties,
+          required: provenancedTypeMembers(t.arg)
+            .filter((m) => !m.optional)
+            .map((m) => m.name),
+          additionalProperties: false,
+        };
+      }
       throw new Error(
         `jsonPropertyForType: generic carrier '${t.ctor}' is not emittable yet (P3b); IR-validate should have rejected it.`,
       );

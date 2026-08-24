@@ -160,7 +160,11 @@ describe("M-T5.10 PR5 — Java reads the <Agg>Response contract record", () => {
     expect(scaffoldOrder).toContain("List<LineResponse> lines");
     expect(scaffoldOrder).not.toContain("LineResponseResponse");
     expect(scaffoldOrder).toContain("UUID id");
-    expect(scaffoldOrder).toContain("ProvLineage amountProvenance");
+    // A `provenanced` field ships as the `Provenanced<T>` wire carrier (M-T6.12)
+    // — and the DECLARED-record path applies the same wrap the wireShape path
+    // does, which is exactly what `baselineOrder === scaffoldOrder` above pins.
+    expect(scaffoldOrder).toContain("Provenanced<BigDecimal> amount");
+    expect(scaffoldOrder).not.toContain("amountProvenance");
     expect(scaffoldOrder).not.toContain("note");
     expect(scaffoldOrder).not.toContain("apiKey");
     // The `from(<domain>)` mapper peels the response name — never double-suffixed.

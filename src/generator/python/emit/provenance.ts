@@ -74,8 +74,14 @@ export function contextsHaveProvenanced(contexts: BoundedContextIR[]): boolean {
  *  capture, the save persist, the hydrate restore, and the migration so all
  *  agree. */
 export function provColumn(fieldName: string): string {
-  return `${snake(fieldName)}_provenance`;
+  return `${snake(fieldName)}${PY_PROV_SUFFIX}`;
 }
+
+/** The suffix `provColumn` appends.  Exported so a serializer holding an
+ *  ATTRIBUTE EXPRESSION rather than a field name (`root.total` →
+ *  `root.total_provenance`) derives the sibling by the same rule instead of
+ *  re-spelling it. */
+export const PY_PROV_SUFFIX = "_provenance";
 
 /** `app/domain/provenance.py` — the `ProvLineage` dataclass + ContextVar
  *  trace buffer.  Pure (no db imports), so it stays in the domain layer. */
