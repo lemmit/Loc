@@ -223,6 +223,13 @@ export function collectPyExprImports(e: ExprIR, into: Set<string> = new Set()): 
     case "member":
       return collectPyExprImports(e.receiver, into);
     case "binary":
+      // A money-scaling binary lifts its `decimal` operand through
+      // `Decimal(str(…))` (renderBinary / `moneyScalarCoercionSide`), so the
+      // module needs the name even when no money LITERAL appears in the
+      // expression — `price * rate` off two refs would otherwise emit an
+      // undefined `Decimal` (F821 / NameError).  Same mirror duty as the
+      // money-`sum` arm above.
+      if (moneyScalarCoercionSide(e)) into.add("decimal");
       collectPyExprImports(e.left, into);
       return collectPyExprImports(e.right, into);
     case "unary":
@@ -735,9 +742,46 @@ function renderBinary(left: string, right: string, e: Extract<ExprIR, { kind: "b
   // operators (`datetime ± timedelta`, `datetime - datetime → timedelta`,
   // timedelta algebra/scaling) directly, so no dedicated arm is needed.
   //
-  // Python's `Decimal` overloads the native operators precisely, so
-  // money needs no method-dispatch detour (unlike decimal.js).
+  // Money scaling is the ONE arm that needs a detour (F8 / M-T6.45).  Python's
+  // `Decimal` overloads the arithmetic operators precisely — but only against
+  // `int` and `Decimal`.  This backend's representation rule (see
+  // `PY_TYPE_TARGET`) holds Loom `money` as `decimal.Decimal` and Loom
+  // `decimal` as `float`, so a mixed `money * decimal` would emit
+  // `self._price * rate` and raise `TypeError: unsupported operand type(s)`
+  // the moment the decimal came off the WIRE rather than off an ORM column.
+  // Coerce the `decimal` side through `Decimal(str(…))` — the shortest-repr
+  // route, and a no-op-by-value when the operand happens to already BE a
+  // `Decimal` (the column case), so both provenances land on one type.
+  const coerce = moneyScalarCoercionSide(e);
+  if (coerce === "right") return `${left} ${pyBinOp(e.op)} Decimal(str(${right}))`;
+  if (coerce === "left") return `Decimal(str(${left})) ${pyBinOp(e.op)} ${right}`;
   return `${left} ${pyBinOp(e.op)} ${right}`;
+}
+
+/**
+ * Which operand of a money-scaling binary is the `float`-represented `decimal`
+ * that must be lifted to `Decimal` — or `undefined` when no lift is needed.
+ *
+ * `moneyArithmetic` (`src/language/type-system.ts`) admits exactly three mixed
+ * money/decimal shapes: `money * decimal`, `decimal * money` (scaling is
+ * commutative) and `money / decimal` (`decimal / money` is rejected).  `+`/`-`
+ * are money-on-both-sides only, and `%` never reaches here, so `*` and `/` are
+ * the whole domain.  The other scalars need nothing: `int`/`long` are Python
+ * `int`, which `Decimal` mixes with natively.
+ *
+ * An `int / int` operand is covered by the same test without a special case —
+ * it WIDENS to `decimal` (`isIntDivWidenedToDecimal`), and Python's true
+ * division hands back a `float`, exactly the representation this lifts.
+ */
+function moneyScalarCoercionSide(
+  e: Extract<ExprIR, { kind: "binary" }>,
+): "left" | "right" | undefined {
+  if (e.op !== "*" && e.op !== "/") return undefined;
+  const isPrim = (t: TypeIR | undefined, name: string): boolean =>
+    t?.kind === "primitive" && t.name === name;
+  if (isPrim(e.leftType, "money") && isPrim(e.rightType, "decimal")) return "right";
+  if (isPrim(e.leftType, "decimal") && isPrim(e.rightType, "money")) return "left";
+  return undefined;
 }
 
 function isNullLiteral(e: ExprIR): boolean {
@@ -756,6 +800,25 @@ function pyBinOp(op: BinOp): string {
 
 // Type printing leaf table — the Python arm of the shared `TypeTarget` dispatch
 // (`../_type/target.ts`).  Python has no boxing axis, so the `mode` arg is ignored.
+//
+// THE NUMERIC REPRESENTATION RULE (M-T6.45 / numeric-types audit F8).  This
+// backend deliberately holds the two fractional Loom primitives in two
+// different Python types:
+//
+//   money    → `decimal.Decimal`  — exact, RS-12's 4-dp string on the wire
+//   decimal  → `float`            — IEEE-754 binary64, RS-24's "a decimal
+//                                   ships as a JSON number of a double's
+//                                   precision" (parity with node, which
+//                                   computes `decimal` in float64 too)
+//
+// The split is intentional and matches the wire contract, but it means the two
+// meet in mixed `money × decimal` arithmetic, where `Decimal.__mul__` refuses a
+// `float`.  The arithmetic site is where that is reconciled — `renderBinary`
+// lifts the `decimal` operand with `Decimal(str(…))` — NOT here: typing
+// `decimal` as `Decimal` would change every request/response DTO and break the
+// contract RS-24 pins.  ORM columns declared `decimal` still materialize as a
+// `Decimal` regardless of this annotation, which is exactly why the lift is
+// written to be value-identical on both provenances.
 const PY_TYPE_TARGET: TypeTarget = {
   primitive(name) {
     switch (name) {
