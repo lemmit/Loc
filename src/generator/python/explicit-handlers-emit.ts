@@ -502,7 +502,14 @@ function renderHandlerModule(
       (agg) => `from app.db.repositories.${snake(agg)}_repository import ${agg}Repository`,
     ),
     hasDispatch ? "from app.dispatch import make_dispatcher" : null,
-    hasDispatch ? null : "from app.domain.events import NoopDomainEventDispatcher",
+    // The dispatcher is only named where a REPOSITORY is constructed.  A handler
+    // touching no aggregate — a pure computation, or a body doing only resource
+    // I/O — constructs none, and an unconditional import is then ruff F401 (the
+    // python compile gate), so gate it on the rendered `def` the same way every
+    // other import here is gated.
+    hasDispatch || !refersTo("NoopDomainEventDispatcher")
+      ? null
+      : "from app.domain.events import NoopDomainEventDispatcher",
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
     ...[...collectFactoryAggs(h.statements)]
       .filter((n) => refersTo(n))
