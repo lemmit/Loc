@@ -67,6 +67,40 @@ describe("tenancy claim name — emitted principal reads follow the declaration"
     expect(repo).not.toContain("current_user.tenant_id");
   });
 
+  // ─── claim name × HIERARCHICAL scope ──────────────────────────────────────
+  //
+  // The flat-floor assertions above only reach the principal member access the
+  // shared enrichment rewrites.  `policy { allow deep on Invoice }` routes the
+  // read through each backend's DEEP-SCOPE SENTINEL instead, which spells the
+  // claims ITSELF — the anchor (`orgPath`) and, in the NULL-`dataKey` floor arm,
+  // the declared tenancy claim.  Elixir defaulted that second one to `tenantId`
+  // at three of four call sites, emitting `current_user.tenant_id` for a
+  // principal that carries `orgId`: a `KeyError` on every deep/global read.
+  it("elixir: the deep-scope floor compares against the DECLARED claim, not `tenantId`", async () => {
+    const repo = await emitted("elixir", /invoice_repository\.ex$/);
+    // The sentinel is what is under test — assert we are reading the deep form.
+    expect(repo).toContain("record.data_key");
+    // The floor arm: `(? IS NULL AND ? = ?)` binds the row column against the
+    // principal's DECLARED claim.
+    expect(repo).toContain("record.tenant_id, ^(current_user && current_user.org_id)");
+    // The anchor claim is a different field and stays `orgPath`.
+    expect(repo).toContain("current_user.org_path");
+    expect(repo).not.toContain("current_user.tenant_id");
+  });
+
+  it("elixir: the deep-scope claim is threaded on the WRITE-scope seam too", async () => {
+    // `vanillaWriteScopeFilter` is the third of the three sites that dropped
+    // the claim; the load-before-write in the canonical update/destroy renders
+    // through it, so a claim-name miss there 404s a row the read can see.
+    const repo = await emitted("elixir", /invoice_repository\.ex$/);
+    const writeGuards = repo
+      .split("\n")
+      .filter((l) => /record\.id == \^id/.test(l))
+      .join("\n");
+    expect(writeGuards.length, "no load-before-write guard emitted").toBeGreaterThan(0);
+    expect(writeGuards).not.toContain("current_user.tenant_id");
+  });
+
   it("every backend keeps the ROW column named `tenantId` (the capability owns it)", async () => {
     // The declaration renames the CLAIM, never the column — a backend that
     // followed the claim on both sides would emit a schema that disagrees with

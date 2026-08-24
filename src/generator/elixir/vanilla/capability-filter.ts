@@ -114,9 +114,15 @@ export function vanillaCapabilityFilter(
     .filter((p) => opts?.actor || !exprUsesCurrentUser(p))
     .map((p) =>
       // The `deep` sentinel renders its own fail-closed pinned fragment — do
-      // NOT run it through `pinPrincipal` (it already pins).
+      // NOT run it through `pinPrincipal` (it already pins).  BOTH claims have
+      // to be threaded: the anchor (`orgPath`/`rootOrg`) AND the system's
+      // declared tenancy claim, which the NULL-`data_key` floor compares
+      // against.  `renderDeepScopeEcto` defaults the latter to `tenantId`, so
+      // omitting it emits `current_user.tenant_id` under `tenancy by
+      // user.<other>` — a claim the principal does not carry (`KeyError` on
+      // every deep/global read).  See `deepScopeTenantClaim`.
       isDeepScopeFilter(p)
-        ? renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(p))
+        ? renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(p), deepScopeTenantClaim(p))
         : renderPrincipalFilter(p, ctx),
     );
   if (preds.length === 0) return null;
@@ -142,7 +148,7 @@ export function vanillaWriteScopeFilter(agg: AggregateIR, contextModule: string)
   };
   const p = agg.writeScopeFilter;
   return isDeepScopeFilter(p)
-    ? renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(p))
+    ? renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(p), deepScopeTenantClaim(p))
     : renderPrincipalFilter(p, ctx);
 }
 
@@ -177,7 +183,7 @@ export function vanillaCapabilityFilterParts(
   (agg.contextFilters ?? []).forEach((p, i) => {
     if (!opts?.actor && exprUsesCurrentUser(p)) return;
     const pred = isDeepScopeFilter(p)
-      ? renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(p))
+      ? renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(p), deepScopeTenantClaim(p))
       : renderPrincipalFilter(p, ctx);
     parts.push({ origin: agg.contextFilterOrigins?.[i], pred });
   });
