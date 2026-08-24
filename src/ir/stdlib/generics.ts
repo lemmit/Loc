@@ -28,10 +28,13 @@
 
 import { upperFirst } from "../../util/naming.js";
 import { PROVENANCE_LINEAGE_FIELD, PROVENANCE_VALUE_FIELD } from "../../util/provenance-carrier.js";
-
-export { PROVENANCE_LINEAGE_FIELD, PROVENANCE_VALUE_FIELD };
-
 import type { FieldIR, GenericCtorName, TypeIR } from "../types/loom-ir.js";
+
+/** Re-exported so an IR-layer caller reaching for the carrier's member names
+ *  finds them beside the shape that uses them; the definition lives in
+ *  `src/util/` because the MACRO layer needs them too and may not import from
+ *  `ir/` (pipeline-layering.test.ts). */
+export { PROVENANCE_LINEAGE_FIELD, PROVENANCE_VALUE_FIELD };
 
 /** A blessed generic-carrier shape: its single type-parameter name (for docs
  *  and diagnostics) and a builder that yields the instantiated fields. */

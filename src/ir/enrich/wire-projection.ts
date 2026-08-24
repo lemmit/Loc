@@ -509,7 +509,11 @@ export function wireFieldsForValueObject(vo: ValueObjectIR): WireField[] {
   for (const f of vo.fields) {
     out.push({
       name: f.name,
-      type: wireTypeForField(f),
+      // Deliberately NOT `wireTypeForField`: a value object has no identity, no
+      // row, and no write-site instrumentation, so no backend emits a lineage
+      // sibling for a VO member.  Wrapping one in the carrier would advertise a
+      // `lineage` the serializer has nothing to fill it from.
+      type: f.type,
       optional: f.optional,
       source: "property",
       access: f.access ?? "editable",

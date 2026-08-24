@@ -119,7 +119,7 @@ function svelteDisclosure(lineage: string, testid: string): string {
 }
 
 /** Angular: an `@if (…; as prov)` alias (a signal-call result like
- *  `data()!.<field>_provenance` can't be narrowed in place — the `as` binds the
+ *  `data()!.<field>.lineage` can't be narrowed in place — the `as` binds the
  *  truthy value), `{{ }}` interpolation, and a tracked `@for`.  `computedValue`
  *  and `inp.value` are `unknown`; Angular templates can't call `String(...)`, so
  *  they ride `$any(...)` (the interpolation stringifies). */

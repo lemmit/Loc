@@ -2270,7 +2270,7 @@ interface WireRecord {
  *  `provLineageDecoder`. */
 export function renderProvLineageType(): string {
   return lines(
-    "// Provenance lineage — the co-located `<field>_provenance` wire shape.",
+    "// Provenance lineage — the `lineage` half of the `Provenanced<'T>` wire carrier.",
     "type ProvInput = { path: string; value: string }",
     "",
     "type ProvLineage =",
