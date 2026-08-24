@@ -27,8 +27,10 @@
 //      Loom's start+LENGTH), `round` forces away-from-zero where Dart's
 //      `.round()` rounds `.5` toward +infinity, and `floor`/`ceil` use
 //      `floorToDouble`/`ceilToDouble` — the bare `num` methods return `int`,
-//      which would silently narrow decimal/money's Dart representation
-//      (`double`, per `dart-types.ts`).
+//      which would silently narrow `decimal`'s Dart representation (`double`,
+//      per `dart-types.ts`).  The MONEY arms of those three route through the
+//      generated `LoomMoney` runtime instead: money is the wire STRING on this
+//      target (M-T1.21), so a `num` method on it would not compile at all.
 //
 // Dart compilation of every arm is proven by `generated-flutter-build.yml`
 // (`flutter analyze` + `flutter build web`), not by this suite — a string
@@ -108,13 +110,20 @@ describe("Flutter Dart intrinsic table — the catalogue contract", () => {
   it("`round` forces AWAY-FROM-ZERO — Dart's `.round()` rounds .5 toward +infinity", () => {
     expect(r("d", "round", "decimal", "2")).toContain(".sign * (((d).abs()");
     expect(r("d", "round", "decimal")).toBe("(d.sign * ((d).abs()).round())");
-    expect(r("m", "round", "money", "2")).toContain("math.pow(10, 2)");
+    // MONEY diverges: it is the wire STRING here (M-T1.21), so the mode is the
+    // runtime's own BigInt rounding rather than the double sign/abs dance.
+    expect(r("m", "round", "money", "2")).toBe("LoomMoney.round(m, 2)");
+    expect(r("m", "round", "money")).toBe("LoomMoney.round(m)");
   });
 
   it("`floor`/`ceil` keep the receiver type (Dart's bare `.floor()`/`.ceil()` return `int`)", () => {
     expect(r("d", "floor", "decimal")).toBe("(d.floorToDouble())");
     expect(r("d", "ceil", "decimal")).toBe("(d.ceilToDouble())");
-    expect(r("m", "floor", "money")).toBe("(m.floorToDouble())");
+    // `floorToDouble` on a money value would not even compile — a Dart `String`
+    // has no such method — and the runtime arm keeps the money TYPE (a
+    // whole-valued money string), which is the catalogue contract.
+    expect(r("m", "floor", "money")).toBe("LoomMoney.floor(m)");
+    expect(r("m", "ceil", "money")).toBe("LoomMoney.ceil(m)");
   });
 
   // `DateTime(y, m, d)` builds a LOCAL-time value even off UTC field reads;

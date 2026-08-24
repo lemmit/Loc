@@ -101,7 +101,11 @@ jobs:
           #   • match await async effect (RestockProduct: await a Result-returning
           #     op → reify error variant → Dart-3 switch → state write)
           #   • data reads (Products' QueryView over Shop.Product.all + For + Card)
-          #   • forms (NewProduct's CreateForm; NewCategory's WorkflowForm;
+          #   • money end-to-end (M-T1.21): a `money` primitive field + optional,
+      #     a money operation arg, a money projection column charted as a
+      #     series, a money page-state cell with a literal, an addition, a
+      #     `Money { }` display and a `round(2)` intrinsic
+      #   • forms (NewProduct's CreateForm; NewCategory's WorkflowForm;
           #     ProductAdmin's OperationForm + Modal-wrapped op-form dialog +
           #     DestroyForm on a :id route) over every field kind (string/int/bool/
           #     enum/datetime/optional + a Money value object + a Category id
@@ -127,6 +131,17 @@ jobs:
                 error OutOfStock { detail: string }
                 aggregate Product {
                   name: string  price: int  inStock: bool  status: Status  note: string?  cost: Money
+                  // The `money` PRIMITIVE (M-T1.21).  Until this landed, the
+                  // whole class was unwitnessed here: `price` is an `int` and
+                  // `cost` is a hand-rolled VALUE OBJECT, so no gate ever put a
+                  // money primitive through the Flutter emitter — which is
+                  // exactly how a decode that threw on every money read stayed
+                  // green.  Money is a Dart `String` (the wire's own digits)
+                  // with a `LoomMoney` runtime behind its arithmetic, so this
+                  // pair now compiles the model field, the CreateForm input,
+                  // the operation-form input, the projection column, the chart
+                  // series, the `Money { }` display and the intrinsics below.
+                  unitPrice: money  discount: money?
                   category: Category id  tags: string[]  lines: LineItem[]
                   // File as an AGGREGATE FIELD (not just page state).  `File`
                   // already spells the NULLABLE `FileRef?` in Dart, so the model
@@ -141,6 +156,7 @@ jobs:
                   // state, so this whole class was unguarded.
                   manual: File  spec: File?
                   operation rename(newName: string) { name := newName }
+                  operation reprice(newPrice: money) { unitPrice := newPrice }
                   operation restock(): Product or OutOfStock { inStock := true }
                 }
                 repository Categories for Category { }
@@ -176,6 +192,16 @@ jobs:
                   group by p.status
                   select status = p.status, n = count
                 }
+                // A MONEY projection column, charted below: the chart's series
+                // coercion has to be total over the wire string, which an
+                // `as num` cast is not.
+                projection RevenueByStatus {
+                  status: Status
+                  revenue: money
+                  from Product as p
+                  group by p.status
+                  select status = p.status, revenue = sum(p.unitPrice)
+                }
               }
             }
             storage db { type: postgres }
@@ -197,14 +223,24 @@ jobs:
               }
               page Home {
                 route: "/"
-                state { count: int = 0 }
+                // `budget` is a money-typed STATE cell seeded from a bare
+                // decimal literal — the spelling that used to emit a `double`
+                // into a `String` field.  `raise()` adds a money LITERAL to it
+                // (string concatenation if the operator seam is missing), and
+                // the display + intrinsic below read it back.
+                state { count: int = 0  budget: money = 12.5 }
                 action inc() { count := count + 1 }
+                action raise() { budget := budget + money("2.50") }
                 body: Stack {
                   Heading { "Storefront", level: 1 },
                   Tagline(text: "Shop smarter"),
                   MiniCounter(start: 10),
                   Text { `Taps: {count}` },
+                  Money { budget },
+                  Money { budget, currency: "USD", decimals: 2 },
+                  Text { budget.round(2) },
                   Button { "+", onClick: inc },
+                  Button { "Raise budget", onClick: raise },
                   Button { "Browse products", to: "/products" }
                 }
               }
@@ -290,13 +326,21 @@ jobs:
                   // and the series coercion over an int vs a money column), and
                   // `flutter analyze` is what proves the emitted Dart is real.
                   Chart { kind: "bar",  of: Shop.ProductsByStatus, x: r => r.status, y: r => r.n },
-                  Chart { kind: "line", of: Shop.ProductsByStatus, x: r => r.status, y: r => r.n }
+                  Chart { kind: "line", of: Shop.ProductsByStatus, x: r => r.status, y: r => r.n },
+                  QueryView {
+                    of: Shop.RevenueByStatus,
+                    loading: Text { "Loading…" }, error: Text { "Failed" }, empty: Text { "No revenue." },
+                    data: rows => Stack { For { each: rows, g => Money { g.revenue } } }
+                  },
+                  // A MONEY series — the coercion the `as num` cast broke.
+                  Chart { kind: "bar", of: Shop.RevenueByStatus, x: r => r.status, y: r => r.revenue }
                 }
               }
               page NewCategory { route: "/categories/new"  body: Stack { Heading { "New category", level: 1 }, WorkflowForm { runs: addCategory } } }
               page ProductAdmin { route: "/products/:id"  body: Stack {
                 Heading { "Admin", level: 1 },
                 OperationForm { of: Product, op: rename },
+                OperationForm { of: Product, op: reprice },
                 Modal { OperationForm { of: Product, op: rename }, trigger: Button { "Rename…" }, title: "Rename product" },
                 DestroyForm { of: Product }
               } }

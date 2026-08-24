@@ -87,9 +87,15 @@ describe("the JS frontends keep the millisecond-number form byte-for-byte", () =
     ["svelte", svelteTarget],
     ["angular", angularTarget],
   ] as const) {
-    it(`${name} implements neither seam, so it takes the walker fallback`, () => {
+    it(`${name} implements none of the typed-binary seams, so it takes the walker fallback`, () => {
       expect(target.exprDuration).toBeUndefined();
       expect(target.exprTemporalBinary).toBeUndefined();
+      // The money seam (M-T1.21) is the third of the same family: a JS
+      // frontend's money is a decimal.js `Decimal`, whose operators already
+      // mean the right thing, so it stays undefined here and the output stays
+      // byte-identical.  Only a target whose money is NOT numeric-ish (Flutter,
+      // where it is the wire String) implements it.
+      expect(target.exprMoneyBinary).toBeUndefined();
     });
   }
 

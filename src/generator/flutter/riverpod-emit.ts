@@ -41,7 +41,7 @@ import { errorTypeUri } from "../../util/error-defaults.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
 import { emitExpr, type WalkContext } from "../_walker/walker-core.js";
-import { dartString, dartZeroValue } from "./dart-expr.js";
+import { coerceDartMoneyInit, dartString, dartZeroValue, isMoneyType } from "./dart-expr.js";
 import { dartType } from "./dart-types.js";
 import { flutterTarget } from "./flutter-target.js";
 import { flutterPack } from "./pack.js";
@@ -348,13 +348,21 @@ export function buildStateFields(state: readonly StateFieldIR[]): DartStateField
   });
 }
 
-/** The `String v` → numeric parse expression for a `NumberField`'s
- *  `set<Field>Text` setter, or undefined for a non-numeric cell.  A nullable
- *  numeric keeps the `tryParse` null (clears on bad input); a non-nullable
- *  falls back to `0`. */
-function numericParse(dt: string): string | undefined {
-  const nullable = dt.endsWith("?");
-  const base = nullable ? dt.slice(0, -1) : dt;
+/** The `String v` → cell-value expression for a `NumberField`'s
+ *  `set<Field>Text` setter, or undefined for a cell no `NumberField` can bind.
+ *  A nullable numeric keeps the `tryParse` null (clears on bad input); a
+ *  non-nullable falls back to `0`.
+ *
+ *  Keyed on the field's `TypeIR`, not on its Dart type SPELLING: `money` is a
+ *  Dart `String` (M-T1.21), so a spelling-keyed lookup could not tell it from a
+ *  plain `string` cell — and a `NumberField` bound to a money cell would then
+ *  emit a `set<Field>Text` call with no such method behind it.  Money's own arm
+ *  is the identity: the cell holds the wire's digits, which is exactly what the
+ *  user typed, and re-spelling it mid-keystroke would fight the caret. */
+function numericParse(f: DartStateField): string | undefined {
+  if (isMoneyType(f.type)) return f.nullable ? "v.trim().isEmpty ? null : v.trim()" : "v.trim()";
+  const nullable = f.dt.endsWith("?");
+  const base = nullable ? f.dt.slice(0, -1) : f.dt;
   if (base === "int") return nullable ? "int.tryParse(v)" : "int.tryParse(v) ?? 0";
   if (base === "double") return nullable ? "double.tryParse(v)" : "double.tryParse(v) ?? 0";
   return undefined;
@@ -387,7 +395,7 @@ export function stateSetterMethods(
         "  }",
       );
     }
-    const parse = numericParse(f.dt);
+    const parse = numericParse(f);
     if (parse && !taken.has(`${setter}Text`)) {
       out.push(
         "",
@@ -437,7 +445,11 @@ export function buildStateInits(
   ctx: WalkContext,
 ): { entries: string[]; constEligible: boolean } {
   const entries = fields.map((f) =>
-    f.init ? `${f.name}: ${emitExpr(f.init, ctx)}` : `${f.name}: ${dartZeroValue(f.type)}`,
+    f.init
+      ? // A money cell holds the wire STRING, and `m: money = 1.50` lowers as a
+        // DECIMAL literal — a bare `1.50` seeded into a `String` (M-T1.21).
+        `${f.name}: ${coerceDartMoneyInit(f.type, emitExpr(f.init, ctx))}`
+      : `${f.name}: ${dartZeroValue(f.type)}`,
   );
   // `now()` is a literal KIND but not a compile-time constant — it renders as
   // `DateTime.now().toUtc()`, a runtime call a `const` constructor invocation

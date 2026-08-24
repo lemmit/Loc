@@ -32,7 +32,8 @@
 //                     than failing).
 //
 // WIRE COMPATIBILITY.  The key (`loom.store.<Name>`) and the decoded JSON shape
-// (an object keyed by the BARE field name; `money` a JSON string, plain
+// (an object keyed by the BARE field name; `money` a JSON string — which is
+// also what the Dart cell holds since M-T1.21 — plain
 // `decimal` a JSON number) match the React / Vue / Svelte / Angular builders, and
 // the query-param encoding matches `encodeFieldToParam` in
 // `react/store-builder.ts` field-for-field (a string/id param DROPPED when
@@ -57,6 +58,7 @@ import {
 } from "../../ir/util/flutter-persist-codec.js";
 import { lines } from "../../util/code-builder.js";
 import { upperFirst } from "../../util/naming.js";
+import { MONEY_WIRE_ZERO } from "../money-scale.js";
 import { storeProviderName } from "./store-names.js";
 
 /** A store whose lifetime asks for persistence AND whose fields have a codec —
@@ -131,9 +133,11 @@ function fromBlobScalar(scalar: FlutterPersistScalar, raw: string, dflt: string)
     case "double":
       return `${raw} is num ? ${raw}.toDouble() : double.tryParse(${raw}.toString()) ?? ${dflt}`;
     case "money":
-      // A JSON STRING on the wire (the JS side holds a `Decimal`), but tolerate
-      // a number too — a hand-edited blob should not wipe the cell.
-      return `${raw} is num ? ${raw}.toDouble() : double.tryParse(${raw}.toString()) ?? ${dflt}`;
+      // A JSON STRING both here and in the Dart cell (M-T1.21) — the JS side
+      // holds a `Decimal`, whose `toJSON` is a string, and Flutter now holds
+      // that same string.  A number in the blob (a hand edit, or an older
+      // writer) still reads rather than wiping the cell.
+      return `${raw} is String ? ${raw} : ${raw}.toString()`;
     case "bool":
       return `${raw} is bool ? ${raw} : ${raw}.toString() == 'true'`;
     case "datetime":
@@ -150,8 +154,10 @@ function fromParamScalar(scalar: FlutterPersistScalar, raw: string, dflt: string
     case "int":
       return `int.tryParse(${raw}) ?? ${dflt}`;
     case "double":
-    case "money":
       return `double.tryParse(${raw}) ?? ${dflt}`;
+    case "money":
+      // The query param IS the money string — no parse, nothing to lose.
+      return raw;
     case "bool":
       return `${raw} == 'true'`;
     case "datetime":
@@ -165,8 +171,9 @@ function fromParamScalar(scalar: FlutterPersistScalar, raw: string, dflt: string
 function toBlobScalar(scalar: FlutterPersistScalar, access: string): string {
   switch (scalar) {
     case "money":
-      // A JSON STRING — the JS side holds a `Decimal`, whose `toJSON` is one.
-      return `${access}.toString()`;
+      // A JSON STRING — the JS side holds a `Decimal`, whose `toJSON` is one,
+      // and the Dart cell already IS that string, so this is identity.
+      return access;
     case "datetime":
       return `${access}.toIso8601String()`;
     default:
@@ -184,9 +191,12 @@ function toParamScalar(scalar: FlutterPersistScalar, access: string): string {
       return `${access} ? 'true' : null`;
     case "int":
     case "double":
-    case "money":
       // A number always serialises — `0` is a real value, not "empty".
       return `${access}.toString()`;
+    case "money":
+      // Already the wire string; always written, for the same reason a number
+      // is — `'0.0000'` is a real value.
+      return access;
     case "datetime":
       return `${access}.toIso8601String()`;
     default:
@@ -204,8 +214,10 @@ function cellType(codec: FlutterPersistCodec): string {
       case "int":
         return "int";
       case "double":
-      case "money":
         return "double";
+      case "money":
+        // The wire STRING, not a `double` — `dart-types.ts` (M-T1.21).
+        return "String";
       case "bool":
         return "bool";
       case "datetime":
@@ -293,8 +305,9 @@ function dartElementZero(scalar: FlutterPersistScalar): string {
     case "int":
       return "0";
     case "double":
-    case "money":
       return "0";
+    case "money":
+      return `'${MONEY_WIRE_ZERO}'`;
     case "bool":
       return "false";
     case "datetime":

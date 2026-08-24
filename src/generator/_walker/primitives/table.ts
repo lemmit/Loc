@@ -24,6 +24,7 @@ import {
   slugify,
   stringNamed,
 } from "../shared/args.js";
+import { isMoneyField } from "../shared/row-field-type.js";
 import type { ClientPagingResult, ClientPagingSpec, PagerChrome, StateRef } from "../target.js";
 import type { WalkContext } from "../walker-core.js";
 import {
@@ -118,6 +119,11 @@ export function emitTable(
   // HEADERS render in both modes (they write `sortKey`/`sortDir` state); only
   // CLIENT mode additionally wraps the rows in a client-side `sortRows`.  A
   // target without the seam ignores the args and renders a plain table.
+  // The aggregate the bound rows are, when the enclosing `QueryView` recorded
+  // one — the only source of FIELD TYPES for a page body (a `data: rows => …`
+  // lambda types every member as `string`).  See `shared/row-field-type.ts`.
+  const sortRowAggregate =
+    rowsArg?.kind === "ref" ? ctx.listRowAggregates?.get(rowsArg.name) : undefined;
   const sortKeyName = refArgName(call, "sortKey");
   const sortDirName = refArgName(call, "sortDir");
   const sortActive =
@@ -143,6 +149,13 @@ export function emitTable(
         // which runs AFTER this: a statically-typed target needs the whole set
         // up front to emit its `match` over the sort key.
         columns: sortableColumnFields(call),
+        // Which of those hold `money` — a target whose money is not a
+        // comparable number needs to know, or the column sorts as text.  The
+        // row aggregate comes from the enclosing `QueryView` (`rowsArg`), the
+        // same resolution `DataGrid` makes for its own `numericSort`.
+        moneyColumns: sortableColumnFields(call).filter((f) =>
+          isMoneyField(f, sortRowAggregate, ctx),
+        ),
       });
     }
   }

@@ -21,9 +21,10 @@
 //   string / guid / id / enum       → Dart `String`   — the raw value
 //   int / long                      → Dart `int`      — `int.tryParse`
 //   decimal                         → Dart `double`   — JSON number
-//   money                           → Dart `double`   — JSON *string* (the JS
-//                                     frontends hold a `Decimal`, whose
-//                                     `toJSON` is a string)
+//   money                           → Dart `String`   — the wire's own digits,
+//                                     a JSON *string* both ways (M-T1.21; the
+//                                     JS frontends hold a `Decimal`, whose
+//                                     `toJSON` is that same string)
 //   bool                            → Dart `bool`
 //   datetime                        → Dart `DateTime` — ISO-8601 string, read
 //                                     via `DateTime.tryParse`
@@ -46,8 +47,9 @@ export type FlutterPersistScalar =
   /** Dart `double` from a JSON NUMBER (Loom `decimal`; the JS frontends hold it
    *  in a plain `number`). */
   | "double"
-  /** Dart `double` from a JSON STRING (Loom `money`; the JS frontends hold it in
-   *  a `Decimal`, whose `toJSON` is a string). */
+  /** Dart `String` from a JSON STRING (Loom `money` — the wire's fixed-scale
+   *  decimal, held verbatim; the JS frontends hold it in a `Decimal`, whose
+   *  `toJSON` is that same string). */
   | "money"
   /** Dart `bool`. */
   | "bool"

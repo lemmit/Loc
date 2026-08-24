@@ -39,7 +39,12 @@ describe("flutter intl formatting", () => {
 
     // Money → NumberFormat.currency (grouping + the currency's own fraction
     // digits when `decimals` is omitted — NOT collapsed to decimalDigits: 0).
-    expect(page).toContain(`NumberFormat.currency(symbol: '\${"USD"} ').format(1234.5)`);
+    // The formatted value goes through `LoomMoney.toNum`: a money value is the
+    // wire STRING (M-T1.21) and `NumberFormat.format` takes a `num`, so the
+    // parse happens at the display boundary and only for formatting.
+    expect(page).toContain(
+      `NumberFormat.currency(symbol: '\${"USD"} ').format(LoomMoney.toNum(1234.5))`,
+    );
     // Explicit `decimals` is honoured.
     expect(page).toContain(`NumberFormat.currency(decimalDigits: 0, symbol: '\${"JPY"} ')`);
     // DateDisplay → DateFormat, not DateTime.toString().

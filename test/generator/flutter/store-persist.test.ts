@@ -88,9 +88,11 @@ describe("flutter `persist: local` — shared_preferences, JS-compatible key + b
     expect(dart).toContain("LoomStorePersist.write(_persistKey, <String, dynamic>{");
     expect(dart).toContain("'lines': s.lines,");
     expect(dart).toContain("'count': s.count,");
-    // `money` rides the wire as a JSON string — the JS side holds a `Decimal`,
-    // whose `toJSON` is one.
-    expect(dart).toContain("'total': s.total.toString(),");
+    // `money` rides the blob as a JSON string — the JS side holds a `Decimal`,
+    // whose `toJSON` is one, and since M-T1.21 the Dart cell holds that same
+    // string, so the write is identity rather than a `toString()` of a double.
+    expect(dart).toContain("'total': s.total,");
+    expect(dart).not.toContain("s.total.toString()");
   });
 
   it("pulls shared_preferences into the pubspec and awaits it before runApp", async () => {

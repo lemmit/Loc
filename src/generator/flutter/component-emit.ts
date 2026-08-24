@@ -50,6 +50,7 @@ import { type ApiHookUse, emitExpr, walkBody } from "../_walker/walker-core.js";
 import { FLUTTER_CHILD_PARAM } from "./dart-expr.js";
 import { dartType } from "./dart-types.js";
 import { flutterTarget } from "./flutter-target.js";
+import { usesMoney } from "./money-runtime.js";
 import { flutterPack, usesIntl, usesMath } from "./pack.js";
 import {
   buildStateFields,
@@ -488,6 +489,9 @@ export function renderComponentsFile(
   if (/(?<![A-Za-z0-9_$.])t\(/.test(blocks.join("\n"))) imports.push("import 'i18n.dart';");
   // `min`/`max`/`round` scalar intrinsics route through `math.*` (`dart-expr.ts`).
   if (usesMath(blocks.join("\n"))) imports.push("import 'dart:math' as math;");
+  // The money runtime (M-T1.21) — a component body/action doing money
+  // arithmetic, on demand and with the same marker `index.ts` emits the file on.
+  if (usesMoney(blocks.join("\n"))) imports.push("import 'money.dart';");
   return `${lines(
     "// User components — one widget per `component Foo(params) { body }` a ui",
     "// hosts (StatelessWidget, or StatefulWidget when it carries `state`).",

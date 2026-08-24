@@ -73,7 +73,7 @@ describe("flutter Chart — a CustomPainter, no charting package", () => {
     expect(page).toContain(
       'LoomChart(isBar: true, label: "Bar chart of SalesByStatus: revenue by status", ' +
         "points: (salesByStatusRead.asData?.value ?? const []).map((r) => " +
-        "LoomChartPoint(r.status.toString(), (r.revenue as num).toDouble())).toList())",
+        "LoomChartPoint(r.status.toString(), LoomMoney.toNum(r.revenue).toDouble())).toList())",
     );
   });
 
@@ -139,6 +139,9 @@ describe("flutter Chart — a CustomPainter, no charting package", () => {
       ),
     );
     expect(page).toContain("LoomChart(isBar: false,");
-    expect(page).toContain("(r.orderCount as num).toDouble()");
+    // The series coercion is the SAME on an int column: a projection row's `y:`
+    // has no usable static type here, so the coercion has to be total over both
+    // a number and the money wire STRING (M-T1.21) — one spelling, not two.
+    expect(page).toContain("LoomMoney.toNum(r.orderCount).toDouble()");
   });
 });
