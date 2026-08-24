@@ -205,3 +205,55 @@ describe("realtime rooms — .NET (tenant-scoped delivery)", () => {
     expect(hub).toContain("public (Guid Id, ChannelReader<string> Reader) Subscribe()");
   });
 });
+
+// ─── Durable channels reach the wire too (audit 2026-08-24, A9) ────────────
+//
+// A `retention: log | work` channel routes its events through the transactional
+// outbox: the repository hands its pending events to
+// `IDomainEventDispatcher.RecordDurableAsync` inside the write transaction, the
+// OUTBOX dispatcher swallows the durable ones (staging an `__loom_outbox` row)
+// and returns only the rest for post-commit `DispatchAsync`.  The relay then
+// drains the staged rows through the RAW in-process dispatcher.
+//
+// The realtime decorator sits OUTSIDE the outbox one, so a durable event
+// touches it exactly once — in `RecordDurableAsync`.  While that method was a
+// bare pass-through, a UI-observable durable event produced NO SSE frame on
+// .NET at all (EF and dapper alike), silently, while node and java streamed it.
+const DURABLE = `
+    channel Lifecycle {
+      carries: OrderPlaced, ShipmentRequested
+      delivery: broadcast
+      retention: log
+    }
+`;
+
+describe("realtime SSE wire — .NET durable (retention: log) channels", () => {
+  it("tees the outbox-CAPTURED events to the hub from RecordDurableAsync", async () => {
+    const files = await generate(system("dotnet", DURABLE));
+    const dispatcher = get(files, "Infrastructure/Events/RealtimeDomainEventDispatcher.cs");
+    // The durable path must not be a bare `=> _inner.RecordDurableAsync(...)`.
+    expect(dispatcher).not.toContain(
+      "=> _inner.RecordDurableAsync(events, transaction, cancellationToken);",
+    );
+    expect(dispatcher).toContain(
+      "var deferred = await _inner.RecordDurableAsync(events, transaction, cancellationToken);",
+    );
+    expect(dispatcher).toContain("if (captured) _hub.Publish(ev);");
+    expect(dispatcher).toContain("return deferred;");
+    // …and ONLY the captured ones: a deferred (ephemeral) event comes back to
+    // the repository, which dispatches it through DispatchAsync — teeing it
+    // here as well would put the same event on the wire twice.
+    expect(dispatcher).toContain("if (ReferenceEquals(pending, ev)) { captured = false; break; }");
+  });
+
+  it("wires the realtime tee OUTSIDE the outbox dispatcher, so RecordDurableAsync reaches it", async () => {
+    const files = await generate(system("dotnet", DURABLE));
+    const program = get(files, "backend/Program.cs");
+    expect(program).toContain(
+      "new RealtimeDomainEventDispatcher(sp.GetRequiredService<OutboxDomainEventDispatcher>(), sp.GetRequiredService<Backend.Infrastructure.Realtime.RealtimeHub>())",
+    );
+    // The repository's save calls RecordDurableAsync on that outer decorator.
+    const repo = get(files, "Infrastructure/Repositories/OrderRepository.cs");
+    expect(repo).toContain("await _events.RecordDurableAsync(__pending, null, cancellationToken);");
+  });
+});
