@@ -214,6 +214,23 @@ const FIRING_FIXTURES: Record<string, string> = {
   "loom.macro-arg-kind-mismatch": uiWith(`scaffoldAggregate(of: "Thing")`),
   "loom.capability-host-invalid": uiWith("auditable"),
 
+  // --- handler body (#2659) -----------------------------------------------
+  // An OPTIONAL repository read bound in a handler body.  The shared workflow
+  // statement vocabulary the body renders through has no null-handling arm, so
+  // before the gate this emitted an unguarded dereference (TS18047 / CS8602) in
+  // the generated project.  The workflow twin refuses the same load.
+  "loom.handler-load-nullable-unsupported": deployed(`      aggregate Order {
+        code: string
+        status: string
+      }
+      repository Orders2 for Order {
+        find byCode(c: string): Order? where code == c
+      }
+      queryHandler CodeStatus(c: string): string {
+        let o = Orders2.byCode(c)
+        return o.status
+      }`),
+
   // --- lifecycle gates (M-T3.16) ------------------------------------------
   // These three arrived on `main` AFTER the 2026-08-13 census and were caught
   // by this gate on the very next run, with no firing proof between them —

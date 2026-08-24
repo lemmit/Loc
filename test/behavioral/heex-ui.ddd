@@ -1,0 +1,81 @@
+// The HEEx/LiveView runtime round-trip fixture.
+//
+// `run-heex-ui.mjs` boots this system's generated Phoenix app against a real
+// postgres and drives the EMITTED Playwright surface at it in a real browser:
+// the `.ui.spec.ts` that `src/system/ui-e2e-render.ts` lowers from the
+// `test e2e` block below, over the per-page page objects
+// `src/generator/elixir/page-objects-emit.ts` emits.
+//
+// Deliberately the SMALLEST system that exercises the full scaffold archetype
+// chain — `scaffold` grows Home + a list / new / detail page per aggregate —
+// because the leg's cost is dominated by the hex dep tree and the Phoenix
+// compile, not by how many aggregates it walks.
+//
+// `platform: elixir` is fullstack (see `lower.ts`, "Test-kind dispatch"), so
+// the one `test e2e` block below lowers to BOTH a `.ui.spec.ts` (Playwright,
+// through the rendered LiveView DOM) and an api spec (fetch).  This leg runs
+// the UI half — the half nothing per-PR has ever executed.
+//
+// The field types are chosen to make the round-trip prove something about
+// RENDERING rather than just about routing:
+//   name  — a plain string, read back out of the detail page's value cell
+//   rank  — an int, so a HEEx arm that stringified it wrongly (or dropped the
+//           value entirely) shows up as a text mismatch, not a 200
+//
+// DELIBERATELY NO VALUE-OBJECT FIELD.  A `price: Money` field was the first
+// draft and it 500s the generated `/widgets/new`: the HEEx CreateForm renders
+// a VO as `<.inputs_for field={@form[:price]}>`, but the Ecto schema flattens
+// the VO into `price_amount` / `price_currency` columns and declares no
+// `embeds_one`, so `Phoenix.HTML.FormData.Ecto.Changeset` raises
+// "could not generate inputs for :price".  That is a real, pre-existing bug on
+// the HEEx create path (and one this leg is how we found — `mix compile` is
+// clean and the route still answers, so the emitted `smoke.spec.ts` passes on
+// the 500).  Fixing it is its own slice; keeping it out of the fixture keeps
+// THIS gate green-when-correct instead of permanently red.
+
+system HeexUiSystem {
+
+  subdomain Catalog {
+    context Catalog {
+
+      aggregate Widget with crudish {
+        name: string
+        rank: int
+        invariant name.length > 0
+      }
+
+      repository Widgets for Widget { }
+    }
+  }
+
+  api CatalogApi from Catalog
+
+  storage primary { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primary }
+
+  ui Web with scaffold(subdomains: [Catalog]) {
+  }
+
+  deployable phoenixApp {
+    platform: elixir
+    contexts: [Catalog]
+    dataSources: [catalogState]
+    serves: CatalogApi
+    ui: Web
+    port: 4000
+  }
+
+  // create -> (via the LIST page's create affordance) -> detail, then a
+  // SECOND navigation back to detail by id.  Every step is a real click /
+  // fill / navigation against the LiveView the generator emitted.
+  // The assertions use `toHaveText` (a LOCATOR matcher — see
+  // src/util/intrinsic-matchers.ts) rather than `toBe`, so they lower to
+  // Playwright's auto-retrying `expect(locator).toHaveText(…)` against the
+  // live DOM instead of a one-shot string snapshot.
+  test e2e "create a widget through the LiveView and read it back" against phoenixApp {
+    let w = ui.widgets.create({ name: "Sprocket", rank: 7 })
+    let read = ui.widgets.getById(w)
+    expect(read.name).toHaveText("Sprocket")
+    expect(read.rank).toHaveText("7")
+  }
+}

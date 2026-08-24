@@ -7,6 +7,7 @@ import {
   wireFieldsForAggregate,
   wireFieldsForPart,
 } from "../../../ir/enrich/wire-projection.js";
+import { provenancedCarrier } from "../../../ir/stdlib/generics.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -20,6 +21,7 @@ import type {
 import { lines } from "../../../util/code-builder.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId, renderJavaExpr } from "../render-expr.js";
+import { JAVA_PROVENANCED_RECORD, javaProvSibling } from "./provenance.js";
 import {
   collectWireImports,
   domainToWire,
@@ -354,7 +356,24 @@ function wireRecord(
       components.push(`${wireJavaType(t, "Response")} ${idW.name}`);
       args.push(domainToWire(t, `value.${accessor(idW)}`));
     }
+    // A DECLARED record names DOMAIN types, so a field the aggregate declares
+    // `provenanced` is wrapped in the wire carrier here — the same wrap
+    // `wireTypeForField` applies on the wireShape path, so both paths emit the
+    // identical component (M-T6.12).
+    const provNames = new Set(entity.fields.filter((f) => f.provenanced).map((f) => f.name));
     for (const f of declared.payload.fields) {
+      if (provNames.has(f.name)) {
+        imports.add(`${basePkg}.domain.common.${JAVA_PROVENANCED_RECORD}`);
+        imports.add(`${basePkg}.domain.common.ProvLineage`);
+        collectWireImports(f.type, imports);
+        components.push(
+          `${JAVA_PROVENANCED_RECORD}<${wireJavaType(f.type, "Response", true)}> ${f.name}`,
+        );
+        args.push(
+          `new ${JAVA_PROVENANCED_RECORD}<>(${payloadFieldToWire(f, declared.payloads)}, value.${javaProvSibling(f.name)}())`,
+        );
+        continue;
+      }
       components.push(`${payloadFieldJavaType(f, declared.payloads, imports)} ${f.name}`);
       args.push(payloadFieldToWire(f, declared.payloads));
     }
@@ -369,8 +388,19 @@ function wireRecord(
       // (auto-boxed), only `fromMasked` may pass null.
       const t = masked ? eff(wireFieldType(w), true) : wireFieldType(w);
       collectWireImports(t, imports);
+      const carried = provenancedCarrier(t);
+      if (carried) {
+        // The carrier is a generated `domain.common` record (M-T6.12); its
+        // `lineage` component is the ProvLineage the same package declares.
+        imports.add(`${basePkg}.domain.common.${JAVA_PROVENANCED_RECORD}`);
+        imports.add(`${basePkg}.domain.common.ProvLineage`);
+      }
       components.push(`${wireJavaType(t, "Response")} ${w.name}`);
-      const projected = domainToWire(t, `value.${accessor(w)}`);
+      // A provenanced field folds the domain's two co-located accessors into
+      // the one carrier: `new Provenanced<>(value.total(), value.totalProvenance())`.
+      const projected = carried
+        ? `new ${JAVA_PROVENANCED_RECORD}<>(${domainToWire(carried, `value.${accessor(w)}`)}, value.${javaProvSibling(w.name)}())`
+        : domainToWire(t, `value.${accessor(w)}`);
       // `from` stays UNMASKED — internal audit before/after snapshots project
       // through it and must record the real value.
       args.push(projected);
@@ -390,27 +420,11 @@ function wireRecord(
       }
     }
   }
-  // Co-located provenance (provenance.md): each provenanced field appends a
-  // trailing lineage component carrying the current lineage, so any GET
-  // surfaces it inline (the field's own value still emits above).  Parts carry
-  // no provenanced fields (write sites live on the root), so this is a no-op
-  // for them — keeping non-provenance responses byte-identical.
-  //
-  // The WIRE KEY is `<field>_provenance`, NOT the camelCase component name.
-  // That is the documented sibling key (provenance.md §"Scaffolded UI"), it is
-  // what the other four backends emit, and it is what the SCAFFOLDED FRONTEND
-  // reads (`data.total_provenance`, `_body-builders.ts`) — so a camelCase key
-  // here silently blanks the provenance disclosure on every generated UI
-  // pointed at a Java backend.  `@JsonProperty` renames the wire key without
-  // giving the record an un-Java-like component name.  (RS-18.)
-  for (const f of entity.fields.filter((pf) => pf.provenanced)) {
-    imports.add(`${basePkg}.domain.common.ProvLineage`);
-    imports.add("com.fasterxml.jackson.annotation.JsonProperty");
-    components.push(
-      `@JsonProperty(${JSON.stringify(`${snake(f.name)}_provenance`)}) ProvLineage ${f.name}Provenance`,
-    );
-    args.push(`value.${f.name}Provenance()`);
-  }
+  // (M-T6.12) No trailing `<field>_provenance` component any more.  The lineage
+  // rides INSIDE the provenanced field's own component as the `Provenanced<T>`
+  // carrier, so the wire key is the field's own name and the `@JsonProperty`
+  // rename this used to need is gone — the carrier's `value` / `lineage`
+  // members already match every other target's spelling.
   // A `mask unless` field redacts fail-closed on a RESPONSE via a SECOND mapper,
   // `fromMasked` — `from` stays unmasked for audit snapshots.  `fromMasked` binds
   // the ambient principal once off the STATIC accessor (a static mapper injects

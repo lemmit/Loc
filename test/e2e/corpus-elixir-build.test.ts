@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { corpusProjectDirs, materializeCorpusFixture } from "../fixtures/corpus/harness.js";
 import { CORPUS } from "../fixtures/corpus/manifest.js";
 import { type HexMirror, startHexMirror } from "./support/hex-mirror.js";
+import { mixDepsGet } from "./support/mix-retry.js";
 
 // ---------------------------------------------------------------------------
 // Phase 1 compile tier (docs/old/plans/global-test-coverage-plan.md) for the
@@ -78,6 +79,8 @@ const HEX_CACHE = path.join(os.tmpdir(), "loom-corpus-elixir-hex");
 // elixir image.  When `mirror` is set (LOOM_HEX_MIRROR=1) hex.pm traffic is
 // routed through the loopback mirror so this gate also runs behind a
 // TLS-fingerprinting egress proxy — mirrors the single-fixture vanilla gate.
+// The FETCH is retried (transient hex.pm 500s used to kill whole cells — see
+// support/mix-retry.ts); the COMPILE is not, and must keep failing fast.
 function runMixCompile(projDir: string, mirror: HexMirror | undefined): void {
   const dockerArgs = mirror ? `${mirror.dockerArgs.join(" ")} ` : "";
   const shellPrefix = mirror?.shellPrefix ?? "";
@@ -86,7 +89,7 @@ function runMixCompile(projDir: string, mirror: HexMirror | undefined): void {
     `docker run --rm ${dockerArgs}-v ${projDir}:/app -v ${HEX_CACHE}:/root/.hex ` +
       `-w /app -e MIX_ENV=prod ${IMAGE} ` +
       `bash -c '${shellPrefix}mix local.hex --force && mix local.rebar --force && ` +
-      `mix deps.get --only prod && mix compile --warnings-as-errors'`,
+      `${mixDepsGet("--only prod")} && mix compile --warnings-as-errors'`,
     { stdio: "inherit", timeout: 600_000 },
   );
 }

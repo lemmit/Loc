@@ -1,6 +1,7 @@
 // Provenanced stored fields (provenance.md): each write to a `provenanced`
 // field becomes an immutable per-write-site rule snapshot.  Backend-only;
-// non-Hono backends parse the keyword but emit no trace code.
+// the value and its lineage ride the wire together as ONE `Provenanced<T>`
+// carrier (`{ value, lineage }`, M-T6.12) — identical on all five backends.
 system OrderingSystem {
   subdomain Ordering {
     context Ordering {
@@ -56,7 +57,10 @@ system OrderingSystem {
     api.orders.reprice(o, { qty: 3, price: 40 })
     let read = api.orders.getById(o)
     expect(read.reference).toBe("R1")
-    expect(read.total).toBe(120)
+    // `total` is `provenanced`, so it ships as the `Provenanced<T>` wire carrier
+    // `{ value, lineage }` (M-T6.12) — the figure is behind `.value` on every
+    // backend, and the lineage travels with it instead of in a sibling key.
+    expect(read.total.value).toBe(120)
 
     // A THIRD write site for the same `provenanced` field, reached through the
     // canonical `update` rather than through a domain operation.  `total` is an
@@ -67,16 +71,16 @@ system OrderingSystem {
     let updated = api.orders.getById(o)
     expect(updated.reference).toBe("R2")
     expect(updated.quantity).toBe(4)
-    expect(updated.total).toBe(120)
+    expect(updated.total.value).toBe(120)
 
     // Free adjacents: the second domain write site recomputes the same field
     // from the values the update just stored, and the declared find keys on the
     // column the update moved.
     api.orders.applyDiscount(o, { amount: 20 })
     let discounted = api.orders.getById(o)
-    expect(discounted.total).toBe(100)
+    expect(discounted.total.value).toBe(100)
     let byRef = api.orders.byReference({ reference: "R2" })
-    expect(byRef.total).toBe(100)
+    expect(byRef.total.value).toBe(100)
 
     // The LIST route reads the same provenanced column in bulk — three write
     // sites have now touched `total` (a domain op, the crudish update, a second

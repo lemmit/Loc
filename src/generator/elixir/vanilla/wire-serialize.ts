@@ -34,6 +34,7 @@ import {
   wireFieldsForPart,
   wireFieldsForValueObject,
 } from "../../../ir/enrich/wire-projection.js";
+import { provenancedCarrier } from "../../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -45,6 +46,7 @@ import type {
   WireField,
 } from "../../../ir/types/loom-ir.js";
 import { snake } from "../../../util/naming.js";
+import { provenancedEntries } from "../../_payload/provenanced-wire.js";
 import { MONEY_WIRE_SCALE } from "../../money-scale.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { provColumn } from "./provenance-emit.js";
@@ -318,9 +320,6 @@ export function renderWireSerialize(
     isVo: boolean,
     derived: Map<string, DerivedIR>,
     idExprLocal = "record.id",
-    /** The entity's `provenanced` fields, whose co-located lineage rides the
-     *  wire after the shape (RS-18).  Empty for value objects. */
-    provFields: readonly FieldIR[] = [],
   ): string {
     const entries: string[] = [];
     for (const wf of shape) {
@@ -340,14 +339,17 @@ export function renderWireSerialize(
         // `:data` embed (`record`) — read it off the caller-supplied root expr.
         ve = opts.versionExpr;
       } else {
-        ve = valueExpr(wf, isVo);
+        ve = valueExpr({ ...wf, type: provenancedCarrier(wf.type) ?? wf.type }, isVo);
       }
       // Money → FIXED wire scale (RS-12): a bare `%Decimal{}` Jason-encodes at
       // its own scale (a DB-stored `12.5`, a derived `Decimal.new("0.00")`), so
       // round every money-typed entry — regular OR derived — to the canonical
       // `NUMERIC(19,4)` scale for a wire value byte-consistent with the other
       // backends.  The `__money_round/1` helper is nil-safe for `money?`.
-      const innerMoney = unwrapOptional(wf.type);
+      //
+      // A provenanced field's coercions apply to the CARRIED value, not to the
+      // `{ value, lineage }` object that wraps it (M-T6.12) — so peel first.
+      const innerMoney = unwrapOptional(provenancedCarrier(wf.type) ?? wf.type);
       if (innerMoney.kind === "primitive" && innerMoney.name === "money") {
         usedMoney = true;
         ve = `__money_round(${ve})`;
@@ -356,15 +358,18 @@ export function renderWireSerialize(
         usedDecimal = true;
         ve = `__decimal_num(${ve})`;
       }
+      // RS-18 / M-T6.12 — a provenanced field ships its value and the lineage
+      // of the write that produced it as ONE carrier object, so the lineage no
+      // longer trails the shape as a `<field>_provenance` sibling: it is folded
+      // in here, keyed off the carrier's own member list.  The row still stores
+      // the two columns; this is the serializer only.
+      if (provenancedCarrier(wf.type)) {
+        const members = provenancedEntries(ve, `record.${provColumn(wf.name)}`)
+          .map(([k, v]) => `${JSON.stringify(k)} => ${v}`)
+          .join(", ");
+        ve = `%{${members}}`;
+      }
       entries.push(`${baseIndent}  "${wf.name}" => ${ve}`);
-    }
-    // RS-18 — co-located provenance rides the wire so any GET surfaces the
-    // current lineage inline, under the snake_case `<field>_provenance` key the
-    // other four backends use (and the scaffolded frontend reads).  It is NOT a
-    // `wireShape` member on any backend: node appends it the same way, after the
-    // shape.
-    for (const f of provFields) {
-      entries.push(`${baseIndent}  "${f.name}_provenance" => record.${provColumn(f.name)}`);
     }
     if (entries.length === 0) return `${baseIndent}%{}`;
     return `${baseIndent}%{\n${entries.join(",\n")}\n${baseIndent}}`;
@@ -375,12 +380,11 @@ export function renderWireSerialize(
     shape: WireField[],
     isVo: boolean,
     derived: Map<string, DerivedIR>,
-    provFields: readonly FieldIR[] = [],
   ): void {
     const hname = `serialize_${snake(name)}${sfx}`;
     if (helpers.has(hname) || building.has(hname)) return;
     building.add(hname);
-    const body = renderMap(shape, "    ", isVo, derived, "record.id", provFields);
+    const body = renderMap(shape, "    ", isVo, derived, "record.id");
     helpers.set(
       hname,
       `  defp ${hname}(nil), do: nil\n\n  defp ${hname}(record) do\n${body}\n  end`,
@@ -391,14 +395,7 @@ export function renderWireSerialize(
   function ensurePartHelper(name: string): void {
     const shape = parts.get(name);
     if (!shape) return;
-    const part = agg.parts.find((p) => p.name === name);
-    buildHelper(
-      name,
-      shape,
-      /* isVo */ false,
-      partDerived.get(name) ?? emptyDerived,
-      (part?.fields ?? []).filter((f) => f.provenanced),
-    );
+    buildHelper(name, shape, /* isVo */ false, partDerived.get(name) ?? emptyDerived);
   }
 
   function ensureVoHelper(name: string): void {
@@ -406,14 +403,7 @@ export function renderWireSerialize(
     if (shape) buildHelper(name, shape, /* isVo */ true, emptyDerived);
   }
 
-  const body = renderMap(
-    wireShape,
-    "    ",
-    /* isVo */ false,
-    aggDerived,
-    idExpr,
-    agg.fields.filter((f) => f.provenanced),
-  );
+  const body = renderMap(wireShape, "    ", /* isVo */ false, aggDerived, idExpr);
   const preludeBind = opts.bind ? `${opts.bind}\n` : "";
 
   // RS-12 money-scale helper — emitted once when the wire shape carries money.

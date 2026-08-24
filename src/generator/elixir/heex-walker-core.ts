@@ -61,6 +61,7 @@ import {
 } from "../../ir/util/projection-read.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { elixirString, humanize, snake, upperFirst } from "../../util/naming.js";
+import { PROVENANCE_VALUE_FIELD } from "../../util/provenance-carrier.js";
 import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
 import { USER_VISIBLE_SLOTS } from "../../util/user-visible-slots.js";
 import { tryRenderGate } from "../_frontend/gate-expr.js";
@@ -836,8 +837,44 @@ function renderMember(expr: Extract<ExprIR, { kind: "member" }>, ctx: WalkContex
     const cu = ctx.position === "template" ? "@current_user" : "socket.assigns.current_user";
     return `${cu}.${snake(expr.member)}`;
   }
+  // HEEx is the exception to "read the wire" (docs/provenance.md): LiveView
+  // renders server-side straight off the Ecto struct, which keeps a provenanced
+  // field SPLIT into its value column and its `<field>_provenance` jsonb
+  // sibling.  The `Provenanced<T>` carrier (M-T6.12) is a WIRE shape, so the
+  // `.value` hop the page body spells for every JSON frontend has nothing to
+  // step into here — `@data.total.value` would raise on an integer.  Drop the
+  // hop and read the column, exactly as `renderProvenanceInfo` reads the
+  // sibling column rather than the carrier's `lineage`.
+  if (
+    expr.member === PROVENANCE_VALUE_FIELD &&
+    expr.receiver.kind === "member" &&
+    provenancedFieldNames(ctx).has(expr.receiver.member)
+  ) {
+    return renderExpr(expr.receiver, ctx);
+  }
   return `${renderExpr(expr.receiver, ctx)}.${snake(expr.member)}`;
 }
+
+/** Every `provenanced` field NAME declared by an aggregate (or entity part) in
+ *  scope.  A page body carries unresolved receiver types (`walker-core.ts`
+ *  documents the same limitation for the JSX walkers), so the carrier hop is
+ *  recognised by field NAME rather than by type.  The residual ambiguity — a
+ *  value object that happens to declare a field with the same name AS WELL AS a
+ *  sub-field literally called `value` — is narrow, and the mis-render it would
+ *  cause is a dropped `.value`, not a wrong value. */
+function provenancedFieldNames(ctx: WalkContext): ReadonlySet<string> {
+  const cached = provNamesCache.get(ctx.aggregatesByName);
+  if (cached) return cached;
+  const names = new Set<string>();
+  for (const agg of ctx.aggregatesByName.values()) {
+    for (const f of agg.fields) if (f.provenanced) names.add(f.name);
+    for (const p of agg.parts) for (const f of p.fields) if (f.provenanced) names.add(f.name);
+  }
+  provNamesCache.set(ctx.aggregatesByName, names);
+  return names;
+}
+
+const provNamesCache = new WeakMap<ReadonlyMap<string, AggregateIR>, ReadonlySet<string>>();
 
 /** JS-frontend collection ops that aren't in the shared `isCollectionOp`
  *  catalogue (`src/util/collection-ops.ts`) but DO render verbatim on the

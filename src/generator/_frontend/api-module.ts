@@ -36,6 +36,7 @@ import { partsChildrenFirst } from "../../ir/util/containment-parent.js";
 import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../ir/validate/invariant-classify.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
+import { PROVENANCED_REQUEST_ERROR } from "../_payload/provenanced-wire.js";
 import { hookFnName } from "../_walker/js-target-helpers.js";
 import {
   chainSingleFieldNative,
@@ -44,7 +45,7 @@ import {
   takeSingleFieldChain,
 } from "../zod-refine.js";
 import { serverSourcedDefaultFields } from "./server-default.js";
-import { AUDIT_ENTRY_LIST_TYPE, emitAuditEntrySchemas } from "./zod-schemas.js";
+import { AUDIT_ENTRY_LIST_TYPE, emitAuditEntrySchemas, provenancedZod } from "./zod-schemas.js";
 
 // ---------------------------------------------------------------------------
 // Per-aggregate API module: Zod schemas + TanStack Query hooks.
@@ -67,13 +68,6 @@ export interface ApiModuleOptions {
    *  `"@tanstack/react-query"` (default, byte-identical to the
    *  pre-extraction React output) or `"@tanstack/vue-query"`. */
   queryPackage?: string;
-  /** Whether a provenanced field's co-located `<field>_provenance` lineage
-   *  sibling rides the `<Agg>Response` schema (the frontend twin of the Hono
-   *  `toWire` append — docs/provenance.md).  React-first: only the React
-   *  generator sets this, so the other frontends stay byte-identical (their
-   *  `ProvenanceInfo` primitive falls through to a comment).  Requires the
-   *  shared lib to export `provLineageSchema` (`../lib/schemas`). */
-  carryProvenance?: boolean;
 }
 
 /** The client read-hook name for an aggregate's entity-history trail.
@@ -87,9 +81,13 @@ export function historyHookName(aggName: string): string {
   return hookFnName(aggName, AUDIT_HISTORY_FIND);
 }
 
-/** True iff the aggregate (root or a part) declares a `provenanced` field —
- *  the gate for surfacing the lineage sibling on the wire + importing
- *  `provLineageSchema`.  Exported so the Svelte api-builder (which emits its
+/** True iff the aggregate (root or a part) declares a `provenanced` field — the
+ *  gate for importing `provLineageSchema` into the api module, since the
+ *  `Provenanced<T>` carrier's `lineage` member references it.
+ *
+ *  No longer an opt-in: the carrier is part of `wireShape` (M-T6.12), so EVERY
+ *  frontend's response schema carries the lineage the moment the field is
+ *  declared `provenanced`.  Exported so the Svelte api-builder (which emits its
  *  response schema through the sibling `zod-schemas.ts` copy) shares the gate. */
 export function aggregateHasProvenanced(agg: EnrichedAggregateIR): boolean {
   return (
@@ -105,9 +103,10 @@ export function buildApiModule(
   options: ApiModuleOptions = {},
 ): string {
   const queryPackage = options.queryPackage ?? "@tanstack/react-query";
-  // Provenance lineage rides the response schema only when the caller opts in
-  // (React) AND this aggregate actually has a provenanced field.
-  const carryProv = (options.carryProvenance ?? false) && aggregateHasProvenanced(agg);
+  // The `Provenanced<T>` carrier's `lineage` member references
+  // `provLineageSchema`, so the import rides on the aggregate declaring a
+  // provenanced field at all — not on a per-frontend opt-in (M-T6.12).
+  const carryProv = aggregateHasProvenanced(agg);
   // Vue's reactivity is pull-based: a parameterised `find` query takes a
   // `MaybeRefOrGetter` so a bound filter input live-refetches (React
   // re-renders and passes fresh args every render — no wrapper needed).
@@ -263,9 +262,9 @@ export function buildApiModule(
   // before the root references them — and a nested part before the sibling
   // that references it (`z.array(LabelResponse)`), hence children-first.
   for (const part of partsChildrenFirst(agg.parts)) {
-    lines.push(...emitResponseSchema(part, ctx, /*isAgg*/ false, carryProv));
+    lines.push(...emitResponseSchema(part, ctx, /*isAgg*/ false));
   }
-  lines.push(...emitResponseSchema(agg, ctx, /*isAgg*/ true, carryProv));
+  lines.push(...emitResponseSchema(agg, ctx, /*isAgg*/ true));
   lines.push(`export const ${agg.name}ListResponse = z.array(${agg.name}Response);`);
   lines.push(`export type ${agg.name}ListResponse = z.infer<typeof ${agg.name}ListResponse>;`);
   // Paged response DTOs (P3b) — one per distinct `<carrier> paged` find return.
@@ -698,7 +697,6 @@ function emitResponseSchema(
   ent: EnrichedAggregateIR | EnrichedEntityPartIR,
   ctx: BoundedContextIR,
   isAgg: boolean,
-  carryProvenance = false,
 ): string[] {
   const lines: string[] = [];
   const name = `${ent.name}Response`;
@@ -719,16 +717,10 @@ function emitResponseSchema(
       lines.push(`  ${wf.name}: ${zodForResponse(wf.type, wf.optional)},`);
     }
   }
-  // Co-located provenance lineage rides the wire DTO after the regular fields —
-  // mirrors the Hono `toWire` append (repository-wire-builder.ts) and the .NET
-  // `<Field>Provenance` DTO key, so the frontend type carries the lineage a
-  // `ProvenanceInfo` disclosure reads.  Nullish: absent on backends that don't
-  // capture lineage (Python/Java) and on the create side.
-  if (carryProvenance) {
-    for (const f of ent.fields.filter((f) => f.provenanced)) {
-      lines.push(`  ${f.name}_provenance: provLineageSchema.nullish(),`);
-    }
-  }
+  // (M-T6.12) The lineage is no longer appended here as a trailing
+  // `<field>_provenance` sibling — it rides INSIDE the provenanced field's own
+  // entry as the `Provenanced<T>` carrier, emitted by `zodForResponse`'s
+  // `provenanced` arm from the one shape definition.
   lines.push(`});`);
   lines.push(`export type ${name} = z.infer<typeof ${name}>;`);
   return lines;
@@ -828,6 +820,11 @@ function zodForRequest(t: TypeIR): string {
       return `${info.base}Schema`;
     case "entity":
       return "z.unknown()";
+    case "provenanced":
+      // Unreachable by construction: the carrier is stamped onto the RESPONSE
+      // wire shape only (`wireTypeForField`); a create/update input takes the
+      // bare `T` — a caller supplies a value, never a lineage.
+      throw new Error(PROVENANCED_REQUEST_ERROR);
   }
 }
 
@@ -853,6 +850,8 @@ function zodForResponseInner(t: TypeIR): string {
       return `${info.base}Schema`;
     case "entity":
       return `${info.base}Response`;
+    case "provenanced":
+      return provenancedZod(zodForResponseInner(info.carried!));
   }
 }
 

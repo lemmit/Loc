@@ -10,6 +10,7 @@
 import type { BoundedContextIR, ExprIR, FieldIR, ParamIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { AUDIT_HISTORY_FIND } from "../../util/audit-names.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { PROVENANCE_LINEAGE_FIELD } from "../_payload/provenanced-wire.js";
 import { stringNamed } from "../_walker/shared/args.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr, walk } from "../_walker/walker-core.js";
@@ -448,7 +449,8 @@ export const felizTarget: WalkerTarget = {
   },
 
   // `ProvenanceInfo(of: <record>, field: "<name>")` → a native `<details>`
-  // disclosure over the co-located `<field>_provenance` (a `ProvLineage option`
+  // disclosure over `<field>.lineage` (the `ProvLineage option` half of the
+  // `Provenanced<'T>` wire carrier
   // on the decoded record).  Feliz forks because its "markup" is F# (`Html.details
   // [ … ]`).  A SINGLE-LINE expression (the walker doesn't re-indent seam output),
   // wrapped in `Html.span` so it starts with `Html.` (a bare `(match …)` list item
@@ -463,7 +465,7 @@ export const felizTarget: WalkerTarget = {
     if (!ofArg || fieldArg?.kind !== "literal") {
       return felizTarget.renderComment("ProvenanceInfo: missing record or field");
     }
-    const lineage = `${emitExpr(ofArg, ctx)}.${String(fieldArg.value)}_provenance`;
+    const lineage = `${emitExpr(ofArg, ctx)}.${String(fieldArg.value)}.${PROVENANCE_LINEAGE_FIELD}`;
     const rule =
       'Html.div [ prop.children [ Html.dt [ prop.text "Rule" ]; Html.dd [ Html.code [ prop.text __p.snapshotId ] ] ] ]';
     const value =
