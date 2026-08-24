@@ -11,7 +11,7 @@
 
 import type { Waiver } from "./waivers.js";
 
-export const TSC_WAIVERS: readonly Waiver[] = [
+export const COMPILE_WAIVERS: readonly Waiver[] = [
   // EMPTY, and that is the target state — same rule as the wire-differential
   // register: a new divergence is a BUG to fix on the emitter first, and a
   // waiver only when fixing it is a mission of its own with a named exit.

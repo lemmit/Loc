@@ -1,0 +1,170 @@
+// ---------------------------------------------------------------------------
+// The pairwise COMPILE oracle, shared across backends.
+//
+// Slice 1 shipped one compile leg (node/strict `tsc`) and said so explicitly:
+// "node-only by design; the dotnet / java / python / elixir compile legs are a
+// named follow-up slice ... this slice's job is to prove the harness earns
+// them."  It has: #2527 / #2528 / #2529 all came out of it.
+//
+// WHY THE OTHER FOUR MATTER MORE THAN A FIFTH COPY OF THE SAME CHECK.  The
+// generation sweep next door covers all five backends, but it can only see a
+// crossing that THROWS.  The bug class this whole corpus exists for is the one
+// that generates perfectly and then fails to compile — and every recorded
+// instance of it failed somewhere OTHER than node:
+//
+//   #2412  `mask unless` × `audited`      → .NET CS0128 + Python F821
+//   #2387  `audited` × dapper × document  → uncompilable .NET
+//   #2391  `audited` × dapper × eventLog  → uncompilable .NET
+//   #2181  channels × rabbit              → .NET /warnaserror
+//
+// A node-only compile tier is therefore blind to its own motivating class, and
+// blind in the exact direction the repo keeps getting burned: node is the
+// backend a fix lands on first, so it is the backend most likely to be already
+// green.  #2664 measured the same asymmetry from the contract side — three
+// schemathesis findings the register recorded as CLOSED were still open on the
+// other backends, because all three fixes had landed on Hono alone.
+//
+// WHAT DIFFERS PER BACKEND is only the toolchain: how dependencies are
+// materialized and what command decides "this compiles".  The case iteration,
+// the verdict handling (rejected → nothing to compile; crashed → owned by the
+// generation register) and BOTH directions of the waiver ratchet are identical,
+// so they live here once and each leg supplies a recipe.  Same core/leg split
+// #2664 used for the schemathesis backends.
+// ---------------------------------------------------------------------------
+
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+import { caseId, type PairwiseCase, type Persistence } from "./axes.js";
+import { pairwiseCover } from "./cases.js";
+import { runPipeline } from "./harness.js";
+import { GENERATION_WAIVERS, waiverFor } from "./waivers.js";
+import { COMPILE_WAIVERS } from "./waivers-compile.js";
+
+/** What a backend must supply to get a compile leg. */
+export interface CompileRecipe {
+  /** `platform:` clause value — also the key both waiver registers match on. */
+  readonly platform: string;
+  /** Human name in the describe block. */
+  readonly label: string;
+  /** `LOOM_*` gate; the leg is skipped unless this is `"1"`. */
+  readonly enabled: boolean;
+  /**
+   * Narrow the cover's persistence axis. Omit for "every adapter this platform
+   * reaches" (`persistenceFor`). A leg passes a list only when an adapter is
+   * genuinely un-compilable rather than merely un-interesting — an adapter
+   * dropped for convenience is a hole with no register row.
+   */
+  readonly persistence?: readonly Persistence[];
+  /**
+   * Relative path from the emitted tree root to the project the compiler runs
+   * in. The pairwise composer emits one deployable named `d`, but each backend
+   * nests its project differently.
+   */
+  readonly projectDir: (root: string) => string;
+  /**
+   * Compile `proj`. Return `undefined` when it compiles, or the captured
+   * diagnostics when it does not. MUST NOT throw for an ordinary compile
+   * failure — a thrown error is a harness fault and fails the case loudly,
+   * which is the correct outcome for "the toolchain itself is broken" but the
+   * wrong one for "the emitted code is bad".
+   */
+  readonly compile: (proj: string, kase: PairwiseCase) => string | undefined;
+  /** Per-case timeout; toolchains differ by an order of magnitude. */
+  readonly timeoutMs: number;
+}
+
+/**
+ * Register one backend's compile leg.
+ *
+ * The ratchet runs BOTH ways, and the second direction is the one a leg that
+ * only ever runs by hand silently forfeits: a waived case that starts compiling
+ * fails until its entry is deleted. (That arm is why the first CI run of this
+ * corpus found four waivers whose bugs had been fixed weeks earlier.)
+ */
+export function describeCompileLeg(recipe: CompileRecipe): void {
+  const cases = pairwiseCover(recipe.platform, recipe.persistence);
+  const only = process.env.LOOM_PAIRWISE_COMPILE_CASE;
+  const selected = cases.filter((c) => !only || caseId(c) === only);
+  const scratch: string[] = [];
+
+  describe.skipIf(!recipe.enabled)(
+    `pairwise corpus — the emitted ${recipe.label} project compiles`,
+    () => {
+      afterAll(() => {
+        for (const d of scratch) fs.rmSync(d, { recursive: true, force: true });
+      });
+
+      it("the cover is non-empty (a leg that selects nothing passes vacuously)", () => {
+        expect(
+          selected.length,
+          `${recipe.platform}: pairwiseCover selected no cases`,
+        ).toBeGreaterThan(0);
+      });
+
+      it.each(selected.map((c) => [caseId(c), c] as const))(
+        "%s",
+        async (_id, kase: PairwiseCase) => {
+          const out = await runPipeline(kase, recipe.platform);
+
+          if (out.verdict === "rejected") {
+            // A named `loom.*` refusal is a legitimate answer and there is no
+            // project to compile. Say so rather than passing silently — a leg
+            // that quietly skips is how a compile tier becomes a no-op.
+            console.log(
+              `${caseId(kase)}: rejected by ${out.codes.join(", ")} — nothing to compile`,
+            );
+            return;
+          }
+          if (out.verdict === "crashed") {
+            // Owned by the generation oracle's register; asserting it again here
+            // would double-count one finding as two.
+            expect(
+              waiverFor(GENERATION_WAIVERS, kase, recipe.platform),
+              `${caseId(kase)} crashed in codegen with no generation waiver`,
+            ).toBeDefined();
+            return;
+          }
+
+          const outDir = fs.mkdtempSync(
+            path.join(os.tmpdir(), `loom-pw-${recipe.platform}-${caseId(kase)}-`),
+          );
+          scratch.push(outDir);
+          try {
+            for (const [rel, content] of out.files!) {
+              const abs = path.join(outDir, rel);
+              fs.mkdirSync(path.dirname(abs), { recursive: true });
+              fs.writeFileSync(abs, content);
+            }
+            const proj = recipe.projectDir(outDir);
+            expect(
+              fs.existsSync(proj),
+              `${caseId(kase)}: ${recipe.label} project emitted at ${path.relative(outDir, proj)}`,
+            ).toBe(true);
+
+            const failure = recipe.compile(proj, kase);
+            const waiver = waiverFor(COMPILE_WAIVERS, kase, recipe.platform);
+
+            if (waiver) {
+              expect(
+                failure,
+                `${caseId(kase)} now compiles on ${recipe.platform} — drop "${recipe.platform}" ` +
+                  `from its entry in test/pairwise/waivers-compile.ts (delete the entry when no ` +
+                  `platform is left) and close its row in the findings register`,
+              ).toBeDefined();
+            } else {
+              expect(
+                failure,
+                `${caseId(kase)}: emitted ${recipe.label} project failed to compile`,
+              ).toBeUndefined();
+            }
+          } finally {
+            fs.rmSync(outDir, { recursive: true, force: true });
+          }
+        },
+        recipe.timeoutMs,
+      );
+    },
+  );
+}
