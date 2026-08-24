@@ -11,7 +11,6 @@
 // `// TODO(flutter full-parity):` in `dart-model-emit.ts`.
 
 import type { PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
-import { MONEY_WIRE_SCALE } from "../money-scale.js";
 
 /** Peel a single `optional` layer — the wire optionality is carried once, at
  *  the field level, so the codec never double-wraps. */
@@ -26,8 +25,18 @@ function dartPrimitive(name: PrimitiveName): string {
     case "long":
       return "int";
     case "decimal":
-    case "money":
       return "double";
+    case "money":
+      // MONEY IS THE WIRE STRING, NOT A NUMBER (M-T1.21).  `money` persists as
+      // `NUMERIC(19,4)` and rides the wire as a fixed-scale decimal STRING
+      // (`money-scale.ts`, RS-12).  A Dart `double` is a binary float with
+      // ~15–17 significant digits, so it cannot hold that range exactly, and
+      // every read→write round trip through one re-quantizes the value.  The
+      // string IS the value here; `LoomMoney` (`money-runtime.ts`) owns the
+      // arithmetic on it, exactly as `decimal.js` does on the JS frontends and
+      // `System.Decimal` does on Feliz.  `decimal` (RS-24, a JSON number) is
+      // unaffected and stays `double` — the deliberate contrast.
+      return "String";
     case "bool":
       return "bool";
     case "datetime":
@@ -96,13 +105,14 @@ export function isIdentityJson(t: TypeIR): boolean {
   switch (base.kind) {
     case "primitive":
       // Every scalar (incl. `double`/`int`/`bool`/`dynamic`) is JSON-native;
-      // `datetime` needs ISO-string conversion, `File` is the `FileRef`
-      // object (`.toJson()` / `.fromJson`), and `money` rides the wire as a
-      // decimal STRING — `MONEY_WIRE_SCALE` digits, the shape every backend
-      // serves and every backend's request schema validates (`z.string()`).
-      // It was in this set, so a Flutter client POSTed a bare JSON number the
-      // backend rejects.
-      return base.name !== "datetime" && base.name !== "File" && base.name !== "money";
+      // `datetime` needs ISO-string conversion and `File` is the `FileRef`
+      // object (`.toJson()` / `.fromJson`).  `money` is back in this set for
+      // the reason it was once out of it: it rides the wire as a decimal
+      // STRING, and now it IS a Dart `String` (M-T1.21) — so the value the
+      // model holds is already the wire value, byte for byte, and `toJson`
+      // has nothing to convert.  (While money was a `double` this had to be
+      // false, because the double had to be re-formatted on the way out.)
+      return base.name !== "datetime" && base.name !== "File";
     case "id":
     case "enum":
       return true;
@@ -132,15 +142,12 @@ export function dartFromJson(t: TypeIR, access: string): string {
           // `money` rides the wire as a decimal STRING at MONEY_WIRE_SCALE
           // digits (`money-scale.ts`, RS-12) — every backend serves
           // `"12.5000"`, and the emitted `wire-spec.json` declares
-          // `{"type":"string","format":"decimal"}`.  This used to read
-          // `(x as num).toDouble()`, so EVERY money read threw
-          // `String is not a subtype of num` at runtime — invisible to
-          // `flutter analyze`/`build`, which cannot see a cast.
-          //
-          // The parse is tolerant of a bare number too (`'$x'` stringifies
-          // either shape): a hand-rolled `extern` endpoint outside the
-          // generated contract is then merely imprecise rather than fatal.
-          return `double.parse('\${${access}}')`;
+          // `{"type":"string","format":"decimal"}`.  It is TAKEN AS-IS: no
+          // parse, so nothing is lost and nothing can throw on a value wider
+          // than a binary float (M-T1.21).  `'${…}'` stringifies rather than
+          // casts, so a hand-rolled `extern` endpoint serving a bare JSON
+          // number still decodes instead of crashing.
+          return `'\${${access}}'`;
         case "bool":
           return `${access} as bool`;
         case "datetime":
@@ -181,13 +188,11 @@ export function dartToJson(t: TypeIR, access: string): string {
   if (isIdentityJson(base)) return access;
   switch (base.kind) {
     case "primitive":
-      // Non-identity primitives: `File` (the `FileRef` object), `datetime`,
-      // and `money` — which goes back out as the same fixed-scale decimal
-      // STRING the backend's request schema validates (`z.string()` +
-      // `^-?\d+(\.\d+)?$`).  A bare `double` here was rejected at the wire
-      // boundary on every write.
+      // Non-identity primitives: `File` (the `FileRef` object) and `datetime`.
+      // `money` is NOT here: it is a Dart `String` holding the wire's own
+      // digits, so it goes back out unchanged — the shape the backend's
+      // request schema validates (`z.string()` over `^-?\d+(\.\d+)?$`).
       if (base.name === "File") return `${access}.toJson()`;
-      if (base.name === "money") return `${access}.toStringAsFixed(${MONEY_WIRE_SCALE})`;
       return `${access}.toIso8601String()`;
     case "valueobject":
     case "entity":

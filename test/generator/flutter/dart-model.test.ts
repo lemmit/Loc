@@ -16,8 +16,15 @@ import { lowerModel } from "../../../src/ir/lower/lower.js";
 import { allContexts } from "../../../src/ir/types/loom-ir.js";
 import { parseString } from "../../_helpers/parse.js";
 
-// One aggregate with a couple of typed fields (incl. an optional + a
-// value-object property) and one value object.
+// One aggregate with a couple of typed fields (incl. an optional, a
+// value-object property, and BOTH decimal-ish primitives) and one value object.
+//
+// `listPrice: money` and `taxRate: decimal` sit side by side on purpose: they
+// are the two halves of RS-12/RS-24 and they diverge (M-T1.21).  `money` rides
+// the wire as a fixed-scale decimal STRING and is a Dart `String` — the wire's
+// own digits, held verbatim, because a `double` cannot carry `NUMERIC(19,4)`.
+// `decimal` rides it as a JSON NUMBER and stays a Dart `double`.  Pinning both
+// in one class is what makes the split a decision rather than an accident.
 const SRC = `
   valueobject Money {
     amount: decimal
@@ -28,6 +35,9 @@ const SRC = `
     aggregate Product {
       name: string
       price: Money
+      listPrice: money
+      rebate: money?
+      taxRate: decimal
       stock: int
       note: string?
     }
@@ -57,6 +67,10 @@ describe("flutter Dart wire-model emitter", () => {
     expect(dart).toContain("  final Money price;"); // nested value-object type
     expect(dart).toContain("  final int stock;");
     expect(dart).toContain("  final String? note;"); // optional → nullable
+    // money → String (the wire's digits); decimal → double.  The contrast.
+    expect(dart).toContain("  final String listPrice;");
+    expect(dart).toContain("  final String? rebate;");
+    expect(dart).toContain("  final double taxRate;");
 
     // Required vs optional constructor params.
     expect(dart).toContain("    required this.name,");
@@ -68,12 +82,25 @@ describe("flutter Dart wire-model emitter", () => {
     expect(dart).toContain("        stock: json['stock'] as int,");
     expect(dart).toContain("        price: Money.fromJson(json['price'] as Map<String, dynamic>),");
     expect(dart).toContain("        note: json['note'] == null ? null : json['note'] as String,");
+    // money decodes with NO parse and NO cast — the string IS the value.  The
+    // `(x as num).toDouble()` this used to emit threw on every money read.
+    expect(dart).toContain("        listPrice: '${json['listPrice']}',");
+    expect(dart).toContain("        rebate: json['rebate'] == null ? null : '${json['rebate']}',");
+    expect(dart).not.toContain("listPrice: (json['listPrice'] as num)");
+    expect(dart).not.toContain("double.parse('${json['listPrice']}')");
+    // CONTROL: `decimal` is a JSON number and keeps the numeric decode.
+    expect(dart).toContain("        taxRate: (json['taxRate'] as num).toDouble(),");
 
     // toJson — scalars pass through, nested record delegates to .toJson().
     expect(dart).toContain("  Map<String, dynamic> toJson() => {");
     expect(dart).toContain("        'name': name,");
     expect(dart).toContain("        'price': price.toJson(),");
     expect(dart).toContain("        'note': note,");
+    // money goes back out unchanged — it already IS the wire spelling, so no
+    // `toStringAsFixed` re-quantization stands between the field and the wire.
+    expect(dart).toContain("        'listPrice': listPrice,");
+    expect(dart).not.toContain("listPrice.toStringAsFixed");
+    expect(dart).toContain("        'taxRate': taxRate,");
   });
 
   it("emits a Dart class for a value object", async () => {

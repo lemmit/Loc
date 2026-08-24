@@ -22,6 +22,7 @@
 import type { EnrichedBoundedContextIR, StoreIR } from "../../ir/types/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
 import { dartType } from "./dart-types.js";
+import { usesMoney } from "./money-runtime.js";
 import {
   buildStateFields,
   buildStateInits,
@@ -171,5 +172,10 @@ export function renderFlutterStores(
   if (persisted.length > 0) header.push("", "import 'store_persist.dart';");
   if (needsModels(stores)) header.push("", "import 'models.dart';");
   const bodies = stores.map((s) => renderStore(s, contexts, byName.get(s.name)).join("\n"));
-  return `${[...header, "", bodies.join("\n\n"), ...urlSync].join("\n")}\n`;
+  // The money runtime (M-T1.21), on demand: a store's money cell seeds and its
+  // actions' money arithmetic both render `LoomMoney.` into these bodies.  Same
+  // marker `index.ts` emits `lib/money.dart` on, so neither can dangle.
+  const body = bodies.join("\n\n");
+  if (usesMoney(body)) header.push("", "import 'money.dart';");
+  return `${[...header, "", body, ...urlSync].join("\n")}\n`;
 }

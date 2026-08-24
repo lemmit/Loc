@@ -1576,6 +1576,14 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
         const temporal = ctx.target.exprTemporalBinary?.(left, right, expr);
         if (temporal !== undefined && temporal !== null) return temporal;
       }
+      // Money next, for EVERY operator (not just `+`/`-`): on a target whose
+      // money is not a numeric type, the comparisons are as wrong as the
+      // arithmetic — a string `<` orders '10' before '9'.  Same null-means-
+      // fall-through contract, so a target that omits the seam is byte-identical.
+      {
+        const money = ctx.target.exprMoneyBinary?.(left, right, expr);
+        if (money !== undefined && money !== null) return money;
+      }
       // Operator-spelling + strict-equality mapping lives in the target's leaf
       // (JS `===`/`!==`; F# `=`/`<>`).
       return ctx.target.exprBinary(left, right, expr.op);
