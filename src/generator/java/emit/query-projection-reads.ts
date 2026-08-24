@@ -27,7 +27,12 @@ import {
   promotedCapabilities,
 } from "../capability-filter.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
-import { JPQL_INTRINSIC_SQL, principalParamName, renderJpqlWhere } from "../render-jpql.js";
+import {
+  JPQL_INTRINSIC_SQL,
+  principalBindExpr,
+  principalParamName,
+  renderJpqlWhere,
+} from "../render-jpql.js";
 import { projectionRepoField } from "./projection-reads.js";
 import { projectionRowClass } from "./projection-state.js";
 import { collectWireImports, domainToWire, wireJavaType } from "./wire.js";
@@ -185,7 +190,7 @@ function aggregationQueryExpr(jpql: string, scope: AggregationScope): string {
   const binds = scope.binds
     .map(
       (a) =>
-        `.setParameter(${JSON.stringify(principalParamName(a))}, __cu == null ? null : __cu.${a}())`,
+        `.setParameter(${JSON.stringify(principalParamName(a))}, ${principalBindExpr(a, "__cu")})`,
     )
     .join("");
   return `entityManager.createQuery(${JSON.stringify(jpql)})${binds}`;
