@@ -3758,6 +3758,56 @@ export function validateAuditedOperationSupport(
   }
 }
 
+// ---------------------------------------------------------------------------
+// `audited` / `provenanced` × a RETURNING operation (audit 2026-08-24, A6).
+//
+// The Hono route builder dispatches to `emitReturningOperationRoute` only when
+// `op.returnType && !audit && !prov && !op.extern`; otherwise the operation
+// falls into the void-204 handler.  For
+// `operation take(n: int) audited : Item or NotFound` that means the route
+// DECLARES 204 only, throws the tagged result away, and audits `status: "ok"`
+// even when the operation returned its error variant — one keyword silently
+// rewriting the HTTP contract, with no diagnostic anywhere.  An in-code comment
+// called it "a later slice"; nothing gated it.
+//
+// Python emits both halves correctly (the audit record AND the tagged result +
+// its 7807 translation), so this is a per-backend gap, not a language one —
+// hence a hosting check rather than a structural one.  The refusal is the
+// honest version of the existing behaviour until the node returning route
+// folds the audit transaction in.
+const AUDITED_RETURNING_UNSUPPORTED = new Set(["node"]);
+export function validateAuditedReturningOperationSupport(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
+): void {
+  const offending = [...backendPlatforms].filter((p) => AUDITED_RETURNING_UNSUPPORTED.has(p));
+  if (offending.length === 0) return;
+  for (const agg of ctx.aggregates) {
+    for (const op of agg.operations) {
+      // Only a PUBLIC op drives a route at all, and only a route can lose a
+      // return contract — mirrors `auditOps`/`provOps` in the route builder.
+      if (!op.returnType || op.visibility !== "public") continue;
+      // `extern` returning ops are a separate (declared) seam — the body lives
+      // outside the toolchain, so the void fall-through is not this bug.
+      if (op.extern) continue;
+      const modifier = op.audited ? "audited" : opHasProvSite(op) ? "provenanced" : undefined;
+      if (!modifier) continue;
+      diags.push({
+        severity: "error",
+        code: "loom.audited-returning-operation-unsupported",
+        message: diagMessage("loom.audited-returning-operation-unsupported", {
+          name: agg.name,
+          op: op.name,
+          modifier,
+          platforms: offending.join(", "),
+        }),
+        source: `${ctx.name}/${agg.name}`,
+      });
+    }
+  }
+}
+
 export function validateDataSourceUnwiredKnobs(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const ds of sys.dataSources) {
     for (const knob of UNWIRED_KNOBS) {
