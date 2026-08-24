@@ -210,3 +210,130 @@ system FulfillmentSys {
     expect(body).not.toContain("Phoenix.PubSub.broadcast");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The DURABLE half of the same rule (transactional outbox, channels.md).
+//
+// A `retention: log | work` channel makes `Channels.dispatch/2` an
+// `__loom_outbox` INSERT rather than a fan-out, so it has to share the persist
+// transaction — commit means "row saved AND event owed", rollback erases both.
+// The PubSub BROADCAST rode along inside that transaction, which breaks the
+// very guarantee the non-durable branch above establishes: a commit failure
+// after the broadcast leaves SSE / LiveView subscribers holding an event whose
+// write never happened, and there is no "unsend".
+//
+// Correct split: bind the event struct BEFORE the transaction (that is what
+// keeps `loom_event_<i>` in scope on both sides), INSERT inside, broadcast in
+// the post-commit `{:ok, saved}` arm.
+const DURABLE = `
+system Durable {
+  subdomain Sales {
+    context Ordering {
+      error Refused { message: string }
+      event OrderPlaced { order: Order id, at: datetime }
+      event OrderSettled { order: Order id, at: datetime }
+      aggregate Order with crudish {
+        total: int
+        status: string
+        operation place() {
+          status := "placed"
+          emit OrderPlaced { order: this.id, at: now() }
+        }
+        operation settle(): Order or Refused {
+          status := "settled"
+          emit OrderSettled { order: this.id, at: now() }
+        }
+      }
+      repository Orders for Order { }
+      channel Lifecycle {
+        carries: OrderPlaced, OrderSettled
+        delivery: broadcast
+        retention: log
+      }
+    }
+  }
+  api SalesApi from Sales
+  storage primarySql { type: postgres }
+  resource ordState { for: Ordering, kind: state, use: primarySql }
+  deployable api {
+    platform: elixir
+    contexts: [Ordering]
+    dataSources: [ordState]
+    serves: SalesApi
+    port: 4000
+  }
+}
+`;
+
+describe("vanilla — durable emit: outbox INSERT inside the tx, broadcast after commit", () => {
+  /** The body of one operation function, from its `def` to the next one. */
+  const bodyOf = (ctx: string, fn: string): string => {
+    const start = ctx.indexOf(`def ${fn}(%`);
+    expect(start, `${fn}/2 was not emitted`).toBeGreaterThan(-1);
+    const rest = ctx.slice(start + 1);
+    const end = rest.indexOf("\n  @doc ");
+    return end === -1 ? rest : rest.slice(0, end);
+  };
+
+  /** Line index of `needle` within `body`, or -1. */
+  const lineOf = (body: string, needle: string): number =>
+    body.split("\n").findIndex((l) => l.includes(needle));
+
+  for (const fn of ["place_order", "settle_order"] as const) {
+    it(`${fn}: the outbox INSERT is inside \`Repo.transaction\`, the broadcast is not`, async () => {
+      const ctx = get(await generateSystemFiles(DURABLE), "lib/api/ordering.ex");
+      const body = bodyOf(ctx, fn);
+
+      const bind = lineOf(body, "loom_event_0 = %Api.Ordering.Events.");
+      const txOpen = lineOf(body, "Api.Repo.transaction(fn ->");
+      const dispatch = lineOf(body, "Api.Channels.dispatch(loom_event_0");
+      const txClose = lineOf(body, "    end)");
+      const commitArm = lineOf(body, "case tx_result do");
+      const broadcast = lineOf(body, "Phoenix.PubSub.broadcast(");
+
+      for (const [name, at] of Object.entries({
+        bind,
+        txOpen,
+        dispatch,
+        txClose,
+        commitArm,
+        broadcast,
+      })) {
+        expect(at, `${fn}: \`${name}\` not found in the emitted body`).toBeGreaterThan(-1);
+      }
+
+      // The event struct is bound BEFORE the transaction — without that hoist
+      // the post-commit arm could not name it.
+      expect(bind).toBeLessThan(txOpen);
+      // The outbox INSERT is INSIDE the transaction (atomic with the write).
+      expect(dispatch).toBeGreaterThan(txOpen);
+      expect(dispatch).toBeLessThan(txClose);
+      // The broadcast is OUTSIDE it, in the post-commit arm.
+      expect(broadcast).toBeGreaterThan(txClose);
+      expect(broadcast).toBeGreaterThan(commitArm);
+    });
+  }
+
+  it("keeps the outer result shape: `{:ok, saved}` / `{:error, reason}`", async () => {
+    // `Repo.transaction` used to BE the return value.  Unwrapping it through
+    // `tx_result` is what makes room for the post-commit broadcast, and the
+    // caller (the controller's `_result/2`) must not be able to tell.
+    const ctx = get(await generateSystemFiles(DURABLE), "lib/api/ordering.ex");
+    const body = bodyOf(ctx, "place_order");
+    expect(body).toContain("tx_result =");
+    expect(body).toContain("      {:ok, saved} ->\n        Phoenix.PubSub.broadcast");
+    expect(body).toContain("        {:ok, saved}");
+    expect(body).toContain("      {:error, reason} ->\n        {:error, reason}");
+  });
+
+  it("an EPHEMERAL channel keeps the plain post-commit fan-out (no transaction at all)", async () => {
+    // The byte-identical control: only `retention: log|work` pulls the emit
+    // into a transaction, so a fix that wrapped every emitting op would be
+    // caught here.
+    const ephemeral = DURABLE.replace("retention: log", "retention: ephemeral");
+    const ctx = get(await generateSystemFiles(ephemeral), "lib/api/ordering.ex");
+    const body = bodyOf(ctx, "place_order");
+    expect(body).not.toContain("Api.Repo.transaction(fn ->");
+    expect(body).toContain("Phoenix.PubSub.broadcast(");
+  });
+});

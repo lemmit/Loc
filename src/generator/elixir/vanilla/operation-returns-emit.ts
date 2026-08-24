@@ -379,8 +379,59 @@ export function renderEmitDispatchLines(
    *  line through the `<App>.Channels` tee (see channels-emit.ts). */
   channels?: ElixirChannelsCfg,
 ): string[] {
-  const appModule = rc.contextModule.split(".")[0]!;
+  const flat = { bind: baseIndent, dispatch: baseIndent, broadcast: baseIndent };
   const lines: string[] = [];
+  for (const p of emitParts(op, rc, hasDispatcher, flat, channels)) {
+    const emitLines = [...p.bind, ...p.dispatch, ...p.broadcast];
+    lines.push(...emitLines);
+    if (opFragments && construct) {
+      opFragments.push({
+        fragmentText: emitLines.join("\n"),
+        subRegions: [{ rel: [1, emitLines.length], origin: p.origin, construct }],
+      });
+    }
+  }
+  return lines;
+}
+
+/** The three PHASES of one hoisted `emit`, kept separable because a DURABLE
+ *  channel has to split them across the persist-transaction boundary. */
+interface OneEmitParts {
+  /** `loom_event_<i> = %<Ctx>.Events.<E>{…}` + the `event_dispatched` narrative
+   *  line.  Reads only `record` / params, so it is hoistable ahead of the
+   *  transaction — which is what puts the event variable in scope on BOTH
+   *  sides of it. */
+  bind: string[];
+  /** The `Dispatcher` / `<App>.Channels` call.  For a DURABLE channel this is
+   *  the `__loom_outbox` INSERT, so it MUST run inside the persist transaction:
+   *  "row saved" and "event owed" commit or roll back as one. */
+  dispatch: string[];
+  /** `Phoenix.PubSub.broadcast(...)` — the SSE / LiveView wire.  MUST run AFTER
+   *  the transaction commits.  Inside it, a commit failure still rolls the write
+   *  back, but the broadcast has already left: a subscriber observes an event
+   *  whose write never happened, and there is no compensating "unsend". */
+  broadcast: string[];
+  origin: Extract<StmtIR, { kind: "emit" }>["origin"];
+}
+
+interface EmitIndents {
+  bind: string;
+  dispatch: string;
+  broadcast: string;
+}
+
+/** Per-`emit` phase builder shared by {@link renderEmitDispatchLines} (which
+ *  concatenates the three phases back together at one indent — byte-identical
+ *  to the pre-split rendering) and {@link renderDurableEmitDispatchParts}. */
+function emitParts(
+  op: OperationIR,
+  rc: RenderCtx,
+  hasDispatcher: boolean,
+  indents: EmitIndents,
+  channels?: ElixirChannelsCfg,
+): OneEmitParts[] {
+  const appModule = rc.contextModule.split(".")[0]!;
+  const out: OneEmitParts[] = [];
   let i = 0;
   for (const s of op.statements) {
     if (s.kind !== "emit") continue;
@@ -394,22 +445,63 @@ export function renderEmitDispatchLines(
       { name: "event_type", valueExpr: `"${upperFirst(s.eventName)}"` },
       ...(rc.agg ? [{ name: "aggregate", valueExpr: `"${upperFirst(rc.agg.name)}"` }] : []),
     ]);
-    const emitLines = [`${baseIndent}${evVar} = ${struct}`, `${baseIndent}${logCall}`];
     const dispatchCall = elixirDispatchCall(evVar, rc.contextModule, hasDispatcher, channels);
-    if (dispatchCall) emitLines.push(`${baseIndent}${dispatchCall}`);
-    emitLines.push(
-      `${baseIndent}Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", ${evVar})`,
-    );
-    lines.push(...emitLines);
-    if (opFragments && construct) {
-      opFragments.push({
-        fragmentText: emitLines.join("\n"),
-        subRegions: [{ rel: [1, emitLines.length], origin: s.origin, construct }],
-      });
-    }
+    out.push({
+      bind: [`${indents.bind}${evVar} = ${struct}`, `${indents.bind}${logCall}`],
+      dispatch: dispatchCall ? [`${indents.dispatch}${dispatchCall}`] : [],
+      broadcast: [
+        `${indents.broadcast}Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", ${evVar})`,
+      ],
+      origin: s.origin,
+    });
     i++;
   }
-  return lines;
+  return out;
+}
+
+/** The DURABLE-emit split of {@link renderEmitDispatchLines}: the event binds
+ *  hoisted ahead of the persist transaction, the outbox INSERT inside it, and
+ *  the PubSub broadcast after it commits.
+ *
+ *  Why the split exists.  A durable channel's `dispatch` is a table INSERT, so
+ *  it has to share the persist transaction — but the broadcast rode along with
+ *  it, which meant SSE and LiveView subscribers could observe an event whose
+ *  write then failed to commit.  The non-durable branches already document (and
+ *  do) the right thing: dispatch AFTER `{:ok, saved}`.  This makes the durable
+ *  branch agree, without giving up the outbox's atomicity.
+ *
+ *  Hoisting the BIND is what makes it possible: `loom_event_<i>` is then in
+ *  scope both inside the transaction fn and in the post-commit arm, and the
+ *  struct's field expressions read `record` / params, which are bound earlier
+ *  still. */
+export function renderDurableEmitDispatchParts(
+  op: OperationIR,
+  rc: RenderCtx,
+  hasDispatcher: boolean,
+  indents: EmitIndents,
+  construct?: string,
+  opFragments?: OpFragment[],
+  channels?: ElixirChannelsCfg,
+): { bind: string[]; dispatch: string[]; broadcast: string[] } {
+  const bind: string[] = [];
+  const dispatch: string[] = [];
+  const broadcast: string[] = [];
+  for (const p of emitParts(op, rc, hasDispatcher, indents, channels)) {
+    bind.push(...p.bind);
+    dispatch.push(...p.dispatch);
+    broadcast.push(...p.broadcast);
+    // The three phases are no longer contiguous, so the source map anchors on
+    // the BIND chunk — the lines that actually carry the `emit`'s own
+    // expressions.  (`fragment()` silently skips text it cannot locate, so a
+    // split fragment would just lose coverage.)
+    if (opFragments && construct) {
+      opFragments.push({
+        fragmentText: p.bind.join("\n"),
+        subRegions: [{ rel: [1, p.bind.length], origin: p.origin, construct }],
+      });
+    }
+  }
+  return { bind, dispatch, broadcast };
 }
 
 /** Does this aggregate have any public returning operation (→ the controller
@@ -543,17 +635,32 @@ export function renderReturningOpFunction(
   // `Repo.transaction` as the persist — see the `txWrapEmits` tail below.  The
   // dispatch lines then sit two columns deeper.
   const txWrapEmits = hoistEmits && opEmitsDurableEvent(op, channels);
-  const dispatchLines = hoistEmits
-    ? renderEmitDispatchLines(
+  const dispatchLines =
+    hoistEmits && !txWrapEmits
+      ? renderEmitDispatchLines(
+          op,
+          renderCtx,
+          hasDispatcher,
+          "        ",
+          `${ctx.name}.${agg.name}.${op.name}`,
+          opFragments,
+          channels,
+        )
+      : [];
+  // Durable emit: the three phases straddle the transaction — binds ahead of it
+  // (so the event var is in scope on both sides), the outbox INSERT inside it,
+  // the PubSub broadcast only after it commits.
+  const durableEmit = txWrapEmits
+    ? renderDurableEmitDispatchParts(
         op,
         renderCtx,
         hasDispatcher,
-        txWrapEmits ? "          " : "        ",
+        { bind: "    ", dispatch: "          ", broadcast: "        " },
         `${ctx.name}.${agg.name}.${op.name}`,
         opFragments,
         channels,
       )
-    : [];
+    : { bind: [], dispatch: [], broadcast: [] };
   const lastIdx = op.statements.length - 1;
   // Per-statement index disambiguates provenance temp vars across writes.  When
   // persisting, the hoisted `emit`s and the relocated trailing success `return`
@@ -697,17 +804,26 @@ export function renderReturningOpFunction(
     tailLines = fallThrough ? [`    {:ok, ${wireMap("record", false)}}`] : [];
   } else if (txWrapEmits) {
     // Durable emit (dispatch-delivery-semantics.md §1): `Channels.dispatch/2`
-    // INSERTs an `__loom_outbox` row instead of fanning out, so persist + emit
-    // (+ any prov/audit rows) run in ONE `Repo.transaction` — commit records
-    // "this event is owed", rollback erases both.  The result is unwrapped
-    // post-commit so the returned tuple shape is unchanged.
+    // INSERTs an `__loom_outbox` row instead of fanning out, so persist + the
+    // outbox INSERT (+ any prov/audit rows) run in ONE `Repo.transaction` —
+    // commit records "this event is owed", rollback erases both.  The result is
+    // unwrapped post-commit so the returned tuple shape is unchanged.
+    //
+    // The PubSub BROADCAST does NOT ride that transaction.  It is the
+    // SSE / LiveView wire, and a broadcast inside the tx is observable before
+    // the commit: a rollback then leaves subscribers holding an event whose
+    // write never happened, with no way to retract it.  So the event struct is
+    // bound BEFORE the transaction (that is what keeps `loom_event_<i>` in
+    // scope on both sides), the outbox INSERT stays inside, and the broadcast
+    // fires in the `{:ok, saved}` arm — the same after-commit ordering the
+    // non-durable branch below already documents.
     const txBody = [
       `    tx_result =`,
       `      ${appModule}.Repo.transaction(fn ->`,
       `      case ${repoMod}.persist_change(changeset) do`,
       `        {:ok, saved} ->`,
       ...txTail,
-      ...dispatchLines,
+      ...durableEmit.dispatch,
       `          saved`,
       ``,
       `        {:error, reason} ->`,
@@ -717,6 +833,8 @@ export function renderReturningOpFunction(
       ``,
     ];
     tailLines = [
+      ...durableEmit.bind,
+      ...(durableEmit.bind.length > 0 ? [``] : []),
       `    changeset =`,
       `      record`,
       `      |> Ecto.Changeset.change(%{})${putBlock}${versionLock}`,
@@ -724,6 +842,7 @@ export function renderReturningOpFunction(
       ...txBody,
       `    case tx_result do`,
       `      {:ok, saved} ->`,
+      ...durableEmit.broadcast,
       ...(aggregateSuccess
         ? [`        {:ok, ${wireMap("saved", mutatesRefColl)}}`]
         : [`        record = saved`, `        ${shapeCReturn()}`]),
@@ -896,9 +1015,16 @@ export function renderReturningOpFunction(
       ? [...beforeBind, ...paramReads, ...wrapOpBodyWithGuards(guardClauses, innerLines)]
       : [...beforeBind, ...paramReads, ...innerLines]
   ).join("\n");
-  // The guard denial adds an `{:error, atom()}` outcome to the result union; the
-  // controller's `<op>_<agg>_result/2` gains the matching 403/422 clauses.
-  const denialSpec = guardClauses.length > 0 ? " | {:error, atom()}" : "";
+  // The guard denial adds a TYPED-DENIAL outcome to the result union; the
+  // controller's `<op>_<agg>_result/2` gains the matching 403/409/422 clauses.
+  //
+  // The reason is a 2-TUPLE, not a bare atom: since the typed denial protocol
+  // (`denial.ts`) a guard short-circuits to `{:error, {:forbidden, msg}}` /
+  // `{:precondition_failed, msg}` / `{:disallowed, msg}` /
+  // `{:validation_failed, [%{…}]}` — the tag carries the rung and the second
+  // element the RFC 7807 `detail` (or the `errors[]` list).  The spec said
+  // `{:error, atom()}`, which no denial this function can produce matches.
+  const denialSpec = guardClauses.length > 0 ? " | {:error, {atom(), term()}}" : "";
 
   return `  @doc "Returning operation \`${op.name}\` on \`${aggPascal}\` (exception-less)."
   @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
