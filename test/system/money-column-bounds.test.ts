@@ -17,8 +17,7 @@
 
 import { describe, expect, it } from "vitest";
 import { MONEY_PRECISION, MONEY_WIRE_SCALE } from "../../src/generator/money-scale.js";
-import { generateSystems } from "../../src/system/index.js";
-import { parseString } from "../_helpers/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
 const SYSTEM = (platform: string) => `system MoneyCols {
   subdomain S { context C {
@@ -35,9 +34,9 @@ const SYSTEM = (platform: string) => `system MoneyCols {
  *  files share an extension (a project emits many `.exs`), so the extension
  *  alone would pick an arbitrary one and assert nothing. */
 async function emitted(platform: string, suffix: string, needle: string): Promise<string> {
-  const { model, errors } = await parseString(SYSTEM(platform));
-  if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
-  const files = generateSystems(model).files;
+  // The helper asserts phases ①/④/⑦ itself, so the hand-rolled
+  // parse-and-check above it is redundant (M-T9.35).
+  const files = await generateSystemFiles(SYSTEM(platform));
   const hit = [...files.entries()].find(([k, v]) => k.endsWith(suffix) && v.includes(needle));
   if (!hit) throw new Error(`no generated ${suffix} containing ${needle}`);
   return hit[1];

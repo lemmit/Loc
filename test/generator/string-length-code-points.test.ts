@@ -31,7 +31,7 @@ const SOURCE = `
           // Message-LESS single-field shapes -> each backend's NATIVE chain.
           invariant code.length >= 3
           invariant code.length <= 16
-          create(c: string) { code := c }
+          create(code: string) { }
           operation relabel(label: string) {
             // Messaged -> the refine / predicate carrier instead.
             precondition label.length >= 4 message "Label needs at least 4 characters"

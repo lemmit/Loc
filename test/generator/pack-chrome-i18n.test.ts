@@ -51,7 +51,7 @@ const SYSTEM = (platform: string, design: string, body: string) => `
     api SalesApi from Sales
     ui Web {
       api Sales: SalesApi
-      page Home { route: "/" body: ${body} }
+      page Home { route: "/" state { status: string = "" } body: ${body} }
     }
     storage primary { type: postgres }
     resource salesState { for: Sales, kind: state, use: primary }

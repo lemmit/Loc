@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // Hono canonical-destroy consumption.
@@ -29,9 +28,12 @@ const FIXTURE = `system AcmeDel {
     }
   }
   api OpsApi from Ops
+  storage pg { type: postgres }
+  resource opsState { for: Ops, kind: state, use: pg }
   deployable opsApi {
     platform: node
     contexts: [Ops]
+    dataSources: [opsState]
     serves: OpsApi
     port: 3000
   }
@@ -39,9 +41,7 @@ const FIXTURE = `system AcmeDel {
 `;
 
 async function build() {
-  const { model, errors } = await parseString(FIXTURE);
-  if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
-  return generateSystems(model).files;
+  return await generateSystemFiles(FIXTURE);
 }
 
 function find(files: Map<string, string>, re: RegExp): string {
