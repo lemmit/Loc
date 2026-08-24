@@ -51,6 +51,7 @@ import {
   validateAuthUiFramework,
   validateChannelWiring,
   validateChartSupport,
+  validateColumnlessProjectionSources,
   validateComposeUniqueness,
   validateContextFilterSupport,
   validateCurrentUserNeedsAuthUi,
@@ -191,6 +192,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateQueryTimeProjectionBackend(sys, diags);
     validateWholeTableAggregationBackend(sys, diags);
     validateGroupedProjectionBackend(sys, diags);
+    validateColumnlessProjectionSources(sys, diags);
     validateWorkflowSourceProjectionBackend(sys, diags);
     validateProjectionSourceProjectionBackend(sys, diags);
     validateDefaultDeny(sys, diags);

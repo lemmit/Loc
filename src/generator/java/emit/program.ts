@@ -16,6 +16,7 @@
 // ---------------------------------------------------------------------------
 
 import { lines } from "../../../util/code-builder.js";
+import { javaLogEvent } from "../../_obs/render-java.js";
 
 /** Spring Boot release the generated projects build against.  Bumping it
  *  is a single-constant change validated by `LOOM_JAVA_BUILD=1`. */
@@ -307,7 +308,7 @@ export function renderApplication(basePkg: string): string {
     `@SpringBootApplication`,
     `public class Application {`,
     `    public static void main(String[] args) {`,
-    `        CatalogLog.event("server_starting", "info");`,
+    `        CatalogLog.event(${javaLogEvent("serverStarting")});`,
     `        SpringApplication.run(Application.class, args);`,
     `    }`,
     `}`,
@@ -414,9 +415,7 @@ export function renderFilesController(
     ``,
     `import java.io.IOException;`,
     `import java.util.UUID;`,
-    `import org.springframework.http.HttpStatus;`,
     `import org.springframework.http.MediaType;`,
-    `import org.springframework.http.ProblemDetail;`,
     `import org.springframework.http.ResponseEntity;`,
     `import org.springframework.web.bind.annotation.GetMapping;`,
     `import org.springframework.web.bind.annotation.PathVariable;`,
@@ -424,6 +423,7 @@ export function renderFilesController(
     `import org.springframework.web.bind.annotation.RequestParam;`,
     `import org.springframework.web.bind.annotation.RestController;`,
     `import org.springframework.web.multipart.MultipartFile;`,
+    `import ${basePkg}.domain.common.AggregateNotFoundException;`,
     `import ${basePkg}.domain.common.FileRef;`,
     `import ${basePkg}.resources.${resourceClass};`,
     ``,
@@ -439,25 +439,15 @@ export function renderFilesController(
     `    }`,
     ``,
     `    @GetMapping("/files/{key}")`,
-    `    public ResponseEntity<?> download(@PathVariable String key) {`,
+    `    public ResponseEntity<byte[]> download(@PathVariable String key) {`,
     `        var obj = ${resourceClass}.${resourceName}GetBytes(key);`,
     `        if (obj == null) {`,
-    // `ResponseEntity.notFound().build()` writes NO body, and ApiExceptionAdvice
-    // never sees this: the advice fires on THROWN exceptions, and a plain return
-    // is not one.  So the blob-absence 404 answered a bodiless second error
-    // contract on a wire already committed to problem+json.  Built with the same
-    // `ProblemDetail` + `setProperty("type", …)` the advice's own responder uses
-    // (RS-9 — Spring's mixin suppresses the default about:blank `type` on
-    // getType(), so it has to ride as a property).  The status stays a literal
-    // 404: a bucket key is not an aggregate id, so it is not the remappable
-    // `NotFound` rung.
-    `            var problem = ProblemDetail.forStatus(HttpStatus.NOT_FOUND);`,
-    `            problem.setTitle("Not Found");`,
-    `            problem.setDetail("No stored object for that key");`,
-    `            problem.setProperty("type", "about:blank");`,
-    `            return ResponseEntity.status(404)`,
-    `                .contentType(MediaType.APPLICATION_PROBLEM_JSON)`,
-    `                .body(problem);`,
+    // M-T6.39 — throw the app's ONE 404 carrier instead of the framework's
+    // bodiless `notFound()`.  This is an ordinary `@RestController`, so
+    // `ApiExceptionAdvice.onNotFound` (a global `@RestControllerAdvice`) renders
+    // it as the same RFC 7807 envelope every other absent read answers with —
+    // including the `httpStatus NotFound -> <Code>` override.
+    `            throw new AggregateNotFoundException("File " + key + " not found");`,
     `        }`,
     `        return ResponseEntity.ok().contentType(MediaType.parseMediaType(obj.contentType())).body(obj.bytes());`,
     `    }`,

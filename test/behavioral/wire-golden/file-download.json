@@ -1,0 +1,150 @@
+{
+  "case": "file-download",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/attachments",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "GET",
+      "path": "/api/attachments/{id}",
+      "status": 200,
+      "body": {
+        "doc": null,
+        "id": "<volatile:key>",
+        "title": "spec.pdf",
+        "version": 1
+      }
+    },
+    {
+      "seq": 2,
+      "method": "GET",
+      "path": "/api/attachments/by_title?title=spec.pdf",
+      "status": 200,
+      "body": {
+        "doc": null,
+        "id": "<volatile:key>",
+        "title": "spec.pdf",
+        "version": 1
+      }
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/attachments",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "doc": null,
+            "id": "<volatile:key>",
+            "title": "spec.pdf",
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/api/attachments/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 5,
+      "method": "GET",
+      "path": "/api/attachments/{id}",
+      "status": 200,
+      "body": {
+        "doc": null,
+        "id": "<volatile:key>",
+        "title": "spec-v2.pdf",
+        "version": 2
+      }
+    },
+    {
+      "seq": 6,
+      "method": "DELETE",
+      "path": "/api/attachments/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 7,
+      "method": "GET",
+      "path": "/api/attachments/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Attachment {id} not found",
+        "instance": "/api/attachments/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 8,
+      "method": "PATCH",
+      "path": "/api/attachments",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/attachments",
+        "instance": "/api/attachments",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/__loom_no_such_path",
+      "status": 404,
+      "body": {
+        "detail": "no route for GET /__loom_no_such_path",
+        "instance": "/__loom_no_such_path",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 10,
+      "method": "POST",
+      "path": "/api/attachments",
+      "status": 400,
+      "body": {
+        "detail": "Malformed JSON in request body",
+        "instance": "/api/attachments",
+        "status": 400,
+        "title": "Bad Request",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/files/__loom_absent",
+      "status": 404,
+      "body": {
+        "detail": "File __loom_absent not found",
+        "instance": "/files/__loom_absent",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    }
+  ]
+}

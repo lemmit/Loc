@@ -237,21 +237,15 @@ export function renderHttpIndex(
         `  });`,
         `  // File download — streams the stored object back with its contentType.`,
         `  app.get("/files/:key", async (c) => {`,
-        `    const obj = await ${fileUpload.resource}$getBytes(c.req.param("key"));`,
-        // The blob-absence 404 answers RFC 7807 like every other fault on this
-        // wire.  It used to send `{"error":"not found"}` as application/json —
-        // a second error contract, and a different one again on each of the five
-        // backends (empty bodies on dotnet/java, `{"error":…}` here, on python
-        // and elixir).  Routed through the SHARED framework envelope so the
-        // title/type/instance members cannot drift from the root handlers'.
-        // The status stays a literal 404: this addresses a bucket key, not an
-        // aggregate id, so it is not the remappable `NotFound` rung
-        // (`ir/util/openapi-errors.ts`).
-        `    if (!obj) {`,
-        `      return c.body(frameworkProblemBody(404, "No stored object for that key", c.req.path), 404, {`,
-        `        "content-type": "application/problem+json",`,
-        `      });`,
-        `    }`,
+        `    const key = c.req.param("key");`,
+        `    const obj = await ${fileUpload.resource}$getBytes(key);`,
+        // M-T6.39 — an absent object raises the app's ONE 404 producer instead of
+        // hand-building a body.  This route is mounted on the ROOT app, which
+        // carries the domain ladder below (M-T6.28), so the throw is rendered as
+        // the same RFC 7807 envelope every other absent read answers with —
+        // including the `httpStatus NotFound -> <Code>` override, which used to
+        // move every 404 in the app EXCEPT this one.
+        "    if (!obj) throw new AggregateNotFoundError(`File ${key} not found`);",
         `    // Copy into a standalone ArrayBuffer — Hono's c.body() rejects a`,
         `    // Uint8Array whose backing buffer is only ArrayBufferLike.`,
         `    const ab = obj.body.buffer.slice(`,

@@ -353,6 +353,11 @@ export const DIAGNOSTIC_MESSAGES = {
     `Abstract aggregate '${p.name}' cannot declare a '${p.kw}' action — abstract ` +
     `bases are never instantiated and have no polymorphic dispatch in v1. ` +
     `Declare it on each concrete subtype.`,
+  "loom.abstract-aggregate-contains": (p: { name: unknown; member: unknown }) =>
+    `Abstract aggregate '${p.name}' cannot declare 'contains ${p.member}' — an abstract ` +
+    `base owns no repository and its concretes do not inherit its parts, so the part's ` +
+    `table would have no reader and no writer. Declare the containment on each concrete ` +
+    `subtype instead.`,
   "loom.es-tph-forced-own-table": (p: { name: unknown; why: unknown; baseName: unknown }) =>
     `'${p.name}' is ${p.why} but extends the sharedTable (TPH) base '${p.baseName}'. ` +
     `An event-sourced / document concrete cannot share the base table — declare ` +
@@ -1167,6 +1172,18 @@ export const DIAGNOSTIC_MESSAGES = {
     `projection '${p.name}': 'select ${p.field} = …' is per-row but not one of the ` +
     `'group by' columns, so it has no single value per group. Select a grouping ` +
     `column directly, aggregate it (sum/min/max/…), or add it to the 'group by'.`,
+  // The direct-table arms (`select … = count()/sum(…)`, `group by`) push the
+  // aggregation into SQL, so they name COLUMNS on the source aggregate's own
+  // table.  A source that has no such columns — an event-sourced stream, a
+  // `shape: document` jsonb blob, a TPC abstract base with no table of its own
+  // — produced code that did not compile on EVERY backend, silently.  Not an
+  // adapter boundary: the way out is the shape of the read, not the deployable.
+  "loom.projection-columnless-source": (p: { name: unknown; ctxName: unknown; reason: unknown }) =>
+    `Query-time projection '${p.ctxName}.${p.name}' ${p.reason}. The aggregating read is ` +
+    `computed IN SQL — that is the point of the shape — so it can only name real columns. ` +
+    `Drop the aggregation for the per-row read (which hydrates each row through the ` +
+    `aggregate's repository), fold the number into a materialized projection ('on(e: …)'), ` +
+    `or source the aggregation from a relationally-stored aggregate.`,
   "loom.projection-key-unknown": (p: { name: unknown; correlationField: unknown }) =>
     `projection '${p.name}' is keyed by '${p.correlationField}', ` +
     `which is not a declared state field.  Declare it as an id-shaped field, ` +
@@ -1299,19 +1316,15 @@ export const DIAGNOSTIC_MESSAGES = {
     `phoenixLiveView frontend — a LiveView store is a server-side per-process struct ` +
     `with no browser storage, and URL state is owned by the page's \`handle_params\`. ` +
     `Use \`persist: memory\` here; the persistence tiers ship on the SPA frontends.`,
-  "loom.store-lifetime-target-unsupported": (p: {
-    where: unknown;
-    lifetime: unknown;
-    platform: unknown;
-  }) =>
-    `${p.where}: \`persist: ${p.lifetime}\` is not implemented on the ${p.platform} frontend — ` +
-    `the emitted store is IN-MEMORY regardless, so the state is lost on restart and not ` +
-    `shareable by URL, with nothing in the build output to say so.  Use \`persist: memory\` ` +
-    `here, or host this ui on a SPA frontend (react / vue / svelte / angular / feliz).  ` +
-    `Support is planned; this gate exists so the degradation is honest until it lands.`,
-  // The FIELD-scoped half of the same code: feliz implements the ladder, but
-  // persistence there crosses the JS boundary per field, so a field type with no
-  // total F# conversion still can't ride it.
+  // `loom.store-lifetime-target-unsupported` is FIELD-SCOPED ONLY now.  The
+  // platform-wide arm (a frontend whose store emitter ignored `persist:` and
+  // built an in-memory store regardless) is gone with its last entry: the
+  // ladder ships on every frontend — the four JS store builders, feliz
+  // (`generator/feliz/store-persist.ts`) and flutter
+  // (`generator/flutter/store-persist.ts`).  What survives on those last two is
+  // narrower: persistence there crosses an UNTYPED boundary per FIELD, so a
+  // field type with no total conversion in that language's codec still can't
+  // ride it, and would be silently dropped from the stored state.
   "loom.store-lifetime-target-unsupported#field": (p: {
     where: unknown;
     name: unknown;
@@ -1323,6 +1336,17 @@ export const DIAGNOSTIC_MESSAGES = {
     `string / int / long / bool.  A datetime, duration, guid, enum, entity or value-object ` +
     `field would be silently dropped from the stored blob.  Give the field one of the ` +
     `covered types, or use \`persist: memory\` for this store.`,
+  "loom.store-lifetime-target-unsupported#flutter-field": (p: {
+    where: unknown;
+    name: unknown;
+    lifetime: unknown;
+  }) =>
+    `${p.where}: field '${p.name}' cannot be persisted on the flutter frontend — ` +
+    `\`persist: ${p.lifetime}\` crosses an untyped boundary per field, and the Dart codec ` +
+    `covers string / guid / id / enum / int / long / decimal / money / bool / datetime ` +
+    `fields plus arrays of those.  A json, File, entity, value-object or optional field ` +
+    `would be silently dropped from the stored state.  Give the field one of the covered ` +
+    `types, or use \`persist: memory\` for this store.`,
   "loom.store-cross-store-on-liveview-invalid": (p: {
     where: unknown;
     store: unknown;
@@ -1772,17 +1796,6 @@ export const DIAGNOSTIC_MESSAGES = {
     `The Dapper adapter renders capability filters as raw SQL and cannot bind the ` +
     `principal claims a hierarchical scope predicate reads — use 'persistence: efcore' ` +
     `on this deployable, or flatten the tenancy to a non-hierarchical registry.`,
-  "loom.dapper-unsupported#feature": (p: {
-    name: unknown;
-    ctxName: unknown;
-    projection: unknown;
-    reason: unknown;
-  }) =>
-    `Deployable '${p.name}' selects 'persistence: dapper', but context '${p.ctxName}' declares ` +
-    `the query-time projection '${p.projection}', which ${p.reason}. The Dapper adapter writes ` +
-    `its own SQL, so an aggregation can only name real columns. Drop the 'persistence: dapper' ` +
-    `clause to use the default (EF Core) adapter, which translates the aggregation itself, or ` +
-    `host the projection on a different deployable.`,
   // The self-provisioning-adapter migration gate.  Neither blanket message
   // above fits: this is not "no relational mapping anywhere" — the sibling
   // adapter (efcore / drizzle) applies the very same migration chain fine.
@@ -1813,14 +1826,14 @@ export const DIAGNOSTIC_MESSAGES = {
     `with 'orm.schema.updateSchema()' at boot, which has no rename intent to consult and ` +
     `resolves a rename as DROP + ADD, destroying the column's data. Use ` +
     `'persistence: drizzle' on this deployable, or host these contexts elsewhere.`,
-  "loom.mikroorm-unsupported": (p: { name: unknown; subject: unknown; reason: unknown }) =>
-    `Deployable '${p.name}' selects 'persistence: mikroorm', but ${p.subject} ${p.reason}. ` +
-    `The MikroORM adapter is at full parity with Drizzle (M-T6.9); the only shapes it now ` +
-    `rejects have no relational persistence mapping at all (drizzle included) — restructure ` +
-    `the model as the message suggests.`,
-  // The ONE remaining shape where mikroorm is behind drizzle rather than at
-  // parity, so it gets its own message: the generic tail above ("no relational
-  // mapping at all, drizzle included") would be a lie here.
+  // (The generic `loom.mikroorm-unsupported` tail lived here — the one
+  // `validateMikroOrmSupport` used for its SHAPE rejects.  Its last surviving
+  // caller was the abstract-inheritance-base-with-`contains` shape, which is
+  // impossible on every target and so became the target-neutral
+  // `loom.abstract-aggregate-contains` above.  The CODE stays live through the
+  // `#migrations` variant just above and the `#scalar-array` reject below —
+  // the ONE shape where mikroorm is behind drizzle rather than at parity,
+  // which is why it carries its own message rather than a generic tail.)
   "loom.mikroorm-unsupported#scalar-array": (p: {
     name: unknown;
     subject: unknown;
@@ -1994,6 +2007,30 @@ export const DIAGNOSTIC_MESSAGES = {
     `\`extern\` function, so the frontend renders nothing for it — in a text slot the ` +
     `content is silently DROPPED (\`Text(${p.name}(…))\` emits an empty element).  Check the ` +
     `spelling, declare a \`component ${p.name}(…)\`, or import it as an \`extern\` function.`,
+  "loom.unresolved-page-ref": (p: { where: unknown; name: unknown }) =>
+    `${p.where}: \`${p.name}\` in a rendered slot names no route parameter, \`state\` field, ` +
+    `\`derived\` binding, enclosing lambda parameter, or store field, so the frontend has ` +
+    `nothing to read — the walker emits a COMMENT in its place and the content is silently ` +
+    `DROPPED on every frontend (\`{/* ref: ${p.name} */}\` on React/Vue/Svelte/Angular, ` +
+    `\`Html.none\` on Feliz, \`SizedBox.shrink()\` on Flutter).  Check the spelling, or declare ` +
+    `\`${p.name}\` as page state / a route parameter.`,
+  "loom.page-primitive-extra-children": (p: {
+    where: unknown;
+    name: unknown;
+    max: unknown;
+    slots: unknown;
+  }) =>
+    `${p.where}: \`${p.name}\` takes ${p.max} positional arguments (${p.slots}) — it is a fixed ` +
+    `SLOT primitive, not a children container like \`Stack\` or \`Card\`, so every design pack ` +
+    `renders exactly those ${p.max} and the extra ones are silently DROPPED from the page ` +
+    `(while still landing in the message catalog).  Wrap the extra content in a \`Stack { … }\` ` +
+    `and pass that as the last slot.`,
+  "loom.page-primitive-extra-children#modal-op-form": (p: { where: unknown }) =>
+    `${p.where}: a \`Modal\` with an \`OperationForm\` child renders the TRIGGER button and the ` +
+    `operation's generated field set — nothing else.  The other positional children have no ` +
+    `slot in any design pack and are silently DROPPED.  Use the state-controlled shape ` +
+    `(\`Modal { …children, open: <stateBool> }\`), which IS a children container, or move the ` +
+    `extra markup out of the modal.`,
   "loom.slot-outside-component": (p: { where: unknown }) =>
     `${p.where}: \`Slot { }\` renders the children a CALLER passed in, so it only means ` +
     `something inside a \`component\` body.  A page has no caller and no children ` +
@@ -2636,6 +2673,10 @@ export const DIAGNOSTIC_MESSAGES = {
   "loom.version-field-collision": (p: { name: unknown; name2: unknown }) =>
     `field 'version' on aggregate '${p.name}' collides with Loom's optimistic-concurrency column, which is an 'int'. ` +
     `Rename this field (e.g. '${p.name2}Version'), or declare it 'version: int' if you meant the concurrency counter.`,
+  "loom.softdelete-field-collision": (p: { name: unknown; name2: unknown }) =>
+    `field 'isDeleted' on aggregate '${p.name}' collides with the 'softDeletable' capability's flag, which is a 'bool' ` +
+    `(the spliced 'filter !this.isDeleted' reads it). Rename this field (e.g. '${p.name2}Deleted'), or declare it ` +
+    `'isDeleted: bool' if you meant the soft-delete flag.`,
   "loom.unknown-macro#top-level": (p: { name: unknown; listMacroNames: unknown }) =>
     `Unknown macro or capability '${p.name}'.  Available macros: ${p.listMacroNames}.`,
   "loom.unknown-macro#nested": (p: {

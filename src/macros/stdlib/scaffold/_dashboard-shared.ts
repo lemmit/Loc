@@ -12,6 +12,31 @@
 import type { Aggregate, BoundedContext, Projection } from "../../../language/generated/ast.js";
 import { isBoundedContext, isProjection, isProperty } from "../../../language/generated/ast.js";
 
+/** Whether this aggregate has a queryable state TABLE at all — the precondition
+ *  for every dashboard tile, since all of them are direct-table aggregations
+ *  computed in SQL.
+ *
+ *  An `abstract` base owns no table (its concretes each have their own) and an
+ *  event-sourced aggregate has none either (its truth is the `<ctx>_events`
+ *  stream).  Both would be refused by `loom.projection-columnless-source`, so
+ *  neither half of the scaffold may claim a dashboard for them. */
+export function hasDashboardTable(agg: Aggregate): boolean {
+  return !agg.isAbstract && agg.persistedAs !== "eventLog";
+}
+
+/** Whether the aggregate's DECLARED FIELDS are columns.  A `shape: document`
+ *  aggregate persists as `(id, data, version)`, so the ROW COUNT tile still
+ *  works — there is an `id` column — but no per-field sum and no per-day series
+ *  does; those would name keys inside the jsonb blob, which
+ *  `loom.projection-columnless-source` refuses on every backend.
+ *
+ *  Header-visible only: a dataSource binding may override `shape:` at the system
+ *  level, which phase ② cannot see.  That residual is caught honestly by the IR
+ *  gate rather than miscompiled. */
+export function fieldsAreColumns(agg: Aggregate): boolean {
+  return agg.shape !== "document";
+}
+
 /** The projection name the dashboard scaffold uses for an aggregate.
  *  `Order` → `OrderTotals`. */
 export function dashboardProjectionName(aggName: string): string {
@@ -46,6 +71,7 @@ export const SERIES_COUNT = "rowCount";
  *  the same reason `summableFields` excludes them: NULL rows would vanish from
  *  the series while still counting in the `rowCount` tile beside it. */
 export function seriesDateField(agg: Aggregate): string | null {
+  if (!fieldsAreColumns(agg)) return null;
   const datetimes: string[] = [];
   for (const m of agg.members) {
     if (!isProperty(m)) continue;
@@ -66,6 +92,7 @@ export function seriesDateField(agg: Aggregate): string | null {
 export function dashboardSeriesFor(agg: Aggregate): { projection: string } | null {
   const ctx = agg.$container;
   if (!isBoundedContext(ctx)) return null;
+  if (!hasDashboardTable(agg)) return null;
   const name = dashboardSeriesName(agg.name);
   const declared = ctx.members.find((m): m is Projection => isProjection(m) && m.name === name);
   if (declared) {
@@ -98,6 +125,7 @@ export function dashboardFieldsFor(
 ): { projection: string; fields: string[] } | null {
   const ctx = agg.$container;
   if (!isBoundedContext(ctx)) return null;
+  if (!hasDashboardTable(agg)) return null;
   const name = dashboardProjectionName(agg.name);
   const declared = ctx.members.find((m): m is Projection => isProjection(m) && m.name === name);
   if (declared) {
@@ -140,6 +168,7 @@ export type Summable = "money" | "int" | "long" | "decimal";
 const SUMMABLE: ReadonlySet<string> = new Set<Summable>(["money", "int", "long", "decimal"]);
 
 export function summableFields(agg: Aggregate): Array<{ name: string; primitive: Summable }> {
+  if (!fieldsAreColumns(agg)) return [];
   const out: Array<{ name: string; primitive: Summable }> = [];
   for (const m of agg.members) {
     if (!isProperty(m)) continue;

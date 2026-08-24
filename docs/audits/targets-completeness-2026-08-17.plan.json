@@ -7,7 +7,7 @@
   "waveRule": "Wave 1 = correctness (silent cells + stale ratchet entries that mask real state). Wave 2 = honest-gap feature ports, disjoint per backend/frontend so they parallelize. Wave 3 = breadth, coverage tiers and roadmap missions. Within a wave, tasks sharing a src/ tree carry conflictsWith and must be sequenced or merged.",
   "processRule": "Every task follows the repo rules: re-sync onto fresh main first, open a DRAFT PR naming the files before implementing, mutation-prove any gate the task adds (revert via file copy, never git checkout), and delete the ratchet/waiver entry the fix closes in the SAME PR.",
   "dispositionsAsOf": "2026-08-23",
-  "dispositionNote": "Wave 1 (21/21) and Wave 2 shipped and merged, except the three in-flight PRs noted per-item (#2619 flutter quartet, #2622/#2623 mikroorm stack tail). Wave 3 batch 1 (6 items) claimed via draft PRs 2026-08-23; remaining 7 wave-3 items planned. Post-audit findings tracked outside this file: feliz page-derived + dapper deep-scope/direct-table (shipped, #2613-#2617), domain-service resource clients (shipped, #2618), column-less-source projection gate, .NET/Java 400-vs-422, handler-leg resource-ops (planned)."
+  "dispositionNote": "Wave 1 (21/21) and Wave 2 shipped and merged, except the three in-flight PRs noted per-item (#2619 flutter quartet, #2622/#2623 mikroorm stack tail). Wave 3 batch 1 (6 items) claimed via draft PRs 2026-08-23; remaining 7 wave-3 items planned. Post-audit findings tracked outside this file: feliz page-derived + dapper deep-scope/direct-table (shipped, #2613-#2617), domain-service resource clients (shipped, #2618), column-less-source projection gate (shipped as a UNIVERSAL gate, not an adapter row — see W2-dapper-directtable-projection), .NET/Java 400-vs-422, handler-leg resource-ops (planned)."
  },
  "claimed": [
   {
@@ -985,15 +985,15 @@
    "title": "Dapper rejects the direct-table query-time projection arm over a column-less source",
    "kind": "honest",
    "targets": [
-    "dotnet + persistence: dapper"
+    "all five backends (was: dotnet + persistence: dapper)"
    ],
    "fileTrees": [
-    "src/generator/dotnet/query-projection-emit.ts",
-    "src/generator/dotnet/emit/dapper.ts",
     "src/ir/util/query-projection-arm.ts",
-    "src/ir/validate/checks/system-checks.ts"
+    "src/ir/validate/checks/system-checks.ts",
+    "src/macros/stdlib/scaffold/_dashboard-shared.ts",
+    "src/generator/dotnet/query-projection-emit.ts"
    ],
-   "fix": "system-checks.ts:2731-2747 (loom.dapper-unsupported#feature) rejects only the two DIRECT-TABLE arms (grouped / whole-table singleton) over a source with no columns — persistedAs: eventLog, shape: document, or a TPC abstract base — classified by the shared src/ir/util/query-projection-arm.ts:75-102, which gate and emitter both read so they cannot drift. The repository/workflow/projection-sourced arms already emit raw Npgsql (query-projection-emit.ts:314-337, 499-546, 686-777). Teach the direct-table arm to read the column-less sources' actual storage (the event log table / the jsonb blob / the concrete tables of a TPC base), mirroring what efcore does for the same three source kinds; then narrow or delete the classifier arm.",
+   "fix": "RESOLVED (not as scoped). The premise below — that EF Core reads the column-less sources and Dapper merely has to catch up — was FALSE, and was the reason this sat as an adapter row. EF Core maps a `shape: document` aggregate to a hand-rolled `<Agg>Document` row type, so `o.Total` is CS1061 there too; an event-sourced source has no `DbSet` at all; a TPC base has no table. Every backend named the same missing column (node `sum(schema.orders.total)` → TS2339, JPQL `sum(e.total)`, SQLAlchemy `OrderRow.total`, Ecto `record.total`). So the refusal became UNIVERSAL: `loom.projection-columnless-source`, raised by `validateColumnlessProjectionSources` off the backend-neutral `columnlessProjectionSource` classifier (renamed from `dapperQueryProjectionGap`), and the dapper projection block + `loom.dapper-unsupported#feature` are gone. The gate is precise about the document case — a document table has a real `id` column, so `select n = count()` still emits everywhere, which is the row-count tile `scaffoldDashboard` synthesises. ORIGINAL SCOPE (still open as an emitter task, on all five backends rather than one adapter): teach the direct-table arm to read the column-less sources' actual storage — the event-log table, the jsonb blob, the concrete tables of a TPC base — and narrow the classifier as each lands.",
    "tests": [
     "npm run test:dapper-corpus with the projection fixtures",
     "node run-dapper.mjs projection-aggregation / projection-groupby (re-armed by W1-drain-behavioural-skip-dapper)",

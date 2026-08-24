@@ -528,17 +528,17 @@ persisted field through a `StorePersist.load<Store><Field> ()` loader, an
 `url` tier adds a `popstate` Elmish subscription so back/forward moves the state.
 Keys and shapes match the JS builders byte-for-byte (`loom.store.<Name>` + a JSON
 object keyed by the bare field name; one query param per field, empties dropped),
-so the same blob and the same URL round-trip across frontends. Two targets still
-do **not** implement the ladder, and each refuses a non-`memory` lifetime rather
-than degrading silently: Phoenix LiveView
+so the same blob and the same URL round-trip across frontends. Every frontend now
+implements the ladder; the one target that does **not** is Phoenix LiveView, which
+refuses a non-`memory` lifetime rather than degrading silently
 (`loom.store-lifetime-liveview-invalid` — a server-side per-process struct has no
-browser storage, and URL state belongs to the page's `handle_params`), and
-**Flutter** (`loom.store-lifetime-target-unsupported` — the emitter builds the
-store in-memory regardless; support is planned, tracked as a `gap` row in
-`src/diagnostics/unsupported-register.ts`). The same code also fires, field-scoped,
-on Feliz for a field type with no total F# conversion (datetime / duration / guid /
-enum / entity / value object, and arrays of them) — persistence there crosses the
-JS boundary per field. A `persist: url` store reflects its fields into
+browser storage, and URL state belongs to the page's `handle_params`). What
+survives of `loom.store-lifetime-target-unsupported` is FIELD-scoped, on the two
+frontends whose persistence crosses an untyped boundary per field: on **Feliz** a
+type with no total F# conversion (datetime / duration / guid / enum / entity /
+value object, and arrays of them), and on **Flutter** one with no total Dart
+conversion (json / File / entity / value object / optional). Both are tracked as
+one `gap` row in `src/diagnostics/unsupported-register.ts`. A `persist: url` store reflects its fields into
 query params, which carry only scalars, so an array / entity / value-object field
 there is rejected (`loom.store-url-field-invalid`). `sync:` remains reserved.
 Validator gates: a store action can't call a
@@ -941,6 +941,14 @@ seam because Dart list literals are comma-separated.
 `match await <api>.<Agg>.<op>()` (async effect) projects an **async Riverpod Notifier method** (`Future<void> <action>(String id) async`): it POSTs the instance op to `/<coll>/$id/<op>`, reifies a non-2xx ProblemDetails back into the error variant (clobbering the wire `type` tag), then a Dart-3 `switch` over `result['type']` reifies each arm via `fromJson` and runs the arm body as a `state.copyWith` write.  The page-shell binds the action as an id-capturing closure (`final <a> = () => notifier.<a>(id);`) so the button's bare `<a>()` call is unchanged (`riverpod-emit.ts`).
 
 A scalar array form field (`tags: string[]` / `scores: int[]`) renders as a repeatable add/remove row list (one `TextEditingController` per row, managed in state; numeric arrays parse each row on submit).
+
+**Stores** (`store X { … }`) project onto the same Riverpod triad a stateful page does (`store-builder.ts`), and the `persist: local|session|url` lifetime ladder ships (`store-persist.ts`): `build()` seeds each cell from its backing store, a `ref.listenSelf` mirror writes the whole state back after every transition, `local`/`session` ride `shared_preferences` with `setPrefix('')` (so the web key is the bare `loom.store.<Name>` the JS builders write) and `url` rides `Uri.base.queryParameters` + `SystemNavigator.routeInformationUpdated` with a `LoomUrlStoreSync` back/forward observer.  `session` is the same backing CLEARED at boot — Dart has no per-tab store on every surface.  A field type with no total Dart codec (`json` / `File` / entity / value-object / optional) is refused rather than silently dropped (`loom.store-lifetime-target-unsupported`, `#flutter-field`).
+
+**`auth: ui`** ships (`auth-gate.ts`): a `sessionProvider` (`FutureProvider<CurrentUser?>`) over `GET /auth/me`, sign-in / sign-out redirects to the backend's own handshake via `url_launcher`, an `AuthGate` on `MaterialApp.builder` (spinner → sign-in prompt → routes; on the `builder` and not around `MaterialApp`, so its Material widgets have Theme/Directionality ancestors and the app never unmounts mid-probe), a page `requires` guard rendering `ForbiddenView`, and `Action`-button gating on a currentUser-only op `requires`.
+
+**Realtime** (`on <channel>.<Event>`) ships (`realtime.ts`): one subscription against `/realtime/events` mounted on `MaterialApp.builder`, a `SnackBar` per `toast(…)`, and `ref.invalidate(<var>Provider)` per `refetch(<Agg>)` — invalidating a `.family` refetches every live instance, so a server-paged table reloads the page the user is on.  The transport is a conditional import: the browser's own `EventSource` on the web (`package:web`; `package:http`'s browser client buffers the whole body, so it cannot stream) and a line parser over a streamed `package:http` response natively.
+
+**`ProvenanceInfo`** renders a native `ExpansionTile` disclosure over the co-located `<field>_provenance` (a `ProvLineage?` on the decoded model — `dart-model-emit.ts`).
 
 A user `component Foo(params) { body }` emits a Dart widget into `lib/components.dart` (`component-emit.ts`); an invocation `Foo(a: x)` renders as a widget constructor call and the page imports `../components.dart`.  A **stateless** component (value params, no own state) becomes a `StatelessWidget` (one final field per param, the walked body as `build`).  A **stateful** component (`state {}` + named `action`s) becomes a `StatefulWidget` whose `State` holds an immutable `<Comp>Model` (the same data-class shape a Riverpod page projects), built in `initState`, exposes each param as a `widget.<param>` getter, and wraps each action body in `setState` — reusing the page path's `renderNotifierStmt` (a write is `state = state.copyWith(field: value)`).  State is **per-instance** (each `Foo(...)` its own `State`), which a shared Riverpod provider would get wrong.  A **read-bearing** component (a `QueryView { of: … }` body, no own `state {}`) becomes a Riverpod `ConsumerWidget` — exactly the shape a read-bearing PAGE takes: `build(BuildContext context, WidgetRef ref)` hoists `final <var> = ref.watch(<var>Provider…)` through the same `renderApiHoisting` seam, and `collectFlutterReads` scans component bodies so the provider it watches is emitted into `lib/reads.dart`.  Only USED components are emitted; an `extern` component, a `derived` binding, an async-effect (`match await`) action, a store read, a `byId` read (the route `id` is a local only a page shell binds), or a stateful component that ALSO reads (that would need `ConsumerStatefulWidget`) falls back to the diagnostic comment.
 

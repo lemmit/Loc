@@ -92,8 +92,15 @@ const INDENT = "        ";
 
 /** resourceName → static C# helper class, for every resource whose
  *  sourceType has a .NET ResourceAdapter (Phase 4c).  Routes resource-op
- *  call sites + drives the `Resources/*.cs` emission and NuGet deps. */
-function buildResourceClasses(sys: SystemIR | undefined): Map<string, string> {
+ *  call sites + drives the `Resources/*.cs` emission and NuGet deps.
+ *
+ *  Exported for the EXPLICIT-HANDLER leg (`explicit-handlers-emit.ts`): a
+ *  `commandHandler` / `queryHandler` body is a site the IR gate declares LEGAL
+ *  for a resource-op, but its `renderArg` passed `undefined` here, so the
+ *  renderer threw "reached the .NET renderer without a resource class mapping"
+ *  at generate time.  Both legs derive the map the same way, from the same
+ *  function, so they cannot disagree about which resources are routable. */
+export function buildResourceClasses(sys: SystemIR | undefined): Map<string, string> {
   const out = new Map<string, string>();
   if (!sys) return out;
   const storeType = new Map(sys.storages.map((s) => [s.name, s.type] as const));

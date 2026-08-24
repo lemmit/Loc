@@ -102,9 +102,13 @@ describe("python workflow-instance endpoints", () => {
       '@router.get("/order_fulfillment/instances/{id}", response_model=OrderFulfillmentInstanceResponse, operation_id="getOrderFulfillmentInstanceById", responses={404: {"model": ProblemDetails, "description": "Not Found"}, 422: {"model": ProblemDetails, "description": "Unprocessable Entity"}})',
     );
     // Correlation-id param carries the uuid format every backend declares
-    // (paramTypeDiffs parity — same ID_PARAM the aggregate routes use).
+    // (paramTypeDiffs parity — same ID_PARAM the aggregate routes use), and
+    // ENFORCES it: a malformed `{id}` is the declared 422, not a 500 out of
+    // asyncpg.  Reached only on a `guid` correlation id — a string/int one
+    // takes `workflows-builder.ts`'s own `id: str` / `id: int` branch and
+    // gets no pattern.
     expect(wf).toContain(
-      'async def order_fulfillment_instance(id: Annotated[str, Path(json_schema_extra={"format": "uuid"})], session: SessionDep) -> dict[str, object]:',
+      'async def order_fulfillment_instance(id: Annotated[str, Path(pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", json_schema_extra={"format": "uuid"})], session: SessionDep) -> dict[str, object]:',
     );
     expect(wf).toContain("row = await session.get(OrderFulfillmentRow, id)");
     expect(wf).toContain("if row is None:");

@@ -3,7 +3,7 @@
 // -tdd-plan.md slice 5; workflow-instance-visibility.md).
 //
 // This retires the deferred-Phoenix workflow-instance-views gap.  On
-// `foundation: vanilla` a correlation-bearing workflow is observable as a
+// `platform: elixir` a correlation-bearing workflow is observable as a
 // plain Ecto read:
 //
 //   - saga-state Ecto schema — reused verbatim from `dispatch-emit.ts`
@@ -122,9 +122,7 @@ function renderInstanceActions(
   // is bound only when the predicate reads it: an unused binding fails
   // `mix compile --warnings-as-errors`.
   const gate = wf.instanceReadGate;
-  const gateExpr = gate
-    ? renderExpr(gate, { thisName: "record", contextModule, foundation: "vanilla" })
-    : null;
+  const gateExpr = gate ? renderExpr(gate, { thisName: "record", contextModule }) : null;
   const cuBind =
     gate && exprUsesCurrentUser(gate)
       ? "    current_user = Map.get(conn.assigns, :current_user)\n"

@@ -32,12 +32,17 @@ import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixDomainOperation, renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import { type SourceMapSubRegion, statementSubRegions } from "../../_trace/sourcemap.js";
 import { MONEY_WIRE_SCALE } from "../../money-scale.js";
-import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js";
+import {
+  type ElixirChannelsCfg,
+  elixirDispatchCall,
+  opEmitsDurableEvent,
+} from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import {
+  appModuleOf,
   denialClause,
   denialOverrides,
   denialResponse,
@@ -45,6 +50,8 @@ import {
   disallowedResponse,
   disallowedTerm,
   type ErrorStatusMap,
+  guardErrorModule,
+  guardRaiseLine,
   opHasWireDenial,
   wireValidationResponse,
 } from "./denial.js";
@@ -473,7 +480,6 @@ export function renderReturningOpFunction(
   const renderCtx: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
-    foundation: "vanilla",
     captureProvenance: hasProv,
     // The enriched aggregate, so the body renderer detects a reference-collection
     // (`X id[]` → `many_to_many`) add/remove and normalises it to an id-list local
@@ -534,12 +540,17 @@ export function renderReturningOpFunction(
   // body ending in a non-committing return) keeps the legacy inline emit.
   const hoistEmits = opEmitsEvent(op) && persists;
   const hasDispatcher = contextHasDispatcher(ctx as EnrichedBoundedContextIR, extraChannels);
+  // Transactional outbox (dispatch-delivery-semantics.md §1): a DURABLE emit is
+  // an `__loom_outbox` INSERT, not a fan-out, so it has to ride the SAME
+  // `Repo.transaction` as the persist — see the `txWrapEmits` tail below.  The
+  // dispatch lines then sit two columns deeper.
+  const txWrapEmits = hoistEmits && opEmitsDurableEvent(op, channels);
   const dispatchLines = hoistEmits
     ? renderEmitDispatchLines(
         op,
         renderCtx,
         hasDispatcher,
-        "        ",
+        txWrapEmits ? "          " : "        ",
         `${ctx.name}.${agg.name}.${op.name}`,
         opFragments,
         channels,
@@ -659,6 +670,26 @@ export function renderReturningOpFunction(
   const shapeCReturn = (): string =>
     renderReturningStmt(trailingReturn!, ctx, renderCtx, lastIdx).trimStart();
 
+  // Derived rows that must commit with the state change (provenance flush /
+  // audit record) — hoisted out of the prov/audit branch so the durable-outbox
+  // branch below can reuse the same transaction tail.
+  const txTail: string[] = [];
+  if (hasProv) txTail.push(`          ${appModule}.Provenance.flush(${appModule}.Repo)`);
+  if (hasAudit) {
+    txTail.push(
+      auditRecordCall({
+        appModule,
+        operationId: `${op.name}${aggPascal}`,
+        action: op.name,
+        targetType: aggPascal,
+        targetId: "saved.id",
+        before: "audit_before",
+        after: wireSnapshot("saved", false, appModule),
+        indent: "          ",
+      }),
+    );
+  }
+
   let tailLines: string[];
   if (!persists) {
     // Non-committing: a pure read/return (or one ending in an unconditional ERROR
@@ -666,28 +697,49 @@ export function renderReturningOpFunction(
     // projection; an explicit `return` is rendered inline in `bodyLines`.
     // Byte-identical to pre-S12 for these shapes.
     tailLines = fallThrough ? [`    {:ok, ${wireMap("record", false)}}`] : [];
+  } else if (txWrapEmits) {
+    // Durable emit (dispatch-delivery-semantics.md §1): `Channels.dispatch/2`
+    // INSERTs an `__loom_outbox` row instead of fanning out, so persist + emit
+    // (+ any prov/audit rows) run in ONE `Repo.transaction` — commit records
+    // "this event is owed", rollback erases both.  The result is unwrapped
+    // post-commit so the returned tuple shape is unchanged.
+    const txBody = [
+      `    tx_result =`,
+      `      ${appModule}.Repo.transaction(fn ->`,
+      `      case ${repoMod}.persist_change(changeset) do`,
+      `        {:ok, saved} ->`,
+      ...txTail,
+      ...dispatchLines,
+      `          saved`,
+      ``,
+      `        {:error, reason} ->`,
+      `          ${appModule}.Repo.rollback(reason)`,
+      `      end`,
+      `    end)`,
+      ``,
+    ];
+    tailLines = [
+      `    changeset =`,
+      `      record`,
+      `      |> Ecto.Changeset.change(%{})${putBlock}${versionLock}`,
+      ``,
+      ...txBody,
+      `    case tx_result do`,
+      `      {:ok, saved} ->`,
+      ...(aggregateSuccess
+        ? [`        {:ok, ${wireMap("saved", mutatesRefColl)}}`]
+        : [`        record = saved`, `        ${shapeCReturn()}`]),
+      ``,
+      `      {:error, reason} ->`,
+      `        {:error, reason}`,
+      `    end`,
+    ];
   } else if (hasProv || hasAudit) {
     // Forced transaction: persist the assigned columns, flush provenance and/or
     // record the audit row — all in ONE transaction so the derived rows commit
     // atomically with the state change.  A persist failure rolls back to
     // `{:error, changeset}` (the controller's `_result/2` gains a matching
     // validation clause).
-    const txTail: string[] = [];
-    if (hasProv) txTail.push(`          ${appModule}.Provenance.flush(${appModule}.Repo)`);
-    if (hasAudit) {
-      txTail.push(
-        auditRecordCall({
-          appModule,
-          operationId: `${op.name}${aggPascal}`,
-          action: op.name,
-          targetType: aggPascal,
-          targetId: "saved.id",
-          before: "audit_before",
-          after: wireSnapshot("saved", false, appModule),
-          indent: "          ",
-        }),
-      );
-    }
     tailLines = aggregateSuccess
       ? hoistEmits
         ? [
@@ -973,20 +1025,15 @@ export function renderReturningStmt(
     case "let":
       return `    ${escapeElixirIdent(snake(s.name))} = ${renderExpr(s.expr, rc)}`;
     case "precondition":
-      // Raise form — reached only by the pure-core / document / function paths
-      // (HTTP-boundary ops hoist guards to `with ensure(…)` for a 422 denial).
-      // NOTE the message is the DERIVED form even when the author wrote
-      // `message "…"`: `GUARD_RESCUE` below routes this raise to its status by
-      // MESSAGE PREFIX, so an authored message would miss the prefix and
-      // `reraise` into a 500.  The `ensure` path has no such coupling and does
-      // honour the clause.  Closing this needs the typed-exception reshape —
-      // M-T6.20.
-      return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Precondition failed: ${s.source}`)})`;
     case "requires":
       // Raise form — reached only by the pure-core / document / function paths
-      // (HTTP-boundary ops hoist guards to `with ensure(…)` for a 403 denial).
-      // Prefix-routed by `GUARD_RESCUE`, same coupling as the precondition arm.
-      return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Forbidden: ${s.source}`)})`;
+      // (HTTP-boundary ops hoist guards to `with ensure(…)` for a 422 / 403
+      // denial).  The typed `<App>.GuardError` carries the classification in its
+      // `:kind` field, so the `:message` is the SAME `denialMessage(s)` the
+      // `ensure` path emits — the author's `message "…"` when there is one
+      // (M-T6.20; it used to be forced to the derived form because `guardRescue`
+      // routed on the message prefix).
+      return guardRaiseLine(s, renderExpr(s.expr, rc), appModuleOf(rc.contextModule));
     case "assign": {
       // `field := value` → struct-update the threaded `record`, so the
       // fall-through success branch serialises the mutated aggregate.
@@ -1121,40 +1168,42 @@ function renderProvenancedAssign(
  *  load the aggregate, run the op, then translate the tagged result — a success
  *  to 200 + body, each error variant to its RFC-7807 ProblemDetails status. */
 // A rejected `requires` / `precondition` in an operation / function /
-// domain-service body RAISES `raise(ArgumentError, "Forbidden: …")` /
-// `"Precondition failed: …")` (the message prefixes here are the contract —
-// they must stay in lockstep with the `case "precondition"/"requires"` arms in
-// `renderStatement` above, and the `function-emit` / `domain-service-emit`
+// domain-service body RAISES the typed `<App>.GuardError` (`guardRaise` in
+// `denial.ts`, shared with the `function-emit` / `domain-service-emit`
 // siblings).  A controller action appends this `rescue` clause so the raise maps
 // to the same HTTP status the other backends return — `requires` → 403 (Hono
 // `ForbiddenError`), `precondition` → 422 (RS-15 — a domain-floor rejection is
 // well-formed-but-semantically-rejected, not malformed; the typed-denial path
 // below has always answered 422, so this rescue arm was the odd one out) —
-// instead of propagating to Phoenix's default 500.  Any other `ArgumentError`
-// reraises unchanged (still a 500 for a genuine bug).
-// The two prefixes below are the CONTRACT this `cond` routes on — do not
-// reword them without rewording the matching `raise(ArgumentError, …)` in
-// `renderStatement` / `function-emit` / `domain-service-emit`, or the raise
-// misses its prefix and `reraise`s into a 500.  Only the STATUS + TITLE are
-// resolved (M-T5.20); the message prefixes stay literal.
-export function guardRescue(overrides?: ErrorStatusMap): string {
+// instead of propagating to Phoenix's default 500.
+//
+// M-T6.20 — the ROUTING KEY is the exception's `:kind` FIELD, not its message.
+// It used to be a `cond` over `String.starts_with?(guard_msg, "Precondition
+// failed: ")`, which made the message load-bearing and therefore unwritable: an
+// author's `message "…"` missed the prefix and fell to the `reraise` → 500.
+// With the classification out of band the detail is free text, and no `reraise`
+// arm is needed either — an exception that is not a `<App>.GuardError` is
+// simply not rescued and propagates with its own stacktrace (still a 500 for a
+// genuine bug, one construct less to keep in lockstep).  Only the STATUS +
+// TITLE are resolved (M-T5.20).
+export function guardRescue(appModule: string, overrides?: ErrorStatusMap): string {
   return `  rescue
-    guard_error in ArgumentError ->
+    guard_error in ${guardErrorModule(appModule)} ->
       guard_msg = Exception.message(guard_error)
 
-      cond do
-        String.starts_with?(guard_msg, "Forbidden: ") ->
+      case guard_error.kind do
+        :forbidden ->
           ${denialResponse("forbidden", "guard_msg", overrides)}
 
-        String.starts_with?(guard_msg, "Precondition failed: ") ->
+        _ ->
           ${denialResponse("precondition", "guard_msg", overrides)}
-
-        true ->
-          reraise(guard_error, __STACKTRACE__)
       end`;
 }
 
 export function renderReturningOpControllerAction(
+  /** The APP module (`Api`), not the aliased context (`Sales`) — the rescue
+   *  below names `<App>.GuardError`, which lives in the domain root. */
+  appModule: string,
   ctxModule: string,
   agg: AggregateIR,
   op: OperationIR,
@@ -1270,7 +1319,7 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
       {:error, :not_found} ->
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
     end
-${guardRescue(denialOverrides(ctx))}
+${guardRescue(appModule, denialOverrides(ctx))}
   end
 
 ${resultClauses}`;

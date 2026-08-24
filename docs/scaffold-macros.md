@@ -99,6 +99,18 @@ Notes:
   declares. So the dashboard works without the macro too.
 - **Nullable columns are excluded.** SQL `SUM` skips NULLs, so the tile would
   describe a different row set than the `rowCount` beside it.
+- **The source has to have columns.** Every tile is a direct-table aggregation
+  computed in SQL, so it can only name real columns
+  (`loom.projection-columnless-source`). An `abstract` base and a
+  `persistedAs: eventLog` aggregate get **no dashboard at all** — neither has a
+  state table, so not even `COUNT(*)` has anything to count. A `shape: document`
+  aggregate keeps **only its `rowCount` tile**: its table is
+  `(id, data, version)`, so the row count is real while every per-field sum and
+  the per-day series would be naming keys inside the jsonb blob. Both halves read
+  the same two predicates in `_dashboard-shared.ts` (`hasDashboardTable`,
+  `fieldsAreColumns`), so a tile can't survive a projection the macro skipped.
+  (Header-visible only — a dataSource binding can override `shape:` at the
+  system level, which the macro can't see; that case is caught by the IR gate.)
 - Additive: a system that doesn't opt in keeps its welcome page unchanged.
 
 ### Composability

@@ -77,7 +77,6 @@ export function renderInspectImpl(
   const renderCtx: RenderCtx = {
     thisName: "record",
     contextModule: `${appModule}.${ctxModule}`,
-    foundation: "vanilla",
     agg,
   };
   const body = renderExpr(inspectDerived.expr, renderCtx);

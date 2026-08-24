@@ -4,15 +4,16 @@
 // via the shared walk helpers.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
-import { localizedAriaLabelAttr, localizedNamedValue, localizedText } from "../i18n-emit.js";
-import { renderPrimitive } from "../render-primitive.js";
+import { escapeHtmlAttr } from "../a11y-emit.js";
 import {
-  namedArgValue,
-  numericNamed,
-  positionalArgs,
-  slugify,
-  stringNamed,
-} from "../shared/args.js";
+  localizedAriaLabelAttr,
+  localizedNamedValue,
+  localizedPositionalAttr,
+  localizedPositionalTranslation,
+  localizedText,
+} from "../i18n-emit.js";
+import { renderPrimitive } from "../render-primitive.js";
+import { gridCols, positionalArgs, slugify, stringNamed } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import { positionalChildren, styleAttr, styleWith, testidAttr, walk } from "../walker-core.js";
 
@@ -70,37 +71,6 @@ export function emitGroup(
   });
 }
 
-/** Read the `cols:` named arg on a Grid call.
- *
- *  Accepts two forms:
- *    - Scalar int literal:  `cols: 3`  →  all three breakpoints use 3.
- *    - List literal:        `cols: [3, 2, 1]`  →  `[desktop, tablet, mobile]`.
- *
- *  When a breakpoint slot is missing in the list form, conservative
- *  defaults apply: `tablet = ceil(desktop/2)`, `mobile = 1`.  When the
- *  arg itself is absent, returns `undefined` and consumers fall back
- *  to their own non-responsive default. */
-function gridColsArg(
-  call: ExprIR & { kind: "call" },
-): { desktop: number; tablet: number; mobile: number } | undefined {
-  const scalar = numericNamed(call, "cols");
-  if (scalar !== undefined) return { desktop: scalar, tablet: scalar, mobile: scalar };
-  const raw = namedArgValue(call, "cols");
-  if (raw?.kind !== "list") return undefined;
-  const intElements: number[] = [];
-  for (const el of raw.elements) {
-    if (el.kind === "literal" && el.lit === "int") {
-      const n = Number(el.value);
-      if (Number.isFinite(n)) intElements.push(n);
-    }
-  }
-  if (intElements.length === 0) return undefined;
-  const desktop = intElements[0]!;
-  const tablet = intElements[1] ?? Math.max(1, Math.ceil(desktop / 2));
-  const mobile = intElements[2] ?? 1;
-  return { desktop, tablet, mobile };
-}
-
 export function emitGrid(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   // Each child wraps in a per-pack column container (Mantine's
   // <Grid.Col span="auto">; shadcn's plain `<div>` since gap is
@@ -111,7 +81,7 @@ export function emitGrid(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   const colIndent = "  ".repeat(depth + 1);
   const childIndent = "  ".repeat(depth + 2);
   const closeIndent = "  ".repeat(depth);
-  const cols = gridColsArg(call);
+  const cols = gridCols(call);
   // Translate column counts to Mantine/MUI `span` values out of 12.
   // `floor(12 / N)` matches the on-screen ratios users intend; an N
   // greater than 12 clamps to 1 so the math stays sane.
@@ -231,13 +201,66 @@ export function emitContainer(
   });
 }
 
+/** The four spellings of a `Tab`'s CAPTION — a user-visible slot (`tabLabel`,
+ *  M-T1.11) the packs render four different ways, so all four come from the
+ *  SAME `messageKey()` and the same translation decision:
+ *
+ *    `label`     — the markup TEXT token (`<Tabs.Tab>{{{label}}}</Tabs.Tab>`);
+ *    `labelAttr` — the complete bound ` label=…` attribute (MUI's `<Tab label=…/>`,
+ *                  Angular Material's `<mat-tab label=…>`, which needs the
+ *                  framework's own binding syntax, not a JSX brace);
+ *    `titleAttr` — the same fragment under the `title` name, for the one pack
+ *                  whose component spells the prop differently (flowbite's
+ *                  `<TabItem title=…>`).  Two names rather than one generic
+ *                  "attribute value" token because a Vue/Angular binding is
+ *                  `:title` / `[title]`, which a value-only token cannot spell;
+ *    `labelExpr` — the bare target-native EXPRESSION, always defined (the
+ *                  translation call under i18n, the target's string literal
+ *                  otherwise), for the packs that splice the caption into their
+ *                  own syntax: a Svelte object literal, Feliz's `prop.ariaLabel`,
+ *                  Flutter's `Tab(text: …)`.
+ *
+ *  `arg` is the `Tab(…)` call when its caption is a plain literal, `undefined`
+ *  for the two chrome fallbacks (a non-literal caption, a bare positional child)
+ *  — those are emitter-built `Tab N` text with no source string, so they carry
+ *  no catalog key and always render static. */
+function tabLabelForms(
+  arg: (ExprIR & { kind: "call" }) | undefined,
+  ctx: WalkContext,
+  labelStr: string,
+): { label: string; labelAttr: string; titleAttr: string; labelExpr: string } {
+  const translation = arg ? localizedPositionalTranslation(arg, ctx, "tabLabel") : undefined;
+  return {
+    label: arg ? localizedText(arg, ctx, "tabLabel", '""') : ctx.target.escapeText(labelStr),
+    labelAttr: arg
+      ? localizedPositionalAttr(arg, ctx, "tabLabel", "label")
+      : ` label="${escapeHtmlAttr(labelStr)}"`,
+    titleAttr: arg
+      ? localizedPositionalAttr(arg, ctx, "tabLabel", "title")
+      : ` title="${escapeHtmlAttr(labelStr)}"`,
+    labelExpr:
+      translation ?? ctx.target.renderStringLiteral?.(labelStr) ?? JSON.stringify(labelStr),
+  };
+}
+
 export function emitTabs(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
-  // Tabs(Tab("Overview", body), Tab("Settings", body))
-  // Each positional child must be a `Tab(label, body)` call;
+  // Tabs(Tab("Overview", ...body), Tab("Settings", ...body))
+  // Each positional child must be a `Tab(label, ...children)` call;
   // anything else lands as a placeholder so the page still
   // compiles.  Tab labels must be string literals in v0; non-
   // literal labels fall back to indexed slugs `tab-1`, …
+  //
+  // The panel body used to be `tabPositionals[1]` ALONE, so
+  // `Tab { "Ovw", Text { "A" }, Text { "B" } }` rendered `A` and dropped `B`
+  // — and every sibling after it — without a word, on all seven targets (the
+  // dropped literal still reached `.loom/messages.en.json`, so translators got
+  // a key nothing renders).  A tab panel is a children container like
+  // `Stack`/`Card`; it joins its children the same way (#2567's class).
   const positionals = positionalArgs(call);
+  const innerIndent = "  ".repeat(depth + 2);
+  /** Join already-walked panel children the way every other container does. */
+  const joinBody = (parts: readonly string[]): string =>
+    parts.join(`${ctx.target.interChildSeparator ?? ""}\n${innerIndent}`);
   const tabs = positionals.map((arg, i) => {
     if (arg.kind !== "call" || arg.name !== "Tab") {
       // Bare positional (e.g. `Tabs(Card(...), Card(...))`) — treat it as
@@ -245,25 +268,34 @@ export function emitTabs(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
       // this fallback, the panel would emit a JSX comment as its only
       // child and tsc rejects it (Mantine's `TabsPanelProps` requires
       // a non-empty `children`).
+      const only = walk(arg, ctx, depth + 2);
       return {
         value: `tab-${i + 1}`,
-        label: `Tab ${i + 1}`,
-        bodyJsx: walk(arg, ctx, depth + 2),
+        ...tabLabelForms(undefined, ctx, `Tab ${i + 1}`),
+        bodyJsx: only,
+        bodyChildren: [only],
       };
     }
     const tabPositionals = positionalArgs(arg);
     const labelArg = tabPositionals[0];
-    const bodyArg = tabPositionals[1];
-    const labelStr =
-      labelArg && labelArg.kind === "literal" && labelArg.lit === "string"
-        ? labelArg.value
-        : `Tab ${i + 1}`;
+    const bodyArgs = tabPositionals.slice(1);
+    const isLiteralLabel = labelArg?.kind === "literal" && labelArg.lit === "string";
+    const labelStr = isLiteralLabel ? labelArg.value : `Tab ${i + 1}`;
+    const bodyParts = bodyArgs.map((e) => walk(e, ctx, depth + 2));
     return {
+      // The switcher's anchor is derived from the SOURCE literal, never from the
+      // translated caption — a `value:` that changed per locale would break
+      // every selector, e2e spec and deep link the moment a translation landed.
       value: slugify(labelStr) || `tab-${i + 1}`,
-      label: ctx.target.escapeText(labelStr),
-      bodyJsx: bodyArg
-        ? walk(bodyArg, ctx, depth + 2)
-        : ctx.target.renderComment("missing tab body"),
+      ...tabLabelForms(isLiteralLabel ? arg : undefined, ctx, labelStr),
+      bodyJsx:
+        bodyParts.length > 0 ? joinBody(bodyParts) : ctx.target.renderComment("missing tab body"),
+      // The same children UNJOINED, for the two packs that emit a PROGRAMMING
+      // LANGUAGE rather than markup: Feliz splices them into an offside-
+      // sensitive `prop.children [ … ]` list (`;`-separated) and Flutter needs
+      // ONE widget per `TabBarView` child, so several fold into a `Column`.
+      // The walker's `\n`-joined `bodyJsx` is a syntax hazard in both.
+      bodyChildren: bodyParts,
     };
   });
   // Record the first tab group's default so the shell can declare the

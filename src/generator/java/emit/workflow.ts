@@ -15,6 +15,7 @@ import { operationBodyUsesCurrentUser, operationGates } from "../../../ir/util/o
 import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst, workflowFnCamel } from "../../../util/naming.js";
+import { javaLogEvent } from "../../_obs/render-java.js";
 import { statementSubRegions } from "../../_trace/sourcemap.js";
 import {
   collectUnionFindLets,
@@ -315,7 +316,7 @@ export function javaWorkflowStmtTarget(
       return emitSink
         ? [`${indent}${emitSink}.add(new ${s.eventName}(${args}));`]
         : [
-            `${indent}{ var __ev = new ${s.eventName}(${args}); CatalogLog.event("event_dispatched", "info", "event_type", __ev.getClass().getSimpleName()); }`,
+            `${indent}{ var __ev = new ${s.eventName}(${args}); CatalogLog.event(${javaLogEvent("eventDispatched")}, "event_type", __ev.getClass().getSimpleName()); }`,
           ];
     },
     repoRun: (s, indent) => {
@@ -710,13 +711,13 @@ export function renderJavaWorkflows(
       ...(usesUser && authed ? [`            var currentUser = currentUserAccessor.user();`] : []),
       // Workflow narrative — `workflow_started` at method entry; shared catalog
       // identity (field `workflow`) across every backend.
-      `            CatalogLog.event("workflow_started", "info", "workflow", ${JSON.stringify(wf.name)});`,
+      `            CatalogLog.event(${javaLogEvent("workflowStarted")}, "workflow", ${JSON.stringify(wf.name)});`,
       ...paramLets,
       ...bodyLines,
       ...saves,
       // `workflow_completed` on the success tail — a thrown guard / domain
       // exception short-circuits before reaching here.
-      `            CatalogLog.event("workflow_completed", "info", "workflow", ${JSON.stringify(wf.name)});`,
+      `            CatalogLog.event(${javaLogEvent("workflowCompleted")}, "workflow", ${JSON.stringify(wf.name)});`,
       `        }`,
       `    }`,
       ``,

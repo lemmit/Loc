@@ -1,12 +1,14 @@
 // Honesty gate for `on <channel>.<Event>` live-event handlers (channels.md
-// Part I).  All five built-in frontends consume the realtime SSE wire, and (as
-// of the elixir slice) ALL FIVE BACKENDS SERVE IT — so the
-// `backend-serves-no-sse` arm no longer bites a real backend platform.  What is
-// still gated: a frontend framework with no realtime path at all (flutter), and
-// an SSE frontend whose serving deployable is not a backend that streams (a
-// `static` host with no `targets:` — nothing there to open an EventSource
-// against).  Those warn (`loom.ui-realtime-unsupported`) rather than dropping
-// the handler silently.
+// Part I).  ALL SIX built-in frontends now consume the realtime SSE wire —
+// flutter was the last holdout and joined with `generator/flutter/realtime.ts`
+// — and ALL FIVE BACKENDS now SERVE it, elixir last
+// (`vanilla/realtime-emit.ts`).  So neither half of the gate bites a shipped
+// platform pairing any more.  Both stay as the SEAMS the next target gates on:
+// the `frontend-has-no-consumer` arm for a NEW frontend without a realtime
+// path, and the `backend-serves-no-sse` arm for an SSE frontend whose serving
+// deployable streams nothing (a `static` host with no backend behind it —
+// nothing there to open an EventSource against).  Those warn
+// (`loom.ui-realtime-unsupported`) rather than dropping the handler silently.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -78,10 +80,21 @@ describe("ui realtime honesty gate (`loom.ui-realtime-unsupported`)", () => {
     expect(warns[0]).toContain("silently dropped");
   });
 
-  it("warns for a frontend framework with no realtime path (flutter → node)", async () => {
-    const warns = await realtimeWarnings(sys("flutter", "node"));
+  it("does not warn for flutter on a realtime-serving backend (flutter → node)", async () => {
+    expect(await realtimeWarnings(sys("flutter", "node"))).toEqual([]);
+  });
+
+  // …and elixir serves the wire now too, so the pairing that USED to be the
+  // flutter counter-example is clean as well.
+  it("does not warn for flutter → elixir (both halves ship)", async () => {
+    expect(await realtimeWarnings(sys("flutter", "elixir"))).toEqual([]);
+  });
+
+  // What still bites: an SSE frontend — flutter included — whose serving
+  // deployable streams nothing at all.
+  it("warns for flutter whose serving deployable streams nothing (flutter → static)", async () => {
+    const warns = await realtimeWarnings(sys("flutter", "static"));
     expect(warns.length).toBe(1);
-    expect(warns[0]).toContain("no realtime consumption");
-    expect(warns[0]).toContain("silently dropped");
+    expect(warns[0]).toContain("does not serve the realtime SSE wire");
   });
 });

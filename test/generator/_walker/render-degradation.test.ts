@@ -530,40 +530,39 @@ describe("frontend render degradation — the emitted page must not give up", ()
   );
 
   // -------------------------------------------------------------------------
-  // RATCHET — a READ-BEARING user component emits an unresolved api handle on
-  // React, Vue and Svelte.
+  // A READ-BEARING user component — the api handle must resolve in the
+  // COMPONENT's own shell, not only in a page's.
   //
   //     component RecentOrders(title: string) {
   //       body: QueryView { of: Sales.Order.all, data: rows => … }
   //     }
   //
+  // This was a ratchet (`READ_BEARING_COMPONENT_BROKEN`) over React, Vue and
+  // Svelte, drained by #2654.  All three component-file emitters handed the
+  // component walk an EMPTY api-param list — `walkBody(…, [], …)` — where the
+  // page shell passes the ui's real `ui.apiParams`.  The handle resolved to
+  // nothing, `emitExpr`'s ref fallthrough emitted `undefined`, and the member
+  // chain was appended to it:
+  //
   //   React →  { /* unresolved: Sales */ undefined.Order.all.isLoading && ( … ) }
   //   Vue   →  <template v-if="/* unresolved: Sales */ undefined.Order.all.isLoading">
   //   Svelte→  {#if /* unresolved: Sales */ undefined.Order.all.isLoading}
   //
-  // `renderUserComponentFile` (and its Vue/Svelte twins) hand the component
-  // walk EMPTY api-param maps — `walkBodyToTsx(…, new Map(), new Map(), …)` —
-  // where a page shell passes the ui's real ones.  So the api handle resolves
-  // to nothing, `emitExpr`'s ref fallthrough emits `undefined`, and the member
-  // chain is appended to it.  Angular is unaffected (its component mode routes
-  // through the page shell and emits `useAllOrders`), and Feliz/Flutter were
-  // fixed by #2568 — so this is three of the seven.
+  // Not a missing element: a guaranteed `TypeError`, and code that fails
+  // `tsc --noEmit` / `vue-tsc` / `svelte-check` (TS18050 ×7 on the React build
+  // gate).  It stayed invisible because no `.ddd` in the repo put a read inside
+  // a component body — the same "coverage the gate never had" this whole
+  // fixture exists to end.  `expression-showcase.ddd` now hosts the shape
+  // (`component RecentProducts`), so the per-frontend build gates COMPILE it;
+  // this leg is the string-level twin, and the one that also covers Feliz and
+  // Flutter (fixed earlier by #2568).
   //
-  // Not a missing element: a guaranteed `TypeError` and code that fails
-  // `tsc --noEmit` / `vue-tsc` / `svelte-check`.  It has been invisible because
-  // no `.ddd` in the repo put a read inside a component body — the same
-  // "coverage the gate never had" this whole fixture exists to end.  It stays
-  // OUT of `expression-showcase.ddd` for exactly that reason: that fixture is
-  // compiled by `generated-{react,vue,svelte}-build`, and hosting the defect
-  // there would turn those gates red for something this PR does not fix.
-  //
-  // Ratchet in both directions, like `KNOWN_VERBATIM_INTRINSICS`: a listed
-  // frontend that STOPS emitting the marker fails as stale (delete its row and
-  // this block with the last one), and an unlisted frontend that STARTS
-  // emitting it fails as a regression.
+  // Kept after the drain rather than deleted with the ratchet: the assertion
+  // that survives is the one worth having — every frontend resolves the handle.
+  // It scans EVERY emitted file, not just the page-path subset the sentinel
+  // loop above filters to, which is what lets it see a `src/components/` file
+  // at all.
   // -------------------------------------------------------------------------
-  const READ_BEARING_COMPONENT_BROKEN: ReadonlySet<string> = new Set(["react", "vue", "svelte"]);
-
   const readBearingComponent = (frontend: string): string => `
     system ReadInComponent {
       subdomain M {
@@ -606,26 +605,18 @@ describe("frontend render degradation — the emitted page must not give up", ()
     "angular",
     "feliz",
     "flutter",
-  ] as const)("%s: read-bearing user component — the api handle resolves (ratcheted)", async (frontend) => {
+  ] as const)("%s: read-bearing user component — the api handle resolves", async (frontend) => {
     const files = await generateSystemFiles(readBearingComponent(frontend));
     const re = SENTINELS.find((s) => s.label === "unresolved name")!.re;
     const hits = [...files.entries()]
       .filter(([, v]) => new RegExp(re.source).test(v))
       .map(([k]) => k);
-    if (READ_BEARING_COMPONENT_BROKEN.has(frontend)) {
-      expect(
-        hits,
-        `${frontend} is ratcheted as emitting an unresolved api handle in a read-bearing ` +
-          `component but emitted none — the emitter was fixed, so delete it from ` +
-          `READ_BEARING_COMPONENT_BROKEN`,
-      ).not.toEqual([]);
-    } else {
-      expect(
-        hits,
-        `${frontend}: a read-bearing user component emitted \`/* unresolved: … */ undefined\` — ` +
-          `the component walk is not seeing the ui's api params`,
-      ).toEqual([]);
-    }
+    expect(
+      hits,
+      `${frontend}: a read-bearing user component emitted \`/* unresolved: … */ undefined\` — ` +
+        `the component-file emitter is not threading the ui's \`apiParams\` into the component ` +
+        `walk (the page shell does; make the component path match it)`,
+    ).toEqual([]);
   }, 120_000);
 
   // -------------------------------------------------------------------------

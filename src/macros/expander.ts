@@ -367,6 +367,22 @@ function isIntProperty(p: Property): boolean {
   return t.base?.$type === "PrimitiveType" && (t.base as PrimitiveType).name === "int";
 }
 
+/** The aggregate's own `isDeleted` PROPERTY, or undefined — the `softDeletable`
+ *  twin of {@link existingVersionMember}, same member-namespace rule. */
+function existingIsDeletedMember(agg: Aggregate): Property | undefined {
+  return agg.members.find(
+    (m): m is Property => m.$type === "Property" && (m as Property).name === "isDeleted",
+  );
+}
+
+/** True iff the property is a plain (non-optional, non-array) `bool` — the
+ *  exact shape the `softDeletable` capability would have spliced. */
+function isBoolProperty(p: Property): boolean {
+  const t = p.type;
+  if (!t || t.optional || t.array || t.alternatives.length > 0) return false;
+  return t.base?.$type === "PrimitiveType" && (t.base as PrimitiveType).name === "bool";
+}
+
 /** Record capability membership without splicing any member — the annotation
  *  lowering's `collectCapabilities` reads.  Mirrors the tail of
  *  `expandCapability`; used when the host already declares the capability's
@@ -618,6 +634,30 @@ function expandCapability(
           continue;
         }
         tagCapability(agg, "versioned");
+        continue;
+      }
+    }
+    // The `isDeleted` collision — the G2 seam on `softDeletable`'s filter
+    // member (corpus-mutation cell M1.aggregate.isDeleted).  The spliced
+    // `filter !this.isDeleted` reads whatever member wins the name, so a
+    // non-bool user `isDeleted` makes every backend's soft-delete predicate
+    // negate a string/number — refused rather than silently mis-filtered or
+    // crashed at codegen (the Drizzle lowering rightly cannot lower it).  A
+    // BOOL user member is structurally the spliced field: `mergeScopedMembers`
+    // keeps the user's declaration and the splice proceeds for the rest.
+    if (cap.name === "softDeletable") {
+      const declared = existingIsDeletedMember(agg);
+      if (declared && !isBoolProperty(declared)) {
+        recordDiagnostic(doc, {
+          severity: "error",
+          code: "loom.softdelete-field-collision",
+          message: diagMessage("loom.softdelete-field-collision", {
+            name: agg.name,
+            name2: lowerFirstSafe(agg.name),
+          }),
+          node: declared,
+          property: "name",
+        });
         continue;
       }
     }

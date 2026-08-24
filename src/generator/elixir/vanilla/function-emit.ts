@@ -8,6 +8,7 @@ import type {
 import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { exprUsesParam, exprUsesReceiver } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr, renderTypespec } from "../render-expr.js";
+import { appModuleOf, guardRaiseLine } from "./denial.js";
 
 // ---------------------------------------------------------------------------
 // Body-variant helpers (domain-services.md rev. 4 — `function` block body).
@@ -70,16 +71,11 @@ function renderPureBlock(stmts: StmtIR[], rc: RenderCtx): string[] {
         lines.push(`    ${escapeElixirIdent(snake(s.name))} = ${renderExpr(s.expr, rc)}`);
         break;
       case "precondition":
-        lines.push(
-          // Derived message, NOT the author's `message "…"` — prefix-routed by
-          // `GUARD_RESCUE` at the controller.  See M-T6.20.
-          `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Precondition failed: ${s.source}`)})`,
-        );
-        break;
       case "requires":
-        lines.push(
-          `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Forbidden: ${s.source}`)})`,
-        );
+        // The typed `<App>.GuardError` — its `:kind` field is what the
+        // controller rescue routes on, so `:message` carries the author's
+        // `message "…"` when there is one (M-T6.20).
+        lines.push(guardRaiseLine(s, renderExpr(s.expr, rc), appModuleOf(rc.contextModule)));
         break;
       case "return":
         // A `function` yields its value directly (no `{:ok, …}` wrap).  The
@@ -143,7 +139,6 @@ export function renderAggregateFunctions(
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
-    foundation: "vanilla",
     ...(doc ? { docStruct: true } : {}),
   };
   const out: string[] = [];

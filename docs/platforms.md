@@ -16,7 +16,7 @@ versioning works.
 
 | `platform:` keyword | Surface file | Default port | Needs DB | Mounts UI |
 |---|---|---|---|---|
-| `node` (default `node@v4`; Hono web framework) | `src/platform/hono/v4/index.ts` | 3000 | ✓ | ✗ |
+| `node` (default `node@v5`; Hono web framework — `node@v4` stays resolvable as a pin) | `src/platform/hono/v5/index.ts` (v4: `src/platform/hono/v4/index.ts`) | 3000 | ✓ | ✗ |
 | `dotnet` (default `dotnet@v10`) | `src/platform/dotnet.ts` | 8080 | ✓ | ✓ (when `ui:` is declared) |
 | `elixir` (default `elixir@v1`; legacy aliases `phoenix` / `phoenixLiveView` desugar to it) | `src/platform/elixir.ts` | 4000 | ✓ | ✓ (fullstack) |
 | `python` (default `python@v1`) | `src/platform/python.ts` | 8000 | ✓ | ✓ (when `ui:` is declared — dotnet-style dual mode) |
@@ -65,23 +65,28 @@ Resolution happens in two parts (see `parseBuiltinPlatformRef` in
 `src/platform/registry.ts`):
 
 1. **Bareword backend** — resolves through `BUILTIN_PLATFORM_LATEST`
-   to today's default version.  Currently: `node → v4`,
-   `dotnet → v8`, `elixir → v1`, `python → v1`, `java → v1`.
+   to today's default version.  Currently: `node → v5`,
+   `dotnet → v10`, `elixir → v1`, `python → v1`, `java → v1`.
+   Older in-tree versions stay resolvable through an explicit pin —
+   `node@v4` is the one such extra registration today
+   (`BUILTIN_PLATFORM_EXTRA_VERSIONS` in `src/platform/metadata.ts`).
    Frontend platforms (`react`, `vue`, `svelte`, `angular`, `static`)
    intentionally aren't versioned at the platform layer — their
    version lives on the design pack / stack axis (see
    [`design-packs.md`](design-packs.md)).
 
-   > **What `vN` means.** A backend package's Loom version mirrors the
-   > **major version of its defining framework/runtime**, *not* the
-   > platform's own name. So `node@v4` tracks **Hono 4** (the `hono:
-   > ^4.x` pin in `src/platform/hono/v4/pins.ts`; `v5` is reserved for
-   > the next Hono major), exactly as `dotnet@v10` tracks **.NET 10** and
-   > `mantine@v9` tracks Mantine 9. `node@v4` is therefore *not* "Node.js
-   > 4" — the `node` platform names the JS runtime, while the `4` versions
-   > the Hono web framework it emits. (Sources never spell this out: every
-   > deployable uses the bareword `platform: node`, and `@v4` is only the
-   > internal qualified ref the resolver fills in.)
+   > **What `vN` means.** A backend package's Loom version tracks the
+   > **package's own dependency-major evolution**, *not* the platform's
+   > name and *not* the JS runtime. `node@v4` was cut around **Hono 4 +
+   > zod 3 + TS 5** (`src/platform/hono/v4/pins.ts`); `node@v5` — today's
+   > default — is the cross-major successor carrying **zod 4, TypeScript 6,
+   > vitest 4** (`src/platform/hono/v5/pins.ts`), with Hono itself still on
+   > 4.x because there is no Hono 5. Elsewhere the number does line up with
+   > the defining framework (`dotnet@v10` tracks **.NET 10**, `mantine@v9`
+   > tracks Mantine 9). What `node@v5` is definitely *not* is "Node.js 5".
+   > (Sources never spell this out: every deployable uses the bareword
+   > `platform: node`, and `@v5` is only the internal qualified ref the
+   > resolver fills in.)
 2. **Pinned `family@version`** — looked up directly in the
    registered backend surfaces.  Unknown versions are a validation
    error that lists the available pins (`backendVersionsForFamily`).
@@ -120,11 +125,15 @@ available. The matured axis today is **`persistence:`**:
   embedded / event-sourced / inheritance (TPH+TPC) shape, containment (incl.
   recursive part-in-part), associations, filters, audit / provenance / managed
   fields, retrievals, seeds, and the workflow outbox all emit. `dapper` ≡ EF
-  Core; `mikroorm` ≡ Drizzle. `loom.dapper-unsupported` /
-  `loom.mikroorm-unsupported` now fire ONLY for one genuinely-impossible shape
-  each (Dapper: an un-owned by-value entity-array part *field*; MikroORM: an
-  abstract inheritance base owning its own `contains`) — fail-fast guards, not
-  subset boundaries. The alternates share the generated **domain layer**
+  Core; `mikroorm` ≡ Drizzle. Neither adapter rejects a SHAPE any more:
+  `loom.mikroorm-unsupported` now fires only for declared migration steps
+  (`orm.schema.updateSchema()` has no rename intent to consult), and its last
+  shape reject — an abstract inheritance base owning its own `contains` — turned
+  out to be impossible on every target and became the target-neutral
+  `loom.abstract-aggregate-contains` (see [`inheritance.md`](inheritance.md)).
+  The remaining adapter-specific narrowing is on the FIND-PREDICATE axis
+  (`loom.find-predicate-unsupported`): MikroORM lowers no reference-collection
+  membership subquery. The alternates share the generated **domain layer**
   with the default and only swap the persistence layer (Dapper SQL
   repositories / MikroORM `EntitySchema` + `EntityManager`), so a project
   can switch persistence without touching its domain code.

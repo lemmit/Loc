@@ -56,6 +56,11 @@ export interface DartField {
   name: string;
   type: TypeIR;
   optional: boolean;
+  /** The co-located `<field>_provenance` lineage sibling of a `provenanced`
+   *  property (docs/provenance.md).  There is no `ProvLineage` `TypeIR`, so the
+   *  marker overrides the type / codec spelling and the placeholder `type` is
+   *  never read — the same trick `feliz/wire.ts`'s `prov` marker plays. */
+  prov?: boolean;
 }
 
 /** A Dart wire model — a class name + its ordered fields.  The neutral shape
@@ -83,6 +88,7 @@ function base(t: TypeIR): TypeIR {
  *  appending produced the non-parsing `FileRef??`.  Mirrors the sibling
  *  `buildStateFields` rule in `riverpod-emit.ts` (`dt.endsWith("?")`). */
 function dartFieldType(f: DartField): string {
+  if (f.prov) return "ProvLineage?";
   const dt = dartType(base(f.type));
   return f.optional && !dt.endsWith("?") ? `${dt}?` : dt;
 }
@@ -109,6 +115,9 @@ function ctorParam(f: DartField): string {
 /** The `fromJson` entry decoding one field out of the JSON map. */
 function fromJsonEntry(f: DartField): string {
   const access = `json['${f.name}']`;
+  if (f.prov) {
+    return `        ${f.name}: ${access} == null ? null : ProvLineage.fromJson(${access} as Map<String, dynamic>),`;
+  }
   if (isNullableField(f)) {
     return `        ${f.name}: ${access} == null ? null : ${dartFromJson(base(f.type), access)},`;
   }
@@ -117,6 +126,7 @@ function fromJsonEntry(f: DartField): string {
 
 /** The `toJson` entry encoding one field into the JSON map. */
 function toJsonEntry(f: DartField): string {
+  if (f.prov) return `        '${f.name}': ${f.name}?.toJson(),`;
   if (isNullableField(f) && !isIdentityJson(base(f.type))) {
     return `        '${f.name}': ${f.name} == null ? null : ${dartToJson(base(f.type), `${f.name}!`)},`;
   }
@@ -186,11 +196,41 @@ function toDartField(w: { name: string; type: TypeIR; optional: boolean }): Dart
   return { name: w.name, type: w.type, optional: w.optional || w.type.kind === "optional" };
 }
 
-/** The Dart wire model for an aggregate (its `wireShape`, api-read filtered). */
+/** The co-located provenance-lineage siblings of a node's `provenanced`
+ *  properties — `<field>_provenance`, decoded through `ProvLineage.fromJson`.
+ *  The Dart twin of `feliz/wire.ts`'s `provWireFields`; the placeholder `type`
+ *  is never read (the `prov` marker overrides the spelling). */
+function provDartFields(node: { fields: { name: string; provenanced?: boolean }[] }): DartField[] {
+  return node.fields
+    .filter((f) => f.provenanced)
+    .map((f) => ({
+      name: `${f.name}_provenance`,
+      type: { kind: "primitive", name: "string" } as TypeIR,
+      optional: true,
+      prov: true,
+    }));
+}
+
+/** True when any aggregate / entity part in these contexts declares a
+ *  `provenanced` property — the emit gate for the fixed `ProvLineage` classes,
+ *  so a provenance-free app's `models.dart` stays byte-identical. */
+export function contextsCarryProvenance(contexts: readonly BoundedContextIR[]): boolean {
+  return contexts.some((c) =>
+    c.aggregates.some(
+      (a) =>
+        a.fields.some((f) => f.provenanced) ||
+        a.parts.some((p) => p.fields.some((f) => f.provenanced)),
+    ),
+  );
+}
+
+/** The Dart wire model for an aggregate (its `wireShape`, api-read filtered),
+ *  plus the co-located `<field>_provenance` siblings its provenanced properties
+ *  carry. */
 export function dartRecordForAggregate(agg: AggregateIR): DartRecord {
   return {
     className: upperFirst(agg.name),
-    fields: forApiRead(wireFieldsForAggregate(agg)).map(toDartField),
+    fields: [...forApiRead(wireFieldsForAggregate(agg)).map(toDartField), ...provDartFields(agg)],
   };
 }
 
@@ -198,7 +238,7 @@ export function dartRecordForAggregate(agg: AggregateIR): DartRecord {
 export function dartRecordForPart(part: EntityPartIR): DartRecord {
   return {
     className: upperFirst(part.name),
-    fields: forApiRead(wireFieldsForPart(part)).map(toDartField),
+    fields: [...forApiRead(wireFieldsForPart(part)).map(toDartField), ...provDartFields(part)],
   };
 }
 
@@ -407,6 +447,58 @@ const FILE_REF_CLASS = lines(
   "}",
 );
 
+/** The fixed provenance-lineage wire classes — the Dart analogue of the JSX
+ *  frontends' `provLineageSchema` and of Feliz's `ProvLineage` record
+ *  (docs/provenance.md).  `computedValue` and each input `value` are `unknown`
+ *  JSON, so both ride a permissive scalar→String coercion (the same display-only
+ *  narrowing every other frontend applies); `target` is dropped (not displayed).
+ *  Emitted only when a provenanced property is in scope. */
+const PROV_LINEAGE_CLASSES = lines(
+  "// Provenance lineage — the co-located `<field>_provenance` wire shape.",
+  "// `computedValue` / `value` are opaque JSON scalars, coerced to String for",
+  "// display (the same narrowing the JSX + Feliz frontends apply).",
+  "String _provScalar(dynamic v) => v == null ? '' : v.toString();",
+  "",
+  "class ProvInput {",
+  "  final String path;",
+  "  final String value;",
+  "",
+  "  const ProvInput({required this.path, required this.value});",
+  "",
+  "  factory ProvInput.fromJson(Map<String, dynamic> json) => ProvInput(",
+  "        path: _provScalar(json['path']),",
+  "        value: _provScalar(json['value']),",
+  "      );",
+  "",
+  "  Map<String, dynamic> toJson() => {",
+  "        'path': path,",
+  "        'value': value,",
+  "      };",
+  "}",
+  "",
+  "class ProvLineage {",
+  "  final String snapshotId;",
+  "  final String computedValue;",
+  "  final List<ProvInput> inputs;",
+  "",
+  "  const ProvLineage({required this.snapshotId, required this.computedValue, required this.inputs});",
+  "",
+  "  factory ProvLineage.fromJson(Map<String, dynamic> json) => ProvLineage(",
+  "        snapshotId: _provScalar(json['snapshotId']),",
+  "        computedValue: _provScalar(json['computedValue']),",
+  "        inputs: ((json['inputs'] as List<dynamic>?) ?? const <dynamic>[])",
+  "            .map((e) => ProvInput.fromJson(e as Map<String, dynamic>))",
+  "            .toList(),",
+  "      );",
+  "",
+  "  Map<String, dynamic> toJson() => {",
+  "        'snapshotId': snapshotId,",
+  "        'computedValue': computedValue,",
+  "        'inputs': inputs.map((e) => e.toJson()).toList(),",
+  "      };",
+  "}",
+);
+
 export function renderDartModels(
   contexts: readonly BoundedContextIR[],
   opts: { fileRef?: boolean; auditEntry?: boolean } = {},
@@ -414,6 +506,7 @@ export function renderDartModels(
   const seen = new Set<string>();
   const blocks: string[] = [];
   if (opts.fileRef) blocks.push(FILE_REF_CLASS);
+  if (contextsCarryProvenance(contexts)) blocks.push(PROV_LINEAGE_CLASSES);
   const addRecord = (r: DartRecord | null): void => {
     if (!r || seen.has(r.className)) return;
     seen.add(r.className);

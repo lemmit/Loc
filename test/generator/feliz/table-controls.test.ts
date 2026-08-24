@@ -122,7 +122,12 @@ describe("feliz Table controls", () => {
     expect(fs).toContain("+ 3 - 1) / 3)");
     // The count is bound once rather than recomputed per pager slot.
     expect(fs).toContain("(let __tp = ");
-    expect(fs).toContain('prop.text (sprintf "Page %d of %d" model.PageNum __tp)');
+    // The counter is one ICU chrome message through the F# runtime: this
+    // fixture's `Column` headers are translatable text (the `columnHeader`
+    // slot), so the app has i18n on and the pager binds rather than sprintf-ing.
+    expect(fs).toContain(
+      'prop.text (I18n.tf "chrome.pageOf" "Page {page} of {pages}" [ "page", box (model.PageNum',
+    );
     expect(fs).toContain("prop.disabled (model.PageNum <= 1)");
     expect(fs).toContain("prop.disabled (model.PageNum >= __tp)");
   });
@@ -143,9 +148,12 @@ describe("feliz Table controls", () => {
     expect(fs).toContain('Html.div [ prop.className "flex flex-col"; prop.children [ Html.input');
   });
 
-  it("leaves a plain Table byte-identical — no container, no controls", async () => {
+  it("leaves a plain Table free of controls — no container, no pager, no sort", async () => {
     const fs = await appFs(`Table(Column("Name", p => p.name), rows: rows)`);
-    expect(fs).toContain('Html.th [ Html.text "Name" ]');
+    // The header is a user-visible slot (`columnHeader`, M-T1.11), so it rides
+    // the F# translation runtime.  What this case pins is the absence of the
+    // CONTROLS, not the spelling of the caption.
+    expect(fs).toContain('Html.th [ prop.children [ Html.text ((I18n.t "');
     expect(fs).not.toContain('prop.className "flex flex-col"');
     expect(fs).not.toContain('data-testid", "pager"');
     expect(fs).not.toContain("SetSortKey");

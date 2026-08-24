@@ -1,5 +1,5 @@
 {{#if hasTabs}}<p-tabs value="0"{{{testidAttr}}}{{{styleAttr}}}>
-{{indent}}<p-tablist>{{#each tabs}}<p-tab value={{json @index}}>{{this.label}}</p-tab>{{/each}}</p-tablist>
+{{indent}}<p-tablist>{{#each tabs}}<p-tab value={{json @index}}>{{{this.label}}}</p-tab>{{/each}}</p-tablist>
 {{indent}}<p-tabpanels>
 {{indent}}{{#each tabs}}<p-tabpanel value={{json @index}}>
 {{../innerIndent}}{{{this.bodyJsx}}}

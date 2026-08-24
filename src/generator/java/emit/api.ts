@@ -11,7 +11,7 @@ import {
   isAllFind,
   relativeOpPath,
 } from "../../../ir/util/api-surface.js";
-import { problemTitle } from "../../../ir/util/openapi-errors.js";
+import { problemTitle, UNPROCESSABLE_ENTITY } from "../../../ir/util/openapi-errors.js";
 import { listReadFind } from "../../../ir/util/read-gates.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
@@ -22,6 +22,7 @@ import {
   resolveErrorStatus,
 } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { javaLogEvent } from "../../_obs/render-java.js";
 import { findUnionSpec } from "../../_payload/union-wire.js";
 import {
   collectJavaExprImports,
@@ -243,7 +244,7 @@ export function renderJavaController(
           hasParams
             ? `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id, @Valid @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
             : `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id${ifMatchHeaderParam}) {`,
-          `        CatalogLog.event("operation_invoked", "info", "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
+          `        CatalogLog.event(${javaLogEvent("operationInvoked")}, "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
           `        httpMetrics.recordDomainOperation("${agg.name}", "${op.name}");`,
           hasParams
             ? `        var result = service.${op.name}(new ${idClass}(id), request${ifMatchServiceArg});`
@@ -274,7 +275,7 @@ export function renderJavaController(
           hasParams
             ? `    public ResponseEntity<${wireRet}> ${op.name}${agg.name}(@PathVariable ${idJava} id, @Valid @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
             : `    public ResponseEntity<${wireRet}> ${op.name}${agg.name}(@PathVariable ${idJava} id${ifMatchHeaderParam}) {`,
-          `        CatalogLog.event("operation_invoked", "info", "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
+          `        CatalogLog.event(${javaLogEvent("operationInvoked")}, "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
           `        httpMetrics.recordDomainOperation("${agg.name}", "${op.name}");`,
           hasParams
             ? `        var result = service.${op.name}(new ${idClass}(id), request${ifMatchServiceArg});`
@@ -291,7 +292,7 @@ export function renderJavaController(
         hasParams
           ? `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id, @Valid @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
           : `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id${ifMatchHeaderParam}) {`,
-        `        CatalogLog.event("operation_invoked", "info", "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
+        `        CatalogLog.event(${javaLogEvent("operationInvoked")}, "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
         `        httpMetrics.recordDomainOperation("${agg.name}", "${op.name}");`,
         hasParams
           ? `        service.${op.name}(new ${idClass}(id), request${ifMatchServiceArg});`
@@ -430,7 +431,7 @@ export function renderJavaController(
         `    @PostMapping${relativeOpPath(createEntry) === "" ? "" : `("${relativeOpPath(createEntry)}")`}`,
         `    public ResponseEntity<Create${agg.name}Response> create${agg.name}(@Valid @RequestBody Create${agg.name}Request request) {`,
         `        var id = service.create${agg.name}(request);`,
-        `        CatalogLog.event("aggregate_created", "info", "aggregate", "${agg.name}", "id", id.value());`,
+        `        CatalogLog.event(${javaLogEvent("aggregateCreated")}, "aggregate", "${agg.name}", "id", id.value());`,
         `        httpMetrics.recordDomainOperation("${agg.name}", "create");`,
         `        return ResponseEntity.created(URI.create("${ctx.routePrefix ?? ""}/${route}/" + id.value()))`,
         `            .body(new Create${agg.name}Response(id.value()));`,
@@ -631,6 +632,7 @@ export function renderApiExceptionAdvice(
     `import org.springframework.web.bind.annotation.ExceptionHandler;`,
     `import org.springframework.web.bind.annotation.RestControllerAdvice;`,
     `import org.springframework.web.context.request.WebRequest;`,
+    `import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;`,
     ``,
     `import ${basePkg}.domain.common.AggregateNotFoundException;`,
     `import ${basePkg}.domain.common.DisallowedException;`,
@@ -660,7 +662,7 @@ export function renderApiExceptionAdvice(
     // key (a messaged rule); the message-less sentinel code is omitted.
     `    @ExceptionHandler(MethodArgumentNotValidException.class)`,
     `    public ResponseEntity<ProblemDetail> onValidation(MethodArgumentNotValidException e, WebRequest request) {`,
-    `        CatalogLog.event("domain_error", "warn", "message", "Validation failed", "status", 422);`,
+    `        CatalogLog.event(${javaLogEvent("domainError")}, "message", "Validation failed", "status", 422);`,
     `        httpMetrics.recordDomainFault("domain_error");`,
     `        var problem = problem(422, "Validation failed", "One or more fields are invalid.", request);`,
     // The lookup locale is the AMBIENT request locale (D-CTX-SHAPE), not Spring's
@@ -705,7 +707,7 @@ export function renderApiExceptionAdvice(
     localizeMessages && ``,
     `    @ExceptionHandler(ForbiddenException.class)`,
     `    public ResponseEntity<ProblemDetail> onForbidden(ForbiddenException e, WebRequest request) {`,
-    `        CatalogLog.event("forbidden", "warn", "message", e.getMessage(), "status", ${forbiddenStatus});`,
+    `        CatalogLog.event(${javaLogEvent("forbidden")}, "message", e.getMessage(), "status", ${forbiddenStatus});`,
     `        httpMetrics.recordDomainFault("forbidden");`,
     `        return respond(problem(${forbiddenStatus}, "${forbiddenTitle}", e.getMessage(), request), ${forbiddenStatus});`,
     `    }`,
@@ -719,14 +721,14 @@ export function renderApiExceptionAdvice(
     // request.  M-T5.20 makes the rung remappable via `httpStatus DomainError
     // -> <Code>`, resolved through the SAME map every structural conflict
     // uses, so the runtime arm and its OpenAPI declaration can't drift.
-    `        CatalogLog.event("domain_error", "warn", "message", e.getMessage(), "status", ${domainStatus});`,
+    `        CatalogLog.event(${javaLogEvent("domainError")}, "message", e.getMessage(), "status", ${domainStatus});`,
     `        httpMetrics.recordDomainFault("domain_error");`,
     `        return respond(problem(${domainStatus}, "${domainTitle}", e.getMessage(), request), ${domainStatus});`,
     `    }`,
     ``,
     `    @ExceptionHandler(DisallowedException.class)`,
     `    public ResponseEntity<ProblemDetail> onDisallowed(DisallowedException e, WebRequest request) {`,
-    `        CatalogLog.event("disallowed", "warn", "message", e.getMessage(), "status", ${disallowedStatus});`,
+    `        CatalogLog.event(${javaLogEvent("disallowed")}, "message", e.getMessage(), "status", ${disallowedStatus});`,
     `        httpMetrics.recordDomainFault("disallowed");`,
     `        return respond(problem(${disallowedStatus}, "Disallowed", e.getMessage(), request), ${disallowedStatus});`,
     `    }`,
@@ -740,11 +742,11 @@ export function renderApiExceptionAdvice(
       `        // \`unique (...)\` breach (23505 unique_violation → \`UniquenessConflict\`).`,
       `        // Either way return a friendly conflict instead of leaking a 500.`,
       `        if ("23503".equals(sqlState(e))) {`,
-      `            CatalogLog.event("conflict", "warn", "message", "This resource is still referenced and cannot be deleted.", "status", ${referencedInUseStatus});`,
+      `            CatalogLog.event(${javaLogEvent("conflict")}, "message", "This resource is still referenced and cannot be deleted.", "status", ${referencedInUseStatus});`,
       `            httpMetrics.recordDomainFault("conflict");`,
       `            return respond(problem(${referencedInUseStatus}, "Conflict", "This resource is still referenced and cannot be deleted.", request), ${referencedInUseStatus});`,
       `        }`,
-      `        CatalogLog.event("disallowed", "warn", "message", "A resource with these values already exists.", "status", ${uniquenessStatus});`,
+      `        CatalogLog.event(${javaLogEvent("disallowed")}, "message", "A resource with these values already exists.", "status", ${uniquenessStatus});`,
       `        httpMetrics.recordDomainFault("disallowed");`,
       `        return respond(problem(${uniquenessStatus}, "Conflict", "A resource with these values already exists.", request), ${uniquenessStatus});`,
       `    }`,
@@ -758,7 +760,7 @@ export function renderApiExceptionAdvice(
       `        // load→save window lost a race (the repository's guarded version bump`,
       `        // matched zero rows — write-time CAS).`,
       `        // Return a friendly 409 instead of leaking a 500.`,
-      `        CatalogLog.event("conflict", "warn", "message", "The resource was modified by another request; reload and retry.", "status", ${concurrencyStatus});`,
+      `        CatalogLog.event(${javaLogEvent("conflict")}, "message", "The resource was modified by another request; reload and retry.", "status", ${concurrencyStatus});`,
       `        httpMetrics.recordDomainFault("conflict");`,
       `        return respond(problem(${concurrencyStatus}, "Conflict", "The resource was modified by another request; reload and retry.", request), ${concurrencyStatus});`,
       `    }`,
@@ -766,7 +768,7 @@ export function renderApiExceptionAdvice(
     ],
     `    @ExceptionHandler(AggregateNotFoundException.class)`,
     `    public ResponseEntity<ProblemDetail> onNotFound(AggregateNotFoundException e, WebRequest request) {`,
-    `        CatalogLog.event("not_found", "warn", "status", ${notFoundStatus});`,
+    `        CatalogLog.event(${javaLogEvent("notFound")}, "status", ${notFoundStatus});`,
     `        httpMetrics.recordDomainFault("not_found");`,
     `        return respond(problem(${notFoundStatus}, "${notFoundTitle}", e.getMessage(), request), ${notFoundStatus});`,
     `    }`,
@@ -774,6 +776,36 @@ export function renderApiExceptionAdvice(
     `    @ExceptionHandler(HttpMessageNotReadableException.class)`,
     `    public ResponseEntity<ProblemDetail> onUnreadable(HttpMessageNotReadableException e, WebRequest request) {`,
     `        return respond(problem(400, "Bad Request", "Malformed JSON in request body", request), 400);`,
+    `    }`,
+    ``,
+    // A path `{id}` / typed query param that will not CONVERT — `GET
+    // /api/orders/not-a-uuid` against `@PathVariable UUID id`.  Spring raises
+    // MethodArgumentTypeMismatchException, which — measured on a booted app,
+    // not assumed — does NOT implement `ErrorResponse`, so the 4xx branch of
+    // `onUnhandled` below never saw it and the catch-all answered
+    // `500 "internal"`: a CLIENT fault reported as a server fault, telling the
+    // caller to retry a request that can never succeed.
+    //
+    // `errorStatuses("getById")` PUBLISHES 422 for exactly this failure ("a
+    // path `{id}` is parsed as a uuid … and a failure answers the same 422 the
+    // body tier does", src/ir/util/openapi-errors.ts), and Hono's
+    // `defaultHook` / .NET's `InvalidModelStateResponseFactory` already answer
+    // it.  A request-part parse failure is the wire-validation tier on every
+    // backend; keep it there on Java too, with the same `errors[]` pointer
+    // shape the body tier emits (`/id`, not the whole document).
+    `    @ExceptionHandler(MethodArgumentTypeMismatchException.class)`,
+    `    public ResponseEntity<ProblemDetail> onParamTypeMismatch(MethodArgumentTypeMismatchException e, WebRequest request) {`,
+    `        CatalogLog.event("domain_error", "warn", "message", "Validation failed", "status", ${UNPROCESSABLE_ENTITY});`,
+    `        httpMetrics.recordDomainFault("domain_error");`,
+    `        var problem = problem(${UNPROCESSABLE_ENTITY}, "Validation failed", "One or more fields are invalid.", request);`,
+    `        var entry = new java.util.LinkedHashMap<String, Object>();`,
+    `        entry.put("pointer", "/" + e.getName());`,
+    `        var required = e.getRequiredType();`,
+    `        entry.put("message", required != null`,
+    `            ? "Expected " + required.getSimpleName() + "."`,
+    `            : "Invalid value.");`,
+    `        problem.setProperty("errors", java.util.List.of(entry));`,
+    `        return respond(problem, ${UNPROCESSABLE_ENTITY});`,
     `    }`,
     ``,
     `    @ExceptionHandler(Exception.class)`,
@@ -814,10 +846,10 @@ export function renderApiExceptionAdvice(
     `                case 405 -> "method " + servletRequest.getMethod() + " is not supported for " + path;`,
     `                default -> er.getBody().getDetail() != null ? er.getBody().getDetail() : reason;`,
     `            };`,
-    `            CatalogLog.event("client_error", "warn", "error", detail, "status", status);`,
+    `            CatalogLog.event(${javaLogEvent("clientError")}, "error", detail, "status", status);`,
     `            return respond(problem(status, reason, detail, request), status);`,
     `        }`,
-    `        CatalogLog.event("internal_error", "error", "error", e.getMessage(), "status", 500);`,
+    `        CatalogLog.event(${javaLogEvent("internalError")}, "error", e.getMessage(), "status", 500);`,
     `        e.printStackTrace();`,
     `        return respond(problem(500, "Internal Server Error", "internal", request), 500);`,
     `    }`,

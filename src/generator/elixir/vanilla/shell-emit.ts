@@ -38,6 +38,7 @@ import {
 } from "../shell/runtime.js";
 import { renderLayouts } from "../shell/web.js";
 import { renderTelemetry } from "../telemetry-emit.js";
+import { renderGuardErrorModule } from "./denial.js";
 import { renderObanConfig } from "./scheduler-emit.js";
 
 export function emitVanillaShellFiles(
@@ -168,6 +169,12 @@ export function emitVanillaShellFiles(
   // Ambient execution-context carrier (Logger.metadata) — the Plug is mounted
   // in the endpoint after Plug.RequestId.
   out.set(`lib/${appName}/request_context.ex`, renderRequestContext(appModule));
+  // The typed guard denial a pure body (`function` / `domainService` /
+  // pure-core op) raises — `<App>.GuardError`, with the rung in its `:kind`
+  // field so the controller rescue routes on a FIELD rather than on the
+  // message prefix.  Domain layer, not `<App>Web.*`: `function-emit` /
+  // `domain-service-emit` render into `lib/<app>/` (M-T6.20).
+  out.set(`lib/${appName}/guard_error.ex`, renderGuardErrorModule(appModule));
   out.set(
     `lib/${appName}_web.ex`,
     // The TEMPLATE-side gate is the ui, not the merged catalog: `pgettext/2` in
@@ -254,6 +261,7 @@ export function emitVanillaShellFiles(
   }
   out.set(`lib/${appName}_web/controllers/error_json.ex`, renderVanillaErrorJson(appModule));
   out.set(`lib/${appName}_web/body_parser.ex`, renderVanillaBodyParser(appModule));
+  out.set(`lib/${appName}_web/fault_handler.ex`, renderVanillaFaultHandler(appModule));
   out.set(
     `lib/${appName}_web/controllers/not_found_controller.ex`,
     renderVanillaNotFoundController(appModule),
@@ -609,7 +617,12 @@ ${liveViewPlugs}${spaStaticPlug}  plug Plug.RequestId
   plug Plug.MethodOverride
   plug Plug.Head
   plug Plug.Session, @session_options
-  plug ${appModule}Web.Router
+  # The router is mounted THROUGH the app-global fault floor (M-T6.30), not
+  # directly: every fault raised at or below the router — a controller raise, a
+  # plug in a pipeline, an \`Ecto\` timeout — is answered by us in RFC 7807
+  # instead of by \`Phoenix.Endpoint.RenderErrors\` in whatever shape and content
+  # type the framework picks.  See ${appModule}Web.FaultHandler.
+  plug ${appModule}Web.FaultHandler
 end
 `;
 }
@@ -880,6 +893,125 @@ end
 `;
 }
 
+function renderVanillaFaultHandler(appModule: string): string {
+  // ── the app-global RFC 7807 floor (M-T6.30) ──────────────────────────────
+  //
+  // The four non-elixir backends install an APP-GLOBAL unhandled-exception
+  // handler — `app.onError` (hono), `DomainExceptionFilter` (.NET),
+  // `ApiExceptionAdvice` (java), `install_error_handlers` (python) — so ANY
+  // unmodelled fault, on any route, in any system, answers the RFC 7807
+  // envelope.  Vanilla Phoenix had none: its sanitized arm lived only inside
+  // the `respond/2` dispatchers that `workflow-execution-emit` /
+  // `explicit-handlers-emit` render, so a plain CRUD system emitted no such arm
+  // AT ALL and a controller raise fell through to the framework — an HTML
+  // debug page in dev (`debug_errors: true`), and in prod a body rendered
+  // through `Phoenix.Endpoint.RenderErrors` under `application/json`, with the
+  // exception's own message as `detail`.  Three ways to violate the contract on
+  // the most common system shape.
+  //
+  // This is the mirror of node's ROOT `app.onError`: the floor sits at the
+  // outermost point that still belongs to this app, and the per-router /
+  // per-dispatcher arms stay as REFINEMENTS above it — a workflow's `respond/2`
+  // still answers its own ladder; this only catches what nothing else did.
+  //
+  // WHY A WRAPPER PLUG.  `Plug.Builder` compiles `plug A` / `plug B` into
+  // `B.call(A.call(conn))`, so a plug listed in the endpoint cannot rescue the
+  // plugs that come AFTER it — a wrapping plug has to invoke the rest itself.
+  // That is the same reason `BodyParser` wraps `Plug.Parsers` rather than
+  // sitting in front of it, and it buys the same two properties: the content
+  // type is ours (`render_errors` exposes no knob for it, and its `json` format
+  // is `application/json`), and dev and prod answer IDENTICALLY, because
+  // `Plug.Debugger` never sees an exception we already turned into a response.
+  //
+  // Faults raised by the endpoint plugs ABOVE this one (`Plug.RequestId`,
+  // `Plug.Session`, `Plug.Head`, …) still reach `RenderErrors` — nothing in a
+  // plug pipeline can wrap what runs before it.  They are framework plugs on a
+  // request that has not reached this app's code yet, and `ErrorJSON` renders
+  // the same 7807 members for them (the content type is the residue).  The
+  // parsers, the one such plug that fails on ordinary bad input, are already
+  // covered by `BodyParser`.
+  return `# Auto-generated.
+defmodule ${appModule}Web.FaultHandler do
+  @moduledoc """
+  The app-global RFC 7807 floor — see the contract in
+  docs/conformance-semantics.md (RS-9, RS-28).
+
+  Mounts the router and answers ANY fault below it with the same
+  ProblemDetails envelope every modelled error on this API answers, under
+  \`application/problem+json\`.  A route that maps the fault itself (a
+  workflow's \`respond/2\`, an aggregate controller's rescue clauses) answers
+  first and never reaches here; this is what the rest of the app inherits.
+  """
+  @behaviour Plug
+
+  require Logger
+
+  alias ${appModule}Web.ProblemDetails
+
+  @impl true
+  def init(opts), do: opts
+
+  @impl true
+  def call(conn, _opts) do
+    ${appModule}Web.Router.call(conn, ${appModule}Web.Router.init([]))
+  rescue
+    # \`Phoenix.Router\`'s dispatch wraps a raise from a controller or pipeline
+    # plug in a \`WrapperError\` carrying the conn AS IT WAS at the raise — the
+    # one with the request id and any response headers already put.  Prefer it.
+    e in Plug.Conn.WrapperError ->
+      handle(e.conn || conn, :error, e.reason, e.stack)
+
+    e ->
+      handle(conn, :error, e, __STACKTRACE__)
+  catch
+    # A throw or an exit (an \`Ecto\` pool checkout timeout is the common one)
+    # is just as unmodelled as a raise, and reaches the wire the same way.
+    kind, reason ->
+      handle(conn, kind, reason, __STACKTRACE__)
+  end
+
+  defp handle(conn, kind, reason, stack) do
+    # The operator keeps everything; the caller gets none of it.  This is the
+    # only place the fault is recorded in full, because the sanitized detail
+    # below deliberately carries nothing about it.
+    Logger.error(Exception.format(kind, reason, stack))
+
+    status = status_for(kind, reason)
+
+    # A response already on the wire cannot be replaced — a chunked SSE stream
+    # that raises mid-send is past the point where an envelope is possible.
+    # Re-raise so the framework tears the connection down instead of us
+    # crashing on \`Plug.Conn.AlreadySentError\` and losing the original fault.
+    if conn.state in [:unset, :set, :set_chunked, :set_file] do
+      respond(conn, status)
+    else
+      :erlang.raise(kind, reason, stack)
+    end
+  end
+
+  # RS-28 — an error the server did not model is a SERVER fault, and its
+  # message names modules, SQL text, hosts and connection strings.  The wire
+  # gets the one sanitized literal all five backends send; the log line above
+  # got the truth.
+  defp respond(conn, status) when status >= 500 do
+    ProblemDetails.problem_response(conn, 500, "Internal Server Error", "internal")
+  end
+
+  # A \`Plug.Exception\` that names a 4xx classified the request, not the server
+  # (\`Ecto.NoResultsError\` -> 404, \`Phoenix.ActionClauseError\` -> 400).  Honour
+  # the status; the reason phrase is the detail, sanitized by construction the
+  # same way \`BodyParser\` sanitizes the parser faults.
+  defp respond(conn, status) do
+    phrase = Plug.Conn.Status.reason_phrase(status)
+    ProblemDetails.problem_response(conn, status, phrase, phrase)
+  end
+
+  defp status_for(:error, %{__exception__: true} = e), do: Plug.Exception.status(e)
+  defp status_for(_kind, _reason), do: 500
+end
+`;
+}
+
 function renderVanillaNotFoundController(appModule: string): string {
   return `# Auto-generated.
 defmodule ${appModule}Web.NotFoundController do
@@ -1067,16 +1199,27 @@ defmodule ${appModule}Web.ErrorJSON do
       type: "about:blank",
       title: title,
       status: status,
-      detail: detail_for(assigns, title),
+      detail: detail_for(status, assigns, title),
       instance: instance_for(assigns)
     }
   end
 
-  # Phoenix passes the raised exception when there is one; its message is a
-  # better \`detail\` than the bare reason phrase ("no route found for PUT
-  # /api/items").  Falls back to the phrase so the member is never absent.
-  defp detail_for(%{reason: %{message: message}}, _title) when is_binary(message), do: message
-  defp detail_for(_assigns, title), do: title
+  # RS-28 — a >= 500 is the fault nobody modelled, and the exception's message
+  # names modules, SQL text and hosts.  It gets the sanitized literal all five
+  # backends send, never \`reason.message\`.  (\`${appModule}Web.FaultHandler\`
+  # answers everything at or below the router, so what still renders here is a
+  # fault in an endpoint plug above it — but the leak must not depend on which
+  # of the two paths a request happened to take.)
+  defp detail_for(status, _assigns, _title) when status >= 500, do: "internal"
+
+  # Below 500, phoenix passes the raised exception when there is one; its
+  # message is a better \`detail\` than the bare reason phrase ("no route found
+  # for PUT /api/items").  Falls back to the phrase so the member is never
+  # absent.
+  defp detail_for(_status, %{reason: %{message: message}}, _title) when is_binary(message),
+    do: message
+
+  defp detail_for(_status, _assigns, title), do: title
 
   defp instance_for(%{conn: %{request_path: path}}) when is_binary(path), do: path
   defp instance_for(_assigns), do: nil

@@ -110,15 +110,27 @@ system ExpressionShowcase {
     // one covers neither of the others.  Both are called from `ComponentShapes`
     // below — the call site is the half that shows the drop.
     //
-    // The THIRD shape — a READ-BEARING component (#2568) — is deliberately not
-    // here.  It does not compile on React / Vue / Svelte today: the component
-    // walk is handed empty api-param maps, so `Catalog.Product.all` resolves to
-    // nothing and the body emits `/* unresolved: Catalog */ undefined.Product
-    // .all.isLoading`.  This fixture is compiled by `generated-react-build` and
-    // its siblings, so hosting it here would turn those gates red for a defect
-    // this PR does not fix.  It is pinned instead as a ratcheting case in
-    // `render-degradation.test.ts` (`READ_BEARING_COMPONENT_BROKEN`), against a
-    // purpose-built system that nothing compiles.
+    // The THIRD shape — a READ-BEARING component — lives here now.  It used to
+    // be barred from this fixture because it did not compile on React / Vue /
+    // Svelte: the component walk was handed an EMPTY api-param list where the
+    // page shell passes the ui's real one, so `Catalog.Product.all` resolved to
+    // nothing and the body emitted `/* unresolved: Catalog */ undefined.Product
+    // .all.isLoading` — a guaranteed TypeError, and TS18050 under
+    // `generated-react-build`.  The three emitters now thread `ui.apiParams`
+    // exactly as the page shell does (#2654), so the read hoists to the same
+    // `use<Op><Agg>()` handle a page gets, and hosting it here is what buys the
+    // shape real per-frontend COMPILER coverage instead of a string scan.
+
+    // an api READ inside a component body — the hoist has to happen in the
+    // component's own shell (`use…()` decl + api import), not the page's.
+    component RecentProducts(title: string) {
+      body: Stack {
+        Heading { title, level: 3 },
+        QueryView { of: Catalog.Product.all, data: rows => Stack {
+          For { each: rows, p => Text { p.name } }
+        } }
+      }
+    }
 
     // state + action — the component owns a cell and a handler that writes it.
     component Counter(caption: string) {
@@ -252,7 +264,8 @@ system ExpressionShowcase {
         Heading { "Component shapes" },
         TierBadge { label: "props-only", level: level },
         Counter { caption: "hits" },
-        ScoreTier { score: 95 }
+        ScoreTier { score: 95 },
+        RecentProducts { title: "Recent" }
       }
     }
 

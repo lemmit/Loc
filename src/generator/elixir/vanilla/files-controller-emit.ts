@@ -27,6 +27,8 @@ export function emitVanillaFilesController(
 defmodule ${webModule}.FilesController do
   use ${webModule}, :controller
 
+  alias ${webModule}.ProblemDetails
+
   @moduledoc """
   App-level file upload/download over the bound objectStore (M-T1.2).
   \`POST /files\` stores the uploaded bytes and returns a FileRef; \`GET /files/:key\`
@@ -63,18 +65,10 @@ defmodule ${webModule}.FilesController do
         |> send_resp(200, body)
 
       nil ->
-        # RFC 7807 through the shared responder — this used to answer
-        # %{"error" => "not found"} as application/json, a second error contract
-        # on a wire already committed to problem+json (and a different one again
-        # on each of the other four backends).  The status stays a literal 404:
-        # a bucket key is not an aggregate id, so this is not the remappable
-        # \`NotFound\` rung.
-        ${webModule}.ProblemDetails.problem_response(
-          conn,
-          404,
-          "Not Found",
-          "No stored object for that key"
-        )
+        # M-T6.39 — the absent object answers through the app's ONE 404
+        # producer, so it carries the same RFC 7807 envelope (and the same
+        # \`httpStatus NotFound -> <Code>\` override) as every other absent read.
+        ProblemDetails.not_found_response(conn, "File", key)
     end
   end
 end

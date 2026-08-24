@@ -13,10 +13,16 @@
 //
 // Per-backend renderers consume this catalog — Hono/pino in
 // `render-hono.ts`, .NET (`ILogger`) in `render-dotnet.ts`, Phoenix
-// (`Logger`) in `render-phoenix.ts` — so the same event surfaces with
+// (`Logger`) in `render-phoenix.ts`, Java (the emitted `CatalogLog`
+// facade) in `render-java.ts` — so the same event surfaces with
 // the same level + fields on every backend.  A log consumer (dashboard,
 // alert, `jq` query) sees one schema.  This is the `wireShape` pattern
 // applied to logs.
+//
+// Python is the one backend with no renderer here: its emitters spell
+// `log("<level>", "<event>", …)` inside template strings, and the
+// name/level pair is held to the catalog by the regex scan in
+// `test/generator/_obs/catalog-parity.test.ts` instead.
 //
 // Stability: treat the catalog like a wire contract — additive changes
 // (new events, new optional fields) are safe; renaming / removing
@@ -169,6 +175,16 @@ export const LogEvents = {
     event: "channel_dead_lettered",
     level: "warn",
     fields: ["address", "type", "id", "attempts", "error"],
+  },
+  /** A Kafka consumer joined its group but the broker assigned it no
+   *  partition inside the bounded wait — logged once, never fatal (the
+   *  subscriber keeps retrying).  Emitted by the java / dotnet / elixir
+   *  Kafka subscribers; catalogued here so the name is not re-spelled
+   *  per backend. */
+  channelSubscribeSlow: {
+    event: "channel_subscribe_slow",
+    level: "warn",
+    fields: ["address", "error"],
   },
 
   timerFired: { event: "timer_fired", level: "info", fields: ["timer"] },

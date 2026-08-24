@@ -254,15 +254,74 @@ export const ROOT_ORG_CLAIM_FIELD = "rootOrg";
  *  itself is emitted here.) */
 export const DATA_KEY_PATH_DELIMITER = ".";
 
+/** `ESCAPE` character for the SARGABLE PREFILTER half of the subtree read
+ *  (M-T3.17 — see {@link DEEP_SCOPE_SEMANTICS}).
+ *
+ *  `!` rather than the conventional `\`: the pattern and its `ESCAPE` clause
+ *  are spelled in five generated source languages plus HQL, and backslash is
+ *  the one character whose literal meaning differs between them (a Java/HQL
+ *  string literal, an Ecto fragment, a Postgres literal under
+ *  `standard_conforming_strings`, a Python `re` replacement).  `!` has one
+ *  meaning everywhere, so the five spellings cannot silently disagree. */
+export const DATA_KEY_LIKE_ESCAPE = "!";
+
+/** The characters a subtree LIKE pattern must escape, in the order the
+ *  generated replace-chains apply them — {@link DATA_KEY_LIKE_ESCAPE} FIRST
+ *  (escaping it after `%`/`_` would double-escape the escapes it just wrote),
+ *  then the two Postgres `LIKE` wildcards.
+ *
+ *  Every backend emits the same chain; `tenant-subtree-sargable.test.ts` pins
+ *  that all of them do, so a backend cannot drift to a different set. */
+export const DATA_KEY_LIKE_ESCAPED_CHARS: readonly string[] = [DATA_KEY_LIKE_ESCAPE, "%", "_"];
+
+/** The subtree LIKE pattern for an anchor path, as the generated code computes
+ *  it: escape the pattern metacharacters, then append `.%`.  The reference
+ *  implementation — the emitters spell this in their own language, and the
+ *  structural test compares their behaviour against this. */
+export function dataKeyLikePattern(anchor: string): string {
+  let out = anchor;
+  for (const ch of DATA_KEY_LIKE_ESCAPED_CHARS) {
+    out = out.split(ch).join(DATA_KEY_LIKE_ESCAPE + ch);
+  }
+  return out + DATA_KEY_PATH_DELIMITER + "%";
+}
+
 /**
  * Semantics every backend renders the `scope` authorization filter (M-T9.9) to
  * (row R, principal P; fail-closed — no principal ⇒ matches nothing):
  *
  *   (R.dataKey IS NOT NULL
  *      AND (R.dataKey = P.orgPath                       -- the caller's own node
- *           OR R.dataKey LIKE P.orgPath || '.%'))       -- + all descendants
+ *           OR (R.dataKey LIKE like(P.orgPath) ESCAPE '!'   -- sargable prefilter
+ *               AND strpos(R.dataKey, P.orgPath || '.') = 1)))  -- exact recheck
  *   OR (R.dataKey IS NULL                               -- legacy / principal-less
  *       AND R.tenantId = P.tenantId)                    --   rows degrade to `local`
+ *
+ * **Why the descendant test is TWO terms (M-T3.17).**  `strpos(col, needle) = 1`
+ * (the #2562 fix for the `orgXa.leak` wildcard leak) has no pattern language,
+ * so it is correct for an anchor containing `%`/`_` — but it is a
+ * function-of-column predicate, so Postgres cannot use the `data_key`
+ * `text_pattern_ops` index for it and every deep/global read seq-scans.  A
+ * prefix `LIKE` IS what that opclass indexes, so the LIKE is added as a
+ * *prefilter* and the anchored test is kept as the *recheck*:
+ *
+ *   - Correctness is decided by the recheck, which is byte-for-byte the
+ *     predicate #2562 shipped.  An escaping bug in the pattern can only make
+ *     the prefilter WIDER (an unescaped `_`/`%` matches more), never narrower,
+ *     and the recheck then throws the extra rows away — so the `orgXa.leak`
+ *     trap is green by construction rather than by trusting five escape
+ *     helpers, which is exactly the failure mode M-T3.17 exists to avoid.
+ *   - Sargability comes from the LIKE: the planner extracts the fixed prefix
+ *     (escapes included) and turns it into an index range over
+ *     `<table>_data_key_idx`, leaving `strpos(...)` as a cheap recheck filter
+ *     on the far fewer rows the index returned.
+ *
+ * No DDL change: the `text_pattern_ops` opclass the tenancy migration already
+ * derives (P2.5) is precisely the index a prefix `LIKE` rides under ANY
+ * database collation — which is also why the half-open-range alternative was
+ * not taken (`data_key >= a || '.' AND data_key < a || '/'` is only the
+ * descendant set under the C collation, and every ORM's `>=` uses the column's
+ * collation).
  *
  * The NULL branch is the deliberate OR-fallback (not pure fail-closed LIKE):
  * every row stamped before P2.3 (or by a principal-less workflow save) carries
@@ -271,7 +330,8 @@ export const DATA_KEY_PATH_DELIMITER = ".";
  * own tenant (never widening past it — no cross-tenant leak) and degrades
  * `deep` to exactly `local` for them, preserving flat-tenancy correctness.
  */
-export const DEEP_SCOPE_SEMANTICS = "descendant-or-self path prefix; NULL-dataKey ⇒ tenant floor";
+export const DEEP_SCOPE_SEMANTICS =
+  "descendant-or-self path prefix (sargable LIKE prefilter + anchored recheck); NULL-dataKey ⇒ tenant floor";
 
 /** Build a subtree reachability predicate for a tenant-owned aggregate as an
  *  `authz-filter` sentinel node carrying a `scope` decision anchored at
@@ -439,6 +499,24 @@ export function deepScopeTenantClaim(e: ExprIR): string {
   const tenant = scopeOf(e)?.tenantClaim;
   if (tenant?.kind === "member") return tenant.member;
   return TENANT_OWNED_TENANT_ID_FIELD;
+}
+
+/** The PRINCIPAL member the tenant floor compares against — the system's
+ *  declared `tenancy by user.<claim>`, falling back to
+ *  {@link TENANT_OWNED_TENANT_ID_FIELD} when the system declares no tenancy
+ *  (the status-quo shape; a `tenantOwned` aggregate without a tenancy
+ *  declaration is a phase-⑦ diagnostic, not something to silently re-point).
+ *
+ *  The single source of truth every consumer reads instead of spelling
+ *  `tenantId`: that constant is the ROW column the `tenantOwned` capability
+ *  provides, and the two names coincide only when the claim happens to be
+ *  called `tenantId`.  Enrichment rebinds the capability's hardcoded principal
+ *  side through this (`bindTenancyClaim`); emitters that reference the
+ *  principal directly — the realtime room key on all four SSE backends — read
+ *  it off the derived plan.  Twin of {@link deepScopeTenantClaim}, which
+ *  answers the same question for a subtree sentinel. */
+export function tenancyPrincipalClaim(sys: Pick<SystemIR, "tenancy"> | undefined): string {
+  return sys?.tenancy?.claimField ?? TENANT_OWNED_TENANT_ID_FIELD;
 }
 
 export type TenantStance = "tenantOwned" | "crossTenant" | "registry" | "unscoped";

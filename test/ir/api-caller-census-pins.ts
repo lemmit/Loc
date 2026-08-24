@@ -490,6 +490,18 @@ export const UNATTRIBUTED_CALLS: Record<string, readonly string[]> = {
 // classes decide the ORDER of the remaining drain, and re-deriving them costs
 // the next agent an hour (#2517).
 export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
+  // COMPILE-TIER WITNESS (generator review A5/A10–A14) — the previously
+  // unwitnessed collection-op shapes (arithmetic-lambda `sum`, `distinct` over
+  // money, argless `any()`, descending `sortBy`, unary minus on money, `-=` on
+  // an int[]).  The bugs it pins were compile/runtime-value defects proven by
+  // the per-backend compile tiers; a behavioural block would add uncalled
+  // routes and unrecorded goldens for no additional oracle.
+  "collection-op-shapes",
+  // COMPILE-TIER WITNESS (generator review A1) — a projection aggregation over
+  // a `tenantOwned` + `softDeletable` source; pins that the emitted aggregation
+  // read carries the capability predicates.  The runtime half needs the
+  // two-principal harness (`tenancy-e2e.yml` owns that shape).
+  "projection-agg-filters",
   // TWO DEPLOYABLES — the caller's client is derived from the callee's served
   // operation set (see the manifest note), and the behavioural corpus requires
   // exactly one `platform: node` deployable per case so dispatch is unambiguous.
@@ -511,6 +523,19 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // scaffold instead of the feature.
   "extern",
   "extern-handlers",
+  // SIDECAR-BOUND, like `channels-broker`/`outbox`: the two routed handlers
+  // exist precisely to issue objectStore / queue / mailer I/O, and the node
+  // behavioural leg boots in-process on PGlite with no minio, no rabbitmq and
+  // no smtp — so a caller would exercise the connection failure, not the
+  // feature.  This fixture's job is therefore the COMPILE tier, which is where
+  // its whole bug class lived: four of five emitters could not render a
+  // resource-op in a handler body at all (node/python emitted the helper call
+  // with no import → TS2304 / F821; .NET and java THREW at generate time), and
+  // the five compile legs now prove all five render.  Structural coverage is
+  // `test/generator/handler-resource-clients.test.ts` (per backend, per verb,
+  // mutation-proven).  The runtime drain belongs with the `resources` fixture's
+  // own sidecar leg, not here.
+  "handler-resource-ops",
   // The lifecycle `requires` gate.  ENFORCEMENT is pinned structurally per
   // backend in `test/generator/lifecycle-guard-render.test.ts` (mutation-proven
   // against ten seeded emitter defects), but no RUNTIME caller exercises it, and

@@ -320,7 +320,9 @@ function columnDefs(columns: readonly DataGridColumn[], selection: boolean): str
   for (const c of columns) {
     const parts = [`"id" ==> "${c.id}"`];
     if (c.accessorKey) parts.push(`"accessorKey" ==> "${c.accessorKey}"`);
-    parts.push(`"header" ==> "${escapeFs(c.header)}"`);
+    // The header is a user-visible slot (`columnHeader`): under i18n it arrives
+    // as an `I18n.t` expression, otherwise as the F#-escaped literal (unchanged).
+    parts.push(`"header" ==> ${c.headerValue ?? `"${escapeFs(c.header)}"`}`);
     parts.push(`"enableSorting" ==> ${c.sortable}`);
     parts.push(`"enableColumnFilter" ==> ${c.filterable}`);
     // A money/decimal column needs an explicit numeric comparator — see

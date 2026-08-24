@@ -215,8 +215,11 @@ structural half.
 - **Browser delivery** (M-T1.10) — the edge relay / room topology consumes
   the same `ChannelTransport` seam but is a separate mission; realtime SSE now
   ships on **all five backends** (`backendServesRealtime()`,
-  `src/ir/util/channels.ts`), consumed by the react/vue/svelte/angular/feliz
-  frontends. Elixir's stream is a chunked Phoenix controller
+  `src/ir/util/channels.ts`), consumed by **all six frontends** —
+  react/vue/svelte/angular/feliz, and flutter through a conditional-import
+  transport (`src/generator/flutter/realtime.ts`: the browser's own
+  `EventSource` on the web, a line parser over a streamed `package:http`
+  response natively). Elixir's stream is a chunked Phoenix controller
   (`src/generator/elixir/vanilla/realtime-emit.ts`) fed by the same `"events"`
   PubSub topic every domain `emit` already broadcasts on — so it needs no
   dispatcher decorator, and a HEEx/LiveView ui keeps consuming that topic
@@ -231,8 +234,9 @@ structural half.
   the subscriber — and therefore takes the *refetch-ticket* degrade the other
   four specify for a dispatch with no ambient tenant: a tenant-scoped event
   ships `type` + its `<Agg> id` references only, never a scalar payload, and
-  the authorized read re-gates on refetch. Remaining gap: Flutter has no
-  realtime consumer yet (warned via `loom.ui-realtime-unsupported`).
+  the authorized read re-gates on refetch. `loom.ui-realtime-unsupported` no
+  longer names a shipped target on either half — it stays as the seam a new
+  frontend (or an SSE ui whose serving deployable streams nothing) warns on.
 - **Elixir/java saga `last_event_id` dedup residual** — the column exists in
   migrations but hosted-durable consumer dedup is wired only on
   node/python/dotnet; elixir and java rely on broker ack semantics +

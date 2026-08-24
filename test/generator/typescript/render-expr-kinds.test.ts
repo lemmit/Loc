@@ -431,6 +431,95 @@ describe("ts renderTsExpr — sum type-awareness (money folds decimal.js)", () =
       "(this._items).reduce((acc, x) => acc + ((x) => x.d)(x), 0)",
     );
   });
+
+  // A5 — the canonical order total.  Before `bodyTypeOf` grew its `binary`
+  // arm this typed as `undefined` and fell through to the native `+`/`0`
+  // reduce, which tsc rejects (`number + Decimal`).
+  it("folds an ARITHMETIC money `sum(l => l.price * l.qty)` via `.plus` / `new Decimal(0)`", () => {
+    const arith: ExprIR = {
+      kind: "lambda",
+      param: "l",
+      body: {
+        kind: "binary",
+        op: "*",
+        left: {
+          kind: "member",
+          receiver: { kind: "ref", name: "l", refKind: "lambda" },
+          member: "price",
+          receiverType: { kind: "entity", name: "Line" },
+          memberType: MONEY,
+        },
+        right: {
+          kind: "member",
+          receiver: { kind: "ref", name: "l", refKind: "lambda" },
+          member: "qty",
+          receiverType: { kind: "entity", name: "Line" },
+          memberType: INT,
+        },
+        leftType: MONEY,
+        rightType: INT,
+        resultType: MONEY,
+      },
+    };
+    expect(renderTsExpr(sumMc({ kind: "entity", name: "Line" }, [arith]))).toBe(
+      "(this._items).reduce((acc, x) => acc.plus(((l) => l.price.times(l.qty))(x)), new Decimal(0))",
+    );
+  });
+});
+
+describe("ts renderTsExpr — unary `-` on money (A11)", () => {
+  it("renders `-money` via decimal.js `.neg()` (native `-` coerces through valueOf)", () => {
+    expect(
+      renderTsExpr({ kind: "unary", op: "-", operand: { ...thisProp("total"), type: MONEY } }),
+    ).toBe("this._total.neg()");
+  });
+
+  it("keeps `-int` on the native operator (int/decimal are plain `number` here)", () => {
+    expect(
+      renderTsExpr({ kind: "unary", op: "-", operand: { ...thisProp("qty"), type: INT } }),
+    ).toBe("-this._qty");
+  });
+
+  it("sees through a binary operand — `-(price * qty)` is still money", () => {
+    const arith: ExprIR = {
+      kind: "binary",
+      op: "*",
+      left: { ...thisProp("price"), type: MONEY },
+      right: { ...thisProp("qty"), type: INT },
+      leftType: MONEY,
+      rightType: INT,
+      resultType: MONEY,
+    };
+    expect(renderTsExpr({ kind: "unary", op: "-", operand: { kind: "paren", inner: arith } })).toBe(
+      "(this._price.times(this._qty)).neg()",
+    );
+  });
+
+  it("keeps `!bool` on the native operator", () => {
+    expect(
+      renderTsExpr({ kind: "unary", op: "!", operand: { ...thisProp("ok"), type: BOOL } }),
+    ).toBe("!this._ok");
+  });
+});
+
+describe("ts renderTsExpr — `distinct` value-dedupe on money (A14)", () => {
+  const distinctOf = (elem: TypeIR): ExprIR => ({
+    kind: "member",
+    receiver: thisProp("prices"),
+    member: "distinct",
+    receiverType: { kind: "array", element: elem },
+    memberType: { kind: "array", element: elem },
+  });
+
+  it("dedupes a `money[]` by VALUE — `new Set` compares Decimal references", () => {
+    expect(renderTsExpr(distinctOf(MONEY))).toBe(
+      "this._prices.filter((__x, __i, __a) => __a.findIndex((__y) => __y.eq(__x)) === __i)",
+    );
+  });
+
+  it("keeps a non-money `distinct` on `[...new Set(…)]` (byte-identical)", () => {
+    expect(renderTsExpr(distinctOf(STRING))).toBe("[...new Set(this._prices)]");
+  });
 });
 
 describe("ts renderTsExpr — call kinds", () => {

@@ -99,8 +99,22 @@ export interface StateRef {
 /** The data a target needs to render a sortable `Table` column header
  *  (M-T1.1 — the `renderSortableHeader` seam). */
 export interface SortableHeaderSpec {
-  /** Already-escaped header content (the column's display label). */
+  /** Already-escaped header content (the column's display label) — under i18n
+   *  the already-rendered interpolation of the translation call (`{t(…)}`),
+   *  which the four JSX/markup targets splice into the button exactly as they
+   *  splice the raw text (M-T1.11, the `columnHeader` slot). */
   header: string;
+  /** The header as a target-native TRANSLATION expression (`t("page.…", "Job
+   *  Name")`), or `undefined` when there is nothing to translate — i18n off, or
+   *  a dynamic header with no source string (M-T1.11, the `columnHeader` slot).
+   *
+   *  Every target renders the header as the sort button's CONTENT, but they
+   *  disagree on what content is: the four JSX/markup targets splice markup and
+   *  need the interpolated form, while Feliz and Flutter splice a STRING into
+   *  their own syntax (`prop.text ("…" + arrow)`, `Text('…')`) and need the bare
+   *  expression.  Handing both keeps the i18n-off path byte-identical: a target
+   *  that ignores this field emits exactly what it emitted before. */
+  headerValue?: string;
   /** Row property this column sorts by (`"name"`, `"id"`, …). */
   field: string;
   /** Page-state field holding the active sort column. */
@@ -292,6 +306,15 @@ export interface DataGridColumn {
   id: string;
   /** Header label, already escaped for the target. */
   header: string;
+  /** The header as a target-native TRANSLATION expression (`t("page.…", "Job
+   *  Name")`), or `undefined` when there is nothing to translate — i18n off, or
+   *  a dynamic header (M-T1.11, the `columnHeader` slot).
+   *
+   *  A grid header is a VALUE inside a TanStack-shaped column definition, not
+   *  markup, so every child renderer spells it `header: <value>` and reads this
+   *  in preference to quoting {@link header}.  `undefined` keeps each renderer's
+   *  own quoting, which is what makes the i18n-off output byte-identical. */
+  headerValue?: string;
   /** Row field this column reads, when the accessor is a simple member. */
   accessorKey?: string;
   /** Already-rendered target markup for a non-trivial accessor, with the row

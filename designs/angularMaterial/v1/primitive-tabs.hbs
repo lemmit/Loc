@@ -1,5 +1,5 @@
 {{#if hasTabs}}<mat-tab-group{{{testidAttr}}}{{{styleAttr}}}>
-{{indent}}{{#each tabs}}<mat-tab label={{json this.label}}>
+{{indent}}{{#each tabs}}<mat-tab{{{this.labelAttr}}}>
 {{../innerIndent}}{{{this.bodyJsx}}}
 {{../indent}}</mat-tab>{{#unless @last}}
 {{../indent}}{{/unless}}{{/each}}

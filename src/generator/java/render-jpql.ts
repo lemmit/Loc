@@ -1,13 +1,16 @@
 import type { ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
+  DATA_KEY_LIKE_ESCAPE,
   DATA_KEY_PATH_DELIMITER,
+  deepScopeAnchorClaim,
   guidClaimAccessorName,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import type { DurationUnit } from "../../util/temporal.js";
+import { spelSubtreeLikePattern } from "../_expr/subtree-like.js";
 
 // ---------------------------------------------------------------------------
 // Find-filter → JPQL renderer.  Spring Data derived method names can't
@@ -38,6 +41,31 @@ export interface JpqlCtx {
   alias: string;
   /** Fully-qualified package of the generated enums (for enum literals). */
   enumsPkg: string;
+  /** When present, a `currentUser.<claim>` reference renders as a PLAIN JPQL
+   *  named parameter (`:__cuTenantId`) instead of the Spring Data SpEL bean
+   *  form, and the accessor it needs is recorded here for the caller to bind.
+   *  `EntityManager.createQuery` has no SpEL layer — `:#{…}` is not a legal
+   *  parameter name there — so the reads that build JPQL directly (query-time
+   *  projection aggregations) bind the principal themselves. */
+  principalAccessors?: Set<string>;
+}
+
+/** JPQL parameter name for a principal claim accessor under
+ *  `JpqlCtx.principalAccessors`.  Prefixed so it cannot collide with a
+ *  find's own `:param` bindings. */
+export function principalParamName(accessor: string): string {
+  return `__cu${accessor.charAt(0).toUpperCase()}${accessor.slice(1)}`;
+}
+
+/** Render a `currentUser.<accessor>` reference for `ctx`: a bound named
+ *  parameter when the caller opted into `principalAccessors`, else the Spring
+ *  Data SpEL bean read. */
+function renderPrincipal(accessor: string, ctx: JpqlCtx): string {
+  if (ctx.principalAccessors) {
+    ctx.principalAccessors.add(accessor);
+    return `:${principalParamName(accessor)}`;
+  }
+  return `:#{@${CURRENT_USER_BEAN}.user()?.${accessor}()}`;
 }
 
 // JPQL-side scalar-intrinsic snippets (src/util/intrinsics.ts) — how a
@@ -108,7 +136,7 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
       // `currentUser.<field>` → SpEL reading the ambient request principal off
       // the CurrentUserAccessor bean (null-safe → fail-closed).
       if (e.receiver.kind === "ref" && e.receiver.refKind === "current-user") {
-        return `:#{@${CURRENT_USER_BEAN}.user()?.${e.member}()}`;
+        return renderPrincipal(e.member, ctx);
       }
       // Property navigation: `this.shipTo.city` → `e.shipTo.city`
       // (embedded path).  JPQL navigates record components by name.
@@ -147,7 +175,18 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
           // portable anchored position test (→ Postgres `position(search in
           // source)`) and has no pattern language, matching how
           // `string.startsWith` lowers in JPQL_INTRINSICS.
-          const descendant = `locate(concat(${org}, '${DATA_KEY_PATH_DELIMITER}'), ${col}) = 1`;
+          const anchored = `locate(concat(${org}, '${DATA_KEY_PATH_DELIMITER}'), ${col}) = 1`;
+          // SARGABLE PREFILTER (M-T3.17).  `locate(...) = 1` is a function of
+          // the column, so Postgres cannot use the `data_key text_pattern_ops`
+          // index for it and every deep/global read seq-scans.  A prefix `like`
+          // IS what that opclass indexes, so it goes IN FRONT of the anchored
+          // test as a prefilter, with the anchored test kept as the recheck: an
+          // escaping slip in the pattern could only WIDEN the prefilter, and
+          // the recheck still decides the row, so `acme_corp` can never reach
+          // `acmeXcorp.…`.  The pattern is built in SpEL (safe-navigated, so an
+          // absent principal yields a null pattern → `like null` → no rows).
+          const pattern = `:#{${spelSubtreeLikePattern(`@${CURRENT_USER_BEAN}.user()?.${deepScopeAnchorClaim(e)}()`)}}`;
+          const descendant = `(${col} like ${pattern} escape '${DATA_KEY_LIKE_ESCAPE}' and ${anchored})`;
           return (
             `(${col} is not null and (${col} = ${org} or ${descendant})) ` +
             `or (${col} is null and ${tenantCol} = ${tenant})`
@@ -287,7 +326,7 @@ function renderBinary(e: Extract<ExprIR, { kind: "binary" }>, ctx: JpqlCtx): str
         idType.valueType === "guid" && claimIsString
           ? guidClaimAccessorName(claim.member)
           : claim.member;
-      const spel = `:#{@${CURRENT_USER_BEAN}.user()?.${accessor}()}`;
+      const spel = renderPrincipal(accessor, ctx);
       return idSide === e.left ? `${idPath} ${op} ${spel}` : `${spel} ${op} ${idPath}`;
     }
   }

@@ -75,17 +75,28 @@ describe("Dapper SaveAsync is transactional", () => {
     // join-table DELETE + INSERT, and the containment DELETE + INSERT.
     expect(save).toContain("DELETE FROM order_tags");
     expect(save).toContain("DELETE FROM line_items");
-    // No save-path ExecuteAsync may omit the transaction.
-    const execCalls = save.slice(0, save.indexOf("PullEvents")).match(/ExecuteAsync\(/g) ?? [];
-    const withTx =
-      save.slice(0, save.indexOf("PullEvents")).match(/transaction: __tx, cancellationToken/g) ??
-      [];
+    // No save-path ExecuteAsync may omit the transaction.  The cut is the
+    // outbox-capture call (`RecordDurableAsync`), which is the last statement
+    // before the commit — `PullEvents` used to mark that boundary, but the
+    // transactional-outbox fix moved the drain to just BEFORE the commit so the
+    // durable rows can be written on `__tx` (dispatch-delivery-semantics.md §1).
+    const cut = save.indexOf("RecordDurableAsync");
+    expect(cut).toBeGreaterThan(0);
+    const execCalls = save.slice(0, cut).match(/ExecuteAsync\(/g) ?? [];
+    const withTx = save.slice(0, cut).match(/transaction: __tx, cancellationToken/g) ?? [];
     expect(execCalls.length).toBeGreaterThan(0);
     expect(withTx.length).toBe(execCalls.length);
 
-    // Commit happens before events are dispatched (a rolled-back save must not fire events).
+    // The durable-outbox capture is handed `__tx` and runs BEFORE the commit, so
+    // an owed event's row commits with the aggregate write.
+    expect(save).toContain(
+      "var __deferred = await _events.RecordDurableAsync(__pending, __tx, cancellationToken);",
+    );
     const commitIdx = save.indexOf("__tx.CommitAsync(cancellationToken)");
-    const eventsIdx = save.indexOf("PullEvents");
+    expect(cut).toBeLessThan(commitIdx);
+
+    // Commit happens before events are dispatched (a rolled-back save must not fire events).
+    const eventsIdx = save.indexOf("_events.DispatchAsync");
     expect(commitIdx).toBeGreaterThan(0);
     expect(commitIdx).toBeLessThan(eventsIdx);
   });

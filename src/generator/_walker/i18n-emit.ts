@@ -377,6 +377,36 @@ export function localizedNamedValue(
   return stringLiteral(ctx, text);
 }
 
+/** The translation-call EXPRESSION for a POSITIONAL user-visible slot, or
+ *  `undefined` when there is nothing to translate — i18n is off, the slot is
+ *  absent, or it is dynamic with no literal text.
+ *
+ *  The "caller keeps its own spelling" variant of {@link localizedNamedValue},
+ *  and it makes the same trade {@link localizedChromeIcuValue} does: a slot
+ *  whose raw form is spliced into the target's OWN string syntax — Flutter's
+ *  `InputDecoration(labelText: '…')`, Feliz's `prop.text "…"`, a TanStack
+ *  `header: "…"` column def — cannot be handed a re-spelled literal without
+ *  putting the pre-i18n bytes at the mercy of that re-spelling.  Returning
+ *  `undefined` leaves the existing raw path untouched BY CONSTRUCTION and hands
+ *  back an expression only when there is a real `t()` call to make.
+ *
+ *  `role` MUST match the slot's role in `USER_VISIBLE_SLOTS`, so the emitted key
+ *  equals the catalog key. */
+export function localizedPositionalTranslation(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  role: string,
+  argIndex = 0,
+): string | undefined {
+  const arg = positionalArgs(call)[argIndex];
+  const literal = literalString(arg);
+  if (literal !== undefined) {
+    if (!ctx.i18nPrefix) return undefined;
+    return translateCall(ctx, messageKey(ctx.i18nPrefix, role, literal), literal);
+  }
+  return icuTranslateCall(arg, ctx, role);
+}
+
 /** A plain string literal in the target's own expression language — the
  *  `renderStringLiteral` seam, JSON-quoted when a target leaves it unset. */
 function stringLiteral(ctx: WalkContext, text: string): string {

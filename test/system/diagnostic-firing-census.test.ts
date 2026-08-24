@@ -152,6 +152,22 @@ const FIRING_FIXTURES: Record<string, string> = {
       find byName(n: string): Thing[] where this.name == n
     }`),
 
+  // An abstract inheritance base owning its own `contains`.  The part's table
+  // would have no reader and no writer — the base has no repository and the
+  // concretes do not inherit its parts.  This was a `persistence: mikroorm`-only
+  // reject until the shape was generated on every other target and the output
+  // read: silently dropped on drizzle / efcore / python / java, a dead FK'd
+  // table on dapper, and a 500-producing half-emission on elixir (schema +
+  // `has_many` + a serializing controller, no migration, no preload).
+  "loom.abstract-aggregate-contains":
+    repoOnly(`    abstract aggregate Party inheritanceUsing: sharedTable {
+      name: string
+      contains addresses: Address[]
+      entity Address { street: string }
+    }
+    aggregate Customer extends Party with crudish { creditLimit: int }
+    repository Customers for Customer { }`),
+
   // --- variant match (structural-checks + the AST-level subject rule) ------
   "loom.match-unknown-variant": unionMatch(
     `outcome { Order o => o.code, Other x => x.resource, else => "" }`,
@@ -239,6 +255,27 @@ system S {
     port: 3000
     auth: required
   }
+}`,
+
+  // A query-time projection whose direct-table arm aggregates a field that has
+  // no column: the source is `shape: document`, so `total` lives inside the
+  // `data` jsonb blob and `sum(o.total)` names nothing.  Universal, not
+  // per-backend — every backend emitted the missing reference.
+  "loom.projection-columnless-source": `
+system S {
+  subdomain Sales { context Orders {
+    aggregate Order shape: document, with crudish { code: string  total: int }
+    repository Orders for Order { }
+    projection OrderVolume {
+      revenue: int
+      from Order as o
+      select revenue = sum(o.total)
+    }
+  } }
+  api Api from Sales
+  storage pg { type: postgres }
+  resource st { for: Orders, kind: state, use: pg }
+  deployable d { platform: node contexts: [Orders] dataSources: [st] serves: Api port: 3000 }
 }`,
 
   // A frontend deployable whose ui READS `currentUser` while the ui is not
@@ -330,8 +367,11 @@ system S {
   deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
 }`,
 
-  // `persist: local|session|url` is dropped to in-memory by the feliz and
-  // flutter store emitters — an honest error until they implement the ladder.
+  // The `persist:` ladder now ships on EVERY frontend, so the platform-wide arm
+  // of this code is gone; what remains is field-scoped.  Persistence on feliz
+  // and flutter crosses an untyped boundary per field, so a cell whose type has
+  // no total conversion in that language's codec (here a `datetime` on feliz)
+  // is refused rather than silently dropped from the stored blob.
   "loom.store-lifetime-target-unsupported": `
 system S {
   subdomain Sub { context C {
@@ -339,15 +379,15 @@ system S {
   } }
   api Api from Sub
   ui WebApp {
-    framework: flutter
+    framework: feliz
     api C: Api
-    store Cart persist: local { state { count: int = 0 } }
-    page Home { route: "/"  body: Stack { Heading { Cart.count, level: 3 } } }
+    store Cart persist: local { state { seenAt: datetime } }
+    page Home { route: "/"  body: Stack { Heading { "hi", level: 3 } } }
   }
   storage pg { type: postgres }
   resource st { for: C, kind: state, use: pg }
   deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
-  deployable web { platform: flutter targets: api ui: WebApp { C: api } port: 3001 }
+  deployable web { platform: feliz targets: api ui: WebApp { C: api } port: 3001 }
 }`,
 
   // A resource handle is ambient over the whole context, but only the
@@ -395,6 +435,44 @@ system S {
       }
     }
   }
+}`,
+
+  // An unresolved bare ref in a rendered slot: the walker emits a comment and
+  // the content silently disappears on all six frontends (A17).
+  "loom.unresolved-page-ref": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: react
+    api C: Api
+    page Home { route: "/"  body: Text { nosuchthing } }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
+  // `Stat(label, value)` is a fixed two-slot shape, not a children container —
+  // a third positional is rendered by no design pack (A7's arity half).
+  "loom.page-primitive-extra-children": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: react
+    api C: Api
+    page Home { route: "/"  body: Stat { "Revenue", "10", Text { "extra" } } }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
 }`,
   // --- frontend deployable without a `ui:` binding ------------------------
   "loom.react-deployable-missing-ui": spaMissingUi("react"),

@@ -2,7 +2,12 @@ import type { BoundedContextIR, EnumIR, StmtIR, ValueObjectIR } from "../../../i
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
 import { emptyPyTypeImports, visitPyTypeImports } from "../py-type-imports.js";
-import { collectPyExprImports, renderPyExpr, renderPyType } from "../render-expr.js";
+import {
+  collectPyExprImports,
+  renderPyExpr,
+  renderPyNegatedGuard,
+  renderPyType,
+} from "../render-expr.js";
 import { renderPyStatements } from "../render-stmt.js";
 
 /** Import collection over a pure block-body function statement's expressions
@@ -114,8 +119,8 @@ function renderPyValueObject(v: ValueObjectIR): string[] {
   const fields = v.fields.map((f) => `    ${snake(f.name)}: ${renderPyType(f.type)}`);
   const invariants = v.invariants.flatMap((inv) => {
     const cond = inv.guard
-      ? `(${renderPyExpr(inv.guard, VO_CTX)}) and not (${renderPyExpr(inv.expr, VO_CTX)})`
-      : `not (${renderPyExpr(inv.expr, VO_CTX)})`;
+      ? `(${renderPyExpr(inv.guard, VO_CTX)}) and ${renderPyNegatedGuard(inv.expr, VO_CTX)}`
+      : renderPyNegatedGuard(inv.expr, VO_CTX);
     return [
       `        if ${cond}:`,
       `            raise DomainError(${JSON.stringify(inv.message ? inv.message.text : `Invariant violated: ${inv.source}`)})`,

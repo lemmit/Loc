@@ -10,6 +10,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { elixirString, escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
+import { appModuleOf, guardErrorModule } from "./denial.js";
 import { pureDerivedAccessorNames } from "./domain-core-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -265,8 +266,11 @@ function renderThrows(expr: ExprIR, env: Env): string {
     return `assert {:error, _} = ${renderCreate(inner, env)}`;
   }
   if (inner.kind === "method-call" && isAggOp(inner, env)) {
-    // A failed precondition raises ArgumentError before any persist.
-    return `assert_raise ArgumentError, fn -> ${renderOp(inner, env)} end`;
+    // A failed `precondition` / `requires` raises the typed `<App>.GuardError`
+    // before any persist.  ONE exception type for both rungs (the `:kind` field
+    // separates them) is what lets this assertion stay shape-agnostic — a
+    // `toThrow()` expression doesn't say which rung the op will trip.
+    return `assert_raise ${guardErrorModule(appModuleOf(env.ctxModule))}, fn -> ${renderOp(inner, env)} end`;
   }
   // A value-object construction invariant (F5): `expect(Money{-1}).toThrow()` →
   // the VO's validating constructor returns {:error, _}.  Only VOs that declare

@@ -204,7 +204,6 @@ function renderFoldModule(appModule: string, ctxModule: string, agg: AggregateIR
   const renderCtx: RenderCtx = {
     thisName: "state",
     contextModule: `${appModule}.${ctxModule}`,
-    foundation: "vanilla",
   };
   // A `boxes += Box{…}` fold constructs a contained entity part; the fold
   // projects the part's wire shape into a plain map (no `%Ctx.Box{}` Ecto
@@ -410,7 +409,7 @@ function renderEsFind(f: FindIR, aggModule: string): string {
   const fnName = snake(f.name);
   const argNames = f.params.map((p) => snake(p.name));
   const single = isSingleReturn(f.returnType);
-  const ctx: RenderCtx = { thisName: "a", contextModule: aggModule, foundation: "vanilla" };
+  const ctx: RenderCtx = { thisName: "a", contextModule: aggModule };
   const pred = f.filter
     ? renderExpr(f.filter, ctx)
     : argNames.map((n) => `a.${n} == ${n}`).join(" and ");
@@ -706,7 +705,6 @@ function renderCommandRunner(c: CommandCtx): string {
   const exprCtx: RenderCtx = {
     thisName: "state",
     contextModule: c.aggModule.split(".").slice(0, -1).join("."),
-    foundation: "vanilla",
     ...(c.kind === "create" ? { idLocal: "id" } : {}),
   };
 
