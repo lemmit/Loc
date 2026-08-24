@@ -390,7 +390,7 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
   {
     code: "loom.handler-load-nullable-unsupported",
     kind: "scope",
-    site: "src/ir/validate/checks/api-checks.ts:113",
+    site: "src/ir/validate/checks/api-checks.ts:116",
     what: "command/query handler load of a nullable result — v1 is single non-nullable",
     verified: true,
   },
