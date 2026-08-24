@@ -196,6 +196,10 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
       c.body!,
       ctx.pack,
       userComponents,
+      // The ui's api handles — the SAME list the page shell gets.  A component
+      // body reads (`QueryView { of: Sales.Order.all }`) exactly as a page body
+      // does; handed `[]` the handle resolved to nothing.
+      ui.apiParams,
       ctx.aggregatesByName,
       buildBcByAggregate(ctx),
       pageRoutes,

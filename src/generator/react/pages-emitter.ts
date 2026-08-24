@@ -287,6 +287,11 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
       c.body!,
       ctx.pack,
       userComponents,
+      // The ui's api handles — the SAME list the page shell below gets.  A
+      // component body reads (`QueryView { of: Sales.Order.all }`) exactly as
+      // a page body does; handed `[]` the handle resolved to nothing and the
+      // walk emitted `/* unresolved: Sales */ undefined.Order.all…`.
+      ui.apiParams,
       ctx.aggregatesByName,
       buildBcByAggregate(ctx),
       pageRoutes,

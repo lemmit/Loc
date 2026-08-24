@@ -581,6 +581,14 @@ export function renderSvelteComponentFile(
   body: ExprIR,
   pack: LoadedPack,
   userComponents: ReadonlyMap<string, readonly ParamIR[]>,
+  /** UI api parameters — the SAME list the page shell threads.  A component
+   *  body reads (`QueryView { of: Sales.Order.all }`) exactly as a page body
+   *  does, so the handle (`Sales`) has to resolve here too; handed an empty
+   *  list the walk emitted `{#if /* unresolved: Sales *​/ undefined.Order.all
+   *  .isLoading}` — uncompilable under `svelte-check`.  The hook imports and
+   *  `$derived` declarations below were already wired; only the input was
+   *  missing. */
+  apiParams: ReadonlyArray<UiApiParamIR> = [],
   aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
   pageRoutes: ReadonlyMap<string, string> = new Map(),
@@ -629,7 +637,7 @@ export function renderSvelteComponentFile(
     paramNames,
     stateNames,
     userComponents,
-    [],
+    apiParams,
     aggregatesByName,
     bcByAggregate,
     new Map(),
