@@ -197,9 +197,16 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
   {
     code: "loom.mikroorm-unsupported",
     kind: "gap",
-    site: "src/ir/validate/checks/system-checks.ts:2456",
-    what: "five features whose Hono emitter is gated off under MikroORM",
-    mission: "M-T6.23",
+    // Re-pointed 2026-08-24: the five feature clauses and the two shape rejects
+    // this row used to name are all drained, and `validateMikroOrmSupport` was
+    // deleted with them (#2621 / #2623) — the block comment at its old site in
+    // `system-checks.ts` records why.  The one surviving raiser is unrelated to
+    // any of them: declared migration steps `orm.schema.updateSchema()` can
+    // never apply (a rename resolves as DROP + ADD).  Twin of
+    // `loom.dapper-unsupported#migrations`, hence the same owning mission.
+    site: "src/ir/validate/checks/migration-checks.ts:254",
+    what: "declared migration steps the MikroORM adapter's schema sync cannot apply",
+    mission: "M-T6.35",
   },
   {
     code: "loom.operation-return-unsupported",
