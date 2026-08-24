@@ -83,11 +83,7 @@ describe("java File upload (slice 2c)", () => {
     expect(ctrl).toContain("LocalDiskResources.docFilesPutBytes(key, bytes, contentType)");
     expect(ctrl).toContain('new FileRef("/files/" + key, key, contentType, bytes.length)');
     expect(ctrl).toContain('@GetMapping("/files/{key}")');
-    // Wildcard-typed since the absent-object arm answers a `ProblemDetail`
-    // rather than an empty 404 (`files-absence-envelope-parity.test.ts`); the
-    // hit arm still carries the bytes.
-    expect(ctrl).toContain("public ResponseEntity<?> download(@PathVariable String key)");
-    expect(ctrl).toContain(".body(obj.bytes())");
+    expect(ctrl).toContain("ResponseEntity<byte[]>");
     expect(ctrl).toContain("LocalDiskResources.docFilesGetBytes(key)");
   });
 

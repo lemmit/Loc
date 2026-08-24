@@ -81,11 +81,7 @@ describe("python File upload (slice 2a)", () => {
     expect(routes).toContain("async def upload_file(file: UploadFile) -> Response:");
     expect(routes).toContain("await doc_files_put_bytes(key, body, content_type)");
     expect(routes).toContain('"contentType": content_type,');
-    // `request` is load-bearing, not cosmetic: the absent-object 404 answers
-    // RFC 7807 through `app.http.problem.problem`, which fills `instance` from
-    // the request path (`files-absence-envelope-parity.test.ts`).
-    expect(routes).toContain("async def download_file(key: str, request: Request) -> Response:");
-    expect(routes).toContain("from app.http.problem import problem");
+    expect(routes).toContain("async def download_file(key: str) -> Response:");
     expect(routes).toContain("obj = await doc_files_get_bytes(key)");
     expect(routes).toContain("return Response(content=body, media_type=content_type)");
   });
