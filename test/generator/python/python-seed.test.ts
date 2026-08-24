@@ -56,7 +56,9 @@ describe("python seeding", () => {
         }
       }}
       api A from S
-      deployable api { platform: python contexts: [C] serves: A port: 3000 }
+      storage pg { type: postgres }
+      resource cState { for: C, kind: state, use: pg }
+      deployable api { platform: python contexts: [C] dataSources: [cState] serves: A port: 3000 }
     }`;
     const { model, errors } = await parseString(src);
     if (errors.length) throw new Error(errors.join("\n"));

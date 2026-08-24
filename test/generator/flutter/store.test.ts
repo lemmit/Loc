@@ -8,7 +8,7 @@
 // it projects onto the same Riverpod triad `riverpod-emit.ts` already builds.
 
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/index.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/index.js";
 
 const SYS = (extra = "") => `
 system Shop {
@@ -42,6 +42,11 @@ system Shop {
 }`;
 
 const gen = (extra = "") => generateSystemFiles(SYS(extra));
+
+/** For the ONE leg whose subject is a lifetime the flutter target refuses:
+ *  `loom.store-lifetime-target-unsupported` firing is the premise, since the
+ *  test asserts the emitter says so out loud instead of downgrading silently. */
+const genUnchecked = (extra: string, why: string) => generateSystemFilesUnchecked(SYS(extra), why);
 
 describe("flutter stores (Stage 5)", () => {
   it("no longer throws on a store-bearing ui", async () => {
@@ -112,10 +117,14 @@ describe("flutter stores (Stage 5)", () => {
   // `<store>Provider` a `memory` store gets.
   it("keeps the plain Riverpod triad under a non-memory lifetime", async () => {
     const dart = (
-      await gen(`store Draft persist: local {
+      await genUnchecked(
+        `store Draft persist: local {
       state { note: string = "" }
       action write(t: string) { note := t }
-    }`)
+    }`,
+        "`persist: local` on flutter IS the subject — loom.store-lifetime-target-unsupported " +
+          "is the gate that keeps the degradation honest, and this pins the emitter half of it",
+      )
     ).get("app/lib/stores.dart")!;
     expect(dart).not.toContain("TODO(flutter full-parity)");
     expect(dart).toContain("class DraftNotifier extends Notifier<DraftState> {");

@@ -7,7 +7,7 @@
 // `<%!-- … --%>` form (inert in both positions) AND every registered primitive
 // counts as markup position, so the wrap can't come back.
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/index.js";
+import { generateSystemFilesUnchecked } from "../../_helpers/index.js";
 
 const SRC = `
 system Demo {
@@ -38,7 +38,15 @@ system Demo {
 `;
 
 async function landingHeex(): Promise<string> {
-  const files = await generateSystemFiles(SRC);
+  // A `Tab` outside a `Tabs` is what `loom.sub-primitive-misplaced` rejects,
+  // and that misplacement IS this test's subject — the fallthrough only fires
+  // for a primitive the target cannot render in that position.  So it emits
+  // from a model the CLI refuses, on purpose.
+  const files = await generateSystemFilesUnchecked(
+    SRC,
+    "the stray `Tab` is the premise — loom.sub-primitive-misplaced firing is " +
+      "what puts the HEEx fallthrough on the path under test",
+  );
   for (const [p, c] of files) {
     if (p.endsWith("/landing_live.ex")) return c;
   }

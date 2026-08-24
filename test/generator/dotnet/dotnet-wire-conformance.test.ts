@@ -61,9 +61,12 @@ const DOTNET_FIXTURE = `system AcmeDotnet {
     }
   }
   api SalesApi from Sales
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
   deployable dotnetApi {
     platform: dotnet
     contexts: [Sales]
+    dataSources: [salesState]
     serves: SalesApi
     port: 8080
   }

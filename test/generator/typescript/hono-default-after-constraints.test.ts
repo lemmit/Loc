@@ -6,10 +6,8 @@
 // that poisons the whole request object's inferred type, so every
 // `body.<field>` collapses to `unknown` in the route handler.  The default
 // is now applied after the single-field invariant chain.
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseValid } from "../../_helpers/parse.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `
   system Sys {
@@ -25,16 +23,18 @@ const SRC = `
       }
     }
     storage primary { type: postgres }
+    resource opsState { for: Ops, kind: state, use: primary }
     deployable api {
       platform: node
       contexts: [Ops]
+      dataSources: [opsState]
       port: 3000
     }
   }
 `;
 
 async function routesFile(): Promise<string> {
-  const files = (await generateSystems(await parseValid(SRC))).files;
+  const files = await generateSystemFiles(SRC);
   const path = [...files.keys()].find((k) => k.endsWith("/http/widget.routes.ts"));
   expect(path, "widget.routes.ts not emitted").toBeDefined();
   return files.get(path!)!;
