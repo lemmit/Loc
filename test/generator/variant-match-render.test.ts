@@ -155,3 +155,67 @@ describe("variant-match over a union find (absence shape) — per-backend render
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Nested variant-`match` — an INNER arm reading an OUTER arm's binding.
+//
+// `match outer { A a => match inner { B b => a.code, NF => "gone" }, NF => "x" }`
+//
+// The shared dispatcher installed each arm's binding as a FRESH single-entry
+// `matchBindings` map, so entering the inner match ERASED `a`.  The inner
+// arm's `a.code` then missed the side-channel and fell back to formatting the
+// bare `.ddd` name — an identifier no target ever declares.  On TS that is
+// especially invisible: `a` is a plausible-looking local, and the emitted
+// project fails with TS2304, which this repo's own `tsc` never sees.
+// Native-pattern backends escaped only by coincidence — their bound name IS
+// the source name, so the fallback happened to be right; that coincidence is
+// exactly why the bug survived.
+const B: TypeIR = { kind: "entity", name: "B" };
+
+type MatchExpr = Extract<ExprIR, { kind: "match" }>;
+
+const innerMatch = (armValue: ExprIR): MatchExpr => ({
+  kind: "match",
+  arms: [],
+  subject: { kind: "ref", name: "inner", refKind: "let" },
+  subjectType: { kind: "union", variants: [B, NF] },
+  variantArms: [
+    { varType: B, binding: "b", value: armValue, isError: false },
+    { varType: NF, binding: undefined, value: lit("gone"), isError: true },
+  ],
+  otherwise: undefined,
+});
+
+const nestedMatch = (innerArmValue: ExprIR): MatchExpr => ({
+  kind: "match",
+  arms: [],
+  subject: { kind: "ref", name: "outer", refKind: "let" },
+  subjectType: { kind: "union", variants: [A, NF] },
+  variantArms: [
+    { varType: A, binding: "a", value: innerMatch(innerArmValue), isError: false },
+    { varType: NF, binding: undefined, value: lit("x"), isError: true },
+  ],
+  otherwise: undefined,
+});
+
+describe("nested variant-match keeps the enclosing arm's bindings in scope", () => {
+  it("TS: the inner arm's `a.code` still resolves to the OUTER scrutinee", () => {
+    // `a` is aliased to `outer` (TS has no expression-level pattern binding),
+    // so the inner arm must read `outer.code` — never the undeclared `a.code`.
+    const out = renderTsExpr(nestedMatch(fieldOf("a", "code")));
+    expect(out).toContain("outer.code");
+    expect(out).not.toMatch(/(^|[^.\w])a\.code/);
+  });
+
+  it("Python: the inner arm reads the outer subject, not a bare name", () => {
+    const out = renderPyExpr(nestedMatch(fieldOf("a", "code")));
+    expect(out).toContain('outer["code"]');
+    expect(out).not.toMatch(/(^|[^.\w])a\["code"\]/);
+  });
+
+  it("the inner arm's OWN binding is still installed alongside the outer one", () => {
+    // The half the single-entry map got right, pinned so the spread never
+    // drops it: `b` still aliases the INNER scrutinee.
+    expect(renderTsExpr(nestedMatch(fieldOf("b", "code")))).toContain("inner.code");
+  });
+});

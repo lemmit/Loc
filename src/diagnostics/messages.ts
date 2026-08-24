@@ -1981,6 +1981,17 @@ export const DIAGNOSTIC_MESSAGES = {
     `audit-record emission for ${p.kind}s is implemented for the ${p.capable} backend(s) only — ${p.hostNote}. ` +
     `Host the context on a capable deployable, or drop the 'audited' modifier (all backends). ` +
     `Tracked in audit-and-logging.md.`,
+  "loom.audited-returning-operation-unsupported": (p: {
+    name: unknown;
+    op: unknown;
+    modifier: unknown;
+    platforms: unknown;
+  }) =>
+    `operation '${p.name}.${p.op}' is '${p.modifier}' AND declares a return type, but the ` +
+    `${p.platforms} backend(s) emit only the void (204) handler for that combination — the ` +
+    `declared result, including its error variants, would be silently discarded and every call ` +
+    `audited as 'ok'. Drop the '${p.modifier}' modifier, drop the return type, or host the ` +
+    `context on a backend that emits both (python emits the returning + audited route today).`,
   "loom.datasource-knob-unwired": (p: { name: unknown; property: unknown; description: unknown }) =>
     `resource '${p.name}' sets '${p.property}', but ${p.description}.  ` +
     `The value is accepted by validation and persisted in the IR but no current ` +

@@ -80,7 +80,7 @@ import { walkExprDeep, walkWorkflowStmtExprsDeep } from "../../../ir/util/walk.j
 import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../../util/scaffold-once.js";
-import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
+import { emitWireSchema, QUERY_BOOL, wireToDomainExpr, zodFor } from "./routes-builder.js";
 import {
   collectReposForWorkflow,
   honoWorkflowStmtTarget,
@@ -141,7 +141,9 @@ function pathParamZod(t: TypeIR): string {
       case "long":
         return "z.coerce.number().int()";
       case "bool":
-        return "z.coerce.boolean()";
+        // A path segment is a string, so `z.coerce.boolean()` bound
+        // `/flag/false` to `true`.  Same four-spelling parse as a query bool.
+        return QUERY_BOOL;
       default:
         return "z.string()";
     }

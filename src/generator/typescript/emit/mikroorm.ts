@@ -58,6 +58,7 @@ import {
   isQueryTimeProjection,
 } from "../../../ir/types/loom-ir.js";
 import { durableEventTypes } from "../../../ir/util/channels.js";
+import { orientComparison } from "../../../ir/util/comparison-operands.js";
 import {
   discriminatorValue,
   isTphBase,
@@ -1169,28 +1170,43 @@ function rawEntry(frag: MikroRawFragment, value: string): string {
   return `[raw(${JSON.stringify(frag.sql)}, [${frag.params.join(", ")}])]: ${value}`;
 }
 
-/** Render a `this.<col> <op> <param>` comparison as a `{ col: ... }` entry. */
+/** Render a `this.<col> <op> <param>` comparison as a `{ col: ... }` entry.
+ *
+ *  A FilterQuery has no left-hand VALUE position — the key is always the
+ *  column — so a predicate written the other way round (`where 100 <
+ *  this.qty`, which `MIKROORM_SUBSET` admits, since the capability descriptor
+ *  walks a comparison's operands symmetrically) is commuted here, with the
+ *  operator mirrored by the shared normalizer.  Requiring the column on the
+ *  left instead is what made that validator-accepted shape emit the
+ *  `not yet supported` runtime-throwing stub. */
 function comparisonEntry(e: Extract<ExprIR, { kind: "binary" }>, acc: string): string {
-  // FilterQuery keys are entity PROPERTY names (== field names), not DB columns.
-  const col = thisFieldColumn(e.left);
+  // FilterQuery keys are entity PROPERTY names (== field names), not DB
+  // columns — or, for an intrinsic over a column, a `raw()` SQL fragment.
+  // Either spelling counts as a column position for orientation purposes.
+  const isColumnSide = (operand: ExprIR): boolean =>
+    thisFieldColumn(operand) !== null || mikroColumnSql(operand, [], acc) !== null;
+  const oriented = orientComparison(e.op, e.left, e.right, isColumnSide);
+  if (oriented === null)
+    throw new Error("mikroorm: unsupported find predicate (neither operand is this.<field>)");
+  const col = thisFieldColumn(oriented.column);
   if (col === null) {
-    // …unless the left side is an intrinsic over a column, which has no
+    // …unless the column side is an intrinsic over a column, which has no
     // FilterQuery spelling at all — it becomes a `raw()` KEY with the
     // comparison's value (or operator object) as the payload.
     const params: string[] = [];
-    const sql = mikroColumnSql(e.left, params, acc);
+    const sql = mikroColumnSql(oriented.column, params, acc);
     if (sql === null)
       throw new Error("mikroorm: unsupported find predicate (lhs not this.<field>)");
-    const rhs = filterValue(e.right, acc);
-    if (e.op === "==") return rawEntry({ sql, params }, rhs);
-    const rawOp = FILTER_OP[e.op];
-    if (!rawOp) throw new Error(`mikroorm: unsupported operator '${e.op}' in find`);
+    const rhs = filterValue(oriented.value, acc);
+    if (oriented.op === "==") return rawEntry({ sql, params }, rhs);
+    const rawOp = FILTER_OP[oriented.op];
+    if (!rawOp) throw new Error(`mikroorm: unsupported operator '${oriented.op}' in find`);
     return rawEntry({ sql, params }, `{ ${rawOp}: ${rhs} }`);
   }
-  const rhs = filterValue(e.right, acc);
-  if (e.op === "==") return `${col}: ${rhs}`;
-  const op = FILTER_OP[e.op];
-  if (!op) throw new Error(`mikroorm: unsupported operator '${e.op}' in find`);
+  const rhs = filterValue(oriented.value, acc);
+  if (oriented.op === "==") return `${col}: ${rhs}`;
+  const op = FILTER_OP[oriented.op];
+  if (!op) throw new Error(`mikroorm: unsupported operator '${oriented.op}' in find`);
   return `${col}: { ${op}: ${rhs} }`;
 }
 
@@ -1473,22 +1489,6 @@ function mikroContextFilters(agg: EnrichedAggregateIR, bypass?: FilterBypass): s
     out.push(whereToMikroFilter(pred));
   });
   return out;
-}
-
-/** The WHERE a query-time projection AGGREGATION reads `agg`'s table with: the
- *  projection's own filter (`base`, already a FilterQuery literal) AND-ed with
- *  the aggregate's applicable capability filters, honouring the read's
- *  `ignoring` bypass.  An aggregation reads the table DIRECTLY rather than
- *  through the repository, so without this it would count rows every repository
- *  read excludes.  `undefined` ⇒ no predicate at all. */
-export function mikroProjectionWhere(
-  base: string | undefined,
-  agg: EnrichedAggregateIR,
-  bypass?: FilterBypass,
-): string | undefined {
-  const caps = mikroContextFilters(agg, bypass);
-  if (caps.length === 0) return base;
-  return withContextFilters(base ?? "{}", caps);
 }
 
 /** Merge a base FilterQuery object-literal with the aggregate's applicable
