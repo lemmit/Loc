@@ -27,7 +27,7 @@ import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import type { ExprIR } from "../../src/ir/types/loom-ir.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
-import { generateSystemFiles } from "../_helpers/generate.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../_helpers/generate.js";
 import { parseString } from "../_helpers/parse.js";
 
 const CODE = "loom.toast-message-unsupported";
@@ -173,10 +173,17 @@ describe("loom.toast-message-unsupported", () => {
       // degradation, it is an ABORT.  Both SPA renderers are exercised
       // end-to-end; the LiveView one directly (it has no SPA deployable).
       it(`${label} crashes codegen today (which is what the gate replaces)`, async () => {
-        await expect(generateSystemFiles(sys(toast, "static"))).rejects.toThrow(
+        // The unchecked helper: the fixture is rejected by the gate under test
+        // on purpose, and the CRASH the gate replaces is the subject — the
+        // checked helper would throw its phase-⑦ refusal before codegen runs.
+        const why =
+          "this leg proves the raw codegen abort loom.toast-message-unsupported replaces; the gate rejects the model by design";
+        await expect(generateSystemFilesUnchecked(sys(toast, "static"), why)).rejects.toThrow(
           /RealtimeHandlers: /,
         );
-        await expect(generateSystemFiles(sys(toast, "feliz"))).rejects.toThrow(/Feliz realtime: /);
+        await expect(generateSystemFilesUnchecked(sys(toast, "feliz"), why)).rejects.toThrow(
+          /Feliz realtime: /,
+        );
       }, 120_000);
     }
 

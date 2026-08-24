@@ -12,7 +12,7 @@
 // no-op pin now that the server-side path is implemented.)
 
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/index.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/index.js";
 
 const SOURCE = `
   error Failed { reason: string }
@@ -129,7 +129,12 @@ describe("HEEx `match await` (Stage 2) — server-side variant-match", () => {
 
 describe("HEEx `match await` — subject shapes", () => {
   async function pageAction(actionBody: string): Promise<string> {
-    const files = await generateSystemFiles(`
+    // Unchecked: the two crash-proof legs' bare `C.Order.confirm()` subject
+    // trips `loom.missing-effect-marker` by design — their subject is that
+    // codegen RAISES on the unrenderable match rather than tap-dropping it.
+    // (The bare-aggregate leg's model is valid; unchecked emits it identically.)
+    const files = await generateSystemFilesUnchecked(
+      `
       error Failed { reason: string }
       system Demo {
         subdomain S { context C {
@@ -158,7 +163,9 @@ describe("HEEx `match await` — subject shapes", () => {
           port: 4000
         }
       }
-    `);
+    `,
+      "the crash-proof legs deliberately omit the effect marker loom.missing-effect-marker requires; the codegen raise on the unrenderable match is their subject",
+    );
     return files.get("phoenix_app/lib/phoenix_app_web/live/detail_live.ex")!;
   }
 

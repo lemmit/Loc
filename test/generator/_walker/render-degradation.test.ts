@@ -764,7 +764,12 @@ system S {
   for (const target of DEFERRED_COMPONENT_SHAPES) {
     it(`${target.framework}: a deferred user component still degrades — and is now REJECTED, which is why the ratchet can be empty`, async () => {
       const src = slotComponentSystem(target.platform);
-      const files = await generateSystemFiles(src);
+      // Unchecked on purpose: the refusal half below asserts this very model is
+      // rejected; this half emits from it to prove the degradation is still real.
+      const files = await generateSystemFilesUnchecked(
+        src,
+        "the deferral sentinel must stay reachable from the model loom.user-component-deferred-target rejects — both halves of the fix-or-gate claim are asserted here",
+      );
       const pages = [...files.entries()].filter(([k]) => target.pages.test(k));
       expect(pages.length, `no page files matched for ${target.framework}`).toBeGreaterThan(0);
       expect(

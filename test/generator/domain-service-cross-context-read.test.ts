@@ -18,15 +18,16 @@
 //      fixes), and
 //   2. proves phase ⑦ rejects the model, so no user reaches that emission.
 //
-// `generateSystemFiles` asserts phases ① and ④ but deliberately does NOT run
-// phase ⑦ (`validateLoomModel`) — which is exactly why the emission below was
-// reachable in the first place, and why (2) is asserted separately here.
+// `generateSystemFiles` now asserts phase ⑦ too (M-T9.34), so the emission
+// legs go through `generateSystemFilesUnchecked`: emitting from the model the
+// gate rejects IS their subject — (1) proves the dangling emission is still
+// real, (2) separately proves phase ⑦ refuses it.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
-import { generateSystemFiles } from "../_helpers/generate.js";
+import { generateSystemFilesUnchecked } from "../_helpers/generate.js";
 import { parseString } from "../_helpers/parse.js";
 
 /** `context Ordering`'s `Naming.isFree` reads `context Billing`'s `Customers`.
@@ -99,7 +100,13 @@ function bySuffix(files: Map<string, string>, suffix: string): string {
 describe("domainService cross-context read — the emission the gate stands in front of", () => {
   for (const { platform, file, dangling } of BACKENDS) {
     it(`${platform} emits a dangling identifier for the cross-context receiver`, async () => {
-      const out = bySuffix(await generateSystemFiles(SRC(platform)), file);
+      const out = bySuffix(
+        await generateSystemFilesUnchecked(
+          SRC(platform),
+          "the dangling cross-context emission loom.domain-service-cross-context-read stands in front of is the subject; the gate rejects this model by design",
+        ),
+        file,
+      );
       expect(out).toContain(dangling);
       // Nothing in the file defines or imports the receiver — that is what
       // makes it dangling rather than merely oddly named.
