@@ -466,7 +466,16 @@ export const UUID_PATTERN =
  *  does").  A `pattern` miss raises `RequestValidationError`, which the
  *  emitted handler already renders as the 422 problem envelope.  Invisible to
  *  the paramTypeDiffs parity dimension, which compares `type` + `format`
- *  only — both unchanged. */
+ *  only — both unchanged.
+ *
+ *  PRECONDITION: every user of this constant must have a `guid` id.  True by
+ *  construction for an aggregate (`lowerAggregate` sets `idValueType` to
+ *  `"guid"` unconditionally); the one caller that CAN see a non-guid key —
+ *  the workflow-instance byId route — already branches on
+ *  `workflowCorrIdValueType` and takes `id: str` / `id: int` instead.  The
+ *  `format: uuid` this replaces carried the same precondition, so the pattern
+ *  adds no new coupling — but if non-guid aggregate ids ever land, this needs
+ *  the workflow side's branch, not just a different annotation. */
 export const ID_PARAM = `id: Annotated[str, Path(pattern=r"${UUID_PATTERN}", json_schema_extra={"format": "uuid"})]`;
 
 /** The domain error names this routes file actually references. */
