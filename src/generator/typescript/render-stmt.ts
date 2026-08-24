@@ -1,4 +1,11 @@
-import type { ExprIR, MessageIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
+import type {
+  ExprIR,
+  MessageIR,
+  PathIR,
+  ProvSite,
+  StmtIR,
+  TypeIR,
+} from "../../ir/types/loom-ir.js";
 import { escapeTsIdent } from "../../util/naming.js";
 import { collectLeaves, provTempNames, wrapProvCapture } from "../_stmt/leaves.js";
 import { renderStmtChunksWith, renderStmtsWith, type StmtTarget } from "../_stmt/target.js";
@@ -181,13 +188,9 @@ function tsStmtTarget(emitProvenance: boolean, traceCtx: TraceCtx): StmtTarget {
     remove: (s, ix) => {
       const path = renderPath(s.target);
       const value = renderTsExpr(s.value);
-      // `money` elements are decimal.js `Decimal` instances, so `===` is
-      // REFERENCE identity — `prices -= p` never matches a value-equal entry
-      // and silently removes nothing.  Compare with `.eq`, the same money
-      // special-case `contains`/`distinct` carry in render-expr (audit A14).
-      const money =
-        s.collection && s.elementType.kind === "primitive" && s.elementType.name === "money";
-      const eq = money ? `(e) => e.eq(${value})` : `(e) => e === (${value})`;
+      const eq = s.collection
+        ? `(e) => ${removeElementEquals(s.elementType, value)}`
+        : `(e) => e === (${value})`;
       const base = `${INDENT}{ const idx = ${path}.findIndex(${eq}); if (idx >= 0) ${path}.splice(idx, 1); }`;
       return withTrace(base, s.prov, s.target, s.value, emitProvenance, ix.prov);
     },
@@ -231,6 +234,35 @@ function tsStmtTarget(emitProvenance: boolean, traceCtx: TraceCtx): StmtTarget {
       return `${INDENT}return ${tagged};`;
     },
   };
+}
+
+/** The scan predicate `<coll> -= v` matches an element with — a VALUE
+ *  comparison, keyed off the element type.
+ *
+ *  `===` is REFERENCE identity on every boxed element, so the plain form
+ *  silently removed NOTHING and still returned 2xx:
+ *
+ *   - `money` — decimal.js `Decimal` instances (audit A14, fixed first).
+ *   - `datetime` — the wire value is a freshly-parsed `Date` and the stored
+ *     elements are hydrated `Date`s, so `dates -= d` never matched (audit A7).
+ *     `.NET`'s `List<DateTime>.Remove` uses value equality, so this was a
+ *     cross-backend behavioural divergence as well as a no-op.
+ *   - `valueobject` — the emitted VO class carries `equals()` precisely
+ *     because reference identity is wrong for it (`emit/value-objects.ts`).
+ *   - `json` — an open shape; structural comparison, matching the VO
+ *     emitter's own `json` field arm.
+ *
+ *  Everything else (`int`/`string`/`guid`/`bool`, branded ids, enum literals,
+ *  and entity PARTS — whose class emits no `equals`, and whose removal is
+ *  genuinely identity-scoped) keeps `===`, byte-identical to before. */
+function removeElementEquals(elementType: TypeIR, v: string): string {
+  if (elementType.kind === "primitive") {
+    if (elementType.name === "money") return `e.eq(${v})`;
+    if (elementType.name === "datetime") return `e.getTime() === (${v}).getTime()`;
+    if (elementType.name === "json") return `JSON.stringify(e) === JSON.stringify(${v})`;
+  }
+  if (elementType.kind === "valueobject") return `e.equals(${v})`;
+  return `e === (${v})`;
 }
 
 /** Render a precondition — plain throw when trace is off; under
