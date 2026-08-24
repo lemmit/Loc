@@ -737,10 +737,38 @@ function responseRecordParams(
   return parts.join(", ");
 }
 
-/** True iff the entity exposes any provenanced field on its response (so the
- *  emitter adds the `using <ns>.Domain.Common;` the `ProvLineage?` param needs). */
+/** True iff the entity exposes any provenanced field on its response — so the
+ *  DTO's `Provenanced<T>` component (and its `ProvLineage` member) need
+ *  `using <ns>.Domain.Common;`. */
 export function entityExposesProvenance(ent: { fields: FieldIR[] }): boolean {
   return ent.fields.some((f) => f.provenanced);
+}
+
+/**
+ * True iff PROJECTING this aggregate to its response DTO emits an expression
+ * that NAMES a type from `<ns>.Domain.Common` — so every emitter that inlines
+ * `projectEntityExpr` / `projectToResponse` into a file must add that using or
+ * the file fails to compile.
+ *
+ * Two triggers, and they are different from the DTO's own
+ * (`entityExposesProvenance`) because a projection can name a Common type the
+ * record declaration doesn't, and vice versa:
+ *
+ *   - `mask unless` — `maskWrap` reads `RequestContext.Current`.
+ *   - `provenanced` — the projection CONSTRUCTS the carrier,
+ *     `new Provenanced<int>(found.Total, found.TotalProvenance)` (M-T6.12).
+ *     Before the carrier this arm was a bare property read
+ *     (`found.TotalProvenance`), which named no type and so needed no using —
+ *     which is exactly why every read handler over a provenanced aggregate
+ *     started failing `CS0246: The type or namespace name 'Provenanced<>'
+ *     could not be found`.
+ */
+export function projectionNamesDomainCommon(agg: EnrichedAggregateIR): boolean {
+  return (
+    agg.fields.some((f) => f.maskUnless) ||
+    entityExposesProvenance(agg) ||
+    agg.parts.some((p) => entityExposesProvenance(p))
+  );
 }
 
 function isPart(ent: EnrichedAggregateIR | EnrichedEntityPartIR): ent is EnrichedEntityPartIR {
