@@ -50,6 +50,9 @@ function dartPrimitive(name: PrimitiveName): string {
 /** Non-nullable Dart type spelling for a wire `TypeIR`.  An `optional` inner
  *  layer appends `?`; the caller adds `?` for a wire field whose optionality is
  *  carried by the `WireField.optional` flag rather than an `optional` type. */
+/** The Dart spelling of the shared `Provenanced<T>` wire carrier. */
+export const DART_PROVENANCED = "Provenanced";
+
 export function dartType(t: TypeIR): string {
   switch (t.kind) {
     case "primitive":
@@ -67,6 +70,13 @@ export function dartType(t: TypeIR): string {
       return t.name;
     case "array":
       return `List<${dartType(t.element)}>`;
+    case "genericInstance":
+      // `Provenanced<int>` (M-T6.12) — the value + lineage wire carrier.  An
+      // explicit arm, not the `dynamic` fallthrough: a dynamic here would
+      // silently drop the value's type out of the model and out of every page
+      // that reads it.
+      if (t.ctor === "provenanced") return `${DART_PROVENANCED}<${dartType(t.arg)}>`;
+      return "dynamic";
     case "optional": {
       // `File` already spells the nullable `FileRef?`, so `File?` must not
       // double-up to `FileRef??`.
@@ -150,6 +160,14 @@ export function dartFromJson(t: TypeIR, access: string): string {
       return `${base.name}.fromJson(${access} as Map<String, dynamic>)`;
     case "array":
       return `(${access} as List<dynamic>).map((e) => ${dartFromJson(base.element, "e")}).toList()`;
+    case "genericInstance":
+      if (base.ctor === "provenanced") {
+        // The carrier's `fromJson` takes a decoder for the value half, so the
+        // carried type keeps its own conversion (a `datetime` value still
+        // parses, a nested VO still builds its class).
+        return `${DART_PROVENANCED}.fromJson(${access} as Map<String, dynamic>, (__v) => ${dartFromJson(base.arg, "__v")})`;
+      }
+      return access;
     default:
       return access;
   }

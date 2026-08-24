@@ -146,6 +146,7 @@ import {
   contextsHaveProvenance,
   emitJavaProvenanceMigration,
   provenancedFieldsOf,
+  renderProvenancedCarrier,
   renderProvenanceRecordEntity,
   renderProvenanceRecordRepository,
   renderProvInput,
@@ -519,6 +520,7 @@ function emitProjectFromContexts(
     place("ProvTarget.java", "domain-common", renderProvLineage(basePkg));
     place("ProvInput.java", "domain-common", renderProvInput(basePkg));
     place("ProvLineage.java", "domain-common", renderProvLineageRecord(basePkg));
+    place("Provenanced.java", "domain-common", renderProvenancedCarrier(basePkg));
     place("ProvenanceRecord.java", "infra-persistence", renderProvenanceRecordEntity(basePkg));
     place(
       "ProvenanceRecordRepository.java",

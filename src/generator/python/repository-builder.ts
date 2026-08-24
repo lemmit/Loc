@@ -43,8 +43,9 @@ import { type ValueCollectionIR, valueCollectionsFor } from "../../ir/util/value
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { provenancedEntries } from "../_payload/provenanced-wire.js";
 import { renderPyHistoryRepoMethod } from "./emit/audit-history.js";
-import { provColumn, provenancedFieldsOf } from "./emit/provenance.js";
+import { PY_PROV_SUFFIX, provColumn, provenancedFieldsOf } from "./emit/provenance.js";
 import {
   aggUsesPrincipalContextFilter,
   contextFilterPredicate,
@@ -1515,6 +1516,19 @@ export function wireValue(
     const comp = inner === "__e" ? `list(${expr})` : `[${inner} for __e in ${expr}]`;
     return optional ? `(None if ${expr} is None else ${comp})` : comp;
   }
+  if (t.kind === "genericInstance" && t.ctor === "provenanced") {
+    // (M-T6.12) Fold the domain's split pair into the one wire carrier.  `expr`
+    // is the VALUE attribute (`root.total`); its lineage sibling is the
+    // co-located `<field>_provenance` attribute the model declared.
+    const lineageAttr = `${expr}${PY_PROV_SUFFIX}`;
+    const members = provenancedEntries(
+      wireValue(expr, t.arg, ctx, optional),
+      `(${lineageAttr}.to_wire() if ${lineageAttr} is not None else None)`,
+    )
+      .map(([k, v]) => `"${k}": ${v}`)
+      .join(", ");
+    return `{${members}}`;
+  }
   if (optional && t.kind === "primitive") {
     return expr;
   }
@@ -1558,16 +1572,13 @@ function wireProjection(
 }
 
 export function toWireMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
-  // Co-located provenance lineage rides the wire DTO so any GET surfaces the
-  // current lineage (`<field>_provenance`), mirroring the Hono / .NET DTO.
-  const provPairs = provenancedFieldsOf(agg).map((f) => {
-    const col = provColumn(f.name);
-    return `"${col}": (root.${col}.to_wire() if root.${col} is not None else None)`;
-  });
+  // (M-T6.12) No trailing `<field>_provenance` pair any more: the lineage rides
+  // inside the provenanced field's own value as the `Provenanced<T>` carrier,
+  // folded by `wireValue`'s carrier branch.
   return lines(
     `    def to_wire(self, root: ${agg.name}) -> dict[str, object]:`,
     "        return {",
-    [...wireProjection(agg, "root", ctx), ...provPairs].map((p) => `            ${p},`),
+    wireProjection(agg, "root", ctx).map((p) => `            ${p},`),
     "        }",
   );
 }

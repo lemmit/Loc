@@ -14,7 +14,7 @@
 // bypass.
 
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
@@ -78,7 +78,7 @@ const SRC = `
 
 let cache: Map<string, string> | undefined;
 async function files(): Promise<Map<string, string>> {
-  cache ??= (await generateSystems(await parseValid(SRC))).files;
+  cache ??= await generateSystemFiles(SRC);
   return cache;
 }
 

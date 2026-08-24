@@ -353,9 +353,11 @@ describe("scaffoldDetails — aggregate read view + related cards", () => {
     expect(errors).toEqual([]);
     const order = findNode(model, "Aggregate", "Order");
     const src = printExpr(scaffoldDetails(order));
-    // The provenanced field wraps value + a "?" disclosure in a Group.
+    // The provenanced field wraps value + a "?" disclosure in a Group.  The
+    // FIGURE reads the wire carrier's `value` member (M-T6.12) — a bare
+    // `data.total` would render the whole `{ value, lineage }` object.
     expect(src).toContain("Group(");
-    expect(src).toContain("Text(data.total)");
+    expect(src).toContain("Text(data.total.value)");
     expect(src).toContain(
       'ProvenanceInfo(of: data, field: "total", testid: "orders-detail-total-prov")',
     );
@@ -536,14 +538,16 @@ describe("scalarColumnsForAggregate — resolves columns from the aggregate AST"
     const cols = scalarColumnsForAggregate(order);
     // value-object (`total: Money`) and array (`tags: Customer id[]`) drop out
     // of a list table (no plain-cell rendering).
+    // `provenanced` is false on every column here — none of these fields carry
+    // the modifier, so no cell reads through the wire carrier (M-T6.12).
     expect(cols).toEqual([
-      { name: "buyer", kind: { tag: "id", targetName: "Customer" } },
-      { name: "createdAt", kind: { tag: "datetime" } },
-      { name: "active", kind: { tag: "bool" } },
-      { name: "status", kind: { tag: "enum" } },
-      { name: "note", kind: { tag: "text" } },
+      { name: "buyer", kind: { tag: "id", targetName: "Customer" }, provenanced: false },
+      { name: "createdAt", kind: { tag: "datetime" }, provenanced: false },
+      { name: "active", kind: { tag: "bool" }, provenanced: false },
+      { name: "status", kind: { tag: "enum" }, provenanced: false },
+      { name: "note", kind: { tag: "text" }, provenanced: false },
       // default-on optimistic-concurrency token (M-T3.4)
-      { name: "version", kind: { tag: "numeric" } },
+      { name: "version", kind: { tag: "numeric" }, provenanced: false },
     ]);
   });
 });

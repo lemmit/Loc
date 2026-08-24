@@ -57,8 +57,14 @@ Sources: global-plan T2.d, [platform-realization-axes](../old/proposals/platform
 What is genuinely reserved-but-unwired is **three optional data slots on `ComposeServiceShape`**, undefined on every backend, which the compose orchestrator skips when absent: `auditSidecar` (a separate container draining audit-record events — M-T4.x audit), `policyInitCmd` (an entrypoint wrapper that loads/verifies compliance policies before the main service — M-T3.x authorization/compliance), and `i18nCatalogDir` (the in-container mount path for the i18n catalog — M-T1.11). Tenancy has no reservation at all: multi-tenant filtering ships through the capability/stance machinery ([`docs/tenancy.md`](../tenancy.md)), not a surface hook.
 Disposition unchanged: don't build speculatively — each slot fills when its owning feature reaches emission. Tracked here so they aren't forgotten or cargo-culted.
 
-## M-T6.12 — Provenanced wire pair — `open` · **M** · P3
-Fold provenanced value+lineage into one `Provenanced<T> = {value, lineage}` carrier in `wireShape` so all targets agree (today 3 backends bolt on an extra key). Phases 1–6 incl. the `.value` read-site unwrap via one `ExprTarget` leaf.
+## M-T6.12 — Provenanced wire pair — `done` (this session) · **M** · P3
+`Provenanced<T> = { value, lineage }` now lands ONCE, in `wireShape` (`wireTypeForField`, `src/ir/enrich/wire-projection.ts`), from ONE shape definition (`GENERIC_SHAPES.provenanced`, `src/ir/stdlib/generics.ts`) whose two member names live at `src/util/provenance-carrier.ts` so all four pipeline layers read the same strings. Eleven hand-rolled `<field>_provenance` SIBLING appends (five backend DTO emitters + six frontend api-type/decoder emitters) are deleted; each target now has ONE arm that builds the carrier off the shared member list.
+
+**Corrections to the proposal, both verified against the code:** (1) the premise "3 backends bolt on an extra key" was stale — all FIVE appended the sibling, so the divergence being fixed was the hand-rolled-in-eleven-places one, plus the artifact blindness. (2) The proposal's §6 read-site unwrap does NOT exist, because §7 of the same document is the binding constraint: storage and the in-memory domain object keep the pair SPLIT, so no domain expression ever reads a carrier and the planned `ExprTarget.refProvenanced` leaf would have been dead code. The unwraps that do exist are all on the WIRE side and are one arm per emitter, each reading `provenancedEntries` / `provenancedTypeMembers`. The read-site work that IS real landed in the scaffold macro (the detail/list value cell reads `<record>.<field>.value`) and in the HEEx walker, which drops that hop because LiveView renders off the Ecto struct.
+
+**Payoff beyond parity:** `.loom/wire-spec.json` now SEES the lineage (§1.2 of the proposal — the contract artifact was blind to it), the lineage rides `forApiRead` / `mask unless` like any other wire content, and the Phoenix OpenAPI document stops publishing a provenanced field as a bare `T` with no lineage at all.
+
+Wire-contract change: the provenance wire golden is rebaselined via the node oracle and the corpus fixture's e2e reads `.value`.
 Sources: [provenanced-wire-pair](../old/proposals/provenanced-wire-pair.md).
 
 ## M-T6.13 — OpenAPI tag grouping — `open` · **S–M** · P3
@@ -959,3 +965,63 @@ And the contract disagrees with all seven: the shared `wireShape` puts `addresse
 No `.ddd` in the repo declares `contains` on an abstract base (checked by brace-matching every `abstract aggregate` body), so nothing had to be restructured; the two fixtures that pair inheritance with containment (`dapper-tph-parts.ddd`, `mikroorm-inheritance-parts.ddd`) both put it on the CONCRETE, which is the supported shape the diagnostic points at.
 
 Sources: found by re-verifying the last `loom.mikroorm-unsupported` shape reject rather than trusting it — the same discipline that overturned M-T6.32 and M-T6.34 one row over. Relates to M-T6.23 (the mikroorm adapter's gate family, now empty) and to the silent-gap class M-T9.8 sweeps for.
+
+> **ID note.** M-T6.44–M-T6.48 minted 2026-08-23 by the numeric-types audit. Checked against `main` (max was M-T6.43) **and** open PR branches (#2627 and #2623 both claim M-T6.43 — the dup-ID incident register grows; nothing claims .44–.48).
+
+## M-T6.44 — TS + Elixir binary gates read only `leftType`: `int * money` doesn't compile, `int < decimal` is silently always-true — `open` · **M** · P1 ⭐ validator admits it, two renderers break on it
+
+Found 2026-08-23 by the numeric-types audit ([F7](../audits/numeric-types-audit-2026-08-23.md)), verified by generating. The validator admits `int * money` as commutative (`moneyArithmetic`, `src/language/type-system.ts`) and the IR stamps both operand types — but `renderMoneyBinary`'s gate in `src/generator/typescript/render-expr.ts` and the Elixir twin in `src/generator/elixir/render-expr.ts` check `leftType` alone. Node emits `this._qty * this._price` on a `Decimal` → **TS2363, the generated project does not compile**. Elixir emits native `*` on a `%Decimal{}` → runtime `ArithmeticError`; worse, `int < decimal` falls to native `<` → Erlang **term ordering** (number < map ⇒ always true) — silently wrong, no crash. Java already fixed its own copy (the `fleet-bug-hunt A4` mirror arm in `src/generator/java/render-expr.ts`); the pattern was never ported. Same class as fleet-bug-hunt B3 (elixir term-ordering `sortBy`), two new sites.
+
+**Why every existing gate is green.** No corpus fixture puts money or decimal on the *right* of a binary op with an integral left — the compile gates never reach the emission.
+
+**The fix:** key the money/decimal arms off BOTH stamped operand types (port the Java mirror-arm pattern); on elixir that covers arithmetic AND comparisons (`Decimal.compare`, never native `<` against a struct). Corpus witness with right-hand operands in the same PR.
+
+**Verification when it lands.** Render-expr arm tests per backend; the corpus expressions through node's tsc gate and elixir's `--warnings-as-errors` gate plus a behavioral value check for the comparison; mutation-proved by reverting each gate.
+
+**Not affected, checked rather than assumed:** .NET and Python coerce natively (money IS `decimal` / Decimal overloads); Java has the mirror arm.
+
+Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F7/F18, plan.json N10, [fleet-bug-hunt A4/B3](../audits/fleet-bug-hunt-2026-07-19.md).
+
+## M-T6.45 — Python holds `decimal` as two types in one backend: `money * decimal` throws at runtime — `open` · **S–M** · P1
+
+Found 2026-08-23 by the numeric-types audit ([F8](../audits/numeric-types-audit-2026-08-23.md)). `PY_TYPE_TARGET` (`src/generator/python/render-expr.ts`) types decimal params/signatures `float` while ORM columns are `Decimal` — an operation body `self._price * f` with a wire-param `f: float` raises `TypeError: unsupported operand Decimal * float`. The same expression works when the decimal came off a column. One backend, two representations, and which one you get depends on where the value came from.
+
+**Why every existing gate is green.** No corpus operation multiplies money by a wire-supplied decimal; `mypy --strict` on generated output would flag it, but only a fixture with the shape reaches that check.
+
+**The fix:** the smallest coherent change wins — coerce the float operand at the money-arithmetic site (`Decimal(str(f))`), and state in one comment at the type table which representation rule (float domain, RS-24 spirit) the backend follows.
+
+**Verification when it lands.** A `money * decimal-param` generator test plus a behavioral witness; mutation-proved.
+
+Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F8, plan.json N11.
+
+## M-T6.46 — Java never got #2563: response `decimal` ships 34 significant digits where the contract is a double's 17 — `open` · **M** · P1 ⭐ invisible to the differential by construction
+
+Found 2026-08-23 by the numeric-types audit ([F9](../audits/numeric-types-audit-2026-08-23.md)). RS-24's fix landed on .NET (#2575: response `decimal` → `double`) but Java's `emit/wire.ts` types decimal `BigDecimal` in **both** directions with no narrowing — a computed `a / b` renders through `MathContext.DECIMAL128` and Jackson serializes all 34 digits, where the other four backends ship ≤17. Java's *projection* arm is only accidentally double-parity (JPQL `avg` returns a provider `Double` before the BigDecimal re-wrap); sums, per-row reads, and derived fields ship exact digits. The .NET emitter's RS-24 comment even claims "java's provider `Double`" — true only for `avg`.
+
+**Why every existing gate is green.** The wire-golden comparator JSON-parses both sides, collapsing every number to a double — **excess** precision can never fail it (register F16 / M-T9.37). This is the one divergence the gate is structurally blind to.
+
+**The fix:** mirror #2575's shape — response DTO decimal fields become `double`, narrowed at the wire boundary, **response direction only** (request stays `BigDecimal` for the same 400-vs-500 reason .NET kept `decimal`). Cover derived fields, per-row reads, and the projection `sum` arm. Pin `WRITE_BIGDECIMAL_AS_PLAIN` for any BigDecimal that remains wire-visible. Extend the RS-24 registry note per its protocol; correct the .NET emitter comment.
+
+**Verification when it lands.** Wire emitter tests pinning `double` on response records; the full java behavioral leg; mutation-proved. M-T9.37's comparator fix must then delete any waiver this created.
+
+Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F9 + annex, plan.json N12, #2563/#2575. Conflicts with M-T6.48 in `java/emit/wire.ts` — stack or sequence.
+
+## M-T6.47 — The .NET decimal→double hops #2631 didn't reach — `blocked(#2631 merge)` · **S–M** · P1
+
+Found 2026-08-23 by the numeric-types audit ([F10](../audits/numeric-types-audit-2026-08-23.md)). [#2631](https://github.com/lemmit/Loc/pull/2631) fixes the *dapper aggregate* arm (SQL cast keyed off the wire type). The **per-row** hop remains: a stored high-precision decimal materializes into `System.Decimal` and crosses the `(double)` cast in `projectToResponse` (`src/generator/dotnet/dto-mapping.ts`) — the CLR decimal→double conversion is **not correctly rounded** (~15-significant-digit narrowing). Node writes `0.30000000000000004`; .NET reads the same row back as `0.3`. The EF aggregate arm is the same class (the "EF materializes a real double" claim in #2631's body deserves the runtime probe while in here).
+
+**The fix:** extend #2631's `aggregateLandsOnDouble` classifier to the per-row and EF arms — replace the raw `(double)` cast on the response path with a correctly-rounded conversion (`double.Parse(d.ToString(CultureInfo.InvariantCulture))`, or read the column as `double` at the provider seam). Read #2631's **merged** shape first; this mission is its continuation, not its competitor.
+
+**Verification when it lands.** #2631's suite extended to the per-row arm; a stored-17-digit-decimal round-trip behavioral witness; mutation-proved.
+
+Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F10, plan.json N13, #2631/#2563. Conflicts with M-T6.48 in `dto-mapping.ts` — stack or sequence.
+
+## M-T6.48 — Malformed numeric input answers 500: four backends parse money with no guard, Elixir op-params skip `int` entirely — `open` · **M** · P1
+
+Found 2026-08-23 by the numeric-types audit ([F12](../audits/numeric-types-audit-2026-08-23.md)). One curl reproduces it: `{"price": "12,50"}` → .NET `decimal.Parse` `FormatException`, Java `new BigDecimal` `NumberFormatException`, Python `Decimal(str)` `InvalidOperation`, Elixir op-params `Decimal.new` raise — all **500**; only node (typed zod 400) and Elixir's create-changeset path (422) answer honestly. Elixir's `coerceOpParam` (`src/generator/elixir/vanilla/context-emit.ts`) coerces only money/decimal/datetime, so a non-integer `int` op param reaches `force_change` → `Ecto.ChangeError` 500 — the exact failure mode its own docstring documents for the money case it fixed. Java likely **silently truncates** `1.5 → 1` for int request fields (Jackson `ACCEPT_FLOAT_AS_INT` default, no coercion config emitted — verify with one POST, then pin strict). Stringified-number acceptance also skews across backends (`"5"` for an int: three accept, two reject).
+
+**The fix:** wrap every bare money parse in a typed 4xx (mirror node's `moneySchema` regex + typed issue); complete `coerceOpParam` over int/bool; pin Java's float-as-int to strict rejection; pin one stance for stringified numbers (proposed: strict everywhere, matching node's body slot and .NET); probe the >1e21 exponential-money edge from the register annex.
+
+**Verification when it lands.** A cross-backend ingress conformance matrix (bad money string, fractional int, stringified number, huge money) asserting the 4xx statuses per backend; one arm per backend mutation-proved.
+
+Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F12 + annex, plan.json N14. Relates to RS-15 (domain floor 422), M-T5.20 (denial ladder). Conflicts with M-T6.46/M-T6.47 in the shared wire files — stack or sequence within the wave.

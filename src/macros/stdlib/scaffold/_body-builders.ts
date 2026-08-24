@@ -29,6 +29,7 @@ import type {
 import { aggregateServesHistory } from "../../../util/audit-ast.js";
 import { AUDIT_HISTORY_FIND } from "../../../util/audit-names.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { PROVENANCE_VALUE_FIELD } from "../../../util/provenance-carrier.js";
 import {
   binaryExpr,
   boolLit,
@@ -386,7 +387,7 @@ export function scaffoldInstanceList(wf: Workflow): Expression {
     cols.push({
       value: callExpr("Column", [
         { value: stringLit(humanize(name)) },
-        { value: lambda("i", columnAccessor(name, kind, "i")) },
+        { value: lambda("i", columnAccessor(name, kind, "i", !!p.provenanced)) },
       ]),
     });
   }
@@ -695,13 +696,20 @@ function buildDataCardParts(
       continue;
     }
     const kind = kindForType(f.type, true)!; // non-array, VO handled above ⇒ always a cell
-    const cell = typedCell(() => memberAccess(nameRefExpr(cellVar), name), kind);
+    // A `provenanced` field ships as the `Provenanced<T>` wire carrier
+    // (M-T6.12), so the FIGURE is `<record>.<field>.value` — reading
+    // `<record>.<field>` would render the whole `{ value, lineage }` object.
+    // The cell's own type is still the carried one, so the typed formatting
+    // (money / datetime / …) applies to the value, as before.
+    const cellAccess = f.provenanced
+      ? () => memberAccess(memberAccess(nameRefExpr(cellVar), name), PROVENANCE_VALUE_FIELD)
+      : () => memberAccess(nameRefExpr(cellVar), name);
+    const cell = typedCell(cellAccess, kind);
     // A `provenanced` field pairs its value with a "?" disclosure over the
-    // value's lineage (docs/provenance.md): `Group(value, ProvenanceInfo)` so
-    // the figure and its "why" sit side by side.  ProvenanceInfo reads the
-    // co-located `<field>_provenance` wire sibling the React response schema
-    // carries; other frontends render the value alone (the primitive comments
-    // itself out — React-first).
+    // value's lineage: `Group(value, ProvenanceInfo)` so the figure and its
+    // "why" sit side by side.  ProvenanceInfo reads the carrier's `lineage`
+    // half off the same field — every frontend carries it now that the lineage
+    // is part of `wireShape` rather than a per-frontend opt-in append.
     const valueCell = f.provenanced
       ? callExpr("Group", [
           { value: cell },
@@ -746,7 +754,7 @@ function relatedCard(c: Containment, part: EntityPart, cellVar: string, slug: st
     const cols = columnsFromProperties(propertiesOf(part.members)).map((col) => ({
       value: callExpr("Column", [
         { value: stringLit(humanize(col.name)) },
-        { value: lambda("row", columnAccessor(col.name, col.kind, "row")) },
+        { value: lambda("row", columnAccessor(col.name, col.kind, "row", col.provenanced)) },
       ]),
     }));
     const table = callExpr("Table", [
@@ -858,6 +866,11 @@ export type ColumnKind =
 export interface ScaffoldColumn {
   name: string;
   kind: ColumnKind;
+  /** The property is declared `provenanced`, so its WIRE value is the
+   *  `Provenanced<T>` carrier `{ value, lineage }` (M-T6.12) — the cell reads
+   *  `<row>.<field>.value`, not `<row>.<field>` (which would render the whole
+   *  carrier object). */
+  provenanced?: boolean;
 }
 
 /** A type-dispatched cell renderer rooted at an arbitrary receiver — the
@@ -895,9 +908,21 @@ function typedCell(receiver: () => Expression, kind: ColumnKind): Expression {
   }
 }
 
-/** One table cell accessor `<rowVar>.<field>`, dispatched by type. */
-function columnAccessor(fieldName: string, kind: ColumnKind, rowVar: string): Expression {
-  return typedCell(() => memberAccess(nameRefExpr(rowVar), fieldName), kind);
+/** One table cell accessor `<rowVar>.<field>`, dispatched by type.  A
+ *  `provenanced` column reads through the wire carrier's `value` member. */
+function columnAccessor(
+  fieldName: string,
+  kind: ColumnKind,
+  rowVar: string,
+  provenanced = false,
+): Expression {
+  return typedCell(
+    () =>
+      provenanced
+        ? memberAccess(memberAccess(nameRefExpr(rowVar), fieldName), PROVENANCE_VALUE_FIELD)
+        : memberAccess(nameRefExpr(rowVar), fieldName),
+    kind,
+  );
 }
 
 /** Resolve an aggregate's scalar list columns from its AST — one `ScaffoldColumn`
@@ -916,7 +941,7 @@ function columnsFromProperties(props: readonly Property[]): ScaffoldColumn[] {
   const out: ScaffoldColumn[] = [];
   for (const p of props) {
     const kind = columnKindForType(p.type);
-    if (kind) out.push({ name: String(p.name), kind });
+    if (kind) out.push({ name: String(p.name), kind, provenanced: !!p.provenanced });
   }
   return out;
 }
@@ -1116,7 +1141,7 @@ export function scaffoldList(
     ...columns.map((c) => ({
       value: callExpr("Column", [
         { value: stringLit(humanize(c.name)) },
-        { value: lambda("o", columnAccessor(c.name, c.kind, "o")) },
+        { value: lambda("o", columnAccessor(c.name, c.kind, "o", c.provenanced)) },
         { name: "sortable", value: boolLit(true) },
         { name: "field", value: stringLit(c.name) },
       ]),

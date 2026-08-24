@@ -4,6 +4,10 @@ import {
 } from "../../../generator/_frontend/server-default.js";
 import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
 import {
+  PROVENANCED_REQUEST_ERROR,
+  provenancedEntries,
+} from "../../../generator/_payload/provenanced-wire.js";
+import {
   discriminatedUnionZod,
   findUnionSpec,
   type UnionMemberField,
@@ -2160,8 +2164,16 @@ function emitResponseDtoSchema(
     : undefined;
   if (declaredResponse) {
     lines.push(`  id: z.string(),`);
+    // A declared record names DOMAIN types, so a field the aggregate declares
+    // `provenanced` is wrapped in the wire carrier here — the same wrap
+    // `wireTypeForField` applies on the wireShape path below, so both paths
+    // emit the identical schema (M-T6.12).
+    const provenanced = new Set(ent.fields.filter((f) => f.provenanced).map((f) => f.name));
     for (const f of declaredResponse.fields) {
-      lines.push(`  ${f.name}: ${zodForResponseField(f.type, f.optional, ctx)},`);
+      const t: TypeIR = provenanced.has(f.name)
+        ? { kind: "genericInstance", ctor: "provenanced", arg: f.type }
+        : f.type;
+      lines.push(`  ${f.name}: ${zodForResponseField(t, f.optional, ctx)},`);
     }
   } else {
     const fields = forApiRead(wireFieldsFor(ent));
@@ -2176,11 +2188,9 @@ function emitResponseDtoSchema(
       }
     }
   }
-  // Co-located provenance rides the wire DTO (see repo.toWire); the
-  // lineage object is nullable when the field was never written.
-  for (const f of ent.fields.filter((f) => f.provenanced)) {
-    lines.push(`  ${f.name}_provenance: ProvenanceLineage.nullable(),`);
-  }
+  // (M-T6.12) No trailing `<field>_provenance` sibling any more: the lineage
+  // rides inside the provenanced field's own key as the `Provenanced<T>`
+  // carrier, emitted by `zodForResponse`'s `provenanced` arm.
   lines.push(`}).openapi("${name}");`);
   return lines;
 }
@@ -2339,6 +2349,10 @@ export function zodFor(t: TypeIR, context: "create-body" | "body" | "query" = "b
       return `${info.base}Schema`;
     case "entity":
       return "z.unknown()";
+    case "provenanced":
+      // Unreachable: the `Provenanced<T>` carrier rides the RESPONSE wire shape
+      // only — a create/update body carries the bare value the caller supplies.
+      throw new Error(PROVENANCED_REQUEST_ERROR);
   }
 }
 
@@ -2393,6 +2407,16 @@ function zodForResponseInner(t: TypeIR): string {
       return `${info.base}Schema`;
     case "entity":
       return `${info.base}Response`;
+    case "provenanced":
+      // `{ value, lineage }` — the value's own response zod plus the shared
+      // nullable `ProvenanceLineage` object, keyed off the carrier's member
+      // list so this route schema and every other target name the same two keys.
+      return `z.object({ ${provenancedEntries(
+        zodForResponseInner(info.carried!),
+        "ProvenanceLineage.nullable()",
+      )
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(", ")} })`;
   }
 }
 
@@ -2593,5 +2617,9 @@ export function wireToDomainExpr(expr: string, t: TypeIR, ctx?: BoundedContextIR
     }
     case "entity":
       return expr;
+    case "provenanced":
+      // Unreachable: request-side only (see `zodFor`).  The domain keeps the
+      // scalar — the carrier is a serialization shape, not an in-memory one.
+      throw new Error(PROVENANCED_REQUEST_ERROR);
   }
 }

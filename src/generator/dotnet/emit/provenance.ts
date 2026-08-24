@@ -1,5 +1,28 @@
 import type { EnrichedBoundedContextIR, FieldIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
+import { upperFirst } from "../../../util/naming.js";
+import {
+  PROVENANCE_LINEAGE_FIELD,
+  PROVENANCE_VALUE_FIELD,
+} from "../../_payload/provenanced-wire.js";
+
+/** The generic wire-carrier record's C# name — `Provenanced<int> Total`. */
+export const PROVENANCED_CS_RECORD = "Provenanced";
+/** PascalCase C# member names for the carrier, derived from the shape's own
+ *  wire member names.  The app's `JsonSerializerDefaults.Web` camelCase policy
+ *  maps them straight back to `value` / `lineage` on the wire, so no
+ *  `[JsonPropertyName]` is needed and the two spellings cannot drift. */
+export const PROV_CS_VALUE = upperFirst(PROVENANCE_VALUE_FIELD);
+export const PROV_CS_LINEAGE = upperFirst(PROVENANCE_LINEAGE_FIELD);
+
+/** The DOMAIN-side lineage property that sits beside a provenanced field's
+ *  value — `Total` → `TotalProvenance` (emitted by `entity.ts`).  This stays a
+ *  co-located pair IN MEMORY and IN STORAGE; only the wire folds the two into
+ *  the `Provenanced<T>` carrier.  Named here, once, so the emitter that
+ *  DECLARES the property and the projections that READ it cannot drift. */
+export function csProvSibling(valueMember: string): string {
+  return `${valueMember}Provenance`;
+}
 
 // ---------------------------------------------------------------------------
 // Provenance runtime — .NET counterpart of the Hono `domain/provenance.ts`
@@ -67,6 +90,14 @@ export function renderProvLineage(ns: string): string {
       "    ProvTarget Target,",
       "    IReadOnlyList<ProvInput> Inputs,",
       "    object? ComputedValue);",
+      "",
+      `/// <summary>The wire carrier for a ${"`provenanced`"} field: its value and the`,
+      "/// lineage of the write that produced it, travelling together as one JSON",
+      '/// object (<c>{ "value": …, "lineage": … }</c>).  The same shape every other',
+      "/// Loom backend and frontend emits — see docs/provenance.md.  Storage is",
+      "/// unaffected: the row still carries a typed value column plus a jsonb",
+      "/// lineage column; this is the DTO projection only.</summary>",
+      `public sealed record ${PROVENANCED_CS_RECORD}<T>(T ${PROV_CS_VALUE}, ProvLineage? ${PROV_CS_LINEAGE});`,
       "",
       "/// <summary>The single System.Text.Json options instance (Web defaults —",
       "/// camelCase) the provenance EF value-converter + history flush serialise",
