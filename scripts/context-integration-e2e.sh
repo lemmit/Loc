@@ -54,7 +54,13 @@ case "$BACKEND" in
     # sandbox rolls back per test after `mix ecto.create && mix ecto.migrate`.
     mix local.hex --force >/dev/null
     mix local.rebar --force >/dev/null
-    mix deps.get
+    # Bounded retry on the hex FETCH only — hex.pm's transient 500s
+    # ("Package fetch failed and no cached copy available") have killed whole
+    # CI cells.  Everything below it must keep failing fast.  Shell twin of
+    # test/e2e/support/mix-retry.ts.
+    mix deps.get \
+      || { echo "loom-retry: mix deps.get failed, attempt 2 of 3 after 5s";  sleep 5;  mix deps.get; } \
+      || { echo "loom-retry: mix deps.get failed, attempt 3 of 3 after 20s"; sleep 20; mix deps.get; }
     MIX_ENV=test mix ecto.create
     MIX_ENV=test mix ecto.migrate
     MIX_ENV=test mix test test/ordering_integration_test.exs
