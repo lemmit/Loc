@@ -519,7 +519,16 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      # One bounded retry on the SDK install: a transient CDN corruption
+      # ("Error on ZipFile unknown archive", run 32761021024) killed the whole
+      # apk gate before any project code ran — the same transient-infra class
+      # the elixir gates retry (docker pull, mix deps.get).  A second failure
+      # is real and still fails the job.
       - uses: android-actions/setup-android@v3
+        id: setup-android
+        continue-on-error: true
+      - uses: android-actions/setup-android@v3
+        if: steps.setup-android.outcome == 'failure'
       - name: Generate a minimal (FileUpload-free) app for the native apk gate
         run: |
           mkdir -p ci-flutter-apk
