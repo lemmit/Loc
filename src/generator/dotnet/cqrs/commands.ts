@@ -112,6 +112,19 @@ function whenGate(agg: AggregateIR, op: AggregateIR["operations"][number]): stri
   return `        if (!(${pred})) throw new DisallowedException("operation '${op.name}' is not allowed in the current state of ${agg.name}.");\n`;
 }
 
+/** Namespaces the gates rendered INTO the handler body reach into — the `when`
+ *  state gate and the hoisted `requires` gates both render arbitrary predicate
+ *  expressions here, and nothing else scans them, so `when this.code.matches(…)`
+ *  emitted `Regex.IsMatch` with no `using System.Text.RegularExpressions`
+ *  (CS0103 — audit A17).  `lifecycleGate` already does the same for create /
+ *  destroy. */
+function gateUsings(op: AggregateIR["operations"][number], ns: string): string[] {
+  const usings = new Set<string>();
+  if (op.when) collectCsExprUsings(op.when, usings, ns);
+  for (const g of operationGates(op)) collectCsExprUsings(g.expr, usings, ns);
+  return [...usings];
+}
+
 // ---------------------------------------------------------------------------
 // Create command + handler
 // ---------------------------------------------------------------------------
@@ -435,7 +448,10 @@ export function emitOperationCommandAndHandler(
     const callArgs = (usesUser ? [...baseCallArgs, "_currentUser.User"] : baseCallArgs).join(", ");
     const userExtraDeps =
       usesUser || gateUsesUser ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }] : [];
-    const userExtraUsings = usesUser || gateUsesUser ? [`${ns}.Auth`] : [];
+    const userExtraUsings = [
+      ...(usesUser || gateUsesUser ? [`${ns}.Auth`] : []),
+      ...gateUsings(op, ns),
+    ];
     // Extern (b) Phase 2: an `extern` op is now an ordinary aggregate method
     // (its body runs preconditions, calls the `<Op>Core` partial hook, and
     // re-asserts invariants — see `emit/entity.ts`), so it flows through the

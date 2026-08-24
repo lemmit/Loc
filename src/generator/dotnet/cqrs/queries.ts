@@ -72,7 +72,13 @@ export function emitCanOpQueriesAndHandlers(
         handlerName: `Can${opName}Handler`,
         queryName: `Can${opName}Query`,
         returnType: "CanResponse",
-        extraUsings: [`${ns}.Domain.Common`],
+        // The predicate is an arbitrary expression rendered into THIS file and
+        // scanned nowhere else, so it carries its own namespaces
+        // (`System.Text.RegularExpressions` for `matches`, audit A17).
+        extraUsings: [
+          `${ns}.Domain.Common`,
+          ...collectCsExprUsings(op.when!, new Set<string>(), ns),
+        ],
         body:
           `        var aggregate = await _repo.GetByIdAsync(query.Id, cancellationToken)\n` +
           `            ?? throw new AggregateNotFoundException($"${agg.name} {query.Id} not found");\n` +

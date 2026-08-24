@@ -259,7 +259,14 @@ export function renderEntity(
     collectCsExprUsings(inv.expr, usings, ns);
     if (inv.guard) collectCsExprUsings(inv.guard, usings, ns);
   }
-  for (const op of operations) collectCsStmtUsings(op.statements, usings, ns);
+  for (const op of operations) {
+    collectCsStmtUsings(op.statements, usings, ns);
+    // The `when` state gate renders a predicate at the domain method entry
+    // (see `whenGate` below) — `Regex.IsMatch` there needs
+    // `System.Text.RegularExpressions` exactly as an invariant's would
+    // (audit A17).
+    if (op.when) collectCsExprUsings(op.when, usings, ns);
+  }
   // Applier + event-sourced-create bodies render through the same path, so
   // their expressions can pull in the same namespaces (e.g. regex).
   for (const ap of appliers) collectCsStmtUsings(ap.statements, usings, ns);
