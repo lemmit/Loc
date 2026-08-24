@@ -502,6 +502,13 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // read carries the capability predicates.  The runtime half needs the
   // two-principal harness (`tenancy-e2e.yml` owns that shape).
   "projection-agg-filters",
+  // COMPILE-TIER WITNESS (generator review A1, document half) — the row count
+  // over a `shape: document` source, the one aggregation that shape can express.
+  // The gate it exists for is a GENERATION one (four backends emit it, java is
+  // refused), and asserting the number needs seeded rows the behavioural runners
+  // set up per-fixture; `document.ddd` already drives the document write path at
+  // runtime.
+  "projection-document-aggregation",
   // TWO DEPLOYABLES — the caller's client is derived from the callee's served
   // operation set (see the manifest note), and the behavioural corpus requires
   // exactly one `platform: node` deployable per case so dispatch is unambiguous.

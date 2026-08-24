@@ -101,16 +101,32 @@ Notes:
   describe a different row set than the `rowCount` beside it.
 - **The source has to have columns.** Every tile is a direct-table aggregation
   computed in SQL, so it can only name real columns
-  (`loom.projection-columnless-source`). An `abstract` base and a
-  `persistedAs: eventLog` aggregate get **no dashboard at all** — neither has a
-  state table, so not even `COUNT(*)` has anything to count. A `shape: document`
-  aggregate keeps **only its `rowCount` tile**: its table is
-  `(id, data, version)`, so the row count is real while every per-field sum and
-  the per-day series would be naming keys inside the jsonb blob. Both halves read
-  the same two predicates in `_dashboard-shared.ts` (`hasDashboardTable`,
-  `fieldsAreColumns`), so a tile can't survive a projection the macro skipped.
-  (Header-visible only — a dataSource binding can override `shape:` at the
-  system level, which the macro can't see; that case is caught by the IR gate.)
+  (`loom.projection-columnless-source`). Three aggregate shapes get **no
+  dashboard at all**: an `abstract` base and a `persistedAs: eventLog`
+  aggregate (neither has a state table, so not even `COUNT(*)` has anything to
+  count), and a `shape: document` aggregate. The document case is the
+  interesting one — its table *is* `(id, data, version)`, so a bare `rowCount`
+  tile is a real query on four of the five backends, and the macro used to keep
+  exactly that tile. It no longer does, because that lone tile costs more than
+  it is worth:
+  - the moment the aggregate carries a read-filtering capability
+    (`tenantOwned`, `softDeletable`, any `filter`) the tile is refused by
+    `loom.projection-document-source-capability-filtered` — the filter
+    predicates name `tenant_id` / `is_deleted`, which the triple has not — and
+    before that gate existed it was a **silent cross-tenant count** on .NET/EF,
+    which registers no `HasQueryFilter` for a document aggregate;
+  - on `platform: java` it is refused by
+    `loom.projection-whole-table-aggregation-unsupported` (its JPQL needs
+    a JPA entity a document aggregate never gets).
+
+  A scaffold whose default output fails `ddd parse` is worse than one tile
+  short, so the skip lives in the macro. A row count over a document aggregate
+  is still writable **by hand** on the four backends that emit it. Both halves
+  read the same predicate in `_dashboard-shared.ts` (`hasDashboardTable`, which
+  folds in `fieldsAreColumns`), so a tile can't survive a projection the macro
+  skipped. (Header-visible only — a dataSource binding can override `shape:` at
+  the system level, which the macro can't see; that case is caught by the IR
+  gate.)
 - Additive: a system that doesn't opt in keeps its welcome page unchanged.
 
 ### Composability
