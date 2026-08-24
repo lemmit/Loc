@@ -19,8 +19,7 @@
 // spells the same string its own way; that breadth is the point of this test.
 
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 /** `platform` is the FRONTEND deployable's platform; `elixir` instead mounts
  *  the ui on the backend deployable itself (LiveView is not a bundle host). */
@@ -45,7 +44,7 @@ system EnumRef {
       route: "/board"
       body: Stack {
         QueryView {
-          of: Ops.Doc.all,
+          of: ops.Doc.all,
           data: rows => Table {
             Column { "Vis", o => Text { o.vis == ${valueRef} ? "pub" : "priv" } },
             rows: rows
@@ -74,9 +73,7 @@ async function pageFor(
   match: (path: string) => boolean,
   valueRef?: string,
 ): Promise<string> {
-  const { model, errors } = await parseString(source(platform, valueRef));
-  if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
-  const files = generateSystems(model).files;
+  const files = await generateSystemFiles(source(platform, valueRef));
   const hit = [...files].find(([p]) => match(p));
   if (!hit) throw new Error(`no page file for ${platform} in:\n${[...files.keys()].join("\n")}`);
   return hit[1];
