@@ -69,18 +69,34 @@ the gate reported it as stale. The finding was **withdrawn**, not shipped.
 
 | # | Crossing | Symptom | Status |
 |---|---|---|---|
-| **F1** | `shape: document` × `policy { allow … }` (node, java, python) | codegen **throws** an internal invariant | open — registered |
-| **F2** | `mask unless` × `document` / `embedded` / `eventLog` (node, drizzle) | TS2339 `toWireMasked` does not exist | open — registered |
-| **F3** | `mask unless` × `persistence: mikroorm` (all four repo variants) | TS2304 cannot find name `User` | **fixed in this PR** |
+| **F1** | `shape: document` × `policy { allow … }` (node, java, python) | codegen **throws** an internal invariant | **fixed** — #2527, waiver deleted 2026-08-24 |
+| **F2** | `mask unless` × `document` / `embedded` / `eventLog` (node, drizzle) | TS2339 `toWireMasked` does not exist | **fixed** — #2528, waiver deleted 2026-08-24 |
+| **F3** | `mask unless` × `persistence: mikroorm` (all four repo variants) | TS2304 cannot find name `User` | **fixed** — in the slice-1 PR |
 | **F4** | a field named `secret` after a modifier-less property | swallowed as that property's access modifier; syntax error on the *next* line | open — registered |
-| **F5** | principal capability filter × `shape: document` × `mikroorm` | TS2304 cannot find name `currentUser` | open — registered |
+| **F5** | principal capability filter × `shape: document` × `mikroorm` | TS2304 cannot find name `currentUser` | **fixed** — #2528, waiver deleted 2026-08-24 |
+
+> **Why F1/F2/F5 sat "open" for weeks after they were fixed.** #2527 and #2528
+> landed the emitter fixes and did *not* delete the waivers — correctly, as far
+> as anyone could tell, because **nothing re-ran this harness**. All three legs
+> were gated behind `LOOM_PAIRWISE=1`, and no workflow set it: the corpus had no
+> CI entry of any kind, not per-PR, not nightly, not `workflow_dispatch`. The
+> stale-waiver ratchet these registers lean on fires only when the leg runs, so
+> for three weeks it reported nothing while `main` was quietly red on four
+> entries. `pairwise.yml` closes that; the four deletions here are what the first
+> run found.
 
 F3 and F5 are the same shape one level apart: the MikroORM repositories were cloned from the
 drizzle ones and each missed a different piece the original had. Neither is visible from a
 single-feature fixture — `mask unless` has one, `persistence: mikroorm` has a matrix, and the
 bug lives only where they meet.
 
-### F1 — `shape: document` × `policy { allow … }` crashes codegen — **open**
+### F1 — `shape: document` × `policy { allow … }` crashes codegen — **fixed (#2527)**
+
+> **Closed 2026-08-24.** `#2527` desugars the `authz-filter` sentinel to ordinary `ExprIR`
+> for the in-app document path (`src/generator/_expr/authz-filter-inapp.ts`), so node/java/
+> python render it through their existing expression renderer instead of blowing
+> `renderExprWith`'s invariant. The generation waiver was deleted when `pairwise.yml`'s first
+> run flagged it stale. Diagnosis below kept as the record.
 
 **Class:** pipeline crash (internal invariant).
 **Reaches:** node, java, python — every capability value, both node persistence adapters.
@@ -119,7 +135,11 @@ node bin/cli.js generate system /tmp/pw/node-none-document-policyAllow-default.d
 
 ---
 
-### F2 — `mask unless` × any non-relational saving shape does not compile (node/drizzle) — **open**
+### F2 — `mask unless` × any non-relational saving shape does not compile (node/drizzle) — **fixed (#2528)**
+
+> **Closed 2026-08-24.** `#2528` emits `toWireMasked` from the document, embedded and
+> event-sourced repository builders, not just the relational one. Waiver deleted on the first
+> `pairwise.yml` run. Diagnosis below kept as the record.
 
 **Class:** uncompilable target code — the recorded class, on a crossing nothing built before.
 **Reaches:** node + drizzle, `shape: document`, `shape: embedded`, `persistedAs: eventLog`,
@@ -207,7 +227,11 @@ bug.
 
 ---
 
-### F5 — a principal capability filter × `shape: document` × `persistence: mikroorm` does not compile — **open**
+### F5 — a principal capability filter × `shape: document` × `persistence: mikroorm` does not compile — **fixed (#2528)**
+
+> **Closed 2026-08-24.** `#2528` binds `requireCurrentUser()` in the MikroORM document
+> repository, as the drizzle one already did. Waiver deleted on the first `pairwise.yml` run.
+> Diagnosis below kept as the record.
 
 **Class:** feature × feature × adapter (three-factor), same family as F3 and in the same file.
 
@@ -291,6 +315,29 @@ findings.
 
 Counts come from `LOOM_PAIRWISE_REPORT=<file>`, which the generation oracle writes — a
 register whose numbers are hand-tallied goes stale the first time the matrix changes.
+
+### Re-run on `main` @ `3a7199c7` (2026-08-24) — the first run since slice 1
+
+The run that motivated `pairwise.yml`. Same three oracles, same cover, three weeks of `main`
+later:
+
+| Oracle | Cases | Result |
+|---|---|---|
+| Generation | 700 | **594 ok, 106 rejected (4 distinct `loom.*` codes), 0 crashed** — red only on the stale F1 waiver |
+| Compile — node, strict `tsc` | 25 | **22 pass, 0 compile failures** — red only on the stale F2 (2 cases) + F5 (1 case) waivers |
+| Schema-load | 25 | **green** |
+
+Two things are worth reading off this, in opposite directions:
+
+- **The intersection surface itself got better, not worse.** Crashes went 20 → 0 and the
+  compile leg has no unwaived failure. The slice-1 findings were drained (#2527, #2528) and
+  nothing new arrived in three weeks of a fast-moving `main`. The generation tier's remaining
+  job is regression protection, not discovery.
+- **Every red the re-run produced was a stale waiver, and staleness is exactly what a dark
+  ratchet cannot report.** Four entries, all fixed weeks earlier. The register said "open" for
+  all four; the emitters said otherwise. That gap is the cost of a gate with no workflow, and
+  it is the argument for wiring the leg *before* widening it — a wider matrix behind the same
+  dark switch would have produced more stale rows, not more caught bugs.
 
 ## Follow-up slices
 

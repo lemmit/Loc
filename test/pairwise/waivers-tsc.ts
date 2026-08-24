@@ -12,48 +12,23 @@
 import type { Waiver } from "./waivers.js";
 
 export const TSC_WAIVERS: readonly Waiver[] = [
-  {
-    // F2 — `mask unless` × any NON-RELATIONAL saving shape, drizzle adapter.
-    //
-    // The route builder calls `repo.toWireMasked(row, __maskUser)`
-    // unconditionally for a masked aggregate
-    // (`src/platform/hono/v4/routes-builder.ts:238`), but only the RELATIONAL
-    // repository builder emits that method —
-    // `typescript/repository-builder.ts:196` gates it on `aggHasFieldMask`,
-    // while `repository-document-builder.ts`, `repository-embedded-builder.ts`
-    // and `repository-eventsourced-builder.ts` import `toWireMethod` alone and
-    // never mention the mask.  Result: TS2339 "Property 'toWireMasked' does not
-    // exist on type '<Agg>Repository'".
-    //
-    // Not fixed in this slice: emitting the method in three builders changes
-    // each repository's PORT surface (the port members are derived FROM the
-    // emitted source in `hono/v4/emit.ts`), so it needs its own per-shape tests
-    // and the behavioral leg — an emitter change, not a harness change.
-    platform: "node",
-    persistence: "default",
-    capability: "*",
-    shape: "document|embedded|eventLog",
-    authz: "mask",
-    reason:
-      "F2 — mask unless × non-relational shape (drizzle): routes call repo.toWireMasked but only the relational repository builder emits it (TS2339)",
-  },
-  {
-    // F5 — a principal-referencing capability filter × `shape: document` ×
-    // `persistence: mikroorm`.  The document read path evaluates the filter
-    // IN-APP over the rehydrated record (`rec.tenantId === currentUser.tenantId`),
-    // which needs `const currentUser = requireCurrentUser();` bound in each read.
-    // The drizzle document builder binds it
-    // (`repository-document-builder.ts:56` — `principalBind`); the MikroORM
-    // document repository renders the same predicate and binds nothing, so
-    // `currentUser` is a free name (TS2304).  MikroORM's relational and
-    // embedded repositories are both correct, which is why only the document
-    // crossing shows it.
-    platform: "node",
-    persistence: "mikroorm",
-    capability: "tenantOwned",
-    shape: "document",
-    authz: "*",
-    reason:
-      "F5 — principal capability filter × shape: document × mikroorm: the in-app document predicate reads `currentUser` with no requireCurrentUser() bind (TS2304)",
-  },
+  // EMPTY, and that is the target state — same rule as the wire-differential
+  // register: a new divergence is a BUG to fix on the emitter first, and a
+  // waiver only when fixing it is a mission of its own with a named exit.
+  //
+  // Both original entries were closed by #2528 and are deleted here:
+  //
+  //   F2 — `mask unless` × a NON-RELATIONAL saving shape (drizzle): the route
+  //        builder called `repo.toWireMasked(...)` for any masked aggregate,
+  //        but only the RELATIONAL repository builder emitted the method
+  //        (TS2339).  The document / embedded / event-sourced builders now
+  //        emit it too.
+  //   F5 — a principal-referencing capability filter × `shape: document` ×
+  //        `persistence: mikroorm`: the in-app document predicate read
+  //        `currentUser` with no `requireCurrentUser()` bind (TS2304).  The
+  //        MikroORM document repository now binds it, as drizzle's already did.
+  //
+  // Both outlived their fix because this leg had no CI workflow to run the
+  // stale-waiver ratchet (see the note in `waivers.ts`).  `pairwise.yml` runs
+  // it now.
 ];
