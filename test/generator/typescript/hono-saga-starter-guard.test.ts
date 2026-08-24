@@ -4,10 +4,8 @@
 // must guard on a NON-empty one (its inverse), so the event folds exactly once:
 // a brand-new correlation runs the create, an existing one runs the on, never
 // both.  A create with no paired `on` on the same event stays byte-identical.
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 // create(e: ProjectArchived) AND on(e: ProjectArchived) — the same-event saga pair.
 const PAIRED = `system S { subdomain O { context O {
@@ -23,7 +21,9 @@ const PAIRED = `system S { subdomain O { context O {
     on(e: ProjectArchived) by e.project { emit ProjectArchivedRecorded { project: e.project, count: 1 } }
     apply(r: ProjectArchivedRecorded) { archivedCount := archivedCount + r.count }
   }
-} } api A from O storage pg { type: postgres } deployable api { platform: node contexts: [O] serves: A port: 8080 } }`;
+} } api A from O storage pg { type: postgres }
+  resource oState { for: O, kind: state, use: pg }
+  deployable api { platform: node contexts: [O] serves: A dataSources: [oState] port: 8080 } }`;
 
 // create + on on DIFFERENT events — no pairing, so the starter must NOT guard.
 const UNPAIRED = `system S { subdomain O { context O {
@@ -39,12 +39,12 @@ const UNPAIRED = `system S { subdomain O { context O {
     on(pr: PaymentReceived) by pr.order { emit PaymentReceived { order: pr.order, amount: total } }
     apply(pr: PaymentReceived) { total := total + pr.amount }
   }
-} } api A from O storage pg { type: postgres } deployable api { platform: node contexts: [O] serves: A port: 8080 } }`;
+} } api A from O storage pg { type: postgres }
+  resource oState { for: O, kind: state, use: pg }
+  deployable api { platform: node contexts: [O] serves: A dataSources: [oState] port: 8080 } }`;
 
 async function gen(src: string): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(src);
-  if (errors.length) throw new Error(errors.join("\n"));
-  return generateSystems(model).files;
+  return await generateSystemFiles(src);
 }
 
 const file = (files: Map<string, string>, suffix: string): string =>
