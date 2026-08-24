@@ -68,13 +68,16 @@ export default defineMacro({
     for (const decl of ctx.members) {
       if (!isAggregate(decl)) continue;
       const agg = decl as Aggregate;
-      // No queryable state table — an abstract base (aggregate-inheritance.md:
-      // its concretes carry their own projections) or an event-sourced stream —
-      // means nothing to aggregate over: every tile here is a direct-table
-      // aggregation, so the lot would be refused by
-      // `loom.projection-columnless-source`.  Shared with the ui half
-      // (`dashboardFieldsFor`) so a card can never bind a projection this macro
-      // skipped.
+      // Nothing this macro may aggregate over — an abstract base
+      // (aggregate-inheritance.md: its concretes carry their own projections),
+      // an event-sourced stream, or a `shape: document` blob whose only
+      // nameable column is `id`.  Every tile here is a direct-table
+      // aggregation, so each of those would be refused downstream
+      // (`loom.projection-columnless-source`, or — for a filtered document
+      // source — `loom.projection-document-source-capability-filtered`, or on
+      // java `loom.projection-whole-table-aggregation-unsupported#document`).
+      // Shared with the ui half (`dashboardFieldsFor`) so a card can never bind
+      // a projection this macro skipped.
       if (!hasDashboardTable(agg)) continue;
       const projName = dashboardProjectionName(agg.name);
       // Skip when the context already declares that name: a hand-written
@@ -92,8 +95,9 @@ export default defineMacro({
         { field: ROW_COUNT, expr: callExpr("count", []) },
       ];
       // `summableFields` is empty for a `shape: document` aggregate — its
-      // declared fields live inside the jsonb blob, not as columns — so a
-      // document source keeps the row-count tile and nothing else.
+      // declared fields live inside the jsonb blob, not as columns.  Belt and
+      // braces: `hasDashboardTable` above already skipped that aggregate
+      // entirely, so this loop never sees one.
       for (const f of summableFields(agg)) {
         members.push(field(`${f.name}Sum`, primType(f.primitive)));
         selects.push({

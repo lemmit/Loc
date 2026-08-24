@@ -60,6 +60,8 @@ import {
   validateDataSourceCoverage,
   validateDataSourceUnwiredKnobs,
   validateDefaultDeny,
+  validateDocumentAggregationBackend,
+  validateDocumentAggregationFilters,
   validateElixirOpSelfCallPosition,
   validateEventSourcedStorage,
   validateEventSourcedWorkflowStorage,
@@ -191,6 +193,8 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateWholeTableAggregationBackend(sys, diags);
     validateGroupedProjectionBackend(sys, diags);
     validateColumnlessProjectionSources(sys, diags);
+    validateDocumentAggregationFilters(sys, diags);
+    validateDocumentAggregationBackend(sys, diags);
     validateWorkflowSourceProjectionBackend(sys, diags);
     validateProjectionSourceProjectionBackend(sys, diags);
     validateDefaultDeny(sys, diags);

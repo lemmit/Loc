@@ -36,6 +36,23 @@
 // import each other: `ir/validate` raises the diagnostic, `generator/dotnet`
 // picks the emission arm.  Two copies would drift, and the failure mode of
 // drift here is exactly the silent miscompile the gate exists to prevent.
+//
+// A DOCUMENT source keeps its `id` column, so `select n = count()` survives the
+// column gate above — and genuinely runs on four of the five backends.  Two
+// narrower questions about that surviving case are answered here too, by
+// `documentAggregationSource` + `unappliedCapabilityFilters` below:
+//
+//   * are there CAPABILITY FILTERS the aggregation would have to apply?  Those
+//     name `tenant_id` / `is_deleted`, which a `(id, data, version)` table does
+//     not have — four backends emit the missing reference and EF Core emits NO
+//     filter at all, counting every tenant's rows
+//     (`loom.projection-document-source-capability-filtered`);
+//   * can this BACKEND reach a document table for an aggregation at all?  Java
+//     cannot — its JPQL needs a JPA entity a document aggregate never gets, so
+//     the two already-registered per-backend aggregation codes
+//     (`loom.projection-whole-table-aggregation-unsupported` /
+//     `loom.projection-groupby-unsupported-backend`) refuse it through their
+//     `#document` message variants.
 // ---------------------------------------------------------------------------
 
 import type {
@@ -152,4 +169,58 @@ export function columnlessProjectionSource(
     }
   }
   return null;
+}
+
+/** The source aggregate a direct-table (aggregating) query-time projection
+ *  reads through, when that source is DOCUMENT-shaped — `undefined` for every
+ *  other arm/shape combination.
+ *
+ *  The one place the "is this the direct-table-over-a-jsonb-blob case" question
+ *  is answered, so the two gates built on it below cannot disagree with each
+ *  other or with `columnlessProjectionSource` above about which arm is in play. */
+export function documentAggregationSource(
+  proj: ProjectionIR,
+  ctx: BoundedContextIR,
+  sys: SystemIR | undefined,
+): EnrichedAggregateIR | undefined {
+  if (!readsAggregateTableDirectly(queryProjectionArm(proj))) return undefined;
+  const agg = ctx.aggregates.find((a) => a.name === proj.query?.source) as
+    | EnrichedAggregateIR
+    | undefined;
+  if (!agg) return undefined;
+  const shape = effectiveSavingShape(agg, sys ? resolveDataSourceConfig(agg, ctx, sys) : undefined);
+  return shape === "document" ? agg : undefined;
+}
+
+/** Human labels for the CAPABILITY filters a direct-table aggregation over
+ *  `agg` would have to apply, after the projection's own `ignoring` bypass has
+ *  dropped the ones it waives — deduplicated, in declaration order.  Empty when
+ *  there is nothing left to apply, which is the "not gated" answer.
+ *
+ *  A predicate with no `contextFilterOrigins` entry is anonymous (a bare
+ *  context-level `filter`, or a derived tenancy scope): `ignoring <Cap>` cannot
+ *  name it, so it can never be bypassed, and it is labelled by the aggregate it
+ *  is declared on rather than dropped — it still has to be applied, and the
+ *  author still has to be told which read is unsafe.
+ *
+ *  Mirrors the triage every backend's aggregation emitter runs
+ *  (`aggregationScope` in java's `query-projection-reads.ts`, its four twins
+ *  elsewhere), so a projection that genuinely needs NO filter — `ignoring *`,
+ *  or an aggregate with no filtering capability at all — is not gated. */
+export function unappliedCapabilityFilters(proj: ProjectionIR, agg: EnrichedAggregateIR): string[] {
+  const q = proj.query;
+  if (q?.bypassAll) return [];
+  const bypassed = new Set(q?.bypassCaps ?? []);
+  const origins = agg.contextFilterOrigins ?? [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  (agg.contextFilters ?? []).forEach((_pred, i) => {
+    const origin = origins[i];
+    if (origin !== undefined && bypassed.has(origin)) return;
+    const label = origin === undefined ? `a 'filter' on '${agg.name}'` : `'${origin}'`;
+    if (seen.has(label)) return;
+    seen.add(label);
+    out.push(label);
+  });
+  return out;
 }
