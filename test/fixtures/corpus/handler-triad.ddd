@@ -22,12 +22,16 @@
 //      `test/ir/handler-nullable-load.test.ts`.
 //
 // Every find here returns an ARRAY on purpose.  A NON-optional SINGLE find
-// (`find byCode(c: string): Order`) is a shape no corpus fixture reaches and
-// the five backends do not agree on: node throws `AggregateNotFoundError`,
-// .NET's `FirstAsync` throws, and java / python / elixir return null / None /
-// nil — which mypy --strict catches on the python leg and nothing catches on
-// the other two.  That divergence is a parity finding of its own, not this
-// fixture's subject, and putting it here would gate this PR on settling it.
+// (`find byCode(c: string): Order`) is a shape no corpus fixture reaches, and
+// when this fixture landed the five backends did not agree on it: node threw
+// `AggregateNotFoundError`, .NET's `FirstAsync` threw an
+// `InvalidOperationException` no filter arm matched (→ 500), and java / python /
+// elixir returned null / None / nil (→ `200 null`, which the 200 schema forbids).
+// F13 settled all five on the shared not-found rung, and `errorStatuses` now
+// DECLARES the 404 that shape answers — see
+// docs/audits/schemathesis-findings-2026-08.md.  The cross-backend pin is
+// test/conformance/not-found-declaration-parity.test.ts, kept out of the corpus
+// because reaching it from here would mean re-baselining every backend golden.
 system HandlerTriad {
   subdomain D {
     context Sales {
