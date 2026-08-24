@@ -63,8 +63,54 @@ describe("feliz create forms", () => {
     expect(app).toContain("module Encoders =");
     expect(app).toContain("let productForm (form: ProductForm) : JsonValue =");
     expect(app).toContain('"name", Encode.string form.name');
-    // money/decimal lifts the string with `decimal`.
+    // money lifts the string with `decimal` — Thoth's `Encode.decimal` renders
+    // `value.ToString()`, i.e. a JSON STRING, which is the money wire (RS-12).
     expect(app).toContain('"price", Encode.decimal (decimal form.price)');
+  });
+
+  // RS-24: a plain `decimal` is a JSON NUMBER on the wire, and only `money` is
+  // a string (RS-12).  Both shared the `Encode.decimal` arm until M-T1.22, so a
+  // decimal request field went out quoted and node/.NET answered 422.  The two
+  // arms are pinned side by side here so re-fusing them fails.
+  it("encodes a plain decimal as a JSON number and money as a string", async () => {
+    const app = await appFs(`
+      system Shop {
+        api ShopApi from Catalog
+        subdomain Catalog {
+          context Cat {
+            aggregate Product with crudish {
+              name:   string
+              price:  money
+              weight: decimal
+              ratio:  decimal?
+            }
+            repository Products for Product { }
+          }
+        }
+        storage db { type: postgres }
+        resource catState { for: Cat, kind: state, use: db }
+        ui WebApp {
+          api Shop: ShopApi
+          page ProductNew {
+            route: "/products/new"
+            body: Stack { CreateForm { of: Product } }
+          }
+        }
+        deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
+        deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 }
+      }
+    `);
+    // money → JSON string.
+    expect(app).toContain('"price", Encode.decimal (decimal form.price)');
+    // plain decimal → JSON number.
+    expect(app).toContain('"weight", Encode.float (float form.weight)');
+    // …including the OPTIONAL arm, which folds empty → null around the number.
+    expect(app).toContain(
+      '"ratio", (if form.ratio = "" then Encode.nil else Encode.float (float form.ratio))',
+    );
+    // No decimal field may go out through the money (string) encoder.
+    expect(app).not.toContain("Encode.decimal (decimal form.weight)");
+    expect(app).not.toContain("Encode.decimal (decimal form.ratio)");
   });
 
   it("emits a create Api fn (encode + POST + decode the `{ id }` envelope)", async () => {

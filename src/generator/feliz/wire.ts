@@ -966,9 +966,14 @@ function elemEncoderFn(base: TypeIR): string {
       case "int":
       case "long":
         return "(fun s -> Encode.int (int s))";
-      case "decimal":
+      // RS-12: `money` is a wire STRING (Thoth's `Encode.decimal` is
+      // `value.ToString()`), and RS-24: a plain `decimal` is a wire NUMBER.
+      // They shared one arm until M-T1.22, so every `decimal` element encoded
+      // as a string and the backends answered 422.
       case "money":
         return "(fun s -> Encode.decimal (decimal s))";
+      case "decimal":
+        return "(fun s -> Encode.float (float s))";
       case "bool":
         return '(fun s -> Encode.bool (s = "true"))';
       default:
@@ -1006,9 +1011,14 @@ function encodeExprFor(t: TypeIR, access: string, optional = false): string {
         case "int":
         case "long":
           return `Encode.int (int ${access})`;
-        case "decimal":
+        // `money` is a wire STRING (RS-12) — Thoth's `Encode.decimal` renders
+        // `value.ToString()`.  A plain `decimal` is a wire NUMBER (RS-24), so
+        // it goes out through `Encode.float`; sharing the money arm made every
+        // decimal request field a string and the backends rejected it (422).
         case "money":
           return `Encode.decimal (decimal ${access})`;
+        case "decimal":
+          return `Encode.float (float ${access})`;
         case "bool":
           return `Encode.bool (${access} = "true")`;
         default:
@@ -2230,9 +2240,13 @@ function paramEncoder(t: TypeIR): string {
       case "int":
       case "long":
         return "Encode.int";
-      case "decimal":
+      // Same RS-12/RS-24 split as the form encoders: money is a wire string,
+      // a plain decimal is a wire number.  The op-param value is already
+      // `decimal`-typed here (`wireFieldType`), so the number arm converts.
       case "money":
         return "Encode.decimal";
+      case "decimal":
+        return "(fun (v: decimal) -> Encode.float (float v))";
       case "bool":
         return "Encode.bool";
       default:
