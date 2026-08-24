@@ -34,7 +34,7 @@ import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
-import { generateSystemFiles } from "../_helpers/generate.js";
+import { generateSystemFilesUnchecked } from "../_helpers/generate.js";
 import { parseString } from "../_helpers/parse.js";
 
 const CODE = "loom.user-component-deferred-target";
@@ -252,9 +252,15 @@ const diagsOf = async (src: string) => {
 };
 const diagCodes = async (src: string): Promise<string[]> => (await diagsOf(src)).map((d) => d.code);
 
-/** The emitted frontend pages, whichever frontend emitted them. */
+/** The emitted frontend pages, whichever frontend emitted them.  Every
+ *  caller is an "emitter really drops it" leg: it generates from the very
+ *  model the gate under test rejects, to prove the degradation arm is still
+ *  real — so the checked helper would (correctly) refuse each fixture. */
 async function frontendSources(src: string): Promise<Map<string, string>> {
-  const files = await generateSystemFiles(src);
+  const files = await generateSystemFilesUnchecked(
+    src,
+    "each MATRIX fixture is rejected by loom.user-component-deferred-target on purpose; this leg emits from it to prove the emitter arm the gate documents still degrades",
+  );
   return new Map(
     [...files.entries()].filter(([k]) => k.endsWith("App.fs") || k.includes("/src/app/")),
   );
