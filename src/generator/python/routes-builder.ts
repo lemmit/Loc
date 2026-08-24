@@ -322,15 +322,23 @@ export function buildPyRoutesFile(
         ))
       ? "from app.auth.user import User"
       : null,
-    // The history mapper's masked-field blocks read the ambient principal
-    // through `current_user()` (the non-raising getter — an unauthenticated
-    // caller drops every masked entry).  Imported only when the aggregate
-    // actually serves history AND masks something, else ruff flags F401.
-    // Emitted separately from the `User` line above because the two conditions
-    // are independent: a masked history needs the accessor but not the type.
-    historyFind && maskedHistoryFields(agg).length > 0
-      ? "from app.auth.user import current_user"
-      : null,
+    // The history path has TWO independent principal readers, and they want
+    // DIFFERENT accessors — emitted separately from the `User` line above
+    // because neither needs the type:
+    //
+    //  * the MAPPER's masked-field blocks read `current_user()`, the
+    //    non-raising getter — an unauthenticated caller simply drops every
+    //    masked entry rather than erroring;
+    //  * the ROUTE's inherited `requires` gate binds
+    //    `current_user_ = require_current_user()` and dereferences a claim on
+    //    it, so it takes the fail-closed raising accessor (`User`, not
+    //    `User | None` — the non-raising one made the gate `mypy --strict`
+    //    union-attr red and an `AttributeError` at runtime).
+    //
+    // Both are demand-gated, or ruff flags the unused import (F401).  Missing
+    // the gate reader entirely is what emitted a call to an unimported name on
+    // a GATED-but-UNMASKED history find (ruff F821 → `NameError`).
+    historyAccessorImport(historyFind, agg),
     historyFind
       ? "from app.audit.history import AuditEntryListResponse, audit_snapshot_value, audit_value_changed"
       : null,
@@ -971,6 +979,24 @@ function byIdRoute(agg: EnrichedAggregateIR, apiOp: ApiOperationIR): string {
   );
 }
 
+/** The `app.auth.user` accessor import the history path needs, or `null`.
+ *
+ *  Two readers, two accessors (see the call site): the mapper's mask blocks
+ *  take the non-raising `current_user`, the route's `requires` gate takes the
+ *  fail-closed `require_current_user`.  A gated AND masked history imports
+ *  both; neither reader present imports nothing (ruff F401). */
+function historyAccessorImport(
+  historyFind: FindIR | undefined,
+  agg: EnrichedAggregateIR,
+): string | null {
+  if (!historyFind) return null;
+  const names = [
+    maskedHistoryFields(agg).length > 0 ? "current_user" : null,
+    findGateUsesCurrentUser(historyFind) ? "require_current_user" : null,
+  ].filter((n): n is string => n !== null);
+  return names.length > 0 ? `from app.auth.user import ${names.join(", ")}` : null;
+}
+
 /** `GET /{id}/history` — the per-entity audit trail (docs/audit.md).
  *
  *  Three guards, in order, mirroring the Hono port exactly:
@@ -991,7 +1017,13 @@ function historyRoute(
     `@router.get("/{id}/history", response_model=AuditEntryListResponse, operation_id="${camelId(opFind(agg.name, "history"))}"${errorResponsesKwarg("getById", false, [], conflictResolver(ctx))})`,
     `async def history_${snake(agg.name)}(${ID_PARAM}, session: SessionDep) -> list[dict[str, object]]:`,
     "    repo = _repo(session)",
-    gateUsesUser ? "    current_user_ = current_user()" : null,
+    // The FAIL-CLOSED accessor: the gate dereferences a claim on the
+    // principal, so "no principal" must reject, not `AttributeError` on
+    // `None` (which the non-raising getter would hand it — also
+    // `mypy --strict` union-attr red).  Same seam the always-on principal
+    // capability filters use.  The mask blocks in the mapper keep the
+    // non-raising getter: there, absence means "drop the entry".
+    gateUsesUser ? "    current_user_ = require_current_user()" : null,
     find.requires
       ? `    if ${renderPyNegatedGuard(find.requires, { thisName: "self", currentUserExpr: "current_user_" })}:\n        raise ForbiddenError("Forbidden")`
       : null,

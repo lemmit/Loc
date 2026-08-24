@@ -40,6 +40,7 @@ import {
   type ReadPort,
   readPortsForOperation,
 } from "../../../ir/util/domain-service-read-ports.js";
+import { walkStmtExprsDeep, walkWorkflowStmtExprsDeep } from "../../../ir/util/walk.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
 import { emptyPyTypeImports, visitPyTypeImports } from "../py-type-imports.js";
@@ -281,7 +282,7 @@ function collectStmtExprImports(st: StmtIR, into: Set<string>): void {
  *  operation / applier / es-create bodies). */
 export function domainServiceImportLines(stmts: readonly StmtIR[]): string[] {
   const byService = new Map<string, Set<string>>();
-  for (const st of stmts) forEachStmtExpr(st, (e) => collectServiceRef(e, byService));
+  for (const st of stmts) walkStmtExprsDeep(st, (e) => collectServiceRef(e, byService));
   return importLinesFor(byService);
 }
 
@@ -289,7 +290,7 @@ export function domainServiceImportLines(stmts: readonly StmtIR[]): string[] {
  *  it walks a distinct (recursive, branch-bearing) statement tree. */
 export function domainServiceImportLinesForWorkflow(stmts: readonly WorkflowStmtIR[]): string[] {
   const byService = new Map<string, Set<string>>();
-  for (const st of stmts) forEachWorkflowStmtExpr(st, (e) => collectServiceRef(e, byService));
+  for (const st of stmts) walkWorkflowStmtExprsDeep(st, (e) => collectServiceRef(e, byService));
   return importLinesFor(byService);
 }
 
@@ -310,122 +311,16 @@ function collectServiceRef(e: ExprIR, byService: Map<string, Set<string>>): void
   }
 }
 
-/** Visit every sub-expression of a statement (recurses into nested
- *  expressions), so a domain-service call in any position is found. */
-function forEachStmtExpr(st: StmtIR, visit: (e: ExprIR) => void): void {
-  switch (st.kind) {
-    case "precondition":
-    case "requires":
-    case "let":
-    case "expression":
-      walkExpr(st.expr, visit);
-      return;
-    case "assign":
-    case "add":
-    case "remove":
-      walkExpr(st.value, visit);
-      return;
-    case "emit":
-      for (const f of st.fields) walkExpr(f.value, visit);
-      return;
-    case "call":
-      for (const a of st.args) walkExpr(a, visit);
-      return;
-    case "return":
-      walkExpr(st.value, visit);
-      return;
-  }
-}
-
-/** Visit every sub-expression of a workflow statement, recursing into the
- *  nested bodies of `for-each` / `if-let`. */
-function forEachWorkflowStmtExpr(st: WorkflowStmtIR, visit: (e: ExprIR) => void): void {
-  switch (st.kind) {
-    case "precondition":
-    case "requires":
-      walkExpr(st.expr, visit);
-      return;
-    case "emit":
-    case "factory-let":
-      for (const f of st.fields) walkExpr(f.value, visit);
-      return;
-    case "repo-let":
-    case "op-call":
-      for (const a of st.args) walkExpr(a, visit);
-      return;
-    case "expr-let":
-      walkExpr(st.expr, visit);
-      return;
-    case "repo-run":
-      for (const a of st.retrievalArgs) walkExpr(a, visit);
-      walkExpr(st.page?.offset, visit);
-      walkExpr(st.page?.limit, visit);
-      return;
-    case "for-each":
-      walkExpr(st.iterable, visit);
-      for (const inner of st.body) forEachWorkflowStmtExpr(inner, visit);
-      return;
-    case "resource-call":
-    case "domain-service-call":
-      walkExpr(st.call, visit);
-      return;
-    case "if-let":
-      for (const a of st.retrievalArgs) walkExpr(a, visit);
-      for (const inner of st.thenBody) forEachWorkflowStmtExpr(inner, visit);
-      for (const inner of st.elseBody ?? []) forEachWorkflowStmtExpr(inner, visit);
-      return;
-  }
-}
-
-/** Depth-first expression walk — visits `e` and every sub-expression. */
-function walkExpr(e: ExprIR | undefined, visit: (e: ExprIR) => void): void {
-  if (!e) return;
-  visit(e);
-  switch (e.kind) {
-    case "member":
-      walkExpr(e.receiver, visit);
-      return;
-    case "method-call":
-      walkExpr(e.receiver, visit);
-      for (const a of e.args) walkExpr(a, visit);
-      return;
-    case "call":
-      for (const a of e.args) walkExpr(a, visit);
-      return;
-    case "binary":
-      walkExpr(e.left, visit);
-      walkExpr(e.right, visit);
-      return;
-    case "unary":
-      walkExpr(e.operand, visit);
-      return;
-    case "paren":
-      walkExpr(e.inner, visit);
-      return;
-    case "ternary":
-      walkExpr(e.cond, visit);
-      walkExpr(e.then, visit);
-      walkExpr(e.otherwise, visit);
-      return;
-    case "convert":
-      walkExpr(e.value, visit);
-      return;
-    case "lambda":
-      walkExpr(e.body, visit);
-      return;
-    case "new":
-    case "object":
-      for (const f of e.fields) walkExpr(f.value, visit);
-      return;
-    case "list":
-      for (const el of e.elements) walkExpr(el, visit);
-      return;
-    case "match":
-      for (const arm of e.arms) {
-        walkExpr(arm.cond, visit);
-        walkExpr(arm.value, visit);
-      }
-      walkExpr(e.otherwise, visit);
-      return;
-  }
-}
+// The two statement walks above are the SHARED, `never`-checked ones from
+// `ir/util/walk.ts` — this file used to carry private copies of both plus a
+// private `walkExpr`.
+//
+// The workflow copy had no `assign` / `repo-delete` arm, so a service called
+// from a workflow-state write (`total := Fee.quote(base)`) got no import and
+// the emitted route called an undefined name — ruff F821 → runtime
+// `NameError`.  The operation-body copy skipped `variant-match`'s nested
+// statements, and the private `walkExpr` reached neither a block-body lambda's
+// statements nor a `match`'s variant arms; both are latent rather than
+// reproduced, which is exactly the argument for deleting the copies: the next
+// `ExprIR` / `StmtIR` / `WorkflowStmtIR` kind is a `tsc` error in ONE place
+// instead of a silent import hole here.
