@@ -33,6 +33,7 @@ import {
   whereToSql,
 } from "./emit/dapper.js";
 import { dapperProjectionColumns, dapperWorkflowStateColumns } from "./emit/dapper-workflow.js";
+import { queryFilterNames } from "./emit/efcore.js";
 import {
   projectionRowClass,
   projectionRowDbSet,
@@ -394,6 +395,54 @@ function aggregationCapabilityFilters(proj: ProjectionIR, ctx: EnrichedBoundedCo
   });
 }
 
+/** The EF twin of {@link aggregationCapabilityFilters}: the
+ *  `.IgnoreQueryFilters(…)` clause an aggregation over an `ignoring` source
+ *  needs.
+ *
+ *  EF installs each capability predicate as a MODEL-level named query filter,
+ *  so the aggregation inherits them for free — which is exactly why the arms
+ *  used to read `aggregationCapabilityFilters` only under Dapper.  But that
+ *  also made `ignoring <Cap>` / `ignoring *` DEAD on EF: the filters it names
+ *  kept applying, while the Dapper arm simply left the predicate out of its
+ *  SQL and the repository read path already honoured the same clause
+ *  (`ignoreFiltersClause`, emit/repository.ts).  One model, three answers.
+ *
+ *  Partial bypass is expressible because EF Core 10's filters are NAMED:
+ *  `ignoring <OneCap>` names only the filters that capability contributed and
+ *  every other one stays armed, so bypassing soft-delete cannot widen the read
+ *  across tenants.  Bypass is capability-origin-only (#2603/#2637, and
+ *  language-reference §11: "`ignoring *` drops every CAPABILITY filter"), which
+ *  is why even `*` names its filters rather than taking the parameterless
+ *  overload — see below. */
+function efAggregationIgnoreClause(
+  proj: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+  usingDapper: boolean,
+): string {
+  if (usingDapper) return "";
+  const agg = ctx.aggregates.find((a) => a.name === proj.query?.source);
+  if (!agg) return "";
+  const q = proj.query!;
+  const bypassAll = q.bypassAll ?? false;
+  const caps = new Set(q.bypassCaps ?? []);
+  if (!bypassAll && caps.size === 0) return "";
+  // Index-for-index the INVERSE of `aggregationCapabilityFilters` above: the
+  // named filter at position i drops exactly when that function would have
+  // dropped the predicate at position i.  Spelled out rather than reusing the
+  // repository's `ignoreFiltersClause`, because that helper maps `*` to the
+  // PARAMETERLESS `IgnoreQueryFilters()` — which also drops a bare
+  // (origin-less) `filter <expr>`, while `ignoring *` is documented, and
+  // implemented by the Dapper twin, as "every CAPABILITY filter".
+  const names = queryFilterNames(agg);
+  const origins = agg.contextFilterOrigins ?? [];
+  const dropped = names.filter((_, i) => {
+    const origin = origins[i];
+    return origin != null && (bypassAll || caps.has(origin));
+  });
+  if (dropped.length === 0) return "";
+  return `.IgnoreQueryFilters([${dropped.map((n) => JSON.stringify(n)).join(", ")}])`;
+}
+
 /** The Dapper `WHERE` body for an aggregation: the projection's own filter
  *  AND the applicable capability filters, each already parenthesised by
  *  `whereToSql`.  `undefined` ⇒ no `WHERE` at all. */
@@ -571,6 +620,8 @@ function renderAggregateHandler(
   // has (`whereToSql`, shared with every Dapper find / retrieval / capability
   // filter).  A second lowering here would be a second dialect to keep true.
   const caps = usingDapper ? aggregationCapabilityFilters(proj, ctx) : [];
+  // …and its EF twin: the model-level query filters this read BYPASSES.
+  const efIgnore = efAggregationIgnoreClause(proj, ctx, usingDapper);
   const where = usingDapper
     ? dapperAggregationWhere(proj, caps)
     : filter
@@ -647,7 +698,7 @@ function renderAggregateHandler(
     const args = aggregates.map((s) => csCoerce(s, `agg`, ctx)).join(", ");
     members = "";
     body =
-      `        var agg = await _db.${dbSet}.AsNoTracking()${where ? `.Where(o => ${where})` : ""}\n` +
+      `        var agg = await _db.${dbSet}.AsNoTracking()${efIgnore}${where ? `.Where(o => ${where})` : ""}\n` +
       `            .GroupBy(_ => 1)\n` +
       `            .Select(g => new { ${anon} })\n` +
       `            .FirstOrDefaultAsync(cancellationToken);\n` +
@@ -756,8 +807,9 @@ function renderGroupedHandler(
   const usings = new Set<string>();
   const filter = proj.query!.filter;
   // Same capability-filter splice as the singleton arm — see
-  // `aggregationCapabilityFilters`.
+  // `aggregationCapabilityFilters` and `efAggregationIgnoreClause`.
   const caps = usingDapper ? aggregationCapabilityFilters(proj, ctx) : [];
+  const efIgnore = efAggregationIgnoreClause(proj, ctx, usingDapper);
   const where = usingDapper
     ? dapperAggregationWhere(proj, caps)
     : filter
@@ -882,7 +934,7 @@ function renderGroupedHandler(
     ? `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);\n` +
       `        var groups = await conn.QueryAsync<GroupRow>(new CommandDefinition("${groupSql}"${seam.paramArg}, cancellationToken: cancellationToken));\n` +
       `        return groups.Select(r => new ${rowName}(${args.join(", ")})).ToList();\n`
-    : `        var groups = await _db.${dbSet}.AsNoTracking()${where ? `.Where(o => ${where})` : ""}\n` +
+    : `        var groups = await _db.${dbSet}.AsNoTracking()${efIgnore}${where ? `.Where(o => ${where})` : ""}\n` +
       `            .GroupBy(o => new { ${cols.map((c) => c.decl).join(", ")} })\n` +
       `            .Select(g => new { ${members} })\n` +
       `            ${orderBy}\n` +
