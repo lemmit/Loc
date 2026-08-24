@@ -74,7 +74,9 @@ describe("elixir domain `test` → ExUnit emission", () => {
     expect(agg).toContain("|> Ecto.Changeset.apply_action(:insert)");
     // <op>/2 = precondition (raise) + in-memory mutation.
     expect(agg).toContain("def confirm(%__MODULE__{} = record, _params) do");
-    expect(agg).toContain('raise(ArgumentError, "Precondition failed: status == \\"open\\"")');
+    expect(agg).toContain(
+      'raise(VanApi.GuardError, kind: :precondition, message: "Precondition failed: status == \\"open\\"")',
+    );
   });
 
   it("vanilla: ports create / op / toThrow / field reads onto the core", async () => {
@@ -92,7 +94,7 @@ describe("elixir domain `test` → ExUnit emission", () => {
     expect(src).toContain('assert o.status == "confirmed"');
     // precondition reject → assert_raise.
     expect(src).toContain(
-      "assert_raise ArgumentError, fn -> VanApi.Selling.Order.confirm(o, %{}) end",
+      "assert_raise VanApi.GuardError, fn -> VanApi.Selling.Order.confirm(o, %{}) end",
     );
     // value-object field read runs (map literal, money → Decimal).
     expect(src).toContain('m = %{amount: Decimal.new("10.5"), currency: "USD"}');

@@ -197,3 +197,110 @@ describe("elixir/vanilla — messaged precondition answers the wire-validation 4
     expect(pd).toContain("def validation_errors_response(conn, errors) when is_list(errors) do");
   });
 });
+
+// ---------------------------------------------------------------------------
+// M-T6.20 PATH 2 — the RAISE path (`function` / `domainService` / pure-core).
+//
+// The `ensure` chain above is only reachable from an HTTP-boundary operation.
+// A guard in a PURE body has no `with` chain to short-circuit through, so it
+// RAISES and a controller `rescue` maps the raise to a status.
+//
+// That rescue used to route by MESSAGE PREFIX — `String.starts_with?(guard_msg,
+// "Precondition failed: ")` — which made the message the ROUTING KEY, so an
+// authored `message "…"` was UNEMITTABLE: it would miss the prefix and fall to
+// the `reraise` arm, answering 500 instead of 422.  Both raise sites carried a
+// comment saying so and shipped the derived text instead.
+//
+// The classification is now out of band, in the `:kind` field of a typed
+// `<App>.GuardError`.  Three things must hold together, and each is asserted on
+// the ONE file that owns it (a joined search over all files would be satisfied
+// by any sibling that happens to carry the shape):
+//   1. the exception module exists in the DOMAIN layer (`lib/<app>/`, not
+//      `<App>Web.*` — `function-emit` / `domain-service-emit` render there);
+//   2. the raise carries `kind:` + the AUTHOR'S message;
+//   3. the controller rescue routes on `guard_error.kind`, and reads the
+//      message nowhere.
+// ---------------------------------------------------------------------------
+
+const RAISE_PATH = `
+system S {
+  subdomain Sales {
+    context Cat {
+      aggregate Product {
+        name: string
+        quantity: int
+
+        function checkRestockable(amount: int): bool {
+          precondition amount >= 1 message "A pure function keeps its authored message"
+          return true
+        }
+
+        create(n: string) { name := n  quantity := 0 }
+
+        operation restock(amount: int) {
+          let ok = checkRestockable(amount)
+          quantity := quantity + amount
+        }
+      }
+      repository Products for Product { }
+
+      domainService Quotes {
+        operation quote(p: Product): int {
+          requires currentUser.level > 2
+          return p.quantity
+        }
+      }
+    }
+  }
+  user { id: string  level: int }
+  api CatApi from Sales
+  storage db { type: postgres }
+  resource st { for: Cat, kind: state, use: db }
+  deployable api { platform: elixir contexts: [Cat] dataSources: [st] serves: CatApi port: 8080 auth: required }
+}
+`;
+
+describe("elixir/vanilla — the RAISE path carries the author's message (M-T6.20 path 2)", () => {
+  it("emits the typed guard exception in the DOMAIN layer", async () => {
+    const files = await generateSystemFiles(RAISE_PATH);
+    const mod = file(files, "/api/guard_error.ex");
+    expect(mod).toContain("defmodule Api.GuardError do");
+    expect(mod).toContain("defexception [:message, :kind]");
+    expect(mod).toContain("@type kind :: :forbidden | :precondition");
+    // Domain layer, NOT `<App>Web.*` — the raise sites live under `lib/<app>/`
+    // and must not reference the Web namespace.
+    expect(mod).not.toContain("ApiWeb");
+    const key = [...files.keys()].find((k) => k.endsWith("/api/guard_error.ex"))!;
+    expect(key).toMatch(/\/lib\/api\/guard_error\.ex$/);
+  });
+
+  it("a `function` precondition raises with the AUTHOR'S message, not the derived form", async () => {
+    const ctx = file(await generateSystemFiles(RAISE_PATH), "/api/cat.ex");
+    expect(ctx).toContain(
+      'raise(Api.GuardError, kind: :precondition, message: "A pure function keeps its authored message")',
+    );
+    // The derived form is what shipped while the prefix was the routing key.
+    expect(ctx, "derived detail emitted despite an authored message").not.toContain(
+      "Precondition failed: amount >= 1",
+    );
+  });
+
+  it("a `domainService` requires raises the same typed exception", async () => {
+    const svc = file(await generateSystemFiles(RAISE_PATH), "/domain/services/quotes.ex");
+    expect(svc).toContain(
+      'raise(Api.GuardError, kind: :forbidden, message: "Forbidden: currentUser.level > 2")',
+    );
+  });
+
+  it("the controller rescue routes on the :kind FIELD, and reads the message nowhere", async () => {
+    const ctrl = file(await generateSystemFiles(RAISE_PATH), "/controllers/product_controller.ex");
+    expect(ctrl).toContain("guard_error in Api.GuardError ->");
+    expect(ctrl).toContain("case guard_error.kind do");
+    expect(ctrl).toContain(":forbidden ->\n          ProblemDetails.problem_response(conn, 403,");
+    expect(ctrl).toContain("_ ->\n          ProblemDetails.problem_response(conn, 422,");
+    // The routing key is the field; the message is free text again.  These two
+    // absences ARE the fix — with either one back, an authored message reroutes.
+    expect(ctrl).not.toContain("String.starts_with?(guard_msg");
+    expect(ctrl).not.toContain('"Precondition failed: "');
+  });
+});

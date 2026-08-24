@@ -79,10 +79,11 @@ describe("phoenix generator — domainService (domain-services.md)", () => {
     expect(svc).toContain("def quote(cart, customer) do");
     // A plain return is the bare value (Elixir last-expression result).
     expect(svc).toContain("cart.subtotal");
-    // `precondition` raises the same ArgumentError guard the aggregate op
-    // body emits.
+    // `precondition` raises the same typed `<App>.GuardError` guard the
+    // aggregate op body emits — `:kind` carries the rung, `:message` the detail
+    // (M-T6.20).
     expect(svc).toMatch(
-      /if not \(.*\), do: raise\(ArgumentError, "Precondition failed: cart\.subtotal > 0"\)/,
+      /if not \(.*\), do: raise\(Shop\.GuardError, kind: :precondition, message: "Precondition failed: cart\.subtotal > 0"\)/,
     );
     // The unused `customer` param is discarded so --warnings-as-errors stays clean.
     expect(svc).toContain("_ = customer");
