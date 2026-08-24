@@ -30,10 +30,11 @@ describe("state + onClick mutations in walker pages", () => {
           page Counter {
             route: "/counter"
             state { count: int = 0 }
+            action inc() { count := count + 1 }
             body:  Stack {
               Heading { "Counter" },
               Text { count },
-              Button { "Increment", onClick: e => { count := count + 1 } }
+              Button { "Increment", onClick: inc }
             }
           }
         }
@@ -53,12 +54,13 @@ describe("state + onClick mutations in walker pages", () => {
     expect(content).toMatch(/const \[count, setCount\] = useState<number>\(0\);/);
     // Body refs render as JSX expressions.
     expect(content).toMatch(/<Text>\{count\}<\/Text>/);
-    // onClick lambda block lowers `count := count + 1` →
-    // setCount(count + 1).  v0 drops the lambda's source param
-    // name; output is `() => { ... }`.
-    expect(content).toMatch(
-      /<Button onClick=\{\(\) => \{ setCount\(\(count \+ 1\)\); \}\}>\{t\("[^"]*", "Increment"\)\}<\/Button>/,
-    );
+    // The named `action` hoists to a const whose body lowers
+    // `count := count + 1` → setCount(count + 1); the control just references
+    // it.  (An inline `onClick: e => { … }` is rejected by
+    // `loom.effect-in-lambda`, so the hoisted form is the only one a user can
+    // reach.)
+    expect(content).toMatch(/const inc = \(\) => \{ setCount\(\(count \+ 1\)\); \};/);
+    expect(content).toMatch(/<Button onClick=\{inc\}>\{t\("[^"]*", "Increment"\)\}<\/Button>/);
   });
 
   it("page declares state but body never refs it → no useState in shell", async () => {
@@ -96,9 +98,10 @@ describe("state + onClick mutations in walker pages", () => {
           page Greet {
             route: "/greet"
             state { who: string }
+            action setWho() { who := "world" }
             body:  Stack {
               Text { who },
-              Button { "Set", onClick: e => { who := "world" } }
+              Button { "Set", onClick: setWho }
             }
           }
         }
@@ -124,9 +127,10 @@ describe("state + onClick mutations in walker pages", () => {
           page Toggle {
             route: "/toggle"
             state { open: bool = true }
+            action close() { open := false }
             body:  Stack {
               Text { open },
-              Button { "Close", onClick: e => { open := false } }
+              Button { "Close", onClick: close }
             }
           }
         }
@@ -155,10 +159,11 @@ describe("state + onClick mutations in walker pages", () => {
               a: int = 0
               b: int = 0
             }
-            body:  Button {"Bump", onClick: e => {
+            action bump() {
               a := a + 1
               b := b + 2
-            }}
+            }
+            body:  Button {"Bump", onClick: bump}
           }
         }
         deployable api { platform: node, contexts: [C], port: 3000 }
@@ -174,10 +179,9 @@ describe("state + onClick mutations in walker pages", () => {
     // Both setters declared.
     expect(content).toMatch(/const \[a, setA\] = useState<number>\(0\);/);
     expect(content).toMatch(/const \[b, setB\] = useState<number>\(0\);/);
-    // Both emitted in onClick body.
-    expect(content).toMatch(
-      /<Button onClick=\{\(\) => \{ setA\(\(a \+ 1\)\); setB\(\(b \+ 2\)\); \}\}>\{t\("[^"]*", "Bump"\)\}<\/Button>/,
-    );
+    // Both emitted, in order, in the hoisted action body.
+    expect(content).toMatch(/const bump = \(\) => \{ setA\(\(a \+ 1\)\); setB\(\(b \+ 2\)\); \};/);
+    expect(content).toMatch(/<Button onClick=\{bump\}>\{t\("[^"]*", "Bump"\)\}<\/Button>/);
   });
 
   it("onClick lambda takes priority over to: when both are written", async () => {
@@ -188,9 +192,10 @@ describe("state + onClick mutations in walker pages", () => {
           page Confused {
             route: "/x"
             state { n: int = 0 }
+            action bump() { n := n + 1 }
             body:  Button {"Do",
               to: "/elsewhere",
-              onClick: e => { n := n + 1 }
+              onClick: bump
             }
           }
         }

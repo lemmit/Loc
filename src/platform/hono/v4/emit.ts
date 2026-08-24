@@ -665,21 +665,27 @@ export function generateTypeScriptForContexts(
       }),
     );
   }
+  // resourceName → sourceType, so a body that issues a resource-op can import
+  // its `<resource>$<verb>` helper from the right client module (Phase 4).
+  // Hoisted out of the workflow block: the EXPLICIT-HANDLER leg needs the same
+  // map.  A `commandHandler` / `queryHandler` body is one of the two sites the
+  // IR gate (`loom.resource-op-outside-workflow`) declares LEGAL for a
+  // resource-op, but `buildExplicitRoutesFile` derived no resource import, so
+  // the router emitted a bare `salesFiles$put(...)` → TS2304 in the generated
+  // project.  One map, both call sites, so they cannot drift.
+  const resourceSourceTypes = new Map<string, string>();
+  if (system) {
+    const storeType = new Map(system.sys.storages.map((s) => [s.name, s.type] as const));
+    for (const r of system.sys.dataSources) {
+      const st = storeType.get(r.storageName);
+      if (st) resourceSourceTypes.set(r.name, st);
+    }
+  }
   if (
     merged.workflows.length > 0 ||
     (durableBrokerEvents.size > 0 && durableEventTypes(merged).size > 0)
   ) {
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
-    // resourceName → sourceType, so workflow bodies can import their
-    // resource-op verb helpers from the right client module (Phase 4).
-    const resourceSourceTypes = new Map<string, string>();
-    if (system) {
-      const storeType = new Map(system.sys.storages.map((s) => [s.name, s.type] as const));
-      for (const r of system.sys.dataSources) {
-        const st = storeType.get(r.storageName);
-        if (st) resourceSourceTypes.set(r.name, st);
-      }
-    }
     // Only collected when a recorder is actually threaded in — a
     // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 11:
     // `http/workflows.ts` pools every workflow, so it never gets a
@@ -727,7 +733,7 @@ export function generateTypeScriptForContexts(
     for (const apiName of system.deployable.serves) {
       const api = system.sys.apis.find((a) => a.name === apiName);
       if (!api || api.routes.length === 0) continue;
-      const content = buildExplicitRoutesFile(api.name, api.routes, contexts);
+      const content = buildExplicitRoutesFile(api.name, api.routes, contexts, resourceSourceTypes);
       if (!content) continue;
       const slug = lowerFirst(api.name);
       out.set(`http/${slug}-routes.ts`, content);
@@ -779,7 +785,7 @@ export function generateTypeScriptForContexts(
   // module reads no `db` at all — `realtimeTee(inner)` decorates a dispatcher and
   // `realtimeRoutes()` takes no handle — so the wire is adapter-independent.
   {
-    const realtimeFile = buildRealtimeFile(merged);
+    const realtimeFile = buildRealtimeFile(merged, system?.sys);
     if (realtimeFile) out.set("http/realtime.ts", realtimeFile);
   }
 

@@ -95,8 +95,11 @@ describe("vanilla aggregate `function` emit (gap §11b)", () => {
     expect(ctx).toMatch(/def shipping_for\(%Api\.Ordering\.Order\{\} = record, extra\) do/);
     // `let base = …` → an Elixir binding.
     expect(ctx).toContain("base = record.total + extra");
-    // `precondition` → a bug-regime raise guard.
-    expect(ctx).toMatch(/if not \(base >= 0\), do: raise\(ArgumentError/);
+    // `precondition` → a bug-regime raise guard, typed so the controller rescue
+    // routes on `:kind` rather than on the message prefix (M-T6.20).
+    expect(ctx).toMatch(
+      /if not \(base >= 0\), do: raise\(Api\.GuardError, kind: :precondition, message: "Precondition failed: base >= 0"\)/,
+    );
     // `return base` yields the bare value — NOT wrapped in `{:ok, …}`.
     expect(ctx).not.toContain("{:ok, base}");
   });
@@ -112,8 +115,10 @@ system NoFns {
     }
   }
   api InvApi from S
+  storage loomDb { type: postgres }
+  resource invState { for: Inv, kind: state, use: loomDb }
   deployable api {
-    platform: elixir, contexts: [Inv],
+    platform: elixir, contexts: [Inv], dataSources: [invState],
     serves: InvApi, port: 4000
   }
 }

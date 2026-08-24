@@ -27,9 +27,13 @@
 //
 // The interactive-table seams (sort header / pager / client filter) and the
 // store seams (`renderStoreFieldRead` / `renderStoreActionCall`, over the
-// Riverpod store modules `store-builder.ts` emits) now ship too.  What a store
-// still does NOT carry here is the lifetime ladder — `persist: local|session|url`
-// emits an in-memory store under a visible TODO in `lib/stores.dart`.
+// Riverpod store modules `store-builder.ts` emits) now ship too, including the
+// `persist: local|session|url` lifetime ladder (`store-persist.ts`).
+//
+// Under `auth: ui` the claims seam (`renderCurrentUserAccess`) and `Action`
+// button gating read the non-null `currentUser` the page shell binds —
+// `auth-gate.ts` owns the session probe, the `AuthGate` wrapper and the gate
+// expression renderer.
 
 import { isConstructible } from "../../ir/enrich/wire-projection.js";
 import type { AggregateIR, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
@@ -37,6 +41,7 @@ import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/nami
 import { localizedNamedValue } from "../_walker/i18n-emit.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr, testidAttr, walk } from "../_walker/walker-core.js";
+import { opActionGate } from "./auth-gate.js";
 import {
   DART_LEAVES,
   dartString,
@@ -286,7 +291,10 @@ export const flutterTarget: WalkerTarget = {
     return (
       `InkWell(onTap: ${onTap}, child: Semantics(button: true, ` +
       `label: ${spec.sortByLabel ?? dartString(`Sort by ${header}`)}, child: Row(mainAxisSize: MainAxisSize.min, ` +
-      `children: <Widget>[Text(${dartString(header)}), ${arrow}])))`
+      // The caption is a user-visible slot (`columnHeader`): under i18n it
+      // arrives as a Dart translation EXPRESSION, otherwise as raw text this
+      // spells as a string literal — byte-identical to before.
+      `children: <Widget>[Text(${spec.headerValue ?? dartString(header)}), ${arrow}])))`
     );
   },
 
@@ -499,8 +507,10 @@ export const flutterTarget: WalkerTarget = {
   // (a QueryView row `p`, a byId record); its `.id` addresses the row.  The
   // page's http/config imports are added by index.ts when the body references
   // `apiUri(` (an Action-only signal).  A parameterised op → a diagnostic
-  // comment steering to OperationForm (never broken Dart).  Auth gating
-  // (currentUser `requires`) is deferred to the auth-ui slice.
+  // comment steering to OperationForm (never broken Dart).  Under `auth: ui`, a
+  // currentUser-only op `requires` HIDES the button (the action-level mirror of
+  // the page gate); a predicate that touches `this.<field>` / params isn't
+  // client-evaluable, so the button stays shown and the backend 403 enforces it.
   renderAction: (call, ctx) => {
     if (call.kind !== "call") return null;
     const argNames = call.argNames ?? [];
@@ -526,13 +536,22 @@ export const flutterTarget: WalkerTarget = {
     // Feliz, and sidesteps the QueryView data-param rename (`p` → the provider var).
     ctx.usesRouteId = true;
     const label = humanize(op.name);
-    return (
+    const button =
       `ElevatedButton(onPressed: () async { ` +
       `final res = await http.post(apiUri('/${coll}/\${id}/${opPath}')); ` +
       `if (res.statusCode >= 200 && res.statusCode < 300 && context.mounted) { ` +
       `ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(${dartString(`${label} done`)}))); ` +
-      `} }, child: Text(${dartString(label)}))`
-    );
+      `} }, child: Text(${dartString(label)}))`;
+    if (ctx.authUi) {
+      const gate = opActionGate(op);
+      if (gate) {
+        // The page shell binds `currentUser` (non-null — `AuthGate` guarantees a
+        // session before any page builds), so the claims read straight off it.
+        ctx.usesCurrentUser = true;
+        return `(${gate}) ? ${button} : const SizedBox.shrink()`;
+      }
+    }
+    return button;
   },
 
   // `Modal { trigger: Button("Label"), OperationForm(of: <Agg>, op: <op>) }` →
@@ -625,6 +644,45 @@ export const flutterTarget: WalkerTarget = {
       `Tooltip(message: __f.url, child: Row(mainAxisSize: MainAxisSize.min, children: <Widget>[` +
       `const Icon(Icons.attach_file, size: 16), Flexible(child: SelectableText(__f.key))]))`;
     return `(switch (${recv}) { final __f? => ${link}, _ => const Text(${dartString("—")}) })`;
+  },
+
+  // `ProvenanceInfo(of: <record>, field: "<name>")` → a native disclosure over
+  // the co-located `<field>_provenance` (a `ProvLineage?` on the decoded model —
+  // `dart-model-emit.ts`).  Flutter forks the primitive because its "markup" is
+  // a Dart widget tree, not JSX: the `<details>`/`<summary>` pair becomes an
+  // `ExpansionTile` (the Material disclosure), and the `<dl>` a `Column` of
+  // label/value rows.  Same null-binding trick as `renderFileLink` — a property
+  // read off a model class is not type-promotable in Dart, so the switch pattern
+  // BINDS `__p` rather than naming `ProvLineage` (which a page file does not
+  // import).  A SINGLE-LINE expression: the walker does not re-indent seam
+  // output.
+  renderProvenanceInfo: (call, ctx) => {
+    if (call.kind !== "call") return null;
+    const argNames = call.argNames ?? [];
+    const ofIdx = argNames.indexOf("of");
+    const ofArg = ofIdx >= 0 ? call.args[ofIdx] : (call.args ?? []).find((_, i) => !argNames[i]);
+    const fieldIdx = argNames.indexOf("field");
+    const fieldArg = fieldIdx >= 0 ? call.args[fieldIdx] : undefined;
+    if (!ofArg || fieldArg?.kind !== "literal") {
+      return flutterTarget.renderComment("ProvenanceInfo: missing record or field");
+    }
+    const lineage = `${emitExpr(ofArg, ctx)}.${String(fieldArg.value)}_provenance`;
+    const row = (label: string, value: string) =>
+      `Row(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[` +
+      `Expanded(child: ${label}), Expanded(child: ${value})])`;
+    const rule = row(`const Text(${dartString("Rule")})`, "Text(__p.snapshotId)");
+    const value = row(`const Text(${dartString("Value")})`, "Text(__p.computedValue)");
+    const inputs = `...__p.inputs.map((__i) => ${row("Text(__i.path)", "Text(__i.value)")})`;
+    const body =
+      `Column(crossAxisAlignment: CrossAxisAlignment.start, ` +
+      `children: <Widget>[${rule}, ${value}, ${inputs}])`;
+    // The summary is the bare "?" affordance of the shared primitive; the
+    // screen-reader label the JSX targets put on `<summary aria-label=…>` rides
+    // `Semantics` here (Flutter's a11y seam — `a11y.test.ts` pins the idiom).
+    const tile =
+      `ExpansionTile(title: Semantics(label: ${dartString("How this value was computed")}, ` +
+      `child: const Text(${dartString("?")})), children: <Widget>[${body}])`;
+    return `(switch (${lineage}) { final __p? => ${tile}, _ => const SizedBox.shrink() })`;
   },
 
   // `Timeline(of: <entries>)` — the entity audit trail (docs/audit.md), the
@@ -753,6 +811,12 @@ export const flutterTarget: WalkerTarget = {
 
   // --- Type-default seam ---------------------------------------------------
   defaultInitFor: (type) => dartZeroValue(type),
+
+  // `currentUser.<claim>` — the verified session user (D-AUTH-OIDC).  The page
+  // shell binds a NON-NULL `currentUser` local (`AuthGate` gates the whole app,
+  // so a page never builds without a session), which is what lets a claim read
+  // sit in an ordinary expression position with no null hop.
+  renderCurrentUserAccess: (member: string) => `currentUser.${member}`,
 
   // --- Markup seams — Dart/Flutter flavoured -------------------------------
   // A diagnostic sentinel has to be a valid Dart EXPRESSION, not a bare

@@ -846,6 +846,13 @@ export function renderUserComponentFile(
   body: ExprIR,
   pack: LoadedPack,
   userComponents: ReadonlyMap<string, readonly ParamIR[]>,
+  /** UI api parameters — the SAME list the page shell threads.  A component
+   *  body is a read-bearing region like any page body (`QueryView { of:
+   *  Sales.Order.all }`), so the handle (`Sales`) has to resolve here too.
+   *  Handed an empty list, `emitExpr`'s ref fallthrough emitted `/* unresolved:
+   *  Sales *​/ undefined` and appended the member chain to it — a guaranteed
+   *  TypeError that also fails `tsc --noEmit`. */
+  apiParams: ReadonlyArray<UiApiParamIR> = [],
   /** Aggregates / owning BCs reachable from this UI — needed for
    *  `Action(<instance>.<op>)` operation + mutation-hook resolution. */
   aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
@@ -892,13 +899,14 @@ export function renderUserComponentFile(
     usedStores,
     usesFragment,
     hoistedModuleDecls,
+    usedApiHooks,
   } = walkBodyToTsx(
     body,
     pack,
     paramNames,
     stateNames,
     userComponents,
-    [],
+    apiParams,
     aggregatesByName,
     bcByAggregate,
     new Map(),
@@ -1014,6 +1022,27 @@ export function renderUserComponentFile(
   // Components live at `src/components/<Name>.tsx` (one hop to `src/`),
   // so api imports for Action mutation hooks resolve via `../api/<agg>`.
   const actionWiring = renderActionMutations(actionMutations, "../");
+  // Api-read hoisting — the component twin of the page shell's block above.
+  // A read in a component body (`QueryView { of: Sales.Order.all }`) records
+  // the same `ApiHookUse`, so it gets the same `use<Op><Agg>()` import + the
+  // same `const <var> = use…()` declaration.  One hop to `src/`, so the
+  // default `"../"` prefix is already right.
+  const apiHookImports = renderApiHookImports(usedApiHooks, "../");
+  const apiHookDecls = tsxTarget
+    .renderApiHoisting(
+      [...usedApiHooks.values()].map((h) => ({
+        apiHandle: "",
+        aggregateName: "",
+        operation: "",
+        kind: "query" as const,
+        args: [],
+        varName: h.varName,
+        hookName: h.hookName,
+        argsRendered: h.argsRendered,
+      })),
+    )
+    .map((line) => `  ${line}\n`)
+    .join("");
   // Form wiring (create / workflow / operation forms) — same as the
   // page shell: module-scope `<Op>Form` components + function-top hook
   // decls.  Component files sit one hop from `src/`, so the api/format
@@ -1159,9 +1188,9 @@ export function renderUserComponentFile(
   // page shell above; a user `component` can host a DataGrid too.
   const moduleDecls = (hoistedModuleDecls ?? []).join("\n");
   return `// Auto-generated.  Do not edit by hand.
-${gate.import}${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${dtoImportLines}${actionWiring.imports}${store.imports}${userComponentImports}${externFunctionImports}${propsType}${form.moduleScope}${moduleDecls === "" ? "" : `${moduleDecls}\n`}
+${gate.import}${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${apiHookImports}${dtoImportLines}${actionWiring.imports}${store.imports}${userComponentImports}${externFunctionImports}${propsType}${form.moduleScope}${moduleDecls === "" ? "" : `${moduleDecls}\n`}
 export default function ${name}(${propDestructure}) {
-${navigateLine}${store.decls}${actionWiring.decls}${form.decls}${stateLines}${derivedLines}${actionLines}${gate.guard}  return (
+${navigateLine}${store.decls}${actionWiring.decls}${form.decls}${stateLines}${apiHookDecls}${derivedLines}${actionLines}${gate.guard}  return (
     ${indentJsx(tsx, "    ")}
   );
 }

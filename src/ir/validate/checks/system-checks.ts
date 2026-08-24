@@ -59,7 +59,7 @@ import {
 } from "../../util/find-predicate-capability.js";
 import { readableProjectionNames } from "../../util/projection-read.js";
 import { opHasProvSite } from "../../util/prov-id.js";
-import { dapperQueryProjectionGap } from "../../util/query-projection-arm.js";
+import { columnlessProjectionSource } from "../../util/query-projection-arm.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
@@ -94,13 +94,16 @@ import { validateE2ETest } from "./test-checks.js";
 // just a string/uuid and doesn't depend on a display label.
 // ---------------------------------------------------------------------------
 
-// `auth: ui` (the frontend OIDC guard) is emitted by the React, Vue, Svelte,
-// Angular and Feliz generators (`generator/feliz/auth-gate.ts` — the Elmish
-// session model + `AuthGate` view, driven end-to-end by the `authgate`
-// scenario in `generated-feliz-build.yml`).  A deployable whose resolved UI
-// framework is none of those (flutter) would silently emit no guard — reject
-// it loudly so the limitation is visible rather than a no-op.
-const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular", "feliz"]);
+// `auth: ui` (the frontend OIDC guard) is emitted by every shipped frontend
+// generator: React, Vue, Svelte, Angular, Feliz (`generator/feliz/auth-gate.ts`
+// — the Elmish session model + `AuthGate` view, driven end-to-end by the
+// `authgate` scenario in `generated-feliz-build.yml`) and Flutter
+// (`generator/flutter/auth-gate.ts` — the `sessionProvider` probe, the `AuthGate`
+// wrapper around `MaterialApp`, and the `ForbiddenView` page guard).  The set is
+// KEPT, not deleted: it is the seam a new frontend gates on until it ports, and
+// the diagnostic below is its message — a deployable whose resolved UI framework
+// is absent would otherwise silently emit no guard at all.
+const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular", "feliz", "flutter"]);
 
 // paged-run (paged-queryHandler): a `queryHandler H(...): <Agg> paged` is
 // emitted by each backend whose explicit-handler emitter has grown the paged
@@ -189,6 +192,57 @@ export function validateGroupedProjectionBackend(sys: SystemIR, diags: LoomDiagn
             platform: d.platform,
           }),
           source: `${c.name}/${p.name}`,
+        });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// COLUMN-LESS direct-table projection source — universal, not per-backend.
+//
+// The two direct-table arms (`select n = count()/sum(o.x)`, `group by`) push
+// the aggregation into SQL, which means they name COLUMNS on the source
+// aggregate's own table.  Three source shapes have no such columns:
+// `persistedAs: eventLog` (no state table at all), `shape: document` (one
+// `(id, data, version)` triple, declared fields inside the jsonb blob), and a
+// TPC abstract base (no table of its own).  Every backend then emitted a
+// reference to something that does not exist — `schema.orders.total` (TS2339),
+// `_db.Orders` / `o.Total` (CS0117 / CS1061), `sum(e.total)` in JPQL,
+// `OrderRow.total` in SQLAlchemy, `record.total` in Ecto — with nothing said at
+// generate time.
+//
+// This was a `persistence: dapper` gate until now, on the premise that EF Core
+// translated the JSON itself.  It does not; Loom maps a document aggregate to
+// a hand-rolled `<Agg>Document` row type.  So the gate is universal, and it is
+// NOT a gate-SET: no backend emits this correctly, so there is no per-platform
+// membership to keep honest.
+//
+// It stays PRECISE about the document case: a document table really does have
+// an `id` column, so `select n = count()` over a document source emits and runs
+// on all five backends — and must keep doing so, since that is the row-count
+// tile `scaffoldDashboard` synthesises.  Only a reference to some OTHER member
+// is refused.  The condition is `columnlessProjectionSource`, which keys off the
+// same `queryProjectionArm` classification the .NET emitter switches on
+// (`ir/util/query-projection-arm.ts`), so the gate and the emission arm cannot
+// disagree about WHICH arm is being refused.
+// ---------------------------------------------------------------------------
+export function validateColumnlessProjectionSources(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const sd of sys.subdomains) {
+    for (const ctx of sd.contexts) {
+      for (const p of ctx.projections ?? []) {
+        if (!isQueryTimeProjection(p)) continue;
+        const reason = columnlessProjectionSource(p, ctx, sys);
+        if (!reason) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.projection-columnless-source",
+          message: diagMessage("loom.projection-columnless-source", {
+            name: p.name,
+            ctxName: ctx.name,
+            reason,
+          }),
+          source: `${ctx.name}/${p.name}`,
         });
       }
     }
@@ -583,11 +637,7 @@ export function validateCurrentUserNeedsAuthUi(sys: SystemIR, diags: LoomDiagnos
     if (d.auth?.ui || d.auth?.required) continue;
     for (const { ui } of mountedUis(sys, d)) {
       // Components are walked for the same reason charts and grids are — a
-      // read moved into one renders into the page all the same.  (Today a
-      // component's `currentUser` lowers to an UNRESOLVED ref, because
-      // `lowerComponent` threads `user: undefined` where `lowerPage` threads
-      // the system's user block; when that is threaded through, this arm
-      // starts biting with no edit here.)
+      // read moved into one renders into the page all the same.
       const hosts: { what: string; host: UiRenderHost }[] = [
         ...ui.pages.map((p) => ({ what: `page '${p.name}'`, host: p as UiRenderHost })),
         ...ui.components.map((c) => ({ what: `component '${c.name}'`, host: c as UiRenderHost })),
@@ -636,6 +686,10 @@ const SSE_REALTIME_FRONTENDS = new Set<string>([
   "svelte",
   "angular",
   "feliz",
+  // Flutter subscribes through `generator/flutter/realtime.ts` — the browser's
+  // own `EventSource` on the web, a line parser over a streamed `package:http`
+  // response natively, behind one conditional-import façade.
+  "flutter",
   "static",
 ]);
 // Frontends that realize realtime NATIVELY (Phoenix LiveView pushes over its
@@ -644,10 +698,12 @@ const NATIVE_REALTIME_FRONTENDS = new Set<string>(["elixir", "phoenixLiveView"])
 
 /** Honesty gate for `on <channel>.<Event>` live-event handlers (channels.md
  *  Part I).  A handler on a ui whose serving frontend can't consume realtime
- *  — a framework with no realtime path (e.g. `flutter`), or an SSE-consuming
- *  frontend pointed at a backend that doesn't serve the SSE wire (e.g. a react
- *  ui targeting the Phoenix/Elixir backend) — compiles clean today but emits
- *  nothing.  Warn so the silent drop is a reviewed decision, not a surprise.
+ *  — a framework with no realtime path, or an SSE-consuming frontend pointed
+ *  at a serving deployable that doesn't stream the SSE wire — compiles clean
+ *  today but emits nothing.  Warn so the silent drop is a reviewed decision,
+ *  not a surprise.  Neither arm names a shipped pairing any more (all six
+ *  frontends consume, all five backends serve); both stay as the seam the
+ *  next target gates on.
  *
  *  Capability-driven (the two frontend sets + `backendServesRealtime`) rather
  *  than hard-coding a frontend list, so a future frontend without the wire
@@ -682,7 +738,10 @@ export function validateUiRealtimeSupport(sys: SystemIR, diags: LoomDiagnostic[]
         });
         continue;
       }
-      // Unknown / non-consuming frontend (e.g. flutter) — no realtime path.
+      // Unknown / non-consuming frontend — no realtime path.  No SHIPPED
+      // frontend sits here any more (flutter was the last, and joined
+      // `SSE_REALTIME_FRONTENDS`); this is the seam a new one warns on until it
+      // grows realtime consumption.
       diags.push({
         severity: "warning",
         code: "loom.ui-realtime-unsupported",
@@ -2631,31 +2690,14 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
       // controller already used), so the feature EMITS here now and the blanket
       // refusal is gone.
       //
-      // What survives is the ONE thing raw SQL genuinely cannot reach: the two
-      // arms that AGGREGATE (`select total = count()` / `group by`) name
-      // COLUMNS on the source aggregate's table, and an aggregate whose fields
-      // are not columns — a `shape: document` jsonb blob, an event-sourced
-      // stream with no state table — has nothing for `sum(total)` to name.  EF
-      // Core hides that behind its own JSON translation; Dapper cannot.  The
-      // condition is computed by `dapperQueryProjectionGap`, which the emitter
-      // reads too, so the gate and the emission arm cannot drift.
-      for (const p of ctx.projections ?? []) {
-        if (!isQueryTimeProjection(p)) continue;
-        const gap = dapperQueryProjectionGap(p, ctx, sys);
-        if (gap) {
-          diags.push({
-            severity: "error",
-            message: diagMessage("loom.dapper-unsupported#feature", {
-              name: dep.name,
-              ctxName,
-              projection: p.name,
-              reason: gap,
-            }),
-            source: `${sys.name}/${dep.name}`,
-            code: "loom.dapper-unsupported",
-          });
-        }
-      }
+      // The narrowed refusal that replaced it — a direct-table arm over a
+      // COLUMN-LESS source — turned out not to be adapter-shaped at all: the
+      // premise "EF Core hides that behind its own JSON translation" is false
+      // (Loom maps a document aggregate to a hand-rolled `<Agg>Document` row
+      // type, so `o.Total` is CS1061 there too, and every other backend names
+      // the same missing column).  It now lives in
+      // `validateColumnlessProjectionSources` as a UNIVERSAL gate, so no arm
+      // of it is left here.
       // `retrieval` bundles are now supported on Dapper — `Run<Name>Async`
       // renders as parameterised SQL (where + sort + offset/limit paging); a
       // predicate outside the Dapper subset stubs (NotImplementedException),
@@ -2814,225 +2856,48 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
 }
 
 // ---------------------------------------------------------------------------
-// `persistence: mikroorm` capability gate (D-REALIZATION-AXES Phase 5d).
+// `persistence: mikroorm` capability gate (D-REALIZATION-AXES Phase 5d) —
+// REMOVED, because it came to reject nothing.
 //
-// The node/hono MikroORM adapter is the SECOND node persistence backend
-// (alongside the default `drizzle`), at full parity with drizzle on the
-// PERSISTENCE axis (M-T6.9, drained across 7 waves): every shape/inheritance/
-// containment/association/audit/provenance/managed-field/seed/ES intersection
-// emits.  Two distinct families of reject live here:
+// `validateMikroOrmSupport` lived here.  The node/hono MikroORM adapter is the
+// SECOND node persistence backend (alongside the default `drizzle`), and the
+// gate carried two families of reject while it caught up:
 //
-//  (a) SHAPE rejects (`reject`) — a genuinely-impossible mapping, drizzle
-//      included.  Only one survives M-T6.9: an abstract inheritance base that
-//      owns its own `contains` (the base has no repository and concretes do not
-//      inherit its parts, so its tables would have no reader/writer).
-//  (b) FEATURE rejects (M-T6.23) — GONE, all five.  Parity is persistence-only,
-//      but five NON-persistence features were once gated `&& !usingMikro` in the
-//      Hono emitter and emitted NOTHING: query-time projections, realtime SSE,
-//      the transactional outbox, timers (`scheduler.ts`) and broker channel
-//      drivers.  Each was first made an honest error here, then closed by its
-//      emitter — the gate was always the interim, never the answer
+//  (a) FEATURE rejects (M-T6.23) — five NON-persistence features once gated
+//      `&& !usingMikro` in the Hono emitter and emitting NOTHING: query-time
+//      projections, realtime SSE, the transactional outbox, timers
+//      (`scheduler.ts`) and broker channel drivers.  Each was first made an
+//      honest error here, then CLOSED by its emitter.  The gate was always the
+//      interim, never the answer
 //      (`docs/old/proposals/integrity-audit-2026-07-residue.md` R1 named the
-//      projection case; the other four were unrecorded).  Nothing about a
-//      non-persistence feature is gated on this adapter any more; if a new one
-//      is ever `!usingMikro`-gated, gate it HERE rather than dropping it
-//      silently, and delete the clause with the emitter that closes it.
+//      projection case; the other four were unrecorded).
+//  (b) SHAPE rejects — genuinely-impossible mappings.  Two survived longest and
+//      both are gone for OPPOSITE reasons.  The hierarchical (`deep`/`global`)
+//      tenancy scope turned out to be EXPRESSIBLE after all, through a `raw()`
+//      FilterQuery key.  The abstract-inheritance-base-with-`contains` shape
+//      turned out to be impossible EVERYWHERE — generated on drizzle / efcore /
+//      dapper / java / python / elixir it is silently dropped, emitted as a dead
+//      FK'd table with no reader or writer, or half-built into a runtime 500 —
+//      so it became a target-neutral AST rule instead
+//      (`loom.abstract-aggregate-contains`,
+//      `src/language/validators/inheritance.ts` Rule 3b).
 //
-// Persist-time audit stamping IS supported (node-persist-time-auditing): the
-// MikroORM `save()` injects the audit columns into `em.upsert(...)` from the
-// ambient request principal (`stampInsert`, db/audit-stamp.ts), keeping
-// createdAt/createdBy immutable on conflict via `onConflictExcludeFields`.
+// The `loom.mikroorm-unsupported` CODE is still live: `migration-checks.ts`
+// raises it (`#migrations`) for declared migration steps this adapter's
+// `orm.schema.updateSchema()` can never apply.  A future adapter-shaped
+// boundary can re-mint a clause under the same code — but it belongs wherever
+// the concern lives, and only after the two questions this gate's history keeps
+// asking: is the shape really inexpressible on THIS adapter (the tenancy one
+// was not), and is it really specific to it (the containment one was not)?
 //
-// Server-managed access (`managed` / `token` / `internal` / `secret`) is NO
-// LONGER gated either: the data-mapper stores such a field as an ordinary
-// column that round-trips through the shared save/hydrate seams (the access
-// modifier shapes only the API wire surface).  Provenanced fields stay gated.
+// What the adapter supports, for the record, since this comment is where people
+// looked it up: full parity with drizzle on the PERSISTENCE axis (M-T6.9,
+// drained across 7 waves) — every shape / inheritance / containment /
+// association / audit / provenance / managed-field / seed / event-sourcing
+// intersection emits; persist-time audit stamping injects the audit columns
+// into `em.upsert(...)` from the ambient principal; and server-managed access
+// (`managed` / `token` / `internal` / `secret`) stores as an ordinary column.
 // ---------------------------------------------------------------------------
-export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
-  const ctxByName = new Map<string, BoundedContextIR>();
-  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
-
-  for (const dep of sys.deployables) {
-    if (dep.persistence !== "mikroorm") continue;
-    const reject = (subject: string, reason: string): void => {
-      diags.push({
-        severity: "error",
-        message: diagMessage("loom.mikroorm-unsupported", { name: dep.name, subject, reason }),
-        source: `${sys.name}/${dep.name}`,
-        code: "loom.mikroorm-unsupported",
-      });
-    };
-    for (const ctxName of dep.contextNames) {
-      const ctx = ctxByName.get(ctxName);
-      if (!ctx) continue;
-      // --- Feature gates (M-T6.23) -----------------------------------------
-      // (1) Query-time projections: CLOSED by M-T6.23 slice 4 — the routes emit
-      // on this adapter.  The aggregation shapes (whole-table and grouped) push
-      // down through the mikro QueryBuilder with `raw()` SQL fragments and a
-      // `whereToMikroFilter` WHERE; the raw-table (`from <Workflow>` /
-      // `from <Projection>`) shape reads its Row entity the same way; and the
-      // repository-sourced shape was adapter-neutral already, since the mikro
-      // repository synthesises the same `repo.<projName>()` find.  A `where`
-      // outside the FilterQuery subset is refused by
-      // `validateFindPredicateAdapterSupport` (which now walks projection
-      // filters), so an aggregation can never silently drop its filter.
-      // (2) Realtime SSE: CLOSED by M-T6.23 slice 5, the last of the five —
-      // `http/realtime.ts` and the boot tee emit on this adapter, so a
-      // `delivery: broadcast` channel keeps its browser-observable wire and a
-      // frontend's EventSource has a route to subscribe to.  The
-      // consumer-dependent severity split that used to live here (error when a
-      // frontend targeted the backend, warning otherwise) goes with the gap it
-      // described: the module reads no `db`, so there is nothing left to gate.
-      // (3) Transactional outbox: CLOSED by M-T6.23 slice 1 — the adapter emits
-      // the `__loom_outbox` Row entity + `createOutboxDispatcher` /
-      // `startOutboxRelay` over the EntityManager, so a durable channel
-      // (`retention: log | work`) is at-least-once here exactly as on drizzle
-      // (dispatch-delivery-semantics.md).  Nothing to gate.
-      // Context `retrieval` query bundles ARE supported (DEBT-17): emitted as
-      // `run<Name>` methods, the MikroORM analogue of the drizzle `runMethod`.
-      // A retrieval whose `where` falls outside the MikroORM FilterQuery subset
-      // emits a runtime-throwing stub at codegen (same as a find predicate), so
-      // there's no validate-time gate here — mirrors the .NET Dapper v1 path.
-      // `seed` data IS supported: `emitMikroSeeds` threads the same dataset
-      // functions (domain `create` → `<Agg>Repository.save`) through the
-      // EntityManager, with raw INSERTs + the `__loom_seed` marker via
-      // `em.getConnection().execute`.  The mikro seed CLI inits the ORM +
-      // `updateSchema()` before running; the boot path runs it after schema
-      // update — so no gate here.
-      for (const agg of ctx.aggregates) {
-        const a = agg as EnrichedAggregateIR;
-        const where = `aggregate '${ctxName}.${agg.name}'`;
-        // (4) HIERARCHICAL tenancy scope IS supported now (the boundary is
-        // drained).  It was gated here because `whereToMikroFilter`'s FilterQuery
-        // subset has no prefix test AND `mikroContextFilters` CAUGHT the
-        // resulting throw, leaving the filter unapplied — which for a
-        // `deep`/`global` scope is not a degraded read but NO tenant predicate
-        // at all, i.e. every tenant's rows readable on every read.
-        //
-        // The FilterQuery *operator vocabulary* still cannot express the
-        // subtree test, but MikroORM's `raw()` fragment can: `authzFilterEntry`
-        // renders the descendant-or-self predicate as a raw SQL FilterQuery key
-        // (`starts_with(data_key, ?)` with the NULL-dataKey tenant floor, the
-        // anchored-prefix twin of drizzle's `strpos(...) = 1` and Dapper's
-        // `starts_with`), the boot-time `orgPath` resolver is registered on this
-        // adapter too, and the silent catch is gone — an unlowerable principal
-        // filter now crashes codegen instead of vanishing.  Pinned by
-        // `test/generator/typescript/mikroorm-deep-scope.test.ts`; the runtime
-        // agreement (subtree, delimiter trap, wildcard trap, NULL floor) by
-        // `test/e2e/tenancy-hierarchy-mikroorm.test.ts`.
-        //
-        // `writeScopeFilter` derived the same sentinel and was scanned here for
-        // the same reason; it lowers through the same arm, so it needs no gate
-        // either.
-        // Event sourcing IS supported on this adapter (appliers): the
-        // `<agg>_events` stream + fold reuse the persistence-agnostic
-        // domain/CQRS layer.  An event-sourced aggregate has no state table,
-        // so the `shape: ...` axis is moot for it — every saving shape is now
-        // supported (no per-shape reject remains), so the shape need not be
-        // resolved here.
-        // `shape: embedded` IS supported (wave 2): the root stays queryable
-        // columns and each containment folds into a jsonb column, (de)serialised
-        // through the shared `<part>ToDoc`/`<part>FromDoc` helpers (the MikroORM
-        // analogue of the drizzle embedded repository).  An `Id[]` reference
-        // collection FOLDS onto the root as one jsonb id-string array (no pivot
-        // table — `embeddedColumnsOf` + the embedded repo's hydrate/save fold),
-        // the embedded analogue of the relational pivot and the mirror of the
-        // drizzle `emitEmbeddedTable` ref-collection column.  `shape: document`
-        // IS supported (wave 3): the whole aggregate tree collapses to one `(id,
-        // data, version)` jsonb blob round-tripped through the shared doc
-        // (de)serialisers — no per-field / containment / pivot columns, so
-        // reference collections + parts ride inside the blob (unbounded).
-        // Aggregate inheritance IS supported (aggregate-inheritance.md): TPH
-        // (`sharedTable`) maps the hierarchy to one shared Row discriminated by
-        // `kind` — concrete repos read/write it scoped to their `kind`, a
-        // polymorphic `<Base>Repository` dispatches on it; TPC (`ownTable`)
-        // gives each concrete its own table with a delegating base reader.
-        // Both mirror the drizzle inheritance slice.
-        // `Id[]` reference-collection associations ARE supported on a state
-        // aggregate: each persists as a composite-PK pivot Row entity, bulk-
-        // loaded on read and full-list-replaced on save (the MikroORM analogue
-        // of the drizzle join table).  On an EVENT-SOURCED aggregate they need
-        // no pivot table at all — an ES aggregate has no state table (its truth
-        // is the `<ctx>_events` stream), so the reference collection folds
-        // IN-MEMORY from the stream via the `apply(...)` bodies (`_fromEvents`),
-        // exactly as on drizzle.  The relational pivot emitters never run for an
-        // ES aggregate (the entities loop skips it), so there is nothing to gate.
-        // Contained entity parts ARE supported (relational child tables): each
-        // part persists as a parent-scoped `<Part>Row` child table, bulk-loaded
-        // on read and diff-synced on save (the MikroORM analogue of the drizzle
-        // containment path).  NESTED parts (part-in-part) are supported — a
-        // nested part FKs to its DIRECT parent part's row (`directParentName`,
-        // shared with migrations-builder), recursively loaded (deepest-first
-        // `<nc>ByParent` maps) / saved (tree-position-stamped FK) / cascade-
-        // deleted (no DB FK, so descendants cleared explicitly).  A COLLECTION
-        // field on a part (array of scalar / enum / VO / id) folds into one jsonb
-        // column (shared serialise/deserialise), the mirror of the Dapper
-        // part-collection path.  An EVENT-SOURCED aggregate's parts fold
-        // IN-MEMORY from the event stream (the `apply(...)` bodies rebuild the
-        // containment tree through `_fromEvents`) — an ES aggregate has no state
-        // table, so the relational child-table emitters never run for it; the
-        // parts ride in the folded aggregate exactly as on the .NET Dapper ES
-        // path, so there is nothing to gate.  A CONCRETE aggregate-inheritance
-        // participant (`extends` a base) composes the inheritance repo with the
-        // containment hydrate pass: its part child tables FK the row that owns
-        // the concrete (the shared TPH row / the concrete's own TPC table), so
-        // the containment tree round-trips like any state aggregate's parts (the
-        // relational repo already emits both).  Only an ABSTRACT inheritance base
-        // with its OWN parts stays gated — an abstract base owns no repository
-        // (validator-forbidden) and concretes do not inherit its `contains`, so
-        // its part tables would have no reader/writer: genuinely unmappable.
-        if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0) {
-          if (a.isAbstract)
-            reject(
-              where,
-              "contains nested entity parts on an abstract aggregate-inheritance base " +
-                "(the base owns no repository, and concretes do not inherit its parts)",
-            );
-        }
-        // `filter` capability predicates ARE supported: the repository ANDs each
-        // non-principal predicate (a MikroORM FilterQuery) into every root read
-        // via `$and`, honoring a read's `ignoring` bypass (the FilterQuery
-        // analogue of drizzle's per-read predicate).  A predicate outside the
-        // FilterQuery subset is caught by `validateFindPredicateAdapterSupport`
-        // (which already iterates contextFilters), and principal-referencing
-        // filters are rejected on Hono by `validatePrincipalContextFilterSupport`
-        // — so only closed, lowerable predicates reach codegen.
-        // Server-managed access (`managed` / `token` / `internal` / `secret`)
-        // is NO LONGER gated: like drizzle, the MikroORM data-mapper stores such
-        // a field as an ordinary column that round-trips through the shared
-        // save-projection / hydrate seams (the access modifier only shapes the
-        // API wire surface, not persistence).  Audit-stamp targets are filled by
-        // the persist-time stamp (`stampInsert` in `em.upsert`) and the default-
-        // on `version` token by the guarded version-CAS `nativeUpdate` — both
-        // already supported.
-        // Provenanced fields ARE supported (wave 3): each `<field>_provenance`
-        // co-located lineage jsonb column rides the mikro Row + save projection
-        // (the shared `provColumnEntries`/`hydrateRootExpr` seams), and the
-        // per-write history flush runs on the EntityManager — see below.
-        //
-        // Per-operation / lifecycle `audited` writes ARE supported (wave 3): the
-        // history row that the SHARED (drizzle-shaped) routes-builder writes in
-        // the save transaction is now ported to the EntityManager API behind a
-        // `usingMikro` branch — `db.transactional(...em.insert(AuditRecordRow /
-        // ProvenanceRecordRow, {...}))` over the mikro history-Row entities, with
-        // the save joining the same transaction via the repos' fork
-        // `keepTransactionContext`.  Persist-time audit STAMPING (`auditable` /
-        // `with audit` → `stampInsert` in `em.upsert`) stays supported too.
-      }
-    }
-    // (4) Timers: CLOSED by M-T6.23 slice 3 — `scheduler.ts` emits on this
-    // adapter (pg-boss for `cron:`, setInterval + a transaction-scoped advisory
-    // lock for `every:`), with the `loom_timer_runs` watermark and the lock query
-    // running through the EntityManager (`TimerStore` in scheduler-builder.ts).
-    // Nothing to gate.
-    // (5) Broker-bound channels: CLOSED by M-T6.23 slice 2 — `channelBindings` is
-    // no longer emptied for a mikroorm deployable, so `http/channels.ts` (the
-    // driver, producer tee and consumer loop) and the boot-time transport /
-    // consumer wiring emit here exactly as on drizzle.  The module reads no
-    // `db`, and the outbox relay it publishes drained rows through landed in
-    // slice 1 — nothing left to gate.
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Per-persistence-adapter find-predicate capability gate (Bucket V / P0).

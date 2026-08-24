@@ -30,13 +30,7 @@
 // limitation, matching the workflow op-call's `{:ok, _} <-` discard.
 // ---------------------------------------------------------------------------
 
-import {
-  PAGED_DEFAULT_PAGE,
-  PAGED_DEFAULT_PAGE_SIZE,
-  PAGED_MAX_PAGE,
-  PAGED_MAX_PAGE_SIZE,
-  pagedReturn,
-} from "../../../ir/stdlib/generics.js";
+import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import type {
   CommandHandlerIR,
   EnrichedBoundedContextIR,
@@ -53,6 +47,12 @@ import type { ApiRoute } from "../api-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { renderControllerSerialize } from "./controller-serialize.js";
 import { contextsHaveWireDenials, denialOverrides, respondErrorTail } from "./denial.js";
+import {
+  PAGE_CALL_ARGS,
+  PAGE_PARAM_HELPER,
+  PAGE_WITH_CLAUSES,
+  pagingElseArm,
+} from "./page-param.js";
 import {
   type BodyLine,
   collectParamRefs,
@@ -360,12 +360,22 @@ function renderHandlerModule(
   const renderCtx: RenderCtx = {
     thisName: "record",
     contextModule: contextModuleFq,
-    foundation: "vanilla",
     resourceModules,
     recordParams: records,
   };
 
-  const lines = lowerStatements(h.statements, contextModuleFq, renderCtx, ctx);
+  // The `return <expr>` is rendered into the with-chain's do-branch by
+  // `assembleHandlerBody`, so its refs are downstream READS of the body's
+  // bindings — pass it as the trailing read scope.  Without it a `let` whose
+  // only reader is the return got `_`-prefixed by the unused-bind rule
+  // (M-T6.21) and the do-branch referenced an undefined variable, a hard
+  // `** (CompileError)` rather than the warning the rule exists to silence.
+  const lines = lowerStatements(h.statements, contextModuleFq, renderCtx, ctx, {
+    trailing: h.returnValue ? [h.returnValue] : [],
+    // `assembleHandlerBody` closes with `{:ok, <return expr>}`, never with the
+    // last bound name — so no statement's bind is the result slot here.
+    ownResult: true,
+  });
   const resultExpr = h.returnValue ? renderExpr(h.returnValue, renderCtx) : ":ok";
   const body = assembleHandlerBody(lines, resultExpr);
   // Emit the `Context` alias iff the body actually references the context
@@ -526,17 +536,20 @@ export function emitExplicitRoutesController(
       );
       const callArgs = [
         ...critArgs,
-        `page_param(params, "page", ${PAGED_DEFAULT_PAGE}, ${PAGED_MAX_PAGE})`,
-        `page_param(params, "pageSize", ${PAGED_DEFAULT_PAGE_SIZE}, ${PAGED_MAX_PAGE_SIZE})`,
+        // Bound by the `with` clauses below (page-param.ts) — an out-of-range
+        // window 422s here instead of being clamped past the published bounds.
+        ...PAGE_CALL_ARGS,
         `Map.get(params, "sort", "id")`,
         `Map.get(params, "dir", "asc")`,
       ];
       actions.push(`  def ${action}(conn, params) do
-    with {:ok, result} <-
+    with ${PAGE_WITH_CLAUSES.join(",\n         ")},
+         {:ok, result} <-
            ${ctxFn}(
              ${callArgs.join(",\n             ")}
            ) do
       json(conn, %{result | items: Enum.map(result.items, &serialize/1)})
+${pagingElseArm("ProblemDetails", "    ")}
     end
   end`);
       apiRoutes.push({
@@ -619,22 +632,7 @@ ${respondErrorTail("respond", "  ", contexts[0] ? denialOverrides(contexts[0]) :
 ${serializeBlock.clauses}${
   hasPaged
     ? `
-
-  # 1-based page coercion for a paged-run queryHandler route (Phoenix delivers
-  # query params as strings; a missing/blank/non-integer value falls back to the
-  # shared default).
-  defp page_param(params, key, default, limit) do
-    case params[key] do
-      v when is_integer(v) and v >= 1 -> min(v, limit)
-      v when is_binary(v) ->
-        case Integer.parse(v) do
-          {n, _} when n >= 1 -> min(n, limit)
-          _ -> default
-        end
-
-      _ -> default
-    end
-  end`
+${PAGE_PARAM_HELPER}`
     : ""
 }${serializeBlock.helpers}
 end

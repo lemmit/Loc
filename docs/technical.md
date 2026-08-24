@@ -649,7 +649,7 @@ Each platform has the same module shape (in `src/generator/<platform>/`):
 | `index.ts` | Orchestrator — `generate<Platform>ForContexts(contexts, ...) → Map<path, content>`. |
 | `emit/*.ts` (TS/.NET) or `*-emit.ts` (Phoenix) | Procedural emitters (`render<Thing>(...)`) for regular-shaped fragments — id classes, value-object classes, events, common errors, etc.  Plain TypeScript functions building strings via `lines(...)` from `src/util/code-builder.ts`. |
 | `*-builder.ts` | Procedural builders for content with too much per-aggregate variation to keep small (Hono routes, Hono repositories, React pages, React page-objects). |
-| `render-expr.ts` / `render-stmt.ts` | `ExprIR → string` / `StmtIR → string` renderers (only on platforms that execute domain logic — TS, .NET, Phoenix LiveView, Python, and Java, not the frontends).  `render-expr.ts` is a leaf-only `ExprTarget` table; the recursive dispatch lives in the shared `_expr/` subdir (below).  `render-stmt.ts` stays per-backend. |
+| `render-expr.ts` / `render-stmt.ts` | `ExprIR → string` / `StmtIR → string` renderers (only on platforms that execute domain logic — TS, .NET, Phoenix LiveView, Python, and Java, not the frontends).  `render-expr.ts` is a leaf-only `ExprTarget` table; the recursive dispatch lives in the shared `_expr/` subdir (below).  `render-stmt.ts` is a leaf-only `StmtTarget` table the same way — the `StmtIR.kind` dispatch lives in `_stmt/target.ts`. |
 
 ### Shared generator subdirs
 
@@ -1191,8 +1191,10 @@ The shape:
 3. For domain-logic-running backends, implement an `ExprTarget` leaf
    table (the shared `renderExprWith` in `_expr/target.ts` owns the
    dispatch + recursion) wrapped by a thin `renderXxxExpr(e: ExprIR):
-   string`, plus `render-stmt.ts`
-   (`renderXxxStatements(stmts: StmtIR[]): string`), honouring
+   string`, plus a `StmtTarget` leaf table in `render-stmt.ts` (the
+   shared `renderStmtsWith` / `renderStmtChunksWith` in
+   `_stmt/target.ts` own the `StmtIR.kind` dispatch) wrapped by
+   `renderXxxStatements(stmts: StmtIR[]): string`, honouring
    `refKind` / `callKind` / `isCollectionOp` tags.  React skips
    these — the frontend doesn't run domain logic.
 4. Add procedural emitters in `emit/*.ts` (or `*-emit.ts` on Phoenix)

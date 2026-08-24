@@ -84,6 +84,11 @@ export function renderProgram(
      *  tenant (off the ambient RequestContext, never a client value) and joins
      *  its room via `hub.Subscribe(tenant)`.  Off ⇒ the broadcast `Subscribe()`. */
     realtimeRoomScoped?: boolean;
+    /** The `User` property the room key is read from — the bound `tenancy by
+     *  user.<claim>`, Pascal-cased.  Read only under `realtimeRoomScoped`; the
+     *  ROW column `TenantId` is NOT a valid default here (the two names differ
+     *  whenever the claim is not called `tenantId`). */
+    realtimeTenantClaim?: string;
     /** Persistence selection (D-REALIZATION-AXES `persistence:`): when true,
      *  the deployable uses Dapper — Program.cs registers an `NpgsqlDataSource`
      *  (not a `DbContext`) and applies the self-contained `DbSchema` at
@@ -178,8 +183,9 @@ export function renderProgram(
   // principal's tenant room (off the ambient RequestContext — never a
   // client-supplied value; an unauthenticated connection joins no room).  The
   // untenanted wire keeps the broadcast `Subscribe()`.
+  const realtimeTenantClaim = options?.realtimeTenantClaim ?? "";
   const realtimeSubscribe = realtimeRoomScoped
-    ? `var tenant = ${ns}.Domain.Common.RequestContext.Current?.CurrentUser is { } __rtUser ? __rtUser.TenantId.ToString() : null;
+    ? `var tenant = ${ns}.Domain.Common.RequestContext.Current?.CurrentUser is { } __rtUser ? __rtUser.${realtimeTenantClaim}.ToString() : null;
     var (id, reader) = hub.Subscribe(tenant);`
     : "var (id, reader) = hub.Subscribe();";
   // The SSE endpoint — one long-lived text/event-stream per browser connection,
@@ -232,10 +238,18 @@ app.MapPost("/files", async (IFormFile file) =>
     await ${fileUpload.putBytes}(key, bytes, contentType);
     return Results.Json(new { url = "/files/" + key, key, contentType, size = bytes.Length }, statusCode: 201);
 }).DisableAntiforgery();
-app.MapGet("/files/{key}", async (string key) =>
+app.MapGet("/files/{key}", async (string key, HttpContext http, ILogger<${ns}.Api.DomainExceptionFilter> log) =>
 {
     var obj = await ${fileUpload.getBytes}(key);
-    return obj is null ? Results.NotFound() : Results.File(obj.Value.Bytes, obj.Value.ContentType);
+    // M-T6.39 — an absent object answers the app's ONE 404 envelope.  A minimal
+    // API is outside MVC, so a throw here would never reach
+    // DomainExceptionFilter; NotFoundProblem is that filter's own responder,
+    // called directly, so the body, the status (incl. the httpStatus NotFound
+    // override), the x-request-id header, the catalog event and the fault
+    // counter are all the ones every other absent read produces.
+    return obj is null
+        ? ${ns}.Api.DomainExceptionFilter.NotFoundProblem(http, log, $"File {key} not found")
+        : Results.File(obj.Value.Bytes, obj.Value.ContentType);
 });
 `
     : "";

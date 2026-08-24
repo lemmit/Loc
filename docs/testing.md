@@ -162,7 +162,7 @@ fails the fast suite.
 | `schema-load.yml` | `npm run test:schema-load` (or point `LOOM_MIGRATION_PG_URL` at a running pg) | docker |
 | `schemathesis.yml` | `npm run test:schemathesis` (needs `uv tool install schemathesis` + `cd test/behavioral && npm ci`) | — |
 | `migration-evolution-e2e.yml` | `npm run test:migration-evolution{,-python,-java,-dotnet,-elixir}` | docker |
-| `tenancy-e2e.yml` | `npm run test:tenancy{,-python,-java,-dotnet,-elixir}` + `test:tenancy-hierarchy{…}` (or `LOOM_TENANCY_PG_URL`) | docker |
+| `tenancy-e2e.yml` | `npm run test:tenancy{,-python,-java,-dotnet,-elixir}` + `test:tenancy-hierarchy{,-python,-java,-dotnet,-elixir,-mikroorm}` + `test:tenancy-subtree-explain` (or `LOOM_TENANCY_PG_URL`) | docker |
 | `hono-obs-e2e.yml` | `npm run test:obs` | — |
 | `dotnet-obs-e2e.yml` | `npm run test:obs-dotnet` | docker |
 | `java-obs-e2e.yml` | `npm run test:obs-java` (or `LOOM_OBS_PG_URL`) | docker |

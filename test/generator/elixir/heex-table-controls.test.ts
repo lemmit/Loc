@@ -33,8 +33,10 @@ system Shop {
   }
   api ShopApi from M
   ui ShopUi with scaffold(subdomains: [M]) { }
+  storage loomDb { type: postgres }
+  resource cState { for: C, kind: state, use: loomDb }
   deployable phoenixApp {
-    platform: elixir, contexts: [C], serves: ShopApi,
+    platform: elixir, contexts: [C], dataSources: [cState], serves: ShopApi,
     ui: ShopUi, port: 4000
   }
 }
@@ -63,8 +65,10 @@ system Shop {
       )
     }
   }
+  storage loomDb { type: postgres }
+  resource cState { for: C, kind: state, use: loomDb }
   deployable phoenixApp {
-    platform: elixir, contexts: [C], serves: ShopApi,
+    platform: elixir, contexts: [C], dataSources: [cState], serves: ShopApi,
     ui: ShopUi, port: 4000
   }
 }

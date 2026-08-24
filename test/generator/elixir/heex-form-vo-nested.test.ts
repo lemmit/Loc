@@ -49,8 +49,10 @@ function phoenixSystem(uiOrderBody: string, extras = ""): string {
         body: ${uiOrderBody}
       }
     }
+    storage loomDb { type: postgres }
+    resource cState { for: C, kind: state, use: loomDb }
     deployable phoenixApp {
-      platform: elixir, contexts: [C], serves: DemoApi,
+      platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
       ui: DemoUi, port: 4000
     }
   }
@@ -110,8 +112,10 @@ describe("HEEx form — value-object field renders as <.inputs_for> nested form"
         ui DemoUi {
           page NewProduct { route: "/products/new" body: CreateForm { of: Product } }
         }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
         deployable phoenixApp {
-          platform: elixir, contexts: [C], serves: DemoApi,
+          platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }
@@ -140,8 +144,10 @@ describe("HEEx form — value-object field renders as <.inputs_for> nested form"
         ui DemoUi {
           page NewProduct { route: "/products/new" body: CreateForm { of: Product } }
         }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
         deployable phoenixApp {
-          platform: elixir, contexts: [C], serves: DemoApi,
+          platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }
@@ -180,8 +186,10 @@ describe("HEEx form — value-object field renders as <.inputs_for> nested form"
         }
         api DemoApi from M
         ui DemoUi with scaffold(subdomains: [M]) {}
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
         deployable phoenixApp {
-          platform: elixir, contexts: [C], serves: DemoApi,
+          platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }

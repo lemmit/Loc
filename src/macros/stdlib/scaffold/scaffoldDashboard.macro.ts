@@ -14,6 +14,7 @@ import {
   ALIAS,
   dashboardProjectionName,
   dashboardSeriesName,
+  hasDashboardTable,
   ROW_COUNT,
   SERIES_COUNT,
   SERIES_DAY,
@@ -67,9 +68,14 @@ export default defineMacro({
     for (const decl of ctx.members) {
       if (!isAggregate(decl)) continue;
       const agg = decl as Aggregate;
-      // An abstract base owns no table (aggregate-inheritance.md), so there is
-      // nothing to aggregate over — its concretes carry their own projections.
-      if (agg.isAbstract) continue;
+      // No queryable state table — an abstract base (aggregate-inheritance.md:
+      // its concretes carry their own projections) or an event-sourced stream —
+      // means nothing to aggregate over: every tile here is a direct-table
+      // aggregation, so the lot would be refused by
+      // `loom.projection-columnless-source`.  Shared with the ui half
+      // (`dashboardFieldsFor`) so a card can never bind a projection this macro
+      // skipped.
+      if (!hasDashboardTable(agg)) continue;
       const projName = dashboardProjectionName(agg.name);
       // Skip when the context already declares that name: a hand-written
       // projection wins over the scaffold, and re-emitting would be a
@@ -85,6 +91,9 @@ export default defineMacro({
         // unrecognised and the projection would look like a GROUP BY.
         { field: ROW_COUNT, expr: callExpr("count", []) },
       ];
+      // `summableFields` is empty for a `shape: document` aggregate — its
+      // declared fields live inside the jsonb blob, not as columns — so a
+      // document source keeps the row-count tile and nothing else.
       for (const f of summableFields(agg)) {
         members.push(field(`${f.name}Sum`, primType(f.primitive)));
         selects.push({

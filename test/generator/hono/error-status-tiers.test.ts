@@ -38,6 +38,7 @@ system S {
     }
   }
   api SalesApi from M
+  user { id: string  role: string }
   storage primary { type: postgres }
   resource salesState { for: Sales, kind: state, use: primary }
   deployable api {
@@ -46,6 +47,7 @@ system S {
     dataSources: [salesState]
     serves: SalesApi
     port: 8080
+    auth: required
   }
 }
 `;

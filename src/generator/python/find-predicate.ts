@@ -9,6 +9,7 @@ import {
 import { tableOwnerName } from "../../ir/util/inheritance.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
+  DATA_KEY_LIKE_ESCAPE,
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
   deepScopeTenantClaim,
@@ -20,6 +21,7 @@ import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { snake } from "../../util/naming.js";
 import type { DurationUnit } from "../../util/temporal.js";
 import { desugarAuthzFilterInApp } from "../_expr/authz-filter-inapp.js";
+import { pySubtreeLikePattern } from "../_expr/subtree-like.js";
 import { joinRowClassName, rowClassName } from "./py-columns.js";
 import { PY_INTRINSIC_RENDERERS, renderPyExpr } from "./render-expr.js";
 
@@ -214,9 +216,18 @@ function lower(
           ops.add("or_");
           ops.add("and_");
           ops.add("func");
+          // SARGABLE PREFILTER (M-T3.17): `func.strpos(col, …) == 1` is a
+          // function of the column, so the planner cannot use the
+          // `data_key text_pattern_ops` index and every deep/global read
+          // seq-scans.  `Column.like(pattern, escape="!")` emits a real
+          // `LIKE … ESCAPE '!'` whose fixed prefix becomes an index range; the
+          // `strpos` anchored test stays as the RECHECK, so an escaping slip
+          // (which can only WIDEN a LIKE) still cannot leak a foreign subtree.
+          const needle = `${org} + ${JSON.stringify(DATA_KEY_PATH_DELIMITER)}`;
+          const prefilter = `${col}.like(${pySubtreeLikePattern(org)}, escape=${JSON.stringify(DATA_KEY_LIKE_ESCAPE)})`;
           return (
             `or_(and_(${col}.isnot(None), or_(${col} == ${org}, ` +
-            `(func.strpos(${col}, ${org} + ${JSON.stringify(DATA_KEY_PATH_DELIMITER)}) == 1))), ` +
+            `and_(${prefilter}, func.strpos(${col}, ${needle}) == 1))), ` +
             `and_(${col}.is_(None), ${tenantCol} == ${tenant}))`
           );
         }

@@ -28,8 +28,10 @@ system Shop {
       body: Stack { Heading { "Order" }, DestroyForm(of: Order) }
     }
   }
+  storage loomDb { type: postgres }
+  resource salesState { for: Sales, kind: state, use: loomDb }
   deployable phoenixApp {
-    platform: elixir, contexts: [Sales], serves: ShopApi,
+    platform: elixir, contexts: [Sales], dataSources: [salesState], serves: ShopApi,
     ui: ShopUi, port: 4000
   }
 }

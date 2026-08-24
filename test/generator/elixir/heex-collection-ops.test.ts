@@ -31,8 +31,10 @@ const phoenixSystem = (uiBody: string): string => `
     ui DemoUi {
       page Landing { route: "/" body: ${uiBody} }
     }
+    storage loomDb { type: postgres }
+    resource cState { for: C, kind: state, use: loomDb }
     deployable phoenixApp {
-      platform: elixir, contexts: [C], serves: DemoApi, ui: DemoUi, port: 4000
+      platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi, ui: DemoUi, port: 4000
     }
   }
 `;

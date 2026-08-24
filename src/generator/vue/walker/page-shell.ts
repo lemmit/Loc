@@ -934,6 +934,12 @@ export function renderVueComponentFile(
   body: ExprIR,
   pack: LoadedPack,
   userComponents: ReadonlyMap<string, readonly ParamIR[]>,
+  /** UI api parameters — the SAME list the page shell threads.  A component
+   *  body reads (`QueryView { of: Sales.Order.all }`) exactly as a page body
+   *  does, so the handle (`Sales`) has to resolve here too; handed an empty
+   *  list the walk emitted `<template v-if="/* unresolved: Sales *​/ undefined
+   *  .Order.all.isLoading">` — uncompilable under `vue-tsc`. */
+  apiParams: ReadonlyArray<UiApiParamIR> = [],
   aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
   pageRoutes: ReadonlyMap<string, string> = new Map(),
@@ -971,7 +977,7 @@ export function renderVueComponentFile(
     paramNames,
     stateNames,
     userComponents,
-    [],
+    apiParams,
     aggregatesByName,
     bcByAggregate,
     new Map(),
@@ -1101,6 +1107,27 @@ export function renderVueComponentFile(
     const names = apiImports.get(from) ?? new Set<string>();
     names.add(m.hookName);
     apiImports.set(from, names);
+  }
+  // Api-read hoists — the component twin of the page shell's `usedApiHooks`
+  // loop.  A read in a component body (`QueryView { of: Sales.Order.all }`)
+  // records the same `ApiHookUse`, so it gets the same `reactive(use…())`
+  // declaration and the same `../api/<agg>` import; `importFrom` is already
+  // recorded one hop from `src/`, which is exactly where a component file
+  // sits (no `adjustDepth` needed).  Args flow through `rewriteScript` below
+  // with the mutation hoists, so a read parameterised by a prop reads
+  // `props.<name>`.
+  for (const use of result.usedApiHooks.values()) {
+    if (seenVars.has(use.varName)) continue;
+    seenVars.add(use.varName);
+    const args = (use.argsRendered ?? []).join(", ");
+    // Same reactive-query rule as the page shell: a parameterised `find`
+    // takes a getter so vue-query re-runs when the bound input changes.
+    const callArg = use.reactiveQuery && args !== "" ? `() => (${args})` : args;
+    hookLines.push(`const ${use.varName} = reactive(${use.hookName}(${callArg}));`);
+    vueImports.add("reactive");
+    const names = apiImports.get(use.importFrom) ?? new Set<string>();
+    names.add(use.hookName);
+    apiImports.set(use.importFrom, names);
   }
   const rewrittenHooks = hookLines.map(rewriteScript);
 

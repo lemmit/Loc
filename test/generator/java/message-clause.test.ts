@@ -18,7 +18,7 @@ system S {
         name: string
         invariant name.length >= 2 && name.length <= 120 message "Name must be 2-120 characters"
         invariant sku.length > 0
-        create(n: string, s: string) { name := n  sku := s }
+        create(name: string, sku: string) { }
       }
       repository Products for Product { }
     }

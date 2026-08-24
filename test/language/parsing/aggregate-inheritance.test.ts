@@ -138,6 +138,54 @@ describe("aggregate inheritance — validator (I1)", () => {
     expect(codes(errors)).toContain("loom.abstract-aggregate-behavior");
   });
 
+  // The sibling of the rule above, one step further: an abstract base declares
+  // no `contains` either.  A containment needs an owner that can be READ and
+  // WRITTEN, and the base has neither — it owns no repository (the next case)
+  // and its concretes do not inherit its parts, so the part's child table would
+  // have no reader and no writer.
+  //
+  // This was a `persistence: mikroorm`-ONLY reject (`loom.mikroorm-unsupported`)
+  // until the shape was generated on every other target and the output read.
+  // The reasoning held everywhere; only the failure mode differed, and each was
+  // worse than a diagnostic: silently dropped on drizzle / efcore / python /
+  // java (with `.loom/wire-spec.json` still declaring the field REQUIRED on the
+  // base), a real `addresses` table with a FK and NO reader or writer on dapper,
+  // and on elixir a full Ecto schema + `has_many` + a `PartyController` whose
+  // `serialize/1` runs `Enum.map(record.addresses || [], …)` over an unpreloaded
+  // association whose table the migration never creates — a 500.
+  it("rejects `contains` on an abstract base (loom.abstract-aggregate-contains)", async () => {
+    const { errors } = await parse(`
+      context T {
+        abstract aggregate Party inheritanceUsing: sharedTable {
+          name: string
+          contains addresses: Address[]
+          entity Address { street: string }
+        }
+        aggregate Customer extends Party { creditLimit: decimal }
+      }
+    `);
+    expect(codes(errors)).toContain("loom.abstract-aggregate-contains");
+  });
+
+  it("allows the SAME `contains` on the concrete subtype", async () => {
+    // The way out the message names, and the shape every backend actually
+    // supports (its child tables FK the shared TPH row / the concrete's own TPC
+    // table) — covered by `dapper-tph-parts.ddd` and
+    // `mikroorm-inheritance-parts.ddd`.  Pinned so the new rule cannot widen
+    // into the supported case.
+    const { errors } = await parse(`
+      context T {
+        abstract aggregate Party inheritanceUsing: sharedTable { name: string }
+        aggregate Customer extends Party {
+          creditLimit: decimal
+          contains addresses: Address[]
+          entity Address { street: string }
+        }
+      }
+    `);
+    expect(codes(errors)).not.toContain("loom.abstract-aggregate-contains");
+  });
+
   it("rejects a repository for an abstract base (loom.abstract-repository)", async () => {
     const { errors } = await parse(`
       context T {

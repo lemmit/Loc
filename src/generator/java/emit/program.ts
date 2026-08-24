@@ -16,6 +16,7 @@
 // ---------------------------------------------------------------------------
 
 import { lines } from "../../../util/code-builder.js";
+import { javaLogEvent } from "../../_obs/render-java.js";
 
 /** Spring Boot release the generated projects build against.  Bumping it
  *  is a single-constant change validated by `LOOM_JAVA_BUILD=1`. */
@@ -307,7 +308,7 @@ export function renderApplication(basePkg: string): string {
     `@SpringBootApplication`,
     `public class Application {`,
     `    public static void main(String[] args) {`,
-    `        CatalogLog.event("server_starting", "info");`,
+    `        CatalogLog.event(${javaLogEvent("serverStarting")});`,
     `        SpringApplication.run(Application.class, args);`,
     `    }`,
     `}`,
@@ -422,6 +423,7 @@ export function renderFilesController(
     `import org.springframework.web.bind.annotation.RequestParam;`,
     `import org.springframework.web.bind.annotation.RestController;`,
     `import org.springframework.web.multipart.MultipartFile;`,
+    `import ${basePkg}.domain.common.AggregateNotFoundException;`,
     `import ${basePkg}.domain.common.FileRef;`,
     `import ${basePkg}.resources.${resourceClass};`,
     ``,
@@ -440,7 +442,12 @@ export function renderFilesController(
     `    public ResponseEntity<byte[]> download(@PathVariable String key) {`,
     `        var obj = ${resourceClass}.${resourceName}GetBytes(key);`,
     `        if (obj == null) {`,
-    `            return ResponseEntity.notFound().build();`,
+    // M-T6.39 — throw the app's ONE 404 carrier instead of the framework's
+    // bodiless `notFound()`.  This is an ordinary `@RestController`, so
+    // `ApiExceptionAdvice.onNotFound` (a global `@RestControllerAdvice`) renders
+    // it as the same RFC 7807 envelope every other absent read answers with —
+    // including the `httpStatus NotFound -> <Code>` override.
+    `            throw new AggregateNotFoundException("File " + key + " not found");`,
     `        }`,
     `        return ResponseEntity.ok().contentType(MediaType.parseMediaType(obj.contentType())).body(obj.bytes());`,
     `    }`,

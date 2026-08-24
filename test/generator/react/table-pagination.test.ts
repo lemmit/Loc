@@ -31,7 +31,9 @@ async function genPage(body: string, state = `state { pageNum: int = 1 }`) {
           body: ${body}
         }
       }
-      deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+      storage loomDb { type: postgres }
+      resource ordersState { for: Orders, kind: state, use: loomDb }
+      deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
       deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
     }
   `);
@@ -53,7 +55,12 @@ describe("Table client-side pagination (React)", () => {
     expect(content).toContain("onClick={() => setPageNum(pageNum - 1)}");
     expect(content).toContain("onClick={() => setPageNum(pageNum + 1)}");
     // "Page N of M" label + last-page disable off the total row count.
-    expect(content).toContain("Page {pageNum} of {Math.max(1, Math.ceil(");
+    // The counter is ONE ICU chrome message (`chrome.pageOf`) rather than a
+    // hand-assembled sentence — this fixture now carries translatable text (its
+    // `Column` headers), so the i18n-on spelling is what it emits.
+    expect(content).toContain(
+      `t("chrome.pageOf", "Page {page} of {pages}", { page: pageNum, pages: Math.max(1, Math.ceil(`,
+    );
     expect(content).toContain(
       "disabled={pageNum >= Math.max(1, Math.ceil(((customerRecent.data) ?? []).length / 25))}",
     );

@@ -19,7 +19,7 @@ import {
 } from "../../../ir/validate/invariant-classify.js";
 import { lines } from "../../../util/code-builder.js";
 import { messageCode } from "../../../util/message-code.js";
-import { renderPyExpr } from "../render-expr.js";
+import { renderPyExpr, renderPyNegatedGuard } from "../render-expr.js";
 
 /** Map of `field → Field(...)` constraint string for every single-field,
  *  message-less invariant over one of `available`.  Multiple constraints
@@ -130,9 +130,13 @@ export function createModelValidator(
   if (refines.length === 0) return null;
   const checks = refines.map((inv) => {
     const pred = renderPyExpr(inv.expr, { thisName: "self", wireField: true });
-    const ok = inv.guard
-      ? `not (${renderPyExpr(inv.guard, { thisName: "self", wireField: true })}) or (${pred})`
-      : pred;
+    // The FAILING condition.  A guarded rule keeps the `not (<guard-neg> or
+    // <pred>)` shape; an unguarded one negates the predicate directly through
+    // `renderPyNegatedGuard`, so a `.contains(...)` rule emits `x not in y`
+    // rather than the ruff-E713 `not (x in y)`.
+    const fails = inv.guard
+      ? `not (${renderPyNegatedGuard(inv.guard, { thisName: "self", wireField: true })} or (${pred}))`
+      : renderPyNegatedGuard(inv.expr, { thisName: "self", wireField: true });
     // A messaged rule raises PydanticCustomError so the wire error carries a
     // stable content-hash `type` (surfaced as `errors[].code`, the i18n key) —
     // and cleanly drops the "Value error, " prefix a bare ValueError adds. A
@@ -158,7 +162,7 @@ export function createModelValidator(
         ? `raise ValidationError.from_exception_data(\n                ${JSON.stringify(cls)},\n                [\n                    InitErrorDetails(\n                        type=PydanticCustomError(${JSON.stringify(messageCode(inv.message.text))}, ${JSON.stringify(inv.message.text)}),\n                        loc=(${JSON.stringify(path)},),\n                        input=${input},\n                    )\n                ],\n            )`
         : `raise PydanticCustomError(${JSON.stringify(messageCode(inv.message.text))}, ${JSON.stringify(inv.message.text)})`
       : `raise ValueError(${JSON.stringify(`Invariant violated: ${inv.source}`)})`;
-    return lines(`        if not (${ok}):`, `            ${raise}`);
+    return lines(`        if ${fails}:`, `            ${raise}`);
   });
   return lines(
     "",

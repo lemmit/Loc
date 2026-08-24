@@ -1,0 +1,68 @@
+// A resource-op inside a `commandHandler` / `queryHandler` BODY — the second
+// of the two sites `loom.resource-op-outside-workflow` declares LEGAL (the
+// other is a workflow body; #2618 excluded domainService operations).
+//
+// The gate says legal, but four of the five emitters could not render it:
+//   node   — emitted `salesFiles$put(...)` into `http/<api>-routes.ts`, a file
+//            that imported no resource client  → TS2304.
+//   python — emitted `await sales_files_put(...)` into
+//            `app/application/<handler>.py`, likewise unimported → F821.
+//   .NET   — THREW "reached the .NET renderer without a resource class
+//            mapping" out of explicit-handlers-emit.ts (its `renderArg`
+//            passed `resourceClasses: undefined`).
+//   java   — THREW the Java twin out of explicit-handlers-emit.ts.
+//   elixir — the only one that was already correct (it renders a
+//            fully-qualified `D.Resources.S3.sales_files_put(...)`, so it
+//            needs no import at all).
+//
+// The handler loads through a declared collection FIND rather than `byId`, so
+// the fixture exercises the resource-op leg without also riding two unrelated
+// pre-existing shapes: the `Agg id` path-param coercion, and an OPTIONAL find's
+// un-guarded dereference in a handler body.
+system HandlerResourceOps {
+  subdomain D {
+    context Sales {
+      aggregate Order with crudish { name: string }
+      repository Orders for Order {
+        find byName(name: string): Order[] where this.name == name
+      }
+
+      // command leg: three resource kinds (objectStore / queue / mailer) in
+      // one body, so a per-kind import/using regression cannot hide.
+      commandHandler ArchiveOrder(name: string): int {
+        let matches = Orders.byName(name)
+        salesFiles.put("orders/" + name, name)
+        salesJobs.enqueue(name)
+        mail.send(name, "Order archived", "Your order " + name + " was archived.")
+        return matches.count
+      }
+
+      // query leg: a LET-BOUND resource read (the `expr-let` statement shape,
+      // distinct from the bare `resource-call` above).
+      queryHandler PeekArchive(name: string): int {
+        let matches = Orders.byName(name)
+        let archived = salesFiles.get("orders/" + name)
+        return matches.count
+      }
+    }
+  }
+  api A from D {
+    route POST "/archive/{name}" -> Sales.ArchiveOrder
+    route GET  "/archive/{name}" -> Sales.PeekArchive
+  }
+  storage pg { type: postgres }
+  storage files { type: s3, config: { bucket: "app-files" } }
+  storage jobs { type: rabbitmq }
+  storage mailServer { type: smtp, config: { from: "no-reply@hro.test" } }
+  resource salesState { for: Sales, kind: state, use: pg }
+  resource salesFiles { for: Sales, kind: objectStore, use: files }
+  resource salesJobs { for: Sales, kind: queue, use: jobs }
+  resource mail { for: Sales, kind: mailer, use: mailServer }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Sales]
+    dataSources: [salesState, salesFiles, salesJobs, mail]
+    serves: A
+    port: 4000
+  }
+}

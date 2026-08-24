@@ -283,6 +283,7 @@ export const COVERED_ELSEWHERE: readonly string[] = [
   "loom.self-outside-capability",
   "loom.slot-member-access",
   "loom.slot-out-of-position",
+  "loom.softdelete-field-collision",
   "loom.stamp-on-event-sourced-invalid",
   "loom.stamp-principal-without-auth",
   "loom.stamp-read-before-flush",

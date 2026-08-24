@@ -34,9 +34,11 @@ system RealtimeNgShop {
     on Live.OrderPlaced(e) { toast("Order " + e.order + " placed") }
     page Home { route: "/" body: Heading { "hi" } }
   }
+  storage loomDb { type: postgres }
+  resource fulfillmentState { for: Fulfillment, kind: state, use: loomDb }
   deployable backend {
     platform: node
-    contexts: [Fulfillment]
+    contexts: [Fulfillment] dataSources: [fulfillmentState]
     serves: FulfillmentApi
     port: 3000
   }

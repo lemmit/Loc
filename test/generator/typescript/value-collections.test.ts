@@ -19,8 +19,10 @@ system VA {
     }
   }
   api SApi from S
-  deployable api { platform: node            contexts: [C] serves: SApi port: 3000 }
-  deployable px  { platform: elixir contexts: [C] serves: SApi port: 4000 }
+  deployable api { platform: node            contexts: [C] dataSources: [cState] serves: SApi port: 3000 }
+  storage loomDb { type: postgres }
+  resource cState { for: C, kind: state, use: loomDb }
+  deployable px  { platform: elixir contexts: [C] dataSources: [cState] serves: SApi port: 4000 }
 }
 `;
 
@@ -36,7 +38,9 @@ describe("value-object collection — child-table persistence (Hono)", () => {
     // No scalar text() fallback for the VO array …
     expect(schema).not.toMatch(/charges:\s*text\(/);
     // … a dedicated child table instead.
-    expect(schema).toMatch(/export const orderCharges = pgTable\("order_charges"/);
+    // Schema-qualified: the deployable binds a `resource` for context `C`, so
+    // both tables land in the `c` Postgres schema rather than the default one.
+    expect(schema).toMatch(/export const orderCharges = cSchema\.table\("order_charges"/);
     // owner FK + ordinal + the value object's flattened columns.  The owner is
     // a guid-id aggregate, so the FK is uuid (lockstep with the migration).
     expect(schema).toMatch(/parentId:\s*uuid\("order_id"\)\.notNull\(\)/);
@@ -67,14 +71,14 @@ describe("value-object collection — migration (relational child table, all bac
   it("the Hono migration creates the child table and drops the parent column", async () => {
     const files = await generateSystemFiles(FIXTURE);
     const sql = findFile(files, /api\/db\/migrations\/.*\.sql$/);
-    expect(sql).toMatch(/CREATE TABLE "order_charges" \(/);
+    expect(sql).toMatch(/CREATE TABLE "c"\."order_charges" \(/);
     expect(sql).toMatch(/"amount"\s+DECIMAL/i);
     expect(sql).toMatch(/PRIMARY KEY \("order_id", "ordinal"\)/);
     // The parent table carries no `charges` column — the data is in the
     // child.  Bound the slice to the `orders` CREATE statement: FK
     // ordering now emits the parent before its `order_charges` child, so
     // slicing to end-of-file would wrongly pull in the child table.
-    const ordersStart = sql.indexOf('CREATE TABLE "orders"');
+    const ordersStart = sql.indexOf('CREATE TABLE "c"."orders"');
     const ordersTable = sql.slice(ordersStart, sql.indexOf(");", ordersStart));
     expect(ordersTable).not.toMatch(/charges/);
   });
@@ -87,7 +91,7 @@ describe("value-object collection — migration (relational child table, all bac
     expect(child).toMatch(/create table\(:order_charges, primary_key: false/);
     expect(child).toMatch(/add :id, :uuid, primary_key: true/);
     expect(child).toMatch(
-      /add :order_id, references\(:orders, type: :uuid, on_delete: :delete_all\), null: false/,
+      /add :order_id, references\(:orders, prefix: "c", type: :uuid, on_delete: :delete_all\), null: false/,
     );
     expect(child).toMatch(/add :ordinal, :integer, null: false/);
     expect(child).toMatch(/add :amount, :decimal/);
@@ -137,7 +141,9 @@ system VB {
     }
   }
   api SApi from S
-  deployable api { platform: node contexts: [C] serves: SApi port: 3000 }
+  storage loomDb { type: postgres }
+  resource cState { for: C, kind: state, use: loomDb }
+  deployable api { platform: node contexts: [C] dataSources: [cState] serves: SApi port: 3000 }
 }
 `;
 

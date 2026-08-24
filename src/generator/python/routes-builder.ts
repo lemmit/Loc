@@ -349,6 +349,10 @@ export function buildPyRoutesFile(
     refersTo(agg.name) ? `from app.domain.${snake(agg.name)} import ${agg.name}` : null,
     hasDispatch ? null : "from app.domain.events import NoopDomainEventDispatcher",
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
+    // The shared `FileRef` TypedDict a `File`-typed wire field is annotated
+    // with (M-T6.39) — demand-driven like every import above, so a File-free
+    // aggregate's module is byte-identical.
+    refersTo("FileRef") ? "from app.domain.file_ref import FileRef" : null,
     [...enumNames, ...voDomainNames].length > 0
       ? `from app.domain.value_objects import ${[...enumNames, ...voDomainNames].sort().join(", ")}`
       : null,
@@ -447,11 +451,35 @@ export const PY_PAGED_CONTROLS: readonly string[] = [
   `pageSize: Annotated[int, Query(ge=1, le=${PAGED_MAX_PAGE_SIZE})] = ${PAGED_DEFAULT_PAGE_SIZE}`,
 ];
 
+/** The canonical dashed-hex uuid form — the same shape `z.string().uuid()`,
+ *  `Guid`-binding and `UUID.fromString` accept on the sibling backends. */
+export const UUID_PATTERN =
+  "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
+
 /** `{id}` path-param annotation carrying the uuid format every backend
  *  declares (paramTypeDiffs parity).  Shared with the workflow-instance
  *  byId route (workflows-builder.ts), whose correlation-id param must
- *  carry the same format. */
-export const ID_PARAM = 'id: Annotated[str, Path(json_schema_extra={"format": "uuid"})]';
+ *  carry the same format.
+ *
+ *  `pattern=` ENFORCES what `format` only documented.  The param bound as a
+ *  bare `str`, so a malformed `{id}` sailed past FastAPI into the repository
+ *  and asyncpg refused the uuid comparison — a 500 where the published
+ *  contract says 422 (`errorStatuses("getById")` declares it: "a path `{id}`
+ *  is parsed as a uuid … and a failure answers the same 422 the body tier
+ *  does").  A `pattern` miss raises `RequestValidationError`, which the
+ *  emitted handler already renders as the 422 problem envelope.  Invisible to
+ *  the paramTypeDiffs parity dimension, which compares `type` + `format`
+ *  only — both unchanged.
+ *
+ *  PRECONDITION: every user of this constant must have a `guid` id.  True by
+ *  construction for an aggregate (`lowerAggregate` sets `idValueType` to
+ *  `"guid"` unconditionally); the one caller that CAN see a non-guid key —
+ *  the workflow-instance byId route — already branches on
+ *  `workflowCorrIdValueType` and takes `id: str` / `id: int` instead.  The
+ *  `format: uuid` this replaces carried the same precondition, so the pattern
+ *  adds no new coupling — but if non-guid aggregate ids ever land, this needs
+ *  the workflow side's branch, not just a different annotation. */
+export const ID_PARAM = `id: Annotated[str, Path(pattern=r"${UUID_PATTERN}", json_schema_extra={"format": "uuid"})]`;
 
 /** The domain error names this routes file actually references. */
 function errorImports(refersTo: (n: string) => boolean): string | null {
@@ -961,7 +989,7 @@ function historyRoute(
     "    repo = _repo(session)",
     gateUsesUser ? "    current_user_ = current_user()" : null,
     find.requires
-      ? `    if not (${renderPyExpr(find.requires, { thisName: "self", currentUserExpr: "current_user_" })}):\n        raise ForbiddenError("Forbidden")`
+      ? `    if ${renderPyNegatedGuard(find.requires, { thisName: "self", currentUserExpr: "current_user_" })}:\n        raise ForbiddenError("Forbidden")`
       : null,
     // (2) — reachability, not a predicate on the audit table.
     `    await repo.get_by_id(${agg.name}Id(id))`,
@@ -1077,9 +1105,8 @@ function lifecycleGate(action: OperationIR | null | undefined, thisName?: string
 
 function whenGate(agg: EnrichedAggregateIR, op: OperationIR): string[] {
   if (!op.when) return [];
-  const pred = renderPyExpr(op.when, { thisName: "found" });
   return [
-    `    if not (${pred}):`,
+    `    if ${renderPyNegatedGuard(op.when, { thisName: "found" })}:`,
     `        raise DisallowedError(${JSON.stringify(
       `operation '${op.name}' is not allowed in the current state of ${agg.name}.`,
     )})`,

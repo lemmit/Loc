@@ -27,8 +27,10 @@ system Demo {
       }
     }
   }
+  storage loomDb { type: postgres }
+  resource cState { for: C, kind: state, use: loomDb }
   deployable phoenixApp {
-    platform: elixir, contexts: [C], serves: DemoApi,
+    platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
     ui: DemoUi, port: 4000
   }
 }
@@ -47,8 +49,10 @@ describe("HEEx Tabs (parity finding #5)", () => {
     const heex = await landingHeex();
     expect(heex).toMatch(/role="tablist"/);
     expect((heex.match(/role="tab"/g) ?? []).length).toBe(2);
-    expect(heex).toContain(">Overview</button>");
-    expect(heex).toContain(">Settings</button>");
+    // The caption is a user-visible slot (`tabLabel`, M-T1.11), so the trigger
+    // renders it through `pgettext` rather than as raw text.
+    expect(heex).toMatch(/><%= pgettext\("page\.\w+\.tabLabel\.\w+", "Overview"\) %><\/button>/);
+    expect(heex).toMatch(/><%= pgettext\("page\.\w+\.tabLabel\.\w+", "Settings"\) %><\/button>/);
   });
 
   it("switches tabs with a Phoenix.LiveView.JS toggle (no server round-trip)", async () => {

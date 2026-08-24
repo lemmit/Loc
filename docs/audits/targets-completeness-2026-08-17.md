@@ -840,7 +840,7 @@ The missions this audit touches directly:
 | `M-T1.10` realtime beyond toast | partial | Elixir/LiveView + Flutter SSE legs; cross-tenant SSE isolation e2e. | F20 |
 | `M-T2.7` seeding tail | partial | Phases 5–7 (workflow-body seed, `seed-spec.json` + compose step, `ddd seed` runner). | F8 (adjacent) |
 | `M-T2.10` document/embedded completion | partial | `embedded` on Drizzle still emits relationally (verify-first); `document` on Ecto unscheduled behind the honest gate. | F18 |
-| `M-T3.17` tenancy subtree index-usability | open | `strpos(data_key, anchor\|\|'.')=1` is correct but not sargable — deep reads seq-scan. | — |
+| `M-T3.17` tenancy subtree index-usability | done | An escaped `LIKE … ESCAPE '!'` prefilter now rides `<table>_data_key_idx` in front of the unchanged `strpos(data_key, anchor\|\|'.')=1` recheck (#2656). | — |
 | `M-T9.25` intra-backend consistency | partial | Round 2 items (4) nested `errors[]` pointer shape, (5) override-propagation asserted on node only. | F26 |
 | `M-T9.27` unsupported register | partial | Slice 4: the full 419-code registry, docs anchors, fix hints. | F33 |
 | `M-T6.32`, `M-T6.34` | open | **Premises overturned — close or rewrite, do not implement.** | F36 |

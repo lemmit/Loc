@@ -1,6 +1,7 @@
 import type { BinOp, EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
+  DATA_KEY_LIKE_ESCAPE,
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
   deepScopeTenantClaim,
@@ -18,6 +19,7 @@ import {
   upperFirst,
 } from "../../util/naming.js";
 import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
+import { exSubtreeLikePattern } from "../_expr/subtree-like.js";
 import {
   type BinaryExpr,
   type CallExpr,
@@ -92,12 +94,6 @@ export interface RenderCtx {
    *  parameters.  Off everywhere else (op / derived / invariant bodies use
    *  plain locals + the in-memory `Decimal.*` API). */
   filterArgs?: boolean;
-  /** Foundation the expression is rendered for.  `platform: elixir` only ever
-   *  emits the vanilla foundation (plain Ecto/Phoenix), so this is always
-   *  `"vanilla"`; the field is retained so the many vanilla call sites that
-   *  pass `foundation: "vanilla"` keep type-checking, but it no longer
-   *  selects a code path. */
-  foundation?: "vanilla";
   /** Renders the aggregate-`id` expression (`{kind:"id"}`) as this bare
    *  local instead of `<thisName>.id`.  Set by the event-sourced create
    *  command runner, where the new aggregate id is a freshly generated
@@ -755,15 +751,29 @@ export function renderDeepScopeEcto(
   // `tid` row column above, which only coincides when the author happened to
   // name the claim `tenantId`.
   const tenant = `^(current_user && current_user.${snake(tenantClaim)})`;
-  // Descendant test as an ANCHORED POSITION, not `LIKE ? || '.%'`.  The anchor
-  // is a principal CLAIM, so `_`/`%` inside it are LIKE wildcards: an org named
-  // `acme_corp` yields the pattern `acme_corp.%`, which matches `acmeXcorp.…` —
-  // a cross-tenant read with no attacker, just an underscore in a name.  Ecto
-  // pins the value (`^`), which stops injection but not wildcard semantics.
-  // `strpos(col, needle) = 1` has no pattern language, matching how
-  // `string.startsWith` lowers elsewhere in this file.
-  const sql = `(? IS NOT NULL AND (? = ? OR strpos(?, ? || '${DATA_KEY_PATH_DELIMITER}') = 1)) OR (? IS NULL AND ? = ?)`;
-  return `fragment(${JSON.stringify(sql)}, ${dk}, ${dk}, ${org}, ${dk}, ${org}, ${dk}, ${tid}, ${tenant})`;
+  // Descendant test = SARGABLE PREFILTER **and** ANCHORED RECHECK (M-T3.17).
+  // The row is DECIDED by `strpos(col, needle) = 1`, which has no pattern
+  // language: the anchor is a principal CLAIM, so `_`/`%` inside it would be
+  // LIKE wildcards — an org named `acme_corp` yields `acme_corp.%`, which
+  // matches `acmeXcorp.…`, a cross-tenant read with no attacker, just an
+  // underscore in a name.  Ecto pins the value (`^`), which stops injection but
+  // not wildcard semantics.  The escaped `LIKE ? ESCAPE '!'` in front is a pure
+  // prefilter so the planner can ride the `data_key text_pattern_ops` index
+  // instead of seq-scanning; an escaping slip could only widen it, and the
+  // recheck still gates.  The pattern is built through the nil-safe
+  // INTERPOLATION the in-app twin uses (`"#{nil}"` is `""`, while
+  // `String.replace(nil, …)` raises) — a nil actor then yields the pattern
+  // `".%"`, which no materialized path matches, and the recheck's NULL needle
+  // keeps the branch false regardless.
+  const anchorStr = `"#{current_user && current_user.${snake(anchorClaim)}}"`;
+  const pattern = `^(${exSubtreeLikePattern(anchorStr)})`;
+  const sql =
+    `(? IS NOT NULL AND (? = ? OR (? LIKE ? ESCAPE '${DATA_KEY_LIKE_ESCAPE}' ` +
+    `AND strpos(?, ? || '${DATA_KEY_PATH_DELIMITER}') = 1))) OR (? IS NULL AND ? = ?)`;
+  return (
+    `fragment(${JSON.stringify(sql)}, ${dk}, ${dk}, ${org}, ${dk}, ${pattern}, ` +
+    `${dk}, ${org}, ${dk}, ${tid}, ${tenant})`
+  );
 }
 
 /** The `deep`/`global` read-level sentinel as an IN-MEMORY Elixir predicate —
@@ -859,7 +869,14 @@ export const ELIXIR_COLLECTION_RENDERERS: Record<
         ? `Enum.sum(Enum.map(${recv}, ${args[0]}))`
         : `Enum.sum(${recv})`,
   all: (recv, args) => `Enum.all?(${recv}, ${args[0] ?? "fn _ -> true end"})`,
-  any: (recv, args) => `Enum.any?(${recv}, ${args[0] ?? "fn _ -> false end"})`,
+  // Argless `xs.any()` means NON-EMPTY (`all`'s dual: `all` over no predicate
+  // is vacuously true, `any` over no predicate is "there is an element").  The
+  // default lambda was `fn _ -> false end` — always false, compiling clean and
+  // silently disagreeing with every sibling backend (`.some(() => true)` /
+  // `.Any(_ => true)` / `!isEmpty()` / `len(...) > 0`).  Audit finding A12.
+  // Note `Enum.any?/1` would NOT do: it tests element TRUTHINESS, so a
+  // `bool[]` of `false`s (or a list with a `nil`) would answer wrongly.
+  any: (recv, args) => `Enum.any?(${recv}, ${args[0] ?? "fn _ -> true end"})`,
   contains: (recv, args) => `Enum.member?(${recv}, ${args[0] ?? "nil"})`,
   where: (recv, args) => `Enum.filter(${recv}, ${args[0] ?? "fn _ -> true end"})`,
   first: (recv) => `List.first(${recv})`,

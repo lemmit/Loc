@@ -178,7 +178,7 @@ system HandlerScaffold {
         status: string
         priority: Priority
         total: Money
-        create(code: string) { code := code  status := "new"  priority := Priority.low  total := Money { amount: 0, currency: "USD" } }
+        create(code: string) { }
         operation reprice(newTotal: Money) { total := newTotal }
         operation cancel() { status := "cancelled" }
         destroy { }

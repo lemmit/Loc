@@ -93,6 +93,17 @@ function wireFieldType(
           return dir === "request" ? "datetime" : "str";
         case "json":
           return "object";
+        case "File":
+          // A `File` field crosses the wire as the shared `FileRef`
+          // ({url,key,contentType,size}) on every other backend — .NET's
+          // `FileRef` record, java's `FileRef`, hono's zod object. Python fell
+          // through to the `str` default below, so the DTO was typed `str`
+          // while the DOMAIN attribute is `FileRef`: `mypy --strict` rejected
+          // the handoff (`Argument "doc" … has incompatible type "str"`), and
+          // the published schema said `string` where the other four said
+          // object. No corpus fixture declared a `File` field until
+          // `file-download.ddd` (M-T6.39), so no compile tier ever saw it.
+          return "FileRef";
         default:
           return "str";
       }

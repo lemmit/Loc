@@ -37,7 +37,12 @@ system ExpressionShowcase {
         currency: string
       }
 
-      aggregate Product {
+      // `audited` is what gives the ui a derived `history(id)` read to bind a
+      // `Timeline` to.  The primitive is the fixture's one call site with a
+      // per-target `default:` degradation arm (`_walker/primitives/
+      // timeline.ts`), so it is what makes the `not yet supported on
+      // <framework>` sentinel reachable instead of theoretical.
+      aggregate Product audited {
         name: string
         sku: string
         note: string
@@ -57,6 +62,12 @@ system ExpressionShowcase {
         derived hasDash: bool = sku.contains("-")
         derived absQty: int = quantity.abs()
         derived roundedWeight: decimal = weight.round(2)
+
+        // One PUBLIC command, which is what `audited` above actually attaches
+        // to: `aggHasAuditedTarget` is false for an aggregate with no command
+        // actions, and without it no `history(id)` read is derived and the
+        // `Timeline` on `ProductHistory` would have nothing to bind.
+        operation restock(by: int) { quantity := quantity + by }
       }
 
       repository Products for Product { }
@@ -80,6 +91,64 @@ system ExpressionShowcase {
         Text { string((level + 1) * 2) },
         Text { string(-level) }
       }
+    }
+
+    // ---- the other component shapes ---------------------------------------
+    // `TierBadge` above is props-only, and for a long time that was the whole
+    // of this fixture's component coverage — which is why the
+    // `unknown layout component` sentinel could not fire here.  A dropped
+    // component takes its declaration AND every call site with it: the walker
+    // never learns the name, so each use renders
+    // `unknown layout component: X` and the element silently disappears.  That
+    // is not hypothetical — both shapes below were target-wide drops within
+    // the last month (#2602: `derived`- and `state`-bearing components vanished
+    // whole on Feliz and Flutter).
+    //
+    // Each has its OWN emission path per frontend (Feliz folds state into the
+    // one Elmish Model and takes the Model as a leading curried arg; Flutter
+    // into a Notifier; Angular emits a standalone `@Component`), so covering
+    // one covers neither of the others.  Both are called from `ComponentShapes`
+    // below — the call site is the half that shows the drop.
+    //
+    // The THIRD shape — a READ-BEARING component — lives here now.  It used to
+    // be barred from this fixture because it did not compile on React / Vue /
+    // Svelte: the component walk was handed an EMPTY api-param list where the
+    // page shell passes the ui's real one, so `Catalog.Product.all` resolved to
+    // nothing and the body emitted `/* unresolved: Catalog */ undefined.Product
+    // .all.isLoading` — a guaranteed TypeError, and TS18050 under
+    // `generated-react-build`.  The three emitters now thread `ui.apiParams`
+    // exactly as the page shell does (#2654), so the read hoists to the same
+    // `use<Op><Agg>()` handle a page gets, and hosting it here is what buys the
+    // shape real per-frontend COMPILER coverage instead of a string scan.
+
+    // an api READ inside a component body — the hoist has to happen in the
+    // component's own shell (`use…()` decl + api import), not the page's.
+    component RecentProducts(title: string) {
+      body: Stack {
+        Heading { title, level: 3 },
+        QueryView { of: Catalog.Product.all, data: rows => Stack {
+          For { each: rows, p => Text { p.name } }
+        } }
+      }
+    }
+
+    // state + action — the component owns a cell and a handler that writes it.
+    component Counter(caption: string) {
+      state { n: int = 0 }
+      action bump() { n := n + 1 }
+      body: Stack {
+        Text { caption },
+        Text { string(n) },
+        Button { "+", onClick: bump }
+      }
+    }
+
+    // derived — including a derived that reads an EARLIER derived, which is
+    // the arm that made Feliz spell `model.Tier` for a plain local.
+    component ScoreTier(score: int) {
+      derived tier: string = score > 90 ? "gold" : "silver"
+      derived shout: string = tier.toUpper()
+      body: Stack { Text { tier }, Text { shout } }
     }
 
     // ---- every scalar intrinsic, in a user-visible slot -------------------
@@ -183,6 +252,48 @@ system ExpressionShowcase {
         Column { "Qty", p => string(p.quantity) },
         rows: rows
       } }
+    }
+
+    // ---- the component shapes, at a call site -----------------------------
+    // The call sites are the half that matters: a component the target failed
+    // to emit is only visible HERE, as `unknown layout component: X`.
+    page ComponentShapes {
+      route: "/components"
+      state { level: int = 3 }
+      body: Stack {
+        Heading { "Component shapes" },
+        TierBadge { label: "props-only", level: level },
+        Counter { caption: "hits" },
+        ScoreTier { score: 95 },
+        RecentProducts { title: "Recent" }
+      }
+    }
+
+    // ---- the audit trail — a primitive with a per-target `default:` arm ----
+    // `Timeline` renders on all seven frontends today (#2569 closed the last
+    // three).  It is in this fixture because it is the one primitive whose
+    // emitter still HAS a give-up arm to fall into, so the
+    // `not yet supported on <framework>` sentinel has something real to watch:
+    // delete one `case` from `_walker/primitives/timeline.ts` and this page
+    // starts carrying the comment.
+    //
+    // NOTE the BARE `Product.history(id)` — not `Catalog.Product.history(id)`
+    // like every other read in this file.  The derived history read is added
+    // in phase ⑥ enrichment, but `checkApiBodyRefs`'s allowlist
+    // (`listValidApiOperations`, a phase-④ AST validator) is built from
+    // DECLARED finds + operations only, so the api-handle spelling is rejected
+    // with "Operation 'history' is not declared on aggregate 'Product'".  The
+    // scaffolded History section never hits it because a scaffolded ui has no
+    // `api X: Y` param and the check returns early on `apiByParam.size === 0`.
+    // The bare form is the same one the scaffold emits and the walker's
+    // `isEntityHistoryRead` explicitly accepts; teaching the AST allowlist
+    // about the derived read is its own slice.
+    page ProductHistory {
+      route: "/products/:id/history"
+      body: QueryView {
+        of: Product.history(id),
+        data: entries => Timeline { of: entries, testid: "product-history" }
+      }
     }
 
     // ---- route `id` + detail scope ---------------------------------------

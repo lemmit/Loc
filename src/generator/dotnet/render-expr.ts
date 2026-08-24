@@ -3,6 +3,7 @@ import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
+  DATA_KEY_LIKE_ESCAPE,
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
   deepScopeTenantClaim,
@@ -13,6 +14,7 @@ import { bodyTypeOf } from "../../util/expr-body-type.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapeCsharpIdent, upperFirst } from "../../util/naming.js";
 import { csCodePointLength } from "../_expr/code-point.js";
+import { csSubtreeLikePattern } from "../_expr/subtree-like.js";
 import {
   type BinaryExpr,
   type CallExpr,
@@ -397,8 +399,25 @@ function renderCsAuthzFilter(
       const startsWith = ctx.efQuery
         ? `${col}.StartsWith(${org} + ${prefix})`
         : `${col}.StartsWith(${org} + ${prefix}, StringComparison.Ordinal)`;
+      // SARGABLE PREFILTER (M-T3.17), EF-query positions only.  A parameterized
+      // `StartsWith` lowers to `left(col, length(@p)) = @p` (see the
+      // `string.startsWith` row in CS_INTRINSIC_QUERY_RENDERERS) — escaping-free
+      // and therefore correct, but a function of the column, so the planner
+      // cannot use the `data_key text_pattern_ops` index and every deep/global
+      // read seq-scans.  `EF.Functions.Like(col, pattern, "!")` emits a real
+      // `LIKE … ESCAPE '!'`, whose fixed prefix the planner turns into an index
+      // range; the `StartsWith` stays as the RECHECK, so an escaping slip in the
+      // pattern (which can only WIDEN a LIKE) cannot leak a foreign subtree.
+      // The pattern chain touches only the principal, never `x`, so EF
+      // funcletizes it into one bound parameter instead of translating
+      // `replace()`.  The in-app (document/jsonb) face has no query to index, so
+      // it keeps the bare anchored test.
+      const descendant = ctx.efQuery
+        ? `(EF.Functions.Like(${col}, ${csSubtreeLikePattern(org)}, ` +
+          `${JSON.stringify(DATA_KEY_LIKE_ESCAPE)}) && ${startsWith})`
+        : startsWith;
       return (
-        `((${col} != null && (${col} == ${org} || ${startsWith})) ` +
+        `((${col} != null && (${col} == ${org} || ${descendant})) ` +
         `|| (${col} == null && ${tenantCol} == ${tenant}))`
       );
     }

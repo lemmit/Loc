@@ -61,8 +61,6 @@ import {
   aggregateUsesMoneyDeep,
   findGateUsesCurrentUser,
   findUsesCurrentUser,
-  operationIsGuarded,
-  operationUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
 import {
   peelCollection,

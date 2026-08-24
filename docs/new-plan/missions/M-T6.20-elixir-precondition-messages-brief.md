@@ -1,6 +1,8 @@
 # M-T6.20 — Elixir (vanilla Phoenix) `precondition` custom messages + wire `code`
 
-**Status:** `partial` · **M** (down from L) · P3 · ⭐ cross-backend parity gap (one backend, one construct)
+**Status:** `done` · **M** (down from L) · P3 · ⭐ cross-backend parity gap (one backend, one construct)
+
+> **[2026-08-23] CLOSED by [#2655](https://github.com/lemmit/Loc/pull/2655) — this brief is now HISTORY, not a work order.** Path 2 (the raise path) landed as the typed-exception reshape §2 predicted: `<App>.GuardError`, `defexception [:message, :kind]`, at `lib/<app>/guard_error.ex`, rescued BY TYPE with the rung read off `guard_error.kind`. `requires` was typed alongside `precondition`, so the message-prefix contract is deleted rather than halved, and the `reraise` arm went with the `cond`. The wire-`code` question in §3 is settled without reshape (a): the other four put a `code` only on the WIRE-VALIDATION rung, which elixir already produces via `deniesAtWire` / `wireValidationTerm`; their DOMAIN-FLOOR 422 carries no `code` and no `errors[]`, and a pure body has no request slot to point into. See the M-T6.20 row in [`../T6-backend-parity.md`](../T6-backend-parity.md) for the closing note.
 
 > **[2026-07-29] Path 1 landed early, unplanned — read this before picking the mission up.** The `ensure` → 422 path below is **DONE** (#2300). It was not scheduled: the M-T9.11 wire-golden gate needed an error-envelope assertion, the golden is byte-exact, and elixir's bare `:precondition_failed` atom made the `detail` generic — so this mission's ensure-path message half became the blocking dependency for closing that gate's last coverage hole, and was done there. The reshape is exactly the one predicted below (2-tuple reason, `ensure/2` itself unchanged); the protocol now has a single owner, `src/generator/elixir/vanilla/denial.ts`, which both producers and consumers go through. `denialMessage` honours the author `message "…"`.
 >

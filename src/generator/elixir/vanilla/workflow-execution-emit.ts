@@ -238,20 +238,79 @@ export interface BodyLine {
   origin?: OriginRef;
 }
 
+/** Does `st` DEFINITELY contribute a `bindName` to the with-chain?  The LAST
+ *  such statement fills `assembleBody`'s `{:ok, <lastBind>}` result slot, so
+ *  every EARLIER bind is `_`-discardable when unread.  `domain-service-call` is
+ *  deliberately absent: its clauses only carry a `bindName` when the mutating
+ *  shape resolves, and guessing wrong here would silently move the workflow's
+ *  return value.  Omitting it can only leave a warning unfixed, never change
+ *  what a workflow returns. */
+function definitelyBinds(st: WorkflowStmtIR): boolean {
+  return (
+    st.kind === "factory-let" ||
+    st.kind === "repo-let" ||
+    st.kind === "repo-run" ||
+    st.kind === "assign"
+  );
+}
+
+/** Everything beyond the following statements that can still READ a binding,
+ *  plus whether this statement's bind may be discarded at all. */
+interface ReadScope {
+  /** Expressions evaluated AFTER the whole statement list.  The explicit
+   *  `commandHandler` / `queryHandler` path (`explicit-handlers-emit.ts`) ends
+   *  its with-chain's do-branch with `{:ok, <return expr>}`, and that expression
+   *  is not a `WorkflowStmtIR` — so without it a `let` whose ONLY reader is the
+   *  `return` looked unread, got `_`-prefixed, and the do-branch then referenced
+   *  an undefined variable (a hard `** (CompileError)`, not a warning). */
+  trailing?: readonly ExprIR[];
+  /** `true` when this statement's `{:ok, <name>}` tuple bind is NOT the
+   *  with-chain's result slot and may therefore be `_`-prefixed if unread.
+   *  Defaults to `false`, so every call path that has not reasoned about the
+   *  result slot (nested loop bodies, legacy callers) keeps today's real name. */
+  discardableBind?: boolean;
+}
+
+const NO_READS: ReadScope = {};
+
+/** How the CALLER closes the with-chain — which decides whether any statement's
+ *  bind is load-bearing as the result. */
+export interface LowerBodyOptions {
+  /** Expressions evaluated after the list — see `ReadScope.trailing`. */
+  trailing?: readonly ExprIR[];
+  /** `true` when the caller renders its OWN result expression instead of
+   *  `assembleBody`'s `{:ok, <lastBind>}` — then no statement's bind is the
+   *  result slot and every unread bind is discardable.  The explicit
+   *  `commandHandler` / `queryHandler` path sets this: `assembleHandlerBody`
+   *  closes with `{:ok, <return expr>}`, never with the last bound name. */
+  ownResult?: boolean;
+}
+
 export function lowerStatements(
   stmts: WorkflowStmtIR[],
   contextModule: string,
   renderCtx: RenderCtx,
   ctx?: BoundedContextIR,
+  opts: LowerBodyOptions = {},
 ): BodyLine[] {
+  const { trailing = [], ownResult = false } = opts;
   const lines: BodyLine[] = [];
+  // M-T6.21 — the LAST statement that definitely binds fills the with-chain's
+  // `{:ok, <result>}` slot (`assembleBody`), so its name is read by
+  // construction; every earlier bind is discardable when nothing reads it.
+  let resultSlot = -1;
+  if (!ownResult)
+    for (let i = 0; i < stmts.length; i++) if (definitelyBinds(stmts[i]!)) resultSlot = i;
   for (let i = 0; i < stmts.length; i++) {
     const st = stmts[i]!;
-    // M-T6.21 — pass the downstream statements so a `let` binding no later
-    // statement references can be `_`-prefixed; an unread real-named bind trips
+    // Pass the downstream statements so a `let` binding no later statement
+    // references can be `_`-prefixed; an unread real-named bind trips
     // `mix compile --warnings-as-errors` (the same move the for-each / if-let
     // body binds already make via `bindUsedLater`).
-    for (const line of lowerStatement(st, contextModule, renderCtx, ctx, stmts.slice(i + 1))) {
+    for (const line of lowerStatement(st, contextModule, renderCtx, ctx, stmts.slice(i + 1), {
+      trailing,
+      discardableBind: i !== resultSlot,
+    })) {
       lines.push({ ...line, origin: st.origin });
     }
   }
@@ -264,6 +323,7 @@ function lowerStatement(
   renderCtx: RenderCtx,
   ctx?: BoundedContextIR,
   rest: WorkflowStmtIR[] = [],
+  reads: ReadScope = NO_READS,
 ): BodyLine[] {
   switch (st.kind) {
     case "factory-let": {
@@ -274,11 +334,15 @@ function lowerStatement(
         .join(", ");
       const action = `create_${snake(st.aggName)}`;
       const call = `${contextModule}.${action}(%{${fields}})`;
+      // M-T6.21 — `{:ok, _order} <- …` when nothing downstream reads the new
+      // aggregate and it is not the workflow's return; the `:ok` match still
+      // gates the chain, so a failed create still rolls back.
+      const { pattern, bindName } = tupleBind(st.name, rest, reads);
       return [
         {
           kind: "with-clause",
-          text: `{:ok, ${snake(st.name)}} <- ${call}`,
-          bindName: snake(st.name),
+          text: `{:ok, ${pattern}} <- ${call}`,
+          bindName,
         },
       ];
     }
@@ -337,8 +401,13 @@ function lowerStatement(
       // (e.g. `let label = match … { … }` with no following use) is
       // `_`-prefixed so `mix compile --warnings-as-errors` stays clean; the
       // expression is still evaluated, only the binding is discarded.
+      // `reads.trailing` carries the explicit handler's `return <expr>` — its
+      // refs are reads too, and omitting them underscored a binding the
+      // do-branch then referenced (`** (CompileError) undefined variable`).
       const expr = renderExpr(st.expr, renderCtx);
-      const bind = bindUsedLater(st.name, rest) ? snake(st.name) : `_${snake(st.name)}`;
+      const bind = bindUsedLater(st.name, rest, reads.trailing)
+        ? snake(st.name)
+        : `_${snake(st.name)}`;
       return [
         {
           kind: "with-clause",
@@ -383,11 +452,14 @@ function lowerStatement(
           ? `get_${snake(st.aggName)}`
           : `${snake(st.method)}_${snake(st.aggName)}`;
       const call = `${contextModule}.${action}(${argList})`;
+      // M-T6.21 — a read whose row nothing downstream touches (an existence
+      // probe, say) binds `{:ok, _wallet}` rather than tripping -Werror.
+      const { pattern, bindName } = tupleBind(st.name, rest, reads);
       return [
         {
           kind: "with-clause",
-          text: `{:ok, ${snake(st.name)}} <- ${call}`,
-          bindName: snake(st.name),
+          text: `{:ok, ${pattern}} <- ${call}`,
+          bindName,
         },
       ];
     }
@@ -496,11 +568,13 @@ function lowerStatement(
       if (optEntries.length > 0) args.push(optEntries.join(", "));
       const action = `run_${snake(st.retrievalName)}_${snake(st.aggName)}`;
       const call = `${contextModule}.${action}(${args.join(", ")})`;
+      // M-T6.21 — same discard rule as the other two fallible binds.
+      const { pattern, bindName } = tupleBind(st.name, rest, reads);
       return [
         {
           kind: "with-clause",
-          text: `{:ok, ${snake(st.name)}} <- ${call}`,
-          bindName: snake(st.name),
+          text: `{:ok, ${pattern}} <- ${call}`,
+          bindName,
         },
       ];
     }
@@ -610,7 +684,9 @@ function lowerStatement(
             } else if (NESTED_FLOW_KINDS.has(inner.kind)) {
               // Nested loop / if-let / repo bind — reuse `lowerStatement` so it
               // lowers to a `<-` clause that threads {:error, _} up this branch.
-              pushNestedFlow(inner, contextModule, renderCtx, clauses, tail, ctx);
+              // The branch's own result is `{:ok, <present>}`, so a nested bind
+              // nothing later reads is `_`-discardable (M-T6.21).
+              pushNestedFlow(inner, contextModule, renderCtx, clauses, tail, ctx, rest, true);
             } else {
               // emit / resource-call — pure side-effects, run in the do-branch.
               tail.push(...renderBranchStmt(inner, renderCtx, contextModule, [], ctx));
@@ -798,9 +874,18 @@ function pushNestedFlow(
   clauses: string[],
   sideEffects: string[],
   ctx?: BoundedContextIR,
+  /** Statements that follow `inner` in the same body/branch. */
+  rest: WorkflowStmtIR[] = [],
+  /** See `ReadScope.discardableBind`.  A LOOP body threads the produced bind out
+   *  as its `{:cont, {:ok, <last>}}` result, so it passes `false` (the default)
+   *  and keeps the real name; an `if-let` BRANCH ends in its own
+   *  `{:ok, <present>}`, so an unread nested bind there is safe to discard. */
+  discardableBind = false,
 ): string | undefined {
   let bind: string | undefined;
-  for (const bl of lowerStatement(inner, contextModule, renderCtx, ctx)) {
+  for (const bl of lowerStatement(inner, contextModule, renderCtx, ctx, rest, {
+    discardableBind,
+  })) {
     if (bl.kind === "with-clause") {
       clauses.push(bl.text);
       if (bl.bindName) bind = bl.bindName;
@@ -1026,13 +1111,41 @@ function collectRefNames(e: ExprIR | undefined, acc: Set<string>): void {
   }
 }
 
-/** Is `name` referenced by any statement in `rest`?  Used to decide whether a
- *  branch/loop `let`-bind needs its real name or can be `_`-discarded (an
- *  unread real-named bind trips `mix compile --warnings-as-errors`). */
-function bindUsedLater(name: string, rest: WorkflowStmtIR[]): boolean {
+/** Is `name` referenced by any statement in `rest` — or by any `trailing`
+ *  expression the caller evaluates after the list (`ReadScope.trailing`)?  Used
+ *  to decide whether a branch/loop/with-chain `let`-bind needs its real name or
+ *  can be `_`-discarded (an unread real-named bind trips
+ *  `mix compile --warnings-as-errors`). */
+function bindUsedLater(
+  name: string,
+  rest: WorkflowStmtIR[],
+  trailing: readonly ExprIR[] = [],
+): boolean {
   const refs = new Set<string>();
   for (const st of rest) collectWorkflowStmtParamRefsAll(st, refs);
+  for (const e of trailing) collectRefNames(e, refs);
   return refs.has(name);
+}
+
+/** M-T6.21 — the `{:ok, <name>}` half of a fallible bind (`factory-let` /
+ *  `repo-let` / `repo-run`).  Returns the pattern to bind and the `BodyLine`
+ *  `bindName` that goes with it.
+ *
+ *  Underscoring is gated on BOTH halves of `ReadScope`: the name must be unread
+ *  downstream AND the bind must not be the with-chain's result slot.  The `:ok`
+ *  side of the tuple is untouched either way, so a fallible call still GATES the
+ *  chain — only the produced value is discarded.  A discarded bind clears
+ *  `bindName` too, so `assembleBody` can never pick `_name` as the result. */
+function tupleBind(
+  name: string,
+  rest: WorkflowStmtIR[],
+  reads: ReadScope,
+): { pattern: string; bindName: string | undefined } {
+  const bare = snake(name);
+  if (!reads.discardableBind || bindUsedLater(name, rest, reads.trailing)) {
+    return { pattern: bare, bindName: bare };
+  }
+  return { pattern: `_${bare}`, bindName: undefined };
 }
 
 /** Like `collectWorkflowStmtParamRefs` but collects ALL ref names (not just
@@ -1462,7 +1575,6 @@ function renderWorkflowModule(
   const renderCtx: RenderCtx = {
     thisName: "record",
     contextModule: contextModuleFq,
-    foundation: "vanilla",
     resourceModules,
     // Domain-service call wiring (domain-services.md rev. 4, Slice 1; Elixir
     // decision B).  A workflow that calls a `reading`-tier service (e.g.

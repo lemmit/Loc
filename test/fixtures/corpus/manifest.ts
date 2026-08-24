@@ -91,6 +91,14 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "projection-aggregation", title: "whole-table aggregation — singleton query-time projection (count/sum/avg/min/max pushed to SQL)", doc: "language", backends: ALL },
   { id: "projection-groupby", title: "group by — grouped query-time projection (one row per group, key selects + per-group aggregates, GROUP BY/ORDER BY pushed to SQL)", doc: "language", backends: ALL },
   {
+    id: "projection-agg-filters",
+    title:
+      "aggregation × capability filters — tenantOwned + softDeletable source, whole-table and grouped aggregations scoped by the SAME predicates the row read applies (plus an `ignoring` witness)",
+    doc: "tenancy",
+    backends: ALL,
+    note: "minted by audit A1: the aggregation shapes read the source table DIRECTLY, so four backends applied only the projection's own `where` — a cross-tenant COUNT/SUM leak no fixture crossed",
+  },
+  {
     id: "projection-join",
     title:
       "projection join — the by-id follow (`join <Agg> as <alias> on <idRef>`), carrying the referenced row's fields onto each projection row",
@@ -134,6 +142,14 @@ export const CORPUS: readonly CorpusFeature[] = [
   },
   { id: "extern", title: "extern operations — preconditions gate a user handler", doc: "extern", backends: ALL },
   { id: "extern-handlers", title: "extern commandHandler / queryHandler — bodyless, scaffold-once user impl", backends: ALL },
+  {
+    id: "handler-resource-ops",
+    title:
+      "resource-op inside a commandHandler / queryHandler body — the second legal site for outbound I/O",
+    doc: "resources",
+    backends: ALL,
+    note: "Four of five emitters could not render this LEGAL site: node / python emitted the helper call with no import (TS2304 / F821), .NET and java THREW 'reached the renderer without a resource class mapping' at generate time; only elixir was correct (it fully-qualifies the module). The handler loads via a declared FIND rather than `byId`, so the fixture isolates the resource-op leg from the unrelated `Agg id` path-param coercion.",
+  },
   { id: "seeding", title: "seed datasets — default / demo / wired-raw", doc: "language", backends: ALL },
   {
     id: "seed-values",
@@ -143,6 +159,14 @@ export const CORPUS: readonly CorpusFeature[] = [
     note: "Split from `seeding` so the two halves can have different BEHAVIOURAL reach: this one reads a collection (the only route class that can see seed rows, and therefore the only one whose body differs on a leg that starts empty), so it was held off the elixir behavioural leg — which emitted no seeder at all (B19) — via BEHAVIOURAL_SKIP, while `seeding` kept its CRUD/FK/404 round-trip armed on all five. M-T6.37 landed the Ecto seeder and that skip is deleted, so this case now runs on all five legs too; the split stays because it is what kept the five-backend coverage armed while one leg was odd.",
   },
   { id: "resources", title: "external resources — objectStore / queue / http api / mailer (smtp) clients", doc: "resources", backends: ALL },
+  {
+    id: "file-download",
+    title:
+      "a `File` field over an objectStore — the root `POST /files` + `GET /files/{key}` pair, and the absent-object 404",
+    doc: "resources",
+    backends: ALL,
+    note: "Split from `resources` (which binds an objectStore but declares no `File` field, so no backend emits the /files routes for it): the download route had NO golden on any backend, which is how its absent-object 404 stayed a fourth envelope shape on all five at once (M-T6.39). The 404 itself is not expressible in the `test e2e` DSL, so it rides the behavioral tier's absent-file probe in wire-differential.mjs.",
+  },
   {
     id: "api-call",
     title: "typed in-system api call — `resource { kind: api, use: <Api> }` a sibling deployable serves",
@@ -211,6 +235,14 @@ export const CORPUS: readonly CorpusFeature[] = [
     title: "stdlib macros — crudish (create/update/destroy) + softDeletable capability + softDelete ops",
     doc: "scaffold-macros",
     backends: ALL,
+  },
+  {
+    id: "collection-op-shapes",
+    title:
+      "collection-op / operator shapes no other fixture witnesses — arithmetic-λ `sum`, `distinct` over money, argless `any()`, DESCENDING `sortBy`, unary `-` on money, `-=` over an `int[]`",
+    doc: "stdlib",
+    backends: ALL,
+    note: "minted by the 2026-08-17 generator code review (A5/A10–A14): every one of these rendered wrong on at least one backend — java's descending sortBy did not COMPILE, node/elixir/python's money fold was broken by a missing `binary` arm in `bodyTypeOf`, elixir's argless `any()` was always false — and none appeared anywhere in the corpus, examples or journey/, so no compile gate could see them.  Writing it also surfaced an UNFILED .NET sibling of A13 (scalar-array mutation routed through a `_codes` backing field that does not exist → CS0103), fixed in the same change.  No `test e2e` block: this is a compile-tier witness, and adding one would mint recorded wire cases whose goldens cannot be captured from the fixture PR",
   },
   {
     id: "validation-messages",

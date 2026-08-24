@@ -3,6 +3,21 @@
 // --warnings-as-errors` rejects the unused variable.  `resolveUnused` binds
 // `label` and never reads it; `resolveUsed` reads it (the emit) and must keep
 // the bare name.  This fixture is the compile gate for that class.
+//
+// The rule spans FOUR binding shapes, and each one is exercised below:
+//   - `expr-let`    → `label <- (…)`               — `resolveUnused` / `resolveUsed`
+//   - `repo-let`    → `{:ok, probe} <- …`          — `discardUnreadReads`
+//   - `repo-run`    → `{:ok, rows} <- run_…`       — `discardUnreadRetrieval`
+//   - `factory-let` → `{:ok, extra} <- create_…`   — `discardUnreadCreate`
+// The three tuple shapes carry the two invariants a naive `_`-prefix breaks:
+//   (1) the LAST bind fills the with-chain's `{:ok, <result>}` return, so it is
+//       read by construction and must keep its real name (`keepsResultBind`);
+//   (2) `{:ok, _x}` still MATCHES `:ok`, so a fallible call keeps GATING the
+//       chain — only the produced value is discarded.
+// `describeOrder` covers the explicit-handler `return <expr>`: that expression
+// is not a statement, so its refs have to be threaded in as reads or the
+// binding it names gets `_`-prefixed and the do-branch references an undefined
+// variable (a hard `** (CompileError)`, not a warning).
 system Catalog {
   subdomain Core {
     context Shop {
@@ -13,6 +28,9 @@ system Catalog {
       }
       repository Orders for Order {
         find locate(ref: string): Order or NotFound where this.customerId == ref
+      }
+      retrieval ByCustomer(ref: string) of Order {
+        where: this.customerId == ref
       }
 
       workflow resolveUnused {
@@ -35,9 +53,51 @@ system Catalog {
           emit Resolved { label: label }
         }
       }
+
+      // `probe` is a repo-let nothing downstream reads, and it is NOT the last
+      // bind (the create below is) — so it lowers to `{:ok, _probe} <- …`.
+      workflow discardUnreadReads {
+        create(ref: string) {
+          let probe = Orders.locate(ref)
+          let placed = Order.create({ customerId: ref })
+          emit Resolved { label: ref }
+        }
+      }
+
+      // Same for a `repo-run` retrieval bind, and for a `factory-let` create
+      // bind — `extra` is created for its side effect and never read.
+      workflow discardUnreadRetrieval {
+        create(ref: string) {
+          let rows = Orders.run(ByCustomer(ref))
+          let extra = Order.create({ customerId: ref })
+          let kept = Order.create({ customerId: ref })
+        }
+      }
+
+      // The SOLE bind is the with-chain's `{:ok, <result>}` return, so it must
+      // keep its real name — underscoring it here would change what the
+      // workflow returns (and reference an undefined variable).
+      workflow keepsResultBind {
+        create(ref: string) {
+          let only = Orders.locate(ref)
+        }
+      }
+
+      // Explicit handler: `label`'s only reader is the `return`, which is not a
+      // statement.  It must stay bare.
+      queryHandler DescribeOrder(ref: string): string {
+        let found = Orders.locate(ref)
+        let label = match found {
+          Order o => o.customerId,
+          NotFound => "missing"
+        }
+        return label
+      }
     }
   }
-  api CatalogApi from Core
+  api CatalogApi from Core {
+    route GET "/orders/describe" -> Shop.DescribeOrder
+  }
   storage pg { type: postgres }
   resource orderState { for: Shop, kind: state, use: pg }
   deployable api {

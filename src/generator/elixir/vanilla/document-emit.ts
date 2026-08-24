@@ -631,7 +631,6 @@ function renderDocFindFn(
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: "",
-    foundation: "vanilla",
     docStruct: true,
   };
   const authored = f.filter
@@ -761,7 +760,6 @@ function docOpStructBody(
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
-    foundation: "vanilla",
     docStruct: true,
     agg: agg as EnrichedAggregateIR,
   };

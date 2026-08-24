@@ -26,6 +26,7 @@ import type {
   ValueObject,
   Workflow,
 } from "../../../language/generated/ast.js";
+import { aggregateServesHistory } from "../../../util/audit-ast.js";
 import { AUDIT_HISTORY_FIND } from "../../../util/audit-names.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import {
@@ -535,70 +536,6 @@ export function scaffoldInstanceDetails(wf: Workflow): Expression {
  *  param when the aggregate is served over one. */
 export function scaffoldDetails(agg: Aggregate, opts: { apiHandle?: string } = {}): Expression {
   return callExpr("Stack", scaffoldDetailsParts(agg, opts));
-}
-
-/** Whether a scaffolded Detail page gets a History section — the MACRO-TIME
- *  (AST) mirror of the enrichment's `aggServesHistory` (`src/ir/util/
- *  audit-history.ts`), which the scaffolder cannot call because it runs at
- *  phase ② over the Langium AST, before there is an `AggregateIR` to ask.
- *
- *  It must not over-approximate: an aggregate whose repository ends up WITHOUT
- *  a `historyFind` gets no `history()` client method, so a History section over
- *  it would call a hook that was never emitted and fail `tsc`.  Every clause
- *  below therefore mirrors one clause of the IR rule, and each errs toward
- *  emitting nothing:
- *
- *    - abstract bases own no repository and emit no table (`ensureHistoryFind`
- *      skips them);
- *    - the audit target — the same "at least one audited public command"
- *      question `aggHasAuditedTarget` asks, read off the AST flags the lowerer
- *      resolves (`aggregate X audited` marks every public command; a `private
- *      operation` is never audited — the opt-out);
- *    - at least one diffable field, so the timeline could say something.  The
- *      declared non-`internal`/`secret`/`managed`/`token` properties are a
- *      SUBSET of the IR's `historyDiffFields` (which also counts derived +
- *      containments), so a false here is a safe under-emit;
- *    - an author-declared `find history(...)` WINS over the derived read
- *      (`ensureHistoryFind` bails), and it keeps its own generic route + object-
- *      shaped client hook — so the scaffold must not claim the derived one. */
-export function aggregateServesHistory(agg: Aggregate): boolean {
-  if (agg.isAbstract) return false;
-  if (!aggregateHasAuditedCommand(agg)) return false;
-  if (!agg.members.some(isHistoryDiffProperty)) return false;
-  if (aggregateHasDeclaredHistoryFind(agg)) return false;
-  return true;
-}
-
-/** AST mirror of `aggHasAuditedTarget` — at least one audited PUBLIC command
- *  action (`operation` / `create` / `destroy`).  The aggregate-header `audited`
- *  is the aggregate-wide form the lowerer resolves into the per-command flags
- *  (`lowerAggregate`), so it counts only when such a command exists. */
-function aggregateHasAuditedCommand(agg: Aggregate): boolean {
-  return agg.members.some((m) => {
-    if (m.$type === "Operation") return !m.private && (m.audited || agg.audited);
-    if (m.$type === "Create" || m.$type === "Destroy") return m.audited || agg.audited;
-    return false;
-  });
-}
-
-/** A declared property that could carry a per-entry field change: the API-read
- *  set (`forApiRead`) minus the server-lifecycle stamp churn `forHistoryDiff`
- *  drops (`managed` / `token`). */
-function isHistoryDiffProperty(m: { $type: string }): boolean {
-  if (m.$type !== "Property") return false;
-  const access = (m as Property).access;
-  return access !== "internal" && access !== "secret" && access !== "managed" && access !== "token";
-}
-
-/** An author-declared `find history(...)` on this aggregate's repository — the
- *  one that WINS over the synthesized read (same rule as `all`). */
-function aggregateHasDeclaredHistoryFind(agg: Aggregate): boolean {
-  for (const m of agg.$container.members) {
-    if (m.$type !== "Repository") continue;
-    if (m.aggregate.ref?.name !== agg.name && m.aggregate.$refText !== agg.name) continue;
-    if (m.finds.some((f) => f.name === AUDIT_HISTORY_FIND)) return true;
-  }
-  return false;
 }
 
 /** The Detail page's History section — a framed `Timeline` over the derived

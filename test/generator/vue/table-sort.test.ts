@@ -26,7 +26,8 @@ async function genPage(
         api Sales: SalesApi
         page X { route: "/x"  ${state}  body: ${body} }
       }
-      deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+      resource ordersState { for: Orders, kind: state, use: pg }
+      deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
       deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
     }
   `);
@@ -68,6 +69,7 @@ describe("Table client-side sort (Vue)", () => {
     const content = files.get("web/src/pages/x.vue")!;
     expect(content).not.toContain("sortRows(");
     expect(content).not.toContain("table-sort");
-    expect(content).toMatch(/>Name</);
+    // Plain (unsortable) header — still translated, per the `columnHeader` slot.
+    expect(content).toMatch(/>\{\{ t\("page\.\w+\.columnHeader\.\w+", "Name"\) \}\}</);
   });
 });

@@ -40,7 +40,9 @@ const sys = (pageBody: string, design = "") => `
     ui WebApp {
       page Run { route: "/run" body: ${pageBody} }
     }
-    deployable api { platform: node, contexts: [C], serves: Api, port: 3000 }
+    storage loomDb { type: postgres }
+    resource cState { for: C, kind: state, use: loomDb }
+    deployable api { platform: node, contexts: [C], dataSources: [cState], serves: Api, port: 3000 }
     deployable web { platform: vue, targets: api, ui: WebApp, port: 3003${design ? `, design: "${design}"` : ""} }
   }
 `;

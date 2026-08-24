@@ -235,7 +235,6 @@ export function renderWireSerialize(
   const derivedRc: RenderCtx = {
     thisName: "record",
     contextModule: opts.contextModule ?? "App",
-    foundation: "vanilla",
     agg: agg as EnrichedAggregateIR,
   };
 

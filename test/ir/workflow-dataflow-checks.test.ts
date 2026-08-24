@@ -113,6 +113,35 @@ describe("workflow-body data-flow checks (IR, phase ⑦)", () => {
     expect(c).toContain("loom.workflow-foreach-unknown-binding");
   });
 
+  // M-T9.34 drain finding: `checkBranchOpCalls` validated an if-let branch's
+  // op-call targets against the OUTER binding map only, so a `let` declared
+  // inside that branch was invisible and its own deref was reported unknown —
+  // while every backend emitter already walks into the branch bodies and wires
+  // the repository for exactly this shape (see
+  // `test/generator/dotnet/dotnet-workflow-repo-find.test.ts`, "injects a
+  // repository first used inside an if-let branch body").  The validator was
+  // the side that was wrong.
+  it("accepts an op-call on a binding declared INSIDE the if-let branch", async () => {
+    const c = await codes(
+      "if let o = Orders.find(HighP) { let w = Widgets.getById(orderId)  w.grow() }",
+    );
+    expect(c).not.toContain("loom.workflow-foreach-unknown-binding");
+  });
+
+  it("still flags an op-call on a name no branch ever bound", async () => {
+    const c = await codes(
+      "if let o = Orders.find(HighP) { let w = Widgets.getById(orderId)  ghost.grow() }",
+    );
+    expect(c).toContain("loom.workflow-foreach-unknown-binding");
+  });
+
+  it("does not leak a branch-local binding past the branch that declared it", async () => {
+    const c = await codes(
+      "if let o = Orders.find(HighP) { let w = Widgets.getById(orderId) } else { w.grow() }",
+    );
+    expect(c).toContain("loom.workflow-foreach-unknown-binding");
+  });
+
   it("accepts a `for … in` op-call on the loop variable", async () => {
     const c = await codes("let xs = Orders.run(OrderQ(High))\n        for o in xs { o.bump() }");
     expect(c).not.toContain("loom.workflow-foreach-unknown-binding");

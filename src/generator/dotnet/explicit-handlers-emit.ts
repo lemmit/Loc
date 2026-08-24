@@ -44,6 +44,7 @@ import type {
   ParamIR,
   QueryHandlerIR,
   RouteIR,
+  SystemIR,
   TypeIR,
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
@@ -54,8 +55,12 @@ import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
 import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
 import { projectEntityExpr, projectToResponse } from "./dto-mapping.js";
 import { CS_PAGED_QUERY_PARAMS } from "./emit/common.js";
-import { renderCsType } from "./render-expr.js";
-import { csWorkflowStmtTarget, renderExprWithCmdParams } from "./workflow-emit.js";
+import { API_CLIENT_CLASS, renderCsType } from "./render-expr.js";
+import {
+  buildResourceClasses,
+  csWorkflowStmtTarget,
+  renderExprWithCmdParams,
+} from "./workflow-emit.js";
 
 const INDENT = "        ";
 
@@ -182,6 +187,11 @@ function renderHandlerClass(
   ctx: EnrichedBoundedContextIR,
   agg: string,
   kind: "Command" | "Query",
+  /** resourceName → static helper class, so a resource-op in this handler body
+   *  renders as `<Class>.<Resource>_<Verb>(...)`.  Empty when the deployable
+   *  binds no adapter-backed resource — then a body containing one is a bug the
+   *  renderer still reports loudly rather than dropping. */
+  resourceClasses: Map<string, string> = new Map(),
 ): string {
   const recName = `${h.name}${kind}`;
   const handlerName = `${h.name}Handler`;
@@ -213,7 +223,7 @@ function renderHandlerClass(
   const records = recordParamNames(h, ctx);
   const flatNames = new Set(h.params.filter((p) => !records.has(p.name)).map((p) => p.name));
   const renderArg = (e: ExprIR): string =>
-    renderExprWithCmdParams(e, flatNames, undefined, undefined, records);
+    renderExprWithCmdParams(e, flatNames, resourceClasses, undefined, records);
   // Guard every getById load with `?? throw` — a handler body always
   // dereferences its load (op-call target / return projection).
   const stmtLines = renderWorkflowStmtChunks(
@@ -235,6 +245,15 @@ function renderHandlerClass(
   const aggUsings = [...new Set([...repos.values(), agg, ...(retAgg ? [retAgg] : [])])]
     .map((a) => `using ${ns}.Domain.${plural(a)};`)
     .join("\n");
+  // `<ns>.Resources` — needed iff the RENDERED body actually names one of the
+  // static helper classes (a resource-op) or the typed api client.  Scanned off
+  // the emitted text rather than the IR so an unreferenced using can't slip
+  // through and trip CS8019 under `/warnaserror`.
+  const resourceUsing = [...new Set([...resourceClasses.values()]), API_CLIENT_CLASS].some((cls) =>
+    new RegExp(`\\b${cls}\\.`).test(body),
+  )
+    ? `\nusing ${ns}.Resources;`
+    : "";
 
   return `// Auto-generated.
 using System.Threading;
@@ -243,7 +262,7 @@ using Mediator;
 using ${ns}.Domain.Common;
 using ${ns}.Domain.Ids;
 using ${ns}.Domain.ValueObjects;
-using ${ns}.Domain.Enums;
+using ${ns}.Domain.Enums;${resourceUsing}
 ${aggUsings}
 
 namespace ${ns}.Application.${plural(agg)}.${kind === "Command" ? "Commands" : "Queries"};
@@ -510,7 +529,12 @@ export function emitExplicitHandlers(
   ctx: EnrichedBoundedContextIR,
   ns: string,
   out: Map<string, string>,
+  /** The composed system, for the resource-op → helper-class routing a handler
+   *  body needs.  Absent (legacy single-context `generate dotnet`) ⇒ no
+   *  resources are bound anyway, and the output stays byte-identical. */
+  sys?: SystemIR,
 ): void {
+  const resourceClasses = buildResourceClasses(sys);
   for (const h of ctx.commandHandlers ?? []) {
     if (h.extern) {
       emitExternHandler(h, ns, "Command", out);
@@ -524,7 +548,7 @@ export function emitExplicitHandlers(
     );
     out.set(
       `Application/${plural(agg)}/Commands/${h.name}Handler.cs`,
-      renderHandlerClass(h, ns, ctx, agg, "Command"),
+      renderHandlerClass(h, ns, ctx, agg, "Command", resourceClasses),
     );
   }
   for (const h of ctx.queryHandlers ?? []) {
@@ -555,7 +579,7 @@ export function emitExplicitHandlers(
     );
     out.set(
       `Application/${plural(agg)}/Queries/${h.name}Handler.cs`,
-      renderHandlerClass(h, ns, ctx, agg, "Query"),
+      renderHandlerClass(h, ns, ctx, agg, "Query", resourceClasses),
     );
   }
 }

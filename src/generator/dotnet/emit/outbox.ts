@@ -100,6 +100,37 @@ public sealed class OutboxDomainEventDispatcher : IDomainEventDispatcher
         }
         await _inner.DispatchAsync(ev, cancellationToken);
     }
+
+    /// <summary>Transactional capture (design §1): stages the durable events'
+    /// outbox rows on the SHARED AppDbContext without saving, so the caller's
+    /// single SaveChangesAsync commits them in the same transaction as the
+    /// aggregate write.  Returns the ephemeral remainder for post-commit
+    /// dispatch.  The <paramref name="transaction"/> argument is unused on the
+    /// EF path — the scoped DbContext already IS the unit of work.</summary>
+    public Task<IReadOnlyList<IDomainEvent>> RecordDurableAsync(
+        IReadOnlyList<IDomainEvent> events,
+        System.Data.Common.DbTransaction? transaction = null,
+        CancellationToken cancellationToken = default)
+    {
+        var deferred = new List<IDomainEvent>();
+        foreach (var ev in events)
+        {
+            var type = ev.GetType().Name;
+            if (DurableEventTypes.Contains(type))
+            {
+                _db.LoomOutbox.Add(new OutboxMessage
+                {
+                    Type = type,
+                    Payload = JsonSerializer.Serialize((object)ev),
+                });
+            }
+            else
+            {
+                deferred.Add(ev);
+            }
+        }
+        return Task.FromResult<IReadOnlyList<IDomainEvent>>(deferred);
+    }
 }
 `;
 }

@@ -867,8 +867,18 @@ the conforming backends, and the fix that established it.
   wire-validation failure, and each denial rung (403 / 409 / 422) keep their own
   status and their occurrence-specific `detail`. This rule governs only the arm
   none of them matched.
-- **Trigger.** A hand-written `extern` handler returning an unmodelled error, or
-  an unexpected fault escaping a workflow's `run`.
+- **Trigger.** A hand-written `extern` handler returning an unmodelled error, an
+  unexpected fault escaping a workflow's `run`, or — the case both of those
+  presuppose away — **a fault raised anywhere else in the app**, on a system that
+  declares neither. That last one is the reason each backend needs an
+  APP-GLOBAL handler and not only per-route arms: `app.onError` (hono),
+  `DomainExceptionFilter` (.NET), `ApiExceptionAdvice` (java),
+  `install_error_handlers` (python), `<App>Web.FaultHandler` (elixir). A rule
+  checked only on the paths a fixture reaches is checked on the paths that were
+  already fine — see M-T6.30, where elixir's arm existed solely inside the
+  workflow/extern `respond/2` dispatchers, so the most common system shape
+  (CRUD, no workflow) emitted none at all and answered an HTML debug page in dev
+  and the exception's own message as `detail` in prod.
 - **Why it hid.** Elixir answered `400` and `inspect/1`'d the term straight into
   `detail`. It survived RS-15's 400 → 422 sweep *precisely because it is not the
   domain floor*: RS-15 moved the rejections the domain **makes**, and this is the
@@ -891,7 +901,11 @@ the conforming backends, and the fix that established it.
 - **Provenance.** Found 2026-07-29 by grepping the vanilla Phoenix denial
   protocol's edges after #2300 centralised it (M-T6.24). Python divergence found
   2026-08-01 by verifying the proposed `conforms` list instead of accepting it.
-  Tier: **static** — promote to behavioral once a fixture reaches the arm.
+  The third trigger above (and elixir's floor for it) landed 2026-08-23 with
+  M-T6.30, gated per-file on a plain-CRUD fixture in
+  `test/conformance/internal-fault-parity.test.ts` and witnessed on a booted
+  Phoenix app. Tier: **static** — promote to behavioral once a fixture reaches
+  the arm.
 
 ### RS-27 · A 404-**by-id** carries the sentence `"<Aggregate> <id> not found"`
 - **Guarantee.** When a read addressed **by id** finds nothing, the RFC 9457
@@ -977,6 +991,28 @@ the conforming backends, and the fix that established it.
   > cause of the whole five-part story is that the emitted `test e2e` DSL has no
   > verb for "read a key that isn't there", so the probe manufactures one from
   > the URLs each tier already requested.
+  >
+  > **And a sixth, at the last by-key read of all (2026-08-23, M-T6.39 /
+  > [#2645](https://github.com/lemmit/Loc/pull/2645)).** `GET /files/{key}` —
+  > the root file-download route over a bound `objectStore` — was the one
+  > absent-read site outside all five discoveries above, and it was wrong on
+  > **all five backends at once**: node/python/elixir answered
+  > `{"error":"not found"}` as plain `application/json`, dotnet/java answered
+  > bodiless. The bodiless pair is the subtler half — neither stays empty on the
+  > wire, because `UseStatusCodePages` and the servlet container fill a bodiless
+  > 4xx with the FRAMEWORK-miss problem, whose `detail` reads `no route for GET
+  > /files/<key>`. That sentence is false: the route exists, the OBJECT does
+  > not, so a client cannot tell a mistyped URL from a deleted upload. All five
+  > now reach their one producer with `File <key> not found` — .NET through a
+  > new static responder on `DomainExceptionFilter`, because the route is a
+  > MINIMAL API and an `IExceptionFilter` never sees a throw from one. Same
+  > gating shape as the fifth discovery: a per-SITE pin
+  > (`test/conformance/files-absent-object-envelope-parity.test.ts`) plus an
+  > absent-FILE probe on the wire-golden dispatch. The reason it survived the
+  > 2026-08-11 sweep is the same reason RS-22 listed .NET and java as conforming
+  > through all of the above — **no golden reached the route**, and none could:
+  > the routes are emitted only for a system with BOTH a `File` field and an
+  > `objectStore`, and no corpus fixture had one until `file-download.ddd`.
 - **The real rule: don't hand-roll a 404.** This was not five backends inventing
   five strings. **Two agreed out of the box**, because on each the message comes
   from one shared producer — the repository's `getById`

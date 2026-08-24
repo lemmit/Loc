@@ -46,8 +46,10 @@ const phoenixSystem = (uiBody: string): string => `
         body: ${uiBody}
       }
     }
+    storage loomDb { type: postgres }
+    resource cState { for: C, kind: state, use: loomDb }
     deployable phoenixApp {
-      platform: elixir, contexts: [C], serves: DemoApi,
+      platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
       ui: DemoUi, port: 4000
     }
   }
@@ -76,7 +78,14 @@ describe("HEEx primitive — testid: emits data-testid (renderPrimitive)", () =>
       dsl: `Stack { testid: "s", Text { "x" } }`,
       tagRx: /<div [^>]*data-testid="s"/,
     },
-    { name: "Card", dsl: `Card { testid: "c", Text { "x" } }`, tagRx: /<div [^>]*data-testid="c"/ },
+    // Card / Paper render through the PACK's `<.card>` function component (the
+    // card surface is design vocabulary — daisyUI `card card-body` vs neutral
+    // Tailwind), not a bare `<div>`, so their tag pin names the component.
+    {
+      name: "Card",
+      dsl: `Card { testid: "c", Text { "x" } }`,
+      tagRx: /<\.card [^>]*data-testid="c"/,
+    },
     {
       name: "Button",
       dsl: `Button { "Click", testid: "b" }`,
@@ -103,7 +112,7 @@ describe("HEEx primitive — testid: emits data-testid (renderPrimitive)", () =>
     {
       name: "Paper",
       dsl: `Paper { testid: "p", Text { "x" } }`,
-      tagRx: /<div [^>]*data-testid="p"/,
+      tagRx: /<\.card [^>]*data-testid="p"/,
     },
     {
       name: "Grid",

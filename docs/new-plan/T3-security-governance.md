@@ -133,25 +133,23 @@ Sources: `docs/auth.md` (D-AUTH-OIDC), `docs/tenancy.md`; pairs with M-T3.13 (st
 
 ---
 
-## M-T3.17 — The tenancy subtree read is correct but no longer index-usable — `open` · **M** · P2
+## M-T3.17 — The tenancy subtree read is correct but no longer index-usable — `done` · **M** · P2
 
-**Context.** The `deep`/`global` descendant test used to be `data_key LIKE <anchor> || '.%'`, which rode the `text_pattern_ops` index the tenancy migration derives (`tenant-index.test.ts`). That spelling was a **cross-tenant read**: the anchor is a principal claim, so `_`/`%` inside it were LIKE wildcards, and an org named `acme_corp` matched `acmeXcorp.…`. Fixed by anchoring the test instead:
+**Context.** The `deep`/`global` descendant test used to be `data_key LIKE <anchor> || '.%'`, which rode the `text_pattern_ops` index the tenancy migration derives (`tenant-index.test.ts`). That spelling was a **cross-tenant read**: the anchor is a principal claim, so `_`/`%` inside it were LIKE wildcards, and an org named `acme_corp` matched `acmeXcorp.…`. #2562 fixed it by anchoring the test instead — `strpos(data_key, <anchor> || '.') = 1` — which has no pattern language and so needs no ESCAPE discipline. Correct, and **not sargable**: Postgres cannot use a btree/`text_pattern_ops` index for a function-of-column predicate, so every deep/global read became a sequential scan.
+
+**Shipped (#2656) — option 1, but as a PREFILTER rather than a replacement.** The descendant test is now two terms, identical on every backend that renders the `scope` sentinel:
 
 ```
-strpos(data_key, <anchor> || '.') = 1
+data_key LIKE <escaped-anchor> || '.%' ESCAPE '!'   -- sargable prefilter
+  AND strpos(data_key, <anchor> || '.') = 1         -- unchanged from #2562; decides the row
 ```
 
-which has no pattern language and so needs no ESCAPE discipline. Correct — and **not sargable**. Postgres cannot use a btree/`text_pattern_ops` index for a function-of-column predicate, so every deep/global read is now a sequential scan over the aggregate's table. The index is still derived (it serves equality, and any future sargable form), but nothing uses it for the subtree read.
+Keeping the anchored test as a **conjunct** is what defuses option 1's stated risk ("an escaping bug reintroduces the leak silently"): a LIKE-escaping mistake can only make the prefilter *wider*, and the recheck then discards the extra rows, so the `orgXa.leak` trap is green by construction, not by trusting five escape helpers. Measured, not asserted: the planner rewrites the escaped LIKE to `data_key ~>=~ 'org_7.' AND data_key ~<~ 'org_7/'` and takes a Bitmap Index Scan on `accounts_data_key_idx` (cost 232) where the `strpos`-only form was a Seq Scan (cost 607).
 
-**Why it was taken anyway.** A wrong answer is worse than a slow one, and the leak was live on four backends. The perf cost is invisible until a tenant table is large, which is exactly when it hurts.
+No DDL or collation change was needed — the `text_pattern_ops` opclass P2.5 already derives is exactly the index a prefix LIKE rides under any collation. Option 3 (half-open range) was rejected for the reason the mission flagged: `data_key >= a || '.' AND data_key < a || '/'` is the descendant set only under the C collation, and every ORM's `>=` uses the column's collation, so it would have meant an `ALTER … COLLATE "C"` across two migration emitters with a silent false-negative failure mode. Option 2 (`^@`) needs a second index kind and is not expressible in JPQL/EF LINQ without raw SQL.
 
-**The options, none free.**
+Escape character is `!`, not `\` — the pattern is spelled in five generated languages plus HQL, and backslash is the one character whose literal meaning differs between them. The five escape chains live together in `src/generator/_expr/subtree-like.ts`.
 
-1. **Escaped LIKE** — keep `LIKE <pattern> ESCAPE '\'` and escape `\`, `%`, `_` in the claim at the point the pattern is built. Sargable AND correct. Costs a per-backend runtime escape helper (5 spellings, and the ESCAPE clause differs), and an escaping bug reintroduces the leak silently — the failure mode this mission exists to avoid.
-2. **`^@` / `starts_with()`** — Postgres 11+ has a starts-with operator with SP-GiST support. Would need a second index kind on `data_key` and is Postgres-only, so the other SQL dialects still need an answer.
-3. **Half-open range** — `data_key >= p AND data_key < p || <max>`. Sargable, no pattern language, but collation-sensitive at the boundary.
-4. **Accept it** — document the scan and revisit when a tenant table is measured slow.
+**Verification.** `test/e2e/tenancy-subtree-explain.test.ts` (`LOOM_TENANCY_E2E=1`) builds the schema from the emitted migration SQL, lifts the predicate verbatim out of a generated repository, seeds 20k rows, and asserts `Index Scan`/`Index Cond` on `accounts_data_key_idx` for both the MikroORM and Ecto spellings. `test/ir/tenancy-subtree-prefix.test.ts` pins the negative half per backend (no LIKE without an ESCAPE clause; no pattern built from a raw claim); `test/generator/policy-deep-scope.test.ts` pins prefilter-AND-recheck on all five. The `orgXa.leak` trap in `assertHierarchyIsolation` is unchanged and still green.
 
-**Verification.** Whatever is chosen must keep the `orgXa` / `orgXa.leak` wildcard trap in `assertHierarchyIsolation` green on all five backends (it fails on the LIKE form), and should add an `EXPLAIN`-level assertion that the subtree read uses the index — otherwise the sargability claim is prose again, which is how the first version went wrong.
-
-Sources: the leak and its fix are [#2562](https://github.com/lemmit/Loc/pull/2562); the sargability loss was flagged in the #2521 review that noted `strpos` cannot ride the prefix index the `startsWith` queryability rationale assumes.
+Sources: the leak and its fix are [#2562](https://github.com/lemmit/Loc/pull/2562); the sargability loss was flagged in the #2521 review; the fix is [#2656](https://github.com/lemmit/Loc/pull/2656).

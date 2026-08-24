@@ -53,7 +53,9 @@ describe("Table primitive", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [C], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], serves: SalesApi, port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -66,8 +68,10 @@ describe("Table primitive", () => {
     expect(tsx).toBeDefined();
     expect(tsx).toMatch(/import \{[^}]*\bTable\b[^}]*\} from "@mantine\/core"/);
     expect(tsx).toMatch(/<Table\.Thead>/);
-    expect(tsx).toMatch(/<Table\.Th>ID<\/Table\.Th>/);
-    expect(tsx).toMatch(/<Table\.Th>Status<\/Table\.Th>/);
+    expect(tsx).toMatch(/<Table\.Th>\{t\("page\.\w+\.columnHeader\.\w+", "ID"\)\}<\/Table\.Th>/);
+    expect(tsx).toMatch(
+      /<Table\.Th>\{t\("page\.\w+\.columnHeader\.\w+", "Status"\)\}<\/Table\.Th>/,
+    );
     expect(tsx).toMatch(/<Table\.Tbody>/);
     // The auto-injected hook for `Sales.Order.all` becomes a local
     // `orderAll` (or similar); we just check that some hook variable
@@ -99,7 +103,9 @@ describe("Table primitive", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [C], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], serves: SalesApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
@@ -128,7 +134,9 @@ describe("Table primitive", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [C], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], serves: SalesApi, port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -164,7 +172,9 @@ describe("Table primitive", () => {
             }
           }
         }
-        deployable api { platform: node, contexts: [C], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], serves: SalesApi, port: 3000 }
         deployable web {
           platform: static
           targets: api
@@ -195,7 +205,9 @@ describe("Table primitive", () => {
             body:  Table { rows: Sales.Order.all }
           }
         }
-        deployable api { platform: node, contexts: [C], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], serves: SalesApi, port: 3000 }
         deployable web {
           platform: static
           targets: api
