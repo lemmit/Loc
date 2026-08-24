@@ -492,19 +492,33 @@ export const angularTarget: WalkerTarget = {
   /** Angular property binding — `[name]="expr"`, leading space included.
    *  The expression is quoted, so pick the quote the rendered JS doesn't
    *  use (JS string literals render double-quoted via JSON.stringify, so
-   *  a `"`-bearing expression binds single-quoted).  An expression
-   *  carrying BOTH quote kinds can't be attribute-quoted — fail loud
-   *  rather than emit a template that won't compile. */
+   *  a `"`-bearing expression binds single-quoted).
+   *
+   *  An expression carrying BOTH quote kinds is ESCAPED, not rejected:
+   *  Angular's template parser decodes HTML entities in an attribute value
+   *  BEFORE compiling the expression, so `&quot;` inside a `"`-delimited
+   *  binding round-trips to a `"` in the expression.  This used to `throw`,
+   *  which aborted the WHOLE `ddd generate system` run with a stack trace —
+   *  and under i18n every bound label is `t("<key>", "<default>")`, so a
+   *  single apostrophe in authored text ("Bob's") was enough to reach it
+   *  (audit finding A15).  Vue hit the identical shape first and answered it
+   *  the same way (`quoteAttrExpr`, finding B21) — every valid `.ddd`
+   *  expression must render on every frontend. */
   renderAttrBinding(name: string, jsExpr: string): string {
     if (!jsExpr.includes('"')) return ` [${name}]="${jsExpr}"`;
     if (!jsExpr.includes("'")) return ` [${name}]='${jsExpr}'`;
-    throw new Error(
-      `angularTarget.renderAttrBinding: expression for '[${name}]' mixes single and double quotes — cannot be attribute-quoted. Simplify the expression (e.g. avoid apostrophes inside string literals used in bindings).`,
-    );
+    // `&` first, so a literal `&` in the expression cannot combine with the
+    // entity injected next (`&` + `quot;` would decode as a stray `"`).
+    return ` [${name}]="${jsExpr.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"`;
   },
   // A bound plain HTML attribute (aria-label) needs `[attr.…]`, not `[…]`
   // (which would target a non-existent element property — `ng build` error).
   ariaAttrPrefix: "attr.",
+
+  // A static link stays `[routerLink]='"/orders"'` — the property binding the
+  // Angular packs have always emitted — rather than the plain `routerLink="…"`
+  // attribute the other frontends use.  See `WalkerTarget.navAttrAlwaysBound`.
+  navAttrAlwaysBound: true,
 
   /** `@if (cond) { … } @else { … }` control-flow block pair.  Angular
    *  template expressions can't evaluate to markup, so conditional

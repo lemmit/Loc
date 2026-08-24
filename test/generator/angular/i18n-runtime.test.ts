@@ -249,6 +249,31 @@ describe("Angular i18n runtime", () => {
     );
   });
 
+  // ---------------------------------------------------------------------
+  // A15 — an APOSTROPHE in translated attribute text used to abort the run.
+  //
+  // Under i18n every bound label is `t("<key>", "<default>")`, which already
+  // carries double quotes; one apostrophe in the authored default made the
+  // expression carry BOTH quote kinds, and `angularTarget.renderAttrBinding`
+  // THREW on that — taking down the entire `ddd generate system` call with a
+  // stack trace, not a `loom.*` diagnostic.  Angular decodes HTML entities in
+  // an attribute value before compiling the binding, so the both-quote case
+  // escapes (`"` → `&quot;`) exactly as Vue's `quoteAttrExpr` does.
+  // ---------------------------------------------------------------------
+  it("an apostrophe in a translated attribute renders (never aborts the run)", async () => {
+    const src = SYSTEM(`Icon { name: "check", label: "Bob's badge" }`);
+    const files = await generateSystemFiles(src);
+    const home = homeOf(files);
+    // The binding survives, delimited by `"` with the expression's own `"`
+    // entity-escaped — and the apostrophe is left intact inside it.
+    expect(home).toMatch(
+      /\[attr\.aria-label\]="t\(&quot;page\.Home\.iconLabel\.\w+&quot;, &quot;Bob's badge&quot;\)"/,
+    );
+    // …and the catalog still carries the untouched source string.
+    const catalog = [...files].find(([p]) => p.endsWith(".loom/messages.en.json"))![1];
+    expect(catalog).toContain("Bob's badge");
+  });
+
   it("translates the CodeBlock caption (codeBlockTitle) — but never the code", async () => {
     const files = await generateSystemFiles(
       SYSTEM(`CodeBlock { "let total = 1", language: "typescript", title: "Example" }`),

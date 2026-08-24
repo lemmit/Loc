@@ -240,3 +240,100 @@ describe("HEEx primitive — testid: omitted leaks no attribute", () => {
     expect(heex).not.toMatch(/testid=""/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// THE FUNNEL — every `testid:` rides `testIdAttr` → `attrValue` (audit §C row 6).
+//
+// The bespoke renderers each hand-rolled ` data-testid="${testid}"` off an
+// `arg.kind === "literal"` scan.  Two bugs in one shape, on ~19 primitives:
+//
+//   1. a DYNAMIC `testid:` (a route param, a state field, a concatenation) was
+//      SILENTLY DROPPED — the literal-only scan never matched it, so the
+//      attribute vanished, while the JSX targets bind it;
+//   2. the literal was spliced UNESCAPED — one `"` in the value closes the
+//      attribute early and the page stops being parseable HEEx.
+//
+// `testIdAttr` (`heex-primitives.ts`) already did both correctly, so the fix is
+// that every renderer now routes through it.  The two properties below are
+// funnel-level: they must hold for every primitive listed, and a renderer that
+// re-hand-rolls the attribute fails them.
+// ---------------------------------------------------------------------------
+
+/** The same system, but the page takes a route param — so `tid` is an
+ *  assign (`@tid`), i.e. a genuinely DYNAMIC attribute value. */
+const paramSystem = (uiBody: string): string =>
+  phoenixSystem(uiBody).replace(
+    'page Landing {\n        route: "/"',
+    'page Landing(tid: string) {\n        route: "/:tid"',
+  );
+
+describe("HEEx testid funnel — dynamic values bind, literals escape", () => {
+  // One call per bespoke renderer that used to hand-roll the attribute, each
+  // with a `testid:` reading the page's route param.
+  const DYNAMIC: ReadonlyArray<{ name: string; dsl: string }> = [
+    { name: "Alert", dsl: `Alert("oops", testid: tid)` },
+    { name: "IdLink", dsl: `IdLink("123", of: Doc, testid: tid)` },
+    { name: "DateDisplay", dsl: `DateDisplay(now(), testid: tid)` },
+    { name: "EnumBadge", dsl: `EnumBadge(Status.Open, testid: tid)` },
+    { name: "KeyValueRow", dsl: `KeyValueRow("k", Text { "v" }, testid: tid)` },
+    { name: "Skeleton", dsl: `Skeleton(count: 2, testid: tid)` },
+    { name: "Divider", dsl: `Divider(label: "or", testid: tid)` },
+    { name: "Heading", dsl: `Heading("H", level: 2, testid: tid)` },
+    { name: "Loader", dsl: `Loader(testid: tid)` },
+    { name: "Stat", dsl: `Stat("Total", "7", testid: tid)` },
+  ];
+
+  for (const { name, dsl } of DYNAMIC) {
+    it(`${name}: a dynamic testid binds as an expression attribute`, async () => {
+      const heex = findLandingHeex(await generateSystemFiles(paramSystem(dsl)));
+      // The expression rides `{…}` — never a quoted literal (`data-testid="@tid"`
+      // is the literal text "@tid"), and never nothing at all.
+      expect(heex).toContain("data-testid={@tid}");
+    });
+  }
+
+  it("a literal testid carrying a quote is entity-escaped, not spliced raw", async () => {
+    // A raw `"` closes the attribute and the rest of the value becomes stray
+    // attribute names — a HEEx tokenizer ParseError at `mix compile`.
+    const heex = findLandingHeex(
+      await generateSystemFiles(phoenixSystem(`Alert("oops", testid: "a\\"b")`)),
+    );
+    expect(heex).toContain(`data-testid="a&quot;b"`);
+    expect(heex).not.toContain(`data-testid="a"b"`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A21 — an Anchor with NO `to:` used to emit `<.link navigate={}>`.
+//
+// An empty HEEx expression attribute is a tokenizer ParseError, so a single
+// destination-less Anchor (a breadcrumb leaf, a plain label) failed `mix
+// compile` for the WHOLE LiveView app.  The JSX family renders the same call as
+// a bare `<Anchor>`/`<a>`, Feliz as `Html.span`; HEEx now spells it `<span>`,
+// which is what `renderIdLink` already does for its own no-destination case.
+// ---------------------------------------------------------------------------
+describe("HEEx Anchor — a destination-less link is a span, not an empty binding", () => {
+  it("renders <span>, never `navigate={}`", async () => {
+    const heex = findLandingHeex(await generateSystemFiles(phoenixSystem(`Anchor { "Just text" }`)));
+    expect(heex).not.toContain("navigate={}");
+    expect(heex).toMatch(/<span[^>]*>(<%= pgettext\([^)]*\) %>|Just text)<\/span>/);
+  });
+
+  it("keeps the testid on the degraded span", async () => {
+    const heex = findLandingHeex(
+      await generateSystemFiles(phoenixSystem(`Anchor { "Just text", testid: "a-x" }`)),
+    );
+    expect(heex).toMatch(/<span data-testid="a-x">/);
+  });
+
+  it("still links when `to:` IS given (literal and dynamic)", async () => {
+    const lit = findLandingHeex(
+      await generateSystemFiles(phoenixSystem(`Anchor { "Go", to: "/docs" }`)),
+    );
+    expect(lit).toContain(`<.link navigate={~p"/docs"}>`);
+    const dyn = findLandingHeex(
+      await generateSystemFiles(paramSystem(`Anchor { "Go", to: "/docs/" + tid }`)),
+    );
+    expect(dyn).toContain(`<.link navigate={"/docs/" <> @tid}>`);
+  });
+});

@@ -653,8 +653,17 @@ describe("WalkerTarget — angularTarget (angular-frontend-plan.md)", () => {
     expect(angularTarget.renderAttrBinding("data-testid", '"row-" + id')).toBe(
       " [data-testid]='\"row-\" + id'",
     );
-    expect(() => angularTarget.renderAttrBinding("x", `"a" + 'b'`)).toThrow(
-      /mixes single and double/,
+    // A both-quote expression ESCAPES rather than throwing (A15): Angular
+    // decodes entities in an attribute value before compiling the binding, so
+    // `&quot;` round-trips to `"`.  It used to throw, which aborted the whole
+    // generation on one apostrophe inside a translated label.
+    expect(angularTarget.renderAttrBinding("x", `"a" + 'b'`)).toBe(
+      ` [x]="&quot;a&quot; + 'b'"`,
+    );
+    // `&` is escaped first so a literal `&` cannot combine with the injected
+    // entity (`&` + `quot;` would decode as a stray `"`).
+    expect(angularTarget.renderAttrBinding("x", `"a&b" + 'c'`)).toBe(
+      ` [x]="&quot;a&amp;b&quot; + 'c'"`,
     );
   });
 

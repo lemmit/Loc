@@ -721,7 +721,11 @@ export const flutterTarget: WalkerTarget = {
     const tid = testidAttr(call, ctx)
       .trim()
       .match(/^data-testid="(.*)"$/);
-    const key = tid ? `key: const Key('${tid[1]}'), ` : "";
+    // `dartString`, not a hand-rolled `'…'`: a testid carrying a quote, a
+    // backslash or a `$` (Dart's interpolation sigil) would otherwise close
+    // the literal early / interpolate — the same escaping the pack's
+    // `testidKey` applies to every other primitive's key.
+    const key = tid ? `key: const Key(${dartString(tid[1] ?? "")}), ` : "";
     const changeRow = "Text('${c.field}: ${c.before ?? '—'} → ${c.after ?? '—'}')";
     const entry =
       `Padding(key: ValueKey(e.auditId), padding: const EdgeInsets.symmetric(vertical: 8), ` +

@@ -473,6 +473,26 @@ registers these helpers globally:
   `value={{expr valueExpr}}`.
 - `json <value>` — JSON-stringifies the value.  Use for inline
   literals: `defaultRadius={{json radius}}`.
+
+Some view-models additionally carry a **context function** — called like a
+helper, but supplied per render by the walker because its output is
+framework-shaped.  `primitive-anchor` has one:
+
+- `navAttr "<attr>"` — the whole link attribute (leading space included) for
+  the `Anchor(to:)` destination.  The PACK picks the attribute name (`to` on a
+  React `RouterLink`, `href` on a plain `<a>`, `routerLink` on Angular); the
+  walker picks the spelling, so a literal path renders `to="/orders"` while a
+  computed one (`to: "/greet/" + who`) renders the framework's bound form
+  (` to={…}` / ` :to="…"` / ` [routerLink]="…"`).  Splice it with a triple
+  stache and NO `=`:
+
+  ```hbs
+  {{#if hasTo}}<a class="loom-anchor"{{{navAttr "href"}}}>{{{label}}}</a>{{else}}…{{/if}}
+  ```
+
+  Spelling the attribute by hand (`href={{{to}}}`) drops every computed
+  destination on the floor — `to` is the bare expression, kept only for the two
+  procedural packs (Feliz, Flutter) whose output is not HTML.
 - Standard Handlebars: `{{#each}}`, `{{#if}}`, `{{#unless}}`,
   `{{> partial-name}}`, etc.
 

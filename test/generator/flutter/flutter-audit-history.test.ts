@@ -159,3 +159,67 @@ describe("flutter entity-history — read provider + wire models + Timeline", ()
     expect(hits).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The Timeline's `testid:` → widget `Key` — Dart-ESCAPED (audit §D item 12).
+//
+// `renderTimeline` hand-rolled `Key('${tid[1]}')` around the raw testid,
+// bypassing `dartString` — the one place in the Flutter emitter that escapes a
+// string literal.  A `'`, a `\` or a `$` (Dart's interpolation sigil) in the
+// value therefore closed the literal early or interpolated a name that does not
+// exist: uncompilable Dart from a valid `.ddd`.  Every OTHER Flutter primitive
+// routes its key through the pack's `testidKey`, which does escape.
+// ---------------------------------------------------------------------------
+const historySystem = (testid: string): string => `
+  system HistoryDemo {
+    subdomain Ordering {
+      context Ordering {
+        aggregate Order audited with crudish {
+          reference: string
+          quantity: int
+        }
+        repository Orders for Order { }
+      }
+    }
+    api OrderingApi from Ordering
+    ui Web {
+      api Ops: OrderingApi
+      page OrderHistory(id: string) {
+        route: "/orders/:id/history"
+        body: QueryView {
+          of: Ops.Order.history(id),
+          data: entries => Timeline(of: entries, testid: ${JSON.stringify(testid)})
+        }
+      }
+    }
+    storage primary { type: postgres }
+    resource orderingState { for: Ordering, kind: state, use: primary }
+    deployable api {
+      platform: node, contexts: [Ordering], dataSources: [orderingState],
+      serves: OrderingApi, port: 3000
+    }
+    deployable web { platform: flutter, targets: api, ui: Web { Ops: api }, port: 3001 }
+  }
+`;
+
+describe("flutter Timeline — the testid Key is Dart-escaped", () => {
+  it("escapes an apostrophe instead of closing the literal", async () => {
+    const files = await generateSystemFiles(historySystem("it's-x"));
+    const page = fileOf(files, "web/lib/pages/order_history_page.dart");
+    expect(page).toContain(String.raw`key: const Key('it\'s-x')`);
+    // The unescaped spelling is uncompilable Dart (`Key('it's-x')`).
+    expect(page).not.toContain("Key('it's-x')");
+  });
+
+  it("escapes Dart's `$` interpolation sigil", async () => {
+    const files = await generateSystemFiles(historySystem("total-$id"));
+    const page = fileOf(files, "web/lib/pages/order_history_page.dart");
+    expect(page).toContain(String.raw`key: const Key('total-\$id')`);
+  });
+
+  it("leaves an ordinary testid byte-identical", async () => {
+    const files = await generateSystemFiles(historySystem("order-timeline"));
+    const page = fileOf(files, "web/lib/pages/order_history_page.dart");
+    expect(page).toContain("key: const Key('order-timeline')");
+  });
+});

@@ -254,9 +254,12 @@ function primitiveAnchor(c: Ctx): string {
   // branch needs the Badge/Button split, since `prop.text` takes a string.
   const label = String(c.label ?? "");
   if (!c.hasTo) return `Html.span [ ${asChild(label)} ]`;
-  const to = String(c.to ?? '"/"');
-  const lit = to.match(/^"(.*)"$/);
-  const href = lit ? `"${lit[1]}"` : `${to}`;
+  // `to` arrives as an F# EXPRESSION (the walker renders it through the target's
+  // own leaf table): `"/products"` for a literal path, `"/greet/" + who` for a
+  // computed one.  Used verbatim — it used to be unwrapped from a JS-quoted
+  // literal, which meant a computed destination arrived as JS and was spliced
+  // into F# source (finding A12).
+  const href = String(c.to ?? '"/"');
   const inner = textOrChildren(label);
   // Plain daisyUI `link` (underlined, inherits `base-content`) — NOT
   // `link-primary`: several daisyUI themes' primary colour fails WCAG AA on

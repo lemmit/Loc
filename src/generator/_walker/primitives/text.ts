@@ -16,6 +16,8 @@ import {
 import type { WalkContext } from "../walker-core.js";
 import {
   emitExpr,
+  navArgValue,
+  navAttrFragment,
   stringOrRefArgValue,
   styleAttr,
   styleWith,
@@ -130,13 +132,23 @@ export function emitAnchor(
   // Anchor("label", to: "/path") — text-style link.  With `to:`,
   // routes via React Router's Link; without, falls through to a
   // bare anchor (no href — visible no-op).
+  //
+  // `to:` takes ANY expression (`to: "/greet/" + who`), not just a literal path:
+  // the pack splices the destination through `{{{navAttr "<attr>"}}}`, which
+  // spells a static path as a plain attribute and a computed one as the
+  // framework's bound attribute (A12).
   void depth;
-  const to = stringOrRefArgValue(call, "to", ctx);
-  if (to) ctx.usesRouterLink = true;
+  const nav = navArgValue(call, "to", ctx);
+  if (nav) ctx.usesRouterLink = true;
   return renderPrimitive(ctx, "primitive-anchor", {
     label: localizedText(call, ctx, "anchor", '"link"'),
-    to,
-    hasTo: to !== undefined,
+    // The pack names the attribute; the walker owns its framework spelling.
+    navAttr: (name: unknown) => navAttrFragment(nav, ctx, String(name)),
+    // The destination as a bare EXPRESSION in the target's own language — what
+    // the two procedural packs (Feliz's `prop.href`, Flutter's `pushNamed`)
+    // consume, since neither renders HTML attributes.
+    to: nav?.expr,
+    hasTo: nav !== undefined,
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
   });

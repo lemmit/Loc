@@ -101,7 +101,7 @@ export function renderBreadcrumbs(
 export function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let label = "";
   let toLiteral: string | undefined;
-  let toExpr = "";
+  let toExpr: string | undefined;
   const positional: ExprIR[] = [];
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -124,6 +124,14 @@ export function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
     }
     return `<a href="${toLiteral}"${testidAttr}>${label}</a>`;
   }
+  // NO `to:` at all — a breadcrumb leaf / plain label, exactly what the JSX
+  // family renders as a bare `<Anchor>`/`<a>` and Feliz as `Html.span`.  This
+  // used to fall into the dynamic branch below with an EMPTY expression,
+  // emitting `<.link navigate={}>` — an empty HEEx expression attribute, which
+  // is a tokenizer ParseError at `mix compile`: one linkless Anchor took the
+  // whole LiveView app out (audit finding A21).  `renderIdLink` already spells
+  // the same no-destination case as a `<span>`.
+  if (toExpr === undefined) return `<span${testidAttr}>${label}</span>`;
   // Dynamic route expression — emit it as a HEEx expression attribute.
   return `<.link navigate={${toExpr}}${testidAttr}>${label}</.link>`;
 }
@@ -235,16 +243,14 @@ ${heading}${childrenHeex}
 
   // Trigger button surface from the `trigger: Button(...)` arg.
   let label = humanize(opName);
-  let testid = "";
   if (triggerExpr && triggerExpr.kind === "call" && triggerExpr.name === "Button") {
     for (let i = 0; i < triggerExpr.args.length; i++) {
       const n = triggerExpr.argNames?.[i];
       const a = triggerExpr.args[i]!;
       if (!n && a.kind === "literal") label = a.value;
-      else if (n === "testid" && a.kind === "literal") testid = a.value;
     }
   }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const heading = title || humanize(opName);
 
   const inputs =
@@ -1042,13 +1048,7 @@ export function renderKeyValueRow(
   expr: Extract<ExprIR, { kind: "call" }>,
   ctx: WalkContext,
 ): string {
-  let testid = "";
-  for (let i = 0; i < expr.args.length; i++) {
-    const name = expr.argNames?.[i];
-    const arg = expr.args[i]!;
-    if (name === "testid" && arg.kind === "literal") testid = arg.value;
-  }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   // The row label is a user-visible slot (`keyValue`), so a plain literal rides
   // the translation runtime under i18n (M-T1.11) and stays raw otherwise.
@@ -1063,19 +1063,16 @@ export function renderKeyValueRow(
 }
 
 /** `Skeleton(count: N)` → `<div class="animate-pulse">` repeated loading lines. */
-export function renderSkeleton(expr: Extract<ExprIR, { kind: "call" }>, _ctx: WalkContext): string {
+export function renderSkeleton(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let count = 3;
-  let testid = "";
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (name === "count" && arg.kind === "literal") {
       count = parseInt(arg.value, 10) || 3;
-    } else if (name === "testid" && arg.kind === "literal") {
-      testid = arg.value;
     }
   }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const lines = Array.from(
     { length: count },
     () => `  <div class="h-4 bg-gray-200 rounded animate-pulse mb-2"></div>`,
@@ -1113,17 +1110,15 @@ export function renderAlert(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   let color = "red";
   let message = "";
   let title = "";
-  let testid = "";
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   if (positionals[0]) message = renderInTemplate(positionals[0], ctx, "alert");
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (name === "color" && arg.kind === "literal") color = arg.value;
-    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
     else if (name === "title") title = renderInTemplate(arg, ctx, "alertTitle");
   }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const titleEl = title ? `<p class="font-medium">${title}</p>` : "";
   return `<div class="alert ${alertVariant(color)}" role="alert"${testidAttr}>${titleEl}${message}</div>`;
 }
@@ -1131,7 +1126,6 @@ export function renderAlert(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
 /** `IdLink(value, of: Aggregate)` → `<.link navigate={...}>value</.link>` */
 export function renderIdLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let aggName = "";
-  let testid = "";
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const valueExpr = positionals[0];
   const valueHeex = valueExpr ? renderInTemplate(valueExpr, ctx) : "";
@@ -1139,9 +1133,8 @@ export function renderIdLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (name === "of" && arg.kind === "ref") aggName = snake(plural(arg.name));
-    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
   }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   if (aggName && valueExpr) {
     const idVal = renderExpr(valueExpr, { ...ctx, position: "template" });
     return `<.link navigate={~p"/${aggName}/#{${idVal}}"}${testidAttr}>${valueHeex}</.link>`;
@@ -1155,13 +1148,7 @@ export function renderIdLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
  *  optional `File?` that is `nil` renders an em-dash (a required `File` is
  *  always truthy). */
 export function renderFileLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  let testid = "";
-  for (let i = 0; i < expr.args.length; i++) {
-    const name = expr.argNames?.[i];
-    const arg = expr.args[i]!;
-    if (name === "testid" && arg.kind === "literal") testid = arg.value;
-  }
-  const testidAttr = testid ? ` data-testid="${escapeHeexAttr(testid)}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const valueArg = namedArg(expr, "value") ?? positionals[0];
   if (!valueArg) return `<span${testidAttr}>—</span>`;
@@ -1268,13 +1255,7 @@ export function renderDateDisplay(
   expr: Extract<ExprIR, { kind: "call" }>,
   ctx: WalkContext,
 ): string {
-  let testid = "";
-  for (let i = 0; i < expr.args.length; i++) {
-    const name = expr.argNames?.[i];
-    const arg = expr.args[i]!;
-    if (name === "testid" && arg.kind === "literal") testid = arg.value;
-  }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const dateExpr = positionals[0];
   if (!dateExpr) return `<time${testidAttr}></time>`;
@@ -1284,13 +1265,7 @@ export function renderDateDisplay(
 
 /** `EnumBadge(enum_value)` → `<.badge>` with the enum value. */
 export function renderEnumBadge(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  let testid = "";
-  for (let i = 0; i < expr.args.length; i++) {
-    const name = expr.argNames?.[i];
-    const arg = expr.args[i]!;
-    if (name === "testid" && arg.kind === "literal") testid = arg.value;
-  }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const val = positionals[0] ? renderInTemplate(positionals[0], ctx) : "";
   return `<span class="badge badge-enum"${testidAttr}>${val}</span>`;
@@ -1430,7 +1405,6 @@ export function renderStack(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
  *  typography so the visual result is unchanged. */
 export function renderHeading(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let level: number | undefined;
-  let testid = "";
   const positional: ExprIR[] = [];
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -1439,13 +1413,11 @@ export function renderHeading(expr: Extract<ExprIR, { kind: "call" }>, ctx: Walk
       positional.push(arg);
     } else if (name === "level" && arg.kind === "literal") {
       level = Number(arg.value);
-    } else if (name === "testid" && arg.kind === "literal") {
-      testid = arg.value;
     }
   }
   const rank = level ?? Math.min(6, 2 + (ctx.headingDepth ?? 0));
   const text = positional[0] ? renderInTemplate(positional[0], ctx, "heading") : "";
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   return `<h${rank} class="text-lg font-semibold leading-8 text-zinc-800"${testidAttr}>${text}</h${rank}>`;
 }
 export function renderText(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
@@ -1472,15 +1444,13 @@ export function renderInlineCode(
  *  translating text the app never showed.  Every JSX pack composes the same
  *  three-element form for exactly this reason (#2388), so HEEx does too. */
 export function renderDivider(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  let testid = "";
   let label = "";
   for (let i = 0; i < expr.args.length; i++) {
     const arg = expr.args[i]!;
     const name = expr.argNames?.[i];
-    if (name === "testid" && arg.kind === "literal") testid = arg.value;
-    else if (name === "label") label = renderInTemplate(arg, ctx, "dividerLabel");
+    if (name === "label") label = renderInTemplate(arg, ctx, "dividerLabel");
   }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   if (!label) return `<hr${testidAttr} />`;
   return (
     `<div class="flex items-center gap-3 my-4"${testidAttr}>` +
@@ -1509,12 +1479,7 @@ export function renderImage(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
 /** `Stat(label, value)` → a small headline-stat block (dimmed label +
  *  bold value), the HEEx analogue of the TSX `primitive-stat` template. */
 export function renderStat(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  let testid = "";
-  for (let i = 0; i < expr.args.length; i++) {
-    const arg = expr.args[i]!;
-    if (expr.argNames?.[i] === "testid" && arg.kind === "literal") testid = arg.value;
-  }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const label = positionals[0] ? renderInTemplate(positionals[0], ctx, "statLabel") : "";
   const value = positionals[1] ? renderInTemplate(positionals[1], ctx, "statValue") : "";
@@ -1544,13 +1509,8 @@ export function renderAvatar(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
 
 /** `Loader(size?)` → an animated spinner.  The optional `size:` is dropped
  *  (a single spinner size, like the packs that don't vary it). */
-export function renderLoader(expr: Extract<ExprIR, { kind: "call" }>, _ctx: WalkContext): string {
-  let testid = "";
-  for (let i = 0; i < expr.args.length; i++) {
-    const arg = expr.args[i]!;
-    if (expr.argNames?.[i] === "testid" && arg.kind === "literal") testid = arg.value;
-  }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+export function renderLoader(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  const testidAttr = testIdAttr(expr, ctx);
   return `<div class="animate-spin h-6 w-6 rounded-full border-2 border-gray-300 border-t-transparent" role="status" aria-label="Loading"${testidAttr}></div>`;
 }
 
@@ -1572,7 +1532,6 @@ export function renderLoader(expr: Extract<ExprIR, { kind: "call" }>, _ctx: Walk
  *  third.  The TYPED money cast (`string(x: money)` in `render-expr.ts`) keeps
  *  `Decimal.to_string/1` — there the operand's type is known. */
 export function renderMoney(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  let testid = "";
   let currency: string | undefined;
   let valueArg: ExprIR | undefined;
   for (let i = 0; i < expr.args.length; i++) {
@@ -1580,10 +1539,9 @@ export function renderMoney(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
     const arg = expr.args[i]!;
     if (name === "value") valueArg = arg;
     else if (name === "currency" && arg.kind === "literal") currency = arg.value;
-    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
     else if (!name && !valueArg) valueArg = arg;
   }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const val = valueArg ? renderExpr(valueArg, { ...ctx, position: "template" }) : "0";
   const prefix = currency ? `${currency} ` : "";
   return `<span class="money"${testidAttr}>${prefix}<%= to_string(${val}) %></span>`;
@@ -1607,12 +1565,10 @@ export function renderDestroyForm(
   ctx: WalkContext,
 ): string {
   let ofName: string | undefined;
-  let testid = "";
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (name === "of" && arg.kind === "ref") ofName = arg.name;
-    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
   }
   if (!ofName) return `<!-- DestroyForm: expected (of: <Agg>) -->`;
   const agg = ctx.aggregatesByName.get(ofName);
@@ -1633,7 +1589,7 @@ export function renderDestroyForm(
     });
   }
   const human = humanize(ofName);
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   return `<.button phx-click="${eventName}" phx-value-id={@id} data-confirm="Delete this ${human.toLowerCase()}? This cannot be undone." class="btn-danger"${testidAttr}>Delete ${human}</.button>`;
 }
 
@@ -1645,7 +1601,6 @@ export function renderDestroyForm(
  *  role-based e2e spec is portable across React and HEEx.  Each Tabs instance
  *  gets a unique `tabs-<n>` id so its toggle selectors stay scoped. */
 export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  let testid = "";
   // `body` is EVERY panel child, not just the first: `Tab { "Ovw", Text { "A" },
   // Text { "B" } }` used to read `pos[1]` alone and drop `B` (the JSX engine's
   // twin defect — `_walker/primitives/layout.ts`).  A panel is a children
@@ -1662,11 +1617,7 @@ export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
-    if (name === "testid" && arg.kind === "literal") {
-      testid = arg.value;
-      continue;
-    }
-    if (name) continue; // other named args (style, …) not consumed here
+    if (name) continue; // named args (testid, style, …) not consumed here
     idx++;
     if (arg.kind === "call" && arg.name === "Tab") {
       const pos = arg.args.filter((_, j) => !arg.argNames?.[j]);
@@ -1708,7 +1659,7 @@ export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
       return `  <div role="tabpanel" id="${id}-panel-${t.slug}" data-tabs="${id}" class="tab-panel${hidden}">\n${indent(body, 4)}\n  </div>`;
     })
     .join("\n");
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   return `<div class="tabs"${testidAttr}>\n  <div role="tablist" class="tab-bar">\n${triggers}\n  </div>\n${panels}\n</div>`;
 }
 
@@ -1733,7 +1684,6 @@ function controlledInput(
   let label = "";
   let labelArg: ExprIR | undefined;
   let bind: string | undefined;
-  let testid = "";
   let optionsExpr: ExprIR | undefined;
   let seenPositional = false;
   for (let i = 0; i < expr.args.length; i++) {
@@ -1747,7 +1697,6 @@ function controlledInput(
       seenPositional = true;
     } else if (name === "bind" && arg.kind === "ref") bind = arg.name;
     else if (name === "options") optionsExpr = arg;
-    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
   }
   // The label is a user-visible slot (`inputLabel`, M-T1.11): a plain literal
   // rides `pgettext` through the `{…}` expression-attribute form, so the
@@ -1760,7 +1709,7 @@ function controlledInput(
     : label
       ? ` label="${label.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"`
       : "";
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   if (!bind || !ctx.stateNames.has(bind)) {
     const opt = type === "select" ? ` options={[]}` : "";
     return `<.input type="${type}" name="_unbound"${labelAttr}${opt} value="" disabled${testidAttr} />`;
@@ -1839,7 +1788,6 @@ export function renderFileUpload(
 ): string {
   let labelArg: ExprIR | undefined;
   let bind: string | undefined;
-  let testid = "";
   let seenPositional = false;
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -1848,13 +1796,12 @@ export function renderFileUpload(
       if (!seenPositional) labelArg = arg;
       seenPositional = true;
     } else if (name === "bind" && arg.kind === "ref") bind = arg.name;
-    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
   }
   // The label is a user-visible slot (`inputLabel`, M-T1.11) — rendered in TEXT
   // position here (the `<label>` wraps the input), so it rides `renderInTemplate`,
   // which yields `<%= pgettext(…) %>` under i18n and the escaped literal off it.
   const labelText = labelArg ? renderInTemplate(labelArg, ctx, "inputLabel") : "";
-  const testidAttr = testid ? ` data-testid="${escapeHeexAttr(testid)}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const field = bind ? snake(bind) : undefined;
   if (!field || !ctx.stateNames.has(field)) {
     // Nothing to two-way bind to — a disabled plain file input, so the page
@@ -2003,7 +1950,6 @@ export function renderContainer(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
  *  pipeline. */
 export function renderSection(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let id: string | undefined;
-  let testid = "";
   const positional: ExprIR[] = [];
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -2012,12 +1958,10 @@ export function renderSection(expr: Extract<ExprIR, { kind: "call" }>, ctx: Walk
       positional.push(arg);
     } else if (name === "id" && arg.kind === "literal") {
       id = arg.value;
-    } else if (name === "testid" && arg.kind === "literal") {
-      testid = arg.value;
     }
   }
   const idAttr = id ? ` id="${id}"` : "";
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   // A Section is a heading-nesting level (like the JSX `emitSection`): a
   // `Heading` in its body derives a rank one deeper (accessibility.md Phase 2).
   const childCtx: WalkContext = { ...ctx, headingDepth: (ctx.headingDepth ?? 0) + 1 };
@@ -2035,7 +1979,6 @@ export function renderSection(expr: Extract<ExprIR, { kind: "call" }>, ctx: Walk
  *  the same way as `renderSection`. */
 export function renderSticky(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let top = "0";
-  let testid = "";
   const positional: ExprIR[] = [];
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -2044,12 +1987,10 @@ export function renderSticky(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
       positional.push(arg);
     } else if (name === "top" && arg.kind === "literal") {
       top = arg.value;
-    } else if (name === "testid" && arg.kind === "literal") {
-      testid = arg.value;
     }
   }
   const style = `style="position: sticky; top: ${top}; z-index: 100"`;
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const childrenHeex = positional.map((c) => renderChild(c, ctx)).join("\n");
   if (childrenHeex.length === 0) {
     return `<div ${style}${testidAttr} />`;
@@ -2067,7 +2008,6 @@ export function renderCodeBlock(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
   let source = "";
   let title: string | undefined;
   let language = "";
-  let testid = "";
   const positional: ExprIR[] = [];
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -2081,12 +2021,10 @@ export function renderCodeBlock(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
       title = renderInTemplate(arg, ctx, "codeBlockTitle");
     } else if (name === "language" && arg.kind === "literal") {
       language = arg.value;
-    } else if (name === "testid" && arg.kind === "literal") {
-      testid = arg.value;
     }
   }
   if (positional[0]?.kind === "literal") source = positional[0].value;
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const langClass = language ? ` class="language-${language}"` : "";
   const escaped = escapeHeexText(source);
   if (title) {
@@ -2110,7 +2048,6 @@ export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   let name: string | undefined;
   let customSvg: string | undefined;
   let size: string | undefined;
-  let testid = "";
   let label: string | undefined;
   let labelArg: ExprIR | undefined;
   let decorative = false;
@@ -2120,7 +2057,6 @@ export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
     if (argName === "name" && arg.kind === "literal") name = arg.value;
     else if (argName === "svg" && arg.kind === "literal") customSvg = arg.value;
     else if (argName === "size" && arg.kind === "literal") size = arg.value;
-    else if (argName === "testid" && arg.kind === "literal") testid = arg.value;
     else if (argName === "label") {
       labelArg = arg;
       if (arg.kind === "literal") label = arg.value;
@@ -2137,7 +2073,7 @@ export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   void name;
   const svg = customSvg ?? "";
   const sizeClass = size ? ` loom-icon-${size}` : "";
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   // Decorative-by-default (icon a11y contract): hidden from assistive tech
   // unless a `label:` gives it meaning, in which case the glyph becomes a NAMED
   // `role="img"`.  HEEx shares the HTML spelling with the JSX/markup packs

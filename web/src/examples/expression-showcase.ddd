@@ -296,6 +296,24 @@ system ExpressionShowcase {
       }
     }
 
+    // ---- a NAMED route param (not the magic `id`) ------------------------
+    // Every page above binds `/:id`, the one param name the emitters special-
+    // case.  A page whose param is named anything else was therefore never
+    // rendered by this fixture — and Feliz dropped it: `routePattern` bound only
+    // the FIRST `:param` and RENAMED it to `id`, while the walk got an empty
+    // param set, so `slug` rendered as `/* unresolved: slug */ undefined`,
+    // spliced into F# (audit finding A14).  Both a text position and a
+    // navigation destination read the param, so a target that loses it fails
+    // the sentinel scan instead of emitting a quietly dead page.
+    page ProductBySlug(slug: string) {
+      route: "/catalog/:slug"
+      body: Stack {
+        Heading { "Catalog entry" },
+        Text { slug },
+        Anchor { "Permalink", to: "/catalog/" + slug }
+      }
+    }
+
     // ---- route `id` + detail scope ---------------------------------------
     page ProductDetail {
       route: "/products/:id"
