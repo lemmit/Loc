@@ -106,6 +106,38 @@ const NON_PRINCIPAL = `system SD {
   }
 }`;
 
+/** The `ignoring` BYPASS crossing: a document aggregate whose finds each carry
+ *  a different bypass — none, a NAMED capability, and `*`.  `renderDocFindFn`
+ *  used to be handed the aggregate-level predicate, so the find's own
+ *  `f.bypassAll` / `f.bypassCaps` never reached it and every `ignoring` clause
+ *  was a silent no-op: an admin "show deleted" read still filtered deleted
+ *  rows, with no diagnostic to say so. */
+const DOC_IGNORING = `system DI {
+  subdomain Core {
+    context Main {
+      aggregate Doc shape: document, with crudish, softDeletable {
+        label: string
+        note: string
+      }
+      repository Docs for Doc {
+        find byLabel(l: string): Doc[] where this.label == l
+        find byLabelAll(l: string): Doc[] where this.label == l ignoring softDeletable
+        find byNoteAny(n: string): Doc? where this.note == n ignoring *
+      }
+    }
+  }
+  api MainApi from Core
+  storage primary { type: postgres }
+  resource mainState { for: Main, kind: state, use: primary }
+  deployable d {
+    platform: elixir
+    contexts: [Main]
+    dataSources: [mainState]
+    serves: MainApi
+    port: 4000
+  }
+}`;
+
 /** The emitted module with `#` comment lines stripped — for assertions about
  *  what the generated CODE does, which must not be satisfied (or broken) by
  *  prose in a generated comment.  The `fragment(` assertions below are exactly
@@ -207,5 +239,43 @@ describe("elixir/vanilla — capability filter on a shape: document aggregate", 
     // The soft-delete predicate runs in memory over the rehydrated embed.
     expect(repo).toContain("record = row.data");
     expect(repo).toContain("not record.is_deleted");
+  });
+
+  // ── `ignoring <Cap>` / `ignoring *` on a DOCUMENT find ────────────────────
+  //
+  // The bypass is carried per-read on `FindIR` (`bypassAll` / `bypassCaps`) and
+  // `vanillaDocCapabilityFilter` has always understood it — but the document
+  // find renderer was handed the aggregate-level predicate instead of computing
+  // its own, so the clause reached nothing.  Wrong DATA, fail-closed and
+  // silent: the read the author wrote to SEE deleted rows returned none.
+  it("honours `ignoring <Cap>` on a document find — the named capability's predicate is dropped", async () => {
+    const repo = codeOf((await generateSystemFiles(DOC_IGNORING)).get(DOC_REPO)!);
+    const fn = (name: string) =>
+      repo.slice(repo.indexOf(`def ${name}(`), repo.indexOf(`def ${name}(`) + 400);
+
+    // Control: the plain find keeps the soft-delete predicate.
+    expect(fn("by_label")).toContain("(record.label == l) and (not record.is_deleted)");
+    // `ignoring softDeletable` drops exactly that one — the author's own
+    // `where` survives untouched.
+    expect(fn("by_label_all")).toContain("record.label == l");
+    expect(fn("by_label_all")).not.toContain("is_deleted");
+  });
+
+  it("honours `ignoring *` on a document find — every capability predicate is dropped", async () => {
+    const repo = codeOf((await generateSystemFiles(DOC_IGNORING)).get(DOC_REPO)!);
+    const fn = repo.slice(repo.indexOf("def by_note_any("), repo.indexOf("def by_note_any(") + 400);
+    expect(fn).toContain("record.note == n");
+    expect(fn).not.toContain("is_deleted");
+  });
+
+  it("a bypass on ONE find leaves every other read fully scoped", async () => {
+    // The bypass is per-read.  A fix that recomputed the predicate globally (or
+    // mutated the aggregate) would open `list` / `find_by_id` too — the exact
+    // failure mode a "just drop the filter" repair produces.
+    const repo = codeOf((await generateSystemFiles(DOC_IGNORING)).get(DOC_REPO)!);
+    const list = repo.slice(repo.indexOf("def list do"), repo.indexOf("def find_by_id("));
+    expect(list).toContain("not record.is_deleted");
+    const byId = repo.slice(repo.indexOf("def find_by_id("), repo.indexOf("def insert("));
+    expect(byId).toContain("not record.is_deleted");
   });
 });
