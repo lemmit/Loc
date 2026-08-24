@@ -1,5 +1,6 @@
 import type { BoundedContextIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
+import { provenancedTypeMembers } from "../../_payload/provenanced-wire.js";
 import {
   createFieldConstraints,
   createModelValidator,
@@ -46,6 +47,9 @@ export function wireModelImport(
 ): string | null {
   const names = [
     ...voModelNames.map((n) => `${n} as ${n}Model`),
+    // The `Provenanced[T]` wire carrier, when this module annotates a
+    // provenanced response field (M-T6.12).
+    ...(refersTo(PY_PROVENANCED) ? [PY_PROVENANCED] : []),
     ...(refersTo(PY_UUID_STR) ? [PY_UUID_STR] : []),
   ];
   return names.length > 0 ? `from app.http.wire_models import ${names.join(", ")}` : null;
@@ -135,9 +139,51 @@ function wireFieldType(
       return `list[${wireFieldType(t.element, ctx, dir, voSuffix)}]`;
     case "optional":
       return `${wireFieldType(t.inner, ctx, dir, voSuffix)} | None`;
+    case "genericInstance":
+      // `Provenanced[int]` (M-T6.12) — the value + lineage wire carrier as a
+      // real generic model, NOT the `object` the default arm below would have
+      // silently produced: a freeform `object` would erase the value's type
+      // from the published OpenAPI schema, which is exactly the divergence the
+      // carrier exists to remove.
+      if (t.ctor === "provenanced") {
+        return `${PY_PROVENANCED}[${wireFieldType(t.arg, ctx, dir, voSuffix)}]`;
+      }
+      return "object";
     default:
       return "object";
   }
+}
+
+/** The generic wire-carrier model's Python name. */
+export const PY_PROVENANCED = "Provenanced";
+/** The carrier model's type variable. */
+const PY_PROV_TYPEVAR = "_ProvT";
+
+/** `class Provenanced(BaseModel, Generic[_ProvT])` — the value + lineage
+ *  carrier a `provenanced` field ships as (M-T6.12).  A classic `TypeVar` +
+ *  `Generic[T]` rather than PEP-695 `class Provenanced[T]`, so the model does
+ *  not depend on pydantic's newer generic-syntax support.  `lineage` is the
+ *  opaque `ProvLineage` audit blob (`json` in the IR — Loom does not model its
+ *  interior), nullable for a field that has never been written. */
+function provenancedModel(): string[] {
+  return [
+    "",
+    "",
+    `${PY_PROV_TYPEVAR} = TypeVar("${PY_PROV_TYPEVAR}")`,
+    "",
+    "",
+    `class ${PY_PROVENANCED}(BaseModel, Generic[${PY_PROV_TYPEVAR}]):`,
+    `    """A provenanced field's value together with the lineage of the write`,
+    "    that produced it — the same { value, lineage } object every other Loom",
+    "    backend serves.  Storage keeps the two apart (a typed value column plus a",
+    '    jsonb lineage column); only the wire folds them."""',
+    "",
+    ...provenancedTypeMembers({ kind: "none" }).map((m) =>
+      m.type
+        ? `    ${m.name}: ${PY_PROV_TYPEVAR}`
+        : `    ${m.name}: dict[str, object] | None${m.optional ? " = None" : ""}`,
+    ),
+  ];
 }
 
 export function renderPyWireModels(ctx: BoundedContextIR): string {
@@ -165,11 +211,19 @@ export function renderPyWireModels(ctx: BoundedContextIR): string {
       validator,
     );
   });
-  const body = models.join("");
+  // The `Provenanced[T]` carrier model — emitted here (beside the VO models) so
+  // every routes module imports one definition instead of re-declaring the
+  // shape per aggregate.
+  const hasProv = ctx.aggregates.some(
+    (a) =>
+      a.fields.some((f) => f.provenanced) ||
+      a.parts.some((p) => p.fields.some((f) => f.provenanced)),
+  );
+  const body = models.join("") + (hasProv ? lines(...provenancedModel()) : "");
   const uses = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(body);
   const enumNames = ctx.enums.map((e) => e.name).filter(uses);
   const pydanticNames = [
-    ctx.valueObjects.length > 0 ? "BaseModel" : null,
+    ctx.valueObjects.length > 0 || hasProv ? "BaseModel" : null,
     uses("Field") ? "Field" : null,
     // `UuidStr` is emitted unconditionally (every routes module imports it for
     // its reference-typed request annotations), so its two pydantic pieces are
@@ -186,7 +240,7 @@ export function renderPyWireModels(ctx: BoundedContextIR): string {
     "",
     uses("datetime") ? "from datetime import datetime" : null,
     uses("Decimal") ? "from decimal import Decimal" : null,
-    "from typing import Annotated",
+    hasProv ? "from typing import Annotated, Generic, TypeVar" : "from typing import Annotated",
     "",
     `from pydantic import ${pydanticNames.join(", ")}`,
     uses("PydanticCustomError")
@@ -196,7 +250,8 @@ export function renderPyWireModels(ctx: BoundedContextIR): string {
     enumNames.length > 0 ? `from app.domain.value_objects import ${enumNames.join(", ")}` : null,
     "",
     PY_UUID_STR_DEF,
-    body,
+    models.join(""),
+    hasProv ? provenancedModel() : null,
     "",
   );
 }

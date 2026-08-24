@@ -99,8 +99,8 @@
 | policies-supplementary-note.md | reference | asks honored in M-T3.2 |
 | production-readiness.md | reference roadmap | §3.3→M-T4.4, §3.4→M-T4.9, §3.5→M-T4.2, §3.6→M-T3.12, §3.9→M-T7.7, §3.10→M-T4.10 |
 | projection.md | proposed | M-T4.2 |
-| provenance.md | shipped (all 5) | deferred accessors noted in-doc; wire pair → M-T6.12 |
-| provenanced-wire-pair.md | proposed | M-T6.12 |
+| provenance.md | shipped (all 5) | deferred accessors noted in-doc; wire pair shipped (M-T6.12) |
+| provenanced-wire-pair.md | shipped | M-T6.12 (done; see the mission row for the two corrections to the proposal) |
 | quickstart-and-day-one-batteries.md | partial | M-T7.5 (dev/deploy), M-T4.6 (batteries), M-T3.12 (saas/identity), M-T3.1 (default-deny) |
 | read-path-architecture.md | partial *(stale header fixed 2026-07-30 — it claimed "no code yet" while paged read-path + query-time projection emit had shipped on all five backends)* | M-T4.2 (projection), M-T1.1/M-T2.6 (paging), M-T5.4 (retrieval), M-T5.10 (contract records) |
 | realtime-tenant-room-parity.md | shipped 2026-07-28 (per-tenant SSE rooms on all four SSE backends) *(added 2026-07-30)* | the runtime cross-tenant SSE isolation e2e leg the doc names as its own follow-up → M-T1.10 (emit-level tests only today) |

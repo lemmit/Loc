@@ -509,10 +509,11 @@ function responseModel(
   ctx: EnrichedBoundedContextIR,
   declared?: PayloadIR,
 ): string {
-  // Co-located provenance lineage (provenance.md): each `provenanced` field
-  // exposes a trailing `<field>_provenance` carrying the current lineage on
-  // the wire (root-only; parts never carry provenanced fields).
-  const provFields = ent.fields.filter((f) => f.provenanced);
+  // (M-T6.12) A provenanced field's lineage rides INSIDE its own response key
+  // as the `Provenanced[T]` carrier — no trailing `<field>_provenance` model
+  // field.  A DECLARED response record names DOMAIN types, so the wrap is
+  // re-applied below for those (the wireShape path already carries it).
+  const provenanced = new Set(ent.fields.filter((f) => f.provenanced).map((f) => f.name));
   // M-T5.10 (PR4): when the context declares a `response <Agg>Response` record
   // (spliced by `scaffoldHandlers`), READ that record's fields instead of
   // re-deriving from `wireShape` — byte-identical for the scaffolded form,
@@ -526,13 +527,17 @@ function responseModel(
       `class ${name}Response(BaseModel):`,
       idWf ? `    ${idWf.name}: ${responsePyType(idWf.type, ctx)}` : [],
       declared.fields.map((f) => {
-        const t = payloadFieldPyType(f.type, ctx);
+        const t = payloadFieldPyType(
+          provenanced.has(f.name)
+            ? { kind: "genericInstance", ctor: "provenanced", arg: f.type }
+            : f.type,
+          ctx,
+        );
         const optional = f.optional || f.type.kind === "optional";
         const suffix =
           optional && !t.endsWith("| None") ? " | None = None" : optional ? " = None" : "";
         return `    ${f.name}: ${t}${suffix}`;
       }),
-      provFields.map((f) => `    ${provColumn(f.name)}: dict[str, object] | None = None`),
       "",
       "",
     );
@@ -553,7 +558,6 @@ function responseModel(
         optional && !t.endsWith("| None") ? " | None = None" : optional ? " = None" : "";
       return `    ${wf.name}: ${t}${suffix}`;
     }),
-    provFields.map((f) => `    ${provColumn(f.name)}: dict[str, object] | None = None`),
     "",
     "",
   );

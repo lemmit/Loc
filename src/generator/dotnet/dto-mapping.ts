@@ -19,7 +19,9 @@ import {
 } from "../../ir/types/wire-types.js";
 import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { PROVENANCED_REQUEST_ERROR } from "../_payload/provenanced-wire.js";
 import { MONEY_WIRE_SCALE } from "../money-scale.js";
+import { csProvSibling, PROVENANCED_CS_RECORD } from "./emit/provenance.js";
 import { renderCsExpr } from "./render-expr.js";
 
 /** Allocator for the C# pattern-variable names `maskWrap` binds.
@@ -182,6 +184,13 @@ export function wireType(
       break;
     case "entity":
       s = `${info.base}Response`;
+      break;
+    case "provenanced":
+      // `Provenanced<int> Total` — the shared generic record from
+      // Domain.Common (see `renderProvLineage`).  The carried type recurses
+      // through this same function, so a `Money provenanced` lands as
+      // `Provenanced<string>` exactly as the bare money field would.
+      s = `${PROVENANCED_CS_RECORD}<${wireType(info.carried!, ctx, dir)}>`;
       break;
   }
   if (info.isCollection) s = `IReadOnlyList<${s}>`;
@@ -347,6 +356,8 @@ export function wireToCommandArgument(
     }
     case "entity":
       return expr;
+    case "provenanced":
+      throw new Error(PROVENANCED_REQUEST_ERROR);
   }
 }
 
@@ -451,6 +462,13 @@ export function projectToResponse(
       if (!part) return domainExpr;
       return projectEntityExpr(domainExpr, part.part, ctx, { maskNames: names });
     }
+    case "provenanced": {
+      // Fold the domain's two co-located members into the one wire carrier.
+      // `domainExpr` is the VALUE property (`found.Total`); its lineage sibling
+      // is named by the same rule the entity emitter declared it with.
+      const value = projectToResponse(domainExpr, info.carried!, ctx, names);
+      return `new ${PROVENANCED_CS_RECORD}<${wireType(info.carried!, ctx, "response")}>(${value}, ${csProvSibling(domainExpr)})`;
+    }
   }
 }
 
@@ -491,6 +509,8 @@ export function domainToRequestExpr(
     }
     case "entity":
       return domainExpr;
+    case "provenanced":
+      throw new Error(PROVENANCED_REQUEST_ERROR);
   }
 }
 
@@ -519,6 +539,9 @@ function csIsValueType(t: TypeIR): boolean {
       return true;
     case "valueObject":
     case "entity":
+    // The carrier is a `record` (a reference type), so `T?` is a plain
+    // nullable reference — no `.Value` unwrap.
+    case "provenanced":
       return false;
   }
 }
@@ -591,13 +614,9 @@ export function projectEntityArgs(
       );
     }
   }
-  // Provenance: trailing `<Field>Provenance` lineage args, in field order,
-  // matching the response record's trailing params (see `responseRecordParams`).
-  if (!opts?.unionVariant) {
-    for (const f of entity.fields.filter((pf) => pf.provenanced)) {
-      args.push(`${domainExpr}.${upperFirst(f.name)}Provenance`);
-    }
-  }
+  // (M-T6.12) No trailing `<Field>Provenance` args any more: the lineage rides
+  // inside the provenanced field's own `Provenanced<T>` argument, folded by
+  // `projectToResponse`'s `provenanced` arm.
   return args.join(", ");
 }
 
@@ -643,14 +662,16 @@ export function responseParamsFromPayload(
   const parts: string[] = [];
   // The DTO leads with `Guid Id` even though the record omits it.
   parts.push(dtoParam(csIdValueClrType(agg.idValueType), "Id"));
+  // A declared record names DOMAIN types (`total: int`), so a field the
+  // aggregate declares `provenanced` is wrapped in the wire carrier here — the
+  // same wrap `wireTypeForField` applies on the wireShape path, so the record's
+  // params still line up with `projectEntityArgs`'s carrier argument.
+  const provenanced = new Set(agg.fields.filter((f) => f.provenanced).map((f) => f.name));
   for (const f of payload.fields) {
-    parts.push(dtoParam(payloadFieldCsType(f.type, ctx), upperFirst(f.name)));
-  }
-  // Provenance — identical trailing logic to `responseRecordParams`.
-  for (const f of agg.fields.filter((pf) => pf.provenanced)) {
-    parts.push(
-      `[property: JsonPropertyName(${JSON.stringify(`${snake(f.name)}_provenance`)})] ProvLineage? ${upperFirst(f.name)}Provenance`,
-    );
+    const t: TypeIR = provenanced.has(f.name)
+      ? { kind: "genericInstance", ctor: "provenanced", arg: f.type }
+      : f.type;
+    parts.push(dtoParam(payloadFieldCsType(t, ctx), upperFirst(f.name)));
   }
   return parts.join(", ");
 }
@@ -711,21 +732,43 @@ function responseRecordParams(
       parts.push(dtoParam(csType, upperFirst(wf.name)));
     }
   }
-  // Provenance (provenance.md): expose each provenanced field's current lineage
-  // as a trailing nullable `<Field>Provenance` response param (no `[Required]` —
-  // a never-written field has null lineage).  Lockstep with `projectEntityArgs`.
-  for (const f of ent.fields.filter((pf) => pf.provenanced)) {
-    parts.push(
-      `[property: JsonPropertyName(${JSON.stringify(`${snake(f.name)}_provenance`)})] ProvLineage? ${upperFirst(f.name)}Provenance`,
-    );
-  }
+  // (M-T6.12) No trailing `<Field>Provenance` param any more: the provenanced
+  // field's own param is `Provenanced<T>`, carrying the lineage with the value.
   return parts.join(", ");
 }
 
-/** True iff the entity exposes any provenanced field on its response (so the
- *  emitter adds the `using <ns>.Domain.Common;` the `ProvLineage?` param needs). */
+/** True iff the entity exposes any provenanced field on its response — so the
+ *  DTO's `Provenanced<T>` component (and its `ProvLineage` member) need
+ *  `using <ns>.Domain.Common;`. */
 export function entityExposesProvenance(ent: { fields: FieldIR[] }): boolean {
   return ent.fields.some((f) => f.provenanced);
+}
+
+/**
+ * True iff PROJECTING this aggregate to its response DTO emits an expression
+ * that NAMES a type from `<ns>.Domain.Common` — so every emitter that inlines
+ * `projectEntityExpr` / `projectToResponse` into a file must add that using or
+ * the file fails to compile.
+ *
+ * Two triggers, and they are different from the DTO's own
+ * (`entityExposesProvenance`) because a projection can name a Common type the
+ * record declaration doesn't, and vice versa:
+ *
+ *   - `mask unless` — `maskWrap` reads `RequestContext.Current`.
+ *   - `provenanced` — the projection CONSTRUCTS the carrier,
+ *     `new Provenanced<int>(found.Total, found.TotalProvenance)` (M-T6.12).
+ *     Before the carrier this arm was a bare property read
+ *     (`found.TotalProvenance`), which named no type and so needed no using —
+ *     which is exactly why every read handler over a provenanced aggregate
+ *     started failing `CS0246: The type or namespace name 'Provenanced<>'
+ *     could not be found`.
+ */
+export function projectionNamesDomainCommon(agg: EnrichedAggregateIR): boolean {
+  return (
+    agg.fields.some((f) => f.maskUnless) ||
+    entityExposesProvenance(agg) ||
+    agg.parts.some((p) => entityExposesProvenance(p))
+  );
 }
 
 function isPart(ent: EnrichedAggregateIR | EnrichedEntityPartIR): ent is EnrichedEntityPartIR {

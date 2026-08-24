@@ -24,6 +24,7 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { mixDepsGet } from "./support/mix-retry.js";
 
 const ENABLED = process.env.LOOM_CHANNELS_E2E_RABBIT_ELIXIR === "1";
 
@@ -207,7 +208,7 @@ describe.skipIf(!ENABLED)("rabbitmq queue semantics — elixir leg (M-T4.4 slice
       ["ship_api", "ship_api"],
     ] as const) {
       const env = { DATABASE_URL: pgUrl(db), MIX_ENV: "dev" };
-      sh("mix deps.get", join(dir, "out", app), env);
+      sh(mixDepsGet(), join(dir, "out", app), env);
       sh("mix ecto.migrate", join(dir, "out", app), env);
     }
 

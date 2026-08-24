@@ -5,6 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { mixDepsGet } from "./support/mix-retry.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix-embeds-React — runtime end-to-end guard (D-PHOENIX-SURFACE).
@@ -153,7 +154,7 @@ describe.skipIf(!ENABLED)("Phoenix embeds React — runtime e2e (LOOM_EMBED_E2E_
 
       // 4. Deps + DB schema.
       const dbUrl = `ecto://postgres:postgres@127.0.0.1:${pgPort}/${externalPgDb}`;
-      execSync(`mix local.hex --force && mix local.rebar --force && mix deps.get`, {
+      execSync(`mix local.hex --force && mix local.rebar --force && ${mixDepsGet()}`, {
         cwd: projDir,
         stdio: "pipe",
         timeout: 300_000,

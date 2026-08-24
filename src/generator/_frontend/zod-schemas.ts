@@ -36,6 +36,7 @@ import {
 } from "../../ir/util/audit-history.js";
 import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../ir/validate/invariant-classify.js";
+import { PROVENANCED_REQUEST_ERROR, provenancedEntries } from "../_payload/provenanced-wire.js";
 import {
   discriminatedUnionZod,
   type UnionMemberField,
@@ -139,7 +140,6 @@ export function emitResponseSchema(
   ent: EnrichedAggregateIR | EnrichedEntityPartIR,
   ctx: BoundedContextIR,
   isAgg: boolean,
-  carryProvenance = false,
 ): string[] {
   const lines: string[] = [];
   const name = `${ent.name}Response`;
@@ -160,14 +160,10 @@ export function emitResponseSchema(
       lines.push(`  ${wf.name}: ${zodForResponse(wf.type, wf.optional)},`);
     }
   }
-  // Co-located provenance lineage rides the wire DTO after the regular fields —
-  // mirrors the api-module.ts twin (React/Vue) and the Hono `toWire` append.
-  // Nullish: absent on backends that don't capture lineage and on create.
-  if (carryProvenance) {
-    for (const f of ent.fields.filter((f) => f.provenanced)) {
-      lines.push(`  ${f.name}_provenance: provLineageSchema.nullish(),`);
-    }
-  }
+  // (M-T6.12) The lineage is no longer appended here as a trailing
+  // `<field>_provenance` sibling — it rides INSIDE the provenanced field's own
+  // entry as the `Provenanced<T>` carrier, emitted by `zodForResponse`'s
+  // `provenanced` arm from the one shape definition.
   lines.push(`});`);
   lines.push(`export type ${name} = z.infer<typeof ${name}>;`);
   return lines;
@@ -258,6 +254,23 @@ const RESPONSE_PRIMITIVE: Record<WirePrimitive, string> = {
   File: "z.object({ url: z.string(), key: z.string(), contentType: z.string(), size: z.number().int() })",
 };
 
+/** The zod shape of a `Provenanced<T>` wire carrier (M-T6.12) — built from the
+ *  carrier's member list so the key names and their order are the shape's, not
+ *  this emitter's.  `lineage` is the shared `provLineageSchema` (`../lib/
+ *  schemas`), nullish because a never-written field carries no lineage.
+ *
+ *  ```ts
+ *  // total: int provenanced   →
+ *  total: z.object({ value: z.number().int(), lineage: provLineageSchema.nullish() }),
+ *  ```
+ */
+export function provenancedZod(valueZod: string): string {
+  const members = provenancedEntries(valueZod, "provLineageSchema.nullish()")
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(", ");
+  return `z.object({ ${members} })`;
+}
+
 export function zodForRequest(t: TypeIR): string {
   const info = wireTypeInfo(t, "request");
   if (info.isNullable) return `${zodForRequest(peelNullable(t))}.nullish()`;
@@ -277,6 +290,11 @@ export function zodForRequest(t: TypeIR): string {
       return `${info.base}Schema`;
     case "entity":
       return "z.unknown()";
+    case "provenanced":
+      // Unreachable by construction: the carrier is stamped onto the RESPONSE
+      // wire shape only (`wireTypeForField`); a create/update input takes the
+      // bare `T` — a caller supplies a value, never a lineage.
+      throw new Error(PROVENANCED_REQUEST_ERROR);
   }
 }
 
@@ -331,6 +349,8 @@ export function zodForResponseInner(t: TypeIR): string {
       return `${info.base}Schema`;
     case "entity":
       return `${info.base}Response`;
+    case "provenanced":
+      return provenancedZod(zodForResponseInner(info.carried!));
   }
 }
 

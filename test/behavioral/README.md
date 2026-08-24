@@ -155,6 +155,28 @@ in-process — no docker, no separate Postgres) and runs the suites Loom
   committed file is named `.pw.ts` so the repo's vitest run never discovers
   it). Gates in `behavioral-ui-e2e.yml` after the emitted round-trips; run:
   `node paged-ui.mjs`.
+- **heex-ui** — the **rendered LiveView**, per PR (`run-heex-ui.mjs`, fixture
+  `heex-ui.ddd`, extra spec `heex-ui-roundtrip.pw.ts`). Deliberately NOT the
+  `run-ui.mjs` topology: that one serves a `vite build` bundle with `/api`
+  delegated in-process to Hono-on-PGlite, and LiveView has neither half — it
+  IS the server, rendering over a websocket against a real Postgres. So this
+  leg boots the generated Phoenix app for real (`mix deps.get` → `ecto.create`
+  → `ecto.migrate` → `phx.server`, host `mix` when present, otherwise the
+  pinned `hexpm/elixir` image) and points headless Chromium at it. It runs the
+  **emitted** `HeexUiSystem.ui.spec.ts` — what `src/system/ui-e2e-render.ts`
+  lowers from the fixture's `test e2e` block, over the page objects
+  `src/generator/elixir/page-objects-emit.ts` emits — plus a hand-written
+  create → **list** → detail round-trip (the DSL has no "assert the row is in
+  the list" verb; see `renderAggregateCall`). Every assertion is on **rendered
+  text**, which is the point: `generated-elixir-vanilla-build` only proves the
+  Elixir compiles, `behavioral-e2e-elixir` drives the *api* half over HTTP and
+  never opens a browser, and `phoenix-ui-e2e` (post-merge / `run-e2e` label)
+  runs the emitted `smoke.spec.ts`, which navigates each route and asserts its
+  URL — it passes on an empty shell, and measurably on a **500**. Needs docker
+  (postgres sidecar unless `LOOM_HEEX_UI_PG_URL` is set) and, behind a
+  TLS-fingerprint egress proxy, `LOOM_HEX_MIRROR=1` (`pkill -f hex-mirror.py`
+  after a killed run). Gates in `behavioral-heex-ui-e2e.yml`; run:
+  `npm run test:behavioral-heex-ui`.
 
 ## Why
 
@@ -403,6 +425,58 @@ the React/Mantine tree + `vite build` + a Chromium download), so it's
 opt-in — its own `behavioral:ui` script and `behavioral-ui-e2e.yml`
 workflow, never part of the fast `npm test`. Corpus cases without a
 `test e2e … against <react>` block carry `"ui": false`.
+
+## Flutter UI tier (`run-ui-flutter.mjs`)
+
+Flutter was the **one** frontend with no full-stack runtime tier at all:
+`generated-flutter-build.yml` is compile-only (`flutter analyze` +
+`flutter build web`), which is precisely how the non-parsing-Dart
+`FileRef??` emitter defect survived. This runner closes that hole with
+`run-ui.mjs`'s exact topology and two substitutions.
+
+```bash
+cd test/behavioral
+npm ci
+npx playwright install --with-deps chromium   # needs the FULL chromium, see below
+node run-ui-flutter.mjs                        # every case with `"uiFlutter": true`
+node run-ui-flutter.mjs sales-system-flutter
+FLUTTER=/path/to/flutter node run-ui-flutter.mjs   # SDK not on PATH
+```
+
+Per case: `generate system` → `flutter pub get` + `flutter build web
+--release --no-web-resources-cdn` → boot the SAME one-origin server
+(`ui-stack.mjs`, shared with `run-ui.mjs`) over `build/web` → seed rows
+over `/api` → deep-link each list route and assert the app's own read
+reached the backend, was answered 2xx, decoded, and rendered.
+
+Four things about it are load-bearing and each one was a dead end first:
+
+- **`--no-web-resources-cdn`.** A default `flutter build web` fetches
+  CanvasKit from `gstatic.com` **at runtime**. On a network-isolated
+  runner the bundle loads `main.dart.js`, silently fails to start its
+  renderer, and paints nothing — **with no error of any kind**. The flag
+  bundles CanvasKit locally, which the one-origin server then serves.
+- **`.wasm` must be served as `application/wasm`.** `instantiateStreaming`
+  rejects any other content-type, and CanvasKit streams its `.wasm`. The
+  same silent no-boot as above. (Hence the MIME entry in `ui-stack.mjs`.)
+- **The FULL chromium, not `headless_shell`.** CanvasKit needs a real
+  WebGL context; the runner launches `channel: "chromium"` with
+  `--enable-unsafe-swiftshader` so a GPU-less runner still has one.
+- **Assertions read the ACCESSIBILITY TREE, not `data-testid`.** Flutter
+  web renders to a canvas, so the emitted testid-driven `*.ui.spec.ts`
+  page objects have nothing to select — the flutter emitter ships none
+  (it maps `testid:` onto a widget `Key` for `flutter_test`). Clicking
+  the engine's `flt-semantics-placeholder` makes Flutter build a real DOM
+  mirror of the widget tree, and the probes read the seeded values out of
+  it. The seeding is done over `/api`, not through a form: Flutter
+  exposes a text field to the DOM only while it is focused, so a
+  form-driven write is a flake source, and the READ half is where the
+  wire contract lives.
+
+A flutter case carries `"uiFlutter": true` **and** `"ui": false` in
+`corpus.json`, so `run-ui.mjs` skips it instead of erroring on the
+missing `e2e/playwright.config.ts`. Nightly: the `flutter` cell of
+`frontend-fullstack-e2e.yml`.
 
 ## The wire differential — every leg gates the same canonical bytes
 

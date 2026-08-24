@@ -1270,10 +1270,15 @@ function renderAppFs(
   // reference it (F# is order-sensitive).  Detected off the rendered records
   // (`wireFieldType` spells a File field `FileRef`).
   const hasFileWire = wire.domain.includes("FileRef");
-  // A `provenanced` aggregate wire field decodes to the `ProvLineage` record, so
-  // its type + `provLineageDecoder` must ship AHEAD of the domain decoders that
-  // reference it (detected off the rendered records, like `hasFileWire`).
-  const hasProvWire = wire.domain.includes("ProvLineage");
+  // A `provenanced` aggregate wire field decodes to the `Provenanced<'T>`
+  // carrier (M-T6.12), whose `lineage` member is the `ProvLineage` record — so
+  // both types + `provenancedDecoder` / `provLineageDecoder` must ship AHEAD of
+  // the domain decoders that reference them (detected off the rendered records,
+  // like `hasFileWire`).  Keyed on the CARRIER spelling: since the fold, a
+  // record names `Provenanced<…>` and never `ProvLineage` directly, so the old
+  // `ProvLineage` probe silently stopped matching and the emitted F# referenced
+  // an undeclared decoder.
+  const hasProvWire = wire.domain.includes("Provenanced<");
   // Multi-variant async effects emit a discriminated-union outcome type, placed
   // right after the domain records (its cases reference them).
   const asyncOutcomes = renderAsyncOutcomeTypes(asyncEffects);

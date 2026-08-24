@@ -302,6 +302,12 @@ export function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   }
   const submitEvent = ofTarget ? `save_${ofTarget}` : runsTarget ? `run_${runsTarget}` : "submit";
   const testidAttr = testIdAttr(expr, ctx);
+  // The form's testid is also the NAMESPACE its controls hang off — the
+  // emitted Playwright page objects address `<ns>-input-<field>` and
+  // `<ns>-submit` (see `page-objects-emit.ts`), and until the HEEx UI
+  // behavioural leg ran one of those specs nothing had noticed that the HEEx
+  // form emitted neither.  Only a LITERAL testid can be concatenated.
+  const testidNs = literalTestid(expr);
   // Register a form binding so the LiveView emitter can assign @form
   // in mount/3.  We track the PascalCase name; emitter handles
   // module-name resolution against contexts + workflows.
@@ -339,6 +345,8 @@ export function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
             ctx.enumsByName,
             ctx.idOptionsBindings,
             ctx.valueObjectsByName,
+            "@",
+            testidNs ? `${testidNs}-input-${f.name}` : undefined,
           )}`,
         );
       }
@@ -347,14 +355,30 @@ export function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   if (inputs.length === 0) {
     inputs.push(`  <.input field={@form[:_placeholder]} label="Field" />`);
   }
+  // The submit control the page objects click (`<ns>-submit`).  Without it a
+  // driver has to fall back to text matching, which breaks under i18n.
+  const submitTestid = testidNs ? ` data-testid="${escapeHeexAttr(`${testidNs}-submit`)}"` : "";
   return [
     `<.simple_form for={@form} phx-submit="${submitEvent}"${testidAttr}>`,
     ...inputs,
     `  <:actions>`,
-    `    <.button type="submit">Submit</.button>`,
+    `    <.button type="submit"${submitTestid}>Submit</.button>`,
     `  </:actions>`,
     `</.simple_form>`,
   ].join("\n");
+}
+
+/** A call's LITERAL `testid:` value, or `undefined` when absent or dynamic.
+ *
+ *  The per-field / per-control testids a form derives (`<ns>-input-<f>`,
+ *  `<ns>-submit`) are STRING CONCATENATIONS of the namespace, so they can only
+ *  be built from a compile-time literal.  A dynamic `testid:` yields no derived
+ *  ids rather than a malformed attribute — the same conservative stance
+ *  `attrValue` takes. */
+function literalTestid(expr: Extract<ExprIR, { kind: "call" }>): string | undefined {
+  const idx = (expr.argNames ?? []).indexOf("testid");
+  const arg = idx >= 0 ? expr.args[idx] : undefined;
+  return arg?.kind === "literal" ? arg.value : undefined;
 }
 
 /** Extract a named arg whose value is a `ref` and return its
@@ -402,9 +426,18 @@ function renderFieldInputForField(
    *  form is a local variable bound by `:let={…}` (`f_form[:sub]`,
    *  no `@`). */
   assignPrefix = "@",
+  /** The `data-testid` this control is addressed by — `<form-ns>-input-<field>`,
+   *  matching what `page-objects-emit.ts` fills.  `undefined` when the form
+   *  carries no literal `testid:`, in which case nothing is emitted (rather
+   *  than an unaddressable placeholder). */
+  testid?: string,
 ): string {
   const fieldName = snake(f.name);
   const label = humanize(f.name);
+  // `.input` collects unknown attributes into its `:global` rest and spreads
+  // them onto the rendered `<input>`/`<select>`/`<textarea>`, so `data-testid`
+  // rides straight through to the element Playwright fills.
+  const tid = testid ? ` data-testid="${escapeHeexAttr(testid)}"` : "";
   // Enum fields render as `<.input type="select" options={[...]}>`.
   // Phoenix CoreComponents' `<.input>` accepts an `options` list of
   // strings (when label == value) or `{label, value}` tuples.  Loom
@@ -416,7 +449,7 @@ function renderFieldInputForField(
     const en = enumsByName.get(inner.name);
     if (en) {
       const options = en.values.map((v) => JSON.stringify(v)).join(", ");
-      return `<.input field={${assignPrefix}${formAssign}[:${fieldName}]} type="select" label="${label}" options={[${options}]} />`;
+      return `<.input field={${assignPrefix}${formAssign}[:${fieldName}]} type="select" label="${label}" options={[${options}]}${tid} />`;
     }
   }
   // `X id` fields render as `<.input type="select" options={@x_options}>`.
@@ -427,7 +460,7 @@ function renderFieldInputForField(
   if (inner.kind === "id" && idOptionsBindings) {
     idOptionsBindings.add(inner.targetName);
     const optionsVar = `${snake(inner.targetName)}_options`;
-    return `<.input field={${assignPrefix}${formAssign}[:${fieldName}]} type="select" label="${label}" options={@${optionsVar}} />`;
+    return `<.input field={${assignPrefix}${formAssign}[:${fieldName}]} type="select" label="${label}" options={@${optionsVar}}${tid} />`;
   }
   // Value-object fields render as `<.inputs_for :let={<f>_form}>`
   // with one nested `<.input>` per VO field.  The `:let` local
@@ -454,6 +487,10 @@ function renderFieldInputForField(
             idOptionsBindings,
             valueObjectsByName,
             "",
+            // Nested VO controls extend the parent's testid with the sub-field
+            // name (`…-input-price-amount`), the exact shape `fillBlock`
+            // drives for a value-object create input.
+            testid ? `${testid}-${sub.name}` : undefined,
           ),
         )
         .join(" ");
@@ -471,7 +508,7 @@ function renderFieldInputForField(
     : isMoney
       ? ` pattern="^-?\\d+(\\.\\d+)?$" inputmode="decimal"`
       : "";
-  return `<.input field={${assignPrefix}${formAssign}[:${fieldName}]} type="${inputType}" label="${label}"${extraAttrs} />`;
+  return `<.input field={${assignPrefix}${formAssign}[:${fieldName}]} type="${inputType}" label="${label}"${extraAttrs}${tid} />`;
 }
 
 /** Map a TypeIR to the HTML `<input type="…">` attribute the form
@@ -1017,7 +1054,12 @@ export function renderKeyValueRow(
   // the translation runtime under i18n (M-T1.11) and stays raw otherwise.
   const label = positionals[0] ? renderInTemplate(positionals[0], ctx, "keyValue") : "Field";
   const value = positionals[1] ? renderInTemplate(positionals[1], ctx) : "";
-  return `<div class="key-value-row"${testidAttr}>\n  <dt class="key-value-label">${label}</dt>\n  <dd class="key-value-value">${value}</dd>\n</div>`;
+  // The testid identifies the VALUE cell, not the row — the same placement the
+  // React/Vue/Svelte packs use (`<div … data-testid={testid}>{children}</div>`
+  // inside `KeyValueRow`), and what the emitted page objects assume: a detail
+  // read is `expect(detail.field("name")).toHaveText("Sprocket")`, which is an
+  // EXACT text match and would see "Name Sprocket" if the id sat on the row.
+  return `<div class="key-value-row">\n  <dt class="key-value-label">${label}</dt>\n  <dd class="key-value-value"${testidAttr}>${value}</dd>\n</div>`;
 }
 
 /** `Skeleton(count: N)` → `<div class="animate-pulse">` repeated loading lines. */

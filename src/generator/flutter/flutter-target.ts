@@ -38,6 +38,7 @@
 import { isConstructible } from "../../ir/enrich/wire-projection.js";
 import type { AggregateIR, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { PROVENANCE_LINEAGE_FIELD } from "../_payload/provenanced-wire.js";
 import { localizedNamedValue } from "../_walker/i18n-emit.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr, testidAttr, walk } from "../_walker/walker-core.js";
@@ -647,7 +648,7 @@ export const flutterTarget: WalkerTarget = {
   },
 
   // `ProvenanceInfo(of: <record>, field: "<name>")` → a native disclosure over
-  // the co-located `<field>_provenance` (a `ProvLineage?` on the decoded model —
+  // `<field>.lineage` (the `ProvLineage?` half of the `Provenanced<T>` carrier —
   // `dart-model-emit.ts`).  Flutter forks the primitive because its "markup" is
   // a Dart widget tree, not JSX: the `<details>`/`<summary>` pair becomes an
   // `ExpansionTile` (the Material disclosure), and the `<dl>` a `Column` of
@@ -666,7 +667,7 @@ export const flutterTarget: WalkerTarget = {
     if (!ofArg || fieldArg?.kind !== "literal") {
       return flutterTarget.renderComment("ProvenanceInfo: missing record or field");
     }
-    const lineage = `${emitExpr(ofArg, ctx)}.${String(fieldArg.value)}_provenance`;
+    const lineage = `${emitExpr(ofArg, ctx)}.${String(fieldArg.value)}.${PROVENANCE_LINEAGE_FIELD}`;
     const row = (label: string, value: string) =>
       `Row(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[` +
       `Expanded(child: ${label}), Expanded(child: ${value})])`;

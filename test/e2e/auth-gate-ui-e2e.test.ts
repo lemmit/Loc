@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type HexMirror, startHexMirror } from "./support/hex-mirror";
+import { mixDepsGet } from "./support/mix-retry";
 
 // ---------------------------------------------------------------------------
 // Runtime auth UI-gate smoke — proves the auth gate WORKS at runtime, not just
@@ -341,7 +342,7 @@ describe.skipIf(!PHX_RUN)("auth UI-gate runtime smoke (phoenix / server-rendered
     phxLog = path.join(workDir, "phx.log");
     const bootCmd =
       `${shellPrefix}mix local.hex --force && mix local.rebar --force && ` +
-      `mix deps.get && mix ecto.create && mix ecto.migrate && ` +
+      `${mixDepsGet()} && mix ecto.create && mix ecto.migrate && ` +
       `mix phx.server`;
     const dockerRun = [
       "docker",

@@ -384,6 +384,28 @@ function containmentTypeFor(partName: string, collection: boolean): TypeIR {
     : { kind: "entity", name: partName };
 }
 
+/**
+ * The WIRE type of a declared property — its domain type, except that a
+ * `provenanced` field ships as the `Provenanced<T>` carrier
+ * `{ value: T, lineage: json | null }` (M-T6.12,
+ * `docs/old/proposals/provenanced-wire-pair.md`).
+ *
+ * This is the ONE place the value/lineage pairing is decided.  Before it
+ * existed each backend appended a trailing `<field>_provenance` SIBLING key out
+ * of band — five backends and six frontends spelling the same convention by
+ * hand, invisible to `wireShape` and therefore to `.loom/wire-spec.json`, to
+ * `forApiRead`'s access filtering, and to `mask unless` redaction.  Folding the
+ * lineage INSIDE the field's own wire entry means every one of those inherits
+ * it for free, and a backend can no longer diverge by forgetting the bolt-on.
+ *
+ * STORAGE is unaffected — the column pair (typed value + jsonb lineage) stays
+ * exactly as it is (§7 of the proposal); this is a DTO/serialization shape
+ * only, and the in-memory domain object keeps the scalar field.
+ */
+export function wireTypeForField(f: FieldIR): TypeIR {
+  return f.provenanced ? { kind: "genericInstance", ctor: "provenanced", arg: f.type } : f.type;
+}
+
 export function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
   const out: WireField[] = [
     {
@@ -405,7 +427,7 @@ export function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
     if (f.name === TENANT_OWNED_DATA_KEY_FIELD && hasTenantOwned(agg)) continue;
     out.push({
       name: f.name,
-      type: f.type,
+      type: wireTypeForField(f),
       optional: f.optional,
       source: "property",
       access: f.access ?? "editable",
@@ -455,7 +477,7 @@ export function wireFieldsForPart(part: EntityPartIR): WireField[] {
   for (const f of part.fields) {
     out.push({
       name: f.name,
-      type: f.type,
+      type: wireTypeForField(f),
       optional: f.optional,
       source: "property",
       access: f.access ?? "editable",
@@ -487,6 +509,10 @@ export function wireFieldsForValueObject(vo: ValueObjectIR): WireField[] {
   for (const f of vo.fields) {
     out.push({
       name: f.name,
+      // Deliberately NOT `wireTypeForField`: a value object has no identity, no
+      // row, and no write-site instrumentation, so no backend emits a lineage
+      // sibling for a VO member.  Wrapping one in the carrier would advertise a
+      // `lineage` the serializer has nothing to fill it from.
       type: f.type,
       optional: f.optional,
       source: "property",

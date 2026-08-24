@@ -59,6 +59,7 @@ import {
   opWorkflowInstances,
 } from "../../../ir/util/openapi-ids.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { PROVENANCE_VALUE_FIELD, provenancedEntries } from "../../_payload/provenanced-wire.js";
 import { unionMembers } from "../../_payload/union-wire.js";
 import type { ApiRoute } from "../api-emit.js";
 import { servedOperationEntries, servesHistory } from "./api-emit.js";
@@ -897,6 +898,20 @@ function openApiType(t: TypeIR, schemasModule: string): string {
       // Containment part → its `<Part>Response`, as a module atom so the
       // part schema is registered in components.
       return `${schemasModule}.${info.base}Response`;
+    case "provenanced": {
+      // The `Provenanced<T>` carrier (M-T6.12), inlined like a value object —
+      // the value's own schema plus the opaque nullable lineage object.  Before
+      // this arm the Phoenix spec published a provenanced field as a bare `T`
+      // and never mentioned the lineage at all, so its OpenAPI document
+      // disagreed with the JSON the controller actually served.
+      const props = provenancedEntries(
+        openApiType(info.carried!, schemasModule),
+        `${OPENAPI_PRIMITIVE.json}`,
+      )
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(", ");
+      return `%OpenApiSpex.Schema{type: :object, properties: %{${props}}, required: [:${PROVENANCE_VALUE_FIELD}]}`;
+    }
   }
 }
 
@@ -1127,10 +1142,18 @@ function declaredResponseProps(
   const props: Array<{ name: string; type: TypeIR; optional: boolean }> = [];
   const idField = forApiRead(wireFieldsFor(agg)).find((w) => w.source === "id");
   if (idField) props.push({ name: idField.name, type: idField.type, optional: idField.optional });
+  // A declared record names DOMAIN types, so a field the aggregate declares
+  // `provenanced` is wrapped in the wire carrier here — the same wrap
+  // `wireTypeForField` applies on the wireShape path, so both paths publish the
+  // identical schema (M-T6.12).
+  const provenanced = new Set(agg.fields.filter((f) => f.provenanced).map((f) => f.name));
   for (const f of payload.fields) {
+    const declaredType = normalizeDeclaredType(f.type, payloads);
     props.push({
       name: f.name,
-      type: normalizeDeclaredType(f.type, payloads),
+      type: provenanced.has(f.name)
+        ? { kind: "genericInstance", ctor: "provenanced", arg: declaredType }
+        : declaredType,
       optional: f.optional,
     });
   }
