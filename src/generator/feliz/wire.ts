@@ -964,8 +964,12 @@ function elemEncoderFn(base: TypeIR): string {
   if (base.kind === "primitive") {
     switch (base.name) {
       case "int":
-      case "long":
         return "(fun s -> Encode.int (int s))";
+      // A `long` element is an int64 on the wire as a JSON NUMBER.  Thoth's
+      // `Encode.int64` renders a STRING (`value.ToString(InvariantCulture)`),
+      // so the number goes out through `Encode.float`.
+      case "long":
+        return "(fun s -> Encode.float (float (int64 s)))";
       // RS-12: `money` is a wire STRING (Thoth's `Encode.decimal` is
       // `value.ToString()`), and RS-24: a plain `decimal` is a wire NUMBER.
       // They shared one arm until M-T1.22, so every `decimal` element encoded
@@ -1009,8 +1013,12 @@ function encodeExprFor(t: TypeIR, access: string, optional = false): string {
     if (base.kind === "primitive") {
       switch (base.name) {
         case "int":
-        case "long":
           return `Encode.int (int ${access})`;
+        // A `long` is a JSON NUMBER, and Thoth's `Encode.int64` renders a
+        // STRING — so the int64 is parsed (keeping the full range on the way
+        // in) and encoded through `Encode.float`.
+        case "long":
+          return `Encode.float (float (int64 ${access}))`;
         // `money` is a wire STRING (RS-12) — Thoth's `Encode.decimal` renders
         // `value.ToString()`.  A plain `decimal` is a wire NUMBER (RS-24), so
         // it goes out through `Encode.float`; sharing the money arm made every
@@ -2238,8 +2246,11 @@ function paramEncoder(t: TypeIR): string {
   if (base.kind === "primitive") {
     switch (base.name) {
       case "int":
-      case "long":
         return "Encode.int";
+      // The param is already `int64`-typed (`wireFieldType`); `Encode.int64`
+      // would render it as a JSON string, so widen to a JSON number instead.
+      case "long":
+        return "(fun (v: int64) -> Encode.float (float v))";
       // Same RS-12/RS-24 split as the form encoders: money is a wire string,
       // a plain decimal is a wire number.  The op-param value is already
       // `decimal`-typed here (`wireFieldType`), so the number arm converts.
@@ -2510,8 +2521,12 @@ export function decoderExprFor(t: TypeIR): string {
     case "primitive":
       switch (t.name) {
         case "int":
-        case "long":
           return "Decode.int";
+        // `Decode.int` bounds-checks against Int32.MIN/MAX and fails the WHOLE
+        // record decode on anything past int32 — so a `long` field decoded
+        // through it rejected every value it exists to carry.
+        case "long":
+          return "Decode.int64";
         case "decimal":
         case "money":
           return "Decode.decimal";

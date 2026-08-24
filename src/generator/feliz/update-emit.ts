@@ -108,9 +108,15 @@ function boundSetArm(
       ? "v"
       : fs === "int"
         ? "(match System.Int32.TryParse v with | true, n -> n | _ -> 0)"
-        : fs === "decimal"
-          ? "(match System.Decimal.TryParse v with | true, n -> n | _ -> 0m)"
-          : "v";
+        : // A `long` state cell is an F# `int64` (`type-fs.ts`), so the raw
+          // input string parses through Int64 — `Int32.TryParse` would refuse
+          // every value past 2^31 that a `long` exists to hold, and the `int`
+          // result would not typecheck against the `int64` Model field.
+          fs === "int64"
+          ? "(match System.Int64.TryParse v with | true, n -> n | _ -> 0L)"
+          : fs === "decimal"
+            ? "(match System.Decimal.TryParse v with | true, n -> n | _ -> 0m)"
+            : "v";
   if (refetch) {
     // A find read's ARGUMENT is a control in exactly the way a paged read's
     // page/sort cell is: change it and the query has to be re-issued off the

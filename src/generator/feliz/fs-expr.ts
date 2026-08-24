@@ -17,9 +17,9 @@
 
 import type { BinOp, ExprIR, LiteralKind, PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
-import { isIntDivWidenedToDecimal } from "../_expr/target.js";
 import { upperFirst } from "../../util/naming.js";
 import { DURATION_UNIT_MS } from "../../util/temporal.js";
+import { isIntDivWidenedToDecimal } from "../_expr/target.js";
 
 /** F# spelling of a Loom binary operator. */
 function fsBinOp(op: BinOp): string {
@@ -80,7 +80,12 @@ export const FS_LEAVES = {
     // the current instant is `System.DateTime.UtcNow` — the same UTC-clock
     // spelling the .NET backend emits for the same literal.
     if (lit === "now") return FS_NOW;
-    // int / long / decimal / money → numeric literal verbatim
+    // A `long` literal needs the `L` suffix: lowering PROMOTES an int literal
+    // to `long` when it meets a long operand (`qty > 3` stamps `lit: "long"`),
+    // and a bare `3` is an F# `int` — an int-vs-int64 type error against the
+    // `int64` the operand now is.
+    if (lit === "long") return `${value}L`;
+    // int / decimal / money → numeric literal verbatim
     return value;
   },
   binary(left: string, right: string, op: BinOp): string {
@@ -95,7 +100,10 @@ export const FS_LEAVES = {
   convert(value: string, target: PrimitiveName, from: PrimitiveName | undefined): string {
     void from;
     if (target === "string") return `(string ${value})`;
-    if (target === "long" || target === "int") return `(int ${value})`;
+    if (target === "int") return `(int ${value})`;
+    // A `long` is an F# `int64` (`type-fs.ts`), so `long(x)` must convert to
+    // int64 — `int` would truncate to 32 bits.
+    if (target === "long") return `(int64 ${value})`;
     if (target === "decimal" || target === "money") return `(decimal ${value})`;
     return value;
   },

@@ -92,3 +92,121 @@ describe("feliz: integer division widens to decimal", () => {
     expect(fs).not.toContain("(decimal model.Total)");
   });
 });
+
+describe("feliz: a Loom `long` is an F# int64", () => {
+  const LONG_SYS = `
+system Shop {
+  api ShopApi from Catalog
+  subdomain Catalog {
+    context Cat {
+      aggregate Product with crudish { name: string  impressions: long }
+      repository Products for Product { }
+    }
+  }
+  storage db { type: postgres }
+  resource catState { for: Cat, kind: state, use: db }
+  ui WebApp {
+    api Shop: ShopApi
+    page Products {
+      route: "/products"
+      body: QueryView {
+        of: Shop.Product.all,
+        loading: Text { "…" }, error: Text { "!" }, empty: Text { "0" },
+        data: rows => Stack { For { each: rows, p => Card { p.name } } }
+      }
+    }
+    page ProductNew {
+      route: "/products/new"
+      body: Stack { CreateForm { of: Product } }
+    }
+  }
+  deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
+  deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 }
+}`;
+
+  /** `src/App.fs` for a system source (rather than a bare ui body). */
+  async function appOf(source: string): Promise<string> {
+    const model = await buildLoomModel(source);
+    const s = model.systems[0]!;
+    const web = s.deployables.find((d) => d.name === "web")!;
+    return generateFelizForContexts(s.subdomains[0]!.contexts, s, web).get("src/App.fs")!;
+  }
+
+  it("spells the wire record field int64 and decodes it with Decode.int64", async () => {
+    const fs = await appOf(LONG_SYS);
+    expect(fs).toContain("impressions: int64");
+    // `Decode.int` bounds-checks against Int32 and fails the WHOLE record
+    // decode past 2^31 — the exact range a `long` exists to carry.
+    expect(fs).toContain('get.Required.Field "impressions" Decode.int64');
+  });
+
+  it("encodes a long form field as a JSON number, not Encode.int64's string", async () => {
+    const fs = await appOf(LONG_SYS);
+    // Thoth's `Encode.int64` renders `value.ToString(InvariantCulture)` — a
+    // JSON STRING — so the int64 goes out through `Encode.float`.
+    expect(fs).toContain('"impressions", Encode.float (float (int64 form.impressions))');
+    expect(fs).not.toContain('"impressions", Encode.int (int form.impressions)');
+  });
+
+  it("spells a long state cell int64, zeroes it 0L, and parses input via Int64", async () => {
+    const fs = await app(`
+    page Counter {
+      route: "/counter"
+      state { impressions: long }
+      body: Stack {
+        NumberField { "Impressions", bind: impressions },
+        Text { \`{impressions}\` }
+      }
+    }`);
+    expect(fs).toContain("Impressions: int64");
+    expect(fs).toContain("Impressions = 0L");
+    expect(fs).toContain(
+      "| SetImpressions v -> { model with Impressions = (match System.Int64.TryParse v with | true, n -> n | _ -> 0L) }, Cmd.none",
+    );
+    expect(fs).not.toContain("System.Int32.TryParse v");
+  });
+
+  // Lowering PROMOTES a bare int literal to `long` when it meets a long
+  // operand, so the literal leaf must emit the `L` suffix — a bare `3` is an
+  // F# `int`, and `int64 > int` does not typecheck.
+  it("suffixes a promoted long literal with L", async () => {
+    const fs = await app(`
+    page Counter {
+      route: "/counter"
+      state { impressions: long  hot: bool = false }
+      action evaluate() { hot := impressions > 3 }
+      body: Button("go", onClick: evaluate)
+    }`);
+    expect(fs).toContain("(model.Impressions > 3L)");
+  });
+
+  // A `long(x)` conversion must widen to int64, not truncate through `int`.
+  it("converts to int64, never through int", async () => {
+    const fs = await app(`
+    page Counter {
+      route: "/counter"
+      state { small: int = 0  impressions: long }
+      action widen() { impressions := long(small) }
+      body: Button("go", onClick: widen)
+    }`);
+    expect(fs).toContain("(int64 model.Small)");
+    expect(fs).not.toContain("(int model.Small)");
+  });
+
+  // A PERSISTED store field of type `long` crosses the JS boundary as a raw
+  // string; its codec has to parse through Int64 or the parsed `int` will not
+  // typecheck against the `int64` Model field (`feliz-persist-codec.ts`).
+  it("persists a long store field through Int64.TryParse", async () => {
+    const fs = await app(`
+    store Stats persist: local {
+      state { impressions: long }
+      action bump() { impressions := impressions + 1 }
+    }
+    page Home {
+      route: "/"
+      body: Text { \`{Stats.impressions}\` }
+    }`);
+    expect(fs).toContain("StatsImpressions: int64");
+    expect(fs).toContain("System.Int64.TryParse raw");
+  });
+});
