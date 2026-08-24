@@ -19,8 +19,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../src/system/index.js";
-import { parseString } from "../_helpers/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
 /** A durable (`retention: log`) channel + an aggregate whose operation emits
  *  one of its carried events — the minimal shape that puts an outbox INSERT on
@@ -100,13 +99,11 @@ const BROKER = (platform: string) => `system BS {
 }`;
 
 async function emit(platform: string): Promise<Map<string, string>> {
-  const { model } = await parseString(DURABLE(platform));
-  return generateSystems(model).files;
+  return await generateSystemFiles(DURABLE(platform));
 }
 
 async function emitBroker(platform: string): Promise<Map<string, string>> {
-  const { model } = await parseString(BROKER(platform));
-  return generateSystems(model).files;
+  return await generateSystemFiles(BROKER(platform));
 }
 
 const fileEndingWith = (files: Map<string, string>, suffix: string): string => {
@@ -207,8 +204,7 @@ describe("outbox write atomicity — .NET (EF Core)", () => {
 
 describe("outbox write atomicity — .NET (Dapper)", () => {
   it("records the durable events on `__tx` before the commit", async () => {
-    const { model } = await parseString(DURABLE("dotnet { persistence: dapper }"));
-    const files = generateSystems(model).files;
+    const files = await generateSystemFiles(DURABLE("dotnet { persistence: dapper }"));
     const repo = fileEndingWith(files, "Infrastructure/Repositories/OrderRepository.cs");
     const save = from(repo, "public async Task SaveAsync(Order aggregate");
 
@@ -222,8 +218,7 @@ describe("outbox write atomicity — .NET (Dapper)", () => {
   });
 
   it("the Dapper outbox dispatcher INSERTs on the caller's transaction", async () => {
-    const { model } = await parseString(DURABLE("dotnet { persistence: dapper }"));
-    const files = generateSystems(model).files;
+    const files = await generateSystemFiles(DURABLE("dotnet { persistence: dapper }"));
     const disp = fileEndingWith(files, "Infrastructure/Events/OutboxDomainEventDispatcher.cs");
     const record = from(disp, "public async Task<IReadOnlyList<IDomainEvent>> RecordDurableAsync(");
     expect(record).toContain("if (transaction?.Connection is { } txConn)");
@@ -256,10 +251,9 @@ describe("outbox write atomicity — elixir/Phoenix", () => {
   it("an EPHEMERAL channel keeps the untransacted post-commit fan-out", async () => {
     // The wrap is gated on the event actually being durable, so ephemeral
     // projects keep their (byte-identical) persist tail.
-    const { model } = await parseString(
+    const files = await generateSystemFiles(
       DURABLE("elixir").replace("retention: log", "retention: ephemeral"),
     );
-    const files = generateSystems(model).files;
     const ctx = fileEndingWith(files, "lib/d/shop.ex");
     const op = from(ctx, "def place_order(%D.Shop.Order{} = record, params)");
     expect(op.slice(0, op.indexOf("def ", 10))).not.toContain("D.Repo.transaction(fn ->");
