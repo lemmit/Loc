@@ -566,6 +566,38 @@ system DevPlatform {
             }
         }
 
+        // The MONEY-PRIMITIVE form witness (M-T1.23 / audit F18).  `Build.cost`
+        // is `money?`, so the crudish update form on this page renders the
+        // pack's `field-input-money` template — the only shape in any
+        // build-matrix example that makes an emitted page bind `Decimal`.
+        // Without it, the pack's `{from: "decimal.js", named: ["Decimal"]}`
+        // declaration and the page shell's own `import Decimal from
+        // "decimal.js"` both landed in one file (TS2300) and every
+        // `generated-*-build` gate stayed green.
+        //
+        // The money field rides the UPDATE form, not the `CreateForm` beside
+        // it: `CreateForm` renders `createInputFields(agg).filter(f =>
+        // !f.optional)` (see `_walker/primitives/forms.ts`), so an OPTIONAL
+        // money field never reaches a create form.  Making `cost` required
+        // instead would change the wire and every `builds.create` literal in
+        // this file — a witness must not move the thing it witnesses.
+        page BuildDesk(id: Build id) {
+            route: "/builds/:id/edit"
+            title: "Edit build"
+            body: Stack {
+                Heading { "Create build", level: 2 },
+                Card { CreateForm { of: Build, testid: "builds-new" } },
+                Heading { "Edit build", level: 2 },
+                Text { id },
+                Modal {
+                    OperationForm { of: Build, op: update, testid: "builds-update" },
+                    title: "Update build",
+                    trigger: Button { "Update" }
+                },
+                testid: "builds-desk-page"
+            }
+        }
+
         // Project detail — covers the remaining layout primitives:
         // Group / Grid / Container / Tabs / Field / NumberField /
         // PasswordField / Toggle / FileUpload / FileLink / Loader / Image / Avatar / Slot /

@@ -304,7 +304,7 @@ Found 2026-08-23 by the numeric-types audit ([F2](../audits/numeric-types-audit-
 
 Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F2, plan.json N2. Relates to M-T1.16 (Feliz polish), M-T9.38 (runtime leg).
 
-## M-T1.23 — A money form input makes the generated React/Svelte app fail to build — `open` · **S–M** · P1 ⭐ duplicate `Decimal` import, hidden by a witness gap
+## M-T1.23 — A money form input makes the generated React/Svelte app fail to build — `done` · **S–M** · P1 ⭐ duplicate `Decimal` import, hidden by a witness gap
 
 Found 2026-08-23 by the numeric-types audit ([F3](../audits/numeric-types-audit-2026-08-23.md)). The page shell emits `import Decimal from "decimal.js"` when a page binds Decimal (`src/generator/react/walker/page-shell.ts`, Svelte twin), while every pack's `field-input-money` template *also* declares `{from: "decimal.js", named: ["Decimal"]}` — both land in the emitted page: `TS2300: Duplicate identifier 'Decimal'`, reproduced with tsc on emitted output. The generated app does not build.
 
@@ -313,6 +313,10 @@ Found 2026-08-23 by the numeric-types audit ([F3](../audits/numeric-types-audit-
 **The fix:** one import owner — the shell's import collector absorbs (or skips) what the active pack already declares. Add a money-primitive create form to a build-matrix example in the same PR (the F18 witness), so the gate reaches the shape forever.
 
 **Verification when it lands.** A walker test pins single-import on a money-form page; the matrix example compiles; mutation-proved by re-duplicating the import.
+
+**Landed 2026-08-24.** `takeDecimalImport` in `src/generator/_walker/render-primitive.ts` (beside the `takeReactSpecifiers` precedent) drains the pack's declaration; the React and Svelte page shells stay the single emitter and OR the drained flag into their own fallback. Packs keep declaring, so an out-of-tree pack still works. The React **component** shell's dead `_decimalImport` (computed, never spliced — TS2304 on a `component` with a money `state {}`) was wired in the same change, because the drain removes the accident that was covering it. Witness: `page BuildDesk` in `examples/showcase.ddd`'s `ui Console` — the PR-time React build slice, red with TS2300 before / green after on `mantine@v9` + `shadcn@v4`. `test/generator/_walker/money-decimal-import.test.ts` now COUNTS the import lines per framework (presence is what passed while the app didn't build); three mutation proofs recorded in the PR.
+
+**Two adjacent findings, one fixed here and one still open.** `CreateForm` renders `createInputFields(agg).filter(f => !f.optional)`, so an OPTIONAL money field never reaches a create form — the witness rides the crudish `update` `OperationForm` instead. And the Svelte api module (`src/generator/svelte/api-builder.ts`) never emitted the dual `FormState`/`Payload` aliases its own form emitter imports (fixed here, tested + mutation-proved). What remains blocking a Svelte build-matrix witness: the walker registers `<Action>FormState` as a VALUE import, which SvelteKit's `verbatimModuleSyntax` rejects — that needs a type-import channel through `_walker/primitives/forms.ts` (M-T1.24's tree), so `examples/svelte-shop.ddd` still has no money form and the Svelte gate is still blind to this shape.
 
 Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F3/F18, plan.json N3. Conflicts with M-T1.24 in the shared walker tree — sequence or stack.
 
