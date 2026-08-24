@@ -1,0 +1,248 @@
+{
+  "meta": {
+    "source": "docs/audits/numeric-types-audit-2026-08-23.md",
+    "snapshotCommit": "e98e3af18",
+    "branch": "claude/loom-number-types-review-xb0sip",
+    "generated": "2026-08-23",
+    "waveRule": "Wave 1 = broken codegen (the generated product fails to build or crashes on first use) plus self-contained wire/migration fixes — file-disjoint, fully parallel, except M-T6.48 which conflictsWith M-T6.46 on java/emit/wire.ts and must stack or sequence. Wave 2 = decision-gated or merge-gated (M-T6.47 after #2631 merges; M-T5.22 carries the owner ruling; M-T9.37 after M-T6.46 or with a ratcheted java waiver). Wave 3 = structural (the codec seam after the concrete fixes inform it; the runtime legs after the fixes they would flag).",
+    "processRule": "Every task follows the repo rules: re-sync onto fresh main first, verify the finding is still live (this register rots like any other), open a DRAFT PR naming the mission ID and files before implementing, mutation-prove any gate the task adds (revert via file copy, never git checkout), delete any waiver the fix closes in the SAME PR, and fix ships WITH its witness — the fixture/probe named in the task, not a promise of one. Decisions embedded in mission texts are proposed defaults: overridable in draft-PR review, not silently."
+  },
+
+  "claimed": [
+    { "gap": "F10 slice: dapper decimal aggregates arrive as double (SQL cast keyed off wire type)", "pr": 2631, "note": "open at audit time; M-T6.47 is blocked on it and covers the REMAINING hops (per-row projectToResponse cast, EF aggregate arm) — the assigned agent must read #2631's merged shape first" }
+  ],
+
+  "gaps": [
+    {
+      "id": "N1-flutter-money",
+      "mission": "M-T1.21",
+      "title": "Flutter money is broken end-to-end: decode crashes on the wire string, forms send a number every backend rejects",
+      "kind": "silent",
+      "targets": ["flutter"],
+      "fileTrees": ["src/generator/flutter/dart-types.ts", "src/generator/flutter/forms-emit.ts", "test/generator/flutter/", ".github/workflows/generated-flutter-build.yml"],
+      "fix": "Represent money in Dart as the wire string with typed helpers (proposed default — never double): fromJson takes the string as-is, forms keep text input and submit the string, display parses for formatting only. Fix the wrong pin in dart-model.test.ts. Add a money-primitive field to the embedded flutter CI fixture so the compile gate reaches the type at all (F18 witness).",
+      "tests": ["test/generator/flutter/dart-model.test.ts re-pinned", "generated-flutter-build.yml fixture gains a money field", "mutation-prove: restore the `as num` decode and watch the new assertion fail"],
+      "size": "M",
+      "wave": 1,
+      "conflictsWith": []
+    },
+    {
+      "id": "N2-feliz-numerics",
+      "mission": "M-T1.22",
+      "title": "Feliz numeric conformance: decimal encodes as a Thoth string, int `/` truncates, long decodes as int32, no pre-encode validation",
+      "kind": "silent",
+      "targets": ["feliz"],
+      "fileTrees": ["src/generator/feliz/wire.ts", "src/generator/feliz/fs-expr.ts", "src/generator/feliz/type-fs.ts", "test/generator/feliz/"],
+      "fix": "Split the encode arm: money stays Encode.decimal (string), plain decimal encodes as a JSON number (Encode.float over the decimal). Add the isIntDivWidenedToDecimal arm to FS_LEAVES (F# int `/` truncates; emit float/decimal division). Decode long via a decoder that accepts the full int64 range. Validate numeric text before Fable int/decimal conversion so a bad value is a form error, not an unhandled Elmish exception.",
+      "tests": ["test/generator/feliz/createform.test.ts gains the decimal-encode arm (only money is pinned today)", "an fs-expr int-division test", "mutation-prove each arm"],
+      "size": "M",
+      "wave": 1,
+      "conflictsWith": []
+    },
+    {
+      "id": "N3-duplicate-decimal-import",
+      "mission": "M-T1.23",
+      "title": "A money form input makes the generated React/Svelte app fail to build (duplicate Decimal import)",
+      "kind": "silent",
+      "targets": ["react", "svelte"],
+      "fileTrees": ["src/generator/react/walker/page-shell.ts", "src/generator/svelte/walker/page-shell.ts", "designs/", "examples/ or web/src/examples/"],
+      "fix": "Dedupe the decimal.js import between the page-shell emission and the pack template import declarations (one owner: the shell's import collector should absorb pack-declared imports, or the shell should skip what a pack already declares). Add a money-primitive create form to a build-matrix example so generated-react-build/-svelte-build reach the shape (F18 witness).",
+      "tests": ["a walker test asserting single import on a money-form page", "the matrix example itself", "mutation-prove: re-duplicate and watch the build/pin fail"],
+      "size": "S-M",
+      "wave": 1,
+      "conflictsWith": ["N4-money-forms"]
+    },
+    {
+      "id": "N4-money-forms",
+      "mission": "M-T1.24",
+      "title": "Money in forms: Svelte structuredClone strips the Decimal default; VO[] rows register money valueAsNumber; Angular seeds a number control against a string DTO",
+      "kind": "silent",
+      "targets": ["svelte", "angular", "react", "vue"],
+      "fileTrees": ["src/generator/svelte/emit-templates.ts", "src/generator/_frontend/form-helpers.ts", "src/generator/_walker/form-fields-vm.ts", "src/generator/angular/form-fields.ts", "designs/*/field-input-array.hbs"],
+      "fix": "One contract, three seams: a money form value is a string/Decimal, never a JS number. Svelte: clone defaults in a Decimal-safe way (or seed money as a string). Shared walker: move field-input-money out of the NUMERIC/valueAsNumber set for array rows and seed rows with the string zero. Angular: controlInit seeds a string control behind a text input matching the string DTO.",
+      "tests": ["per-seam generator tests", "mutation-prove each seam", "the pack int-truncation/2dp consistency notes from the register annex recorded as acceptance observations"],
+      "size": "M",
+      "wave": 1,
+      "conflictsWith": ["N3-duplicate-decimal-import"]
+    },
+    {
+      "id": "N5-money-display",
+      "mission": "M-T1.25",
+      "title": "Money display fabricates $/USD and rounds to 2dp — show the wire's 4dp faithfully or make display format a declared knob",
+      "kind": "breadth",
+      "targets": ["react", "vue", "svelte", "angular"],
+      "fileTrees": ["designs/*/format-helpers*", "src/generator/_frontend/"],
+      "fix": "Stop inventing a currency symbol (Loom money has no currency dimension — M-T2.12 owns adding one); default display shows the wire value faithfully (4dp) with locale-neutral formatting; if a knob is added it is a declared design decision, not a hardcode.",
+      "tests": ["pack format-helper tests", "no wire change — display only"],
+      "size": "S",
+      "wave": 1,
+      "conflictsWith": ["N4-money-forms"]
+    },
+    {
+      "id": "N6-columntype-equal",
+      "mission": "M-T2.14",
+      "title": "columnTypeEqual is blind to precision/scale, so #2575's NUMERIC(19,4) never reaches an existing database",
+      "kind": "silent",
+      "targets": ["all backends (shared MigrationsIR)"],
+      "fileTrees": ["src/system/migrations-builder.ts", "test/system/"],
+      "fix": "Compare precision/scale in columnTypeEqual so a bounds change diffs out as alterColumnType (the USING cast path already exists). Guard the rebaseline/destructive gating semantics: a widening bound is safe, a narrowing one goes through --allow-destructive review.",
+      "tests": ["migration-evolution witness: a pre-#2575 baseline snapshot evolves to NUMERIC(19,4)", "decimal<->money retype produces a migration", "mutation-prove: revert the comparator and the witness fails"],
+      "size": "S-M",
+      "wave": 1,
+      "conflictsWith": []
+    },
+    {
+      "id": "N7-decimal-arithmetic-rule",
+      "mission": "M-T5.22",
+      "title": "Decimal arithmetic representation has no rule: float64 on node/python, exact on .NET/Java/Elixir — 0.1+0.2 diverges on the wire AND in storage",
+      "kind": "mission",
+      "targets": ["all backends"],
+      "fileTrees": ["docs/conformance-semantics.md", "test/behavioral/", "src/generator/dotnet/", "src/generator/java/", "src/generator/elixir/", "docs/language.md", "src/util/collection-ops.ts"],
+      "fix": "Mint the RS rule per the registry's own claim-the-number protocol. Proposed default (overridable): observable results — wire AND persisted values — of computed decimals follow float64/node-oracle semantics; in-memory representation stays per-backend where it cannot be observed. Then add the corpus witness (a derived 0.1+0.2 field) and bring the exact-side backends into rule compliance. Also carries: the node decimal.js 20-digit precision question, the inbound precision-acceptance skew (java unlimited vs dotnet 28-29 vs double-clamped), and the numeric doc-drift fixes (language.md host table, collection-ops sum signature -> docs:stdlib regen).",
+      "tests": ["the new corpus case against all five behavioral legs", "the RS registry entry", "mutation-prove via one exact-side revert"],
+      "size": "L",
+      "wave": 2,
+      "conflictsWith": ["N10-java-decimal-narrowing", "N11-dotnet-decimal-hops"]
+    },
+    {
+      "id": "N8-long-contract",
+      "mission": "M-T5.23",
+      "title": "long has no contract: JS-number storage and float() aggregates corrupt past 2^53; int-overflow behavior is 3-way divergent",
+      "kind": "mission",
+      "targets": ["node", "python", "java", "dotnet"],
+      "fileTrees": ["src/language/validators/", "src/generator/typescript/emit/schema.ts", "src/generator/python/query-projections-builder.ts", "src/generator/java/emit/query-projection-reads.ts", "docs/"],
+      "fix": "Proposed default (overridable): document + validator-enforce a 2^53 safe-integer ceiling for long on the affected paths now (an honest loom.* diagnostic, not silent corruption); representation upgrade (BigInt/string wire) becomes a named follow-up mission if the ceiling pinches. Route python declared-int/long aggregates through int(), not float(). Unify aggregate overflow behavior (proposed: the Java wraparound becomes an error like .NET's, surfaced as a 500-with-diagnostic or a checked read).",
+      "tests": ["validator tests", "a >2^53 witness on the exact backends proving THEY carry it", "python aggregate int test"],
+      "size": "M",
+      "wave": 2,
+      "conflictsWith": []
+    },
+    {
+      "id": "N9-avg-over-money",
+      "mission": "M-T5.24",
+      "title": "Projection avg over money is typed decimal (lossy double) while in-memory avg of the same field is money",
+      "kind": "mission",
+      "targets": ["all backends"],
+      "fileTrees": ["src/ir/lower/lower-projection.ts", "src/ir/util/projection-aggregate.ts", "test/behavioral/"],
+      "fix": "Proposed default (overridable): retype projection avg over a money column to money — 4dp string on the wire, matching the in-memory operator; aggregateCoercion's isMoney arm already knows how to format it. Wire-golden capture updates with the retype.",
+      "tests": ["lowering test", "behavioral golden for an avg-over-money projection", "mutation-prove via the coercion"],
+      "size": "S",
+      "wave": 2,
+      "conflictsWith": []
+    },
+    {
+      "id": "N10-ts-elixir-operand-gates",
+      "mission": "M-T6.44",
+      "title": "TS + Elixir money/decimal binary gates read only leftType: int * money emits uncompilable TS / crashing Elixir; int < decimal falls to Erlang term ordering",
+      "kind": "silent",
+      "targets": ["node", "elixir"],
+      "fileTrees": ["src/generator/typescript/render-expr.ts", "src/generator/elixir/render-expr.ts", "test/fixtures/corpus/"],
+      "fix": "Key the money/decimal binary arms off BOTH stamped operand types (the IR already stamps leftType/rightType/resultType — port the java fleet-bug-hunt-A4 mirror-arm pattern). On elixir this covers arithmetic AND comparisons (Decimal.compare, never native `<` against a struct). Corpus witness: right-hand money and decimal operands in operation bodies, compiled + behavioral on both backends.",
+      "tests": ["render-expr arm tests per backend", "the new corpus expressions through the node tsc and elixir --warnings-as-errors compile gates plus a behavioral value check for the comparison", "mutation-prove by reverting each gate"],
+      "size": "M",
+      "wave": 1,
+      "conflictsWith": []
+    },
+    {
+      "id": "N11-python-decimal-coherence",
+      "mission": "M-T6.45",
+      "title": "Python holds decimal as float in signatures and Decimal on columns — money * decimal throws at runtime",
+      "kind": "silent",
+      "targets": ["python"],
+      "fileTrees": ["src/generator/python/render-expr.ts", "src/generator/python/repository-builder.ts", "test/generator/python/"],
+      "fix": "Make the money-arithmetic arm coerce a float decimal operand (Decimal(str(f))) at the operation site, or unify python's decimal domain representation — smallest coherent fix wins; state which representation rule (float domain per RS-24 spirit) the backend follows in one comment at the type table.",
+      "tests": ["a money*decimal-param generator test + behavioral witness", "mutation-prove"],
+      "size": "S-M",
+      "wave": 1,
+      "conflictsWith": []
+    },
+    {
+      "id": "N12-java-decimal-narrowing",
+      "mission": "M-T6.46",
+      "title": "Java never got #2563: response decimal ships un-narrowed BigDecimal (34 digits vs the double contract)",
+      "kind": "silent",
+      "targets": ["java"],
+      "fileTrees": ["src/generator/java/emit/wire.ts", "src/generator/java/render-expr.ts", "src/generator/java/emit/query-projection-reads.ts", "test/generator/java/"],
+      "fix": "Type response DTO decimal fields double and narrow at the wire boundary exactly as dotnet's #2575 shape (response-only; request stays BigDecimal for the same 400-vs-500 reason). Cover derived fields, per-row reads, and the projection sum arm (avg already reflows through provider Double). Extend the RS-24 note per the registry protocol; correct the dotnet emitter comment that claims java already uses Double.",
+      "tests": ["wire emitter tests pinning double on response records", "full java behavioral leg", "mutation-prove"],
+      "size": "M",
+      "wave": 1,
+      "conflictsWith": ["N14-numeric-ingress"]
+    },
+    {
+      "id": "N13-dotnet-decimal-hops",
+      "mission": "M-T6.47",
+      "title": "The .NET decimal->double hops #2631 didn't reach: per-row projectToResponse CLR cast + EF aggregate arm are not correctly rounded",
+      "kind": "silent",
+      "targets": ["dotnet"],
+      "fileTrees": ["src/generator/dotnet/dto-mapping.ts", "src/generator/dotnet/query-projection-emit.ts", "test/generator/dotnet/"],
+      "fix": "BLOCKED on #2631 merging (read its landed shape first). Replace the raw (double) cast on the response path with a correctly-rounded conversion (double.Parse(d.ToString(CultureInfo.InvariantCulture)) or reading the column as double at the provider seam, extending #2631's aggregateLandsOnDouble classifier to the per-row and EF arms). Runtime-probe the EF Average materialization claim while there.",
+      "tests": ["the #2631 suite extended to the per-row arm", "a stored 17-digit decimal round-trip behavioral witness", "mutation-prove"],
+      "size": "S-M",
+      "wave": 2,
+      "conflictsWith": ["N14-numeric-ingress"]
+    },
+    {
+      "id": "N14-numeric-ingress",
+      "mission": "M-T6.48",
+      "title": "Malformed numeric input answers 500: money-string parse on .NET/Java/Python/Elixir, Elixir op-params skip int validation, Java may float-truncate int fields",
+      "kind": "silent",
+      "targets": ["dotnet", "java", "python", "elixir"],
+      "fileTrees": ["src/generator/dotnet/dto-mapping.ts", "src/generator/java/emit/wire.ts", "src/generator/python/routes-builder.ts", "src/generator/elixir/vanilla/context-emit.ts", "test/behavioral/"],
+      "fix": "Wrap every bare money-string parse in a typed 4xx (mirror node's moneySchema regex + typed issue). Complete elixir coerceOpParam over int/bool (its own docstring documents the failure mode). Runtime-verify the Java 1.5->int truncation and pin strict rejection. Record the stringified-number acceptance skew and pin a decision (lax everywhere or strict everywhere) as part of the ingress matrix. Probe the 1e21 exponential-money edge. conflictsWith N12/N13 on the shared wire files — stack or sequence within the wave.",
+      "tests": ["a cross-backend ingress conformance matrix (bad money string, fractional int, stringified number, huge money) asserting 4xx statuses per backend", "mutation-prove one arm per backend"],
+      "size": "M",
+      "wave": 1,
+      "conflictsWith": ["N12-java-decimal-narrowing", "N13-dotnet-decimal-hops"]
+    },
+    {
+      "id": "N15-wire-codec-seam",
+      "mission": "M-T9.36",
+      "title": "The numeric wire-codec seam: one per-backend codec contract + a boundary-enumeration completeness gate",
+      "kind": "mission",
+      "targets": ["all backends"],
+      "fileTrees": ["src/generator/_wire/ (new)", "src/generator/*/", "src/ir/util/projection-aggregate.ts", "test/system/"],
+      "fix": "BLOCKED on M-T6.46 + M-T6.47 (they finish the concrete divergences the seam generalizes). Lift the scattered per-path decisions into one per-backend numeric codec table (the generalization of aggregateCoercion + #2631's aggregateLandsOnDouble), consumed at every boundary: per-row DTO, projection select, aggregate, group key, raw-SQL adapters. Gate: a completeness test enumerating the boundaries per backend so a NEW read path cannot ship without declaring its codec — the structural end of the #2545->#2631 series. Byte-identical-output gated, like every prior seam extraction (#843, #607-#627).",
+      "tests": ["byte-identical emission across the refactor", "the boundary-enumeration completeness gate, mutation-proved by adding a fake unregistered boundary"],
+      "size": "L",
+      "wave": 3,
+      "conflictsWith": ["N12-java-decimal-narrowing", "N13-dotnet-decimal-hops", "N14-numeric-ingress"]
+    },
+    {
+      "id": "N16-comparator-fidelity",
+      "mission": "M-T9.37",
+      "title": "The wire-golden comparator JSON-parses bodies, so excess numeric precision can never fail the gate",
+      "kind": "ratchet-drain",
+      "targets": ["test harness"],
+      "fileTrees": ["test/_helpers/wire-record.ts", "test/_helpers/wire-waivers.ts"],
+      "fix": "Compare numeric leaves on raw text (or a big-decimal parse) so excess precision diverges. Lands after M-T6.46 (java would go red) OR ships first with a narrowly-scoped ratcheted java waiver that M-T6.46 must delete. Mutation-prove against java's current 34-digit output — the gate must fail on the exact defect that motivated it.",
+      "tests": ["the mutation-proof IS the test", "existing goldens stay green (numbers whose text already matches)"],
+      "size": "S-M",
+      "wave": 2,
+      "conflictsWith": []
+    },
+    {
+      "id": "N17-frontend-runtime-legs",
+      "mission": "M-T9.38",
+      "title": "Flutter and Feliz have no runtime leg — a money crash ships behind a green compile gate",
+      "kind": "breadth",
+      "targets": ["flutter", "feliz"],
+      "fileTrees": [".github/workflows/", "test/e2e/"],
+      "fix": "BLOCKED on M-T1.21 + M-T1.22 (the legs would be red until they land). A minimal boot + list-read + create-submit smoke for each self-hosting frontend against a real backend, over a numeric-rich fixture (money, decimal, int, long) — the runtime twin of generated-flutter-build/generated-feliz-build, wired to a run-* label per the post-merge-gate convention.",
+      "tests": ["the legs themselves, mutation-proved by re-seeding the F1 decode bug in a scratch branch"],
+      "size": "L",
+      "wave": 3,
+      "conflictsWith": []
+    }
+  ],
+
+  "counts": {
+    "gapsTotal": 17,
+    "wave1": 9,
+    "wave2": 5,
+    "wave3": 3,
+    "byKind": { "silent": 10, "mission": 4, "breadth": 2, "ratchet-drain": 1 },
+    "claimedExclusions": 1,
+    "note": "F18 (witness starvation) has no row of its own — it is distributed: every task's tests[] carries the witness its finding lacked, and N15's completeness gate is the structural backstop."
+  }
+}
