@@ -115,6 +115,8 @@ system DocAudit {
 // the aggregate's UNMASKED serializer, never the redacting one.
 const MASKED = `
 system MaskedAudit {
+  user { id: string role: string }
+  auth { provider: keycloak oidc { issuer: env("OIDC_ISSUER") clientId: env("OIDC_CLIENT_ID") } }
   subdomain Sales {
     context Orders {
       aggregate Order {
@@ -134,6 +136,7 @@ system MaskedAudit {
     dataSources: [orderState]
     serves: OrdersApi
     port: 4000
+    auth: required
   }
 }
 `;

@@ -58,13 +58,16 @@ describe("react page requires gate", () => {
     expect(bodyIdx).toBeGreaterThan(guardIdx);
   });
 
-  it("emits no gate when the frontend has no auth: ui (session not available)", async () => {
-    const files = await generateSystemFiles(
-      SYS({ authUi: false, gate: 'requires currentUser.role == "agent"\n      ' }),
-    );
-    const page = find(files, "web/src/pages/secret.tsx");
-    expect(page).not.toContain("useSession");
-    expect(page).not.toContain("Forbidden");
+  it("rejects a currentUser gate when the frontend has no auth: ui (the silent drop is closed)", async () => {
+    // This used to assert the output emitted UNGUARDED — an access check
+    // declared in the model and silently absent from the output.  Phase ⑦
+    // now refuses the model instead (`requires` joined the currentUser-read
+    // placements), so the unguarded output is output no user can obtain.
+    await expect(
+      generateSystemFiles(
+        SYS({ authUi: false, gate: 'requires currentUser.role == "agent"\n      ' }),
+      ),
+    ).rejects.toThrow("loom.current-user-needs-auth-ui");
   });
 
   it("emits no gate for an ungated page", async () => {

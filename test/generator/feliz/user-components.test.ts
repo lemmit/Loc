@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/generate.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
 // User (non-`extern`) components — Feliz flavour (`feliz/component-emit.ts`).
@@ -347,13 +347,18 @@ describe("user components — Feliz", () => {
     // declines to declare the Model field — and the emitter must then decline the
     // component too, rather than emitting `model.OrderById` against a field the
     // record does not carry (which is exactly what an unguarded read path did).
-    const fs = await appFs(
+    // `loom.user-component-deferred-target` rejects exactly this model — the
+    // deferral behavior asserted here is what the gate documents, so the
+    // emission from the rejected model IS the subject.
+    const files = await generateSystemFilesUnchecked(
       sys(`
       component OneOrder() {
         body: QueryView { of: Sales.Order.byId(id), single: true, data: o => Text { o.customerId } }
       }
       page Detail { route: "/orders/:id" body: Stack { OneOrder() } }`),
+      "the feliz emitter's defensive deferral of a byId-reading component is the subject; the gate that rejects this model documents that same deferral",
     );
+    const fs = [...files.entries()].find(([p]) => p.endsWith("src/App.fs"))![1];
     expect(fs).not.toContain("let OneOrder");
     expect(fs).not.toContain("model.OrderById");
     expect(fs).toContain("unknown layout component: OneOrder");
