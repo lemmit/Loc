@@ -168,8 +168,18 @@ describe("tenancy claim name — emitted principal reads follow the declaration"
     // what says the fix is parity, not a new elixir-only convention.  Each
     // spells the anchor (`orgPath`) and the tenant floor (`orgId`) separately.
     const cases: [string, RegExp, string, string][] = [
-      ["node", /invoice-repository\.ts$/, "requireCurrentUser().orgPath", "requireCurrentUser().orgId"],
-      ["python", /invoice_repository\.py$/, "require_current_user().org_path", "require_current_user().org_id"],
+      [
+        "node",
+        /invoice-repository\.ts$/,
+        "requireCurrentUser().orgPath",
+        "requireCurrentUser().orgId",
+      ],
+      [
+        "python",
+        /invoice_repository\.py$/,
+        "require_current_user().org_path",
+        "require_current_user().org_id",
+      ],
       ["java", /InvoiceJpaRepository\.java$/, "user()?.orgPath()", "user()?.orgId()"],
       ["dotnet", /AppDbContext\.cs$/, "_currentUser.User.OrgPath", "_currentUser.User.OrgId"],
     ];
