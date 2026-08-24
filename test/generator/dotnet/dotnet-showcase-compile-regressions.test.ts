@@ -21,13 +21,11 @@
 //   6. AuditableInterceptor — a stamp value reaching THROUGH the principal
 //      (`currentUser.role`) needs the ambient-principal local materialised
 //      (CS0103: `currentUser` did not exist in the static interceptor).
-
 import { describe, expect, it } from "vitest";
 import { wireToCommandArgument } from "../../../src/generator/dotnet/dto-mapping.js";
 import { renderAuditableInterceptor } from "../../../src/generator/dotnet/emit/auditable-interceptor.tpl.js";
 import type { AggregateIR, EnrichedBoundedContextIR } from "../../../src/ir/types/loom-ir.js";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseValid } from "../../_helpers/parse.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `
   system S {
@@ -78,12 +76,14 @@ const SRC = `
       }
     }
     api A from Core
-    deployable svc { platform: dotnet  contexts: [Catalog]  serves: A  port: 8080 }
+    storage pg { type: postgres }
+    resource catalogState { for: Catalog, kind: state, use: pg }
+    deployable svc { platform: dotnet  contexts: [Catalog]  dataSources: [catalogState]  serves: A  port: 8080 }
   }
 `;
 
 async function build(): Promise<Map<string, string>> {
-  return generateSystems(await parseValid(SRC)).files;
+  return await generateSystemFiles(SRC);
 }
 
 function find(files: Map<string, string>, suffix: string): string {
@@ -151,7 +151,7 @@ describe(".NET showcase compile regressions (conformance-parity breakers)", () =
       "aggregate Project with crudish {",
       "aggregate Project with crudish {\n          entity Step { label: string }",
     );
-    const files = generateSystems(await parseValid(src)).files;
+    const files = await generateSystemFiles(src);
     const carrier = find(files, "Domain/Projects/ProjectOrProjectNotFound.cs");
     expect(carrier).toContain("using Svc.Application.Projects.Responses;");
   });

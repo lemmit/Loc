@@ -57,7 +57,9 @@ ${extra}
       }
     }
   }
-  deployable api { platform: ${platform}, ${targets || "contexts: [C],"} port: 3000 }
+  storage pg { type: postgres }
+  resource cState { for: C, kind: state, use: pg }
+  deployable api { platform: ${platform}, ${targets || "contexts: [C], dataSources: [cState],"} port: 3000 }
 }
 `;
 
@@ -141,7 +143,9 @@ system S {
       }
     }
   }
-  deployable api { platform: node, contexts: [C], port: 3000 }
+  storage pg { type: postgres }
+  resource cState { for: C, kind: state, use: pg }
+  deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
 }
 `;
 
@@ -199,7 +203,9 @@ system S {
       repository Carts for Cart { }
     }
   }
-  deployable api { platform: node, contexts: [C], port: 3000 }
+  storage pg { type: postgres }
+  resource cState { for: C, kind: state, use: pg }
+  deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
 }
 `;
     const { warnings } = await parseModel(src);
@@ -325,7 +331,9 @@ system S {
       }
     }
   }
-  deployable api { platform: node, contexts: [C], port: 3000 }
+  storage pg { type: postgres }
+  resource cState { for: C, kind: state, use: pg }
+  deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
 }
 `;
 
@@ -393,7 +401,9 @@ system S {
       }
     }
   }
-  deployable api { platform: node, contexts: [C], port: 3000 }
+  storage pg { type: postgres }
+  resource cState { for: C, kind: state, use: pg }
+  deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
 }
 `;
 

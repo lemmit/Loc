@@ -16,23 +16,9 @@
 // UNRESERVED columns are untouched — the whole argument for quoting only the
 // reserved words is that existing output does not move.
 
-import { NodeFileSystem } from "langium/node";
-import { parseHelper } from "langium/test";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
-import { generateSystems } from "../../../src/system/index.js";
-
-async function build(source: string): Promise<Model> {
-  const services = createDddServices(NodeFileSystem);
-  const doc = await parseHelper<Model>(services.Ddd)(source, { validation: true });
-  const errs = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
-  expect(
-    errs.map((d) => d.message),
-    "source validation errors",
-  ).toEqual([]);
-  return doc.parseResult.value;
-}
+import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // `order` / `group` / `limit` are Postgres reserved words; `total` is the
 // control.  All four are valid C# identifiers, so the row DTO is not the
@@ -74,7 +60,7 @@ const SCHEMA = "d/Infrastructure/Persistence/DbSchema.cs";
 
 describe("Dapper quotes reserved-word identifiers", () => {
   it("quotes them in every DML clause position, escaped for a C# regular literal", async () => {
-    const src = generateSystems(await build(SOURCE("dapper"))).files.get(REPO)!;
+    const src = (await generateSystemFiles(SOURCE("dapper"))).get(REPO)!;
 
     // The SQL lives in `new CommandDefinition("…")` — a REGULAR C# literal — so
     // a quote has to arrive as `\"`.  A bare `"` would end the literal and the
@@ -115,7 +101,7 @@ describe("Dapper quotes reserved-word identifiers", () => {
   });
 
   it("quotes them in the self-applied DDL, in the VERBATIM spelling", async () => {
-    const src = generateSystems(await build(SOURCE("dapper"))).files.get(SCHEMA)!;
+    const src = (await generateSystemFiles(SOURCE("dapper"))).get(SCHEMA)!;
     // `public const string Sql = @"…"` is a verbatim literal: a quote is `""`
     // and a backslash is just a backslash.  The DML's `\"` spelling here would
     // put a literal backslash into the SQL Postgres receives.
@@ -127,7 +113,7 @@ describe("Dapper quotes reserved-word identifiers", () => {
   });
 
   it("leaves the EF Core adapter alone — it quotes through its own provider", async () => {
-    const files = generateSystems(await build(SOURCE("efcore"))).files;
+    const files = await generateSystemFiles(SOURCE("efcore"));
     // EF builds its own SQL and quotes identifiers itself, so nothing in this
     // fix should reach it.  There is no DbSchema at all on that adapter.
     expect(files.has(SCHEMA)).toBe(false);

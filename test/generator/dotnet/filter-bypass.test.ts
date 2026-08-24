@@ -7,10 +7,8 @@
 // Covered: repository find and inline
 // `Repo.findAll(...)` in a workflow body.  The EF filter name must match the
 // `HasQueryFilter("<Name>", ...)` the entity configuration emits.
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseValid } from "../../_helpers/parse.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `
   system S {
@@ -33,13 +31,15 @@ const SRC = `
       }
     }}
     storage primary { type: postgres }
-    deployable api { platform: dotnet  contexts: [C]  port: 3000 }
+    storage pg { type: postgres }
+    resource cState { for: C, kind: state, use: pg }
+    deployable api { platform: dotnet  contexts: [C]  dataSources: [cState]  port: 3000 }
   }
 `;
 
 let cache: Map<string, string> | undefined;
 async function files(): Promise<Map<string, string>> {
-  cache ??= (await generateSystems(await parseValid(SRC))).files;
+  cache ??= await generateSystemFiles(SRC);
   return cache;
 }
 
