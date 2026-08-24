@@ -235,7 +235,7 @@ system S {
           return true
         }
 
-        create(n: string) { name := n  quantity := 0 }
+        create(name: string, quantity: int) { }
 
         operation restock(amount: int) {
           let ok = checkRestockable(amount)
