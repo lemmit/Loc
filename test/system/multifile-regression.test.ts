@@ -105,7 +105,9 @@ describe("multi-file regression — byte-identical with the single-file baseline
               repository Products for Product { }
             }
           }
-          deployable api { platform: node, contexts: [Catalog] }
+          storage pg { type: postgres }
+          resource catalogState { for: Catalog, kind: state, use: pg }
+          deployable api { platform: node, contexts: [Catalog], dataSources: [catalogState] }
         }
       `,
       "shared/money.ddd": `

@@ -187,7 +187,9 @@ system Shop {
       repository Orders for Order { }
     }
   }
-  deployable api { platform: node, contexts: [Orders], port: 3000 }
+  storage pg { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: pg }
+  deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], port: 3000 }
 }
 `;
 

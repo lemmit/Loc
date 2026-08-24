@@ -235,10 +235,7 @@ system S {
           return true
         }
 
-        // A body-less create — the assign-carrying body this fixture used to
-        // declare is refused by loom.lifecycle-body-dropped (the assigns never
-        // ran on a state-based aggregate), and the create is not the subject.
-        create(name: string) { }
+        create(name: string, quantity: int) { }
 
         operation restock(amount: int) {
           let ok = checkRestockable(amount)
