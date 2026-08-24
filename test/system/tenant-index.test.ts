@@ -80,13 +80,14 @@ describe("tenantOwned → derived tenant_id index DDL", () => {
     );
     const sql = sqlOf(files);
     // The materialized-path prefix index — `text_pattern_ops` is the opclass a
-    // prefix scan needs under any locale.  NOTE: the deep/global descendant
-    // test is now `strpos(data_key, anchor || '.') = 1` (the anchor is a
-    // principal claim, and a LIKE pattern built from it treated `_`/`%` as
-    // wildcards — see tenancy-subtree-prefix.test.ts).  That form is CORRECT
-    // but not sargable, so this index no longer serves it; restoring an
-    // index-usable spelling is M-T3.17.  The index is still derived (it serves
-    // equality and any future sargable form), so this stays pinned.
+    // prefix scan needs under any locale.  The deep/global descendant test
+    // rides it again (M-T3.17): the row is decided by the anchored
+    // `strpos(data_key, anchor || '.') = 1` that #2562 introduced, but an
+    // escaped `data_key LIKE <escaped-anchor>.% ESCAPE '!'` prefilter sits in
+    // front of it, and THAT is what the planner turns into a
+    // `~>=~`/`~<~` range over this index (proven by
+    // `test/e2e/tenancy-subtree-explain.test.ts`).  Without the opclass the
+    // prefix LIKE would only be indexable under the C collation.
     expect(sql).toMatch(
       /CREATE INDEX "?invoices_data_key_idx"? ON \S+ \("?data_key"? text_pattern_ops\)/,
     );

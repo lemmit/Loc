@@ -1,4 +1,5 @@
-// The `deep`/`global` subtree scope is an ANCHORED PREFIX, not a LIKE pattern.
+// The `deep`/`global` subtree scope is decided by an ANCHORED PREFIX, and any
+// LIKE beside it is an ESCAPED prefilter — never the thing that admits the row.
 //
 // The anchor is a principal CLAIM (`orgPath` / `rootOrg`), so it is DATA, and
 // `_` / `%` inside it are LIKE wildcards.  Every SQL backend used to build the
@@ -12,12 +13,20 @@
 // which stops INJECTION but not WILDCARD SEMANTICS — the value is interpolated
 // into a pattern, and a pattern is a language.
 //
-// The fix is the form the repo already chose for `string.startsWith` when it
-// became queryable (M-T3.6): an anchored position test, which has no pattern
-// language at all and therefore needs no ESCAPE discipline.  This test pins
-// BOTH directions per backend — the anchored form is present AND the wildcard
-// form is gone — because only asserting the former would pass on a backend that
-// emitted both.
+// #2562 fixed it with an anchored position test, which has no pattern language
+// at all.  M-T3.17 then had to put a LIKE BACK — `strpos`/`locate` is a function
+// of the column, so no index can serve it and every deep read seq-scanned — but
+// as a PREFILTER only: `<col> LIKE <escaped-anchor>.% ESCAPE '!' AND <anchored
+// test>`.  The anchored test still decides the row, so a slip in the escaping
+// can only cost selectivity, never widen the result.
+//
+// So this file pins the invariant in the shape it now has, per backend:
+//   (a) the anchored test is PRESENT (it is what excludes `acmeXcorp.…`), and
+//   (b) every LIKE that reaches SQL carries an ESCAPE clause, and
+//   (c) no pattern is ever built from a RAW, unescaped anchor.
+// (b) and (c) together are the negative half the old "no LIKE anywhere" check
+// used to give: a backend that emitted a bare `LIKE anchor || '.%'` alongside
+// the anchored test would fail both.
 //
 // Note SQLAlchemy specifically: `Column.startswith(v)` does NOT auto-escape by
 // default (that needs `autoescape=True`, which rewrites to `'a/_c.' … ESCAPE
@@ -39,13 +48,30 @@ async function emitFor(platform: string): Promise<string> {
     .join("\n");
 }
 
-describe("hierarchical tenancy — the subtree test is anchored, not a LIKE pattern", () => {
+/** Every spelling of "this LIKE has an escape character bound to it".  A LIKE
+ *  on a line matching none of these is running the raw claim as a pattern. */
+const ESCAPED_LIKE = [
+  "escape '!'", // raw SQL (MikroORM raw(), Ecto fragment, JPQL) — lower/upper
+  'escape="!"', // SQLAlchemy Column.like(pattern, escape="!")
+  ', "!")', // EF Core: EF.Functions.Like(col, pattern, "!")
+  ", '!')", // JPA Criteria: cb.like(path, pattern, '!')
+];
+
+function unescapedLikeLines(src: string): string[] {
+  return src.split("\n").filter((line) => {
+    if (!/\blike\b/i.test(line)) return false;
+    const lower = line.toLowerCase();
+    return !ESCAPED_LIKE.some((tok) => lower.includes(tok.toLowerCase()));
+  });
+}
+
+describe("hierarchical tenancy — the subtree test is anchored; any LIKE is an escaped prefilter", () => {
   it.each([
-    // [platform, the anchored form it must emit, the wildcard form it must not]
+    // [platform, the anchored form it must emit, a RAW-anchor pattern it must not]
     [
       "node",
       'strpos(${schema.accounts.dataKey}, ${requireCurrentUser().orgPath + "."}) = 1',
-      "like(",
+      'requireCurrentUser().orgPath + ".%"',
     ],
     [
       "python",
@@ -55,7 +81,7 @@ describe("hierarchical tenancy — the subtree test is anchored, not a LIKE patt
     [
       "java",
       "locate(concat(:#{@currentUserAccessor.user()?.orgPath()}, '.'), e.dataKey) = 1",
-      " like ",
+      "concat(:#{@currentUserAccessor.user()?.orgPath()}, '.%')",
     ],
     ["elixir", "strpos(?, ? || '.') = 1", "LIKE ? || '.%'"],
     // The SECOND node persistence adapter.  MikroORM's FilterQuery operators
@@ -63,21 +89,49 @@ describe("hierarchical tenancy — the subtree test is anchored, not a LIKE patt
     // FilterQuery key — a different renderer with the same trap available to it,
     // which is exactly why it needs its own cell here rather than riding the
     // `node` row above.
-    ["node { persistence: mikroorm }", "starts_with(data_key, ?)", " like "],
-  ])("%s emits the anchored prefix and no wildcard pattern", async (platform, anchored, wildcard) => {
+    [
+      "node { persistence: mikroorm }",
+      "strpos(data_key, ?) = 1",
+      'requireCurrentUser().orgPath + ".%"',
+    ],
+  ])("%s emits the anchored prefix and never a raw-anchor pattern", async (platform, anchored, rawPattern) => {
     const src = await emitFor(platform);
-    expect(src).toContain(anchored);
-    // The wildcard spelling must be gone entirely: a backend emitting both
-    // would still leak on whichever read used the LIKE arm.
-    expect(src).not.toContain(wildcard);
+    expect(src, `${platform}: the anchored test that DECIDES the row is missing`).toContain(
+      anchored,
+    );
+    // A backend emitting the raw-anchor spelling would leak on whichever read
+    // used it, whether or not the anchored test is also present.
+    expect(src, `${platform}: a LIKE pattern built from the raw claim`).not.toContain(rawPattern);
   });
 
-  // The `%` half of the same bug — a claim containing `%` matched EVERYTHING
-  // under the tenant root.  No emitted pattern may end in the `.%` suffix that
-  // made the anchor a pattern in the first place.
-  it("emits no `.%` pattern suffix on any SQL backend", async () => {
+  it("no SQL backend emits an unescaped LIKE", async () => {
     for (const platform of ["node", "node { persistence: mikroorm }", "python", "java", "elixir"]) {
-      expect(await emitFor(platform), platform).not.toContain(".%");
+      const offenders = unescapedLikeLines(await emitFor(platform));
+      expect(
+        offenders,
+        `${platform}: LIKE without an ESCAPE clause:\n${offenders.join("\n")}`,
+      ).toHaveLength(0);
+    }
+  });
+
+  it("every `.%` pattern suffix is produced by the escape chain", async () => {
+    // The `%` half of the original bug — a claim containing `%` matched
+    // EVERYTHING under the tenant root.  The suffix is allowed back only as the
+    // tail of an escaped pattern, so each backend that emits `.%` must also
+    // emit its escape chain.
+    const chains: ReadonlyArray<readonly [string, string]> = [
+      ["node", '.replace(/[!%_]/g, "!$&")'],
+      ["node { persistence: mikroorm }", '.replace(/[!%_]/g, "!$&")'],
+      ["python", '.replace("!", "!!").replace("%", "!%").replace("_", "!_")'],
+      ["java", "?.replace('!', '!!')?.replace('%', '!%')?.replace('_', '!_')"],
+      ["elixir", 'String.replace("!", "!!")'],
+    ];
+    for (const [platform, chain] of chains) {
+      const src = await emitFor(platform);
+      if (!src.includes(".%")) continue;
+      expect(src, `${platform}: a \`.%\` pattern with no escape chain in front of it`).toContain(
+        chain,
+      );
     }
   });
 
@@ -129,8 +183,14 @@ system TenantCriteria {
       .map(([, c]) => c)
       .join("\n");
     expect(criteria).toContain("tenantScope(User currentUser)");
+    // The anchored test that decides the row…
     expect(criteria).toContain("cb.locate(");
-    expect(criteria).not.toContain("cb.like(");
-    expect(criteria).not.toContain(".%");
+    // …and the prefilter beside it carries the escape character AND an escaped
+    // pattern — never `currentUser.orgPath() + ".%"` raw.
+    expect(criteria).toContain(
+      'currentUser.orgPath().replace("!", "!!").replace("%", "!%").replace("_", "!_") + ".%"',
+    );
+    expect(criteria).not.toContain('currentUser.orgPath() + ".%"');
+    expect(unescapedLikeLines(criteria)).toHaveLength(0);
   });
 });

@@ -9,7 +9,8 @@
 // stop the silent cross-tenant read that resulted.
 //
 // Three things have to agree, and none of them is visible to `tsc --noEmit`:
-//   (1) the SQL text (an anchored prefix test, never a LIKE pattern),
+//   (1) the SQL text (a sargable escaped-LIKE prefilter ANDed with the
+//       anchored prefix RECHECK that actually decides the row — M-T3.17),
 //   (2) the `?` binding ARITY and order (a raw fragment binds positionally),
 //   (3) the `raw` IMPORT in every repository file that emits one.
 // (3) is a compile error, but only in the generated project — and (1)/(2) are
@@ -70,6 +71,25 @@ async function repo(agg: string): Promise<string> {
   return all.get(key!)!;
 }
 
+/** Split a `raw()` binding list on its TOP-LEVEL commas — commas nested inside
+ *  parens/brackets/braces belong to one binding expression, not to the list. */
+function splitTopLevel(list: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < list.length; i++) {
+    const c = list[i];
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    else if (c === "," && depth === 0) {
+      out.push(list.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(list.slice(start));
+  return out;
+}
+
 async function indexTs(): Promise<string> {
   const all = await files();
   const key = [...all.keys()].find((k) => k.endsWith("api/index.ts"));
@@ -81,11 +101,14 @@ describe("the deep/global subtree sentinel renders as a raw() FilterQuery key", 
   it("`allow deep` anchors at orgPath, descendant-or-self, with the tenant floor", async () => {
     const src = await repo("account");
     expect(src).toContain(
-      'raw("((data_key is not null and (data_key = ? or starts_with(data_key, ?))) ' +
+      'raw("((data_key is not null and (data_key = ? ' +
+        "or (data_key like ? escape '!' and strpos(data_key, ?) = 1))) " +
         'or (data_key is null and tenant_id = ?))"',
     );
     expect(src).toContain(
-      '[requireCurrentUser().orgPath, requireCurrentUser().orgPath + ".", requireCurrentUser().tenantId]',
+      "[requireCurrentUser().orgPath, " +
+        '(requireCurrentUser().orgPath).replace(/[!%_]/g, "!$&") + ".%", ' +
+        'requireCurrentUser().orgPath + ".", requireCurrentUser().tenantId]',
     );
   });
 
@@ -95,21 +118,30 @@ describe("the deep/global subtree sentinel renders as a raw() FilterQuery key", 
     expect(src).not.toContain("requireCurrentUser().orgPath");
   });
 
-  it("`starts_with`, never LIKE — a claim carrying `_` or `%` must not widen", async () => {
+  it("the LIKE is only a prefilter — the anchored `strpos` recheck decides the row", async () => {
     // The wildcard trap (`orgXa.leak` readable from `org_a`, because `_` is a
     // LIKE metacharacter) is a CROSS-TENANT LEAK driven by a token value.  A
     // `raw()` fragment BINDS its `?` params, which stops injection — not
-    // pattern semantics.  `starts_with` has no metacharacters at all.
+    // pattern semantics.  So the LIKE added for sargability (M-T3.17) is never
+    // allowed to stand ALONE: it must be ANDed with `strpos(...) = 1`, which has
+    // no metacharacters at all.  Every `like` in the fragment carries both the
+    // `escape` clause and the recheck beside it.
     for (const agg of ["account", "entry"]) {
       const src = await repo(agg);
-      expect(src, `${agg}: the subtree test must not be a LIKE pattern`).not.toMatch(/\blike\b/i);
+      for (const [, sql] of src.matchAll(/raw\("([^"]*)"/g)) {
+        if (!/\blike\b/i.test(sql!)) continue;
+        expect(sql, `${agg}: a LIKE without its ESCAPE clause`).toContain("escape '!'");
+        expect(sql, `${agg}: a LIKE without the anchored recheck beside it`).toMatch(
+          /like \? escape '!' and strpos\(data_key, \?\) = 1/,
+        );
+      }
     }
   });
 
   it("the default (`local`) level stays the flat tenant floor — no subtree, no raw()", async () => {
     const src = await repo("memo");
     expect(src).toContain("tenantId: requireCurrentUser().tenantId");
-    expect(src).not.toContain("starts_with(");
+    expect(src).not.toContain("strpos(");
     // …and therefore no `raw` import: a repository that emits no fragment keeps
     // a byte-identical import list.
     expect(src).not.toContain('from "@mikro-orm/core"');
@@ -135,9 +167,11 @@ describe("every raw() fragment is importable and binds what it names", () => {
       expect(frags.length, `${agg}: no raw() fragment emitted`).toBeGreaterThan(0);
       for (const [, sql, params] of frags) {
         const holes = (sql!.match(/\?/g) ?? []).length;
-        // The params are `requireCurrentUser().x` expressions — top-level commas
-        // separate them (no nested commas in this shape).
-        const bound = params!.split(",").filter((p) => p.trim().length > 0).length;
+        // The params are host expressions; only TOP-LEVEL commas separate them
+        // (`.replace(/[!%_]/g, "!$&")` carries a comma of its own inside its
+        // parens, so a naive split over-counts and the check silently passes on
+        // a fragment it never really measured).
+        const bound = splitTopLevel(params!).filter((p) => p.trim().length > 0).length;
         expect(bound, `${agg}: "${sql}" has ${holes} '?' but ${bound} bindings`).toBe(holes);
       }
     }

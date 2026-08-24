@@ -31,6 +31,7 @@ import {
 import { intrinsicFor, intrinsicKey, isQueryableBoolIntrinsic } from "../../util/intrinsics.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
+import { SQL_LIKE_ESCAPE_CLAUSE, tsSubtreeLikePattern } from "../_expr/subtree-like.js";
 import { joinColumnName, joinTableConstName } from "./emit.js";
 import { TS_INTRINSIC_RENDERERS } from "./render-expr.js";
 import { associationsOf } from "./repository-associations-builder.js";
@@ -176,17 +177,23 @@ export function lowerToDrizzle(
           // NOT the row column above, which only coincides when the author
           // happened to name the claim `tenantId`.
           const tenant = `${principal}.${deepScopeTenantClaim(e)}`;
-          // Descendant test as an ANCHORED POSITION, not `LIKE <org> || '.%'`.
-          // The anchor is a principal CLAIM, so it is data, and `_`/`%` inside
-          // it are LIKE wildcards: an org legitimately named `acme_corp` gets
-          // the pattern `acme_corp.%`, which matches `acmeXcorp.…` — a
-          // cross-tenant read with no attacker involved, just an underscore in
-          // a name.  Binding the value (which Drizzle does) stops injection,
-          // not wildcard semantics.  `strpos(col, needle) = 1` has no pattern
-          // language at all, which is the same reason `string.startsWith`
-          // lowers this way in DRIZZLE_INTRINSIC_SQL above.
+          // Descendant test = SARGABLE PREFILTER **and** ANCHORED RECHECK
+          // (M-T3.17).  The anchor is a principal CLAIM, so it is data, and
+          // `_`/`%` inside it are LIKE wildcards: an org legitimately named
+          // `acme_corp` gets the pattern `acme_corp.%`, which matches
+          // `acmeXcorp.…` — a cross-tenant read with no attacker involved, just
+          // an underscore in a name.  Binding the value (which Drizzle does)
+          // stops injection, not wildcard semantics.  So the row is DECIDED by
+          // `strpos(col, needle) = 1`, which has no pattern language at all —
+          // the same reason `string.startsWith` lowers this way in
+          // DRIZZLE_INTRINSIC_SQL above.  The escaped `LIKE … ESCAPE '!'` in
+          // front of it exists only so the planner can ride the
+          // `data_key text_pattern_ops` index instead of seq-scanning; an
+          // escaping slip could only widen it, and the recheck still gates.
           for (const op of ["or", "and", "eq", "isNull", "isNotNull", "sql"]) ops.add(op);
-          const descendant = `sql\`strpos(\${${col}}, \${${org} + ${JSON.stringify(DATA_KEY_PATH_DELIMITER)}}) = 1\``;
+          const prefilter = `sql\`\${${col}} like \${${tsSubtreeLikePattern(org)}} ${SQL_LIKE_ESCAPE_CLAUSE}\``;
+          const anchored = `sql\`strpos(\${${col}}, \${${org} + ${JSON.stringify(DATA_KEY_PATH_DELIMITER)}}) = 1\``;
+          const descendant = `and(${prefilter}, ${anchored})`;
           return (
             `or(and(isNotNull(${col}), or(eq(${col}, ${org}), ` +
             `${descendant})), ` +

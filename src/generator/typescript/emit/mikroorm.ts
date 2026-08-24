@@ -80,6 +80,7 @@ import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { intrinsicFor, intrinsicKey, isQueryableBoolIntrinsic } from "../../../util/intrinsics.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { SQL_LIKE_ESCAPE_CLAUSE, tsSubtreeLikePattern } from "../../_expr/subtree-like.js";
 import { joinColumnName, joinTableConstName } from "../emit.js";
 import { isRefCollection } from "../repository-associations-builder.js";
 import {
@@ -1312,7 +1313,9 @@ function authzFilterEntry(e: Extract<ExprIR, { kind: "authz-filter" }>, acc: str
     // `deep`/`global` read level (hierarchical tenancy P2.4/P2.5) — the
     // materialized-path descendant-or-self sentinel, DEEP_SCOPE_SEMANTICS:
     //
-    //   (data_key IS NOT NULL AND (data_key = ? OR starts_with(data_key, ?)))
+    //   (data_key IS NOT NULL
+    //      AND (data_key = ?
+    //           OR (data_key like ? escape '!' AND strpos(data_key, ?) = 1)))
     //   OR (data_key IS NULL AND tenant_id = ?)
     //
     // The FilterQuery *operator* vocabulary genuinely cannot express a prefix
@@ -1326,13 +1329,17 @@ function authzFilterEntry(e: Extract<ExprIR, { kind: "authz-filter" }>, acc: str
     // cache key is consumed on use, so two statements need two fragments — the
     // emitters splice this string per statement, which is what makes that true.
     //
-    // `starts_with(text, text)` rather than `LIKE ? || '.%'`: the anchor is a
-    // principal CLAIM, i.e. data, and `_`/`%` inside it are LIKE wildcards — an
-    // org legitimately named `org_a` would match `orgXa.leak`, a cross-tenant
-    // read with no attacker involved.  Binding the value (which `raw`'s `?`
-    // does) stops injection, not pattern semantics.  Same anchored-prefix
-    // stance as the drizzle twin's `strpos(col, needle) = 1` and the Dapper
-    // twin's `starts_with`.
+    // The descendant test is TWO terms (M-T3.17).  The row is DECIDED by the
+    // anchored `strpos(data_key, ?) = 1`, which has no pattern language: the
+    // anchor is a principal CLAIM, i.e. data, and `_`/`%` inside it would be
+    // LIKE wildcards — an org legitimately named `org_a` would match
+    // `orgXa.leak`, a cross-tenant read with no attacker involved.  Binding the
+    // value (which `raw`'s `?` does) stops injection, not pattern semantics.
+    // The escaped `like ? escape '!'` in FRONT of it is a pure prefilter, there
+    // so the planner can turn the fixed prefix into an index range over
+    // `<table>_data_key_idx` instead of seq-scanning every row; an escaping
+    // slip could only widen it, and the recheck still gates the row.  Same
+    // two-term shape as the drizzle twin.
     //
     // The NULL branch is a deliberate OR-fallback, not fail-closed: a row
     // stamped before P2.3 (or by a principal-less save) has no `data_key`, and
@@ -1349,9 +1356,11 @@ function authzFilterEntry(e: Extract<ExprIR, { kind: "authz-filter" }>, acc: str
       const col = snake(TENANT_OWNED_DATA_KEY_FIELD);
       const tenantCol = snake(TENANT_OWNED_TENANT_ID_FIELD);
       const sql =
-        `((${col} is not null and (${col} = ? or starts_with(${col}, ?))) ` +
+        `((${col} is not null and (${col} = ? ` +
+        `or (${col} like ? ${SQL_LIKE_ESCAPE_CLAUSE} and strpos(${col}, ?) = 1))) ` +
         `or (${col} is null and ${tenantCol} = ?))`;
-      const params = `[${anchor}, ${anchor} + ${JSON.stringify(DATA_KEY_PATH_DELIMITER)}, ${tenant}]`;
+      const needle = `${anchor} + ${JSON.stringify(DATA_KEY_PATH_DELIMITER)}`;
+      const params = `[${anchor}, ${tsSubtreeLikePattern(anchor)}, ${needle}, ${tenant}]`;
       return `[raw(${JSON.stringify(sql)}, ${params})]: []`;
     }
     default: {

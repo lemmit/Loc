@@ -1,13 +1,16 @@
 import type { ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
+  DATA_KEY_LIKE_ESCAPE,
   DATA_KEY_PATH_DELIMITER,
+  deepScopeAnchorClaim,
   guidClaimAccessorName,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import type { DurationUnit } from "../../util/temporal.js";
+import { spelSubtreeLikePattern } from "../_expr/subtree-like.js";
 
 // ---------------------------------------------------------------------------
 // Find-filter → JPQL renderer.  Spring Data derived method names can't
@@ -172,7 +175,18 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
           // portable anchored position test (→ Postgres `position(search in
           // source)`) and has no pattern language, matching how
           // `string.startsWith` lowers in JPQL_INTRINSICS.
-          const descendant = `locate(concat(${org}, '${DATA_KEY_PATH_DELIMITER}'), ${col}) = 1`;
+          const anchored = `locate(concat(${org}, '${DATA_KEY_PATH_DELIMITER}'), ${col}) = 1`;
+          // SARGABLE PREFILTER (M-T3.17).  `locate(...) = 1` is a function of
+          // the column, so Postgres cannot use the `data_key text_pattern_ops`
+          // index for it and every deep/global read seq-scans.  A prefix `like`
+          // IS what that opclass indexes, so it goes IN FRONT of the anchored
+          // test as a prefilter, with the anchored test kept as the recheck: an
+          // escaping slip in the pattern could only WIDEN the prefilter, and
+          // the recheck still decides the row, so `acme_corp` can never reach
+          // `acmeXcorp.…`.  The pattern is built in SpEL (safe-navigated, so an
+          // absent principal yields a null pattern → `like null` → no rows).
+          const pattern = `:#{${spelSubtreeLikePattern(`@${CURRENT_USER_BEAN}.user()?.${deepScopeAnchorClaim(e)}()`)}}`;
+          const descendant = `(${col} like ${pattern} escape '${DATA_KEY_LIKE_ESCAPE}' and ${anchored})`;
           return (
             `(${col} is not null and (${col} = ${org} or ${descendant})) ` +
             `or (${col} is null and ${tenantCol} = ${tenant})`
