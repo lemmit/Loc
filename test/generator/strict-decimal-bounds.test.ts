@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../src/system/index.js";
-import { parseString } from "../_helpers/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // Regression: a strict `>` / `<` numeric invariant on a NON-integer field
@@ -31,14 +30,14 @@ system Demo {
     }
   }
   api ParcelApi from S
-  deployable svc { platform: ${platform} contexts: [C] serves: ParcelApi port: ${port} }
+  storage pg { type: postgres }
+  resource cState { for: C, kind: state, use: pg }
+  deployable svc { platform: ${platform} contexts: [C] serves: ParcelApi dataSources: [cState] port: ${port} }
 }
 `;
 
 async function filesFor(platform: string, port: number): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(DDL(platform, port));
-  if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
-  return generateSystems(model).files;
+  return await generateSystemFiles(DDL(platform, port));
 }
 
 function findFile(files: Map<string, string>, re: RegExp): string {
