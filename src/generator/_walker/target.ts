@@ -1457,6 +1457,26 @@ export interface WalkerTarget {
     e: Extract<ExprIR, { kind: "binary" }>,
   ): string | null;
 
+  /** Integer division WIDENED to `decimal` (`a / b` with both operands
+   *  integral and the lowered `resultType` `decimal` — `isIntDivWidenedToDecimal`
+   *  in `_expr/target.ts`).  Loom's type system says `5 / 2` is `2.5`; the four
+   *  JS frontends and Flutter get that from their host language's `/` for free,
+   *  so they leave this seam undefined and stay byte-identical.  A target whose
+   *  integer `/` TRUNCATES (F#, like C# and Java) has to widen the operands
+   *  itself, or a page body silently computes `2` where every backend computes
+   *  `2.5` — the frontend twin of the backend `renderBinary` arms that already
+   *  consult the same shared predicate.
+   *
+   *  Consulted by `emitExpr` BEFORE `exprBinary`, only for `/`.  Return `null`
+   *  to fall through to `exprBinary`, so a target may implement it partially;
+   *  a mixed `int / decimal` never reaches it (the shared predicate refuses to
+   *  match one, since its decimal operand is already fractional). */
+  exprIntDivWidened?(
+    left: string,
+    right: string,
+    e: Extract<ExprIR, { kind: "binary" }>,
+  ): string | null;
+
   /** Scalar-intrinsic renderer (`src/util/intrinsics.ts` — `s.toUpper()`,
    *  `n.abs()`, `d.round(2)`, …).  Loom's intrinsic SPELLING is its own; every
    *  backend translates it through a per-language snippet table, and a target

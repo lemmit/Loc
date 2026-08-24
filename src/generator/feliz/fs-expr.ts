@@ -17,6 +17,7 @@
 
 import type { BinOp, ExprIR, LiteralKind, PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
+import { isIntDivWidenedToDecimal } from "../_expr/target.js";
 import { upperFirst } from "../../util/naming.js";
 import { DURATION_UNIT_MS } from "../../util/temporal.js";
 
@@ -154,6 +155,28 @@ export function fsTemporalBinary(
     return `((${right}).Add(${left}))`;
   }
   return null;
+}
+
+/** The integer-division-widened-to-`decimal` arm, or `null` to fall through to
+ *  the plain operator leaf.
+ *
+ *  Loom's type system widens `/` on two integral operands to `decimal`
+ *  (`5 / 2` is `2.5`) — the same rule .NET, Java, Elixir and the SQL renderer
+ *  already honour through the shared `isIntDivWidenedToDecimal` predicate.  F#
+ *  is in the truncating family (`5 / 2 = 2`), so both operands are converted
+ *  before the division; a mixed `int / decimal` is refused by the predicate and
+ *  must NOT be re-wrapped.
+ *
+ *  Shared by both feliz paths: the view walker reaches it through
+ *  `felizTarget.exprIntDivWidened`, the MVU update path through `renderFsExpr`'s
+ *  binary arm — the same pairing `fsTemporalBinary` has. */
+export function fsIntDivWidened(
+  left: string,
+  right: string,
+  e: Extract<ExprIR, { kind: "binary" }>,
+): string | null {
+  if (!isIntDivWidenedToDecimal(e)) return null;
+  return `((decimal ${left}) / (decimal ${right}))`;
 }
 
 // ---------------------------------------------------------------------------
@@ -424,9 +447,14 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
     case "binary": {
       const left = r(e.left);
       const right = r(e.right);
-      // Datetime arithmetic is a method call in .NET, not an operator — the
-      // same seam the view path consults through `felizTarget`.
-      return fsTemporalBinary(left, right, e) ?? FS_LEAVES.binary(left, right, e.op);
+      // Datetime arithmetic is a method call in .NET, not an operator, and an
+      // integer `/` that widened to `decimal` needs both operands converted —
+      // the same two seams the view path consults through `felizTarget`.
+      return (
+        fsTemporalBinary(left, right, e) ??
+        fsIntDivWidened(left, right, e) ??
+        FS_LEAVES.binary(left, right, e.op)
+      );
     }
     case "unary":
       return FS_LEAVES.unary(e.op, r(e.operand));
