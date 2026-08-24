@@ -622,6 +622,7 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
           nameCtx,
           authEnabled: deployable.auth?.required === true,
           pack,
+          i18nEnabled: i18nUi !== undefined,
         }),
       );
       hasSidebar = true;

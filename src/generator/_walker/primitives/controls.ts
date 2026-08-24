@@ -26,10 +26,10 @@ import {
   emitExpr,
   emitStmt,
   extendLambdaParams,
+  navArgValue,
   propagateChildFlags,
   recordStoreUse,
   storeLocalFor,
-  stringOrRefArgValue,
   styleAttr,
   testidAttr,
   walk,
@@ -110,9 +110,11 @@ export function emitButton(
     onClickHandler = emitLambdaBody(onClick, ctx);
   } else {
     // `to:` named arg wires the button to a React
-    // Router navigate call.  Accepts either a string-literal path
-    // or a route-param ref.
-    const to = stringOrRefArgValue(call, "to", ctx);
+    // Router navigate call.  Accepts ANY expression — a literal path, a route
+    // param, or a computed one (`to: "/greet/" + who`).  It used to accept only
+    // the first two and silently drop everything else, leaving a button that
+    // rendered but navigated nowhere (A12).
+    const to = navArgValue(call, "to", ctx)?.expr;
     if (to) {
       ctx.usesNavigate = true;
       // Route through the navigate + event-handler seams so statement-binding

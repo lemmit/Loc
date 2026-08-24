@@ -29,6 +29,7 @@ import {
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import { JSX_NAV_LABELS, withNavLabelTokens } from "../_frontend/nav-labels.js";
 import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import {
@@ -322,9 +323,11 @@ export function generateSvelteForContexts(
   const navSections =
     sidebarOverride?.map((s) => ({
       label: s.label,
+      labelKey: s.labelKey,
       entries: s.entries.map((e) => ({
         to: e.to,
         label: e.label,
+        labelKey: e.labelKey,
         testId: e.testId,
         // Per-link gate condition (auth: ui) — the app-shell `{#if}`-hides a
         // forbidden page's link.  Absent ⇒ link always shown.
@@ -336,11 +339,15 @@ export function generateSvelteForContexts(
   const navUsesSession = navSections.some(
     (s) => "entries" in s && s.entries.some((e) => "requiresJs" in e && !!e.requiresJs),
   );
+  // Nav labels → JSX-spelled tokens (Svelte shares JSX's single braces), so the
+  // `menu.*` catalog keys the extractor writes finally render (A13b).  Escaped
+  // raw string when i18n is off / the label has no key — byte-identical.
+  const navSectionsVM = withNavLabelTokens(navSections, i18nEnabled ? JSX_NAV_LABELS : undefined);
   out.set(
     "src/routes/(app)/+layout.svelte",
     pack.render("app-shell", {
       systemNameHuman: humanize(sys.name),
-      navSections,
+      navSections: navSectionsVM,
       hasNav: navSections.length > 0,
       navUsesSession,
       // Pack-chrome (M-T1.11): raw source string when i18n is off (byte-identical

@@ -32,6 +32,7 @@ import {
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import { VUE_NAV_LABELS, withNavLabelTokens } from "../_frontend/nav-labels.js";
 import { pageEmitPath } from "../_frontend/page-identity.js";
 import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
@@ -533,9 +534,11 @@ export function generateVueForContexts(
   const sidebarOverride = deriveSidebarFromUi(ui, pageCtx, authUi);
   const navSections: Array<{
     label: string;
+    labelKey?: string;
     entries: Array<{
       to: string;
       label: string;
+      labelKey?: string;
       testId: string;
       exact?: boolean;
       external?: boolean;
@@ -545,9 +548,11 @@ export function generateVueForContexts(
   }> = sidebarOverride
     ? sidebarOverride.map((s) => ({
         label: s.label,
+        labelKey: s.labelKey,
         entries: s.entries.map((e) => ({
           to: e.to,
           label: e.label,
+          labelKey: e.labelKey,
           testId: e.testId,
           // The Vue templates append `, { exact: true }` to `isActive(...)`
           // off this flag; the shared emitter carries it inside `activeArgs`.
@@ -578,9 +583,15 @@ export function generateVueForContexts(
   // `:aria-label='t(…)'` (single-quoted, the `t()` call holds double quotes)
   // under i18n, else the static `aria-label="…"`.
   const primaryNavAria = shellChromeAttr("aria-label", "primaryNav", i18nEnabled);
+  // Nav labels → their Vue-spelled tokens (`{{ t(key, def) }}` in text
+  // position, `:attr='t(key, def)'` bound): the `menu.section.*`/`menu.link.*`
+  // catalog keys the extractor has always written finally render (A13b).  With
+  // i18n off — and for the emitter-DERIVED default sidebar, which carries no
+  // key — the token is the escaped raw string, byte-identical to `{{label}}`.
+  const navSectionsVM = withNavLabelTokens(navSections, i18nEnabled ? VUE_NAV_LABELS : undefined);
   const chromeVM = {
     systemNameHuman: humanize(sys.name),
-    navSections,
+    navSections: navSectionsVM,
     navUsesSession,
     hasRealtimeHandlers,
     hasToastHost,

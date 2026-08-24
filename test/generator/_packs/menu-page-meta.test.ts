@@ -109,8 +109,11 @@ describe("per-page menuMeta drives the sidebar", () => {
       }
     `);
     const appTsx = files.get("web/src/App.tsx")!;
-    // Visible page lands in sidebar.
-    expect(appTsx).toMatch(/label="Public"|>Public</);
+    // Visible page lands in sidebar.  Its label is an AUTHORED string, so under
+    // i18n (on here — the pages carry headings) it binds through the catalog key
+    // the extraction pass recorded for `menu { label: … }` (A13b); a raw
+    // `label="Public"` would mean the key is dead again.
+    expect(appTsx).toMatch(/label=\{t\("page\.Public\.menu\.label\.\w+", "Public"\)\}/);
     // Secret is still routable (so the Route exists) but the
     // sidebar navSections doesn't include it.  Look for a nav
     // entry shape that points at /s.
@@ -143,9 +146,10 @@ describe("per-page menuMeta drives the sidebar", () => {
       }
     `);
     const appTsx = files.get("web/src/App.tsx")!;
-    // Z appears before A (order: 1 < 2) — check positional order.
-    const zIdx = appTsx.search(/label="Z"|>Z</);
-    const aIdx = appTsx.search(/label="A"|>A</);
+    // Z appears before A (order: 1 < 2) — check positional order.  Both labels
+    // are authored, so they render through their catalog keys (A13b).
+    const zIdx = appTsx.search(/t\("page\.Z\.menu\.label\.\w+", "Z"\)/);
+    const aIdx = appTsx.search(/t\("page\.A\.menu\.label\.\w+", "A"\)/);
     expect(zIdx).toBeGreaterThan(0);
     expect(aIdx).toBeGreaterThan(0);
     expect(zIdx).toBeLessThan(aIdx);

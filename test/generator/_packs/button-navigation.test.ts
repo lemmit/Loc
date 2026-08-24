@@ -130,7 +130,7 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
     );
   });
 
-  it("Button { to: <param-ref> } interpolates the param via template literal", async () => {
+  it("Button { to: <param-ref> } navigates to the bare param", async () => {
     const files = await buildAndGenerate(`
       system S {
         subdomain M { context C { } }
@@ -150,9 +150,14 @@ describe("Button { to: } navigation in walker-rendered pages", () => {
       }
     `);
     const content = files.get("web/src/pages/home.tsx")!;
-    // Template literal interpolating the route param at render time.
+    // The destination is just the param: `navigate(slug)`.  It used to be
+    // wrapped in a JS template literal (``navigate(`${slug}`)``) — harmless in a
+    // call position, but the SAME reader put that literal into JSX/F#/Dart
+    // ATTRIBUTE position, where it is not valid syntax, and dropped any
+    // destination that was neither a literal nor a bare param (A12).  The arg
+    // now renders through `emitExpr`, like every other expression in a body.
     expect(content).toMatch(
-      /<Button onClick=\{\(\) => navigate\(`\$\{slug\}`\)\}>\{t\("[^"]*", "Open"\)\}<\/Button>/,
+      /<Button onClick=\{\(\) => navigate\(slug\)\}>\{t\("[^"]*", "Open"\)\}<\/Button>/,
     );
     // Param consumed by the Button to: arg → destructured in shell.
     expect(content).toMatch(/const \{ slug \} = useParams/);

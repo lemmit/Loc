@@ -93,17 +93,17 @@ function AppShellLayout() {
       <Toolbar />
       <Divider />
       <List dense>
-{{#each navSections}}        <ListSubheader sx=\{{ lineHeight: "32px", fontWeight: 600, color: "text.secondary" }}>{{label}}</ListSubheader>
+{{#each navSections}}        <ListSubheader sx=\{{ lineHeight: "32px", fontWeight: 600, color: "text.secondary" }}>{{{labelText}}}</ListSubheader>
 {{#each entries}}{{#if requiresJs}}        {({{{requiresJs}}}) ? (
           <ListItem disablePadding>
             <ListItemButton selected={isActive({{{activeArgs}}})} onClick={() => navigate("{{to}}")} data-testid="{{testId}}">
-              <ListItemText primary="{{label}}" />
+              <ListItemText {{{labelAttr "primary"}}} />
             </ListItemButton>
           </ListItem>
         ) : null}
 {{else}}        <ListItem disablePadding>
           <ListItemButton selected={isActive({{{activeArgs}}})} onClick={() => navigate("{{to}}")} data-testid="{{testId}}">
-            <ListItemText primary="{{label}}" />
+            <ListItemText {{{labelAttr "primary"}}} />
           </ListItemButton>
         </ListItem>
 {{/if}}{{/each}}{{/each}}      </List>

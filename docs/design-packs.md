@@ -473,6 +473,39 @@ registers these helpers globally:
   `value={{expr valueExpr}}`.
 - `json <value>` — JSON-stringifies the value.  Use for inline
   literals: `defaultRadius={{json radius}}`.
+
+Some view-models additionally carry a **context function** — called like a
+helper, but supplied per render by the walker because its output is
+framework-shaped.  `primitive-anchor` has one:
+
+- `navAttr "<attr>"` — the whole link attribute (leading space included) for
+  the `Anchor(to:)` destination.  The PACK picks the attribute name (`to` on a
+  React `RouterLink`, `href` on a plain `<a>`, `routerLink` on Angular); the
+  walker picks the spelling, so a literal path renders `to="/orders"` while a
+  computed one (`to: "/greet/" + who`) renders the framework's bound form
+  (` to={…}` / ` :to="…"` / ` [routerLink]="…"`).  Splice it with a triple
+  stache and NO `=`:
+
+  ```hbs
+  {{#if hasTo}}<a class="loom-anchor"{{{navAttr "href"}}}>{{{label}}}</a>{{else}}…{{/if}}
+  ```
+
+  Spelling the attribute by hand (`href={{{to}}}`) drops every computed
+  destination on the floor — `to` is the bare expression, kept only for the two
+  procedural packs (Feliz, Flutter) whose output is not HTML.
+
+The `app-shell`'s nav entries carry the same split for their LABELS, because a
+label authored in a `menu { … }` block is a translatable catalog string:
+
+- `labelText` — the label in text position, already escaped (i18n off) or bound
+  as `{t(key, default)}` / `{{ t(…) }}` (i18n on).
+- `labelAttr "<attr>"` — the same value as a whole attribute, for a pack that
+  passes the label as a prop (`{{{labelAttr "primary"}}}` on MUI's
+  `<ListItemText>`, `{{{labelAttr "label"}}}` on Mantine's `<NavLink>`).
+
+Both are triple-stache values. `{{label}}` still exists (the raw string) but
+rendering it directly re-opens the dead-catalog-key bug: the key is extracted,
+the app shows English at every locale.
 - Standard Handlebars: `{{#each}}`, `{{#if}}`, `{{#unless}}`,
   `{{> partial-name}}`, etc.
 

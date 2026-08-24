@@ -29,6 +29,7 @@ import {
 import { renderGateExpr } from "../_frontend/gate-expr.js";
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import { ANGULAR_NAV_LABELS, withNavLabelTokens } from "../_frontend/nav-labels.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { angularChromeAttr, angularChromeText } from "../_frontend/shell-chrome.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
@@ -397,9 +398,11 @@ export function generateAngularForContexts(
   const navSections = sidebarOverride
     ? sidebarOverride.map((s) => ({
         label: s.label,
+        labelKey: s.labelKey,
         entries: s.entries.map((e) => ({
           to: e.to,
           label: e.label,
+          labelKey: e.labelKey,
           testId: e.testId,
           requiresJs: e.requiresJs,
           external: !!e.external,
@@ -422,6 +425,15 @@ export function generateAngularForContexts(
           },
         ]
       : [];
+
+  // Nav labels → Angular-spelled tokens (`{{ t(key, def) }}`, resolved against
+  // the component instance the shell already exposes), so the `menu.*` catalog
+  // keys finally render (A13b).  Escaped raw string when i18n is off / the
+  // label carries no key — byte-identical to the `{{label}}` it replaces.
+  const navSectionsVM = withNavLabelTokens(
+    navSections,
+    i18nEnabled ? ANGULAR_NAV_LABELS : undefined,
+  );
 
   // Bind the session user in the app shell only when a nav entry is actually
   // gated — an unused injected member would be an `ng build` strict error.
@@ -486,7 +498,7 @@ export function generateAngularForContexts(
     "src/app/app.component.ts",
     pack.render("app-shell", {
       systemNameHuman: humanize(sys.name),
-      navSections,
+      navSections: navSectionsVM,
       hasNav: navSections.some((s) => s.entries.length > 0),
       authUi,
       navUsesSession,

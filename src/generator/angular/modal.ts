@@ -1,7 +1,11 @@
 import type { ExprIR, OperationIR } from "../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { preconditionsAsInvariants } from "../_frontend/zod-schemas.js";
-import { localizedNamedText, localizedPageChromeText } from "../_walker/i18n-emit.js";
+import {
+  localizedNamedText,
+  localizedPageChromeText,
+  localizedText,
+} from "../_walker/i18n-emit.js";
 import { namedArgValue, positionalArgs, stringNamed } from "../_walker/shared/args.js";
 import { emitExpr, type WalkContext } from "../_walker/walker-core.js";
 import {
@@ -122,9 +126,15 @@ export function renderAngularModal(
 
   const trigger = namedArgValue(call, "trigger");
   const triggerPositional = trigger?.kind === "call" ? positionalArgs(trigger)[0] : undefined;
+  // The trigger label is the `button` user-visible slot — already in the
+  // catalog as `page.<Page>.button.<hash>`, and read RAW here, so the key was
+  // dead and the label shipped in English at every locale (A13).  Angular's
+  // fork renders it in markup TEXT position, so `localizedText` gives the
+  // `{{ t(<key>, <default>) }}` interpolation (the raw escaped literal with
+  // i18n off — byte-identical).
   const triggerLabel =
-    triggerPositional?.kind === "literal" && triggerPositional.lit === "string"
-      ? triggerPositional.value
+    trigger?.kind === "call" && triggerPositional?.kind === "literal"
+      ? localizedText(trigger, ctx, "button", JSON.stringify(humanize(op.name)))
       : humanize(op.name);
   const emphasis =
     trigger?.kind === "call" ? (stringNamed(trigger, "emphasis") ?? "primary") : "primary";

@@ -376,9 +376,12 @@ function primitiveAnchor(c: Ctx): string {
   // as visible text.
   const label = asText(String(c.label ?? ""));
   if (!c.hasTo) return label;
-  const to = String(c.to ?? '"/"');
-  const lit = to.match(/^"(.*)"$/);
-  const route = lit ? `'${dartStr(lit[1])}'` : to;
+  // `to` arrives as a DART EXPRESSION (rendered through the target's own leaf
+  // table): `'/products'` for a literal path, `'/greet/' + who` for a computed
+  // one.  Used verbatim — it used to be unwrapped from a JS-quoted literal and
+  // re-escaped, so a computed destination arrived as JS (a template literal, in
+  // backticks) and was spliced into Dart source (finding A12).
+  const route = String(c.to ?? "'/'");
   return `TextButton(onPressed: () => Navigator.of(context).pushNamed(${route}), child: ${label})`;
 }
 
