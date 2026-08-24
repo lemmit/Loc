@@ -193,12 +193,20 @@ describe("HEEx primitive — testid: on bespoke renderers", () => {
     expect(heex).toMatch(/<span class="badge badge-enum"[^>]*data-testid="enum-x"/);
   });
 
-  it("KeyValueRow: data-testid on the row div", async () => {
+  // The testid identifies the VALUE cell, not the row wrapper — matching the
+  // JSX packs' `KeyValueRow` (`<div … data-testid={testid}>{children}</div>`)
+  // and, decisively, what the emitted page objects assume: a detail read is
+  // `expect(detail.field("name")).toHaveText("Sprocket")`, an EXACT text match
+  // that sees "Name Sprocket" when the id sits on the row.  Caught by the HEEx
+  // UI behavioural leg (`test/behavioral/run-heex-ui.mjs`), not by a string
+  // match — the row placement was self-consistent, just undrivable.
+  it("KeyValueRow: data-testid on the VALUE cell, not the row wrapper", async () => {
     const files = await generateSystemFiles(
       phoenixSystem(`KeyValueRow("Label", "Value", testid: "kv-x")`),
     );
     const heex = findLandingHeex(files);
-    expect(heex).toMatch(/<div class="key-value-row"[^>]*data-testid="kv-x"/);
+    expect(heex).toMatch(/<dd class="key-value-value"[^>]*data-testid="kv-x"/);
+    expect(heex).not.toMatch(/<div class="key-value-row"[^>]*data-testid=/);
   });
 
   it("Skeleton: data-testid on the wrapper div", async () => {

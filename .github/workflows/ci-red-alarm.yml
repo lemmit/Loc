@@ -29,6 +29,7 @@ on:
       - ".NET observability events (runtime e2e)"
       - "API call (typed in-system call runtime e2e)"
       - "Behavioral UI e2e (headless, no docker)"
+      - "Behavioral UI e2e — HEEx / LiveView"
       - "Behavioral e2e (headless, no docker)"
       - "Behavioral e2e — .NET (ASP.NET + EF Core)"
       - "Behavioral e2e — .NET (persistence: dapper)"

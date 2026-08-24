@@ -67,7 +67,7 @@ gets attributed to a later, innocent commit.
 | Lane | What | Rule |
 |---|---|---|
 | **Per-PR, every push** (required) | `test.yml` (fast vitest ×4 shards) + lint + web-tsc → `tests-passed` (unfiltered on PRs); `langium-generated`; `workflow-lint`; the typecheck/compile gates (`hono/dotnet/java/python-build`, `generated-*-build`, `corpus-build`); `behavioral-e2e` (Hono on PGlite, daemonless) as the runtime canary; `pr-gate` (the aggregate verdict over everything that triggered) | Cheap, parallel, no docker/db. Catches most regressions with fast feedback. |
-| **Per-PR, path-scoped** (binding via `pr-gate`) | The cross-backend runtime legs `behavioral-e2e-{dotnet,java,python,elixir,dapper,mikroorm}` + `behavioral-ui-e2e` (each fires when the PR touches its backend's emitters, the shared IR, or the harness); the `pages` build (docs/web/src) | Docker/boot cost paid only by the PRs that can break them; when they fire, `pr-gate` makes them blocking. |
+| **Per-PR, path-scoped** (binding via `pr-gate`) | The cross-backend runtime legs `behavioral-e2e-{dotnet,java,python,elixir,dapper,mikroorm}` + `behavioral-ui-e2e` + `behavioral-heex-ui-e2e` (each fires when the PR touches its backend's emitters, the shared IR, or the harness); the `pages` build (docs/web/src) | Docker/boot cost paid only by the PRs that can break them; when they fire, `pr-gate` makes them blocking. |
 | **Merge queue** (`merge_group`, runs once on the final candidate — inert until the repo lives in an org) | The same cross-backend runtime matrix unconditionally, `tenancy-e2e` (10 legs), `*-obs-e2e`, `*-oidc-e2e`, `auth-oidc-compose-e2e`; the full `generated-react-build` Cartesian; `pages` build | What actually breaks `main` **and** the expensive ones. Runs once per landing, not per push. A PR revised 10× pays this once. |
 | **Nightly / label** (unchanged) | `conformance-full`, `generated-a11y`, `frontend-fullstack-e2e`, `k8s-e2e` | Broad, slow, low churn — post-hoc is fine. |
 
@@ -250,7 +250,7 @@ Two shapes of check name:
   counts as OK, which is what makes a label-guarded job legitimate on an
   unlabelled PR run (in the queue it actually runs).
 
-#### The required-checks list (39)
+#### The required-checks list (40)
 
 Per-PR lane — cheap, already runs on every push:
 
@@ -286,6 +286,7 @@ Queue-heavy lane — the gates that only run on `push:main` / label today:
 | `behavioral-e2e-dapper.yml` | `behavioral-dapper` |
 | `behavioral-e2e-mikroorm.yml` | `behavioral-mikroorm` |
 | `behavioral-ui-e2e.yml` | `behavioral-ui` |
+| `behavioral-heex-ui-e2e.yml` | `behavioral-heex-ui` |
 | `tenancy-e2e.yml` | `tenancy-e2e-passed` |
 | `hono-obs-e2e.yml` | `hono-obs-e2e` |
 | `dotnet-obs-e2e.yml` | `dotnet-obs-e2e` |
@@ -329,13 +330,13 @@ Nothing below is code; it is an admin action on `github.com/lemmit/Loc`.
    - build concurrency: **5** (the queue-heavy lane is docker/boot-bound);
    - only merge non-failing pull requests: **on**;
    - "Merge candidates should require all checks to pass": **on**.
-4. Enable **Require status checks to pass** and add **exactly** the 39 check
+4. Enable **Require status checks to pass** and add **exactly** the 40 check
    names from the two tables above. Add them by pasting the name — the search
    box only offers checks GitHub has seen recently, and several of these have
    never reported on a PR (they are `push:main`-only today), so they must be
    typed in.
 5. Save. From then on, PRs merge via the queue: GitHub builds a rebased
-   candidate, runs all 39 checks on it, and lands it only if they are green.
+   candidate, runs all 40 checks on it, and lands it only if they are green.
 6. **Watch the first day.** A check that never reports leaves candidates
    pending — if that happens, the cause is a missing `merge_group:` trigger or
    a mistyped check name. `npx vitest run test/system/merge-queue-readiness.test.ts`
@@ -350,7 +351,7 @@ the required-checks list in settings.
 **Scriptable alternative.** The same configuration can be applied as a repo
 ruleset via `gh api --method POST /repos/lemmit/Loc/rulesets` with a
 `merge_queue` rule plus a `required_status_checks` rule whose
-`required_status_checks[]` are the 39 names above. It is the reproducible path
+`required_status_checks[]` are the 40 names above. It is the reproducible path
 and worth capturing once the settings are stable, but the UI path is primary:
 ruleset JSON silently accepts check names that do not exist, which is the one
 mistake that stalls the queue.

@@ -155,6 +155,28 @@ in-process — no docker, no separate Postgres) and runs the suites Loom
   committed file is named `.pw.ts` so the repo's vitest run never discovers
   it). Gates in `behavioral-ui-e2e.yml` after the emitted round-trips; run:
   `node paged-ui.mjs`.
+- **heex-ui** — the **rendered LiveView**, per PR (`run-heex-ui.mjs`, fixture
+  `heex-ui.ddd`, extra spec `heex-ui-roundtrip.pw.ts`). Deliberately NOT the
+  `run-ui.mjs` topology: that one serves a `vite build` bundle with `/api`
+  delegated in-process to Hono-on-PGlite, and LiveView has neither half — it
+  IS the server, rendering over a websocket against a real Postgres. So this
+  leg boots the generated Phoenix app for real (`mix deps.get` → `ecto.create`
+  → `ecto.migrate` → `phx.server`, host `mix` when present, otherwise the
+  pinned `hexpm/elixir` image) and points headless Chromium at it. It runs the
+  **emitted** `HeexUiSystem.ui.spec.ts` — what `src/system/ui-e2e-render.ts`
+  lowers from the fixture's `test e2e` block, over the page objects
+  `src/generator/elixir/page-objects-emit.ts` emits — plus a hand-written
+  create → **list** → detail round-trip (the DSL has no "assert the row is in
+  the list" verb; see `renderAggregateCall`). Every assertion is on **rendered
+  text**, which is the point: `generated-elixir-vanilla-build` only proves the
+  Elixir compiles, `behavioral-e2e-elixir` drives the *api* half over HTTP and
+  never opens a browser, and `phoenix-ui-e2e` (post-merge / `run-e2e` label)
+  runs the emitted `smoke.spec.ts`, which navigates each route and asserts its
+  URL — it passes on an empty shell, and measurably on a **500**. Needs docker
+  (postgres sidecar unless `LOOM_HEEX_UI_PG_URL` is set) and, behind a
+  TLS-fingerprint egress proxy, `LOOM_HEX_MIRROR=1` (`pkill -f hex-mirror.py`
+  after a killed run). Gates in `behavioral-heex-ui-e2e.yml`; run:
+  `npm run test:behavioral-heex-ui`.
 
 ## Why
 
