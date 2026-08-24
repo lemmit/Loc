@@ -29,6 +29,7 @@ import {
 import { renderGateExpr } from "../_frontend/gate-expr.js";
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import { MONEY_TEXT_SOURCE } from "../_frontend/money-format.js";
 import { ANGULAR_NAV_LABELS, withNavLabelTokens } from "../_frontend/nav-labels.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { angularChromeAttr, angularChromeText } from "../_frontend/shell-chrome.js";
@@ -153,7 +154,7 @@ export function generateAngularForContexts(
   out.set("tsconfig.app.json", pack.render("tsconfig-app", {}));
   out.set("src/main.ts", pack.render("main", {}));
   out.set("src/styles.css", pack.render("theme", prepareThemeVM(sys.theme)));
-  out.set("src/lib/format.ts", pack.render("format-helpers", {}));
+  out.set("src/lib/format.ts", pack.render("format-helpers", { moneySource: MONEY_TEXT_SOURCE }));
   // Interactive-table sort helper (M-T1.1) — re-exposed as a component member
   // by any page rendering a sortable Table; emitted unconditionally.
   out.set("src/lib/table-sort.ts", buildTableSortHelper());

@@ -32,6 +32,7 @@ import {
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import { MONEY_TEXT_SOURCE } from "../_frontend/money-format.js";
 import { VUE_NAV_LABELS, withNavLabelTokens } from "../_frontend/nav-labels.js";
 import { pageEmitPath } from "../_frontend/page-identity.js";
 import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
@@ -481,7 +482,10 @@ export function generateVueForContexts(
     out.set("src/auth/AuthGate.vue", AUTH_GATE_VUE);
   }
   out.set("src/logger.ts", renderShell(pack, "logger", {}));
-  out.set("src/lib/format.ts", renderShell(pack, "format-helpers", {}));
+  out.set(
+    "src/lib/format.ts",
+    renderShell(pack, "format-helpers", { moneySource: MONEY_TEXT_SOURCE }),
+  );
   // Interactive-table sort helper (M-T1.1) — imported by a page only when it
   // renders a sortable `Table`; emitted unconditionally (like format.ts).
   out.set("src/lib/table-sort.ts", buildTableSortHelper());
