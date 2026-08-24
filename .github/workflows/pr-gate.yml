@@ -60,6 +60,7 @@ on:
       - 'Behavioral e2e — Python (FastAPI)'
       - 'Behavioral e2e (headless, no docker)'
       - 'Behavioral UI e2e (headless, no docker)'
+      - 'Behavioral UI e2e — HEEx / LiveView'
       - 'Channels (broker runtime e2e)'
       - 'main-red alarm'
       - 'Cleanup old workflow artifacts'

@@ -78,6 +78,7 @@ export const REQUIRED_CHECKS: readonly RequiredCheck[] = [
   { workflow: "behavioral-e2e-dapper.yml", check: "behavioral-dapper", lane: "queue" },
   { workflow: "behavioral-e2e-mikroorm.yml", check: "behavioral-mikroorm", lane: "queue" },
   { workflow: "behavioral-ui-e2e.yml", check: "behavioral-ui", lane: "queue" },
+  { workflow: "behavioral-heex-ui-e2e.yml", check: "behavioral-heex-ui", lane: "queue" },
   { workflow: "tenancy-e2e.yml", check: "tenancy-e2e-passed", lane: "queue" },
   { workflow: "hono-obs-e2e.yml", check: "hono-obs-e2e", lane: "queue" },
   { workflow: "dotnet-obs-e2e.yml", check: "dotnet-obs-e2e", lane: "queue" },
