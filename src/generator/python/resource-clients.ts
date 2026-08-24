@@ -1,10 +1,4 @@
-import type {
-  DataSourceIR,
-  ExprIR,
-  StorageIR,
-  SystemIR,
-  WorkflowStmtIR,
-} from "../../ir/types/loom-ir.js";
+import type { DataSourceIR, StorageIR, SystemIR, WorkflowStmtIR } from "../../ir/types/loom-ir.js";
 import { walkWorkflowStmtExprsDeep } from "../../ir/util/walk.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
@@ -579,107 +573,34 @@ export function resourceVerbImport(
 // helpers from `app.resources.<sourceType>`.
 // ---------------------------------------------------------------------------
 
-interface ResourceOpRef {
-  resourceName: string;
-  verb: string;
-}
-
-function exprResourceOps(e: ExprIR | undefined, out: ResourceOpRef[]): void {
-  if (!e) return;
-  if (e.kind === "call") {
-    if (e.callKind === "resource-op" && e.resourceOp) {
-      out.push({ resourceName: e.resourceOp.resourceName, verb: e.resourceOp.verb });
-    }
-    for (const a of e.args) exprResourceOps(a, out);
-    return;
-  }
-  switch (e.kind) {
-    case "method-call":
-      exprResourceOps(e.receiver, out);
-      for (const a of e.args) exprResourceOps(a, out);
-      return;
-    case "member":
-      exprResourceOps(e.receiver, out);
-      return;
-    case "binary":
-      exprResourceOps(e.left, out);
-      exprResourceOps(e.right, out);
-      return;
-    case "ternary":
-      exprResourceOps(e.cond, out);
-      exprResourceOps(e.then, out);
-      exprResourceOps(e.otherwise, out);
-      return;
-    case "unary":
-      exprResourceOps(e.operand, out);
-      return;
-    case "paren":
-      exprResourceOps(e.inner, out);
-      return;
-    case "lambda":
-      exprResourceOps(e.body, out);
-      return;
-    case "new":
-    case "object":
-      for (const f of e.fields) exprResourceOps(f.value, out);
-      return;
-  }
-}
-
-function stmtResourceOps(s: WorkflowStmtIR, out: ResourceOpRef[]): void {
-  switch (s.kind) {
-    case "precondition":
-    case "requires":
-    case "expr-let":
-      exprResourceOps(s.expr, out);
-      return;
-    case "resource-call":
-      exprResourceOps(s.call, out);
-      return;
-    case "emit":
-    case "factory-let":
-      for (const f of s.fields) exprResourceOps(f.value, out);
-      return;
-    case "repo-let":
-    case "op-call":
-      for (const a of s.args) exprResourceOps(a, out);
-      return;
-    case "repo-run":
-      for (const a of s.retrievalArgs) exprResourceOps(a, out);
-      if (s.page?.offset) exprResourceOps(s.page.offset, out);
-      if (s.page?.limit) exprResourceOps(s.page.limit, out);
-      return;
-    case "for-each":
-      exprResourceOps(s.iterable, out);
-      for (const b of s.body) stmtResourceOps(b, out);
-      return;
-  }
-}
-
 /** Import lines (`from app.resources.<src> import a_put, b_get`) for every
- *  resource-op called across `statements`, deduped + grouped by module. */
+ *  resource-op called across `statements`, deduped + grouped by module.
+ *
+ *  Both halves ride the SHARED, `never`-checked walker (`ir/util/walk.ts`).
+ *  The untyped half used to walk a hand-enumerated statement/expression switch
+ *  that reached neither `if-let`'s `thenBody`/`elseBody` nor
+ *  `domain-service-call.call` / `repo-delete.entity` — so
+ *  `if let o = … { salesFiles.put(…) }` emitted the call with no import (ruff
+ *  F821 → runtime `NameError`) while the typed half, already on the deep
+ *  walker, was fine.  One walker, one traversal, no second copy to drift. */
 export function resourceImportLines(
   sys: SystemIR,
   statements: readonly WorkflowStmtIR[],
 ): string[] {
-  const refs: ResourceOpRef[] = [];
-  for (const st of statements) stmtResourceOps(st, refs);
   const byModule = new Map<string, Set<string>>();
-  for (const ref of refs) {
-    const resolved = resourceVerbImport(sys, ref.resourceName, ref.verb);
-    if (!resolved) continue;
-    const fns = byModule.get(resolved.module) ?? new Set<string>();
-    fns.add(resolved.fn);
-    byModule.set(resolved.module, fns);
-  }
   // Typed in-system api helpers (M-T4.8): `<resource>_<operation_id>` from the
-  // single generated client module.  Collected with the DEEP expression walker
-  // — `stmtResourceOps` above only reaches top-level statement shapes, and a
-  // typed call nested inside another expression is legal.
+  // single generated client module.
   const apiFns = new Set<string>();
   for (const st of statements) {
     walkWorkflowStmtExprsDeep(st, (e) => {
-      if (e.kind === "call" && e.callKind === "remote-api-op" && e.remoteApiOp) {
+      if (e.kind !== "call") return;
+      if (e.callKind === "resource-op" && e.resourceOp) {
+        const resolved = resourceVerbImport(sys, e.resourceOp.resourceName, e.resourceOp.verb);
+        if (!resolved) return;
+        const fns = byModule.get(resolved.module) ?? new Set<string>();
+        fns.add(resolved.fn);
+        byModule.set(resolved.module, fns);
+      } else if (e.callKind === "remote-api-op" && e.remoteApiOp) {
         apiFns.add(`${snake(e.remoteApiOp.resourceName)}_${snake(e.remoteApiOp.operationId)}`);
       }
     });
