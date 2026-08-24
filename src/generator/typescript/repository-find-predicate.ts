@@ -18,6 +18,7 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { orientComparison } from "../../ir/util/comparison-operands.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
@@ -255,12 +256,26 @@ export function lowerToDrizzle(
           return `${drizzleFn}(${l}, ${r})`;
         }
       }
-      const colExpr = renderColumnRef(e.left) ?? renderColumnRef(e.right);
-      const valueExpr =
-        renderColumnRef(e.left) === null ? renderValue(e.left) : renderValue(e.right);
+      // Drizzle's operator vocabulary is `<fn>(<column>, <value>)` — there is
+      // no left-hand value position — so a predicate written with the column
+      // on the RIGHT (`where 100 < this.qty`) has to be commuted, and the
+      // operator mirrored with it.  Both halves come from the shared
+      // normalizer; keeping only the first half is how `100 < this.qty`
+      // used to emit `lt(qty, 100)`, the exact opposite read.
+      const oriented = orientComparison(
+        e.op,
+        e.left,
+        e.right,
+        (operand) => renderColumnRef(operand) !== null,
+      );
+      if (oriented === null) return null;
+      const orientedFn = COMPARE_OP_TO_DRIZZLE[oriented.op];
+      if (!orientedFn) return null;
+      const colExpr = renderColumnRef(oriented.column);
+      const valueExpr = renderValue(oriented.value);
       if (colExpr === null || valueExpr === null) return null;
-      ops.add(drizzleFn);
-      return `${drizzleFn}(${colExpr}, ${valueExpr})`;
+      ops.add(orientedFn);
+      return `${orientedFn}(${colExpr}, ${valueExpr})`;
     }
     if (e.kind === "unary" && e.op === "!") {
       // A bare boolean column under `!` — `!this.isDeleted` — has no

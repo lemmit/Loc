@@ -13,7 +13,10 @@
 //   - Dapper   (`src/generator/dotnet/emit/dapper.ts` whereToSql)
 //       emits a `NotImplementedException` stub body.
 //   - Drizzle  (`src/generator/typescript/repository-find-predicate.ts`)
-//       lowers `null` → the find body falls back to a TODO comment.
+//       lowers `null`, and every caller of `lowerToDrizzle` on a find /
+//       retrieval / criterion path turns that into a LOUD generation-time
+//       throw ("… could not lower to Drizzle, but the validator should have
+//       caught this") — no TODO-comment stub survives to the generated tree.
 //
 // EF Core (`efcore`) lowers the RICHEST subset — exactly the queryable
 // sublanguage admitted by `firstNonQueryableNode` (this.<field> compared to
@@ -112,7 +115,10 @@ const FULL_SUBSET: FindPredicateCapability = () => null;
  *  subset, so it narrows nothing versus the EF Core / drizzle baseline. */
 const DAPPER_SUBSET: FindPredicateCapability = FULL_SUBSET;
 
-/** MikroORM (`whereToMikroFilter`): comparisons (`col <op> value`), bare
+/** MikroORM (`whereToMikroFilter`): comparisons (`col <op> value` — in EITHER
+ *  operand order; `value <op> col` is commuted with its operator mirrored by
+ *  `src/ir/util/comparison-operands.ts`, since a FilterQuery has no left-hand
+ *  value position), bare
  *  boolean columns (`this.active` → `{ active: true }`), unary `!` (NOT — via
  *  FilterQuery `$not` / a `false` boolean entry), `&&` / `||` of predicate
  *  positions, `currentUser.<field>` principal references, the authorization /
