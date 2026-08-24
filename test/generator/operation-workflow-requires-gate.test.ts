@@ -18,15 +18,15 @@ const src = (plat: string) => `
     subdomain S {
       context Tickets {
         aggregate Ticket {
-          subject: string  open: bool
-          create newT(subject: string) { subject := subject  open := true }
+          subject: string  open: bool = true
+          create(subject: string) { subject := subject  open := true }
           operation close() requires currentUser.role == "agent" { open := false }
         }
         repository Tickets for Ticket { }
         workflow Triage {
           create open(subject: string) requires currentUser.role == "admin" {
             precondition subject.length > 0
-            let t = Ticket.newT(subject)
+            let t = Ticket.create({ subject: subject })
           }
         }
       }

@@ -13,10 +13,8 @@
 //
 // This reproduces the Acme ERP playground failure (coreApi hosts five
 // contexts that all reference the ambient `Currency` enum + `Money` VO).
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseValid } from "../../_helpers/parse.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 // Two contexts on two modules, both referencing the ambient `Currency`
 // enum + `Money` VO, hosted by one Hono deployable.
@@ -48,16 +46,19 @@ system Sys {
     }
   }
   storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  resource invoicesState { for: Invoices, kind: state, use: primary }
   deployable api {
     platform: node
     contexts: [Orders, Invoices]
+    dataSources: [ordersState, invoicesState]
     port: 3000
   }
 }
 `;
 
 async function generate(src: string): Promise<Map<string, string>> {
-  return (await generateSystems(await parseValid(src))).files;
+  return await generateSystemFiles(src);
 }
 
 function fileEndingWith(files: Map<string, string>, suffix: string): string {

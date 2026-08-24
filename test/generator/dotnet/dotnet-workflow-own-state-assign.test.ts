@@ -2,10 +2,8 @@
 // .NET.  A `field := value` in a workflow body targeting one of the workflow's
 // OWN state fields writes onto the loaded correlation-state row
 // (`state.<Field>`, PascalCase) — flushed by the handler's SaveAsync at exit.
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseValid } from "../../_helpers/parse.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `
   system S {
@@ -34,7 +32,7 @@ const SRC = `
 
 describe(".NET workflow own-state assignment", () => {
   it("writes the own-state field onto the saga row in the start handler", async () => {
-    const files = (await generateSystems(await parseValid(SRC))).files;
+    const files = await generateSystemFiles(SRC);
     const handler = [...files.entries()].find(([k]) =>
       k.endsWith("OrderFulfillmentStartOrderPlacedHandler.cs"),
     )?.[1];
@@ -43,7 +41,7 @@ describe(".NET workflow own-state assignment", () => {
   });
 
   it("emits a settable Attempts property on the saga state entity", async () => {
-    const files = (await generateSystems(await parseValid(SRC))).files;
+    const files = await generateSystemFiles(SRC);
     const entity = [...files.entries()].find(([k]) =>
       k.endsWith("Workflows/OrderFulfillmentState.cs"),
     )?.[1];
@@ -71,7 +69,7 @@ const COMPOUND_SRC = `
           orderId: Order id
           attempts: int
           total: money
-          create(p: OrderPlaced) by p.order { attempts += 1  total -= 5.00 USD }
+          create(p: OrderPlaced) by p.order { attempts += 1  total -= money("5.00") }
         }
       }
     }
@@ -84,7 +82,7 @@ const COMPOUND_SRC = `
 
 describe(".NET workflow own-state compound assignment", () => {
   it("emits a read-modify-write for an int `attempts += 1`", async () => {
-    const files = (await generateSystems(await parseValid(COMPOUND_SRC))).files;
+    const files = await generateSystemFiles(COMPOUND_SRC);
     const handler = [...files.entries()].find(([k]) =>
       k.endsWith("OrderFulfillmentStartOrderPlacedHandler.cs"),
     )?.[1];
@@ -92,8 +90,8 @@ describe(".NET workflow own-state compound assignment", () => {
     expect(handler).toContain("state.Attempts = state.Attempts + 1;");
   });
 
-  it("emits decimal arithmetic for a money `total -= 5.00 USD`", async () => {
-    const files = (await generateSystems(await parseValid(COMPOUND_SRC))).files;
+  it("emits decimal arithmetic for a money `total -= money(...)`", async () => {
+    const files = await generateSystemFiles(COMPOUND_SRC);
     const handler = [...files.entries()].find(([k]) =>
       k.endsWith("OrderFulfillmentStartOrderPlacedHandler.cs"),
     )?.[1];

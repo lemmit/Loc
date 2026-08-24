@@ -44,9 +44,12 @@ const SOURCE = `system MiniLiveView {
     page Home { route: "/" body: Text { "home" } }
   }
 
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
   deployable phoenixApp {
     platform: elixir
     contexts: [Sales]
+    dataSources: [salesState]
     serves: SalesApi
     ui: SalesAdmin { Sales: phoenixApp }
     port: 4000

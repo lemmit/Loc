@@ -20,7 +20,9 @@ const SRC = `system S { subdomain O { context O {
   workflow OrderFulfillment { orderId: Order id  attempts: int  status: FulfillmentStatus
     create(p: OrderPlaced) by p.order { let s = Shipment.create({ orderRef: p.order, status: "P" }) emit ShipmentRequested { shipment: s.id, order: p.order } }
     on(s: ShipmentRequested) by s.order { let sh = Shipments.getById(s.shipment) sh.mark() } }
-} } api A from O storage pg { type: postgres } deployable api { platform: java contexts: [O] serves: A port: 8080 } }`;
+} } api A from O storage pg { type: postgres }
+  resource oState { for: O, kind: state, use: pg }
+  deployable api { platform: java contexts: [O] serves: A dataSources: [oState] port: 8080 } }`;
 
 async function gen(): Promise<Map<string, string>> {
   const { model, errors } = await parseString(SRC);
@@ -36,7 +38,9 @@ describe("java saga-state persistence", () => {
     )?.[1];
     expect(entity, "saga-state entity not emitted").toBeDefined();
     expect(entity).toContain("package com.loom.api.infrastructure.persistence;");
-    expect(entity).toContain('@Table(name = "order_fulfillments")');
+    // Schema-qualified: the deployable binds a `dataSource` for context `O`
+    // (which every accepted model must), so JPA maps the saga table into it.
+    expect(entity).toContain('@Table(name = "order_fulfillments", schema = "o")');
     expect(entity).toContain("public class OrderFulfillmentState {");
     // Correlation field is the @EmbeddedId, mapped to its snake column.
     expect(entity).toContain("@EmbeddedId");
@@ -74,7 +78,9 @@ describe("java saga-state persistence", () => {
       aggregate Customer { name: string  operation rename(n: string) { name := n } }
       repository Customers for Customer { }
       workflow renameCustomer { create(customerId: Customer id, newName: string) { let c = Customers.getById(customerId) c.rename(newName) } }
-    } } api A from O storage pg { type: postgres } deployable api { platform: java contexts: [O] serves: A port: 8080 } }`;
+    } } api A from O storage pg { type: postgres }
+  resource oState { for: O, kind: state, use: pg }
+  deployable api { platform: java contexts: [O] serves: A dataSources: [oState] port: 8080 } }`;
     const { model } = await parseString(PLAIN);
     const keys = [...generateSystems(model).files.keys()];
     expect(keys.some((k) => /State\.java$|StateRepository\.java$/.test(k))).toBe(false);
