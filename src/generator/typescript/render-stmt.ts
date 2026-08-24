@@ -236,8 +236,8 @@ function tsStmtTarget(emitProvenance: boolean, traceCtx: TraceCtx): StmtTarget {
   };
 }
 
-/** The scan predicate `<coll> -= v` matches an element with — a VALUE
- *  comparison, keyed off the element type.
+/** How `<coll> -= v` decides that an element MATCHES: a VALUE comparison,
+ *  keyed off the element type.
  *
  *  `===` is REFERENCE identity on every boxed element, so the plain form
  *  silently removed NOTHING and still returned 2xx:
