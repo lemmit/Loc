@@ -1,35 +1,33 @@
 {
-  "comment": "Ratcheting waivers for the schemathesis contract-fuzzing leg (M-T9.21). A rule names one ROOT CAUSE — a check plus a regex over the operation label — and points at the entry in docs/audits/schemathesis-findings-2026-08.md that explains it with a repro. The ratchet bites both ways: a finding no rule matches FAILS the run (a new bug, or a known one spreading to a surface no rule claimed), and a rule that matches nothing across the whole run ALSO fails it (fix the root cause, delete the rule and strike the register entry in the same PR). Rules are deliberately NOT machine-generated: an unexplained waiver is indistinguishable from a silent skip. `kind` is `bug` (a defect we are choosing not to fix in the discovery PR) or `by-design` (the check disagrees with a deliberate decision).",
+  "comment": "Ratcheting waivers for the schemathesis contract-fuzzing leg (M-T9.21). A rule names one ROOT CAUSE \u2014 a check plus a regex over the operation label \u2014 and points at the entry in docs/audits/schemathesis-findings-2026-08.md that explains it with a repro. The ratchet bites both ways: a finding no rule matches FAILS the run (a new bug, or a known one spreading to a surface no rule claimed), and a rule that matches nothing across the whole run ALSO fails it (fix the root cause, delete the rule and strike the register entry in the same PR). Rules are deliberately NOT machine-generated: an unexplained waiver is indistinguishable from a silent skip. `kind` is `bug` (a defect we are choosing not to fix in the discovery PR) or `by-design` (the check disagrees with a deliberate decision). STALE IS NOT FIXED: a rule that matches nothing is the ratchet asking a QUESTION \u2014 did the root cause go away, or did the fuzzer stop reaching it? Answer it against the emitter before deleting the rule. W10 spent three nights failing the run as \"stale\" while `errorStatuses(\"workflow\")` still had no 404 arm; the case had simply stopped being generated when the spec shape shifted (the seed is pinned, but the cases are derived FROM the spec, and a data-dependent finding needs a row an earlier case created). A finding whose reproduction depends on run data carries `intermittent` for exactly that reason \u2014 W10 was one and did not say so.",
   "waivers": [
     {
       "id": "W8",
-      "findings": ["F9"],
+      "findings": [
+        "F9"
+      ],
       "check": "negative_data_rejection",
       "operations": "^GET ",
       "kind": "by-design",
-      "reason": "F9 — schemathesis counts an unknown QUERY parameter as a schema-violating request that the API accepted. Ignoring unrecognised query parameters is ordinary HTTP behaviour and deliberate here; recorded so the decision is visible rather than silently filtered out of the check set."
-    },
-    {
-      "id": "W10",
-      "findings": ["F10"],
-      "check": "status_code_conformance",
-      "operations": "^POST /api/workflows/",
-      "kind": "bug",
-      "reason": "F10 — a workflow body that loads an aggregate by a client-supplied id answers 404 (AggregateNotFoundError → the router's onError), but `errorStatuses(\"workflow\")` declares only 400/415/422 (+403 when guarded). F6's shape on the workflow arm, and it lands with F6: the 404 is CONDITIONAL on the body reading a repository, so the shared table needs that predicate rather than an unconditional 404 per kind. Uncovered when the over-broad W5 (`^POST `) was deleted with F1's fix — not a regression of it."
+      "reason": "F9 \u2014 schemathesis counts an unknown QUERY parameter as a schema-violating request that the API accepted. Ignoring unrecognised query parameters is ordinary HTTP behaviour and deliberate here; recorded so the decision is visible rather than silently filtered out of the check set."
     },
     {
       "id": "W11",
-      "findings": ["F11"],
+      "findings": [
+        "F11"
+      ],
       "check": "not_a_server_error",
       "operations": "^POST /api/orders/\\{id\\}/add_line$",
       "kind": "bug",
       "intermittent": true,
-      "intermittentReason": "Reaching the overflow needs TWO independent things in one run: an out-of-int32 `qty` (the declared `{type: integer}` permits it) AND a path `{id}` that resolves to a row the fuzzer created earlier — a random uuid 404s before the column is ever written. So its absence from a given run is not evidence of a fix; it reproduced on the discovery run and not on the next. Removing this exemption means pinning it as a deterministic case in the behavioral tier — the shape W6's fix took (#2615).",
-      "reason": "F11 — an `int` body field publishes `{\"type\":\"integer\"}` with NO bound and validates as `z.number().int()` with no bound, while the column behind it is Postgres `int4`: a value the published contract permits (9543751572142) overflows and 500s. Same declared-vs-enforced family as F7, one level down — F7 was the declared type, this is the missing declared range. Scoped to the one operation it reproduces on deliberately: widening it is a decision, not a default. Uncovered when the over-broad W1 (`^POST /api/`) was deleted with F1's fix."
+      "intermittentReason": "Reaching the overflow needs TWO independent things in one run: an out-of-int32 `qty` (the declared `{type: integer}` permits it) AND a path `{id}` that resolves to a row the fuzzer created earlier \u2014 a random uuid 404s before the column is ever written. So its absence from a given run is not evidence of a fix; it reproduced on the discovery run and not on the next. Removing this exemption means pinning it as a deterministic case in the behavioral tier \u2014 the shape W6's fix took (#2615).",
+      "reason": "F11 \u2014 an `int` body field publishes `{\"type\":\"integer\"}` with NO bound and validates as `z.number().int()` with no bound, while the column behind it is Postgres `int4`: a value the published contract permits (9543751572142) overflows and 500s. Same declared-vs-enforced family as F7, one level down \u2014 F7 was the declared type, this is the missing declared range. Scoped to the one operation it reproduces on deliberately: widening it is a decision, not a default. Uncovered when the over-broad W1 (`^POST /api/`) was deleted with F1's fix."
     },
     {
       "id": "W12",
-      "findings": ["F11"],
+      "findings": [
+        "F11"
+      ],
       "check": "status_code_conformance",
       "operations": "^POST /api/orders/\\{id\\}/add_line$",
       "kind": "bug",

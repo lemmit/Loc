@@ -52,6 +52,7 @@ import { AUDIT_HISTORY_FIND } from "../../util/audit-names.js";
 import { lines } from "../../util/code-builder.js";
 import { errorTypeUri } from "../../util/error-defaults.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { provenancedTypeMembers } from "../_payload/provenanced-wire.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
 import { isEntityHistoryRead } from "../_walker/history-read.js";
 import { isOfReadCall } from "../_walker/of-reads.js";
@@ -2199,6 +2200,13 @@ export function wireFieldType(t: TypeIR): string {
       return `${wireFieldType(t.element)} list`;
     case "optional":
       return `${wireFieldType(t.inner)} option`;
+    case "genericInstance":
+      // `Provenanced<int>` (M-T6.12).  Without this arm the carrier fell
+      // through to `typeToFs`'s `obj` and the field decoded as an untyped
+      // blob — a SILENT degradation of exactly the shape the carrier exists
+      // to make uniform.
+      if (t.ctor === "provenanced") return `${FS_PROVENANCED}<${wireFieldType(t.arg)}>`;
+      return typeToFs(t);
     default:
       return typeToFs(t);
   }
@@ -2236,6 +2244,11 @@ export function decoderExprFor(t: TypeIR): string {
       return `(Decode.list ${decoderExprFor(t.element)})`;
     case "optional":
       return decoderExprFor(t.inner); // handled at the field via get.Optional
+    case "genericInstance":
+      if (t.ctor === "provenanced") {
+        return `(${FS_PROVENANCED_DECODER} ${decoderExprFor(t.arg)})`;
+      }
+      return "Decode.string";
     default:
       return "Decode.string";
   }
@@ -2246,24 +2259,7 @@ export function decoderExprFor(t: TypeIR): string {
 interface WireRecord {
   typeName: string;
   decoderName: string;
-  fields: { name: string; type: TypeIR; optional: boolean; prov?: boolean }[];
-}
-
-/** The co-located provenance-lineage fields for a node's provenanced properties
- *  — `<field>_provenance: ProvLineage option`, decoded via `provLineageDecoder`.
- *  The `prov` marker overrides the type/decoder emission (there is no
- *  `ProvLineage` `TypeIR`, so the placeholder `type` is never read). */
-function provWireFields(node: {
-  fields: { name: string; provenanced?: boolean }[];
-}): WireRecord["fields"] {
-  return node.fields
-    .filter((f) => f.provenanced)
-    .map((f) => ({
-      name: `${f.name}_provenance`,
-      type: { kind: "primitive", name: "string" } as TypeIR,
-      optional: true,
-      prov: true,
-    }));
+  fields: { name: string; type: TypeIR; optional: boolean }[];
 }
 
 /** The fixed `ProvLineage` wire record + Thoth decoder — the Feliz analogue of
@@ -2274,7 +2270,7 @@ function provWireFields(node: {
  *  `provLineageDecoder`. */
 export function renderProvLineageType(): string {
   return lines(
-    "// Provenance lineage — the co-located `<field>_provenance` wire shape.",
+    "// Provenance lineage — the `lineage` half of the `Provenanced<'T>` wire carrier.",
     "type ProvInput = { path: string; value: string }",
     "",
     "type ProvLineage =",
@@ -2306,8 +2302,32 @@ export function renderProvLineageType(): string {
     '      computedValue = get.Required.Field "computedValue" provAnyToString',
     '      inputs = get.Required.Field "inputs" (Decode.list provInputDecoder)',
     "    })",
+    "",
+    "// `Provenanced<'T>` — a provenanced field's value and its lineage as ONE",
+    "// wire carrier (M-T6.12), the same `{ value, lineage }` object every other",
+    "// Loom target reads.",
+    `type ${FS_PROVENANCED}<'T> =`,
+    "  {",
+    ...provenancedTypeMembers({ kind: "none" }).map((mem) =>
+      mem.type ? `    ${mem.name}: 'T` : `    ${mem.name}: ProvLineage option`,
+    ),
+    "  }",
+    "",
+    `let ${FS_PROVENANCED_DECODER} (inner: Decoder<'T>) : Decoder<${FS_PROVENANCED}<'T>> =`,
+    "  Decode.object (fun get ->",
+    "    {",
+    ...provenancedTypeMembers({ kind: "none" }).map((mem) =>
+      mem.type
+        ? `      ${mem.name} = get.Required.Field "${mem.name}" inner`
+        : `      ${mem.name} = get.Optional.Field "${mem.name}" provLineageDecoder`,
+    ),
+    "    })",
   );
 }
+
+/** The Feliz spelling of the shared wire carrier + its Thoth decoder factory. */
+const FS_PROVENANCED = "Provenanced";
+const FS_PROVENANCED_DECODER = "provenancedDecoder";
 
 /** The F# type name a wire field references (an entity part / value object),
  *  peeling arrays + optionals; undefined for scalar/enum leaves. */
@@ -2359,7 +2379,6 @@ function collectRecords(
             type: w.type,
             optional: w.optional,
           })),
-          ...provWireFields(part),
         ]);
         continue;
       }
@@ -2375,7 +2394,6 @@ function collectRecords(
         type: w.type,
         optional: w.optional,
       })),
-      ...provWireFields(agg),
     ]);
   }
   return out;
@@ -2463,7 +2481,7 @@ export function renderWireTypes(
   // guard is uniform (a required File is always `Some`), mirroring the
   // always-truthy guard the JSX frontends emit.
   const fieldOptional = (f: WireRecord["fields"][number]): boolean =>
-    f.prov || f.optional || f.type.kind === "optional" || typeIsFile(fieldBase(f));
+    f.optional || f.type.kind === "optional" || typeIsFile(fieldBase(f));
 
   // A record that references another (a value object / entity part field) forms
   // a mutually-recursive group — F# is order-sensitive, so `type Order = { …
@@ -2477,7 +2495,7 @@ export function renderWireTypes(
       `${rec && i > 0 ? "and" : "type"} ${r.typeName} =`,
       "  {",
       ...r.fields.map((f) => {
-        const base = f.prov ? "ProvLineage" : wireFieldType(fieldBase(f));
+        const base = wireFieldType(fieldBase(f));
         return `    ${f.name}: ${fieldOptional(f) ? `${base} option` : base}`;
       }),
       "  }",
@@ -2497,9 +2515,7 @@ export function renderWireTypes(
         // `let rec … and` group (`Decoders.address` isn't in scope while the
         // module is being defined); `decoderExprFor` qualifies it for external
         // callers, so strip the self-module prefix here.
-        const dec = f.prov
-          ? "provLineageDecoder"
-          : decoderExprFor(fieldBase(f)).replaceAll("Decoders.", "");
+        const dec = decoderExprFor(fieldBase(f)).replaceAll("Decoders.", "");
         return `        ${f.name} = ${
           fieldOptional(f)
             ? `get.Optional.Field "${f.name}" ${dec}`

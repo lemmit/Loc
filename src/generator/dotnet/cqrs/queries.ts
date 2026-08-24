@@ -10,7 +10,7 @@ import type {
 import { findGateUsesCurrentUser, findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { maskedHistoryFields } from "../../../ir/util/audit-history.js";
 import { upperFirst } from "../../../util/naming.js";
-import { projectEntityExpr } from "../dto-mapping.js";
+import { projectEntityExpr, projectionNamesDomainCommon } from "../dto-mapping.js";
 import {
   HISTORY_RETURN_TYPE,
   historyHandlerName,
@@ -20,11 +20,14 @@ import {
 import { renderQuery, renderQueryHandler } from "../emit.js";
 import { collectCsExprUsings, renderCsExpr, renderCsType } from "../render-expr.js";
 
-/** `<ns>.Domain.Common` is where `RequestContext` lives; a read handler that
- *  projects a `mask unless` field references `RequestContext.Current` in its
- *  DTO projection (see `dto-mapping.maskWrap`), so it needs that using. */
-function maskUsings(agg: EnrichedAggregateIR, ns: string): string[] {
-  return agg.fields.some((f) => f.maskUnless) ? [`${ns}.Domain.Common`] : [];
+/** `<ns>.Domain.Common` holds the types a DTO PROJECTION can name —
+ *  `RequestContext` (a `mask unless` field's `maskWrap`) and `Provenanced<T>`
+ *  (a `provenanced` field's wire carrier, M-T6.12).  A read handler inlines the
+ *  projection into its own file, so it needs the using whenever either applies;
+ *  `projectionNamesDomainCommon` is the single predicate both the mask and the
+ *  carrier register with, so a third such type cannot be forgotten here. */
+function projectionUsings(agg: EnrichedAggregateIR, ns: string): string[] {
+  return projectionNamesDomainCommon(agg) ? [`${ns}.Domain.Common`] : [];
 }
 
 // ---------------------------------------------------------------------------
@@ -114,7 +117,7 @@ export function emitGetByIdQueryAndHandler(
       handlerName: `Get${agg.name}ByIdHandler`,
       queryName: `Get${agg.name}ByIdQuery`,
       returnType: `${agg.name}Response?`,
-      extraUsings: maskUsings(agg, ns),
+      extraUsings: projectionUsings(agg, ns),
       body:
         `        var found = await _repo.GetByIdAsync(query.Id, cancellationToken);\n` +
         `        return found is null ? null : ${projectEntityExpr("found", agg, ctx)};\n`,
@@ -294,7 +297,7 @@ export function emitFindQueriesAndHandlers(
             ...(needsUser ? [`${ns}.Auth`] : []),
             ...pagedUsings,
             ...gateUsings,
-            ...maskUsings(agg, ns),
+            ...projectionUsings(agg, ns),
           ]),
         ],
       }),

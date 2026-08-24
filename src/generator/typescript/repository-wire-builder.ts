@@ -15,7 +15,9 @@ import type {
   WireField,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
+import { provenancedEntries } from "../_payload/provenanced-wire.js";
 import { MONEY_WIRE_SCALE } from "../money-scale.js";
+import { tsProvSibling } from "./prov-names.js";
 import { renderTsExpr } from "./render-expr.js";
 
 export function toWireMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
@@ -115,11 +117,9 @@ function wireProjectionEntity(
       `${wf.name}: ${wireProjectionValue(`${varExpr}.${wf.name}`, wf.type, ctx, wf.optional)}`,
     );
   }
-  // Co-located provenance rides the wire DTO so any GET surfaces the
-  // current lineage inline (the field's own value still emits above).
-  for (const f of ent.fields.filter((f) => f.provenanced)) {
-    parts.push(`${f.name}_provenance: ${varExpr}.${f.name}_provenance`);
-  }
+  // (M-T6.12) No trailing `<field>_provenance` key any more: the lineage rides
+  // inside the provenanced field's own value as the `Provenanced<T>` carrier,
+  // folded by `wireProjectionValue`'s carrier branch below.
   return `{ ${parts.join(", ")} }`;
 }
 
@@ -174,5 +174,18 @@ export function wireProjectionValue(
     return `${expr}.map((a) => (${wireProjectionValue("a", t.element, ctx, false)}))`;
   }
   if (t.kind === "entity") return expr;
+  if (t.kind === "genericInstance" && t.ctor === "provenanced") {
+    // Fold the domain's split pair into the one wire carrier: the value's own
+    // projection plus the co-located lineage getter the entity emitter
+    // declared.  `?? null` because a never-written provenanced field has no
+    // lineage yet and the response schema says nullable, not optional.
+    const members = provenancedEntries(
+      wireProjectionValue(expr, t.arg, ctx, optional),
+      `${tsProvSibling(expr)} ?? null`,
+    )
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(", ");
+    return `{ ${members} }`;
+  }
   return expr;
 }

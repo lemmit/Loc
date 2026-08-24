@@ -178,10 +178,7 @@ export function generateReactForContexts(
   // `ui.pages` for both pages and page-objects (single source).
   for (const { agg, ctx } of aggregates) {
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
-    out.set(
-      `src/api/${lowerFirst(agg.name)}.ts`,
-      buildApiModule(agg, repo, ctx, { carryProvenance: true }),
-    );
+    out.set(`src/api/${lowerFirst(agg.name)}.ts`, buildApiModule(agg, repo, ctx));
   }
 
   const workflows = allWorkflows(contexts);

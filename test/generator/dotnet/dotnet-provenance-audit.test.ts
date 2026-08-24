@@ -63,6 +63,58 @@ async function files(): Promise<Map<string, string>> {
   return generateSystems(model).files;
 }
 
+/**
+ * EVERY emitted C# file that NAMES `Provenanced<...>` must also import the
+ * namespace it lives in (`<ns>.Domain.Common`).  A compile-free stand-in for
+ * `dotnet build /warnaserror`, which is the only other thing that catches this
+ * and costs ~90s of docker per fixture.
+ *
+ * This exists because the carrier shipped broken: `projectEntityExpr` started
+ * CONSTRUCTING `new Provenanced<int>(...)` inside the read handlers, where the
+ * pre-carrier projection had been a bare property read (`found.TotalProvenance`)
+ * that named no type and so needed no using.  The DTO file had the import (it
+ * declares the component); the handler files did not — and every unit test
+ * passed while `dotnet build` failed with
+ * `CS0246: The type or namespace name 'Provenanced<>' could not be found`.
+ *
+ * Written as a SWEEP over the whole emitted tree rather than a list of known
+ * handler paths, so a NEW emitter that inlines the projection is covered the day
+ * it lands instead of the day someone remembers to add it here.
+ */
+describe("dotnet provenance — the carrier's namespace import follows every use", () => {
+  it("every file naming `Provenanced<` imports its namespace", async () => {
+    const f = await files();
+    const offenders: string[] = [];
+    for (const [path, content] of f) {
+      if (!path.endsWith(".cs")) continue;
+      // The declaration site itself IS Domain.Common — it needs no using.
+      if (path.endsWith("Domain/Common/ProvLineage.cs")) continue;
+      if (!/\bProvenanced</.test(content)) continue;
+      // Namespace-agnostic: the app namespace is derived from the DEPLOYABLE
+      // name (`api` → `Api`), so pinning a literal would only test this fixture.
+      if (!/using [A-Za-z0-9_]+\.Domain\.Common;/.test(content)) offenders.push(path);
+    }
+    // A non-empty sweep would have caught the CS0246 without a docker build.
+    expect(offenders, "files naming Provenanced<> without a Domain.Common using").toEqual([]);
+    // Guard the guard: the sweep must actually REACH some files, or an emitter
+    // rename would silently turn it into a vacuous pass.
+    const seen = [...f].filter(([p, c]) => p.endsWith(".cs") && /\bProvenanced</.test(c));
+    expect(seen.length, "the sweep saw at least the DTO + the read handlers").toBeGreaterThan(2);
+  });
+
+  it("the read handlers that project the carrier carry the using", async () => {
+    const f = await files();
+    // Named explicitly as well as swept above: these are the three read paths a
+    // provenanced aggregate always emits, and the two that actually regressed.
+    for (const handler of ["GetOrderByIdHandler", "AllHandler"]) {
+      const src = f.get(`api/Application/Orders/Queries/${handler}.cs`);
+      expect(src, `${handler}.cs emitted`).toBeDefined();
+      expect(src, `${handler}.cs projects the carrier`).toContain("new Provenanced<int>(");
+      expect(src, `${handler}.cs imports Domain.Common`).toContain("using Api.Domain.Common;");
+    }
+  });
+});
+
 describe("dotnet provenance runtime", () => {
   it("emits the shared ProvLineage SDK + provenance_records POCO/configuration", async () => {
     const f = await files();
@@ -144,10 +196,23 @@ describe("dotnet provenance runtime", () => {
     expect(repo).toContain("ParentId = RequestContext.Current?.ParentId,");
   });
 
-  it("exposes the current lineage on the response DTO", async () => {
-    const resp = (await files()).get("api/Application/Orders/Responses/OrderResponses.cs")!;
-    expect(resp).toContain("ProvLineage? TotalProvenance");
+  it("exposes the current lineage INSIDE the field's own carrier component", async () => {
+    const f = await files();
+    const resp = f.get("api/Application/Orders/Responses/OrderResponses.cs")!;
+    // M-T6.12 — one `Provenanced<int> Total` component, not a bare `int Total`
+    // plus a trailing `[JsonPropertyName("total_provenance")] ProvLineage?`.
+    expect(resp).toContain("Provenanced<int> Total");
+    expect(resp).not.toContain("TotalProvenance");
     expect(resp).toContain("using Api.Domain.Common;");
+    // The projection folds the domain's split pair into that one argument.
+    expect(resp + [...f.values()].join("\n")).toContain(
+      "new Provenanced<int>(found.Total, found.TotalProvenance)",
+    );
+    // The shared generic record ships beside `ProvLineage`.
+    const lineage = f.get("api/Domain/Common/ProvLineage.cs")!;
+    expect(lineage).toContain(
+      "public sealed record Provenanced<T>(T Value, ProvLineage? Lineage);",
+    );
   });
 
   it("adds the co-located column in a migration and takes the history table from MigrationsIR", async () => {

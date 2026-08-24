@@ -180,10 +180,7 @@ export function generateVueForContexts(
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
     out.set(
       `src/api/${agg.name[0]!.toLowerCase()}${agg.name.slice(1)}.ts`,
-      buildApiModule(agg, repo, ctx, {
-        queryPackage: "@tanstack/vue-query",
-        carryProvenance: true,
-      }),
+      buildApiModule(agg, repo, ctx, { queryPackage: "@tanstack/vue-query" }),
     );
   }
 

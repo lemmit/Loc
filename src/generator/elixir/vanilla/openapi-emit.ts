@@ -21,7 +21,11 @@ import type {
   ValueObjectIR,
   WireField,
 } from "../../../ir/types/loom-ir.js";
-import { workflowEmitsCommandRoute, workflowIsGuarded } from "../../../ir/types/loom-ir.js";
+import {
+  workflowCanAnswerNotFound,
+  workflowEmitsCommandRoute,
+  workflowIsGuarded,
+} from "../../../ir/types/loom-ir.js";
 import {
   peelCollection,
   peelNullable,
@@ -55,6 +59,7 @@ import {
   opWorkflowInstances,
 } from "../../../ir/util/openapi-ids.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { PROVENANCE_VALUE_FIELD, provenancedEntries } from "../../_payload/provenanced-wire.js";
 import { unionMembers } from "../../_payload/union-wire.js";
 import type { ApiRoute } from "../api-emit.js";
 import { servedOperationEntries, servesHistory } from "./api-emit.js";
@@ -371,8 +376,11 @@ function errorResponseEntries(
    *  409 (`ReferencedInUse`) through the `httpStatus` mapper so the OpenAPI
    *  declaration moves with the runtime arm.  Omitted ⇒ literal 409. */
   resolve?: (name: string) => number,
+  /** Body facts the `kind` cannot carry — `readsAggregate` for the workflow
+   *  arm's conditional not-found rung.  See `errorStatuses`. */
+  opts?: { readsAggregate?: boolean },
 ): string {
-  return statusResponseEntries(errorStatuses(kind, guarded, resolve), schemasModule);
+  return statusResponseEntries(errorStatuses(kind, guarded, resolve, opts), schemasModule);
 }
 
 /** The same ProblemDetails response-map entries for an explicit status list —
@@ -409,7 +417,7 @@ function renderApiSpec(
   const pathEntries: string[] = [];
 
   // Workflow paths: POST /workflows/<slug>
-  for (const { wf } of allWorkflows) {
+  for (const { ctx, wf } of allWorkflows) {
     const slug = snake(wf.name);
     const reqMod = `${schemasModule}.${upperFirst(wf.name)}Request`;
     pathEntries.push(`      "/workflows/${slug}" => %OpenApiSpex.PathItem{
@@ -427,7 +435,9 @@ function renderApiSpec(
             200 => %OpenApiSpex.Response{
               description: "Success",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: %OpenApiSpex.Schema{type: :object}}}
-            }${errorResponseEntries("workflow", schemasModule, workflowIsGuarded(wf))}
+            }${errorResponseEntries("workflow", schemasModule, workflowIsGuarded(wf), undefined, {
+              readsAggregate: workflowCanAnswerNotFound(wf, ctx.repositories),
+            })}
           }
         }
       }`);
@@ -888,6 +898,20 @@ function openApiType(t: TypeIR, schemasModule: string): string {
       // Containment part → its `<Part>Response`, as a module atom so the
       // part schema is registered in components.
       return `${schemasModule}.${info.base}Response`;
+    case "provenanced": {
+      // The `Provenanced<T>` carrier (M-T6.12), inlined like a value object —
+      // the value's own schema plus the opaque nullable lineage object.  Before
+      // this arm the Phoenix spec published a provenanced field as a bare `T`
+      // and never mentioned the lineage at all, so its OpenAPI document
+      // disagreed with the JSON the controller actually served.
+      const props = provenancedEntries(
+        openApiType(info.carried!, schemasModule),
+        `${OPENAPI_PRIMITIVE.json}`,
+      )
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(", ");
+      return `%OpenApiSpex.Schema{type: :object, properties: %{${props}}, required: [:${PROVENANCE_VALUE_FIELD}]}`;
+    }
   }
 }
 
@@ -1118,10 +1142,18 @@ function declaredResponseProps(
   const props: Array<{ name: string; type: TypeIR; optional: boolean }> = [];
   const idField = forApiRead(wireFieldsFor(agg)).find((w) => w.source === "id");
   if (idField) props.push({ name: idField.name, type: idField.type, optional: idField.optional });
+  // A declared record names DOMAIN types, so a field the aggregate declares
+  // `provenanced` is wrapped in the wire carrier here — the same wrap
+  // `wireTypeForField` applies on the wireShape path, so both paths publish the
+  // identical schema (M-T6.12).
+  const provenanced = new Set(agg.fields.filter((f) => f.provenanced).map((f) => f.name));
   for (const f of payload.fields) {
+    const declaredType = normalizeDeclaredType(f.type, payloads);
     props.push({
       name: f.name,
-      type: normalizeDeclaredType(f.type, payloads),
+      type: provenanced.has(f.name)
+        ? { kind: "genericInstance", ctor: "provenanced", arg: declaredType }
+        : declaredType,
       optional: f.optional,
     });
   }

@@ -123,3 +123,37 @@ The fork leaks downstream: the duplicate diagnostic pairs (`loom.workflow-emitte
 Design: [`M-T5.21-callable-unification-design.md`](missions/M-T5.21-callable-unification-design.md).
 
 Sources: language-size review 2026-08-04. `src/language/ddd.langium` (the fifteen rules, line numbers in the design doc), [`docs/customization-gradient.md`](../customization-gradient.md), [`surface-redundancy-cuts.md`](../old/proposals/surface-redundancy-cuts.md) (same "one spelling per concept" principle, previously applied only to trivia). Relates to M-T5.17 (modifier zoo, one layer up), M-T5.18 (soft-keyword sprawl).
+
+## M-T5.22 — Decimal arithmetic has no governing rule: `0.1 + 0.2` diverges on the wire AND in storage — `open` · **L** · P1 ⭐ carries an owner ruling
+
+Found 2026-08-23 by the numeric-types audit ([F11](../audits/numeric-types-audit-2026-08-23.md)). RS-24 pins how a `decimal` *serializes* (a JSON number through a float64) but nothing pins how it *computes*: node/python run float64 arithmetic, .NET/Java/Elixir run exact decimal (System.Decimal / DECIMAL128 / Decimal-context-28). A `derived x: decimal = 0.1 + 0.2` ships — and **persists into the shared unbounded `DECIMAL` column** — `0.30000000000000004` from two backends and `0.3` from three. Single divisions agree only coincidentally (double division is correctly rounded), which is why `7/3` never exposed it.
+
+**Why every existing gate is green.** Zero corpus coverage of float-error-visible decimal arithmetic — and the witness cannot be added first, because it alone turns three backends red against the node oracle. The ruling comes first.
+
+**The ruling (proposed default, overridable in draft-PR review):** pin *observable* results — wire AND persisted values of computed decimals — to float64/node-oracle semantics; in-memory representation stays per-backend where it cannot be observed. Mint the RS rule per the registry's own claim-the-number protocol (`docs/conformance-semantics.md`). Then add the corpus witness and bring the exact-side backends into compliance.
+
+**Also carried here** (same ruling's blast radius, from the register annex): node money arithmetic runs at decimal.js default 20-significant-digit precision (no `Decimal.set` emitted) vs 28+ elsewhere; the inbound `decimal` precision-acceptance skew (Java unlimited vs .NET 28–29 vs double-clamped — a Java-written 30-digit value can `OverflowException` a .NET reader of the same column); and the numeric doc drift (`docs/language.md` host-type table predates #2575 and mislabels Java; the stdlib catalog signature `sum → decimal` in `src/util/collection-ops.ts` disagrees with `type-system.ts`'s body-type rule — fix the catalog, regen `docs:stdlib`).
+
+**Verification when it lands.** The new corpus case green on all five behavioral legs; the RS entry in the registry; mutation-proved by reverting one exact-side backend.
+
+Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F11 + annex, plan.json N7. Relates to M-T6.46/M-T6.47 (the response-narrowing halves), RS-24.
+
+## M-T5.23 — `long` has no contract: silent corruption past 2^53 on node/python, 3-way divergent overflow — `open` · **M** · P2
+
+Found 2026-08-23 by the numeric-types audit ([F13](../audits/numeric-types-audit-2026-08-23.md)). Node stores `long` as a JS `number` (`bigint(col, {mode: "number"})`, `src/generator/typescript/emit/schema.ts`; mikroorm `ts: "number"`) and python's aggregate arm routes declared int/long sums through `float()` — both silently corrupt past 2^53 while .NET/Java/Elixir carry int64 exactly. Aggregate int-overflow behavior is three-way divergent for the same `.ddd`: Java `((Number) x).intValue()` **wraps silently**, .NET's `(int)` cast **throws** (500), the rest pass the too-big value through. No validator, no doc caveat anywhere.
+
+**The work (proposed default, overridable):** document + validator-enforce a 2^53 safe-integer ceiling for `long` on the affected paths now — an honest `loom.*` diagnostic instead of silent corruption; a representation upgrade (BigInt / string wire) becomes a named follow-up mission only if the ceiling pinches. Route python's declared-int/long aggregates through `int()`. Unify overflow behavior (proposed: Java's wraparound becomes an error like .NET's).
+
+**Verification when it lands.** Validator tests; a >2^53 witness proving the exact backends carry it; python aggregate int test; each mutation-proved.
+
+Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F13 + annex, plan.json N8.
+
+## M-T5.24 — Projection `avg` over money is typed `decimal`: the mean of exact money leaves as a lossy double — `open` · **S** · P2
+
+Found 2026-08-23 by the numeric-types audit ([F14](../audits/numeric-types-audit-2026-08-23.md)). `src/ir/lower/lower-projection.ts` stamps query-time `avg → decimal` even over a money column, so the mean of exact money crosses the wire as a float64 JSON number — while the **in-memory** `avg` of the same field types `money?` (`type-system.ts`) and ships the 4-dp string. Same word, two semantics, no gate.
+
+**The work (proposed default, overridable):** retype projection `avg` over a money column to `money` — `aggregateCoercion`'s `isMoney` arm (`src/ir/util/projection-aggregate.ts`) already knows how to format it on all five backends; update the wire-golden capture with the retype.
+
+**Verification when it lands.** A lowering test plus a behavioral golden for an avg-over-money projection; mutation-proved through the coercion.
+
+Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F14, plan.json N9. Relates to RS-12, #2560.

@@ -50,3 +50,15 @@ Sources: [completeness-audit-2026-07](../audits/completeness-audit-2026-07.md).
 
 ## M-T2.13 — Migration-evolution gate — `done` (PR #2264) · **M** · P2
 Sources: `docs/migrations.md`, weak-spots §"silent data loss"; runtime companion to M-T2.1 (rename intent) + M-T2.2 (baseline safety) + M-T2.3 (data migrations).
+
+## M-T2.14 — `columnTypeEqual` is blind to precision/scale: #2575's `NUMERIC(19,4)` never reaches an existing database — `open` · **S–M** · P1 ⭐ the migration #2575 promised but did not deliver
+
+Found 2026-08-23 by the numeric-types audit ([F15](../audits/numeric-types-audit-2026-08-23.md)), confirmed twice independently. [#2575](https://github.com/lemmit/Loc/pull/2575) bounded money's DDL to `NUMERIC(19,4)` and claimed migration safety ("`alterColumnType` already existed with a `USING` cast, so an existing database gets a real type-change migration"). It does not: `columnTypeEqual` (`src/system/migrations-builder.ts`) compares `kind` only, and `decimal`/`money` share `kind: "decimal"` — a baseline's `{kind:"decimal"}` compares **equal** to `{kind:"decimal", precision:19, scale:4}`, so no `alterColumnType` is ever diffed out. Every pre-#2575 database keeps the unbounded column (the storage half of #2549, resurfaced for migrated schemas), and a user-visible `decimal ↔ money` field retype produces **no migration at all**.
+
+**Why every existing gate is green.** `schema-load` loads *fresh* chains (the fresh DDL is correct); `migration-evolution` has no fixture evolving a pre-bounds baseline across the #2575 boundary.
+
+**The fix:** compare `precision`/`scale` in `columnTypeEqual` so a bounds change diffs out through the existing `alterColumnType`/`USING` path — minding the destructive-gating semantics (a widening bound is safe; a narrowing one belongs behind `--allow-destructive` review).
+
+**Verification when it lands.** A migration-evolution witness evolving a pre-#2575 baseline to `NUMERIC(19,4)`, plus a `decimal → money` retype producing a migration; mutation-proved by reverting the comparator.
+
+Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F15, plan.json N6, #2549/#2575. Relates to M-T2.2 (baseline safety), M-T2.13 (the gate that gets the witness).

@@ -44,6 +44,14 @@ of the sibling `/{id}` validator's `422`. Their waivers (W4, W9) are deleted.
 `minLength`/`maxLength` the emitted JSON Schema publishes. Its waiver (W6) is
 deleted and a deterministic astral-character case is pinned in the wire golden.
 
+**F10 and F13 landed on all five backends (2026-08-23, PR #2648)** — the
+not-found rung is published from the READ that produces it rather than from the
+route's shape, so a workflow whose body loads and a non-optional `find` route
+both declare the 404 they answer — and .NET (500) and elixir (`200 null`) now
+ANSWER it, where they had each diverged in their own direction. W10 is deleted;
+F13 never had a waiver
+(the fuzzer never reached it — it was found by hand under F10).
+
 ---
 
 ## Class: server error (500)
@@ -431,7 +439,9 @@ what the same runs were already producing underneath it. They get their own
 narrow rules so the next deletion can't hide a third one.
 
 ### F10 — a workflow that loads an aggregate answers 404, and the workflow route declares none
-**Waiver:** W10 · **Severity: medium** — every workflow whose body reads an
+**Status: FIXED (2026-08-23, PR #2648).** The rung is declared on all five
+backends when — and only when — the body can raise it. W10 is deleted.
+**Severity: medium** — every workflow whose body reads an
 aggregate by a client-supplied id.
 
 ```
@@ -440,13 +450,87 @@ curl -X POST -H 'Content-Type: application/json' \
 → 404   # `Customers.getById(customerId)` → AggregateNotFoundError → onError
 ```
 
-but `errorStatuses("workflow")` declares `400`, `415`, `422` (+`403` when
+but `errorStatuses("workflow")` declared `400`, `415`, `422` (+`403` when
 guarded) and no `404`. This is F6's shape on the workflow arm: a status the
 route really sends, published nowhere, so every generated client is blind to
 it. Unlike the read routes, the 404 is CONDITIONAL — a workflow whose body
 touches no repository cannot send it — so the honest fix needs a
-"body reads an aggregate" predicate threaded into the shared table rather than
-an unconditional `404` on the kind. Fix it with F6, on all five backends.
+"body reads an aggregate" predicate rather than an unconditional `404` on the
+kind, and declaring it unconditionally would trade this contract lie for its
+mirror image (a declared status the route can never send).
+
+`workflowCanAnswerNotFound` (`src/ir/types/loom-ir.ts`) is that predicate,
+threaded into the shared table as `opts.readsAggregate` by all five backends.
+It is true for exactly two producers: a `repo-let` (validator-constrained to a
+single non-optional aggregate, so the emitted method can only report an empty
+result by throwing) and a NAMED read inside an expression — the `reading`
+domain-service tier, whose read port this workflow threads. `repo-run` /
+`findAll` return arrays, `if-let` handles the empty case explicitly, and a
+criterion `find` renders as `[0] ?? null`: none of those can throw.
+
+> **The waiver did not go stale — the fuzzer stopped reaching it.** W10 failed
+> the nightly as a stale rule on 2026-08-21/22/23 while the `workflow` arm still
+> had no 404. The seed is pinned, but Schemathesis derives its cases FROM the
+> spec, and this one needs a body whose id resolves to nothing in a run whose
+> earlier cases shaped the table — so a spec change reshuffles whether it is
+> generated at all. The ratchet's staleness half asks a question; it does not
+> answer one. `schemathesis-waivers.json` now says so, and a finding with this
+> data dependency carries `intermittent` (W11/W12 do; W10 should have).
+
+### F13 — a non-optional declared `find` route answers an undeclared 404 too
+**Status: FIXED (2026-08-23, PR #2648)**, in the same commit as F10 and by the
+same one-line reasoning: the rung is a fact about the read.
+**Waiver:** none — the fuzzer never reached it (neither fixture declares a
+non-optional `find`) · **Severity: medium** — found by hand while root-causing
+F10, and it is the SAME defect one route class over.
+
+```
+find byRef(r: string): Wallet where this.ownerRef == r     # non-optional
+→ GET /api/wallets/by_ref?r=nope   answers 404
+```
+
+but `errorStatuses("findSingle")` declares `{200, 422}`. The emitted repository
+method throws `AggregateNotFoundError` on an empty result set (it has no other
+option — the declared return type is non-optional), and the aggregate router's
+`onError` renders that as a 404. An OPTIONAL find declares its 404 (the absent
+variant rides that status by design); the NON-optional one, which reaches the
+same status by throwing, declares nothing.
+
+`findSingle` now declares the rung exactly as `findOptional` does — and forcing
+that question surfaced a RUNTIME half nobody had asked about. All five backends
+agree on the happy path and split four ways on a miss:
+
+| backend | answered on an absent row |
+|---|---|
+| node | 404 — the repository method throws the shared carrier |
+| java | 404 — the controller null-checks and throws |
+| python | 404 — the route null-checks and raises |
+| **.NET** | **500** — EF `FirstAsync` throws `InvalidOperationException("Sequence contains no elements")`, which no filter arm matches (and on `persistence: dapper`, it did not compile at all) |
+| **elixir** | **200** with a `null` body — not a valid `<Agg>Response`, so it violates the 200 schema it publishes |
+
+There is a third .NET path: `persistence: dapper` builds its own method bodies
+rather than riding the EF terminal, and returned a bare `null` from a declared
+`Task<Agg>` — which is not a runtime bug but a COMPILE one. `dotnet build
+/warnaserror` (the `dotnet-build` gate) rejects it with CS8603, so
+`persistence: dapper` paired with a non-optional find has never compiled; no
+fixture in that matrix pairs the two. Verified by building the emitted project
+in `mcr.microsoft.com/dotnet/sdk:10.0`: FAILED before, `0 Warning(s) 0 Error(s)`
+after, for the efcore, dapper and `shape: document` adapters alike.
+
+All of it is corrected with the declaration, or it would have been a second lie
+on two backends. The split was invisible to every existing gate: the wire
+differential GETs collection endpoints, and no corpus case reads a single find
+that misses. Elixir's emitter had even recorded the reason it kept `json(conn,
+nil)` — "`findSingle` declares no error status" — which is exactly the premise
+this finding removes.
+
+Together with F10 this names the root cause under both: the shared table
+publishes the not-found rung from the ROUTE SHAPE (does the path carry an
+`{id}`?), while the rung's real producer is the READ — every repository read
+returning a non-optional aggregate throws when the row is absent. Shape and
+read agree for `getById`/`destroy`/`operation`, and diverge in exactly the two
+places a non-optional read happens without a path id: a non-optional `find`
+route, and a workflow body that reads.
 
 ### F11 — an `int` field declares no range, and a value inside the declared range overflows the column
 **Waiver:** W11 (server error) + W12 (its status-conformance consequence), both

@@ -31,13 +31,43 @@ describe("errorStatuses — shared error matrix", () => {
     expect(errorStatuses("workflow")).toEqual([400, 415, 422]);
     expect(errorStatuses("findOptional")).toEqual([404]);
     expect(errorStatuses("findList")).toEqual([]);
-    expect(errorStatuses("findSingle")).toEqual([]);
+    // A NON-optional single find declares the not-found rung too (F13).  Its
+    // emitted repository method has nowhere to put an empty result set, so it
+    // throws the shared not-found carrier and the router answers 404 — the same
+    // status the optional arm above RETURNS by design.  Until this arm, exactly
+    // one of the two published it.
+    expect(errorStatuses("findSingle")).toEqual([404]);
     expect(errorStatuses("list")).toEqual([]);
   });
 
   it("inserts 403 for a guarded operation / workflow", () => {
     expect(errorStatuses("operation", true)).toEqual([400, 403, 404, 415, 422]);
     expect(errorStatuses("workflow", true)).toEqual([400, 403, 415, 422]);
+  });
+
+  it("the workflow not-found rung is a BODY fact, not a route-shape one (F10)", () => {
+    // Every other 404 in this table follows from the path carrying an `{id}`.
+    // A workflow command route has none: whether it can answer 404 depends on
+    // whether its BODY reads an aggregate, which is why the arm takes the fact
+    // rather than assuming it either way.  Declaring it unconditionally would
+    // be as wrong as omitting it — an unreachable declared status and an
+    // undeclared reachable one are both contract lies.
+    expect(errorStatuses("workflow", false, undefined, { readsAggregate: false })).toEqual([
+      400, 415, 422,
+    ]);
+    expect(errorStatuses("workflow", false, undefined, { readsAggregate: true })).toEqual([
+      400, 404, 415, 422,
+    ]);
+    expect(errorStatuses("workflow", true, undefined, { readsAggregate: true })).toEqual([
+      400, 403, 404, 415, 422,
+    ]);
+    // …and it rides the `httpStatus NotFound -> N` resolver like every other
+    // rung, rather than being pinned to the literal.
+    expect(
+      errorStatuses("workflow", false, (n) => (n === "NotFound" ? 410 : 422), {
+        readsAggregate: true,
+      }),
+    ).toEqual([400, 410, 415, 422]);
   });
 
   it("inserts 403 for a guarded READ — `requires` is legal on a find", () => {
@@ -50,7 +80,7 @@ describe("errorStatuses — shared error matrix", () => {
     // 403 — a test pinning a premise that was never true.
     expect(errorStatuses("findOptional", true)).toEqual([403, 404]);
     expect(errorStatuses("findList", true)).toEqual([403]);
-    expect(errorStatuses("findSingle", true)).toEqual([403]);
+    expect(errorStatuses("findSingle", true)).toEqual([403, 404]);
   });
 
   it("the canonical create / destroy carry the gated 403", () => {

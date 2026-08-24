@@ -28,28 +28,30 @@
         "id": "<volatile:key>",
         "quantity": 3,
         "reference": "R1",
-        "total": 120,
-        "total_provenance": {
-          "computedValue": 120,
-          "inputs": [
-            {
-              "path": "qty",
-              "value": 3
-            },
-            {
-              "path": "price",
-              "value": 40
-            },
-            {
-              "path": "discount",
-              "value": 0
+        "total": {
+          "lineage": {
+            "computedValue": 120,
+            "inputs": [
+              {
+                "path": "qty",
+                "value": 3
+              },
+              {
+                "path": "price",
+                "value": 40
+              },
+              {
+                "path": "discount",
+                "value": 0
+              }
+            ],
+            "snapshotId": "<volatile:key>",
+            "target": {
+              "field": "total",
+              "type": "Order"
             }
-          ],
-          "snapshotId": "<volatile:key>",
-          "target": {
-            "field": "total",
-            "type": "Order"
-          }
+          },
+          "value": 120
         },
         "unitPrice": 40,
         "version": 2
@@ -72,20 +74,22 @@
         "id": "<volatile:key>",
         "quantity": 4,
         "reference": "R2",
-        "total": 120,
-        "total_provenance": {
-          "computedValue": 120,
-          "inputs": [
-            {
-              "path": "total",
-              "value": 120
+        "total": {
+          "lineage": {
+            "computedValue": 120,
+            "inputs": [
+              {
+                "path": "total",
+                "value": 120
+              }
+            ],
+            "snapshotId": "<volatile:key>",
+            "target": {
+              "field": "total",
+              "type": "Order"
             }
-          ],
-          "snapshotId": "<volatile:key>",
-          "target": {
-            "field": "total",
-            "type": "Order"
-          }
+          },
+          "value": 120
         },
         "unitPrice": 30,
         "version": 3
@@ -108,28 +112,30 @@
         "id": "<volatile:key>",
         "quantity": 4,
         "reference": "R2",
-        "total": 100,
-        "total_provenance": {
-          "computedValue": 100,
-          "inputs": [
-            {
-              "path": "quantity",
-              "value": 4
-            },
-            {
-              "path": "unitPrice",
-              "value": 30
-            },
-            {
-              "path": "amount",
-              "value": 20
+        "total": {
+          "lineage": {
+            "computedValue": 100,
+            "inputs": [
+              {
+                "path": "quantity",
+                "value": 4
+              },
+              {
+                "path": "unitPrice",
+                "value": 30
+              },
+              {
+                "path": "amount",
+                "value": 20
+              }
+            ],
+            "snapshotId": "<volatile:key>",
+            "target": {
+              "field": "total",
+              "type": "Order"
             }
-          ],
-          "snapshotId": "<volatile:key>",
-          "target": {
-            "field": "total",
-            "type": "Order"
-          }
+          },
+          "value": 100
         },
         "unitPrice": 30,
         "version": 4
@@ -145,28 +151,30 @@
         "id": "<volatile:key>",
         "quantity": 4,
         "reference": "R2",
-        "total": 100,
-        "total_provenance": {
-          "computedValue": 100,
-          "inputs": [
-            {
-              "path": "quantity",
-              "value": 4
-            },
-            {
-              "path": "unitPrice",
-              "value": 30
-            },
-            {
-              "path": "amount",
-              "value": 20
+        "total": {
+          "lineage": {
+            "computedValue": 100,
+            "inputs": [
+              {
+                "path": "quantity",
+                "value": 4
+              },
+              {
+                "path": "unitPrice",
+                "value": 30
+              },
+              {
+                "path": "amount",
+                "value": 20
+              }
+            ],
+            "snapshotId": "<volatile:key>",
+            "target": {
+              "field": "total",
+              "type": "Order"
             }
-          ],
-          "snapshotId": "<volatile:key>",
-          "target": {
-            "field": "total",
-            "type": "Order"
-          }
+          },
+          "value": 100
         },
         "unitPrice": 30,
         "version": 4
@@ -184,28 +192,30 @@
             "id": "<volatile:key>",
             "quantity": 4,
             "reference": "R2",
-            "total": 100,
-            "total_provenance": {
-              "computedValue": 100,
-              "inputs": [
-                {
-                  "path": "quantity",
-                  "value": 4
-                },
-                {
-                  "path": "unitPrice",
-                  "value": 30
-                },
-                {
-                  "path": "amount",
-                  "value": 20
+            "total": {
+              "lineage": {
+                "computedValue": 100,
+                "inputs": [
+                  {
+                    "path": "quantity",
+                    "value": 4
+                  },
+                  {
+                    "path": "unitPrice",
+                    "value": 30
+                  },
+                  {
+                    "path": "amount",
+                    "value": 20
+                  }
+                ],
+                "snapshotId": "<volatile:key>",
+                "target": {
+                  "field": "total",
+                  "type": "Order"
                 }
-              ],
-              "snapshotId": "<volatile:key>",
-              "target": {
-                "field": "total",
-                "type": "Order"
-              }
+              },
+              "value": 100
             },
             "unitPrice": 30,
             "version": 4

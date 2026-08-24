@@ -22,6 +22,16 @@ name: Frontend full-stack e2e (nightly, no docker)
 # browser, feliz→dist). Vue + Svelte + Angular + Feliz are all verified locally
 # (full round-trip green, all blocking). Feliz needs dotnet/Fable in the runner
 # (the gated setup-dotnet step below).
+#
+# FLUTTER is the odd cell out and runs a DIFFERENT script, `run-ui-flutter.mjs`
+# (matrix `runner:`), for two reasons the header above cannot paper over: it is
+# built by the Flutter SDK rather than npm, and Flutter web renders to a CANVAS,
+# so there is no DOM for the emitted testid-driven `*.ui.spec.ts` page objects to
+# select — the flutter emitter ships none. That leg asserts the same round-trip
+# over Flutter's ACCESSIBILITY TREE instead (seed over /api → deep-link the route
+# → the app's own read must reach the real backend, decode, and render the seeded
+# value). It is the only runtime tier flutter has: `generated-flutter-build.yml`
+# is compile-only. Its cell is flagged `uiFlutter: true` in corpus.json.
 
 on:
   schedule:
@@ -52,9 +62,11 @@ jobs:
         include:
           - frontend: vue
             case: sales-system-vue
+            runner: run-ui.mjs
             experimental: false
           - frontend: svelte
             case: sales-system-svelte
+            runner: run-ui.mjs
             experimental: false
           # Angular: BLOCKING. The Angular-codegen cascade this gate first
           # surfaced is fixed and the full round-trip (create product w/ a
@@ -69,6 +81,7 @@ jobs:
           # matching the Hono route — was camelCase → 404).
           - frontend: angular
             case: sales-system-angular
+            runner: run-ui.mjs
             experimental: false
           # Feliz (F#/Fable/Elmish): BLOCKING.  The frontend emits the full
           # `data-testid` surface, so the SHARED testid-driven page objects + smoke
@@ -83,6 +96,21 @@ jobs:
           # testid on the value cell.
           - frontend: feliz
             case: sales-system-feliz
+            runner: run-ui.mjs
+            experimental: false
+          # Flutter (Dart/Riverpod): BLOCKING.  The ONLY runtime tier flutter has
+          # — its other gate (`generated-flutter-build.yml`) is compile-only, and
+          # that blind spot is precisely how the non-parsing-Dart `FileRef??`
+          # emitter defect survived into a shipped release.  Runs
+          # `run-ui-flutter.mjs`, not run-ui.mjs (canvas rendering → no DOM page
+          # objects; SDK build → no `npm run build`).  Needs the Flutter SDK (the
+          # gated setup step below) and a full chromium (CanvasKit needs WebGL,
+          # which `headless_shell` does not provide).  Verified locally against
+          # Flutter 3.47.1: all three route round-trips green, and red on a
+          # seeded `FileRef??` emitter mutation.
+          - frontend: flutter
+            case: sales-system-flutter
+            runner: run-ui-flutter.mjs
             experimental: false
     # Non-blocking for cells not yet locally verified; flip by dropping the flag.
     continue-on-error: ${{ matrix.experimental || false }}
@@ -104,6 +132,15 @@ jobs:
         with:
           dotnet-version: '8.0'
 
+      # The Flutter cell builds with the SDK (`flutter pub get` + `flutter build
+      # web`), so it needs it on PATH — the same action `generated-flutter-build`
+      # uses.  Gated so the npm-built cells don't pay for the SDK download.
+      - name: Set up Flutter (flutter cell only)
+        if: matrix.frontend == 'flutter'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
       - name: Install Loom toolchain
         run: npm ci
 
@@ -116,4 +153,4 @@ jobs:
 
       - name: Run ${{ matrix.frontend }} full-stack UI round-trip
         working-directory: test/behavioral
-        run: node run-ui.mjs ${{ matrix.case }}
+        run: node ${{ matrix.runner }} ${{ matrix.case }}

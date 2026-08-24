@@ -151,8 +151,9 @@ The .NET backend emits the same runtime shape, in EF Core / CQRS terms:
   `provenance_records` table; the repository's `SaveAsync` drains
   `DrainProv()` into it *before* `SaveChangesAsync`, so the history
   commits in the aggregate's transaction.
-- The current lineage is exposed on the wire as a trailing
-  `<Field>Provenance` field on the aggregate's `<Agg>Response` DTO.
+- The current lineage is exposed on the wire INSIDE the field's own
+  `<Agg>Response` component — `Provenanced<int> Total`, the shared
+  `Domain/Common` generic record (see "The wire shape" below).
 
 The co-located columns ship as one extra EF migration
 (`Migrations/<late>_ProvenanceAudit.cs`) that sorts after every module's
@@ -226,10 +227,68 @@ _ = MyApp.Provenance.record(loom_lineage_1)
 # …then save + MyApp.Provenance.flush(MyApp.Repo) inside Repo.transaction.
 ```
 
+## The wire shape — `Provenanced<T>`, one carrier on every target
+
+A provenanced field's value and its lineage travel together as ONE wire
+object, on all five backends and all six frontends:
+
+```jsonc
+// GET /api/orders/:id
+{
+  "id": "…",
+  "quantity": 3,
+  "unitPrice": 40,
+  "discount": 0,
+  "total": {                     // ← the carrier, not a bare 120
+    "value": 120,
+    "lineage": {                 // null until the field is first written
+      "snapshotId": "13d60464",
+      "target": { "type": "Order", "field": "total" },
+      "inputs": [ { "path": "qty", "value": 3 }, { "path": "price", "value": 40 } ],
+      "computedValue": 120
+    }
+  }
+}
+```
+
+The shape is declared **once**, in `GENERIC_SHAPES.provenanced`
+(`src/ir/stdlib/generics.ts`), and stamped into `wireShape` **once**, by
+`wireTypeForField` (`src/ir/enrich/wire-projection.ts`).  Every DTO emitter
+reads it from there through `src/generator/_payload/provenanced-wire.ts`, so
+the two member names cannot drift between targets:
+
+| Target | Spelling |
+|---|---|
+| Hono / TS | `total: z.object({ value: z.number().int(), lineage: ProvenanceLineage.nullable() })` |
+| .NET | `Provenanced<int> Total` (`public sealed record Provenanced<T>(T Value, ProvLineage? Lineage)`) |
+| Java | `Provenanced<Integer> total` (`public record Provenanced<T>(T value, ProvLineage lineage)`) |
+| Python | `total: Provenanced[int]` (`class Provenanced(BaseModel, Generic[_ProvT])`) |
+| Elixir (vanilla) | `"total" => %{"value" => record.total, "lineage" => record.total_provenance}` |
+| React / Vue / Svelte | `total: z.object({ value: …, lineage: provLineageSchema.nullish() })` |
+| Angular | `total: { value: number; lineage: ProvLineage | null }` |
+| Feliz | `total: Provenanced<int>` (`provenancedDecoder Decode.int`) |
+| Flutter | `final Provenanced<int> total;` |
+
+Because the lineage is part of `wireShape`, it is also part of the contract
+artifact — `.loom/wire-spec.json` publishes the carrier's two properties, so a
+change to the lineage half is now visible to the wire diff.  It equally rides
+`forApiRead`'s access filtering and any `mask unless` redaction, which a
+bolted-on sibling key did not.
+
+**Storage is unchanged.** The row still carries a typed value column plus a
+`<field>_provenance` jsonb column, and the in-memory domain object still keeps
+the two apart — the carrier is a DTO/serialization shape only, assembled on the
+way out and split on the way in.  That is also why a domain expression reading
+`total` (an invariant, a derived, another operation) needs no unwrap: the domain
+value never became a carrier.
+
+**On the request side there is no carrier.** A `create` / `update` / operation
+body carries the bare value — a caller supplies a value, never a lineage.
+
 ## Scaffolded UI — the "?" provenance disclosure (five frontends + the HEEx server render)
 
-The lineage is already on the wire (the co-located `<field>_provenance`
-key above), so a **scaffolded detail page** now surfaces it: every
+The lineage is already on the wire (the carrier's `lineage` member above),
+so a **scaffolded detail page** surfaces it: every
 `provenanced` field's value pairs with a small **"?" disclosure** that
 expands to show where the value came from — the rule it was computed by,
 the computed value, and the input list (`path = value`).
@@ -242,9 +301,11 @@ Phoenix/HEEx server render: **React** (`<details>` + JSX), **Vue**
 **HEEx** (Phoenix LiveView: a null-guarded `<%= if … %>` `<details>` + a
 `<%= for … %>` comprehension). Two things make it work:
 
-1. The React frontend response schema carries the lineage as a nullable
-   `provLineageSchema` field (`src/lib/schemas.ts`), so the client type
-   has a typed lineage to read.
+1. EVERY frontend's response schema carries the lineage, because it is part
+   of the field's own wire type rather than a per-frontend opt-in append —
+   the JSON frontends type it as the nullable `provLineageSchema`
+   (`src/lib/schemas.ts`), Feliz as `ProvLineage option`, Flutter as
+   `ProvLineage?`.
 2. The scaffold pairs the value cell with the closed `ProvenanceInfo`
    primitive — a native `<details>`/`<summary>` (no design-pack component,
    no client state, accessible by default).
@@ -267,21 +328,23 @@ The scaffolded `unfold`-able page body pairs the value with the disclosure:
 
 ```ddd
 KeyValueRow("Total",
-  Group(Text(data.total),
+  Group(Text(data.total.value),
         ProvenanceInfo(of: data, field: "total", testid: "orders-detail-total-prov")))
 ```
 
-which the React generator renders as the native disclosure over
-`data.total_provenance`:
+Note `data.total.value` — the figure is the carrier's value half; the
+disclosure reads the lineage half off the same field.  The React generator
+renders it as the native disclosure over `data.total.lineage`:
 
 ```tsx
-{orderById.data.total_provenance != null ? (
+<Text>{orderById.data.total.value}</Text>
+{orderById.data.total.lineage != null ? (
   <details className="loom-provenance" data-testid="orders-detail-total-prov">
     <summary aria-label="How this value was computed">?</summary>
     <dl className="loom-provenance-tree">
-      <div><dt>Rule</dt><dd><code>{orderById.data.total_provenance.snapshotId}</code></dd></div>
-      <div><dt>Value</dt><dd>{String(orderById.data.total_provenance.computedValue)}</dd></div>
-      {orderById.data.total_provenance.inputs.map((inp) => (
+      <div><dt>Rule</dt><dd><code>{orderById.data.total.lineage.snapshotId}</code></dd></div>
+      <div><dt>Value</dt><dd>{String(orderById.data.total.lineage.computedValue)}</dd></div>
+      {orderById.data.total.lineage.inputs.map((inp) => (
         <div key={inp.path}><dt>{inp.path}</dt><dd>{String(inp.value)}</dd></div>
       ))}
     </dl>
@@ -289,15 +352,15 @@ which the React generator renders as the native disclosure over
 ) : null}
 ```
 
-The disclosure is null-guarded: on a backend that carries the field but
-doesn't capture lineage (Python/Java), `total_provenance` is null and the
-"?" simply doesn't render — the value still shows.
+The disclosure is null-guarded: a field that has never been written has a
+null lineage and the "?" simply doesn't render — the value still shows.
 
 **HEEx is the exception to "read the wire".** Phoenix LiveView renders
-server-side straight from the Ecto struct, so there is no JSON wire to carry
-a camelCase `provLineageSchema` — the co-located `<field>_provenance` jsonb
-column (already persisted by the vanilla provenance runtime) loads as a
-**string-keyed** map, and the renderer reads it directly:
+server-side straight from the Ecto struct, where the pair is still SPLIT — so
+there is no carrier to step into.  Both halves read the columns directly: the
+walker drops the page body's `.value` hop (`@data.total`, see `renderMember`
+in `heex-walker-core.ts`), and the disclosure reads the co-located
+`<field>_provenance` jsonb column, which loads as a **string-keyed** map:
 
 ```heex
 <%= if @data.total_provenance do %>

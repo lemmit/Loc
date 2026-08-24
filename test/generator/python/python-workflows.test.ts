@@ -31,8 +31,14 @@ describe("python workflows", () => {
     const files = await build();
     const wf = files.get("api/app/http/workflows_routes.py")!;
     expect(wf).toContain("class RenameCustomerRequest(BaseModel):");
+    // The 404 is there because THIS body reads: `get_by_id` below raises the
+    // shared not-found carrier on an absent row, so the route answers it (F10 —
+    // docs/audits/schemathesis-findings-2026-08.md).  The header of this very
+    // file recorded the behaviour — "Verified live (rename persisted, 404
+    // propagation)" — while the set asserted here omitted it; a workflow whose
+    // body touches no repository still declares no 404.
     expect(wf).toContain(
-      '@router.post("/rename_customer", status_code=204, operation_id="renameCustomerWorkflow", responses={400: {"model": ProblemDetails, "description": "Bad Request"}, 415: {"model": ProblemDetails, "description": "Unsupported Media Type"}, 422: {"model": ProblemDetails, "description": "Unprocessable Entity"}})',
+      '@router.post("/rename_customer", status_code=204, operation_id="renameCustomerWorkflow", responses={400: {"model": ProblemDetails, "description": "Bad Request"}, 404: {"model": ProblemDetails, "description": "Not Found"}, 415: {"model": ProblemDetails, "description": "Unsupported Media Type"}, 422: {"model": ProblemDetails, "description": "Unprocessable Entity"}})',
     );
     // The route runs in a child execution-context frame under the request root
     // (parent_id chaining), so its audit/provenance rows are distinguishable

@@ -1,0 +1,81 @@
+// The handler-body shapes #2652 measured and left unfixed, in one fixture
+// (#2659).  Each was a SILENT emitter defect — valid `.ddd`, output that either
+// vanished or did not compile:
+//
+//   A. a handler touching NO aggregate — .NET's `emitExplicitHandlers` dropped
+//      it (`if (!primaryAgg(h)) continue`), so `Echo` / `Sum` AND their routes
+//      were absent from the .NET project while the other four emitted them.
+//      They now file under the neutral `Application/Handlers/` folder the
+//      extern handlers already use.  The same shape on PYTHON emitted a
+//      handler module importing `NoopDomainEventDispatcher` with no repository
+//      to construct — ruff F821's twin, F401, which is that leg's compile gate.
+//   B. a declared find named `byId` called with an already-typed `Agg id` —
+//      java renamed it to `getById` AND wrapped the argument, emitting
+//      `getById(new OrderId(orderId))` where `orderId` is an `OrderId`
+//      (`incompatible types` at javac), against a method the declared find is
+//      not.  The declared method is now rendered verbatim, as everywhere else.
+//   C. an OPTIONAL find bound in a handler body — the shared workflow statement
+//      vocabulary has no null-handling arm, so the binding was dereferenced
+//      unguarded (TS18047 / CS8602).  That shape is REFUSED at phase ⑦ now
+//      (`loom.handler-load-nullable-unsupported`), mirroring the workflow twin,
+//      so it cannot appear in a corpus fixture at all: its pin is
+//      `test/ir/handler-nullable-load.test.ts`.
+//
+// Every find here returns an ARRAY on purpose.  A NON-optional SINGLE find
+// (`find byCode(c: string): Order`) is a shape no corpus fixture reaches, and
+// when this fixture landed the five backends did not agree on it: node threw
+// `AggregateNotFoundError`, .NET's `FirstAsync` threw an
+// `InvalidOperationException` no filter arm matched (→ 500), and java / python /
+// elixir returned null / None / nil (→ `200 null`, which the 200 schema forbids).
+// F13 settled all five on the shared not-found rung, and `errorStatuses` now
+// DECLARES the 404 that shape answers — see
+// docs/audits/schemathesis-findings-2026-08.md.  The cross-backend pin is
+// test/conformance/not-found-declaration-parity.test.ts, kept out of the corpus
+// because reaching it from here would mean re-baselining every backend golden.
+system HandlerTriad {
+  subdomain D {
+    context Sales {
+      aggregate Order {
+        code: string
+        status: string
+        // A self-reference, so a find can take an `Order id` and still filter
+        // on a real column (the primary key is not a filterable field).
+        replaces: Order id
+        operation cancel() { status := "cancelled" }
+      }
+      repository Orders for Order {
+        // B: named `byId` on purpose — the name java used to special-case,
+        // renaming the call to `getById` and re-wrapping its argument.
+        find byId(oid: Order id): Order[] where replaces == oid
+      }
+
+      // A, command leg: no repository, no aggregate — pure computation.
+      commandHandler Echo(text: string): string {
+        return text
+      }
+      // A, query leg: same, with two scalar params.
+      queryHandler Sum(a: int, b: int): int {
+        return a + b
+      }
+      // B: an `Agg id` path param flowing into the declared `byId` find.
+      queryHandler CountReplacing(orderId: Order id): int {
+        let matches = Orders.byId(orderId)
+        return matches.count
+      }
+    }
+  }
+  api A from D {
+    route POST "/echo/{text}" -> Sales.Echo
+    route GET  "/sum/{a}/{b}" -> Sales.Sum
+    route GET  "/orders/{orderId}/replacements" -> Sales.CountReplacing
+  }
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: A
+    port: 4000
+  }
+}

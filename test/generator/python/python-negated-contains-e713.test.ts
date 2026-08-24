@@ -20,8 +20,7 @@
 // `not (… in …)` elsewhere in the file would not disturb the first.
 
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `system S {
   user { id: string  role: string  permissions: string[] }
@@ -60,11 +59,7 @@ const SRC = `system S {
 
 let cache: Map<string, string> | undefined;
 async function files(): Promise<Map<string, string>> {
-  if (!cache) {
-    const { model, errors } = await parseString(SRC);
-    if (errors.length) throw new Error(errors.join("\n"));
-    cache = generateSystems(model).files;
-  }
+  if (!cache) cache = await generateSystemFiles(SRC);
   return cache;
 }
 

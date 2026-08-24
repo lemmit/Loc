@@ -141,11 +141,21 @@ describe("java provenance runtime", () => {
     expect(repo.indexOf("jpa.save(aggregate)")).toBeLessThan(repo.indexOf("drainProv"));
   });
 
-  it("exposes the current lineage on the response DTO", async () => {
+  it("exposes the current lineage INSIDE the field's own carrier component", async () => {
     const resp = await file("/OrderResponse.java");
     expect(resp).toContain("import com.loom.api.domain.common.ProvLineage;");
-    expect(resp).toContain("ProvLineage totalProvenance)");
-    expect(resp).toContain("value.totalProvenance()");
+    expect(resp).toContain("import com.loom.api.domain.common.Provenanced;");
+    // M-T6.12 — one `Provenanced<Integer> total` component, not a bare `int
+    // total` plus a trailing `@JsonProperty("total_provenance") ProvLineage`.
+    expect(resp).toContain("Provenanced<Integer> total");
+    expect(resp).not.toContain("total_provenance");
+    // The mapper folds the domain's two accessors into that one argument.
+    expect(resp).toContain("new Provenanced<>(value.total(), value.totalProvenance())");
+    // The shared generic record ships in domain.common.
+    const carrier = await file("/domain/common/Provenanced.java");
+    expect(carrier).toContain("public record Provenanced<T>(");
+    expect(carrier).toContain("    T value,");
+    expect(carrier).toContain("    ProvLineage lineage) {");
   });
 
   it("adds the co-located column in a late migration and takes the history table from MigrationsIR", async () => {

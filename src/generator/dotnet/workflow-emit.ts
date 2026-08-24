@@ -6,6 +6,7 @@ import {
   type SystemIR,
   type WorkflowIR,
   type WorkflowStmtIR,
+  workflowCanAnswerNotFound,
   workflowIsGuarded,
   workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
@@ -2077,8 +2078,21 @@ function renderController(
       .map((p) => wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx))
       .join(",\n            ");
     // Error responses from the shared matrix: 400 always, + 403 when the
-    // workflow has a `requires` guard (denies with ForbiddenException).
-    const errorAttrs = errorStatuses("workflow", workflowIsGuarded(wf))
+    // workflow has a `requires` guard (denies with ForbiddenException), + the
+    // not-found rung when the BODY reads an aggregate (a repo read throws on an
+    // absent row and the exception filter renders it).
+    //
+    // The resolver is threaded like every other arm's.  This one was the last
+    // call site in the file passing NONE, which is invisible by default (with
+    // no `httpStatus` override `resolve` returns the literal) and wrong the
+    // moment one exists — the exact "an optional field whose absence is
+    // indistinguishable from its default" shape called out in openapi-errors.ts.
+    const errorAttrs = errorStatuses(
+      "workflow",
+      workflowIsGuarded(wf),
+      (name) => resolveErrorStatus(name, ctx.structuralErrorStatuses),
+      { readsAggregate: workflowCanAnswerNotFound(wf, ctx.repositories) },
+    )
       .map((s) => `    [ProducesResponseType(typeof(ProblemDetails), ${s})]\n`)
       .join("");
     blocks.push(

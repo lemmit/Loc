@@ -89,15 +89,26 @@ defmodule {{webModule}}.CoreComponents do
 
     assigns = assign(assigns, :classes, classes)
 
+    # `testid:` is an ALIAS for `data-testid`, folded into @rest rather than
+    # written as its own attribute.  Written as `data-testid={@testid}` next to
+    # a `{@rest}` spread, an unset (nil) testid SHADOWS a caller-supplied
+    # `data-testid` and the attribute never reaches the DOM — measured against
+    # a running LiveView, which is how the HEEx UI behavioural leg found it.
+    # Folding makes the two channels additive instead of competing.
+    assigns =
+      if assigns.testid,
+        do: assign(assigns, :rest, Map.put(assigns.rest, :"data-testid", assigns.testid)),
+        else: assigns
+
     if assigns.to do
       ~H"""
-      <.link navigate={@to} class={@classes} data-testid={@testid} {@rest}>
+      <.link navigate={@to} class={@classes} {@rest}>
         {render_slot(@inner_block)}
       </.link>
       """
     else
       ~H"""
-      <button type={@type} class={@classes} data-testid={@testid} {@rest}>
+      <button type={@type} class={@classes} {@rest}>
         {render_slot(@inner_block)}
       </button>
       """
@@ -354,10 +365,15 @@ defmodule {{webModule}}.CoreComponents do
   @doc "Colored pill — used for status / enum displays."
   attr :class, :string, default: nil
   slot :inner_block, required: true
+  # The walker addresses this component with `data-testid` (and can pass
+  # `aria-*`/`phx-*`); without a `:global` rest those attributes are DROPPED
+  # with only a compile warning, so a Playwright selector aimed at it never
+  # matches.  Spread on the root element below.
+  attr :rest, :global
 
   def badge(assigns) do
     ~H"""
-    <span class={["inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700", @class]}>
+    <span class={["inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700", @class]} {@rest}>
       {render_slot(@inner_block)}
     </span>
     """
@@ -408,10 +424,15 @@ defmodule {{webModule}}.CoreComponents do
   @doc "Empty-state placeholder rendered when a list is empty."
   attr :class, :string, default: nil
   slot :inner_block
+  # The walker addresses this component with `data-testid` (and can pass
+  # `aria-*`/`phx-*`); without a `:global` rest those attributes are DROPPED
+  # with only a compile warning, so a Playwright selector aimed at it never
+  # matches.  Spread on the root element below.
+  attr :rest, :global
 
   def empty(assigns) do
     ~H"""
-    <div class={["text-center text-sm text-zinc-500 py-8", @class]}>
+    <div class={["text-center text-sm text-zinc-500 py-8", @class]} {@rest}>
       <%= if @inner_block == [] do %>{{{chrome "emptyList"}}}<% else %>{render_slot(@inner_block)}<% end %>
     </div>
     """
