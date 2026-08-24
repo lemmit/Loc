@@ -302,16 +302,6 @@ export function generateFlutterForContexts(
   if (rendered.some((r) => r.source.includes("LoomChart("))) {
     out.set("lib/chart.dart", renderFlutterChartRuntime());
   }
-  // The money runtime (M-T1.21).  Same use-driven rule, but the scan is over
-  // EVERY emitted file rather than the pages alone: `LoomMoney.` also lands in
-  // `components.dart` (a component body doing money arithmetic) and in
-  // `stores.dart` (a store action doing the same), and a per-file import with
-  // no file behind it is a compile error, not a warning.  Placed after every
-  // producer above has written its entry.
-  if ([...out.values()].some((content) => usesMoney(content))) {
-    out.set("lib/money.dart", renderFlutterMoneyRuntime());
-  }
-
   // `persist:` wiring for the app root: a web-storage tier must be loaded before
   // the first Notifier `build()` (so a seed can read synchronously), and a `url`
   // tier needs the back/forward observer around `MaterialApp`.
@@ -373,6 +363,18 @@ export function generateFlutterForContexts(
   // enabled and asserts Flutter's built-in WCAG guidelines on the first frame.
   // Runs under the same `flutter test` step (whole `test/` dir) as the smoke.
   out.set("test/a11y_test.dart", renderA11yTest(pkg));
+
+  // The money runtime (M-T1.21).  Same use-driven rule as the modal bridge and
+  // the chart painter above, but the scan is over EVERY emitted file and it
+  // runs LAST — `LoomMoney.` lands in the PAGES (written below those two), in
+  // `components.dart` (a component body doing money arithmetic) and in
+  // `stores.dart` (a store action doing the same).  Scanning before the pages
+  // were written emitted the per-page `import '../money.dart';` with no file
+  // behind it: `uri_does_not_exist` + `Undefined name 'LoomMoney'`, caught by
+  // `flutter analyze` on the generated showcase.
+  if ([...out.values()].some((content) => usesMoney(content))) {
+    out.set("lib/money.dart", renderFlutterMoneyRuntime());
+  }
 
   return out;
 }
