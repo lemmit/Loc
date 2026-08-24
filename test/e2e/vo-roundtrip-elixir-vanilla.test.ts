@@ -5,6 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { mixDepsGet } from "./support/mix-retry.js";
 
 // ---------------------------------------------------------------------------
 // Value-object wire round-trip on the vanilla Phoenix backend — the runtime
@@ -197,7 +198,7 @@ describe.skipIf(!ENABLED)(
         expect(fs.existsSync(path.join(projDir, "mix.exs"))).toBe(true);
 
         // 3. Fetch deps + compile.
-        execSync("mix local.hex --force && mix local.rebar --force && mix deps.get", {
+        execSync(`mix local.hex --force && mix local.rebar --force && ${mixDepsGet()}`, {
           cwd: projDir,
           stdio: "pipe",
           timeout: 300_000,

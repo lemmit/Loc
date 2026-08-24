@@ -536,6 +536,19 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // mutation-proven).  The runtime drain belongs with the `resources` fixture's
   // own sidecar leg, not here.
   "handler-resource-ops",
+  // COMPILE-TIER WITNESS, and UNSEEDABLE besides.  Two of its three defects were
+  // "the emitted project does not exist / does not compile" on .NET and java
+  // (a dropped aggregate-less handler + route; a declared `byId` find renamed
+  // and its already-typed argument re-wrapped) — and the behavioural tier boots
+  // NODE, the one backend neither defect touched, so a caller would witness the
+  // one leg that was always green.  The two find-backed routes are unseedable on
+  // top of that: `Order` carries no `crudish` and no author-declared create, so
+  // nothing can mint a row for `LoadOrder` / `CodeStatus` to read (the same
+  // shape as `extern`'s pin).  The oracles that DO reach the bugs are the five
+  // compile legs plus `test/generator/handler-triad.test.ts` (per backend,
+  // mutation-proven).  Drain: give `Order` a create, then drive `Echo` / `Sum`
+  // — the two pure-computation routes need no data at all.
+  "handler-triad",
   // The lifecycle `requires` gate.  ENFORCEMENT is pinned structurally per
   // backend in `test/generator/lifecycle-guard-render.test.ts` (mutation-proven
   // against ten seeded emitter defects), but no RUNTIME caller exercises it, and

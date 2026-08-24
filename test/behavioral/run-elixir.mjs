@@ -134,6 +134,33 @@ function appNameOf(mixExs) {
   return /\bapp:\s*:([a-z0-9_]+)/.exec(mixExs)?.[1] ?? null;
 }
 
+// ── Bounded retry on the hex FETCH ───────────────────────────────────────────
+// hex.pm answers a tarball fetch with a transient 500 often enough to kill an
+// otherwise-green CI cell ("Package fetch failed and no cached copy available").
+// The vitest e2e harnesses splice a shell snippet from test/e2e/support/mix-
+// retry.ts into their command lines; this file is a standalone .mjs that invokes
+// `mix` argv-style (no shell), so it carries the same policy as this wrapper —
+// the ONE place this harness fetches deps.
+//
+// ONLY `deps.get` retries.  `deps.compile` / `ecto.*` / `test` / `phx.server`
+// must keep failing fast: their failures are the signal this tier exists for.
+const DEPS_GET_BACKOFF_S = [5, 20];
+
+/** `mix deps.get` with a bounded retry (3 attempts, 5s then 20s backoff). */
+function mixDepsGet(cwd, env) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return execFileSync("mix", ["deps.get"], { cwd, stdio: "pipe", env });
+    } catch (err) {
+      const wait = DEPS_GET_BACKOFF_S[attempt - 1];
+      if (wait === undefined) throw err;
+      process.stdout.write(`  [retry] mix deps.get failed, attempt ${attempt + 1} of ${DEPS_GET_BACKOFF_S.length + 1} after ${wait}s\n`);
+      // Synchronous sleep — this harness is a straight-line script.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait * 1000);
+    }
+  }
+}
+
 /** Fetch + compile the dep tree ONCE into `warm`, from this case's project.
  *  `mix deps.compile` builds dependencies only — the app is not compiled here
  *  (and is pruned defensively below), so the warm tree can never carry emitted
@@ -142,7 +169,7 @@ function primeWarm(deplDir, warm, appName) {
   rmSync(warm, { recursive: true, force: true });
   mkdirSync(warm, { recursive: true });
   const shared = { MIX_DEPS_PATH: join(warm, "deps"), MIX_BUILD_ROOT: join(warm, "_build") };
-  execFileSync("mix", ["deps.get"], { cwd: deplDir, stdio: "pipe", env: mixEnv(shared) });
+  mixDepsGet(deplDir, mixEnv(shared));
   for (const env of MIX_ENVS) {
     execFileSync("mix", ["deps.compile"], { cwd: deplDir, stdio: "pipe", env: mixEnv({ ...shared, MIX_ENV: env }) });
   }
@@ -385,14 +412,14 @@ async function runCase(c) {
       /** Every mix invocation for this case, with the shared deps path folded in. */
       const menv = (extra = {}) => mixEnv({ ...(warmDeps ? { MIX_DEPS_PATH: warmDeps } : {}), ...extra });
       try {
-        execFileSync("mix", ["deps.get"], { cwd: deplDir, stdio: "pipe", env: menv() });
+        mixDepsGet(deplDir, menv());
       } catch (err) {
         // A warm tree that no longer RESOLVES (truncated cache restore, a dep
         // dir deleted underneath us) must not fail the case: discard it — marker
         // and all, so the next case re-primes — and fetch cold.
         if (!warmDeps) throw err;
         dropWarm(err, false);
-        execFileSync("mix", ["deps.get"], { cwd: deplDir, stdio: "pipe", env: menv() });
+        mixDepsGet(deplDir, menv());
       }
       const depsMs = Date.now() - tDeps;
 

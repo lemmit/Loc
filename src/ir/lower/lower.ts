@@ -669,16 +669,29 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
     // Test-kind dispatch.
     //   - `react` / `static` are frontend-only → only `ui` (Playwright).
     //   - `dotnet` / `hono` are backend-only → only `api` (vitest+fetch).
-    //   - `phoenixLiveView` is fullstack — emit BOTH a UI spec (driven
-    //     by Playwright page objects) AND an API spec (driven by
-    //     fetch against the deployable's HTTP surface).
+    //   - `phoenixLiveView` is fullstack — it can carry EITHER kind, so the
+    //     block's own CALL ROOT decides: a body written against `ui.<agg>.…`
+    //     lowers to the Playwright spec, one written against `api.<agg>.…` to
+    //     the fetch spec.
+    //
+    // A fullstack deployable used to emit BOTH kinds from every block, which
+    // could never be right: the two renderers read DIFFERENT roots
+    // (`matchUiCall` wants `ui`, `matchApiCall` wants `api`) and every call in
+    // a body has exactly one of them, so the other half was always garbage —
+    // `.ui.spec.ts` files calling an undefined `api`, and `.e2e.test.ts` files
+    // calling an undefined `ui`.  Nothing executed either, so it went unseen
+    // until the HEEx UI behavioural leg ran one.  It is not only cosmetic: a
+    // locator matcher (`toHaveText`, legal in a ui body) makes the api
+    // renderer throw outright, so a perfectly valid ui block could fail
+    // `generate system`.
     const isFrontendOnly = !!targetPlatform && descriptorFor(targetPlatform).isFrontend;
     const isFullstack = targetPlatform === "elixir";
     if (isFrontendOnly) {
       e2eTests.push(lowerE2E(b, e2eEnv, "ui"));
     } else if (isFullstack) {
-      e2eTests.push(lowerE2E(b, e2eEnv, "ui"));
-      e2eTests.push(lowerE2E(b, e2eEnv, "api"));
+      for (const kind of fullstackE2EKinds(lowerE2E(b, e2eEnv, "api"))) {
+        e2eTests.push(lowerE2E(b, e2eEnv, kind));
+      }
     } else {
       e2eTests.push(lowerE2E(b, e2eEnv, "api"));
     }
@@ -1061,6 +1074,71 @@ function lowerTheme(block: ThemeBlock): ThemeIR {
     }
   }
   return out;
+}
+
+/** Which spec kind(s) a `test e2e` block against a FULLSTACK deployable
+ *  (`platform: elixir`) lowers to, decided by the call root its body uses.
+ *
+ *  `ui.<agg>.create(…)` is the Playwright/page-object surface, `api.<agg>
+ *  .create(…)` the fetch surface; the two renderers each recognise only their
+ *  own root, so a body belongs to exactly one of them. A body that names
+ *  neither (or, pathologically, both) is left to emit both kinds — the
+ *  pre-existing behaviour, and the only answer that cannot silently drop a
+ *  test the author wrote. */
+function fullstackE2EKinds(lowered: TestE2EIR): ("api" | "ui")[] {
+  const roots = new Set<string>();
+  const visitExpr = (e: ExprIR | undefined): void => {
+    if (!e) return;
+    if (e.kind === "ref" && (e.name === "ui" || e.name === "api")) roots.add(e.name);
+    for (const child of exprChildren(e)) visitExpr(child);
+  };
+  for (const s of lowered.statements) {
+    if (s.kind === "expect" || s.kind === "expect-throws" || s.kind === "let") visitExpr(s.expr);
+    else if (s.kind === "expression") visitExpr(s.expr);
+    else if (s.kind === "call") for (const a of s.args) visitExpr(a);
+  }
+  if (roots.has("ui") && !roots.has("api")) return ["ui"];
+  if (roots.has("api") && !roots.has("ui")) return ["api"];
+  return ["ui", "api"];
+}
+
+/** Every sub-expression of `e`, for the root scan above. Deliberately a plain
+ *  structural walk rather than a shared visitor: it needs no types, no
+ *  ordering and no completeness beyond "reaches every `ref`". */
+function exprChildren(e: ExprIR): (ExprIR | undefined)[] {
+  switch (e.kind) {
+    case "method-call":
+      return [e.receiver, ...e.args];
+    case "member":
+      return [e.receiver];
+    case "binary":
+      return [e.left, e.right];
+    case "ternary":
+      return [e.cond, e.then, e.otherwise];
+    case "unary":
+      return [e.operand];
+    case "paren":
+      return [e.inner];
+    case "call":
+      return e.args;
+    case "new":
+    case "object":
+      return e.fields.map((f) => f.value);
+    case "list":
+      return e.elements;
+    case "lambda":
+      return [e.body];
+    case "convert":
+      return [e.value];
+    case "duration":
+      return [e.amount];
+    case "i18nFormat":
+      return [e.inner];
+    case "match":
+      return [...e.arms.flatMap((a) => [a.cond, a.value]), e.otherwise];
+    default:
+      return [];
+  }
 }
 
 function lowerE2E(block: TestE2E, env: Env, kind: "api" | "ui"): TestE2EIR {

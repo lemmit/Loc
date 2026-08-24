@@ -93,7 +93,13 @@ import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 
-const MIME = { ".html":"text/html", ".js":"text/javascript", ".mjs":"text/javascript", ".css":"text/css", ".json":"application/json", ".svg":"image/svg+xml", ".png":"image/png", ".jpg":"image/jpeg", ".jpeg":"image/jpeg", ".gif":"image/gif", ".ico":"image/x-icon", ".woff2":"font/woff2", ".woff":"font/woff", ".ttf":"font/ttf", ".map":"application/json", ".txt":"text/plain", ".webmanifest":"application/manifest+json" };
+// \`.wasm\` MUST be \`application/wasm\`: \`WebAssembly.instantiateStreaming\`
+// REJECTS any other content-type, and CanvasKit (the Flutter web renderer)
+// streams its \`.wasm\` that way — served as octet-stream the Flutter bundle
+// silently never boots (no error, no <flutter-view>, an empty body).  \`.otf\`
+// is here for the same reason in a milder form (Flutter's tree-shaken
+// MaterialIcons face).
+const MIME = { ".html":"text/html", ".js":"text/javascript", ".mjs":"text/javascript", ".css":"text/css", ".json":"application/json", ".svg":"image/svg+xml", ".png":"image/png", ".jpg":"image/jpeg", ".jpeg":"image/jpeg", ".gif":"image/gif", ".ico":"image/x-icon", ".woff2":"font/woff2", ".woff":"font/woff", ".ttf":"font/ttf", ".otf":"font/otf", ".wasm":"application/wasm", ".map":"application/json", ".txt":"text/plain", ".webmanifest":"application/manifest+json" };
 
 export async function startServer({ distDir }) {
   const pglite = new PGlite();

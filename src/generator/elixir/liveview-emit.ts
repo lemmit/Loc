@@ -34,7 +34,12 @@ import {
   exprUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
 import { lifecycleGates, lifecycleGatesUseCurrentUser } from "../../ir/util/op-gates.js";
-import { type PageNameCtx, pageConstructId, pageEmitName } from "../../ir/util/page-kind.js";
+import {
+  classifyPage,
+  type PageNameCtx,
+  pageConstructId,
+  pageEmitName,
+} from "../../ir/util/page-kind.js";
 import { isFrontendReadableProjection } from "../../ir/util/projection-read.js";
 import { listReadGate } from "../../ir/util/read-gates.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
@@ -58,7 +63,7 @@ import {
   walkBodyToHeex,
 } from "./heex-walker.js";
 import { heexI18nEnabled } from "./i18n.js";
-import { buildPlaywrightPageObject } from "./page-objects-emit.js";
+import { buildPlaywrightPageObject, pageObjectPathFor } from "./page-objects-emit.js";
 import { exprUsesBind, REALTIME_TOPIC, renderMessageExprElixir } from "./realtime-liveview.js";
 import { renderExpr as renderDomainExpr } from "./render-expr.js";
 import { renderStoreModule } from "./store-emit.js";
@@ -342,6 +347,20 @@ export function emitLiveViewPages(args: {
     aggregateNames: [...aggregatesByName.keys()],
     workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
   };
+  // Which page each page-object module is BUILT from.  The three scaffold
+  // archetypes of one aggregate collapse onto a single module, and the LIST
+  // page's builder is the only one that emits all three classes
+  // (List + New + Detail), so it wins whenever it exists; otherwise the first
+  // routed page claiming that path does.
+  const preferredPageObjectPages = new Map<string, PageIR>();
+  for (const page of ui.pages) {
+    if (!page.route) continue;
+    const path = pageObjectPathFor(page, nameCtx);
+    const held = preferredPageObjectPages.get(path);
+    if (!held || classifyPage(page, nameCtx).kind === "aggregate-list") {
+      preferredPageObjectPages.set(path, page);
+    }
+  }
   for (const page of ui.pages) {
     if (!page.route) continue; // can't emit a router entry without one
     // Phoenix derives the module + file stem from the page's emit name
@@ -374,19 +393,31 @@ export function emitLiveViewPages(args: {
     sourcemap?.file(filePath, source, page.origin, pageConstructId(ui.name, page));
     routes.push({ route: page.route, liveModule });
 
-    // Playwright page object emission.  Mirrors the React
-    // generator's per-page `e2e/pages/<page>.ts` so `test e2e ui`
-    // blocks (src/system/ui-e2e-render.ts) drive the Phoenix
-    // deployable identically to a React one.
-    const pageObjectSource = buildPlaywrightPageObject({
-      page,
-      appName,
-      aggregatesByName,
-      contextByAggName,
-    });
-    const pageObjectPath = `e2e/pages/${snake(emitName)}.ts`;
-    out.set(pageObjectPath, pageObjectSource);
-    sourcemap?.file(pageObjectPath, pageObjectSource, page.origin, pageConstructId(ui.name, page));
+    // Playwright page object emission.  Mirrors the React generator's
+    // `e2e/pages/<aggregate-camel>.ts` (one module per aggregate, carrying the
+    // List/New/Detail classes) so `test e2e` blocks (src/system/
+    // ui-e2e-render.ts) drive the Phoenix deployable identically to a React
+    // one — that renderer imports the aggregate-keyed path, so a per-PAGE
+    // module left every emitted Phoenix `.ui.spec.ts` importing a file that
+    // was never written.  `pageObjectPathFor` owns the mapping; the LIST
+    // archetype is preferred as the module's source because its builder emits
+    // all three classes in one go (`preferredPageObjectSource`).
+    if (preferredPageObjectPages.get(pageObjectPathFor(page, nameCtx)) === page) {
+      const pageObjectSource = buildPlaywrightPageObject({
+        page,
+        appName,
+        aggregatesByName,
+        contextByAggName,
+      });
+      const pageObjectPath = pageObjectPathFor(page, nameCtx);
+      out.set(pageObjectPath, pageObjectSource);
+      sourcemap?.file(
+        pageObjectPath,
+        pageObjectSource,
+        page.origin,
+        pageConstructId(ui.name, page),
+      );
+    }
   }
 
   // Playwright harness + route-driven smoke spec — the same e2e surface
@@ -1496,7 +1527,23 @@ function renderCreateEventClauses(
   if (!ctxModule) return "";
   const aggSnake = snake(fb.name);
   const human = humanizeOp(`create_${aggSnake}`);
-  const nav = listRoute ? `\n         |> push_navigate(to: ~p"${listRoute}")` : "";
+  // Success lands on the CREATED RECORD's detail page, not back on the list.
+  // Two reasons, and the second is the load-bearing one:
+  //   * parity — the React/Vue/Svelte/Angular scaffolds all navigate to the new
+  //     record after a create, and the emitted Playwright page objects encode
+  //     that shared contract (`NewPage.submit()` waits for `<slug>-detail` and
+  //     reads the id off the URL).  Landing on the list made every emitted
+  //     Phoenix `.ui.spec.ts` unrunnable — which nothing noticed until the HEEx
+  //     UI behavioural leg executed one.
+  //   * the id is otherwise unobtainable: the list gives a driver no handle on
+  //     WHICH row was just created.
+  // Falls back to the list route when the record has no detail route to go to.
+  const detailRoute = listRoute ? `${listRoute}/#{record.id}` : null;
+  const navTarget = detailRoute ?? listRoute;
+  const nav = navTarget ? `\n         |> push_navigate(to: ~p"${navTarget}")` : "";
+  // `record` is referenced by the detail route, so it must be bound rather than
+  // discarded — an unused binding would trip `--warnings-as-errors`.
+  const okBinding = detailRoute ? "record" : "_record";
   // The GUARDED create: the gate lives in the context (`create_<agg>/2`) so this
   // form cannot walk around it — but the context can only evaluate a principal
   // term if this handler passes one, and a LiveView's principal is its own
@@ -1511,7 +1558,7 @@ function renderCreateEventClauses(
   return `\n  @impl true
   def handle_event("save_${aggSnake}", %{"${aggSnake}" => params}, socket) do
 ${usesUser ? "    current_user = Map.get(socket.assigns, :current_user)\n" : ""}    case ${ctxModule}.create_${aggSnake}(params${gated ? (usesUser ? ", current_user" : ", nil") : ""}) do
-      {:ok, _record} ->
+      {:ok, ${okBinding}} ->
         {:noreply,
          socket
          |> put_flash(:info, "${human} succeeded")${nav}}
