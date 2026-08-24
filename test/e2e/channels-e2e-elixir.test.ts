@@ -16,6 +16,7 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { mixDepsGet } from "./support/mix-retry.js";
 
 const ENABLED = process.env.LOOM_CHANNELS_E2E_ELIXIR === "1";
 
@@ -142,7 +143,7 @@ describe.skipIf(!ENABLED)("cross-backend broker delivery (channels-e2e, elixir c
       MIX_ENV: "dev",
       PORT: String(SHIP_PORT),
     };
-    sh("mix deps.get", shipDir, shipEnv);
+    sh(mixDepsGet(), shipDir, shipEnv);
     sh("mix ecto.migrate", shipDir, shipEnv);
 
     const boot = (

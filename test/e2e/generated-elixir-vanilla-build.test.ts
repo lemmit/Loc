@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type HexMirror, startHexMirror } from "./support/hex-mirror";
+import { mixDepsGet } from "./support/mix-retry";
 
 // ---------------------------------------------------------------------------
 // Slice 6 of docs/old/plans/vanilla-foundation-tdd-plan.md — CI gate for
@@ -34,13 +35,15 @@ const IMAGE = "hexpm/elixir:1.18.4-erlang-27.3.4-debian-bookworm-20260610-slim";
 // When `mirror` is set (LOOM_HEX_MIRROR=1) hex.pm traffic is routed through the
 // loopback mirror — mirrors the Ash gate, so this gate also runs behind a
 // TLS-fingerprinting egress proxy.  See test/e2e/support/hex-mirror.ts.
+// The FETCH is retried (transient hex.pm 500s used to kill whole cells — see
+// support/mix-retry.ts); the COMPILE is not, and must keep failing fast.
 function runMixCompile(projDir: string, mirror: HexMirror | undefined): void {
   const dockerArgs = mirror ? `${mirror.dockerArgs.join(" ")} ` : "";
   const shellPrefix = mirror?.shellPrefix ?? "";
   execSync(
     `docker run --rm ${dockerArgs}-v ${projDir}:/app -w /app -e MIX_ENV=prod ${IMAGE} ` +
       `bash -c '${shellPrefix}mix local.hex --force && mix local.rebar --force && ` +
-      `mix deps.get --only prod && mix compile --warnings-as-errors'`,
+      `${mixDepsGet("--only prod")} && mix compile --warnings-as-errors'`,
     { stdio: "inherit", timeout: 600_000 },
   );
 }
@@ -57,7 +60,7 @@ function runMixTest(projDir: string, mirror: HexMirror | undefined): void {
   execSync(
     `docker run --rm ${dockerArgs}-v ${projDir}:/app -w /app ${IMAGE} ` +
       `bash -c '${shellPrefix}mix local.hex --force && mix local.rebar --force && ` +
-      `mix deps.get && mix test'`,
+      `${mixDepsGet()} && mix test'`,
     { stdio: "inherit", timeout: 600_000 },
   );
 }
