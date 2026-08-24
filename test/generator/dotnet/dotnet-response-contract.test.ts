@@ -160,7 +160,11 @@ describe("M-T5.10 PR2 — .NET reads the <Agg>Response contract record", () => {
     expect(scaffoldOrder).toContain("IReadOnlyList<LineResponse> Lines");
     expect(scaffoldOrder).not.toContain("LineResponseResponse");
     expect(scaffoldOrder).toContain("Guid Id");
-    expect(scaffoldOrder).toContain("ProvLineage? AmountProvenance");
+    // A `provenanced` field ships as the `Provenanced<T>` wire carrier (M-T6.12)
+    // — and the DECLARED-record path applies the same wrap the wireShape path
+    // does, which is what `baselineOrder === scaffoldOrder` above pins.
+    expect(scaffoldOrder).toContain("Provenanced<double> Amount");
+    expect(scaffoldOrder).not.toContain("AmountProvenance");
     expect(scaffoldOrder).not.toContain("Note");
     expect(scaffoldOrder).not.toContain("ApiKey");
   });

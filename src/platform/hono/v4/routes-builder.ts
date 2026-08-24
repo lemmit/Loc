@@ -2164,8 +2164,16 @@ function emitResponseDtoSchema(
     : undefined;
   if (declaredResponse) {
     lines.push(`  id: z.string(),`);
+    // A declared record names DOMAIN types, so a field the aggregate declares
+    // `provenanced` is wrapped in the wire carrier here — the same wrap
+    // `wireTypeForField` applies on the wireShape path below, so both paths
+    // emit the identical schema (M-T6.12).
+    const provenanced = new Set(ent.fields.filter((f) => f.provenanced).map((f) => f.name));
     for (const f of declaredResponse.fields) {
-      lines.push(`  ${f.name}: ${zodForResponseField(f.type, f.optional, ctx)},`);
+      const t: TypeIR = provenanced.has(f.name)
+        ? { kind: "genericInstance", ctor: "provenanced", arg: f.type }
+        : f.type;
+      lines.push(`  ${f.name}: ${zodForResponseField(t, f.optional, ctx)},`);
     }
   } else {
     const fields = forApiRead(wireFieldsFor(ent));
