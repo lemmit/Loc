@@ -34,7 +34,8 @@ import { generateSystemFiles } from "../_helpers/generate.js";
 //     entry, a welcome direction).
 //
 // Generation-level only; compiling each frontend's output stays the per-frontend
-// build gate's job (`generated-{react,vue,svelte,angular,feliz}-build.yml`).
+// build gate's job (`generated-{react,vue,svelte,angular,feliz,flutter}-build.yml`,
+// and `elixir-vanilla-build.yml` for the HEEx row's `mix compile`).
 // ---------------------------------------------------------------------------
 
 /** Frozen, reasoned gaps — `"<frontend>:<ui>"` → WHY it does not render today.
