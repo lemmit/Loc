@@ -235,9 +235,18 @@ export function javaWorkflowStmtTarget(
     repoLet: (s, indent) => {
       for (const a of s.args) collectJavaExprImports(a, imports);
       const args = s.args.map((a) => renderJavaExpr(a, renderCtx)).join(", ");
-      const method = s.method === "byId" ? "getById" : s.method;
-      const wrap = s.method === "byId" ? `new ${s.aggName}Id(${args})` : args;
-      return [`${indent}var ${s.name} = ${repoField(s.aggName)}.${method}(${wrap});`];
+      // The method name is rendered VERBATIM — `getById` is the built-in load,
+      // anything else is a declared `find` the repository interface emits under
+      // exactly that name, and the args are already domain-typed by the lowerer.
+      //
+      // Java used to special-case a find literally named `byId`, renaming it to
+      // `getById` AND wrapping its first argument in `new <Agg>Id(...)`.  No
+      // other backend did (`_orders.ById(...)`, `orders.by_id(...)`), and both
+      // halves were wrong: the rename calls a method the declared find is not,
+      // and the wrap re-wraps an argument that is ALREADY an `<Agg>Id` whenever
+      // the caller passes an `Agg id` param — `getById(new OrderId(orderId))`
+      // where `orderId` is an `OrderId`, which does not compile.
+      return [`${indent}var ${s.name} = ${repoField(s.aggName)}.${s.method}(${args});`];
     },
     exprLet: (s, indent) => {
       collectJavaExprImports(s.expr, imports);

@@ -82,6 +82,13 @@ function aggregatesTouched(h: CommandHandlerIR | QueryHandlerIR): Set<string> {
  *    - `loom.query-handler-saves` — a `queryHandler` must not mutate/save.
  *    - `loom.command-handler-multi-aggregate` — a `commandHandler` may touch
  *      only ONE aggregate; a cross-aggregate orchestration must be a workflow.
+ *    - `loom.handler-load-nullable-unsupported` — a handler body may not bind an
+ *      OPTIONAL repository read (`let o = Orders.byCode(c)` over a
+ *      `find byCode(...): Order?`).  Same v1 limit the workflow body carries
+ *      (`loom.workflow-load-nullable-unsupported`): the shared statement
+ *      vocabulary these two bodies render through has no null-handling arm, so
+ *      the binding lowers to an UNGUARDED dereference — TS18047 on node,
+ *      CS8602 on .NET, in the generated project rather than here.
  *    - `loom.handler-param-reserved-id` — a handler parameter may not be named
  *      `id`: in Loom's expression scope a bare `id` always means "the current
  *      entity's id", so a body reference to an `id` param silently resolves to
@@ -96,6 +103,26 @@ export function validateApplicationHandlers(ctx: BoundedContextIR, diags: LoomDi
   ];
   for (const [handlers, kind] of handlerKinds) {
     for (const h of handlers) {
+      // An OPTIONAL repository read has nowhere to go in a handler body — the
+      // shared workflow statement vocabulary it renders through has no
+      // null-handling arm, so the bound name is dereferenced unguarded.  The
+      // workflow body refuses the same load for the same reason; refuse it here
+      // rather than emit a generated project that does not compile.
+      forEachStmtDeep(h.statements, (s) => {
+        if (s.kind !== "repo-let" || s.method === "getById") return;
+        if (s.returnType.kind !== "optional") return;
+        diags.push({
+          severity: "error",
+          code: "loom.handler-load-nullable-unsupported",
+          message: diagMessage("loom.handler-load-nullable-unsupported", {
+            kind,
+            name: h.name,
+            repoName: s.repoName,
+            method: s.method,
+          }),
+          source: `${ctx.name}/${h.name}`,
+        });
+      });
       for (const p of h.params) {
         if (p.name === "id") {
           diags.push({

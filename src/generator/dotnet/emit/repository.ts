@@ -6,6 +6,7 @@ import type {
   ParamIR,
   RepositoryIR,
   RetrievalIR,
+  TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
@@ -259,11 +260,7 @@ export function renderRepositoryImpl(
         "    }",
       ];
     }
-    // rows expression depends on the cardinality of the find — the
-    // catalog field is just "rows" (an integer count), so map both
-    // arrays + singles to a number.
-    const isArray = f.returnType.kind === "array";
-    const rowsExpr = isArray ? "result.Count" : "result == null ? 0 : 1";
+    const rowsExpr = findRowsExpr(f.returnType);
     return [
       `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)})`,
       "    {",
@@ -740,8 +737,7 @@ export function renderDocumentRepositoryImpl(
       .replace(".FirstOrDefaultAsync(cancellationToken)", ".FirstOrDefault()")
       .replace(".FirstAsync(cancellationToken)", ".First()");
     const usesUser = findUsesCurrentUser(f);
-    const isArray = f.returnType.kind === "array";
-    const rowsExpr = isArray ? "result.Count" : "result == null ? 0 : 1";
+    const rowsExpr = findRowsExpr(f.returnType);
     return [
       `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)})`,
       "    {",
@@ -976,8 +972,7 @@ export function renderEventSourcedRepositoryImpl(
       .replace(".FirstOrDefaultAsync(cancellationToken)", ".FirstOrDefault()")
       .replace(".FirstAsync(cancellationToken)", ".First()");
     const usesUser = findUsesCurrentUser(f);
-    const isArray = f.returnType.kind === "array";
-    const rowsExpr = isArray ? "result.Count" : "result == null ? 0 : 1";
+    const rowsExpr = findRowsExpr(f.returnType);
     return [
       `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParamsWithCt(f.params, usesUser)})`,
       "    {",
@@ -1137,6 +1132,20 @@ export function renderEventSourcedRepositoryImpl(
       "}",
     ) + "\n"
   );
+}
+
+/** The `rows=` value for a find's `find_executed` log line.  The catalog field
+ *  is an integer count, so an array maps to `.Count` and a single row to 1/0.
+ *
+ *  A NON-optional single find must NOT spell that as `result == null ? 0 : 1`:
+ *  its terminal is `First()`/`FirstAsync` (throws on empty, so the row is never
+ *  null), and the comparison teaches C#'s flow analysis the opposite — the
+ *  following `return result;` becomes **CS8603 Possible null reference return**,
+ *  fatal under `/warnaserror`.  A `T?` find keeps the comparison: there the
+ *  terminal really is `FirstOrDefault` and the return type admits null. */
+function findRowsExpr(returnType: TypeIR): string {
+  if (returnType.kind === "array") return "result.Count";
+  return returnType.kind === "optional" ? "result == null ? 0 : 1" : "1";
 }
 
 function renderParamsWithCt(

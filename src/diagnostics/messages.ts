@@ -2479,6 +2479,13 @@ export const DIAGNOSTIC_MESSAGES = {
     method: unknown;
   }) =>
     `workflow '${p.name}': '${p.repoName}.${p.method}(...)' returns a nullable; v1 supports only single non-nullable aggregates.  Use getById (throws → 404) instead.`,
+  "loom.handler-load-nullable-unsupported": (p: {
+    kind: unknown;
+    name: unknown;
+    repoName: unknown;
+    method: unknown;
+  }) =>
+    `${p.kind} '${p.name}': '${p.repoName}.${p.method}(...)' returns a nullable; a handler body has no null-handling vocabulary, so the binding is dereferenced unguarded (TS18047 on node, CS8602 on .NET).  Use getById (throws → 404), or declare the find non-optional.`,
   "loom.workflow-run-unknown-repository#workflow-a-criterion-query": (p: {
     name: unknown;
     repoName: unknown;
