@@ -93,19 +93,26 @@ export function denialStatus(rung: DenialRung, overrides?: ErrorStatusMap): numb
  *  the status next to it (elixir shipped a "Precondition Failed" title against a
  *  422 status until #2300 — exactly the drift a hardcoded pair invites).
  *
- *  Two derivations, because the ladder genuinely has two kinds of rung:
- *   - the NAMED rungs (`Disallowed` / `Forbidden` / `NotFound`) title on the
- *     error NAME humanised, matching java's `problem(disallowedStatus,
- *     "Disallowed", …)` — the name is the stable identity, the status is the
- *     remappable projection of it;
- *   - the DOMAIN FLOOR has no error name on the wire (its title has always been
- *     the status reason phrase, "Unprocessable Entity" on all five backends), so
- *     it titles on the RESOLVED status — `httpStatus DomainError -> 400` moves
- *     the title to "Bad Request" alongside it. */
+ *  Two derivations, because the ladder genuinely has two kinds of rung — and
+ *  the split is per-rung EMPIRICAL, read off what the other four backends
+ *  emit, not a principle applied uniformly:
+ *
+ *   - `Disallowed` titles on the error NAME humanised.  Every backend spells
+ *     that one as the literal `"Disallowed"` next to a resolved status
+ *     (`java/emit/api.ts`, `dotnet/emit/api.ts`, `python/index.ts`,
+ *     `hono/v4/routes-builder.ts`), so the name is the cross-backend contract.
+ *   - `Forbidden` / `NotFound` / the DOMAIN FLOOR title on the RESOLVED
+ *     status, via `problemTitle(...)` — which is what those same four
+ *     backends do (`problemTitle(forbiddenStatus)` /
+ *     `problemTitle(notFoundStatus)`).  Identical to the name at the stdlib
+ *     defaults ("Forbidden" / "Not Found"), and only observably different
+ *     under an `httpStatus` override: `httpStatus NotFound -> 410` must title
+ *     "Gone", not "Not Found".  Elixir titled those two on the NAME until this
+ *     was fixed — a divergence the status-only census could not see. */
 export function denialTitle(rung: DenialRung, overrides?: ErrorStatusMap): string {
-  return rung === "precondition"
-    ? problemTitle(denialStatus(rung, overrides))
-    : errorTitle(RUNG_ERROR_NAME[rung]);
+  return rung === "disallowed"
+    ? errorTitle(RUNG_ERROR_NAME[rung])
+    : problemTitle(denialStatus(rung, overrides));
 }
 
 /** A whole `ProblemDetails.problem_response(conn, <status>, <title>, <detail>)`
