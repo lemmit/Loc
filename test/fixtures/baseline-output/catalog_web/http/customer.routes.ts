@@ -54,7 +54,14 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
   // method probe (http/index.ts) is unaffected.
   const staticSubpathMethods: Record<string, string[]> = { by_email: ["GET"] };
   app.use("/:__seg", async (c, next) => {
-    const allow = staticSubpathMethods[c.req.path.slice(c.req.path.lastIndexOf("/") + 1)];
+    const __seg = c.req.path.slice(c.req.path.lastIndexOf("/") + 1);
+    // `Object.hasOwn`, never a bare index: the segment is CALLER-supplied,
+    // so a plain lookup reaches Object.prototype — `/api/items/constructor`
+    // resolved to a function, passed the truthiness guard, and threw on
+    // `.includes` (a 500 from an ordinary URL).  Own keys only.
+    const allow = Object.hasOwn(staticSubpathMethods, __seg)
+      ? staticSubpathMethods[__seg]
+      : undefined;
     if (allow && !allow.includes(c.req.method)) {
       return c.body(
         frameworkProblemBody(405, `method ${c.req.method} is not supported for ${c.req.path}`, c.req.path),
