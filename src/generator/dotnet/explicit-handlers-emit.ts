@@ -140,12 +140,33 @@ function returnEntityAgg(h: Handler, ctx: EnrichedBoundedContextIR): string | un
   return owning?.name;
 }
 
+/** Where a DSL-bodied handler's two files are filed.  A handler that touches an
+ *  aggregate files under it (`Application/Orders/Commands/…`); one that touches
+ *  NONE — a pure computation, or a body doing only resource I/O — has no home
+ *  aggregate, so it takes the same neutral `Application/Handlers/` folder the
+ *  extern handlers use.  (Before #2659 the aggregate-less handler was DROPPED
+ *  here — `if (!primaryAgg(h)) continue` — so a declared handler and its route
+ *  vanished from the .NET output while the other four backends emitted them.) */
+function handlerHome(
+  ns: string,
+  agg: string | undefined,
+  kind: "Command" | "Query",
+): { dir: string; ns: string } {
+  const folder = kind === "Command" ? "Commands" : "Queries";
+  return agg
+    ? {
+        dir: `Application/${plural(agg)}/${folder}`,
+        ns: `${ns}.Application.${plural(agg)}.${folder}`,
+      }
+    : { dir: "Application/Handlers", ns: EXTERN_HANDLERS_NS(ns) };
+}
+
 /** Render a handler's `<Name>Command` / `<Name>Query` record. */
 function renderRecord(
   h: Handler,
   ns: string,
   ctx: EnrichedBoundedContextIR,
-  agg: string,
+  agg: string | undefined,
   kind: "Command" | "Query",
 ): string {
   const recName = `${h.name}${kind}`;
@@ -162,7 +183,6 @@ function renderRecord(
         ? `ICommand<${renderCsType(ret)}>`
         : "ICommand"
       : `IQuery<${renderCsType(ret!)}>`;
-  const folder = kind === "Command" ? "Commands" : "Queries";
   // A record whose return type is an aggregate needs that aggregate's domain
   // namespace so `ICommand<Order>` / `IQuery<Order>` resolves.
   const retAgg = returnEntityAgg(h, ctx);
@@ -173,7 +193,7 @@ using ${ns}.Domain.Ids;
 using ${ns}.Domain.ValueObjects;
 using ${ns}.Domain.Enums;${retUsing}
 
-namespace ${ns}.Application.${plural(agg)}.${folder};
+namespace ${handlerHome(ns, agg, kind).ns};
 
 public sealed record ${recName}(${params}) : ${iface};
 `;
@@ -185,7 +205,7 @@ function renderHandlerClass(
   h: Handler,
   ns: string,
   ctx: EnrichedBoundedContextIR,
-  agg: string,
+  agg: string | undefined,
   kind: "Command" | "Query",
   /** resourceName → static helper class, so a resource-op in this handler body
    *  renders as `<Class>.<Resource>_<Verb>(...)`.  Empty when the deployable
@@ -242,9 +262,14 @@ function renderHandlerClass(
   // The `Handle` signature (`ValueTask<Order>`) needs the return aggregate's
   // domain namespace too — usually the same as the loaded one, but not always.
   const retAgg = returnEntityAgg(h, ctx);
-  const aggUsings = [...new Set([...repos.values(), agg, ...(retAgg ? [retAgg] : [])])]
-    .map((a) => `using ${ns}.Domain.${plural(a)};`)
-    .join("\n");
+  // An aggregate-less handler (no repo, no entity return) names no domain
+  // aggregate at all — the leading newline rides WITH each using so the header
+  // does not grow a stray blank line when the set is empty.
+  const aggUsings = [
+    ...new Set([...repos.values(), ...(agg ? [agg] : []), ...(retAgg ? [retAgg] : [])]),
+  ]
+    .map((a) => `\nusing ${ns}.Domain.${plural(a)};`)
+    .join("");
   // `<ns>.Resources` — needed iff the RENDERED body actually names one of the
   // static helper classes (a resource-op) or the typed api client.  Scanned off
   // the emitted text rather than the IR so an unreferenced using can't slip
@@ -262,10 +287,9 @@ using Mediator;
 using ${ns}.Domain.Common;
 using ${ns}.Domain.Ids;
 using ${ns}.Domain.ValueObjects;
-using ${ns}.Domain.Enums;${resourceUsing}
-${aggUsings}
+using ${ns}.Domain.Enums;${resourceUsing}${aggUsings}
 
-namespace ${ns}.Application.${plural(agg)}.${kind === "Command" ? "Commands" : "Queries"};
+namespace ${handlerHome(ns, agg, kind).ns};
 
 public sealed class ${handlerName} : ${iface}
 {
@@ -541,13 +565,10 @@ export function emitExplicitHandlers(
       continue;
     }
     const agg = primaryAgg(h);
-    if (!agg) continue;
+    const home = handlerHome(ns, agg, "Command").dir;
+    out.set(`${home}/${h.name}Command.cs`, renderRecord(h, ns, ctx, agg, "Command"));
     out.set(
-      `Application/${plural(agg)}/Commands/${h.name}Command.cs`,
-      renderRecord(h, ns, ctx, agg, "Command"),
-    );
-    out.set(
-      `Application/${plural(agg)}/Commands/${h.name}Handler.cs`,
+      `${home}/${h.name}Handler.cs`,
       renderHandlerClass(h, ns, ctx, agg, "Command", resourceClasses),
     );
   }
@@ -572,13 +593,10 @@ export function emitExplicitHandlers(
       continue;
     }
     const agg = primaryAgg(h);
-    if (!agg) continue;
+    const home = handlerHome(ns, agg, "Query").dir;
+    out.set(`${home}/${h.name}Query.cs`, renderRecord(h, ns, ctx, agg, "Query"));
     out.set(
-      `Application/${plural(agg)}/Queries/${h.name}Query.cs`,
-      renderRecord(h, ns, ctx, agg, "Query"),
-    );
-    out.set(
-      `Application/${plural(agg)}/Queries/${h.name}Handler.cs`,
+      `${home}/${h.name}Handler.cs`,
       renderHandlerClass(h, ns, ctx, agg, "Query", resourceClasses),
     );
   }
@@ -683,15 +701,11 @@ export function emitExplicitRouteController(
       continue;
     }
     const agg = primaryAgg(h);
-    // A DSL-bodied handler files under its home aggregate; an extern handler has
-    // none and lives in the neutral `Application/Handlers/` namespace.
-    if (!h.extern && !agg) continue;
+    // A DSL-bodied handler files under its home aggregate; an extern handler —
+    // and a DSL-bodied handler that touches no aggregate at all — lives in the
+    // neutral `Application/Handlers/` namespace.
     const kind: "Command" | "Query" = cmd ? "Command" : "Query";
-    nsUsings.add(
-      h.extern
-        ? EXTERN_HANDLERS_NS(ns)
-        : `${ns}.Application.${plural(agg!)}.${kind === "Command" ? "Commands" : "Queries"}`,
-    );
+    nsUsings.add(h.extern ? EXTERN_HANDLERS_NS(ns) : handlerHome(ns, agg, kind).ns);
 
     // Split params: those bound by a `{token}` in the route path stay URL params;
     // the rest ride in one `[FromBody]` request record. (Multiple bare complex

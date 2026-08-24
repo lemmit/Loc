@@ -75,7 +75,15 @@ describe("vanilla LiveView forms — create form (2-B)", () => {
     const live = get(await files(), "/live/customer_new_live.ex");
     expect(live).toContain('def handle_event("save_customer", %{"customer" => params}, socket) do');
     expect(live).toContain("case PhoenixApp.Sales.create_customer(params) do");
-    expect(live).toContain('|> push_navigate(to: ~p"/customers")');
+    // Success lands on the CREATED RECORD, matching the React/Vue/Svelte/
+    // Angular scaffolds and the contract the emitted Playwright page objects
+    // encode (`NewPage.submit()` waits for `<slug>-detail` and reads the id off
+    // the URL).  It used to navigate back to the list, which left every emitted
+    // Phoenix `.ui.spec.ts` unrunnable and gave a driver no handle on which row
+    // it had just created — found by the HEEx UI behavioural leg
+    // (`test/behavioral/run-heex-ui.mjs`) executing one for the first time.
+    expect(live).toContain("{:ok, record} ->");
+    expect(live).toContain('|> push_navigate(to: ~p"/customers/#{record.id}")');
     expect(live).toContain(
       "{:error, %Ecto.Changeset{} = changeset} ->\n        {:noreply, assign(socket, :form, to_form(changeset))}",
     );
