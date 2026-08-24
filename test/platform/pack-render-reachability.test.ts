@@ -411,7 +411,7 @@ system Shop {
       enum Status { draft, placed }
       valueobject Address { street: string  city: string }
       valueobject LineItem { sku: string  qty: int }
-      aggregate Customer { name: string }
+      aggregate Customer { name: string  derived display: string = name }
       repository Customers for Customer { }
       aggregate Order with crudish {
         reference: string
@@ -429,16 +429,26 @@ system Shop {
       repository Orders for Order { }
       workflow PlaceOrder {
         ref: string
-        create(reference: string, qty: int) {
-          let o = Order.create({ reference: reference, qty: qty })
+        create(
+          reference: string, qty: int, rate: decimal, price: money, active: bool,
+          placedAt: datetime, status: Status, customer: Customer id,
+          ship: Address, items: LineItem[], doc: File
+        ) {
+          let o = Order.create({
+            reference: reference, qty: qty, rate: rate, price: price, active: active,
+            placedAt: placedAt, status: status, customer: customer,
+            ship: ship, items: items, doc: doc
+          })
         }
       }
     }
   }
   storage db { type: postgres }
+  storage blobs { type: localDisk }
   resource ordState { for: Ordering, kind: state, use: db }
+  resource ordFiles { for: Ordering, kind: objectStore, use: blobs }
   ui WebApp with scaffold(subdomains: [Sales]) { api Shop: ShopApi }
-  deployable api { platform: node contexts: [Ordering] dataSources: [ordState] serves: ShopApi port: 3000 }
+  deployable api { platform: node contexts: [Ordering] dataSources: [ordState, ordFiles] serves: ShopApi port: 3000 }
   deployable web { platform: ${platform} targets: api ui: WebApp { Shop: api } port: 3005 design: ${design} }
 }
 `;

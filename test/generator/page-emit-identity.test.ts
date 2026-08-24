@@ -154,10 +154,16 @@ describe("D1 — React router imports the module the page emitter wrote", () => 
 // ---------------------------------------------------------------------------
 
 describe("D2 — the App shell imports where the conventional page really landed", () => {
-  it("routes /orders at the author's area-placed List page, not the conventional path", async () => {
-    // Only ONE list page for Order here — the ui declares no scaffold, so
-    // nothing competes for the slot; the shell must still find it at its area
-    // path rather than rebuilding `./pages/orders/list` by convention.
+  it("routes an area-placed custom page at its real area path, not a conventional one", async () => {
+    // The page carries its OWN name and route, so it competes for no scaffold
+    // archetype slot — a `Detail` nested under `area Sales { area Orders }`
+    // beside a scaffolded `area Orders` is what `loom.ui-page-slot-collision`
+    // refuses ("to add a second page, give it its own name and route"), and an
+    // orphan-avoidance test has to run on a system a user can actually build.
+    //
+    // The subject is unchanged: the shell must import where the page really
+    // landed (`./pages/sales/orders/audit`) rather than rebuilding a path by
+    // convention from the page name alone.
     const files = await generateSystemFiles(`
       system Override {
         subdomain Sales {
@@ -173,9 +179,9 @@ describe("D2 — the App shell imports where the conventional page really landed
           api Sales: SalesApi
           area Sales {
             area Orders {
-              page Detail {
-                route: "/orders/:id"
-                body: Stack { Heading { "My own order detail", level: 1 }, testid: "my-detail" }
+              page Audit {
+                route: "/orders/:id/audit"
+                body: Stack { Heading { "My own order audit", level: 1 }, testid: "my-audit" }
               }
             }
           }
@@ -185,11 +191,12 @@ describe("D2 — the App shell imports where the conventional page really landed
       }
     `);
     const app = files.get("web/src/App.tsx")!;
-    expect(files.has("web/src/pages/sales/orders/detail.tsx")).toBe(true);
-    // The author's page is what /orders/:id mounts.  Importing
-    // `./pages/orders/detail` here left the authored page a dead file with no
-    // tsc error anywhere — the silent one.
-    expect(app).toContain('import OrderDetail from "./pages/sales/orders/detail"');
+    expect(files.has("web/src/pages/sales/orders/audit.tsx")).toBe(true);
+    // Importing `./pages/audit` — the path a name-only reconstruction builds —
+    // left the authored page a dead file with no tsc error anywhere: the
+    // silent failure this pins.
+    expect(app).toContain('from "./pages/sales/orders/audit"');
+    expect(app).not.toContain('from "./pages/audit"');
   });
 });
 

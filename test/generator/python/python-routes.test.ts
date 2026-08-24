@@ -2,8 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // Python backend — HTTP layer (plan S7): Pydantic wire DTOs (camelCase
@@ -19,9 +18,7 @@ const load = (f: string) =>
   fs.readFileSync(path.resolve(here, `../../e2e/fixtures/python-build/${f}`), "utf8");
 
 async function build(fixture: string) {
-  const { model, errors } = await parseString(load(fixture));
-  if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
-  return generateSystems(model).files;
+  return await generateSystemFiles(load(fixture));
 }
 
 describe("python wire DTOs", () => {
@@ -75,12 +72,12 @@ system Demo {
     }
   }
   api AccountApi from S
-  deployable pyApi { platform: python contexts: [C] serves: AccountApi port: 8000 }
+  storage pg { type: postgres }
+  resource cState { for: C, kind: state, use: pg }
+  deployable pyApi { platform: python contexts: [C] dataSources: [cState] serves: AccountApi port: 8000 }
 }
 `;
-    const { model, errors } = await parseString(src);
-    if (errors.length) throw new Error(errors.join("\n"));
-    const files = generateSystems(model).files;
+    const files = await generateSystemFiles(src);
     const routes = [...files.entries()].find(([k]) => /account_routes\.py$/i.test(k))?.[1];
     expect(routes).toBeDefined();
     if (!routes) throw new Error("account_routes.py not emitted");

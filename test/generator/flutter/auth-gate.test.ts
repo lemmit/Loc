@@ -18,7 +18,7 @@
 //     with no null hop.
 
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/index.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/index.js";
 
 const SYS = (auth: string) => `
 system Helpdesk {
@@ -132,7 +132,14 @@ describe("flutter auth: ui — the page and action guards", () => {
 
 describe("flutter without auth: ui — byte-identical to before the port", () => {
   it("emits no auth module, no dependency, no session binding", async () => {
-    const out = await generateSystemFiles(SYS(""));
+    // The refusal is the premise, as the comment below already says: this leg
+    // exists to pin what the un-gated variant emits, and `ddd generate` will
+    // not produce it.
+    const out = await generateSystemFilesUnchecked(
+      SYS(""),
+      "the un-guarded `currentUser` read IS the subject — loom.current-user-needs-auth-ui " +
+        "firing is what makes this the degradation leg of the auth: ui matrix",
+    );
     expect(out.has("web/lib/auth.dart")).toBe(false);
     expect(out.get("web/pubspec.yaml")!).not.toContain("url_launcher");
     const main = out.get("web/lib/main.dart")!;

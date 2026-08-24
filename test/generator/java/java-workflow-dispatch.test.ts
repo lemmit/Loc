@@ -6,10 +6,8 @@
 // events through Spring's ApplicationEventPublisher — ALWAYS, uniform with
 // .NET/Hono/Python/Elixir (audit §S5c: gating the publish on "context has a
 // subscriber" dropped an event whose context had none).
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `system S { subdomain O { context O {
   aggregate Order { status: string  operation place() { status := "P"  emit OrderPlaced { order: id } } }
@@ -23,19 +21,21 @@ const SRC = `system S { subdomain O { context O {
   workflow OrderFulfillment { orderId: Order id  attempts: int  status: FulfillmentStatus
     create(p: OrderPlaced) by p.order { let s = Shipment.create({ orderRef: p.order, status: "P" }) emit ShipmentRequested { shipment: s.id, order: p.order } }
     on(s: ShipmentRequested) by s.order { let sh = Shipments.getById(s.shipment) sh.mark() } }
-} } api A from O storage pg { type: postgres } deployable api { platform: java contexts: [O] serves: A port: 8080 } }`;
+} } api A from O storage pg { type: postgres }
+  resource oState { for: O, kind: state, use: pg }
+  deployable api { platform: java contexts: [O] serves: A dataSources: [oState] port: 8080 } }`;
 
 // A context with no channel/subscriptions — proves the log-only path is intact.
 const PLAIN = `system S { subdomain O { context O {
   aggregate Customer { name: string  operation rename(n: string) { name := n  emit Renamed { customer: id } } }
   repository Customers for Customer { }
   event Renamed { customer: Customer id }
-} } api A from O storage pg { type: postgres } deployable api { platform: java contexts: [O] serves: A port: 8080 } }`;
+} } api A from O storage pg { type: postgres }
+  resource oState { for: O, kind: state, use: pg }
+  deployable api { platform: java contexts: [O] serves: A dataSources: [oState] port: 8080 } }`;
 
 async function gen(src: string): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(src);
-  if (errors.length) throw new Error(errors.join("\n"));
-  return generateSystems(model).files;
+  return await generateSystemFiles(src);
 }
 
 describe("java saga dispatcher", () => {
