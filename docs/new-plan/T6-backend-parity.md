@@ -927,3 +927,31 @@ defdelegate list_orders(), to: PhoenixApp.Sales.OrderRepository, as: :list
 **Verification.** The fixture is already in place: flip `paged` off in `vanilla-list-read-gate.ddd` and the elixir-vanilla-build cell fails. Whichever side is chosen, add a fixture (or a validator negative test) pinning the non-paged pairing, so the compile tier keeps reaching it.
 
 Sources: found by [#2544](https://github.com/lemmit/Loc/pull/2544) while adding compile coverage for the LiveView list-read gate — the fixture it needed tripped this first.
+
+---
+
+## M-T6.43 — `contains` on an abstract inheritance base fails six different silent ways — `done` (2026-08-18) · **S–M** · P1 ⭐ the re-verify changed the answer, again
+
+**Premise, and why it was checked.** `validateMikroOrmSupport` rejected an abstract inheritance base that owns its own `contains`, arguing the shape is *genuinely unmappable*: the base has no repository (`loom.abstract-repository`) and concretes do not inherit its parts, so the part's table would have no reader and no writer. That reasoning names nothing adapter-specific — so if it is true, it is true everywhere, and a reject living on exactly ONE persistence adapter of ONE backend is a claim worth testing.
+
+**Verified by generating the shape on every target and READING the output.** Per-backend verdicts:
+
+| target | what it emits | verdict |
+|---|---|---|
+| node / drizzle | no table, no column, no domain field; only a dead `AddressId` brand in `ids.ts` | **silently dropped** |
+| node / mikroorm | `loom.mikroorm-unsupported` | honest reject (the only one) |
+| dotnet / efcore | dropped, plus an `Inspect` that prints the literal `"addresses: [Address[]]"` for a property the class does not have | **silently dropped** |
+| dotnet / dapper | same drop in the domain — but `DbSchema.cs` **creates** `addresses (id, party_id → parties(id) on delete cascade, street)` + an index, and emits **no reader and no writer** | **dead table** |
+| java | dropped; `toString()` prints the same `"[Address[]]"` literal | **silently dropped** |
+| python | dropped; only a dead `AddressId` | **silently dropped** |
+| elixir | the full `D.Parties.Address` Ecto schema, `has_many :addresses` on the base, an `AddressResponse` OpenAPI schema, and a polymorphic `PartyController` whose `serialize/1` runs `Enum.map(record.addresses \|\| [], …)` — while the migration **never creates** `addresses` and the repository **never preloads**. `%Ecto.Association.NotLoaded{}` is truthy, so `\|\|` does not save it | **`GET /api/partys` → 500** (`Protocol.UndefinedError`) |
+
+And the contract disagrees with all seven: the shared `wireShape` puts `addresses` on the base as **required**, so `.loom/wire-spec.json` promises a field six of the seven cannot serve.
+
+**Outcome — promoted, not deleted.** The premise held; only the failure mode differed. It is now one target-neutral AST rule — `loom.abstract-aggregate-contains`, `src/language/validators/inheritance.ts` **Rule 3b**, the sibling of Rule 3 (no `create`/`operation` on a base) — instead of six divergent silences. Negative + positive pins in `test/language/parsing/aggregate-inheritance.test.ts` (the concrete-subtype `contains`, which every backend does support, must keep validating), plus a `FIRING_FIXTURES` entry.
+
+**Consequence: `validateMikroOrmSupport` is deleted.** With this reject promoted and the hierarchical-tenancy one drained (M-T6.23 slice 6), the function rejected nothing. Its register — the "what this adapter supports and where to gate the next boundary" comment every reader used it for — stays in place as a block comment at its old site. The `loom.mikroorm-unsupported` CODE is still live via `migration-checks.ts`'s `#migrations` variant; only the generic shape-reject message is gone.
+
+No `.ddd` in the repo declares `contains` on an abstract base (checked by brace-matching every `abstract aggregate` body), so nothing had to be restructured; the two fixtures that pair inheritance with containment (`dapper-tph-parts.ddd`, `mikroorm-inheritance-parts.ddd`) both put it on the CONCRETE, which is the supported shape the diagnostic points at.
+
+Sources: found by re-verifying the last `loom.mikroorm-unsupported` shape reject rather than trusting it — the same discipline that overturned M-T6.32 and M-T6.34 one row over. Relates to M-T6.23 (the mikroorm adapter's gate family, now empty) and to the silent-gap class M-T9.8 sweeps for.

@@ -152,6 +152,22 @@ const FIRING_FIXTURES: Record<string, string> = {
       find byName(n: string): Thing[] where this.name == n
     }`),
 
+  // An abstract inheritance base owning its own `contains`.  The part's table
+  // would have no reader and no writer — the base has no repository and the
+  // concretes do not inherit its parts.  This was a `persistence: mikroorm`-only
+  // reject until the shape was generated on every other target and the output
+  // read: silently dropped on drizzle / efcore / python / java, a dead FK'd
+  // table on dapper, and a 500-producing half-emission on elixir (schema +
+  // `has_many` + a serializing controller, no migration, no preload).
+  "loom.abstract-aggregate-contains":
+    repoOnly(`    abstract aggregate Party inheritanceUsing: sharedTable {
+      name: string
+      contains addresses: Address[]
+      entity Address { street: string }
+    }
+    aggregate Customer extends Party with crudish { creditLimit: int }
+    repository Customers for Customer { }`),
+
   // --- variant match (structural-checks + the AST-level subject rule) ------
   "loom.match-unknown-variant": unionMatch(
     `outcome { Order o => o.code, Other x => x.resource, else => "" }`,
