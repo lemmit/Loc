@@ -8,6 +8,7 @@ import {
   type WireField,
   type WorkflowIR,
   type WorkflowStmtIR,
+  workflowCanAnswerNotFound,
   workflowIsGuarded,
   workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
@@ -573,7 +574,15 @@ function workflowRoute(
     "session: SessionDep",
   ].join(", ");
   const out: string[] = [
-    `@router.post("/${snake(wf.name)}", status_code=204, operation_id="${camelId(opWorkflow(wf.name))}"${errorResponsesKwarg("workflow", workflowIsGuarded(wf), [], conflictResolver(ctx))})`,
+    `@router.post("/${snake(wf.name)}", status_code=204, operation_id="${camelId(opWorkflow(wf.name))}"${errorResponsesKwarg(
+      "workflow",
+      workflowIsGuarded(wf),
+      [],
+      conflictResolver(ctx),
+      {
+        readsAggregate: workflowCanAnswerNotFound(wf, ctx.repositories),
+      },
+    )})`,
     // A route-invoked workflow runs in a child frame under the request root, so
     // its audit / provenance rows are distinguishable from a direct operation's.
     "@in_child_context",
