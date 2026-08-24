@@ -269,6 +269,27 @@ aggregate's own table at `/<name>`, and this one reads `audit_records` at a
 path-nested `/{id}/history`. An aggregate with no audit trail emits neither the
 DTOs nor the hook.
 
+#### Calling it from a hand-written page
+
+Both spellings work, and mean the same read:
+
+```ddd
+QueryView { of: Order.history(id),        data: entries => Timeline { of: entries } }
+QueryView { of: Sales.Order.history(id),  data: entries => Timeline { of: entries } }
+```
+
+The second — routed through the ui's api handle — is the one the scaffold itself
+emits. It is worth stating because for a while it was the one the validator
+*refused*: `listValidApiOperations` (the phase-④ allowlist behind
+`checkApiBodyRefs`) knew the CRUD verbs, the public operations and the declared
+finds, and `history` is none of those — it is synthesized at phase ⑥. Membership
+is now derived from the `audited` AST flag through the same predicate the
+scaffold macro uses to decide whether to emit the section at all
+(`aggregateServesHistory`, `src/util/audit-ast.ts`), so "the macro emits it" and
+"the validator accepts it" are one answer. On a non-audited aggregate — or one
+that serves no history read for any of the §3 reasons — both spellings are still
+refused, since the client hook would never have been emitted.
+
 #### The scaffolded History section
 
 `with scaffold(...)` grows an audited aggregate's **Detail** page a History

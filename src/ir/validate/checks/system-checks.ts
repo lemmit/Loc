@@ -59,7 +59,7 @@ import {
 } from "../../util/find-predicate-capability.js";
 import { readableProjectionNames } from "../../util/projection-read.js";
 import { opHasProvSite } from "../../util/prov-id.js";
-import { dapperQueryProjectionGap } from "../../util/query-projection-arm.js";
+import { columnlessProjectionSource } from "../../util/query-projection-arm.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
@@ -192,6 +192,57 @@ export function validateGroupedProjectionBackend(sys: SystemIR, diags: LoomDiagn
             platform: d.platform,
           }),
           source: `${c.name}/${p.name}`,
+        });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// COLUMN-LESS direct-table projection source — universal, not per-backend.
+//
+// The two direct-table arms (`select n = count()/sum(o.x)`, `group by`) push
+// the aggregation into SQL, which means they name COLUMNS on the source
+// aggregate's own table.  Three source shapes have no such columns:
+// `persistedAs: eventLog` (no state table at all), `shape: document` (one
+// `(id, data, version)` triple, declared fields inside the jsonb blob), and a
+// TPC abstract base (no table of its own).  Every backend then emitted a
+// reference to something that does not exist — `schema.orders.total` (TS2339),
+// `_db.Orders` / `o.Total` (CS0117 / CS1061), `sum(e.total)` in JPQL,
+// `OrderRow.total` in SQLAlchemy, `record.total` in Ecto — with nothing said at
+// generate time.
+//
+// This was a `persistence: dapper` gate until now, on the premise that EF Core
+// translated the JSON itself.  It does not; Loom maps a document aggregate to
+// a hand-rolled `<Agg>Document` row type.  So the gate is universal, and it is
+// NOT a gate-SET: no backend emits this correctly, so there is no per-platform
+// membership to keep honest.
+//
+// It stays PRECISE about the document case: a document table really does have
+// an `id` column, so `select n = count()` over a document source emits and runs
+// on all five backends — and must keep doing so, since that is the row-count
+// tile `scaffoldDashboard` synthesises.  Only a reference to some OTHER member
+// is refused.  The condition is `columnlessProjectionSource`, which keys off the
+// same `queryProjectionArm` classification the .NET emitter switches on
+// (`ir/util/query-projection-arm.ts`), so the gate and the emission arm cannot
+// disagree about WHICH arm is being refused.
+// ---------------------------------------------------------------------------
+export function validateColumnlessProjectionSources(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const sd of sys.subdomains) {
+    for (const ctx of sd.contexts) {
+      for (const p of ctx.projections ?? []) {
+        if (!isQueryTimeProjection(p)) continue;
+        const reason = columnlessProjectionSource(p, ctx, sys);
+        if (!reason) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.projection-columnless-source",
+          message: diagMessage("loom.projection-columnless-source", {
+            name: p.name,
+            ctxName: ctx.name,
+            reason,
+          }),
+          source: `${ctx.name}/${p.name}`,
         });
       }
     }
@@ -2639,31 +2690,14 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
       // controller already used), so the feature EMITS here now and the blanket
       // refusal is gone.
       //
-      // What survives is the ONE thing raw SQL genuinely cannot reach: the two
-      // arms that AGGREGATE (`select total = count()` / `group by`) name
-      // COLUMNS on the source aggregate's table, and an aggregate whose fields
-      // are not columns — a `shape: document` jsonb blob, an event-sourced
-      // stream with no state table — has nothing for `sum(total)` to name.  EF
-      // Core hides that behind its own JSON translation; Dapper cannot.  The
-      // condition is computed by `dapperQueryProjectionGap`, which the emitter
-      // reads too, so the gate and the emission arm cannot drift.
-      for (const p of ctx.projections ?? []) {
-        if (!isQueryTimeProjection(p)) continue;
-        const gap = dapperQueryProjectionGap(p, ctx, sys);
-        if (gap) {
-          diags.push({
-            severity: "error",
-            message: diagMessage("loom.dapper-unsupported#feature", {
-              name: dep.name,
-              ctxName,
-              projection: p.name,
-              reason: gap,
-            }),
-            source: `${sys.name}/${dep.name}`,
-            code: "loom.dapper-unsupported",
-          });
-        }
-      }
+      // The narrowed refusal that replaced it — a direct-table arm over a
+      // COLUMN-LESS source — turned out not to be adapter-shaped at all: the
+      // premise "EF Core hides that behind its own JSON translation" is false
+      // (Loom maps a document aggregate to a hand-rolled `<Agg>Document` row
+      // type, so `o.Total` is CS1061 there too, and every other backend names
+      // the same missing column).  It now lives in
+      // `validateColumnlessProjectionSources` as a UNIVERSAL gate, so no arm
+      // of it is left here.
       // `retrieval` bundles are now supported on Dapper — `Run<Name>Async`
       // renders as parameterised SQL (where + sort + offset/limit paging); a
       // predicate outside the Dapper subset stubs (NotImplementedException),
