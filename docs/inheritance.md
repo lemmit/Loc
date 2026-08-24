@@ -106,6 +106,7 @@ or switching to `inheritanceUsing: ownTable` (which works everywhere).
 | `loom.extends-self` | an aggregate `extends` itself |
 | `loom.inheritance-modifier-misplaced` | `inheritanceUsing: …` on an aggregate that is neither an abstract base nor a subtype |
 | `loom.abstract-aggregate-behavior` | an abstract base declares `create` / `operation` lifecycle behaviour |
+| `loom.abstract-aggregate-contains` | an abstract base declares `contains` — the base owns no repository and concretes do not inherit its parts, so the part's table would have no reader and no writer. Declare the containment on each concrete instead |
 | `loom.abstract-repository` | a `repository` targets an abstract base |
 | `loom.polymorphic-id-ref-unsupported` | a `<Base> id` reference to an `ownTable` (TPC) base |
 | `loom.es-tph-forced-own-table` | event-sourced / document opt-out forces `ownTable` on a TPH member |

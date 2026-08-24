@@ -349,6 +349,10 @@ export function buildPyRoutesFile(
     refersTo(agg.name) ? `from app.domain.${snake(agg.name)} import ${agg.name}` : null,
     hasDispatch ? null : "from app.domain.events import NoopDomainEventDispatcher",
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
+    // The shared `FileRef` TypedDict a `File`-typed wire field is annotated
+    // with (M-T6.39) — demand-driven like every import above, so a File-free
+    // aggregate's module is byte-identical.
+    refersTo("FileRef") ? "from app.domain.file_ref import FileRef" : null,
     [...enumNames, ...voDomainNames].length > 0
       ? `from app.domain.value_objects import ${[...enumNames, ...voDomainNames].sort().join(", ")}`
       : null,

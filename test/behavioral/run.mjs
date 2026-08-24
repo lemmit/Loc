@@ -28,7 +28,7 @@ import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { AUTHZ_LADDERS, DEV_CLAIMS, featureCases, sharedSystemCases, unauthorizedCredentials } from "./cases.mjs";
+import { AUTHZ_LADDERS, DEV_CLAIMS, featureCases, mountsFileRoutes, sharedSystemCases, unauthorizedCredentials } from "./cases.mjs";
 import { authzLadderTail, makeWireGate, recorderPreamble } from "./wire-differential.mjs";
 import { startMockIssuer } from "./oidc-mock.mjs";
 
@@ -68,7 +68,7 @@ function findNodeDeployable(genDir) {
 }
 
 /** Synthesise the per-case boot+run entry (bundled by esbuild). */
-function entrySource({ deplDir, e2eFile, unitFiles, traceFile, authMode, bearerToken, unauthorizedToken, authzLadder, seedFile }) {
+function entrySource({ deplDir, e2eFile, unitFiles, traceFile, authMode, bearerToken, unauthorizedToken, authzLadder, seedFile, mountsFiles }) {
   const J = JSON.stringify;
   // When the deployable is `auth: required` the generated boot module
   // (index.ts) registers a verifier before serving — but we boot via
@@ -168,7 +168,7 @@ export async function run() {
     for (const r of await runTests(cases)) out.push({ tier: "api", ...r });
     // RS-9 — appended AFTER the tier so the probes never shift the ordinals the
     // golden aligns on, and so a failing tier is diagnosed on its own requests.
-    await __frameworkProbes(dispatch, { auth: ${J(authMode !== "none")} });
+    await __frameworkProbes(dispatch, { auth: ${J(authMode !== "none")}, files: ${J(!!mountsFiles)} });
     // M-T9.28 / M-T9.11 — the authorization ladder, on the cases that declare
     // one.  RECORDED through the same dispatch, so its 401/403/2xx enter the wire
     // golden; runs last, after the framework probes, so it only appends trailing
@@ -249,6 +249,11 @@ async function runCase(c) {
         : "none";
     const bearerToken = authMode === "oidc" ? oidc?.token ?? null : null;
     const unauthorizedToken = authMode === "oidc" ? oidc?.unauthorizedToken ?? null : null;
+    // Does this deployable mount the root /files pair (M-T6.39)?  Drives the
+    // absent-file probe — see __frameworkProbes.  Same shared source predicate
+    // the four cross-backend legs use, so the ORACLE and the legs comparing
+    // against its golden cannot disagree about whether the probe fired.
+    const mountsFiles = mountsFileRoutes(c.source);
     // `db/seed.ts` exists iff the system declares `seed` datasets — same
     // derived-from-the-file-map rule as the tiers above, so a system without
     // seeds boots byte-identically to before.
@@ -259,7 +264,7 @@ async function runCase(c) {
     writeFileSync(entry, entrySource({
       deplDir, e2eFile, unitFiles, traceFile, authMode, bearerToken, unauthorizedToken,
       authzLadder: AUTHZ_LADDERS[c.name] ?? null,
-      seedFile,
+      seedFile, mountsFiles,
     }));
     await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });
     const { run } = await import(pathToFileURL(bundle).href);

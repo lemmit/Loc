@@ -1,0 +1,76 @@
+// A `File` field bound to an `objectStore` — the root `POST /files` +
+// `GET /files/{key}` pair every backend mounts for it (M-T1.2).
+//
+// WHY THIS FIXTURE EXISTS (M-T6.39).  `resources.ddd` already binds an
+// objectStore, but it declares no `File` field, so no backend emits the
+// /files routes for it — and no committed wire golden had ever reached the
+// download route on any backend.  That blind spot is how `GET /files/{key}`'s
+// absent-object 404 came to be a FOURTH envelope shape, wrong on all five
+// backends at once: node/python/elixir answered `{"error":"not found"}` as
+// plain `application/json`, dotnet/java answered bodiless (which
+// `UseStatusCodePages` / the servlet container then filled with the
+// FRAMEWORK-miss sentence — "no route for GET /files/…", a lie: the route
+// exists, the object does not).
+//
+// The absent-object read itself is not expressible in the `test e2e` DSL (it
+// speaks `api.<agg>.<op>`, not raw HTTP), so the assertion rides the
+// behavioral tier's absent-read PROBE instead: `wire-differential.mjs` fires
+// `GET /files/<absent-key>` on any case whose deployable mounts the route, and
+// the recorded 404 is diffed against the committed golden on all five booted
+// legs.  The e2e block below exists to put this fixture INTO that tier (a
+// corpus feature with no `test e2e`/`test` block is compile-tier only) and to
+// prove the File-bearing aggregate itself round-trips.
+//
+// `doc` is optional on purpose: the point is the download ROUTE, and a
+// required `File` would make every create in the tier carry a FileRef literal
+// for no added coverage.
+system FileStore {
+  subdomain Docs {
+    context Attachments {
+      aggregate Attachment with crudish {
+        title: string
+        doc: File?
+      }
+      repository Attachments for Attachment {
+        find byTitle(title: string): Attachment? where this.title == title
+      }
+    }
+  }
+  api DocsApi from Docs
+  storage primary { type: postgres }
+  storage uploads { type: localDisk }
+  resource docsState { for: Attachments, kind: state, use: primary, index: [Attachment.title] }
+  resource docsFiles { for: Attachments, kind: objectStore, use: uploads }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Attachments]
+    dataSources: [docsState, docsFiles]
+    serves: DocsApi
+    port: 4000
+  }
+
+  test e2e "a File-bearing aggregate round-trips with no object attached" against d {
+    let a = api.attachments.create({ title: "spec.pdf" })
+
+    let read = api.attachments.getById(a)
+    expect(read.title).toBe("spec.pdf")
+    expect(read.doc).toBe(null)
+
+    let found = api.attachments.byTitle({ title: "spec.pdf" })
+    expect(found.title).toBe("spec.pdf")
+
+    let listed = api.attachments.all()
+    expect(listed.total).toBe(1)
+
+    // The update path carries the `File` field in its request body, which is
+    // the wire position that never compiled: the DTO was typed `str` on python
+    // and referenced an unimported `FileRef` on .NET (M-T6.39).
+    api.attachments.update(a, { title: "spec-v2.pdf" })
+    let renamed = api.attachments.getById(a)
+    expect(renamed.title).toBe("spec-v2.pdf")
+    expect(renamed.doc).toBe(null)
+
+    api.attachments.destroy(a)
+    expect(api.attachments.getById(a)).toThrow(404)
+  }
+}

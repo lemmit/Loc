@@ -521,7 +521,7 @@ but a runtime witness for each is still owed and belongs with M-T9.x.
 **Found while landing it:** M-T6.42 below — the Dapper adapter emits UNQUOTED
 identifiers, so a reserved-word column name makes its DDL a syntax error.
 
-## M-T6.30 — Vanilla Phoenix has no app-global RFC 7807 arm — `open` · **M** · P2 ⭐ shape divergence, not a detail one
+## M-T6.30 — Vanilla Phoenix has no app-global RFC 7807 arm — `done` (PR #2641) · **M** · P2 ⭐ shape divergence, not a detail one
 Found 2026-08-01 while writing RS-26's five-way gate, and it is **bigger than the rule that surfaced it**.
 
 The four non-elixir backends install an **app-global** unhandled-exception handler — `app.onError` (hono), `DomainExceptionFilter` (.NET), `ApiExceptionAdvice` (java), `install_error_handlers` (python) — so *any* unmodelled fault, on any route, in any system, answers the RFC 7807 envelope.
@@ -540,7 +540,13 @@ That is a **different SHAPE, not a different detail**: `{"errors":{"detail":"Int
 
 **Verification:** extend `internal-fault-parity.test.ts` to the plain-CRUD fixture (drop the workflow) once closed — the test is written so that is a one-line change. A booted check is better still: hit a route that raises on the generated Phoenix app and read the body.
 
-Sources: found while landing M-T6.24 / RS-26. Relates to RS-22 (the 7807 envelope's exact membership) and M-T9.11 (which is blind here).
+**Closed by [#2641](https://github.com/lemmit/Loc/pull/2641).** Two of the three faults the row names had already been taken by RS-9 ([#2472](https://github.com/lemmit/Loc/pull/2472)), which is worth recording because the row still quotes the pre-RS-9 body: the unmatched route and the wrong verb go through `NotFoundController` (404/405 + `Allow`, `application/problem+json`), the unreadable body through `BodyParser` (400), and `ErrorJSON` already rendered the 7807 MEMBERS. What survived is the one the row leads with — **a raise inside a handler**, on a system with no workflow. There was no arm for it at all: in dev `debug_errors: true` answered an HTML debug page, and in prod `Phoenix.Endpoint.RenderErrors` answered under `application/json` with **the exception's own message as `detail`** (a leak of RS-28's DETAIL claim, not just a content-type slip).
+
+The fix is the mirror of node's root `app.onError` (M-T6.28): a `<App>Web.FaultHandler` plug that MOUNTS the router and rescues everything below it — `Plug.Conn.WrapperError` (what `Phoenix.Router`'s dispatch wraps a controller raise in), any other exception, and `catch kind, reason` for a throw or an `Ecto` pool-timeout exit. `Plug.Builder` compiles `plug A`/`plug B` into `B.call(A.call(conn))`, so a plug listed in the endpoint cannot rescue the plugs after it — a wrapping plug is the only shape that works, which is the same reason `BodyParser` wraps `Plug.Parsers`. It buys the content type (`render_errors` exposes no knob for it) and makes dev and prod answer identically, because `Plug.Debugger` never sees an exception already turned into a response. `Plug.Exception.status/1` is honoured, so a 4xx-classifying exception keeps its status; `>= 500` sends the RS-28 literal `problem_response(conn, 500, "Internal Server Error", "internal")` through the existing `ProblemDetails` responder, so the envelope, the `x-request-id`, and the `internal_error` catalog log line are the ones every other elixir fault already uses. The full exception + stacktrace goes to `Logger.error` and nowhere else. A conn already sent (a chunked SSE stream that raises mid-send) re-raises rather than crashing on `AlreadySentError`. `ErrorJSON` was sanitized in the same PR (`detail_for(status, …) when status >= 500 -> "internal"`, clause-ordered ahead of the `reason.message` one) so the residual path — a fault in an endpoint plug ABOVE the floor, which nothing in a plug pipeline can wrap — cannot leak either.
+
+Gate: a second `describe` in `test/conformance/internal-fault-parity.test.ts` on a **plain-CRUD** fixture (the workflow dropped, so the floor is the only thing that can answer), asserting **per file** — each construct is read out of the one file that must own it, never a joined concatenation. That discipline is load-bearing here and was demonstrated, not assumed: with the floor emitted but UNMOUNTED, a joined-output search still finds the sanitized arm in `fault_handler.ex`, which nothing calls. Mutation-proven 3/3, each failing its own named assertion — unmount the floor → the `endpoint.ex` mount assertion; drop the floor file → the `fault_handler.ex` scope assertion; unsanitize `ErrorJSON` → the `error_json.ex` clause assertion.
+
+Sources: found while landing M-T6.24 / RS-26. Relates to RS-22 (the 7807 envelope's exact membership), M-T6.28 (the node root floor this mirrors), M-T6.31 (which unified the envelope this matches field-for-field) and M-T9.11 (blind here — no shared fixture reaches an unmodelled fault).
 
 ## M-T6.31 — The absent-read 404 is three different envelopes — `done` · **M** · P1 ⭐ the RS-28 companion, and the half a string fix can't reach
 Found 2026-08-02 by the M-T9.25 casing/absence census sweep, and it is the **structural** half of what RS-28 fixed as a string.
@@ -863,10 +869,21 @@ Sources: found by [#2520](https://github.com/lemmit/Loc/pull/2520) (M-T6.31 + M-
 
 > **ID note.** Minted as M-T6.37, renumbered to M-T6.38 before merge: [#2517](https://github.com/lemmit/Loc/pull/2517) (the M-T9.13 drain) had claimed M-T6.37 for the Elixir-seeder gap in the same hour, and neither PR could see the other's ID on `main`. First claim wins. The next-free-ID check has to span open PR branches, not just `main` — which is [M-T9.32](./T9-toolchain-health.md)'s job (dup-claim automation, minted by #2495); this is a live instance of what it exists to prevent.
 
-## M-T6.39 — The `/files/{key}` absent-object 404 is a fourth envelope, on zero backends — `open` · **S–M** · P2
-Found 2026-08-11 by the M-T6.31 drain, at the one absent-read site outside that mission's five.
+## M-T6.39 — The `/files/{key}` absent-object 404 is a fourth envelope, on zero backends — `done` ([#2645](https://github.com/lemmit/Loc/pull/2645)) · **S–M** · P2
+Found 2026-08-11 by the M-T6.31 drain, at the one absent-read site outside that mission's five. **Closed 2026-08-23** — all five backends now answer the unified problem-details envelope on this route.
 
-`GET /files/{key}` (the root file-download route over the bound `objectStore` — M-T1.2) answers a missing object in **two shapes, neither of them RFC 7807**:
+**How it landed.** Both sub-decisions below were settled as written:
+
+- **(a) the `detail` sentence** → `"File <key> not found"`, the RS-27 template `<Resource> <key> not found` with `File` as the resource noun. Capitalised, because RS-27's resource slot is a TYPE name on every other 404 in the app and `File` is the DSL's own type for this field — a lowercase noun here would make it the one absent-read detail spelled differently from its siblings.
+- **(b) join the shared producer**, not a second hand-built body — on four of five. node `throw new AggregateNotFoundError(…)` into the root domain ladder (M-T6.28); java `throw new AggregateNotFoundException(…)` — the premise that `ApiExceptionAdvice` "does not apply" was **wrong**: `FilesController` is an ordinary `@RestController`, so the global `@RestControllerAdvice` renders it; python `raise AggregateNotFoundError(…)` into the app-level handler; elixir `ProblemDetails.not_found_response(conn, "File", key)`. **.NET is the one genuine exception** and the premise held there: the route is a MINIMAL API and `DomainExceptionFilter` is an `IExceptionFilter`, so a throw never reaches it — it calls `DomainExceptionFilter.NotFoundProblem(http, log, …)`, a new static responder emitted *inside that filter* so the status (incl. the `httpStatus NotFound` override), title, body, `x-request-id` header, catalog event and fault counter still have exactly one construction site. (`Results.Problem` is deliberately not used: it applies `ProblemDetailsDefaults`, which is where the rfc9110 `type` + null `instance` divergence M-T6.31 documented comes from.)
+
+**One correction to the finding.** The dotnet/java row below says "empty body / no content-type". Neither stays empty on the wire: `UseStatusCodePages` and the servlet container fill a bodiless 4xx with the FRAMEWORK-miss problem, whose detail reads `"no route for GET /files/<key>"`. That is worse than an empty body, not better — the route exists and the object does not, so the sentence is false and a client cannot tell a mistyped URL from a deleted upload.
+
+**Gates.** `test/conformance/files-absent-object-envelope-parity.test.ts` — per-SITE, file-scoped, positive + negative per backend, plus the producer assertion and an `httpStatus NotFound -> 410` override arm (the override used to move every 404 in the app except this one). Runtime: a new corpus fixture `file-download.ddd` (the corpus gap named below — `resources.ddd` binds an objectStore but declares no `File` field, so no backend emits the routes for it) plus an absent-file probe in `wire-differential.mjs`, gated on `mountsFileRoutes` and fired last so no existing ordinal moves. `wire-golden/file-download.json` is the new golden; no existing golden changed.
+
+**Three latent bugs the fixture flushed out, fixed here because it cannot land without them.** `file-download.ddd` is the FIRST corpus fixture to declare a `File` field, so it is the first time any compile tier saw one — and both relevant `COMPILE_SKIP` maps are empty ratchets, so a skip entry would have been a regression. (1) **.NET, any `File` field**: the create/update command records reference `FileRef` (declared in `Domain.Common`) and `renderCommand` never emitted that `using` → **CS0246 in every .NET project with a `File` field**. (2) **.NET, optional `File?`**: `csIsValueType` and its sibling inline `valueWire` predicate classified the `File` primitive as a value type, so the projection emitted `.Value` on a `FileRef` *record* → CS1061 ×5. (3) **python, any `File` field**: `wireFieldType` had no `File` arm, so the DTO was typed `str` against a `FileRef` domain attribute — `mypy --strict` rejected the handoff, and the published schema said `string` where the other four backends say object, so this is also a **wire/spec parity fix** (python moves toward the other four; no golden carried a `File` field, so nothing rebaselined). The general lesson is the corpus one: a feature with no corpus fixture has no compile tier, whatever the per-backend build gates appear to say.
+
+`GET /files/{key}` (the root file-download route over the bound `objectStore` — M-T1.2) answered a missing object in **two shapes, neither of them RFC 7807**:
 
 | backends | body | content-type |
 |---|---|---|
@@ -879,9 +896,11 @@ Emission sites: `src/generator/typescript/emit/routes.ts` (the `app.get("/files/
 
 Two sub-decisions to settle in the PR, neither hard: (a) the `detail` sentence — `"file <key> not found"` is the RS-27-shaped answer, but the resource is an object key, not an aggregate id; (b) whether the route joins each backend's shared 404 producer (the M-T6.31 answer, and the reason those arms can't drift again) or hand-builds the body — on dotnet/java it is a **minimal-API / plain-controller** route, so `DomainExceptionFilter` / `ApiExceptionAdvice` do **not** apply to it as-is, which is the actual work.
 
-**Verification.** The absent-read wire-golden probe #2520 added (`test/behavioral/wire-differential.mjs`) is the natural home — extend it to `/files/<absent-key>` for any case that uploads a file, and the envelope is gated on all seven legs. A static five-backend site pin (the `absent-read-envelope-parity.test.ts` shape) is the fast companion. Note the corpus gap first: `resources.ddd` exercises the object store but no committed golden reaches the download route.
+**Verification (as built).** The absent-read wire-golden probe #2520 added (`test/behavioral/wire-differential.mjs`) was the natural home, and it is where the runtime half went. The corpus gap it named had to be closed first: `resources.ddd` exercises the object store but declares no `File` field, so no backend emits the download route for it and no committed golden could reach it — hence `test/fixtures/corpus/file-download.ddd`, which carries both halves plus a `test e2e` block so it enters the behavioral tier on all five legs.
 
-Sources: found by [#2520](https://github.com/lemmit/Loc/pull/2520) while draining M-T6.31; recorded in that mission's body as the remaining site. Relates to RS-22 (the envelope's membership) and M-T6.31 (the same class, the aggregate/projection/instance sites).
+**Left for a follow-up, recorded rather than folded in silently:** no backend DECLARES this route's 404 in its OpenAPI document. The three spec-reflecting backends (springdoc, FastAPI, Swashbuckle) publish `/files/{key}` with a 200 and nothing else; node does not publish the route at all (it is a plain `app.get`, not an `.openapi()` route), and `src/ir/util/openapi-errors.ts` is a per-DOMAIN-operation matrix that this route is not in. So there was no declared 404 schema to keep in step with the new body — and adding one on the three reflecting backends alone would have WIDENED an existing spec divergence rather than closed one. The honest fix is to give the route a declared response set on all five at once (the `openapi-errors.ts` matrix shape), which is its own claim.
+
+Sources: found by [#2520](https://github.com/lemmit/Loc/pull/2520) while draining M-T6.31; recorded in that mission's body as the remaining site. Closed by [#2645](https://github.com/lemmit/Loc/pull/2645). Relates to RS-22 (the envelope's membership) and M-T6.31 (the same class, the aggregate/projection/instance sites).
 
 ---
 
@@ -908,3 +927,31 @@ defdelegate list_orders(), to: PhoenixApp.Sales.OrderRepository, as: :list
 **Verification.** The fixture is already in place: flip `paged` off in `vanilla-list-read-gate.ddd` and the elixir-vanilla-build cell fails. Whichever side is chosen, add a fixture (or a validator negative test) pinning the non-paged pairing, so the compile tier keeps reaching it.
 
 Sources: found by [#2544](https://github.com/lemmit/Loc/pull/2544) while adding compile coverage for the LiveView list-read gate — the fixture it needed tripped this first.
+
+---
+
+## M-T6.43 — `contains` on an abstract inheritance base fails six different silent ways — `done` (2026-08-18) · **S–M** · P1 ⭐ the re-verify changed the answer, again
+
+**Premise, and why it was checked.** `validateMikroOrmSupport` rejected an abstract inheritance base that owns its own `contains`, arguing the shape is *genuinely unmappable*: the base has no repository (`loom.abstract-repository`) and concretes do not inherit its parts, so the part's table would have no reader and no writer. That reasoning names nothing adapter-specific — so if it is true, it is true everywhere, and a reject living on exactly ONE persistence adapter of ONE backend is a claim worth testing.
+
+**Verified by generating the shape on every target and READING the output.** Per-backend verdicts:
+
+| target | what it emits | verdict |
+|---|---|---|
+| node / drizzle | no table, no column, no domain field; only a dead `AddressId` brand in `ids.ts` | **silently dropped** |
+| node / mikroorm | `loom.mikroorm-unsupported` | honest reject (the only one) |
+| dotnet / efcore | dropped, plus an `Inspect` that prints the literal `"addresses: [Address[]]"` for a property the class does not have | **silently dropped** |
+| dotnet / dapper | same drop in the domain — but `DbSchema.cs` **creates** `addresses (id, party_id → parties(id) on delete cascade, street)` + an index, and emits **no reader and no writer** | **dead table** |
+| java | dropped; `toString()` prints the same `"[Address[]]"` literal | **silently dropped** |
+| python | dropped; only a dead `AddressId` | **silently dropped** |
+| elixir | the full `D.Parties.Address` Ecto schema, `has_many :addresses` on the base, an `AddressResponse` OpenAPI schema, and a polymorphic `PartyController` whose `serialize/1` runs `Enum.map(record.addresses \|\| [], …)` — while the migration **never creates** `addresses` and the repository **never preloads**. `%Ecto.Association.NotLoaded{}` is truthy, so `\|\|` does not save it | **`GET /api/partys` → 500** (`Protocol.UndefinedError`) |
+
+And the contract disagrees with all seven: the shared `wireShape` puts `addresses` on the base as **required**, so `.loom/wire-spec.json` promises a field six of the seven cannot serve.
+
+**Outcome — promoted, not deleted.** The premise held; only the failure mode differed. It is now one target-neutral AST rule — `loom.abstract-aggregate-contains`, `src/language/validators/inheritance.ts` **Rule 3b**, the sibling of Rule 3 (no `create`/`operation` on a base) — instead of six divergent silences. Negative + positive pins in `test/language/parsing/aggregate-inheritance.test.ts` (the concrete-subtype `contains`, which every backend does support, must keep validating), plus a `FIRING_FIXTURES` entry.
+
+**Consequence: `validateMikroOrmSupport` is deleted.** With this reject promoted and the hierarchical-tenancy one drained (M-T6.23 slice 6), the function rejected nothing. Its register — the "what this adapter supports and where to gate the next boundary" comment every reader used it for — stays in place as a block comment at its old site. The `loom.mikroorm-unsupported` CODE is still live via `migration-checks.ts`'s `#migrations` variant; only the generic shape-reject message is gone.
+
+No `.ddd` in the repo declares `contains` on an abstract base (checked by brace-matching every `abstract aggregate` body), so nothing had to be restructured; the two fixtures that pair inheritance with containment (`dapper-tph-parts.ddd`, `mikroorm-inheritance-parts.ddd`) both put it on the CONCRETE, which is the supported shape the diagnostic points at.
+
+Sources: found by re-verifying the last `loom.mikroorm-unsupported` shape reject rather than trusting it — the same discipline that overturned M-T6.32 and M-T6.34 one row over. Relates to M-T6.23 (the mikroorm adapter's gate family, now empty) and to the silent-gap class M-T9.8 sweeps for.
