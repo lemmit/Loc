@@ -523,6 +523,19 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // scaffold instead of the feature.
   "extern",
   "extern-handlers",
+  // SIDECAR-BOUND, like `channels-broker`/`outbox`: the two routed handlers
+  // exist precisely to issue objectStore / queue / mailer I/O, and the node
+  // behavioural leg boots in-process on PGlite with no minio, no rabbitmq and
+  // no smtp — so a caller would exercise the connection failure, not the
+  // feature.  This fixture's job is therefore the COMPILE tier, which is where
+  // its whole bug class lived: four of five emitters could not render a
+  // resource-op in a handler body at all (node/python emitted the helper call
+  // with no import → TS2304 / F821; .NET and java THREW at generate time), and
+  // the five compile legs now prove all five render.  Structural coverage is
+  // `test/generator/handler-resource-clients.test.ts` (per backend, per verb,
+  // mutation-proven).  The runtime drain belongs with the `resources` fixture's
+  // own sidecar leg, not here.
+  "handler-resource-ops",
   // The lifecycle `requires` gate.  ENFORCEMENT is pinned structurally per
   // backend in `test/generator/lifecycle-guard-render.test.ts` (mutation-proven
   // against ten seeded emitter defects), but no RUNTIME caller exercises it, and

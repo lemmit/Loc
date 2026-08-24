@@ -794,7 +794,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // / queryHandler → app/application/<name>.py.  Per-context (handlers live on a
   // context); no-op for a deployable with none.  The served-api routers that
   // call these were emitted before renderMain.
-  for (const ctx of args.contexts) emitPyExplicitHandlers(ctx, out, hasDispatch);
+  for (const ctx of args.contexts) emitPyExplicitHandlers(ctx, out, hasDispatch, args.sys);
   // LAST — cross-backend `%` semantics (see emit/numeric.ts).  Runs over the
   // finished map so every module that rendered a `trunc_mod(` call gets the
   // import, whichever emitter produced it.

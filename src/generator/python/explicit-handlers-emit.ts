@@ -43,6 +43,7 @@ import type {
   ParamIR,
   QueryHandlerIR,
   RouteIR,
+  SystemIR,
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
 import { wireTypeInfo } from "../../ir/types/wire-types.js";
@@ -56,6 +57,7 @@ import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
 import { requestPyType, wireModelImport } from "./emit/http-models.js";
 import { type PyRenderContext, renderPyExpr, renderPyType } from "./render-expr.js";
 import { aggHasFieldMask } from "./repository-builder.js";
+import { resourceImportLines } from "./resource-clients.js";
 import { PY_PAGED_CONTROLS, pyWireToDomain } from "./routes-builder.js";
 import { collectUsedLetNames, pyWorkflowStmtTarget } from "./workflows-builder.js";
 
@@ -351,6 +353,13 @@ function renderHandlerModule(
   h: Handler,
   ctx: EnrichedBoundedContextIR,
   hasDispatch: boolean,
+  /** The composed system, for the `<resource>_<verb>` helper imports a handler
+   *  body's resource-ops need.  A `commandHandler` / `queryHandler` body is one
+   *  of the two sites the IR gate declares LEGAL for a resource-op, but this
+   *  module derived no resource import — so the emitted `await
+   *  sales_files_put(...)` referenced an undefined name (F821 / NameError at
+   *  request time).  Same helper the workflow leg uses. */
+  sys?: SystemIR,
 ): string {
   // Extern handler: no DSL body — the dispatch delegates to the scaffold-once
   // user impl module (emitted separately in `emitPyExplicitHandlers`).
@@ -470,6 +479,16 @@ function renderHandlerModule(
     .filter(refersTo)
     .sort();
 
+  // Resource verb-helper imports for any `<resource>.<verb>(...)` this handler
+  // body calls — filtered to the ones the rendered `def` actually names, so a
+  // handler doing no resource I/O emits nothing and stays byte-identical.
+  const resourceImports = sys
+    ? resourceImportLines(sys, h.statements).filter((line) => {
+        const named = line.slice(line.indexOf(" import ") + 8).split(", ");
+        return named.some((fn) => refersTo(fn));
+      })
+    : [];
+
   return lines(
     `"""${h.name} application handler.  Auto-generated."""`,
     "",
@@ -477,6 +496,7 @@ function renderHandlerModule(
     refersTo("datetime") ? "from datetime import UTC, datetime" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
+    ...resourceImports,
     usesUser ? "from app.auth.user import User" : null,
     ...repoAggs.map(
       (agg) => `from app.db.repositories.${snake(agg)}_repository import ${agg}Repository`,
@@ -503,6 +523,7 @@ export function emitPyExplicitHandlers(
   ctx: EnrichedBoundedContextIR,
   out: Map<string, string>,
   hasDispatch: boolean,
+  sys?: SystemIR,
 ): void {
   const handlers = [...(ctx.commandHandlers ?? []), ...(ctx.queryHandlers ?? [])];
   if (handlers.length === 0) return;
@@ -510,7 +531,7 @@ export function emitPyExplicitHandlers(
   const hasExtern = handlers.some((h) => h.extern);
   if (hasExtern) out.set("app/application/impl/__init__.py", "");
   for (const h of handlers) {
-    out.set(`app/application/${snake(h.name)}.py`, renderHandlerModule(h, ctx, hasDispatch));
+    out.set(`app/application/${snake(h.name)}.py`, renderHandlerModule(h, ctx, hasDispatch, sys));
     // Extern: the scaffold-once user impl the dispatch above delegates to.
     if (h.extern) out.set(externImplPath(h.name), renderPyExternImpl(h, ctx));
   }
