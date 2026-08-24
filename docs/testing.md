@@ -160,7 +160,7 @@ fails the fast suite.
 | `conformance-full.yml` | `LOOM_E2E=1 npm run test:e2e` | docker |
 | `differential-report.yml` | `LOOM_DIFF_REPORT=1 npx vitest run test/e2e/e2e.test.ts` | docker |
 | `schema-load.yml` | `npm run test:schema-load` (or point `LOOM_MIGRATION_PG_URL` at a running pg) | docker |
-| `schemathesis.yml` | `npm run test:schemathesis` (needs `uv tool install schemathesis` + `cd test/behavioral && npm ci`) | — |
+| `schemathesis.yml` | `npm run test:schemathesis{,-python,-java,-dotnet,-elixir}` (needs `uv tool install schemathesis` + `cd test/behavioral && npm ci`; the four booted legs need a pg and must run ONE AT A TIME against it — each resets the schemas per case) | docker (all but node) |
 | `migration-evolution-e2e.yml` | `npm run test:migration-evolution{,-python,-java,-dotnet,-elixir}` | docker |
 | `tenancy-e2e.yml` | `npm run test:tenancy{,-python,-java,-dotnet,-elixir}` + `test:tenancy-hierarchy{,-python,-java,-dotnet,-elixir,-mikroorm}` + `test:tenancy-subtree-explain` (or `LOOM_TENANCY_PG_URL`) | docker |
 | `hono-obs-e2e.yml` | `npm run test:obs` | — |

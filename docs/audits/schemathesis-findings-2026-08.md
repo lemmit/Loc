@@ -1,11 +1,16 @@
 # Schemathesis contract fuzzing — findings register (2026-08)
 
-**Subject:** the generated **node/Hono** backend, fuzzed against its **own emitted
-`/openapi.json`** (M-T9.21, first leg).
-**Harness:** `test/behavioral/run-schemathesis.mjs` — `npm run test:schemathesis`.
+**Subject:** every generated backend, fuzzed against its **own emitted
+`/openapi.json`** (M-T9.21). F1–F13 came from the first leg (**node/Hono**);
+F14–F26 from the **python / dotnet / java** legs added when the harness became a
+matrix — see [Cross-backend legs](#cross-backend-legs-2026-08-24) below.
+**Harness:** `test/behavioral/run-schemathesis.mjs` (node) and
+`test/behavioral/run-schemathesis-backend.mjs <backend>` (the booted legs) over
+the shared `schemathesis-core.mjs` — `npm run test:schemathesis{,-python,-java,-dotnet,-elixir}`.
 **Fixtures:** `web/src/examples/storefront-system.ddd` (29 operations) and
 `web/src/examples/sales-system.ddd` (18 operations), booted on PGlite in-process
-and served on a real port.
+and served on a real port; the cross-backend legs generate the SAME two with the
+deployable re-platformed and boot them against a postgres sidecar.
 **Checks:** `not_a_server_error`, `response_schema_conformance`,
 `status_code_conformance`, `content_type_conformance`, `unsupported_method`,
 `negative_data_rejection`. Seed pinned, Hypothesis example database off.
@@ -492,12 +497,235 @@ dropped from the check set, so the decision stays visible.
 
 ---
 
+## Cross-backend legs (2026-08-24)
+
+The harness became a five-cell matrix: `run-schemathesis.mjs` keeps the
+in-process PGlite boot for node, `run-schemathesis-backend.mjs <backend>` boots
+the other four as real processes against a postgres sidecar, and everything
+after "the server is listening" is the shared `schemathesis-core.mjs`. Waiver
+rules gained a `backends` list, because each leg is its own process against its
+own database and staleness cannot be pooled across them.
+
+**What the other backends answered.** The node leg is *clean* — 11 findings, all
+attributed to W8/W10/W11/W12. It is clean because F1, F5, F7 and F8 were fixed
+**on the Hono emitter only**. Feeding each backend its own contract is what turns
+that into a visible per-backend answer sheet:
+
+| Leg | Findings | Root causes | Verdict with the new rules |
+|---|---|---|---|
+| node | 11 | (F9, F10, F11) | clean |
+| python | 22 | F16, F17 (=F7 unfixed here), F18 (=F8 unfixed here), F9, F10 | clean |
+| dotnet | 10 + 1 case unfuzzable | F14, F19, F20, F21, F22, F9 | clean |
+| java | 103 | F19, F21, F23, F24, F25, F26, F18, F9, F10, F11 | clean |
+| elixir | — | F15 | discovery cell (see below) |
+
+Three of the four new legs reproduce a finding the node emitter has *already
+fixed*. That is the headline: a per-backend fix reads as "closed" in this
+register while three backends still answer the old way, and no gate said so
+until each backend was fuzzed against its own published contract.
+
+### F14 — .NET: `GET /openapi.json` 500s when two contexts emit the same request DTO name
+**Waiver:** none — a *case skip* (`SKIP.dotnet["storefront-system"]` in
+`run-schemathesis-backend.mjs`), because there is no contract to fuzz.
+**Severity: high** · the published contract is unavailable, not merely wrong.
+
+```
+curl http://host/openapi.json → 500
+Swashbuckle.AspNetCore.SwaggerGen.SwaggerGeneratorException:
+  Failed to generate schema for type - Api.Application.Products.Requests.CreateProductRequest
+  ---> System.InvalidOperationException: Can't use schemaId "$MoneyRequest" for type
+       "$Api.Application.Products.Requests.MoneyRequest".
+       The same schemaId is already used for type "$Api.Application.Orders.Requests.MoneyRequest"
+```
+
+The .NET emitter writes a per-aggregate request namespace, so a value object used
+by two aggregates produces two CLR types with the same short name. Swashbuckle's
+default `schemaId` selector is the short name, and a collision is fatal to the
+whole document. `storefront-system` has `Money` on both `Product` and `Wallet`,
+so its spec endpoint 500s; `sales-system` uses `Money` in one namespace and is
+fine — which is exactly why no existing gate caught it. Fix shape:
+`options.CustomSchemaIds(...)` with a namespace-qualified id, emitted in
+`Program.cs`.
+
+### F15 — elixir: no `/openapi.json` at all unless the deployable declares `serves:`
+**Waiver:** none — the elixir leg runs a *different fixture* for this reason
+(`ELIXIR_CASES`). **Severity: high** · a whole backend can publish no contract.
+
+`emitOpenApiSpec` (`src/generator/elixir/vanilla/index.ts`) returns early when
+`deployable.serves` is empty, so a deployable declared with `contexts:` alone
+emits no spec module, no `OpenapiController` and no `/openapi.json` route. The
+other four backends publish a document derived from the routes either way. Both
+shared fixtures declare `contexts:` only, so on elixir there is literally nothing
+to fuzz them against; the leg therefore runs
+`web/src/examples/storefront-elixir.ddd`, which does declare an `api`. When F15
+lands, `ELIXIR_CASES` collapses back into the shared list.
+
+### F16 — python: a create referencing a well-formed uuid that does not exist 500s
+**Waiver:** W20 (+ W21) · **Severity: high**
+
+```
+curl -X POST http://host/api/orders \
+  -d '{"customerId":"e3e70682-c209-1cac-a29f-6fbed82c07cd","placedAt":0,"status":"Draft"}'
+→ 500
+asyncpg.exceptions.ForeignKeyViolationError: insert or update on table "orders"
+  violates foreign key constraint "orders_customer_id_fkey"
+```
+
+F2's successor. F2 was the *malformed* reference, fixed on all five in #2555 by
+publishing and enforcing `format: uuid`; this is the well-formed one, which no
+amount of wire validation can catch — a uuid is only wrong because the row is
+absent. Nothing between the SQLAlchemy repository and the router maps
+`IntegrityError`, so it escapes as 500 and, being undeclared, also trips
+`status_code_conformance`. The node leg does not reproduce it: the PGlite DDL the
+behavioral harness synthesises carries no foreign keys, so node's clean result
+here is an artefact of the harness, not of the emitter — worth fixing in
+`synthDDL` so the two legs ask the same question.
+
+### F17 — python: F7 (declared `type` not honoured) is still open
+**Waiver:** W22 · **Severity: medium**
+
+```
+curl -X POST http://host/api/products \
+  -d '{"sku":"0","price":{"amount":false,"currency":"000"}}' → 201
+```
+
+`Money.amount` publishes `{"type":"number","minimum":0}`. Python's `bool` is an
+`int` subclass and pydantic's lax mode coerces it, so a body the published
+contract rejects is accepted. F7's fix landed on the Hono emitter only
+(2026-08-16) — same defect, same declared schema, different answer.
+
+### F18 — python + java: F8 (wrong verb on a static sub-path) is still open
+**Waiver:** W23 (python), W33 (java) · **Severity: low**
+
+```
+curl -X DELETE http://host/api/customers/by_email
+→ 422 {"pointer":"/id","message":"Expected UUID."}      (honest answer: 405)
+```
+
+F8's fix is a hono middleware (`emitStaticSubpathMethodGuard`,
+`src/platform/hono/v4/routes-builder.ts`) with no counterpart on the other
+backends: FastAPI and Spring both match `DELETE /api/customers/{id}` with
+`id="by_email"` and answer the identifier validator's 422.
+
+### F19 — dotnet + java: a malformed declared `date-time` reaches the domain layer
+**Waiver:** W24/W25 (dotnet), W29/W30 (java) · **Severity: high**
+
+```
+curl -X POST http://host/api/orders -d '{"customerId":"…","placedAt":"","status":"Draft"}'
+→ 500   System.FormatException: String '' was not recognized as a valid DateTime.   (.NET)
+→ 500   java.time.format.DateTimeParseException: Text '' could not be parsed at index 0  (java)
+```
+
+The field publishes `{"type":"string","format":"date-time"}`, and both backends
+parse it inside the domain constructor rather than refusing it at the wire
+boundary. F7's family — declared but unenforced — on the two statically typed
+backends.
+
+### F20 — dotnet: a NUL character in a declared string reaches Postgres
+**Waiver:** W24/W25 · **Severity: medium**
+
+```
+curl -X POST http://host/api/customers -d '{"email":" ","name":""}' → 500
+asyncpg/Npgsql: CharacterNotInRepertoireError (22021) — invalid byte sequence
+```
+
+` ` is a legal JSON string character and an illegal Postgres `text` byte.
+Nothing on the write path rejects it, so the driver's error escapes as a 500. The
+same generated body also reproduces F21 (see below) when the NUL half happens not
+to be generated, which is why W27/W28 are marked `intermittent`.
+
+### F21 — dotnet + java: `minLength` is published and enforced nowhere
+**Waiver:** W27/W28 (dotnet), W34 (java) · **Severity: medium**
+
+```
+curl -X POST http://host/api/customers -d '{"name":"","email":"a@b.c"}'  → 201
+curl     http://host/api/customers                                       → 200, and the
+  response violates the API's OWN schema: "" is shorter than 1 character
+```
+
+One defect with two halves. `name` carries `minLength: 1` in both the request and
+the response schema; .NET and java enforce it in neither, so the write is
+accepted and the *read* then violates the published contract. Enforcing the
+declared bound on the write closes both.
+
+### F22 — dotnet: a bodyless operation POST answers 415 before the path parameter is looked at
+**Waiver:** W26 · **Severity: low**
+
+```
+curl -X POST 'http://host/api/orders/%C2%A8/confirm'   → 415
+```
+
+ASP.NET's media-type check fires before model binding, so a request with a
+malformed `{id}` AND no body is answered by the one thing the contract says least
+about. 415 is not in the set of statuses that count as a rejection, so the fuzzer
+reads it as "schema-violating request accepted". The honest answer is the
+declared 422 for the unparseable identifier (or 400 for the absent body).
+
+### F23 — java: a required body field arriving as JSON `null` NPEs in the domain layer
+**Waiver:** W29/W30 · **Severity: high**
+
+```
+curl -X POST http://host/api/products -d '{"sku":null,"price":{"amount":1,"currency":"USD"}}'
+→ 500   java.lang.NullPointerException: Cannot invoke "String.codePoints()" because "sku" is null
+```
+
+Also observed as `"amount" is null` and `"qty" is null`. The field is `required`
+in the published request schema; the Spring binder maps a JSON `null` to a Java
+`null` and hands it straight to the invariant check. Same family as F19 — the
+declared shape is published and never enforced.
+
+### F24 — java: an adversarial query string 500s a paged find
+**Waiver:** W31 · **Severity: medium**
+
+```
+curl 'http://host/api/products?sort=%22&dir=%C3%9D5%03&…' → 500
+```
+
+The query-parameter binder's twin of F23 (Tomcat additionally rejects some
+chunks before the app sees them). Kept as its own rule because the fix is on the
+other side of the request — the query binder, not the body binder.
+
+### F25 — java: the paged bounds answer 400, and no read route declares one
+**Waiver:** W32 · **Severity: low**
+
+```
+curl 'http://host/api/products?pageSize=0' → 400   (the shared matrix declares 422)
+```
+
+#2555 gave `page`/`pageSize` declared, enforced upper bounds on every backend.
+Java enforces them with a status its own spec does not publish — the F6 shape,
+one route family over.
+
+### F26 — java: every 405 omits the `Allow` header
+**Waiver:** W33 · **Severity: medium**
+
+```
+curl -X QUERY http://host/api/customers
+→ 405 {"title":"Method Not Allowed",…}   with NO Allow header
+```
+
+RFC 9110 makes `Allow` a MUST on 405. It fires on every operation, `/health` and
+`/ready` included, which is why W33's pattern is unscoped: the defect is in the
+one shared error mapper, not in any route. The #2500 class one layer over — that
+was a 401 without `WWW-Authenticate`.
+
+### The elixir leg
+It ships as a **discovery cell**: the matrix runs it, but `continue-on-error`
+keeps its verdict off the workflow's, because its waiver register is empty. The
+elixir toolchain could not be exercised locally when the matrix landed (the hex
+image was unreachable from the sandbox), and seeding rules by guesswork is worse
+than none — a wrong rule fails the leg from either direction. The first nightly
+produces the finding set (`LOOM_SCHEMATHESIS_UPDATE=1` writes `observed.json`);
+turning it into root-cause rules and deleting the `discovery: true` matrix entry
+is the follow-up. F15 above is what is already known about that leg.
+
+---
+
 ## Follow-up slices
 
-1. **The other four backend legs** — python / java / dotnet / elixir, each over
-   that backend's existing obs-e2e boot recipe (a real process + postgres
-   sidecar instead of this leg's in-process PGlite). Feeding each backend its
-   own spec is what turns these 9 findings into a per-backend answer sheet.
+1. **Seed the elixir leg and drop its `continue-on-error`** — the one cell of the
+   matrix whose rules are not yet written (see "The elixir leg" above), plus F15,
+   which is why it cannot run the shared fixtures at all.
 2. **F1–F8 as cross-backend fixes**, one per root cause, each landing on all
    five backends with a wire-golden case so the answer stops being per-backend
    folklore.

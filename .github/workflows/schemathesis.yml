@@ -1,12 +1,11 @@
-name: Schemathesis contract fuzzing (node/Hono)
+name: Schemathesis contract fuzzing
 
-# M-T9.21 — spec-driven API property fuzzing.
+# M-T9.21 — spec-driven API property fuzzing, all five backends.
 #
-# Boots the generated Hono deployable and feeds it its OWN emitted
-# `/openapi.json` to Schemathesis, which derives thousands of adversarial cases
-# from the schema and asserts the server never 500s, never violates its own
-# declared response schema, and honours the `required`/`format`/`enum`/bounds it
-# published.
+# Boots each generated backend and feeds it its OWN emitted `/openapi.json` to
+# Schemathesis, which derives thousands of adversarial cases from the schema and
+# asserts the server never 500s, never violates its own declared response
+# schema, and honours the `required`/`format`/`enum`/bounds it published.
 #
 # WHY: every other runtime gate drives the backends with EXAMPLE-shaped input —
 # the emitted `test e2e` suite, the corpus fixtures, the hand-written negatives
@@ -16,24 +15,31 @@ name: Schemathesis contract fuzzing (node/Hono)
 # and #2261 all had to be found by hand inside nine days.
 #
 # Complements the wire differential (M-T9.11): that checks the backends against
-# EACH OTHER, this checks each backend against ITS OWN published contract.
+# EACH OTHER, this checks each backend against ITS OWN published contract — and
+# the two questions only coincide on input the differential actually sends.
 #
-# NOT per-PR: it needs a Python toolchain on top of the node one, and its
+# WHY A MATRIX: the node leg boots Hono in-process on PGlite; no other backend
+# has an in-process Postgres, so the other four boot a real process against the
+# `services: postgres` sidecar — the same split the behavioral tier makes
+# (behavioral-e2e.yml vs behavioral-e2e-{python,dotnet,java,elixir}.yml).  Each
+# leg needs its OWN database, which per-job sidecars give for free; two legs
+# sharing one Postgres would have each leg's per-case schema reset pull the
+# tables out from under the other.
+#
+# NOT per-PR: it needs a Python toolchain on top of each backend's own, and its
 # subject (the emitted route + spec surface) moves slowly.  Nightly, plus the
 # `run-schemathesis` label for an on-demand pre-merge run, plus dispatch — the
 # same shape as the other heavy feature gates (CLAUDE.md → "Forcing a
 # post-merge gate before merge").
 #
-# Local: `npm run test:schemathesis` (needs `uv tool install schemathesis` and
-# `cd test/behavioral && npm ci`).  Findings register:
+# Local: `npm run test:schemathesis` (node) and
+# `npm run test:schemathesis-{python,java,dotnet,elixir}` — each needs
+# `uv tool install schemathesis` + `cd test/behavioral && npm ci`, and the four
+# booted legs need a reachable Postgres.  Findings register:
 # docs/audits/schemathesis-findings-2026-08.md.  Known findings are ratcheting
-# root-cause rules in test/behavioral/schemathesis-waivers.json — an
-# unattributed finding fails the run, and a rule that stops reproducing fails it
-# too.
-#
-# Follow-up slices: the python / java / dotnet / elixir legs, each over that
-# backend's existing obs-e2e boot recipe (a real process + a postgres sidecar
-# rather than this leg's in-process PGlite).
+# root-cause rules in test/behavioral/schemathesis-waivers.json, scoped per
+# backend — an unattributed finding fails the leg, and a rule that stops
+# reproducing on a leg it claims fails it too.
 
 on:
   schedule:
@@ -58,7 +64,38 @@ jobs:
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'run-schemathesis'))
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [node, python, dotnet, java]
+        include:
+          # DISCOVERY CELL.  The elixir toolchain could not be run locally when
+          # this matrix landed (the hex image was unreachable), so its waiver
+          # register is EMPTY — every finding it makes will be unattributed and
+          # the leg will report red.  Running it anyway is the point: the first
+          # nightly produces the finding set a follow-up turns into root-cause
+          # rules (`LOOM_SCHEMATHESIS_UPDATE=1` writes observed.json).  Until
+          # then its verdict must not fail the workflow, and this line is what a
+          # reviewer deletes when the rules land.
+          - backend: elixir
+            discovery: true
+    continue-on-error: ${{ matrix.discovery == true }}
+    name: fuzz (${{ matrix.backend }})
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v5
 
@@ -74,6 +111,37 @@ jobs:
       - name: Install schemathesis
         run: pipx install schemathesis==4.24.3
 
+      # --- per-backend toolchains (the versions their behavioral legs use) ---
+      - name: Set up uv (python backend)
+        if: matrix.backend == 'python'
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up .NET
+        if: matrix.backend == 'dotnet'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up JDK 25
+        if: matrix.backend == 'java'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Gradle
+        if: matrix.backend == 'java'
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.1.0'
+
+      - name: Set up Elixir
+        if: matrix.backend == 'elixir'
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18'
+          otp-version: '27'
+
       - name: Install toolchain deps
         run: npm ci
 
@@ -84,18 +152,31 @@ jobs:
         run: npm ci
         working-directory: test/behavioral
 
-      - name: Fuzz the generated Hono backend against its own spec
-        run: npm run test:schemathesis
+      - name: Fuzz the generated backend against its own spec
+        env:
+          # Each leg reads its backend's NATIVE database env var — the same ones
+          # the behavioral legs and the generated compose file use.  The node leg
+          # boots on in-process PGlite and reads none of them.
+          DATABASE_URL: >-
+            ${{ (matrix.backend == 'python' && 'postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/app')
+             || (matrix.backend == 'elixir' && 'ecto://postgres:postgres@127.0.0.1:5432/app')
+             || '' }}
+          ConnectionStrings__Default: Host=127.0.0.1;Port=5432;Database=app;Username=postgres;Password=postgres
+          SPRING_DATASOURCE_URL: jdbc:postgresql://127.0.0.1:5432/app
+          SPRING_DATASOURCE_USERNAME: postgres
+          SPRING_DATASOURCE_PASSWORD: postgres
+        run: npm run test:schemathesis${{ matrix.backend == 'node' && '' || format('-{0}', matrix.backend) }}
 
       - name: Upload schemathesis reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: schemathesis-reports
+          name: schemathesis-reports-${{ matrix.backend }}
           path: |
-            test/behavioral/.work-schemathesis/*/schemathesis.log
-            test/behavioral/.work-schemathesis/*/app-errors.log
-            test/behavioral/.work-schemathesis/*/openapi.json
-            test/behavioral/.work-schemathesis/*/report/*.ndjson
+            test/behavioral/.work-schemathesis*/*/schemathesis.log
+            test/behavioral/.work-schemathesis*/*/app-errors.log
+            test/behavioral/.work-schemathesis*/*/server.log
+            test/behavioral/.work-schemathesis*/*/openapi.json
+            test/behavioral/.work-schemathesis*/*/report/*.ndjson
           if-no-files-found: warn
           retention-days: 14

@@ -112,7 +112,7 @@ on:
       - 'Python observability e2e'
       - 'Python OIDC auth (runtime e2e)'
       - 'Schema load (emitted DDL)'
-      - 'Schemathesis contract fuzzing (node/Hono)'
+      - 'Schemathesis contract fuzzing'
       - 'Tenancy isolation (runtime e2e)'
       - 'Tests + coverage'
       - 'Lint GitHub Actions workflows'
