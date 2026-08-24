@@ -314,7 +314,9 @@ describe("HEEx testid funnel — dynamic values bind, literals escape", () => {
 // ---------------------------------------------------------------------------
 describe("HEEx Anchor — a destination-less link is a span, not an empty binding", () => {
   it("renders <span>, never `navigate={}`", async () => {
-    const heex = findLandingHeex(await generateSystemFiles(phoenixSystem(`Anchor { "Just text" }`)));
+    const heex = findLandingHeex(
+      await generateSystemFiles(phoenixSystem(`Anchor { "Just text" }`)),
+    );
     expect(heex).not.toContain("navigate={}");
     expect(heex).toMatch(/<span[^>]*>(<%= pgettext\([^)]*\) %>|Just text)<\/span>/);
   });

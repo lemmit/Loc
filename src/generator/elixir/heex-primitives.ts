@@ -242,12 +242,19 @@ ${heading}${childrenHeex}
   });
 
   // Trigger button surface from the `trigger: Button(...)` arg.
-  let label = humanize(opName);
+  // The trigger's label is a `Button` first-positional — the `button`
+  // user-visible slot the extraction pass already writes to the catalog as
+  // `page.<Page>.button.<hash>`.  It was read RAW (`a.value`), two lines below
+  // the modal TITLE which is translated, so the key existed and nothing
+  // rendered it: English at every locale (audit finding A13).  `renderInTemplate`
+  // with the same role emits `<%= pgettext(<key>, <default>) %>` and derives the
+  // identical key; with i18n off it is the escaped literal, byte-identical.
+  let label = escapeHeexText(humanize(opName));
   if (triggerExpr && triggerExpr.kind === "call" && triggerExpr.name === "Button") {
     for (let i = 0; i < triggerExpr.args.length; i++) {
       const n = triggerExpr.argNames?.[i];
       const a = triggerExpr.args[i]!;
-      if (!n && a.kind === "literal") label = a.value;
+      if (!n && a.kind === "literal") label = renderInTemplate(a, ctx, "button");
     }
   }
   const testidAttr = testIdAttr(expr, ctx);

@@ -26,9 +26,9 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
       <aside class="loom-sidebar" data-testid="nav-sidebar">
         <a routerLink="/" class="loom-brand">{{systemNameHuman}}</a>
         <nav class="loom-nav" {{{primaryNavAria}}}>
-{{#each navSections}}          <div class="loom-nav-section">{{label}}</div>
-{{#each entries}}{{#if requiresJs}}          @if ({{{requiresJs}}}) { <a routerLink="{{to}}" routerLinkActive="loom-active" class="loom-nav-link" data-testid="{{testId}}">{{label}}</a> }
-{{else}}          <a routerLink="{{to}}" routerLinkActive="loom-active" class="loom-nav-link" data-testid="{{testId}}">{{label}}</a>
+{{#each navSections}}          <div class="loom-nav-section">{{{labelText}}}</div>
+{{#each entries}}{{#if requiresJs}}          @if ({{{requiresJs}}}) { <a routerLink="{{to}}" routerLinkActive="loom-active" class="loom-nav-link" data-testid="{{testId}}">{{{labelText}}}</a> }
+{{else}}          <a routerLink="{{to}}" routerLinkActive="loom-active" class="loom-nav-link" data-testid="{{testId}}">{{{labelText}}}</a>
 {{/if}}{{/each}}{{/each}}        </nav>
       </aside>
       <main class="loom-main" id="main-content">

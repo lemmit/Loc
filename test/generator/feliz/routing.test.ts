@@ -330,9 +330,7 @@ describe("feliz named route params", () => {
     const app = await appFs(MULTI.replace('route: "/products"', 'route: "/products/:id"'));
     expect(app).toContain("  | Products of string");
     expect(app).toContain('  | [ "products"; id ] -> Products id');
-    expect(app).toContain(
-      "let productsView (model: Model) (dispatch: Msg -> unit) (id: string) =",
-    );
+    expect(app).toContain("let productsView (model: Model) (dispatch: Msg -> unit) (id: string) =");
     expect(app).toContain("| Products id -> productsView model dispatch id");
   });
 });

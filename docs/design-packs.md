@@ -493,6 +493,19 @@ framework-shaped.  `primitive-anchor` has one:
   Spelling the attribute by hand (`href={{{to}}}`) drops every computed
   destination on the floor — `to` is the bare expression, kept only for the two
   procedural packs (Feliz, Flutter) whose output is not HTML.
+
+The `app-shell`'s nav entries carry the same split for their LABELS, because a
+label authored in a `menu { … }` block is a translatable catalog string:
+
+- `labelText` — the label in text position, already escaped (i18n off) or bound
+  as `{t(key, default)}` / `{{ t(…) }}` (i18n on).
+- `labelAttr "<attr>"` — the same value as a whole attribute, for a pack that
+  passes the label as a prop (`{{{labelAttr "primary"}}}` on MUI's
+  `<ListItemText>`, `{{{labelAttr "label"}}}` on Mantine's `<NavLink>`).
+
+Both are triple-stache values. `{{label}}` still exists (the raw string) but
+rendering it directly re-opens the dead-catalog-key bug: the key is extracted,
+the app shows English at every locale.
 - Standard Handlebars: `{{#each}}`, `{{#if}}`, `{{#unless}}`,
   `{{> partial-name}}`, etc.
 

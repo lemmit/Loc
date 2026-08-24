@@ -45,16 +45,19 @@ describe("angular explicit menu block", () => {
     }
 `;
     const shell = shellOf(await generateSystemFiles(SYS(menu)));
-    // Section subheader comes from the menu, not the system name.
-    expect(shell).toContain("<h3 matSubheader>Main</h3>");
-    expect(shell).not.toContain("<h3 matSubheader>Shop</h3>");
+    // Section subheader comes from the menu, not the system name.  Every
+    // authored menu label binds through the catalog key the extraction pass
+    // recorded for it (A13b) — a RAW `>Main<` here would mean the
+    // `menu.section.*` / `menu.link.*` entries are dead again.
+    expect(shell).toMatch(/<h3 matSubheader>\{\{ t\("menu\.section\.\w+", "Main"\) \}\}<\/h3>/);
+    expect(shell).not.toContain("Shop</h3>");
     // Internal link: the menu's `label:` override + a routerLink to the route.
-    expect(shell).toContain(
-      '<a mat-list-item routerLink="/" routerLinkActive="loom-active" data-testid="nav-home">Dashboard</a>',
+    expect(shell).toMatch(
+      /<a mat-list-item routerLink="\/" routerLinkActive="loom-active" data-testid="nav-home">\{\{ t\("menu\.link\.\w+", "Dashboard"\) \}\}<\/a>/,
     );
     // External link renders as a real anchor (target/_blank), not a routerLink.
-    expect(shell).toContain(
-      '<a mat-list-item href="https://loom.dev/docs" target="_blank" rel="noopener" data-testid="nav-ext-docs">Docs</a>',
+    expect(shell).toMatch(
+      /<a mat-list-item href="https:\/\/loom\.dev\/docs" target="_blank" rel="noopener" data-testid="nav-ext-docs">\{\{ t\("menu\.link\.\w+", "Docs"\) \}\}<\/a>/,
     );
   });
 

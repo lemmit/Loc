@@ -39,7 +39,7 @@ import { isConstructible } from "../../ir/enrich/wire-projection.js";
 import type { AggregateIR, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { PROVENANCE_LINEAGE_FIELD } from "../_payload/provenanced-wire.js";
-import { localizedNamedValue } from "../_walker/i18n-emit.js";
+import { localizedNamedValue, localizedPositionalTranslation } from "../_walker/i18n-emit.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr, testidAttr, walk } from "../_walker/walker-core.js";
 import { opActionGate } from "./auth-gate.js";
@@ -603,6 +603,13 @@ export const flutterTarget: WalkerTarget = {
       firstPositional?.kind === "literal" && firstPositional.lit === "string"
         ? firstPositional.value
         : humanize(op.name);
+    // …and its TRANSLATED spelling.  The label is the `button` user-visible
+    // slot, already extracted as `page.<Page>.button.<hash>`, and this renderer
+    // read it raw — a live catalog key nothing rendered, so the trigger shipped
+    // in English at every locale (A13).  `localizedPositionalTranslation` yields
+    // a Dart `t('<key>', '<default>')` expression under i18n and `undefined`
+    // otherwise, leaving the raw `dartString` path byte-identical.
+    const labelExpr = localizedPositionalTranslation(trigger, ctx, "button") ?? dartString(label);
     // The dialog title: the authored `Modal { title: … }` (already translated —
     // the `modalTitle` catalog slot, D-I18N-ATTR), else the humanized op name,
     // which is what this renderer hardcoded.  `localizedNamedValue` yields a
@@ -613,7 +620,7 @@ export const flutterTarget: WalkerTarget = {
       `ElevatedButton(onPressed: () => showDialog(context: context, ` +
       `builder: (dialogContext) => AlertDialog(title: Text(${title}), ` +
       `content: SizedBox(width: double.maxFinite, child: SingleChildScrollView(child: ${widget}(id: id))))), ` +
-      `child: Text(${dartString(label)}))`
+      `child: Text(${labelExpr}))`
     );
   },
 

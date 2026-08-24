@@ -42,10 +42,10 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
     </v-app-bar>
     <v-navigation-drawer v-model="drawer" width="240" {{{primaryNavAria}}}>
       <v-list density="compact" nav role="none" data-testid="nav-sidebar">
-{{#each navSections}}        <v-list-subheader>{{label}}</v-list-subheader>
-{{#each entries}}{{#if external}}        <v-list-item :href="'{{href}}'" target="_blank" rel="noreferrer" title="{{label}}" data-testid="{{testId}}" />
-{{else}}{{#if requiresJs}}        <template v-if='({{{requiresJs}}})'><v-list-item to="{{to}}" title="{{label}}" :active="isActive('{{to}}'{{#if exact}}, { exact: true }{{/if}})" data-testid="{{testId}}" /></template>
-{{else}}        <v-list-item to="{{to}}" title="{{label}}" :active="isActive('{{to}}'{{#if exact}}, { exact: true }{{/if}})" data-testid="{{testId}}" />
+{{#each navSections}}        <v-list-subheader>{{{labelText}}}</v-list-subheader>
+{{#each entries}}{{#if external}}        <v-list-item :href="'{{href}}'" target="_blank" rel="noreferrer" {{{labelAttr "title"}}} data-testid="{{testId}}" />
+{{else}}{{#if requiresJs}}        <template v-if='({{{requiresJs}}})'><v-list-item to="{{to}}" {{{labelAttr "title"}}} :active="isActive('{{to}}'{{#if exact}}, { exact: true }{{/if}})" data-testid="{{testId}}" /></template>
+{{else}}        <v-list-item to="{{to}}" {{{labelAttr "title"}}} :active="isActive('{{to}}'{{#if exact}}, { exact: true }{{/if}})" data-testid="{{testId}}" />
 {{/if}}{{/if}}{{/each}}{{/each}}      </v-list>
     </v-navigation-drawer>
     <v-main id="main-content">

@@ -78,7 +78,7 @@ describe("Anchor primitive", () => {
     expect(content).toMatch(/<Anchor>\{t\("[^"]*", "Bare link"\)\}<\/Anchor>/);
   });
 
-  it("Anchor with route-param ref to: interpolates via template literal", async () => {
+  it("Anchor with a route-param ref to: binds the param as a JSX expression", async () => {
     const files = await buildAndGenerate(`
       system S {
         subdomain M { context C { } }
@@ -98,8 +98,13 @@ describe("Anchor primitive", () => {
       }
     `);
     const content = files.get("web/src/pages/user.tsx")!;
-    // Same shape as Button { to: <param-ref> } — template literal at render time.
-    expect(content).toMatch(/<Anchor component=\{RouterLink\} to=`\$\{slug\}`>/);
+    // The destination is an EXPRESSION, so it binds: `to={slug}`.  This used to
+    // emit a bare JS template literal (``to=`${slug}` ``) — not valid JSX at all,
+    // since an attribute value must be a string literal or a braced expression.
+    // Both halves came from `stringOrRefArgValue`, the literal-or-param-ref
+    // reader that also DROPPED any computed destination (audit finding A12);
+    // the arg now renders through `emitExpr` like every other expression.
+    expect(content).toMatch(/<Anchor component=\{RouterLink\} to=\{slug\}>/);
   });
 
   it("page combining navigate (Button to:) + Link (Anchor to:) imports both specifiers", async () => {

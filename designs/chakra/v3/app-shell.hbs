@@ -104,7 +104,7 @@ function AppShellLayout() {
       <Box h="64px" />
       <Separator />
       <List.Root gap={0} pt={2} listStyleType="none">
-{{#each navSections}}        <Text fontSize="xs" fontWeight={600} color="gray.500" px={4} py={1} textTransform="uppercase">{{label}}</Text>
+{{#each navSections}}        <Text fontSize="xs" fontWeight={600} color="gray.500" px={4} py={1} textTransform="uppercase">{{{labelText}}}</Text>
 {{#each entries}}{{#if requiresJs}}        {({{{requiresJs}}}) ? (
           <List.Item>
             <Box
@@ -120,7 +120,7 @@ function AppShellLayout() {
               onClick={() => navigate("{{to}}")}
               data-testid="{{testId}}"
             >
-              {{label}}
+              {{{labelText}}}
             </Box>
           </List.Item>
         ) : null}
@@ -138,7 +138,7 @@ function AppShellLayout() {
             onClick={() => navigate("{{to}}")}
             data-testid="{{testId}}"
           >
-            {{label}}
+            {{{labelText}}}
           </Box>
         </List.Item>
 {{/if}}{{/each}}{{/each}}      </List.Root>
