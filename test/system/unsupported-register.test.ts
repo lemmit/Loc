@@ -48,8 +48,18 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  rather than silent, which is exactly the trade this register exists to
  *  record: a gap that appears here is a gap that stopped shipping broken
  *  output.  Drained by the wave-2 tasks that implement the ladder on both
- *  targets, which delete the row and lower this back to 37. */
-const MAX_OPEN_GAPS = 38;
+ *  targets, which delete the row and lower this back to 37.
+ *
+ *  38 → 39: `loom.audited-returning-operation-unsupported` (generator review
+ *  2026-08-24, A6).  Same trade as the row above, and the same reason to raise
+ *  rather than dodge: the gap is not new — the Hono route builder has always
+ *  routed an `audited`/`provenanced` operation that DECLARES a return type into
+ *  the void-204 handler, discarding the tagged result and auditing `status:
+ *  "ok"` even on the error variant.  What is new is that it stopped shipping a
+ *  contract the backend silently drops.  Python already emits both halves, so
+ *  this is a one-backend gap; draining it folds the audit transaction into
+ *  `emitReturningOperationRoute`, deletes the row, and lowers this back to 38. */
+const MAX_OPEN_GAPS = 39;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
