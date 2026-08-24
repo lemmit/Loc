@@ -68,6 +68,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { mixDepsGetShell } from "./mix-retry.mjs";
 import { stopServer, waitForPort } from "./proc.mjs";
 import { outcomesFromPlaywrightJson } from "./ui-stack.mjs";
 
@@ -244,16 +245,9 @@ async function main() {
     // ONE shell chain either way: deps → schema → serve.  `phx.server` is last
     // and blocks, so the process staying alive IS the "migrations applied"
     // signal, exactly as run-elixir.mjs relies on.
-    // The fetch carries the bounded hex retry (the shell-chain twin of
-    // test/e2e/support/mix-retry.ts — brace-grouped so a `mix local.*` failure
-    // before it cannot fall into the retry arms; see that header).
-    const depsGet =
-      "{ mix deps.get" +
-      " || { echo loom-retry: mix deps.get failed, attempt 2 of 3 after 5s; sleep 5; mix deps.get; }" +
-      " || { echo loom-retry: mix deps.get failed, attempt 3 of 3 after 20s; sleep 20; mix deps.get; }; }";
     const bootScript =
       `${mirror?.shellPrefix ?? ""}mix local.hex --force && mix local.rebar --force && ` +
-      `${depsGet} && mix ecto.create && mix ecto.migrate && mix phx.server`;
+      `${mixDepsGetShell()} && mix ecto.create && mix ecto.migrate && mix phx.server`;
     server = useMix
       ? spawn("bash", ["-c", bootScript], { cwd: projDir, env, stdio: "pipe", detached: true })
       : spawn(

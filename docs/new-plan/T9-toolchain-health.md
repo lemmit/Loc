@@ -341,3 +341,39 @@ Six of the eight are classes M-T9.34 already drained through the helper, so the 
 **How to re-measure** (the technique, since the numbers rot): temporarily add a `validateLoomModel(loom)` call inside `generateSystems` in `src/system/index.ts` behind an env var, append `{file, code}` per call (derive `file` from `new Error().stack`), run `npx vitest run`, tabulate, then **revert by file copy** — never `git checkout --`, which discards unrelated edits in the same file (retro §84, §87).
 
 Sources: M-T9.34's own measurement pass. Blocked-by: nothing — M-T9.34's helper half is landed.
+
+Sources: [test-coverage-audit-2026-08-13](../audits/test-coverage-audit-2026-08-13.md) §3.2. Relates to #2354 (the parse-error half, already landed in this helper), #2489, #2512.
+
+> **ID note.** M-T9.36–M-T9.38 minted 2026-08-23 by the numeric-types audit. M-T9.35 was allocated to #2604's census drain (since landed above).
+
+## M-T9.36 — The numeric wire-codec seam: one decision per backend, enumerated boundaries — `blocked(M-T6.46, M-T6.47)` · **L** · P2 ⭐ the structural end of the #2545→#2631 series
+
+Minted 2026-08-23 by the numeric-types audit (the [root cause](../audits/numeric-types-audit-2026-08-23.md)). Five PRs in four days (#2545, #2560, #2575 ×3, #2631) fixed the same defect at five different read paths: the number wire contract (money = F4 string, decimal = float64 number, int/long = integer) is one cross-cutting decision implemented as scattered per-backend, per-path coercions — per-row DTO, projection `select`, aggregate, group key, dapper raw SQL. Each new path re-decides; some backends get it wrong; the diagnosis "no fixture exercised this path" was recorded per-bug five times and never made structural.
+
+**The work:** lift the decisions into one per-backend numeric codec table — the generalization of `aggregateCoercion` (`src/ir/util/projection-aggregate.ts`) and #2631's `aggregateLandsOnDouble` — consumed at *every* boundary, plus the gate that makes it stick: a completeness test enumerating the numeric boundaries per backend, so a new read path cannot ship without declaring its codec. Byte-identical-output gated, like every prior seam extraction (`_expr/target.ts` #843, the walker #607–#627).
+
+**Sequencing:** after M-T6.46 and M-T6.47 land — they finish the concrete divergences the seam generalizes, and doing the refactor under them would conflict in every wire emitter.
+
+**Verification when it lands.** Byte-identical emission across the refactor; the boundary-enumeration gate mutation-proved by adding an unregistered boundary.
+
+Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md), plan.json N15, #2545/#2560/#2575/#2631. Relates to M-T9.25 (intra-backend consistency gates).
+
+## M-T9.37 — The wire-golden comparator can never fail on excess precision — `open` · **S–M** · P1 ⭐ the gate that was blind to M-T6.46, by construction
+
+Found 2026-08-23 by the numeric-types audit ([F16](../audits/numeric-types-audit-2026-08-23.md)). `toWireEntry` (`test/_helpers/wire-record.ts`) JSON-parses each body before diffing, collapsing every JSON number to a JS double: **deficient** precision (dapper's 15 digits, #2631) changes the parsed double and fails; **excess** precision (Java's 34-digit BigDecimals, M-T6.46) parses to the *identical* double and cannot fail — one-sided by construction. The direction that is currently broken on `main` is exactly the invisible one.
+
+**The fix:** compare numeric leaves on raw text (or a big-decimal parse) so excess precision diverges. Lands after M-T6.46, or first with a narrowly-scoped ratcheted java waiver that M-T6.46 must delete (`test/_helpers/wire-waivers.ts` is empty today — keep it that way if sequencing allows).
+
+**Verification when it lands.** The mutation-proof IS the test: the upgraded comparator must fail on Java's current 34-digit output (the exact defect that motivated it) and stay green on every existing golden.
+
+Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F16, plan.json N16. Relates to M-T9.11 (the differential itself), M-T6.46.
+
+## M-T9.38 — Flutter and Feliz have no runtime leg: a money crash ships behind a green compile gate — `blocked(M-T1.21, M-T1.22)` · **L** · P2
+
+Found 2026-08-23 by the numeric-types audit ([F17](../audits/numeric-types-audit-2026-08-23.md)). `generated-flutter-build.yml` / `generated-feliz-build.yml` are compile-only, and Dart's `(x as num)` on a wire string compiles clean — so F1's crash-on-first-read shipped green. React/Vue/Svelte/Angular have real e2e legs; the two self-hosting frontends (the pair M-T1.20 already flags as carrying most frontend residue) have none.
+
+**The work:** a minimal boot + list-read + create-submit smoke for each, against a real backend, over a numeric-rich fixture (money, decimal, int, long) — the runtime twin of the build gates, wired to a `run-*` label per the post-merge-gate convention. Blocked on M-T1.21/M-T1.22 (the legs would be born red).
+
+**Verification when it lands.** The legs themselves, mutation-proved by re-seeding F1's `as num` decode on a scratch branch and watching the flutter leg fail.
+
+Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F17, plan.json N17. Relates to M-T9.14 (Flutter runtime gates), M-T1.20.
