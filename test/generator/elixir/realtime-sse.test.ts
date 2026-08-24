@@ -123,6 +123,7 @@ system RtTenant {
     dataSources: [salesState]
     serves: SalesApi
     port: 4000
+    auth: required
   }
 }
 `;

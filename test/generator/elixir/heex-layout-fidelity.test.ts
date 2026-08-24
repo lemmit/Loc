@@ -44,8 +44,10 @@ const phoenixSystem = (uiBody: string, state = ""): string => `
         body: ${uiBody}
       }
     }
+    storage primary { type: postgres }
+    resource cState { for: C, kind: state, use: primary }
     deployable phoenixApp {
-      platform: elixir, contexts: [C], serves: DemoApi,
+      platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
       ui: DemoUi, port: 4000
     }
   }
