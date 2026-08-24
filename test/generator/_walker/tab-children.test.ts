@@ -136,7 +136,9 @@ system TabChildrenHeex {
       body: Tabs { Tab { "Ovw", Text { "tab-first" }, Text { "tab-second" } } }
     }
   }
-  deployable phoenixApp { platform: elixir, contexts: [C], serves: DemoApi, ui: DemoUi, port: 4000 }
+  storage primary { type: postgres }
+  resource cState { for: C, kind: state, use: primary }
+  deployable phoenixApp { platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi, ui: DemoUi, port: 4000 }
 }`);
     const page = [...files.entries()].find(([p]) => /landing_live\.ex$/.test(p))?.[1];
     expect(page, "no landing LiveView emitted").toBeDefined();

@@ -12,7 +12,7 @@
 // render time.
 
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/index.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/index.js";
 
 const buildAndGenerate = generateSystemFiles;
 
@@ -157,7 +157,11 @@ describe("typed page parameters in walker-rendered pages", () => {
   });
 
   it("ref to non-param name still emits as a placeholder (build-warn shape)", async () => {
-    const files = await buildAndGenerate(`
+    // `unknownThing` resolving to nothing IS the subject — that is exactly what
+    // `loom.unresolved-page-ref` reports, and the placeholder is the emitter's
+    // half of the same fact.  So this leg emits from a model the CLI refuses.
+    const files = await generateSystemFilesUnchecked(
+      `
       system S {
         subdomain M { context C { } }
         ui WebApp {
@@ -174,7 +178,10 @@ describe("typed page parameters in walker-rendered pages", () => {
           port: 3001
         }
       }
-    `);
+    `,
+      "the unresolved `unknownThing` is the premise — loom.unresolved-page-ref " +
+        "firing is what puts the placeholder on the path under test",
+    );
     const content = files.get("web/src/pages/page.tsx")!;
     // unknownThing isn't a route param → walker emits a JSX
     // comment placeholder (visible in the file, no crash).
