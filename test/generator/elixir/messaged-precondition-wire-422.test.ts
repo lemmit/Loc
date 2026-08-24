@@ -33,7 +33,7 @@ system S {
         name: string
         quantity: int
         status: string
-        create(n: string) { name := n  quantity := 0  status := "open" }
+        create(name: string) { }
 
         // Messaged + param-only → the WIRE rung.
         operation restock(amount: int) {
@@ -71,7 +71,7 @@ system P {
     context Cat {
       aggregate Widget {
         quantity: int
-        create() { quantity := 0 }
+        create() { }
         operation ship(amount: int) {
           precondition amount >= 1
           quantity := quantity - amount
@@ -235,7 +235,7 @@ system S {
           return true
         }
 
-        create(n: string) { name := n  quantity := 0 }
+        create(name: string, quantity: int) { }
 
         operation restock(amount: int) {
           let ok = checkRestockable(amount)

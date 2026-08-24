@@ -21,7 +21,7 @@ const SYSTEM = (body: string) => `
     api SalesApi from Sales
     ui Web {
       api Sales: SalesApi
-      page Home { route: "/" body: ${body} }
+      page Home { route: "/" state { status: string = "" } body: ${body} }
     }
     storage primary { type: postgres }
     resource salesState { for: Sales, kind: state, use: primary }
@@ -158,7 +158,14 @@ describe("React i18n runtime", () => {
       "Stack { " +
         "Text { `You have {count, plural, one {# order} other {# orders}}` }, " +
         "Text { `Status: {status, select, shipped {Shipped} other {Pending}}` } }",
-    ).replace('page Home { route: "/"', 'page Home(count: int, status: string) { route: "/:count"');
+    )
+      // `status` arrives as a route PARAM here, so the page-state declaration
+      // the other legs carry would collide with it.
+      .replace(' state { status: string = "" }', "")
+      .replace(
+        'page Home { route: "/"',
+        'page Home(count: int, status: string) { route: "/:count"',
+      );
     const files = await generateSystemFiles(withParam);
     const home = [...files].find(([p]) => p.endsWith("home.tsx"))![1];
     expect(home).toContain(

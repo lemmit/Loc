@@ -26,7 +26,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { snake } from "../../../src/util/naming.js";
-import { generateSystemFiles, loadExample, parseString } from "../../_helpers/index.js";
+import {
+  generateSystemFiles,
+  generateSystemFilesUnchecked,
+  loadExample,
+  parseString,
+} from "../../_helpers/index.js";
 
 const FIXTURE = "web/src/examples/expression-showcase.ddd";
 
@@ -311,9 +316,8 @@ const SELF_HOSTED_DEPLOYABLE = (platform: string): string => `  deployable web_a
  *
  * which, for `phoenixLiveView`, produced `platform: elixir` + `targets: api`
  * — a combination the VALIDATOR REJECTS (`loom.unknown`: "'targets:' is only
- * valid on a frontend deployable").  `generateSystemFiles` deliberately runs
- * validation without asserting it (many walker tests emit from
- * diagnostic-carrying models on purpose), so nothing said so, and the leg
+ * valid on a frontend deployable").  `generateSystemFiles` did not assert
+ * validation back then, so nothing said so, and the leg
  * emitted anyway — from a system where `enrichDeployables` had backfilled
  * NOTHING.  That backfill (`contextNames` inherited from `targets:`) is gated
  * on `descriptorFor(d.platform).isFrontend`, and `elixir` is correctly
@@ -395,18 +399,20 @@ describe("frontend render degradation — the emitted page must not give up", ()
   });
 
   // -------------------------------------------------------------------------
-  // The gate ON the gate.  Every assertion below reads emitted output, and
-  // `generateSystemFiles` emits from a validation-DIAGNOSTIC-carrying model
-  // without complaint (deliberately — negative/gated-feature tests depend on
-  // it).  So a retarget that produces an INVALID system still "generates", and
-  // every downstream assertion then runs against a system the compiler would
-  // have refused.
+  // The gate ON the gate.  Every assertion below reads emitted output, so a
+  // retarget that produces an INVALID system would have every downstream
+  // assertion running against a system the compiler refuses.
   //
   // That is not hypothetical: the phoenixLiveView leg did exactly this until
   // this test existed — `platform: elixir` + `targets: api`, rejected by
   // `loom.unknown`, emitting pages whose deployable resolved `contextNames:
-  // []`.  See `retargetFixture`.  This runs FIRST so a topology regression
-  // reports as itself rather than as a confusing downstream sentinel diff.
+  // []`.  See `retargetFixture`.
+  //
+  // `generateSystemFiles` now asserts phases ①/④/⑦ itself (M-T9.34), so the
+  // downstream legs can no longer emit from a refused model either way.  This
+  // check stays because it runs FIRST and names the fixture: a topology
+  // regression reports as itself rather than as a confusing sentinel diff
+  // buried in a generate failure.
   // -------------------------------------------------------------------------
   for (const target of TARGETS) {
     it(`${target.framework}: the retargeted fixture validates cleanly`, async () => {
@@ -500,7 +506,15 @@ describe("frontend render degradation — the emitted page must not give up", ()
   ] as const)(
     "%s: the `primitive not supported` sentinel fires on a misplaced sub-primitive",
     async (frontend, pages) => {
-      const files = await generateSystemFiles(misplacedSubPrimitive(frontend));
+      // The misplacement IS the subject: a `Tab` outside a `Tabs` is what
+      // `loom.sub-primitive-misplaced` rejects, and the sentinel only exists
+      // for the primitive the walker then cannot render.  Emitting from a
+      // model the CLI refuses is the premise, not a stale fixture.
+      const files = await generateSystemFilesUnchecked(
+        misplacedSubPrimitive(frontend),
+        "the solo `Tab` is the premise — loom.sub-primitive-misplaced firing is " +
+          "what puts the `primitive not supported` sentinel on the path under test",
+      );
       const bodies = [...files.entries()].filter(([k]) => pages.test(k)).map(([, v]) => v);
       expect(bodies.length, `no page files matched for ${frontend}`).toBeGreaterThan(0);
       const re = SENTINELS.find((s) => s.label === "primitive not supported")!.re;

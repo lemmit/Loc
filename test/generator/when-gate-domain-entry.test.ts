@@ -31,6 +31,16 @@ import { generateSystemFiles } from "../_helpers/generate.js";
  *  event-triggered workflow starter that loads the aggregate and calls the
  *  domain method directly.  `place()` is the emitter of the event that drives
  *  the workflow, so the whole cascade is in one system. */
+/** The workflow half of the cascade, spelled once so the private-operation leg
+ *  can drop it verbatim (a workflow may only call PUBLIC operations). */
+const WORKFLOW = `      workflow AutoCancel {
+        orderId: Order id
+        create(p: OrderPlaced) by p.order {
+          let o = Orders.getById(p.order)
+          o.cancel()
+        }
+      }`;
+
 const SOURCE = (platform: string) => `
 system GateProbe {
   subdomain Sales {
@@ -54,13 +64,7 @@ system GateProbe {
         delivery: broadcast
         retention: ephemeral
       }
-      workflow AutoCancel {
-        orderId: Order id
-        create(p: OrderPlaced) by p.order {
-          let o = Orders.getById(p.order)
-          o.cancel()
-        }
-      }
+${WORKFLOW}
     }
   }
   api SalesApi from Sales
@@ -161,8 +165,15 @@ describe("M-T6.38 — the `when` state gate is a property of the domain method",
       // to live on the method: the only callers it can have are in-system ones.
       // (The validator warns that a private `when` exposes no `can-<op>` query;
       // it does NOT mean the gate is inert.)
+      //
+      // The workflow goes with it: `loom.workflow-private-operation` — a
+      // workflow may only call PUBLIC operations — so the two-caller cascade
+      // the other legs use cannot survive privatisation.  This leg asserts on
+      // the domain method alone, which is the thing under test.
       const files = await generateSystemFiles(
-        SOURCE(b.platform).replace("operation cancel() when", "private operation cancel() when"),
+        SOURCE(b.platform)
+          .replace("operation cancel() when", "private operation cancel() when")
+          .replace(WORKFLOW, ""),
       );
       const hit = [...files.entries()].find(([p]) => b.domain.test(p));
       expect(hit?.[1]).toContain(DETAIL);
