@@ -371,7 +371,14 @@ function emitStaticSubpathMethodGuard(statics: Record<string, string[]>): string
     "  // method probe (http/index.ts) is unaffected.",
     `  const staticSubpathMethods: Record<string, string[]> = { ${entries} };`,
     '  app.use("/:__seg", async (c, next) => {',
-    '    const allow = staticSubpathMethods[c.req.path.slice(c.req.path.lastIndexOf("/") + 1)];',
+    '    const __seg = c.req.path.slice(c.req.path.lastIndexOf("/") + 1);',
+    "    // `Object.hasOwn`, never a bare index: the segment is CALLER-supplied,",
+    "    // so a plain lookup reaches Object.prototype — `/api/items/constructor`",
+    "    // resolved to a function, passed the truthiness guard, and threw on",
+    "    // `.includes` (a 500 from an ordinary URL).  Own keys only.",
+    "    const allow = Object.hasOwn(staticSubpathMethods, __seg)",
+    "      ? staticSubpathMethods[__seg]",
+    "      : undefined;",
     "    if (allow && !allow.includes(c.req.method)) {",
     "      return c.body(",
     "        frameworkProblemBody(405, `method ${c.req.method} is not supported for ${c.req.path}`, c.req.path),",
@@ -2229,13 +2236,36 @@ function emitResponseDtoSchema(
 const BODY_DATETIME =
   "z.string().datetime({ offset: true, local: true }).transform((s: string) => new Date(s))";
 
+/** A query-string / path-segment `bool`, parsed from its four legal textual
+ *  spellings.
+ *
+ *  `z.coerce.boolean()` is `Boolean(input)`, and a query value is ALWAYS a
+ *  string — so `?f=false`, `?f=0` and `?f=` all bound `true` (only the absent
+ *  key differed), and the find answered with exactly the rows the caller asked
+ *  to exclude, at 200.  .NET, FastAPI and Spring all parse `"false"` as false,
+ *  so it was a cross-backend wire divergence as well as a wrong answer.  #2566
+ *  fixed this class for BODIES (`BODY_PRIMITIVE`, uncoerced); this is the
+ *  query/path half of the same rule.
+ *
+ *  `preprocess` rather than `z.enum([...]).transform(...)` because the
+ *  published declaration has to stay `{"type":"boolean"}` — the cross-backend
+ *  spec diff compares it against four other backends that declare a boolean
+ *  query param as a boolean.  Verified on BOTH pinned majors: zod 3 +
+ *  `@hono/zod-openapi@0.19` and zod 4 + `@hono/zod-openapi@1` each publish
+ *  `{"type":"boolean"}` for this chain, and `v` infers as `unknown` from
+ *  `preprocess`'s own signature under `--strict` on both (and the coercion's spurious
+ *  `nullable: true` goes away with it, exactly as it did for `BODY_DATETIME`).
+ *  An unrecognised spelling falls through to `z.boolean()`, i.e. a typed 422. */
+export const QUERY_BOOL =
+  'z.preprocess((v) => (v === "true" || v === "1" ? true : v === "false" || v === "0" ? false : v), z.boolean())';
+
 const QUERY_PRIMITIVE: Record<WirePrimitive, string> = {
   int: "z.coerce.number().int()",
   long: "z.coerce.number().int()",
   decimal: "z.coerce.number()",
   money: "moneySchema",
   string: "z.string()",
-  bool: "z.coerce.boolean()",
+  bool: QUERY_BOOL,
   datetime: "z.coerce.date()",
   guid: "z.string()",
   json: "z.unknown()",
@@ -2293,8 +2323,8 @@ export function zodFor(t: TypeIR, context: "create-body" | "body" | "query" = "b
       // alike).  An operation parameter has no default to fall back on, so an
       // omitted one is a client error, not a `false`.
       //
-      // Query params keep the plain coercion (Phoenix doesn't special-case
-      // query bools).
+      // Query params carry a textual bool, parsed by `QUERY_BOOL` — the four
+      // legal spellings, never `Boolean(input)` (see that constant).
       //
       // A body bool must NOT be coerced.  `z.coerce.boolean()` is
       // `Boolean(input)`, and `Boolean(undefined) === false` — so a coerced
