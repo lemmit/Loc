@@ -56,32 +56,10 @@ system TenantClaimName {
         delivery: broadcast
         retention: ephemeral
       }
-
-      // CLAIM NAME × HIERARCHICAL SCOPE — the second axis this fixture was
-      // minted for but never crossed.  Everything above exercises the FLAT
-      // tenant floor, whose principal side is one `currentUser.<claim>`
-      // member access the shared enrichment rewrites.  `allow deep` swaps
-      // that for the per-backend DEEP-SCOPE SENTINEL, which spells TWO claims
-      // itself: the ANCHOR (`orgPath`) and — in the NULL-`dataKey` floor arm —
-      // the system's declared tenancy claim.  Three of elixir's four call
-      // sites passed only the anchor, so the floor fell back to the
-      // `tenantId` DEFAULT and emitted `current_user.tenant_id`: a claim this
-      // principal does not carry, i.e. a `KeyError` on every deep read.
-      // Crossing the two axes is what makes that visible — a `deep` fixture
-      // whose claim IS `tenantId` (tenancy-hierarchy) cannot see it, and a
-      // claim-name fixture with no hierarchy (this one, before) never renders
-      // the sentinel at all.
-      policy {
-        allow deep on Invoice
-      }
     }
     context Accounts {
-      // `implements tenantRegistry` is what makes `allow deep` legal
-      // (`loom.policy-level-requires-hierarchy`): the materialized-path tree
-      // the deep sentinel scans.
       aggregate Organization with crudish {
         name: string
-        implements tenantRegistry
       }
     }
   }
