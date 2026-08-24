@@ -21,6 +21,7 @@ import {
   type TypeIR,
   type WorkflowIR,
   type WorkflowStmtIR,
+  workflowCanAnswerNotFound,
   workflowIsGuarded,
   workflowUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
@@ -687,10 +688,26 @@ function emitWorkflowRoute(
   out.push(
     `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
+  // The DOMAIN not-found rung, declared only when the body can raise it — a
+  // `repo-let` (or a `reading` service's named read) throws on an absent row
+  // and the router's `AggregateNotFoundError` arm below answers this status.
+  // Conditional because a workflow that touches no repository genuinely cannot
+  // send it; `workflowCanAnswerNotFound` is the shared predicate the other four
+  // backends thread into `errorStatuses("workflow", …, { readsAggregate })`.
+  if (workflowCanAnswerNotFound(wf, ctx.repositories)) {
+    const wfRouteNotFoundStatus = resolveErrorStatus("NotFound", ctx.structuralErrorStatuses);
+    out.push(
+      `      ${wfRouteNotFoundStatus}: { description: ${JSON.stringify(
+        problemTitle(wfRouteNotFoundStatus),
+      )}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    );
+  }
   // 415 — the media-type refusal the handler's `requireJsonContentType` throws.
   // Hand-rolled here (this route predates `errorStatuses("workflow")`, which
   // the other four backends render) so the declared workflow set stays equal
-  // across all five; keep the two in step.
+  // across all five.  `test/conformance/not-found-declaration-parity.test.ts` now PINS that
+  // equality against the shared table for a corpus of workflow shapes, so the
+  // "keep the two in step" above is a gate rather than a request.
   out.push(
     `      415: { description: ${JSON.stringify(problemTitle(415))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );

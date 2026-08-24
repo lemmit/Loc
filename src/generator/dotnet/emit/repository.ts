@@ -1138,8 +1138,9 @@ export function renderEventSourcedRepositoryImpl(
  *  is an integer count, so an array maps to `.Count` and a single row to 1/0.
  *
  *  A NON-optional single find must NOT spell that as `result == null ? 0 : 1`:
- *  its terminal is `First()`/`FirstAsync` (throws on empty, so the row is never
- *  null), and the comparison teaches C#'s flow analysis the opposite — the
+ *  its terminal is `FirstOrDefault(…) ?? throw` (`find-emit.ts` — a miss leaves
+ *  as the not-found rung, so the row reaching this line is never null), and the
+ *  comparison teaches C#'s flow analysis the opposite — the
  *  following `return result;` becomes **CS8603 Possible null reference return**,
  *  fatal under `/warnaserror`.  A `T?` find keeps the comparison: there the
  *  terminal really is `FirstOrDefault` and the return type admits null. */

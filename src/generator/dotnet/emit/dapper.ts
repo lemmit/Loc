@@ -1524,6 +1524,22 @@ export function renderDapperRepository(
         `    }`,
       );
     }
+    // The absent branch.  A NON-optional single find has no `null` to return —
+    // its declared `Task<Agg>` says so — so an empty result set is the domain
+    // not-found rung, exactly as it is on the EF adapter (find-emit.ts) and on
+    // node / java / python.  This arm emitted a bare `null` for BOTH shapes,
+    // which for the non-optional one did not even compile: `dotnet build
+    // /warnaserror` rejects it with CS8603 ("Possible null reference return").
+    // Nothing caught it because the `dotnet-build` fixture matrix has no
+    // `persistence: dapper` case that declares a non-optional find.
+    const absent =
+      f.returnType.kind === "optional"
+        ? "null"
+        : `throw new AggregateNotFoundException("not_found")`;
+    const absentGuard =
+      f.returnType.kind === "optional"
+        ? "        if (r is null) return null;"
+        : `        if (r is null) throw new AggregateNotFoundException("not_found");`;
     return lines(
       `    public async Task<${ret}> ${name}(${renderParams(f.params, [], usesUser)})`,
       `    {`,
@@ -1531,19 +1547,19 @@ export function renderDapperRepository(
       `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("${sql}"${paramObj}, cancellationToken: cancellationToken));`,
       ...(hasContains
         ? [
-            `        if (r is null) return null;`,
+            absentGuard,
             `        var __one = await HydrateAsync(conn, new List<Row> { r }, cancellationToken);`,
             ...(hasAssoc ? [`        await LoadRefsAsync(conn, __one, cancellationToken);`] : []),
             `        return __one[0];`,
           ]
         : hasAssoc
           ? [
-              `        if (r is null) return null;`,
+              absentGuard,
               `        var __one = new List<${agg.name}> { Map(r) };`,
               `        await LoadRefsAsync(conn, __one, cancellationToken);`,
               `        return __one[0];`,
             ]
-          : [`        return r is null ? null : Map(r);`]),
+          : [`        return r is null ? ${absent} : Map(r);`]),
       `    }`,
     );
   });
@@ -1935,8 +1951,7 @@ export function renderDapperDocumentRepository(
     // documents, so the async EF operators become their LINQ-to-objects twins.
     const projection = (body?.projectionClause ?? ".ToListAsync(cancellationToken)")
       .replace(".ToListAsync(cancellationToken)", ".ToList()")
-      .replace(".FirstOrDefaultAsync(cancellationToken)", ".FirstOrDefault()")
-      .replace(".FirstAsync(cancellationToken)", ".First()");
+      .replace(".FirstOrDefaultAsync(cancellationToken)", ".FirstOrDefault()");
     const usesUser = findUsesCurrentUser(f);
     return lines(
       `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParams(f.params, [], usesUser)})`,
@@ -2099,8 +2114,7 @@ export function renderDapperEventSourcedRepository(
     // (the projection clause is built with `cancellationToken`).
     const projection = (body?.projectionClause ?? ".ToListAsync(cancellationToken)")
       .replace(".ToListAsync(cancellationToken)", ".ToList()")
-      .replace(".FirstOrDefaultAsync(cancellationToken)", ".FirstOrDefault()")
-      .replace(".FirstAsync(cancellationToken)", ".First()");
+      .replace(".FirstOrDefaultAsync(cancellationToken)", ".FirstOrDefault()");
     return [
       `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParams(f.params)})`,
       "    {",

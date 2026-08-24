@@ -280,3 +280,16 @@ export function walkWorkflowStmtExprsDeep(s: WorkflowStmtIR, visit: (e: ExprIR) 
     workflowStmt: (c) => walkWorkflowStmtExprsDeep(c, visit),
   });
 }
+
+/** Visit `s` and every workflow-body statement nested inside it, descending
+ *  through the `for-each` / `if-let` bodies.
+ *
+ *  The statement-level twin of {@link walkWorkflowStmtExprsDeep}: that one
+ *  yields EXPRESSIONS (and is what an expression scan wants), this one yields
+ *  the STATEMENTS themselves — needed by any predicate that asks "does this
+ *  body contain a statement of kind X anywhere", where a hand-rolled recursion
+ *  is exactly the drifting copy this module exists to prevent. */
+export function walkWorkflowStmtsDeep(s: WorkflowStmtIR, visit: (s: WorkflowStmtIR) => void): void {
+  visit(s);
+  walkWorkflowStmtChildren(s, { workflowStmt: (c) => walkWorkflowStmtsDeep(c, visit) });
+}

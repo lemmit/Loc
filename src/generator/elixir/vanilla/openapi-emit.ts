@@ -21,7 +21,11 @@ import type {
   ValueObjectIR,
   WireField,
 } from "../../../ir/types/loom-ir.js";
-import { workflowEmitsCommandRoute, workflowIsGuarded } from "../../../ir/types/loom-ir.js";
+import {
+  workflowCanAnswerNotFound,
+  workflowEmitsCommandRoute,
+  workflowIsGuarded,
+} from "../../../ir/types/loom-ir.js";
 import {
   peelCollection,
   peelNullable,
@@ -372,8 +376,11 @@ function errorResponseEntries(
    *  409 (`ReferencedInUse`) through the `httpStatus` mapper so the OpenAPI
    *  declaration moves with the runtime arm.  Omitted ⇒ literal 409. */
   resolve?: (name: string) => number,
+  /** Body facts the `kind` cannot carry — `readsAggregate` for the workflow
+   *  arm's conditional not-found rung.  See `errorStatuses`. */
+  opts?: { readsAggregate?: boolean },
 ): string {
-  return statusResponseEntries(errorStatuses(kind, guarded, resolve), schemasModule);
+  return statusResponseEntries(errorStatuses(kind, guarded, resolve, opts), schemasModule);
 }
 
 /** The same ProblemDetails response-map entries for an explicit status list —
@@ -410,7 +417,7 @@ function renderApiSpec(
   const pathEntries: string[] = [];
 
   // Workflow paths: POST /workflows/<slug>
-  for (const { wf } of allWorkflows) {
+  for (const { ctx, wf } of allWorkflows) {
     const slug = snake(wf.name);
     const reqMod = `${schemasModule}.${upperFirst(wf.name)}Request`;
     pathEntries.push(`      "/workflows/${slug}" => %OpenApiSpex.PathItem{
@@ -428,7 +435,9 @@ function renderApiSpec(
             200 => %OpenApiSpex.Response{
               description: "Success",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: %OpenApiSpex.Schema{type: :object}}}
-            }${errorResponseEntries("workflow", schemasModule, workflowIsGuarded(wf))}
+            }${errorResponseEntries("workflow", schemasModule, workflowIsGuarded(wf), undefined, {
+              readsAggregate: workflowCanAnswerNotFound(wf, ctx.repositories),
+            })}
           }
         }
       }`);

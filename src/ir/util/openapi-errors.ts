@@ -21,9 +21,25 @@
 //   getById (GET  /<aggs>/{id})       → 404, 422
 //   destroy (DELETE /<aggs>/{id})     → [403 if guarded], 404, 409, 422
 //   operation (POST /<aggs>/{id}/op)  → 400, 415, [403 if guarded], 404, 422
-//   find (optional return)            → 404, [422 if it validates a request part]
-//   workflow (POST /workflows/<wf>)   → 400, 415, [403 if guarded], 422
-//   list / non-optional find          → [422 if it validates a request part]
+//   find (single return, optional or not) → 404, [422 if it validates a part]
+//   workflow (POST /workflows/<wf>)   → 400, 415, [403 if guarded], 422,
+//                                       [404 if the body reads an aggregate]
+//   list / collection find            → [422 if it validates a request part]
+//
+// WHERE THE NOT-FOUND RUNG COMES FROM.  The four `404`s above look like a fact
+// about the ROUTE SHAPE — the path carries an `{id}`, the handler loads it, an
+// absent row is a 404 — and for those four they are.  But the rung's actual
+// producer is the READ: every repository read whose declared return type is a
+// single non-optional aggregate has nowhere to put an empty result set, so the
+// emitted method throws the shared not-found carrier and the router renders it.
+// Shape and read agree wherever a path id is what gets read, and DIVERGE in the
+// two places a non-optional read happens without one — a non-optional `find`
+// route, and a workflow body that loads.  Both answered an undeclared 404 for
+// as long as this table keyed the rung on shape alone (F10 + F13 in
+// docs/audits/schemathesis-findings-2026-08.md); `findSingle` therefore
+// declares it like `findOptional` does, and `workflow` declares it under the
+// body predicate `workflowCanAnswerNotFound` (loom-ir.ts) that the five
+// backends thread in as `opts.readsAggregate`.
 //
 // 415 (Unsupported Media Type, RFC 9110 §15.5.16) is declared on exactly the
 // BODY-CARRYING kinds — create / operation / workflow.  A request whose
@@ -120,6 +136,11 @@ export function errorStatuses(
    *  `NotFound`. Omitted ⇒ the literal defaults (409 / 422 / 403 / 404 —
    *  byte-identical output). */
   resolve?: (name: string) => number,
+  /** Facts about the ROUTE'S BODY that its `kind` cannot carry.  Today one:
+   *  `readsAggregate` — the `workflow` arm's not-found predicate.  See the
+   *  "WHERE THE NOT-FOUND RUNG COMES FROM" note above the `notFound` binding
+   *  below for why the rung needs a body fact at all. */
+  opts?: { readsAggregate?: boolean },
 ): number[] {
   const referencedInUse = resolve?.("ReferencedInUse") ?? 409;
   // The domain floor (RS-15: a well-formed request the domain refuses on
@@ -185,10 +206,19 @@ export function errorStatuses(
       return guarded
         ? set(400, forbidden, notFound, UNSUPPORTED_MEDIA_TYPE, 422, domain)
         : set(400, notFound, UNSUPPORTED_MEDIA_TYPE, 422, domain);
-    case "workflow":
+    // A workflow command route has NO path `{id}`, so — unlike every arm above
+    // — the not-found rung is not implied by its shape.  It is implied by its
+    // BODY: a body that reads an aggregate throws on an absent row and the
+    // route answers `notFound`; a body that touches no repository cannot.
+    // `opts.readsAggregate` is that fact, computed once by
+    // `workflowCanAnswerNotFound` (loom-ir.ts) and threaded by all five
+    // backends, so the conditional rung stays one decision instead of five.
+    case "workflow": {
+      const wfNotFound = opts?.readsAggregate ? [notFound] : [];
       return guarded
-        ? set(400, forbidden, UNSUPPORTED_MEDIA_TYPE, 422, domain)
-        : set(400, UNSUPPORTED_MEDIA_TYPE, 422, domain);
+        ? set(400, forbidden, ...wfNotFound, UNSUPPORTED_MEDIA_TYPE, 422, domain)
+        : set(400, ...wfNotFound, UNSUPPORTED_MEDIA_TYPE, 422, domain);
+    }
     // The gated FIND arms resolve `forbidden` for the same reason `operation`
     // and `workflow` do — and they are here because they did NOT.  M-T5.20
     // converted the two command arms above and left these three as literal
@@ -199,9 +229,20 @@ export function errorStatuses(
     // cannot tell a resolved 403 from a hardcoded one.
     case "findOptional":
       return guarded ? set(forbidden, notFound) : [notFound];
+    // A collection find answers `[]` for "no rows" — there is no absent case
+    // and so no rung.
     case "findList":
-    case "findSingle":
       return guarded ? [forbidden] : [];
+    // A NON-optional single find declares the rung for the same reason the
+    // optional one does, arrived at from the opposite direction.  The optional
+    // find RETURNS its absence (the `none` unit is the stdlib 404); the
+    // non-optional one has nowhere to put an empty result set, so every
+    // backend's emitted repository method THROWS the shared not-found carrier
+    // and the aggregate router renders it as `notFound`.  Same status, same
+    // ProblemDetails body, and until this arm it was published by exactly one
+    // of the two (F13 in docs/audits/schemathesis-findings-2026-08.md).
+    case "findSingle":
+      return guarded ? set(forbidden, notFound) : [notFound];
     // `list` is the auto-`findAll`, which carries no `requires` of its own.
     case "list":
       return [];

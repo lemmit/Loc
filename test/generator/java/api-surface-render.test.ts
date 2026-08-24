@@ -179,11 +179,22 @@ system P {
     expect(published.some((k) => k.startsWith("delete "))).toBe(false);
   });
 
-  it("a genuinely-single find declares no 404 (findSingle, not the optional convention)", async () => {
-    // NAMED FIX (iii): the customizer's non-array bucket declared
-    // `findOptional`'s 404 for a bare-`T` find; the derivation classifies it
-    // `findSingle` → [] (matching what the controller answers on the happy
-    // path — the ladder's 404 belongs to ABSENCE-capable returns).
+  it("a genuinely-single find declares the 404 its own controller throws", async () => {
+    // NAMED FIX (iii) said the opposite — `findSingle` → [], "matching what the
+    // controller answers on the happy path".  The happy path was the whole
+    // error: read two lines further and this same controller says
+    //
+    //     var response = service.newest();
+    //     if (response == null) throw new AggregateNotFoundException("not_found");
+    //
+    // so the route it declared `[]` for answers 404 on every miss.  The premise
+    // that "the ladder's 404 belongs to ABSENCE-capable returns" inverts the
+    // rule: a NON-optional return is the one with nowhere to PUT an absence, so
+    // it can only throw.  Corrected with F13 —
+    // docs/audits/schemathesis-findings-2026-08.md — which also brought .NET
+    // (EF `FirstAsync` → 500) and elixir (`json(conn, nil)` → `200 null`) onto
+    // the same answer.  Cross-backend coverage:
+    // test/conformance/not-found-declaration-parity.test.ts.
     const src = `
 system P {
   subdomain D {
@@ -204,6 +215,6 @@ system P {
 `;
     const files = await generateSystemFiles(src);
     const published = scrapeCustomizerRoutes(files);
-    expect(published.get("get /api/orders/newest")).toEqual([]);
+    expect(published.get("get /api/orders/newest")).toEqual([404]);
   });
 });
