@@ -163,6 +163,7 @@ describe("mixDepsGet — bounded retry snippet", () => {
 const RAW_ALLOWED = new Set([
   "test/e2e/support/mix-retry.ts", // this helper
   "test/behavioral/run-elixir.mjs", // the execFileSync twin (no shell there)
+  "test/behavioral/run-heex-ui.mjs", // the shell-chain twin (plain-node .mjs, cannot import the TS helper)
   "scripts/context-integration-e2e.sh", // the shell twin
   "test/e2e/support/mix-retry.test.ts", // this gate (names the command in its own message)
 ]);
