@@ -128,6 +128,38 @@ system RtTenant {
 }
 `;
 
+/** An `auth: required` deployable over an UNTENANTED context — the strongest
+ *  witness for the SSE auth hole.  Untenanted means no refetch-ticket degrade:
+ *  every carried event goes out with its FULL scalar payload, so an
+ *  unauthenticated `GET /api/realtime/events` streams domain data to anyone. */
+const AUTH_SYS = `
+system RtAuth {
+  user { id: string  role: string }
+  subdomain Sales {
+    context Sales {
+      aggregate Order {
+        customerId: string
+        status: string
+      }
+      repository Orders for Order { }
+      event OrderPlaced { order: Order id, customerId: string, status: string }
+      ${BROADCAST}
+    }
+  }
+  api SalesApi from Sales
+  storage primary { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primary }
+  deployable backend {
+    platform: elixir
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    port: 4000
+    auth: required
+  }
+}
+`;
+
 const get = (files: Map<string, string>, suffix: string): string =>
   files.get([...files.keys()].find((k) => k.endsWith(suffix)) ?? "") ?? "";
 
@@ -172,6 +204,43 @@ describe("realtime SSE wire — vanilla Phoenix (delivery: broadcast)", () => {
     // whose `plug :accepts, ["json"]` answers 406 to `Accept: text/event-stream`).
     const apiScope = router.slice(router.indexOf(`scope "/api", BackendWeb do`));
     expect(apiScope).not.toContain("realtime");
+  });
+
+  // ── The stream inherits the deployable's auth mode ────────────────────────
+  //
+  // The `:sse` pipeline exists ONLY to drop `plug :accepts, ["json"]` (which
+  // 406s `Accept: text/event-stream`).  It used to drop the Auth plug with it,
+  // so an `auth: required` Phoenix deployable served
+  // `GET /api/realtime/events` to anyone — and on an UNTENANTED context there
+  // is no refetch-ticket degrade, so those frames carry full scalar payloads.
+  // Hono mounts `/api/realtime` behind `authMiddleware`; python's
+  // `AuthMiddleware` covers it. Both 401. This is that parity.
+  it("gates the SSE stream on `auth: required` — the :sse pipeline carries the Auth plug", async () => {
+    const router = get(await generateSystemFiles(AUTH_SYS), "lib/backend_web/router.ex");
+    const ssePipeline = router.slice(
+      router.indexOf("pipeline :sse do"),
+      router.indexOf("pipeline :sse do") + 200,
+    );
+    expect(ssePipeline).toContain("plug BackendWeb.Auth");
+    // …and the negotiation split that is the pipeline's whole reason to exist
+    // is unchanged (an `:accepts` plug here would 406 every EventSource).
+    expect(ssePipeline).not.toContain(":accepts");
+  });
+
+  it("carries the FULL payload on an untenanted stream — which is why the gate matters", async () => {
+    // The other half of the finding: with no tenancy there is no ticket
+    // degrade, so an ungated stream leaks domain scalars, not just event types.
+    const ctrl = get(await generateSystemFiles(AUTH_SYS), "realtime_controller.ex");
+    expect(ctrl).toContain(`"customerId" => event.customer_id`);
+    expect(ctrl).toContain(`"status" => event.status`);
+  });
+
+  it("leaves the :sse pipeline plug-for-plug unchanged without `auth: required`", async () => {
+    // A deployable that declares no auth emits no Auth plug anywhere — the gate
+    // is gated, exactly like the `:api` pipeline's.
+    const router = get(await generateSystemFiles(sys(BROADCAST)), "lib/backend_web/router.ex");
+    expect(router).toContain("pipeline :sse do\n    plug :fetch_query_params\n  end");
+    expect(router).not.toContain("BackendWeb.Auth");
   });
 
   it("makes the react frontend's realtime client + handlers reach an elixir backend", async () => {

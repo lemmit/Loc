@@ -87,6 +87,7 @@ import {
 import type { OriginRef } from "../../../ir/types/origin.js";
 import { classifyDomainServiceTier } from "../../../ir/util/domain-service-tier.js";
 import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js";
+import { walkExprDeep, walkWorkflowStmtChildren } from "../../../ir/util/walk.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import { lineCount, type SourceMapRecorder } from "../../_trace/sourcemap.js";
@@ -1045,70 +1046,22 @@ function renderLoopBody(
   ];
 }
 
-/** Collect every `ref` name reachable from `e` (any refKind) into `acc`. */
+/** Collect every `ref` name reachable from `e` (any refKind) into `acc`.
+ *
+ *  Rides the SHARED `walkExprDeep` rather than a local `ExprIR.kind` switch.
+ *  The local copy had already lost this exact bet twice — the variant-`match`
+ *  `subject` arm below the previous comment, and (on the statement side) the
+ *  `repo-run` `page:` bounds — and each miss has the same shape: the name reads
+ *  as unread, M-T6.21 `_`-prefixes the bind to satisfy
+ *  `--warnings-as-errors`, and the renderer that DOES read it then names an
+ *  undefined variable → `CompileError` on every `mix compile`.
+ *
+ *  `walkExprChildren` carries a trailing-`never` guard, so a new `ExprIR.kind`
+ *  is a compile error there instead of a silent hole here. */
 function collectRefNames(e: ExprIR | undefined, acc: Set<string>): void {
-  if (!e) return;
-  switch (e.kind) {
-    case "ref":
-      acc.add(e.name);
-      return;
-    case "member":
-      collectRefNames(e.receiver, acc);
-      return;
-    case "method-call":
-      collectRefNames(e.receiver, acc);
-      for (const a of e.args) collectRefNames(a, acc);
-      return;
-    case "call":
-      for (const a of e.args) collectRefNames(a, acc);
-      return;
-    case "lambda":
-      collectRefNames(e.body, acc);
-      return;
-    case "new":
-    case "object":
-      for (const f of e.fields) collectRefNames(f.value, acc);
-      return;
-    case "list":
-      for (const el of e.elements) collectRefNames(el, acc);
-      return;
-    case "paren":
-      collectRefNames(e.inner, acc);
-      return;
-    case "unary":
-      collectRefNames(e.operand, acc);
-      return;
-    case "binary":
-      collectRefNames(e.left, acc);
-      collectRefNames(e.right, acc);
-      return;
-    case "ternary":
-      collectRefNames(e.cond, acc);
-      collectRefNames(e.then, acc);
-      collectRefNames(e.otherwise, acc);
-      return;
-    case "convert":
-      collectRefNames(e.value, acc);
-      return;
-    case "match":
-      // BOTH match forms.  The boolean form has `arms`; the VARIANT form has a
-      // `subject` plus `variantArms`, and the subject was missing here — so a
-      // `let` whose only use was as a variant-match scrutinee looked unread,
-      // got `_`-prefixed to satisfy `--warnings-as-errors`, and then the arm
-      // referenced the un-prefixed name: `** (CompileError) undefined variable`.
-      //
-      // Only reachable from an `expr-let` binding (a `repo-let` binds the
-      // `{:ok, x}` tuple pattern, which this rule never touches), which is why
-      // it went unnoticed until a typed in-system api call produced one.
-      for (const arm of e.arms) {
-        collectRefNames(arm.cond, acc);
-        collectRefNames(arm.value, acc);
-      }
-      collectRefNames(e.subject, acc);
-      for (const arm of e.variantArms ?? []) collectRefNames(arm.value, acc);
-      collectRefNames(e.otherwise, acc);
-      return;
-  }
+  walkExprDeep(e, (sub) => {
+    if (sub.kind === "ref") acc.add(sub.name);
+  });
 }
 
 /** Is `name` referenced by any statement in `rest` — or by any `trailing`
@@ -1151,52 +1104,23 @@ function tupleBind(
 /** Like `collectWorkflowStmtParamRefs` but collects ALL ref names (not just
  *  declared create-params) — feeds the unused-bind discard check. */
 function collectWorkflowStmtParamRefsAll(st: WorkflowStmtIR, acc: Set<string>): void {
-  switch (st.kind) {
-    case "precondition":
-    case "requires":
-    case "expr-let":
-      collectRefNames(st.expr, acc);
-      return;
-    case "factory-let":
-    case "emit":
-      for (const f of st.fields) collectRefNames(f.value, acc);
-      return;
-    case "op-call":
-      acc.add(st.target);
-      for (const a of st.args) collectRefNames(a, acc);
-      return;
-    case "repo-let":
-      for (const a of st.args) collectRefNames(a, acc);
-      return;
-    case "repo-delete":
-      collectRefNames(st.entity, acc);
-      return;
-    case "resource-call":
-      collectRefNames(st.call, acc);
-      return;
-    case "domain-service-call":
-      // `Transfer.run(a, b, q)` — its call args may reference an earlier
-      // `let q = …`; without this the binding reads as unused and gets wrongly
-      // `_`-prefixed, then the service call references an undefined variable.
-      collectRefNames(st.call, acc);
-      return;
-    case "assign":
-      // `total := q.amount` reads the binding `q`.
-      collectRefNames(st.value, acc);
-      return;
-    case "repo-run":
-      for (const a of st.retrievalArgs) collectRefNames(a, acc);
-      return;
-    case "for-each":
-      collectRefNames(st.iterable, acc);
-      for (const inner of st.body) collectWorkflowStmtParamRefsAll(inner, acc);
-      return;
-    case "if-let":
-      for (const a of st.retrievalArgs) collectRefNames(a, acc);
-      for (const inner of st.thenBody) collectWorkflowStmtParamRefsAll(inner, acc);
-      for (const inner of st.elseBody ?? []) collectWorkflowStmtParamRefsAll(inner, acc);
-      return;
-  }
+  // The `op-call` TARGET is not an expression — it is the bound aggregate the
+  // call mutates (`order.confirm()`), so it has no child-expression slot for a
+  // walker to hand over and is added here.
+  if (st.kind === "op-call") acc.add(st.target);
+  // Everything else rides the SHARED, `never`-guarded child walker.  The
+  // hand-enumerated switch this replaces read only `repo-run`'s `retrievalArgs`
+  // and never its `page:` bounds — which the renderer DOES read — so a `let`
+  // used solely as a page offset/limit was `_`-prefixed by the M-T6.21
+  // underscore rule while the emitted `Repo.run(...)` still named it:
+  // `** (CompileError) undefined variable "x"` on every `mix compile`.
+  //
+  // A new `WorkflowStmtIR` kind (or a new child slot on an existing one) is now
+  // a compile error in `walkWorkflowStmtChildren`, not a silent hole here.
+  walkWorkflowStmtChildren(st, {
+    expr: (e) => collectRefNames(e, acc),
+    workflowStmt: (inner) => collectWorkflowStmtParamRefsAll(inner, acc),
+  });
 }
 
 /** Render a single `if-let` branch statement (`thenBody` / `elseBody`) as the

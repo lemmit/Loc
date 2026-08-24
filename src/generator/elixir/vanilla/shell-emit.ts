@@ -668,10 +668,21 @@ ${rootApiLines}
   end
 `
     : "";
-  // The SSE pipeline runs no `:accepts` negotiation (see above) and no Auth
-  // plug: an `EventSource` cannot send an `Authorization` header, and the wire
-  // carries no privileged payload — the authorized read stays the gate, exactly
-  // as on the Hono / python backends whose stream is likewise unauthenticated.
+  // Auth plug — populates `conn.assigns.current_user` from the Bearer JWT so
+  // principal (tenancy) filters can scope reads by the actor, and 401s a
+  // request that carries no valid credentials.  Shared by the `:api` and
+  // `:sse` pipelines, so the split below cannot drift into an auth hole.
+  const authApiPlug = authEnabled ? `\n    plug ${appModule}Web.Auth` : "";
+  // The SSE pipeline runs no `:accepts` negotiation (see above) — that split is
+  // the ONLY reason it exists, since `plug :accepts, ["json"]` answers 406 to
+  // the `Accept: text/event-stream` an `EventSource` sends.  It DOES carry the
+  // same Auth plug: an `auth: required` deployable must not serve an
+  // unauthenticated stream, and an untenanted broadcast event carries its FULL
+  // payload on this wire (only tenant-scoped events degrade to a refetch
+  // ticket).  Hono mounts `/api/realtime` behind `authMiddleware` and python's
+  // `AuthMiddleware` covers it — both 401 without credentials — so this is
+  // parity, not a Phoenix-specific restriction.  (An earlier comment here
+  // claimed those two streams were "likewise unauthenticated".  They are not.)
   const sseLines = sseRoutes
     .map((r) => {
       const path = r.path.slice("!sse:".length);
@@ -681,7 +692,7 @@ ${rootApiLines}
   const sseBlock = sseLines
     ? `
   pipeline :sse do
-    plug :fetch_query_params
+    plug :fetch_query_params${authApiPlug}
   end
 
   scope "/" do
@@ -742,9 +753,8 @@ ${liveLines}
   end
 `
     : "";
-  // Auth plug in the :api pipeline — populates `conn.assigns.current_user` from
-  // the Bearer JWT so principal (tenancy) filters can scope reads by the actor.
-  const authApiPlug = authEnabled ? `\n    plug ${appModule}Web.Auth` : "";
+  // (`authApiPlug` — the :api / :sse Auth plug — is defined above, next to the
+  // `:sse` pipeline it also feeds.)
   // `/api/auth/me` session probe (+ OIDC login/callback/logout handshake when an
   // `auth { oidc }` block is present).  Piped through :api so the Auth plug
   // verifies the principal first.
@@ -958,8 +968,15 @@ defmodule ${appModule}Web.FaultHandler do
     # \`Phoenix.Router\`'s dispatch wraps a raise from a controller or pipeline
     # plug in a \`WrapperError\` carrying the conn AS IT WAS at the raise — the
     # one with the request id and any response headers already put.  Prefer it.
+    #
+    # \`e.kind\`, not a hardcoded \`:error\`: a WrapperError also wraps a THROW or
+    # an EXIT (\`kind: :throw | :exit\`), and the kind is load-bearing twice
+    # below — \`Exception.format/3\` formats a thrown term as an exception and
+    # garbles the log line, and the already-sent re-raise
+    # (\`:erlang.raise(kind, …)\`) would convert an exit into an error and lose
+    # the original failure signal.
     e in Plug.Conn.WrapperError ->
-      handle(e.conn || conn, :error, e.reason, e.stack)
+      handle(e.conn || conn, e.kind, e.reason, e.stack)
 
     e ->
       handle(conn, :error, e, __STACKTRACE__)

@@ -97,20 +97,39 @@ describe("elixir denial ladder — `httpStatus` overrides move the runtime arm",
     expect(all).toContain('problem_response(conn, 409, "Disallowed"');
   });
 
-  it("`httpStatus Forbidden -> 401` retargets the `requires` rung", async () => {
+  // THE TITLE MOVES WITH THE STATUS on these two rungs.  Both assertions used
+  // to read `401, "Forbidden"` / `410, "Not Found"` — the error NAME humanised,
+  // pinning a divergence: the other four backends title `Forbidden`/`NotFound`
+  // through `problemTitle(<resolved status>)`, so they answer `410, "Gone"` and
+  // `401, "Error"` (401 has no `problemTitle` entry).  Elixir alone kept the
+  // name.  Cross-backend census: `test/conformance/override-status-title-parity`.
+  it("`httpStatus Forbidden -> 401` retargets the `requires` rung, title included", async () => {
     const { all } = await emit("{ httpStatus Forbidden -> 401 }");
-    expect(all).toContain('problem_response(conn, 401, "Forbidden"');
+    expect(all).toContain('problem_response(conn, 401, "Error"');
     expect(all).not.toContain('problem_response(conn, 403, "Forbidden"');
+    // The old (name-derived) pairing must be gone, not merely joined.
+    expect(all).not.toContain('problem_response(conn, 401, "Forbidden"');
   });
 
   it("`httpStatus NotFound -> 410` retargets BOTH the per-controller arm and the shared `not_found_response/3`", async () => {
     const { all, problem } = await emit("{ httpStatus NotFound -> 410 }");
-    expect(all).toContain('problem_response(conn, 410, "Not Found"');
+    expect(all).toContain('problem_response(conn, 410, "Gone"');
     // The shared app-global responder is the one a per-controller-only fix
     // would have left behind at 404 — the exact half-move the mechanism exists
     // to prevent.
-    expect(problem).toContain('problem_response(conn, 410, "Not Found"');
+    expect(problem).toContain('problem_response(conn, 410, "Gone"');
     expect(problem).not.toContain('problem_response(conn, 404, "Not Found"');
+    expect(problem).not.toContain('problem_response(conn, 410, "Not Found"');
+  });
+
+  it("`Disallowed` is the exception: its title stays the error NAME under a remap", async () => {
+    // Every backend spells the state-gate title as the literal "Disallowed"
+    // next to a resolved status, so a blanket "title = problemTitle(status)"
+    // repair would break parity here.  423 is "Locked" — asserting the title is
+    // still "Disallowed" is what stops that.
+    const { all } = await emit("{ httpStatus Disallowed -> 423 }");
+    expect(all).toContain('problem_response(conn, 423, "Disallowed"');
+    expect(all).not.toContain('problem_response(conn, 423, "Locked"');
   });
 });
 
@@ -139,5 +158,80 @@ describe("elixir denial ladder — the OpenAPI declaration moves with the arm", 
     expect(spec).toContain("403 => %OpenApiSpex.Response{");
     expect(spec).toContain("404 => %OpenApiSpex.Response{");
     expect(spec).toContain("422 => %OpenApiSpex.Response{");
+  });
+});
+
+// ─── The DENIAL TERM's own shape, as declared by the emitted `@spec` ─────────
+//
+// Since the typed denial protocol (`denial.ts`) every rung short-circuits to a
+// 2-TUPLE reason — `{:error, {:forbidden, msg}}` / `{:precondition_failed, msg}`
+// / `{:disallowed, msg}` / `{:validation_failed, [%{…}]}` — the tag naming the
+// rung and the second element carrying the RFC 7807 `detail`.  The guarded
+// operations' `@spec`s still declared `| {:error, atom()}`, which no denial the
+// function can produce matches: a spec that describes a shape the code never
+// returns, in the one place a reader looks for the contract.
+const GUARDED_RETURNING = `
+system Denials2 {
+  user { id: string  level: int }
+  subdomain Sales {
+    context Sales {
+      error Refused { message: string }
+      aggregate Order with crudish {
+        total: int
+        status: string
+        operation settle(): Order or Refused {
+          requires currentUser.level > 2
+          precondition total > 0
+          status := "settled"
+        }
+      }
+      repository Orders for Order { }
+      aggregate Cart shape: document with crudish {
+        total: int
+        status: string
+        operation close(): Cart or Refused {
+          precondition total > 0
+          status := "settled"
+        }
+        operation touch() {
+          precondition total > 0
+          total := total + 1
+        }
+      }
+      repository Carts for Cart { }
+    }
+  }
+  api SalesApi from Sales
+  storage primary { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primary }
+  deployable d {
+    platform: elixir
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    port: 8080
+    auth: required
+  }
+}
+`;
+
+describe("elixir denial ladder — the emitted @spec matches the typed-denial term", () => {
+  it("a guarded op's spec declares the 2-tuple reason, on the relational AND document paths", async () => {
+    const files = await generateSystemFiles(GUARDED_RETURNING);
+    const ctx = files.get([...files.keys()].find((k) => k.endsWith("/sales.ex"))!) ?? "";
+    expect(ctx, "the context facade was not emitted").not.toBe("");
+    // Three guarded ops: the relational returning op, the document returning
+    // op, and the document NAMED op — one per `denialSpec` site.
+    const specs = ctx.split("\n").filter((l) => l.includes("{:error, {atom(), term()}}"));
+    expect(specs.length, "expected all three guarded-op specs to carry the 2-tuple").toBe(3);
+    // The bare-atom form must be gone: it is what the guards never return.
+    expect(ctx).not.toContain("{:error, atom()}");
+  });
+
+  it("the actual denial terms the same ops emit ARE 2-tuples (the spec is not a lie)", async () => {
+    const files = await generateSystemFiles(GUARDED_RETURNING);
+    const ctx = files.get([...files.keys()].find((k) => k.endsWith("/sales.ex"))!) ?? "";
+    expect(ctx).toMatch(/ensure\([^\n]*, \{:forbidden, "/);
+    expect(ctx).toMatch(/ensure\([^\n]*, \{:precondition_failed, "/);
   });
 });

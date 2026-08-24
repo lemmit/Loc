@@ -67,6 +67,7 @@ import {
   opHasGuards,
   opHasWhenGate,
   persistPutBodies,
+  renderDurableEmitDispatchParts,
   renderEmitDispatchLines,
   renderReturningOpFunction,
   renderReturningStmt,
@@ -1073,17 +1074,34 @@ function renderNamedOpFunction(
   // ephemeral-only (or channel-less) op keeps the post-commit fan-out and its
   // byte-identical layout.
   const txWrapEmits = emits && opEmitsDurableEvent(op, channels);
-  const dispatchLines = emits
-    ? renderEmitDispatchLines(
+  const dispatchLines =
+    emits && !txWrapEmits
+      ? renderEmitDispatchLines(
+          op,
+          rc,
+          hasDispatcher,
+          "        ",
+          `${ctx.name}.${agg.name}.${op.name}`,
+          opFragments,
+          channels,
+        )
+      : [];
+  // Durable emit: the phases straddle the transaction — event binds ahead of it
+  // (keeping `loom_event_<i>` in scope on both sides), the `__loom_outbox`
+  // INSERT inside it, the PubSub broadcast only after it commits.  Broadcasting
+  // inside the tx let SSE / LiveView subscribers observe an event whose write
+  // then rolled back.
+  const durableEmit = txWrapEmits
+    ? renderDurableEmitDispatchParts(
         op,
         rc,
         hasDispatcher,
-        txWrapEmits ? "          " : "        ",
+        { bind: "    ", dispatch: "          ", broadcast: "        " },
         `${ctx.name}.${agg.name}.${op.name}`,
         opFragments,
         channels,
       )
-    : [];
+    : { bind: [], dispatch: [], broadcast: [] };
 
   // Render the body (guards / assigns / let) — shared with the returning-op
   // path; a non-returning body never carries a `return` arm.  The statement index
@@ -1214,23 +1232,40 @@ function renderNamedOpFunction(
   if (txWrapEmits) {
     // Durable emit: the outbox INSERT rides `Repo.transaction` together with
     // the persist (+ any prov/audit rows), so "aggregate saved" and "event
-    // owed" commit or roll back as one.  `Repo.transaction` already yields
-    // `{:ok, saved}` / `{:error, reason}`, so the outer result shape is
+    // owed" commit or roll back as one.
+    //
+    // The PubSub BROADCAST does not ride it.  That is the SSE / LiveView wire,
+    // and a broadcast inside the tx is observable before the commit — a
+    // rollback then leaves subscribers holding an event whose write never
+    // happened.  So: bind the event structs first, INSERT inside, broadcast in
+    // the post-commit `{:ok, saved}` arm (the ordering the non-durable branches
+    // below already use).  `Repo.transaction`'s result is unwrapped through
+    // `tx_result` so the outer `{:ok, saved}` / `{:error, reason}` shape is
     // unchanged.
-    persist = `    changeset =
+    persist = `${durableEmit.bind.length > 0 ? `${durableEmit.bind.join("\n")}\n\n` : ""}    changeset =
       ${persistBase}
       |> Ecto.Changeset.change(%{})${putBlock6}${opLockPipe6}${invPipe6}
 
-    ${appModule}.Repo.transaction(fn ->
+    tx_result =
+      ${appModule}.Repo.transaction(fn ->
       case ${repoMod}.persist_change(changeset) do
         {:ok, saved} ->
-${txTail.length > 0 ? `${txTail.join("\n")}\n` : ""}${dispatchBlock}
+${txTail.length > 0 ? `${txTail.join("\n")}\n` : ""}${durableEmit.dispatch.join("\n")}
           saved
 
         {:error, reason} ->
           ${appModule}.Repo.rollback(reason)
       end
-    end)`;
+    end)
+
+    case tx_result do
+      {:ok, saved} ->
+${durableEmit.broadcast.join("\n")}
+        {:ok, saved}
+
+      {:error, reason} ->
+        {:error, reason}
+    end`;
   } else if (hasProv || hasAudit) {
     persist = emits
       ? // Emit + prov/audit: commit the state change (+ derived rows) in the
