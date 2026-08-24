@@ -51,7 +51,9 @@ ${body}
       }
     }
   }
-  deployable api { platform: node, contexts: [C], port: 3000 }
+  storage pg { type: postgres }
+  resource cState { for: C, kind: state, use: pg }
+  deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
 }
 `;
 
@@ -252,7 +254,9 @@ describe("provenanced — TypeScript emission", () => {
       const files = generateSystems(model).files;
       const mig = files.get("api/db/migrations/29991231000000_provenance.sql")!;
       expect(mig).toBeDefined();
-      expect(mig).toContain('ALTER TABLE "carts" ADD COLUMN "total_provenance" JSONB');
+      // Schema-qualified: the deployable binds a `resource` for context C, so
+      // its tables live in the `c` Postgres schema — the shape a real user gets.
+      expect(mig).toContain('ALTER TABLE "c"."carts" ADD COLUMN "total_provenance" JSONB');
       // The history table is a shared MigrationsIR companion table
       // (`provenanceTableShape`) now, so it lands in the ordinary module
       // migration rather than being hand-written into this late one.
@@ -424,13 +428,15 @@ system S {
       repository Carts for Cart { }
       workflow buildCart {
         create(base: int, qty: int) {
-          let cart = Cart.create({ label: "seed", discount: 0 })
+          let cart = Cart.create({ label: "seed", discount: 0, total: 0 })
           cart.applyTotal(base, qty)
         }
       }
     }
   }
-  deployable api { platform: node, contexts: [C], port: 3000 }
+  storage pg { type: postgres }
+  resource cState { for: C, kind: state, use: pg }
+  deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
 }
 `;
 
@@ -502,7 +508,9 @@ system S {
       }
     }
   }
-  deployable api { platform: node, contexts: [C], port: 3000 }
+  storage pg { type: postgres }
+  resource cState { for: C, kind: state, use: pg }
+  deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
 }
 `;
 

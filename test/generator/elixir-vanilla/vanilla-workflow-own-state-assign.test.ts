@@ -77,7 +77,7 @@ describe("vanilla foundation — workflow own-state compound assignment", () => 
     expect(wf).toContain("state <- (%{state | attempts: record.attempts + n})");
   });
 
-  it("emits Decimal arithmetic for a money `total -= 5.00 USD`", async () => {
+  it("emits Decimal arithmetic for a money `total -= money(...)`", async () => {
     const files = await generateSystemFiles(COMPOUND_SRC);
     const wf = [...files.entries()].find(([k]) =>
       k.endsWith("workflows/order_fulfillment.ex"),

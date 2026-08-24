@@ -31,7 +31,9 @@ system Shop {
     }
   }
   api CatalogApi from Sales
-  deployable d { platform: python  contexts: [Catalog]  serves: CatalogApi  port: 4000 }
+  storage pg { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: pg }
+  deployable d { platform: python  contexts: [Catalog]  serves: CatalogApi  dataSources: [catalogState]  port: 4000 }
 }
 `;
 
@@ -78,7 +80,9 @@ describe("python VO invariant → 422 at the wire", () => {
           }
         }
         api SApi from Sub
-        deployable d { platform: python  contexts: [C]  serves: SApi  port: 4000 }
+        storage pg { type: postgres }
+        resource cState { for: C, kind: state, use: pg }
+        deployable d { platform: python  contexts: [C]  serves: SApi  dataSources: [cState]  port: 4000 }
       }
     `);
     const wm = generateSystems(model).files.get("d/app/http/wire_models.py")!;
