@@ -219,11 +219,11 @@ export default function OrderDetail() {
               </Stack>
             </Card>
             <Group>
-              <Button variant="filled" onClick={() => openAddLineModal(addLine)} data-testid="orders-op-addLine">Add Line</Button>
+              <Button variant="filled" onClick={() => openAddLineModal(addLine)} data-testid="orders-op-addLine">{t("page.Detail.button.uhabr2", "Add Line")}</Button>
     
-              <Button variant="light" onClick={() => openConfirmModal(confirm)} data-testid="orders-op-confirm">Confirm</Button>
+              <Button variant="light" onClick={() => openConfirmModal(confirm)} data-testid="orders-op-confirm">{t("page.Detail.button.8tbqwf", "Confirm")}</Button>
     
-              <Button variant="light" onClick={() => openUpdateModal(update)} data-testid="orders-op-update">Update</Button>
+              <Button variant="light" onClick={() => openUpdateModal(update)} data-testid="orders-op-update">{t("page.Detail.button.uk4kus", "Update")}</Button>
     
             </Group>
           </Stack>
