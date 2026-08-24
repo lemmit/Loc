@@ -16,7 +16,7 @@
 // `requireCurrentUser()` principal binding and the `ignoring <Cap>` bypass.
 
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = (persistence: string) => `
@@ -82,7 +82,7 @@ const cache = new Map<string, Map<string, string>>();
 async function files(persistence: string): Promise<Map<string, string>> {
   let f = cache.get(persistence);
   if (!f) {
-    f = (await generateSystems(await parseValid(SRC(persistence)))).files;
+    f = await generateSystemFiles(SRC(persistence));
     cache.set(persistence, f);
   }
   return f;

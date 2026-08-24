@@ -11,23 +11,8 @@
 // `dotnet build` proves the C# compiles; the SQL is a string literal, so a
 // missing WHERE conjunct is invisible to it.
 
-import { NodeFileSystem } from "langium/node";
-import { parseHelper } from "langium/test";
 import { describe, expect, it } from "vitest";
-import { createDddServices } from "../../../src/language/ddd-module.js";
-import type { Model } from "../../../src/language/generated/ast.js";
-import { generateSystems } from "../../../src/system/index.js";
-
-async function build(source: string): Promise<Model> {
-  const services = createDddServices(NodeFileSystem);
-  const doc = await parseHelper<Model>(services.Ddd)(source, { validation: true });
-  const errs = (doc.diagnostics ?? []).filter((d) => d.severity === 1);
-  expect(
-    errs.map((d) => d.message),
-    "source validation errors",
-  ).toEqual([]);
-  return doc.parseResult.value;
-}
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SOURCE = (persistence: string) => `
 system S {
@@ -94,7 +79,7 @@ const IGNORING = "d/Application/Projections/AllTimeVolumeQpHandler.cs";
 
 let cache: Map<string, string> | undefined;
 async function dapper(): Promise<Map<string, string>> {
-  cache ??= generateSystems(await build(SOURCE("dapper"))).files;
+  cache ??= await generateSystemFiles(SOURCE("dapper"));
   return cache;
 }
 
@@ -140,7 +125,7 @@ describe("Dapper query-projection aggregations apply the source capability filte
   });
 
   it("leaves the EF adapter alone — it inherits HasQueryFilter", async () => {
-    const files = generateSystems(await build(SOURCE("efcore"))).files;
+    const files = await generateSystemFiles(SOURCE("efcore"));
     const src = files.get(UNFILTERED)!;
     expect(src).toContain("private readonly AppDbContext _db;");
     expect(src).toContain(".GroupBy(_ => 1)");
