@@ -90,10 +90,16 @@ function renderTestsCore(
   const voNames = ctx.valueObjects.map((v) => v.name).filter(refs);
   const enumNames = ctx.enums.map((e) => e.name).filter(refs);
   const usesIds = /\bIds\.\w/.test(bodyStr);
+  // A money literal / money expression in a test body renders as
+  // `new Decimal("…")` / `.eq(...)` receivers (M-T6.44's fixture was the first
+  // test block to reference the money PRIMITIVE directly — every earlier
+  // fixture asserted a VO's scalar `amount`, so the import was never needed).
+  const usesDecimal = /\bnew Decimal\(/.test(bodyStr);
 
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { describe, it, expect } from "vitest";`);
+  if (usesDecimal) lines.push(`import Decimal from "decimal.js";`);
   if (subjectImport && subjectNames.length > 0) {
     lines.push(`import { ${subjectNames.join(", ")} } from "${subjectImport.modulePath}";`);
   }

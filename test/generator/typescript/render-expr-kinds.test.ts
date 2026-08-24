@@ -801,3 +801,57 @@ describe("ts renderTsType — generic carriers (P3b)", () => {
 });
 
 void BOOL;
+
+// ---------------------------------------------------------------------------
+// M-T6.44 (numeric-types audit F7) — the MIRROR money arm.  `moneyArithmetic`
+// admits `money × scalar` commutatively, so money arrives on the RIGHT with an
+// integral/decimal left; the gate used to read `leftType` alone, and
+// `qty * price` fell to native `*` on a decimal.js Decimal — TS2363, an
+// uncompilable generated project.  The numeric left is wrapped so the method
+// receiver is a Decimal.
+// ---------------------------------------------------------------------------
+describe("ts renderTsExpr — money on the RIGHT of a binary (M-T6.44 mirror arm)", () => {
+  const DECIMAL: TypeIR = { kind: "primitive", name: "decimal" };
+  const LONG: TypeIR = { kind: "primitive", name: "long" };
+  const mul = (lt: TypeIR, l: ExprIR): ExprIR => ({
+    kind: "binary",
+    op: "*",
+    left: l,
+    right: { ...thisProp("price"), type: MONEY },
+    leftType: lt,
+    rightType: MONEY,
+    resultType: MONEY,
+  });
+
+  it("int * money dispatches through the Decimal method API with a wrapped left", () => {
+    expect(renderTsExpr(mul(INT, { ...thisProp("qty"), type: INT }))).toBe(
+      "new Decimal(this._qty).times(this._price)",
+    );
+  });
+
+  it("long * money takes the same arm", () => {
+    expect(renderTsExpr(mul(LONG, { ...thisProp("qty"), type: LONG }))).toBe(
+      "new Decimal(this._qty).times(this._price)",
+    );
+  });
+
+  it("decimal * money takes the same arm (plain decimal is a native number here)", () => {
+    expect(renderTsExpr(mul(DECIMAL, { ...thisProp("rate"), type: DECIMAL }))).toBe(
+      "new Decimal(this._rate).times(this._price)",
+    );
+  });
+
+  it("string + string is untouched by the mirror arm (concat stays native)", () => {
+    expect(
+      renderTsExpr({
+        kind: "binary",
+        op: "+",
+        left: { ...thisProp("first"), type: STRING },
+        right: { ...thisProp("last"), type: STRING },
+        leftType: STRING,
+        rightType: STRING,
+        resultType: STRING,
+      }),
+    ).toBe("this._first + this._last");
+  });
+});
