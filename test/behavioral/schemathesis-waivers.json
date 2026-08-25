@@ -1,5 +1,6 @@
 {
-  "comment": "Ratcheting waivers for the schemathesis contract-fuzzing leg (M-T9.21). A rule names one ROOT CAUSE \u2014 a check plus a regex over the operation label \u2014 and points at the entry in docs/audits/schemathesis-findings-2026-08.md that explains it with a repro. The ratchet bites both ways: a finding no rule matches FAILS the run (a new bug, or a known one spreading to a surface no rule claimed), and a rule that matches nothing across the whole run ALSO fails it (fix the root cause, delete the rule and strike the register entry in the same PR). Rules are deliberately NOT machine-generated: an unexplained waiver is indistinguishable from a silent skip. `kind` is `bug` (a defect we are choosing not to fix in the discovery PR) or `by-design` (the check disagrees with a deliberate decision). STALE IS NOT FIXED: a rule that matches nothing is the ratchet asking a QUESTION \u2014 did the root cause go away, or did the fuzzer stop reaching it? Answer it against the emitter before deleting the rule. W10 spent three nights failing the run as \"stale\" while `errorStatuses(\"workflow\")` still had no 404 arm; the case had simply stopped being generated when the spec shape shifted (the seed is pinned, but the cases are derived FROM the spec, and a data-dependent finding needs a row an earlier case created). A finding whose reproduction depends on run data carries `intermittent` for exactly that reason \u2014 W10 was one and did not say so.",
+  "comment": "Ratcheting waivers for the schemathesis contract-fuzzing legs (M-T9.21). A rule names one ROOT CAUSE — a check plus a regex over the operation label — and points at the entry in docs/audits/schemathesis-findings-2026-08.md that explains it with a repro. The ratchet bites both ways: a finding no rule matches FAILS the run (a new bug, or a known one spreading to a surface no rule claimed), and a rule that matches nothing across the whole run ALSO fails it (fix the root cause, delete the rule and strike the register entry in the same PR). Rules are deliberately NOT machine-generated: an unexplained waiver is indistinguishable from a silent skip. `kind` is `bug` (a defect we are choosing not to fix in the discovery PR) or `by-design` (the check disagrees with a deliberate decision). STALE IS NOT FIXED: a rule that matches nothing is the ratchet asking a QUESTION — did the root cause go away, or did the fuzzer stop reaching it? Answer it against the emitter before deleting the rule. W10 spent three nights failing the run as \"stale\" while `errorStatuses(\"workflow\")` still had no 404 arm; the case had simply stopped being generated when the spec shape shifted (the seed is pinned, but the cases are derived FROM the spec, and a data-dependent finding needs a row an earlier case created). A finding whose reproduction depends on run data carries `intermittent` for exactly that reason — W10 was one and did not say so.",
+  "backendsComment": "`backends` names the LEGS a rule claims, and drives BOTH halves of the ratchet: a rule only absorbs a finding on a leg it claims (so a known root cause spreading to a sixth surface is still unwaived), and it is only judged stale on a leg it claims (so fixing it on python means dropping \"python\" from the list in the same PR, while the rule survives for the legs that still reproduce it). Each leg is its own process against its own database, so staleness cannot be pooled across them. Omitting `backends` means all five. The elixir leg carries NO rules yet: its toolchain could not be run locally when the matrix landed, so it runs as a discovery cell (continue-on-error in schemathesis.yml) until a nightly run seeds its rules — see the audit's \"elixir leg\" section.",
   "waivers": [
     {
       "id": "W8",
@@ -8,8 +9,14 @@
       ],
       "check": "negative_data_rejection",
       "operations": "^GET ",
+      "backends": [
+        "node",
+        "python",
+        "java",
+        "dotnet"
+      ],
       "kind": "by-design",
-      "reason": "F9 \u2014 schemathesis counts an unknown QUERY parameter as a schema-violating request that the API accepted. Ignoring unrecognised query parameters is ordinary HTTP behaviour and deliberate here; recorded so the decision is visible rather than silently filtered out of the check set."
+      "reason": "F9 — schemathesis counts an unknown QUERY parameter as a schema-violating request that the API accepted. Ignoring unrecognised query parameters is ordinary HTTP behaviour and deliberate here; recorded so the decision is visible rather than silently filtered out of the check set. Reproduces identically on every booted backend, which is the evidence that it is the DECISION and not one backend's router."
     },
     {
       "id": "W11",
@@ -18,10 +25,14 @@
       ],
       "check": "not_a_server_error",
       "operations": "^POST /api/orders/\\{id\\}/add_line$",
+      "backends": [
+        "node",
+        "java"
+      ],
       "kind": "bug",
       "intermittent": true,
-      "intermittentReason": "Reaching the overflow needs TWO independent things in one run: an out-of-int32 `qty` (the declared `{type: integer}` permits it) AND a path `{id}` that resolves to a row the fuzzer created earlier \u2014 a random uuid 404s before the column is ever written. So its absence from a given run is not evidence of a fix; it reproduced on the discovery run and not on the next. Removing this exemption means pinning it as a deterministic case in the behavioral tier \u2014 the shape W6's fix took (#2615).",
-      "reason": "F11 \u2014 an `int` body field publishes `{\"type\":\"integer\"}` with NO bound and validates as `z.number().int()` with no bound, while the column behind it is Postgres `int4`: a value the published contract permits (9543751572142) overflows and 500s. Same declared-vs-enforced family as F7, one level down \u2014 F7 was the declared type, this is the missing declared range. Scoped to the one operation it reproduces on deliberately: widening it is a decision, not a default. Uncovered when the over-broad W1 (`^POST /api/`) was deleted with F1's fix."
+      "intermittentReason": "Reaching the overflow needs TWO independent things in one run: an out-of-int32 `qty` (the declared `{type: integer}` permits it) AND a path `{id}` that resolves to a row the fuzzer created earlier — a random uuid 404s before the column is ever written. So its absence from a given run is not evidence of a fix; it reproduced on the discovery run and not on the next. Removing this exemption means pinning it as a deterministic case in the behavioral tier — the shape W6's fix took (#2615).",
+      "reason": "F11 — an `int` body field publishes `{\"type\":\"integer\"}` with NO bound and validates as `z.number().int()` with no bound, while the column behind it is Postgres `int4`: a value the published contract permits (9543751572142) overflows and 500s. Same declared-vs-enforced family as F7, one level down — F7 was the declared type, this is the missing declared range. Scoped to the one operation it reproduces on deliberately: widening it is a decision, not a default. Uncovered when the over-broad W1 (`^POST /api/`) was deleted with F1's fix."
     },
     {
       "id": "W12",
@@ -30,10 +41,218 @@
       ],
       "check": "status_code_conformance",
       "operations": "^POST /api/orders/\\{id\\}/add_line$",
+      "backends": [
+        "node",
+        "java"
+      ],
       "kind": "bug",
       "intermittent": true,
       "intermittentReason": "The consequence half of W11 inherits its data dependency exactly: no overflow in a run means no 500, and no 500 means nothing for status_code_conformance to report. Exempt from the staleness ratchet for the same reason, and it graduates with W11.",
       "reason": "The consequence half of W11: a 500 is not a declared response on any route, so F11's overflow also trips status_code_conformance. Clears with W11 when `int` gets its declared int32 range on all five backends."
+    },
+    {
+      "id": "W20",
+      "findings": [
+        "F16"
+      ],
+      "check": "not_a_server_error",
+      "operations": "^POST /api/(orders|wallets)$",
+      "backends": [
+        "python"
+      ],
+      "kind": "bug",
+      "reason": "F16 — a create whose `X id` reference is a WELL-FORMED uuid for a row that does not exist reaches Postgres and trips the foreign key: asyncpg raises ForeignKeyViolationError, SQLAlchemy re-raises it as IntegrityError, and nothing between the repository and the router maps it, so it surfaces as 500. F2's successor: F2 was the MALFORMED reference (fixed on all five in #2555 by publishing + enforcing `format: uuid`), this is the well-formed one, which no amount of wire validation can catch — it needs the existence check the domain layer already knows how to express. Scoped to the two creates in these fixtures that carry a cross-aggregate reference."
+    },
+    {
+      "id": "W21",
+      "findings": [
+        "F16"
+      ],
+      "check": "status_code_conformance",
+      "operations": "^POST /api/(orders|wallets)$",
+      "backends": [
+        "python"
+      ],
+      "kind": "bug",
+      "reason": "The consequence half of W20: 500 is not a declared response on any route, so F16's foreign-key escape also trips status_code_conformance. Clears with W20."
+    },
+    {
+      "id": "W22",
+      "findings": [
+        "F17"
+      ],
+      "check": "negative_data_rejection",
+      "operations": "^POST /api/products(/\\{id\\}/update)?$",
+      "backends": [
+        "python"
+      ],
+      "kind": "bug",
+      "reason": "F17 — F7 (declared `type` not honoured: the wire validators coerce) is still OPEN on python. `Money.amount` publishes `{\"type\":\"number\",\"minimum\":0}`, and a JSON boolean is accepted for it: pydantic's lax mode treats `false` as `0.0` (bool is an int subclass in Python), so the create answers 201 for a body the published contract rejects. F7's fix landed on the Hono emitter only (2026-08-16) — the node leg is clean here and python is not, which is precisely the per-backend divergence this matrix exists to surface."
+    },
+    {
+      "id": "W23",
+      "findings": [
+        "F18"
+      ],
+      "check": "unsupported_method",
+      "operations": "^GET /api/[a-z_]+/[a-z_]+$",
+      "backends": [
+        "python"
+      ],
+      "kind": "bug",
+      "reason": "F18 — F8 (a wrong verb on a static sub-path is swallowed by the sibling `/{id}` route) is still OPEN on python. `DELETE /api/customers/by_email` matches `DELETE /api/customers/{id}` with `id=\"by_email\"` and answers 422 `Expected UUID`, where the honest answer is 405. F8's fix is a hono middleware (`emitStaticSubpathMethodGuard`, `src/platform/hono/v4/routes-builder.ts`) with no python counterpart. The pattern matches a two-segment LITERAL path only — `/{id}` carries braces, so the parameterised siblings cannot fall in here."
+    },
+    {
+      "id": "W24",
+      "findings": [
+        "F19",
+        "F20"
+      ],
+      "check": "not_a_server_error",
+      "operations": "^POST /api/",
+      "backends": [
+        "dotnet"
+      ],
+      "kind": "bug",
+      "reason": "F19 + F20 — two write-path escapes on .NET, deliberately covered by ONE discovery-wide rule until each lands: (F19) a `date-time` string the contract declares but the wire layer does not parse reaches `DateTime.Parse` in the domain layer and throws `FormatException` → 500 (`placedAt: \"\"`); (F20) a NUL character inside a declared `string` reaches Postgres, which rejects it with `CharacterNotInRepertoireError` (22021) → 500 (`email: \"\\u0000\"`). Both are the F7 family — declared-but-unenforced — and both need the same fix shape, a wire-boundary validator that refuses what the published schema forbids. Broad on purpose, as W1/W5 were for the node discovery pass: narrowing it before either root cause lands would just split one unfixed defect across three rules."
+    },
+    {
+      "id": "W25",
+      "findings": [
+        "F19",
+        "F20"
+      ],
+      "check": "status_code_conformance",
+      "operations": "^POST /api/",
+      "backends": [
+        "dotnet"
+      ],
+      "kind": "bug",
+      "reason": "The consequence half of W24: 500 is not a declared response on any route. Clears with W24."
+    },
+    {
+      "id": "W26",
+      "findings": [
+        "F22"
+      ],
+      "check": "negative_data_rejection",
+      "operations": "^POST /api/orders/\\{id\\}/(confirm|update)$",
+      "backends": [
+        "dotnet"
+      ],
+      "kind": "bug",
+      "reason": "F22 — an operation route sent with NO body at all answers 415 (ASP.NET's media-type check fires before model binding), and 415 is not in the set of statuses that count as a rejection, so the check reads it as \"schema-violating request accepted\". The malformed `{id}` in the same request is never reached. The honest answer is the declared 422 for the unparseable identifier, or 400 for the absent required body — the point is that the FIRST thing checked is the one the contract says least about."
+    },
+    {
+      "id": "W27",
+      "findings": [
+        "F21"
+      ],
+      "check": "negative_data_rejection",
+      "operations": "^POST /api/customers$",
+      "backends": [
+        "dotnet"
+      ],
+      "kind": "bug",
+      "intermittent": true,
+      "intermittentReason": "Whether the empty-string create is REACHED depends on whether the same generated body also carries the NUL byte of F20, which 500s first and is itself data-dependent — two runs of the same pinned seed produced the write half on one and only the read half (W28) on the other. Absence is therefore not evidence of a fix; it graduates with F21.",
+      "reason": "F21 — `name` publishes `minLength: 1` in BOTH the request and the response schema, and .NET enforces it in neither: the create accepts `\"\"` with 201."
+    },
+    {
+      "id": "W28",
+      "findings": [
+        "F21"
+      ],
+      "check": "response_schema_conformance",
+      "operations": "^GET /api/customers",
+      "backends": [
+        "dotnet"
+      ],
+      "kind": "bug",
+      "intermittent": true,
+      "intermittentReason": "The read half only fires once the write half (W27) has stored the offending row in the same run, so it inherits that data dependency exactly.",
+      "reason": "F21's read half — the row the unenforced `minLength` let in is then served by a response the API's OWN schema declares as `minLength: 1`, so the server violates its published contract on a plain `GET`. The two halves are one defect: enforce the declared bound on the write and the read conforms again."
+    },
+    {
+      "id": "W29",
+      "findings": [
+        "F23",
+        "F19"
+      ],
+      "check": "not_a_server_error",
+      "operations": "^POST /api/",
+      "backends": [
+        "java"
+      ],
+      "kind": "bug",
+      "reason": "F23 + F19 on java — a required body field that arrives as JSON `null` is not rejected at the wire boundary and reaches the invariant code, which dereferences it (`Cannot invoke \"String.codePoints()\" because \"sku\" is null`, `\"amount\" is null`, `\"qty\" is null`) → NullPointerException → 500; and the same route family throws `DateTimeParseException: Text '' could not be parsed` for a malformed declared `date-time`, which is F19's shape on the JVM. Both are the declared-but-unenforced family and both are fixed by the same missing thing: a wire validator that refuses what the published schema forbids before the domain layer sees it. Discovery-wide on purpose, like W24."
+    },
+    {
+      "id": "W30",
+      "findings": [
+        "F23",
+        "F19"
+      ],
+      "check": "status_code_conformance",
+      "operations": "^POST /api/",
+      "backends": [
+        "java"
+      ],
+      "kind": "bug",
+      "reason": "The consequence half of W29: 500 is not a declared response on any route. Clears with W29."
+    },
+    {
+      "id": "W31",
+      "findings": [
+        "F24"
+      ],
+      "check": "not_a_server_error",
+      "operations": "^GET /api/",
+      "backends": [
+        "java"
+      ],
+      "kind": "bug",
+      "reason": "F24 — a paged find with an adversarial query string 500s on java: the same NPE family as W29 reached through the query-parameter binder rather than the body (and Tomcat additionally rejects some of the fuzzer's chunks before the app sees them). Kept separate from W29 because the FIX is separate — the query side has its own binder — even though the shape is the same."
+    },
+    {
+      "id": "W32",
+      "findings": [
+        "F25"
+      ],
+      "check": "status_code_conformance",
+      "operations": "^GET /api/",
+      "backends": [
+        "java"
+      ],
+      "kind": "bug",
+      "reason": "F25 — `GET /api/products?pageSize=0` answers 400, and no read route declares a 400: the paged `page`/`pageSize` bounds that #2555 gave declared, enforced limits are enforced on java with a status the contract does not publish (the shared matrix declares 422). Also absorbs the 500s of W31 reaching this check."
+    },
+    {
+      "id": "W33",
+      "findings": [
+        "F26",
+        "F18"
+      ],
+      "check": "unsupported_method",
+      "operations": ".",
+      "backends": [
+        "java"
+      ],
+      "kind": "bug",
+      "reason": "F26 + F18 on java — every 405 the Spring backend answers omits the `Allow` header, which RFC 9110 makes a MUST for 405 (the #2500 class, one layer over: that was a 401 missing `WWW-Authenticate`). It fires on EVERY operation, `/health` and `/ready` included, which is why the pattern is unscoped: the defect is in the one shared error mapper, not in any route. F18's static-sub-path 422 (`DELETE /api/customers/by_email`) rides the same check on java and lands with the same fix pass."
+    },
+    {
+      "id": "W34",
+      "findings": [
+        "F21"
+      ],
+      "check": "negative_data_rejection",
+      "operations": "^POST /api/customers$",
+      "backends": [
+        "java"
+      ],
+      "kind": "bug",
+      "reason": "F21 on java — `name` publishes `minLength: 1` and the create accepts `\"\"` with 201, exactly as on .NET (W27). Two independent backends failing the same declared bound is the evidence that the bound is published but never emitted as an enforcement anywhere but node."
     }
   ]
 }

@@ -57,6 +57,17 @@ const fixedFindings = new Set(
     .map((m) => m[1] as string),
 );
 
+/** Findings whose entry declares `**Waiver:** none — <mechanism>`: the case is
+ *  not fuzzed at all (a `SKIP` entry or a dedicated fixture in the runner), so
+ *  there is no run for a waiver rule to filter.  The dash-explanation is
+ *  REQUIRED — a bare `**Waiver:** none` is an undocumented hole, not a
+ *  disposition — and stays a register-visible, greppable decision. */
+const nonWaiverFindings = new Set(
+  [...register.matchAll(/^### (F\d+)\b[\s\S]*?(?=^### |Z)/gm)]
+    .filter((m) => /\*\*Waiver:\*\* none — \S/.test(m[0]))
+    .map((m) => m[1] as string),
+);
+
 describe("schemathesis waivers ↔ findings register", () => {
   it("the register was actually read", () => {
     // Guards the whole file against a rename silently emptying every set below.
@@ -106,14 +117,31 @@ describe("schemathesis waivers ↔ findings register", () => {
 
   it("every OPEN finding in the register is covered by a waiver rule", () => {
     const cited = new Set(waiverDoc.waivers.flatMap((w) => w.findings));
-    const uncovered = [...registerFindings].filter((f) => !cited.has(f) && !fixedFindings.has(f));
+    const uncovered = [...registerFindings].filter(
+      (f) => !cited.has(f) && !fixedFindings.has(f) && !nonWaiverFindings.has(f),
+    );
     expect(
       uncovered,
       "these findings are documented but no waiver rule claims them, so the gate " +
         "would report them as unwaived (mark the entry `**Status: FIXED` if it " +
-        "was actually fixed): " +
+        "was actually fixed, or `**Waiver:** none — <mechanism>` if the case is " +
+        "not fuzzed at all): " +
         uncovered.join(", "),
     ).toEqual([]);
+  });
+
+  it("no waiver rule claims a finding the register says needs no waiver", () => {
+    // `**Waiver:** none` means the case never runs — a rule claiming it would
+    // be dead weight that also masks the entry's own documented mechanism.
+    for (const w of waiverDoc.waivers) {
+      for (const f of w.findings) {
+        expect(
+          nonWaiverFindings.has(f),
+          `waiver ${w.id} claims ${f}, whose register entry declares ` +
+            "`**Waiver:** none` — drop the rule or fix the entry",
+        ).toBe(false);
+      }
+    }
   });
 
   it("no waiver rule still claims a finding the register marks FIXED", () => {
