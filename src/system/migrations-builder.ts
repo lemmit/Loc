@@ -1304,10 +1304,15 @@ export function applyDestructivePolicy(
       // A column type change is destructive: it emits `ALTER COLUMN ... TYPE t
       // USING col::t`, which fails at apply time on any row that doesn't cast
       // (`string -> int` on a non-numeric value) or silently truncates
-      // (`decimal -> int`).  Loom's type surface exposes no intra-family width
-      // distinctions (a single `int`/`decimal`/`string`), so every type change
-      // is a cross-representation change — none is a provably-safe widening.
-      s.op === "alterColumnType" ||
+      // (`decimal -> int`).  ONE carve-out since #2575 gave the decimal family
+      // widths: a provably-total decimal widening (`decimalBoundWidens`) — the
+      // cast can neither fail nor change a value, e.g. money NUMERIC(19,4) →
+      // unbounded decimal.  The reverse (incl. the pre-#2575 money catch-up,
+      // where an unbounded column becomes NUMERIC(19,4)) stays gated: Postgres
+      // rounds >4-dp rows and errors past 15 integer digits, and pre-#2575
+      // columns hold exactly such rows (#2549) — so that one-time catch-up is
+      // a deliberate, reviewed `--allow-destructive` step, not a silent one.
+      (s.op === "alterColumnType" && !decimalBoundWidens(s.from, s.to)) ||
       isBlockingNotNullAdd(s) ||
       (s.op === "alterColumnNullable" && !s.nullable && !safeFlips.has(s)),
   );
@@ -2666,7 +2671,37 @@ function columnTypeEqual(a: ColumnType, b: ColumnType): boolean {
   if (a.kind === "array" && b.kind === "array") {
     return columnTypeEqual(a.inner, b.inner);
   }
+  if (a.kind === "decimal" && b.kind === "decimal") {
+    // Since #2575 the decimal family carries widths (`money` = NUMERIC(19,4),
+    // plain `decimal` = unbounded), so bounds are part of the column's
+    // identity: a bare-`DECIMAL` baseline must diff against a bounded target,
+    // or the money bound never reaches an existing database (audit F15).
+    return a.precision === b.precision && a.scale === b.scale;
+  }
   return true;
+}
+
+/** True when a column type change is a provably-total decimal widening —
+ *  every value the old column can hold fits the new column unchanged, so the
+ *  `USING` cast can neither fail nor alter a value.  Anything else (including
+ *  every non-decimal transition) is not a widening.
+ *
+ *  Bounded → unbounded is a widening.  Unbounded → bounded is NOT — the cast
+ *  rounds rows with more fractional digits than the target scale and errors
+ *  past the target's integer digits; pre-#2575 money columns are exactly the
+ *  ones that stored "whatever scale each backend wrote" (#2549), so lossy
+ *  rows are the expected case there, not a hypothetical.  Both bounds must
+ *  grow measured the way Postgres allocates them: fractional digits (scale)
+ *  AND integer digits (precision − scale) — `(19,4) → (19,8)` grows scale
+ *  while shrinking integer digits 15 → 11, a narrowing in disguise. */
+function decimalBoundWidens(from: ColumnType, to: ColumnType): boolean {
+  if (from.kind === "array" && to.kind === "array") {
+    return decimalBoundWidens(from.inner, to.inner);
+  }
+  if (from.kind !== "decimal" || to.kind !== "decimal") return false;
+  if (to.precision === undefined || to.scale === undefined) return true;
+  if (from.precision === undefined || from.scale === undefined) return false;
+  return to.scale >= from.scale && to.precision - to.scale >= from.precision - from.scale;
 }
 
 function findPrimaryStorageBinding(

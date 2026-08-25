@@ -5,6 +5,7 @@ import {
   handleFor,
   type PgConn,
   runMigrationEvolutionGate,
+  runMoneyBoundsCatchUpGate,
 } from "./support/migration-evolution-harness.js";
 
 // ---------------------------------------------------------------------------
@@ -56,5 +57,14 @@ describe.skipIf(!ENABLED)(
     it("migrate-chain ≡ fresh-create, and seeded rows survive forward-migrate", async () => {
       await runMigrationEvolutionGate(nodeDriver);
     }, 480_000);
+  },
+);
+
+describe.skipIf(!ENABLED)(
+  "money-bounds catch-up gate — a pre-#2575 database receives NUMERIC(19,4) through review (M-T2.14)",
+  () => {
+    it("diffs the bound out, refuses it without --allow-destructive, applies it with", async () => {
+      await runMoneyBoundsCatchUpGate();
+    }, 240_000);
   },
 );
