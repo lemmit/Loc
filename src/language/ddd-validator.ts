@@ -380,7 +380,7 @@ export class DddValidator {
     // reference cycles.  See `src/language/validators/policy-fn.ts`.
     guard("policy-fns", model, () => checkPolicyFns(model, accept));
     // Channel + channelSource: key-field existence and the channel<->storage
-    // transport compatibility matrix (channels.md, Slice 1).
+    // transport compatibility matrix (channels.md).
     guard("channels", model, () => checkChannels(model, accept));
     // TimerSource cadence: exactly-one-of cron/every, cron range-check, every
     // floor + cron-expressibility (scheduling.md, M-T4.1).
@@ -440,7 +440,7 @@ export class DddValidator {
           }
         }
         for (const ab of authBlocks) guard("auth-block", ab, () => checkAuthBlock(ab, m, accept));
-        // Tenancy declaration (multi-tenancy Phase 1a).  Duplicate +
+        // Tenancy declaration (multi-tenancy).  Duplicate +
         // claim-exists checks; the registry/stance checks need the merged
         // multi-file IR and live in the phase-⑦ tenancy checks.
         guard("tenancy-decls", m, () => checkTenancyDecls(m, accept));

@@ -821,7 +821,7 @@ export function checkEmit(stmt: EmitStmt, env: Env, accept: ValidationAcceptor):
  *  per-arg `isAssignable` with `unknown`-suppression (a typo'd bare arg is
  *  reported once at its source) + numeric-literal promotion (`bump(5)` into a
  *  `money`/`decimal` param).  On an arity mismatch we stop before the per-arg
- *  loop — the positions no longer line up, so per-arg type errors would be
+ *  loop — the positions do not line up, so per-arg type errors would be
  *  noise. */
 /** Per-argument type check (positional, over the overlap of params/args), shared
  *  by the arity-and-type `checkCallArgs` and the type-ONLY predicate path.  Same

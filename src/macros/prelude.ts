@@ -1,4 +1,4 @@
-// Built-in capability prelude (typed-capabilities.md, Phase 3).
+// Built-in capability prelude (typed-capabilities.md).
 //
 // Macros are delivered by *code* (registered in the macro registry at toolchain
 // start), so any `.ddd` can use them with nothing declared.  A `capability` is
@@ -10,12 +10,12 @@
 // `expander.ts`).  A user-declared capability of the same name wins (the prelude
 // is a default, not an override).
 //
-// The capabilities are BUILT with the same AST factories the macros used (not
-// parsed from source) so their nodes — crucially their cross-references — match
-// the old macro output exactly.  A factory reference carries no `$refNode`, so a
-// `createdBy: User id` whose `User` isn't declared fails resolution *silently*
-// (no diagnostic; lowering reads the `$refText`) — identical to the macro, and
-// unlike a parsed reference which would surface a "could not resolve" error.
+// The capabilities are BUILT with the AST factories, not parsed from source, so
+// their nodes — crucially their cross-references — match what a macro emits.  A
+// factory reference carries no `$refNode`, so a `createdBy: User id` whose
+// `User` isn't declared fails resolution *silently* (no diagnostic; lowering
+// reads the `$refText`), unlike a parsed reference which would surface a "could
+// not resolve" error.
 //
 // Pure-mixin only (fields + filter + stamp) — operations/structure stay macros.
 // `auditable` collapses the former `auditable` (fields) + `audit` (stamps) macro
@@ -109,12 +109,12 @@ function buildSoftDeletable(): Capability {
  * different thing and stays put: that is the ROW column this capability
  * provides.  Only the `currentUser.` side is claim-dependent.
  *
- * (An earlier version of this note claimed the tenancy validators verified the
- * declared claim is literally `tenantId`.  They never did — they check the
- * claim EXISTS on the principal and that its TYPE binds, not its name — so a
- * non-`tenantId` claim emitted a backend referencing a claim the principal did
- * not have: a compile error on node/.NET/Java, a per-request 500 on
- * Python/Elixir.  See `test/fixtures/corpus/tenancy-claim-name.ddd`.)
+ * (The tenancy validators do NOT check that the declared claim is literally
+ * named `tenantId` — they check the claim EXISTS on the principal and that its
+ * TYPE binds.  So the claim name has to be bound HERE: hardcoding `tenantId`
+ * emits a backend referencing a claim the principal does not have — a compile
+ * error on node/.NET/Java, a per-request 500 on Python/Elixir.  See
+ * `test/fixtures/corpus/tenancy-claim-name.ddd`.)
  *
  * `dataKey := currentUser.orgPath` is a pure claim-copy stamp exactly like
  * `tenantId`'s — it rides the same `contextStamp` pipeline, no per-backend

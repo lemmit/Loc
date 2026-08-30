@@ -395,7 +395,7 @@ function printAuthBlock(node: AuthBlock): string {
 
 function printTenancyDecl(node: import("../generated/ast.js").TenancyDecl): string {
   // `tenancy by user.<claim> of <registry>` — the `user.` prefix is fixed
-  // surface syntax (multi-tenancy Phase 1a).  Both slots are cross-references
+  // surface syntax (multi-tenancy).  Both slots are cross-references
   // (1b.1); print the source text like every other cross-ref printer arm.
   return `tenancy by user.${node.claim.$refText} of ${node.registry.$refText}`;
 }
@@ -782,7 +782,7 @@ function printAggregate(node: Aggregate): string {
   const inheritanceUsing = node.inheritanceUsing
     ? ` inheritanceUsing: ${node.inheritanceUsing}`
     : "";
-  // `crossTenant` (multi-tenancy Phase 1a) is a realization modifier, so it
+  // `crossTenant` (multi-tenancy) is a realization modifier, so it
   // prints in the header region beside the enum axes rather than in the prefix
   // slot.  The group is order-independent; we emit it last for a stable,
   // diff-friendly canonical form.
@@ -849,7 +849,7 @@ function printPayloadDecl(node: import("../generated/ast.js").PayloadDecl): stri
 }
 
 /** `channel <Name> { carries: … delivery: … retention: … key: … }`
- *  (channels.md, Slice 1). */
+ *  (channels.md). */
 function printChannel(node: import("../generated/ast.js").Channel): string {
   const items: string[] = [`carries: ${node.carries.map((c) => c.$refText).join(", ")}`];
   if (node.delivery) items.push(`delivery: ${node.delivery}`);

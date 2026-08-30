@@ -107,11 +107,10 @@ import {
 } from "./factories-internals.js";
 
 // ---------------------------------------------------------------------------
-// Origin tagging — implementation lives in `factories-internals.ts`
-// so the active-origin slot is a single shared cell across both this
-// file and `ui-factories.ts`.  These re-exports keep the old import
-// paths working (`originOf`, `ORIGIN_PROP`, `_withOrigin` are all
-// already-public surface).
+// Origin tagging — implementation lives in `factories-internals.ts` so the
+// active-origin slot is a single shared cell across both this file and
+// `ui-factories.ts`.  Re-exported here so `originOf` / `ORIGIN_PROP` /
+// `_withOrigin` stay importable from either module.
 // ---------------------------------------------------------------------------
 
 export const ORIGIN_PROP = ORIGIN_PROP_INTERNAL;
@@ -930,8 +929,8 @@ export function route(method: HttpMethod, path: string, target: HandlerRef): Rou
 /** Plain Property declarations on the aggregate (excludes
  * containments, derived props, operations, entity parts, tests).
  * Lists user-declared fields plus any fields contributed by other
- * macros that ran before this one — call order is the `with`
- * clause's left-to-right order. */
+ * macros that ran earlier — call order is the `with` clause's left-to-right
+ * order. */
 export function targetFields(target: Aggregate): readonly Property[] {
   return (target.members ?? []).filter(isProperty);
 }

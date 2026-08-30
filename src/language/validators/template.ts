@@ -23,7 +23,7 @@ import {
 /** ICU format kinds Loom supports (i18n, M-T1.11).  `currency`/`percent` are
  *  NUMBER sub-skeletons (`, number, ::currency/USD`), so the number ICU *type*
  *  covers all three; `plural`/`selectordinal` are the count-driven branch forms
- *  (slice 2) and `select` the string-driven one — all rendered natively by the
+ *  and `select` the string-driven one — all rendered natively by the
  *  `intl-messageformat` runtime the shim ships. */
 type FormatKind = "number" | "date" | "time" | "plural" | "select" | "unsupported";
 

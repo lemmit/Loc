@@ -507,9 +507,9 @@ function checkEventSourcedDiscipline(agg: Aggregate, accept: ValidationAcceptor)
   }
 }
 
-// Constructibility is no longer a defaults-based AST warning (Stage 4):
-// under the invariant gate an aggregate with required, undefaulted fields
-// is constructible — those fields just become required create params (see
+// Constructibility is NOT a defaults-based AST warning: under the invariant
+// gate an aggregate with required, undefaulted fields is constructible —
+// those fields just become required create params (see
 // `isConstructible`).  The remaining non-constructible case (an invariant
 // referencing state outside the create input) is an IR-level concern; a
 // dedicated diagnostic there is a follow-up.

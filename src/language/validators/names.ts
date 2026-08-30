@@ -7,8 +7,7 @@
 // suppresses on `unknown` on the premise that an upstream checker has
 // already reported it.  Nothing had.  `checkUnknownMemberAccess` closes the
 // same hole for member *suffixes* (`order.totl`); this closes it for bare
-// *heads* (`total := amout` → previously 0 errors, emitted `this._total =
-// amout;`).
+// *heads*, where an unreported typo emits `this._total = amout;`.
 //
 // Design — conservative by construction (FALSE POSITIVES ARE WORSE THAN THE
 // BUG):

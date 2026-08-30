@@ -797,7 +797,7 @@ function memberListKey(target: object): "members" | "routes" {
  * of the same name only within the *same* container.  Two same-named `area`
  * blocks merge — their children combine recursively — so role-named pages
  * (`page List` repeated across per-aggregate `area Orders` / `area Products`
- * blocks) no longer collapse onto the first area's copy.  Wires the `$container`
+ * blocks) do NOT collapse onto the first area's copy.  Wires the `$container`
  * triple on every appended node. */
 function spliceIntoTarget(target: object, members: unknown[]): void {
   const key = memberListKey(target);

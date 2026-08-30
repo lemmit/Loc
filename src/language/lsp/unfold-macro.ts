@@ -107,9 +107,9 @@ export function unfoldMacro(document: LangiumDocument, call: MacroCall): UnfoldR
   }
 
   // Flatten one level, group directly-returned nodes by destination
-  // AST node.  `invokeMacro` no longer contributes nodes here (it
-  // returned []), so this map holds only the macro's own direct
-  // emissions — e.g. `softDelete` returns one `FilterDecl`.
+  // AST node.  `invokeMacro` contributes none, so this map holds only the
+  // macro's own direct emissions — e.g. `softDelete` returns one
+  // `FilterDecl`.
   const byDest = new Map<object, unknown[]>();
   for (const item of produced) {
     const items = Array.isArray(item) ? item : [item];

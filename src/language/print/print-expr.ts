@@ -48,11 +48,11 @@ export const indentBlock = indent;
 // ---------------------------------------------------------------------------
 // The ambient print column.
 //
-// `wrapArgList` used to measure the one-line form from column 0, but its result
+// `wrapArgList` must not measure the one-line form from column 0: its result
 // is then indented — by `print-structural.ts`'s `block`, by an enclosing
-// wrapped call, and again by the unfold code action's `memberIndent`.  A widget
-// call that measured 95 columns therefore landed at 105 (2026-07 unfold review,
-// defect 5).  Tracking the column ambiently rather than threading it through
+// wrapped call, and again by the unfold code action's `memberIndent` — so a
+// widget call measuring 95 columns lands at 105.  Tracking the column ambiently
+// rather than threading it through
 // ~60 printer signatures keeps the call sites readable; the printers are pure
 // and single-threaded, and every mutation is `finally`-restored.
 //

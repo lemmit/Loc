@@ -42,7 +42,7 @@ import {
  * Why a projection and not a page-side fold: `.all` is paged by default
  * (M-T2.6), so counting rows in the browser counts ONE PAGE — and the numbers
  * belong in the database anyway.  A whole-table aggregation is one `SELECT`
- * with `COUNT(*)`/`SUM(...)` and no rows materialised (M-T1.3 Phase 0).
+ * with `COUNT(*)`/`SUM(...)` and no rows materialised (M-T1.3).
  *
  * ONE PROJECTION PER AGGREGATE, not one per context: a query-time projection
  * has a single `from` source, so a per-context row would have nothing to
@@ -107,7 +107,7 @@ export default defineMacro({
       }
       out.push(singletonProjection(projName, agg.name, ALIAS, members, selects));
 
-      // The per-day SERIES beside the totals (M-T1.3 Phase 5): one row per day
+      // The per-day SERIES beside the totals (M-T1.3): one row per day
       // with that day's count — what a dashboard chart plots.  It rides the
       // GROUPED read model (M-T4.2) with the catalogued
       // `datetime.startOfDay()` key, so buckets are cut by `date_trunc('day',

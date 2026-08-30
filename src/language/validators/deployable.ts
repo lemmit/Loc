@@ -137,13 +137,11 @@ export function checkDeployable(
   //          `java`, `python`).  The menu is derived, not listed here.
   // Rule 4:  every `static` deployable must declare `ui:` (otherwise
   //          it has nothing to serve).
-  // Rule 4b: every `react` deployable must declare `ui:`.  The
-  //          legacy "no ui → fall back to per-aggregate scaffolded
-  //          pages" path was removed in favour of the explicit page
-  //          metamodel — every React project's pages now flow through
-  //          `ui.pages`, which the `scaffold` stdlib macro populates
-  //          for the bulk-CRUD case.  Diagnostic code
-  //          `loom.react-deployable-missing-ui`.
+  // Rule 4b: every `react` deployable must declare `ui:`.  There is no
+  //          "no ui → fall back to per-aggregate scaffolded pages" path:
+  //          every React project's pages flow through `ui.pages`, which the
+  //          `scaffold` stdlib macro populates for the bulk-CRUD case.
+  //          Diagnostic code `loom.react-deployable-missing-ui`.
   checkDeployablePlatform(d, accept);
   checkDeployableRealizationAxes(d, accept);
   // D-PHOENIX-SURFACE: `hosts:` is a UI mount on equal footing with the
@@ -180,12 +178,10 @@ export function checkDeployable(
   // declaration carries its own framework, the hosting deployable's
   // platform must be able to serve it — `framework ∈ host.hostableFrameworks`.
   // This is the host-capability direction: the `ui` owns its framework, the
-  // host declares what it can host (the former per-deployable `framework:`
-  // override, once carried on the legacy `ui X { framework: … }` block
-  // binding, was removed — the `ui` declaration is the sole framework home).
-  // Backward-compatible: only fires when the
-  // `ui` declaration opts in by declaring `framework:` (existing sources
-  // omit it and are unaffected).  The principled rule means LiveView is
+  // host declares what it can host.  There is no per-deployable `framework:`
+  // override — the `ui` declaration is the sole framework home.  The rule only
+  // fires when the `ui` declaration opts in by declaring `framework:`, so a
+  // source that omits it is unaffected.  The rule means LiveView is
   // rejected on every non-Phoenix host, while React is accepted on any
   // static-asset host.
   // Every `ui` the deployable mounts — the legacy single binding plus
@@ -304,8 +300,8 @@ export function checkDeployable(
  *    - backend pin (`"node@v4"`) → the version must be a
  *      registered surface, else error listing the available pins.
  *    - anything else (`"frobnicator"`, a typo'd quoted platform)
- *      → unknown-platform error (the grammar enum used to reject
- *      these; the STRING alternative no longer does). */
+ *      → unknown-platform error (the STRING alternative parses anything the
+ *      grammar enum would have rejected). */
 export function checkDeployablePlatform(d: Deployable, accept: ValidationAcceptor): void {
   const raw = d.platform;
   if (raw == null) return;
@@ -593,7 +589,7 @@ export function checkDeployableUiCompose(d: Deployable, accept: ValidationAccept
   const legacyUi = d.uiSugar?.ref?.ref ?? d.uiCompose?.ref?.ref;
   if (legacyUi) checkUiApiBindings(d, legacyUi, d.uiCompose, accept);
   // `hosts:`-mounted uis (D-PHOENIX-SURFACE) get the SAME api-binding
-  // validation (C7) — previously they escaped it entirely.  A `hosts:` mount
+  // validation (C7).  A `hosts:` mount
   // carries no compose bindings, so a hosted ui that declares `api X: <Api>`
   // params has nothing to fill them and is told to switch to the `ui: X {…}`
   // compose form; a hosted ui with no api params validates clean.

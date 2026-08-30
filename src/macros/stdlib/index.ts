@@ -62,7 +62,7 @@ export function loadStdlibMacros(): void {
   // `/projections/<criterion>` route that binds to it.
   registerMacro(scaffoldPaged);
   registerMacro(scaffoldPagedApi);
-  // Dashboard read models (M-T1.3 Phase 2): one SINGLETON query-time projection
+  // Dashboard read models (M-T1.3): one SINGLETON query-time projection
   // per aggregate, aggregating the whole table in SQL.  The ui-side scaffold
   // renders the matching `Stat` cards from the same derivation
   // (`_dashboard-shared.ts`), so a card can't bind a projection this didn't

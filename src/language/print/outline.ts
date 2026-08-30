@@ -94,8 +94,8 @@ const NOT_A_QUALIFIER: ReadonlySet<string> = new Set(["Model", "System", "Subdom
 
 /** True for a node that can be named as a patch target — a mapped declaration
  *  or one of the leaf members above.  A `Parameter` is deliberately NOT one:
- *  it lives under `params`, is not independently patchable, and (before this
- *  rule existed) collided with the entity-part field of the same name. */
+ *  it lives under `params`, is not independently patchable, and would collide
+ *  with the entity-part field of the same name. */
 export function isAddressable(node: AstNode): boolean {
   return KEYWORD_BY_TYPE[node.$type] !== undefined || ADDRESSABLE_MEMBER_TYPES.has(node.$type);
 }
@@ -138,12 +138,12 @@ function nameOf(node: AstNode): string | undefined {
  * field of a nested entity part reads `entity Sales.Order.Line.qty`, and a page
  * under an area reads `page Admin.Back.Board`.
  *
- * This used to be a hardcoded pair — one bounded-context slot and one
- * aggregate/value-object slot — which silently mis-addressed everything that
- * did not fit that shape: the whole `ui` subtree (no qualifier at all, so pages
- * collided across `ui` blocks), entity-part fields (the part name dropped), and
- * event/payload fields (no keyword, so they read `node Sales.at`).  Walking the
- * chain instead of naming two slots is both shorter and total.
+ * The chain is WALKED rather than read from a fixed pair of slots (one
+ * bounded-context, one aggregate/value-object).  A fixed pair silently
+ * mis-addresses everything that does not fit it: the whole `ui` subtree (no
+ * qualifier at all, so pages collide across `ui` blocks), entity-part fields
+ * (the part name dropped), and event/payload fields (no keyword, so they read
+ * `node Sales.at`).
  *
  * Returns `undefined` for a node with no addressable ancestry.
  */

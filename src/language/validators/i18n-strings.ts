@@ -1,4 +1,4 @@
-// `loom.user-visible-concat` (M-T1.11, i18n-strings.md Phase 1).
+// `loom.user-visible-concat` (M-T1.11, i18n-strings.md).
 //
 // String concatenation in a user-visible page slot produces output that can't
 // be translated: `"Order " + order.id` pins the variable to the right of a

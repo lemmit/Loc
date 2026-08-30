@@ -203,13 +203,13 @@ export function checkLegacyConstructorCalls(model: Model, accept: ValidationAcce
 }
 
 // ---------------------------------------------------------------------------
-// `loom.unknown-construction-field` (M-T6.18, slice 1) — a record built with
+// `loom.unknown-construction-field` (M-T6.18) — a record built with
 // `X { field: value, … }` must only name fields the record DECLARES.  A typo'd
-// or stale field name (`Money { amount: …, bogus: 3 }`) previously slipped
-// through — `checkBuilderCallType` resolves the type NAME but never the entries
-// — and mis-generated (`new Money(…, 3)`, a stray positional arg / dropped
-// field), caught only downstream by `tsc`/`gradle`/`mix`.  This is the safest
-// slice of the systemic parameter-passing gap: an entry name that isn't a
+// or stale field name (`Money { amount: …, bogus: 3 }`) is not caught by
+// `checkBuilderCallType`, which resolves the type NAME but never the entries,
+// so it mis-generates (`new Money(…, 3)` — a stray positional arg / dropped
+// field) and surfaces only downstream in `tsc`/`gradle`/`mix`.  This is the
+// narrowest slice of the parameter-passing gap: an entry name that isn't a
 // declared field is unambiguously wrong (no optional / required / derived
 // nuance, no type inference, no `Env`).  Completeness + entry-VALUE type checks
 // are the follow-on slices.  Scoped to RECORD construction (value object /

@@ -11,9 +11,9 @@
 // `scaffoldList` (per-type columns + `rowTestid` + the find-filter bar),
 // `scaffoldNewForm`, `scaffoldDetails` (value-object sub-rows + related-entity
 // cards), `scaffoldOperations`, `scaffoldWorkflowForm`, the
-// workflow-instance list/detail, and the `scaffoldHome` / `scaffoldWorkflowsIndex`
-// dashboards.  (The old IR-phase ⑤c expanders these once
-// mirrored are deleted — there is no sentinel layer left.)
+// workflow-instance list/detail, and the `scaffoldHome` /
+// `scaffoldWorkflowsIndex` dashboards.  Each builds its FINAL body here — there
+// is no sentinel layer and no later expansion pass.
 
 import type {
   Aggregate,

@@ -74,9 +74,9 @@ export class DddImplementationProvider implements ImplementationProvider {
    *
    *  Reads go through `FileSystemProvider` only (never `node:fs`) so
    *  `EmptyFileSystem` (browser, no backing fs) degrades to "no result"
-   *  rather than throwing. No caching in this slice — maps are small and
-   *  read fresh per request; a future slice may cache by root + mtime
-   *  once this becomes a hot path. */
+   *  rather than throwing.  No caching — maps are small and read fresh per
+   *  request; caching by root + mtime would only pay once this becomes a hot
+   *  path. */
   private async discoverMap(
     docUri: URI,
     docPath: string,
