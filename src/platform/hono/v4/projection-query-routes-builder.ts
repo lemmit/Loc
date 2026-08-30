@@ -8,7 +8,10 @@ import {
   type FilterBypass,
   lowerToDrizzle,
 } from "../../../generator/typescript/repository-find-predicate.js";
-import { wireProjectionValue } from "../../../generator/typescript/repository-wire-builder.js";
+import {
+  canonicalIsoExpr,
+  wireProjectionValue,
+} from "../../../generator/typescript/repository-wire-builder.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -1022,7 +1025,9 @@ function groupKeyWireExpr(inner: TypeIR, expr: string): string {
       // three.
       return `new Decimal(${expr}).toFixed(${MONEY_WIRE_SCALE})`;
     case "datetime":
-      return `${expr}.toISOString()`;
+      // Same canonical trim the aggregate wire applies (RS-4) — a projection
+      // row and an aggregate read must spell the same instant identically.
+      return canonicalIsoExpr(expr);
     default:
       return expr;
   }

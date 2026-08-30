@@ -386,7 +386,7 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
     ).toBe("record.order.shipped_at");
   });
 
-  it("collapses string.length → String.length(...)", () => {
+  it("collapses string.length → the CODE-POINT count (not String.length/1)", () => {
     expect(
       renderExpr(
         {
@@ -398,7 +398,7 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
         },
         ctx,
       ),
-    ).toBe("String.length(record.name)");
+    ).toBe("length(String.to_charlist(record.name))");
   });
 
   it("collapses array.count → Enum.count(...)", () => {

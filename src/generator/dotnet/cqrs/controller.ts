@@ -16,7 +16,7 @@ import {
 } from "../../../ir/util/api-surface.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
-import { plural, upperFirst } from "../../../util/naming.js";
+import { escapeCsharpIdent, plural, upperFirst } from "../../../util/naming.js";
 import { isServerSourcedDefault } from "../../_frontend/server-default.js";
 import { findUnionSpec, unionMembers } from "../../_payload/union-wire.js";
 import {
@@ -323,14 +323,16 @@ export function emitController(
                 p.type.kind === "optional"
                   ? ""
                   : "[Microsoft.AspNetCore.Mvc.ModelBinding.BindRequired] ";
-              return `[FromQuery] ${bind}${wireType(p.type, ctx, "request")} ${p.name}`;
+              return `[FromQuery] ${bind}${wireType(p.type, ctx, "request")} ${escapeCsharpIdent(p.name)}`;
             }),
             // Paged finds auto-gain 1-based page/pageSize + sort/dir query
             // params with defaults (P3b / M-T2.6), mirroring the Hono contract.
             ...(paged ? CS_PAGED_QUERY_PARAMS : []),
           ].join(", "),
           queryConstructorArgs: [
-            ...find.params.map((p) => wireToCommandArgument(p.name, p.type, ctx)),
+            ...find.params.map((p) =>
+              wireToCommandArgument(escapeCsharpIdent(p.name), p.type, ctx),
+            ),
             ...(paged ? ["page", "pageSize", "sort", "dir"] : []),
           ].join(", "),
           guarded: find.requires !== undefined,

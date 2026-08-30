@@ -1158,11 +1158,13 @@ function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): 
 function renderBinary(expr: Extract<ExprIR, { kind: "binary" }>, ctx: WalkContext): string {
   const l = renderExpr(expr.left, ctx);
   const r = renderExpr(expr.right, ctx);
-  // String concatenation: Elixir uses `<>`.  Detect by left operand
-  // type — but in v0 we don't carry type tags on raw binary nodes
-  // ubiquitously, so assume `+` on strings if either side is a string
-  // literal.  This matches dotnet/render-expr.ts's heuristic.
-  if (expr.op === "+" && (isStringLit(expr.left) || isStringLit(expr.right))) {
+  // String concatenation: Elixir uses `<>`.  Decide on the IR TYPE stamps the
+  // way the domain renderer does (`render-expr.ts` `elixirOp(op, leftIsString)`)
+  // — `who + other` between two string state cells carries no string LITERAL
+  // on either side, and `+` on two binaries raises `ArithmeticError` at render.
+  // The literal probe stays as the fallback for synthetic binary nodes (the
+  // walker-primitive expander and friends leave the type stamps undefined).
+  if (expr.op === "+" && isStringConcat(expr)) {
     return `${l} <> ${r}`;
   }
   // A5 temporal — datetime ± duration / datetime − datetime in a page body.
@@ -1184,6 +1186,24 @@ function renderBinary(expr: Extract<ExprIR, { kind: "binary" }>, ctx: WalkContex
 
 function isStringLit(e: ExprIR): boolean {
   return e.kind === "literal" && e.lit === "string";
+}
+
+function isStringPrim(t: TypeIR | undefined): boolean {
+  return t?.kind === "primitive" && t.name === "string";
+}
+
+/** A `+` binary that is really Elixir string CONCATENATION (`<>`).  The IR type
+ *  stamps (`leftType` / `rightType` / `resultType`, populated during lowering)
+ *  are authoritative; the string-literal probe is only the fallback for
+ *  synthetic nodes that carry no stamps. */
+function isStringConcat(expr: Extract<ExprIR, { kind: "binary" }>): boolean {
+  return (
+    isStringPrim(expr.leftType) ||
+    isStringPrim(expr.rightType) ||
+    isStringPrim(expr.resultType) ||
+    isStringLit(expr.left) ||
+    isStringLit(expr.right)
+  );
 }
 
 // A5 temporal (page bodies) — the same in-memory representation as the

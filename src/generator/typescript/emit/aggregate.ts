@@ -184,12 +184,27 @@ export function renderAggregate(
       voEnumImport = `import { ${symbols.join(", ")} } from "./value-objects";`;
     }
   }
+  // Domain-service namespaces an OPERATION BODY calls (`Rules.clamp(…)`).  The
+  // workflow emitter has always imported these; the aggregate class never did,
+  // so a service call from inside an operation emitted `Cannot find name
+  // 'Rules'` (F2-CB-C8) — the other four backends import at this site.  Same
+  // body-scan narrowing as the VO/enum imports above, so an aggregate that
+  // calls no service keeps a byte-identical header.
+  const servicesReferenced = (ctx.domainServices ?? [])
+    .map((s) => s.name)
+    .filter((n) => new RegExp(`\\b${n}\\.\\w`).test(body))
+    .sort();
+  const serviceImport =
+    servicesReferenced.length > 0
+      ? `import { ${servicesReferenced.join(", ")} } from "./services";`
+      : null;
   return (
     lines(
       "// Auto-generated.",
       usesMoney ? 'import Decimal from "decimal.js";' : null,
       'import * as Ids from "./ids";',
       voEnumImport,
+      serviceImport,
       'import type * as Events from "./events";',
       errorsImportList ? `import { ${errorsImportList} } from "./errors";` : null,
       hasProv ? 'import { type ProvLineage } from "./provenance";' : null,

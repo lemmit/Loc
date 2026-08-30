@@ -37,6 +37,7 @@ import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { classifyForWire, pickErrorPath } from "../../../ir/validate/invariant-classify.js";
 import { errorTitle, resolveErrorStatus } from "../../../util/error-defaults.js";
 import { messageCode } from "../../../util/message-code.js";
+import { elixirString } from "../../../util/naming.js";
 
 type GuardStmt = Extract<StmtIR | WorkflowStmtIR, { kind: "requires" | "precondition" }>;
 
@@ -199,7 +200,7 @@ export function guardErrorModule(appModule: string): string {
  *  the `ensure` path puts in the same denial's `detail`. */
 export function guardRaise(s: GuardStmt, appModule: string): string {
   const kind = s.kind === "requires" ? ":forbidden" : ":precondition";
-  return `raise(${guardErrorModule(appModule)}, kind: ${kind}, message: ${JSON.stringify(
+  return `raise(${guardErrorModule(appModule)}, kind: ${kind}, message: ${elixirString(
     denialMessage(s),
   )})`;
 }
@@ -243,7 +244,7 @@ end
 export function denialTerm(s: GuardStmt, wireAvailable?: ReadonlySet<string>): string {
   if (deniesAtWire(s, wireAvailable)) return wireValidationTerm(s);
   const tag = s.kind === "requires" ? ":forbidden" : ":precondition_failed";
-  return `{${tag}, ${JSON.stringify(denialMessage(s))}}`;
+  return `{${tag}, ${elixirString(denialMessage(s))}}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -302,7 +303,9 @@ export function wireValidationTerm(s: GuardStmt): string {
   const text = denialMessage(s);
   const entry = [
     `pointer: ${JSON.stringify(pointer)}`,
-    `message: ${JSON.stringify(text)}`,
+    // The author's `message "…"` goes through the shared escaping funnel — a
+    // raw `#{` here would interpolate into the 422 body at request time.
+    `message: ${elixirString(text)}`,
     `code: ${JSON.stringify(messageCode(text))}`,
   ].join(", ");
   return `{:validation_failed, [%{${entry}}]}`;

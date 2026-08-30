@@ -19,6 +19,7 @@ import {
   upperFirst,
 } from "../../util/naming.js";
 import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
+import { elixirCodePointLength } from "../_expr/code-point.js";
 import { exSubtreeLikePattern } from "../_expr/subtree-like.js";
 import {
   type BinaryExpr,
@@ -527,14 +528,14 @@ function renderMember(recv: string, e: MemberExpr, ctx: RenderCtx): string {
     e.receiverType.name === "string" &&
     e.member === "length"
   ) {
-    // GRAPHEMES, deliberately — the one backend that does not count code
-    // points (RS-31 / src/generator/_expr/code-point.ts).  Graphemes agree
-    // with code points on every astral character and diverge only on
-    // combining sequences; Ecto's `validate_length/3`, the changeset half of
-    // the same rule, offers no `:codepoints` count, so moving one without the
-    // other would make elixir disagree with ITSELF.  Signed residual, not an
-    // oversight — see docs/audits/schemathesis-findings-2026-08.md § F5.
-    return `String.length(${recv})`;
+    // CODE POINTS — the unit `.length` is defined in and the unit the emitted
+    // `minLength`/`maxLength` publish (RS-31 / src/generator/_expr/code-point.ts).
+    // `String.length/1` would count GRAPHEMES, which disagrees with the served
+    // OpenAPI (and with the other four backends) on every combining sequence.
+    // The changeset half moved with it — `changeset-validators.ts` hand-rolls
+    // `validate_change/3` closures over the same count, because Ecto's
+    // `validate_length/3` has no `:codepoints` option.
+    return elixirCodePointLength(recv);
   }
   // Value-object SUB-field read (`this.money.amount`) — issue #1660.  A value
   // object has THREE inconsistent runtime shapes on vanilla: a single VO field is

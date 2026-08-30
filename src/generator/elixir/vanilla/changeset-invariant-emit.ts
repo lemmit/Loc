@@ -30,7 +30,7 @@
 import type { AggregateIR, ExprIR, InvariantIR } from "../../../ir/types/loom-ir.js";
 import { pickErrorPath, singleFieldConstraints } from "../../../ir/validate/invariant-classify.js";
 import { messageCode } from "../../../util/message-code.js";
-import { snake } from "../../../util/naming.js";
+import { elixirString, snake } from "../../../util/naming.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 
 /** A scalar this-property / enum-value / literal reads cleanly off the applied
@@ -139,7 +139,10 @@ export function renderInvariantValidatorFn(agg: AggregateIR, contextModule: stri
     const codeOpt = inv.message
       ? `, loom_code: ${JSON.stringify(messageCode(inv.message.text))}`
       : "";
-    const violate = `add_error(changeset, :${field}, ${JSON.stringify(msg)}${codeOpt})`;
+    // The message goes through the shared escaping funnel: a raw `#{` in the
+    // author's `message "…"` (or in the derived `must satisfy: <source>`) would
+    // interpolate when the changeset runs, not read as text.
+    const violate = `add_error(changeset, :${field}, ${elixirString(msg)}${codeOpt})`;
     const guarded = inv.guard
       ? `    changeset =
       if ${renderExpr(inv.guard, rc)} do

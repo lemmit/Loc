@@ -29,7 +29,7 @@ import {
   repoTableName,
   runMethod,
 } from "./repository-find-builder.js";
-import { writeScopePredicate } from "./repository-find-predicate.js";
+import { writeScopeGuardLines } from "./repository-find-predicate.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
 import { repoPortImportLine, repoPortName } from "./repository-port-builder.js";
 import { saveMethod } from "./repository-save-builder.js";
@@ -319,19 +319,9 @@ function getByIdMethod(
   drizzleOps: Set<string>,
 ): string {
   const tableName = repoTableName(agg, ctx);
-  const writePred = writeScopePredicate(agg, tableName, ctx, drizzleOps);
-  const guard: string[] = [];
-  if (writePred) {
-    drizzleOps.add("and");
-    drizzleOps.add("eq");
-    guard.push(
-      `    const inScope = await this.db.select({ id: schema.${tableName}.id }).from(schema.${tableName}).where(and(eq(schema.${tableName}.id, id), ${writePred})).limit(1);`,
-      `    if (inScope.length === 0) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
-    );
-  }
   return lines(
     `  async getById(id: Ids.${agg.name}Id): Promise<${agg.name}> {`,
-    ...guard,
+    ...writeScopeGuardLines(agg, tableName, ctx, drizzleOps),
     `    const found = await this.findById(id);`,
     `    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
     `    return found;`,

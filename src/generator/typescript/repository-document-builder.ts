@@ -1,8 +1,11 @@
+import { wireFieldsForAggregate } from "../../ir/enrich/wire-projection.js";
+import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EntityPartIR,
+  ExprIR,
   FindIR,
   RepositoryIR,
   TypeIR,
@@ -10,8 +13,10 @@ import type {
 import {
   aggregateUsesMoneyDeep,
   aggregateUsesPrincipalContextFilter,
+  exprUsesCurrentUser,
   findUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
+import { sortableFields } from "../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
@@ -127,11 +132,7 @@ export function buildDocumentRepositoryFile(
       : [`    return ${fromDocOf("row")};`]),
     `  }`,
     "",
-    `  async getById(id: ${idVar}): Promise<${agg.name}> {`,
-    `    const found = await this.findById(id);`,
-    `    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
-    `    return found;`,
-    `  }`,
+    ...blobGetByIdLines(agg, idVar),
     "",
     `  async findManyByIds(ids: ${idVar}[]): Promise<${agg.name}[]> {`,
     `    if (ids.length === 0) return [];`,
@@ -246,7 +247,10 @@ export function buildDocumentRepositoryFile(
     // A principal-referencing capability filter (tenancy) binds
     // `requireCurrentUser()` into the in-app document predicate (DEBT-02 Slice
     // B), the same ambient-accessor path the relational/embedded builders use.
-    usesPrincipalFilter && `import { requireCurrentUser } from "../../auth/middleware";`,
+    // …and a principal-referencing WRITE scope binds the same accessor in the
+    // `getById` command load, so key off the emitted body too (F2-ADP-5).
+    (usesPrincipalFilter || /\brequireCurrentUser\(/.test(bodyScan)) &&
+      `import { requireCurrentUser } from "../../auth/middleware";`,
     `import { requestLog } from "../../obs/als";`,
     "",
     `type Db = NodePgDatabase<typeof schema>;`,
@@ -306,6 +310,108 @@ export function writeScopeDeniesAll(agg: EnrichedAggregateIR): boolean {
   return f !== undefined && f.kind === "authz-filter" && f.filter.kind === "deny";
 }
 
+/** The `getById` body lines for a BLOB shape (`shape: document`, event-sourced
+ *  stream) on the DRIZZLE adapter — the in-app twin of the relational
+ *  pre-guard, and the exact shape `mikroBlobGetByIdLines` (emit/mikroorm.ts)
+ *  already emits on the MikroORM adapter.  Every mutation route loads through
+ *  `getById`, so that is where a narrowed write scope is enforced: a row the
+ *  caller may READ but not WRITE reads as missing (404).  Byte-identical to the
+ *  plain `findById` + not-found throw when nothing narrows. */
+export function blobGetByIdLines(agg: EnrichedAggregateIR, idVar: string): readonly string[] {
+  const notFound = `throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`;
+  // `deny write` → the in-app form is the constant `false`, so no row is ever
+  // writable: answer not-found without loading (and without emitting the
+  // `if (!(false))` a constant-condition lint would flag).
+  if (writeScopeDeniesAll(agg)) {
+    return [
+      `  async getById(id: ${idVar}): Promise<${agg.name}> {`,
+      `    // policy { deny write on ${agg.name} } — no row is in write scope.`,
+      `    ${notFound}`,
+      `  }`,
+    ];
+  }
+  const pred = documentWriteScopeBody(agg, "found");
+  const bind =
+    pred && exprUsesCurrentUser(agg.writeScopeFilter as ExprIR)
+      ? [`    const currentUser = requireCurrentUser();`]
+      : [];
+  return [
+    `  async getById(id: ${idVar}): Promise<${agg.name}> {`,
+    ...bind,
+    `    const found = await this.findById(id);`,
+    `    if (!found) ${notFound}`,
+    ...(pred ? [`    if (!(${pred})) ${notFound}`] : []),
+    `    return found;`,
+    `  }`,
+  ];
+}
+
+/** The extra parameters a PAGED find carries, in the order every route /
+ *  workflow caller passes them (the relational builder's `pagedParams`). */
+export const PAGED_TAIL_PARAMS = [
+  "page: number",
+  "pageSize: number",
+  "sort: string",
+  "dir: string",
+] as const;
+
+/** The wrapper type a paged find returns — identical on every saving shape,
+ *  because the ROUTE contract (`<Agg>Paged`) does not vary with persistence. */
+export function pagedReturnType(aggName: string): string {
+  return `{ items: ${aggName}[]; page: number; pageSize: number; total: number; totalPages: number }`;
+}
+
+/** IN-MEMORY paging tail for a BLOB shape (`shape: document`, event-sourced
+ *  stream) — the body lines after `matchedVar` holds the full filtered list.
+ *
+ *  Neither shape has queryable columns to push `ORDER BY`/`LIMIT` into, so the
+ *  page is taken over the rehydrated list, exactly as java's document/event
+ *  stores do (`inMemoryPagedSortLines` + `skip`/`limit`).  The comparator table
+ *  is the SAME `?sort=` whitelist every other layer validates against
+ *  (`sortableFields`), with an unknown key falling back to `id` — so a paged
+ *  find answers the same contract on every saving shape (F2-CB-C1: these
+ *  builders used to classify only `array` / `optional` returns, so a `paged`
+ *  find fell through to the single-get branch and the emitted repository did
+ *  not match the route built for it). */
+export function inMemoryPagedTailLines(
+  agg: EnrichedAggregateIR,
+  matchedVar: string,
+  findName: string,
+): string[] {
+  const cmpEntries = sortableFields(agg).map((f) => {
+    const t = wireFieldsForAggregate(agg).find((w) => w.name === f)?.type;
+    const prim = t?.kind === "optional" ? t.inner : t;
+    const name = prim?.kind === "primitive" ? prim.name : undefined;
+    // `Number(...)` covers every ordered scalar this backend represents as a
+    // number-like: int/long/decimal are numbers, money is a decimal.js
+    // `Decimal` (numeric `valueOf`), bool coerces to 0/1, and a `Date` coerces
+    // to its epoch milliseconds.  Everything else (string, enum, json) orders
+    // as text — the same two families the SQL `ORDER BY` collapses to.
+    const numeric =
+      name === "int" ||
+      name === "long" ||
+      name === "decimal" ||
+      name === "money" ||
+      name === "bool" ||
+      name === "datetime";
+    const cmp = numeric
+      ? `Number(a.${f} ?? 0) - Number(b.${f} ?? 0)`
+      : `String(a.${f} ?? "") < String(b.${f} ?? "") ? -1 : String(a.${f} ?? "") > String(b.${f} ?? "") ? 1 : 0`;
+    return `${JSON.stringify(f)}: (a, b) => (${cmp})`;
+  });
+  return [
+    `    const __cmps: Record<string, (a: ${agg.name}, b: ${agg.name}) => number> = { ${cmpEntries.join(", ")} };`,
+    `    const __base = __cmps[sort] ?? __cmps["id"]!;`,
+    `    const __cmp = dir === "desc" ? (a: ${agg.name}, b: ${agg.name}) => -__base(a, b) : __base;`,
+    `    const total = ${matchedVar}.length;`,
+    `    const totalPages = pageSize > 0 ? Math.ceil(total / pageSize) : 0;`,
+    `    const offset = (page - 1) * pageSize;`,
+    `    const items = [...${matchedVar}].sort(__cmp).slice(offset, offset + pageSize);`,
+    `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${findName}", rows: total`)}`,
+    `    return { items, page, pageSize, total, totalPages };`,
+  ];
+}
+
 function documentFindMethod(
   agg: EnrichedAggregateIR,
   find: FindIR,
@@ -336,11 +442,29 @@ function documentFindMethod(
   // already takes a `currentUser: User` param (findUsesCurrentUser) reuses it;
   // otherwise bind the ambient accessor (fail-closed).
   const needsPrincipalBind = aggregateUsesPrincipalContextFilter(agg) && !usesUser;
-  return lines(
-    `  async ${find.name}(${params}): Promise<${ret}> {`,
+  const loadLines = [
     ...(needsPrincipalBind ? [`    const currentUser = requireCurrentUser();`] : []),
     `    const rows = await this.db.select().from(schema.${tableName});`,
     `    const all = rows.map((r) => ${lowerFirst(agg.name)}FromDoc(r.data as ${agg.name}Doc${aggregateIsVersioned(agg) ? ", r.version" : ""}));`,
+  ];
+  // `find … paged` — the route is built for the paged contract, so the
+  // repository has to answer it (F2-CB-C1).  The match set is the same
+  // capability-filtered, predicate-filtered list the array branch computes;
+  // only the tail (sort + slice + totals) differs.
+  if (pagedReturn(find.returnType)) {
+    const pagedParams = [...baseParams, ...PAGED_TAIL_PARAMS];
+    const pagedAll = (usesUser ? [...pagedParams, "currentUser: User"] : pagedParams).join(", ");
+    return lines(
+      `  async ${find.name}(${pagedAll}): Promise<${pagedReturnType(agg.name)}> {`,
+      ...loadLines,
+      `    const matched = ${pred ? `${allExpr}.filter(${pred})` : allExpr};`,
+      ...inMemoryPagedTailLines(agg, "matched", find.name),
+      `  }`,
+    );
+  }
+  return lines(
+    `  async ${find.name}(${params}): Promise<${ret}> {`,
+    ...loadLines,
     `    const result = ${selector};`,
     `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: ${rowsExpr}`)}`,
     `    return result;`,

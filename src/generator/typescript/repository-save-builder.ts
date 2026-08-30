@@ -376,6 +376,19 @@ function projectValueEntries(
   if (t.kind === "enum") {
     return [{ fieldName, expr: valueExpr }];
   }
+  if (t.kind === "array") {
+    // The write half of the scalar-collection round-trip (the read half is
+    // `arrayElementHydrate` in repository-find-hydrate.ts): a `numeric().array()`
+    // column takes STRINGS, so a `money[]` / `decimal[]` element is stringified
+    // exactly as its scalar twin above.  Every other element type persists as
+    // itself, so the emission is byte-identical for them.
+    const el = t.element;
+    const money = el.kind === "primitive" && el.name === "money";
+    const dec = el.kind === "primitive" && el.name === "decimal";
+    if (!money && !dec) return [{ fieldName, expr: valueExpr }];
+    const mapped = `${valueExpr}.map((__v) => ${money ? "__v.toString()" : "String(__v)"})`;
+    return [{ fieldName, expr: optional ? `${valueExpr} === null ? null : ${mapped}` : mapped }];
+  }
   if (t.kind === "valueobject") {
     const vo = ctx.valueObjects.find((v) => v.name === t.name);
     if (!vo) return [{ fieldName, expr: valueExpr }];

@@ -39,7 +39,7 @@ import { ectoValidator, voHasConstraints } from "./changeset-validators.js";
 import { isVanillaDocAgg, renderDocChangeset } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { isAbstractBase } from "./inheritance-emit.js";
-import { NORMALIZE_KEYS_DEFP } from "./key-normalize.js";
+import { isVoValuedType, NORMALIZE_KEYS_DEFP, NORMALIZE_VO_KEYS_DEFP } from "./key-normalize.js";
 import { managedTimestampNames } from "./managed-timestamps.js";
 import { isRefCollField, refCollFieldNames } from "./ref-collection-emit.js";
 import { usesRelationalContainments } from "./schema-emit.js";
@@ -380,6 +380,21 @@ ${keyAliasPairs.join(",\n")}
     })
     .filter((l): l is string => l !== null);
   const voBlock = voFieldLines.length > 0 ? `\n${voFieldLines.join("\n")}` : "";
+  // A single VALUE OBJECT is a `field :<name>, :map` jsonb column — cast
+  // verbatim, with no nested changeset to recurse through — so neither
+  // `__normalize_keys/1` (top level only) nor `cast_assoc`/`cast_embed` reaches
+  // its sub-keys.  `{"dims": {"maxWidth": 3}}` was therefore STORED camelCase
+  // while every read site (`wire-serialize.ts`, the expression renderer's VO
+  // sub-field read, the VO's own `new/1`) looks up `:max_width`: a multi-word VO
+  // field round-tripped as `null` on Phoenix and nowhere else (F2-W-01).  Snake
+  // is the canonical stored key, so the sub-map is normalized on the way IN.
+  const voKeyFields = allFields
+    .filter((f) => isVoValuedType(f.type))
+    .map((f) => JSON.stringify(snake(f.name)));
+  const voKeyNormalizeLine =
+    voKeyFields.length > 0
+      ? `attrs = __normalize_vo_keys(attrs, [${voKeyFields.join(", ")}])\n    `
+      : "";
   // The shared helper is emitted only when a VO field uses it (no unused defp
   // under `mix compile --warnings-as-errors`).
   const voHelper =
@@ -491,7 +506,7 @@ ${keyAliasPairs.join(",\n")}
     ? `\n\n  @doc "Update changeset — the generic PATCH seam.  Casts only the update-editable wire fields and does NOT touch contained parts (their mutation goes through the aggregate's own operations)${versioned ? "; guards the write with optimistic_lock(:version)" : ""}."
   def update_changeset(struct, attrs) do
     attrs = __normalize_keys(attrs)
-    ${updateVcPrep}struct
+    ${voKeyNormalizeLine}${updateVcPrep}struct
     |> cast(attrs, ${updateColsList})${presenceLine}
     |> validate_required(${updateReqList})${validatorBlock}${castAssocBlock}${voBlock}${uniqueBlock}${invBlock}${optimisticLine}
   end`
@@ -521,7 +536,12 @@ ${keyAliasPairs.join(",\n")}
   // SNAKE-cased column atoms verbatim, so the top-level keys are snaked before any
   // cast (§15).  Nested `cast_assoc`/`cast_embed` children snake their own keys in
   // their own changesets (`key-normalize.ts`).
-  const keyNormalizeHelper = `\n\n${NORMALIZE_KEYS_DEFP}`;
+  //
+  // A single VALUE OBJECT is the one shape neither pass reaches — see
+  // `voKeyFields` above.
+  const keyNormalizeHelper = `\n\n${NORMALIZE_KEYS_DEFP}${
+    voKeyFields.length > 0 ? `\n\n${NORMALIZE_VO_KEYS_DEFP}` : ""
+  }`;
 
   return `# Auto-generated.
 defmodule ${changesetMod} do
@@ -535,7 +555,7 @@ defmodule ${changesetMod} do
   @doc "Default cast/3 helper applied by every per-action changeset below."
   def base_changeset(struct \\\\ %${aggPascal}{}, attrs) do
     attrs = __normalize_keys(attrs)
-    ${valueCollections.length > 0 ? "attrs = prepare_vc_attrs(attrs)\n\n    " : ""}struct
+    ${voKeyNormalizeLine}${valueCollections.length > 0 ? "attrs = prepare_vc_attrs(attrs)\n\n    " : ""}struct
     |> cast(attrs, @all_fields)${defaultBlock}
     |> validate_required(@required_fields)${validatorBlock}${castEmbedBlock}${castAssocBlock}${voBlock}${uniqueBlock}${invBlock}
   end${updateChangesetBlock}${invariantFnBlock}${keyNormalizeHelper}${presenceHelper}${defaultHelper}${voHelper}${normalizeHelper}${ordinalHelper}
