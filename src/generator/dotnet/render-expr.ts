@@ -639,7 +639,10 @@ function renderRef(e: RefExpr, ctx: CsRenderContext): string {
       // use matches the (also-escaped) binding (`let base` → `@base`).
       return escapeCsharpIdent(e.name);
     case "param":
-      return ctx.paramExpr?.(e.name) ?? e.name;
+      // Same rule as `let`/`lambda`: a `.ddd` param named after a C# keyword
+      // (`case`, `do`, `lock`, …) reaches the generated signature as a
+      // verbatim identifier, so its USES have to match it (F2-ADP-7).
+      return ctx.paramExpr?.(e.name) ?? escapeCsharpIdent(e.name);
     case "this-prop":
     case "this-vo-prop":
     case "this-derived":

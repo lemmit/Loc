@@ -18,7 +18,7 @@ import {
   wholeTableAggregates,
 } from "../../ir/util/projection-aggregate.js";
 import { queryProjectionArm } from "../../ir/util/query-projection-arm.js";
-import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { escapeCsharpIdent, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { PG_INTRINSIC_SQL } from "../_expr/pg-intrinsics.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { MONEY_WIRE_SCALE } from "../money-scale.js";
@@ -679,12 +679,17 @@ function renderAggregateHandler(
     // column→property match is exact.
     const cols = aggregates.map((s) => `${sqlAggregate(s, ctx)} AS ${sqlIdent(snake(s.field))}`);
     members = aggregates
-      .map((s) => `        public ${sqlAggregateRowCs(s, ctx)} ${snake(s.field)} { get; set; }`)
+      .map(
+        (s) =>
+          `        public ${sqlAggregateRowCs(s, ctx)} ${escapeCsharpIdent(snake(s.field))} { get; set; }`,
+      )
       .join("\n");
     const sql = `SELECT ${cols.join(", ")} FROM ${sqlIdent(dapperAggregateTable(source))}${
       where ? ` WHERE ${where}` : ""
     }`;
-    const args = aggregates.map((s) => csCoerce(s, `agg`, ctx, snake(s.field))).join(", ");
+    const args = aggregates
+      .map((s) => csCoerce(s, `agg`, ctx, escapeCsharpIdent(snake(s.field))))
+      .join(", ");
     body =
       `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);\n` +
       `        var agg = await conn.QuerySingleAsync<AggRow>(new CommandDefinition("${sql}"${seam.paramArg}, cancellationToken: cancellationToken));\n` +

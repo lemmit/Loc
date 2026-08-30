@@ -638,9 +638,19 @@ export function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   // and the hoisted `handle_event` clauses (liveview-emit.ts) re-run
   // `list_<agg>s/4` with the new arguments.  Absent args ⇒ every branch below
   // is skipped and the emitted table is byte-identical to before.
-  const sortKey = stateRefArg(expr, "sortKey", ctx);
-  const sortDir = stateRefArg(expr, "sortDir", ctx);
-  const pageRef = stateRefArg(expr, "page", ctx);
+  //
+  // They are ALSO skipped for a CLIENT-paged table (`serverPaged:` absent —
+  // the shape a document/embedded/event-sourced/inheritance aggregate's
+  // non-paged `find all` produces).  The JSX targets slice and sort such a list
+  // in the browser; HEEx has no client-side sort, so the refetch the hoisted
+  // clause performs calls the argument-less `list_<agg>s/0` and returns the
+  // very same rows — clickable headers that flip an arrow and change nothing
+  // (F2-MT640-SORT-DEAD).  Emitting no affordance is the honest rendering: the
+  // UI stops advertising a capability the repository does not expose.
+  const serverPaged = isTrueLit(namedArg(expr, "serverPaged"));
+  const sortKey = serverPaged ? stateRefArg(expr, "sortKey", ctx) : undefined;
+  const sortDir = serverPaged ? stateRefArg(expr, "sortDir", ctx) : undefined;
+  const pageRef = serverPaged ? stateRefArg(expr, "page", ctx) : undefined;
   const sortActive = sortKey !== undefined && sortDir !== undefined;
   if (sortActive || pageRef !== undefined) {
     ctx.tableControls.push({ sortKey, sortDir, page: pageRef });
@@ -667,8 +677,7 @@ export function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   // `totalPages`; a client-side (non-server-paged) list has no count to show
   // without slicing in the template, so the pager is server-only here.
   const totalPagesArg = namedArg(expr, "totalPages");
-  const serverPaged = isTrueLit(namedArg(expr, "serverPaged"));
-  if (pageRef !== undefined && serverPaged && totalPagesArg) {
+  if (pageRef !== undefined && totalPagesArg) {
     const totalPages = renderPagedEnvelopeRead(totalPagesArg, ctx);
     return `${table}\n<.pager page={@${pageRef}} total_pages={${totalPages}} />`;
   }

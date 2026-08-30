@@ -185,4 +185,41 @@ describe("dotnet seeding — raw explicit-id path", () => {
     // The EF mapping for the same table, so the two agree.
     expect(find(files, /CustomerConfiguration\.cs$/)).toContain('ToTable("customers", "sales")');
   });
+
+  // …and the SAME model on the Dapper adapter (F2-ADP-2).  `persistence: dapper`
+  // is SELF-PROVISIONING: no migration chain, its DDL is `DbSchema.EnsureAsync`,
+  // and every Dapper statement names tables UNQUALIFIED.  Qualifying the raw
+  // seed off the per-context dataSource schema therefore inserted into a schema
+  // nothing ever created — `RunSeeds` threw `3F000 schema "sales" does not
+  // exist` on first boot, invisible to the .NET compile gate (it is a C# string
+  // literal) and to schema-load (which loads the migration chain this adapter
+  // does not use).
+  const RAW_DAPPER = RAW_WITH_SCHEMA.replace(
+    "platform: dotnet ",
+    "platform: dotnet { persistence: dapper } ",
+  );
+
+  /** Every table an emitted C# file provisions (`CREATE TABLE [IF NOT EXISTS]
+   *  <t>`) or writes (`INSERT INTO <t>`), normalised to `schema.table` with the
+   *  C#-literal quoting (`""` / `\"`) stripped. */
+  function sqlTables(src: string, verb: "CREATE TABLE" | "INSERT INTO"): string[] {
+    const re = new RegExp(`${verb}(?: IF NOT EXISTS)? ((?:[^\\s(]|\\\\")+)`, "g");
+    return [...src.matchAll(re)].map((m) => m[1]!.replace(/\\"|""|"/g, ""));
+  }
+
+  it("dapper: every raw seed INSERT targets a table the emitted DDL creates", async () => {
+    const files = await build(RAW_DAPPER);
+    const seed = find(files, /Seed\.cs$/);
+    const provisioned = new Set([
+      ...sqlTables(find(files, /DbSchema\.cs$/), "CREATE TABLE"),
+      // the `__loom_seed` idempotency marker Seed.cs provisions itself
+      ...sqlTables(seed, "CREATE TABLE"),
+    ]);
+    const written = sqlTables(seed, "INSERT INTO");
+    expect(written.length).toBeGreaterThan(0);
+    for (const t of written) expect([...provisioned]).toContain(t);
+    // Concretely: unqualified on both sides, matching the adapter's layout.
+    expect(seed).toContain('INSERT INTO ""customers""');
+    expect(seed).not.toContain('""sales"".""customers""');
+  });
 });

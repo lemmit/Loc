@@ -8,7 +8,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
 import { canEmitToExpressionFor } from "./criteria-emit.js";
-import { bypassedFilterNames } from "./emit/efcore.js";
+import { bypassedFilterNames, hasNonBypassableFilter } from "./emit/efcore.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 
 /** The `.IgnoreQueryFilters(…)` clause for an `ignoring`-bearing read
@@ -16,12 +16,17 @@ import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
  *  the `.Where(...)`.  `ignoring *` → the parameterless overload (drop every
  *  query filter); `ignoring <Cap>` → `IgnoreQueryFilters(["Name1", …])` for the
  *  EF filters the bypassed capabilities contributed.  Returns "" when nothing
- *  is bypassed (a `*` on a filterless aggregate is a harmless no-op). */
+ *  is bypassed (a `*` on a filterless aggregate is a harmless no-op).
+ *
+ *  The parameterless overload drops EVERY query filter, so it is only safe
+ *  when the aggregate carries no NON-bypassable filter.  A `policy { deny on X }`
+ *  carve-out is exactly that: `ignoring *` must not lift the always-false
+ *  sentinel, so the bypassable filters are enumerated by name instead. */
 export function ignoreFiltersClause(
   agg: EnrichedAggregateIR,
   bypass: { bypassAll?: boolean; bypassCaps?: string[] },
 ): string {
-  if (bypass.bypassAll) return ".IgnoreQueryFilters()";
+  if (bypass.bypassAll && !hasNonBypassableFilter(agg)) return ".IgnoreQueryFilters()";
   const names = bypassedFilterNames(agg, bypass);
   if (names.length === 0) return "";
   return `.IgnoreQueryFilters([${names.map((n) => JSON.stringify(n)).join(", ")}])`;

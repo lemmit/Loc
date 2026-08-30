@@ -41,7 +41,6 @@ import type {
   DerivedIR,
   EnrichedAggregateIR,
   ExprIR,
-  FieldIR,
   TypeIR,
   WireField,
 } from "../../../ir/types/loom-ir.js";
@@ -262,10 +261,19 @@ export function renderWireSerialize(
   // crashes with `KeyError` on the string-keyed case (issue #1660).  Read via a
   // key-type-agnostic fallback there (atom key, then string key).  Everywhere
   // else `record` is a real struct → struct-dot stays (byte-identical output).
-  const fieldAccess = (name: string, isVo: boolean): string =>
-    isVo
-      ? `Map.get(record, :${snake(name)}, Map.get(record, ${JSON.stringify(snake(name))}))`
-      : `record.${snake(name)}`;
+  //
+  // A MULTI-WORD VO sub-field gets a third arm — the camelCase wire key.  The
+  // canonical stored key is snake (`__normalize_vo_keys/2` on the write side,
+  // F2-W-01), but a row written by a build from before that fix still holds the
+  // camelCase key it arrived with, and dropping to `nil` on read is exactly the
+  // failure this closes.  Single-word fields snake to themselves, so their two
+  // arms are unchanged (byte-identical output).
+  const fieldAccess = (name: string, isVo: boolean): string => {
+    if (!isVo) return `record.${snake(name)}`;
+    const snakeKey = JSON.stringify(snake(name));
+    const legacy = snake(name) === name ? "" : `, Map.get(record, ${JSON.stringify(name)})`;
+    return `Map.get(record, :${snake(name)}, Map.get(record, ${snakeKey}${legacy}))`;
+  };
 
   function valueExpr(wf: WireField, isVo: boolean): string {
     const t = unwrapOptional(wf.type);

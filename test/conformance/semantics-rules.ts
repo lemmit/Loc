@@ -948,19 +948,25 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     // to one carrier alone leaves the other wrong, which is why the pinned case
     // exercises both directions.
     //
-    // ELIXIR IS A SIGNED RESIDUAL, not a conformer: graphemes agree with code
-    // points on every astral character (so it passes the pinned case) and
-    // diverge only on combining sequences, which nothing in the corpus reaches.
-    // Ecto's `validate_length/3` has no `:codepoints` count, so closing it means
-    // hand-rolling Ecto's error tuples — a unit of its own.
-    conforms: ["node", "dotnet", "java", "python"],
-    targets: ["elixir"],
+    // ELIXIR was the last hold-out (`String.length/1` and Ecto's
+    // `validate_length/3` both count GRAPHEMES) and was signed off as a residual
+    // on the theory that graphemes and code points diverge only on combining
+    // sequences.  They do — but NFD-normalised accented Latin, emoji ZWJ
+    // sequences and regional-indicator flags are all combining sequences, so the
+    // exposure was never as narrow as the residual note implied.  Both carriers
+    // moved together: Ecto has no `:codepoints` option, so the native chain's
+    // length arm is now a `validate_change/3` closure over the shared code-point
+    // snippet, carrying Ecto's own error tuple (message text, `count`,
+    // `validation: :length`, `kind`, `type`) so the 422 body is unchanged.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    targets: [],
     provenance: [
       "found 2026-08-06 by the M-T9.21 schemathesis leg (finding F5, waiver W6): a 2-code-point currency was accepted on write and then served back in violation of the `minLength: 3` the same server published",
       "fixed on node/.NET/java via one shared definition, src/generator/_expr/code-point.ts, consumed by BOTH the domain rule renderer and the wire-boundary validator emitter so the two cannot drift; python was already correct",
       "the Hono routes re-attach `.openapi({ minLength, maxLength })` because zod cannot describe a `.refine` to the OpenAPI emitter — the published bound is byte-identical to before",
       "pinned in test/fixtures/corpus/validation-messages.ddd and recorded in wire-golden/validation-messages.json (a 2-code-point label DENIED by `>= 3`, a 9-code-point/18-code-unit label ADMITTED by `<= 16` and round-tripped); verified to fail with each half of the fix reverted independently",
       "statically pinned per backend by test/generator/string-length-code-points.test.ts",
+      "elixir closed 2026-08-30 (the last hold-out): `elixirCodePointLength` in the same shared module feeds render-expr.ts, the ExUnit value renderer, and a hand-rolled `validate_change/3` length arm in changeset-validators.ts — both carriers in one change, since moving one alone made elixir disagree with itself",
     ],
     // BEHAVIORAL: the golden records both directions, so every backend leg
     // gates it per-PR.

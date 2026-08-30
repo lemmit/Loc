@@ -14,6 +14,51 @@ import { elixirRegexBody, snake } from "../../../util/naming.js";
 // `validate_length` / `validate_format` pipe lines.
 // ---------------------------------------------------------------------------
 
+/** Ecto's own default message for each `validate_length/3` failure kind — kept
+ *  verbatim (interpolation placeholder included) so a hand-rolled length error
+ *  renders exactly like the native one through the app's error translator. */
+const LENGTH_MESSAGE: Readonly<Record<"min" | "max" | "is", string>> = {
+  min: "should be at least %{count} character(s)",
+  max: "should be at most %{count} character(s)",
+  is: "should be %{count} character(s)",
+};
+
+type LengthArm = { cmp: "<" | ">" | "!="; bound: number; kind: "min" | "max" | "is" };
+
+/** A CODE-POINT length rule as an Ecto `validate_change/3` closure.
+ *
+ *  `validate_change/3` has the same nil/absent-change skip as `validate_length/3`
+ *  (Ecto returns `[]` for a nil change), so only the counting unit differs.  The
+ *  returned error tuple is Ecto's own — same message text, same `count` /
+ *  `validation: :length` / `kind` / `type: :string` metadata — so ProblemDetails
+ *  and any Gettext translator see no difference. */
+function lengthValidator(field: string, arms: readonly LengthArm[], message?: string): string {
+  const error = (a: LengthArm): string =>
+    `[{:${field}, {${JSON.stringify(message ?? LENGTH_MESSAGE[a.kind])}, count: ${a.bound}, validation: :length, kind: :${a.kind}, type: :string}}]`;
+  const count = "length(String.to_charlist(value))";
+  if (arms.length === 1) {
+    const a = arms[0] as LengthArm;
+    // Single bound — the negated comparison inline, no intermediate binding.
+    const ok = a.cmp === "<" ? `>= ${a.bound}` : a.cmp === ">" ? `<= ${a.bound}` : `== ${a.bound}`;
+    return `    |> validate_change(:${field}, fn _, value ->
+      if ${count} ${ok},
+        do: [],
+        else: ${error(a)}
+    end)`;
+  }
+  // A range binds the count once and picks the first failing bound, exactly as
+  // `validate_length(min:, max:)` does (min checked before max).
+  const branches = arms.map((a) => `        len ${a.cmp} ${a.bound} -> ${error(a)}`).join("\n");
+  return `    |> validate_change(:${field}, fn _, value ->
+      len = ${count}
+
+      cond do
+${branches}
+        true -> []
+      end
+    end)`;
+}
+
 /** Map a recognised single-field invariant pattern to the idiomatic Ecto
  *  changeset validator pipe line (4-space-indented, ready for a `|>` pipe). */
 export function ectoValidator(field: string, p: SingleFieldPattern, message?: string): string {
@@ -35,20 +80,29 @@ export function ectoValidator(field: string, p: SingleFieldPattern, message?: st
         : `    |> validate_number(:${field}, less_than_or_equal_to: ${p.n}${m})`;
     case "between":
       return `    |> validate_number(:${field}, greater_than_or_equal_to: ${p.lo}, less_than_or_equal_to: ${p.hi}${m})`;
-    // `validate_length/3` counts GRAPHEMES, where every other backend counts
-    // CODE POINTS (RS-31 / src/generator/_expr/code-point.ts).  The two agree on
-    // every astral character and differ only on combining sequences; Ecto has no
-    // `:codepoints` count, so closing the gap means hand-rolling Ecto's error
-    // tuples and default message text.  Signed residual — see
-    // docs/audits/schemathesis-findings-2026-08.md § F5.
+    // `.length` counts CODE POINTS on every backend (RS-31 /
+    // src/generator/_expr/code-point.ts) — the unit the emitted `minLength` /
+    // `maxLength` publish in this server's own /openapi.json.  Ecto's
+    // `validate_length/3` counts GRAPHEMES and has no `:codepoints` option, so
+    // the length rules are hand-rolled as `validate_change/3` closures over the
+    // shared code-point snippet, carrying Ecto's own error tuples (message
+    // text, `count`, `validation: :length`, `kind`, `type`) so the 422 body and
+    // the changeset error metadata stay byte-identical to the native validator.
     case "len-min":
-      return `    |> validate_length(:${field}, min: ${p.n}${m})`;
+      return lengthValidator(field, [{ cmp: "<", bound: p.n, kind: "min" }], message);
     case "len-max":
-      return `    |> validate_length(:${field}, max: ${p.n}${m})`;
+      return lengthValidator(field, [{ cmp: ">", bound: p.n, kind: "max" }], message);
     case "len-eq":
-      return `    |> validate_length(:${field}, is: ${p.n}${m})`;
+      return lengthValidator(field, [{ cmp: "!=", bound: p.n, kind: "is" }], message);
     case "len-range":
-      return `    |> validate_length(:${field}, min: ${p.lo}, max: ${p.hi}${m})`;
+      return lengthValidator(
+        field,
+        [
+          { cmp: "<", bound: p.lo, kind: "min" },
+          { cmp: ">", bound: p.hi, kind: "max" },
+        ],
+        message,
+      );
     case "regex":
       return `    |> validate_format(:${field}, ~r/${elixirRegexBody(p.pattern)}/${m})`;
   }

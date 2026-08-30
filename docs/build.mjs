@@ -19,7 +19,7 @@ const OUT  = join(HERE, '_site');
 // docs into the plan/audit corpus don't 404.  Nested paths are
 // supported (depth derived from the path).  old/proposals ships too
 // now that new-plan/ links into it as the archived design record.
-const RENDERED_SUBDIRS = ['new-plan', 'old/plans', 'old/proposals', 'audits', 'language-reference'];
+export const RENDERED_SUBDIRS = ['new-plan', 'old/plans', 'old/proposals', 'audits', 'language-reference'];
 
 // Nav surfaces the top-level reading order — keep in sync with
 // docs/README.md's "Start here" table and docs/index.html's footer.
@@ -164,6 +164,13 @@ const TAB_STYLE = `<style>
 .lt-panel.active{display:block}
 .lt-panel pre{margin:.75rem 0}
 </style>`;
+const ARCHIVED_STYLE = `<style>
+.archived-notice{margin:0 0 1.5rem;padding:.85rem 1.1rem;border:1px solid rgba(255,185,138,.35);border-left:3px solid #ffb98a;border-radius:8px;background:rgba(255,185,138,.06);color:#cdd6e3;font-size:.9rem;line-height:1.55}
+.archived-notice strong{color:#ffb98a;letter-spacing:.02em}
+.archived-notice p{margin:.35rem 0 0}
+.archived-notice a{color:#6fd1ff}
+</style>`;
+
 const TAB_SCRIPT = `<script>
 (function(){
   function apply(group,name){
@@ -201,6 +208,7 @@ const page = ({ title, body, currentHref, depth, styleHref }) => `<!doctype html
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
 <link rel="stylesheet" href="${styleHref}">
 ${TAB_STYLE}
+${ARCHIVED_STYLE}
 </head>
 <body>
 ${header(currentHref, depth)}
@@ -216,11 +224,45 @@ ${TAB_SCRIPT}
 </html>
 `;
 
+// Archived corpora.  These render so cross-doc links resolve, but they are
+// NOT a description of what ships: `old/**` is a frozen design record whose
+// status tables are superseded, and `audits/**` are snapshot-in-time findings
+// true only as of the commit each one names.  CLAUDE.md fences agents off
+// this material; a web reader has no such fence, so the page carries one.
+// Keep in sync with the `docs/old/` link rule in
+// test/system/archived-docs-fence.test.ts.
+export const ARCHIVED = [
+  {
+    prefix: 'old/',
+    label: 'Archived design record',
+    note: 'Frozen. Kept for its grammar sketches, semantics and rationale — its status tables and backlog registers are superseded and must not be treated as current behavior.',
+  },
+  {
+    prefix: 'audits/',
+    label: 'Snapshot audit',
+    note: 'Point-in-time findings, true as of the commit this document names. Later work may have drained, changed or invalidated them.',
+  },
+];
+
+/** Banner HTML for a rendered path under an archived corpus, else ''.
+ *  `rel` is the docs-relative source path (POSIX separators). */
+export function archivedNotice(rel, depth) {
+  const hit = ARCHIVED.find((a) => rel.startsWith(a.prefix));
+  if (!hit) return '';
+  const up = '../'.repeat(depth);
+  return `<aside class="archived-notice">
+<strong>${escapeHtml(hit.label)}</strong>
+<p>${escapeHtml(hit.note)}</p>
+<p>For what ships today see <a href="${up}README.html">the docs index</a>; for what is planned see <a href="${up}new-plan/README.html">the live roadmap</a>.</p>
+</aside>
+`;
+}
+
 async function renderMdFile(srcPath, depth) {
   const src = await readFile(srcPath, 'utf8');
   const rel = relative(HERE, srcPath);
   const title = extractTitle(src, basename(srcPath, '.md'));
-  const body = marked.parse(src);
+  const body = archivedNotice(rel, depth) + marked.parse(src);
   const outRel = rel.replace(/\.md$/, '.html');
   const outPath = join(OUT, outRel);
   await mkdir(dirname(outPath), { recursive: true });
@@ -250,9 +292,9 @@ ${items.join('\n')}
 
 async function writeSubdirIndex(subdir, entries) {
   if (entries.length === 0) return;
-  const body = buildIndexBody(subdir, entries);
-  const outPath = join(OUT, subdir, 'index.html');
   const depth = subdir.split('/').length;
+  const body = archivedNotice(`${subdir}/`, depth) + buildIndexBody(subdir, entries);
+  const outPath = join(OUT, subdir, 'index.html');
   const styleHref = `${'../'.repeat(depth)}style.css`;
   await writeFile(
     outPath,
@@ -312,7 +354,11 @@ async function main() {
   console.log('copied    style.css');
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Run only when invoked directly (`node docs/build.mjs`), so the pure
+// helpers above stay importable from test/system/archived-docs-fence.test.ts.
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

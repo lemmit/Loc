@@ -12,7 +12,7 @@ import {
   operationGates,
   operationGatesUseCurrentUser,
 } from "../../../ir/util/op-gates.js";
-import { plural, upperFirst } from "../../../util/naming.js";
+import { escapeCsharpIdent, plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 import { maskNamer, projectEntityExpr, projectToResponse, wireType } from "../dto-mapping.js";
 import { renderCommand, renderCommandHandler } from "../emit.js";
@@ -241,7 +241,7 @@ export function emitCreateCommandAndHandler(
         // in.  Naming them decouples the two — and a create factory is exactly
         // the call site where positional args read worst.
         `        var aggregate = ${agg.name}.Create(${requiredFields
-          .map((f) => `${f.name}: command.${upperFirst(f.name)}`)
+          .map((f) => `${escapeCsharpIdent(f.name)}: command.${upperFirst(f.name)}`)
           .join(", ")});\n` +
         createAuditStage +
         `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +

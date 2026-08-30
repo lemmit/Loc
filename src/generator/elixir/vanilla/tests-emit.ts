@@ -9,6 +9,7 @@ import type {
   ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
 import { elixirString, escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
+import { elixirCodePointLength } from "../../_expr/code-point.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
 import { appModuleOf, guardErrorModule } from "./denial.js";
 import { pureDerivedAccessorNames } from "./domain-core-emit.js";
@@ -315,7 +316,9 @@ export function vtExpr(e: ExprIR, env: Env): string {
         e.receiverType.name === "string" &&
         e.member === "length"
       ) {
-        return `String.length(${recv})`;
+        // CODE POINTS, matching the runtime renderer (`render-expr.ts`) and the
+        // published `minLength`/`maxLength` — `String.length/1` counts graphemes.
+        return elixirCodePointLength(recv);
       }
       // A derived-field read has no struct field on elixir — route it to the
       // pure-core accessor `Agg.<derived>(record)` (B18) when the receiver is the

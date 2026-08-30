@@ -123,6 +123,21 @@ function wireProjectionEntity(
   return `{ ${parts.join(", ")} }`;
 }
 
+/** A `Date` expression → the CANONICAL `datetime` wire string (RS-4,
+ *  docs/conformance-semantics.md): ISO-8601 UTC with trailing zero fractional
+ *  seconds trimmed, so a whole-second instant spells `…T00:00:00Z`.
+ *
+ *  `Date.toISOString()` alone always pads the fraction to exactly three digits
+ *  (`…T00:00:00.000Z`), which made node the ONLY backend to put a fraction on a
+ *  whole-second instant — .NET trims with this same regex, java's
+ *  `Instant.toString()` omits a zero fraction, python's `isoformat()` omits it,
+ *  and elixir's `:utc_datetime` has no fractional part at all (F2-W-05).  The
+ *  trim is safe because the input always carries the `.mmm` group: the regex
+ *  can only bite the fraction, never the seconds field. */
+export function canonicalIsoExpr(dateExpr: string): string {
+  return `${dateExpr}.toISOString().replace(/\\.?0+Z$/, "Z")`;
+}
+
 /** Render one DOMAIN value to its wire form.  Exported because the query-time
  *  projection route emitter must serialise a `select`ed domain value EXACTLY as
  *  the aggregate's own `toWire` does — money's fixed RS-12 scale in particular
@@ -140,8 +155,8 @@ export function wireProjectionValue(
   if (t.kind === "primitive") {
     if (t.name === "datetime")
       return optional
-        ? `(${expr} == null ? null : (${expr} as Date).toISOString())`
-        : `(${expr} as Date).toISOString()`;
+        ? `(${expr} == null ? null : ${canonicalIsoExpr(`(${expr} as Date)`)})`
+        : canonicalIsoExpr(`(${expr} as Date)`);
     // money carries a FIXED wire scale (RS-12): decimal.js `.toJSON()`
     // normalizes trailing zeros (`"12.50"` → `"12.5"`), so serialize with the
     // canonical scale (4, matching money's NUMERIC(19,4) storage) instead — the

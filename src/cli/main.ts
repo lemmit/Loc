@@ -213,8 +213,24 @@ async function runParse(file: string) {
   if (irErrors.length > 0) {
     for (const d of irErrors) console.error(`${d.code} ${d.source}: ${d.message}`);
     console.error(`${irErrors.length} error(s).`);
-    process.exit(1);
   }
+
+  // The WARNING half of the same defect.  Phase ⑦ computes 18 warning codes
+  // (datasource-knob-unwired, findall-no-page, cross-tenant-without-tenancy,
+  // …) and `parse` used to filter them down to the single allow-listed
+  // `loom.index-suggestion` — so `--json` reported `warnings: 2` while the
+  // human command printed `0 error(s), 0 warning(s).  OK:` for the same file.
+  // A warning never affects the exit code; it just has to be VISIBLE.
+  // (`loom.index-suggestion` is excluded here — it keeps its own
+  // `Suggestions:` footer below, and would otherwise print twice.)
+  const irWarnings = irDiagnostics.filter(
+    (d) => d.severity === "warning" && d.code !== "loom.index-suggestion",
+  );
+  if (irWarnings.length > 0) {
+    for (const d of irWarnings) console.error(`${d.code} ${d.source} warning: ${d.message}`);
+    console.error(`${irWarnings.length} warning(s).`);
+  }
+  if (irErrors.length > 0) process.exit(1);
 
   // Advisory only — the index-suggestion lint (uniqueness-and-indexes.md §11)
   // keeps its own footer and never fails the parse.
@@ -471,6 +487,15 @@ async function runGenerate(
     );
     if (!options.continueOnError) process.exit(1);
     return { hadError: true };
+  }
+  // A clean-but-WARNED model used to print nothing at all: the warning print
+  // lived inside the `loomErrors.length > 0` branch above, so every phase-⑦
+  // warning was computed and then dropped on exactly the runs that succeed.
+  // Warnings never gate generation — they just have to reach the author.
+  const loomWarnings = loomDiags.filter((d) => d.severity !== "error");
+  if (loomWarnings.length > 0) {
+    for (const d of loomWarnings) console.error(`${d.source} ${d.severity}: ${d.message}`);
+    console.error(`${loomWarnings.length} warning(s).`);
   }
   // Directory creation is deferred to the write loop below (and guarded by
   // `!options.dryRun`) so a `--dry-run` touches nothing on disk — not even

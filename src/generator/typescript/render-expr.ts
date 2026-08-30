@@ -401,14 +401,17 @@ export const TS_COLLECTION_RENDERERS: Record<
   all: (recv, args) => `${recv}.every(${args[0] ?? "() => true"})`,
   any: (recv, args) => `${recv}.some(${args[0] ?? "() => true"})`,
   // Array membership.  For value types this is JS's `.includes(value)` (===).
-  // For money the elements are decimal.js `Decimal` instances, whose `===` is
-  // reference identity — two value-equal Decimals never match — so a money
-  // membership test dispatches to a value-equality scan (`.some(x => x.eq(v))`),
-  // the same reason min/max/sum special-case money.
-  contains: (recv, args, e) =>
-    receiverElementIsMoney(e)
-      ? `${recv}.some((__x) => __x.eq(${args[0] ?? "undefined"}))`
-      : `${recv}.includes(${args[0] ?? "undefined"})`,
+  // For an OBJECT element — money (decimal.js `Decimal`) or a value object —
+  // `===` is reference identity and two value-equal elements never match, so
+  // the membership test dispatches to a value-equality scan through the
+  // element's own equality method (`.eq` / `.equals`), the same reason min/max/
+  // sum special-case money.
+  contains: (recv, args, e) => {
+    const eqm = receiverElementEqMethod(e);
+    return eqm
+      ? `${recv}.some((__x) => __x.${eqm}(${args[0] ?? "undefined"}))`
+      : `${recv}.includes(${args[0] ?? "undefined"})`;
+  },
   where: (recv, args) => `${recv}.filter(${args[0] ?? "() => true"})`,
   first: (recv) => `${recv}[0]`,
   firstOrNull: (recv) => `(${recv}[0] ?? null)`,
@@ -429,14 +432,17 @@ export const TS_COLLECTION_RENDERERS: Record<
     return `[...${recv}].sort((__a, __b) => { const ka = (${args[0]})(__a), kb = (${args[0]})(__b); return ${cmp}; })`;
   },
   // `new Set` dedupes by SameValueZero — reference identity for objects — so a
-  // `money[]` (decimal.js `Decimal` instances) never dedupes at all: two
-  // value-equal `Decimal`s are distinct references.  Fall back to an
-  // `.eq`-keyed first-occurrence filter for money, the same money special-case
-  // the `contains`/`sum`/`sortBy`/`min`/`max` rows already carry (audit A14).
-  distinct: (recv, _args, e) =>
-    receiverElementIsMoney(e)
-      ? `${recv}.filter((__x, __i, __a) => __a.findIndex((__y) => __y.eq(__x)) === __i)`
-      : `[...new Set(${recv})]`,
+  // `money[]` (decimal.js `Decimal` instances) or a value-object collection
+  // never dedupes at all: two value-equal elements are distinct references.
+  // Fall back to an equality-keyed first-occurrence filter for both, the same
+  // object-element special-case the `contains`/`sum`/`sortBy`/`min`/`max` rows
+  // already carry (audit A14; F2-EXPR-4 for the value-object half).
+  distinct: (recv, _args, e) => {
+    const eqm = receiverElementEqMethod(e);
+    return eqm
+      ? `${recv}.filter((__x, __i, __a) => __a.findIndex((__y) => __y.${eqm}(__x)) === __i)`
+      : `[...new Set(${recv})]`;
+  },
   take: (recv, args) => `${recv}.slice(0, ${args[0]})`,
   skip: (recv, args) => `${recv}.slice(${args[0]})`,
   join: (recv, args) => `${recv}.join(${args[0]})`,
@@ -471,15 +477,29 @@ function unaryOperandIsMoney(e: Extract<ExprIR, { kind: "unary" }>): boolean {
   return unwrapped?.kind === "primitive" && unwrapped.name === "money";
 }
 
-/** True iff a collection op's receiver element type is `money` — its elements
- *  are decimal.js `Decimal`s, so `contains`/`distinct` must use value equality
- *  (`.eq`) rather than `.includes`/`new Set` (reference identity). */
-function receiverElementIsMoney(e?: Extract<ExprIR, { kind: "method-call" }>): boolean {
+/** The VALUE-equality method a collection op's element type carries, or null
+ *  when the element compares correctly with JS identity (`===`).
+ *
+ *  Both element kinds here are OBJECTS on this backend, so `.includes` /
+ *  `new Set` compare references and silently answer wrong: `money` elements are
+ *  decimal.js `Decimal`s (`.eq`), and a `valueobject` element is a generated
+ *  class carrying the field-wise `equals` every VO emits (emit/value-objects.ts
+ *  — a VO's defining property).  The validator ADMITS both element types on
+ *  `distinct`/`contains` (`loom.distinct-non-scalar` reads "requires a scalar or
+ *  value-object element"), and every other backend is structural by
+ *  construction — python frozen dataclass, .NET/java records, elixir maps —
+ *  so node was alone in returning duplicates from a dedupe and `false` from a
+ *  membership test (F2-EXPR-4). */
+function receiverElementEqMethod(
+  e?: Extract<ExprIR, { kind: "method-call" }>,
+): "eq" | "equals" | null {
   const rt = e?.receiverType;
-  if (!rt) return false;
+  if (!rt) return null;
   const unwrapped = rt.kind === "optional" ? rt.inner : rt;
   const elem = unwrapped.kind === "array" ? unwrapped.element : undefined;
-  return elem?.kind === "primitive" && elem.name === "money";
+  if (elem?.kind === "primitive" && elem.name === "money") return "eq";
+  if (elem?.kind === "valueobject") return "equals";
+  return null;
 }
 
 /** True iff a `sum` reduction's numeric type is `money` — the λ-body type for

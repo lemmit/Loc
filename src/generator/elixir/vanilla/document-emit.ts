@@ -39,6 +39,7 @@
 // `validateVanillaDocumentScope`.
 // ---------------------------------------------------------------------------
 
+import { isRequiredUpdateInput } from "../../../ir/enrich/wire-projection.js";
 import {
   PAGED_DEFAULT_PAGE,
   PAGED_DEFAULT_PAGE_SIZE,
@@ -58,11 +59,8 @@ import type {
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { isDocumentShaped, resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
-import {
-  type SingleFieldPattern,
-  singleFieldConstraints,
-} from "../../../ir/validate/invariant-classify.js";
-import { elixirRegexBody, plural, snake, upperFirst } from "../../../util/naming.js";
+import { singleFieldConstraints } from "../../../ir/validate/invariant-classify.js";
+import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { statementSubRegions } from "../../_trace/sourcemap.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
@@ -74,7 +72,8 @@ import {
   vanillaDocCapabilityFilter,
   vanillaDocWriteScopeFilter,
 } from "./capability-filter.js";
-import { NORMALIZE_KEYS_DEFP } from "./key-normalize.js";
+import { ectoValidator } from "./changeset-validators.js";
+import { isVoValuedType, NORMALIZE_KEYS_DEFP, NORMALIZE_VO_KEYS_DEFP } from "./key-normalize.js";
 import { managedTimestampNames } from "./managed-timestamps.js";
 import {
   collectOpGuardClauses,
@@ -264,6 +263,18 @@ function renderDocDataSchema(appModule: string, ctxModule: string, agg: Aggregat
   );
   const validatorBlock = validatorLines.length > 0 ? `\n${validatorLines.join("\n")}` : "";
   const requiredBlock = requiredCols ? `\n    |> validate_required([${requiredCols}])` : "";
+  // A VALUE-OBJECT field inside the embed is a `:map` cast verbatim, so neither
+  // `__normalize_keys/1` (top level) nor `cast_embed` reaches its sub-keys — the
+  // relational hole (F2-W-01) in the document shape.  Snake is the canonical
+  // stored key here too.
+  const voKeyFields = fields
+    .filter((f) => isVoValuedType(f.type))
+    .map((f) => JSON.stringify(snake(f.name)));
+  const voKeyLine =
+    voKeyFields.length > 0
+      ? `\n    attrs = __normalize_vo_keys(attrs, [${voKeyFields.join(", ")}])`
+      : "";
+  const voKeyHelper = voKeyFields.length > 0 ? `\n\n${NORMALIZE_VO_KEYS_DEFP}` : "";
   return `# Auto-generated.
 defmodule ${dataMod} do
   @moduledoc "Embedded domain shape for the document aggregate — the whole tree stored in the jsonb \`data\` column."
@@ -278,57 +289,26 @@ ${schemaBody}
 
   @doc false
   def changeset(struct, attrs) do
-    attrs = __normalize_keys(attrs)
+    attrs = __normalize_keys(attrs)${voKeyLine}
 
     struct
     |> cast(attrs, [${castCols}])${castEmbedBlock}${requiredBlock}${validatorBlock}
   end
 
-${NORMALIZE_KEYS_DEFP}
+${NORMALIZE_KEYS_DEFP}${voKeyHelper}
 end
 `;
 }
 
 // ---------------------------------------------------------------------------
 // Changeset — schemaless validation over the document fields.
+//
+// The per-pattern validator lines come from the SHARED `ectoValidator`
+// (`changeset-validators.ts`) — the same leaf the relational changeset and the
+// value-object emitter use — so a document embed can't drift from them (it
+// carried a byte-identical private copy until the code-point length rules
+// landed, which is exactly the drift a duplicate invites).
 // ---------------------------------------------------------------------------
-
-function ectoValidator(field: string, p: SingleFieldPattern, message?: string): string {
-  // A messaged single-field rule rides its author text on Ecto's own
-  // `message:` option (mirrors the shared `ectoValidator`); message-less is
-  // byte-identical.
-  const m = message ? `, message: ${JSON.stringify(message)}` : "";
-  switch (p.kind) {
-    case "min":
-      // Exclusive (`weight > 0.5` on a decimal/money field) → Ecto's strict
-      // `greater_than:`; inclusive keeps `greater_than_or_equal_to:`.
-      return p.exclusive
-        ? `    |> validate_number(:${field}, greater_than: ${p.n}${m})`
-        : `    |> validate_number(:${field}, greater_than_or_equal_to: ${p.n}${m})`;
-    case "max":
-      return p.exclusive
-        ? `    |> validate_number(:${field}, less_than: ${p.n}${m})`
-        : `    |> validate_number(:${field}, less_than_or_equal_to: ${p.n}${m})`;
-    case "between":
-      return `    |> validate_number(:${field}, greater_than_or_equal_to: ${p.lo}, less_than_or_equal_to: ${p.hi}${m})`;
-    // `validate_length/3` counts GRAPHEMES, where every other backend counts
-    // CODE POINTS (RS-31 / src/generator/_expr/code-point.ts).  The two agree on
-    // every astral character and differ only on combining sequences; Ecto has no
-    // `:codepoints` count, so closing the gap means hand-rolling Ecto's error
-    // tuples and default message text.  Signed residual — see
-    // docs/audits/schemathesis-findings-2026-08.md § F5.
-    case "len-min":
-      return `    |> validate_length(:${field}, min: ${p.n}${m})`;
-    case "len-max":
-      return `    |> validate_length(:${field}, max: ${p.n}${m})`;
-    case "len-eq":
-      return `    |> validate_length(:${field}, is: ${p.n}${m})`;
-    case "len-range":
-      return `    |> validate_length(:${field}, min: ${p.lo}, max: ${p.hi}${m})`;
-    case "regex":
-      return `    |> validate_format(:${field}, ~r/${elixirRegexBody(p.pattern)}/${m})`;
-  }
-}
 
 export function renderDocChangeset(appModule: string, ctxModule: string, agg: AggregateIR): string {
   const aggMod = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
@@ -338,6 +318,52 @@ export function renderDocChangeset(appModule: string, ctxModule: string, agg: Ag
   // changeset just casts the incoming attrs INTO the `:data` embed (so
   // `on_replace: :update` gives merge-on-update semantics for free) and stamps
   // the version.  `record` is `%<Agg>{}` on insert and the existing row on update.
+  //
+  // The UPDATE seam takes the second head (M-T6.26).  RS-26 says the update
+  // contract is full-replacement, so an ABSENT KEY is a missing field — but
+  // `on_replace: :update` merges the incoming attrs ONTO the stored embed, and
+  // the embed's own `validate_required/2` then reads the retained value and
+  // passes.  Elixir answered 204 where the other four backends answer 422.
+  // Presence is therefore checked against the RAW attrs on the root changeset,
+  // ahead of `cast_embed`, exactly as the relational `update_changeset/2` does
+  // (`changeset-emit.ts` `__require_keys/3`) — same helper, same error shape,
+  // so ProblemDetails renders the same `{"pointer":"/<field>"}` entry.
+  const updateRequired = docRequiredFields(agg).filter((f) => isRequiredUpdateInput(f));
+  // Emitted only where there IS a required field to check, so a document
+  // aggregate whose updatable fields are all optional stays byte-identical.
+  //
+  // The raw attrs carry the CAMELCASE wire keys — the document path snake-cases
+  // them inside `<Agg>.Data.changeset/2`, not here — so the presence check reads
+  // a normalized COPY (the attrs handed to `cast_embed` are untouched).  Without
+  // that, `Map.has_key?(attrs, "item_count")` is false for a body that DID carry
+  // `itemCount` and every multi-word field 422s.
+  const requireKeys =
+    updateRequired.length > 0
+      ? `
+    |> __require_keys(__normalize_keys(attrs), [${updateRequired
+      .map((f) => `:${snake(f.name)}`)
+      .join(", ")}])`
+      : "";
+  const requireKeysHelper =
+    updateRequired.length > 0
+      ? `
+
+  # A full-replacement PUT carries every required field, so an ABSENT KEY is a
+  # missing field even when the loaded document still holds a value (RS-26).
+  # The embed's \`validate_required/2\` cannot see that — \`cast_embed\` merges
+  # onto the stored data first — so presence is checked here, against the raw
+  # attrs.  The error shape is \`validate_required/2\`'s own, on the ROOT
+  # changeset, so ProblemDetails still renders 422 with \`{"pointer":"/<field>"}\`.
+  defp __require_keys(changeset, attrs, fields) do
+    Enum.reduce(fields, changeset, fn field, cs ->
+      if Map.has_key?(attrs, Atom.to_string(field)) or Map.has_key?(attrs, field),
+        do: cs,
+        else: add_error(cs, field, "can't be blank", validation: :required)
+    end)
+  end
+
+${NORMALIZE_KEYS_DEFP}`
+      : "";
   return `# Auto-generated.
 defmodule ${changesetMod} do
   @moduledoc "Casts document attrs into the embedded \`:data\` schema + stamps the version."
@@ -350,6 +376,14 @@ defmodule ${changesetMod} do
     |> cast_embed(:data, with: &${aggMod}.Data.changeset/2, required: true)
     |> put_change(:version, version)
   end
+
+  @doc "The UPDATE seam — \`document_changeset/3\` plus the RS-26 raw-attrs presence check."
+  def document_update_changeset(%${aggMod}{} = record, attrs, version) when is_map(attrs) do
+    record
+    |> cast(%{"data" => attrs}, [])${requireKeys}
+    |> cast_embed(:data, with: &${aggMod}.Data.changeset/2, required: true)
+    |> put_change(:version, version)
+  end${requireKeysHelper}
 end
 `;
 }
@@ -573,14 +607,14 @@ ${
     record = %{record | version: expected_version || record.version}
 
     record
-    |> ${changesetMod}.document_changeset(attrs, record.version)
+    |> ${changesetMod}.document_update_changeset(attrs, record.version)
     |> Ecto.Changeset.optimistic_lock(:version)
     |> Repo.update()
   rescue
     Ecto.StaleEntryError -> {:error, :conflict}
   end`
     : `    record
-    |> ${changesetMod}.document_changeset(attrs, record.version + 1)
+    |> ${changesetMod}.document_update_changeset(attrs, record.version + 1)
     |> Repo.update()
   end`
 }
