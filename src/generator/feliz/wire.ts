@@ -667,6 +667,11 @@ export interface FelizRowField {
   /** Whether the sub-field is required (non-optional) — informational for v1
    *  (row validity does not gate submit yet). */
   required: boolean;
+  /** Numeric strictness of the sub-field's wire type — same contract as
+   *  `FelizFormField.numeric`.  A numeric row cell's encoder parses and throws
+   *  exactly like a flat cell's, so `renderValidation` folds a `List.forall`
+   *  parse term per row group into `<form>Valid`. */
+  numeric?: "integral" | "fractional";
 }
 
 /** A dynamic-row form field — an `X[]` create/param input whose element is a
@@ -1135,6 +1140,8 @@ function buildFieldArray(
         jsonKey: vf.name,
         enumValues: kind === "select" && eb.kind === "enum" ? enumsByName.get(eb.name) : undefined,
         required: !optional,
+        // A file cell degrades to text and encodes as a string — never numeric.
+        numeric: rowFile ? undefined : numericKind(eb),
       };
     });
   const rowType = `${upperFirst(elem.name)}Row`;
@@ -3338,9 +3345,12 @@ export function renderValidation(forms: FormRecord[]): string {
   const withFields = forms.filter((f) => f.fields.length > 0);
   if (withFields.length === 0) return "";
   const kinds = new Set<"integral" | "fractional">(
-    withFields.flatMap((f) =>
-      validatedFields(f).flatMap((fld) => (fld.numeric ? [fld.numeric] : [])),
-    ),
+    withFields.flatMap((f) => [
+      ...validatedFields(f).flatMap((fld) => (fld.numeric ? [fld.numeric] : [])),
+      ...f.fieldArrays.flatMap((fa) =>
+        fa.rowFields.flatMap((rf) => (rf.numeric ? [rf.numeric] : [])),
+      ),
+    ]),
   );
   return lines(
     "// Client-side validation — required text/number fields must be non-empty,",
@@ -3360,7 +3370,22 @@ export function renderValidation(forms: FormRecord[]): string {
         ...(fld.required ? [`not (${emptyPredicate(fld)})`] : []),
         ...(fld.numeric ? [`${NUMERIC_CHECK_FN[fld.numeric]} form.${fld.wireName}`] : []),
       ]);
-      const body = terms.length > 0 ? terms.join(" && ") : "true";
+      // Dynamic-row groups: each row's numeric cells feed the SAME encoders,
+      // so a `List.forall` parse term guards them too.  (Row required-ness
+      // stays informational — only the parse hazard gates submit.)
+      const rowTerms = f.fieldArrays.flatMap((fa) => {
+        const numericRows = fa.rowFields.filter((rf) => rf.numeric !== undefined);
+        if (numericRows.length === 0) return [];
+        const inner = numericRows
+          .map(
+            (rf) =>
+              `${NUMERIC_CHECK_FN[rf.numeric as "integral" | "fractional"]} row.${rf.wireName}`,
+          )
+          .join(" && ");
+        return [`List.forall (fun row -> ${inner}) form.${fa.fieldName}`];
+      });
+      const allTerms = [...terms, ...rowTerms];
+      const body = allTerms.length > 0 ? allTerms.join(" && ") : "true";
       const errorFns = validated.flatMap((fld) => [
         "",
         `  let ${fieldErrorFn(f.formType, fld.wireName)} (form: ${f.formType}) : string option =`,

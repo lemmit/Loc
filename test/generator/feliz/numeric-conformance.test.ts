@@ -324,7 +324,9 @@ system Shop {
   });
 
   it("emits no numeric helpers for a form with no numeric field", async () => {
-    const fs = await appOf(FORM_SYS.replace("name: string  price: money  rank: int?", "name: string"));
+    const fs = await appOf(
+      FORM_SYS.replace("name: string  price: money  rank: int?", "name: string"),
+    );
     expect(fs).toContain("module Validation =");
     expect(fs).not.toContain("isWholeText");
     expect(fs).not.toContain("isNumberText");
@@ -379,5 +381,55 @@ system P {
       body: Text { \`Deal: {price < 5}\` }
     }`);
     expect(fs).toContain("(model.Price < 5m)");
+  });
+});
+
+describe("feliz: dynamic-row numeric cells guard the submit too", () => {
+  // A VO[] row cell feeds the SAME throwing encoders as a flat cell, so each
+  // row group with a numeric sub-field contributes a `List.forall` parse term
+  // to `<form>Valid` (row required-ness stays informational — only the parse
+  // hazard gates submit).
+  const ROW_SYS = `
+system Shop {
+  api ShopApi from Sales
+  subdomain Sales {
+    context Ordering {
+      valueobject LineItem { sku: string  qty: int  price: money }
+      aggregate Order with crudish {
+        reference: string
+        items: LineItem[]
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage db { type: postgres }
+  resource ordState { for: Ordering, kind: state, use: db }
+  ui WebApp {
+    api Shop: ShopApi
+    page OrderNew {
+      route: "/orders/new"
+      body: Stack { CreateForm { of: Order } }
+    }
+  }
+  deployable api { platform: node contexts: [Ordering] dataSources: [ordState] serves: ShopApi port: 3000 }
+  deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 }
+}`;
+
+  async function appOf(source: string): Promise<string> {
+    const model = await buildLoomModel(source);
+    const s = model.systems[0]!;
+    const web = s.deployables.find((d) => d.name === "web")!;
+    return generateFelizForContexts(s.subdomains[0]!.contexts, s, web).get("src/App.fs")!;
+  }
+
+  it("folds a List.forall parse term per numeric row cell into the Valid predicate", async () => {
+    const fs = await appOf(ROW_SYS);
+    expect(fs).toContain(
+      "  let orderFormValid (form: OrderForm) : bool =\n" +
+        "    not (System.String.IsNullOrWhiteSpace form.reference)" +
+        " && List.forall (fun row -> isWholeText row.qty && isNumberText row.price) form.items",
+    );
+    // The string row cell contributes nothing.
+    expect(fs).not.toContain("row.sku)");
   });
 });
