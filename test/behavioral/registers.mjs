@@ -150,17 +150,7 @@ export function sharedSystemGoldenCases() {
  *
  * @type {ReadonlyArray<{case: string, reason: string}>}
  */
-export const GOLDEN_OPT_OUT = [
-  {
-    case: "numeric-operands",
-    reason:
-      "unit-tier-only by design (M-T6.44): the fixture witnesses the right-hand money/decimal " +
-      "operand gates through in-process `test` assertions on every backend; a wire golden minted " +
-      "now would freeze one backend's decimal wire representation and pre-empt the pending " +
-      "cross-backend decimal-arithmetic ruling (audit F11 / M-T5.22). Exit: M-T5.22 lands its " +
-      "RS rule -> add a `test e2e` block + golden here and delete this entry.",
-  },
-];
+export const GOLDEN_OPT_OUT = [];
 
 /** Every case that must carry a golden: all of them, minus the signed opt-outs. */
 export function requiredGoldenCases() {
