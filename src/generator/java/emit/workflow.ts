@@ -636,7 +636,7 @@ export function renderJavaWorkflows(
     if (wf.params.length > 0) {
       const reqImports = new Set<string>();
       const components = wf.params.map((p) => {
-        collectWireImports(p.type, reqImports);
+        collectWireImports(p.type, reqImports, "Request");
         return `${wireJavaType(p.type, "Request")} ${p.name}`;
       });
       // A VO-typed param's `<Vo>Request` record lives in an aggregate's

@@ -39,6 +39,11 @@ function javaRealtimeValue(access: string, t: TypeIR): string {
   if (inner.kind === "id") base = `${access}.value()`;
   else if (inner.kind === "primitive" && inner.name === "datetime") base = `${access}.toString()`;
   else if (inner.kind === "primitive" && inner.name === "money") base = `${access}.toPlainString()`;
+  // decimal → a JSON NUMBER at double width (RS-24 / M-T6.46).  Handing Jackson
+  // the raw `BigDecimal` shipped the domain value's full precision — up to the
+  // 34 significant digits `MathContext.DECIMAL128` produces — on the SSE frame
+  // while the REST response (and every other backend's frame) carries a double.
+  else if (inner.kind === "primitive" && inner.name === "decimal") base = `${access}.doubleValue()`;
   if (opt && base !== access) return `${access} == null ? null : ${base}`;
   return base;
 }

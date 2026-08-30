@@ -198,7 +198,14 @@ const rabbitmqJavaAdapter: JavaResourceAdapter = {
       `import com.rabbitmq.client.MessageProperties;`,
       ``,
       `public final class RabbitmqResources {`,
-      `    private static final ObjectMapper JSON = JsonMapper.builder().build();`,
+      // WRITE_BIGDECIMAL_AS_PLAIN (M-T6.46): the payload is an `Object` the
+      // caller supplies — a domain value carrying a `BigDecimal` reaches this
+      // mapper and crosses an EXTERNAL wire (broker / third-party REST), so pin
+      // plain notation rather than the default scientific form for a
+      // negative-scale value.
+      `    private static final ObjectMapper JSON = JsonMapper.builder()`,
+      `        .enable(tools.jackson.core.StreamWriteFeature.WRITE_BIGDECIMAL_AS_PLAIN)`,
+      `        .build();`,
       `    private static final AMQP.BasicProperties PERSISTENT = MessageProperties.PERSISTENT_TEXT_PLAIN;`,
       ``,
       `    private RabbitmqResources() {`,
@@ -263,7 +270,14 @@ const restApiJavaAdapter: JavaResourceAdapter = {
       ``,
       `public final class RestApiResources {`,
       `    private static final HttpClient CLIENT = HttpClient.newHttpClient();`,
-      `    private static final ObjectMapper JSON = JsonMapper.builder().build();`,
+      // WRITE_BIGDECIMAL_AS_PLAIN (M-T6.46): the payload is an `Object` the
+      // caller supplies — a domain value carrying a `BigDecimal` reaches this
+      // mapper and crosses an EXTERNAL wire (broker / third-party REST), so pin
+      // plain notation rather than the default scientific form for a
+      // negative-scale value.
+      `    private static final ObjectMapper JSON = JsonMapper.builder()`,
+      `        .enable(tools.jackson.core.StreamWriteFeature.WRITE_BIGDECIMAL_AS_PLAIN)`,
+      `        .build();`,
       ``,
       `    private RestApiResources() {`,
       `    }`,

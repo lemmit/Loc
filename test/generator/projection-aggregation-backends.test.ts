@@ -161,11 +161,16 @@ describe("java", () => {
     expect(svc).toContain("((Number) r[0]).intValue()");
     // Still `toString()` on the provider's own type rather than a cast — but
     // money is then pinned to the fixed wire scale, and its empty-table zero is
-    // `"0.0000"` (RS-12 / #2549), where a plain decimal keeps `BigDecimal.ZERO`.
+    // `"0.0000"` (RS-12 / #2549).
     expect(svc).toContain(
       'r[1] == null ? "0.0000" : new java.math.BigDecimal(r[1].toString()).setScale(4, java.math.RoundingMode.HALF_UP).toPlainString()',
     );
-    expect(svc).toContain("r[2] == null ? BigDecimal.ZERO : new BigDecimal(r[2].toString())");
+    // A plain `decimal` lands on the RESPONSE wire's `double` (RS-24 /
+    // M-T6.46), so it reads through `Number` like the count does and its
+    // empty-table zero is `0.0`, not `BigDecimal.ZERO` — the aggregate arm used
+    // to re-wrap into a BigDecimal and ship the stored column's full precision.
+    expect(svc).toContain("r[2] == null ? 0.0 : ((Number) r[2]).doubleValue()");
+    expect(svc).not.toContain("BigDecimal.ZERO");
   });
 
   it("binds a SINGLE-select aggregation as a bare scalar — no Object[] cast", async () => {

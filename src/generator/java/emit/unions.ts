@@ -205,13 +205,13 @@ function memberDomainParams(m: UnionMember, imports: Set<string>): string {
 function memberWireParams(m: UnionMember, imports: Set<string>): string {
   if (m.shape === "none") return "";
   if (m.shape === "scalar") {
-    collectWireImports(m.type, imports);
+    collectWireImports(m.type, imports, "Response");
     return `${wireJavaType(m.type, "Response")} value`;
   }
   return m.fields
     .map((f) => {
       const t = eff(f.type, f.optional);
-      collectWireImports(t, imports);
+      collectWireImports(t, imports, "Response");
       return `${wireJavaType(t, "Response")} ${f.name}`;
     })
     .join(", ");

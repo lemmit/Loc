@@ -590,7 +590,7 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     title: "A plain `decimal` is a JSON NUMBER on the wire; only `money` is a string",
     trigger: "a GET returning an aggregate (or nested value object) with a `decimal` field",
     observable:
-      'the value is a JSON number (`9.99`, `5`). This is the deliberate counterpart to RS-12, where `money` is a fixed-scale STRING (`"19.5000"`) so no float rounding can touch a monetary amount — the two types differ on the wire, and a backend must not collapse them.',
+      'the value is a JSON number (`9.99`, `5`) — and the SAME number every other backend sends: the wire width is an IEEE-754 double (≤17 significant digits), whatever the backend computes in. This is the deliberate counterpart to RS-12, where `money` is a fixed-scale STRING (`"19.5000"`) so no float rounding can touch a monetary amount — the two types differ on the wire, and a backend must not collapse them.',
     // 4-vs-1 again, and a textbook FRAMEWORK-MEDIATED shape: nothing in the
     // vanilla emitter chose a string.  Jason's `Decimal` encoder emits a JSON
     // string, so every `%Decimal{}` that reached the serializer un-transformed
@@ -609,6 +609,9 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
       'found 2026-08-01 by the M-T9.11 golden gate on the elixir leg: value-collections #1 GET /api/invoices/{id} at $.lineItems[*].amount — golden 9.99 / 5 vs "9.99" / "5"',
       'root-caused by running Jason.encode!(%{a: Decimal.new("9.99")}) against the real library rather than reading the emitter',
       "fixed (elixir): src/generator/elixir/vanilla/wire-serialize.ts __decimal_num/1",
+      "#2563 / #2575 (dotnet): a response `decimal` is a `double`, not a `System.Decimal` — the rule is not just 'a number', it is the SAME number, and .NET's ~15-significant-digit type could not reproduce the oracle's double",
+      "amended 2026-08-24 by the numeric-types audit F9 (#2644) / M-T6.46: java conformed only PARTIALLY — the wire was a JSON number, but the VALUE carried up to 34 significant digits (domain `BigDecimal`, `MathContext.DECIMAL128` division) against everyone else's ≤17.  Only the projection `avg` arm was double-parity, and only by the provider's accident of typing an average as a `Double`",
+      "fixed (java): src/generator/java/emit/wire.ts response-direction `double` + `.doubleValue()`, plus the JPQL aggregate / GROUP-BY-key coercions, the SSE realtime frame and the explicit-handler scalar return",
     ],
     tier: "behavioral",
   },

@@ -163,7 +163,10 @@ describe("M-T5.10 PR5 — Java reads the <Agg>Response contract record", () => {
     // A `provenanced` field ships as the `Provenanced<T>` wire carrier (M-T6.12)
     // — and the DECLARED-record path applies the same wrap the wireShape path
     // does, which is exactly what `baselineOrder === scaffoldOrder` above pins.
-    expect(scaffoldOrder).toContain("Provenanced<BigDecimal> amount");
+    // The CARRIED type is the RESPONSE wire type, so a `decimal` is the boxed
+    // `Double` a generic argument needs, not the domain `BigDecimal`
+    // (RS-24 / M-T6.46 — the narrowing reaches inside the carrier too).
+    expect(scaffoldOrder).toContain("Provenanced<Double> amount");
     expect(scaffoldOrder).not.toContain("amountProvenance");
     expect(scaffoldOrder).not.toContain("note");
     expect(scaffoldOrder).not.toContain("apiKey");
