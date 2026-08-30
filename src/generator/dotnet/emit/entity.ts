@@ -18,7 +18,7 @@ import { resolveToSource } from "../../../ir/types/origin.js";
 import { typeIsFile } from "../../../ir/util/file-field.js";
 import { operationBody, operationBodyUsesCurrentUser } from "../../../ir/util/op-gates.js";
 import { lines } from "../../../util/code-builder.js";
-import { plural, upperFirst } from "../../../util/naming.js";
+import { escapeCsharpIdent, plural, upperFirst } from "../../../util/naming.js";
 import {
   constructionSeededDefaults,
   isServerSourcedDefault,
@@ -395,7 +395,9 @@ export function renderEntity(
     derivedLines.push("    public override string ToString() => Inspect;");
   }
   const fnLines = entity.functions.flatMap((fn) => {
-    const params = fn.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
+    const params = fn.params
+      .map((p) => `${renderCsType(p.type)} ${escapeCsharpIdent(p.name)}`)
+      .join(", ");
     const head = `    private ${renderCsType(fn.returnType)} ${upperFirst(fn.name)}(${params})`;
     // Expression form keeps the expression-bodied `=> expr;` shape
     // (byte-identical); block form (domain-services.md rev. 4) emits a
@@ -436,7 +438,9 @@ export function renderEntity(
     // (op-gates.ts) — the entity renders only what remains.
     const opBody = operationBody(op);
     const userParam = usesUser ? "User currentUser" : "";
-    const baseParams = op.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
+    const baseParams = op.params
+      .map((p) => `${renderCsType(p.type)} ${escapeCsharpIdent(p.name)}`)
+      .join(", ");
     const params = [baseParams, userParam].filter(Boolean).join(", ");
     if (op.extern) {
       // Extern op (extern (b) Phase 2): a REAL method that runs the
@@ -452,9 +456,10 @@ export function renderEntity(
       // the co-located scaffold-once `<Agg>.Extern.cs` partial
       // (`renderExternHookImpl`).
       const hookName = `${upperFirst(op.name)}Core`;
-      const callArgs = [...op.params.map((p) => p.name), ...(usesUser ? ["currentUser"] : [])].join(
-        ", ",
-      );
+      const callArgs = [
+        ...op.params.map((p) => escapeCsharpIdent(p.name)),
+        ...(usesUser ? ["currentUser"] : []),
+      ].join(", ");
       const retType = op.returnType ? renderCsType(op.returnType) : "void";
       opLines.push(`    public ${retType} ${upperFirst(op.name)}(${params})`);
       opLines.push("    {");
@@ -609,17 +614,17 @@ export function renderEntity(
     isRoot && eventSourced && esCreate
       ? [
           `    public static ${entity.name} Create(${esCreate.params
-            .map((p) => `${renderCsType(p.type)} ${p.name}`)
+            .map((p) => `${renderCsType(p.type)} ${escapeCsharpIdent(p.name)}`)
             .join(", ")})`,
           "    {",
           `        var e = new ${entity.name}();`,
           `        e.Id = new ${idClass}(${csNewIdValue(effIdValueType)});`,
-          `        e._Init(${esCreate.params.map((p) => p.name).join(", ")});`,
+          `        e._Init(${esCreate.params.map((p) => escapeCsharpIdent(p.name)).join(", ")});`,
           "        return e;",
           "    }",
           "",
           `    private void _Init(${esCreate.params
-            .map((p) => `${renderCsType(p.type)} ${p.name}`)
+            .map((p) => `${renderCsType(p.type)} ${escapeCsharpIdent(p.name)}`)
             .join(", ")})`,
           "    {",
           renderCsStatements(esCreate.statements, renderCtx, {
@@ -763,7 +768,8 @@ export function renderEntity(
   const createAssignments = createInputFieldList.map((f) => {
     const dflt = csFactoryDefault(f);
     // `??`, not a truthiness test: an explicit 0/""/false must survive.
-    return `        e.${upperFirst(f.name)} = ${dflt === undefined ? f.name : `${f.name} ?? ${dflt}`};`;
+    const arg = escapeCsharpIdent(f.name);
+    return `        e.${upperFirst(f.name)} = ${dflt === undefined ? arg : `${arg} ?? ${dflt}`};`;
   });
   // Server-seeded literal defaults (RS-11): fields outside the create-input set
   // (`token`/`managed`/`internal`) whose default is a plain constant — the
@@ -790,13 +796,13 @@ export function renderEntity(
           ]
             .map((f) => {
               const dflt = csFactoryDefault(f);
-              if (dflt === undefined) return `${renderCsType(f.type)} ${f.name}`;
+              if (dflt === undefined) return `${renderCsType(f.type)} ${escapeCsharpIdent(f.name)}`;
               // `T? x = null` rather than `T x = <default>`: a C# optional
               // parameter default must be a compile-time constant, which a
               // rendered default expression (a VO ctor, an enum member, a
               // decimal) need not be.  The body applies it instead.
               const t = renderCsType(f.type);
-              return `${t.endsWith("?") ? t : `${t}?`} ${f.name} = null`;
+              return `${t.endsWith("?") ? t : `${t}?`} ${escapeCsharpIdent(f.name)} = null`;
             })
             .join(", ")})`,
           "    {",

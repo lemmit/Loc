@@ -103,3 +103,74 @@ describe("ddd parse — IR-level validation", () => {
     expect(out).toContain("OK:");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The WARNING half of the same defect.
+//
+// Phase ⑦ computes 18 warning codes.  `parse` filtered them down to the one
+// allow-listed `loom.index-suggestion`, and `generate system` printed its
+// diagnostics only inside the `if (loomErrors.length > 0)` branch — so a
+// clean-but-warned model printed NOTHING on either command while `--json`
+// reported the warnings faithfully.  A warning the tool computes and then
+// discards is the same "the checking tool asserts the file is fine" failure
+// the error half above fixed.
+// ---------------------------------------------------------------------------
+
+/** A model with no errors and three phase-⑦ warnings: an `eventLog` resource
+ *  nothing is persisted as (`loom.datasource-unused`) whose `every:` /
+ *  `retain:` snapshot knobs no emitter reads (`loom.datasource-knob-unwired`
+ *  ×2). */
+const IR_WARNED = `
+system WarnSystem {
+  subdomain D {
+    context Orders {
+      aggregate Order with crudish { code: string }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: Orders, kind: state, use: pg }
+  resource evtLog { for: Orders, kind: eventLog, use: pg, every: 100, retain: 3 }
+  deployable d {
+    platform: node
+    contexts: [Orders]
+    dataSources: [st, evtLog]
+    port: 3000
+  }
+}
+`;
+
+function generateSystem(file: string): { out: string; status: number } {
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-gen-"));
+  const r = spawnSync("node", [cli, "generate", "system", file, "-o", outDir, "--dry-run"], {
+    encoding: "utf8",
+  });
+  return { out: `${r.stdout ?? ""}${r.stderr ?? ""}`, status: r.status ?? 1 };
+}
+
+describe("IR warnings are visible, not discarded", () => {
+  it("`ddd parse` prints every IR warning, with a severity label, and still exits 0", () => {
+    const { out, status } = parse(write("warned.ddd", IR_WARNED));
+    expect(status).toBe(0);
+    // Both warning codes reach the user…
+    expect(out).toContain("loom.datasource-knob-unwired");
+    expect(out).toContain("loom.datasource-unused");
+    // …labelled as warnings, not passed off as errors…
+    expect(out).toMatch(/loom\.datasource-knob-unwired \S+ warning: /);
+    // …and the run still succeeds.
+    expect(out).toContain("OK:");
+    // …with a footer that counts them (the AST-layer footer above it reports
+    // 0/0 — these are phase-⑦ warnings, and used to be counted nowhere).
+    expect(out).toMatch(/^3 warning\(s\)\.$/m);
+  });
+
+  it("`ddd generate system` prints IR warnings on the SUCCESS path", () => {
+    const { out, status } = generateSystem(write("warned-gen.ddd", IR_WARNED));
+    expect(status).toBe(0);
+    // The generate path prints `<source> <severity>: <message>` — same shape
+    // it already used on the error path, now reached when there are no errors.
+    expect(out).toMatch(/warning: resource 'evtLog' sets 'every'/);
+    expect(out).toMatch(/warning: Deployable 'd' lists resource 'evtLog'/);
+    expect(out).toContain("warning(s).");
+  });
+});

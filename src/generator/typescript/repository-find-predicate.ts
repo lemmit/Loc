@@ -712,6 +712,31 @@ export function writeScopePredicate(
   return l.expr;
 }
 
+/** The write-scope existence PRE-GUARD lines for a QUERYABLE-COLUMN shape
+ *  (relational / `shape: embedded`): a one-row probe matching BOTH the id and
+ *  the write scope, ahead of the ordinary `findById` load.  Every mutation
+ *  route loads through `getById`, so that is where a narrowing write scope is
+ *  enforced — a row the caller may READ but not WRITE is indistinguishable
+ *  from a missing one (404), and the read filter still hydrates it afterwards.
+ *  Empty (byte-identical emission) when nothing narrows.  Shared by the
+ *  relational and embedded builders — the MikroORM adapter's twin is
+ *  `mikroGetByIdLines` (emit/mikroorm.ts). */
+export function writeScopeGuardLines(
+  agg: EnrichedAggregateIR,
+  tableName: string,
+  ctx: EnrichedBoundedContextIR,
+  ops: Set<string>,
+): string[] {
+  const pred = writeScopePredicate(agg, tableName, ctx, ops);
+  if (!pred) return [];
+  ops.add("and");
+  ops.add("eq");
+  return [
+    `    const inScope = await this.db.select({ id: schema.${tableName}.id }).from(schema.${tableName}).where(and(eq(schema.${tableName}.id, id), ${pred})).limit(1);`,
+    `    if (inScope.length === 0) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
+  ];
+}
+
 /** Combine a capability-filter predicate with an existing read predicate.
  *  `existing` is a raw Drizzle predicate expression (the argument that
  *  would go inside `.where(...)`), e.g. `eq(schema.docs.id, id)`.  When a

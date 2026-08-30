@@ -81,6 +81,7 @@ import { lines } from "../../../util/code-builder.js";
 import { intrinsicFor, intrinsicKey, isQueryableBoolIntrinsic } from "../../../util/intrinsics.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { SQL_LIKE_ESCAPE_CLAUSE, tsSubtreeLikePattern } from "../../_expr/subtree-like.js";
+import { isReservedIdent } from "../../sql-reserved.js";
 import { joinColumnName, joinTableConstName } from "../emit.js";
 import { synthProjectionFinds } from "../projection-finds.js";
 import { isRefCollection } from "../repository-associations-builder.js";
@@ -93,6 +94,9 @@ import {
   entityFromDocFn,
   entityToDocFn,
   findPredicate,
+  inMemoryPagedTailLines,
+  PAGED_TAIL_PARAMS,
+  pagedReturnType,
   serializeField,
   writeScopeDeniesAll,
 } from "../repository-document-builder.js";
@@ -1108,6 +1112,13 @@ export const MIKRO_INTRINSIC_SQL: Record<string, (recv: string, args: string[]) 
   "datetime.startOfDay": (r) => `date_trunc('day', ${r})`,
 };
 
+/** A column name in a raw-SQL identifier position: quoted when the word cannot
+ *  appear bare in Postgres (`src/generator/sql-reserved.ts` owns the list),
+ *  bare otherwise so no existing fragment moves. */
+function mikroIdent(name: string): string {
+  return isReservedIdent(name) ? `"${name}"` : name;
+}
+
 /** A raw SQL fragment plus the TypeScript expressions its `?` placeholders
  *  bind, in placeholder order. */
 interface MikroRawFragment {
@@ -1120,11 +1131,17 @@ interface MikroRawFragment {
  *
  *  Column identifiers are inlined as DB column names (`snake`) rather than
  *  bound: a FilterQuery key names entity PROPERTIES, but a raw fragment is SQL
- *  and is past the mapping layer.  Only VALUES bind. */
+ *  and is past the mapping layer.  Only VALUES bind — which is why a RESERVED
+ *  name (`end`, `order`, `limit`, …) has to be quoted here: MikroORM's own
+ *  `updateSchema()` quotes it when it creates the column, so the table is fine
+ *  and only this fragment would be a runtime syntax error (F2-ADP-6).  The
+ *  escaping is trivial on this backend — the fragment is `JSON.stringify`d into
+ *  a TS string literal, so the `"` needs no further treatment (unlike Dapper's
+ *  regular/verbatim split). */
 function mikroColumnSql(e: ExprIR, params: string[], acc: string): string | null {
   const inner = e.kind === "paren" ? e.inner : e;
   const col = thisFieldColumn(inner);
-  if (col !== null) return snake(col);
+  if (col !== null) return mikroIdent(snake(col));
   if (inner.kind === "method-call" && inner.receiverType.kind === "primitive") {
     const sig = intrinsicFor(inner.receiverType.name, inner.member);
     const render = MIKRO_INTRINSIC_SQL[intrinsicKey(inner.receiverType.name, inner.member)];
@@ -2845,12 +2862,30 @@ export function renderMikroDocumentRepository(
     // other find under a principal filter binds the ambient accessor
     // (fail-closed), matching `documentFindMethod` on the drizzle side.
     const needsPrincipalBind = principalBind !== null && !findUsesCurrentUser(f);
-    return lines(
-      `  async ${f.name}(${params}): Promise<${ret}> {`,
+    const loadLines = [
       ...(needsPrincipalBind ? [principalBind] : []),
       `    const em = this.em.fork({ keepTransactionContext: true });`,
       `    const rows = await em.find(${row}, {});`,
       `    const all = rows.map((r) => ${fromDocOf("r")});`,
+    ];
+    // `find … paged` — no queryable columns on a document blob, so the page is
+    // taken in-memory over the rehydrated list, exactly as the drizzle document
+    // repository does.  Without this the route's paged contract met an unpaged
+    // single-get method (F2-CB-C1).
+    if (pagedReturn(f.returnType)) {
+      const pagedParams = [...baseParams, ...PAGED_TAIL_PARAMS];
+      const pagedAll = (usesUser ? [...pagedParams, "currentUser: User"] : pagedParams).join(", ");
+      return lines(
+        `  async ${f.name}(${pagedAll}): Promise<${pagedReturnType(agg.name)}> {`,
+        ...loadLines,
+        `    const matched = ${pred ? `${allExpr}.filter(${pred})` : allExpr};`,
+        ...inMemoryPagedTailLines(agg, "matched", f.name),
+        `  }`,
+      );
+    }
+    return lines(
+      `  async ${f.name}(${params}): Promise<${ret}> {`,
+      ...loadLines,
       `    const result = ${selector};`,
       `    requestLog().debug({ event: "find_executed", aggregate: "${agg.name}", find: "${f.name}", rows: ${rowsExpr} });`,
       `    return result;`,
@@ -3089,6 +3124,21 @@ export function renderMikroEventSourcedRepository(
         : isOptional
           ? `all.find(${pred ?? "() => true"}) ?? null`
           : `all.find(${pred ?? "() => true"})!`;
+      // `find … paged` over a stream — same in-memory page as the document blob
+      // above and as the drizzle event-sourced repository (F2-CB-C1).
+      if (pagedReturn(find.returnType)) {
+        const pagedParams = [...baseParams, ...PAGED_TAIL_PARAMS];
+        const pagedAll = (usesUser ? [...pagedParams, "currentUser: User"] : pagedParams).join(
+          ", ",
+        );
+        return lines(
+          `  async ${find.name}(${pagedAll}): Promise<${pagedReturnType(agg.name)}> {`,
+          "    const all = await this._loadAll();",
+          `    const matched = ${pred ? `all.filter(${pred})` : "all"};`,
+          ...inMemoryPagedTailLines(agg, "matched", find.name),
+          "  }",
+        );
+      }
       return lines(
         `  async ${find.name}(${params}): Promise<${ret}> {`,
         "    const all = await this._loadAll();",

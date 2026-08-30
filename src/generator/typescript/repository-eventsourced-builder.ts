@@ -1,3 +1,4 @@
+import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -10,9 +11,13 @@ import { lines } from "../../util/code-builder.js";
 import { lowerFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import {
+  blobGetByIdLines,
   deserializeField,
   docFieldType,
   findPredicate,
+  inMemoryPagedTailLines,
+  PAGED_TAIL_PARAMS,
+  pagedReturnType,
   serializeField,
   tsParamType,
 } from "./repository-document-builder.js";
@@ -92,11 +97,9 @@ export function buildEventSourcedRepositoryFile(
     `    );`,
     `  }`,
     "",
-    `  async getById(id: ${idVar}): Promise<${agg.name}> {`,
-    `    const found = await this.findById(id);`,
-    `    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
-    `    return found;`,
-    `  }`,
+    // Command load — carries the write-scope check when the write scope is
+    // narrower than the read scope (F2-ADP-5); a bare load otherwise.
+    ...blobGetByIdLines(agg, idVar),
     "",
     `  async findManyByIds(ids: ${idVar}[]): Promise<${agg.name}[]> {`,
     `    if (ids.length === 0) return [];`,
@@ -212,6 +215,10 @@ export function buildEventSourcedRepositoryFile(
     voOrEnumImportLine,
     `import * as Ids from "../../domain/ids";`,
     `import type * as Events from "../../domain/events";`,
+    // A principal-referencing WRITE scope binds the ambient accessor in the
+    // `getById` command load — key the import off the emitted body (F2-ADP-5).
+    /\brequireCurrentUser\(/.test(bodyScan) &&
+      `import { requireCurrentUser } from "../../auth/middleware";`,
     `import { AggregateNotFoundError, ConcurrencyError } from "../../domain/errors";`,
     `import type { DomainEventDispatcher } from "../../domain/events";`,
     `import { requestLog } from "../../obs/als";`,
@@ -245,6 +252,21 @@ function eventSourcedFindMethod(
       ? `all.find(${pred ?? "() => true"}) ?? null`
       : `all.find(${pred ?? "() => true"})!`;
   const rowsExpr = isArray ? "result.length" : "result == null ? 0 : 1";
+  // `find … paged` — the route is built for the paged contract, so the
+  // repository has to answer it (F2-CB-C1).  No queryable columns on a stream,
+  // so the page is taken in-memory over the folded list, exactly as the
+  // document shape (and java's event store) does.
+  if (pagedReturn(find.returnType)) {
+    const pagedParams = [...baseParams, ...PAGED_TAIL_PARAMS];
+    const pagedAll = (usesUser ? [...pagedParams, "currentUser: User"] : pagedParams).join(", ");
+    return lines(
+      `  async ${find.name}(${pagedAll}): Promise<${pagedReturnType(agg.name)}> {`,
+      `    const all = await this._loadAll();`,
+      `    const matched = ${pred ? `all.filter(${pred})` : "all"};`,
+      ...inMemoryPagedTailLines(agg, "matched", find.name),
+      `  }`,
+    );
+  }
   return lines(
     `  async ${find.name}(${params}): Promise<${ret}> {`,
     `    const all = await this._loadAll();`,

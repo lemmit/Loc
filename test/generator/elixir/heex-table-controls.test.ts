@@ -74,6 +74,35 @@ system Shop {
 }
 `;
 
+/** A scaffolded list page whose author-declared `find all` is NOT paged — so
+ *  the scaffold's `all` QueryView is CLIENT-paged (`serverPaged:` absent) and
+ *  the repository exposes `list_orders/0`.  The JSX frontends slice and sort
+ *  such a list in the browser; HEEx cannot, so the affordance must not be
+ *  advertised at all (F2-MT640-SORT-DEAD). */
+const NON_PAGED_SRC = `
+system Sales {
+  subdomain M {
+    context C {
+      aggregate Order {
+        code: string
+        derived display: string = code
+      }
+      repository Orders for Order {
+        find all(): Order[]
+      }
+    }
+  }
+  api SalesApi from M
+  ui SalesUi with scaffold(subdomains: [M]) { }
+  storage loomDb { type: postgres }
+  resource cState { for: C, kind: state, use: loomDb }
+  deployable phoenixApp {
+    platform: elixir, contexts: [C], dataSources: [cState], serves: SalesApi,
+    ui: SalesUi, port: 4000
+  }
+}
+`;
+
 async function liveView(src: string, file: string): Promise<string> {
   const files = await generateSystemFiles(src);
   for (const [p, c] of files) {
@@ -188,6 +217,20 @@ describe("HEEx table controls — gated off", () => {
     const live = await liveView(PLAIN_SRC, "listing_live.ex");
     expect(live).toContain("<.table ");
     // No control args ⇒ none of the new emission fires.
+    expect(live).not.toContain("sort_key={");
+    expect(live).not.toContain("sort_field=");
+    expect(live).not.toContain("<.pager");
+    expect(live).not.toContain("loom-sort");
+    expect(live).not.toContain("loom-page");
+  });
+
+  it("a CLIENT-paged (non-`serverPaged`) list advertises no sort or pager", async () => {
+    const live = await liveView(NON_PAGED_SRC, "order_list_live.ex");
+    // The list itself still loads — through the argument-less delegate.
+    expect(live).toContain("list_orders()");
+    expect(live).toContain("<.table ");
+    // …but every control the server can't honour is gone.  Sortable headers
+    // over an argument-less refetch flip an arrow and change nothing.
     expect(live).not.toContain("sort_key={");
     expect(live).not.toContain("sort_field=");
     expect(live).not.toContain("<.pager");

@@ -35,7 +35,11 @@ describe("vanilla — T2.i changeset field-constraint validators", () => {
     const files = await generateSystemFiles(SRC);
     const cs = files.get([...files.keys()].find((k) => k.endsWith("/shop/product_changeset.ex"))!)!;
     expect(cs).toContain("|> validate_number(:price, greater_than_or_equal_to: 0)");
-    expect(cs).toContain("|> validate_length(:name, max: 50)");
+    // Length is the one pattern that is NOT a native Ecto validator: Ecto counts
+    // GRAPHEMES and has no `:codepoints` option, so a length bound rides a
+    // `validate_change/3` closure over the shared code-point count (RS-31).
+    expect(cs).toContain("|> validate_change(:name, fn _, value ->");
+    expect(cs).toContain("length(String.to_charlist(value)) <= 50");
     expect(cs).toContain("|> validate_format(:sku, ~r/[A-Z]{3}/)");
   });
 
@@ -76,7 +80,7 @@ system P {
     const f = await generateSystemFiles(plain);
     const cs = f.get([...f.keys()].find((k) => k.endsWith("/tracker/task_changeset.ex"))!)!;
     expect(cs).not.toContain("validate_number");
-    expect(cs).not.toContain("validate_length");
+    expect(cs).not.toContain("validate_change");
     expect(cs).not.toContain("validate_format");
   });
 });

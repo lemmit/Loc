@@ -1010,7 +1010,16 @@ function emitProjectFromContexts(
     // RAW seed rows are hand-built SQL, so they need the same dataSource schema
     // the EF model routes the tables into (the DOMAIN path is qualified by the
     // model mapping itself).
+    //
+    // …EXCEPT under `persistence: dapper`, which is a SELF-PROVISIONING adapter:
+    // it emits no migration chain, its DDL is `DbSchema.EnsureAsync`, and that
+    // DDL (like every Dapper statement) names tables UNQUALIFIED — so the raw
+    // seed has to target the same unqualified tables `EnsureAsync` created.
+    // Qualifying them off the per-context dataSource schema instead made
+    // `RunSeeds` throw `3F000 schema "catalog" does not exist` on first boot,
+    // because nothing in the Dapper emission ever creates that schema (F2-ADP-2).
     emitDotnetSeeds(merged, ns, out, usingDapper, (aggName) => {
+      if (usingDapper) return undefined;
       // Resolve through the aggregate's OWNING context, not `merged`: the
       // dataSource bindings name the real contexts, so a merged pseudo-context
       // resolves to nothing and the qualifier would silently go missing again.

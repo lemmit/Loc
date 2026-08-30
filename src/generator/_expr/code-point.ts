@@ -16,7 +16,7 @@
 //   C#      `s.Length`               UTF-16 code units   ✗
 //   Java    `s.length()`             UTF-16 code units   ✗
 //   Python  `len(s)`                 code points         ✓
-//   Elixir  `String.length/1`        graphemes           ~ (see below)
+//   Elixir  `String.length/1`        graphemes           ✗ (see below)
 //
 // So `"😀X"` — 2 code points, 3 UTF-16 code units — was simultaneously
 // ACCEPTED by a `length == 3` rule on node/.NET/java and INVALID against the
@@ -25,14 +25,16 @@
 // per target language, used by both the domain rule renderer and the
 // wire-boundary validator emitter, so the two can never drift.
 //
-// **Elixir counts GRAPHEMES, deliberately not converted here.** `String.length/1`
-// and Ecto's `validate_length/3` both count grapheme clusters, and Ecto offers
-// no `:codepoints` count — moving it would mean hand-rolling Ecto's error
-// tuples and changing its default message text.  Graphemes and code points
-// agree on every astral character (the case that broke the other three), and
-// diverge only on combining sequences, which nothing in the corpus exercises.
-// Recorded as a residual in docs/audits/schemathesis-findings-2026-08.md
-// rather than silently left alone.
+// **Elixir used to count GRAPHEMES** — `String.length/1` and Ecto's
+// `validate_length/3` both count grapheme clusters — and was signed off as a
+// residual on the theory that the two only diverge on combining sequences.
+// That theory undercounts the exposure: NFD-normalised accented Latin, emoji
+// ZWJ sequences and regional-indicator flags all hit it, and none is exotic.
+// So elixir now counts code points too.  Ecto has no `:codepoints` count, which
+// is why the changeset half hand-rolls `validate_change/3` closures carrying
+// Ecto's own error tuples (`changeset-validators.ts`) instead of
+// `validate_length/3` — both halves moved together, because moving one alone
+// would make elixir disagree with itself.
 // ---------------------------------------------------------------------------
 
 /** JS/TS: spreading a string iterates it by code point. */
@@ -62,4 +64,12 @@ export function csCodePointLength(recv: string): string {
  *  lands in arbitrary expression slots. */
 export function javaCodePointLength(recv: string): string {
   return `((int) ${recv}.codePoints().count())`;
+}
+
+/** Elixir: a charlist is a list of CODE POINTS, so `length/1` over it is the
+ *  code-point count — `String.length/1` would count graphemes.  Chosen over
+ *  `String.codepoints/1 |> length/1` because it spells the receiver once and
+ *  needs no pipe (the snippet lands in arbitrary expression slots). */
+export function elixirCodePointLength(recv: string): string {
+  return `length(String.to_charlist(${recv}))`;
 }

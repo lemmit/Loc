@@ -184,6 +184,18 @@ function hydrateValueExpr(
       return `(${colExpr} as { url: string; key: string; contentType: string; size: number })`;
     return colExpr;
   }
+  if (t.kind === "array") {
+    // A scalar collection (`money[]`, `decimal[]`, `int[]`, `string[]`, enum[])
+    // is a native Postgres ARRAY column, and drizzle hands back the ELEMENT
+    // column's own runtime type per item — so `numeric().array()` reads back as
+    // `string[]`.  Without this arm the raw strings went straight into
+    // `_rehydrate` (typed `Decimal[]`), so a `money[]` never round-tripped and
+    // every downstream `.eq`/arithmetic on an element blew up.  Map each
+    // element through the SAME conversion the scalar arm applies; element types
+    // that need none keep the bare column (byte-identical emission).
+    const mapped = arrayElementHydrate(t.element);
+    return mapped ? `(${colExpr} ?? []).map((__v) => ${mapped("__v")})` : colExpr;
+  }
   if (t.kind === "id") {
     return `Ids.${t.targetName}Id(${colExpr})`;
   }
@@ -211,6 +223,20 @@ function hydrateValueExpr(
     return `new ${t.name}(${args})`;
   }
   return colExpr;
+}
+
+/** How ONE element of a scalar-collection column converts from its drizzle
+ *  runtime value to its domain value, or null when the two already agree (the
+ *  common case — `int[]` / `string[]` / `bool[]` / enum[] / `datetime[]` all
+ *  arrive in their domain form).  Mirrors the primitive arm of
+ *  {@link hydrateValueExpr}: `numeric` reads back as a string, which is
+ *  precisely why `money` exists (lossless `Decimal`) and `decimal` does not
+ *  (lossy JS `number`). */
+function arrayElementHydrate(t: TypeIR): ((v: string) => string) | null {
+  if (t.kind !== "primitive") return null;
+  if (t.name === "money") return (v) => `new Decimal(${v})`;
+  if (t.name === "decimal") return (v) => `Number(${v})`;
+  return null;
 }
 
 /** The first LEAF (non-VO) flattened column of a VO field — the null probe

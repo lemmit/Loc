@@ -363,10 +363,14 @@ export function checkAssignOrCall(
  *  lambda-bound refs as `unknown` under this body env → suppressed (skipped, not
  *  false-flagged). */
 export function checkConstructionArgTypes(
-  node: AstNode,
+  node: AstNode | undefined,
   env: Env,
   accept: ValidationAcceptor,
 ): void {
+  // Parse recovery leaves grammar-required expression slots undefined; the
+  // Langium stream throws ("Root node must be an AstNode") on one, which would
+  // abort the enclosing check and swallow its sibling diagnostics.
+  if (!node) return;
   for (const n of AstUtils.streamAst(node)) {
     if (n.$type !== "BuilderCall") continue;
     const bc = n as BuilderCall;
@@ -426,7 +430,13 @@ export function checkConstructionArgTypes(
  *  `unknown`-suppression + numeric-literal promotion).  Bare call STATEMENTS
  *  (`fee(5)` / `o.f(5)` alone) are an `LValue`, not a `PostfixChain`, so they
  *  stay `checkCallStmt`'s job with no double report. */
-export function checkExprCallArgs(node: AstNode, env: Env, accept: ValidationAcceptor): void {
+export function checkExprCallArgs(
+  node: AstNode | undefined,
+  env: Env,
+  accept: ValidationAcceptor,
+): void {
+  // Same parse-recovery guard as `checkConstructionArgTypes` above.
+  if (!node) return;
   for (const n of AstUtils.streamAst(node)) {
     if (!isPostfixChain(n)) continue;
     const first = n.suffixes[0];
