@@ -384,11 +384,4 @@ export const COVERED_ELSEWHERE: readonly string[] = [
  *  fixture here yet.  The honest TODO list — shrink-only (M-T9.33 drain): a
  *  code leaves by gaining a FIRING_FIXTURES entry (it fires) or an
  *  UNREACHABLE_PINS entry (it cannot).  Nothing may be added. */
-export const UNCOVERED: readonly string[] = [
-  "loom.applier-impure-call",
-  "loom.cross-aggregate-entity-part",
-  "loom.ir-internal",
-  "loom.platform-knob-style-layout-mismatch",
-  "loom.resource-missing-capability",
-  "loom.ui-id-ref-unknown-aggregate",
-];
+export const UNCOVERED: readonly string[] = [];

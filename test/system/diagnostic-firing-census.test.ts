@@ -19,6 +19,11 @@ import {
   PROJECTION_WF_SOURCE_SUPPORTED,
   REMOTE_API_OP_UNSUPPORTED,
 } from "../../src/ir/validate/checks/system-checks.js";
+import {
+  allAdapterNames,
+  hasAdapters,
+  styleSupportedLayouts,
+} from "../../src/platform/adapter-metadata.js";
 import { parseBuiltinPlatformRef } from "../../src/platform/metadata.js";
 import { FLUTTER_UNRENDERED_PRIMITIVES } from "../../src/util/flutter-deferred-primitives.js";
 import { COVERED_ELSEWHERE, UNCOVERED } from "./diagnostic-firing-census.data.js";
@@ -522,6 +527,56 @@ system S {
       create(n: string) { let batch = Orders.run(Nope()) }
     }`),
 
+  // --- the last singletons, each DRIVEN before being classified -----------
+  // An applier body is a pure fold; a CALL statement in one is the impurity.
+  // (Raises several event-sourcing codes together — the assertion is
+  // containment, so a fixture may legitimately trip more than its own.)
+  "loom.applier-impure-call": repoOnly(`    event Opened { account: Account id }
+    aggregate Account persistedAs: eventLog {
+      owner: string
+      operation touch() { owner := "x" }
+      create open(owner: string) { emit Opened { account: id } }
+      apply(e: Opened) { touch() }
+    }
+    repository Accounts for Account { }`),
+
+  // A resource op whose capability the bound storage does not offer.
+  // `localDisk` offers objectStore{blob,list}; `signedUrl` is s3-only — so the
+  // SAME source on `type: s3` does not raise this code, which is what makes
+  // the fixture discriminating rather than incidental.
+  "loom.resource-missing-capability": `
+system S {
+  subdomain Sub { context C {
+    aggregate Doc with crudish { name: string }
+    repository Docs for Doc { }
+    workflow W {
+      create(k: string) { let u = Blobs.signedUrl(k) }
+    }
+  } }
+  storage pg { type: postgres }
+  storage files { type: localDisk }
+  resource st { for: C, kind: state, use: pg }
+  resource Blobs { for: C, kind: objectStore, use: files }
+  deployable api { platform: node contexts: [C] dataSources: [st, Blobs] port: 3000 }
+}`,
+
+  // A UI-mounting deployable whose form would need a Select picker for an
+  // `X id` naming no aggregate in the system.  Needs the ui + react deployable
+  // — a backend-only system never reaches the id-reference walk.
+  "loom.ui-id-ref-unknown-aggregate": `
+system S {
+  subdomain Sub { context C {
+    aggregate Order with crudish { code: string  buyer: Ghost id }
+    repository Orders for Order { }
+  } }
+  api A from Sub
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  ui W { api Sales: A }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: A port: 3000 }
+  deployable web { platform: react targets: api ui: W { Sales: api } port: 3001 }
+}`,
+
   "loom.sub-primitive-misplaced": `
 system S {
   subdomain Sub { context C {
@@ -926,6 +981,27 @@ const UNREACHABLE_PINS: Record<string, string> = {
     "Driven and confirmed: the only code out of `validate()` is `loom.parse-error`.  Re-test by " +
     "ungating `isolation:` in `ddd.langium`.",
 
+  // --- the last three singletons -------------------------------------------
+  "loom.cross-aggregate-entity-part":
+    "The arm needs a RESOLVED entity-part owned by a different aggregate, and `ddd-scope.ts` " +
+    "restricts containment part types to entity parts declared in the SAME aggregate (the rule " +
+    "CLAUDE.md states as `cross-aggregate references must use X id`).  So the name never links " +
+    "and the source reports `loom.linking-error` instead.  Driven and confirmed.  Re-test by " +
+    "widening the containment part-type scope to sibling aggregates.",
+  "loom.platform-knob-style-layout-mismatch":
+    "Every platform's LAYOUT menu is a subset of what its style declares in `styleSupportedLayouts`, " +
+    "so a layout that would mismatch is already out-of-menu and `loom.platform-knob-out-of-menu` " +
+    "fires first (the gate's own comment says an unknown value 'already errored under R1').  " +
+    "Checked by `the style/layout menus cannot disagree` below — and note the gate's comment " +
+    "names elixir + `byLayer` as the way to reach it, which does NOT work for exactly this " +
+    "reason: `byLayer` is not in elixir's menu at all.  Driven and confirmed.",
+  "loom.ir-internal":
+    "A catch-all: `irDiagnosticsFor` wraps the whole lower/enrich/validate pipeline and converts " +
+    "a THROW into this code, so it fires only when the compiler crashes.  A `.ddd` that reaches " +
+    "it is a compiler bug to fix, not a fixture to keep — pinning a crashing source here would " +
+    "enshrine the crash as expected behaviour and make the fixture fail the day it is fixed.  " +
+    "Re-test by removing the try/catch: every source that reaches it should be a bug report.",
+
   // --- defensive backstops for shapes scope already forbids ------------------
   "loom.java-workflow-instance-field-unsupported":
     "Fires on an ENTITY-typed field in a workflow's `instanceWireShape`.  An entity is a " +
@@ -1152,7 +1228,7 @@ const catalogueCodes = (): string[] => [
  *  `loom.workflow-name-collision`, fires cleanly — its recorded preemption was
  *  simply wrong, which is the second false unreachability claim this census
  *  has caught in that one file. */
-const UNCOVERED_BASELINE = 6;
+const UNCOVERED_BASELINE = 0;
 
 describe("diagnostic firing census", () => {
   // Keeps the LATENT_GATES pins honest.  Without this the pin is prose and its
@@ -1190,6 +1266,41 @@ describe("diagnostic firing census", () => {
         `${gate.setName} no longer covers every backend-owning platform (missing ` +
           `${uncovered.join(", ")}), so ${gate.code} is reachable again — either port the ` +
           `feature on those platforms or replace its pin with a FIRING_FIXTURES entry`,
+      ).toEqual([]);
+    });
+  });
+
+  // Backs the `loom.platform-knob-style-layout-mismatch` pin the same way
+  // LATENT_GATES backs the capability pins: by re-deriving the claim, not
+  // trusting the prose.  The gate can only fire for a layout that is IN the
+  // platform's menu (anything else trips the out-of-menu check first) but NOT
+  // in the style's supported set.  Today no platform has such a value.
+  describe("the style/layout menus cannot disagree", () => {
+    const platforms = ["node", "dotnet", "python", "java", "elixir"] as const;
+
+    it("at least one platform declares layout adapters", () => {
+      // Vacuous-pass guard: if every platform had an empty menu the loop below
+      // would assert nothing at all.
+      expect(platforms.some((p) => hasAdapters(p) && allAdapterNames(p, "layout").length > 0)).toBe(
+        true,
+      );
+    });
+
+    it.each(platforms)("%s", (platform) => {
+      if (!hasAdapters(platform)) return;
+      const layouts = allAdapterNames(platform, "layout");
+      const unreachable: string[] = [];
+      for (const style of allAdapterNames(platform, "style")) {
+        const supported = new Set(styleSupportedLayouts(platform, style) ?? []);
+        for (const layout of layouts) {
+          if (!supported.has(layout)) unreachable.push(`${style} does not support ${layout}`);
+        }
+      }
+      expect(
+        unreachable,
+        `${platform} now offers a layout its style refuses (${unreachable.join("; ")}), so ` +
+          `loom.platform-knob-style-layout-mismatch is reachable — replace its UNREACHABLE_PINS ` +
+          `entry with a FIRING_FIXTURES entry naming that combination`,
       ).toEqual([]);
     });
   });
