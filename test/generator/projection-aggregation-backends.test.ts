@@ -141,7 +141,7 @@ describe("dotnet", () => {
 //   count → int  |  avg over int → double  |  avg/sum/max/min over decimal → decimal
 //
 // so a `decimal` column comes back as `System.Decimal` and the `(double)` cast
-// that follows is the same not-correctly-rounded conversion (F10 — 9.19% of
+// that follows is the same not-correctly-rounded conversion (F10 — 9.2% of
 // doubles fail to round-trip through it, measured on .NET 10.0.11;
 // `99.52989333734583` returns as `…84`).  `csDecimalToWireDouble` replaces it with an exact
 // `decimal.ToString` → correctly-rounded `double.Parse` pair.

@@ -142,7 +142,8 @@ function csCanonicalInstantWire(domainExpr: string): string {
  *  17 significant digits — the NUMERATOR is rounded to a double first and the
  *  quotient is then rounded again, so the result need not be the nearest double
  *  to the stored decimal.  MEASURED on .NET 10.0.11 over 3M random doubles in
- *  [0,100) written out as Postgres `numeric` and read back: 9.19% do not
+ *  [0,100) written out as Postgres `numeric` and read back: 9.2% (275,923 of
+ *  3,000,000) do not
  *  round-trip (`99.52989333734583` comes back `99.52989333734584`), while
  *  `double.Parse` of the same digits misses zero times.  Every one
  *  of the other four backends ships the true nearest double, so the .NET row is
