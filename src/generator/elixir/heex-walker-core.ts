@@ -45,6 +45,7 @@ import { variantTag } from "../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
   BoundedContextIR,
+  ComponentIR,
   EnumIR,
   ExprIR,
   PageIR,
@@ -107,6 +108,12 @@ export interface WalkResult {
   /** Names of user `component`s invoked in the body, so the LiveView
    *  emitter can hoist their action handlers transitively. */
   usedComponents: string[];
+  /** How many times each user `component` is INVOKED in this body (keyed by
+   *  component name).  `usedComponents` answers "which", this answers "how
+   *  many" — the host emitter multiplies these along the render tree to decide
+   *  whether a stateful component has more than one live instance, which the
+   *  lift-to-host-assigns model cannot represent (see `hostStateAssign`). */
+  componentUses: Map<string, number>;
   /** True when the body renders a `Slot()` (children passthrough), so the
    *  component emitter declares `slot :inner_block` for it. */
   usesSlot: boolean;
@@ -318,6 +325,22 @@ export interface WalkContext {
   actionBindings: ActionBinding[];
   /** Names of user components invoked while walking this body. */
   usedComponents: Set<string>;
+  /** Invocation COUNT per user component in this body — see
+   *  `WalkResult.componentUses`. */
+  componentUses: Map<string, number>;
+  /** The `component` whose `state { … }` / `action` this body owns, when the
+   *  body being walked is a component's rather than a page's.  A HEEx function
+   *  component is stateless, so its state lives in the HOST LiveView's assigns
+   *  under `hostStateAssign(owner, field)` and flows back down as an attr of
+   *  that same name.  Undefined for a page body — page state keeps its bare
+   *  assign name. */
+  stateOwner?: string;
+  /** Rendered-source substitutions for an INLINED action call's parameters
+   *  (`setLabel("hi")` inlining `action setLabel(v: string)`): param name →
+   *  already-rendered Elixir expression, applied at `ref` resolution.  LiveView
+   *  cannot call one `handle_event` clause from another, so a parameterised
+   *  sibling action is inlined with its arguments substituted. */
+  actionArgSubst?: ReadonlyMap<string, string>;
   /** Shared box flag set by `Slot()` rendering — boxed so the mutation
    *  survives the `{...ctx}` shallow copies nested renders make (like the
    *  Set/array accumulators above). */
@@ -447,6 +470,12 @@ export function walkBodyToHeex(
   /** i18n key prefix (M-T1.11) — `page.<Name>` / `component.<Name>`, matching
    *  the shared catalog.  Undefined ⇒ no translation, byte-identical. */
   i18nPrefix: string | undefined = undefined,
+  /** Name of the `component` this body belongs to, when walking a component
+   *  rather than a page.  Namespaces the lifted state assigns (and the
+   *  synthesized lambda event names) so two components can each declare `n`
+   *  without colliding in the host LiveView.  Undefined for a page body ⇒
+   *  byte-identical to the pre-lift output. */
+  stateOwner: string | undefined = undefined,
 ): WalkResult {
   const stateNames = new Set<string>(page.state.map((f) => snake(f.name)));
   const stateFields = new Map<string, StateFieldIR>(page.state.map((f) => [snake(f.name), f]));
@@ -482,6 +511,8 @@ export function walkBodyToHeex(
     handlers: [],
     actionBindings: [],
     usedComponents: new Set(),
+    componentUses: new Map(),
+    stateOwner,
     slotUsed: { value: false },
     chartUsed: { value: false },
     tabSeq: { value: 0 },
@@ -552,6 +583,7 @@ export function walkBodyToHeex(
     queryBindings: ctx.queryBindings,
     actionBindings: ctx.actionBindings,
     usedComponents: [...ctx.usedComponents],
+    componentUses: ctx.componentUses,
     usesSlot: ctx.slotUsed.value,
     usesChart: ctx.chartUsed.value,
     idOptionsBindings: [...ctx.idOptionsBindings],
@@ -716,6 +748,11 @@ function renderLiteral(kind: string, value: string): string {
 }
 
 function renderRef(expr: Extract<ExprIR, { kind: "ref" }>, ctx: WalkContext): string {
+  // Parameter of an INLINED sibling action (`go() { setLabel("hi") }`) — the
+  // caller's argument, already rendered in the CALLER's scope.  Parenthesised
+  // so substituting an operator expression into a larger one stays safe.
+  const subst = ctx.actionArgSubst?.get(expr.name);
+  if (subst !== undefined) return `(${subst})`;
   // Store-field read — `Cart.count` (Stage 5).  Resolved at lowering into a
   // `ref` carrying `refKind: "store-field"` + the declaring `storeName`.  In a
   // page/component body it reads the store's per-page assign
@@ -742,16 +779,19 @@ function renderRef(expr: Extract<ExprIR, { kind: "ref" }>, ctx: WalkContext): st
     // StateFieldIR up by snake-cased name (built once at walker
     // entry) and passes through; the target snake-cases the name
     // itself and dispatches by position.
+    // A component's state is lifted into the HOST LiveView's assigns and flows
+    // back down as an attr of the same (namespaced) name, so BOTH positions use
+    // `hostStateAssign` — `@counter_n` in the component template, and
+    // `socket.assigns.counter_n` in the handler the host hoisted.
+    const assignName = hostStateAssign(ctx.stateOwner, expr.name);
     const field = ctx.stateFields.get(snake(expr.name));
     if (field) {
-      return heexTarget.renderStateRead({ field, name: field.name }, ctx.position);
+      return heexTarget.renderStateRead({ field, name: assignName }, ctx.position);
     }
     // Fallback to legacy path if the field isn't in the map (shouldn't
     // happen — stateNames and stateFields are populated together at
     // walker entry).  Behavior-identical to delegation.
-    return ctx.position === "template"
-      ? `@${snake(expr.name)}`
-      : `socket.assigns.${snake(expr.name)}`;
+    return ctx.position === "template" ? `@${assignName}` : `socket.assigns.${assignName}`;
   }
   // Page/component `derived` binding — LiveView has no render-scope hoist
   // site, so we INLINE-RECOMPUTE: substitute the derived's expr at each
@@ -775,7 +815,10 @@ function renderRef(expr: Extract<ExprIR, { kind: "ref" }>, ctx: WalkContext): st
     case "lambda":
       return snake(expr.name);
     case "enum-value":
-      return `:${snake(expr.name)}`;
+      // Declared casing, never snake: the loaded struct field is the
+      // declared-case `Ecto.Enum` atom (see render-expr.ts's enum-value arm) —
+      // `:public` would never equal `:Public`, silently failing the comparison.
+      return `:${expr.name}`;
     case "current-user":
       return ctx.position === "template" ? `@current_user` : `socket.assigns.current_user`;
     case "helper-fn":
@@ -881,10 +924,11 @@ function renderMethodCall(
  *  Values render in template position (refs become `@assign`). */
 function renderUserComponent(
   expr: Extract<ExprIR, { kind: "call" }>,
-  comp: import("../../ir/types/loom-ir.js").ComponentIR,
+  comp: ComponentIR,
   ctx: WalkContext,
 ): string {
   ctx.usedComponents.add(comp.name);
+  ctx.componentUses.set(comp.name, (ctx.componentUses.get(comp.name) ?? 0) + 1);
   const attrs: string[] = [];
   let pos = 0;
   for (let i = 0; i < expr.args.length; i++) {
@@ -904,6 +948,13 @@ function renderUserComponent(
     const mod = externModuleFromPath(comp.externPath ?? "");
     const rest = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
     return `<.live_component module={${mod}} id="${snake(comp.name)}"${rest} />`;
+  }
+  // Lifted state — the callee's own `state { … }` plus that of every component
+  // it renders, threaded down from the host LiveView's assigns under the same
+  // namespaced name at every level (see `hostStateAssign`).  Rendered in
+  // template position because a call site always sits inside a `~H` body.
+  for (const { assign } of liftedStateAttrs(comp, ctx.ui)) {
+    attrs.push(`${assign}={@${assign}}`);
   }
   const tag = `${ctx.appModule}Web.Components.UiComponents.${snake(comp.name)}`;
   return attrs.length > 0 ? `<${tag} ${attrs.join(" ")} />` : `<${tag} />`;
@@ -1805,7 +1856,12 @@ function hoistLambdaToHandler(arg: ExprIR, ctx: WalkContext): string {
   // handler onto ctx.handlers (shared by reference across nested renders), so
   // its length gives a per-page sequence that resets for the next page and is
   // deterministic regardless of how many pages were walked before.
-  const eventName = `event_${ctx.handlers.length + 1}`;
+  // Namespaced by the owning component so a component's inline lambda and the
+  // host page's own `event_1` don't collide once the host hoists both.  A page
+  // body keeps the bare `event_<n>` (byte-identical).
+  const eventName = ctx.stateOwner
+    ? `${snake(ctx.stateOwner)}_event_${ctx.handlers.length + 1}`
+    : `event_${ctx.handlers.length + 1}`;
   // Lambda body — either single-expression or block.
   const bodyLines: string[] = [];
   bodyLines.push(`    socket =`);
@@ -1846,7 +1902,7 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
       const value = renderExpr(stmt.value, { ...ctx, position: "handler" });
       const stateRef = {
         field: { name: fieldName, type: { kind: "primitive" as const, name: "string" as const } },
-        name: fieldName,
+        name: hostStateAssignIfOwned(fieldName, ctx),
       };
       return heexTarget.renderStateWrite(stateRef, value);
     }
@@ -1878,7 +1934,7 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
       if (!fieldName) return `# bad ${stmt.kind}`;
       const stateRef = {
         field: { name: fieldName, type: { kind: "primitive" as const, name: "string" as const } },
-        name: fieldName,
+        name: hostStateAssignIfOwned(fieldName, ctx),
       };
       const rhs = renderExpr(stmt.value, { ...ctx, position: "handler" });
       // Nested target (`order.total += v`) reads the dotted handler path;
@@ -1886,7 +1942,7 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
       const read =
         stmt.target.segments.length === 1
           ? heexTarget.renderStateRead(stateRef, "handler")
-          : `socket.assigns.${stmt.target.segments.map((s) => snake(s)).join(".")}`;
+          : `socket.assigns.${[stateRef.name, ...stmt.target.segments.slice(1).map((s) => snake(s))].join(".")}`;
       const value = stmt.collection
         ? stmt.kind === "add"
           ? `${read} ++ [${rhs}]`
@@ -1951,21 +2007,32 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
           return `|> tap(fn _ -> :ok end) # action '${snake(stmt.name)}' cycle (HEEx)`;
         }
         const callee = ctx.page.actions?.find((a) => a.name === stmt.name);
-        if (callee && callee.params.length === 0) {
-          if (callee.body.length === 0) return "|> tap(fn _ -> :ok end)";
-          const innerCtx: WalkContext = {
-            ...ctx,
-            actionInlineStack: new Set([...(ctx.actionInlineStack ?? []), stmt.name]),
-          };
-          return callee.body.map((s) => renderStmt(s, innerCtx)).join("\n      ");
+        if (!callee) {
+          // No such action in scope — the validator owns the diagnostic; codegen
+          // must not emit a call to a function that does not exist.
+          return `|> tap(fn _ -> :ok end) # action '${snake(stmt.name)}' not found`;
         }
-        // Parameterised callee (a single payload param the caller would have
-        // to substitute) — no clean inline without param rewriting.  Emit a
-        // no-op marker rather than a call to an undefined function; this stays
-        // a reviewed HEEx parity gap (mirrors the component-level-action
-        // caveat).  Stage-1 action→action with a payload is rare; revisit if a
-        // real case needs it.
-        return `|> tap(fn _ -> :ok end) # action '${snake(stmt.name)}' (parameterised) not inlined in LiveView (HEEx parity gap)`;
+        if (callee.body.length === 0) return "|> tap(fn _ -> :ok end)";
+        // A PARAMETERISED callee inlines the same way, with its parameters
+        // bound to the caller's arguments — rendered here, in the CALLER's
+        // scope, and substituted at each `ref` inside the callee body
+        // (`ctx.actionArgSubst`).  Elixir has no way to introduce a binding
+        // mid-pipe, so substitution is the inline; the arguments are pure
+        // expressions, so evaluating them once per use is equivalent.
+        const subst = new Map<string, string>();
+        callee.params.forEach((p, i) => {
+          const arg = stmt.args[i];
+          if (arg) subst.set(p.name, renderExpr(arg, { ...ctx, position: "handler" }));
+        });
+        const innerCtx: WalkContext = {
+          ...ctx,
+          actionInlineStack: new Set([...(ctx.actionInlineStack ?? []), stmt.name]),
+          // Replaces (never merges) the caller's substitutions: the callee's
+          // body resolves ITS parameter names, and the arguments that carried
+          // the caller's own parameters were already rendered above.
+          actionArgSubst: subst,
+        };
+        return callee.body.map((s) => renderStmt(s, innerCtx)).join("\n      ");
       }
       // Bare function / private-operation call statement.  Evaluated for
       // its effect; the socket flows through unchanged via `tap`.
@@ -2003,23 +2070,24 @@ function detectAwaitedOp(
   subject: ExprIR,
 ): { aggName: string; opName: string; args: ExprIR[] } | null {
   if (subject.kind === "method-call") {
-    const recv = subject.receiver;
-    if (recv.kind === "member" && recv.receiver.kind === "ref") {
-      return { aggName: recv.member, opName: subject.member, args: subject.args };
-    }
-    if (recv.kind === "ref") {
-      return { aggName: recv.name, opName: subject.member, args: subject.args };
-    }
+    const aggName = qualifierName(subject.receiver);
+    if (aggName) return { aggName, opName: subject.member, args: subject.args };
   }
   if (subject.kind === "member") {
-    const recv = subject.receiver;
-    if (recv.kind === "member" && recv.receiver.kind === "ref") {
-      return { aggName: recv.member, opName: subject.member, args: [] };
-    }
-    if (recv.kind === "ref") {
-      return { aggName: recv.name, opName: subject.member, args: [] };
-    }
+    const aggName = qualifierName(subject.receiver);
+    if (aggName) return { aggName, opName: subject.member, args: [] };
   }
+  return null;
+}
+
+/** The aggregate name a `match await` subject is qualified by: the LAST segment
+ *  of the receiver chain, whatever its depth.  `Order` in each of `Order.op()`,
+ *  `Api.Order.op()` and any deeper `a.b.Order.op()` qualification — only the
+ *  aggregate matters here, since `contextModuleByAggName` already resolves the
+ *  bounded context the api handle would have selected. */
+function qualifierName(recv: ExprIR): string | null {
+  if (recv.kind === "member") return recv.member;
+  if (recv.kind === "ref") return recv.name;
   return null;
 }
 
@@ -2040,12 +2108,23 @@ function renderVariantMatchStmt(
   stmt: Extract<StmtIR, { kind: "variant-match" }>,
   ctx: WalkContext,
 ): string {
+  // An unrecognised subject used to render a `tap(fn _ -> :ok end)` marker —
+  // valid Elixir that silently did nothing at runtime.  Fail at CODEGEN
+  // instead: the awaited call is the whole point of the statement, so dropping
+  // it is never the right answer.
   const detected = detectAwaitedOp(stmt.subject);
   if (!detected) {
-    return `|> tap(fn _ -> :ok end) # match await: unrecognised subject (HEEx parity gap, Stage 2)`;
+    throw new Error(
+      `platform: elixir — a variant \`match\` statement on page '${ctx.page.name}' has a subject the LiveView emitter cannot resolve to an aggregate operation (ExprIR kind '${stmt.subject.kind}'). A LiveView discriminates a union by RUNNING the operation server-side, so the subject must be the awaited call itself: \`match await <Aggregate>.<operation>(…)\` (optionally api-qualified).`,
+    );
   }
   const { aggName, opName, args } = detected;
   const agg = ctx.aggregatesByName.get(aggName);
+  if (!agg) {
+    throw new Error(
+      `platform: elixir — \`match await\` on page '${ctx.page.name}' resolves to '${aggName}.${opName}', but '${aggName}' is not an aggregate served by this deployable, so there is no context function to run.`,
+    );
+  }
   const ctxModule = ctx.contextModuleByAggName.get(aggName) ?? ctx.appModule;
   const aggSnake = snake(aggName);
   const opSnake = snake(opName);
@@ -2159,6 +2238,7 @@ function renderRequiresGuardAt(
     handlers: [],
     actionBindings: [],
     usedComponents: new Set(),
+    componentUses: new Map(),
     slotUsed: { value: false },
     chartUsed: { value: false },
     tabSeq: { value: 0 },
@@ -2171,6 +2251,73 @@ function renderRequiresGuardAt(
     contextModuleByAggName: new Map(),
   };
   return renderExpr(page.requires, ctx);
+}
+
+// ---------------------------------------------------------------------------
+// Component state lifting.
+//
+// A HEEx function component is a pure render function — it owns no process and
+// therefore no state.  React gives `component C { state { n } action bump() }`
+// a per-instance `useState`; the LiveView equivalent is to LIFT `n` into the
+// host page's assigns and pass it back down as an attr, while `bump` becomes a
+// `handle_event` clause on that same host LiveView.  Every reference — the
+// component's own template `@counter_n`, the host's `assign(:counter_n, …)`,
+// the call site's `counter_n={@counter_n}` — spells the ONE namespaced name, so
+// forwarding through an intermediate component needs no rewriting.
+// ---------------------------------------------------------------------------
+
+/** Host-LiveView assign name for a `state { … }` field: bare for a page's own
+ *  state, `<component>_<field>` for a component's lifted state. */
+export function hostStateAssign(owner: string | undefined, field: string): string {
+  return owner ? `${snake(owner)}_${snake(field)}` : snake(field);
+}
+
+/** `hostStateAssign` for a mutation target — namespaced only when the target
+ *  really is one of THIS body's declared state fields (a dotted path into an
+ *  aggregate instance, or a name the body doesn't own, is left alone). */
+function hostStateAssignIfOwned(field: string, ctx: WalkContext): string {
+  return ctx.stateNames.has(snake(field)) ? hostStateAssign(ctx.stateOwner, field) : snake(field);
+}
+
+/** Every lifted state field a component invocation must be passed — its own,
+ *  plus (transitively) those of the components it renders, since an
+ *  intermediate function component can only forward what it was itself given.
+ *  Ordered by owning component then declaration, deduped by assign name. */
+export function liftedStateAttrs(
+  comp: ComponentIR,
+  ui: UiIR,
+): { assign: string; field: StateFieldIR }[] {
+  const out = new Map<string, { assign: string; field: StateFieldIR }>();
+  const seen = new Set<string>();
+  const visit = (c: ComponentIR): void => {
+    if (seen.has(c.name)) return;
+    seen.add(c.name);
+    for (const f of c.state) {
+      const assign = hostStateAssign(c.name, f.name);
+      if (!out.has(assign)) out.set(assign, { assign, field: f });
+    }
+    for (const nested of collectComponentCalls(c.body, ui)) visit(nested);
+  };
+  visit(comp);
+  return [...out.values()];
+}
+
+/** User `component`s invoked anywhere in an expression tree. */
+function collectComponentCalls(root: ExprIR | undefined, ui: UiIR): ComponentIR[] {
+  const out: ComponentIR[] = [];
+  const visit = (e: ExprIR | undefined): void => {
+    if (!e || typeof e !== "object") return;
+    if (e.kind === "call") {
+      const hit = ui.components.find((c) => c.name === e.name);
+      if (hit) out.push(hit);
+    }
+    for (const v of Object.values(e as Record<string, unknown>)) {
+      if (Array.isArray(v)) for (const el of v) visit(el as ExprIR);
+      else if (v && typeof v === "object" && "kind" in (v as object)) visit(v as ExprIR);
+    }
+  };
+  visit(root);
+  return out;
 }
 
 // ---------------------------------------------------------------------------

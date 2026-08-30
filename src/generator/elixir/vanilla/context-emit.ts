@@ -1046,7 +1046,9 @@ function renderNamedOpFunction(
   // The `before` wire snapshot — taken from the ORIGINAL `record` before the
   // body rebinds any field, so it reflects the pre-mutation state (parity with
   // the Hono/Python `before` captured before the mutation).
-  const beforeBind = hasAudit ? `    audit_before = ${wireSnapshot("record")}\n` : "";
+  const beforeBind = hasAudit
+    ? `    audit_before = ${wireSnapshot("record", false, facadeMod.split(".")[0]!)}\n`
+    : "";
 
   // Bind only the params the body references, so an unused param never trips
   // `mix compile --warnings-as-errors`.  (`record` is always used — the persist
@@ -1204,7 +1206,7 @@ function renderNamedOpFunction(
         targetType: aggPascalName,
         targetId: "saved.id",
         before: "audit_before",
-        after: wireSnapshot("saved"),
+        after: wireSnapshot("saved", false, appModule),
         indent: "          ",
       }),
     );

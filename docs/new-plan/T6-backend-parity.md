@@ -532,7 +532,10 @@ but a runtime witness for each is still owed and belongs with M-T9.x.
 identifiers, so a reserved-word column name makes its DDL a syntax error.
 
 ## M-T6.30 — Vanilla Phoenix has no app-global RFC 7807 arm — `done` (PR #2641) · **M** · P2 ⭐ shape divergence, not a detail one
-Found 2026-08-01 while writing RS-26's five-way gate, and it is **bigger than the rule that surfaced it**.
+
+**Closed — verified 2026-08-23 on fresh `main`.** All three halves the brief asked for ship in `src/generator/elixir/vanilla/shell-emit.ts`: (a) `renderVanillaErrorJson` (`:1014`, wired at `:255` → `lib/<app>_web/controllers/error_json.ex`) renders `%{type: "about:blank", title, status, detail, instance}` for **every** template — the status prefix drives the numeric member, `status_message_from_template` the title, the raised exception's message the `detail` (falling back to the reason phrase), so 404/405/500 all answer the same envelope the other four backends do; (b) `renderVanillaNotFoundController` owns the CONTENT TYPE at the catch-all route (`match :*, "/*path"`, declared last) — `render_errors` exposes no knob for it, so a controller is the only place `application/problem+json` can be set, and it splits an unknown path (404) from a wrong verb (405) via `Phoenix.Router.route_info/4`; (c) `renderVanillaBodyParser` rescues `Plug.Parsers` failures **before** `Phoenix.Endpoint.RenderErrors` exists as a concept, so a malformed body answers the same envelope + content type identically in dev and prod. The brief's note that "the same shape divergence likely applies to a bare unmatched route" was right, and (b) is what covers it.
+
+*Original brief (kept as the design record):* Found 2026-08-01 while writing RS-26's five-way gate, and it is **bigger than the rule that surfaced it**.
 
 The four non-elixir backends install an **app-global** unhandled-exception handler — `app.onError` (hono), `DomainExceptionFilter` (.NET), `ApiExceptionAdvice` (java), `install_error_handlers` (python) — so *any* unmodelled fault, on any route, in any system, answers the RFC 7807 envelope.
 

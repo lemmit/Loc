@@ -2,6 +2,15 @@
 
 **Snapshot date:** 2026-06-21
 
+> **[2026-08-23 re-audit]** The backend gate sets have **fully converged**: every
+> classic set in `src/ir/validate/checks/system-checks.ts` now holds all five
+> backends (`EVENT_SOURCING_WORKFLOW_BACKENDS`, `AUDIT_OP_BACKENDS`,
+> `AUDIT_LIFECYCLE_BACKENDS`, `LIMITED_FAMILIES` + `supportsPrincipalFilter`,
+> `TPH_CAPABLE`, `PROVENANCE_BACKENDS`, `SUPPORTED_RETURN_BACKENDS`,
+> `EVENT_SOURCING_BACKENDS`), so no per-backend cell in this audit is still a
+> gate. The remaining gaps are language-level rather than per-backend — see
+> [`language-gaps-2026-08.md`](language-gaps-2026-08.md).
+
  **(Superseded 2026: the Ash foundation was removed. `platform: elixir` now generates plain Ecto/Phoenix only — `foundation: ash` is a validation error and `vanilla` is the default and only valid value. The `elixir·ash` columns/rows below, and the foundation-split framing, are historical; on current `main` only the `elixir·vanilla` surface ships.)**
 
 > **[2026-07-11 re-verified against `main` @ `ad81732e`, code-grounded]** The

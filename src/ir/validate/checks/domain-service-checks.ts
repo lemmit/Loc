@@ -38,6 +38,9 @@
 //     operation/create/destroy
 //                                         → loom.domain-service-infra-call-from-aggregate
 //     (pure services are exempt — they carry no infrastructure)
+//   - a body naming a repository that belongs to ANOTHER context
+//                                         → loom.domain-service-cross-context-read
+//     (see the CROSS-CONTEXT READS header note below)
 //
 // Plus the anemic-domain WARNING when every operation takes exactly one
 // aggregate-typed parameter (loom.domain-service-single-aggregate).
@@ -61,12 +64,18 @@ import { isWriteMethod } from "../../util/repo-methods.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
 
-export function validateDomainServices(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+export function validateDomainServices(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  allCtxs: readonly BoundedContextIR[],
+): void {
   const repoNames = new Set(ctx.repositories.map((r) => r.name));
   const workflowNames = new Set(ctx.workflows.map((w) => w.name));
+  const foreignRepos = foreignRepositoryOwners(ctx, allCtxs);
   for (const svc of ctx.domainServices) {
     for (const op of svc.operations) {
       checkOperationBody(ctx, svc, op, repoNames, workflowNames, diags);
+      checkCrossContextRepoReads(ctx, svc, op, foreignRepos, diags);
     }
     checkAnemic(ctx, svc, diags);
   }
@@ -147,6 +156,111 @@ function checkOperationBody(
           source,
         });
       }
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CROSS-CONTEXT READS — `loom.domain-service-cross-context-read`.
+//
+// The `reading` tier is scoped to the service's OWN context, and nothing said
+// so.  `lowerDomainService` indexes `serviceRepos` from `env.ctx.members`
+// alone, so a body naming a repository of ANOTHER context can never lower to a
+// `repo-read` Call: it stays a `method-call` on a `ref` with
+// `refKind: "unknown"`.  That has three consequences, all silent:
+//
+//   1. `classifyDomainServiceTier` sees no `repo-read` and calls the op `pure`,
+//   2. `readPortsForOperation` yields no port, so no backend threads a
+//      repository handle in, and
+//   3. every backend renders the unresolved receiver verbatim.
+//
+// Re-verified 2026-08-23 on a two-context system (`context A`'s
+// `domainService Naming { operation isFree(r: string): bool { return
+// Customers.byName(r) == null } }` reading `context B`'s `Customers`) —
+// `ddd parse` reports ZERO diagnostics and all five backends emit a dangling
+// identifier:
+//
+//   TS     — `domain/services.ts`: `return Customers.byName(r) === null;`
+//            in a file importing nothing → TS2304.
+//   .NET   — `Domain/Services/Naming.cs`: `Customers.ByName(r)` → CS0103.
+//   Java   — `domain/services/Naming.java`: `Customers.byName(r)`
+//            → "cannot find symbol".
+//   Python — `app/domain/services/naming.py`: `Customers.by_name(r)`
+//            → NameError / F821.
+//   Phoenix— `lib/<app>/domain/services/naming.ex`:
+//            `is_nil(customers.by_name(r))` → "undefined variable customers"
+//            (the ref is snake-cased into a local that was never bound).
+//
+// So this is one MODEL-level shape that no backend supports, not five
+// per-backend gaps — the same call the repo's parity policy makes for
+// `loom.resource-op-outside-workflow` (#2618): reject at the source rather
+// than let five emitters fail five different silent ways.
+//
+// SCOPE.  The gate keys on a bare `ref` that (a) did not resolve
+// (`refKind: "unknown"`, so a param/local shadowing the name is never flagged)
+// and (b) names a repository declared in some OTHER context of the model —
+// never one this context declares, so a same-name repository in the service's
+// own context keeps resolving locally and is untouched.  Both read and write
+// verbs are caught: the sibling `loom.domain-service-no-repo-write` gate is
+// context-LOCAL (it keys on `ctx.repositories`), so a cross-context
+// `Customers.save(x)` reaches only this one.
+//
+// NOT in scope: an unresolved receiver that names nothing at all
+// (`Ghost.foo(r)`) is equally silent today, but it is a general
+// unresolved-name hole across every body kind, not the domain-service context
+// boundary this gate describes.
+// ---------------------------------------------------------------------------
+
+/** repository name → the OTHER context that declares it (first wins).  Names
+ *  this context declares are excluded, so a locally-resolving read is never a
+ *  candidate. */
+function foreignRepositoryOwners(
+  ctx: BoundedContextIR,
+  allCtxs: readonly BoundedContextIR[],
+): ReadonlyMap<string, string> {
+  const local = new Set(ctx.repositories.map((r) => r.name));
+  const owners = new Map<string, string>();
+  for (const other of allCtxs) {
+    if (other.name === ctx.name) continue;
+    for (const repo of other.repositories) {
+      if (local.has(repo.name) || owners.has(repo.name)) continue;
+      owners.set(repo.name, other.name);
+    }
+  }
+  return owners;
+}
+
+/** `loom.domain-service-cross-context-read` — see the header note above. */
+function checkCrossContextRepoReads(
+  ctx: BoundedContextIR,
+  svc: DomainServiceIR,
+  op: DomainServiceOperationIR,
+  foreignRepos: ReadonlyMap<string, string>,
+  diags: LoomDiagnostic[],
+): void {
+  if (foreignRepos.size === 0) return;
+  const where = `domainService '${svc.name}' operation '${op.name}'`;
+  const source = `${ctx.name}/${svc.name}.${op.name}`;
+  // One diagnostic per repository, not per mention — a body reading the same
+  // foreign repository twice states the same boundary problem once.
+  const flagged = new Set<string>();
+  for (const stmt of op.body) {
+    forEachStmtExpr(stmt, (e) => {
+      if (e.kind !== "ref" || e.refKind !== "unknown") return;
+      const otherContext = foreignRepos.get(e.name);
+      if (!otherContext || flagged.has(e.name)) return;
+      flagged.add(e.name);
+      diags.push({
+        severity: "error",
+        code: "loom.domain-service-cross-context-read",
+        message: diagMessage("loom.domain-service-cross-context-read", {
+          where,
+          recvName: e.name,
+          ownContext: ctx.name,
+          otherContext,
+        }),
+        source,
+      });
     });
   }
 }

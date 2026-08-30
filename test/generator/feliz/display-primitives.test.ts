@@ -83,4 +83,30 @@ describe("feliz display / layout primitives", () => {
     expect(app).toContain("Html.section [");
     expect(app).toContain('prop.className "sticky top-0 z-10"');
   });
+
+  it("renders Grid's CHILDREN, not just its container class", async () => {
+    // Regression: `emitGrid` was the one children-bearing container that never
+    // passed `childrenBlock`, so the two PROCEDURAL packs (which read exactly
+    // that key through their shared container helpers) emitted an EMPTY
+    // `prop.children [ ]` — `Grid { Card { "c1" } }` silently lost the card.
+    // The old assertion here only checked the grid's CSS class, so it passed
+    // throughout (the swallowed-assertion shape, CLAUDE.md "Mutation-prove").
+    const app = await appFs();
+    const gridAt = app.indexOf(
+      'prop.className "grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3"',
+    );
+    expect(gridAt, "no Grid container emitted").toBeGreaterThan(-1);
+    // The Grid's own body: everything between its container class and the
+    // `Section` that follows it in the page source.
+    const sectionAt = app.indexOf("Html.section [", gridAt);
+    expect(sectionAt, "no Section after the Grid").toBeGreaterThan(gridAt);
+    const gridBody = app.slice(gridAt, sectionAt);
+    // The children list exists and is NOT the empty `prop.children [ ]` the
+    // missing `childrenBlock` produced.
+    expect(gridBody).toContain("prop.children [");
+    expect(gridBody).not.toMatch(/prop\.children \[\s*\]/);
+    // …and the Card child is really inside it (class + its title text).
+    expect(gridBody, "Grid dropped its Card child").toContain('prop.className "card');
+    expect(gridBody, "Grid dropped its Card child's title").toContain('"c1"');
+  });
 });

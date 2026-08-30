@@ -38,18 +38,30 @@ async function currentUserErrors(source: string): Promise<string[]> {
 }
 
 /** `where` places the `currentUser.email` read; `auth` is the frontend
- *  deployable's auth clause (`` = none). */
-function sys(opts: { where: "page" | "action" | "component"; auth?: string }): string {
+ *  deployable's auth clause (`` = none).
+ *
+ *  `requires` is the SECURITY-shaped placement, and the one the check's
+ *  `UiRenderHost` shape originally left out: a page gate expression is exactly
+ *  where a `currentUser` read is load-bearing, and without a session binding it
+ *  renders against nothing — an access check that can never evaluate, shipped
+ *  from a model that validated clean. */
+function sys(opts: { where: "page" | "action" | "requires" | "component"; auth?: string }): string {
   const user = "user { id: string email: string }";
   const auth = opts.auth ? opts.auth : "";
   const read = "Text(`hello ${currentUser.email}`)";
   const uiBody =
-    opts.where === "page"
-      ? `page X { route: "/x"  body: Stack { ${read} } }`
-      : opts.where === "component"
-        ? `component Greeting() { body: Stack { ${read} } }
+    opts.where === "requires"
+      ? `page X {
+             route: "/x"
+             requires currentUser.email == "root@example.com"
+           body: Stack { Text("hello") }
+         }`
+      : opts.where === "page"
+        ? `page X { route: "/x"  body: Stack { ${read} } }`
+        : opts.where === "component"
+          ? `component Greeting() { body: Stack { ${read} } }
            page X { route: "/x" body: Stack { Greeting() } }`
-        : `page X {
+          : `page X {
              route: "/x"
              state { greeting: string = "" }
              action greet() { greeting := currentUser.email }
@@ -79,7 +91,7 @@ system S {
 }
 
 describe("loom.current-user-needs-auth-ui", () => {
-  for (const where of ["page", "action", "component"] as const) {
+  for (const where of ["page", "action", "requires", "component"] as const) {
     it(`rejects a currentUser read in a ${where} with no auth guard`, async () => {
       const errs = await currentUserErrors(sys({ where }));
       expect(errs.length, `expected the gate to fire for a ${where} read`).toBe(1);
@@ -95,6 +107,16 @@ describe("loom.current-user-needs-auth-ui", () => {
       expect(await currentUserErrors(sys({ where, auth: "auth: ui" }))).toEqual([]);
     });
   }
+
+  it("fires on a `requires` gate even though the BODY never mentions currentUser", async () => {
+    // The regression this pins: the walked-member shape (`UiRenderHost`) listed
+    // body / state / derived / actions and NOT `requires`, so the one placement
+    // where the read is an access check went ungated.  The body here is a plain
+    // string — the gate must come from the `requires` expression alone.
+    const src = sys({ where: "requires" });
+    expect(src).not.toContain("${currentUser");
+    expect((await currentUserErrors(src)).length).toBe(1);
+  });
 
   it("stays silent on a ui with no currentUser read at all", async () => {
     const clean = sys({ where: "page" }).replace(

@@ -42,6 +42,17 @@ import { generateSystemFiles } from "../_helpers/generate.js";
  *  Adding a NEW gap here is a reviewed decision; closing one means deleting the
  *  entry. Keep EMPTY-by-default discipline: an entry is debt, not a resting state. */
 const GAPS: Record<string, string> = {
+  // Console declares `Panel(head: slot, onPick: action(Project))`, a shape the
+  // angular and feliz component emitters DEFER (no content-projection channel
+  // through `ngComponentOutletInputs`; no F# props-record spelling).  The
+  // deferral used to be INVISIBLE to this matrix — Panel has no call site in a
+  // Console page, so the declaration vanished with no marker — and is now an
+  // honest phase-⑦ refusal (`loom.user-component-deferred-target`), which
+  // this matrix records as the THROW below.  Closing either entry means the
+  // emitter grew the shape (delete the ui-checks arm in the same PR).
+  "angular:Console": "Panel's slot/action params are refused for an angular host",
+  "feliz:Console": "Panel's slot/action params are refused for a feliz host",
+
   // The four static-bundle frontends and Feliz render the whole showcase UI
   // surface against `FALLBACK_MARKERS`. (Vue's user-component slot/action
   // props, once a gap here, now render: the slot is template `<slot>`, the
@@ -201,11 +212,15 @@ interface Frontend {
   readonly extraScan?: (emitted: ReadonlyArray<readonly [string, string]>) => string | null;
 }
 
-/** A client frontend served as a static/self-built bundle beside a backend. */
+/** A client frontend served as a static/self-built bundle beside a backend.
+ *  `auth: ui` — Console's ProjectList gates on `requires currentUser.role`,
+ *  and a currentUser read without a session binding is refused at phase ⑦
+ *  (`loom.current-user-needs-auth-ui`), matching the shipped web deployables.
+ *  (The HEEx cell satisfies the same gate through its `auth: required`.) */
 const spa =
   (platform: string) =>
   (ui: string): string =>
-    `    deployable feCell { platform: ${platform} targets: ${UIS[ui]!.api} ${UIS[ui]!.bind} port: 3900 }`;
+    `    deployable feCell { platform: ${platform} targets: ${UIS[ui]!.api} ${UIS[ui]!.bind} port: 3900 auth: ui }`;
 
 const FRONTENDS: ReadonlyArray<Frontend> = [
   { name: "react", deployable: spa("react") },

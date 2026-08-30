@@ -24,6 +24,7 @@ import { gridCols } from "../_walker/shared/args.js";
 import {
   escapeHeexAttr,
   escapeHeexText,
+  hostStateAssign,
   indent,
   isAttrRenderable,
   localizedHeexAttr,
@@ -1765,7 +1766,11 @@ function controlledInput(
     const opt = type === "select" ? ` options={[]}` : "";
     return `<.input type="${type}" name="_unbound"${labelAttr}${opt} value="" disabled${testidAttr} />`;
   }
-  const field = snake(bind);
+  // A component's state lives in the HOST LiveView's assigns under its
+  // namespaced name (heex-walker-core `hostStateAssign`), and the write-back
+  // clause hoisted just below runs THERE — so the assign, the form field name
+  // and the `phx-change` payload key all spell that one name.
+  const field = hostStateAssign(ctx.stateOwner, bind);
   const isCheckbox = type === "checkbox";
   const eventName = isCheckbox ? `toggle_${field}` : `update_${field}`;
   // Hoist the write-back handler once per bound field.

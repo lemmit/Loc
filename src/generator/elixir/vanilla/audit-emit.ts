@@ -28,7 +28,7 @@
 // ORM-level half, which is genuinely per-backend.
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR, BoundedContextIR } from "../../../ir/types/loom-ir.js";
+import type { AggregateIR, BoundedContextIR, SystemIR } from "../../../ir/types/loom-ir.js";
 import { contextHasAuditedTarget } from "../../../ir/util/audit-capability.js";
 import { upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
@@ -37,6 +37,7 @@ import {
   renderVanillaAuditHistoryModule,
   vanillaHistoryModulePath,
 } from "./audit-history-emit.js";
+import { renderControllerSerialize } from "./controller-serialize.js";
 
 /** True iff any aggregate in the given contexts carries an audited command
  *  action — gates the runtime helper module + the per-action capture. */
@@ -51,13 +52,17 @@ export function emitVanillaAudit(
   appModule: string,
   contexts: BoundedContextIR[],
   out: Map<string, string>,
+  /** Resolves each aggregate's effective saving shape for the `Audit.Wire`
+   *  snapshot dispatcher (a `document` aggregate's wire fields live on the
+   *  `:data` embed).  Same role it plays for the deployable controllers. */
+  sys?: SystemIR,
 ): void {
   if (!contextsHaveAudit(contexts)) return;
   // Only the Ecto SCHEMA + insert helper are emitted here.  The `audit_records`
   // DDL moved to the shared MigrationsIR (`auditTableShape`) so all five
   // backends derive it from one place — Hono emitted none at all, which made
   // every audited command fail at runtime there.
-  out.set(`lib/${appName}/audit.ex`, renderAuditModule(appModule));
+  out.set(`lib/${appName}/audit.ex`, renderAuditModule(appModule, contexts, sys));
   // The READ side (docs/audit.md) — the shared shape module behind
   // `GET /<aggs>/{id}/history`.  Gated on the enrichment-derived `historyFind`
   // rather than on "has audit" alone: an aggregate whose every field is
@@ -68,8 +73,13 @@ export function emitVanillaAudit(
   }
 }
 
-/** `<App>.Audit.Record` schema + the `<App>.Audit` insert helper. */
-function renderAuditModule(appModule: string): string {
+/** `<App>.Audit.Record` schema + the `<App>.Audit` insert helper + the
+ *  `<App>.Audit.Wire` snapshot projector. */
+function renderAuditModule(
+  appModule: string,
+  contexts: BoundedContextIR[],
+  sys?: SystemIR,
+): string {
   return `# Auto-generated.
 defmodule ${appModule}.Audit.Json do
   @moduledoc """
@@ -176,6 +186,52 @@ defmodule ${appModule}.Audit do
     inserted
   end
 end
+
+${renderAuditWireModule(appModule, contexts, sys)}`;
+}
+
+/** `<App>.Audit.Wire` — the before/after SNAPSHOT projector.
+ *
+ *  A snapshot is a wire body, not a database row: the audit timeline (and the
+ *  `changes` diff derived from it, docs/audit.md) is a cross-backend contract,
+ *  and node/.NET/Java/Python all snapshot through the aggregate's `wireShape`.
+ *  This backend's create/destroy capture already did — it runs inside the
+ *  aggregate REST controller, where `serialize/1` is in scope — but the OPERATION
+ *  capture runs in the CONTEXT module (and the returning-op fn), which hosts no
+ *  serializer, so it dumped the raw Ecto struct instead: snake_case keys plus
+ *  Ecto's `inserted_at`/`updated_at`, which are in no backend's wire shape.  Two
+ *  audited actions on ONE aggregate therefore wrote two different shapes.
+ *
+ *  One module gives every capture site the same projection: `wire/1` dispatches
+ *  per aggregate struct to that aggregate's `wireShape` serializer (the same
+ *  per-(context, aggregate) suffixing the deployable-level controllers use, so
+ *  same-named aggregates / parts / value objects across contexts coexist), and
+ *  falls back to the raw-struct dump for a struct that is not a hosted
+ *  aggregate.  A `mask unless` aggregate projects UNMASKED — an audit row
+ *  records the real value (authorization.md §5). */
+function renderAuditWireModule(
+  appModule: string,
+  contexts: BoundedContextIR[],
+  sys?: SystemIR,
+): string {
+  const ser = renderControllerSerialize(appModule, contexts, [], sys, /* unmasked */ true);
+  return `defmodule ${appModule}.Audit.Wire do
+  @moduledoc """
+  Audit before/after snapshot projection — the aggregate's \`wireShape\` body,
+  identical to what \`GET /<aggs>/{id}\` serves (camelCase keys, no Ecto
+  timestamps), so every audited action (operation / create / destroy) records
+  the same shape as every other backend.
+
+  A \`mask unless\` field is projected UNMASKED here: the history must hold the
+  real before/after value, and read redaction happens on the response path.
+  """
+
+  @doc "Project one loaded aggregate record into its audit snapshot map."
+  @spec wire(term()) :: term()
+  def wire(record), do: serialize(record)
+
+${ser.clauses}${ser.helpers}
+end
 `;
 }
 
@@ -208,15 +264,19 @@ export function auditRecordCall(args: {
 }
 
 /** The wire-snapshot expression for a vanilla aggregate record — the SAME wire
- *  projection the controller's `serialize/1` uses, inlined where `serialize/1`
- *  is out of scope (the context module + the returning-op fn).  Relational
- *  aggregates dump the whole struct (`Map.from_struct |> Map.drop`); a
- *  document-shaped aggregate (`shape: document`) stores its wire form in the
- *  `<Agg>.Data` embed (Route A) — flatten that struct (dropping `:__struct__`)
- *  and merge under the row id so the audit before/after row carries the flat wire
- *  shape every other backend records, not a nested `%{id:, data: …}`.  Pass
- *  `isDoc: true` for a doc agg. */
-export function wireSnapshot(recordExpr: string, isDoc = false): string {
+ *  projection the controller's `serialize/1` uses, for the capture sites where
+ *  `serialize/1` is out of scope (the context module + the returning-op fn).
+ *
+ *  Pass `appModule` to route through `<App>.Audit.Wire.wire/1`, the shared
+ *  per-aggregate `wireShape` dispatcher (see {@link renderAuditWireModule}) —
+ *  the operation snapshot then matches the create/destroy one byte-for-byte,
+ *  and matches every other backend.  Without it the legacy raw-struct dump is
+ *  emitted (snake_case keys + Ecto's `inserted_at`/`updated_at`); a
+ *  document-shaped aggregate (`shape: document`) keeps its own flattening form,
+ *  which merges the `<Agg>.Data` embed (Route A) under the row id rather than
+ *  recording a nested `%{id:, data: …}`. */
+export function wireSnapshot(recordExpr: string, isDoc = false, appModule?: string): string {
+  if (appModule !== undefined) return `${appModule}.Audit.Wire.wire(${recordExpr})`;
   return isDoc
     ? `Map.merge(%{id: ${recordExpr}.id}, (${recordExpr}.data && Map.from_struct(${recordExpr}.data)) || %{})`
     : `(${recordExpr} |> Map.from_struct() |> Map.drop([:__meta__, :__struct__]))`;

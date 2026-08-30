@@ -48,8 +48,39 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  rather than silent, which is exactly the trade this register exists to
  *  record: a gap that appears here is a gap that stopped shipping broken
  *  output.  Drained by the wave-2 tasks that implement the ladder on both
- *  targets, which delete the row and lower this back to 37. */
-const MAX_OPEN_GAPS = 38;
+ *  targets, which delete the row and lower this back to 37.
+ *
+ *  38 → 39: `loom.flutter-async-effect-unsupported`.  Same trade again — the gap
+ *  is not new (the Flutter component emitter has always filtered out a component
+ *  whose action carries a `match await`, emitting NO widget and rendering every
+ *  call site as `SizedBox.shrink()`), only the honesty is.  Feliz gated the
+ *  identical component-host limitation from the start; Flutter dropped it
+ *  silently.  Drained by the M-T1.20 slice that gives the Flutter component
+ *  emitter the notifier/route-id path, which deletes the row and lowers this
+ *  back to 38.
+ *
+ *  39 → 39 (2026-08 prose audit, no count change).  Re-reading every row against
+ *  the Set / emitter it names showed the register had frozen in a three-backend
+ *  era: ~20 rows said "missing on some backends" while their gate already named
+ *  every shipping target.  Those rows' PROSE was rewritten (they are now marked
+ *  "latent seam" / "dormant" / "unreachable backstop"); their `kind` was NOT,
+ *  because the codes are still emitted in `src/` and invariant (1) demands a row
+ *  for each.  Consequence for this pin: it counts LIVE gaps and LATENT gates
+ *  together, so it is not a backlog depth — a latent row lowers it only when the
+ *  seam itself is deleted, a live one when the last target ports.  Do not "drain"
+ *  a latent row by deleting it while its code still fires from `src/`; test (2)
+ *  is the thing that would catch the reverse mistake.
+ *
+ *  39 → 40: `loom.toast-message-unsupported`.  The trade this register exists to
+ *  record, in its sharpest form yet — the gap is not new and the degradation was
+ *  not even a degradation: an `on <chan>.<Event> { toast(<expr>) }` message
+ *  outside the v1 subset (a literal, the event binding, single-level member
+ *  access off it, paren, binary) THREW a raw `Error` out of all three realtime
+ *  renderers, aborting `ddd generate system` with a stack trace and no `loom.*`
+ *  code.  The validator bounded the handler STATEMENT vocabulary and never
+ *  looked inside the `toast(…)`.  Drained by the renderers growing the general
+ *  expression path (M-T1.10), which deletes the row and lowers this back to 39. */
+const MAX_OPEN_GAPS = 40;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

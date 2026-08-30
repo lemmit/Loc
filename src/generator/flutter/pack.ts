@@ -78,7 +78,10 @@ function ariaLabelExpr(c: Ctx, fallback = ""): string {
  *  otherwise wrap the raw text directly. */
 function styledText(value: string, styleExpr: string): string {
   const t = value.trim();
-  if (/^[A-Za-z_][\w.]*\(/.test(t) || t.startsWith("(")) {
+  // The optional `const ` prefix covers the degradation sentinel (`const
+  // SizedBox.shrink() /* … */`) and any other const widget — styling it beats
+  // stringifying it into `Text('const SizedBox…')`, which SHOWED Dart source.
+  if (/^(?:const\s+)?[A-Za-z_][\w.]*\(/.test(t) || t.startsWith("(")) {
     return `DefaultTextStyle.merge(style: ${styleExpr}, child: ${t})`;
   }
   return `Text('${dartStr(t)}', style: ${styleExpr})`;
@@ -92,7 +95,14 @@ function asWidget(s: string | undefined): string {
   // Already a Dart widget/expression (a constructor call `Foo(…)`, a member
   // access, or a parenthesised expression) — pass through verbatim.  Otherwise
   // it is raw text the walker handed unquoted (a string literal): wrap it.
-  if (/^[A-Za-z_][\w.]*\(/.test(t) || t.startsWith("(")) return t;
+  //
+  // The optional `const ` prefix matters: the target's degradation sentinel is
+  // `const SizedBox.shrink() /* … */` (`flutterTarget.renderComment` — a bare
+  // comment is not a legal Dart child).  Without the prefix here the sentinel
+  // failed this probe and came back as `Text('const SizedBox.shrink() /* … */')`
+  // — the generated app PRINTED Dart source on screen wherever a slot degraded
+  // (a table cell, a tab body, a Card child, a KeyValueRow slot).
+  if (/^(?:const\s+)?[A-Za-z_][\w.]*\(/.test(t) || t.startsWith("(")) return t;
   return `Text('${dartStr(t)}')`;
 }
 
@@ -103,6 +113,12 @@ function asText(s: string | undefined): string {
   const t = (s ?? "").trim();
   if (t === "") return "const SizedBox.shrink()";
   if (/^Text\(/.test(t) || t.startsWith("(")) return t;
+  // A leading-`const` widget is the degradation sentinel (`const
+  // SizedBox.shrink() /* … */`), not text and not a value to interpolate — it
+  // passes through as itself.  Every slot fed from here (`Chip.label`,
+  // `Card.title`, an empty-state `child`) is Widget-typed, so a zero-size widget
+  // fits where a `Text` would; interpolating it printed Dart source on screen.
+  if (/^const\s+[A-Za-z_][\w.]*\(/.test(t)) return t;
   if (/^[A-Za-z_][\w.]*\(/.test(t)) return `Text('\${${t}}')`;
   return `Text('${dartStr(t)}')`;
 }
@@ -552,8 +568,8 @@ function primitiveTable(c: Ctx): string {
 /** A QueryView branch (loading / error / empty / data) is ALREADY a walked
  *  widget string — the shared walker rendered it through this same pack.  Only
  *  a missing branch (the walker's `"null"` sentinel / empty) needs the neutral
- *  empty widget; everything else passes through verbatim (unlike `asWidget`,
- *  which re-wraps a leading-`const` widget — `const Center(…)` — as text). */
+ *  empty widget; everything else passes through verbatim — a branch is ALWAYS a
+ *  widget, so it skips `asWidget`'s raw-text probe entirely. */
 function branchWidget(s: string | undefined): string {
   const t = (s ?? "").trim();
   return t === "" || t === "null" ? "const SizedBox.shrink()" : t;

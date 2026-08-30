@@ -42,6 +42,7 @@ import {
   isListLit,
   isMatchExpr,
   isMemberSuffix,
+  isModel,
   isMoneyLit,
   isNameRef,
   isNowExpr,
@@ -86,6 +87,7 @@ import { lowerStatement } from "./lower-stmt.js";
 import {
   cstText,
   type Env,
+  findAmbientEnumForValue,
   findApiOperations,
   findDomainServiceByName,
   findEntityByName,
@@ -93,6 +95,7 @@ import {
   findFunctionInEnv,
   findOperationInEnv,
   findPayloadByName,
+  findProjectionByName,
   findValueObjectByName,
   findWorkflowByName,
   inAggregate,
@@ -848,7 +851,17 @@ function applySuffixToRecv(
         (m) => isEnumDecl(m) && m.name === enumName && m.values.some((v) => v.name === ms.member),
       ) ?? false;
     const rootEnum = ambientEnumIndex.get(ms.member) === enumName;
-    if (localEnum || rootEnum) {
+    // Same shape from a `ui` body (`Visibility.Public` in a page): there is no
+    // `ctx` to scan and the root-level index is blind to a context-nested enum,
+    // so resolve through the document-wide index the BARE form uses below —
+    // otherwise the receiver stays unresolved and the frontends emit
+    // `undefined.Public`.  Gated to ui bodies for the same reason the bare form
+    // is (see `resolveNameRef`): an `e2e` body must keep reporting instead.
+    const uiEnum =
+      !env.ctx &&
+      (env.actions !== undefined || env.stores !== undefined) &&
+      uiEnumOwnerFor(ms.member, suffix) === enumName;
+    if (localEnum || rootEnum || uiEnum) {
       return {
         recv: {
           kind: "ref",
@@ -1160,7 +1173,7 @@ function lowerExprInner(expr: Expression | undefined, env: Env): ExprIR {
     return lowerPostfixChain(expr, env);
   }
   if (isNameRef(expr)) {
-    return resolveNameRef(expr.name, env);
+    return resolveNameRef(expr.name, env, expr);
   }
   return lit("null", "null");
 }
@@ -1519,7 +1532,34 @@ function inlineTopLevelFn(fn: FunctionDecl, args: ExprIR[], env: Env): ExprIR {
   return { kind: "paren", inner: inlined };
 }
 
-function resolveNameRef(name: string, env: Env): ExprIR {
+/** Per-document `enum` VALUE → owning enum name index, memoised on the
+ *  document root.  Built by streaming the whole AST, so it sees an enum at any
+ *  nesting depth (`subdomain { context { enum … } }` included) — unlike the two
+ *  `members`-walking ambient indices `lowerProject` installs.  First
+ *  declaration wins on a value-name collision, matching those indices. */
+const uiEnumIndexByRoot = new WeakMap<AstNode, ReadonlyMap<string, string>>();
+
+function uiEnumIndexFor(root: AstNode): ReadonlyMap<string, string> {
+  const cached = uiEnumIndexByRoot.get(root);
+  if (cached) return cached;
+  const index = new Map<string, string>();
+  for (const n of AstUtils.streamAllContents(root)) {
+    if (!isEnumDecl(n)) continue;
+    for (const v of n.values) if (!index.has(v.name)) index.set(v.name, n.name);
+  }
+  uiEnumIndexByRoot.set(root, index);
+  return index;
+}
+
+/** The enum owning value `name` as seen from a `ui` body: the ui's own document
+ *  first (any depth), then the cross-document ambient kernel index. */
+function uiEnumOwnerFor(name: string, node: AstNode | undefined): string | undefined {
+  const root = node ? AstUtils.getContainerOfType(node, isModel) : undefined;
+  const local = root ? uiEnumIndexFor(root).get(name) : undefined;
+  return local ?? findAmbientEnumForValue(name)?.name;
+}
+
+function resolveNameRef(name: string, env: Env, node?: AstNode): ExprIR {
   // Criterion-parameter substitution — while inlining a criterion body, a
   // bare reference to one of its parameters resolves to the caller's
   // already-lowered argument expression.  Wins over candidate fields so a
@@ -1678,6 +1718,42 @@ function resolveNameRef(name: string, env: Env): ExprIR {
       enumName: ambientEnum,
       type: { kind: "enum", name: ambientEnum },
     };
+  }
+  // UI body enum value (`o.vis == Public` in a page / component / store).
+  //
+  // A `ui` body has NO enclosing `ctx` — it sits at the system level and may
+  // read several contexts through its api params — so both scans above are
+  // skipped and a bare enum-value reference fell all the way to
+  // `refKind: "unknown"`.  Every shared-walker frontend then emitted
+  // `/* unresolved: Public */ undefined` (an undeclared identifier in Dart,
+  // an unbound variable on HEEx) with zero diagnostics: valid `.ddd` in,
+  // silently wrong output out.
+  //
+  // Resolution walks the ui's OWN document (every `enum` at any depth — the
+  // two ambient indices installed by `lowerProject` are built by walking
+  // `members`, and a `subdomain` holds its contexts in `contexts`, so a
+  // `subdomain { context { enum … } }` never reaches either of them), then
+  // falls back to the cross-document ambient kernel index.  Reached only after
+  // locals / params / state / derived / actions / criteria, so a same-named
+  // binding still shadows the enum member exactly as before.
+  //
+  // Gated to UI bodies: an `e2e` test body is likewise ctx-less, and there a
+  // bare domain name must STAY unresolved so `loom.e2e-unresolved-ref` can
+  // tell the author to write the wire string (test/ir/e2e-unresolved-ref).
+  // The two ui-only Env indices mark the body: `actions` is set on every
+  // page/component/store body env, `stores` on every body of a ui that
+  // declares one (a store's own state inits lower before `actions` binds).
+  if (!env.ctx && (env.actions !== undefined || env.stores !== undefined)) {
+    const owner = uiEnumOwnerFor(name, node);
+    if (owner) {
+      return {
+        kind: "ref",
+        name,
+        refKind: "enum-value",
+        enumName: owner,
+        type: { kind: "enum", name: owner },
+      };
+    }
   }
   return { kind: "ref", name, refKind: "unknown" };
 }
@@ -1970,8 +2046,10 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     }
     // Criterion candidate alias (`of T as o`) — types as the candidate entity,
     // exactly like `this`, so `o.field` member access resolves against it.
-    if (expr.name === env.candidateAlias && env.aggregate) {
-      return { kind: "entity", name: env.aggregate.name };
+    if (expr.name === env.candidateAlias) {
+      if (env.aggregate) return { kind: "entity", name: env.aggregate.name };
+      if (env.workflow) return { kind: "entity", name: env.workflow.name };
+      if (env.projection) return { kind: "entity", name: env.projection.name };
     }
     // Parameterless criterion / policy-function reference types as a boolean
     // predicate.
@@ -1979,7 +2057,7 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     if (crit && crit.params.length === 0) return { kind: "primitive", name: "bool" };
     const policyFn = findPolicyFnInEnv(env, expr.name);
     if (policyFn && policyFn.params.length === 0) return { kind: "primitive", name: "bool" };
-    const ref = resolveNameRef(expr.name, env);
+    const ref = resolveNameRef(expr.name, env, expr);
     if (ref.kind === "ref" && ref.type) return ref.type;
     return { kind: "primitive", name: "string" };
   }
@@ -2420,6 +2498,8 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
     // state fields (workflow-and-applier.md A2).
     const wf = findWorkflowByName(env, t.name);
     if (wf) return memberOnWorkflow(wf, name);
+    const proj = findProjectionByName(env, t.name);
+    if (proj) return memberOnProjection(proj, name);
   }
   if (t.kind === "valueobject") {
     const vo = findValueObjectByName(env, t.name);
@@ -2619,6 +2699,8 @@ function stepInto(t: TypeIR, name: string, env: Env): TypeIR {
     if (payload) return memberOnPayload(payload, name);
     const wf = findWorkflowByName(env, t.name);
     if (wf) return memberOnWorkflow(wf, name);
+    const proj = findProjectionByName(env, t.name);
+    if (proj) return memberOnProjection(proj, name);
   }
   if (t.kind === "valueobject") {
     const vo = findValueObjectByName(env, t.name);

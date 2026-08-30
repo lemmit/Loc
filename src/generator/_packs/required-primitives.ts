@@ -139,6 +139,30 @@ const TSX_ONLY_PRIMITIVES: readonly string[] = [
   "primitive-sticky",
 ];
 
+// `Modal { open: <state-bool> }` — the STATE-CONTROLLED dialog (distinct from
+// the operation-form modal above).  `_walker/primitives/forms.ts:
+// emitControlledModal` dispatches it behind a `templates.has(...)` probe and
+// falls back to a stub when the pack ships no template, so a pack that omits
+// it degrades SILENTLY — the page compiles, the dialog just never opens.  All
+// 15 JSX-family packs ship the template today; requiring it turns the next
+// pack that forgets into a load-time failure instead of a dead dialog.
+//
+// Kept OUT of `TSX_ONLY_PRIMITIVES` because that list is filtered per format
+// for `primitive-modal`, and the controlled modal's format story is DIFFERENT
+// from the op-dialog modal's on every format that diverges:
+//   - angular DROPS `primitive-modal` (inline Reactive Forms) but KEEPS this
+//     one: `renderAngularModal` forks only the op-dialog shape and returns null
+//     for `open:`, so the walker falls through to the pack template.
+//   - flutter DROPS `primitive-modal` (`FLUTTER_INLINE_OR_DEFERRED`) but ships a
+//     real `primitiveModalControlled` (a `LoomModalHost`), and feliz ships one
+//     too — both PROCEDURAL packs genuinely pack-dispatch it, so it belongs in
+//     their required surface (enforced by the *-pack-groundwork tests rather
+//     than the load-time gate, which procedural packs never reach).
+//   - heex is the ONLY exemption: its walker emits the modal inline through
+//     `renderModalHeex`, and a HEEx pack owns no call-site primitive templates
+//     at all (`heex.core` is empty).
+const CONTROLLED_MODAL_PRIMITIVES: readonly string[] = ["primitive-modal-controlled"];
+
 // Primitives the Flutter walking-skeleton pack renders INLINE via the walker
 // seams (Track B/D) or DEFERS to full parity — never as a `flutter` pack
 // template.  Subtracted from the shared + TSX-only lists below to form the
@@ -275,6 +299,7 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", Requi
     core: [
       ...SHARED_PRIMITIVES,
       ...TSX_ONLY_PRIMITIVES,
+      ...CONTROLLED_MODAL_PRIMITIVES,
       ...DATA_GRID_PRIMITIVES,
       ...CHART_PRIMITIVES,
     ],
@@ -304,7 +329,12 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", Requi
   // projects need a `svelte-config` shell template (svelte.config.js)
   // that the TSX/Vite world has no counterpart for.
   svelte: {
-    core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES, ...DATA_GRID_PRIMITIVES],
+    core: [
+      ...SHARED_PRIMITIVES,
+      ...TSX_ONLY_PRIMITIVES,
+      ...CONTROLLED_MODAL_PRIMITIVES,
+      ...DATA_GRID_PRIMITIVES,
+    ],
     shell: [...SHARED_SHELL, "svelte-config"],
     fieldInput: TSX_FIELD_INPUT,
     form: TSX_FORM,
@@ -315,7 +345,12 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", Requi
   // no shell template beyond the shared set (vite config / theme /
   // app shell are all covered by SHARED_SHELL names).
   vue: {
-    core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES, ...DATA_GRID_PRIMITIVES],
+    core: [
+      ...SHARED_PRIMITIVES,
+      ...TSX_ONLY_PRIMITIVES,
+      ...CONTROLLED_MODAL_PRIMITIVES,
+      ...DATA_GRID_PRIMITIVES,
+    ],
     shell: SHARED_SHELL,
     fieldInput: TSX_FIELD_INPUT,
     // Vue packs additionally own the operation-dialog wrapper the
@@ -336,6 +371,10 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", Requi
     core: [
       ...SHARED_PRIMITIVES.filter((p) => p !== "primitive-form-of"),
       ...TSX_ONLY_PRIMITIVES.filter((p) => p !== "primitive-modal"),
+      // The op-dialog `primitive-modal` is dropped (inline Reactive Forms), but
+      // the STATE-CONTROLLED one is not: `renderAngularModal` returns null for
+      // the `open:` shape, so the walker falls through to the pack template.
+      ...CONTROLLED_MODAL_PRIMITIVES,
       ...DATA_GRID_PRIMITIVES,
     ],
     shell: [
@@ -369,6 +408,10 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", Requi
     core: [
       ...SHARED_PRIMITIVES.filter((p) => !FLUTTER_INLINE_OR_DEFERRED.has(p)),
       ...TSX_ONLY_PRIMITIVES.filter((p) => !FLUTTER_INLINE_OR_DEFERRED.has(p)),
+      // Not subtracted with `primitive-modal`: the op-dialog modal renders
+      // through the walker seam, but the STATE-CONTROLLED one has a real
+      // `primitiveModalControlled` renderer in the flutter pack.
+      ...CONTROLLED_MODAL_PRIMITIVES,
     ],
     shell: ["pubspec"],
   },
@@ -390,6 +433,7 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", Requi
     core: [
       ...SHARED_PRIMITIVES.filter((p) => p !== "primitive-form-of"),
       ...TSX_ONLY_PRIMITIVES,
+      ...CONTROLLED_MODAL_PRIMITIVES,
       ...DATA_GRID_PRIMITIVES,
     ],
     shell: [],

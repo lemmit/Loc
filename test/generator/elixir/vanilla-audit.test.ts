@@ -110,6 +110,66 @@ system DocAudit {
 }
 `;
 
+// A `mask unless` aggregate with an audited operation — the audit snapshot must
+// record the REAL value (authorization.md §5), so `Audit.Wire` projects through
+// the aggregate's UNMASKED serializer, never the redacting one.
+const MASKED = `
+system MaskedAudit {
+  user { id: string role: string }
+  auth { provider: keycloak oidc { issuer: env("OIDC_ISSUER") clientId: env("OIDC_CLIENT_ID") } }
+  subdomain Sales {
+    context Orders {
+      aggregate Order {
+        status: string
+        secretNote: string mask unless currentUser.role == "admin"
+        operation cancel() audited { status := "cancelled" }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api OrdersApi from Sales
+  storage pg { type: postgres }
+  resource orderState { for: Orders, kind: state, use: pg }
+  deployable api {
+    platform: elixir
+    contexts: [Orders]
+    dataSources: [orderState]
+    serves: OrdersApi
+    port: 4000
+    auth: required
+  }
+}
+`;
+
+// A multi-word field + BOTH an audited operation and an audited create — the
+// pair whose snapshots used to disagree (`commit_sha` from the operation's
+// struct dump vs `commitSha` from the create's wire serializer).
+const WIRE = `
+system WireAudit {
+  subdomain Sales {
+    context Orders {
+      aggregate Order {
+        commitSha: string
+        buildState: string
+        operation cancel() audited { buildState := "cancelled" }
+        create(commitSha: string) audited { commitSha := commitSha }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api OrdersApi from Sales
+  storage pg { type: postgres }
+  resource orderState { for: Orders, kind: state, use: pg }
+  deployable api {
+    platform: elixir
+    contexts: [Orders]
+    dataSources: [orderState]
+    serves: OrdersApi
+    port: 4000
+  }
+}
+`;
+
 function file(files: Map<string, string>, suffix: string): string {
   const key = [...files.keys()].find((k) => k.endsWith(suffix));
   expect(key, `${suffix} not emitted`).toBeDefined();
@@ -164,10 +224,11 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
 
   it("wraps the audited OPERATION persist in a forced transaction + records before/after", async () => {
     const ctx = file(await generateSystemFiles(SOURCE), "/api/orders.ex");
-    // `before` snapshot is taken from the original record before the body runs.
-    expect(ctx).toContain(
-      "audit_before = (record |> Map.from_struct() |> Map.drop([:__meta__, :__struct__]))",
-    );
+    // `before` snapshot is taken from the original record before the body runs,
+    // and projects through the SHARED wire dispatcher (`Audit.Wire.wire/1`) —
+    // the same `wireShape` body the create/destroy capture records.
+    expect(ctx).toContain("audit_before = Api.Audit.Wire.wire(record)");
+    expect(ctx).not.toContain("Map.from_struct()");
     // Forced transaction tail (no provenance here — audit alone forces it).
     expect(ctx).toContain("Api.Repo.transaction(fn ->");
     expect(ctx).toContain("Api.Audit.record(Api.Repo, %{");
@@ -176,9 +237,7 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
     expect(ctx).toContain('target_type: "Order"');
     expect(ctx).toContain("target_id: saved.id");
     expect(ctx).toContain("before: audit_before");
-    expect(ctx).toContain(
-      "after: (saved |> Map.from_struct() |> Map.drop([:__meta__, :__struct__]))",
-    );
+    expect(ctx).toContain("after: Api.Audit.Wire.wire(saved)");
   });
 
   it("wraps the audited RETURNING operation persist in a forced transaction + records before/after(saved)", async () => {
@@ -188,10 +247,9 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
     const settleIdx = ctx.indexOf("def settle_order(");
     expect(settleIdx).toBeGreaterThan(-1);
     const settle = ctx.slice(settleIdx);
-    // `before` snapshot taken before the body rebinds any field.
-    expect(settle).toContain(
-      "audit_before = (record |> Map.from_struct() |> Map.drop([:__meta__, :__struct__]))",
-    );
+    // `before` snapshot taken before the body rebinds any field — same shared
+    // wire dispatcher as the non-returning path.
+    expect(settle).toContain("audit_before = Api.Audit.Wire.wire(record)");
     // The persist runs inside a forced transaction (audit alone forces it).
     expect(settle).toContain("Api.Repo.transaction(fn ->");
     expect(settle).toContain("case Api.Orders.OrderRepository.persist_change(changeset) do");
@@ -202,9 +260,7 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
     expect(settle).toContain("target_id: saved.id");
     expect(settle).toContain("before: audit_before");
     // `after` is the SAVED aggregate state (post-save), regardless of union arm.
-    expect(settle).toContain(
-      "after: (saved |> Map.from_struct() |> Map.drop([:__meta__, :__struct__]))",
-    );
+    expect(settle).toContain("after: Api.Audit.Wire.wire(saved)");
     // The audit insert must NOT change the controller-facing return shape — the
     // success branch returns the wire map (the controller `json`s it).
     expect(settle).toContain("%{id: saved.id, status: saved.status, version: saved.version}");
@@ -325,3 +381,69 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
     expect(ctx).not.toContain("Repo.transaction(");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The audit SNAPSHOT shape (the `Audit.Wire` dispatcher).
+//
+// An audit row's before/after is a WIRE body, not a database row: the timeline
+// and the `changes` diff derived from it are a cross-backend contract, and
+// node/.NET/Java/Python all snapshot the aggregate's `wireShape`.  This backend
+// captured create/destroy in the REST controller (where `serialize/1` is in
+// scope) but the OPERATION capture in the context module — which hosts no
+// serializer — so it dumped the raw Ecto struct.  Two audited actions on ONE
+// aggregate wrote two different key spellings into one table.
+// ---------------------------------------------------------------------------
+describe("vanilla audit snapshot shape — Audit.Wire", () => {
+  it("emits an Audit.Wire dispatcher projecting each hosted aggregate's wireShape", async () => {
+    const audit = file(await generateSystemFiles(WIRE), "/api/audit.ex");
+    expect(audit).toContain("defmodule Api.Audit.Wire do");
+    expect(audit).toContain("def wire(record), do: serialize(record)");
+    expect(audit).toContain(
+      "defp serialize(%Api.Orders.Order{} = record), do: serialize_orders_order(record)",
+    );
+    // camelCase wire keys, verbatim from `wireShape` — NOT the Ecto columns.
+    expect(audit).toContain('"commitSha" => record.commit_sha');
+    // Ecto's `timestamps()` columns are in no backend's wire shape, and the
+    // struct dump leaked both into every operation audit row.
+    expect(audit).not.toContain("inserted_at");
+    expect(audit).not.toContain("updated_at");
+    // The struct-drop clause survives only as the non-aggregate fallback,
+    // behind the aggregate head.
+    const dispatchAt = audit.indexOf("defp serialize(%Api.Orders.Order{}");
+    const fallbackAt = audit.indexOf("defp serialize(%_{} = struct)");
+    expect(dispatchAt).toBeGreaterThan(-1);
+    expect(fallbackAt).toBeGreaterThan(dispatchAt);
+  });
+
+  it("the OPERATION snapshot is byte-identical to the create/destroy one", async () => {
+    const files = await generateSystemFiles(WIRE);
+    // create captures in the controller, through that controller's `serialize/1`
+    const ctrl = file(files, "/order_controller.ex");
+    const ctrlBody = ctrl.slice(ctrl.indexOf("defp serialize(record) do"));
+    const ctrlMap = ctrlBody.slice(ctrlBody.indexOf("%{"), ctrlBody.indexOf("\n  end"));
+    // the operation captures through Audit.Wire
+    const audit = file(files, "/api/audit.ex");
+    const wireBody = audit.slice(audit.indexOf("defp serialize_orders_order(record) do"));
+    const wireMap = wireBody.slice(wireMap0(wireBody), wireBody.indexOf("\n  end"));
+    expect(wireMap).toBe(ctrlMap);
+  });
+
+  it("a masked aggregate snapshots UNMASKED (the history holds the real value)", async () => {
+    const audit = file(await generateSystemFiles(MASKED), "/api/audit.ex");
+    // The dispatch targets the unmasked projection, and the redacting
+    // `serialize_<sfx>` is not emitted at all — nothing would call it, and an
+    // unreferenced private fn fails `mix compile --warnings-as-errors`.
+    expect(audit).toContain(
+      "defp serialize(%Api.Orders.Order{} = record), do: serialize_unmasked_orders_order(record)",
+    );
+    expect(audit).toContain("defp serialize_unmasked_orders_order(record) do");
+    expect(audit).not.toContain("defp serialize_orders_order(record) do");
+    expect(audit).not.toContain("Process.get(:loom_current_user)");
+    expect(audit).toContain('"secretNote" => record.secret_note');
+  });
+});
+
+/** Index of the `%{` opening the wire map in a rendered `serialize_*` body. */
+function wireMap0(body: string): number {
+  return body.indexOf("%{");
+}

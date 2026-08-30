@@ -48,10 +48,27 @@ function isFrontendPlatform(platform: string | undefined): boolean {
   }
 }
 
+/** The platforms whose descriptor says they mount a UI, in DSL spelling —
+ *  the menu Rule 3's diagnostic lists.  DERIVED from the descriptor table
+ *  (`mountsUi`), never hand-listed: the inline list this replaced had drifted
+ *  to omit `angular`, `feliz` and `python`, all of which mount a UI.
+ *
+ *  The universe iterated is every platform keyword the validator already
+ *  accepts — the frontend keywords plus the registered backend families — so a
+ *  new platform shows up here the moment it is registered.  (`static` is a
+ *  frontend keyword sharing React's descriptor, so it is listed too.) */
+function uiMountingPlatformMenu(): string {
+  return [...FRONTEND_KEYWORDS, ...backendPlatformNames()]
+    .filter((p) => platformMountsUi(p))
+    .sort()
+    .map((p) => `'${p}'`)
+    .join(", ");
+}
+
 /** Rule 4b — one emitter per SPA frontend platform, for the
  *  "frontend deployable declares no `ui:`" error.  The diagnostic code stays
  *  PER-PLATFORM (`loom.react-deployable-missing-ui` and its `svelte`/`vue`/
- *  `angular` siblings) so the fix-hint registry can dispatch on it
+ *  `angular`/`feliz`/`flutter` siblings) so the fix-hint registry can dispatch on it
  *  (`src/language/fix-hints.ts` → `missingUiFix`); the wording differs only in
  *  the platform label and lives in the catalog under the matching key.
  *
@@ -59,7 +76,7 @@ function isFrontendPlatform(platform: string | undefined): boolean {
  *  `` code: `loom.${d.platform}-deployable-missing-ui` ``: a computed code is
  *  invisible to the wording ratchet (`test/system/diagnostic-catalog.test.ts`
  *  only records a site whose `code:` is statically known), which is exactly how
- *  these four kept inline wording long after every sibling moved to the catalog.
+ *  these kept inline wording long after every sibling moved to the catalog.
  *  Both the key and the code are spelled out here, once per platform. */
 const SPA_MISSING_UI: Record<string, (d: Deployable, accept: ValidationAcceptor) => void> = {
   react: (d, accept) =>
@@ -86,6 +103,27 @@ const SPA_MISSING_UI: Record<string, (d: Deployable, accept: ValidationAcceptor)
       property: "name",
       code: "loom.angular-deployable-missing-ui",
     }),
+  // Feliz and Flutter are frontends too — they just build through their own
+  // toolchains (`dotnet fable` + vite / the Flutter SDK) instead of the shared
+  // static-bundle pipeline, which is why they were missed here.  Without an
+  // arm, a `ui:`-less deployable on either platform passed validation and then
+  // FAILED SILENTLY DOWNSTREAM: the Feliz generator threw a raw
+  // `Error: Feliz deployable 'web' has no ui binding (uiName).`
+  // (`src/generator/feliz/index.ts`), while Flutter emitted a degenerate
+  // placeholder app — a bare `ListTile` home page — and exited 0
+  // (`src/generator/flutter/index.ts`, `deployable.uiName ? … : undefined`).
+  feliz: (d, accept) =>
+    accept("error", diagMessage("loom.feliz-deployable-missing-ui", { name: d.name }), {
+      node: d,
+      property: "name",
+      code: "loom.feliz-deployable-missing-ui",
+    }),
+  flutter: (d, accept) =>
+    accept("error", diagMessage("loom.flutter-deployable-missing-ui", { name: d.name }), {
+      node: d,
+      property: "name",
+      code: "loom.flutter-deployable-missing-ui",
+    }),
 };
 
 export function checkDeployable(
@@ -94,8 +132,9 @@ export function checkDeployable(
   accept: ValidationAcceptor,
 ): void {
   // Page-metamodel UI binding rules (3, 4, 4b).
-  // Rule 3:  only platforms that mount a UI admit `ui:` — `react`,
-  //          `static`, and `elixir` (fullstack Phoenix LiveView).
+  // Rule 3:  only platforms whose descriptor says `mountsUi` admit `ui:` —
+  //          every frontend plus the fullstack backends (`elixir`, `dotnet`,
+  //          `java`, `python`).  The menu is derived, not listed here.
   // Rule 4:  every `static` deployable must declare `ui:` (otherwise
   //          it has nothing to serve).
   // Rule 4b: every `react` deployable must declare `ui:`.  The
@@ -115,10 +154,14 @@ export function checkDeployable(
   if (hasUiBinding && !platformMountsUi(d.platform)) {
     accept(
       "error",
-      `'ui:'/'hosts:' binding is only valid on platforms that mount a UI ('react', 'svelte', 'vue', 'flutter', 'static', 'elixir', 'dotnet', 'java'); got '${d.platform}'.`,
+      diagMessage("loom.ui-binding-unmountable-platform", {
+        platform: d.platform,
+        menu: uiMountingPlatformMenu(),
+      }),
       {
         node: d,
         property: d.uiSugar ? "uiSugar" : d.uiCompose ? "uiCompose" : "hosts",
+        code: "loom.ui-binding-unmountable-platform",
       },
     );
   }
@@ -129,9 +172,9 @@ export function checkDeployable(
       { node: d, property: "name" },
     );
   }
-  // Rule 4b generalises to every frontend SPA platform (`react`,
-  // `svelte`, `vue`, `angular`) — a frontend deployable without a `ui:`
-  // has no pages to render.  `static` keeps its own wording above.
+  // Rule 4b generalises to every frontend platform (`react`, `svelte`,
+  // `vue`, `angular`, `feliz`, `flutter`) — a frontend deployable without a
+  // `ui:` has no pages to render.  `static` keeps its own wording above.
   if (!hasUiBinding) SPA_MISSING_UI[d.platform]?.(d, accept);
   // Rule 13 (D-PHOENIX-SURFACE): when the referenced `ui { framework: … }`
   // declaration carries its own framework, the hosting deployable's

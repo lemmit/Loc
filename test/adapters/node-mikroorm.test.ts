@@ -581,6 +581,21 @@ describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
     expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toEqual([]);
   });
 
+  // A ROOT scalar collection is the one shape still behind drizzle — and it used
+  // to abort codegen with a raw `Error: mikroorm: unsupported field kind 'array'
+  // … (validator gap)` instead of failing validation.  `emit` returns before
+  // generating when the IR validator errors, so this asserts BOTH halves at once:
+  // the diagnostic is present, and no exception escapes.
+  it("refuses a root scalar-collection field as a diagnostic, not a codegen throw", async () => {
+    const { errors, files } = await emit(sys("mikroorm", "tags: string[]"));
+    expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toHaveLength(1);
+    expect(files.size).toBe(0);
+    // The same field on drizzle still generates (native Postgres array).
+    const drizzle = await emit(sys("drizzle", "tags: string[]"));
+    expect(drizzle.errors).toEqual([]);
+    expect(drizzle.files.size).toBeGreaterThan(0);
+  });
+
   it("accepts the supported subset (scalar / enum / VO / optional)", async () => {
     const { errors } = await emit(sys("mikroorm"));
     expect(errors).toEqual([]);

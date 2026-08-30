@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { generateSystems } from "../../src/system/index.js";
 import { parseValid } from "../_helpers/parse.js";
 
-const src = (platform: string) => `
+const src = (platform: string, select = "orderId = t.orderId, total = t.total") => `
   system S {
     subdomain D { context C {
       aggregate Order { total: int  status: string }
@@ -26,7 +26,7 @@ const src = (platform: string) => `
         orderId: Order id
         total: int
         from OrderTotals as t where t.total > 100
-        select orderId = t.orderId, total = t.total
+        select ${select}
       }
     }}
     storage primary { type: postgres }
@@ -35,8 +35,8 @@ const src = (platform: string) => `
   }
 `;
 
-async function allFiles(platform: string): Promise<string> {
-  const files = (await generateSystems(await parseValid(src(platform)))).files;
+async function allFiles(platform: string, select?: string): Promise<string> {
+  const files = (await generateSystems(await parseValid(src(platform, select)))).files;
   return [...files.values()].join("\n \n");
 }
 
@@ -72,6 +72,39 @@ describe("query-time projection `from <Projection>` cross-backend read-model rea
       // `OrderTotalsRowRepository` is legit and does NOT match these).
       expect(all).not.toMatch(/\bOrderTotalsRepository\b/);
       expect(all).not.toMatch(/\bIOrderTotalsRepository\b/);
+    });
+  }
+});
+
+// Arithmetic on a SOURCE-PROJECTION row field in a `select`.  `t.total` must
+// type as the source projection's declared `int`, not as `string` — a
+// string-typed left operand turns `+` into an implicit string CONCAT and wraps
+// the numeric right operand in a string convert.  This is a SILENT failure:
+// the model validates clean (a `select` carries no queryable-subset gate) and
+// every backend emits nonsense — two of them uncompilable, three of them
+// wrong at runtime against a numeric wire schema.
+// See test/ir/projection-source-member-typing.test.ts for the lowering half.
+const ARITHMETIC: { platform: string; projected: RegExp }[] = [
+  { platform: "dotnet", projected: /new BigOrdersRow\(r\.OrderId\.Value, r\.Total \+ 1\)/ },
+  {
+    platform: "java",
+    projected: /new BigOrdersRow\(x\.orderId\(\)\.value\(\), x\.total\(\) \+ 1\)/,
+  },
+  { platform: "elixir", projected: /total: record\.total \+ 1/ },
+  { platform: "node", projected: /total: r\.total \+ 1,/ },
+  { platform: "python", projected: /"total": r\.total \+ 1,/ },
+];
+
+describe("query-time projection `from <Projection>` — arithmetic on a row field", () => {
+  for (const { platform, projected } of ARITHMETIC) {
+    it(`${platform}: emits plain arithmetic, never a string-convert of the operand`, async () => {
+      const all = await allFiles(platform, "orderId = t.orderId, total = t.total + 1");
+      expect(all).toMatch(projected);
+      expect(all).not.toMatch(/Total \+ 1\.ToString\(/);
+      expect(all).not.toMatch(/total\(\) \+ String\.valueOf\(1\)/);
+      expect(all).not.toMatch(/record\.total <> to_string\(1\)/);
+      expect(all).not.toMatch(/r\.total \+ String\(1\)/);
+      expect(all).not.toMatch(/r\.total \+ str\(1\)/);
     });
   }
 });

@@ -79,7 +79,19 @@ import { opCallParamFields } from "./vanilla/workflow-execution-emit.js";
 /** True when a reading op's read-ports all resolve to ONE context (this
  *  service's own) — the single-context case Slice 1 emits as a context fn.  A
  *  port whose repository is not declared in `ctx` means the read spans another
- *  context (out of scope) — then we keep the standalone module form. */
+ *  context (out of scope) — then we keep the standalone module form.
+ *
+ *  CURRENTLY ALWAYS TRUE — kept DEFENSIVE, not load-bearing.  A read-port is
+ *  derived from a `repo-read` Call (`readPortsForOperation`), and
+ *  `lowerDomainService` resolves reads only against `env.ctx.members`, so a
+ *  port can never name a repository outside the service's own context: the
+ *  cross-context body it was written to catch never reaches this predicate.
+ *  What it DID reach was a `pure`-tier op whose unresolved receiver got
+ *  rendered verbatim (`is_nil(customers.by_name(r))` → "undefined variable
+ *  customers"), which is now rejected at phase ⑦ by
+ *  `loom.domain-service-cross-context-read` (domain-service-checks.ts).  The
+ *  guard below stays as a floor in case lowering ever widens the resolution
+ *  scope; it is not the thing that closes the gap. */
 export function readingIsSingleContext(
   op: DomainServiceOperationIR,
   ctx: BoundedContextIR,

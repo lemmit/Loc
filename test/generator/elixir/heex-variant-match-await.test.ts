@@ -12,7 +12,7 @@
 // no-op pin now that the server-side path is implemented.)
 
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/index.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/index.js";
 
 const SOURCE = `
   error Failed { reason: string }
@@ -124,5 +124,90 @@ describe("HEEx `match await` (Stage 2) — server-side variant-match", () => {
     // rendered `_d`.
     expect(src).toContain('{:error, "Declined", _d} ->');
     expect(src).toContain("{:ok, o} ->");
+  });
+});
+
+describe("HEEx `match await` — subject shapes", () => {
+  async function pageAction(actionBody: string): Promise<string> {
+    // Unchecked: the two crash-proof legs' bare `C.Order.confirm()` subject
+    // trips `loom.missing-effect-marker` by design — their subject is that
+    // codegen RAISES on the unrenderable match rather than tap-dropping it.
+    // (The bare-aggregate leg's model is valid; unchecked emits it identically.)
+    const files = await generateSystemFilesUnchecked(
+      `
+      error Failed { reason: string }
+      system Demo {
+        subdomain S { context C {
+          aggregate Order { code: string
+            operation confirm(): Order or Failed { return Failed { reason: code } }
+          }
+        } }
+        api CApi from S
+        ui Web {
+          api C: CApi
+          page Detail {
+            route: "/orders/:id"
+            state { message: string = "" }
+            action submit() { ${actionBody} }
+            body: Stack { Button { "Go", onClick: submit } }
+          }
+        }
+        storage primary { type: postgres }
+        resource cState { for: C, kind: state, use: primary }
+        deployable phoenixApp {
+          platform: elixir
+          contexts: [C]
+          dataSources: [cState]
+          serves: CApi
+          ui: Web { C: phoenixApp }
+          port: 4000
+        }
+      }
+    `,
+      "the crash-proof legs deliberately omit the effect marker loom.missing-effect-marker requires; the codegen raise on the unrenderable match is their subject",
+    );
+    return files.get("phoenix_app/lib/phoenix_app_web/live/detail_live.ex")!;
+  }
+
+  it("resolves a BARE-aggregate subject, not just the api-qualified one", async () => {
+    // `Order.confirm()` and `C.Order.confirm()` name the same operation — the
+    // api handle only selected the bounded context, which the emitter already
+    // resolves from the aggregate name.
+    const src = await pageAction(`
+      match await Order.confirm() {
+        Order o  => { message := o.code }
+        Failed f => { message := f.reason }
+      }
+    `);
+    expect(src).toContain("apply(PhoenixApp.C, :confirm_order, ");
+    expect(src).toContain('{:error, "Failed", f} ->');
+  });
+
+  it("fails at codegen — not silently — when the subject is not an operation call", async () => {
+    // A LiveView discriminates a union by RUNNING the operation server-side, so
+    // a subject that is merely a let-bound name has no call for the emitter to
+    // run.  This used to render `tap(fn _ -> :ok end)`: valid Elixir, every arm
+    // dropped, no error anywhere.
+    await expect(
+      pageAction(`
+        let outcome = C.Order.confirm()
+        match await outcome {
+          Order o  => { message := o.code }
+          Failed f => { message := f.reason }
+        }
+      `),
+    ).rejects.toThrow(/cannot resolve to an aggregate operation \(ExprIR kind 'ref'\)/);
+  });
+
+  it("fails at codegen for a NON-awaited variant match over a let-bound union too", async () => {
+    await expect(
+      pageAction(`
+        let outcome = C.Order.confirm()
+        match outcome {
+          Order o  => { message := o.code }
+          Failed f => { message := f.reason }
+        }
+      `),
+    ).rejects.toThrow(/variant `match` statement on page 'Detail'/);
   });
 });
