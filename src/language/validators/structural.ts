@@ -417,6 +417,25 @@ function checkEventSourcedDiscipline(agg: Aggregate, accept: ValidationAcceptor)
   const isEventSourced = agg.persistedAs === "eventLog";
   const appliers = agg.members.filter(isApply);
 
+  // Rule 0 — `shape:` is INERT on an event-sourced aggregate, so it may not be
+  // spelled.  Every backend's schema emitter short-circuits on `persistedAs ===
+  // "eventLog"` BEFORE it reads `effectiveSavingShape(...)` (the Hono one at
+  // `generator/typescript/emit/schema.ts`), so the knob is read nowhere: the
+  // same source with and without `shape: document` generates byte-identical
+  // output and `ddd parse --json` reports `errors: 0, warnings: 0`.  Snapshot
+  // rehydration in a document/embedded shape is a deferred feature
+  // (docs/new-plan/T2-data-evolution.md) — but a deferral that ACCEPTS the
+  // syntax and silently emits the OTHER shape is a silent gap, not a deferral,
+  // which is exactly the case the sibling `loom.unique-on-event-sourced` gate
+  // below already refuses.
+  if (isEventSourced && (agg.shape === "document" || agg.shape === "embedded")) {
+    accept(
+      "error",
+      diagMessage("loom.shape-on-event-sourced", { name: agg.name, shape: agg.shape }),
+      { node: agg, property: "shape", code: "loom.shape-on-event-sourced" },
+    );
+  }
+
   // Rule 1 — appliers require an event-sourced aggregate.
   if (!isEventSourced) {
     for (const ap of appliers) {

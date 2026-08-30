@@ -348,3 +348,77 @@ describe("IR validator — domainService cross-context repository reads", () => 
     expect(d.some((x) => x.code === crossCode)).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// `loom.domain-service-read-unsupported` (domainservice-member-chained-repo-read).
+//
+// `matchRepoRead` (src/ir/lower/repo-read.ts) requires the repository call to
+// be the WHOLE postfix chain (`suffixes.length === 1`), so a read used as a
+// MEMBER RECEIVER — `Customers.byTier(t).tier` — never lowers to a `repo-read`
+// Call.  It stays a `method-call` on an `unknown` ref, which means
+// `classifyDomainServiceTier` types the service `pure`, no backend threads a
+// read port in, and all five emit the bare source name: node/dotnet/java a
+// dangling identifier (TS2304 / CS0103 / "cannot find symbol"), python F821
+// with no port param at all, elixir `customers.by_tier(t).tier` — not valid
+// Elixir, and the misclassification splits ONE service across two modules.
+//
+// The `let`-bound sibling one line away IS threaded correctly, which is what
+// made this silent rather than obviously broken.  Until the detector is widened
+// (the real fix), refuse it by name.
+// ---------------------------------------------------------------------------
+describe("a repository read in MEMBER-RECEIVER position is refused, not mis-emitted", () => {
+  const CODE = "loom.domain-service-read-unsupported";
+
+  it("flags `Repo.find(...).member` in a domain-service body", async () => {
+    const d = await diags(`
+      domainService Lookup {
+        operation tierOf(t: string): string {
+          return Customers.byTier(t).tier
+        }
+      }
+    `);
+    const hit = d.find((x) => x.code === CODE);
+    expect(hit, `got: ${d.map((x) => x.code).join(", ") || "(none)"}`).toBeDefined();
+    expect(hit!.severity).toBe("error");
+    expect(hit!.source).toBe("Sales/Lookup.tierOf");
+    expect(hit!.message).toContain("Customers.byTier");
+    // The message must name the WORKING spelling, not just the rule.
+    expect(hit!.message).toContain("let x = Customers.byTier(…)");
+  });
+
+  it("CONTROL — the `let`-bound spelling is the supported one and stays clean", async () => {
+    const d = await diags(`
+      domainService Lookup {
+        operation isFree(t: string): bool {
+          let c = Customers.byTier(t)
+          return c == null
+        }
+      }
+    `);
+    expect(d.some((x) => x.code === CODE)).toBe(false);
+  });
+
+  it("CONTROL — a whole-chain read in return position stays clean", async () => {
+    const d = await diags(`
+      domainService Lookup {
+        operation isFree(t: string): bool {
+          return Customers.byTier(t) == null
+        }
+      }
+    `);
+    expect(d.some((x) => x.code === CODE)).toBe(false);
+  });
+
+  it("CONTROL — a repository WRITE keeps its own, more specific diagnostic", async () => {
+    const d = await diags(`
+      domainService Pricing {
+        operation quote(cart: Cart): money {
+          let r = Carts.save(cart)
+          return cart.subtotal
+        }
+      }
+    `);
+    expect(d.some((x) => x.code === "loom.domain-service-no-repo-write")).toBe(true);
+    expect(d.some((x) => x.code === CODE)).toBe(false);
+  });
+});

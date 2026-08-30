@@ -33,7 +33,9 @@ system Demo {
   subdomain S {
     context C {
       enum Status { Open, Closed }
-      aggregate Customer { name: string  status: Status }
+      aggregate Customer { name: string  status: Status
+        operation rename(to: string) { name := to }
+      }
       repository Customers for Customer { }
     }
   }
@@ -91,8 +93,33 @@ describe("loom.unresolved-page-ref — the gate", () => {
       (x) => x.code === CODE,
     );
     expect(d?.severity).toBe("error");
-    expect(d?.message).toMatch(/page 'X'/);
+    // The host lives in `source` (the CLI prints `${code} ${source}: …`), so
+    // the message must not repeat it — see F2-FFE-9.
+    expect(d?.source).toBe("page 'X'");
     expect(d?.message).toMatch(/nosuchthing/);
+  });
+
+  // The gate's first cut scanned `positionalArgsOf(e)` only, so the identical
+  // defect in a NAMED argument passed clean — including the `undefined`-emitting
+  // form (`<MoneyValue value={ /* unresolved: x */ undefined } />`, a guaranteed
+  // TypeError that also fails `tsc --noEmit` / `svelte-check` / `vue-tsc`).
+  // Named args are how authors spell value slots, so this was the common half.
+  it("flags an unresolved ref in a NAMED argument, not just a positional", async () => {
+    expect(await codes(`page X { route: "/x"  body: Text { value: nosuchthing } }`)).toContain(
+      CODE,
+    );
+  });
+
+  it("flags the `undefined`-emitting named-arg form on a value primitive", async () => {
+    expect(await codes(`page X { route: "/x"  body: Money { value: alsomissing } }`)).toContain(
+      CODE,
+    );
+  });
+
+  it("flags a named arg nested in a compound expression", async () => {
+    expect(
+      await codes(`page X { route: "/x"  body: Text { value: nosuchthing ? "y" : "n" } }`),
+    ).toContain(CODE);
   });
 
   it("reports ONE diagnostic per name, however often the page repeats the typo", async () => {
@@ -163,6 +190,59 @@ describe("loom.unresolved-page-ref — what it must NOT flag", () => {
           }
         }
       `),
+    ).not.toContain(CODE);
+  });
+
+  it("POSITIVE CONTROL: a NAMED receiver-rooted arg is still not a rendered ref", async () => {
+    // `of:` is a named arg whose value roots at an api handle — widening the
+    // scan from positionals to every arg must not start flagging it.
+    expect(
+      await codes(`
+        page X {
+          route: "/x"
+          body: QueryView {
+            of: Shop.Customer.all,
+            loading: Skeleton { },
+            error: Alert { "e" },
+            empty: Empty { "none" },
+            data: rows => Text { value: rows }
+          }
+        }
+      `),
+    ).not.toContain(CODE);
+  });
+
+  it("POSITIVE CONTROL: a STRUCTURAL named slot is not a value read", async () => {
+    // `of:` names a DECLARATION.  It lowers to `refKind: "unknown"` like every
+    // other bare name, but the walker resolves it against the model, not the
+    // page's value scope — every scaffolded page in the corpus spells it, so
+    // flagging it would reject shipped output.
+    expect(
+      await codes(`
+        page X {
+          route: "/x"
+          body: CreateForm { of: Customer, submitLabel: "Save" }
+        }
+      `),
+    ).not.toContain(CODE);
+  });
+
+  it("POSITIVE CONTROL: `op:` naming an OPERATION is structural too", async () => {
+    // The shape the angular walker fixtures ship (`OperationForm { of: Order,
+    // op: addNote }`).  An operation name is a declaration, not a value.
+    expect(
+      await codes(`
+        page X {
+          route: "/x"
+          body: OperationForm { of: Customer, op: rename }
+        }
+      `),
+    ).not.toContain(CODE);
+  });
+
+  it("POSITIVE CONTROL: a resolved name in a named arg raises nothing", async () => {
+    expect(
+      await codes(`page X(kind: string) { route: "/x/:kind"  body: Text { value: kind } }`),
     ).not.toContain(CODE);
   });
 

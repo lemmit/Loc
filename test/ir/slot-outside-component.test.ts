@@ -69,7 +69,9 @@ describe("loom.slot-outside-component — the gate", () => {
       (x) => x.code === CODE,
     );
     expect(d?.severity).toBe("error");
-    expect(d?.message).toMatch(/page 'X'/);
+    // The PAGE lives in `source` (the CLI prints `${code} ${source}: …`); the
+    // message must not repeat it — see F2-FFE-9.
+    expect(d?.source).toBe("page 'X'");
     expect(d?.message).toMatch(/component/);
   });
 

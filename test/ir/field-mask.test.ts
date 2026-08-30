@@ -137,4 +137,70 @@ describe("field mask — IR gates", () => {
     const d = diags.find((x) => x.code === "loom.field-mask-projection-source")!;
     expect(d.message).toContain("joins aggregate 'Customer'");
   });
+
+  // M-T3.15 B0 — the FOLD bypass.  The query-time bound above refuses a
+  // projection that READS a masked aggregate; an `emit` carrying the masked
+  // value into a folded read model reached exactly the same cleartext row on
+  // all five backends, with no unusual syntax and a clean `ddd parse`.
+  const foldSystem = (emitFields: string) => `system S {
+  user { id: string  role: string  permissions: string[] }
+  subdomain M {
+    permissions { unmask }
+    context C {
+      event Raised { who: P id  newSalary: money }
+      aggregate P {
+        who: string
+        salary: money mask unless currentUser.permissions.contains(permissions.unmask)
+        create(who: string, salary: money) { }
+        operation raise(amount: money) {
+          salary := amount
+          emit Raised { ${emitFields} }
+        }
+      }
+      repository Ps for P { }
+      projection SalaryBoard keyed by who {
+        who: P id
+        newSalary: money
+        on(e: Raised) by e.who {
+          who := e.who
+          newSalary := e.newSalary
+        }
+      }
+    }
+  }
+  storage db { type: postgres }
+  resource st { for: C, kind: state, use: db }
+  deployable api { platform: node  contexts: [C]  dataSources: [st]  port: 8080  auth: required }
+}`;
+
+  async function foldDiags(emitFields: string) {
+    const { model } = await parseString(foldSystem(emitFields), { validate: false });
+    return validateLoomModel(enrichLoomModel(lowerModel(model)));
+  }
+
+  it("rejects a projection that folds an event laundering a masked field", async () => {
+    const ds = await foldDiags("who: id, newSalary: salary");
+    expect(ds.map((d) => d.code)).toContain("loom.field-mask-projection-source");
+    const d = ds.find((x) => x.code === "loom.field-mask-projection-source")!;
+    expect(d.message).toContain("folds event 'Raised'");
+    expect(d.message).toContain("'P.salary'");
+  });
+
+  it("follows the masked value through a `let` binding into the emit", async () => {
+    const src = foldSystem("who: id, newSalary: hidden").replace(
+      "          emit Raised",
+      "          let hidden = salary\n          emit Raised",
+    );
+    const { model } = await parseString(src, { validate: false });
+    const ds = validateLoomModel(enrichLoomModel(lowerModel(model)));
+    expect(ds.map((d) => d.code)).toContain("loom.field-mask-projection-source");
+  });
+
+  it("leaves a fold that carries no masked value alone", async () => {
+    // Same aggregate, same mask, same projection — the emit carries the
+    // operation PARAM, not the masked column.  A gate that fired here would
+    // ban every read model built off a masked aggregate.
+    const ds = await foldDiags("who: id, newSalary: amount");
+    expect(ds.map((d) => d.code)).not.toContain("loom.field-mask-projection-source");
+  });
 });
