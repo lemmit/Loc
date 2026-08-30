@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { validate } from "../../src/api/index.js";
 import { codeOfMessageKey, DIAGNOSTIC_MESSAGES } from "../../src/diagnostics/messages.js";
@@ -51,10 +54,14 @@ import { COVERED_ELSEWHERE, UNCOVERED } from "./diagnostic-firing-census.data.js
 // That is deterministic, shard-safe (no whole-run state to union), and the
 // drain it asks for produces real negative tests rather than a report.
 //
-// FOUR BUCKETS, and every catalogue code is in exactly one:
+// FIVE BUCKETS, and every catalogue code is in exactly one:
 //
 //   FIRING_FIXTURES   — proven here, by running it.
 //   UNREACHABLE_PINS  — cannot fire from source; the reason is the entry.
+//   DRIVEN_ELSEWHERE  — reachable, but not from `.ddd`: a named test drives it,
+//                       and the pointer is CHECKED (file exists, names the
+//                       code).  Added for the macro-authoring trio, which needs
+//                       a misbehaving macro rather than a source defect.
 //   UNCOVERED         — no proof yet.  Shrink-only.  The drain list.
 //   COVERED_ELSEWHERE — raised by some other test per the 2026-08-13 census.
 //                       Frozen; a NEW code can never join it.
@@ -1075,6 +1082,36 @@ const LATENT_GATES: ReadonlyArray<{
   },
 ];
 
+// ---------------------------------------------------------------------------
+// DRIVEN_ELSEWHERE — proven, but not from `.ddd` source.
+//
+// A code can be perfectly reachable and still have no fixture here, because
+// this census drives SOURCE TEXT and some gates are not defects in source at
+// all.  The macro-authoring trio is the clean example: `loom.macro-threw` and
+// its siblings fire when a registered MACRO misbehaves, so tripping them needs
+// a macro, not a `.ddd`.
+//
+// Neither existing bucket fits, and forcing one would be a lie:
+//   * UNREACHABLE_PINS says "cannot be driven from `.ddd` source at all" — true
+//     here, but the word `unreachable` would then cover codes a test DOES
+//     drive, which is precisely the confusion this census exists to remove.
+//   * COVERED_ELSEWHERE is frozen and, by its own header, credits coverage
+//     measured ONCE — if the test that raised a code is deleted, nothing
+//     notices.  That is the weakness; adding to it would inherit the weakness.
+//
+// So this bucket carries a POINTER, and the pointer is checked: the named file
+// must exist AND must name the code.  Delete the test, rename the file, or
+// remove the assertion, and this fails — which is the guarantee
+// COVERED_ELSEWHERE cannot make.
+// ---------------------------------------------------------------------------
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+const DRIVEN_ELSEWHERE: Record<string, string> = {
+  "loom.macro-threw": "test/macro/misbehaving-macro-diagnostics.test.ts",
+  "loom.macro-non-ast-result": "test/macro/misbehaving-macro-diagnostics.test.ts",
+  "loom.macro-escapes-host": "test/macro/misbehaving-macro-diagnostics.test.ts",
+};
+
 const catalogueCodes = (): string[] => [
   ...new Set(
     Object.keys(DIAGNOSTIC_MESSAGES).map((k) =>
@@ -1115,7 +1152,7 @@ const catalogueCodes = (): string[] => [
  *  `loom.workflow-name-collision`, fires cleanly — its recorded preemption was
  *  simply wrong, which is the second false unreachability claim this census
  *  has caught in that one file. */
-const UNCOVERED_BASELINE = 9;
+const UNCOVERED_BASELINE = 6;
 
 describe("diagnostic firing census", () => {
   // Keeps the LATENT_GATES pins honest.  Without this the pin is prose and its
@@ -1157,10 +1194,31 @@ describe("diagnostic firing census", () => {
     });
   });
 
+  // The half that makes DRIVEN_ELSEWHERE a claim rather than a note.
+  describe("every DRIVEN_ELSEWHERE pointer still points at something", () => {
+    it.each(Object.entries(DRIVEN_ELSEWHERE))("%s", (code, relPath) => {
+      const abs = join(repoRoot, relPath);
+      expect(existsSync(abs), `${code} points at ${relPath}, which does not exist`).toBe(true);
+      // A BOUNDED match, not `toContain`.  A plain substring check passes for a
+      // RENAMED code — `loom.macro-escapes-host-RENAMED` contains
+      // `loom.macro-escapes-host` — so the first version of this assertion was
+      // vacuous, and the mutation that should have failed it did not.  The
+      // negative lookahead is what makes the pointer check real.
+      const named = new RegExp(`${code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z0-9-])`);
+      expect(
+        named.test(readFileSync(abs, "utf8")),
+        `${relPath} no longer names ${code} (as a whole code — a longer code that merely ` +
+          `starts with it does not count), so the pointer credits coverage that is gone.  ` +
+          `Restore the assertion, or move the code back to UNCOVERED.`,
+      ).toBe(true);
+    });
+  });
+
   describe("every catalogued code is in exactly one bucket", () => {
     const buckets = {
       FIRING_FIXTURES: Object.keys(FIRING_FIXTURES),
       UNREACHABLE_PINS: Object.keys(UNREACHABLE_PINS),
+      DRIVEN_ELSEWHERE: Object.keys(DRIVEN_ELSEWHERE),
       UNCOVERED: [...UNCOVERED],
       COVERED_ELSEWHERE: [...COVERED_ELSEWHERE],
     };
