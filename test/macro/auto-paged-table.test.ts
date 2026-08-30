@@ -151,4 +151,57 @@ describe("auto-paged table", () => {
     expect(tsx).not.toContain("pageNum");
     expect(tsx).toContain("taskAll.data.total");
   });
+
+  // -------------------------------------------------------------------------
+  // F2-CFE-4 — the rewrite flips the binding from the ROW ARRAY to the
+  // ENVELOPE, so every SIBLING reader in the same lambda has to hop through
+  // `.items` too.  Rewriting only the Table's own `rows:` left a `For { each:
+  // rows }` next to it iterating `{ items, page, pageSize, total, totalPages }`
+  // — a TypeScript error plus a render-time crash, with no diagnostic.  The
+  // author never wrote the rewrite that broke it.
+  // -------------------------------------------------------------------------
+
+  it("re-points a SIBLING For at the envelope's items, not the envelope", async () => {
+    const tsx = await pageTsx(`QueryView {
+      of: T.Task.all,
+      data: rows => Stack {
+        For { each: rows, r => Text { r.title } },
+        Table { rows: rows, Column { "Title", o => Text { o.title } } }
+      }
+    }`);
+    // The rewrite fired…
+    expect(tsx).toContain("const [pageNum, setPageNum] = useState<number>(1);");
+    // …and BOTH readers iterate the row array.
+    expect(tsx).toContain("taskAll.data.items.map((r, rIdx)");
+    expect(tsx).toContain("taskAll.data.items.map((row)");
+    // The envelope is never iterated directly.
+    expect(tsx).not.toMatch(/taskAll\.data\.map\(/);
+  });
+
+  it("leaves the envelope members the pager reads exactly as written", async () => {
+    const tsx = await pageTsx(`QueryView {
+      of: T.Task.all,
+      data: rows => Stack {
+        Text { rows.total },
+        Table { rows: rows, Column { "Title", o => Text { o.title } } }
+      }
+    }`);
+    // `total` is an envelope field — a `.items` hop would be wrong here.
+    expect(tsx).toContain("taskAll.data.total");
+    expect(tsx).not.toContain("taskAll.data.items.total");
+    // …while the table still reads the rows.
+    expect(tsx).toContain("taskAll.data.items.map((row)");
+  });
+
+  it("re-points a CHAINED read off the binding (`rows.count()`) through .items", async () => {
+    const tsx = await pageTsx(`QueryView {
+      of: T.Task.all,
+      data: rows => Stack {
+        Text { rows.count() },
+        Table { rows: rows, Column { "Title", o => Text { o.title } } }
+      }
+    }`);
+    expect(tsx).toContain("taskAll.data.items.length");
+    expect(tsx).not.toMatch(/taskAll\.data\.length/);
+  });
 });

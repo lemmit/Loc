@@ -62,13 +62,21 @@ describe("find-filter list UI — scaffolded list pages", () => {
     );
   });
 
-  it("a paged or non-string-param find is not offered as a filter (v1 eligibility)", async () => {
+  // M-T1.15: an `int` / `long` / `X id` param used to be dropped from the bar
+  // SILENTLY — declared, emitted as a backend route, no input, no diagnostic.
+  // It now renders (number → `NumberField`, id → the text box the string case
+  // gets); a PAGED find and a param with no matching input still don't.
+  it("offers int and `X id` filter params, and still declines a paged find", async () => {
     const files = await generateSystemFiles(`
       system S {
         subdomain Sub { context Sales {
-          aggregate Order { total: int }
+          aggregate Customer { name: string  derived display: string = name }
+          aggregate Order { total: int  placedAt: datetime  customer: Customer id }
+          repository Customers for Customer { }
           repository Orders for Order {
             find expensive(min: int): Order[] where this.total > min
+            find forCustomer(c: Customer id): Order[] where this.customer == c
+            find since(d: datetime): Order[] where this.placedAt >= d
             find recent(): Order paged
           }
         } }
@@ -83,7 +91,18 @@ describe("find-filter list UI — scaffolded list pages", () => {
       }
     `);
     const list = files.get("web/src/pages/orders/list.tsx")!;
-    expect(list).not.toContain("useExpensiveOrder");
+    // int → a NUMBER input bound to a number state; "unset" is 0.
+    expect(list).toContain("const [expensiveMin, setExpensiveMin] = useState<number>(0);");
+    expect(list).toContain('data-testid="orders-filter-expensive_min"');
+    expect(list).toContain("const orderExpensive = useExpensiveOrder({ min: expensiveMin });");
+    expect(list).toContain("((expensiveMin !== 0)) ? (");
+    // `X id` → the string box, since an id's wire form IS a string.
+    expect(list).toContain('const [forCustomerC, setForCustomerC] = useState<string>("");');
+    expect(list).toContain("const orderForCustomer = useForCustomerOrder({ c: forCustomerC });");
+    expect(list).toContain('((forCustomerC !== "")) ? (');
+    // A `datetime` param has no filter input, and a PAGED find is not a filter
+    // arm at all — both still decline.
+    expect(list).not.toContain("useSinceOrder");
     expect(list).not.toContain("useRecentOrder");
     expect(list).toContain(
       "const orderAll = useAllOrders({ page: pageNum, pageSize: 10, sort: sortKey, dir: sortDir });",

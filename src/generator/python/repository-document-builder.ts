@@ -28,7 +28,8 @@ import {
   partWireMethod,
   queryProjectionViews,
   toWireMethod,
-  writeGuardAlias,
+  writeGuardInApp,
+  writeGuardInAppUsesPrincipal,
 } from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -107,7 +108,11 @@ export function buildPyDocumentRepositoryFile(
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
-    ...writeGuardAlias(agg),
+    // Command load (authorization Phase 3 P3.1): the whole aggregate lives in
+    // one jsonb blob, so the write-scope guard is checked IN-APP over the loaded
+    // instance — the same place this shape already evaluates its capability
+    // READ filters.
+    ...writeGuardInApp(agg),
     "",
     `    async def all(self) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${row}))).scalars().all()`,
@@ -245,7 +250,7 @@ export function buildPyDocumentRepositoryFile(
     "",
     // `User` for a per-find `where` principal param; `require_current_user` for
     // an always-on principal capability filter (DEBT-02 tail) — one sorted import.
-    authUserImport(findUser, usesPrincipal),
+    authUserImport(findUser, usesPrincipal || writeGuardInAppUsesPrincipal(agg)),
     `from app.db.schema import ${row}`,
     wireHelperImport(refersTo),
     versioned
