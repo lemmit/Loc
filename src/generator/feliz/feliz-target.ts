@@ -22,7 +22,7 @@ import {
   FELIZ_DISPATCH_PARAM,
   FELIZ_MODEL_PARAM,
   FS_LEAVES,
-  fsIntDivWidened,
+  fsNumericBinary,
   fsString,
   fsTemporalBinary,
   renderFsIntrinsic,
@@ -1096,11 +1096,11 @@ export const felizTarget: WalkerTarget = {
   exprDuration: (unit, amount) => FS_LEAVES.duration(unit, amount),
   exprTemporalBinary: (left, right, e) => fsTemporalBinary(left, right, e),
   // `5 / 2` is `2.5` in Loom's type system, but F#'s integer `/` truncates —
-  // the same shared predicate the .NET/Java/Elixir backends consult decides
-  // when both operands must be widened.  Forwards to the SAME shared function
-  // the MVU update path uses, so a division cannot mean one thing in a page
-  // body and another in an action body.
-  exprIntDivWidened: (left, right, e) => fsIntDivWidened(left, right, e),
+  // and F# has NO implicit numeric conversion where Loom widens (`int + long`,
+  // `qty * price`).  The seam converts the operands; it forwards to the SAME
+  // shared function the MVU update path uses, so a numeric op cannot mean one
+  // thing in a page body and another in an action body.
+  exprNumericBinary: (left, right, e) => fsNumericBinary(left, right, e),
 
   // Scalar intrinsics — the SAME F# table the MVU update path uses
   // (`renderFsMethodCall`), so `s.replace(a, b)` cannot mean one thing in a

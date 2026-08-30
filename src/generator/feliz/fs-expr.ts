@@ -165,26 +165,46 @@ export function fsTemporalBinary(
   return null;
 }
 
-/** The integer-division-widened-to-`decimal` arm, or `null` to fall through to
- *  the plain operator leaf.
+/** The numeric binary-operand arms, or `null` to fall through to the plain
+ *  operator leaf.  F# performs NO implicit numeric conversion, but Loom's type
+ *  system widens along `int → long → decimal` — three cases diverge:
  *
- *  Loom's type system widens `/` on two integral operands to `decimal`
- *  (`5 / 2` is `2.5`) — the same rule .NET, Java, Elixir and the SQL renderer
- *  already honour through the shared `isIntDivWidenedToDecimal` predicate.  F#
- *  is in the truncating family (`5 / 2 = 2`), so both operands are converted
- *  before the division; a mixed `int / decimal` is refused by the predicate and
- *  must NOT be re-wrapped.
+ *   1. `/` on two integral operands widens to `decimal` (`5 / 2` is `2.5`) —
+ *      the same rule .NET, Java, Elixir and the SQL renderer already honour
+ *      through the shared `isIntDivWidenedToDecimal` predicate.  F# is in the
+ *      truncating family (`5 / 2 = 2`), so BOTH operands convert.
+ *   2. `int` meets `long` — the int side converts up (`int64 x`), else the
+ *      operator is a hard F# type error (the int64 spelling of `long` is what
+ *      created this pair; C# converts implicitly, F# does not).
+ *   3. an integral operand meets `decimal`/`money` — the integral side
+ *      converts up (`decimal x`), same reasoning.  `decimal` meets `money`
+ *      needs nothing: both are F# `decimal` (`type-fs.ts`).
  *
- *  Shared by both feliz paths: the view walker reaches it through
- *  `felizTarget.exprIntDivWidened`, the MVU update path through `renderFsExpr`'s
- *  binary arm — the same pairing `fsTemporalBinary` has. */
-export function fsIntDivWidened(
+ *  Literal operands never reach cases 2-3: lowering's `tryPromoteNumericLit`
+ *  already stamps them the wider type, and the literal leaf spells the suffix
+ *  (`3L`, `9.99m`).  Shared by both feliz paths: the view walker reaches it
+ *  through `felizTarget.exprNumericBinary`, the MVU update path through
+ *  `renderFsExpr`'s binary arm — the same pairing `fsTemporalBinary` has. */
+export function fsNumericBinary(
   left: string,
   right: string,
   e: Extract<ExprIR, { kind: "binary" }>,
 ): string | null {
-  if (!isIntDivWidenedToDecimal(e)) return null;
-  return `((decimal ${left}) / (decimal ${right}))`;
+  if (isIntDivWidenedToDecimal(e)) return `((decimal ${left}) / (decimal ${right}))`;
+  const prim = (t: typeof e.leftType): string | undefined =>
+    t?.kind === "primitive" ? t.name : undefined;
+  const l = prim(e.leftType);
+  const r = prim(e.rightType);
+  if (!l || !r || l === r) return null;
+  const integral = (n: string): boolean => n === "int" || n === "long";
+  const fractional = (n: string): boolean => n === "decimal" || n === "money";
+  // Case 2 — int vs long: the int side converts up to int64.
+  if (l === "int" && r === "long") return FS_LEAVES.binary(`(int64 ${left})`, right, e.op);
+  if (l === "long" && r === "int") return FS_LEAVES.binary(left, `(int64 ${right})`, e.op);
+  // Case 3 — integral vs decimal/money: the integral side converts up.
+  if (integral(l) && fractional(r)) return FS_LEAVES.binary(`(decimal ${left})`, right, e.op);
+  if (fractional(l) && integral(r)) return FS_LEAVES.binary(left, `(decimal ${right})`, e.op);
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -460,7 +480,7 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       // the same two seams the view path consults through `felizTarget`.
       return (
         fsTemporalBinary(left, right, e) ??
-        fsIntDivWidened(left, right, e) ??
+        fsNumericBinary(left, right, e) ??
         FS_LEAVES.binary(left, right, e.op)
       );
     }

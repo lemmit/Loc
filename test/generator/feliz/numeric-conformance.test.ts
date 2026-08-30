@@ -15,9 +15,14 @@
 //     threw an unhandled Elmish exception instead of showing a form error.
 //
 // Both feliz expression paths are asserted for the division: the VIEW path
-// (shared `_walker/walker-core.ts` → the `exprIntDivWidened` seam) and the MVU
+// (shared `_walker/walker-core.ts` → the `exprNumericBinary` seam) and the MVU
 // UPDATE path (`fs-expr.ts`'s own dispatcher). They share one function, and
 // this pins that they cannot drift apart.
+//
+// The same seam also coerces MIXED numeric operands (`int + long`,
+// `int * decimal`): Loom's type system widens along `int → long → decimal`
+// implicitly, F# not at all — so without the conversion the emitted operator
+// is a hard Fable type error.
 
 import { describe, expect, it } from "vitest";
 import { generateFelizForContexts } from "../../../src/generator/feliz/index.js";
@@ -66,7 +71,7 @@ describe("feliz: integer division widens to decimal", () => {
 
   // A body-position division goes through the SHARED walker
   // (`_walker/walker-core.ts`), not `fs-expr.ts`'s own dispatcher — so it only
-  // reaches the F# arm through the new `WalkerTarget.exprIntDivWidened` seam.
+  // reaches the F# arm through the new `WalkerTarget.exprNumericBinary` seam.
   it("widens both operands on the view path (the walker seam)", async () => {
     const fs = await app(`
     page Calc {
@@ -78,7 +83,7 @@ describe("feliz: integer division widens to decimal", () => {
     expect(fs).not.toContain("(model.Hits / model.Visits)");
   });
 
-  it("leaves a mixed int / decimal division alone", async () => {
+  it("converts only the integral side of a mixed decimal / int division", async () => {
     const fs = await app(`
     page Calc {
       route: "/calc"
@@ -86,10 +91,36 @@ describe("feliz: integer division widens to decimal", () => {
       action compute() { rate := total / parts }
       body: Button("go", onClick: compute)
     }`);
-    // The shared predicate refuses a mixed operand pair — its decimal side is
-    // already fractional and must not be re-wrapped.
-    expect(fs).toContain("(model.Total / model.Parts)");
+    // The int-div predicate refuses a mixed pair (its decimal side is already
+    // fractional and must not be re-wrapped) — but F# has no implicit
+    // `int → decimal` conversion either, so the INT side still converts up.
+    expect(fs).toContain("(model.Total / (decimal model.Parts))");
     expect(fs).not.toContain("(decimal model.Total)");
+  });
+});
+
+describe("feliz: mixed-width numeric operands coerce (F# widens nothing)", () => {
+  it("converts the int side up when it meets a long", async () => {
+    const fs = await app(`
+    page Stats {
+      route: "/stats"
+      state { impressions: long  bonus: int = 0  reach: long }
+      action compute() { reach := impressions + bonus }
+      body: Button("go", onClick: compute)
+    }`);
+    // int64 + int is a hard F# type error — the narrower side converts.
+    expect(fs).toContain("(model.Impressions + (int64 model.Bonus))");
+  });
+
+  it("converts the integral side up when it meets a decimal, on the view path too", async () => {
+    const fs = await app(`
+    page Cart {
+      route: "/cart"
+      state { price: decimal = 0  qty: int = 1 }
+      body: Text { \`Total: {qty * price}\` }
+    }`);
+    // The body-position expression reaches F# through the walker seam.
+    expect(fs).toContain("((decimal model.Qty) * model.Price)");
   });
 });
 
