@@ -1040,3 +1040,31 @@ Found 2026-08-23 by the numeric-types audit ([F12](../audits/numeric-types-audit
 **Verification when it lands.** A cross-backend ingress conformance matrix (bad money string, fractional int, stringified number, huge money) asserting the 4xx statuses per backend; one arm per backend mutation-proved.
 
 Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F12 + annex, plan.json N14. Relates to RS-15 (domain floor 422), M-T5.20 (denial ladder). Conflicts with M-T6.46/M-T6.47 in the shared wire files — stack or sequence within the wave.
+
+## M-T6.50 — Python saga / workflow emission holes: three collector gaps that ship `F821` into the generated app — `open` · **S–M** · P1
+
+Found 2026-08-30 re-verifying the [08-24 generator review](../audits/generator-code-review-2026-08-24.md)'s follow-up register (rows 14–16); two **reproduced** on `main` @ `aa236ae`, one latent. No ledger row in #2668, no other owner. One backend, one class — a renderer emits a name the module never binds — three sites:
+
+1. **`dispatch-builder.ts` emits no domain-service imports at all.** `domainServiceImportLinesForWorkflow` exists (`python/emit/domain-service.ts:291`) and has exactly two callers — `workflows-builder.ts:257` and `emit/aggregate.ts:266`. The saga-handler file is not one of them, and the PY_TARGET leaf renders a domain-service call as the **bare** function name. Reproduced: a saga `on(s: ShipmentRequested)` handler calling `Retry.nextAttempt(1)` emits `next_attempt(1)` at `app/dispatch.py:31` with no `from app.domain.services.retry import next_attempt` → ruff `F821` / `NameError` at first delivery.
+2. **Own-state assign in a non-correlated command workflow renders `self._x` at module level.** `workflows-builder.ts:582` builds the route target with `thisName: "self"`, and the `assign` arm (`:817-823`) renders the own-state LHS through that mapping — but the workflow ROUTE is a module-level `async def`, not a method. Reproduced: `create(title: string) { counter := 1 … }` emits `self._counter = 1` into `app/http/workflows_routes.py` → `F821`. (The correlated saga path is correct: it maps to the tracked row via `thisName: "state"`.)
+3. **`collectStmtExprImports` misses `variant-match`.** `python/emit/domain-service.ts:243-265` enumerates 10 of the 11 `StmtIR` kinds by hand; nested statements inside a `variant-match` arm contribute no imports. Latent today, and it is §F3's exact shape — the two exported collectors in the *same file* already ride `walkStmtExprsDeep` / `walkWorkflowStmtExprsDeep` (`:283-296`).
+
+**The work:** (1) call the existing helper from `dispatch-builder.ts` (the handler bodies are `WorkflowStmtIR`, so it is the `…ForWorkflow` variant); (2) decide the own-state target for the uncorrelated command shape — the honest options are a local dict the route saves at exit, or a validator refusal if own-state on an uncorrelated workflow has no meaning — and render *that*, not `self`; (3) delete the hand-enumerated switch in favour of the exhaustive walker (the `never`-guard is the point: the next new `StmtIR` kind fails to compile instead of silently emitting an unbound name).
+
+**Verification when it lands.** Per-site generator tests plus a `ruff --select F821` run over the generated tree for each shape (the corpus python gate already runs ruff — the reason these shipped green is that no fixture crosses saga × domainService, or command-workflow × own-state; mint both). Mutation-prove by file-copy revert, per the repo rule.
+
+Sources: [generator-code-review-2026-08-24](../audits/generator-code-review-2026-08-24.md) §Follow-up register (2026-08-30) rows 14–16; §F3 (one ref-walker per IR family) is the durable fix for (3). Relates to §A16 (the three sibling collectors #2667 already migrated onto `src/ir/util/walk.ts`).
+
+## M-T6.51 — node document finds ignore `ignoring` — the A11 fix has no node twin — `open` · **S** · P1
+
+Found 2026-08-30 (recorded as §D item 14 of the [08-24 review](../audits/generator-code-review-2026-08-24.md), re-verified on `main` @ `aa236ae`). Not claimed by #2668.
+
+`documentFindMethod` computes the capability predicate once per aggregate — `const cap = documentCapabilityBody(agg, "x")` (`src/generator/typescript/repository-document-builder.ts:325`) — and reuses it for every find, with no access to that find's `bypassAll` / `bypassCaps`. So on a `shape: document` aggregate a declared `find … ignoring softDeletable` **still filters the soft-deleted rows out**: wrong data, fail-closed, no diagnostic. The synthesized query-time-projection reads assembled in the same file inherit it (`:89-90`), so a `projection … ignoring <Cap>` over a document source is likewise not bypassed on node.
+
+Both siblings already do it right: elixir's `renderDocFindFn` threads `bypass: { bypassAll: f.bypassAll, bypassCaps: f.bypassCaps }` (`elixir/vanilla/document-emit.ts:641` — the §A11 fix landed in #2667), and python's document `findMethod` recomputes with the find's own bypass.
+
+**The fix:** recompute the predicate per find, exactly as `renderDocFindFn` does — pass the find's bypass set into `documentCapabilityBody` (or a bypass-aware sibling) and drop the per-aggregate cache. Check the synthesized projection reads take the projection's own bypass, not the aggregate's default.
+
+**Verification when it lands.** A generator test per shape (declared find with `ignoring <Cap>`, `ignoring *`, and a projection over a document source), asserting the bypassed predicate is *absent* — and mutation-proved, since the failure mode here is a silently-retained conjunct, which a presence-only assertion cannot see.
+
+Sources: [generator-code-review-2026-08-24](../audits/generator-code-review-2026-08-24.md) §D item 14 + §Follow-up register (2026-08-30) row 18. Sibling of §A11 (elixir, fixed #2667).
