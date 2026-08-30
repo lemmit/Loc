@@ -36,6 +36,15 @@ import {
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
 
+// Backend platforms that render the paged generic carrier / the `or`-union
+// operation return.  Both are EXPORTED so the diagnostic-firing census can
+// check the claim its UNREACHABLE_PIN makes: each set today contains every
+// backend-owning platform, so `unsupported` is always empty and the gate
+// cannot fire.  A sixth backend that has not ported either feature makes the
+// gate live again — and fails that pin, which is the point.
+export const SUPPORTED_PAGED_BACKENDS = new Set(["node", "dotnet", "elixir", "python", "java"]);
+export const SUPPORTED_RETURN_BACKENDS = new Set(["node", "dotnet", "python", "java", "elixir"]);
+
 // ---------------------------------------------------------------------------
 // Workspace uniqueness — multi-file (Stage A) makes it easy to declare
 // two `valueobject Money` in different files, two `context Sales`, or
@@ -327,7 +336,6 @@ export function validateGenericInstancesUnimplemented(
   // (the legacy `phoenix` / `phoenixLiveView` platform aliases canonicalize
   // to `elixir` per D-ELIXIR-PLATFORM).  All four backends now emit
   // generic carriers.
-  const SUPPORTED_PAGED_BACKENDS = new Set(["node", "dotnet", "elixir", "python", "java"]);
   const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_PAGED_BACKENDS.has(p));
   if (unsupported.length === 0) return;
 
@@ -602,7 +610,6 @@ export function validateOperationReturnsUnimplemented(
   // and elixir (plain Ecto/Phoenix) followed — every backend emits it for any
   // returning op.  No backend (legacy single-context path) → emittable, gate
   // stays quiet.
-  const SUPPORTED_RETURN_BACKENDS = new Set(["node", "dotnet", "python", "java", "elixir"]);
 
   const isCapable = (p: string): boolean => SUPPORTED_RETURN_BACKENDS.has(p);
 

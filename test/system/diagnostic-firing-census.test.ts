@@ -1,6 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { validate } from "../../src/api/index.js";
 import { codeOfMessageKey, DIAGNOSTIC_MESSAGES } from "../../src/diagnostics/messages.js";
+import {
+  SUPPORTED_PAGED_BACKENDS,
+  SUPPORTED_RETURN_BACKENDS,
+} from "../../src/ir/validate/checks/structural-checks.js";
+import {
+  EVENT_SOURCING_WORKFLOW_BACKENDS,
+  FILTER_BYPASS_FAMILIES,
+  PAGED_QH_SUPPORTED,
+  PROJECTION_AGG_SUPPORTED,
+  PROJECTION_GROUPBY_SUPPORTED,
+  PROJECTION_PROJ_SOURCE_SUPPORTED,
+  PROJECTION_QT_SUPPORTED,
+  PROJECTION_WF_SOURCE_SUPPORTED,
+  REMOTE_API_OP_UNSUPPORTED,
+} from "../../src/ir/validate/checks/system-checks.js";
+import { parseBuiltinPlatformRef } from "../../src/platform/metadata.js";
+import { FLUTTER_UNRENDERED_PRIMITIVES } from "../../src/util/flutter-deferred-primitives.js";
 import { COVERED_ELSEWHERE, UNCOVERED } from "./diagnostic-firing-census.data.js";
 
 // ---------------------------------------------------------------------------
@@ -440,6 +457,23 @@ system S {
           return this
         }
       }`),
+  // A FOURTH of the same shape, found by reading `validateFieldMask` for the
+  // `anyBackend` arm rather than trusting `FIELD_MASK_BACKENDS` (which does
+  // list all five families).  `mask unless` on a context nothing hosts is the
+  // drivable case, so this belongs here and not in the pins beside its
+  // set-shaped siblings — the distinction the pin block warns about, caught in
+  // the act.  The gate needs a `user {}` block for `currentUser` to resolve.
+  "loom.field-mask-unsupported": `
+system S {
+  user { id: string  role: string }
+  subdomain Sub { context C {
+    aggregate Order with crudish {
+      code: string
+      total: int mask unless currentUser.role == "admin"
+    }
+    repository Orders for Order { }
+  } }
+}`,
   // `Tab` / `Column` are `group: "sub"` primitives — the parent consumes them
   // inline, so anywhere else they degrade to a comment on all seven targets.
   "loom.sub-primitive-misplaced": `
@@ -771,7 +805,210 @@ const UNREACHABLE_PINS: Record<string, string> = {
     "on an empty `unsupported`.  Its own doc comment already calls the guard `latent`, kept as " +
     "the safety net for a future backend that lands before its `when` emitter; this pin records " +
     "that the net currently catches nothing.",
+
+  // --- the same latent-set shape, but CHECKED -------------------------------
+  // Each of the ten below is registered in `LATENT_GATES`, so the set it names
+  // is re-read on every run rather than trusted from this prose.  Each was
+  // read for an `anyBackend` second arm first — the arm that makes
+  // `loom.field-mask-unsupported` drivable and therefore a fixture, not a pin.
+  "loom.paged-query-handler-unsupported-backend":
+    "`PAGED_QH_SUPPORTED` covers every backend-owning platform, and " +
+    "`validatePagedQueryHandlerBackends` skips a deployable that is either not " +
+    "`platformOwnsBackend` or in that set.  Checked by `LATENT_GATES`.",
+  "loom.projection-whole-table-aggregation-unsupported":
+    "`PROJECTION_AGG_SUPPORTED` covers every backend-owning platform; the gate skips on " +
+    "`!platformOwnsBackend(d.platform) || SET.has(d.platform)`.  Checked by `LATENT_GATES`.",
+  "loom.projection-groupby-unsupported-backend":
+    "`PROJECTION_GROUPBY_SUPPORTED` covers every backend-owning platform, same skip shape as " +
+    "its whole-table sibling.  Checked by `LATENT_GATES`.",
+  "loom.projection-workflow-source-unsupported-backend":
+    "`PROJECTION_WF_SOURCE_SUPPORTED` covers every backend-owning platform, same skip shape.  " +
+    "Checked by `LATENT_GATES`.",
+  "loom.projection-source-unsupported-backend":
+    "`PROJECTION_PROJ_SOURCE_SUPPORTED` covers every backend-owning platform, same skip shape.  " +
+    "Checked by `LATENT_GATES`.",
+  "loom.filter-bypass-unsupported":
+    "`bypassSupported(dep)` is `FILTER_BYPASS_FAMILIES.has(family)` and that set covers every " +
+    "backend-owning platform; a frontend deployable `continue`s before reaching the check, so " +
+    "no deployable can reach the `!supported` push.  Checked by `LATENT_GATES`.",
+  "loom.event-sourced-workflow-unsupported":
+    "`EVENT_SOURCING_WORKFLOW_BACKENDS` covers every backend-owning platform and " +
+    "`validateEventSourcedWorkflowStorage` returns on an empty `unsupported`.  Unlike its " +
+    "event-sourced AGGREGATE sibling it has NO `anyBackend` arm — which is exactly why that " +
+    "sibling is driven by a fixture and this one is pinned.  Checked by `LATENT_GATES`.",
+  "loom.generic-carrier-unsupported":
+    "`SUPPORTED_PAGED_BACKENDS` (structural-checks.ts) covers every backend-owning platform and " +
+    "`validateGenericCarrierSupport` returns on an empty `unsupported`; its own comment records " +
+    "that a context served by no backend is emittable and stays quiet, so there is no second " +
+    "arm.  Checked by `LATENT_GATES`.",
+  "loom.operation-return-unsupported":
+    "`SUPPORTED_RETURN_BACKENDS` (structural-checks.ts) covers every backend-owning platform and " +
+    "the loop `continue`s on an empty `unsupported`; the no-backend case is documented as " +
+    "deliberately quiet.  A bare scalar return is not gated at all.  Checked by `LATENT_GATES`.",
+  "loom.remote-api-op-unsupported":
+    "`REMOTE_API_OP_UNSUPPORTED` is the EMPTY set and the gate fires only for its members " +
+    "(`if (!REMOTE_API_OP_UNSUPPORTED.has(dep.platform)) continue`), so every platform skips.  " +
+    "Checked by `LATENT_GATES`.",
+  "loom.flutter-primitive-unsupported":
+    "`FLUTTER_UNRENDERED_PRIMITIVES` is the EMPTY set — every page primitive has a Flutter " +
+    "renderer today — and the gate only rejects a primitive that is a member.  Its own source " +
+    "comment calls it a dormant safety net the gate re-arms from.  Checked by `LATENT_GATES`.",
+
+  // --- defensive backstops for shapes scope already forbids ------------------
+  "loom.java-workflow-instance-field-unsupported":
+    "Fires on an ENTITY-typed field in a workflow's `instanceWireShape`.  An entity is a " +
+    "containment part, and a part type never resolves in workflow scope (`ddd-scope.ts` " +
+    "restricts part types to the owning aggregate), so no source can put one there.  " +
+    "`validateJavaReadModelShapes` calls it a defensive backstop in its own comment.  Re-test " +
+    "by widening part-type scope, or by making `wireLeafKind` report `entity` for a shape a " +
+    "workflow CAN name.",
+  "loom.java-projection-field-unsupported":
+    "The projection twin of the workflow-instance backstop above: an ENTITY-typed field in a " +
+    "projection's `wireShape`.  Same preemption — a containment part type does not resolve in " +
+    "projection scope — and the same re-test.",
 };
+
+// ---------------------------------------------------------------------------
+// LATENT CAPABILITY GATES — pins whose reason is CHECKED, not just written.
+//
+// The pins above are prose: a reader has to re-derive the claim by reading the
+// validator.  That is the weak half of a pin, and it rots silently — the claim
+// "this set lists all five families" stops being true the moment a sixth
+// backend family lands, and nothing says so.
+//
+// These entries close that.  Each names the actual `Set` its gate consults, so
+// the pin's reason is re-evaluated on every run:
+//
+//   "covers-every-backend" — the gate computes `unsupported = hosting \ SET`
+//                            and returns/skips when that is empty.  Latent for
+//                            as long as SET ⊇ every backend-owning platform.
+//   "empty"                — the gate fires only for members of SET, and SET
+//                            has none.  Latent until something is added.
+//
+// The backend-owning roster is not hardcoded here either: it is derived from
+// `parseBuiltinPlatformRef`, the same predicate `platformOwnsBackend` uses, so
+// registering a sixth backend family fails these pins on the next run and
+// forces whoever added it to either port the feature or write a real fixture.
+//
+// WHAT THIS DOES NOT PROVE.  That a gate cannot fire *via this set* — not that
+// it cannot fire at all.  Several sibling gates carry a SECOND arm ("no
+// db-owning deployable hosts this context at all") which fires with the set
+// fully satisfied; `loom.field-mask-unsupported` is exactly that shape and is
+// therefore driven by a real fixture above, not pinned here.  Every entry below
+// was read for that arm first.  A pin added without that read is a TODO wearing
+// a pin's clothes — which is the failure mode the prose block above warns about
+// in its own words.
+// ---------------------------------------------------------------------------
+
+/** Platforms that own a backend — the roster `platformOwnsBackend` admits. */
+const BACKEND_OWNING = [
+  "node",
+  "dotnet",
+  "python",
+  "java",
+  "elixir",
+  "react",
+  "vue",
+  "svelte",
+  "angular",
+  "feliz",
+  "flutter",
+  "static",
+].filter((p) => parseBuiltinPlatformRef(p) !== null);
+
+const LATENT_GATES: ReadonlyArray<{
+  code: string;
+  setName: string;
+  set: ReadonlySet<string>;
+  kind: "covers-every-backend" | "empty";
+}> = [
+  // system-checks.ts — the `!platformOwnsBackend(d.platform) || SET.has(...)`
+  // skip shape.  No second arm: a context nothing hosts iterates zero
+  // deployables, so the push is unreachable rather than reachable-with-a-
+  // different-message.
+  // Already pinned in prose above; listed here so the claim is re-checked.
+  {
+    code: "loom.projection-query-time-unsupported",
+    setName: "PROJECTION_QT_SUPPORTED",
+    set: PROJECTION_QT_SUPPORTED,
+    kind: "covers-every-backend",
+  },
+  {
+    code: "loom.paged-query-handler-unsupported-backend",
+    setName: "PAGED_QH_SUPPORTED",
+    set: PAGED_QH_SUPPORTED,
+    kind: "covers-every-backend",
+  },
+  {
+    code: "loom.projection-whole-table-aggregation-unsupported",
+    setName: "PROJECTION_AGG_SUPPORTED",
+    set: PROJECTION_AGG_SUPPORTED,
+    kind: "covers-every-backend",
+  },
+  {
+    code: "loom.projection-groupby-unsupported-backend",
+    setName: "PROJECTION_GROUPBY_SUPPORTED",
+    set: PROJECTION_GROUPBY_SUPPORTED,
+    kind: "covers-every-backend",
+  },
+  {
+    code: "loom.projection-workflow-source-unsupported-backend",
+    setName: "PROJECTION_WF_SOURCE_SUPPORTED",
+    set: PROJECTION_WF_SOURCE_SUPPORTED,
+    kind: "covers-every-backend",
+  },
+  {
+    code: "loom.projection-source-unsupported-backend",
+    setName: "PROJECTION_PROJ_SOURCE_SUPPORTED",
+    set: PROJECTION_PROJ_SOURCE_SUPPORTED,
+    kind: "covers-every-backend",
+  },
+  // `bypassSupported(dep)` is `FILTER_BYPASS_FAMILIES.has(family)`, and a
+  // frontend deployable `continue`s before reaching it.
+  {
+    code: "loom.filter-bypass-unsupported",
+    setName: "FILTER_BYPASS_FAMILIES",
+    set: FILTER_BYPASS_FAMILIES,
+    kind: "covers-every-backend",
+  },
+  // `validateEventSourcedWorkflowStorage` returns on an empty `unsupported`
+  // and — unlike its event-sourced AGGREGATE sibling — carries no `anyBackend`
+  // arm, which is why that sibling is driven by a fixture and this is pinned.
+  {
+    code: "loom.event-sourced-workflow-unsupported",
+    setName: "EVENT_SOURCING_WORKFLOW_BACKENDS",
+    set: EVENT_SOURCING_WORKFLOW_BACKENDS,
+    kind: "covers-every-backend",
+  },
+  // structural-checks.ts — both return early on an empty `unsupported`, and
+  // both document the no-backend case as deliberately QUIET (the carrier / the
+  // union return is emittable when nothing hosts the context).
+  {
+    code: "loom.generic-carrier-unsupported",
+    setName: "SUPPORTED_PAGED_BACKENDS",
+    set: SUPPORTED_PAGED_BACKENDS,
+    kind: "covers-every-backend",
+  },
+  {
+    code: "loom.operation-return-unsupported",
+    setName: "SUPPORTED_RETURN_BACKENDS",
+    set: SUPPORTED_RETURN_BACKENDS,
+    kind: "covers-every-backend",
+  },
+  // The inverted polarity: these gates fire only for a MEMBER, and have none.
+  {
+    code: "loom.remote-api-op-unsupported",
+    setName: "REMOTE_API_OP_UNSUPPORTED",
+    set: REMOTE_API_OP_UNSUPPORTED as ReadonlySet<string>,
+    kind: "empty",
+  },
+  {
+    code: "loom.flutter-primitive-unsupported",
+    setName: "FLUTTER_UNRENDERED_PRIMITIVES",
+    set: FLUTTER_UNRENDERED_PRIMITIVES,
+    kind: "empty",
+  },
+];
 
 const catalogueCodes = (): string[] => [
   ...new Set(
@@ -791,10 +1028,60 @@ const catalogueCodes = (): string[] => [
  *  context` arm their pinned siblings lack.  That split is the point: "every
  *  backend supports it" is a reason to pin only when the gate has NO second
  *  arm, and reading for the second arm is what separates a real pin from a
- *  TODO. */
-const UNCOVERED_BASELINE = 31;
+ *  TODO.
+ *
+ *  31 -> 17: the backend-capability cluster.  Thirteen were latent — their
+ *  gate's capability set already lists every backend-owning platform (or, for
+ *  two, is empty) — and are pinned, but as CHECKED pins: `LATENT_GATES` reads
+ *  the real `Set` on every run, so a sixth backend family re-arms the gate and
+ *  fails the pin instead of leaving a stale claim in a comment.  The
+ *  fourteenth, `loom.field-mask-unsupported`, looked identical and is NOT
+ *  pinned: reading `validateFieldMask` for the `anyBackend` arm its siblings
+ *  have showed it fires on a context no backend hosts, so it got a fixture.
+ *  That one-in-fourteen split is the whole reason the pin block insists on
+ *  reading for the second arm. */
+const UNCOVERED_BASELINE = 17;
 
 describe("diagnostic firing census", () => {
+  // Keeps the LATENT_GATES pins honest.  Without this the pin is prose and its
+  // truth decays silently the moment a sixth backend family registers.
+  describe("the latent capability gates are still latent", () => {
+    it("every entry names a code that is actually pinned", () => {
+      const notPinned = LATENT_GATES.filter((g) => !(g.code in UNREACHABLE_PINS)).map(
+        (g) => g.code,
+      );
+      expect(
+        notPinned,
+        "a LATENT_GATES row whose code is not in UNREACHABLE_PINS checks a claim nobody made",
+      ).toEqual([]);
+    });
+
+    // The guard against a vacuous pass: an empty roster would make the
+    // subset assertion below trivially true for every gate.
+    it("the backend-owning roster is non-empty", () => {
+      expect(BACKEND_OWNING.length).toBeGreaterThan(0);
+      expect(BACKEND_OWNING).toContain("node");
+    });
+
+    it.each(LATENT_GATES.map((g) => [g.code, g] as const))("%s", (_code, gate) => {
+      if (gate.kind === "empty") {
+        expect(
+          [...gate.set],
+          `${gate.setName} is no longer empty, so ${gate.code} can fire again — it needs a real ` +
+            `FIRING_FIXTURES entry, and its UNREACHABLE_PINS entry must go`,
+        ).toEqual([]);
+        return;
+      }
+      const uncovered = BACKEND_OWNING.filter((p) => !gate.set.has(p));
+      expect(
+        uncovered,
+        `${gate.setName} no longer covers every backend-owning platform (missing ` +
+          `${uncovered.join(", ")}), so ${gate.code} is reachable again — either port the ` +
+          `feature on those platforms or replace its pin with a FIRING_FIXTURES entry`,
+      ).toEqual([]);
+    });
+  });
+
   describe("every catalogued code is in exactly one bucket", () => {
     const buckets = {
       FIRING_FIXTURES: Object.keys(FIRING_FIXTURES),

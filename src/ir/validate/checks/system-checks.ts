@@ -117,7 +117,7 @@ const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular", "feliz"
 // return-type render, so gate a paged queryHandler hosted on such a deployable
 // with an honest diagnostic until its emitter fans out — a reviewed gap rather
 // than a silent codegen crash.
-const PAGED_QH_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"]);
+export const PAGED_QH_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"]);
 
 // query-time projection (read-path-architecture.md rev.13): the always-current
 // read model (`projection X { from … where … join … select … }`, no folds) is
@@ -127,7 +127,7 @@ const PAGED_QH_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"
 // until its port lands — the same reviewed-gap discipline as the paged gate.
 // All five backends have ported it: node (PR-C), python (PR-D), elixir (PR-E),
 // java (PR-F), dotnet (PR-G).
-const PROJECTION_QT_SUPPORTED = new Set(["node", "python", "elixir", "java", "dotnet"]);
+export const PROJECTION_QT_SUPPORTED = new Set(["node", "python", "elixir", "java", "dotnet"]);
 
 // Whole-table aggregation in a query-time projection's `select`
 // (`select orders = count`, `select revenue = sum(o.total)`) — the SINGLETON
@@ -141,7 +141,7 @@ const PROJECTION_QT_SUPPORTED = new Set(["node", "python", "elixir", "java", "do
 // Every shipping backend emits the SQL push-down, so the set is currently
 // exhaustive.  It is kept — not deleted — because it is the seam a new backend
 // gates on until it ports, and the diagnostic below is its message.
-const PROJECTION_AGG_SUPPORTED = new Set(["node", "python", "dotnet", "java", "elixir"]);
+export const PROJECTION_AGG_SUPPORTED = new Set(["node", "python", "dotnet", "java", "elixir"]);
 
 export function validateWholeTableAggregationBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
@@ -177,7 +177,7 @@ export function validateWholeTableAggregationBackend(sys: SystemIR, diags: LoomD
 // per-row read (rows mapped in the app), so a new backend gates on it
 // separately until its port lands — the same reviewed-gap discipline as
 // `PROJECTION_AGG_SUPPORTED` above.  All five current backends emit it.
-const PROJECTION_GROUPBY_SUPPORTED = new Set(["node", "python", "dotnet", "java", "elixir"]);
+export const PROJECTION_GROUPBY_SUPPORTED = new Set(["node", "python", "dotnet", "java", "elixir"]);
 
 export function validateGroupedProjectionBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
@@ -446,7 +446,13 @@ export function validateQueryTimeProjectionBackend(sys: SystemIR, diags: LoomDia
 // `PROJECTION_WF_SOURCE_SUPPORTED` have ported it; others gate the read HONESTLY
 // (rather than emit a broken reference to a non-existent workflow repository)
 // until their port lands.  Mirrors `validateQueryTimeProjectionBackend`.
-const PROJECTION_WF_SOURCE_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"]);
+export const PROJECTION_WF_SOURCE_SUPPORTED = new Set([
+  "node",
+  "python",
+  "java",
+  "dotnet",
+  "elixir",
+]);
 
 export function validateWorkflowSourceProjectionBackend(
   sys: SystemIR,
@@ -482,7 +488,13 @@ export function validateWorkflowSourceProjectionBackend(
 // repository — a distinct per-backend emit path.  Backends in
 // `PROJECTION_PROJ_SOURCE_SUPPORTED` have ported it; others gate the read
 // HONESTLY until their port lands.  Mirrors `validateWorkflowSourceProjectionBackend`.
-const PROJECTION_PROJ_SOURCE_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"]);
+export const PROJECTION_PROJ_SOURCE_SUPPORTED = new Set([
+  "node",
+  "python",
+  "java",
+  "dotnet",
+  "elixir",
+]);
 
 export function validateProjectionSourceProjectionBackend(
   sys: SystemIR,
@@ -2601,7 +2613,7 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
  *  bypassing find omits the named conjunct statically, and a shared
  *  `run_<retrieval>` omits the union of its inline call-sites' bypasses) all
  *  honor it. */
-const FILTER_BYPASS_FAMILIES = new Set(["dotnet", "node", "elixir", "java", "python"]);
+export const FILTER_BYPASS_FAMILIES = new Set(["dotnet", "node", "elixir", "java", "python"]);
 
 /** Whether `dep`'s backend honors `ignoring` filter-bypass.  A backend must
  *  not pass this gate while still silently filtering — a family is supported
@@ -3621,7 +3633,7 @@ export function validateInheritanceStorage(
 //
 // Phoenix (plain Ecto/Phoenix) hosts pure ES via the per-aggregate stream +
 // fold-on-load data layer (D-VANILLA-ES-HOME), so elixir is ES-capable.
-const EVENT_SOURCING_BACKENDS = new Set(["node", "dotnet", "python", "java", "elixir"]);
+export const EVENT_SOURCING_BACKENDS = new Set(["node", "dotnet", "python", "java", "elixir"]);
 
 export function validateEventSourcedStorage(
   ctx: BoundedContextIR,
@@ -3661,7 +3673,13 @@ export function validateEventSourcedStorage(
 // mutable `<Wf>State` row + dispatcher, and drop the appliers entirely).  A
 // parsed-but-unemitted feature is a footgun, so it fails fast — exactly like the
 // event-sourced *aggregate* storage gate.
-const EVENT_SOURCING_WORKFLOW_BACKENDS = new Set(["node", "dotnet", "python", "java", "elixir"]);
+export const EVENT_SOURCING_WORKFLOW_BACKENDS = new Set([
+  "node",
+  "dotnet",
+  "python",
+  "java",
+  "elixir",
+]);
 export function validateEventSourcedWorkflowStorage(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
@@ -3832,7 +3850,7 @@ export function maskLaunderingEvents(ctx: BoundedContextIR): Map<string, string>
   return out;
 }
 
-const FIELD_MASK_BACKENDS = new Set<string>(["node", "dotnet", "python", "java", "elixir"]);
+export const FIELD_MASK_BACKENDS = new Set<string>(["node", "dotnet", "python", "java", "elixir"]);
 export function validateFieldMask(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],

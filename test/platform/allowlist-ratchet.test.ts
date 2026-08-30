@@ -194,11 +194,18 @@ const REGISTERED: Ratchet[] = [
   // literal already names every backend family, and they have no second arm),
   // three driven by real fixtures through the `no db-owning deployable hosts
   // this context` arm the pinned four lack.
+  //
+  // 31 -> 17: the rest of the backend-capability cluster.  Eleven more latent
+  // gates plus the two java entity-field backstops are pinned — this time as
+  // CHECKED pins (`LATENT_GATES` re-reads each gate's real capability `Set` on
+  // every run, so a sixth backend family fails the pin instead of leaving a
+  // stale claim in prose).  `loom.field-mask-unsupported` was the one in the
+  // cluster that turned out drivable, through the same `anyBackend` arm.
   {
     file: "test/system/diagnostic-firing-census.data.ts",
     name: "UNCOVERED",
     kind: "set",
-    max: 31,
+    max: 17,
   },
   // The MikroORM behavioural leg's skip register.  It was NOT registered here
   // until `projection-join` (a query-time projection the adapter refuses) had to
