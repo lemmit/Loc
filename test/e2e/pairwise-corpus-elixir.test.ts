@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { afterAll, beforeAll } from "vitest";
 import { describeCompileLeg } from "../pairwise/compile-leg.js";
 import { type HexMirror, startHexMirror } from "./support/hex-mirror.js";
-import { mixDepsGet } from "./support/mix-retry.js";
+import { mixDepsGet, mixLocalInstall } from "./support/mix-retry.js";
 
 // ---------------------------------------------------------------------------
 // M-T9.29 — the COMPILE oracle, elixir leg (plain Ecto/Phoenix, `mix compile
@@ -67,7 +67,7 @@ describeCompileLeg({
       execSync(
         `docker run --rm ${dockerArgs}-v ${proj}:/app -v ${HEX_CACHE}:/root/.hex ` +
           `-w /app -e MIX_ENV=prod ${IMAGE} ` +
-          `bash -c '${shellPrefix}mix local.hex --force && mix local.rebar --force && ` +
+          `bash -c '${shellPrefix}${mixLocalInstall()} && ` +
           `${mixDepsGet("--only prod")} && mix compile --warnings-as-errors'`,
         { stdio: "pipe", timeout: 600_000 },
       );

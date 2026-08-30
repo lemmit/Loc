@@ -6,7 +6,7 @@ import {
   type PgConn,
   runMigrationEvolutionGate,
 } from "./support/migration-evolution-harness.js";
-import { mixDepsGet } from "./support/mix-retry.js";
+import { mixDepsGet, mixLocalInstall } from "./support/mix-retry.js";
 
 // ---------------------------------------------------------------------------
 // Migration-evolution gate (M-T2.13) — vanilla Phoenix (plain Ecto/Phoenix)
@@ -42,7 +42,7 @@ const elixirDriver: BackendDriver = {
     },
   },
   install(appDir) {
-    execSync(`mix local.hex --force && mix local.rebar --force && ${mixDepsGet()}`, {
+    execSync(`${mixLocalInstall()} && ${mixDepsGet()}`, {
       cwd: appDir,
       stdio: "pipe",
       timeout: 600_000,

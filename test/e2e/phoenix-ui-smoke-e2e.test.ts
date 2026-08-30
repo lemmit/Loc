@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { mixDepsGet } from "./support/mix-retry.js";
+import { mixDepsGet, mixLocalInstall } from "./support/mix-retry.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix/LiveView UI smoke — runtime end-to-end guard.
@@ -134,7 +134,7 @@ describe.skipIf(!ENABLED)("Phoenix LiveView UI smoke — runtime e2e (LOOM_PHOEN
       // 3. Deps + DB schema (the migrate-on-boot release task also runs, but
       //    create the DB + migrate explicitly so a fresh sidecar has tables).
       const dbUrl = `ecto://postgres:postgres@127.0.0.1:${pgPort}/${externalPgDb}`;
-      execSync(`mix local.hex --force && mix local.rebar --force && ${mixDepsGet()}`, {
+      execSync(`${mixLocalInstall()} && ${mixDepsGet()}`, {
         cwd: projDir,
         stdio: "pipe",
         timeout: 600_000,
