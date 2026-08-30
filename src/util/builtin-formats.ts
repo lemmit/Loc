@@ -66,14 +66,11 @@ export const BUILTIN_PACK_LATEST = {
   // that want React 18.  This flip was paired with refreshing
   // `test/fixtures/baseline-output/` (acme.ddd uses the bareword).
   mantine: "v9",
-  // chakra promoted to v3 (Chakra UI 3 / React 19, stack v3) and mui
-  // to v7 (Material UI 7) once their pinned packs proved out via the
-  // tsc + vite-build shards and runtime-gate e2e specs.  Bareword
-  // `design: chakra` / `design: mui` now resolve to the new majors;
-  // the old packs stay loadable via the explicit pins
-  // `design: "chakra@v2"` / `design: "mui@v5"`.  acme.ddd (the
-  // baseline fixture source) has no `design:` slot so it tracks
-  // mantine — these flips don't touch test/fixtures/baseline-output/.
+  // Bareword `design: chakra` / `design: mui` resolve to the current majors
+  // (Chakra UI 3 / React 19 on stack v3; Material UI 7).  Earlier packs stay
+  // loadable via the explicit pins `design: "chakra@v2"` / `design: "mui@v5"`.
+  // acme.ddd (the baseline fixture source) has no `design:` slot, so it tracks
+  // mantine and these entries do not touch test/fixtures/baseline-output/.
   chakra: "v3",
   mui: "v7",
   // shadcn promoted to v4 (Tailwind 4 CSS-first / React 19, stack

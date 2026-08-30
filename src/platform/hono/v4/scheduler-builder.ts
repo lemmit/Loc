@@ -97,7 +97,7 @@ export function anyTimerUsesCron(timers: readonly TimerSourceIR[]): boolean {
   return timers.some((ts) => ts.cadence.kind === "cron");
 }
 
-/** The raw-SQL seam between the two node persistence adapters (M-T6.23 slice 3).
+/** The raw-SQL seam between the two node persistence adapters (M-T6.23).
  *
  *  `scheduler.ts` is the one emitted module whose database access is NOT domain
  *  persistence: a self-owned `loom_timer_runs` watermark table and a
@@ -342,7 +342,7 @@ export function renderTimerScheduler(
   timers: readonly TimerSourceIR[],
   eventByName: Map<string, EventIR>,
   /** `persistence: mikroorm` — run the watermark + advisory lock on the
-   *  EntityManager instead of Drizzle (M-T6.23 slice 3).  Default false keeps
+   *  EntityManager instead of Drizzle (M-T6.23).  Default false keeps
    *  the Drizzle output byte-identical. */
   usingMikro = false,
 ): string {

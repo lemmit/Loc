@@ -18,7 +18,7 @@
 //      `system-checks.ts` (`validateFlutterPrimitiveSupport`) REJECTS these on a
 //      `platform: flutter` target — `loom.flutter-primitive-unsupported`.  This
 //      is a STRICT SUBSET of set 1.  **It is currently EMPTY** — every page
-//      primitive now renders on Flutter (the controlled inputs Field /
+//      primitive renders on Flutter (the controlled inputs Field /
 //      MultilineField / PasswordField / NumberField / Toggle / SelectField and
 //      the standalone FileUpload via the pack `RENDERERS`; Tabs as a container;
 //      the form family + Modal via the walker seams).  The gate is retained as a
@@ -53,7 +53,7 @@
  *      trap: they give you *a* grid, not *the same* grid.
  *
  *      The contrast with Feliz is what makes this principled rather than
- *      arbitrary.  Feliz DID get a real DataGrid (slice 10e) precisely because
+ *      arbitrary.  Feliz DID get a real DataGrid precisely because
  *      Fable compiles F# to JavaScript, so it binds `@tanstack/table-core` — the
  *      genuine row model — through ordinary interop.  Flutter has no such route:
  *      `dart:js_interop` exists on Flutter WEB only, while the shipping target

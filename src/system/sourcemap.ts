@@ -46,7 +46,7 @@ interface WireRegion {
    *  (`src/generator/_trace/sourcemap.ts`) for the 1-based half-open
    *  convention.  Additive: `.loom/sourcemap.json` stays version 1, and a
    *  consumer reading only `target` is unaffected (span-tracking-emission.md,
-   *  M15 phase 7 slice 2). */
+   *  M15 phase 7). */
   targetCol?: [number, number];
 }
 

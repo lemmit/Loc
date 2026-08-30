@@ -317,9 +317,8 @@ export function newApp(): OpenAPIHono {
  *  turning a fault into a problem document, so every 404/422/500 took the worker
  *  down instead of answering.
  *
- *  The values are node's verbatim, so the wire is unchanged.  A status outside
- *  this set falls back to "Error" — exactly what the old read did for a code
- *  node's own table didn't carry. */
+ *  The values are node's verbatim.  A status outside this set falls back to
+ *  "Error", as node's own table does for a code it doesn't carry. */
 const REASON_PHRASES: Record<number, string> = {
   400: "Bad Request",
   401: "Unauthorized",
@@ -333,7 +332,7 @@ const REASON_PHRASES: Record<number, string> = {
 
 /** RFC 7807 body for a fault the FRAMEWORK raised — one no domain error class
  *  describes: an unmatched route, a body hono itself refused to parse, an
- *  aborted request.  Before this, such a fault left the wire two ways: never
+ *  aborted request.  Without it such a fault leaves the wire two ways: never
  *  reaching a router (hono's default \`text/plain\` 404), or reaching one and
  *  falling past every domain arm into the generic 500 — reporting a CLIENT
  *  fault as a server fault.  Both are a second error contract on a wire that
@@ -483,16 +482,16 @@ export function generateTypeScriptForContexts(
   // Union the hosted contexts into one synthetic context (ambient enums / VOs
   // deduped by name — see src/ir/util/merge-contexts.ts) so the shared domain /
   // schema modules reflect the FULL set.
-  // Broker bindings (channels.md; M-T4.4 slice 2): the redis-bound broadcast
+  // Broker bindings (channels.md; M-T4.4): the redis-bound broadcast
   // channelSources this deployable wires via `channels:`.  Computed up front
   // because they widen the merged vocabulary below — a consumer deployable
   // need not HOST the channel's owning context to react to its events; the
   // wired binding is what carries the routing knowledge across deployables.
   // Persistence-neutral since M-T6.23 slice 2: `http/channels.ts` (the driver,
   // producer tee and consumer loop) reads no `db` at all, and the outbox relay
-  // it publishes drained rows through now emits on both adapters (slice 1).
+  // it publishes drained rows through now emits on both adapters.
   const channelBindings = system ? brokerChannelBindings(system.deployable, system.sys) : [];
-  // Durable broker-bound events (M-T4.4 slice 3): carried by a wired
+  // Durable broker-bound events (M-T4.4): carried by a wired
   // `queue`/`work` (or future `log`) channel — the producer path for these
   // rides the outbox relay (design §5), never the inline tee.
   const durableBrokerEvents = new Set(
@@ -666,7 +665,7 @@ export function generateTypeScriptForContexts(
     );
   }
   // resourceName → sourceType, so a body that issues a resource-op can import
-  // its `<resource>$<verb>` helper from the right client module (Phase 4).
+  // its `<resource>$<verb>` helper from the right client module.
   // Hoisted out of the workflow block: the EXPLICIT-HANDLER leg needs the same
   // map.  A `commandHandler` / `queryHandler` body is one of the two sites the
   // IR gate (`loom.resource-op-outside-workflow`) declares LEGAL for a
@@ -772,7 +771,7 @@ export function generateTypeScriptForContexts(
       explicitRouters,
       fileUpload,
       // Durable broker-bound events must reach the outbox even from a
-      // deployable with no local reactor (M-T4.4 slice 3): the relay
+      // deployable with no local reactor (M-T4.4): the relay
       // publishes them on drain.
       forceOutbox: durableBrokerEvents.size > 0 && durableEventTypes(merged).size > 0,
     }),
@@ -825,7 +824,7 @@ export function generateTypeScriptForContexts(
     if (finalPath !== byLayerPath) moved.set(byLayerPath, finalPath);
     out.set(finalPath, artifact.content);
     sourcemap?.file(finalPath, artifact.content, origin, construct);
-    // Statement-granular sub-regions (source-map Milestone 3) — layered onto
+    // Statement-granular sub-regions (source-map) — layered onto
     // the whole-file region just recorded above, anchored by exact-text
     // search against this SAME final content, so they land at the right
     // absolute lines regardless of what the layout adapter did to the path.
@@ -875,8 +874,8 @@ export function generateTypeScriptForContexts(
       // no-sourcemap run pays no per-statement bookkeeping cost.
       const opFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
       const aggContent = renderAggregate(agg, ctx, emitProvenance, emitTrace, opFragments);
-      // Extern operations (extern-domain-extension-point.md §3a, decision (b)
-      // Phase 2): the aggregate is emitted as an abstract `<Agg>Base`
+      // Extern operations (extern-domain-extension-point.md §3a,
+      // decision (b)): the aggregate is emitted as an abstract `<Agg>Base`
       // (`domain/<agg>.base.ts`, regenerated) plus a scaffold-once concrete
       // `<Agg>` subclass (`domain/<agg>.ts`, user-owned) that implements each
       // op's extension-point hook.  Everyone still imports the concrete `<Agg>`.
@@ -956,7 +955,7 @@ export function generateTypeScriptForContexts(
         place("domain-test", agg.name, testsFile, agg.origin, construct);
       }
     }
-    // Value-object and domain-service unit tests (test-placement.md, Phase 2) —
+    // Value-object and domain-service unit tests (test-placement.md) —
     // colocated `domain/<subject>.test.ts` files, picked up by the same
     // behavioral-unit glob as aggregate tests.  Emitted only when the subject
     // declares a `test`, so a test-free project stays byte-identical.
@@ -968,7 +967,7 @@ export function generateTypeScriptForContexts(
       const svcTests = renderServiceTestsFile(svc, ctx);
       if (svcTests) place("domain-test", svc.name, svcTests, undefined, `${ctx.name}.${svc.name}`);
     }
-    // Context INTEGRATION test (test-placement.md, Phase 3a) — an in-process,
+    // Context INTEGRATION test (test-placement.md) — an in-process,
     // repository-backed cross-aggregate test file reading a PG_URL, no HTTP.
     const integrationTests = renderContextIntegrationTest(ctx);
     if (integrationTests) {
@@ -1079,7 +1078,7 @@ export function generateTypeScriptForContexts(
   if (hasMigrations || provenanceHistory.length > 0) {
     emitTypescriptMigrations(system?.migrations ?? [], out, provenanceHistory);
   }
-  // First-boot seed data (database-seeding.md, Phase 2) — emits `db/seed.ts`
+  // First-boot seed data (database-seeding.md) — emits `db/seed.ts`
   // when the served contexts declare any `seed` block.  Through the domain
   // `create` (D-SEED-PATH), ship-once per dataset (D-SEED-IDEMPOTENCY).  The
   // mikroorm variant threads the same dataset functions through the
@@ -1110,7 +1109,7 @@ export function generateTypeScriptForContexts(
   // (RFC §Phase 2.4 foundation).  Additive + gated: a deployable with
   // no such resources emits nothing, so existing models stay
   // byte-identical.  No call-sites — those land with the workflow-level
-  // consumption surface (Phase 4).
+  // consumption surface.
   const resourceDeps: Record<string, string> = {};
   const resourceImports: string[] = [];
   if (system) {
@@ -1142,7 +1141,7 @@ export function generateTypeScriptForContexts(
       Object.assign(resourceDeps, adapter.emitProjectDeps(resourceCtx));
       resourceImports.push(`import "./resources/${sourceType}";`);
     }
-    // Typed in-system api clients (M-T4.8 slice 3).  Emitted alongside the
+    // Typed in-system api clients (M-T4.8).  Emitted alongside the
     // sourceType-keyed adapters above, NOT through them: an api-bound resource
     // has no `storage`, so `storeType.get(r.storageName)` misses by design and
     // the loop above skips it.
@@ -1182,7 +1181,7 @@ export function generateTypeScriptForContexts(
     out.set("scheduler.ts", renderTimerScheduler(ownedTimers, eventByName, usingMikro));
   }
 
-  // Broker transport (channels.md; M-T4.4 slice 2).  A deployable that wires
+  // Broker transport (channels.md; M-T4.4).  A deployable that wires
   // a redis-bound broadcast channelSource via `channels:` gets the transport
   // module (ChannelTransport seam + ioredis driver + producer tee + consumer
   // loop); index.ts composes the tee into the dispatcher chain and starts the
@@ -1238,7 +1237,7 @@ export function generateTypeScriptForContexts(
       // slice 1 — the mikro adapter emits the same relay over the EntityManager.
       contexts.some((c) => c.eventSubscriptions.length > 0 && durableEventTypes(c).size > 0) ||
         // A durable-broker producer relays even without local subscribers:
-        // the drained rows publish to the broker (M-T4.4 slice 3).
+        // the drained rows publish to the broker (M-T4.4).
         (durableBrokerEvents.size > 0 && durableEventTypes(merged).size > 0),
       // Realtime tee: the relay's inner dispatcher rides through it so
       // relayed (durable) events reach the SSE wire too.  Persistence-neutral
@@ -1258,7 +1257,7 @@ export function generateTypeScriptForContexts(
       // Timer scheduler (scheduling.md, M-T4.1): boot wires startTimerScheduler
       // into the same in-process dispatcher the outbox relay uses.
       hasTimers,
-      // Broker transport (M-T4.4 slice 2): boot creates the redis transports,
+      // Broker transport (M-T4.4): boot creates the redis transports,
       // wraps the app dispatcher in the publish tee, and starts the consumer
       // loop feeding the in-process dispatcher.
       hasChannels,
@@ -1361,9 +1360,9 @@ function projectPackageJson(
     : { ...pins.dependencies };
   const devDependencies = {
     ...(mikro ? { ...devDepsNoDrizzle } : { ...pins.devDependencies }),
-    // pg-boss (the durable cron-timer store, scheduling.md Phase 2) ships its
+    // pg-boss (the durable cron-timer store, scheduling.md) ships its
     // own types, so no @types devDep is needed for the timer path.
-    // Types for the amqplib broker dep (M-T4.4 slice 3) — devDep so the
+    // Types for the amqplib broker dep (M-T4.4) — devDep so the
     // generated project's `tsc --noEmit` resolves `import amqp from "amqplib"`.
     ...(opts.withRabbitChannels ? { "@types/amqplib": "^0.10.5" } : {}),
   };
@@ -1410,18 +1409,18 @@ function projectPackageJson(
           // OIDC token verification (D-AUTH-OIDC) — jose owns JWKS fetch +
           // signature/claims validation in the generated verifier.
           ...(opts.withOidc ? { jose: "^5.9.0" } : {}),
-          // Durable timer scheduler (scheduling.md Phase 2) — pg-boss runs
+          // Durable timer scheduler (scheduling.md) — pg-boss runs
           // cron: timers as Postgres-backed durable jobs (single-fire + retry);
           // cron-parser computes the previous boundary for the coalesce-once
           // catch-up.  An `every:`-only deployable needs neither (in-process).
           ...(opts.withCronTimers ? { "pg-boss": "^12.26.1", "cron-parser": "^5.4.0" } : {}),
-          // Broker transport (M-T4.4 slice 2) — ioredis (MIT, design §6a)
+          // Broker transport (M-T4.4) — ioredis (MIT, design §6a)
           // speaks RESP to the compose-provisioned Valkey sidecar.
           ...(opts.withRedisChannels ? { ioredis: "^5.4.0" } : {}),
-          // Broker transport (M-T4.4 slice 3) — amqplib (MIT, design §6a)
+          // Broker transport (M-T4.4) — amqplib (MIT, design §6a)
           // speaks AMQP 0-9-1 to the compose-provisioned RabbitMQ sidecar.
           ...(opts.withRabbitChannels ? { amqplib: "^0.10.4" } : {}),
-          // Broker transport (M-T4.4 slice 4) — kafkajs (MIT, design §6a)
+          // Broker transport (M-T4.4) — kafkajs (MIT, design §6a)
           // only when a kafka-bound channelSource is wired.
           ...(opts.withKafkaChannels ? { kafkajs: "^2.2.4" } : {}),
           ...(opts.resourceDeps ?? {}),
@@ -1600,13 +1599,12 @@ function renderProjectIndexTs(
   // persistence paths.  The auth middleware calls it per request; here we bind
   // it to the db with a `SELECT data_key … WHERE id = <claim>`.
   //
-  // It used to be drizzle-only, on the reasoning that "mikroorm hierarchy falls
-  // back to the claim via the unregistered-resolver path".  That fallback is
-  // fail-SAFE only in the flat sense: `orgPath` degrades to the bare claim, so
-  // a child org reads as its own root and the whole subtree ladder collapses —
-  // which was consistent while the adapter refused hierarchical tenancy outright,
-  // and is a silent wrong answer now that it renders the subtree predicate.  The
-  // mikro branch reads the registry Row through the EntityManager instead
+  // NOT drizzle-only.  Letting mikroorm fall back to the claim via the
+  // unregistered-resolver path is fail-SAFE only in the flat sense: `orgPath`
+  // degrades to the bare claim, so a child org reads as its own root and the
+  // whole subtree ladder collapses — a silent wrong answer on an adapter that
+  // renders the subtree predicate.  The mikro branch reads the registry Row
+  // through the EntityManager instead
   // (`findOne(<Reg>Row, { id: claim })`), the same one-row lookup.
   // The drizzle schema-table var (`orgs`) and the MikroORM Row entity class
   // (`OrgRow`) for the same registry aggregate — one name in, both spellings
@@ -1627,10 +1625,9 @@ function renderProjectIndexTs(
       ? `${orgPathDoc}registerOrgPathResolver(async (claim) => {\n  const row = await db.fork().findOne(${orgPathRegistryRow}, { id: claim });\n  return row?.dataKey ?? null;\n});\n`
       : `${orgPathDoc}registerOrgPathResolver(async (claim) => {\n  const rows = await db\n    .select({ dataKey: schema.${orgPathRegistryTable}.dataKey })\n    .from(schema.${orgPathRegistryTable})\n    .where(eq(schema.${orgPathRegistryTable}.id, claim))\n    .limit(1);\n  return rows[0]?.dataKey ?? null;\n});\n`;
   // Event-dispatch / relay / scheduler imports — SHARED by both persistence
-  // branches (M-T6.23 slice 1: the mikro adapter now emits the outbox relay
-  // too, so this block can no longer live inside the drizzle arm).  Empty when
-  // nothing needs the in-process dispatcher, which keeps every project that
-  // wires none byte-identical.
+  // branches — the mikro adapter emits the outbox relay too, so this block
+  // cannot live inside the drizzle arm.  Empty when nothing needs the
+  // in-process dispatcher.
   const dispatcherImports = `${
     // The in-process dispatcher is shared by the outbox relay and the timer
     // scheduler (scheduling.md) — import it (and the realtime tee) whenever
@@ -1642,7 +1639,7 @@ function renderProjectIndexTs(
                 outboxRelay ? ", createOutboxDispatcher, startOutboxRelay" : ""
               } } from "./http/workflows";\n`
             : `import { NoopDomainEventDispatcher } from "./domain/events";\n${
-                // Pure producer of durable broker-bound events (M-T4.4 slice 3):
+                // Pure producer of durable broker-bound events (M-T4.4):
                 // the outbox captures on save; the relay publishes on drain.
                 outboxRelay
                   ? `import { createOutboxDispatcher, startOutboxRelay } from "./http/workflows";\n`

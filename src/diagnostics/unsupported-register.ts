@@ -3,34 +3,29 @@
 //
 // Every diagnostic code in `src/` carrying an `-unsupported` / `-backend`
 // suffix is WORK — either now (`gap`) or later (`scope`).  That invariant is
-// the point of this file, and slice 2 is what made it true.
+// the point of this file.
 //
 //   gap    — a target hasn't implemented it yet.  A TODO.  DRAINS TO ZERO.
 //   scope  — a declared v1 limit with a named successor.  Owned by a mission;
 //            becomes a `gap` when that mission starts, or is renamed out (as
 //            below) if the limit is re-justified as permanent.
 //
-// HOW IT GOT THIS WAY.  The suffix originally spanned 69 codes and LOOKED like
-// one family — "this target can't do this yet" — which is what made them
-// ossify: a permanent-shaped artifact (a stable `loom.*` identity, documented
-// beside real rules, matched in tests like real rules) standing in for a
-// temporary condition.  Classifying all 69 against their emission sites split
-// them FOUR ways, and 27 turned out not to be work at all:
+// WHAT DOES NOT BELONG HERE.  The suffix reads like one family — "this target
+// can't do this yet" — which is exactly how a permanent-shaped artifact (a
+// stable `loom.*` identity, documented beside real rules, matched in tests like
+// real rules) comes to stand in for a temporary condition.  A code that is NOT
+// work does not carry the suffix and does not get a row:
 //
-//   * 13 were semantically impossible or deliberately refused
+//   * semantically impossible or deliberately refused — `-invalid`
 //     (`projection-groupby-join`: a join is a by-id load AFTER the query, so it
 //     cannot compose with `group by`; `policy-write-global`, a documented
-//     deliberate never).  Those never drain.
-//   * 6 were not gaps in any sense — a closed vocabulary or a misuse error the
-//     suffix regex swept in (`auth-ui-on-backend` was a misuse error;
-//     `ui-handler-unsupported` a closed statement vocabulary).
+//     deliberate never);
+//   * parses and does nothing — `-no-effect`;
+//   * not in a closed vocabulary, or a plain misuse error — `-unknown`
+//     (`auth-ui-on-backend` is a misuse error; `ui-handler-unsupported` a closed
+//     statement vocabulary).
 //
-// Slice 2 RENAMED all 19 out of the suffix — `-invalid` (impossible/refused),
-// `-no-effect` (parses, does nothing), `-unknown` (not in a closed vocabulary)
-// — so they no longer read as parity debt and no longer land in this register.
-// That is why the two kinds below are the only two left: a third of the
-// apparent debt was permanent by design, and leaving it here would have stalled
-// any drain sprint at 19 rows nothing could close.
+// Leaving those here would stall any drain sprint on rows nothing can close.
 //
 // The lasting lesson: NO NAMING CONVENTION separates these.  The classification
 // is a reviewed field, not something derivable from the code name — which is
@@ -39,19 +34,15 @@
 // `verified` marks rows whose classification a human has confirmed against the
 // emission site.  Rows land `false` and are promoted on review.
 //
-// LATENT ROWS — why a `gap` can be a gate nothing can trip.  The 2026-08 prose
-// audit re-read every row against the set / emitter it names and found the
-// register describing a THREE-BACKEND world that had since converged: ~20 rows
-// claimed "missing on some backends" while their gate's Set (EVENT_SOURCING_
-// BACKENDS, PROJECTION_*_SUPPORTED, SUPPORTED_UNION_BACKENDS, FIELD_MASK_
-// BACKENDS, CHART_FRAMEWORKS, PROJECTION_READ_FRAMEWORKS, …) already named
-// every shipping target.  Those gates are deliberately KEPT — they are the seam
-// the NEXT backend/frontend gates on until it ports, the pattern CHART_FRAMEWORKS
-// documents at system-checks.ts (`the gate no longer fires for anything that
-// exists — it is the seam a NEW frontend gates on, not dead code`).  Their rows
-// stay too, because the code IS still emitted in `src/` and the still-emitted
-// invariant demands a row; what changed is the PROSE, which now says "ships on
-// all five; latent seam for a NEW target" instead of pretending to be a TODO.
+// LATENT ROWS — why a `gap` can be a gate nothing can trip.  Many gates' Sets
+// (EVENT_SOURCING_BACKENDS, PROJECTION_*_SUPPORTED, SUPPORTED_UNION_BACKENDS,
+// FIELD_MASK_BACKENDS, CHART_FRAMEWORKS, PROJECTION_READ_FRAMEWORKS, …) name
+// every shipping target, so the gate fires for nothing that exists.  Those
+// gates are deliberately KEPT — they are the seam the NEXT backend/frontend
+// gates on until it ports, the pattern CHART_FRAMEWORKS documents at
+// system-checks.ts.  Their rows stay too, because the code IS still emitted in
+// `src/` and that invariant demands a row; such a row's `what` says "ships on
+// all five; latent seam for a NEW target" rather than reading as a TODO.
 //
 // So the `gap` count is NOT a backlog depth: a latent row drains only when the
 // gate itself is deleted (a decision about the seam), while a live row drains
@@ -69,7 +60,7 @@
 
 /** How a `*-unsupported` code relates to work — now or later.  See the header.
  *  A code that is NEITHER (impossible, refused, or a plain rule) does not
- *  belong in the suffix at all; rename it, per slice 2. */
+ *  belong in the suffix at all — rename it, per the header. */
 export type UnsupportedKind = "gap" | "scope";
 
 export interface UnsupportedEntry {

@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // The DAP `stackTrace` remap core — the REVERSE twin of
 // `src/dap/set-breakpoints.ts` (docs/old/proposals/source-map-and-debugging.md
-// §6E, docs/old/plans/dap-node-debug.md phase 8, Milestone 25). Where
+// §6E, docs/old/plans/dap-node-debug.md phase 8). Where
 // `resolveSetBreakpoints` remaps a `.ddd` breakpoint FORWARD to the
 // generated location the target debugger should arm, `remapStackFrames`
 // remaps the debugged runtime's reported stack frames BACKWARD: each frame

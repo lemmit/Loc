@@ -326,7 +326,7 @@ function renderSecretTemplate(workloads: WorkloadModel[]): string {
   return lines.join("\n") + "\n";
 }
 
-/** Broker workload template (M-T4.4 slice 5b) — Deployment + Service (+
+/** Broker workload template (M-T4.4) — Deployment + Service (+
  *  file ConfigMap), enabled-gated per broker under `.Values.brokers`. */
 function renderBrokerTemplate(b: BrokerModel): string {
   const lines: string[] = [];

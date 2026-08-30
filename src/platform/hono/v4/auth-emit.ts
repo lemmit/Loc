@@ -328,7 +328,7 @@ async function resolveOrgPath(claim: string): Promise<string> {
   const rootOrgSeam = orgPathClaim
     ? `
 /** The caller's ROOT-org segment (\`currentUser.rootOrg\`): the first segment of
- *  the materialized \`orgPath\` (multi-tenancy Phase 2, P2.5). */
+ *  the materialized \`orgPath\` (multi-tenancy, P2.5). */
 function rootOrgOf(orgPath: string): string {
   const i = orgPath.indexOf(".");
   return i === -1 ? orgPath : orgPath.slice(0, i);
@@ -383,8 +383,8 @@ ${resolverSeam}${rootOrgSeam}
  *  list matches the .NET side — framework endpoints stay anonymous so
  *  smoke tests + the OpenAPI cross-check don't need tokens. */
 /** RFC 7807 for a request that carried no valid credentials — the same envelope
- *  every other error on this API sends, where this used to be
- *  \`{"error":"unauthorized"}\`, a shape appearing nowhere else.
+ *  every other error on this API sends, rather than
+ *  \`{"error":"unauthorized"}\` — a shape appearing nowhere else.
  *
  *  \`WWW-Authenticate\` is not decoration: RFC 9110 §15.5.2 makes it a MUST on
  *  every 401 ("at least one challenge applicable to the target resource"), and

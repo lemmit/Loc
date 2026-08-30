@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Typed in-system api client (M-T4.8 slice 3) — the Hono caller half.
+// Typed in-system api client (M-T4.8) — the Hono caller half.
 //
 // For a `resource { kind: api, use: <Api> }`, emit one typed function per
 // operation the CALLEE exposes, instead of the untyped `get(path): json` /

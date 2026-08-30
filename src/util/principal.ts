@@ -11,7 +11,7 @@ export const PRINCIPAL_TYPE_NAME = "User";
 
 /** The derived principal member `currentUser.orgPath` — the materialized
  *  DataKey path of the caller's tenant, resolved per-request and memoized on
- *  the request-scoped principal (multi-tenancy Phase 2, plan P2.1).  Unlike
+ *  the request-scoped principal (multi-tenancy, plan P2.1).  Unlike
  *  the `user { … }` claims it is NOT an IdP token field: the `claims:` map is
  *  a static token→field projection with no derived-value carrier, so `orgPath`
  *  is *computed* server-side from the tenancy claim we already hold.  It is
@@ -27,7 +27,7 @@ export const PRINCIPAL_TYPE_NAME = "User";
 export const PRINCIPAL_ORG_PATH = "orgPath";
 
 /** The derived principal member `currentUser.rootOrg` — the caller's ROOT-org
- *  segment (multi-tenancy Phase 2, plan P2.5): the first segment of
+ *  segment (multi-tenancy, plan P2.5): the first segment of
  *  {@link PRINCIPAL_ORG_PATH} (the substring before the first `.`, or the whole
  *  path when it has no `.`).  A pure string computation off the already-resolved
  *  `orgPath` — NO extra DB read; every backend derives it from its `orgPath`

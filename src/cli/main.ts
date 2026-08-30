@@ -176,31 +176,20 @@ function printDiagnostics(result: {
 /**
  * `ddd parse <file>` — "parse + validate, exit non-zero on errors".
  *
- * It used to be neither half of that, quietly:
+ * It runs exactly what `generate system` runs, minus the emission — because a
+ * pre-flight command that checks LESS than the command it pre-flights is worse
+ * than no check: it asserts a file is fine that `generate system` then rejects.
+ * Two ways to get that wrong, both avoided here:
  *
- *  - It ran the AST validator (phase ④) only.  `validateLoomModel` WAS called,
- *    and then filtered to `loom.index-suggestion` — so every phase-⑦ error it
- *    had just computed was thrown away and the command printed `OK`.  A model
- *    `generate system` rejects with six errors parsed clean.  That is worse
- *    than not checking: it is the checking tool ASSERTING the file is fine.
- *    (It also made the command useless as a measuring instrument — a
- *    106-file blast-radius scan run through it returned zero hits while being
- *    structurally incapable of finding any; `experience_gathered.md` §62.)
+ *  - reporting only the AST validator (phase ④), or filtering
+ *    `validateLoomModel`'s output down to `loom.index-suggestion`, discards the
+ *    phase-⑦ errors it just computed and prints `OK`;
+ *  - the SINGLE-document `parseFile` makes a multi-file entry report unresolved
+ *    cross-file references that `parseProject` — which walks the import graph,
+ *    as `generate system` does — resolves fine.
  *
- *  - It used the SINGLE-document `parseFile`, so a multi-file entry reported
- *    unresolved cross-file references that `generate system` — which walks the
- *    import graph via `parseProject` — resolves fine.
- *
- * Both are the same root cause: `parse` was checking less of the pipeline than
- * the command it is meant to pre-flight.  It now runs exactly what
- * `generate system` runs, minus the emission.
- *
- * Blast radius measured before the change, over every `.ddd` in the repo (117
- * files: examples, playground picker, journey, behavioral systems, corpus
- * fixtures × node): ZERO new IR failures.  The only files that fail are
- * fragments meant to be imported by an entry file, and they already failed on
- * AST errors.  The one real casualty was `web/src/examples/acme.ddd`, fixed in
- * the commit before this one.
+ * A `.ddd` fragment meant to be imported by an entry file still fails here, on
+ * its AST errors.
  */
 async function runParse(file: string) {
   // The project loader, matching `generate system` — a multi-file entry
@@ -469,8 +458,8 @@ async function runGenerate(
 
   // Loom-IR-level validation: catches `api.<unknown>.<verb>` and
   // `ui.<unknown>.<verb>` references in `test e2e` bodies before
-  // generators are called.  Everything caught here used to throw
-  // mid-generation with a slightly less helpful trace.
+  // generators are called, rather than throwing mid-generation with a less
+  // helpful trace.
   const loomDiags = validateLoomModel(loom);
   const loomErrors = loomDiags.filter((d) => d.severity === "error");
   if (loomErrors.length > 0) {

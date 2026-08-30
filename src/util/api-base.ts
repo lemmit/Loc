@@ -3,14 +3,13 @@
 // backend mounts its domain routes under, and every frontend / test / OpenAPI
 // `servers` block targets.
 //
-// Historically `/api` was used ONLY when a SPA was embedded into a backend
-// (the `hasEmbeddedSpa` fullstack mode) plus Elixir/Phoenix always. This
-// constant promotes `/api` to the universal default so the whole stack is
+// `/api` is the universal default — not conditional on an embedded SPA (the
+// `hasEmbeddedSpa` fullstack mode) or on the platform — so the whole stack is
 // uniform: domain routes live under `/api`, infra endpoints (`/health`,
 // `/ready`, the OpenAPI document) stay at the root, and a reverse proxy /
 // k8s ingress can split `/api → backend` from `/ → SPA` on one origin.
 //
-// Phase 1 keeps this a constant (prefix-only). A later phase turns it into a
+// It is a constant (prefix-only).  Making it a
 // per-system `basePath:` field (e.g. `/api/v1`) threaded from the IR — every
 // consumer already reads through this module, so versioning lands in one place.
 // ---------------------------------------------------------------------------

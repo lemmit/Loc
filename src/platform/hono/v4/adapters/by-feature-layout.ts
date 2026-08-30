@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // byFeature — a real LayoutAdapter for the hono (node) platform
-// (D-REALIZATION-AXES Phase 5b).  The sibling of `byLayer`: same artifacts,
+// (D-REALIZATION-AXES).  The sibling of `byLayer`: same artifacts,
 // different on-disk arrangement.  Where `byLayer` groups by RESPONSIBILITY
 // (`domain/<agg>.ts`, `db/repositories/<agg>-repository.ts`,
 // `http/<agg>.routes.ts`), `byFeature` colocates everything for ONE aggregate

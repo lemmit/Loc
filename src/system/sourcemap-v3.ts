@@ -55,7 +55,7 @@ interface ResolvedRegion {
   /** Straight passthrough of `SourceMapRegion.targetCol` (1-based,
    *  half-open) — converted to 0-based only where it's consumed below,
    *  same treatment `line`/`col` already get from `offsetToLineCol`'s
-   *  1-based output (span-tracking-emission.md, M15 phase 7 slice 2). */
+   *  1-based output (span-tracking-emission.md, M15 phase 7). */
   targetCol?: [number, number];
 }
 

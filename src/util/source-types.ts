@@ -72,7 +72,7 @@ export interface SourceTypeDescriptor {
    *  support multiple kinds; interfaces are declared per kind, not
    *  globally (RFC §3.5). */
   readonly supports: Partial<Record<InfraKind, KindSupport>>;
-  /** Allowed/required generic `config` keys (used from Phase 2). */
+  /** Allowed/required generic `config` keys (used from). */
   readonly configKeys?: readonly ConfigKeySchema[];
 }
 
@@ -108,8 +108,8 @@ const set = <T>(...xs: T[]): ReadonlySet<T> => new Set(xs);
 //   cache          → redis, inMemory
 //   eventLog       → postgres, mysql, sqlite, inMemory, kafka
 // elastic / meilisearch / clickhouse / bigquery parse + validate as
-// storage types but bind to no kind today (empty `supports`), matching
-// the old behaviour where no `KIND_STORAGE` row admitted them.
+// storage types but bind to no kind today (empty `supports`) — no
+// `KIND_STORAGE` row admits them.
 
 const RELATIONAL_DB: KindSupport = {
   capabilities: set("state", "snapshot", "replica", "crud", "query", "transactions"),
@@ -123,8 +123,8 @@ const RELATIONAL_EVENTLOG: KindSupport = {
 const REGISTRY = new Map<string, SourceTypeDescriptor>();
 
 /** Register (or override) a sourceType descriptor.  The boot-time
- *  registration seam for out-of-tree sourceType plugins (RFC §8,
- *  Phase 3) pushes through here. */
+ *  registration seam for out-of-tree sourceType plugins (RFC §8) pushes
+ *  through here. */
 export function registerSourceType(descriptor: SourceTypeDescriptor): void {
   REGISTRY.set(descriptor.name, descriptor);
 }
@@ -307,7 +307,7 @@ export function interfacesFor(
 // (sql for relational, amqp for queues), then SDK over raw REST for
 // backend consumers (e.g. S3 prefers `sdk` over `rest`).  A consuming
 // operation may override this once the workflow-level consumption
-// surface exists (Phase 4); until then this is the resolved default.
+// surface exists; until then this is the resolved default.
 const INTERFACE_PREFERENCE: readonly LoomInterface[] = [
   "sql",
   "amqp",

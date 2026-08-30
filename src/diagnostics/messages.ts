@@ -1760,11 +1760,10 @@ export const DIAGNOSTIC_MESSAGES = {
     `request-scoped principal to scope reads by. Add 'auth: required' (and a system ` +
     `'user {}' block), or remove the principal-referencing filter.`,
   // (`loom.context-filter-unsupported#unsupported-predicate` lived here — the
-  //  "this backend cannot emit that filter" refusal.  It was DELETED with its
-  //  last reachable case: every backend family now wires capability filters on
-  //  every saving shape, elixir + `shape: document` being the final cell.  A
+  //  "this backend cannot emit that filter" refusal.  There is no such message:
+  //  every backend family wires capability filters on every saving shape, and a
   //  message with no reachable call site is an orphan the catalogue gate
-  //  rejects, and worse, it documents a limitation that no longer exists.  A
+  //  rejects — one that documents a limitation the code does not have.  A
   //  future unwired (family, shape) pair adds its own, naming itself.)
   "loom.filter-bypass-unsupported": (p: {
     name: unknown;

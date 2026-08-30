@@ -158,8 +158,8 @@ export function schemaFromModule(
   // Value-object field list lookup (by VO name), so a value-object field
   // can be flattened into the parent table's columns — the standard DDD
   // destructure, matching the Drizzle / EF ORMs.  The migration builder
-  // otherwise only sees a `TypeIR` and used to collapse a VO to one `json`
-  // column, which the relational ORMs (flattened) then mismatched.
+  // otherwise only sees a `TypeIR`, and collapsing a VO to one `json` column
+  // mismatches the relational ORMs, which flatten it.
   const voLookup: VoLookup = new Map(
     module.contexts.flatMap((c) => c.valueObjects.map((v) => [v.name, v.fields] as const)),
   );
@@ -315,7 +315,7 @@ export function schemaFromModule(
   // typing, which creates nothing), so every audited command on the DEFAULT
   // backend failed at runtime with `relation "audit_records" does not exist`
   // while compiling clean and passing the emitted-string tests.  Deriving the
-  // shape once means the DDL and the writers can no longer disagree.
+  // shape once is what keeps the DDL and the writers in agreement.
   if (module.contexts.some((c) => contextHasAuditedTarget(c))) {
     tables.push(auditTableShape(module.name));
   }
@@ -390,12 +390,10 @@ function outboxTableShape(ownerModule: string): TableShape {
  *  the per-entity history read — and on `correlation_id` for tracing one
  *  command across aggregates. */
 function auditTableShape(ownerModule: string): TableShape {
-  // Derived from the SHARED descriptor (`util/audit-records-table.ts`) rather
-  // than transcribed here.  The comment above used to promise "the DDL and the
-  // writers can no longer disagree" — but only this DDL derived, and the
-  // per-backend writers each kept their own copy.  They drifted on `before` /
-  // `after` nullability and broke two behavioral legs; the descriptor is now
-  // the single source both sides read.
+  // Derived from the SHARED descriptor (`util/audit-records-table.ts`), NOT
+  // transcribed here.  Deriving only this DDL leaves each per-backend writer
+  // with its own copy — they drift on `before` / `after` nullability, and the
+  // descriptor is the single source both sides must read.
   return {
     name: AUDIT_RECORDS_TABLE,
     ownerModule,
@@ -1610,9 +1608,9 @@ export function buildMigrations(
   // every block already taken.  Precedence:
   //   1. the block recorded in the module's own snapshot — a module keeps its
   //      block for life, so its deltas always land in the same slice;
-  //   2. for a snapshot written before this field existed, the LEGACY
-  //      position-derived index, so already-generated projects keep the block
-  //      their initial migrations were emitted with;
+  //   2. for a snapshot that predates the field, the LEGACY position-derived
+  //      index, so already-generated projects keep the block their initial
+  //      migrations were emitted with;
   //   3. otherwise (a brand-new module) the next free block, above everything
   //      — which is what makes a module added later safe to insert anywhere in
   //      the source.
@@ -2625,10 +2623,9 @@ function primitiveColumnType(name: string): ColumnType {
       // `money` is a precise decimal — same column family as `decimal`, but
       // BOUNDED: the canonical `NUMERIC(19,4)` every other layer already
       // declares (`money-scale.ts`, the Drizzle/SQLAlchemy/MikroORM models).
-      // The DDL used to drop those bounds and create a bare `DECIMAL`, so the
-      // table and the ORM model that reads it disagreed, and the column kept
-      // whatever scale each backend happened to write — the storage half of
-      // #2549, and the reason node/python only looked correct there.
+      // A bare `DECIMAL` here drops those bounds, so the table and the ORM
+      // model reading it disagree and the column keeps whatever scale each
+      // backend happens to write.
       return { kind: "decimal", precision: MONEY_PRECISION, scale: MONEY_WIRE_SCALE };
     case "string":
       return { kind: "text" };

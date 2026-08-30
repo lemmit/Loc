@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
-// `ddd i18n <subcommand>` — the translator-workflow CLI (M-T1.11, i18n.md
-// Phase 3).  `git merge` for strings, backed by the pure three-way merge core
+// `ddd i18n <subcommand>` — the translator-workflow CLI (M-T1.11, i18n.md).
+// `git merge` for strings, backed by the pure three-way merge core
 // (`src/i18n/merge.ts`) and the phase ①–⑥ extraction (`./extract.ts`).
 //
 //   ddd i18n extract <file> [-o out]        write <out>/.loom/messages.en.json

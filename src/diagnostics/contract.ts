@@ -127,10 +127,10 @@ export interface OutlineSystem {
   /** `ui` blocks and the surfaces inside them (pages — area path included in
    *  the address — components, stores).
    *
-   *  This used to be a `pages: string[]` on OutlineContext, which was always
-   *  EMPTY: the grammar only allows `Page` as a `UiMember`/`AreaMember`, never
-   *  as a context member, so nothing ever filled it.  Uis are system-scoped,
-   *  and the outline now says so. */
+   *  Uis are system-scoped, so they live here rather than as a
+   *  `pages: string[]` on OutlineContext: the grammar allows `Page` only as a
+   *  `UiMember`/`AreaMember`, never as a context member, so a context-level
+   *  list would always be empty. */
   uis: OutlineDecl[];
   deployables: string[];
 }
