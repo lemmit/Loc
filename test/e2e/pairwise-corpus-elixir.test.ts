@@ -46,6 +46,23 @@ const IMAGE = "hexpm/elixir:1.18.4-erlang-27.3.4-debian-bookworm-20260610-slim";
  *  Mirrors the HEX_CACHE mount in `corpus-elixir-build.test.ts`. */
 const HEX_CACHE = path.join(os.tmpdir(), "loom-pairwise-elixir-hex");
 
+/**
+ * The hex ARCHIVE dir — and the reason this leg could not finish a full cover.
+ *
+ * `~/.hex` above is the PACKAGE cache (tarballs `deps.get` pulls).  The hex
+ * archive that `mix local.hex` installs lives somewhere else entirely,
+ * `~/.mix/archives`, and hex is NOT baked into the hexpm/elixir image.  With
+ * only `~/.hex` mounted, all 25 `docker run --rm` cases re-fetched the archive
+ * from builds.hex.pm — 25 downloads of the same file, which that host throttles.
+ *
+ * That is why a SINGLE case passes in 81s while the full cover loses 17 of 25:
+ * one fetch is fine, twenty-five are not.  Retrying (which this leg also does)
+ * cannot help — a bounded retry against a rate limit just spends its attempts.
+ * Mounting the archive dir makes it ONE fetch for the whole run, and
+ * `--if-missing` lets every later case skip the network entirely.
+ */
+const MIX_HOME = path.join(os.tmpdir(), "loom-pairwise-elixir-mix");
+
 let mirror: HexMirror | undefined;
 beforeAll(async () => {
   mirror = await startHexMirror();
@@ -61,13 +78,15 @@ describeCompileLeg({
   projectDir: (root) => path.join(root, "d"),
   compile(proj) {
     fs.mkdirSync(HEX_CACHE, { recursive: true });
+    fs.mkdirSync(MIX_HOME, { recursive: true });
     const dockerArgs = mirror ? `${mirror.dockerArgs.join(" ")} ` : "";
     const shellPrefix = mirror?.shellPrefix ?? "";
     try {
       execSync(
         `docker run --rm ${dockerArgs}-v ${proj}:/app -v ${HEX_CACHE}:/root/.hex ` +
+          `-v ${MIX_HOME}:/root/.mix ` +
           `-w /app -e MIX_ENV=prod ${IMAGE} ` +
-          `bash -c '${shellPrefix}${mixLocalInstall()} && ` +
+          `bash -c '${shellPrefix}${mixLocalInstall({ ifMissing: true })} && ` +
           `${mixDepsGet("--only prod")} && mix compile --warnings-as-errors'`,
         { stdio: "pipe", timeout: 600_000 },
       );

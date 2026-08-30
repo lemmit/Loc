@@ -126,9 +126,20 @@ export function mixDepsGet(args = ""): string {
  * Same quote-free, brace-grouped invariants as {@link mixDepsGet} — it is
  * spliced into the same single-quoted `docker run … bash -c '…'` lines.
  */
-export function mixLocalInstall(): string {
+export function mixLocalInstall(opts: { ifMissing?: boolean } = {}): string {
+  // `--if-missing` turns the install into a no-op once the archive is already
+  // in `~/.mix/archives`, so a caller that MOUNTS that dir across cases pays
+  // one network fetch for a whole run instead of one per container.  Callers
+  // that do not mount it must keep `--force`: a stale archive in a fresh
+  // container is not a thing `--if-missing` can detect.
+  //
+  // This matters more than the retry beside it.  builds.hex.pm throttles the
+  // same archive fetched 25 times in a row, and a bounded retry against a rate
+  // limit only spends its attempts — the pairwise elixir leg lost 17 of 25
+  // cases that way while a single case passed in 81s.
+  const flags = opts.ifMissing ? "--if-missing" : "--force";
   return [
-    retryChain("mix local.hex --force", MIX_DEPS_GET_BACKOFF_S, MIX_DEPS_GET_ATTEMPTS),
-    retryChain("mix local.rebar --force", MIX_DEPS_GET_BACKOFF_S, MIX_DEPS_GET_ATTEMPTS),
+    retryChain(`mix local.hex ${flags}`, MIX_DEPS_GET_BACKOFF_S, MIX_DEPS_GET_ATTEMPTS),
+    retryChain(`mix local.rebar ${flags}`, MIX_DEPS_GET_BACKOFF_S, MIX_DEPS_GET_ATTEMPTS),
   ].join(" && ");
 }
