@@ -130,6 +130,116 @@ describe("dotnet", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// dotnet — an EF aggregate over a `decimal` COLUMN narrows correctly (M-T6.47).
+//
+// #2631 fixed the dapper aggregate at the SQL seam and recorded that "EF
+// materialises `Average` as a real `double`".  That holds only for an INTEGRAL
+// column, which is what its fixture aggregated (`avg(o.lineCount)`).  The LINQ
+// result type follows the AGGREGATED COLUMN, not the declared row field:
+//
+//   count → int  |  avg over int → double  |  avg/sum/max/min over decimal → decimal
+//
+// so a `decimal` column comes back as `System.Decimal` and the `(double)` cast
+// that follows is the same not-correctly-rounded conversion (F10 — 9.20% of
+// doubles fail to round-trip through it, measured on .NET 10.0.11;
+// `99.52989333734583` returns as `…84`).  `csDecimalToWireDouble` replaces it with an exact
+// `decimal.ToString` → correctly-rounded `double.Parse` pair.
+//
+// BOTH arms are pinned — the one that must change and the one that must not —
+// which is #2631's own discipline: this is a classifier, and a classifier is
+// only proved by its false case.
+// ---------------------------------------------------------------------------
+const decimalColumnSystem = `system Shop {
+  subdomain Sales {
+    context Orders {
+      enum OrderStatus { Draft Confirmed }
+      aggregate Order {
+        code: string
+        total: money
+        lineCount: int
+        price: decimal
+        status: OrderStatus
+      }
+      repository Orders for Order { }
+      projection PriceStats {
+        avgPrice: decimal
+        maxPrice: decimal
+        avgLines: decimal
+        orders: int
+        revenue: money
+        from Order as o
+        select avgPrice = avg(o.price), maxPrice = max(o.price), avgLines = avg(o.lineCount), orders = count(), revenue = sum(o.total)
+      }
+      projection PriceByStatus {
+        status: OrderStatus
+        avgPrice: decimal
+        from Order as o
+        group by o.status
+        select status = o.status, avgPrice = avg(o.price)
+      }
+    }
+  }
+  api SalesApi from Sales
+  storage pg { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: pg }
+  deployable api { platform: dotnet contexts: [Orders] dataSources: [ordersState] serves: SalesApi port: 8080 }
+}`;
+
+/** The correctly-rounded narrowing, as `csDecimalToWireDouble` renders it. */
+const csParse = (expr: string) =>
+  `double.Parse(${expr}.ToString(System.Globalization.CultureInfo.InvariantCulture), ` +
+  `System.Globalization.CultureInfo.InvariantCulture)`;
+
+async function decimalColumnFile(suffix: string): Promise<string> {
+  const files = await generateSystemFiles(decimalColumnSystem);
+  for (const [path, content] of files) if (path.endsWith(suffix)) return content;
+  throw new Error(`no generated file ending with ${suffix}`);
+}
+
+describe("dotnet EF aggregates land on the CLR type their COLUMN produces", () => {
+  it("a `decimal`-column aggregate narrows through the correctly-rounded pair", async () => {
+    const handler = await decimalColumnFile("Projections/PriceStatsQpHandler.cs");
+    // `Average`/`Max` over a `decimal` property both return `decimal`.
+    expect(handler).toContain(csParse("(agg?.AvgPrice ?? 0)"));
+    expect(handler).toContain(csParse("(agg?.MaxPrice ?? 0)"));
+    // The defect, stated so a regression reads as itself.
+    expect(
+      handler,
+      "the CLR decimal->double cast is a double rounding — it disagrees with node",
+    ).not.toContain("(double)(agg?.AvgPrice ?? 0)");
+  });
+
+  it("an INT-column aggregate keeps the plain cast — no needless Parse", async () => {
+    // `Average` over an `int` really does materialise as a `double`, so the
+    // cast is an identity and converting again would be noise.  This is
+    // #2631's fixture shape, and it must not move.
+    const handler = await decimalColumnFile("Projections/PriceStatsQpHandler.cs");
+    expect(handler).toContain("(double)(agg?.AvgLines ?? 0)");
+    expect(handler).not.toContain("double.Parse((agg?.AvgLines");
+  });
+
+  it("money and `count` are untouched", async () => {
+    const handler = await decimalColumnFile("Projections/PriceStatsQpHandler.cs");
+    // money never becomes a JSON number — it is a fixed-scale string (RS-12).
+    expect(handler).toContain('(agg?.Revenue ?? 0m).ToString("F4", CultureInfo.InvariantCulture)');
+    expect(handler).not.toContain("double.Parse((agg?.Revenue");
+    expect(handler).toContain("agg?.Orders ?? 0");
+  });
+
+  it("the GROUPED arm takes the same decision — one classifier, both arms", async () => {
+    const grouped = await decimalColumnFile("Projections/PriceByStatusQpHandler.cs");
+    // The chain materialises FIRST (`ToListAsync`), then maps in memory — so
+    // the Parse is LINQ-to-Objects and never has to translate to SQL.
+    expect(grouped).toContain(".ToListAsync(cancellationToken);");
+    expect(grouped).toContain(csParse("(x?.AvgPrice ?? 0)"));
+    expect(grouped).not.toContain("(double)(x?.AvgPrice ?? 0)");
+    // The aggregation itself still happens in SQL — this changes the RESULT
+    // conversion, never where the accumulation runs.
+    expect(grouped).toContain("AvgPrice = g.Average(o => o.Price)");
+  });
+});
+
 describe("java", () => {
   it("aggregates in JPQL through the EntityManager", async () => {
     // Through the EntityManager rather than a Spring Data repository method: a

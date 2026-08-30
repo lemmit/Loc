@@ -278,3 +278,63 @@ describe("dapper aggregates land on the CLR type their wire field crosses as", (
     expect(grouped).not.toContain("::double precision");
   });
 });
+
+// ---------------------------------------------------------------------------
+// …and dapper does NOT then convert a second time (M-T6.47).
+//
+// The continuation of the fix above took the two hops #2631 could not reach —
+// the per-row response funnel and the EF aggregate arm over a `decimal` COLUMN
+// — and routes both through a correctly-rounded
+// `double.Parse(d.ToString(InvariantCulture), InvariantCulture)`.
+//
+// Dapper must stay exactly as #2631 left it.  After the SQL cast the row DTO
+// already declares `double?`, so the value arriving in C# IS a double: adding a
+// Parse would be converting an already-converted number — harmless
+// numerically, but it would put a `decimal`-shaped fix on a path that has no
+// decimal, and the next edit to either arm would have two conversions to keep
+// in step instead of one decision. Hence a `decimal` COLUMN is added here too,
+// and pinned to the SQL-side answer.
+// ---------------------------------------------------------------------------
+const DECIMAL_COLUMN_SOURCE = SOURCE("dapper")
+  .replace("        lineCount: int\n", "        lineCount: int\n        price: decimal\n")
+  .replace(
+    "      projection RevenueByDay {",
+    `      projection PriceStats {
+        avgPrice: decimal
+        from Order as o
+        select avgPrice = avg(o.price)
+      }
+
+      projection RevenueByDay {`,
+  );
+
+describe("dapper fixes the decimal narrowing in SQL, and only there", () => {
+  it("a `decimal`-COLUMN aggregate still casts in SQL and grows no `double.Parse`", async () => {
+    const files = generateSystems(await build(DECIMAL_COLUMN_SOURCE)).files;
+    const src = files.get("d/Application/Projections/PriceStatsQpHandler.cs")!;
+    // Postgres' own numeric→float8 is correctly rounded, so the value reaches
+    // C# already narrowed — nothing left to convert.
+    expect(src).toContain("avg(price)::double precision AS avg_price");
+    expect(src).toContain("public double? avg_price { get; set; }");
+    expect(src).toContain("(double)(agg?.avg_price ?? 0)");
+    expect(
+      src,
+      "the dapper value is already a double — a Parse here would convert twice",
+    ).not.toContain("double.Parse");
+  });
+
+  it("the EF twin of the same projection DOES parse — one decision, two seams", async () => {
+    // The false case of the classifier, on the identical `.ddd`: EF has no SQL
+    // to cast in, so it narrows in C#.  Both arms end up shipping the nearest
+    // double to the stored value; only the seam differs.
+    const files = generateSystems(
+      await build(DECIMAL_COLUMN_SOURCE.replace("dapper", "efcore")),
+    ).files;
+    const src = files.get("d/Application/Projections/PriceStatsQpHandler.cs")!;
+    expect(src).toContain(
+      "double.Parse((agg?.AvgPrice ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture), " +
+        "System.Globalization.CultureInfo.InvariantCulture)",
+    );
+    expect(src).not.toContain("::double precision");
+  });
+});
