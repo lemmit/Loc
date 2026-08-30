@@ -17,14 +17,14 @@
 // … }` crashed codegen on node, java and python; .NET's EF `HasQueryFilter`
 // intercepts it, and Elixir has no `document` shape at all).
 //
-// The fix is not a fourth per-backend translator.  Both sentinel decisions are
+// The fix is not another per-backend translator.  Both sentinel decisions are
 // expressible as ORDINARY `ExprIR` over the rehydrated row, and the row carries
 // everything they need: `dataKey` and `tenantId` are `tenantOwned` fields, so on
 // a document aggregate they live INSIDE the blob and are on the instance.  So
-// this module lowers the sentinel to plain IR ONCE, and the three in-app render
+// this module lowers the sentinel to plain IR ONCE, and the four in-app render
 // sites feed the result to their existing expression renderer — which already
 // handles every node used here (`==`/`!=` against a null literal, `&&`/`||`,
-// string `+`, and the `string.startsWith` intrinsic) on all three backends.
+// string `+`, and the `string.startsWith` intrinsic) on all four backends.
 //
 // Only the IN-APP (document) path desugars.  The relational and embedded paths
 // keep their native column translators: a SQL `where` is strictly better than
