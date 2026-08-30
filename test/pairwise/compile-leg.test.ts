@@ -29,6 +29,10 @@ const INFRA = [
   ],
   ["dns failure", "curl: (6) Could not resolve host: repo.maven.apache.org"],
   ["disk exhausted", "write /src/build/x.o: no space left on device"],
+  [
+    "mix printing bare :timeout while resolving deps (slipped through once)",
+    ":timeout\n:timeout\n:timeout\nResolving Hex dependencies...\n:timeout\n:timeout\n",
+  ],
 ] as const;
 
 const REAL_FINDINGS = [

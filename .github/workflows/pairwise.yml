@@ -160,14 +160,23 @@ jobs:
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'run-pairwise'))
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 150min, not 60: the elixir cell MEASURED 78min for its full cover on an
+    # uncontended sandbox with a warm hex archive, and a CI runner starts cold.
+    # The first budget here was 60min, sized from a single-case extrapolation
+    # (81s x 25) that was wrong by more than 2x — every case rebuilds the whole
+    # dependency tree from source, because `deps/` and `_build/` are NOT shared
+    # across cases the way the node leg shares `node_modules`.  Sharing them
+    # (hash `mix.exs`, mount both) is the obvious follow-up and would cut this
+    # cell by most of its runtime; until then the budget has to match reality.
+    # The other four cells finish in single-digit minutes and are unaffected.
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Measured wall-clocks on a contended sandbox (warm caches), for
-          # sizing rather than promise: node ~2.8min, python ~3min,
-          # dotnet ~4.5min, java ~4.4min.
+          # MEASURED wall-clocks, not estimates: node ~2.8min, python ~3min,
+          # dotnet ~4.5min, java ~4.4min (all warm, contended sandbox);
+          # elixir 78min uncontended with a warm hex archive.
           - backend: node
             script: test:pairwise-corpus-tsc
           - backend: python

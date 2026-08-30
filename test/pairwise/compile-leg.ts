@@ -115,6 +115,15 @@ const INFRA_SIGNATURES: readonly RegExp[] = [
   /Could not GET .*repo\.maven|Read timed out/i, // Gradle
   // No space left mid-build — the sandbox's fixed writable allowance.
   /no space left on device/i,
+  // Mix printing a bare `:timeout` atom, usually many times, while resolving
+  // hex deps.  Added because it SLIPPED THROUGH: the elixir cover's clean run
+  // still reported one "compile failure" whose entire body was `:timeout`
+  // repeated around `Resolving Hex dependencies...`, with no compiler
+  // diagnostic anywhere.  A signature list only catches what it has seen, so an
+  // unmatched infra failure lands as a FAKE FINDING — the exact direction this
+  // classifier is least able to notice about itself.
+  /^\s*:timeout\s*$/m,
+  /Resolving Hex dependencies\.\.\.[\s\S]*:timeout/,
 ];
 
 /** The infra signature `out` matches, if any — exported for its own gate

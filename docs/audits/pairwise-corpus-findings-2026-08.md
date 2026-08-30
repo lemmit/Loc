@@ -355,7 +355,7 @@ each backend's real toolchain. The first run:
 | **python** | 25 | **7 compile failures** → F6, F7, F8 · 0 rejected · 0 crashed |
 | **dotnet** | 25 | **1 compile failure** → F9 · 4 rejected (named `loom.*`) · 0 crashed |
 | java | 25 | clean (22 compiled, 3 rejected) — two independent full runs |
-| elixir | 25 | **no locally-observed verdict** (see below) |
+| elixir | 25 | **clean** — 0 compile failures (verdict obtained after the hex-archive fix, below) |
 
 ### Two of these are findings this register already called CLOSED
 
@@ -396,15 +396,49 @@ python fails.
 Java's clean result is also what proves the leg is honest: a leg that quietly dodged the hard
 crossings would look exactly like a green one.
 
-### Elixir — UNVERIFIED, deliberately recorded as such
+### Elixir — CLEAN, after four attempts and one real harness bug
 
-Three local attempts produced no trustworthy verdict: the first lost 17 of 25 cases to
-byte-identical `mix local.hex` hex.pm timeouts under concurrent load (fixed since — the Hex
-INSTALL now retries, and the census in `mix-retry.test.ts` keeps it that way), the second was
-killed by a reaped `dockerd`, the third was still running when this was written. Four cases
-compiled clean and four were legitimately rejected (`loom.vanilla-document-unsupported`,
-`loom.stamp-on-event-sourced-invalid` ×2, `loom.event-sourced-command-mutation`); the rest have
-no verdict. **A green nobody watched is not a green**, so no elixir row is claimed here.
+The verdict took four runs, and the first three were the harness's fault, not elixir's:
+
+| Run | Result | Cause |
+|---|---|---|
+| 1 | 17 of 25 "failed" | hex.pm timeouts under concurrent load from sibling agents |
+| 2 | all 21 remaining "failed" | a reaped `dockerd` |
+| 3 | 17 of 25, 65min | same hex timeouts, uncontended — so NOT contention |
+| **4** | **25 pass / 1 infra, 78min** | after the fix below |
+
+Run 3 is the one that mattered: uncontended and still failing, which killed the contention
+theory and forced a real diagnosis. **The leg mounted `~/.hex` — the PACKAGE cache — but not
+`~/.mix/archives`, where `mix local.hex` installs the hex archive, and hex is not baked into
+the `hexpm/elixir` image.** So all 25 `docker run --rm` cases re-downloaded the same archive
+from builds.hex.pm, which throttles it. One fetch is fine; twenty-five are not — which is
+exactly why a SINGLE case passed in 81s throughout. Mounting the archive dir and installing
+`--if-missing` makes it one fetch per run; harness faults went 34 → 0.
+
+Note what this says about the retry added alongside: **a bounded retry cannot beat a rate
+limit**, and the logs show it spending `attempt 2 of 3` and `attempt 3 of 3` before failing
+anyway. The retry is still correct for hex.pm's transient 500s (#2661's case) but it was
+treating a symptom here.
+
+**Result: zero real compile findings on elixir** — no `CompileError`, no `undefined function`,
+no diagnostic of any kind anywhere in the run. The single reported "compile failure" was an
+unclassified infra timeout (a bare `:timeout` atom repeated around `Resolving Hex
+dependencies...`), which **slipped past the classifier** and has been added to its signature
+list with its own test case. That miss is worth recording: a signature list only catches what
+it has already seen, so an unmatched infra failure lands as a FAKE FINDING — the direction this
+classifier is least able to notice about itself.
+
+Two corrections to the record, both mine: the earlier claim that "hex.pm is unreachable from
+this sandbox" was **wrong** (the host gets HTTP 200 from both hex hosts and the mirror works —
+every `repo.hex.pm` fetch returned 200 through it), and this section previously read
+"UNVERIFIED". A HARNESS FAULT is a prompt to investigate, not a verdict to accept: "the
+registry is down" and "your own daemon died" report identically and share no remedy.
+
+**Cost, and what it implies for CI:** 78min for the full cover, uncontended, with a warm hex
+archive — against a 60min cell budget sized from a single-case extrapolation that was wrong by
+more than 2×. The budget is now 150min. The real fix is that `deps/` and `_build/` are not
+shared across cases the way the node leg shares `node_modules`, so every case rebuilds the
+whole dependency tree from source; hashing `mix.exs` and mounting both is the named follow-up.
 
 Both of those failures also exposed a flaw in the harness itself: an infra failure was being
 reported as a compile finding, which both manufactures fake findings and — on a waived case —
