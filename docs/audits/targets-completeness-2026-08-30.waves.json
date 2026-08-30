@@ -1,0 +1,1270 @@
+{
+ "packets": [
+  {
+   "name": "dotnet-adapters",
+   "fileTrees": [
+    "src/generator/dotnet/**"
+   ],
+   "rows": [
+    {
+     "id": "F2-CB-C2-tph-filter-dropped-dotnet",
+     "size": "S",
+     "confidence": "proven",
+     "P": 0,
+     "needsValidatorSlot": false,
+     "title": ".NET silently drops every static capability `filter` on an aggregate that participates in an inheritance hierarchy"
+    },
+    {
+     "id": "F2-ADP-1",
+     "size": "M",
+     "confidence": "proven",
+     "P": 0,
+     "needsValidatorSlot": false,
+     "title": "`ignoring *` drops the `policy { deny }` always-false sentinel on .NET (both adapters) \u2014 read-denied rows are served"
+    },
+    {
+     "id": "F2-ADP-3",
+     "size": "M",
+     "confidence": "proven",
+     "P": 0,
+     "needsValidatorSlot": true,
+     "title": "dapper and efcore deployables over the SAME context read different physical tables (public.<t> vs <context>.<t>)"
+    },
+    {
+     "id": "F2-ADP-2",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "`persistence: dapper` raw seed inserts into a schema its own DDL never creates \u2014 boot-time 3F000/42P01, reproduced on the shipped corpus fixture"
+    },
+    {
+     "id": "F2-ADP-4",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "`writeScopeFilter` on an event-sourced aggregate emits a .NET repository that does not implement the port member it declares (CS0535), on BOTH adapters"
+    },
+    {
+     "id": "F2-CB-C7-domainservice-in-requires-guard",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "A `domainService` call inside a `requires` authorization guard passes validation and emits an unresolvable reference on four of five backends"
+    },
+    {
+     "id": "F2-ADP-7",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": true,
+     "title": "A `.ddd` field named after a TARGET-LANGUAGE keyword emits uncompilable C# and Java \u2014 the host-identifier twin the M-T6.42/M-T6.43 quoting fixes left open"
+    },
+    {
+     "id": "G2644-M-T6.48-numeric-ingress",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "#2644 F12 / M-T6.48 \u2014 malformed numeric input answers 500, not 4xx, on four backends"
+    },
+    {
+     "id": "M-T3.9-dotnet-audit-masked-snapshot",
+     "size": "S",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": ".NET records audit before/after snapshots through the MASKED serializer \u2014 the stored trail depends on who performed the write"
+    },
+    {
+     "id": "dapper-no-schema-evolution",
+     "size": "L",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": true,
+     "title": "`persistence: dapper` has no ALTER path at all \u2014 every post-first-boot model change is silently unapplied (migrations-on-adapters slice 2)"
+    },
+    {
+     "id": "F2-ADP-9",
+     "size": "S",
+     "confidence": "suspected",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "dapper binds a Dapper parameter the bypassed SQL no longer references"
+    },
+    {
+     "id": "G2667-D3-projection-join-unguarded-index",
+     "size": "S",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "Debt: query-time projection `join` indexes the joined dictionary unguarded \u2014 500 from ordinary data"
+    },
+    {
+     "id": "G2667-D4-dotnet-explicit-route-id-coercion",
+     "size": "S",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "Debt: .NET explicit-route id coercion contradicts the id wire mapping"
+    },
+    {
+     "id": "F2-EXPR-7",
+     "size": "M",
+     "confidence": "likely",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "`.first` on an empty collection has no cross-backend contract \u2014 3 backends throw, node and elixir return an undefined/nil typed as non-optional"
+    },
+    {
+     "id": "F2-W-14",
+     "size": "M",
+     "confidence": "suspected",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "dotnet likely publishes an EMPTY schema for a union-returning operation's 200 body (no `UseOneOfForPolymorphism`)"
+    },
+    {
+     "id": "M-T5.7-inheritance-tail",
+     "size": "M",
+     "confidence": "likely",
+     "P": 3,
+     "needsValidatorSlot": true,
+     "title": "Inheritance tail \u2014 all three remaining items are honest register rows"
+    }
+   ],
+   "needsValidatorSlot": true,
+   "estTotalSize": 35,
+   "notes": "Dapper/EF split dominates: ADP-1..9 are one adapter-parity sweep. ADP-2/ADP-3 are the same schema-qualification decision \u2014 fix once, both fall. Compile the generated .NET in docker per the loom-test-suites recipe before claiming green."
+  },
+  {
+   "name": "node-ts",
+   "fileTrees": [
+    "src/platform/hono/**",
+    "src/generator/typescript/**"
+   ],
+   "rows": [
+    {
+     "id": "F2-CB-C3-tph-filter-node-wrong-table",
+     "size": "S",
+     "confidence": "proven",
+     "P": 0,
+     "needsValidatorSlot": false,
+     "title": "node renders an aggregate's capability filter against `schema.<aggregatePlural>` \u2014 a table object that does not exist under TPH"
+    },
+    {
+     "id": "F2-ADP-5",
+     "size": "M",
+     "confidence": "proven",
+     "P": 0,
+     "needsValidatorSlot": false,
+     "title": "drizzle \u2014 the DEFAULT node adapter \u2014 enforces `writeScopeFilter` only on the relational shape; mikroorm (the adapter that got the fix) enforces all four"
+    },
+    {
+     "id": "F2-CB-C4-tph-filter-node-base-field-dropped",
+     "size": "M",
+     "confidence": "proven",
+     "P": 0,
+     "needsValidatorSlot": false,
+     "title": "node silently omits a capability filter whose predicate reads a field declared on the abstract base"
+    },
+    {
+     "id": "F2-ADP-6",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "MikroORM `raw()` fragments splice BARE column identifiers \u2014 a reserved-word column breaks every queryable intrinsic (`startsWith`, `trim`, `round`, \u2026)"
+    },
+    {
+     "id": "F2-CB-C8-domainservice-op-body-node-import",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "node's aggregate class calls a domainService without importing it (op-body site)"
+    },
+    {
+     "id": "F2-EXPR-4",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "node: `distinct` / `contains` over a value-object collection uses reference identity \u2014 silent no-op dedupe and always-false membership"
+    },
+    {
+     "id": "F2-W-05",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "node is the only backend that emits `.000Z` on every `datetime` \u2014 RS-4's canonical form and the .NET converter's own comment are both wrong about it"
+    },
+    {
+     "id": "G2667-C2-money-array-no-roundtrip",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "08-17 register #2: money[] fields don't round-trip on node (drizzle string[] never hydrates to Decimal[])"
+    },
+    {
+     "id": "F2-CB-C1-paged-nonrelational",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": true,
+     "title": "`find \u2026 paged` on a non-relational aggregate (eventLog / document / embedded) emits a route built for the paged contract against a repository built for the unpaged one"
+    },
+    {
+     "id": "F2-XB-4",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": true,
+     "title": "Every non-assignment statement in a folded-projection `on(e)` body is silently dropped on all five backends \u2014 and a `let` its own assignment references emits an undefined identifier"
+    },
+    {
+     "id": "timer-tz-overlap-inert",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": true,
+     "title": "`timerSource` `in: \"<tz>\"` and `overlap: allow` parse, lower, and are read by zero emitters \u2014 no diagnostic (M-T4.1)"
+    },
+    {
+     "id": "F2-CB-C12-tph-polymorphic-base-reader-unfiltered",
+     "size": "S",
+     "confidence": "suspected",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "The emitted TPH polymorphic base reader queries the shared table with no capability predicate"
+    },
+    {
+     "id": "G2646-open-projection-on-event-no-channel",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "#2646 documented, NOT fixed: `projection \u2026 on(Event)` with no `channel` folds on node only; the other four silently never subscribe"
+    },
+    {
+     "id": "G2667-C4-mikroorm-save-no-transaction",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "08-17 register #4: mikroorm save path opens no transaction (document/embedded/ES TS adapters likewise)"
+    },
+    {
+     "id": "M-T5.14-reading-service-readport-not-threaded",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": true,
+     "title": "A `reading` domain service called from a command/query handler emits a port-less call \u2014 the generated module does not compile"
+    },
+    {
+     "id": "static-subpath-405-node-only",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "The F8 static-sub-path 405 guard landed on the Hono emitter alone \u2014 a wrong verb on a static sub-path still answers the sibling `/{id}` route's 422 on dotnet / java / python / elixir"
+    },
+    {
+     "id": "M-T1.11-domain-floor-message-code",
+     "size": "L",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "M-T1.11 item (c) \u2014 `DomainError` carries no `code` on any of the five backends, so a rule enforced only at the domain floor is unlocalizable"
+    },
+    {
+     "id": "G2646-open-node-mounts-ui-false",
+     "size": "M",
+     "confidence": "likely",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "#2646 documented, NOT fixed: node is the only backend with mountsUi: false"
+    }
+   ],
+   "needsValidatorSlot": true,
+   "estTotalSize": 43,
+   "notes": "hono v4 paths dominate the citations, but `platform: node` defaults to v5 \u2014 re-verify each row on src/platform/hono/v5/ before editing v4 only."
+  },
+  {
+   "name": "elixir",
+   "fileTrees": [
+    "src/generator/elixir/** (incl. vanilla/ + heex-*)"
+   ],
+   "rows": [
+    {
+     "id": "F2-ELX-ESCAPE-FUNNEL",
+     "size": "S",
+     "confidence": "proven",
+     "P": 0,
+     "needsValidatorSlot": false,
+     "title": "The Elixir `#{` escaping funnel is incomplete: four emit sites splice a `.ddd` string into Elixir code with bare `JSON.stringify`"
+    },
+    {
+     "id": "F2-CB-C11-tph-base-owned-child-crosstenant",
+     "size": "M",
+     "confidence": "proven",
+     "P": 0,
+     "needsValidatorSlot": true,
+     "title": "`abstract \u2026 with tenantOwned` + `crossTenant` concretes is accepted and leaves a NOT NULL tenant column with no stamp and no filter"
+    },
+    {
+     "id": "F2-SEED-TENANT-NULL",
+     "size": "M",
+     "confidence": "proven",
+     "P": 0,
+     "needsValidatorSlot": true,
+     "title": "A `seed` row on a `tenantOwned` aggregate is stamped with a NULL tenant on all five backends, so no tenant can ever read it"
+    },
+    {
+     "id": "F2-FFE-6",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "Phoenix/HEEx picks `+` vs `<>` for string concatenation from whether an operand is a string LITERAL, not from its type \u2014 `who + other` emits `(@who + @other)`, an ArithmeticError at render"
+    },
+    {
+     "id": "F2-MT640-SORT-DEAD",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": true,
+     "title": "M-T6.40 shipped as option (a) \u2014 the non-paged elixir list page now compiles, but its sortable headers are a no-op refetch (and the mission row still reads `open`)"
+    },
+    {
+     "id": "F2-SEED-DATASET-NAME-COLLISION",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": true,
+     "title": "Two seed datasets whose identifier-cased names coincide emit duplicate seeder functions \u2014 compile error on 3 backends, silent data loss on 2"
+    },
+    {
+     "id": "F2-SEED-RAW-DOCUMENT",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": true,
+     "title": "`seed raw` on a `shape: document` aggregate emits a column-per-field INSERT against the (id, data, version) jsonb table \u2014 on all five backends"
+    },
+    {
+     "id": "M-T6.26-doc-put-presence",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "A `shape: document` aggregate's PUT still accepts an omitted required field on Elixir \u2014 the one changeset the presence check does not reach"
+    },
+    {
+     "id": "elixir-grapheme-vs-codepoint-length",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": true,
+     "title": "Elixir counts GRAPHEMES where the spec it publishes (and the other four backends) count code points"
+    },
+    {
+     "id": "F2-SEED-EVENTSOURCED",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": true,
+     "title": "A `seed` row on an event-sourced aggregate is silently dropped on elixir (marker still written) and emits an arity-wrong `create(...)` on java + dotnet"
+    },
+    {
+     "id": "F2-W-01",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "elixir multi-word valueobject field always reads back null (camelCase jsonb key written, snake_case key read)"
+    },
+    {
+     "id": "F2-W-06",
+     "size": "S",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "elixir persists `datetime` at SECOND precision (`:utc_datetime`) where the other four use TIMESTAMPTZ(\u00b5s)"
+    },
+    {
+     "id": "G2646-open-elixir-precondition-messages",
+     "size": "S",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "#2646 documented, NOT fixed: authored `precondition` messages lost on the elixir raise path"
+    },
+    {
+     "id": "G2667-C7-heex-button-icon-loading",
+     "size": "S",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "08-17 register #7: Button { icon: / loading: } dropped on HEEx"
+    },
+    {
+     "id": "G2667-C8-heex-tab-slug-spaces",
+     "size": "S",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "08-17 register #8: HEEx tab slug keeps spaces (snake(label)) and diverges from JSX's slugify"
+    },
+    {
+     "id": "G2667-D6-elixir-seeder-not-atomic",
+     "size": "S",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "Debt: elixir seeder is not atomic per dataset \u2014 a mid-dataset crash re-seeds duplicates"
+    },
+    {
+     "id": "M-T6.2-s14-audit-wiresnapshot",
+     "size": "S",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "Elixir audit before/after snapshots still dump the raw snake_case Ecto struct while the other four record the wireShape"
+    },
+    {
+     "id": "F2-W-03",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "elixir validation `errors[]` pointers can only ever be depth-1 \u2014 `/dims`, never `/dims/width`"
+    },
+    {
+     "id": "G2646-open-heex-in-component-degradation",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "#2646 documented, NOT fixed: HEEx forms/queries/uploads/table-controls INSIDE a component still degrade silently"
+    },
+    {
+     "id": "G2646-open-heex-layout-inert",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "#2646 documented, NOT fixed: HEEx layout primitives semantically inert (Grid \u2261 Stack, bare divs); non-server-paged Table gets no pager; i18nFormat wrapper dropped"
+    },
+    {
+     "id": "F2-W-04",
+     "size": "L",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "elixir stores a valueobject as one jsonb `:map` column and never validates its inner fields \u2014 accepts bodies the other four 422"
+    },
+    {
+     "id": "F2-W-09",
+     "size": "S",
+     "confidence": "proven",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "A `File` field is an inline anonymous object on node/elixir and a named `FileRef` component on dotnet/java/python"
+    },
+    {
+     "id": "F2-W-12",
+     "size": "S",
+     "confidence": "likely",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "Optional-field nullability: java and elixir publish a non-nullable schema for fields they serialize as `null`"
+    },
+    {
+     "id": "F2-W-08",
+     "size": "M",
+     "confidence": "proven",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "A `valueobject` aggregate field publishes ONE shared component on node/python/elixir and TWO (`<VO>Request` + `<VO>Response`) on dotnet/java"
+    },
+    {
+     "id": "M-T6.2-s12-vanilla-document-gate",
+     "size": "M",
+     "confidence": "likely",
+     "P": 3,
+     "needsValidatorSlot": true,
+     "title": "\u00a712 residue: the Elixir document-shape gate still honestly rejects named ops and non-scalar-predicate finds"
+    }
+   ],
+   "needsValidatorSlot": true,
+   "estTotalSize": 48,
+   "notes": "Two independent sub-clusters: the `#{}` escaping funnel (ELX-ESCAPE-FUNNEL \u2014 security, do first) and the seeder family (SEED-*), which is 5-backend-wide but elixir-worst. HEEx rows ride in this packet because heex-* lives under src/generator/elixir/."
+  },
+  {
+   "name": "python",
+   "fileTrees": [
+    "src/generator/python/**"
+   ],
+   "rows": [
+    {
+     "id": "F2-ADP-8",
+     "size": "M",
+     "confidence": "proven",
+     "P": 0,
+     "needsValidatorSlot": false,
+     "title": "`writeScopeFilter` is a documented no-op on python's non-relational shapes and absent entirely on java's document/event-sourced shapes"
+    },
+    {
+     "id": "F2-EXPR-6",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "python: `long.divTrunc` renders `int(a / b)` \u2014 a float round-trip that is wrong beyond 2^53, on the one backend with exact integers"
+    }
+   ],
+   "needsValidatorSlot": false,
+   "estTotalSize": 4,
+   "notes": "EXPR-6 (divTrunc precision) and the writeScope non-relational rows are independent; both need a mypy --strict pass over the generated project."
+  },
+  {
+   "name": "validator-diagnostics",
+   "fileTrees": [
+    "src/ir/**",
+    "src/diagnostics/**",
+    "src/language/validators/**"
+   ],
+   "rows": [
+    {
+     "id": "M-T3.15-B0-mask-launder",
+     "size": "M",
+     "confidence": "proven",
+     "P": 0,
+     "needsValidatorSlot": false,
+     "title": "B0 \u2014 a `mask unless` value still launders through `emit` into a projection row and is served in cleartext"
+    },
+    {
+     "id": "F2-EXPR-1",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "`sum(\u03bb)` result type loses `money` in the IR \u2014 node/python then emit decimal-path arithmetic on a Decimal object"
+    },
+    {
+     "id": "F2-EXPR-2",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "`let m = coll.map(\u03bb)` is typed `string` in the IR \u2014 every downstream collection op on `m` mis-renders on 4 of 5 backends"
+    },
+    {
+     "id": "F2-FFE-9",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "`loom.sub-primitive-misplaced` (and its siblings) print the `where` prefix twice in CLI output"
+    },
+    {
+     "id": "F2-VAL-1",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "AST validator crashes on a partially-parsed `derived` \u2014 aborting the entire `context` check and dropping every other diagnostic in it"
+    },
+    {
+     "id": "F2-XB-3",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "A resource-op inside an aggregate `test { }` block escapes `loom.resource-op-outside-workflow` \u2014 and fails five different ways, exactly the class the gate exists to close"
+    },
+    {
+     "id": "M-T5.9-reserved-not-emitted",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "`loom.reserved-not-emitted` does not exist \u2014 parse-but-no-emit surfaces are still silent"
+    },
+    {
+     "id": "M-T6.18-gap3-criterion-arg-types",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "A criterion/policy-fn invoked from a DECLARATION site (`filter X(42)`, `from X(args)`, `where:`, `when`) has its argument TYPES unchecked \u2014 the last live piece of gap #3"
+    },
+    {
+     "id": "eventlog-shape-silently-ignored",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "`shape: document` / `shape: embedded` on a `persistedAs: eventLog` aggregate is silently ignored (M-T2.10 residue)"
+    },
+    {
+     "id": "M-T3.8-sensitivity-phases-2-4",
+     "size": "L",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "`sensitive(...)` reaches exactly one emitter \u2014 no wire masking, no sink classification, and no diagnostic saying so"
+    },
+    {
+     "id": "domainservice-nullable-load-ungated",
+     "size": "S",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "An optional `find \u2026: Agg?` bound in a `domainService` body emits an unguarded deref on all five backends \u2014 the new handler gate and its workflow twin skip the third body kind"
+    },
+    {
+     "id": "unresolved-page-ref-named-args",
+     "size": "S",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "`loom.unresolved-page-ref` (new) walks positional args only \u2014 the same unresolved-ref defect in a NAMED argument still passes clean, including the `undefined`-emitting form"
+    },
+    {
+     "id": "domainservice-member-chained-repo-read",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "A repo read used as a MEMBER RECEIVER (`Accounts.byHolder(h).balance`) is not classified `repo-read`, so the domain service is typed `pure`, no read port is threaded, and all five backends emit the bare source name"
+    },
+    {
+     "id": "F2-CB-C10-tph-stance-not-inherited",
+     "size": "S",
+     "confidence": "proven",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "`loom.tenancy-stance-unmarked` tells the author to add a marker they already added on the abstract base \u2014 capability FIELDS inherit, the stance does not"
+    },
+    {
+     "id": "F2-CB-C9-requires-unknown-message",
+     "size": "S",
+     "confidence": "proven",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "`requires <DomainService>.<op>(\u2026)` is rejected as \"got 'unknown'\" \u2014 and appending `&& true` makes the identical expression valid"
+    },
+    {
+     "id": "F2-EXPR-5",
+     "size": "S",
+     "confidence": "proven",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "Validator falsely rejects `money * <numeric literal>` and `money / <numeric literal>` \u2014 with a message that says the form is allowed"
+    },
+    {
+     "id": "M-T1.20-collection-op-gate-misclassified",
+     "size": "S",
+     "confidence": "likely",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "M-T1.20 \u2014 `loom.frontend-collection-op-unsupported` is a DELIBERATE permanent gate but is registered as a drainable `gap`"
+    },
+    {
+     "id": "M-T3.15-E2-getbyid-no-gate-surface",
+     "size": "S",
+     "confidence": "likely",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "E2 \u2014 the by-id read has no author gate surface at all"
+    },
+    {
+     "id": "M-T5.19-a-workflow-test-anchor",
+     "size": "S",
+     "confidence": "likely",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "`WorkflowMember` still has no `TestBlock` arm"
+    },
+    {
+     "id": "F2-CFE-10",
+     "size": "M",
+     "confidence": "proven",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "String literals inside a `match` in a user-visible slot are silently untranslatable, while string `+` in the SAME slot is a hard validator error \u2014 `ddd i18n check --strict` passes on a page shipping hardcoded English"
+    },
+    {
+     "id": "M-T1.10-handler-vocabulary",
+     "size": "M",
+     "confidence": "likely",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "M-T1.10 \u2014 `on <channel>.<Event>` handler bodies remain a closed two-verb vocabulary (`toast` + `refetch`)"
+    },
+    {
+     "id": "M-T5.3-nested-carriers-and-option",
+     "size": "M",
+     "confidence": "likely",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "Nested carriers stay gated; `option` lowers but the three-state PATCH it unblocks is unbuilt"
+    },
+    {
+     "id": "feliz-flutter-persist-codec-asymmetry",
+     "size": "M",
+     "confidence": "likely",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "The new field-scoped `loom.store-lifetime-target-unsupported` splits feliz and flutter into two DIFFERENT covered type sets \u2014 a `persist:` store portable between them does not exist"
+    },
+    {
+     "id": "workflow-projection-rename-unexpressible",
+     "size": "M",
+     "confidence": "proven",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "M-T2.1 slice (d) \u2014 renaming a `workflow` or `projection` drop+recreates its state/projection table; `TableRename` cannot name one"
+    }
+   ],
+   "needsValidatorSlot": false,
+   "estTotalSize": 43,
+   "notes": "Pure src/ir + src/diagnostics rows. Every row here is a new or widened `loom.*` gate, so each needs a src/diagnostics/messages.ts entry and a firing-census fixture; VAL-1 (streamAst crash on a partially-parsed derived) is a crash fix, not a gate, and should land first."
+  },
+  {
+   "name": "wire-openapi",
+   "fileTrees": [
+    "src/system/**",
+    "src/ir/util/openapi-errors.ts",
+    "src/ir/stdlib/generics.ts",
+    "test/conformance/**"
+   ],
+   "rows": [
+    {
+     "id": "connection-secret-wiring",
+     "size": "L",
+     "confidence": "proven",
+     "P": 0,
+     "needsValidatorSlot": true,
+     "title": "`connection:` on a storage parses, validates and lowers \u2014 no emitter reads it (credential wiring silently inert)"
+    },
+    {
+     "id": "F2-W-13",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "`httpStatus NotFound -> <code>` also silently retargets the objectStore blob-absence 404, which the shared table's own comment says stays literal"
+    },
+    {
+     "id": "elixir-malformed-path-id-422",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "The malformed-`{id}` 422 alignment (#2652) measured and pinned four backends; `platform: elixir` was never measured and still cannot answer the 422 it publishes"
+    },
+    {
+     "id": "F2-XB-7",
+     "size": "S",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "`lineage` is declared a non-nullable object in `.loom/wire-spec.json` and in elixir's OpenApiSpex schema, while every backend puts `\"lineage\": null` on the wire"
+    },
+    {
+     "id": "schemathesis-F11-int32-range",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": true,
+     "title": "F11/W11+W12 \u2014 an `int` body field publishes no bound while the column is Postgres `int4`, so a contract-conforming value 500s; explicitly deferred by both open schemathesis PRs"
+    }
+   ],
+   "needsValidatorSlot": true,
+   "estTotalSize": 16,
+   "notes": "Contract-shaped rows plus the src/system/ composer rows that had no other home (connection-secret-wiring is the P0 here \u2014 `connection:` on a storage lowers and no emitter reads it, so credential wiring is silently inert). Landing anything here moves wire goldens \u2014 regenerate test/behavioral/wire-golden/* in the same PR. The RS-18 stale conformance rule (F2-XB-5) is NOT scheduled here (kind=stale-prose, P5) but should ride along, since it governs the same carrier."
+  },
+  {
+   "name": "walker-shared",
+   "fileTrees": [
+    "src/generator/_walker/**",
+    "src/generator/_expr/**",
+    "src/generator/_stmt/**",
+    "src/generator/_frontend/**"
+   ],
+   "rows": [
+    {
+     "id": "F2-CFE-5",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": true,
+     "title": "`OperationForm { of: <Agg>, op: <op> }` emits `use<Op><Agg>(id ?? \"\")` against an UNBOUND `id` \u2014 even on a page whose route declares `:id`"
+    },
+    {
+     "id": "F2-CFE-6",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": true,
+     "title": "The \"a bare OperationForm still compiles\" fix reaches only ONE of the two OperationForm shapes \u2014 the by-name shape emits Svelte referencing three un-imported symbols, and on every JSX target a bare operation form renders nothing at all"
+    },
+    {
+     "id": "fixed-slot-arity-membership-incomplete",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": true,
+     "title": "`loom.page-primitive-extra-children` (new) covers only Stat / KeyValueRow / op-form Modal \u2014 every other one-slot value primitive still drops extra positionals silently"
+    },
+    {
+     "id": "queryview-single-lambda-paramtypes",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "`QueryView { of: X.Agg.all, single: true, data: row => OperationForm { row.<op> } }` drops the form on EVERY frontend \u2014 the lambda binding never reaches `paramTypes`"
+    },
+    {
+     "id": "F2-CFE-1",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "`navigate(<Page>)` in a page `action` body \u2014 the only documented home for navigation \u2014 is broken on all 7 frontend targets (feliz hard-crashes codegen)"
+    },
+    {
+     "id": "F2-FFE-7",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": true,
+     "title": "An unrecognized NAMED argument on a walker primitive silently swallows the content it carries (`Card { title: \u2026 }`, `Tab { title: \u2026 }`) \u2014 on every frontend, with the dropped literal still shipped to translators"
+    },
+    {
+     "id": "F2-CFE-12",
+     "size": "S",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": true,
+     "title": "`Modal { open: <state>, <OperationForm child> }` degrades to a comment and drops the entire modal, on every target"
+    },
+    {
+     "id": "G2667-D2-provenance-leaf-blindness",
+     "size": "S",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "Debt: provenance leaf collection blind to convert/duration/list/i18nFormat/variant arms"
+    },
+    {
+     "id": "G2667-D7-walker-flag-propagation-divergence",
+     "size": "S",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": true,
+     "title": "Debt: propagateSinkFlags is a diverging near-copy of propagateChildFlags; stmtIsAwaited doesn't recurse as documented"
+    },
+    {
+     "id": "G2667-D9-i18n-slot-asymmetry",
+     "size": "S",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "Debt: i18n slot asymmetry \u2014 Stat extracts label+value, KeyValueRow only the label"
+    },
+    {
+     "id": "M-T1.1-table-filter-silent-drop",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": true,
+     "title": "`Table { filter: \u2026 }` is silently ignored on HEEx and on ANY server-paged table \u2014 no marker, no diagnostic"
+    },
+    {
+     "id": "queryview-lambda-int-plus-literal-concat",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "An int LITERAL operand of `+` against a read-record member in a page body lowers to string concatenation \u2014 `o.qty + 1` renders `o.qty + String(1)`"
+    }
+   ],
+   "needsValidatorSlot": true,
+   "estTotalSize": 20,
+   "notes": "Highest fan-out packet in the plan: every row here changes 6-7 frontends at once. CFE-1 (navigate) and FFE-7 (unknown named arg) are the two structural ones; land them before the per-framework packets so those rebase onto the new seam."
+  },
+  {
+   "name": "feliz",
+   "fileTrees": [
+    "src/generator/feliz/**"
+   ],
+   "rows": [
+    {
+     "id": "F2-CFE-7",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "Feliz `asChild` prefix heuristic wraps a user-component call in an F# string literal \u2014 the component's source is shown as visible text AND the nested quotes are unescaped, so App.fs does not parse"
+    },
+    {
+     "id": "F2-FFE-5",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "Feliz `parseUrl` arms are emitted in page-declaration order \u2014 a literal route declared after a sibling parameterised route is unreachable (dead F# match rule)"
+    },
+    {
+     "id": "F2-FFE-4",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "Feliz: a user component invoked from ANOTHER component's body is emitted without the `model` / `dispatch` curried arguments \u2014 `dotnet fable` fails (FS0001)"
+    },
+    {
+     "id": "M-T1.16-invariant-validation-feliz-flutter",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": true,
+     "title": "Invariant-derived client-side form validation is missing on BOTH self-hosting frontends \u2014 Feliz and Flutter enforce \"Required\" only"
+    },
+    {
+     "id": "sourcemap-feliz-flutter-not-emitted",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": true,
+     "title": "`--sourcemap` records NOTHING for the feliz and flutter frontends \u2014 the plan files it as a test-parity skew, but the emission is absent"
+    },
+    {
+     "id": "G2646-open-feliz-honest-residue",
+     "size": "S",
+     "confidence": "likely",
+     "P": 3,
+     "needsValidatorSlot": true,
+     "title": "#2646 documented, NOT fixed: feliz `.map(\u03bb)` has no lambda seam; component-host `match await` gated; three of four newly-throwing sub-shapes still lack validator gates"
+    },
+    {
+     "id": "M-T1.20-feliz-match-await",
+     "size": "M",
+     "confidence": "likely",
+     "P": 3,
+     "needsValidatorSlot": true,
+     "title": "M-T1.20 \u2014 `loom.feliz-async-effect-unsupported` residue is narrower than documented: only a route-id-less host and a non-aggregate-instance subject stay gated"
+    }
+   ],
+   "needsValidatorSlot": true,
+   "estTotalSize": 15,
+   "notes": "FE-4 (curried model/dispatch) blocks `dotnet fable`, so nothing else in this packet can be compile-verified until it lands."
+  },
+  {
+   "name": "frontend-js",
+   "fileTrees": [
+    "src/generator/react/**",
+    "src/generator/vue/**",
+    "src/generator/svelte/**",
+    "src/generator/angular/**",
+    "designs/**"
+   ],
+   "rows": [
+    {
+     "id": "F2-CFE-8",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "Angular silently drops component CHILDREN (the `Slot {}` content) \u2014 `ngComponentOutlet` cannot project content, and no degradation comment is emitted"
+    },
+    {
+     "id": "F2-FFE-2",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "React `derived` / `title:` useMemo dependency arrays miss every ref that is not a top-level binary/ref/call-arg \u2014 ternaries, member receivers and intrinsic receivers all drop out, so the memo freezes"
+    },
+    {
+     "id": "F2-XB-2",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": true,
+     "title": "The code-point `.length` fix never reached Angular: generated Angular forms validate length in UTF-16 code units"
+    },
+    {
+     "id": "F2-CFE-2",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "Two forms on one page emit duplicate `const`/class-member declarations (react, svelte, angular) or silently cross-wire the second form to the first aggregate (vue)"
+    },
+    {
+     "id": "F2-CFE-3",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "`For` as the direct body of a `QueryView { data: }` lambda emits syntactically invalid source on React (object literal), Feliz (`yield!` outside a seq) and Flutter (spread in expression position)"
+    },
+    {
+     "id": "F2-FFE-1",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "`store` state initializers are dropped on react / vue / svelte (all four lifetimes) and reset to the type zero on angular `persist: url`"
+    },
+    {
+     "id": "M-T3.15-C3-nav-vs-requires",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "C3 \u2014 the default sidebar shows links to routes the backend refuses (react/vue/svelte)"
+    },
+    {
+     "id": "G2667-D8-pack-loader-global-handlebars",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "Debt: pack loader mutates global Handlebars state; the 'one pack per generation' comment is stale"
+    },
+    {
+     "id": "M-T1.12-raw-field-aria",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "M-T1.12 \u2014 form-field `aria-invalid`/`aria-describedby` missing on flowbite (Svelte) and all three Angular packs; primeng additionally has NO label\u2194input association"
+    },
+    {
+     "id": "M-T1.8-error-boundary-five-targets",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "M-T1.8 \u2014 the root render-time error boundary ships on React + 2 Vue packs only; Svelte, Angular, Feliz, Flutter and HEEx have none (a thrown render whitescreens the app)"
+    }
+   ],
+   "needsValidatorSlot": true,
+   "estTotalSize": 24,
+   "notes": "Not in the requested packet list \u2014 added because react/vue/svelte/angular per-framework trees (and designs/*.hbs) had no home there and several P1 rows live only in them. Depends on walker-shared."
+  },
+  {
+   "name": "flutter",
+   "fileTrees": [
+    "src/generator/flutter/**"
+   ],
+   "rows": [
+    {
+     "id": "F2-CFE-9",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "Flutter's `Money` / `DateDisplay` / `EnumBadge` primitives do not null-guard an OPTIONAL field \u2014 two produce Dart that fails static analysis, the third renders the literal text \"null\""
+    },
+    {
+     "id": "F2-FFE-3",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "Flutter registers `'/things/:id'` verbatim as a `MaterialApp.routes` key while navigation pushes the interpolated path \u2014 every detail-page link on flutter is dead, including in the shipped `sales-system-flutter.ddd`"
+    },
+    {
+     "id": "flutter-form-field-drops",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": true,
+     "title": "Four Flutter form-field drops are still emitted as Dart COMMENTS, not diagnostics \u2014 the parity freeze is unchanged since the 08-17 snapshot"
+    },
+    {
+     "id": "flutter-modal-instance-operationform",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "Flutter drops the ENTIRE operations row of every scaffolded Detail page \u2014 `renderModal` only matches `OperationForm { of:, op: }`"
+    },
+    {
+     "id": "F2-FFE-8",
+     "size": "S",
+     "confidence": "suspected",
+     "P": 2,
+     "needsValidatorSlot": true,
+     "title": "Flutter and Feliz persisted stores write a FLAT JSON blob under the same `loom.store.<Name>` key the JS frontends use for zustand's `{state,version}` envelope"
+    },
+    {
+     "id": "F2-CFE-11",
+     "size": "S",
+     "confidence": "proven",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "`testid:` on `CreateForm` is silently dropped on Angular and Flutter (honoured on react/vue/svelte/feliz)"
+    }
+   ],
+   "needsValidatorSlot": true,
+   "estTotalSize": 12,
+   "notes": "FE-3 (routes registered verbatim) is the only P1 that makes the shipped sales-system-flutter example non-functional; do it first."
+  },
+  {
+   "name": "cli",
+   "fileTrees": [
+    "src/cli/**"
+   ],
+   "rows": [
+    {
+     "id": "ir-warnings-invisible-in-cli",
+     "size": "S",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": true,
+     "title": "`ddd parse` and `ddd generate system` discard every IR-level WARNING they compute (17 of 18 codes)"
+    }
+   ],
+   "needsValidatorSlot": true,
+   "estTotalSize": 1,
+   "notes": "Single row (IR warnings discarded by `ddd parse` / `generate system`) \u2014 it is also the reason several 'honest' gates elsewhere are invisible in practice, so schedule it early and cheaply."
+  },
+  {
+   "name": "macros",
+   "fileTrees": [
+    "src/macros/**"
+   ],
+   "rows": [
+    {
+     "id": "F2-CFE-4",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": false,
+     "title": "The `auto-paged-table` macro rewrites only the Table's own `rows:` slot, leaving every SIBLING reader of the same QueryView binding pointed at the paged envelope"
+    },
+    {
+     "id": "M-T1.15-nonstring-filter-finds-dropped",
+     "size": "M",
+     "confidence": "proven",
+     "P": 1,
+     "needsValidatorSlot": true,
+     "title": "M-T1.15 \u2014 a repository `find` with an enum / numeric / `X id` parameter is SILENTLY excluded from the scaffolded list filter bar"
+    },
+    {
+     "id": "provenanced-bare-read-in-page-body",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": true,
+     "title": "Provenanced<T> (#2653, merged 2026-08-24) changed the wire shape of a `provenanced` field under every page-body read; only the scaffold macro was taught `.value`, so a hand-written body reading the field bare now emits an object into a text slot with no gate"
+    },
+    {
+     "id": "M-T5.5-stdlib-tail",
+     "size": "S",
+     "confidence": "likely",
+     "P": 3,
+     "needsValidatorSlot": true,
+     "title": "Stdlib tail \u2014 block-form top-level functions honestly refused; storable `duration` and the `std/*.ddd` prelude unbuilt"
+    },
+    {
+     "id": "M-T3.7-e-claim-typed-capability-fields",
+     "size": "M",
+     "confidence": "likely",
+     "P": 3,
+     "needsValidatorSlot": true,
+     "title": "`tenantOwned` still hardcodes `tenantId: string`, so a `guid` claim is refused"
+    }
+   ],
+   "needsValidatorSlot": true,
+   "estTotalSize": 13,
+   "notes": "Scaffold-macro rows only; they change AST output, so every downstream frontend fixture moves. Run the corpus tier after."
+  },
+  {
+   "name": "java",
+   "fileTrees": [
+    "src/generator/java/**"
+   ],
+   "rows": [
+    {
+     "id": "nested-errors-pointer-shape",
+     "size": "M",
+     "confidence": "likely",
+     "P": 2,
+     "needsValidatorSlot": false,
+     "title": "Nested `errors[]` JSON pointer diverges: java emits a non-RFC-6901 `/lineTotals[0].unitPrice`, elixir emits nothing for nested children"
+    },
+    {
+     "id": "F2-W-07",
+     "size": "S",
+     "confidence": "likely",
+     "P": 3,
+     "needsValidatorSlot": false,
+     "title": "java publishes a differently-named paged envelope for a DECLARED `find \u2026 paged` (`PagedWidgetResponse`) than the other four (`WidgetPaged`)"
+    },
+    {
+     "id": "M-T6.36",
+     "size": "S",
+     "confidence": "likely",
+     "P": 3,
+     "needsValidatorSlot": true,
+     "title": "Java emitter shape gaps \u2014 two narrow honest rejections still live"
+    }
+   ],
+   "needsValidatorSlot": true,
+   "estTotalSize": 5,
+   "notes": "Small packet; W-07/W-12 are OpenAPI-shaped and could be pulled into wire-openapi if that packet is scheduled first."
+  }
+ ],
+ "sequencing": [
+  [
+   "cli before validator-diagnostics and every honest-gate row",
+   "`ddd parse` / `generate system` discard 17 of 18 IR-level WARNING codes (ir-warnings-invisible-in-cli). Any new honest gate emitted as a warning is invisible until that lands, so a 'gate added' claim cannot be mutation-proved before it."
+  ],
+  [
+   "validator-diagnostics VAL-1 before any other validator work",
+   "checkDerived crashes on a partially-parsed `derived`, aborting the whole context check and swallowing every other diagnostic in it \u2014 including the ones the new gates emit."
+  ],
+  [
+   "walker-shared before frontend-js, flutter and feliz",
+   "CFE-1 (navigate statement), FFE-7 (unknown named argument) and FFE-1 (store initializers) all change the _walker seam that the six per-framework targets consume; landing the framework packets first guarantees a rebase."
+  ],
+  [
+   "feliz FE-4 before any other feliz row",
+   "the missing curried model/dispatch args make `dotnet fable` fail, so no other feliz change can be compile-verified."
+  ],
+  [
+   "dotnet-adapters ADP-2/ADP-3 as one decision, before ADP-9",
+   "both are the same question \u2014 does the dapper adapter schema-qualify off resolveDataSourceConfig? \u2014 and ADP-9's principal-binding fix edits the same capabilityFilterSqlFor path."
+  ],
+  [
+   "elixir ELX-ESCAPE-FUNNEL first in its packet",
+   "it is the one code-injection row in the ledger (`#{}` interpolation spliced from .ddd string literals at four unescaped emit sites); everything else in the packet is correctness."
+  ],
+  [
+   "the seed family (SEED-* + CB-C6) as one cross-backend packet-crossing slice",
+   "SEED-EVENTSOURCED / SEED-RAW-DOCUMENT / SEED-DATASET-NAME-COLLISION / SEED-TENANT-NULL all reduce to 'the seeder does not know the aggregate's shape or its principal'; four independent per-backend fixes would each need the same validator decision."
+  ],
+  [
+   "the TPH cluster (CB-C2/C3/C4/C10/C11/C12) as one slice across dotnet-adapters, node-ts and validator-diagnostics",
+   "all six come from reading capability/stance facts off `agg.capabilities` and the aggregate's own plural instead of resolving through the supertype/root-table; fixing them one backend at a time re-derives the same rule three times."
+  ],
+  [
+   "wire-openapi after the backend packets",
+   "its goldens are regenerated from backend emission; landing it first means regenerating twice."
+  ]
+ ]
+}
