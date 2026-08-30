@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { describeCompileLeg } from "../pairwise/compile-leg.js";
+import { caInstallPrefix, describeCompileLeg, proxyCaDockerArgs } from "../pairwise/compile-leg.js";
 
 // ---------------------------------------------------------------------------
 // M-T9.29 — the COMPILE oracle, .NET leg (ASP.NET + EF Core / Dapper,
@@ -59,16 +59,14 @@ fs.mkdirSync(NUGET_CACHE_DIR, { recursive: true });
 /** Proxy + CA plumbing the container needs to reach nuget.org in this
  *  environment. Harmless where the proxy is absent (CI runners) — `-e NAME`
  *  with no `=value` passes through whatever the host process has (or nothing). */
-const PROXY_ENV = ["-e", "HTTPS_PROXY", "-e", "HTTP_PROXY", "-v", "/root/.ccr:/root/.ccr:ro"];
+const PROXY_ENV = ["-e", "HTTPS_PROXY", "-e", "HTTP_PROXY", ...proxyCaDockerArgs()];
 
 /** Install the sandbox's proxy CA into the container's system trust store
  *  (NuGet, unlike the JVM, only reads that store — no env-var override) and
  *  then restore + build under `/warnaserror`, matching
  *  `corpus-dotnet-build.test.ts` exactly. */
 const BUILD_SCRIPT =
-  "cp /root/.ccr/ca-bundle.crt /usr/local/share/ca-certificates/proxy.crt " +
-  "&& update-ca-certificates >/dev/null " +
-  "&& dotnet restore --nologo " +
+  `${caInstallPrefix()}dotnet restore --nologo ` +
   "&& dotnet build --no-restore --nologo /warnaserror";
 
 describeCompileLeg({

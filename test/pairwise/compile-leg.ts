@@ -134,6 +134,48 @@ export function infraFailure(out: string): string | undefined {
 }
 
 /**
+ * `docker run` args that hand a container the sandbox's egress-proxy CA — and
+ * NOTHING when there is no such CA, which is every CI runner.
+ *
+ * `/root/.ccr/ca-bundle.crt` exists only in this repo's agent sandbox, whose
+ * egress proxy re-signs TLS.  The dotnet leg mounted it and `cp`-ed it into the
+ * container trust store unconditionally, so on a GitHub runner the mount became
+ * an empty dir and the build chain died at
+ *
+ *   cp: cannot stat '/root/.ccr/ca-bundle.crt': No such file or directory
+ *
+ * — reported, of course, as "emitted .NET project failed to compile" (#2690).
+ *
+ * Shared rather than inlined per leg: the condition is subtle, two legs need it,
+ * and "fixed in one place, missed in its twin" is the exact defect this whole
+ * corpus was built to catch.  `caInstallPrefix()` is the shell half; a leg that
+ * uses one must use the other.
+ */
+export const PROXY_CA_HOST_PATH = "/root/.ccr/ca-bundle.crt";
+
+export function proxyCaDockerArgs(): string[] {
+  return fs.existsSync(PROXY_CA_HOST_PATH) ? ["-v", "/root/.ccr:/root/.ccr:ro"] : [];
+}
+
+/**
+ * The shell prefix that installs that CA into the container's SYSTEM trust
+ * store, or `""` when there is none to install.
+ *
+ * NuGet reads only the system store — no env-var override, unlike the JVM's
+ * truststore — so without this a sandbox run fails `dotnet restore` with a
+ * misleading NU1301 UntrustedRoot.  Guarded with a `[ -f ]` test as well as the
+ * host-side check so a stale-but-empty mount cannot resurrect the failure.
+ */
+export function caInstallPrefix(): string {
+  if (!fs.existsSync(PROXY_CA_HOST_PATH)) return "";
+  return (
+    `if [ -f ${PROXY_CA_HOST_PATH} ]; then ` +
+    `cp ${PROXY_CA_HOST_PATH} /usr/local/share/ca-certificates/proxy.crt && ` +
+    "update-ca-certificates >/dev/null; fi && "
+  );
+}
+
+/**
  * Delete a scratch dir, BEST-EFFORT — a cleanup failure is never a verdict.
  *
  * The dotnet / java / elixir recipes bind-mount the emitted project into a

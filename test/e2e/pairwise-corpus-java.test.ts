@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { describeCompileLeg } from "../pairwise/compile-leg.js";
+import { describeCompileLeg, proxyCaDockerArgs } from "../pairwise/compile-leg.js";
 
 // ---------------------------------------------------------------------------
 // M-T9.29 — the COMPILE oracle, java leg (Spring Boot / JPA, `gradle`).
@@ -28,16 +28,22 @@ const GRADLE_HOME = path.join(os.tmpdir(), "loom-pairwise-java-gradle-home");
 fs.mkdirSync(GRADLE_HOME, { recursive: true });
 
 /** Proxy + CA plumbing the container needs to reach Maven Central in this
- *  environment. Harmless where the proxy is absent (CI runners). */
+ *  environment, and NOTHING extra on a CI runner.
+ *
+ *  `-e NAME` with no `=value` passes through whatever the host has (or nothing),
+ *  so the proxy vars and `JAVA_TOOL_OPTIONS` (which points the JVM at the
+ *  sandbox truststore) are inert where they are unset.  The CA mount is NOT
+ *  inert and is therefore conditional — see `proxyCaDockerArgs`, added after the
+ *  dotnet leg's unconditional copy of the same sandbox-only file failed every
+ *  case on the runner. */
 const PROXY_ENV = [
   "-e",
   "HTTPS_PROXY",
   "-e",
   "HTTP_PROXY",
-  "-v",
-  "/root/.ccr:/root/.ccr:ro",
   "-e",
   "JAVA_TOOL_OPTIONS",
+  ...proxyCaDockerArgs(),
 ];
 
 describeCompileLeg({
