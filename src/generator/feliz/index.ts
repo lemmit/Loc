@@ -407,8 +407,8 @@ function renderPageView(
   // name (bound by its `Page` case).  A detail page's `/:id` therefore still
   // spells `(id: string)` — the local the body's `byId(id)` reaches through the
   // `renderRouteId` seam — while `/greet/:who` binds `who`, which is the name
-  // the body actually uses (audit finding A14: every param but the first was
-  // dropped, and the first was renamed to `id`).
+  // the body actually uses.  Renaming the first param to `id` and dropping the
+  // rest binds locals no body refers to.
   const idParam = routeParams.map((n) => ` (${n}: string)`).join("");
   const head = `let ${fnName} (model: Model) (dispatch: Msg -> unit)${idParam} =`;
   if (!page.body) return `${head}\n    Html.none`;
@@ -575,11 +575,10 @@ function hasRouteParam(page: PageIR): boolean {
 /** URL segments of a page's `route:` as an F# list pattern.  `/` → `[]`;
  *  `/orders/:id` → `[ "orders"; id ]`; `/greet/:who` → `[ "greet"; who ]`.
  *
- *  Each `:param` binds under ITS OWN name.  This used to rename the first param
- *  to `id` and match every other as `_`, so a page with a named param
- *  (`/greet/:who`) bound a local nothing in the body referred to, while `who`
- *  itself resolved to nowhere — the walker rendered `/* unresolved: who *​/
- *  undefined` into F# source that cannot compile (audit finding A14). */
+ *  Each `:param` binds under ITS OWN name.  Renaming the first param to `id`
+ *  and matching every other as `_` binds a local nothing in the body refers to,
+ *  while a named param (`/greet/:who`) resolves nowhere — the walker renders
+ *  `/* unresolved: who *​/ undefined` into F# source that cannot compile. */
 function routePattern(route: string | undefined): string {
   const segs = (route ?? "/").split("/").filter((s) => s.length > 0);
   if (segs.length === 0) return "[]";
@@ -811,8 +810,8 @@ function readsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizRead[]
   // User COMPONENTS host reads too — an Elmish read is a field on the ONE Model,
   // so a `component X() { body: QueryView { of: Api.Order.all, … } }` needs the
   // same Model field / init `Cmd` / `Loaded` arm a page's read gets.  Without
-  // this the component walk resolved `model.AllOrders` against a field nothing
-  // declared, which is why `component-emit.ts` used to drop the whole component
+  // this the component walk resolves `model.AllOrders` against a field nothing
+  // declares, leaving `component-emit.ts` to drop the whole component
   // (declaration AND every call site) rather than emit unbuildable F#.
   for (const component of ui.components ?? []) {
     for (const r of collectComponentReads(
@@ -1896,11 +1895,12 @@ export function generateFelizForContexts(
   // fsproj package refs must match what `renderAppFs` emits: SimpleHttp/Thoth
   // when there's any Http (reads or mutations/forms).
   //
-  // Feliz.Router is no longer a SECOND predicate over the model — it is read off
-  // the emitted App.fs below (`open Feliz.Router`).  Two independent conditions
-  // for one invariant is what let them disagree: the open gained a
-  // navigating-body case while this side still asked "routed or any form", and
-  // the mismatch is a package reference missing for code that uses it.  Deriving
+  // Feliz.Router is NOT a second predicate over the model — it is read off the
+  // emitted App.fs below (`open Feliz.Router`).  Two independent conditions for
+  // one invariant disagree the moment either moves (the open gaining a
+  // navigating-body case while this side still asks "routed or any form"), and
+  // the mismatch is a package reference missing for code that uses it.
+  // Deriving
   // it from the source makes them agree by construction.
   // Auth gate (D-AUTH-OIDC, `auth: ui`): this feliz deployable opts in AND its
   // target backend enforces auth AND the system declares a `user { }` claim

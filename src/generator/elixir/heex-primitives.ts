@@ -908,8 +908,8 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
   // a name any hand-written read could also pick — and a detail page carrying
   // both would have the two loads fight over one assign.
   if (historyRead) assignName = `${snake(historyRead)}_history`;
-  // Flag OR fact: an author may still opt in explicitly (the scaffold does),
-  // but omitting the flag no longer means "not paged" / "not single".
+  // Flag OR fact: an author may opt in explicitly (the scaffold does), but
+  // omitting the flag does NOT mean "not paged" / "not single".
   const isSingle = litTrue(names.indexOf("single")) || shape.single;
   const explicitPaged = litTrue(names.indexOf("paged"));
   const isPaged = explicitPaged || shape.paged;

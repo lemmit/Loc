@@ -783,7 +783,7 @@ const PY_TYPE_TARGET: TypeTarget = {
         return "FileRef";
       case "duration":
         // A5 temporal — absolute duration as `datetime.timedelta`.
-        // Expression-only (never a field / wire type in this slice).
+        // Expression-only (never a field / wire type).
         return "timedelta";
     }
   },

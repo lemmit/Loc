@@ -103,8 +103,8 @@ export function buildPyWorkflowsFile(
    *  so it never gets a `sourcemap.file(...)` whole-file region (mirrors the
    *  Elixir pooled-file precedent) — these fragment-only statement regions
    *  are the only mapping this file gets.  Reactor / event-`create` starter
-   *  bodies live in `dispatch-builder.ts` (`app/dispatch.py`), out of scope
-   *  for this slice. */
+   *  bodies live in `dispatch-builder.ts` (`app/dispatch.py`), out of
+   *  scope. */
   opFragments?: OpFragment[],
 ): string | null {
   const wfs = commandWorkflowsOf(ctx);

@@ -319,7 +319,7 @@ function lower(
     case "method-call": {
       // (The `deep` / DENY authorization filter sentinels moved to the
       // discriminated `authz-filter` kind in M-T9.9 — handled in its own case
-      // above, no longer a `method-call` marker here.)
+      // above, not a `method-call` marker here.)
       // `this.<refColl>.contains(x)` → correlated EXISTS against the
       // field's join table.
       if (

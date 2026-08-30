@@ -248,7 +248,7 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
     case "method-call": {
       // (The `deep` / DENY authorization filter sentinels moved to the
       // discriminated `authz-filter` kind in M-T9.9 — handled in its own case
-      // above, no longer a `method-call` marker here.)
+      // above, not a `method-call` marker here.)
       // Reference-collection membership: `this.<refColl>.contains(x)`.  The
       // collection is an `@ElementCollection` of an embeddable id
       // (`PokemonId(UUID value)`), so `:x member of e.<refColl>` throws at

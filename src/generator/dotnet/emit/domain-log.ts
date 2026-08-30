@@ -5,8 +5,8 @@
 // pipeline behaviour binds it onto the frame for the duration of every
 // dispatch, and trace-injected statements in aggregate methods resolve it
 // through the static `DomainLog` shim.  Folded onto RequestContext per
-// docs/architecture/request-context.md — `DomainLog` no longer owns its
-// own AsyncLocal; it reads the carrier's logger slice.
+// docs/architecture/request-context.md — `DomainLog` owns no AsyncLocal of its
+// own; it reads the carrier's logger slice.
 //
 // Emitted ONLY when --trace is on.  Off path emits nothing — the
 // generated `Domain/<Agg>/<Agg>.cs` stays free of any DomainLog

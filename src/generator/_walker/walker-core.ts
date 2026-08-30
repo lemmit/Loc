@@ -2391,7 +2391,7 @@ export function styleWith(
       // NUMBER stays unquoted so `weight: 700` keeps emitting `fontWeight: 700`
       // rather than the string `"700"` — React would otherwise be free to treat
       // a numeric length differently from its string form (it appends `px` to
-      // numbers), and the packs' own declarations were numeric before this merge.
+      // numbers), and the packs' own declarations are numeric.
       const numeric = /^-?\d+(\.\d+)?$/.test(literal);
       return [{ key, rendered: numeric ? literal : JSON.stringify(literal), literal }];
     });

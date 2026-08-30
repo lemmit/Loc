@@ -513,8 +513,8 @@ export function renderConfiguration(
           ([predicate, i]) =>
             `        builder.HasQueryFilter(${JSON.stringify(filterNames[i])}, x => ${renderCsExpr(predicate, { thisName: "x", efQuery: true })});`,
         );
-  // The config class no longer references the principal (those filters moved to
-  // AppDbContext), so it never needs the ambient `RequestContext` import.
+  // The config class never references the principal — those filters live on
+  // AppDbContext — so it needs no ambient `RequestContext` import.
   const filterRefsCurrentUser = false;
   // Co-located provenance (provenance.md): each `provenanced` field's
   // `<Field>Provenance` lineage maps to a `<field>_provenance` jsonb column via

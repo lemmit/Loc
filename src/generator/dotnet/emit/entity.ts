@@ -38,8 +38,8 @@ import {
  *  (`src/generator/dotnet/index.ts`'s `emitAggregate`/`place`), which
  *  anchors it via `SourceMapRecorder.fragment`.  Covers only the REGULAR
  *  (non-extern) named-operation body path — see the call site in
- *  `renderEntity` below; extern check bodies, event-sourced init, and
- *  appliers are out of scope for this slice. */
+ *  `renderEntity` below.  Extern check bodies, event-sourced init and
+ *  appliers are out of scope. */
 export interface OpFragment {
   fragmentText: string;
   subRegions: SourceMapSubRegion[];
@@ -535,11 +535,11 @@ export function renderEntity(
     opLines.push("");
   }
 
-  // Extern (b) Phase 2: the extern write surface is no longer an injected
-  // `I<Agg>Mutator` — the `<Op>Core` partial hooks (collected in
-  // `partialHookLines`) are MEMBERS of the aggregate, so they reach its own
-  // `private` state natively.  Nothing here widens any setter (S10 fixed by
-  // construction); the hook declarations are appended to the class body below.
+  // The extern write surface is NOT an injected `I<Agg>Mutator`: the
+  // `<Op>Core` partial hooks (collected in `partialHookLines`) are MEMBERS of
+  // the aggregate, so they reach its own `private` state natively and nothing
+  // here widens a setter.  The hook declarations are appended to the class body
+  // below.
 
   const pullEventsLines = isRoot
     ? [

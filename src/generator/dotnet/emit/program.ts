@@ -168,8 +168,7 @@ export function renderProgram(
   // at all.  Only the genuinely colliding types are re-mapped (keyed by CLR
   // full name, computed at emit time in `schema-ids.ts`); every other type
   // keeps its short name so the component set stays comparable with the four
-  // other backends.  No collision ⇒ both fragments are empty and Program.cs is
-  // byte-identical to before this guard existed.
+  // other backends.  No collision ⇒ both fragments are empty.
   const schemaOverrides = options?.schemaIdOverrides ?? [];
   const schemaIdDictionary =
     schemaOverrides.length === 0

@@ -735,7 +735,7 @@ const TS_TYPE_TARGET: TypeTarget = {
         return "Date";
       case "duration":
         // A5 temporal — absolute duration as plain milliseconds.
-        // Expression-only (never a field / wire type in this slice).
+        // Expression-only (never a field / wire type).
         return "number";
       case "json":
         return "unknown";

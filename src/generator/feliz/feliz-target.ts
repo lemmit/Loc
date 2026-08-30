@@ -341,11 +341,11 @@ export const felizTarget: WalkerTarget = {
     // envelope), the derived entity-history read (docs/audit.md) →
     // `<Agg>History`, and a user-declared repository find → `<Agg><Find>`.
     //
-    // The `All<Plural>` FALLBACK this used to end in is what made two of those
-    // silent bugs: it kept feliz out of `HISTORY_CAPABLE_FRAMEWORKS`, and it
-    // bound every parameterised find (`Doc.byVis(v)`) to the unfiltered list —
-    // a `model.AllDocs` no Model declared, no `Cmd` filled and no update arm
-    // stored, for a query that was never issued.  There is no fallback now:
+    // There is deliberately NO `All<Plural>` fallback: it keeps feliz out of
+    // `HISTORY_CAPABLE_FRAMEWORKS` and binds every parameterised find
+    // (`Doc.byVis(v)`) to the unfiltered list — a `model.AllDocs` no Model
+    // declares, no `Cmd` filled and no update arm stored, for a query never
+    // issued.  Instead:
     // the read collector (`collectBodyReads`) throws on any operation that is
     // not one of these four, so a field named here always exists.
     const field =
@@ -1084,9 +1084,9 @@ export const felizTarget: WalkerTarget = {
 
   // Scalar intrinsics — the SAME F# table the MVU update path uses
   // (`renderFsMethodCall`), so `s.replace(a, b)` cannot mean one thing in a
-  // page body and another in an action body.  Before this seam was supplied
-  // the view path had no intrinsic arm at all and emitted Loom's own spelling
-  // verbatim (`(model.Name.toUpper())`), which is not F#.
+  // page body and another in an action body.  Without this seam the view path
+  // has no intrinsic arm and emits Loom's own spelling verbatim
+  // (`(model.Name.toUpper())`), which is not F#.
   renderIntrinsic: (receiverType, member, recv, args) =>
     renderFsIntrinsic(receiverType, member, recv, args),
 };

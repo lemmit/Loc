@@ -2108,9 +2108,10 @@ export function renderDapperEventSourcedRepository(
   );
   // A `currentUser`-referencing find takes the trailing `User currentUser`
   // param the INTERFACE declares (emit/repository.ts) — the relational and
-  // document Dapper repos both thread it, and this one used to drop it: the
-  // class then failed to implement its own interface (CS0535) and the body's
-  // `currentUser` bound to nothing (CS0103).  `User` is a named type, so the
+  // document Dapper repos both thread it, and so must this one — dropping it
+  // fails to implement the class's own interface (CS0535) and leaves the
+  // body's `currentUser` bound to nothing (CS0103).  `User` is a named type, so
+  // the
   // file also needs `using <ns>.Auth`.
   const anyFindUsesUser = (repo?.finds ?? []).some((raw) =>
     findUsesCurrentUser(unionFindAsOptionalTwin(raw, agg.name)),
@@ -2415,11 +2416,11 @@ export function renderDapperSchema(
       `CREATE UNIQUE INDEX IF NOT EXISTS ${t}_seq_key ON ${t} (seq);`,
     ].join("\n");
   });
-  // The append-only provenance history table (provenance.md).  This used to be
-  // a hand-written CREATE TABLE — the second of two .NET copies.  It now
-  // renders the SHARED MigrationsIR shape (`provenanceTableShape`), reaching
-  // this emitter as DATA off the snapshot rather than as an import (generator
-  // may not import system).  `IF NOT EXISTS` because DbSchema re-runs on every
+  // The append-only provenance history table (provenance.md), rendered from
+  // the SHARED MigrationsIR shape (`provenanceTableShape`) rather than a
+  // hand-written CREATE TABLE.  It reaches this emitter as DATA off the
+  // snapshot, not as an import (generator may not import system).
+  // `IF NOT EXISTS` because DbSchema re-runs on every
   // startup, where a migration would run once.  The co-located
   // `<field>_provenance` columns ride on each aggregate's CREATE TABLE via
   // `columnsOf` — that half is per-aggregate and stays here.

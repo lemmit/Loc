@@ -1002,10 +1002,10 @@ function renderStmt(
     // Both guard rungs of a reactor / starter body short-circuit through the
     // SHARED denial protocol (`denialTerm`), so the thrown reason is the same
     // tagged 2-tuple every other producer emits — `{:forbidden, "Forbidden: …"}`
-    // / `{:precondition_failed, "Precondition failed: …"}`.  `requires` used to
-    // throw a bare `:forbidden` atom, which carried the status but no `detail`,
-    // while its `precondition` sibling threw a bare message string: two shapes,
-    // neither matching the controllers' denial clauses (M-T6.24).
+    // / `{:precondition_failed, "Precondition failed: …"}`.  A bare `:forbidden`
+    // atom carries the status but no `detail`, and a bare message string
+    // carries the detail but no status — two shapes, neither matching the
+    // controllers' denial clauses.
     //
     // Nothing PATTERN-MATCHES this throw today — a reactor `handle/1` is invoked
     // straight from the context `Dispatcher` with no `try`/`catch`, so an

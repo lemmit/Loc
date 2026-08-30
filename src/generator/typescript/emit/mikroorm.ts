@@ -1281,8 +1281,8 @@ function predicateEntry(e: ExprIR, acc: string): string {
   // Authorization/tenancy filter sentinels (M-T9.9).  A DISCRIMINATED node, so
   // a missing arm here is a `tsc` error rather than a fall-through to the
   // `unsupported find predicate` throw at the bottom of this function — which
-  // is exactly how the `deny` carve-out used to be unreachable on this adapter
-  // (the whole point of giving the sentinel its own `ExprIR.kind`).
+  // is how the `deny` carve-out becomes unreachable on this adapter.  That is
+  // the whole point of giving the sentinel its own `ExprIR.kind`.
   if (inner.kind === "authz-filter") return authzFilterEntry(inner, acc);
   const selfScope = guidFromStringSelfScope(inner);
   if (selfScope) {
@@ -1475,16 +1475,13 @@ function mikroContextFilters(agg: EnrichedAggregateIR, bypass?: FilterBypass): s
     // A principal filter takes the SAME path as any other: lower it, and let an
     // unlowerable one THROW.
     //
-    // This used to be wrapped in a `try { … } catch { /* drop */ }`, on the
-    // reasoning that a principal filter is not gated for FilterQuery-lowerability
-    // (`validateFindPredicateAdapterSupport` skips it) and the only shape that
-    // could fail — the deep-scope subtree predicate — "is not generated on the
-    // mikro adapter today".  That belief was load-bearing and wrong twice over:
-    // the deep-scope shape reached here for real (nothing stopped it until the
-    // capability gate was added), and DROPPING a tenancy predicate is not a
-    // degraded read — it is NO tenant predicate, i.e. every tenant's rows on
-    // every read.  A crash at generation is the strictly safer failure, and now
-    // that `authzFilterEntry` renders the subtree sentinel there is no known
+    // Deliberately NOT wrapped in a `try { … } catch { /* drop */ }`.  A
+    // principal filter is not gated for FilterQuery-lowerability
+    // (`validateFindPredicateAdapterSupport` skips it), so a shape that cannot
+    // lower reaches here — and DROPPING a tenancy predicate is not a degraded
+    // read, it is NO tenant predicate, i.e. every tenant's rows on every read.
+    // A crash at generation is the strictly safer failure.  With
+    // `authzFilterEntry` rendering the subtree sentinel there is no known
     // shape left to crash on.
     out.push(whereToMikroFilter(pred));
   });

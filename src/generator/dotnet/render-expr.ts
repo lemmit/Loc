@@ -818,7 +818,7 @@ function renderMethodCall(
 ): string {
   // (The `deep` / DENY authorization filter sentinels moved to the
   // discriminated `authz-filter` kind in M-T9.9 — handled by
-  // `renderCsAuthzFilter` before the shared dispatch, no longer a `method-call`
+  // `renderCsAuthzFilter` before the shared dispatch, not a `method-call`
   // marker here.)
   // `this.<refColl>.contains(x)` — membership over a reference
   // collection.  Lowers to a join-table subquery, mirroring TS's
@@ -1153,7 +1153,7 @@ const CS_TYPE_TARGET: TypeTarget = {
         return "FileRef";
       case "duration":
         // A5 temporal — absolute duration as a native TimeSpan.
-        // Expression-only (never a field / wire type in this slice);
+        // Expression-only (never a field / wire type);
         // reachable for duration-typed locals in operation bodies.
         return "TimeSpan";
     }

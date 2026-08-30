@@ -432,9 +432,9 @@ export function renderRepositoryImpl(
       // events are drained and the DURABLE ones staged on the SAME change
       // tracker BEFORE the single SaveChangesAsync below, so their
       // __loom_outbox rows land in the same round trip — and therefore the same
-      // implicit transaction — as the aggregate write.  Previously the outbox
-      // insert ran from DispatchAsync AFTER the commit, on a second
-      // SaveChangesAsync: a crash in between silently lost an owed event.
+      // implicit transaction — as the aggregate write.  Inserting from
+      // DispatchAsync AFTER the commit, on a second SaveChangesAsync, loses an
+      // owed event to a crash in between.
       // `__deferred` is what still needs dispatching post-commit (everything,
       // when no durable channel is wired — the inline at-most-once path).
       "        var __pending = aggregate.PullEvents();",
@@ -592,7 +592,7 @@ function buildLoadManyByIdsLines(
  * detached-check Add and before `SaveChangesAsync`.  For every
  * reference collection on the aggregate: load existing join rows,
  * compare against the current `aggregate.<Prop>` set, delete pairs
- * that are no longer present, and insert new ones.  Set semantics —
+ * that are absent from it, and insert new ones.  Set semantics —
  * the wire contract for `Id<T>[]` is a set (membership only, no order),
  * so the join row carries no payload: it's added if missing, left as-is
  * otherwise.  Mirrors the TS Drizzle save diff-sync. */
@@ -648,11 +648,10 @@ function buildSaveDiffSyncLines(associations: AssociationIR[]): string[] {
 // aggregate's persistence record is `(Id, Data jsonb, Version)`, so the
 // filter's columns (`tenantId`, `dataKey`, `isDeleted`) live INSIDE the
 // blob and there is no mapped column for EF to attach a predicate to.
-// Before this was wired, a `tenantOwned` document aggregate read
-// UNFILTERED across tenants while `validateContextFilterSupport` claimed
-// .NET filters every shape — a silent cross-tenant read (#2527's
-// follow-up 1).  node/java/python already filter document reads in-app
-// this way; this is the .NET half of that parity.
+// Without it a `tenantOwned` document aggregate reads UNFILTERED across
+// tenants while `validateContextFilterSupport` claims .NET filters every
+// shape — a silent cross-tenant read.  node/java/python filter document reads
+// in-app the same way.
 // ---------------------------------------------------------------------------
 export function renderDocumentRepositoryImpl(
   agg: EnrichedAggregateIR,

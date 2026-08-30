@@ -1554,7 +1554,7 @@ export function renderTypespec(t: TypeIR, contextModule: string, typesModule?: s
         case "duration":
           // A5 temporal — an absolute duration is plain integer milliseconds
           // on this backend (see the temporal section above).  Expression-only
-          // (never a field / wire type in this slice), so this arm serves
+          // (never a field / wire type), so this arm serves
           // inferred spec positions (e.g. a duration-typed `let` flowing into
           // a `function` signature) rather than stored attributes.
           return "integer()";

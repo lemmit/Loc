@@ -49,8 +49,9 @@ import { provenancedEntries } from "../_payload/provenanced-wire.js";
 // `<VO>Response`, enum fields as a `<Enum>` string union, containment parts as
 // `<Part>Response` (all emitted as nested interfaces alongside) — so a
 // detail page that dereferences `x.price.amount`, narrows an enum, or walks
-// `order.lines[i].quantity` compiles under `ng build` (previously `unknown` →
-// TS2571).  REQUEST-side value-object / enum fields stay `unknown` (the reactive
+// `order.lines[i].quantity` compiles under `ng build`, where a blanket
+// `unknown` is TS2571.  REQUEST-side value-object / enum fields stay `unknown`
+// (the reactive
 // form holds a VO field as a nested `FormGroup` and an enum as a `""` control,
 // both assignable to `unknown`); request-side precise typing is a separate
 // concern.  (Request-side `id` fields are always `string`, not `unknown` — the

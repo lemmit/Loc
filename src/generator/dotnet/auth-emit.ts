@@ -1042,9 +1042,9 @@ ${wrap}
  *  materialized `data_key` keyed by the tenancy claim, ignore the registry's
  *  own self-scope filter (this is an explicit id lookup, and the Dapper
  *  adapter's filters live in the repositories, not here), and yield `null` on
- *  every failure path so the middleware falls back to the claim.  The EF file
- *  used to be emitted whatever the adapter was, which does not compile on a
- *  Dapper deployable: no `Microsoft.EntityFrameworkCore`, no `AppDbContext`. */
+ *  every failure path so the middleware falls back to the claim.  Emitting the
+ *  EF file regardless of adapter does not compile on a Dapper deployable: no
+ *  `Microsoft.EntityFrameworkCore`, no `AppDbContext`. */
 function renderDapperOrgPathResolver(ns: string, registry: AggregateIR): string {
   const table = dapperAggregateTable(registry.name);
   const dataKeyColumn = snake("dataKey");

@@ -56,10 +56,10 @@ export interface FlutterRead {
    *  Present only for a named find; `.all` / `.byId` leave it undefined and
    *  emit exactly as before.  The provider becomes a `.family` keyed by a Dart
    *  RECORD of these params, which is what the page walker already calls
-   *  (`ref.watch(productNamedProvider((n: 'x')))`) — before this, the walker
-   *  emitted that call and the import for a provider the collector never
-   *  produced, so the generated project had a dangling `import '../reads.dart'`
-   *  and would not pass `flutter analyze`. */
+   *  (`ref.watch(productNamedProvider((n: 'x')))`).  Without the params here
+   *  the walker emits that call and its import for a provider this collector
+   *  never produces — a dangling `import '../reads.dart'` that fails
+   *  `flutter analyze`. */
   params?: ReadonlyArray<{ name: string; dartType: string }>;
   /** The derived entity-history read (`<api>.<Agg>.history(id)`, docs/audit.md)
    *  — a `.family<List<AuditEntry>, String>` keyed by the route id, fetching
@@ -187,9 +187,9 @@ function queryViewOfArgs(body: ExprIR): ExprIR[] {
  *  QueryView { of: Api.Order.all, … } }` hosts its read exactly as a page does
  *  (`component-emit.ts` emits it as a `ConsumerWidget` whose `build` hoists the
  *  same `ref.watch(<var>Provider)`), so the provider it watches has to be in
- *  `reads.dart`.  Before this, a read-bearing component was dropped whole —
- *  declaration AND every call site — and the page fell back to the "unknown
- *  layout component" comment. */
+ *  `reads.dart`.  A read-bearing component whose provider is missing is
+ *  dropped whole — declaration AND every call site — leaving the page on the
+ *  "unknown layout component" comment. */
 export function collectFlutterReads(
   ui: UiIR | undefined,
   contexts: readonly EnrichedBoundedContextIR[],
@@ -235,9 +235,8 @@ export function collectFlutterReads(
       // The derived entity-history read (docs/audit.md).  Not a lifecycle op
       // and not in `repo.finds` (`historyFind` sits BESIDE it), so both the
       // lifecycle branch and the named-find lookup below are blind to it —
-      // which is exactly what used to leave the walker referencing
-      // `<agg>HistoryProvider` for a provider this collector never emitted
-      // (the reason flutter sat outside `HISTORY_CAPABLE_FRAMEWORKS`).  Gated
+      // so without this arm the walker references `<agg>HistoryProvider` for
+      // a provider this collector never emits.  Gated
       // on the SHARED predicate the walker uses plus the repo actually
       // carrying the derived find, so an author-declared `find history(...)`
       // falls through to the named-find path, exactly as it wins on the JS
@@ -364,10 +363,10 @@ function renderReadProvider(read: FlutterRead): string {
   // fixed URL with nothing to key on, so both are a PLAIN `FutureProvider` —
   // which is also what the call site already emits for them (`renderApiHoisting`
   // watches the bare `<var>Provider` when a read renders no args).  A zero-param
-  // find used to fall into the `.family` branch below, whose key type is a Dart
-  // RECORD of the params: with none, that spells `({})`, and the empty record
-  // type in Dart is `()`.  The result did not analyze at all — 19 errors from
-  // one line, cascading into every page that watched the provider.
+  // find must NOT fall into the `.family` branch below, whose key type is a
+  // Dart RECORD of the params: with none that spells `({})`, where Dart's empty
+  // record type is `()` — one line that fails to analyze, cascading into every
+  // page that watches the provider.
   if (read.projection || read.params?.length === 0) {
     // A SINGLETON projection returns ONE object and a GROUPED one a bare array
     // — neither is the paged `{items: […]}` envelope a `.all` read unwraps, and

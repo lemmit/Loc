@@ -114,12 +114,12 @@ export function renderHttpIndex(
   // FOLDED projections drive the event-fold tee + `http/projections.ts` mount.
   // Query-time projections (read-path-architecture.md rev.13) have no folds —
   // they mount their own `/projections` router from `http/query-projections.ts`.
-  // FOLDED projections now emit on BOTH persistence adapters (the MikroORM
-  // read-model store + fold routes land via `buildProjectionsFile(..., usingMikro)`),
-  // so the fold tee + `/projections` mount are no longer drizzle-gated.
+  // FOLDED projections emit on BOTH persistence adapters (the MikroORM
+  // read-model store + fold routes ride `buildProjectionsFile(..., usingMikro)`),
+  // so the fold tee + `/projections` mount are NOT drizzle-gated.
   const hasProjections = ctx.projections.some(isMaterializedProjection);
-  // Persistence-neutral since M-T6.23 slice 4 (the query-projection routes emit
-  // on both adapters), so the `/projections` mount is no longer drizzle-gated.
+  // Persistence-neutral (the query-projection routes emit on both adapters),
+  // so the `/projections` mount is NOT drizzle-gated.
   const hasQueryProjections = ctx.projections.some(isQueryTimeProjection);
   // Transactional-outbox tier (dispatch-delivery-semantics.md): when any
   // channel asks for durability (`retention: log | work`), createApp's
@@ -134,9 +134,8 @@ export function renderHttpIndex(
   // Realtime SSE wire (channels.md Part I): any `delivery: broadcast`
   // channel makes its carried events UI-observable — createApp wraps its
   // default dispatcher with the realtime tee and mounts GET /realtime/events.
-  // Persistence-neutral since M-T6.23 slice 5: `http/realtime.ts` emits on both
-  // adapters (it reads no `db`), so the tee + the `/realtime` mount are no longer
-  // drizzle-gated.
+  // Persistence-neutral: `http/realtime.ts` emits on both adapters (it reads no
+  // `db`), so the tee + the `/realtime` mount are NOT drizzle-gated.
   const wireRealtime = realtimeEventTypes(ctx).size > 0;
   const realtimeImport = wireRealtime
     ? `import { realtimeRoutes, realtimeTee } from "./realtime";`
@@ -243,8 +242,8 @@ export function renderHttpIndex(
         // hand-building a body.  This route is mounted on the ROOT app, which
         // carries the domain ladder below (M-T6.28), so the throw is rendered as
         // the same RFC 7807 envelope every other absent read answers with —
-        // including the `httpStatus NotFound -> <Code>` override, which used to
-        // move every 404 in the app EXCEPT this one.
+        // including the `httpStatus NotFound -> <Code>` override, which a
+        // hand-built body would not honour.
         "    if (!obj) throw new AggregateNotFoundError(`File ${key} not found`);",
         `    // Copy into a standalone ArrayBuffer — Hono's c.body() rejects a`,
         `    // Uint8Array whose backing buffer is only ArrayBufferLike.`,

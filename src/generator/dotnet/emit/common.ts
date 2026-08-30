@@ -317,13 +317,12 @@ public sealed class InProcessDomainEventDispatcher : IDomainEventDispatcher
  * python, elixir and — since this — java and dotnet all send.  Same PRODUCER
  * either way, which is the whole of RS-27's "don't hand-roll a 404".
  *
- * Both .NET find-absence arms used to `return NotFound();` — ASP.NET's own bare
- * 404, which never reaches `DomainExceptionFilter` and is instead rendered by
- * `ProblemDetailsFactory`.  That produced FOUR wrong members at once:
+ * Neither .NET find-absence arm may `return NotFound();` — ASP.NET's own bare
+ * 404 never reaches `DomainExceptionFilter` and is rendered by
+ * `ProblemDetailsFactory` instead, which gets FOUR members wrong at once:
  * `type` = the rfc9110 §15.5.5 URI instead of `about:blank`, `detail` = null,
  * `instance` = null, plus an injected `traceId` the envelope must not carry —
- * an [RS-22] violation on every count, and exactly the divergence RS-22 already
- * names for the arms "nobody had converted".
+ * an [RS-22] violation on every count.
  *
  * The shared filter arm renders `Problem(context, 404, "Not Found", nf.Message,
  * …)`, whose helper sets `Type = "about:blank"` and `Instance` = the request

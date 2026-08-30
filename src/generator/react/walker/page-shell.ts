@@ -537,8 +537,7 @@ ${gate.import}${reactImport}${decimalImportFor(belowImports, decimalImport)}${re
  *  `useState<Decimal>(new Decimal("0"))` needs the binding.  That misses every
  *  OTHER way a page body produces a `Decimal`: `jsExprLeaves.exprConvert`
  *  emits `new Decimal(…)` for a cast to money, and the shared intrinsic table
- *  emits `Decimal.min`/`Decimal.max`/`Decimal.ROUND_HALF_UP` — which is why
- *  those three arms had to be declined before this existed.
+ *  emits `Decimal.min`/`Decimal.max`/`Decimal.ROUND_HALF_UP`.
  *
  *  Deciding it by scanning the RENDERED file body covers all three producers
  *  at once and cannot drift as the tables change — the same detect-once shape
@@ -1136,11 +1135,11 @@ export function renderUserComponentFile(
       }
       return action.arg ? "(arg: string) => void" : "() => void";
     }
-    // Component props carry their DECLARED type.  This used to call
-    // `typeRefAsTsString`, whose `string` answer is right for a ROUTE param
-    // (React Router hands every `:id` over as a string) but wrong here: it
-    // typed `component Badge(level: int)` as `level: string`, making `level >
-    // 2` a TS2365 and `<Badge level={count} />` a TS2322.  Shared with Vue and
+    // Component props carry their DECLARED type — NOT `typeRefAsTsString`,
+    // whose `string` answer is right for a ROUTE param (React Router hands
+    // every `:id` over as a string) but wrong here: it types
+    // `component Badge(level: int)` as `level: string`, making `level > 2` a
+    // TS2365 and `<Badge level={count} />` a TS2322.  Shared with Vue and
     // Svelte — all three emit the same language.
     return componentPropTsType(p.type, aggregatesByName, dtoImports);
   };

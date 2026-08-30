@@ -8,12 +8,11 @@
 // carries the registry key + project deps and wraps the same emitters on the
 // formal contract for the eventual clean orchestrator dispatch.
 //
-// It used to also "publish the capability surface the validator reads to accept
-// the selection and gate it (`supports` / `supportedShapes`)".  The validator
-// never read either one, and `supportedShapes: ["relational"]` sat here stale
-// and false for the whole of the parity described below.
+// It publishes NO capability surface (`supports` / `supportedShapes`): the
+// validator reads none, and an unread declaration here goes stale — see
+// `_adapters/persistence-surface.ts`.
 //
-// CAPABILITY — at EF-Core parity since M-T6.9 (drained across 7 waves): every
+// CAPABILITY — at EF-Core parity: every
 // relational / document / embedded / event-sourced / inheritance shape,
 // containment (incl. recursive part-in-part), associations, audit, provenance,
 // managed fields, retrievals, seeds and the workflow outbox all emit.

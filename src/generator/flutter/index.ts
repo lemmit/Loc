@@ -638,8 +638,8 @@ function renderPage(
 
   // A page becomes a Riverpod `ConsumerWidget` (bound to `ref`) when it either
   // projects reactive state / actions (Track D) OR issues a QueryView read
-  // (this slice — `ref.watch(<var>Provider)`).  Display-only pages with neither
-  // stay plain `StatelessWidget`s (Track A/B/C skeleton).
+  // (`ref.watch(<var>Provider)`).  Display-only pages with neither stay plain
+  // `StatelessWidget`s.
   const stateful = hasRiverpodState(page) && (usesState || usedActions.size > 0);
   // A store read/call needs a `WidgetRef` too (`ref.watch(cartProvider…)`), so a
   // page whose only reactive input is a store is still a `ConsumerWidget` — the
@@ -710,8 +710,8 @@ function routeArgBindings(paramNames: readonly string[], needsId: boolean): stri
   return out;
 }
 
-/** What a `ConsumerWidget` page's `build` binds — reactive state/actions (Track
- *  D) and/or QueryView read hoists (this slice). */
+/** What a `ConsumerWidget` page's `build` binds — reactive state/actions
+ *  and/or QueryView read hoists. */
 interface ConsumerBindings {
   usesState: boolean;
   usedActions: ReadonlySet<string>;

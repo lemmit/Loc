@@ -1228,9 +1228,9 @@ function renderHandler(
   // outside the SDK's implicit-usings set — collect them per file.
   const usings = new Set<string>();
   // The `IsolationLevel.X` enum literal passed to `IUnitOfWork.BeginTransactionAsync`
-  // (audit S7 Slice C) lives in System.Data.  The transaction itself now goes
-  // through the domain `IUnitOfWork` port, NOT `_db.Database.BeginTransactionAsync`,
-  // so the handler no longer needs the EntityFrameworkCore namespace.
+  // lives in System.Data.  The transaction itself goes through the domain
+  // `IUnitOfWork` port, NOT `_db.Database.BeginTransactionAsync`, so the
+  // handler needs no EntityFrameworkCore namespace.
   if (wf.transactional && effectiveIsolation) usings.add("System.Data");
   if (usesUser) usings.add(`${ns}.Auth`);
   // Field declarations for injected dependencies.

@@ -144,8 +144,8 @@ function renderSfc(spec: DataGridSpec): string {
   // markup with no import-registration channel, so the whole set comes in
   // unconditionally and the generated tsconfig keeps `noUnusedLocals` off.
   // The child needs its OWN copy because a computed cell's markup lands here,
-  // not on the page — a `DateDisplay` column rendered `formatDateTime(...)`
-  // against nothing at all before this line existed.
+  // not on the page — without it a `DateDisplay` column renders
+  // `formatDateTime(...)` against nothing at all.
   const formatImport = `import { ${FORMAT_MODULE_EXPORTS.join(", ")} } from "../lib/format";`;
 
   return `${lines(

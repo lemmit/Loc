@@ -429,11 +429,11 @@ export function generateReactForContexts(
       authUi,
       i18nEnabled,
       // Where each conventional page ACTUALLY landed.  The shell's
-      // per-aggregate / -workflow loops used to rebuild `./pages/<plural>/list`
-      // by convention, which diverges from `page.emitPath` the moment the
-      // author re-declares a scaffold page inside an `area { … }` — the shell
-      // then imported the scaffolded module and the author's page became a
-      // silently unreachable file.
+      // per-aggregate / -workflow loops must NOT rebuild
+      // `./pages/<plural>/list` by convention: that diverges from
+      // `page.emitPath` the moment the author re-declares a scaffold page
+      // inside an `area { … }`, and the shell then imports the scaffolded
+      // module while the author's page becomes a silently unreachable file.
       buildPageModuleIndex(ui, pageCtx),
     ),
   );

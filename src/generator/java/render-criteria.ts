@@ -96,7 +96,7 @@ function bool(e: ExprIR, ctx: CriteriaCtx): string {
     case "method-call":
       // (The `deep` / DENY authorization filter sentinels moved to the
       // discriminated `authz-filter` kind in M-T9.9 — handled in its own case
-      // above, no longer a `method-call` marker here.)
+      // above, not a `method-call` marker here.)
       // Reference-collection membership.
       if (e.member === "contains" && e.receiverType.kind === "array" && e.args.length === 1) {
         const segs = pathSegments(e.receiver);
@@ -409,8 +409,8 @@ function deepScopeCriteria(
   // — a cross-tenant read with no attacker, just an underscore in a name.
   // `cb.locate(x, pattern) = 1` has no pattern language; the needle is lifted
   // with `cb.literal` because `locate` takes Expressions, and it stays
-  // null-safe for an absent principal exactly as the old pattern did (a null
-  // needle yields a null predicate operand → no rows, fail-closed).
+  // null-safe for an absent principal (a null needle yields a null predicate
+  // operand → no rows, fail-closed).
   const orgNeedle = `cb.literal((currentUser == null ? null : currentUser.${orgMember}() + "${DATA_KEY_PATH_DELIMITER}"))`;
   const anchored = `cb.equal(cb.locate(${dataKeyPath}, ${orgNeedle}), 1)`;
   // SARGABLE PREFILTER (M-T3.17).  `locate(...) = 1` is a function of the

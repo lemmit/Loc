@@ -239,7 +239,7 @@ const SPELLINGS: Record<PackFormat, ChromeSpelling> = {
 };
 
 /** Substitute a message's ICU holes with their literal values — the i18n-OFF
- *  rendering, which must reproduce the bytes the template used to spell. */
+ *  rendering, which must reproduce the bytes the template spells inline. */
 function fillHoles(message: string, holes: ReadonlyArray<[string, string]>): string {
   const byName = new Map(holes);
   return message.replace(HOLE, (whole, name: string) => byName.get(name) ?? whole);
@@ -255,7 +255,7 @@ function holesOf(options: Handlebars.HelperOptions): Array<[string, string]> {
 
 /** Every `.hbs` helper this module binds, for one pack in one i18n state.
  *  `i18n: false` (the default a pack loads in) yields the raw bytes the
- *  template previously spelled inline. */
+ *  template spells inline. */
 export function chromeHelpers(
   manifest: { name: string; chrome?: Record<string, string>; format?: PackFormat },
   i18n: boolean,

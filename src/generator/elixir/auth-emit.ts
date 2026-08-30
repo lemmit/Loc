@@ -707,13 +707,13 @@ function renderDevStubVerifier(user: UserIR | undefined): string {
   // The stub identity is DERIVED FROM THE DECLARED `user { … }` SHAPE — one
   // type-shaped value per declared field — not a fixed three-key map (#2548).
   //
-  // It used to be `%{"id" => …, "role" => "admin", "permissions" => []}`, which
-  // `build_user/1` then read by declared field name: a field named `role` got
-  // "admin" by coincidence of NAME (and regardless of its declared TYPE — an
-  // `int` role was handed a string), and every other declared field — the
-  // `tenantId` of every tenancy system among them — came back `nil` while the
-  // other four backends filled it.  `/api/auth/me` is a contract over the
-  // declared shape, so a non-optional field must not answer null; the
+  // A fixed `%{"id" => …, "role" => "admin", "permissions" => []}` is read by
+  // `build_user/1` by declared field name, so a field named `role` gets "admin"
+  // by coincidence of NAME (and regardless of its declared TYPE — an `int` role
+  // handed a string), while every other declared field — the `tenantId` of
+  // every tenancy system among them — comes back `nil`.  `/api/auth/me` is a
+  // contract over the declared shape, so a non-optional field must not answer
+  // null; the
   // `x-loom-dev-claims` override below is already keyed by declared field name,
   // and this makes the DEFAULT it merges over agree with it.
   //

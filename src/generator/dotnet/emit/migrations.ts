@@ -69,11 +69,11 @@ export function emitDotnetProvenanceAuditMigration(
 ): void {
   const stmts: string[] = [];
   if (opts.provenance) {
-    // The `provenance_records` DDL moved to the shared MigrationsIR
-    // (`provenanceTableShape`) so all five backends derive it from one place —
-    // and the copy that used to live here was already drifting: it created only
-    // the `(target_type, field)` index, silently omitting the `correlation_id`
-    // one its four siblings emit.  What stays is the per-aggregate half:
+    // The `provenance_records` DDL lives in the shared MigrationsIR
+    // (`provenanceTableShape`) so all five backends derive it from one place; a
+    // per-backend copy drifts (one such copy created only the
+    // `(target_type, field)` index, silently omitting the `correlation_id` one
+    // its siblings emit).  What stays here is the per-aggregate half:
     // Co-located current-lineage column per provenanced field, on each owning
     // aggregate's table.  The table is schema-/prefix-qualified the same way
     // efcore.ts `ToTable` derives it from the resolved dataSource binding, so

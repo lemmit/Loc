@@ -639,9 +639,9 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   //
   // The producers are the shared intrinsic table's money arms —
   // `Decimal.min` / `Decimal.max` / `toDecimalPlaces(…, Decimal.ROUND_HALF_UP)`
-  // — which `renderJsIntrinsic` used to DECLINE precisely because the page
-  // shells had no way to bring the binding into scope.  Declining fell through
-  // to a verbatim `amt.min(x)`, which decimal.js has no instance method for.
+  // — which `renderJsIntrinsic` renders only because the page shell brings the
+  // binding into scope here.  Declining them instead falls through to a
+  // verbatim `amt.min(x)`, which decimal.js has no instance method for.
   if (usesDecimalBinding(result.tsx)) {
     imports.push(`import Decimal from "decimal.js";`);
     members.push(`  protected readonly Decimal = Decimal;`);

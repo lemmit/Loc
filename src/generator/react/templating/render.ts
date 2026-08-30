@@ -137,7 +137,6 @@ export function renderMain(pack: LoadedPack, basename?: string, authUi = false):
   });
 }
 
-// BoundedContextIR is re-exported below for callers that import
-// it via this module — preserves the original import surface even
-// though render.ts no longer needs it directly.
+// BoundedContextIR is re-exported below for callers that import it via this
+// module; render.ts itself does not use it.
 export type { BoundedContextIR };

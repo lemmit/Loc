@@ -126,7 +126,7 @@ export function prepareAppShellVM(
   pageModules: ReadonlyMap<string, string> = new Map(),
 ): AppShellVM {
   /** Where the page filling `slot` actually landed, else the conventional
-   *  path this preparer used to hard-code. */
+   *  path. */
   const moduleFor = (slot: string, conventional: string): string =>
     pageModules.get(slot) ?? conventional;
   const imports: ImportVM[] = [];

@@ -118,8 +118,7 @@ function recordQualifiedSeed(
 //     TOP-LEVEL refs — `customerAll.data` in a `v-if` would otherwise
 //     be an always-truthy Ref.  `reactive()` deep-unwraps, so the
 //     SAME rendered expression reads correctly in template and
-//     script positions.  (This is the vue-query surface decision the
-//     plan gates in this slice.)
+//     script positions.
 //   - the walker emits `navigate("/path")` for `Button(to:)` — a
 //     local `const navigate = (to: string) => { void router.push(to) }`
 //     adapter keeps that contract without a new WalkerTarget seam.

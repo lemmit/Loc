@@ -176,11 +176,11 @@ export function emitDataGrid(
           nextLabel: localizedChromeText(ctx, "next"),
           filterPlaceholderAttr: localizedChromeAttr(ctx, "placeholder", "filter"),
           // The position counter — one ICU message, not a "Page " + n + " of "
-          // + m concatenation the packs used to spell inline, so a locale can
+          // + m concatenation spelled inline in each pack, so a locale can
           // re-order the two numbers.  The hole EXPRESSIONS come from here
-          // rather than staying in each template because the message around
-          // them now belongs to the catalog: leaving `Page …` in fifteen `.hbs`
-          // files and the holes here would be one sentence with two owners.
+          // rather than each template because the message around them belongs
+          // to the catalog: `Page …` in fifteen `.hbs` files with the holes
+          // here would be one sentence with two owners.
           // They read `table`, the TanStack instance every one of those
           // templates already binds, so this is the same vocabulary the pack
           // markup around it uses.

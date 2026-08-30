@@ -113,8 +113,8 @@ export interface FelizRead {
   /** A USER-DECLARED repository find (`<api>.<Agg>.<find>(args)`) rather than a
    *  lifecycle op.  Init-fired and id-less like a list read (so `single` stays
    *  false), but its fetch carries the find's declared parameters as a query
-   *  string — which is exactly the fact that used to be unrepresentable here,
-   *  so EVERY non-`all`/`byId` read collapsed onto the `All<Plural>` field. */
+   *  string.  Without that fact represented here, EVERY non-`all`/`byId` read
+   *  collapses onto the `All<Plural>` field. */
   find?: FelizFindRead;
   /** A query-time PROJECTION read (M-T1.3) rather than an aggregate
    *  read.  It is SINGLE-shaped like a byId (`Remote<'T option>`, rendered by
@@ -507,13 +507,13 @@ export function projectionRowType(projection: string): string {
 
 /** Build the `FelizRead` for a query-time projection.
  *
- *  THE SHAPE IS ASKED, NOT ASSUMED.  This used to take only the projection's
- *  NAME, which made the shape question structurally unaskable — so every
- *  projection read was hard-coded to the singleton (`'Row option`) form.  A
- *  `group by` read returns a JSON ARRAY, and the halves then disagreed with
- *  each other: the wire decoded one object into `Remote<Row option>` while the
- *  walker (which does ask, via `queryShape`) rendered `View.remoteList` — a
- *  matcher `renderViewModule` had not even emitted, because its `hasList` also
+ *  THE SHAPE IS ASKED, NOT ASSUMED.  Taking only the projection's NAME makes
+ *  the shape question structurally unaskable, hard-coding every projection read
+ *  to the singleton (`'Row option`) form.  A `group by` read returns a JSON
+ *  ARRAY, and the two halves then disagree: the wire decodes one object into
+ *  `Remote<Row option>` while the walker (which does ask, via `queryShape`)
+ *  renders `View.remoteList` — a matcher `renderViewModule` never emitted,
+ *  because its `hasList` also
  *  assumed every projection was single.  The result was F# that named an
  *  undefined function AND mistyped the field it passed it: a `dotnet fable`
  *  break for any Feliz ui reading a grouped projection, from a model with no
@@ -1316,8 +1316,9 @@ function exprChildren(e: ExprIR): ExprIR[] {
  *
  *  Which primitives those are is the REGISTRY's answer (`readsOf`), not a list
  *  kept here — see `_walker/of-reads.ts` for why: this collector and Flutter's
- *  twin each used to enumerate them by name, and both missed `Chart`.  On
- *  Elmish the read IS the Model field the view names, so a body whose only read
+ *  twin enumerating them by name is two copies that both miss the next new
+ *  one.  On Elmish the read IS the Model field the view names, so a body whose
+ *  only read
  *  is a chart otherwise emits `View.chart … model.<Field>` against a field no
  *  Model declares, no Cmd fills and no update arm stores. */
 function queryViewOfArgs(body: ExprIR): { of: ExprIR; explicitPaged: boolean }[] {
@@ -1460,9 +1461,9 @@ function collectBodyReads(
     // A USER-DECLARED repository find — the parameterised query.  Resolved
     // against the aggregate's repository so the read carries the find's own
     // Model field, route and parameter list.  Everything that reaches here and
-    // is NOT a declared find would previously have been mapped to
-    // `All<Plural>` by the target's `buildHookUse` — a Model field nothing
-    // declares, a fetch nothing issues — so it fails loudly instead.
+    // is NOT a declared find fails LOUDLY here — mapping it to `All<Plural>`
+    // in the target's `buildHookUse` yields a Model field nothing declares and
+    // a fetch nothing issues.
     else if (detected.operation !== "byId" && !isEntityHistoryRead(ofArg, aggregatesByName)) {
       const find = findOnAggregate(bcByAggregate, detected.aggregateName, detected.operation);
       if (!find) {

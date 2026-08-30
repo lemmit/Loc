@@ -708,11 +708,11 @@ function emitProjectFromContexts(
   // adapters — the shared ProvLineage SDK + the co-located `<field>_provenance`
   // columns + the append-only `provenance_records` flush; the Dapper repository
   // flushes via raw Npgsql (DbSchema owns the history table's DDL) instead of
-  // the EF ProvenanceRecord POCO/configuration.  Audit now follows exactly that
-  // shape.  It used to be EF-only (`!usingDapper && …`), but the handler
-  // emitters kept referencing `IAuditWriter` under Dapper while the runtime went
-  // unemitted — a dangling CS0246 on every audited operation, and create/destroy
-  // audit silently dropped.  It is emitted on both adapters now: Dapper stages
+  // the EF ProvenanceRecord POCO/configuration.  Audit follows exactly that
+  // shape, on BOTH adapters — gating it EF-only (`!usingDapper && …`) leaves
+  // the handler emitters referencing `IAuditWriter` under Dapper with no
+  // runtime emitted: a dangling CS0246 on every audited operation, and
+  // create/destroy audit silently dropped.  Dapper stages
   // into a request-scoped buffer the repository drains onto its open
   // transaction, so the atomicity guarantee is the same on both.
   const hasProvenance = contextsHaveProvenance(contexts);

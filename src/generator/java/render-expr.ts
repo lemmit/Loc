@@ -1061,7 +1061,7 @@ const JAVA_TYPE_TARGET: TypeTarget = {
         return "FileRef";
       case "duration":
         // A5 temporal — absolute duration as java.time.Duration.
-        // Expression-only (never a field / wire type in this slice).
+        // Expression-only (never a field / wire type).
         return "Duration";
     }
   },
