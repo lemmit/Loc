@@ -1172,9 +1172,8 @@ function emitProjectFromContexts(
   // aggregate this deployable does not host (`create(orderId: Order id)`)
   // emitted `new OrderId(...)` with no `OrderId.java` anywhere, in any
   // channel-less java project.  Valid model, emitter reports success, javac
-  // says "cannot find symbol" — the same shape as the four-way duplication
-  // `src/ir/util/foreign-ids.ts` was extracted to kill.  The SOURCES were
-  // already right here; only the gate was wrong.
+  // says "cannot find symbol".  The SOURCES are all here; the gate is what
+  // decides which of them get an id class.
   if (system) {
     const hostedIdNames = new Set(
       contexts.flatMap((c) =>
@@ -1287,9 +1286,9 @@ function emitProjectFromContexts(
   }
 
   // Per-module Flyway migrations — empty (non-system entry points) → no-op.
-  // The flyway deps stay as long as ANY migration history exists (a regen
-  // with an unchanged schema emits no new steps, but the previously
-  // emitted V*.sql files still need Flyway to run).
+  // The flyway deps stay as long as ANY migration history exists: a regen with
+  // an unchanged schema emits no new steps, but the already-emitted V*.sql
+  // files still need Flyway to run them.
   const allMigrations = system?.migrations ?? [];
   emitJavaMigrations(allMigrations, out);
   // Provenance DDL (provenance.md) ships as one extra late Flyway migration

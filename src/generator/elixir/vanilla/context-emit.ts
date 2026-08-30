@@ -372,8 +372,8 @@ function renderContextModule(
     // LiveView form lifecycle calls (`change_<agg>(%Agg{})` for a create form,
     // `change_<agg>(record, params)` for validate).  Delegates to the
     // per-aggregate Changeset module's `base_changeset/2`.  A DOCUMENT
-    // aggregate has no `base_changeset` (it round-trips via `document_changeset`),
-    // so skip the facade there — its form path is out of scope for this slice.
+    // aggregate has no `base_changeset` (it round-trips via
+    // `document_changeset`), so the facade is skipped there.
     const changesetMod = `${facadeMod}.${aggPascal}Changeset`;
     const changeFacade = isDoc
       ? ""
@@ -936,8 +936,9 @@ function renderContextRefCollHelpers(appModule: string, includeResolve: boolean)
 // Runs the preconditions (`ensure/2` guard chain), delegates to the co-located,
 // user-owned `<Agg>ExternImpl.<op>(record, params)` hook, then persists the
 // returned (mutated) struct's scalar columns via `force_change` and re-asserts
-// invariants.  Replaces the old empty-`change(%{})` no-op that silently returned
-// 204.  A missing user impl `raise`s (loud 500), never a silent success.
+// invariants — an empty `change(%{})` here would persist nothing and answer a
+// silent 204.  A missing user impl `raise`s (loud 500), never succeeds
+// silently.
 function renderExternOpFunction(
   facadeMod: string,
   agg: AggregateIR,
@@ -977,9 +978,9 @@ function renderExternOpFunction(
   const invPipe = aggregateHasResidualInvariants(agg)
     ? `\n      |> ${changesetMod}.validate_invariants()`
     : "";
-  // Persist EVERY scalar column off the returned struct (not the old empty
-  // `change(%{})`): `force_change` because the changeset data already carries the
-  // new value.  See `externPersistForceChanges`.
+  // Persist EVERY scalar column off the returned struct, not an empty
+  // `change(%{})`: `force_change`, because the changeset data already carries
+  // the new value.  See `externPersistForceChanges`.
   const forceChanges = externPersistForceChanges(agg)
     .map((b) => `\n      |> ${b}`)
     .join("");
@@ -1313,9 +1314,9 @@ ${txTail.join("\n")}
     end)`;
   } else {
     persist = emits
-      ? // Emit, no prov/audit: persist then dispatch after `{:ok, saved}` — a
-        // phantom event can no longer fire on a failed write, and the event
-        // reaches the context Dispatcher (saga seam) + the raw broadcast.
+      ? // Emit, no prov/audit: persist then dispatch after `{:ok, saved}`, so a
+        // failed write cannot fire a phantom event, and the event reaches the
+        // context Dispatcher (saga seam) + the raw broadcast.
         `    changeset =
       ${persistBase}
       |> Ecto.Changeset.change(%{})${putBlock6}${opLockPipe6}${invPipe6}

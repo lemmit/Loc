@@ -270,10 +270,9 @@ export interface WalkContext {
   /** Aggregate PascalCase name → its owning bounded context, so a `QueryView`
    *  `of:` read can be resolved to the repository find behind it.  That is what
    *  `queryShape` needs to DERIVE whether the read is paged and whether it
-   *  yields one record — facts the LiveView renderer previously took from the
-   *  author's `paged:` / `single:` flags alone, and got wrong whenever they
-   *  were absent.  Empty default ⇒ the collection shape, i.e. the old
-   *  behaviour. */
+   *  yields one record.  Taking those from the author's `paged:` / `single:`
+   *  flags alone gets them wrong whenever the flags are absent.  Empty
+   *  default ⇒ the collection shape. */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
   /** Frontend-readable projection names (M-T1.3) — the detector's
    *  Pattern H set, so `QueryView { of: <api>.<Projection> }` resolves to the
@@ -315,9 +314,9 @@ export interface WalkContext {
   stateNames: Set<string>;
   /** Per-field StateFieldIR keyed by snake-cased name.  Drives
    *  `heexTarget.renderStateRead` delegation — the contract's
-   *  `StateRef` carries the full field, but the walker historically
-   *  carried only the name set.  Built once at walker entry next
-   *  to `stateNames` so lookups stay symmetric. */
+   *  `StateRef` carries the full field, which the bare `stateNames` set
+   *  cannot supply.  Built once at walker entry next to `stateNames` so
+   *  lookups stay symmetric. */
   stateFields: Map<string, StateFieldIR>;
   /** Accumulated handle_event clauses. */
   handlers: HandleEventClause[];
@@ -1142,7 +1141,7 @@ function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): 
   // here through an expression position would be wrapped as `<%= <!-- … --> %>`
   // — a syntax error `mix compile` rejects.  `<%!-- … --%>` is inert in both
   // positions (`isHEExCall` also keeps every registered primitive in markup
-  // position, so the wrap no longer happens either).
+  // position, so the wrap does not arise).
   if (def) {
     return `<%!-- ${expr.name}: not supported by Phoenix LiveView target --%>`;
   }
@@ -2402,8 +2401,8 @@ export function defaultInitFor(t: TypeIR): string {
 // Helpers.
 // ---------------------------------------------------------------------------
 
-// the target through the cross-framework contract above; this file
-// no longer carries the path → module name derivation.
+// the target through the cross-framework contract above; the path → module
+// name derivation does not live in this file.
 
 export function indent(s: string, n: number): string {
   const pad = " ".repeat(n);

@@ -18,11 +18,11 @@ export function smokeSpec(ui: UiIR, nameCtx: PageNameCtx): string {
   // pages map onto page-object files — a custom-page ui emits
   // `pages/<page>.ts` (class `<Page>Page`), a scaffold ui emits
   // `pages/<aggregate>.ts` (class `<Agg>ListPage`), and a ui covers only
-  // the aggregates it actually shows.  The old per-served-aggregate
-  // `import { <Agg>ListPage } from "./pages/<agg>"` assumed the scaffold
-  // shape for every served aggregate and broke (module-not-found →
-  // Playwright "No tests found" → non-zero exit) on any ui with custom or
-  // partial pages.  Richer per-page scenarios live in the page objects
+  // the aggregates it actually shows.  A per-served-aggregate
+  // `import { <Agg>ListPage } from "./pages/<agg>"` assumes the scaffold shape
+  // for every served aggregate and breaks (module-not-found → Playwright "No
+  // tests found" → non-zero exit) on any ui with custom or partial pages.
+  // Richer per-page scenarios live in the page objects
   // under e2e/pages/ and the generated `*.ui.spec.ts`.
   const cases: string[] = [];
   for (const page of ui.pages) {

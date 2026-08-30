@@ -2180,8 +2180,8 @@ function emitVariantMatch(
 }
 
 /** A page event-handler statement the React walker can't lower.  We throw
- *  rather than emit a `/* unsupported *\/` comment: the old comment compiled
- *  fine but silently dropped the statement at runtime (e.g. a button whose
+ *  rather than emit a `/* unsupported *\/` comment: such a comment compiles
+ *  fine but silently drops the statement at runtime (e.g. a button whose
  *  handler does nothing).  Failing generation surfaces the gap loudly — see
  *  the same rationale in src/ir/validate/validate.ts (test-body fallbacks). */
 /** Immutable React state write for a (possibly nested) `state` target.
@@ -2265,9 +2265,8 @@ export interface NavTarget {
  *  route-param ref and returned `undefined` for everything else, so a computed
  *  `to:` was SILENTLY DROPPED — the anchor/button rendered with no navigation
  *  at all, on six of the seven frontends, with no diagnostic.  (HEEx, which
- *  runs its own engine, always rendered it correctly — that is the intended
- *  semantics this brings the walker targets up to.)  The param-ref case is
- *  fixed here too: it used to come back as a JS TEMPLATE LITERAL
+ *  runs its own engine, renders it correctly — that is the intended
+ *  semantics.)  A param ref must not come back as a JS TEMPLATE LITERAL
  *  (`` `${id}` ``), which is neither valid in a JSX/HTML attribute position nor
  *  valid F#/Dart at all.
  *

@@ -118,7 +118,7 @@ export function renderAggregate(
   // User` parameter typechecks.  Files emitted under deployables
   // without `auth: required` don't import this — and operations
   // can't reference currentUser there because the validator gates it.
-  // Lifecycle stamps no longer thread the principal into the domain (it's
+  // Lifecycle stamps do NOT thread the principal into the domain (it is
   // stamped persist-time in the drizzle save()), and the leading `requires`
   // gates are hoisted to the calling handler (`src/ir/util/op-gates.ts`), so
   // only what REMAINS of an operation body can pull the principal in here.
@@ -140,11 +140,11 @@ export function renderAggregate(
   const usesForbidden = agg.operations.some((op) =>
     operationBody(op).some((s) => s.kind === "requires"),
   );
-  // DisallowedError — the `when` state gate (M-T6.38).  The gate used to be a
-  // ROUTE-layer check only, so a workflow step / saga cascade / extern handler
-  // calling the domain method directly slipped past it and the refused write
-  // landed silently.  It is now emitted at the domain-method entry too, so the
-  // import follows any `when`-carrying operation.
+  // DisallowedError — the `when` state gate.  Emitted at the DOMAIN-METHOD
+  // entry, not only at the route layer: a workflow step / saga cascade / extern
+  // handler calls the domain method directly and would otherwise slip past the
+  // gate, landing the refused write silently.  So the import follows any
+  // `when`-carrying operation.
   const usesDisallowed = agg.operations.some((op) => !!op.when);
   const errorsImportList = [
     usesDisallowed && "DisallowedError",
@@ -813,13 +813,13 @@ function renderEntity(
       ]
     : [];
 
-  // Lifecycle stamps (audit / softDelete capability stamps) are NO LONGER
-  // emitted on the domain entity.  Persist-time auditing
-  // (node-persist-time-auditing) relocated stamping into the drizzle `save()`
+  // Lifecycle stamps (audit / softDelete capability stamps) are NOT emitted on
+  // the domain entity.  Stamping happens persist-time in the drizzle `save()`
   // (db/audit-stamp.ts), reading the principal from the ambient request
-  // context — so the aggregate stays pure (no `_stampOnCreate`/`_stampOnUpdate`)
-  // and the route handler never stamps.  The audit FIELDS + getters
-  // (createdAt/createdBy/updatedAt/updatedBy) remain, as before.
+  // context, so the aggregate stays pure (no
+  // `_stampOnCreate`/`_stampOnUpdate`) and the route handler never stamps.
+  // The audit FIELDS + getters (createdAt/createdBy/updatedAt/updatedBy) are
+  // still emitted.
 
   // Event-sourcing fold (appliers A2): one `_apply<Event>` method per
   // applier (body rendered at the natural method-body depth), a `_apply`

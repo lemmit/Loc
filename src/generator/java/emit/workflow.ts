@@ -239,10 +239,10 @@ export function javaWorkflowStmtTarget(
       // anything else is a declared `find` the repository interface emits under
       // exactly that name, and the args are already domain-typed by the lowerer.
       //
-      // Java used to special-case a find literally named `byId`, renaming it to
-      // `getById` AND wrapping its first argument in `new <Agg>Id(...)`.  No
-      // other backend did (`_orders.ById(...)`, `orders.by_id(...)`), and both
-      // halves were wrong: the rename calls a method the declared find is not,
+      // Deliberately NO special case for a find literally named `byId`.  No
+      // other backend has one (`_orders.ById(...)`, `orders.by_id(...)`), and
+      // both halves of such a case are wrong: renaming it to `getById` calls a
+      // method the declared find is not,
       // and the wrap re-wraps an argument that is ALREADY an `<Agg>Id` whenever
       // the caller passes an `Agg id` param — `getById(new OrderId(orderId))`
       // where `orderId` is an `OrderId`, which does not compile.

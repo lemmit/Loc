@@ -24,11 +24,11 @@
 // struct.  Paged finds build the wire envelope in memory, union finds
 // return the single-get tuple the shared find controller tags, and an
 // AUDITED op — named or returning — records its audit row
-// inside the persist transaction.  A mutating RETURNING op re-embeds + persists its
-// write, projecting the wire off the saved embed (#1774 — it previously dropped the
-// write).  Collection READS over the aggregate's own in-memory lists work too —
-// Route A made a containment a real `embeds_many` and a scalar array an
-// `{:array, _}` field, so `lines.sum(l => l.qty)` renders through the shared
+// inside the persist transaction.  A mutating RETURNING op re-embeds + persists
+// its write, projecting the wire off the SAVED embed rather than the in-memory
+// struct.  Collection READS over the aggregate's own in-memory lists work too:
+// a containment is a real `embeds_many` and a scalar array an `{:array, _}`
+// field, so `lines.sum(l => l.qty)` renders through the shared
 // collection-op table verbatim.  Capability filters are applied IN-APP over the
 // same rehydrated embed (`vanillaDocCapabilityFilter`).  The residual the
 // document path can't express yet — provenanced ops (no per-field prov columns
@@ -916,9 +916,9 @@ ${bodyContent}
  *  `<op>_<agg>_result/2` translates to HTTP (success → 200 + wire, error variant
  *  → RFC-7807).
  *
- *  #1774: a MUTATING returning op now PERSISTS its embed re-write (the relational
- *  sibling always did; the doc path previously projected the mutated struct in
- *  memory and silently dropped the write).  The persist gate is the SAME predicate
+ *  A MUTATING returning op PERSISTS its embed re-write, like the relational
+ *  sibling — projecting the mutated struct in memory instead would silently
+ *  drop the write.  The persist gate is the SAME predicate
  *  the shared returning-op controller uses for its `{:error, %Ecto.Changeset{}}`
  *  clause (`returningOpPersistsChangeset`), so the op fn + controller never
  *  disagree.  A non-committing body (pure read, or an unconditional error return)

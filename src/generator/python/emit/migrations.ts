@@ -72,10 +72,9 @@ export function emitPythonProvenanceMigration(
   out.set(`migrations/${provenanceMigrationTag()}.sql`, renderPyProvenanceMigration(provAggs));
 }
 
-// The LATE audit migration used to live here.  The `audit_records` DDL moved
-// to the shared MigrationsIR (`auditTableShape`) so all five backends derive it
-// from one place — Hono emitted none at all, which made every audited command
-// fail at runtime there.
+// NOTE: no LATE audit migration here.  The `audit_records` DDL lives in the
+// shared MigrationsIR (`auditTableShape`) so all five backends derive it from
+// one place.
 
 export const MIGRATE_PY = `"""Boot-time migration runner.  Auto-generated.
 

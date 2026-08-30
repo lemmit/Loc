@@ -265,14 +265,12 @@ export function renderCreateInput(
   const declared = new Map(forCreateInput(agg.fields).map((f) => [f.name, f.type] as const));
   // Emit EXACTLY the fields the test author wrote.
   //
-  // This used to iterate the whole create-input set and fill each omission,
-  // because `create` was keyword-only with no kwarg defaults and an omission
-  // was `mypy --strict: Missing named argument`.  That made the assertion
-  // vacuous — `test "an omitted default is applied at construction"` writes
-  // `Item.create(name="N")` and checks `qty == 1`, and the fill emitted
-  // `Item.create(name="N", qty=1, …)`, passing the value it then asserted.
+  // Filling each omission from the create-input set would make the assertion
+  // vacuous: `test "an omitted default is applied at construction"` writes
+  // `Item.create(name="N")` and checks `qty == 1`, and the fill would emit
+  // `Item.create(name="N", qty=1, …)`, passing the value it then asserts.
   //
-  // The factory now defaults omittable inputs itself (`factoryDefault` in
+  // The factory defaults omittable inputs itself (`factoryDefault` in
   // emit/aggregate.ts), so the omission both type-checks AND exercises the
   // domain rule under test.
   return obj.fields

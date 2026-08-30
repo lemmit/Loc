@@ -795,12 +795,12 @@ export function whereToSql(e: ExprIR, sqlCtx?: WhereSqlCtx): string {
 
 /** The `authz-filter` sentinels as raw Postgres SQL (M-T9.9 / M-T6.29).  A
  *  discriminated node, so a missing arm is a `tsc` error here rather than a
- *  fall-through to `whereToSql`'s `default:` — which is exactly how the `deny`
- *  carve-out used to reach the generic dispatcher and CRASH codegen on this
- *  adapter (the whole point of giving the sentinel its own `ExprIR.kind`). */
+ *  fall-through to `whereToSql`'s `default:`, where the `deny` carve-out would
+ *  reach the generic dispatcher and CRASH codegen on this adapter.  That is the
+ *  whole point of giving the sentinel its own `ExprIR.kind`. */
 function authzFilterToSql(e: Extract<ExprIR, { kind: "authz-filter" }>): string {
   switch (e.filter.kind) {
-    // DENY carve-out (authorization Phase 4 — deny-wins).  The always-false
+    // DENY carve-out (deny-wins).  The always-false
     // term, ANDed into every read SELECT (and into the write-scope existence
     // pre-guard).  `1 = 0` rather than `FALSE` to match the JPQL/Java rendering
     // and stay a valid standalone predicate in every SQL position.
@@ -1193,7 +1193,7 @@ export function renderDapperRepository(
   // (GetById / FindManyByIds).
   const princSuffix = princFields.length > 0 ? `, ${princFields.join(", ")}` : "";
 
-  // Command-load path (authorization Phase 3 P3.1 / M-T6.29): the write-scope
+  // Command-load path (authorization.md): the write-scope
   // existence pre-guard behind `GetByIdForWriteAsync`, the raw-SQL twin of the
   // EF `AnyAsync(x => x.Id == id && (<scope>))` in `emit/repository.ts`.  EF
   // gets the READ query-filter applied to that `Any` for free; Dapper has no
@@ -1286,7 +1286,7 @@ export function renderDapperRepository(
   // root through `HydrateAsync` (loads each child table + reconstructs the root
   // with its children in State); saves full-list-replace each child table;
   // deletes cascade the children first.  `hasContains` and reference-collection
-  // associations COMPOSE (wave 4): when both are present a read hydrates the
+  // associations COMPOSE: when both are present a read hydrates the
   // child tables first, then `LoadRefsAsync` post-sets the writable
   // ref-collection list on the reconstructed roots (the two hydrate passes run
   // in sequence — columnsOf excludes the assoc field, so HydrateAsync's
@@ -1405,15 +1405,7 @@ export function renderDapperRepository(
     // maps a C# enum PARAMETER to its integer ordinal, so the predicate reaches
     // Postgres as `WHERE status = 1` against a text column — `operator does not
     // exist: text = integer`, a 500 at the route.  The SAVE path in this same
-    // file already spells `.ToString()`; only the find binder had been written
-    // without it, so an enum-keyed find was broken on Dapper for as long as it
-    // has shipped, on every fixture that has one.
-    //
-    // Found 2026-08-05 by the caller-census drain: `core-domain`'s `byStatus`
-    // (a new caller) and `payments`' `byNetwork` (a caller from the preceding
-    // update-route drain) were the first enum-keyed finds ever driven at
-    // runtime, and both were ✗ on the dapper leg — the leg's only two case
-    // failures, one bug.
+    // file spells `.ToString()` for the same reason.
     const paramFields = f.params.map((p) => {
       const pt = p.type.kind === "optional" ? p.type.inner : p.type;
       if (pt.kind === "id") return `${p.name} = ${p.name}.Value`;
@@ -1807,9 +1799,9 @@ export function renderDapperRepository(
       // Transactional outbox (dispatch-delivery-semantics.md §1): the durable
       // events' __loom_outbox rows are INSERTed on `__tx` — the same
       // transaction the write set rides — so the commit below records them
-      // atomically with the state change.  Before this the outbox insert ran
-      // from DispatchAsync AFTER the commit, on its own pooled connection: a
-      // crash in between silently lost an owed event.  `__deferred` is what
+      // atomically with the state change.  Inserting from DispatchAsync AFTER
+      // the commit, on its own pooled connection, loses an owed event to a
+      // crash in between.  `__deferred` is what
       // still needs dispatching post-commit (everything, when no durable
       // channel is wired).
       "        var __pending = aggregate.PullEvents();",

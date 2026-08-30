@@ -4,11 +4,9 @@
 // underlying emit fns directly, mirroring how dotnet's efcore adapter
 // wraps its emitters.
 //
-// This header used to claim the capability answers (supports /
-// supportedStrategies / supportedShapes) were "live from day one —
-// they drive the language-layer dataSource validation".  They never
-// were: nothing in src/ read them, and the dataSource validation runs
-// off the sourceType registry.  The fields are gone; see
+// The adapter carries NO capability answers (supports /
+// supportedStrategies / supportedShapes): nothing in src/ would read them, and
+// the dataSource validation runs off the sourceType registry.  See
 // `_adapters/persistence-surface.ts`.
 // ---------------------------------------------------------------------------
 

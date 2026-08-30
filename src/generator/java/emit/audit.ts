@@ -24,12 +24,11 @@ import { lines } from "../../../util/code-builder.js";
 // per-backend.
 // ---------------------------------------------------------------------------
 
-// `auditedOpsOf` / `aggHasAuditedOp` used to live here (and in the .NET and
-// Python siblings) but were never called by anything — the real gate is
-// `service.ts`'s inline `op.visibility === "public" && op.audited`.  Removed
-// rather than centralized: three unused copies had already drifted apart (the
-// .NET one included lifecycle actions and skipped the visibility filter), so
-// they were a trap for the next reader, not a shared seam.
+// NOTE: there is deliberately no `auditedOpsOf` / `aggHasAuditedOp` helper
+// here or in the .NET / Python siblings.  The real gate is `service.ts`'s
+// inline `op.visibility === "public" && op.audited`; a parallel helper nothing
+// calls drifts from it (one such copy included lifecycle actions and skipped
+// the visibility filter) and reads as a shared seam it is not.
 /** True iff any aggregate in the given contexts carries an `audited` command
  *  action — operation, lifecycle create, OR destroy (the SHARED predicate).
  *  Gates the shared runtime files + the audit_records DDL so a
@@ -196,9 +195,8 @@ export function renderAuditRecordRepository(basePkg: string, withHistory = false
   );
 }
 
-// The `audit_records` DDL is NO LONGER emitted here.  It moved to the shared
-// MigrationsIR (`auditTableShape`, src/system/migrations-builder.ts) so all five
-// backends derive one platform-neutral shape from one place — Hono previously
-// emitted no DDL at all (its table existed only as a Drizzle `pgTable`, which
-// creates nothing), so every audited command failed at runtime there while the
-// other four hand-wrote near-identical late migrations.
+// The `audit_records` DDL is NOT emitted here — it lives in the shared
+// MigrationsIR (`auditTableShape`, src/system/migrations-builder.ts) so all
+// five backends derive one platform-neutral shape from one place.  Hand-written
+// per-backend late migrations drift, and a backend that emits none at all (a
+// Drizzle `pgTable` creates nothing) fails every audited command at runtime.

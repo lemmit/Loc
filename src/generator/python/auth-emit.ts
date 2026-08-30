@@ -455,10 +455,10 @@ function renderAuthMiddleware(
 
 /** `app/auth/routes.py` — the `/auth/me` session probe.
  *
- *  The body is the DECLARED `user { … }` shape, BY DECLARED NAME (#2548).  It
- *  used to be `asdict(user)`, which spells every field the way the dataclass
- *  does — `tenantId` reached the wire as `tenant_id`, while the other four
- *  backends answered the declared name.  `/auth/me` is the one endpoint the
+ *  The body is the DECLARED `user { … }` shape, BY DECLARED NAME — NOT
+ *  `asdict(user)`, which spells every field the way the dataclass does, so
+ *  `tenantId` would reach the wire as `tenant_id` while the other four backends
+ *  answer the declared name.  `/auth/me` is the one endpoint the
  *  frontends' `auth: ui` guard reads, so its keys are a wire contract like any
  *  other; the per-request derived members (`org_path` / `root_org`) stay off it
  *  for the same reason they do on the other backends — they are scoping state,

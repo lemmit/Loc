@@ -255,9 +255,9 @@ export function renderGradleBuild(
     // UUIDv7 (time-ordered) id generation — the JDK has no v7 factory.
     `    implementation("com.fasterxml.uuid:java-uuid-generator:${JAVA_UUID_GENERATOR_VERSION}")`,
     // Flyway runs the emitted db/migration/V*.sql on boot.  Spring Boot 4.x
-    // no longer auto-configures Flyway from `flyway-core` alone — the
+    // does not auto-configure Flyway from `flyway-core` alone — the
     // `spring-boot-starter-flyway` starter is what wires the
-    // FlywayAutoConfiguration, so migrations would silently skip without it.
+    // FlywayAutoConfiguration, so migrations silently skip without it.
     // (versions managed by the imported BOM).  Only shipped when the
     // deployable owns migrations.
     options.flyway

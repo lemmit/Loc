@@ -218,14 +218,13 @@ function absentReturnLines(
   ns: string,
 ): string[] {
   // RS-22/RS-27 — a `none` absence THROWS, so `DomainExceptionFilter` renders
-  // the envelope.  This used to `return NotFound();`: ASP.NET's own bare 404,
-  // which never reaches the filter and is rendered by `ProblemDetailsFactory`
-  // instead — wrong `type` (rfc9110 §15.5.5, not `about:blank`), null `detail`,
-  // null `instance`, plus an injected `traceId` the envelope must not carry.
-  // The identical defect RS-27 fixed on the by-id read, at the arm that reads
-  // `null` and answers locally; it also made ONE controller emit two different
-  // wires for shapes `docs/payloads.md` declares wire-identical, since the
-  // `error`-variant branch below hand-builds a correct ProblemDetails.
+  // the envelope.  A bare `return NotFound();` never reaches the filter and is
+  // rendered by `ProblemDetailsFactory` instead: wrong `type` (rfc9110
+  // §15.5.5, not `about:blank`), null `detail`, null `instance`, plus an
+  // injected `traceId` the envelope must not carry.  It would also make ONE
+  // controller emit two different wires for shapes `docs/payloads.md` declares
+  // wire-identical, since the `error`-variant branch below hand-builds a
+  // correct ProblemDetails.
   if (ua.kind === "none") return [`            ${dotnetFindAbsenceThrow(ns)}`];
   const detail = JSON.stringify(ua.title);
   if (!ua.resource) {
@@ -576,9 +575,9 @@ export function renderOperationActionBlock(
   //      instead of trailing the 422 (same set, attribute order only);
   //   2. a union error arm declares `typeof(ProblemDetails)` — the arm really
   //      does answer a ProblemDetails body (see the dispatch below), so the
-  //      old bare `[ProducesResponseType(<s>)]` under-documented it;
-  //   3. a union arm sharing a status with the when-gate is declared once,
-  //      where the old groups declared it twice (typed + bare).
+  //      a bare `[ProducesResponseType(<s>)]` would under-document it;
+  //   3. a union arm sharing a status with the when-gate is declared ONCE,
+  //      not twice (typed + bare).
   const successDecl = ru
     ? `    [ProducesResponseType(typeof(${ru.appNs}.${ru.unionName}), 200)]`
     : rs
@@ -718,25 +717,23 @@ export function renderExceptionFilter(
   const disallowedStatus = resolveErrorStatus("Disallowed", options?.structuralStatuses);
   const uniquenessStatus = resolveErrorStatus("UniquenessConflict", options?.structuralStatuses);
   const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", options?.structuralStatuses);
-  // M-T5.20 — the domain floor and the `requires` denial resolve through the
-  // same `httpStatus` map as the structural conflicts above, instead of the
-  // hardcoded 422 / 403 literals they used to be. Defaults collapse to those
-  // same literals, so output is byte-identical with no override.
+  // The domain floor and the `requires` denial resolve through the same
+  // `httpStatus` map as the structural conflicts above; the defaults are the
+  // 422 / 403 literals.
   const domainStatus = resolveErrorStatus("DomainError", options?.structuralStatuses);
   const forbiddenStatus = resolveErrorStatus("Forbidden", options?.structuralStatuses);
-  // The last literal of the ladder — the domain not-found rung.  It stayed a
-  // hardcoded 404 while its four siblings resolved, so `httpStatus NotFound ->
-  // <code>` moved this filter's `Disallowed`/`DomainError`/`Forbidden` arms and
-  // silently not its `AggregateNotFoundException` one.  The FRAMEWORK 404 in
+  // The domain not-found rung resolves like its four siblings, so
+  // `httpStatus NotFound -> <code>` moves this filter's
+  // `AggregateNotFoundException` arm as well as its
+  // `Disallowed`/`DomainError`/`Forbidden` ones.  The FRAMEWORK 404 in
   // `Program.cs` (`no route for <verb> <path>`) is a different concern and
   // stays literal.
   const notFoundStatus = resolveErrorStatus("NotFound", options?.structuralStatuses);
-  // A project with no `unique (...)` key emits no 23505 → 409 arm, so a model
-  // without uniqueness is byte-identical to before the feature (the proposal's
-  // strict-additivity guarantee — only a `unique` index can raise 23505).
+  // A project with no `unique (...)` key emits no 23505 → 409 arm — only a
+  // `unique` index can raise 23505.
   const hasUniqueKeys = !!options?.hasUniqueKeys;
-  // A project with no `versioned` aggregate emits no concurrency-conflict arm,
-  // so a non-versioned model is byte-identical (strict additivity).
+  // A project with no `versioned` aggregate emits no concurrency-conflict
+  // arm.
   const hasVersioned = !!options?.hasVersioned;
   // Persistence selection (D-REALIZATION-AXES): the EF adapter surfaces a
   // Postgres unique-violation wrapped in `Microsoft.EntityFrameworkCore.
@@ -952,11 +949,11 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             // failure from the framework's POV, so the body is
             // sanitized to "internal" like every other 500 arm (RS-28).
             //
-            // This previously sent xh.Message, whose intent was to name
-            // the offending op + aggregate so operators didn't have to grep
-            // logs.  But that message interpolates the INNER exception the
-            // user handler threw — driver text, URLs, connection strings —
-            // into a public, potentially unauthenticated response.  The
+            // Deliberately NOT xh.Message: naming the offending op +
+            // aggregate would save operators a log grep, but that message
+            // interpolates the INNER exception the user handler threw —
+            // driver text, URLs, connection strings — into a public,
+            // potentially unauthenticated response.  The
             // operator-facing half is unaffected: aggregate, op and the full
             // inner exception all reach the catalog's extern_handler_threw
             // event below.  Same shape the Hono onError arm emits.

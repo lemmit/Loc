@@ -10,7 +10,7 @@
 // specifier, so `node --experimental-strip-types` (or Node 23.6+/24's
 // unflagged type-stripping) fails immediately with ERR_MODULE_NOT_FOUND on
 // the project's very first relative import — independent of, and prior to,
-// any question about type-stripping itself. Confirmed empirically: see
+// any question about type-stripping itself.  See
 // docs/old/plans/dap-node-debug.md "Phase A — the spike" for the reproduction.
 //
 // This pass appends the resolved module's real extension (`.ts`/`.tsx`) to

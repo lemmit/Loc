@@ -56,7 +56,7 @@
 //
 // i18n-OFF IS BYTE-IDENTICAL BY CONSTRUCTION, not by reconstruction: the
 // binding starts OFF, and OFF each helper returns exactly the bytes the
-// template used to spell inline (`chromeImport` returns nothing at all).  A
+// template spells inline (`chromeImport` returns nothing at all).  A
 // frontend opts in only for a UI that is already i18n-enabled by its authored
 // strings — the same gate `APP_SHELL_CHROME` / `FORM_CHROME` use, so pack
 // chrome never flips the translation runtime on for a string-less app.

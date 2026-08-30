@@ -6,12 +6,12 @@
 // `sku.length > 0`, `email.matches(...)`) as idiomatic `validate_number` /
 // `validate_length` / `validate_format` lines (via `singleFieldConstraints`).
 // A CROSS-field invariant (`handle != email`, `startDate <= endDate`) fits no
-// single-field native chain, so the classifier returns null and — before this
-// module — it was **silently dropped on every path**: create, PATCH, and
-// operation persist all skipped it, while the other four backends 400 it at the
-// domain floor (`docs/audits/generated-code-ddd-review-2026-07.md`).
+// single-field native chain, so the classifier returns null.  Without this
+// module such an invariant is **silently dropped on every path** — create,
+// PATCH and operation persist all skip it — while the other four backends 400
+// it at the domain floor.
 //
-// The fix mirrors the other backends' `AssertInvariants()`: a custom Ecto
+// So this mirrors the other backends' `AssertInvariants()`: a custom Ecto
 // validation that reads the PROPOSED struct (`apply_changes/1` — the record with
 // the changeset's changes applied, valid or not) and `add_error`s when the
 // predicate is false.  The predicate is rendered by the same vanilla

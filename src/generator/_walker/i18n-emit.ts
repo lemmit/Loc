@@ -54,8 +54,7 @@ const TRANSLATED: TypeIR = { kind: "primitive", name: "string" };
  *  import the JS frontends need.
  *
  *  The four JS frontends share one `t(key, default, values?)` shim, so the
- *  default spelling here is that JavaScript call — every existing call site is
- *  byte-identical to before this indirection.  A frontend whose runtime is a
+ *  default spelling here is that JavaScript call.  A frontend whose runtime is a
  *  different LANGUAGE (Feliz's F#, Flutter's Dart) supplies `renderTranslate`
  *  and spells the same call its own way; the key, the default message and the
  *  ICU hole values are the shared part, so the catalog is unchanged.
@@ -151,12 +150,12 @@ function localizedRawOf(
  *  `label: row.name` is dynamic but carries no translatable TEXT, so
  *  `icuFromConcat` rejects it and the caller's raw-expression branch still runs).
  *
- *  This lives here rather than at each call site because the ATTRIBUTE helpers
- *  originally had only two branches — literal and raw-expression — so an
- *  interpolated `label:`/`title:` fell straight through to concatenation while the
- *  extraction pass still wrote its ICU entry into the catalog.  That is the
- *  dead-key shape `user-visible-slot-coverage.test.ts` cannot see (the slot DOES
- *  render, just not through `t()`), and it emitted the very concatenation
+ *  This lives here rather than at each call site because ATTRIBUTE helpers with
+ *  only two branches — literal and raw-expression — send an interpolated
+ *  `label:`/`title:` straight to concatenation while the extraction pass still
+ *  writes its ICU entry into the catalog.  That is the dead-key shape
+ *  `user-visible-slot-coverage.test.ts` cannot see (the slot DOES render, just
+ *  not through `t()`), and it emits the very concatenation
  *  `loom.user-visible-concat` bans in `.ddd` source. */
 function icuTranslateCall(
   arg: ExprIR | undefined,

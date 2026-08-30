@@ -34,10 +34,10 @@ export function renderVanillaProblemDetailsModule(
    *  — the `requires` authorization gate (`Forbidden`, 403 by default), the
    *  `when` state gate (`Disallowed`, 409) and the FK-restrict destroy
    *  (`ReferencedInUse`, 409).  They are not written into a response body here;
-   *  they key the CATALOG-EVENT classifier below, which used to be a literal
-   *  `case status do 403 … 409 … 404` and therefore silently reclassified every
-   *  remapped rung as `domain_error` (M-T9.25 round 2, probe 1).  Defaults
-   *  reproduce the literal arms exactly ⇒ byte-identical. */
+   *  they key the CATALOG-EVENT classifier below.  A literal
+   *  `case status do 403 … 409 … 404` there silently reclassifies every
+   *  remapped rung as `domain_error`; the defaults here are those same literal
+   *  statuses. */
   forbiddenStatus = 403,
   disallowedStatus = 409,
   referencedInUseStatus = 409,

@@ -126,12 +126,11 @@ export function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
     return `<a href="${toLiteral}"${testidAttr}>${label}</a>`;
   }
   // NO `to:` at all — a breadcrumb leaf / plain label, exactly what the JSX
-  // family renders as a bare `<Anchor>`/`<a>` and Feliz as `Html.span`.  This
-  // used to fall into the dynamic branch below with an EMPTY expression,
-  // emitting `<.link navigate={}>` — an empty HEEx expression attribute, which
-  // is a tokenizer ParseError at `mix compile`: one linkless Anchor took the
-  // whole LiveView app out (audit finding A21).  `renderIdLink` already spells
-  // the same no-destination case as a `<span>`.
+  // family renders as a bare `<Anchor>`/`<a>` and Feliz as `Html.span`.  Routed
+  // into the dynamic branch below it would emit `<.link navigate={}>` with an
+  // EMPTY expression attribute — a tokenizer ParseError at `mix compile`, so
+  // one linkless Anchor takes the whole LiveView app out.  `renderIdLink`
+  // spells the same no-destination case as a `<span>`.
   if (toExpr === undefined) return `<span${testidAttr}>${label}</span>`;
   // Dynamic route expression — emit it as a HEEx expression attribute.
   return `<.link navigate={${toExpr}}${testidAttr}>${label}</.link>`;
@@ -736,12 +735,12 @@ export function renderTableColumn(
   // Second positional arg: accessor lambda `fn cell -> renderCell(cell) end`
   //
   // The header is a STATIC attribute on the `<:col>` slot, so only a string
-  // LITERAL can supply it, and it must be entity-escaped: a label carrying a
-  // `"` used to close the attribute mid-word (`label="Na"me"`) and the whole
-  // template failed to parse.  A non-literal header (a state ref, a
-  // concatenation) has no attribute spelling at all — it used to splice the
-  // rendered Elixir expression inside the quotes (`label="@q"`), so the column
-  // was headed with a variable name.  Both now degrade to the JSX side's
+  // LITERAL can supply it, and it must be entity-escaped: an unescaped label
+  // carrying a `"` closes the attribute mid-word (`label="Na"me"`) and the
+  // whole template fails to parse.  A non-literal header (a state ref, a
+  // concatenation) has no attribute spelling at all — splicing the rendered
+  // Elixir expression inside the quotes (`label="@q"`) heads the column with a
+  // variable name.  Both degrade to the JSX side's
   // `Column N` fallback (`_walker/primitives/table.ts`'s `emitColumn`), so the
   // two frontends show the same header for the same source.
   let cellHeex = "<%= row %>";
@@ -1536,8 +1535,9 @@ export function renderLoader(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
  *      raises FunctionClauseError on a binary;
  *    - a LITERAL (`Money(value: 9.99)`) is a float, which raises the same way.
  *
- *  So the narrower cast was wrong for two of the three, and identical for the
- *  third.  The TYPED money cast (`string(x: money)` in `render-expr.ts`) keeps
+ *  So a narrower `Decimal.to_string/1` cast is wrong for two of the three and
+ *  identical for the third.  The TYPED money cast (`string(x: money)` in
+ *  `render-expr.ts`) keeps
  *  `Decimal.to_string/1` — there the operand's type is known. */
 export function renderMoney(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let currency: string | undefined;
@@ -1923,8 +1923,8 @@ export function renderPaper(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
  *
  *  `cols:` is read through the SHARED `gridCols` reader the JSX walker uses, so
  *  `cols: [3, 2, 1]` means `[desktop, tablet, mobile]` on Phoenix exactly as it
- *  does on React — and it is CONSUMED into the class list.  It used to fall
- *  through the generic named-attr path as `cols={[3, 2, 1]}`: a LIST reaching
+ *  does on React — and it is CONSUMED into the class list.  Left to the
+ *  generic named-attr path it emits `cols={[3, 2, 1]}`: a LIST reaching
  *  Phoenix's attribute escaper, i.e. a page that compiles and then raises on
  *  first render.
  *
@@ -1946,7 +1946,8 @@ export function renderGrid(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
 /** `Container(size: "md", …children)` → a centred max-width wrapper.
  *
  *  `size:` is CONSUMED into a `max-w-*` utility (see {@link CONTAINER_MAX_W});
- *  it used to leak as `size="md"`, an attribute no `<div>` has. */
+ *  left to the generic named-attr path it leaks as `size="md"`, an attribute
+ *  no `<div>` has. */
 export function renderContainer(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   const size = stringNamedLit(expr, "size");
   const maxW = size ? CONTAINER_MAX_W[size] : undefined;

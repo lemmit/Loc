@@ -257,8 +257,7 @@ function renderWhenGateClause(aggName: string, op: OperationIR, rc: RenderCtx): 
 /** All hoisted guard with-clauses for an op, in evaluation order: the `when`
  *  state gate (→ `:disallowed` / 409) first, then each `requires` (→ `:forbidden`
  *  / 403) and `precondition` (→ `:precondition_failed` / 422) in body order.
- *  Byte-identical to the old requires/precondition-only list when the op has no
- *  `when`, so a guard-free / `when`-free op is unchanged. */
+ *  An op with no `when` contributes only its requires/precondition clauses. */
 export function collectOpGuardClauses(aggName: string, op: OperationIR, rc: RenderCtx): string[] {
   const clauses: string[] = [];
   if (op.when) clauses.push(renderWhenGateClause(aggName, op, rc));
@@ -490,8 +489,8 @@ export function renderDurableEmitDispatchParts(
     bind.push(...p.bind);
     dispatch.push(...p.dispatch);
     broadcast.push(...p.broadcast);
-    // The three phases are no longer contiguous, so the source map anchors on
-    // the BIND chunk — the lines that actually carry the `emit`'s own
+    // The three phases are not contiguous, so the source map anchors on the
+    // BIND chunk — the lines that actually carry the `emit`'s own
     // expressions.  (`fragment()` silently skips text it cannot locate, so a
     // split fragment would just lose coverage.)
     if (opFragments && construct) {
@@ -675,10 +674,10 @@ export function renderReturningOpFunction(
   // The `when` state gate + `requires`/`precondition` guards are hoisted out of
   // the linear body into a leading `with :ok <- ensure(...)` chain (below), so a
   // failed guard returns a typed denial tuple (`:disallowed` 409 / `:forbidden`
-  // 403 / `:precondition_failed` 422) instead of raising (→ 500).  Exclude the
-  // guard STATEMENTS from the in-body statements (they no longer render inline;
-  // the `when` gate is a predicate field, not a statement, so it needs no
-  // exclusion).
+  // 403 / `:precondition_failed` 422) instead of raising (→ 500).  The guard
+  // STATEMENTS are excluded from the in-body statements, since they render in
+  // that chain rather than inline; the `when` gate is a predicate field, not a
+  // statement, so it needs no exclusion.
   const guardClauses = collectOpGuardClauses(agg.name, op, renderCtx);
   const bodyStmts = op.statements.filter((s, idx) => {
     if (s.kind === "requires" || s.kind === "precondition") return false;
@@ -1093,8 +1092,8 @@ function taggedSuccess(value: string, s: Extract<StmtIR, { kind: "return" }>): s
  *  containment list (jsonb `{:array, :map}`) or arithmetic on a scalar column.
  *  A bare `call` (`f(args)`) lowers to a discarding no-op — vanilla emits no
  *  aggregate-`function` helpers, so there is no callable target, and a bare
- *  call discards its result anyway.  The switch is now exhaustive over
- *  `StmtIR` — there is no `# TODO` fallthrough. */
+ *  call discards its result anyway.  The switch is exhaustive over `StmtIR` —
+ *  there is no `# TODO` fallthrough. */
 export function renderReturningStmt(
   s: StmtIR,
   ctx: BoundedContextIR,
@@ -1156,9 +1155,7 @@ export function renderReturningStmt(
       // (HTTP-boundary ops hoist guards to `with ensure(…)` for a 422 / 403
       // denial).  The typed `<App>.GuardError` carries the classification in its
       // `:kind` field, so the `:message` is the SAME `denialMessage(s)` the
-      // `ensure` path emits — the author's `message "…"` when there is one
-      // (M-T6.20; it used to be forced to the derived form because `guardRescue`
-      // routed on the message prefix).
+      // `ensure` path emits — the author's `message "…"` when there is one.
       return guardRaiseLine(s, renderExpr(s.expr, rc), appModuleOf(rc.contextModule));
     case "assign": {
       // `field := value` → struct-update the threaded `record`, so the
@@ -1303,11 +1300,11 @@ function renderProvenancedAssign(
 // below has always answered 422, so this rescue arm was the odd one out) —
 // instead of propagating to Phoenix's default 500.
 //
-// M-T6.20 — the ROUTING KEY is the exception's `:kind` FIELD, not its message.
-// It used to be a `cond` over `String.starts_with?(guard_msg, "Precondition
-// failed: ")`, which made the message load-bearing and therefore unwritable: an
-// author's `message "…"` missed the prefix and fell to the `reraise` → 500.
-// With the classification out of band the detail is free text, and no `reraise`
+// The ROUTING KEY is the exception's `:kind` FIELD, never its message.  A
+// `cond` over `String.starts_with?(guard_msg, "Precondition failed: ")` would
+// make the message load-bearing and therefore unwritable: an author's
+// `message "…"` misses the prefix and falls to the `reraise` → 500.  With the
+// classification out of band the detail is free text, and no `reraise`
 // arm is needed either — an exception that is not a `<App>.GuardError` is
 // simply not rescued and propagates with its own stacktrace (still a 500 for a
 // genuine bug, one construct less to keep in lockstep).  Only the STATUS +

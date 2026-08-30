@@ -103,7 +103,7 @@ export function vanillaCapabilityFilter(
   // columns), NOT `Decimal`/`DateTime` structs.  Without it a money/datetime
   // comparison renders the in-memory `Decimal.compare(...)` struct API, which is
   // not a valid Ecto query expression → `mix compile` fails.  (bool/id/string/enum
-  // render identically in both modes, so previously-working filters are unchanged.)
+  // render identically in both modes.)
   const ctx: RenderCtx = {
     thisName: "record",
     contextModule,

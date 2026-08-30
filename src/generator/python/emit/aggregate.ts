@@ -227,11 +227,11 @@ export function renderPyAggregate(
     // run is hoisted to the calling handler, which owns the 403 (op-gates.ts).
     s.operations.some((op) => operationBody(op).some((st) => st.kind === "requires")),
   );
-  // DisallowedError — the `when` state gate (M-T6.38).  The gate used to be a
-  // ROUTE-layer check only, so the in-process workflow dispatcher (`dispatch.py`)
-  // or an extern handler calling the domain method directly slipped past it and
-  // the refused write landed silently.  It is now emitted at the domain-method
-  // entry too, so the import follows any `when`-carrying operation.
+  // DisallowedError — the `when` state gate.  Emitted at the DOMAIN-METHOD
+  // entry, not only at the route layer: the in-process workflow dispatcher
+  // (`dispatch.py`) and extern handlers call the domain method directly, and
+  // would otherwise slip past the gate and land the refused write silently.
+  // So the import follows any `when`-carrying operation.
   const usesDisallowed = shapes.some((s) => s.operations.some((op) => !!op.when));
   const errorNames = [
     usesDisallowed ? "DisallowedError" : null,
