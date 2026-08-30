@@ -134,6 +134,37 @@ export function infraFailure(out: string): string | undefined {
 }
 
 /**
+ * Delete a scratch dir, BEST-EFFORT — a cleanup failure is never a verdict.
+ *
+ * The dotnet / java / elixir recipes bind-mount the emitted project into a
+ * toolchain container that runs as ROOT, so gradle / dotnet / mix leave
+ * root-owned build output behind.  On a non-root host (every GitHub runner)
+ * `rm` of that tree fails EACCES — and because the removal sat bare in a
+ * `finally`, the error propagated and FAILED THE CASE.  #2690's java cell went
+ * red on 22 of 26 with zero compile failures: every one was this `rm`.
+ *
+ * It passed locally only because that sandbox runs as root, which is the
+ * sharpest possible reminder that "green on my machine" and "green on the
+ * runner" differ by more than flakiness.
+ *
+ * Swallowing is right rather than merely convenient: the scratch dir is
+ * housekeeping, the runner is ephemeral, and reporting a leftover temp
+ * directory as "the emitted project failed to compile" is the same
+ * instrument-vs-subject confusion the infra classifier above exists to stop.
+ * A local run leaks dirs under $TMPDIR instead; the warning says so.
+ */
+export function bestEffortRm(dir: string): void {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch (e) {
+    console.warn(
+      `pairwise: could not remove scratch dir ${dir} (${(e as { code?: string }).code ?? e}) — ` +
+        `left on disk; container-written files are root-owned. Not a finding.`,
+    );
+  }
+}
+
+/**
  * Register one backend's compile leg.
  *
  * The ratchet runs BOTH ways, and the second direction is the one a leg that
@@ -151,7 +182,7 @@ export function describeCompileLeg(recipe: CompileRecipe): void {
     `pairwise corpus — the emitted ${recipe.label} project compiles`,
     () => {
       afterAll(() => {
-        for (const d of scratch) fs.rmSync(d, { recursive: true, force: true });
+        for (const d of scratch) bestEffortRm(d);
       });
 
       it("the cover is non-empty (a leg that selects nothing passes vacuously)", () => {
@@ -232,7 +263,7 @@ export function describeCompileLeg(recipe: CompileRecipe): void {
               ).toBeUndefined();
             }
           } finally {
-            fs.rmSync(outDir, { recursive: true, force: true });
+            bestEffortRm(outDir);
           }
         },
         recipe.timeoutMs,

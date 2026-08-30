@@ -1,5 +1,8 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { infraFailure } from "./compile-leg.js";
+import { bestEffortRm, infraFailure } from "./compile-leg.js";
 
 // ---------------------------------------------------------------------------
 // The infra-vs-finding classifier (compile-leg.ts).
@@ -62,4 +65,29 @@ describe("real compiler diagnostics are NOT swallowed as infra", () => {
   for (const [name, out] of REAL_FINDINGS) {
     it(`passes through: ${name}`, () => expect(infraFailure(out)).toBeUndefined());
   }
+});
+
+describe("scratch cleanup never fails a case", () => {
+  // #2690's java cell went red on 22 of 26 with ZERO compile failures: every one
+  // was `rm` of a scratch dir returning EACCES, because the toolchain container
+  // runs as root and the GitHub runner does not.  A leftover temp directory is
+  // housekeeping; reporting it as "the emitted project failed to compile" is the
+  // same instrument-vs-subject confusion the infra classifier exists to stop.
+  //
+  // HONESTY ABOUT THIS TEST: it cannot reproduce EACCES, because the sandbox
+  // that runs it is root and root bypasses the permission bit that produced the
+  // failure — the very asymmetry that let the bug reach CI.  What it CAN pin is
+  // the mechanism: whatever `rmSync` throws, `bestEffortRm` swallows.  A NUL in
+  // the path makes it throw a different code (ERR_INVALID_ARG_VALUE) for the
+  // same reason a permission error would.
+  it("swallows a throwing rmSync instead of propagating", () => {
+    expect(() => bestEffortRm("/tmp/loom-pairwise-\u0000-invalid")).not.toThrow();
+  });
+
+  it("still removes a directory it CAN remove", () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "loom-pw-cleanup-"));
+    fs.writeFileSync(path.join(d, "f"), "x");
+    bestEffortRm(d);
+    expect(fs.existsSync(d)).toBe(false);
+  });
 });
