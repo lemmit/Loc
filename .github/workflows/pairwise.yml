@@ -96,15 +96,22 @@ jobs:
   generation:
     name: generation sweep (all crossings, 5 backends)
     # Draft-gated like every other per-PR fan-out job (docs/ci-gating.md →
-    # "Draft PRs and the runner queue"), and skipped on the `labeled` event,
-    # which exists for the two heavy legs below.  Spelled as two explicit arms
-    # rather than one clever condition: `draft-gate.test.ts` classifies a
-    # workflow carrying `labeled:` in its `types:` as label-opt-in and does NOT
-    # require the gate here, so this job would otherwise rejoin the draft
-    # fan-out unchecked — the precise rot that suite's header warns about.
+    # "Draft PRs and the runner queue").  Spelled out rather than inherited:
+    # `draft-gate.test.ts` classifies a workflow carrying `labeled:` in its
+    # `types:` as label-opt-in and does NOT require the gate here, so this job
+    # would otherwise rejoin the draft fan-out unchecked — the precise rot that
+    # suite's header warns about.
+    #
+    # It deliberately does NOT also skip the `labeled` event, though skipping
+    # looks right (the label exists for the heavy legs below, and re-running a
+    # per-PR job on it is redundant).  That version SILENTLY LOST THE JOB on
+    # #2690: `concurrency.cancel-in-progress` means the `labeled` run cancels
+    # the `opened` run, and the `labeled` run then skipped generation — so on
+    # any PR that gets a label after opening, the per-PR sweep never ran at all,
+    # and `pr-gate` only sees what actually ran.  Nineteen seconds of duplicate
+    # work is the cheaper mistake.
     if: >
-      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
-      (github.event_name != 'pull_request' || github.event.action != 'labeled')
+      github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
