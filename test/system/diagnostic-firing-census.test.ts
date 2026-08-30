@@ -476,6 +476,45 @@ system S {
 }`,
   // `Tab` / `Column` are `group: "sub"` primitives — the parent consumes them
   // inline, so anywhere else they degrade to a comment on all seven targets.
+  // --- workflow-checks.ts --------------------------------------------------
+  // M-T9.19 recorded FOUR of this file's codes as unemittable from source.
+  // Driving each one instead of re-reading the note found that claim wrong for
+  // `loom.workflow-name-collision`: its stated preemption ("by
+  // `loom.duplicate-workflow`") does not hold, because the two gates test
+  // different things — `duplicate-workflow` fires on a REPEATED workflow name,
+  // `workflow-name-collision` on a clash with an aggregate / value object /
+  // enum / event / repository, and a workflow named after an aggregate trips
+  // only the second.  The other three are confirmed preempted and pinned below.
+  "loom.duplicate-workflow": repoOnly(`    aggregate Thing with crudish { name: string }
+    repository Things for Thing { }
+    workflow Dup { create(n: string) { precondition n.length > 0 } }
+    workflow Dup { create(n: string) { precondition n.length > 0 } }`),
+  "loom.workflow-name-collision": repoOnly(`    aggregate Thing with crudish { name: string }
+    repository Things for Thing { }
+    workflow Thing { create(n: string) { precondition n.length > 0 } }`),
+  // The code whose "covered by message in validation.test.ts" claim outlived
+  // the file it cited (M-T9.33's own opening finding).  It fires: an `emit`
+  // supplying a field the event does not declare.
+  "loom.workflow-emit-unknown-field": repoOnly(`    aggregate Thing with crudish { name: string }
+    repository Things for Thing { }
+    event Happened { thing: Thing id, label: string }
+    workflow W {
+      create(n: string) { emit Happened { thing: id, label: n, bogus: n } }
+    }`),
+  // `Repo.run(<Retrieval>(args))` naming a retrieval the context does not
+  // declare.  Its repository-side sibling is NOT drivable — an unknown
+  // repository name never lowers to a `repo-run` at all — so only this half
+  // gets a fixture.  Control: the same source with `ActiveOrders()` raises
+  // nothing, which is what makes the fixture's single diagnostic meaningful.
+  "loom.workflow-run-unknown-retrieval":
+    repoOnly(`    aggregate Order with crudish { code: string  archived: bool }
+    criterion Active of Order = !this.archived
+    retrieval ActiveOrders() of Order { where: Active  sort: [code asc] }
+    repository Orders for Order { }
+    workflow W {
+      create(n: string) { let batch = Orders.run(Nope()) }
+    }`),
+
   "loom.sub-primitive-misplaced": `
 system S {
   subdomain Sub { context C {
@@ -854,6 +893,32 @@ const UNREACHABLE_PINS: Record<string, string> = {
     "renderer today — and the gate only rejects a primitive that is a member.  Its own source " +
     "comment calls it a dormant safety net the gate re-arms from.  Checked by `LATENT_GATES`.",
 
+  // --- workflow-checks.ts, the three M-T9.19 claims that HELD ---------------
+  // Each was re-driven rather than inherited.  All three are preempted by
+  // SCOPE resolution: the unknown name is reported as `loom.unknown-name`
+  // during linking, and the statement never lowers to the `factory-let` /
+  // `repo-let` / `repo-run` kind whose arm carries these codes — so the arm
+  // switches on a shape that cannot exist.  Re-test by making the lowerer emit
+  // the typed statement kind for an unresolved name (it currently degrades to a
+  // generic `expr-let`), which is the change that would re-arm all three at once.
+  "loom.workflow-create-unknown-aggregate":
+    "`Nope.create({…})` in a workflow raises `loom.unknown-name` at link time and lowers to a " +
+    "generic `expr-let`, never the `factory-let` this arm switches on.  Driven and confirmed: " +
+    "the only code out of `validate()` is `loom.unknown-name`.",
+  "loom.workflow-unknown-repository":
+    "`Missing.getById(x)` in a workflow raises `loom.unknown-name` and lowers to a generic " +
+    "`expr-let`, never the `repo-let` this arm switches on.  Driven and confirmed.",
+  "loom.workflow-run-unknown-repository":
+    "`Missing.run(ActiveOrders())` raises `loom.unknown-name` and never lowers to a `repo-run`, " +
+    "so the repository half of that arm is unreachable — while its RETRIEVAL half is drivable " +
+    "(`Orders.run(Nope())`) and has a fixture.  Both halves driven; only this one is dead.",
+  "loom.isolation-requires-transactional":
+    "The gate calls itself defence-in-depth against a future grammar change, and the grammar " +
+    "still gates `isolation:` behind `transactional`: a workflow carrying `isolation:` alone is " +
+    "a PARSE error, so no model reaches the IR with `wf.isolation && !wf.transactional`.  " +
+    "Driven and confirmed: the only code out of `validate()` is `loom.parse-error`.  Re-test by " +
+    "ungating `isolation:` in `ddd.langium`.",
+
   // --- defensive backstops for shapes scope already forbids ------------------
   "loom.java-workflow-instance-field-unsupported":
     "Fires on an ENTITY-typed field in a workflow's `instanceWireShape`.  An entity is a " +
@@ -1039,8 +1104,18 @@ const catalogueCodes = (): string[] => [
  *  pinned: reading `validateFieldMask` for the `anyBackend` arm its siblings
  *  have showed it fires on a context no backend hosts, so it got a fixture.
  *  That one-in-fourteen split is the whole reason the pin block insists on
- *  reading for the second arm. */
-const UNCOVERED_BASELINE = 17;
+ *  reading for the second arm.
+ *
+ *  17 -> 9: the workflow-checks cluster.  Four are drivable and get fixtures;
+ *  four are pinned after being DRIVEN rather than inherited — three preempted
+ *  by scope resolution (the unknown name reports `loom.unknown-name` and the
+ *  statement lowers to a generic `expr-let`, never the typed kind the arm
+ *  switches on) and one by the grammar (`isolation:` without `transactional`
+ *  is a parse error).  M-T9.19 had listed FOUR as unreachable; one of them,
+ *  `loom.workflow-name-collision`, fires cleanly — its recorded preemption was
+ *  simply wrong, which is the second false unreachability claim this census
+ *  has caught in that one file. */
+const UNCOVERED_BASELINE = 9;
 
 describe("diagnostic firing census", () => {
   // Keeps the LATENT_GATES pins honest.  Without this the pin is prose and its

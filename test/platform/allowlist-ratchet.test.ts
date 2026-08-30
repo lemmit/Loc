@@ -205,7 +205,7 @@ const REGISTERED: Ratchet[] = [
     file: "test/system/diagnostic-firing-census.data.ts",
     name: "UNCOVERED",
     kind: "set",
-    max: 17,
+    max: 9,
   },
   // The MikroORM behavioural leg's skip register.  It was NOT registered here
   // until `projection-join` (a query-time projection the adapter refuses) had to
