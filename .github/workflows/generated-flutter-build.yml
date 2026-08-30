@@ -102,10 +102,10 @@ jobs:
           #     op → reify error variant → Dart-3 switch → state write)
           #   • data reads (Products' QueryView over Shop.Product.all + For + Card)
           #   • money end-to-end (M-T1.21): a `money` primitive field + optional,
-      #     a money operation arg, a money projection column charted as a
-      #     series, a money page-state cell with a literal, an addition, a
-      #     `Money { }` display and a `round(2)` intrinsic
-      #   • forms (NewProduct's CreateForm; NewCategory's WorkflowForm;
+          #     a money operation arg, a money projection column charted as a
+          #     series, a money page-state cell with a literal, an addition, a
+          #     `Money { }` display and a `round(2)` intrinsic
+          #   • forms (NewProduct's CreateForm; NewCategory's WorkflowForm;
           #     ProductAdmin's OperationForm + Modal-wrapped op-form dialog +
           #     DestroyForm on a :id route) over every field kind (string/int/bool/
           #     enum/datetime/optional + a Money value object + a Category id
