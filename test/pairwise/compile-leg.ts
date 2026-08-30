@@ -75,6 +75,55 @@ export interface CompileRecipe {
   readonly timeoutMs: number;
 }
 
+// ---------------------------------------------------------------------------
+// INFRA FAILURE vs FINDING — the distinction the whole leg exists to make.
+//
+// Every recipe shells out to a containerised toolchain and returns whatever the
+// process printed.  That conflates two completely different outcomes: "the
+// emitted code does not compile" (a FINDING) and "the compiler never ran" (a
+// HARNESS FAULT).  Reported as the first, the second is worse than useless — it
+// manufactures N identical fake findings and buries any real one among them.
+//
+// Both failure modes were observed within an hour of this leg existing:
+//
+//   * the elixir leg's first full run — 17 of 25 cases "failed" with identical
+//     `mix local.hex` hex.pm timeouts (fixed by retrying the install, but the
+//     leg still could not TELL);
+//   * a reaped `dockerd` — all 21 remaining cases "failed to compile" with
+//     `failed to connect to the docker API at unix:///var/run/docker.sock`.
+//
+// Neither had read a byte of emitted code.  So the core classifies first: an
+// output matching a known infra signature THROWS, failing the case loudly as a
+// harness fault, and never reaches the waiver ratchet — a run that cannot reach
+// its subject must not be allowed to look like a verdict about it (§59/§63).
+// ---------------------------------------------------------------------------
+
+const INFRA_SIGNATURES: readonly RegExp[] = [
+  // Docker itself is unreachable / the daemon was reaped mid-run.
+  /failed to connect to the docker API/i,
+  /Cannot connect to the Docker daemon/i,
+  /docker: command not found/i,
+  // The toolchain image could not be pulled.
+  /(manifest|pull access) (unknown|denied)/i,
+  /error pulling image|failed to (pull|resolve) (reference|image)/i,
+  // The registries every leg fetches dependencies from.
+  /Could not install Hex because Mix could not download/i,
+  /request timed out after \d+ms/i,
+  /Could not resolve host|Temporary failure in name resolution/i,
+  /(ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN)\b/,
+  /NU1301|unable to load the service index/i, // NuGet
+  /Could not GET .*repo\.maven|Read timed out/i, // Gradle
+  // No space left mid-build — the sandbox's fixed writable allowance.
+  /no space left on device/i,
+];
+
+/** The infra signature `out` matches, if any — exported for its own gate
+ *  (`compile-leg.test.ts`), which pins BOTH directions: real infra text is
+ *  caught, and real compiler diagnostics are not swallowed. */
+export function infraFailure(out: string): string | undefined {
+  return INFRA_SIGNATURES.find((re) => re.test(out))?.source;
+}
+
 /**
  * Register one backend's compile leg.
  *
@@ -144,6 +193,20 @@ export function describeCompileLeg(recipe: CompileRecipe): void {
             ).toBe(true);
 
             const failure = recipe.compile(proj, kase);
+
+            // Classify BEFORE the ratchet: an infra failure is not a verdict
+            // about the emitted code, in either direction.  Treating it as one
+            // would both invent a finding and — on a waived case — read as
+            // "still broken", quietly holding a waiver whose bug may be fixed.
+            const infra = failure && infraFailure(failure);
+            if (infra) {
+              throw new Error(
+                `${caseId(kase)}: HARNESS FAULT, not a finding — the ${recipe.label} toolchain ` +
+                  `never compiled anything (matched /${infra}/).  Fix the environment and re-run; ` +
+                  `do NOT add a waiver for this.\n${failure.slice(0, 1500)}`,
+              );
+            }
+
             const waiver = waiverFor(COMPILE_WAIVERS, kase, recipe.platform);
 
             if (waiver) {
