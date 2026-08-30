@@ -405,7 +405,9 @@ for (const c of active) {
     process.stdout.write(`  ${ok ? "✓" : "✗"} [${r.tier ?? "api"}] ${r.name}\n`);
     if (!ok && r.error) process.stdout.write(`      ${String(r.error).split("\n")[0]}\n`);
   }
-  await wire.check(c.name, out.wire, out.results);
+  // Unit-only cases record no wire (the early return above) — keep them out
+  // of the differential instead of gating an empty recording on a golden.
+  if (declaresE2e(c.source)) await wire.check(c.name, out.wire, out.results);
 }
 
 await oidc?.stop();
