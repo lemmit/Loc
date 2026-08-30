@@ -70,6 +70,32 @@ jobs:
       matrix:
         backend: [node, python, dotnet, java]
         include:
+          # The script name is CARRIED, not computed.  It used to be derived
+          # with the `A && B || C` ternary idiom —
+          #
+          #   npm run test:schemathesis${{ matrix.backend == 'node' && ''
+          #                                || format('-{0}', matrix.backend) }}
+          #
+          # — which is broken for the ONE cell whose branch is the empty
+          # string: `''` is FALSY in a GitHub Actions expression, so
+          # `true && ''` yields `''` and the `||` arm runs anyway, producing
+          # `test:schemathesis-node`.  No such script exists, so the node leg
+          # exited 1 in under a second on every nightly from 2026-08-25 to
+          # 08-29 without ever fuzzing anything.  (Same shape as the shell
+          # `&&`/`||` precedence trap documented in `mix-retry.ts`.)
+          #
+          # A literal per-cell value has no truthiness to get wrong, and it is
+          # statically greppable — which is what lets
+          # `test/system/workflow-npm-scripts.test.ts` check that every script
+          # a workflow names actually exists.
+          - backend: node
+            script: test:schemathesis
+          - backend: python
+            script: test:schemathesis-python
+          - backend: dotnet
+            script: test:schemathesis-dotnet
+          - backend: java
+            script: test:schemathesis-java
           # DISCOVERY CELL.  The elixir toolchain could not be run locally when
           # this matrix landed (the hex image was unreachable), so its waiver
           # register is EMPTY — every finding it makes will be unattributed and
@@ -79,6 +105,7 @@ jobs:
           # then its verdict must not fail the workflow, and this line is what a
           # reviewer deletes when the rules land.
           - backend: elixir
+            script: test:schemathesis-elixir
             discovery: true
     continue-on-error: ${{ matrix.discovery == true }}
     name: fuzz (${{ matrix.backend }})
@@ -165,7 +192,7 @@ jobs:
           SPRING_DATASOURCE_URL: jdbc:postgresql://127.0.0.1:5432/app
           SPRING_DATASOURCE_USERNAME: postgres
           SPRING_DATASOURCE_PASSWORD: postgres
-        run: npm run test:schemathesis${{ matrix.backend == 'node' && '' || format('-{0}', matrix.backend) }}
+        run: npm run ${{ matrix.script }}
 
       - name: Upload schemathesis reports
         if: always()
