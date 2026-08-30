@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Typed in-system api client (M-T4.8 slice 4b) — the .NET caller half.
+// Typed in-system api client (M-T4.8) — the .NET caller half.
 //
 // Third sibling of `src/platform/hono/v4/adapters/api-client.ts` and
 // `src/generator/python/api-client.ts`; same contract, C# idiom.  One

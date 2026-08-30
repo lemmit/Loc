@@ -183,7 +183,7 @@ export function buildApiModule(
         `export type Prepare${agg.name}Response = z.infer<typeof Prepare${agg.name}Response>;`,
       );
     }
-    // Dual FormState/Payload aliases (frontend-acl.md Phase 3) — only when
+    // Dual FormState/Payload aliases (frontend-acl.md) — only when
     // the schema carries a real transform (a money field somewhere in the
     // create input), so `z.input` ≠ `z.output`.
     if (requiredFields.some((f) => typeReachesMoney(f.type, ctx))) {
@@ -789,7 +789,7 @@ export function typeReachesMoney(t: TypeIR, ctx: BoundedContextIR): boolean {
 }
 
 /** The dual-type aliases for a transform-bearing action schema
- *  (frontend-acl.md Phase 3): `FormState` is what a form holds
+ *  (frontend-acl.md): `FormState` is what a form holds
  *  (`z.input` — money fields are decimal strings pre-parse), `Payload`
  *  what the API client sends after parse (`z.output` — Decimal). */
 function dualTypeAliases(name: string): string[] {

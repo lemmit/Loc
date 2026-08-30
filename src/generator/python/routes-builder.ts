@@ -136,7 +136,7 @@ export function buildPyRoutesFile(
   // `<Parent>Response` that references it (`list[LabelResponse]`) — no Pydantic
   // forward-ref.  Byte-identical when there is no part-in-part nesting.
   const parts: EnrichedEntityPartIR[] = partsChildrenFirst(agg.parts);
-  // Extern ops (docs/extern.md, extern (b) Phase 2) route exactly like any
+  // Extern ops (docs/extern.md, extern (b)) route exactly like any
   // other public operation: the aggregate's `<op>` method (preconditions → hook
   // → invariants) is a real method now, so `found.<op>(…)` drives the whole
   // framework flow — no separate registry dispatch.

@@ -460,7 +460,7 @@ function primitiveEnumBadge(c: Ctx): string {
 
 /** Stat(label, value) — a labelled metric block. */
 /** Chart(kind:, of:, x:, y:) — `LoomChart(...)` (lib/chart.dart), a
- *  `CustomPainter` over the rows the page already watches (M-T1.3 Phase 4).
+ *  `CustomPainter` over the rows the page already watches (M-T1.3).
  *
  *  No charting package: the rows are decoded on this side, so the geometry is
  *  arithmetic — see `chart-runtime.ts` for why the widget takes a flat point

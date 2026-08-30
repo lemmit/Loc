@@ -1389,7 +1389,7 @@ function authzFilterEntry(e: Extract<ExprIR, { kind: "authz-filter" }>, acc: str
 /** Conjunctions merge into one object; `||` becomes `$or`.  Bare boolean
  *  columns and unary `!` are lowered via `predicateEntry`.
  *
- *  Exported for the query-time projection routes (M-T6.23 slice 4): an
+ *  Exported for the query-time projection routes (M-T6.23): an
  *  aggregation reads the source table directly through the QueryBuilder, and its
  *  `where` must lower through the SAME subset a find predicate does — a second
  *  lowering would be a second set of bugs.  Throws on a predicate outside the

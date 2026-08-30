@@ -14,7 +14,6 @@
 //     via `<App>.Repo.all` / `.get`, projecting the cross-backend
 //     `instanceWireShape` (camelCase keys ← snake struct fields).  A missing
 //     id returns an RFC-7807 404 via the vanilla `ProblemDetails` module
-//     (slice 4).
 //
 // The 404 `detail` names the WORKFLOW (`"<Wf> <id> not found"`), not
 // `"<Wf> instance <id> not found"` as it did until M-T6.31.  Elixir was the only

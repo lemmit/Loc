@@ -51,7 +51,7 @@ public sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outbox
 /** The outbox-recording dispatcher: durable events INSERT into the outbox
  *  (the relay delivers); everything else delegates to the inner dispatcher —
  *  the in-process Mediator one where reactors live, the Noop in the
- *  workflow-less durable-broker producer shape (M-T4.4 slice 7b). */
+ *  workflow-less durable-broker producer shape (M-T4.4). */
 export function renderOutboxDispatcher(
   ns: string,
   durableTypes: readonly string[],
@@ -166,7 +166,7 @@ public static class OutboxDelivery
  *  (ordered by occurred_at) through the in-process dispatcher; failures bump
  *  `attempts` and dead-letter (log only — the row stays) after MaxAttempts.
  *
- *  `durableBroker` (M-T4.4 slice 7b, design §5): drained rows whose channel
+ *  `durableBroker` (design §5): drained rows whose channel
  *  is broker-bound publish via `ChannelRelayPublisher` (envelope id = row
  *  id) instead of redelivering locally.  `hasSubscriptions: false` is the
  *  workflow-less durable-broker producer — there is no in-process dispatcher

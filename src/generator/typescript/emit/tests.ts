@@ -46,14 +46,14 @@ export function renderTestsFile(agg: AggregateIR, ctx: BoundedContextIR): string
   });
 }
 
-/** Value-object unit-test file (test-placement.md, Phase 2).  The VO is a
+/** Value-object unit-test file (test-placement.md).  The VO is a
  *  member of `ctx.valueObjects`, so it's imported from `./value-objects` by the
  *  shared narrowing — no dedicated subject import needed. */
 export function renderVoTestsFile(vo: ValueObjectIR, ctx: BoundedContextIR): string | null {
   return renderTestsCore(vo.name, vo.tests, ctx, null);
 }
 
-/** Domain-service unit-test file (test-placement.md, Phase 2).  The service is
+/** Domain-service unit-test file (test-placement.md).  The service is
  *  emitted as a namespace in `./services`. */
 export function renderServiceTestsFile(svc: DomainServiceIR, ctx: BoundedContextIR): string | null {
   return renderTestsCore(svc.name, svc.tests, ctx, {

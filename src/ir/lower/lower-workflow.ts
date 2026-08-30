@@ -905,7 +905,7 @@ function lowerWorkflowStatementInner(
   if (isAssignOrCallStmt(stmt)) {
     const lv = stmt.target;
     if (!stmt.op && lv.call && lv.tail.length === 1) {
-      // `files.put(args)` — a bare resource-op call (Phase 4).  When the
+      // `files.put(args)` — a bare resource-op call.  When the
       // head is an ambient resource handle, lower to a `resource-call`
       // statement; otherwise it's an op-call on a let binding.
       const resourceKind = env.resources?.get(lv.head);

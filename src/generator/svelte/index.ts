@@ -164,7 +164,7 @@ export function generateSvelteForContexts(
     out.set("src/lib/api/workflows.ts", buildWorkflowsApiModule(contexts));
   }
 
-  // Query-time projection clients (M-T1.3 Phase 1) — the SHARED builder React
+  // Query-time projection clients (M-T1.3) — the SHARED builder React
   // and Vue use, driven by the svelte-query leaves (PR #2366's decision: reuse
   // while the divergence is leaf-shaped).  `createQuery` + the thunked options
   // object + `../schemas` (this module lives at `src/lib/api/`, one hop below

@@ -206,12 +206,10 @@ export interface PagerSpec {
 
 /** The pack chrome a pager renders, pre-resolved by `primitives/table.ts`.
  *
- *  A target used to spell "Prev" / "Next" / "Page N of M" as literals inside
- *  its markup string, which made them the one class of user-visible text no
- *  locale could reach.  They arrive here instead, already decided: under i18n a
- *  `t()` binding keyed to the shared `chrome.*` catalog, otherwise the same raw
- *  English as before — so an un-migrated target and a string-less app are both
- *  byte-identical.
+ *  "Prev" / "Next" / "Page N of M" arrive here already decided — under i18n a
+ *  `t()` binding keyed to the shared `chrome.*` catalog, otherwise raw English.
+ *  A target that spelled them as literals inside its markup string would make
+ *  them the one class of user-visible text no locale can reach.
  *
  *  TWO forms of each, and the split is the one D-I18N-ATTR already draws: the
  *  four JSX/markup targets splice a rendered FRAGMENT, while Feliz and Flutter
@@ -245,13 +243,12 @@ export interface PagerChrome {
 /** What a target needs to build the CLIENT-side page window under a paged
  *  `Table` (M-T1.1 — the `renderClientPaging` seam).
  *
- *  Windowing used to be built generically in `primitives/table.ts` with literal
- *  JavaScript (`.slice(…)`, `Math.max`, `Math.ceil`, `.length`).  That is fine
- *  for the four JSX targets — which share JS — but it is not source the F# and
- *  Dart targets can host, so client paging was structurally unreachable for
- *  them no matter what `renderPager` did.  The arithmetic is now a seam with
- *  the JS form as its default, so the JSX targets stay byte-identical and a
- *  non-JS target can express the same window in its own language. */
+ *  The arithmetic is a seam with the JS form as its default.  Building the
+ *  window generically in `primitives/table.ts` with literal JavaScript
+ *  (`.slice(…)`, `Math.max`, `Math.ceil`, `.length`) works for the four JSX
+ *  targets, which share JS, but is not source the F# and Dart targets can host
+ *  — client paging would be structurally unreachable for them no matter what
+ *  `renderPager` did. */
 /** What a target needs to build the plotted-data expression under a `Chart`
  *  (M-T1.3 Phase 4 — the `renderChartData` seam).  The `of:` read is already
  *  rendered; what differs per target is only how rows are reached and how the
@@ -939,7 +936,7 @@ export interface WalkerTarget {
    *  literal, its raw text (`literal`).  TSX camel-cases keys into a
    *  JSX object (` style={{ backgroundColor: v }}`); Svelte emits a
    *  CSS string with `{expr}` interpolation; HEEx emits the flat
-   *  quoted CSS string (lifted from the old styleAttrHeex helper). */
+   *  quoted CSS string. */
   renderStyleAttr(
     entries: ReadonlyArray<{ key: string; rendered: string; literal?: string }>,
   ): string;
@@ -1204,11 +1201,6 @@ export interface WalkerTarget {
   // (`src/generator/{react,vue,svelte,angular}/store-builder.ts`, and
   // `src/generator/elixir/store-emit.ts` for LiveView), outside `walkBody`.
   //
-  // A third method, `renderStoreModule(store)`, was declared here for that
-  // file and was implemented by NO target and called by NOTHING — the
-  // builders had already taken the job.  It has been removed; the builders
-  // are the contract.
-  //
   // The React reference (`tsx-target.ts`) implements both use-site methods
   // against Zustand:
   //
@@ -1369,7 +1361,7 @@ export interface WalkerTarget {
    *  untouched either way. */
   joinRoots?(parts: readonly string[]): string;
 
-  // --- DataGrid seam (M-T1.1 slice 10) ------------------------------------
+  // --- DataGrid seam (M-T1.1) ------------------------------------
   //
   // Unlike the `Table` seams above, a `DataGrid` cannot be expressed as markup
   // around a rows expression: it is a TanStack row model driven by a component

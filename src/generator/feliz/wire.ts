@@ -116,7 +116,7 @@ export interface FelizRead {
    *  string — which is exactly the fact that used to be unrepresentable here,
    *  so EVERY non-`all`/`byId` read collapsed onto the `All<Plural>` field. */
   find?: FelizFindRead;
-  /** A query-time PROJECTION read (M-T1.3 Phase 1) rather than an aggregate
+  /** A query-time PROJECTION read (M-T1.3) rather than an aggregate
    *  read.  It is SINGLE-shaped like a byId (`Remote<'T option>`, rendered by
    *  `View.remoteOne`) but INIT-fired and id-less like a list read, which is
    *  why it cannot simply reuse `single`: that flag conflates the record shape
@@ -2699,7 +2699,7 @@ export function renderWireTypes(
     });
   }
 
-  // Projection ROW records (M-T1.3 Phase 1) — flat, like the error payloads
+  // Projection ROW records (M-T1.3) — flat, like the error payloads
   // above, and built from the SAME `wireShape` the backend's `<Proj>Row` and the
   // other frontends' `<Proj>Response` are built from, so the three cannot drift.
   // A projection read's `aggregate` is the projection name, which resolves to no
@@ -3309,7 +3309,7 @@ export function renderViewModule(
     "    | Loaded items -> items |> List.map (fun x -> Html.option [ prop.value (idOf x); prop.text (labelOf x) ])",
     "    | _ -> []",
   ];
-  // `Chart` (M-T1.3 Phase 4) — inline SVG computed from the rows already in the
+  // `Chart` (M-T1.3) — inline SVG computed from the rows already in the
   // Model, with NO charting library.  Same argument as the HEEx leg: a chart
   // plots a grouped projection's rows, the rows are already decoded here, so
   // the geometry is arithmetic and the output is markup.  Feliz has no pack

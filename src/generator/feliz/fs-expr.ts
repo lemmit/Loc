@@ -13,7 +13,7 @@
 // sub-expressions, exactly like the backend `ExprTarget` leaves in
 // src/generator/_expr/target.ts.  This is the frontend's F# leaf table; the
 // JS leaf table (React/Vue/Svelte/Angular) stays inline in walker-core until
-// the seam extraction (slice 4) converts it.
+// the seam extraction converts it.
 
 import type { BinOp, ExprIR, LiteralKind, PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";

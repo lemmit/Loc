@@ -563,7 +563,7 @@ export function generateAngularForContexts(
     out.set("src/api/workflows.ts", buildAngularWorkflowsModule(contexts));
   }
 
-  // Query-time projection clients (M-T1.3 Phase 1).  Angular FORKS the shared
+  // Query-time projection clients (M-T1.3).  Angular FORKS the shared
   // `_frontend/projections-module.ts` rather than widening its options — the
   // emitted unit is an interface + an @Injectable service method + an
   // `injectQuery` factory, not a zod schema plus a hook (see that module's
@@ -574,7 +574,7 @@ export function generateAngularForContexts(
     out.set("src/api/projections.ts", buildAngularProjectionsModule(contexts));
   }
 
-  // --- Playwright e2e harness (angular-frontend-plan.md Slice 6) -------
+  // --- Playwright e2e harness (angular-frontend-plan.md) -------
   // Page objects + smoke spec are framework-neutral — they drive the
   // browser through the SAME testid-keyed runtime React/Vue/Svelte use, so
   // the SHARED `_frontend/` emitters produce them verbatim.  Angular

@@ -51,7 +51,7 @@ export function renderTestsFile(
   );
 }
 
-/** Value-object unit-test class (test-placement.md, Phase 2).  The VO lives in
+/** Value-object unit-test class (test-placement.md).  The VO lives in
  *  `${ns}.Domain.ValueObjects`, already among the shared usings — no dedicated
  *  subject using needed. */
 export function renderVoTestsFile(
@@ -62,7 +62,7 @@ export function renderVoTestsFile(
   return renderSubjectTestsFile(vo.name, vo.tests, ctx, ns, "ValueObjects", null);
 }
 
-/** Domain-service unit-test class (test-placement.md, Phase 2).  The service
+/** Domain-service unit-test class (test-placement.md).  The service
  *  lives in `${ns}.Domain.Services`. */
 export function renderServiceTestsFile(
   svc: DomainServiceIR,

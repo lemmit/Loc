@@ -7,7 +7,7 @@ import { renderTsType } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Extern operation seam — the TS/Hono domain extension point
-// (extern-domain-extension-point.md §3a, decision (b), Phase 2).
+// (extern-domain-extension-point.md §3a, decision (b)).
 //
 // An `operation X(...) extern` declares case-1 business logic the DSL can't
 // express: preconditions in the body, the mutation hand-written by the user.

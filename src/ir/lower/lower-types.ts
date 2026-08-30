@@ -136,7 +136,7 @@ export interface Env {
   /** Resources in scope for the enclosing context — `resource X { for:
    *  <thisCtx>, kind, … }` declarations, keyed by name to their infra
    *  kind.  Drives resolution of an ambient resource handle
-   *  (`files.put(...)`) in workflow bodies (Phase 4).  Undefined / empty
+   *  (`files.put(...)`) in workflow bodies.  Undefined / empty
    *  outside a context or when none are declared for it. */
   resources?: Map<string, DataSourceKind>;
   /** For each in-system api-bound resource in scope, the `api` it binds

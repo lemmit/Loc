@@ -86,7 +86,7 @@ export function renderHttpIndex(
     const args = needsTx ? `${repoArg}, db, events` : repoArg;
     return `  app.route("${API_BASE_PATH}/${snake(plural(a.name))}", ${lowerFirst(a.name)}Routes(${args}));`;
   });
-  // Extern operations (extern (b) Phase 2) re-home to aggregate-owned hooks
+  // Extern operations (extern (b)) re-home to aggregate-owned hooks
   // implemented by a scaffold-once subclass — a missing implementation is a
   // COMPILE error (unimplemented abstract), so there is no boot-time registry
   // verify anymore.
@@ -163,7 +163,7 @@ export function renderHttpIndex(
         : `import { createInProcessDispatcher, workflowsRoutes } from "./workflows";`
       : `import { workflowsRoutes } from "./workflows";`
     : null;
-  // Pure-producer outbox wire (M-T4.4 slice 3): createOutboxDispatcher lives
+  // Pure-producer outbox wire (M-T4.4): createOutboxDispatcher lives
   // in ./workflows (emitted for durable-broker producers even without
   // workflows); the workflow import above only covers the hasWorkflows case.
   const outboxImport =

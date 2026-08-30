@@ -491,7 +491,7 @@ function renderEntity(
     `    ${assertCall("<init>")}`,
   ].filter((s): s is string => s != null);
 
-  // Extern ops (docs/extern.md, extern (b) Phase 2): the op body delegates its
+  // Extern ops (docs/extern.md, extern (b)): the op body delegates its
   // mutation to a USER-OWNED hook function that receives the aggregate and
   // reaches its own private state directly — so the aggregate needs no per-field
   // setters (fields stay `private` behind read-only getters).  It keeps only
@@ -557,7 +557,7 @@ function renderEntity(
     // route threads `request.state.current_user` into it.
     if (operationBodyUsesCurrentUser(op)) params.push("current_user: User");
     const trace = emitTrace ? { aggregate: e.name, op: op.name } : undefined;
-    // An extern op (extern (b) Phase 2, docs/extern.md) is a REAL method whose
+    // An extern op (extern (b), docs/extern.md) is a REAL method whose
     // DSL body carries only its preconditions: run them, delegate the mutation
     // to the user-owned hook (`<agg>_extern.<op>(self, …)`, which reaches the
     // aggregate's private state and may `raise_event`), then re-assert
@@ -588,8 +588,8 @@ function renderEntity(
     // `renderPyStatements` here — `renderPyStatements` IS `chunks.join("\n")`
     // by construction, so `body` below is byte-identical either way, but the
     // per-chunk list lets us surface per-statement sub-regions to the caller
-    // that owns the recorder + this file's final content (source-map
-    // Milestone 3, regular named-operation bodies only — see `OpFragment`).
+    // that owns the recorder + this file's final content (source-map;
+    // regular named-operation bodies only — see `OpFragment`).
     const opBody = operationBody(op);
     const chunks = renderPyStatementChunks(opBody, undefined, {
       eventSourced: e.eventSourced,

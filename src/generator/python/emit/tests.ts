@@ -52,14 +52,14 @@ export function renderPyTestsFile(agg: AggregateIR, ctx: BoundedContextIR): stri
   });
 }
 
-/** Value-object unit-test module (test-placement.md, Phase 2).  The VO is
+/** Value-object unit-test module (test-placement.md).  The VO is
  *  imported through the shared `app.domain.value_objects` narrowing — no
  *  dedicated subject import. */
 export function renderPyVoTestsFile(vo: ValueObjectIR, ctx: BoundedContextIR): string | null {
   return renderPySubjectTests(vo.name, vo.tests, ctx, null);
 }
 
-/** Domain-service unit-test module (test-placement.md, Phase 2).  A service op
+/** Domain-service unit-test module (test-placement.md).  A service op
  *  renders as a bare module-level function (`snake(op)(…)`), so the test imports
  *  the referenced op functions from `app.domain.services.<snake(svc)>`. */
 export function renderPyServiceTestsFile(

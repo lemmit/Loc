@@ -105,7 +105,7 @@ export function buildRetrievalBodies(
 }
 
 /** A retrieval's `.Where(...)` clause.  When the `where` is exactly a named
- *  criterion with an emitted reified class (Slice 2b), consume its
+ *  criterion with an emitted reified class, consume its
  *  `ToExpression()` — `.Where(new XCriterion(args).ToExpression())` — so the
  *  query is the reified Specification rather than an inlined predicate.
  *  Composed / anonymous / non-eligible `where`s fall back to the inline
@@ -157,7 +157,7 @@ export function collectRetrievalBodyUsings(
 
 function filterClauseFor(find: FindIR, agg: EnrichedAggregateIR, ctx?: BoundedContextIR): string {
   // A `where` that is exactly a named, eligible criterion consumes its
-  // reified `ToExpression()` (Slice 2b, symmetric to the retrieval path).
+  // reified `ToExpression` (symmetric to the retrieval path).
   if (ctx && find.criterionRef && canEmitToExpressionFor(find.criterionRef.name, ctx, agg.name)) {
     const args = find.criterionRef.args
       .map((a) => renderCsExpr(a, { thisName: "x", agg, efQuery: true }))

@@ -349,7 +349,7 @@ function renderBinary(e: Extract<ExprIR, { kind: "binary" }>, ctx: JpqlCtx): str
   }
   const op = jpqlOp(e.op);
   // Self-id vs principal-claim comparison (`this.id == currentUser.<claim>` —
-  // the derived tenancy registry self-scope, Phase 1b).  The entity key is an
+  // the derived tenancy registry self-scope).  The entity key is an
   // `@EmbeddedId` record (`OrganizationId(UUID value)`), so the comparison
   // navigates into its component (`e.id.value`) and the SpEL principal side
   // binds the claim AS the id's value type: a same-typed claim binds directly

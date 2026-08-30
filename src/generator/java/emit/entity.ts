@@ -205,7 +205,7 @@ export interface JavaEntityOptions {
    *  from the context's read-decls (`capability-filter.ts`). */
   promotedCaps?: ReadonlySet<string>;
   /** `${ctx.name}.${agg.name}` — construct-id prefix for this aggregate's
-   *  own operation bodies (source-map Milestone 3).  Only consulted when
+   *  own operation bodies (source-map).  Only consulted when
    *  `opFragments` is also passed; entity parts never carry operations, so
    *  neither is ever needed for a part render call. */
   construct?: string;

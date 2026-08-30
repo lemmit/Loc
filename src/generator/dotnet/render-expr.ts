@@ -63,7 +63,7 @@ export interface CsRenderContext {
   efQuery?: boolean;
   /** Resource-op call routing: resourceName → static C# helper class
    *  name (e.g. `salesFiles` → `S3Resources`).  Set on the workflow
-   *  render context (Phase 4c); a `resource-op` call renders to
+   *  render context; a `resource-op` call renders to
    *  `<class>.<Resource>_<Verb>(args)`.  When unset, a resource-op
    *  throws at emit (non-resource render contexts never see one). */
   resourceClasses?: Map<string, string>;
@@ -97,7 +97,7 @@ export interface CsRenderContext {
    *  are in scope. */
   paramExpr?: (name: string) => string | undefined;
   /** Read-port handle resolver for a `reading`-tier domain-service body
-   *  (domain-services.md rev. 4, Slice 1).  A `repo-read` Call
+   *  (domain-services.md rev. 4).  A `repo-read` Call
    *  (`Accounts.byHolder(holder)`, lowered to `callKind: "repo-read"`) renders
    *  against the repository the service has INJECTED — on .NET / EF a `reading`
    *  service is a DI'd `sealed class` whose ctor takes one `I<Aggregate>Repository`
@@ -108,7 +108,7 @@ export interface CsRenderContext {
    *  validator-caught bug). */
   repoReadHandle?: (repo: string) => string;
   /** Injected-service call resolver for a `reading`-tier domain-service call
-   *  (domain-services.md rev. 4, Slice 1).  On .NET a `reading` service is a
+   *  (domain-services.md rev. 4).  On .NET a `reading` service is a
    *  DI'd `sealed class`, so the orchestrating workflow injects it (`_registration`)
    *  and the call site is `await _registration.IsEmailAvailableAsync(holder, ct)` —
    *  NOT the static `Registration.IsEmailAvailable(holder)` a PURE service emits.
@@ -437,7 +437,7 @@ function renderCsBinary(left: string, right: string, e: BinaryExpr, efQuery: boo
     if (temporal !== null) return temporal;
   }
   // Self-id vs scalar comparison (`this.id == currentUser.<claim>` — the
-  // derived tenancy registry self-scope, Phase 1b).  The entity's `Id` is
+  // derived tenancy registry self-scope).  The entity's `Id` is
   // the strongly-typed `<Agg>Id` record struct, so a raw scalar operand
   // must be lifted into it: same-typed claims wrap directly
   // (`new OrgId(claim)`), a `string` claim against a guid id parses first
@@ -1003,7 +1003,7 @@ function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {
       return `(await ${API_CLIENT_CLASS}.${upperFirst(op.resourceName)}_${upperFirst(op.operationId)}(${coerced.join(", ")}))`;
     }
     case "resource-op": {
-      // Resource-op (Phase 4c) → `<Class>.<Resource>_<Verb>(args)`, an
+      // Resource-op → `<Class>.<Resource>_<Verb>(args)`, an
       // async static helper the .NET ResourceAdapter emits.  Awaited by
       // the statement renderer.  The class is routed by sourceType via
       // `ctx.resourceClasses`; a missing entry means this render context
@@ -1038,7 +1038,7 @@ function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {
     }
     case "repo-read": {
       // A read-only repository query in a `reading` domain-service body
-      // (domain-services.md rev. 4, Slice 1).  Renders against the INJECTED
+      // (domain-services.md rev. 4).  Renders against the INJECTED
       // repository the service holds — `ctx.repoReadHandle(repo)` resolves the
       // field (`Accounts` → `_accounts`), and the method is the resolved repo
       // method (the .NET method name shape, no re-recognition).  `await`-wrapped
@@ -1082,7 +1082,7 @@ function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {
 }
 
 /** The .NET repository method name a `repo-read` (`callKind: "repo-read"`) in a
- *  `reading` domain-service body resolves to (domain-services.md rev. 4, Slice 1).
+ *  `reading` domain-service body resolves to (domain-services.md rev. 4).
  *  Mirrors the names the repository emitter generates:
  *   - a named `getById` read → `GetByIdAsync` (the built-in load-or-null, which
  *     carries the `Async` suffix, like the workflow `repoLet`);

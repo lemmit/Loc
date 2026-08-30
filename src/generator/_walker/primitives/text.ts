@@ -170,7 +170,7 @@ export function emitImage(
       ? JSON.stringify(positional.value)
       : undefined;
   const src = stringOrRefArgValue(call, "src", ctx) ?? positionalSrc;
-  // `decorative: true` (accessibility.md Phase 3) renders an explicit empty
+  // `decorative: true` (accessibility.md) renders an explicit empty
   // alt (`alt=""`), hiding a purely-decorative image from assistive tech; a
   // real `alt:` wins over it.  The validator guarantees one of the two is
   // present when the image has a src.
@@ -314,11 +314,8 @@ export function emitKeyValueRow(
     // of the one name are supplied, from the same `messageKey()`:
     //   `label`     — the text/children token, for `<span>{{{label}}}</span>`;
     //   `labelAttr` — the complete bound attribute, for `<KeyValueRow{{{labelAttr}}}>`.
-    // Before this the emitter read the raw literal and escaped it, so the slot
-    // was extracted into the catalog and rendered in English on every target.
     label: localizedText(call, ctx, "keyValue", '""'),
-    // A missing label kept its pre-change `label=""` rather than dropping the
-    // attribute — the degenerate case is not what this change is about.
+    // A missing label emits `label=""` rather than dropping the attribute.
     labelAttr: labelArg ? localizedPositionalAttr(call, ctx, "keyValue", "label") : ' label=""',
     childJsx,
     testidAttr: testidAttr(call, ctx),

@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Typed in-system api client (M-T4.8 slice 4c) — the Java/Spring Boot caller
+// Typed in-system api client (M-T4.8) — the Java/Spring Boot caller
 // half.
 //
 // Fourth sibling of the Hono / Python / .NET clients; same contract, Java

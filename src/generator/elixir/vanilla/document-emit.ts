@@ -4,7 +4,7 @@
 //
 // A document-shaped aggregate persists as ONE jsonb column — the canonical
 // `(id, data, version)` table the migrations-builder already emits — instead of
-// the normalised table-per-entity tree.  Route A (slice 1): the blob is a TYPED
+// the normalised table-per-entity tree.  Route A: the blob is a TYPED
 // `embeds_one :data, <Agg>.Data` embedded schema (`renderDocDataSchema`), so
 // `row.data` rehydrates into a `%<Agg>.Data{}` struct carrying every domain
 // field.  Validation lives on that embed's `changeset/2` (cast + `cast_embed` +
@@ -21,9 +21,9 @@
 // the rehydrated `%<Agg>.Data{}` embed (`record = row.data`) via the SHARED
 // relational body renderer (`renderReturningStmt`) — no `docMap` fork; an op
 // re-embeds the mutated struct + bumps version, a find filters in memory over the
-// struct.  Paged finds build the wire envelope in memory (slice 4c), union finds
-// return the single-get tuple the shared find controller tags (slice 4d), and an
-// AUDITED op — named (slice 4e) or returning (slice 4f) — records its audit row
+// struct.  Paged finds build the wire envelope in memory, union finds
+// return the single-get tuple the shared find controller tags, and an
+// AUDITED op — named or returning — records its audit row
 // inside the persist transaction.  A mutating RETURNING op re-embeds + persists its
 // write, projecting the wire off the saved embed (#1774 — it previously dropped the
 // write).  Collection READS over the aggregate's own in-memory lists work too —
@@ -808,7 +808,7 @@ function docOpStructBody(
   return { params, body, guardClauses, trailingReturnLine };
 }
 
-/** `<op>_<agg>(row, params)` for a document aggregate (Route A slice 2) — bind
+/** `<op>_<agg>(row, params)` for a document aggregate (Route A) — bind
  *  the rehydrated embed as `record`, run the body in struct mode, then re-embed
  *  the mutated struct + bump the version.  `cast_embed` is skipped on the write
  *  back (the struct is already validated on read); `put_embed` stores it verbatim. */
@@ -826,7 +826,7 @@ export function renderDocNamedOpFunction(
   const repoMod = `${aggModule}Repository`;
   const { params, body, guardClauses } = docOpStructBody(op, agg, facadeMod, ctx, opFragments);
   const actorParam = opUsesCurrentUser(op) ? ", current_user \\\\ nil" : "";
-  // An AUDITED named op (Route A slice 4e) records a who/what/when + before/after
+  // An AUDITED named op (Route A) records a who/what/when + before/after
   // wire snapshot into `audit_records` INSIDE the persist transaction, so the
   // history row commits atomically with the embed re-write — parity with the
   // relational `renderNamedOpFunction` audit path.  The `before` snapshot is the
@@ -953,9 +953,9 @@ export function renderDocReturningOpFunction(
     trailingReturn !== undefined &&
     (trailingReturn.value.kind === "this" || trailingReturn.variantTag === agg.name);
   const aggregateSuccess = persists && (fallThrough || trailingIsAggregate);
-  // An AUDITED returning op (slice 4f) records its audit row INSIDE the persist
+  // An AUDITED returning op records its audit row INSIDE the persist
   // transaction, so the history row commits atomically with the embed re-write —
-  // the same tail the named-op audit path (slice 4e) uses, wrapped around the
+  // the same tail the named-op audit path uses, wrapped around the
   // #1774 returning-op persist.  `audit_before` is the pre-mutation document.
   const hasAudit = op.audited === true;
 

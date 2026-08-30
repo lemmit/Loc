@@ -317,7 +317,7 @@ function emitProjectFromContexts(
     const path = layout.pathFor(artifact, emitCtx);
     out.set(path, content);
     sourcemap?.file(path, content, origin, construct);
-    // Statement-granular sub-regions (source-map Milestone 3) — layered onto
+    // Statement-granular sub-regions (source-map) — layered onto
     // the whole-file region just recorded above, anchored by exact-text
     // search against this SAME final content.
     if (sourcemap && opFragments) {
@@ -344,7 +344,7 @@ function emitProjectFromContexts(
   // (auth: required) deployable.
   const oidc = authRequired && !!system?.sys.auth;
   // Resource client classes (objectStore / queue / api) + their Gradle
-  // deps (Phase 4c) — empty when the deployable wires no consumable
+  // deps — empty when the deployable wires no consumable
   // resources, leaving build.gradle.kts byte-identical.
   const resourceEmission = emitJavaResourceFiles(
     system?.sys,
@@ -366,7 +366,7 @@ function emitProjectFromContexts(
     );
     if (apiClients) place(`${JAVA_API_CLIENT_CLASS}.java`, "resource-client", apiClients);
   }
-  // Broker bindings (channels.md; M-T4.4 slice 6b): the redis-bound broadcast
+  // Broker bindings (channels.md; M-T4.4): the redis-bound broadcast
   // channelSources this deployable wires via `channels:`.  A wired-but-foreign
   // channel joins the per-context dispatcher derivation as a stub with its
   // REAL semantics knobs, so a hosted reactor routes off a channel declared in
@@ -376,7 +376,7 @@ function emitProjectFromContexts(
   // by the ChannelConsumerService on delivery instead.
   const channelBindings = system ? brokerChannelBindings(system.deployable, system.sys) : [];
   const hasChannels = channelBindings.length > 0;
-  // Durable broker-bound events (M-T4.4 slice 7c): HOSTED durable events
+  // Durable broker-bound events (M-T4.4): HOSTED durable events
   // carried by a wired `queue`/`work` (or future `log`) channel — their
   // producer path rides the outbox relay (design §5), never the inline tee.
   // Hosted-only on purpose: the module-level migrations are what back the
@@ -681,7 +681,7 @@ function emitProjectFromContexts(
         sourcemap,
       );
     }
-    // Value-object / domain-service unit tests (test-placement.md, Phase 2) —
+    // Value-object / domain-service unit tests (test-placement.md) —
     // JUnit classes colocated in each subject's test package; emitted only when
     // the subject declares a `test`.
     for (const vo of ctx.valueObjects) {
@@ -720,7 +720,7 @@ function emitProjectFromContexts(
           `${ctx.name}.${svc.name}`,
         );
     }
-    // Context INTEGRATION test (test-placement.md, Phase 3b) — a @SpringBootTest
+    // Context INTEGRATION test (test-placement.md) — a @SpringBootTest
     // that autowires the JPA repositories, applies the Flyway migrations on boot
     // (LOOM_PG_URL → spring.datasource.*), and persists→reads cross-aggregate.
     // Placed at the base package so component scan finds the @SpringBootApplication.
@@ -898,8 +898,8 @@ function emitProjectFromContexts(
         projConstruct,
       );
     }
-    // In-process saga dispatcher (workflow-debt-backend-parity.md, Java saga
-    // slice 2): a @Component whose @EventListener handlers react to
+    // In-process saga dispatcher (workflow-debt-backend-parity.md): a
+    // @Component whose @EventListener handlers react to
     // channel-carried events — load-or-allocate / route-or-drop the saga row,
     // run the handler body, re-publish so choreography chains re-enter.
     // Only collected when a recorder is actually threaded in — a
@@ -958,8 +958,8 @@ function emitProjectFromContexts(
         );
       }
     }
-    // Read-only instance endpoints (workflow-debt-backend-parity.md, Java saga
-    // slice 3): every observable (correlation-bearing) saga gets
+    // Read-only instance endpoints (workflow-debt-backend-parity.md): every
+    // observable (correlation-bearing) saga gets
     // GET /workflows/<wf>/instances[/{id}] over its persisted state row.
     const instanceReads = renderJavaWorkflowInstanceReads(ctx, {
       basePkg,
@@ -1144,7 +1144,7 @@ function emitProjectFromContexts(
     }
   }
 
-  // Broker transport (M-T4.4 slice 6b) — channel-less projects stay
+  // Broker transport (M-T4.4) — channel-less projects stay
   // byte-identical.  Foreign vocabulary first (Hono/Python/.NET parity): a
   // consumed foreign event's record class + the id brands it (and correlating
   // workflow state) reference join the deployable's domain packages.
@@ -1216,7 +1216,7 @@ function emitProjectFromContexts(
     )) {
       place(name, "config", content);
     }
-    // Transactional-outbox tier (M-T4.4 slice 7c, design §5): the JPA entity
+    // Transactional-outbox tier (design §5): the JPA entity
     // over the MigrationsIR-owned __loom_outbox + its repository + the
     // polling relay that publishes drained rows to the broker.  Only where
     // HOSTED durable events ride a broker-bound channel.
@@ -1351,7 +1351,7 @@ function emitProjectFromContexts(
     renderGradleBuild({
       flyway: hasMigrations,
       oidc,
-      // Durable cron timerSources (scheduling.md Phase 2) add the JobRunr core dep.
+      // Durable cron timerSources (scheduling.md) add the JobRunr core dep.
       jobrunr: ownsCronTimer,
       extraDeps: {
         ...resourceEmission.deps,
@@ -1784,7 +1784,7 @@ function emitAggregate(
   // variant at its own status (exception-less.md §4).  A tagged union DTO is
   // needed only for a genuine multi-success union, which IR validation rejects
   // for finds.
-  // Extern operations (extern-domain-extension-point.md §3a, Phase 2): the
+  // Extern operations (extern-domain-extension-point.md §3a): the
   // aggregate op delegates to a co-located, scaffold-once `<Agg>Extern` hook
   // class — same package as the entity, so it reaches the aggregate's
   // package-private fields natively.  Placed under the `entity` category so it

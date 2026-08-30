@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Typed in-system api client (M-T4.8 slice 4) — the Python/FastAPI caller half.
+// Typed in-system api client (M-T4.8) — the Python/FastAPI caller half.
 //
 // Sibling of `src/platform/hono/v4/adapters/api-client.ts`; same contract,
 // idiomatic Python.  One `async def <resource>_<operation_id>(...)` per

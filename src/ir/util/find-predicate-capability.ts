@@ -109,7 +109,7 @@ const FULL_SUBSET: FindPredicateCapability = () => null;
  *  params, this-prop / enum-value refs, literals, `currentUser.<claim>`
  *  (lowered to a `@__cu_<claim>` param bound from the ambient request
  *  principal — same accessor the capability-filter path uses), AND
- *  `this.<refColl>.contains(x)` membership (M-T6.9 wave 2 — lowered to an
+ *  `this.<refColl>.contains(x)` membership (lowered to an
  *  EXISTS join subquery correlated on the owner row's `id`, the raw-SQL mirror
  *  of EF's `_db.<JoinDbSet>.Any(...)`).  Dapper now matches the full queryable
  *  subset, so it narrows nothing versus the EF Core / drizzle baseline. */
@@ -147,13 +147,11 @@ const MIKROORM_SUBSET: FindPredicateCapability = (e) => {
       return `arithmetic '${inner.op}' — ${NOT_SUPPORTED}`;
     }
     if (inner.kind === "unary" && inner.op === "!") return walkPredicate(inner.operand);
-    // Authorization/tenancy sentinels (M-T9.9).  BOTH lower now.  `deny` is the
-    // always-false FilterQuery contradiction `$and: [{ id: null }, { id: { $ne:
-    // null } }]` (the twin of Dapper's `1 = 0`); the `deep`/`global` SCOPE
-    // sentinel is the descendant-or-self subtree predicate, rendered through a
-    // `raw()` FilterQuery key because the operator vocabulary has no prefix
-    // test.  The scope arm used to be narrowed here and separately refused by
-    // the mikroorm capability gate — both are gone together.
+    // Authorization/tenancy sentinels — BOTH lower.  `deny` is the always-false
+    // FilterQuery contradiction `$and: [{ id: null }, { id: { $ne: null } }]`
+    // (the twin of Dapper's `1 = 0`); the `deep`/`global` SCOPE sentinel is the
+    // descendant-or-self subtree predicate, rendered through a `raw()`
+    // FilterQuery key because the operator vocabulary has no prefix test.
     if (inner.kind === "authz-filter") return null;
     if (isContainsMembership(inner))
       return `'this.<refColl>.contains(x)' membership — ${NOT_SUPPORTED}`;

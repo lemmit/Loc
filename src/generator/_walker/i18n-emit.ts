@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// i18n emission — the shared translation-runtime seam (M-T1.11, i18n.md Phase 2).
+// i18n emission — the shared translation-runtime seam (M-T1.11, i18n.md).
 //
 // `localizedText` is the drop-in replacement for the
 // `unwrapTextLiteral(firstPositionalContent(call, ctx), ctx.target.escapeText)`

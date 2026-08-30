@@ -90,7 +90,7 @@ function formArrayMemberLines(
 
 // ---------------------------------------------------------------------------
 // Angular page shell — assembles a generated standalone component around a
-// walked page body (angular-frontend-plan.md Slice 4b).
+// walked page body (angular-frontend-plan.md).
 //
 // Batch 1 scope: static content + signal state + router navigation.  The
 // walked markup lands in the component's inline `template`; `state` fields
@@ -114,7 +114,7 @@ export interface AngularPageShellInput {
    *  guard below — without it, a `requires` predicate stays purely a
    *  server-side 403. */
   authUi?: boolean;
-  /** Served decl names for the component's emitted identifier (slice 3c). */
+  /** Served decl names for the component's emitted identifier. */
   nameCtx: PageNameCtx;
   /** The ui's api handles (`api Sales: SalesApi`) — needed so an action body
    *  that awaits a remote op (`match await Sales.Order.op()`,
@@ -647,7 +647,7 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     members.push(`  protected readonly Decimal = Decimal;`);
   }
 
-  // The chart component (`Chart`, M-T1.3 Phase 4) — a standalone component used
+  // The chart component (`Chart`, M-T1.3) — a standalone component used
   // BY TAG, so it takes one import line and one `imports: []` entry, exactly
   // like a hoisted `DataGrid` child.  Marker-keyed off the emitted tag so the
   // file and its registration cannot dangle apart.

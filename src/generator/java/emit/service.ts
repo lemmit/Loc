@@ -445,7 +445,7 @@ export function renderJavaService(
         ", ",
       );
       if (op.extern) {
-        // Extern op (extern-domain-extension-point.md §3a, Phase 2): the op is a
+        // Extern op (extern-domain-extension-point.md §3a): the op is a
         // real aggregate method now — it runs its preconditions, delegates to the
         // co-located scaffold-once `<Agg>Extern` hook, and re-asserts invariants
         // internally (all inside `aggregate.<op>(...)`).  The service just loads,

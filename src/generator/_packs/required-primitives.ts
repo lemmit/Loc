@@ -264,7 +264,7 @@ const TSX_FORM: readonly string[] = [
 const DATA_GRID_PRIMITIVES: readonly string[] = ["primitive-data-grid"];
 
 // `Chart` — the line/bar chart over a grouped projection's LIST response
-// (M-T1.3 Phase 4).  Required of the TSX packs ONLY, and that is a statement
+// (M-T1.3).  Required of the TSX packs ONLY, and that is a statement
 // about WHERE THE TEMPLATE LIVES, not about which frameworks can draw a chart.
 //
 // tsx is per-PACK because each tsx pack binds its own charting library

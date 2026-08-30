@@ -182,7 +182,7 @@ export function generateReactForContexts(
   }
 
   const workflows = allWorkflows(contexts);
-  // Name-context for `classifyPage` (slice 3c): a page's kind is derived from
+  // Name-context for `classifyPage`: a page's kind is derived from
   // its role-scoped name + area against the served decls, not a stamped origin.
   const pageCtx: PageNameCtx = {
     aggregateNames: aggregates.map(({ agg }) => agg.name),
@@ -245,7 +245,7 @@ export function generateReactForContexts(
     out.set("src/api/workflows.ts", buildWorkflowsApiModule(contexts));
   }
 
-  // Query-time projection clients (M-T1.3 Phase 1) — one shared module, 1:1
+  // Query-time projection clients (M-T1.3) — one shared module, 1:1
   // with the frontend-readable projection inventory.  Emitted only when the
   // deployable actually serves one, so a projection-free app stays
   // byte-identical.

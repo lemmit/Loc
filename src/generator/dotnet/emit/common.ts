@@ -97,7 +97,7 @@ public sealed class ForbiddenException : Exception
 /// implementation, so the <see cref="DomainExceptionFilter"/> can emit a
 /// 500 envelope that names the offending handler instead of the bare
 /// <c>{ "error": "internal" }</c> operators see otherwise.  (Since extern
-/// (b) Phase 2, an extern aggregate OPERATION is an ordinary domain method
+/// (b), an extern aggregate OPERATION is an ordinary domain method
 /// — a hand-written exception from its hook bubbles as a generic 500, the
 /// same as any other op body.  This wrap + filter arm is retained for the
 /// application-layer extern handler surface.)  Domain-layer exceptions

@@ -188,7 +188,7 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
 }
 
 /** Marks-carrying sibling of `renderTsExpr` (span-tracking-emission.md, M15
- *  phase 7 slice 2) — same TS leaf table, composed through the level-wise
+ *  phase 7) — same TS leaf table, composed through the level-wise
  *  anchoring dispatcher instead of the plain one.  Only called from a
  *  recording path (the aggregate op-body loop, when a `SourceMapRecorder`
  *  is threaded in); never on the default flag-off path. */
@@ -539,7 +539,7 @@ function renderCall(
       return `(await ${op.resourceName}$${op.operationId}(${argList}))`;
     }
     case "resource-op": {
-      // A verb call on an ambient resource handle (Phase 4).  The
+      // A verb call on an ambient resource handle.  The
       // resource client module exports an async `<resource>$<verb>`
       // helper that owns the SDK mapping; the call site is uniform and
       // awaited inline so it composes in any expression position.
@@ -563,7 +563,7 @@ function renderCall(
     }
     case "repo-read": {
       // A read-only repository query in a `reading` domain-service body
-      // (domain-services.md rev. 4, Slice 1).  Renders against the THREADED
+      // (domain-services.md rev. 4).  Renders against the THREADED
       // read-port handle — `lowerFirst(repo)` (`Accounts` → `accounts`), the
       // param the service declaration takes and the orchestrating workflow
       // supplies — exactly the var the workflow's own repo reads use

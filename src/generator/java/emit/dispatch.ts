@@ -184,7 +184,7 @@ export function renderJavaDispatcher(
   /** Source-map Milestone 12 — `<Ctx>Dispatcher.java` pools every reactor /
    *  event-create handler, so it never gets a whole-file region — only these
    *  fragment-only statement regions (mirrors `renderJavaWorkflows`'
-   *  `opFragments` at Milestone 11).  Allocated by the caller ONLY when a
+   *  `opFragments` at).  Allocated by the caller ONLY when a
    *  recorder is present, so a no-`--sourcemap` run pays no per-statement
    *  bookkeeping cost. */
   opFragments?: OpFragment[],
@@ -509,8 +509,7 @@ function renderHandler(
   // Handler body — emit appends to __events; the spine threads the 8-space base.
   // Chunked (one lines-array per top-level statement) rather than the
   // pre-flattened `renderWorkflowStmts` — byte-identical either way, but the
-  // per-chunk list lets us surface per-statement sub-regions (source-map
-  // Milestone 12).
+  // per-chunk list lets us surface per-statement sub-regions (source-map).
   const stmtChunks = renderWorkflowStmtChunks(
     resolved.statements,
     javaWorkflowStmtTarget(
@@ -604,7 +603,7 @@ function renderEsHandler(
   // that only emits constants never touches `state`) — folding is then a
   // pure no-op, so we skip the stream load + fold (parity with the python
   // port).  The chunk list also lets us surface per-statement sub-regions
-  // (source-map Milestone 12).
+  // (source-map).
   const stmtChunks = renderWorkflowStmtChunks(
     resolved.statements,
     javaWorkflowStmtTarget(

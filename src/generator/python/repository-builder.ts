@@ -379,7 +379,7 @@ export function buildPyRepositoryFile(
     authUserImport(
       emittableFinds(repo).some(findUsesCurrentUser),
       // Gate the `require_current_user` accessor import on ACTUAL principal usage,
-      // not mere `writeScopeFilter` presence: a `deny write` carve-out (Phase 4)
+      // not mere `writeScopeFilter` presence: a `deny write` carve-out
       // sets an always-false write scope that references NO principal, so an
       // unconditional import would be unused → ruff F401 on the generated project.
       aggUsesPrincipalContextFilter(agg) || exprUsesCurrentUser(agg.writeScopeFilter),

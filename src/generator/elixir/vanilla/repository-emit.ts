@@ -189,7 +189,7 @@ function renderRepository(
   const writeScope = vanillaWriteScopeFilter(agg, contextModule);
   const writeEff = combineWhere(kindFilter, writeScope);
   // Does the write-scope predicate actually reference the principal?  A DENY
-  // carve-out (`deny write on X`, authorization Phase 4) is always-false and uses
+  // carve-out (`deny write on X`, authorization) is always-false and uses
   // NO `current_user`, so the `find_by_id_for_write` principal param must be
   // underscored or `--warnings-as-errors` trips on the unused variable.  The
   // tenant-floor / deep write scopes DO reference it.

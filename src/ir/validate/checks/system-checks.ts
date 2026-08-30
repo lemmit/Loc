@@ -138,9 +138,9 @@ const PROJECTION_QT_SUPPORTED = new Set(["node", "python", "elixir", "java", "do
 // Backends in `PROJECTION_AGG_SUPPORTED` have ported it; the rest gate HONESTLY
 // rather than emit the operator name as a free identifier.  Same reviewed-gap
 // discipline as `validateQueryTimeProjectionBackend` above; node is first.
-// All five backends now emit the SQL push-down (node #1, then python / dotnet /
-// java / elixir).  The set is kept — not deleted — because it is the seam a new
-// backend gates on until it ports, and the diagnostic below is its message.
+// Every shipping backend emits the SQL push-down, so the set is currently
+// exhaustive.  It is kept — not deleted — because it is the seam a new backend
+// gates on until it ports, and the diagnostic below is its message.
 const PROJECTION_AGG_SUPPORTED = new Set(["node", "python", "dotnet", "java", "elixir"]);
 
 export function validateWholeTableAggregationBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
@@ -570,18 +570,16 @@ function mountedUis(sys: SystemIR, d: DeployableIR): { ui: UiIR; fw: string }[] 
   return out;
 }
 
-/** Frontends that can render `Chart` (M-T1.3 Phase 4).
+/** Frontends that can render `Chart`.
  *
  *  react reaches a charting LIBRARY through its design pack; the other three
  *  need none — see the rollout note on the gate below. */
-/** `Chart` on a target that can't render it (M-T1.3 Phase 4).
+/** `Chart` on a target that can't render it.
  *
- *  The gate was per-PACK during the staged rollout (mantine v9 was the only
- *  pack shipping a `primitive-chart` template + a chart dependency).  The
- *  backfill is complete — all EIGHT tsx packs ship both — so `primitive-chart`
- *  is now in `REQUIRED_PRIMITIVES.tsx.core`, which makes a react pack missing
- *  it a pack-LOAD failure rather than something to re-check here.  What remains
- *  is the per-FRAMEWORK rule, exactly like `validateDataGridFramework`.
+ *  `primitive-chart` is in `REQUIRED_PRIMITIVES.tsx.core`, so a react pack
+ *  missing it is a pack-LOAD failure rather than something to re-check here.
+ *  This gate is the per-FRAMEWORK rule, exactly like
+ *  `validateDataGridFramework`.
  *
  *  Phoenix, Feliz and Flutter join react by rendering the chart THEMSELVES —
  *  inline SVG (HEEx, Feliz) and a `CustomPainter` (Flutter), computed from rows
@@ -596,8 +594,8 @@ function mountedUis(sys: SystemIR, d: DeployableIR): { ui: UiIR; fw: string }[] 
  *  so it conflicts on rebase.  Resolve by keeping EVERY framework already
  *  present plus yours — never by taking one side wholesale.
  *
- *  With the last frontend ported the Set names every shipping framework, so the
- *  gate no longer fires for anything that exists — it is the seam a NEW frontend
+ *  The Set names every shipping framework, so the gate fires for nothing that
+ *  exists today — it is the seam a NEW frontend
  *  gates on until it ports, not dead code.  EXPORTED so its own test can prove
  *  it still bites: with nothing left to gate, "the check works" and "the check
  *  is unreachable" are indistinguishable from the outside, and the only honest
@@ -642,7 +640,7 @@ export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): vo
 }
 
 // Frontends whose generated client can READ a query-time projection
-// (M-T1.3 Phase 1).  These ship a projections api module + the walker's
+// These ship a projections api module + the walker's
 // Pattern H; the remaining frontends have no client, so a page reading a
 // projection there would emit an unresolved receiver — `undefined.<Projection>`,
 // a runtime TypeError and a build break.  Gate honestly until each ports, the
@@ -652,8 +650,8 @@ export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): vo
 // port PR, so it conflicts on rebase.  Resolve by keeping EVERY framework
 // already present plus yours — never by taking one side wholesale.
 //
-// With the last frontend ported the Set names every shipping framework, so the
-// gate no longer fires for anything that exists — it is the seam a NEW frontend
+// The Set names every shipping framework, so the gate fires for nothing that
+// exists today — it is the seam a NEW frontend
 // gates on until it ports, not dead code.  EXPORTED so its own test can prove
 // it still bites: with nothing left to gate, "the check works" and "the check
 // is unreachable" are indistinguishable from the outside, and the only honest
@@ -800,13 +798,12 @@ export function validateCurrentUserNeedsAuthUi(sys: SystemIR, diags: LoomDiagnos
  *  `currentUser` read can hide in one.  (`PageIR` carries more; only these
  *  five are walked here.)
  *
- *  `requires` is page-only (a component has no gate expression) and was the
- *  member this shape originally omitted — the SECURITY-shaped hole, since
- *  `page { requires currentUser.role == "admin" }` is precisely the place a
- *  `currentUser` read is load-bearing.  Without a session binding the gate
- *  expression renders against nothing (`_frontend/gate-expr.ts` emits the read
- *  verbatim), so an unauthenticated ui shipped an access check that could never
- *  evaluate — clean validation, no guard. */
+ *  `requires` is page-only (a component has no gate expression) and is the
+ *  SECURITY-shaped member: `page { requires currentUser.role == "admin" }` is
+ *  precisely the place a `currentUser` read is load-bearing.  Without a session
+ *  binding the gate expression renders against nothing (`_frontend/gate-expr.ts`
+ *  emits the read verbatim), so an unauthenticated ui would ship an access check
+ *  that can never evaluate — clean validation, no guard. */
 interface UiRenderHost {
   body?: ExprIR;
   requires?: ExprIR;
@@ -981,7 +978,7 @@ export function validateFlutterPrimitiveSupport(sys: SystemIR, diags: LoomDiagno
 //     client-reachable, so they are excluded.
 //
 // Read endpoints — **views** and repository **finds** — are in scope too: each
-// is a GET endpoint, and both now carry an optional `requires <expr>` gate (the
+// is a GET endpoint, and both carry an optional `requires <expr>` gate (the
 // read-side twin of an operation's in-handler 403).  An ungated read under
 // denyByDefault serves to any caller; `requires true` is the explicit
 // intentionally-public escape.
@@ -1035,7 +1032,7 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
         }
       }
       // Repository finds: each author-declared named find is its own GET route
-      // and now carries the same optional `requires <expr>` gate.  The aggregate
+      // and carries the same optional `requires <expr>` gate.  The aggregate
       // list-all endpoint (the auto-injected `find all`) is out of scope — it is
       // compiler-synthesized and has no author source line to attach a gate to;
       // gating it needs an aggregate-level default-read surface (follow-up).
@@ -1081,12 +1078,9 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
       // one), so under denyByDefault an ungated one publishes its rows to any
       // caller exactly as an ungated find publishes an aggregate's.
       //
-      // This was the last read surface default-deny walked past.  It could not
-      // have been enforced before: a folded projection was unable to SPELL a
-      // gate (the keyword lived in the query-clause fragment) and no backend
-      // emitted one, so demanding a gate would have been demanding the
-      // impossible.  Both halves are fixed, so the requirement is now
-      // satisfiable and the exemption has no reason left.
+      // Folded projections are in scope like every other read surface: a
+      // projection can SPELL a `requires` gate and the backends emit it, so
+      // demanding one is satisfiable.
       for (const proj of c.projections) {
         if (proj.query?.requires) continue;
         // A MACRO-emitted projection has no declaration header, so the
@@ -1419,7 +1413,7 @@ export function validateComposeUniqueness(sys: SystemIR, diags: LoomDiagnostic[]
 }
 
 // ---------------------------------------------------------------------------
-// Channel wiring (channels.md §"Surface — transport binding", M-T4.4 slice 1).
+// Channel wiring (channels.md §"Surface — transport binding").
 // Cross-file/system-level twins of the AST-level channelSource matrix checks:
 //
 //   - `loom.channelsource-unbound` (warning) — a channelSource no deployable
@@ -2019,7 +2013,7 @@ function docStmtUnsupported(s: StmtIR, allowFnCall: boolean, agg: AggregateIR): 
       // Scalar compound arithmetic (`total += n`) is fine.  A COLLECTION mutation
       // is supported ONLY for a CONTAINMENT (`lines += Item{…}`): the relational
       // add/remove arm appends/removes a part struct and the op re-embeds the
-      // mutated list via `put_embed` (Route A slice 4b — boot-verified).  A
+      // mutated list via `put_embed` (boot-verified).  A
       // reference collection (`X id[]` → many_to_many) and a scalar value
       // collection stay gated (no join table / not-yet-wired on a document blob).
       if (s.collection) {
@@ -2049,8 +2043,8 @@ function docStmtUnsupported(s: StmtIR, allowFnCall: boolean, agg: AggregateIR): 
 /** A user-defined document operation the path can't emit.  `allowFnCall` is set
  *  once per aggregate from whether its `function`s are all doc-safe.  A RETURNING
  *  op is admitted (persisting tagged tuple, #1774) and CONTAINMENT mutation is
- *  admitted (Route A); an AUDITED op — named (slice 4e) or returning (slice 4f) —
- *  is admitted (the persist tail records an audit row in a `Repo.transaction`).  A
+ *  admitted; an AUDITED op — named or returning — is admitted (the persist tail
+ *  records an audit row in a `Repo.transaction`).  A
  *  PROVENANCED op stays gated (a jsonb blob has no co-located `<field>_provenance`
  *  columns to drain a history buffer into). */
 function docOpUnsupported(op: OperationIR, allowFnCall: boolean, agg: AggregateIR): boolean {
@@ -2075,8 +2069,8 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
         // gated.  Computed once here and threaded into the op/find checks.
         const allowFnCall = (agg.functions ?? []).every((fn) => !docFunctionUnsupported(fn, agg));
         // A custom find is unsupported only when its predicate reads a non-scalar
-        // shape.  PAGED finds (Route A slice 4c) and UNION finds (Route A slice 4d)
-        // are now supported: `renderDocFindFn` returns the single-get `{:ok, nil}`/
+        // shape.  PAGED and UNION finds are supported: `renderDocFindFn`
+        // returns the single-get `{:ok, nil}`/
         // `{:ok, record}` tuple the shared find controller translates to the tagged
         // union wire (found → 200 body, absent → 404 / RFC-7807 via `problem_variant`).
         const badFinds = (
@@ -2226,41 +2220,29 @@ export function validateElixirOpSelfCallPosition(sys: SystemIR, diags: LoomDiagn
 // unidirectional @OneToMany.
 
 // ---------------------------------------------------------------------------
-// Lifecycle-stamp rejections (M-T6.33).
+// Lifecycle-stamp rejections.
 //
-// This check USED to carry five codes — `loom.{node,dotnet,java,python,elixir}
-// -stamp-unsupported` — one per backend, over a shared body.  The M-T9.27
-// re-verify killed that framing on two counts:
+// TWO codes, neither backend-named.  The body reads only `dep.auth`,
+// `sys.user` and `agg.persistedAs` — facts about the MODEL — and never
+// consults a backend capability; the per-backend stamp mechanisms (Java
+// `_stampOnCreate`, .NET EF `AuditableInterceptor`, node Hono
+// `_stampOnCreate`, python pre-persist, Elixir Ecto `put_change`) only select
+// a message noun.
 //
-//   1. NEITHER ARM IS BACKEND-SPECIFIC.  The body below reads only `dep.auth`,
-//      `sys.user` and `agg.persistedAs` — facts about the MODEL.  It never
-//      consults a backend capability.  The per-backend stamp MECHANISMS do
-//      differ (Java `_stampOnCreate` entity methods; .NET EF
-//      `AuditableInterceptor`; node Hono `_stampOnCreate`; python pre-persist;
-//      Elixir Ecto `put_change`) — but none of them is what these two arms are
-//      about, so the family only ever selected a message noun.
-//   2. NEITHER ARM IS A GAP.  A backend-named `-unsupported` code promises
-//      "not yet, on this target".  Both arms are permanent:
+// Both arms are permanent language rules, not gaps waiting on a port:
 //
-//        * a principal stamp on a deployable with no auth has NO PRINCIPAL TO
-//          READ.  No backend can implement that; it is a misuse, and the
-//          message says how to fix it (add `auth: required`, or use a
-//          non-principal stamp).  A plain language rule.
-//        * a stamp on an event-sourced aggregate contradicts the storage model
-//          — stamps mutate state fields, and an event-sourced aggregate's state
-//          is FOLDED FROM ITS EVENT STREAM.  Semantically impossible, on every
-//          backend, forever.
+//   * a principal stamp on a deployable with no auth has NO PRINCIPAL TO READ.
+//     No backend can implement that; the message says how to fix it (add
+//     `auth: required`, or use a non-principal stamp).
+//   * a stamp on an event-sourced aggregate contradicts the storage model —
+//     stamps mutate state fields, and an event-sourced aggregate's state is
+//     FOLDED FROM ITS EVENT STREAM.
 //
-// So the five collapse to TWO codes named for what they mean, not for who
-// rejected them — and they leave the `*-unsupported` register entirely (that
-// register holds work; these are not work).  Splitting by meaning rather than
-// merging to one `loom.stamp-unsupported` is deliberate: the two arms are
-// different failures with different fixes, and a caller matching on identity
-// should be able to tell them apart.
-//
-// Naming follows M-T9.27 slice 2 (`-invalid` = impossible or refused) and
-// M-T5.21 §Symptom 1 (a target name never belongs in a code identity — it
-// becomes a lie the day that target supports it).
+// They stay SPLIT rather than merged into one `loom.stamp-invalid`: the two
+// failures have different fixes, so a caller matching on identity must be able
+// to tell them apart.  `-invalid` marks "impossible or refused", and a target
+// name never belongs in a code identity — it becomes a lie the day that target
+// supports it.
 // ---------------------------------------------------------------------------
 
 /** The noun for the missing request principal.  Elixir says "principal
@@ -2442,28 +2424,21 @@ export function validateGuardPrincipalWithoutAuth(sys: SystemIR, diags: LoomDiag
   }
 }
 
-// M-T6.19: `shape: embedded` reference collections (`X id[]`) now map on
-// java.  The jsonb id-array column rides a per-target `AttributeConverter`
+// `shape: embedded` reference collections (`X id[]`) map on java: the jsonb
+// id-array column rides a per-target `AttributeConverter`
 // (`<Target>IdJsonListConverter`, emitted in domain.ids) that unwraps the
-// `List<XId>` to its bare `value`s so the Jackson FormatMapper serialises
-// `["v1","v2"]` — the same physical jsonb shape .NET / node / elixir produce
-// — instead of the structured-JSON aggregate path that bypassed it.  Nested
-// part-in-part containments (single AND collection) likewise map
-// (`directParentOf`).
-//
-// The gate this replaced was `loom.java-embedded-refcoll-unsupported`.  It is
-// RETIRED — the code has zero raise sites in `src/`; the only surviving
-// mention is the negative pin in
-// `test/generator/java/generator-java-shapes.test.ts`, which asserts it is NOT
-// raised.  Named here only so a reader grepping the old code finds this note
-// instead of concluding the grep failed.
+// `List<XId>` to its bare `value`s, so the Jackson FormatMapper serialises
+// `["v1","v2"]` — the same physical jsonb shape .NET / node / elixir produce.
+// Nested part-in-part containments (single AND collection) likewise map
+// (`directParentOf`).  There is no gate: `loom.java-embedded-refcoll-unsupported`
+// has no raise site, and `test/generator/java/generator-java-shapes.test.ts`
+// pins that it is never raised.
 
 // ---------------------------------------------------------------------------
 // Java read-model backstop gates.  Cross-aggregate `follows` and VO-typed
-// read-model fields (workflow-instance / projection) are now emitted
-// (the read-model VO records in java/emit/dto.ts).  What
-// remains here is a defensive gate for an ENTITY (containment-part) read-model
-// field: it would need a `<Part>Response` DTO the emitter doesn't build, but a
+// read-model fields (workflow-instance / projection) emit via the read-model VO
+// records in java/emit/dto.ts.  This is a defensive gate for an ENTITY
+// (containment-part) read-model field: it would need a `<Part>Response` DTO the emitter doesn't build, but a
 // part type never resolves in workflow / projection scope, so the gate is an
 // unreachable backstop mirroring the emitters' `guardInstanceField` /
 // `guardProjectionField` throws — kept so the shape fails honestly rather than
@@ -2492,7 +2467,7 @@ export function validateJavaReadModelShapes(sys: SystemIR, diags: LoomDiagnostic
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
 
-      // (1) Entity-typed saga instance read-model field.  VO-typed fields now emit
+      // (1) Entity-typed saga instance read-model field.  VO-typed fields emit
       // (their `<Vo>Response` is co-located in application.workflows); an entity
       // (containment part) field would need a `<Part>Response` DTO — but a part
       // type never resolves in workflow scope, so this is a defensive backstop
@@ -2540,19 +2515,15 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
 
-  // Every backend family x every saving shape now wires capability filters, so
-  // the "this backend cannot emit that filter" half of this gate is GONE.  The
-  // deferral tables it used (supportsPrincipalFilter /
-  // supportsNonRelationalFilter / supportsPrincipalNonRelationalFilter) and the
-  // `#unsupported-predicate` message they raised were deleted together with the
-  // last unwired cell — elixir + `shape: document`, which now evaluates the
-  // predicate IN-APP over the rehydrated `%<Agg>.Data{}` embed on every read
-  // (`vanillaDocCapabilityFilter`).  A stale deferral table is worse than none:
-  // it reads as an authoritative statement of what a backend cannot do, and it
-  // sends the author to a workaround they do not need.
+  // Every backend family x every saving shape wires capability filters, so this
+  // gate carries no per-backend deferral table — including elixir +
+  // `shape: document`, which evaluates the predicate IN-APP over the rehydrated
+  // `%<Agg>.Data{}` embed on every read (`vanillaDocCapabilityFilter`).  A
+  // stale deferral table is worse than none: it reads as an authoritative
+  // statement of what a backend cannot do, and sends the author to a
+  // workaround they do not need.
   //
-  // What REMAINS is shape- and backend-independent, and is why this check still
-  // exists: a principal-referencing filter needs a REQUEST PRINCIPAL to scope
+  // What this check DOES enforce is shape- and backend-independent: a principal-referencing filter needs a REQUEST PRINCIPAL to scope
   // by.  Without `auth: required` on the deployable and a system `user {}`
   // block there is no actor at all — node/python never emit the ambient
   // `requireCurrentUser()` accessor, elixir has no `current_user` to thread,
@@ -2597,8 +2568,7 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
 // A read (repository `find`, or inline `Repo.findAll(...)`/`Repo.run`)
 // may carry an `ignoring *` / `ignoring <Cap>, …` clause that bypasses a
 // capability's query-filter(s).  Three fail-fast gates run over the FULLY-
-// RESOLVED IR (the capability provenance lives on `agg.contextFilterOrigins`,
-// Slice 0):
+// RESOLVED IR (the capability provenance lives on `agg.contextFilterOrigins`):
 //
 //   loom.filter-bypass-unknown-capability — `ignoring X` where the target
 //       aggregate does NOT implement capability X (X ∉ agg.capabilities).
@@ -2615,13 +2585,13 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
 //       disabled per-read via the Hibernate Session), and python (SQLAlchemy
 //       has no global filter, so each read AND-s its predicates explicitly —
 //       a bypassing find/inline-run simply OMITS the named conjunct).
-//       Every honoring family is now in the set; the diagnostic only fires for
+//       Every honoring family is in the set, so the diagnostic only fires for
 //       a backend with no DB read path (which never carries `ignoring`).
 // ---------------------------------------------------------------------------
 
 /** Backend families that honor an `ignoring` filter-bypass clause.  `dotnet`
- *  (EF `IgnoreQueryFilters`, Slice 1), `node` (Drizzle — omits the bypassed
- *  conjunct from the `and(...)` chain, Slice 2), `elixir` (plain Ecto omits the
+ *  (EF `IgnoreQueryFilters`), `node` (Drizzle — omits the bypassed conjunct
+ *  from the `and(...)` chain), `elixir` (plain Ecto omits the
  *  bypassed `where:`), and `java` (§11.6 hybrid — a bypassed capability leaves the
  *  always-on `@SQLRestriction` for a bypassable Hibernate named `@Filter`, which
  *  a bypassing read disables via `session.disableFilter`/`enableFilter`;
@@ -2796,15 +2766,15 @@ export function validateFilterBypassSupport(sys: SystemIR, diags: LoomDiagnostic
 }
 
 // ---------------------------------------------------------------------------
-// `persistence: dapper` capability gate (D-REALIZATION-AXES Phase 5c).
+// `persistence: dapper` capability gate (D-REALIZATION-AXES).
 //
-// The .NET Dapper adapter is now at FULL PARITY with EF Core (M-T6.9, drained
-// across 7 waves): every relational/document/embedded/ES/inheritance shape,
-// containment (incl. recursive part-in-part), associations, audit/provenance,
-// managed fields, retrievals, seeds, and the workflow outbox all emit.  This
-// check now fires ONLY for a genuinely-impossible shape (an un-owned by-value
-// entity-array part field — no relational storage form on any adapter), a
-// fail-fast guard like the category-A stamp guard.
+// The .NET Dapper adapter is at full parity with EF Core: every
+// relational/document/embedded/ES/inheritance shape, containment (incl.
+// recursive part-in-part), associations, audit/provenance, managed fields,
+// retrievals, seeds, and the workflow outbox all emit.  This check fires ONLY
+// for a genuinely-impossible shape (an un-owned by-value entity-array part
+// field — no relational storage form on any adapter), a fail-fast guard like
+// the category-A stamp guard.
 // ---------------------------------------------------------------------------
 // Element kinds a Dapper part collection field can round-trip as one `jsonb`
 // column (System.Text.Json list serialisation) — kept in lockstep with
@@ -2827,38 +2797,28 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
-      // QUERY-TIME PROJECTIONS used to be refused WHOLESALE here:
-      // `query-projection-emit.ts` had no dapper branch at all, so it emitted
-      // the EF shape unconditionally — `using Microsoft.EntityFrameworkCore;` +
-      // `private readonly AppDbContext _db;`, neither of which exists on this
-      // adapter — and the generated project did not COMPILE (CS0234 / CS0246).
-      // M-T6.25 ported the four direct-table arms to raw Npgsql (the same
-      // `NpgsqlDataSource` + private row DTO + `Map` shape the FOLDED read
-      // controller already used), so the feature EMITS here now and the blanket
-      // refusal is gone.
+      // Not gated here, and why:
       //
-      // The narrowed refusal that replaced it — a direct-table arm over a
-      // COLUMN-LESS source — turned out not to be adapter-shaped at all: the
-      // premise "EF Core hides that behind its own JSON translation" is false
-      // (Loom maps a document aggregate to a hand-rolled `<Agg>Document` row
-      // type, so `o.Total` is CS1061 there too, and every other backend names
-      // the same missing column).  It now lives in
-      // `validateColumnlessProjectionSources` as a UNIVERSAL gate, so no arm
-      // of it is left here.
-      // `retrieval` bundles are now supported on Dapper — `Run<Name>Async`
-      // renders as parameterised SQL (where + sort + offset/limit paging); a
-      // predicate outside the Dapper subset stubs (NotImplementedException),
-      // mirroring the find path.  No gate.
-      // `seed` data is now supported — the Dapper seeder (Seed.cs) frames the
-      // marker table / raw inserts on Npgsql+Dapper while reusing the
-      // persistence-agnostic domain-`Create` path (I<Agg>Repository.SaveAsync).
-      // Workflow event subscriptions (and therefore channels/outbox) are now
-      // wired on the Dapper adapter (M-T6.9): the saga handlers depend on the
+      // QUERY-TIME PROJECTIONS emit — the four direct-table arms render as raw
+      // Npgsql (the same `NpgsqlDataSource` + private row DTO + `Map` shape the
+      // FOLDED read controller uses).  A direct-table arm over a COLUMN-LESS
+      // source is refused UNIVERSALLY in
+      // `validateColumnlessProjectionSources`, not per-adapter: every backend
+      // names the same missing column (a document aggregate maps to a
+      // hand-rolled `<Agg>Document` row type, so `o.Total` is CS1061 on EF
+      // Core too).
+      // `retrieval` bundles emit — `Run<Name>Async` renders as parameterised
+      // SQL (where + sort + offset/limit paging); a predicate outside the
+      // Dapper subset stubs (NotImplementedException), mirroring the find path.
+      // `seed` data emits — the Dapper seeder (Seed.cs) frames the marker table
+      // / raw inserts on Npgsql+Dapper while reusing the persistence-agnostic
+      // domain-`Create` path (I<Agg>Repository.SaveAsync).
+      // Workflow event subscriptions (and therefore channels/outbox) are wired
+      // on the Dapper adapter: the saga handlers depend on the
       // persistence-neutral Domain.Common ports, whose raw-Npgsql adapters
       // (DapperPersistencePorts.cs) replace the EF AppDbContext ones; the outbox
       // dispatcher/relay + workflow-instances read controller + saga / outbox /
-      // event tables are all emitted through NpgsqlDataSource + DbSchema.  No
-      // gate.
+      // event tables are all emitted through NpgsqlDataSource + DbSchema.
       for (const agg of ctx.aggregates) {
         const a = agg as EnrichedAggregateIR;
         const where = `aggregate '${ctxName}.${agg.name}'`;
@@ -2867,7 +2827,7 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // domain/CQRS layer.  An event-sourced aggregate has no state table,
         // so the `shape: ...` axis is moot — skip that check for it.
         const shape = effectiveSavingShape(a, resolveDataSourceConfig(a, ctx, sys));
-        // shape: document IS supported now (D-DOCUMENT-AXIS, Dapper edition): the
+        // shape: document IS supported (D-DOCUMENT-AXIS, Dapper edition): the
         // whole aggregate persists as one JSONB `data` blob (a `(id, data,
         // version)` table), reusing the persistence-agnostic ToSnapshot/
         // FromSnapshot round-trip.  Contained parts + `X id[]` references fold
@@ -2921,12 +2881,12 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // `contains` (in any shape) needs no gate on an event-sourced aggregate.
         //
         // Nested entity parts + reference-collection associations (`X id[]`)
-        // NOW COMPOSE (wave 4): every read hydrates the child tables through
-        // `_Create(State)` first, then `LoadRefsAsync` post-sets the writable
-        // ref-collection list on the reconstructed roots — the two hydrate
-        // paths run in sequence, not exclusively.
+        // COMPOSE: every read hydrates the child tables through `_Create(State)`
+        // first, then `LoadRefsAsync` post-sets the writable ref-collection list
+        // on the reconstructed roots — the two hydrate paths run in sequence,
+        // not exclusively.
         //
-        // Part-in-part (a contained part with its OWN `contains`) is now drained
+        // Part-in-part (a contained part with its OWN `contains`) is supported
         // for BOTH shapes.  RELATIONAL child-table shape: `partChildrenOf` builds
         // the containment TREE, each grandchild a table FK'd to its DIRECT parent
         // part; hydration recurses bottom-up (children grouped by parent-part id,
@@ -2942,13 +2902,10 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // supported — it stores as one `jsonb` column holding the serialised
         // list (System.Text.Json round-trip, the raw-Npgsql mirror of EF's
         // primitive-collection JSON mapping).  A part FIELD typed as an array of
-        // a sibling ENTITY used to be gated here as an "impossible storage
-        // shape", but since `contains` became optional (#2161) such a field
-        // lowers to a containment (its own grandchild table, part-in-part above),
-        // never a by-value column — and a cross-aggregate entity is a structural
-        // error — so no un-owned entity collection can reach this check.  The
-        // gate (and its `DAPPER_ARRAY_ELEM_KINDS` set) was therefore unreachable
-        // dead code and has been removed.
+        // a sibling ENTITY needs no gate: it lowers to a containment (its own
+        // grandchild table, part-in-part above), never a by-value column, and a
+        // cross-aggregate entity is a structural error — so no un-owned entity
+        // collection can reach this check.
         // Lifecycle stamping is supported (onUpdate mutates the aggregate
         // pre-save; onCreate binds INSERT-only parameters excluded from the
         // upsert SET), INCLUDING principal-referencing stamp values — the
@@ -2958,16 +2915,13 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // the EF AuditableInterceptor.  A principal stamp on a no-auth
         // deployable stays rejected by the category-A loom.stamp-principal-without-auth.
         //
-        // HIERARCHICAL TENANCY (M-T6.29).  The `deep`/`global` read level lowers
-        // to the materialized-path `authz-filter` sentinel, whose
-        // `currentUser.<claim>` sub-expressions the Dapper principal-param
-        // collector does not descend into — so it cannot bind the `@__cu_*`
-        // params the fragment would need.  This USED to escape the gate entirely
-        // and crash codegen (`capability filter … is outside the Dapper SQL
-        // subset`) — the corpus map claimed the validator rejected it, and it did
-        // not.  Now it is what that map always said: an honest boundary.  The
-        // `deny` sentinel is principal-free and DOES render (`1 = 0`), so it is
-        // deliberately not gated here.
+        // HIERARCHICAL TENANCY.  The `deep`/`global` read level lowers to the
+        // materialized-path `authz-filter` sentinel, whose `currentUser.<claim>`
+        // sub-expressions the Dapper principal-param collector does not descend
+        // into — so it cannot bind the `@__cu_*` params the fragment would need.
+        // Gated here as an honest boundary rather than left to crash codegen.
+        // The `deny` sentinel is principal-free and DOES render (`1 = 0`), so it
+        // is deliberately not gated.
         for (const f of [...(a.contextFilters ?? []), a.writeScopeFilter].filter(
           (x): x is ExprIR => x != null,
         )) {
@@ -3003,55 +2957,34 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
 }
 
 // ---------------------------------------------------------------------------
-// `persistence: mikroorm` capability gate (D-REALIZATION-AXES Phase 5d) —
-// SLIMMED to a single reject, because everything else it carried came to
-// reject nothing.
+// `persistence: mikroorm` capability gate (D-REALIZATION-AXES).
 //
-// The node/hono MikroORM adapter is the
-// SECOND node persistence backend (alongside the default `drizzle`), and the
-// gate carried two families of reject while it caught up:
-//
-//  (a) FEATURE rejects (M-T6.23) — five NON-persistence features once gated
-//      `&& !usingMikro` in the Hono emitter and emitting NOTHING: query-time
-//      projections, realtime SSE, the transactional outbox, timers
-//      (`scheduler.ts`) and broker channel drivers.  Each was first made an
-//      honest error here, then CLOSED by its emitter.  The gate was always the
-//      interim, never the answer
-//      (`docs/old/proposals/integrity-audit-2026-07-residue.md` R1 named the
-//      projection case; the other four were unrecorded).
-//  (b) SHAPE rejects — genuinely-impossible mappings.  Two survived longest and
-//      both are gone for OPPOSITE reasons.  The hierarchical (`deep`/`global`)
-//      tenancy scope turned out to be EXPRESSIBLE after all, through a `raw()`
-//      FilterQuery key.  The abstract-inheritance-base-with-`contains` shape
-//      turned out to be impossible EVERYWHERE — generated on drizzle / efcore /
-//      dapper / java / python / elixir it is silently dropped, emitted as a dead
-//      FK'd table with no reader or writer, or half-built into a runtime 500 —
-//      so it became a target-neutral AST rule instead
-//      (`loom.abstract-aggregate-contains`,
-//      `src/language/validators/inheritance.ts` Rule 3b).
-//
-// The `loom.mikroorm-unsupported` CODE is still live: `migration-checks.ts`
-// raises it (`#migrations`) for declared migration steps this adapter's
-// `orm.schema.updateSchema()` can never apply.  A future adapter-shaped
-// boundary can re-mint a clause under the same code — but it belongs wherever
-// the concern lives, and only after the two questions this gate's history keeps
-// asking: is the shape really inexpressible on THIS adapter (the tenancy one
-// was not), and is it really specific to it (the containment one was not)?
-//
-// What the adapter supports, for the record, since this comment is where people
-// looked it up: full parity with drizzle on the PERSISTENCE axis (M-T6.9,
-// drained across 7 waves) — every shape / inheritance / containment /
-// association / audit / provenance / managed-field / seed / event-sourcing
-// intersection emits; persist-time audit stamping injects the audit columns
-// into `em.upsert(...)` from the ambient principal; and server-managed access
+// The node/hono MikroORM adapter is the SECOND node persistence backend
+// (alongside the default `drizzle`).  On the PERSISTENCE axis it is at full
+// parity with drizzle: every shape / inheritance / containment / association /
+// audit / provenance / managed-field / seed / event-sourcing intersection
+// emits; persist-time audit stamping injects the audit columns into
+// `em.upsert(...)` from the ambient principal; and server-managed access
 // (`managed` / `token` / `internal` / `secret`) stores as an ordinary column.
+// Hierarchical (`deep`/`global`) tenancy scope is expressible through a `raw()`
+// FilterQuery key, so it is not gated here either.
+//
+// The `loom.mikroorm-unsupported` CODE is also raised by `migration-checks.ts`
+// (`#migrations`), for declared migration steps this adapter's
+// `orm.schema.updateSchema()` can never apply.  Before adding a clause under
+// it, answer both questions this gate exists to ask: is the shape really
+// inexpressible on THIS adapter, and is it really specific to it?  A shape
+// impossible on every backend belongs in a target-neutral AST rule instead —
+// abstract-inheritance-base-with-`contains` lives in
+// `loom.abstract-aggregate-contains`
+// (`src/language/validators/inheritance.ts` Rule 3b) for exactly that reason.
 // ---------------------------------------------------------------------------
 //
-// ONE adapter-specific reject survives that removal, and it answers both
+// ONE adapter-specific reject lives here, and it answers both
 // questions: a SCALAR collection field on the aggregate root (`tags: string[]`,
 // `kinds: Status[]`).  Inexpressible on THIS adapter (no column arm — see the
 // function body), and specific to it (drizzle stores the same field as a
-// native Postgres array).  So the function stays, slimmed to that one reject.
+// native Postgres array).
 export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
@@ -3170,11 +3103,10 @@ export function validateFindPredicateAdapterSupport(sys: SystemIR, diags: LoomDi
       // A QUERY-TIME projection's `where` lowers into a relational SELECT too —
       // through the synthesised `repo.<projName>()` find for the row-sourced
       // shape, and directly into the aggregation query for the pushed-down ones.
-      // It was the one predicate position this gate did not walk, which mattered
-      // as of M-T6.23 slice 4: on the MikroORM adapter an aggregation whose
-      // filter fell outside the FilterQuery subset would otherwise answer a
-      // plausible WRONG NUMBER (the filter silently dropped) instead of being
-      // refused. Adapter-generic, like every other position here.
+      // Walked here because on the MikroORM adapter an aggregation whose filter
+      // falls outside the FilterQuery subset would otherwise answer a plausible
+      // WRONG NUMBER (the filter silently dropped) instead of being refused.
+      // Adapter-generic, like every other position here.
       for (const proj of ctx.projections ?? []) {
         if (!isQueryTimeProjection(proj)) continue;
         check(proj.query?.filter, `query-time projection '${proj.name}'`);
@@ -3213,10 +3145,9 @@ export function validateFindPredicateAdapterSupport(sys: SystemIR, diags: LoomDi
 // coarser "kind supported by sourceType" check (with editor squiggles),
 // so this only reports a *capability* gap on a kind the sourceType DOES
 // support — avoiding a duplicate diagnostic for a plain kind/type
-// mismatch.  In Phase 1 every supported kind offers all its
-// capabilities, so this is silent for valid models; it becomes load-
-// bearing once kinds carry capabilities a sourceType may partially
-// support.
+// mismatch.  Every supported kind currently offers all its capabilities, so
+// this is silent for valid models; it becomes load-bearing once kinds carry
+// capabilities a sourceType may partially support.
 // ---------------------------------------------------------------------------
 
 export function validateNeedCapabilities(sys: EnrichedSystemIR, diags: LoomDiagnostic[]): void {
@@ -3250,26 +3181,24 @@ export function validateNeedCapabilities(sys: EnrichedSystemIR, diags: LoomDiagn
 }
 
 // ---------------------------------------------------------------------------
-// Typed remote-call backend support (M-T4.8).  Slice 2 lands the LOWERING —
-// `orders.getOrderById(id)` resolves against the callee's derived operation set
-// and types its result — but no backend emits the typed client yet (slices
-// 3-5).  Without this gate, such a model reaches the renderer and dies on a
-// stack trace.  This is the repo's HONEST-gap stance: a `loom.*` code the user
-// can read, not a silent mis-emit.
+// Typed remote-call backend support.  `orders.getOrderById(id)` resolves
+// against the callee's derived operation set and types its result; a backend
+// with no typed client would reach the renderer and die on a stack trace.  This
+// gate is the repo's HONEST-gap stance: a `loom.*` code the user can read, not
+// a silent mis-emit.
 //
-// The set is now EMPTY — every backend (node, python, dotnet, java, elixir)
-// emits a typed client, which is what "M-T4.8 is done" means.
-//
-// The check is deliberately KEPT rather than deleted with the last entry.  It
-// costs one `.some()` early-exit on models with no api binding, and it is the
+// The set is EMPTY — every backend (node, python, dotnet, java, elixir) emits a
+// typed client.  The check is deliberately KEPT rather than deleted with the
+// last entry.  It costs one `.some()` early-exit on models with no api binding,
+// and it is the
 // honest-gap net for the NEXT backend: a sixth platform added without a client
 // would otherwise reach a `render-expr.ts` arm that has no idea what to emit.
 // Adding the new platform key here turns that into a readable `loom.*` error at
 // validation time, which is the whole stance this check exists to hold.
 // ---------------------------------------------------------------------------
 
-/** Backends with no typed in-system api client.  Empty as of slice 4d — add a
- *  key here when introducing a backend before its client exists. */
+/** Backends with no typed in-system api client.  Currently empty — add a key
+ *  here when introducing a backend before its client exists. */
 export const REMOTE_API_OP_UNSUPPORTED: ReadonlySet<Platform> = new Set<Platform>([]);
 
 export function validateRemoteApiOpSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
@@ -3561,7 +3490,7 @@ function coverageGapReason(kind: string, ctx: BoundedContextIR): string | undefi
 //   - `keyPrefix`      — would gate the same Redis cache adapter
 //                        gated by `ttl`
 //
-// `isolationLevel` used to be on this list; it now flows through
+// `isolationLevel` is NOT on this list: it flows through
 // `resolveWorkflowIsolation` into the .NET BeginTransactionAsync and
 // Phoenix `Repo.transaction` opts when a workflow in the context is
 // transactional and doesn't carry its own per-workflow isolation.
@@ -3798,13 +3727,12 @@ export function validateProvenancedStorage(
 //   - loom.field-mask-unsupported — the field is hosted by a backend whose DTO
 //     projection doesn't yet emit the redaction.  A parsed-but-unredacted mask
 //     is a SECURITY footgun (the sensitive value ships in the clear), so it
-//     fails fast rather than silently no-op'ing.  The supported set is EMPTY in
-//     this foundation slice (grammar + IR + validation + wire-spec landed; the
-//     per-backend read redaction is the stacked follow-on), so a `mask unless`
-//     field is currently a compile error on every backend rather than an
-//     unenforced no-op.  Each backend redaction slice adds its platform here.
+//     fails fast rather than silently no-op'ing.  A backend absent from the set
+//     makes a `mask unless` field a compile error there rather than an
+//     unenforced no-op; adding read redaction to a backend adds its platform
+//     here.
 //     `node` emits response-boundary read redaction (`toWireMasked`) across its
-//     read routes + explicit handlers (M-T3.2 item 6, slice 2); `dotnet` redacts
+//     read routes + explicit handlers; `dotnet` redacts
 //     each masked field's DTO-projection arg via the ambient principal; `python`
 //     routes response boundaries through `to_wire_masked` (reads the ambient
 //     `current_user()` and redacts fail-closed); `java` adds a `<Agg>Response
@@ -4093,15 +4021,6 @@ export function validateAuth(sys: SystemIR, diags: LoomDiagnostic[]): void {
     }
   }
 }
-
-// `validateScaffoldDoubles` deleted.  Cross-directive
-// double-scaffold detection now happens at the AST level: two
-// scaffold directives producing the same generated page name surface
-// either as a duplicate-symbol error from Langium's linker (when both
-// pages reach the AST) or as a no-op in the expander (the second
-// synthesis is suppressed by the per-ui name set).  Keeping the IR-
-// level fallback would either duplicate the error or produce a
-// confusing second diagnostic; better to let the AST layer own it.
 
 export function validatePermissions(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const mod of sys.subdomains) {

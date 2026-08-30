@@ -5,7 +5,7 @@
 // `scheduler-builder.ts`.  A `timerSource` fires a plain domain event on a
 // wall-clock cadence.  The firing contract splits by cadence:
 //
-//   * `cron:` timers are DURABLE (Phase 2) — driven by **Oban**, the Postgres-
+//   * `cron:` timers are DURABLE — driven by **Oban**, the Postgres-
 //     backed job queue.  A per-timer GenServer computes each wall-clock boundary
 //     (the same `crontab` next-minute logic the Phase-1 loop used) and enqueues
 //     a unique Oban job for it; Oban's `unique` constraint makes that job
@@ -16,7 +16,7 @@
 //     must not replay history); a later boot whose most-recent boundary is past
 //     the watermark enqueues exactly ONE catch-up job (the whole missed window
 //     collapses to a single replay, never a stampede).
-//   * `every:` (sub-minute) timers stay IN-PROCESS (Phase 1) — ONE `GenServer`
+//   * `every:` (sub-minute) timers stay IN-PROCESS — ONE `GenServer`
 //     that on each tick takes a TRANSACTION-SCOPED Postgres advisory lock
 //     (single-fire across replicas, the SAME `pg_try_advisory_xact_lock`
 //     primitive keyed by the SAME FNV-1a hash the other backends use), builds
@@ -228,7 +228,7 @@ end
 `;
 }
 
-// ── cron: — the durable Oban worker + scheduler GenServer (Phase 2) ─────────
+// ── cron: — the durable Oban worker + scheduler GenServer ─────────
 
 /** Render one `lib/<app>/scheduler/<timer>_worker.ex` Oban worker for a `cron:`
  *  timer — the DURABLE executor.  `unique` on the `boundary` arg makes a

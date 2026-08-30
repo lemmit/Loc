@@ -156,7 +156,7 @@ export function emitVanillaContextModule(
   out: Map<string, string>,
   sys?: SystemIR,
   sourcemap?: SourceMapRecorder,
-  /** Broker channels (M-T4.4 slice 6c) — re-routes op-emit dispatch lines
+  /** Broker channels (M-T4.4) — re-routes op-emit dispatch lines
    *  through the `<App>.Channels` tee (see channels-emit.ts). */
   channels?: ElixirChannelsCfg,
   extraChannels: ChannelIR[] = [],
@@ -1009,7 +1009,7 @@ function renderNamedOpFunction(
   /** Source-map Milestone 3 collector (`--sourcemap`) — only allocated by the
    *  caller when a recorder is present (zero cost otherwise). */
   opFragments?: OpFragment[],
-  /** Broker channels (M-T4.4 slice 6c) — see renderEmitDispatchLines. */
+  /** Broker channels (M-T4.4) — see renderEmitDispatchLines. */
   channels?: ElixirChannelsCfg,
   extraChannels: ChannelIR[] = [],
 ): string {

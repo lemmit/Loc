@@ -1,4 +1,4 @@
-// Timer scheduler emission (scheduling.md, M-T4.1 Phase 2) — the Python /
+// Timer scheduler emission (scheduling.md, M-T4.1) — the Python /
 // FastAPI half.
 //
 // A `timerSource` fires a plain domain event on a wall-clock cadence.  The

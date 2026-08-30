@@ -90,7 +90,7 @@ export function buildPyDispatchFile(
   /** Source-map Milestone 12 — `app/dispatch.py` pools every reactor /
    *  event-create handler, so it never gets a whole-file region — only
    *  these fragment-only statement regions (mirrors `workflows_routes.py`'s
-   *  `opFragments` at Milestone 11).  Allocated by the caller ONLY when a
+   *  `opFragments` at).  Allocated by the caller ONLY when a
    *  recorder is present, so a no-`--sourcemap` run pays no per-statement
    *  bookkeeping cost. */
   opFragments?: OpFragment[],
@@ -668,7 +668,7 @@ function handlerFn(
   // Chunked (one lines-array per top-level statement) rather than the
   // pre-flattened `renderWorkflowStmts` — byte-identical either way, but the
   // per-chunk list lets us surface per-statement sub-regions to the caller
-  // (source-map Milestone 12, mirrors `workflowRoute`'s `stmtChunks`).  No
+  // (source-map, mirrors `workflowRoute`'s `stmtChunks`).  No
   // re-indent transform sits between here and the final file, so the chunk
   // texts collected here are already the exact text that lands in
   // `app/dispatch.py`.
@@ -732,7 +732,7 @@ function esHandlerFn(
   // statement) so we know whether it reads the folded snapshot (a starter
   // that only emits constants never touches `state`) — folding is a pure
   // no-op then, so we skip the unused binding (ruff F841).  The chunk list
-  // also lets us surface per-statement sub-regions (source-map Milestone 12).
+  // also lets us surface per-statement sub-regions (source-map).
   const stmtChunks = renderWorkflowStmtChunks(
     statements,
     pyWorkflowStmtTarget(rctx, undefined, collectUsedLetNames(statements)),
@@ -820,7 +820,7 @@ function esHandlerFn(
  *  dispatcher at-least-once, ordered by `occurred_at`, dead-lettering
  *  after `max_attempts`.
  *
- *  `durableBroker` (M-T4.4 slice 7a, design §5): drained rows whose channel
+ *  `durableBroker` (design §5): drained rows whose channel
  *  is broker-bound publish via `publish_event_from_relay` (envelope id =
  *  row id) instead of redelivering locally.  `pureProducer` drops the
  *  handler-side pieces (`_current_event_id`, `_dispatch_chained`, the local

@@ -1,16 +1,14 @@
 // One shared, exhaustively-`never`-checked IR child-walker.
 //
-// Before this module, ≥5 near-identical hand-copied expression / statement
-// traversals lived across `ir/validate`, `ir/util`, and `ir/types` — each one
-// lagging the IR by a different set of node kinds (`convert.value`,
-// `list.elements`, lambda `block` bodies, `match` arms, and half the
-// `WorkflowStmtIR` kinds).  A missed child is a silent traversal dead-zone:
+// Hand-copied traversals across `ir/validate`, `ir/util` and `ir/types` each
+// lag the IR by a different set of node kinds (`convert.value`,
+// `list.elements`, lambda `block` bodies, `match` arms, half the
+// `WorkflowStmtIR` kinds), and a missed child is a silent traversal dead-zone:
 // a `currentUser` hidden in a `match` arm never threads the auth param; a
 // `repo-read` inside a for-each body never derives a read-port; a `files.put`
-// nested in a loop never trips its capability gate (full-code-review 2026-07,
-// findings 2 + 24 + the shared-walker mediums).
+// nested in a loop never trips its capability gate.  Hence one seam.
 //
-// The fix is one seam.  `walk{Expr,Stmt,WorkflowStmt}Children` are SHALLOW,
+// `walk{Expr,Stmt,WorkflowStmt}Children` are SHALLOW,
 // one-level child visitors whose `switch` covers every kind of its union and
 // ends in a `never` assignment — so adding a new `ExprIR` / `StmtIR` /
 // `WorkflowStmtIR` kind fails `tsc` (and the `walk-completeness` property test)
@@ -78,7 +76,7 @@ export function walkExprChildren(e: ExprIR, v: ExprChildVisitor): void {
     case "call":
       for (const a of e.args) expr?.(a);
       // The per-primitive `style: { … }` escape hatch carries ExprIR values —
-      // a real child slot the old hand copies all missed.
+      // an easily-missed child slot.
       for (const s of e.style?.entries ?? []) expr?.(s.value);
       break;
     case "lambda":

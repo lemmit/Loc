@@ -339,7 +339,7 @@ export function generateFlutterForContexts(
   out.set("web/index.html", renderWebIndexHtml(title));
   out.set("web/manifest.json", renderWebManifest(pkg, title));
   out.set("Dockerfile", DOCKERFILE);
-  // Native mobile surface (Phase 3).  The emitted project is a plain Flutter app
+  // Native mobile surface.  The emitted project is a plain Flutter app
   // — it builds for web (served by the Dockerfile above) AND, with the platform
   // folders materialised, for Android/iOS.  We deliberately do NOT vendor the
   // large `android/`/`ios/` scaffolds (Gradle wrappers, manifests, Xcode
@@ -350,7 +350,7 @@ export function generateFlutterForContexts(
   // target, not a modelling mode — both are always available.
   out.set("Makefile", renderMakefile(pkg, usesFileUpload));
   out.set("README.md", renderReadme(title, pkg));
-  // Runtime e2e (Phase 4) — a headless `flutter_test` widget smoke that boots
+  // Runtime e2e — a headless `flutter_test` widget smoke that boots
   // the real app and asserts it renders.  Unlike an `integration_test` (needs a
   // device/emulator) this runs under plain `flutter test` on any host, so it
   // gates "does the app actually RUN", not just compile.  Data reads fire on

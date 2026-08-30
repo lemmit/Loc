@@ -36,7 +36,7 @@ export interface SourceMapRegion {
    *  treatment `target`'s line numbers already get.  Only meaningful when
    *  `target[0] === target[1]` (a single-line region) — present only for
    *  expression-level marks produced by a backend's marks-carrying
-   *  statement renderer (span-tracking-emission.md, M15 phase 7 slice 2,
+   *  statement renderer (span-tracking-emission.md, M15 phase 7,
    *  TS/Hono only this slice).  Absent everywhere else, which keeps the
    *  pre-existing col-0 v3 fallback untouched. */
   targetCol?: [number, number];
@@ -60,7 +60,7 @@ export interface SourceMapSubRegion {
 }
 
 /** One expression-level mark inside a SINGLE already-rendered statement
- *  chunk (span-tracking-emission.md, M15 phase 7 slice 2) — `start`/`end`
+ *  chunk (span-tracking-emission.md, M15 phase 7) — `start`/`end`
  *  are 0-based, end-exclusive character offsets into that OWNING chunk
  *  string (not the whole fragment), paired with the origin the marked
  *  sub-expression resolved to.  Produced by a backend's marks-carrying

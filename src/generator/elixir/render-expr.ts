@@ -81,7 +81,7 @@ export interface RenderCtx {
    *  membership form inside repository `where` clauses, so other
    *  emission contexts (derived, invariant) shouldn't reach it. */
   agg?: EnrichedAggregateIR;
-  /** Resource-op routing (Phase 4c): resourceName → fully-qualified
+  /** Resource-op routing: resourceName → fully-qualified
    *  Elixir helper module (e.g. `salesFiles` → `MyApp.Resources.S3`).
    *  A `resource-op` call renders `<Module>.<resource>_<verb>(args)`.
    *  Unset outside workflow rendering — a resource-op there throws. */
@@ -134,7 +134,7 @@ export interface RenderCtx {
    *  reading fn itself is emitted INTO this module by `domain-service-emit.ts`.
    *  Defaults to `contextModule` when unset. */
   readingServiceModule?: string;
-  /** Document-shape STRUCT rendering (Route A slice 2).  A `shape: document`
+  /** Document-shape STRUCT rendering (Route A).  A `shape: document`
    *  aggregate now rehydrates its blob into a typed `%<Agg>.Data{}` struct, so a
    *  `this.<field>` read is genuine struct access (`record.<field>`) — same as the
    *  relational path — NOT a `data["<field>"]` bracket.  But the blob keeps enums
@@ -263,7 +263,7 @@ const ELIXIR_FILTER_TARGET: ExprTarget<RenderCtx> = {
   duration: (_unit, amount) => `(${amount})`,
 };
 
-// Document-shape STRUCT rendering target (`docStruct` — Route A slice 2).
+// Document-shape STRUCT rendering target (`docStruct` — Route A).
 // Shares the FILTER target's native-value leaves (the jsonb blob keeps enums
 // as strings and money/decimal as native JSON numbers), but its predicates
 // run IN-MEMORY (`Enum.filter` over rehydrated `%<Agg>.Data{}` embeds), so
@@ -305,7 +305,7 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
   // — not `Decimal` structs — so it shares the native-operator filter target
   // (params still render as plain locals: the `^`-pin lives in `renderRef`'s
   // `filterArgs` arm, which `docMap` does NOT set).
-  // `docStruct` (Route A slice 2) reads struct fields off the rehydrated
+  // `docStruct` (Route A) reads struct fields off the rehydrated
   // `%<Agg>.Data{}` embed, but the embed keeps enums as `:string` + money/decimal
   // as native JSON numbers, so it shares the native-value leaves (without any
   // bracket projection — `this.<field>` renders as `record.<field>`).  Its
@@ -1097,7 +1097,7 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
       return `${app}.Resources.ApiClients.${snake(op.resourceName)}_${snake(op.operationId)}(${args.join(", ")})`;
     }
     case "resource-op": {
-      // Resource-op (Phase 4c) → `<Module>.<resource>_<verb>(args)`, a
+      // Resource-op → `<Module>.<resource>_<verb>(args)`, a
       // helper function the Phoenix ResourceAdapter emits.  Routed by
       // sourceType via `ctx.resourceModules`.
       const op = e.resourceOp!;

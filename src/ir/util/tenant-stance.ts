@@ -1,5 +1,4 @@
-// Tenancy stance classification (multi-tenancy Phase 1a, slice 1a.3 —
-// docs/old/plans/multi-tenancy-implementation.md §3).
+// Tenancy stance classification (tenancy.md).
 //
 // An aggregate's tenancy *stance* is a pure function of facts already on
 // the IR — the `crossTenant` header flag, `tenantOwned` capability
@@ -21,7 +20,7 @@ import type {
 export const TENANT_OWNED_CAPABILITY = "tenantOwned";
 
 /** The prelude capability that opts the tenant registry into hierarchy
- *  (`implements tenantRegistry` — multi-tenancy Phase 2, plan P2.2).  It
+ *  (`implements tenantRegistry`).  It
  *  PROVIDES the registry tree fields `parent: Self id?` (immutable self-FK,
  *  null = root) and the managed `dataKey` materialized path.  Only the
  *  registry (the `of <Registry>` target) may carry it, and its presence is
@@ -30,8 +29,8 @@ export const TENANT_OWNED_CAPABILITY = "tenantOwned";
 export const TENANT_REGISTRY_CAPABILITY = "tenantRegistry";
 
 /** The field name the `tenantOwned` capability provides for the materialized
- *  DataKey path (multi-tenancy Phase 2, plan P2.3 —
- *  `docs/old/plans/multi-tenancy-phase2.md`).  Unlike the `tenantRegistry`
+ *  DataKey path (`docs/old/plans/multi-tenancy-phase2.md`).  Unlike the
+ *  `tenantRegistry`
  *  capability's own `dataKey` (a managed field that stays ON the wire — the
  *  registry's path is meant to be readable), `tenantOwned`'s `dataKey` is a
  *  **persistence-only column**: `authorization.md §2` calls for it "kept out
@@ -43,7 +42,7 @@ export const TENANT_REGISTRY_CAPABILITY = "tenantRegistry";
 export const TENANT_OWNED_DATA_KEY_FIELD = "dataKey";
 
 /** `contextFilterOrigins` marker for the DERIVED registry self-scope filter
- *  (multi-tenancy Phase 1b, capstone decision 4): under `tenancy by
+ *  (tenancy.md): under `tenancy by
  *  user.<claim> of <Registry>`, enrichment appends `this.id ==
  *  currentUser.<claim>` to the registry's `contextFilters` — the
  *  `tenantId ≡ <Registry>.id` identity, never written by the author.  The
@@ -234,11 +233,11 @@ function stringPrincipalClaim(x: ExprIR): string | undefined {
 export const TENANT_OWNED_TENANT_ID_FIELD = "tenantId";
 
 /** The derived principal member that carries the caller's materialized org
- *  path (multi-tenancy Phase 2 P2.1 — `currentUser.orgPath`). */
+ *  path (`currentUser.orgPath`). */
 export const ORG_PATH_CLAIM_FIELD = "orgPath";
 
 /** The derived principal member that carries the caller's ROOT-org segment
- *  (multi-tenancy Phase 2 P2.5 — `currentUser.rootOrg`): the first segment of
+ *  (`currentUser.rootOrg`): the first segment of
  *  `orgPath` (everything before the first {@link DATA_KEY_PATH_DELIMITER}, or
  *  the whole path when it has none).  A pure string computation off the
  *  already-resolved `orgPath` — no DB read.  It anchors the `global` read
@@ -386,7 +385,7 @@ export function buildDeepScopeFilter(agg: Pick<AggregateIR, "name">, tenantClaim
 /** The flat tenant FLOOR predicate `this.tenantId == currentUser.<claim>` —
  *  the exact ExprIR shape the `tenantOwned` prelude capability filter lowers to
  *  (`src/macros/prelude.ts`), rebuilt here so the `local` WRITE level
- *  (authorization Phase 3 P3.1) can restore the floor at a mutation's command
+ *  can restore the floor at a mutation's command
  *  load even when the READ filter has been widened to `deep`/`global` in
  *  enrichment.  Every backend already renders this shape (it is today's tenant
  *  floor), so the write guard needs no new render code.
@@ -425,7 +424,7 @@ export function buildTenantFloorFilter(
 }
 
 /** The `global` read-level reachability predicate — the ROOT-org-subtree scope
- *  (multi-tenancy Phase 2 P2.5).  Structurally identical to `deep` but anchored
+ *  (tenancy.md).  Structurally identical to `deep` but anchored
  *  at `currentUser.rootOrg` (the first `orgPath` segment) instead of `orgPath`,
  *  so it widens from the caller's own node to the caller's ENTIRE root subtree.
  *  Only emitted under a hierarchy registry; under flat tenancy `rootOrg ==
@@ -446,7 +445,7 @@ export function isDeepScopeFilter(e: ExprIR): boolean {
   return scopeOf(e) !== undefined;
 }
 
-/** The DENY carve-out predicate (authorization Phase 4 — deny-wins).  An
+/** The DENY carve-out predicate (deny-wins).  An
  *  `authz-filter` sentinel carrying a `deny` decision (no `currentUser`, so
  *  `exprUsesCurrentUser` is false → each backend routes it to its STATIC filter
  *  path, adding no principal parameter — this is what keeps a denied
@@ -467,7 +466,7 @@ export function buildDenyFilter(agg: Pick<AggregateIR, "name">): ExprIR {
   };
 }
 
-/** True when `e` is the DENY carve-out sentinel (authorization Phase 4).  Each
+/** True when `e` is the DENY carve-out sentinel.  Each
  *  backend's filter translator gates its always-false fragment on this. */
 export function isDenyFilter(e: ExprIR): boolean {
   return e.kind === "authz-filter" && e.filter.kind === "deny";
@@ -530,7 +529,7 @@ export function hasTenantOwned(agg: Pick<AggregateIR, "capabilities">): boolean 
 
 /** True when the aggregate carries the `tenantRegistry` prelude capability —
  *  i.e. it opted into hierarchy and therefore has a `dataKey` column
- *  (multi-tenancy Phase 2, plan P2.2).  Drives both the structural checks
+ *  (tenancy.md).  Drives both the structural checks
  *  (exactly one, on the `of` target) and the `currentUser.orgPath` accessor
  *  swap (registry `dataKey` read only when hierarchy is enabled). */
 export function hasTenantRegistry(agg: Pick<AggregateIR, "capabilities">): boolean {

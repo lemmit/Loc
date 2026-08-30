@@ -326,7 +326,7 @@ export const felizTarget: WalkerTarget = {
   // value QueryView matches on, and `renderApiHoisting` emits nothing (there is
   // no page-top hoist to make).
   buildHookUse: (detected) => {
-    // A query-time PROJECTION read (M-T1.3 Phase 1) resolves to its own Model
+    // A query-time PROJECTION read (M-T1.3) resolves to its own Model
     // field, filled by the init Cmd.  Its Remote payload — and so which
     // `View.*` matcher renders it — follows the projection's RESPONSE SHAPE:
     // `Remote<<Proj>Row option>` + `remoteOne` for the whole-table aggregation,
@@ -885,7 +885,7 @@ export const felizTarget: WalkerTarget = {
     }
   },
 
-  // --- DataGrid seam (M-T1.1 slice 10e) ----------------------------------
+  // --- DataGrid seam (M-T1.1) ----------------------------------
   //
   // Feliz hosts the REAL TanStack row model — `@tanstack/table-core` through
   // Fable interop — so the grid behaves identically to the four JSX frontends

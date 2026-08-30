@@ -118,8 +118,8 @@ export interface WalkResult {
    *  component emitter declares `slot :inner_block` for it. */
   usesSlot: boolean;
   /** True when the body renders a `Chart { … }` — the deployable then emits the
-   *  shared `LoomChart` function component the call site invokes (M-T1.3
-   *  Phase 4, HEEx leg).  False ⇒ no component file, byte-identical output. */
+   *  shared `LoomChart` function component the call site invokes (the HEEx
+   *  leg).  False ⇒ no component file. */
   usesChart: boolean;
   /** Aggregate names (PascalCase) referenced by `X id` form fields in
    *  this page's body — the LiveView emitter loads each target's
@@ -194,7 +194,7 @@ export interface QueryBinding {
    *  read resolves to `<Ctx>.QueryProjections.<Proj>.run/1`. */
   aggregate: string;
   /** Which declaration `aggregate` names, and therefore which load the emitter
-   *  builds (M-T1.3 Phase 1, HEEx leg).  `"aggregate"` (the default, and every
+   *  builds (M-T1.3, HEEx leg).  `"aggregate"` (the default, and every
    *  binding before projections were readable) → the repository read;
    *  `"projection"` → the query-time projection's `run/1`, an IN-PROCESS call:
    *  a LiveView deployable hosts its contexts in the SAME OTP app, so the
@@ -275,7 +275,7 @@ export interface WalkContext {
    *  were absent.  Empty default ⇒ the collection shape, i.e. the old
    *  behaviour. */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
-  /** Frontend-readable projection names (M-T1.3 Phase 1) — the detector's
+  /** Frontend-readable projection names (M-T1.3) — the detector's
    *  Pattern H set, so `QueryView { of: <api>.<Projection> }` resolves to the
    *  projection's own read instead of falling through to the aggregate arms.
    *  Derived at walker entry from `bcByAggregate`, the same single predicate
@@ -418,7 +418,7 @@ export interface WalkContext {
   authEnabled?: boolean;
   /** Section/Card nesting depth, so a `Heading` with no explicit `level:`
    *  derives its rank from structure — `min(6, 2 + headingDepth)`, matching
-   *  the JSX frontends' `WalkEnv.headingDepth` (accessibility.md Phase 2, so
+   *  the JSX frontends' `WalkEnv.headingDepth` (accessibility.md, so
    *  ranks never skip).  Incremented by `renderSection` / `renderCard` for
    *  their children; undefined at page top ⇒ depth 0 ⇒ `<h2>` (the app shell
    *  owns the single `<h1>`). */

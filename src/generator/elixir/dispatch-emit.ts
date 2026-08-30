@@ -236,7 +236,7 @@ export function emitDispatch(
    *  region (like the command-workflow file) PLUS per-statement fragments —
    *  same contract as `emitVanillaWorkflowExecution`. */
   sourcemap?: SourceMapRecorder,
-  /** Broker channels (M-T4.4 slice 6c): presence widens the subscription
+  /** Broker channels (M-T4.4): presence widens the subscription
    *  derivation with the wired-but-foreign channels and re-routes handler
    *  re-emits through the `<App>.Channels` tee. */
   channels?: ElixirChannelsCfg,
@@ -414,7 +414,7 @@ function renderDispatcher(
   const clauses: string[] = [];
   for (const [event, calls] of byEvent) {
     // A wired-but-foreign channel's event struct lives under its OWNING
-    // context's module (M-T4.4 slice 6c) — qualify the match accordingly.
+    // context's module (M-T4.4) — qualify the match accordingly.
     const evModule = channels?.foreignEventModules.get(event) ?? contextModule;
     clauses.push(
       `  def dispatch(%${evModule}.Events.${upperFirst(event)}{} = event) do\n${calls.join("\n")}\n    :ok\n  end`,
@@ -963,7 +963,7 @@ function renderStmt(
         .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
         .join(", ");
       const struct = `%${contextModule}.Events.${upperFirst(st.eventName)}{${fields}}`;
-      // Broker tee (M-T4.4 slice 6c): a reactor re-emit goes through
+      // Broker tee (M-T4.4): a reactor re-emit goes through
       // `<App>.Channels.dispatch` so choreography chains re-publish broker-
       // routed events instead of short-circuiting locally (.NET/Java parity).
       const dispatchText = channels

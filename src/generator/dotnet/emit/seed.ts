@@ -1,5 +1,5 @@
 // First-boot database seeding for the .NET/EF Core backend
-// (database-seeding.md, Phase 3a).  Emits `Infrastructure/Persistence/Seed.cs`
+// (database-seeding.md).  Emits `Infrastructure/Persistence/Seed.cs`
 // from the context's `SeedIR` list.
 //
 // Per D-SEED-PATH the default path is **through the domain `Create`**: each

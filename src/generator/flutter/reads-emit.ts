@@ -69,7 +69,7 @@ export interface FlutterRead {
    *  `z.array(AuditEntry)`).  `aggregate` carries `AuditEntry`, so the
    *  `fromJson` call site needs no new branch. */
   history?: boolean;
-  /** A query-time PROJECTION read (M-T1.3 Phase 1) rather than an aggregate
+  /** A query-time PROJECTION read (M-T1.3) rather than an aggregate
    *  read.  Deliberately its own flag rather than a reuse of `single`: a
    *  SINGLETON projection is single-SHAPED (one object, no envelope) yet
    *  paramless, while `single` here means "a byId `.family` keyed by a route
@@ -77,7 +77,7 @@ export interface FlutterRead {
    *  `<Proj>Row` class name, so the `fromJson` call site needs no new branch.
    *
    *  A GROUPED (`group by`) projection is the LIST shape — one row per group
-   *  (M-T1.3 Phase 4) — and is carried by `single: false` on the same flag. */
+   *  (M-T1.3) — and is carried by `single: false` on the same flag. */
   projection?: boolean;
 }
 
@@ -178,7 +178,7 @@ function queryViewOfArgs(body: ExprIR): ExprIR[] {
 
 /** Collect the reads a ui issues — deduped by `varName` across the whole ui.
  *  Aggregate-rooted reads (`<handle>.<Agg>.all` / `.byId(id)` / a named find)
- *  and query-time PROJECTION reads (`<handle>.<Proj>`, M-T1.3 Phase 1) project a
+ *  and query-time PROJECTION reads (`<handle>.<Proj>`, M-T1.3) project a
  *  provider; workflow-instance reads are still skipped (a follow-up), so the
  *  caller's hoist over the same detector stays consistent (an un-emitted
  *  provider would just be an unresolved var, never silent).

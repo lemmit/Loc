@@ -92,7 +92,7 @@ import {
 const INDENT = "        ";
 
 /** resourceName → static C# helper class, for every resource whose
- *  sourceType has a .NET ResourceAdapter (Phase 4c).  Routes resource-op
+ *  sourceType has a .NET ResourceAdapter.  Routes resource-op
  *  call sites + drives the `Resources/*.cs` emission and NuGet deps.
  *
  *  Exported for the EXPLICIT-HANDLER leg (`explicit-handlers-emit.ts`): a
@@ -181,7 +181,7 @@ export function emitWorkflows(
     const handlerContent = renderHandler(wf, usage, ns, ctx, options?.sys, opFragments);
     out.set(handlerPath, handlerContent);
     sourcemap?.file(handlerPath, handlerContent, wf.origin, construct);
-    // Statement-granular sub-regions (source-map Milestone 11) — layered onto
+    // Statement-granular sub-regions (source-map) — layered onto
     // the whole-file region just recorded above, anchored by exact-text
     // search against this SAME final content.
     if (sourcemap && opFragments) {
@@ -1315,7 +1315,7 @@ function renderHandler(
     for (const aggName of auditAggs) usings.add(`${ns}.Application.${plural(aggName)}.Responses`);
   }
 
-  // Reading-tier domain-service calls (domain-services.md rev. 4, Slice 1): a
+  // Reading-tier domain-service calls (domain-services.md rev. 4): a
   // `reading` service is a DI'd `sealed class`, so the orchestrating workflow
   // INJECTS it (`_registration`) and calls through the instance —
   // `await _registration.IsEmailAvailableAsync(...)` — rather than the static
@@ -1347,7 +1347,7 @@ function renderHandler(
   // renderExprWithCmdParams rewrites those refs at render time, keyed by the
   // workflow's param-name set.
   const paramNames = new Set(wf.params.map((p) => p.name));
-  // Resource-op routing (Phase 4c): resourceName → static helper class,
+  // Resource-op routing: resourceName → static helper class,
   // built from the system's resources + storages.  Empty when the
   // deployable wires no consumable resources.
   const resourceClasses = buildResourceClasses(sys);
@@ -1370,8 +1370,7 @@ function renderHandler(
   // pre-flattened `renderWorkflowStmts` — byte-identical either way
   // (`renderWorkflowStmts` IS `chunks.flat()` by construction), but the
   // per-chunk list lets us surface per-statement sub-regions to the caller
-  // that owns the recorder + this file's final content (source-map
-  // Milestone 11).
+  // that owns the recorder + this file's final content (source-map).
   const stmtChunks = renderWorkflowStmtChunks(
     wf.statements,
     csWorkflowStmtTarget(ctx, renderArg, dereffedLoads, auditsOps),
@@ -1937,7 +1936,7 @@ export function renderExprWithCmdParams(
 }
 
 /** The distinct `reading`-tier domain SERVICES a workflow body calls
- *  (domain-services.md rev. 4, Slice 1) — the services the handler must inject.
+ *  (domain-services.md rev. 4) — the services the handler must inject.
  *  A service is `reading` when a called operation consumes at least one
  *  read-port; a PURE-only service is excluded (its calls stay the static shape,
  *  needing no injection).  De-duplicated by service name. */

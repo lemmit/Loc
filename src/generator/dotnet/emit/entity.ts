@@ -119,7 +119,7 @@ export function weaveLineDirectives(
 // used by repository hydration, and (for the root) a public `Create`
 // factory + `PullEvents()` drainage hook.
 //
-// Extern operations (extern (b) Phase 2): when an aggregate declares
+// Extern operations (extern (b)): when an aggregate declares
 // `operation X(...) extern { precondition ... }`, the generated `X(...)`
 // method runs the preconditions, then delegates the hand-written business
 // decision to a `private partial X Core(...)` HOOK the aggregate OWNS, then
@@ -194,7 +194,7 @@ export function renderEntity(
    *  `statementSubRegions` construct id `"Sales.Order.confirm"`.  Required
    *  whenever `opFragments` is passed. */
   constructPrefix?: string,
-  /** `.ddd` source text keyed by `OriginRef` source path (M7 phase 6a) —
+  /** `.ddd` source text keyed by `OriginRef` source path —
    *  present only alongside `opFragments` (same recorder-present gate).
    *  When set, the REGULAR named-operation body loop below weaves C#
    *  enhanced `#line` directives (see `weaveLineDirectives`) so the PDB
@@ -408,7 +408,7 @@ export function renderEntity(
   });
 
   const opLines: string[] = [];
-  // Extern-operation domain hooks (extern (b) Phase 2): a `private partial`
+  // Extern-operation domain hooks (extern (b)): a `private partial`
   // method the aggregate OWNS, declared here and implemented by the user in a
   // co-located scaffold-once partial file (`renderExternHookImpl`).  Collected
   // here and appended to the (now `partial`) class body below.
@@ -439,7 +439,7 @@ export function renderEntity(
     const baseParams = op.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
     const params = [baseParams, userParam].filter(Boolean).join(", ");
     if (op.extern) {
-      // Extern op (extern (b) Phase 2): a REAL method that runs the
+      // Extern op (extern (b)): a REAL method that runs the
       // preconditions, delegates the hand-written business decision to a
       // partial-method HOOK the aggregate OWNS (`<Op>Core`), then re-asserts
       // invariants.  The framework flow (load → preconditions → hook →
@@ -498,8 +498,7 @@ export function renderEntity(
     // `renderCsStatements` here — `renderCsStatements` IS `chunks.join("\n")`
     // by construction, so `body` below is byte-identical either way, but the
     // per-chunk list lets us surface per-statement sub-regions to the caller
-    // that owns the recorder + this file's final content (source-map
-    // Milestone 3).
+    // that owns the recorder + this file's final content (source-map).
     const opRenderCtx = retUnion ? { ...renderCtx, returnUnion: retUnion } : renderCtx;
     const rawChunks = renderCsStatementChunks(opBody, opRenderCtx, {
       emitTrace,

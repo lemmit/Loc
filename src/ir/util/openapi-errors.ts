@@ -45,9 +45,8 @@
 // BODY-CARRYING kinds — create / operation / workflow.  A request whose
 // `Content-Type` is not `application/json` cannot be parsed into the declared
 // request schema, and every backend refuses it before the handler runs
-// (schemathesis F1: Hono used to skip validation silently and 500 on the
-// undefined body, so the node emitter now guards it explicitly; ASP.NET,
-// Spring and Plug.Parsers already answer 415 at the framework layer).  A
+// (the node emitter guards it explicitly; ASP.NET, Spring and Plug.Parsers
+// answer 415 at the framework layer).  A
 // read/delete route carries no body, so it declares none.
 //
 // 422 (Unprocessable Entity) is the validation-failure code declared per
@@ -129,12 +128,11 @@ export function errorStatuses(
   guarded = false,
   /** Resolver for the app-global denial-ladder rungs — maps an error name to
    *  its `httpStatus`-overridden status, defaulting to that name's stdlib code.
-   *  Originally only the structural conflicts (M-T3.4a: the destroy FK-restrict
-   *  `ReferencedInUse`); M-T5.20 extended it to the `DomainError` domain floor
-   *  and the `Forbidden` rung so the DECLARED response set moves in lockstep
-   *  with the runtime handler arm; the follow-up slice added the last one,
-   *  `NotFound`. Omitted ⇒ the literal defaults (409 / 422 / 403 / 404 —
-   *  byte-identical output). */
+   *  Covers the structural conflicts (the destroy FK-restrict
+   *  `ReferencedInUse`), the `DomainError` domain floor, `Forbidden` and
+   *  `NotFound`, so the DECLARED response set moves in lockstep with the
+   *  runtime handler arm.  Omitted ⇒ the literal defaults
+   *  (409 / 422 / 403 / 404). */
   resolve?: (name: string) => number,
   /** Facts about the ROUTE'S BODY that its `kind` cannot carry.  Today one:
    *  `readsAggregate` — the `workflow` arm's not-found predicate.  See the
@@ -150,21 +148,15 @@ export function errorStatuses(
   const domain = resolve?.("DomainError") ?? 422;
   const forbidden = resolve?.("Forbidden") ?? 403;
   // The DOMAIN not-found rung — the aggregate/projection/workflow-instance a
-  // request addressed does not exist.  It was the LAST literal in this table,
-  // and the reason was the TWO-PRODUCER split: besides the exception-handler
-  // arm (`AggregateNotFoundError` → Hono's `onError`, `AggregateNotFoundException`
+  // request addressed does not exist.  Resolvable here because each backend has
+  // exactly ONE producer for it: the exception-handler arm
+  // (`AggregateNotFoundError` → Hono's `onError`, `AggregateNotFoundException`
   // → the .NET filter / the Spring advice, `AggregateNotFoundError` → FastAPI's
-  // handler), each backend used to answer some read paths with a BARE framework
-  // return (`NotFound()` / `ResponseEntity.notFound().build()` / a `None`
-  // check).  Resolving only the declaration would have published a status the
-  // bare-return paths never answer.
-  //
-  // M-T6.31 converted those bare returns into the shared not-found carrier on
-  // all four backends (they never reached the app's problem filter, so they
-  // were answering an EMPTY-bodied framework 404 rather than a ProblemDetails
-  // one — a separate bug with the same root).  With one producer per backend
-  // left, the rung resolves here like every other one, and the runtime arms
-  // below it read the same resolved value.
+  // handler).  Read paths route through that same carrier rather than a BARE
+  // framework return (`NotFound()` / `ResponseEntity.notFound().build()` / a
+  // `None` check), which would publish a status those paths never answer — and
+  // would answer an EMPTY-bodied framework 404 instead of a ProblemDetails one.
+  // The runtime arms below read the same resolved value.
   //
   // Two 404s are deliberately NOT this rung and stay literal on all five
   // backends (elixir included, so the reference stays the reference):
@@ -269,8 +261,8 @@ export function problemTitle(status: number): string {
     case 409:
       return "Conflict";
     // A natural retarget for the `NotFound` rung — `httpStatus NotFound -> 410`
-    // is the canonical "this id used to exist" remap, and without an entry here
-    // every backend titled it the generic "Error".
+    // is the canonical "this id is gone" remap.  Without an entry here every
+    // backend titles it the generic "Error".
     case 410:
       return "Gone";
     // The body-carrying kinds' media-type refusal (see UNSUPPORTED_MEDIA_TYPE).

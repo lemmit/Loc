@@ -99,7 +99,7 @@ export interface WorkflowCtx {
   pkg: string;
   /** Route prefix ("/api" in fullstack mode). */
   routePrefix?: string;
-  /** resourceName → client class, for `resource-op` calls (Phase 4c). */
+  /** resourceName → client class, for `resource-op` calls. */
   resourceClasses?: Map<string, string>;
   /** True when any hosted workflow issues a typed in-system api call (M-T4.8).
    *  Gates the resources-package import independently of `resourceClasses`,
@@ -121,7 +121,7 @@ export interface WorkflowCtx {
   voRequestPkgOf?: (voName: string) => string | null;
   /** Package the `domainService` beans live in — a `reading`-tier service a
    *  workflow calls is constructor-injected (`@Service` bean), imported from
-   *  here (domain-services.md rev. 4, Slice 1).  Optional; absent ⇒ no reading
+   *  here (domain-services.md rev. 4).  Optional; absent ⇒ no reading
    *  service is injected (pure-only / legacy callers). */
   domainServicePkg?: string;
 }
@@ -476,8 +476,8 @@ function renderCtxFor(ctx: EnrichedBoundedContextIR, wctx: WorkflowCtx): JavaRen
 }
 
 /** The reading-tier domain services a workflow calls in its body — each is a
- *  `@Service` bean the workflow constructor-injects (domain-services.md rev. 4,
- *  Slice 1).  De-duplicated by service name, in first-call order; a PURE service
+ *  `@Service` bean the workflow constructor-injects
+ *  (domain-services.md rev. 4).  De-duplicated by service name, in first-call order; a PURE service
  *  call is a static call (no injection), so it never appears here. */
 function readingServicesCalled(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string[] {
   const seen = new Set<string>();
@@ -617,7 +617,7 @@ export function renderJavaWorkflows(
   let usesIsolation = false;
   const repoAggs = new Set<string>();
   // Reading-tier domain services any command-workflow calls — injected as
-  // `@Service` beans (domain-services.md rev. 4, Slice 1).  First-call order,
+  // `@Service` beans (domain-services.md rev. 4).  First-call order,
   // deduped across workflows.
   const readingSvcs = new Set<string>();
   // STATIC (pure / mutating) domain services any command-workflow calls — a
@@ -676,8 +676,8 @@ export function renderJavaWorkflows(
     // pre-flattened `renderWorkflowStmts` — byte-identical either way
     // (`renderWorkflowStmts` IS `chunks.flat()` by construction), but the
     // per-chunk list lets us surface per-statement sub-regions to the caller
-    // that owns the recorder + this file's final content (source-map
-    // Milestone 11).  No re-indent transform sits between here and the final
+    // that owns the recorder + this file's final content (source-map).
+    // No re-indent transform sits between here and the final
     // file, so the chunk texts collected here are already the exact text
     // that lands in `<Ctx>Workflows.java`.
     const bodyChunks = renderWorkflowStmtChunks(

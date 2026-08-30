@@ -8,8 +8,8 @@ import { emptyPyTypeImports, visitPyTypeImports } from "./py-type-imports.js";
 import { renderPyType } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
-// Extern operation seam — the Python domain extension point (extern (b)
-// Phase 2, docs/extern.md), the Python sibling of the Elixir analog
+// Extern operation seam — the Python domain extension point
+// (docs/extern.md), the Python sibling of the Elixir analog
 // (src/generator/elixir/vanilla/extern-emit.ts, #1841).
 //
 // An `operation X() extern { precondition … }` declares case-1 business logic

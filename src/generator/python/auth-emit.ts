@@ -125,7 +125,7 @@ function renderUserModule(
     return `    ${snake(f.name)}: ${t}`;
   });
   // Derived `currentUser.orgPath` — the caller's tenant materialized path
-  // (multi-tenancy Phase 2).  Two shapes, both keeping it OFF `asdict()` /
+  // (multi-tenancy).  Two shapes, both keeping it OFF `asdict` /
   // the `/auth/me` wire (derived, not a claim) and untouched by every
   // construction site (the verifier never sets it):
   //

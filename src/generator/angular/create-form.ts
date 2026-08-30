@@ -15,7 +15,7 @@ import { applyAngularValidators } from "./form-validators.js";
 import { angularSink } from "./walker/sink.js";
 
 // ---------------------------------------------------------------------------
-// Angular `CreateForm(of: <Agg>)` renderer (angular-frontend-plan.md Slice 4b).
+// Angular `CreateForm(of: <Agg>)` renderer (angular-frontend-plan.md).
 //
 // IDIOMATIC TYPED REACTIVE FORMS — a fork of the shared react-hook-form path
 // (the `renderCreateForm` WalkerTarget seam routes here for Angular only).

@@ -887,7 +887,7 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
     listShapedProjections: ctx.listShapedProjections,
   };
   const shape = ofNode ? queryShape(ofNode, detectCtx) : { paged: false, single: false };
-  // Pattern H — `QueryView { of: <api>.<Projection> }` (M-T1.3 Phase 1).  The
+  // Pattern H — `QueryView { of: <api>.<Projection> }` (M-T1.3).  The
   // read resolves to the query-time projection's own `run/1`, in-process: a
   // LiveView deployable hosts its contexts in the SAME OTP app, so what the SPA
   // frontends reach over `GET /projections/<slug>` is one function call here.
@@ -1888,7 +1888,7 @@ function renderCardLike(
   }
   const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
   // A Card is a heading-nesting level (like the JSX `emitCard`): a `Heading`
-  // inside it derives a rank one deeper (accessibility.md Phase 2).
+  // inside it derives a rank one deeper (accessibility.md).
   const childCtx: WalkContext = { ...ctx, headingDepth: (ctx.headingDepth ?? 0) + 1 };
   const children = bodyExprs.map((c) => renderChild(c, childCtx)).join("\n");
   const testidAttr = testIdAttr(expr, ctx);
@@ -1975,7 +1975,7 @@ export function renderSection(expr: Extract<ExprIR, { kind: "call" }>, ctx: Walk
   const idAttr = id ? ` id="${id}"` : "";
   const testidAttr = testIdAttr(expr, ctx);
   // A Section is a heading-nesting level (like the JSX `emitSection`): a
-  // `Heading` in its body derives a rank one deeper (accessibility.md Phase 2).
+  // `Heading` in its body derives a rank one deeper (accessibility.md).
   const childCtx: WalkContext = { ...ctx, headingDepth: (ctx.headingDepth ?? 0) + 1 };
   const childrenHeex = positional.map((c) => renderChild(c, childCtx)).join("\n");
   if (childrenHeex.length === 0) {
@@ -2110,7 +2110,7 @@ export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
 }
 
 // ---------------------------------------------------------------------------
-// Chart (M-T1.3 Phase 4, HEEx leg).
+// Chart (M-T1.3, HEEx leg).
 // ---------------------------------------------------------------------------
 
 /** `Chart { kind: "bar"|"line", of: <api>.<Projection>, x: r => …, y: r => … }`

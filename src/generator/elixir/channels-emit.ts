@@ -432,7 +432,7 @@ export function emitElixirChannelFiles(
     { name: "id", valueExpr: "id" },
   ]);
 
-  // Kafka (slice 8d): the channel's `key:` field per address — the envelope
+  // Kafka: the channel's `key:` field per address — the envelope
   // stamps its value as `loomkey`, kafka's partition key (design §4).  A
   // separate map so the routing tuples keep their 4-tuple shape.
   const keyedBindings = unique.filter((b) => b.key !== undefined);

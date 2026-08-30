@@ -1,4 +1,4 @@
-// The `Chart` primitive's Flutter runtime — `lib/chart.dart` (M-T1.3 Phase 4).
+// The `Chart` primitive's Flutter runtime — `lib/chart.dart` (M-T1.3).
 //
 // WHY THERE IS NO CHARTING PACKAGE HERE
 // -------------------------------------

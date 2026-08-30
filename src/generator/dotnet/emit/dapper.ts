@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // dapper — minimal-real persistence emitters for the .NET backend
-// (D-REALIZATION-AXES Phase 5c).  An ALTERNATE persistence implementation
+// (D-REALIZATION-AXES).  An ALTERNATE persistence implementation
 // selected by `persistence: dapper`: the generated Domain layer (entities, ids,
 // value objects, enums, events, commands/handlers/controllers) is
 // persistence-agnostic and reused as-is; Dapper only replaces the Infrastructure

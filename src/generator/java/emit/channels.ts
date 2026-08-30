@@ -26,7 +26,7 @@ import { javaLogEvent } from "../../_obs/render-java.js";
 // reactor subscribes — the `ChannelConsumerService` invoking the SAME
 // dispatcher handler methods local events would reach.
 //
-// Producer path split (design §5, slice 7c): the tee publishes EPHEMERAL
+// Producer path split (design §5): the tee publishes EPHEMERAL
 // broker-routed events inline; DURABLE (`work`) events land in
 // `__loom_outbox` inside the caller's @Transactional write (the tee IS the
 // outbox recorder on java) and are published by the `OutboxRelayService` on

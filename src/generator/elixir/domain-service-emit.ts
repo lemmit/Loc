@@ -439,7 +439,7 @@ function renderOperation(
     .map((n) => `    _ = ${n}`);
 
   if (multiContextReading) {
-    // OUT OF SCOPE (Slice 1): a cross-context reading service.  Emit a guard
+    // OUT OF SCOPE: a cross-context reading service.  Emit a guard
     // raise + a visible flag note rather than a body whose repo reads name
     // context fns that don't exist in this module.
     const allDiscards = paramNames.map((n) => `    _ = ${n}`);

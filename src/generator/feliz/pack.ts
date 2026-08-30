@@ -319,7 +319,7 @@ function primitiveTable(c: Ctx): string {
 }
 
 /** DataGrid — daisyUI chrome around a TanStack `table-core` instance
- *  (M-T1.1 slice 10e).
+ *  (M-T1.1).
  *
  *  The `table` binding, the column defs and every state slice come from the
  *  walker-emitted `[<ReactComponent>]` child that wraps this markup
@@ -373,7 +373,7 @@ function primitiveDataGrid(c: Ctx): string {
     : "";
 
   // `aria-sort` on the header cell is the a11y contract the JSX packs already
-  // ship (M-T1.1 slice 5); a sortable header without it is a WCAG gap.
+  // ship (M-T1.1); a sortable header without it is a WCAG gap.
   const head =
     `Html.thead [ prop.children [\n` +
     `        yield! unbox<obj array> (table?getHeaderGroups()) |> Array.map (fun hg ->\n` +
@@ -569,7 +569,7 @@ function primitiveEnumBadge(c: Ctx): string {
 }
 /** Stat(label, value) — a daisyUI stat card.  `label`/`value` are raw text. */
 /** Chart(kind:, of:, x:, y:) — a line/bar chart as INLINE SVG, computed by the
- *  `View.chart` helper from the rows already in the Model (M-T1.3 Phase 4).
+ *  `View.chart` helper from the rows already in the Model (M-T1.3).
  *
  *  No charting library, and no dependency added to the emitted `.fsproj` — the
  *  same conclusion the HEEx leg reached, and for the same reason: the rows are

@@ -1,4 +1,4 @@
-// Named layouts — Vue flavour (Phase 8).
+// Named layouts — Vue flavour.
 //
 // A `layout <Name> { header / main / footer }` SystemMember wraps every
 // page that selects it via `layout: <Name>`.  React weaves the layout

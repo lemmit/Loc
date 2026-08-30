@@ -1,5 +1,5 @@
 // Vue's `DataGrid` child component — the SFC half of the `renderDataGridChild`
-// seam (M-T1.1 slice 10).
+// seam (M-T1.1).
 //
 // WHY A SIBLING FILE, NOT A MODULE DECLARATION
 // --------------------------------------------

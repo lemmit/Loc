@@ -122,7 +122,7 @@ export function renderProgram(
      *  `AddHostedService<…>()` per owned timer).  Empty ⇒ no registration, so
      *  a timer-free deployable's Program.cs stays byte-identical. */
     timerServices?: string[];
-    /** Broker channels (M-T4.4 slice 6a): the deployable wires a broker-bound
+    /** Broker channels (M-T4.4): the deployable wires a broker-bound
      *  channelSource — register the ChannelTransports singleton and wrap the
      *  dispatcher chain in the publish tee (design §4 delivery uniformity). */
     hasChannels?: boolean;
@@ -133,7 +133,7 @@ export function renderProgram(
     /** A hosted reactor subscribes to a carried event — start the consumer
      *  BackgroundService feeding envelopes into the in-process dispatch. */
     hasChannelConsumers?: boolean;
-    /** TimerSource durable scheduling (scheduling.md Phase 2): the deployable
+    /** TimerSource durable scheduling (scheduling.md): the deployable
      *  owns at least one `cron:` timer, so wire Hangfire (`AddHangfire` +
      *  `AddHangfireServer`, Hangfire.PostgreSql storage) + register its recurring
      *  jobs.  `every:`-only + timer-free deployables leave this false — no
@@ -360,7 +360,7 @@ app.MapGet("/files/{key}", async (string key, HttpContext http, ILogger<${ns}.Ap
           .map((fqn) => `builder.Services.AddHostedService<${fqn}>();`)
           .join("\n")}`
       : "";
-  // TimerSource `cron:` schedulers (scheduling.md Phase 2) run on Hangfire with
+  // TimerSource `cron:` schedulers (scheduling.md) run on Hangfire with
   // Hangfire.PostgreSql storage: the recurring-job scheduler is store-coordinated
   // (single-fire across replicas), retries a failed job with backoff, and fires an
   // overdue recurring job on server start (native missed-run replay).
@@ -412,7 +412,7 @@ using (var seedScope = app.Services.CreateScope())
     )
     .join("\n");
 
-  // Reading-tier domain services (domain-services.md rev. 4, Slice 1): a
+  // Reading-tier domain services (domain-services.md rev. 4): a
   // `reading` service is a DI'd `sealed class` (it injects an
   // I<Aggregate>Repository per read-port), so it must be registered as a scoped
   // service the orchestrating workflow handler can inject.  A `pure` service is
@@ -463,7 +463,7 @@ using (var seedScope = app.Services.CreateScope())
     : "";
 
   // Extern application-layer handlers ([ExternHandler] scan targets).  Since
-  // extern (b) Phase 2, an extern aggregate OPERATION is a domain partial-method
+  // extern (b), an extern aggregate OPERATION is a domain partial-method
   // hook (no injected handler, no `[ExternHandler]`, no DI registration — a
   // missing implementation is a COMPILE error), so ONLY the extern
   // commandHandler / queryHandler application members (Phase 1's case-2 home)
@@ -1199,7 +1199,7 @@ export function renderCsproj(
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />`;
-  // Resource-client NuGet refs (Phase 4c) — AWSSDK.S3 / RabbitMQ.Client
+  // Resource-client NuGet refs — AWSSDK.S3 / RabbitMQ.Client
   // etc., one row per package the deployable's consumed resources need.
   const resourceRefs = Object.entries(resourceNugetDeps)
     .sort(([a], [b]) => a.localeCompare(b))
@@ -1224,7 +1224,7 @@ export function renderCsproj(
     usesSpecifications && !usingDapper
       ? `\n    <!-- Ardalis.Specification — reified retrieval/criterion query objects -->\n    <PackageReference Include="Ardalis.Specification" Version="9.3.1" />\n    <PackageReference Include="Ardalis.Specification.EntityFrameworkCore" Version="9.3.1" />`
       : "";
-  // Hangfire — durable `timerSource … cron:` scheduling (scheduling.md Phase 2)
+  // Hangfire — durable `timerSource … cron:` scheduling (scheduling.md)
   // on Hangfire.PostgreSql storage.  Ships only when an owned timer uses a real
   // cron cadence (an `every:`-only deployable uses PeriodicTimer and needs no
   // dep).  Newtonsoft.Json is pinned to 13.x to override the vulnerable 11.0.1

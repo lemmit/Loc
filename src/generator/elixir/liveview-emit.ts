@@ -84,7 +84,7 @@ export interface LiveRoute {
   liveModule: string;
 }
 
-/** Where a page-body projection read lands on the Phoenix leg (M-T1.3 Phase 1).
+/** Where a page-body projection read lands on the Phoenix leg (M-T1.3).
  *  Resolved once per deployable from the hosted contexts, then consumed by the
  *  `handle_params` load block. */
 interface ProjectionRead {
@@ -212,8 +212,8 @@ export function emitLiveViewPages(args: {
   // (matching the domain emitter).  An aggregate's parts live in its
   // owning context's module namespace.
   const partContextModule = new Map<string, string>();
-  // Frontend-readable query-time projections a page body may read (M-T1.3
-  // Phase 1), keyed by projection name.  The Phoenix leg needs no api client
+  // Frontend-readable query-time projections a page body may read, keyed by
+  // projection name.  The Phoenix leg needs no api client
   // for these: a LiveView deployable hosts its contexts in the SAME OTP app, so
   // what the SPA frontends fetch over `GET /projections/<slug>` is an
   // in-process `run/1` call here.
@@ -466,7 +466,7 @@ export function emitLiveViewPages(args: {
   }
 
   // `Chart { … }` → the shared inline-SVG function component the call sites
-  // invoke fully qualified (M-T1.3 Phase 4).  One per deployable, and only when
+  // invoke fully qualified (M-T1.3).  One per deployable, and only when
   // a chart is actually rendered — a chartless app is byte-identical.
   if (anyChart) {
     out.set(`lib/${appName}_web/components/loom_chart.ex`, renderLoomChartComponent(webModule));
@@ -895,8 +895,8 @@ function renderLiveView(a: RenderArgs): { source: string; usesChart: boolean } {
   // seam.  Persists the completed entry and assigns the FileRef into state.
   const uploadHandlers = renderUploadProgressHandlers(walked.uploadBindings, appName);
 
-  // One `defp load_<proj>(socket)` per projection the page reads (M-T1.3
-  // Phase 1) — the in-process `run/1` call plus the wire→snake rekey.
+  // One `defp load_<proj>(socket)` per projection the page reads — the
+  // in-process `run/1` call plus the wire→snake rekey.
   const projectionLoaders = renderProjectionLoaders(walked.queryBindings, a.projectionReads);
 
   // One `defp load_<agg>_history(socket, id)` + its `defp <agg>_audit_entry/…`
@@ -1313,7 +1313,7 @@ ${read.replace(/^ {6}/gm, "        ")}
 }
 
 /** The `handle_params` load line for a `QueryView { of: <api>.<Projection> }`
- *  (M-T1.3 Phase 1) — a call into the page-private loader below. */
+ *  (M-T1.3) — a call into the page-private loader below. */
 function renderProjectionLoadBlock(qb: import("./heex-walker.js").QueryBinding): string {
   return `    socket = assign(socket, :${qb.assign}, ${projectionLoaderName(qb.aggregate)}(socket))`;
 }
@@ -1323,7 +1323,7 @@ function projectionLoaderName(projection: string): string {
   return `load_${snake(projection)}`;
 }
 
-/** The page-private loader for each projection a page reads (M-T1.3 Phase 1) —
+/** The page-private loader for each projection a page reads (M-T1.3) —
  *  one `defp load_<proj>(socket)` per DISTINCT projection, spliced into the
  *  LiveView module body.
  *
@@ -1861,7 +1861,7 @@ end
 void plural;
 
 /** The shared `LoomChart` function component — the HEEx leg of the `Chart`
- *  primitive (M-T1.3 Phase 4), emitted once per deployable when any page
+ *  primitive (M-T1.3), emitted once per deployable when any page
  *  renders a chart.
  *
  *  Inline SVG, no charting library and no JavaScript: the rows a chart plots

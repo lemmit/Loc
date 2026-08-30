@@ -543,7 +543,7 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     a11y: { role: "table", owns: "Column" },
   },
   // Kind-discriminated (line | bar) chart over a GROUPED query-time projection
-  // (M-T1.3 Phase 4).  The `tsx` renderer serves react — all eight packs, each
+  // (M-T1.3).  The `tsx` renderer serves react — all eight packs, each
   // binding its own charting library — AND, through the `renderChartData` seam
   // plus their procedural packs, Feliz and Flutter, which render it as inline
   // SVG / a `CustomPainter` with no library at all.  HEEx has its own renderer
