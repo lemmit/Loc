@@ -620,6 +620,22 @@ function renderBinary(left: string, right: string, e: Extract<ExprIR, { kind: "b
   if (e.leftType?.kind === "primitive" && e.leftType.name === "money") {
     return renderMoneyBinary(e.op, left, right);
   }
+  // MIRROR arm (audit F7 / M-T6.44): `moneyArithmetic` admits `money × scalar`
+  // COMMUTATIVELY, so money can arrive on the RIGHT with an integral/decimal
+  // left (`qty * price`).  Only `money` maps to a `Decimal` here (plain
+  // `decimal` is a native number), so without this arm the expression fell to
+  // native `*` on a Decimal instance — TS2363, an uncompilable project.  Wrap
+  // the numeric left so the method receiver is a Decimal; the explicit
+  // numeric-left guard keeps string-concat `+` shapes out (same posture as
+  // Java's mirror arm, fleet-bug-hunt A4).
+  if (
+    e.rightType?.kind === "primitive" &&
+    e.rightType.name === "money" &&
+    e.leftType?.kind === "primitive" &&
+    (e.leftType.name === "int" || e.leftType.name === "long" || e.leftType.name === "decimal")
+  ) {
+    return renderMoneyBinary(e.op, `new Decimal(${left})`, right);
+  }
   // A5 temporal: datetime ± duration / datetime − datetime / duration +
   // datetime.  duration ± duration and duration * int stay native number
   // arithmetic (a duration is plain milliseconds on this backend) and fall

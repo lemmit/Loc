@@ -77,14 +77,19 @@ const SHARED_CASES = [
   { name: "sales-system", ddd: "web/src/examples/sales-system.ddd", swap: true },
 ];
 
-/** Elixir is the exception, and the exception is itself a finding (F14).  The
- *  vanilla-Phoenix backend emits its OpenAPI document from the deployable's
- *  `serves:` api — a deployable that declares only `contexts:` publishes no
- *  /openapi.json at all, while the other four publish one derived from the
- *  routes either way.  The two shared fixtures declare no `api` block, so on
- *  elixir there would be no contract to fuzz against; this leg therefore runs
- *  the broad elixir storefront fixture, which does declare one.  When F14 is
- *  fixed this list collapses back into SHARED_CASES. */
+/** Elixir still runs its own case, and the reason it ever needed one was itself
+ *  a finding (F15, now FIXED): the vanilla-Phoenix backend used to emit its
+ *  OpenAPI document only when the deployable declared a `serves:` api, so a
+ *  deployable declaring `contexts:` alone published no /openapi.json at all
+ *  while the other four publish one derived from the routes either way.  The
+ *  two shared fixtures declare no `api` block, so on elixir there was no
+ *  contract to fuzz against; this leg therefore runs the broad elixir
+ *  storefront fixture, which does declare one.
+ *
+ *  With F15 fixed, elixir CAN now fuzz the shared fixtures — but pointing it at
+ *  them fuzzes a contract this backend has never published, which is a
+ *  discovery run rather than a no-op.  Collapsing this list back into
+ *  SHARED_CASES is therefore its own change, with its own findings to triage. */
 const ELIXIR_CASES = [
   { name: "storefront-elixir", ddd: "web/src/examples/storefront-elixir.ddd", swap: false },
 ];
@@ -94,10 +99,11 @@ const ELIXIR_CASES = [
  *  the fuzzer never ran — so it is spelled out here, printed in the run output,
  *  and carries the register entry that has to be struck before it is deleted. */
 const SKIP = {
-  dotnet: {
-    "storefront-system":
-      "F14 — GET /openapi.json answers 500 on this fixture: two contexts each emit a `MoneyRequest`, and Swashbuckle's default schemaId (the type's short name) collides, so the document generator throws. No published contract → nothing to fuzz.",
-  },
+  // Empty since 2026-08-30: the one entry that lived here, dotnet ×
+  // `storefront-system`, was drained with F14's fix (the emitter now qualifies
+  // the colliding OpenAPI schema ids, so the document generates and the leg
+  // fuzzes it like any other case).  The mechanism stays — the next
+  // unfuzzable case is a one-line entry plus its register heading.
 };
 
 // ---------------------------------------------------------------------------

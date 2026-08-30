@@ -38,7 +38,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { AUTHZ_LADDERS, DEV_CLAIMS, featureCases, mountsFileRoutes, resetDatabase, sharedSystemCases, unauthorizedCredentials } from "./cases.mjs";
+import { AUTHZ_LADDERS, declaresE2e, DEV_CLAIMS, featureCases, mountsFileRoutes, resetDatabase, sharedSystemCases, unauthorizedCredentials } from "./cases.mjs";
 import { stopServer, waitForPort, waitForPortFree } from "./proc.mjs";
 import { makeWireGate, recorderPreamble } from "./wire-differential.mjs";
 import { startMockIssuer } from "./oidc-mock.mjs";
@@ -240,7 +240,16 @@ async function runCase(c) {
     const deplDir = findNodeDeployable(genDir);
     const e2eDir = join(genDir, "e2e");
     const e2eFile = existsSync(e2eDir) ? (walk(e2eDir, (p) => p.endsWith(".e2e.test.ts"))[0] ?? null) : null;
-    if (!e2eFile) throw new Error("no emitted e2e suite (the system declares no `test e2e … against <node>`)");
+    // A UNIT-ONLY case (domain `test "…"`, no `test e2e`) emits no e2e suite —
+    // that is the declared shape, not an error: run the DB-free unit tier and
+    // skip the api/wire legs, the node oracle's derive-from-the-file-map
+    // posture (M-T6.44's numeric-operands is the first such fixture).  A case
+    // that DECLARES e2e and emits nothing is still an error.
+    if (!e2eFile && declaresE2e(c.source)) throw new Error("no emitted e2e suite (the system declares no `test e2e … against <node>`)");
+    // Unit-only case: nothing for the api tier to dispatch — the unit tier is
+    // pure-domain (persistence-independent) and already covered by run.mjs,
+    // exactly as the corpus comment below promises.
+    if (!e2eFile) return { results: [], wire: [] };
 
     // OIDC (`auth {}` block) → the generated verifier validates a real bearer
     // JWT against the issuer's JWKS.  Point the backend at the in-process mock
@@ -396,7 +405,9 @@ for (const c of active) {
     process.stdout.write(`  ${ok ? "✓" : "✗"} [${r.tier ?? "api"}] ${r.name}\n`);
     if (!ok && r.error) process.stdout.write(`      ${String(r.error).split("\n")[0]}\n`);
   }
-  await wire.check(c.name, out.wire, out.results);
+  // Unit-only cases record no wire (the early return above) — keep them out
+  // of the differential instead of gating an empty recording on a golden.
+  if (declaresE2e(c.source)) await wire.check(c.name, out.wire, out.results);
 }
 
 await oidc?.stop();

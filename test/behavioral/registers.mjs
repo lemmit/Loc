@@ -32,6 +32,18 @@ export function hasBehaviouralBlock(src) {
   return /(^|\n)\s*test\s+e2e\s+"/.test(src) || /(^|\n)\s*test\s+"/.test(src);
 }
 
+/** True when a `.ddd` DECLARES an api-tier `test e2e "…"` block.  The runner
+ *  legs use this to tell a UNIT-ONLY case (domain `test "…"` blocks, no e2e —
+ *  admitted by `hasBehaviouralBlock` above, and run by the node oracle via its
+ *  derive-tiers-from-the-emitted-file-map posture) apart from a case that
+ *  declared e2e and emitted nothing, which stays an error.  Until
+ *  numeric-operands (M-T6.44) no fixture used the unit-only shape, so the five
+ *  cross-backend legs had hard-required the e2e suite without anything
+ *  noticing. */
+export function declaresE2e(src) {
+  return /(^|\n)\s*test\s+e2e\s+"/.test(src);
+}
+
 /** True when this `.ddd` makes its backends mount the root `POST /files` +
  *  `GET /files/{key}` pair (M-T1.2) — i.e. some declared field is `File`-typed
  *  AND an `objectStore` resource is wired.  Both halves are required: the

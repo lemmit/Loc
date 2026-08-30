@@ -28,7 +28,7 @@ import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { AUTHZ_LADDERS, DEV_CLAIMS, featureCases, mountsFileRoutes, sharedSystemCases, unauthorizedCredentials } from "./cases.mjs";
+import { AUTHZ_LADDERS, declaresE2e, DEV_CLAIMS, featureCases, mountsFileRoutes, sharedSystemCases, unauthorizedCredentials } from "./cases.mjs";
 import { authzLadderTail, makeWireGate, recorderPreamble } from "./wire-differential.mjs";
 import { startMockIssuer } from "./oidc-mock.mjs";
 
@@ -359,7 +359,13 @@ for (const c of corpus) {
       if (r.verdict === "FAILING") process.stdout.write(`      ✗ ${id} FAILING (${r.failingTestCaseIds.join(", ")})\n`);
     }
   }
-  await wire.check(c.name, out.wire, out.results);
+  // A unit-only case (a `test` block, no `test e2e`) stays OUT of the wire
+  // differential: the oracle's auto probes above still exercise it, but
+  // recording them would demand a node-only golden no other leg compares —
+  // every other runner skips unit-only cases entirely (their `declaresE2e`
+  // arm), and the static coverage gates require goldens only of e2e-declaring
+  // cases.  One rule, all seven legs.
+  if (declaresE2e(c.source)) await wire.check(c.name, out.wire, out.results);
 }
 
 await oidc?.stop();

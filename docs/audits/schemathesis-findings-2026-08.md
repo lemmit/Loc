@@ -609,8 +609,10 @@ register while three backends still answer the old way, and no gate said so
 until each backend was fuzzed against its own published contract.
 
 ### F14 — .NET: `GET /openapi.json` 500s when two contexts emit the same request DTO name
-**Waiver:** none — a *case skip* (`SKIP.dotnet["storefront-system"]` in
-`run-schemathesis-backend.mjs`), because there is no contract to fuzz.
+**Status: FIXED (2026-08-30, PR #2686).**
+**Waiver:** none — it was a *case skip* (`SKIP.dotnet["storefront-system"]` in
+`run-schemathesis-backend.mjs`), because there was no contract to fuzz; the skip
+is drained with the fix and `SKIP.dotnet` is now empty.
 **Severity: high** · the published contract is unavailable, not merely wrong.
 
 ```
@@ -627,22 +629,49 @@ by two aggregates produces two CLR types with the same short name. Swashbuckle's
 default `schemaId` selector is the short name, and a collision is fatal to the
 whole document. `storefront-system` has `Money` on both `Product` and `Wallet`,
 so its spec endpoint 500s; `sales-system` uses `Money` in one namespace and is
-fine — which is exactly why no existing gate caught it. Fix shape:
-`options.CustomSchemaIds(...)` with a namespace-qualified id, emitted in
-`Program.cs`.
+fine — which is exactly why no existing gate caught it.
+
+**The fix is narrower than "qualify every id".** The axis is the NAMESPACE, not
+the context: the emitter writes one `Application.<Aggregates>.Requests` /
+`.Responses` per AGGREGATE, so `storefront-system` reproduces it inside a single
+context (`Money` on `Product`, `Wallet`, `Order`, plus the workflow request
+namespace — seven colliding CLR types, not two). Namespace-qualifying every
+schema id would close the crash and break something else: the other four
+backends publish SHORT component names, and that shape is what
+`.loom/wire-spec.json` and conformance-parity compare. So
+`src/generator/dotnet/schema-ids.ts` derives the colliding short names from the
+project's own emitted DTO files at EMIT time and `Program.cs` maps only those
+(`ProductsMoneyRequest` / `OrdersMoneyRequest` / …), keeping the `Paged<>` arm
+first and the bare `return t.Name;` fallback for everything else — a
+collision-free project emits byte-identical output.
 
 ### F15 — elixir: no `/openapi.json` at all unless the deployable declares `serves:`
 **Waiver:** none — the elixir leg runs a *different fixture* for this reason
 (`ELIXIR_CASES`). **Severity: high** · a whole backend can publish no contract.
 
-`emitOpenApiSpec` (`src/generator/elixir/vanilla/index.ts`) returns early when
-`deployable.serves` is empty, so a deployable declared with `contexts:` alone
-emits no spec module, no `OpenapiController` and no `/openapi.json` route. The
-other four backends publish a document derived from the routes either way. Both
-shared fixtures declare `contexts:` only, so on elixir there is literally nothing
-to fuzz them against; the leg therefore runs
-`web/src/examples/storefront-elixir.ddd`, which does declare an `api`. When F15
-lands, `ELIXIR_CASES` collapses back into the shared list.
+**Status: FIXED (2026-08-30, PR #2687).** `serves:` no longer decides whether
+the document exists — only what it is CALLED. `emitOpenApiSpec`
+(`src/generator/elixir/vanilla/openapi-emit.ts`) dropped the early return and
+falls back to the app name for the spec module (`ApiWeb.Api.ApiSpec`,
+`lib/api_web/api/api_spec.ex`) when the deployable declares no api, so a
+`contexts:`-only deployable publishes the same route-derived document the other
+four backends publish. Nothing else moved: every path and schema in that module
+was already derived from the hosted contexts, and a deployable that DOES declare
+`serves:` emits byte-identical output (differenced emission-to-emission in
+`test/generator/elixir/vanilla-openapi-no-serves.test.ts`).
+
+`ELIXIR_CASES` still runs `web/src/examples/storefront-elixir.ddd` — collapsing
+it back into `SHARED_CASES` is a follow-up, because pointing the leg at the two
+shared fixtures fuzzes a contract elixir has never published and is a discovery
+run, not a no-op.
+
+**Repro (pre-fix).** `emitOpenApiSpec` returned early when `deployable.serves`
+was empty, so a deployable declared with `contexts:` alone emitted no spec
+module, no `OpenapiController` and no `/openapi.json` route. The other four
+backends publish a document derived from the routes either way. Both shared
+fixtures declare `contexts:` only, so on elixir there was literally nothing to
+fuzz them against; the leg therefore runs
+`web/src/examples/storefront-elixir.ddd`, which does declare an `api`.
 
 ### F16 — python: a create referencing a well-formed uuid that does not exist 500s
 **Waiver:** W20 (+ W21) · **Severity: high**

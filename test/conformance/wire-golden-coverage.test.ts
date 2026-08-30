@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   BEHAVIOURAL_SKIP,
+  declaresE2e,
   GOLDEN_OPT_OUT,
   goldenPath,
   hasBehaviouralBlock,
@@ -68,12 +69,19 @@ const optedOut = new Set<string>(
   (GOLDEN_OPT_OUT as ReadonlyArray<{ case: string }>).map((o) => o.case),
 );
 
-/** Corpus features that carry a behavioural block AND survive some leg's skips. */
-const featureCasesRun = CORPUS.filter(
-  (f) =>
-    hasBehaviouralBlock(corpusSource(f.id)) &&
-    f.backends.some((b) => !(f.id in skipSetFor(PLATFORM_CLAUSE[b]))),
-).map((f) => f.id);
+/** Corpus features that carry a behavioural block AND survive some leg's skips.
+ *  A unit-only case (a `test` block but no `test e2e`) runs but RECORDS no wire
+ *  — every runner returns its unit results and skips the differential — so it
+ *  needs no golden, and the wire-differential stale-opt-out ratchet rejects
+ *  parking it in GOLDEN_OPT_OUT.  Mirrors the runners' `declaresE2e` arm. */
+const featureCasesRun = CORPUS.filter((f) => {
+  const src = corpusSource(f.id);
+  return (
+    hasBehaviouralBlock(src) &&
+    declaresE2e(src) &&
+    f.backends.some((b) => !(f.id in skipSetFor(PLATFORM_CLAUSE[b])))
+  );
+}).map((f) => f.id);
 
 const sharedCasesRun = (sharedSystemGoldenCases() as string[]).filter(runsSomewhere);
 

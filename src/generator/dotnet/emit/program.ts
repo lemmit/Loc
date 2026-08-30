@@ -5,6 +5,7 @@ import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall, renderDotnetLogCallWithException } from "../../_obs/render-dotnet.js";
 import { OTEL_ENDPOINT_ENV, OTEL_SERVICE_NAME_ENV } from "../../_obs/tracing.js";
+import type { SchemaIdOverride } from "../schema-ids.js";
 import { DAPPER_PROJECT_DEPS, renderDapperConnectionSetup } from "./dapper.js";
 
 // Program.cs is top-level statements, not a class — so the renderer's
@@ -152,8 +153,43 @@ export function renderProgram(
      *  `POST /files` + `GET /files/{key}` over them.  Undefined ⇒ no File field,
      *  no routes (byte-identical). */
     fileUpload?: { putBytes: string; getBytes: string };
+    /** OpenAPI schema-id overrides for the wire DTO short names that collide
+     *  across this project's per-aggregate namespaces (F14, `schema-ids.ts`).
+     *  Empty/absent ⇒ Program.cs keeps the bare `return t.Name;` fallback and
+     *  emits no dictionary (byte-identical to a collision-free project). */
+    schemaIdOverrides?: readonly SchemaIdOverride[];
   },
 ): string {
+  // Schema-id collision guard (F14).  Two aggregates each emit their own
+  // `Application.<Aggregates>.Requests` / `.Responses` namespace, so a value
+  // object used by both produces two CLR types with the same SHORT name.
+  // Swashbuckle's default schemaId selector is that short name and a collision
+  // THROWS — `GET /openapi.json` 500s and the deployable publishes no contract
+  // at all.  Only the genuinely colliding types are re-mapped (keyed by CLR
+  // full name, computed at emit time in `schema-ids.ts`); every other type
+  // keeps its short name so the component set stays comparable with the four
+  // other backends.  No collision ⇒ both fragments are empty and Program.cs is
+  // byte-identical to before this guard existed.
+  const schemaOverrides = options?.schemaIdOverrides ?? [];
+  const schemaIdDictionary =
+    schemaOverrides.length === 0
+      ? ""
+      : `    // Wire DTO short names this project emits in more than one namespace
+    // (a value object shared by two aggregates).  Swashbuckle would throw on
+    // the duplicate schemaId and fail the WHOLE document, so each colliding
+    // type publishes its owning namespace's qualified id instead.
+    var collidingSchemaIds = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+${schemaOverrides.map((o) => `        ["${o.clrFullName}"] = "${o.schemaId}",\n`).join("")}    };
+`;
+  const schemaIdLookup =
+    schemaOverrides.length === 0
+      ? ""
+      : `        if (t.FullName is not null && collidingSchemaIds.TryGetValue(t.FullName, out var qualified))
+        {
+            return qualified;
+        }
+`;
   const authRequired = !!options?.authRequired;
   const oidc = !!options?.oidc;
   const orgPathResolver = !!options?.orgPathResolver;
@@ -839,7 +875,7 @@ builder.Services.AddSwaggerGen(c =>
             ? null
             : char.ToLowerInvariant(action[0]) + action.Substring(1);
     });
-    // Schema-name parity for the paged carrier (M-T2.6): the generic
+${schemaIdDictionary}    // Schema-name parity for the paged carrier (M-T2.6): the generic
     // Paged<XResponse> return would otherwise get Swashbuckle's default
     // "PagedXResponse" component name — but Hono/Phoenix/Java/Python all name
     // the envelope "<Agg>Paged" (e.g. EngineerPaged).  Map the generic back to
@@ -853,7 +889,7 @@ builder.Services.AddSwaggerGen(c =>
             var stem = inner.EndsWith("Response", StringComparison.Ordinal) ? inner.Substring(0, inner.Length - "Response".Length) : inner;
             return stem + "Paged";
         }
-        return t.Name;
+${schemaIdLookup}        return t.Name;
     });
 });
 

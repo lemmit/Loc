@@ -185,6 +185,7 @@ import { rewriteNamespacesForLayout } from "./layout-namespaces.js";
 import { emitProjectionDispatch, emitProjectionReads } from "./projection-emit.js";
 import { emitProjectionRowPersistence } from "./projection-state-emit.js";
 import { emitQueryProjections } from "./query-projection-emit.js";
+import { dotnetSchemaIdOverrides } from "./schema-ids.js";
 import { emitRetrievalSpecs, renderPagingExtension } from "./spec-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitDispatchHandlers, emitWorkflowInstanceReads, emitWorkflows } from "./workflow-emit.js";
@@ -1900,9 +1901,16 @@ function emitProject(
   const emitTrace = !!options?.emitTrace;
   const usingDapper = !!options?.usingDapper;
   const timers = options?.timers ?? [];
+  // OpenAPI schema-id collisions (F14): read off the DTO files this project has
+  // ALREADY emitted (every caller populates `out` with the per-aggregate
+  // Requests/Responses before reaching here), so a value object shared by two
+  // aggregates does not take the whole `/openapi.json` document down with a
+  // duplicate schemaId.  Collision-free ⇒ empty ⇒ byte-identical Program.cs.
+  const schemaIdOverrides = dotnetSchemaIdOverrides(out);
   out.set(
     "Program.cs",
     renderProgram(ctx, ns, {
+      schemaIdOverrides,
       authRequired: !!options?.authRequired,
       userFields: options?.userFields ?? [],
       usesValidators,

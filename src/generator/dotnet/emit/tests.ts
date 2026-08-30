@@ -227,7 +227,14 @@ export function renderExplicitMatcherToAwesome(expr: ExprIR): string | null {
     receiver = receiver.receiver;
   }
   const inner = receiver.kind === "paren" ? receiver.inner : receiver;
-  const actual = renderCsExpr(inner);
+  // A binary or unary actual must be parenthesized: `.Should()` is postfix
+  // member access, which binds tighter than every C# operator, so
+  // `a == b.Should().Be(true)` compares `a` to the assertion object (CS0019 —
+  // the generated project does not build).  Found by numeric-operands
+  // (M-T6.44), the first test block to wrap a comparison in a matcher; every
+  // non-hazard emission stays byte-identical.
+  const rendered = renderCsExpr(inner);
+  const actual = inner.kind === "binary" || inner.kind === "unary" ? `(${rendered})` : rendered;
   const arg = expr.args[0] !== undefined ? renderCsExpr(expr.args[0]) : "";
   // FluentAssertions/AwesomeAssertions verb (post `.Should().`) — `Not`
   // prefix when negated.

@@ -1296,7 +1296,25 @@ function renderBinary(
   // Inside an Ecto query filter money/decimal lower to the data layer via the
   // native operators — `Decimal.compare`/`Decimal.add` are invalid there — so
   // only the native op-body path dispatches through `Decimal.*`.
-  if (!inFilter && e.leftType?.kind === "primitive" && isDecimalStruct(e.leftType.name)) {
+  //
+  // The arm fires on EITHER stamped operand being a decimal struct (audit
+  // F7 / M-T6.44): the validator admits `int * money` commutatively, numeric
+  // widening admits `int + decimal` both orders, and `comparable` admits
+  // `int < decimal` — with only the left checked, all three fell to native
+  // operators on a `%Decimal{}`: arithmetic raised `ArithmeticError` at
+  // runtime, and a comparison silently used Erlang TERM ordering
+  // (number < map ⇒ always true).  `Decimal.*` coerces an integer operand on
+  // either side, so no boxing is needed; the integral-left guard on the
+  // mirror keeps string-concat `+` (and every non-numeric left) out.
+  const rightIsDecimalStruct =
+    e.rightType?.kind === "primitive" && isDecimalStruct(e.rightType.name);
+  const leftIsIntegral =
+    e.leftType?.kind === "primitive" && (e.leftType.name === "int" || e.leftType.name === "long");
+  if (
+    !inFilter &&
+    ((e.leftType?.kind === "primitive" && isDecimalStruct(e.leftType.name)) ||
+      (rightIsDecimalStruct && leftIsIntegral))
+  ) {
     return renderDecimalBinary(e.op, l, r);
   }
   // Integer division widened to decimal (`int / int` → decimal): native Elixir
