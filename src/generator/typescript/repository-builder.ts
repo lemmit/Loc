@@ -9,13 +9,13 @@ import {
   aggregateUsesMoneyDeep,
   aggregateUsesPrincipalContextFilter,
   findUsesCurrentUser,
-  isQueryTimeProjection,
 } from "../../ir/types/loom-ir.js";
 import { tableOwnerName } from "../../ir/util/inheritance.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { aggregateIsAudited } from "./emit/audit-stamp.js";
+import { synthProjectionFinds } from "./projection-finds.js";
 import {
   contextFilterPredicate,
   findByIdMethod,
@@ -152,19 +152,10 @@ export function buildRepositoryFile(
   // Query-time projections (read-path-architecture.md rev.13) sourced from this
   // aggregate synthesise a parameterless-find repository read —
   // `repo.<projName>()` returns the filtered aggregate
-  // rows the projection route then follows (`join`) + projects (`select`).  A
-  // parameterised projection's `where` still lowers criterion params away at
-  // compile time, so the synthesised find stays parameterless.
-  const projectionFinds: FindIR[] = ctx.projections
-    .filter((p) => isQueryTimeProjection(p) && p.query?.source === agg.name)
-    .map((p) => ({
-      name: lowerFirst(p.name),
-      params: [],
-      returnType: { kind: "array", element: { kind: "entity", name: agg.name } },
-      filter: p.query?.filter,
-      bypassAll: p.query?.bypassAll,
-      bypassCaps: p.query?.bypassCaps,
-    }));
+  // rows the projection route then follows (`join`) + projects (`select`).
+  // Shared with the MikroORM + document builders (`projection-finds.ts`), which
+  // must emit the same method names for the same routes.
+  const projectionFinds: FindIR[] = synthProjectionFinds(agg.name, ctx);
 
   // Individual methods, hoisted so the same strings feed BOTH the class body
   // AND the derived repository PORT (audit S7 — the concrete `implements` a

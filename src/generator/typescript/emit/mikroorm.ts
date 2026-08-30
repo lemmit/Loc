@@ -55,7 +55,6 @@ import {
   exprUsesCurrentUser,
   findUsesCurrentUser,
   isMaterializedProjection,
-  isQueryTimeProjection,
 } from "../../../ir/types/loom-ir.js";
 import { durableEventTypes } from "../../../ir/util/channels.js";
 import { orientComparison } from "../../../ir/util/comparison-operands.js";
@@ -83,6 +82,7 @@ import { intrinsicFor, intrinsicKey, isQueryableBoolIntrinsic } from "../../../u
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { SQL_LIKE_ESCAPE_CLAUSE, tsSubtreeLikePattern } from "../../_expr/subtree-like.js";
 import { joinColumnName, joinTableConstName } from "../emit.js";
+import { synthProjectionFinds } from "../projection-finds.js";
 import { isRefCollection } from "../repository-associations-builder.js";
 import {
   deserializeField,
@@ -2008,31 +2008,6 @@ function containCascade(
 }
 
 // ---------------------------------------------------------------------------
-// Query-time `projection`s sourced from an aggregate synthesise a
-// parameterless-find repository read (`repo.<projName>()` → `<Agg>[]`), exactly
-// as the drizzle `repository-builder` does — the projection query routes call
-// these by name, so the MikroORM repo must emit them or the boot crashes on a
-// missing method.  Reusing the FindIR shape means the find-method builder
-// (predicate lowering, capability-filter AND, hydration) applies for free.
-// ---------------------------------------------------------------------------
-function synthProjectionFinds(
-  agg: EnrichedAggregateIR,
-  ctx: EnrichedBoundedContextIR,
-): RepositoryIR["finds"] {
-  const projectionFinds = (ctx.projections ?? [])
-    .filter((p) => isQueryTimeProjection(p) && p.query?.source === agg.name)
-    .map((p) => ({
-      name: lowerFirst(p.name),
-      params: [],
-      returnType: { kind: "array", element: { kind: "entity", name: agg.name } } as TypeIR,
-      filter: p.query?.filter,
-      bypassAll: p.query?.bypassAll,
-      bypassCaps: p.query?.bypassCaps,
-    }));
-  return [...projectionFinds];
-}
-
-// ---------------------------------------------------------------------------
 // Per-aggregate repository — a drop-in for the drizzle `<Agg>Repository`.
 // ---------------------------------------------------------------------------
 
@@ -2161,7 +2136,7 @@ export function renderMikroRepository(
   const dbg = (find: string, rowsExpr: string) =>
     `    requestLog().debug({ event: "find_executed", aggregate: "${agg.name}", find: "${find}", rows: ${rowsExpr} });`;
 
-  const findMethods = [...(repo?.finds ?? []), ...synthProjectionFinds(agg, ctx)].map((f) => {
+  const findMethods = [...(repo?.finds ?? []), ...synthProjectionFinds(agg.name, ctx)].map((f) => {
     const name = lowerFirst(f.name);
     const paged = pagedReturn(f.returnType);
     const isList = f.returnType.kind === "array";
@@ -2586,7 +2561,7 @@ export function renderMikroEmbeddedRepository(
   const dbg = (find: string, rowsExpr: string) =>
     `    requestLog().debug({ event: "find_executed", aggregate: "${agg.name}", find: "${find}", rows: ${rowsExpr} });`;
 
-  const findMethods = [...(repo?.finds ?? []), ...synthProjectionFinds(agg, ctx)].map((f) => {
+  const findMethods = [...(repo?.finds ?? []), ...synthProjectionFinds(agg.name, ctx)].map((f) => {
     const name = lowerFirst(f.name);
     const paged = pagedReturn(f.returnType);
     const isList = f.returnType.kind === "array";
@@ -2841,7 +2816,7 @@ export function renderMikroDocumentRepository(
   // deserialises every row), narrowed first by the capability filter then by
   // the find's own predicate — same selector shape as the drizzle document
   // builder's `documentFindMethod`.
-  const findMethods = [...(repo?.finds ?? []), ...synthProjectionFinds(agg, ctx)].map((f) => {
+  const findMethods = [...(repo?.finds ?? []), ...synthProjectionFinds(agg.name, ctx)].map((f) => {
     // A find whose own `where` names `currentUser` gains a trailing
     // `currentUser: User` parameter — the same contract the drizzle repository
     // has, and the one every call site already assumes: the Hono route emits
@@ -3098,28 +3073,30 @@ export function renderMikroEventSourcedRepository(
     ];
   });
 
-  const findMethods = [...(repo?.finds ?? []), ...synthProjectionFinds(agg, ctx)].map((find) => {
-    const usesUser = findUsesCurrentUser(find);
-    const baseParams = find.params.map((p) => `${p.name}: ${tsParamType(p.type)}`);
-    const params = (usesUser ? [...baseParams, "currentUser: User"] : baseParams).join(", ");
-    const pred = findPredicate(agg, find, ctx);
-    const isArray = find.returnType.kind === "array";
-    const isOptional = find.returnType.kind === "optional";
-    const ret = isArray ? `${agg.name}[]` : isOptional ? `${agg.name} | null` : agg.name;
-    const selector = isArray
-      ? pred
-        ? `all.filter(${pred})`
-        : "all"
-      : isOptional
-        ? `all.find(${pred ?? "() => true"}) ?? null`
-        : `all.find(${pred ?? "() => true"})!`;
-    return lines(
-      `  async ${find.name}(${params}): Promise<${ret}> {`,
-      "    const all = await this._loadAll();",
-      `    return ${selector};`,
-      "  }",
-    );
-  });
+  const findMethods = [...(repo?.finds ?? []), ...synthProjectionFinds(agg.name, ctx)].map(
+    (find) => {
+      const usesUser = findUsesCurrentUser(find);
+      const baseParams = find.params.map((p) => `${p.name}: ${tsParamType(p.type)}`);
+      const params = (usesUser ? [...baseParams, "currentUser: User"] : baseParams).join(", ");
+      const pred = findPredicate(agg, find, ctx);
+      const isArray = find.returnType.kind === "array";
+      const isOptional = find.returnType.kind === "optional";
+      const ret = isArray ? `${agg.name}[]` : isOptional ? `${agg.name} | null` : agg.name;
+      const selector = isArray
+        ? pred
+          ? `all.filter(${pred})`
+          : "all"
+        : isOptional
+          ? `all.find(${pred ?? "() => true"}) ?? null`
+          : `all.find(${pred ?? "() => true"})!`;
+      return lines(
+        `  async ${find.name}(${params}): Promise<${ret}> {`,
+        "    const all = await this._loadAll();",
+        `    return ${selector};`,
+        "  }",
+      );
+    },
+  );
 
   // A find that threads `currentUser`, OR a `mask unless` field — whose
   // `toWireMasked(root, currentUser: User | null)` names `User` in its
