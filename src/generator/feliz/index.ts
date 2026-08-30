@@ -358,7 +358,11 @@ function renderPageView(
   aggregatesByName: ReadonlyMap<string, AggregateIR>,
   workflowsByName: ReadonlyMap<string, WorkflowIR>,
   fnName: string,
-  takesRouteId = false,
+  /** The page's route params, in URL order — one `(<name>: string)` argument
+   *  each on the view fn, and the SAME names threaded into the walk so a body
+   *  reference to one resolves (`routeParamNames`).  Empty for a paramless page
+   *  and for the single-page (non-routed) branch. */
+  routeParams: readonly string[] = [],
   /** Aggregate/workflow → owning bounded context, so a form seam can resolve an
    *  enum-typed field's values (→ a `<select>`). */
   bcByAggregate: ReadonlyMap<string, EnrichedBoundedContextIR> = new Map(),
@@ -399,9 +403,13 @@ function renderPageView(
    *  False → the prefix stays undefined and the body is byte-identical. */
   i18nEnabled = false,
 ): string {
-  // A detail page's view takes the route `id` (bound by its `Page` case); the
-  // body's `byId(id)` renders through the `renderRouteId` seam to this local.
-  const idParam = takesRouteId ? " (id: string)" : "";
+  // A page's view takes ONE argument per route param, under the param's own
+  // name (bound by its `Page` case).  A detail page's `/:id` therefore still
+  // spells `(id: string)` — the local the body's `byId(id)` reaches through the
+  // `renderRouteId` seam — while `/greet/:who` binds `who`, which is the name
+  // the body actually uses (audit finding A14: every param but the first was
+  // dropped, and the first was renamed to `id`).
+  const idParam = routeParams.map((n) => ` (${n}: string)`).join("");
   const head = `let ${fnName} (model: Model) (dispatch: Msg -> unit)${idParam} =`;
   if (!page.body) return `${head}\n    Html.none`;
   const stateNames = new Set(page.state.map((s) => s.name));
@@ -413,7 +421,9 @@ function renderPageView(
     page.body,
     felizTarget,
     felizPack(),
-    new Set(),
+    // Route params: the view fn's own arguments, so a body ref to one renders
+    // as the bare local instead of `/* unresolved: <name> */ undefined`.
+    new Set(routeParams),
     stateNames,
     externComponents, // userComponents (extern only)
     ui.apiParams,
@@ -525,26 +535,74 @@ function pageCase(page: PageIR, nameCtx: PageNameCtx): string {
 function pageViewFn(page: PageIR, nameCtx: PageNameCtx): string {
   return `${lowerFirst(pageEmitName(page, nameCtx))}View`;
 }
+/** The `:param` names a page's `route:` binds, IN URL ORDER
+ *  (`/greet/:who/:mood` → `["who", "mood"]`).
+ *
+ *  The route — not the page's declared `params` — is the source of truth here,
+ *  for the same reason React reads `useParams()` by route key: `parseUrl`
+ *  destructures URL SEGMENTS, so their order and spelling is the contract.  It
+ *  also covers the scaffold's Detail pages, which carry `/:id` with NO declared
+ *  param (the body reads the magic `id` through `renderRouteId`).
+ *
+ *  A name repeated in one route binds ONCE (the later segment matches `_`) — F#
+ *  rejects a duplicate binding in a single pattern. */
+function routeParamNames(page: PageIR): string[] {
+  return routeParamSegments(page.route).filter((n): n is string => n !== undefined);
+}
+
+/** Per URL segment: the name it BINDS, or undefined for a literal segment / a
+ *  duplicate name.  Shared by {@link routeParamNames} and {@link routePattern}
+ *  so the pattern and the view-fn signature can never disagree. */
+function routeParamSegments(route: string | undefined): Array<string | undefined> {
+  const seen = new Set<string>();
+  return (route ?? "/")
+    .split("/")
+    .filter((s) => s.length > 0)
+    .map((s) => {
+      if (!s.startsWith(":")) return undefined;
+      const name = s.slice(1);
+      if (name === "" || seen.has(name)) return undefined;
+      seen.add(name);
+      return name;
+    });
+}
+
 /** A page carries a route param when its `route:` has a `:param` segment
- *  (`/products/:id`) — a detail page.  v1 binds only the FIRST such param, as
- *  the magic route `id`. */
+ *  (`/products/:id`) — a detail page, or any page with a named param. */
 function hasRouteParam(page: PageIR): boolean {
-  return (page.route ?? "/").split("/").some((s) => s.startsWith(":"));
+  return routeParamNames(page).length > 0;
 }
 /** URL segments of a page's `route:` as an F# list pattern.  `/` → `[]`;
- *  `/orders/:id` → `[ "orders"; id ]` (the first `:param` binds the local `id`,
- *  further params match as `_` — single-param detail routes are the v1 shape). */
+ *  `/orders/:id` → `[ "orders"; id ]`; `/greet/:who` → `[ "greet"; who ]`.
+ *
+ *  Each `:param` binds under ITS OWN name.  This used to rename the first param
+ *  to `id` and match every other as `_`, so a page with a named param
+ *  (`/greet/:who`) bound a local nothing in the body referred to, while `who`
+ *  itself resolved to nowhere — the walker rendered `/* unresolved: who *​/
+ *  undefined` into F# source that cannot compile (audit finding A14). */
 function routePattern(route: string | undefined): string {
   const segs = (route ?? "/").split("/").filter((s) => s.length > 0);
   if (segs.length === 0) return "[]";
-  let bound = false;
-  const pats = segs.map((s) => {
+  const binds = routeParamSegments(route);
+  const pats = segs.map((s, i) => {
     if (!s.startsWith(":")) return `"${s}"`;
-    if (bound) return "_";
-    bound = true;
-    return "id";
+    return binds[i] ?? "_";
   });
   return `[ ${pats.join("; ")} ]`;
+}
+
+/** The union-case payload for a page's route params: `""` (no params),
+ *  ` of string`, ` of string * string`, … */
+function caseFields(n: number): string {
+  return n === 0 ? "" : ` of ${Array.from({ length: n }, () => "string").join(" * ")}`;
+}
+
+/** A `Page` case's binder/constructor argument list for `n` route params —
+ *  `""` (nullary), `" id"` (single field), `" (who, mood)"` (a tuple). */
+function caseArgs(names: readonly string[]): string {
+  if (names.length === 0) return "";
+  if (names.length === 1) return ` ${names[0]}`;
+  return ` (${names.join(", ")})`;
 }
 
 /** The `Page` union + `parseUrl` — URL segments → the active `Page`.  A detail
@@ -565,15 +623,14 @@ function renderRouting(
   withRouteId = false,
 ): string {
   const caseDecl = (p: PageIR): string =>
-    hasRouteParam(p) ? `  | ${pageCase(p, nameCtx)} of string` : `  | ${pageCase(p, nameCtx)}`;
-  const ctor = (p: PageIR): string =>
-    hasRouteParam(p) ? `${pageCase(p, nameCtx)} id` : pageCase(p, nameCtx);
+    `  | ${pageCase(p, nameCtx)}${caseFields(routeParamNames(p).length)}`;
+  const ctor = (p: PageIR): string => `${pageCase(p, nameCtx)}${caseArgs(routeParamNames(p))}`;
   const union = `type Page =\n${pages.map(caseDecl).join("\n")}`;
   const arms = pages.map((p) => `  | ${routePattern(p.route)} -> ${ctor(p)}`);
   const fallback = pages.find((p) => !hasRouteParam(p)) ?? pages[0]!;
-  const fallbackCtor = hasRouteParam(fallback)
-    ? `${pageCase(fallback, nameCtx)} ""`
-    : pageCase(fallback, nameCtx);
+  const fallbackCtor = `${pageCase(fallback, nameCtx)}${caseArgs(
+    routeParamNames(fallback).map(() => `""`),
+  )}`;
   const parse =
     `let parseUrl (segments: string list) : Page =\n  match segments with\n` +
     `${arms.join("\n")}\n  | _ -> ${fallbackCtor}`;
@@ -581,7 +638,14 @@ function renderRouting(
   // One arm per param-carrying case; the wildcard covers the paramless ones and
   // is OMITTED when every case binds an id (F# would flag it as a rule that can
   // never match).
-  const idArms = pages.filter(hasRouteParam).map((p) => `  | ${pageCase(p, nameCtx)} id -> id`);
+  // `routeId` is the FIRST route param of the active page — the "record this
+  // page is about" the MVU paths read outside a view fn.  A multi-param page
+  // wildcards the rest.
+  const idArms = pages.filter(hasRouteParam).map((p) => {
+    const names = routeParamNames(p);
+    const binder = caseArgs(names.map((n, i) => (i === 0 ? n : "_")));
+    return `  | ${pageCase(p, nameCtx)}${binder} -> ${names[0]}`;
+  });
   const wildcard = pages.every(hasRouteParam) ? [] : ['  | _ -> ""'];
   const accessor =
     `let ${ROUTE_ID_FN} (page: Page) : string =\n  match page with\n` +
@@ -649,11 +713,11 @@ function renderRootView(
   brand = "",
   i18nEnabled = false,
 ): string {
-  const arms = pages.map((p) =>
-    hasRouteParam(p)
-      ? `        | ${pageCase(p, nameCtx)} id -> ${pageViewFn(p, nameCtx)} model dispatch id`
-      : `        | ${pageCase(p, nameCtx)} -> ${pageViewFn(p, nameCtx)} model dispatch`,
-  );
+  const arms = pages.map((p) => {
+    const names = routeParamNames(p);
+    const args = names.length > 0 ? ` ${names.join(" ")}` : "";
+    return `        | ${pageCase(p, nameCtx)}${caseArgs(names)} -> ${pageViewFn(p, nameCtx)} model dispatch${args}`;
+  });
   const navbar = renderNavbar(pages, brand, i18nEnabled);
   const router = [
     "    React.router [",
@@ -1362,7 +1426,7 @@ function renderAppFs(
             aggregatesByName,
             workflowsByName,
             pageViewFn(p, nameCtx),
-            hasRouteParam(p),
+            routeParamNames(p),
             bcByAggregate,
             bcByWorkflow,
             userComponents,
@@ -1384,7 +1448,7 @@ function renderAppFs(
           aggregatesByName,
           workflowsByName,
           rootFn,
-          false, // single-page (non-routed) branch: no `:id` route param
+          [], // single-page (non-routed) branch: no route params
           bcByAggregate,
           bcByWorkflow,
           userComponents,

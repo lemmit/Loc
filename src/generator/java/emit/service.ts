@@ -348,6 +348,11 @@ export function renderJavaService(
   // can_<op> companion returns.
   const gatedOps = agg.operations.filter((op) => op.visibility === "public" && !!op.when);
   if (gatedOps.length > 0) imports.add(`${ctx.basePkg}.domain.common.DisallowedException`);
+  // …and the predicate's OWN imports, exactly as the hoisted `requires` gate
+  // below collects its own (audit A17): the state gate renders here and in the
+  // `can_<op>` companion, so `Objects.equals` / `Pattern.compile` / `Instant`
+  // must be imported by THIS file — nothing else scans `op.when`.
+  for (const op of gatedOps) collectJavaExprImports(op.when!, imports);
   // The 403 the hoisted `requires` gate throws now lives HERE rather than in
   // the entity (op-gates.ts), so the service pulls the exception in.
   if (agg.operations.some((op) => operationGates(op).length > 0)) {

@@ -59,7 +59,11 @@ import {
 } from "../../util/find-predicate-capability.js";
 import { readableProjectionNames } from "../../util/projection-read.js";
 import { opHasProvSite } from "../../util/prov-id.js";
-import { columnlessProjectionSource } from "../../util/query-projection-arm.js";
+import {
+  columnlessProjectionSource,
+  documentAggregationSource,
+  unappliedCapabilityFilters,
+} from "../../util/query-projection-arm.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
@@ -245,6 +249,138 @@ export function validateColumnlessProjectionSources(sys: SystemIR, diags: LoomDi
           }),
           source: `${ctx.name}/${p.name}`,
         });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CAPABILITY-FILTERED direct-table aggregation over a `shape: document` source
+// — universal, and the one gate here that closes a SILENT DATA LEAK rather
+// than a miscompile.
+//
+// `columnlessProjectionSource` above deliberately lets `select n = count()`
+// through over a document source: a document table really is `(id, data,
+// version)`, so a row count names a real column and four of the five backends
+// emit it correctly.  What that gate cannot see is the OTHER half of the SQL —
+// the capability filters (tenancy scope, `softDeletable`, any `filter`
+// capability) that the aggregation emitters splice in themselves, because the
+// read bypasses the repository that would otherwise apply them.  Those
+// predicates name `tenant_id` / `is_deleted`, and a document table has neither:
+//
+//   node/drizzle    `eq(schema.orders.tenantId, …)`        TS2339
+//   node/mikroorm   `qb.where({ tenantId: … })`            not a property of OrderRow
+//   python          `OrderRow.tenant_id == …`              AttributeError / mypy
+//   elixir          `record.tenant_id`                     `mix compile` error
+//   dotnet/dapper   `WHERE tenant_id = @__cu_org`          Postgres 42703 at runtime
+//   dotnet/EF       — NOTHING —                            counts every tenant's rows
+//
+// The last row is why this is refused universally instead of being left to the
+// per-backend compile.  EF applies capability filters through
+// `modelBuilder.Entity<T>().HasQueryFilter(…)`, which Loom registers only for a
+// RELATIONALLY-mapped aggregate; a document aggregate's filters live in-app, in
+// the repository's `_CapabilityVisible`.  So the EF aggregation compiles clean,
+// ships, and silently counts other tenants' (and soft-deleted) rows — the exact
+// failure a compile gate can never catch.
+//
+// `ignoring` is honoured: a projection that explicitly waives the filters needs
+// none applied, so it is not gated (`unappliedCapabilityFilters`).  That is the
+// documented way out for an author who genuinely wants the unscoped total.
+// ---------------------------------------------------------------------------
+export function validateDocumentAggregationFilters(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const sd of sys.subdomains) {
+    for (const ctx of sd.contexts) {
+      for (const p of ctx.projections ?? []) {
+        if (!isQueryTimeProjection(p)) continue;
+        const agg = documentAggregationSource(p, ctx, sys);
+        if (!agg) continue;
+        const caps = unappliedCapabilityFilters(p, agg);
+        if (caps.length === 0) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.projection-document-source-capability-filtered",
+          message: diagMessage("loom.projection-document-source-capability-filtered", {
+            name: p.name,
+            ctxName: ctx.name,
+            source: agg.name,
+            caps: caps.join(", "),
+          }),
+          source: `${ctx.name}/${p.name}`,
+        });
+      }
+    }
+  }
+}
+
+// Direct-table aggregation over a `shape: document` source — the BARE case, the
+// one `validateDocumentAggregationFilters` above leaves alone.  Four backends
+// aggregate a document table correctly (`count(*)` over `(id, data, version)`
+// is a real query): node/drizzle and node/mikroorm select over the row table,
+// python over the `OrderRow` model, elixir over the document Ecto schema, and
+// both .NET adapters over `DbSet<OrderDocument>` / the raw table.
+//
+// Java cannot.  Its aggregation runs JPQL through the `EntityManager`
+// (`select count(e) from Order e`), and a document aggregate has NO JPA
+// `@Entity` at all — it round-trips one jsonb column through a `JdbcTemplate`
+// repository — so Hibernate fails the query with "could not resolve root
+// entity" at request time.  Broken with NO capabilities in play, which is what
+// makes this a SECOND, per-backend gate rather than part of the universal one
+// above.
+//
+// It reuses the two codes that already mean exactly "deployable D (platform P)
+// cannot generate this aggregation arm" —
+// `loom.projection-whole-table-aggregation-unsupported` for the singleton arm
+// and `loom.projection-groupby-unsupported-backend` for the grouped one — via
+// their `#document` message variants.  Minting a third code would have said the
+// same thing in a third way, and both of these are already carried as `gap`
+// rows in the `*-unsupported` register: this membership set is a REFINEMENT of
+// theirs (which source shapes the ported emitter can reach), not a new kind of
+// claim.  The set is the seam java's emitter drops out of the moment it learns
+// to read a document table (a native `select count(*) from <schema>.<table>`).
+const PROJECTION_DOCUMENT_AGG_SUPPORTED = new Set(["node", "python", "elixir", "dotnet"]);
+
+export function validateDocumentAggregationBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
+  for (const d of sys.deployables) {
+    if (!platformOwnsBackend(d.platform)) continue;
+    if (PROJECTION_DOCUMENT_AGG_SUPPORTED.has(platformFamily(d.platform) ?? "")) continue;
+    for (const cn of d.contextNames) {
+      const c = ctxByName.get(cn);
+      if (!c) continue;
+      for (const p of c.projections ?? []) {
+        if (!isQueryTimeProjection(p)) continue;
+        const agg = documentAggregationSource(p, c, sys);
+        if (!agg) continue;
+        const params = {
+          name: p.name,
+          source: agg.name,
+          dName: d.name,
+          platform: d.platform,
+        };
+        // Two separate pushes, each with a LITERAL `code:`, rather than one
+        // push with a ternary — `test/ir/diagnostic-codes-completeness.test.ts`
+        // reads the code straight out of the source text, and a computed code is
+        // exactly the "which code does this arm raise?" question it exists to
+        // keep answerable by grep.
+        const where = `${c.name}/${p.name}`;
+        if (isGroupedProjection(p)) {
+          diags.push({
+            severity: "error",
+            code: "loom.projection-groupby-unsupported-backend",
+            message: diagMessage("loom.projection-groupby-unsupported-backend#document", params),
+            source: where,
+          });
+        } else {
+          diags.push({
+            severity: "error",
+            code: "loom.projection-whole-table-aggregation-unsupported",
+            message: diagMessage(
+              "loom.projection-whole-table-aggregation-unsupported#document",
+              params,
+            ),
+            source: where,
+          });
+        }
       }
     }
   }
@@ -3831,6 +3967,56 @@ export function validateAuditedOperationSupport(
         lifecycleUnsupported,
         capableLabel,
       );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// `audited` / `provenanced` × a RETURNING operation (audit 2026-08-24, A6).
+//
+// The Hono route builder dispatches to `emitReturningOperationRoute` only when
+// `op.returnType && !audit && !prov && !op.extern`; otherwise the operation
+// falls into the void-204 handler.  For
+// `operation take(n: int) audited : Item or NotFound` that means the route
+// DECLARES 204 only, throws the tagged result away, and audits `status: "ok"`
+// even when the operation returned its error variant — one keyword silently
+// rewriting the HTTP contract, with no diagnostic anywhere.  An in-code comment
+// called it "a later slice"; nothing gated it.
+//
+// Python emits both halves correctly (the audit record AND the tagged result +
+// its 7807 translation), so this is a per-backend gap, not a language one —
+// hence a hosting check rather than a structural one.  The refusal is the
+// honest version of the existing behaviour until the node returning route
+// folds the audit transaction in.
+const AUDITED_RETURNING_UNSUPPORTED = new Set(["node"]);
+export function validateAuditedReturningOperationSupport(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
+): void {
+  const offending = [...backendPlatforms].filter((p) => AUDITED_RETURNING_UNSUPPORTED.has(p));
+  if (offending.length === 0) return;
+  for (const agg of ctx.aggregates) {
+    for (const op of agg.operations) {
+      // Only a PUBLIC op drives a route at all, and only a route can lose a
+      // return contract — mirrors `auditOps`/`provOps` in the route builder.
+      if (!op.returnType || op.visibility !== "public") continue;
+      // `extern` returning ops are a separate (declared) seam — the body lives
+      // outside the toolchain, so the void fall-through is not this bug.
+      if (op.extern) continue;
+      const modifier = op.audited ? "audited" : opHasProvSite(op) ? "provenanced" : undefined;
+      if (!modifier) continue;
+      diags.push({
+        severity: "error",
+        code: "loom.audited-returning-operation-unsupported",
+        message: diagMessage("loom.audited-returning-operation-unsupported", {
+          name: agg.name,
+          op: op.name,
+          modifier,
+          platforms: offending.join(", "),
+        }),
+        source: `${ctx.name}/${agg.name}`,
+      });
     }
   }
 }

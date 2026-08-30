@@ -48,8 +48,11 @@ describe("feliz modal", () => {
     );
     // The summary IS the trigger the op page-object clicks, so it carries the
     // `<plural>-op-<op>` testid (from the scaffold's trigger Button).
-    expect(app).toContain(
-      'Html.summary [ prop.custom("data-testid", "products-op-rename"); prop.className "collapse-title font-medium"; prop.text "Rename" ]',
+    // The label is TRANSLATED — it is the `button` user-visible slot, so the
+    // extractor keys it (`page.<P>.button.<hash>`) and this renderer used to
+    // splice it raw: a live catalog entry nothing rendered (A13).
+    expect(app).toMatch(
+      /Html\.summary \[ prop\.custom\("data-testid", "products-op-rename"\); prop\.className "collapse-title font-medium"; prop\.text \(\(I18n\.t "page\.\w+\.button\.\w+" "Rename"\)\) \]/,
     );
     // The wrapped operation form renders inline inside the disclosure (its inputs
     // + the id-carrying submit — the same `renderOperationForm` markup).

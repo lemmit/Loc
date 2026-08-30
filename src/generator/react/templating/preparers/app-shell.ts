@@ -13,6 +13,7 @@
 import { emitsRestCreate } from "../../../../ir/enrich/wire-projection.js";
 import type { AggregateIR, WorkflowIR } from "../../../../ir/types/loom-ir.js";
 import { humanize, plural, snake } from "../../../../util/naming.js";
+import { JSX_NAV_LABELS, withNavLabelTokens } from "../../../_frontend/nav-labels.js";
 import {
   jsxChromeAttr as shellChromeAttr,
   jsxChromeText as shellChromeText,
@@ -318,7 +319,17 @@ export function prepareAppShellVM(
   }
   for (const imp of layoutImports ?? []) imports.push(imp);
 
+  // Nav labels carry their catalog key from the menu emitter; `withNavLabelTokens`
+  // turns each into the JSX-spelled token the app-shell splices (`{t(key, def)}`
+  // in text position, `label={t(key, def)}` as an attribute).  With i18n off —
+  // and for the DEFAULT aggregate/workflow sidebar, whose labels the emitter
+  // derives and no translator ever sees — the token is the Handlebars-escaped
+  // raw string, i.e. byte-identical to the `{{label}}` it replaces (A13b).
   const finalNavSections = sidebarOverride ?? navSections;
+  const navSectionsVM = withNavLabelTokens(
+    finalNavSections,
+    i18nEnabled ? JSX_NAV_LABELS : undefined,
+  );
   // The App-shell binds the session user only when at least one nav entry is
   // actually gated — binding it under bare `authUi` (with no gated link) would
   // leave `currentUser` + the `useSession` import unused, which the generated
@@ -333,7 +344,7 @@ export function prepareAppShellVM(
     namedLayouts: namedLayoutsVM,
     hasNamedLayouts: namedLayoutsVM.length > 0,
     anyLayoutUsesNavigate: namedLayoutsVM.some((nl) => nl.usesNavigate),
-    navSections: finalNavSections,
+    navSections: navSectionsVM,
     authUi,
     navUsesSession,
     // Pack-chrome: raw source string when i18n is off (byte-identical), else a

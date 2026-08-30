@@ -10,7 +10,7 @@ import {
 } from "../../ir/util/tenant-stance.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import type { DurationUnit } from "../../util/temporal.js";
-import { spelSubtreeLikePattern } from "../_expr/subtree-like.js";
+import { javaSubtreeLikePattern, spelSubtreeLikePattern } from "../_expr/subtree-like.js";
 
 // ---------------------------------------------------------------------------
 // Find-filter → JPQL renderer.  Spring Data derived method names can't
@@ -50,11 +50,38 @@ export interface JpqlCtx {
   principalAccessors?: Set<string>;
 }
 
-/** JPQL parameter name for a principal claim accessor under
- *  `JpqlCtx.principalAccessors`.  Prefixed so it cannot collide with a
- *  find's own `:param` bindings. */
-export function principalParamName(accessor: string): string {
-  return `__cu${accessor.charAt(0).toUpperCase()}${accessor.slice(1)}`;
+/** Marker prefix for a recorded binding that is not a bare claim read but the
+ *  DERIVED subtree-LIKE pattern built from one (`<anchor escaped>.%`).  The
+ *  SpEL form builds that pattern inside the `:#{…}` expression; a
+ *  `principalAccessors` caller has no SpEL layer, so the pattern has to be
+ *  computed in Java at the bind site instead — see {@link principalBindExpr}. */
+const SUBTREE_LIKE_BIND = "subtreeLike:";
+
+/** JPQL parameter name for a recorded `JpqlCtx.principalAccessors` binding —
+ *  a bare claim accessor, or a `subtreeLike:<accessor>` derived pattern.
+ *  Prefixed so it cannot collide with a find's own `:param` bindings. */
+export function principalParamName(entry: string): string {
+  const derived = entry.startsWith(SUBTREE_LIKE_BIND);
+  const accessor = derived ? entry.slice(SUBTREE_LIKE_BIND.length) : entry;
+  const cap = `${accessor.charAt(0).toUpperCase()}${accessor.slice(1)}`;
+  return derived ? `__cuSubtree${cap}` : `__cu${cap}`;
+}
+
+/** The Java expression a `principalAccessors` caller binds one recorded entry
+ *  with, given the name of its nullable principal local.  Keeping it here —
+ *  beside the renderer that recorded the entry — is what stops the two halves
+ *  from drifting: a new derived binding kind adds an arm here rather than
+ *  needing every call site to learn about it. */
+export function principalBindExpr(entry: string, principalVar: string): string {
+  if (entry.startsWith(SUBTREE_LIKE_BIND)) {
+    const accessor = entry.slice(SUBTREE_LIKE_BIND.length);
+    const read = `${principalVar}.${accessor}()`;
+    // Null anchor ⇒ null pattern ⇒ `like null` is UNKNOWN, i.e. fail-closed —
+    // exactly what the safe-navigated SpEL chain yields for an absent
+    // principal, and what the anchored `locate(...)` recheck beside it does.
+    return `${principalVar} == null || ${read} == null ? null : ${javaSubtreeLikePattern(read)}`;
+  }
+  return `${principalVar} == null ? null : ${principalVar}.${entry}()`;
 }
 
 /** Render a `currentUser.<accessor>` reference for `ctx`: a bound named
@@ -66,6 +93,26 @@ function renderPrincipal(accessor: string, ctx: JpqlCtx): string {
     return `:${principalParamName(accessor)}`;
   }
   return `:#{@${CURRENT_USER_BEAN}.user()?.${accessor}()}`;
+}
+
+/** The deep/global-scope sargable prefilter's LIKE pattern.  Two spellings,
+ *  because the two modes have different parameter layers under them:
+ *
+ *   - `@Query` (Spring Data) — SpEL builds the escape chain inside the
+ *     `:#{…}` parameter expression.
+ *   - `EntityManager.createQuery` (`principalAccessors`) — there IS no SpEL
+ *     layer, and `:#{…}` is not a legal HQL parameter name: Hibernate throws
+ *     at parse and every read over the scoped aggregate 500s.  So the pattern
+ *     is recorded as a derived binding and computed in Java at the
+ *     `setParameter` site, exactly as the plain claims already are.
+ *     (The .NET twin splits the same way on `ctx.efQuery`.) */
+function renderSubtreeLikePattern(accessor: string, ctx: JpqlCtx): string {
+  if (ctx.principalAccessors) {
+    const entry = `${SUBTREE_LIKE_BIND}${accessor}`;
+    ctx.principalAccessors.add(entry);
+    return `:${principalParamName(entry)}`;
+  }
+  return `:#{${spelSubtreeLikePattern(`@${CURRENT_USER_BEAN}.user()?.${accessor}()`)}}`;
 }
 
 // JPQL-side scalar-intrinsic snippets (src/util/intrinsics.ts) — how a
@@ -183,9 +230,9 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
           // test as a prefilter, with the anchored test kept as the recheck: an
           // escaping slip in the pattern could only WIDEN the prefilter, and
           // the recheck still decides the row, so `acme_corp` can never reach
-          // `acmeXcorp.…`.  The pattern is built in SpEL (safe-navigated, so an
-          // absent principal yields a null pattern → `like null` → no rows).
-          const pattern = `:#{${spelSubtreeLikePattern(`@${CURRENT_USER_BEAN}.user()?.${deepScopeAnchorClaim(e)}()`)}}`;
+          // `acmeXcorp.…`.  The pattern is safe-navigated in both modes, so an
+          // absent principal yields a null pattern → `like null` → no rows.
+          const pattern = renderSubtreeLikePattern(deepScopeAnchorClaim(e), ctx);
           const descendant = `(${col} like ${pattern} escape '${DATA_KEY_LIKE_ESCAPE}' and ${anchored})`;
           return (
             `(${col} is not null and (${col} = ${org} or ${descendant})) ` +

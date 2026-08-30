@@ -1524,6 +1524,14 @@ export function renderDapperRepository(
         `    }`,
       );
     }
+    // A single-row DECLARED find (`find byX(): T?`) — its predicate is not
+    // required to be unique, so two matching rows are legal data.  `QuerySingle
+    // OrDefaultAsync` throws `InvalidOperationException` on the second row → a
+    // 500 where EF / node / java / python all return the first match, so take
+    // the first row explicitly and let the database stop after one.  (GetById
+    // is keyed on the PK and stays `QuerySingleOrDefaultAsync` — there a second
+    // row would be a corrupt table, and the throw is the right answer.)
+    //
     // The absent branch.  A NON-optional single find has no `null` to return —
     // its declared `Task<Agg>` says so — so an empty result set is the domain
     // not-found rung, exactly as it is on the EF adapter (find-emit.ts) and on
@@ -1544,7 +1552,7 @@ export function renderDapperRepository(
       `    public async Task<${ret}> ${name}(${renderParams(f.params, [], usesUser)})`,
       `    {`,
       `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);`,
-      `        var r = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition("${sql}"${paramObj}, cancellationToken: cancellationToken));`,
+      `        var r = await conn.QueryFirstOrDefaultAsync<Row>(new CommandDefinition("${sql} LIMIT 1"${paramObj}, cancellationToken: cancellationToken));`,
       ...(hasContains
         ? [
             absentGuard,
@@ -2106,6 +2114,15 @@ export function renderDapperEventSourcedRepository(
     (e) =>
       `            "${e}" => System.Text.Json.JsonSerializer.Deserialize<${e}>(__r.data, __json)!,`,
   );
+  // A `currentUser`-referencing find takes the trailing `User currentUser`
+  // param the INTERFACE declares (emit/repository.ts) — the relational and
+  // document Dapper repos both thread it, and this one used to drop it: the
+  // class then failed to implement its own interface (CS0535) and the body's
+  // `currentUser` bound to nothing (CS0103).  `User` is a named type, so the
+  // file also needs `using <ns>.Auth`.
+  const anyFindUsesUser = (repo?.finds ?? []).some((raw) =>
+    findUsesCurrentUser(unionFindAsOptionalTwin(raw, agg.name)),
+  );
   const findMethods = (repo?.finds ?? []).flatMap((raw) => {
     const f = unionFindAsOptionalTwin(raw, agg.name);
     const body = findBodies.find((b) => b.name === f.name);
@@ -2116,7 +2133,7 @@ export function renderDapperEventSourcedRepository(
       .replace(".ToListAsync(cancellationToken)", ".ToList()")
       .replace(".FirstOrDefaultAsync(cancellationToken)", ".FirstOrDefault()");
     return [
-      `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParams(f.params)})`,
+      `    public async Task<${renderCsType(f.returnType)}> ${upperFirst(f.name)}(${renderParams(f.params, [], findUsesCurrentUser(f))})`,
       "    {",
       "        var __all = await _LoadAllAsync(cancellationToken);",
       `        return __all${filter}${projection};`,
@@ -2139,6 +2156,7 @@ export function renderDapperEventSourcedRepository(
       `using ${ns}.Domain.ValueObjects;`,
       `using ${ns}.Domain.Common;`,
       `using ${ns}.Domain.Events;`,
+      anyFindUsesUser ? `using ${ns}.Auth;` : null,
       audit.usingLine,
       "",
       `namespace ${ns}.Infrastructure.Repositories;`,

@@ -842,6 +842,17 @@ export interface WalkerTarget {
    *  method every target must implement. */
   ariaAttrPrefix?: string;
 
+  /** OPTIONAL — bind a NAVIGATION attribute (`to` / `href` / `routerLink`)
+   *  through `renderAttrBinding` even when the destination is a static string
+   *  literal.  Angular sets it: its packs have always spelled a static link
+   *  `[routerLink]='"/orders"'` (a property binding over a JS string), and a
+   *  plain `routerLink="/orders"` — while equally valid — would be a gratuitous
+   *  change of emitted bytes.  Every other frontend leaves it undefined and
+   *  spells a static path as a plain quoted attribute (` to="/orders"`), which
+   *  is what they emitted before computed destinations were supported at all.
+   *  Read only by `navAttrFragment`. */
+  navAttrAlwaysBound?: boolean;
+
   /** OPTIONAL — the SPELLING of a plain STRING LITERAL in the target's own
    *  expression language (M-T1.11).  Needed only where a user-visible string
    *  reaches a pack as a VALUE rather than as an HTML-ish attribute fragment —

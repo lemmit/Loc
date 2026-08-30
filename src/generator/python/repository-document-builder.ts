@@ -21,10 +21,12 @@ import { rowClassName } from "./py-columns.js";
 import { dtImportLine, wireHelperImport } from "./py-type-imports.js";
 import { renderPyExpr, renderPyType } from "./render-expr.js";
 import {
+  type AggregateReadShape,
   authUserImport,
   emittableFinds,
   findExecutedLine,
   partWireMethod,
+  queryProjectionViews,
   toWireMethod,
   writeGuardAlias,
 } from "./repository-builder.js";
@@ -125,6 +127,19 @@ export function buildPyDocumentRepositoryFile(
         ]
       : [`        return [${fromDocCall("r")} for r in rows]`]),
     ...emittableFinds(repo).flatMap((f) => ["", findMethod(agg, f, ctx, capX != null)]),
+    // Query-time projections sourced from this aggregate synthesise the same
+    // parameterless `repo.<snake(projName)>()` read the RELATIONAL builder emits
+    // (`queryProjectionViews` → `viewFindMethod`).  The projection route calls it
+    // by name whatever the saving shape, so a document-shaped source without
+    // these emitted `app/http/query_projections_routes.py` against a repository
+    // method that does not exist — an AttributeError on the first request, with
+    // nothing said at generate time.  Rendered through the document `findMethod`
+    // so the read stays hydrate-then-filter-in-app, with the projection's own
+    // `where` as the find filter and its `ignoring` clause as the bypass.
+    ...queryProjectionViews(agg, ctx).flatMap((v) => [
+      "",
+      findMethod(agg, projectionViewFind(agg, v), ctx, capX != null),
+    ]),
     "",
     versioned
       ? `    async def save(self, aggregate: ${agg.name}, expected_version: int | None = None) -> None:`
@@ -256,6 +271,21 @@ export function buildPyDocumentRepositoryFile(
     "",
     serializers,
   );
+}
+
+/** The synthesised query-time-projection read as a `FindIR`, so the document
+ *  `findMethod` below renders it exactly like a declared filtered find.  Keeps
+ *  the projection's PascalCase name (`snake`d at the method head, matching the
+ *  relational `viewFindMethod`) and carries its `where` + `ignoring` clause. */
+function projectionViewFind(agg: EnrichedAggregateIR, view: AggregateReadShape): FindIR {
+  return {
+    name: view.name,
+    params: [],
+    returnType: { kind: "array", element: { kind: "entity", name: agg.name } },
+    ...(view.filter ? { filter: view.filter } : {}),
+    ...(view.bypassAll ? { bypassAll: true } : {}),
+    ...(view.bypassCaps ? { bypassCaps: view.bypassCaps } : {}),
+  };
 }
 
 function findMethod(

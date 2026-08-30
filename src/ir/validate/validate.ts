@@ -47,6 +47,7 @@ import {
   backendPlatformsHostingEachContext,
   validateApiResourceBindings,
   validateAuditedOperationSupport,
+  validateAuditedReturningOperationSupport,
   validateAuth,
   validateAuthUiFramework,
   validateChannelWiring,
@@ -60,6 +61,8 @@ import {
   validateDataSourceCoverage,
   validateDataSourceUnwiredKnobs,
   validateDefaultDeny,
+  validateDocumentAggregationBackend,
+  validateDocumentAggregationFilters,
   validateElixirOpSelfCallPosition,
   validateEventSourcedStorage,
   validateEventSourcedWorkflowStorage,
@@ -193,6 +196,8 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateWholeTableAggregationBackend(sys, diags);
     validateGroupedProjectionBackend(sys, diags);
     validateColumnlessProjectionSources(sys, diags);
+    validateDocumentAggregationFilters(sys, diags);
+    validateDocumentAggregationBackend(sys, diags);
     validateWorkflowSourceProjectionBackend(sys, diags);
     validateProjectionSourceProjectionBackend(sys, diags);
     validateDefaultDeny(sys, diags);
@@ -286,6 +291,11 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateProvenancedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateFieldMask(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateAuditedOperationSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
+    validateAuditedReturningOperationSupport(
+      c,
+      diags,
+      backendPlatformsByContext.get(c.name) ?? new Set(),
+    );
   }
   validateExprIntegrity(loom, diags);
   // Migration-block data steps (M-T2.3): expression renderability / target /

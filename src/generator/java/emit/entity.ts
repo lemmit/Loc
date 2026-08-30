@@ -278,6 +278,11 @@ export function renderJavaEntity(
   }
   for (const op of operations) {
     collectJavaStmtImports(op.statements, javaImports);
+    // The `when` state gate renders a predicate at the DOMAIN method entry
+    // (see `whenGate` below) — an expression like any other, so it pulls
+    // `Objects` / `Pattern` / `Instant` exactly like an invariant does.  It was
+    // the one expression on the entity nothing scanned (audit A17).
+    if (op.when) collectJavaExprImports(op.when, javaImports);
     for (const p of op.params) collectJavaTypeImports(p.type, javaImports);
     if (op.returnType) collectJavaTypeImports(op.returnType, javaImports);
   }
@@ -307,6 +312,11 @@ export function renderJavaEntity(
   for (const d of entity.derived) collectJavaRegexLiterals(d.expr, regexLiterals);
   for (const fn of entity.functions) {
     if ("expr" in fn.body) collectJavaRegexLiterals(fn.body.expr, regexLiterals);
+  }
+  // The `when` gate is a pure predicate evaluated on every call of the
+  // operation — same hot path as an invariant, so it hoists too.
+  for (const op of operations) {
+    if (op.when) collectJavaRegexLiterals(op.when, regexLiterals);
   }
   const regex = buildJavaRegexFields(regexLiterals);
 

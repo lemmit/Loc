@@ -295,6 +295,33 @@ system S {
   deployable d { platform: node contexts: [Orders] dataSources: [st] serves: Api port: 3000 }
 }`,
 
+  // A ROW COUNT over a `shape: document` source — which the column gate above
+  // deliberately allows, since a document table does have an `id` column —
+  // whose aggregate is read-filtered by `tenantOwned` + `softDeletable`.  Those
+  // predicates name `tenant_id` / `is_deleted`, which the `(id, data, version)`
+  // triple has not: four backends emit the missing reference and EF Core emits
+  // no filter at all, counting every tenant's rows.
+  "loom.projection-document-source-capability-filtered": `
+system S {
+  user { id: guid  org: string }
+  tenancy by user.org of Tenant
+  subdomain Sales { context Orders {
+    aggregate Tenant with tenantRegistry, crudish { slug: string }
+    aggregate Order shape: document, with tenantOwned, softDeletable, crudish { code: string }
+    repository Tenants for Tenant { }
+    repository Orders for Order { }
+    projection OrderVolume {
+      rows: int
+      from Order as o
+      select rows = count()
+    }
+  } }
+  api Api from Sales
+  storage pg { type: postgres }
+  resource st { for: Orders, kind: state, use: pg }
+  deployable d { platform: node contexts: [Orders] dataSources: [st] serves: Api port: 3000 auth: required }
+}`,
+
   // A frontend deployable whose ui READS `currentUser` while the ui is not
   // served under auth (`auth: ui` absent) — arrived on `main` mid-PR, same as
   // the three above.
@@ -365,6 +392,17 @@ system S {
       code: string
       operation dispatch() audited { code := "x" }
     }`),
+  // Needs the DEPLOYMENT side: the refusal is per-backend (node emits only the
+  // void-204 handler for an audited RETURNING operation; python emits both),
+  // so a declaration-only system raises nothing.
+  "loom.audited-returning-operation-unsupported": deployed(`      error NotFound { message: string }
+      aggregate Order with crudish {
+        qty: int
+        operation take(n: int) audited : Order or NotFound {
+          qty := qty - n
+          return this
+        }
+      }`),
   // `Tab` / `Column` are `group: "sub"` primitives — the parent consumes them
   // inline, so anywhere else they degrade to a comment on all seven targets.
   "loom.sub-primitive-misplaced": `

@@ -11,7 +11,8 @@ import type { BoundedContextIR, ExprIR, FieldIR, ParamIR, TypeIR } from "../../i
 import { AUDIT_HISTORY_FIND } from "../../util/audit-names.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { PROVENANCE_LINEAGE_FIELD } from "../_payload/provenanced-wire.js";
-import { stringNamed } from "../_walker/shared/args.js";
+import { localizedPositionalTranslation } from "../_walker/i18n-emit.js";
+import { namedArgValue, stringNamed } from "../_walker/shared/args.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr, walk } from "../_walker/walker-core.js";
 import { opActionGate } from "./auth-gate.js";
@@ -698,7 +699,19 @@ export const felizTarget: WalkerTarget = {
     if (!formChild) return null;
     const form = felizTarget.renderOperationForm?.(formChild, ctx, 0);
     if (!form) return null;
+    // The trigger label is the `button` user-visible slot — already extracted
+    // into the catalog as `page.<Page>.button.<hash>`, and read RAW here, so the
+    // key was dead and the summary shipped in English at every locale (A13).
+    // `localizedPositionalTranslation` hands back an `I18n.t <key> <default>`
+    // F# expression under i18n and `undefined` otherwise, which keeps the raw
+    // `prop.text "…"` spelling byte-identical when i18n is off.
+    const triggerCall = namedArgValue(call, "trigger");
+    const labelT =
+      triggerCall?.kind === "call"
+        ? localizedPositionalTranslation(triggerCall, ctx, "button")
+        : undefined;
     const label = modalTriggerLabel(call).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    const summaryText = labelT ? `prop.text (${labelT})` : `prop.text "${label}"`;
     // The op page-object method CLICKS the trigger (`<slug>-op-<op>`) before it
     // waits for the form (`<slug>-op-<op>-form`, on the OperationForm wrapper the
     // seam above emits).  The scaffold puts that trigger testid on the Modal's
@@ -717,7 +730,7 @@ export const felizTarget: WalkerTarget = {
     // the enclosing Group's children list; paren-wrapped against sibling absorption.
     // A native <details> styled as a daisyUI `collapse` disclosure — the summary
     // is the trigger, the operation form the revealed `collapse-content`.
-    return `(Html.details [ prop.className "collapse collapse-arrow border border-base-300 bg-base-200"; prop.children [ Html.summary [ ${summaryTid}prop.className "collapse-title font-medium"; prop.text "${label}" ]; Html.div [ prop.className "collapse-content"; prop.children [ ${form} ] ] ] ])`;
+    return `(Html.details [ prop.className "collapse collapse-arrow border border-base-300 bg-base-200"; prop.children [ Html.summary [ ${summaryTid}prop.className "collapse-title font-medium"; ${summaryText} ]; Html.div [ prop.className "collapse-content"; prop.children [ ${form} ] ] ] ])`;
   },
 
   defaultInitFor: (type) => fsZeroValue(type),

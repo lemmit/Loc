@@ -10,7 +10,6 @@
 // ---------------------------------------------------------------------------
 
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
-import { errorTitle } from "../../../util/error-defaults.js";
 import { renderPhoenixDomainFault, renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 
 export function renderVanillaProblemDetailsModule(
@@ -343,7 +342,7 @@ ${responseFns}${sendValidationProblemFn}${wireErrorsFn}
   Send a 404 ProblemDetails response for a missing record.
   """
   def not_found_response(conn, kind, id) do
-    problem_response(conn, ${notFoundStatus}, ${JSON.stringify(errorTitle("NotFound"))}, "#{kind} #{id} not found")
+    problem_response(conn, ${notFoundStatus}, ${JSON.stringify(problemTitle(notFoundStatus))}, "#{kind} #{id} not found")
   end
 
   @doc """

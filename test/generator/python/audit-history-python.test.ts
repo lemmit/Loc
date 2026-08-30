@@ -126,6 +126,60 @@ describe("entity history — python negative authz", () => {
   });
 });
 
+/** `src.replace(from, to)`, but LOUD when `from` never matched — a fixture
+ *  derived by a silent no-op replace is the same fixture, and the test that
+ *  reads it passes while proving nothing. */
+function edit(src: string, from: string, to: string): string {
+  const out = src.replace(from, to);
+  if (out === src) throw new Error(`fixture edit matched nothing: ${JSON.stringify(from)}`);
+  return out;
+}
+
+/** GATED but UNMASKED — the history find inherits a `requires` gate that reads
+ *  `currentUser`, and nothing on the aggregate is `mask unless`.  The route
+ *  still reads the principal for the gate, so it needs an accessor import even
+ *  though no mask block does. */
+const GATED_UNMASKED = edit(
+  MASKED,
+  "        salary: decimal mask unless currentUser.permissions.contains(permissions.unmask)\n",
+  "        salary: decimal\n",
+);
+
+describe("entity history — the gate is a second reader of the ambient principal", () => {
+  it("imports the gate's accessor for a gated-but-unmasked history find", async () => {
+    const routes = fileEndingWith(await emit(GATED_UNMASKED), "app/http/employee_routes.py");
+    // Nothing is masked here — the mapper has no `_mask_user` block at all…
+    expect(routes).not.toContain("_mask_user = current_user()");
+    // …but the ROUTE still reads the principal for the inherited `requires`
+    // gate, through the FAIL-CLOSED accessor: it dereferences a claim, so an
+    // absent principal must reject rather than `AttributeError` on None (which
+    // is also `mypy --strict` union-attr red).
+    expect(routes).toContain("current_user_ = require_current_user()");
+    // Gating the import on masking alone left this call undefined (ruff F821 →
+    // runtime NameError).  Both readers must keep an import alive.
+    expect(routes).toContain("from app.auth.user import require_current_user");
+  });
+
+  it("imports BOTH accessors when the history find is gated AND masked", async () => {
+    const routes = fileEndingWith(await emit(MASKED), "app/http/employee_routes.py");
+    // Mapper: non-raising (absence drops the masked entry).  Route gate:
+    // raising.  One import line, both names.
+    expect(routes).toContain("from app.auth.user import current_user, require_current_user");
+    expect(routes).toContain("_mask_user = current_user()");
+    expect(routes).toContain("current_user_ = require_current_user()");
+  });
+
+  it("omits the accessor import when neither reader exists", async () => {
+    // Ungated AND unmasked: no `requires` on the list read the history find
+    // inherits, no `mask unless` — importing an accessor would be ruff F401.
+    const ungated = edit(GATED_UNMASKED, ' requires currentUser.role == "hr"', "");
+    const routes = fileEndingWith(await emit(ungated), "app/http/employee_routes.py");
+    expect(routes).toContain('@router.get("/{id}/history"');
+    expect(routes).not.toContain("current_user()");
+    expect(routes).not.toContain("require_current_user");
+  });
+});
+
 describe("entity history — aggregates that serve none", () => {
   it("emits no history route or module when nothing is audited", async () => {
     const files = await emit(MASKED.replace("aggregate Employee audited", "aggregate Employee"));

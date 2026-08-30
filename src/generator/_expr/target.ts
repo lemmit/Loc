@@ -285,9 +285,18 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
           // lets a backend swap the alias (TS → subject) for the real
           // bound identifier (native backends → the binding name).
           const bindingText = a.binding ? t.bindingRefText(a.binding, subject) : undefined;
+          // EXTEND the inherited map, never replace it: `match` nests, and an
+          // inner arm may read an OUTER arm's binding.  A fresh single-entry
+          // map dropped every enclosing binding, so that read fell back to the
+          // bare `.ddd` name — an identifier the target never declares (TS2304
+          // and its per-backend twins).  Native-pattern backends escaped only
+          // by coincidence, because their bound name IS the source name.
           const armCtx: Ctx =
             a.binding && bindingText !== undefined
-              ? { ...ctx, matchBindings: new Map([[a.binding, bindingText]]) }
+              ? {
+                  ...ctx,
+                  matchBindings: new Map([...(ctx.matchBindings ?? []), [a.binding, bindingText]]),
+                }
               : ctx;
           return {
             tag: variantTag(a.varType),
@@ -530,9 +539,18 @@ export function renderExprWithMarks<Ctx extends ExprCtxBase>(
         }
         const arms = e.variantArms.map((a) => {
           const bindingText = a.binding ? t.bindingRefText(a.binding, subject.text) : undefined;
+          // EXTEND the inherited map, never replace it: `match` nests, and an
+          // inner arm may read an OUTER arm's binding.  A fresh single-entry
+          // map dropped every enclosing binding, so that read fell back to the
+          // bare `.ddd` name — an identifier the target never declares (TS2304
+          // and its per-backend twins).  Native-pattern backends escaped only
+          // by coincidence, because their bound name IS the source name.
           const armCtx: Ctx =
             a.binding && bindingText !== undefined
-              ? { ...ctx, matchBindings: new Map([[a.binding, bindingText]]) }
+              ? {
+                  ...ctx,
+                  matchBindings: new Map([...(ctx.matchBindings ?? []), [a.binding, bindingText]]),
+                }
               : ctx;
           const value = renderExprWithMarks(a.value, t, armCtx);
           return {

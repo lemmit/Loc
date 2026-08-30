@@ -242,3 +242,95 @@ describe("feliz multi-page routing", () => {
     expect(errors).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A14 — NAMED route params (not just the magic `id`).
+//
+// `routePattern` bound only the FIRST `:param` of a route and renamed it to
+// `id`, and `renderPageView` threaded an EMPTY `paramNames` set into the walk.
+// So a page with `route: "/greet/:who"`:
+//
+//   • bound a local `id` nothing in the body referred to, and
+//   • rendered every `who` reference as `/* unresolved: who */ undefined` —
+//     a JS comment plus an unbound name, spliced into F# source that cannot
+//     compile.  A second `:param` was matched as `_` and dropped outright.
+//
+// Each `:param` now binds under its own name, the `Page` case carries one field
+// per param, and the view fn takes them as arguments.  The scaffold's `/:id`
+// detail pages are unaffected (their param IS named `id`), which is the
+// byte-identity claim below.
+// ---------------------------------------------------------------------------
+const NAMED_PARAM = `
+system Greeter {
+  api GreetApi from Sub
+  subdomain Sub {
+    context C {
+      aggregate Note with crudish { text: string }
+      repository Notes for Note { }
+    }
+  }
+  storage db { type: postgres }
+  resource cState { for: C, kind: state, use: db }
+  ui WebApp {
+    api Api: GreetApi
+    page Home { route: "/" body: Stack { Heading { "Home", level: 1 } } }
+    page Greet(who: string) {
+      route: "/greet/:who"
+      body: Stack {
+        Heading { "Greeting", level: 1 },
+        Text { who },
+        Anchor { "Again", to: "/greet/" + who }
+      }
+    }
+  }
+  deployable api { platform: node contexts: [C] dataSources: [cState] serves: GreetApi port: 3000 }
+  deployable web { platform: feliz targets: api ui: WebApp { Api: api } port: 3005 }
+}
+`;
+
+/** Two named params on one route — the case that used to lose the second one
+ *  entirely (matched `_`, never bound, never passed to the view). */
+const TWO_PARAMS = NAMED_PARAM.replace(
+  'page Greet(who: string) {\n      route: "/greet/:who"',
+  'page Greet(who: string, mood: string) {\n      route: "/greet/:who/:mood"',
+).replace("Text { who },", "Text { who }, Text { mood },");
+
+describe("feliz named route params", () => {
+  it("binds the param under ITS OWN name — pattern, case, and view fn", async () => {
+    const app = await appFs(NAMED_PARAM);
+    expect(app).toContain("  | Greet of string");
+    expect(app).toContain('  | [ "greet"; who ] -> Greet who');
+    expect(app).toContain("let greetView (model: Model) (dispatch: Msg -> unit) (who: string) =");
+    expect(app).toContain("| Greet who -> greetView model dispatch who");
+  });
+
+  it("resolves body references to the param (no unresolved-name sentinel)", async () => {
+    const app = await appFs(NAMED_PARAM);
+    // The walk now knows `who` is in scope, so it renders as the bare local…
+    expect(app).toContain('prop.href ("/greet/" + who)');
+    // …and NOT as the give-up placeholder, which is not even valid F#.
+    expect(app).not.toContain("unresolved: who");
+    expect(app).not.toContain("undefined");
+  });
+
+  it("binds EVERY param of a multi-param route", async () => {
+    const app = await appFs(TWO_PARAMS);
+    expect(app).toContain("  | Greet of string * string");
+    expect(app).toContain('  | [ "greet"; who; mood ] -> Greet (who, mood)');
+    expect(app).toContain(
+      "let greetView (model: Model) (dispatch: Msg -> unit) (who: string) (mood: string) =",
+    );
+    expect(app).toContain("| Greet (who, mood) -> greetView model dispatch who mood");
+    expect(app).not.toContain("unresolved: mood");
+  });
+
+  it("leaves the scaffold's `/:id` detail route byte-identical", async () => {
+    // The magic route `id` is just a route param that happens to be named `id`,
+    // so the general binding must reproduce exactly what the special case did.
+    const app = await appFs(MULTI.replace('route: "/products"', 'route: "/products/:id"'));
+    expect(app).toContain("  | Products of string");
+    expect(app).toContain('  | [ "products"; id ] -> Products id');
+    expect(app).toContain("let productsView (model: Model) (dispatch: Msg -> unit) (id: string) =");
+    expect(app).toContain("| Products id -> productsView model dispatch id");
+  });
+});

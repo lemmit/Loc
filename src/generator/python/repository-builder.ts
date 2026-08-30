@@ -22,7 +22,7 @@ import {
  *  `viewFindMethod` — a name, an aggregate source, an optional filter and
  *  capability bypass.  The synthesised `repo.<projName>()` read is emitted
  *  from this. */
-interface AggregateReadShape {
+export interface AggregateReadShape {
   name: string;
   source: { kind: "aggregate"; name: string };
   filter?: ExprIR;

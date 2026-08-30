@@ -1,7 +1,6 @@
 import {
   type BoundedContextIR,
   type EnrichedBoundedContextIR,
-  type ExprIR,
   exprUsesCurrentUser,
   type OperationIR,
   type SystemIR,
@@ -26,9 +25,9 @@ import {
   opWorkflowInstances,
 } from "../../ir/util/openapi-ids.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
+import { walkWorkflowStmtExprsDeep } from "../../ir/util/walk.js";
 import { commandWorkflowsOf } from "../../ir/util/workflow-command-route.js";
 import { workflowCorrIdValueType } from "../../ir/util/workflow-instances.js";
-import { walkExpr } from "../../ir/validate/checks/shared.js";
 import { type LinesPart, lines } from "../../util/code-builder.js";
 import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { snake, upperFirst, workflowFnSnake } from "../../util/naming.js";
@@ -368,59 +367,32 @@ function workflowReadPortResolver(
   };
 }
 
-/** Every read-port a workflow's `reading`-tier domain-service calls require —
- *  the repositories those services read, so the workflow constructs them even
- *  when its own body never reads that repository directly.  De-duplicated by
- *  repository name across all service calls in the body. */
+/** Every read-port a workflow's domain-service calls require — the
+ *  repositories those services read, so the workflow constructs them even when
+ *  its own body never reads that repository directly.  De-duplicated by
+ *  repository name across all service calls in the body.
+ *
+ *  On the SHARED, `never`-checked walker (`ir/util/walk.ts`), like
+ *  `collectUsedLetNames` below.  The hand-enumerated `switch` it replaced had
+ *  no `domain-service-call` arm — the statement form a BARE `Audit.record(s, c)`
+ *  lowers to — so a service invoked as a statement (rather than
+ *  `let x = Svc.op(…)`) contributed no port.  The call site still rendered the
+ *  handle argument (`await record(ledgers, s, code)`), so the route referenced
+ *  a repository local it never constructed: ruff F821 → runtime `NameError`.
+ *  Only invisible when the service happens to read a repository the workflow
+ *  also reads itself. */
 function collectServiceReadPorts(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): ReadPort[] {
   const byRepo = new Map<string, ReadPort>();
-  const visit = (e: ExprIR | undefined): void =>
-    walkExpr(e, (n) => {
-      if (n.kind === "call" && n.callKind === "domain-service" && n.serviceRef) {
-        const svc = ctx.domainServices.find((s) => s.name === n.serviceRef!.service);
-        const operation = svc?.operations.find((o) => o.name === n.serviceRef!.op);
-        if (operation) {
-          for (const p of readPortsForOperation(operation)) {
-            if (!byRepo.has(p.repo)) byRepo.set(p.repo, p);
-          }
-        }
+  for (const st of wf.statements)
+    walkWorkflowStmtExprsDeep(st, (n) => {
+      if (n.kind !== "call" || n.callKind !== "domain-service" || !n.serviceRef) return;
+      const svc = ctx.domainServices.find((s) => s.name === n.serviceRef?.service);
+      const operation = svc?.operations.find((o) => o.name === n.serviceRef?.op);
+      if (!operation) return;
+      for (const p of readPortsForOperation(operation)) {
+        if (!byRepo.has(p.repo)) byRepo.set(p.repo, p);
       }
     });
-  const walkStmts = (stmts: WorkflowStmtIR[]): void => {
-    for (const st of stmts) {
-      switch (st.kind) {
-        case "precondition":
-        case "requires":
-        case "expr-let":
-          visit(st.expr);
-          break;
-        case "emit":
-        case "factory-let":
-          for (const f of st.fields) visit(f.value);
-          break;
-        case "repo-let":
-        case "op-call":
-          for (const a of st.args) visit(a);
-          break;
-        case "repo-run":
-          for (const a of st.retrievalArgs) visit(a);
-          break;
-        case "resource-call":
-          visit(st.call);
-          break;
-        case "for-each":
-          visit(st.iterable);
-          walkStmts(st.body);
-          break;
-        case "if-let":
-          for (const a of st.retrievalArgs) visit(a);
-          walkStmts(st.thenBody);
-          if (st.elseBody) walkStmts(st.elseBody);
-          break;
-      }
-    }
-  };
-  walkStmts(wf.statements);
   return [...byRepo.values()];
 }
 
@@ -449,50 +421,24 @@ function mergeReadPortRepos(
  *  unused local (F841), so the emitter drops the binding and keeps the (still
  *  side-effecting) RHS as a bare statement.  Aggregate-binding lets
  *  (`repo-let` / `factory-let` / `repo-run`) save at exit and are never
- *  considered unused. */
+ *  considered unused.
+ *
+ *  Rides the SHARED, `never`-checked walker (`ir/util/walk.ts`) rather than a
+ *  hand-enumerated `switch`: a missed statement kind here is not a cosmetic
+ *  traversal gap, it emits a reference to a name the body never binds.  The
+ *  hand-rolled copy this replaced had no `assign` / `domain-service-call` /
+ *  `repo-delete` arm, so a `let` read only by `total := q.amount`,
+ *  `Transfer.run(s, d, fee)` or `Orders.delete(o)` was scored "unused", its
+ *  binding dropped, and the emitted body referenced an undefined name (ruff
+ *  F821 → runtime `NameError`).  With the shared walker, the next
+ *  `WorkflowStmtIR` kind fails `tsc` in ONE place instead of silently
+ *  regressing this collector. */
 export function collectUsedLetNames(sts: WorkflowStmtIR[]): Set<string> {
   const used = new Set<string>();
-  const addExpr = (e: ExprIR | undefined): void =>
-    walkExpr(e, (n) => {
+  for (const st of sts)
+    walkWorkflowStmtExprsDeep(st, (n) => {
       if (n.kind === "ref" && n.refKind === "let") used.add(n.name);
     });
-  const visit = (list: WorkflowStmtIR[]): void => {
-    for (const st of list) {
-      switch (st.kind) {
-        case "precondition":
-        case "requires":
-        case "expr-let":
-          addExpr(st.expr);
-          break;
-        case "emit":
-        case "factory-let":
-          for (const f of st.fields) addExpr(f.value);
-          break;
-        case "repo-let":
-        case "op-call":
-          for (const a of st.args) addExpr(a);
-          break;
-        case "repo-run":
-          for (const a of st.retrievalArgs) addExpr(a);
-          addExpr(st.page?.offset);
-          addExpr(st.page?.limit);
-          break;
-        case "for-each":
-          addExpr(st.iterable);
-          visit(st.body);
-          break;
-        case "if-let":
-          for (const a of st.retrievalArgs) addExpr(a);
-          visit(st.thenBody);
-          if (st.elseBody) visit(st.elseBody);
-          break;
-        case "resource-call":
-          addExpr(st.call);
-          break;
-      }
-    }
-  };
-  visit(sts);
   return used;
 }
 

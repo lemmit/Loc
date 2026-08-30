@@ -326,6 +326,17 @@ const FLOOR: Record<(typeof PLATFORMS)[number], FileAssertion[]> = {
       file: /fault_handler\.ex$/,
       shape: /e in Plug\.Conn\.WrapperError ->/,
     },
+    // A `WrapperError` also wraps a THROW or an EXIT (`kind: :throw | :exit`),
+    // and the handler used to pass a hardcoded `:error` on.  That kind is
+    // load-bearing twice: `Exception.format(kind, …)` formats a thrown term as
+    // an exception (a garbled operator log line — the ONE place the fault is
+    // recorded in full), and the already-sent path re-raises with
+    // `:erlang.raise(kind, …)`, which would turn an exit into an error.
+    {
+      why: "the wrapped fault's own KIND is forwarded, not collapsed to `:error`",
+      file: /fault_handler\.ex$/,
+      shape: /handle\(e\.conn \|\| conn, e\.kind, e\.reason, e\.stack\)/,
+    },
     {
       why: "the router mounted THROUGH the floor — a handler nothing mounts is not a floor",
       file: /endpoint\.ex$/,

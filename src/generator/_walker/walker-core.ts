@@ -2245,6 +2245,76 @@ export function stringOrRefArgValue(
   return undefined;
 }
 
+/** A resolved navigation destination for `Anchor(to:)` / `Button(to:)`.
+ *
+ *  `expr` is the destination in the TARGET's own expression language (JS for
+ *  the JSX family, F# for Feliz, Dart for Flutter) — a quoted string literal
+ *  for a static path, any rendered expression otherwise.  `literal` carries the
+ *  raw source string when (and only when) the destination is a string literal,
+ *  so a markup call site can spell a STATIC attribute (` to="/orders"`) instead
+ *  of a bound one. */
+export interface NavTarget {
+  readonly expr: string;
+  readonly dynamic: boolean;
+  readonly literal?: string;
+}
+
+/** Read a named arg as a navigation destination.
+ *
+ *  Any expression is accepted — `to: "/greet/" + who`, `to: row.url`, `to: id`
+ *  — and rendered through `emitExpr`, i.e. through the SAME leaf table the rest
+ *  of the body uses.  This is finding A12: the previous helper
+ *  ({@link stringOrRefArgValue}) accepted only a string literal or a bare
+ *  route-param ref and returned `undefined` for everything else, so a computed
+ *  `to:` was SILENTLY DROPPED — the anchor/button rendered with no navigation
+ *  at all, on six of the seven frontends, with no diagnostic.  (HEEx, which
+ *  runs its own engine, always rendered it correctly — that is the intended
+ *  semantics this brings the walker targets up to.)  The param-ref case is
+ *  fixed here too: it used to come back as a JS TEMPLATE LITERAL
+ *  (`` `${id}` ``), which is neither valid in a JSX/HTML attribute position nor
+ *  valid F#/Dart at all.
+ *
+ *  Returns undefined when the arg is absent — the deliberate "no destination"
+ *  case every target renders as a plain, unlinked label. */
+export function navArgValue(
+  call: ExprIR & { kind: "call" },
+  name: string,
+  ctx: WalkContext,
+): NavTarget | undefined {
+  const argNames = call.argNames ?? [];
+  for (let i = 0; i < call.args.length; i++) {
+    if (argNames[i] !== name) continue;
+    const a = call.args[i]!;
+    if (a.kind === "literal" && a.lit === "string") {
+      return { expr: ctx.target.exprLiteral("string", a.value), dynamic: false, literal: a.value };
+    }
+    return { expr: emitExpr(a, ctx), dynamic: true };
+  }
+  return undefined;
+}
+
+/** The markup ATTRIBUTE fragment (leading space included) carrying a nav
+ *  destination — the value packs splice via `{{{navAttr "<name>"}}}`.
+ *
+ *  The attribute NAME is the pack's decision (`to` on a React `RouterLink`,
+ *  `href` on a plain `<a>`, `routerLink` on Angular), the SPELLING is the
+ *  framework's: a static path is a plain quoted attribute, a computed one rides
+ *  `renderAttrBinding` (` to={expr}` on JSX/Svelte, ` :to="expr"` on Vue,
+ *  ` [to]="expr"` on Angular).  Angular binds even the static case
+ *  (`navAttrAlwaysBound`), since `[routerLink]='"/x"'` is what its packs have
+ *  always emitted. */
+export function navAttrFragment(
+  nav: NavTarget | undefined,
+  ctx: WalkContext,
+  name: string,
+): string {
+  if (!nav) return "";
+  if (!nav.dynamic && nav.literal !== undefined && !ctx.target.navAttrAlwaysBound) {
+    return ` ${name}="${escapeHtmlAttr(nav.literal)}"`;
+  }
+  return ctx.target.renderAttrBinding(name, nav.expr);
+}
+
 /** Read the `style:` IR field hoisted from a `style: { … }` named arg
  *  on a walker-primitive call.  Returns a JSX `style={{ ... }}` attribute
  *  fragment (with a leading space) ready to splice into the template's

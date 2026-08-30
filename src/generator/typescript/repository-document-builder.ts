@@ -17,6 +17,7 @@ import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { desugarAuthzFilterInApp } from "../_expr/authz-filter-inapp.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
+import { synthProjectionFinds } from "./projection-finds.js";
 import { renderTsExpr } from "./render-expr.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
 import { repoPortImportLine, repoPortName } from "./repository-port-builder.js";
@@ -75,7 +76,19 @@ export function buildDocumentRepositoryFile(
       ? `${lowerFirst(agg.name)}FromDoc(${rowVar}.data as ${agg.name}Doc, ${rowVar}.version)`
       : `${lowerFirst(agg.name)}FromDoc(${rowVar}.data as ${agg.name}Doc)`;
 
-  const findMethods = (repo?.finds ?? []).map((find) => documentFindMethod(agg, find, ctx));
+  // Declared finds PLUS the query-time projections sourced from this aggregate.
+  // A query-time projection route calls `repo.<projName>()` by name, and it does
+  // that whatever the aggregate's SAVING SHAPE — the relational and MikroORM
+  // builders both synthesise the read, and this one silently did not, so a
+  // `projection … from <document aggregate>` emitted a project whose routes
+  // named a method the repository never declared (TS2339 on `tsc`, an
+  // AttributeError-equivalent at request time).  The synthesised finds are
+  // parameterless array reads whose `filter` is the projection's own `where`, so
+  // `documentFindMethod` renders them exactly like a declared filtered find:
+  // load the table, rehydrate, narrow in-app.
+  const findMethods = [...(repo?.finds ?? []), ...synthProjectionFinds(agg.name, ctx)].map((find) =>
+    documentFindMethod(agg, find, ctx),
+  );
 
   // Capability filter (e.g. soft-delete / tenancy) applied in-app on the by-id
   // reads so a hidden / cross-tenant record reads as not-found, matching the

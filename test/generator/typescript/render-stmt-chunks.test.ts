@@ -13,7 +13,7 @@ import {
   statementExprMarks,
   statementSubRegions,
 } from "../../../src/generator/typescript/render-stmt.js";
-import type { ExprIR, PathIR, StmtIR } from "../../../src/ir/types/loom-ir.js";
+import type { ExprIR, PathIR, StmtIR, TypeIR } from "../../../src/ir/types/loom-ir.js";
 import type { OriginRef } from "../../../src/ir/types/origin.js";
 
 const litInt = (v: string): ExprIR => ({ kind: "literal", lit: "int", value: v });
@@ -89,6 +89,69 @@ describe("ts `-=` element removal — money compares by value (A14)", () => {
     expect(renderTsStatements([removeStmt("int")])).toBe(
       "    { const idx = this._prices.findIndex((e) => e === (this._p)); if (idx >= 0) this._prices.splice(idx, 1); }",
     );
+  });
+});
+
+// A7 — the rest of the boxed element types the money fix left behind.
+//
+// `===` is REFERENCE identity on every boxed element, not just `Decimal`:
+// a `datetime[]` holds hydrated `Date`s and the incoming wire value is a
+// FRESH `Date`, so `dates -= d` matched nothing, removed nothing, and
+// answered 2xx.  .NET's `List<DateTime>.Remove` uses value equality, so the
+// same model behaved differently per backend.  Value objects have the same
+// shape and already carry the `equals()` the emitter generates for exactly
+// this reason.
+describe("ts `-=` element removal — every boxed element type compares by value (A7)", () => {
+  const removeOf = (elementType: TypeIR): StmtIR => ({
+    kind: "remove",
+    target: path("dates"),
+    value: thisProp("d"),
+    elementType,
+    collection: true,
+  });
+  const scan = (s: StmtIR): string =>
+    /findIndex\((.*)\); if/.exec(renderTsStatements([s]))?.[1] ?? "<no scan emitted>";
+
+  it("datetime compares by `getTime()`, never by reference", () => {
+    expect(scan(removeOf({ kind: "primitive", name: "datetime" }))).toBe(
+      "(e) => e.getTime() === (this._d).getTime()",
+    );
+  });
+
+  it("a value-object element uses the class's own `equals()`", () => {
+    expect(scan(removeOf({ kind: "valueobject", name: "Money" }))).toBe("(e) => e.equals(this._d)");
+  });
+
+  it("`json` compares structurally, matching the VO emitter's json arm", () => {
+    expect(scan(removeOf({ kind: "primitive", name: "json" }))).toBe(
+      "(e) => JSON.stringify(e) === JSON.stringify(this._d)",
+    );
+  });
+
+  it("branded ids, enums and scalars keep `===` (byte-identical)", () => {
+    for (const t of [
+      { kind: "id", targetName: "Order", valueType: "guid" },
+      { kind: "enum", name: "Status" },
+      { kind: "primitive", name: "string" },
+      // An entity PART emits no `equals()`, and its removal is genuinely
+      // identity-scoped — the instance held IS the one being removed.
+      { kind: "entity", name: "Line" },
+    ] as TypeIR[]) {
+      expect(scan(removeOf(t)), `${t.kind} should keep reference identity`).toBe(
+        "(e) => e === (this._d)",
+      );
+    }
+  });
+
+  it("a SCALAR compound `-=` (not a collection) is untouched", () => {
+    const scalar: StmtIR = {
+      kind: "remove",
+      target: path("dates"),
+      value: thisProp("d"),
+      elementType: { kind: "primitive", name: "datetime" },
+      collection: false,
+    };
+    expect(scan(scalar)).toBe("(e) => e === (this._d)");
   });
 });
 

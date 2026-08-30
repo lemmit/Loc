@@ -24,6 +24,7 @@ import {
   localizedNamedValue,
   localizedPageChromeText,
   localizedPageChromeValue,
+  localizedText,
 } from "../i18n-emit.js";
 import { renderFormField } from "../render-form-field.js";
 import {
@@ -39,14 +40,12 @@ import {
   namedArgValue,
   positionalArgs,
   stringNamed,
-  unwrapTextLiteral,
 } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import {
   emitExpr,
   emitStmt,
   extendLambdaParams,
-  firstPositionalContent,
   propagateChildFlags,
   testidAttr,
   walk,
@@ -910,10 +909,15 @@ export function emitModal(
       `Modal: child must be OperationForm(<instance>.<op>) or OperationForm(of:, op:)`,
     );
   }
-  const label = unwrapTextLiteral(
-    firstPositionalContent(triggerArg, ctx) ?? '"Action"',
-    ctx.target.escapeText,
-  );
+  // The trigger's label is a `Button` first-positional — the `button`
+  // user-visible slot, which the extraction pass ALREADY writes to the catalog
+  // as `page.<Page>.button.<hash>`.  Reading it raw here meant the key existed
+  // and nothing ever rendered it: a translator translated a string the app
+  // showed in English at every locale (audit finding A13).  Routed through the
+  // same helper the plain `Button` path uses, so the emitted key equals the
+  // extracted one by construction.  With i18n off, `localizedText` is the raw
+  // literal — byte-identical to the `firstPositionalContent` it replaces.
+  const label = localizedText(triggerArg, ctx, "button", '"Action"');
   // Platform-neutral emphasis token from the scaffold-expander
   // (`primary` for the aggregate's first public op, `secondary`
   // for the rest).  Each pack's template maps it to its own button

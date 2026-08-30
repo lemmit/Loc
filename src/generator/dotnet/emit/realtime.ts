@@ -377,16 +377,38 @@ public sealed class RealtimeDomainEventDispatcher : IDomainEventDispatcher
         return _inner.DispatchAsync(ev, cancellationToken);
     }
 
-    /// <summary>Pass-through for the write-tx outbox capture (design §1): the
-    /// repository calls it inside its save transaction and the wrapped
-    /// dispatcher stages the row there.  Without this forward the interface
-    /// default would swallow it and silently demote the durable path back to a
-    /// second, post-commit transaction.</summary>
-    public Task<IReadOnlyList<IDomainEvent>> RecordDurableAsync(
+    /// <summary>The write-tx outbox capture (design §1): the repository calls
+    /// it inside its save transaction and the wrapped dispatcher stages the row
+    /// there.  Without this forward the interface default would swallow it and
+    /// silently demote the durable path back to a second, post-commit
+    /// transaction.
+    ///
+    /// It ALSO tees the CAPTURED events to the SSE hub, because this is the
+    /// only place a durable event passes through the decorator: a durable
+    /// (retention log / work) event is swallowed here by the outbox and the
+    /// relay drains it through the RAW inner dispatcher, so it never reaches
+    /// <see cref="DispatchAsync"/> and would otherwise produce no SSE frame at
+    /// all.  Only the captured ones are teed — the deferred (ephemeral) events
+    /// come straight back to the repository, which dispatches them through
+    /// <see cref="DispatchAsync"/>, and teeing them here too would emit the
+    /// frame twice.</summary>
+    public async Task<IReadOnlyList<IDomainEvent>> RecordDurableAsync(
         IReadOnlyList<IDomainEvent> events,
         System.Data.Common.DbTransaction? transaction = null,
         CancellationToken cancellationToken = default)
-        => _inner.RecordDurableAsync(events, transaction, cancellationToken);
+    {
+        var deferred = await _inner.RecordDurableAsync(events, transaction, cancellationToken);
+        foreach (var ev in events)
+        {
+            var captured = true;
+            foreach (var pending in deferred)
+            {
+                if (ReferenceEquals(pending, ev)) { captured = false; break; }
+            }
+            if (captured) _hub.Publish(ev);
+        }
+        return deferred;
+    }
 }
 `;
 }

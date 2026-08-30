@@ -362,7 +362,7 @@ end
  *  unfiltered find → `true`, a `deny` carve-out → `false`, an id-only scope)
  *  must NOT bind `record = row.data`: an unused binding trips
  *  `mix compile --warnings-as-errors`. */
-function docPredReadsRecord(pred: string): boolean {
+export function docPredReadsRecord(pred: string): boolean {
   return /\brecord\b/.test(pred);
 }
 
@@ -373,7 +373,7 @@ function docBindRecord(pred: string, indent: string): string {
 
 /** The lambda parameter for an in-app `Enum.filter` — underscored when the
  *  predicate reads neither the embed nor the row. */
-function docFilterLambdaArg(pred: string): string {
+export function docFilterLambdaArg(pred: string): string {
   return docPredReadsRecord(pred) || /\brow\b/.test(pred) ? "row" : "_row";
 }
 
@@ -482,9 +482,16 @@ export function renderDocRepository(
   // AND-ed into that same in-memory predicate, so the ladder narrows the
   // author's own `where` and not only the auto-`findAll`.  `all` is dropped
   // (the `list/0` CRUD seam already covers it).
+  //
+  // The per-find capability predicate is RECOMPUTED inside `renderDocFindFn`
+  // from the find's own `ignoring` clause — passing the aggregate-level `cap`
+  // down (which is what this did) silently dropped `ignoring <Cap>` /
+  // `ignoring *` on every document find, so an admin "show deleted" read still
+  // filtered deleted rows with no diagnostic.  The relational twin
+  // (`repository-emit.ts` → `renderFindFn`) has always recomputed.
   const findFns = finds
     .filter((f) => f.name !== "all")
-    .map((f) => renderDocFindFn(f, aggModule, cap, principal));
+    .map((f) => renderDocFindFn(f, agg, aggModule, contextModule, principal));
   const findBlock = findFns.length > 0 ? `\n\n${findFns.join("\n\n")}` : "";
 
   return `# Auto-generated.
@@ -613,17 +620,26 @@ function isDocSingleReturn(t: TypeIR): boolean {
  *  Single-return finds yield the first match (or `nil`); list finds yield every
  *  match.
  *
- *  `cap` is the aggregate's IN-APP capability predicate (already rendered over
- *  the same `record`/`row` bindings) — AND-ed into the author's own `where` so
- *  the ladder narrows a custom find, not only the auto-`findAll`.  A principal
- *  filter adds the trailing `current_user \\ nil` the context facade's
- *  defdelegate already declares. */
+ *  The IN-APP capability predicate (rendered over the same `record`/`row`
+ *  bindings) is AND-ed into the author's own `where` so the ladder narrows a
+ *  custom find, not only the auto-`findAll`.  It is computed HERE, per find,
+ *  with the find's own `ignoring` bypass — a bypassed capability's predicate is
+ *  omitted from THIS finder only, exactly as the relational `renderFindFn`
+ *  does.  (Taking the aggregate-level predicate as a parameter is what made
+ *  `ignoring <Cap>` / `ignoring *` a silent no-op on document finds.)  A
+ *  principal filter adds the trailing `current_user \\ nil` the context
+ *  facade's defdelegate already declares. */
 function renderDocFindFn(
   f: FindIR,
+  agg: AggregateIR,
   aggModule: string,
-  cap: string | null = null,
+  contextModule: string,
   principal = false,
 ): string {
+  const cap = vanillaDocCapabilityFilter(agg, contextModule, "row", {
+    actor: principal,
+    bypass: { bypassAll: f.bypassAll, bypassCaps: f.bypassCaps },
+  });
   const fnName = snake(f.name);
   const argNames = f.params.map((p) => snake(p.name));
   const paged = pagedReturn(f.returnType) != null;
@@ -872,7 +888,7 @@ export function renderDocNamedOpFunction(
   // `with ensure(...)` chain (403/422 denials) — `record = row.data` + param
   // binds (+ the `audit_before` capture) stay before the `with` (the guards read
   // `record.<field>`), the body + persist tail move inside the `do` block.  The
-  // `{:error, atom()}` spec arm carries the denial atoms.  A guard-free op keeps
+  // The denial spec arm carries the TYPED-DENIAL 2-tuples.  A guard-free op keeps
   // the flat layout (byte-identical when non-audited).
   const bodyContent =
     guardClauses.length > 0
@@ -883,7 +899,7 @@ export function renderDocNamedOpFunction(
           ...wrapOpBodyWithGuards(guardClauses, [...body, ...persistTail]),
         ].join("\n")
       : `${[...auditBeforeBind, `    record = row.data`, ...params, ...body].join("\n")}\n${persistTail.join("\n")}`;
-  const denialSpec = guardClauses.length > 0 ? " | {:error, atom()}" : "";
+  const denialSpec = guardClauses.length > 0 ? " | {:error, {atom(), term()}}" : "";
   // Audited persist wraps in `Repo.transaction`, whose failure is `{:error, term()}`;
   // the plain pipe fails with an `Ecto.Changeset.t()`.
   const errSpec = hasAudit ? "{:error, term()}" : "{:error, Ecto.Changeset.t()}";
@@ -1064,7 +1080,7 @@ export function renderDocReturningOpFunction(
           ...wrapOpBodyWithGuards(guardClauses, [...body, ...tailLines]),
         ].join("\n")
       : [...auditBeforeBind, ...recordBind, ...params, ...body, ...tailLines].join("\n");
-  const denialSpec = guardClauses.length > 0 ? " | {:error, atom()}" : "";
+  const denialSpec = guardClauses.length > 0 ? " | {:error, {atom(), term()}}" : "";
   // A persisting op can additionally fail its persist changeset validation; an
   // audited persist wraps in `Repo.transaction`, whose failure is `{:error, term()}`.
   const changesetSpec = persists

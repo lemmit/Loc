@@ -97,6 +97,82 @@ describe("vanilla — workflow body lowering (precondition / requires / expr-let
   });
 });
 
+// ---------------------------------------------------------------------------
+// M-T6.21's underscore rule vs. the REF COLLECTOR that feeds it.
+//
+// A workflow `let` whose name is never read downstream is `_`-prefixed, or
+// `mix compile --warnings-as-errors` trips on the unused variable.  The read
+// test is `collectWorkflowStmtParamRefsAll`, and it used to be a hand-enumerated
+// `WorkflowStmtIR.kind` switch whose `repo-run` arm walked only `retrievalArgs`
+// — never the `page:` bounds, which the RENDERER does emit.  So a `let` used
+// solely as an offset/limit read as unread, the bind became `_cap`, and the
+// emitted `Repo.run(..., limit: cap)` next to it named a variable that no
+// longer existed: `** (CompileError) undefined variable "cap"`, on every build.
+//
+// The durable fix is the shared, trailing-`never`-guarded walkers in
+// `src/ir/util/walk.ts` — so a new statement kind (or a new child slot on an
+// existing one) is a compile error there rather than a silent hole here.
+const PAGE_BOUND_LET = `
+system PageLet {
+  subdomain Ops {
+    context Fulfillment {
+      enum Priority { Low High }
+      aggregate Order with crudish {
+        reference: string
+        priority: Priority
+        placedAt: datetime
+        operation escalate() {
+          priority := High
+        }
+      }
+      criterion AtPriority(p: Priority) of Order = priority == p
+      retrieval PendingByPriority(p: Priority) of Order {
+        where: AtPriority(p)
+        sort: [placedAt asc]
+      }
+      repository Orders for Order { }
+      workflow escalateBacklog {
+        create(p: Priority) {
+          let cap = 50
+          let batch = Orders.run(PendingByPriority(p), page: { offset: 0, limit: cap })
+          for o in batch {
+            o.escalate()
+          }
+        }
+      }
+    }
+  }
+  api OpsApi from Ops
+  storage primary { type: postgres }
+  resource fState { for: Fulfillment, kind: state, use: primary }
+  deployable d {
+    platform: elixir
+    contexts: [Fulfillment]
+    dataSources: [fState]
+    serves: OpsApi
+    port: 4000
+  }
+}
+`;
+
+describe("vanilla — a `let` read only by a `Repo.run` page bound keeps its name", () => {
+  it("binds `cap`, not `_cap`, and the emitted page bound names it", async () => {
+    const files = await generateSystemFiles(PAGE_BOUND_LET);
+    const wf = files.get(
+      [...files.keys()].find((k) => k.endsWith("/workflows/escalate_backlog.ex"))!,
+    )!;
+    // The bind keeps its real name …
+    expect(wf).toContain("cap <- (50)");
+    expect(wf, "the page-only `let` was discarded as unread").not.toContain("_cap <-");
+    // … and the page bound the renderer emits references it.
+    expect(wf).toContain("limit: cap");
+    // The pair is what matters: an emitted `limit: cap` next to a `_cap` bind
+    // is the CompileError, so assert they agree on ONE spelling.
+    const underscored = /\b_cap\b/.test(wf);
+    expect(underscored, "emitted `_cap` while the page bound reads `cap`").toBe(false);
+  });
+});
+
 describe("vanilla — WorkflowsController maps precondition failure to 422", () => {
   it("emits a `:precondition_failed` → 422 case in the controller", async () => {
     const files = await generateSystemFiles(SOURCE);
