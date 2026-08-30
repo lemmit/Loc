@@ -94,10 +94,11 @@ const ELIXIR_CASES = [
  *  the fuzzer never ran — so it is spelled out here, printed in the run output,
  *  and carries the register entry that has to be struck before it is deleted. */
 const SKIP = {
-  dotnet: {
-    "storefront-system":
-      "F14 — GET /openapi.json answers 500 on this fixture: two contexts each emit a `MoneyRequest`, and Swashbuckle's default schemaId (the type's short name) collides, so the document generator throws. No published contract → nothing to fuzz.",
-  },
+  // Empty since 2026-08-30: the one entry that lived here, dotnet ×
+  // `storefront-system`, was drained with F14's fix (the emitter now qualifies
+  // the colliding OpenAPI schema ids, so the document generates and the leg
+  // fuzzes it like any other case).  The mechanism stays — the next
+  // unfuzzable case is a one-line entry plus its register heading.
 };
 
 // ---------------------------------------------------------------------------
