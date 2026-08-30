@@ -235,6 +235,20 @@ exactly the 20 crashed crossings slice 1 recorded.
 > package.json's script, so a correctly-wired workflow never mentions it: checking the var made
 > the healthy `schema-load.yml` look dark too.
 
+**Slice 1c — the compile oracle reaches all five backends.** `pairwise.yml`'s compile job is
+now a five-cell matrix, not node-only. First run: **python 7 compile failures (F6/F7/F8),
+dotnet 1 (F9), node and java clean, elixir unverified** (three local attempts lost to hex
+contention and a reaped dockerd; recorded as unverified rather than claimed green). **Two of
+the four are partial fixes of findings the register called CLOSED** — F6 *is* F2 (#2528's diff
+touches `src/generator/typescript/` only; python's non-relational builders emit `to_wire_masked`
+zero times) and F9 *is* #2527's follow-up 2 (which fixed the document shape and left the
+event-sourced impl). With #2664's three Hono-only schemathesis closures that is three
+independent instances of one defect: **a fix is marked closed when it lands on the first target
+it was reported against** — the cross-target-closure gap R11's successor should own. The
+structural correlate: the backends that split repository emission per storage shape (python,
+node, dotnet) are exactly the ones that drift; java's single repository emitter is clean.
+F6–F9 are emitter bugs, deliberately left for their own PR.
+
 **Open half:** the driven-primitive census proper — the ~55 walker primitives crossed against the six frontends and the design packs, with the undriven cells registered as a shrink-only ratchet rather than discovered one bug at a time. Plus the named compile-leg follow-up: the dotnet / java / python / elixir compile oracles over the same cover (slice 1 was node-only "to prove the harness earns them" — it has).
 
 Sources: [quality-audit-2026-08](../audits/quality-audit-2026-08.md) R5. Related: M-T9.13 (the route-caller residue), M-T9.22 (generative fuzzing — the unstructured sibling of this structured sweep).

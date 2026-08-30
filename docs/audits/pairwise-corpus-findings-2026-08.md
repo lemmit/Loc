@@ -74,6 +74,10 @@ the gate reported it as stale. The finding was **withdrawn**, not shipped.
 | **F3** | `mask unless` × `persistence: mikroorm` (all four repo variants) | TS2304 cannot find name `User` | **fixed** — in the slice-1 PR |
 | **F4** | a field named `secret` after a modifier-less property | swallowed as that property's access modifier; syntax error on the *next* line | open — registered |
 | **F5** | principal capability filter × `shape: document` × `mikroorm` | TS2304 cannot find name `currentUser` | **fixed** — #2528, waiver deleted 2026-08-24 |
+| **F6** | `mask` × `document`/`embedded`/`eventLog` — **python** | `to_wire_masked` missing on the non-relational repo builders | open — **F2's fix never left TypeScript** |
+| **F7** | `audited` × `document`/`embedded` — **python** | `record_audit` / `history` are relational-only | open |
+| **F8** | `versioned` × `eventLog` — **python** | `save()` takes no `expected_version` (mypy `call-arg`) | open |
+| **F9** | `versioned` × `eventLog` × `deny` — **dotnet/EF** | CS0535: the event-sourced impl has no `GetByIdForWriteAsync` | open — **#2527 f/u 2 fixed the DOCUMENT shape only** |
 
 > **Why F1/F2/F5 sat "open" for weeks after they were fixed.** #2527 and #2528
 > landed the emitter fixes and did *not* delete the waivers — correctly, as far
@@ -338,6 +342,84 @@ Two things are worth reading off this, in opposite directions:
   all four; the emitters said otherwise. That gap is the cost of a gate with no workflow, and
   it is the argument for wiring the leg *before* widening it — a wider matrix behind the same
   dark switch would have produced more stale rows, not more caught bugs.
+
+## The five-backend compile run (2026-08-24) — F6–F9, and the pattern behind them
+
+Slice 1's compile oracle was node-only *by design* ("this slice's job is to prove the harness
+earns them"). It has now earned them: `pairwise.yml` runs the same all-pairs cover through
+each backend's real toolchain. The first run:
+
+| Leg | Cases | Verdict |
+|---|---|---|
+| node | 25 | clean |
+| **python** | 25 | **7 compile failures** → F6, F7, F8 · 0 rejected · 0 crashed |
+| **dotnet** | 25 | **1 compile failure** → F9 · 4 rejected (named `loom.*`) · 0 crashed |
+| java | 25 | clean (22 compiled, 3 rejected) — two independent full runs |
+| elixir | 25 | **no locally-observed verdict** (see below) |
+
+### Two of these are findings this register already called CLOSED
+
+That is the result worth carrying forward, and it is why every row above names its **target**:
+
+- **F6 is F2.** #2528 fixed `toWireMasked` on the non-relational repository builders — and its
+  diff touches `src/generator/typescript/` and nothing else. Node's document / embedded /
+  event-sourced builders each emit the method; python's emit it **zero** times. The register
+  said *fixed*.
+- **F9 is #2527's follow-up 2.** That fix added `GetByIdForWriteAsync` to the **document**
+  repository impl, and `src/generator/dotnet/emit/repository.ts:711` says so in its own comment
+  — "the interface declares `GetByIdForWriteAsync` and the document impl had no
+  implementation". The **event-sourced** impl was left without it. The register said *fixed*.
+
+One partial along the TARGET axis, one along the SHAPE axis. Both were recorded closed, and
+neither was reachable by anything that ran in CI. This is the same shape #2664 hit from the
+contract side (three schemathesis findings closed on Hono alone), which makes it three
+independent instances of one process defect: **a fix is marked closed when it lands on the
+first target it was reported against.**
+
+### The pattern: per-shape repository emitters drift
+
+| Backend | Repository emission | Compile failures |
+|---|---|---|
+| java | ONE emitter, no per-shape split | **0** |
+| node | 3 shape-specific builder FILES | 0 — *but only since #2528* |
+| dotnet | 3 shape-specific impl FUNCTIONS in one file | 1 |
+| python | 3 shape-specific builder FILES | 7 |
+
+The backends that split repository emission per storage shape are exactly the backends that
+drift. Every python failure is the same mechanism: `routes-builder.ts` calls a repository
+method whenever a capability flag is set, with **no check on persistence shape**, and only the
+relational builder implements it. So the finding is not "python forgot three methods" — it is
+that **a per-shape split creates N places to implement every capability and nothing checks all
+N**. Java, which cannot drift this way, passed the identical cover including all four crossings
+python fails.
+
+Java's clean result is also what proves the leg is honest: a leg that quietly dodged the hard
+crossings would look exactly like a green one.
+
+### Elixir — UNVERIFIED, deliberately recorded as such
+
+Three local attempts produced no trustworthy verdict: the first lost 17 of 25 cases to
+byte-identical `mix local.hex` hex.pm timeouts under concurrent load (fixed since — the Hex
+INSTALL now retries, and the census in `mix-retry.test.ts` keeps it that way), the second was
+killed by a reaped `dockerd`, the third was still running when this was written. Four cases
+compiled clean and four were legitimately rejected (`loom.vanilla-document-unsupported`,
+`loom.stamp-on-event-sourced-invalid` ×2, `loom.event-sourced-command-mutation`); the rest have
+no verdict. **A green nobody watched is not a green**, so no elixir row is claimed here.
+
+Both of those failures also exposed a flaw in the harness itself: an infra failure was being
+reported as a compile finding, which both manufactures fake findings and — on a waived case —
+reads as "still broken", silently holding a waiver whose bug may already be fixed. The core now
+classifies infra signatures as HARNESS FAULTS before the ratchet sees them
+(`test/pairwise/compile-leg.ts`, gated both ways by its own test).
+
+### Disposition
+
+F6–F9 are **emitter bugs**, not harness bugs, and are deliberately NOT fixed in the PR that
+found them — they belong in `src/generator/python/` and `src/generator/dotnet/` with their own
+per-backend tests. The waiver registers stay EMPTY: these are open findings to fix, not
+divergences to sign for.
+
+---
 
 ## Follow-up slices
 
