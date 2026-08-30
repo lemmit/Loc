@@ -166,8 +166,8 @@ describe("loom.toast-message-unsupported", () => {
         expect(mine[0]!.severity).toBe("error");
         expect(mine.some((d) => detail.test(d.message))).toBe(true);
         // The handler is named, so the diagnostic points at a source construct.
-        // The `where` prefix lives on `source` (the CLI prints it), not inside
-        // the message body — embedding it there printed it twice (F2-FFE-9).
+        // It lives in `source` (the CLI prints `${code} ${source}: …`); the
+        // message must not repeat it — see F2-FFE-9.
         expect(mine[0]!.source).toContain("`on Live.OrderPlaced` handler");
       });
 
