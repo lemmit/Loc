@@ -5,12 +5,12 @@ import type { OriginRef } from "../../ir/types/origin.js";
 // ---------------------------------------------------------------------------
 // Shared ExprIR dispatch — the `ExprTarget` contract.
 //
-// Every domain-logic backend (TypeScript / .NET / Phoenix LiveView) renders
-// the *same* fully-resolved Loom `ExprIR` to source.  The 17-arm `kind`
-// dispatch and **all** recursion into sub-expressions are identical across
-// backends — only the leaves diverge (operator spelling, name casing, money
-// arithmetic, collection-op shape, `refColl.contains` membership, regex,
-// `ref` role, `callKind` call syntax).
+// All five domain-logic backends (TypeScript / .NET / Phoenix LiveView /
+// Python / Java) render the *same* fully-resolved Loom `ExprIR` to source.
+// The 17-arm `kind` dispatch and **all** recursion into sub-expressions are
+// identical across backends — only the leaves diverge (operator spelling,
+// name casing, money arithmetic, collection-op shape, `refColl.contains`
+// membership, regex, `ref` role, `callKind` call syntax).
 //
 // `renderExprWith` owns the dispatch + recursion once; an `ExprTarget`
 // supplies the per-backend leaves.  Sub-expressions are rendered here and
@@ -20,7 +20,7 @@ import type { OriginRef } from "../../ir/types/origin.js";
 // callKind / refKind tables) also receive the original IR node.
 //
 // Mirrors the body-walker's `WalkerTarget` extraction (src/generator/_walker/
-// target.ts).  Adding a backend = one target table, not a fourth dispatcher;
+// target.ts).  Adding a backend = one target table, not a sixth dispatcher;
 // adding an `ExprIR.kind` = one arm here + one method on the interface (the
 // exhaustive switch makes both fail to type-check until done).
 // ---------------------------------------------------------------------------

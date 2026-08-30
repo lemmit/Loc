@@ -1,3 +1,4 @@
+import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -10,17 +11,28 @@ import {
   aggregateUsesPrincipalContextFilter,
   findUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
+import { sortableFields } from "../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
-import { docTypeAlias, entityFromDocFn, entityToDocFn } from "./repository-document-builder.js";
+import {
+  docTypeAlias,
+  entityFromDocFn,
+  entityToDocFn,
+  PAGED_TAIL_PARAMS,
+  pagedReturnType,
+} from "./repository-document-builder.js";
 import {
   buildFindWhereClause,
   hydrateRootExpr,
   lowerToDrizzle,
 } from "./repository-find-builder.js";
-import { combinePredicate, contextFilterPredicate } from "./repository-find-predicate.js";
+import {
+  combinePredicate,
+  contextFilterPredicate,
+  writeScopeGuardLines,
+} from "./repository-find-predicate.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
 import { repoPortImportLine, repoPortName } from "./repository-port-builder.js";
 import { projectFieldEntries } from "./repository-save-builder.js";
@@ -94,6 +106,14 @@ export function buildEmbeddedRepositoryFile(
   // Drizzle ops the find where-clauses need (default eq/and/inArray; the
   // lowering adds ne/gt/or/… per filter shape).
   const drizzleOps = new Set<string>(["eq", "and", "inArray"]);
+  // A paged find runs a `count()` for the total and an `asc`/`desc` ORDER BY for
+  // the server-side sort — same three candidates the relational builder seeds;
+  // the body-scan narrower below drops any that don't appear.
+  if ((repo?.finds ?? []).some((f) => pagedReturn(f.returnType))) {
+    drizzleOps.add("count");
+    drizzleOps.add("asc");
+    drizzleOps.add("desc");
+  }
   for (const f of repo?.finds ?? []) {
     if (!f.filter) continue;
     const lowered = lowerToDrizzle(f.filter, tableName, ctx);
@@ -177,6 +197,10 @@ export function buildEmbeddedRepositoryFile(
     `  }`,
     "",
     `  async getById(id: ${idVar}): Promise<${agg.name}> {`,
+    // An embedded root keeps queryable columns, so a narrowing write scope is
+    // a real SQL pre-guard here — the same one the relational builder emits
+    // (F2-ADP-5); nothing is emitted when the write scope does not narrow.
+    ...writeScopeGuardLines(agg, tableName, ctx, drizzleOps),
     `    const found = await this.findById(id);`,
     `    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
     `    return found;`,
@@ -272,6 +296,9 @@ export function buildEmbeddedRepositoryFile(
     // Domain-side repository PORT this concrete implements (audit S7).
     repoPortImportLine(agg.name),
     `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
+    // The paged find's sort-column allowlist is typed `AnyPgColumn` (as on the
+    // relational builder); absent from a repository with no paged find.
+    /\bAnyPgColumn\b/.test(bodyScan) && `import type { AnyPgColumn } from "drizzle-orm/pg-core";`,
     `import { ${usedDrizzleOps.join(", ")} } from "drizzle-orm";`,
     `import * as schema from "../schema";`,
     repoUsesUser && `import type { User } from "../../auth/user-types";`,
@@ -285,7 +312,9 @@ export function buildEmbeddedRepositoryFile(
     // A principal-referencing capability filter (tenancy) weaves
     // `requireCurrentUser()` into every embedded root read (DEBT-02), the same
     // ambient-accessor path the relational builder uses — so import it.
-    aggregateUsesPrincipalContextFilter(agg) &&
+    // …and a principal-referencing WRITE scope binds the same accessor in the
+    // `getById` pre-guard, so key off the emitted body too (F2-ADP-5).
+    (aggregateUsesPrincipalContextFilter(agg) || /\brequireCurrentUser\(/.test(bodyScan)) &&
       `import { requireCurrentUser } from "../../auth/middleware";`,
     `import { requestLog } from "../../obs/als";`,
     "",
@@ -323,6 +352,33 @@ function embeddedFindMethod(
     : isOptional
       ? `const result = rows.length > 0 ? [rows[0]!].map(${mapRow})[0]! : null;`
       : `const result = [rows[0]!].map(${mapRow})[0]!;`;
+  // `find … paged` — an embedded root keeps real columns, so the page is taken
+  // in SQL exactly as the relational builder does (count + ORDER BY over the
+  // `?sort=` whitelist + limit/offset).  Before this, `paged` fell through to
+  // the single-get branch and the emitted method did not match the route built
+  // for it (F2-CB-C1).
+  if (pagedReturn(find.returnType)) {
+    const pagedParams = [...baseParams, ...PAGED_TAIL_PARAMS];
+    const pagedAll = (usesUser ? [...pagedParams, "currentUser: User"] : pagedParams).join(", ");
+    const sortCols = sortableFields(agg)
+      .map((f) => `${JSON.stringify(f)}: schema.${tableName}.${f}`)
+      .join(", ");
+    return lines(
+      `  async ${find.name}(${pagedAll}): Promise<${pagedReturnType(agg.name)}> {`,
+      `    const offset = (page - 1) * pageSize;`,
+      `    const sortColumns: Record<string, AnyPgColumn> = { ${sortCols} };`,
+      `    const sortColumn = sortColumns[sort] ?? schema.${tableName}.id;`,
+      `    const orderBy = dir === "desc" ? desc(sortColumn) : asc(sortColumn);`,
+      `    const countRows = await this.db.select({ value: count() }).from(schema.${tableName})${whereClause};`,
+      `    const total = Number(countRows[0]?.value ?? 0);`,
+      `    const totalPages = pageSize > 0 ? Math.ceil(total / pageSize) : 0;`,
+      `    const rows = await this.db.select().from(schema.${tableName})${whereClause}.orderBy(orderBy).limit(pageSize).offset(offset);`,
+      `    const items = rows.map(${mapRow});`,
+      `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: total`)}`,
+      `    return { items, page, pageSize, total, totalPages };`,
+      `  }`,
+    );
+  }
   return lines(
     `  async ${find.name}(${params}): Promise<${ret}> {`,
     `    const rows = await this.db.select().from(schema.${tableName})${whereClause};`,

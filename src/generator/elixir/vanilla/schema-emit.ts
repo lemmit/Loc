@@ -27,7 +27,7 @@ import {
   resolveDataSourceConfig,
 } from "../../../ir/util/resolve-datasource.js";
 import { isValueCollectionType } from "../../../ir/util/value-collections.js";
-import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { elixirString, plural, snake, upperFirst } from "../../../util/naming.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import { isVanillaDocAgg, renderDocSchema } from "./document-emit.js";
 import { renderAggregatePureCore } from "./domain-core-emit.js";
@@ -403,7 +403,10 @@ export function renderEctoDefault(e: ExprIR): string | null {
   if (e.kind !== "literal") return null;
   switch (e.lit) {
     case "string":
-      return JSON.stringify(e.value);
+      // Through the shared escaping funnel: an unescaped `#{` in a `.ddd`
+      // default would INTERPOLATE in the schema module body (evaluated at
+      // `mix compile` time), not read as text.
+      return elixirString(e.value);
     case "money":
     case "decimal":
       return `Decimal.new(${JSON.stringify(e.value)})`;

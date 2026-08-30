@@ -44,10 +44,11 @@ import {
 } from "../../../ir/util/inheritance.js";
 import { refCollectionFieldName } from "../../../ir/util/ref-collection.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
+import { isDenyFilter } from "../../../ir/util/tenant-stance.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { intrinsicFor, intrinsicKey } from "../../../util/intrinsics.js";
-import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { escapeCsharpIdent, plural, snake, upperFirst } from "../../../util/naming.js";
 import { PG_INTRINSIC_SQL } from "../../_expr/pg-intrinsics.js";
 import { renderCreateTableIfNotExists } from "../../sql-pg.js";
 import { isReservedIdent } from "../../sql-reserved.js";
@@ -234,8 +235,8 @@ export function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
             : `System.Text.Json.JsonSerializer.Serialize(${acc})`,
           stateProp: prop,
           hydrate: nullable
-            ? `r.${col} is null ? (FileRef?)null : System.Text.Json.JsonSerializer.Deserialize<FileRef>(r.${col})!`
-            : `System.Text.Json.JsonSerializer.Deserialize<FileRef>(r.${col})!`,
+            ? `r.${escapeCsharpIdent(col)} is null ? (FileRef?)null : System.Text.Json.JsonSerializer.Deserialize<FileRef>(r.${escapeCsharpIdent(col)})!`
+            : `System.Text.Json.JsonSerializer.Deserialize<FileRef>(r.${escapeCsharpIdent(col)})!`,
         };
       }
       const { sql, cs } = primTypes(type.name);
@@ -247,7 +248,7 @@ export function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
         cast: "",
         save: acc,
         stateProp: prop,
-        hydrate: `r.${col}`,
+        hydrate: `r.${escapeCsharpIdent(col)}`,
       };
     }
     case "enum":
@@ -260,8 +261,8 @@ export function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
         save: nullable ? `${acc}?.ToString()` : `${acc}.ToString()`,
         stateProp: prop,
         hydrate: nullable
-          ? `r.${col} is null ? (${type.name}?)null : Enum.Parse<${type.name}>(r.${col})`
-          : `Enum.Parse<${type.name}>(r.${col})`,
+          ? `r.${escapeCsharpIdent(col)} is null ? (${type.name}?)null : Enum.Parse<${type.name}>(r.${escapeCsharpIdent(col)})`
+          : `Enum.Parse<${type.name}>(r.${escapeCsharpIdent(col)})`,
       };
     case "valueobject":
       return {
@@ -275,8 +276,8 @@ export function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
           : `System.Text.Json.JsonSerializer.Serialize(${acc})`,
         stateProp: prop,
         hydrate: nullable
-          ? `r.${col} is null ? (${type.name}?)null : System.Text.Json.JsonSerializer.Deserialize<${type.name}>(r.${col})!`
-          : `System.Text.Json.JsonSerializer.Deserialize<${type.name}>(r.${col})!`,
+          ? `r.${escapeCsharpIdent(col)} is null ? (${type.name}?)null : System.Text.Json.JsonSerializer.Deserialize<${type.name}>(r.${escapeCsharpIdent(col)})!`
+          : `System.Text.Json.JsonSerializer.Deserialize<${type.name}>(r.${escapeCsharpIdent(col)})!`,
       };
     case "id": {
       const { sql, cs } = idTypes(type.valueType);
@@ -289,8 +290,8 @@ export function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
         save: nullable ? `${acc}?.Value` : `${acc}.Value`,
         stateProp: prop,
         hydrate: nullable
-          ? `r.${col} is null ? (${type.targetName}Id?)null : new ${type.targetName}Id(r.${col}${cs === "Guid" ? ".Value" : ""})`
-          : `new ${type.targetName}Id(r.${col})`,
+          ? `r.${escapeCsharpIdent(col)} is null ? (${type.targetName}Id?)null : new ${type.targetName}Id(r.${escapeCsharpIdent(col)}${cs === "Guid" ? ".Value" : ""})`
+          : `new ${type.targetName}Id(r.${escapeCsharpIdent(col)})`,
       };
     }
     case "array": {
@@ -321,8 +322,8 @@ export function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
         // reached the wire as `null` on this adapter alone.  Coalescing on the
         // READ (not the write) also repairs rows already written as NULL.
         hydrate: nullable
-          ? `r.${col} is null ? new ${listCs}() : System.Text.Json.JsonSerializer.Deserialize<${listCs}>(r.${col})!`
-          : `System.Text.Json.JsonSerializer.Deserialize<${listCs}>(r.${col})!`,
+          ? `r.${escapeCsharpIdent(col)} is null ? new ${listCs}() : System.Text.Json.JsonSerializer.Deserialize<${listCs}>(r.${escapeCsharpIdent(col)})!`
+          : `System.Text.Json.JsonSerializer.Deserialize<${listCs}>(r.${escapeCsharpIdent(col)})!`,
       };
     }
     default:
@@ -365,7 +366,7 @@ function provColumn(f: FieldIR): DapperColumn {
     cast: "::jsonb",
     save: `aggregate.${prop} is null ? null : System.Text.Json.JsonSerializer.Serialize(aggregate.${prop}, ProvJson.Options)`,
     stateProp: prop,
-    hydrate: `r.${col} is null ? null : System.Text.Json.JsonSerializer.Deserialize<ProvLineage>(r.${col}, ProvJson.Options)`,
+    hydrate: `r.${escapeCsharpIdent(col)} is null ? null : System.Text.Json.JsonSerializer.Deserialize<ProvLineage>(r.${escapeCsharpIdent(col)}, ProvJson.Options)`,
   };
 }
 
@@ -391,7 +392,7 @@ function embeddedContainmentColumn(cont: ContainmentIR): DapperColumn {
       cast: "::jsonb",
       save: `System.Text.Json.JsonSerializer.Serialize(aggregate.${prop}.Select(__x => __x.ToSnapshot()).ToList(), __json)`,
       stateProp: prop,
-      hydrate: `System.Text.Json.JsonSerializer.Deserialize<List<${snapT}>>(r.${col}, __json)!.Select(${cont.partName}.FromSnapshot).ToList()`,
+      hydrate: `System.Text.Json.JsonSerializer.Deserialize<List<${snapT}>>(r.${escapeCsharpIdent(col)}, __json)!.Select(${cont.partName}.FromSnapshot).ToList()`,
     };
   }
   if (cont.optional) {
@@ -403,7 +404,7 @@ function embeddedContainmentColumn(cont: ContainmentIR): DapperColumn {
       cast: "::jsonb",
       save: `aggregate.${prop} is null ? null : System.Text.Json.JsonSerializer.Serialize(aggregate.${prop}.ToSnapshot(), __json)`,
       stateProp: prop,
-      hydrate: `r.${col} is null ? null : ${cont.partName}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snapT}>(r.${col}, __json)!)`,
+      hydrate: `r.${escapeCsharpIdent(col)} is null ? null : ${cont.partName}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snapT}>(r.${escapeCsharpIdent(col)}, __json)!)`,
     };
   }
   return {
@@ -414,7 +415,7 @@ function embeddedContainmentColumn(cont: ContainmentIR): DapperColumn {
     cast: "::jsonb",
     save: `System.Text.Json.JsonSerializer.Serialize(aggregate.${prop}.ToSnapshot(), __json)`,
     stateProp: prop,
-    hydrate: `${cont.partName}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snapT}>(r.${col}, __json)!)`,
+    hydrate: `${cont.partName}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snapT}>(r.${escapeCsharpIdent(col)}, __json)!)`,
   };
 }
 
@@ -547,10 +548,10 @@ function containmentValueType(pc: PartChild): string {
 function partRowAndMap(pc: PartChild): string {
   const rowCols = [
     `        public ${pc.partIdCs} id { get; set; }`,
-    `        public ${pc.parentIdCs} ${pc.parentFk} { get; set; }`,
+    `        public ${pc.parentIdCs} ${escapeCsharpIdent(pc.parentFk)} { get; set; }`,
     ...pc.fieldCols.map(
       (c) =>
-        `        public ${c.rowCs} ${c.col} { get; set; }${c.rowCs === "string" ? " = default!;" : ""}`,
+        `        public ${c.rowCs} ${escapeCsharpIdent(c.col)} { get; set; }${c.rowCs === "string" ? " = default!;" : ""}`,
     ),
   ];
   // The grandchild dictionaries are the concrete `Dictionary<…>` that
@@ -570,7 +571,7 @@ function partRowAndMap(pc: PartChild): string {
     `        ${pc.part.name}._Create(new ${pc.part.name}.State`,
     "        {",
     `            Id = new ${pc.part.name}Id(r.id),`,
-    `            ParentId = new ${pc.parentEntityId}Id(r.${pc.parentFk}),`,
+    `            ParentId = new ${pc.parentEntityId}Id(r.${escapeCsharpIdent(pc.parentFk)}),`,
     ...pc.fieldCols.map((c) => `            ${c.stateProp} = ${c.hydrate},`),
     ...childSlots,
     "        });",
@@ -895,7 +896,7 @@ function dedupPrincipalRefs(refs: readonly FilterPrincipalRef[]): FilterPrincipa
  *  CancellationToken) — the SAME position the shared `I<Agg>Repository`
  *  interface renders (`renderParamsWithCt`), so the Dapper impl matches it. */
 function renderParams(params: ParamIR[], extra: readonly string[] = [], usesUser = false): string {
-  const ps = params.map((p) => `${renderCsType(p.type)} ${p.name}`);
+  const ps = params.map((p) => `${renderCsType(p.type)} ${escapeCsharpIdent(p.name)}`);
   return [
     ...ps,
     ...extra,
@@ -1034,7 +1035,9 @@ export function renderDapperRepository(
   const updateLocal = (col: string): string => `__stamp_${col}`;
   const stampParam = (col: string): string | null =>
     onCreateCols.has(col) ? createLocal(col) : onUpdateCols.has(col) ? updateLocal(col) : null;
-  const saveParams = cols.map((c) => `${c.col} = ${stampParam(c.col) ?? c.save}`).join(", ");
+  const saveParams = cols
+    .map((c) => `${escapeCsharpIdent(c.col)} = ${stampParam(c.col) ?? c.save}`)
+    .join(", ");
   // A stamp value referencing the request principal resolves through the same
   // ambient accessor the EF AuditableInterceptor uses: `currentUser.<claim>` →
   // `RequestContext.Current!.CurrentUser!.<Claim>` (via `currentUserExpr`), and
@@ -1142,29 +1145,38 @@ export function renderDapperRepository(
   // The origin is what an `ignoring <Cap>` clause resolves against; a filter
   // with no origin (a plain context filter) can only be dropped by `ignoring *`.
   const filterOrigins = agg.contextFilterOrigins ?? [];
-  const capabilityFilterParts: { sql: string; origin: string | undefined }[] =
-    capabilityFilters.map((p, i) => {
-      try {
-        return { sql: whereToSql(p, sqlCtx), origin: filterOrigins[i] };
-      } catch {
-        throw new Error(
-          `dapper: capability filter on '${agg.name}' is outside the Dapper SQL subset; ` +
-            `use 'persistence: efcore' or simplify the predicate.`,
-        );
-      }
-    });
+  const capabilityFilterParts: {
+    sql: string;
+    origin: string | undefined;
+    bypassable: boolean;
+  }[] = capabilityFilters.map((p, i) => {
+    try {
+      // A `policy { deny on X }` always-false sentinel is a CARVE-OUT, not a
+      // capability filter: deny wins over an authored `ignoring *`, so this
+      // conjunct is never dropped (the raw-SQL twin of the EF rule in
+      // `find-emit.ts` — and of the TPH discriminator rule just below).
+      return { sql: whereToSql(p, sqlCtx), origin: filterOrigins[i], bypassable: !isDenyFilter(p) };
+    } catch {
+      throw new Error(
+        `dapper: capability filter on '${agg.name}' is outside the Dapper SQL subset; ` +
+          `use 'persistence: efcore' or simplify the predicate.`,
+      );
+    }
+  });
   /** The capability predicates a read carrying `bypass` still applies
-   *  (named-filter-bypass.md §11).  `ignoring *` drops every one; `ignoring A,
-   *  B` drops the ones those capabilities contributed.  Dapper has no EF
-   *  `IgnoreQueryFilters`, so the bypass is expressed by OMITTING the conjunct
-   *  from the generated WHERE — the raw-SQL equivalent. */
+   *  (named-filter-bypass.md §11).  `ignoring *` drops every BYPASSABLE one;
+   *  `ignoring A, B` drops the ones those capabilities contributed.  Dapper has
+   *  no EF `IgnoreQueryFilters`, so the bypass is expressed by OMITTING the
+   *  conjunct from the generated WHERE — the raw-SQL equivalent. */
   const capabilityFilterSqlFor = (bypass?: {
     bypassAll?: boolean;
     bypassCaps?: string[];
   }): string | null => {
-    if (bypass?.bypassAll) return null;
     const caps = new Set(bypass?.bypassCaps ?? []);
-    const kept = capabilityFilterParts.filter((p) => !(p.origin != null && caps.has(p.origin)));
+    const kept = capabilityFilterParts.filter(
+      (p) =>
+        !p.bypassable || !(bypass?.bypassAll === true || (p.origin != null && caps.has(p.origin))),
+    );
     return kept.length > 0 ? kept.map((p) => p.sql).join(" AND ") : null;
   };
   /** The full spliced WHERE fragment (TPH discriminator + surviving capability
@@ -1318,7 +1330,7 @@ export function renderDapperRepository(
     const insertParams = [
       `id = ${pc.childVar}.Id.Value`,
       `${pc.parentFk} = ${ownerIdExpr}`,
-      ...pc.fieldCols.map((c) => `${c.col} = ${c.save}`),
+      ...pc.fieldCols.map((c) => `${escapeCsharpIdent(c.col)} = ${c.save}`),
     ].join(", ");
     const iter = pc.cont.collection
       ? `        foreach (var ${pc.childVar} in ${ownerAccessor})`
@@ -1416,13 +1428,15 @@ export function renderDapperRepository(
     // failures, one bug.
     const paramFields = f.params.map((p) => {
       const pt = p.type.kind === "optional" ? p.type.inner : p.type;
-      if (pt.kind === "id") return `${p.name} = ${p.name}.Value`;
+      // The anon-object member name stays the DECLARED name (Dapper binds it to
+      // the `@<name>` SQL parameter); the verbatim `@` prefix is only the C#
+      // identifier escape, so both halves take it (F2-ADP-7).
+      const n = escapeCsharpIdent(p.name);
+      if (pt.kind === "id") return `${n} = ${n}.Value`;
       if (pt.kind === "enum") {
-        return p.type.kind === "optional"
-          ? `${p.name} = ${p.name}?.ToString()`
-          : `${p.name} = ${p.name}.ToString()`;
+        return p.type.kind === "optional" ? `${n} = ${n}?.ToString()` : `${n} = ${n}.ToString()`;
       }
-      return p.name;
+      return n;
     });
     // Bind the find's own params + every `currentUser.<claim>` param the SELECT
     // references — both the capability-filter refs spliced into every WHERE AND
@@ -1611,11 +1625,14 @@ export function renderDapperRepository(
         ? [
             `        var __caps = new List<string>();`,
             ...capabilityFilterParts.map((part) => {
-              const guard =
-                part.origin != null
-                  ? `if (!bypass.All && bypass.Capabilities?.Contains(${JSON.stringify(part.origin)}) != true)`
-                  : `if (!bypass.All)`;
-              return `        ${guard} __caps.Add("${part.sql}");`;
+              // A non-bypassable conjunct (the `policy { deny }` sentinel) is
+              // added unconditionally — no runtime `bypass` can drop it.
+              const guard = !part.bypassable
+                ? ""
+                : part.origin != null
+                  ? `if (!bypass.All && bypass.Capabilities?.Contains(${JSON.stringify(part.origin)}) != true) `
+                  : `if (!bypass.All) `;
+              return `        ${guard}__caps.Add("${part.sql}");`;
             }),
             `        var sql = "${headSql}" + (__caps.Count > 0 ? " AND " + string.Join(" AND ", __caps) : "")${orderSql ? ` + "${orderSql}"` : ""};`,
           ]
@@ -1623,7 +1640,8 @@ export function renderDapperRepository(
     const paramAdds = [
       ...r.params.map((p) => {
         const pt = p.type.kind === "optional" ? p.type.inner : p.type;
-        const val = pt.kind === "id" ? `${p.name}.Value` : p.name;
+        const n = escapeCsharpIdent(p.name);
+        const val = pt.kind === "id" ? `${n}.Value` : n;
         return `        p.Add("${p.name}", ${val});`;
       }),
       // Principal params (`__cu_<claim>`) — the spliced capability filter's refs
@@ -1732,7 +1750,7 @@ export function renderDapperRepository(
       // is a CS1597 error, so the no-initializer arm ends at `}`.
       ...cols.map(
         (c) =>
-          `        public ${c.rowCs} ${c.col} { get; set; }${c.rowCs === "string" ? " = default!;" : ""}`,
+          `        public ${c.rowCs} ${escapeCsharpIdent(c.col)} { get; set; }${c.rowCs === "string" ? " = default!;" : ""}`,
       ),
       "    }",
       "",
@@ -2123,6 +2141,28 @@ export function renderDapperEventSourcedRepository(
   const anyFindUsesUser = (repo?.finds ?? []).some((raw) =>
     findUsesCurrentUser(unionFindAsOptionalTwin(raw, agg.name)),
   );
+  // Write-scope narrowing (authorization Phase 3 P3.1): the EVENT-SOURCED twin
+  // of the document `writeScopeMethod` above — a stream has no queryable row to
+  // pre-guard in SQL, so fold it through `GetByIdAsync` and apply the scope
+  // predicate in-app.  Without it, a narrowed write ladder (or `policy { deny
+  // write on X }`) on an event-sourced aggregate failed CS0535: the port
+  // declares `GetByIdForWriteAsync` whenever `agg.writeScopeFilter` is set.
+  const writeScopeMethod = agg.writeScopeFilter
+    ? [
+        "",
+        `    public async Task<${agg.name}?> GetByIdForWriteAsync(${agg.name}Id id, CancellationToken cancellationToken = default)`,
+        "    {",
+        "        var __found = await GetByIdAsync(id, cancellationToken);",
+        "        if (__found == null) return null;",
+        "        return _WriteScopeAllows(__found) ? __found : null;",
+        "    }",
+        "",
+        `    private static bool _WriteScopeAllows(${agg.name} x) => ${renderCsExpr(
+          agg.writeScopeFilter,
+          { thisName: "x", agg, currentUserExpr: AMBIENT_CURRENT_USER },
+        )};`,
+      ]
+    : [];
   const findMethods = (repo?.finds ?? []).flatMap((raw) => {
     const f = unionFindAsOptionalTwin(raw, agg.name);
     const body = findBodies.find((b) => b.name === f.name);
@@ -2191,6 +2231,7 @@ export function renderDapperEventSourcedRepository(
       "        if (__rows.Count == 0) return null;",
       `        return ${agg.name}._FromEvents(id, __rows.Select(RowToEvent).ToList());`,
       "    }",
+      ...writeScopeMethod,
       "",
       `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken cancellationToken = default)`,
       "    {",

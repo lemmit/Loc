@@ -12,6 +12,7 @@ import { isMaterializedProjection } from "../../../ir/types/loom-ir.js";
 import { directParentName } from "../../../ir/util/containment-parent.js";
 import { aggregateHasFileField } from "../../../ir/util/file-field.js";
 import { isTphBase, ownFieldsOf } from "../../../ir/util/inheritance.js";
+import { isDenyFilter } from "../../../ir/util/tenant-stance.js";
 import { isValueCollectionType, valueCollectionsFor } from "../../../ir/util/value-collections.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
@@ -668,23 +669,43 @@ export function queryFilterNames(agg: AggregateIR): string[] {
   });
 }
 
+/** Does this aggregate carry a query filter no `ignoring` clause may drop?
+ *  Today that is exactly the `policy { deny on X }` always-false sentinel
+ *  (authorization Phase 4, deny-wins): it is a CARVE-OUT, not a capability
+ *  filter, so an authored `ignoring *` (a legitimate escape hatch for the
+ *  tenancy/softDelete filters, docs/tenancy.md) must not lift it — otherwise a
+ *  read-denied aggregate serves every row through a public route. */
+export function hasNonBypassableFilter(agg: AggregateIR): boolean {
+  return (agg.contextFilters ?? []).some(isDenyFilter);
+}
+
+/** The EF named-filter names an `ignoring *` clause may drop on this
+ *  aggregate — every named query filter EXCEPT the non-bypassable ones
+ *  (see {@link hasNonBypassableFilter}). */
+export function bypassableFilterNames(agg: AggregateIR): string[] {
+  const filters = agg.contextFilters ?? [];
+  return queryFilterNames(agg).filter((_, i) => !isDenyFilter(filters[i]!));
+}
+
 /** The EF named-filter names an `ignoring` clause bypasses on this aggregate
- *  (named-filter-bypass.md §11).  `bypassAll` → every filter; otherwise the
- *  names whose contributing capability (`agg.contextFilterOrigins[i]`) is in
- *  `bypassCaps`.  Returns [] when nothing matches (a `*` on a filterless
- *  aggregate, or only stamps-only caps named — both already validated). */
+ *  (named-filter-bypass.md §11).  `bypassAll` → every BYPASSABLE filter (the
+ *  deny sentinel survives); otherwise the names whose contributing capability
+ *  (`agg.contextFilterOrigins[i]`) is in `bypassCaps`.  Returns [] when nothing
+ *  matches (a `*` on a filterless aggregate, or only stamps-only caps named —
+ *  both already validated). */
 export function bypassedFilterNames(
   agg: AggregateIR,
   bypass: { bypassAll?: boolean; bypassCaps?: string[] },
 ): string[] {
+  if (bypass.bypassAll) return bypassableFilterNames(agg);
   const names = queryFilterNames(agg);
-  if (bypass.bypassAll) return names;
   const caps = new Set(bypass.bypassCaps ?? []);
   if (caps.size === 0) return [];
   const origins = agg.contextFilterOrigins ?? [];
+  const filters = agg.contextFilters ?? [];
   return names.filter((_, i) => {
     const origin = origins[i];
-    return origin != null && caps.has(origin);
+    return origin != null && caps.has(origin) && !isDenyFilter(filters[i]!);
   });
 }
 

@@ -520,6 +520,64 @@ describe("ts renderTsExpr — `distinct` value-dedupe on money (A14)", () => {
   it("keeps a non-money `distinct` on `[...new Set(…)]` (byte-identical)", () => {
     expect(renderTsExpr(distinctOf(STRING))).toBe("[...new Set(this._prices)]");
   });
+
+  // F2-EXPR-4.  A VALUE-OBJECT element is an object too, so `new Set` /
+  // `.includes` compare references and silently answer wrong — a dedupe that
+  // returns duplicates and a membership test that is always false.  The
+  // validator ADMITS this element type (`loom.distinct-non-scalar`: "requires a
+  // scalar or value-object element") and every generated VO carries the
+  // field-wise `equals` these arms call, so node was alone in getting it wrong.
+  const TAG: TypeIR = { kind: "valueobject", name: "Tag" };
+  const containsOf = (elem: TypeIR, arg: ExprIR): ExprIR => ({
+    kind: "method-call",
+    receiver: thisProp("prices"),
+    member: "contains",
+    args: [arg],
+    receiverType: { kind: "array", element: elem },
+    memberType: BOOL,
+    isCollectionOp: true,
+  });
+  const newTag = (label: string): ExprIR => ({
+    kind: "call",
+    callKind: "value-object-ctor",
+    name: "Tag",
+    args: [litStr(label)],
+  });
+
+  it("dedupes a value-object collection through the VO's own `equals`", () => {
+    expect(renderTsExpr(distinctOf(TAG))).toBe(
+      "this._prices.filter((__x, __i, __a) => __a.findIndex((__y) => __y.equals(__x)) === __i)",
+    );
+  });
+
+  it("tests value-object membership through `equals`, not `.includes`", () => {
+    expect(renderTsExpr(containsOf(TAG, newTag("x")))).toBe(
+      '(this._prices).some((__x) => __x.equals(new Tag("x")))',
+    );
+    // Money keeps its `.eq` spelling; a scalar element keeps `.includes`.
+    expect(renderTsExpr(containsOf(MONEY, litMoney("3")))).toBe(
+      '(this._prices).some((__x) => __x.eq(new Decimal("3")))',
+    );
+    expect(renderTsExpr(containsOf(STRING, litStr("x")))).toBe('(this._prices).includes("x")');
+  });
+
+  // The defect was a WRONG ANSWER, not a compile break, so evaluate the two
+  // rendered expressions against a stand-in for the generated VO class (which
+  // carries exactly this `equals`) and assert what they compute.
+  it("computes the right answers at runtime", () => {
+    class Tag {
+      constructor(public label: string) {}
+      equals(other: Tag): boolean {
+        return this.label === other.label;
+      }
+    }
+    const self = { _prices: [new Tag("x"), new Tag("x"), new Tag("y")] };
+    const evalIn = (expr: string): unknown =>
+      new Function("Tag", `return ${expr};`).call(self, Tag);
+    expect((evalIn(renderTsExpr(distinctOf(TAG))) as Tag[]).length).toBe(2);
+    expect(evalIn(renderTsExpr(containsOf(TAG, newTag("x"))))).toBe(true);
+    expect(evalIn(renderTsExpr(containsOf(TAG, newTag("zz"))))).toBe(false);
+  });
 });
 
 describe("ts renderTsExpr — call kinds", () => {
