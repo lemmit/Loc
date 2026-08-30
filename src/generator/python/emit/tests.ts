@@ -339,7 +339,16 @@ export function renderExplicitMatcher(
     receiver = receiver.receiver;
   }
   const inner = receiver.kind === "paren" ? receiver.inner : receiver;
-  const actual = renderTestExpr(inner, ctx, lets);
+  const rendered = renderTestExpr(inner, ctx, lets);
+  // Python CHAINS comparisons: `a == b == True` parses as
+  // `(a == b) and (b == True)`, so an `expect(a == b).toBe(true)` whose actual
+  // is itself a comparison must be parenthesized or the assert silently tests
+  // the wrong thing (found by numeric-operands, M-T6.44 — the first test block
+  // to wrap a comparison in a matcher).  Only the hazard shapes get parens so
+  // every existing emission stays byte-identical.
+  const chains =
+    inner.kind === "binary" && ["==", "!=", "<", "<=", ">", ">=", "&&", "||"].includes(inner.op);
+  const actual = chains ? `(${rendered})` : rendered;
   const expected = expr.args.map((a) => renderTestExpr(a, ctx, lets)).join(", ");
   const cmp = `${actual} ${op} ${expected}`;
   return negate ? `    assert not (${cmp})` : `    assert ${cmp}`;

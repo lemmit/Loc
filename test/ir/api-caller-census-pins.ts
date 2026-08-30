@@ -497,6 +497,15 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // the per-backend compile tiers; a behavioural block would add uncalled
   // routes and unrecorded goldens for no additional oracle.
   "collection-op-shapes",
+  // COMPILE + UNIT-TIER WITNESS (numeric-types audit F7 / M-T6.44) — the
+  // right-hand money/decimal operand shapes (`int * money`, `int + decimal`,
+  // `int < decimal`) the leftType-only TS/Elixir gates broke on.  The pure-
+  // domain `test` block is the runtime oracle (the elixir ExUnit run proves
+  // the term-ordering comparison flipped); a `test e2e` block would mint a
+  // wire golden whose derived decimal values sit inside the UN-RULED
+  // cross-backend decimal-arithmetic divergence (F11 / M-T5.22) — that golden
+  // waits for the owner ruling, not for this fixture.
+  "numeric-operands",
   // COMPILE-TIER WITNESS (generator review A1) — a projection aggregation over
   // a `tenantOwned` + `softDeletable` source; pins that the emitted aggregation
   // read carries the capability predicates.  The runtime half needs the

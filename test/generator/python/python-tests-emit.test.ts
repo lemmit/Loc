@@ -53,3 +53,43 @@ describe("python test emission", () => {
     expect(testFiles).toEqual(["api/tests/test_widget.py"]);
   });
 });
+
+// M-T6.44 (numeric-types audit): Python CHAINS comparisons — `a == b == True`
+// parses as `(a == b) and (b == True)`, so a matcher whose ACTUAL is itself a
+// comparison must be parenthesized or the emitted assert silently tests the
+// wrong thing (found by the numeric-operands fixture: `Decimal("7.5") == True`
+// is False, so the case failed while every value was correct).
+describe("python test emission — comparison-shaped actuals are parenthesized", () => {
+  it("wraps a comparison actual so the assert cannot chain", async () => {
+    const src = `
+system S {
+  subdomain M {
+    context C {
+      aggregate Order {
+        count: int
+        factor: decimal
+        test "comparison inside a matcher" {
+          let o = Order.create({ count: 3, factor: 2.5 })
+          expect(o.count < o.factor).toBe(false)
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api A from M
+  storage primary { type: postgres }
+  resource st { for: C, kind: state, use: primary }
+  deployable d { platform: python contexts: [C] dataSources: [st] serves: A port: 4000 }
+}
+`;
+    const { model, errors } = await parseString(src);
+    if (errors.length) throw new Error(errors.join("\n"));
+    const files = generateSystems(model).files;
+    const tests = [...files.entries()].find(([p]) => /tests\/test_order\.py$/.test(p))?.[1];
+    expect(tests).toBeDefined();
+    expect(tests!).toContain("assert (o.count < o.factor) == False");
+    // The defect, stated so a regression reads as itself: unparenthesized,
+    // Python evaluates `o.factor == False` — always False for a Decimal.
+    expect(tests!).not.toContain("assert o.count < o.factor == False");
+  });
+});

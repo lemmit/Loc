@@ -20,7 +20,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { BEHAVIOURAL_SKIP, GOLDEN_OPT_OUT, hasBehaviouralBlock } from "../behavioral/registers.mjs";
+import {
+  BEHAVIOURAL_SKIP,
+  declaresE2e,
+  GOLDEN_OPT_OUT,
+  hasBehaviouralBlock,
+} from "../behavioral/registers.mjs";
 import { PLATFORM_CLAUSE } from "../fixtures/corpus/backends.js";
 import { CORPUS } from "../fixtures/corpus/manifest.js";
 
@@ -78,12 +83,16 @@ const skipSetFor = (platformClause: string): Record<string, string> =>
  *  from `.mjs`; here it is a plain typed import of the same file.) */
 export function featureCaseNames(backendKey: string, platformClause: string): string[] {
   const skip = skipSetFor(platformClause);
-  return CORPUS.filter(
-    (f) =>
-      (f.backends as readonly string[]).includes(backendKey) &&
-      !(f.id in skip) &&
-      hasBehaviouralBlock(fs.readFileSync(path.join(CORPUS_DIR, `${f.id}.ddd`), "utf8")),
-  ).map((f) => f.id);
+  return CORPUS.filter((f) => {
+    if (!(f.backends as readonly string[]).includes(backendKey) || f.id in skip) return false;
+    const src = fs.readFileSync(path.join(CORPUS_DIR, `${f.id}.ddd`), "utf8");
+    // A unit-only case (a `test` block but no `test e2e`) runs on every leg but
+    // RECORDS no wire — the runners return its unit results and skip the
+    // differential — so it needs no golden.  Mirrors each runner's
+    // `declaresE2e` arm; the wire-differential stale-opt-out ratchet rejects
+    // listing such a case in GOLDEN_OPT_OUT for the same reason.
+    return hasBehaviouralBlock(src) && declaresE2e(src);
+  }).map((f) => f.id);
 }
 
 /** Mirror of `cases.mjs` → `sharedSystemCases`, names only. */
