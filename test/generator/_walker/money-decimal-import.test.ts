@@ -216,6 +216,68 @@ describe("a money form field yields exactly one decimal.js import (M-T1.23)", ()
   }, 300_000);
 });
 
+describe("the FormState alias rides a type-only import specifier (M-T1.23)", () => {
+  // The alias is a `type` export (`export type CreateAFormState = z.input<…>`),
+  // and SvelteKit's generated tsconfig turns `verbatimModuleSyntax` on — under
+  // it a plain VALUE import of a type is a hard svelte-check error:
+  //   TS1484: 'CreateAFormState' is a type and must be imported using a
+  //   type-only import when 'verbatimModuleSyntax' is enabled.
+  // So the walker registers the alias through `addTypeImport`, which stores the
+  // inline `type X` import SPECIFIER — the form `verbatimModuleSyntax`
+  // prescribes, and valid TS on every frontend that already accepted the plain
+  // import.  Without this, the svelte-shop money witness's build cell is red
+  // even with the decimal drain in place.
+  it("react and svelte money-form pages import `type <Action>FormState`, never the value form", async () => {
+    for (const framework of ["react", "svelte"] as const) {
+      const files = await generateSystemFiles(MONEY_FORM_SYSTEM(framework));
+      const src = [...files].find(([k]) => PAGE_OF[framework]!.test(k))?.[1] ?? "";
+      expect(src, `${framework}: no page emitted`).not.toBe("");
+      expect(src, `${framework}: the alias must arrive as an inline type specifier`).toMatch(
+        /import \{[^}]*\btype CreateAFormState\b[^}]*\} from/,
+      );
+      expect(
+        src,
+        `${framework}: a bare value import of the alias is TS1484 under verbatimModuleSyntax`,
+      ).not.toMatch(/[{,]\s*CreateAFormState/);
+    }
+  }, 300_000);
+
+  // The svelte-shop matrix witness rides the OPERATION form (crudish `update`
+  // on the scaffolded Detail page), which registers its alias at a different
+  // call site than `CreateForm` — pin that site too.
+  it("an OperationForm page imports its `type <Op><Agg>FormState` the same way", async () => {
+    const files = await generateSystemFiles(`
+      system OF {
+        subdomain D {
+          context C {
+            aggregate A {
+              name: string
+              price: money
+              derived display: string = name
+              operation reprice(price: money) { }
+            }
+            repository As for A { }
+          }
+        }
+        api Api from D
+        storage pg { type: postgres }
+        resource st { for: C, kind: state, use: pg }
+        ui W {
+          framework: svelte
+          api C: Api
+          page P(id: A id) { route: "/p/:id" body: OperationForm(of: A, op: reprice) }
+        }
+        deployable api { platform: node, contexts: [C], dataSources: [st], serves: Api, port: 3000 }
+        deployable web { platform: static, targets: api, ui: W { C: api }, port: 3001 }
+      }
+    `);
+    const src = [...files].find(([k]) => PAGE_OF.svelte!.test(k))?.[1] ?? "";
+    expect(src, "no svelte page emitted").not.toBe("");
+    expect(src).toMatch(/import \{[^}]*\btype RepriceAFormState\b[^}]*\} from/);
+    expect(src).not.toMatch(/[{,]\s*RepriceAFormState/);
+  }, 300_000);
+});
+
 describe("a React component brings its own `Decimal` into scope (M-T1.23)", () => {
   // The component shell computed a decimal import and then dropped it —
   // `const _decimalImport = …` was never spliced into the returned file.  A

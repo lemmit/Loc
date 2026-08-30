@@ -107,6 +107,19 @@ export function addImport(ctx: WalkContext, from: string, ...names: string[]): v
   addImportToMap(ctx.imports, from, ...names);
 }
 
+/** Register a TYPE-ONLY named import: the map stores the inline
+ *  `type X` import SPECIFIER, so every frontend's import-line renderer
+ *  emits `import { type X, ... }` with no renderer change.  Required
+ *  for a name that exists only in the type layer (the `<Action>FormState`
+ *  aliases): SvelteKit's generated tsconfig turns `verbatimModuleSyntax`
+ *  on, and under it a plain value import of a type is a hard
+ *  svelte-check error (TS1484).  The inline form is what
+ *  `verbatimModuleSyntax` prescribes, and is byte-inert everywhere a
+ *  plain import already type-checked. */
+export function addTypeImport(ctx: WalkContext, from: string, name: string): void {
+  addImport(ctx, from, `type ${name}`);
+}
+
 /** Convenience for the (still many) emit functions that haven't been
  *  ported to the pack contract yet — they all want named imports
  *  from `@mantine/core`.  Keeps call sites compact and grep-able
