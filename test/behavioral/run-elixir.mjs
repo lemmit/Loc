@@ -40,7 +40,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { AUTHZ_LADDERS, DEV_CLAIMS, featureCases, mountsFileRoutes, resetDatabase, sharedSystemCases, unauthorizedCredentials } from "./cases.mjs";
+import { AUTHZ_LADDERS, declaresE2e, DEV_CLAIMS, featureCases, mountsFileRoutes, resetDatabase, sharedSystemCases, unauthorizedCredentials } from "./cases.mjs";
 import { stopServer, waitForPort, waitForPortFree } from "./proc.mjs";
 import { makeWireGate, recorderPreamble } from "./wire-differential.mjs";
 import { startMockIssuer } from "./oidc-mock.mjs";
@@ -341,7 +341,12 @@ async function runCase(c) {
     const deplDir = findElixirDeployable(genDir);
     const e2eDir = join(genDir, "e2e");
     const e2eFile = existsSync(e2eDir) ? (walk(e2eDir, (p) => p.endsWith(".e2e.test.ts"))[0] ?? null) : null;
-    if (!e2eFile) throw new Error("no emitted e2e suite (the system declares no `test e2e … against <elixir>`)");
+    // A UNIT-ONLY case (domain `test "…"`, no `test e2e`) emits no e2e suite —
+    // that is the declared shape, not an error: run the DB-free unit tier and
+    // skip the api/wire legs, the node oracle's derive-from-the-file-map
+    // posture (M-T6.44's numeric-operands is the first such fixture).  A case
+    // that DECLARES e2e and emits nothing is still an error.
+    if (!e2eFile && declaresE2e(c.source)) throw new Error("no emitted e2e suite (the system declares no `test e2e … against <elixir>`)");
 
     // OIDC (`auth {}` block) → point the Phoenix app at the in-process mock
     // issuer + forward its signed token.  Detect from source (verifier path is
@@ -452,6 +457,9 @@ async function runCase(c) {
           unitResults.push({ tier: "unit", name: "mix test", status: "fail", error: "no ExUnit summary (compile error?)" });
         }
       }
+
+      // Unit-only case: the unit tier IS the case — no api/wire legs.
+      if (!e2eFile) return { results: unitResults, error: null };
 
       const unitMs = Date.now() - tUnit;
 
