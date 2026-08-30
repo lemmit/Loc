@@ -85,7 +85,14 @@ export const FS_LEAVES = {
     // and a bare `3` is an F# `int` — an int-vs-int64 type error against the
     // `int64` the operand now is.
     if (lit === "long") return `${value}L`;
-    // int / decimal / money → numeric literal verbatim
+    // A `decimal`/`money` literal needs the `m` suffix for the same reason as
+    // `L`: lowering promotes `price > 10`'s `10` to `lit: "decimal"`, and a
+    // bare `10` is an F# `int` — Fable has no implicit `int → decimal`.  The
+    // suffixed form is invisible to the two literal-shaped regex workarounds
+    // downstream (`update-emit.ts:decimalLit`, `store-persist.ts:fieldDefault`
+    // — both match only bare numerals), so it cannot double-suffix.
+    if (lit === "decimal" || lit === "money") return `${value}m`;
+    // int → numeric literal verbatim
     return value;
   },
   binary(left: string, right: string, op: BinOp): string {

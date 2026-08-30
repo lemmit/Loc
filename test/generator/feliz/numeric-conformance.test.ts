@@ -330,3 +330,54 @@ system Shop {
     expect(fs).not.toContain("isNumberText");
   });
 });
+
+describe("feliz: a promoted decimal/money literal carries the m suffix", () => {
+  const sys2 = (body: string) => `
+system P {
+  subdomain S { context C {
+    aggregate Order { name: string }
+    repository Orders for Order { }
+  } }
+  api A from S
+  ui WebApp {
+    api C: A
+    ${body}
+  }
+  storage primary { type: postgres }
+  resource st { for: C, kind: state, use: primary }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: A port: 3000 }
+  deployable web { platform: feliz targets: api ui: WebApp { C: api } port: 3005 }
+}`;
+
+  async function app2(body: string): Promise<string> {
+    const model = await buildLoomModel(sys2(body));
+    const s = model.systems[0]!;
+    const web = s.deployables.find((d) => d.name === "web")!;
+    return generateFelizForContexts(s.subdomains[0]!.contexts, s, web).get("src/App.fs")!;
+  }
+
+  // Lowering PROMOTES a bare int literal to `decimal` when it meets a decimal
+  // operand (`price > 10` stamps `lit: "decimal"`), and a bare `10` is an F#
+  // `int` — Fable has no implicit `int → decimal`, so without the `m` suffix
+  // the comparison does not typecheck.  The exact sibling of the `L` case.
+  it("suffixes a promoted decimal literal with m on the MVU path", async () => {
+    const fs = await app2(`
+    page Cart {
+      route: "/cart"
+      state { price: decimal = 0  pricey: bool = false }
+      action evaluate() { pricey := price > 10 }
+      body: Button("go", onClick: evaluate)
+    }`);
+    expect(fs).toContain("(model.Price > 10m)");
+  });
+
+  it("suffixes a promoted decimal literal with m on the view path", async () => {
+    const fs = await app2(`
+    page Cart {
+      route: "/cart"
+      state { price: decimal = 0 }
+      body: Text { \`Deal: {price < 5}\` }
+    }`);
+    expect(fs).toContain("(model.Price < 5m)");
+  });
+});
