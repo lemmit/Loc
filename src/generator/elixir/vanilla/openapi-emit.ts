@@ -143,12 +143,6 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
   const files = new Map<string, string>();
   const routes: ApiRoute[] = [];
 
-  // No served Api → no spec.  `serves` can be absent on a hand-built /
-  // under-shaped deployable (some unit fixtures omit it), so guard the access.
-  if (!deployable.serves || deployable.serves.length === 0) {
-    return { files, routes };
-  }
-
   const webModule = `${appModule}Web`;
 
   // Collect all aggregates, workflows across all contexts.
@@ -173,11 +167,19 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
   }
 
   // --- Per-Api spec module ---------------------------------------------------
-  // In Loom v0, there is one spec module per deployable (one api per deployable).
-  // Use the first serves entry as the spec name.
-  const apiName = deployable.serves[0]!;
-  const apiSnake = snake(apiName);
-  const apiPascal = upperFirst(apiName);
+  // In Loom v0, there is one spec module per deployable (one api per deployable),
+  // named after the served `api` when the deployable declares one.
+  //
+  // `serves:` is OPTIONAL, and it only ever named the module: every path and
+  // schema below is derived from the hosted `contexts`, not from the `api`
+  // declaration.  So a deployable declared with `contexts:` alone falls back to
+  // the app name and still publishes the same route-derived document the other
+  // four backends publish either way (F15,
+  // `docs/audits/schemathesis-findings-2026-08.md`) — previously it emitted no
+  // spec module, no OpenapiController and no `/openapi.json` route at all.
+  const servedApi = deployable.serves?.[0];
+  const apiSnake = servedApi ? snake(servedApi) : appName;
+  const apiPascal = servedApi ? upperFirst(servedApi) : appModule;
 
   const specPath = `lib/${appName}_web/api/${apiSnake}_spec.ex`;
   files.set(
