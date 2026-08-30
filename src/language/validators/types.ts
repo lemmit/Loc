@@ -710,6 +710,13 @@ export function checkInvariant(inv: Invariant, env: Env, accept: ValidationAccep
 }
 
 export function checkDerived(d: DerivedProp, env: Env, accept: ValidationAcceptor): void {
+  // Parse recovery can hand us a `DerivedProp` whose initializer never parsed
+  // (`derived page: int[] = …` — a soft-keyword name fails the `ID` token, and
+  // the rule completes with `expr` undefined).  Typing it is meaningless, and
+  // streaming it used to THROW — which aborted the whole enclosing `context`
+  // check and dropped every sibling diagnostic with it.  Mirrors the
+  // `if (!p.default) return;` guard on the property/parameter-default siblings.
+  if (!d.expr) return;
   checkConstructionArgTypes(d.expr, env, accept);
   checkExprCallArgs(d.expr, env, accept);
   const declared = resolveTypeRef(d.type);

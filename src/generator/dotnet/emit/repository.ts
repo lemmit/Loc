@@ -12,7 +12,7 @@ import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
-import { plural, upperFirst } from "../../../util/naming.js";
+import { escapeCsharpIdent, plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 import { unionFindAsOptionalTwin } from "../find-emit.js";
 import {
@@ -21,7 +21,7 @@ import {
   renderCsExpr,
   renderCsType,
 } from "../render-expr.js";
-import { queryFilterNames } from "./efcore.js";
+import { bypassableFilterNames, hasNonBypassableFilter, queryFilterNames } from "./efcore.js";
 import { eventDbSetName, eventRecordClass } from "./event-store.js";
 import { joinDbSetName, joinEntityName, joinFkPropName } from "./join-entities.js";
 
@@ -298,11 +298,28 @@ export function renderRepositoryImpl(
   const bypassPairs = filterNames
     .map((filter, i) => ({ cap: filterOrigins[i], filter }))
     .filter((p): p is { cap: string; filter: string } => p.cap != null);
+  // `bypass.All` drops every BYPASSABLE filter.  The parameterless overload
+  // drops all of them, so it is only safe when nothing on this aggregate is
+  // non-bypassable; a `policy { deny on X }` always-false sentinel is (deny
+  // wins over an authored `ignoring *`), and then the droppable filters are
+  // enumerated by name instead — or the branch disappears entirely when the
+  // deny carve-out is the only filter.
+  const allBypassNames = hasNonBypassableFilter(agg) ? bypassableFilterNames(agg) : null;
+  const bypassAllLines =
+    allBypassNames === null
+      ? ["        if (bypass.All) __q = __q.IgnoreQueryFilters();"]
+      : allBypassNames.length > 0
+        ? [
+            `        if (bypass.All) __q = __q.IgnoreQueryFilters([${allBypassNames
+              .map((n) => JSON.stringify(n))
+              .join(", ")}]);`,
+          ]
+        : [];
   const bypassBody = [
-    "        if (bypass.All) __q = __q.IgnoreQueryFilters();",
+    ...bypassAllLines,
     ...(bypassPairs.length > 0
       ? [
-          "        else if (bypass.Capabilities is { Count: > 0 })",
+          `        ${bypassAllLines.length > 0 ? "else if" : "if"} (bypass.Capabilities is { Count: > 0 })`,
           "        {",
           `            var __ignore = new (string Capability, string Filter)[] { ${bypassPairs
             .map((p) => `(${JSON.stringify(p.cap)}, ${JSON.stringify(p.filter)})`)
@@ -964,6 +981,31 @@ export function renderEventSourcedRepositoryImpl(
   );
   const recordCls = eventRecordClass(contextName);
 
+  // Write-scope narrowing (authorization Phase 3 P3.1): the EVENT-SOURCED twin
+  // of the document `writeScopeMethod` above.  A stream has no queryable row to
+  // pre-guard with `AnyAsync`, so — exactly like the document blob — fold the
+  // stream through `GetByIdAsync` and apply the scope predicate in-app.
+  // Without it, a narrowed write ladder (or `policy { deny write on X }`) on an
+  // event-sourced aggregate failed CS0535: the port declares
+  // `GetByIdForWriteAsync` whenever `agg.writeScopeFilter` is set (see the
+  // interface emitter), and this impl had no implementation.
+  const writeScopeMethod = agg.writeScopeFilter
+    ? [
+        "",
+        `    public async Task<${agg.name}?> GetByIdForWriteAsync(${idClass} id, CancellationToken cancellationToken = default)`,
+        "    {",
+        "        var __found = await GetByIdAsync(id, cancellationToken);",
+        "        if (__found == null) return null;",
+        "        return _WriteScopeAllows(__found) ? __found : null;",
+        "    }",
+        "",
+        `    private static bool _WriteScopeAllows(${agg.name} x) => ${renderCsExpr(
+          agg.writeScopeFilter,
+          { thisName: "x", agg, currentUserExpr: AMBIENT_CURRENT_USER },
+        )};`,
+      ]
+    : [];
+
   const findMethodLines = finds.flatMap((f) => {
     const body = findBodies.find((b) => b.name === f.name);
     const filter = body?.filterClause ?? "";
@@ -1039,6 +1081,7 @@ export function renderEventSourcedRepositoryImpl(
       "        if (__rows.Count == 0) return null;",
       `        return ${agg.name}._FromEvents(id, __rows.Select(RowToEvent).ToList());`,
       "    }",
+      ...writeScopeMethod,
       "",
       `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${idClass}> ids, CancellationToken cancellationToken = default)`,
       "    {",
@@ -1155,7 +1198,7 @@ function renderParamsWithCt(
   extra: string[] = [],
 ): string {
   const head = [
-    ...params.map((p) => `${renderCsType(p.type)} ${p.name}`),
+    ...params.map((p) => `${renderCsType(p.type)} ${escapeCsharpIdent(p.name)}`),
     ...extra,
     usesUser ? "User currentUser" : null,
   ]
@@ -1172,7 +1215,7 @@ function renderParamsWithCt(
  *  the run method. */
 export function renderRetrievalParamsWithCt(params: ParamIR[]): string {
   const head = [
-    ...params.map((p) => `${renderCsType(p.type)} ${p.name}`),
+    ...params.map((p) => `${renderCsType(p.type)} ${escapeCsharpIdent(p.name)}`),
     "(int? offset, int? limit)? page = null",
   ].join(", ");
   // The `bypass` param carries an inline read's `ignoring` clause

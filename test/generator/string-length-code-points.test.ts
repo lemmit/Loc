@@ -178,14 +178,32 @@ describe("string .length is code points — python (already correct)", () => {
   });
 });
 
-describe("string .length on elixir — the signed grapheme residual", () => {
-  // Elixir counts GRAPHEMES (`String.length/1`, Ecto's `validate_length/3`),
-  // which agrees with code points on every astral character and diverges only
-  // on combining sequences.  Ecto has no `:codepoints` count, so this is a
-  // documented residual rather than a silent gap — pinned here so a future
-  // change to it is a deliberate edit, not a surprise.
-  it("still uses Ecto validate_length / String.length", async () => {
+describe("string .length is code points — elixir", () => {
+  // Elixir was the last hold-out: `String.length/1` and Ecto's
+  // `validate_length/3` both count GRAPHEMES.  That was signed off as a
+  // residual on the theory it only diverges on combining sequences — but
+  // NFD-normalised accented Latin, emoji ZWJ sequences and regional-indicator
+  // flags all hit it.  Both carriers moved together (moving one alone would
+  // make elixir disagree with itself): Ecto has no `:codepoints` option, so the
+  // native chain's length arm became a `validate_change/3` closure carrying
+  // Ecto's own error tuple.
+  it("the message-LESS chain counts code points, not graphemes", async () => {
     const changeset = await file("cat/product_changeset.ex");
-    expect(changeset).toMatch(/String\.length|validate_length/);
+    expect(changeset).toContain("|> validate_change(:code, fn _, value ->");
+    expect(changeset).toContain("length(String.to_charlist(value)) >= 3");
+    expect(changeset).toContain("length(String.to_charlist(value)) <= 16");
+    // Ecto's own error metadata is preserved, so the 422 body is unchanged.
+    expect(changeset).toContain(
+      '[{:code, {"should be at least %{count} character(s)", count: 3, validation: :length, kind: :min, type: :string}}]',
+    );
+    // The grapheme-counting forms are gone.
+    expect(changeset).not.toContain("validate_length(");
+    expect(changeset).not.toContain("String.length(");
+  });
+
+  it("the messaged predicate carrier counts code points too", async () => {
+    const ctx = await file("cat.ex");
+    expect(ctx).toContain("length(String.to_charlist(label)) >= 4");
+    expect(ctx).not.toContain("String.length(label)");
   });
 });
