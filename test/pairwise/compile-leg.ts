@@ -176,6 +176,36 @@ export function caInstallPrefix(): string {
 }
 
 /**
+ * Trim compiler output for a human-readable assertion, keeping the END.
+ *
+ * Every leg used to do `.slice(0, 4000)` in its own catch block, which is
+ * backwards twice over:
+ *
+ *  1. A compiler prints its DIAGNOSTIC LAST.  The head of a `mix compile` or a
+ *     `gradle build` is dependency-resolution noise, so a head-slice reliably
+ *     captures everything EXCEPT the error.  #2690's elixir cell reported a
+ *     failure whose whole captured body was 4000 characters of "Compiling 12
+ *     files (.ex)", cut off mid-word before anything went wrong.
+ *  2. Truncating in the LEG meant `infraFailure` only ever saw the head too, so
+ *     an infra signature that appears at the end — `:timeout` after a long
+ *     resolution log, exactly the case already in the signature list — could
+ *     not match, and the run was scored a real compile failure.
+ *
+ * So the legs now return their FULL output, the classifier reads all of it, and
+ * only the message is trimmed: a little head for the command context, then the
+ * tail, with the elision marked so nobody mistakes a trim for the whole story.
+ */
+export function trimForMessage(out: string, limit = 4000): string {
+  if (out.length <= limit) return out;
+  const head = Math.min(600, Math.floor(limit / 6));
+  const tail = limit - head;
+  return (
+    `${out.slice(0, head)}\n\n…[${out.length - limit} characters elided — the TAIL follows, ` +
+    `because that is where a compiler puts its error]…\n\n${out.slice(-tail)}`
+  );
+}
+
+/**
  * Delete a scratch dir, BEST-EFFORT — a cleanup failure is never a verdict.
  *
  * The dotnet / java / elixir recipes bind-mount the emitted project into a
@@ -274,18 +304,21 @@ export function describeCompileLeg(recipe: CompileRecipe): void {
               `${caseId(kase)}: ${recipe.label} project emitted at ${path.relative(outDir, proj)}`,
             ).toBe(true);
 
-            const failure = recipe.compile(proj, kase);
+            const failureFull = recipe.compile(proj, kase);
+            // Classify on the FULL text — an infra signature at the end must
+            // still match (see `trimForMessage`).
+            const failure = failureFull === undefined ? undefined : trimForMessage(failureFull);
 
             // Classify BEFORE the ratchet: an infra failure is not a verdict
             // about the emitted code, in either direction.  Treating it as one
             // would both invent a finding and — on a waived case — read as
             // "still broken", quietly holding a waiver whose bug may be fixed.
-            const infra = failure && infraFailure(failure);
+            const infra = failureFull && infraFailure(failureFull);
             if (infra) {
               throw new Error(
                 `${caseId(kase)}: HARNESS FAULT, not a finding — the ${recipe.label} toolchain ` +
                   `never compiled anything (matched /${infra}/).  Fix the environment and re-run; ` +
-                  `do NOT add a waiver for this.\n${failure.slice(0, 1500)}`,
+                  `do NOT add a waiver for this.\n${trimForMessage(failureFull, 1500)}`,
               );
             }
 

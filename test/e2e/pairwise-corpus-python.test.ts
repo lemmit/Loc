@@ -80,7 +80,7 @@ describeCompileLeg({
       return undefined;
     } catch (e) {
       const err = e as { stdout?: Buffer; stderr?: Buffer };
-      return `${err.stdout?.toString() ?? ""}${err.stderr?.toString() ?? ""}`.slice(0, 4000);
+      return `${err.stdout?.toString() ?? ""}${err.stderr?.toString() ?? ""}`;
     }
   },
   timeoutMs: 600_000,

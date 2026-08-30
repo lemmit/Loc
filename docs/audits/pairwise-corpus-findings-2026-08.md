@@ -78,6 +78,7 @@ the gate reported it as stale. The finding was **withdrawn**, not shipped.
 | **F7** | `audited` × `document`/`embedded` — **python** | `record_audit` / `history` are relational-only | **fixed** — this PR |
 | **F8** | `versioned` × `eventLog` — **python** | `save()` takes no `expected_version` (mypy `call-arg`) | **fixed** — this PR (guard is stream-head, not row-version) |
 | **F9** | `versioned` × `eventLog` × `deny` — **dotnet/EF** | CS0535: the event-sourced impl has no `GetByIdForWriteAsync` | **fixed** — this PR; was **#2527 f/u 2 fixing the DOCUMENT shape only** |
+| **F10** | `versioned` × `eventLog` × `requires currentUser.…` — **elixir** | `undefined variable "current_user"` — the ES command emitter never grew the `current_user \\ nil` arg the relational and document paths take | **fixed** — this PR; found only after the log-truncation fix below |
 
 > **Why F1/F2/F5 sat "open" for weeks after they were fixed.** #2527 and #2528
 > landed the emitter fixes and did *not* delete the waivers — correctly, as far
@@ -343,7 +344,7 @@ Two things are worth reading off this, in opposite directions:
   it is the argument for wiring the leg *before* widening it — a wider matrix behind the same
   dark switch would have produced more stale rows, not more caught bugs.
 
-## The five-backend compile run (2026-08-24) — F6–F9, and the pattern behind them
+## The five-backend compile run (2026-08-24) — F6–F10, and the pattern behind them
 
 Slice 1's compile oracle was node-only *by design* ("this slice's job is to prove the harness
 earns them"). It has now earned them: `pairwise.yml` runs the same all-pairs cover through
@@ -355,7 +356,7 @@ each backend's real toolchain. The first run:
 | **python** | 25 | **7 compile failures** → F6, F7, F8 · 0 rejected · 0 crashed |
 | **dotnet** | 25 | **1 compile failure** → F9 · 4 rejected (named `loom.*`) · 0 crashed |
 | java | 25 | clean (22 compiled, 3 rejected) — two independent full runs |
-| elixir | 25 | **clean** — 0 compile failures (verdict obtained after the hex-archive fix, below) |
+| **elixir** | 25 | **1 compile failure** → F10 · reported as "clean" for three runs because the leg truncated the log from the HEAD (below) |
 
 ### Two of these are findings this register already called CLOSED
 
@@ -396,7 +397,7 @@ python fails.
 Java's clean result is also what proves the leg is honest: a leg that quietly dodged the hard
 crossings would look exactly like a green one.
 
-### Elixir — CLEAN, after four attempts and one real harness bug
+### Elixir — three false "clean" verdicts, two harness bugs, and F10
 
 The verdict took four runs, and the first three were the harness's fault, not elixir's:
 
@@ -420,13 +421,56 @@ limit**, and the logs show it spending `attempt 2 of 3` and `attempt 3 of 3` bef
 anyway. The retry is still correct for hex.pm's transient 500s (#2661's case) but it was
 treating a symptom here.
 
-**Result: zero real compile findings on elixir** — no `CompileError`, no `undefined function`,
-no diagnostic of any kind anywhere in the run. The single reported "compile failure" was an
-unclassified infra timeout (a bare `:timeout` atom repeated around `Resolving Hex
-dependencies...`), which **slipped past the classifier** and has been added to its signature
-list with its own test case. That miss is worth recording: a signature list only catches what
-it has already seen, so an unmatched infra failure lands as a FAKE FINDING — the direction this
-classifier is least able to notice about itself.
+**Run 4 was read as "zero real compile findings on elixir" — and that reading was wrong.**
+It is recorded here rather than edited away, because the reason it was wrong is the more
+useful finding. One case did report a compile failure, and its entire captured body was four
+thousand characters of
+
+```
+Compiling 12 files (.ex)
+Compiling 12 files (.ex)
+…
+```
+
+cut off mid-word. Nothing in it named a file, a line, or an error, so it was filed as another
+unclassified infra timeout — the same disposition the genuine `:timeout` case above got, which
+made the misfiling look consistent.
+
+**The cause was in the leg, not in elixir: every leg returned `` `${err.stdout}${err.stderr}`
+.slice(0, 4000) ``, and a compiler prints its diagnostic LAST.** The slice kept the progress
+noise and threw away the answer. Worse, the truncation happened BEFORE the text reached
+`infraFailure`, so a signature at the tail could not match either — the classifier was being
+handed a prefix and asked to recognise a suffix. `trimForMessage` now keeps a 600-character
+head for command context and the TAIL, and marks the elision; the classifier sees the FULL
+text. Both directions are pinned in `test/pairwise/compile-leg.test.ts`, including the
+head-slice case that reproduces the miss.
+
+With the tail visible the same case reported, immediately and unambiguously:
+
+```
+error: undefined variable "current_user"
+ 27 │  :ok <- ensure(current_user.role == "agent", {:forbidden, …}),
+    └─ lib/d/main.ex:27:24: D.Main.bump_thing/2
+```
+
+That is **F10**, and it is a textbook instance of the class this corpus exists to find:
+`versioned` × `eventLog` × `requires currentUser.…`. The relational command path
+(`context-emit.ts`) and the document path both give a principal-reading command a
+`current_user \\ nil` trailing argument; the event-sourced path was the one command emitter
+that never grew it, so it rendered `current_user.role` into a `with` chain of a function that
+never bound it. Fixed on both halves — the function head AND the controller's pass-through,
+because emitting the parameter alone would compile and then deny every request at runtime on
+`nil.role`, which is strictly worse than the compile error it replaces. Pinned by
+`test/generator/elixir/es-command-principal.test.ts` (mutation-proved: reverting either half
+fails four of its five assertions), and verified by a real container compile — `Generated d
+app`, exit 0.
+
+The wider lesson is about the instrument. Three runs in a row reported elixir clean while a
+real emitter bug sat in the cover, and the two mechanisms that hid it are opposites of the
+same mistake: a signature list only catches infra it has already seen (so an unmatched infra
+failure becomes a FAKE finding), and a head-truncated log shows no diagnostic at all (so a REAL
+finding becomes a fake infra fault). **This leg misclassified in both directions before it
+reported anything true.** A green oracle is a claim about the oracle first.
 
 Two corrections to the record, both mine: the earlier claim that "hex.pm is unreachable from
 this sandbox" was **wrong** (the host gets HTTP 200 from both hex hosts and the mirror works —
@@ -448,19 +492,20 @@ classifies infra signatures as HARNESS FAULTS before the ratchet sees them
 
 ### Disposition
 
-**All four are FIXED in the same PR that found them**, and the deciding argument was not
+**All five are FIXED in the same PR that found them**, and the deciding argument was not
 ambition but consistency: this PR drains four stale waivers in its first commit precisely
-because *you cannot wire a gate into CI that lands red*, so shipping a compile matrix with 8
+because *you cannot wire a gate into CI that lands red*, so shipping a compile matrix with 9
 known failures and a register saying "waivers stay empty" would have contradicted itself. The
 registers stay empty because there is nothing left to sign.
 
 Sizes, since "separate PR" was first justified as scope discipline and that was wrong: F6 and
 F9 were splices against templates already in the file (F9's sits twelve lines above the gap it
-didn't fill), F7 was four rounds of import gates the relational builder already had, and only
-F8 needed a genuine semantics decision. None was large.
+didn't fill), F7 was four rounds of import gates the relational builder already had, F10 was
+one predicate call at three emission sites, and only F8 needed a genuine semantics decision.
+None was large.
 
-Post-fix cover: **python 26/26, dotnet's single failure closed, node / java / elixir already
-clean** — so the matrix lands green.
+Post-fix cover: **python 26/26, dotnet's single failure closed, elixir's F10 closed, node /
+java already clean** — so the matrix lands green.
 
 ---
 

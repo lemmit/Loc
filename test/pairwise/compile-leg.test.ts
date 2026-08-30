@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { bestEffortRm, infraFailure } from "./compile-leg.js";
+import { bestEffortRm, infraFailure, trimForMessage } from "./compile-leg.js";
 
 // ---------------------------------------------------------------------------
 // The infra-vs-finding classifier (compile-leg.ts).
@@ -89,5 +89,41 @@ describe("scratch cleanup never fails a case", () => {
     fs.writeFileSync(path.join(d, "f"), "x");
     bestEffortRm(d);
     expect(fs.existsSync(d)).toBe(false);
+  });
+});
+
+describe("compiler output is trimmed from the HEAD, never the tail", () => {
+  // The failure this pins actually happened.  #2690's elixir cell reported a
+  // compile failure whose entire captured body was 4000 characters of
+  // "Compiling 12 files (.ex)", cut off mid-word before anything went wrong —
+  // because each leg did `.slice(0, 4000)` and a compiler prints its diagnostic
+  // LAST.  Worse, the leg truncated BEFORE returning, so `infraFailure` only
+  // ever saw the head and an infra signature at the end could not match.
+  const noise = "Compiling 12 files (.ex)\n".repeat(400);
+
+  it("keeps the error at the end of a long log", () => {
+    const out = `${noise}** (CompileError) lib/app/thing.ex:14: undefined function foo/1`;
+    expect(out.length).toBeGreaterThan(4000);
+    expect(trimForMessage(out)).toContain("undefined function foo/1");
+  });
+
+  it("says that it elided, so a trim is not mistaken for the whole story", () => {
+    expect(trimForMessage(noise)).toContain("characters elided");
+  });
+
+  it("keeps some head for command context", () => {
+    expect(trimForMessage(`STARTMARKER\n${noise}ENDMARKER`)).toContain("STARTMARKER");
+  });
+
+  it("leaves short output completely alone", () => {
+    expect(trimForMessage("error CS0535: nope")).toBe("error CS0535: nope");
+  });
+
+  it("an infra signature at the END is still classifiable — the head-slice bug", () => {
+    const out = `${noise}Resolving Hex dependencies...\n:timeout\n:timeout\n`;
+    // What the OLD code handed the classifier: the head only.
+    expect(infraFailure(out.slice(0, 4000))).toBeUndefined();
+    // What it sees now: the full text.
+    expect(infraFailure(out)).toBeDefined();
   });
 });

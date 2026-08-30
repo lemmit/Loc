@@ -146,7 +146,10 @@ jobs:
   # F821, #2387/#2391 uncompilable .NET, #2181 .NET /warnaserror).  Node is also
   # the backend a fix lands on first, so it is the one most likely to be already
   # green — measured again on this leg's first five-backend run, which found
-  # 7 python and 1 .NET compile failures with node and java clean.
+  # 7 python, 1 .NET and 1 elixir compile failure with node and java clean.
+  # The elixir one surfaced only after a SECOND harness fix: each leg truncated
+  # the captured log to its first 4000 characters and a compiler prints its
+  # diagnostic LAST, so a real finding read as progress noise for three runs.
   #
   # `fail-fast: false` — each cell is an independent backend verdict, and one
   # backend's toolchain trouble must not hide another's real finding.
