@@ -74,10 +74,10 @@ the gate reported it as stale. The finding was **withdrawn**, not shipped.
 | **F3** | `mask unless` × `persistence: mikroorm` (all four repo variants) | TS2304 cannot find name `User` | **fixed** — in the slice-1 PR |
 | **F4** | a field named `secret` after a modifier-less property | swallowed as that property's access modifier; syntax error on the *next* line | open — registered |
 | **F5** | principal capability filter × `shape: document` × `mikroorm` | TS2304 cannot find name `currentUser` | **fixed** — #2528, waiver deleted 2026-08-24 |
-| **F6** | `mask` × `document`/`embedded`/`eventLog` — **python** | `to_wire_masked` missing on the non-relational repo builders | open — **F2's fix never left TypeScript** |
-| **F7** | `audited` × `document`/`embedded` — **python** | `record_audit` / `history` are relational-only | open |
-| **F8** | `versioned` × `eventLog` — **python** | `save()` takes no `expected_version` (mypy `call-arg`) | open |
-| **F9** | `versioned` × `eventLog` × `deny` — **dotnet/EF** | CS0535: the event-sourced impl has no `GetByIdForWriteAsync` | open — **#2527 f/u 2 fixed the DOCUMENT shape only** |
+| **F6** | `mask` × `document`/`embedded`/`eventLog` — **python** | `to_wire_masked` missing on the non-relational repo builders | **fixed** — this PR; was **F2's fix never leaving TypeScript** |
+| **F7** | `audited` × `document`/`embedded` — **python** | `record_audit` / `history` are relational-only | **fixed** — this PR |
+| **F8** | `versioned` × `eventLog` — **python** | `save()` takes no `expected_version` (mypy `call-arg`) | **fixed** — this PR (guard is stream-head, not row-version) |
+| **F9** | `versioned` × `eventLog` × `deny` — **dotnet/EF** | CS0535: the event-sourced impl has no `GetByIdForWriteAsync` | **fixed** — this PR; was **#2527 f/u 2 fixing the DOCUMENT shape only** |
 
 > **Why F1/F2/F5 sat "open" for weeks after they were fixed.** #2527 and #2528
 > landed the emitter fixes and did *not* delete the waivers — correctly, as far
@@ -448,10 +448,19 @@ classifies infra signatures as HARNESS FAULTS before the ratchet sees them
 
 ### Disposition
 
-F6–F9 are **emitter bugs**, not harness bugs, and are deliberately NOT fixed in the PR that
-found them — they belong in `src/generator/python/` and `src/generator/dotnet/` with their own
-per-backend tests. The waiver registers stay EMPTY: these are open findings to fix, not
-divergences to sign for.
+**All four are FIXED in the same PR that found them**, and the deciding argument was not
+ambition but consistency: this PR drains four stale waivers in its first commit precisely
+because *you cannot wire a gate into CI that lands red*, so shipping a compile matrix with 8
+known failures and a register saying "waivers stay empty" would have contradicted itself. The
+registers stay empty because there is nothing left to sign.
+
+Sizes, since "separate PR" was first justified as scope discipline and that was wrong: F6 and
+F9 were splices against templates already in the file (F9's sits twelve lines above the gap it
+didn't fill), F7 was four rounds of import gates the relational builder already had, and only
+F8 needed a genuine semantics decision. None was large.
+
+Post-fix cover: **python 26/26, dotnet's single failure closed, node / java / elixir already
+clean** — so the matrix lands green.
 
 ---
 
