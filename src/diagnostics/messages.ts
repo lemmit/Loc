@@ -2130,13 +2130,13 @@ export const DIAGNOSTIC_MESSAGES = {
     `renders exactly those ${p.max} and the extra ones are silently DROPPED from the page ` +
     `(while still landing in the message catalog).  Wrap the extra content in a \`Stack { … }\` ` +
     `and pass that as the last slot.`,
-  "loom.page-primitive-extra-children#modal-op-form": (p: { where: unknown }) =>
+  "loom.page-primitive-extra-children#modal-op-form": (_p: { where: unknown }) =>
     `a \`Modal\` with an \`OperationForm\` child renders the TRIGGER button and the ` +
     `operation's generated field set — nothing else.  The other positional children have no ` +
     `slot in any design pack and are silently DROPPED.  Use the state-controlled shape ` +
     `(\`Modal { …children, open: <stateBool> }\`), which IS a children container, or move the ` +
     `extra markup out of the modal.`,
-  "loom.slot-outside-component": (p: { where: unknown }) =>
+  "loom.slot-outside-component": (_p: { where: unknown }) =>
     `\`Slot { }\` renders the children a CALLER passed in, so it only means ` +
     `something inside a \`component\` body.  A page has no caller and no children ` +
     `parameter, so this emits an unbound children reference on every frontend — a ` +

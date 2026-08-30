@@ -48,7 +48,11 @@ describe("aggregate shape: … saving shape (D-DOCUMENT-AXIS)", () => {
     const { model, errors } = await parse(`
       context T { aggregate Cart persistedAs: eventLog shape: document { name: string } }
     `);
-    expect(errors).toEqual([]);
+    // Both header fields still PARSE in either order (that is what this test
+    // is about).  The combination itself is now rejected by
+    // `loom.eventlog-shape-ignored`: no emitter reads a saving shape off an
+    // event-sourced aggregate, so it used to be silently dropped.
+    expect(errors.join("\n")).toContain("on event-sourced");
     expect(firstAgg(model).persistedAs).toBe("eventLog");
     expect(firstAgg(model).shape).toBe("document");
   });
@@ -74,7 +78,8 @@ describe("shape threads to the IR (aggregate + dataSource)", () => {
 system Sys {
   subdomain Sales {
     context Shopping {
-      aggregate Cart persistedAs: eventLog shape: document { name: string }
+      aggregate Cart persistedAs: eventLog { name: string }
+      aggregate Basket shape: document { name: string }
     }
   }
   storage pg { type: postgres }
@@ -92,8 +97,10 @@ system Sys {
   it("AggregateIR.savingShape === document for a shape: document aggregate", async () => {
     const loom = lowerModel(await parseValid(SRC));
     const ctx = loom.systems[0]!.subdomains[0]!.contexts.find((c) => c.name === "Shopping")!;
+    const basket = ctx.aggregates.find((a) => a.name === "Basket")!;
+    expect(basket.savingShape).toBe("document");
+    // …and the event-sourced sibling keeps its own persistence mode.
     const cart = ctx.aggregates.find((a) => a.name === "Cart")!;
-    expect(cart.savingShape).toBe("document");
     expect(cart.persistedAs).toBe("eventLog");
   });
 
