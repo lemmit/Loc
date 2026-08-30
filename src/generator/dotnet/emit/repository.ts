@@ -1039,6 +1039,40 @@ export function renderEventSourcedRepositoryImpl(
       "        if (__rows.Count == 0) return null;",
       `        return ${agg.name}._FromEvents(id, __rows.Select(RowToEvent).ToList());`,
       "    }",
+      // Write-scope narrowing (authorization Phase 3 P3.1) — the EVENT-SOURCED
+      // twin of the relational `AnyAsync(...)` pre-guard and the document
+      // fallback above.  `renderRepositoryInterface` declares
+      // `GetByIdForWriteAsync` whenever `agg.writeScopeFilter` is set, and that
+      // derivation (enrichments.ts) is shape-AGNOSTIC — so an event-sourced
+      // aggregate under `policy { deny write … }` got the interface member and
+      // no implementation: CS0535, pairwise F9.
+      //
+      // #2527's follow-up 2 fixed exactly this CS0535 for the DOCUMENT shape
+      // (see the comment on `writeScopeMethod` above, which says so) and left
+      // the event-sourced impl behind — the shape-axis twin of F2's
+      // target-axis partial fix.
+      //
+      // Same body as the document one: `GetByIdAsync` has already folded the
+      // stream, so this only adds the write-scope predicate on top of the
+      // rehydrated aggregate.  There is no query to push it into — an event
+      // stream is append-only rows, not a projected table — so in-app is the
+      // only place it can be evaluated, exactly as for a jsonb document.
+      ...(agg.writeScopeFilter
+        ? [
+            "",
+            `    public async Task<${agg.name}?> GetByIdForWriteAsync(${idClass} id, CancellationToken cancellationToken = default)`,
+            "    {",
+            "        var __found = await GetByIdAsync(id, cancellationToken);",
+            "        if (__found == null) return null;",
+            "        return _WriteScopeAllows(__found) ? __found : null;",
+            "    }",
+            "",
+            `    private static bool _WriteScopeAllows(${agg.name} x) => ${renderCsExpr(
+              agg.writeScopeFilter,
+              { thisName: "x", agg, currentUserExpr: AMBIENT_CURRENT_USER },
+            )};`,
+          ]
+        : []),
       "",
       `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${idClass}> ids, CancellationToken cancellationToken = default)`,
       "    {",
