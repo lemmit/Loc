@@ -131,10 +131,27 @@ jobs:
           retention-days: 14
 
   # ---------------------------------------------------------------------------
-  # NIGHTLY / label / dispatch.  An npm install + strict tsc per case.
+  # NIGHTLY / label / dispatch — the COMPILE oracle, one cell per backend.
+  #
+  # Slice 1 ran this on node alone, which is the tier blind to its own
+  # motivating class: every recorded intersection bug GENERATED cleanly and
+  # failed to compile somewhere OTHER than node (#2412 .NET CS0128 + Python
+  # F821, #2387/#2391 uncompilable .NET, #2181 .NET /warnaserror).  Node is also
+  # the backend a fix lands on first, so it is the one most likely to be already
+  # green — measured again on this leg's first five-backend run, which found
+  # 7 python and 1 .NET compile failures with node and java clean.
+  #
+  # `fail-fast: false` — each cell is an independent backend verdict, and one
+  # backend's toolchain trouble must not hide another's real finding.
+  #
+  # dotnet / java / elixir shell out to their own toolchain CONTAINER (the same
+  # images docs/tools.md documents), so they need only docker, which the runner
+  # has; python needs `uv` on the host.  A cell that cannot reach its toolchain
+  # now fails as a HARNESS FAULT rather than as 25 fake findings — see the
+  # infra-vs-finding classifier in test/pairwise/compile-leg.ts.
   # ---------------------------------------------------------------------------
-  tsc:
-    name: compile oracle (node, strict tsc)
+  compile:
+    name: compile oracle (${{ matrix.backend }})
     if: >
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
@@ -143,19 +160,45 @@ jobs:
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'run-pairwise'))
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Measured wall-clocks on a contended sandbox (warm caches), for
+          # sizing rather than promise: node ~2.8min, python ~3min,
+          # dotnet ~4.5min, java ~4.4min.
+          - backend: node
+            script: test:pairwise-corpus-tsc
+          - backend: python
+            script: test:pairwise-corpus-python
+          - backend: dotnet
+            script: test:pairwise-corpus-dotnet
+          - backend: java
+            script: test:pairwise-corpus-java
+          - backend: elixir
+            script: test:pairwise-corpus-elixir
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: '24'
           cache: npm
+      - name: Install uv (python leg only)
+        if: matrix.backend == 'python'
+        uses: astral-sh/setup-uv@v5
       - name: Install toolchain deps
         run: npm ci
       - name: Build toolchain
         run: npm run build
-      - name: Type-check the emitted node project for every cover case
-        run: npm run test:pairwise-corpus-tsc
+      - name: Compile the emitted project for every cover case
+        run: npm run ${{ matrix.script }}
+        env:
+          # Every leg is gated on LOOM_PAIRWISE plus its own backend var; the
+          # npm scripts set both, so nothing extra is needed here.  The elixir
+          # leg's hex mirror is a SANDBOX workaround for a TLS-fingerprinting
+          # egress proxy — CI runners reach hex.pm directly, so it stays off.
+          LOOM_PAIRWISE: '1'
 
   # ---------------------------------------------------------------------------
   # NIGHTLY / label / dispatch.  The emitted DDL is data — no compiler reads it,
