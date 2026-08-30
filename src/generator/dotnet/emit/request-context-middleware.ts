@@ -77,7 +77,7 @@ public sealed class RequestContextMiddleware
         ctx.Response.Headers["X-Correlation-Id"] = correlationId;
         var rootFrame = RequestContext.OpenRoot(correlationId, locale, DateTimeOffset.UtcNow);${ifMatchLines}
         // Project the frame onto the request's OTel SERVER span (M-T7.1): the
-        // AspNetCore instrumentation starts Activity.Current ahead of this
+        // AspNetCore instrumentation started Activity.Current before this
         // middleware, so stamp the loom.* ids onto it, and thread its
         // trace_id/span_id onto the log scope so every request-scoped line
         // joins to its trace (log<->trace correlation).

@@ -949,11 +949,11 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             // failure from the framework's POV, so the body is
             // sanitized to "internal" like every other 500 arm (RS-28).
             //
-            // Deliberately NOT xh.Message: naming the offending op +
-            // aggregate would save operators a log grep, but that message
-            // interpolates the INNER exception the user handler threw —
-            // driver text, URLs, connection strings — into a public,
-            // potentially unauthenticated response.  The
+            // This previously sent xh.Message, whose intent was to name
+            // the offending op + aggregate so operators didn't have to grep
+            // logs.  But that message interpolates the INNER exception the
+            // user handler threw — driver text, URLs, connection strings —
+            // into a public, potentially unauthenticated response.  The
             // operator-facing half is unaffected: aggregate, op and the full
             // inner exception all reach the catalog's extern_handler_threw
             // event below.  Same shape the Hono onError arm emits.
