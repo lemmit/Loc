@@ -70,6 +70,7 @@ import {
 } from "../../ir/util/projection-read.js";
 import { errorTypeUri } from "../../util/error-defaults.js";
 import { provableStringType } from "../../util/expr-body-type.js";
+import { snake } from "../../util/naming.js";
 import { DURATION_UNIT_MS } from "../../util/temporal.js";
 import { WALKER_LAYOUT_PRIMITIVES } from "../../util/walker-primitive-names.js";
 import type { LoadedPack } from "../_packs/loader.js";
@@ -982,7 +983,41 @@ function adjustFindHookArgs(
   return { ...hookUse, argsRendered: [bag], reactiveQuery: true };
 }
 
-const STANDARD_AGG_OPS: ReadonlySet<string> = new Set([
+/** Resolve a `navigate(<Page>[, <state>])` CALL — in `then:` position (where
+ *  `emitActionThen` has always handled it) or as a bare STATEMENT in a page
+ *  `action` body (where nothing did, so it fell through to the generic
+ *  `${name}(${args})` line and emitted `navigate(/* unresolved: Other *​/
+ *  undefined)` against a `navigate` the shell never imported).  Returns
+ *  undefined when the call is not a navigate, so a caller can fall through.
+ *
+ *  The page-ref → route derivation stays here (it reads `ctx.pageRoutes`, a
+ *  walker concern) and the target contributes only its own navigation form
+ *  through `renderNavigate`; `usesNavigate` is the shell's cue to bind the
+ *  navigator (`useNavigate` / `useRouter` / `inject(Router)`). */
+export function tryRenderNavigateCall(
+  name: string,
+  args: readonly ExprIR[],
+  ctx: WalkContext,
+): string | undefined {
+  if (name !== "navigate") return undefined;
+  const pageRef = args[0];
+  const route =
+    pageRef && pageRef.kind === "ref"
+      ? (ctx.pageRoutes?.get(pageRef.name) ?? `/${snake(pageRef.name)}`)
+      : "/";
+  ctx.usesNavigate = true;
+  // A second arg is an opaque route-state expression (`navigate(Page, sel)`);
+  // the contract's `stateExpr` escape hatch embeds it verbatim.
+  const stateArg = args[1];
+  const stateExpr = stateArg ? emitExpr(stateArg, ctx) : undefined;
+  return ctx.target.renderNavigate(route, [], stateExpr);
+}
+
+/** The compiler-owned repository verbs a `<handle>.<Agg>.<verb>` read can name.
+ *  Exported because a caller resolving the AGGREGATE out of such a read has to
+ *  recognise the verb to look past it: `Ops.Item.all` is a MEMBER chain whose
+ *  last hop is the verb, not the aggregate (`primitives/controls.ts`). */
+export const STANDARD_AGG_OPS: ReadonlySet<string> = new Set([
   "all",
   "byId",
   "create",
@@ -2028,6 +2063,18 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
         return `${ctx.target.renderStoreActionCall({ storeName: stmt.store, action: stmt.name, local: storeLocalFor(ctx, stmt.store, stmt.name) }, callArgs)};`;
       }
       if (ctx.externFunctions?.has(stmt.name)) ctx.usedExternFunctions?.add(stmt.name);
+      // `navigate(<Page>)` — the DOCUMENTED home for navigation (docs/actions.md
+      // §navigate; the lambda form is refused by `loom.effect-in-lambda`), and
+      // the one shape with no arm here: it fell through to the generic call line
+      // below, emitting `navigate(/* unresolved: Other */ undefined)` against a
+      // `navigate` the shell never bound.  Routed through the SAME resolver the
+      // `then:` path uses, so both spellings agree by construction.  Checked
+      // after the action/store/extern arms so a user-declared `action navigate`
+      // still wins.
+      if (stmt.target !== "action" && stmt.target !== "store-action") {
+        const nav = tryRenderNavigateCall(stmt.name, stmt.args, ctx);
+        if (nav !== undefined) return `${nav};`;
+      }
       const args = stmt.args.map((a) => emitExpr(a, ctx)).join(", ");
       return `${stmt.name}(${args});`;
     }

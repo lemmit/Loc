@@ -29,9 +29,11 @@ import {
   navArgValue,
   propagateChildFlags,
   recordStoreUse,
+  STANDARD_AGG_OPS,
   storeLocalFor,
   styleAttr,
   testidAttr,
+  tryRenderNavigateCall,
   walk,
 } from "../walker-core.js";
 
@@ -294,21 +296,13 @@ export function emitAction(
  *  side-effect (drives the shell's `useNavigate` import) also stays
  *  walker-local. */
 export function emitActionThen(then: ExprIR, ctx: WalkContext): string {
-  if (then.kind === "call" && then.name === "navigate") {
-    const pageRef = then.args[0];
-    const route =
-      pageRef && pageRef.kind === "ref"
-        ? (ctx.pageRoutes?.get(pageRef.name) ?? `/${snake(pageRef.name)}`)
-        : "/";
-    ctx.usesNavigate = true;
-    const stateArg = then.args[1];
-    // Source's second arg is rendered as an opaque expression
-    // (`navigate(Page, someRef)` / `navigate(Page, computeState())`).
-    // The contract's `stateExpr` escape hatch wraps it as the
-    // `state:` value verbatim; the args[] path is reserved for the
-    // future kv-decomposed shape.
-    const stateExpr = stateArg ? emitExpr(stateArg, ctx) : undefined;
-    return ctx.target.renderNavigate(route, [], stateExpr);
+  if (then.kind === "call") {
+    // ONE resolver, shared with the action-BODY statement arm in walker-core:
+    // the two spellings of `navigate(<Page>)` diverged (this one worked, the
+    // statement one emitted an unresolved sentinel), and a single call site is
+    // what keeps them from diverging again.
+    const nav = tryRenderNavigateCall(then.name, then.args, ctx);
+    if (nav !== undefined) return nav;
   }
   return emitExpr(then, ctx);
 }
@@ -353,7 +347,21 @@ function emitLambdaBody(lam: ExprIR & { kind: "lambda" }, ctx: WalkContext): str
  *  with no api handle.  Returns the aggregate name when it's known to
  *  this UI, else undefined. */
 function singleAggregateOfQuery(ofArg: ExprIR, ctx: WalkContext): string | undefined {
-  const recv = ofArg.kind === "method-call" ? ofArg.receiver : ofArg;
+  let recv = ofArg.kind === "method-call" ? ofArg.receiver : ofArg;
+  // `<handle>.<Agg>.all` is a plain MEMBER chain, not a method call, so one hop
+  // down lands on the VERB (`all`), not the aggregate — and the lookup below
+  // silently returned undefined, leaving the data-lambda binding untyped so
+  // every `OperationForm { row.<op> }` inside it degraded to a comment on all
+  // six frontends.  `byId(id)` never hit it because the method NAME is not part
+  // of the receiver chain.  Only step past a verb that is not itself a declared
+  // aggregate, so an aggregate legitimately named after one still resolves.
+  if (
+    recv.kind === "member" &&
+    STANDARD_AGG_OPS.has(recv.member) &&
+    !ctx.aggregatesByName.has(recv.member)
+  ) {
+    recv = recv.receiver;
+  }
   const name = recv.kind === "member" ? recv.member : recv.kind === "ref" ? recv.name : undefined;
   return name && ctx.aggregatesByName.has(name) ? name : undefined;
 }
