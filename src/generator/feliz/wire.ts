@@ -637,6 +637,14 @@ export interface FelizFormField {
    *  enum defaults to its first value (a `<select>` always has a selection, and
    *  it keeps the required-enum form valid from the start, mirroring React). */
   emptyValue: string;
+  /** Set when the field's wire type is NUMERIC, and how strictly: `integral`
+   *  for `int`/`long`, `fractional` for `decimal`/`money`.  Every form cell is
+   *  a `string` and the encoder lifts it with F#'s `int`/`int64`/`decimal`
+   *  conversions — which PARSE and THROW.  A `type=number` input happily holds
+   *  `"2.5"` in an `int` field (and `"1e9"`, and a locale comma), so without a
+   *  pre-encode check submit raised an unhandled Elmish exception instead of
+   *  showing a form error.  Drives the numeric guard in `renderValidation`. */
+  numeric?: "integral" | "fractional";
 }
 
 /** One scalar sub-field of a dynamic-row group (`sku` / `qty` of a `LineItem`
@@ -869,6 +877,25 @@ function felizDefaultString(e: ExprIR | undefined): string | undefined {
   return undefined;
 }
 
+/** How strictly a form cell's text must parse before the encoder converts it,
+ *  or `undefined` for a non-numeric field.  `base` is the already-peeled scalar
+ *  type.  A scalar ARRAY of numbers is deliberately NOT marked: its cell holds
+ *  a comma-separated list, which no single-value parse describes (the per-item
+ *  guard is tracked separately). */
+function numericKind(base: TypeIR): "integral" | "fractional" | undefined {
+  if (base.kind !== "primitive") return undefined;
+  switch (base.name) {
+    case "int":
+    case "long":
+      return "integral";
+    case "decimal":
+    case "money":
+      return "fractional";
+    default:
+      return undefined;
+  }
+}
+
 /** Build one flat `FelizFormField` — the record field `wireName` (bound to an
  *  input), encoding to `jsonKey` (inside `objectKey`'s group when set). */
 function buildField(
@@ -902,6 +929,7 @@ function buildField(
     setMsg: `Set${formType}${upperFirst(wireName)}`,
     encodeExpr: encodeExprFor(type, `form.${wireName}`, optional),
     inputKind,
+    numeric: numericKind(base),
     required: !optional,
     enumValues,
     idTarget,
@@ -3255,33 +3283,88 @@ function emptyPredicate(fld: FelizFormField): string {
     : `System.String.IsNullOrWhiteSpace form.${fld.wireName}`;
 }
 
+/** The F# helper that decides whether a numeric cell's TEXT parses, per
+ *  strictness.  Both are BLANK-TOLERANT on purpose: emptiness is the required
+ *  guard's business (an empty optional numeric is a legitimate omission that
+ *  encodes to `null`), so these answer only "is what is typed a number".  The
+ *  `TryParse` spelling is the one `update-emit.ts` already proves compiles
+ *  under Fable. */
+const NUMERIC_CHECK_FN: Record<"integral" | "fractional", string> = {
+  integral: "isWholeText",
+  fractional: "isNumberText",
+};
+
+/** The inline-error message a badly-typed numeric cell shows. */
+const NUMERIC_MESSAGE: Record<"integral" | "fractional", string> = {
+  integral: "Must be a whole number",
+  fractional: "Must be a number",
+};
+
+/** The `let isWholeText` / `let isNumberText` helper bindings, emitted only for
+ *  the strictnesses a form actually uses (a form with no numeric field keeps
+ *  its `Validation` module byte-identical). */
+function numericHelperLines(kinds: ReadonlySet<"integral" | "fractional">): string[] {
+  const out: string[] = [];
+  if (kinds.has("integral")) {
+    out.push(
+      "  /// A whole-number cell's text — blank is left to the required guard.",
+      "  let isWholeText (s: string) : bool =",
+      "    System.String.IsNullOrWhiteSpace s || (match System.Int64.TryParse s with | true, _ -> true | _ -> false)",
+      "",
+    );
+  }
+  if (kinds.has("fractional")) {
+    out.push(
+      "  /// A fractional cell's text — blank is left to the required guard.",
+      "  let isNumberText (s: string) : bool =",
+      "    System.String.IsNullOrWhiteSpace s || (match System.Decimal.TryParse s with | true, _ -> true | _ -> false)",
+      "",
+    );
+  }
+  return out;
+}
+
 /** Emit the `Validation` module — one `<form>Valid` predicate per form, true
- *  when every REQUIRED text/number field is non-empty.  Optional fields and
- *  checkbox (bool) fields are excluded: an optional field left empty encodes to
- *  `null` (a legitimate omission), and an unchecked box is a legitimate `false`,
- *  never "unfilled" — so a form of only optional/bool fields is always valid.
- *  The submit button's `prop.disabled` reads this, so an incomplete form can't
- *  POST (the zod-`.min(1)`-parity guard). */
+ *  when every REQUIRED text/number field is non-empty AND every NUMERIC field's
+ *  text actually parses.  Checkbox (bool) fields are excluded entirely (an
+ *  unchecked box is a legitimate `false`, never "unfilled"), and an optional
+ *  non-numeric field left empty encodes to `null` — a legitimate omission — so
+ *  it is exempt too.  An optional NUMERIC field is still checked for
+ *  well-formedness: empty is fine, `"2.5"` in an `int` cell is not, because the
+ *  encoder's `int`/`int64`/`decimal` conversion THROWS on it.
+ *  The submit button's `prop.disabled` reads this, so an incomplete or
+ *  unparseable form can't POST (the zod-`.min(1)`-parity guard). */
 export function renderValidation(forms: FormRecord[]): string {
   const withFields = forms.filter((f) => f.fields.length > 0);
   if (withFields.length === 0) return "";
+  const kinds = new Set<"integral" | "fractional">(
+    withFields.flatMap((f) =>
+      validatedFields(f).flatMap((fld) => (fld.numeric ? [fld.numeric] : [])),
+    ),
+  );
   return lines(
-    "// Client-side validation — required text/number fields must be non-empty.",
+    "// Client-side validation — required text/number fields must be non-empty,",
+    "// and a numeric field's text must parse before the encoder converts it.",
     "// Alongside the whole-form <form>Valid guard (drives the submit button's",
     "// disabled state), a per-field <form><Field>Error : 'Form -> string option",
     "// feeds the inline message the view shows once a field is touched (blurred)",
     "// — the Elmish analogue of react-hook-form's per-field `errors.<f>.message`.",
     "module Validation =",
+    ...numericHelperLines(kinds),
     ...withFields.flatMap((f, i) => {
-      const required = requiredValidatedFields(f);
-      const body =
-        required.length > 0
-          ? required.map((fld) => `not (${emptyPredicate(fld)})`).join(" && ")
-          : "true"; // nothing required (all optional / bool) → always submittable
-      const errorFns = required.flatMap((fld) => [
+      const validated = validatedFields(f);
+      // One flat `&&` chain: a required field contributes its non-empty term,
+      // a numeric field contributes its parse term, and a required numeric
+      // contributes BOTH (in that order).
+      const terms = validated.flatMap((fld) => [
+        ...(fld.required ? [`not (${emptyPredicate(fld)})`] : []),
+        ...(fld.numeric ? [`${NUMERIC_CHECK_FN[fld.numeric]} form.${fld.wireName}`] : []),
+      ]);
+      const body = terms.length > 0 ? terms.join(" && ") : "true";
+      const errorFns = validated.flatMap((fld) => [
         "",
         `  let ${fieldErrorFn(f.formType, fld.wireName)} (form: ${f.formType}) : string option =`,
-        `    if ${emptyPredicate(fld)} then Some "Required" else None`,
+        fieldErrorBody(fld),
       ]);
       return [
         i > 0 ? "" : undefined,
@@ -3293,18 +3376,42 @@ export function renderValidation(forms: FormRecord[]): string {
   );
 }
 
-/** A form's REQUIRED, message-bearing fields — the ones that carry an inline
- *  error + a touched onBlur (required, non-checkbox: an unchecked box is a
- *  legitimate `false`, never "unfilled").  Shared by the validation emitter, the
- *  Model/Msg/update touched wiring, and the view seam so all three agree. */
-export function requiredValidatedFields(f: FormRecord): FelizFormField[] {
-  return f.fields.filter((fld) => fld.required && fld.inputKind !== "checkbox");
+/** Whether a form field carries an inline error + a touched onBlur.  Two
+ *  reasons qualify: it is REQUIRED (so "unfilled" is an error), or it is
+ *  NUMERIC (so unparseable text is an error, even when the field is optional —
+ *  the encoder's `int`/`int64`/`decimal` conversion throws on it either way).
+ *  A checkbox never qualifies: an unchecked box is a legitimate `false`, never
+ *  "unfilled", and a bool cell is not parsed. */
+export function isValidatedField(fld: FelizFormField): boolean {
+  return (fld.required || fld.numeric !== undefined) && fld.inputKind !== "checkbox";
+}
+
+/** A form's message-bearing fields — see `isValidatedField`.  Shared by the
+ *  validation emitter, the Model/Msg/update touched wiring, and the view seam
+ *  so all three agree. */
+export function validatedFields(f: FormRecord): FelizFormField[] {
+  return f.fields.filter(isValidatedField);
+}
+
+/** The per-field inline-error body — the `if/elif/else` deciding which message
+ *  (if any) a field shows.  A non-numeric required field keeps the original
+ *  single-line form byte-for-byte. */
+function fieldErrorBody(fld: FelizFormField): string {
+  const empty = emptyPredicate(fld);
+  if (!fld.numeric) return `    if ${empty} then Some "Required" else None`;
+  const parses = `${NUMERIC_CHECK_FN[fld.numeric]} form.${fld.wireName}`;
+  const bad = `Some "${NUMERIC_MESSAGE[fld.numeric]}"`;
+  // An OPTIONAL numeric has no "Required" rung — blank is a legitimate
+  // omission — but its text still has to parse.
+  return fld.required
+    ? `    if ${empty} then Some "Required" elif not (${parses}) then ${bad} else None`
+    : `    if ${parses} then None else ${bad}`;
 }
 
 /** True when a form has any field that shows an inline error — the gate for
  *  emitting its `<form>Touched` Model field + `Touch<form>` Msg. */
 export function formHasFieldErrors(f: FormRecord): boolean {
-  return requiredValidatedFields(f).length > 0;
+  return validatedFields(f).length > 0;
 }
 
 /** The `Touch<Form>` Msg case (adds a blurred field's name to the touched set). */

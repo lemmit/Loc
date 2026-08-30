@@ -189,8 +189,10 @@ describe("feliz create forms", () => {
     const app = await appFs(CREATE);
     expect(app).toContain("module Validation =");
     expect(app).toContain("  let productFormValid (form: ProductForm) : bool =");
+    // `price` is numeric (money → fractional), so beyond non-emptiness its text
+    // must also PARSE before the encoder's `decimal` conversion runs (M-T1.22).
     expect(app).toContain(
-      "    not (System.String.IsNullOrWhiteSpace form.name) && not (System.String.IsNullOrWhiteSpace form.price)",
+      "    not (System.String.IsNullOrWhiteSpace form.name) && not (System.String.IsNullOrWhiteSpace form.price) && isNumberText form.price",
     );
   });
 
@@ -332,9 +334,12 @@ describe("feliz create forms", () => {
     expect(app).toContain(
       '"rank", (if form.rank = "" then Encode.nil else Encode.int (int form.rank))',
     );
-    // Only the REQUIRED `name` guards the submit — optionals are exempt.
+    // Only the REQUIRED `name` contributes a non-empty term — optionals are
+    // exempt from that guard.  The optional NUMERIC `rank` still contributes a
+    // parse term (its encoder's `int` conversion throws on unparseable text),
+    // while the optional TEXT `note` contributes nothing at all (M-T1.22).
     expect(app).toContain(
-      "  let productFormValid (form: ProductForm) : bool =\n    not (System.String.IsNullOrWhiteSpace form.name)",
+      "  let productFormValid (form: ProductForm) : bool =\n    not (System.String.IsNullOrWhiteSpace form.name) && isWholeText form.rank",
     );
     expect(app).not.toContain("IsNullOrWhiteSpace form.note");
     expect(app).not.toContain("IsNullOrWhiteSpace form.rank");

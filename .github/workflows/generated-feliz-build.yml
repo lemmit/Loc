@@ -136,6 +136,13 @@ jobs:
                 aggregate Product with crudish {
                   name:     string
                   price:    money
+                  // M-T1.22 — the numeric surface `dotnet fable` had never
+                  // compiled: a PLAIN `decimal` (a JSON *number* on the wire,
+                  // unlike money's string) and a `long` (F# `int64`, decoded
+                  // with `Decode.int64`).  Both reach the create form, so the
+                  // encoders + the numeric form guard compile here too.
+                  weight:   decimal
+                  sold:     long
                   inStock:  bool
                   note:     string?
                   status:   Status
@@ -251,6 +258,12 @@ jobs:
                   Badge { "beta" },
                   Text { `Clicks: {count}` },
                   Text { `Doubled: {doubled}` },
+                  // M-T1.22 — integer division WIDENS to decimal in Loom
+                  // (`5 / 2` is `2.5`), but F#'s `int / int` truncates.  The
+                  // walker's `exprIntDivWidened` seam converts both operands;
+                  // only a Fable compile proves the emitted `decimal` division
+                  // typechecks against the `string` coercion around it.
+                  Text { `Share: {count / 4}` },
                   // Store reads — the persisted tiers' hydrated values.
                   Text { `Draft: {Draft.note}` },
                   Text { `Mode: {Prefs.mode}` },

@@ -45,6 +45,7 @@ import {
   formTouchMsg,
   historyFieldName,
   idLabelsFrom,
+  isValidatedField,
   pageMetaFieldName,
   pageMetaMember,
   projectionFieldName,
@@ -138,7 +139,9 @@ function renderFormInput(formField: string, fld: FelizFormField, base: string): 
   // Message-bearing fields (required, non-checkbox) get a touched onBlur + an
   // inline error below the input — the Elmish mirror of react-hook-form's
   // per-field `errors.<f>.message`, shown once the field has been blurred.
-  const validated = fld.required;
+  // Required OR numeric — an optional numeric cell shows the same inline
+  // error, since its text has to parse before the encoder converts it.
+  const validated = isValidatedField(fld);
   const onBlur = validated
     ? `; prop.onBlur (fun _ -> dispatch (${formTouchMsg(formField)} "${fld.wireName}"))`
     : "";

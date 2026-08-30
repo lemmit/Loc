@@ -210,3 +210,92 @@ system Shop {
     expect(fs).toContain("System.Int64.TryParse raw");
   });
 });
+
+describe("feliz: numeric form text validates before the encoder parses it", () => {
+  // name (required, non-numeric) / price (required, fractional) /
+  // rank (OPTIONAL, integral) — the three validation shapes side by side.
+  const FORM_SYS = `
+system Shop {
+  api ShopApi from Catalog
+  subdomain Catalog {
+    context Cat {
+      aggregate Product with crudish { name: string  price: money  rank: int? }
+      repository Products for Product { }
+    }
+  }
+  storage db { type: postgres }
+  resource catState { for: Cat, kind: state, use: db }
+  ui WebApp {
+    api Shop: ShopApi
+    page ProductNew {
+      route: "/products/new"
+      body: Stack { CreateForm { of: Product } }
+    }
+  }
+  deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
+  deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 }
+}`;
+
+  async function appOf(source: string): Promise<string> {
+    const model = await buildLoomModel(source);
+    const s = model.systems[0]!;
+    const web = s.deployables.find((d) => d.name === "web")!;
+    return generateFelizForContexts(s.subdomains[0]!.contexts, s, web).get("src/App.fs")!;
+  }
+
+  it("emits blank-tolerant TryParse helpers, one per strictness in use", async () => {
+    const fs = await appOf(FORM_SYS);
+    // The spelling `update-emit.ts` already proves compiles under Fable.
+    expect(fs).toContain("  let isWholeText (s: string) : bool =");
+    expect(fs).toContain(
+      "    System.String.IsNullOrWhiteSpace s || (match System.Int64.TryParse s with | true, _ -> true | _ -> false)",
+    );
+    expect(fs).toContain("  let isNumberText (s: string) : bool =");
+    expect(fs).toContain(
+      "    System.String.IsNullOrWhiteSpace s || (match System.Decimal.TryParse s with | true, _ -> true | _ -> false)",
+    );
+  });
+
+  it("adds a parse term per numeric field to the Valid predicate — optional included", async () => {
+    const fs = await appOf(FORM_SYS);
+    // One flat && chain: required contributes non-empty, numeric contributes
+    // parse, a required numeric contributes both.  `rank` is OPTIONAL and still
+    // guarded: its encoder's `int` conversion throws on unparseable text too.
+    expect(fs).toContain(
+      "  let productFormValid (form: ProductForm) : bool =\n" +
+        "    not (System.String.IsNullOrWhiteSpace form.name)" +
+        " && not (System.String.IsNullOrWhiteSpace form.price) && isNumberText form.price" +
+        " && isWholeText form.rank",
+    );
+  });
+
+  it("gives a required numeric the Required→parse error ladder", async () => {
+    const fs = await appOf(FORM_SYS);
+    expect(fs).toContain(
+      '    if System.String.IsNullOrWhiteSpace form.price then Some "Required" elif not (isNumberText form.price) then Some "Must be a number" else None',
+    );
+  });
+
+  it("gives an optional numeric a parse-only error fn — blank stays a legitimate omission", async () => {
+    const fs = await appOf(FORM_SYS);
+    expect(fs).toContain(
+      '    if isWholeText form.rank then None else Some "Must be a whole number"',
+    );
+    // No Required rung, and no non-empty term anywhere for the optional cell.
+    expect(fs).not.toContain("IsNullOrWhiteSpace form.rank");
+  });
+
+  it("wires the optional numeric cell into the touched/onBlur inline-error path", async () => {
+    const fs = await appOf(FORM_SYS);
+    // `rank` is not required, but it is message-bearing now — the view must
+    // dispatch its blur so the "Must be a whole number" message can show.
+    expect(fs).toContain('prop.onBlur (fun _ -> dispatch (TouchProductForm "rank"))');
+  });
+
+  it("emits no numeric helpers for a form with no numeric field", async () => {
+    const fs = await appOf(FORM_SYS.replace("name: string  price: money  rank: int?", "name: string"));
+    expect(fs).toContain("module Validation =");
+    expect(fs).not.toContain("isWholeText");
+    expect(fs).not.toContain("isNumberText");
+  });
+});
