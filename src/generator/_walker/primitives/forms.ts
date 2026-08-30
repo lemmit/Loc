@@ -253,17 +253,17 @@ function routeIdExpr(ctx: WalkContext): string {
  *  them (React), or `{@render <op>OpModal(<op>Form)}` was never emitted at all
  *  (Svelte).  Label/emphasis are the same defaults the state carries. */
 function renderBareOperationFormTrigger(ctx: WalkContext, aggOpLabel: string, opName: string) {
-  // A pack that ships no `primitive-modal` template (the two procedural packs —
-  // Feliz ships one, Flutter does not) would otherwise fall into its loader's
-  // missing-renderer fallback, which is a LINE comment: valid nowhere an
-  // expression is required, so it would turn a silent drop into uncompilable
-  // Dart.  Say so through the target's own comment shape instead — visible in
-  // the output, and still syntactically inert.
-  if (!ctx.pack.templates.has("primitive-modal")) {
-    return ctx.target.renderComment(
-      `OperationForm(${opName}): this design pack renders no operation-form trigger`,
-    );
-  }
+  // Deliberately UNGUARDED (no `ctx.pack.templates.has` probe), matching the
+  // `emitModal` call site this mirrors.  A probe here would mark
+  // `primitive-modal` guarded for the whole `_walker/` scrape in
+  // `test/platform/pack-render-reachability.test.ts`, hiding the fact that
+  // `emitModal` still renders it unguarded on a format whose packs are not
+  // obliged to ship it (angular).  The formats that reach this path — react /
+  // vue / svelte — all ship it; angular, feliz and flutter each FORK
+  // `renderOperationForm` and never fall through (flutter's decline for the
+  // instance-qualified shape is explicit in `flutter-target.ts` for exactly
+  // this reason: its procedural pack has no `primitive-modal`, and its
+  // missing-renderer fallback is a line comment).
   return renderPrimitive(ctx, "primitive-modal", {
     label: aggOpLabel,
     emphasisPrimary: true,

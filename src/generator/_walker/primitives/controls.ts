@@ -351,8 +351,10 @@ function singleAggregateOfQuery(ofArg: ExprIR, ctx: WalkContext): string | undef
   // `<handle>.<Agg>.all` is a plain MEMBER chain, not a method call, so one hop
   // down lands on the VERB (`all`), not the aggregate — and the lookup below
   // silently returned undefined, leaving the data-lambda binding untyped so
-  // every `OperationForm { row.<op> }` inside it degraded to a comment on all
-  // six frontends.  `byId(id)` never hit it because the method NAME is not part
+  // every `OperationForm { row.<op> }` inside it degraded to a comment on
+  // react / vue / svelte / feliz / flutter, and to NOTHING at all on Angular
+  // (its forked resolver returned undefined).  `byId(id)` never hit it,
+  // because a method call's NAME is not part
   // of the receiver chain.  Only step past a verb that is not itself a declared
   // aggregate, so an aggregate legitimately named after one still resolves.
   if (

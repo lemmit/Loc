@@ -86,33 +86,23 @@ async function rendered(framework: string, query: string): Promise<string> {
 // green on the same cell.
 const NOT_IN_SCOPE = /is not an in-scope aggregate instance/;
 
+// Flutter is DELIBERATELY not in this list.  `flutterTarget.renderOperationForm`
+// declines the instance-qualified shape BEFORE any aggregate resolution
+// happens, so the `.all` fix is not observable in its output at all — a
+// parameterised cell for it would pass with the fix reverted, i.e. prove
+// nothing.  Its own (real, separately mutation-proved) behaviour is asserted
+// below.
 describe.each([
   "react",
   "vue",
   "svelte",
   "angular",
   "feliz",
-  "flutter",
 ])("%s — single QueryView over `.all`", (framework) => {
   it("types the data-lambda binding, so the operation form survives", async () => {
     const src = await rendered(framework, "Ops.Item.all");
     expect(src, `${framework}: the op form degraded to a comment`).not.toMatch(NOT_IN_SCOPE);
-    if (framework === "flutter") {
-      // Flutter's pack ships no `primitive-modal` template and its forked
-      // `renderOperationForm` matches only the by-name shape, so the binding
-      // now resolves but there is still nothing to render.  That residue is
-      // its own ledger row (`flutter-modal-instance-operationform`); what
-      // this slice owns is that the residue is a SYNTACTICALLY INERT, VISIBLE
-      // marker rather than the resolution failure — Flutter's pack fallback
-      // for a missing template is a Dart LINE comment, illegal in the
-      // expression position this slot occupies.
-      expect(src).toMatch(/renders no operation-form trigger/);
-      expect(src, "flutter: a line comment here would not compile").not.toMatch(
-        /flutter pack: no renderer for "primitive-modal"/,
-      );
-      return;
-    }
-    // …and the operation actually reached the emitted app.  Every other target
+    // …and the operation actually reached the emitted app.  Every target
     // spells the mutation hook `useActivateItem` / `activateItem`; assert the
     // op name is present rather than a per-framework call shape.
     expect(src, `${framework}: no trace of the 'activate' operation`).toMatch(/[Aa]ctivateItem/);
@@ -122,6 +112,23 @@ describe.each([
     const src = await rendered(framework, "Ops.Item.byId(id)");
     expect(src).not.toMatch(NOT_IN_SCOPE);
   });
+});
+
+it("flutter: the instance-qualified op form is DECLINED, not dropped into the shared path", async () => {
+  // Flutter builds an `<Op><Agg>Form` widget only for the by-name shape
+  // (`flutter-modal-instance-operationform`), so this shape has nothing to
+  // render either way.  What this slice owns is HOW it says so: an explicit
+  // decline from `flutterTarget.renderOperationForm` — a syntactically inert
+  // `const SizedBox.shrink() /* … */` — rather than a `null` that falls
+  // through to the shared walker's `primitive-modal`, which the procedural
+  // Flutter pack answers with a Dart LINE comment.  A line comment in this
+  // slot (the `:` arm of a conditional expression) does not compile.
+  const src = await rendered("flutter", "Ops.Item.all");
+  expect(src).toMatch(/the instance-qualified shape is not rendered on Flutter/);
+  expect(src, "flutter: a line comment here would not compile").not.toMatch(
+    /flutter pack: no renderer for "primitive-modal"/,
+  );
+  expect(src).not.toMatch(NOT_IN_SCOPE);
 });
 
 it("does not step past a verb that is itself a declared aggregate", async () => {
