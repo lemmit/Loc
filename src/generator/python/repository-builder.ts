@@ -1413,7 +1413,11 @@ function syncValueCollection(
  *  either side of the mutation; the actor + correlation / scope / parent ids
  *  are the ambient RequestContext slices.  Parity with the .NET IAuditWriter
  *  staging + the Java service insert. */
-function recordAuditMethod(): string {
+/** `record_audit(...)` — the audit-trail insert.  Shape-INDEPENDENT: it writes an
+ *  `AuditRecordRow` and touches nothing about how the aggregate itself is
+ *  stored, so the document / embedded builders emit the identical method
+ *  (pairwise F7).  Exported for exactly that reuse. */
+export function recordAuditMethod(): string {
   return lines(
     "    async def record_audit(",
     "        self,",

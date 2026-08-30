@@ -6,9 +6,11 @@ import type {
   RepositoryIR,
 } from "../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { renderPyHistoryRepoMethod } from "./emit/audit-history.js";
 import { aggUsesPrincipalContextFilter, contextFilterPredicate } from "./find-predicate.js";
 import { isRefCollectionField, isValueCollectionField, rowClassName } from "./py-columns.js";
 import { wireHelperImport } from "./py-type-imports.js";
@@ -19,6 +21,7 @@ import {
   hydrateField,
   partWireMethod,
   persistField,
+  recordAuditMethod,
   relationalFindMethod,
   rootWhere,
   toWireMaskedMethod,
@@ -135,6 +138,19 @@ export function buildPyEmbeddedRepositoryFile(
     // #2528 fixed exactly this on the TypeScript builders and stopped there —
     // which is why the register recorded F2 as closed while python still had it.
     ...(aggHasFieldMask(agg) ? [toWireMaskedMethod(agg)] : []),
+    // Audit trail (pairwise F7).  The routes call `repo.record_audit(...)` from
+    // the create / update / destroy paths and `repo.history(...)` from the
+    // history route whenever the aggregate is `audited` — with NO check on
+    // saving shape (`createAuditCall` / the destroy + history routes,
+    // routes-builder.ts) — but only the relational builder emitted either, so a
+    // document/embedded audited aggregate failed mypy `attr-defined`.
+    //
+    // Both are shape-INDEPENDENT: `record_audit` inserts an `AuditRecordRow`,
+    // and `history` reads back over `audit_records`.  Neither touches how the
+    // aggregate itself is stored, so both are the relational emitters reused
+    // verbatim rather than re-implemented per shape.
+    ...(aggHasAuditedTarget(agg) ? ["", recordAuditMethod()] : []),
+    ...(repo?.historyFind ? ["", renderPyHistoryRepoMethod(agg)] : []),
     ...parts.flatMap((p) => ["", partWireMethod(p, ctx)]),
   );
 
@@ -182,10 +198,16 @@ export function buildPyEmbeddedRepositoryFile(
     dtNames.length > 0 ? `from datetime import ${dtNames.join(", ")}` : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
     refersTo("math") || dtNames.length > 0 || refersTo("Decimal") ? "" : null,
+    // `history()` is annotated `-> Sequence[...]` (F7).
+    aggHasAuditedTarget(agg) ? "from collections.abc import Sequence" : null,
     refersTo("cast") ? "from typing import cast" : null,
     "",
     saNames.length > 0 ? `from sqlalchemy import ${saNames.join(", ")}` : null,
     refersTo("insert") ? "from sqlalchemy.dialects.postgresql import insert" : null,
+    // `uuid4` + `AuditRecordRow` for `record_audit`'s insert (F7) — the same two
+    // lines the relational builder gates on its own `hasAudit`.  `datetime`/`UTC`
+    // need no gate: `refersTo` scans the emitted body, which now contains them.
+    aggHasAuditedTarget(agg) ? "from uuid import uuid4" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
     // `User` for a per-find `where` principal param; `require_current_user` for
@@ -194,6 +216,7 @@ export function buildPyEmbeddedRepositoryFile(
     // `current_user()` fail-closed and needs the import (F6 / ruff F821).
     authUserImport(findUser, aggUsesPrincipalContextFilter(agg), aggHasFieldMask(agg)),
     `from app.db.schema import ${row}`,
+    aggHasAuditedTarget(agg) ? "from app.db.audit import AuditRecordRow" : null,
     wireHelperImport(refersTo),
     aggregateIsVersioned(agg)
       ? "from app.domain.errors import AggregateNotFoundError, ConcurrencyError"
@@ -210,7 +233,12 @@ export function buildPyEmbeddedRepositoryFile(
       : null,
     // `log` for the mechanism-debug trio (aggregate_loaded / repository_save;
     // find_executed rides the shared relationalFindMethod) — always emitted (S5).
-    "from app.obs.log import log",
+    // The audit insert reads the ambient RequestContext accessors for the
+    // correlation / scope / parent ids (F7), so they join `log` in this import
+    // exactly as the relational builder unions them.  Sorted, single line.
+    aggHasAuditedTarget(agg)
+      ? "from app.obs.log import correlation_id, log, parent_id, scope_id"
+      : "from app.obs.log import log",
     "",
     "",
     body,

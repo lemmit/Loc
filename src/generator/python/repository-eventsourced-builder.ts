@@ -7,6 +7,7 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
+import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { contextEventRowClassName } from "./py-columns.js";
@@ -91,7 +92,22 @@ export function buildPyEventSourcedRepositoryFile(
     "        ]",
     ...emittableFinds(repo).flatMap((f) => ["", inMemoryFind(agg, f)]),
     "",
-    `    async def save(self, aggregate: ${agg.name}) -> None:`,
+    // `expected_version` (pairwise F8): the routes emit
+    // `repo.save(found, expected_version=_expected)` for EVERY `versioned`
+    // aggregate (`versionedSave`, routes-builder.ts) regardless of saving shape,
+    // and this signature did not accept it — mypy `call-arg`.
+    //
+    // The guard is NOT the relational/document one.  Those default the
+    // expectation to `aggregate.version`; an event-sourced aggregate cannot,
+    // because `_from_events` folds the stream with `_version = 0` and never
+    // increments it, so `.version` is ALWAYS 0 here.  The authoritative version
+    // of an event-sourced aggregate is its STREAM HEAD, which is `prior` below.
+    // So an explicit expectation (the `If-Match` echo) is compared against the
+    // head, and absent one there is nothing to compare — the (stream_id,
+    // version) PK already rejects a concurrent append on its own.
+    aggregateIsVersioned(agg)
+      ? `    async def save(self, aggregate: ${agg.name}, expected_version: int | None = None) -> None:`
+      : `    async def save(self, aggregate: ${agg.name}) -> None:`,
     "        pending = aggregate.pull_events()",
     "        if pending:",
     "            prior = (",
@@ -102,6 +118,12 @@ export function buildPyEventSourcedRepositoryFile(
     "                )",
     "            ).scalar()",
     "            version = prior or 0",
+    ...(aggregateIsVersioned(agg)
+      ? [
+          "            if expected_version is not None and version != expected_version:",
+          `                raise ConcurrencyError(f"${agg.name} {aggregate.id} was modified concurrently")`,
+        ]
+      : []),
     "            for ev in pending:",
     "                version += 1",
     // The (stream_id, version) PK IS the event stream's optimistic-concurrency
