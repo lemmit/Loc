@@ -2060,7 +2060,7 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
       // function AND an unbound `other`, i.e. an Elixir CompileError.  Routed
       // through the SAME resolver the expression position uses; `then/2` gives
       // the mid-pipe socket the `push_navigate(socket, …)` shape needs.
-      if (stmt.name === "navigate") {
+      if (stmt.name === "navigate" && stmt.target === "private-operation") {
         return `|> then(fn socket -> ${renderNavigate(stmt.args, ctx)} end)`;
       }
       // Bare function / private-operation call statement.  Evaluated for

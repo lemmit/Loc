@@ -184,3 +184,46 @@ it("flutter: the Notifier residue stays a VISIBLE, compiling TODO", async () => 
   const src = await homePage("flutter");
   expect(src).toMatch(/TODO\(flutter full-parity\).*navigate/);
 });
+
+it("a declared extern ui `function navigate` still wins over the built-in", async () => {
+  // The navigate arm fires only on `target: "private-operation"` — what an
+  // UNRESOLVABLE `navigate(…)` lowers to — AND only when the name is not a
+  // declared extern ui function.  Both halves are needed: an extern
+  // `function navigate()` lowers to the SAME target, so without the second
+  // check the arm hijacked it and emitted `navigate("/")` beside BOTH an
+  // `import { navigate }` and a `const navigate = useNavigate()` — a
+  // redeclaration, on a program that generated correctly before this slice.
+  // (A sibling `action` / store action is excluded by its own arm upstream.)
+  const files = await generateSystemFiles(`
+system NavShadow {
+  subdomain S {
+    context Ops {
+      aggregate Item { name: string }
+      repository Items for Item { }
+    }
+  }
+  ui App {
+    framework: react
+    function navigate(): string extern from "./helpers"
+    page Home {
+      route: "/"
+      state { n: int = 0 }
+      action go() { n := n + 1  navigate() }
+      body: Stack { Button { "Go", onClick: go } }
+    }
+  }
+  api OpsApi from S
+  storage primary { type: postgres }
+  resource st { for: Ops, kind: state, use: primary }
+  deployable api { platform: node contexts: [Ops] dataSources: [st] serves: OpsApi port: 4400 }
+  deployable app { platform: static targets: api ui: App port: 3007 }
+}`);
+  const home = [...files].find(([p]) => /pages\/home\.tsx$/.test(p))?.[1] ?? "";
+  expect(home, "no Home page emitted").not.toBe("");
+  // The handler calls the DECLARED helper with its own (empty) arg list …
+  expect(home, "the declared `navigate` was hijacked by the built-in").toMatch(
+    /const go = \(\) => \{ setN\(\(n \+ 1\)\); navigate\(\); \}/,
+  );
+  // … and no router navigator is hoisted, which would redeclare the import.
+  expect(home, "redeclares `navigate`").not.toMatch(/useNavigate/);
+});

@@ -2068,10 +2068,17 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       // the one shape with no arm here: it fell through to the generic call line
       // below, emitting `navigate(/* unresolved: Other */ undefined)` against a
       // `navigate` the shell never bound.  Routed through the SAME resolver the
-      // `then:` path uses, so both spellings agree by construction.  Checked
-      // after the action/store/extern arms so a user-declared `action navigate`
-      // still wins.
-      if (stmt.target !== "action" && stmt.target !== "store-action") {
+      // `then:` path uses, so both spellings agree by construction.
+      //
+      // Narrowed to `private-operation` — the target `navigate` lowers to when
+      // it resolves to nothing — and skipped for a DECLARED extern ui
+      // `function navigate(...)`, which lowers to the same target but has a
+      // real binding: hijacking it emitted `navigate("/")` alongside BOTH an
+      // `import { navigate }` and a `const navigate = useNavigate()`, i.e. a
+      // redeclaration.  A sibling `action` / store action is already excluded
+      // by its own arm above.  (Feliz gets the same ordering for free from arm
+      // position in `update-emit.ts`.)
+      if (stmt.target === "private-operation" && !ctx.externFunctions?.has(stmt.name)) {
         const nav = tryRenderNavigateCall(stmt.name, stmt.args, ctx);
         if (nav !== undefined) return `${nav};`;
       }
