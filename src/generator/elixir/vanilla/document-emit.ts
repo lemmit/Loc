@@ -362,7 +362,7 @@ end
  *  unfiltered find → `true`, a `deny` carve-out → `false`, an id-only scope)
  *  must NOT bind `record = row.data`: an unused binding trips
  *  `mix compile --warnings-as-errors`. */
-function docPredReadsRecord(pred: string): boolean {
+export function docPredReadsRecord(pred: string): boolean {
   return /\brecord\b/.test(pred);
 }
 
@@ -373,7 +373,7 @@ function docBindRecord(pred: string, indent: string): string {
 
 /** The lambda parameter for an in-app `Enum.filter` — underscored when the
  *  predicate reads neither the embed nor the row. */
-function docFilterLambdaArg(pred: string): string {
+export function docFilterLambdaArg(pred: string): string {
   return docPredReadsRecord(pred) || /\brow\b/.test(pred) ? "row" : "_row";
 }
 

@@ -242,7 +242,7 @@ export const DOC_DENY_HELPER = `  # \`deny\` carve-out (authorization Phase 4): 
  *  in scope.  Anchored on a non-member, non-word char so a value-object
  *  sub-field (`record.money.id`) and a longer field name (`record.identifier`)
  *  are left alone. */
-function liftDocRootId(rendered: string, rowVar: string): string {
+export function liftDocRootId(rendered: string, rowVar: string): string {
   return rendered.replace(/(^|[^.\w])record\.id\b/g, `$1${rowVar}.id`);
 }
 
@@ -257,7 +257,7 @@ function guardPrincipalInApp(rendered: string): string {
 
 /** One predicate rendered for the IN-APP document read path: sentinels
  *  desugared, `this.id` lifted to the row, principal claims made nil-safe. */
-function renderDocPredicate(
+export function renderDocPredicate(
   p: ExprIR,
   agg: AggregateIR,
   contextModule: string,
