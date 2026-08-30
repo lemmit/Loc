@@ -22,11 +22,13 @@ import { dtImportLine, wireHelperImport } from "./py-type-imports.js";
 import { renderPyExpr, renderPyType } from "./render-expr.js";
 import {
   type AggregateReadShape,
+  aggHasFieldMask,
   authUserImport,
   emittableFinds,
   findExecutedLine,
   partWireMethod,
   queryProjectionViews,
+  toWireMaskedMethod,
   toWireMethod,
   writeGuardAlias,
 } from "./repository-builder.js";
@@ -196,6 +198,18 @@ export function buildPyDocumentRepositoryFile(
       : []),
     "",
     toWireMethod(agg, ctx),
+    // `mask unless` response redaction (pairwise F6 — the python half of F2).
+    // The routes call `repo.to_wire_masked(x)` for EVERY masked aggregate
+    // regardless of SAVING SHAPE (`wireResp`, routes-builder.ts), but only the
+    // relational builder emitted the method, so a masked document/embedded/
+    // event-sourced aggregate failed mypy with `has no attribute`.  Masking is a
+    // WIRE-PROJECTION concern, independent of how the row is stored: the shared
+    // `toWireMaskedMethod` projects through `to_wire`, which this builder
+    // already emits, so nothing shape-specific is needed.
+    //
+    // #2528 fixed exactly this on the TypeScript builders and stopped there —
+    // which is why the register recorded F2 as closed while python still had it.
+    ...(aggHasFieldMask(agg) ? [toWireMaskedMethod(agg)] : []),
     ...parts.flatMap((p) => ["", partWireMethod(p, ctx)]),
   );
 
@@ -245,7 +259,11 @@ export function buildPyDocumentRepositoryFile(
     "",
     // `User` for a per-find `where` principal param; `require_current_user` for
     // an always-on principal capability filter (DEBT-02 tail) — one sorted import.
-    authUserImport(findUser, usesPrincipal),
+    // Third gate: `current_user` (the non-raising getter) rides in for the
+    // read-mask projection's fail-closed principal read (`to_wire_masked`) —
+    // the same argument the relational builder passes.  Omitting it is what
+    // turned F6's emitted method into ruff F821 `Undefined name current_user`.
+    authUserImport(findUser, usesPrincipal, aggHasFieldMask(agg)),
     `from app.db.schema import ${row}`,
     wireHelperImport(refersTo),
     versioned

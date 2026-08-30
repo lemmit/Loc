@@ -13,6 +13,7 @@ import { aggUsesPrincipalContextFilter, contextFilterPredicate } from "./find-pr
 import { isRefCollectionField, isValueCollectionField, rowClassName } from "./py-columns.js";
 import { wireHelperImport } from "./py-type-imports.js";
 import {
+  aggHasFieldMask,
   authUserImport,
   emittableFinds,
   hydrateField,
@@ -20,6 +21,7 @@ import {
   persistField,
   relationalFindMethod,
   rootWhere,
+  toWireMaskedMethod,
   toWireMethod,
   writeGuardAlias,
 } from "./repository-builder.js";
@@ -121,6 +123,18 @@ export function buildPyEmbeddedRepositoryFile(
     hydrateMethod(agg, ctx),
     "",
     toWireMethod(agg, ctx),
+    // `mask unless` response redaction (pairwise F6 — the python half of F2).
+    // The routes call `repo.to_wire_masked(x)` for EVERY masked aggregate
+    // regardless of SAVING SHAPE (`wireResp`, routes-builder.ts), but only the
+    // relational builder emitted the method, so a masked document/embedded/
+    // event-sourced aggregate failed mypy with `has no attribute`.  Masking is a
+    // WIRE-PROJECTION concern, independent of how the row is stored: the shared
+    // `toWireMaskedMethod` projects through `to_wire`, which this builder
+    // already emits, so nothing shape-specific is needed.
+    //
+    // #2528 fixed exactly this on the TypeScript builders and stopped there —
+    // which is why the register recorded F2 as closed while python still had it.
+    ...(aggHasFieldMask(agg) ? [toWireMaskedMethod(agg)] : []),
     ...parts.flatMap((p) => ["", partWireMethod(p, ctx)]),
   );
 
@@ -176,7 +190,9 @@ export function buildPyEmbeddedRepositoryFile(
     "",
     // `User` for a per-find `where` principal param; `require_current_user` for
     // an always-on principal capability filter (DEBT-02 tail) — one sorted import.
-    authUserImport(findUser, aggUsesPrincipalContextFilter(agg)),
+    // Third gate — see the document builder: `to_wire_masked` reads
+    // `current_user()` fail-closed and needs the import (F6 / ruff F821).
+    authUserImport(findUser, aggUsesPrincipalContextFilter(agg), aggHasFieldMask(agg)),
     `from app.db.schema import ${row}`,
     wireHelperImport(refersTo),
     aggregateIsVersioned(agg)

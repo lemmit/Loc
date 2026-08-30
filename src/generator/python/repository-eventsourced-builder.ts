@@ -12,7 +12,14 @@ import { snake } from "../../util/naming.js";
 import { contextEventRowClassName } from "./py-columns.js";
 import { wireHelperImport } from "./py-type-imports.js";
 import { renderPyExpr } from "./render-expr.js";
-import { emittableFinds, findExecutedLine, writeGuardAlias } from "./repository-builder.js";
+import {
+  aggHasFieldMask,
+  authUserImport,
+  emittableFinds,
+  findExecutedLine,
+  toWireMaskedMethod,
+  writeGuardAlias,
+} from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
 // Event-sourced repository — `persistedAs: eventLog` aggregates persist
@@ -126,6 +133,12 @@ export function buildPyEventSourcedRepositoryFile(
     eventToData(events),
     "",
     toWireStub(agg, ctx),
+    // `mask unless` response redaction (pairwise F6 — the python half of F2).
+    // Routes call `repo.to_wire_masked(x)` for every masked aggregate whatever
+    // its saving shape; only the relational builder emitted it.  The shared
+    // helper projects through `to_wire`, which `toWireStub` above emits, so an
+    // event-sourced aggregate needs nothing shape-specific either.
+    ...(aggHasFieldMask(agg) ? [toWireMaskedMethod(agg)] : []),
   );
 
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
@@ -150,6 +163,12 @@ export function buildPyEventSourcedRepositoryFile(
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
     `from app.db.schema import ${row}`,
+    // `current_user` for `to_wire_masked`'s fail-closed principal read (F6).
+    // Through the SHARED helper, not a hand-written line: it owns the module
+    // path and the sorted name list, and hand-rolling it here is how the two
+    // drift.  The mask is this builder's only principal usage, so the other two
+    // gates are false.
+    authUserImport(false, false, aggHasFieldMask(agg)),
     wireHelperImport(refersTo),
     "from app.domain.errors import AggregateNotFoundError, ConcurrencyError",
     `from app.domain.events import ${["DomainEvent", "DomainEventDispatcher", ...events.map((e) => e.name)].join(", ")}`,
