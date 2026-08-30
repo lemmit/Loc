@@ -1085,9 +1085,16 @@ function csCoerce(
   // `Select`), so it is LINQ-to-Objects — there is no expression tree for EF to
   // translate and no `double.Parse` ever reaches SQL.
   if (arrivesAsDecimal && (target === "double" || target === "double?")) {
-    return c.optional
-      ? `(${read} is null ? null : ${csDecimalToWireDouble(`${read}!.Value`)})`
-      : csDecimalToWireDouble(`(${read} ?? 0)`);
+    if (!c.optional) return csDecimalToWireDouble(`(${read} ?? 0)`);
+    // Pattern-match the unwrap: `agg?.X is { } v` yields a NON-nullable
+    // `decimal` for the Parse argument, so nullable analysis sees the
+    // `ToString` result as non-null (a `agg?.X!.Value.ToString(…)` chain
+    // stays `string?` and fails `/warnaserror` with CS8604).  The member name
+    // keeps the pattern variable unique when one row carries several optional
+    // decimal aggregates, and the `(double?)` keeps the conditional's type
+    // explicit rather than leaning on target-typing.
+    const v = `__dec${member}`;
+    return `(${read} is { } ${v} ? (double?)${csDecimalToWireDouble(v)} : null)`;
   }
   return c.optional ? `(${target})${read}` : `(${target})(${read} ?? 0)`;
 }

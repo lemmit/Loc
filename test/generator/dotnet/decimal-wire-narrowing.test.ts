@@ -10,7 +10,7 @@
 // double first and the quotient is rounded again — a double rounding, so the
 // answer need not be the nearest double to the stored decimal.  MEASURED on
 // .NET 10.0.11 over 3M random doubles in [0,100), written out as the digits a
-// Postgres `numeric` column holds: 9.20% fail to round-trip through the cast
+// Postgres `numeric` column holds: 9.19% fail to round-trip through the cast
 // (`99.52989333734583` returns as `99.52989333734584`); zero fail through
 // `double.Parse`.
 //

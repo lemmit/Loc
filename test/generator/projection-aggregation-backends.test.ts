@@ -141,7 +141,7 @@ describe("dotnet", () => {
 //   count → int  |  avg over int → double  |  avg/sum/max/min over decimal → decimal
 //
 // so a `decimal` column comes back as `System.Decimal` and the `(double)` cast
-// that follows is the same not-correctly-rounded conversion (F10 — 9.20% of
+// that follows is the same not-correctly-rounded conversion (F10 — 9.19% of
 // doubles fail to round-trip through it, measured on .NET 10.0.11;
 // `99.52989333734583` returns as `…84`).  `csDecimalToWireDouble` replaces it with an exact
 // `decimal.ToString` → correctly-rounded `double.Parse` pair.
@@ -159,17 +159,19 @@ const decimalColumnSystem = `system Shop {
         total: money
         lineCount: int
         price: decimal
+        rate: decimal?
         status: OrderStatus
       }
       repository Orders for Order { }
       projection PriceStats {
         avgPrice: decimal
         maxPrice: decimal
+        maxRate: decimal?
         avgLines: decimal
         orders: int
         revenue: money
         from Order as o
-        select avgPrice = avg(o.price), maxPrice = max(o.price), avgLines = avg(o.lineCount), orders = count(), revenue = sum(o.total)
+        select avgPrice = avg(o.price), maxPrice = max(o.price), maxRate = max(o.rate), avgLines = avg(o.lineCount), orders = count(), revenue = sum(o.total)
       }
       projection PriceByStatus {
         status: OrderStatus
@@ -208,6 +210,16 @@ describe("dotnet EF aggregates land on the CLR type their COLUMN produces", () =
       handler,
       "the CLR decimal->double cast is a double rounding — it disagrees with node",
     ).not.toContain("(double)(agg?.AvgPrice ?? 0)");
+  });
+
+  it("an OPTIONAL decimal-column aggregate unwraps via a pattern match, then parses", async () => {
+    // `agg?.MaxRate!.Value.ToString(…)` is a `string?` conditional chain and
+    // fails `/warnaserror` (CS8604); the `is { } v` pattern hands the Parse a
+    // real `decimal`.  Compile-proved by the dotnet build witness.
+    const handler = await decimalColumnFile("Projections/PriceStatsQpHandler.cs");
+    expect(handler).toContain(
+      `(agg?.MaxRate is { } __decMaxRate ? (double?)${csParse("__decMaxRate")} : null)`,
+    );
   });
 
   it("an INT-column aggregate keeps the plain cast — no needless Parse", async () => {
