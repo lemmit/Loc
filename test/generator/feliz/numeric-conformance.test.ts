@@ -25,7 +25,13 @@
 // is a hard Fable type error.
 
 import { describe, expect, it } from "vitest";
+import { angularTarget } from "../../../src/generator/angular/walker/angular-target.js";
+import { felizTarget } from "../../../src/generator/feliz/feliz-target.js";
 import { generateFelizForContexts } from "../../../src/generator/feliz/index.js";
+import { flutterTarget } from "../../../src/generator/flutter/flutter-target.js";
+import { tsxTarget } from "../../../src/generator/react/walker/tsx-target.js";
+import { svelteTarget } from "../../../src/generator/svelte/walker/svelte-target.js";
+import { vueTarget } from "../../../src/generator/vue/walker/vue-target.js";
 import { buildLoomModel } from "../../_helpers/ir.js";
 
 const sys = (body: string) => `
@@ -431,5 +437,28 @@ system Shop {
     );
     // The string row cell contributes nothing.
     expect(fs).not.toContain("row.sku)");
+  });
+});
+
+// The seam is OPTIONAL, and every other frontend leaves it undefined: JS's one
+// `number` tower already yields `2.5` for `5 / 2` and has no int-vs-long
+// distinction, and Dart's `/` is double division.  Structural proof that no
+// other frontend's output could have shifted — the same shape
+// `duration-seam.test.ts` uses for `exprDuration`/`exprTemporalBinary`.
+describe("the numeric seam is Feliz-only", () => {
+  for (const [name, target] of [
+    ["react", tsxTarget],
+    ["vue", vueTarget],
+    ["svelte", svelteTarget],
+    ["angular", angularTarget],
+    ["flutter", flutterTarget],
+  ] as const) {
+    it(`${name} leaves exprNumericBinary undefined, so it takes the walker fallback`, () => {
+      expect(target.exprNumericBinary).toBeUndefined();
+    });
+  }
+
+  it("feliz is the one target that implements it", () => {
+    expect(felizTarget.exprNumericBinary).toBeDefined();
   });
 });

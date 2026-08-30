@@ -260,7 +260,7 @@ jobs:
                   Text { `Doubled: {doubled}` },
                   // M-T1.22 — integer division WIDENS to decimal in Loom
                   // (`5 / 2` is `2.5`), but F#'s `int / int` truncates.  The
-                  // walker's `exprIntDivWidened` seam converts both operands;
+                  // walker's `exprNumericBinary` seam converts both operands;
                   // only a Fable compile proves the emitted `decimal` division
                   // typechecks against the `string` coercion around it.
                   Text { `Share: {count / 4}` },
