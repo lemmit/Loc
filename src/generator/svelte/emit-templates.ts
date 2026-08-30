@@ -27,11 +27,34 @@ export interface LoomForm<T> {
   applyServerErrors(e: unknown): { kind: "fields" } | { kind: "global"; title: string } | { kind: "unhandled" };
 }
 
+/** Deep-copy the defaults while PRESERVING prototypes.
+ *
+ *  \`structuredClone\` cannot be used here: it drops the prototype off class
+ *  instances, so a \`money\` seed (a \`Decimal\`) came back as a prototype-less
+ *  bag — the input rendered \`[object Object]\` and an untouched default could
+ *  never satisfy the money schema.  Only ARRAYS and PLAIN objects are copied
+ *  (a fresh form must not share mutable structure with the seed); everything
+ *  else — class instances, dates, primitives, null — is carried by reference,
+ *  which is safe because those values are only ever REPLACED by the inputs,
+ *  never mutated in place.
+ */
+function cloneDefaults<T>(v: T): T {
+  if (Array.isArray(v)) return v.map(cloneDefaults) as unknown as T;
+  if (typeof v === "object" && v !== null && Object.getPrototypeOf(v) === Object.prototype) {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      out[k] = cloneDefaults(val);
+    }
+    return out as T;
+  }
+  return v;
+}
+
 export function createForm<S extends z.ZodType>(
   schema: S,
   defaults: z.infer<S>,
 ): LoomForm<z.infer<S>> {
-  let values = $state(structuredClone(defaults) as z.infer<S>);
+  let values = $state(cloneDefaults(defaults) as z.infer<S>);
   let errors = $state<Record<string, string>>({});
   let submitting = $state(false);
 
@@ -49,7 +72,7 @@ export function createForm<S extends z.ZodType>(
       return submitting;
     },
     reset() {
-      values = structuredClone(defaults) as z.infer<S>;
+      values = cloneDefaults(defaults) as z.infer<S>;
       errors = {};
     },
     async submit(onValid: (vals: z.infer<S>) => Promise<void> | void) {
