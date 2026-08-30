@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
 // .NET test emission — a binary actual inside a matcher is parenthesized.
@@ -37,9 +36,7 @@ system S {
   deployable d { platform: dotnet contexts: [C] dataSources: [st] serves: A port: 4000 }
 }
 `;
-    const { model, errors } = await parseString(src);
-    if (errors.length) throw new Error(errors.join("\n"));
-    const files = generateSystems(model).files;
+    const files = await generateSystemFiles(src);
     const tests = [...files.entries()].find(([p]) => /Tests\/.*OrderTests\.cs$/.test(p))?.[1];
     expect(tests).toBeDefined();
     expect(tests!).toContain("(o.Count < o.Factor).Should().Be(false);");
@@ -69,9 +66,7 @@ system S {
   deployable d { platform: dotnet contexts: [C] dataSources: [st] serves: A port: 4000 }
 }
 `;
-    const { model, errors } = await parseString(src);
-    if (errors.length) throw new Error(errors.join("\n"));
-    const files = generateSystems(model).files;
+    const files = await generateSystemFiles(src);
     const tests = [...files.entries()].find(([p]) => /Tests\/.*OrderTests\.cs$/.test(p))?.[1];
     expect(tests).toBeDefined();
     expect(tests!).toContain("o.Count.Should().Be(3);");
