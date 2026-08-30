@@ -38,6 +38,7 @@ import {
   felizOperationForm,
   felizWorkflowForm,
   fieldErrorFn,
+  findFieldName,
   formFileSelectMsg,
   formTouchedField,
   formTouchMsg,
@@ -335,19 +336,26 @@ export const felizTarget: WalkerTarget = {
       const field = projectionFieldName(detected.aggregateName);
       return { varName: field, hookName: lowerFirst(field), importFrom: "", argsRendered: [] };
     }
-    // A `byId` read resolves to the `<Agg>ById` Model field (its `Remote<'T
-    // option>` envelope); the derived entity-history read (docs/audit.md) to its
-    // own `<Agg>History` field — NEVER the `All<Plural>` list, which was the
-    // misbinding that kept feliz out of `HISTORY_CAPABLE_FRAMEWORKS`; `all` (and
-    // any other read) to `All<Plural>`.  The page-entry `Cmd` — not this call —
-    // issues the byId/history fetch, so the view only names the field it
-    // matches on.
+    // Every read resolves to its OWN Model field, keyed by the OPERATION:
+    // `all` → `All<Plural>`, `byId` → `<Agg>ById` (its `Remote<'T option>`
+    // envelope), the derived entity-history read (docs/audit.md) →
+    // `<Agg>History`, and a user-declared repository find → `<Agg><Find>`.
+    //
+    // The `All<Plural>` FALLBACK this used to end in is what made two of those
+    // silent bugs: it kept feliz out of `HISTORY_CAPABLE_FRAMEWORKS`, and it
+    // bound every parameterised find (`Doc.byVis(v)`) to the unfiltered list —
+    // a `model.AllDocs` no Model declared, no `Cmd` filled and no update arm
+    // stored, for a query that was never issued.  There is no fallback now:
+    // the read collector (`collectBodyReads`) throws on any operation that is
+    // not one of these four, so a field named here always exists.
     const field =
-      detected.operation === "byId"
-        ? byIdFieldName(detected.aggregateName)
-        : detected.operation === AUDIT_HISTORY_FIND
-          ? historyFieldName(detected.aggregateName)
-          : readFieldName(detected.aggregateName);
+      detected.operation === "all"
+        ? readFieldName(detected.aggregateName)
+        : detected.operation === "byId"
+          ? byIdFieldName(detected.aggregateName)
+          : detected.operation === AUDIT_HISTORY_FIND
+            ? historyFieldName(detected.aggregateName)
+            : findFieldName(detected.aggregateName, detected.operation);
     return { varName: field, hookName: lowerFirst(field), importFrom: "", argsRendered: [] };
   },
   renderApiCall: (call) => call.varName ?? readFieldName(call.aggregateName),
@@ -641,7 +649,7 @@ export const felizTarget: WalkerTarget = {
   // (paramless) submit button dispatching `Submit<Wf>Form`.  The form state +
   // encoder + POST `/workflows/<wf>` Cmd live in `update`/`Api` (wired by
   // index.ts's `collectPageWorkflowForms`).  Falls through when `runs:` isn't a
-  // ref to a reachable workflow with scalar params.
+  // ref to a reachable workflow.
   renderWorkflowForm: (call, ctx) => {
     if (call.kind !== "call") return null;
     const names = call.argNames ?? [];
@@ -655,7 +663,11 @@ export const felizTarget: WalkerTarget = {
       idLabelsFrom(ctx.aggregatesByName.values()),
       vosFromBc(ctx.bcByWorkflow.get(wfName)),
     );
-    if (form.fields.length === 0 && form.fieldArrays.length === 0) return null;
+    // A PARAM-LESS workflow (`run()`) renders too — an empty form with just the
+    // submit (no inputs, no validity guard), matching `renderOperationForm`'s
+    // param-less op.  (Returning null here dropped the whole primitive: the
+    // shared fallback emits `primitive-form-of`, which the feliz pack has no
+    // renderer for, so the form vanished into a pack comment.)
     // Testid namespace: the scaffold's `testid:` arg (`workflow-place_order`) or
     // the `workflow-<snake(wf)>` default the workflow page-object builder computes.
     const base = stringNamed(call, "testid") ?? `workflow-${snake(wf.name)}`;

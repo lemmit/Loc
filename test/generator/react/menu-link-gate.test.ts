@@ -76,15 +76,16 @@ describe("react menu-link gate", () => {
     expect(publicLine).not.toContain("?");
   });
 
-  it("does not gate any link when the frontend has no auth: ui", async () => {
-    const files = await generateSystemFiles(
-      SYS({ authUi: false, gate: 'requires currentUser.role == "agent"\n      ' }),
-    );
-    const app = find(files, "web/src/App.tsx");
-    expect(app).not.toContain("useSession");
-    expect(app).not.toContain("currentUser");
-    // The gated page's link still renders, just unconditionally.
-    expect(app).toContain('to="/secret"');
+  it("rejects a gated link without auth: ui (the silent drop is closed)", async () => {
+    // This used to assert the output emitted UNGUARDED — an access check
+    // declared in the model and silently absent from the output.  Phase ⑦
+    // now refuses the model instead (`requires` joined the currentUser-read
+    // placements), so the unguarded output is output no user can obtain.
+    await expect(
+      generateSystemFiles(
+        SYS({ authUi: false, gate: 'requires currentUser.role == "agent"\n      ' }),
+      ),
+    ).rejects.toThrow("loom.current-user-needs-auth-ui");
   });
 
   it("does not wrap an ungated linked page even under auth: ui", async () => {

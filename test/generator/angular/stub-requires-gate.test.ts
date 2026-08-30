@@ -54,12 +54,13 @@ describe("angular parameterised-find requires gate", () => {
     expect(page).toContain("<h2>Forbidden</h2>");
   });
 
-  it("renders the ungated body (no session, no Forbidden) without auth: ui", async () => {
-    const page = await gatedPage(false);
-    expect(page).not.toContain("stub — body needs api/forms support");
-    expect(page).toContain('readonly ticketOpen = useOpenTicket(() => ({ status: "open" }));');
-    // No client-side gate without an `auth: ui` frontend.
-    expect(page).not.toContain("SessionService");
-    expect(page).not.toContain("Forbidden");
+  it("rejects the currentUser gate without auth: ui (the silent drop is closed)", async () => {
+    // This used to assert the page emitted UNGUARDED — an access check declared
+    // in the model and silently absent from the output.  Phase ⑦ now refuses
+    // the model instead (`requires` joined the currentUser-read placements),
+    // so the unguarded page is output no user can obtain.
+    await expect(generateSystemFiles(SYS({ authUi: false }))).rejects.toThrow(
+      "loom.current-user-needs-auth-ui",
+    );
   });
 });

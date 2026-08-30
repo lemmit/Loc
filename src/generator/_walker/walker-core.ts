@@ -1496,6 +1496,18 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // already tags these with `refKind: "let"`; emit the bare
       // name so the generated code references the local.
       if (expr.refKind === "let") return expr.name;
+      // A bare enum-member reference (`o.vis == Public`).  A frontend never
+      // sees the enum as a type: it rides the wire as the member's bare NAME
+      // string (`z.enum(["Public", …])` in _frontend/zod-schemas.ts, `String`
+      // in flutter/dart-types.ts, `string` in feliz/wire.ts `wireFieldType`),
+      // which is why the two other frontend renderers of this ref — the ui
+      // gate (`_frontend/gate-expr.ts`) and the seed defaults
+      // (`_frontend/default-seed.ts`) — both emit `JSON.stringify(e.name)`.
+      // Rendered through the literal seam so each embedded language spells the
+      // string its own way (JS/F# `"Public"`, Dart `'Public'`) — no new seam.
+      // Last, after the name-scoped lookups above, so a state / param / shell
+      // local of the same name still wins (lowering already shadows it too).
+      if (expr.refKind === "enum-value") return ctx.target.exprLiteral("string", expr.name);
       return `/* unresolved: ${expr.name} */ undefined`;
     case "binary": {
       const left = emitExpr(expr.left, ctx);

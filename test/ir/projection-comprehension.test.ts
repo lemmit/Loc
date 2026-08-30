@@ -44,11 +44,15 @@ async function lowerProjection(name: string, body: string) {
   return ctx.projections.find((p) => p.name === name)!;
 }
 
-async function projectionErrorCodes(body: string): Promise<string[]> {
+async function projectionErrors(body: string) {
   const { model } = await parseString(wrap(body), { validate: false });
-  return validateLoomModel(enrichLoomModel(lowerModel(model)))
-    .filter((d) => d.severity === "error")
-    .map((d) => d.code);
+  return validateLoomModel(enrichLoomModel(lowerModel(model))).filter(
+    (d) => d.severity === "error",
+  );
+}
+
+async function projectionErrorCodes(body: string): Promise<string[]> {
+  return (await projectionErrors(body)).map((d) => d.code);
 }
 
 const QUERY_TIME = `
@@ -190,6 +194,56 @@ describe("projection comprehension — validation gates", () => {
     expect(codes).toContain("loom.projection-query-and-fold-invalid");
     // the specific reserved-combo gate fires INSTEAD of the generic honest gate
     expect(codes).not.toContain("loom.projection-query-time-unsupported");
+  });
+
+  // A projection's `where` is a SELECTION position — pushed down to SQL by
+  // every backend — so it carries the same queryable-subset contract as a
+  // repository `find … where` and a `retrieval` `where`.  Nothing checked it
+  // until now, and the two exits were both bad on a model that parsed with ZERO
+  // errors: node/drizzle threw `internal: where-clause for find '…' could not
+  // lower to Drizzle` at generate time, while the DIRECT-TABLE paths (a
+  // workflow-/projection-sourced read, an aggregation) dropped the filter
+  // SILENTLY on node and python — an endpoint that returns every row.
+  it("rejects a non-queryable `where` (arithmetic) on a query-time projection", async () => {
+    const diags = await projectionErrors(`
+      projection BigOrders {
+        code: string
+        from Order as o
+        where o.lineCount + 1 > 5
+        select code = o.status
+      }
+    `);
+    const hit = diags.find((d) => d.code === "loom.projection-where-not-queryable");
+    expect(hit, "the non-queryable where is rejected").toBeDefined();
+    expect(hit?.message).toContain("BigOrders");
+    expect(hit?.message).toContain("arithmetic '+'");
+  });
+
+  it("rejects a non-queryable `where` on an AGGREGATION (the silently-dropped-filter shape)", async () => {
+    // The repro from the audit: node's and python's aggregation route lower the
+    // `where` separately from the repository find, and used to emit no
+    // `.where(…)` at all when it failed to lower — a total over the WHOLE table.
+    const codes = await projectionErrorCodes(`
+      projection SalesTotals {
+        orders: int
+        from Order as o
+        where o.lineCount + 1 > 5
+        select orders = count
+      }
+    `);
+    expect(codes).toContain("loom.projection-where-not-queryable");
+  });
+
+  it("accepts a queryable `where` (comparisons, &&, params, enum values)", async () => {
+    const codes = await projectionErrorCodes(`
+      projection ConfirmedBig(min: int) {
+        code: string
+        from Order as o
+        where o.status == Confirmed && o.lineCount > min
+        select code = o.status
+      }
+    `);
+    expect(codes).not.toContain("loom.projection-where-not-queryable");
   });
 
   it("leaves today's folded projection untouched (no comprehension diagnostics)", async () => {

@@ -117,9 +117,40 @@ workflow MoveMoney transactional {
 | Start a workflow in the same context | `loom.domain-service-no-workflow-start` |
 | Calling a **reading**/**mutating** service from an aggregate op / view body | `loom.domain-service-infra-call-from-aggregate` |
 | A **resource-op** (`files.put(…)`, `mail.send(…)`, …) — outbound I/O belongs to the orchestrator | `loom.resource-op-outside-workflow` |
+| Reading a repository of **another context** — the `reading` tier is scoped to the service's own context | `loom.domain-service-cross-context-read` |
 
 Repository **reads** are allowed (they lower to a `repo-read` Call, not a
-write); mutation of a **passed-in aggregate** via its own operation is
+write) — but only of the service's **own context**: lowering resolves reads
+against the enclosing context's repositories alone, so a cross-context name
+never becomes a `repo-read` and every backend would render the unresolved
+receiver verbatim (`Customers.byName(r)` with nothing defining `Customers`).
+Move the service into the other context, or have the orchestrating workflow do
+the read and pass the value in as a parameter.
+
+## Cross-context data, in DDD terms (a decision, not a TODO)
+
+The `loom.domain-service-cross-context-read` gate is **permanent by design**,
+not an interim awaiting a "cross-context read port" (decided 2026-08-23). A
+bounded context is a language boundary: another context's repository is its
+internal model, and a domain service is an internal detail of the context that
+declares it — never visible outside it, never seeing outside it. Loom already
+models both sanctioned crossings, and both sit in the **application layer**
+(workflows / handlers), which is where cross-context orchestration belongs:
+
+1. **The other context's published API** (Open Host Service, with `wireShape`
+   as the published language): bind it with `resource <name> { for: <Ctx>,
+   kind: api, use: <Api> }` and call it from a workflow — a typed in-system
+   `remote-api-op`, addressed via the `<RESOURCE>_URL` seam, on every backend.
+2. **The other context's published events**, carried over a `channel` and
+   folded into a **local projection** — the projection is the anti-corruption
+   translation, and the domain then reads only its own model.
+
+Either way the callable surface of a context is its api (commands and queries
+routed to aggregate operations and workflows) plus its published events; the
+workflow fetches, and the domain service receives **values as parameters**.
+Co-hosting two contexts on one deployable is a deployment fact and does not
+loosen the model boundary — the model decides, deployment realizes. Mutation of a **passed-in
+aggregate** via its own operation is
 allowed in the `mutating` tier (it's a method-call, never the
 `no-mutation` statement gate). Plus an **anemic-domain warning**
 (`loom.domain-service-single-aggregate`) when every operation takes

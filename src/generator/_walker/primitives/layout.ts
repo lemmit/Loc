@@ -89,6 +89,21 @@ export function emitGrid(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   return renderPrimitive(ctx, "primitive-grid", {
     hasChildren: children.length > 0,
     children,
+    // Grid was the ONE children-bearing container that never passed
+    // `childrenBlock` — the pre-joined form every sibling container supplies
+    // (`Stack`/`Group`/`Section`/`Sticky`/`Container`/`Toolbar`).  The `.hbs`
+    // packs iterate `{{#each children}}` (each child in its own column
+    // wrapper), so they never noticed; the two PROCEDURAL packs read
+    // `childrenBlock` through their shared container helpers — Feliz's
+    // `containerEl` (`prop.children [ … ]`) and Flutter's `childrenList`
+    // (`<Widget>[ … ]`) — and silently rendered an EMPTY grid.  Flutter's
+    // was worse than silent: `<Widget>[\n,\n]` is a Dart syntax error.
+    // Joined on `childIndent` because the children were walked at `depth + 2`
+    // (the extra level is the per-child column wrapper the markup packs emit),
+    // so the join indent stays self-consistent with the child bodies.
+    childrenBlock: children.join(`${ctx.target.interChildSeparator ?? ""}\n${childIndent}`),
+    // `indent` is the name the procedural helpers read for the same value.
+    indent: childIndent,
     colIndent,
     childIndent,
     closeIndent,

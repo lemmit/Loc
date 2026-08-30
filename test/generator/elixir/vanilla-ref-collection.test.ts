@@ -171,3 +171,87 @@ system RC3 {
     expect(ctxMod).toContain("defp __ref_id_list(");
   });
 });
+
+// ---------------------------------------------------------------------------
+// EVENT-SOURCED aggregates with a reference collection.
+//
+// The ES controller serializes the FOLDED struct from `wireShape` — except when
+// the aggregate carried an `X id[]` field, where it fell back to the raw
+// `Map.from_struct |> Map.drop` dump: `wireShape`'s ref-collection projection
+// calls `__ref_ids/1`, and the relational helper (`Enum.map(records, & &1.id)`)
+// is wrong here — an ES fold has no Ecto association, it appends the id VALUE
+// (`crewIds += e.sailor`), so the field already holds the id list.  The result
+// was a snake_cased body that contradicted this backend's OWN served
+// `<Agg>Response` schema, on the one aggregate shape that hit the fallback.
+// ---------------------------------------------------------------------------
+const ES_SRC = `
+system EsRC {
+  subdomain Fleet {
+    context Fleet {
+      event ShipNamed { ship: Ship id, name: string }
+      event SailorHired { ship: Ship id, sailor: Sailor id }
+      aggregate Ship persistedAs: eventLog {
+        homePort: string
+        crewIds: Sailor id[]
+        create launch(homePort: string) { emit ShipNamed { ship: id, name: homePort } }
+        operation hire(sailor: Sailor id) { emit SailorHired { ship: id, sailor: sailor } }
+        apply(e: ShipNamed) { homePort := e.name }
+        apply(e: SailorHired) { crewIds += e.sailor }
+      }
+      aggregate Sailor with crudish {
+        name: string
+        mateIds: Sailor id[]
+      }
+      repository Ships for Ship { }
+      repository Sailors for Sailor { }
+    }
+  }
+  api FleetApi from Fleet
+  storage pg { type: postgres }
+  resource fleetState { for: Fleet, kind: state, use: pg }
+  resource fleetLog { for: Fleet, kind: eventLog, use: pg }
+  deployable api { platform: elixir, contexts: [Fleet], dataSources: [fleetState, fleetLog], serves: FleetApi, port: 4000 }
+}`;
+
+describe("vanilla elixir — ES aggregate with a reference collection serializes its wireShape", () => {
+  it("projects the folded struct through wireShape, not the raw struct dump", async () => {
+    const ctrl = file(await generateSystemFiles(ES_SRC), "/ship_controller.ex");
+    expect(ctrl).toContain('"id" => record.id');
+    expect(ctrl).toContain('"homePort" => record.home_port');
+    expect(ctrl).toContain('"crewIds" => __ref_ids(record.crew_ids)');
+    // The snake-cased raw dump is gone.
+    expect(ctrl).not.toContain("Map.from_struct()");
+    expect(ctrl).not.toContain("Map.drop([:__meta__, :__struct__])");
+  });
+
+  it("emits the IN-MEMORY __ref_ids/1 (identity over the folded id list)", async () => {
+    const ctrl = file(await generateSystemFiles(ES_SRC), "/ship_controller.ex");
+    expect(ctrl).toContain("defp __ref_ids(ids) when is_list(ids), do: ids");
+    expect(ctrl).toContain("defp __ref_ids(_), do: []");
+    // NOT the relational assoc helper — `& &1.id` on a folded id binary raises.
+    expect(ctrl).not.toContain("Enum.map(records, & &1.id)");
+    expect(ctrl).not.toContain("%Ecto.Association.NotLoaded{}");
+  });
+
+  it("serves the SAME wire keys its own OpenAPI ShipResponse declares", async () => {
+    const files = await generateSystemFiles(ES_SRC);
+    const schema = file(files, "/schemas/ship_response.ex");
+    expect(schema).toContain("crewIds:");
+    expect(schema).toContain("homePort:");
+    const ctrl = file(files, "/ship_controller.ex");
+    for (const key of ["id", "homePort", "crewIds"]) expect(ctrl).toContain(`"${key}" =>`);
+  });
+
+  it("matches the RELATIONAL twin's projection shape for the same field kind", async () => {
+    const files = await generateSystemFiles(ES_SRC);
+    const es = file(files, "/ship_controller.ex");
+    const rel = file(files, "/sailor_controller.ex");
+    // Both project an `X id[]` to a camelCase id array through `__ref_ids/1`;
+    // only the helper body differs (Ecto assoc vs in-memory fold).
+    expect(rel).toContain('"mateIds" => __ref_ids(record.mate_ids)');
+    expect(es).toContain('"crewIds" => __ref_ids(record.crew_ids)');
+    expect(rel).toContain(
+      "defp __ref_ids(records) when is_list(records), do: Enum.map(records, & &1.id)",
+    );
+  });
+});

@@ -92,6 +92,19 @@ import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 // BY is emitted as three separate `raw()` calls of the same SQL text.
 // ---------------------------------------------------------------------------
 
+/** The internal-error text for a projection `where` that reached emission
+ *  without lowering to Drizzle.  The IR validator rejects a non-queryable
+ *  projection `where` (`loom.projection-where-not-queryable`, the twin of the
+ *  find/retrieval gates), so this is unreachable from valid input — and it is a
+ *  THROW rather than a silent `where: undefined` because dropping the filter
+ *  would serve every row of the table from a route the author scoped. */
+function unloweredWhere(projName: string): string {
+  return (
+    `internal: where-clause for projection '${projName}' could not lower to Drizzle, ` +
+    "but the validator should have caught this. Please file a bug."
+  );
+}
+
 export function buildQueryProjectionsFile(
   ctx: EnrichedBoundedContextIR,
   /** `persistence: mikroorm` — read the direct-table shapes through the
@@ -132,10 +145,9 @@ export function buildQueryProjectionsFile(
     let where: string | undefined;
     if (p.query.filter) {
       const lowered = lowerToDrizzle(p.query.filter, tableBare, ctx);
-      if (lowered) {
-        where = lowered.expr;
-        for (const op of lowered.ops) rawDrizzleOps.add(op);
-      }
+      if (!lowered) throw new Error(unloweredWhere(p.name));
+      where = lowered.expr;
+      for (const op of lowered.ops) rawDrizzleOps.add(op);
     }
     rawReads.set(p.name, { table: `schema.${tableBare}`, where });
   }
@@ -175,10 +187,9 @@ export function buildQueryProjectionsFile(
     const parts: string[] = [];
     if (p.query.filter) {
       const lowered = lowerToDrizzle(p.query.filter, table, ctx);
-      if (lowered) {
-        parts.push(lowered.expr);
-        for (const op of lowered.ops) rawDrizzleOps.add(op);
-      }
+      if (!lowered) throw new Error(unloweredWhere(p.name));
+      parts.push(lowered.expr);
+      for (const op of lowered.ops) rawDrizzleOps.add(op);
     }
     parts.push(...drizzleCapabilityPredicates(p, ctx, table, rawDrizzleOps));
     if (parts.length === 0) aggWheres.set(p.name, undefined);

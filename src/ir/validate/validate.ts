@@ -75,6 +75,7 @@ import {
   validateGuardPrincipalWithoutAuth,
   validateInheritanceStorage,
   validateJavaReadModelShapes,
+  validateMikroOrmSupport,
   validateNeedCapabilities,
   validatePagedQueryHandlerBackend,
   validatePermissions,
@@ -171,6 +172,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateStampSupport(sys, diags);
     validateGuardPrincipalWithoutAuth(sys, diags);
     validateDapperSupport(sys, diags);
+    validateMikroOrmSupport(sys, diags);
     validateFindPredicateAdapterSupport(sys, diags);
     validateNeedCapabilities(sys, diags);
     validateResourceConfig(sys, diags);
@@ -241,7 +243,10 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateFindNameCollisions(c, diags);
     validateAggregateTestBodies(c, diags);
     validateContextIntegrationTests(c, diags);
-    validateDomainServices(c, diags);
+    // The cross-context-repository gate needs the sibling contexts, so this
+    // check takes the model's full context list (like `validateWorkflows`
+    // below, which takes every context's events).
+    validateDomainServices(c, diags, [...allContexts(loom)]);
     validateFunctionBlockBodies(c, diags);
     validateExternOperations(c, diags);
     validateStampReadsBeforeFlush(c, diags);

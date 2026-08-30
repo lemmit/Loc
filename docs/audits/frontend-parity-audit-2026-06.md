@@ -1,5 +1,11 @@
 # Frontend feature-parity audit
 
+> **[2026-08-23 re-audit]** On the BACKEND side the picture this audit's era
+> assumed is gone — every classic gate set in
+> `src/ir/validate/checks/system-checks.ts` now holds all five backends, so
+> per-target backend gaps are no longer where the debt is. The remaining gaps
+> are language-level — see [`language-gaps-2026-08.md`](language-gaps-2026-08.md).
+
 > **SUPERSEDED (2026-07-16)** by [`frontend-parity-audit-2026-07.md`](frontend-parity-audit-2026-07.md),
 > which adds the **Feliz (F#/Fable/Elmish)** frontend this pass predates and
 > reports a 🔴 silent gap (24 page primitives with no Feliz renderer). Kept for

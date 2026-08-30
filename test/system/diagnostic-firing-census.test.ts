@@ -192,6 +192,22 @@ const FIRING_FIXTURES: Record<string, string> = {
     repository Things for Thing { }
     retrieval Same() of Thing { where: name == other }`),
 
+  // --- projection `where` -------------------------------------------------
+  // A projection's `where` is a selection position too — it is pushed down to
+  // SQL by every backend — so it carries the same queryable-subset contract as
+  // the find / retrieval twins above.  Arithmetic does not lower: node/drizzle
+  // threw an internal error at generate time and the direct-table paths dropped
+  // the filter silently (an endpoint returning every row) until this gate.
+  "loom.projection-where-not-queryable":
+    repoOnly(`    aggregate Order with crudish { lineCount: int }
+    repository Orders for Order { }
+    projection SalesTotals {
+      orders: int
+      from Order as o
+      where o.lineCount + 1 > 5
+      select orders = count
+    }`),
+
   // --- macro expansion (phase ②) ------------------------------------------
   "loom.macro-arg-missing": uiWith("scaffoldAggregate()"),
   "loom.macro-arg-duplicate": uiWith("scaffoldAggregate(of: Thing, of: Thing)"),
@@ -454,6 +470,27 @@ system S {
     port: 3000
   }
 }`,
+  // A domainService's `reading` tier is scoped to its OWN context: a body
+  // naming another context's repository never lowers to a `repo-read`, so all
+  // five backends render the unresolved receiver verbatim.
+  "loom.domain-service-cross-context-read": `
+system S {
+  subdomain Sub {
+    context Billing {
+      aggregate Customer { name: string }
+      repository Customers for Customer {
+        find byName(name: string): Customer? where this.name == name
+      }
+    }
+    context Ordering {
+      aggregate Order { ref: string }
+      repository Orders for Order { }
+      domainService Naming {
+        operation isFree(r: string): bool { return Customers.byName(r) == null }
+      }
+    }
+  }
+}`,
 
   // An unresolved bare ref in a rendered slot: the walker emits a comment and
   // the content silently disappears on all six frontends (A17).
@@ -497,6 +534,102 @@ system S {
   "loom.svelte-deployable-missing-ui": spaMissingUi("svelte"),
   "loom.vue-deployable-missing-ui": spaMissingUi("vue"),
   "loom.angular-deployable-missing-ui": spaMissingUi("angular"),
+  // The two SELF-HOSTING frontends (own build toolchain, not the static-bundle
+  // pipeline) were missing from the rule entirely: feliz crashed codegen with a
+  // raw `Error`, flutter emitted a placeholder app at exit 0.
+  "loom.feliz-deployable-missing-ui": spaMissingUi("feliz"),
+  "loom.flutter-deployable-missing-ui": spaMissingUi("flutter"),
+  // --- `ui:` on a platform that mounts no UI (Rule 3) ---------------------
+  "loom.ui-binding-unmountable-platform": `
+system P {
+  subdomain D { context Orders {
+    aggregate Order with crudish { name: string }
+    repository Orders for Order { }
+  } }
+  ui WebApp { }
+  storage pg { type: postgres }
+  resource st { for: Orders, kind: state, use: pg }
+  deployable api { platform: node contexts: [Orders] dataSources: [st] ui: WebApp port: 3000 }
+}`,
+
+  // A `match await` in a COMPONENT action, on a Flutter-hosted ui: the Flutter
+  // component emitter filters such a component out entirely (no widget, every
+  // call site an empty `SizedBox.shrink()`), so the gate makes the drop honest.
+  "loom.flutter-async-effect-unsupported": `
+system P {
+  subdomain D { context C {
+    aggregate Order with crudish { customerId: string
+      operation reserve(): Order { return this }
+    }
+  } }
+  api Api from D
+  ui WebApp {
+    api C: Api
+    component Confirmer(order: Order) {
+      state { note: string = "" }
+      action go() {
+        match await C.Order.reserve() {
+          Order o => { note := o.customerId }
+          else    => { note := "x" }
+        }
+      }
+      body: Button { "Go", onClick: go }
+    }
+    page Detail(id: Order id) {
+      route: "/orders/:id"
+      body: Confirmer(order: C.Order.byId(id))
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable app { platform: flutter targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
+  // A `slot` param on a WALKED component, on an Angular-hosted ui: the Angular
+  // component emitter filters such a component out entirely (no class file, and
+  // every call site keeps `<!-- unknown layout component: Panel -->`), because
+  // `ngComponentOutletInputs` sets INPUTS and has no content-projection channel.
+  "loom.user-component-deferred-target": `
+system P {
+  subdomain D { context C {
+    aggregate Order with crudish { customerId: string }
+  } }
+  api Api from D
+  ui WebApp {
+    api C: Api
+    component Panel(head: slot) { body: Card { head } }
+    page Home { route: "/" body: Stack { Panel(head: Text { "hi" }) } }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable app { platform: angular targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
+  // A `toast(<expr>)` outside the v1 message subset every realtime renderer
+  // implements — two-level member access off the event binding.  Without the
+  // gate this aborts `ddd generate system` with a raw Error from
+  // `renderMessageExpr` / `renderFsToastMessage` / `renderMessageExprElixir`.
+  "loom.toast-message-unsupported": `
+system P {
+  subdomain D { context C {
+    aggregate Order with crudish { customerId: string }
+    event OrderPlaced { order: Order id, at: datetime }
+    channel Lifecycle { carries: OrderPlaced  delivery: broadcast  retention: ephemeral }
+  } }
+  api Api from D
+  ui WebApp {
+    api C: Api
+    channel Live: C.Lifecycle
+    on Live.OrderPlaced(e) { toast(e.order.id) }
+    page Home { route: "/" body: Stack { Heading { "home" } } }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable app { platform: react targets: api ui: WebApp { C: api } port: 3001 }
+}`,
 
   // `display`/`inspect` are reserved derived names that only mean something on
   // an aggregate — on a value object they are rejected.

@@ -59,12 +59,12 @@ describe("svelte menu-link gate", () => {
     expect(layout).not.toContain("{#if (");
   });
 
-  it("emits no gating without auth: ui", async () => {
-    const layout = find(
-      await generateSystemFiles(SYS({ authUi: false, menu: true })),
-      "(app)/+layout.svelte",
+  it("rejects a gated link without auth: ui (the silent drop is closed)", async () => {
+    // This used to assert the shell emitted the link UNGATED — the page's
+    // `requires currentUser…` silently unenforced.  Phase ⑦ now refuses the
+    // model instead (`requires` joined the currentUser-read placements).
+    await expect(generateSystemFiles(SYS({ authUi: false, menu: true }))).rejects.toThrow(
+      "loom.current-user-needs-auth-ui",
     );
-    expect(layout).not.toContain("useSession");
-    expect(layout).not.toContain("{#if (");
   });
 });

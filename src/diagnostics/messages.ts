@@ -33,10 +33,11 @@
  *  interpolates. */
 type MessageEntry = string | ((params: never) => string);
 
-/** The four `*-deployable-missing-ui` codes (`react`/`svelte`/`vue`/`angular`)
- *  say the same thing about a different platform — but they stay FOUR codes so
- *  the fix-hint registry can dispatch per platform (`src/language/fix-hints.ts`).
- *  One shared builder, four catalog entries: a key must resolve to exactly the
+/** The six `*-deployable-missing-ui` codes (`react`/`svelte`/`vue`/`angular`/
+ *  `feliz`/`flutter`) say the same thing about a different platform — but they
+ *  stay SIX codes so the fix-hint registry can dispatch per platform
+ *  (`src/language/fix-hints.ts`).
+ *  One shared builder, six catalog entries: a key must resolve to exactly the
  *  code its call site attaches (`codeOfMessageKey`, gated by
  *  `test/system/diagnostic-catalog.test.ts`), so a single shared key would be a
  *  hole in that invariant — and a key is never computed at a call site. */
@@ -261,6 +262,18 @@ export const DIAGNOSTIC_MESSAGES = {
   "loom.svelte-deployable-missing-ui": spaDeployableMissingUi("Svelte"),
   "loom.vue-deployable-missing-ui": spaDeployableMissingUi("Vue"),
   "loom.angular-deployable-missing-ui": spaDeployableMissingUi("Angular"),
+  // Feliz and Flutter are self-hosting frontends (own toolchain, own bundle);
+  // without a `ui:` the Feliz generator THREW a raw `Error: Feliz deployable
+  // 'web' has no ui binding` and the Flutter one emitted a placeholder app with
+  // exit 0 — both after `ddd parse` reported zero errors.
+  "loom.feliz-deployable-missing-ui": spaDeployableMissingUi("Feliz"),
+  "loom.flutter-deployable-missing-ui": spaDeployableMissingUi("Flutter"),
+  // Rule 3 — `ui:`/`hosts:` on a platform whose descriptor says `mountsUi:
+  // false` (today: `node`).  The platform menu is DERIVED from the descriptor
+  // table, never hand-listed, so it can't drift the way the inline literal did
+  // (it omitted angular, feliz and python for as long as they had existed).
+  "loom.ui-binding-unmountable-platform": (p: { platform: unknown; menu: unknown }) =>
+    `'ui:'/'hosts:' binding is only valid on platforms that mount a UI (${p.menu}); got '${p.platform}'.`,
   "loom.auth-ui-target-open": (p: { name: unknown; targetName: unknown }) =>
     `Frontend deployable '${p.name}' declares 'auth: ui' but its target '${p.targetName}' is not 'auth: required'; the guard has no session endpoint to probe.`,
   "loom.auth-ui-misplaced": (p: { name: unknown }) =>
@@ -1002,6 +1015,13 @@ export const DIAGNOSTIC_MESSAGES = {
     op: unknown;
   }) =>
     `${p.where}: call to domain service '${p.service}.${p.op}(…)' reaches beyond the aggregate boundary (a repository read, or mutating other passed-in aggregates), which the domain layer may not do from inside an aggregate operation.  Move the call into the orchestrating workflow / command handler, which loads the aggregates and owns the commit.`,
+  "loom.domain-service-cross-context-read": (p: {
+    where: unknown;
+    recvName: unknown;
+    ownContext: unknown;
+    otherContext: unknown;
+  }) =>
+    `${p.where}: repository '${p.recvName}' is declared in context '${p.otherContext}', not in this service's own context '${p.ownContext}' — a domain service is an internal detail of its context and may only read its own repositories. Cross-context data crosses at the context's PUBLIC surface instead: have the orchestrating workflow fetch it — through '${p.otherContext}''s api (a 'resource { kind: api }' binding gives a typed in-system call), or from a local projection folded over '${p.otherContext}''s published events (via a channel) — and pass the value into the service as a parameter. Or move the service into '${p.otherContext}'.`,
   "loom.domain-service-single-aggregate": (p: { name: unknown }) =>
     `domainService '${p.name}': every operation takes a single aggregate parameter — consider declaring the behaviour as an 'operation' on that aggregate instead of a domain service.`,
 
@@ -1121,6 +1141,11 @@ export const DIAGNOSTIC_MESSAGES = {
     `projection '${p.name}': 'select ${p.field} = …' references '${p.unresolved}', which ` +
     `resolves to nothing — not a field of the '${p.source}' source, not a 'join' alias, ` +
     `not a parameter${p.hint}. It would be emitted as an undeclared identifier.`,
+  "loom.projection-where-not-queryable": (p: { name: unknown; offending: unknown }) =>
+    `projection '${p.name}': where-clause is not queryable (${p.offending}). ` +
+    `Allowed: comparisons, &&/||/!, parens, '<alias>.<column>' / '<alias>.<vo>.<sub>' refs, ` +
+    `parameter refs, literals — the 'where' is pushed down to SQL, so it carries the same ` +
+    `subset a repository 'find … where' does.`,
   "loom.projection-groupby-source-invalid": (p: { name: unknown; why: unknown }) =>
     `projection '${p.name}' declares 'group by', but ${p.why}. A grouped ` +
     `projection reads (and groups) an AGGREGATE source's table in SQL — ` +
@@ -1370,6 +1395,18 @@ export const DIAGNOSTIC_MESSAGES = {
     `(with or without params), one or more named success/error arms, and an optional ` +
     `\`else\`.  Otherwise host this ui on an SPA frontend (React/Vue/Svelte/Angular), or ` +
     `drive the op through a form primitive (CreateForm/OperationForm).  Tracked in M-T6.15.`,
+  "loom.flutter-async-effect-unsupported": (p: {
+    where: unknown;
+    uiName: unknown;
+    name: unknown;
+  }) =>
+    `${p.where}: \`match await …\` (an async effect) is used in a COMPONENT action on ui ` +
+    `'${p.uiName}', hosted by the Flutter deployable '${p.name}', but the Flutter component ` +
+    `emitter does not render one — an async effect needs the page shell's notifier and route ` +
+    `id.  A component carrying one is DROPPED: no widget is emitted for it and every call ` +
+    `site renders an empty \`SizedBox.shrink()\`.  Move the \`match await\` into a PAGE ` +
+    `action (Flutter renders it there), or drive the op through a form primitive ` +
+    `(CreateForm/OperationForm).  Tracked in M-T1.20.`,
 
   // ----------------------------------------------------------------------
   // src/ir/validate/checks/system-checks.ts
@@ -1852,8 +1889,25 @@ export const DIAGNOSTIC_MESSAGES = {
   // `validateMikroOrmSupport` used for its SHAPE rejects.  Its last surviving
   // caller was the abstract-inheritance-base-with-`contains` shape, which is
   // impossible on every target and so became the target-neutral
-  // `loom.abstract-aggregate-contains` above; the gate function went with it.
-  // The CODE stays live through the `#migrations` variant just above.)
+  // `loom.abstract-aggregate-contains` above.  The CODE stays live through the
+  // `#migrations` variant just above and the `#scalar-array` reject below —
+  // the ONE shape where mikroorm is behind drizzle rather than at parity,
+  // which is why it carries its own message rather than a generic tail.)
+  "loom.mikroorm-unsupported#scalar-array": (p: {
+    name: unknown;
+    subject: unknown;
+    field: unknown;
+    element: unknown;
+  }) =>
+    `Deployable '${p.name}' selects 'persistence: mikroorm', but ${p.subject} declares the ` +
+    `scalar collection field '${p.field}: ${p.element}[]'. The MikroORM row emitter maps a ` +
+    `root aggregate field to a column per declared kind (primitive / enum / id / value ` +
+    `object) and has no arm for an array of primitives or enum values, so generation would ` +
+    `abort. Drizzle stores it as a native Postgres array — use 'persistence: drizzle' on ` +
+    `this deployable, move the collection onto a contained entity part (parts fold a ` +
+    `collection field into one jsonb column on this adapter), or model it as a value-object ` +
+    `collection ('<VO>[]') or a reference collection ('<Agg> id[]'), both of which mikroorm ` +
+    `already persists.`,
   "loom.find-predicate-unsupported": (p: {
     name: unknown;
     adapter: unknown;
@@ -2215,6 +2269,31 @@ export const DIAGNOSTIC_MESSAGES = {
     `\`match await ${p.aggName}.${p.op}(…) { … }\` so its Result is handled ` +
     `(async-actions-and-effects.md Stage 2b — every remote call is explicitly awaited and its ` +
     `Result matched).`,
+  "loom.user-component-deferred-target": (p: {
+    name: unknown;
+    uiName: unknown;
+    framework: unknown;
+    dName: unknown;
+    reason: unknown;
+    emitter: unknown;
+  }) =>
+    `component '${p.name}' on ui '${p.uiName}': the ${p.framework} component emitter DEFERS ` +
+    `this component — ${p.reason} — so it is rendered by deployable '${p.dName}' as NOTHING: ` +
+    `no component is emitted for it, and every call site renders the walker's ` +
+    `\`unknown layout component: ${p.name}\` give-up comment.  The declaration and its uses ` +
+    `disappear together, with a clean build (${p.emitter}).  Change the component to a shape ` +
+    `this frontend emits, or host this ui on a frontend that renders it ` +
+    `(React / Vue / Svelte all do).`,
+  "loom.toast-message-unsupported": (p: { where: unknown; kind: unknown; detail: unknown }) =>
+    `${p.where}: the \`toast(…)\` message ${p.detail}.  Every realtime renderer implements the ` +
+    `same v1 message subset — a literal, the handler's event binding, a SINGLE-LEVEL member ` +
+    `access off that binding, parentheses, and binary operators between those — and THROWS on ` +
+    `anything else (\`unsupported expression kind '${p.kind}'\`): ` +
+    `src/generator/_frontend/realtime.ts (React/Vue/Svelte/Angular), ` +
+    `src/generator/feliz/realtime.ts (Feliz), src/generator/elixir/realtime-liveview.ts ` +
+    `(Phoenix LiveView).  So this \`.ddd\` validates and then CRASHES codegen.  Build the ` +
+    `message from a literal and \`<bind>.<field>\` parts (\`toast("Order " + e.order + ` +
+    `" placed")\`); compute anything richer server-side and carry it on the event.`,
 
   // ----------------------------------------------------------------------
   // src/ir/validate/checks/tenancy-checks.ts

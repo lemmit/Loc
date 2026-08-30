@@ -6,9 +6,10 @@
 > a `.ddd` fixture (`MacroArgString`, `MacroArgInt` — no stdlib macro declares
 > string/int params; `ImportStmt` — single-file fixture, covered by
 > `multifile-*.ddd`). Bugs below are surfaced-not-fixed per campaign policy.
-> **Product bugs: BUG-003 OPEN** (scalar-return op HTTP divergence — an earlier
-> gate was **reverted** because it broke the shipped op-self-call feature; see
-> below). **BUG-005 FIXED** (union find → success-variant-directly at 200 across
+> **Product bugs: BUG-003 RESOLVED** (2026-08-23 — the scalar-return op HTTP
+> contract converged on **200-with-body across all five backends**; an earlier
+> *gate* had been reverted because it broke the shipped op-self-call feature, but
+> the emitter-side fix has since landed everywhere — see below). **BUG-005 FIXED** (union find → success-variant-directly at 200 across
 > all 5 backends). **BUG-004 FIXED** (M-T5.18 Track C — keyword
 > fields readable via postfix `.`). BUG-006 in flight as #1622; BUG-001/002 were test-infra
 > and fixed here.
@@ -57,7 +58,25 @@ plus a 2-entry residual (`LValue`, `NamedType`). The honest target is now
 
 ---
 
-### BUG-003 — scalar return-typed operation diverges 3 ways across backends — **S2**
+### BUG-003 — scalar return-typed operation diverges 3 ways across backends — **S2 · RESOLVED (verified 2026-08-23)**
+
+> **RESOLVED — the convergence landed on all five backends, and it is 200-with-body.**
+> Re-verified 2026-08-23 against fresh `main`: the three 204-discard backends now
+> return the value — python `routes-builder.ts:~1240` (`response_model=<wireType>`,
+> 200 with the serialized value instead of the 204 that discarded it), java
+> `emit/api.ts:259-285` (`ResponseEntity<${wireRet}>` + `ResponseEntity.ok(result)`;
+> the wire type is boxed so it fits the generic position), .NET `emit/api.ts:635-637`
+> (`var result = await _mediator.Send(cmd); return Ok(result);`, with the value's
+> wire type threaded through `cqrs/commands.ts:394` + `cqrs/controller.ts:104`).
+> Defect (b) is closed too — Hono's 200 schema is now `zodForResponse(op.returnType)`
+> rather than the aggregate's `<Agg>Response` (`src/platform/hono/v4/routes-builder.ts:1828`),
+> and elixir declares the scalar body in its spec (`vanilla/openapi-emit.ts:693`).
+> Void ops still answer 204; union ops keep their 200/ProblemDetails path. Pinned
+> statically across all five by `test/conformance/scalar-return-parity.test.ts`,
+> with per-backend arms in `test/generator/{java/generator-java-scalar-returns,
+> dotnet/operation-scalar-return-emit,python/python-operation-scalar-return}.test.ts`
+> and `test/generator/elixir/vanilla-openapi-spec.test.ts`. The paragraphs below
+> are the historical record.
 
 Slice S3. Added `operation describe(): string { return name + " #" + string(sequence) }`
 to `Catalog.Project`. `generate system` succeeds on all 5 backends, but the
@@ -79,7 +98,7 @@ response schema as the aggregate's `ProjectResponse` when the value is a
 only covers the *union* return form `X or NotFound` → 200; the scalar-return
 form was apparently never reconciled across backends.)
 
-**OPEN — an attempted gate was REVERTED.** The first fix assumed scalar-return
+**Historical — an attempted gate was REVERTED (and the real fix landed later; see the resolution note above).** The first fix assumed scalar-return
 aggregate operations "aren't part of any shipped design" and added an IR-validate
 gate (`loom.operation-return-scalar-unsupported`) rejecting non-`or`-union
 operation returns. **That premise was wrong.** `test/e2e/fixtures/elixir-vanilla-build/vanilla-op-self-call.ddd`
@@ -92,10 +111,10 @@ feature's existence. The gate was removed (`structural-checks.ts` now only runs
 the `or`-union backend-support check); `test/ir/operation-returns.test.ts` now
 guards that scalar returns stay valid. The showcase's synthetic `describe()` had
 been removed with the gate and stays removed — it added nothing beyond the
-`domainService` op's `ReturnStmt` coverage, and re-adding it would re-trip
-`conformance-parity` on the still-open divergence. **BUG-003 remains open**: the
-real fix is to converge the scalar-return HTTP contract across all five backends
-(all-200-with-body or all-204), which is additive feature work, not a gate.
+`domainService` op's `ReturnStmt` coverage. The real fix — converging the
+scalar-return HTTP contract across all five backends, additive feature work
+rather than a gate — **has since landed on all-200-with-body** (2026-08-23
+verification above).
 
 ### BUG-004 — union-find absence error mandates field `resource`, which is a reserved keyword → unreadable — **FIXED (M-T5.18 Track C)**
 
