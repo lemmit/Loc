@@ -168,7 +168,7 @@ describe("user-defined components — Vue", () => {
         subdomain M { context C { aggregate Order { code: string } } }
         ui WebApp {
           component Panel(head: slot, onPick: action(Order)) {
-            body: Stack { Slot { "head" }, Button { "Pick" } }
+            body: Stack { Slot { }, Button { "Pick" } }
           }
           page Home { route: "/" body: Heading { "home" } }
         }

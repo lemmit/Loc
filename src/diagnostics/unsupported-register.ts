@@ -381,6 +381,31 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     mission: "M-T1.20",
   },
   {
+    code: "loom.table-filter-unsupported",
+    kind: "gap",
+    site: "src/ir/validate/checks/ui-checks.ts:840",
+    what:
+      "`Table { filter: <state> }` on a framework with no filter seam.  The six `walkBody` " +
+      "targets all declare `renderFilteredRows` + `renderFilterInput`; phoenixLiveView runs the " +
+      "parallel HEEx engine, whose `renderTable` `else if` chain handles rows/testid/sort/page " +
+      "and lets `filter:` fall through into nothing.  Drains when the generated `list/4` takes a " +
+      "filter param and the LiveView grows the matching `handle_event` + `<.input>`",
+    mission: "M-T1.1",
+  },
+  {
+    code: "loom.modal-controlled-op-form-unsupported",
+    kind: "gap",
+    site: "src/ir/validate/checks/ui-checks.ts:913",
+    what:
+      "`Modal { open: <stateBool>, OperationForm { … } }` on react / vue / svelte / flutter, " +
+      "where `emitModal` only reaches the state-controlled path when there is NO form child and " +
+      "otherwise degrades the WHOLE modal to a comment.  Angular and Feliz fork the primitive " +
+      "and render the form, and HEEx's `renderModal` handles it, so this is a per-target gap, " +
+      "not a rejected shape.  Drains when the four render the controlled shell around the " +
+      "recorded OperationFormState",
+    mission: "M-T1.6",
+  },
+  {
     code: "loom.toast-message-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/ui-checks.ts:2193",

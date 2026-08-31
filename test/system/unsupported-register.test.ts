@@ -122,8 +122,24 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  implemented: there was nothing to implement.  IN:
  *  `loom.java-reserved-identifier-unsupported` (F2-ADP-7's java arm) — the trade
  *  this register records, again: `aggregate T { case: string }` used to emit
- *  `String case;` and fail javac with zero diagnostics; it now refuses. */
-const MAX_OPEN_GAPS = 42;
+ *  `String case;` and fail javac with zero diagnostics; it now refuses.
+ *
+ *  42 → 44: `loom.table-filter-unsupported` and
+ *  `loom.modal-controlled-op-form-unsupported` (targets-completeness W1,
+ *  `M-T1.1-table-filter-silent-drop` / `F2-CFE-12`).  Same trade, and the same
+ *  reason to raise rather than dodge: NEITHER gap is new.  `Table { filter: q }`
+ *  has always been dropped on HEEx (whose `renderTable` never reads the arg) and
+ *  on any server-paged table — and since the auto-paged rewrite, the simplest
+ *  hand-written paged table IS server-paged, so the natural spelling lost its
+ *  filter with `ddd parse` reporting no error and the bound state left as a dead
+ *  `useState`.  `Modal { open: …, OperationForm { … } }` has always collapsed the
+ *  whole modal to a comment on react/vue/svelte/flutter.  What is new is that
+ *  both stopped being silent.  Draining the first is a `filter` param on the
+ *  generated `list/4` plus a LiveView `handle_event` (and a server-side filter
+ *  on the paged read); the second is the controlled shell rendered around the
+ *  recorded OperationFormState on the four JSX/Dart targets.  Each deletes its
+ *  row and lowers this by one. */
+const MAX_OPEN_GAPS = 44;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

@@ -538,12 +538,12 @@ Split the problem by where the rule lives:
 | `Heading`, `Text`, `Bold`, `Italic`, `InlineCode`, `Badge`, `Stat`, `Empty`, `Anchor`, `Image`, `Avatar`, `Loader`, `Skeleton`, `Alert`, `KeyValueRow`, `Icon` | Display primitives. `Bold`/`Italic`/`InlineCode` are inline-emphasis spans; `Icon` is a builtin-name or `svg:` literal, decorative-by-default (`aria-hidden`) unless `label:` gives it meaning — which makes it a named `role="img"` and makes that name a user-visible slot, translated through the message catalog. |
 | `Field`, `NumberField`, `PasswordField`, `MultilineField`, `Toggle`, `SelectField { label, bind, options }`, `Select`, `Fieldset` | Bindable inputs. `MultilineField` is the textarea twin of `Field`; `SelectField` is a controlled single-select over a string-array `options:` expression. All accept an optional `error:` expression rendered in the pack's inline error slot (§8.2). |
 | `Action(operation, then?)`, `Button { label, on? }` | Action primitives. |
-| `Modal { trigger, … }` | Disclosure surface — hosts an `OperationForm` (scaffold detail pages) or a state-controlled `open:` body. The state-controlled form ships on **all six frontends**. Flutter's dialogs are imperative (`showDialog` pushes a route), so there is no widget to conditionally render: it bridges through a generated `LoomModalHost` that drives `showDialog` on the flag's rising edge and reports dismissal back, keeping the page's state the single source of truth. `title:` is a user-visible slot on both shapes — it is the dialog's title, translated through the message catalog. |
+| `Modal { trigger, … }` | Disclosure surface — hosts an `OperationForm` (scaffold detail pages) or a state-controlled `open:` body. The state-controlled form ships on **all six frontends**. Flutter's dialogs are imperative (`showDialog` pushes a route), so there is no widget to conditionally render: it bridges through a generated `LoomModalHost` that drives `showDialog` on the flag's rising edge and reports dismissal back, keeping the page's state the single source of truth. `title:` is a user-visible slot on both shapes — it is the dialog's title, translated through the message catalog. The two shapes do not COMBINE on every target: `Modal { open: <stateBool>, OperationForm { … } }` renders on Angular, Feliz and HEEx (which drive the dialog from their own trigger) and collapses the whole modal to a comment on React/Vue/Svelte/Flutter, so it is a compile error there (`loom.modal-controlled-op-form-unsupported`) — use the trigger shape, which drives the dialog itself. |
 | `Money`, `DateDisplay`, `EnumBadge`, `IdLink`, `FileLink` | Formatter primitives. |
 | `ProvenanceInfo(of:, field:)` | A "?" disclosure over a `provenanced` field's lineage (a native `<details>`/`<summary>`; [provenance.md](provenance.md)). Reads the co-located `<field>_provenance` lineage; scaffolded onto a provenanced field's detail row. Renders on **five of the six frontends** (all but Flutter) plus the Phoenix/HEEx server render — React/Vue/Svelte/Angular/Feliz off the JSON wire sibling; HEEx reads the string-keyed jsonb struct field server-side (`<%= if … %>`/`<%= for … %>`). |
 | `CodeBlock` | Syntax-highlighted code block (highlight.js at runtime). `title:` is a user-visible slot — a caption above the sample, translated through the message catalog. The code SOURCE deliberately is not: translating code breaks it, so an untitled block leaves a page string-less. |
-| `Table`, `Column` | Tabular display (data lambda accessors). `Column` is the sub-element of `Table`/`DataGrid`. |
-| `DataGrid` | **React, Vue, Svelte, Angular, Feliz.** Interactive grid over the same `Column` children — multi-column sort, per-column filters, column-visibility toggles, client pagination, optional row selection. Backed by [TanStack Table](https://tanstack.com/table); see §9.1 below. Using it on HEEx or Flutter is a compile error (`loom.datagrid-unsupported-target`) — use `Table`, which sorts, pages and filters on every frontend. |
+| `Table`, `Column` | Tabular display (data lambda accessors). `Column` is the sub-element of `Table`/`DataGrid`. `filter: <state>` binds a client-side search box above the table; it renders on the six `walkBody` frontends and on a CLIENT-paged table only. On HEEx there is no filter seam (`loom.table-filter-unsupported`), and a server-paged table's rows are one server window, so a client filter there would narrow that page rather than the result set (`loom.table-filter-server-paged`) — note the auto-paged rewrite turns the simplest hand-written `Table { rows: rows, filter: q }` over a paged `.all` into the server-paged shape. |
+| `DataGrid` | **React, Vue, Svelte, Angular, Feliz.** Interactive grid over the same `Column` children — multi-column sort, per-column filters, column-visibility toggles, client pagination, optional row selection. Backed by [TanStack Table](https://tanstack.com/table); see §9.1 below. Using it on HEEx or Flutter is a compile error (`loom.datagrid-unsupported-target`) — use `Table`, which sorts and pages on every frontend (its client `filter:` is the six `walkBody` frontends, client-paged only — see the `Table` row). |
 | `For { each: T[], empty?: markup, item => markup }` | List comprehension — emits the item lambda's markup once per element. TSX lowers to a keyed `.map` + `<Fragment>`, Vue to `<template v-for :key>`, Svelte to a keyed `{#each}`, Angular to an `@for (… ; track …)` block, Phoenix LiveView to a `for … do … end` block. A child primitive (nest inside a layout container — it isn't a standalone page body); the list key is the loop index. The optional `empty:` arm is rendered when the collection is empty — Svelte's native `{:else}`, a TSX `length === 0 ? … : .map(…)` ternary, a Vue `v-if` sibling `<template>`, Angular's `@for`/`@empty` block, a HEEx `Enum.empty?/1` guard. |
 | `QueryView { of:, loading:, error:, empty:, data:, single?:, paged?: }` | 4-arm query-state branching (collection or single-record). The `data:` binding also exposes the paged envelope's page metadata — see §9.2. |
 
@@ -560,16 +560,21 @@ draft forms are a §14 non-goal, not a shipped primitive).
 
 **Containers vs fixed slots.** A layout primitive (`Stack`, `Group`, `Card`,
 `Tab`, `Section`, `Toolbar`, `Container`, …) renders *every* positional as a
-child. A handful of display primitives are not containers but fixed SLOT
-shapes, and every design pack renders exactly their declared positions:
-`Stat { <label>, <value> }`, `KeyValueRow { <label>, <value> }`, and the
+child. Most display primitives are not containers but fixed SLOT shapes, and
+every design pack renders exactly their declared positions: `Stat { <label>,
+<value> }`, `KeyValueRow { <label>, <value> }`, `Text { <text> }`,
+`EnumBadge { <value> }`, `Image { <src> }`, `Icon { }` (named args only), and the
 op-form `Modal { trigger: …, OperationForm { … } }` (which renders the trigger
-button plus the operation's generated field set, and nothing else). An extra
-positional on one of those is rendered by nobody, so it is a validation error
+button plus the operation's generated field set, and nothing else). Each
+primitive's slot count is declared once, in `WALKER_PRIMITIVE_SLOTS`
+(`src/util/walker-primitive-names.ts`), where every primitive is classified as
+capped or as a children container — so a new one cannot land outside the rule.
+An extra positional past the cap is rendered by nobody, so it is a validation error
 (`loom.page-primitive-extra-children`) rather than content that silently
 disappears — wrap the extra markup in a `Stack { … }` and pass that as the slot,
 or use the state-controlled `Modal { …children, open: <stateBool> }`, which *is*
 a children container.
+
 
 A bare name in a rendered slot must resolve to a route parameter, a `state`
 field, a `derived` binding, an enclosing lambda's parameter, or a store field.
