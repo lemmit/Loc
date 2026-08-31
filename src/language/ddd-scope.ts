@@ -198,13 +198,19 @@ export class DddScopeProvider extends DefaultScopeProvider {
 
   private localTypeScope(context: ReferenceInfo): Scope | undefined {
     // Transport types (`event` / `command` / `query` / `response` / `error`)
-    // are only offered as a type in a workflow `create`/`handle` parameter —
-    // `create(e: PaymentReceived) by …`, `handle settle(c: SettleOrder)`.
-    // Everywhere else they stay out of scope, so a stray event name in an
-    // aggregate field / UI param position resolves to nothing (a clear error)
-    // rather than silently typing as a transport record.
+    // are only offered as a type in a TRANSPORT-BOUNDARY position — a workflow
+    // `create`/`handle` parameter (`create(e: PaymentReceived) by …`,
+    // `handle settle(c: SettleOrder)`), a union variant, or an application-layer
+    // `commandHandler`/`queryHandler` contract (its record param and its
+    // response return — `queryHandler GetOrder(query: GetOrderQuery):
+    // OrderResponse`).  Everywhere else they stay out of scope, so a stray event
+    // name in an aggregate field / UI param / operation param position resolves
+    // to nothing (a clear error) rather than silently typing as a transport
+    // record.
     const allowTransport =
-      inWorkflowCommandParam(context.container) || inUnionVariant(context.container);
+      inWorkflowCommandParam(context.container) ||
+      inUnionVariant(context.container) ||
+      inHandlerContract(context.container);
     const aggregate = enclosingAggregate(context.container);
     const defaultScope = super.getScope(context);
     // Event-triggered `create(e: X)` is a subscription position like `on(e: X)`
@@ -428,6 +434,37 @@ function inWorkflowCommandParam(namedType: AstNode | undefined): boolean {
   if (param?.$type !== "Parameter") return false;
   const owner = param.$container?.$type;
   return owner === "WorkflowCreateDecl" || owner === "HandleDecl";
+}
+
+/** True when `namedType` sits in an application-layer handler's CONTRACT — the
+ *  declared type of a `commandHandler` / `queryHandler` parameter, or the
+ *  handler's own `returnType`:
+ *
+ *      queryHandler GetOrder(query: GetOrderQuery): OrderResponse { … }
+ *                                  ^^^^^^^^^^^^^    ^^^^^^^^^^^^^
+ *
+ *  Both are genuine transport boundaries — the request record the route body
+ *  deserialises into, and the response record the route serialises out — which
+ *  is exactly what `src/ir/util/handler-contracts.ts` (`requestRecordFor` /
+ *  `normalizeHandlerReturn`) reads, and what `scaffoldHandlers` synthesises.
+ *  Deliberately positional (the same shape as `inWorkflowCommandParam`), so the
+ *  widening reaches these two slots and nothing else: an aggregate field, an
+ *  operation / find / workflow-function param, and a UI page param all keep
+ *  resolving a stray transport name to nothing.
+ *
+ *  Container chains: NamedType → TypeRef → Parameter → CommandHandler |
+ *  QueryHandler (param), and NamedType → TypeRef(`returnType`) →
+ *  CommandHandler | QueryHandler (return). */
+function inHandlerContract(namedType: AstNode | undefined): boolean {
+  const typeRef = namedType?.$container;
+  if (typeRef?.$type !== "TypeRef") return false;
+  const owner = typeRef.$container;
+  if (owner?.$type === "Parameter") return isHandlerDecl(owner.$container?.$type);
+  return typeRef.$containerProperty === "returnType" && isHandlerDecl(owner?.$type);
+}
+
+function isHandlerDecl(type: string | undefined): boolean {
+  return type === "CommandHandler" || type === "QueryHandler";
 }
 
 /** True when `namedType` sits in a discriminated-union variant position
