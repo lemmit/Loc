@@ -113,7 +113,7 @@ export function buildPyDocumentRepositoryFile(
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
-    // Command load (authorization Phase 3 P3.1): the whole aggregate lives in
+    // Command load (authorization): the whole aggregate lives in
     // one jsonb blob, so the write-scope guard is checked IN-APP over the loaded
     // instance — the same place this shape already evaluates its capability
     // READ filters.

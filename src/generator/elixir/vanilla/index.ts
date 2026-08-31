@@ -3,13 +3,10 @@
 //
 // Plain Phoenix + Ecto.  Called from `../index.ts`.
 //
-// Per docs/old/plans/vanilla-foundation-tdd-plan.md — built in TDD slices.
-//   Slice 0: shell.
-//   Slice 1: per-aggregate schema + repository + context module + read
-//     controllers + spliced router routes.
-//   Slice 2 (current scope): + changeset module + create/update/destroy
-//     controller actions + write-path routes.
-//   Later slices: policies, ProblemDetails parity, workflows + views, CI.
+// Per docs/old/plans/vanilla-foundation-tdd-plan.md.  What it emits: the
+// project shell; per-aggregate schema + repository + context module + read
+// controllers + spliced router routes; the changeset module + the
+// create/update/destroy controller actions + write-path routes.
 // ---------------------------------------------------------------------------
 
 import { deriveEventSubscriptions } from "../../../ir/enrich/enrichments.js";
@@ -125,7 +122,7 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
   // needed.
   pack?.setChromeI18n(i18nUi !== undefined);
 
-  // Shared cross-controller helper modules (Slice 4).  Emitted once
+  // Shared cross-controller helper modules.  Emitted once
   // per project; controllers `alias` the public functions.  The 23505 → 409
   // conflict branch is emitted only when some aggregate declares a `unique (...)`
   // key, so a unique-free project stays byte-identical (strict additivity).
@@ -687,7 +684,7 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
     channelsCfg,
     wiredForeignChannels,
   );
-  // Broker transport files (M-T4.4 slice 6c) — channel-less projects stay
+  // Broker transport files (M-T4.4) — channel-less projects stay
   // byte-identical.  Foreign vocabulary first: a consumed event owned by a
   // non-hosted context emits its struct module under the OWNER's namespace,
   // so dispatcher/handler pattern-matches and the consumer's decode agree.

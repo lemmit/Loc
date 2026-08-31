@@ -96,11 +96,11 @@ public sealed class ForbiddenException : Exception
 /// Wraps an exception thrown by a user-supplied <c>[ExternHandler]</c>
 /// implementation, so the <see cref="DomainExceptionFilter"/> can emit a
 /// 500 envelope that names the offending handler instead of the bare
-/// <c>{ "error": "internal" }</c> operators see otherwise.  (Since extern
-/// (b) Phase 2, an extern aggregate OPERATION is an ordinary domain method
-/// — a hand-written exception from its hook bubbles as a generic 500, the
-/// same as any other op body.  This wrap + filter arm is retained for the
-/// application-layer extern handler surface.)  Domain-layer exceptions
+/// <c>{ "error": "internal" }</c> operators see otherwise.  (An extern
+/// aggregate OPERATION is an ordinary domain method — a hand-written
+/// exception from its hook bubbles as a generic 500, the same as any other
+/// op body.  This wrap + filter arm serves the application-layer extern
+/// handler surface.)  Domain-layer exceptions
 /// (DomainException, ForbiddenException, AggregateNotFoundException) are
 /// NOT wrapped — they bubble through to their usual status codes.
 /// </summary>
@@ -187,7 +187,7 @@ public readonly record struct FilterBypass(bool All, IReadOnlyList<string> Capab
 }
 
 /// <summary>
-/// The commit boundary (audit S7 Slice C).  Orchestration handlers depend on
+/// The commit boundary.  Orchestration handlers depend on
 /// this instead of the concrete EF <c>AppDbContext</c>; the infrastructure
 /// adapter opens the transaction on the SAME scoped DbContext the repositories
 /// use, so a repository <c>SaveAsync</c> inside the transaction still commits
@@ -209,7 +209,7 @@ public interface IDomainTransaction : IAsyncDisposable
 
 /// <summary>The shape a workflow event-stream record exposes to the event-store
 /// port — the per-context log discriminator + stream key + gap-free version
-/// (audit S7 Slice C; per-context log — event-log-architecture.md).</summary>
+/// (per-context log — event-log-architecture.md).</summary>
 public interface IWorkflowEventRow
 {
     string StreamType { get; }
@@ -218,8 +218,8 @@ public interface IWorkflowEventRow
 }
 
 /// <summary>
-/// Append-only event-stream port for an event-sourced workflow (audit S7 Slice
-/// C).  The workflow's stream lives in the shared per-context <c>&lt;ctx&gt;_events</c>
+/// Append-only event-stream port for an event-sourced workflow.  The
+/// workflow's stream lives in the shared per-context <c>&lt;ctx&gt;_events</c>
 /// log (event-log-architecture.md), so every load / max-version scopes to the
 /// caller's <c>streamType</c> discriminator — the correctness trap: streams
 /// sharing one table must each fold only their own events.  The EF adapter
@@ -234,7 +234,7 @@ public interface IWorkflowEventStore<TRow> where TRow : class, IWorkflowEventRow
 }
 
 /// <summary>
-/// Saga-state row port (audit S7 Slice C).  <c>FindAsync</c> returns the EF
+/// Saga-state row port.  <c>FindAsync</c> returns the EF
 /// change-TRACKED entity off the same scoped DbContext, so a subsequent
 /// <c>state.Prop = …; SaveChangesAsync()</c> persists exactly as before.
 /// </summary>
@@ -246,7 +246,7 @@ public interface ISagaStateStore<TRow> where TRow : class
 }
 
 /// <summary>
-/// Projection read-model row port (audit S7 Slice C).  Same TRACKED-load +
+/// Projection read-model row port.  Same TRACKED-load +
 /// upsert + flush contract as <see cref="ISagaStateStore{TRow}"/>, named for the
 /// projection fold's read model.
 /// </summary>
@@ -317,13 +317,12 @@ public sealed class InProcessDomainEventDispatcher : IDomainEventDispatcher
  * python, elixir and — since this — java and dotnet all send.  Same PRODUCER
  * either way, which is the whole of RS-27's "don't hand-roll a 404".
  *
- * Both .NET find-absence arms used to `return NotFound();` — ASP.NET's own bare
- * 404, which never reaches `DomainExceptionFilter` and is instead rendered by
- * `ProblemDetailsFactory`.  That produced FOUR wrong members at once:
+ * Neither .NET find-absence arm may `return NotFound();` — ASP.NET's own bare
+ * 404 never reaches `DomainExceptionFilter` and is rendered by
+ * `ProblemDetailsFactory` instead, which gets FOUR members wrong at once:
  * `type` = the rfc9110 §15.5.5 URI instead of `about:blank`, `detail` = null,
  * `instance` = null, plus an injected `traceId` the envelope must not carry —
- * an [RS-22] violation on every count, and exactly the divergence RS-22 already
- * names for the arms "nobody had converted".
+ * an [RS-22] violation on every count.
  *
  * The shared filter arm renders `Problem(context, 404, "Not Found", nf.Message,
  * …)`, whose helper sets `Type = "about:blank"` and `Instance` = the request

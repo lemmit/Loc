@@ -344,7 +344,7 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
 
 // ---------------------------------------------------------------------------
 // Span-tracking emission — the marks-carrying twin of `renderExprWith`
-// (docs/old/plans/span-tracking-emission.md, M15 phase 7 slice 2).
+// (docs/old/plans/span-tracking-emission.md).
 //
 // LEVEL-WISE ANCHORING: `renderExprWith` already renders every child via its
 // local `r` BEFORE handing the child STRINGS to the leaf method, so the
@@ -374,9 +374,8 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
 // strings exactly as `renderExprWith` calls it today, so a backend's target
 // table needs no changes to support this.  `renderExprWith` itself is also
 // untouched — this is a parallel entry a caller opts into only when a
-// `SourceMapRecorder` is actually threaded in (the TS aggregate op-body
-// loop, this slice); the flag-off path never calls this function and pays
-// no extra allocation.
+// `SourceMapRecorder` is actually threaded in (the TS aggregate op-body loop);
+// the flag-off path never calls this function and pays no extra allocation.
 // ---------------------------------------------------------------------------
 
 /** One mark discovered while composing an expression's rendered text —

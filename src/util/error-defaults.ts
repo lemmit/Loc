@@ -27,17 +27,18 @@ const STDLIB_ERROR_STATUS: Readonly<Record<string, number>> = {
   // `DomainError`-class throw the wire validator cannot express.  RFC 9110
   // §15.5.21: well-formed but semantically rejected.  Added here (M-T5.20) so
   // the rung resolves through the SAME `httpStatus <Error> -> <Code>` override
-  // path as every other one; it used to be a hardcoded integer literal at each
-  // backend's handler arm, which is why moving it 400 → 422 in #2300 cost five
-  // edits that nothing but a five-way assertion kept in agreement.
+  // path as every other one.  A hardcoded integer literal at each backend's
+  // handler arm makes a retarget five edits, held together by nothing but a
+  // five-way assertion.
   DomainError: 422,
   TransportFailure: 502,
   UnexpectedStatus: 502,
   DeserializeError: 502,
   // Structural-conflict built-ins (expressible-builtins.md §3 / M-T3.4a). Each
-  // backend used to hardcode a literal 409 at the runtime site AND declare it
-  // independently in OpenAPI (so the two could drift and a user couldn't remap
-  // them). They are now blessed stdlib names defaulting to 409, so their status
+  // backend would otherwise hardcode a literal 409 at the runtime site AND
+  // declare it independently in OpenAPI — two places to drift, and no way for a
+  // user to remap them.  They are blessed stdlib names defaulting to 409, so
+  // their status
   // flows through the SAME `httpStatus <Error> -> <Code>` override path as user
   // errors — `httpStatus UniquenessConflict -> 422` retargets both the runtime
   // response and the OpenAPI declaration. Absent an override, the resolved value

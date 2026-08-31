@@ -1,5 +1,5 @@
 // Chart primitive — a kind-discriminated (line | bar) chart over a GROUPED
-// query-time projection (M-T1.3 Phase 4).
+// query-time projection (M-T1.3).
 //
 // WHY EXACTLY ONE PRIMITIVE
 // -------------------------
@@ -53,8 +53,8 @@ import { simpleAccessorField } from "./data-grid-shape.js";
 const LINE_ONLY_COMPONENTS: ReadonlySet<string> = new Set(["LineChart", "Line"]);
 const BAR_ONLY_COMPONENTS: ReadonlySet<string> = new Set(["BarChart", "Bar"]);
 
-/** The default (JavaScript) plotted-data expression — what every JSX target
- *  emitted inline before this became a seam, verbatim.
+/** The default (JavaScript) plotted-data expression, shared by every JSX
+ *  target.
  *
  *  The series is coerced to a NUMBER on the way in, and this is load-bearing
  *  rather than defensive: a `money` (or `decimal`) projection field parses

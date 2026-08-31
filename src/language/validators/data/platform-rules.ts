@@ -1,8 +1,6 @@
-// Table-driven deployable-platform rules.  Lifted from the inline
-// helpers that used to live alongside `checkDeployablePlatform` /
-// `checkDeployableDesignPack` in `ddd-validator.ts` so future
-// platform additions touch one data table instead of multiple
-// switches scattered through validator methods.
+// Table-driven deployable-platform rules, so a new platform touches one data
+// table rather than switches scattered through `checkDeployablePlatform` /
+// `checkDeployableDesignPack` and their neighbours in `ddd-validator.ts`.
 //
 // What stays out of the table: the *backend version registry*
 // (`parseBuiltinPlatformRef`, `backendVersionsForFamily` etc. from
@@ -223,7 +221,7 @@ export function resolveStyleLayoutCompat(
   // `checkDeployablePlatform` (deployable.ts), and a frontend legitimately has
   // no layout axis to check.  Reads pure adapter FACTS from
   // `adapter-metadata.ts` (no live surface / generator import), so the
-  // validator no longer drags the backend generators into a client bundle.
+  // validator does not drag the backend generators into a client bundle.
   if (parseBuiltinPlatformRef(family) == null) return undefined;
   const defaults = defaultsFor(family);
   if (!defaults) return undefined;

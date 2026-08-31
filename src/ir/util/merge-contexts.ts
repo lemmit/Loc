@@ -90,7 +90,7 @@ export function mergeContexts(contexts: EnrichedBoundedContextIR[]): EnrichedBou
  *  Returns `undefined` when no context declares any, so the field stays absent
  *  rather than becoming an empty object — `resolveErrorStatus` treats the two
  *  identically, but an absent field keeps the merged context byte-comparable
- *  with one built before this merge existed. */
+ *  with an unmerged one. */
 function mergeErrorStatusOverrides(
   contexts: EnrichedBoundedContextIR[],
 ): Record<string, number> | undefined {

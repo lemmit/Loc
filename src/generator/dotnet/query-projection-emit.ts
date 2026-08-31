@@ -158,7 +158,7 @@ function renderHandler(
   //   - GROUPED (`group by`, M-T4.2) first — a grouped projection mixes per-row
   //     key selects with aggregates, so falling through would hand the per-row
   //     arm an unresolved aggregate;
-  //   - then the WHOLE-TABLE aggregation (M-T1.3 Phase 0), which queries the
+  //   - then the WHOLE-TABLE aggregation (M-T1.3), which queries the
   //     table directly rather than through a repository, because the point of
   //     the shape is to materialise no rows;
   //   - then the workflow / folded-projection sources, which have no aggregate
@@ -587,7 +587,7 @@ function dapperRowMap(
   return `    private static ${pocoFqn} ${fnName}(${rowCls} r) => new()\n    {\n${inits}\n    };`;
 }
 
-/** Render the handler for a WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0).
+/** Render the handler for a WHOLE-TABLE AGGREGATION (M-T1.3).
  *
  *  ONE SQL query, no rows materialised — the shape exists precisely to avoid
  *  the naive read (a `SELECT *` over the whole table with every row rehydrated

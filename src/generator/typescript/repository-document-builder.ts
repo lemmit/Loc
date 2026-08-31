@@ -60,7 +60,7 @@ export function buildDocumentRepositoryFile(
   // concern, independent of the saving shape.
   const repoUsesUser = (repo?.finds ?? []).some(findUsesCurrentUser) || aggHasFieldMask(agg);
   // A principal-referencing (tenancy) capability filter evaluates the request
-  // actor IN-APP over the rehydrated document (DEBT-02 Slice B): each read binds
+  // actor IN-APP over the rehydrated document: each read binds
   // `requireCurrentUser()` so the in-app predicate (`currentUser.tenantId`) can
   // read it.  Fail-closed — the accessor throws when unauthenticated.
   const usesPrincipalFilter = aggregateUsesPrincipalContextFilter(agg);
@@ -245,8 +245,8 @@ export function buildDocumentRepositoryFile(
       : `import { AggregateNotFoundError } from "../../domain/errors";`,
     `import type { DomainEventDispatcher } from "../../domain/events";`,
     // A principal-referencing capability filter (tenancy) binds
-    // `requireCurrentUser()` into the in-app document predicate (DEBT-02 Slice
-    // B), the same ambient-accessor path the relational/embedded builders use.
+    // `requireCurrentUser()` into the in-app document predicate, the same
+    // ambient-accessor path the relational/embedded builders use.
     // …and a principal-referencing WRITE scope binds the same accessor in the
     // `getById` command load, so key off the emitted body too (F2-ADP-5).
     (usesPrincipalFilter || /\brequireCurrentUser\(/.test(bodyScan)) &&
@@ -270,7 +270,7 @@ export function buildDocumentRepositoryFile(
  *  the aggregate's filters, or null.  A principal/tenancy predicate renders its
  *  `currentUser.<claim>` access against a `currentUser` binding the caller
  *  introduces (`requireCurrentUser()` for by-id reads, the find's own
- *  `currentUser` param when it has one) — DEBT-02 Slice B.
+ *  `currentUser` param when it has one).
  *
  *  An `authz-filter` SENTINEL (`policy { allow deep … }` / `deny`) is desugared
  *  to ordinary IR first: it exists to be intercepted by a backend's
@@ -285,7 +285,7 @@ export function documentCapabilityBody(agg: EnrichedAggregateIR, varName: string
   return preds.length > 0 ? preds.join(" && ") : null;
 }
 
-/** The aggregate's `writeScopeFilter` (authorization Phase 3 P3.1 — the WRITE
+/** The aggregate's `writeScopeFilter` (authorization — the WRITE
  *  scope is strictly narrower than the read scope) as an IN-APP boolean over a
  *  rehydrated aggregate bound to `varName`, or null when nothing narrows.
  *

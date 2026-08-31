@@ -831,7 +831,7 @@ export function renderMikroEntities(
         // MikroORM derives `RequiredEntityData` from the CLASS, not from the
         // `autoincrement` flag.  Declared required, `em.insert(<Ctx>EventRow, {…})`
         // fails `tsc` with "Property 'seq' is missing" on every event-sourced
-        // append.  Found by M-T6.23 slice 3's compile proof: no gate hid this
+        // append.  Found by's compile proof: no gate hid this
         // one, the tsc TIERS did — the corpus tsc gates run drizzle only, and the
         // mikro behavioural leg builds with esbuild (no typecheck), so an
         // event-sourced aggregate or workflow on `persistence: mikroorm` has
@@ -1298,8 +1298,8 @@ function predicateEntry(e: ExprIR, acc: string): string {
   // Authorization/tenancy filter sentinels (M-T9.9).  A DISCRIMINATED node, so
   // a missing arm here is a `tsc` error rather than a fall-through to the
   // `unsupported find predicate` throw at the bottom of this function — which
-  // is exactly how the `deny` carve-out used to be unreachable on this adapter
-  // (the whole point of giving the sentinel its own `ExprIR.kind`).
+  // is how the `deny` carve-out becomes unreachable on this adapter.  That is
+  // the whole point of giving the sentinel its own `ExprIR.kind`.
   if (inner.kind === "authz-filter") return authzFilterEntry(inner, acc);
   const selfScope = guidFromStringSelfScope(inner);
   if (selfScope) {
@@ -1334,7 +1334,7 @@ function predicateEntry(e: ExprIR, acc: string): string {
  *  `and(isNull(id), isNotNull(id))`. */
 function authzFilterEntry(e: Extract<ExprIR, { kind: "authz-filter" }>, acc: string): string {
   switch (e.filter.kind) {
-    // DENY carve-out (authorization Phase 4 — deny-wins).  The always-false
+    // DENY carve-out (authorization — deny-wins).  The always-false
     // term, ANDed into every read FilterQuery (and into the write-scope
     // existence pre-guard).  A genuine CONTRADICTION on the always-present
     // primary key rather than the bare `{ id: null }` this file uses elsewhere:
@@ -1343,7 +1343,7 @@ function authzFilterEntry(e: Extract<ExprIR, { kind: "authz-filter" }>, acc: str
     // sibling entries `flattenAnd` merges into the same object literal.
     case "deny":
       return `$and: [{ id: null }, { id: { $ne: null } }]`;
-    // `deep`/`global` read level (hierarchical tenancy P2.4/P2.5) — the
+    // `deep`/`global` read level (hierarchical tenancy) — the
     // materialized-path descendant-or-self sentinel, DEEP_SCOPE_SEMANTICS:
     //
     //   (data_key IS NOT NULL
@@ -1375,7 +1375,7 @@ function authzFilterEntry(e: Extract<ExprIR, { kind: "authz-filter" }>, acc: str
     // two-term shape as the drizzle twin.
     //
     // The NULL branch is a deliberate OR-fallback, not fail-closed: a row
-    // stamped before P2.3 (or by a principal-less save) has no `data_key`, and
+    // stamped before (or by a principal-less save) has no `data_key`, and
     // a bare prefix test would hide it from its own tenant.  It degrades to
     // exactly the flat floor — never wider.
     //
@@ -1406,7 +1406,7 @@ function authzFilterEntry(e: Extract<ExprIR, { kind: "authz-filter" }>, acc: str
 /** Conjunctions merge into one object; `||` becomes `$or`.  Bare boolean
  *  columns and unary `!` are lowered via `predicateEntry`.
  *
- *  Exported for the query-time projection routes (M-T6.23 slice 4): an
+ *  Exported for the query-time projection routes (M-T6.23): an
  *  aggregation reads the source table directly through the QueryBuilder, and its
  *  `where` must lower through the SAME subset a find predicate does — a second
  *  lowering would be a second set of bugs.  Throws on a predicate outside the
@@ -1492,16 +1492,13 @@ function mikroContextFilters(agg: EnrichedAggregateIR, bypass?: FilterBypass): s
     // A principal filter takes the SAME path as any other: lower it, and let an
     // unlowerable one THROW.
     //
-    // This used to be wrapped in a `try { … } catch { /* drop */ }`, on the
-    // reasoning that a principal filter is not gated for FilterQuery-lowerability
-    // (`validateFindPredicateAdapterSupport` skips it) and the only shape that
-    // could fail — the deep-scope subtree predicate — "is not generated on the
-    // mikro adapter today".  That belief was load-bearing and wrong twice over:
-    // the deep-scope shape reached here for real (nothing stopped it until the
-    // capability gate was added), and DROPPING a tenancy predicate is not a
-    // degraded read — it is NO tenant predicate, i.e. every tenant's rows on
-    // every read.  A crash at generation is the strictly safer failure, and now
-    // that `authzFilterEntry` renders the subtree sentinel there is no known
+    // Deliberately NOT wrapped in a `try { … } catch { /* drop */ }`.  A
+    // principal filter is not gated for FilterQuery-lowerability
+    // (`validateFindPredicateAdapterSupport` skips it), so a shape that cannot
+    // lower reaches here — and DROPPING a tenancy predicate is not a degraded
+    // read, it is NO tenant predicate, i.e. every tenant's rows on every read.
+    // A crash at generation is the strictly safer failure.  With
+    // `authzFilterEntry` rendering the subtree sentinel there is no known
     // shape left to crash on.
     out.push(whereToMikroFilter(pred));
   });
@@ -1518,7 +1515,7 @@ function withContextFilters(base: string, caps: string[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// Write-scope pre-guard (authorization Phase 3 P3.1 / Phase 4 deny-write).
+// Write-scope pre-guard (authorization / deny-write).
 //
 // `agg.writeScopeFilter` is the predicate an INSTANCE mutation's command load
 // must satisfy when the write scope is strictly NARROWER than the read scope

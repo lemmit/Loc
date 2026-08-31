@@ -212,8 +212,8 @@ export function buildJavaOpenApiContract(
       const repo = repoByAgg.get(agg.name);
       // THE UNIFICATION SEAM (api-surface.ts): every published path + declared
       // error set below comes from the same derived list the controller
-      // renders (emit/api.ts) — the customizer and the router can no longer
-      // disagree, which they have three separate times.  Workflow routes stay
+      // renders (emit/api.ts), so the customizer and the router cannot
+      // disagree.  Workflow routes stay
       // hand-built (`apiSurfaceCoverage.notLifted`).
       const derivedOps = deriveAggregateOperations(agg, repo, apiStatusContext(ctx));
       const pathOf = (o: ApiOperationIR): string => `${route}${relativeOpPath(o)}`;
@@ -395,10 +395,10 @@ export function buildJavaOpenApiContract(
           wrappers.set(listWrapper, `${agg.name}Response`);
           routes.push({ method: "get", path: findPath, listWrapper, errors: findErrors });
         } else {
-          // Optional find → 404 (+403 when gated).  NAMED FIX (unification): a
-          // GENUINELY-single find (bare `T`, not `T option`) no longer
-          // declares the optional convention's 404 — the derivation classifies
-          // it `findSingle`, matching what the controller answers.
+          // Optional find → 404 (+403 when gated).  A GENUINELY-single find
+          // (bare `T`, not `T option`) does NOT declare the optional
+          // convention's 404 — the derivation classifies it `findSingle`,
+          // matching what the controller answers.
           routes.push({ method: "get", path: findPath, errors: findErrors });
         }
       }
@@ -515,12 +515,11 @@ function requiredWireFields(fields: readonly WireField[]): string[] {
 /** Required params for an OPERATION request DTO: every param that is not
  *  optional-typed.
  *
- *  RS-26.  A bare body-bool used to be dropped here too, on the reasoning that
- *  a non-nullable bool "defaults to false when omitted" — but that is a
- *  CREATE-input rule (`hasImplicitDefault`), and an operation body constructs
- *  nothing, so an omitted param is a missing required one.  Keeping the
- *  exclusion made the spec claim a PUT could omit `active: bool = true` when
- *  doing so silently stored `false`. */
+ *  RS-26.  A bare body-bool is NOT excluded: "defaults to false when omitted"
+ *  is a CREATE-input rule (`hasImplicitDefault`), and an operation body
+ *  constructs nothing, so an omitted param is a missing required one.
+ *  Excluding it makes the spec claim a PUT may omit `active: bool = true` when
+ *  doing so silently stores `false`. */
 function requiredParams(params: readonly { name: string; type: TypeIR }[]): string[] {
   return params.filter((p) => !isOptionalType(p.type)).map((p) => p.name);
 }

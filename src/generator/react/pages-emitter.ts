@@ -124,7 +124,7 @@ function computeSrcImportPrefix(emitPath: string): string {
  *  the aggregate.  Built from `ctx.contextsByName` once per emit
  *  so the walker doesn't repeatedly scan all contexts. */
 /** The served aggregate / workflow names `classifyPage` matches a
- *  page's role-scoped name against (slice 3c — replaces stamped `origin`). */
+ *  page's role-scoped name against (replaces stamped `origin`). */
 function pageNameCtx(ctx: PageEmitContext): PageNameCtx {
   const workflowNames: string[] = [];
   for (const bc of ctx.contextsByName.values()) {
@@ -172,7 +172,7 @@ function buildBcByWorkflow(ctx: PageEmitContext): Map<string, BoundedContextIR> 
  *      AppShell layout-route alongside conventional scaffold routes.
  *    - `outOfShell`: `layout: none` — mounted as sibling routes
  *      OUTSIDE every layout wrapper, getting no chrome at all.
- *    - `namedLayouts`: Phase 8 — pages with `layout: <Name>` map
+ *    - `namedLayouts`: — pages with `layout: <Name>` map
  *      `Name → ExtraPageRoute[]`.  The generator emits one
  *      `<Name>Layout` wrapper component and routes the bucket
  *      through it. */

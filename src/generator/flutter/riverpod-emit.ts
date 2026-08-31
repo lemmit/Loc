@@ -467,8 +467,8 @@ export function renderRiverpod(
    *  `main.dart` imports every page file, so naming them off `page.name` gave
    *  each scaffolded aggregate its own `listProvider` / `ListNotifier` /
    *  `ListState` in the same import scope — the same collision the page's file
-   *  base had.  Defaults to `page.name` so a caller with no name-context (the
-   *  unit tests) keeps the old identifiers. */
+   *  base had.  Defaults to `page.name` for a caller with no name-context (the
+   *  unit tests). */
   emitName: string = page.name,
 ): RiverpodProjection {
   const stateClass = `${upperFirst(emitName)}State`;

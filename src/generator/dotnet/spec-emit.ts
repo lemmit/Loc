@@ -12,7 +12,7 @@
 // The spec holds where + sort; call-site `page` (offset/limit) stays LINQ on
 // the spec-filtered query in the repository method (`Skip`/`Take`). When the
 // `where` is exactly a named, eligible criterion the spec consumes that
-// criterion's `ToExpression()` (Slice 2b); otherwise it inlines the predicate.
+// criterion's `ToExpression`; otherwise it inlines the predicate.
 
 import type { BoundedContextIR, EnrichedAggregateIR, RetrievalIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";

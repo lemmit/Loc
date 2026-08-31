@@ -65,7 +65,7 @@ export interface PyRenderContext {
    *  aggregate / workflow render contexts leave it undefined (byte-identical). */
   recordParamNames?: ReadonlySet<string>;
   /** Read-port handle expressions to PREPEND to a `domain-service` call's
-   *  arguments (domain-services.md rev. 4, Slice 1 — the `reading` tier).  A
+   *  arguments (domain-services.md rev. 4 — the `reading` tier).  A
    *  `reading` service operation takes one read-port parameter per repository
    *  it reads; the orchestrating caller (a `workflow`) supplies the matching
    *  repo handle here, keyed by `<service>.<op>`.  Returns `[]` (or is absent)
@@ -646,7 +646,7 @@ function renderCall(args: string[], e: CallExpr, ctx: PyRenderContext): string {
       // bare module-level functions (snake-cased), imported by name.  A
       // `reading`-tier service op takes read-port handle(s) AHEAD of the user
       // args; the orchestrating caller supplies them via `ctx.readPortArgs`
-      // (domain-services.md rev. 4, Slice 1).  A PURE service has no ports →
+      // (domain-services.md rev. 4).  A PURE service has no ports →
       // no prepend, no `await` → byte-identical.  A reading op is `async` (it
       // awaits its repo reads), so its call is `(await op(handle, …))` —
       // parenthesised so it composes in any expression position (a precondition,
@@ -659,7 +659,7 @@ function renderCall(args: string[], e: CallExpr, ctx: PyRenderContext): string {
     }
     case "repo-read": {
       // A read-only repository query in a `reading` domain-service body
-      // (domain-services.md rev. 4, Slice 1).  Renders against the THREADED
+      // (domain-services.md rev. 4).  Renders against the THREADED
       // read-port handle — `snake(repo)` (`Accounts` → `accounts`), the param
       // the service declaration takes and the orchestrating workflow supplies —
       // exactly the var the workflow's own repo reads use
@@ -789,7 +789,7 @@ const PY_TYPE_TARGET: TypeTarget = {
         return "FileRef";
       case "duration":
         // A5 temporal — absolute duration as `datetime.timedelta`.
-        // Expression-only (never a field / wire type in this slice).
+        // Expression-only (never a field / wire type).
         return "timedelta";
     }
   },

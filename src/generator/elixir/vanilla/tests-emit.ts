@@ -41,7 +41,7 @@ import { pureDerivedAccessorNames } from "./domain-core-emit.js";
 
 export interface Env {
   /** The aggregate under test, or `null` for a value-object / domain-service
-   *  subject (test-placement.md, Phase 2) — those have no aggregate identity, so
+   *  subject (test-placement.md) — those have no aggregate identity, so
    *  the agg-op / create paths are inert. */
   agg: AggregateIR | null;
   /** Fully-qualified module of the aggregate under test, e.g. `App.Ctx.Order`;
@@ -134,7 +134,7 @@ export function renderVanillaAggregateTestModule(
   return renderSubjectTestModule(agg.name, agg.tests, contextModule, env);
 }
 
-/** Value-object test module (test-placement.md, Phase 2) — no aggregate
+/** Value-object test module (test-placement.md) — no aggregate
  *  identity; the invariant-throw path (`<VO>.new/1`) is what these exercise. */
 export function renderVanillaVoTestModule(
   vo: ValueObjectIR,
@@ -153,7 +153,7 @@ export function renderVanillaVoTestModule(
   return renderSubjectTestModule(vo.name, vo.tests, contextModule, env);
 }
 
-/** Domain-service test module (test-placement.md, Phase 2) — exercises the
+/** Domain-service test module (test-placement.md) — exercises the
  *  service's PURE ops via `App.Domain.Services.<Name>.<op>(…)`. */
 export function renderVanillaServiceTestModule(
   svc: DomainServiceIR,

@@ -10,12 +10,11 @@ import {
 import type { LoomDiagnostic } from "./diagnostic.js";
 
 // ---------------------------------------------------------------------------
-// Tenancy checks (multi-tenancy Phase 1a, slice 1a.3 —
-// docs/old/plans/multi-tenancy-implementation.md §1).
+// Tenancy checks (tenancy.md).
 //
 // The AST-level tenancy rule (duplicate `tenancy by`) lives in
 // `src/language/validators/tenancy.ts`; claim / registry existence is the
-// LINKER's job since 1b.1 (both bindings are real cross-references — an
+// LINKER's job (both bindings are real cross-references — an
 // unknown name is a parse-level "Could not resolve reference …", not the
 // former `loom.tenancy-registry-unknown` / `loom.tenancy-unknown-claim`).
 // This leaf owns everything that needs the merged, fully-lowered model:
@@ -46,7 +45,7 @@ function typeName(t: TypeIR): string {
 }
 
 /** Structural checks for the `tenantRegistry` hierarchy capability
- *  (multi-tenancy Phase 2, plan P2.2).  The capability PROVIDES the registry
+ *  (tenancy.md).  The capability PROVIDES the registry
  *  tree fields (`parent: Self id?`, managed `dataKey`); this verifies the
  *  facts the design lists that aren't field-presence (which the capability
  *  guarantees by construction): it is opted into only under a `tenancy by`
@@ -117,7 +116,7 @@ function validateTenantRegistry(sys: SystemIR, diags: LoomDiagnostic[]): void {
 }
 
 /** Validate `policy { allow <level> on <Aggregate> }` read-reachability rules
- *  (authorization.md §3; multi-tenancy Phase 2 P2.4).  Fail-closed:
+ *  (authorization.md §3; tenancy.md).  Fail-closed:
  *
  *   - `loom.policy-unknown-aggregate` — the target names no aggregate in the
  *     policy's own context (the read ladder scopes a concrete tenant-owned
@@ -201,15 +200,15 @@ function validatePolicyReadLevels(sys: SystemIR, diags: LoomDiagnostic[]): void 
   }
 }
 
-/** Validate `policy { allow write <level> on <Aggregate> }` rules (authorization
- *  Phase 3 P3.1 — `docs/old/plans/authorization-phase3.md`).  Fail-closed:
+/** Validate `policy { allow write <level> on <Aggregate> }` rules
+ *  (`docs/old/plans/authorization-phase3.md`).  Fail-closed:
  *
  *   - the shared target checks (`loom.policy-unknown-aggregate`,
  *     `loom.policy-target-not-tenant-owned`, `loom.policy-duplicate-target`) —
  *     a write rule scopes a concrete tenant-owned aggregate, and a context may
  *     hold at most one write rule per aggregate.
  *   - `loom.policy-write-global-invalid` — `write global` is rejected in
- *     P3.1 (root-subtree-wide mutation is a footgun); only `write local` (the
+ * (root-subtree-wide mutation is a footgun); only `write local` (the
  *     floor) and `write deep` are offered.
  *   - `loom.policy-level-requires-hierarchy` — `write deep` needs the
  *     materialized-path tree (`implements tenantRegistry`), same as read `deep`.
@@ -320,8 +319,8 @@ function validatePolicyWriteLevels(sys: SystemIR, diags: LoomDiagnostic[]): void
   }
 }
 
-/** Validate `policy { deny [write] on <Aggregate> }` carve-outs (authorization
- *  Phase 4 — deny-wins, docs/old/plans/authorization-phase4-deny.md):
+/** Validate `policy { deny [write] on <Aggregate> }` carve-outs (deny-wins —
+ *  docs/old/plans/authorization-phase4-deny.md):
  *
  *   - `loom.policy-deny-unknown-aggregate` — the target names no aggregate in the
  *     policy's own context (a carve-out scopes a concrete local aggregate).
@@ -412,8 +411,8 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
   // re-check needed (an unresolved ref lowers with its `$refText`, and the
   // lookups below simply find no aggregate and skip).
   if (tenancy) {
-    // The derived registry self-scope filter (Phase 1b, capstone decision 4)
-    // compares `<Registry>.id == currentUser.<claim>` — the `tenantId ≡
+    // The derived registry self-scope filter compares
+    // `<Registry>.id == currentUser.<claim>` — the `tenantId ≡
     // <Registry>.id` identity — so the claim's declared type must bind
     // against the registry's id value type: same-typed always works, and a
     // `string` claim binds as a guid at each backend's accessor site

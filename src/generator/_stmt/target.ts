@@ -9,10 +9,9 @@ import type { StmtIR } from "../../ir/types/loom-ir.js";
 // 11-kind `StmtIR` sequence in declaration order, one chunk per statement,
 // joined with `"\n"`.  Only the per-kind *spelling* diverges (the expression
 // renderer, the indent, the throw/append/push idiom, the per-backend render
-// context) plus the temp-name index model.  Before this seam each backend
-// re-implemented the whole switch, the `map`/`join` chunking pair, and the
-// `variant-match` guard — the convergence finding C1 of
-// `docs/audits/generator-code-review-2026-08-17.md`.
+// context) plus the temp-name index model.  Without this seam each backend
+// re-implements the whole switch, the `map`/`join` chunking pair, and the
+// `variant-match` guard.
 //
 // `renderStmtChunksWith` owns the dispatch + the index bookkeeping once; each
 // backend supplies a `StmtTarget` leaf table.  A new `StmtIR` kind is a compile
@@ -118,8 +117,7 @@ export function renderStmtChunksWith(stmts: readonly StmtIR[], target: StmtTarge
   let prov = 0;
   return stmts.map((s, i) => {
     // Order matters for `"per-kind"`: `pre` is evaluated before `prov`, and a
-    // statement bumps at most one of the two — the same single pass the Python
-    // renderer ran before this seam.
+    // statement bumps at most one of the two — one single pass.
     const ix: StmtIndex =
       target.indexing === "positional"
         ? { pre: i, prov: i }
@@ -157,7 +155,7 @@ function renderStmt(s: StmtIR, target: StmtTarget, ix: StmtIndex): string {
       // Frontend-only effect statement (`match await op() { … }`,
       // async-actions-and-effects.md Stage 2) — gated to page/component action
       // bodies, never lowered into a backend body.  One guard for all four
-      // backends; each spelled its own before this seam.
+      // backends.
       throw new Error(
         `variant-match statement is frontend-only; it must not reach the ${target.backendName} backend`,
       );

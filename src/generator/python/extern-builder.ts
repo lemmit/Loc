@@ -8,25 +8,23 @@ import { emptyPyTypeImports, visitPyTypeImports } from "./py-type-imports.js";
 import { renderPyType } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
-// Extern operation seam — the Python domain extension point (extern (b)
-// Phase 2, docs/extern.md), the Python sibling of the Elixir analog
+// Extern operation seam — the Python domain extension point
+// (docs/extern.md), the Python sibling of the Elixir analog
 // (src/generator/elixir/vanilla/extern-emit.ts, #1841).
 //
 // An `operation X() extern { precondition … }` declares case-1 business logic
 // the DSL can't express: the body carries only preconditions, and the mutation
-// is HAND-WRITTEN by the user.  Before this slice the mutation lived in an
-// INJECTED, application-layer per-op handler registry — a typed request shape,
-// a module-global handler slot, `register_<op>_<agg>_handler`, a boot-time
-// `verify_..._registered` check, and per-field setters minted on the aggregate
-// so the external holder could mutate it.  That whole apparatus is deleted.
-//
-// The re-home: the aggregate's `X()` op becomes a REAL method (preconditions →
-// hook → invariants) that delegates the mutation to a user-owned, scaffold-once
-// hook FUNCTION receiving the aggregate.  Because the function receives the
-// aggregate directly, it reaches the aggregate's own private/name-mangled state
-// natively (`order._status = …`, `order.raise_event(…)`) — no per-field setters,
-// no external write surface.  A missing implementation `raise`s loudly
-// (`NotImplementedError`), never the old silent success.
+// is HAND-WRITTEN by the user.  The aggregate's `X()` op is a REAL method
+// (preconditions → hook → invariants) that delegates the mutation to a
+// user-owned, scaffold-once hook FUNCTION receiving the aggregate.  Because the
+// function receives the aggregate directly, it reaches the aggregate's own
+// private/name-mangled state natively (`order._status = …`,
+// `order.raise_event(…)`) — no per-field setters, no external write surface,
+// and none of the injected application-layer handler-registry apparatus (typed
+// request shape, module-global handler slot, `register_<op>_<agg>_handler`,
+// boot-time `verify_..._registered` check) an out-of-domain mutation would
+// need.  A missing implementation `raise`s loudly (`NotImplementedError`),
+// never succeeds silently.
 //
 //   * one MODULE per aggregate with an extern op:
 //       `app/domain/extern/<agg>_extern.py` — one `def <op>(<agg>, …)` per

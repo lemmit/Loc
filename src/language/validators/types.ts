@@ -340,10 +340,11 @@ export function checkIntrinsicCalls(model: Model, accept: ValidationAcceptor): v
         ) {
           // Strict unknown-intrinsic gate: a CALL on a known primitive
           // receiver that matches no catalogue row (and is neither the
-          // string regex `matches` nor a test matcher) used to fail open —
-          // rendering garbage per backend.  Bare member ACCESS stays
-          // un-gated (string `.length` is legal; future field-style members
-          // shouldn't need a catalogue change to parse).
+          // string regex `matches` nor a test matcher) is REJECTED, not
+          // failed open — failing open renders garbage per backend.  Bare
+          // member ACCESS stays un-gated (string `.length` is legal; a
+          // field-style member should not need a catalogue change to
+          // parse).
           const known = intrinsicsForReceiver(recvType.name)
             .map((s) => s.name)
             .join(", ");

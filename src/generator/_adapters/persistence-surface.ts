@@ -19,32 +19,28 @@ export interface PersistenceAdapter {
    *  entries for Node, `mix.exs` deps for Phoenix).  The one LIVE emit
    *  method — consumed by the hono v4 backend (`hono/v4/emit.ts`). */
   emitProjectDeps(ctx: EmitCtx): Lines;
-  // NOTE: the heavy emit methods (emitConnectionSetup / emitRepository /
-  // emitMigrations / emitOutbox) were removed (M-T9.2 / M-T6.10 residue).
-  // They were never invoked on the production emit path — each backend's
-  // orchestrator calls the underlying emitters directly — and were
-  // scaffolding for a "route the orchestrator through the adapter registry"
-  // rewire that the M-T9.2 conclusion superseded (the persistence seam lives
-  // INSIDE each backend's emitters, not behind the adapter registry — see
-  // docs/new-plan/missions/M-T9.2-persistence-seam-design.md §0.7/§2.5).
+  // NOTE: this surface deliberately carries NO heavy emit methods
+  // (emitConnectionSetup / emitRepository / emitMigrations / emitOutbox) and no
+  // capability declarations (`supports()` / `supportedShapes` /
+  // `supportedStrategies`).  The persistence seam lives INSIDE each backend's
+  // emitters, not behind the adapter registry (see
+  // docs/new-plan/missions/M-T9.2-persistence-seam-design.md §0.7/§2.5): each
+  // orchestrator calls the underlying emitters directly, so an emit method here
+  // would sit on no production path.
   //
-  // The capability half (`supports()` / `supportedShapes` /
-  // `supportedStrategies`) was removed for the same reason, one level down:
-  // it was read by NOTHING in src/ (only by tests asserting a declaration
-  // equalled itself), while each check it claimed to serve was already
-  // implemented elsewhere, against a different source of truth —
-  //   - the per-`dataSource` kind↔storage check `supports()` documented is
-  //     `checkDataSource` (language/validators/datasource.ts), driven by the
-  //     sourceType registry in `util/source-types.ts`;
-  //   - the `shape: …` check `supportedShapes` documented is
-  //     `validateSavingShapeSupport`, driven by `PLATFORM_SAVING_SHAPES`
-  //     (util/platform-axes.ts), keyed by PLATFORM rather than by adapter.
-  // Being unread, they also drifted: `dapper` advertised
-  // `supportedShapes: ["relational"]` long after M-T6.9 gave it document +
-  // embedded emission, with a test pinning the false value green.
+  // The checks a capability declaration would claim to serve already live
+  // elsewhere, against a different source of truth:
+  //   - the per-`dataSource` kind↔storage check is `checkDataSource`
+  //     (language/validators/datasource.ts), driven by the sourceType registry
+  //     in `util/source-types.ts`;
+  //   - the `shape: …` check is `validateSavingShapeSupport`, driven by
+  //     `PLATFORM_SAVING_SHAPES` (util/platform-axes.ts), keyed by PLATFORM
+  //     rather than by adapter.
+  // An unread declaration here would just drift from those — and a test
+  // asserting it equals itself would keep the drift green.
   //
-  // Contrast `StyleAdapter.supportedLayouts`, which is NOT dead — it reaches
-  // the validator through the adapter-metadata mirror.  See style-surface.ts.
+  // Contrast `StyleAdapter.supportedLayouts`, which IS live — it reaches the
+  // validator through the adapter-metadata mirror.  See style-surface.ts.
 }
 
 /** Capability subset a stub still answers at registration time.  Used

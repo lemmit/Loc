@@ -166,8 +166,8 @@ export interface FlutterFormSpec {
    *  sub-field, mixed value-object array, enum/bool/datetime/id element array,
    *  unresolved value-object field).  Emitted into the widget class so the drop
    *  is visible in the generated Dart AND counted by the parity lint's
-   *  `TODO_LINE` regex — the drop is no longer silent.  Empty for a fully
-   *  rendered form. */
+   *  `TODO_LINE` regex, rather than silent.  Empty for a fully rendered
+   *  form. */
   dropped: string[];
   /** Whether this form styles its submit as a destructive (error-coloured)
    *  action (destroy forms). */
@@ -227,8 +227,8 @@ function scalarInputKind(
         // (`{url,key,contentType,size}`) — NOT a string.  It renders as the same
         // pick → multipart `POST /files` → `FileRef` write-back the standalone
         // `FileUpload` page primitive ships (`pack.ts`), and submits the
-        // `FileRef` map.  Before this it fell through to `"text"` and posted a
-        // bare `String`, which every backend rejected with a 422.
+        // `FileRef` map.  Falling through to `"text"` posts a bare `String`,
+        // which every backend rejects with a 422.
         return "file";
       default:
         return "text"; // string, guid, json

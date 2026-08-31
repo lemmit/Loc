@@ -113,9 +113,9 @@ export function emitButton(
   } else {
     // `to:` named arg wires the button to a React
     // Router navigate call.  Accepts ANY expression — a literal path, a route
-    // param, or a computed one (`to: "/greet/" + who`).  It used to accept only
-    // the first two and silently drop everything else, leaving a button that
-    // rendered but navigated nowhere (A12).
+    // param, or a computed one (`to: "/greet/" + who`).  Accepting only the
+    // literal and param forms would leave a button that renders but navigates
+    // nowhere.
     const to = navArgValue(call, "to", ctx)?.expr;
     if (to) {
       ctx.usesNavigate = true;
@@ -135,7 +135,7 @@ export function emitButton(
   // injection so the local hook var is available at page-top).
   const disabled = anyNamedArgExpr(call, "disabled", ctx);
   const loading = anyNamedArgExpr(call, "loading", ctx);
-  // Phase 5 — variant + icon slot.  `variant: "primary" | "secondary"
+  // Variant + icon slot.  `variant: "primary" | "secondary"
   // | "ghost"` maps to each pack's idiomatic rank ("filled" / "outline"
   // / "subtle" on Mantine, "default" / "outline" / "ghost" on shadcn).
   // `icon:` + `iconPosition:` lets a button display an SVG glyph from
@@ -412,12 +412,12 @@ export function emitQueryView(
   // loading completes; `data` branch fires when `data` is truthy.
   // Without the flag, the default collection semantics apply
   // (`data && data.length === 0` / `data && data.length > 0`).
-  // DERIVED, with the flag as an opt-in on top.  `single: true` was originally
-  // the only source, which made a byId read written WITHOUT it emit the
-  // collection arms — `.length` of one record: `undefined`, so neither the
-  // empty branch nor the data branch fires and the page renders blank (a raise
-  // on HEEx, where `Enum.empty?` of a struct has no Enumerable).  The IR knows
-  // the read yields one record; asking the author to restate it only creates a
+  // DERIVED, with the flag as an opt-in on top.  Taking `single: true` as the
+  // ONLY source makes a byId read written without it emit the collection arms
+  // — `.length` of one record is `undefined`, so neither the empty branch nor
+  // the data branch fires and the page renders blank (a raise on HEEx, where
+  // `Enum.empty?` of a struct has no Enumerable).  The IR knows the read yields
+  // one record; asking the author to restate it only creates a
   // way for the two to disagree.  Covers the singleton PROJECTION read too —
   // its response is one object, not a list — so both read kinds get their
   // answer from the same place (`_walker/paged-query.ts`).

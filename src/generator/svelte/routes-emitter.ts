@@ -318,7 +318,7 @@ export function defaultNavSections(
  *  pages get a per-page class from their collected testids).  Only
  *  the api-module import root differs (`src/lib/api` in SvelteKit
  *  projects). */
-/** Served decl names for `classifyPage` (slice 3c — replaces stamped `origin`). */
+/** Served decl names for `classifyPage` (replaces stamped `origin`). */
 function sveltePageNameCtx(ctx: SveltePageEmitContext): PageNameCtx {
   const workflowNames: string[] = [];
   for (const bc of ctx.contextsByName.values()) {

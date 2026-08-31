@@ -399,7 +399,7 @@ export function renderSveltePage(
     tableHelperNames.length > 0
       ? `  import { ${tableHelperNames.join(", ")} } from "$lib/table-sort";\n`
       : "";
-  // The chart component (`Chart`, M-T1.3 Phase 4).  Keyed off the same MARKER
+  // The chart component (`Chart`, M-T1.3).  Keyed off the same MARKER
   // the template carries rather than a walker import, so the emitted file and
   // its import cannot dangle apart — the discipline the Flutter and Vue shells
   // already use for `LoomModalHost` / `LoomChart`.

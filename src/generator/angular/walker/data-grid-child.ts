@@ -1,5 +1,5 @@
 // Angular's `DataGrid` child component — the fourth and final JS-frontend half
-// of the `renderDataGridChild` seam (M-T1.1 slice 10).
+// of the `renderDataGridChild` seam (M-T1.1).
 //
 // WHY A SIBLING FILE
 // ------------------

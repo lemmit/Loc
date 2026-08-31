@@ -1,4 +1,4 @@
-// Top-level (ambient) helper `function` checks (stdlib Phase B).
+// Top-level (ambient) helper `function` checks (stdlib).
 //
 // A top-level function — declared at file root or inside a `system { }`,
 // visible workspace-wide — INLINES its expression body at every call site

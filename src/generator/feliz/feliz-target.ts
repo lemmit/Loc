@@ -336,7 +336,7 @@ export const felizTarget: WalkerTarget = {
   // value QueryView matches on, and `renderApiHoisting` emits nothing (there is
   // no page-top hoist to make).
   buildHookUse: (detected) => {
-    // A query-time PROJECTION read (M-T1.3 Phase 1) resolves to its own Model
+    // A query-time PROJECTION read (M-T1.3) resolves to its own Model
     // field, filled by the init Cmd.  Its Remote payload — and so which
     // `View.*` matcher renders it — follows the projection's RESPONSE SHAPE:
     // `Remote<<Proj>Row option>` + `remoteOne` for the whole-table aggregation,
@@ -351,11 +351,11 @@ export const felizTarget: WalkerTarget = {
     // envelope), the derived entity-history read (docs/audit.md) →
     // `<Agg>History`, and a user-declared repository find → `<Agg><Find>`.
     //
-    // The `All<Plural>` FALLBACK this used to end in is what made two of those
-    // silent bugs: it kept feliz out of `HISTORY_CAPABLE_FRAMEWORKS`, and it
-    // bound every parameterised find (`Doc.byVis(v)`) to the unfiltered list —
-    // a `model.AllDocs` no Model declared, no `Cmd` filled and no update arm
-    // stored, for a query that was never issued.  There is no fallback now:
+    // There is deliberately NO `All<Plural>` fallback: it keeps feliz out of
+    // `HISTORY_CAPABLE_FRAMEWORKS` and binds every parameterised find
+    // (`Doc.byVis(v)`) to the unfiltered list — a `model.AllDocs` no Model
+    // declares, no `Cmd` filled and no update arm stored, for a query never
+    // issued.  Instead:
     // the read collector (`collectBodyReads`) throws on any operation that is
     // not one of these four, so a field named here always exists.
     const field =
@@ -895,7 +895,7 @@ export const felizTarget: WalkerTarget = {
     }
   },
 
-  // --- DataGrid seam (M-T1.1 slice 10e) ----------------------------------
+  // --- DataGrid seam (M-T1.1) ----------------------------------
   //
   // Feliz hosts the REAL TanStack row model — `@tanstack/table-core` through
   // Fable interop — so the grid behaves identically to the four JSX frontends
@@ -1094,9 +1094,9 @@ export const felizTarget: WalkerTarget = {
 
   // Scalar intrinsics — the SAME F# table the MVU update path uses
   // (`renderFsMethodCall`), so `s.replace(a, b)` cannot mean one thing in a
-  // page body and another in an action body.  Before this seam was supplied
-  // the view path had no intrinsic arm at all and emitted Loom's own spelling
-  // verbatim (`(model.Name.toUpper())`), which is not F#.
+  // page body and another in an action body.  Without this seam the view path
+  // has no intrinsic arm and emits Loom's own spelling verbatim
+  // (`(model.Name.toUpper())`), which is not F#.
   renderIntrinsic: (receiverType, member, recv, args) =>
     renderFsIntrinsic(receiverType, member, recv, args),
 };

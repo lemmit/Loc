@@ -135,7 +135,7 @@ function renderValues(_sys: SystemIR, workloads: WorkloadModel[], brokers: Broke
   for (const b of brokers) {
     if (brokers[0] === b) {
       lines.push("brokers:");
-      lines.push("  # In-cluster broker workloads (M-T4.4 slice 5b), auth-provisioned");
+      lines.push("  # In-cluster broker workloads (M-T4.4), auth-provisioned");
       lines.push("  # exactly like the compose sidecars (§7).  Disable one and point");
       lines.push("  # the deployables' `channels:` URLs at a managed broker instead.");
     }
@@ -326,7 +326,7 @@ function renderSecretTemplate(workloads: WorkloadModel[]): string {
   return lines.join("\n") + "\n";
 }
 
-/** Broker workload template (M-T4.4 slice 5b) — Deployment + Service (+
+/** Broker workload template (M-T4.4) — Deployment + Service (+
  *  file ConfigMap), enabled-gated per broker under `.Values.brokers`. */
 function renderBrokerTemplate(b: BrokerModel): string {
   const lines: string[] = [];

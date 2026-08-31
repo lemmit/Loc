@@ -43,11 +43,10 @@ export interface RequiredSet {
    *  (entry point, package config, theme tokens, build config).
    *  Shared between formats. */
   shell: readonly string[];
-  /** Form-field templates per FieldIR type.  Not used by HEEx: the Ash
-   *  foundation (and its `AshPhoenix.Form`) was removed, and plain
-   *  Ecto/Phoenix renders inputs through the pack's `core-components`
-   *  shell template instead, so no per-field Loom-side templates
-   *  participate on that format. */
+  /** Form-field templates per FieldIR type.  Not used by HEEx: plain
+   *  Ecto/Phoenix renders inputs through the pack's `core-components` shell
+   *  template, so no per-field Loom-side templates participate on that
+   *  format. */
   fieldInput?: readonly string[];
   /** Form-level templates (form-of-decls, op-decls, etc.).  Not used by
    *  HEEx, same reason as `fieldInput`. */
@@ -129,7 +128,7 @@ const TSX_ONLY_PRIMITIVES: readonly string[] = [
   // HAS a HEEx renderer (`renderFileUploadHeex`, wired in
   // `_walker/registry.ts`, using LiveView's native
   // `allow_upload`/`<.live_file_input>` flow), and `KNOWN_HEEX_GAPS` in
-  // heex-parity.test.ts no longer lists it — `DataGrid` is the sole entry.
+  // heex-parity.test.ts does not list it — `DataGrid` is the sole entry.
   // It is exempt because heex's required set is `SHARED_PRIMITIVES` only:
   // HEEx packs own no call-site primitive templates at all.
   "primitive-file-upload",
@@ -264,7 +263,7 @@ const TSX_FORM: readonly string[] = [
 const DATA_GRID_PRIMITIVES: readonly string[] = ["primitive-data-grid"];
 
 // `Chart` — the line/bar chart over a grouped projection's LIST response
-// (M-T1.3 Phase 4).  Required of the TSX packs ONLY, and that is a statement
+// (M-T1.3).  Required of the TSX packs ONLY, and that is a statement
 // about WHERE THE TEMPLATE LIVES, not about which frameworks can draw a chart.
 //
 // tsx is per-PACK because each tsx pack binds its own charting library
@@ -288,10 +287,8 @@ const DATA_GRID_PRIMITIVES: readonly string[] = ["primitive-data-grid"];
 //
 // So `Chart` reaches ALL SEVEN frameworks, which is why `CHART_FRAMEWORKS`
 // (`src/ir/validate/checks/system-checks.ts`) lists all seven and
-// `loom.chart-unsupported-target` no longer fires for anything that ships — it
-// is the seam a NEW frontend gates on until it ports, not a live gap.  (This
-// block used to say vue/svelte/angular "ship no chart template … so every one
-// of those stays an honest gap"; both halves were false.)
+// `loom.chart-unsupported-target` fires for nothing that ships — it is the
+// seam a NEW frontend gates on until it ports, not a live gap.
 const CHART_PRIMITIVES: readonly string[] = ["primitive-chart"];
 
 export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", RequiredSet> = {

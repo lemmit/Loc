@@ -164,5 +164,8 @@ jobs:
           name: heex-ui-playwright-traces
           # The runner lifts them out of its tmpdir before cleanup.
           path: test/behavioral/.work-heex-ui/test-results/**
+          # Dot-directory: without this, upload-artifact@v4 silently ships
+          # nothing (see the note in schemathesis.yml).
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7

@@ -54,7 +54,7 @@ export const EMPTY_CONTEXT_CAPABILITIES: ContextLevelCapabilities = Object.freez
 
 /** Scan a BoundedContext's members for FilterDecl/StampDecl nodes and lower
  * them in the context's env.  Context-level filters/stamps apply to every
- * aggregate inside (typed-capabilities Phase 6 removed the capability-scoped
+ * aggregate inside (there is no capability-scoped
  * `for "<name>"` qualifier — a capability co-locates its own filter/stamp).
  * Context-level `implements <Cap>` is applied by the expander (it splices the
  * capability into each aggregate), so there is nothing to lower here. */

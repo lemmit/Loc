@@ -42,7 +42,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   // framework value is one of the v0-allowed alternatives.
   // Precedence: the framework declared on the bound `ui` itself — whether
   // bound via `ui:` sugar / `compose` or via `hosts:` (D-PHOENIX-SURFACE
-  // phase 2 — the ui owns its framework) — then the legacy platform-derived
+  // — the ui owns its framework) — then the platform-derived
   // default.  The bound-ui hop matters: the validator's rules 13b/14 read
   // the ui's declared framework through every binding spelling, so lowering
   // must agree or a validation-clean `ui X { framework: svelte }` + `ui: X`
@@ -65,11 +65,11 @@ export function lowerDeployable(d: Deployable): DeployableIR {
               : platform === "flutter"
                 ? "flutter"
                 : // Feliz self-hosts (`hostableFrameworks: {feliz}`), so a bare
-                  // `platform: feliz` renders F#/Fable — NOT the react default
-                  // the fall-through used to hand it.  The wrong answer here is
-                  // not cosmetic: every per-framework validator gate keys on
-                  // `uiFramework`, so a feliz deployable was being measured
-                  // against react's capabilities.
+                  // `platform: feliz` renders F#/Fable, NOT the react default
+                  // the fall-through would otherwise hand it.  Not cosmetic:
+                  // every per-framework validator gate keys on `uiFramework`, so
+                  // the wrong answer measures a feliz deployable against
+                  // react's capabilities.
                   platform === "feliz"
                   ? "feliz"
                   : descriptorFor(platform).isFrontend ||

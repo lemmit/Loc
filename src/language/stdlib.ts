@@ -1,4 +1,4 @@
-// The Loom standard prelude — parse-once ambient index (stdlib Phase C, C1).
+// The Loom standard prelude — parse-once ambient index (stdlib, C1).
 //
 // The prelude source (`stdlib-source.ts`) is parsed ONCE, synchronously, on an
 // isolated `EmptyFileSystem` service instance (browser-safe, no fs), and its

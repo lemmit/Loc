@@ -107,9 +107,9 @@ export function unfoldMacro(document: LangiumDocument, call: MacroCall): UnfoldR
   }
 
   // Flatten one level, group directly-returned nodes by destination
-  // AST node.  `invokeMacro` no longer contributes nodes here (it
-  // returned []), so this map holds only the macro's own direct
-  // emissions — e.g. `softDelete` returns one `FilterDecl`.
+  // AST node.  `invokeMacro` contributes none, so this map holds only the
+  // macro's own direct emissions — e.g. `softDelete` returns one
+  // `FilterDecl`.
   const byDest = new Map<object, unknown[]>();
   for (const item of produced) {
     const items = Array.isArray(item) ? item : [item];
@@ -597,7 +597,7 @@ function indent(text: string, prefix: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Per-page unfold (M-T1.5 slice A) — eject ONE scaffolded page's body as
+// Per-page unfold — eject ONE scaffolded page's body as
 // `.ddd` source while its siblings stay under the macro.
 //
 // Whole-`ui` unfold (above) removes the `with scaffold(...)` clause and ejects

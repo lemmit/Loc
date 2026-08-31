@@ -420,11 +420,11 @@ function wireRecord(
       }
     }
   }
-  // (M-T6.12) No trailing `<field>_provenance` component any more.  The lineage
-  // rides INSIDE the provenanced field's own component as the `Provenanced<T>`
-  // carrier, so the wire key is the field's own name and the `@JsonProperty`
-  // rename this used to need is gone — the carrier's `value` / `lineage`
-  // members already match every other target's spelling.
+  // No trailing `<field>_provenance` component: the lineage rides INSIDE the
+  // provenanced field's own component as the `Provenanced<T>` carrier, so the
+  // wire key is the field's own name and no `@JsonProperty` rename is needed —
+  // the carrier's `value` / `lineage` members match every other target's
+  // spelling.
   // A `mask unless` field redacts fail-closed on a RESPONSE via a SECOND mapper,
   // `fromMasked` — `from` stays unmasked for audit snapshots.  `fromMasked` binds
   // the ambient principal once off the STATIC accessor (a static mapper injects

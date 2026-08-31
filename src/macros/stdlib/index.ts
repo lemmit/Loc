@@ -34,11 +34,11 @@ export function loadStdlibMacros(): void {
   _loaded = true;
   // Audit is now the built-in `capability auditable` (src/macros/prelude.ts) —
   // the former audit/auditable/auditedByDefault macros were removed in the
-  // typed-capabilities Phase 3 migration.
+  // typed-capabilities migration.
   // Soft-delete: state + filter is the built-in `capability softDeletable`
   // (src/macros/prelude.ts); `softDelete` (ops) + `softDeleteByDefault` stay
   // macros.  The former `softDeletable` (state) + `softDelete` (context filter)
-  // macros were removed in the typed-capabilities Phase 3 migration.
+  // macros were removed in the typed-capabilities migration.
   registerMacro(softDelete);
   registerMacro(softDeleteByDefault);
   // Other capabilities
@@ -62,7 +62,7 @@ export function loadStdlibMacros(): void {
   // `/projections/<criterion>` route that binds to it.
   registerMacro(scaffoldPaged);
   registerMacro(scaffoldPagedApi);
-  // Dashboard read models (M-T1.3 Phase 2): one SINGLETON query-time projection
+  // Dashboard read models (M-T1.3): one SINGLETON query-time projection
   // per aggregate, aggregating the whole table in SQL.  The ui-side scaffold
   // renders the matching `Stat` cards from the same derivation
   // (`_dashboard-shared.ts`), so a card can't bind a projection this didn't

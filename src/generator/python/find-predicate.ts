@@ -186,7 +186,7 @@ function lower(
       // so a missing arm is a `tsc` error here, not a silent authorization
       // bypass.
       switch (e.filter.kind) {
-        // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false
+        // DENY carve-out (authorization — deny-wins).  An always-false
         // predicate: a column can't be both NULL and NOT NULL.  Self-contained
         // (uses the always-present `id` column + `and_`, already an import
         // here), so no extra SQLAlchemy import and no self-comparison ruff lint.
@@ -195,7 +195,7 @@ function lower(
           const idCol = `${row}.id`;
           return `and_(${idCol}.is_(None), ${idCol}.isnot(None))`;
         }
-        // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) —
+        // `deep`/`global` read level (multi-tenancy) —
         // descendant-or-self materialized-path scope with the NULL-dataKey
         // fallback to the tenant floor (see `DEEP_SCOPE_SEMANTICS`).
         // Descendant test as an ANCHORED POSITION, not `Column.startswith`.
@@ -319,7 +319,7 @@ function lower(
     case "method-call": {
       // (The `deep` / DENY authorization filter sentinels moved to the
       // discriminated `authz-filter` kind in M-T9.9 — handled in its own case
-      // above, no longer a `method-call` marker here.)
+      // above, not a `method-call` marker here.)
       // `this.<refColl>.contains(x)` → correlated EXISTS against the
       // field's join table.
       if (
@@ -528,7 +528,7 @@ export function contextFilterPredicate(
   return { expr: `and_(${lowered.join(", ")})`, ops };
 }
 
-/** Lower an aggregate's `writeScopeFilter` (authorization Phase 3 P3.1 — the
+/** Lower an aggregate's `writeScopeFilter` (authorization — the
  *  WRITE-ladder guard) to a single SQLAlchemy predicate, or null when the
  *  aggregate has no write-scope narrowing.  Renders `current_user.<field>`
  *  against the ambient `require_current_user()` accessor, exactly like the read
@@ -592,7 +592,7 @@ export function documentCapabilityBody(
   return { expr, usesPrincipal };
 }
 
-/** The aggregate's `writeScopeFilter` (authorization Phase 3 P3.1 — the WRITE
+/** The aggregate's `writeScopeFilter` (authorization — the WRITE
  *  scope is strictly narrower than the read scope) as an IN-APP Python boolean
  *  over a rehydrated aggregate bound to `varName`, or null when nothing narrows.
  *

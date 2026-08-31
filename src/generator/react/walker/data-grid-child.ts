@@ -1,5 +1,5 @@
 // React's `DataGrid` child component — the TSX half of the `renderDataGridChild`
-// seam (M-T1.1 slice 10).
+// seam (M-T1.1).
 //
 // WHY IT IS A COMPONENT, NOT MARKUP
 // ---------------------------------

@@ -312,10 +312,10 @@ export function emitTable(
   // group in a `<>…</>` fragment; the multi-root-tolerant frameworks
   // (Vue/Svelte/Angular) omit the seam.
   //
-  // Applied to the PAGER too, not just the filter box.  It used to be
-  // filter-only on the reasoning that a pager always sits under a pack wrapper
-  // (`<Paper>`) in scaffolded pages — true of the scaffold, and not something
-  // this primitive can know.  A hand-written page that gets a pager emits the
+  // Applied to the PAGER too, not just the filter box.  Filter-only would rest
+  // on a pager always sitting under a pack wrapper (`<Paper>`) — true of
+  // scaffolded pages, but not something this primitive can know.  A
+  // hand-written page that gets a pager emits the
   // table and the pager as bare siblings and fails to compile (TS2657), so the
   // wrap belongs where the sibling is ADDED rather than where it happens to be
   // contained.  The redundant fragment inside a `<Paper>` is inert.

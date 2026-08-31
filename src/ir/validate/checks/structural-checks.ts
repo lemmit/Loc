@@ -417,9 +417,9 @@ function containsUnion(type: TypeIR): boolean {
  * payload whose only permitted field is `resource: string` (filled with the
  * aggregate name; other fields can't be derived from absence).  Anything else
  * (aggregate-or-aggregate, three-plus variants, scalar variants, named payload
- * unions) has no derivable selection and is rejected here — previously these
- * shapes generated runtime stubs (`NotImplementedException` on .NET, an
- * untagged body on Hono).
+ * unions) has no derivable selection and is rejected here rather than left to
+ * generate a runtime stub (`NotImplementedException` on .NET, an untagged body
+ * on Hono).
  *
  * Backend scope: enforced for every backend host (node / dotnet / java /
  * python / elixir) and for the legacy no-deployable path (`generate ts` /
@@ -764,7 +764,7 @@ export function validateExternOperations(ctx: BoundedContextIR, diags: LoomDiagn
 }
 
 // ---------------------------------------------------------------------------
-// Event-sourcing body discipline (D-DOCUMENT-AXIS, appliers Phase A1).
+// Event-sourcing body discipline (D-DOCUMENT-AXIS, appliers).
 //
 // `persistedAs: eventLog` makes an aggregate event-sourced: its truth is
 // the event stream, and state is a fold of that stream.  That imposes a
@@ -2046,12 +2046,12 @@ export function validateLifecycleBodyDropped(ctx: BoundedContextIR, diags: LoomD
       ["destroy", agg.canonicalDestroy],
     ] as const) {
       // ── the guard's READABLE SURFACE ────────────────────────────────────
-      // Runs for EVERY lifecycle guard, event-sourced included.  It used to sit
-      // below the ES `continue` guarding the drop report, so an ES create's
-      // guard was never checked at all — and an ES create body IS rendered (into
-      // the domain `_init`), which makes it the one place where an unreadable
-      // guard reaches a compiler rather than a diagnostic.  The exemption below
-      // is about whether a body is DROPPED; it was never a statement about what
+      // Runs for EVERY lifecycle guard, event-sourced included — deliberately
+      // ABOVE the ES `continue` that guards the drop report.  An ES create body
+      // IS rendered (into the domain `_init`), which makes it the one place
+      // where an unreadable guard would reach a compiler rather than a
+      // diagnostic.  The exemption below is about whether a body is DROPPED;
+      // it is not a statement about what
       // a guard may read, and reusing it for both conflated two questions.
       //
       // WHICH LAYER OWNS THE ES CASE.  This check answers "what may a guard

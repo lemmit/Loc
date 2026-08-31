@@ -79,7 +79,7 @@ export function renderRepositoryInterface(
       `public interface I${agg.name}Repository`,
       "{",
       `    Task<${agg.name}?> GetByIdAsync(${idClass} id, CancellationToken cancellationToken = default);`,
-      // Command-load path (authorization Phase 3 P3.1): a write-scope-narrowed
+      // Command-load path (authorization): a write-scope-narrowed
       // GetById the mutation handlers load through.  Only when the aggregate's
       // write scope is narrower than its read scope.
       ...(agg.writeScopeFilter
@@ -380,7 +380,7 @@ export function renderRepositoryImpl(
       "{",
       "    private readonly AppDbContext _db;",
       "    private readonly IDomainEventDispatcher _events;",
-      // Per-class ILogger injection — same idiom Phase 8 .NET v1 used
+      // Per-class ILogger injection — same idiom .NET v1 used
       // for the controllers + DomainExceptionFilter, so the entire
       // generated codebase keeps one logging pattern.
       `    private readonly ILogger<${agg.name}Repository> _log;`,
@@ -407,7 +407,7 @@ export function renderRepositoryImpl(
       "        return found;",
       "    }",
       "",
-      // Command-load path (authorization Phase 3 P3.1): a write-scope existence
+      // Command-load path (authorization): a write-scope existence
       // pre-guard (EF applies the read query-filter automatically; the extra
       // predicate narrows to the write scope, which is always ⊆ the read scope),
       // then the ordinary hydrating `GetByIdAsync`.  A row the caller may READ
@@ -449,9 +449,9 @@ export function renderRepositoryImpl(
       // events are drained and the DURABLE ones staged on the SAME change
       // tracker BEFORE the single SaveChangesAsync below, so their
       // __loom_outbox rows land in the same round trip — and therefore the same
-      // implicit transaction — as the aggregate write.  Previously the outbox
-      // insert ran from DispatchAsync AFTER the commit, on a second
-      // SaveChangesAsync: a crash in between silently lost an owed event.
+      // implicit transaction — as the aggregate write.  Inserting from
+      // DispatchAsync AFTER the commit, on a second SaveChangesAsync, loses an
+      // owed event to a crash in between.
       // `__deferred` is what still needs dispatching post-commit (everything,
       // when no durable channel is wired — the inline at-most-once path).
       "        var __pending = aggregate.PullEvents();",
@@ -609,7 +609,7 @@ function buildLoadManyByIdsLines(
  * detached-check Add and before `SaveChangesAsync`.  For every
  * reference collection on the aggregate: load existing join rows,
  * compare against the current `aggregate.<Prop>` set, delete pairs
- * that are no longer present, and insert new ones.  Set semantics —
+ * that are absent from it, and insert new ones.  Set semantics —
  * the wire contract for `Id<T>[]` is a set (membership only, no order),
  * so the join row carries no payload: it's added if missing, left as-is
  * otherwise.  Mirrors the TS Drizzle save diff-sync. */
@@ -665,11 +665,10 @@ function buildSaveDiffSyncLines(associations: AssociationIR[]): string[] {
 // aggregate's persistence record is `(Id, Data jsonb, Version)`, so the
 // filter's columns (`tenantId`, `dataKey`, `isDeleted`) live INSIDE the
 // blob and there is no mapped column for EF to attach a predicate to.
-// Before this was wired, a `tenantOwned` document aggregate read
-// UNFILTERED across tenants while `validateContextFilterSupport` claimed
-// .NET filters every shape — a silent cross-tenant read (#2527's
-// follow-up 1).  node/java/python already filter document reads in-app
-// this way; this is the .NET half of that parity.
+// Without it a `tenantOwned` document aggregate reads UNFILTERED across
+// tenants while `validateContextFilterSupport` claims .NET filters every
+// shape — a silent cross-tenant read.  node/java/python filter document reads
+// in-app the same way.
 // ---------------------------------------------------------------------------
 export function renderDocumentRepositoryImpl(
   agg: EnrichedAggregateIR,
@@ -719,7 +718,7 @@ export function renderDocumentRepositoryImpl(
         `    private static bool _CapabilityVisible(${agg.name} x) => ${capPredicate};`,
       ]
     : [];
-  // Write-scope narrowing (authorization Phase 3 P3.1): the document twin of the
+  // Write-scope narrowing (authorization): the document twin of the
   // relational `AnyAsync(x => x.Id == id && (<scope>))` pre-guard.  `GetByIdAsync`
   // already applies the READ filter above (EF gets that for free on the
   // relational path via the query filter), so this only adds the write-scope
@@ -981,7 +980,7 @@ export function renderEventSourcedRepositoryImpl(
   );
   const recordCls = eventRecordClass(contextName);
 
-  // Write-scope narrowing (authorization Phase 3 P3.1): the EVENT-SOURCED twin
+  // Write-scope narrowing (authorization): the EVENT-SOURCED twin
   // of the document `writeScopeMethod` above.  A stream has no queryable row to
   // pre-guard with `AnyAsync`, so — exactly like the document blob — fold the
   // stream through `GetByIdAsync` and apply the scope predicate in-app.

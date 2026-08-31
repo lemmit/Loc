@@ -91,13 +91,13 @@ function adapterBagFor(
   }
 }
 
-// NOTE: `resolvePersistence()` was removed (M-T9.2 / closes M-T6.10) — it was
-// never invoked on the production emit path (lowering reads the default NAME
-// via `defaultsFor`, and no emitter resolves a persistence adapter OBJECT).
-// The live capability surface is `adaptersFor(...).persistence[name]` +
-// `defaultsFor(...)`; callers that want a named adapter read the menu directly.
-// `resolveStyle` / `resolveLayout` are retained (style/layout resolution is
-// still the shape the validator/menu code expects).
+// NOTE: there is deliberately no `resolvePersistence()`.  Nothing on the
+// production emit path would call it — lowering reads the default NAME via
+// `defaultsFor`, and no emitter resolves a persistence adapter OBJECT.  The
+// live capability surface is `adaptersFor(...).persistence[name]` +
+// `defaultsFor(...)`; a caller wanting a named adapter reads the menu
+// directly.  `resolveStyle` / `resolveLayout` DO exist — style/layout
+// resolution is the shape the validator/menu code expects.
 
 export function resolveStyle(platform: Platform, name: string | null | undefined): StyleAdapter {
   const surface = platformFor(platform);

@@ -32,8 +32,8 @@ function resolveOne(
   // `bp.column` (the column the user's editor sent on the REQUEST) is
   // intentionally IGNORED for lookup here: `translateBreakpoint` is
   // line-granular on input. A request-column-aware forward lookup (narrowing
-  // candidates to the one whose origin span covers that column too) is a
-  // later refinement, not built in this slice. The RESPONSE `column` below
+  // candidates to the one whose origin span covers that column too) is not
+  // built. The RESPONSE `column` below
   // is the GENERATED column (from `BreakpointTarget.column`), independent of
   // any column the request carried.
   const targets = translateBreakpoint(map, sourcePath, bp.line, readSource);

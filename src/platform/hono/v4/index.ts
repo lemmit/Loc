@@ -130,7 +130,7 @@ export function makeHonoPlatform(pins: BackendPins): PlatformSurface {
         layout: "byLayer",
       };
     },
-    // M18 phase 8 slice 1 (Node debug wiring) — moved verbatim from the old
+    // (Node debug wiring) — moved verbatim from the old
     // `NodeLaunchTarget`-based `renderVsCodeLaunchJson` (src/system/
     // launch-config.ts) when the seam generalized to per-backend
     // `debugLaunch` (M26).  BYTE-IDENTICAL with the pre-M26 shape:

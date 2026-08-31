@@ -436,7 +436,7 @@ export function renderJavaSpringDataRepository(
       ``,
     );
   }
-  // Command-load path (authorization Phase 3 P3.1): a WRITE-scope-narrowed
+  // Command-load path (authorization): a WRITE-scope-narrowed
   // `findByIdForWrite` the impl's `getById` loads through when the aggregate's
   // write scope is narrower than its read scope.  Same SpEL-principal @Query
   // shape as the read override, but with the write predicate — a row a caller
@@ -815,7 +815,7 @@ export function renderJavaRepositoryImpl(
     ``,
     `    @Override`,
     `    public ${agg.name} getById(${idClass} id) {`,
-    // Command load (authorization Phase 3 P3.1): when the aggregate's write
+    // Command load (authorization): when the aggregate's write
     // scope is narrower than its read scope, load through the write-scoped
     // `findByIdForWrite` @Query — a readable-but-not-writable (or missing) row
     // → 404.  Otherwise the ordinary read-scoped `findById` (byte-identical).

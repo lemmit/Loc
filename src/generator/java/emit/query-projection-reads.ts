@@ -382,7 +382,7 @@ export function renderJavaQueryProjections(
       // NO `continue` — fall through to the shared `requires`-gate + list-route
       // block below, exactly like the per-row arms.
     } else if (aggregates) {
-      // WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0) — ONE JPQL query with
+      // WHOLE-TABLE AGGREGATION (M-T1.3) — ONE JPQL query with
       // `count`/`sum`/`avg`/`min`/`max`, no rows materialised.  The shape exists
       // precisely to avoid the naive read: a `findAll()` stream over the whole
       // table with every row hydrated into an entity to produce one integer.

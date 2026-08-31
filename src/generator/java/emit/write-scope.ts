@@ -6,7 +6,7 @@ import { javaNotFoundThrow } from "./common.js";
 
 // ---------------------------------------------------------------------------
 // The IN-APP write-scope guard for java's BLOB-shaped repositories
-// (`shape: document` and the event-sourced stream, authorization Phase 3 P3.1).
+// (`shape: document` and the event-sourced stream, authorization).
 //
 // The relational / embedded shapes push the write scope into a SpEL-principal
 // `findByIdForWrite` @Query (src/generator/java/emit/repository.ts): a row the

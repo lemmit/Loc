@@ -391,7 +391,7 @@ function projectionRoute(
   return out.join("\n");
 }
 
-/** `GET /projections/<name>` for a WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0):
+/** `GET /projections/<name>` for a WHOLE-TABLE AGGREGATION (M-T1.3):
  *  one SQL query with `COUNT(*)`/`SUM(...)` over the source table, no rows
  *  materialised.  The shape exists precisely to avoid the naive read — a
  *  `SELECT *` over the whole table with every row rehydrated into a domain

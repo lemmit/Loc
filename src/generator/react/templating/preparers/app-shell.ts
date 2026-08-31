@@ -66,7 +66,7 @@ export function prepareAppShellVM(
    *  appears once regardless of which shell branch routes it.
    *  Phoenix LiveView ignores this channel today. */
   outOfShellRoutes?: ExtraPageRoute[],
-  /** Phase 8 step 2: pre-built named-layout VMs from `layouts-emitter.ts`.
+  /** step 2: pre-built named-layout VMs from `layouts-emitter.ts`.
    *  Each entry already has its slot JSX walked + its route bucket
    *  populated.  The preparer flattens the per-entry routes into
    *  `RouteVM[]` and threads the VM list into `AppShellVM.namedLayouts`
@@ -82,7 +82,7 @@ export function prepareAppShellVM(
     usesNavigate: boolean;
     routes: ExtraPageRoute[];
   }>,
-  /** Phase 8 step 2: extra imports the named-layout JSX needs.
+  /** step 2: extra imports the named-layout JSX needs.
    *  Already deduped by the layouts-emitter; the preparer appends
    *  them to the shared `imports` list. */
   layoutImports?: ReadonlyArray<{ specifier: string; from: string }>,
@@ -126,7 +126,7 @@ export function prepareAppShellVM(
   pageModules: ReadonlyMap<string, string> = new Map(),
 ): AppShellVM {
   /** Where the page filling `slot` actually landed, else the conventional
-   *  path this preparer used to hard-code. */
+   *  path. */
   const moduleFor = (slot: string, conventional: string): string =>
     pageModules.get(slot) ?? conventional;
   const imports: ImportVM[] = [];
@@ -291,7 +291,7 @@ export function prepareAppShellVM(
     navSections.push({ label: "Workflows", entries });
   }
 
-  // Phase 8 step 2 — flatten the pre-walked named-layout VMs into
+  // step 2 — flatten the pre-walked named-layout VMs into
   // the AppShellVM channel + extend the import list.  Routes inside
   // a named layout are routed via `<Route element={<NameLayout />}>
   // <Route .../>… </Route>` in the template; the page-component

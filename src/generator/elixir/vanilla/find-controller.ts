@@ -272,11 +272,11 @@ ${pagingElseArm(`${webModule}.ProblemDetails`, "    ")}
         absent.kind === "none"
           ? // RS-22/RS-27 — the `T option` miss goes through the SHARED
             // producer, with the canonical `"not_found"` token as `detail`.
-            // It used to call `problem_variant(…, "Not Found", %{})`, whose
-            // helper sets `detail: title` — so elixir answered `"Not Found"`
-            // where node/python/java/dotnet answer `"not_found"`.  Two
+            // NOT `problem_variant(…, "Not Found", %{})`, whose helper sets
+            // `detail: title` — that answers `"Not Found"` where
+            // node/python/java/dotnet answer `"not_found"`, and puts two
             // spellings of one 404 inside ONE controller (the `T?` arm below
-            // said `"<Agg> not found"`), which is this rule's own lesson:
+            // says `"<Agg> not found"`), which is this rule's own lesson:
             // don't hand-roll a 404, reach the producer.
             `        ${denialResponse("notFound", '"not_found"', denialOverrides(ctx))}`
           : `        problem_variant(conn, ${absent.status}, ${JSON.stringify(absent.type)}, ${JSON.stringify(absent.title)}, ${absent.hasResource ? `%{resource: ${JSON.stringify(aggPascal)}}` : "%{}"})`;
@@ -299,10 +299,9 @@ ${absentArm}
       // declares no error status, and its default is the (softened) A4 question.
       //
       // The `detail` is the canonical `"not_found"` TOKEN (RS-27 scopes the
-      // find miss out of the by-id sentence).  It used to interpolate the
-      // aggregate — `"<Agg> not found"` — which reads like the by-id sentence
-      // but carries no id and matched no other backend; the first callers for
-      // `by_email` / `by_reference` / `by_code` / `by_sku` are what surfaced it.
+      // find miss out of the by-id sentence).  Interpolating the aggregate —
+      // `"<Agg> not found"` — reads like the by-id sentence but carries no id,
+      // and matches no other backend.
       //
       // A NON-optional single find takes the SAME arm, and the sentence above
       // is why: it has even less of an absent representation than the optional
@@ -326,11 +325,10 @@ ${absentArm}
   });
   // The `page_param/4` reader — once per controller — backs every paged find's
   // `page`/`pageSize` query reads.  ONE definition, shared with the
-  // queryHandler controller (`page-param.ts`); it used to be copy-pasted into
-  // both, and both copies clamped where the OpenAPI document publishes bounds.
-  // The auto-`findAll` `index` is paged-by-default now (M-T2.6), so the helper
-  // is required on every non-abstract controller even without an explicit paged
-  // find.
+  // queryHandler controller (`page-param.ts`), rather than a copy in each that
+  // clamps where the OpenAPI document publishes bounds.  The auto-`findAll`
+  // `index` is paged by default, so the helper is required on every
+  // non-abstract controller even without an explicit paged find.
   const indexAllFind = (ctx.repositories ?? [])
     .find((r) => r.aggregateName === agg.name)
     ?.finds?.find((f) => f.name === "all");

@@ -7,7 +7,7 @@
 // implementation needs (role, accessible name, keyboard pattern, heading
 // level, landmark, live-region politeness) is derivable from the IR.  This
 // module declares that obligation as data on each `PrimitiveDef`; later phases
-// consume it (Phase 2 walker emit, Phase 3 `loom.a11y-*` validation) — Phase 1
+// consume it (walker emit, `loom.a11y-*` validation) — this layer
 // is data only, no emit change.
 //
 // A primitive is either explicitly `"presentational"` (nothing required — it

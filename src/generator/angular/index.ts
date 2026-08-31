@@ -245,7 +245,7 @@ export function generateAngularForContexts(
   }
   const pageRoutes = new Map<string, string>();
   for (const page of pages) pageRoutes.set(page.name, page.route!);
-  // Name-context for the page's emitted identifier (slice 3c — replaces origin).
+  // Name-context for the page's emitted identifier (replaces origin).
   const pageCtx: PageNameCtx = {
     aggregateNames: contexts.flatMap((c) => c.aggregates.map((a) => a.name)),
     workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
@@ -550,7 +550,7 @@ export function generateAngularForContexts(
   out.set("src/api/config.ts", pack.render("api-config", { apiBaseUrl }));
 
   // Per-aggregate API modules — the idiomatic-Angular `@Injectable` service +
-  // signal-backed `use<Op><Agg>` read factory (data-path sub-slice A; the
+  // signal-backed `use<Op><Agg>` read factory (the
   // QueryView read path that consumes them lands in the next sub-slice).
   for (const { agg } of aggregates) {
     out.set(
@@ -566,7 +566,7 @@ export function generateAngularForContexts(
     out.set("src/api/workflows.ts", buildAngularWorkflowsModule(contexts));
   }
 
-  // Query-time projection clients (M-T1.3 Phase 1).  Angular FORKS the shared
+  // Query-time projection clients (M-T1.3).  Angular FORKS the shared
   // `_frontend/projections-module.ts` rather than widening its options — the
   // emitted unit is an interface + an @Injectable service method + an
   // `injectQuery` factory, not a zod schema plus a hook (see that module's
@@ -577,7 +577,7 @@ export function generateAngularForContexts(
     out.set("src/api/projections.ts", buildAngularProjectionsModule(contexts));
   }
 
-  // --- Playwright e2e harness (angular-frontend-plan.md Slice 6) -------
+  // --- Playwright e2e harness (angular-frontend-plan.md) -------
   // Page objects + smoke spec are framework-neutral — they drive the
   // browser through the SAME testid-keyed runtime React/Vue/Svelte use, so
   // the SHARED `_frontend/` emitters produce them verbatim.  Angular

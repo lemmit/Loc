@@ -175,8 +175,9 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
   // declaration.  So a deployable declared with `contexts:` alone falls back to
   // the app name and still publishes the same route-derived document the other
   // four backends publish either way (F15,
-  // `docs/audits/schemathesis-findings-2026-08.md`) — previously it emitted no
-  // spec module, no OpenapiController and no `/openapi.json` route at all.
+  // `docs/audits/schemathesis-findings-2026-08.md`).  Without the fallback such
+  // a deployable emits no spec module, no OpenapiController and no
+  // `/openapi.json` route at all.
   const servedApi = deployable.serves?.[0];
   const apiSnake = servedApi ? snake(servedApi) : appName;
   const apiPascal = servedApi ? upperFirst(servedApi) : appModule;
@@ -668,9 +669,9 @@ ${pagingQueryParams()}
       );
     }
 
-    // Per-operation paths — the SERVED entries (router parity by
-    // construction; the spec used to document every public op, including the
-    // CRUD-verb-named ones the router never mounts and the ES `update`).
+    // Per-operation paths — the SERVED entries, so router parity holds by
+    // construction.  Documenting every public op instead would publish the
+    // CRUD-verb-named ones the router never mounts, and the ES `update`.
     for (const entry of served.opEntries) {
       const op = entry.operation!;
       const opReqMod = `${schemasModule}.${upperFirst(op.name)}${agg.name}Request`;
@@ -781,9 +782,9 @@ ${pagingQueryParams()}
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${findRespMod}}}
             }${
-              // The declared set (gated 403 included, union-absent status
-              // resolved) is the derived one — the union arm here used to
-              // omit the 403 a gated union find answers.
+              // The declared set is the DERIVED one, so it carries the 403 a
+              // gated union find answers and the resolved union-absent
+              // status.
               statusResponseEntries(
                 withResolvedNotFound(entry.errorStatuses, notFoundStatus),
                 schemasModule,
@@ -1011,7 +1012,7 @@ end
  *  message }` array) that the runtime emits on 422 validation responses.
  *  All fields optional — base 5 per the spec core; `errors` is only
  *  present on 422 validation responses (consumed by the frontend ACL's
- *  `applyServerErrors`).  Phase D of validation-error-extension.md —
+ * `applyServerErrors`).  validation-error-extension.md —
  *  all three backends (Hono / .NET / Phoenix) declare the same shape in
  *  lockstep so the cross-backend parity gate stays green. */
 function renderProblemDetailsSchema(webModule: string): string {
@@ -1260,9 +1261,8 @@ function pagedFindName(ctx: EnrichedBoundedContextIR, agg: EnrichedAggregateIR):
  *
  *  `page` / `pageSize` publish the same declared `minimum` / `maximum` the
  *  other four backends do (`PAGED_MAX_PAGE` / `PAGED_MAX_PAGE_SIZE`); the
- *  controller's `page_param/4` clamps to the same ceiling, so an unbounded
- *  `page * pageSize` can no longer overflow the SQL `OFFSET` (schemathesis
- *  F4). */
+ *  controller's `page_param/4` bounds to the same ceiling, so an unbounded
+ *  `page * pageSize` cannot overflow the SQL `OFFSET` (schemathesis F4). */
 function pagingQueryParams(): string {
   return [
     `            %OpenApiSpex.Parameter{name: :page, in: :query, required: false, schema: %OpenApiSpex.Schema{type: :integer, minimum: 1, maximum: ${PAGED_MAX_PAGE}}}`,

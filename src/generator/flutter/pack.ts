@@ -394,9 +394,9 @@ function primitiveAnchor(c: Ctx): string {
   if (!c.hasTo) return label;
   // `to` arrives as a DART EXPRESSION (rendered through the target's own leaf
   // table): `'/products'` for a literal path, `'/greet/' + who` for a computed
-  // one.  Used verbatim — it used to be unwrapped from a JS-quoted literal and
-  // re-escaped, so a computed destination arrived as JS (a template literal, in
-  // backticks) and was spliced into Dart source (finding A12).
+  // one.  Used verbatim: unwrapping it from a JS-quoted literal and
+  // re-escaping splices a computed destination into Dart source as JS (a
+  // template literal, in backticks).
   const route = String(c.to ?? "'/'");
   return `TextButton(onPressed: () => Navigator.of(context).pushNamed(${route}), child: ${label})`;
 }
@@ -460,7 +460,7 @@ function primitiveEnumBadge(c: Ctx): string {
 
 /** Stat(label, value) — a labelled metric block. */
 /** Chart(kind:, of:, x:, y:) — `LoomChart(...)` (lib/chart.dart), a
- *  `CustomPainter` over the rows the page already watches (M-T1.3 Phase 4).
+ *  `CustomPainter` over the rows the page already watches (M-T1.3).
  *
  *  No charting package: the rows are decoded on this side, so the geometry is
  *  arithmetic — see `chart-runtime.ts` for why the widget takes a flat point
@@ -634,7 +634,7 @@ function primitiveButton(c: Ctx): string {
 // type-agnostic); Tabs is the one container here (DefaultTabController + TabBar +
 // TabBarView); FileUpload picks a file (file_picker), POSTs it multipart to
 // `/files`, and writes the returned `FileRef` back to state.  EVERY page
-// primitive now renders — the `FLUTTER_UNRENDERED_PRIMITIVES` gate is empty.
+// primitive renders, so the `FLUTTER_UNRENDERED_PRIMITIVES` gate is empty.
 // Forms (Create/Operation/Workflow/Destroy) and Modal are NOT here — they render
 // via the `flutterTarget` walker SEAMS.
 // ---------------------------------------------------------------------------

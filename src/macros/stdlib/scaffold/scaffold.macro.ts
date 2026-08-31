@@ -87,7 +87,7 @@ export default defineMacro({
           },
           // Home grows a KPI row per aggregate whose context carries a dashboard
           // projection — the numbers come from the database, not from a
-          // client-side fold over one page of rows (M-T1.3 Phase 2).
+          // client-side fold over one page of rows (M-T1.3).
           allAggregates,
           target as Ui,
         ),

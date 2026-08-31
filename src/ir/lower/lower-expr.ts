@@ -121,7 +121,7 @@ const NO_PAREN_CALL_COLLECTION_OPS = new Set(["first", "firstOrNull"]);
 
 /** Synthetic entity name used to type an ambient resource handle.  A
  *  `.verb(...)` call on a ref of this type lowers to a `resource-op`;
- *  the name carries no members of its own (Phase 4). */
+ *  the name carries no members of its own. */
 const RESOURCE_HANDLE_SHAPE = "__ResourceHandle";
 
 // ── Ambient root-level enum index ─────────────────────────────────────
@@ -147,8 +147,8 @@ export function setAmbientEnumIndex(index: ReadonlyMap<string, string>): void {
   ambientEnumIndex = index;
 }
 
-// Project-global index of TOP-LEVEL (ambient) helper `function`s (stdlib
-// Phase B), name → decl.  Installed once by `lowerModel` before any body is
+// Project-global index of TOP-LEVEL (ambient) helper `function`s, name →
+// decl.  Installed once by `lowerModel` before any body is
 // lowered (single synchronous pass, so the module-global is safe — same
 // posture as `ambientEnumIndex`).  A call to one of these inlines its
 // expression body at the call site (`inlineTopLevelFn`), so it needs no
@@ -362,7 +362,7 @@ function lowerPostfixChain(chain: PostfixChain, env: Env): ExprIR {
     return recv;
   }
   // Named policy-function CALL at the chain head (`IsManager()` /
-  // `CanApprove(amount)`, auth P3.2) — inline the ambient predicate body with
+  // `CanApprove(amount)`, auth) — inline the ambient predicate body with
   // the call arguments, then apply any trailing suffixes.  Handled here (not
   // via the `recv.kind === "ref"` call branch below) because a PARAMETERLESS
   // policy function resolves eagerly to its inlined body in `resolveNameRef`,
@@ -434,8 +434,7 @@ function applySuffixToRecv(
     const argNames = callArgs.map((a) => a.name || undefined);
     const named = argNames.some((n) => n !== undefined);
     // When the receiver IR is a `ref` (we lowered a bare NameRef
-    // head), produce the same `call` IR the old CallExpr branch did;
-    // resolution of callKind matches the original semantics.
+    // head), produce the same `call` IR the CallExpr branch produces.
     if (recv.kind === "ref") {
       // Parameterised criterion call (`InRegion("EU")`) — inline the
       // predicate body with the call arguments substituted for its
@@ -448,7 +447,7 @@ function applySuffixToRecv(
         };
       }
       // Parameterised policy-function call (`CanApprove(cap)`) — inline the
-      // ambient predicate body with the call arguments substituted (auth P3.2).
+      // ambient predicate body with the call arguments substituted (auth).
       const policyFn = findPolicyFnInEnv(env, recv.name);
       if (policyFn) {
         return {
@@ -457,7 +456,7 @@ function applySuffixToRecv(
         };
       }
       const callKind = resolveCallKind(recv.name, env);
-      // Top-level (ambient) helper `function` call (stdlib Phase B) — inline
+      // Top-level (ambient) helper `function` call (stdlib) — inline
       // its expression body with the arguments substituted.  Gated on
       // `callKind === "free"` so a LOCAL member (aggregate/VO/workflow
       // function, operation, VO ctor) of the same name shadows the top-level
@@ -630,7 +629,7 @@ function applySuffixToRecv(
       }
     }
     // `<resource>.<verb>(args)` — a verb call on an ambient resource
-    // handle lowers to a `resource-op` call (Phase 4).  The verb's
+    // handle lowers to a `resource-op` call.  The verb's
     // capability comes from the resource-verb registry; an unknown verb
     // still lowers (carrying the raw name) so the IR validator can emit
     // a precise diagnostic rather than the lowering silently dropping it.
@@ -1294,10 +1293,9 @@ function inferBuilderCallType(expr: BuilderCall, env: Env): TypeIR {
  * Lower a builder-entry value against its DECLARED slot type, when known.
  *
  * This is `lowerExprInContext` — the promotion seam `emit` fields, `:=`, field
- * defaults and workflow params all use — reached from the builder-call path,
- * which previously lowered every entry context-free.  Routing through the
- * shared seam rather than post-hoc rewriting the lowered `args` matters for
- * three reasons:
+ * defaults and workflow params all use — reached from the builder-call path.
+ * Routing through the shared seam rather than post-hoc rewriting the lowered
+ * `args` matters for three reasons:
  *
  *   1. it promotes against the slot's OWN primitive (`money` stays `money`),
  *      where a blanket int→decimal rewrite silently mis-resolves a `money`
@@ -1399,7 +1397,7 @@ function findCriterionInEnv(env: Env, name: string): Criterion | undefined {
 }
 
 /** Locate a FUNCTION-form `policy` declaration by name in the enclosing
- *  context (authorization Phase 3.2).  A block-form `policy {}` (read ladder)
+ *  context (authorization.md).  A block-form `policy {}` (read ladder)
  *  has no `returnType`; only the function form is a callable predicate. */
 function findPolicyFnInEnv(env: Env, name: string): PolicyDecl | undefined {
   if (!env.ctx) return undefined;
@@ -1410,7 +1408,7 @@ function findPolicyFnInEnv(env: Env, name: string): PolicyDecl | undefined {
 }
 
 /** Inline a named policy-function reference into the host expression
- *  (authorization Phase 3.2).  Unlike a criterion, a policy function is
+ *  (authorization.md).  Unlike a criterion, a policy function is
  *  AMBIENT — it has no candidate aggregate, so the body sees only
  *  `currentUser`, its own parameters (substituted by the caller's already-
  *  lowered arguments), and context-level ambient names (module `permissions`,
@@ -1455,8 +1453,8 @@ function inlinePolicyFn(fn: PolicyDecl, args: ExprIR[], env: Env): ExprIR {
  *  (`InRegion("EU")`) — return the criterion name + its lowered argument
  *  expressions; otherwise `undefined` (composed / anonymous clause).
  *
- *  Reified-criteria Slice 2b: lets retrieval/find lowering record the
- *  reference so a backend can consume the reified `Criterion` / Specification,
+ *  Lets retrieval/find lowering record the reference so a backend can consume
+ *  the reified `Criterion` / Specification,
  *  even though the use-site otherwise keeps no provenance (the clause is still
  *  inlined into the IR for every non-reifying backend). */
 export function criterionRefOf(
@@ -1526,8 +1524,8 @@ function findTopLevelFn(name: string): FunctionDecl | undefined {
   return topLevelFnIndex.get(name);
 }
 
-/** Inline a top-level (ambient) helper `function` at the call site (stdlib
- *  Phase B).  Like `inlinePolicyFn`, the body is AMBIENT — it sees only its
+/** Inline a top-level (ambient) helper `function` at the call site.
+ *  Like `inlinePolicyFn`, the body is AMBIENT — it sees only its
  *  own parameters (substituted by the caller's already-lowered arguments),
  *  context-level ambient names (root enums, sibling top-level functions), and
  *  `currentUser` if present; the enclosing aggregate/part/VO/workflow scope is
@@ -1618,7 +1616,7 @@ function resolveNameRef(name: string, env: Env, node?: AstNode): ExprIR {
     };
   }
   // Ambient resource handle (`files`, `jobs`, …) — a `resource X { for:
-  // <thisCtx>, … }` declaration in scope (Phase 4).  Resolved before
+  // <thisCtx>, … }` declaration in scope.  Resolved before
   // locals so it isn't shadowable, mirroring `currentUser`.  The type is
   // a synthetic marker; a `.verb(...)` call on this ref lowers to a
   // `resource-op` (see `applySuffixToRecv`).
@@ -1712,7 +1710,7 @@ function resolveNameRef(name: string, env: Env, node?: AstNode): ExprIR {
       return inlineCriterion(crit, [], env);
     }
     // Parameterless policy-function reference (`IsManager`) — inline the
-    // ambient predicate body (auth P3.2).  A parameterised policy function
+    // ambient predicate body (auth).  A parameterised policy function
     // referenced bare falls through; the validator reports the arity mismatch
     // (`loom.policy-fn-arity`).
     const policyFn = findPolicyFnInEnv(env, name);
@@ -2456,7 +2454,7 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
   // with a friendlier message.
   if (t.kind === "entity" && t.name === USER_SHAPE_NAME && env.user) {
     // `currentUser.orgPath` — the derived tenant materialized-path member
-    // (multi-tenancy Phase 2, P2.1).  Not a `user {}` claim; computed per
+    // (tenancy.md).  Not a `user {}` claim; computed per
     // backend from the tenancy claim, typed as the DataKey path (a string).
     if (name === PRINCIPAL_ORG_PATH || name === PRINCIPAL_ROOT_ORG)
       return { kind: "primitive", name: "string" };

@@ -30,7 +30,7 @@
 // by `JAVA_TARGET`'s domain-service call leaf (render-expr.ts) →
 // `Pricing.quote(...)`, so this emitter owns only the declaration side.
 //
-// READING tier (domain-services.md rev. 4, Slice 1) — a service whose body runs
+// READING tier (domain-services.md rev. 4) — a service whose body runs
 // read-only repository queries (`Accounts.byHolder(holder)`, lowered to a
 // `repo-read` Call).  On Java the idiom is a SPRING BEAN, not a static utility:
 //
@@ -211,7 +211,7 @@ function serviceIsReading(svc: DomainServiceIR): boolean {
   return svc.operations.some((op) => readPortsForOperation(op).length > 0);
 }
 
-/** A `reading`-tier service (domain-services.md rev. 4, Slice 1) → a Spring
+/** A `reading`-tier service (domain-services.md rev. 4) → a Spring
  *  `@Service` bean with constructor-injected `<Aggregate>Repository`s (one per
  *  distinct read-port across its ops) and INSTANCE methods.  The read methods
  *  carry `@Transactional(readOnly = true)`; the body's `repo-read` arms render

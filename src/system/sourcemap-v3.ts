@@ -3,7 +3,7 @@ import { offsetToLineCol } from "../generator/_trace/sourcemap.js";
 import { resolveToSource } from "../ir/types/origin.js";
 
 // ---------------------------------------------------------------------------
-// Source Map v3 sidecars — Milestone 5 of docs/old/proposals/source-map-and-
+// Source Map v3 sidecars — docs/old/proposals/source-map-and-
 // debugging.md.  Sibling of sourcemap.ts (the construct-granular
 // `.loom/sourcemap.json` artifact): renders the SAME recorded regions into
 // the standard `<file>.map` shape a debugger / browser devtools already
@@ -55,7 +55,7 @@ interface ResolvedRegion {
   /** Straight passthrough of `SourceMapRegion.targetCol` (1-based,
    *  half-open) — converted to 0-based only where it's consumed below,
    *  same treatment `line`/`col` already get from `offsetToLineCol`'s
-   *  1-based output (span-tracking-emission.md, M15 phase 7 slice 2). */
+   *  1-based output (span-tracking-emission.md). */
   targetCol?: [number, number];
 }
 
@@ -118,7 +118,7 @@ export function renderSourceMapV3(
   let prevSourceCol = 0;
   const lineGroups: string[] = [];
   for (let line = 1; line <= maxLine; line++) {
-    // Expression-level marks (span-tracking-emission.md, M15 phase 7 slice
+    // Expression-level marks (span-tracking-emission.md, slice
     // 2): a region carrying `targetCol` reports the REAL generated column
     // instead of the construct-granular col-0 fallback.  Multiple marked
     // regions covering the SAME generated line become multiple segments,

@@ -155,7 +155,7 @@ export function lowerToDrizzle(
     // a missing arm is a `tsc` error here, not a silent authorization bypass.
     if (e.kind === "authz-filter") {
       switch (e.filter.kind) {
-        // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false
+        // DENY carve-out (authorization — deny-wins).  An always-false
         // term: a column can't be both NULL and NOT NULL, so
         // `and(isNull(id), isNotNull(id))` matches no row.  Self-contained (uses
         // the always-present `id` column and standard Drizzle ops), so it needs
@@ -165,7 +165,7 @@ export function lowerToDrizzle(
           const idCol = `schema.${tableName}.id`;
           return `and(isNull(${idCol}), isNotNull(${idCol}))`;
         }
-        // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) — the
+        // `deep`/`global` read level (multi-tenancy) — the
         // materialized-path descendant-or-self scope with the NULL-dataKey
         // fallback to the tenant floor (see `DEEP_SCOPE_SEMANTICS`).  Renders as
         // a Drizzle operator tree.
@@ -692,7 +692,7 @@ export function contextFilterPredicate(
   return `and(${lowered.join(", ")})`;
 }
 
-/** Lower an aggregate's `writeScopeFilter` (authorization Phase 3 P3.1 — the
+/** Lower an aggregate's `writeScopeFilter` (authorization — the
  *  WRITE-ladder guard) to a single Drizzle predicate string, or null when the
  *  aggregate has no write-scope narrowing.  Renders `currentUser.<field>`
  *  against the ambient `requireCurrentUser()` accessor, exactly like the read

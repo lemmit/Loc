@@ -38,8 +38,8 @@ import {
  *  (`src/generator/dotnet/index.ts`'s `emitAggregate`/`place`), which
  *  anchors it via `SourceMapRecorder.fragment`.  Covers only the REGULAR
  *  (non-extern) named-operation body path — see the call site in
- *  `renderEntity` below; extern check bodies, event-sourced init, and
- *  appliers are out of scope for this slice. */
+ *  `renderEntity` below.  Extern check bodies, event-sourced init and
+ *  appliers are out of scope. */
 export interface OpFragment {
   fragmentText: string;
   subRegions: SourceMapSubRegion[];
@@ -77,7 +77,7 @@ function narrowedOrigin(stmt: NarrowableStmt): OriginRef | undefined {
   return stmt.origin;
 }
 
-/** M7 phase 6a: weave enhanced C#10 `#line (a,b)-(c,d) "path"` directives
+/** Weave enhanced C#10 `#line (a,b)-(c,d) "path"` directives
  *  (source-map-and-debugging.md §6.C) into a REGULAR named-operation's
  *  per-statement chunk list, one directive per statement whose origin
  *  resolves to a span in `sourceTexts`.  A statement with no usable origin
@@ -119,7 +119,7 @@ export function weaveLineDirectives(
 // used by repository hydration, and (for the root) a public `Create`
 // factory + `PullEvents()` drainage hook.
 //
-// Extern operations (extern (b) Phase 2): when an aggregate declares
+// Extern operations (extern (b)): when an aggregate declares
 // `operation X(...) extern { precondition ... }`, the generated `X(...)`
 // method runs the preconditions, then delegates the hand-written business
 // decision to a `private partial X Core(...)` HOOK the aggregate OWNS, then
@@ -182,7 +182,7 @@ export function renderEntity(
    *  signature with the union type and threads `returnUnion` into the body's
    *  render context so tagged `return`s build the right variant record. */
   operationReturnUnions?: Map<string, { name: string; members: UnionMember[] }>,
-  /** Source-map Milestone 3 (statement regions) — when passed, the REGULAR
+  /** Source-map (statement regions) — when passed, the REGULAR
    *  named-operation body loop below pushes one `OpFragment` per operation.
    *  Only the root render call gets this (entity parts carry no
    *  operations); allocated by the caller ONLY when a recorder is present
@@ -194,7 +194,7 @@ export function renderEntity(
    *  `statementSubRegions` construct id `"Sales.Order.confirm"`.  Required
    *  whenever `opFragments` is passed. */
   constructPrefix?: string,
-  /** `.ddd` source text keyed by `OriginRef` source path (M7 phase 6a) —
+  /** `.ddd` source text keyed by `OriginRef` source path —
    *  present only alongside `opFragments` (same recorder-present gate).
    *  When set, the REGULAR named-operation body loop below weaves C#
    *  enhanced `#line` directives (see `weaveLineDirectives`) so the PDB
@@ -231,7 +231,7 @@ export function renderEntity(
   const appliers = isAgg(entity) ? (entity.appliers ?? []) : [];
   const esCreate = isAgg(entity) ? entity.creates?.[0] : undefined;
   const hasExtern = operations.some((o) => o.extern);
-  // Extern (b) Phase 2: an `extern` op never widens any setter.  The extern
+  // Extern (b): an `extern` op never widens any setter.  The extern
   // hook (`<Op>Core`) is a member of the aggregate, so it mutates the `private`
   // setters directly — no `internal`/`public` leak (finding S10 fixed by
   // construction).  Setters stay `private` for every aggregate.
@@ -410,7 +410,7 @@ export function renderEntity(
   });
 
   const opLines: string[] = [];
-  // Extern-operation domain hooks (extern (b) Phase 2): a `private partial`
+  // Extern-operation domain hooks (extern (b)): a `private partial`
   // method the aggregate OWNS, declared here and implemented by the user in a
   // co-located scaffold-once partial file (`renderExternHookImpl`).  Collected
   // here and appended to the (now `partial`) class body below.
@@ -443,7 +443,7 @@ export function renderEntity(
       .join(", ");
     const params = [baseParams, userParam].filter(Boolean).join(", ");
     if (op.extern) {
-      // Extern op (extern (b) Phase 2): a REAL method that runs the
+      // Extern op (extern (b)): a REAL method that runs the
       // preconditions, delegates the hand-written business decision to a
       // partial-method HOOK the aggregate OWNS (`<Op>Core`), then re-asserts
       // invariants.  The framework flow (load → preconditions → hook →
@@ -503,8 +503,7 @@ export function renderEntity(
     // `renderCsStatements` here — `renderCsStatements` IS `chunks.join("\n")`
     // by construction, so `body` below is byte-identical either way, but the
     // per-chunk list lets us surface per-statement sub-regions to the caller
-    // that owns the recorder + this file's final content (source-map
-    // Milestone 3).
+    // that owns the recorder + this file's final content (source-map).
     const opRenderCtx = retUnion ? { ...renderCtx, returnUnion: retUnion } : renderCtx;
     const rawChunks = renderCsStatementChunks(opBody, opRenderCtx, {
       emitTrace,
@@ -512,7 +511,7 @@ export function renderEntity(
       op: op.name,
       eventSourced,
     });
-    // M7 phase 6a: weave enhanced `#line` directives BEFORE the join, so
+    // Weave enhanced `#line` directives BEFORE the join, so
     // `chunks`/`body`/`fragmentText` and the sub-region cursor walk below
     // all see the exact same (post-weave) text that lands in the file —
     // never post-process the joined `body`, that would desync
@@ -541,11 +540,11 @@ export function renderEntity(
     opLines.push("");
   }
 
-  // Extern (b) Phase 2: the extern write surface is no longer an injected
-  // `I<Agg>Mutator` — the `<Op>Core` partial hooks (collected in
-  // `partialHookLines`) are MEMBERS of the aggregate, so they reach its own
-  // `private` state natively.  Nothing here widens any setter (S10 fixed by
-  // construction); the hook declarations are appended to the class body below.
+  // The extern write surface is NOT an injected `I<Agg>Mutator`: the
+  // `<Op>Core` partial hooks (collected in `partialHookLines`) are MEMBERS of
+  // the aggregate, so they reach its own `private` state natively and nothing
+  // here widens a setter.  The hook declarations are appended to the class body
+  // below.
 
   const pullEventsLines = isRoot
     ? [
@@ -896,7 +895,7 @@ export function renderEntity(
       "",
       `namespace ${ns}.Domain.${plural(rootName)};`,
       "",
-      // Extern (b) Phase 2: an aggregate with an extern op is `partial` so the
+      // Extern (b): an aggregate with an extern op is `partial` so the
       // user's co-located scaffold-once file can supply the implementing half
       // of each `<Op>Core` hook.
       `public sealed ${isRoot && hasExtern ? "partial " : ""}class ${entity.name}${

@@ -307,8 +307,8 @@ export function emitRequestDtos(
     const rendered = requiredFields.map((f) => {
       // Explicit `= default` → optional request field via a record default
       // value, dropping its `[Required]` (see `wireCreateDefault`).  A
-      // `bool = true` now reaches here (was previously dropped), so the record
-      // can carry an optional param mid-list — invalid C# (CS1737: optional
+      // `bool = true` reaches here too, so the record can end up with an
+      // optional param mid-list — invalid C# (CS1737: optional
       // params must follow required ones).  STJ binds by JSON name and the
       // controller reads `request.<Name>` by name, so reordering the RECORD's
       // params is wire- and call-safe; sort the defaulted (optional) params

@@ -26,7 +26,7 @@ import { javaLogEvent } from "../../_obs/render-java.js";
 // reactor subscribes — the `ChannelConsumerService` invoking the SAME
 // dispatcher handler methods local events would reach.
 //
-// Producer path split (design §5, slice 7c): the tee publishes EPHEMERAL
+// Producer path split (design §5): the tee publishes EPHEMERAL
 // broker-routed events inline; DURABLE (`work`) events land in
 // `__loom_outbox` inside the caller's @Transactional write (the tee IS the
 // outbox recorder on java) and are published by the `OutboxRelayService` on
@@ -172,7 +172,7 @@ export function renderJavaChannelFiles(
    *  ChannelConsumerService (a pure producer ships publish-only). */
   consumerHandlers: ChannelConsumerHandler[],
   sys: SystemIR,
-  /** M-T4.4 slice 7c: hosted durable events ride a broker-bound
+  /** M-T4.4: hosted durable events ride a broker-bound
    *  `queue`/`work` channel — the tee records them in `__loom_outbox` and
    *  the relay publishes on drain (design §5).  False on consumers that
    *  don't host the durable channel's context (their module migrations
@@ -1314,7 +1314,7 @@ export function renderJavaOutboxDelivery(basePkg: string): string {
   );
 }
 
-/** The transactional-outbox tier (M-T4.4 slice 7c — dispatch-delivery-
+/** The transactional-outbox tier (dispatch-delivery-
  *  semantics.md on java): the JPA entity mapped onto the MigrationsIR-owned
  *  `__loom_outbox` table, its Spring Data repository, and the polling relay
  *  that publishes drained rows to the broker (design §5; the tee in

@@ -131,12 +131,11 @@ export function renderJavaService(
       collectJavaExprImports(dflt, imports);
       return `        var ${f.name} = ${raw} != null ? ${wireToDomain(f.type, raw)} : ${renderJavaExpr(dflt)};`;
     }
-    // Every OTHER default now belongs to the factory (`javaFactoryDefault` in
+    // Every OTHER default belongs to the factory (`javaFactoryDefault` in
     // emit/entity.ts), which reads `null` as "the caller omitted this".  The
-    // service used to coalesce here too; keeping both would restate one rule in
-    // two places, which is the exact duplication that produced the node /
-    // elixir / java drift bugs (#2329, #2392).  So an omittable input passes
-    // straight through, null and all.
+    // service deliberately does NOT coalesce as well: restating one rule in two
+    // places is what produces cross-backend default drift.  So an omittable
+    // input passes straight through, null and all.
     if (!ctx.esCreateParams && !isRequiredCreateInput(f as FieldIR)) {
       return `        var ${f.name} = ${wireToDomain(eff(f.type, true), raw)};`;
     }
@@ -159,7 +158,7 @@ export function renderJavaService(
   // @LastModifiedDate / @LastModifiedBy) filled by the AuditingEntityListener
   // at flush — there is no service call site (the §5 dedup move).  The
   // JpaAuditingConfig's AuditorAware<UUID> supplies the principal for
-  // @CreatedBy / @LastModifiedBy, so the service no longer threads currentUser
+  // @CreatedBy / @LastModifiedBy, so the service does not thread currentUser
   // for stamping.  See §5c of docs/old/plans/capability-stamp-dedup-simulation.md.
   // Audited lifecycle (audit-and-logging.md): the route-driving create / the
   // canonical destroy stage an audit_records row in the SAME @Transactional
@@ -368,10 +367,10 @@ export function renderJavaService(
   const requiresGateLines = (op: (typeof agg.operations)[number]): string[] =>
     operationGates(op).map((g) => {
       // The gate's own expression imports (`java.util.Objects` for a string
-      // comparison, enum/id types, …) used to ride in on the ENTITY's
-      // `collectJavaStmtImports` sweep over `op.statements`.  The gate lives
-      // here now, so this file has to collect them — a `tsc`-green emitter can
-      // still emit Java that doesn't compile.
+      // comparison, enum/id types, …) are collected HERE, since the gate lives
+      // in this file rather than the ENTITY's `collectJavaStmtImports` sweep
+      // over `op.statements` — a `tsc`-green emitter can still emit Java that
+      // doesn't compile.
       collectJavaExprImports(g.expr, imports);
       return `        if (!(${renderJavaExpr(g.expr, {
         thisName: "aggregate",
@@ -445,7 +444,7 @@ export function renderJavaService(
         ", ",
       );
       if (op.extern) {
-        // Extern op (extern-domain-extension-point.md §3a, Phase 2): the op is a
+        // Extern op (extern-domain-extension-point.md §3a): the op is a
         // real aggregate method now — it runs its preconditions, delegates to the
         // co-located scaffold-once `<Agg>Extern` hook, and re-asserts invariants
         // internally (all inside `aggregate.<op>(...)`).  The service just loads,

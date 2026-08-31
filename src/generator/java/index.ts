@@ -317,7 +317,7 @@ function emitProjectFromContexts(
     const path = layout.pathFor(artifact, emitCtx);
     out.set(path, content);
     sourcemap?.file(path, content, origin, construct);
-    // Statement-granular sub-regions (source-map Milestone 3) — layered onto
+    // Statement-granular sub-regions (source-map) — layered onto
     // the whole-file region just recorded above, anchored by exact-text
     // search against this SAME final content.
     if (sourcemap && opFragments) {
@@ -344,7 +344,7 @@ function emitProjectFromContexts(
   // (auth: required) deployable.
   const oidc = authRequired && !!system?.sys.auth;
   // Resource client classes (objectStore / queue / api) + their Gradle
-  // deps (Phase 4c) — empty when the deployable wires no consumable
+  // deps — empty when the deployable wires no consumable
   // resources, leaving build.gradle.kts byte-identical.
   const resourceEmission = emitJavaResourceFiles(
     system?.sys,
@@ -366,7 +366,7 @@ function emitProjectFromContexts(
     );
     if (apiClients) place(`${JAVA_API_CLIENT_CLASS}.java`, "resource-client", apiClients);
   }
-  // Broker bindings (channels.md; M-T4.4 slice 6b): the redis-bound broadcast
+  // Broker bindings (channels.md; M-T4.4): the redis-bound broadcast
   // channelSources this deployable wires via `channels:`.  A wired-but-foreign
   // channel joins the per-context dispatcher derivation as a stub with its
   // REAL semantics knobs, so a hosted reactor routes off a channel declared in
@@ -376,7 +376,7 @@ function emitProjectFromContexts(
   // by the ChannelConsumerService on delivery instead.
   const channelBindings = system ? brokerChannelBindings(system.deployable, system.sys) : [];
   const hasChannels = channelBindings.length > 0;
-  // Durable broker-bound events (M-T4.4 slice 7c): HOSTED durable events
+  // Durable broker-bound events (M-T4.4): HOSTED durable events
   // carried by a wired `queue`/`work` (or future `log`) channel — their
   // producer path rides the outbox relay (design §5), never the inline tee.
   // Hosted-only on purpose: the module-level migrations are what back the
@@ -681,7 +681,7 @@ function emitProjectFromContexts(
         sourcemap,
       );
     }
-    // Value-object / domain-service unit tests (test-placement.md, Phase 2) —
+    // Value-object / domain-service unit tests (test-placement.md) —
     // JUnit classes colocated in each subject's test package; emitted only when
     // the subject declares a `test`.
     for (const vo of ctx.valueObjects) {
@@ -720,7 +720,7 @@ function emitProjectFromContexts(
           `${ctx.name}.${svc.name}`,
         );
     }
-    // Context INTEGRATION test (test-placement.md, Phase 3b) — a @SpringBootTest
+    // Context INTEGRATION test (test-placement.md) — a @SpringBootTest
     // that autowires the JPA repositories, applies the Flyway migrations on boot
     // (LOOM_PG_URL → spring.datasource.*), and persists→reads cross-aggregate.
     // Placed at the base package so component scan finds the @SpringBootApplication.
@@ -760,7 +760,7 @@ function emitProjectFromContexts(
       }
     }
     // Only collected when a recorder is actually threaded in — a
-    // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 11:
+    // no-sourcemap run pays no per-statement bookkeeping cost.
     // the merged `<Ctx>Workflows.java` service pools every command
     // workflow's method, so it never gets a whole-file region — only these
     // fragment-only statement regions, attached below via `place`'s
@@ -898,12 +898,12 @@ function emitProjectFromContexts(
         projConstruct,
       );
     }
-    // In-process saga dispatcher (workflow-debt-backend-parity.md, Java saga
-    // slice 2): a @Component whose @EventListener handlers react to
+    // In-process saga dispatcher (workflow-debt-backend-parity.md): a
+    // @Component whose @EventListener handlers react to
     // channel-carried events — load-or-allocate / route-or-drop the saga row,
     // run the handler body, re-publish so choreography chains re-enter.
     // Only collected when a recorder is actually threaded in — a
-    // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 12:
+    // no-sourcemap run pays no per-statement bookkeeping cost.
     // `<Ctx>Dispatcher.java` pools every reactor / event-create handler, so
     // it never gets a whole-file region (origin/construct stay undefined on
     // the `place()` call below) — only these fragment-only statement
@@ -958,8 +958,8 @@ function emitProjectFromContexts(
         );
       }
     }
-    // Read-only instance endpoints (workflow-debt-backend-parity.md, Java saga
-    // slice 3): every observable (correlation-bearing) saga gets
+    // Read-only instance endpoints (workflow-debt-backend-parity.md): every
+    // observable (correlation-bearing) saga gets
     // GET /workflows/<wf>/instances[/{id}] over its persisted state row.
     const instanceReads = renderJavaWorkflowInstanceReads(ctx, {
       basePkg,
@@ -1144,7 +1144,7 @@ function emitProjectFromContexts(
     }
   }
 
-  // Broker transport (M-T4.4 slice 6b) — channel-less projects stay
+  // Broker transport (M-T4.4) — channel-less projects stay
   // byte-identical.  Foreign vocabulary first (Hono/Python/.NET parity): a
   // consumed foreign event's record class + the id brands it (and correlating
   // workflow state) reference join the deployable's domain packages.
@@ -1172,9 +1172,8 @@ function emitProjectFromContexts(
   // aggregate this deployable does not host (`create(orderId: Order id)`)
   // emitted `new OrderId(...)` with no `OrderId.java` anywhere, in any
   // channel-less java project.  Valid model, emitter reports success, javac
-  // says "cannot find symbol" — the same shape as the four-way duplication
-  // `src/ir/util/foreign-ids.ts` was extracted to kill.  The SOURCES were
-  // already right here; only the gate was wrong.
+  // says "cannot find symbol".  The SOURCES are all here; the gate is what
+  // decides which of them get an id class.
   if (system) {
     const hostedIdNames = new Set(
       contexts.flatMap((c) =>
@@ -1216,7 +1215,7 @@ function emitProjectFromContexts(
     )) {
       place(name, "config", content);
     }
-    // Transactional-outbox tier (M-T4.4 slice 7c, design §5): the JPA entity
+    // Transactional-outbox tier (design §5): the JPA entity
     // over the MigrationsIR-owned __loom_outbox + its repository + the
     // polling relay that publishes drained rows to the broker.  Only where
     // HOSTED durable events ride a broker-bound channel.
@@ -1255,11 +1254,11 @@ function emitProjectFromContexts(
   // Auth surface — only when the deployable opts in via auth: required
   // and the system declares a user block.
   if (authRequired && system?.sys) {
-    // Hierarchy (multi-tenancy P2.2): when the tenant registry opts into
+    // Hierarchy (multi-tenancy): when the tenant registry opts into
     // `tenantRegistry` (a `data_key` column exists) AND its state table is
     // among THIS deployable's contexts (so the boot JdbcTemplate reaches it),
     // `currentUser.orgPath` reads the registry's `data_key` per request;
-    // otherwise the P2.1 claim-copy accessor stands.
+    // otherwise the claim-copy accessor stands.
     let orgPathRegistry: { table: string; idValueType: IdValueType } | undefined;
     const reg = hierarchyRegistry(system.sys);
     if (reg) {
@@ -1287,9 +1286,9 @@ function emitProjectFromContexts(
   }
 
   // Per-module Flyway migrations — empty (non-system entry points) → no-op.
-  // The flyway deps stay as long as ANY migration history exists (a regen
-  // with an unchanged schema emits no new steps, but the previously
-  // emitted V*.sql files still need Flyway to run).
+  // The flyway deps stay as long as ANY migration history exists: a regen with
+  // an unchanged schema emits no new steps, but the already-emitted V*.sql
+  // files still need Flyway to run them.
   const allMigrations = system?.migrations ?? [];
   emitJavaMigrations(allMigrations, out);
   // Provenance DDL (provenance.md) ships as one extra late Flyway migration
@@ -1351,7 +1350,7 @@ function emitProjectFromContexts(
     renderGradleBuild({
       flyway: hasMigrations,
       oidc,
-      // Durable cron timerSources (scheduling.md Phase 2) add the JobRunr core dep.
+      // Durable cron timerSources (scheduling.md) add the JobRunr core dep.
       jobrunr: ownsCronTimer,
       extraDeps: {
         ...resourceEmission.deps,
@@ -1368,7 +1367,7 @@ function emitProjectFromContexts(
           ? { "org.apache.kafka:kafka-clients": KAFKA_CLIENTS_VERSION }
           : {}),
       },
-      // M10 phase 6b: the recorder's PRESENCE alone gates the emitted
+      // The recorder's PRESENCE alone gates the emitted
       // `injectSmap` task — this generator never sees `sourceTexts` (the
       // `.smap` sidecars themselves are rendered later, system-side, from
       // the SAME recorder — see src/system/index.ts).
@@ -1784,7 +1783,7 @@ function emitAggregate(
   // variant at its own status (exception-less.md §4).  A tagged union DTO is
   // needed only for a genuine multi-success union, which IR validation rejects
   // for finds.
-  // Extern operations (extern-domain-extension-point.md §3a, Phase 2): the
+  // Extern operations (extern-domain-extension-point.md §3a): the
   // aggregate op delegates to a co-located, scaffold-once `<Agg>Extern` hook
   // class — same package as the entity, so it reaches the aggregate's
   // package-private fields natively.  Placed under the `entity` category so it

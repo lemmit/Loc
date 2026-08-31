@@ -370,7 +370,7 @@ export function emitElixirChannelFiles(
   /** Carried event IRs paired with their owning-context module prefix. */
   carried: { ev: EventIR; ctxModule: string }[],
   routes: ElixirConsumerRoute[],
-  /** M-T4.4 slice 7d: hosted durable events ride a broker-bound
+  /** M-T4.4: hosted durable events ride a broker-bound
    *  `queue`/`work` channel — the tee records them in `__loom_outbox`
    *  (joining the caller's Repo transaction, which an aggregate-writing emit
    *  site opens around persist + dispatch) and the OutboxRelay publishes
@@ -432,7 +432,7 @@ export function emitElixirChannelFiles(
     { name: "id", valueExpr: "id" },
   ]);
 
-  // Kafka (slice 8d): the channel's `key:` field per address — the envelope
+  // Kafka: the channel's `key:` field per address — the envelope
   // stamps its value as `loomkey`, kafka's partition key (design §4).  A
   // separate map so the routing tuples keep their 4-tuple shape.
   const keyedBindings = unique.filter((b) => b.key !== undefined);

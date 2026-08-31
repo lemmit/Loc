@@ -128,9 +128,8 @@ export { firstNonQueryableNode } from "./checks/shared.js";
 //
 // What this catches today: `test e2e` bodies referencing
 // `api.<unknown>.<verb>` or `ui.<unknown>.<verb>`, or invoking an
-// unknown verb on a known aggregate.  Previously these surfaced as
-// thrown Errors from the e2e renderers — useful messages, but
-// produced lazily during generation.  Doing it here means:
+// unknown verb on a known aggregate.  Catching them here, rather than
+// letting the e2e renderers throw lazily during generation, means:
 //
 //   - Errors are collected up-front (one pass over the model), not
 //     surfaced one-by-one as the renderer hits them.
@@ -205,7 +204,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDefaultDeny(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);
-    // Tenancy (multi-tenancy Phase 1a): registry existence, the explicit-
+    // Tenancy (tenancy.md): registry existence, the explicit-
     // stance lint, marker-without-declaration, conflicting markers.
     validateTenancy(sys, diags);
     // Timer sources (scheduling.md, M-T4.1): cadence well-formedness, the

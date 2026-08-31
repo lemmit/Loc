@@ -1,6 +1,6 @@
 // Application-layer handler checks — the `extern` ↔ body pairing on
 // `commandHandler` / `queryHandler` context members
-// (unfoldable-api-derivation.md, Layer 3; extern-handler Phase 1).
+// (unfoldable-api-derivation.md, Layer 3; extern-handler).
 //
 // The grammar admits BOTH a braced body (`{ … }`) and a bodyless `;` for either
 // prefix, so the validator enforces the pairing (mirror of the `extern`

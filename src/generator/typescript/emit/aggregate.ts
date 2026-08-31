@@ -118,7 +118,7 @@ export function renderAggregate(
   // User` parameter typechecks.  Files emitted under deployables
   // without `auth: required` don't import this — and operations
   // can't reference currentUser there because the validator gates it.
-  // Lifecycle stamps no longer thread the principal into the domain (it's
+  // Lifecycle stamps do NOT thread the principal into the domain (it is
   // stamped persist-time in the drizzle save()), and the leading `requires`
   // gates are hoisted to the calling handler (`src/ir/util/op-gates.ts`), so
   // only what REMAINS of an operation body can pull the principal in here.
@@ -140,11 +140,11 @@ export function renderAggregate(
   const usesForbidden = agg.operations.some((op) =>
     operationBody(op).some((s) => s.kind === "requires"),
   );
-  // DisallowedError — the `when` state gate (M-T6.38).  The gate used to be a
-  // ROUTE-layer check only, so a workflow step / saga cascade / extern handler
-  // calling the domain method directly slipped past it and the refused write
-  // landed silently.  It is now emitted at the domain-method entry too, so the
-  // import follows any `when`-carrying operation.
+  // DisallowedError — the `when` state gate.  Emitted at the DOMAIN-METHOD
+  // entry, not only at the route layer: a workflow step / saga cascade / extern
+  // handler calls the domain method directly and would otherwise slip past the
+  // gate, landing the refused write silently.  So the import follows any
+  // `when`-carrying operation.
   const usesDisallowed = agg.operations.some((op) => !!op.when);
   const errorsImportList = [
     usesDisallowed && "DisallowedError",
@@ -309,8 +309,8 @@ function renderEntity(
     `${c.partName}${c.collection ? "[]" : " | null"}`;
   const containsGetterType = (c: ContainmentIR): string =>
     c.collection ? `readonly ${c.partName}[]` : `${c.partName} | null`;
-  // Extern operations (extern-domain-extension-point.md §3a, decision (b)
-  // Phase 2) re-home to a DOMAIN extension point that is a MEMBER of the
+  // Extern operations (extern-domain-extension-point.md §3a, decision (b))
+  // re-home to a DOMAIN extension point that is a MEMBER of the
   // aggregate — a `protected abstract <op>Extern(...)` hook the operation
   // method calls, implemented by a co-located scaffold-once subclass the user
   // owns (`domain/<agg>.ts`, extending this generated base `domain/<agg>.base.ts`).
@@ -492,8 +492,8 @@ function renderEntity(
     return [`${head} {`, renderTsStatements(fn.body.stmts), `  }`];
   });
 
-  // Extern extension points (extern-domain-extension-point.md §3a, decision (b)
-  // Phase 2).  The hook is a MEMBER of the aggregate (`protected abstract
+  // Extern extension points (extern-domain-extension-point.md §3a,
+  // decision (b)).  The hook is a MEMBER of the aggregate (`protected abstract
   // <op>Extern(...)`, emitted per op in the ops loop below); the operation
   // method calls it between preconditions and invariants.  The co-located
   // scaffold-once subclass implements each hook, reaching the (now `protected`)
@@ -598,8 +598,8 @@ function renderEntity(
     // `renderTsStatements` here — `renderTsStatements` IS `chunks.join("\n")`
     // by construction, so `body` below is byte-identical either way, but the
     // per-chunk list lets us surface per-statement sub-regions to the caller
-    // that owns the recorder + this file's final content (source-map
-    // Milestone 3, Hono-only for now — see `OpFragment`).
+    // that owns the recorder + this file's final content (source-map;
+    // Hono-only for now — see `OpFragment`).
     const chunks = renderTsStatementChunks(opBody, emitProvenance, {
       emitTrace,
       aggregate: e.name,
@@ -608,8 +608,8 @@ function renderEntity(
     });
     const body = chunks.join("\n");
     if (opFragments && chunks.length > 0) {
-      // Expression-level marks (span-tracking-emission.md, M15 phase 7
-      // slice 2) — only computed on this recording path (`opFragments`
+      // Expression-level marks (span-tracking-emission.md)
+      // — only computed on this recording path (`opFragments`
       // present); the flag-off run above never re-renders the RHS
       // expressions through the marks-carrying entry.
       const exprMarks = opBody.map((s, i) => statementExprMarks(s, chunks[i]!));
@@ -828,13 +828,13 @@ function renderEntity(
       ]
     : [];
 
-  // Lifecycle stamps (audit / softDelete capability stamps) are NO LONGER
-  // emitted on the domain entity.  Persist-time auditing
-  // (node-persist-time-auditing) relocated stamping into the drizzle `save()`
+  // Lifecycle stamps (audit / softDelete capability stamps) are NOT emitted on
+  // the domain entity.  Stamping happens persist-time in the drizzle `save()`
   // (db/audit-stamp.ts), reading the principal from the ambient request
-  // context — so the aggregate stays pure (no `_stampOnCreate`/`_stampOnUpdate`)
-  // and the route handler never stamps.  The audit FIELDS + getters
-  // (createdAt/createdBy/updatedAt/updatedBy) remain, as before.
+  // context, so the aggregate stays pure (no
+  // `_stampOnCreate`/`_stampOnUpdate`) and the route handler never stamps.
+  // The audit FIELDS + getters (createdAt/createdBy/updatedAt/updatedBy) are
+  // still emitted.
 
   // Event-sourcing fold (appliers A2): one `_apply<Event>` method per
   // applier (body rendered at the natural method-body depth), a `_apply`

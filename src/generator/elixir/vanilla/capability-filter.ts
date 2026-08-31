@@ -103,7 +103,7 @@ export function vanillaCapabilityFilter(
   // columns), NOT `Decimal`/`DateTime` structs.  Without it a money/datetime
   // comparison renders the in-memory `Decimal.compare(...)` struct API, which is
   // not a valid Ecto query expression → `mix compile` fails.  (bool/id/string/enum
-  // render identically in both modes, so previously-working filters are unchanged.)
+  // render identically in both modes.)
   const ctx: RenderCtx = {
     thisName: "record",
     contextModule,
@@ -132,7 +132,7 @@ export function vanillaCapabilityFilter(
   return preds.length === 1 ? preds[0]! : preds.map((p) => `(${p})`).join(" and ");
 }
 
-/** The aggregate's `writeScopeFilter` (authorization Phase 3 P3.1 — the WRITE
+/** The aggregate's `writeScopeFilter` (authorization — the WRITE
  *  ladder) as a single Ecto `where:` predicate, or null when the aggregate has
  *  no write-scope narrowing.  Rendered exactly like a principal capability read
  *  filter (deep sentinel → the fail-closed pinned LIKE fragment; the floor →
@@ -226,7 +226,7 @@ export const DOC_DENY_PREDICATE = "__denied?(row)";
 
 /** The private helper {@link DOC_DENY_PREDICATE} calls.  Emitted once per
  *  document repository whose filters contain a `deny`. */
-export const DOC_DENY_HELPER = `  # \`deny\` carve-out (authorization Phase 4): the visible set is EMPTY.  Spelled
+export const DOC_DENY_HELPER = `  # \`deny\` carve-out: the visible set is EMPTY.  Spelled
   # as a runtime membership test rather than the literal \`false\` because the
   # compiler FOLDS a literal — \`… and false\` is a typing violation, and a read
   # that provably never returns \`{:ok, _}\` makes each caller's success branch

@@ -42,7 +42,7 @@ export function emitAggregateTests(
     out.set(`test/${snake(ctx.name)}/${snake(agg.name)}_test.exs`, content);
     emitted = true;
   }
-  // Value-object / domain-service unit tests (test-placement.md, Phase 2) —
+  // Value-object / domain-service unit tests (test-placement.md) —
   // colocated ExUnit modules; a VO test exercises its `<VO>.new/1` invariant,
   // a service test its pure ops.  Shapes the vanilla renderer can't lower
   // degrade to a `@tag :skip`, never broken Elixir.
@@ -62,7 +62,7 @@ export function emitAggregateTests(
     );
     emitted = true;
   }
-  // Context INTEGRATION test (test-placement.md, Phase 3b) — an ExUnit module
+  // Context INTEGRATION test (test-placement.md) — an ExUnit module
   // that persists→reads through the context module against the live Ecto repo
   // (Sandbox-isolated).  Emitted only when the context declares integration tests.
   const integration = renderVanillaContextIntegrationTest(ctx, appModule);

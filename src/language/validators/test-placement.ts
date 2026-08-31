@@ -1,7 +1,7 @@
 // Placement rules for the unit / integration `test` block (test-placement.md).
 //
-// A `test` resolves its home subject — an aggregate (Phase 1), a value object /
-// domain service (Phase 2), or a bounded context (Phase 3, the integration rung)
+// A `test` resolves its home subject — an aggregate, a value object /
+// domain service, or a bounded context (the integration rung)
 // — from the `for <Subject>` head if present, else from its enclosing
 // declaration.  The structural rules, enforced here so a misplaced test surfaces
 // a themed diagnostic instead of a parse error:
@@ -35,7 +35,7 @@ import {
   type Model,
 } from "../generated/ast.js";
 
-// Backends whose integration renderer has landed (test-placement.md Phase 3a/3b)
+// Backends whose integration renderer has landed (test-placement.md)
 // — a context hosted by any of these emits a runnable integration test, so the
 // `loom.context-test-unsupported` warning is suppressed.  Grows as each backend
 // lands; a context hosted ONLY on a not-yet-shipped backend still warns.
@@ -86,7 +86,7 @@ export function checkTestPlacement(model: Model, accept: ValidationAcceptor): vo
     }
 
     // Honest gate: a context integration test emits ONLY on the node backend so
-    // far (Phase 3a). Warn when the target context is not hosted by a node
+    // far. Warn when the target context is not hosted by a node
     // deployable — the other backends' integration renderers are still pending.
     // A context test targets a context: `for <Ctx>`, or nested in a context with
     // no `for` (or `for` restating that context).  A context-nested `for <Agg>`

@@ -98,9 +98,9 @@ function e2eInputParamType(
 // block against a `platform: elixir` deployable — fullstack, so it emits BOTH
 // an api spec and a `.ui.spec.ts`) renders detail reads as
 // `expect(read.field("x")).toHaveText(…)` and `await read.field("x")
-// .innerText()`.  Both forms need a Locator.  This emitter used to return
-// `Promise<string>`, so every emitted Phoenix UI spec called `.innerText()`
-// on a string — the specs had simply never been executed.  Same reason the
+// .innerText()`.  Both forms need a Locator — returning `Promise<string>`
+// here makes every emitted Phoenix UI spec call `.innerText()` on a string.
+// Same reason the
 // contained-collection accessors are here: the renderer lowers
 // `read.<coll>.length` to `<handle>.<coll>Rows()`.
 // ---------------------------------------------------------------------------
@@ -160,7 +160,7 @@ export function pageObjectPathFor(page: PageIR, ctx: PageNameCtx): string {
 export function buildPlaywrightPageObject(args: BuildPlaywrightPageObjectArgs): string {
   const { page, aggregatesByName, contextByAggName } = args;
   // The page's kind + emitted name are derived from its role-scoped name + area
-  // (slice 3c — no stamped `origin`).
+  // (no stamped `origin`).
   const workflowNames: string[] = [];
   for (const bc of contextByAggName.values()) {
     for (const wf of bc.workflows) workflowNames.push(wf.name);

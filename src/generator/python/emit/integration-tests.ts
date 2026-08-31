@@ -1,4 +1,4 @@
-// Context-scoped INTEGRATION test emission (test-placement.md, Phase 3b) — the
+// Context-scoped INTEGRATION test emission (test-placement.md) — the
 // Python/FastAPI backend.  The Python twin of the node renderer
 // (`typescript/emit/integration-tests.ts`): a `test … for <Context>` (or a
 // `context`-nested `test`) runs cross-aggregate behaviour IN-PROCESS against

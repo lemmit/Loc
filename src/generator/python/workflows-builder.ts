@@ -97,14 +97,14 @@ export function buildPyWorkflowsFile(
   ctx: EnrichedBoundedContextIR,
   hasDispatch = false,
   sys?: SystemIR,
-  /** Source-map Milestone 11 (workflow-body statement regions) — allocated by
+  /** Source-map (workflow-body statement regions) — allocated by
    *  the caller (`src/generator/python/index.ts`) ONLY when a recorder is
    *  present.  `app/http/workflows_routes.py` pools every command workflow,
    *  so it never gets a `sourcemap.file(...)` whole-file region (mirrors the
    *  Elixir pooled-file precedent) — these fragment-only statement regions
    *  are the only mapping this file gets.  Reactor / event-`create` starter
-   *  bodies live in `dispatch-builder.ts` (`app/dispatch.py`), out of scope
-   *  for this slice. */
+   *  bodies live in `dispatch-builder.ts` (`app/dispatch.py`), out of
+   *  scope. */
   opFragments?: OpFragment[],
 ): string | null {
   const wfs = commandWorkflowsOf(ctx);
@@ -154,7 +154,7 @@ export function buildPyWorkflowsFile(
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
   const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
   // Includes the read-port repos a `reading`-tier domain-service call needs
-  // (domain-services.md rev. 4, Slice 1): the route constructs them, so the
+  // (domain-services.md rev. 4): the route constructs them, so the
   // file must import their classes even when the workflow body never reads them.
   const repoAggs = [
     ...new Set(
@@ -342,7 +342,7 @@ function reposFor(wf: WorkflowIR): RepoNeed[] {
   return [...out.values()];
 }
 
-// --- read-port wiring (domain-services.md rev. 4, Slice 1) -----------------
+// --- read-port wiring (domain-services.md rev. 4) -----------------
 //
 // A `reading`-tier domain-service operation declares one read-port repository
 // parameter per repo it reads; the orchestrating workflow constructs each
@@ -507,7 +507,7 @@ function workflowRoute(
   ctx: EnrichedBoundedContextIR,
   dispatcherExpr: string,
   sys?: SystemIR,
-  /** Source-map Milestone 11 — see `buildPyWorkflowsFile`'s `opFragments`. */
+  /** Source-map — see `buildPyWorkflowsFile`'s `opFragments`. */
   opFragments?: OpFragment[],
 ): string {
   // A `requires`-guarded workflow declares its 403 outcome; a
@@ -552,7 +552,7 @@ function workflowRoute(
   for (const p of wf.params) {
     out.push(`    ${snake(p.name)} = ${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`);
   }
-  // Read-port repos (domain-services.md rev. 4, Slice 1): a `reading`-tier
+  // Read-port repos (domain-services.md rev. 4): a `reading`-tier
   // domain-service call the workflow makes needs a live repository handle, so
   // the workflow constructs `<Agg>Repository(session, …)` for those repos even
   // when its own body never reads them — `mergeReadPortRepos` folds the service
@@ -568,15 +568,15 @@ function workflowRoute(
   // pre-flattened `renderWorkflowStmts` — byte-identical either way
   // (`renderWorkflowStmts` IS `chunks.flat()` by construction), but the
   // per-chunk list lets us surface per-statement sub-regions to the caller
-  // that owns the recorder + this file's final content (source-map
-  // Milestone 11).  No re-indent transform sits between here and the final
+  // that owns the recorder + this file's final content (source-map).
+  // No re-indent transform sits between here and the final
   // file (unlike the .NET transactional path), so the chunk texts collected
   // here are already the exact text that lands in `workflows_routes.py`.
   const stmtChunks = renderWorkflowStmtChunks(
     wf.statements,
     // Thread the read-port resolver so a `reading`-tier domain-service call in
     // the body is supplied its repository handle(s) ahead of the user args
-    // (domain-services.md rev. 4, Slice 1).  PURE service calls resolve to
+    // (domain-services.md rev. 4).  PURE service calls resolve to
     // `[]` → byte-identical.
     pyWorkflowStmtTarget(
       { thisName: "self", readPortArgs: workflowReadPortResolver(ctx) },

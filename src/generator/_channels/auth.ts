@@ -1,5 +1,5 @@
 // Broker service-to-service auth — dev-credential derivation (M-T4.4
-// slice 5, design §7).
+// design §7).
 //
 // v1 stance: broker-level, per-deployable credentials; envelope claims stay
 // observability-only (consumers authorize by their OWN scoping, never by

@@ -42,7 +42,7 @@ export const WALKER_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set([
   "Paper",
   "Breadcrumbs",
   "KeyValueRow",
-  // Phase 6 — semantic anchor target + sticky-position wrapper.
+  // Semantic anchor target + sticky-position wrapper.
   "Section",
   "Sticky",
   // Inputs.  (`Switch` is deliberately absent: page-metamodel.md removed it —
