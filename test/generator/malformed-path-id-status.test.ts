@@ -112,8 +112,20 @@ describe("a malformed path {id} answers the DECLARED 422, not a framework defaul
   // the path `{id}` `format: :uuid`, and `errorStatuses("getById")` puts 422 on
   // the operation) but could not ANSWER it: the controller bound the raw string
   // and handed it to `Repo.get/2`, where a malformed `:binary_id` raises
-  // `Ecto.Query.CastError` out of Ecto, leaving only the app-global fault floor
-  // — a bare 500 with no `errors[]` and no pointer.
+  // `Ecto.Query.CastError` out of Ecto, leaving only the app-global fault floor.
+  //
+  // MEASURED on a booted app (postgres + `mix phx.server` + `curl`), not assumed
+  // — and the measurement CORRECTED the ledger, which said 500:
+  //
+  //   without the plug   GET /api/orders/not-a-uuid
+  //                      → 400 {"title":"Bad Request","detail":"Bad Request"}
+  //                        (`Plug.Exception.status/1` maps CastError to 400)
+  //                        no `errors[]`, no pointer
+  //   with the plug      → 422 {"errors":[{"pointer":"/id",
+  //                                        "message":"Expected UUID."}]}
+  //
+  // Either way it is the wrong rung for a failure this app's own spec declares
+  // 422, answered with a body naming no field.
   it("elixir: the aggregate controller refuses a non-uuid {id} at its edge", async () => {
     const files = await generateSystemFiles(src("elixir"));
     const ctrl = fileEndingWith(files, "controllers/order_controller.ex");

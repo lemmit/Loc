@@ -160,7 +160,7 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  `<.simple_form for={@form} phx-submit="save_thing">` into a function
  *  component whose host LiveView has an empty `mount/3`, no `@form` assign and
  *  no matching `handle_event` — output that passes `mix compile
- *  --warnings-as-errors` and then 500s on page load.  #2646 built exactly the
+ *  --warnings-as-errors` and then raises on page load.  #2646 built exactly the
  *  hoisting this needs for a component's `state { … }` and named `action`s and
  *  stopped there; draining this extends the same `ComponentActionInfo` +
  *  `gather*` seam to the walker's form / query / upload / table-control

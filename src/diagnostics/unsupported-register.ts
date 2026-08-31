@@ -162,7 +162,7 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
       "a form / QueryView / Table / FileUpload / Chart inside a `component` on phoenixLiveView — " +
       "#2646 lifted a component's `state` and `action`s into the host LiveView but not the " +
       "walker's form / query / upload / table-control accumulators, so the markup emitted " +
-      "against an assign the host never makes (compiles clean, 500s at request time)",
+      "against an assign the host never makes (compiles clean, then raises at render time)",
     mission: "M-T1.26",
     verified: true,
   },

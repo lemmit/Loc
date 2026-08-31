@@ -1350,7 +1350,11 @@ nothing and the test passes vacuously.
   it and the malformed value reached the repository. **Elixir was never
   measured** in that pass: it handed the raw string to `Repo.get/2`, where a
   malformed `:binary_id` raises `Ecto.Query.CastError` out of Ecto, leaving only
-  the app-global fault floor — a bare 500 with no `errors[]` and no pointer.
+  the app-global fault floor — which answers whatever `Plug.Exception.status/1`
+  says. Measured on a booted app: **`400 "Bad Request"`**, no `errors[]`, no
+  pointer. (The ledger row that raised this said 500; the boot corrected it. It
+  is the wrong rung either way — the app refused a request its own spec says
+  answers 422, on a rung with nothing a client can bind to.)
 - **Where the guard belongs is part of the rule.** On Phoenix it is a controller
   **`plug`**, not a per-action `case`: a controller gains actions over time and a
   per-action guard is the one the next action's emitter forgets. It is opt-in per
@@ -1361,8 +1365,12 @@ nothing and the test passes vacuously.
 - **Provenance.** Four backends aligned by #2652 and pinned in
   `test/generator/malformed-path-id-status.test.ts`; elixir added there in the
   W1b elixir packet (`renderPathIdCastPlug` +
-  `ProblemDetails.invalid_path_id_response/2`), mutation-proven by reverting the
-  plug. Tier: **generator**, with the runtime half recorded per backend.
+  `ProblemDetails.invalid_path_id_response/2`). **Runtime-proven, not inferred**:
+  a generated Phoenix app booted against Postgres answers
+  `422 {"errors":[{"pointer":"/id","message":"Expected UUID."}]}`, and with the
+  plug reverted (file-copy, regenerate, recompile, re-boot) the same request
+  answers `400 {"title":"Bad Request"}` with no `errors[]`. Tier: **generator**,
+  with the runtime half measured per backend.
 
 ### RS-33 · An `errors[]` pointer names the whole path to the offending field
 - **Guarantee.** A 422 `errors[]` entry carries an **RFC 6901** JSON pointer to
@@ -1393,6 +1401,10 @@ nothing and the test passes vacuously.
   (`collect_changeset_errors/2` + the `loom_path` opt on `validate_vo/3`),
   mutation-proven by deleting the recursion's call site — which the first version
   of the gate did **not** catch, because it asserted the helper clauses existed
-  rather than that they were called. Tier: **generator**; the runtime half wants
-  a wire-golden fixture carrying a VO-collection violation, which no golden
-  records today (only 4 of 31 record any error body).
+  rather than that they were called. **Runtime-proven**: a booted Phoenix app
+  answers a `{"sku":{"code":"ab"}}` create with
+  `422 {"errors":[{"pointer":"/sku/code","message":"SKU code needs at least 3 characters"}]}`,
+  and with `validate_vo/3` reverted the same request answers
+  `{"pointer":"/sku","message":"is invalid"}` — the inner field, the authored
+  text and the wire code all gone. Tier: **generator**; a wire golden carrying a
+  VO-collection violation is still wanted (only 4 of 31 record any error body).

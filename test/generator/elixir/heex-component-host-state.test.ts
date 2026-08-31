@@ -26,7 +26,7 @@ import { generateSystemFiles } from "../../_helpers/index.js";
 // That passes `mix compile --warnings-as-errors` and then raises on page load
 // for the assign that was never made.  Until the four accumulators hoist the way
 // state and actions already do, the gate refuses it at compile time — a message
-// the author reads beats a 500 they meet in the running app.
+// the author reads beats a failure they meet in the running app.
 //
 // The set is EMPIRICAL, one generated case per primitive (see the module
 // header); this suite is what keeps it that way.

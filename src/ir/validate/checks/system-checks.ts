@@ -579,7 +579,7 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
  *
  *  It is a COMPILE ERROR rather than a documented degrade because the emitted
  *  project passes `mix compile --warnings-as-errors` and then dies at REQUEST
- *  time on the missing assign — a page that 500s on load, or a form whose submit
+ *  time on the missing assign — a page that raises on load, or a form whose submit
  *  silently does nothing.  A gate the author reads is strictly better than a
  *  crash they meet in the running app.  The workaround is exact and local: move
  *  the primitive into the page body (components may still hold layout, display,

@@ -339,12 +339,13 @@ ${responseFns}${sendValidationProblemFn}${wireErrorsFn}
   and the per-operation error matrix publishes 422 for a value that will not
   parse ("a path \`{id}\` is parsed as a uuid … and a failure answers the same 422
   the body tier does").  Ecto raises \`Ecto.Query.CastError\` out of \`Repo.get/2\`
-  on a malformed \`:binary_id\`, which the app-global fault floor renders as a bare
-  500 — a CLIENT fault reported as a server fault, telling the caller to retry a
-  request that can never succeed.  The controller-edge \`__cast_path_id\` plug
-  routes it here instead, so the answer is the same §3.2 \`errors[]\` envelope the
-  body tier emits (\`pointer: "/id"\`) and the same 422 the other four backends
-  already answer.
+  on a malformed \`:binary_id\`, and the app-global fault floor answers whatever
+  \`Plug.Exception.status/1\` says — measured on a booted app: \`400 "Bad Request"\`,
+  with NO \`errors[]\` and no pointer.  So the app refused a request its own spec
+  says answers 422, on a rung with nothing a client can bind to.  The
+  controller-edge \`__cast_path_id\` plug routes it here instead, so the answer is
+  the same §3.2 \`errors[]\` envelope the body tier emits (\`pointer: "/id"\`) and
+  the same 422 the other four backends already answer.
   """
   def invalid_path_id_response(conn, param) do
     send_validation_problem(conn, [%{pointer: pointer_of([param]), message: "Expected UUID."}])
@@ -535,7 +536,9 @@ end
  *  four answer the declared 422.  Phoenix bound the raw string and handed it to
  *  `Repo.get/2`, where a malformed `:binary_id` raises `Ecto.Query.CastError`
  *  out of Ecto — so the only thing that could answer was the app-global fault
- *  floor, which renders a bare 500 with no `errors[]` and no pointer.
+ *  floor.  Measured on a booted app, that is `400 "Bad Request"` with no
+ *  `errors[]` and no pointer (`Plug.Exception.status/1` maps `CastError` to 400):
+ *  the wrong rung, and a body naming no field.
  *
  *  The guard is a CONTROLLER PLUG rather than a per-action `case`: a controller
  *  gains actions over time (`show`, `delete`, `update`, each named operation,
@@ -560,7 +563,7 @@ export function renderPathIdCastPlug(problemDetailsAlias = "ProblemDetails"): st
 
   # Refuse a malformed path \`{id}\` at the controller edge with the 422 this
   # app's OpenAPI already publishes for it, rather than letting an
-  # \`Ecto.Query.CastError\` out of \`Repo.get/2\` become a bare 500.
+  # \`Ecto.Query.CastError\` out of \`Repo.get/2\` fall to the fault floor's 400.
   defp __cast_path_id(%Plug.Conn{path_params: %{"id" => id}} = conn, _opts) when is_binary(id) do
     case Ecto.UUID.cast(id) do
       {:ok, _} -> conn
