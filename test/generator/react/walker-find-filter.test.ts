@@ -124,7 +124,9 @@ describe("find-filter list UI — scaffolded list pages", () => {
     // page state.  Unset is `""`, and the comparison is the find argument.
     expect(list).toContain('const [byActiveA, setByActiveA] = useState<string>("");');
     expect(list).toContain('data={ ["true", "false"] }');
-    expect(list).toContain('const orderByActive = useByActiveOrder({ a: (byActiveA === "true") });');
+    expect(list).toContain(
+      'const orderByActive = useByActiveOrder({ a: (byActiveA === "true") });',
+    );
     expect(list).toContain('((byActiveA !== "")) ? (');
     // A `decimal` param has no type-checking zero sentinel (Feliz would see
     // `decimal <> int`), and a PAGED find is not a filter arm at all — both
