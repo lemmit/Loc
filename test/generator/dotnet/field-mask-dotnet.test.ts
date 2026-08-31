@@ -105,23 +105,32 @@ describe("mask unless — .NET read redaction", () => {
 // `x is { } name` declares `name` in the ENCLOSING BLOCK, so two masked
 // projections in one method body are two declarations of the same local:
 // CS0128, "a local variable named '__maskUser' is already defined in this
-// scope".  An `audited` operation's handler renders the projection twice (the
-// before and after snapshots), which made this the DEFAULT outcome for the
-// feature's central case — a sensitive field is exactly the one you audit.
-// These pin that every wrap in one scope binds its own name.
+// scope".  These pin that every wrap in one scope binds its own name.
+//
+// The AUDITED handler used to be the sharpest case — it rendered the projection
+// twice (before + after), so two masked fields meant four wraps in one body.
+// It no longer renders ANY wrap: M-T3.9 made the audit snapshots project
+// UNMASKED, because a trail whose content depends on the writer's read
+// permission is not a trail.  The scope-collision invariant is unchanged and
+// still live wherever one body renders two wraps (the read handler below), so
+// the audited case now pins the OPPOSITE fact — that the snapshots carry the
+// real value.  Reading the trail back still redacts (the history query).
 // ---------------------------------------------------------------------------
 describe("mask unless × audited — no duplicate pattern variable in one scope", () => {
-  it("the audited operation's before/after snapshots bind distinct mask variables", async () => {
+  it("the audited operation's before/after snapshots are UNMASKED (M-T3.9)", async () => {
     const out = await filesFrom(AUDITED_SRC);
     const handler = [...out.entries()].find(([k]) => k.endsWith("PromoteHandler.cs"))?.[1] ?? "";
     // Sanity: this really is the audited handler with both snapshots.
     expect(handler).toContain("var __before = ");
     expect(handler).toContain("var __after = ");
-    const vars = maskPatternVars(handler);
-    // Two masked fields, projected twice — four wraps in one method body.
-    expect(vars.length).toBe(4);
-    expect(new Set(vars).size, `duplicate mask pattern variables: ${vars.join(", ")}`).toBe(
-      vars.length,
+    // No wrap at all — so no pattern variable, so nothing to collide.  The
+    // stored trail is the same whoever performed the write.
+    expect(
+      maskPatternVars(handler),
+      "the audit snapshot redacts by the WRITER's principal",
+    ).toEqual([]);
+    expect(handler).toContain(
+      "var __before = System.Text.Json.JsonSerializer.SerializeToNode(new PResponse(",
     );
   });
 
