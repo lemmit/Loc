@@ -129,3 +129,32 @@ describe("document onCreate stamps — node/mikroorm (the SIXTH emission site)",
     );
   });
 });
+
+describe("document onCreate stamps — dotnet/dapper (the SEVENTH write path)", () => {
+  // `persistence: dapper` is a THIRD .NET document emitter (emit/dapper.ts),
+  // separate from EF.  Its save is a single `INSERT … ON CONFLICT DO UPDATE`
+  // with no insert branch, so the stamp needs an explicit existence probe —
+  // emitted ONLY when the aggregate has create claim stamps, so an unstamped
+  // document aggregate keeps the single-statement upsert byte-identically.
+  //
+  // Found by `behavioral-e2e-dapper` going red on this PR while green on main.
+  // The full enumeration of document write paths is drizzle, mikroorm, EF,
+  // dapper, java, python, elixir — four needed the fix, python and elixir were
+  // already correct.
+  const dapperSource = (): string =>
+    sourceFor("dotnet").replace("platform: dotnet", "platform: dotnet { persistence: dapper }");
+
+  it("probes for existence and stamps a new row BEFORE serializing", async () => {
+    const files = await generateSystemFiles(dapperSource());
+    const repo = fileEndingWith(files, "Repositories/ThingRepository.cs");
+    expect(repo).toContain("aggregate._StampOnCreate();");
+    expect(repo).toContain("SELECT 1 FROM things WHERE id = @id");
+    // Ordering is load-bearing: serializing first captures the unstamped
+    // snapshot and the stamp never reaches the row.
+    const stampAt = repo.indexOf("aggregate._StampOnCreate();");
+    const serializeAt = repo.indexOf("Serialize(aggregate.ToSnapshot()");
+    expect(stampAt).toBeGreaterThan(-1);
+    expect(serializeAt).toBeGreaterThan(-1);
+    expect(stampAt, "the stamp must precede serialization").toBeLessThan(serializeAt);
+  });
+});
