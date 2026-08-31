@@ -375,6 +375,20 @@ signed off, so it is a straight implementation fleet).
 - **Stay in your tree.** A packet that half-fixes into a neighbour's tree is worse than one
   that hands off — `#2668` deferred `F2-ADP-3` with a written handoff for exactly this
   reason, and that was the right call.
+- **A row can be closed by a META-gate that never names it.** W0-A scored
+  `connection-secret-wiring` open (P0) by searching for a *dedicated* `loom.*` code — and
+  the row's own `related_to` field said the meta-gate was missing. It is not:
+  `checks/reserved-surfaces.ts:89` carries a `storage-connection` row, so
+  `loom.reserved-not-emitted` already refuses the clause honestly. **Search for the
+  BEHAVIOUR (is this refused?), never for a code name.** The wave's second reconciliation
+  miss of this shape.
+- **You may overrule the dispatcher, and should when the target language disagrees.** #2703
+  was steered to fix Java's reserved-word fields by quote/escaping "like .NET" and correctly
+  refused: C#'s `@case` is a *verbatim identifier* — lexically `case`, so the member and its
+  JSON property are unchanged — while Java has no equivalent (JLS §3.9) and a record
+  component name **is** the Jackson property name. Escaping would have renamed the wire
+  field on java alone. A silent wire divergence is worse than the compile error it fixes, so
+  the honest refusal was right and the steer was wrong.
 - **Verify the ledger's proposed REMEDY, not just its defect.** A row is evidence that
   something is broken; its suggested fix is a hypothesis, and the ledger's hypotheses have
   been wrong. Wave 1 proved it: the TPH agent probed EF Core 10 in Docker *before*

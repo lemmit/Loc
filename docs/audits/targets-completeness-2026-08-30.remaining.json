@@ -4,14 +4,14 @@
   "measured": "the drain from #2668 (wave 1), #2694 (wave 2) and #2690, none of which recorded which rows they closed",
   "totals": {
     "reconciled": 134,
-    "open": 88,
+    "open": 87,
     "drained": 34,
     "partial": 11,
-    "stale": 1,
-    "remaining": 99
+    "stale": 2,
+    "remaining": 98
   },
   "remainingByPriority": {
-    "0": 7,
+    "0": 6,
     "1": 29,
     "2": 37,
     "3": 26
@@ -54,7 +54,7 @@
     "wire-openapi": {
       "total": 5,
       "open": 5,
-      "remaining": 5
+      "remaining": 4
     },
     "walker-shared": {
       "total": 12,
@@ -147,14 +147,6 @@
       "status": "open",
       "evidence": "src/generator/typescript/repository-find-predicate.ts:686 (`if (!l) return null`)",
       "note": "Re-derived on fresh main: `criterion Live of Car = !this.retired` (retired declared on the abstract base) emits ZERO `liveCriterion` anywhere and no predicate on car-repository.ts:27/47/79, while the own-field variant `this.doors > 0` reifies correctly — the whole conjunction is still silently dropped rather than raised."
-    },
-    {
-      "id": "connection-secret-wiring",
-      "packet": "wire-openapi",
-      "P": 0,
-      "status": "open",
-      "evidence": "`grep -rln ConnectionSourceIR src/` → src/ir/types/loom-ir.ts and src/ir/lower/lower.ts (lowered at lower.ts:735) only — zero generator/system/platform readers; zero hits for 'connection' in src/diagnostics/messages.ts and src/diagnostics/unsupported-register.ts",
-      "note": "`connection:` on a storage still parses, validates and lowers into IR that nothing consumes and no diagnostic mentions, so declared credential wiring stays silently inert (the k8s Secret is still the `Host=db;` heuristic); untouched by every open PR."
     },
     {
       "id": "F2-CB-C7-domainservice-in-requires-guard",
@@ -892,5 +884,17 @@
       "evidence": "src/language/ddd.langium:111-112 `TableRename: fromTable=ID '->' toAggregate=[Aggregate:ID];` — live side still Aggregate-only",
       "note": "Unchanged; today's behaviour stays honest only because the destructive-migration gate hard-stops the drop+create."
     }
-  ]
+  ],
+  "corrections": [
+    {
+      "row": "connection-secret-wiring",
+      "was": "open (P0)",
+      "now": "stale — already gated",
+      "by": "#2703",
+      "lesson": "a row can be covered by a META-gate that does not name it; W0-A searched for a dedicated `loom.*` code and missed `loom.reserved-not-emitted`",
+      "evidence": "ALREADY GATED on main: `src/ir/validate/checks/reserved-surfaces.ts:89` carries a `storage-connection` row, so `loom.reserved-not-emitted` (M-T5.9a) already refuses the clause honestly. W0-A scored it open because it looked for a DEDICATED diagnostic, and the row's own `related_to` named the meta-gate as still missing.",
+      "followUp": "Wiring the surface (4 surfaces + 2 unsettled semantics) is minted as M-T7.9 by #2703."
+    }
+  ],
+  "note": "remainingRows still lists rows drained by the UNMERGED wave-1 PRs (#2699-#2703). They leave this file when their PR merges, not when it opens."
 }
