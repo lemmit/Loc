@@ -56,7 +56,7 @@ function sys(body: string, stateField = "total: int", resources = ""): string {
   system Shop {
     subdomain Sales { context Orders {
       enum OrderStatus { Placed Shipped }
-      event OrderPlaced { order: Order id, customer: Customer id, at: datetime, amount: int }
+      event OrderPlaced { order: Order id, customer: Customer id, at: datetime, __AMOUNT__ }
       aggregate Customer { name: string }
       aggregate Order { status: OrderStatus  create(customer: Customer id) {} }
       channel Lifecycle { carries: OrderPlaced  delivery: broadcast  retention: ephemeral }
@@ -84,8 +84,12 @@ function sys(body: string, stateField = "total: int", resources = ""): string {
   }`;
 }
 
-async function foldBody(source: string): Promise<string> {
-  const files = (await generateSystems(await parseValid(source))).files;
+async function filesFor(source: string, amount = "amount: int"): Promise<Map<string, string>> {
+  return (await generateSystems(await parseValid(source.replace("__AMOUNT__", amount)))).files;
+}
+
+async function foldBody(source: string, amount = "amount: int"): Promise<string> {
+  const files = await filesFor(source, amount);
   const key = [...files.keys()].find((k) => k.endsWith("http/projections.ts"));
   expect(key, "http/projections.ts not emitted").toBeDefined();
   const src = files.get(key!)!;
@@ -95,7 +99,9 @@ async function foldBody(source: string): Promise<string> {
 }
 
 async function errorCodes(source: string): Promise<string[]> {
-  const { model } = await parseString(source, { validate: false });
+  const { model } = await parseString(source.replace("__AMOUNT__", "amount: int"), {
+    validate: false,
+  });
   return validateLoomModel(enrichLoomModel(lowerModel(model)))
     .filter((d) => d.severity === "error")
     .map((d) => d.code);
@@ -144,6 +150,41 @@ describe("node/Hono folded-projection body — every statement kind is emitted o
     // Before the fix this parsed with ZERO diagnostics and generated a fold
     // that did not contain the call.
     expect(codes).toContain("loom.projection-fold-impure");
+  });
+
+  // ── column representation ────────────────────────────────────────────────
+  // A projection state field is a real column.  Drizzle maps `money` to
+  // `numeric(19,4)` and `decimal` to `numeric`, and BOTH infer as `string`,
+  // while the domain/event value is a decimal.js `Decimal` / a `number` — so a
+  // fold has to write the column's shape, exactly as the aggregate save
+  // projection does.  It did not: `total := e.amount` on a money column emitted
+  // `state.total = e.amount;` — TS2322, a project that does not compile.
+
+  it("a money assign is stored as the column's decimal string", async () => {
+    const body = await foldBody(sys("total := e.amount", "total: money"), "amount: money");
+    expect(body).toContain("state.total = (e.amount).toString();");
+  });
+
+  it("a money `+=` accumulates through decimal.js, not `+` on the stored string", async () => {
+    const body = await foldBody(sys("total += e.amount", "total: money"), "amount: money");
+    expect(body).toContain("state.total = new Decimal(state.total ?? 0).plus(e.amount).toString();");
+  });
+
+  it("the money fold pulls its own `decimal.js` import AND the package dep", async () => {
+    const files = await filesFor(sys("total += e.amount", "total: money"), "amount: money");
+    const k = [...files.keys()].find((key) => key.endsWith("http/projections.ts"))!;
+    expect(files.get(k)!).toContain('import Decimal from "decimal.js";');
+    // The dep must be DECLARED or the project is TS2307 on install:
+    // `contextUsesMoney` scanned aggregates and value objects only, so a system
+    // whose only money lives on an event field / a projection column shipped
+    // the import with no dependency.
+    const pkg = [...files.keys()].find((key) => key.endsWith("api/package.json"))!;
+    expect(files.get(pkg)!).toContain('"decimal.js"');
+  });
+
+  it("a non-money assign is byte-identical — no coercion is introduced", async () => {
+    const body = await foldBody(sys("total := e.amount"));
+    expect(body).toContain("state.total = e.amount;");
   });
 
   it("the emitter's renderable set and the validator's pure set are the same four kinds", () => {
