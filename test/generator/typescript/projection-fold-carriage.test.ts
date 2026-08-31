@@ -20,8 +20,7 @@
 // subscription set — and the warning tells the truth on all five.
 
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseValid } from "../../_helpers/parse.js";
+import { generateSystemFiles } from "../../_helpers/generate.js";
 
 function sys(channel: string): string {
   return `
@@ -57,7 +56,7 @@ const CARRIES_BOTH = `channel Lifecycle { carries: OrderPlaced, OrderShipped  de
 const CARRIES_ONE = `channel Lifecycle { carries: OrderPlaced  delivery: broadcast  retention: ephemeral }`;
 
 async function projections(channel: string): Promise<string> {
-  const files = (await generateSystems(await parseValid(sys(channel)))).files;
+  const files = await generateSystemFiles(sys(channel));
   const k = [...files.keys()].find((key) => key.endsWith("http/projections.ts"));
   expect(k, "http/projections.ts not emitted").toBeDefined();
   return files.get(k!)!;

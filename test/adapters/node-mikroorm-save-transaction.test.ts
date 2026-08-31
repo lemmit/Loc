@@ -15,8 +15,7 @@
 // makes the bug visible: assoc + containment writes are extra statements.
 
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../src/system/index.js";
-import { parseValid } from "../_helpers/parse.js";
+import { generateSystemFiles } from "../_helpers/generate.js";
 
 function sys(shape: string): string {
   return `
@@ -42,7 +41,7 @@ function sys(shape: string): string {
 }
 
 async function saveMethod(shape: string): Promise<string> {
-  const files = (await generateSystems(await parseValid(sys(shape)))).files;
+  const files = await generateSystemFiles(sys(shape));
   const k = [...files.keys()].find((key) => key.endsWith("db/repositories/order-repository.ts"));
   expect(k, "order-repository.ts not emitted").toBeDefined();
   const file = files.get(k!)!;

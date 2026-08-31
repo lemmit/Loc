@@ -28,8 +28,8 @@ import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../../src/ir/lower/lower.js";
 import type { StmtIR } from "../../../src/ir/types/loom-ir.js";
 import { validateLoomModel } from "../../../src/ir/validate/validate.js";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString, parseValid } from "../../_helpers/parse.js";
+import { generateSystemFiles } from "../../_helpers/generate.js";
+import { parseString } from "../../_helpers/parse.js";
 
 /** Every `StmtIR` kind, and what a projection fold does with it: `emit` — the
  *  node builder renders it; `reject` — `foldImpurity` raises
@@ -85,7 +85,7 @@ function sys(body: string, stateField = "total: int", resources = ""): string {
 }
 
 async function filesFor(source: string, amount = "amount: int"): Promise<Map<string, string>> {
-  return (await generateSystems(await parseValid(source.replace("__AMOUNT__", amount)))).files;
+  return await generateSystemFiles(source.replace("__AMOUNT__", amount));
 }
 
 async function foldBody(source: string, amount = "amount: int"): Promise<string> {

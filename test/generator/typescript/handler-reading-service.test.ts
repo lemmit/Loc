@@ -18,8 +18,7 @@
 // render, its port-repo construction, and its service import were missing.
 
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseValid } from "../../_helpers/parse.js";
+import { generateSystemFiles } from "../../_helpers/generate.js";
 
 const SRC = `
 system S {
@@ -63,7 +62,7 @@ system S {
 let cache: string | undefined;
 async function routes(): Promise<string> {
   if (cache === undefined) {
-    const files = (await generateSystems(await parseValid(SRC))).files;
+    const files = await generateSystemFiles(SRC);
     const k = [...files.keys()].find((key) => key.endsWith("http/a-routes.ts"));
     expect(k, "a-routes.ts not emitted").toBeDefined();
     cache = files.get(k!)!;

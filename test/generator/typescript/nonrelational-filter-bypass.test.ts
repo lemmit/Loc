@@ -19,8 +19,7 @@
 // The elixir twin of the document half is §A11, fixed in #2667.
 
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseValid } from "../../_helpers/parse.js";
+import { generateSystemFiles } from "../../_helpers/generate.js";
 
 /** Three finds over one soft-deletable aggregate: one bypassing by name, one
  *  bypassing everything, one plain control. */
@@ -53,7 +52,7 @@ function src(shape: string, persistence = ""): string {
 }
 
 async function repoFile(shape: string, persistence = ""): Promise<string> {
-  const files = (await generateSystems(await parseValid(src(shape, persistence)))).files;
+  const files = await generateSystemFiles(src(shape, persistence));
   const k = [...files.keys()].find((key) => key.endsWith("db/repositories/order-repository.ts"));
   expect(k, "order-repository.ts not emitted").toBeDefined();
   return files.get(k!)!;
