@@ -1087,8 +1087,9 @@ export interface FilterFind {
 }
 
 /** Resolve a list's filter finds from the aggregate's repository in the same
- *  context: each `find` (excluding the synthetic `all`) whose params are all
- *  plain non-array/non-optional strings and whose return is an unwrapped list.
+ *  context: each `find` (excluding the synthetic `all`) whose return is an
+ *  unwrapped list and whose params are ALL renderable by `filterParamKind`
+ *  (non-array, non-optional, and one of the kinds tabulated there).
  *  Filters the aggregate's repository finds to the bar-eligible ones — the repository
  *  is a sibling `ContextMember`, so it's reachable from the aggregate's AST
  *  without lowering. */
