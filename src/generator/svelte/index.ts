@@ -334,7 +334,14 @@ export function generateSvelteForContexts(
         // forbidden page's link.  Absent ⇒ link always shown.
         requiresJs: e.requiresJs,
       })),
-    })) ?? defaultNavSections(scaffoldedAggregates, scaffoldedWorkflows, hasWorkflowsIndex);
+    })) ??
+    defaultNavSections(
+      scaffoldedAggregates,
+      scaffoldedWorkflows,
+      hasWorkflowsIndex,
+      ui.pages,
+      authUi,
+    );
   // Bind the session user in the app-shell only when a nav entry is actually
   // gated — an unused binding would be a svelte-check error.
   const navUsesSession = navSections.some(
