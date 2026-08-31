@@ -803,42 +803,65 @@ in the published request schema; the Spring binder maps a JSON `null` to a Java
 declared shape is published and never enforced.
 
 ### F24 — java: an adversarial query string 500s a paged find
-**Waiver:** none — the CI leg never generates this case · **Severity: medium**
+**Waiver:** none — fixed · **Severity: medium**
 
-**Status: OPEN, but NOT reproduced by the schemathesis leg** (2026-08-30). W31 was
-retired here because it had matched **nothing on every java run since the leg landed** —
-the 08-29 nightly (`38580cd`) and the 08-30 dispatch (`20a6745`) produce byte-identical
-attribution tables, `— W31` in both, so the leg failed on `STALE WAIVER W31` rather than
-on any finding. A waiver for a case the fuzzer does not produce is permanently stale and
-holds the leg permanently red.
+**Status: FIXED (2026-08-31).** `ApiExceptionAdvice` now carries a dedicated
+`org.apache.tomcat.util.http.InvalidParameterException` arm that answers Tomcat's own
+`getErrorCode()` (400), floored at 400. Gated by `test/generator/malformed-query-status.test.ts`;
+mutation-proved — deleting the emitter arm fails 3 of its 5 cases.
 
-Retiring it is **not** a claim that F24 is fixed, and the staleness is **not** evidence
-that it is — the W10 episode (#2648) is the standing reminder that the ratchet's
-staleness half asks a question rather than answering one. Three things say the hazard is
-still live:
-
-- `JAVA_PAGED_QUERY_PARAMS` (`src/generator/java/emit/common.ts`) still binds `sort` and
-  `dir` as **unvalidated `String`** with defaults, while `page`/`pageSize` next to them
-  carry `@Min`/`@Max`. The repro above targets `sort`/`dir` precisely.
-- `#2667` is the only java-generator change since the register landed and it touches
-  `entity` / `query-projection-reads` / `service` / `render-jpql` — nothing on the
-  query-parameter binding path.
-- The GET route class **is** fuzzed: W32 (`status_code_conformance` on the same
-  `^GET /api/`) matched ×10 in both runs. Only the *server-error* check comes back empty,
-  so this is the fuzzer not generating the adversarial query string — not the route
-  going unvisited.
-
-So F24 needs a **targeted regression test** (validate `sort` against the aggregate's
-sortable fields, and `dir` against `asc`/`desc`), not a fuzzer waiver. Until that lands
-the finding stays open here with no rule attached.
+**The root cause is not the one this entry previously named.** It is *not* `sort`/`dir`:
+measured on a booted backend, both answer 200 with any value. It is *not* the `pageSize`
+bound either — `?pageSize=467` is under the published `@Max(500)` and answers 200 on its
+own. It is the **empty parameter name**. Tomcat refuses to parse the chunk and throws out
+of the first `getParameter()` call, which on a paged read is Spring's own argument
+resolution; the exception extends `IllegalStateException` and implements nothing, so it
+fell past the `ErrorResponse` branch of `onUnhandled` and the catch-all answered
+`500 "internal"`. That makes it the **third** instance of one recurring bug in this file —
+a client fault reported as a server fault — after the framework exceptions and the
+malformed path `{id}` (F-series twin: `malformed-path-id-status.test.ts`).
 
 ```
-curl 'http://host/api/products?sort=%22&dir=%C3%9D5%03&…' → 500
+GET /api/customers?=%C3%A0&pageSize=467 → 500
+org.apache.tomcat.util.http.InvalidParameterException:
+  Invalid chunk starting at byte [0] and ending at byte [7] with a value of [=%C3%A0] ignored
 ```
 
-The query-parameter binder's twin of F23 (Tomcat additionally rejects some
-chunks before the app sees them). Kept as its own rule because the fix is on the
-other side of the request — the query binder, not the body binder.
+Measured on the storefront-system fixture the leg itself uses (postgres + `gradle bootJar`):
+
+| request | before | after |
+|---|---|---|
+| `GET /api/{customers,orders,products,wallets}?=%C3%A0&pageSize=467` | 500 | **400** |
+| `GET /api/customers` | 200 | 200 |
+| `GET /api/customers?pageSize=467` | 200 | 200 |
+| `GET /api/customers?pageSize=0` / `?page=0` | 400 | 400 |
+
+The resulting 400 is still **undocumented** on read routes — that is F25/W32, unchanged
+and untouched by this fix.
+
+#### The W31 retirement was wrong, and how
+
+On 2026-08-30 (PR #2693) W31 was retired on the reasoning that it had matched **nothing on
+every java run since the leg landed** — `38580cd` and `20a6745` produce byte-identical
+attribution tables with `— W31` in both, while W32 on the same `^GET /api/` route class
+matched ×10 in both. The conclusion drawn was "the leg never generates this case."
+
+The next nightly (`33382822525`, `4466ab8`, 2026-08-31) generated it **×4**, one per paged
+collection read, and the leg failed on four *unwaived* `not_a_server_error` findings that
+W31's pattern would have matched exactly.
+
+The measurement was right; the inference was not. Two runs of a randomized fuzzer showing
+zero matches is evidence of a **low rate**, not of an impossible case — the register has an
+`intermittent` flag for precisely this, and that was the correct response to the staleness
+signal. This is the W10 lesson (#2648) recurring with the opposite sign: there, staleness
+was misread as "fixed"; here, as "unreachable". **A stale rule asks a question. It does not
+answer one** — and "the fuzzer cannot produce this" is an answer that needs its own evidence,
+which two samples cannot supply.
+
+Retiring W31 did not turn a green leg red (java was already failing on the staleness), but
+it did remove the one rule that would have absorbed these findings, and it recorded a wrong
+root cause that a later reader would have acted on. The fix above is the right resolution
+either way: the bug is closed rather than re-waived.
 
 ### F25 — java: the paged bounds answer 400, and no read route declares one
 **Waiver:** W32 · **Severity: low**
@@ -863,6 +886,38 @@ RFC 9110 makes `Allow` a MUST on 405. It fires on every operation, `/health` and
 `/ready` included, which is why W33's pattern is unscoped: the defect is in the
 one shared error mapper, not in any route. The #2500 class one layer over — that
 was a 401 without `WWW-Authenticate`.
+
+### F27 — elixir: the generated LiveView does not compile, so the leg never boots
+**Waiver:** none — the leg fails before any request is sent · **Severity: high**
+· **Status: OPEN, not yet diagnosed.**
+
+Observed on the 2026-08-31 nightly (run `33382822525`, `4466ab8`) while verifying
+an unrelated fix; recorded here so it is not lost. The elixir discovery cell
+reports `1 problem(s)`, and the cause is upstream of schemathesis entirely — the
+emitted Phoenix project fails `mix compile`:
+
+```
+ERROR: Command failed: mix ecto.create
+== Compilation error in file lib/phoenix_app_web/live/wallet_list_live.ex ==
+** (TokenMissingError) token missing on lib/phoenix_app_web/live/wallet_list_live.ex:158:16:
+     error: missing terminator: end
+     │
+ 128 │           cond do
+     │                └ unclosed delimiter
+ ...
+ 158 │            end
+     │                └ missing closing delimiter (expected "end")
+```
+
+So the HEEx walker emits a `cond do` whose arms do not close. This is a codegen
+defect, not a contract defect: no fuzzing happens at all, and the leg's `No files
+were found with the provided path` on its report upload is an *honest* empty —
+there is no work directory to upload, unlike the four legs whose uploads were
+silently dropped before the `include-hidden-files` fix.
+
+Not investigated further here — it belongs to the HEEx walker
+(`src/generator/elixir/heex-target.ts` / `heex-walker-core.ts`), not to the
+query-parameter path this session was working on.
 
 ### The elixir leg
 It ships as a **discovery cell**: the matrix runs it, but `continue-on-error`

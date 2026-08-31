@@ -814,6 +814,36 @@ export function renderApiExceptionAdvice(
     `        return respond(problem, ${UNPROCESSABLE_ENTITY});`,
     `    }`,
     ``,
+    // A MALFORMED QUERY STRING — `GET /api/customers?=%C3%A0`, a parameter with
+    // an empty name.  Tomcat refuses to parse the chunk and throws
+    // `InvalidParameterException` out of the first `getParameter()` call, which
+    // on a paged read is Spring's own argument resolution.  It extends
+    // IllegalStateException and does NOT implement `ErrorResponse`, so — exactly
+    // like MethodArgumentTypeMismatchException above — it fell past the 4xx
+    // branch of `onUnhandled` and the catch-all answered `500 "internal"`: the
+    // third instance of this file's recurring bug, a CLIENT fault reported as a
+    // server fault (schemathesis F24, `not_a_server_error` on every paged
+    // collection read).
+    //
+    // Measured on a booted backend, not assumed: `GET /api/customers?=%C3%A0`
+    // → 500 before this arm, 400 after; `?pageSize=467` (in-contract, and the
+    // other half of the fuzzer's repro) answers 200 either way, so the declared
+    // `@Max` bound is not involved.
+    //
+    // Tomcat has already decided the status — `getErrorCode()` is the 400 it
+    // would have sent itself — so take it rather than hardcoding one, and fall
+    // back to 400 if a future version leaves it unset.  The type is named
+    // fully-qualified (no import added, as with the validation annotations in
+    // common.ts); `spring-boot-starter-web` is emitted unconditionally and
+    // brings Tomcat, so the class is always on the classpath.
+    `    @ExceptionHandler(org.apache.tomcat.util.http.InvalidParameterException.class)`,
+    `    public ResponseEntity<ProblemDetail> onMalformedQuery(org.apache.tomcat.util.http.InvalidParameterException e, WebRequest request) {`,
+    `        var status = e.getErrorCode() >= 400 ? e.getErrorCode() : 400;`,
+    `        var reason = HttpStatus.valueOf(status).getReasonPhrase();`,
+    `        CatalogLog.event(${javaLogEvent("clientError")}, "error", "Malformed query string", "status", status);`,
+    `        return respond(problem(status, reason, "Malformed query string", request), status);`,
+    `    }`,
+    ``,
     `    @ExceptionHandler(Exception.class)`,
     `    public ResponseEntity<ProblemDetail> onUnhandled(Exception e, WebRequest request) {`,
     // Spring's OWN framework exceptions are CLIENT errors carrying their own

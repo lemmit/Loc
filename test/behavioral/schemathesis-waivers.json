@@ -212,7 +212,7 @@
         "java"
       ],
       "kind": "bug",
-      "reason": "F25 — `GET /api/products?pageSize=0` answers 400, and no read route declares a 400: the paged `page`/`pageSize` bounds that #2555 gave declared, enforced limits are enforced on java with a status the contract does not publish (the shared matrix declares 422). Also absorbs the 500s of W31 reaching this check."
+      "reason": "F25 — `GET /api/products?pageSize=0` answers 400, and no read route declares a 400: the paged `page`/`pageSize` bounds that #2555 gave declared, enforced limits are enforced on java with a status the contract does not publish (the shared matrix declares 422). The 500s that used to reach this check alongside it were F24, fixed 2026-08-31 (malformed query string -> Tomcat InvalidParameterException -> 400); this rule now matches the 400s of the bounds only, plus that fix's own 400."
     },
     {
       "id": "W33",
