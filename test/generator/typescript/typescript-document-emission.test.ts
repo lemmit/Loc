@@ -7,6 +7,8 @@ import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
 import { generateTypeScript } from "../../../src/platform/hono/v4/emit.js";
 import { BACKEND_PINS as HONO_V4_PINS } from "../../../src/platform/hono/v4/pins.js";
+import { dddSourceOf } from "../../_helpers/ddd-corpus.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 import { parseValid } from "../../_helpers/parse.js";
 
 // ---------------------------------------------------------------------------
@@ -171,5 +173,81 @@ describe("Hono/Drizzle document — optional single containment is null-safe", (
     expect(repo).not.toMatch(/coupon: couponFromDoc\(d\.coupon\)/);
     // The required collection containment is unchanged.
     expect(repo).toContain("items: a.items.map((e) => cartLineToDoc(e))");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The `onCreate` lifecycle stamps on the DOCUMENT write path.
+//
+// `tenantOwned` (and `auditable`, and a hand-written `stamp onCreate`) declare
+// stamps the create must apply.  On the RELATIONAL path node lands them in
+// `db/audit-stamp.ts` — `.values(stampInsert(row))`.  The document repository
+// never imported it, so a tenant-owned document row was written with an EMPTY
+// `tenantId` and became invisible to every principal INCLUDING ITS CREATOR: the
+// read filter is correct, `"" === currentUser.tenantId` is false, and a 201
+// create was followed by 404 on every read, update and destroy — silently.
+//
+// The compile tier could not see it (the emission type-checks either way) and
+// `policy-document-inapp.test.ts` could not either (it runs the predicate over
+// FABRICATED rows, which already carry a tenant).  Only a real write through
+// the real create path exposes it, which is why the runtime half lives in
+// `test/fixtures/corpus/policy-document.ddd`'s `test e2e`.  This is the
+// unit-tier witness for the same defect.
+// ---------------------------------------------------------------------------
+
+describe("document save() applies the onCreate stamps", () => {
+  let stamped: Map<string, string>;
+  /** `examples/document.ddd`'s `Cart` — a document aggregate with NO lifecycle
+   *  stamps.  The control that keeps this gate from passing by stamping
+   *  everything.  Built here rather than reused from the sibling describe, whose
+   *  `files` is scoped to it. */
+  let unstamped: Map<string, string>;
+  beforeAll(async () => {
+    unstamped = generateTypeScript(await buildModel("examples/document.ddd"), HONO_V4_PINS);
+    // The corpus fixture is a `__PLATFORM__`-tokenized TEMPLATE, not a source —
+    // `dddSourceOf` substitutes a backend the way every census and runner does.
+    // It is a multi-context SYSTEM, so it goes through the system generator
+    // (the legacy single-context `generateTypeScript` emits no repositories for
+    // it, which is how this assertion first passed vacuously).
+    stamped = await generateSystemFiles(dddSourceOf("test/fixtures/corpus/policy-document.ddd"));
+  });
+
+  const thingRepo = (): string => {
+    const key = [...stamped.keys()].find((k) => /repositories\/thing-repository\.ts$/.test(k));
+    expect(key, "the document repository file was not emitted").toBeDefined();
+    return stamped.get(key as string) as string;
+  };
+
+  it("stamps the doc payload on the INSERT branch", () => {
+    const src = thingRepo();
+    expect(src).toContain('import { stampInsert } from "../audit-stamp";');
+    // The insert carries the stamped payload…
+    expect(src).toMatch(/\.insert\(schema\.things\)\.values\(\{[^}]*data: stampInsert\(data\)/);
+  });
+
+  it("does NOT stamp the UPDATE branch — it writes the whole blob", () => {
+    // `stampUpdate` STRIPS the create-only fields so a relational partial `set`
+    // cannot overwrite them.  A document update replaces the entire jsonb, so
+    // stripping `tenantId`/`dataKey` would DELETE them from the row.  The
+    // rehydrated aggregate already carries both, so the update is correct
+    // writing `data` unchanged.
+    const src = thingRepo();
+    expect(src).not.toContain("stampUpdate");
+    expect(src).toMatch(/\.update\(schema\.things\)\.set\(\{ data,/);
+  });
+
+  it("emits the helper it imports", () => {
+    const key = [...stamped.keys()].find((k) => /(^|\/)db\/audit-stamp\.ts$/.test(k));
+    expect(key, "the stamp helper the repository imports was not emitted").toBeDefined();
+  });
+
+  it("leaves an UNSTAMPED document aggregate alone", async () => {
+    // `examples/document.ddd`'s `Cart` carries no lifecycle stamps, so its
+    // repository must neither import the helper nor call it — the gate would
+    // otherwise pass by stamping everything.
+    const src = unstamped.get("db/repositories/cart-repository.ts") as string;
+    expect(src, "the unstamped control repository was not emitted").toBeDefined();
+    expect(src).not.toContain("stampInsert");
+    expect(src).toMatch(/\.insert\(schema\.carts\)\.values\(\{[^}]*data,/);
   });
 });

@@ -411,6 +411,19 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
     updateOrg: R.tenantRegistryRow,
     allOrg: R.tenantRegistryRow,
   },
+  // ── The DOCUMENT-crossing fixture's tenant registry ──────────────────────
+  // `policy-document` declares `tenancy by user.tenantId of Org` too, so its
+  // `Org` is a fourth tenant registry joining the same one cause as `policy-deny`
+  // directly above: the deny/deep stances are fully driven by the fixture's own
+  // caller, and asserting the 404s these five routes DO answer would pin the
+  // harness artefact rather than the feature.
+  "corpus/policy-document": {
+    createOrg: R.tenantRegistryRow,
+    getOrgById: R.tenantRegistryRow,
+    destroyOrg: R.tenantRegistryRow,
+    updateOrg: R.tenantRegistryRow,
+    allOrg: R.tenantRegistryRow,
+  },
   // ── The `when`-gate probe ────────────────────────────────────────────────
   // The one route with no `test e2e` verb at all.  The gate itself is
   // exercised: the 409 on the gated operation, and — added by this drain — the
@@ -593,62 +606,35 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // and the undenied control), so "a denied read 404s / lists empty" is proven
   // rather than assumed.  Its five registry routes are pinned above.
   //
-  // The `shape: document` × authz crossing (pairwise F1) STAYS, and its old
-  // waiver text named the wrong blocker.  That text said a caller here needed
-  // "an AUTHENTICATED, UNAUTHORIZED principal … the multi-principal harness work
-  // (#2515)".  #2515 landed (`DEV_CLAIMS_UNAUTHORIZED`), and it does not help:
-  // that principal carries the SAME tenancy claims by design, so it is not a
-  // second tenant either.
-  //
-  // The REAL blocker was found by writing the caller and booting it (node leg,
-  // 2026-08-30).  `Thing` carries `allow deep`, which anchors at
-  // `ORG_PATH_CLAIM_FIELD` = `orgPath` (src/ir/util/tenant-stance.ts), and
-  // `DEV_CLAIMS` mints `{ tenantId, orgId, role }` — no `orgPath`.  So the
-  // subtree predicate matches nothing for the behavioural principal and the
-  // aggregate is invisible to the very identity that created it:
+  // `policy-document` DRAINED — but only after the defect it was hiding was
+  // FIXED, which is the whole argument for this register.  Writing the caller
+  // and booting it (node leg) produced:
   //
   //     POST /api/things            -> 201  (aggregate_created)
   //     GET  /api/things/{that id}  -> 404
   //
-  // A caller cannot distinguish that from a correct deny, so an e2e authored
-  // today would either fail or — if narrowed to `Note`'s principal-free `deny` —
-  // PASS while leaving `allow deep`, the reason this fixture exists, undriven,
-  // and would take this waiver with it.  That is precisely the coverage-hiding
-  // trade M-T9.13 exists to prevent, so the entry stays.
+  // `tenantOwned`'s `onCreate` stamps (`tenantId := currentUser.tenantId`,
+  // `dataKey := currentUser.orgPath`) never reached the `shape: document` write
+  // path: the relational repository lands them via `db/audit-stamp.ts`
+  // `stampInsert(row)`, and the document repository never imported it.  So every
+  // tenant-owned document row was written with an EMPTY tenant and was invisible
+  // to every principal INCLUDING ITS CREATOR — read, update and destroy all 404,
+  // silently, behind a 201.  The read filter was correct the whole time; nothing
+  // had ever written a real row through the real create path for it to filter,
+  // which is exactly why `test/generator/policy-document-inapp.test.ts` (which
+  // runs the predicate over FABRICATED rows) stayed green through it.
   //
-  // WHY THE 404 — a PRODUCT BUG this waiver was hiding, not a harness gap.
-  // `tenantOwned` declares `onCreate` stamps (`tenantId := currentUser.tenantId`,
-  // `dataKey := currentUser.orgPath`; src/macros/prelude.ts).  On the RELATIONAL
-  // write path the node backend lands them in `db/audit-stamp.ts` —
-  // `stampInsert(row)` returns `{ ...row, tenantId, dataKey }`.  The
-  // `shape: document` repository NEVER IMPORTS IT: the create route is
-  // `Thing.create(...)` then `repo.save(created)`, `Thing.create` hardcodes
-  // `tenantId: ""` / `dataKey: null`, and `save` inserts `thingToDoc(aggregate)`
-  // verbatim.  So a tenant-owned DOCUMENT row is written with an EMPTY tenant and
-  // is invisible to every principal INCLUDING ITS CREATOR — read, update and
-  // destroy all 404 — silently, behind a 201.
+  // The fix stamps the doc payload on the INSERT branch only — the update writes
+  // the whole blob, so `stampUpdate`'s create-field STRIP would delete the
+  // tenant.  The caller now drives `allow deep` (admit, incl. the author's own
+  // `where`) and `deny` (nothing, and 404 on both mutations) over HTTP, and its
+  // first read is the stamp's regression test.
   //
-  // Per-backend (2026-08-30, generated from this fixture):
-  //   • node    — runtime-proven on the behavioural leg (POST 201 -> GET 404)
-  //   • dotnet  — no stamp on the document write path (read/write-scope
-  //               predicates emit, `_WriteScopeAllows`/`_CapabilityVisible`)
-  //   • java    — same absence across factory, `ThingService`, repository
-  //   • python  — CORRECT: emits `_stamp_on_create(current_user)`
-  //   (elixir refuses this crossing by name, `loom.context-filter-unsupported`)
-  //
-  // So this entry cannot be drained by writing a caller: the caller is correct
-  // and the SYSTEM is wrong on three of the four in-app backends.  Draining it
-  // means fixing the document-shape stamp seam first — python is the reference
-  // emission.  That is a `src/` change and belongs to its own mission; this
-  // register only records why the runtime hole persisted long enough to hide it.
-  //
-  // `lifecycle-guard` above is a DIFFERENT and genuinely harness-shaped blocker
-  // (the principal's claim set), so the two do NOT drain together after all.
-  // The emitted predicate IS executed against fabricated rows in
-  // `test/generator/policy-document-inapp.test.ts`, which is exactly why the
-  // defect survived: the filter is right, and nothing ever wrote a real row
-  // through the real create path for it to filter.
-  "policy-document",
+  // What the caller still does NOT prove is stated in the fixture beside it: the
+  // deep rung HIDING an out-of-subtree row needs a second tenancy identity the
+  // behavioural tier does not have (`DEV_CLAIMS_UNAUTHORIZED` shares the tenant
+  // by design).  That half belongs to `tenancy-e2e`.  Its five registry routes
+  // are pinned below.
   // SIDECARS — `objectStore` (S3/minio), `queue`, an http `api` peer and a
   // `mailer` (mailpit).  A put→get round-trip needs them standing up, which is
   // `email-e2e.yml`'s and `channels-e2e.yml`'s shape, not this leg's.
