@@ -11,6 +11,7 @@
 // Pure leaf — the find method builders depend on these, never the reverse.
 
 import type {
+  BoundedContextIR,
   CriterionIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -19,6 +20,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { orientComparison } from "../../ir/util/comparison-operands.js";
+import { tableOwnerName } from "../../ir/util/inheritance.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
@@ -641,20 +643,36 @@ export function renderCriterionArg(e: ExprIR): string {
   return "undefined as never";
 }
 
+/** The Drizzle table const a repository reads `agg` from — the shared TPH base
+ *  table for a TPH concrete, otherwise the aggregate's own table.  Lives here
+ *  (rather than beside the find builders) so the predicate lowerer can derive
+ *  it itself: every read a capability filter AND-s into targets this table, and
+ *  a caller that passed the subtype's own plural instead emitted
+ *  `schema.cars.tenantId` against `select().from(schema.vehicles)` — a table
+ *  object that does not exist under TPH (`F2-CB-C3`, 7 × TS2339). */
+export function repoTableName(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string {
+  return lowerFirst(plural(tableOwnerName(agg, ctx.aggregates)));
+}
+
 /** Lower an aggregate's capability filters to a single Drizzle predicate
  *  string (conjoined with `and(...)` when there is more than one), or
  *  null when the aggregate has none.  Adds the Drizzle ops it uses to
  *  `ops` so the import-narrowing in the repository builders pulls them
- *  in.  Returns null (rather than throwing) on a non-lowerable predicate
- *  — the validator guarantees selectability, so that path is unreachable
- *  for valid models. */
+ *  in.
+ *
+ *  The table is DERIVED (`repoTableName`), never passed in — see that
+ *  function.  Throws on a non-lowerable predicate: the validator guarantees
+ *  every capability filter is selectable, so reaching that path means an IR
+ *  shape got past the gate, and returning null there silently dropped the
+ *  WHOLE conjunction — a declared read restriction absent from the emitted SQL
+ *  with no compile error and no diagnostic (`F2-CB-C4`). */
 export function contextFilterPredicate(
   agg: EnrichedAggregateIR,
-  tableName: string,
   ctx: EnrichedBoundedContextIR,
   ops: Set<string>,
   bypass?: FilterBypass,
 ): string | null {
+  const tableName = repoTableName(agg, ctx);
   const entries = allContextFilterEntries(agg, bypass);
   if (entries.length === 0) return null;
   const lowered: string[] = [];
@@ -683,7 +701,15 @@ export function contextFilterPredicate(
     const l = lowerToDrizzle(e.predicate, tableName, ctx, {
       principalAccessor: "requireCurrentUser()",
     });
-    if (!l) return null;
+    if (!l) {
+      throw new Error(
+        `Loom internal: capability \`filter\` on aggregate '${agg.name}' is not lowerable to ` +
+          `a Drizzle predicate, so the read restriction it declares cannot be emitted. ` +
+          `The IR validator is supposed to reject a non-selectable filter before codegen ` +
+          `(loom.criterion-not-selectable) — this shape reached the emitter instead. ` +
+          `Dropping it would ship unfiltered reads, so this is a hard stop.`,
+      );
+    }
     for (const op of l.ops) ops.add(op);
     lowered.push(l.expr);
   }

@@ -630,15 +630,21 @@ system Sys {
     // The abstract base's discriminated-union type.
     const union = files.get("api/domain/party.ts") ?? "";
     expect(union).toMatch(/export type Party = Customer \| Supplier;/);
-    // A read-only repository that scans the shared table and dispatches on kind.
+    // A read-only repository that DELEGATES to the concrete repositories.  It
+    // used to scan the shared table and dispatch on `kind` itself, which read
+    // that table through none of the machinery the concrete repositories apply
+    // to it — no capability `filter`, no tenancy predicate, no contained parts
+    // (F2-CB-C12).  `docs/inheritance.md` has always described the reader as
+    // delegating; only the TPH arm on node diverged.
     const reader = files.get("api/db/repositories/party-repository.ts") ?? "";
     expect(reader).toMatch(/export class PartyRepository/);
     expect(reader).toMatch(/async findById\(id: Ids\.PartyId\): Promise<Party \| null>/);
     expect(reader).toMatch(/async findAll\(\): Promise<Party\[\]>/);
-    expect(reader).toMatch(/from\(schema\.parties\)/);
-    expect(reader).toMatch(/switch \(row\.kind\)/);
-    expect(reader).toMatch(/case "Customer":/);
-    expect(reader).toMatch(/case "Supplier":/);
+    expect(reader).toMatch(/new CustomerRepository\(db, events\)/);
+    expect(reader).toMatch(/new SupplierRepository\(db, events\)/);
+    expect(reader).toMatch(/this\.customerRepo\.all\(\)/);
+    expect(reader, "no direct read of the shared table").not.toMatch(/from\(schema\.parties\)/);
+    expect(reader, "no inline kind dispatch").not.toMatch(/switch \(row\.kind\)/);
   });
 
   it("rejects a polymorphic 'Party id' ref to an ownTable (TPC) base (ambiguous FK)", async () => {

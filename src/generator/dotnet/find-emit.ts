@@ -6,6 +6,7 @@ import type {
   RetrievalIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
+import type { AggPool } from "../../ir/util/inheritance.js";
 import { upperFirst } from "../../util/naming.js";
 import { canEmitToExpressionFor } from "./criteria-emit.js";
 import { bypassedFilterNames, hasNonBypassableFilter } from "./emit/efcore.js";
@@ -24,10 +25,11 @@ import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
  *  sentinel, so the bypassable filters are enumerated by name instead. */
 export function ignoreFiltersClause(
   agg: EnrichedAggregateIR,
+  pool: AggPool,
   bypass: { bypassAll?: boolean; bypassCaps?: string[] },
 ): string {
   if (bypass.bypassAll && !hasNonBypassableFilter(agg)) return ".IgnoreQueryFilters()";
-  const names = bypassedFilterNames(agg, bypass);
+  const names = bypassedFilterNames(agg, pool, bypass);
   if (names.length === 0) return "";
   return `.IgnoreQueryFilters([${names.map((n) => JSON.stringify(n)).join(", ")}])`;
 }
@@ -65,14 +67,14 @@ export function unionFindAsOptionalTwin(find: FindIR, aggName: string): FindIR {
 export function buildFindBodies(
   agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
-  ctx?: BoundedContextIR,
+  ctx: BoundedContextIR,
 ): Array<{ name: string; ignoreClause: string; filterClause: string; projectionClause: string }> {
   if (!repo) return [];
   return repo.finds.map((raw) => {
     const find = unionFindAsOptionalTwin(raw, agg.name);
     return {
       name: find.name,
-      ignoreClause: ignoreFiltersClause(agg, find),
+      ignoreClause: ignoreFiltersClause(agg, ctx.aggregates, find),
       filterClause: filterClauseFor(find, agg, ctx),
       projectionClause: projectionClauseFor(find.returnType),
     };

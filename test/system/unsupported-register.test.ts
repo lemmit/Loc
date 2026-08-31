@@ -89,8 +89,19 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  "ok"` even on the error variant.  What is new is that it stopped shipping a
  *  contract the backend silently drops.  Python already emits both halves, so
  *  this is a one-backend gap; draining it folds the audit transaction into
- *  `emitReturningOperationRoute`, deletes the row, and lowers this back to 40. */
-const MAX_OPEN_GAPS = 41;
+ *  `emitReturningOperationRoute`, deletes the row, and lowers this back to 40.
+ *
+ *  41 → 42: `loom.tph-filter-unsupported`.  Same trade, and the sharpest example
+ *  of it in this register: the .NET config emitter replaced the WHOLE query-filter
+ *  list with `[]` for any TPH participant, so a declared read restriction on a
+ *  subtype (`filter Live`, a `softDeletable` visibility rule, a tenancy filter)
+ *  was absent from every emitted query with no compile error and no diagnostic.
+ *  Most of that gap is now EMITTED rather than gated — filters reading root
+ *  columns move to the root config discriminator-guarded — and only the residue
+ *  EF Core structurally cannot express (a subtype-only column) is gated here.
+ *  Drains when .NET moves capability filters off `HasQueryFilter` onto the
+ *  per-read LINQ `.Where(...)`, which is per-`DbSet` and therefore subtype-typed. */
+const MAX_OPEN_GAPS = 42;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

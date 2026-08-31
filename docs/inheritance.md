@@ -70,7 +70,14 @@ per backend as infrastructure that **delegates to the concrete loaders** (so
 contained parts and `X id[]` associations load correctly) rather than a flat
 column union:
 
-| Backend (`platform:`) | TPC reader |
+This holds for **both** layouts. It used to be a TPC-only property on
+node/Hono: the TPH reader hand-rolled `select().from(schema.<base>)` + a `kind`
+switch, which meant it read the shared table through none of the machinery the
+concrete repositories apply to it — no capability `filter`, no tenancy
+predicate, no contained parts. Under `tenantOwned` that is a cross-tenant read
+as soon as the reader is routed. Both layouts now delegate.
+
+| Backend (`platform:`) | polymorphic base reader |
 |---|---|
 | `node` (Hono / Drizzle) | a read-only `<Base>Repository` whose `findAll()` concatenates each concrete repo's `all()`; a `<Base>` discriminated-union response type |
 | `dotnet` (.NET / EF Core) | `public abstract class <Base>` carrying the shared fields; concretes declare `: <Base>` and inherit them; EF excludes the base via `modelBuilder.Ignore<<Base>>()` so each concrete maps standalone; a read-only `I<Base>Repository` / `<Base>Repository` whose `FindAllAsync()` returns `IReadOnlyList<<Base>>` |
@@ -110,7 +117,45 @@ or switching to `inheritanceUsing: ownTable` (which works everywhere).
 | `loom.abstract-repository` | a `repository` targets an abstract base |
 | `loom.polymorphic-id-ref-unsupported` | a `<Base> id` reference to an `ownTable` (TPC) base |
 | `loom.es-tph-forced-own-table` | event-sourced / document opt-out forces `ownTable` on a TPH member |
+| `loom.tph-filter-unsupported` | **.NET only** — a TPH *subtype* carries a capability `filter` whose predicate reads a column the hierarchy ROOT does not declare (see below) |
+| `loom.tenancy-inherited-stance-conflict` | a subtype declares the opposite tenancy stance from the base it inherits its columns from (`abstract … with tenantOwned` + `… extends … crossTenant`) |
 | (storage gate) | a `sharedTable` (TPH) hierarchy whose context has no node/Hono, .NET, Phoenix, Python, or Java host |
+
+## Capabilities and inheritance — what propagates and what does not
+
+Only the base's **fields** are merged onto a subtype (by the enrich pass). Its
+capability *identity* is not: a stance, a stamp and a capability `filter` all
+stay on the aggregate that declared them. Two consequences worth stating,
+because both used to be silent:
+
+- **Declare the tenancy stance on every concrete.** `abstract aggregate Vehicle
+  with tenantOwned` gives every subtype the `tenant_id` column, but nothing
+  stamps or filters it until the subtype says `with tenantOwned` too. A subtype
+  with no stance is `loom.tenancy-stance-unmarked`; one that says `crossTenant`
+  against a `tenantOwned` base is `loom.tenancy-inherited-stance-conflict`.
+- **A subtype's `filter` reads through the hierarchy.** `criterion Live of Car =
+  !this.retired` works when `retired` lives on the abstract base — the predicate
+  is typed and lowered against the merged field set on every backend.
+
+### The one .NET restriction
+
+EF Core registers a query filter on the **root** entity type of a hierarchy
+only. Loom therefore hosts every TPH filter on the root config, guarding a
+subtype's filter with the discriminator so it constrains that subtype's rows
+alone and prefixing its name (`Car_LiveFilter`) so two subtypes carrying the
+same capability cannot overwrite each other's key:
+
+```csharp
+// VehicleConfiguration.cs — `criterion Live of Car = !this.retired`
+builder.HasQueryFilter("Car_LiveFilter", x => EF.Property<string>(x, "kind") != "Car" || (!x.Retired));
+```
+
+A predicate reading a **subtype-only** column cannot be hosted that way at all
+(the root-typed lambda has no such member, and both workarounds — a CLR downcast
+and `EF.Property` — fail as soon as the query source is a sibling subtype), so
+it is rejected with `loom.tph-filter-unsupported`. Move the field to the
+abstract base, switch to `inheritanceUsing: ownTable`, or host the context off
+.NET. The other four backends have no such restriction.
 
 ## Deferred (gated, not emitted)
 

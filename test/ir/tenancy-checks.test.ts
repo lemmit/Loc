@@ -21,6 +21,7 @@ const TENANCY_CODES = new Set([
   "loom.tenant-owned-without-tenancy",
   "loom.cross-tenant-without-tenancy",
   "loom.tenancy-conflicting-stance",
+  "loom.tenancy-inherited-stance-conflict",
   "loom.tenancy-registry-marked",
   "loom.tenant-owned-claim-type",
   "loom.tenant-registry-without-tenancy",
@@ -104,6 +105,98 @@ describe("loom.tenancy-stance-unmarked", () => {
     expect(diags.map((d) => [d.code, d.source])).toEqual([
       ["loom.tenancy-stance-unmarked", "Invoicing/Invoice"],
     ]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Inheritance × stance (F2-CB-C10 / F2-CB-C11).
+  //
+  // A base's FIELDS are merged onto its subtypes by the enrich pass, so
+  // `abstract … with tenantOwned` puts `tenant_id NOT NULL` on the subtype's
+  // row.  Its STANCE is read off `agg.capabilities` alone and does NOT
+  // propagate, so the two halves can disagree — and the two tests below are the
+  // two ways they did.
+  // -------------------------------------------------------------------------
+
+  it("names the real constraint when the BASE declared the stance the concrete is missing", async () => {
+    // C10: the generic message told the author to add `with tenantOwned` — which
+    // they had already written, on the base — and offered `crossTenant` as the
+    // alternative, which walks straight into C11 below.
+    const diags = await tenancyDiags(`
+      system Fleets {
+        user { id: guid  tenantId: string }
+        tenancy by user.tenantId of Org
+        subdomain D {
+          context Fleet {
+            abstract aggregate Vehicle with tenantOwned { name: string }
+            aggregate Car extends Vehicle { doors: int }
+            aggregate Org { title: string }
+            repository Cars for Car { }
+            repository Orgs for Org { }
+          }
+        }
+      }
+    `);
+    expect(diags.map((d) => [d.code, d.source])).toEqual([
+      ["loom.tenancy-stance-unmarked", "Fleet/Car"],
+    ]);
+    const msg = diags[0]!.message;
+    expect(msg, "names the base that already declares it").toContain("'Vehicle' declares");
+    expect(msg, "states that a stance does not propagate").toContain(
+      "does NOT propagate through `extends`",
+    );
+    expect(msg, "explains what the subtype actually lacks").toContain(
+      "the tenant column without the stamp that fills it",
+    );
+    expect(msg, "must NOT offer crossTenant as a remedy any more").toContain(
+      "`crossTenant` would contradict the base and is rejected",
+    );
+  });
+
+  it("rejects a `crossTenant` subtype of a `tenantOwned` base", async () => {
+    // C11: this parsed 0 errors on all five backends.  The base's capability
+    // still contributes `tenant_id NOT NULL` to the shared row, but nothing
+    // stamps it and nothing filters by it — node/python persist every row under
+    // tenant "" with no isolation at all, while java/.NET/elixir cannot insert.
+    // It is also the exact spelling C10's old message recommended.
+    const diags = await tenancyDiags(`
+      system Fleets {
+        user { id: guid  tenantId: string }
+        tenancy by user.tenantId of Org
+        subdomain D {
+          context Fleet {
+            abstract aggregate Vehicle with tenantOwned { name: string }
+            aggregate Car extends Vehicle crossTenant { doors: int }
+            aggregate Org { title: string }
+            repository Cars for Car { }
+            repository Orgs for Org { }
+          }
+        }
+      }
+    `);
+    expect(diags.map((d) => [d.code, d.source])).toEqual([
+      ["loom.tenancy-inherited-stance-conflict", "Fleet/Car"],
+    ]);
+    expect(diags[0]!.severity).toBe("error");
+    expect(diags[0]!.message).toContain("declares `crossTenant` but its abstract base 'Vehicle'");
+  });
+
+  it("accepts a subtype that repeats the base's stance", async () => {
+    const diags = await tenancyDiags(`
+      system Fleets {
+        user { id: guid  tenantId: string }
+        tenancy by user.tenantId of Org
+        subdomain D {
+          context Fleet {
+            abstract aggregate Vehicle with tenantOwned { name: string }
+            aggregate Car extends Vehicle with tenantOwned { doors: int }
+            aggregate Org { title: string }
+            repository Cars for Car { }
+            repository Orgs for Org { }
+          }
+        }
+      }
+    `);
+    expect(diags).toEqual([]);
   });
 
   it("does not fire on a system without a tenancy declaration", async () => {

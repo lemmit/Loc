@@ -27,7 +27,7 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser, findUsesCurrentUser } from "../../ir/types/loom-ir.js";
-import { discriminatorValue, tableOwnerName } from "../../ir/util/inheritance.js";
+import { discriminatorValue } from "../../ir/util/inheritance.js";
 import { sortableFields } from "../../ir/util/sortable-fields.js";
 import { valueCollectionsFor } from "../../ir/util/value-collections.js";
 import { indent, lines } from "../../util/code-builder.js";
@@ -49,6 +49,7 @@ import {
   lowerToDrizzle,
   reifiableCriterion,
   renderCriterionArg,
+  repoTableName,
 } from "./repository-find-predicate.js";
 
 /** The capability-filter predicate to AND into one read.  When the read
@@ -59,13 +60,12 @@ import {
  *  ops set is fine here (the import narrower keys off the emitted body). */
 function readFilterPred(
   agg: EnrichedAggregateIR,
-  tableName: string,
   ctx: EnrichedBoundedContextIR,
   filterPred: string | null,
   bypass: FilterBypass | undefined,
 ): string | null {
   if (!bypass || (!bypass.bypassAll && (bypass.bypassCaps ?? []).length === 0)) return filterPred;
-  return contextFilterPredicate(agg, tableName, ctx, new Set<string>(), bypass);
+  return contextFilterPredicate(agg, ctx, new Set<string>(), bypass);
 }
 
 // Re-export the leaf modules' externally-consumed surface so the sibling
@@ -77,13 +77,11 @@ export {
   lowerToDrizzle,
   nonPrincipalContextFilterEntries,
   nonPrincipalContextFilters,
+  // The table a repository reads `agg` from.  Defined beside the predicate
+  // lowerer (which derives it itself) and re-exported here so the sibling
+  // builders keep importing it from this module.
+  repoTableName,
 } from "./repository-find-predicate.js";
-
-/** The Drizzle table const a repository reads from for `agg` — the shared
- *  TPH base table for a TPH concrete, otherwise the aggregate's own table. */
-export function repoTableName(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string {
-  return lowerFirst(plural(tableOwnerName(agg, ctx.aggregates)));
-}
 
 // ---------------------------------------------------------------------------
 // Reified criteria (Hono).  A `retrieval`/`find` whose `where` is exactly a
@@ -412,7 +410,7 @@ export function findQueryMethod(
   const params = (usesUser ? [...baseParams, "currentUser: User"] : baseParams).join(", ");
   // An `ignoring <Cap>` / `ignoring *` on this find drops the named
   // capability filters from its `where` conjunction (other finds keep them).
-  const readPred = readFilterPred(agg, tableName, ctx, filterPred, find);
+  const readPred = readFilterPred(agg, ctx, filterPred, find);
   const whereClause = buildFindWhereClause(agg, find, tableName, ctx, readPred);
 
   // Paged return (`find x(): <Agg> paged`, P3b): the method gains trailing

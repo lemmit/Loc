@@ -1636,7 +1636,7 @@ function emitAggregate(
             extraUsings: [...repoImplUsings].sort(),
             idClass,
           })
-        : renderRepositoryImpl(agg, repoWithViews, ns, findBodies, {
+        : renderRepositoryImpl(agg, repoWithViews, ns, ctx.aggregates, findBodies, {
             extraUsings: [...repoImplUsings].sort(),
             emitTrace,
             retrievals: aggRetrievals,

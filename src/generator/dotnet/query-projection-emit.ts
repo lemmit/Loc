@@ -433,7 +433,7 @@ function efAggregationIgnoreClause(
   // PARAMETERLESS `IgnoreQueryFilters()` — which also drops a bare
   // (origin-less) `filter <expr>`, while `ignoring *` is documented, and
   // implemented by the Dapper twin, as "every CAPABILITY filter".
-  const names = queryFilterNames(agg);
+  const names = queryFilterNames(agg, ctx.aggregates);
   const origins = agg.contextFilterOrigins ?? [];
   const dropped = names.filter((_, i) => {
     const origin = origins[i];

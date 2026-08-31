@@ -1,24 +1,21 @@
-// Polymorphic base reader for a TPH hierarchy (aggregate-inheritance.md).
+// Polymorphic base reader for an aggregate-inheritance hierarchy
+// (aggregate-inheritance.md), either layout.
 //
-// An abstract `sharedTable` (TPH) base has no user repository (the validator
-// forbids one — abstract aggregates aren't instantiated), but the whole point
-// of TPH is polymorphic access: "reference any Party, query all Parties".
-// This emitter generates a read-only `<Base>Repository` that scans the shared
-// table and dispatches on the `kind` discriminator to hydrate the right
-// concrete, returning the `Customer | Supplier` tagged union.  It is the read
-// home for `find all <Base>` and for dereferencing a polymorphic `<Base> id`.
+// An abstract base has no user repository (the validator forbids one — abstract
+// aggregates aren't instantiated), but the whole point of inheritance here is
+// polymorphic access: "reference any Party, query all Parties".  This emitter
+// generates a read-only `<Base>Repository` returning the `Customer | Supplier`
+// tagged union.  It is the read home for `find all <Base>` and for
+// dereferencing a polymorphic `<Base> id`.
 //
-// Hono/Drizzle only (v1), mirroring the rest of the TPH slice.  Reads are
-// scalar/VO/enum/id-shaped; contained parts and reference collections aren't
-// eagerly loaded here (the per-concrete repository loads those) — see
-// hydrateConcreteFromSharedRow.
+// Both layouts DELEGATE to the per-concrete repositories rather than querying a
+// table directly, so every read rides the loader that already applies the
+// concrete's `kind` scoping, capability filters, contained parts and `X id[]`
+// associations.  Hono/Drizzle only (v1).
 
-import type { EnrichedAggregateIR, EnrichedBoundedContextIR } from "../../ir/types/loom-ir.js";
-import { aggregateUsesMoneyDeep } from "../../ir/types/loom-ir.js";
+import type { EnrichedAggregateIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
-import { lowerFirst, plural } from "../../util/naming.js";
-import { hydrateConcreteFromSharedRow } from "./repository-find-builder.js";
-import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
+import { lowerFirst } from "../../util/naming.js";
 
 /** The `<Base> = Concrete | …` discriminated-union type (TS structural union
  *  of the concrete domain classes). Lives in `domain/<base>.ts`.  `layout`
@@ -45,109 +42,54 @@ export function buildBaseUnionFile(
   );
 }
 
-/** The read-only `<Base>Repository` — `findById` + `findAll` over the shared
- *  TPH table, dispatching on `kind`. */
+/** The read-only `<Base>Repository` for a TPH (`sharedTable`) hierarchy.
+ *
+ *  It DELEGATES to the per-concrete repositories, exactly as the TPC reader
+ *  below does — and for a second reason on top of that one's.  The hand-rolled
+ *  version read `schema.<base>` directly, which meant it saw the shared table
+ *  through NONE of the machinery the concrete repositories apply to it: no
+ *  capability `filter`, no tenancy predicate, no contained parts, no `X id[]`
+ *  associations.  Both concrete repos in a `tenantOwned` hierarchy AND-ed a
+ *  tenant predicate into every read while this reader emitted a bare
+ *  `select().from(schema.vehicles)` — a cross-tenant read the moment the
+ *  polymorphic reader is wired to a route, which `docs/inheritance.md` already
+ *  describes as its purpose (`F2-CB-C12`).  Delegating makes every one of those
+ *  concerns ride along by construction instead of needing to be re-applied
+ *  here, which is why the doc said "delegates to the concrete loaders" in the
+ *  first place. */
 export function buildBaseReaderFile(
   base: EnrichedAggregateIR,
   concretes: EnrichedAggregateIR[],
-  ctx: EnrichedBoundedContextIR,
 ): string {
-  const table = lowerFirst(plural(base.name));
-  const cases = concretes.flatMap((c) => [
-    `    case ${JSON.stringify(c.name)}:`,
-    `      return ${hydrateConcreteFromSharedRow(c, "row", ctx)};`,
-  ]);
-  const bodyStr = lines(
-    `export class ${base.name}Repository {`,
-    // Explicit field declaration + constructor assignment, not a
-    // parameter property — see emit/value-objects.ts's renderValueObject.
-    `  private readonly db: Db;`,
-    `  constructor(db: Db) {`,
-    `    this.db = db;`,
-    `  }`,
-    "",
-    `  async findById(id: Ids.${base.name}Id): Promise<${base.name} | null> {`,
-    `    const rows = await this.db.select().from(schema.${table}).where(eq(schema.${table}.id, id));`,
-    `    if (rows.length === 0) return null;`,
-    `    return hydrate${base.name}(rows[0]!);`,
-    `  }`,
-    "",
-    `  async findAll(): Promise<${base.name}[]> {`,
-    `    const rows = await this.db.select().from(schema.${table});`,
-    `    return rows.map(hydrate${base.name});`,
-    `  }`,
-    `}`,
-    "",
-    `type ${base.name}Row = typeof schema.${table}.$inferSelect;`,
-    "",
-    `function hydrate${base.name}(row: ${base.name}Row): ${base.name} {`,
-    `  switch (row.kind) {`,
-    ...cases,
-    `    default:`,
-    "      throw new Error(`unknown " + base.name + " kind: ${row.kind}`);",
-    `  }`,
-    `}`,
-  );
-
-  // Narrow VO / enum imports to those the concrete hydrations reference, and
-  // pull Decimal only when a concrete uses money — same discipline as the
-  // per-aggregate repository builder keeps the generated header dead-name-free.
-  const bodyScan = bodyStr
-    .replace(/"(?:\\.|[^"\\])*"/g, '""')
-    .replace(/'(?:\\.|[^'\\])*'/g, "''")
-    .replace(/`(?:\\.|[^`\\])*`/g, "``");
-  const voOrEnum = [
-    ...new Set(concretes.flatMap((c) => [...collectValueObjects(c, ctx), ...collectEnums(c, ctx)])),
-  ].filter((n) => new RegExp(`\\b${n}\\b`).test(bodyScan));
-  const isValueUsed = (n: string): boolean =>
-    new RegExp(`new\\s+${n}\\(|\\b${n}\\.\\w`).test(bodyScan);
-  let voOrEnumImportLine: string | false = false;
-  if (voOrEnum.length > 0) {
-    voOrEnumImportLine = voOrEnum.some(isValueUsed)
-      ? `import { ${voOrEnum.map((n) => (isValueUsed(n) ? n : `type ${n}`)).join(", ")} } from "../../domain/value-objects";`
-      : `import type { ${voOrEnum.join(", ")} } from "../../domain/value-objects";`;
-  }
-  // Deep check: a concrete whose only money usage is inside a value-object
-  // field still makes the base reader's hydrate emit `new Decimal(...)` (it
-  // recurses into the VO). The shallow `aggregateUsesMoney` misses that, so the
-  // import was dropped while the body used `Decimal` → TS2304.
-  const usesMoney = concretes.some((c) => aggregateUsesMoneyDeep(c, ctx.valueObjects));
-
-  return lines(
-    "// Auto-generated.  Do not edit by hand.",
-    usesMoney && `import Decimal from "decimal.js";`,
-    `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
-    `import { eq } from "drizzle-orm";`,
-    `import * as schema from "../schema";`,
-    `import * as Ids from "../../domain/ids";`,
-    ...concretes.map((c) => `import { ${c.name} } from "../../domain/${lowerFirst(c.name)}";`),
-    voOrEnumImportLine,
-    `import type { ${base.name} } from "../../domain/${lowerFirst(base.name)}";`,
-    "",
-    `type Db = NodePgDatabase<typeof schema>;`,
-    "",
-    bodyStr,
-    "",
-  );
+  return buildDelegatingBaseReaderFile(base, concretes, "sharedTable");
 }
 
 /** The read-only `<Base>Repository` for a TPC (`ownTable`) hierarchy.
  *
- *  Unlike TPH, a TPC base has NO table — each concrete is a standalone table
- *  with its own fully-featured repository.  So rather than hand-roll a fragile
- *  `unionAll` over differently-shaped concrete tables (which could only read
- *  flat scalars and would silently drop contained parts / `X id[]`
- *  associations), this reader DELEGATES to the per-concrete repositories and
- *  concatenates: `findAll()` is the union of each concrete's `all()`,
- *  `findById()` tries each concrete in turn.  Every aggregate therefore loads
- *  its complete tree through the loader that already knows how.  It returns the
- *  `Customer | Supplier` tagged union — the read home for `find all <Base>`.
- *
- *  N round-trips instead of one (one per concrete); the trade is correctness +
- *  reuse over a single hand-aligned query.  Hono/Drizzle only (v1). */
+ *  A TPC base has NO table — each concrete is a standalone table with its own
+ *  fully-featured repository.  So rather than hand-roll a fragile `unionAll`
+ *  over differently-shaped concrete tables (which could only read flat scalars
+ *  and would silently drop contained parts / `X id[]` associations), this
+ *  reader DELEGATES to the per-concrete repositories and concatenates.  Same
+ *  emission as the TPH reader above — see `buildDelegatingBaseReaderFile`. */
 export function buildTpcBaseReaderFile(
   base: EnrichedAggregateIR,
   concretes: EnrichedAggregateIR[],
+): string {
+  return buildDelegatingBaseReaderFile(base, concretes, "ownTable");
+}
+
+/** The polymorphic base reader, for either layout: `findAll()` is the union of
+ *  each concrete's `all()`, `findById()` tries each concrete in turn.  Every
+ *  aggregate therefore loads its complete tree — and through its own capability
+ *  filters — via the loader that already knows how.
+ *
+ *  N round-trips instead of one (one per concrete); the trade is correctness +
+ *  reuse over a single hand-aligned query.  Hono/Drizzle only (v1). */
+function buildDelegatingBaseReaderFile(
+  base: EnrichedAggregateIR,
+  concretes: EnrichedAggregateIR[],
+  layout: "sharedTable" | "ownTable",
 ): string {
   const repoCtor = (c: EnrichedAggregateIR): string => `${c.name}Repository`;
   const repoField = (c: EnrichedAggregateIR): string => `${lowerFirst(c.name)}Repo`;
@@ -162,9 +104,10 @@ export function buildTpcBaseReaderFile(
     "",
     `type Db = NodePgDatabase<typeof schema>;`,
     "",
-    `// Polymorphic ${base.name} reader (TPC / ownTable): delegates to each`,
-    `// concrete repository so every aggregate loads its full tree, then unions`,
-    `// the results.  Read-only — writes go through the per-concrete repos.`,
+    `// Polymorphic ${base.name} reader (${layout === "ownTable" ? "TPC / ownTable" : "TPH / sharedTable"}): delegates to each`,
+    `// concrete repository so every aggregate loads its full tree — and through`,
+    `// its own capability filters — then unions the results.  Read-only; writes`,
+    `// go through the per-concrete repos.`,
     `export class ${base.name}Repository {`,
     ...concretes.map((c) => `  private readonly ${repoField(c)}: ${repoCtor(c)};`),
     `  constructor(db: Db, events: DomainEventDispatcher) {`,

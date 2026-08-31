@@ -50,7 +50,6 @@ import type {
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import {
-  aggregateUsesMoneyDeep,
   aggregateUsesPrincipalContextFilter,
   exprUsesCurrentUser,
   findUsesCurrentUser,
@@ -100,10 +99,9 @@ import {
   serializeField,
   writeScopeDeniesAll,
 } from "../repository-document-builder.js";
-import { hydrateConcreteFromSharedRow, hydrateRootExpr } from "../repository-find-builder.js";
+import { hydrateRootExpr } from "../repository-find-builder.js";
 import { hydrateEntityExpr } from "../repository-find-hydrate.js";
 import { GUID_CLAIM_RE_LITERAL } from "../repository-find-predicate.js";
-import { collectEnums, collectValueObjects } from "../repository-imports-builder.js";
 import { repoPortImportLine, repoPortName } from "../repository-port-builder.js";
 import {
   projectFieldEntries,
@@ -3321,93 +3319,20 @@ export function renderMikroEventSourcedRepository(
 // a `<Base>Repository` returning the `Concrete | …` tagged union.
 // ---------------------------------------------------------------------------
 
-/** Narrow the VO/enum/Decimal imports a base-reader body actually references,
- *  matching the discipline the per-aggregate repository builder keeps. */
-function baseReaderImports(
-  bodyStr: string,
-  concretes: readonly EnrichedAggregateIR[],
-  ctx: EnrichedBoundedContextIR,
-): { voImportLine: string | false; usesMoney: boolean } {
-  const bodyScan = bodyStr
-    .replace(/"(?:\\.|[^"\\])*"/g, '""')
-    .replace(/'(?:\\.|[^'\\])*'/g, "''")
-    .replace(/`(?:\\.|[^`\\])*`/g, "``");
-  const voOrEnum = [
-    ...new Set(concretes.flatMap((c) => [...collectValueObjects(c, ctx), ...collectEnums(c, ctx)])),
-  ].filter((n) => new RegExp(`\\b${n}\\b`).test(bodyScan));
-  const isValueUsed = (n: string): boolean =>
-    new RegExp(`new\\s+${n}\\(|\\b${n}\\.\\w`).test(bodyScan);
-  let voImportLine: string | false = false;
-  if (voOrEnum.length > 0) {
-    voImportLine = voOrEnum.some(isValueUsed)
-      ? `import { ${voOrEnum.map((n) => (isValueUsed(n) ? n : `type ${n}`)).join(", ")} } from "../../domain/value-objects";`
-      : `import type { ${voOrEnum.join(", ")} } from "../../domain/value-objects";`;
-  }
-  // Deep check — a concrete with money only inside a VO field still hydrates
-  // via `new Decimal(...)`, so gate the import on the VO-aware predicate.
-  return {
-    voImportLine,
-    usesMoney: concretes.some((c) => aggregateUsesMoneyDeep(c, ctx.valueObjects)),
-  };
-}
-
-/** TPH (`sharedTable`) read-only `<Base>Repository` — scans the shared Row and
- *  dispatches on the `kind` discriminator to hydrate the right concrete. */
+/** TPH (`sharedTable`) read-only `<Base>Repository`.
+ *
+ *  DELEGATES to the per-concrete repositories, exactly like the TPC reader
+ *  below.  It used to scan the shared Row itself (`em.find(<Base>Row, {})`) and
+ *  hydrate by `kind`, which meant it saw that Row through NONE of the machinery
+ *  the concrete repositories apply to it — no capability `filter`, no tenancy
+ *  predicate, no contained parts.  That is a cross-tenant read the moment the
+ *  polymorphic reader is wired to a route (`F2-CB-C12`, the drizzle twin of
+ *  which `buildBaseReaderFile` fixes the same way). */
 export function renderMikroBaseReader(
   base: EnrichedAggregateIR,
   concretes: readonly EnrichedAggregateIR[],
-  ctx: EnrichedBoundedContextIR,
 ): string {
-  const row = rowClassOf(base.name);
-  const cases = concretes.flatMap((c) => [
-    `    case ${JSON.stringify(c.name)}:`,
-    `      return ${hydrateConcreteFromSharedRow(c, "row", ctx)};`,
-  ]);
-  const body = lines(
-    `export class ${base.name}Repository {`,
-    `  private readonly em: EntityManager;`,
-    `  constructor(em: EntityManager) {`,
-    `    this.em = em;`,
-    `  }`,
-    "",
-    `  async findById(id: Ids.${base.name}Id): Promise<${base.name} | null> {`,
-    `    const em = this.em.fork({ keepTransactionContext: true });`,
-    `    const row = await em.findOne(${row}, { id: id as string });`,
-    `    if (row === null) return null;`,
-    `    return hydrate${base.name}(row);`,
-    `  }`,
-    "",
-    `  async findAll(): Promise<${base.name}[]> {`,
-    `    const em = this.em.fork({ keepTransactionContext: true });`,
-    `    const rows = await em.find(${row}, {});`,
-    `    return rows.map(hydrate${base.name});`,
-    `  }`,
-    `}`,
-    "",
-    `function hydrate${base.name}(row: ${row}): ${base.name} {`,
-    `  switch (row.kind) {`,
-    ...cases,
-    `    default:`,
-    "      throw new Error(`unknown " + base.name + " kind: ${row.kind}`);",
-    `  }`,
-    `}`,
-  );
-  const { voImportLine, usesMoney } = baseReaderImports(body, concretes, ctx);
-  return (
-    lines(
-      "// Auto-generated.  Do not edit by hand.",
-      usesMoney && `import Decimal from "decimal.js";`,
-      `import { EntityManager } from "@mikro-orm/postgresql";`,
-      `import { ${row} } from "../entities";`,
-      `import * as Ids from "../../domain/ids";`,
-      ...concretes.map((c) => `import { ${c.name} } from "../../domain/${lowerFirst(c.name)}";`),
-      voImportLine,
-      `import type { ${base.name} } from "../../domain/${lowerFirst(base.name)}";`,
-      "",
-      body,
-      "",
-    ) + "\n"
-  );
+  return renderMikroDelegatingBaseReader(base, concretes, "sharedTable");
 }
 
 /** TPC (`ownTable`) read-only `<Base>Repository` — each concrete is its own
@@ -3418,6 +3343,18 @@ export function renderMikroBaseReader(
 export function renderMikroTpcBaseReader(
   base: EnrichedAggregateIR,
   concretes: readonly EnrichedAggregateIR[],
+): string {
+  return renderMikroDelegatingBaseReader(base, concretes, "ownTable");
+}
+
+/** The polymorphic base reader for either layout: `findAll` unions each
+ *  concrete's `all()`, `findById` tries each in turn.  N round-trips traded for
+ *  reuse — and for filter correctness, since each concrete's own read path
+ *  carries its capability predicates. */
+function renderMikroDelegatingBaseReader(
+  base: EnrichedAggregateIR,
+  concretes: readonly EnrichedAggregateIR[],
+  layout: "sharedTable" | "ownTable",
 ): string {
   const repoCtor = (c: EnrichedAggregateIR): string => `${c.name}Repository`;
   const repoField = (c: EnrichedAggregateIR): string => `${lowerFirst(c.name)}Repo`;
@@ -3432,9 +3369,10 @@ export function renderMikroTpcBaseReader(
       ),
       `import type { ${base.name} } from "../../domain/${lowerFirst(base.name)}";`,
       "",
-      `// Polymorphic ${base.name} reader (TPC / ownTable): delegates to each`,
-      `// concrete repository so every aggregate loads its full tree, then unions`,
-      `// the results.  Read-only — writes go through the per-concrete repos.`,
+      `// Polymorphic ${base.name} reader (${layout === "ownTable" ? "TPC / ownTable" : "TPH / sharedTable"}): delegates to`,
+      `// each concrete repository so every aggregate loads its full tree — and`,
+      `// through its own capability filters — then unions the results.`,
+      `// Read-only; writes go through the per-concrete repos.`,
       `export class ${base.name}Repository {`,
       ...concretes.map((c) => `  private readonly ${repoField(c)}: ${repoCtor(c)};`),
       `  constructor(em: EntityManager, events: DomainEventDispatcher) {`,

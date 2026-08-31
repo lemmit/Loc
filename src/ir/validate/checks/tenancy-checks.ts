@@ -1,10 +1,11 @@
 import { diagMessage } from "../../../diagnostics/messages.js";
-import type { SystemIR, TypeIR } from "../../types/loom-ir.js";
+import type { AggregateIR, SystemIR, TypeIR } from "../../types/loom-ir.js";
 import {
   classifyTenantStance,
   hasTenantOwned,
   hasTenantRegistry,
   hierarchyRegistry,
+  type TenantStance,
   tenancyClaimBinding,
 } from "../../util/tenant-stance.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
@@ -34,6 +35,14 @@ import type { LoomDiagnostic } from "./diagnostic.js";
 //     `loom.cross-tenant-without-tenancy` (warning — intent declared,
 //     nothing to opt out of)
 //   - `loom.tenancy-conflicting-stance` — both markers on one aggregate.
+//   - `loom.tenancy-inherited-stance-conflict` — a subtype taking the OPPOSITE
+//     stance from the abstract base it `extends`.  The base's capability
+//     contributes the `tenant_id` column to the subtype's row either way (the
+//     enrich pass merges the base's fields), while the subtype's stance decides
+//     whether anything stamps or filters it — so the halves disagree at
+//     runtime.  Its twin is the `#inherited` variant of the unmarked message
+//     above, which names that asymmetry instead of asking the author for a
+//     marker they already wrote on the base.
 //
 // Stance is DERIVED per aggregate via `classifyTenantStance`
 // (`src/ir/util/tenant-stance.ts`) — never stamped on the IR.
@@ -539,16 +548,57 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
           continue;
         }
 
+        // Inheritance and stance (aggregate-inheritance.md × tenancy.md).
+        // A base's FIELDS are merged onto a subtype by the enrich pass, so the
+        // base's `tenantOwned` puts `tenant_id NOT NULL` on the subtype's row —
+        // but its STANCE is read off `agg.capabilities` alone and does not
+        // propagate.  The two rules below are the two halves of that asymmetry:
+        // C11 (the subtype takes the opposite side) is a contradiction the
+        // model must not express at all, and C10 (the subtype takes no side) is
+        // the existing lint, told to say what is actually true.
+        const baseStance = inheritedStance(agg, ctx.aggregates, sys);
+        if (baseStance && baseStance.stance !== stance && stance !== "unscoped") {
+          diags.push({
+            severity: "error",
+            code: "loom.tenancy-inherited-stance-conflict",
+            message: diagMessage("loom.tenancy-inherited-stance-conflict", {
+              name: agg.name,
+              base: baseStance.base,
+              own: stance === "tenantOwned" ? "with tenantOwned" : "crossTenant",
+              baseMarker: baseStance.stance === "tenantOwned" ? "with tenantOwned" : "crossTenant",
+            }),
+            source: `${ctx.name}/${agg.name}`,
+          });
+          continue;
+        }
+
         // Explicit-stance lint: every row-persisting aggregate under a
         // tenancy system must pick a side.  Abstract bases are exempt (no
         // repository, no table — aggregate-inheritance.md I1).
         if (stance === "unscoped" && !agg.isAbstract) {
-          diags.push({
-            severity: "error",
-            code: "loom.tenancy-stance-unmarked",
-            message: diagMessage("loom.tenancy-stance-unmarked", { name: agg.name }),
-            source: `${ctx.name}/${agg.name}`,
-          });
+          // When the base DID declare a stance, the generic remedy ("add `with
+          // tenantOwned` or `crossTenant`") names something the author already
+          // wrote and offers a second option that is now an error — so the two
+          // remedies are two SITES, each rendering its own catalog key.
+          if (baseStance) {
+            diags.push({
+              severity: "error",
+              code: "loom.tenancy-stance-unmarked",
+              message: diagMessage("loom.tenancy-stance-unmarked#inherited", {
+                name: agg.name,
+                base: baseStance.base,
+                marker: baseStance.stance === "tenantOwned" ? "with tenantOwned" : "crossTenant",
+              }),
+              source: `${ctx.name}/${agg.name}`,
+            });
+          } else {
+            diags.push({
+              severity: "error",
+              code: "loom.tenancy-stance-unmarked",
+              message: diagMessage("loom.tenancy-stance-unmarked", { name: agg.name }),
+              source: `${ctx.name}/${agg.name}`,
+            });
+          }
         }
 
         // Tenant-scope lint (uniqueness-and-indexes.md §5): a `unique (...)`
@@ -574,4 +624,33 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
       }
     }
   }
+}
+
+/** The tenancy stance an aggregate inherits from its `extends` chain — the
+ *  nearest ancestor that declares one — or `undefined` when no ancestor picks a
+ *  side (or the aggregate is a root).
+ *
+ *  This is deliberately NOT a change to `classifyTenantStance`: resolving the
+ *  stance through the chain would silence `loom.tenancy-stance-unmarked` while
+ *  the subtype still gets no stamp and no read filter (those are driven by the
+ *  base's own `contextFilters`/stamps, which do not propagate either), turning
+ *  an honest error into a silent isolation hole.  The rule stays "declare it on
+ *  each concrete"; the inherited stance is used only to say something TRUE
+ *  about that rule, and to reject a subtype that contradicts it. */
+function inheritedStance(
+  agg: AggregateIR,
+  pool: readonly AggregateIR[],
+  sys: Pick<SystemIR, "tenancy">,
+): { base: string; stance: TenantStance } | undefined {
+  const seen = new Set<string>([agg.name]);
+  let cur = agg;
+  while (cur.extendsAggregate && !seen.has(cur.extendsAggregate)) {
+    seen.add(cur.extendsAggregate);
+    const base = pool.find((a) => a.name === cur.extendsAggregate);
+    if (!base) return undefined;
+    const stance = classifyTenantStance(base, sys);
+    if (stance === "tenantOwned" || stance === "crossTenant") return { base: base.name, stance };
+    cur = base;
+  }
+  return undefined;
 }
