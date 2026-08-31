@@ -65,7 +65,7 @@ export interface PyRenderContext {
    *  aggregate / workflow render contexts leave it undefined (byte-identical). */
   recordParamNames?: ReadonlySet<string>;
   /** Read-port handle expressions to PREPEND to a `domain-service` call's
-   *  arguments (domain-services.md rev. 4, Slice 1 — the `reading` tier).  A
+   *  arguments (domain-services.md rev. 4 — the `reading` tier).  A
    *  `reading` service operation takes one read-port parameter per repository
    *  it reads; the orchestrating caller (a `workflow`) supplies the matching
    *  repo handle here, keyed by `<service>.<op>`.  Returns `[]` (or is absent)

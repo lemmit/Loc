@@ -9,7 +9,7 @@ import { HTTPException } from "hono/http-exception";
  *  the runtime emits on 422 validation responses.  Consumed by the
  *  frontend ACL's `applyServerErrors` (see docs/old/proposals/frontend-acl.md).
  *  All fields nullable / optional — base 5 per the spec core; `errors` is
- *  only present on 422 validation responses.  Phase D of
+ *  only present on 422 validation responses.  See
  *  docs/old/proposals/validation-error-extension.md — all three backends
  *  (Hono / .NET / Phoenix) declare the same shape in lockstep so the
  *  cross-backend parity gate stays green. */

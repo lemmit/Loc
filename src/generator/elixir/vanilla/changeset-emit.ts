@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Vanilla per-aggregate Changeset module — `lib/<app>/<ctx>/<agg>_changeset.ex`.
-// Slice 2 of vanilla-foundation-tdd-plan.md.
+// vanilla-foundation-tdd-plan.md.
 //
 // Plain Ecto.Changeset cast/3 + validate_required.  Per-action
 // `change_<op>/2` helpers wrap the basic cast with the action's param

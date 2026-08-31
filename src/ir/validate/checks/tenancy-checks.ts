@@ -208,7 +208,7 @@ function validatePolicyReadLevels(sys: SystemIR, diags: LoomDiagnostic[]): void 
  *     a write rule scopes a concrete tenant-owned aggregate, and a context may
  *     hold at most one write rule per aggregate.
  *   - `loom.policy-write-global-invalid` — `write global` is rejected in
- *     P3.1 (root-subtree-wide mutation is a footgun); only `write local` (the
+ * (root-subtree-wide mutation is a footgun); only `write local` (the
  *     floor) and `write deep` are offered.
  *   - `loom.policy-level-requires-hierarchy` — `write deep` needs the
  *     materialized-path tree (`implements tenantRegistry`), same as read `deep`.

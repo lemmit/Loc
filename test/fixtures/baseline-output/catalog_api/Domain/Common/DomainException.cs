@@ -134,7 +134,7 @@ public readonly record struct FilterBypass(bool All, IReadOnlyList<string> Capab
 }
 
 /// <summary>
-/// The commit boundary (audit S7 Slice C).  Orchestration handlers depend on
+/// The commit boundary.  Orchestration handlers depend on
 /// this instead of the concrete EF <c>AppDbContext</c>; the infrastructure
 /// adapter opens the transaction on the SAME scoped DbContext the repositories
 /// use, so a repository <c>SaveAsync</c> inside the transaction still commits
@@ -156,7 +156,7 @@ public interface IDomainTransaction : IAsyncDisposable
 
 /// <summary>The shape a workflow event-stream record exposes to the event-store
 /// port — the per-context log discriminator + stream key + gap-free version
-/// (audit S7 Slice C; per-context log — event-log-architecture.md).</summary>
+/// (per-context log — event-log-architecture.md).</summary>
 public interface IWorkflowEventRow
 {
     string StreamType { get; }
@@ -165,8 +165,8 @@ public interface IWorkflowEventRow
 }
 
 /// <summary>
-/// Append-only event-stream port for an event-sourced workflow (audit S7 Slice
-/// C).  The workflow's stream lives in the shared per-context <c>&lt;ctx&gt;_events</c>
+/// Append-only event-stream port for an event-sourced workflow.  The
+/// workflow's stream lives in the shared per-context <c>&lt;ctx&gt;_events</c>
 /// log (event-log-architecture.md), so every load / max-version scopes to the
 /// caller's <c>streamType</c> discriminator — the correctness trap: streams
 /// sharing one table must each fold only their own events.  The EF adapter
@@ -181,7 +181,7 @@ public interface IWorkflowEventStore<TRow> where TRow : class, IWorkflowEventRow
 }
 
 /// <summary>
-/// Saga-state row port (audit S7 Slice C).  <c>FindAsync</c> returns the EF
+/// Saga-state row port.  <c>FindAsync</c> returns the EF
 /// change-TRACKED entity off the same scoped DbContext, so a subsequent
 /// <c>state.Prop = …; SaveChangesAsync()</c> persists exactly as before.
 /// </summary>
@@ -193,7 +193,7 @@ public interface ISagaStateStore<TRow> where TRow : class
 }
 
 /// <summary>
-/// Projection read-model row port (audit S7 Slice C).  Same TRACKED-load +
+/// Projection read-model row port.  Same TRACKED-load +
 /// upsert + flush contract as <see cref="ISagaStateStore{TRow}"/>, named for the
 /// projection fold's read model.
 /// </summary>

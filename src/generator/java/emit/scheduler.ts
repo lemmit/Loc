@@ -1,4 +1,4 @@
-// Timer scheduler emission (scheduling.md) — the Java/Spring backend, Phase 2.
+// Timer scheduler emission (scheduling.md) — the Java/Spring backend.
 //
 // A `timerSource` fires a plain domain event on a wall-clock cadence.  The two
 // cadences split by where durability matters:

@@ -119,7 +119,7 @@ export interface GenerateSystemOptions {
    *  the node/Hono backend's domain code, plus (M8) the React and Angular
    *  frontends' `.tsx` / `.component.ts` pages — the only files a JS/TS
    *  debugger can step through today.  Also feeds JSR-45 `.java.smap`
-   *  sidecar emission (M10 phase 6b, `src/system/smap.ts`) for every
+   * sidecar emission (`src/system/smap.ts`) for every
    *  recorded `.java` output, sharing this same gate.  `src/system/` stays
    *  browser-safe (no `fs`), so the CLI/playground supply the text; a
    *  mapped file with no entry here is skipped (no sidecar), never guessed.
@@ -207,7 +207,7 @@ export function generateSystemsFromLoom(
       out.set(path, `${content}//# sourceMappingURL=${basename}\n`);
     }
   }
-  // JSR-45 SMAP sidecars (Milestone 10 phase 6b) — the Java sibling of the
+  // JSR-45 SMAP sidecars — the Java sibling of the
   // v3 loop above, same `recorder && options.sourceTexts` gate.  Unlike v3,
   // the mapped `.java` file's own content is never touched: a compiled
   // class carries the SourceDebugExtension pointer at Gradle build time
@@ -307,7 +307,7 @@ function emitSystem(
     );
     out.set(`broker-init/${slug}-definitions.json`, renderRabbitDefinitions(sys, storageName));
   }
-  // M18 phase 8 slice 1 (Node debug wiring) / M26 (.NET + Java): one VS Code
+  // (Node debug wiring) / M26 (.NET + Java): one VS Code
   // launch config per deployable whose platform implements `debugLaunch`,
   // sibling of docker-compose.yml, `--sourcemap`-gated.  Each surface owns
   // its own naming (assembly / main-class FQN); the system layer only
@@ -358,7 +358,7 @@ function emitSystem(
   out.set(".loom/architecture.c4", renderC4Model(sys));
   // DataSource routing — derived markdown view of how `dataSource`
   // declarations route domain contexts to physical storage.  Pairs
-  // with the Phase B / C / D validators.  See `datasources.ts`.
+  // with the dataSource validators.  See `datasources.ts`.
   out.set(".loom/datasources.md", renderDataSourcesMd(sys));
   // AsyncAPI view of `channel` declarations (channels.md).
   // Realises the BC-model's "events as channels" placeholder.

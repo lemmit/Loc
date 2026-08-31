@@ -1,4 +1,4 @@
-// Timer scheduler emission (scheduling.md) — the .NET backend, Phase 2 (durable).
+// Timer scheduler emission (scheduling.md) — the .NET backend (durable).
 //
 // A `timerSource` fires a plain domain event on a wall-clock cadence.  This
 // emitter renders `Infrastructure/Scheduling/TimerScheduler.cs`, splitting the
@@ -150,7 +150,7 @@ public sealed class ${cls}
 }
 
 /** Render one `<Pascal>TimerService : BackgroundService` for an `every:` timer.
- *  Unchanged from Phase 1: PeriodicTimer + transaction-scoped advisory lock. */
+ *  Unchanged from: PeriodicTimer + transaction-scoped advisory lock. */
 function renderEveryService(ts: TimerSourceIR, eventByName: Map<string, EventIR>): string {
   const cls = `${upperFirst(ts.name)}TimerService`;
   const lockKey = timerLockKey(ts.name);

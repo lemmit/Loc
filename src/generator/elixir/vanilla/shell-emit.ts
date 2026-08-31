@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
-// Shell renderers — plain Phoenix + Ecto skeleton.  Slice 0 of
-// vanilla-foundation-tdd-plan.md: emit a minimal project that
+// Shell renderers — plain Phoenix + Ecto skeleton
+// (vanilla-foundation-tdd-plan.md): a minimal project that
 // `mix compile --warnings-as-errors` accepts.
-// Slice 1: router now accepts per-aggregate routes spliced into /api.
+// The router accepts per-aggregate routes spliced into /api.
 // Observability: `renderApplication` / `renderLogFormatter` /
 // `renderTelemetry` in `../shell/runtime.ts` + `../telemetry-emit.ts` are
 // wired through here so the backend emits the same cross-backend log-event

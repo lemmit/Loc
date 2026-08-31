@@ -79,7 +79,7 @@ export function renderRepositoryInterface(
       `public interface I${agg.name}Repository`,
       "{",
       `    Task<${agg.name}?> GetByIdAsync(${idClass} id, CancellationToken cancellationToken = default);`,
-      // Command-load path (authorization Phase 3 P3.1): a write-scope-narrowed
+      // Command-load path (authorization): a write-scope-narrowed
       // GetById the mutation handlers load through.  Only when the aggregate's
       // write scope is narrower than its read scope.
       ...(agg.writeScopeFilter
@@ -380,7 +380,7 @@ export function renderRepositoryImpl(
       "{",
       "    private readonly AppDbContext _db;",
       "    private readonly IDomainEventDispatcher _events;",
-      // Per-class ILogger injection — same idiom Phase 8 .NET v1 used
+      // Per-class ILogger injection — same idiom .NET v1 used
       // for the controllers + DomainExceptionFilter, so the entire
       // generated codebase keeps one logging pattern.
       `    private readonly ILogger<${agg.name}Repository> _log;`,
@@ -407,7 +407,7 @@ export function renderRepositoryImpl(
       "        return found;",
       "    }",
       "",
-      // Command-load path (authorization Phase 3 P3.1): a write-scope existence
+      // Command-load path (authorization): a write-scope existence
       // pre-guard (EF applies the read query-filter automatically; the extra
       // predicate narrows to the write scope, which is always ⊆ the read scope),
       // then the ordinary hydrating `GetByIdAsync`.  A row the caller may READ
@@ -718,7 +718,7 @@ export function renderDocumentRepositoryImpl(
         `    private static bool _CapabilityVisible(${agg.name} x) => ${capPredicate};`,
       ]
     : [];
-  // Write-scope narrowing (authorization Phase 3 P3.1): the document twin of the
+  // Write-scope narrowing (authorization): the document twin of the
   // relational `AnyAsync(x => x.Id == id && (<scope>))` pre-guard.  `GetByIdAsync`
   // already applies the READ filter above (EF gets that for free on the
   // relational path via the query filter), so this only adds the write-scope
@@ -980,7 +980,7 @@ export function renderEventSourcedRepositoryImpl(
   );
   const recordCls = eventRecordClass(contextName);
 
-  // Write-scope narrowing (authorization Phase 3 P3.1): the EVENT-SOURCED twin
+  // Write-scope narrowing (authorization): the EVENT-SOURCED twin
   // of the document `writeScopeMethod` above.  A stream has no queryable row to
   // pre-guard with `AnyAsync`, so — exactly like the document blob — fold the
   // stream through `GetByIdAsync` and apply the scope predicate in-app.

@@ -97,7 +97,7 @@ export function buildPyWorkflowsFile(
   ctx: EnrichedBoundedContextIR,
   hasDispatch = false,
   sys?: SystemIR,
-  /** Source-map Milestone 11 (workflow-body statement regions) — allocated by
+  /** Source-map (workflow-body statement regions) — allocated by
    *  the caller (`src/generator/python/index.ts`) ONLY when a recorder is
    *  present.  `app/http/workflows_routes.py` pools every command workflow,
    *  so it never gets a `sourcemap.file(...)` whole-file region (mirrors the
@@ -507,7 +507,7 @@ function workflowRoute(
   ctx: EnrichedBoundedContextIR,
   dispatcherExpr: string,
   sys?: SystemIR,
-  /** Source-map Milestone 11 — see `buildPyWorkflowsFile`'s `opFragments`. */
+  /** Source-map — see `buildPyWorkflowsFile`'s `opFragments`. */
   opFragments?: OpFragment[],
 ): string {
   // A `requires`-guarded workflow declares its 403 outcome; a

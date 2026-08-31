@@ -497,7 +497,7 @@ export interface OperationIR {
  * — assignment statements and derivations only (enforced by
  * `validateEventSourcedDiscipline` in phase ⑦); no `emit`, no
  * side-effecting calls.  Not yet consumed by backends (emission is the
- * deferred Phase A2; the event-store/fold/projection layer).  See
+ * deferred; the event-store/fold/projection layer).  See
  * docs/old/proposals/workflow-and-applier.md. */
 export interface ApplyIR {
   /** The event type this applier folds, by name (resolved to a context
@@ -690,7 +690,7 @@ export interface AggregateIR {
    * validator (phase ⑦) rejects appliers on state-sourced aggregates and
    * requires a matching applier for every emitted event.  Omitted /
    * empty when the aggregate declares none.  Not yet consumed by
-   * backends (deferred Phase A2). */
+   * backends (deferred). */
   appliers?: ApplyIR[];
   /** Aggregate-inheritance (aggregate-inheritance.md, I1).  `true` for an
    * `abstract aggregate` base — never instantiated, no repository, emits no
@@ -1269,7 +1269,7 @@ export interface WorkflowIR {
    *  `params`/`statements`/`savesAtExit` are a facade over the primary one. */
   creates: CreateIR[];
   /** Event-subscription reactors declared via `on(e: Event) [by <expr>] { … }`
-   *  members (workflow-and-applier.md Phase A2, surface slice).  Omitted when
+   *  members (workflow-and-applier.md, surface slice).  Omitted when
    *  the workflow declares none.  Consumed by the in-process dispatcher
    *  emission on node / dotnet / python (channels.md); the `by`
    *  correlation-field type-check runs in the IR validator (workflow-checks.ts).
@@ -3411,7 +3411,7 @@ export type RefKind =
   | "workflow-fn" // a bare reference to a workflow's own `function` helper (rendered as the scoped name)
   | "enum-value"
   | "current-user" // magic identifier — system's `user` block shape
-  | "resource" // ambient resource handle — `files`, `jobs`, … (Phase 4)
+  | "resource" // ambient resource handle — `files`, `jobs`, …
   | "store-field" // a `<Store>.<field>` read from a page/component/store body (Stage 5)
   | "match-binding" // the narrowed variant binding of a variant-`match` arm (variant-match.md)
   | "unknown";
@@ -3421,7 +3421,7 @@ export type CallKind =
   | "workflow-fn" // calls a workflow's own `function` helper — emitted as a per-workflow-scoped module helper
   | "value-object-ctor" // calls a value-object constructor
   | "private-operation" // calls a private operation
-  | "resource-op" // a verb call on an ambient resource handle (Phase 4)
+  | "resource-op" // a verb call on an ambient resource handle
   | "remote-api-op" // a TYPED call on an in-system api-bound resource (M-T4.8)
   | "repo-read" // a read-only repository query in a `reading` domain-service body (domain-services.md rev. 4)
   | "domain-service" // a member call on a `domainService` (domain-services.md)

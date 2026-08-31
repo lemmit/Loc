@@ -252,8 +252,8 @@ export function checkContext(ctx: BoundedContext, accept: ValidationAcceptor): v
   }
 }
 
-// `on(e: Event) [by <expr>] { … }` reactor discipline (workflow-and-applier.md
-// Phase A2, surface slice).  Each inbound event routes to exactly one reactor,
+// `on(e: Event) [by <expr>] { … }` reactor discipline
+// (workflow-and-applier.md).  Each inbound event routes to exactly one reactor,
 // so two `on(...)` members for the same event type are almost certainly a
 // mistake.  Until the `by` correlation clause is type-checked against the
 // workflow's correlation field (a later slice), this is a warning rather than
@@ -406,7 +406,7 @@ function checkWorkflowEventSourcedDiscipline(wf: Workflow, accept: ValidationAcc
   }
 }
 
-// Event-sourcing body discipline (D-DOCUMENT-AXIS, appliers Phase A1).
+// Event-sourcing body discipline (D-DOCUMENT-AXIS, appliers).
 // `persistedAs: eventLog` makes the event stream the source of truth, so
 // command bodies decide and `emit`, and state transitions live in
 // `apply(...)` folds.  This is the AST-level mirror of the IR validator

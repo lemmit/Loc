@@ -2147,7 +2147,7 @@ function applyManualIndexes(tables: readonly TableShape[], specs: readonly Manua
  *  `unique (tenantId, ...)`-style index only by exact single-column shape —
  *  a unique composite still benefits from the plain prefix index.
  *
- *  Multi-tenancy Phase 2 P2.5 adds a SECOND derived index on `data_key`: the
+ *  Multi-tenancy adds a SECOND derived index on `data_key`: the
  *  `deep` / `global` read levels prefix-match the materialized path with
  *  `LIKE 'prefix.%'`, so `data_key` gets a non-unique `<table>_data_key_idx`
  *  with the `text_pattern_ops` opclass — the opclass that makes a prefix `LIKE`

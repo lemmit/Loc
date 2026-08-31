@@ -181,7 +181,7 @@ function factoryAggsIn(statements: WorkflowStmtIR[]): string[] {
 export function renderJavaDispatcher(
   ctx: EnrichedBoundedContextIR,
   dctx: DispatchCtx,
-  /** Source-map Milestone 12 — `<Ctx>Dispatcher.java` pools every reactor /
+  /** Source-map — `<Ctx>Dispatcher.java` pools every reactor /
    *  event-create handler, so it never gets a whole-file region — only these
    *  fragment-only statement regions (mirrors `renderJavaWorkflows`'
    *  `opFragments` at).  Allocated by the caller ONLY when a
@@ -453,7 +453,7 @@ function renderHandler(
   resolved: ResolvedHandler,
   imports: Set<string>,
   construct: string,
-  /** Source-map Milestone 12 — see `renderJavaDispatcher`'s `opFragments`. */
+  /** Source-map — see `renderJavaDispatcher`'s `opFragments`. */
   opFragments?: OpFragment[],
 ): string[] {
   const corr = wf.correlationField as string;
@@ -574,7 +574,7 @@ function renderEsHandler(
   imports: Set<string>,
   construct: string,
   schema?: string,
-  /** Source-map Milestone 12 — see `renderJavaDispatcher`'s `opFragments`. */
+  /** Source-map — see `renderJavaDispatcher`'s `opFragments`. */
   opFragments?: OpFragment[],
 ): string[] {
   const corr = wf.correlationField as string;
@@ -716,7 +716,7 @@ function esMergedBranchLines(
   branchParam: string,
   schema: string | undefined,
   construct: string,
-  /** Source-map Milestone 12 — this branch's own `OpFragment`, pushed here so
+  /** Source-map — this branch's own `OpFragment`, pushed here so
    *  the merged handler (create + on) records TWO fragments, one per branch.
    *  This branch's lines get re-indented TWICE before landing in the final
    *  file: once by the caller's if/else wrap (`renderEsMergedHandler`, +4)
@@ -796,7 +796,7 @@ function renderEsMergedHandler(
   imports: Set<string>,
   schema: string | undefined,
   construct: string,
-  /** Source-map Milestone 12 — forwarded to `esMergedBranchLines` for BOTH
+  /** Source-map — forwarded to `esMergedBranchLines` for BOTH
    *  branches, so a merged handler records two `OpFragment`s (create + on). */
   opFragments?: OpFragment[],
 ): string[] {

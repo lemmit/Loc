@@ -132,7 +132,7 @@ export function vanillaCapabilityFilter(
   return preds.length === 1 ? preds[0]! : preds.map((p) => `(${p})`).join(" and ");
 }
 
-/** The aggregate's `writeScopeFilter` (authorization Phase 3 P3.1 — the WRITE
+/** The aggregate's `writeScopeFilter` (authorization — the WRITE
  *  ladder) as a single Ecto `where:` predicate, or null when the aggregate has
  *  no write-scope narrowing.  Rendered exactly like a principal capability read
  *  filter (deep sentinel → the fail-closed pinned LIKE fragment; the floor →

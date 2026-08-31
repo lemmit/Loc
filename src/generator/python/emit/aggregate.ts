@@ -118,7 +118,7 @@ export function renderPyAggregate(
    *  threaded for auth deployables; principal stamps without auth are
    *  gated upstream (loom.stamp-principal-without-auth). */
   principalIdAttr?: string | null,
-  /** Collector for source-map Milestone 3 statement sub-regions — only
+  /** Collector for source-map statement sub-regions — only
    *  allocated by the caller when a recorder is present (zero cost
    *  otherwise).  Only the root shape carries operations, so only its
    *  `renderEntity` call contributes fragments. */

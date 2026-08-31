@@ -87,7 +87,7 @@ export function dispatchSubscriptionsOf(ctx: EnrichedBoundedContextIR): EventSub
 export function buildPyDispatchFile(
   ctx: EnrichedBoundedContextIR,
   sys?: SystemIR,
-  /** Source-map Milestone 12 — `app/dispatch.py` pools every reactor /
+  /** Source-map — `app/dispatch.py` pools every reactor /
    *  event-create handler, so it never gets a whole-file region — only
    *  these fragment-only statement regions (mirrors `workflows_routes.py`'s
    *  `opFragments` at).  Allocated by the caller ONLY when a
@@ -98,13 +98,13 @@ export function buildPyDispatchFile(
    *  `<ctx>_events` row class matches the schema + repository in a merged
    *  multi-context deployable.  Absent → the merged `ctx.name`. */
   resolveStreamContext?: (name: string) => string | undefined,
-  /** M-T4.4 slice 2b: the deployable wires a redis-bound broadcast
+  /** M-T4.4: the deployable wires a redis-bound broadcast
    *  channelSource — `make_dispatcher` wraps the chain in the channel tee
    *  (design §4 delivery-uniformity: broker-routed events publish instead of
    *  fanning out locally), and a subscription-less PURE PRODUCER still gets
    *  a minimal dispatch.py so routes drain events into the tee. */
   hasChannels = false,
-  /** M-T4.4 slice 7a: hosted durable events carried by a wired BROKER-bound
+  /** M-T4.4: hosted durable events carried by a wired BROKER-bound
    *  `queue`/`work` channel — their producer path rides the outbox relay,
    *  which publishes on drain (design §5) instead of redelivering locally. */
   durableBrokerEvents: ReadonlySet<string> = new Set(),
@@ -601,7 +601,7 @@ function handlerFn(
   saves: { name: string; aggName: string; repoName: string }[],
   hasOutbox: boolean,
   construct: string,
-  /** Source-map Milestone 12 — see `buildPyDispatchFile`'s `opFragments`. */
+  /** Source-map — see `buildPyDispatchFile`'s `opFragments`. */
   opFragments?: OpFragment[],
 ): string {
   if (wf.correlationField && wf.eventSourced) {
@@ -720,7 +720,7 @@ function esHandlerFn(
   saves: { name: string; aggName: string; repoName: string }[],
   hasOutbox: boolean,
   construct: string,
-  /** Source-map Milestone 12 — see `buildPyDispatchFile`'s `opFragments`. */
+  /** Source-map — see `buildPyDispatchFile`'s `opFragments`. */
   opFragments?: OpFragment[],
 ): string {
   const param = snake(sub.param);

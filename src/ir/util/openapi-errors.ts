@@ -50,7 +50,7 @@
 // read/delete route carries no body, so it declares none.
 //
 // 422 (Unprocessable Entity) is the validation-failure code declared per
-// docs/old/proposals/validation-error-extension.md — Phase D.  Body carries the
+// docs/old/proposals/validation-error-extension.md —.  Body carries the
 // §3.2 `errors[]` extension array (per-field `{ pointer, message }`)
 // consumed by the frontend ACL's `applyServerErrors` (#769).  500 is the
 // universal fallback every route can produce; like most specs we don't

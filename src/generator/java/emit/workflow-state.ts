@@ -23,7 +23,7 @@ import {
 // platform-neutrally by `workflowStateTableShape` in the migrations builder)
 // plus a Spring Data `JpaRepository` over it.  This is the persistence
 // foundation the in-process dispatcher (load-or-allocate / route-or-drop) and
-// the read-only instance endpoints build on — slice 1 of the Java saga track
+// the read-only instance endpoints build on —
 // (docs/old/plans/workflow-debt-backend-parity.md).
 //
 // Field mapping mirrors the aggregate entity emitter (jpa-annotations.ts):

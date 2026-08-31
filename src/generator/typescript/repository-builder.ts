@@ -307,7 +307,7 @@ export function buildRepositoryFile(
 
 /** `async getById(id)` — the command-load path (distinct from `findById`, the
  *  read path): every mutation route loads through this.  When the aggregate
- *  carries a `writeScopeFilter` (authorization Phase 3 P3.1 — the write scope is
+ *  carries a `writeScopeFilter` (authorization — the write scope is
  *  strictly narrower than the read scope), a write-scope existence pre-guard
  *  runs first: a row a caller may READ but not WRITE (out of write scope) is
  *  indistinguishable from a missing one (404), and the `findById` read filter

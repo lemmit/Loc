@@ -360,11 +360,11 @@ function renderCsAuthzFilter(
   ctx: CsRenderContext,
 ): string {
   switch (e.filter.kind) {
-    // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false EF
+    // DENY carve-out (authorization — deny-wins).  An always-false EF
     // query-filter predicate; EF Core translates `Where(_ => false)` to no rows.
     case "deny":
       return "false";
-    // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) —
+    // `deep`/`global` read level (multi-tenancy) —
     // descendant-or-self materialized-path scope with the NULL-dataKey fallback
     // to the tenant floor (see `DEEP_SCOPE_SEMANTICS`).  Rendered as a
     // static-expressible EF query-filter lambda: `.StartsWith(...)` translates

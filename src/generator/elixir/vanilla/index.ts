@@ -3,13 +3,10 @@
 //
 // Plain Phoenix + Ecto.  Called from `../index.ts`.
 //
-// Per docs/old/plans/vanilla-foundation-tdd-plan.md — built in TDD slices.
-//   Slice 0: shell.
-//   Slice 1: per-aggregate schema + repository + context module + read
-//     controllers + spliced router routes.
-//   Slice 2 (current scope): + changeset module + create/update/destroy
-//     controller actions + write-path routes.
-//   Later slices: policies, ProblemDetails parity, workflows + views, CI.
+// Per docs/old/plans/vanilla-foundation-tdd-plan.md.  What it emits: the
+// project shell; per-aggregate schema + repository + context module + read
+// controllers + spliced router routes; the changeset module + the
+// create/update/destroy controller actions + write-path routes.
 // ---------------------------------------------------------------------------
 
 import { deriveEventSubscriptions } from "../../../ir/enrich/enrichments.js";

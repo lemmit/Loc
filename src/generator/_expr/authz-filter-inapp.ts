@@ -116,7 +116,7 @@ function binary(
  * The delimiter-correct prefix is what keeps `org_a` from matching `org_ab`
  * (the SQL side spells the same thing as `LIKE anchor || '.%'`).  The null
  * branch is the same deliberate OR-fallback the SQL translators carry: a row
- * stamped before P2.3 has a NULL `dataKey` and would otherwise vanish from its
+ * stamped before has a NULL `dataKey` and would otherwise vanish from its
  * own tenant's reads.
  *
  * The receiver of `.startsWith` is typed as a bare `string` (not the field's

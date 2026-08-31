@@ -347,7 +347,7 @@ export function emitLiveViewPages(args: {
     anyChart ||= w.usesChart;
   }
 
-  // Name-context for `pageEmitName` (slice 3c — derives the emitted name from
+  // Name-context for `pageEmitName` (derives the emitted name from
   // the page's role-scoped name + area against the served decls).
   const nameCtx: PageNameCtx = {
     aggregateNames: [...aggregatesByName.keys()],

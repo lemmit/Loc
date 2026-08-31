@@ -231,7 +231,7 @@ export interface PrimitiveDef {
    *  single source of truth for the a11y semantics later phases render
    *  (accessibility.md).  Either `"presentational"` (no ARIA obligation)
    *  or a concrete `A11yObligation`.  REQUIRED: a new primitive without
-   *  an a11y decision fails to type-check.  Phase 1 is data only — no
+   * an a11y decision fails to type-check. is data only — no
    *  emit consumes it yet. */
   a11y: A11yContract;
 }
@@ -329,7 +329,7 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     heex: renderKeyValueRowHeex,
     a11y: "presentational",
   },
-  // --- Phase 6 — semantic anchor target + sticky-position wrapper -------
+  // --- Semantic anchor target + sticky-position wrapper ---------
   // Both Section and Sticky DO render on HEEx (`renderSectionHeex` /
   // `renderStickyHeex` below) — a `<section>` and a `position: sticky`
   // wrapper are plain markup with no LiveView divergence.  (This block used
@@ -666,7 +666,7 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     heex: renderModalHeex,
     a11y: { role: "dialog", modal: true, needsName: true, focus: "trap-restore" },
   },
-  // --- Phase 3 — code/icon primitives ------------------------------------
+  // --- Code / icon primitives ------------------------------------
   // Both CodeBlock and Icon DO render on HEEx (`renderCodeBlockHeex` /
   // `renderIconHeex` below).  Same correction as the Section/Sticky block
   // above: the note claiming the HEEx renderer was "intentionally absent"

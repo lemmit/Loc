@@ -1,6 +1,6 @@
-// The Loom standard prelude, written in Loom (stdlib Phase C).
+// The Loom standard prelude, written in Loom (stdlib).
 //
-// These are ordinary expression-form top-level `function`s (Phase B).  They
+// These are ordinary expression-form top-level `function`s.  They
 // are AMBIENT — available in every `.ddd` with nothing imported, like a
 // language builtin — and, being expression-form, they INLINE at each call
 // site during lowering, so an UNCALLED std function emits nothing into any

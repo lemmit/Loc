@@ -100,7 +100,7 @@ function collectDeclNames(node: AstNode, into: Set<string>): void {
  *  workspace index, plus the magic identifiers. */
 function buildNameUniverse(model: Model, services?: DddServices): Set<string> {
   const names = new Set<string>(MAGIC_NAMES);
-  // Ambient std prelude (stdlib Phase C) — its top-level functions are callable
+  // Ambient std prelude (stdlib) — its top-level functions are callable
   // in every `.ddd` with nothing imported, so their names are always resolvable.
   for (const n of stdFunctions().keys()) names.add(n);
   const roots: AstNode[] = [model];

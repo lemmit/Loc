@@ -37,12 +37,12 @@ export function emitAuthFiles(sys: SystemIR, out: Map<string, string>): void {
   if (!sys.user) return;
   const oidc = sys.auth;
   // The tenancy claim field, when the system declares `tenancy by …` — drives
-  // the derived `currentUser.orgPath` principal member (multi-tenancy P2.1).
+  // the derived `currentUser.orgPath` principal member (multi-tenancy).
   const orgPathClaim = sys.tenancy?.claimField;
-  // Hierarchy (P2.2): when the registry opts into `tenantRegistry` (a `dataKey`
+  // Hierarchy: when the registry opts into `tenantRegistry` (a `dataKey`
   // column exists), `orgPath` becomes a per-request memoized registry read via
   // a registered resolver (falling back to the claim when the row/dataKey is
-  // absent).  Without it (flat tenancy), the P2.1 claim-copy stands.
+  // absent).  Without it (flat tenancy), the claim-copy stands.
   const orgPathReadsRegistry = hierarchyRegistry(sys) !== undefined;
   out.set("auth/user-types.ts", renderUserTypes(sys.user, orgPathClaim));
   out.set("auth/verifier.ts", renderVerifier());
@@ -163,7 +163,7 @@ function renderUserTypes(user: UserIR, orgPathClaim?: string): string {
   });
   // `UserClaims` is the raw token→field projection the verifier returns; the
   // request principal `User` extends it with the derived, per-request
-  // `orgPath` (multi-tenancy P2.1) when the system declares tenancy.  The
+  // `orgPath` (multi-tenancy) when the system declares tenancy.  The
   // split keeps the verifier free of the derived member (it can't know the
   // path from the token) while every domain-code `import { User }` sees it.
   const userDecl = orgPathClaim
@@ -259,14 +259,14 @@ function renderMiddleware(
   // Computed once here (post-verify, so it reflects any dev-claims override)
   // and memoized on the request-scoped principal.
   //
-  //  - flat tenancy (P2.1): `orgPath` is the claim itself (the root-segment
+  //  - flat tenancy: `orgPath` is the claim itself (the root-segment
   //    path — no registry `dataKey` column to read).
-  //  - hierarchy (P2.2): resolve the caller's registry `dataKey` once per
+  //  - hierarchy: resolve the caller's registry `dataKey` once per
   //    request via the registered resolver; fall back to the claim when the
   //    row is missing or has no `dataKey` (pre-tree data) — never null/crash.
   const claimExpr = orgPathClaim ? `String(claims.${orgPathClaim} ?? "")` : `""`;
   // The per-request `orgPath` expression (claim itself under flat tenancy, the
-  // memoized registry read under hierarchy).  `rootOrg` (P2.5) is its first
+  // memoized registry read under hierarchy).  `rootOrg` is its first
   // segment — a pure string derivation, no extra read.  Build both onto the
   // principal: compute `orgPath` once into a const, then derive `rootOrg`.
   const orgPathExpr = orgPathReadsRegistry ? `await resolveOrgPath(${claimExpr})` : claimExpr;
@@ -293,7 +293,7 @@ function renderMiddleware(
     : arrayClaimDefaults.length > 0
       ? `const user: User = { ${claimsSpread} };`
       : `const user: User = claims;`;
-  // The registry-lookup seam (P2.2).  The auth layer can't reach the db (it is
+  // The registry-lookup seam.  The auth layer can't reach the db (it is
   // constructed at boot and injected into repositories), so — like the verifier
   // — the resolver is REGISTERED at boot (index.ts) with a closure that reads
   // `SELECT data_key FROM <registry> WHERE id = <claim>`.  Unregistered (or a
@@ -322,7 +322,7 @@ async function resolveOrgPath(claim: string): Promise<string> {
 }
 `
     : "";
-  // `rootOrg` (P2.5): the first segment of the caller's `orgPath` (up to the
+  // `rootOrg`: the first segment of the caller's `orgPath` (up to the
   // first `.`), the anchor for the `global` read level's root-subtree widening.
   // Pure string derivation — emitted whenever tenancy is declared.
   const rootOrgSeam = orgPathClaim

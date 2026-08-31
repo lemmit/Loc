@@ -113,7 +113,7 @@ builder.Services.AddSingleton<IDomainEventDispatcher, NoopDomainEventDispatcher>
 builder.Services.AddScoped<Api.Domain.Products.IProductRepository, Api.Infrastructure.Repositories.ProductRepository>();
 builder.Services.AddScoped<Api.Domain.Orders.IOrderRepository, Api.Infrastructure.Repositories.OrderRepository>();
 builder.Services.AddScoped<Api.Domain.Customers.ICustomerRepository, Api.Infrastructure.Repositories.CustomerRepository>();
-// Domain persistence ports (audit S7 Slice C) — EF adapters over the scoped AppDbContext.
+// Domain persistence ports — EF adapters over the scoped AppDbContext.
 builder.Services.AddScoped<Api.Domain.Common.IUnitOfWork, Api.Infrastructure.Persistence.EfUnitOfWork>();
 builder.Services.AddScoped(typeof(Api.Domain.Common.IWorkflowEventStore<>), typeof(Api.Infrastructure.Persistence.EfWorkflowEventStore<>));
 builder.Services.AddScoped(typeof(Api.Domain.Common.ISagaStateStore<>), typeof(Api.Infrastructure.Persistence.EfSagaStateStore<>));

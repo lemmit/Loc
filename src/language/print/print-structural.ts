@@ -737,8 +737,8 @@ function printSeed(node: import("../generated/ast.js").Seed): string {
 }
 
 /** `policy <Name>? { allow <level> on <Aggregate> … }` (authorization.md §3;
- *  multi-tenancy Phase 2 P2.4 — the read-reachability ladder) OR the function
- *  form `policy <Name>(<params>): bool = <expr>` (authorization Phase 3.2 — a
+ *  multi-tenancy — the read-reachability ladder) OR the function
+ *  form `policy <Name>(<params>): bool = <expr>` (authorization — a
  *  named, requires-gated authorization predicate). */
 function printPolicyDecl(node: import("../generated/ast.js").PolicyDecl): string {
   // Function form: carries a `returnType` (the read-ladder block has none).
@@ -769,7 +769,7 @@ function printValueObject(node: ValueObject): string {
 }
 
 function printAggregate(node: Aggregate): string {
-  // Header modifiers in grammar order (ddd.langium `Aggregate`, M-T5.17 Phase 2
+  // Header modifiers in grammar order (ddd.langium `Aggregate`, M-T5.17
   // + the sort-by-meaning amendment):
   //   [abstract] aggregate <name> [extends <Base>]
   //   [persistedAs: …] [shape: …] [inheritanceUsing: …] [crossTenant] [with …]

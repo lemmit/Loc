@@ -417,11 +417,11 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // An `auth { oidc }` block drives the generated OIDC verifier + handshake;
   // absent it, the dev stub keeps a fresh stack callable out of the box.
   const oidc = authRequired ? args.sys.auth : undefined;
-  // Hierarchy (multi-tenancy P2.2): when the tenant registry opts into
+  // Hierarchy (multi-tenancy): when the tenant registry opts into
   // `tenantRegistry` (a `data_key` column exists), `currentUser.orgPath`
   // resolves from that registry's table.  Pass the schema-qualified table so
   // the auth middleware can `SELECT data_key … WHERE id = <claim>`; `undefined`
-  // for flat tenancy keeps the P2.1 claim-copy.
+  // for flat tenancy keeps the claim-copy.
   const orgPathRegistryTable = authRequired
     ? (() => {
         const reg = hierarchyRegistry(args.sys);
@@ -447,7 +447,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // Durable-channel outbox relay (dispatch-delivery-semantics.md): when a
   // durable channel carries a *subscribed* event, `app/dispatch.py` ships
   // `start_outbox_relay`, which the lifespan kicks off as a background
-  // task.  M-T4.4 slice 7a adds the workflow-less durable-broker PRODUCER
+  // task. adds the workflow-less durable-broker PRODUCER
   // (design §5): no subscription, but the relay must still drain the outbox
   // to publish.  No durable channel → byte-identical boot.
   const startsRelay =
@@ -572,7 +572,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // repository constructed by routes/workflows takes the live
   // dispatcher instead of the Noop (mirrors Hono's createApp default).
   // Only collected when a recorder is actually threaded in — a
-  // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 12:
+  // no-sourcemap run pays no per-statement bookkeeping cost.
   // `app/dispatch.py` pools every reactor / event-create handler, so it
   // never gets a whole-file region — only these fragment-only statement
   // regions (mirrors `workflows_routes.py` at).
@@ -654,7 +654,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   if (queryProjectionsFile != null)
     out.set("app/http/query_projections_routes.py", queryProjectionsFile);
   // Only collected when a recorder is actually threaded in — a
-  // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 11:
+  // no-sourcemap run pays no per-statement bookkeeping cost.
   // `app/http/workflows_routes.py` pools every command workflow, so it
   // never gets a whole-file region — only these fragment-only statement
   // regions.
@@ -752,7 +752,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
           sourcemap.fragment(domainPath, domainContent, frag.fragmentText, frag.subRegions);
         }
       }
-      // Extern (b) Phase 2 (docs/extern.md): the scaffold-once, user-owned hook
+      // Extern (b) (docs/extern.md): the scaffold-once, user-owned hook
       // module the aggregate's extern-op bodies delegate to.  It carries the
       // `loom:scaffold-once` marker, so the CLI writer PRESERVES the filled-in
       // copy on regen (the sourcemap deliberately does NOT anchor it — it is

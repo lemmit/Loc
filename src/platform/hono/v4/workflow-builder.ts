@@ -99,7 +99,7 @@ export function buildWorkflowsFile(
   /** resourceName → sourceType, so resource-op verb helpers can be
    *  imported from `../resources/<sourceType>`. */
   resourceSourceTypes: Map<string, string> = new Map(),
-  /** Source-map Milestone 11 (workflow-body statement regions) — allocated by
+  /** Source-map (workflow-body statement regions) — allocated by
    *  the caller (`src/platform/hono/v4/emit.ts`) ONLY when a recorder is
    *  present, so a no-`--sourcemap` run pays no per-statement bookkeeping
    *  cost.  `http/workflows.ts` pools every workflow's command route AND its
@@ -659,7 +659,7 @@ function emitWorkflowRoute(
   wf: WorkflowIR,
   ctx: BoundedContextIR,
   aggsByName: Map<string, AggregateIR>,
-  /** Source-map Milestone 11 (workflow-body statement regions) — when passed,
+  /** Source-map (workflow-body statement regions) — when passed,
    *  pushes ONE `OpFragment` covering this route's workflow-body chunk list.
    *  `http/workflows.ts` is a POOLED file (every workflow + reactor shares
    *  it), so it never gets a whole-file region — only these fragment-only
@@ -683,7 +683,7 @@ function emitWorkflowRoute(
   out.push(`      204: { description: "No content" },`);
   // workflow → 400 (domain) + 422 (validation, ProblemDetails with §3.2
   // `errors[]` extension emitted by the shared defaultHook), per the
-  // openapi-errors matrix.  Phase D of
+  // openapi-errors matrix.  See
   // docs/old/proposals/validation-error-extension.md.
   out.push(
     `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
@@ -1095,7 +1095,7 @@ function emitSubscriptionHandlers(
   helperDone: Set<string> = new Set<string>(),
   /** Whether the stream (de)serialisers were already emitted by the prelude. */
   serializersDone = false,
-  /** Source-map Milestone 11 — forwarded into each reactor/starter handler
+  /** Source-map — forwarded into each reactor/starter handler
    *  body (see `emitHandlerFn` / `emitEventSourcedHandlerFn`). */
   opFragments?: OpFragment[],
   /** Owning-context resolver for the shared `<ctx>_events` log const — see
@@ -1511,7 +1511,7 @@ function emitHandlerFn(
    *  no-ops when the saga row already records the inbound outbox event id
    *  and stamps it before save.  Ephemeral contexts stay byte-identical. */
   durable = false,
-  /** Source-map Milestone 11 — see `emitWorkflowRoute`'s `opFragments`; same
+  /** Source-map — see `emitWorkflowRoute`'s `opFragments`; same
    *  fragment-only discipline, keyed off the SAME `${ctx.name}.${wf.name}`
    *  construct as the workflow's command-route body (a reactor/starter body
    *  belongs to the same workflow). */
@@ -1647,7 +1647,7 @@ function emitEventSourcedHandlerFn(
    *  append and the workflow event folds twice.  A create with no paired `on`
    *  stays byte-identical (guard omitted). */
   guardStreamExists = false,
-  /** Source-map Milestone 11 — see `emitWorkflowRoute`'s `opFragments`; same
+  /** Source-map — see `emitWorkflowRoute`'s `opFragments`; same
    *  fragment-only discipline and construct id. */
   opFragments?: OpFragment[],
   /** `persistence: mikroorm` — the `db` handle is the EntityManager. */

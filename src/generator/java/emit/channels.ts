@@ -172,7 +172,7 @@ export function renderJavaChannelFiles(
    *  ChannelConsumerService (a pure producer ships publish-only). */
   consumerHandlers: ChannelConsumerHandler[],
   sys: SystemIR,
-  /** M-T4.4 slice 7c: hosted durable events ride a broker-bound
+  /** M-T4.4: hosted durable events ride a broker-bound
    *  `queue`/`work` channel — the tee records them in `__loom_outbox` and
    *  the relay publishes on drain (design §5).  False on consumers that
    *  don't host the durable channel's context (their module migrations
@@ -1314,7 +1314,7 @@ export function renderJavaOutboxDelivery(basePkg: string): string {
   );
 }
 
-/** The transactional-outbox tier (M-T4.4 slice 7c — dispatch-delivery-
+/** The transactional-outbox tier (dispatch-delivery-
  *  semantics.md on java): the JPA entity mapped onto the MigrationsIR-owned
  *  `__loom_outbox` table, its Spring Data repository, and the polling relay
  *  that publishes drained rows to the broker (design §5; the tee in

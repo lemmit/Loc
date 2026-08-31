@@ -344,7 +344,7 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
 
 // ---------------------------------------------------------------------------
 // Span-tracking emission — the marks-carrying twin of `renderExprWith`
-// (docs/old/plans/span-tracking-emission.md, M15 phase 7).
+// (docs/old/plans/span-tracking-emission.md).
 //
 // LEVEL-WISE ANCHORING: `renderExprWith` already renders every child via its
 // local `r` BEFORE handing the child STRINGS to the leaf method, so the

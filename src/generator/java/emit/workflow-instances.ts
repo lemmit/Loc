@@ -23,7 +23,7 @@ import { workflowStateClass } from "./workflow-state.js";
 
 // ---------------------------------------------------------------------------
 // Read-only workflow-instance endpoints (workflow-instance-visibility.md),
-// Java saga slice 3.  For every observable workflow (a correlation-state row +
+// Java saga.  For every observable workflow (a correlation-state row +
 // enriched `instanceWireShape`) emit an instance Response record and a
 // controller exposing `GET /workflows/<snake>/instances` (list) +
 // `/instances/{id}` (one by correlation id, 404 if absent) over the persisted

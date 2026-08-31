@@ -351,7 +351,7 @@ export class DddValidator {
     guard("duration-constructors", model, () => checkDurationConstructors(model, accept));
     // A6 string-interpolation hole types (loom.interp-hole-type).
     guard("template-holes", model, () => checkTemplateHoles(model, accept));
-    // Phase B top-level functions: block-form rejection + recursion cycle
+    // Top-level functions: block-form rejection + recursion cycle
     // (loom.function-toplevel-block / loom.function-recursive).
     guard("toplevel-functions", model, () => checkTopLevelFunctions(model, accept));
     // The `extern` ↔ body pairing on commandHandler / queryHandler
@@ -364,7 +364,7 @@ export class DddValidator {
     // Restores the "`unknown` implies already-reported" invariant its
     // siblings assume.  Needs `services` for cross-file / workspace names.
     guard("unknown-name-refs", model, () => checkUnknownNameRefs(model, accept, this.services));
-    // `currentUser.orgPath` (the derived tenant materialized path, P2.1) is
+    // `currentUser.orgPath` (the derived tenant materialized path) is
     // only meaningful under a `tenancy by` declaration — fail-closed otherwise.
     guard("orgpath-tenancy", model, () => checkOrgPathReferences(model, accept));
     // Primitive conversion expressions (`string(x)`, `money(d)`):
@@ -376,7 +376,7 @@ export class DddValidator {
     // Criterion declarations + use sites: candidate-type support,
     // body purity, reference cycles, and call arity.
     guard("criteria", model, () => checkCriteria(model, accept));
-    // Named policy functions (auth P3.2): return-type = bool, use-site arity,
+    // Named policy functions (auth): return-type = bool, use-site arity,
     // reference cycles.  See `src/language/validators/policy-fn.ts`.
     guard("policy-fns", model, () => checkPolicyFns(model, accept));
     // Channel + channelSource: key-field existence and the channel<->storage

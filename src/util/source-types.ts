@@ -20,7 +20,7 @@
 // still NOT import any runtime value from `language/`, `generator/`, or
 // `platform/`.
 //
-// Phase 1 note: the user-facing `kind:` keyword keeps its fine-grained
+// NOTE: the user-facing `kind:` keyword keeps its fine-grained
 // values (`state`/`snapshot`/`replica`/`eventLog`/`cache`); those map to
 // the coarse infra `kind` + a refining `capability` via
 // `SURFACE_KIND_MAP`.  The registry is seeded to reproduce the previous
@@ -177,7 +177,7 @@ function seedBuiltins(): void {
       eventLog: { capabilities: set("append", "read", "replay"), interfaces: set<LoomInterface>() },
     },
   });
-  // Phase 2 kinds: object store, queue, external API.
+  // Infrastructure kinds: object store, queue, external API.
   registerSourceType({
     name: "s3",
     supports: {

@@ -89,8 +89,8 @@ function buildSoftDeletable(): Capability {
 /** `capability tenantOwned { tenantId (internal) + dataKey (internal) +
  * onCreate stamp from the principal's claim + orgPath + filter this.tenantId
  * == currentUser.tenantId }` — the tenant-data marker of multi-tenancy Phase
- * 1a (docs/old/plans/multi-tenancy-implementation.md, slice 1a.2), extended by
- * Phase 2 slice P2.3 (docs/old/plans/multi-tenancy-phase2.md) with the
+ * 1a (docs/old/plans/multi-tenancy-implementation.md), extended by
+ * (docs/old/plans/multi-tenancy-phase2.md) with the
  * materialized `dataKey` path.  Combines `auditable`'s principal-stamp shape
  * with `softDeletable`'s filter shape: every read is scoped to the caller's
  * tenant, every create is stamped with it, and `internal` keeps both
@@ -119,12 +119,12 @@ function buildSoftDeletable(): Capability {
  * `dataKey := currentUser.orgPath` is a pure claim-copy stamp exactly like
  * `tenantId`'s — it rides the same `contextStamp` pipeline, no per-backend
  * code needed (every backend already renders `currentUser.orgPath` for the
- * P2.1/P2.2 filter use-site; a stamp assignment is the same expression
+ * filter use-site; a stamp assignment is the same expression
  * renderer, different call site).  It is stamped **unconditionally** — not
  * gated on the system having opted the registry into `implements
- * tenantRegistry` (P2.2) — because `currentUser.orgPath` is never a
+ * tenantRegistry` — because `currentUser.orgPath` is never a
  * placeholder: under flat tenancy (no registry hierarchy) it resolves to the
- * tenancy claim itself (P2.1's defined fallback, the correct *root-only*
+ * tenancy claim itself (defined fallback, the correct *root-only*
  * path), and once a hierarchy exists it resolves to the real materialized
  * path with no code here needing to change. `authorization.md §2` calls
  * `dataKey` a persistence column only — it is dropped from `wireShape`
@@ -151,8 +151,8 @@ function buildTenantOwned(): Capability {
 }
 
 /** `capability tenantRegistry { parent: Self id? (immutable) + dataKey: string?
- * (managed) }` — the tenant-registry TREE capability of multi-tenancy Phase 2
- * (docs/old/plans/multi-tenancy-phase2.md, slice P2.2).  The registry aggregate —
+ * (managed) }` — the tenant-registry TREE capability of multi-tenancy
+ * (docs/old/plans/multi-tenancy-phase2.md, slice).  The registry aggregate —
  * the `of <Registry>` target of `tenancy by user.<claim> of <Registry>` — opts
  * into hierarchy by carrying `implements tenantRegistry`, which PROVIDES:
  *

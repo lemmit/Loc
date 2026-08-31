@@ -498,7 +498,7 @@ function emitQueryProjectionRoute(
     // back to ENTITY PROPERTY names, which silently rewrites any select alias
     // that happens to be a real column: a `customer_id` grouping key came back
     // as `customerId`, so reading `r.customer_id` yielded undefined and the wire
-    // carried the string "undefined" (M-T6.23 slice 4 — found by the
+    // carried the string "undefined" (found by the
     // `projection-groupby` behavioural case; the aggregate aliases were
     // unaffected precisely because `avg_lines` is not a column).  Verbatim
     // aliases keep the read keyed by what the SELECT actually asked for.

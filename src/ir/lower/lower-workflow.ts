@@ -473,8 +473,8 @@ function lowerHandlerBody(
   return { statements, ...(returnValue ? { returnValue } : {}) };
 }
 
-// Lower an `on(e: Event) { … }` reactor member to its IR (workflow-and-applier.md
-// Phase A2, surface slice).  Mirrors `lowerApply`: the event instance binds as a
+// Lower an `on(e: Event) { … }` reactor member to its IR
+// (workflow-and-applier.md).  Mirrors `lowerApply`: the event instance binds as a
 // `refKind: "param"` local typed as the event entity, so `e.field` accesses
 // resolve through the same machinery.  The body reuses `lowerWorkflowStatement`
 // (a reactor is a workflow continuation and may load/save aggregates and emit).

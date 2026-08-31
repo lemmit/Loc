@@ -131,7 +131,7 @@ function gateUsings(op: AggregateIR["operations"][number], ns: string): string[]
 
 /** The repo method a MUTATION command handler loads through: `GetByIdForWriteAsync`
  *  when the aggregate's write scope is narrower than its read scope
- *  (authorization Phase 3 P3.1), else the ordinary `GetByIdAsync` (byte-
+ *  (authorization), else the ordinary `GetByIdAsync` (byte-
  *  identical).  Query (read) handlers always use `GetByIdAsync`. */
 function writeCmdLoad(agg: AggregateIR): string {
   return agg.writeScopeFilter ? "GetByIdForWriteAsync" : "GetByIdAsync";
@@ -452,7 +452,7 @@ export function emitOperationCommandAndHandler(
       ...(usesUser || gateUsesUser ? [`${ns}.Auth`] : []),
       ...gateUsings(op, ns),
     ];
-    // Extern (b) Phase 2: an `extern` op is now an ordinary aggregate method
+    // Extern (b): an `extern` op is now an ordinary aggregate method
     // (its body runs preconditions, calls the `<Op>Core` partial hook, and
     // re-asserts invariants — see `emit/entity.ts`), so it flows through the
     // SAME command-handler path below as any other op (`aggregate.<Op>(...)`).

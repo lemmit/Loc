@@ -543,7 +543,7 @@ function bindTenancyClaim(m: EnrichedSubdomainIR, sys: SystemIR): EnrichedSubdom
 // claim:
 //   - `deep`   → `buildDeepScopeFilter`   (anchor `orgPath`: caller's node + descendants).
 //   - `global` → `buildGlobalScopeFilter` (anchor `rootOrg`: caller's ROOT subtree) —
-//                ONLY under a hierarchy registry (P2.5).  Without a hierarchy
+//                ONLY under a hierarchy registry.  Without a hierarchy
 //                `global` keeps the flat floor (fail-closed; and `deep`/`global`
 //                without a hierarchy is a phase-⑦ error anyway), and under flat
 //                tenancy `rootOrg == orgPath == the tenant floor` so the levels

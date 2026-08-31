@@ -1012,7 +1012,7 @@ end
  *  message }` array) that the runtime emits on 422 validation responses.
  *  All fields optional — base 5 per the spec core; `errors` is only
  *  present on 422 validation responses (consumed by the frontend ACL's
- *  `applyServerErrors`).  Phase D of validation-error-extension.md —
+ * `applyServerErrors`).  validation-error-extension.md —
  *  all three backends (Hono / .NET / Phoenix) declare the same shape in
  *  lockstep so the cross-backend parity gate stays green. */
 function renderProblemDetailsSchema(webModule: string): string {

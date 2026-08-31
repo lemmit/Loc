@@ -414,7 +414,7 @@ export function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
     },
   ];
   for (const f of agg.fields) {
-    // `tenantOwned`'s `dataKey` (multi-tenancy P2.3) is a persistence-only
+    // `tenantOwned`'s `dataKey` (multi-tenancy) is a persistence-only
     // materialized-path column — `authorization.md §2` calls for it "kept
     // out of wireShape" entirely, unlike `tenantId` which stays in wireShape
     // as `internal` (excluded from API reads by `forApiRead`, still visible

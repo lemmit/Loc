@@ -112,7 +112,7 @@ export interface ComposeServiceShape {
    *  (no CORS, no separate API host). */
   injectsApiProxyTarget?: boolean;
   // -------------------------------------------------------------------------
-  // Reserved slots for future cross-cutting concerns (Phase 3 / 4 of the
+  // Reserved slots for future cross-cutting concerns (of the
   // proposal corpus).  Currently undefined on every backend; the
   // orchestrator emits nothing when absent.  Wiring lands per concern.
   // -------------------------------------------------------------------------

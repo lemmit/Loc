@@ -149,7 +149,7 @@ export class DddScopeProvider extends DefaultScopeProvider {
     }
     // Reactor / projection-fold event subscriptions — `on(e: OrderPlaced)` in a
     // workflow or projection resolves system-wide, not context-local (M-T4.4
-    // slice 1; channels.md cross-context choreography: a Shipping reactor
+    // channels.md cross-context choreography: a Shipping reactor
     // consumes Orders' OrderPlaced).  Same targeted-scope shape as the
     // timerSource arm above: events stay unexported globally, so the widening
     // applies ONLY in these two subscription positions.  Within one deployable
@@ -334,7 +334,7 @@ export class DddScopeComputation extends DefaultScopeComputation {
           exports.push(this.descriptions.createDescription(node, name, document));
         }
       }
-      // Top-level (ambient) helper `function`s (stdlib Phase B) — declared at
+      // Top-level (ambient) helper `function`s (stdlib) — declared at
       // file root or directly inside a `system { }`, visible workspace-wide so
       // a call from any context/file resolves by bare name (they inline at
       // lowering).  Local aggregate/VO/workflow functions stay member-scoped

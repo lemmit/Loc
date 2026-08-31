@@ -887,7 +887,7 @@ function emitProjectFromContexts(
     // `EventRecord` POCO + `<Ctx>EventRecordConfiguration`, emitted once per
     // context above), so no per-workflow POCO/config here.
     emitEventSourcedWorkflowFiles(merged.workflows, ns, out, ownerOf);
-    // Domain persistence-port adapters (audit S7 Slice C): the EF
+    // Domain persistence-port adapters: the EF
     // implementations of IUnitOfWork / IWorkflowEventStore / ISagaStateStore /
     // IReadModelStore the orchestration handlers depend on INSTEAD of the
     // concrete AppDbContext.  Emitted when the deployable hosts a workflow or a
@@ -1124,7 +1124,7 @@ function emitProjectFromContexts(
     resourceNugetDeps: resourceEmission.nugetDeps,
     fileUpload,
     oidc: !!(authRequired && system?.sys.auth),
-    // Tenant hierarchy (multi-tenancy P2.2): the registry opts into
+    // Tenant hierarchy (multi-tenancy): the registry opts into
     // `tenantRegistry` (a `dataKey` column), so Program.cs registers the scoped
     // `IOrgPathResolver` → `EfOrgPathResolver` the auth middleware calls to
     // materialize `currentUser.orgPath`.  Undefined (flat tenancy) ⇒ omitted.
@@ -1500,7 +1500,7 @@ function emitAggregate(
     agg.origin,
     opFragments,
   );
-  // Extern (b) Phase 2: an aggregate with any `extern` op is emitted `partial`;
+  // Extern (b): an aggregate with any `extern` op is emitted `partial`;
   // the user supplies the implementing half of each `<Op>Core` hook in a
   // co-located SCAFFOLD-ONCE partial (`<Agg>.Extern.cs`) that regeneration
   // preserves (the `loom:scaffold-once` marker → CLI writer keeps the on-disk
@@ -1778,7 +1778,7 @@ function emitInfrastructure(
   emitWorkflowStatePersistence(ctx.workflows, ns, out, durableEventTypes(ctx).size > 0);
   emitProjectionRowPersistence(ctx.projections.filter(isMaterializedProjection), ns, out);
   emitEventSourcedWorkflowFiles(ctx.workflows, ns, out, makeOwnerOf([ctx]));
-  // Domain persistence-port adapters (audit S7 Slice C) — the LEGACY
+  // Domain persistence-port adapters — the LEGACY
   // single-context (`generate dotnet`) sibling of the system path's emission.
   // Gated on the SAME condition renderProgram registers the ports under
   // (ctx.workflows / ctx.projections), so a project that uses none of these
@@ -1832,11 +1832,11 @@ function emitProject(
     /** Broker channels (M-T4.4) — see renderProgram/renderCsproj. */
     hasChannels?: boolean;
     hasChannelConsumers?: boolean;
-    /** M-T4.4 slice 7b: which broker drivers the wired bindings need — drives
+    /** M-T4.4: which broker drivers the wired bindings need — drives
      *  the per-transport csproj package refs (StackExchange.Redis /
      *  RabbitMQ.Client). */
     channelTransports?: { redis: boolean; rabbit: boolean; kafka?: boolean };
-    /** M-T4.4 slice 7b: the workflow-less durable-broker producer shape — the
+    /** M-T4.4: the workflow-less durable-broker producer shape — the
      *  outbox dispatcher wraps the Noop, so Program.cs registers it concretely
      *  instead of the InProcess scoped line. */
     outboxNoopInner?: boolean;
@@ -1879,7 +1879,7 @@ function emitProject(
     /** OIDC turnkey auth (D-AUTH-OIDC): the system declares `auth { oidc }`,
      *  so emit the generated verifier registration + its NuGet refs. */
     oidc?: boolean;
-    /** Tenant hierarchy (multi-tenancy P2.2): register the scoped
+    /** Tenant hierarchy (multi-tenancy): register the scoped
      *  `IOrgPathResolver` → `EfOrgPathResolver` for the per-request
      *  `currentUser.orgPath` registry `data_key` read. */
     orgPathResolver?: boolean;
@@ -1895,10 +1895,10 @@ function emitProject(
   },
 ): void {
   // Scrutor scan (+ package ref) is needed when the project emits any
-  // `[ExternHandler]` class.  Since extern (b) Phase 2 an extern aggregate
+  // `[ExternHandler]` class.  For an extern (b) aggregate, an extern aggregate
   // OPERATION is a domain partial-method hook (no injected handler, no
   // `[ExternHandler]`), so only the extern application-layer commandHandler /
-  // queryHandler (Phase 1's case-2 home) still registers through the scan.
+  // queryHandler (case-2 home) still registers through the scan.
   const hasExtern = [...(ctx.commandHandlers ?? []), ...(ctx.queryHandlers ?? [])].some(
     (h) => h.extern,
   );

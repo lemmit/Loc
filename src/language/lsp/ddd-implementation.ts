@@ -1,5 +1,5 @@
-// `textDocument/implementation` — "go to generated code" (M6 phase 3,
-// forward direction only). Resolves the cursor's construct id(s) via
+// `textDocument/implementation` — "go to generated code" (forward direction
+// only). Resolves the cursor's construct id(s) via
 // `generated-nav.ts`, discovers the nearest `.loom/sourcemap.json` on
 // disk, and turns the matching regions into `LocationLink[]` pointing at
 // the generated output. Mirrors the `ddd-code-actions.ts` /

@@ -43,7 +43,7 @@ export function eventDbSetName(ctxName: string): string {
  *  Version)`.  `StreamType` discriminates the owning stream (aggregate/workflow
  *  name); `Seq` is the context-global bigserial cursor (DB-assigned — EF never
  *  writes it).  It implements the domain-side `IWorkflowEventRow` marker (audit
- *  S7 Slice C) so the generic `IWorkflowEventStore<<Ctx>EventRecord>` port
+ *  so the generic `IWorkflowEventStore<<Ctx>EventRecord>` port
  *  adapter can read the stream key; get/set satisfies the get-only members. */
 export function renderEventRecordPoco(ns: string, ctxName: string): string {
   const cls = eventRecordClass(ctxName);

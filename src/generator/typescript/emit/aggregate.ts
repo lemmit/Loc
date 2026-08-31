@@ -608,7 +608,7 @@ function renderEntity(
     });
     const body = chunks.join("\n");
     if (opFragments && chunks.length > 0) {
-      // Expression-level marks (span-tracking-emission.md, M15 phase 7)
+      // Expression-level marks (span-tracking-emission.md)
       // — only computed on this recording path (`opFragments`
       // present); the flag-off run above never re-renders the RHS
       // expressions through the marks-carrying entry.

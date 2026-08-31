@@ -1,7 +1,7 @@
 // Synchronous, dependency-free SHA-256 (FIPS 180-4).
 //
 // The toolchain needs a hash at GENERATION time (RabbitMQ definitions.json
-// carries `password_hash`, the salted-SHA-256 scheme — M-T4.4 slice 5 §7),
+// carries `password_hash`, the salted-SHA-256 scheme — §7),
 // and `src/system/` must stay browser-safe for the playground, so
 // `node:crypto` is off the table and `crypto.subtle` is async (the compose
 // renderers are sync).  This is the textbook compression loop — fine for

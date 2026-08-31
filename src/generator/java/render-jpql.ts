@@ -200,11 +200,11 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
       // so a missing arm is a `tsc` error here, not a silent authorization
       // bypass.
       switch (e.filter.kind) {
-        // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false
+        // DENY carve-out (authorization — deny-wins).  An always-false
         // JPQL predicate; no row satisfies `1 = 0`.
         case "deny":
           return "1 = 0";
-        // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) —
+        // `deep`/`global` read level (multi-tenancy) —
         // descendant-or-self materialized-path scope with the NULL-dataKey
         // fallback to the tenant floor (see `DEEP_SCOPE_SEMANTICS`).  The
         // principal claims render as the same null-safe SpEL accessors the

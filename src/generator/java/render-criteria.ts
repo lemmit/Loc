@@ -52,11 +52,11 @@ function bool(e: ExprIR, ctx: CriteriaCtx): string {
       // so a missing arm is a `tsc` error here, not a silent authorization
       // bypass.
       switch (e.filter.kind) {
-        // DENY carve-out (authorization Phase 4 — deny-wins).  `cb.disjunction()`
+        // DENY carve-out (authorization — deny-wins).  `cb.disjunction`
         // is the JPA Criteria always-false predicate (an empty OR).
         case "deny":
           return "cb.disjunction()";
-        // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) —
+        // `deep`/`global` read level (multi-tenancy) —
         // descendant-or-self materialized-path scope with the NULL-dataKey
         // fallback to the tenant floor (see `DEEP_SCOPE_SEMANTICS`), as a JPA
         // Criteria predicate over the `tenantScope(User currentUser)`

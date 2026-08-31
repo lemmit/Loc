@@ -1,4 +1,4 @@
-// Channel + channelSource validation (channels.md, Slice 1; M-T4.4).
+// Channel + channelSource validation (channels.md, M-T4.4).
 //
 // Three checks, mirroring the dataSource matrix validator:
 //

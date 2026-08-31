@@ -84,7 +84,7 @@ export const JOBRUNR_VERSION = "7.5.1";
 
 /** ASM — the bytecode library the emitted `injectSmap` Gradle task (below)
  *  uses to attach a `.smap` sidecar as a compiled class's
- *  `SourceDebugExtension` attribute (JSR-45, M10 phase 6b).  Only pulled
+ *  `SourceDebugExtension` attribute (JSR-45).  Only pulled
  *  onto the BUILDSCRIPT classpath — the build script itself imports
  *  `org.objectweb.asm.*` to define the task — never onto the generated
  *  app's own runtime classpath.  9.8+ is required to read Java 25 class

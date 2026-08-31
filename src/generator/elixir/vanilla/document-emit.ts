@@ -17,7 +17,7 @@
 // struct back through `serialize/1` (snake-cased jsonb keys → camelCase wire).
 //
 // Beyond CRUD, this module also emits custom finds, named + returning operations,
-// and pure functions.  Route A slice 2: these all render in STRUCT mode against
+// and pure functions.  Route A: these all render in STRUCT mode against
 // the rehydrated `%<Agg>.Data{}` embed (`record = row.data`) via the SHARED
 // relational body renderer (`renderReturningStmt`) — no `docMap` fork; an op
 // re-embeds the mutated struct + bumps version, a find filters in memory over the
@@ -487,7 +487,7 @@ export function renderDocRepository(
   // to the pre-filter document repository.
   const principal = aggregateUsesPrincipalContextFilter(agg);
   const cap = vanillaDocCapabilityFilter(agg, contextModule, "row", { actor: principal });
-  // The WRITE-scope command-load filter (authorization Phase 3 P3.1): the
+  // The WRITE-scope command-load filter (authorization): the
   // context facade emits `get_<agg>_for_write` whenever `writeScopeFilter` is
   // set, regardless of saving shape, so the document repository must define the
   // `find_by_id_for_write` it delegates to.
@@ -567,7 +567,7 @@ ${docBindRecord(cap, "        ")}        if ${cap}, do: {:ok, row}, else: {:erro
 ${
   writeScope
     ? `
-  @doc "Command-load path (authorization Phase 3 P3.1): scope the by-id load to the WRITE scope; a readable-but-not-writable (or missing) row reads as :not_found → 404."
+  @doc "Command-load path (authorization): scope the by-id load to the WRITE scope; a readable-but-not-writable (or missing) row reads as :not_found → 404."
   @spec find_by_id_for_write(binary(), map() | nil) :: {:ok, ${aggModule}.t()} | {:error, :not_found}
   def find_by_id_for_write(id, ${writeScopeUsesPrincipal ? "current_user" : "_current_user"} \\\\ nil) when is_binary(id) do
     case Repo.get(${aggModule}, id) do
@@ -646,7 +646,7 @@ function isDocSingleReturn(t: TypeIR): boolean {
 }
 
 /** One document custom-find function — an IN-MEMORY filter over the loaded rows.
- *  Route A slice 2: the predicate renders in STRUCT mode (`docStruct`) against the
+ *  Route A: the predicate renders in STRUCT mode (`docStruct`) against the
  *  rehydrated `%<Agg>.Data{}` embed bound as `record` (`this.<field>` →
  *  `record.<snake>`, enums as their stored strings, money/decimal native) — the
  *  same relational renderer, no `docMap` fork.  A find with no `where` clause
@@ -796,7 +796,7 @@ function docOpStructBody(
   agg: AggregateIR,
   facadeMod: string,
   ctx: BoundedContextIR,
-  /** Source-map Milestone 3 collector (`--sourcemap`) — only allocated by the
+  /** Source-map collector (`--sourcemap`) — only allocated by the
    *  caller when a recorder is present (zero cost otherwise).  A document op's
    *  body is filtered only of its guards (no emit-hoisting restructuring here),
    *  so `bodyStmts` and `body` line up 1:1 for the sub-region zip. */

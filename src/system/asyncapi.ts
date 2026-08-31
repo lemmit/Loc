@@ -24,7 +24,7 @@ export function renderAsyncApi(sys: SystemIR): string {
   out.push(`  title: ${yamlStr(`${sys.name} channels`)}`);
   out.push("  version: 0.0.0");
 
-  // channelSource bindings, indexed by channel name (Slice 1: bare names).
+  // channelSource bindings, indexed by channel name (bare names).
   const bindingByChannel = new Map<string, string>();
   const csNameByChannel = new Map<string, string>();
   for (const cs of sys.channelSources) {

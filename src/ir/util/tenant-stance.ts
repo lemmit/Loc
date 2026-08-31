@@ -241,7 +241,7 @@ export const ORG_PATH_CLAIM_FIELD = "orgPath";
  *  `orgPath` (everything before the first {@link DATA_KEY_PATH_DELIMITER}, or
  *  the whole path when it has none).  A pure string computation off the
  *  already-resolved `orgPath` — no DB read.  It anchors the `global` read
- *  level's root-subtree widening (P2.5): under flat tenancy `orgPath` is the
+ *  level's root-subtree widening: under flat tenancy `orgPath` is the
  *  root-segment claim itself, so `rootOrg == orgPath` and `global == deep ==
  *  local` all coincide at the tenant floor. */
 export const ROOT_ORG_CLAIM_FIELD = "rootOrg";
@@ -249,7 +249,7 @@ export const ROOT_ORG_CLAIM_FIELD = "rootOrg";
 /** The materialized-path segment delimiter (`root.child.leaf`).  The `deep`
  *  read level prefix-matches on it so `org_a` does NOT match `org_ab` — a
  *  descendant is `path` exactly or `path` + delimiter + more.  (Full
- *  delimiter/opclass index discipline is P2.5; the delimiter-correct prefix
+ * delimiter/opclass index discipline is; the delimiter-correct prefix
  *  itself is emitted here.) */
 export const DATA_KEY_PATH_DELIMITER = ".";
 
@@ -316,14 +316,14 @@ export function dataKeyLikePattern(anchor: string): string {
  *     on the far fewer rows the index returned.
  *
  * No DDL change: the `text_pattern_ops` opclass the tenancy migration already
- * derives (P2.5) is precisely the index a prefix `LIKE` rides under ANY
+ * derives is precisely the index a prefix `LIKE` rides under ANY
  * database collation — which is also why the half-open-range alternative was
  * not taken (`data_key >= a || '.' AND data_key < a || '/'` is only the
  * descendant set under the C collation, and every ORM's `>=` uses the column's
  * collation).
  *
  * The NULL branch is the deliberate OR-fallback (not pure fail-closed LIKE):
- * every row stamped before P2.3 (or by a principal-less workflow save) carries
+ * every row stamped before (or by a principal-less workflow save) carries
  * a NULL `data_key`, which a bare prefix LIKE would silently hide.  Falling
  * those rows back to the flat `tenantId ==` floor keeps them visible to their
  * own tenant (never widening past it — no cross-tenant leak) and degrades
@@ -375,7 +375,7 @@ function scopeOf(e: ExprIR): Extract<AuthzFilterKind, { kind: "scope" }> | undef
 }
 
 /** The `deep` read-level reachability predicate — the descendant-or-self
- *  materialized-path scope anchored at `currentUser.orgPath` (P2.4).
+ *  materialized-path scope anchored at `currentUser.orgPath`.
  *  `tenantClaim` is the system's declared tenancy claim, used by the
  *  NULL-`dataKey` fallback branch that degrades to the flat tenant floor. */
 export function buildDeepScopeFilter(agg: Pick<AggregateIR, "name">, tenantClaim: string): ExprIR {
@@ -540,7 +540,7 @@ export function hasTenantRegistry(agg: Pick<AggregateIR, "capabilities">): boole
  *  the `of <Registry>` target that also carries `implements tenantRegistry`
  *  (so it has a `dataKey` column).  `undefined` for a flat system (no
  *  `tenancy by`, or a registry without the capability).  The single signal the
- *  per-backend `currentUser.orgPath` emitters read to decide between the P2.1
+ * per-backend `currentUser.orgPath` emitters read to decide between the
  *  claim-copy fallback and the real registry `dataKey` lookup. */
 export function hierarchyRegistry(
   sys: Pick<SystemIR, "tenancy" | "subdomains">,

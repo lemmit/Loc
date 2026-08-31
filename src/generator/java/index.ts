@@ -760,7 +760,7 @@ function emitProjectFromContexts(
       }
     }
     // Only collected when a recorder is actually threaded in — a
-    // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 11:
+    // no-sourcemap run pays no per-statement bookkeeping cost.
     // the merged `<Ctx>Workflows.java` service pools every command
     // workflow's method, so it never gets a whole-file region — only these
     // fragment-only statement regions, attached below via `place`'s
@@ -903,7 +903,7 @@ function emitProjectFromContexts(
     // channel-carried events — load-or-allocate / route-or-drop the saga row,
     // run the handler body, re-publish so choreography chains re-enter.
     // Only collected when a recorder is actually threaded in — a
-    // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 12:
+    // no-sourcemap run pays no per-statement bookkeeping cost.
     // `<Ctx>Dispatcher.java` pools every reactor / event-create handler, so
     // it never gets a whole-file region (origin/construct stay undefined on
     // the `place()` call below) — only these fragment-only statement
@@ -1254,11 +1254,11 @@ function emitProjectFromContexts(
   // Auth surface — only when the deployable opts in via auth: required
   // and the system declares a user block.
   if (authRequired && system?.sys) {
-    // Hierarchy (multi-tenancy P2.2): when the tenant registry opts into
+    // Hierarchy (multi-tenancy): when the tenant registry opts into
     // `tenantRegistry` (a `data_key` column exists) AND its state table is
     // among THIS deployable's contexts (so the boot JdbcTemplate reaches it),
     // `currentUser.orgPath` reads the registry's `data_key` per request;
-    // otherwise the P2.1 claim-copy accessor stands.
+    // otherwise the claim-copy accessor stands.
     let orgPathRegistry: { table: string; idValueType: IdValueType } | undefined;
     const reg = hierarchyRegistry(system.sys);
     if (reg) {
@@ -1367,7 +1367,7 @@ function emitProjectFromContexts(
           ? { "org.apache.kafka:kafka-clients": KAFKA_CLIENTS_VERSION }
           : {}),
       },
-      // M10 phase 6b: the recorder's PRESENCE alone gates the emitted
+      // The recorder's PRESENCE alone gates the emitted
       // `injectSmap` task — this generator never sees `sourceTexts` (the
       // `.smap` sidecars themselves are rendered later, system-side, from
       // the SAME recorder — see src/system/index.ts).

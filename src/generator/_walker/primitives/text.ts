@@ -217,13 +217,13 @@ export function emitHeading(
   // literal OR a ref (e.g. a route-param name).  Optional `level:`
   // named arg controls the heading rank (1..6); when absent the rank is
   // DERIVED from the `Section`/`Card` nesting depth (accessibility.md
-  // Phase 2 — `min(6, 2 + headingDepth)`, so levels never skip) rather
+  // `min(6, 2 + headingDepth)`, so levels never skip) rather
   // than a flat default.  At page top (depth 0) this is `<h2>`; the page
   // chrome owns the single `<h1>`.
   const text = localizedText(call, ctx, "heading", '"Heading"');
   const level = numericNamed(call, "level") ?? Math.min(6, 2 + (ctx.headingDepth ?? 0));
   void depth;
-  // Phase 5 — explicit typography control decoupled from semantic level.
+  // Explicit typography control, decoupled from the semantic level.
   // `size:` overrides the level's default size; `weight:` sets the
   // font weight; `gradient:` applies a CSS gradient as the text fill
   // via `background: <gradient>; background-clip: text; color:

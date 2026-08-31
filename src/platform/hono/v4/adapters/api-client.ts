@@ -69,7 +69,7 @@ function tsParamType(t: TypeIR): string {
   }
   // An entity-typed body is the callee's createInput projection.  Typing it
   // properly means emitting that projection's schema on the caller side —
-  // real work, and not what slice 3 promised — so it stays `unknown` rather
+  // real work — so it stays `unknown` rather
   // than pretending to a precision the emitter does not have.
   return "unknown";
 }

@@ -34,11 +34,11 @@ export function loadStdlibMacros(): void {
   _loaded = true;
   // Audit is now the built-in `capability auditable` (src/macros/prelude.ts) —
   // the former audit/auditable/auditedByDefault macros were removed in the
-  // typed-capabilities Phase 3 migration.
+  // typed-capabilities migration.
   // Soft-delete: state + filter is the built-in `capability softDeletable`
   // (src/macros/prelude.ts); `softDelete` (ops) + `softDeleteByDefault` stay
   // macros.  The former `softDeletable` (state) + `softDelete` (context filter)
-  // macros were removed in the typed-capabilities Phase 3 migration.
+  // macros were removed in the typed-capabilities migration.
   registerMacro(softDelete);
   registerMacro(softDeleteByDefault);
   // Other capabilities

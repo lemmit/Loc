@@ -269,8 +269,8 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
     }
   }
   setAmbientEnumIndex(ambientEnumIndex);
-  // Project-global index of TOP-LEVEL (ambient) helper `function`s (stdlib
-  // Phase B) — declared at file root or inside a `system { }`, visible
+  // Project-global index of TOP-LEVEL (ambient) helper `function`s —
+  // declared at file root or inside a `system { }`, visible
   // workspace-wide.  Expression-form functions INLINE at every call site
   // during lowering (`inlineTopLevelFn` in lower-expr.ts), so they need this
   // ambient index rather than an owning aggregate.  First declaration wins on
@@ -285,7 +285,7 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
     addTopLevelFn(m);
     if (isSystem(m)) for (const sm of m.members) addTopLevelFn(sm);
   }
-  // Ambient std prelude (stdlib Phase C) — merge the built-in functions LAST,
+  // Ambient std prelude (stdlib) — merge the built-in functions LAST,
   // and only for names the user did not declare, so a user top-level function
   // of the same name shadows the prelude (`addTopLevelFn` is first-wins).
   for (const [name, fn] of stdFunctions())

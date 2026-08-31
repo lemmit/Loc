@@ -11,10 +11,10 @@
 // dependency and emit the boot-time client/connection setup for the
 // resources of this kind a deployable wires.
 //
-// Phase 2.4 (foundation): adapters emit the dependency + a connection
-// module instantiated at boot.  The *call surface* domain logic uses to
-// reach these clients is a workflow-level concern (RFC §Phase 4) and is
-// deliberately out of scope here — no method wrappers are emitted.
+// Adapters emit the dependency + a connection module instantiated at boot.
+// The *call surface* domain logic uses to reach these clients is a
+// workflow-level concern and is deliberately out of scope here — no method
+// wrappers are emitted.
 // ---------------------------------------------------------------------------
 
 import type { DataSourceIR, StorageIR } from "../../ir/types/loom-ir.js";
@@ -43,7 +43,7 @@ export interface ResourceAdapter {
    *  The orchestrator writes the result to `resources/<sourceType>.ts`
    *  and side-effect-imports it from the server entry so the clients
    *  instantiate at boot.  No call-sites are emitted (those are a
-   *  workflow-level concern — RFC §Phase 4). */
+   * workflow-level concern — RFC §). */
   emitClientModule(
     resources: readonly DataSourceIR[],
     physicalStores: readonly StorageIR[],

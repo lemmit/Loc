@@ -412,7 +412,7 @@ function expandOneCall(
   if (!macro) {
     // No macro by this name — try a typed capability (typed-capabilities.md).
     // Macro wins on a name collision (a stdlib macro shadows a same-named
-    // capability) until the stdlib migrates in Phase 3; that keeps this
+    // capability) until the stdlib migrates; that keeps this
     // purely additive.
     const cap = inv.Capability.get(name);
     if (cap) {

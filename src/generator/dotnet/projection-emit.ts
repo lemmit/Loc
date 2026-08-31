@@ -135,7 +135,7 @@ using ${ns}.Infrastructure.Persistence.Projections;
 
 namespace ${ns}.Application.Workflows;
 
-// Read-model fold via the domain IReadModelStore port (audit S7 Slice C), NOT
+// Read-model fold via the domain IReadModelStore port, NOT
 // the concrete AppDbContext.  FindAsync returns the EF change-TRACKED row, so
 // the ` +
     "`state.<Prop> = …; SaveChangesAsync()`" +

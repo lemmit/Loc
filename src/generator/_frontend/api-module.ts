@@ -774,7 +774,7 @@ const RESPONSE_PRIMITIVE: Record<WirePrimitive, string> = {
  *  directly, through array/optional wrappers, or inside a value object.
  *  Money is the one wire type whose schema TRANSFORMS on parse
  *  (`moneySchema`: decimal string → Decimal), so it gates the dual
- *  FormState/Payload aliases (frontend-acl.md Phase 3 — emitted only
+ *  FormState/Payload aliases (frontend-acl.md — emitted only
  *  where `z.input` and `z.output` genuinely diverge; structurally
  *  identical aliases would be noise). */
 export function typeReachesMoney(t: TypeIR, ctx: BoundedContextIR): boolean {

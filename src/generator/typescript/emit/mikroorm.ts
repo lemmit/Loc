@@ -831,7 +831,7 @@ export function renderMikroEntities(
         // MikroORM derives `RequiredEntityData` from the CLASS, not from the
         // `autoincrement` flag.  Declared required, `em.insert(<Ctx>EventRow, {…})`
         // fails `tsc` with "Property 'seq' is missing" on every event-sourced
-        // append.  Found by M-T6.23 slice 3's compile proof: no gate hid this
+        // append.  Found by's compile proof: no gate hid this
         // one, the tsc TIERS did — the corpus tsc gates run drizzle only, and the
         // mikro behavioural leg builds with esbuild (no typecheck), so an
         // event-sourced aggregate or workflow on `persistence: mikroorm` has
@@ -1334,7 +1334,7 @@ function predicateEntry(e: ExprIR, acc: string): string {
  *  `and(isNull(id), isNotNull(id))`. */
 function authzFilterEntry(e: Extract<ExprIR, { kind: "authz-filter" }>, acc: string): string {
   switch (e.filter.kind) {
-    // DENY carve-out (authorization Phase 4 — deny-wins).  The always-false
+    // DENY carve-out (authorization — deny-wins).  The always-false
     // term, ANDed into every read FilterQuery (and into the write-scope
     // existence pre-guard).  A genuine CONTRADICTION on the always-present
     // primary key rather than the bare `{ id: null }` this file uses elsewhere:
@@ -1343,7 +1343,7 @@ function authzFilterEntry(e: Extract<ExprIR, { kind: "authz-filter" }>, acc: str
     // sibling entries `flattenAnd` merges into the same object literal.
     case "deny":
       return `$and: [{ id: null }, { id: { $ne: null } }]`;
-    // `deep`/`global` read level (hierarchical tenancy P2.4/P2.5) — the
+    // `deep`/`global` read level (hierarchical tenancy) — the
     // materialized-path descendant-or-self sentinel, DEEP_SCOPE_SEMANTICS:
     //
     //   (data_key IS NOT NULL
@@ -1375,7 +1375,7 @@ function authzFilterEntry(e: Extract<ExprIR, { kind: "authz-filter" }>, acc: str
     // two-term shape as the drizzle twin.
     //
     // The NULL branch is a deliberate OR-fallback, not fail-closed: a row
-    // stamped before P2.3 (or by a principal-less save) has no `data_key`, and
+    // stamped before (or by a principal-less save) has no `data_key`, and
     // a bare prefix test would hide it from its own tenant.  It degrades to
     // exactly the flat floor — never wider.
     //
@@ -1515,7 +1515,7 @@ function withContextFilters(base: string, caps: string[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// Write-scope pre-guard (authorization Phase 3 P3.1 / Phase 4 deny-write).
+// Write-scope pre-guard (authorization / deny-write).
 //
 // `agg.writeScopeFilter` is the predicate an INSTANCE mutation's command load
 // must satisfy when the write scope is strictly NARROWER than the read scope

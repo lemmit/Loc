@@ -353,7 +353,7 @@ export function generateReactForContexts(
   const extraRouteSplit = deriveExtraRoutesFromUi(ui, options.topLevelComponents ?? [], pageCtx);
   const extraRoutes = extraRouteSplit.inShell;
   const outOfShellRoutes = extraRouteSplit.outOfShell;
-  // Phase 8 step 2: walk each declared `layout <Name>` referenced by
+  // step 2: walk each declared `layout <Name>` referenced by
   // a page in this ui into pre-built `NamedLayoutVM`s (slot JSX +
   // route bucket + the imports the slot JSX needs).  The shell
   // template renders one `<XLayout>` component + matching

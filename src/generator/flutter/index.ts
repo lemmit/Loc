@@ -357,8 +357,9 @@ export function generateFlutterForContexts(
   // mount and settle to their loading/error branch with no backend — the tree
   // still builds, which is exactly what the smoke proves.
   out.set("test/widget_test.dart", renderWidgetSmokeTest(pkg));
-  // A11y runtime gate (accessibility.md; docs/audits/flutter-a11y-audit-2026-07.md
-  // Phase C) — the Flutter analogue of the axe-core tripwire, which can't scan a
+  // A11y runtime gate (accessibility.md;
+  // docs/audits/flutter-a11y-audit-2026-07.md) — the Flutter analogue of the
+  // axe-core tripwire, which can't scan a
   // canvas-rendered Flutter build.  Boots the real app with the semantics tree
   // enabled and asserts Flutter's built-in WCAG guidelines on the first frame.
   // Runs under the same `flutter test` step (whole `test/` dir) as the smoke.
@@ -1283,8 +1284,8 @@ void main() {
 `;
 }
 
-/** `test/a11y_test.dart` — the runtime accessibility gate (Phase C of the
- *  Flutter a11y audit).  Flutter web renders to a canvas, so axe-core (the
+/** `test/a11y_test.dart` — the runtime accessibility gate (see the Flutter
+ *  a11y audit).  Flutter web renders to a canvas, so axe-core (the
  *  web frontends' a11y tripwire) can't traverse it; Flutter's own
  *  `flutter_test` `meetsGuideline(...)` matchers are the equivalent.  Enables
  *  the semantics tree, pumps the real `App` once (a single `pump`, not

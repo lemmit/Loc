@@ -17,7 +17,7 @@
 //
 // ---------------------------------------------------------------------------
 // HOW THE REMAINING FRONTENDS PORT INTO THIS MODULE  (decided on the Vue port,
-// M-T1.3 Phase 1; read this BEFORE reaching for a per-framework seam)
+// M-T1.3; read this BEFORE reaching for a per-framework seam)
 // ---------------------------------------------------------------------------
 //
 // This module stays ONE shared emitter widened by a plain options object — it

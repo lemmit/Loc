@@ -86,7 +86,7 @@ import { vueTarget } from "./walker/vue-target.js";
 // Query import specifier differs), same two-stage vite-build /
 // vite-preview docker runtime.
 //
-// Slice 3 scope (vue-frontend-plan.md): project shell + api modules +
+// Scope (vue-frontend-plan.md): project shell + api modules +
 // router + page SKELETONS.  Page bodies walk through the shared
 // markup walker with `vueTarget` in the next slice; until then each
 // declared page emits a stub SFC (route + testid + title) so the
@@ -206,7 +206,7 @@ export function generateVueForContexts(
   }
   const pageRoutes = new Map<string, string>();
   for (const page of pages) pageRoutes.set(page.name, page.route!);
-  // Name-context for `classifyPage` (slice 3c — replaces the stamped `origin`).
+  // Name-context for `classifyPage` (replaces the stamped `origin`).
   const pageCtx: PageNameCtx = {
     aggregateNames: [...aggregatesIRByName.keys()],
     workflowNames: [...workflowsByName.keys()],

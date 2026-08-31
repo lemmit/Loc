@@ -385,7 +385,7 @@ export function buildPyRoutesFile(
 
 /** `app.http.problem` names this routes file references. */
 /** The repo method a MUTATION route loads through: `get_by_id_for_write` when
- *  the aggregate carries a `writeScopeFilter` (authorization Phase 3 P3.1 — the
+ *  the aggregate carries a `writeScopeFilter` (authorization — the
  *  write scope is narrower than the read scope), else `get_by_id` (byte-
  *  identical).  Read routes always use `get_by_id`. */
 function cmdLoad(agg: EnrichedAggregateIR): string {

@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Vanilla ProblemDetails — `lib/<app>_web/problem_details.ex`.
-// Slice 4 of vanilla-foundation-tdd-plan.md (exception-less alignment).
+// vanilla-foundation-tdd-plan.md (exception-less alignment).
 //
 // RFC-7807 envelope — `about:blank` type, camelCased JSON pointers in
 // `errors[]`, `Validation failed` title, `application/problem+json` content

@@ -135,7 +135,7 @@ export function emitButton(
   // injection so the local hook var is available at page-top).
   const disabled = anyNamedArgExpr(call, "disabled", ctx);
   const loading = anyNamedArgExpr(call, "loading", ctx);
-  // Phase 5 — variant + icon slot.  `variant: "primary" | "secondary"
+  // Variant + icon slot.  `variant: "primary" | "secondary"
   // | "ghost"` maps to each pack's idiomatic rank ("filled" / "outline"
   // / "subtle" on Mantine, "default" / "outline" / "ghost" on shadcn).
   // `icon:` + `iconPosition:` lets a button display an SVG glyph from

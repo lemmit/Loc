@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Vanilla foundation — workflow-instance read endpoints (vanilla-foundation
-// -tdd-plan.md slice 5; workflow-instance-visibility.md).
+// -tdd-plan.md; workflow-instance-visibility.md).
 //
 // This retires the deferred-Phoenix workflow-instance-views gap.  On
 // `platform: elixir` a correlation-bearing workflow is observable as a

@@ -245,7 +245,7 @@ export function generateAngularForContexts(
   }
   const pageRoutes = new Map<string, string>();
   for (const page of pages) pageRoutes.set(page.name, page.route!);
-  // Name-context for the page's emitted identifier (slice 3c — replaces origin).
+  // Name-context for the page's emitted identifier (replaces origin).
   const pageCtx: PageNameCtx = {
     aggregateNames: contexts.flatMap((c) => c.aggregates.map((a) => a.name)),
     workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
@@ -550,7 +550,7 @@ export function generateAngularForContexts(
   out.set("src/api/config.ts", pack.render("api-config", { apiBaseUrl }));
 
   // Per-aggregate API modules — the idiomatic-Angular `@Injectable` service +
-  // signal-backed `use<Op><Agg>` read factory (data-path sub-slice A; the
+  // signal-backed `use<Op><Agg>` read factory (the
   // QueryView read path that consumes them lands in the next sub-slice).
   for (const { agg } of aggregates) {
     out.set(

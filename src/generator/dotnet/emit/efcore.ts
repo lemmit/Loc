@@ -671,7 +671,7 @@ export function queryFilterNames(agg: AggregateIR): string[] {
 
 /** Does this aggregate carry a query filter no `ignoring` clause may drop?
  *  Today that is exactly the `policy { deny on X }` always-false sentinel
- *  (authorization Phase 4, deny-wins): it is a CARVE-OUT, not a capability
+ *  (authorization, deny-wins): it is a CARVE-OUT, not a capability
  *  filter, so an authored `ignoring *` (a legitimate escape hatch for the
  *  tenancy/softDelete filters, docs/tenancy.md) must not lift it — otherwise a
  *  read-denied aggregate serves every row through a public route. */

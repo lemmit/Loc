@@ -250,7 +250,7 @@ export interface PagerChrome {
  *  — client paging would be structurally unreachable for them no matter what
  *  `renderPager` did. */
 /** What a target needs to build the plotted-data expression under a `Chart`
- *  (M-T1.3 Phase 4 — the `renderChartData` seam).  The `of:` read is already
+ *  (the `renderChartData` seam).  The `of:` read is already
  *  rendered; what differs per target is only how rows are reached and how the
  *  series is coerced to a number. */
 export interface ChartDataSpec {

@@ -43,7 +43,7 @@ export function renderHttpIndex(
      *  `<resource>$getBytes`).  Absent → no `/files` routes emitted
      *  (byte-identical output). */
     fileUpload?: { resource: string; sourceType: string };
-    /** M-T4.4 slice 3: durable events ride a broker-bound `queue`/`work`
+    /** M-T4.4: durable events ride a broker-bound `queue`/`work`
      *  channel — the outbox must capture them even when this deployable hosts
      *  no reactor (a pure producer), so the relay can publish on drain. */
     forceOutbox?: boolean;
@@ -126,7 +126,7 @@ export function renderHttpIndex(
   // default dispatcher wraps the in-process one — durable events are
   // recorded in __loom_outbox and the relay (started by index.ts) delivers
   // them; ephemeral events keep the inline at-most-once path.
-  // Persistence-neutral since M-T6.23 slice 1: the MikroORM adapter emits the
+  // Persistence-neutral since M-T6.23: the MikroORM adapter emits the
   // same two exports over the `LoomOutboxRow` EntitySchema, so a durable channel
   // is at-least-once on both adapters (it silently degraded to the at-most-once
   // in-process path here before).

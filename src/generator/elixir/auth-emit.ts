@@ -84,12 +84,12 @@ export function emitAuth(args: AuthEmitArgs): AuthEmitResult {
   // dev stub keeps a freshly-generated stack callable out of the box.
   const auth = sys.auth;
 
-  // Hierarchy (multi-tenancy P2.2): when the registry opts into
+  // Hierarchy (multi-tenancy): when the registry opts into
   // `tenantRegistry` (a `dataKey` column exists), `currentUser.orgPath` becomes
   // a per-request registry read — the caller org's materialized `data_key`,
   // resolved through the registry's Ecto schema module (which carries the
   // `@schema_prefix` + `:binary_id` cast) via the app `Repo`.  Without it (flat
-  // tenancy), the P2.1 claim-copy stands.  The plug is constructed once per
+  // tenancy), the claim-copy stands.  The plug is constructed once per
   // request, so the read is naturally memoized on `conn.assigns.current_user`.
   const registry = hierarchyRegistry(sys);
   const orgPathRegistry =
@@ -129,9 +129,9 @@ export function emitAuth(args: AuthEmitArgs): AuthEmitResult {
   return { files, enabled: true };
 }
 
-/** The Ecto modules the P2.2 `orgPath` registry read needs — the registry's
+/** The Ecto modules the `orgPath` registry read needs — the registry's
  *  schema module (carrying `@schema_prefix` + the `:binary_id` id cast) and the
- *  app `Repo`.  `undefined` for flat tenancy (P2.1 claim-copy). */
+ *  app `Repo`.  `undefined` for flat tenancy (claim-copy). */
 interface OrgPathRegistryRef {
   repoModule: string;
   schemaModule: string;
@@ -201,21 +201,21 @@ function renderAuthPlug(
   // Applied as a final `put_org_path/1` step AFTER the principal (and any
   // dev-claims override) is built, so it reflects the final claim value.
   //
-  //  - flat tenancy (P2.1): `orgPath` is the claim itself (the root-segment
+  //  - flat tenancy: `orgPath` is the claim itself (the root-segment
   //    path — no registry `dataKey` column to read), stringified null-safely.
-  //  - hierarchy (P2.2): resolve the caller org's registry `data_key` once per
+  //  - hierarchy: resolve the caller org's registry `data_key` once per
   //    request (the plug runs per request, so it is memoized on the principal);
   //    fail safe to the claim when the row / dataKey is absent or the claim is
   //    malformed — never crashes.
   const orgPathKey = orgPathClaim ? snake(orgPathClaim) : undefined;
   // `put_root_org/1` runs AFTER `put_org_path/1` in the pipe, deriving
-  // `current_user.root_org` (P2.5) from the just-set `:org_path`.
+  // `current_user.root_org` from the just-set `:org_path`.
   const orgPathPipe = orgPathKey ? " |> put_org_path() |> put_root_org()" : "";
   const putOrgPathDef = !orgPathKey
     ? ""
     : orgPathRegistry
       ? `
-  # Derives \`current_user.org_path\` (multi-tenancy P2.2): the caller org's
+  # Derives \`current_user.org_path\` (multi-tenancy): the caller org's
   # materialized \`data_key\`, read once per request from the tenant registry via
   # the app \`Repo\`.  The registry's Ecto schema module applies the schema prefix
   # and casts the pinned string claim against the \`:binary_id\` id column (the
@@ -240,17 +240,17 @@ function renderAuthPlug(
   defp resolve_org_path(claim), do: to_string(claim)
 `
       : `
-  # Derives \`current_user.org_path\` from the tenancy claim (multi-tenancy P2.1).
+  # Derives \`current_user.org_path\` from the tenancy claim (multi-tenancy).
   defp put_org_path(user), do: Map.put(user, :org_path, to_string(user[:${orgPathKey}]))
 `;
-  // `current_user.root_org` (P2.5): the ROOT-org segment — the first segment of
+  // `current_user.root_org`: the ROOT-org segment — the first segment of
   // `:org_path` (up to the first `.`).  Derived off the already-resolved
   // `:org_path` (pure, no extra read), correct under both flat and hierarchy
   // tenancy; anchors the `global` read level's root-subtree widening.
   const putRootOrgDef = !orgPathKey
     ? ""
     : `
-  # Derives \`current_user.root_org\` (multi-tenancy P2.5): the first segment of
+  # Derives \`current_user.root_org\` (multi-tenancy): the first segment of
   # the materialized \`org_path\`, the anchor for the \`global\` read level.
   defp put_root_org(user), do: Map.put(user, :root_org, root_org_of(user[:org_path]))
 
@@ -263,7 +263,7 @@ function renderAuthPlug(
 
   defp root_org_of(path), do: to_string(path)
 `;
-  // The P2.2 registry read needs `from/2`; import it only in hierarchy mode so
+  // The registry read needs `from/2`; import it only in hierarchy mode so
   // a flat / no-tenancy plug carries no unused import (--warnings-as-errors).
   const ectoQueryImport =
     orgPathKey && orgPathRegistry ? "\n  import Ecto.Query, only: [from: 2]" : "";

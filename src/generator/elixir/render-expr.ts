@@ -117,7 +117,7 @@ export interface RenderCtx {
    *  (so `s.order` → `event.order`); other refs are unaffected. */
   paramRenames?: Record<string, string>;
   /** Tier resolver for a `reading`-tier domain-service CALL (domain-services.md
-   *  rev. 4, Slice 1; Elixir decision B — ambient `Repo`).  On the
+   *  rev. 4; Elixir decision B — ambient `Repo`).  On the
    *  Elixir/vanilla backend a `reading` service op lowers to a CONTEXT FUNCTION
    *  on its aggregate's context module (so it has the ambient `Repo`), NOT a
    *  standalone `<App>.Domain.Services.<Name>` module — the latter is reserved
@@ -285,11 +285,11 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
   // `scope` sentinel first — this arm keeps `renderExpr` total for it too.)
   if (e.kind === "authz-filter") {
     switch (e.filter.kind) {
-      // DENY carve-out (authorization Phase 4 — deny-wins).  Ecto's always-false
+      // DENY carve-out (authorization — deny-wins).  Ecto's always-false
       // query fragment; no row satisfies it.
       case "deny":
         return 'fragment("false")';
-      // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) — the pinned
+      // `deep`/`global` read level (multi-tenancy) — the pinned
       // fail-closed materialized-path scope fragment.
       case "scope":
         return renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(e), deepScopeTenantClaim(e));
@@ -322,7 +322,7 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
 }
 
 /** The context-facade find fn that fronts a repository read in a `reading`
- *  domain-service body (domain-services.md rev. 4, Slice 1; Elixir decision B —
+ * domain-service body (domain-services.md rev. 4; Elixir decision B —
  *  ambient `Repo`).  Mirrors the workflow `repo-let` lowering exactly
  *  (`workflow-execution-emit.ts`): the built-in `getById` maps to the
  *  `get_<agg>/1` (`find_by_id`) facade; a custom find maps to the per-find
@@ -729,7 +729,7 @@ function renderMethodCall(recv: string, args: string[], e: MethodCallExpr, ctx: 
   return `${recv}.${snake(e.member)}(${args.join(", ")})`;
 }
 
-/** The `deep` read-level sentinel (multi-tenancy Phase 2 P2.4) as a raw Ecto
+/** The `deep` read-level sentinel (multi-tenancy) as a raw Ecto
  *  `fragment` inside a `where:` — descendant-or-self materialized-path scope
  *  with the NULL-dataKey fallback to the tenant floor (see
  *  `DEEP_SCOPE_SEMANTICS`).  A SQL `fragment` sidesteps Ecto's `is_nil`/`like`
@@ -1047,7 +1047,7 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
     }
     case "repo-read": {
       // Read-only repository query in a `reading` domain-service body
-      // (domain-services.md rev. 4, Slice 1; Elixir decision B — ambient
+      // (domain-services.md rev. 4; Elixir decision B — ambient
       // `Repo`).  The reading op is emitted as a CONTEXT FUNCTION (it has the
       // ambient `Repo`), so a repo read renders against the SAME context-facade
       // find fn the workflow `repo-let` lowering calls: `getById` → `get_<agg>`,
@@ -1112,7 +1112,7 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
     }
     case "domain-service": {
       // Two shapes, decided by the operation's TIER (domain-services.md rev. 4,
-      // Slice 1; Elixir decision B):
+      // Elixir decision B):
       //
       //   - `pure` (or no tier resolver) → `Shop.Domain.Services.Pricing.quote(…)`,
       //     a plain stateless module fully qualified under the app's

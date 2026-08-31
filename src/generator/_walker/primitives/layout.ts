@@ -389,7 +389,7 @@ export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
     contentParts.length > 0
       ? contentParts.join(`${ctx.target.interChildSeparator ?? ""}\n${indent}`)
       : undefined;
-  // Phase 5 — visual rank.  `variant: "raised" | "flat" | "outline"`
+  // visual rank.  `variant: "raised" | "flat" | "outline"`
   // picks the card's elevation idiom per pack.  `shadow: "sm" | "md"
   // | "lg" | "none"` overrides the variant's default shadow level.
   const variant = stringNamed(call, "variant");

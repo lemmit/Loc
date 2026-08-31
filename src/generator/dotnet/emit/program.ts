@@ -111,7 +111,7 @@ export function renderProgram(
      *  rows stamp the per-dispatch frame's scope / parent ids, so it also
      *  forces the `ExecutionContextBehavior` frame-opener to be registered. */
     hasProvenance?: boolean;
-    /** Tenant hierarchy (multi-tenancy P2.2): the registry opts into
+    /** Tenant hierarchy (multi-tenancy): the registry opts into
      *  `tenantRegistry`, so register the scoped `IOrgPathResolver` →
      *  `EfOrgPathResolver` that UserMiddleware calls per request to materialize
      *  `currentUser.orgPath` from the registry's `data_key`.  Implies
@@ -126,7 +126,7 @@ export function renderProgram(
      *  channelSource — register the ChannelTransports singleton and wrap the
      *  dispatcher chain in the publish tee (design §4 delivery uniformity). */
     hasChannels?: boolean;
-    /** M-T4.4 slice 7b: the workflow-less durable-broker producer shape — the
+    /** M-T4.4: the workflow-less durable-broker producer shape — the
      *  outbox dispatcher wraps the Noop (no in-process dispatcher exists), so
      *  register the Noop concretely instead of the InProcess scoped line. */
     outboxNoopInner?: boolean;
@@ -442,7 +442,7 @@ using (var seedScope = app.Services.CreateScope())
     ? `\n// Entity history — the read port over audit_records (GET /<agg>/{id}/history).\nbuilder.Services.AddScoped<${ns}.Application.Common.IAuditHistoryReader, ${ns}.Infrastructure.Persistence.AuditHistoryReader>();`
     : "";
 
-  // Domain persistence-port adapters (audit S7 Slice C): the orchestration
+  // Domain persistence-port adapters: the orchestration
   // handlers (transactional workflow command, saga reactors, projection fold)
   // depend on IUnitOfWork / IWorkflowEventStore / ISagaStateStore /
   // IReadModelStore instead of the concrete AppDbContext.  All scoped over the
@@ -458,14 +458,14 @@ using (var seedScope = app.Services.CreateScope())
   const portsDi = usesPersistencePorts
     ? usingDapper
       ? `\n// Domain persistence ports (M-T6.9) — Dapper adapters over NpgsqlDataSource (closed bindings).\n${(options?.dapperPortRegistrations ?? []).join("\n")}`
-      : `\n// Domain persistence ports (audit S7 Slice C) — EF adapters over the scoped AppDbContext.\nbuilder.Services.AddScoped<${ns}.Domain.Common.IUnitOfWork, ${ns}.Infrastructure.Persistence.EfUnitOfWork>();\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IWorkflowEventStore<>), typeof(${ns}.Infrastructure.Persistence.EfWorkflowEventStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.ISagaStateStore<>), typeof(${ns}.Infrastructure.Persistence.EfSagaStateStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IReadModelStore<>), typeof(${ns}.Infrastructure.Persistence.EfReadModelStore<>));`
+      : `\n// Domain persistence ports — EF adapters over the scoped AppDbContext.\nbuilder.Services.AddScoped<${ns}.Domain.Common.IUnitOfWork, ${ns}.Infrastructure.Persistence.EfUnitOfWork>();\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IWorkflowEventStore<>), typeof(${ns}.Infrastructure.Persistence.EfWorkflowEventStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.ISagaStateStore<>), typeof(${ns}.Infrastructure.Persistence.EfSagaStateStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IReadModelStore<>), typeof(${ns}.Infrastructure.Persistence.EfReadModelStore<>));`
     : "";
 
   // Extern application-layer handlers ([ExternHandler] scan targets).  Since
   // extern (b), an extern aggregate OPERATION is a domain partial-method
   // hook (no injected handler, no `[ExternHandler]`, no DI registration — a
   // missing implementation is a COMPILE error), so ONLY the extern
-  // commandHandler / queryHandler application members (Phase 1's case-2 home)
+  // commandHandler / queryHandler application members (case-2 home)
   // register through the Scrutor scan.  Their user impl carries `[ExternHandler]`;
   // the same scan registers it under `I<Name>Handler` and the startup verify
   // fails fast when the user hasn't supplied one.
@@ -536,7 +536,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserAccessor, HttpContextCurrentUserAccessor>();${
         orgPathResolver
           ? `
-// Tenant hierarchy (multi-tenancy P2.2): the per-request \`orgPath\` resolver —
+// Tenant hierarchy (multi-tenancy): the per-request \`orgPath\` resolver —
 // currentUser.orgPath = the caller org's materialized \`data_key\`, read once
 // per request by UserMiddleware and memoized on the principal (fail-safe to
 // the claim).  Scoped: it holds the request-scoped ${usingDapper ? "connection source" : "AppDbContext"}.

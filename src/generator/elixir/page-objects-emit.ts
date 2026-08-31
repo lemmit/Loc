@@ -160,7 +160,7 @@ export function pageObjectPathFor(page: PageIR, ctx: PageNameCtx): string {
 export function buildPlaywrightPageObject(args: BuildPlaywrightPageObjectArgs): string {
   const { page, aggregatesByName, contextByAggName } = args;
   // The page's kind + emitted name are derived from its role-scoped name + area
-  // (slice 3c — no stamped `origin`).
+  // (no stamped `origin`).
   const workflowNames: string[] = [];
   for (const bc of contextByAggName.values()) {
     for (const wf of bc.workflows) workflowNames.push(wf.name);

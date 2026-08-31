@@ -591,7 +591,7 @@ export function renderJavaWorkflows(
   wctx: WorkflowCtx,
   authed: boolean,
   sys?: SystemIR,
-  /** Source-map Milestone 11 (workflow-body statement regions) — allocated by
+  /** Source-map (workflow-body statement regions) — allocated by
    *  the caller (`src/generator/java/index.ts`) ONLY when a recorder is
    *  present.  The merged `<Ctx>Workflows.java` service deliberately gets no
    *  whole-file region (a multi-workflow pool — see the call site's comment),

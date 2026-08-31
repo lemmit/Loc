@@ -844,7 +844,7 @@ function typeOfFreeCall(name: string, env: Env): DddType {
   // (`CanApprove(cap)`) is a boolean predicate.
   if (lookupCriterionByName(name, env)) return T.prim("bool");
   if (lookupPolicyFnByName(name, env)) return T.prim("bool");
-  // Top-level (ambient) helper function (stdlib Phase B) — its declared
+  // Top-level (ambient) helper function (stdlib) — its declared
   // return type.  After the shadowing lookups above, before the duration
   // builtins (a user `function days(...)` shadows the `days()` builtin).
   const topFn = lookupTopLevelFunction(name, env);
@@ -1215,7 +1215,7 @@ function lookupFunctionInScope(
   return undefined;
 }
 
-/** A TOP-LEVEL (ambient) helper `function` named `name` (stdlib Phase B) —
+/** A TOP-LEVEL (ambient) helper `function` named `name` (stdlib) —
  *  declared at file root or inside a `system { }`, visible workspace-wide.
  *  Checked AFTER local functions / VO ctors / criteria / policy fns (which
  *  shadow it), mirroring the lowerer's inline precedence (`inlineTopLevelFn`
@@ -1236,7 +1236,7 @@ function lookupTopLevelFunction(
       }
     }
   }
-  // Ambient std prelude (stdlib Phase C) — after any user-declared top-level
+  // Ambient std prelude (stdlib) — after any user-declared top-level
   // function (which shadows it), so a call to a prelude function types to its
   // declared return.
   return stdFunction(name);
@@ -1312,7 +1312,7 @@ function lookupCriterionByName(name: string, env: Env): Criterion | undefined {
 }
 
 /** Resolve a FUNCTION-form `policy` declaration by name against the enclosing
- *  bounded context (auth P3.2).  A reference to one in expression position
+ *  bounded context (auth).  A reference to one in expression position
  *  (e.g. a `requires PolicyName(args)` gate) types as `bool`.  Only the
  *  function form (carrying a `returnType`) is callable; a block-form
  *  `policy {}` read ladder is not. */

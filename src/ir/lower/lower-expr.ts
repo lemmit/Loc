@@ -147,8 +147,8 @@ export function setAmbientEnumIndex(index: ReadonlyMap<string, string>): void {
   ambientEnumIndex = index;
 }
 
-// Project-global index of TOP-LEVEL (ambient) helper `function`s (stdlib
-// Phase B), name → decl.  Installed once by `lowerModel` before any body is
+// Project-global index of TOP-LEVEL (ambient) helper `function`s, name →
+// decl.  Installed once by `lowerModel` before any body is
 // lowered (single synchronous pass, so the module-global is safe — same
 // posture as `ambientEnumIndex`).  A call to one of these inlines its
 // expression body at the call site (`inlineTopLevelFn`), so it needs no
@@ -362,7 +362,7 @@ function lowerPostfixChain(chain: PostfixChain, env: Env): ExprIR {
     return recv;
   }
   // Named policy-function CALL at the chain head (`IsManager()` /
-  // `CanApprove(amount)`, auth P3.2) — inline the ambient predicate body with
+  // `CanApprove(amount)`, auth) — inline the ambient predicate body with
   // the call arguments, then apply any trailing suffixes.  Handled here (not
   // via the `recv.kind === "ref"` call branch below) because a PARAMETERLESS
   // policy function resolves eagerly to its inlined body in `resolveNameRef`,
@@ -447,7 +447,7 @@ function applySuffixToRecv(
         };
       }
       // Parameterised policy-function call (`CanApprove(cap)`) — inline the
-      // ambient predicate body with the call arguments substituted (auth P3.2).
+      // ambient predicate body with the call arguments substituted (auth).
       const policyFn = findPolicyFnInEnv(env, recv.name);
       if (policyFn) {
         return {
@@ -456,7 +456,7 @@ function applySuffixToRecv(
         };
       }
       const callKind = resolveCallKind(recv.name, env);
-      // Top-level (ambient) helper `function` call (stdlib Phase B) — inline
+      // Top-level (ambient) helper `function` call (stdlib) — inline
       // its expression body with the arguments substituted.  Gated on
       // `callKind === "free"` so a LOCAL member (aggregate/VO/workflow
       // function, operation, VO ctor) of the same name shadows the top-level
@@ -1524,8 +1524,8 @@ function findTopLevelFn(name: string): FunctionDecl | undefined {
   return topLevelFnIndex.get(name);
 }
 
-/** Inline a top-level (ambient) helper `function` at the call site (stdlib
- *  Phase B).  Like `inlinePolicyFn`, the body is AMBIENT — it sees only its
+/** Inline a top-level (ambient) helper `function` at the call site.
+ *  Like `inlinePolicyFn`, the body is AMBIENT — it sees only its
  *  own parameters (substituted by the caller's already-lowered arguments),
  *  context-level ambient names (root enums, sibling top-level functions), and
  *  `currentUser` if present; the enclosing aggregate/part/VO/workflow scope is
@@ -1710,7 +1710,7 @@ function resolveNameRef(name: string, env: Env, node?: AstNode): ExprIR {
       return inlineCriterion(crit, [], env);
     }
     // Parameterless policy-function reference (`IsManager`) — inline the
-    // ambient predicate body (auth P3.2).  A parameterised policy function
+    // ambient predicate body (auth).  A parameterised policy function
     // referenced bare falls through; the validator reports the arity mismatch
     // (`loom.policy-fn-arity`).
     const policyFn = findPolicyFnInEnv(env, name);

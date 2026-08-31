@@ -84,8 +84,8 @@ export interface JavaRenderContext {
    *  aggregate read from OUTSIDE its package (query-projection reads in the
    *  view-service package) — package-private fields are unreachable there. */
   accessorProps?: boolean;
-  /** Tier resolver for a `domain-service` call (domain-services.md rev. 4,
-   *  Slice 1 — the `reading` tier).  Returns `true` when `<service>.<op>` is a
+  /** Tier resolver for a `domain-service` call (domain-services.md rev. 4 —
+   *  the `reading` tier).  Returns `true` when `<service>.<op>` is a
    *  READING-tier operation (it runs read-only repository queries, so on Java it
    *  is a `@Service` bean), in which case the call renders as an INSTANCE call
    *  against the injected field (`registration.isEmailAvailable(holder)`).  A

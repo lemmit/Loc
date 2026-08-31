@@ -116,7 +116,7 @@ export function generateSvelteForContexts(
   }
   const aggregatesByName = new Map<string, AggregateIR>();
   for (const { agg } of aggregates) aggregatesByName.set(agg.name, agg);
-  // Name-context for `classifyPage` / `pageEmitName` (slice 3c — replaces the
+  // Name-context for `classifyPage` / `pageEmitName` (replaces the
   // stamped page origin).  Derived once from the served contexts.
   const pageCtx: PageNameCtx = {
     aggregateNames: contexts.flatMap((c) => c.aggregates.map((a) => a.name)),

@@ -1,4 +1,4 @@
-// Timer scheduler emission (scheduling.md) — the Hono backend, Phase 2 (durable).
+// Timer scheduler emission (scheduling.md) — the Hono backend (durable).
 //
 // A `timerSource` fires a plain domain event on a wall-clock cadence.  This
 // builder renders `scheduler.ts`, splitting the owned timers by cadence:

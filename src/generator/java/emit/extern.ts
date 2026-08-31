@@ -7,7 +7,7 @@ import { renderJavaType } from "../render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Extern operations — the DOMAIN EXTENSION POINT
-// (extern-domain-extension-point.md §3a, decisions D2/D5; the Java Phase 2
+// (extern-domain-extension-point.md §3a, decisions D2/D5; the Java
 // re-home).  An `operation X() extern` on the aggregate declares business
 // logic the DSL can't express: the generated `<Agg>.<op>(...)` method runs the
 // preconditions, delegates HERE, then re-asserts invariants.

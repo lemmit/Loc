@@ -597,7 +597,7 @@ function indent(text: string, prefix: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Per-page unfold (M-T1.5 slice A) — eject ONE scaffolded page's body as
+// Per-page unfold — eject ONE scaffolded page's body as
 // `.ddd` source while its siblings stay under the macro.
 //
 // Whole-`ui` unfold (above) removes the `with scaffold(...)` clause and ejects

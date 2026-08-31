@@ -96,7 +96,7 @@ export function buildPyEmbeddedRepositoryFile(
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
-    // Command load (authorization Phase 3 P3.1): an embedded root is a normal
+    // Command load (authorization): an embedded root is a normal
     // queryable row, so the write-scope pre-guard pushes into the same SQL
     // `where` the relational shape uses (and falls back to an in-app check on a
     // predicate SQLAlchemy cannot express).

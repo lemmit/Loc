@@ -14,9 +14,9 @@ import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { lines } from "../../../util/code-builder.js";
 import { renderJavaType } from "../render-expr.js";
 
-/** The tenant registry (`implements tenantRegistry`) facts the P2.2
+/** The tenant registry (`implements tenantRegistry`) facts the
  *  `currentUser.orgPath` resolver needs.  Present only under hierarchy — its
- *  presence flips the `orgPath()` accessor from P2.1's claim-copy to a real,
+ * presence flips the `orgPath` accessor from claim-copy to a real,
  *  per-request memoized registry `data_key` read. */
 export interface OrgPathRegistry {
   /** `plural(snake(registry.name))` — the registry's Flyway state table
@@ -48,10 +48,10 @@ export function renderAuthFiles(
   /** Fullstack mode: only guard routes under this prefix ("/api"), so
    *  the SPA bundle + client-side routes stay public. */
   guardPrefix?: string,
-  /** Hierarchy (multi-tenancy P2.2): when the tenant registry opts into
+  /** Hierarchy (multi-tenancy): when the tenant registry opts into
    *  `tenantRegistry` (a `data_key` column exists) AND its table is reachable
    *  from this deployable, `orgPath()` reads it per request.  `undefined` for
-   *  flat tenancy — the P2.1 claim-copy accessor stands. */
+   *  flat tenancy — the claim-copy accessor stands. */
   orgPathRegistry?: OrgPathRegistry,
 ): Map<string, string> {
   const out = new Map<string, string>();
@@ -74,9 +74,9 @@ export function renderAuthFiles(
     })
     .join(", ");
   // Derived `currentUser.orgPath` — the caller's tenant materialized path
-  // (multi-tenancy P2.1).  An extra record accessor (not a component), so
-  // every `new User(...)` site is untouched; stringified null-safely.  P2.1
-  // resolves it to the tenancy claim value (the root path); P2.2 swaps the
+  // (multi-tenancy).  An extra record accessor (not a component), so
+  // every `new User(...)` site is untouched; stringified null-safely.
+  // resolves it to the tenancy claim value (the root path); swaps the
   // body for a memoized registry `dataKey` lookup.
   const orgPathClaim = sys.tenancy?.claimField;
   const claimAsString = orgPathClaim
@@ -104,7 +104,7 @@ export function renderAuthFiles(
           `    }`,
         ]
     : [];
-  // `currentUser.rootOrg` (P2.5): the ROOT-org segment — the first segment of
+  // `currentUser.rootOrg`: the ROOT-org segment — the first segment of
   // `orgPath()` (up to the first `.`).  A record accessor off `orgPath()`
   // (pure, no extra read), correct under both flat and hierarchy tenancy;
   // anchors the `global` read level's root-subtree widening.
@@ -376,7 +376,7 @@ export function renderAuthFiles(
       `            chain.doFilter(request, response);`,
       `        } finally {`,
       `            accessor.clear();`,
-      // Hierarchy (P2.2): drop the per-request orgPath memo so a pooled thread
+      // Hierarchy: drop the per-request orgPath memo so a pooled thread
       // never serves a stale tenant path to the next request.
       orgPathRegistry ? `            OrgPathResolver.clearRequestCache();` : null,
       `        }`,
@@ -418,7 +418,7 @@ export function renderAuthFiles(
     out.set("OidcUserVerifier.java", renderOidcVerifier(fields, oidc, pkg));
   }
 
-  // Hierarchy (multi-tenancy P2.2): the registry-backed `orgPath` resolver.
+  // Hierarchy (multi-tenancy): the registry-backed `orgPath` resolver.
   // The `User` record can't inject beans, so `orgPath()` delegates to a static
   // holder (`OrgPathResolver`) that memoizes the lookup per request; a boot
   // @Component (`OrgPathResolverConfig`) registers a JdbcTemplate closure
@@ -432,7 +432,7 @@ export function renderAuthFiles(
 }
 
 // ---------------------------------------------------------------------------
-// currentUser.orgPath under hierarchy (multi-tenancy P2.2) — the registry
+// currentUser.orgPath under hierarchy (multi-tenancy) — the registry
 // `data_key` read.  Two files:
 //
 //   OrgPathResolver       — a static holder the `User.orgPath()` accessor

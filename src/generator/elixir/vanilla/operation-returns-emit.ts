@@ -371,7 +371,7 @@ export function renderEmitDispatchLines(
   /** Dotted construct id (`Ctx.Agg.op`) — only needed when `opFragments` is
    *  passed. */
   construct?: string,
-  /** Source-map Milestone 13 collector (`--sourcemap`) — only allocated by
+  /** Source-map collector (`--sourcemap`) — only allocated by
    *  the caller when a recorder is present (zero cost otherwise). */
   opFragments?: OpFragment[],
   /** Broker channels (M-T4.4) — presence re-routes the dispatch
@@ -546,7 +546,7 @@ export function renderReturningOpFunction(
    *  §11c) — those `put_assoc` rather than `put_embed`.  Caller computes via
    *  `usesRelationalContainments`; empty (the default) keeps embedded output. */
   relationalContainments: ReadonlySet<string> = new Set(),
-  /** Source-map Milestone 3 collector (`--sourcemap`) — only allocated by the
+  /** Source-map collector (`--sourcemap`) — only allocated by the
    *  caller when a recorder is present (zero cost otherwise). */
   opFragments?: OpFragment[],
   /** Broker channels (M-T4.4) — see renderEmitDispatchLines. */

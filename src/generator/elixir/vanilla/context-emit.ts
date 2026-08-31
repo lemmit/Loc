@@ -4,7 +4,7 @@
 //
 // Plain Elixir context module.  Façade that
 // re-exports the per-aggregate Repository functions plus named-
-// operation handlers (Slice 5c prerequisite — workflows on vanilla
+// operation handlers (workflows on vanilla
 // need `<op>_<agg>(record, params)` for cross-aggregate operation
 // calls in the workflow body).
 // ---------------------------------------------------------------------------
@@ -649,7 +649,7 @@ ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}${functi
   // unused.
   const requireLogger = contextEmitsEvent(ctx) ? "\n  require Logger" : "";
 
-  // Reading-tier domain services (domain-services.md rev. 4, Slice 1; Elixir
+  // Reading-tier domain services (domain-services.md rev. 4; Elixir
   // decision B — ambient `Repo`).  A single-context `reading` service op lowers
   // to a CONTEXT FUNCTION on THIS module (not a `Domain.Services` module), so
   // its body's repo reads resolve against the ambient `Repo` via the
@@ -1007,7 +1007,7 @@ function renderNamedOpFunction(
   /** Containment fields persisted as child tables (relational §11c) — these
    *  `put_assoc` rather than `put_embed`.  Empty = embedded output (default). */
   relationalContainments: ReadonlySet<string> = new Set(),
-  /** Source-map Milestone 3 collector (`--sourcemap`) — only allocated by the
+  /** Source-map collector (`--sourcemap`) — only allocated by the
    *  caller when a recorder is present (zero cost otherwise). */
   opFragments?: OpFragment[],
   /** Broker channels (M-T4.4) — see renderEmitDispatchLines. */

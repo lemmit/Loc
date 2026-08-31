@@ -2134,7 +2134,7 @@ export function renderDapperEventSourcedRepository(
   const anyFindUsesUser = (repo?.finds ?? []).some((raw) =>
     findUsesCurrentUser(unionFindAsOptionalTwin(raw, agg.name)),
   );
-  // Write-scope narrowing (authorization Phase 3 P3.1): the EVENT-SOURCED twin
+  // Write-scope narrowing (authorization): the EVENT-SOURCED twin
   // of the document `writeScopeMethod` above — a stream has no queryable row to
   // pre-guard in SQL, so fold it through `GetByIdAsync` and apply the scope
   // predicate in-app.  Without it, a narrowed write ladder (or `policy { deny

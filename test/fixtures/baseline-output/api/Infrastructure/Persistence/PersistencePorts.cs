@@ -1,4 +1,4 @@
-// Auto-generated.  EF Core adapters for the domain persistence ports (audit S7 Slice C).
+// Auto-generated.  EF Core adapters for the domain persistence ports.
 using System;
 using System.Collections.Generic;
 using System.Data;

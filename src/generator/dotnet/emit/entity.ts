@@ -77,7 +77,7 @@ function narrowedOrigin(stmt: NarrowableStmt): OriginRef | undefined {
   return stmt.origin;
 }
 
-/** M7 phase 6a: weave enhanced C#10 `#line (a,b)-(c,d) "path"` directives
+/** Weave enhanced C#10 `#line (a,b)-(c,d) "path"` directives
  *  (source-map-and-debugging.md §6.C) into a REGULAR named-operation's
  *  per-statement chunk list, one directive per statement whose origin
  *  resolves to a span in `sourceTexts`.  A statement with no usable origin
@@ -182,7 +182,7 @@ export function renderEntity(
    *  signature with the union type and threads `returnUnion` into the body's
    *  render context so tagged `return`s build the right variant record. */
   operationReturnUnions?: Map<string, { name: string; members: UnionMember[] }>,
-  /** Source-map Milestone 3 (statement regions) — when passed, the REGULAR
+  /** Source-map (statement regions) — when passed, the REGULAR
    *  named-operation body loop below pushes one `OpFragment` per operation.
    *  Only the root render call gets this (entity parts carry no
    *  operations); allocated by the caller ONLY when a recorder is present
@@ -231,7 +231,7 @@ export function renderEntity(
   const appliers = isAgg(entity) ? (entity.appliers ?? []) : [];
   const esCreate = isAgg(entity) ? entity.creates?.[0] : undefined;
   const hasExtern = operations.some((o) => o.extern);
-  // Extern (b) Phase 2: an `extern` op never widens any setter.  The extern
+  // Extern (b): an `extern` op never widens any setter.  The extern
   // hook (`<Op>Core`) is a member of the aggregate, so it mutates the `private`
   // setters directly — no `internal`/`public` leak (finding S10 fixed by
   // construction).  Setters stay `private` for every aggregate.
@@ -511,7 +511,7 @@ export function renderEntity(
       op: op.name,
       eventSourced,
     });
-    // M7 phase 6a: weave enhanced `#line` directives BEFORE the join, so
+    // Weave enhanced `#line` directives BEFORE the join, so
     // `chunks`/`body`/`fragmentText` and the sub-region cursor walk below
     // all see the exact same (post-weave) text that lands in the file —
     // never post-process the joined `body`, that would desync
@@ -895,7 +895,7 @@ export function renderEntity(
       "",
       `namespace ${ns}.Domain.${plural(rootName)};`,
       "",
-      // Extern (b) Phase 2: an aggregate with an extern op is `partial` so the
+      // Extern (b): an aggregate with an extern op is `partial` so the
       // user's co-located scaffold-once file can supply the implementing half
       // of each `<Op>Core` hook.
       `public sealed ${isRoot && hasExtern ? "partial " : ""}class ${entity.name}${

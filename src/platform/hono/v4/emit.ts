@@ -221,7 +221,7 @@ ${localizeMessages ? 'import { localizeMessage } from "./messages";\n' : ""}
  *  the runtime emits on 422 validation responses.  Consumed by the
  *  frontend ACL's \`applyServerErrors\` (see docs/old/proposals/frontend-acl.md).
  *  All fields nullable / optional — base 5 per the spec core; \`errors\` is
- *  only present on 422 validation responses.  Phase D of
+ *  only present on 422 validation responses.  See
  *  docs/old/proposals/validation-error-extension.md — all three backends
  *  (Hono / .NET / Phoenix) declare the same shape in lockstep so the
  *  cross-backend parity gate stays green. */
@@ -487,7 +487,7 @@ export function generateTypeScriptForContexts(
   // because they widen the merged vocabulary below — a consumer deployable
   // need not HOST the channel's owning context to react to its events; the
   // wired binding is what carries the routing knowledge across deployables.
-  // Persistence-neutral since M-T6.23 slice 2: `http/channels.ts` (the driver,
+  // Persistence-neutral since M-T6.23: `http/channels.ts` (the driver,
   // producer tee and consumer loop) reads no `db` at all, and the outbox relay
   // it publishes drained rows through now emits on both adapters.
   const channelBindings = system ? brokerChannelBindings(system.deployable, system.sys) : [];
@@ -686,7 +686,7 @@ export function generateTypeScriptForContexts(
   ) {
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
     // Only collected when a recorder is actually threaded in — a
-    // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 11:
+    // no-sourcemap run pays no per-statement bookkeeping cost.
     // `http/workflows.ts` pools every workflow, so it never gets a
     // whole-file region — only these fragment-only statement regions.
     const workflowOpFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
@@ -717,7 +717,7 @@ export function generateTypeScriptForContexts(
   // current read model of the query-time projection read.  Emitted to a distinct
   // file (`http/query-projections.ts`, mounted under `/projections`) since the
   // folded read model owns `http/projections.ts` with a different signature.
-  // Persistence-neutral since M-T6.23 slice 4: the aggregation / raw-table
+  // Persistence-neutral since M-T6.23: the aggregation / raw-table
   // shapes read through the mikro QueryBuilder, and the repository-sourced shape
   // was adapter-neutral already (`synthProjectionFinds` emits the same find).
   if (merged.projections.some(isQueryTimeProjection)) {
@@ -780,7 +780,7 @@ export function generateTypeScriptForContexts(
   // channel makes its carried events UI-observable at GET /realtime/events;
   // createApp's dispatcher tee (see routes emit) copies dispatched events
   // onto the stream.
-  // Persistence-neutral since M-T6.23 slice 5 (the last of the five): the SSE
+  // Persistence-neutral: the SSE
   // module reads no `db` at all — `realtimeTee(inner)` decorates a dispatcher and
   // `realtimeRoutes()` takes no handle — so the wire is adapter-independent.
   {
@@ -1106,7 +1106,7 @@ export function generateTypeScriptForContexts(
   // strings.
   // Resource clients (objectStore / queue / api) — boot-time client
   // modules for the new infrastructure kinds the deployable wires
-  // (RFC §Phase 2.4 foundation).  Additive + gated: a deployable with
+  // (RFC §).  Additive + gated: a deployable with
   // no such resources emits nothing, so existing models stay
   // byte-identical.  No call-sites — those land with the workflow-level
   // consumption surface.
@@ -1172,7 +1172,7 @@ export function generateTypeScriptForContexts(
       "internal: timer ownership disagrees between the entity opt and the scheduler filter",
     );
   }
-  // Persistence-neutral since M-T6.23 slice 3: the scheduler's watermark table
+  // Persistence-neutral since M-T6.23: the scheduler's watermark table
   // and advisory lock run on the EntityManager under `persistence: mikroorm`
   // (`TimerStore` in scheduler-builder.ts).
   const hasTimers = ownedTimers.length > 0;
@@ -1208,7 +1208,7 @@ export function generateTypeScriptForContexts(
       resourceDeps,
       hasSeeds,
       persistence: usingMikro ? "mikroorm" : "drizzle",
-      // M18 phase 8 slice 1 (Node debug wiring): a `debug` script only when
+      // (Node debug wiring): a `debug` script only when
       // `--sourcemap` is on — see the `addTsExtensionsForNodeDebug` call
       // below for why this needs the sibling import rewrite to actually run.
       debugScript: !!sourcemap,
@@ -1233,20 +1233,20 @@ export function generateTypeScriptForContexts(
       usingMikro,
       // Outbox relay (dispatch-delivery-semantics.md): started at boot when
       // any context carries a durable channel AND the in-process dispatcher
-      // is wired (subscriptions exist).  Persistence-neutral since M-T6.23
-      // slice 1 — the mikro adapter emits the same relay over the EntityManager.
+      // is wired (subscriptions exist).  Persistence-neutral — the mikro
+      // adapter emits the same relay over the EntityManager.
       contexts.some((c) => c.eventSubscriptions.length > 0 && durableEventTypes(c).size > 0) ||
         // A durable-broker producer relays even without local subscribers:
         // the drained rows publish to the broker (M-T4.4).
         (durableBrokerEvents.size > 0 && durableEventTypes(merged).size > 0),
       // Realtime tee: the relay's inner dispatcher rides through it so
       // relayed (durable) events reach the SSE wire too.  Persistence-neutral
-      // since M-T6.23 slice 5.
+      // since M-T6.23.
       contexts.some((c) => realtimeEventTypes(c).size > 0),
       // OIDC turnkey auth: register the generated verifier instead of the
       // dev stub.
       !!oidcAuth,
-      // Hierarchy (multi-tenancy P2.2): the tenant-registry AGGREGATE name when
+      // Hierarchy (multi-tenancy): the tenant-registry AGGREGATE name when
       // it opts into `tenantRegistry` — boot registers the `orgPath` resolver
       // (`SELECT data_key … WHERE id = <claim>`) that the auth middleware calls
       // per request, on both persistence adapters.  `undefined` for flat
@@ -1280,7 +1280,7 @@ export function generateTypeScriptForContexts(
   // project so the moved modules still resolve.  No-op (byte-identical) for the
   // byLayer default, where `moved` is empty.
   rewriteRelativeImports(out, moved);
-  // M18 phase 8 slice 1 (Node debug wiring, docs/old/plans/dap-node-debug.md):
+  // (Node debug wiring, docs/old/plans/dap-node-debug.md):
   // ONLY under `--sourcemap` — suffix every relative import with its real
   // `.ts`/`.tsx` extension so plain `node --enable-source-maps index.ts`
   // (no tsx/tsup loader) can resolve the whole module graph, chaining
@@ -1314,20 +1314,20 @@ function projectPackageJson(
      *  timerSource uses a real `cron:` expression (an `every:`-only deployable
      *  uses a bare setInterval and needs no dep). */
     withCronTimers?: boolean;
-    /** M-T4.4 slice 2 — the `ioredis` broker-client dep, added only when the
+    /** M-T4.4 — the `ioredis` broker-client dep, added only when the
      *  deployable wires a redis-bound channelSource via `channels:`. */
     withRedisChannels?: boolean;
-    /** M-T4.4 slice 3 — the `amqplib` broker-client dep (+ its types), added
+    /** M-T4.4 — the `amqplib` broker-client dep (+ its types), added
      *  only when the deployable wires a rabbitmq-bound channelSource. */
     withRabbitChannels?: boolean;
-    /** M-T4.4 slice 4 — the `kafkajs` broker-client dep (MIT, ships its own
+    /** M-T4.4 — the `kafkajs` broker-client dep (MIT, ships its own
      *  types), added only when the deployable wires a kafka-bound
      *  channelSource. */
     withKafkaChannels?: boolean;
     resourceDeps?: Record<string, string>;
     hasSeeds?: boolean;
     persistence?: "drizzle" | "mikroorm";
-    /** M18 phase 8 slice 1 (Node debug wiring) — a `debug` script that runs
+    /** (Node debug wiring) — a `debug` script that runs
      *  the project under plain Node (no tsx/tsup loader), chaining Node's
      *  own `--enable-source-maps` through the phase-5 `.ts.map` sidecars
      *  straight to `.ddd` coordinates.  Requires the sibling
@@ -1399,7 +1399,7 @@ function projectPackageJson(
           // no self-executing entry (a run-directly guard misfires once tsup
           // bundles it into dist/index.js, seeding before migrations).
           ...(opts.hasSeeds ? { "db:seed": "tsx db/seed-cli.ts" } : {}),
-          // M18 phase 8 slice 1 (Node debug wiring, --sourcemap only): plain
+          // (Node debug wiring, --sourcemap only): plain
           // Node, no tsx/tsup loader — see the `debugScript` jsdoc above.
           ...(opts.debugScript ? { debug: "node --enable-source-maps index.ts" } : {}),
         },
@@ -1485,7 +1485,7 @@ export const moneySchema = z.string().transform((s: string, ctx: any) => {
 });
 `;
 
-/** `debugImports` — M18 phase 8 slice 1 (Node debug wiring, `--sourcemap`
+/** `debugImports` — (Node debug wiring, `--sourcemap`
  *  only): once `addTsExtensionsForNodeDebug` suffixes relative imports with
  *  their real `.ts`/`.tsx` extension, plain `tsc --noEmit` (the project's
  *  own `typecheck` script) rejects them with TS5097 ("An import path can
@@ -1595,7 +1595,7 @@ function renderProjectIndexTs(
     : oidc
       ? `\n// OIDC verifier (D-AUTH-OIDC) — validates the IdP's tokens against its\n// JWKS and maps claims onto the typed User.  Configure the issuer /\n// client via the env vars the \`auth { oidc }\` block referenced.\nregisterOidcVerifier();\nbaseLogger.info({ event: "auth_oidc_verifier_registered" });\n`
       : `\n// Dev-stub verifier (auth/dev-stub.ts) — accepts every request as a\n// built-in identity filling every field the \`user { … }\` block declares.\n// Dev-only: the Loom playground (or curl) can override the claims by\n// sending a base64-encoded JSON object in \`x-loom-dev-claims\`; absent the\n// header the built-in identity is used.  REPLACE for production by calling\n// registerUserVerifier(...) with a real JWT-decoding implementation.\nregisterDevStubVerifier();\nbaseLogger.warn({ event: "auth_dev_stub_registered" });\n`;
-  // Tenant-registry orgPath resolver (multi-tenancy P2.2) — wired on BOTH
+  // Tenant-registry orgPath resolver (multi-tenancy) — wired on BOTH
   // persistence paths.  The auth middleware calls it per request; here we bind
   // it to the db with a `SELECT data_key … WHERE id = <claim>`.
   //
@@ -1618,7 +1618,7 @@ function renderProjectIndexTs(
     : usingMikro
       ? `import { registerOrgPathResolver } from "./auth/middleware";\nimport { ${orgPathRegistryRow} } from "./db/entities";\n`
       : `import { eq } from "drizzle-orm";\nimport { registerOrgPathResolver } from "./auth/middleware";\n`;
-  const orgPathDoc = `\n// Register the tenant-registry \`orgPath\` resolver (multi-tenancy P2.2):\n// currentUser.orgPath = the caller org's materialized \`data_key\`, memoized\n// per request in the auth middleware; a missing row / dataKey falls back to\n// the claim (root-segment path) — fail-safe, never null/crash.\n`;
+  const orgPathDoc = `\n// Register the tenant-registry \`orgPath\` resolver (multi-tenancy):\n// currentUser.orgPath = the caller org's materialized \`data_key\`, memoized\n// per request in the auth middleware; a missing row / dataKey falls back to\n// the claim (root-segment path) — fail-safe, never null/crash.\n`;
   const orgPathRegistration = !wireOrgPath
     ? ""
     : usingMikro

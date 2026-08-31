@@ -72,7 +72,7 @@ function ectoIndexOpts(i: IndexShape, prefix: string): string {
 }
 
 /** The bracketed column list for a `create index(...)` call.  A column with a
- *  per-column opclass (P2.5 materialized-path prefix index) uses Ecto's raw
+ *  per-column opclass (materialized-path prefix index) uses Ecto's raw
  *  fragment string form (`"data_key text_pattern_ops"`) so the opclass reaches
  *  the DDL; plain columns stay `:atom`s. */
 function ectoIndexColumns(i: IndexShape): string {

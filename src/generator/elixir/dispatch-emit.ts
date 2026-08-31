@@ -231,7 +231,7 @@ export function emitDispatch(
   appModule: string,
   out: Map<string, string>,
   sys?: SystemIR,
-  /** Source-map Milestone 13 collector (`--sourcemap`).  Each handler file is
+  /** Source-map collector (`--sourcemap`).  Each handler file is
    *  single-workflow-attributable, so it gets a whole-file `wf.origin`
    *  region (like the command-workflow file) PLUS per-statement fragments —
    *  same contract as `emitVanillaWorkflowExecution`. */

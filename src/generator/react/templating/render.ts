@@ -57,7 +57,7 @@ export function renderAppShell(
   pack: LoadedPack,
   hasScaffoldHome: boolean = true,
   outOfShellRoutes: import("./preparers/app-shell.js").ExtraPageRoute[] | undefined = undefined,
-  /** Phase 8 step 2: pre-built named-layout VMs (slot JSX + route
+  /** step 2: pre-built named-layout VMs (slot JSX + route
    *  buckets), and the deduped pack imports those slots need. */
   namedLayouts:
     | ReadonlyArray<{
