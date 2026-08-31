@@ -612,17 +612,51 @@ function validateHandlers(
 }
 
 /** The impurity phrase for a fold statement, or `undefined` when it is a pure
- *  fold statement (assign / add / remove / let / derivation). */
+ *  fold statement (assign / add / remove / let).
+ *
+ *  FAIL-CLOSED, deliberately.  This used to list the impure kinds and return
+ *  `undefined` in the `default:` arm, so every kind nobody had thought about
+ *  was silently *admitted* — and the backends' fold emitters then dropped it
+ *  just as silently.  A `files.put(k, v)` in a fold lowers to `kind:
+ *  "expression"` (`lower-stmt.ts`, the resource-op statement arm) and so
+ *  passed this check, generated nothing on node, and shipped a projection
+ *  whose declared effect never ran.  The four kinds a replayable fold can
+ *  express are now the allowlist; everything else — present or future — is an
+ *  error here, which is also what makes the node/elixir emitters' loud
+ *  `default:` arms unreachable rather than merely unlikely. */
 function foldImpurity(stmt: StmtIR): string | undefined {
   switch (stmt.kind) {
+    // The pure, replayable fold vocabulary.
+    case "assign":
+    case "add":
+    case "remove":
+    case "let":
+      return undefined;
     case "emit":
       return "emits an event";
     case "call":
-      return `calls '${(stmt as { name?: string }).name ?? "out"}'`;
+      return `calls '${stmt.name}'`;
     case "precondition":
     case "requires":
       return `contains a '${stmt.kind}' guard`;
-    default:
-      return undefined;
+    case "expression":
+      // A bare call written for its EFFECT — a resource verb
+      // (`files.put(…)`), a domain-service member call, a method call on some
+      // receiver.  Every one of them reaches outside the event, which is
+      // precisely the projection/reactor boundary this check draws.
+      return `calls '${effectCallName(stmt.expr)}' for its effect`;
+    case "return":
+      return "contains a 'return'";
+    case "variant-match":
+      return "contains an effect-form 'match'";
   }
+}
+
+/** Best-effort name of the call a bare expression-statement performs, for the
+ *  impurity phrase.  Falls back to the expression kind when the statement is
+ *  not call-shaped (the message stays readable either way). */
+function effectCallName(e: ExprIR): string {
+  if (e.kind === "call") return e.name;
+  if (e.kind === "method-call") return e.member;
+  return e.kind;
 }

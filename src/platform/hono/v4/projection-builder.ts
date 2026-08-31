@@ -4,11 +4,12 @@ import type {
   EnrichedBoundedContextIR,
   ProjectionIR,
   ProjectionOnIR,
+  StmtIR,
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser, isMaterializedProjection } from "../../../ir/types/loom-ir.js";
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { resolveErrorStatus } from "../../../util/error-defaults.js";
-import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { escapeTsIdent, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { zodForResponse } from "./routes-builder.js";
 
 /** The `db` handle's TS type in an emitted projection function signature —
@@ -204,16 +205,71 @@ function emitFoldHandler(p: ProjectionIR, h: ProjectionOnIR, usingMikro = false)
     `  const __key = ${keyExpr};`,
     `  const state = (await load${T}(db, __key)) ?? ${allocate};`,
   ];
-  for (const stmt of h.statements) {
-    if (stmt.kind === "assign") {
-      const segs = stmt.target.segments;
-      const field = segs[segs.length - 1];
-      out.push(`  state.${field} = ${renderTsExpr(stmt.value, { thisName: "state" })};`);
-    }
-  }
+  for (const stmt of h.statements) out.push(renderFoldStatement(stmt, p, h));
   out.push(`  await save${T}(db, state);`);
   out.push(`}`);
   return out;
+}
+
+/** Render ONE fold-body statement against the `state` row.
+ *
+ *  This loop used to be `if (stmt.kind === "assign")` with no else, so every
+ *  other statement kind a fold body can carry vanished from the emitted
+ *  handler — a `let` binding disappeared while its USES survived (TS2304 on
+ *  the reference), and `+=` / `-=` / a resource call were dropped outright
+ *  with no diagnostic and no compile error, so the column was simply never
+ *  written.  The set is now exhaustive over `StmtIR`: the four kinds a pure
+ *  fold can express are rendered, and everything else is an internal
+ *  invariant violation because `checkProjections`
+ *  (`src/ir/validate/checks/projection-checks.ts`) rejects it as impure.
+ *  Mirrors the elixir applier's `renderFoldStatement`
+ *  (`generator/elixir/vanilla/fold-stmt-emit.ts:54`), including the loud
+ *  `default:` — a dropped statement is worse than a crash, because it ships. */
+function renderFoldStatement(stmt: StmtIR, p: ProjectionIR, h: ProjectionOnIR): string {
+  const ctx = { thisName: "state" } as const;
+  switch (stmt.kind) {
+    case "assign": {
+      const field = lastSegment(stmt.target);
+      return `  state.${field} = ${renderTsExpr(stmt.value, ctx)};`;
+    }
+    case "let":
+      // `let`-names may collide with a JS reserved word; escape consistently
+      // with the matching `refKind: "let"` use sites in `renderRef`.
+      return `  const ${escapeTsIdent(stmt.name)} = ${renderTsExpr(stmt.expr, ctx)};`;
+    case "add": {
+      // `xs += v` appends to the folded collection; a scalar `n += v`
+      // (`collection: false`) is arithmetic on the folded column.  Every
+      // non-key read-model column is NULLABLE (the allocate seeds the key
+      // only), so both forms coalesce the current value first — otherwise the
+      // first event for a key reads `null` and the fold produces `null` /
+      // `NaN` instead of the first increment.
+      const field = lastSegment(stmt.target);
+      const value = renderTsExpr(stmt.value, ctx);
+      return stmt.collection
+        ? `  state.${field} = [...(state.${field} ?? []), ${value}];`
+        : `  state.${field} = (state.${field} ?? 0) + ${value};`;
+    }
+    case "remove": {
+      // `xs -= v` drops the matching element; scalar `n -= v` subtracts.
+      const field = lastSegment(stmt.target);
+      const value = renderTsExpr(stmt.value, ctx);
+      return stmt.collection
+        ? `  state.${field} = (state.${field} ?? []).filter((__e) => __e !== ${value});`
+        : `  state.${field} = (state.${field} ?? 0) - ${value};`;
+    }
+    default:
+      throw new Error(
+        `hono projection fold: unsupported fold statement '${stmt.kind}' in ` +
+          `projection '${p.name}' on(${h.param}: ${h.event}) — a fold applies pure ` +
+          `assignments / collection mutations / let bindings only; ` +
+          `'loom.projection-fold-impure' should have rejected this.`,
+      );
+  }
+}
+
+/** The written column of a fold assignment target (`this`-rooted path). */
+function lastSegment(target: { segments: string[] }): string {
+  return target.segments[target.segments.length - 1] ?? "";
 }
 
 /** The dispatcher decorator: route each dispatched event to every matching
