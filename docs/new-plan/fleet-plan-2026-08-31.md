@@ -330,9 +330,22 @@ signed off, so it is a straight implementation fleet).
 
 1. Re-run W0-A's reconciliation delta — **on fresh `main`**. A wave dispatched off a
    week-old register rebuilds merged work.
-2. Open **every** draft PR for the wave up front, one per packet, before any agent
+2. **Re-read the OPEN PR list in the same breath as the dispatch — not at planning time.**
+   Step 1 measures *merged* work; it is blind to a parallel session claiming the same rows
+   right now. **This failed in Wave 1 and cost a duplicated row.** The dispatch went out
+   against an open-PR list read ~2 hours earlier, during which
+   [#2698](https://github.com/lemmit/Loc/pull/2698) ("Targets drain wave 3" — another
+   session draining *this same ledger*) appeared and landed
+   `loom.page-primitive-unknown-arg` + `src/util/walker-primitive-args.ts`: exactly
+   **F2-FFE-7**, the row the walker-shared agent had been told was its most valuable. The
+   agent was mid-flight before the overlap was caught.
+   **The ledger is not privately owned.** Anyone may drain it, so the open list is a live
+   claim registry, not a static input — re-read it at T-0 and cross every packet's rows
+   against it.
+3. Open **every** draft PR for the wave up front, one per packet, before any agent
    implements. The draft PR is the claim ticket; opening them all first makes intra-fleet
    collision impossible and lets a worker that finds its row already drained stop cleanly.
+   *(This protects against fleet-internal collision only — see step 2 for external.)*
 3. Post the wave's golden order and the pre-allocated slot table into each PR body.
 4. Dispatch. One packet per agent. Never two agents in one file tree.
 
@@ -386,6 +399,8 @@ nothing.
 |---|---|
 | Register goes stale mid-wave (happened twice during the audit itself) | W0-A re-runs at the head of every wave, not just wave 0 |
 | Two agents fix the same defect (`f4df492` was an empty commit narrating an already-landed fix) | All draft PRs opened before any implementation; a worker that finds its row drained stops and reports |
+| **An EXTERNAL session drains the same ledger mid-wave** — the fleet's own claim protocol cannot see it | **Occurred in Wave 1**: #2698 duplicated F2-FFE-7 against the walker-shared packet. Mitigation is dispatcher-checklist step 2 — re-read the open PR list at T-0, not at planning time — plus, on collision: the *other* author's PR wins by default, the fleet agent drops its version and rebases its remaining rows onto it. Never race a ready-for-review PR with a draft |
+| **Two PRs each half-fix one row, and neither is wrong alone** | Record the merge-order constraint explicitly in both PR bodies. Live example: #2699 renders `guid`/`datetime`/`bool` filter params while #2698 adds the `RENDERABLE_FILTER_PRIMITIVES` gate listing what is renderable — **whichever merges second must add those three kinds to the set**, or #2698's own behavioural pin ("wired into the bar OR reported — never both, never neither") fails loudly on `main` |
 | The diagnostic catalog conflicts 10 ways | Slot pre-allocation (Wave 0-B) |
 | Golden rebaseline churn | One golden owner per wave, fixed order, landed last |
 | A packet's "fix" is proven by a gate that never reaches it | Mutation proof stated in the PR body with the failing assertion named — the recurring failure shape in `experience_gathered.md` §59/§63/§84 |
