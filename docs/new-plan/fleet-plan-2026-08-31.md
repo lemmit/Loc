@@ -365,6 +365,16 @@ signed off, so it is a straight implementation fleet).
   **file copy**, never `git checkout -- <path>` — checkout restores HEAD and silently
   discards every other uncommitted edit in that file, so the proof fails for an unrelated
   reason and reads as a pass. Read *which* assertion failed.
+- **Then prove the MUTATION APPLIED.** A third failure mode, found in Wave 1 (#2705) and not
+  covered by the rule above: the agent's mutation was a string replacement that **silently
+  no-op'd on a failed match**, so the suite passed — and a passing suite after a mutation
+  reads exactly like "the gate is fine". It was caught only by regenerating the output and
+  looking at it, then re-mutating by line index. **A mutation that changes nothing proves
+  nothing, and it is indistinguishable from a working gate unless you check.** After
+  mutating, confirm the file actually differs (diff it, or assert the mutated text is
+  present) before believing a green run. This is the `experience_gathered.md` §59/§63 shape
+  one level deeper: there the gate never reached the thing it named; here the mutation never
+  reached the gate.
 - **Never a silent gap.** A feature lands on every target or gets an honest `loom.*` gate on
   the others. Never a crash, never a TODO emitted into compiling output.
 - **Run the gates locally.** `docs/testing.md` → "Running any CI gate locally" is the
