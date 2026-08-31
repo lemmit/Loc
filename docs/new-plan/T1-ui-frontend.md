@@ -352,3 +352,57 @@ Found 2026-08-30 re-verifying the [08-24 generator review](../audits/generator-c
 **Verification when it lands.** A per-target walker test with a computed `src:` and a param-ref `alt:` on both primitives (seven targets — HEEx included, which already renders the dynamic form correctly and is the semantics oracle here, exactly as it was for A12); mutation-proved by file-copy revert. Assert the *absence* of `` `${ `` in the F#/Dart output, not just the presence of the attribute.
 
 Sources: [generator-code-review-2026-08-24](../audits/generator-code-review-2026-08-24.md) §A12 (the fixed twin) + §Follow-up register (2026-08-30) row 17.
+
+## M-T1.27 — Finish HEEx component hoisting: forms, queries, uploads and table controls — `open` · **M** · P2
+
+Found 2026-08-31 by the W1b elixir packet, draining ledger row
+`G2646-open-heex-in-component-degradation` — and re-classified in the process.
+The ledger called it a silent degradation; measured on generated output it is a
+**crash the compile gate cannot see**.
+
+A HEEx function component is a pure render function with no process of its own,
+so anything it needs at render time must be supplied by the LiveView that
+renders it. #2646 built exactly that hoisting for a component's `state { … }`
+and its named `action`s — `ComponentActionInfo.state` / `.handlers`,
+`gatherComponentHandlers` and `hostStateAssign` — and stopped there. The
+walker's **other four accumulators** — `formBindings`, `queryBindings`,
+`uploadBindings`, `tableControls` — were never extended, so the component emits
+its markup and the host LiveView gets nothing:
+
+```elixir
+# ui_components.ex
+<.simple_form for={@form} phx-submit="save_customer">   # needs @form + a clause
+# home_live.ex
+def mount(_params, _session, socket), do: {:ok, socket}  # …and has neither
+```
+
+That passes `mix compile --warnings-as-errors` and then raises on page load.
+The broken set is **empirical**, one generated case per primitive:
+`CreateForm` / `OperationForm` / `WorkflowForm` (no `@form`, no `save_*`/`run_*`
+clause), `DestroyForm` (no `@id`), `QueryView` and `Table` (no `@items`),
+`FileUpload` (`@uploads.<field>` with no `allow_upload/3`), `Chart` (no
+projection assign). A bare `Modal`, `Action` and `state` are fine.
+
+**Held honest meanwhile, not left silent:**
+`loom.heex-component-host-state-unsupported` (`system-checks.ts`,
+`src/ir/util/heex-component-host-state.ts`) refuses the shape at compile time and
+names the local workaround — move the primitive into the page body. It carries
+a `gap` row in the `*-unsupported` register (pin 41 → 42) and a firing fixture in
+the diagnostic census. **It caught a live instance on its first run:** the
+`expression-showcase` fixture retargeted onto phoenixLiveView by
+`render-degradation.test.ts`, whose sentinel scan is structurally blind to a
+dangling assign.
+
+**The work:** extend `ComponentActionInfo` and the `gather*` transitive closures
+to the four accumulators, with each one's host-side emission seam (mount assigns,
+`allow_upload/3`, the sort/page `handle_event` clauses). The non-obvious part is
+the **multi-instance** question `componentUses` already exists to answer for
+state: a component rendered twice needs two form/query states, not one shared
+assign. Draining it deletes the register row, lowers the pin back to 41, deletes
+the `liftReadOutOfComponent` transform in `render-degradation.test.ts`, and also
+closes the walker packet's handoff row (a standalone instance `OperationForm` on
+LiveView needs the same `handle_event` + form-binding half `renderModal` owns).
+
+Sources: ledger `G2646-open-heex-in-component-degradation`
+([targets-completeness-2026-08-30](../audits/targets-completeness-2026-08-30.md)),
+PR #2704. Builds directly on #2646.
