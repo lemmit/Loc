@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/index.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // HEEx page-body layout FIDELITY (generator code review C7).
@@ -54,7 +54,17 @@ const phoenixSystem = (uiBody: string, state = ""): string => `
 `;
 
 async function landingHeex(uiBody: string, state = ""): Promise<string> {
-  const files = await generateSystemFiles(phoenixSystem(uiBody, state));
+  return pickLanding(await generateSystemFiles(phoenixSystem(uiBody, state)));
+}
+
+/** `landingHeex` for a body the IR validator REJECTS — the unknown-named-arg
+ *  case below, whose whole subject is what the emitter does with an argument
+ *  `loom.page-primitive-unknown-arg` now names. */
+async function landingHeexUnchecked(uiBody: string, why: string): Promise<string> {
+  return pickLanding(await generateSystemFilesUnchecked(phoenixSystem(uiBody, ""), why));
+}
+
+function pickLanding(files: Map<string, string>): string {
   for (const [path, content] of files) {
     if (path.endsWith("/landing_live.ex")) return content;
   }
@@ -123,8 +133,16 @@ describe("HEEx layout primitives CONSUME their named args", () => {
 
   it("an UNKNOWN named arg is dropped, not spliced as a bare attribute", async () => {
     // `gap:` has no HEEx mapping (the JSX packs ignore it too).  Dropping it is
-    // the contract; emitting `gap="6"` on a <div> is the bug.
-    const heex = await landingHeex(`Stack { gap: 6, Text { "a" } }`);
+    // the contract; emitting `gap="6"` on a <div> is the bug.  The IR gate
+    // `loom.page-primitive-unknown-arg` now REJECTS this body — which is why it
+    // runs unchecked: what the emitter does with an unknown arg is exactly the
+    // subject, and it is what an author sees while the diagnostic is on screen.
+    const heex = await landingHeexUnchecked(
+      `Stack { gap: 6, Text { "a" } }`,
+      "`Stack { gap: … }` is rejected by `loom.page-primitive-unknown-arg`; this test's " +
+        "subject is that the emitter DROPS the unknown arg rather than splicing it as a " +
+        "bare HEEx attribute.",
+    );
     expect(heex).toContain('<div class="flex flex-col gap-4">');
     expect(heex).not.toMatch(/\sgap="/);
     expect(heex).not.toMatch(/\sgap=\{/);
@@ -166,7 +184,7 @@ describe("HEEx Card/Paper render through the pack's <.card> component", () => {
 describe("HEEx Table column headers are attribute-safe", () => {
   it("escapes a label carrying a quote and angle brackets", async () => {
     const heex = await landingHeex(
-      `Table { of: api.Doc.all, Column { "Na\\"me <b>", d => d.name } }`,
+      `Table { rows: api.Doc.all, Column { "Na\\"me <b>", d => d.name } }`,
     );
     // A literal header rides the i18n slot (`columnHeader`, M-T1.11) through the
     // `{…}` expression-attribute form, so the hazard characters live inside an
@@ -180,7 +198,7 @@ describe("HEEx Table column headers are attribute-safe", () => {
 
   it("a NON-LITERAL header falls back to `Column N`, like the JSX side", async () => {
     const heex = await landingHeex(
-      `Table { of: api.Doc.all, Column { "First", d => d.name }, Column { q, d => d.name } }`,
+      `Table { rows: api.Doc.all, Column { "First", d => d.name }, Column { q, d => d.name } }`,
       `state { q: string = "" }`,
     );
     // The literal header translates; the non-literal one keeps the escaped
