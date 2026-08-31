@@ -33,6 +33,7 @@
 import type { ActionIR, StateFieldIR, StoreIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { upperFirst } from "../../util/naming.js";
+import { storeFieldInitJs } from "../_frontend/store-field-init.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { defaultInitForJs, storeHookName } from "../_walker/js-target-helpers.js";
 import type { StateRef, WalkerTarget } from "../_walker/target.js";
@@ -74,11 +75,20 @@ function storeFieldTsType(type: TypeIR): string {
   }
 }
 
-/** Initial value for a store field — its declared `= init`, else the type's
- *  zero value (`[]` for arrays, `defaultInitForJs` for scalars). */
-function storeFieldInit(type: TypeIR): string {
-  if (type.kind === "array") return "[]";
-  return defaultInitForJs(type);
+/** Initial value for a store field — its declared `= init` literal, else the
+ *  type's zero value.  Shared with every other JS-family store builder
+ *  (`_frontend/store-field-init.ts`); the doc comment used to promise the
+ *  declared init while the signature took only the TYPE, so `mode: string =
+ *  "dark"` booted as `""` (F2-FFE-1). */
+function storeFieldInit(field: StateFieldIR): string {
+  return storeFieldInitJs(field);
+}
+
+/** True when the field declares no non-zero default — the URL codec then keeps
+ *  its original type-zero shape byte-for-byte, and only a field that really
+ *  carries a declared default takes the default-aware arms. */
+function initIsTypeZero(field: StateFieldIR): boolean {
+  return storeFieldInitJs(field) === defaultInitForJs(field.type);
 }
 
 /** A Zustand-flavoured `WalkerTarget` for rendering store-ACTION bodies.  Only
@@ -182,27 +192,37 @@ function moneyFieldNames(store: StoreIR): string[] {
 function decodeFieldFromParam(field: StateFieldIR): string {
   const key = JSON.stringify(field.name);
   const t = field.type;
+  // The fallback is the field's DECLARED default, not the type zero — an
+  // absent param and the declared default have to mean the same thing, or a
+  // `store Prefs { state { mode: string = "dark" } }` boots as `""` the moment
+  // it gains `persist: url`.
+  const init = storeFieldInit(field);
+  const zero = initIsTypeZero(field);
   if (t.kind === "primitive") {
     switch (t.name) {
       case "int":
       case "long":
       case "decimal":
-        return `p.has(${key}) && Number.isFinite(Number(p.get(${key}))) ? Number(p.get(${key})) : ${storeFieldInit(t)}`;
+        return `p.has(${key}) && Number.isFinite(Number(p.get(${key}))) ? Number(p.get(${key})) : ${init}`;
       case "money":
-        return `p.has(${key}) && p.get(${key})!.match(/^-?\\d+(\\.\\d+)?$/) ? new Decimal(p.get(${key})!) : ${storeFieldInit(t)}`;
+        return `p.has(${key}) && p.get(${key})!.match(/^-?\\d+(\\.\\d+)?$/) ? new Decimal(p.get(${key})!) : ${init}`;
       case "bool":
-        return `p.get(${key}) === "true"`;
+        // An absent param means the DECLARED default, which for a `= true`
+        // field is not `false`.
+        return zero
+          ? `p.get(${key}) === "true"`
+          : `p.has(${key}) ? p.get(${key}) === "true" : ${init}`;
       default:
-        return `p.get(${key}) ?? ${storeFieldInit(t)}`;
+        return `p.get(${key}) ?? ${init}`;
     }
   }
   // ids/enums decode as bare strings (enum membership is not re-checked here;
   // an off-set value is harmless client filter state, re-validated server-side).
-  if (t.kind === "id" || t.kind === "enum") return `p.get(${key}) ?? ${storeFieldInit(t)}`;
+  if (t.kind === "id" || t.kind === "enum") return `p.get(${key}) ?? ${init}`;
   // Arrays / entities / anything structural are not URL-encodable in v1 — the
   // validator (loom.store-url-field-invalid) blocks them, so this is a
   // defensive default only.
-  return storeFieldInit(t);
+  return init;
 }
 
 /** Serialise a field back into the query string (`p.set` / `p.delete`), keyed
@@ -211,6 +231,14 @@ function encodeFieldToParam(field: StateFieldIR): string {
   const key = JSON.stringify(field.name);
   const t = field.type;
   const ref = `s.${field.name}`;
+  // A field carrying a declared default drops out of the URL when it EQUALS
+  // that default (the decoder restores it), instead of when it is type-zero —
+  // otherwise `mode: string = "dark"` writes `?mode=dark` on every load and
+  // `?mode=` (cleared) decodes back to "dark".
+  const init = storeFieldInit(field);
+  if (!initIsTypeZero(field) && t.kind === "primitive" && t.name !== "money") {
+    return `if (${ref} !== ${init}) p.set(${key}, String(${ref})); else p.delete(${key});`;
+  }
   if (t.kind === "primitive" && t.name === "money") {
     return `if (${ref} != null) p.set(${key}, ${ref}.toString()); else p.delete(${key});`;
   }
@@ -262,7 +290,7 @@ export function renderZustandStoreModule(store: StoreIR): string {
     );
   }
 
-  const stateEntries = store.state.map((f) => `  ${f.name}: ${storeFieldInit(f.type)},`);
+  const stateEntries = store.state.map((f) => `  ${f.name}: ${storeFieldInit(f)},`);
   const bodyEntries = [...stateEntries, ...actionEntries];
 
   if (store.lifetime === "persistLocal" || store.lifetime === "persistSession") {
