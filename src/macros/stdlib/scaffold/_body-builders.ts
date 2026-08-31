@@ -37,6 +37,7 @@ import {
   cloneTypeRef,
   intLit,
   lambda,
+  listLit,
   matchExpr,
   memberAccess,
   nameRefExpr,
@@ -1020,22 +1021,54 @@ function columnKindForType(type: TypeRef): ColumnKind | null {
  *  M-T1.15: the bar used to accept ONLY plain `string` params, so
  *  `find byAmount(min: int)` and `find forCustomer(c: Customer id)` were
  *  declared, emitted as backend routes, and produced NO input — a filter bar
- *  that quietly omitted the author's find, with no diagnostic.  The three kinds
+ *  that quietly omitted the author's find, with no diagnostic.  The kinds
  *  below are the ones whose state type and the generated query-param type
  *  AGREE, so the emitted page type-checks on every frontend:
  *
- *    string     → `Field`        state `string`,         unset = `""`
- *    int / long → `NumberField`  state <the param type>, unset = `0`
- *    `X id`     → `Field`        state `string`,         unset = `""`
+ *    string           → `Field`        state `string`,         unset = `""`
+ *    int / long       → `NumberField`  state <the param type>, unset = `0`
+ *    `X id`           → `Field`        state `string`,         unset = `""`
+ *    guid / datetime  → `Field`        state `string`,         unset = `""`
+ *    bool             → `SelectField`  state `string`,         unset = `""`
  *
- *  An ENUM param is still dropped — the frontends' state emitters type an enum
- *  state as bare `string` (`stateTypeAsTsString`), while the generated query
- *  param is the `z.enum([...])` union, so an enum filter input would emit a
- *  TS2322 in the generated project.  That is a frontend-emitter fix, not a
- *  macro one; see IMPL-NOTES.md.  Every other type (datetime, bool, VO, array,
- *  optional) is dropped for want of an input primitive with a matching state
- *  type. */
-export type FilterParamKind = "string" | "number" | "ref";
+ *  `guid` and `datetime` are STRING-shaped end to end — the request zod for
+ *  both is a bare `z.string()` (`zodForRequest`, `_frontend/api-module.ts`) and
+ *  every frontend's state emitter already types them `string`
+ *  (`stateTypeAsTsString` and its Vue/Svelte/Angular/Feliz/Flutter twins) — so
+ *  a text box over them binds and calls with the types agreeing, exactly like
+ *  the `X id` arm.
+ *
+ *  `bool` is the one kind whose NATURAL input is wrong rather than missing: a
+ *  `Toggle` binds a `bool` state whose zero value is `false`, which makes
+ *  "filter for false" and "no filter" the same page state and puts half the
+ *  domain out of reach.  So the bar binds a THREE-state string select instead
+ *  (`""` unset / `"true"` / `"false"`) and passes `<state> == "true"` as the
+ *  find argument — the whole domain, with an unset state that is genuinely
+ *  distinct.
+ *
+ *  Still dropped, each for a reason that lives outside this macro:
+ *
+ *    enum            — every frontend's state emitter types an enum-valued
+ *                      `state {}` field as bare `string`
+ *                      (`stateTypeAsTsString`), while the generated query param
+ *                      is the `z.enum([...])` UNION, so the call is TS2322.
+ *                      A frontend-emitter fix; see IMPL-NOTES.md §2.
+ *    decimal / money — the "unset" sentinel would be the int literal `0`, which
+ *                      Feliz types `decimal <> int` (FS0001); `money` binds a
+ *                      `Decimal` state `NumberField` does not accept at all.
+ *                      IMPL-NOTES.md §3.
+ *    value objects, arrays, optionals
+ *                    — no single input has a matching state type. */
+export type FilterParamKind = "string" | "number" | "ref" | "bool";
+
+/** The walker input primitive each filter kind binds through.  One table so the
+ *  input choice and the "unset" sentinel below can't drift apart. */
+const FILTER_INPUT_PRIMITIVE: Record<FilterParamKind, string> = {
+  string: "Field",
+  ref: "Field",
+  number: "NumberField",
+  bool: "SelectField",
+};
 
 /** One param of a filter find: the name the input binds through, how it renders,
  *  and the param's own declared type (cloned onto the page-state field so the
@@ -1114,16 +1147,22 @@ function filterParamKind(type: TypeRef): FilterParamKind | null {
   if (type.base.$type !== "PrimitiveType") return null;
   switch (type.base.name) {
     case "string":
+    // `guid` and `datetime` are string-shaped on the wire (`z.string()`) and
+    // string-typed in every frontend's state emitter, so a text box over them
+    // binds and calls with the types agreeing — same arm as a plain `string`.
+    case "guid":
+    case "datetime":
       return "string";
     case "int":
     case "long":
       return "number";
+    case "bool":
+      return "bool";
     default:
       // `decimal` and `money` are held back deliberately, not forgotten: their
       // "unset" sentinel would be the int literal `0`, and Feliz types that
       // comparison `decimal <> 0` / `Decimal` against an `int` literal, which
-      // does not type-check there.  `bool`/`datetime`/`guid` have no matching
-      // filter input at all.  See IMPL-NOTES.md.
+      // does not type-check there.  See IMPL-NOTES.md §3.
       return null;
   }
 }
@@ -1146,9 +1185,11 @@ export function filterStateFields(filters: readonly FilterFind[]): Array<string 
     f.params.map((p): string | StateFieldSpec =>
       p.kind === "number"
         ? { name: stateNameFor(f.name, p.name), type: "string", typeRef: cloneTypeRef(p.type) }
-        : // `string` AND `X id` both bind a `string` state: an id's wire form IS
-          // a string (`z.string().uuid()`), and a bare-name spec keeps the
-          // string arm's emission byte-identical.
+        : // `string`, `X id`, `guid`/`datetime` and `bool` all bind a `string`
+          // state: an id's wire form IS a string (`z.string().uuid()`), guid and
+          // datetime are `z.string()`, and the bool select's three states are
+          // `""`/`"true"`/`"false"`.  A bare-name spec keeps the string arm's
+          // emission byte-identical.
           stateNameFor(f.name, p.name),
     ),
   );
@@ -1305,13 +1346,25 @@ export function scaffoldList(
     for (const f of filters) {
       for (const p of f.params) {
         const stateName = stateNameFor(f.name, p.name);
-        // `NumberField` for a numeric param, `Field` (text) otherwise — an
-        // `X id` filter is a raw-id box until a walker-level FK picker exists
-        // (IMPL-NOTES.md), which is still strictly better than the silent drop.
+        // `NumberField` for a numeric param, a three-state `SelectField` for a
+        // bool, `Field` (text) otherwise — an `X id` filter is a raw-id box
+        // until a walker-level FK picker exists (IMPL-NOTES.md), which is still
+        // strictly better than the silent drop.
         filterFields.push({
-          value: callExpr(p.kind === "number" ? "NumberField" : "Field", [
+          value: callExpr(FILTER_INPUT_PRIMITIVE[p.kind], [
             { value: stringLit(humanize(p.name)) },
             { name: "bind", value: nameRefExpr(stateName) },
+            // The bool select's options are the two SET states; "unset" is the
+            // state's own zero value (`""`), which the picker's placeholder
+            // row already offers.
+            ...(p.kind === "bool"
+              ? [
+                  {
+                    name: "options",
+                    value: listLit([stringLit("true"), stringLit("false")]) as Expression,
+                  },
+                ]
+              : []),
             { name: "testid", value: stringLit(`${slug}-filter-${snake(stateName)}`) },
           ]),
         });
@@ -1322,10 +1375,13 @@ export function scaffoldList(
         cond: f.params
           .map(
             (p): Expression =>
-              // "Unset" is the state type's zero value: `""` for a string / id
-              // box, `0` for a number box.  Same trade the string arm always
-              // made — a filter FOR the zero value is indistinguishable from no
-              // filter, which is why the input starts there.
+              // "Unset" is the state type's zero value: `""` for a string / id /
+              // guid / datetime box AND for the bool select, `0` for a number
+              // box.  Same trade the string arm always made — a filter FOR the
+              // zero value is indistinguishable from no filter, which is why the
+              // input starts there.  (The bool select is the exception by
+              // construction: its zero value `""` is not one of its two options,
+              // so both `true` and `false` stay reachable.)
               binaryExpr(
                 nameRefExpr(stateNameFor(f.name, p.name)),
                 "!=",
@@ -1336,7 +1392,17 @@ export function scaffoldList(
         value: makeQueryView(
           memberAccess(queryRoot(), f.name, {
             call: true,
-            args: f.params.map((p) => nameRefExpr(stateNameFor(f.name, p.name))),
+            // A bool param's state is the select's `"true"`/`"false"` STRING;
+            // the find takes a `bool`, so the comparison is the argument.
+            args: f.params.map((p): Expression =>
+              p.kind === "bool"
+                ? binaryExpr(
+                    nameRefExpr(stateNameFor(f.name, p.name)),
+                    "==",
+                    stringLit("true"),
+                  )
+                : nameRefExpr(stateNameFor(f.name, p.name)),
+            ),
           }),
           false,
         ),
