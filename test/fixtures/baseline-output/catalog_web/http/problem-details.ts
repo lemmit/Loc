@@ -93,9 +93,8 @@ export function newApp(): OpenAPIHono {
  *  turning a fault into a problem document, so every 404/422/500 took the worker
  *  down instead of answering.
  *
- *  The values are node's verbatim, so the wire is unchanged.  A status outside
- *  this set falls back to "Error" — exactly what the old read did for a code
- *  node's own table didn't carry. */
+ *  The values are node's verbatim.  A status outside this set falls back to
+ *  "Error", as node's own table does for a code it doesn't carry. */
 const REASON_PHRASES: Record<number, string> = {
   400: "Bad Request",
   401: "Unauthorized",
@@ -109,7 +108,7 @@ const REASON_PHRASES: Record<number, string> = {
 
 /** RFC 7807 body for a fault the FRAMEWORK raised — one no domain error class
  *  describes: an unmatched route, a body hono itself refused to parse, an
- *  aborted request.  Before this, such a fault left the wire two ways: never
+ *  aborted request.  Without it such a fault leaves the wire two ways: never
  *  reaching a router (hono's default `text/plain` 404), or reaching one and
  *  falling past every domain arm into the generic 500 — reporting a CLIENT
  *  fault as a server fault.  Both are a second error contract on a wire that

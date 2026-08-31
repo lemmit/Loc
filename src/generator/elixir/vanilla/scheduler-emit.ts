@@ -260,7 +260,7 @@ function renderCronTimerWorker(
         ]
       : [`    ${fireLog}`, "    :ok"];
 
-  return `# Auto-generated — cron: timer durable executor (scheduling.md, M-T4.1 Phase 2).
+  return `# Auto-generated — cron: timer durable executor (scheduling.md, M-T4.1).
 defmodule ${mod} do
   @moduledoc "Durable executor for timerSource ${ts.name}: builds ${upperFirst(ts.event)} and dispatches it. Enqueued single-fire per boundary by ${appModule}.Scheduler.${upperFirst(ts.name)}; retried by Oban."
 
@@ -318,7 +318,7 @@ function renderCronTimerScheduler(appModule: string, ts: TimerSourceIR): string 
     { name: "boundary", valueExpr: "boundary" },
   ]);
 
-  return `# Auto-generated — cron: timer scheduler (scheduling.md, M-T4.1 Phase 2).
+  return `# Auto-generated — cron: timer scheduler (scheduling.md, M-T4.1).
 defmodule ${mod} do
   @moduledoc "timerSource ${ts.name} — enqueues a durable ${worker} job at each cron boundary (single-fire across replicas via Oban), replaying one missed boundary on recovery."
 
@@ -432,7 +432,7 @@ function renderTimerMigration(appModule: string): { path: string; content: strin
   return {
     path: `priv/repo/migrations/${version}_add_timer_infrastructure.exs`,
     content: `defmodule ${appModule}.Repo.Migrations.AddTimerInfrastructure do
-  # Auto-generated — durable timerSource infrastructure (scheduling.md, M-T4.1 Phase 2).
+  # Auto-generated — durable timerSource infrastructure (scheduling.md, M-T4.1).
   use Ecto.Migration
 
   def up do
@@ -459,7 +459,7 @@ end
  *  watermark — not job history — is the catch-up ledger, so pruning is safe). */
 export function renderObanConfig(appName: string, appModule: string): string {
   return `
-# Durable timerSource jobs (scheduling.md, M-T4.1 Phase 2) — cron timers enqueue
+# Durable timerSource jobs (scheduling.md, M-T4.1) — cron timers enqueue
 # ${appModule}.Scheduler.*Worker jobs onto Oban; the unique constraint gives
 # single-fire across replicas, max_attempts gives retry.  The Pruner bounds the
 # completed-job table (the loom_timer_runs watermark is the catch-up ledger).

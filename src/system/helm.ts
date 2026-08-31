@@ -135,7 +135,7 @@ function renderValues(_sys: SystemIR, workloads: WorkloadModel[], brokers: Broke
   for (const b of brokers) {
     if (brokers[0] === b) {
       lines.push("brokers:");
-      lines.push("  # In-cluster broker workloads (M-T4.4 slice 5b), auth-provisioned");
+      lines.push("  # In-cluster broker workloads (M-T4.4), auth-provisioned");
       lines.push("  # exactly like the compose sidecars (§7).  Disable one and point");
       lines.push("  # the deployables' `channels:` URLs at a managed broker instead.");
     }

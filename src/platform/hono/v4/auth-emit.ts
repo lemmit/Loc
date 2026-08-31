@@ -171,10 +171,10 @@ function renderUserTypes(user: UserIR, orgPathClaim?: string): string {
         "export interface User extends UserClaims {",
         "  /** The caller's tenant materialized path (`currentUser.orgPath`) —",
         "   *  derived per-request from the tenancy claim, memoized on this",
-        "   *  request-scoped principal (multi-tenancy Phase 2, P2.1). */",
+        "   *  request-scoped principal (multi-tenancy). */",
         "  orgPath: string;",
         "  /** The caller's ROOT-org segment (`currentUser.rootOrg`) — the first",
-        "   *  segment of `orgPath` (multi-tenancy Phase 2, P2.5).  Anchors the",
+        "   *  segment of `orgPath` (multi-tenancy).  Anchors the",
         "   *  `global` read level's root-subtree widening. */",
         "  rootOrg: string;",
         "}",
@@ -328,7 +328,7 @@ async function resolveOrgPath(claim: string): Promise<string> {
   const rootOrgSeam = orgPathClaim
     ? `
 /** The caller's ROOT-org segment (\`currentUser.rootOrg\`): the first segment of
- *  the materialized \`orgPath\` (multi-tenancy Phase 2, P2.5). */
+ *  the materialized \`orgPath\` (multi-tenancy). */
 function rootOrgOf(orgPath: string): string {
   const i = orgPath.indexOf(".");
   return i === -1 ? orgPath : orgPath.slice(0, i);
@@ -383,8 +383,8 @@ ${resolverSeam}${rootOrgSeam}
  *  list matches the .NET side — framework endpoints stay anonymous so
  *  smoke tests + the OpenAPI cross-check don't need tokens. */
 /** RFC 7807 for a request that carried no valid credentials — the same envelope
- *  every other error on this API sends, where this used to be
- *  \`{"error":"unauthorized"}\`, a shape appearing nowhere else.
+ *  every other error on this API sends, rather than
+ *  \`{"error":"unauthorized"}\` — a shape appearing nowhere else.
  *
  *  \`WWW-Authenticate\` is not decoration: RFC 9110 §15.5.2 makes it a MUST on
  *  every 401 ("at least one challenge applicable to the target resource"), and

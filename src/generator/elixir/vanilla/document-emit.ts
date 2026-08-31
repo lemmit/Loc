@@ -593,8 +593,8 @@ ${insertStamps}    %${aggModule}{}
 ${updateStamps}
     # cast_embed(:data, on_replace: :update) casts the incoming (possibly
     # partial) attrs ONTO the existing embedded document, so unspecified fields
-    # keep their stored values (the merge-on-update semantics the old manual
-    # Map.merge gave) and validate_required still sees the retained values.
+    # keep their stored values (merge-on-update semantics) and
+    # validate_required still sees the retained values.
 ${
   versioned
     ? `    # Optimistic concurrency (default-on \`versioned\`): override the loaded

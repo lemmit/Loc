@@ -226,7 +226,7 @@ export const DOC_DENY_PREDICATE = "__denied?(row)";
 
 /** The private helper {@link DOC_DENY_PREDICATE} calls.  Emitted once per
  *  document repository whose filters contain a `deny`. */
-export const DOC_DENY_HELPER = `  # \`deny\` carve-out (authorization Phase 4): the visible set is EMPTY.  Spelled
+export const DOC_DENY_HELPER = `  # \`deny\` carve-out: the visible set is EMPTY.  Spelled
   # as a runtime membership test rather than the literal \`false\` because the
   # compiler FOLDS a literal — \`… and false\` is a typing violation, and a read
   # that provably never returns \`{:ok, _}\` makes each caller's success branch

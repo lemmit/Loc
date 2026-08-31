@@ -351,7 +351,7 @@ export function renderTimerScheduler(
   const store = usingMikro ? MIKRO_TIMER_STORE : DRIZZLE_TIMER_STORE;
 
   return lines(
-    "// Auto-generated — durable timer scheduler (scheduling.md Phase 2).",
+    "// Auto-generated — durable timer scheduler (scheduling.md).",
     "// cron: → pg-boss (durable, retried, single-fire); every: → in-process.",
     "// Emitted only when this deployable owns timerSources.",
     cron.length > 0 ? `import { PgBoss } from "pg-boss";` : false,

@@ -709,7 +709,7 @@ function renderUserRecord(
   // anchors the `global` read level's root-subtree widening.
   const rootOrgProp = `
     /// <summary>The caller's ROOT-org segment (<c>currentUser.rootOrg</c>) —
-    /// the first segment of <c>OrgPath</c> (multi-tenancy Phase 2, P2.5).</summary>
+    /// the first segment of <c>OrgPath</c> (multi-tenancy).</summary>
     public string RootOrg
     {
         get
@@ -728,7 +728,7 @@ function renderUserRecord(
     /// <summary>The caller's tenant materialized path
     /// (<c>currentUser.orgPath</c>) — the caller org's registry <c>data_key</c>,
     /// resolved once per request by UserMiddleware and memoized here
-    /// (multi-tenancy Phase 2, P2.2).  Falls back to the tenancy claim (the
+    /// (multi-tenancy).  Falls back to the tenancy claim (the
     /// root-segment path) until the resolver sets it, or when the caller's row
     /// has no <c>data_key</c> — never null.</summary>
     public string OrgPath
@@ -742,7 +742,7 @@ ${rootOrgProp}
 {
     /// <summary>The caller's tenant materialized path
     /// (<c>currentUser.orgPath</c>) — derived per-request from the tenancy
-    /// claim (multi-tenancy Phase 2, P2.1).</summary>
+    /// claim (multi-tenancy).</summary>
     public string OrgPath => $"{${upperFirst(orgPathClaim)}}";
 ${rootOrgProp}
 }`;
@@ -966,7 +966,7 @@ namespace ${ns}.Auth;
 
 /// <summary>Resolves the caller's tenant materialized path
 /// (<c>currentUser.orgPath</c>) from the registry's <c>data_key</c> column,
-/// keyed by the tenancy claim (multi-tenancy Phase 2, P2.2).  UserMiddleware
+/// keyed by the tenancy claim (multi-tenancy).  UserMiddleware
 /// calls it once per request and memoizes the result on the principal;
 /// <c>null</c> (missing row / <c>data_key</c> / unparseable claim) means "fall
 /// back to the claim" — the fail-safe root-segment path.</summary>
@@ -1001,9 +1001,9 @@ using ${ns}.Domain.Ids;
 
 namespace ${ns}.Infrastructure.Persistence;
 
-/// <summary>EF-backed <see cref="IOrgPathResolver"/> (multi-tenancy Phase 2,
-/// P2.2).  Reads the caller org's materialized <c>data_key</c> from the
-/// registry table keyed by the tenancy claim, memoized per request by
+/// <summary>EF-backed <see cref="IOrgPathResolver"/> (multi-tenancy).  Reads
+/// the caller org's materialized <c>data_key</c> from the registry table
+/// keyed by the tenancy claim, memoized per request by
 /// UserMiddleware.  Ignores the registry's own self-scope query filter (an
 /// explicit id lookup) and returns <c>null</c> on any failure — an unparseable
 /// claim, a missing row, a null <c>data_key</c>, or a DB error — so the caller
@@ -1062,8 +1062,8 @@ using ${ns}.Auth;
 
 namespace ${ns}.Infrastructure.Persistence;
 
-/// <summary>Dapper-backed <see cref="IOrgPathResolver"/> (multi-tenancy Phase 2,
-/// P2.2).  Reads the caller org's materialized <c>${dataKeyColumn}</c> from the
+/// <summary>Dapper-backed <see cref="IOrgPathResolver"/> (multi-tenancy).
+/// Reads the caller org's materialized <c>${dataKeyColumn}</c> from the
 /// registry table keyed by the tenancy claim, memoized per request by
 /// UserMiddleware.  Returns <c>null</c> on any failure — an unparseable claim, a
 /// missing row, a null <c>${dataKeyColumn}</c>, or a DB error — so the caller

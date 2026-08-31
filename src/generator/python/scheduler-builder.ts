@@ -208,7 +208,7 @@ export function renderPyTimerScheduler(
   });
 
   return lines(
-    `"""Timer scheduler (scheduling.md, M-T4.1 Phase 2).  Auto-generated.`,
+    `"""Timer scheduler (scheduling.md, M-T4.1).  Auto-generated.`,
     "",
     "Fires each owned `timerSource`'s tick event on a wall-clock cadence.",
     "",

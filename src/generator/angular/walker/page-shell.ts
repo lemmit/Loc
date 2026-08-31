@@ -1151,7 +1151,7 @@ export function renderAngularPageStub(page: PageIR, nameCtx: PageNameCtx, authUi
   if (requires) {
     const gate = renderGateExpr(requires, "currentUser");
     return [
-      "// Auto-generated (stub — body needs api/forms support, a later Slice 4b batch).",
+      "// Auto-generated (stub — the body needs api/forms support).",
       'import { Component, inject } from "@angular/core";',
       'import { SessionService } from "../auth/session.service";',
       "",
@@ -1175,7 +1175,7 @@ export function renderAngularPageStub(page: PageIR, nameCtx: PageNameCtx, authUi
   }
 
   return [
-    "// Auto-generated (stub — body needs api/forms support, a later Slice 4b batch).",
+    "// Auto-generated (stub — the body needs api/forms support).",
     'import { Component } from "@angular/core";',
     "",
     "@Component({",

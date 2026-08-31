@@ -445,12 +445,12 @@ function renderOperation(
     const allDiscards = paramNames.map((n) => `    _ = ${n}`);
     return `${specLine}
   # loom.domain-service-multi-context-reading: '${op.name}' reads repositories
-  # across more than one context — out of scope for domain-services rev. 4 Slice 1
-  # (single-context reading only).  A cross-context reading service needs a
+  # across more than one context — only single-context reading is supported
+  # (domain-services.md rev. 4).  A cross-context reading service needs a
   # standalone module taking explicit Repo/context args; not emitted here.
   def ${fnName}(${paramNames.join(", ")}) do
 ${allDiscards.join("\n")}
-    raise "domain service '${op.name}': cross-context reading not yet supported (domain-services.md rev. 4 Slice 1)"
+    raise "domain service '${op.name}': cross-context reading not yet supported (domain-services.md rev. 4)"
   end`;
   }
 

@@ -148,7 +148,7 @@ function renderUserModule(
           "    # registry's `data_key` column and stored here via",
           "    # object.__setattr__ (this dataclass is frozen).  A bare class",
           "    # attribute — NOT a dataclass field — so asdict()/the /auth/me wire",
-          "    # never serializes it (multi-tenancy Phase 2, P2.2).",
+          "    # never serializes it (multi-tenancy).",
           '    org_path = ""',
         ]
       : [
