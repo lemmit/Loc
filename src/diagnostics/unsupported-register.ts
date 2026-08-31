@@ -155,6 +155,18 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     mission: "M-T1.1",
   },
   {
+    code: "loom.heex-component-host-state-unsupported",
+    kind: "gap",
+    site: "src/ir/validate/checks/system-checks.ts:585",
+    what:
+      "a form / QueryView / Table / FileUpload / Chart inside a `component` on phoenixLiveView — " +
+      "#2646 lifted a component's `state` and `action`s into the host LiveView but not the " +
+      "walker's form / query / upload / table-control accumulators, so the markup emitted " +
+      "against an assign the host never makes (compiles clean, 500s at request time)",
+    mission: "M-T1.1",
+    verified: true,
+  },
+  {
     code: "loom.event-sourced-workflow-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:3724",

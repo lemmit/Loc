@@ -58,6 +58,7 @@ import {
   isFindPredicateAdapter,
 } from "../../util/find-predicate-capability.js";
 import { nonRootFilterFields, rootBaseOf } from "../../util/inheritance.js";
+import { heexComponentHostStateUses } from "../../util/heex-component-host-state.js";
 import { readableProjectionNames } from "../../util/projection-read.js";
 import { opHasProvSite } from "../../util/prov-id.js";
 import {
@@ -560,6 +561,47 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
             fw: fw || "unknown",
           }),
           source: `${ui.name}/${what}`,
+        });
+      }
+    }
+  }
+}
+
+/** A page-body primitive that needs HOST-LIVEVIEW state, written inside a
+ *  `component`, on a phoenixLiveView ui.
+ *
+ *  A HEEx function component is a pure render function with no process of its
+ *  own, so its `state { … }` and named `action`s are LIFTED into the host page's
+ *  LiveView (#2646).  That hoisting was never extended to the walker's form /
+ *  query / upload / table-control accumulators, so these primitives emit their
+ *  markup inside the component while the host gets no assign, no
+ *  `allow_upload/3` and no `handle_event/3`.
+ *
+ *  It is a COMPILE ERROR rather than a documented degrade because the emitted
+ *  project passes `mix compile --warnings-as-errors` and then dies at REQUEST
+ *  time on the missing assign — a page that 500s on load, or a form whose submit
+ *  silently does nothing.  A gate the author reads is strictly better than a
+ *  crash they meet in the running app.  The workaround is exact and local: move
+ *  the primitive into the page body (components may still hold layout, display,
+ *  `state` and `action`s).
+ *
+ *  Drains when the four accumulators hoist the way state and actions already do
+ *  — the same `ComponentActionInfo` + `gather*` seam, plus the multi-instance
+ *  question `componentUses` exists to answer for state. */
+export function validateHeexComponentHostState(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const d of sys.deployables) {
+    for (const { ui, fw } of mountedUis(sys, d)) {
+      if (fw !== "phoenixLiveView") continue;
+      for (const { component, primitive } of heexComponentHostStateUses(ui)) {
+        diags.push({
+          severity: "error",
+          code: "loom.heex-component-host-state-unsupported",
+          message: diagMessage("loom.heex-component-host-state-unsupported", {
+            component,
+            primitive,
+            dName: d.name,
+          }),
+          source: `${ui.name}/${component}`,
         });
       }
     }
