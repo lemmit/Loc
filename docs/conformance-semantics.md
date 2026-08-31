@@ -1325,3 +1325,74 @@ nothing and the test passes vacuously.
   round-tripped — verified to fail with each half of the fix reverted
   independently. Statically pinned per backend by
   `test/generator/string-length-code-points.test.ts`. Tier: **behavioral**.
+
+### RS-32 · A malformed path `{id}` answers the declared 422, not a framework default
+- **Guarantee.** `GET /api/orders/not-a-uuid` — a path `{id}` that will not
+  parse — answers **422** with the same §3.2 `errors[]` envelope the body tier
+  emits (`pointer: "/id"`), on every backend. It is a **client** fault, and
+  reporting it as a 500 tells the caller to retry a request that can never
+  succeed.
+- **Why it is not a judgement call.** Every backend already *publishes* the 422:
+  the per-operation error matrix (`src/ir/util/openapi-errors.ts`) says "a path
+  `{id}` is parsed as a uuid and a query parameter is parsed against its
+  declared type, and a failure at either answers the same 422 the body tier
+  does", and each emitted spec declares the parameter `format: uuid`. What
+  differed was what they *answered*.
+- **Trigger.** Any route binding `{id}` — `getById`, `destroy`, the canonical
+  `update`, each named operation, each `can_<op>` probe, the entity-history read,
+  the workflow-instance read.
+- **The split.** 2-vs-3 when first measured (#2652): node's
+  `z.string().uuid()` param → `defaultHook`, and .NET's `[FromRoute] Guid` →
+  `InvalidModelStateResponseFactory`, both answered 422. Java raised
+  `MethodArgumentTypeMismatchException`, which does not implement
+  `ErrorResponse`, so the catch-all reported **500**; python bound the param as a
+  bare `str` carrying a documentation-only `format: uuid`, so nothing rejected
+  it and the malformed value reached the repository. **Elixir was never
+  measured** in that pass: it handed the raw string to `Repo.get/2`, where a
+  malformed `:binary_id` raises `Ecto.Query.CastError` out of Ecto, leaving only
+  the app-global fault floor — a bare 500 with no `errors[]` and no pointer.
+- **Where the guard belongs is part of the rule.** On Phoenix it is a controller
+  **`plug`**, not a per-action `case`: a controller gains actions over time and a
+  per-action guard is the one the next action's emitter forgets. It is opt-in per
+  controller rather than living in the shared `<App>Web` `controller` quote,
+  because an api's explicit `route` list may declare a `{id}` of its own that is
+  not an aggregate id.
+- **Conforms.** node, dotnet, java, python, elixir.
+- **Provenance.** Four backends aligned by #2652 and pinned in
+  `test/generator/malformed-path-id-status.test.ts`; elixir added there in the
+  W1b elixir packet (`renderPathIdCastPlug` +
+  `ProblemDetails.invalid_path_id_response/2`), mutation-proven by reverting the
+  plug. Tier: **generator**, with the runtime half recorded per backend.
+
+### RS-33 · An `errors[]` pointer names the whole path to the offending field
+- **Guarantee.** A 422 `errors[]` entry carries an **RFC 6901** JSON pointer to
+  the field that failed, however deeply nested — `/lines/0/qty`, `/sku/code` —
+  never just the top-level container it sits under, and never an empty array. It
+  is what lets a frontend ACL (`applyServerErrors`) bind the denial to the form
+  control that caused it.
+- **Trigger.** A violation inside a containment part, a value-object collection
+  row, or a value-object field.
+- **The split.** 3-vs-1-vs-1. .NET's `PointerOf` converts `Items[0].Qty` to
+  `/items/0/qty`, node joins the whole zod `issue.path`, python keeps every
+  pydantic `loc` segment. **Java** emits `/lineTotals[0].unitPrice` — a field
+  path, not a pointer. **Elixir was structurally depth-1**: the body was built
+  from a flat `changeset.errors` walk into `pointer_of([field])`, and
+  `Ecto.Changeset.errors` holds only the top level, so a `cast_embed` /
+  `cast_assoc` child violation answered `errors: []` — a 422 naming no field at
+  all.
+- **A value object is a third carrier, not a nested changeset.** On Phoenix a VO
+  persists as one jsonb `:map` column and is checked by `validate_change/3`, so
+  there is no child changeset for the walk to find. It has to forward its own
+  errors explicitly — with the inner field path *and* the authored message *and*
+  the `loom_code` the i18n catalog is keyed by. Collapsing it to
+  `[{field, "is invalid"}]` discarded all three.
+- **Conforms.** node, dotnet, python, elixir. **Open:** java (the bracket
+  spelling; `src/generator/java/emit/api.ts:678` and `:802`).
+- **Provenance.** Recorded as ledger rows `F2-W-03` and
+  `nested-errors-pointer-shape`; the elixir arm fixed in the W1b elixir packet
+  (`collect_changeset_errors/2` + the `loom_path` opt on `validate_vo/3`),
+  mutation-proven by deleting the recursion's call site — which the first version
+  of the gate did **not** catch, because it asserted the helper clauses existed
+  rather than that they were called. Tier: **generator**; the runtime half wants
+  a wire-golden fixture carrying a VO-collection violation, which no golden
+  records today (only 4 of 31 record any error body).
