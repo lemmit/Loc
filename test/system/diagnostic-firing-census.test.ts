@@ -507,6 +507,31 @@ system S {
   deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
 }`,
 
+  // A form inside a `component` on Phoenix LiveView.  A HEEx function component
+  // is a pure render function, so the form's `@form` assign and its
+  // `handle_event` clause must come from the host page's LiveView — and only a
+  // component's `state`/`action`s are lifted there (#2646).  The emitted project
+  // compiled and then 500'd on page load; the gate refuses it instead.
+  "loom.heex-component-host-state-unsupported": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+    repository Things for Thing { }
+  } }
+  api Api from Sub
+  ui WebApp {
+    api C: Api
+    component NewThing() { body: CreateForm { of: Thing } }
+    page Home { route: "/"  body: NewThing() }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable app {
+    platform: elixir contexts: [C] dataSources: [st] serves: Api
+    ui: WebApp { C: app } port: 4000
+  }
+}`,
+
   // --- backend-capability gates, driven by their UNHOSTED arm --------------
   // These three read as "your backend can't do this", and the census read them
   // as undrivable because every backend family IS in their capability set.
