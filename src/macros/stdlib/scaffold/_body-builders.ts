@@ -1394,14 +1394,11 @@ export function scaffoldList(
             call: true,
             // A bool param's state is the select's `"true"`/`"false"` STRING;
             // the find takes a `bool`, so the comparison is the argument.
-            args: f.params.map((p): Expression =>
-              p.kind === "bool"
-                ? binaryExpr(
-                    nameRefExpr(stateNameFor(f.name, p.name)),
-                    "==",
-                    stringLit("true"),
-                  )
-                : nameRefExpr(stateNameFor(f.name, p.name)),
+            args: f.params.map(
+              (p): Expression =>
+                p.kind === "bool"
+                  ? binaryExpr(nameRefExpr(stateNameFor(f.name, p.name)), "==", stringLit("true"))
+                  : nameRefExpr(stateNameFor(f.name, p.name)),
             ),
           }),
           false,

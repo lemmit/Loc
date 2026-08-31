@@ -4,7 +4,6 @@
 
 export { checkIconOnlyButtonName, checkImageAltText, checkThemeContrast } from "./a11y.js";
 export { checkAuthBlock } from "./auth.js";
-export { checkBypassPlacement } from "./bypass-placement.js";
 export {
   checkBindableInputArgs,
   checkBuilderCallType,
@@ -14,6 +13,7 @@ export {
   checkFileUploadBinding,
   checkLegacyConstructorCalls,
 } from "./builder-call.js";
+export { checkBypassPlacement } from "./bypass-placement.js";
 export { checkChannels } from "./channel.js";
 export { checkProjectSingletons, checkTopLevelDomainComposition } from "./composition.js";
 export { checkCriteria } from "./criterion.js";

@@ -107,7 +107,9 @@ export function intLit(value: number): IntLit {
 export function listLit(elements: Expression[]): ListLit {
   const origin = _currentOrigin();
   const node = _tag(mkListLit({ $type: "ListLit", elements }), origin);
-  elements.forEach((e, i) => _setContainer(e, node, "elements", i));
+  elements.forEach((e, i) => {
+    _setContainer(e, node, "elements", i);
+  });
   return node;
 }
 
