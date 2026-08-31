@@ -264,12 +264,23 @@ describe("F13 (runtime) — every backend ANSWERS the not-found rung on a miss",
     // compiled.  Nothing caught it because no fixture in the dotnet-build
     // matrix pairs the two.  Verified by compiling the emitted project in the
     // sdk:10.0 container: FAILED before, `0 Warning(s) 0 Error(s)` after.
-    const files = await generateSystemFiles(
-      SRC.replace(
+    // The dapper variant is generated from a ONE-DEPLOYABLE source, not from
+    // `SRC` with one platform swapped.  `SRC`'s five deployables share context
+    // `N`, and `loom.dapper-unsupported#schema-split` (F2-ADP-3) now refuses a
+    // self-provisioning adapter beside a migration-chain one on one context —
+    // dapper provisions `public.wallets` while the other four route into the
+    // binding's schema, so the five would start against two different tables.
+    // The comparison harness is an authoring convenience; the deployment it
+    // describes is the very bug that gate exists for, so this arm drops the
+    // siblings instead of asking the gate to look away.
+    const dapperSrc = SRC.split("\n")
+      .filter((l) => !/^ {2}deployable (?!netApi)/.test(l))
+      .join("\n")
+      .replace(
         "deployable netApi  { platform: dotnet,",
         "deployable netApi  { platform: dotnet { persistence: dapper },",
-      ),
-    );
+      );
+    const files = await generateSystemFiles(dapperSrc);
     const key = [...files.keys()].find((k) => /Repositories\/WalletRepository\.cs$/.test(k));
     expect(key, "no dapper wallet repository emitted").toBeDefined();
     const repo = files.get(key!)!;
