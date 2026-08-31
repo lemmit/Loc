@@ -100,8 +100,17 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  columns move to the root config discriminator-guarded — and only the residue
  *  EF Core structurally cannot express (a subtype-only column) is gated here.
  *  Drains when .NET moves capability filters off `HasQueryFilter` onto the
- *  per-read LINQ `.Where(...)`, which is per-`DbSet` and therefore subtype-typed. */
-const MAX_OPEN_GAPS = 42;
+ *  per-read LINQ `.Where(...)`, which is per-`DbSet` and therefore subtype-typed.
+ *
+ *  42 → 43: `loom.seed-event-sourced-unsupported` (targets-completeness
+ *  2026-08-30, `F2-SEED-EVENTSOURCED`; M-T6.52).  The gap is not new — no
+ *  backend has ever had an event-append seed path.  What is new is that it
+ *  stopped being INVISIBLE: elixir dropped the row and still wrote the
+ *  dataset's ship-once marker, while java/.NET emitted a `create(...)` call
+ *  that does not compile against the declared factory.  Raising the pin buys
+ *  five backends refusing identically instead of three diverging silently;
+ *  M-T6.52 lands the seed path, deletes the row, and lowers this back to 42. */
+const MAX_OPEN_GAPS = 43;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

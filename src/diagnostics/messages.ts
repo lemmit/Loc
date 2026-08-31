@@ -497,6 +497,35 @@ export const DIAGNOSTIC_MESSAGES = {
   "loom.seed-raw-column-invalid": (p: { name: unknown }) =>
     `Raw seed column '${p.name}' is a value object / nested record — raw rows ` +
     "support scalar / enum / id columns only; use the domain path for value objects.",
+  "loom.seed-dataset-name-collision": (p: { name: unknown; name2: unknown }) =>
+    `Seed dataset '${p.name}' collides with '${p.name2}' once cased into a seeder ` +
+    "function name (snake on elixir/python, PascalCase on node/java/.NET), so the two " +
+    "datasets would emit one duplicated function — a compile error on three backends and " +
+    "a silently-dropped dataset on the other two. Rename one, or merge them into a single " +
+    "`seed` block (blocks with the SAME name already merge).",
+  "loom.seed-raw-document-shape": (p: { name: unknown }) =>
+    `Raw seed row on '${p.name}': a \`shape: document\` aggregate is stored as ` +
+    "(id, data, version) with the whole tree in one jsonb column, so it has no per-field " +
+    "columns for a raw INSERT to target (Postgres answers 42703 at first boot). Use the " +
+    "domain path — `seed <dataset> { … }` without `raw` — which writes a document " +
+    "aggregate correctly on every backend.",
+  "loom.seed-event-sourced-unsupported": (p: { name: unknown }) =>
+    `Seed row on event-sourced aggregate '${p.name}': its truth is the append-only event ` +
+    "stream, and no backend has a seed path that appends one — elixir drops the row while " +
+    "still committing the dataset's ship-once marker, and java/.NET emit a create call " +
+    "that does not match the declared `create` signature. Seed a state-persisted " +
+    "aggregate, or drive the stream through the aggregate's own create at runtime.",
+  "loom.seed-abstract-aggregate": (p: { name: unknown }) =>
+    `Seed row on abstract aggregate '${p.name}': an inheritance base has no create ` +
+    "factory and no repository, so every backend drops the row — and elixir still commits " +
+    "the dataset's ship-once marker, so it can never be applied later. Seed a concrete " +
+    "subtype instead.",
+  "loom.seed-tenant-owned-needs-raw": (p: { name: unknown }) =>
+    `Seed row on tenant-owned aggregate '${p.name}' uses the domain create path, which ` +
+    "stamps `tenantId`/`dataKey` FROM THE PRINCIPAL — and a first-boot seeder has none, so " +
+    "the row is written with an empty/NULL tenant and no tenant can ever read it. Use " +
+    "`seed <dataset> raw { … }` and spell the tenant columns (and the row's `id`) " +
+    "explicitly instead.",
 
   // ----------------------------------------------------------------------
   // src/language/validators/statements.ts

@@ -1068,3 +1068,15 @@ Both siblings already do it right: elixir's `renderDocFindFn` threads `bypass: {
 **Verification when it lands.** A generator test per shape (declared find with `ignoring <Cap>`, `ignoring *`, and a projection over a document source), asserting the bypassed predicate is *absent* — and mutation-proved, since the failure mode here is a silently-retained conjunct, which a presence-only assertion cannot see.
 
 Sources: [generator-code-review-2026-08-24](../audits/generator-code-review-2026-08-24.md) §D item 14 + §Follow-up register (2026-08-30) row 18. Sibling of §A11 (elixir, fixed #2667).
+
+## M-T6.52 — No backend can seed an event-sourced aggregate; three of five were wrong about it in two different ways — `open` · **M** · P1
+
+Found 2026-08-30 by the targets-completeness audit (`F2-SEED-EVENTSOURCED`), gated 2026-08-31 by [#2700](https://github.com/lemmit/Loc/pull/2700). `seed default { Account { owner: "seeded-alice" } }` on an `persistedAs: eventLog` aggregate parsed `0 error(s), 0 warning(s)` and then diverged: **elixir** dropped the row from the dataset (`seedableAggs` filter, `src/generator/elixir/vanilla/seed-emit.ts:83/92`) and still committed the dataset's `mark_seeded` ship-once marker, so the rows could never be applied on a later boot; **java** and **.NET** built the create call from `forCreateInput(agg.fields)` — every declared field — against a factory that takes only the declared `create open(owner: string)` parameters, i.e. `Account.create("seeded-alice", null)` against `create(String owner)` (javac "cannot be applied", CS1739+CS1501). node/python were accidentally correct because their factories are keyword-shaped.
+
+#2700 stopped the divergence with `loom.seed-event-sourced-unsupported` (`src/language/validators/seed.ts`) — all five now refuse identically instead of three diverging silently. **This mission is the feature the gate stands in for**, and the register row (`src/diagnostics/unsupported-register.ts`, `kind: "gap"`) drains only when it lands.
+
+**The fix:** an event-append seed path. Elixir appends the aggregate's creation event through the same seam the create op uses rather than calling a repository `insert/1` that does not exist; java/.NET build the call from the aggregate's **declared `create` parameters**, not `forCreateInput` (the same divergence the .NET named-arg path already dodges by accident). Then delete the validator rule + its register row and lower `MAX_OPEN_GAPS`.
+
+**Verification when it lands.** The `test/language/seed.test.ts` negative case flips to a positive one on all five; a behavioural leg that seeds a stream and reads the folded balance back; mutation-proved per backend.
+
+Sources: [targets-completeness-2026-08-30](../audits/targets-completeness-2026-08-30.md) `F2-SEED-EVENTSOURCED`, ledger.json. Touches the seed emitters only — sequence against any other seed-path work.
