@@ -159,7 +159,9 @@ import {
 } from "./emit/query-projection-reads.js";
 import { renderJavaRealtimeController } from "./emit/realtime.js";
 import {
+  declaredFinds,
   isPagedAutoAll,
+  isPagedFind,
   type JavaRepoCtx,
   renderJavaRepositoryImpl,
   renderJavaRepositoryInterface,
@@ -1733,7 +1735,11 @@ function emitAggregate(
     pkgFor("entity", agg.name),
     esCreateParams,
     ctx.payloads,
-    isPagedAutoAll(repo),
+    // F2-W-07 — a DECLARED `find … : T paged` returns the same envelope, so it
+    // needs the same concrete record.  `isPagedAutoAll` alone left a
+    // document/embedded/event-sourced aggregate (non-paged auto-all) with a
+    // declared paged find and no `<Agg>Paged` to return.
+    isPagedAutoAll(repo) || declaredFinds(repo).some(isPagedFind),
   )) {
     place(dto.name, dto.category, dto.content, agg.name, agg.origin, construct);
   }

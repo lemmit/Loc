@@ -340,16 +340,19 @@ function idTargetName(f: WireField): string {
  *  which `renderReadModelVoResponseDtos` co-locates in `application.workflows`
  *  (`domainToWire` emits `<Vo>Response.from(...)`).  An entity (containment
  *  part) type would need a `<Part>Response` DTO — but a part type never
- *  resolves in workflow scope (parts are private to their aggregate), so this
- *  arm is an unreachable backstop mirrored by the
- *  `loom.java-workflow-instance-field-unsupported` validator gate. */
+ *  resolves in workflow scope (parts are private to their aggregate — the rule
+ *  lives in `ddd-scope.ts`, so `workflow W { line: Line }` never links), so this
+ *  arm is an INTERNAL INVARIANT, not a backend gap.  The
+ *  `loom.java-workflow-instance-field-unsupported` code that used to mirror it
+ *  was retired as a phantom (M-T6.36); the unreachability is pinned instead by
+ *  `test/generator/java/generator-java-readmodel-gates.test.ts`. */
 function guardInstanceField(wf: WorkflowIR, f: WireField): void {
   const t = f.type.kind === "optional" ? f.type.inner : f.type;
   const leaf =
     t.kind === "array" ? (t.element.kind === "optional" ? t.element.inner : t.element) : t;
   if (leaf.kind === "entity") {
     throw new Error(
-      `java workflow-instances: instance field '${f.name}' of '${wf.name}' is entity-typed — not yet supported on the java backend.`,
+      `java workflow-instances: instance field '${f.name}' of '${wf.name}' is entity-typed — unreachable: a part type never resolves in workflow scope.`,
     );
   }
 }

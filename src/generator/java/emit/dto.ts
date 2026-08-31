@@ -101,9 +101,14 @@ export function renderDtoFiles(
    *  `response <Agg>Response` is present it drives the aggregate response DTO
    *  (read-path replacement for the `wireShape` derivation). */
   payloads: readonly PayloadIR[] = [],
-  /** M-T2.6: the aggregate's implicit findAll is paged (plain relational) — emit
-   *  a concrete `<Agg>Paged` envelope record the controller returns, so springdoc
-   *  names + shapes the OpenAPI schema `<Agg>Paged` (matching every backend). */
+  /** M-T2.6 / F2-W-07: SOME route on this aggregate returns the paged wire —
+   *  the implicit findAll (plain relational), or an author-declared
+   *  `find … : T paged`.  Emit a concrete `<Agg>Paged` envelope record the
+   *  controller returns, so springdoc names + shapes the OpenAPI schema
+   *  `<Agg>Paged` (matching every backend).  Named for the auto-all case it was
+   *  introduced for; a DECLARED paged find needs the identical record, and
+   *  before F2-W-07 it got the raw generic instead (springdoc named that
+   *  component `Paged<Agg>Response` — a name no sibling backend publishes). */
   pagedAutoAll = false,
 ): DtoFile[] {
   const out: DtoFile[] = [];

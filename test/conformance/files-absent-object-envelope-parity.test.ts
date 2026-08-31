@@ -182,16 +182,28 @@ describe("M-T6.39 — an absent /files object answers the service's one 404 enve
   // The `httpStatus NotFound -> <Code>` override (M-T5.20) used to move every
   // 404 in the app EXCEPT this one, because the route hardcoded its own answer.
   // Joining the shared producer is what makes it move — asserted, not assumed.
-  it("an httpStatus NotFound override retargets the files 404 too, on all five", async () => {
-    const overridden = (platform: string, port: number) =>
-      systemFor(platform, port).replace(
-        "  api A from D",
-        "  api A from D { httpStatus NotFound -> 410 }",
-      );
+  //
+  // THIS IS ALSO THE CONTRACT ASSERTION FOR F2-W-13.  That ledger row read the
+  // override reaching the blob-absence 404 as a DEFECT, on the strength of a
+  // (now corrected) comment in `src/ir/util/openapi-errors.ts` claiming the blob
+  // miss "stays literal on all five backends".  It does not, and must not: the
+  // remap is the deliberate consequence of M-T6.39 routing every backend's blob
+  // miss through its ONE not-found producer.  Giving the blob path a literal
+  // carrier of its own — F2-W-13's proposed fix — fails the cases below.
+  //
+  // The title said "on all five" while the body checked TWO.  It now checks
+  // five: the three the original left out are exactly the ones whose producer is
+  // a shared HELPER, where a regression would look like the helper still
+  // existing but the route no longer reaching it.
+  const overridden = (platform: string, port: number) =>
+    systemFor(platform, port).replace(
+      "  api A from D",
+      "  api A from D { httpStatus NotFound -> 410 }",
+    );
 
-    // node / python / elixir / java route through a shared carrier or helper
-    // whose status is resolved in ONE place, so the override lands there; only
-    // .NET bakes the literal into the route's own responder.
+  it("an httpStatus NotFound override retargets the files 404 too — dotnet + elixir", async () => {
+    // .NET is the one backend that bakes the literal into the route's own
+    // responder, so the resolved status has to appear in the responder itself.
     const dotnet = sourceFor(
       await generateSystemFiles(overridden("dotnet", 3146)),
       "DomainExceptionFilter.cs",
@@ -205,4 +217,64 @@ describe("M-T6.39 — an absent /files object answers the service's one 404 enve
     );
     expect(elixir).toContain("problem_response(conn, 410,");
   });
+
+  // node / python / java resolve the status once, inside the shared producer.
+  // The property to pin is therefore TWO-part and per-SITE (property 1 above):
+  // the producer answers the OVERRIDDEN status, AND the files route still
+  // reaches that producer rather than answering 404 itself.
+  const SHARED_PRODUCER: Record<
+    string,
+    { port: number; producerFile: string; resolved: string[]; routeFile: string }
+  > = {
+    node: {
+      port: 3148,
+      producerFile: "http/index.ts",
+      // The `onError` not-found arm, not merely the digit somewhere in the file
+      // — a bare "410" would also match the `problem(status: … | 410 | …)`
+      // signature, which is present whether or not the arm resolves.
+      resolved: [
+        'baseLogger.warn({ event: "not_found", status: 410 });',
+        'return problem(410, "Gone", err.message);',
+      ],
+      routeFile: "http/index.ts",
+    },
+    python: {
+      port: 3149,
+      producerFile: "http/problem.py",
+      resolved: [
+        'log("warn", "not_found", message=str(err), status=410)',
+        'return problem(request, 410, "Gone", str(err))',
+      ],
+      routeFile: "files_routes.py",
+    },
+    java: {
+      port: 3150,
+      producerFile: "ApiExceptionAdvice.java",
+      resolved: [
+        'CatalogLog.event("not_found", "warn", "status", 410);',
+        'return respond(problem(410, "Gone", e.getMessage(), request), 410);',
+      ],
+      routeFile: "FilesController.java",
+    },
+  };
+
+  for (const [platform, spec] of Object.entries(SHARED_PRODUCER)) {
+    it(`an httpStatus NotFound override retargets the files 404 too — ${platform}`, async () => {
+      const files = await generateSystemFiles(overridden(platform, spec.port));
+      const producer = sourceFor(files, spec.producerFile);
+      for (const needle of spec.resolved) {
+        expect(
+          producer,
+          `${platform}: ${spec.producerFile} must carry the resolved status`,
+        ).toContain(needle);
+      }
+      // The route must still REACH that producer — the half a status-only
+      // assertion cannot see.  `SITES[platform].raises` is the same reach the
+      // per-site cases above pin, re-asserted under the override so a fix that
+      // gave the blob path its own literal carrier fails here too.
+      const route = sourceFor(files, spec.routeFile);
+      for (const needle of SITES[platform]!.raises) expect(route).toContain(needle);
+      for (const needle of SITES[platform]!.forbidden) expect(route).not.toContain(needle);
+    });
+  }
 });

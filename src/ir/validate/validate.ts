@@ -75,7 +75,7 @@ import {
   validateGroupedProjectionBackend,
   validateGuardPrincipalWithoutAuth,
   validateInheritanceStorage,
-  validateJavaReadModelShapes,
+  validateJavaReservedIdentifiers,
   validateMikroOrmSupport,
   validateNeedCapabilities,
   validatePagedQueryHandlerBackend,
@@ -169,7 +169,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateElixirOpSelfCallPosition(sys, diags);
     validateContextFilterSupport(sys, diags);
     validateFilterBypassSupport(sys, diags);
-    validateJavaReadModelShapes(sys, diags);
+    validateJavaReservedIdentifiers(sys, diags);
     validateStampSupport(sys, diags);
     validateGuardPrincipalWithoutAuth(sys, diags);
     validateDapperSupport(sys, diags);

@@ -375,11 +375,19 @@ export function renderJavaController(
       if (isPagedFind(f)) {
         const pagedParams = [...declared, ...JAVA_PAGED_QUERY_PARAMS].join(", ");
         const pagedArgs = [args, "page, pageSize, sort, dir"].filter(Boolean).join(", ");
+        // F2-W-07 — return the CONCRETE `<Agg>Paged` record, exactly as the
+        // auto-findAll route below does.  Returning the raw `Paged<T>` generic
+        // made springdoc name the component `Paged<Agg>Response`, while node
+        // (`.openapi("<Agg>Paged")`), python (`response_model=<Agg>Paged`),
+        // elixir (`<Agg>Paged` schema) and .NET (`CustomSchemaIds` mapping
+        // `Paged<T>` → `<Agg>Paged`) all publish `<Agg>Paged` for the same
+        // route.  The service still returns `Paged<T>`; the controller wraps.
         return [
           `    @GetMapping("${relativeOpPath(entry)}")`,
-          `    public Paged<${agg.name}Response> ${f.name}${agg.name}(${pagedParams}) {`,
+          `    public ${agg.name}Paged ${f.name}${agg.name}(${pagedParams}) {`,
           ...(f.requires ? findGateLines(f) : []),
-          `        return service.${f.name}(${pagedArgs});`,
+          `        var result = service.${f.name}(${pagedArgs});`,
+          `        return new ${agg.name}Paged(result.items(), result.page(), result.pageSize(), result.total(), result.totalPages());`,
           `    }`,
           ``,
         ];
@@ -496,7 +504,9 @@ export function renderJavaController(
     ``,
     ctx.applicationPkg !== ctx.pkg ? `import ${ctx.applicationPkg}.*;` : null,
     ...[...unionImports].sort().map((i) => `import ${i};`),
-    declaredFinds(repo).some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
+    // No `Paged;` import: since F2-W-07 the controller never names the generic
+    // — both paged arms (declared find + auto-findAll) return `<Agg>Paged` and
+    // bind the service's `Paged<T>` through `var`.
     anyFindGate ? `import ${ctx.basePkg}.domain.common.ForbiddenException;` : null,
     anyFindAbsenceThrow ? `import ${ctx.basePkg}.domain.common.AggregateNotFoundException;` : null,
     anyFindGateUsesUser ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
