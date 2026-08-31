@@ -76,7 +76,7 @@ system Docs {
       title: "Browse"
       state { chosen: string = "" }
       body: Stack {
-        Field { label: "Visibility", bind: chosen },
+        Field("Visibility", bind: chosen),
         match {
           chosen != "" => QueryView {
             of: K.Doc.byVis(chosen),
