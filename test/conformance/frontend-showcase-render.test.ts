@@ -53,50 +53,16 @@ const GAPS: Record<string, string> = {
   "angular:Console": "Panel's slot/action params are refused for an angular host",
   "feliz:Console": "Panel's slot/action params are refused for a feliz host",
 
-  // The four static-bundle frontends and Feliz render the whole showcase UI
-  // surface against `FALLBACK_MARKERS`. (Vue's user-component slot/action
-  // props, once a gap here, now render: the slot is template `<slot>`, the
-  // action a callback prop — page-shell.ts / vue-target.ts.)  The two entries
-  // below are the Flutter row's first-run findings; both are FILED, not fixed,
-  // and both are `flutterTarget.renderComment` drops — the widget and
-  // everything under it collapse to `const SizedBox.shrink() /* … */`.
-
-  // FINDING F1 — `Kitchen`'s
-  //     QueryView { of: …, single: true, data: row => OperationForm { row.rename } }
-  // The RESOLUTION half is FIXED (`queryview-single-lambda-paramtypes`):
-  // `singleAggregateOfQuery` took one hop off the `of:` receiver chain, which
-  // lands on the VERB for `<handle>.<Agg>.all`, so the lambda binding never
-  // reached `paramTypes` and the form degraded to
-  //     Form(row.rename): 'row' is not an in-scope aggregate instance
-  // on react / vue / svelte / feliz / flutter (and to nothing at all on
-  // Angular).  It now descends past a `STANDARD_AGG_OPS` verb, and the five
-  // other frontends render the form.
-  //
-  // What KEEPS this cell amber is Flutter-specific and narrower: its pack ships
-  // no `primitive-modal` template and its forked `renderOperationForm` matches
-  // only the by-name (`of:`/`op:`) shape, so the resolved instance-qualified
-  // form still has nothing to render and emits a visible, syntactically inert
-  // marker.  Tracked as `flutter-modal-instance-operationform` — the same root
-  // as F2 below.
-  "flutter:Console":
-    "F1 — Flutter has no `primitive-modal` renderer and its `renderOperationForm` " +
-    "matches only `OperationForm { of:, op: }`, so a resolved `OperationForm { row.<op> }` " +
-    "renders a marker (the paramTypes resolution itself is fixed)",
-
-  // FINDING F2 — every scaffolded Detail page's operation surface.
-  // `scaffoldOperations` (macros/stdlib/scaffold/_body-builders.ts) emits the
-  // INSTANCE-QUALIFIED shape whenever the ops sit inside the Detail QueryView's
-  // `data` lambda: `Modal { trigger: Button {…}, OperationForm { data.<op> } }`.
-  // Flutter's `renderModal` (`flutter/flutter-target.ts`) only understands the
-  // by-name shape (`OperationForm { of: <Agg>, op: <op> }`) and otherwise emits
-  //     Modal: OperationForm child must name of: <Agg> and op: <public op>
-  // so the ENTIRE operations row of `EngineerDetail` and `SquadDetail` is a
-  // `SizedBox.shrink()` — every write action on a scaffolded Flutter app is
-  // missing.  The fix is a Flutter `renderModal` arm for the instance-qualified
-  // child (the shared walker already has one); filed for the next batch.
-  "flutter:Admin":
-    "F2 — Flutter `renderModal` only matches `OperationForm { of:, op: }`, but " +
-    "`scaffoldOperations` emits `OperationForm { data.<op> }`, dropping the whole ops row",
+  // The four static-bundle frontends, Feliz AND Flutter render the whole
+  // showcase UI surface against `FALLBACK_MARKERS`.  (Vue's user-component
+  // slot/action props, once a gap here, now render: the slot is template
+  // `<slot>`, the action a callback prop — page-shell.ts / vue-target.ts.  The
+  // two Flutter findings that were frozen here — F1, an `OperationForm { row.<op> }`
+  // inside a `single:` QueryView, and F2, the whole operations row of every
+  // scaffolded Detail page — both traced to `flutterTarget` matching only the
+  // by-name `OperationForm { of:, op: }` child, and both closed when
+  // `renderModal` / `renderOperationForm` grew the instance-qualified arm and
+  // `forms-emit.ts`'s collector learned to emit the widget for it.)
 };
 
 /** The showcase UIs' three binding forms, plus the api each targets.
