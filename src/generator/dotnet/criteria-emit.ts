@@ -111,7 +111,7 @@ function renderCriterion(c: CriterionIR, candidate: string, ns: string): string 
     `${ns}.Domain.Ids`,
     "System.Linq",
   ]);
-  for (const u of collectCsExprUsings(c.body)) usings.add(u);
+  collectCsExprUsings(c.body, usings, ns);
   if (queryable) usings.add("System.Linq.Expressions");
   return lines(
     "// Auto-generated.",

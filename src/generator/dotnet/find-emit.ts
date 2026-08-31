@@ -87,10 +87,13 @@ export function buildFindBodies(
  *  what `filterClauseFor` renders. */
 export function collectFindBodyUsings(
   repo: RepositoryIR | undefined,
-  into: Set<string> = new Set(),
+  into: Set<string>,
+  /** Project root namespace — a find `where` may call a `domainService`, which
+   *  needs `${ns}.Domain.Services` on the repository impl. */
+  ns: string,
 ): Set<string> {
   for (const find of repo?.finds ?? []) {
-    if (find.filter) collectCsExprUsings(find.filter, into);
+    if (find.filter) collectCsExprUsings(find.filter, into, ns);
   }
   return into;
 }
@@ -156,9 +159,11 @@ function orderByClauseFor(r: RetrievalIR): string {
  *  `collectFindBodyUsings` for finds. */
 export function collectRetrievalBodyUsings(
   retrievals: RetrievalIR[],
-  into: Set<string> = new Set(),
+  into: Set<string>,
+  /** Project root namespace — see `collectFindBodyUsings`. */
+  ns: string,
 ): Set<string> {
-  for (const r of retrievals) collectCsExprUsings(r.where, into);
+  for (const r of retrievals) collectCsExprUsings(r.where, into, ns);
   return into;
 }
 

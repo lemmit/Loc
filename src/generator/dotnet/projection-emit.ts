@@ -313,7 +313,7 @@ function renderProjectionsController(
     // who fails it cannot learn whether the key exists.
     const gate = proj.query?.requires;
     if (gate) {
-      collectCsExprUsings(gate, usings);
+      collectCsExprUsings(gate, usings, ns);
       usings.add(`${ns}.Domain.Common`); // ForbiddenException
       if (exprUsesCurrentUser(gate)) {
         usings.add(`${ns}.Auth`); // ICurrentUserAccessor

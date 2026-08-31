@@ -78,7 +78,7 @@ function lifecycleGate(
   if (gates.length === 0) return { body: "", deps: [], usings: [] };
   const usesUser = lifecycleGatesUseCurrentUser(action);
   const usings = new Set<string>();
-  for (const g of gates) collectCsExprUsings(g.expr, usings);
+  for (const g of gates) collectCsExprUsings(g.expr, usings, ns);
   // `ICurrentUserAccessor` lives in `<ns>.Auth`, which the base handler usings
   // do NOT carry — the operation handler adds it the same way.  Without it the
   // emitted handler is CS0246, which no tsc-level test can see.

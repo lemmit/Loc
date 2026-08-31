@@ -71,10 +71,12 @@ export { statementSubRegions } from "../_trace/sourcemap.js";
  *  per-kind expression set of the leaf table below. */
 export function collectCsStmtUsings(
   stmts: StmtIR[],
-  into: Set<string> = new Set(),
+  into: Set<string>,
   /** Forwarded to `collectCsExprUsings` so a domain-service call in any
-   *  statement body adds `${ns}.Domain.Services`.  Omitted ⇒ no such using. */
-  ns?: string,
+   *  statement body adds `${ns}.Domain.Services`.  Required for the same
+   *  reason it is required there — an omitted `ns` is silently a missing
+   *  `using`, i.e. C# that does not compile. */
+  ns: string,
 ): Set<string> {
   for (const s of stmts) {
     switch (s.kind) {

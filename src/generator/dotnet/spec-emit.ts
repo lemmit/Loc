@@ -104,7 +104,7 @@ function renderSpec(
   // The ambient accessor (`RequestContext`) lives in `<ns>.Domain.Common`;
   // import it only when the predicate actually resolves the principal.
   if (refsPrincipal) usings.add(`${ns}.Domain.Common`);
-  for (const u of collectCsExprUsings(r.where)) usings.add(u);
+  collectCsExprUsings(r.where, usings, ns);
 
   const ctorParams = r.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
   return lines(

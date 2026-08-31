@@ -146,12 +146,17 @@ const DEFAULT: CsRenderContext = { thisName: "this" };
  *  exactly when this finds it. */
 export function collectCsExprUsings(
   e: ExprIR,
-  into: Set<string> = new Set(),
-  /** Project root namespace — when present, a `domain-service` call adds
+  into: Set<string>,
+  /** Project root namespace — a `domain-service` call adds
    *  `${ns}.Domain.Services` so the hosting file resolves the static class
-   *  the call leaf emits (`Pricing.Quote(...)`).  Omitted by collectors that
-   *  never sit beside a domain-service call (criteria, finds, validators). */
-  ns?: string,
+   *  the call leaf emits (`Pricing.Quote(...)`).  **Required**: it used to be
+   *  optional "for collectors that never sit beside a domain-service call",
+   *  and every collector that took that exemption was wrong — a `requires`
+   *  gate on a `destroy`, a value-object invariant and a projection gate all
+   *  admit `Svc.Op(...)`, and each shipped C# that does not compile (CS0103).
+   *  A caller cannot opt out any more; every emitter that renders an
+   *  expression knows its own root namespace. */
+  ns: string,
 ): Set<string> {
   switch (e.kind) {
     case "method-call":
@@ -183,7 +188,7 @@ export function collectCsExprUsings(
       // A domain-service member call (`Pricing.Quote(...)`) reaches into the
       // generated `Domain.Services` namespace — the call leaf renders the
       // class name unqualified, so the file must import it.
-      if (e.callKind === "domain-service" && ns !== undefined) {
+      if (e.callKind === "domain-service") {
         into.add(`${ns}.Domain.Services`);
       }
       for (const a of e.args) collectCsExprUsings(a, into, ns);

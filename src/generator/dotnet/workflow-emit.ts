@@ -2337,7 +2337,7 @@ function renderInstancesController(
     // arm the command route's body gate uses.
     const gate = wf.instanceReadGate;
     if (gate) {
-      collectCsExprUsings(gate, usings);
+      collectCsExprUsings(gate, usings, ns);
       usings.add(`${ns}.Domain.Common`); // ForbiddenException
       if (exprUsesCurrentUser(gate)) {
         usings.add(`${ns}.Auth`); // ICurrentUserAccessor

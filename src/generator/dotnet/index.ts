@@ -1546,8 +1546,8 @@ function emitAggregate(
   // declares its System.Text.RegularExpressions dependency; the
   // repository impl emitter then adds the using.  Retrieval `where`
   // predicates contribute the same way.
-  const repoImplUsings = collectFindBodyUsings(repoWithViews);
-  collectRetrievalBodyUsings(aggRetrievals, repoImplUsings);
+  const repoImplUsings = collectFindBodyUsings(repoWithViews, new Set<string>(), ns);
+  collectRetrievalBodyUsings(aggRetrievals, repoImplUsings, ns);
   // A retrieval/find whose `where` is a reified criterion consumes its
   // `Criterion` class's `ToExpression` → needs Domain.Criteria.
   const consumesCriterion =
