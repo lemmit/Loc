@@ -902,6 +902,42 @@ system P {
       }
     }`,
   ),
+
+  // --- seed crossings (F2-SEED-*, validators/seed.ts rules 5-8) -------------
+  // Each of these parsed 0 errors / 0 warnings before the rule existed and
+  // then produced a DIFFERENT wrong artefact per backend.
+  "loom.seed-dataset-name-collision": repoOnly(`    aggregate Widget with crudish { name: string }
+    repository Widgets for Widget { }
+    seed default { Widget { name: "a" } }
+    seed Default { Widget { name: "b" } }`),
+  "loom.seed-raw-document-shape":
+    repoOnly(`    aggregate Article shape: document, with crudish { title: string }
+    repository Articles for Article { }
+    seed wired raw { Article { id: "11111111-1111-1111-1111-111111111111", title: "Anchor" } }`),
+  "loom.seed-event-sourced-unsupported":
+    repoOnly(`    event Opened { account: Account id, owner: string }
+    aggregate Account persistedAs: eventLog {
+      owner: string
+      create open(owner: string) { emit Opened { account: id, owner: owner } }
+      apply(e: Opened) { owner := e.owner }
+    }
+    repository Accounts for Account { }
+    seed default { Account { owner: "seeded-alice" } }`),
+  "loom.seed-abstract-aggregate": repoOnly(`    abstract aggregate Base { name: string }
+    aggregate Child extends Base with crudish { extra: int }
+    repository Children for Child { }
+    seed default { Base { name: "x" } }`),
+  "loom.seed-tenant-owned-needs-raw": `
+system S {
+  user { id: guid  tenantId: string }
+  tenancy by user.tenantId of Org
+  subdomain Sub { context C {
+    aggregate Invoice with tenantOwned, crudish { label: string }
+    aggregate Org with crudish { name: string }
+    repository Invoices for Invoice { }
+    seed default { Invoice { label: "Seeded" } }
+  } }
+}`,
 };
 
 /**
