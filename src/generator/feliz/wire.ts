@@ -1307,6 +1307,26 @@ function exprChildren(e: ExprIR): ExprIR[] {
       return [e.cond, e.then, e.otherwise];
     case "convert":
       return [e.value];
+    // A `match` hosts read-bearing children in EVERY arm — which is exactly the
+    // shape a scaffolded filter bar emits: the `QueryView` over the filter find
+    // sits in an arm and the unfiltered `.all` view sits in `otherwise`.  With
+    // no arm here the walk stopped at the `match` node, so BOTH reads were
+    // missed and the emitted view named `model.<Field>`s the Model never
+    // declared, `init` never seeded and no `Cmd` ever filled.
+    case "match":
+      return [
+        ...(e.subject ? [e.subject] : []),
+        ...e.arms.flatMap((a) => [a.cond, a.value]),
+        ...e.variantArms.map((a) => a.value),
+        ...(e.otherwise ? [e.otherwise] : []),
+      ];
+    // Transparent wrappers — descend so a read never hides behind one.
+    case "i18nFormat":
+      return [e.inner];
+    case "duration":
+      return [e.amount];
+    // `literal` / `this` / `id` / `ref` / `action-ref` / `authz-filter` carry no
+    // expression children at all.
     default:
       return [];
   }
