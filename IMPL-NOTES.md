@@ -58,6 +58,16 @@ does not.
 
 **Row:** `M-T1.15-nonstring-filter-finds-dropped` (enum arm).
 
+> **Status 2026-08-31 (fleet wave 1, PR #2699):** `guid`, `datetime` and `bool`
+> have since LANDED in the macro — `guid`/`datetime` bind the same string box as
+> `X id` (both are `z.string()` on the request wire and `string` in every
+> frontend's state emitter), and `bool` binds a three-state `SelectField`
+> (`""`/`"true"`/`"false"`) passing `<state> == "true"` as the find argument,
+> because a `Toggle`'s `false` zero value would put half the domain out of
+> reach. **Enum is still blocked for exactly the reason below**, and this
+> section is the frontend-js packet's brief: it is the LAST kind whose only
+> obstacle is a frontend emitter.
+
 The macro half of an enum filter is two lines (`SelectField` + the enum's values
 as `options:`). It is **not landed** because the generated page would not
 type-check:
@@ -107,6 +117,11 @@ branch already supports that) and the arm condition `<state> != ""`.
 ---
 
 ## 3. `decimal` / `money` filter params — Feliz's zero-literal comparison
+
+> **Status 2026-08-31:** still held back, unchanged. Note the grammar DOES carry
+> a `DecLit` (`ddd.langium` `LiteralExpr`), so a `decLit` ui-factory plus a
+> Feliz-side numeric-literal check is a concrete route — it just needs the Feliz
+> compile tier to verify, which is why wave 1 did not take it.
 
 Held back for the same class of reason. The bar's "unset" sentinel is the int
 literal `0`; F# types `model.ByRateR <> 0` as `decimal <> int`, which is FS0001.
