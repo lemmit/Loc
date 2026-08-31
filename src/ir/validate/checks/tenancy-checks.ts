@@ -35,6 +35,14 @@ import type { LoomDiagnostic } from "./diagnostic.js";
 //     `loom.cross-tenant-without-tenancy` (warning — intent declared,
 //     nothing to opt out of)
 //   - `loom.tenancy-conflicting-stance` — both markers on one aggregate.
+//   - `loom.tenancy-inherited-stance-conflict` — a subtype taking the OPPOSITE
+//     stance from the abstract base it `extends`.  The base's capability
+//     contributes the `tenant_id` column to the subtype's row either way (the
+//     enrich pass merges the base's fields), while the subtype's stance decides
+//     whether anything stamps or filters it — so the halves disagree at
+//     runtime.  Its twin is the `#inherited` variant of the unmarked message
+//     above, which names that asymmetry instead of asking the author for a
+//     marker they already wrote on the base.
 //
 // Stance is DERIVED per aggregate via `classifyTenantStance`
 // (`src/ir/util/tenant-stance.ts`) — never stamped on the IR.

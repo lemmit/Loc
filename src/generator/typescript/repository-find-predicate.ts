@@ -706,7 +706,7 @@ export function contextFilterPredicate(
         `Loom internal: capability \`filter\` on aggregate '${agg.name}' is not lowerable to ` +
           `a Drizzle predicate, so the read restriction it declares cannot be emitted. ` +
           `The IR validator is supposed to reject a non-selectable filter before codegen ` +
-          `(loom.filter-not-queryable) — this shape reached the emitter instead. ` +
+          `(loom.criterion-not-selectable) — this shape reached the emitter instead. ` +
           `Dropping it would ship unfiltered reads, so this is a hard stop.`,
       );
     }

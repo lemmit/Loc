@@ -177,6 +177,36 @@ describe(".NET TPH × capability filter", () => {
     expect(gated[0]!.message).toContain("'isDeleted'");
   });
 
+  it("the gate is scoped to the EF adapter — Dapper splices the same predicate into raw SQL", async () => {
+    // The restriction is EF's, not .NET's: Dapper builds its capability
+    // predicates as SQL text against the shared table, where a subtype column
+    // is simply a column.  A gate keyed on `platform: dotnet` would have
+    // rejected a model that works — so it is keyed on the ADAPTER.
+    const { diags } = await emit(`
+      system Acme {
+        subdomain Registry {
+          context Fleet {
+            criterion Live of Car = this.doors > 0
+            abstract aggregate Vehicle { name: string  retired: bool }
+            aggregate Car extends Vehicle { doors: int  filter Live }
+            aggregate Truck extends Vehicle { payloadKg: int }
+            repository Cars for Car { }
+            repository Trucks for Truck { }
+          }
+        }
+        storage primary { type: postgres }
+        resource fleetState { for: Fleet, kind: state, use: primary }
+        deployable api {
+          platform: dotnet { persistence: dapper }
+          contexts: [Fleet]
+          dataSources: [fleetState]
+          port: 8080
+        }
+      }
+    `);
+    expect(diags.filter((d) => d.code === "loom.tph-filter-unsupported")).toEqual([]);
+  });
+
   it("a PRINCIPAL filter on a subtype registers on the root, with distinct names per subtype", async () => {
     // `modelBuilder.Entity<Car>().HasQueryFilter(…)` threw at model build; and
     // because both subtypes' `tenantOwned` produces the same base name

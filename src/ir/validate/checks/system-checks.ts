@@ -3610,29 +3610,53 @@ export function validateInheritanceStorage(
       source: `${ctx.name}/${agg.name}`,
     });
   }
-  // .NET only: a TPH subtype's capability `filter` must be expressible as a
-  // ROOT query filter.  EF Core hosts every filter in an inheritance hierarchy
-  // on the root entity type, so a predicate reading a column that exists on one
-  // subtype alone cannot be registered at all — see `nonRootFilterFields` for
-  // the two workarounds and why each fails.  Without this gate the emitter
-  // either dropped the filter silently (the old `tph ? [] :` short-circuit, a
-  // read restriction absent from every emitted query) or emitted a lambda that
-  // does not compile.
-  if (backendPlatforms.has("dotnet")) {
-    for (const agg of ctx.aggregates) {
-      const stray = nonRootFilterFields(agg, ctx.aggregates);
-      if (stray.length === 0) continue;
-      const root = rootBaseOf(agg, ctx.aggregates);
-      diags.push({
-        severity: "error",
-        code: "loom.tph-filter-unsupported",
-        message: diagMessage("loom.tph-filter-unsupported", {
-          name: agg.name,
-          fields: stray.map((f) => `'${f}'`).join(", "),
-          root: root.name,
-        }),
-        source: `${ctx.name}/${agg.name}`,
-      });
+}
+
+// ---------------------------------------------------------------------------
+// EF Core only: a TPH subtype's capability `filter` must be expressible as a
+// ROOT query filter.
+//
+// EF hosts every query filter in an inheritance hierarchy on the root entity
+// type, so a predicate reading a column that exists on ONE subtype cannot be
+// registered at all — `nonRootFilterFields` carries the two workarounds and the
+// EF Core 10.0.10 errors that rule each of them out.  Without this gate the
+// emitter either dropped the filter whole (the old `tph ? [] :` short-circuit,
+// a declared read restriction absent from every emitted query with no error at
+// all) or emitted a root-typed lambda naming a member the root does not have.
+//
+// Scoped to the EF adapter, NOT to `platform: dotnet`.  The Dapper adapter
+// splices its capability predicates into raw SQL against the shared table, where
+// a subtype column is simply a column — so the same model is fine there, and a
+// platform-wide gate would reject a shape that works.  Every other backend
+// filters per-read, so none of them is affected either.
+// ---------------------------------------------------------------------------
+export function validateTphFilterExpressibility(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  const seen = new Set<string>();
+  for (const dep of sys.deployables) {
+    if (dep.platform !== "dotnet" || dep.persistence === "dapper") continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const stray = nonRootFilterFields(agg, ctx.aggregates);
+        if (stray.length === 0) continue;
+        // One diagnostic per aggregate, however many .NET deployables host it.
+        const key = `${ctx.name}/${agg.name}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        diags.push({
+          severity: "error",
+          code: "loom.tph-filter-unsupported",
+          message: diagMessage("loom.tph-filter-unsupported", {
+            name: agg.name,
+            fields: stray.map((f) => `'${f}'`).join(", "),
+            root: rootBaseOf(agg, ctx.aggregates).name,
+          }),
+          source: key,
+        });
+      }
     }
   }
 }

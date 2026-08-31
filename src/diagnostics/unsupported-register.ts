@@ -410,10 +410,12 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
   {
     code: "loom.tph-filter-unsupported",
     kind: "gap",
-    site: "src/ir/validate/checks/system-checks.ts:3628",
+    site: "src/ir/validate/checks/system-checks.ts:3651",
     what:
       "a TPH SUBTYPE's capability `filter` reading a column the hierarchy ROOT does not declare, " +
-      "on .NET only.  EF Core registers every query filter in an inheritance hierarchy on the " +
+      "on the .NET EF adapter only — Dapper splices the same predicate into raw SQL, where a " +
+      "subtype column is just a column, so it is NOT gated.  EF Core registers every query " +
+      "filter in an inheritance hierarchy on the " +
       "root entity type, and a root-hosted filter cannot reach a subtype-only column (verified " +
       'against EF Core 10.0.10: a CLR downcast raises "No coercion operator is defined between ' +
       "types 'Truck' and 'Car'\" and EF.Property raises \"the specified property does not exist " +
