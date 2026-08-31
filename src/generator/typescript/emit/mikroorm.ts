@@ -2844,7 +2844,17 @@ export function renderMikroDocumentRepository(
     const isArray = f.returnType.kind === "array";
     const isOptional = f.returnType.kind === "optional";
     const ret = isArray ? `${agg.name}[]` : isOptional ? `${agg.name} | null` : agg.name;
-    const allExpr = capX ? `all.filter((x) => ${capX})` : "all";
+    // Per-find capability predicate: the aggregate-wide `capX` above cannot see
+    // THIS find's `ignoring <Cap>` / `ignoring *`, so reusing it here silently
+    // re-applied a bypassed capability filter — the MikroORM twin of the
+    // drizzle document defect (M-T6.51).  The relational mikro path already
+    // threads the bypass (`mikroContextFilters(agg, { bypassAll, bypassCaps })`);
+    // the document path now does too.
+    const findCap = documentCapabilityBody(agg, "x", {
+      bypassAll: f.bypassAll,
+      bypassCaps: f.bypassCaps,
+    });
+    const allExpr = findCap ? `all.filter((x) => ${findCap})` : "all";
     const selector = isArray
       ? pred
         ? `${allExpr}.filter(${pred})`

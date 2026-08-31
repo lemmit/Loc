@@ -24,6 +24,8 @@ import { desugarAuthzFilterInApp } from "../_expr/authz-filter-inapp.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { synthProjectionFinds } from "./projection-finds.js";
 import { renderTsExpr } from "./render-expr.js";
+import type { FilterBypass } from "./repository-find-predicate.js";
+import { allContextFilterEntries } from "./repository-find-predicate.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
 import { repoPortImportLine, repoPortName } from "./repository-port-builder.js";
 import { aggHasFieldMask, toWireMaskedMethod, toWireMethod } from "./repository-wire-builder.js";
@@ -277,10 +279,24 @@ export function buildDocumentRepositoryFile(
  *  QUERY-filter translator, and this path has no query to translate into
  *  (pairwise finding F1 — the sentinel reached the generic dispatcher and blew
  *  its invariant).  In-app, both decisions are plain expressions over the
- *  rehydrated row. */
-export function documentCapabilityBody(agg: EnrichedAggregateIR, varName: string): string | null {
-  const preds = (agg.contextFilters ?? []).map(
-    (p) => `(${renderTsExpr(desugarAuthzFilterInApp(p, agg.name), { thisName: varName })})`,
+ *  rehydrated row.
+ *
+ *  `bypass` is the READ's OWN `ignoring <Cap>` / `ignoring *` clause.  It used
+ *  to be absent here, so the predicate came from the aggregate's default filter
+ *  set and every find reused it: a declared `find … ignoring softDeletable` on
+ *  a `shape: document` aggregate STILL filtered the soft-deleted rows out —
+ *  wrong data, fail-closed, no diagnostic (M-T6.51; the elixir twin is §A11,
+ *  fixed in #2667).  Bypassed entries are now dropped through the same
+ *  `allContextFilterEntries` the relational and MikroORM builders use, so all
+ *  three adapters answer `ignoring` from one rule. */
+export function documentCapabilityBody(
+  agg: EnrichedAggregateIR,
+  varName: string,
+  bypass?: FilterBypass,
+): string | null {
+  const preds = allContextFilterEntries(agg, bypass).map(
+    (e) =>
+      `(${renderTsExpr(desugarAuthzFilterInApp(e.predicate, agg.name), { thisName: varName })})`,
   );
   return preds.length > 0 ? preds.join(" && ") : null;
 }
@@ -427,8 +443,16 @@ function documentFindMethod(
   const ret = isArray ? `${agg.name}[]` : isOptional ? `${agg.name} | null` : agg.name;
   // Capability filter narrows `all` to the visible set BEFORE the find's own
   // predicate runs, so a find never returns a capability-hidden (soft-deleted)
-  // record.
-  const cap = documentCapabilityBody(agg, "x");
+  // record — UNLESS this find carries its own `ignoring` clause, in which case
+  // the named (or all) capability conjuncts are dropped for this read only.
+  // Recomputed PER FIND: the aggregate-wide predicate that used to be reused
+  // here could not see `bypassAll` / `bypassCaps` at all (M-T6.51).  The
+  // synthesised query-time-projection reads carry the projection's own bypass
+  // on their `FindIR` (`projection-finds.ts`), so they inherit this correctly.
+  const cap = documentCapabilityBody(agg, "x", {
+    bypassAll: find.bypassAll,
+    bypassCaps: find.bypassCaps,
+  });
   const allExpr = cap ? `all.filter((x) => ${cap})` : "all";
   const selector = isArray
     ? pred

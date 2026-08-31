@@ -57,8 +57,14 @@ import {
  *  conjunction with the named capability origins dropped — otherwise reuse the
  *  repo-wide `filterPred` the caller already lowered.  The dropped predicate's
  *  Drizzle ops are a subset of the always-collected superset, so a throwaway
- *  ops set is fine here (the import narrower keys off the emitted body). */
-function readFilterPred(
+ *  ops set is fine here (the import narrower keys off the emitted body).
+ *
+ *  Exported because the EMBEDDED repository builder needs the identical rule:
+ *  it computes one repo-wide `filterPred` and used to hand that to every find,
+ *  so `find … ignoring softDeletable` on a `shape: embedded` aggregate kept
+ *  the bypassed conjunct in its `where` (M-T6.51, the relational-column twin
+ *  of the document defect). */
+export function readFilterPred(
   agg: EnrichedAggregateIR,
   ctx: EnrichedBoundedContextIR,
   filterPred: string | null,
