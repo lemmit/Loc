@@ -530,8 +530,20 @@ system S {
     repository Orders for Order { }
   } }
 }`,
-  // `Tab` / `Column` are `group: "sub"` primitives — the parent consumes them
-  // inline, so anywhere else they degrade to a comment on all seven targets.
+  // Needs the DEPLOYMENT side, and specifically a JAVA one: the same field is
+  // legal on every other backend (`get case()` / `def case` / `field :case` /
+  // `@case`), so a declaration-only system — or a node one — raises nothing.
+  "loom.java-reserved-identifier-unsupported": `
+system P {
+  subdomain D { context Orders {
+    aggregate Order with crudish { case: string }
+    repository Orders for Order { }
+  } }
+  api A from D
+  storage pg { type: postgres }
+  resource st { for: Orders, kind: state, use: pg }
+  deployable d { platform: java, contexts: [Orders], dataSources: [st], serves: A, port: 4000 }
+}`,
   // --- workflow-checks.ts --------------------------------------------------
   // M-T9.19 recorded FOUR of this file's codes as unemittable from source.
   // Driving each one instead of re-reading the note found that claim wrong for
@@ -1082,18 +1094,21 @@ const UNREACHABLE_PINS: Record<string, string> = {
     "enshrine the crash as expected behaviour and make the fixture fail the day it is fixed.  " +
     "Re-test by removing the try/catch: every source that reaches it should be a bug report.",
 
-  // --- defensive backstops for shapes scope already forbids ------------------
-  "loom.java-workflow-instance-field-unsupported":
-    "Fires on an ENTITY-typed field in a workflow's `instanceWireShape`.  An entity is a " +
-    "containment part, and a part type never resolves in workflow scope (`ddd-scope.ts` " +
-    "restricts part types to the owning aggregate), so no source can put one there.  " +
-    "`validateJavaReadModelShapes` calls it a defensive backstop in its own comment.  Re-test " +
-    "by widening part-type scope, or by making `wireLeafKind` report `entity` for a shape a " +
-    "workflow CAN name.",
-  "loom.java-projection-field-unsupported":
-    "The projection twin of the workflow-instance backstop above: an ENTITY-typed field in a " +
-    "projection's `wireShape`.  Same preemption — a containment part type does not resolve in " +
-    "projection scope — and the same re-test.",
+  // The two `loom.java-{workflow-instance,projection}-field-unsupported` pins
+  // that sat here are GONE, because the codes are (M-T6.36).  This census
+  // reached the right diagnosis independently — "a part type never resolves in
+  // workflow / projection scope, so no source can put one there" — and pinning
+  // was the best available move while the codes existed.  Once that is true,
+  // though, the codes are not backstops but PHANTOMS: they name java in their
+  // identity for a shape the LANGUAGE refuses on every platform, so they made
+  // java read as uniquely limited and carried two rows in the M-T9.27 open-gap
+  // register that nothing could ever drain.  The emitters keep their
+  // `guardInstanceField` / `guardProjectionField` throws as internal
+  // invariants, and the unreachability is now pinned where it actually holds —
+  // at the SCOPE layer, in
+  // `test/generator/java/generator-java-readmodel-gates.test.ts`, which fails
+  // if part-type scope ever widens.  That is this pin's "re-test" turned into
+  // a test.
 };
 
 // ---------------------------------------------------------------------------

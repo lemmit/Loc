@@ -152,7 +152,17 @@ describe("Provenanced<T> — the value+lineage carrier is one shape on all five 
     const spec = JSON.parse(files.get(".loom/wire-spec.json")!);
     expect(spec.aggregates.Order.properties.total).toEqual({
       type: "object",
-      properties: { [VALUE]: { type: "integer" }, [LINEAGE]: { type: "object" } },
+      properties: {
+        [VALUE]: { type: "integer" },
+        // NULLABLE, not a bare object (F2-XB-7).  Every backend puts an
+        // explicit `"lineage": null` on the wire for a field never written, and
+        // JSON Schema applies a member's subschema whenever the key is PRESENT
+        // — `required: [value]` does not save it — so a bare `{"type":"object"}`
+        // published a contract the app's own response violates.  The
+        // nullability is read off the carrier's one declaration
+        // (`PROVENANCED_LINEAGE_NULLABLE`), the same way the member NAMES are.
+        [LINEAGE]: { type: ["object", "null"] },
+      },
       required: [VALUE],
       additionalProperties: false,
     });
