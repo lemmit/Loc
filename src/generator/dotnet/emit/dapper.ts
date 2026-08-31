@@ -19,7 +19,6 @@
 // `text` (`.ToString()` / `Enum.Parse`).
 // ---------------------------------------------------------------------------
 
-import { csClaimStampsFor } from "./entity.js";
 import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import type {
   ContainmentIR,
@@ -60,6 +59,7 @@ import {
   renderCsExpr,
   renderCsType,
 } from "../render-expr.js";
+import { csClaimStampsFor } from "./entity.js";
 import { renderRetrievalParamsWithCt } from "./repository.js";
 
 // ---------------------------------------------------------------------------
@@ -1968,7 +1968,8 @@ export function renderDapperDocumentRepository(
   ];
   const serializeLine =
     "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);";
-  const openLine = "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);";
+  const openLine =
+    "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);";
   // Stamped: open → begin → probe → stamp → serialize (the stamp must precede
   // the snapshot).  Unstamped: the original serialize → open → begin order.
   const savePrelude = docCreateStamps
