@@ -5292,11 +5292,39 @@ The mechanism existed. It did not reach the named thing. Checking "is there a
 multi-principal harness" was the adjacent question; "does it mint the claim THIS
 predicate reads" was the real one.
 
+### The third instance, found only by running it
+
+`policy-document` looked genuinely drainable after all that: its predicate reads
+`role`/`tenantId`, both minted. So I wrote the `test e2e`, and booted the node
+behavioural leg to capture its wire golden. It failed on the second call:
+
+    POST /api/things            -> 201  (aggregate_created)
+    GET  /api/things/{that id}  -> 404
+
+The aggregate is invisible to the identity that just created it. `Thing` carries
+`allow deep`, which anchors at `ORG_PATH_CLAIM_FIELD` = `orgPath`
+(`src/ir/util/tenant-stance.ts`) — and `DEV_CLAIMS` mints
+`{ tenantId, orgId, role }`, no `orgPath`. Reading the aggregate's own fields
+was still not enough; the binding claim was one the POLICY introduced, not one
+the `user {}` block declared.
+
+So both waivers were accurate, for **one shared reason** neither text stated:
+the behavioural principal's claim set is `{ tenantId, orgId, role }`, and any
+fixture whose predicate reads another claim cannot be driven. Draining either is
+one piece of harness work, not two fixture edits.
+
+Note the near-miss: narrowing the caller to `Note`'s principal-free `deny` would
+have PASSED, removed the waiver, and left `allow deep` — the reason the fixture
+exists — undriven. A green e2e that drains a waiver while covering less than the
+waiver described is worse than the waiver.
+
 **Rule:** before declaring a blocker stale, resolve the blocker's own nouns down
 to the code that satisfies them — the claim, the route, the identifier — not to
 the subsystem that plausibly covers them. A waiver text names specifics on
 purpose; matching it against a capability's headline is how a stale-looking
-waiver survives being "drained".
+waiver survives being "drained". And when the nouns check out, RUN it: the third
+instance here was invisible to every amount of reading, because the binding
+claim was introduced by the policy rung, not by the fixture's own declarations.
 
 **Corollary for probes:** a monitoring probe deserves the same mutation proof as
 a test gate (§59, §63). Prove it can observe a KNOWN state before you trust its

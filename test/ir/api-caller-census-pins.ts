@@ -567,15 +567,23 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   "handler-triad",
   // The lifecycle `requires` gate.  ENFORCEMENT is pinned structurally per
   // backend in `test/generator/lifecycle-guard-render.test.ts` (mutation-proven
-  // against ten seeded emitter defects), but no RUNTIME caller exercises it, and
-  // the two reasons are worth stating rather than hiding: an e2e proving the 403
-  // needs a principal whose `permissions` claim the behavioural harness does not
-  // mint (the OIDC fixture's mock issuer supplies `realm_access.roles` and
-  // nothing else), and the e2e DSL has no negative-status assertion form to
-  // spell a denial with — every emitted block asserts a SUCCESSFUL path.  The
-  // runtime negative-authz proof for `requires` lives in the M-T3.13 OIDC e2e
-  // legs; extending it to the lifecycle gate is M-T9.13's drain, not this
-  // slice's.
+  // against ten seeded emitter defects), but no RUNTIME caller exercises it.
+  //
+  // ONE of the two blockers this used to name is now STALE, retired here so it
+  // is not re-derived: "the e2e DSL has no negative-status assertion form" is
+  // false — `expect(<call>).toThrow(404)` is the form, and `policy-deny` spells
+  // every one of its denials with it.
+  //
+  // The BINDING blocker stands, and it is the CLAIM-SET one below: this fixture
+  // gates on `currentUser.permissions.contains(...)` over
+  // `user { id: string  permissions: string[] }`, and `DEV_CLAIMS` mints no
+  // `permissions`.  Worse for this entry specifically, the claim is an ARRAY and
+  // `DEV_CLAIMS` is pinned to STRING claims because the non-node backends honour
+  // only strings — so this one needs the claim-injection path widened, not just
+  // a key added.  Until then an e2e here would 403 on every call and assert the
+  // denial twice rather than pinning the gate from both sides (the two-halves
+  // rule `read-gates` states).  The runtime negative-authz proof for `requires`
+  // meanwhile lives in the M-T3.13 OIDC e2e legs.
   "lifecycle-guard",
   // BROKER SIDECAR (the outbox relay's delivery half). Same home as
   // `channels-broker`.
@@ -585,15 +593,37 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // and the undenied control), so "a denied read 404s / lists empty" is proven
   // rather than assumed.  Its five registry routes are pinned above.
   //
-  // The `shape: document` × authz crossing (pairwise F1) is a DIFFERENT fixture
-  // and stays: codegen CRASHED on node/java/python until the in-app desugar
-  // landed, so its first job is the compile tier — but "the deep ladder actually
-  // hides an out-of-subtree document row over HTTP" is still unproven at runtime.
-  // A runtime caller there needs an AUTHENTICATED, UNAUTHORIZED principal (the
-  // ladder is meaningless with one identity), which is the multi-principal
-  // harness work (#2515), not that fixture's.  The emitted predicate IS executed
-  // against fabricated rows in `test/generator/policy-document-inapp.test.ts`, so
-  // the filtering semantics are proven — just not end-to-end over the wire.
+  // The `shape: document` × authz crossing (pairwise F1) STAYS, and its old
+  // waiver text named the wrong blocker.  That text said a caller here needed
+  // "an AUTHENTICATED, UNAUTHORIZED principal … the multi-principal harness work
+  // (#2515)".  #2515 landed (`DEV_CLAIMS_UNAUTHORIZED`), and it does not help:
+  // that principal carries the SAME tenancy claims by design, so it is not a
+  // second tenant either.
+  //
+  // The REAL blocker was found by writing the caller and booting it (node leg,
+  // 2026-08-30).  `Thing` carries `allow deep`, which anchors at
+  // `ORG_PATH_CLAIM_FIELD` = `orgPath` (src/ir/util/tenant-stance.ts), and
+  // `DEV_CLAIMS` mints `{ tenantId, orgId, role }` — no `orgPath`.  So the
+  // subtree predicate matches nothing for the behavioural principal and the
+  // aggregate is invisible to the very identity that created it:
+  //
+  //     POST /api/things            -> 201  (aggregate_created)
+  //     GET  /api/things/{that id}  -> 404
+  //
+  // A caller cannot distinguish that from a correct deny, so an e2e authored
+  // today would either fail or — if narrowed to `Note`'s principal-free `deny` —
+  // PASS while leaving `allow deep`, the reason this fixture exists, undriven,
+  // and would take this waiver with it.  That is precisely the coverage-hiding
+  // trade M-T9.13 exists to prevent, so the entry stays.
+  //
+  // SAME ROOT CAUSE AS `lifecycle-guard` ABOVE: the behavioural principal's
+  // claim set is `{ tenantId, orgId, role }`, and a fixture whose predicate
+  // reads any other claim cannot be driven at runtime.  Draining EITHER entry is
+  // one piece of harness work — widen the claim set (and allow array-valued
+  // claims for `permissions`) — not two fixture edits.  The emitted predicate IS
+  // executed against fabricated rows in
+  // `test/generator/policy-document-inapp.test.ts`, so the filtering semantics
+  // are proven; what is missing is the wire.
   "policy-document",
   // SIDECARS — `objectStore` (S3/minio), `queue`, an http `api` peer and a
   // `mailer` (mailpit).  A put→get round-trip needs them standing up, which is
