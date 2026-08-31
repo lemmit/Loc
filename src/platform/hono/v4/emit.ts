@@ -255,8 +255,8 @@ function pointerOf(path: ReadonlyArray<PropertyKey>): string {
  *
  *  Validation failures get 422 (Unprocessable Entity, RFC 7807 standard
  *  for input-shape errors).  Domain-rule violations carried by
- *  DomainError ALSO emit 422 via the router's \`app.onError\` catch-all
- *  (RS-15, owner decision 2026-07-29): both are well-formed requests the
+ *  DomainError ALSO emit 422 via the router's \`app.onError\` catch-all:
+ *  both are well-formed requests the
  *  server refuses on SEMANTIC grounds, which is what RFC 9110 reserves 422
  *  for, and it makes the denial ladder identical on all five backends.  400
  *  stays for a genuinely malformed/unparseable request. */
@@ -270,7 +270,7 @@ export function defaultHook(result: { success: boolean; error?: { issues: Readon
       // authored message emits a byte-identical file (the acme baseline fixture
       // is the gate).  Under a catalog the code resolves SERVER-side (M-T1.11).
       localizeMessages
-        ? `// The SERVER localises the message too (M-T1.11): the code resolves
+        ? `// The SERVER localises the message too: the code resolves
     // against the generated catalog for the request locale, falling back to the
     // authored text the refine carries.  Resolved HERE rather than in the refine
     // because a zod "message" is fixed when the schema is CONSTRUCTED (module
@@ -1593,7 +1593,7 @@ function renderProjectIndexTs(
   const authStubCall = !userShape
     ? ""
     : oidc
-      ? `\n// OIDC verifier (D-AUTH-OIDC) — validates the IdP's tokens against its\n// JWKS and maps claims onto the typed User.  Configure the issuer /\n// client via the env vars the \`auth { oidc }\` block referenced.\nregisterOidcVerifier();\nbaseLogger.info({ event: "auth_oidc_verifier_registered" });\n`
+      ? `\n// OIDC verifier — validates the IdP's tokens against its\n// JWKS and maps claims onto the typed User.  Configure the issuer /\n// client via the env vars the \`auth { oidc }\` block referenced.\nregisterOidcVerifier();\nbaseLogger.info({ event: "auth_oidc_verifier_registered" });\n`
       : `\n// Dev-stub verifier (auth/dev-stub.ts) — accepts every request as a\n// built-in identity filling every field the \`user { … }\` block declares.\n// Dev-only: the Loom playground (or curl) can override the claims by\n// sending a base64-encoded JSON object in \`x-loom-dev-claims\`; absent the\n// header the built-in identity is used.  REPLACE for production by calling\n// registerUserVerifier(...) with a real JWT-decoding implementation.\nregisterDevStubVerifier();\nbaseLogger.warn({ event: "auth_dev_stub_registered" });\n`;
   // Tenant-registry orgPath resolver (multi-tenancy) — wired on BOTH
   // persistence paths.  The auth middleware calls it per request; here we bind
@@ -1708,7 +1708,7 @@ ${effectiveMigCall}${seedCall}${authStubCall}${orgPathRegistration}${
       };
 ${
   hasChannels
-    ? `// Broker transport (channels.md; M-T4.4): one shared redis connection set
+    ? `// Broker transport (channels.md): one shared redis connection set
 // per LOOM_CHANNEL_*_URL.  The publish tee routes broker-bound events to
 // the broker (co-located consumers receive them via the subscription, not
 // a local shortcut); the consumer loop feeds received envelopes into the

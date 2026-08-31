@@ -23,7 +23,7 @@ export function renderCommon(
   // project stays byte-identical.
   const fileRef = opts.file
     ? `/// <summary>The {url, key, contentType, size} an object-store upload
-/// returns for a <c>File</c> field (M-T1.2).</summary>
+/// returns for a <c>File</c> field.</summary>
 public sealed record FileRef(string Url, string Key, string ContentType, long Size);
 
 `

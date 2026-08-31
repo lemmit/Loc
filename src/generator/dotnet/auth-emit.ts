@@ -173,7 +173,7 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace ${ns}.Auth;
 
-/// <summary>Generated OIDC verifier (D-AUTH-OIDC).  Validates the bearer
+/// <summary>Generated OIDC verifier.  Validates the bearer
 /// token's signature against the issuer's JWKS (discovered + cached via
 /// <see cref="ConfigurationManager{T}"/>), checks iss / aud / exp, then
 /// projects the configured claims onto the <see cref="User"/> shape.
@@ -371,7 +371,7 @@ using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 
 namespace ${ns}.Auth;
 
-/// <summary>OIDC redirect handshake (D-AUTH-OIDC).  <c>/auth/login</c> starts
+/// <summary>OIDC redirect handshake.  <c>/auth/login</c> starts
 /// the authorization-code flow, <c>/auth/callback</c> exchanges the code and
 /// issues the local <c>session</c> cookie (read by OidcUserVerifier),
 /// <c>/auth/logout</c> clears it.  No login form — the IdP hosts the

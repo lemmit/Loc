@@ -310,7 +310,7 @@ ${devClaimStringFields
   // discovery/verification helpers; the dev stub needs none.
   const verifierSection = auth ? renderOidcVerifier(auth, webModule) : renderDevStubVerifier(user);
   const verifierDoc = auth
-    ? "validates the inbound JWT via joken + joken_jwks against the issuer's JWKS (D-AUTH-OIDC)"
+    ? "validates the inbound JWT via joken + joken_jwks against the issuer's JWKS"
     : "is a permissive DEV STUB — replace verify_token/1 for production";
   // DEV STUB only: expose the built-in admin principal so LiveAuth can grant
   // LiveViews the SAME out-of-the-box identity this plug grants every :api
@@ -530,7 +530,7 @@ function renderOidcVerifier(auth: AuthIR, webModule: string): string {
 `
     : "";
   return `  # ---------------------------------------------------------------------------
-  # OIDC token verification (D-AUTH-OIDC) — delegated to joken + joken_jwks.
+  # OIDC token verification — delegated to joken + joken_jwks.
   # ---------------------------------------------------------------------------
 
   # Trailing-slash-trimmed issuer, read at runtime (NOT a module attribute —
@@ -609,7 +609,7 @@ function renderOidcToken(webModule: string, auth: AuthIR): string {
   return `# Auto-generated.
 defmodule ${webModule}.Auth.Token do
   @moduledoc """
-  Joken token config for the inbound OIDC access token (D-AUTH-OIDC).
+  Joken token config for the inbound OIDC access token.
 
   Signature verification is supplied per-request by the \`JokenJwks\` hook +
   \`${webModule}.Auth.JwksStrategy\` (the cached, periodically-refreshed JWKS,
@@ -656,7 +656,7 @@ function renderJwksStrategy(webModule: string): string {
   return `# Auto-generated.
 defmodule ${webModule}.Auth.JwksStrategy do
   @moduledoc """
-  \`joken_jwks\` strategy (D-AUTH-OIDC): fetches the issuer's JWKS, caches the
+  \`joken_jwks\` strategy: fetches the issuer's JWKS, caches the
   signers keyed by \`kid\`, and refreshes them periodically — so IdP key
   rotation heals without a restart (the same guarantee the other backends'
   JWKS clients give out of the box).  Started in the app supervision tree.
@@ -912,7 +912,7 @@ defmodule ${webModule}.AuthController do
   use ${webModule}, :controller
 
   @moduledoc """
-  Session probe + OIDC redirect handshake (D-AUTH-OIDC).
+  Session probe + OIDC redirect handshake.
 
   GET  /auth/me      — the verified current_user (the \`auth: ui\` guard reads it).
   GET  /auth/login   — starts the authorization-code flow with PKCE (redirect to the IdP).

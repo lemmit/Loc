@@ -602,7 +602,7 @@ ${disallowedClause}  defp command_error(conn, {:forbidden, detail}) do
     ${denialResponse("forbidden", "detail", esOverrides)}
   end
 
-  # RS-15 — a tripped precondition names the predicate that failed, matching
+  # A tripped precondition names the predicate that failed, matching
   # node/dotnet/java/python byte-for-byte.  The catch-all below stays for an
   # untagged reason (a raise the domain core didn't type).
   defp command_error(conn, {:precondition_failed, detail}) do

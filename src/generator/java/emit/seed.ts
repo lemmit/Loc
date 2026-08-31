@@ -101,7 +101,7 @@ export function renderJavaSeedRunner(ctx: EnrichedBoundedContextIR, sctx: SeedCt
     `import ${sctx.basePkg}.config.CatalogLog;`,
     ``,
     `/** First-boot seed data (database-seeding.md).  Ship-once per dataset`,
-    ` *  via the __loom_seed marker (D-SEED-IDEMPOTENCY); re-runs are no-ops.`,
+    ` *  via the __loom_seed marker; re-runs are no-ops.`,
     ` *  \`default\` always runs; other datasets opt in via LOOM_SEED. */`,
     `@Component`,
     `public class ${ctx.name}SeedRunner implements ApplicationRunner {`,

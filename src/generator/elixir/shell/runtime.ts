@@ -220,7 +220,7 @@ defmodule ${appModule}.RequestContext do
     correlation_id = resolve_correlation_id(conn)
     scope_id = generate_id()
 
-    # Open the request's OTel SERVER span (M-T7.1).  Created on every request so
+    # Open the request's OTel SERVER span.  Created on every request so
     # its trace_id / span_id ride the log envelope (the LogFormatter dumps every
     # Logger.metadata key); exported only when a collector endpoint is set.  The
     # route template isn't matched yet (this plug runs before the router), so the

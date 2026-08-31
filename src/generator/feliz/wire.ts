@@ -2561,7 +2561,7 @@ export function renderProvLineageType(): string {
     "    })",
     "",
     "// `Provenanced<'T>` — a provenanced field's value and its lineage as ONE",
-    "// wire carrier (M-T6.12), the same `{ value, lineage }` object every other",
+    "// wire carrier, the same `{ value, lineage }` object every other",
     "// Loom target reads.",
     `type ${FS_PROVENANCED}<'T> =`,
     "  {",

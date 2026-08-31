@@ -104,7 +104,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             context.ExceptionHandled = true;
             return;
         }
-        // RS-15: a domain-floor rejection (precondition / invariant) is 422 —
+        // A domain-floor rejection (precondition / invariant) is 422 —
         // the request is well-formed, the domain refuses it on semantic
         // grounds.  400 stays for a malformed request.
         if (context.Exception is DomainException de)
@@ -127,7 +127,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         {
             // 500 — the user handler threw, which is an internal
             // failure from the framework's POV, so the body is
-            // sanitized to "internal" like every other 500 arm (RS-28).
+            // sanitized to "internal" like every other 500 arm.
             //
             // Deliberately NOT xh.Message: it interpolates the INNER
             // exception the user handler threw — driver text, URLs,
@@ -169,7 +169,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         };
     }
 
-    // M-T6.39 — the same 404 envelope, for the routes MVC cannot reach.
+    // The same 404 envelope, for the routes MVC cannot reach.
     //
     // This class is an `IExceptionFilter`: it only ever sees exceptions raised
     // inside the MVC pipeline.  The root `/files/{key}` download is a MINIMAL

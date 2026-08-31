@@ -36,7 +36,7 @@ export const CS_MESSAGES_PATH = "Localization/LoomMessages.cs";
  *  locale-aware lookup the 422 filter resolves each `errors[].code` through. */
 export function renderCsMessages(ns: string, messages: readonly ValidationMessage[]): string {
   return lines(
-    "// Auto-generated.  Validation-message catalog (Loom i18n, M-T1.11).",
+    "// Auto-generated.  Validation-message catalog (Loom i18n).",
     "//",
     "// Keys are the stable content-hash codes the wire validators attach to a",
     "// messaged invariant / check / precondition (errors[].code), identical to the",

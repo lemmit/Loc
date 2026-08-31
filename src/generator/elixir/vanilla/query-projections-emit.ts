@@ -591,7 +591,7 @@ function moneyWireHelper(
   )
     return "";
   return `
-  # RS-12 money scale: a SQL aggregate echoes the scale its rows were STORED
+  # Money scale: a SQL aggregate echoes the scale its rows were STORED
   # at, and a grouping KEY echoes the scale its row was WRITTEN at, so pin the
   # wire value to the canonical scale every other read uses.
   defp __money_wire(%Decimal{} = dec), do: dec |> Decimal.round(${MONEY_WIRE_SCALE}) |> to_string()

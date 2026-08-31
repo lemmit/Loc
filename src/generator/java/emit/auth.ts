@@ -671,7 +671,7 @@ function renderOidcVerifier(fields: FieldIR[], auth: AuthIR, pkg: string): strin
     `import jakarta.servlet.http.Cookie;`,
     `import jakarta.servlet.http.HttpServletRequest;`,
     ``,
-    `/** Generated OIDC verifier (D-AUTH-OIDC).  Validates the bearer token's`,
+    `/** Generated OIDC verifier.  Validates the bearer token's`,
     ` *  signature against the issuer's JWKS (discovered + cached via Nimbus),`,
     ` *  checks iss / exp, then projects the configured claims onto User.`,
     ` *  Returns null to reject (-> 401).  @Primary so it wins over the dev`,
@@ -949,7 +949,7 @@ function renderHandshakeMethods(auth: AuthIR): string[] {
   const scopesLiteral = JSON.stringify(scopeList.join(" "));
   return [
     ``,
-    `    // --- OIDC redirect handshake (D-AUTH-OIDC) -------------------------`,
+    `    // --- OIDC redirect handshake -------------------------`,
     `    private static final String ISSUER = stripTrailingSlashes(${issuerExpr});`,
     `    private static final String CLIENT_ID = orEmpty(${clientIdExpr});`,
     `    private static final String CLIENT_SECRET = ${clientSecretExpr};`,

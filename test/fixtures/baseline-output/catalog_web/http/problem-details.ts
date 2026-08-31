@@ -43,8 +43,8 @@ function pointerOf(path: ReadonlyArray<PropertyKey>): string {
  *
  *  Validation failures get 422 (Unprocessable Entity, RFC 7807 standard
  *  for input-shape errors).  Domain-rule violations carried by
- *  DomainError ALSO emit 422 via the router's `app.onError` catch-all
- *  (RS-15, owner decision 2026-07-29): both are well-formed requests the
+ *  DomainError ALSO emit 422 via the router's `app.onError` catch-all:
+ *  both are well-formed requests the
  *  server refuses on SEMANTIC grounds, which is what RFC 9110 reserves 422
  *  for, and it makes the denial ladder identical on all five backends.  400
  *  stays for a genuinely malformed/unparseable request. */

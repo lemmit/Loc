@@ -487,7 +487,7 @@ ${keyAliasPairs.join(",\n")}
     ? `
 
   # A full-replacement PUT carries every required field, so an ABSENT KEY is a
-  # missing field even when the loaded row still holds a value (RS-26).
+  # missing field even when the loaded row still holds a value.
   # \`validate_required/2\` cannot see that — it reads through \`get_field/2\`, which
   # falls back to the struct's data — so presence is checked here, against the raw
   # attrs, before \`cast\` can hide it behind the stored value.  The error shape is

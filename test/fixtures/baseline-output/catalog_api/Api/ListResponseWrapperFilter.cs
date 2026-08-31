@@ -17,7 +17,7 @@ public sealed class ListResponseWrapperFilter : IDocumentFilter
     {
         // Retarget inline array responses to the named wrapper $ref, adding the
         // wrapper component ONLY when an endpoint actually returns that array.
-        // A paged-by-default findAll (M-T2.6) returns <Agg>Paged, not a bare
+        // A paged-by-default findAll returns <Agg>Paged, not a bare
         // array, so a paged-only aggregate surfaces no <Agg>ListResponse — the
         // Hono / Phoenix backends omit it too (an unreferenced wrapper never
         // enters their spec), so adding it unconditionally would drift parity.

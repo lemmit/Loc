@@ -1091,7 +1091,7 @@ function renderMain(
     "",
     ...(oidc
       ? [
-          "# OIDC verifier (D-AUTH-OIDC) — validates the IdP's tokens against its",
+          "# OIDC verifier — validates the IdP's tokens against its",
           "# JWKS and maps the configured claims onto User.  Auto-registered here.",
           "register_oidc_verifier()",
           'log("info", "auth_oidc_verifier_registered")',
@@ -1408,7 +1408,7 @@ def iso(dt: datetime) -> str:
 
 
 def money_str(amount: Decimal) -> str:
-    """Money → wire string at the FIXED NUMERIC(19,4) scale (RS-12): the same
+    """Money → wire string at the FIXED NUMERIC(19,4) scale: the same
     canonical scale every backend serializes money at (node \`.toFixed(4)\`,
     .NET \`ToString("F4")\`, Java \`setScale(4)\`, Elixir \`Decimal.round(_, 4)\`).
     \`quantize\` pins the scale (a value/derived money carries its own scale
@@ -1698,7 +1698,7 @@ def install_error_handlers(app: FastAPI) -> None:
         record_domain_fault("forbidden")
         return problem(request, ${forbiddenStatus}, "${problemTitle(forbiddenStatus)}", str(err))
 
-    # RS-17 - the 7807 title on the when-gate rung is the ERROR NAME
+    # The 7807 title on the when-gate rung is the ERROR NAME
     # (errorTitle humanises Disallowed), not the 409 reason phrase.  The
     # sibling 409 rungs (UniquenessConflict / ConcurrencyConflict) keep
     # "Conflict"; this one does not.
@@ -1722,7 +1722,7 @@ ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFou
 
     @app.exception_handler(RequestValidationError)
     async def _validation(request: Request, err: RequestValidationError) -> JSONResponse:
-        # RS-9's 400/422 split: an UNREADABLE body is malformed, not invalid —
+        # The 400/422 split: an UNREADABLE body is malformed, not invalid —
         # no field-level pointer describes it, and hono/.NET/Spring all answer
         # 400.  FastAPI funnels it into RequestValidationError anyway (pydantic
         # tags it \`json_invalid\`), which is why python was the one backend
@@ -1743,7 +1743,7 @@ ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFou
             if code.startswith("msg."):
                 entry["code"] = code${localizeLine}
             errors.append(entry)
-        # RS-29 — the WIRE-VALIDATION rung's title/detail, byte-identical to the
+        # The WIRE-VALIDATION rung's title/detail, byte-identical to the
         # other four backends.  Deliberately NOT the status reason phrase: the
         # domain floor above already answers 422 with "Unprocessable Entity", and
         # a client that sees only a status + reason phrase cannot tell a malformed
@@ -1798,10 +1798,9 @@ ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFou
         # wire.  The specific handlers above still win via the exception MRO
         # (Starlette looks each exception's type up most-specific-first).
         #
-        # The detail is the literal "internal" (RS-28), not a prose sentence:
-        # this arm's body must be byte-identical to the other four backends'
-        # for the M-T9.11 wire golden, and python was the one sending its own
-        # wording.  Nothing about the fault may reach the wire, so the string
+        # The detail is the literal "internal", not a prose sentence:
+        # this arm's body is byte-identical to the other four backends'.
+        # Nothing about the fault may reach the wire, so the string
         # carries no information and there is no cost to matching.
         log("error", "internal_error", error=str(err), status=500)
         return problem(request, 500, "Internal Server Error", "internal")

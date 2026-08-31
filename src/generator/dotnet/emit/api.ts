@@ -921,7 +921,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             context.ExceptionHandled = true;
             return;
         }${uniqueConflictArm}${concurrencyConflictArm}
-        // RS-15: a domain-floor rejection (precondition / invariant) is 422 —
+        // A domain-floor rejection (precondition / invariant) is 422 —
         // the request is well-formed, the domain refuses it on semantic
         // grounds.  400 stays for a malformed request.
         if (context.Exception is DomainException de)
@@ -947,7 +947,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         {
             // 500 — the user handler threw, which is an internal
             // failure from the framework's POV, so the body is
-            // sanitized to "internal" like every other 500 arm (RS-28).
+            // sanitized to "internal" like every other 500 arm.
             //
             // Deliberately NOT xh.Message: it interpolates the INNER
             // exception the user handler threw — driver text, URLs,
@@ -996,7 +996,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         };
     }
 
-    // M-T6.39 — the same 404 envelope, for the routes MVC cannot reach.
+    // The same 404 envelope, for the routes MVC cannot reach.
     //
     // This class is an \`IExceptionFilter\`: it only ever sees exceptions raised
     // inside the MVC pipeline.  The root \`/files/{key}\` download is a MINIMAL
@@ -1265,7 +1265,7 @@ public sealed class ListResponseWrapperFilter : IDocumentFilter
     {
         // Retarget inline array responses to the named wrapper $ref, adding the
         // wrapper component ONLY when an endpoint actually returns that array.
-        // A paged-by-default findAll (M-T2.6) returns <Agg>Paged, not a bare
+        // A paged-by-default findAll returns <Agg>Paged, not a bare
         // array, so a paged-only aggregate surfaces no <Agg>ListResponse — the
         // Hono / Phoenix backends omit it too (an unreferenced wrapper never
         // enters their spec), so adding it unconditionally would drift parity.
@@ -1361,7 +1361,7 @@ public sealed class RequiredFromCtorParamFilter : ISchemaFilter
         if (s.Properties is null || s.Properties.Count == 0) return;
         s.Required ??= new HashSet<string>();
 
-        // Paged carrier (M-T2.6): the generic Paged<T> record's members
+        // Paged carrier: the generic Paged<T> record's members
         // (items/page/pageSize/total/totalPages) are all non-optional, but
         // Swashbuckle's non-nullable detection can't read nullability off an
         // OPEN generic parameter, so it leaves the required set empty — while

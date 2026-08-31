@@ -45,7 +45,7 @@ function propertiesValue(text: string): string {
  *  `MessageSource` resolves each messaged rule's wire `code` against. */
 export function renderJavaMessagesBundle(messages: readonly ValidationMessage[]): string {
   return lines(
-    "# Validation-message catalog (Loom i18n, M-T1.11).",
+    "# Validation-message catalog (Loom i18n).",
     "#",
     "# Keys are the stable content-hash codes the wire validators attach to a",
     "# messaged invariant / check / precondition (errors[].code), identical to the",

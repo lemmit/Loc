@@ -383,7 +383,7 @@ function renderDapperPersistencePorts(
   return (
     lines(
       "// Auto-generated.  Dapper (raw Npgsql) adapters for the domain persistence",
-      "// ports (M-T6.9 — the raw-SQL siblings of PersistencePorts.cs's EF adapters).",
+      "// ports (the raw-SQL siblings of PersistencePorts.cs's EF adapters).",
       "using System;",
       "using System.Collections.Generic;",
       "using System.Linq;",
