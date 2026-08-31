@@ -104,3 +104,28 @@ describe("document onCreate stamps — python is the reference emission", () => 
     expect(thing).toContain("self._tenant_id = current_user.tenant_id");
   });
 });
+
+describe("document onCreate stamps — node/mikroorm (the SIXTH emission site)", () => {
+  // `persistence: mikroorm` is a SEPARATE document-repository emitter
+  // (emit/mikroorm.ts), not the drizzle builder.  It carried the same bug, and
+  // nothing caught it until `policy-document` gained a `test e2e`: that caller
+  // runs on EVERY behavioural leg, so `behavioral-mikroorm` went red while
+  // drizzle passed.  Five sites had been checked by reading; the sixth was
+  // found by running.
+  const mikroormSource = (): string =>
+    sourceFor("node").replace("platform: node", "platform: node { persistence: mikroorm }");
+
+  it("stamps the doc payload on the INSERT branch, and only there", async () => {
+    const files = await generateSystemFiles(mikroormSource());
+    const repo = fileEndingWith(files, "db/repositories/thing-repository.ts");
+    expect(repo).toContain('import { stampInsert } from "../audit-stamp";');
+    expect(repo).toMatch(
+      /em\.insert\(ThingRow, \{ id: aggregate\.id as string, data: stampInsert\(data\)/,
+    );
+    // The whole blob is rewritten on update, so a strip would delete the tenant.
+    expect(repo).not.toContain("stampUpdate");
+    expect(repo).toMatch(
+      /nativeUpdate\(ThingRow, \{ id: aggregate\.id as string, version: expected \}, \{ data,/,
+    );
+  });
+});

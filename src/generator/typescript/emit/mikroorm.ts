@@ -2888,6 +2888,7 @@ export function renderMikroDocumentRepository(
     );
   });
 
+  const docAudited = aggregateIsAudited(agg);
   const deleteMethod = emitsDelete
     ? lines(
         `  async delete(id: ${idVar}): Promise<void> {`,
@@ -2896,12 +2897,29 @@ export function renderMikroDocumentRepository(
       )
     : "";
 
+  // The `onCreate` stamps land on the doc payload at INSERT, exactly as on the
+  // drizzle document path (repository-document-builder.ts) and the relational
+  // MikroORM path above (`em.upsert(row, stampInsert(...))`).  A document
+  // aggregate is one jsonb column, so the stamped fields live INSIDE `data` —
+  // same helper, same lifecycle.
+  //
+  // INSERT only.  `stampUpdate` STRIPS the create-only fields so a relational
+  // partial update cannot overwrite them; here the whole blob is rewritten, so
+  // stripping `tenantId`/`dataKey` would DELETE them from the document.  The
+  // rehydrated aggregate already carries both.
+  //
+  // This adapter was the SIXTH emission site of one bug: a `tenantOwned`
+  // document row written with an empty tenant is invisible to every principal
+  // including its creator.  It surfaced only when `policy-document` gained a
+  // `test e2e` — the caller runs on every behavioural leg, and the mikroorm leg
+  // failed while drizzle passed.
+  const docData = docAudited ? "stampInsert(data)" : "data";
   const saveLines = versioned
     ? [
         `    const expected = expectedVersion ?? aggregate.version;`,
         `    const existing = await em.findOne(${row}, { id: aggregate.id as string });`,
         `    if (existing === null) {`,
-        `      await em.insert(${row}, { id: aggregate.id as string, data, version: 1 });`,
+        `      await em.insert(${row}, { id: aggregate.id as string, data: ${docData}, version: 1 });`,
         `    } else {`,
         `      const affected = await em.nativeUpdate(${row}, { id: aggregate.id as string, version: expected }, { data, version: expected + 1 });`,
         `      if (affected === 0) throw new ConcurrencyError("${agg.name}", aggregate.id as string);`,
@@ -2910,7 +2928,7 @@ export function renderMikroDocumentRepository(
     : [
         `    const existing = await em.findOne(${row}, { id: aggregate.id as string });`,
         `    if (existing === null) {`,
-        `      await em.insert(${row}, { id: aggregate.id as string, data, version: 1 });`,
+        `      await em.insert(${row}, { id: aggregate.id as string, data: ${docData}, version: 1 });`,
         `    } else {`,
         `      await em.nativeUpdate(${row}, { id: aggregate.id as string }, { data, version: existing.version + 1 });`,
         `    }`,
@@ -3032,6 +3050,7 @@ export function renderMikroDocumentRepository(
         ? `import { AggregateNotFoundError, ConcurrencyError } from "../../domain/errors";`
         : `import { AggregateNotFoundError } from "../../domain/errors";`,
       `import type { DomainEventDispatcher } from "../../domain/events";`,
+      docAudited && `import { stampInsert } from "../audit-stamp";`,
       `import { requestLog } from "../../obs/als";`,
       "",
       body,
