@@ -814,6 +814,50 @@ export function renderApiExceptionAdvice(
     `        return respond(problem, ${UNPROCESSABLE_ENTITY});`,
     `    }`,
     ``,
+    // A PAGED BOUND REFUSED — `GET /api/customers?pageSize=0`, outside the
+    // `@Min(1)`/`@Max(500)` that `JAVA_PAGED_QUERY_PARAMS` both publishes and
+    // enforces.  Spring raises HandlerMethodValidationException, which — unlike
+    // the two arms below — DOES implement `ErrorResponse`, carrying 400.  So it
+    // was answered correctly-shaped but with the WRONG STATUS: the other four
+    // backends all answer 422 for the same request (`z.coerce.number().min(1)`
+    // → Hono's `defaultHook`; `Query(ge=1, le=…)` → FastAPI's
+    // RequestValidationError; `[Range(1, …)]` → .NET's
+    // `InvalidModelStateResponseFactory`), and java's OWN published contract
+    // declares 200 + 422 on these routes and no 400.
+    //
+    // A rejected query parameter is the WIRE-VALIDATION tier on every backend —
+    // the same tier as a malformed path `{id}` (the arm below) and a body field
+    // (`MethodArgumentNotValidException`, above).  It answers that tier's 422
+    // here too, with the same `errors[]` pointer shape, so one client ACL
+    // handles all three (schemathesis F25).
+    //
+    // NOT to be confused with the malformed-query arm that follows: THAT one is
+    // an UNPARSEABLE request (400 is right, and stays), this one is a
+    // well-formed request carrying an out-of-contract value.
+    `    @ExceptionHandler(org.springframework.web.method.annotation.HandlerMethodValidationException.class)`,
+    `    public ResponseEntity<ProblemDetail> onParamValidation(org.springframework.web.method.annotation.HandlerMethodValidationException e, WebRequest request) {`,
+    `        CatalogLog.event("domain_error", "warn", "message", "Validation failed", "status", ${UNPROCESSABLE_ENTITY});`,
+    `        httpMetrics.recordDomainFault("domain_error");`,
+    `        var problem = problem(${UNPROCESSABLE_ENTITY}, "Validation failed", "One or more fields are invalid.", request);`,
+    `        var entries = new java.util.ArrayList<java.util.Map<String, Object>>();`,
+    `        for (var result : e.getParameterValidationResults()) {`,
+    // `getParameterName()` needs javac's `-parameters`, which Spring Boot's
+    // Gradle plugin sets by default (and the controllers rely on already —
+    // their `@RequestParam` declarations name no value). Guarded anyway so a
+    // toolchain that drops the flag degrades to the whole-document pointer
+    // rather than emitting `/null`.
+    `            var name = result.getMethodParameter().getParameterName();`,
+    `            for (var err : result.getResolvableErrors()) {`,
+    `                var entry = new java.util.LinkedHashMap<String, Object>();`,
+    `                entry.put("pointer", pointerOf(name != null ? name : ""));`,
+    `                entry.put("message", err.getDefaultMessage() != null ? err.getDefaultMessage() : "Invalid value.");`,
+    `                entries.add(entry);`,
+    `            }`,
+    `        }`,
+    `        problem.setProperty("errors", entries);`,
+    `        return respond(problem, ${UNPROCESSABLE_ENTITY});`,
+    `    }`,
+    ``,
     // A MALFORMED QUERY STRING — `GET /api/customers?=%C3%A0`, a parameter with
     // an empty name.  Tomcat refuses to parse the chunk and throws
     // `InvalidParameterException` out of the first `getParameter()` call, which

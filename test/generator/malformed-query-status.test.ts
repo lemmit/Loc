@@ -39,13 +39,18 @@
 //   GET /api/customers                        200        200   ← no regression
 //   GET /api/customers?pageSize=467           200        200
 //   GET /api/customers?pageSize=0             400        400   ← the @Min/@Max bound,
-//   GET /api/customers?page=0                 400        400      untouched
+//   GET /api/customers?page=0                 400        400      untouched here
 //
-// NOTE the 400 stays UNDOCUMENTED on read routes — `GET /api/customers`
-// declares only 200 and 422.  That is a separate, pre-existing finding (F25,
-// waived as W32): the `@Min`/`@Max` bounds already answered an undocumented
-// 400 before this change.  Fixing the server-error is not a fix for F25 and
-// does not pretend to be one; W32 stays.
+// (The bounds later moved to the declared 422 — that is F25, a separate bug
+// with its own arm and its own test, `java/paged-bounds-422.test.ts`. This
+// change did not touch them.)
+//
+// NOTE the 400 this arm emits stays UNDOCUMENTED on read routes — `GET
+// /api/customers` declares only 200 and 422 — and cannot readily be made
+// otherwise: Tomcat refuses the chunk in its own parser before any handler
+// runs, and 11.0.22 exposes no leniency knob. Tracked as F28, waived as W35
+// (intermittent). Fixing the server-error is not a fix for that, and does not
+// pretend to be one.
 //
 // The other four backends never reached this arm — node/python answer their
 // own 4xx for a malformed query and are clean on this check in the same run —

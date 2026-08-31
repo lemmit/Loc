@@ -836,8 +836,12 @@ Measured on the storefront-system fixture the leg itself uses (postgres + `gradl
 | `GET /api/customers?pageSize=467` | 200 | 200 |
 | `GET /api/customers?pageSize=0` / `?page=0` | 400 | 400 |
 
-The resulting 400 is still **undocumented** on read routes — that is F25/W32, unchanged
-and untouched by this fix.
+(The bounds row reads 400/400 because this fix did not touch it — F25, fixed
+separately below, later moved both to the declared 422.)
+
+The resulting 400 is still **undocumented** on read routes. That was first recorded here
+as F25/W32; F25 turned out to be a different (and now fixed) bug, so the residue is tracked
+as **F28/W35**.
 
 #### The W31 retirement was wrong, and how
 
@@ -864,15 +868,66 @@ root cause that a later reader would have acted on. The fix above is the right r
 either way: the bug is closed rather than re-waived.
 
 ### F25 — java: the paged bounds answer 400, and no read route declares one
-**Waiver:** W32 · **Severity: low**
+**Waiver:** none — fixed · **Severity: low**
+
+**Status: FIXED (2026-08-31).** `ApiExceptionAdvice` gained a dedicated
+`HandlerMethodValidationException` arm answering the wire-validation tier's 422
+with the same `errors[]` pointer envelope the body tier emits.
 
 ```
-curl 'http://host/api/products?pageSize=0' → 400   (the shared matrix declares 422)
+curl 'http://host/api/customers?pageSize=0'
+  before → 400 {"title":"Bad Request","detail":"Validation failure"}
+  after  → 422 {"title":"Validation failed","errors":[{"pointer":"/pageSize",
+                "message":"must be greater than or equal to 1"}]}
 ```
 
-#2555 gave `page`/`pageSize` declared, enforced upper bounds on every backend.
-Java enforces them with a status its own spec does not publish — the F6 shape,
-one route family over.
+**Java was the outlier, not the matrix.** The register's earlier note read this
+as "the shared matrix declares 422" and left it open as a contract question. It
+is not one — all four other backends already answer 422 for the identical
+request (`z.coerce.number().int().min(1)` → Hono's `defaultHook`;
+`Query(ge=1, le=…)` → FastAPI's `RequestValidationError`; `[Range(1, …)]` →
+.NET's `InvalidModelStateResponseFactory`), and java's OWN published set for
+these routes is `[200, 422]` with no 400. Only the runtime answer diverged.
+
+The cause is that `HandlerMethodValidationException` — unlike the two arms
+beside it — DOES implement Spring's `ErrorResponse`, so the `instanceof`
+branch in `onUnhandled` answered its self-declared 400. The 4xx branch that
+exists to stop client faults being reported as 500s was, for this one
+exception, reporting the wrong 4xx.
+
+Verified on a booted backend (storefront-system, postgres): `pageSize=0`,
+`pageSize=99999`, `page=0` and `page=99999999` all answer 422 with a real
+pointer (`/pageSize`, `/page`); `pageSize=467`, no params, and `sort=bogus`
+still answer 200. Gated by `test/generator/java/paged-bounds-422.test.ts`.
+
+### F28 — java: an UNPARSEABLE query string answers an undeclared 400
+**Waiver:** W35 (intermittent) · **Severity: low** · **Status: OPEN, by
+constraint rather than by choice.**
+
+The residue of F24's fix, and narrower than the F25 it replaces in W32's slot.
+`GET /api/customers?=%C3%A0` now answers 400 instead of 500 — correct, and
+Tomcat's own `getErrorCode()` — but no read route declares a 400, so the
+`status_code_conformance` check still reports it.
+
+Three ways out, and none is free:
+
+1. **Answer 200, like the other four.** They ignore the junk parameter, which
+   W8 records as the deliberate cross-backend decision. Java cannot: Tomcat
+   refuses the malformed chunk in the container's own parser, before any
+   handler runs, and Tomcat 11.0.22 exposes no leniency knob — there is no
+   `parameterParsing*` attribute on `Connector` or on `Parameters` (checked
+   against the shipped jar, not the docs). It would take replacing the parser.
+2. **Answer 422.** Contradicts this repo's own split, stated in both the java
+   advice and the python handler: 422 is for a well-formed request that is
+   invalid, 400 for one that cannot be parsed. This one genuinely cannot.
+3. **Declare the 400.** On the SHARED read contract that publishes a status the
+   other four backends never produce — the exact failure the `errorStatuses`
+   table warns about. A java-only declaration would break spec parity instead.
+
+So it stays waived with an honest reason, and W35 carries `intermittent: true`:
+the case appeared ×4 on run 33382822525 and ×0 on the two runs before it. That
+low rate is what made W31 look permanently stale and got it wrongly retired —
+flagging it now is that lesson applied rather than repeated.
 
 ### F26 — java: every 405 omits the `Allow` header
 **Waiver:** W33 · **Severity: medium**
