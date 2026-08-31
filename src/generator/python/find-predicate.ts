@@ -591,3 +591,35 @@ export function documentCapabilityBody(
   const usesPrincipal = kept.some(({ predicate }) => exprUsesCurrentUser(predicate));
   return { expr, usesPrincipal };
 }
+
+/** The aggregate's `writeScopeFilter` (authorization Phase 3 P3.1 — the WRITE
+ *  scope is strictly narrower than the read scope) as an IN-APP Python boolean
+ *  over a rehydrated aggregate bound to `varName`, or null when nothing narrows.
+ *
+ *  The blob-shaped stores (`shape: document`, and the event-sourced stream —
+ *  neither exposes the aggregate's fields as queryable columns) cannot push the
+ *  write scope into a SQL `where`, so the command load checks it over the LOADED
+ *  instance instead — the same place those shapes already evaluate their
+ *  capability READ filters ({@link documentCapabilityBody}).  Same sentinel
+ *  desugar: `deny write` collapses to the `False` literal, which callers
+ *  special-case through {@link writeScopeDeniesAll} into an unconditional
+ *  not-found rather than emitting `if not (False)`. */
+export function documentWriteScopeBody(
+  agg: EnrichedAggregateIR,
+  varName: string,
+): { expr: string; usesPrincipal: boolean } | null {
+  const f = agg.writeScopeFilter;
+  if (!f) return null;
+  return {
+    expr: renderPyExpr(desugarAuthzFilterInApp(f, agg.name), { thisName: varName }),
+    usesPrincipal: exprUsesCurrentUser(f),
+  };
+}
+
+/** True when the aggregate's write scope denies EVERY row (`policy { deny write
+ *  on X }`) — the in-app form is the constant `False`, so a command load can
+ *  answer not-found without loading anything. */
+export function writeScopeDeniesAll(agg: EnrichedAggregateIR): boolean {
+  const f = agg.writeScopeFilter;
+  return f !== undefined && f.kind === "authz-filter" && f.filter.kind === "deny";
+}

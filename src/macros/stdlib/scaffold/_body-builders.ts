@@ -34,11 +34,13 @@ import {
   binaryExpr,
   boolLit,
   callExpr,
+  cloneTypeRef,
   intLit,
   lambda,
   matchExpr,
   memberAccess,
   nameRefExpr,
+  type StateFieldSpec,
   stringLit,
   ternaryExpr,
 } from "../../api/index.js";
@@ -1012,11 +1014,43 @@ function columnKindForType(type: TypeRef): ColumnKind | null {
   return kindForType(type, false);
 }
 
-/** A repository `find` the list filter-bar turns into a text-input arm — its
- *  name and the (all-string) param names the inputs bind to. */
+/** How the list filter bar renders one param of a filter `find`, and what the
+ *  page-state field it binds to is typed as.
+ *
+ *  M-T1.15: the bar used to accept ONLY plain `string` params, so
+ *  `find byAmount(min: int)` and `find forCustomer(c: Customer id)` were
+ *  declared, emitted as backend routes, and produced NO input — a filter bar
+ *  that quietly omitted the author's find, with no diagnostic.  The three kinds
+ *  below are the ones whose state type and the generated query-param type
+ *  AGREE, so the emitted page type-checks on every frontend:
+ *
+ *    string     → `Field`        state `string`,         unset = `""`
+ *    int / long → `NumberField`  state <the param type>, unset = `0`
+ *    `X id`     → `Field`        state `string`,         unset = `""`
+ *
+ *  An ENUM param is still dropped — the frontends' state emitters type an enum
+ *  state as bare `string` (`stateTypeAsTsString`), while the generated query
+ *  param is the `z.enum([...])` union, so an enum filter input would emit a
+ *  TS2322 in the generated project.  That is a frontend-emitter fix, not a
+ *  macro one; see IMPL-NOTES.md.  Every other type (datetime, bool, VO, array,
+ *  optional) is dropped for want of an input primitive with a matching state
+ *  type. */
+export type FilterParamKind = "string" | "number" | "ref";
+
+/** One param of a filter find: the name the input binds through, how it renders,
+ *  and the param's own declared type (cloned onto the page-state field so the
+ *  state and the find ARGUMENT agree by construction). */
+export interface FilterParam {
+  name: string;
+  kind: FilterParamKind;
+  type: TypeRef;
+}
+
+/** A repository `find` the list filter-bar turns into an input arm — its name
+ *  and the params the inputs bind to. */
 export interface FilterFind {
   name: string;
-  params: readonly string[];
+  params: readonly FilterParam[];
 }
 
 /** Resolve a list's filter finds from the aggregate's repository in the same
@@ -1054,20 +1088,44 @@ export function filterFindsForAggregate(agg: Aggregate): FilterFind[] {
       if (f.name === "all") continue;
       if (!f.returnType.array) continue;
       if (f.params.length === 0) continue;
-      if (!f.params.every((p) => isPlainString(p.type))) continue;
-      out.push({ name: f.name, params: f.params.map((p) => String(p.name)) });
+      const kinds = f.params.map((p) => filterParamKind(p.type));
+      // ALL-OR-NOTHING per find: the bar's arm is active only when every input
+      // of the find is set, so a find with one unrenderable param has no
+      // meaningful partial form.
+      if (kinds.some((k) => k === null)) continue;
+      out.push({
+        name: f.name,
+        params: f.params.map((p, i) => ({
+          name: String(p.name),
+          kind: kinds[i]!,
+          type: cloneTypeRef(p.type),
+        })),
+      });
     }
   }
   return out;
 }
 
-function isPlainString(type: TypeRef): boolean {
-  return (
-    !type.array &&
-    !type.optional &&
-    type.base.$type === "PrimitiveType" &&
-    type.base.name === "string"
-  );
+/** The filter-bar input kind for a find param's declared type, or null when no
+ *  input renders it (see the {@link FilterParam} note). */
+function filterParamKind(type: TypeRef): FilterParamKind | null {
+  if (type.array || type.optional) return null;
+  if (type.base.$type === "IdType") return "ref";
+  if (type.base.$type !== "PrimitiveType") return null;
+  switch (type.base.name) {
+    case "string":
+      return "string";
+    case "int":
+    case "long":
+      return "number";
+    default:
+      // `decimal` and `money` are held back deliberately, not forgotten: their
+      // "unset" sentinel would be the int literal `0`, and Feliz types that
+      // comparison `decimal <> 0` / `Decimal` against an `int` literal, which
+      // does not type-check there.  `bool`/`datetime`/`guid` have no matching
+      // filter input at all.  See IMPL-NOTES.md.
+      return null;
+  }
 }
 
 /** The page-state field name a filter input binds to: `<find><Param>`
@@ -1076,11 +1134,24 @@ export function stateNameFor(findName: string, param: string): string {
   return `${findName}${param[0]!.toUpperCase()}${param.slice(1)}`;
 }
 
-/** The page-state fields the scaffolded filter inputs bind to — one `string`
- *  field (init `""`) per find param.  The page builder attaches these as the
- *  page's `state { }` block when wiring `scaffoldList`'s filter form. */
-export function filterStateFields(filters: readonly FilterFind[]): Array<{ name: string }> {
-  return filters.flatMap((f) => f.params.map((p) => ({ name: stateNameFor(f.name, p) })));
+/** The page-state fields the scaffolded filter inputs bind to — one per find
+ *  param, typed as the PARAM is (M-T1.15).  A plain `string` param keeps the
+ *  bare-name spec (`string`, init `""`) so its emission stays byte-identical;
+ *  every other kind carries the param's cloned `TypeRef` and no initializer, so
+ *  each frontend's state emitter falls back to that type's zero value.  The page
+ *  builder attaches these as the page's `state { }` block when wiring
+ *  `scaffoldList`'s filter form. */
+export function filterStateFields(filters: readonly FilterFind[]): Array<string | StateFieldSpec> {
+  return filters.flatMap((f) =>
+    f.params.map((p): string | StateFieldSpec =>
+      p.kind === "number"
+        ? { name: stateNameFor(f.name, p.name), type: "string", typeRef: cloneTypeRef(p.type) }
+        : // `string` AND `X id` both bind a `string` state: an id's wire form IS
+          // a string (`z.string().uuid()`), and a bare-name spec keeps the
+          // string arm's emission byte-identical.
+          stateNameFor(f.name, p.name),
+    ),
+  );
 }
 
 /** `scaffoldList` — scaffolds the list page body: breadcrumbs, a toolbar with
@@ -1233,10 +1304,13 @@ export function scaffoldList(
   if (filters.length > 0) {
     for (const f of filters) {
       for (const p of f.params) {
-        const stateName = stateNameFor(f.name, p);
+        const stateName = stateNameFor(f.name, p.name);
+        // `NumberField` for a numeric param, `Field` (text) otherwise — an
+        // `X id` filter is a raw-id box until a walker-level FK picker exists
+        // (IMPL-NOTES.md), which is still strictly better than the silent drop.
         filterFields.push({
-          value: callExpr("Field", [
-            { value: stringLit(humanize(p)) },
+          value: callExpr(p.kind === "number" ? "NumberField" : "Field", [
+            { value: stringLit(humanize(p.name)) },
             { name: "bind", value: nameRefExpr(stateName) },
             { name: "testid", value: stringLit(`${slug}-filter-${snake(stateName)}`) },
           ]),
@@ -1248,13 +1322,21 @@ export function scaffoldList(
         cond: f.params
           .map(
             (p): Expression =>
-              binaryExpr(nameRefExpr(stateNameFor(f.name, p)), "!=", stringLit("")),
+              // "Unset" is the state type's zero value: `""` for a string / id
+              // box, `0` for a number box.  Same trade the string arm always
+              // made — a filter FOR the zero value is indistinguishable from no
+              // filter, which is why the input starts there.
+              binaryExpr(
+                nameRefExpr(stateNameFor(f.name, p.name)),
+                "!=",
+                p.kind === "number" ? intLit(0) : stringLit(""),
+              ),
           )
           .reduce((acc, e) => binaryExpr(acc, "&&", e)),
         value: makeQueryView(
           memberAccess(queryRoot(), f.name, {
             call: true,
-            args: f.params.map((p) => nameRefExpr(stateNameFor(f.name, p))),
+            args: f.params.map((p) => nameRefExpr(stateNameFor(f.name, p.name))),
           }),
           false,
         ),

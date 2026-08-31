@@ -12,7 +12,13 @@ import { snake } from "../../util/naming.js";
 import { contextEventRowClassName } from "./py-columns.js";
 import { wireHelperImport } from "./py-type-imports.js";
 import { renderPyExpr } from "./render-expr.js";
-import { emittableFinds, findExecutedLine, writeGuardAlias } from "./repository-builder.js";
+import {
+  authUserImport,
+  emittableFinds,
+  findExecutedLine,
+  writeGuardInApp,
+  writeGuardInAppUsesPrincipal,
+} from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
 // Event-sourced repository — `persistedAs: eventLog` aggregates persist
@@ -66,7 +72,10 @@ export function buildPyEventSourcedRepositoryFile(
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
-    ...writeGuardAlias(agg),
+    // Command load (authorization Phase 3 P3.1): an event stream has no
+    // queryable state columns, so the write-scope guard is checked IN-APP over
+    // the FOLDED aggregate.
+    ...writeGuardInApp(agg),
     "",
     `    async def all(self) -> list[${agg.name}]:`,
     "        rows = (",
@@ -149,6 +158,9 @@ export function buildPyEventSourcedRepositoryFile(
     "from sqlalchemy.exc import IntegrityError",
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
+    // `require_current_user` only when the in-app write-scope guard binds it —
+    // an unused import fails the python build on ruff F401.
+    authUserImport(false, writeGuardInAppUsesPrincipal(agg)),
     `from app.db.schema import ${row}`,
     wireHelperImport(refersTo),
     "from app.domain.errors import AggregateNotFoundError, ConcurrencyError",

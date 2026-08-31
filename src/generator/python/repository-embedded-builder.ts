@@ -9,7 +9,11 @@ import { findUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
-import { aggUsesPrincipalContextFilter, contextFilterPredicate } from "./find-predicate.js";
+import {
+  aggUsesPrincipalContextFilter,
+  contextFilterPredicate,
+  writeScopePredicate,
+} from "./find-predicate.js";
 import { isRefCollectionField, isValueCollectionField, rowClassName } from "./py-columns.js";
 import { wireHelperImport } from "./py-type-imports.js";
 import {
@@ -21,7 +25,8 @@ import {
   relationalFindMethod,
   rootWhere,
   toWireMethod,
-  writeGuardAlias,
+  writeGuardInAppUsesPrincipal,
+  writeGuardMethod,
 } from "./repository-builder.js";
 import { entityFromDoc, entityToDoc } from "./repository-document-builder.js";
 
@@ -86,7 +91,11 @@ export function buildPyEmbeddedRepositoryFile(
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
-    ...writeGuardAlias(agg),
+    // Command load (authorization Phase 3 P3.1): an embedded root is a normal
+    // queryable row, so the write-scope pre-guard pushes into the same SQL
+    // `where` the relational shape uses (and falls back to an in-app check on a
+    // predicate SQLAlchemy cannot express).
+    ...writeGuardMethod(agg, row, writeScopePredicate(agg, ctx)),
     "",
     `    async def all(self) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${row})${rootWhere(null, row, undefined, filterPred)})).scalars().all()`,
@@ -176,7 +185,10 @@ export function buildPyEmbeddedRepositoryFile(
     "",
     // `User` for a per-find `where` principal param; `require_current_user` for
     // an always-on principal capability filter (DEBT-02 tail) — one sorted import.
-    authUserImport(findUser, aggUsesPrincipalContextFilter(agg)),
+    authUserImport(
+      findUser,
+      aggUsesPrincipalContextFilter(agg) || writeGuardInAppUsesPrincipal(agg),
+    ),
     `from app.db.schema import ${row}`,
     wireHelperImport(refersTo),
     aggregateIsVersioned(agg)

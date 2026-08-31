@@ -444,8 +444,14 @@ export const PY_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[
   "money.abs": (recv) => `abs(${recv})`,
   // Truncating integer division (toward zero) — `int(a / b)`, NOT `//` (which
   // floors negatives); `int()` on the float quotient truncates toward zero.
-  "int.divTrunc": (recv, args) => `int(${recv} / ${args[0]})`,
-  "long.divTrunc": (recv, args) => `int(${recv} / ${args[0]})`,
+  // `int(a / b)` would round-trip through a float — exact only below 2**53, and
+  // Python's ints are arbitrary precision, so the loss is real and silent.  `//`
+  // is exact but FLOORS, which disagrees with java/.NET/elixir/node on negative
+  // operands.  `trunc_div` (app/domain/numeric.py, wired centrally by
+  // `wireNumericHelpers`) is both exact and truncating — the intrinsic's whole
+  // contract is a deterministic cross-backend truncating division.
+  "int.divTrunc": (recv, args) => `trunc_div(${recv}, ${args[0]})`,
+  "long.divTrunc": (recv, args) => `trunc_div(${recv}, ${args[0]})`,
   "int.min": (recv, args) => `min(${recv}, ${args[0]})`,
   "long.min": (recv, args) => `min(${recv}, ${args[0]})`,
   "decimal.min": (recv, args) => `min(${recv}, ${args[0]})`,

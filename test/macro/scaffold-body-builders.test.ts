@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { printExpr } from "../../src/language/print/print-expr.js";
-import type { ScaffoldColumn } from "../../src/macros/stdlib/scaffold/_body-builders.js";
+import type {
+  FilterParam,
+  ScaffoldColumn,
+} from "../../src/macros/stdlib/scaffold/_body-builders.js";
 import {
   filterFindsForAggregate,
   filterStateFields,
@@ -429,11 +432,28 @@ describe("scaffold instance builders — observable workflow pages", () => {
   });
 });
 
+/** A `FilterParam` for the builder tests.  `type` is only consulted for the
+ *  `number` arm (it is cloned onto the state field), so a bare TypeRef stub is
+ *  enough for the string/id arms. */
+const fp = (name: string, kind: FilterParam["kind"] = "string"): FilterParam =>
+  ({
+    name,
+    kind,
+    // `cloneTypeRef` reads `.base.$type` / `.base.name`, so the stub needs a
+    // real `base` node — not just a bare TypeRef shell.
+    type: {
+      $type: "TypeRef",
+      array: false,
+      optional: false,
+      base: { $type: "PrimitiveType", name: kind === "number" ? "int" : "string" },
+    },
+  }) as unknown as FilterParam;
+
 describe("scaffoldList filter-bar — find inputs + match switch", () => {
   it("emits a Group of bound inputs and a match that switches the list per find", () => {
     const src = printExpr(
       scaffoldList("Order", [text("status")], {
-        filters: [{ name: "byStatus", params: ["status"] }],
+        filters: [{ name: "byStatus", params: [fp("status")] }],
       }),
     );
     // one bound text input per param, testid keyed by the snake state name
@@ -455,7 +475,7 @@ describe("scaffoldList filter-bar — find inputs + match switch", () => {
   it("ANDs a multi-param find's inputs into one arm condition", () => {
     const src = printExpr(
       scaffoldList("Order", [text("name")], {
-        filters: [{ name: "search", params: ["name", "city"] }],
+        filters: [{ name: "search", params: [fp("name"), fp("city")] }],
       }),
     );
     expect(src).toContain('Field("Name", bind: searchName');
@@ -476,18 +496,25 @@ describe("scaffoldList filter-bar — find inputs + match switch", () => {
     expect(src).toContain("of: Order.all(pageNum, 10, sortKey, sortDir),");
   });
 
-  it("filterStateFields names one string field per find param", () => {
+  it("filterStateFields: a bare string field per string/id param, a typed spec per number", () => {
+    // string and `X id` params keep the bare-name spelling (byte-identical
+    // emission); a numeric param carries the find param's own type onto the
+    // state field so the state and the find ARGUMENT agree by construction.
     expect(
       filterStateFields([
-        { name: "byStatus", params: ["status"] },
-        { name: "search", params: ["name", "city"] },
+        { name: "byStatus", params: [fp("status")] },
+        { name: "search", params: [fp("name"), fp("city")] },
       ]),
-    ).toEqual([{ name: "byStatusStatus" }, { name: "searchName" }, { name: "searchCity" }]);
+    ).toEqual(["byStatusStatus", "searchName", "searchCity"]);
+
+    const withNumber = filterStateFields([{ name: "byTotal", params: [fp("total", "number")] }]);
+    expect(withNumber).toHaveLength(1);
+    expect(withNumber[0]).toMatchObject({ name: "byTotalTotal", type: "string" });
   });
 });
 
 describe("filterFindsForAggregate — resolves filter finds from the repository AST", () => {
-  it("keeps string-param list finds, drops all / scalar / non-array / non-string", async () => {
+  it("keeps string- and numeric-param list finds, drops all / scalar / non-array", async () => {
     const { model, errors } = await parseString(`
       system S {
         context C {
@@ -504,9 +531,25 @@ describe("filterFindsForAggregate — resolves filter finds from the repository 
     `);
     expect(errors).toEqual([]);
     const order = findNode(model, "Aggregate", "Order");
-    expect(filterFindsForAggregate(order)).toEqual([
-      { name: "byStatus", params: ["status"] },
-      { name: "search", params: ["name", "city"] },
+    // `byTotal(total: int)` is offered too since M-T1.15 — an int/long/`X id`
+    // param renders a NumberField rather than being silently dropped.
+    // `params` carries a live `TypeRef` since M-T1.15; project to the fields
+    // under test rather than deep-comparing AST nodes.
+    expect(
+      filterFindsForAggregate(order).map((f) => ({
+        name: f.name,
+        params: f.params.map((x) => [x.name, x.kind]),
+      })),
+    ).toEqual([
+      { name: "byStatus", params: [["status", "string"]] },
+      {
+        name: "search",
+        params: [
+          ["name", "string"],
+          ["city", "string"],
+        ],
+      },
+      { name: "byTotal", params: [["total", "number"]] },
     ]);
   });
 });
