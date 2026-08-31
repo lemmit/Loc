@@ -304,8 +304,8 @@ system LoomLanding {
               }
             }
           },
+          },
           size: "xl"
-        },
         },
 
         Divider {},
@@ -350,8 +350,8 @@ system LoomLanding {
               }
             }
           },
+          },
           size: "xl"
-        },
         },
 
         Divider {},
@@ -402,8 +402,8 @@ system LoomLanding {
               }
             }
           },
+          },
           size: "xl"
-        },
         },
 
         Divider {},
@@ -451,8 +451,8 @@ system LoomLanding {
               KeyValueRow { "--dry-run",            "Print the plan; touch nothing." }
             }
           },
+          },
           size: "xl"
-        },
         },
 
         Divider {},
