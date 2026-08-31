@@ -200,11 +200,11 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
       // so a missing arm is a `tsc` error here, not a silent authorization
       // bypass.
       switch (e.filter.kind) {
-        // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false
+        // DENY carve-out (authorization — deny-wins).  An always-false
         // JPQL predicate; no row satisfies `1 = 0`.
         case "deny":
           return "1 = 0";
-        // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) —
+        // `deep`/`global` read level (multi-tenancy) —
         // descendant-or-self materialized-path scope with the NULL-dataKey
         // fallback to the tenant floor (see `DEEP_SCOPE_SEMANTICS`).  The
         // principal claims render as the same null-safe SpEL accessors the
@@ -248,7 +248,7 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
     case "method-call": {
       // (The `deep` / DENY authorization filter sentinels moved to the
       // discriminated `authz-filter` kind in M-T9.9 — handled in its own case
-      // above, no longer a `method-call` marker here.)
+      // above, not a `method-call` marker here.)
       // Reference-collection membership: `this.<refColl>.contains(x)`.  The
       // collection is an `@ElementCollection` of an embeddable id
       // (`PokemonId(UUID value)`), so `:x member of e.<refColl>` throws at
@@ -349,7 +349,7 @@ function renderBinary(e: Extract<ExprIR, { kind: "binary" }>, ctx: JpqlCtx): str
   }
   const op = jpqlOp(e.op);
   // Self-id vs principal-claim comparison (`this.id == currentUser.<claim>` —
-  // the derived tenancy registry self-scope, Phase 1b).  The entity key is an
+  // the derived tenancy registry self-scope).  The entity key is an
   // `@EmbeddedId` record (`OrganizationId(UUID value)`), so the comparison
   // navigates into its component (`e.id.value`) and the SpEL principal side
   // binds the claim AS the id's value type: a same-typed claim binds directly

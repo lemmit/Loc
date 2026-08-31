@@ -41,7 +41,7 @@ export interface PlatformAdapters {
 
 /** Defaults a platform falls back to when the source doesn't pin one
  *  via `persistence:` / `directoryLayout:`.  (`style` is the single
- *  per-backend emission style — no longer user-selectable.) */
+ *  per-backend emission style; it is not a user knob.) */
 export interface PlatformAdapterDefaults {
   persistence: { state: string; eventLog: string };
   style: string;

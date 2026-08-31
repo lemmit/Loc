@@ -62,7 +62,7 @@ export function renderJavaDocumentRepositoryImpl(
   const origins = agg.contextFilterOrigins ?? [];
   // The (predicate, origin) entries, split by whether the predicate reads the
   // request principal (`currentUser`).  Non-principal filters are applied in-app
-  // over the rehydrated aggregate as before; PRINCIPAL filters (DEBT-02 Slice B,
+  // over the rehydrated aggregate as before; PRINCIPAL filters (,
   // e.g. `filter this.tenantId == currentUser.tenantId`) are also applied in-app
   // here — a document aggregate can't push them to SQL/JPQL (the relational path
   // does via a SpEL @Query) — but they need the `currentUser` local bound from
@@ -75,7 +75,7 @@ export function renderJavaDocumentRepositoryImpl(
   // with `accessorProps` so `currentUser.tenantId` → `currentUser.tenantId()`.
   const principalPreds: ExprIR[] = (agg.contextFilters ?? []).filter(exprUsesCurrentUser);
   const hasPrincipal = aggregateUsesPrincipalContextFilter(agg);
-  // The command load's IN-APP write-scope guard (P3.1) can read the principal
+  // The command load's IN-APP write-scope guard can read the principal
   // even when no READ filter does, and it is the only other user of the
   // accessor bean — so the injection gate is the union of the two.
   const needsAccessor = hasPrincipal || writeScopeUsesPrincipal(agg);
@@ -134,7 +134,7 @@ export function renderJavaDocumentRepositoryImpl(
   // `import java.util.Objects`, and the generated project fails to compile.
   for (const p of agg.contextFilters ?? [])
     collectJavaExprImports(desugarAuthzFilterInApp(p, agg.name), exprImports);
-  // Same for the command load's in-app write-scope guard (P3.1).
+  // Same for the command load's in-app write-scope guard.
   if (agg.writeScopeFilter)
     collectJavaExprImports(desugarAuthzFilterInApp(agg.writeScopeFilter, agg.name), exprImports);
 
@@ -244,7 +244,7 @@ export function renderJavaDocumentRepositoryImpl(
     `        .build();`,
     ``,
     `    private final JdbcTemplate jdbc;`,
-    // DEBT-02 Slice B: a principal (tenancy) capability filter is applied in-app
+    // A principal (tenancy) capability filter is applied in-app
     // over the rehydrated document, so the impl needs the request principal —
     // inject the same CurrentUserAccessor bean the relational path uses.  Only
     // wired when the aggregate carries such a filter (non-principal document
@@ -305,7 +305,7 @@ export function renderJavaDocumentRepositoryImpl(
     `    }`,
     ``,
     // `getById` IS the command load on java (the read route calls `findById`;
-    // every mutation calls this), so the P3.1 write-scope guard lives here.  A
+    // every mutation calls this), so the write-scope guard lives here.  A
     // document blob has no queryable columns for a `findByIdForWrite` @Query, so
     // the scope is checked IN-APP over the rehydrated aggregate — the same place
     // this repository already evaluates its capability READ filters.  Without a

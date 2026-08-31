@@ -6,8 +6,8 @@ import { readableProjections } from "../_frontend/projections-module.js";
 import { wireTsType } from "./workflows-module.js";
 
 // ---------------------------------------------------------------------------
-// Angular query-time PROJECTION client (`src/api/projections.ts`) — M-T1.3
-// Phase 1.  The Angular sibling of `_frontend/projections-module.ts`.
+// Angular query-time PROJECTION client (`src/api/projections.ts`) — the
+// Angular sibling of `_frontend/projections-module.ts`.
 //
 // WHY THIS IS A FORK, not another options-widening of the shared module.
 //

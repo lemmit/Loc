@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
-// Shell renderers — plain Phoenix + Ecto skeleton.  Slice 0 of
-// vanilla-foundation-tdd-plan.md: emit a minimal project that
+// Shell renderers — plain Phoenix + Ecto skeleton
+// (vanilla-foundation-tdd-plan.md): a minimal project that
 // `mix compile --warnings-as-errors` accepts.
-// Slice 1: router now accepts per-aggregate routes spliced into /api.
+// The router accepts per-aggregate routes spliced into /api.
 // Observability: `renderApplication` / `renderLogFormatter` /
 // `renderTelemetry` in `../shell/runtime.ts` + `../telemetry-emit.ts` are
 // wired through here so the backend emits the same cross-backend log-event
@@ -97,8 +97,8 @@ export function emitVanillaShellFiles(
   // Either source of translatable strings turns the runtime on.
   const i18nEnabled = i18nUi !== undefined || validationMessages.length > 0;
   // The SECOND-tier i18n gate (D-I18N-HEEX-ICU): an ICU engine ships only for a
-  // ui that actually INTERPOLATES.  A translatable-but-literal-only app keeps
-  // the byte-identical dep list it had before this slice.
+  // ui that actually INTERPOLATES, so a translatable-but-literal-only app pays
+  // for no ICU dep.
   const icuEnabled = i18nUi !== undefined && heexIcuEnabled(i18nUi);
   // Swoosh boots its default API client (Hackney) when the `:swoosh`
   // application starts — even for the SMTP adapter, which sends through
@@ -233,10 +233,9 @@ export function emitVanillaShellFiles(
   // Two halves, one `.po` tree: a Loom key is globally unique and is always the
   // `msgctxt`, so `mix gettext.merge` and every `.po` importer see one catalog.
   //
-  // NOT LiveView-gated (it used to be, when the ui was the only source of
-  // strings): a JSON-API-only deployable with an authored `message "…"` needs
-  // the backend + catalog too, and its 422 handler resolves through them.
-  // Neither half ⇒ byte-identical (no module, no `priv/gettext`, no dep).
+  // NOT LiveView-gated: a JSON-API-only deployable with an authored
+  // `message "…"` needs the backend + catalog too, and its 422 handler resolves
+  // through them.  Neither half ⇒ no module, no `priv/gettext`, no dep.
   if (i18nEnabled) {
     out.set(`lib/${appName}_web/gettext.ex`, renderGettextBackend(appName, appModule));
     // The active HEEx pack's DECLARED chrome (D-PACK-CHROME) — English baked
@@ -1197,11 +1196,10 @@ function renderVanillaErrorJson(appModule: string): string {
   //
   // This is RFC 7807, the same envelope `ProblemDetails` gives every DOMAIN
   // error, because a client parses ONE error shape per API or it parses two.
-  // It used to be Phoenix's scaffold default, `%{errors: %{detail: …}}` — so a
-  // wrong verb answered a shape that appears nowhere else on the API and
-  // satisfies none of RS-9 (`type` present and "about:blank").  Measured
-  // across the five backends, framework errors produced three statuses and
-  // five body shapes while every domain error was byte-identical.
+  // Phoenix's scaffold default, `%{errors: %{detail: …}}`, would answer a
+  // wrong verb with a shape that appears nowhere else on the API and satisfies
+  // none of RS-9 (`type` present and "about:blank") — framework errors are
+  // where the five backends diverge most, so this pins the envelope.
   //
   // `template` is "404.json" / "405.json" / "500.json"; the status prefix is
   // the authority for the numeric member, and `status_message_from_template`

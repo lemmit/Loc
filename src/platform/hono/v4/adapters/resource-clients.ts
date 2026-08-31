@@ -5,10 +5,10 @@
 // module: imports at the top, then one exported client handle per
 // resource the deployable wires.  No call-sites — domain logic reaches
 // these clients through a workflow-level surface designed later
-// (RFC §Phase 4).  kind/sourceType compatibility is checked by
+// (RFC §).  kind/sourceType compatibility is checked by
 // `checkDataSource` against the sourceType registry (`util/source-types.ts`),
-// the one source of truth; the unread `supports()` mirror that used to sit on
-// each adapter here has been removed.
+// the one source of truth.  These adapters carry no `supports()` mirror of it —
+// see `generator/_adapters/persistence-surface.ts` for why.
 
 import type { Lines, ResourceAdapter } from "../../../../generator/_adapters/index.js";
 import type { DataSourceIR, StorageIR } from "../../../../ir/types/loom-ir.js";

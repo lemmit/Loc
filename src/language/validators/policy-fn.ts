@@ -1,4 +1,4 @@
-// Named policy-function declaration + use-site checks (authorization Phase 3.2).
+// Named policy-function declaration + use-site checks (authorization).
 //
 // A function-form `policy` declaration —
 //   policy CanApprove(cap: money): bool = <expr>
@@ -6,7 +6,7 @@
 // — is a named, parameterised, AMBIENT boolean authorization predicate
 // (currentUser + its own params), referenced from a `requires PolicyName(args)`
 // gate and INLINED there (like a `criterion … of bool`).  It shares the
-// `policy` head with the P3.1 read-ladder block; the function form is the one
+// `policy` head with the read-ladder block; the function form is the one
 // carrying a `returnType`.  These checks keep the construct honest before
 // lowering ever inlines it:
 //

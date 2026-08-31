@@ -102,7 +102,7 @@ function matchTemplateFormat(
   if (depth !== 0) return null;
 
   // Depth-0 comma → the format start.  Capture up to the hole-closing `}`,
-  // balancing any `{`/`}` in the suffix (brace-free in slice 1).
+  // balancing any `{`/`}` in the suffix (brace-free in).
   let i = offset;
   let brace = 0;
   while (i < text.length) {

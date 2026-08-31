@@ -3,12 +3,12 @@
 //
 // An `operation X() extern { precondition … }` declares business logic the DSL
 // can't express: the body carries only preconditions, and the mutation is
-// hand-written by the user.  Before this slice the Elixir backend had NO seam —
-// the context ran the preconditions and then persisted an EMPTY changeset
-// (`Ecto.Changeset.change(%{})`), silently reporting HTTP 204 success for a
-// no-op (proposal `extern-domain-extension-point.md` §1b, task #18).
+// hand-written by the user.  Without a seam the context runs the preconditions
+// and then persists an EMPTY changeset (`Ecto.Changeset.change(%{})`),
+// silently reporting HTTP 204 success for a no-op
+// (`extern-domain-extension-point.md` §1b).
 //
-// This module gives it a real seam (proposal §3a, decisions D2/D3):
+// So this module supplies the seam (proposal §3a, decisions D2/D3):
 //
 //   * a GENERATED behaviour module `<Ctx>.<Agg>Extern` — one `@callback` per
 //     extern op, regenerated every run so it tracks the op signatures; and

@@ -1,11 +1,11 @@
 // Seed-declaration checks (database-seeding.md, declarative form).
 //
 // Model-level so the foreign-aggregate rule can compare a row's resolved
-// aggregate against the seed's enclosing context.  This slice covers the
+// aggregate against the seed's enclosing context.  Scope is the
 // false-positive-free subset: a row may only seed an aggregate of its own
 // context, and a row's record may not repeat a field name.  Create-parameter
 // shape-checking, `@handle` resolution, and the `raw`-bypasses-invariant
-// warning are later slices.
+// warning are not checked.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
 import { diagMessage } from "../../diagnostics/messages.js";

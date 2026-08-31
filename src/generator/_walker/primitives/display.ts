@@ -35,9 +35,9 @@ export function emitStat(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   // `money` deserialises client-side to a decimal.js `Decimal`, which is a
   // `TS2322: Type 'Decimal' is not assignable to type 'ReactNode'` and would
   // crash at runtime — exactly why the scaffold's table-cell accessor wraps a
-  // money column in `Money { … }`.  Before this, the text path coerced the
-  // nested call to nothing and the slot rendered EMPTY: a silent drop, and the
-  // only way to put a currency figure on a KPI card.
+  // money column in `Money { … }`.  Routing it down the text path instead
+  // coerces the nested call to nothing and renders the slot EMPTY, silently
+  // dropping the only way to put a currency figure on a KPI card.
   const valueArg = positionalArgs(call)[1];
   const nestedValue =
     valueArg?.kind === "call" && isWalkerPrimitive(valueArg.name)
@@ -128,9 +128,10 @@ export function emitDivider(
   // catalog slot), else byte-identical.  `label` is the text-children form
   // (mui/vuetify/shadcn*/flowbite render the label as element text); `labelAttr`
   // is the complete bound-attribute fragment (mantine's `<Divider label=…>`).
-  // Presence is the ARG, not a literal: a dynamic `label: row.name` used to
-  // read as "no label" and render a bare rule, silently dropping the author's
-  // text.  The label/labelAttr values below already handle the dynamic form.
+  // Presence is the ARG, not a literal: testing for a literal reads a dynamic
+  // `label: row.name` as "no label" and renders a bare rule, silently dropping
+  // the author's text.  The label/labelAttr values below handle the dynamic
+  // form.
   const hasLabel = namedArgValue(call, "label") !== undefined;
   return renderPrimitive(ctx, "primitive-divider", {
     label: localizedNamedText(call, ctx, "dividerLabel", "label", '""'),

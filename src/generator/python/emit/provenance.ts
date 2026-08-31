@@ -235,9 +235,9 @@ export function provenanceMigrationTag(): string {
 /** The co-located-column ALTERs, rendered as a single `.sql` file split into
  *  one statement per `--> statement-breakpoint` (asyncpg runs one statement per
  *  call).  Each ALTER is schema-qualified to the owning aggregate's table.  The
- *  `provenance_records` history table used to be created here as well; it is
- *  now a shared MigrationsIR companion table (`provenanceTableShape`) and
- *  arrives in the ordinary module migration. */
+ *  `provenance_records` history table is NOT created here — it is a shared
+ *  MigrationsIR companion table (`provenanceTableShape`) arriving in the
+ *  ordinary module migration. */
 export function renderPyProvenanceMigration(
   provAggs: Array<{ agg: AggregateIR; fields: FieldIR[]; schema?: string }>,
 ): string {

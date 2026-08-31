@@ -19,7 +19,7 @@ import { positionalChildren, styleAttr, styleWith, testidAttr, walk } from "../w
 
 /** Run `fn` with the walk one semantic heading-nesting level deeper — used
  *  by the `nesting: true` a11y-contract containers (`Section` / `Card`) so a
- *  `Heading` in their body derives a rank deeper (accessibility.md Phase 2).
+ *  `Heading` in their body derives a rank deeper (accessibility.md).
  *  Mutate-and-restore on the SAME context (not a spread copy) so every
  *  value-typed `Sink` flag a child writes (`usesNavigate`, `usesChildren`,
  *  …) still lands on the shared object — a shallow `{...ctx}` would silently
@@ -74,7 +74,7 @@ export function emitGroup(
 export function emitGrid(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   // Each child wraps in a per-pack column container (Mantine's
   // <Grid.Col span="auto">; shadcn's plain `<div>` since gap is
-  // on the parent).  `cols:` (Phase 6) selects per-breakpoint column
+  // on the parent).  `cols:` selects per-breakpoint column
   // counts; when absent, every child takes `span="auto"` and the
   // pack picks an equal-weight default.
   const children = positionalChildren(call, ctx, depth + 2);
@@ -132,7 +132,7 @@ export function emitSection(
   // theming (if any) varies per template.
   const id = stringNamed(call, "id");
   // `Section` is a `nesting: true` container in the a11y contract — its
-  // children's `Heading`s derive one rank deeper (accessibility.md Phase 2).
+  // children's `Heading`s derive one rank deeper (accessibility.md).
   const children = withHeadingNesting(ctx, () => positionalChildren(call, ctx, depth + 1));
   const indent = "  ".repeat(depth + 1);
   const closeIndent = "  ".repeat(depth);
@@ -194,9 +194,9 @@ export function emitContainer(
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
     // Vuetify has no `size` prop on `<v-container>`, so its pack expresses the
-    // size as its own `max-width` declaration — which used to sit NEXT TO
-    // `{{{styleAttr}}}` as a second `style` attribute (F2).  `styleWith` merges
-    // the pack's base declarations with the author's into one attribute.
+    // size as its own `max-width` declaration.  `styleWith` merges the pack's
+    // base declarations with the author's into ONE attribute — emitting it next
+    // to `{{{styleAttr}}}` would produce two `style` attributes.
     styleWith: styleWith(call, ctx),
   });
 }
@@ -250,12 +250,12 @@ export function emitTabs(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   // compiles.  Tab labels must be string literals in v0; non-
   // literal labels fall back to indexed slugs `tab-1`, …
   //
-  // The panel body used to be `tabPositionals[1]` ALONE, so
-  // `Tab { "Ovw", Text { "A" }, Text { "B" } }` rendered `A` and dropped `B`
-  // — and every sibling after it — without a word, on all seven targets (the
-  // dropped literal still reached `.loom/messages.en.json`, so translators got
-  // a key nothing renders).  A tab panel is a children container like
-  // `Stack`/`Card`; it joins its children the same way (#2567's class).
+  // The panel body is EVERY remaining positional, not `tabPositionals[1]`
+  // alone: a tab panel is a children container like `Stack`/`Card` and joins
+  // its children the same way.  Taking only the first would render `A` and drop
+  // `B` from `Tab { "Ovw", Text { "A" }, Text { "B" } }` on all seven targets,
+  // silently — and the dropped literal would still reach
+  // `.loom/messages.en.json`, handing translators a key nothing renders.
   const positionals = positionalArgs(call);
   const innerIndent = "  ".repeat(depth + 2);
   /** Join already-walked panel children the way every other container does. */
@@ -364,10 +364,10 @@ export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   // `Card(child)` (single non-text-like positional)
   // renders a card with no heading.
   //
-  // The body used to be `positionals[1]` alone, so `Card { "T", Text { … },
-  // Slot { } }` rendered the `Text` and dropped the `Slot` — and every
-  // sibling after the first — without a word.  Card is a container like
-  // `Stack`/`Section`; it joins its children the same way they do.
+  // EVERY remaining positional is a body child, not `positionals[1]` alone:
+  // Card is a container like `Stack`/`Section` and joins its children the same
+  // way.  Taking only the first would drop the `Slot` from
+  // `Card { "T", Text { … }, Slot { } }` without a word.
   const positionals = positionalArgs(call);
   const titleArg = positionals[0];
   const titleIsTextLike = titleArg !== undefined && titleArg.kind !== "call";
@@ -380,7 +380,7 @@ export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   const titleText =
     titleIsTextLike && titleArg ? localizedText(call, ctx, "cardTitle", '""', 0) : undefined;
   // `Card` is a `nesting: true` container in the a11y contract — its body
-  // `Heading`s derive one rank deeper (accessibility.md Phase 2).  The card
+  // `Heading`s derive one rank deeper (accessibility.md).  The card
   // title itself is not a `Heading` primitive, so it is unaffected.
   const contentParts = withHeadingNesting(ctx, () =>
     contentExprs.map((e) => walk(e, ctx, depth + 1)),
@@ -389,7 +389,7 @@ export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
     contentParts.length > 0
       ? contentParts.join(`${ctx.target.interChildSeparator ?? ""}\n${indent}`)
       : undefined;
-  // Phase 5 — visual rank.  `variant: "raised" | "flat" | "outline"`
+  // visual rank.  `variant: "raised" | "flat" | "outline"`
   // picks the card's elevation idiom per pack.  `shadow: "sm" | "md"
   // | "lg" | "none"` overrides the variant's default shadow level.
   const variant = stringNamed(call, "variant");

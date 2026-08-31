@@ -1,4 +1,4 @@
-// Phase 8 step 2 — walk each declared `layout <Name> { … }`
+// step 2 — walk each declared `layout <Name> { … }`
 // SystemMember's slot expressions into TSX so the AppShell preparer
 // can emit a `<Name>Layout` wrapper component per layout.
 //

@@ -1,7 +1,7 @@
 import type { ApiRoute } from "../api-emit.js";
 
 // ---------------------------------------------------------------------------
-// File upload/download endpoints (M-T1.2 slice 2d) — the app-level HTTP
+// File upload/download endpoints (M-T1.2) — the app-level HTTP
 // `POST /files` + `GET /files/:key` the JSX frontends hit (distinct from the
 // HEEx LiveView `allow_upload` channel path).  Root-mounted (`!root:`, not under
 // `/api`) to match the frontend api-client (`api.upload("/files")`, the

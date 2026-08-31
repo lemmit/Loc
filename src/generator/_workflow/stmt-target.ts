@@ -7,8 +7,8 @@ import type { WorkflowStmtIR } from "../../ir/types/loom-ir.js";
 // Every backend's workflow emitter walks the same body: the 10-kind
 // `WorkflowStmtIR` sequence in declaration order, recursing into `for-each`
 // bodies. Only the per-kind *spelling* diverges (let syntax, block syntax,
-// guard idiom, the expression renderer) plus the indent unit. Before this
-// seam each backend re-implemented the whole switch.
+// guard idiom, the expression renderer) plus the indent unit. Without this
+// seam each backend re-implements the whole switch.
 //
 // `renderWorkflowStmts` owns the dispatch + `for-each` recursion once; each
 // backend supplies a `WorkflowStmtTarget` leaf table. A new `WorkflowStmtIR`

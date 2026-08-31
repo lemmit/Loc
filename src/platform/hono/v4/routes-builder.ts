@@ -452,9 +452,9 @@ export function buildRoutesFile(
   // too: a deployable with auditing off writes no rows, and a route serving an
   // always-empty timeline reads as authoritative while saying nothing.
   const historyFind = emitAudit ? repo?.historyFind : undefined;
-  // Lifecycle stamps (audit / softDelete) no longer touch the route handler:
-  // node-persist-time-auditing relocated stamping into the drizzle save()
-  // (db/audit-stamp.ts), reading the principal from the ambient request context.
+  // Lifecycle stamps (audit / softDelete) do NOT touch the route handler:
+  // stamping happens persist-time in the drizzle save() (db/audit-stamp.ts),
+  // reading the principal from the ambient request context.
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   if (aggregateUsesMoneyDeep(agg, ctx.valueObjects)) {
@@ -507,7 +507,7 @@ export function buildRoutesFile(
   if (whenEnums.size > 0) {
     lines.push(`import { ${[...whenEnums].sort().join(", ")} } from "../domain/value-objects";`);
   }
-  // Extern operations (extern (b) Phase 2) are now aggregate-owned hooks: the
+  // Extern operations (extern (b)) are now aggregate-owned hooks: the
   // route calls `aggregate.<op>(...)` like any other operation, so there is no
   // handler-registry import.
   if (needsTx) {
@@ -932,10 +932,10 @@ export function buildRoutesFile(
       })
       .join(", ");
     lines.push(`      const created = ${agg.name}.create({ ${createArgs} });`);
-    // Lifecycle stamps (createdAt/createdBy/…) are NO LONGER set here.
-    // node-persist-time-auditing relocated stamping into the drizzle save()
-    // (db/audit-stamp.ts), which reads the principal from the ambient request
-    // context — so the handler is just create → save.
+    // Lifecycle stamps (createdAt/createdBy/…) are NOT set here: stamping
+    // happens persist-time in the drizzle save() (db/audit-stamp.ts), which
+    // reads the principal from the ambient request context, so the handler is
+    // just create → save.
     if (auditCreate) {
       // Audited create — persist + write the lifecycle audit row in ONE
       // transaction (mirrors the operation audit path).  Asymmetry: create
@@ -1278,11 +1278,10 @@ export function buildRoutesFile(
   const disallowedStatus = resolveErrorStatus("Disallowed", ctx.structuralErrorStatuses);
   const uniquenessStatus = resolveErrorStatus("UniquenessConflict", ctx.structuralErrorStatuses);
   const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", ctx.structuralErrorStatuses);
-  // M-T5.20 — the domain floor and the `requires` denial resolve through the
-  // api's `httpStatus` map exactly like the structural conflicts above,
-  // instead of the hardcoded 422 / 403 literals they used to be. Defaults
-  // collapse to those same literals, so output is byte-identical with no
-  // override. `denialOverridesFor`-equivalent merge: neither rung has a
+  // The domain floor and the `requires` denial resolve through the api's
+  // `httpStatus` map exactly like the structural conflicts above; the defaults
+  // are the 422 / 403 literals. `denialOverridesFor`-equivalent merge: neither
+  // rung has a
   // per-context tag (both surface in this app-global handler), so both maps
   // are read — `errorStatusOverrides` for a directly-declared name,
   // `structuralErrorStatuses` for the app-wide fold M-T5.20 widened to carry
@@ -1620,8 +1619,8 @@ function emitOperationRoute(
   emitTrace: boolean,
   usingMikro = false,
 ): string[] {
-  // Lifecycle stamps are applied persist-time in the drizzle save()
-  // (node-persist-time-auditing); the operation route no longer stamps.
+  // Lifecycle stamps are applied persist-time in the drizzle save(); the
+  // operation route does not stamp.
   const aggSlug = snake(plural(agg.name));
   // Exception-less operation (`operation foo(): X or NotFound`): the route
   // captures the tagged-union result and translates an `error`-variant to an
@@ -1696,8 +1695,8 @@ function emitOperationRoute(
   // when the method still declares the parameter.
   const usesUser = operationBodyUsesCurrentUser(op);
   // The operation body reads the typed `currentUser` only when it references
-  // it directly; lifecycle stamps no longer thread the principal through the
-  // handler (stamped persist-time in the drizzle save()).
+  // it directly; lifecycle stamps do not thread the principal through the
+  // handler (they are stamped persist-time in the drizzle save()).
   if (usesUser || operationGatesUseCurrentUser(op)) {
     out.push(
       `    const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
@@ -1709,7 +1708,7 @@ function emitOperationRoute(
   // The mutation block — extern dispatch or the direct method call —
   // operates on `aggregate` and is independent of which repo loaded it,
   // so it's shared verbatim between the plain and transactional paths.
-  // Extern operations (extern (b) Phase 2) re-home to an aggregate-owned hook,
+  // Extern operations (extern (b)) re-home to an aggregate-owned hook,
   // so the operation method itself runs preconditions → hook → invariants —
   // the route calls it exactly like a non-extern op.
   const mutation = (pad: string): string[] => [
@@ -1855,8 +1854,8 @@ function emitReturningOperationRoute(
   entry: ApiOperationIR,
   emitTrace: boolean,
 ): string[] {
-  // Lifecycle stamps are applied persist-time in the drizzle save()
-  // (node-persist-time-auditing); the operation route no longer stamps.
+  // Lifecycle stamps are applied persist-time in the drizzle save(); the
+  // operation route does not stamp.
   const aggSlug = snake(plural(agg.name));
   const variants = op.returnType?.kind === "union" ? op.returnType.variants : [];
   const errorVariants = variants.filter((vv) => isErrorVariant(vv, ctx));
@@ -1924,7 +1923,7 @@ function emitReturningOperationRoute(
   out.push(...requiresGateLines(op, "    ", ctx));
   out.push(...whenGateLine(agg, op, "    "));
   // Lifecycle stamps are applied persist-time in the drizzle save()
-  // (node-persist-time-auditing) — the handler no longer stamps.
+  // — the handler does not stamp.
   out.push(`    const result = aggregate.${lowerFirst(op.name)}(${callArgs});`);
   out.push(`    await repo.save(aggregate);`);
   // Translate each error variant to a ProblemDetails before the success path.
@@ -2049,8 +2048,8 @@ function emitFindRoute(
   // ForbiddenError is mapped to a 403 ProblemDetails by the file's onError
   // filter — the read-side analogue of an operation `requires` gate.  The 403
   // `detail` carries the source label (`Forbidden: find <name>`) exactly as the
-  // operation gates and the other four backends do — node's read gates used to
-  // drop it, the lone bare-`Forbidden` outlier across all five backends.
+  // operation gates and the other four backends do; dropping it makes node's
+  // read gates the lone bare-`Forbidden` outlier across all five backends.
   if (find.requires) {
     out.push(
       `    if (!(${renderTsExpr(find.requires)})) throw new ForbiddenError(${JSON.stringify(`Forbidden: find ${find.name}`)});`,
@@ -2534,7 +2533,7 @@ export function emitWireSchema(
   openapiName: string, // component name passed to `.openapi(...)`
   // `default` (when set) is the zod `.default(...)` literal; it is appended
   // AFTER the single-field invariant chain, because `.default(x)` returns a
-  // `ZodDefault` that no longer exposes `.min`/`.max` — emitting
+  // `ZodDefault` that does not expose `.min`/`.max` — emitting
   // `.default(3).min(1)` is a type error that poisons the whole object
   // schema's inferred type (every `body.<field>` then becomes `unknown`).
   fields: { name: string; base: string; default?: string; optional?: boolean }[],

@@ -239,7 +239,7 @@ export function dartRecordForEvent(ev: EventIR): DartRecord {
   };
 }
 
-/** The Dart wire model for a query-time PROJECTION's row (M-T1.3 Phase 1).
+/** The Dart wire model for a query-time PROJECTION's row (M-T1.3).
  *
  *  `<Proj>Row`, off the SAME `wireShape` the backend's row DTO and every other
  *  frontend's row type are built from — which is the whole reason a projection

@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Typed in-system api client (M-T4.8 slice 4d) — the Phoenix/Elixir caller
+// Typed in-system api client (M-T4.8) — the Phoenix/Elixir caller
 // half, and the last one: with this the `REMOTE_API_OP_UNSUPPORTED` set empties
 // and the honest-gap validator that guarded the feature goes away.
 //

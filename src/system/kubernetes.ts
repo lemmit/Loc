@@ -95,7 +95,7 @@ export interface WorkloadModel {
    *  `.Values.<key>.secrets.<NAME>` map.  Keeps secrets out of the
    *  plaintext `ConfigMap`. */
   secretEnv: SecretEnv[];
-  /** Broker channel URLs (`LOOM_CHANNEL_<NAME>_URL` — M-T4.4 slice 5b).
+  /** Broker channel URLs (`LOOM_CHANNEL_<NAME>_URL` — M-T4.4).
    *  Secret-sourced (they embed the §7 credentials); `value` is the raw
    *  view's in-cluster URL (plain service name), `chartFormat` the printf
    *  format the chart's Secret template resolves with the release fullname
@@ -172,7 +172,7 @@ export function buildWorkloads(sys: SystemIR): WorkloadModel[] {
         apiBackend = { name: kName(target.name), servicePort: target.port };
       }
     }
-    // Broker channel URLs (M-T4.4 slice 5b): the same credentialed URLs
+    // Broker channel URLs (M-T4.4): the same credentialed URLs
     // compose injects, re-hosted at the in-cluster broker Service.
     const channelEnv = brokerChannelBindings(d, sys).map((b) => ({
       name: b.envVar,
@@ -236,7 +236,7 @@ export function buildWorkloads(sys: SystemIR): WorkloadModel[] {
 }
 
 // ---------------------------------------------------------------------------
-// Broker workloads (M-T4.4 slice 5b) — the in-cluster siblings of the compose
+// Broker workloads (M-T4.4) — the in-cluster siblings of the compose
 // broker sidecars, carrying the same §7 auth provisioning.  Rendered by both
 // the raw view here and the chart (enabled-gated per broker: set
 // `.Values.brokers.<storage>.enabled=false` and point the deployables'

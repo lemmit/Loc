@@ -66,7 +66,7 @@ export function renderJavaEventSourcedRepositoryImpl(
   // sorted retrieval).  The retrieval helper appends its own below.
   const exprImports = new Set<string>();
   for (const f of finds) if (f.filter) collectJavaExprImports(f.filter, exprImports);
-  // The command load's in-app write-scope guard (P3.1) renders from the
+  // The command load's in-app write-scope guard renders from the
   // DESUGARED IR, so its imports come from that same tree.
   if (agg.writeScopeFilter)
     collectJavaExprImports(desugarAuthzFilterInApp(agg.writeScopeFilter, agg.name), exprImports);
@@ -164,7 +164,7 @@ export function renderJavaEventSourcedRepositoryImpl(
     `    private static final ObjectMapper JSON = JsonMapper.builder().findAndAddModules().build();`,
     ``,
     `    private final JdbcTemplate jdbc;`,
-    // The in-app write-scope guard (P3.1) reads the request principal, so the
+    // The in-app write-scope guard reads the request principal, so the
     // impl injects the same CurrentUserAccessor bean the relational path uses.
     // Only wired when the write scope references it — otherwise no field, no
     // ctor param, no import (byte-identical emission).
@@ -218,7 +218,7 @@ export function renderJavaEventSourcedRepositoryImpl(
     `    }`,
     ``,
     // `getById` IS the command load on java (the read route calls `findById`;
-    // every mutation calls this), so the P3.1 write-scope guard lives here.  An
+    // every mutation calls this), so the write-scope guard lives here.  An
     // event stream has no queryable state columns for a `findByIdForWrite`
     // @Query, so the scope is checked IN-APP over the FOLDED aggregate.  Without
     // a write scope the load stays byte-identical.

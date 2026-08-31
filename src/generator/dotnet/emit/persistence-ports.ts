@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// EF Core adapters for the domain persistence ports (audit S7 Slice C).
+// EF Core adapters for the domain persistence ports.
 //
 // The orchestration/application handlers (workflow command, saga reactors,
 // projection fold) depend on the domain-termed ports declared in
@@ -20,7 +20,7 @@
 
 /** The single Infrastructure.Persistence file carrying every EF port adapter. */
 export function renderPersistencePortAdapters(ns: string): string {
-  return `// Auto-generated.  EF Core adapters for the domain persistence ports (audit S7 Slice C).
+  return `// Auto-generated.  EF Core adapters for the domain persistence ports.
 using System;
 using System.Collections.Generic;
 using System.Data;

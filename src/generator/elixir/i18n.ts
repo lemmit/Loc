@@ -40,8 +40,8 @@
 //
 // SECOND-TIER GATE.  The CLDR backend costs real compile time, so it ships only
 // when the ui has an INTERPOLATED message — one tier below the existing "has
-// any string at all" gate.  A plain-literal Phoenix app keeps exactly the deps,
-// files and bytes it had before this slice.
+// any string at all" gate, so a plain-literal Phoenix app pays for none of
+// it.
 // ---------------------------------------------------------------------------
 
 import type { UiIR } from "../../ir/types/loom-ir.js";

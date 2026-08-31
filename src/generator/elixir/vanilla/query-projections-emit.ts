@@ -354,7 +354,7 @@ ${
 `;
   }
 
-  // WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0) — ONE Ecto query with
+  // WHOLE-TABLE AGGREGATION (M-T1.3) — ONE Ecto query with
   // `count`/`sum`/`avg`/`min`/`max` in the `select`, no rows loaded.  The shape
   // exists precisely to avoid the naive read: `Repo.all/1` over the whole table
   // with every row hydrated into a struct to produce one integer.

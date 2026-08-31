@@ -1,5 +1,5 @@
-// First-boot database seeding for the Hono backend (database-seeding.md,
-// Phase 2).  Emits `db/seed.ts` from the context's `SeedIR` list.
+// First-boot database seeding for the Hono backend (database-seeding.md).
+// Emits `db/seed.ts` from the context's `SeedIR` list.
 //
 // Per D-SEED-PATH the default path is **through the domain `create`**: each
 // row becomes `await <agg>Repo.save(<Agg>.create({ … }))`, so the aggregate's

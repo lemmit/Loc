@@ -43,7 +43,7 @@ export interface GenerateElixirArgs {
   /** Compile-time --trace switch.  When true, the controllers emit a
    *  `wire_in` Logger.debug line at each CRUD action entry so the parsed
    *  `params` key set surfaces on the structured stream — mirroring Hono
-   *  Phase 6d / .NET v6 wire_in's intent. */
+   *  and .NET wire_in's intent. */
   emitTrace?: boolean;
   /** The deployable's resolved STYLE adapter (D-REALIZATION-AXES
    *  `application:` → the `layered` controller → context → repository

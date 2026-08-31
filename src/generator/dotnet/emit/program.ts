@@ -111,7 +111,7 @@ export function renderProgram(
      *  rows stamp the per-dispatch frame's scope / parent ids, so it also
      *  forces the `ExecutionContextBehavior` frame-opener to be registered. */
     hasProvenance?: boolean;
-    /** Tenant hierarchy (multi-tenancy P2.2): the registry opts into
+    /** Tenant hierarchy (multi-tenancy): the registry opts into
      *  `tenantRegistry`, so register the scoped `IOrgPathResolver` →
      *  `EfOrgPathResolver` that UserMiddleware calls per request to materialize
      *  `currentUser.orgPath` from the registry's `data_key`.  Implies
@@ -122,18 +122,18 @@ export function renderProgram(
      *  `AddHostedService<…>()` per owned timer).  Empty ⇒ no registration, so
      *  a timer-free deployable's Program.cs stays byte-identical. */
     timerServices?: string[];
-    /** Broker channels (M-T4.4 slice 6a): the deployable wires a broker-bound
+    /** Broker channels (M-T4.4): the deployable wires a broker-bound
      *  channelSource — register the ChannelTransports singleton and wrap the
      *  dispatcher chain in the publish tee (design §4 delivery uniformity). */
     hasChannels?: boolean;
-    /** M-T4.4 slice 7b: the workflow-less durable-broker producer shape — the
+    /** M-T4.4: the workflow-less durable-broker producer shape — the
      *  outbox dispatcher wraps the Noop (no in-process dispatcher exists), so
      *  register the Noop concretely instead of the InProcess scoped line. */
     outboxNoopInner?: boolean;
     /** A hosted reactor subscribes to a carried event — start the consumer
      *  BackgroundService feeding envelopes into the in-process dispatch. */
     hasChannelConsumers?: boolean;
-    /** TimerSource durable scheduling (scheduling.md Phase 2): the deployable
+    /** TimerSource durable scheduling (scheduling.md): the deployable
      *  owns at least one `cron:` timer, so wire Hangfire (`AddHangfire` +
      *  `AddHangfireServer`, Hangfire.PostgreSql storage) + register its recurring
      *  jobs.  `every:`-only + timer-free deployables leave this false — no
@@ -168,8 +168,7 @@ export function renderProgram(
   // at all.  Only the genuinely colliding types are re-mapped (keyed by CLR
   // full name, computed at emit time in `schema-ids.ts`); every other type
   // keeps its short name so the component set stays comparable with the four
-  // other backends.  No collision ⇒ both fragments are empty and Program.cs is
-  // byte-identical to before this guard existed.
+  // other backends.  No collision ⇒ both fragments are empty.
   const schemaOverrides = options?.schemaIdOverrides ?? [];
   const schemaIdDictionary =
     schemaOverrides.length === 0
@@ -360,7 +359,7 @@ app.MapGet("/files/{key}", async (string key, HttpContext http, ILogger<${ns}.Ap
           .map((fqn) => `builder.Services.AddHostedService<${fqn}>();`)
           .join("\n")}`
       : "";
-  // TimerSource `cron:` schedulers (scheduling.md Phase 2) run on Hangfire with
+  // TimerSource `cron:` schedulers (scheduling.md) run on Hangfire with
   // Hangfire.PostgreSql storage: the recurring-job scheduler is store-coordinated
   // (single-fire across replicas), retries a failed job with backoff, and fires an
   // overdue recurring job on server start (native missed-run replay).
@@ -368,7 +367,7 @@ app.MapGet("/files/{key}", async (string key, HttpContext http, ILogger<${ns}.Ap
   const hangfireJobDiRegistrations = options?.hangfireJobDiRegistrations ?? [];
   const hangfireRecurringRegistrations = options?.hangfireRecurringRegistrations ?? [];
   const hangfireDiBlock = hangfireCronTimers
-    ? `\n// Durable cron timers (scheduling.md Phase 2) — Hangfire + Hangfire.PostgreSql.\n// The storage schema is created automatically on first use.\nbuilder.Services.AddHangfire(cfg => cfg\n    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)\n    .UseSimpleAssemblyNameTypeSerializer()\n    .UseRecommendedSerializerSettings()\n    .UsePostgreSqlStorage(o => o.UseNpgsqlConnection(builder.Configuration.GetConnectionString("Default"))));\nbuilder.Services.AddHangfireServer();\n${hangfireJobDiRegistrations.join("\n")}`
+    ? `\n// Durable cron timers (scheduling.md) — Hangfire + Hangfire.PostgreSql.\n// The storage schema is created automatically on first use.\nbuilder.Services.AddHangfire(cfg => cfg\n    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)\n    .UseSimpleAssemblyNameTypeSerializer()\n    .UseRecommendedSerializerSettings()\n    .UsePostgreSqlStorage(o => o.UseNpgsqlConnection(builder.Configuration.GetConnectionString("Default"))));\nbuilder.Services.AddHangfireServer();\n${hangfireJobDiRegistrations.join("\n")}`
     : "";
   const hangfireRecurringBlock = hangfireCronTimers
     ? `\n// Register the durable cron timerSources as Hangfire recurring jobs (standard\n// 5-field cron).  Uses the service-based IRecurringJobManager (the static\n// RecurringJob API needs JobStorage.Current, unset on the DI path).  AddOrUpdate\n// is idempotent per stable id — re-registers on boot.\nusing (var hangfireScope = app.Services.CreateScope())\n{\n    var recurring = hangfireScope.ServiceProvider.GetRequiredService<IRecurringJobManager>();\n${hangfireRecurringRegistrations.join("\n")}\n}\n`
@@ -412,7 +411,7 @@ using (var seedScope = app.Services.CreateScope())
     )
     .join("\n");
 
-  // Reading-tier domain services (domain-services.md rev. 4, Slice 1): a
+  // Reading-tier domain services (domain-services.md rev. 4): a
   // `reading` service is a DI'd `sealed class` (it injects an
   // I<Aggregate>Repository per read-port), so it must be registered as a scoped
   // service the orchestrating workflow handler can inject.  A `pure` service is
@@ -443,7 +442,7 @@ using (var seedScope = app.Services.CreateScope())
     ? `\n// Entity history — the read port over audit_records (GET /<agg>/{id}/history).\nbuilder.Services.AddScoped<${ns}.Application.Common.IAuditHistoryReader, ${ns}.Infrastructure.Persistence.AuditHistoryReader>();`
     : "";
 
-  // Domain persistence-port adapters (audit S7 Slice C): the orchestration
+  // Domain persistence-port adapters: the orchestration
   // handlers (transactional workflow command, saga reactors, projection fold)
   // depend on IUnitOfWork / IWorkflowEventStore / ISagaStateStore /
   // IReadModelStore instead of the concrete AppDbContext.  All scoped over the
@@ -459,14 +458,14 @@ using (var seedScope = app.Services.CreateScope())
   const portsDi = usesPersistencePorts
     ? usingDapper
       ? `\n// Domain persistence ports (M-T6.9) — Dapper adapters over NpgsqlDataSource (closed bindings).\n${(options?.dapperPortRegistrations ?? []).join("\n")}`
-      : `\n// Domain persistence ports (audit S7 Slice C) — EF adapters over the scoped AppDbContext.\nbuilder.Services.AddScoped<${ns}.Domain.Common.IUnitOfWork, ${ns}.Infrastructure.Persistence.EfUnitOfWork>();\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IWorkflowEventStore<>), typeof(${ns}.Infrastructure.Persistence.EfWorkflowEventStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.ISagaStateStore<>), typeof(${ns}.Infrastructure.Persistence.EfSagaStateStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IReadModelStore<>), typeof(${ns}.Infrastructure.Persistence.EfReadModelStore<>));`
+      : `\n// Domain persistence ports — EF adapters over the scoped AppDbContext.\nbuilder.Services.AddScoped<${ns}.Domain.Common.IUnitOfWork, ${ns}.Infrastructure.Persistence.EfUnitOfWork>();\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IWorkflowEventStore<>), typeof(${ns}.Infrastructure.Persistence.EfWorkflowEventStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.ISagaStateStore<>), typeof(${ns}.Infrastructure.Persistence.EfSagaStateStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IReadModelStore<>), typeof(${ns}.Infrastructure.Persistence.EfReadModelStore<>));`
     : "";
 
   // Extern application-layer handlers ([ExternHandler] scan targets).  Since
-  // extern (b) Phase 2, an extern aggregate OPERATION is a domain partial-method
+  // extern (b), an extern aggregate OPERATION is a domain partial-method
   // hook (no injected handler, no `[ExternHandler]`, no DI registration — a
   // missing implementation is a COMPILE error), so ONLY the extern
-  // commandHandler / queryHandler application members (Phase 1's case-2 home)
+  // commandHandler / queryHandler application members (case-2 home)
   // register through the Scrutor scan.  Their user impl carries `[ExternHandler]`;
   // the same scan registers it under `I<Name>Handler` and the startup verify
   // fails fast when the user hasn't supplied one.
@@ -537,7 +536,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserAccessor, HttpContextCurrentUserAccessor>();${
         orgPathResolver
           ? `
-// Tenant hierarchy (multi-tenancy P2.2): the per-request \`orgPath\` resolver —
+// Tenant hierarchy (multi-tenancy): the per-request \`orgPath\` resolver —
 // currentUser.orgPath = the caller org's materialized \`data_key\`, read once
 // per request by UserMiddleware and memoized on the principal (fail-safe to
 // the claim).  Scoped: it holds the request-scoped ${usingDapper ? "connection source" : "AppDbContext"}.
@@ -1199,7 +1198,7 @@ export function renderCsproj(
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />`;
-  // Resource-client NuGet refs (Phase 4c) — AWSSDK.S3 / RabbitMQ.Client
+  // Resource-client NuGet refs — AWSSDK.S3 / RabbitMQ.Client
   // etc., one row per package the deployable's consumed resources need.
   const resourceRefs = Object.entries(resourceNugetDeps)
     .sort(([a], [b]) => a.localeCompare(b))
@@ -1224,7 +1223,7 @@ export function renderCsproj(
     usesSpecifications && !usingDapper
       ? `\n    <!-- Ardalis.Specification — reified retrieval/criterion query objects -->\n    <PackageReference Include="Ardalis.Specification" Version="9.3.1" />\n    <PackageReference Include="Ardalis.Specification.EntityFrameworkCore" Version="9.3.1" />`
       : "";
-  // Hangfire — durable `timerSource … cron:` scheduling (scheduling.md Phase 2)
+  // Hangfire — durable `timerSource … cron:` scheduling (scheduling.md)
   // on Hangfire.PostgreSql storage.  Ships only when an owned timer uses a real
   // cron cadence (an `every:`-only deployable uses PeriodicTimer and needs no
   // dep).  Newtonsoft.Json is pinned to 13.x to override the vulnerable 11.0.1

@@ -508,7 +508,7 @@ export function computeSaves(
 ): SaveEntry[] {
   const opCallTargets = new Set<string>();
   // The aggregate-arg names a called `mutating` domain service writes
-  // (domain-services.md rev. 4, Slice 2).  `Transfer.run(s, d, amount)` mutates
+  // (domain-services.md rev. 4).  `Transfer.run(s, d, amount)` mutates
   // its `source`/`dest` params (their own ops) → the workflow-local vars bound
   // to those positions (`s`/`d`) must persist at exit, exactly as a repo-let an
   // `op-call` targets does.  Derived from the resolved service op + aggregate

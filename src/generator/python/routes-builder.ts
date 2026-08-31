@@ -136,7 +136,7 @@ export function buildPyRoutesFile(
   // `<Parent>Response` that references it (`list[LabelResponse]`) — no Pydantic
   // forward-ref.  Byte-identical when there is no part-in-part nesting.
   const parts: EnrichedEntityPartIR[] = partsChildrenFirst(agg.parts);
-  // Extern ops (docs/extern.md, extern (b) Phase 2) route exactly like any
+  // Extern ops (docs/extern.md, extern (b)) route exactly like any
   // other public operation: the aggregate's `<op>` method (preconditions → hook
   // → invariants) is a real method now, so `found.<op>(…)` drives the whole
   // framework flow — no separate registry dispatch.
@@ -385,7 +385,7 @@ export function buildPyRoutesFile(
 
 /** `app.http.problem` names this routes file references. */
 /** The repo method a MUTATION route loads through: `get_by_id_for_write` when
- *  the aggregate carries a `writeScopeFilter` (authorization Phase 3 P3.1 — the
+ *  the aggregate carries a `writeScopeFilter` (authorization — the
  *  write scope is narrower than the read scope), else `get_by_id` (byte-
  *  identical).  Read routes always use `get_by_id`. */
 function cmdLoad(agg: EnrichedAggregateIR): string {

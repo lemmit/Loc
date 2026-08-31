@@ -11,13 +11,13 @@
 // the thin vanilla-side wrapper that bakes in the context's aggregate pool and
 // exposes the table name + discriminator the emitters need.
 //
-// THE BUG THIS CLOSES (vanilla-phoenix-gaps.md §8): a TPH concrete's schema
-// used to point at `snake(plural(agg.name))` (`customers` / `vendors`) — tables
-// the migration never creates (TPH shares ONE table named for the abstract
-// base, with a `kind` discriminator).  Reads 500'd at runtime with "relation
-// customers does not exist".  The schema now resolves to the shared base table
-// and carries `kind`; the repository filters every read by `kind` and stamps it
-// on insert.  The abstract base emits a read-only polymorphic reader.
+// A TPH concrete's schema resolves to the SHARED BASE TABLE and carries `kind`
+// — never `snake(plural(agg.name))` (`customers` / `vendors`), which the
+// migration never creates, since TPH shares one table named for the abstract
+// base with a `kind` discriminator; reads there 500 at runtime with "relation
+// customers does not exist".  The repository filters every read by `kind` and
+// stamps it on insert.  The abstract base emits a read-only polymorphic
+// reader.
 // ---------------------------------------------------------------------------
 
 import type { AggregateIR, FieldIR } from "../../../ir/types/loom-ir.js";

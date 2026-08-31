@@ -13,7 +13,7 @@
 // Pure structural derivation over the shared IR (no target-backend IR, no
 // upward import): lives at the generator layer, imported *down* by each
 // `src/generator/<platform>/emit/seed.ts` — see docs/new-plan/missions/
-// M-T9.2-persistence-seam-design.md §Slice 3.
+// M-T9.2-persistence-seam-design.md §.
 // ---------------------------------------------------------------------------
 
 import type { EnrichedBoundedContextIR, SeedRowIR } from "../../ir/types/loom-ir.js";

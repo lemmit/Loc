@@ -1,7 +1,7 @@
 import { assignStmt, defineMacro, nullLit, operation } from "../../api/index.js";
 import { boolLit, nowExpr } from "../../api/ui-factories.js";
 
-/** Soft-delete operations (typed-capabilities.md, Phase 3).
+/** Soft-delete operations (typed-capabilities.md).
  *
  * Adds the `softDelete()` / `restore()` mutations to an aggregate.  A capability
  * is a pure mixin (fields + filter + stamp), so the operations live here, in a

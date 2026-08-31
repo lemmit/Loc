@@ -155,8 +155,8 @@ function versionToEpochMillis(version: string): number {
 // `MigrationsIR` owns, so they must be ALTERed in after those exist, and a
 // version far in the future sorts this after every module's initial + delta
 // migrations (parity with the `29991231235959` / `29991231000000` siblings)
-// regardless of module count.  The `provenance_records` history table used to
-// be created here too; it is now a shared `MigrationsIR` companion table
+// regardless of module count.  The `provenance_records` history table is NOT
+// created here — it is a shared `MigrationsIR` companion table
 // (`provenanceTableShape`), like the outbox and the audit log.
 // ---------------------------------------------------------------------------
 

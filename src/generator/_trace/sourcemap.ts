@@ -4,12 +4,12 @@
 // [startLine, endLine] region against the `OriginRef` chain the IR node
 // carried in from lowering (see src/ir/types/origin.ts).
 //
-// Construct-granular by default (Milestone 1 — see
+// Construct-granular by default (see
 // docs/old/plans/source-map-debug-kickoff.md §2): `file()` records one region
 // per emitted file, not per statement/line.  Pooled/merged files
 // (domain/ids.ts, db/schema.ts, ...) are simply never `.file(...)`-recorded
 // — they stay unmapped rather than getting a misleading single-origin
-// region.  `fragment()` (Milestone 3, source-map-and-debugging.md §5.2)
+// region.  `fragment` (source-map-and-debugging.md §5.2)
 // layers statement-granular sub-regions onto one already-`file()`-recorded
 // fragment (e.g. one operation body) by anchoring its exact text in the
 // file's final content — line-anchored, not offset-tracked, so it needs no
@@ -36,9 +36,9 @@ export interface SourceMapRegion {
    *  treatment `target`'s line numbers already get.  Only meaningful when
    *  `target[0] === target[1]` (a single-line region) — present only for
    *  expression-level marks produced by a backend's marks-carrying
-   *  statement renderer (span-tracking-emission.md, M15 phase 7 slice 2,
-   *  TS/Hono only this slice).  Absent everywhere else, which keeps the
-   *  pre-existing col-0 v3 fallback untouched. */
+   * statement renderer (span-tracking-emission.md,; TS/Hono
+   *  only).  Absent everywhere else, leaving the col-0 v3 fallback in
+   *  place. */
   targetCol?: [number, number];
 }
 
@@ -60,7 +60,7 @@ export interface SourceMapSubRegion {
 }
 
 /** One expression-level mark inside a SINGLE already-rendered statement
- *  chunk (span-tracking-emission.md, M15 phase 7 slice 2) — `start`/`end`
+ *  chunk (span-tracking-emission.md) — `start`/`end`
  *  are 0-based, end-exclusive character offsets into that OWNING chunk
  *  string (not the whole fragment), paired with the origin the marked
  *  sub-expression resolved to.  Produced by a backend's marks-carrying
@@ -85,14 +85,13 @@ export interface ChunkMark {
  *
  *  `exprMarks`, when passed, layers FINER column-level sub-regions onto the
  *  same cursor walk: `exprMarks[i]` is the `ChunkMark[]` for `chunks[i]`
- *  (span-tracking-emission.md, M15 phase 7 slice 2 — TS/Hono only this
- *  slice, so every other caller simply omits the parameter and gets
- *  byte-identical behavior).  Each mark's chunk-relative offset is turned
- *  into a (line, col) via the shared `offsetToLineCol`; a mark whose start
- *  and end fall on DIFFERENT lines is skipped (this slice only marks
- *  single-line `let`/`assign`/`return` RHS expressions, so that shouldn't
- *  occur in practice, but a multi-line mark has no single `col` to report
- *  and an honest skip beats a wrong one). */
+ * (span-tracking-emission.md,; TS/Hono only — every other caller
+ *  omits the parameter).  Each mark's chunk-relative offset is turned into a
+ *  (line, col) via the shared `offsetToLineCol`; a mark whose start and end
+ *  fall on DIFFERENT lines is skipped.  Only single-line
+ *  `let`/`assign`/`return` RHS expressions are marked, so that should not
+ *  occur — but a multi-line mark has no single `col` to report, and an honest
+ *  skip beats a wrong one. */
 export function statementSubRegions(
   stmts: readonly { origin?: OriginRef }[],
   chunks: readonly string[],

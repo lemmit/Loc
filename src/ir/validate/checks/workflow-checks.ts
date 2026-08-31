@@ -1079,7 +1079,7 @@ function validateWorkflowBody(
   }
 }
 
-// Validate a resource-op call expression in a workflow body (Phase 4):
+// Validate a resource-op call expression in a workflow body:
 //   - the verb must belong to the resource's kind vocabulary
 //     (lowering leaves `capability === ""` on an unknown verb);
 //   - a resource-op may not run inside a transactional span — an S3

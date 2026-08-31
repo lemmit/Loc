@@ -75,7 +75,7 @@ export function buildPyEventSourcedRepositoryFile(
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
-    // Command load (authorization Phase 3 P3.1): an event stream has no
+    // Command load (authorization): an event stream has no
     // queryable state columns, so the write-scope guard is checked IN-APP over
     // the FOLDED aggregate.
     ...writeGuardInApp(agg),

@@ -131,7 +131,7 @@ function gateUsings(op: AggregateIR["operations"][number], ns: string): string[]
 
 /** The repo method a MUTATION command handler loads through: `GetByIdForWriteAsync`
  *  when the aggregate's write scope is narrower than its read scope
- *  (authorization Phase 3 P3.1), else the ordinary `GetByIdAsync` (byte-
+ *  (authorization), else the ordinary `GetByIdAsync` (byte-
  *  identical).  Query (read) handlers always use `GetByIdAsync`. */
 function writeCmdLoad(agg: AggregateIR): string {
   return agg.writeScopeFilter ? "GetByIdForWriteAsync" : "GetByIdAsync";
@@ -235,11 +235,11 @@ export function emitCreateCommandAndHandler(
         // The gate runs BEFORE the factory: a denied create constructs nothing
         // and stages no audit row.
         createGate.body +
-        // NAMED arguments, not positional: the factory now trails its
-        // defaultable parameters (C# CS1737 requires optional params last), so
-        // its signature order no longer matches the declared field order this
-        // list is in.  Naming them decouples the two — and a create factory is
-        // exactly the call site where positional args were least readable.
+        // NAMED arguments, not positional: the factory trails its defaultable
+        // parameters (C# CS1737 requires optional params last), so its
+        // signature order does not match the declared field order this list is
+        // in.  Naming them decouples the two — and a create factory is exactly
+        // the call site where positional args read worst.
         `        var aggregate = ${agg.name}.Create(${requiredFields
           .map((f) => `${escapeCsharpIdent(f.name)}: command.${upperFirst(f.name)}`)
           .join(", ")});\n` +
@@ -441,8 +441,8 @@ export function emitOperationCommandAndHandler(
     // its `User` into the call.  Any non-auth-aware op stays
     // untouched — no DI changes, no handler-ctor surface widening.
     const usesUser = operationBodyUsesCurrentUser(op);
-    // The gate is evaluated by the handler now, so it needs the accessor
-    // injected even when the remaining body no longer takes a principal.
+    // The handler evaluates the gate, so it needs the accessor injected even
+    // when the remaining body takes no principal.
     const gateUsesUser = operationGatesUseCurrentUser(op);
     const baseCallArgs = op.params.map((p) => `command.${upperFirst(p.name)}`);
     const callArgs = (usesUser ? [...baseCallArgs, "_currentUser.User"] : baseCallArgs).join(", ");
@@ -452,7 +452,7 @@ export function emitOperationCommandAndHandler(
       ...(usesUser || gateUsesUser ? [`${ns}.Auth`] : []),
       ...gateUsings(op, ns),
     ];
-    // Extern (b) Phase 2: an `extern` op is now an ordinary aggregate method
+    // Extern (b): an `extern` op is now an ordinary aggregate method
     // (its body runs preconditions, calls the `<Op>Core` partial hook, and
     // re-asserts invariants — see `emit/entity.ts`), so it flows through the
     // SAME command-handler path below as any other op (`aggregate.<Op>(...)`).

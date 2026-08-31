@@ -336,13 +336,11 @@ export function renderJavaController(
         const absent =
           spec.absent.kind === "none"
             ? // RS-22/RS-27 — THROW, so the `@RestControllerAdvice` renders the
-              // five-member envelope.  This used to be
-              // `ResponseEntity.notFound().build()`: Spring's own bare 404 with
-              // an EMPTY BODY, which never reaches the advice — the identical
-              // defect RS-27 fixed on the by-id read, at the arm that reads
-              // `null` and answers locally.  It also made this controller emit
-              // two different wires for shapes `payloads.md` declares
-              // wire-identical, since the `error`-variant branch below builds a
+              // five-member envelope.  `ResponseEntity.notFound().build()` is
+              // Spring's own bare 404 with an EMPTY BODY and never reaches the
+              // advice; it would also make this controller emit two different
+              // wires for shapes `payloads.md` declares wire-identical, since
+              // the `error`-variant branch below builds a
               // real ProblemDetail.
               [`            throw ${JAVA_FIND_ABSENCE_THROW};`]
             : (() => {
@@ -445,12 +443,11 @@ export function renderJavaController(
     ...createRoute,
     `    @GetMapping("${relativeOpPath(getByIdEntry)}")`,
     `    public ResponseEntity<${agg.name}Response> get${agg.name}ById(@PathVariable ${idJava} id) {`,
-    // RS-27 — the service THROWS AggregateNotFoundException on a miss now
-    // (never returns null), so the `@RestControllerAdvice` renders the RFC-9457
-    // envelope with the `"<Agg> <id> not found"` detail.  This route used to
-    // answer `ResponseEntity.notFound().build()` — Spring's own bare 404 with an
-    // EMPTY BODY — which is why the java behavioural leg read `golden {…} ≠
-    // java ""` on the first test that ever drove a 404-by-id.
+    // RS-27 — the service THROWS AggregateNotFoundException on a miss (it
+    // never returns null), so the `@RestControllerAdvice` renders the RFC-9457
+    // envelope with the `"<Agg> <id> not found"` detail.  Answering
+    // `ResponseEntity.notFound().build()` here would send Spring's own bare 404
+    // with an EMPTY BODY instead.
     `        return ResponseEntity.ok(service.get${agg.name}ById(new ${idClass}(id)));`,
     `    }`,
     ``,
@@ -595,8 +592,7 @@ export function renderApiExceptionAdvice(
   const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", structuralErrorStatuses);
   // M-T5.20 — the domain floor and the `requires` denial resolve through the
   // same `httpStatus` map as the structural conflicts above, instead of the
-  // hardcoded 422 / 403 literals they used to be. Defaults collapse to those
-  // same literals, so output is byte-identical with no override.
+  // same `httpStatus` map; the defaults are those same 422 / 403 literals.
   const domainStatus = resolveErrorStatus("DomainError", structuralErrorStatuses);
   const forbiddenStatus = resolveErrorStatus("Forbidden", structuralErrorStatuses);
   // The domain not-found rung — the ladder's last literal.  The FRAMEWORK 404

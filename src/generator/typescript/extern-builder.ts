@@ -7,12 +7,12 @@ import { renderTsType } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // Extern operation seam — the TS/Hono domain extension point
-// (extern-domain-extension-point.md §3a, decision (b), Phase 2).
+// (extern-domain-extension-point.md §3a, decision (b)).
 //
 // An `operation X(...) extern` declares case-1 business logic the DSL can't
 // express: preconditions in the body, the mutation hand-written by the user.
-// Phase 2 re-homes it from the old injected per-op handler REGISTRY to a domain
-// extension point that is a MEMBER of the aggregate — a `protected abstract
+// The extension point is a MEMBER of the aggregate, not an injected per-op
+// handler registry — a `protected abstract
 // <op>Extern(...)` hook (emitted on the abstract `<Agg>Base` by
 // `emit/aggregate.ts`) that the operation method calls between preconditions
 // and invariants.

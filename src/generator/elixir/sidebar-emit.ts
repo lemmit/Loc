@@ -29,7 +29,7 @@ export interface RenderSidebarComponentArgs {
   ui: UiIR;
   appName: string;
   appModule: string;
-  /** Served decl names for `classifyPage` (slice 3c — replaces stamped origin). */
+  /** Served decl names for `classifyPage` (replaces stamped origin). */
   nameCtx: PageNameCtx;
   /** True when this deployable runs `auth: required` — so `LiveAuth.on_mount`
    *  assigns `@current_user` into the LiveView scope and the app layout passes

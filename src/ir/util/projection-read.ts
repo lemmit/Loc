@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Which projections a FRONTEND can read (M-T1.3 Phase 1).
+// Which projections a FRONTEND can read.
 //
 // One predicate, imported by all three parties that must agree about it:
 //
@@ -38,7 +38,7 @@ import {
  *      for the whole-table aggregation (the dashboard KPI `QueryView`'s
  *      single-record mode binds), or the LIST shape for a `group by`
  *      projection (one row per group — the `Chart`/`Table`-shaped binding,
- *      M-T1.3 Phase 4; `projectionReadShape` tells the two apart).  A keyed
+ *      `projectionReadShape` tells the two apart).  A keyed
  *      projection returns an array parameterised by key and stays out.
  *
  *  All narrowings are honest gaps, not oversights — each is reported by
@@ -57,17 +57,16 @@ export function isFrontendReadableProjection(p: ProjectionIR): boolean {
  *  aggregation, which collapses the source table to one row by construction.
  *  Both of the others return an array —
  *
- *    - a `group by` projection: one row per distinct group (M-T1.3 Phase 4);
+ *    - a `group by` projection: one row per distinct group;
  *    - a SHORTHAND projection (`projection P { from A as a where … }`, no
  *      declared fields, no `select`): the filtered SOURCE ROWS themselves.
  *
- *  The shorthand arm is the one this predicate originally got wrong, and it was
- *  wrong invisibly: `isSingletonProjection` answers "unkeyed", which a shorthand
- *  read is, and the shape question was answered from `isGroupedProjection`
- *  alone.  So every frontend emitted a `z.object` client for a route that
- *  returns an array — a `.parse` that throws on the first load, from a model
- *  with no diagnostic at all.  Ask "is it the whole-table aggregation", not "is
- *  it grouped". */
+ *  The shorthand arm is the easy one to get wrong, invisibly:
+ *  `isSingletonProjection` answers "unkeyed", which a shorthand read is, so
+ *  deciding the shape from `isGroupedProjection` alone emits a `z.object`
+ *  client for a route that returns an array — a `.parse` that throws on the
+ *  first load, from a model with no diagnostic at all.  Ask "is it the
+ *  whole-table aggregation", not "is it grouped". */
 export function projectionReadShape(p: ProjectionIR): "one" | "many" {
   return isGroupedProjection(p) || isShorthandProjection(p) ? "many" : "one";
 }

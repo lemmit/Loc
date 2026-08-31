@@ -32,10 +32,10 @@
 // Hono's emitted bytes against this list, and each backend has a
 // `test/generator/<backend>/api-surface-render.test.ts` sibling.
 //
-// SCOPE (honest partial).  This slice lifts the AGGREGATE surface: create,
+// SCOPE (honest partial).  Only the AGGREGATE surface is lifted: create,
 // getById, destroy, domain operations + their gate probes, and repository
 // finds.  Workflow, explicit-handler, projection and `prepare` routes are NOT
-// yet lifted — see `apiSurfaceCoverage` below, which names them so a consumer
+// — see `apiSurfaceCoverage` below, which names them so a consumer
 // can tell "no such operation" from "not yet derived" instead of silently
 // treating the set as complete.
 //

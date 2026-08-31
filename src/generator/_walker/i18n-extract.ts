@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // i18n message extraction — the user-visible-string catalog pass (M-T1.11,
-// docs/old/proposals/i18n.md Phase 1).
+// docs/old/proposals/i18n.md).
 //
 // Walks a `UiIR`'s pages/components/menu and collects every user-visible
 // string literal into `<key, message>` catalog entries.  A downstream renderer

@@ -13,7 +13,7 @@
 // sub-expressions, exactly like the backend `ExprTarget` leaves in
 // src/generator/_expr/target.ts.  This is the frontend's F# leaf table; the
 // JS leaf table (React/Vue/Svelte/Angular) stays inline in walker-core until
-// the seam extraction (slice 4) converts it.
+// the seam extraction converts it.
 
 import type { BinOp, ExprIR, LiteralKind, PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
@@ -358,10 +358,9 @@ export function storeMsgCase(store: string, action: string): string {
  *  `List.length`) is handled here; every SCALAR op routes through the shared
  *  `FS_INTRINSIC_RENDERERS` table above — the same table the VIEW path reaches
  *  via `felizTarget.renderIntrinsic`, so the two paths cannot diverge on what
- *  `s.replace(a, b)` means (this file's whole premise, and previously true of
- *  the leaves but NOT of the intrinsics: the view path had no table at all and
- *  emitted the Loom spelling verbatim, while this path knew seven ops and threw
- *  on the rest).
+ *  `s.replace(a, b)` means — this file's whole premise.  A view path with no
+ *  intrinsic table of its own emits the Loom spelling verbatim while this path
+ *  renders the F#.
  *
  *  An unrecognised method still fails fast rather than emitting a
  *  `.member(args)` call that would not compile under Fable. */

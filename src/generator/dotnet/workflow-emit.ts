@@ -92,7 +92,7 @@ import {
 const INDENT = "        ";
 
 /** resourceName → static C# helper class, for every resource whose
- *  sourceType has a .NET ResourceAdapter (Phase 4c).  Routes resource-op
+ *  sourceType has a .NET ResourceAdapter.  Routes resource-op
  *  call sites + drives the `Resources/*.cs` emission and NuGet deps.
  *
  *  Exported for the EXPLICIT-HANDLER leg (`explicit-handlers-emit.ts`): a
@@ -181,7 +181,7 @@ export function emitWorkflows(
     const handlerContent = renderHandler(wf, usage, ns, ctx, options?.sys, opFragments);
     out.set(handlerPath, handlerContent);
     sourcemap?.file(handlerPath, handlerContent, wf.origin, construct);
-    // Statement-granular sub-regions (source-map Milestone 11) — layered onto
+    // Statement-granular sub-regions (source-map) — layered onto
     // the whole-file region just recorded above, anchored by exact-text
     // search against this SAME final content.
     if (sourcemap && opFragments) {
@@ -292,7 +292,7 @@ export function emitDispatchHandlers(
    *  matches the schema + aggregate repository.  For a single-context system it
    *  returns `ctx.name`. */
   ownerOf: OwnerOf,
-  /** Source-map recorder (Milestone 12) — threaded ONLY from the system-mode
+  /** Source-map recorder — threaded ONLY from the system-mode
    *  `dotnet/index.ts` entry point; the legacy single-context path stays
    *  unmapped by design (undefined here), so its output is untouched.  Each
    *  dispatch-handler file is per-subscription and single-workflow-attributable,
@@ -415,7 +415,7 @@ function analyseStmts(
   saves: { name: string; aggName: string; repoName: string }[],
 ): WorkflowUsage {
   const repos = new Map<string, string>();
-  // Extern (b) Phase 2: an extern aggregate op is an ordinary method (no
+  // Extern (b): an extern aggregate op is an ordinary method (no
   // injected `I<Op><Agg>Handler` to collect / inject), so `externs` stays empty
   // — kept only to satisfy the WorkflowUsage shape the handler renderers read.
   const externs = new Map<string, { aggName: string; opName: string }>();
@@ -471,7 +471,7 @@ function renderEventReactorHandler(
   sys: SystemIR | undefined,
   construct: string,
   ownerOf: OwnerOf,
-  /** Source-map Milestone 12 — when passed, pushes ONE `OpFragment` covering
+  /** Source-map — when passed, pushes ONE `OpFragment` covering
    *  this handler's whole reactor-body chunk list (mirrors `renderHandler`'s
    *  `opFragments`, no re-indent here — the body renders flush, unlike the
    *  transactional command-handler tab-in). */
@@ -544,7 +544,7 @@ function renderEventReactorHandler(
   // own Application.Workflows namespace); a state-based saga reads its row POCO
   // (Persistence.Workflows).
   if (persisted) {
-    // Saga persistence via a domain-termed port (audit S7 Slice C), NOT the
+    // Saga persistence via a domain-termed port, NOT the
     // concrete AppDbContext.  An event-sourced saga loads/appends its
     // `<wf>_events` stream through `IWorkflowEventStore<<Wf>EventRecord>`; a
     // state-based saga loads/mutates/persists its row POCO through
@@ -677,7 +677,7 @@ function renderEventReactorHandler(
   // Chunked (one lines-array per top-level statement) rather than the
   // pre-flattened `renderWorkflowStmts` — byte-identical either way, but the
   // per-chunk list lets us surface per-statement sub-regions to the caller
-  // (source-map Milestone 12; mirrors `renderHandler`'s `stmtChunks`).
+  // (source-map; mirrors `renderHandler`'s `stmtChunks`).
   const stmtChunks = renderWorkflowStmtChunks(
     statements,
     csWorkflowStmtTarget(ctx, renderArg, true, auditsOps),
@@ -809,7 +809,7 @@ function renderCsEsBranch(
   auditsOps: boolean,
   construct: string,
   ownerOf: OwnerOf,
-  /** Source-map Milestone 12 — this branch's own `OpFragment`, pushed here so
+  /** Source-map — this branch's own `OpFragment`, pushed here so
    *  the merged handler (create + on) records TWO fragments, one per branch.
    *  The caller (`renderMergedEventSourcedHandler`) nests this branch's WHOLE
    *  returned `lines` one level (+4 spaces, uniform per-line map) inside its
@@ -895,7 +895,7 @@ function renderMergedEventSourcedHandler(
   sys: SystemIR | undefined,
   construct: string,
   ownerOf: OwnerOf,
-  /** Source-map Milestone 12 — forwarded to `renderCsEsBranch` for BOTH
+  /** Source-map — forwarded to `renderCsEsBranch` for BOTH
    *  branches, so a merged handler records two `OpFragment`s (create + on),
    *  each anchored at its own nested position in the final `if`/`else`. */
   opFragments?: OpFragment[],
@@ -949,7 +949,7 @@ function renderMergedEventSourcedHandler(
     for (const aggName of auditAggs) usings.add(`${ns}.Application.${plural(aggName)}.Responses`);
   }
   // Event-sourced saga stream via the domain `IWorkflowEventStore` port (audit
-  // S7 Slice C), NOT the concrete AppDbContext.  Both branches (create/on) load
+  // NOT the concrete AppDbContext.  Both branches (create/on) load
   // + append through it; the EF adapter delegates to the same scoped DbContext.
   fields.push(
     `    private readonly global::${ns}.Domain.Common.IWorkflowEventStore<${esEventRecordClass(wf, ownerOf)}> _eventStore;`,
@@ -1078,7 +1078,7 @@ interface WorkflowUsage {
   repos: Map<string, string>;
   /** True when at least one `emit` statement appears. */
   hasEmit: boolean;
-  /** Since extern (b) Phase 2 an extern aggregate op is an ordinary method
+  /** For an extern (b) aggregate, an extern aggregate op is an ordinary method
    *  (no injected `I<Op><Agg>Handler`), so this stays empty — kept only to hold
    *  the WorkflowUsage shape the handler renderers still destructure. */
   externs: Map<string, { aggName: string; opName: string }>;
@@ -1208,7 +1208,7 @@ function renderHandler(
   ns: string,
   ctx: EnrichedBoundedContextIR,
   sys: SystemIR | undefined,
-  /** Source-map Milestone 11 (workflow-body statement regions) — when passed,
+  /** Source-map (workflow-body statement regions) — when passed,
    *  pushes ONE `OpFragment` covering this handler's whole workflow-body
    *  chunk list.  Allocated by the caller ONLY when a recorder is present
    *  (`emitWorkflows`), so a no-`--sourcemap` run pays no per-statement
@@ -1228,9 +1228,9 @@ function renderHandler(
   // outside the SDK's implicit-usings set — collect them per file.
   const usings = new Set<string>();
   // The `IsolationLevel.X` enum literal passed to `IUnitOfWork.BeginTransactionAsync`
-  // (audit S7 Slice C) lives in System.Data.  The transaction itself now goes
-  // through the domain `IUnitOfWork` port, NOT `_db.Database.BeginTransactionAsync`,
-  // so the handler no longer needs the EntityFrameworkCore namespace.
+  // lives in System.Data.  The transaction itself goes through the domain
+  // `IUnitOfWork` port, NOT `_db.Database.BeginTransactionAsync`, so the
+  // handler needs no EntityFrameworkCore namespace.
   if (wf.transactional && effectiveIsolation) usings.add("System.Data");
   if (usesUser) usings.add(`${ns}.Auth`);
   // Field declarations for injected dependencies.
@@ -1250,7 +1250,7 @@ function renderHandler(
     ctorAssigns.push("_events = events");
   }
   if (wf.transactional) {
-    // Commit boundary via the domain `IUnitOfWork` port (audit S7 Slice C) —
+    // Commit boundary via the domain `IUnitOfWork` port —
     // NOT the concrete `AppDbContext`.  The EF adapter opens the transaction on
     // the SAME scoped DbContext the repositories share, so `repo.SaveAsync`
     // inside the transaction commits atomically (identical semantics).
@@ -1315,7 +1315,7 @@ function renderHandler(
     for (const aggName of auditAggs) usings.add(`${ns}.Application.${plural(aggName)}.Responses`);
   }
 
-  // Reading-tier domain-service calls (domain-services.md rev. 4, Slice 1): a
+  // Reading-tier domain-service calls (domain-services.md rev. 4): a
   // `reading` service is a DI'd `sealed class`, so the orchestrating workflow
   // INJECTS it (`_registration`) and calls through the instance —
   // `await _registration.IsEmailAvailableAsync(...)` — rather than the static
@@ -1347,7 +1347,7 @@ function renderHandler(
   // renderExprWithCmdParams rewrites those refs at render time, keyed by the
   // workflow's param-name set.
   const paramNames = new Set(wf.params.map((p) => p.name));
-  // Resource-op routing (Phase 4c): resourceName → static helper class,
+  // Resource-op routing: resourceName → static helper class,
   // built from the system's resources + storages.  Empty when the
   // deployable wires no consumable resources.
   const resourceClasses = buildResourceClasses(sys);
@@ -1370,8 +1370,7 @@ function renderHandler(
   // pre-flattened `renderWorkflowStmts` — byte-identical either way
   // (`renderWorkflowStmts` IS `chunks.flat()` by construction), but the
   // per-chunk list lets us surface per-statement sub-regions to the caller
-  // that owns the recorder + this file's final content (source-map
-  // Milestone 11).
+  // that owns the recorder + this file's final content (source-map).
   const stmtChunks = renderWorkflowStmtChunks(
     wf.statements,
     csWorkflowStmtTarget(ctx, renderArg, dereffedLoads, auditsOps),
@@ -1665,7 +1664,7 @@ export function csWorkflowStmtTarget(
       const op = ctx.aggregates
         .find((a) => a.name === st.aggName)
         ?.operations.find((o) => o.name === st.op);
-      // Extern (b) Phase 2: an `extern` op is an ordinary aggregate method (it
+      // Extern (b): an `extern` op is an ordinary aggregate method (it
       // runs preconditions, calls its `<Op>Core` partial hook, then re-asserts
       // invariants — see `emit/entity.ts`), so a workflow op-call to it is
       // `st.target.<Op>(...)` exactly like any other op — no injected handler,
@@ -1937,7 +1936,7 @@ export function renderExprWithCmdParams(
 }
 
 /** The distinct `reading`-tier domain SERVICES a workflow body calls
- *  (domain-services.md rev. 4, Slice 1) — the services the handler must inject.
+ *  (domain-services.md rev. 4) — the services the handler must inject.
  *  A service is `reading` when a called operation consumes at least one
  *  read-port; a PURE-only service is excluded (its calls stay the static shape,
  *  needing no injection).  De-duplicated by service name. */

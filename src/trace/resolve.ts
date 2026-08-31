@@ -186,10 +186,9 @@ export interface Resolution {
  *     some line-matching region carries a `targetCol` containing it
  *     (`targetCol[0] <= col < targetCol[1]`, half-open): pick the
  *     NARROWEST such region by `targetCol` width — the fine
- *     expression-level origin, the whole point of this slice. Ties keep
- *     the earlier region.
+ *     expression-level origin. Ties keep the earlier region.
  *   - ELSE (no column, or a column matching no `targetCol` region): fall
- *     back to today's line-narrowest walk — the NARROWEST region whose
+ *     back to the line-narrowest walk — the NARROWEST region whose
  *     target range contains the frame's line — but EXCLUDING every
  *     `targetCol`-bearing region from consideration. A fine expression
  *     region must never win a line-width contest by accident when the

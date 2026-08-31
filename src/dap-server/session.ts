@@ -2,7 +2,7 @@
 // src/dap-server/session.ts — the Loom DAP (Debug Adapter Protocol) session:
 // the REMAP LAYER over the two pure cores in `src/dap/`
 // (docs/old/proposals/source-map-and-debugging.md §6E, docs/old/plans/
-// dap-node-debug.md, Milestone 27 — the phase-8 protocol shell).
+// dap-node-debug.md — the phase-8 protocol shell).
 //
 // SCOPE (read before extending): this class wires `resolveSetBreakpoints`
 // (forward: `.ddd` breakpoint -> generated location to arm) and
@@ -12,8 +12,8 @@
 // proposal's north star (§6E) describes — spawning/proxying `js-debug` /
 // `coreclr` / JDWP and forwarding `launch`/`attach`/`continue`/`stepIn`/…
 // to it. That full proxy needs a live editor + a running target debugger to
-// verify and is out of scope for this slice; it stays the documented,
-// editor-verified frontier. `stackTraceRequest` below demonstrates exactly
+// verify, so it stays the documented, editor-verified frontier.
+// `stackTraceRequest` below demonstrates exactly
 // that boundary: in the eventual full adapter, the raw (generated-coordinate)
 // frames come from the delegated debugger's own `stackTrace` response; here
 // there is no delegate, so `fetchRawFrames` is the seam a real adapter would
@@ -60,8 +60,8 @@ export class LoomDebugSession extends DebugSession {
    *  `response.body` with every `supports*` flag defaulted to `false` (bar
    *  `supportsConfigurationDoneRequest`, which the base session always
    *  honours) and calls `sendResponse` — exactly the "don't advertise a
-   *  capability this remap layer can't back" posture this slice wants, so it
-   *  is reused verbatim rather than re-declared. This session adds nothing
+   *  capability this remap layer can't back" posture, so it is reused
+   *  verbatim rather than re-declared. This session adds nothing
    *  to that set (no conditional breakpoints, no stepping, no evaluate —
    *  all of that is target-debugger-delegation work, out of scope here);
    *  the only addition is the `InitializedEvent`, which tells the client the

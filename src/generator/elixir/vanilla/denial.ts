@@ -2,18 +2,18 @@
 // failed `requires` / `precondition` short-circuits to, and the controller
 // clause that turns it into an RFC 7807 response.
 //
-// Why it exists.  A guard denial used to be a bare atom (`{:error, :forbidden}`
-// / `{:error, :precondition_failed}`), which carried the STATUS but not the
-// MESSAGE — so every controller answered with a hardcoded generic string
-// ("A precondition failed"), while node/dotnet/java/python all name the failed
-// predicate ("Precondition failed: status != \"cancelled\"").  RFC 7807 wants
-// `detail` specific to the OCCURRENCE, and the M-T9.11 wire-golden gate can't
-// carry an error-envelope assertion while one backend's `detail` is generic
-// (the golden is byte-exact — a waiver would only park the divergence).
+// Why it exists.  A bare atom (`{:error, :forbidden}` /
+// `{:error, :precondition_failed}`) carries the STATUS but not the MESSAGE, so
+// every controller answers with a hardcoded generic string ("A precondition
+// failed") where node/dotnet/java/python name the failed predicate
+// ("Precondition failed: status != \"cancelled\"").  RFC 7807 wants `detail`
+// specific to the OCCURRENCE, and the wire-golden gate is byte-exact — it
+// cannot carry an error-envelope assertion while one backend's `detail` is
+// generic.
 //
-// So a denial is now a 2-TUPLE — `{:precondition_failed, "<message>"}` — and
-// the reason term flows through `{:error, reason}` catch-alls exactly as the
-// bare atom did.  The message is built by the SAME rule the other four
+// So a denial is a 2-TUPLE — `{:precondition_failed, "<message>"}` — and the
+// reason term flows through `{:error, reason}` catch-alls exactly as a bare
+// atom would.  The message is built by the SAME rule the other four
 // backends use (the `raise(<App>.GuardError, …)` path below here, and the
 // `DomainError`/`DomainException` throws there): an explicit `message:` if the
 // statement declares one, else the derived `"<Prefix>: <source>"`.

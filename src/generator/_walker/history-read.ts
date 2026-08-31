@@ -5,37 +5,30 @@
 // The find behind it (`RepositoryIR.historyFind`) deliberately sits BESIDE
 // `finds` (docs/audit.md), so every read layer that discovers a page's queries
 // by walking `finds` — or by matching only the `all` / `byId` standard ops —
-// does not see it.  Every shipped frontend now serves it; the histories below
-// record what each read layer got wrong before it joined, because a NEW
-// frontend starts in exactly that position.
+// does not see it.  A read layer that discovers reads that way binds the wrong
+// thing — the unfiltered list, or a handle nothing declares — so each frontend
+// has to collect this read explicitly.  How each one does:
 //
-// **Flutter used to skip it** — `collectFlutterReads` skipped
-// non-`all`/`byId` ops while the walker still referenced `<agg>HistoryProvider`,
-// an undefined name.  It now collects the read (`flutter/reads-emit.ts` — a
+// **Flutter** — `flutter/reads-emit.ts` collects it as a
 // `FutureProvider.family<List<AuditEntry>, String>` keyed by the route id over
-// `GET /<coll>/$id/history`, decoding the Track A `AuditEntry` wire model) and
-// renders the trail natively (`flutter/flutter-target.ts` `renderTimeline`).
+// `GET /<coll>/$id/history`, decoding the Track A `AuditEntry` wire model;
+// `flutter/flutter-target.ts` `renderTimeline` renders the trail.
 //
-// **Feliz used to be in that position too** — its `collectPageReads` matched
-// `all` / `byId` only and `buildHookUse` mapped every OTHER operation onto the
-// `All<Plural>` Model field, so a history read would have silently bound the
-// unfiltered list.  It now collects the read (`feliz/wire.ts`
-// `felizHistoryRead`: page-entry keyed off the route id like a byId, fired by
-// `pageCmd`, but list-shaped — `Remote<AuditEntry list>` matched by
-// `View.remoteList`), `buildHookUse` maps it to that `<Agg>History` field, and
-// `felizTarget.renderTimeline` renders the ordered list natively.
+// **Feliz** — `feliz/wire.ts` `felizHistoryRead` collects it as a page-entry
+// keyed off the route id like a byId, fired by `pageCmd`, but list-shaped
+// (`Remote<AuditEntry list>`, matched by `View.remoteList`); `buildHookUse`
+// maps it to the `<Agg>History` Model field, and `felizTarget.renderTimeline`
+// renders the ordered list.
 //
-// **Phoenix/HEEx used to be another** — it mapped the read onto the
-// aggregate's `list_<aggs>` context function, which is the LIST, not the trail,
-// so the whole view was skipped.  It now serves the trail natively: the LiveView
-// hosts its contexts in the SAME OTP app, so the read is a page-private
-// `load_<agg>_history/2` calling `<App>.Audit.History.for_target/3` in-process
-// (the same three guards the `history` controller action applies) — see
-// `elixir/liveview-emit.ts`.  No api client, no fetch.
+// **Phoenix/HEEx** — the LiveView hosts its contexts in the SAME OTP app, so
+// the read is a page-private `load_<agg>_history/2` calling
+// `<App>.Audit.History.for_target/3` in-process (the same three guards the
+// `history` controller action applies) — see `elixir/liveview-emit.ts`.  No api
+// client, no fetch.
 //
-// None of those was a rendering gap the `Timeline` primitive's own comment
-// covers: the damage was in the READ the surrounding `QueryView` registers, one
-// level up.  A frontend OUTSIDE the capable set therefore has its whole view
+// None of this is the rendering gap the `Timeline` primitive's own comment
+// covers: the exposure is in the READ the surrounding `QueryView` registers,
+// one level up.  A frontend OUTSIDE the capable set has its whole view
 // skipped, with a visible notice in its place — the same "honest degradation"
 // contract every unported-frontend primitive follows, rather than emitting a
 // dangling handle that only fails at `dotnet fable` / `flutter analyze` /

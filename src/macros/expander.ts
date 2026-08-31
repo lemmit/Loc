@@ -412,7 +412,7 @@ function expandOneCall(
   if (!macro) {
     // No macro by this name — try a typed capability (typed-capabilities.md).
     // Macro wins on a name collision (a stdlib macro shadows a same-named
-    // capability) until the stdlib migrates in Phase 3; that keeps this
+    // capability) until the stdlib migrates; that keeps this
     // purely additive.
     const cap = inv.Capability.get(name);
     if (cap) {
@@ -797,7 +797,7 @@ function memberListKey(target: object): "members" | "routes" {
  * of the same name only within the *same* container.  Two same-named `area`
  * blocks merge — their children combine recursively — so role-named pages
  * (`page List` repeated across per-aggregate `area Orders` / `area Products`
- * blocks) no longer collapse onto the first area's copy.  Wires the `$container`
+ * blocks) do NOT collapse onto the first area's copy.  Wires the `$container`
  * triple on every appended node. */
 function spliceIntoTarget(target: object, members: unknown[]): void {
   const key = memberListKey(target);

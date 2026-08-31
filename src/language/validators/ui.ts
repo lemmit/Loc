@@ -511,7 +511,7 @@ export function checkPage(p: Page, ui: Ui, accept: ValidationAcceptor): void {
     }
   }
 
-  // LayoutProp — Phase 8 admits two preset values (`default` /
+  // LayoutProp admits two preset values (`default` /
   // `none`) plus the name of any `layout <Name> { … }` SystemMember
   // declared in the same system.  Resolution is system-scope: walk
   // up the AST to the enclosing System and look for a matching
@@ -629,7 +629,7 @@ export function checkApiBodyRefs(p: Page, ui: Ui, accept: ValidationAcceptor): v
   }
 }
 
-/** Phase 8: validate a named `layout <Name> { … }` SystemMember. */
+/** Validate a named `layout <Name> { … }` SystemMember. */
 export function checkLayout(layout: Layout, accept: ValidationAcceptor): void {
   if (layout.name === "default" || layout.name === "none") {
     accept(

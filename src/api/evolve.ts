@@ -263,7 +263,7 @@ function diffSystems(
  * playground's Migrations dock tab, at single-source granularity.
  *
  * `baseline` omitted/empty ⇒ every system reads "Initial" (`hasBaseline: false`,
- * wire diff skipped).  A baseline that no longer parses/lowers is treated as
+ * wire diff skipped).  A baseline that fails to parse/lower is treated as
  * absent rather than failing the whole diff.  A broken `current` source returns
  * `ok: false` with its diagnostics — use `loom_validate` to repair it first.
  */

@@ -23,7 +23,7 @@ import { workflowStateClass } from "./workflow-state.js";
 
 // ---------------------------------------------------------------------------
 // Read-only workflow-instance endpoints (workflow-instance-visibility.md),
-// Java saga slice 3.  For every observable workflow (a correlation-state row +
+// Java saga.  For every observable workflow (a correlation-state row +
 // enriched `instanceWireShape`) emit an instance Response record and a
 // controller exposing `GET /workflows/<snake>/instances` (list) +
 // `/instances/{id}` (one by correlation id, 404 if absent) over the persisted
@@ -33,7 +33,7 @@ import { workflowStateClass } from "./workflow-state.js";
 // of the command route, so an event-triggered-only saga is still observed.
 //
 // The row is read through the saga-state Spring Data `<Wf>StateRepository`
-// (slice 1): `findAll()` for the list, `findById(<Corr>Id)` for one.  Each row
+// `findAll()` for the list, `findById(<Corr>Id)` for one.  Each row
 // projects through `instanceWireShape` (the same camelCase wire key the .NET
 // `<Wf>InstanceResponse` uses), id → `.value()`, datetime/money ISO-/plain-
 // coded exactly like the aggregate `<Agg>Response`.

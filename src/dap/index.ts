@@ -10,8 +10,8 @@
 // coordinates, back to `.ddd` source). Whose discipline this mirrors
 // exactly: no `fs`, no Node-only API, safe to import from browser-bundled
 // code. The eventual DAP protocol shell (a `packages/ddd-dap` workspace,
-// `@vscode/debugadapter`) is glue built on top of these functions later;
-// none of that lands in this slice.
+// `@vscode/debugadapter`) is glue built on top of these functions; none of it
+// lives here.
 // ---------------------------------------------------------------------------
 
 export type { BreakpointTarget } from "./breakpoints.js";

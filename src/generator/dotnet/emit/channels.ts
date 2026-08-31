@@ -103,7 +103,7 @@ export function renderDotnetChannels(
    *  (Outbox where durable channels exist, InProcess where any reactor
    *  lives, else the Noop). */
   innerDispatcherType = "NoopDomainEventDispatcher",
-  /** M-T4.4 slice 7b knobs.  `hasOutbox`: the outbox tier exists on THIS
+  /** knobs.  `hasOutbox`: the outbox tier exists on THIS
    *  deployable (the `OutboxDelivery` marker class is emitted), so the
    *  consumer stamps each envelope id for the saga handlers' idempotent
    *  no-op.  `durableBroker`: hosted durable events ride a broker-bound

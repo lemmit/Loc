@@ -76,7 +76,7 @@ export interface IndexShape {
    *  The SQL renderer (`sql-pg.ts`) appends `WHERE <predicate>`; the Ecto
    *  emitter passes it as the `where:` index option. */
   predicate?: string;
-  /** Per-column Postgres operator classes (multi-tenancy Phase 2 P2.5).  Keyed
+  /** Per-column Postgres operator classes (tenancy.md).  Keyed
    *  by column name → opclass, e.g. `{ data_key: "text_pattern_ops" }` so a
    *  `LIKE 'prefix.%'` materialized-path prefix scan uses the index under ANY
    *  locale/collation (the default opclass only indexes prefix `LIKE` under the
@@ -176,7 +176,7 @@ export interface SchemaSnapshot {
    *
    *  Recording the block in the snapshot fixes both: a module keeps its block
    *  for life, and a NEW module is allocated a block above every existing one.
-   *  Absent on snapshots written before this field existed — the builder then
+   *  Absent on snapshots that predate the field — the builder then
    *  falls back to the legacy position-derived index, so existing projects
    *  keep the block they were generated with.  Optional ⇒ `schemaVersion`
    *  stays 1. */

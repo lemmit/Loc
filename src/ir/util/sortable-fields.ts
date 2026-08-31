@@ -1,4 +1,4 @@
-// Server-side sort whitelist (M-T2.6 / M-T1.1 slice 9).
+// Server-side sort whitelist.
 //
 // A paged list endpoint accepts `?sort=<field>&dir=asc|desc` and applies a
 // server-side ORDER BY.  The `<field>` must be validated against a fixed

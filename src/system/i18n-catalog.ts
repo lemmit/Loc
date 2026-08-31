@@ -7,7 +7,7 @@ import type { EnrichedSystemIR, UiIR } from "../ir/types/loom-ir.js";
 import { packFormatForBuiltin } from "../util/builtin-formats.js";
 
 // ---------------------------------------------------------------------------
-// `<system>/.loom/messages.en.json` artifact (M-T1.11, i18n.md Phase 1).
+// `<system>/.loom/messages.en.json` artifact (M-T1.11, i18n.md).
 //
 // The source-language (English) message catalog: every user-visible string
 // extracted from the system's UIs, keyed by its stable content-hash key

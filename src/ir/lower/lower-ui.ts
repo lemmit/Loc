@@ -392,7 +392,7 @@ function lowerPage(p: Page, user?: UserIR, stores?: Env["stores"]): PageIR {
         })),
       };
     } else if (prop.$type === "LayoutProp") {
-      // Phase 8: bare `ID` value resolves to either the two reserved
+      // A bare `ID` value resolves to either the two reserved
       // presets (`default` / `none`) or the name of a named `layout`
       // SystemMember declared in the same system.  Validator gates
       // the resolution — by lowering time, anything that's not a

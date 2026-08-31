@@ -1,6 +1,6 @@
 // -------------------------------------------------------------------------
 // Domain-service body checks — the no-infra contract, rev. 4 tiers.
-// (domain-services.md; the `reading` tier is Slice 1.)
+// (domain-services.md).
 //
 // A `domainService` operation falls into a tier DERIVED from its body
 // (`classifyDomainServiceTier` — never a stamped field):
@@ -11,7 +11,7 @@
 //                  Reads are ALLOWED; writes / commits stay forbidden.
 //   - `mutating` — mutates the aggregates the orchestrator PASSES IN, by
 //                  calling a MUTATING operation on an aggregate PARAMETER
-//                  (`src.withdraw(amount)`).  ALLOWED (Slice 2): a domain
+//                  (`src.withdraw(amount)`).  ALLOWED: a domain
 //                  service has no `this`, so the param-op call — a `method-call`
 //                  whose receiver is an aggregate param — is the legitimate
 //                  mutating mechanism; it never reaches the `no-mutation` gate

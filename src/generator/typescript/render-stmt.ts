@@ -78,8 +78,8 @@ export function renderTsStatementChunks(
 export { statementSubRegions } from "../_trace/sourcemap.js";
 
 /** The expression-bearing sub-nodes marked for EVERY StmtIR kind
- *  (span-tracking-emission.md, M17 phase 7 slice 4 — widened from the
- *  `let`/`assign`/`return`-only narrowing of M15 phase 7 slice 2, which
+ *  (span-tracking-emission.md — widened from the
+ *  `let`/`assign`/`return`-only narrowing of, which
  *  mirrored the .NET `#line` weave's own scope-6a narrowing).  Each
  *  returned expr is anchored INDEPENDENTLY in `statementExprMarks` below —
  *  a multi-expr kind (`call`'s args, `emit`'s field values) doesn't let one
@@ -115,8 +115,8 @@ function markableExprsOf(s: StmtIR): ExprIR[] {
 
 /** Expression-level marks for ONE already-rendered statement chunk — the
  *  marks-carrying sibling to `renderTsStatementChunks`
- *  (span-tracking-emission.md, M15 phase 7 slice 2; widened to every
- *  expression-bearing kind in M17 phase 7 slice 4).  Renders EACH of the
+ * (span-tracking-emission.md,; widened to every
+ *  expression-bearing kind in).  Renders EACH of the
  *  statement's markable expressions (`markableExprsOf` above) a SECOND time
  *  through `renderTsExprWithMarks` (the level-wise mark composer,
  *  `src/generator/_expr/target.ts`), then locates that rendered text inside

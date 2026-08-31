@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // dapper — minimal-real persistence emitters for the .NET backend
-// (D-REALIZATION-AXES Phase 5c).  An ALTERNATE persistence implementation
+// (D-REALIZATION-AXES).  An ALTERNATE persistence implementation
 // selected by `persistence: dapper`: the generated Domain layer (entities, ids,
 // value objects, enums, events, commands/handlers/controllers) is
 // persistence-agnostic and reused as-is; Dapper only replaces the Infrastructure
@@ -796,12 +796,12 @@ export function whereToSql(e: ExprIR, sqlCtx?: WhereSqlCtx): string {
 
 /** The `authz-filter` sentinels as raw Postgres SQL (M-T9.9 / M-T6.29).  A
  *  discriminated node, so a missing arm is a `tsc` error here rather than a
- *  fall-through to `whereToSql`'s `default:` — which is exactly how the `deny`
- *  carve-out used to reach the generic dispatcher and CRASH codegen on this
- *  adapter (the whole point of giving the sentinel its own `ExprIR.kind`). */
+ *  fall-through to `whereToSql`'s `default:`, where the `deny` carve-out would
+ *  reach the generic dispatcher and CRASH codegen on this adapter.  That is the
+ *  whole point of giving the sentinel its own `ExprIR.kind`. */
 function authzFilterToSql(e: Extract<ExprIR, { kind: "authz-filter" }>): string {
   switch (e.filter.kind) {
-    // DENY carve-out (authorization Phase 4 — deny-wins).  The always-false
+    // DENY carve-out (deny-wins).  The always-false
     // term, ANDed into every read SELECT (and into the write-scope existence
     // pre-guard).  `1 = 0` rather than `FALSE` to match the JPQL/Java rendering
     // and stay a valid standalone predicate in every SQL position.
@@ -1205,7 +1205,7 @@ export function renderDapperRepository(
   // (GetById / FindManyByIds).
   const princSuffix = princFields.length > 0 ? `, ${princFields.join(", ")}` : "";
 
-  // Command-load path (authorization Phase 3 P3.1 / M-T6.29): the write-scope
+  // Command-load path (authorization.md): the write-scope
   // existence pre-guard behind `GetByIdForWriteAsync`, the raw-SQL twin of the
   // EF `AnyAsync(x => x.Id == id && (<scope>))` in `emit/repository.ts`.  EF
   // gets the READ query-filter applied to that `Any` for free; Dapper has no
@@ -1298,7 +1298,7 @@ export function renderDapperRepository(
   // root through `HydrateAsync` (loads each child table + reconstructs the root
   // with its children in State); saves full-list-replace each child table;
   // deletes cascade the children first.  `hasContains` and reference-collection
-  // associations COMPOSE (wave 4): when both are present a read hydrates the
+  // associations COMPOSE: when both are present a read hydrates the
   // child tables first, then `LoadRefsAsync` post-sets the writable
   // ref-collection list on the reconstructed roots (the two hydrate passes run
   // in sequence — columnsOf excludes the assoc field, so HydrateAsync's
@@ -1417,15 +1417,7 @@ export function renderDapperRepository(
     // maps a C# enum PARAMETER to its integer ordinal, so the predicate reaches
     // Postgres as `WHERE status = 1` against a text column — `operator does not
     // exist: text = integer`, a 500 at the route.  The SAVE path in this same
-    // file already spells `.ToString()`; only the find binder had been written
-    // without it, so an enum-keyed find was broken on Dapper for as long as it
-    // has shipped, on every fixture that has one.
-    //
-    // Found 2026-08-05 by the caller-census drain: `core-domain`'s `byStatus`
-    // (a new caller) and `payments`' `byNetwork` (a caller from the preceding
-    // update-route drain) were the first enum-keyed finds ever driven at
-    // runtime, and both were ✗ on the dapper leg — the leg's only two case
-    // failures, one bug.
+    // file spells `.ToString()` for the same reason.
     const paramFields = f.params.map((p) => {
       const pt = p.type.kind === "optional" ? p.type.inner : p.type;
       // The anon-object member name stays the DECLARED name (Dapper binds it to
@@ -1825,9 +1817,9 @@ export function renderDapperRepository(
       // Transactional outbox (dispatch-delivery-semantics.md §1): the durable
       // events' __loom_outbox rows are INSERTed on `__tx` — the same
       // transaction the write set rides — so the commit below records them
-      // atomically with the state change.  Before this the outbox insert ran
-      // from DispatchAsync AFTER the commit, on its own pooled connection: a
-      // crash in between silently lost an owed event.  `__deferred` is what
+      // atomically with the state change.  Inserting from DispatchAsync AFTER
+      // the commit, on its own pooled connection, loses an owed event to a
+      // crash in between.  `__deferred` is what
       // still needs dispatching post-commit (everything, when no durable
       // channel is wired).
       "        var __pending = aggregate.PullEvents();",
@@ -2134,14 +2126,15 @@ export function renderDapperEventSourcedRepository(
   );
   // A `currentUser`-referencing find takes the trailing `User currentUser`
   // param the INTERFACE declares (emit/repository.ts) — the relational and
-  // document Dapper repos both thread it, and this one used to drop it: the
-  // class then failed to implement its own interface (CS0535) and the body's
-  // `currentUser` bound to nothing (CS0103).  `User` is a named type, so the
+  // document Dapper repos both thread it, and so must this one — dropping it
+  // fails to implement the class's own interface (CS0535) and leaves the
+  // body's `currentUser` bound to nothing (CS0103).  `User` is a named type, so
+  // the
   // file also needs `using <ns>.Auth`.
   const anyFindUsesUser = (repo?.finds ?? []).some((raw) =>
     findUsesCurrentUser(unionFindAsOptionalTwin(raw, agg.name)),
   );
-  // Write-scope narrowing (authorization Phase 3 P3.1): the EVENT-SOURCED twin
+  // Write-scope narrowing (authorization): the EVENT-SOURCED twin
   // of the document `writeScopeMethod` above — a stream has no queryable row to
   // pre-guard in SQL, so fold it through `GetByIdAsync` and apply the scope
   // predicate in-app.  Without it, a narrowed write ladder (or `policy { deny
@@ -2464,11 +2457,11 @@ export function renderDapperSchema(
       `CREATE UNIQUE INDEX IF NOT EXISTS ${t}_seq_key ON ${t} (seq);`,
     ].join("\n");
   });
-  // The append-only provenance history table (provenance.md).  This used to be
-  // a hand-written CREATE TABLE — the second of two .NET copies.  It now
-  // renders the SHARED MigrationsIR shape (`provenanceTableShape`), reaching
-  // this emitter as DATA off the snapshot rather than as an import (generator
-  // may not import system).  `IF NOT EXISTS` because DbSchema re-runs on every
+  // The append-only provenance history table (provenance.md), rendered from
+  // the SHARED MigrationsIR shape (`provenanceTableShape`) rather than a
+  // hand-written CREATE TABLE.  It reaches this emitter as DATA off the
+  // snapshot, not as an import (generator may not import system).
+  // `IF NOT EXISTS` because DbSchema re-runs on every
   // startup, where a migration would run once.  The co-located
   // `<field>_provenance` columns ride on each aggregate's CREATE TABLE via
   // `columnsOf` — that half is per-aggregate and stays here.

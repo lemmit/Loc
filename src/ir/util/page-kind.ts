@@ -5,11 +5,10 @@ import type { PageIR } from "../types/loom-ir.js";
  *  aggregate's list/new/detail, a workflow's form/instance pages, the
  *  singleton index pages, or a hand-written `custom` page.
  *
- *  This used to be *stamped* onto `PageIR.origin` at lower time (by
- *  `inferPageOrigin` + `resourceScaffoldOrigins`).  Slice 3c removed that
- *  denormalised field: a page's kind is now *derived on demand* from its
- *  role-scoped `name` + `area` (the single source of truth set by the scaffold
- *  macro / the `area` block) via `classifyPage`.  `contextName` is intentionally
+ *  The kind is *derived on demand* from the page's role-scoped `name` + `area`
+ *  (the single source of truth, set by the scaffold macro / the `area` block)
+ *  via `classifyPage` — it is deliberately NOT stamped onto a denormalised
+ *  `PageIR` field.  `contextName` is intentionally
  *  empty — every consumer that needs the bounded context resolves it by
  *  searching, so the name was never load-bearing. */
 export type PageKind =
@@ -26,7 +25,7 @@ export type PageKind =
 /** The declaration names a page is classified against — the aggregates and
  *  workflows served by the page's ui.  Every consumer already has these (the
  *  generators iterate them; lowering carries the expand context), so threading
- *  this tiny shape is cheaper than re-stamping `origin`. */
+ *  this tiny shape is cheaper than stamping the kind onto each page. */
 export interface PageNameCtx {
   // Arrays, not bare `Iterable` — `classifyPage` runs once per page over the
   // same ctx, so a single-use `Map.keys()` iterator would be exhausted after
@@ -35,9 +34,7 @@ export interface PageNameCtx {
   workflowNames: readonly string[];
 }
 
-/** Derive a page's {@link PageKind} from its role-scoped `name` + `area`.
- *  Reproduces exactly what `inferPageOrigin` + `classifyScaffoldPageByName`
- *  stamped before slice 3c, so generated output is byte-identical. */
+/** Derive a page's {@link PageKind} from its role-scoped `name` + `area`. */
 export function classifyPage(page: Pick<PageIR, "name" | "area">, ctx: PageNameCtx): PageKind {
   const name = page.name;
   const area = page.area ?? [];

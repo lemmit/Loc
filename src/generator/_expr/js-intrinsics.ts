@@ -7,11 +7,10 @@
 // which re-exports it as `TS_INTRINSIC_RENDERERS`) and the four JS-embedding
 // frontend walkers (React / Vue / Svelte / Angular, via `jsExprLeaves`).
 // Keeping one table is the point: an intrinsic must mean the same thing in an
-// aggregate `derived` and in a page body.  Before this was shared, the walker
-// had no intrinsic arm at all and emitted the Loom spelling verbatim — which
-// is a TS2339 for the ops JS spells differently (`toUpper` / `toLower` /
-// `contains`) and, worse, SILENTLY WRONG for the two JS happens to spell the
-// same but define differently:
+// aggregate `derived` and in a page body.  A walker without an intrinsic arm
+// emits the Loom spelling verbatim — a TS2339 for the ops JS spells
+// differently (`toUpper` / `toLower` / `contains`) and, worse, SILENTLY WRONG
+// for the two JS happens to spell the same but define differently:
 //
 //   Loom `s.replace(a, b)`      = replace ALL   → JS `.replaceAll(a, b)`
 //     (bare `.replace(a, b)` replaces only the FIRST occurrence)
@@ -94,18 +93,13 @@ export const JS_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[
  * deliberately narrow (a construction or a member access, never the bare
  * word), so a literal `"Decimal"` in user-authored page text does not trip it.
  *
- * This used to be a private `needsDecimalImport`, used to make
- * `renderJsIntrinsic` DECLINE the three arms that hit it — `money.min`,
- * `money.max`, `money.round` — because the frontend PAGE shells never imported
- * decimal.js (only `store-builder.ts` did).  Declining did not avoid broken
- * output, it chose a different one: the walker's verbatim
- * `<recv>.<member>(…)` fallthrough emitted `amt.min(x)` / `amt.max(x)`, for
- * which decimal.js has no INSTANCE method (TS2339), and `amt.round(2)`, whose
- * instance method takes no arguments (TS2554).  Since no `.ddd` in the repo
- * put a money intrinsic in a page body, no build gate ever said so.
- *
- * Now every page shell consumes this to bring the binding into scope itself,
- * so the arms render.
+ * Every page shell consumes this to bring the binding into scope itself, so
+ * the three money arms (`money.min` / `money.max` / `money.round`) render.
+ * Having `renderJsIntrinsic` DECLINE them instead does not avoid broken output,
+ * it picks a different one: the walker's verbatim `<recv>.<member>(…)`
+ * fallthrough emits `amt.min(x)` / `amt.max(x)`, for which decimal.js has no
+ * INSTANCE method (TS2339), and `amt.round(2)`, whose instance method takes no
+ * arguments (TS2554).
  */
 export function usesDecimalBinding(source: string): boolean {
   return /\bnew Decimal\(|\bDecimal\.[a-zA-Z]/.test(source);

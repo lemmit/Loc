@@ -1,4 +1,4 @@
-// "Go to generated code" — pure logic (M6 phase 3, forward direction only;
+// "Go to generated code" — pure logic (forward direction only;
 // reverse nav from generated code back to `.ddd` is a follow-up, out of
 // scope here). No LSP/fs coupling, so it's unit-testable without a running
 // language server and safe to import from the browser bundle.

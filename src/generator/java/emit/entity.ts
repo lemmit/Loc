@@ -205,7 +205,7 @@ export interface JavaEntityOptions {
    *  from the context's read-decls (`capability-filter.ts`). */
   promotedCaps?: ReadonlySet<string>;
   /** `${ctx.name}.${agg.name}` — construct-id prefix for this aggregate's
-   *  own operation bodies (source-map Milestone 3).  Only consulted when
+   *  own operation bodies (source-map).  Only consulted when
    *  `opFragments` is also passed; entity parts never carry operations, so
    *  neither is ever needed for a part render call. */
   construct?: string;
@@ -645,8 +645,8 @@ export function renderJavaEntity(
     // `chunks.join("\n")` by construction, so `body` below is byte-identical
     // either way, but the per-chunk list lets us surface per-statement
     // sub-regions to the caller that owns the recorder + this file's final
-    // content (source-map Milestone 3 — see `OpFragment`).  Extern check
-    // bodies and lifecycle appliers are out of scope for this slice.
+    // content (source-map — see `OpFragment`).  Extern check bodies and
+    // lifecycle appliers are out of scope.
     const chunks = renderJavaStatementChunks(
       opBody,
       retUnion ? { ...renderCtx, returnUnion: retUnion } : renderCtx,
@@ -996,8 +996,8 @@ export function renderJavaEntity(
       : null;
   // Promoted capabilities → bypassable Hibernate named filters.  `autoEnabled`
   // reproduces @SQLRestriction's always-on semantics with no interceptor;
-  // `applyToLoadByKey` keeps by-id / lazy loads filtered (else a promoted filter
-  // would leak previously-hidden rows on a primary-key load).  The condition is
+  // `applyToLoadByKey` keeps by-id / lazy loads filtered — without it a
+  // promoted filter leaks hidden rows on a primary-key load.  The condition is
   // a constant SQL fragment (parameterless — the validator gates principal /
   // non-relational shapes off java), so no `@ParamDef`/resolver is needed.
   const promoted =

@@ -3,7 +3,7 @@
 //
 // Four backends (Hono / .NET / React / Phoenix-LiveView) emit DTO fields
 // that translate between the platform-neutral `WireField.type` (a
-// `TypeIR`) and a per-platform string shape.  Before this helper landed,
+// `TypeIR`) and a per-platform string shape.  Without this helper,
 // each backend carried its own exhaustive `switch (t.kind)` over
 // `TypeIR.kind` — ~400 LOC of parallel code.  When PR #517 missed a
 // `Form` variant in one place, the fix had to land in four files.
@@ -87,7 +87,7 @@ export type WireRefKind =
    *  Deliberately its own `refKind` rather than a flag beside the value's:
    *  every wire consumer switches exhaustively on `refKind`, so a surface that
    *  has not learned the carrier fails to COMPILE instead of silently shipping
-   *  the bare `T` its callers no longer receive. */
+   *  a bare `T` where the carrier is expected. */
   | "provenanced";
 
 /** Single-leaf summary of a `TypeIR` for wire-shape emission.

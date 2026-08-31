@@ -92,8 +92,7 @@ function samePath(sourcePath: string, dddPath: string): boolean {
  *     expression regions that land on the SAME generated line at
  *     DIFFERENT columns both survive as separate armable sites — for a
  *     column-less region the key's column suffix is always the same
- *     empty string, so collapsing there is byte-identical to before this
- *     column carried any weight.
+ *     empty string, so such regions still collapse together.
  *
  * Returns every match — a `.ddd` line can host nested constructs (e.g. an
  * aggregate declaration and a narrower operation inside it both covering

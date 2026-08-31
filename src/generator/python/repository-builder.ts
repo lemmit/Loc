@@ -141,7 +141,7 @@ export function writeGuardMethod(
 
 /** The `get_by_id_for_write` command load for a BLOB shape (`shape: document`,
  *  the event-sourced stream) — neither exposes the aggregate's fields as
- *  queryable columns, so the P3.1 write-scope guard is checked IN-APP over the
+ *  queryable columns, so the write-scope guard is checked IN-APP over the
  *  LOADED aggregate, exactly where those shapes already evaluate their
  *  capability READ filters.  A row the caller may READ but not WRITE (or a
  *  missing one) raises the same not-found the relational pre-guard does — no
@@ -205,7 +205,7 @@ export function buildPyRepositoryFile(
   // Principal-referencing filters are gated by the IR validator on python
   // (W1b), so only non-principal predicates reach here.
   const filterPred = contextFilterPredicate(agg, ctx);
-  // The WRITE-scope guard predicate (authorization Phase 3 P3.1) — null unless
+  // The WRITE-scope guard predicate (authorization) — null unless
   // the aggregate's write scope is narrower than its read scope.
   const writePred = writeScopePredicate(agg, ctx);
   // Inline `Repo.findAll(<Criterion>) ignoring …` / `Repo.run(…) ignoring …`
@@ -293,7 +293,7 @@ export function buildPyRepositoryFile(
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
-    // The command-load path (authorization Phase 3 P3.1): a mutation route
+    // The command-load path (authorization): a mutation route
     // loads through this when the aggregate's WRITE scope is narrower than its
     // READ scope.  A write-scope existence pre-guard runs first — a row the
     // caller may READ but not WRITE (or a missing one) → 404, no existence
@@ -420,7 +420,7 @@ export function buildPyRepositoryFile(
     authUserImport(
       emittableFinds(repo).some(findUsesCurrentUser),
       // Gate the `require_current_user` accessor import on ACTUAL principal usage,
-      // not mere `writeScopeFilter` presence: a `deny write` carve-out (Phase 4)
+      // not mere `writeScopeFilter` presence: a `deny write` carve-out
       // sets an always-false write scope that references NO principal, so an
       // unconditional import would be unused → ruff F401 on the generated project.
       aggUsesPrincipalContextFilter(agg) || exprUsesCurrentUser(agg.writeScopeFilter),

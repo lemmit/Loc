@@ -63,7 +63,7 @@ export interface CsRenderContext {
   efQuery?: boolean;
   /** Resource-op call routing: resourceName → static C# helper class
    *  name (e.g. `salesFiles` → `S3Resources`).  Set on the workflow
-   *  render context (Phase 4c); a `resource-op` call renders to
+   *  render context; a `resource-op` call renders to
    *  `<class>.<Resource>_<Verb>(args)`.  When unset, a resource-op
    *  throws at emit (non-resource render contexts never see one). */
   resourceClasses?: Map<string, string>;
@@ -97,7 +97,7 @@ export interface CsRenderContext {
    *  are in scope. */
   paramExpr?: (name: string) => string | undefined;
   /** Read-port handle resolver for a `reading`-tier domain-service body
-   *  (domain-services.md rev. 4, Slice 1).  A `repo-read` Call
+   *  (domain-services.md rev. 4).  A `repo-read` Call
    *  (`Accounts.byHolder(holder)`, lowered to `callKind: "repo-read"`) renders
    *  against the repository the service has INJECTED — on .NET / EF a `reading`
    *  service is a DI'd `sealed class` whose ctor takes one `I<Aggregate>Repository`
@@ -108,7 +108,7 @@ export interface CsRenderContext {
    *  validator-caught bug). */
   repoReadHandle?: (repo: string) => string;
   /** Injected-service call resolver for a `reading`-tier domain-service call
-   *  (domain-services.md rev. 4, Slice 1).  On .NET a `reading` service is a
+   *  (domain-services.md rev. 4).  On .NET a `reading` service is a
    *  DI'd `sealed class`, so the orchestrating workflow injects it (`_registration`)
    *  and the call site is `await _registration.IsEmailAvailableAsync(holder, ct)` —
    *  NOT the static `Registration.IsEmailAvailable(holder)` a PURE service emits.
@@ -317,10 +317,8 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
   bindingRefText: (binding) => binding,
   // Union-find repos return `Agg?` (payloads.md §Union finds).
   absenceCheck: (subject) => `${subject} is not null`,
-  // List literals were walker-config sugar only (e.g. responsive Grid cols)
-  // until `[]` started parsing; `tags := […]` in a domain body is the first
-  // render context that actually reaches this leaf.  Doing so surfaced that
-  // the old `new[] { … }` was wrong in BOTH directions:
+  // A C# 12 collection expression, not `new[] { … }`, which is wrong in BOTH
+  // directions:
   //
   //   - empty    → CS0826, no element type to infer from `new[] {  }`;
   //   - NON-empty → CS0029, `new[] { "a" }` is a `string[]`, but a collection
@@ -331,8 +329,7 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
   // so neither `Array.Empty<T>()` nor `new List<T> { … }` is reachable here.
   // C# 12's collection expression is TARGET-TYPED — it takes its shape from
   // the assignment target — so one spelling serves `T[]`, `List<T>` and
-  // `IReadOnlyList<T>`, empty or not.  (Both arms verified by building the
-  // generated project under `/warnaserror`.)
+  // `IReadOnlyList<T>`, empty or not.
   list: (elements) => `[${elements.join(", ")}]`,
 };
 
@@ -363,11 +360,11 @@ function renderCsAuthzFilter(
   ctx: CsRenderContext,
 ): string {
   switch (e.filter.kind) {
-    // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false EF
+    // DENY carve-out (authorization — deny-wins).  An always-false EF
     // query-filter predicate; EF Core translates `Where(_ => false)` to no rows.
     case "deny":
       return "false";
-    // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) —
+    // `deep`/`global` read level (multi-tenancy) —
     // descendant-or-self materialized-path scope with the NULL-dataKey fallback
     // to the tenant floor (see `DEEP_SCOPE_SEMANTICS`).  Rendered as a
     // static-expressible EF query-filter lambda: `.StartsWith(...)` translates
@@ -437,7 +434,7 @@ function renderCsBinary(left: string, right: string, e: BinaryExpr, efQuery: boo
     if (temporal !== null) return temporal;
   }
   // Self-id vs scalar comparison (`this.id == currentUser.<claim>` — the
-  // derived tenancy registry self-scope, Phase 1b).  The entity's `Id` is
+  // derived tenancy registry self-scope).  The entity's `Id` is
   // the strongly-typed `<Agg>Id` record struct, so a raw scalar operand
   // must be lifted into it: same-typed claims wrap directly
   // (`new OrgId(claim)`), a `string` claim against a guid id parses first
@@ -824,7 +821,7 @@ function renderMethodCall(
 ): string {
   // (The `deep` / DENY authorization filter sentinels moved to the
   // discriminated `authz-filter` kind in M-T9.9 — handled by
-  // `renderCsAuthzFilter` before the shared dispatch, no longer a `method-call`
+  // `renderCsAuthzFilter` before the shared dispatch, not a `method-call`
   // marker here.)
   // `this.<refColl>.contains(x)` — membership over a reference
   // collection.  Lowers to a join-table subquery, mirroring TS's
@@ -1006,7 +1003,7 @@ function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {
       return `(await ${API_CLIENT_CLASS}.${upperFirst(op.resourceName)}_${upperFirst(op.operationId)}(${coerced.join(", ")}))`;
     }
     case "resource-op": {
-      // Resource-op (Phase 4c) → `<Class>.<Resource>_<Verb>(args)`, an
+      // Resource-op → `<Class>.<Resource>_<Verb>(args)`, an
       // async static helper the .NET ResourceAdapter emits.  Awaited by
       // the statement renderer.  The class is routed by sourceType via
       // `ctx.resourceClasses`; a missing entry means this render context
@@ -1041,7 +1038,7 @@ function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {
     }
     case "repo-read": {
       // A read-only repository query in a `reading` domain-service body
-      // (domain-services.md rev. 4, Slice 1).  Renders against the INJECTED
+      // (domain-services.md rev. 4).  Renders against the INJECTED
       // repository the service holds — `ctx.repoReadHandle(repo)` resolves the
       // field (`Accounts` → `_accounts`), and the method is the resolved repo
       // method (the .NET method name shape, no re-recognition).  `await`-wrapped
@@ -1085,7 +1082,7 @@ function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {
 }
 
 /** The .NET repository method name a `repo-read` (`callKind: "repo-read"`) in a
- *  `reading` domain-service body resolves to (domain-services.md rev. 4, Slice 1).
+ *  `reading` domain-service body resolves to (domain-services.md rev. 4).
  *  Mirrors the names the repository emitter generates:
  *   - a named `getById` read → `GetByIdAsync` (the built-in load-or-null, which
  *     carries the `Async` suffix, like the workflow `repoLet`);
@@ -1159,7 +1156,7 @@ const CS_TYPE_TARGET: TypeTarget = {
         return "FileRef";
       case "duration":
         // A5 temporal — absolute duration as a native TimeSpan.
-        // Expression-only (never a field / wire type in this slice);
+        // Expression-only (never a field / wire type);
         // reachable for duration-typed locals in operation bodies.
         return "TimeSpan";
     }

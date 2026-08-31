@@ -590,7 +590,7 @@ public sealed class OutboxDomainEventDispatcher : IDomainEventDispatcher
  *  outbox rows (ordered by occurred_at) through the in-process dispatcher;
  *  failures bump `attempts` and dead-letter (log only) after MaxAttempts.
  *
- *  `durableBroker` (M-T4.4 slice 7b, design §5): drained rows whose channel
+ *  `durableBroker` (design §5): drained rows whose channel
  *  is broker-bound publish via `ChannelRelayPublisher` (envelope id = row
  *  id) instead of redelivering locally.  `hasSubscriptions: false` is the
  *  workflow-less durable-broker producer — no in-process dispatcher exists,

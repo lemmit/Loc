@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Vanilla foundation — workflow-instance read endpoints (vanilla-foundation
-// -tdd-plan.md slice 5; workflow-instance-visibility.md).
+// -tdd-plan.md; workflow-instance-visibility.md).
 //
 // This retires the deferred-Phoenix workflow-instance-views gap.  On
 // `platform: elixir` a correlation-bearing workflow is observable as a
@@ -14,7 +14,6 @@
 //     via `<App>.Repo.all` / `.get`, projecting the cross-backend
 //     `instanceWireShape` (camelCase keys ← snake struct fields).  A missing
 //     id returns an RFC-7807 404 via the vanilla `ProblemDetails` module
-//     (slice 4).
 //
 // The 404 `detail` names the WORKFLOW (`"<Wf> <id> not found"`), not
 // `"<Wf> instance <id> not found"` as it did until M-T6.31.  Elixir was the only

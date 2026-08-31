@@ -275,8 +275,8 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         );
       }
       // A `store`'s state initialisers and action bodies are the THIRD frontend
-      // expression surface — and the one the F3 gate originally missed.  A store
-      // action is emitted by each frontend's own store builder (`react`'s
+      // expression surface.  A store action is emitted by each frontend's own
+      // store builder (`react`'s
       // zustand slice, `flutter/store-builder.ts`'s Riverpod notifier, the Feliz
       // Elmish `update` arm), and none of them renders a collection op either:
       // `action tidy() { tags := tags.distinct() }` CRASHES the Feliz emitter
@@ -1200,8 +1200,8 @@ function isStringArray(t: TypeIR): boolean {
 
 // -------------------------------------------------------------------------
 // `loom.chart-of-not-grouped` / `loom.chart-kind-invalid` /
-// `loom.chart-accessor-not-field` — the `Chart` primitive's arg shapes
-// (M-T1.3 Phase 4).  The walker resolves each arg by NAME with no types in
+// `loom.chart-accessor-not-field` — the `Chart` primitive's arg shapes.
+// The walker resolves each arg by NAME with no types in
 // scope, so a wrong shape would emit a chart keyed on an empty string or
 // bound to a one-object singleton read (`.data ?? []` of an object → `[]`, a
 // permanently empty chart with no diagnostic).  Gated here instead, where the
@@ -1301,10 +1301,9 @@ function checkChartArgs(
 }
 
 /** Fix 4 — run the same IR body checks over every named action's body, with
- *  the action's params in scope.  Action bodies previously escaped the page's
- *  IR checks entirely (only `page.body/title/requires` were walked); this gives
- *  them the F1/F2/payload checks and, via the `inActionBody` flag, the
- *  action-only purity checks (Fix 3 body-call + Fix 5 await-floor). */
+ *  the action's params in scope: the F1/F2/payload checks and, via the
+ *  `inActionBody` flag, the action-only purity checks (Fix 3 body-call +
+ *  Fix 5 await-floor). */
 function checkActionBodies(
   actions: readonly ActionIR[],
   baseCtx: BodyCheckCtx,
@@ -1759,20 +1758,20 @@ function checkMethodCallReceiver(
 
 /** F3 — `loom.ui-projection-read-unsupported`, the FLAVOUR half.
  *
- *  A page/component reading a `projection` (`QueryView { of:
- *  <ApiHandle>.<Projection> }`) used to validate clean and emit
+ *  An unreadable `projection` read (`QueryView { of:
+ *  <ApiHandle>.<Projection> }`) would otherwise emit
  *  `/* unresolved: <Handle> *␣/ undefined.<Projection>` — a runtime `TypeError`
- *  AND a build break, from a model with no diagnostic.  The hole was
- *  structural: F2 above exempts an api-handle receiver root, correct for an
- *  aggregate (`Sales.Customer`) but it let a PROJECTION member through, and
- *  nothing downstream resolved it.
+ *  AND a build break, from a model with no diagnostic.  F2 above exempts an
+ *  api-handle receiver root, correct for an aggregate (`Sales.Customer`), but
+ *  that exemption lets a PROJECTION member through and nothing downstream
+ *  resolves it.
  *
- *  M-T1.3 Phase 1 shipped the read path for the SINGLETON QUERY-TIME flavour
- *  (one object out — the dashboard KPI shape); Phase 4 added the GROUPED
- *  (`group by`) flavour, whose LIST response list-binds through `QueryView`
- *  exactly like a find-all (the query-shape derivation answers `single:
- *  false`, so the collection arms read `.length` of a real array) or feeds a
- *  `Chart`.  What stays rejected here is every other flavour, on every
+ *  Two flavours ARE readable and pass: the SINGLETON QUERY-TIME one (one object
+ *  out — the dashboard KPI shape), and the GROUPED (`group by`) one, whose LIST
+ *  response list-binds through `QueryView` exactly like a find-all (the
+ *  query-shape derivation answers `single: false`, so the collection arms read
+ *  `.length` of a real array) or feeds a `Chart`.  Every other flavour is
+ *  rejected here, on every
  *  target: a KEYED projection returns an array parameterised by key, and a
  *  FOLDED one is read by key off its materialized row table.  Whether a
  *  *readable* projection's frontend has the client is a per-framework

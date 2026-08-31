@@ -1,14 +1,13 @@
 // ---------------------------------------------------------------------------
 // Which `createdAt`/`updatedAt` fields are SERVER-MANAGED on a vanilla aggregate.
 //
-// The vanilla backend historically treated any field NAMED `createdAt` /
-// `updatedAt` as an audit-managed timestamp — excluded from the changeset cast
-// and lifecycle-stamped (`stamp onCreate { createdAt := now() }` / `with audit`).
-// That name-based assumption is wrong for a PLAIN declared field: a `Project`
-// with `createdAt: datetime` (no `stamp`, no `audit`) is a normal client-supplied
+// The test is NOT the field's NAME.  Treating any field named `createdAt` /
+// `updatedAt` as audit-managed — excluded from the changeset cast and
+// lifecycle-stamped — is wrong for a PLAIN declared field: a `Project` with
+// `createdAt: datetime` (no `stamp`, no `audit`) is a normal client-supplied
 // column, exactly as every other backend casts it.  Excluding it from the cast
-// while the migration still emits it `NOT NULL` left `created_at` unpopulated →
-// `23502 not_null_violation` on insert.
+// while the migration still emits it `NOT NULL` leaves `created_at`
+// unpopulated → `23502 not_null_violation` on insert.
 //
 // A `createdAt`/`updatedAt` field is server-managed iff it is an actual STAMP
 // TARGET (assigned in the aggregate's `contextStamps`) or `access: "managed"`.

@@ -2,28 +2,21 @@
 // The ONE `page`/`pageSize` query-control reader every vanilla-Phoenix
 // controller emits.
 //
-// Two things used to be wrong here, and they are the same bug seen twice:
+// ONE definition, shared by `find-controller.ts` (which also serves
+// `api-emit.ts`'s auto-`findAll` `index`) and `explicit-handlers-emit.ts`'s
+// paged-run queryHandler routes.  A second copy is a second contract.
 //
-//  1. The helper was COPIED — `find-controller.ts` emitted one `page_param/4`
-//     (also consumed by `api-emit.ts`'s auto-`findAll` `index`) and
-//     `explicit-handlers-emit.ts` emitted a byte-identical second one for the
-//     paged-run queryHandler routes.  Two copies, one contract.
-//  2. Both copies CLAMPED an out-of-range value (`min(v, limit)`, and anything
-//     below 1 silently fell back to the default) while `openapi-emit.ts`
-//     publishes `minimum: 1` / `maximum: <limit>` for the very same params.  So
-//     elixir answered `200` for `?page=0` / `?pageSize=100000` where the
-//     OpenAPI document it serves says the request is invalid — and where node
-//     (zod `.min(1).max(…)` → the 422 hook) and python (`Query(ge=…, le=…)` →
-//     the 422 handler) both refuse.  A spec-driven client (or schemathesis,
-//     which only fuzzes the node leg today) reads that as the backend
-//     contradicting its own contract.
+// The reader REFUSES an out-of-range value with the §3.2 `errors[]` 422 — the
+// same envelope as the changeset rung, since it goes through
+// `ProblemDetails.validation_errors_response/2`, the one sender.  CLAMPING
+// instead (`min(v, limit)`, anything below 1 falling back to the default)
+// contradicts the document this backend serves: `openapi-emit.ts` publishes
+// `minimum: 1` / `maximum: <limit>` for the very same params, and node (zod
+// `.min(1).max(…)` → the 422 hook) and python (`Query(ge=…, le=…)` → the 422
+// handler) both refuse.
 //
-// The reader now REFUSES an out-of-range value with the §3.2 `errors[]` 422 —
-// byte-identical envelope to the changeset rung, since it goes through
-// `ProblemDetails.validation_errors_response/2`, the one sender.  An
-// absent/blank/unparseable value still falls back to the shared default (the
-// pre-existing lenient coercion; narrowing THAT is a separate contract call,
-// and node/python differ from each other on it too).
+// An absent/blank/unparseable value DOES fall back to the shared default —
+// lenient coercion, on which node and python differ from each other too.
 // ---------------------------------------------------------------------------
 
 import {
@@ -53,18 +46,17 @@ export const PAGE_WITH_CLAUSES: readonly string[] = [
 ];
 
 /** The repository-call arguments those clauses bind — drop-in for the two
- *  inline `page_param(...)` calls the call sites used to pass. */
+ *  inline `page_param(...)` calls a call site would otherwise pass. */
 export const PAGE_CALL_ARGS: readonly string[] = [PAGE_VAR, PAGE_SIZE_VAR];
 
 /** The `else` arm answering the refusal.  `problemDetails` is how the emitting
  *  controller names the module (aliased or fully qualified); `indent` is the
  *  column the `else` body sits at.
  *
- *  The trailing `other -> other` catch-all is load-bearing: adding an `else` to
- *  a `with` turns every previously-returned non-matching term into a
- *  `WithClauseError`, so without it a `{:error, :not_found}` from the read
- *  would change from "returned to Phoenix" into "raises". It keeps every
- *  non-paging path byte-identical in BEHAVIOUR. */
+ *  The trailing `other -> other` catch-all is load-bearing: an `else` on a
+ *  `with` turns every non-matching term into a `WithClauseError`, so without it
+ *  a `{:error, :not_found}` from the read raises instead of being returned to
+ *  Phoenix. */
 export function pagingElseArm(problemDetails: string, indent: string): string {
   return [
     `${indent}else`,

@@ -191,9 +191,9 @@ export function resetBackendSource(): void {
   resetBackendVersionSource();
 }
 
-/** The in-tree backend set the registry was bootstrapped with —
- *  i.e. the entries `versionedPlatforms` originally aliased.  fs-
- *  backed discovery (see `fs-discovery.ts`) composes against
+/** The in-tree backend set the registry is bootstrapped with — the entries
+ *  `versionedPlatforms` aliases.  fs-backed discovery
+ *  (see `fs-discovery.ts`) composes against
  *  this so families/versions not yet packaged as npm workspace
  *  modules still resolve from in-tree code.  Returned as
  *  `readonly` so callers can't mutate the source-of-truth array. */

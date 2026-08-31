@@ -576,8 +576,8 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
     // than the historical `unknown`) lets `currentUser.<claim>` member access
     // type precisely, so a bare boolean gate such as
     // `requires currentUser.permissions.contains(permissions.x)` type-checks
-    // instead of falsely rejecting (previously it only passed when a
-    // surrounding `==`/`&&`/`||` forced the result to bool).
+    // instead of falsely rejecting — resolving it to `unknown` passes only
+    // when a surrounding `==`/`&&`/`||` forces the result to bool.
     if (expr.name === "currentUser") {
       const ub = userBlockFor(expr);
       if (ub) return { kind: "userclaim", ref: ub };
@@ -844,7 +844,7 @@ function typeOfFreeCall(name: string, env: Env): DddType {
   // (`CanApprove(cap)`) is a boolean predicate.
   if (lookupCriterionByName(name, env)) return T.prim("bool");
   if (lookupPolicyFnByName(name, env)) return T.prim("bool");
-  // Top-level (ambient) helper function (stdlib Phase B) — its declared
+  // Top-level (ambient) helper function (stdlib) — its declared
   // return type.  After the shadowing lookups above, before the duration
   // builtins (a user `function days(...)` shadows the `days()` builtin).
   const topFn = lookupTopLevelFunction(name, env);
@@ -1013,8 +1013,8 @@ function lookupPayloadMember(target: EventDecl | PayloadDecl, name: string): Ddd
  *  (`lower-expr.ts`), including its **fail-open** posture: an unknown member
  *  resolves to `string` rather than `unknown`, so introducing precise typing
  *  here never turns an already-valid `currentUser.<x>` reference into a new
- *  error — it only lets the *known* claim types (arrays, ints, …) flow into
- *  the collection-op / comparison checks that previously saw `unknown`. */
+ *  error — it only lets the *known* claim types (arrays, ints, …) reach the
+ *  collection-op / comparison checks, which would otherwise see `unknown`. */
 function lookupUserMember(target: UserBlock, name: string): DddType {
   if (name === PRINCIPAL_ORG_PATH || name === PRINCIPAL_ROOT_ORG) return T.prim("string");
   const f = target.fields.find((f) => f.name === name);
@@ -1215,7 +1215,7 @@ function lookupFunctionInScope(
   return undefined;
 }
 
-/** A TOP-LEVEL (ambient) helper `function` named `name` (stdlib Phase B) —
+/** A TOP-LEVEL (ambient) helper `function` named `name` (stdlib) —
  *  declared at file root or inside a `system { }`, visible workspace-wide.
  *  Checked AFTER local functions / VO ctors / criteria / policy fns (which
  *  shadow it), mirroring the lowerer's inline precedence (`inlineTopLevelFn`
@@ -1236,7 +1236,7 @@ function lookupTopLevelFunction(
       }
     }
   }
-  // Ambient std prelude (stdlib Phase C) — after any user-declared top-level
+  // Ambient std prelude (stdlib) — after any user-declared top-level
   // function (which shadows it), so a call to a prelude function types to its
   // declared return.
   return stdFunction(name);
@@ -1312,7 +1312,7 @@ function lookupCriterionByName(name: string, env: Env): Criterion | undefined {
 }
 
 /** Resolve a FUNCTION-form `policy` declaration by name against the enclosing
- *  bounded context (auth P3.2).  A reference to one in expression position
+ *  bounded context (auth).  A reference to one in expression position
  *  (e.g. a `requires PolicyName(args)` gate) types as `bool`.  Only the
  *  function form (carrying a `returnType`) is callable; a block-form
  *  `policy {}` read ladder is not. */
@@ -1426,10 +1426,10 @@ const lettingInFlight = new Set<import("./generated/ast.js").LetStmt>();
  * Mutates `bindings` in place.
  *
  * This computes the SAME type `checkStatement` (validators/statements.ts)
- * derives when it threads an operation body, unifying the two env builders:
- * previously `envForNode` bound every let to `T.unknown`, which silently
- * disengaged every operand check on a `let` operand (`let s = "hi"
- * requires s > 5` produced no diagnostic because `s` typed as `unknown`).
+ * derives when it threads an operation body, so the two env builders agree.
+ * Binding every let to `T.unknown` here instead silently disengages every
+ * operand check on a `let` operand (`let s = "hi" requires s > 5` produces no
+ * diagnostic, because `s` types as `unknown`).
  */
 function addTypedLets(
   bindings: Map<string, { type: DddType; origin: AstNode }>,

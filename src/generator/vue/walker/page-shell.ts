@@ -108,7 +108,7 @@ function recordQualifiedSeed(
 // ---------------------------------------------------------------------------
 // Vue page shell — assembles a generated `.vue` SFC around a walked
 // page body.  The Vue analogue of `react/walker/page-shell.ts`, v1
-// scope (vue-frontend-plan.md Slice 4):
+// scope (vue-frontend-plan.md):
 //
 //   - `<script setup lang="ts">` carries the api-composable hoists,
 //     route-param reads, `ref()` state fields, and the `navigate`
@@ -118,8 +118,7 @@ function recordQualifiedSeed(
 //     TOP-LEVEL refs — `customerAll.data` in a `v-if` would otherwise
 //     be an always-truthy Ref.  `reactive()` deep-unwraps, so the
 //     SAME rendered expression reads correctly in template and
-//     script positions.  (This is the vue-query surface decision the
-//     plan gates in this slice.)
+//     script positions.
 //   - the walker emits `navigate("/path")` for `Button(to:)` — a
 //     local `const navigate = (to: string) => { void router.push(to) }`
 //     adapter keeps that contract without a new WalkerTarget seam.
@@ -649,7 +648,7 @@ export function renderVuePage(input: VuePageShellInput): string {
     }
     script.push(`import { ${[...names].sort().join(", ")} } from "${from}";`);
   }
-  // The chart component (`Chart`, M-T1.3 Phase 4).  It cannot ride
+  // The chart component (`Chart`, M-T1.3).  It cannot ride
   // `result.imports` like a pack component: the loop above drops every RELATIVE
   // specifier (React-pipeline leakage), and a Vue SFC is a DEFAULT export,
   // which the walker's named-import map cannot express either.  So the page

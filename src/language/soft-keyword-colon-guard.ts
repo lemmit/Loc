@@ -115,9 +115,9 @@ function guardedPattern(keyword: string): RegExp {
  * `LONGER_ALT` (→ `ID`) is left untouched: `secretive` still matches the
  * keyword pattern at `secret` and is then extended to the longer `ID`.
  * `START_CHARS_HINT` / `LINE_BREAKS` are set explicitly so Chevrotain keeps
- * its optimized first-char dispatch for a pattern it can no longer analyse
- * statically (a lookahead defeats its regexp introspection) and emits no
- * line-terminator warning.
+ * its optimized first-char dispatch for a pattern it cannot analyse statically
+ * (a lookahead defeats its regexp introspection) and emits no line-terminator
+ * warning.
  *
  * @returns the names actually guarded (a keyword absent from this grammar
  *          build is skipped, not an error).

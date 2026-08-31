@@ -126,12 +126,11 @@ export function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
     return `<a href="${toLiteral}"${testidAttr}>${label}</a>`;
   }
   // NO `to:` at all — a breadcrumb leaf / plain label, exactly what the JSX
-  // family renders as a bare `<Anchor>`/`<a>` and Feliz as `Html.span`.  This
-  // used to fall into the dynamic branch below with an EMPTY expression,
-  // emitting `<.link navigate={}>` — an empty HEEx expression attribute, which
-  // is a tokenizer ParseError at `mix compile`: one linkless Anchor took the
-  // whole LiveView app out (audit finding A21).  `renderIdLink` already spells
-  // the same no-destination case as a `<span>`.
+  // family renders as a bare `<Anchor>`/`<a>` and Feliz as `Html.span`.  Routed
+  // into the dynamic branch below it would emit `<.link navigate={}>` with an
+  // EMPTY expression attribute — a tokenizer ParseError at `mix compile`, so
+  // one linkless Anchor takes the whole LiveView app out.  `renderIdLink`
+  // spells the same no-destination case as a `<span>`.
   if (toExpr === undefined) return `<span${testidAttr}>${label}</span>`;
   // Dynamic route expression — emit it as a HEEx expression attribute.
   return `<.link navigate={${toExpr}}${testidAttr}>${label}</.link>`;
@@ -745,12 +744,12 @@ export function renderTableColumn(
   // Second positional arg: accessor lambda `fn cell -> renderCell(cell) end`
   //
   // The header is a STATIC attribute on the `<:col>` slot, so only a string
-  // LITERAL can supply it, and it must be entity-escaped: a label carrying a
-  // `"` used to close the attribute mid-word (`label="Na"me"`) and the whole
-  // template failed to parse.  A non-literal header (a state ref, a
-  // concatenation) has no attribute spelling at all — it used to splice the
-  // rendered Elixir expression inside the quotes (`label="@q"`), so the column
-  // was headed with a variable name.  Both now degrade to the JSX side's
+  // LITERAL can supply it, and it must be entity-escaped: an unescaped label
+  // carrying a `"` closes the attribute mid-word (`label="Na"me"`) and the
+  // whole template fails to parse.  A non-literal header (a state ref, a
+  // concatenation) has no attribute spelling at all — splicing the rendered
+  // Elixir expression inside the quotes (`label="@q"`) heads the column with a
+  // variable name.  Both degrade to the JSX side's
   // `Column N` fallback (`_walker/primitives/table.ts`'s `emitColumn`), so the
   // two frontends show the same header for the same source.
   let cellHeex = "<%= row %>";
@@ -896,7 +895,7 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
     listShapedProjections: ctx.listShapedProjections,
   };
   const shape = ofNode ? queryShape(ofNode, detectCtx) : { paged: false, single: false };
-  // Pattern H — `QueryView { of: <api>.<Projection> }` (M-T1.3 Phase 1).  The
+  // Pattern H — `QueryView { of: <api>.<Projection> }` (M-T1.3).  The
   // read resolves to the query-time projection's own `run/1`, in-process: a
   // LiveView deployable hosts its contexts in the SAME OTP app, so what the SPA
   // frontends reach over `GET /projections/<slug>` is one function call here.
@@ -918,8 +917,8 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
   // a name any hand-written read could also pick — and a detail page carrying
   // both would have the two loads fight over one assign.
   if (historyRead) assignName = `${snake(historyRead)}_history`;
-  // Flag OR fact: an author may still opt in explicitly (the scaffold does),
-  // but omitting the flag no longer means "not paged" / "not single".
+  // Flag OR fact: an author may opt in explicitly (the scaffold does), but
+  // omitting the flag does NOT mean "not paged" / "not single".
   const isSingle = litTrue(names.indexOf("single")) || shape.single;
   const explicitPaged = litTrue(names.indexOf("paged"));
   const isPaged = explicitPaged || shape.paged;
@@ -1545,8 +1544,9 @@ export function renderLoader(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
  *      raises FunctionClauseError on a binary;
  *    - a LITERAL (`Money(value: 9.99)`) is a float, which raises the same way.
  *
- *  So the narrower cast was wrong for two of the three, and identical for the
- *  third.  The TYPED money cast (`string(x: money)` in `render-expr.ts`) keeps
+ *  So a narrower `Decimal.to_string/1` cast is wrong for two of the three and
+ *  identical for the third.  The TYPED money cast (`string(x: money)` in
+ *  `render-expr.ts`) keeps
  *  `Decimal.to_string/1` — there the operand's type is known. */
 export function renderMoney(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let currency: string | undefined;
@@ -1903,7 +1903,7 @@ function renderCardLike(
   }
   const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
   // A Card is a heading-nesting level (like the JSX `emitCard`): a `Heading`
-  // inside it derives a rank one deeper (accessibility.md Phase 2).
+  // inside it derives a rank one deeper (accessibility.md).
   const childCtx: WalkContext = { ...ctx, headingDepth: (ctx.headingDepth ?? 0) + 1 };
   const children = bodyExprs.map((c) => renderChild(c, childCtx)).join("\n");
   const testidAttr = testIdAttr(expr, ctx);
@@ -1938,8 +1938,8 @@ export function renderPaper(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
  *
  *  `cols:` is read through the SHARED `gridCols` reader the JSX walker uses, so
  *  `cols: [3, 2, 1]` means `[desktop, tablet, mobile]` on Phoenix exactly as it
- *  does on React — and it is CONSUMED into the class list.  It used to fall
- *  through the generic named-attr path as `cols={[3, 2, 1]}`: a LIST reaching
+ *  does on React — and it is CONSUMED into the class list.  Left to the
+ *  generic named-attr path it emits `cols={[3, 2, 1]}`: a LIST reaching
  *  Phoenix's attribute escaper, i.e. a page that compiles and then raises on
  *  first render.
  *
@@ -1961,7 +1961,8 @@ export function renderGrid(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
 /** `Container(size: "md", …children)` → a centred max-width wrapper.
  *
  *  `size:` is CONSUMED into a `max-w-*` utility (see {@link CONTAINER_MAX_W});
- *  it used to leak as `size="md"`, an attribute no `<div>` has. */
+ *  left to the generic named-attr path it leaks as `size="md"`, an attribute
+ *  no `<div>` has. */
 export function renderContainer(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   const size = stringNamedLit(expr, "size");
   const maxW = size ? CONTAINER_MAX_W[size] : undefined;
@@ -1990,7 +1991,7 @@ export function renderSection(expr: Extract<ExprIR, { kind: "call" }>, ctx: Walk
   const idAttr = id ? ` id="${id}"` : "";
   const testidAttr = testIdAttr(expr, ctx);
   // A Section is a heading-nesting level (like the JSX `emitSection`): a
-  // `Heading` in its body derives a rank one deeper (accessibility.md Phase 2).
+  // `Heading` in its body derives a rank one deeper (accessibility.md).
   const childCtx: WalkContext = { ...ctx, headingDepth: (ctx.headingDepth ?? 0) + 1 };
   const childrenHeex = positional.map((c) => renderChild(c, childCtx)).join("\n");
   if (childrenHeex.length === 0) {
@@ -2125,7 +2126,7 @@ export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
 }
 
 // ---------------------------------------------------------------------------
-// Chart (M-T1.3 Phase 4, HEEx leg).
+// Chart (M-T1.3, HEEx leg).
 // ---------------------------------------------------------------------------
 
 /** `Chart { kind: "bar"|"line", of: <api>.<Projection>, x: r => …, y: r => … }`
