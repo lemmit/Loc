@@ -360,17 +360,21 @@ formality. Measured, not estimated:
 - **Merging is CI-bound and strictly serial.** Each merge moves `main`, which invalidates the
   next PR's rebase, which needs a fresh CI cycle before branch protection will merge it.
   Eight PRs is eight sequential cycles.
-- **Never force-push and retarget a PR's base in the same minute.** Doing so fires two
-  overlapping event storms; GitHub's concurrency group cancels one *whole set* of runs, and
-  if `pr-gate`'s runs land in the cancelled set it never posts a conclusion at all — leaving
-  the PR permanently "expected" even though every gate it aggregates went green. That
-  happened here on #2705 (`PR gate` runs 22174 *and* 22175 both cancelled at 17:54:33, while
-  the workflows they aggregate all completed `success` at 18:42–18:45). Recovery is awkward:
-  `rerun_workflow_run` returns `403 Resource not accessible by integration` for this token,
-  and CLAUDE.md rightly forbids an empty commit to kick CI — so the only clean exit is a
-  *substantive* push (a real rebase onto the newer `main`, which is needed anyway).
-  **Sequence it: retarget first, then push — or push, then retarget once CI has settled.
-  Never both at once.**
+- **`pr-gate`'s own `pull_request` runs ALWAYS show `cancelled`. That is normal, and it is
+  not the reason a PR is stuck.** Every one of the seven `PR gate` workflow runs on
+  `claude/w1b-node-ts` shows `conclusion: cancelled`, back to its first commit — because
+  `pr-gate` is `workflow_run`-driven and the `pull_request`-triggered copies are cancelled by
+  its concurrency group. The verdict arrives as a **check run** posted through the Checks API
+  (a `github.com/<owner>/<repo>/runs/<id>` URL, not an Actions job URL). So do not diagnose a
+  stuck PR from the Actions run list: a wall of `cancelled` there is the design working.
+  Look for the `pr-gate` **check run** on the head SHA instead.
+- **Before diagnosing CI at all, confirm the remote head is the commit you think it is.**
+  This wave lost real time to an elaborate theory — overlapping event storms cancelling
+  `pr-gate` — when the actual cause was that **the rebase had never been pushed**. Local was
+  at the rebased commit; `git ls-remote` showed the branch still on the old SHA, whose runs
+  had legitimately been superseded. One `git ls-remote origin <branch>` would have settled it
+  before any of the theorising. **Check the SHA first; it is one command and it is the thing
+  every other explanation depends on.**
 
 This is precisely the merge queue's job, and the queue is workflow-complete and inert (39
 gates carry `merge_group:` triggers, drift-pinned by `merge-queue-readiness.test.ts`) purely
