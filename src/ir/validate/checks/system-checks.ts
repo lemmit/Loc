@@ -12,7 +12,7 @@ import {
 } from "../../../language/validators/data/platform-rules.js";
 import { descriptorFor } from "../../../platform/metadata.js";
 import { FLUTTER_DEFERRED_BUILDER_NAMES } from "../../../util/flutter-deferred-primitives.js";
-import { lowerFirst, plural, snake } from "../../../util/naming.js";
+import { isJavaKeyword, lowerFirst, plural, snake } from "../../../util/naming.js";
 import {
   capabilitiesFor,
   configSchemaFor,
@@ -2448,77 +2448,130 @@ export function validateGuardPrincipalWithoutAuth(sys: SystemIR, diags: LoomDiag
 // pins that it is never raised.
 
 // ---------------------------------------------------------------------------
-// Java read-model backstop gates.  Cross-aggregate `follows` and VO-typed
-// read-model fields (workflow-instance / projection) emit via the read-model VO
-// records in java/emit/dto.ts.  This is a defensive gate for an ENTITY
-// (containment-part) read-model field: it would need a `<Part>Response` DTO the emitter doesn't build, but a
-// part type never resolves in workflow / projection scope, so the gate is an
-// unreachable backstop mirroring the emitters' `guardInstanceField` /
-// `guardProjectionField` throws — kept so the shape fails honestly rather than
-// crashing if that scope rule ever changes.
+// M-T6.36 — the two `loom.java-{workflow-instance,projection}-field-unsupported`
+// gates USED TO LIVE HERE, and were retired 2026-08-31 as PHANTOMS.
+//
+// Both refused an ENTITY (containment-part) typed read-model field.  The
+// mission asked for the refused shapes to be emitted; probing the premise on
+// fresh `main` showed there is nothing to emit, because the shape is
+// UNREACHABLE.  A part type resolves only inside its own aggregate
+// (`src/language/ddd-scope.ts`), so `projection P { line: Line }` and
+// `workflow W { line: Line }` both fail at phase ③ with `Could not resolve
+// reference to NamedDecl named 'Line'` — on EVERY platform, before any
+// java-specific check runs.  A backend-named code for a shape the language
+// refuses is the M-T5.21 §Symptom 1 lie in its purest form: it made java read
+// as uniquely limited and carried two rows in the open-gap register that
+// nothing could ever drain.
+//
+// The emitters keep their `guardInstanceField` / `guardProjectionField` throws
+// as internal invariants (that is what an unreachable arm should be), and
+// `test/generator/java/generator-java-readmodel-gates.test.ts` now pins the
+// unreachability at the scope layer — so if that rule ever widens, the gap
+// becomes visible again as a test failure rather than as silent output.
 // ---------------------------------------------------------------------------
 
-/** Peel optional / array wrappers to the leaf type kind — the emitters' own
- *  guard shape: `T?` → `T`, `T[]` → element, `T?[]` element-optional → `T`. */
-function wireLeafKind(t: TypeIR): TypeIR["kind"] {
-  const inner = t.kind === "optional" ? t.inner : t;
-  const leaf =
-    inner.kind === "array"
-      ? inner.element.kind === "optional"
-        ? inner.element.inner
-        : inner.element
-      : inner;
-  return leaf.kind;
+// ---------------------------------------------------------------------------
+// F2-ADP-7 (java arm) — a `.ddd` name that is a JAVA RESERVED WORD.
+//
+// The SQL half of this was closed by M-T6.42/M-T6.43: `@Column(name = …)` runs
+// through `hbIdent`, so a column called `case` is quoted.  The HOST-IDENTIFIER
+// half was left bare — `src/generator/java/emit/entity.ts` emits `String case;`
+// and `public String case() {`, and the DTO records emit
+// `record TicketResponse(String case, int do, …)`.  `javac` rejects all of it,
+// and codegen reports zero diagnostics, so the failure surfaces only in a
+// compile tier.
+//
+// WHY THIS REFUSES INSTEAD OF ESCAPING (probed, not assumed).  The .NET arm
+// escapes — `@case` is a C# VERBATIM IDENTIFIER: lexically the identifier
+// `case`, so the emitted member name, and therefore the JSON property
+// System.Text.Json derives from it, are byte-identical to today.  Java has no
+// verbatim-identifier syntax (JLS §3.9: a keyword is never an identifier), so
+// the only "escape" available is a RENAME — which is what `escapeJavaIdent`
+// does for LOCALS (`case` → `case_`).  Renaming a DECLARED field renames the
+// Java record component, and a record component name IS the Jackson property
+// name: `{"case": …}` would silently become `{"case_": …}` on java and java
+// only.  A wire divergence introduced to fix a compile error is a worse bug
+// than the compile error, so the honest answer at this layer is to refuse the
+// name while a java deployable hosts the declaration.
+//
+// SCOPED TO THE AXIS THE LIMITATION LIVES ON: it fires only for a context
+// hosted by a `platform: java` deployable.  The same model on node / python /
+// elixir / dotnet is untouched — `get case()`, `def case`, `field :case` and
+// `@case` are all legal there.
+// ---------------------------------------------------------------------------
+
+/** Every `.ddd`-declared name in `ctx` that the java emitters put in a bare
+ *  Java identifier position, as `[what, owner, name]`. */
+function javaIdentifierPositions(ctx: BoundedContextIR): [string, string, string][] {
+  const out: [string, string, string][] = [];
+  const members = (owner: string, fields: { name: string }[], what: string): void => {
+    for (const f of fields) out.push([what, owner, f.name]);
+  };
+  const action = (owner: string, op: OperationIR): void => {
+    // The canonical `create` / `destroy` are unnamed — they emit as `create` /
+    // `destroy`, never as a `.ddd` name, so only their PARAMS are at risk.
+    if (!op.canonical) out.push(["operation", owner, op.name]);
+    for (const p of op.params) out.push(["parameter", `${owner}.${op.name}`, p.name]);
+  };
+  for (const agg of ctx.aggregates) {
+    members(agg.name, agg.fields, "field");
+    members(agg.name, agg.contains, "containment");
+    members(agg.name, agg.derived, "derived field");
+    for (const fn of agg.functions) {
+      out.push(["function", agg.name, fn.name]);
+      for (const p of fn.params) out.push(["parameter", `${agg.name}.${fn.name}`, p.name]);
+    }
+    for (const op of [...agg.operations, ...(agg.creates ?? []), ...(agg.destroys ?? [])])
+      action(agg.name, op);
+    for (const part of agg.parts) {
+      members(`${agg.name}.${part.name}`, part.fields, "field");
+      members(`${agg.name}.${part.name}`, part.contains, "containment");
+      members(`${agg.name}.${part.name}`, part.derived, "derived field");
+    }
+  }
+  for (const vo of ctx.valueObjects) {
+    members(vo.name, vo.fields, "field");
+    members(vo.name, vo.derived, "derived field");
+  }
+  for (const ev of ctx.events) members(ev.name, ev.fields, "field");
+  for (const proj of ctx.projections) {
+    members(proj.name, proj.stateFields, "field");
+    for (const p of proj.params) out.push(["parameter", proj.name, p.name]);
+  }
+  for (const wf of ctx.workflows) {
+    members(wf.name, wf.stateFields ?? [], "field");
+    for (const p of wf.params) out.push(["parameter", wf.name, p.name]);
+  }
+  return out;
 }
 
-export function validateJavaReadModelShapes(sys: SystemIR, diags: LoomDiagnostic[]): void {
+export function validateJavaReservedIdentifiers(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  // One diagnostic per offending NAME, not per hosting deployable — two java
+  // deployables serving the same context describe one defect, not two.
+  const seen = new Set<string>();
   for (const dep of sys.deployables) {
     if (platformFamily(dep.platform) !== "java") continue;
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
-
-      // (1) Entity-typed saga instance read-model field.  VO-typed fields emit
-      // (their `<Vo>Response` is co-located in application.workflows); an entity
-      // (containment part) field would need a `<Part>Response` DTO — but a part
-      // type never resolves in workflow scope, so this is a defensive backstop
-      // for a shape the grammar/scope already forbids.  Only observable
-      // workflows (those with an `instanceWireShape`) reach the instance emitter.
-      for (const wf of ctx.workflows) {
-        for (const f of wf.instanceWireShape ?? []) {
-          if (wireLeafKind(f.type) !== "entity") continue;
-          diags.push({
-            severity: "error",
-            message: diagMessage("loom.java-workflow-instance-field-unsupported", {
-              name: dep.name,
-              ctxName,
-              wfName: wf.name,
-              fName: f.name,
-            }),
-            source: `${sys.name}/${dep.name}`,
-            code: "loom.java-workflow-instance-field-unsupported",
-          });
-        }
-      }
-
-      // (2) Entity-typed projection row field — same defensive backstop as (1).
-      for (const proj of ctx.projections) {
-        for (const f of proj.wireShape ?? []) {
-          if (wireLeafKind(f.type) !== "entity") continue;
-          diags.push({
-            severity: "error",
-            message: diagMessage("loom.java-projection-field-unsupported", {
-              name: dep.name,
-              ctxName,
-              projName: proj.name,
-              fName: f.name,
-            }),
-            source: `${sys.name}/${dep.name}`,
-            code: "loom.java-projection-field-unsupported",
-          });
-        }
+      for (const [what, owner, name] of javaIdentifierPositions(ctx)) {
+        if (!isJavaKeyword(name)) continue;
+        const key = `${ctxName}/${owner}/${what}/${name}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        diags.push({
+          severity: "error",
+          message: diagMessage("loom.java-reserved-identifier-unsupported", {
+            what,
+            owner,
+            name,
+            ctxName,
+          }),
+          source: `${sys.name}/${ctxName}/${owner}`,
+          code: "loom.java-reserved-identifier-unsupported",
+        });
       }
     }
   }

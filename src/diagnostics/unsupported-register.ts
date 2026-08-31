@@ -241,22 +241,18 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     mission: "M-T5.3",
   },
   {
-    code: "loom.java-projection-field-unsupported",
+    code: "loom.java-reserved-identifier-unsupported",
     kind: "gap",
-    site: "src/ir/validate/checks/system-checks.ts:2336",
+    site: "src/ir/validate/checks/system-checks.ts:2560",
     what:
-      "an ENTITY-typed projection row field on Java — an unreachable defensive backstop: a part " +
-      "type never resolves in projection scope (VO-typed fields emit)",
+      "a `.ddd` field / param / operation named after a JAVA reserved word (`case`, `do`, " +
+      '`new`, …). The SQL half is quoted (`@Column(name = "`case`")`); the host-identifier ' +
+      "half emits `String case;` / `public String case() {`, which javac rejects. Refused " +
+      "rather than escaped because Java has no verbatim identifier and a rename would move " +
+      "the JSON property on java alone — drained by emitting a mangled field plus an explicit " +
+      "`@JsonProperty` at every wire site",
     mission: "M-T6.36",
-  },
-  {
-    code: "loom.java-workflow-instance-field-unsupported",
-    kind: "gap",
-    site: "src/ir/validate/checks/system-checks.ts:2318",
-    what:
-      "an ENTITY-typed workflow instance field on Java — the same unreachable backstop as the " +
-      "projection twin; a part type never resolves in workflow scope",
-    mission: "M-T6.36",
+    verified: true,
   },
   {
     code: "loom.mikroorm-unsupported",

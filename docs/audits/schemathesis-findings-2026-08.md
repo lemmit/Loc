@@ -563,6 +563,21 @@ not existing. The fix is to declare and enforce int32 for `int` (int64 for
 `long`) — a spec change, so all five backends together, and `.NET`/`Java`
 already type-bound their side while python/elixir do not.
 
+**Re-verified 2026-08-31 (Wave 1b `wire-openapi` packet) and deliberately NOT
+taken there — with the size measured rather than asserted.** The premise holds:
+`int` still publishes an unbounded `{"type":"integer"}`. What the re-check adds
+is why this keeps being deferred (#2648, #2664, and now a third time), so the
+next agent does not re-discover it: **there is no shared choke point.** Each
+backend derives its integer schema separately — elixir from its own literal
+table (`elixir/vanilla/openapi-emit.ts:849/865`), .NET/java/python by
+REFLECTION over the annotated wire types (Swashbuckle / springdoc / FastAPI, so
+the bound has to come from a `[Range]` / `@Min@Max` / `Field(ge=,le=)` the
+validator emitters attach), node from zod via `_frontend/zod-schemas.ts`. So
+"declare int32" is five emitter changes plus the shared zod one, and the two
+waivers can only be DELETED once a booted schemathesis leg passes — a runtime
+tier, not a unit one. That is a mission, and it should be claimed as one rather
+than ridden along with a contract-shaped packet.
+
 ---
 
 ## Class: by design (recorded, not filtered)

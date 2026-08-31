@@ -154,6 +154,11 @@ export function renderJavaEventSourcedRepositoryImpl(
     // DomainEvent rides the events wildcard (it lives in domain.events).
     `import ${ctx.basePkg}.domain.events.*;`,
     `import ${ctx.basePkg}.domain.ids.*;`,
+    // The enums wildcard, matching the RELATIONAL impl (repository.ts:305) and
+    // the document twin.  A declared find's params render through
+    // `renderJavaType`, which spells an enum param as the bare enum name, so
+    // this file had the same "cannot find symbol" hole the document store did.
+    `import ${ctx.basePkg}.domain.enums.*;`,
     needsAccessor ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
     `import ${ctx.basePkg}.config.CatalogLog;`,
     ``,

@@ -158,12 +158,34 @@ export function errorStatuses(
   // would answer an EMPTY-bodied framework 404 instead of a ProblemDetails one.
   // The runtime arms below read the same resolved value.
   //
-  // Two 404s are deliberately NOT this rung and stay literal on all five
-  // backends (elixir included, so the reference stays the reference):
-  //   * the FRAMEWORK routing 404 — `no route for <verb> <path>` — which is
-  //     about the URL space, not about a domain record;
-  //   * the objectStore blob-absence 404 on a `resource … kind: objectStore`
-  //     download route, which addresses a bucket key, not an aggregate id.
+  // ONE 404 is deliberately NOT this rung and stays literal on all five
+  // backends (elixir included, so the reference stays the reference): the
+  // FRAMEWORK routing 404 — `no route for <verb> <path>` — which is about the
+  // URL space, not about a domain record.
+  //
+  // The objectStore blob-absence 404 on a `resource … kind: objectStore`
+  // download route IS this rung, deliberately (M-T6.39 / #2645).  This comment
+  // used to claim the opposite — that the blob miss "addresses a bucket key,
+  // not an aggregate id" and therefore stays literal — and F2-W-13 was filed
+  // against the emitters for not honouring it.  The emitters are right and the
+  // comment was stale.  M-T6.39's whole finding was that all five backends
+  // hand-rolled that 404 (`{"error":"not found"}` / a bodiless 4xx the
+  // container filled with the FALSE sentence `no route for GET /files/<key>`),
+  // and its fix was to route every one of them through the app's ONE not-found
+  // producer.  Reaching the shared producer is what makes an `httpStatus
+  // NotFound -> <code>` override reach this route, and that is ASSERTED, not
+  // incidental: `test/conformance/files-absent-object-envelope-parity.test.ts`
+  // ("an httpStatus NotFound override retargets the files 404 too, on all
+  // five") fails if the blob miss is given a literal carrier of its own.  An
+  // author who remaps `NotFound` is remapping the app's not-found envelope; the
+  // file route answers that envelope.
+  //
+  // What IS still open on this route is the other half of F2-W-13: no backend
+  // DECLARES the /files/{key} 404 in its OpenAPI document (node does not
+  // publish the route at all), so the status is undeclared — see M-T6.39's
+  // "left for a follow-up" note.  That is a missing declaration, not a wrong
+  // resolution, and this matrix is per-DOMAIN-operation, which that route is
+  // not.
   const notFound = resolve?.("NotFound") ?? 404;
   const set = (...statuses: number[]): number[] => [...new Set(statuses)].sort((a, b) => a - b);
   switch (kind) {

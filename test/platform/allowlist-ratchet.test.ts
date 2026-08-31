@@ -201,6 +201,13 @@ const REGISTERED: Ratchet[] = [
   // every run, so a sixth backend family fails the pin instead of leaving a
   // stale claim in prose).  `loom.field-mask-unsupported` was the one in the
   // cluster that turned out drivable, through the same `anyBackend` arm.
+  //
+  // …and of those, the two java entity-field backstops are now GONE
+  // ENTIRELY rather than pinned (M-T6.36): a backend-named code for a shape
+  // the LANGUAGE refuses on every platform is a phantom, not a backstop, and
+  // it carried two undrainable rows in the M-T9.27 register.  The
+  // unreachability moved to a scope-layer test that fails if part-type scope
+  // widens.
   {
     file: "test/system/diagnostic-firing-census.data.ts",
     name: "UNCOVERED",

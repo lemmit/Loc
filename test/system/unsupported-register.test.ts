@@ -109,8 +109,21 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  dataset's ship-once marker, while java/.NET emitted a `create(...)` call
  *  that does not compile against the declared factory.  Raising the pin buys
  *  five backends refusing identically instead of three diverging silently;
- *  M-T6.52 lands the seed path, deletes the row, and lowers this back to 42. */
-const MAX_OPEN_GAPS = 43;
+ *  M-T6.52 lands the seed path, deletes the row, and lowers this back to 42.
+ *
+ *  43 → 42 (net −1: two rows out, one in).  OUT, as PHANTOMS:
+ *  `loom.java-projection-field-unsupported` and
+ *  `loom.java-workflow-instance-field-unsupported` (M-T6.36).  Both refused an
+ *  ENTITY-typed read-model field; probing the mission's premise showed the shape
+ *  is unreachable — a part type resolves only inside its own aggregate, so
+ *  `projection P { line: Line }` fails at phase ③ on EVERY platform.  Two rows
+ *  nothing could ever drain, against a backend that was never limited.  This is
+ *  the one case where deleting a row is right even though its cause was never
+ *  implemented: there was nothing to implement.  IN:
+ *  `loom.java-reserved-identifier-unsupported` (F2-ADP-7's java arm) — the trade
+ *  this register records, again: `aggregate T { case: string }` used to emit
+ *  `String case;` and fail javac with zero diagnostics; it now refuses. */
+const MAX_OPEN_GAPS = 42;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

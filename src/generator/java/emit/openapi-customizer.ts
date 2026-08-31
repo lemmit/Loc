@@ -385,6 +385,14 @@ export function buildJavaOpenApiContract(
           continue;
         }
         if (isPagedFind(f)) {
+          // F2-W-07 — the controller returns the concrete `<Agg>Paged` record
+          // (not the raw `Paged<T>` generic springdoc would have named
+          // `Paged<Agg>Response`), so the envelope's required set must be
+          // registered here too and not only under `isPagedAutoAll`: a
+          // document / embedded / event-sourced aggregate has a NON-paged
+          // auto-findAll and can still declare a paged find.  `setRequired` is
+          // a map write, so the auto-all case re-registering it is a no-op.
+          setRequired(`${agg.name}Paged`, ["items", "page", "pageSize", "total", "totalPages"]);
           routes.push({ method: "get", path: findPath, errors: findErrors });
           continue;
         }

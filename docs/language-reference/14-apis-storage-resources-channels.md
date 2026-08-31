@@ -97,7 +97,7 @@ A `storage` may pin **where its connection string comes from** with `connection:
 storage primarySql { type: postgres, connection: env("DATABASE_URL") }
 ```
 
-The four forms lower to a `ConnectionSourceIR` (`kind: service | env | secret | literal`) on the storage. **Honest gap:** as of this writing the IR carries `connection` but no backend emitter consumes it — the generated compose env still uses the per-deployable derived `DATABASE_URL` shown in [Systems & topology](02-systems-and-topology.md). The clause parses, validates, and is recorded for the artefacts; it does not yet override the generated wiring.
+The four forms lower to a `ConnectionSourceIR` (`kind: service | env | secret | literal`) on the storage. **Honest gap, and the compiler says so:** the IR carries `connection` but no backend emitter consumes it — the generated compose env still uses the per-deployable derived `DATABASE_URL` shown in [Systems & topology](02-systems-and-topology.md), and the k8s/Helm secret wiring is derived from the compose service host rather than from the source you named. Declaring the clause raises **`loom.reserved-not-emitted`** (a warning, printed by both `ddd parse` and `ddd generate system`), so this is not prose you have to find — the clause parses, validates, is recorded for the artefacts, and tells you it does not yet override the generated wiring. Draining it is [M-T7.9](../new-plan/T7-deployment-ops.md), which deletes that warning in the same change.
 
 ## `resource`
 

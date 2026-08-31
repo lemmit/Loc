@@ -25,7 +25,7 @@
 | bounded-context-model.md | shipped (core) | deferred futures noted in-doc; no live mission |
 | capability-emission-dedup.md | partial (`ignoring` shipped) | M-T5.12 |
 | channels.md | partial | M-T1.10 (realtime), M-T4.4 (brokers), M-T4.9 (caching) |
-| connection-secret-wiring.md | proposed (draft 2026-07-19) *(added 2026-07-21)* | **no mission yet** — resource/config family (M-T2.9, M-T4.8); see Known unmapped items |
+| connection-secret-wiring.md | proposed (draft 2026-07-19) *(added 2026-07-21)* | **[M-T7.9](T7-deployment-ops.md)** (minted 2026-08-31) — the honesty half already shipped via M-T5.9a (`loom.reserved-not-emitted`, `RESERVED_SURFACES` id `storage-connection`); M-T7.9 owns the wiring |
 | contract-typed-resources.md | proposed | M-T4.8 |
 | criterion-everywhere.md | superseded (by reified-criteria) | residue → M-T5.4 |
 | criterion.md | partial | M-T5.4 |
@@ -270,7 +270,7 @@
 ## Known unmapped items (deliberate)
 
 - ~~**Test-placement DSL**~~ — **resolved 2026-07-30: now [M-T5.19](T5-language-core.md)**, with the shipped Phase 1–2 slices (#2163/#2179/#2188) back-filled into the mission body and the remaining phases scoped. `test-placement.md` + `test-authoring-language.md` point at it.
-- **`connection-secret-wiring`** (draft 2026-07-19) — resource connection/secret provisioning; depends on the resource model. No mission yet; closest homes are M-T2.9 (storage/platform config) and M-T4.8 (resource kinds). Whoever picks it up scopes the mission.
+- ~~**`connection-secret-wiring`**~~ — **resolved 2026-08-31: now [M-T7.9](T7-deployment-ops.md)**. It landed in T7 rather than the resource family because the work is deployment wiring (compose env, `kubernetes.ts`, `helm.ts`) and not resource modelling. Note the split: the clause is no longer SILENT — M-T5.9a's `loom.reserved-not-emitted` already warns on every `connection:` declaration — so M-T7.9 is scoped to the wiring alone, and deletes that `RESERVED_SURFACES` row when it lands.
 - **API versioning** (completeness audit) — no proposal exists; whoever picks it up writes one and adds a mission under T5.
 - **`infrastructure-port`** — explicitly usage-pulled; no mission until a concrete case.
 - **Brownfield adoption** (M-T2.5) is a proposal-writing mission, reflecting that no design exists yet.

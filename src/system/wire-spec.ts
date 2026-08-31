@@ -1,4 +1,7 @@
-import { provenancedTypeMembers } from "../generator/_payload/provenanced-wire.js";
+import {
+  PROVENANCED_LINEAGE_NULLABLE,
+  provenancedTypeMembers,
+} from "../generator/_payload/provenanced-wire.js";
 import { wireFieldsFor } from "../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
@@ -51,6 +54,14 @@ type JsonSchemaProperty =
   /** Opaque JSON blob (the `json` primitive) — freeform object, no
    *  further constraints.  `additionalProperties` left default. */
   | { type: "object" }
+  /** A member that may be `null` when PRESENT.  JSON Schema's type keyword
+   *  takes an array for exactly this, and `required` cannot express it —
+   *  omitting a member from `required` says "the key may be missing", not "the
+   *  value may be null", so a body carrying `"lineage": null` failed against a
+   *  bare `{"type":"object"}` (F2-XB-7).  Used only where a member's
+   *  nullability is DECLARED (today: the `provenanced` carrier's `lineage`), not
+   *  inferred from optionality — those are different claims. */
+  | { type: ["object", "null"] }
   /** Fixed-shape object (the `File` primitive's `FileRef` wire object) —
    *  a closed set of named scalar properties. */
   | {
@@ -266,8 +277,17 @@ export function jsonPropertyForType(t: TypeIR, ref: RefResolver = bareRef): Json
         const properties: Record<string, JsonSchemaProperty> = {};
         for (const m of provenancedTypeMembers(t.arg)) {
           // No `type`: the lineage is an opaque `ProvLineage` audit blob, the
-          // same freeform-object treatment the `json` primitive gets above.
-          properties[m.name] = m.type ? jsonPropertyForType(m.type, ref) : { type: "object" };
+          // same freeform-object treatment the `json` primitive gets above —
+          // but NULLABLE, which the freeform treatment cannot say.  Every
+          // backend puts an explicit `"lineage": null` on the wire for a field
+          // never written, so a bare `{"type":"object"}` published a contract
+          // the app's own response violates (F2-XB-7).  The nullability is read
+          // off the carrier's one declaration, not decided here.
+          properties[m.name] = m.type
+            ? jsonPropertyForType(m.type, ref)
+            : PROVENANCED_LINEAGE_NULLABLE
+              ? { type: ["object", "null"] }
+              : { type: "object" };
         }
         return {
           type: "object",
