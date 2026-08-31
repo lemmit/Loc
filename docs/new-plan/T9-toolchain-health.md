@@ -214,12 +214,44 @@ The behavioral tier held exactly ONE identity, so the only authorization stateme
 
 Sources: [quality-audit-2026-08](../audits/quality-audit-2026-08.md) R3(a). Feeds M-T9.25 (round 2), M-T9.11 (4xx goldens). Related: M-T3.16 (the lifecycle write gate whose absence this class of blindness hid).
 
-## M-T9.29 — Driven-primitive / combination census — `partial` (slice 1 in flight; four findings already landed) · **M** · P2
+## M-T9.29 — Driven-primitive / combination census — `partial` (harness + CI wiring landed; the primitive census and the four non-node compile legs remain) · **M** · P2
 R5's other half. `test/ir/api-caller-census.test.ts` closed "every generated ROUTE has a runtime caller" (216 → 13 pins, #2448/#2468, residue owned by M-T9.13). The same question is unanswered one layer over: **which walker primitives, and which combinations of features, does any test actually drive?** Coverage is counted per-feature while holes live per-cell (audit §4.4) — bugs cluster at feature × backend × adapter × example intersections no single fixture crosses.
 
 **Slice 1 — the pairwise-combination corpus harness — is [#2512](https://github.com/lemmit/Loc/pull/2512), still open**, but it has already paid for itself: four of its findings merged ahead of the harness itself — [#2527](https://github.com/lemmit/Loc/pull/2527) (F1: `shape: document` × `policy` crashed codegen), [#2528](https://github.com/lemmit/Loc/pull/2528) (F2+F5: `mask unless` + principal filters never reached the non-relational repo builders), [#2529](https://github.com/lemmit/Loc/pull/2529) (F4: a line-leading soft keyword before `:` lexed as an identifier). Every one is a two-feature intersection that both features' own per-feature tests pass.
 
-**Open half:** the driven-primitive census proper — the ~55 walker primitives crossed against the six frontends and the design packs, with the undriven cells registered as a shrink-only ratchet rather than discovered one bug at a time.
+**Slice 1b — the harness reaches CI (`pairwise.yml`).** Slice 1 shipped the harness, the three
+oracles and three ratcheting registers, and then ran **nowhere**: no workflow invoked any of the
+`test:pairwise-*` scripts, so the corpus executed only when a human typed it. That forfeits the
+half of the ratchet that fires without a new bug — the **stale**-waiver arm. The first re-run
+after three weeks of `main` (@ `3a7199c7`) found **four stale waivers and zero new failures**:
+F1 was fixed by #2527 and F2+F5 by #2528, all weeks earlier, and `main` had been red on this leg
+ever since with nothing to say so. Tiers: the generation sweep is **per-PR** (~700 crossings ×
+5 backends, no toolchain, ~19s — its `crashed` verdict is valid-looking source taking the
+compiler down instead of answering with a named `loom.*` code); the `tsc` and schema-load
+oracles are **nightly + `run-pairwise` + dispatch**. Mutation-proved by re-seeding F1's defect
+(`desugarAuthzFilterInApp` passing the sentinel through undesugared): the leg goes red with
+exactly the 20 crashed crossings slice 1 recorded.
+
+> **Audit trap worth carrying forward.** Grep for the npm **script** (`test:pairwise`) when
+> asking whether a gate runs in CI — *not* for its `LOOM_*` env var. The var is set inside
+> package.json's script, so a correctly-wired workflow never mentions it: checking the var made
+> the healthy `schema-load.yml` look dark too.
+
+**Slice 1c — the compile oracle reaches all five backends.** `pairwise.yml`'s compile job is
+now a five-cell matrix, not node-only. First run: **python 7 compile failures (F6/F7/F8),
+dotnet 1 (F9), node and java clean, elixir unverified** (three local attempts lost to hex
+contention and a reaped dockerd; recorded as unverified rather than claimed green). **Two of
+the four are partial fixes of findings the register called CLOSED** — F6 *is* F2 (#2528's diff
+touches `src/generator/typescript/` only; python's non-relational builders emit `to_wire_masked`
+zero times) and F9 *is* #2527's follow-up 2 (which fixed the document shape and left the
+event-sourced impl). With #2664's three Hono-only schemathesis closures that is three
+independent instances of one defect: **a fix is marked closed when it lands on the first target
+it was reported against** — the cross-target-closure gap R11's successor should own. The
+structural correlate: the backends that split repository emission per storage shape (python,
+node, dotnet) are exactly the ones that drift; java's single repository emitter is clean.
+F6–F9 are emitter bugs, deliberately left for their own PR.
+
+**Open half:** the driven-primitive census proper — the ~55 walker primitives crossed against the six frontends and the design packs, with the undriven cells registered as a shrink-only ratchet rather than discovered one bug at a time. Plus the named compile-leg follow-up: the dotnet / java / python / elixir compile oracles over the same cover (slice 1 was node-only "to prove the harness earns them" — it has).
 
 Sources: [quality-audit-2026-08](../audits/quality-audit-2026-08.md) R5. Related: M-T9.13 (the route-caller residue), M-T9.22 (generative fuzzing — the unstructured sibling of this structured sweep).
 

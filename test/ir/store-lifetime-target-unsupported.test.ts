@@ -94,7 +94,9 @@ describe("loom.store-lifetime-target-unsupported — the feliz FIELD-scoped half
       (x) => x.code === CODE,
     );
     expect(d?.severity).toBe("error");
-    expect(d?.message).toMatch(/store 'Cart'/);
+    // The STORE lives in `source` (the CLI prints `${code} ${source}: …`); the
+    // message must not repeat it — see F2-FFE-9.
+    expect(d?.source).toBe("store 'Cart'");
     expect(d?.message).toMatch(/field 'at'/);
     expect(d?.message).toMatch(/feliz/);
   });
@@ -142,7 +144,7 @@ describe("loom.store-lifetime-target-unsupported — the flutter FIELD-scoped ha
       await diagnostics("flutter", "flutter", "local", "count: int = 0  price: Money")
     ).find((x) => x.code === CODE);
     expect(d?.severity).toBe("error");
-    expect(d?.message).toMatch(/store 'Cart'/);
+    expect(d?.source).toBe("store 'Cart'");
     expect(d?.message).toMatch(/field 'price'/);
     expect(d?.message).toMatch(/flutter/);
   });

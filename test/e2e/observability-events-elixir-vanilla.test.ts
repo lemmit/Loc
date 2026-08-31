@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { mixDepsGet } from "./support/mix-retry.js";
+import { mixDepsGet, mixLocalInstall } from "./support/mix-retry.js";
 
 // ---------------------------------------------------------------------------
 // Observability events on the vanilla Phoenix backend — vanilla mirror of
@@ -188,7 +188,7 @@ describe.skipIf(!ENABLED)(
         // 3. Fetch deps + compile.  --warnings-as-errors here would
         //    catch generator drift, but a single test shouldn't fight
         //    both surfaces; let mix compile defaults apply.
-        execSync(`mix local.hex --force && mix local.rebar --force && ${mixDepsGet()}`, {
+        execSync(`${mixLocalInstall()} && ${mixDepsGet()}`, {
           cwd: projDir,
           stdio: "pipe",
           timeout: 300_000,

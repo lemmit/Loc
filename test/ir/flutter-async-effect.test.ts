@@ -138,8 +138,9 @@ describe("loom.flutter-async-effect-unsupported", () => {
   it("names the component, the action, the ui and the deployable, and says where to move it", async () => {
     const d = (await diagsOf(componentHost("flutter"))).find((x) => x.code === CODE)!;
     expect(d.severity).toBe("error");
+    // The host lives in `source` (the CLI prints `${code} ${source}: …`), so
+    // the message must not repeat it — see F2-FFE-9.
     expect(d.source).toBe("component 'Confirmer' action 'go'");
-    expect(d.message).toContain("Confirmer");
     expect(d.message).toContain("'Web'");
     expect(d.message).toContain("'web'");
     expect(d.message).toContain("PAGE action");

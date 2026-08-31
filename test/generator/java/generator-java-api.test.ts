@@ -242,7 +242,9 @@ describe("java generator — wire validators + advice (S5)", () => {
     );
     const advice = files_.get(`${ROOT}/api/ApiExceptionAdvice.java`)!;
     expect(advice).toContain("@ExceptionHandler(MethodArgumentNotValidException.class)");
-    expect(advice).toContain('entry.put("pointer", "/" + err.getField());');
+    // The pointer is built by `pointerOf` since the RFC-6901 fix — a nested
+    // path is `/lineTotals/0/unitPrice`, not `/lineTotals[0].unitPrice`.
+    expect(advice).toContain('entry.put("pointer", pointerOf(err.getField()));');
     expect(advice).toContain(
       'if (code != null && code.startsWith("msg.")) entry.put("code", code);',
     );

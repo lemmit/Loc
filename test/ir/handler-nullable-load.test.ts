@@ -124,3 +124,74 @@ system S {
     expect(got).not.toContain("loom.handler-load-nullable-unsupported");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The THIRD body kind (domainservice-nullable-load-ungated).  The gate above
+// walked `ctx.commandHandlers`/`ctx.queryHandlers` and its workflow twin walked
+// workflow bodies; nothing walked `ctx.domainServices[].operations[].body`, so
+// the identical load parsed `0 error(s), 0 warning(s)` and emitted an unguarded
+// deref on ALL FIVE backends.
+// ---------------------------------------------------------------------------
+const svcSystem = (findRet: string, body: string) => `
+system S {
+  subdomain D {
+    context Sales {
+      aggregate Order { code: string  status: string }
+      repository Orders for Order {
+        find byCode(c: string): ${findRet} where code == c
+      }
+      domainService Lookup {
+        operation statusOf(c: string): string {
+          ${body}
+        }
+      }
+    }
+  }
+  api A from D
+  storage pg { type: postgres }
+  resource s { for: Sales, kind: state, use: pg }
+  deployable d { platform: node  contexts: [Sales]  dataSources: [s]  serves: A  port: 3000 }
+}
+`;
+
+describe("an optional find bound in a DOMAIN SERVICE body is refused too", () => {
+  const CODE = "loom.handler-load-nullable-unsupported";
+
+  it("refuses the optional load with the coded diagnostic", async () => {
+    const diags = await irDiagnostics(
+      svcSystem("Order?", "let o = Orders.byCode(c)\n          return o.status"),
+    );
+    const hit = diags.find((d) => d.code === CODE);
+    expect(hit, `got: ${diags.map((d) => d.code).join(", ") || "(none)"}`).toBeDefined();
+    expect(hit!.severity).toBe("error");
+    expect(hit!.source).toBe("Sales/Lookup.statusOf");
+    expect(hit!.message).toContain("domainService 'Lookup.statusOf'");
+    expect(hit!.message).toContain("Orders.byCode(...)");
+  });
+
+  it("CONTROL — the non-optional find is clean", async () => {
+    expect(
+      await codes(svcSystem("Order", "let o = Orders.byCode(c)\n          return o.status")),
+    ).not.toContain(CODE);
+  });
+
+  it("CONTROL — an inline (unbound) optional read is not this gate's business", async () => {
+    // `Accounts.byHolder(h) == null` is the shape the corpus fixture ships:
+    // nothing is dereferenced, so nothing is unguarded.
+    expect(
+      await codes(svcSystem("Order?", 'return Orders.byCode(c) == null ? "none" : "some"')),
+    ).not.toContain(CODE);
+  });
+
+  it("reports ONCE per repo.method however many times the body loads it", async () => {
+    const hits = (
+      await irDiagnostics(
+        svcSystem(
+          "Order?",
+          "let o = Orders.byCode(c)\n          let p = Orders.byCode(c)\n          return o.status + p.status",
+        ),
+      )
+    ).filter((d) => d.code === CODE);
+    expect(hits).toHaveLength(1);
+  });
+});

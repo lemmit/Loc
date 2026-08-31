@@ -256,6 +256,7 @@ export function renderCustomLayoutPage(
   let actionLines = "";
   let usesStateForActions = false;
   let usesRouteIdForActions = false;
+  let usesNavigateForActions = false;
   if (actions.length > 0 && usedActions && usedActions.size > 0) {
     const actx: WalkContext = {
       target: tsxTarget,
@@ -264,6 +265,11 @@ export function renderCustomLayoutPage(
       paramNames,
       usedParams,
       usesNavigate,
+      // An action body may `navigate(<Page>)` (docs/actions.md — the documented
+      // home for navigation), which resolves the destination page's ROUTE.  The
+      // action ctx omitted the table, so the resolver fell back to
+      // `/<snake(page)>` and a page with a custom `route:` navigated nowhere.
+      pageRoutes,
       stateNames,
       derivedNames,
       authUi: false,
@@ -308,6 +314,10 @@ export function renderCustomLayoutPage(
     // An awaited op mutation hoists `use<Op><Agg>(id)` off the route id, so the
     // shell must destructure `id` from `useParams` even if the body never did.
     usesRouteIdForActions = actx.usesRouteId;
+    // …and a `navigate(<Page>)` in the body needs the navigator bound.  Only
+    // `usesState`/`usesRouteId` were read back, so an action-only navigation
+    // emitted a `navigate(…)` call with no `useNavigate` import — a TS2304.
+    usesNavigateForActions = actx.usesNavigate;
   }
   // Render the title expression through emitExpr
   // (sharing the body's tracking state so the shell destructures
@@ -452,7 +462,8 @@ export function renderCustomLayoutPage(
   const needsUseParams = hasParams || effectiveUsesRouteId;
   const routerSpecifiers: string[] = [];
   if (needsUseParams) routerSpecifiers.push("useParams");
-  if (usesNavigate || form.usesNavigate) routerSpecifiers.push("useNavigate");
+  if (usesNavigate || usesNavigateForActions || form.usesNavigate)
+    routerSpecifiers.push("useNavigate");
   if (usesRouterLink) routerSpecifiers.push("Link as RouterLink");
   const reactRouterImport =
     routerSpecifiers.length > 0
@@ -500,7 +511,9 @@ export function renderCustomLayoutPage(
         ? `  useParams${paramsType}();\n`
         : "";
   const navigateLine =
-    usesNavigate || form.usesNavigate ? `  const navigate = useNavigate();\n` : "";
+    usesNavigate || usesNavigateForActions || form.usesNavigate
+      ? `  const navigate = useNavigate();\n`
+      : "";
   // Page-level `requires` UI gate (D-AUTH-OIDC): bind the verified session user
   // and render a `<Forbidden/>` fallback when the currentUser-only predicate
   // fails.  The guard lands AFTER every hook (useSession is itself a hook, so it
@@ -971,6 +984,7 @@ export function renderUserComponentFile(
   // page shell; Proposal A Stage 1).
   let actionLines = "";
   let usesStateForActions = false;
+  let usesNavigateForActions = false;
   if (actions.length > 0 && usedActions && usedActions.size > 0) {
     const actx: WalkContext = {
       target: tsxTarget,
@@ -979,6 +993,9 @@ export function renderUserComponentFile(
       paramNames,
       usedParams,
       usesNavigate,
+      // A component has no route table of its own (a `navigate(<Page>)` in a
+      // component action falls back to `/<snake(page)>`, as the body walk does).
+      pageRoutes,
       stateNames,
       derivedNames,
       authUi: false,
@@ -1017,6 +1034,7 @@ export function renderUserComponentFile(
         .join("\n")}\n`;
     }
     usesStateForActions = actx.usesState;
+    usesNavigateForActions = actx.usesNavigate;
   }
   const compUsesState = usesState || usesStateForDerived || usesStateForActions;
   // Components live at `src/components/<Name>.tsx` (one hop to `src/`),
@@ -1070,7 +1088,8 @@ export function renderUserComponentFile(
   // Components don't have routes — useNavigate/Link still legal in
   // a component subtree (e.g. Button(to:) inside).
   const routerSpecifiers: string[] = [];
-  if (usesNavigate || form.usesNavigate) routerSpecifiers.push("useNavigate");
+  if (usesNavigate || usesNavigateForActions || form.usesNavigate)
+    routerSpecifiers.push("useNavigate");
   if (usesRouterLink) routerSpecifiers.push("Link as RouterLink");
   const reactRouterImport =
     routerSpecifiers.length > 0
@@ -1164,7 +1183,9 @@ export function renderUserComponentFile(
   const propDestructure =
     destructureNames.length > 0 ? `{ ${destructureNames.join(", ")} }: ${name}Props` : "";
   const navigateLine =
-    usesNavigate || form.usesNavigate ? `  const navigate = useNavigate();\n` : "";
+    usesNavigate || usesNavigateForActions || form.usesNavigate
+      ? `  const navigate = useNavigate();\n`
+      : "";
   const stateLines = compUsesState
     ? state.map((f) => `  ${renderUseState(f, pack)}\n`).join("")
     : "";

@@ -675,7 +675,7 @@ export function renderApiExceptionAdvice(
     `        problem.setProperty("errors", e.getBindingResult().getFieldErrors().stream()`,
     `            .map(err -> {`,
     `                var entry = new java.util.LinkedHashMap<String, Object>();`,
-    `                entry.put("pointer", "/" + err.getField());`,
+    `                entry.put("pointer", pointerOf(err.getField()));`,
     // A FieldError IS a MessageSourceResolvable: MessageSource tries its codes
     // (the `msg.<hash>` i18n key) and falls back to getDefaultMessage() — the
     // authored English — when the bundle has no entry for this locale.  The
@@ -799,7 +799,7 @@ export function renderApiExceptionAdvice(
     `        httpMetrics.recordDomainFault("domain_error");`,
     `        var problem = problem(${UNPROCESSABLE_ENTITY}, "Validation failed", "One or more fields are invalid.", request);`,
     `        var entry = new java.util.LinkedHashMap<String, Object>();`,
-    `        entry.put("pointer", "/" + e.getName());`,
+    `        entry.put("pointer", pointerOf(e.getName()));`,
     `        var required = e.getRequiredType();`,
     `        entry.put("message", required != null`,
     `            ? "Expected " + required.getSimpleName() + "."`,
@@ -877,6 +877,42 @@ export function renderApiExceptionAdvice(
     `            .contentType(MediaType.APPLICATION_PROBLEM_JSON)`,
     `            .body(problem);`,
     `    }`,
+    ``,
+    // RFC 6901 JSON pointer for a Spring binding path (M-T9.25 / F1
+    // nested-errors-pointer-shape).  Spring spells a nested VO-collection
+    // violation `lineTotals[0].unitPrice` — Java property-path notation, NOT a
+    // pointer — so a nested `errors[]` entry shipped `/lineTotals[0].unitPrice`
+    // while .NET/node/python all shipped `/lineTotals/0/unitPrice` for the same
+    // model.  Split on `.`, turn each `[i]` indexer into its own numeric
+    // segment, and apply the RFC 6901 escapes (`~` → `~0`, `/` → `~1`) inside
+    // each segment.  Java record components are already camelCase, so (unlike
+    // .NET's `PointerOf`) no case conversion is needed.  Empty input → the
+    // empty pointer (the whole document).
+    `    private static String pointerOf(String path) {`,
+    `        if (path == null || path.isEmpty()) return "";`,
+    `        var segments = new java.util.ArrayList<String>();`,
+    `        for (var dotPart : path.split("\\\\.", -1)) {`,
+    `            int idx = 0;`,
+    `            while (idx < dotPart.length()) {`,
+    `                int bracket = dotPart.indexOf('[', idx);`,
+    `                if (bracket < 0) {`,
+    `                    segments.add(dotPart.substring(idx));`,
+    `                    break;`,
+    `                }`,
+    `                if (bracket > idx) segments.add(dotPart.substring(idx, bracket));`,
+    `                int close = dotPart.indexOf(']', bracket);`,
+    `                if (close < 0) break;`,
+    `                segments.add(dotPart.substring(bracket + 1, close));`,
+    `                idx = close + 1;`,
+    `            }`,
+    `        }`,
+    `        var out = new StringBuilder();`,
+    `        for (var seg : segments) {`,
+    `            out.append('/').append(seg.replace("~", "~0").replace("/", "~1"));`,
+    `        }`,
+    `        return out.toString();`,
+    `    }`,
+
     // The SQLState reader is emitted only alongside the DataIntegrityViolation
     // handler that calls it (gated on `hasUniqueKeys`), so a unique-free project
     // stays byte-identical.

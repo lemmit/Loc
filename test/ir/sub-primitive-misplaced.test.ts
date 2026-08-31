@@ -99,9 +99,24 @@ describe("loom.sub-primitive-misplaced — the gate", () => {
       (x) => x.code === CODE,
     );
     expect(d?.severity).toBe("error");
-    expect(d?.message).toMatch(/page 'X'/);
+    // The LOCATION lives in `source` (the CLI prints `${code} ${source}: …`).
+    expect(d?.source).toBe("page 'X'");
     expect(d?.message).toMatch(/`Tab`/);
     expect(d?.message).toMatch(/'Tabs'/);
+  });
+
+  // F2-FFE-9 — the message used to LEAD with the same `where` string the
+  // diagnostic carries as `source`, so `ddd parse` printed the location twice:
+  // `loom.sub-primitive-misplaced page 'Home': page 'Home': \`Tab\` is a …`.
+  it("does not repeat its `source` at the head of the message", async () => {
+    for (const body of [
+      `page X { route: "/x"  body: Stack { Tab("one") } }`,
+      `component TabbyTop() { body: Stack { Tab("one") } }`,
+    ]) {
+      const d = (await diagnostics(body)).find((x) => x.code === CODE);
+      expect(d, body).toBeDefined();
+      expect(d!.message.startsWith(`${d!.source}:`), `${body} → ${d!.message}`).toBe(false);
+    }
   });
 
   it("names BOTH legal parents for `Column`", async () => {

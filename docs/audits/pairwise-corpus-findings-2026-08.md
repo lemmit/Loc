@@ -69,18 +69,39 @@ the gate reported it as stale. The finding was **withdrawn**, not shipped.
 
 | # | Crossing | Symptom | Status |
 |---|---|---|---|
-| **F1** | `shape: document` × `policy { allow … }` (node, java, python) | codegen **throws** an internal invariant | open — registered |
-| **F2** | `mask unless` × `document` / `embedded` / `eventLog` (node, drizzle) | TS2339 `toWireMasked` does not exist | open — registered |
-| **F3** | `mask unless` × `persistence: mikroorm` (all four repo variants) | TS2304 cannot find name `User` | **fixed in this PR** |
+| **F1** | `shape: document` × `policy { allow … }` (node, java, python) | codegen **throws** an internal invariant | **fixed** — #2527, waiver deleted 2026-08-24 |
+| **F2** | `mask unless` × `document` / `embedded` / `eventLog` (node, drizzle) | TS2339 `toWireMasked` does not exist | **fixed** — #2528, waiver deleted 2026-08-24 |
+| **F3** | `mask unless` × `persistence: mikroorm` (all four repo variants) | TS2304 cannot find name `User` | **fixed** — in the slice-1 PR |
 | **F4** | a field named `secret` after a modifier-less property | swallowed as that property's access modifier; syntax error on the *next* line | open — registered |
-| **F5** | principal capability filter × `shape: document` × `mikroorm` | TS2304 cannot find name `currentUser` | open — registered |
+| **F5** | principal capability filter × `shape: document` × `mikroorm` | TS2304 cannot find name `currentUser` | **fixed** — #2528, waiver deleted 2026-08-24 |
+| **F6** | `mask` × `document`/`embedded`/`eventLog` — **python** | `to_wire_masked` missing on the non-relational repo builders | **fixed** — this PR; was **F2's fix never leaving TypeScript** |
+| **F7** | `audited` × `document`/`embedded` — **python** | `record_audit` / `history` are relational-only | **fixed** — this PR |
+| **F8** | `versioned` × `eventLog` — **python** | `save()` takes no `expected_version` (mypy `call-arg`) | **fixed** — this PR (guard is stream-head, not row-version) |
+| **F9** | `versioned` × `eventLog` × `deny` — **dotnet/EF** | CS0535: the event-sourced impl has no `GetByIdForWriteAsync` | **fixed** — this PR; was **#2527 f/u 2 fixing the DOCUMENT shape only** |
+| **F10** | `versioned` × `eventLog` × `requires currentUser.…` — **elixir** | `undefined variable "current_user"` — the ES command emitter never grew the `current_user \\ nil` arg the relational and document paths take | **fixed** — this PR; found only after the log-truncation fix below |
+
+> **Why F1/F2/F5 sat "open" for weeks after they were fixed.** #2527 and #2528
+> landed the emitter fixes and did *not* delete the waivers — correctly, as far
+> as anyone could tell, because **nothing re-ran this harness**. All three legs
+> were gated behind `LOOM_PAIRWISE=1`, and no workflow set it: the corpus had no
+> CI entry of any kind, not per-PR, not nightly, not `workflow_dispatch`. The
+> stale-waiver ratchet these registers lean on fires only when the leg runs, so
+> for three weeks it reported nothing while `main` was quietly red on four
+> entries. `pairwise.yml` closes that; the four deletions here are what the first
+> run found.
 
 F3 and F5 are the same shape one level apart: the MikroORM repositories were cloned from the
 drizzle ones and each missed a different piece the original had. Neither is visible from a
 single-feature fixture — `mask unless` has one, `persistence: mikroorm` has a matrix, and the
 bug lives only where they meet.
 
-### F1 — `shape: document` × `policy { allow … }` crashes codegen — **open**
+### F1 — `shape: document` × `policy { allow … }` crashes codegen — **fixed (#2527)**
+
+> **Closed 2026-08-24.** `#2527` desugars the `authz-filter` sentinel to ordinary `ExprIR`
+> for the in-app document path (`src/generator/_expr/authz-filter-inapp.ts`), so node/java/
+> python render it through their existing expression renderer instead of blowing
+> `renderExprWith`'s invariant. The generation waiver was deleted when `pairwise.yml`'s first
+> run flagged it stale. Diagnosis below kept as the record.
 
 **Class:** pipeline crash (internal invariant).
 **Reaches:** node, java, python — every capability value, both node persistence adapters.
@@ -119,7 +140,11 @@ node bin/cli.js generate system /tmp/pw/node-none-document-policyAllow-default.d
 
 ---
 
-### F2 — `mask unless` × any non-relational saving shape does not compile (node/drizzle) — **open**
+### F2 — `mask unless` × any non-relational saving shape does not compile (node/drizzle) — **fixed (#2528)**
+
+> **Closed 2026-08-24.** `#2528` emits `toWireMasked` from the document, embedded and
+> event-sourced repository builders, not just the relational one. Waiver deleted on the first
+> `pairwise.yml` run. Diagnosis below kept as the record.
 
 **Class:** uncompilable target code — the recorded class, on a crossing nothing built before.
 **Reaches:** node + drizzle, `shape: document`, `shape: embedded`, `persistedAs: eventLog`,
@@ -207,7 +232,11 @@ bug.
 
 ---
 
-### F5 — a principal capability filter × `shape: document` × `persistence: mikroorm` does not compile — **open**
+### F5 — a principal capability filter × `shape: document` × `persistence: mikroorm` does not compile — **fixed (#2528)**
+
+> **Closed 2026-08-24.** `#2528` binds `requireCurrentUser()` in the MikroORM document
+> repository, as the drizzle one already did. Waiver deleted on the first `pairwise.yml` run.
+> Diagnosis below kept as the record.
 
 **Class:** feature × feature × adapter (three-factor), same family as F3 and in the same file.
 
@@ -291,6 +320,235 @@ findings.
 
 Counts come from `LOOM_PAIRWISE_REPORT=<file>`, which the generation oracle writes — a
 register whose numbers are hand-tallied goes stale the first time the matrix changes.
+
+### Re-run on `main` @ `3a7199c7` (2026-08-24) — the first run since slice 1
+
+The run that motivated `pairwise.yml`. Same three oracles, same cover, three weeks of `main`
+later:
+
+| Oracle | Cases | Result |
+|---|---|---|
+| Generation | 700 | **594 ok, 106 rejected (4 distinct `loom.*` codes), 0 crashed** — red only on the stale F1 waiver |
+| Compile — node, strict `tsc` | 25 | **22 pass, 0 compile failures** — red only on the stale F2 (2 cases) + F5 (1 case) waivers |
+| Schema-load | 25 | **green** |
+
+Two things are worth reading off this, in opposite directions:
+
+- **The intersection surface itself got better, not worse.** Crashes went 20 → 0 and the
+  compile leg has no unwaived failure. The slice-1 findings were drained (#2527, #2528) and
+  nothing new arrived in three weeks of a fast-moving `main`. The generation tier's remaining
+  job is regression protection, not discovery.
+- **Every red the re-run produced was a stale waiver, and staleness is exactly what a dark
+  ratchet cannot report.** Four entries, all fixed weeks earlier. The register said "open" for
+  all four; the emitters said otherwise. That gap is the cost of a gate with no workflow, and
+  it is the argument for wiring the leg *before* widening it — a wider matrix behind the same
+  dark switch would have produced more stale rows, not more caught bugs.
+
+## The five-backend compile run (2026-08-24) — F6–F10, and the pattern behind them
+
+Slice 1's compile oracle was node-only *by design* ("this slice's job is to prove the harness
+earns them"). It has now earned them: `pairwise.yml` runs the same all-pairs cover through
+each backend's real toolchain. The first run:
+
+| Leg | Cases | Verdict |
+|---|---|---|
+| node | 25 | clean |
+| **python** | 25 | **7 compile failures** → F6, F7, F8 · 0 rejected · 0 crashed |
+| **dotnet** | 25 | **1 compile failure** → F9 · 4 rejected (named `loom.*`) · 0 crashed |
+| java | 25 | clean (22 compiled, 3 rejected) — two independent full runs |
+| **elixir** | 25 | **1 compile failure** → F10 · reported as "clean" for three runs because the leg truncated the log from the HEAD (below) |
+
+### Two of these are findings this register already called CLOSED
+
+That is the result worth carrying forward, and it is why every row above names its **target**:
+
+- **F6 is F2.** #2528 fixed `toWireMasked` on the non-relational repository builders — and its
+  diff touches `src/generator/typescript/` and nothing else. Node's document / embedded /
+  event-sourced builders each emit the method; python's emit it **zero** times. The register
+  said *fixed*.
+- **F9 is #2527's follow-up 2.** That fix added `GetByIdForWriteAsync` to the **document**
+  repository impl, and `src/generator/dotnet/emit/repository.ts:711` says so in its own comment
+  — "the interface declares `GetByIdForWriteAsync` and the document impl had no
+  implementation". The **event-sourced** impl was left without it. The register said *fixed*.
+
+One partial along the TARGET axis, one along the SHAPE axis. Both were recorded closed, and
+neither was reachable by anything that ran in CI. This is the same shape #2664 hit from the
+contract side (three schemathesis findings closed on Hono alone), which makes it three
+independent instances of one process defect: **a fix is marked closed when it lands on the
+first target it was reported against.**
+
+### The pattern: per-shape repository emitters drift
+
+| Backend | Repository emission | Compile failures |
+|---|---|---|
+| java | ONE emitter, no per-shape split | **0** |
+| node | 3 shape-specific builder FILES | 0 — *but only since #2528* |
+| dotnet | 3 shape-specific impl FUNCTIONS in one file | 1 |
+| python | 3 shape-specific builder FILES | 7 |
+
+The backends that split repository emission per storage shape are exactly the backends that
+drift. Every python failure is the same mechanism: `routes-builder.ts` calls a repository
+method whenever a capability flag is set, with **no check on persistence shape**, and only the
+relational builder implements it. So the finding is not "python forgot three methods" — it is
+that **a per-shape split creates N places to implement every capability and nothing checks all
+N**. Java, which cannot drift this way, passed the identical cover including all four crossings
+python fails.
+
+Java's clean result is also what proves the leg is honest: a leg that quietly dodged the hard
+crossings would look exactly like a green one.
+
+### Elixir — three false "clean" verdicts, two harness bugs, and F10
+
+The verdict took four runs, and the first three were the harness's fault, not elixir's:
+
+| Run | Result | Cause |
+|---|---|---|
+| 1 | 17 of 25 "failed" | hex.pm timeouts under concurrent load from sibling agents |
+| 2 | all 21 remaining "failed" | a reaped `dockerd` |
+| 3 | 17 of 25, 65min | same hex timeouts, uncontended — so NOT contention |
+| **4** | **25 pass / 1 infra, 78min** | after the fix below |
+
+Run 3 is the one that mattered: uncontended and still failing, which killed the contention
+theory and forced a real diagnosis. **The leg mounted `~/.hex` — the PACKAGE cache — but not
+`~/.mix/archives`, where `mix local.hex` installs the hex archive, and hex is not baked into
+the `hexpm/elixir` image.** So all 25 `docker run --rm` cases re-downloaded the same archive
+from builds.hex.pm, which throttles it. One fetch is fine; twenty-five are not — which is
+exactly why a SINGLE case passed in 81s throughout. Mounting the archive dir and installing
+`--if-missing` makes it one fetch per run; harness faults went 34 → 0.
+
+Note what this says about the retry added alongside: **a bounded retry cannot beat a rate
+limit**, and the logs show it spending `attempt 2 of 3` and `attempt 3 of 3` before failing
+anyway. The retry is still correct for hex.pm's transient 500s (#2661's case) but it was
+treating a symptom here.
+
+**Run 4 was read as "zero real compile findings on elixir" — and that reading was wrong.**
+It is recorded here rather than edited away, because the reason it was wrong is the more
+useful finding. One case did report a compile failure, and its entire captured body was four
+thousand characters of
+
+```
+Compiling 12 files (.ex)
+Compiling 12 files (.ex)
+…
+```
+
+cut off mid-word. Nothing in it named a file, a line, or an error, so it was filed as another
+unclassified infra timeout — the same disposition the genuine `:timeout` case above got, which
+made the misfiling look consistent.
+
+**The cause was in the leg, not in elixir: every leg returned `` `${err.stdout}${err.stderr}`
+.slice(0, 4000) ``, and a compiler prints its diagnostic LAST.** The slice kept the progress
+noise and threw away the answer. Worse, the truncation happened BEFORE the text reached
+`infraFailure`, so a signature at the tail could not match either — the classifier was being
+handed a prefix and asked to recognise a suffix. `trimForMessage` now keeps a 600-character
+head for command context and the TAIL, and marks the elision; the classifier sees the FULL
+text. Both directions are pinned in `test/pairwise/compile-leg.test.ts`, including the
+head-slice case that reproduces the miss.
+
+With the tail visible the same case reported, immediately and unambiguously:
+
+```
+error: undefined variable "current_user"
+ 27 │  :ok <- ensure(current_user.role == "agent", {:forbidden, …}),
+    └─ lib/d/main.ex:27:24: D.Main.bump_thing/2
+```
+
+That is **F10**, and it is a textbook instance of the class this corpus exists to find:
+`versioned` × `eventLog` × `requires currentUser.…`. The relational command path
+(`context-emit.ts`) and the document path both give a principal-reading command a
+`current_user \\ nil` trailing argument; the event-sourced path was the one command emitter
+that never grew it, so it rendered `current_user.role` into a `with` chain of a function that
+never bound it. Fixed on both halves — the function head AND the controller's pass-through,
+because emitting the parameter alone would compile and then deny every request at runtime on
+`nil.role`, which is strictly worse than the compile error it replaces. Pinned by
+`test/generator/elixir/es-command-principal.test.ts` (mutation-proved: reverting either half
+fails four of its five assertions), and verified by a real container compile — `Generated d
+app`, exit 0.
+
+The wider lesson is about the instrument. Three runs in a row reported elixir clean while a
+real emitter bug sat in the cover, and the two mechanisms that hid it are opposites of the
+same mistake: a signature list only catches infra it has already seen (so an unmatched infra
+failure becomes a FAKE finding), and a head-truncated log shows no diagnostic at all (so a REAL
+finding becomes a fake infra fault). **This leg misclassified in both directions before it
+reported anything true.** A green oracle is a claim about the oracle first.
+
+Two corrections to the record, both mine: the earlier claim that "hex.pm is unreachable from
+this sandbox" was **wrong** (the host gets HTTP 200 from both hex hosts and the mirror works —
+every `repo.hex.pm` fetch returned 200 through it), and this section previously read
+"UNVERIFIED". A HARNESS FAULT is a prompt to investigate, not a verdict to accept: "the
+registry is down" and "your own daemon died" report identically and share no remedy.
+
+**Cost, and what it implies for CI:** 78min for the full cover, uncontended, with a warm hex
+archive — against a 60min cell budget sized from a single-case extrapolation that was wrong by
+more than 2×. The budget is now 150min. The real fix is that `deps/` and `_build/` are not
+shared across cases the way the node leg shares `node_modules`, so every case rebuilds the
+whole dependency tree from source; hashing `mix.exs` and mounting both is the named follow-up.
+
+Both of those failures also exposed a flaw in the harness itself: an infra failure was being
+reported as a compile finding, which both manufactures fake findings and — on a waived case —
+reads as "still broken", silently holding a waiver whose bug may already be fixed. The core now
+classifies infra signatures as HARNESS FAULTS before the ratchet sees them
+(`test/pairwise/compile-leg.ts`, gated both ways by its own test).
+
+### Disposition
+
+**All five are FIXED in the same PR that found them**, and the deciding argument was not
+ambition but consistency: this PR drains four stale waivers in its first commit precisely
+because *you cannot wire a gate into CI that lands red*, so shipping a compile matrix with 9
+known failures and a register saying "waivers stay empty" would have contradicted itself. The
+registers stay empty because there is nothing left to sign.
+
+Sizes, since "separate PR" was first justified as scope discipline and that was wrong: F6 and
+F9 were splices against templates already in the file (F9's sits twelve lines above the gap it
+didn't fill), F7 was four rounds of import gates the relational builder already had, F10 was
+one predicate call at three emission sites, and only F8 needed a genuine semantics decision.
+None was large.
+
+Post-fix cover: **python 26/26, dotnet's single failure closed, elixir's F10 closed, node /
+java already clean** — so the matrix lands green.
+
+---
+
+## Postscript — what merging `main` under this PR cost, twice
+
+Both merges hit the SAME files this PR fixes, because two other fleets were
+draining the same gap list from the other direction.
+
+**#2668 landed F9 independently**, as a hoisted `writeScopeMethod` const rather
+than the inline splice here. Byte-identical emission; main's structure kept. Two
+methods converging on one CS0535 is corroboration, not waste — but note that
+neither knew about the other, which is the coordination cost of parallel drains.
+
+**#2694 collided with F6/F7/F8 in the python builders**, and this one is worth
+recording as its own class. Both sides added a reason for the SAME
+`authUserImport(...)` gate — #2694 wanted `require_current_user` for its in-app
+write guard, F6 wanted `current_user` for the read-mask projection — and git,
+seeing two additions near one another, kept both. The result was **two
+`authUserImport(...)` call sites in the event-sourced builder**, which emits two
+`from app.auth.user import …` lines into the generated module and fails it on
+ruff.
+
+The correct resolution was a UNION of the arguments, not a choice between the
+sides — a distinction a three-way textual merge cannot make, because the two
+edits are textually independent and semantically the same gate.
+
+What makes it worth a section: **`tsc -b` passed on the duplicate.** The emitter
+builds strings, so two calls typecheck exactly as well as one. It was caught only
+because #2694 had also renamed `writeGuardAlias` → `writeGuardInApp`, leaving a
+stale import two lines above that the compiler *did* object to. Without that
+coincidence the duplicate ships, and the failure appears as a ruff error inside a
+generated project — three layers from its cause, in the same
+compile-oracle-shaped blind spot this whole register is about.
+
+`test/generator/python/python-auth-import-single-call.test.ts` now pins one call
+site per builder (mutation-proved by reinstating the exact duplicate the merge
+produced). A source scan rather than an output assertion, deliberately: the
+defect is structural and typecheck-invisible, and reproducing it through emitted
+output needs a read mask AND a narrowed write scope on one aggregate — which
+needs the whole `tenancy by` + `tenantOwned` + `policy { allow deep }` scaffold.
+Same pattern as `pipeline-layering` / `diagnostic-catalog`.
+
+---
 
 ## Follow-up slices
 

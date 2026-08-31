@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { MIX_DEPS_GET_ATTEMPTS, mixDepsGet } from "./mix-retry";
+import { MIX_DEPS_GET_ATTEMPTS, mixDepsGet, mixLocalInstall } from "./mix-retry";
 
 // ---------------------------------------------------------------------------
 // Unit gate for the `mix deps.get` retry snippet (test/e2e/support/mix-retry.ts).
@@ -155,6 +155,17 @@ describe("mixDepsGet — bounded retry snippet", () => {
     const { mixDepsGetShell } = await import("../../behavioral/mix-retry.mjs");
     expect(mixDepsGetShell()).toBe(mixDepsGet());
   });
+
+  it("wraps only the toolchain FETCH steps — local.hex/rebar, never compile", () => {
+    expect(mixLocalInstall()).not.toContain("compile");
+    expect(mixLocalInstall()).toContain("mix local.hex --force");
+    expect(mixLocalInstall()).toContain("mix local.rebar --force");
+  });
+
+  it("the .mjs twin of the Hex install emits the identical snippet", async () => {
+    const { mixLocalInstallShell } = await import("../../behavioral/mix-retry.mjs");
+    expect(mixLocalInstallShell()).toBe(mixLocalInstall());
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -208,5 +219,38 @@ it("no harness invokes a bare `mix deps.get` — the fetch always goes through t
     offenders,
     `these call sites fetch hex deps without the bounded retry — compose ` +
       `mixDepsGet() from test/e2e/support/mix-retry.ts instead:\n  ${offenders.join("\n  ")}`,
+  ).toEqual([]);
+});
+
+it("no harness invokes a bare `mix local.hex` — the Hex INSTALL retries too", () => {
+  // The twin of the `mix deps.get` census above, and it exists because the
+  // narrower version was not enough.  The pairwise elixir leg's first full run
+  // lost 17 of 25 cases to ONE un-retried call: `mix local.hex --force` timing
+  // out against builds.hex.pm under concurrent docker load, BEFORE any emitted
+  // code was read (all 17 failures byte-identical; one of them compiled clean
+  // in 67s re-run alone).  Every containerised elixir gate runs it once per
+  // `docker run --rm`, and `--force` re-fetches `hex.csv` however warm the
+  // mounted `~/.hex` cache is — the single most-repeated remote fetch in these
+  // gates, and until then the only one with no backoff at all.
+  const offenders: string[] = [];
+  for (const dir of ["test", "scripts"]) {
+    for (const file of sourceFiles(path.join(repoRoot, dir))) {
+      const rel = path.relative(repoRoot, file).split(path.sep).join("/");
+      // Same allowlist as the fetch census: the retry definitions, their
+      // documented .mjs/.sh twins, and this gate itself.
+      if (RAW_ALLOWED.has(rel)) continue;
+      fs.readFileSync(file, "utf8")
+        .split("\n")
+        .forEach((line, i) => {
+          if (!isComment(line) && /mix local\.(hex|rebar)/.test(line)) {
+            offenders.push(`${rel}:${i + 1}`);
+          }
+        });
+    }
+  }
+  expect(
+    offenders,
+    `these call sites install Hex/rebar without the bounded retry — compose ` +
+      `mixLocalInstall() from test/e2e/support/mix-retry.ts instead:\n  ${offenders.join("\n  ")}`,
   ).toEqual([]);
 });

@@ -146,19 +146,28 @@ function appNameOf(mixExs) {
 // must keep failing fast: their failures are the signal this tier exists for.
 const DEPS_GET_BACKOFF_S = [5, 20];
 
-/** `mix deps.get` with a bounded retry (3 attempts, 5s then 20s backoff). */
-function mixDepsGet(cwd, env) {
+/** One `mix <args>` with a bounded retry (3 attempts, 5s then 20s backoff).
+ *  Only ever wrapped around a TOOLCHAIN FETCH — `deps.get` and the
+ *  `local.hex`/`local.rebar` install.  `mix compile` and friends must keep
+ *  failing fast: a compile error is the signal this harness exists to deliver. */
+function mixWithRetry(args, cwd, env) {
+  const label = `mix ${args.join(" ")}`;
   for (let attempt = 1; ; attempt++) {
     try {
-      return execFileSync("mix", ["deps.get"], { cwd, stdio: "pipe", env });
+      return execFileSync("mix", args, { cwd, stdio: "pipe", env });
     } catch (err) {
       const wait = DEPS_GET_BACKOFF_S[attempt - 1];
       if (wait === undefined) throw err;
-      process.stdout.write(`  [retry] mix deps.get failed, attempt ${attempt + 1} of ${DEPS_GET_BACKOFF_S.length + 1} after ${wait}s\n`);
+      process.stdout.write(`  [retry] ${label} failed, attempt ${attempt + 1} of ${DEPS_GET_BACKOFF_S.length + 1} after ${wait}s\n`);
       // Synchronous sleep — this harness is a straight-line script.
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait * 1000);
     }
   }
+}
+
+/** `mix deps.get` with the bounded retry. */
+function mixDepsGet(cwd, env) {
+  return mixWithRetry(["deps.get"], cwd, env);
 }
 
 /** Fetch + compile the dep tree ONCE into `warm`, from this case's project.
@@ -224,8 +233,11 @@ function pruneUnusedWarmTrees() {
 let mixToolingReady = false;
 function ensureMixTooling(cwd) {
   if (mixToolingReady) return;
-  execFileSync("mix", ["local.hex", "--force"], { cwd, stdio: "pipe", env: mixEnv() });
-  execFileSync("mix", ["local.rebar", "--force"], { cwd, stdio: "pipe", env: mixEnv() });
+  // Retried like the fetch below it: `--force` re-downloads
+  // builds.hex.pm/installs/hex.csv every time, and that one call cost the
+  // pairwise elixir leg 17 of 25 cases when it timed out under load.
+  mixWithRetry(["local.hex", "--force"], cwd, mixEnv());
+  mixWithRetry(["local.rebar", "--force"], cwd, mixEnv());
   mixToolingReady = true;
 }
 

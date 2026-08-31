@@ -92,7 +92,9 @@ describe("loom.page-primitive-extra-children — the gate", () => {
       await diagnostics(`page X { route: "/x"  body: Stat { "R", "10", Text { "extra" } } }`)
     ).find((x) => x.code === CODE);
     expect(d?.severity).toBe("error");
-    expect(d?.message).toMatch(/page 'X'/);
+    // The HOST lives in `source` (the CLI prints `${code} ${source}: …`); the
+    // message must not repeat it — see F2-FFE-9.
+    expect(d?.source).toBe("page 'X'");
     expect(d?.message).toMatch(/Stat/);
   });
 
