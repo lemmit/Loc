@@ -616,14 +616,38 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // and would take this waiver with it.  That is precisely the coverage-hiding
   // trade M-T9.13 exists to prevent, so the entry stays.
   //
-  // SAME ROOT CAUSE AS `lifecycle-guard` ABOVE: the behavioural principal's
-  // claim set is `{ tenantId, orgId, role }`, and a fixture whose predicate
-  // reads any other claim cannot be driven at runtime.  Draining EITHER entry is
-  // one piece of harness work — widen the claim set (and allow array-valued
-  // claims for `permissions`) — not two fixture edits.  The emitted predicate IS
-  // executed against fabricated rows in
-  // `test/generator/policy-document-inapp.test.ts`, so the filtering semantics
-  // are proven; what is missing is the wire.
+  // WHY THE 404 — a PRODUCT BUG this waiver was hiding, not a harness gap.
+  // `tenantOwned` declares `onCreate` stamps (`tenantId := currentUser.tenantId`,
+  // `dataKey := currentUser.orgPath`; src/macros/prelude.ts).  On the RELATIONAL
+  // write path the node backend lands them in `db/audit-stamp.ts` —
+  // `stampInsert(row)` returns `{ ...row, tenantId, dataKey }`.  The
+  // `shape: document` repository NEVER IMPORTS IT: the create route is
+  // `Thing.create(...)` then `repo.save(created)`, `Thing.create` hardcodes
+  // `tenantId: ""` / `dataKey: null`, and `save` inserts `thingToDoc(aggregate)`
+  // verbatim.  So a tenant-owned DOCUMENT row is written with an EMPTY tenant and
+  // is invisible to every principal INCLUDING ITS CREATOR — read, update and
+  // destroy all 404 — silently, behind a 201.
+  //
+  // Per-backend (2026-08-30, generated from this fixture):
+  //   • node    — runtime-proven on the behavioural leg (POST 201 -> GET 404)
+  //   • dotnet  — no stamp on the document write path (read/write-scope
+  //               predicates emit, `_WriteScopeAllows`/`_CapabilityVisible`)
+  //   • java    — same absence across factory, `ThingService`, repository
+  //   • python  — CORRECT: emits `_stamp_on_create(current_user)`
+  //   (elixir refuses this crossing by name, `loom.context-filter-unsupported`)
+  //
+  // So this entry cannot be drained by writing a caller: the caller is correct
+  // and the SYSTEM is wrong on three of the four in-app backends.  Draining it
+  // means fixing the document-shape stamp seam first — python is the reference
+  // emission.  That is a `src/` change and belongs to its own mission; this
+  // register only records why the runtime hole persisted long enough to hide it.
+  //
+  // `lifecycle-guard` above is a DIFFERENT and genuinely harness-shaped blocker
+  // (the principal's claim set), so the two do NOT drain together after all.
+  // The emitted predicate IS executed against fabricated rows in
+  // `test/generator/policy-document-inapp.test.ts`, which is exactly why the
+  // defect survived: the filter is right, and nothing ever wrote a real row
+  // through the real create path for it to filter.
   "policy-document",
   // SIDECARS — `objectStore` (S3/minio), `queue`, an http `api` peer and a
   // `mailer` (mailpit).  A put→get round-trip needs them standing up, which is
