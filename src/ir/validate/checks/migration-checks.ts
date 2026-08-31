@@ -331,7 +331,7 @@ export function validateSelfProvisioningSchemaSupport(
 
       for (const dep of selfProv) {
         const source = `${sys.name}/${dep.name}`;
-        const key = dep.persistence === "dapper" ? "dapper" : "mikroorm";
+        const isDapper = dep.persistence === "dapper";
         // (1) split-brain — a sibling adapter qualifies the same context.
         if (qualifying.length > 0) {
           const params = {
@@ -341,15 +341,25 @@ export function validateSelfProvisioningSchemaSupport(
             other: qualifying[0]!.name,
             otherAdapter: qualifying[0]!.persistence ?? qualifying[0]!.platform,
           };
-          diags.push({
-            severity: "error",
-            code: `loom.${key}-unsupported`,
-            message:
-              key === "dapper"
-                ? diagMessage("loom.dapper-unsupported#schema-split", params)
-                : diagMessage("loom.mikroorm-unsupported#schema-split", params),
-            source,
-          });
+          // One push per adapter, each with a STRING-LITERAL `code:` — a
+          // computed `loom.${…}-unsupported` is invisible to the catalog
+          // ratchet (`diagnostic-catalog.test.ts`), which is the whole reason
+          // the sibling migration gate above spells both arms out too.
+          if (isDapper) {
+            diags.push({
+              severity: "error",
+              code: "loom.dapper-unsupported",
+              message: diagMessage("loom.dapper-unsupported#schema-split", params),
+              source,
+            });
+          } else {
+            diags.push({
+              severity: "error",
+              code: "loom.mikroorm-unsupported",
+              message: diagMessage("loom.mikroorm-unsupported#schema-split", params),
+              source,
+            });
+          }
           continue;
         }
         // (2) no sibling, but the binding ASKS for a placement this adapter
@@ -372,15 +382,21 @@ export function validateSelfProvisioningSchemaSupport(
               ? `schema: "${asking.schema}"`
               : `tablePrefix: "${asking.tablePrefix}"`,
         };
-        diags.push({
-          severity: "error",
-          code: `loom.${key}-unsupported`,
-          message:
-            key === "dapper"
-              ? diagMessage("loom.dapper-unsupported#schema-ignored", params)
-              : diagMessage("loom.mikroorm-unsupported#schema-ignored", params),
-          source,
-        });
+        if (isDapper) {
+          diags.push({
+            severity: "error",
+            code: "loom.dapper-unsupported",
+            message: diagMessage("loom.dapper-unsupported#schema-ignored", params),
+            source,
+          });
+        } else {
+          diags.push({
+            severity: "error",
+            code: "loom.mikroorm-unsupported",
+            message: diagMessage("loom.mikroorm-unsupported#schema-ignored", params),
+            source,
+          });
+        }
       }
     }
   }
