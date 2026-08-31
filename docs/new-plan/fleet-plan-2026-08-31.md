@@ -68,7 +68,12 @@ an empty commit on `main` (`f4df492`/`#2419`) when two agents fixed the same def
 | Agent | Task | Deliverable |
 |---|---|---|
 | **W0-A** | Ledger reconciliation. Walk all 251 rows of `targets-completeness-2026-08-30.ledger.json` against merged `#2668`/`#2694`/`#2690` and open `#2696`/`#2689`/`#2673`–`#2678`. Add a `status` field per row (`drained` + PR / `open` / `claimed` + PR). Fold in the 5 findings from `real-todo-2026-08-30.md` and the 6 missions `#2689` mints. | `…ledger.json` gains `status`; a new `remaining.json` every later wave reads. **One number as the exit criterion: how many P0–P2 rows are actually left.** |
-| **W0-B** | Slot + ID pre-allocation, using W0-A's output. Mint every `loom.*` code, `messages.ts` key, `unsupported-register.ts` row and mission ID the waves below need. Codes land raised-by-nothing; `test/system/unsupported-register.test.ts` and `diagnostic-catalog.test.ts` must stay green, so each minted row needs a raiser **or** an explicit pending marker the gate accepts. | One PR. If the register gates refuse un-raised rows, W0-B instead publishes the allocation as a **reserved-names table in the plan** and workers add their own row — still collision-free, because the names are assigned. |
+| **W0-B** | Mission-ID minting + the **reserved-names table** (see below). | One docs-only PR. |
+
+> **Resolved 2026-08-31 — a pre-allocation PR is impossible; the reserved-names table is the only form.** Both register gates refuse an un-raised entry, by design:
+> `test/system/unsupported-register.test.ts` invariant 2 — *"every registered code is STILL EMITTED — a drained gap must delete its row in the same PR, so the register ratchets down instead of becoming a graveyard"*; and `test/system/diagnostic-catalog.test.ts` invariant 3 — *"No orphans — every catalog entry is reachable from a call site."* A row minted ahead of its raiser fails both. That is the right behaviour and should not be weakened for a fleet's convenience.
+>
+> So W0-B publishes an **allocation table** instead, and each worker adds its own catalog row *in the same PR as the raiser*. Collision-free anyway, for a reason worth stating: `messages.ts` (514 keys) is **thematically grouped, not alphabetical** — so each packet's codes land in a different region of the file by construction, and disjoint-region inserts 3-way-merge cleanly. The table therefore assigns each reserved name **an anchor key to insert after**, not just the name. Workers insert at their anchor and never reflow the file.
 
 **Why W0-A is not optional:** two of my own audit's five recommendations were already
 overtaken within 24 hours. A fleet dispatched off a stale register spends its first hour
@@ -218,7 +223,11 @@ into a gate — and the audit found the class by tripping over one instance of i
 
 ---
 
-## Wave 6 — Unbuilt subsystems · **design-first, do not fleet yet**
+## Wave 6 — Unbuilt subsystems · **OUT OF SCOPE (owner, 2026-08-31)**
+
+*The owner has taken the unbuilt subsystems out of this plan alongside T7. The waves execute
+0 → 5 and stop. This section is retained as the record of what was deferred and why the
+sequencing below was chosen, so the next planner does not re-derive it.*
 
 These are features with no code at all. **A fleet cannot parallelize an unproposed XL** —
 dispatching 8 agents at a subsystem with no agreed design produces 8 incompatible designs.
@@ -298,12 +307,12 @@ signed off, so it is a straight implementation fleet).
 | 3 | 4 | yes | pairwise generation + tsc waiver registers back to 0 |
 | 4 | 7 | yes | live `gap` rows down from ~12; register hygiene landed |
 | 5 | 4 | yes | flutter + feliz have a runtime leg; gate scopes derived |
-| 6 | 1 per subsystem (design), then a fleet per approved one | no | a proposal per subsystem, owner-signed |
+| ~~6~~ | — | — | **out of scope (owner, 2026-08-31)** — the plan ends at wave 5 |
 
-**~29 implementation agents across waves 1–5**, plus 2 in wave 0 and a design agent per wave-6
-subsystem. Use Opus for every implementation packet: each one is a cross-target correctness
-change with a mutation proof attached, which is precisely where a weaker model produces a
-green-looking PR that proves nothing.
+**~29 implementation agents across waves 1–5**, plus 2 in wave 0. Use Opus for every
+implementation packet: each one is a cross-target correctness change with a mutation proof
+attached, which is precisely where a weaker model produces a green-looking PR that proves
+nothing.
 
 ### Risk register
 
@@ -314,4 +323,4 @@ green-looking PR that proves nothing.
 | The diagnostic catalog conflicts 10 ways | Slot pre-allocation (Wave 0-B) |
 | Golden rebaseline churn | One golden owner per wave, fixed order, landed last |
 | A packet's "fix" is proven by a gate that never reaches it | Mutation proof stated in the PR body with the failing assertion named — the recurring failure shape in `experience_gathered.md` §59/§63/§84 |
-| Wave 6 fleeted before design | Design agent per subsystem; no implementation fleet without an owner-signed proposal |
+| ~~Wave 6 fleeted before design~~ | Moot — wave 6 is out of scope |
