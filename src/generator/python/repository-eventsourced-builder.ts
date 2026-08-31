@@ -19,7 +19,8 @@ import {
   emittableFinds,
   findExecutedLine,
   toWireMaskedMethod,
-  writeGuardAlias,
+  writeGuardInApp,
+  writeGuardInAppUsesPrincipal,
 } from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -74,7 +75,10 @@ export function buildPyEventSourcedRepositoryFile(
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
-    ...writeGuardAlias(agg),
+    // Command load (authorization Phase 3 P3.1): an event stream has no
+    // queryable state columns, so the write-scope guard is checked IN-APP over
+    // the FOLDED aggregate.
+    ...writeGuardInApp(agg),
     "",
     `    async def all(self) -> list[${agg.name}]:`,
     "        rows = (",
@@ -184,13 +188,17 @@ export function buildPyEventSourcedRepositoryFile(
     "from sqlalchemy.exc import IntegrityError",
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
+    // ONE call, both reasons — `require_current_user` when the in-app
+    // write-scope guard binds it (#2694), `current_user` for
+    // `to_wire_masked`'s fail-closed principal read (F6).  It has to be one
+    // call: the helper owns the module path AND the sorted name list, so two
+    // calls emit two `from app.auth.user import …` lines, and an unused or
+    // duplicated import fails the python build on ruff.  The merge of #2694
+    // into this branch produced exactly that pair, and only the stale
+    // `writeGuardAlias` import beside it made the compiler say so — the
+    // duplicate itself typechecks fine and would have shipped.
+    authUserImport(false, writeGuardInAppUsesPrincipal(agg), aggHasFieldMask(agg)),
     `from app.db.schema import ${row}`,
-    // `current_user` for `to_wire_masked`'s fail-closed principal read (F6).
-    // Through the SHARED helper, not a hand-written line: it owns the module
-    // path and the sorted name list, and hand-rolling it here is how the two
-    // drift.  The mask is this builder's only principal usage, so the other two
-    // gates are false.
-    authUserImport(false, false, aggHasFieldMask(agg)),
     wireHelperImport(refersTo),
     "from app.domain.errors import AggregateNotFoundError, ConcurrencyError",
     `from app.domain.events import ${["DomainEvent", "DomainEventDispatcher", ...events.map((e) => e.name)].join(", ")}`,

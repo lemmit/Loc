@@ -60,7 +60,7 @@ import {
   isStateBlock,
   isUi,
 } from "../../language/generated/ast.js";
-import { mkBuilderEntry } from "../api/_mk.js";
+import { mkBuilderEntry, mkMemberSuffix } from "../api/_mk.js";
 import { memberAccess } from "../api/factories.js";
 import { _setContainer, _tag } from "../api/factories-internals.js";
 import { boolLit, intLit, nameRefExpr, stateBlock, stringLit } from "../api/ui-factories.js";
@@ -221,6 +221,96 @@ function chainOf(head: Expression, members: readonly string[]): Expression {
   return members.reduce<Expression>((acc, m) => memberAccess(acc, m), head);
 }
 
+/** The paged envelope's own members (`{ items, page, pageSize, total,
+ *  totalPages }` — `src/ir/util/api-surface.ts`).  A body that already reads one
+ *  of these off the data binding is reading the ENVELOPE deliberately (the pager
+ *  the rewrite adds reads `.totalPages`), so those chains are left alone. */
+const ENVELOPE_MEMBERS = new Set(["items", "page", "pageSize", "total", "totalPages"]);
+
+/** Replace `oldNode` with `newNode` in whatever container slot it occupies,
+ *  wiring `$container`/`$containerProperty`/`$containerIndex` as the parser
+ *  would.  A macro emits FINAL AST, so a rewritten node has to be indistinguishable
+ *  from a parsed one — everything downstream (lowering, `unfold`, the printer)
+ *  reads those back-pointers. */
+function replaceNode(oldNode: AstNode, newNode: AstNode): void {
+  const parent = oldNode.$container;
+  const prop = oldNode.$containerProperty;
+  if (!parent || !prop) return;
+  const idx = oldNode.$containerIndex;
+  const slot = parent as unknown as Record<string, unknown>;
+  if (idx === undefined) {
+    slot[prop] = newNode;
+    _setContainer(newNode, parent, prop);
+  } else {
+    (slot[prop] as unknown[])[idx] = newNode;
+    _setContainer(newNode, parent, prop, idx);
+  }
+}
+
+/**
+ * Re-point EVERY reader of the data-lambda binding at `<binding>.items`.
+ *
+ * The rewrite flips the QueryView to `paged: true`, which changes what the
+ * binding IS: it was the row array, it is now `{ items, page, pageSize, total,
+ * totalPages }`.  Rewriting only the Table's own `rows:` left every SIBLING
+ * reader in the same lambda — a `For { each: rows }`, a `rows.count()`, a
+ * `Stat { value: rows }` — pointed at the envelope, which is a TypeScript error
+ * plus a render-time crash on four frontends and a Dart compile error on
+ * Flutter, with no diagnostic (F2-CFE-4).  The author never wrote the rewrite
+ * that broke it, so the rewrite owns fixing it.
+ *
+ * Two shapes carry the binding:
+ *   - a BARE `NameRef` (`each: rows`, `rows: rows`)          → `rows.items`
+ *   - a chain headed by it (`rows.count()`)                  → `rows.items.count()`
+ * and a chain whose FIRST member is an envelope field (`rows.totalPages`) is
+ * left exactly as written — that reader already means the envelope.
+ */
+function repointBindingReaders(lambda: Lambda, param: string): void {
+  const body = lambda.body as AstNode;
+  // Collect first, mutate after: `streamAllContents` walks the live tree, and
+  // the replacement nodes contain a NameRef of the same name (the `.items`
+  // chain's own head), which would otherwise be re-visited and re-wrapped.
+  const bare: AstNode[] = [];
+  const chains: PostfixChain[] = [];
+  const consider = (node: AstNode): void => {
+    if (isPostfixChain(node)) {
+      if (!isNameRef(node.head) || node.head.name !== param) return;
+      const first = node.suffixes?.[0];
+      if (!first || first.$type !== "MemberSuffix") return;
+      if (ENVELOPE_MEMBERS.has((first as unknown as { member: string }).member)) return;
+      chains.push(node);
+      return;
+    }
+    // A bare `rows` parses as a NameRef in its own right — the `PostfixChain`
+    // action only fires with at least one suffix.  But `streamAllContents` also
+    // visits the HEAD NameRef of every chain, and those are the chain's job (or
+    // deliberately untouched, when the chain reads an envelope member), so a
+    // head is never a bare read.
+    if (!isNameRef(node) || node.name !== param) return;
+    if (node.$containerProperty === "head" && isPostfixChain(node.$container as AstNode)) return;
+    bare.push(node);
+  };
+  consider(body);
+  for (const child of AstUtils.streamAllContents(body)) consider(child);
+
+  for (const node of bare) replaceNode(node, memberOf(param, "items"));
+  for (const chain of chains) {
+    // `rows.<rest>` → `rows.items.<rest>`.  Splice the hop in as a new FIRST
+    // suffix rather than rebuilding the chain: the tail can carry call suffixes
+    // and an `ignoring` clause, and the parser's own shape is one flat chain
+    // (`memberAccess` flattens for the same reason), so an in-place unshift is
+    // the only edit that preserves it exactly.
+    const hop = _tag(
+      mkMemberSuffix({ $type: "MemberSuffix", member: "items", call: false, args: [] }),
+      undefined,
+    );
+    chain.suffixes.unshift(hop);
+    chain.suffixes.forEach((s, i) => {
+      _setContainer(s, chain, "suffixes", i);
+    });
+  }
+}
+
 /** The one rewrite.  Returns true when it fired (for tests / diagnostics). */
 function upgradeQueryView(model: Model, page: Page, qv: BuilderCall): boolean {
   // Author already opted into the envelope — their body reads `rows.items`
@@ -248,6 +338,10 @@ function upgradeQueryView(model: Model, page: Page, qv: BuilderCall): boolean {
   if (entry(table, "page") || entry(table, "serverPaged")) return false;
 
   ensurePagingState(page);
+  // The binding becomes the ENVELOPE, so EVERY reader of it in this lambda —
+  // not just the Table's `rows:` — has to hop through `.items` (F2-CFE-4).
+  // Runs before the Table's own rewrite so the two agree by construction.
+  repointBindingReaders(lambda, param);
   const controlled = withControls(ofEntry.value as PostfixChain);
   ofEntry.value = controlled;
   _setContainer(controlled, ofEntry, "value");

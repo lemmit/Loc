@@ -33,7 +33,8 @@ import {
   recordAuditMethod,
   toWireMaskedMethod,
   toWireMethod,
-  writeGuardAlias,
+  writeGuardInApp,
+  writeGuardInAppUsesPrincipal,
 } from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -112,7 +113,11 @@ export function buildPyDocumentRepositoryFile(
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
-    ...writeGuardAlias(agg),
+    // Command load (authorization Phase 3 P3.1): the whole aggregate lives in
+    // one jsonb blob, so the write-scope guard is checked IN-APP over the loaded
+    // instance — the same place this shape already evaluates its capability
+    // READ filters.
+    ...writeGuardInApp(agg),
     "",
     `    async def all(self) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${row}))).scalars().all()`,
@@ -285,7 +290,13 @@ export function buildPyDocumentRepositoryFile(
     // read-mask projection's fail-closed principal read (`to_wire_masked`) —
     // the same argument the relational builder passes.  Omitting it is what
     // turned F6's emitted method into ruff F821 `Undefined name current_user`.
-    authUserImport(findUser, usesPrincipal, aggHasFieldMask(agg)),
+    // The SECOND gate takes the union of both reasons a principal accessor is
+    // needed: a per-find principal filter, and #2694's in-app write guard.
+    authUserImport(
+      findUser,
+      usesPrincipal || writeGuardInAppUsesPrincipal(agg),
+      aggHasFieldMask(agg),
+    ),
     `from app.db.schema import ${row}`,
     aggHasAuditedTarget(agg) ? "from app.db.audit import AuditRecordRow" : null,
     wireHelperImport(refersTo),

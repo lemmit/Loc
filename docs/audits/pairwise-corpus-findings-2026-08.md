@@ -509,6 +509,47 @@ java already clean** — so the matrix lands green.
 
 ---
 
+## Postscript — what merging `main` under this PR cost, twice
+
+Both merges hit the SAME files this PR fixes, because two other fleets were
+draining the same gap list from the other direction.
+
+**#2668 landed F9 independently**, as a hoisted `writeScopeMethod` const rather
+than the inline splice here. Byte-identical emission; main's structure kept. Two
+methods converging on one CS0535 is corroboration, not waste — but note that
+neither knew about the other, which is the coordination cost of parallel drains.
+
+**#2694 collided with F6/F7/F8 in the python builders**, and this one is worth
+recording as its own class. Both sides added a reason for the SAME
+`authUserImport(...)` gate — #2694 wanted `require_current_user` for its in-app
+write guard, F6 wanted `current_user` for the read-mask projection — and git,
+seeing two additions near one another, kept both. The result was **two
+`authUserImport(...)` call sites in the event-sourced builder**, which emits two
+`from app.auth.user import …` lines into the generated module and fails it on
+ruff.
+
+The correct resolution was a UNION of the arguments, not a choice between the
+sides — a distinction a three-way textual merge cannot make, because the two
+edits are textually independent and semantically the same gate.
+
+What makes it worth a section: **`tsc -b` passed on the duplicate.** The emitter
+builds strings, so two calls typecheck exactly as well as one. It was caught only
+because #2694 had also renamed `writeGuardAlias` → `writeGuardInApp`, leaving a
+stale import two lines above that the compiler *did* object to. Without that
+coincidence the duplicate ships, and the failure appears as a ruff error inside a
+generated project — three layers from its cause, in the same
+compile-oracle-shaped blind spot this whole register is about.
+
+`test/generator/python/python-auth-import-single-call.test.ts` now pins one call
+site per builder (mutation-proved by reinstating the exact duplicate the merge
+produced). A source scan rather than an output assertion, deliberately: the
+defect is structural and typecheck-invisible, and reproducing it through emitted
+output needs a read mask AND a narrowed write scope on one aggregate — which
+needs the whole `tenancy by` + `tenantOwned` + `policy { allow deep }` scaffold.
+Same pattern as `pipeline-layering` / `diagnostic-catalog`.
+
+---
+
 ## Follow-up slices
 
 1. **Compile legs for dotnet / java / python / elixir.** Every recorded instance of this bug

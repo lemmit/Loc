@@ -81,7 +81,8 @@ describe("a malformed path {id} answers the DECLARED 422, not a framework defaul
     );
     // The same `errors[]` pointer shape the body tier emits — `/id`, the field,
     // not the whole document — so one client ACL handles both tiers.
-    expect(advice).toContain('entry.put("pointer", "/" + e.getName());');
+    // RFC 6901: the pointer goes through `pointerOf`, not a raw "/" + name.
+    expect(advice).toContain('entry.put("pointer", pointerOf(e.getName()));');
     expect(advice).toContain("return respond(problem, 422);");
     // The arm must sit BEFORE the catch-all in the file; Spring picks the most
     // specific handler, but ordering keeps the emitted file readable and makes

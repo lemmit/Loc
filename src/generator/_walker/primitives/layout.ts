@@ -278,7 +278,19 @@ export function emitTabs(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
     }
     const tabPositionals = positionalArgs(arg);
     const labelArg = tabPositionals[0];
-    const bodyArgs = tabPositionals.slice(1);
+    // Positional 0 is the CAPTION only when it is text-like — the same rule
+    // `emitCard` applies to its title (`titleIsTextLike`).  Reading it as the
+    // caption unconditionally made an unrecognised NAMED argument SWALLOW the
+    // tab's content: `Tab { title: "One", Text { "first" } }` puts nothing in
+    // positional 0 but the `Text`, so the body became the caption (rendered as
+    // the indexed fallback "Tab 1") and `slice(1)` left the panel empty — a
+    // `missing tab body` marker on every frontend, while the dropped literal
+    // still shipped to translators as a live catalog key.  A `Tab` whose
+    // positional 0 is a CALL now renders it as body; the unrecognised
+    // `title:` remains an author error the IR gate should name
+    // (`loom.page-primitive-unknown-arg`, see IMPL-NOTES.md).
+    const labelIsTextLike = labelArg !== undefined && labelArg.kind !== "call";
+    const bodyArgs = labelIsTextLike ? tabPositionals.slice(1) : tabPositionals;
     const isLiteralLabel = labelArg?.kind === "literal" && labelArg.lit === "string";
     const labelStr = isLiteralLabel ? labelArg.value : `Tab ${i + 1}`;
     const bodyParts = bodyArgs.map((e) => walk(e, ctx, depth + 2));

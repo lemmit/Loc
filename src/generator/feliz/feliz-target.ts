@@ -242,6 +242,17 @@ function routerNavigate(
   routeTemplate: string,
   args: ReadonlyArray<{ name: string; value: string }>,
 ): string {
+  return `Router.navigatePath(${felizRouteSegments(routeTemplate, args).join(", ")})`;
+}
+
+/** The rendered `Router.navigate*` ARG LIST for a route template — shared by the
+ *  view-side `Router.navigatePath(...)` above and the MVU-side
+ *  `Cmd.navigatePath(...)` an action body's `navigate(<Page>)` becomes
+ *  (`update-emit.ts`), so the two spellings segment a route identically. */
+export function felizRouteSegments(
+  routeTemplate: string,
+  args: ReadonlyArray<{ name: string; value: string }> = [],
+): string[] {
   const byName = new Map(args.map((a) => [a.name, a.value]));
   const segs = routeTemplate.split("/").filter((s) => s.length > 0);
   const rendered = segs.map((s) => {
@@ -250,9 +261,8 @@ function routerNavigate(
     // `Router.navigate` args are `obj[]`; a param value renders as `string <v>`.
     return `(string ${byName.get(name) ?? name})`;
   });
-  // `Router.navigate` needs ≥1 arg; the root path (`/`) navigates to `""`.
-  if (rendered.length === 0) return `Router.navigatePath("")`;
-  return `Router.navigatePath(${rendered.join(", ")})`;
+  // `Router.navigate` needs >=1 arg; the root path (`/`) navigates to `""`.
+  return rendered.length === 0 ? ['""'] : rendered;
 }
 
 /** Collapse a walked markup fragment to ONE line.  The walker joins children

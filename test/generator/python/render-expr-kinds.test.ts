@@ -537,7 +537,10 @@ describe("py renderPyExpr — A1 int-division widening + divTrunc", () => {
   });
 
   // `a.divTrunc(b)` — truncating integer division toward zero via `int(...)`.
-  it("renders the `divTrunc` intrinsic as `int(recv / arg)`", () => {
+  // `int(recv / arg)` was a FLOAT round-trip: wrong past 2^53 on the one backend
+  // with exact integers.  `trunc_div` truncates toward zero in integer space
+  // (`//` floors, so it is not the answer for negatives).
+  it("renders the `divTrunc` intrinsic as an exact `trunc_div(recv, arg)`", () => {
     expect(
       renderPyExpr({
         kind: "method-call",
@@ -548,7 +551,7 @@ describe("py renderPyExpr — A1 int-division widening + divTrunc", () => {
         memberType: INT,
         isCollectionOp: false,
       }),
-    ).toBe("int(self._a / 2)");
+    ).toBe("trunc_div(self._a, 2)");
   });
 });
 

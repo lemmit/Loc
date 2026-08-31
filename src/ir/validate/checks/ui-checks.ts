@@ -782,6 +782,27 @@ function directlyRenderedRefs(e: ExprIR, out: Extract<ExprIR, { kind: "ref" }>[]
   }
 }
 
+/** Named primitive slots whose argument is a VALUE the frontend reads and
+ *  renders — as opposed to the structural slots (`of:` / `op:` / `workflow:` /
+ *  `to:` / `data:` …) that name a DECLARATION the walker resolves against the
+ *  model.  Only these carry the silent-drop / `undefined`-emitting failure the
+ *  ref gate exists to close, so only these are scanned for unresolved refs. */
+const VALUE_SLOT_ARGS: ReadonlySet<string> = new Set([
+  "value",
+  "label",
+  "text",
+  "title",
+  "subtitle",
+  "caption",
+  "placeholder",
+  "help",
+  "hint",
+  "alt",
+  "message",
+  "description",
+  "emptyText",
+]);
+
 /** Reject an unresolved bare ref in a rendered slot.  One diagnostic per
  *  (host, name): a page spelling the same typo three times made one mistake. */
 function checkUnresolvedPageRefs(
@@ -798,7 +819,30 @@ function checkUnresolvedPageRefs(
       // component.  Anything else is `loom.unknown-page-element`'s business.
       if (!isWalkerPrimitive(e.name) && !names.components.has(e.name)) return;
       const slots: Extract<ExprIR, { kind: "ref" }>[] = [];
-      for (const arg of positionalArgsOf(e)) directlyRenderedRefs(arg, slots);
+      e.args.forEach((arg, i) => {
+        const argName = e.argNames?.[i];
+        // A POSITIONAL arg is a rendered slot outright.  A NAMED arg is a
+        // rendered slot only when the name is a VALUE slot: `Text { value:
+        // nosuchthing }` emits `<Text></Text>` with the content silently gone,
+        // and `Money { value: alsomissing }` emits `<MoneyValue value={ /*
+        // unresolved: alsomissing */ undefined } />` — a guaranteed TypeError
+        // that also fails `tsc --noEmit` / `svelte-check` / `vue-tsc`.  Scanning
+        // positionals ONLY let that identical defect through on the spelling
+        // authors actually use for a value.
+        //
+        // The other named slots are STRUCTURAL: `of:` / `op:` / `workflow:` name
+        // a DECLARATION (an aggregate, an operation, a workflow), which lowers
+        // to `refKind: "unknown"` by design because the walker resolves it
+        // against the model rather than the page's value scope — the same class
+        // as the `Status.Open` enum receiver this walk already stops at.  Every
+        // scaffolded page in the corpus spells them, so reading them as value
+        // slots would reject shipped output.  Keyed on the slot NAME rather than
+        // on "is this a declared name?" because the latter has to enumerate
+        // every declaration namespace and silently reopens the hole for the one
+        // it forgets.
+        if (argName !== undefined && !VALUE_SLOT_ARGS.has(argName)) return;
+        directlyRenderedRefs(arg, slots);
+      });
       for (const ref of slots) {
         if (ref.refKind !== "unknown" || flagged.has(ref.name)) continue;
         flagged.add(ref.name);

@@ -11,7 +11,11 @@ import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { renderPyHistoryRepoMethod } from "./emit/audit-history.js";
-import { aggUsesPrincipalContextFilter, contextFilterPredicate } from "./find-predicate.js";
+import {
+  aggUsesPrincipalContextFilter,
+  contextFilterPredicate,
+  writeScopePredicate,
+} from "./find-predicate.js";
 import { isRefCollectionField, isValueCollectionField, rowClassName } from "./py-columns.js";
 import { wireHelperImport } from "./py-type-imports.js";
 import {
@@ -26,7 +30,8 @@ import {
   rootWhere,
   toWireMaskedMethod,
   toWireMethod,
-  writeGuardAlias,
+  writeGuardInAppUsesPrincipal,
+  writeGuardMethod,
 } from "./repository-builder.js";
 import { entityFromDoc, entityToDoc } from "./repository-document-builder.js";
 
@@ -91,7 +96,11 @@ export function buildPyEmbeddedRepositoryFile(
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
-    ...writeGuardAlias(agg),
+    // Command load (authorization Phase 3 P3.1): an embedded root is a normal
+    // queryable row, so the write-scope pre-guard pushes into the same SQL
+    // `where` the relational shape uses (and falls back to an in-app check on a
+    // predicate SQLAlchemy cannot express).
+    ...writeGuardMethod(agg, row, writeScopePredicate(agg, ctx)),
     "",
     `    async def all(self) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${row})${rootWhere(null, row, undefined, filterPred)})).scalars().all()`,
@@ -214,7 +223,13 @@ export function buildPyEmbeddedRepositoryFile(
     // an always-on principal capability filter (DEBT-02 tail) — one sorted import.
     // Third gate — see the document builder: `to_wire_masked` reads
     // `current_user()` fail-closed and needs the import (F6 / ruff F821).
-    authUserImport(findUser, aggUsesPrincipalContextFilter(agg), aggHasFieldMask(agg)),
+    // Second gate is the union of both accessor reasons (find filter, #2694
+    // in-app write guard).
+    authUserImport(
+      findUser,
+      aggUsesPrincipalContextFilter(agg) || writeGuardInAppUsesPrincipal(agg),
+      aggHasFieldMask(agg),
+    ),
     `from app.db.schema import ${row}`,
     aggHasAuditedTarget(agg) ? "from app.db.audit import AuditRecordRow" : null,
     wireHelperImport(refersTo),
