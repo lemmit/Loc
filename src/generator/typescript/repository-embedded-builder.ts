@@ -16,6 +16,7 @@ import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
+import { synthProjectionFinds } from "./projection-finds.js";
 import {
   docTypeAlias,
   entityFromDocFn,
@@ -27,6 +28,7 @@ import {
   buildFindWhereClause,
   hydrateRootExpr,
   lowerToDrizzle,
+  readFilterPred,
 } from "./repository-find-builder.js";
 import {
   combinePredicate,
@@ -169,7 +171,15 @@ export function buildEmbeddedRepositoryFile(
   const rootRowInsert = `{ ${rootEntriesNoVersion.join(", ")}, version: 1 }`;
   const rootRowUpdate = `{ ${rootEntriesNoVersion.join(", ")}, version: expected + 1 }`;
 
-  const findMethods = (repo?.finds ?? []).map((find) =>
+  // Declared finds PLUS the query-time projections sourced from this
+  // aggregate.  A query-time projection route calls `repo.<projName>()` by name
+  // whatever the aggregate's SAVING SHAPE; the relational, document and
+  // MikroORM builders all synthesise that read, and this one silently did not —
+  // so a `projection … from <embedded aggregate>` emitted a project whose
+  // `http/query-projections.ts` named a method the repository never declared
+  // (**TS2339** on `tsc`, i.e. a project that does not compile).  Same fix, and
+  // for the same reason, as the document builder's.
+  const findMethods = [...(repo?.finds ?? []), ...synthProjectionFinds(agg.name, ctx)].map((find) =>
     embeddedFindMethod(agg, find, ctx, filterPred),
   );
 
@@ -335,7 +345,13 @@ function embeddedFindMethod(
   const usesUser = findUsesCurrentUser(find);
   const baseParams = find.params.map((p) => `${p.name}: ${tsFindParamType(p.type)}`);
   const params = (usesUser ? [...baseParams, "currentUser: User"] : baseParams).join(", ");
-  const whereClause = buildFindWhereClause(agg, find, tableName, ctx, filterPred);
+  // An `ignoring <Cap>` / `ignoring *` on THIS find drops the named capability
+  // conjuncts from its `where` (other finds keep them).  The repo-wide
+  // `filterPred` cannot see the bypass, so handing it straight to
+  // `buildFindWhereClause` re-applied a capability the read explicitly asked to
+  // ignore — wrong data, fail-closed, no diagnostic (M-T6.51).
+  const readPred = readFilterPred(agg, ctx, filterPred, find);
+  const whereClause = buildFindWhereClause(agg, find, tableName, ctx, readPred);
   const isArray = find.returnType.kind === "array";
   const isOptional = find.returnType.kind === "optional";
   const ret = isArray ? `${agg.name}[]` : isOptional ? `${agg.name} | null` : agg.name;

@@ -4,11 +4,13 @@ import type {
   EnrichedBoundedContextIR,
   ProjectionIR,
   ProjectionOnIR,
+  StmtIR,
+  TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser, isMaterializedProjection } from "../../../ir/types/loom-ir.js";
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { resolveErrorStatus } from "../../../util/error-defaults.js";
-import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { escapeTsIdent, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { zodForResponse } from "./routes-builder.js";
 
 /** The `db` handle's TS type in an emitted projection function signature —
@@ -55,13 +57,40 @@ export function buildProjectionsFile(ctx: EnrichedBoundedContextIR, usingMikro =
   const folded = ctx.projections.filter(isMaterializedProjection);
   if (folded.length === 0) return "";
 
+  // A fold only runs for an event some `channel` CARRIES.  In-process dispatch
+  // is channel-routed — `deriveEventSubscriptions` (ir/enrich) records a
+  // subscription only when a channel carries the event, and that is exactly
+  // what `loom.projection-event-uncarried` warns about: *"this fold never runs
+  // and the read-model row is never written"*.  Every other backend honours it
+  // (python and elixir emit no fold module at all for an uncarried projection),
+  // and so does node's OWN workflow-reactor path (`workflow-builder.ts` gates on
+  // `ctx.eventSubscriptions.length > 0`) — but this emitter keyed off
+  // `isMaterializedProjection` alone, so node folded events nothing carried and
+  // wired the tee as `createApp`'s default dispatcher.  The generated node
+  // project therefore CONTRADICTED the warning that shipped beside it
+  // (G2646).  Filtering by the subscription set makes the warning true on all
+  // five backends; declaring the channel the warning names restores the fold.
+  const carriedFolds = new Set(
+    ctx.eventSubscriptions
+      .filter((s) => s.projection !== undefined)
+      .map((s) => `${s.projection} ${s.event}`),
+  );
+  const carriedHandlers = (p: ProjectionIR): ProjectionOnIR[] =>
+    p.handlers.filter((h) => carriedFolds.has(`${p.name} ${h.event}`));
+
   const body: string[] = [];
   for (const p of folded) body.push(...emitResponseSchemas(p), "");
   for (const p of folded) {
+    // A projection whose every fold is uncarried keeps its READ surface (the
+    // row table and its routes still exist — the model declared them) but emits
+    // no fold and no load/save helpers, which would otherwise be dead code the
+    // generated-project lint rejects.
+    const hs = carriedHandlers(p);
+    if (hs.length === 0) continue;
     body.push(...emitStateHelpers(p, usingMikro), "");
-    for (const h of p.handlers) body.push(...emitFoldHandler(p, h, usingMikro), "");
+    for (const h of hs) body.push(...emitFoldHandler(p, h, usingMikro), "");
   }
-  body.push(...emitProjectionTee(folded, usingMikro), "");
+  body.push(...emitProjectionTee(folded, carriedHandlers, usingMikro), "");
   body.push(...emitProjectionRoutes(folded, usingMikro, ctx));
   const bodyText = body.join("\n");
 
@@ -103,13 +132,21 @@ export function buildProjectionsFile(ctx: EnrichedBoundedContextIR, usingMikro =
       'import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";',
       ...persistenceImports,
       'import { type DomainEventDispatcher } from "../domain/events";',
-      'import type * as Events from "../domain/events";',
+      // The `Events.<Name>` namespace is referenced only by fold handlers and
+      // the tee's `switch`.  With no CARRIED fold the tee is the identity
+      // decorator, so nothing names it — and an unused import is an error under
+      // the generated-project Biome config (`noUnusedImports`).
+      bodyText.includes("Events.") ? 'import type * as Events from "../domain/events";' : null,
       // `ForbiddenError` only when a projection actually declares a `requires`
       // gate — an unused import fails the generated-code Biome gate.
       bodyText.includes("ForbiddenError")
         ? 'import { AggregateNotFoundError, ForbiddenError } from "../domain/errors";'
         : 'import { AggregateNotFoundError } from "../domain/errors";',
       'import { ProblemDetails } from "./problem-details";',
+      // decimal.js only when a money column is actually folded through
+      // `Decimal` arithmetic — an unused import is an error under the
+      // generated-project Biome config.
+      /\bnew Decimal\(/.test(bodyText) ? 'import Decimal from "decimal.js";' : null,
       enumValueImportLine,
       "",
       ...(enumSchemaDecls.length > 0 ? [...enumSchemaDecls, ""] : []),
@@ -204,31 +241,146 @@ function emitFoldHandler(p: ProjectionIR, h: ProjectionOnIR, usingMikro = false)
     `  const __key = ${keyExpr};`,
     `  const state = (await load${T}(db, __key)) ?? ${allocate};`,
   ];
-  for (const stmt of h.statements) {
-    if (stmt.kind === "assign") {
-      const segs = stmt.target.segments;
-      const field = segs[segs.length - 1];
-      out.push(`  state.${field} = ${renderTsExpr(stmt.value, { thisName: "state" })};`);
-    }
-  }
+  for (const stmt of h.statements) out.push(renderFoldStatement(stmt, p, h));
   out.push(`  await save${T}(db, state);`);
   out.push(`}`);
   return out;
 }
 
+/** Render ONE fold-body statement against the `state` row.
+ *
+ *  This loop used to be `if (stmt.kind === "assign")` with no else, so every
+ *  other statement kind a fold body can carry vanished from the emitted
+ *  handler — a `let` binding disappeared while its USES survived (TS2304 on
+ *  the reference), and `+=` / `-=` / a resource call were dropped outright
+ *  with no diagnostic and no compile error, so the column was simply never
+ *  written.  The set is now exhaustive over `StmtIR`: the four kinds a pure
+ *  fold can express are rendered, and everything else is an internal
+ *  invariant violation because `checkProjections`
+ *  (`src/ir/validate/checks/projection-checks.ts`) rejects it as impure.
+ *  Mirrors the elixir applier's `renderFoldStatement`
+ *  (`generator/elixir/vanilla/fold-stmt-emit.ts:54`), including the loud
+ *  `default:` — a dropped statement is worse than a crash, because it ships. */
+function renderFoldStatement(stmt: StmtIR, p: ProjectionIR, h: ProjectionOnIR): string {
+  const ctx = { thisName: "state" } as const;
+  switch (stmt.kind) {
+    case "assign": {
+      const field = lastSegment(stmt.target);
+      return `  state.${field} = ${toColumn(stmt.targetType, renderTsExpr(stmt.value, ctx))};`;
+    }
+    case "let":
+      // `let`-names may collide with a JS reserved word; escape consistently
+      // with the matching `refKind: "let"` use sites in `renderRef`.
+      return `  const ${escapeTsIdent(stmt.name)} = ${renderTsExpr(stmt.expr, ctx)};`;
+    case "add": {
+      // `xs += v` appends to the folded collection; a scalar `n += v`
+      // (`collection: false`) is arithmetic on the folded column.  Every
+      // non-key read-model column is NULLABLE (the allocate seeds the key
+      // only), so both forms coalesce the current value first — otherwise the
+      // first event for a key reads `null` and the fold produces `null` /
+      // `NaN` instead of the first increment.
+      const field = lastSegment(stmt.target);
+      const value = renderTsExpr(stmt.value, ctx);
+      return stmt.collection
+        ? `  state.${field} = [...(state.${field} ?? []), ${toColumn(stmt.elementType, value)}];`
+        : `  state.${field} = ${accumulate(stmt.elementType, field, "+", value)};`;
+    }
+    case "remove": {
+      // `xs -= v` drops the matching element; scalar `n -= v` subtracts.
+      const field = lastSegment(stmt.target);
+      const value = renderTsExpr(stmt.value, ctx);
+      return stmt.collection
+        ? `  state.${field} = (state.${field} ?? []).filter((__e) => __e !== ${toColumn(stmt.elementType, value)});`
+        : `  state.${field} = ${accumulate(stmt.elementType, field, "-", value)};`;
+    }
+    default:
+      throw new Error(
+        `hono projection fold: unsupported fold statement '${stmt.kind}' in ` +
+          `projection '${p.name}' on(${h.param}: ${h.event}) — a fold applies pure ` +
+          `assignments / collection mutations / let bindings only; ` +
+          `'loom.projection-fold-impure' should have rejected this.`,
+      );
+  }
+}
+
+/** The read-model COLUMN representation of a folded domain value.
+ *
+ *  A projection state field is a real column and takes the same shape the
+ *  aggregate save projection writes (`repository-save-builder.ts`): drizzle
+ *  maps `money` to `numeric(19,4)` and `decimal` to `numeric`, and BOTH infer
+ *  as `string`, while the domain/event value is a decimal.js `Decimal` (money)
+ *  or a `number` (decimal).  The fold used to assign the domain value straight
+ *  to the column — TS2322, a generated project that does not compile, on any
+ *  projection carrying a money column.  Every other type stores as-is and
+ *  renders byte-identically. */
+function toColumn(t: TypeIR | undefined, value: string): string {
+  const p = unwrapOptional(t);
+  if (p?.kind !== "primitive") return value;
+  if (p.name === "money") return `(${value}).toString()`;
+  if (p.name === "decimal") return `String(${value})`;
+  return value;
+}
+
+/** `state.<field> <op>= <value>`, in the column's own representation.  The
+ *  column is NULLABLE (the allocate seeds the correlation key only), so the
+ *  running total coalesces first — otherwise the FIRST event for a key folds
+ *  `null + n`.  Money accumulates through decimal.js, never through `+` on the
+ *  stored string. */
+function accumulate(t: TypeIR | undefined, field: string, op: "+" | "-", value: string): string {
+  const p = unwrapOptional(t);
+  const cur = `state.${field}`;
+  if (p?.kind === "primitive" && p.name === "money") {
+    const verb = op === "+" ? "plus" : "minus";
+    return `new Decimal(${cur} ?? 0).${verb}(${value}).toString()`;
+  }
+  if (p?.kind === "primitive" && p.name === "decimal") {
+    return `String(Number(${cur} ?? 0) ${op} ${value})`;
+  }
+  return `(${cur} ?? 0) ${op} ${value}`;
+}
+
+function unwrapOptional(t: TypeIR | undefined): TypeIR | undefined {
+  return t?.kind === "optional" ? t.inner : t;
+}
+
+/** The written column of a fold assignment target (`this`-rooted path). */
+function lastSegment(target: { segments: string[] }): string {
+  return target.segments[target.segments.length - 1] ?? "";
+}
+
 /** The dispatcher decorator: route each dispatched event to every matching
  *  projection fold, then delegate to the inner dispatcher (workflow saga /
  *  realtime / noop).  Composes without touching the workflow dispatcher. */
-function emitProjectionTee(projections: ProjectionIR[], usingMikro = false): string[] {
-  // event type → the fold calls it triggers (one per matching handler).
+function emitProjectionTee(
+  projections: ProjectionIR[],
+  carriedHandlers: (p: ProjectionIR) => ProjectionOnIR[],
+  usingMikro = false,
+): string[] {
+  // event type → the fold calls it triggers (one per CARRIED handler — an
+  // uncarried fold emits no function, so a tee case for it would name a
+  // symbol the module does not declare).
   const byEvent = new Map<string, string[]>();
   for (const p of projections) {
-    for (const h of p.handlers) {
+    for (const h of carriedHandlers(p)) {
       const call = `await fold${h.event}Into${upperFirst(p.name)}(db, event as Events.${h.event});`;
       const calls = byEvent.get(h.event) ?? [];
       calls.push(call);
       byEvent.set(h.event, calls);
     }
+  }
+  // No CARRIED fold in this deployable: the tee has nothing to route, so it is
+  // the identity decorator.  Emitted rather than skipped because `createApp`
+  // imports it unconditionally; `_db` keeps the generated-project Biome gate
+  // (`noUnusedFunctionParameters: error`) quiet without changing the signature.
+  if (byEvent.size === 0) {
+    return [
+      `export function projectionTee(`,
+      `  _db: ${projDbType(usingMikro)},`,
+      `  inner: DomainEventDispatcher,`,
+      `): DomainEventDispatcher {`,
+      `  return inner;`,
+      `}`,
+    ];
   }
   const out = [
     `export function projectionTee(`,

@@ -976,6 +976,35 @@ export function renderMikroConfig(): string {
 
 /** index.ts bootstrap lines — replaces the drizzle pool/db block. Initialises
  *  MikroORM, applies the schema (dev), exposes `db` as the EntityManager. */
+/** Wrap a repository `save`'s WRITE statements in one real database
+ *  transaction.
+ *
+ *  Every mikro save used to open only `this.em.fork({ keepTransactionContext:
+ *  true })`, and there is no `RequestContext` middleware in the generated
+ *  server (see `mikroConfig`'s `allowGlobalContext` comment), so on an ordinary
+ *  route that flag has nothing to keep: the root upsert, the association writes
+ *  and the containment writes each ran on their own implicit transaction.  A
+ *  multi-statement save that failed part-way therefore left the root row
+ *  written and its children not — while the drizzle sibling has always run the
+ *  same statements inside `this.db.transaction(...)` (G2667-C4).
+ *
+ *  `em.transactional` defaults to `TransactionPropagation.NESTED` (MikroORM 6
+ *  `TransactionManager.handle`), so this composes with the ambient
+ *  `db.transactional(...)` the audited / provenanced routes open: an existing
+ *  transaction context yields a SAVEPOINT rather than a competing transaction,
+ *  and the callback's forked EM is the handle its writes must go through —
+ *  which is why the callback parameter takes the name `em` and the fork is no
+ *  longer bound to a local.  The read half (the `findOne` behind the CAS
+ *  version guard) is inside the same transaction on purpose: a read-then-write
+ *  guard outside one is a race by construction. */
+function mikroSaveTxLines(writeLines: readonly (string | null)[]): (string | null)[] {
+  return [
+    `    await this.em.fork({ keepTransactionContext: true }).transactional(async (em) => {`,
+    ...writeLines.map((l) => (l === null || l === "" ? l : `  ${l}`)),
+    `    });`,
+  ];
+}
+
 export function mikroConnectionSetup(): readonly string[] {
   return [
     `const orm = await MikroORM.init(mikroConfig);`,
@@ -2369,10 +2398,11 @@ export function renderMikroRepository(
     versioned
       ? `  async save(aggregate: ${agg.name}, expectedVersion?: number): Promise<void> {`
       : `  async save(aggregate: ${agg.name}): Promise<void> {`,
-    `    const em = this.em.fork({ keepTransactionContext: true });`,
-    ...(versioned ? versionedSaveLines : [upsertCall]),
-    ...(hasAssocs ? assocSaveLines(agg, "em", "    ") : []),
-    ...(hasContains ? containSaveLines(agg, ctx, "em", "    ") : []),
+    ...mikroSaveTxLines([
+      ...(versioned ? versionedSaveLines : [upsertCall]),
+      ...(hasAssocs ? assocSaveLines(agg, "em", "    ") : []),
+      ...(hasContains ? containSaveLines(agg, ctx, "em", "    ") : []),
+    ]),
     `    requestLog().debug({ event: "repository_save", aggregate: "${agg.name}", id: aggregate.id as string });`,
     "",
     `    for (const event of aggregate.pullEvents()) {`,
@@ -2710,8 +2740,9 @@ export function renderMikroEmbeddedRepository(
     versioned
       ? `  async save(aggregate: ${agg.name}, expectedVersion?: number): Promise<void> {`
       : `  async save(aggregate: ${agg.name}): Promise<void> {`,
-    `    const em = this.em.fork({ keepTransactionContext: true });`,
-    ...(versioned ? versionedSaveLines : [`    const rootRow = ${rootRow};`, upsertCall]),
+    ...mikroSaveTxLines(
+      versioned ? versionedSaveLines : [`    const rootRow = ${rootRow};`, upsertCall],
+    ),
     `    requestLog().debug({ event: "repository_save", aggregate: "${agg.name}", id: aggregate.id as string });`,
     "",
     `    for (const event of aggregate.pullEvents()) {`,
@@ -2844,7 +2875,17 @@ export function renderMikroDocumentRepository(
     const isArray = f.returnType.kind === "array";
     const isOptional = f.returnType.kind === "optional";
     const ret = isArray ? `${agg.name}[]` : isOptional ? `${agg.name} | null` : agg.name;
-    const allExpr = capX ? `all.filter((x) => ${capX})` : "all";
+    // Per-find capability predicate: the aggregate-wide `capX` above cannot see
+    // THIS find's `ignoring <Cap>` / `ignoring *`, so reusing it here silently
+    // re-applied a bypassed capability filter — the MikroORM twin of the
+    // drizzle document defect (M-T6.51).  The relational mikro path already
+    // threads the bypass (`mikroContextFilters(agg, { bypassAll, bypassCaps })`);
+    // the document path now does too.
+    const findCap = documentCapabilityBody(agg, "x", {
+      bypassAll: f.bypassAll,
+      bypassCaps: f.bypassCaps,
+    });
+    const allExpr = findCap ? `all.filter((x) => ${findCap})` : "all";
     const selector = isArray
       ? pred
         ? `${allExpr}.filter(${pred})`
@@ -2956,9 +2997,10 @@ export function renderMikroDocumentRepository(
     versioned
       ? `  async save(aggregate: ${agg.name}, expectedVersion?: number): Promise<void> {`
       : `  async save(aggregate: ${agg.name}): Promise<void> {`,
-    `    const em = this.em.fork({ keepTransactionContext: true });`,
-    `    const data = ${lowerFirst(agg.name)}ToDoc(aggregate);`,
-    ...saveLines,
+    ...mikroSaveTxLines([
+      `    const data = ${lowerFirst(agg.name)}ToDoc(aggregate);`,
+      ...saveLines,
+    ]),
     `    requestLog().debug({ event: "repository_save", aggregate: "${agg.name}", id: aggregate.id as string });`,
     "",
     `    for (const event of aggregate.pullEvents()) {`,

@@ -4352,6 +4352,20 @@ export function valueObjectUsesMoney(vo: ValueObjectIR): boolean {
 export function contextUsesMoney(ctx: BoundedContextIR): boolean {
   if (ctx.aggregates.some(aggregateUsesMoney)) return true;
   if (ctx.valueObjects.some(valueObjectUsesMoney)) return true;
+  // Aggregates and value objects were the whole test, and they are not the
+  // whole surface a `money` type reaches.  An EVENT field, a PROJECTION state
+  // column, a WORKFLOW state field or a PAYLOAD/handler record can each be the
+  // only money in a system — and each is emitted as a `Decimal` on the TS
+  // backends.  With no money-bearing aggregate the flag read false, so
+  // `domain/events.ts` shipped `import Decimal from "decimal.js"` while
+  // `package.json` omitted the dependency: TS2307, a generated project that
+  // does not install-and-compile.  (Reproduced with an event carrying
+  // `amount: money` and a projection folding it, then `npm install && tsc`.)
+  if (ctx.events.some((e) => e.fields.some((f) => typeUsesMoney(f.type)))) return true;
+  if (ctx.projections.some((p) => p.stateFields.some((f) => typeUsesMoney(f.type)))) return true;
+  if (ctx.workflows.some((w) => (w.stateFields ?? []).some((f) => typeUsesMoney(f.type))))
+    return true;
+  if (ctx.payloads.some((p) => p.fields.some((f) => typeUsesMoney(f.type)))) return true;
   return false;
 }
 /** True when the ui declares a money-typed `state {}` field on any page

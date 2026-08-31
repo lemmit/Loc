@@ -84,6 +84,8 @@ import { emitWireSchema, QUERY_BOOL, wireToDomainExpr, zodFor } from "./routes-b
 import {
   collectReposForWorkflow,
   honoWorkflowStmtTarget,
+  mergeHandlerReadPortRepos,
+  readPortResolver,
   renderExprWithParams,
 } from "./workflow-builder.js";
 
@@ -441,7 +443,21 @@ function emitRouteHandler(
   // Repos constructed inline on the request `db` (matches aggregate/workflow
   // routes).  `getById` throws AggregateNotFoundError → 404 via onError, so a
   // load needs no explicit guard.
-  const repos = collectReposForWorkflow(h);
+  // A handler orchestrates `reading`-tier domain services exactly as a workflow
+  // does, so it must construct the read-port repositories those services take —
+  // even when its own body never reads them directly.  It did not, and it also
+  // rendered its `return` expression without the port resolver, so
+  // `return Registration.isHolderFree(holder)` emitted an arity-short,
+  // un-awaited call against `async isHolderFree(accounts, holder)` — TS2554 +
+  // a Promise serialised as `{}`, with no diagnostic (M-T5.14).  The statement
+  // path was already correct (`honoWorkflowStmtTarget` threads the resolver);
+  // only these two seams were missing.
+  const repos = mergeHandlerReadPortRepos(
+    collectReposForWorkflow(h),
+    h.statements,
+    hasReturn && h.returnValue ? [h.returnValue] : [],
+    ctx,
+  );
   const repoVarByAgg = new Map(repos.map((r) => [r.aggName, lowerFirst(r.repoName)]));
   for (const r of repos) {
     out.push(`    const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
@@ -461,6 +477,7 @@ function emitRouteHandler(
   }
   // Load → mutate → save body, rendered through the shared Hono workflow stmt
   // target (handlers carry no `this` state, so the default `thisName` is inert).
+  const readPortArgs = readPortResolver(ctx);
   const chunks = renderWorkflowStmtChunks(
     h.statements,
     honoWorkflowStmtTarget(ctx, paramExprs, "this"),
@@ -471,7 +488,7 @@ function emitRouteHandler(
     out.push(`    await ${lowerFirst(save.repoName)}.save(${save.name});`);
   }
   if (hasReturn) {
-    const retExpr = renderExprWithParams(h.returnValue!, paramExprs, "this");
+    const retExpr = renderExprWithParams(h.returnValue!, paramExprs, "this", readPortArgs);
     // A domain entity/part return projects to its wire shape via the owning
     // repo's `toWire(...)`; a collection maps each element.  A single-entity
     // return additionally casts to the typed 200's inferred schema (the
@@ -822,6 +839,19 @@ export function buildExplicitRoutesFile(
   }
   if (voEnumReferenced.length > 0) {
     imports.push(`import { ${voEnumReferenced.join(", ")} } from "../domain/value-objects";`);
+  }
+  // Domain-service namespaces a routed handler body calls (`Registration.…`),
+  // imported from the generated `domain/services.ts` — the handler-leg twin of
+  // workflow-builder's block, and missing entirely until now: a handler that
+  // called a service emitted `Registration.isHolderFree(…)` against a name the
+  // file never imported (TS2304, on top of the arity/await defect the read-port
+  // threading above fixes — M-T5.14).  Same body-text filter as the workflow
+  // side, so a service-free routes file stays byte-identical.
+  const servicesReferenced = contexts
+    .flatMap((c) => c.domainServices.map((sv) => sv.name))
+    .filter((n) => new RegExp(`\\b${n}\\.\\w`).test(bodyStr));
+  if (servicesReferenced.length > 0) {
+    imports.push(`import { ${servicesReferenced.sort().join(", ")} } from "../domain/services";`);
   }
   // Resource-op verb helpers (the handler-leg twin of workflow-builder's
   // block).  Grouped by client module, one named import per (resource, verb)
