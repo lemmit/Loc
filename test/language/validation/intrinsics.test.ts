@@ -173,6 +173,80 @@ describe("validation — scalar intrinsic calls", () => {
     ).toEqual([]);
   });
 
+  // -------------------------------------------------------------------------
+  // NULLABLE RECEIVERS.  `checkIntrinsicCalls` gated on
+  // `recvType.kind === "primitive"`, which a `T?` receiver never satisfies —
+  // so the whole catalogue check was SKIPPED on one.  A nonsense intrinsic was
+  // rejected on `string` and silently accepted on `string?`.
+  // -------------------------------------------------------------------------
+
+  it("an unknown intrinsic is rejected on a NULLABLE receiver too, naming 'string?'", async () => {
+    const { errors } = await parseString(
+      wrap(`
+        path: string?
+        derived a: string = path.totallyMadeUp("")
+      `),
+    );
+    expect(
+      errors.some((e) => e.includes("'string?' has no intrinsic '.totallyMadeUp()'")),
+      JSON.stringify(errors),
+    ).toBe(true);
+  });
+
+  it("the same unknown intrinsic is still rejected on the NON-nullable receiver", async () => {
+    const { errors } = await parseString(wrap(`derived a: string = name.totallyMadeUp("")`));
+    expect(
+      errors.some((e) => e.includes("'string' has no intrinsic '.totallyMadeUp()'")),
+      JSON.stringify(errors),
+    ).toBe(true);
+  });
+
+  it("a REAL intrinsic on a nullable receiver is an unguarded deref — rejected", async () => {
+    const { errors } = await parseString(
+      wrap(`
+        path: string?
+        derived a: string = path.trim()
+      `),
+    );
+    expect(
+      errors.some((e) => e.includes("'.trim()' can't be called on 'string?'")),
+      JSON.stringify(errors),
+    ).toBe(true);
+  });
+
+  it("string `.matches` is a deref too — rejected on a nullable receiver", async () => {
+    const { errors } = await parseString(
+      wrap(`
+        path: string?
+        derived a: bool = path.matches("^a")
+      `),
+    );
+    expect(
+      errors.some((e) => e.includes("'.matches()' can't be called on 'string?'")),
+      JSON.stringify(errors),
+    ).toBe(true);
+  });
+
+  it("bare member ACCESS on a nullable receiver stays un-gated (`.length`)", async () => {
+    const { errors } = await parseString(
+      wrap(`
+        path: string?
+        derived a: int = path.length
+      `),
+    );
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+  });
+
+  it("a non-nullable receiver still accepts every catalogue call", async () => {
+    const { errors } = await parseString(
+      wrap(`
+        derived a: string = name.trim().toLower()
+        derived b: bool = name.matches("^a")
+      `),
+    );
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+  });
+
   it("queryable intrinsics chain in a find where (trim + toLower)", async () => {
     const src = `
       context C {

@@ -909,6 +909,9 @@ export const DIAGNOSTIC_MESSAGES = {
     `'${p.member}' argument ${p.i} is '${p.actual}' but the signature ${p.member}${p.signature} expects '${p.expected}'.`,
   "loom.intrinsic-unknown": (p: { name: unknown; member: unknown; known: unknown }) =>
     `'${p.name}' has no intrinsic '.${p.member}()'${p.known}.`,
+  "loom.intrinsic-nullable-receiver": (p: { member: unknown; recv: unknown }) =>
+    `'.${p.member}()' can't be called on '${p.recv}' — the receiver may be null and every backend emits a bare dereference. ` +
+    `Guard it with a null-narrowing ternary: '<expr> != null ? <expr>.${p.member}(…) : …'.`,
   "loom.ternary-condition": (p: { condT: unknown }) =>
     `Ternary condition must be of type 'bool', got '${p.condT}'.`,
   "loom.ternary-branches": (p: { thenT: unknown; elseT: unknown }) =>
