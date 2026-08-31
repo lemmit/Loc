@@ -167,7 +167,9 @@ describe("node/Hono folded-projection body — every statement kind is emitted o
 
   it("a money `+=` accumulates through decimal.js, not `+` on the stored string", async () => {
     const body = await foldBody(sys("total += e.amount", "total: money"), "amount: money");
-    expect(body).toContain("state.total = new Decimal(state.total ?? 0).plus(e.amount).toString();");
+    expect(body).toContain(
+      "state.total = new Decimal(state.total ?? 0).plus(e.amount).toString();",
+    );
   });
 
   it("the money fold pulls its own `decimal.js` import AND the package dep", async () => {

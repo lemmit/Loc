@@ -83,9 +83,9 @@ import { SCAFFOLD_ONCE_MARKER } from "../../../util/scaffold-once.js";
 import { emitWireSchema, QUERY_BOOL, wireToDomainExpr, zodFor } from "./routes-builder.js";
 import {
   collectReposForWorkflow,
+  honoWorkflowStmtTarget,
   mergeHandlerReadPortRepos,
   readPortResolver,
-  honoWorkflowStmtTarget,
   renderExprWithParams,
 } from "./workflow-builder.js";
 

@@ -2066,9 +2066,7 @@ export function renderExprWithParams(
  *  read-ports the service operation consumes (derived from its body), in order.
  *  A pure service op has no ports, so the resolver returns `[]` and the call
  *  renders byte-identically. */
-export function readPortResolver(
-  ctx: BoundedContextIR,
-): (service: string, op: string) => string[] {
+export function readPortResolver(ctx: BoundedContextIR): (service: string, op: string) => string[] {
   return (service, op) => {
     const svc = ctx.domainServices.find((s) => s.name === service);
     const operation = svc?.operations.find((o) => o.name === op);
