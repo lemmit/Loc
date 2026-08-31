@@ -403,6 +403,14 @@ dressed as design. Until this plan is merged, the rule is:
 - **Stay in your tree.** A packet that half-fixes into a neighbour's tree is worse than one
   that hands off — `#2668` deferred `F2-ADP-3` with a written handoff for exactly this
   reason, and that was the right call.
+- **Hand off with an EXECUTABLE ratchet, not a prose note.** Invented by the dotnet packet
+  (#2708) and better than what this plan asked for. It found `F2-CB-C7` reproducing in three
+  other trees it was not allowed to touch, so instead of writing "node/java/python have this
+  too" in a PR body — where the next agent may never read it — it landed
+  `test/generator/domain-service-gate-import-parity.test.ts`: a test that **fails when the
+  owning packet fixes its arm**, forcing the handoff to be closed out rather than quietly
+  inherited. A prose handoff decays into a stale note; a ratchet cannot. Prefer this shape
+  whenever a defect you found lives in someone else's tree.
 - **A row can be closed by a META-gate that never names it.** W0-A scored
   `connection-secret-wiring` open (P0) by searching for a *dedicated* `loom.*` code — and
   the row's own `related_to` field said the meta-gate was missing. It is not:
