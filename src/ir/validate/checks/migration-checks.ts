@@ -193,11 +193,14 @@ function sqlExprFamily(e: ExprIR): string | undefined {
 // (mikroorm).
 // ---------------------------------------------------------------------------
 
-/** The self-provisioning persistence adapters, and the message key each one's
- *  diagnostic resolves through.  The message KEYS stay as string literals at
- *  the `diagMessage(...)` call sites below — `diagnostic-catalog.test.ts` reads
- *  them syntactically, so a key routed through a lookup table reads as an
- *  orphan entry. */
+/** The self-provisioning persistence adapters.  Both consequences of "I run
+ *  `CREATE TABLE IF NOT EXISTS` at boot instead of applying a chain" are gated
+ *  against this one set: no migration steps (below) and no schema qualifier
+ *  (`validateSelfProvisioningSchemaSupport`, further down).
+ *
+ *  The message KEYS stay as string literals at the `diagMessage(...)` call
+ *  sites — `diagnostic-catalog.test.ts` reads them syntactically, so a key
+ *  routed through a lookup table reads as an orphan entry. */
 const SELF_PROVISIONING_ADAPTERS = new Set(["dapper", "mikroorm"]);
 
 export function validateMigrationAdapterSupport(
@@ -253,6 +256,129 @@ export function validateMigrationAdapterSupport(
           severity: "error",
           code: "loom.mikroorm-unsupported",
           message: diagMessage("loom.mikroorm-unsupported#migrations", params),
+          source,
+        });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The OTHER consequence of self-provisioning: no schema concept (F2-ADP-3).
+//
+// A self-provisioning adapter emits its DDL as `CREATE TABLE IF NOT EXISTS` at
+// boot and names every table UNQUALIFIED — dapper's `DbSchema.EnsureAsync`
+// (`CREATE TABLE IF NOT EXISTS "as"`), mikroorm's `@Entity({ tableName: "as" })`.
+// Every migration-chain adapter instead routes the table into the binding's
+// Postgres schema, which `resolveDataSourceConfig` DEFAULTS to
+// `snake(<context>)` when the DSL omits `schema:` — so EF Core emits
+// `builder.ToTable("as", "alpha")` and Drizzle `pgSchema("alpha").table("as")`
+// for a context named `Alpha` that declares nothing at all.
+//
+// Two silent failures follow, and neither needs an explicit `schema:` to
+// appear:
+//
+//   SPLIT-BRAIN — one context served by BOTH kinds of adapter provisions TWO
+//   physical tables (`public.as` and `alpha.as`).  Both deployables start, both
+//   answer, and each sees an empty database the other is writing to.  This is
+//   the shape #2668 deferred: the fix cannot live in the dotnet emitter,
+//   because the disagreement is between two deployables.
+//
+//   DROPPED REQUEST — an EXPLICIT `schema:` / `tablePrefix:` on the binding is
+//   simply ignored by the self-provisioning adapter, so a model that asks for
+//   `schema: "legacy"` silently gets `public`.
+//
+// Both are gated here rather than in an emitter for the same reason the
+// migration gate above is: the offending fact is a property of the SYSTEM's
+// deployable/binding graph, which no single backend emitter can see.  Scoped to
+// the ADAPTER, not the platform — `persistence: efcore` on the same `platform:
+// dotnet` deployable is fine, and that is the fix the message names.
+// ---------------------------------------------------------------------------
+export function validateSelfProvisioningSchemaSupport(
+  loom: EnrichedLoomModel,
+  diags: LoomDiagnostic[],
+): void {
+  for (const sys of loom.systems) {
+    // Bindings that put tables on disk.  `cache` / `replica` bindings carry no
+    // aggregate tables, so a schema on one is not a table-placement decision.
+    const tableBindings = sys.dataSources.filter(
+      (d) => d.kind === "state" || d.kind === "eventLog",
+    );
+    if (tableBindings.length === 0) continue;
+    const boundContexts = new Set(tableBindings.map((d) => d.contextName));
+
+    /** Deployables that actually provision tables for `ctx`: they host it AND
+     *  wire at least one of its table bindings.  A deployable that hosts a
+     *  context without wiring its dataSource emits no schema for it. */
+    const provisioners = (ctxName: string) =>
+      sys.deployables.filter(
+        (dep) =>
+          dep.contextNames.includes(ctxName) &&
+          tableBindings.some(
+            (d) => d.contextName === ctxName && dep.dataSourceNames.includes(d.name),
+          ),
+      );
+
+    for (const ctxName of boundContexts) {
+      const hosts = provisioners(ctxName);
+      const selfProv = hosts.filter(
+        (d) => d.persistence && SELF_PROVISIONING_ADAPTERS.has(d.persistence),
+      );
+      if (selfProv.length === 0) continue;
+      const qualifying = hosts.filter(
+        (d) => !d.persistence || !SELF_PROVISIONING_ADAPTERS.has(d.persistence),
+      );
+
+      for (const dep of selfProv) {
+        const source = `${sys.name}/${dep.name}`;
+        const key = dep.persistence === "dapper" ? "dapper" : "mikroorm";
+        // (1) split-brain — a sibling adapter qualifies the same context.
+        if (qualifying.length > 0) {
+          const params = {
+            name: dep.name,
+            adapter: dep.persistence,
+            ctxName,
+            other: qualifying[0]!.name,
+            otherAdapter: qualifying[0]!.persistence ?? qualifying[0]!.platform,
+          };
+          diags.push({
+            severity: "error",
+            code: `loom.${key}-unsupported`,
+            message:
+              key === "dapper"
+                ? diagMessage("loom.dapper-unsupported#schema-split", params)
+                : diagMessage("loom.mikroorm-unsupported#schema-split", params),
+            source,
+          });
+          continue;
+        }
+        // (2) no sibling, but the binding ASKS for a placement this adapter
+        // cannot honour.  Only an EXPLICIT `schema:` / `tablePrefix:` is a
+        // request — the `snake(ctx)` default is what a lone self-provisioning
+        // deployable already lives with consistently.
+        const asking = tableBindings.find(
+          (d) =>
+            d.contextName === ctxName &&
+            dep.dataSourceNames.includes(d.name) &&
+            (d.schema !== undefined || d.tablePrefix !== undefined),
+        );
+        if (!asking) continue;
+        const params = {
+          name: dep.name,
+          adapter: dep.persistence,
+          binding: asking.name,
+          asked:
+            asking.schema !== undefined
+              ? `schema: "${asking.schema}"`
+              : `tablePrefix: "${asking.tablePrefix}"`,
+        };
+        diags.push({
+          severity: "error",
+          code: `loom.${key}-unsupported`,
+          message:
+            key === "dapper"
+              ? diagMessage("loom.dapper-unsupported#schema-ignored", params)
+              : diagMessage("loom.mikroorm-unsupported#schema-ignored", params),
           source,
         });
       }

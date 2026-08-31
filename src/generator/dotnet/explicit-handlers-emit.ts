@@ -53,7 +53,7 @@ import { normalizeHandlerReturn, requestRecordFor } from "../../ir/util/handler-
 import { escapeCsharpIdent, plural, upperFirst } from "../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
 import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
-import { projectEntityExpr, projectToResponse } from "./dto-mapping.js";
+import { csIdValueClrType, projectEntityExpr, projectToResponse } from "./dto-mapping.js";
 import { CS_PAGED_QUERY_PARAMS } from "./emit/common.js";
 import { API_CLIENT_CLASS, renderCsType } from "./render-expr.js";
 import {
@@ -617,7 +617,11 @@ function pathActionParam(p: ParamIR): { actionParam: string; commandArg: string 
   const t: TypeIR = p.type;
   const n = escapeCsharpIdent(p.name);
   if (t.kind === "id") {
-    const wire = t.valueType === "guid" ? "Guid" : t.valueType === "int" ? "long" : "string";
+    // The SHARED derivation (`csIdValueClrType`), not a local switch: the copy
+    // that used to live here mapped `int` to `long`, so an `int`-keyed
+    // aggregate bound a `long` route token and handed it to a ctor taking
+    // `int` — CS1503 (G2667-D4).  Latent only because ids are guid by default.
+    const wire = csIdValueClrType(t.valueType);
     return {
       actionParam: `${wire} ${n}`,
       commandArg: `new ${t.targetName}Id(${n})`,
@@ -632,7 +636,8 @@ function queryActionParam(p: ParamIR): { actionParam: string; commandArg: string
   const t: TypeIR = p.type;
   const n = escapeCsharpIdent(p.name);
   if (t.kind === "id") {
-    const wire = t.valueType === "guid" ? "Guid" : t.valueType === "int" ? "long" : "string";
+    // Same shared derivation as `pathActionParam` — see the note there.
+    const wire = csIdValueClrType(t.valueType);
     return {
       actionParam: `[FromQuery] ${wire} ${n}`,
       commandArg: `new ${t.targetName}Id(${n})`,

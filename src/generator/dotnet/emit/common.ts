@@ -93,6 +93,26 @@ public sealed class ForbiddenException : Exception
 }
 
 /// <summary>
+/// A wire value the caller sent cannot be parsed into its domain type —
+/// money and datetime cross the wire as strings, so a price of "12,50" is a
+/// malformed REQUEST, not a domain-rule failure.  Before this existed the
+/// controllers called decimal.Parse bare and a bad value threw
+/// FormatException, which no filter arm matched: the caller got 500 for input
+/// the server itself refused.  DomainExceptionFilter renders this as the same
+/// 422 + errors[] envelope FluentValidation and Hono's zod hook emit, so one
+/// malformed field reads identically on every backend (M-T6.48).
+/// </summary>
+public sealed class WireFormatException : Exception
+{
+    /// <summary>RFC-6901 pointer to the offending field, e.g. <c>/price</c>.
+    /// Named FieldPointer, not Pointer: CA1720 ("identifier contains type
+    /// name") is an ERROR under /warnaserror and rejects the shorter name.</summary>
+    public string FieldPointer { get; }
+    public WireFormatException(string fieldPointer, string message)
+        : base(message) => FieldPointer = fieldPointer;
+}
+
+/// <summary>
 /// Wraps an exception thrown by a user-supplied <c>[ExternHandler]</c>
 /// implementation, so the <see cref="DomainExceptionFilter"/> can emit a
 /// 500 envelope that names the offending handler instead of the bare

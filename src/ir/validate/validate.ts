@@ -8,6 +8,7 @@ import { validateIndexSuggestions } from "./checks/index-suggestion-checks.js";
 import {
   validateMigrationAdapterSupport,
   validateMigrationDataSteps,
+  validateSelfProvisioningSchemaSupport,
 } from "./checks/migration-checks.js";
 import { validateProjections } from "./checks/projection-checks.js";
 import {
@@ -308,6 +309,11 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   // (dapper / mikroorm): both skip the phase-⑨ chain entirely, so the step
   // would silently no-op (dapper) or drop+add the column (mikroorm).
   validateMigrationAdapterSupport(loom, diags);
+  // The other half of self-provisioning (F2-ADP-3): those adapters name every
+  // table UNQUALIFIED, so a context they share with a migration-chain deployable
+  // ends up with two physical tables — and an explicit `schema:` on the binding
+  // is silently dropped.
+  validateSelfProvisioningSchemaSupport(loom, diags);
   // Explicit transport bindings (unfoldable-api-derivation.md, Layer 4): every
   // `route ... -> Context.Handler` target must resolve.  Whole-model (routes are
   // system-level, their targets cross-context).

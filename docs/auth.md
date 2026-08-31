@@ -697,14 +697,13 @@ redacts). The masked field is nullable in the response schema. Internal
 audit/provenance snapshots stay unmasked (they record the real value). A
 mask-free aggregate is byte-identical.
 
-> **Known divergence — .NET audit snapshots.** node, Java, Python and Elixir all
-> project audit `before`/`after` through the UNMASKED serializer, as the previous
-> paragraph says. .NET does not: its audited command handlers reuse the ordinary
-> (masked) wire projection, so a masked field is recorded as `null` whenever the
-> acting principal fails the predicate — the stored trail then depends on *who*
-> performed the write, and the entity-history read has nothing left to redact.
-> Not fixed here (it changes what .NET writes, and overlaps the in-flight
-> history-read work); tracked as a follow-up.
+All five backends do this the same way. (.NET used to diverge — its audited
+command handlers reused the ordinary, masked wire projection, so a masked field
+was recorded as `null` whenever the acting principal failed the predicate, and
+the stored trail depended on *who* performed the write. Closed 2026-08-31: the
+four .NET audit projection sites pass `unmasked` (M-T3.9). The redaction did not
+vanish — reading the trail back through `GET /<agg>/{id}/history` still drops a
+masked field's `FieldChange`, which is where it belongs.)
 
 ```ts
 // generated (Hono) — the aggregate's read serializer
