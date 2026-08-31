@@ -445,3 +445,51 @@ Minted 2026-08-30 from the [08-24 generator review](../audits/generator-code-rev
 **Verification when it lands.** The gate must be mutation-proved twice — once by reverting an A13 half (the dead-key direction) and once by removing a `t()` wrap from a translated slot (the raw-render direction). A single green first run proves nothing here: this class's whole history is gates that never reached the thing they named.
 
 Sources: [generator-code-review-2026-08-24](../audits/generator-code-review-2026-08-24.md) §F5, §A13, §D9; [generator-code-review-2026-08-17](../audits/generator-code-review-2026-08-17.md) §8 (the vacuous slot ratchet). Relates to [M-T1.11](T1-ui-frontend.md) (the i18n epic that owns the catalog).
+
+## M-T9.40 — `--verify-ir`: the resolved-IR contract has no verifier, and no check reaches every expression — `open` · **M** · P1 ⭐ turns phase-⑧ forensics into a phase-⑤ assertion
+
+Minted 2026-08-31 by the [verification-architecture audit](../audits/verification-architecture-2026-08-31.md) §4 C2.
+
+`docs/technical.md` states the payoff of phase ⑤ as a CONTRACT: "every name carries a `refKind`, every member access carries `receiverType` and `memberType`, every call carries a `callKind`. Backends never re-resolve." Most of that contract is enforced by the IR's own types — but the parts that are not are exactly the parts a lowering bug breaks: `enumName` on an `enum-value` ref, `resourceName`/`resourceKind` on a `resource` ref, `wfScope` on a `workflow-fn` ref, `storeName` on a `store-field` ref. Each is an OPTIONAL field the type system cannot require, and each reaches a backend as `undefined` that renders into emitted source as the literal text `undefined` — found, today, only by whichever compile leg happens to cover that cell.
+
+**The second half is the harder one: there is no model-wide expression enumeration.** Eleven files under `src/ir/validate/checks/` and `src/ir/enrich/` roll their own partial walk over the model's expression-bearing sites, and they disagree about which sites exist — `validateExprIntegrity`'s covers workflows, operations, appliers, invariants, derived and functions, and reaches NO ui page, find, projection, criterion, domain service, handler or test. So "does this check reach every expression" has no answer anywhere in the tree, and a check that looks total is silently partial. This is the §77 class (a gap spanning one axis is invisible to per-axis tests) applied to the compiler's own checks.
+
+**The work.** (1) `src/ir/util/model-exprs.ts` — ONE enumeration of every expression in a model with a source label, exhaustive over the declaration kinds (the `walkExprChildren` family already gives the intra-expression exhaustiveness; this is the missing outer loop). (2) `src/ir/verify/verify-ir.ts` — a pure `verifyEnrichedModel(model): string[]` over that enumeration plus the structural invariants `test/ir/properties.test.ts` currently asserts on four examples (`wireShape` present and `id`-first, VOs carrying neither `id` nor containment, every aggregate's repository leading with the auto `all`, deployable/module references resolving). (3) Wire it as a `GenerateSystemOptions` flag and a CLI `--verify-ir`, default OFF in production and ON in `test/_helpers/generate.ts`, so every fixture in the tree — plus the 250 fuzz seeds and the pairwise matrix — checks the contract for free.
+
+Sequence (3) last and behind a measurement: turning it on across ~985 generator test files will either be silent or surface a wave, and which one it is IS the finding. The partial walks in (1)'s consumers are then deletable, which is the point — the seam pays for itself in removed copies.
+
+**Verification when it lands.** Mutation-proved per invariant, not per file: drop `enumName` at the lowering site that sets it and the verifier must name the expression; drop a `wireShape` and it must name the aggregate. And the enumeration itself needs its own proof — a site added to the IR with no arm in `model-exprs.ts` must fail to type-check, or the seam is one more partial walk with a better name.
+
+Sources: [verification-architecture-2026-08-31](../audits/verification-architecture-2026-08-31.md) §4 C2. Relates to M-T9.34 (harness honesty — the same "the instrument was blind" class, one layer down), M-T9.25 (intra-backend consistency).
+
+## M-T9.41 — Prove tenancy, authorization and masking on the IR, once, for all models — `open` · **L** · P1 ⭐ replaces ten per-backend runtime legs with one walk
+
+Minted 2026-08-31 by the [verification-architecture audit](../audits/verification-architecture-2026-08-31.md) §4 C3.
+
+The three cross-cutting properties whose violation is the worst failure mode in the codebase — a read that escapes its tenant filter, a route that escapes its `denyByDefault` gate, a `mask unless` field that reaches a wire — are all verified the same way today: per backend, at runtime, on a handful of fixtures (`test:tenancy-*` is ten npm legs; `authz-status-census` and `wire-no-leak-parity` are per-target). Coverage is therefore anecdotal by construction, and the gate ledger says so directly: `tenancy-hierarchy` and `policy-document` sit at the COMPILE tier in the corpus, and `projection-agg-filters` exists only because an audit found a cross-tenant COUNT/SUM leak that no fixture crossed.
+
+Every one of those properties is decidable on the IR, for every model, in milliseconds: the IR is fully resolved, so "every repository read carries a scope filter unless the node is explicitly `crossTenant`" is a walk, not an experiment. The runtime legs then stop being the coverage story and become what they are good at — a faithfulness spot-check that the emitters honour the IR they were handed.
+
+**The work.** Three IR-level proofs over M-T9.40's enumeration: (a) scope-filter totality for reads and writes, with `crossTenant`/`ignoring` as the only exits and each exit named; (b) route-gate totality under `enforcement: denyByDefault`, with `open` as the only exit; (c) mask closure — enumerate EVERY path that can serialize a masked field (wire DTO, event payload, projection row, audit record, log field, OpenAPI example, error body) and require each masked or explicitly exempted. (c) is the one that pays for itself immediately: leaks live in the paths nobody thought to test, and an exhaustive walk is the only thing that visits them.
+
+Depends on M-T9.40's enumeration — without it each proof re-rolls a partial walk and inherits exactly the blindness this mission exists to remove.
+
+**Verification when it lands.** Each proof mutation-proved against a real historical leak: re-seed the EF `ignoring *` deny-sentinel drop (#2668 wave 1) and the aggregation-source filter drop (`projection-agg-filters`' minting defect) and watch (a) name them. A proof that cannot re-find the leak that motivated it has not been shown to work.
+
+Sources: [verification-architecture-2026-08-31](../audits/verification-architecture-2026-08-31.md) §4 C3. Relates to M-T9.9 (sentinel `ExprIR` → typed nodes, done — the prerequisite that made these sentinels inspectable), M-T9.28 (the authorization-surface census this generalises).
+
+## M-T9.42 — Promote the duplicated per-target scenarios into the corpus, then delete them — `open` · **L** · P2 ⭐ the only route that shrinks the suite without losing a claim
+
+Minted 2026-08-31 by the [verification-architecture audit](../audits/verification-architecture-2026-08-31.md) §1, §5.
+
+The suite is 302,948 LOC across 1,825 files — 0.91× `src/` — and **879 files / 126,741 LOC assert only by substring on emitted text**, the tier [quality-audit-2026-08](../audits/quality-audit-2026-08.md) §3 measures as discovering ~0% of bugs. 42 scenarios are duplicated across three or more target directories (199 files, 35,700 LOC): the same `.ddd` written five times, each copy asserting that one emitter wrote particular tokens.
+
+The naive conclusion — delete them — is wrong, and the gate ledger (`test/_helpers/gate-ledger.ts`) is what shows it: **only 3 of the 42 have a corpus fixture.** For the other 39 (33,639 LOC) the string tests are the only gate those cells have. So the unit of work is promotion, not deletion: one `.ddd` plus one manifest row buys five compile cells; a behavioural block plus a golden buys five runtime cells; then the five copies go. `temporal` is the canonical case — 813 LOC across five near-identical fixtures, replaced by ~60 LOC whose cells assert that five backends compile and answer rather than that five emitters wrote a token.
+
+**The rule the drain runs under** (audit §2): keep exactly one gate per (feature × target) cell, at the strongest tier available. A string assertion survives only when it is the strongest gate for its cell, or when it pins something no stronger tier can observe — import hygiene, a negative no-leak, a name that never reaches the wire. No deletion without citing the cell and the stronger gate now watching it; `gate-ledger.test.ts`'s `BEHAVIOURAL_ABSENT` names the 14 features where nothing runtime watches, and those keep their string tests until B3 reaches them.
+
+Ranked by copies × LOC, the promotion candidates are `generator` (5,236/×5), `render-expr-kinds` (3,203/×4 — and this one wants M-T9.43's shape, an evaluated value table rather than a rendered-string table), `i18n-runtime` (2,136/×7), `explicit-handlers` (1,885/×5), `projection-read` (1,522/×7), `store` (1,444/×7).
+
+**Verification when it lands.** Per promoted scenario, in its own PR: the new corpus cells green at the tier claimed, and the deleted copies' claims accounted for — anything the string test asserted that the new tier does NOT cover stays, named, rather than being dropped silently. The failure mode to guard is a promotion that trades a specific claim for a general one and calls it a win.
+
+Sources: [verification-architecture-2026-08-31](../audits/verification-architecture-2026-08-31.md) §1, §2, §5. Relates to M-T9.13 (the behavioural matrix that unblocks the compile-only cells), M-T9.29 (the driven-primitive census — the same "emitted but never exercised" question from the other side).
