@@ -1849,7 +1849,7 @@ export function honoWorkflowStmtTarget(
   // constructs for that repo (`collectReposForWorkflow` includes service ports),
   // so a service reading `Accounts` is passed the workflow's `accounts` repo.
   // PURE services resolve to `[]` → byte-identical.
-  const readPortArgs = workflowReadPortResolver(ctx);
+  const readPortArgs = readPortResolver(ctx);
   const renderArg = (e: ExprIR): string =>
     renderExprWithParams(e, paramExprs, thisName, readPortArgs);
   // Unique suffix per in-body audit capture so multiple audited op-calls in one
@@ -2066,7 +2066,7 @@ export function renderExprWithParams(
  *  read-ports the service operation consumes (derived from its body), in order.
  *  A pure service op has no ports, so the resolver returns `[]` and the call
  *  renders byte-identically. */
-function workflowReadPortResolver(
+export function readPortResolver(
   ctx: BoundedContextIR,
 ): (service: string, op: string) => string[] {
   return (service, op) => {
@@ -2083,6 +2083,25 @@ function workflowReadPortResolver(
  *  that repository directly.  De-duplicated by repository name across all
  *  service calls in the body. */
 function collectServiceReadPorts(wf: WorkflowIR, ctx: BoundedContextIR): ReadPort[] {
+  return serviceReadPorts(wf.statements, [], ctx);
+}
+
+/** The read ports every `reading`-tier domain-service call inside `statements`
+ *  (plus any loose `extraExprs`, e.g. a handler's `return` expression) needs.
+ *  De-duplicated by repository name.
+ *
+ *  Split out of `collectServiceReadPorts` so the EXPLICIT-HANDLER route builder
+ *  can reuse it: a `commandHandler` / `queryHandler` orchestrates services
+ *  exactly as a workflow does, but constructed none of their ports and rendered
+ *  its `return` expression without the resolver — so
+ *  `return Registration.isHolderFree(holder)` emitted a call that was both
+ *  arity-short and un-awaited against an `async isHolderFree(accounts, holder)`
+ *  (M-T5.14). */
+function serviceReadPorts(
+  statements: WorkflowStmtIR[],
+  extraExprs: readonly ExprIR[],
+  ctx: BoundedContextIR,
+): ReadPort[] {
   const byRepo = new Map<string, ReadPort>();
   const visit = (e: ExprIR): void => {
     if (e.kind === "call" && e.callKind === "domain-service" && e.serviceRef) {
@@ -2106,7 +2125,8 @@ function collectServiceReadPorts(wf: WorkflowIR, ctx: BoundedContextIR): ReadPor
       }
     }
   };
-  walkStmts(wf.statements);
+  walkStmts(statements);
+  for (const e of extraExprs) visit(e);
   return [...byRepo.values()];
 }
 
@@ -2120,9 +2140,27 @@ function mergeReadPortRepos(
   wf: WorkflowIR,
   ctx: BoundedContextIR,
 ): { repoName: string; aggName: string }[] {
+  return mergeServiceReadPortRepos(own, collectServiceReadPorts(wf, ctx));
+}
+
+/** The statements-and-expressions form of {@link mergeReadPortRepos}, for the
+ *  explicit-handler builder. */
+export function mergeHandlerReadPortRepos(
+  own: { repoName: string; aggName: string }[],
+  statements: WorkflowStmtIR[],
+  extraExprs: readonly ExprIR[],
+  ctx: BoundedContextIR,
+): { repoName: string; aggName: string }[] {
+  return mergeServiceReadPortRepos(own, serviceReadPorts(statements, extraExprs, ctx));
+}
+
+function mergeServiceReadPortRepos(
+  own: { repoName: string; aggName: string }[],
+  ports: readonly ReadPort[],
+): { repoName: string; aggName: string }[] {
   const seen = new Set(own.map((r) => r.repoName));
   const out = [...own];
-  for (const port of collectServiceReadPorts(wf, ctx)) {
+  for (const port of ports) {
     if (seen.has(port.repo)) continue;
     seen.add(port.repo);
     out.push({ repoName: port.repo, aggName: port.aggregate });
