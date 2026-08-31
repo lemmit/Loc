@@ -360,6 +360,19 @@ formality. Measured, not estimated:
 - **Merging is CI-bound and strictly serial.** Each merge moves `main`, which invalidates the
   next PR's rebase, which needs a fresh CI cycle before branch protection will merge it.
   Eight PRs is eight sequential cycles.
+- **Do not push the whole wave at once — it saturates the shared runner pool and makes every
+  PR slower.** Each PR triggers ~20 workflows against a pool of roughly 20 runners, so four
+  simultaneous pushes queue ~80 jobs and nothing starts promptly. Observed here: `Tests +
+  coverage` run 6147 on the macros branch sat in `queued` for **40+ minutes without
+  starting**, which is indistinguishable from "CI is broken" if you only look at the merge
+  API's `2 of 2 required status checks are expected`. **Push at most two branches at a time**,
+  and when a PR looks stalled check `status` on its workflow run — `queued` means the pool is
+  full and the answer is patience, `in_progress` means it is genuinely running, and neither
+  is a fault to debug.
+- **The pin is re-derived on EVERY merge, not offset by a constant.** #2703 was net −1 (two
+  phantom rows deleted, one added), so `main` went 43 → 42 and both queued branches needed
+  *new* numbers rather than their old ones (elixir 44 → 43, walker 45 → 44). Recompute
+  against `main` each round; never carry a previous resolution forward.
 - **`pr-gate`'s own `pull_request` runs ALWAYS show `cancelled`. That is normal, and it is
   not the reason a PR is stuck.** Every one of the seven `PR gate` workflow runs on
   `claude/w1b-node-ts` shows `conclusion: cancelled`, back to its first commit — because
