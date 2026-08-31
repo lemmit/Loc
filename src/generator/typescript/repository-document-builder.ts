@@ -174,7 +174,7 @@ export function buildDocumentRepositoryFile(
     // tenant and was invisible to every principal INCLUDING ITS CREATOR — the
     // read filter is correct, and `"" === currentUser.tenantId` is false, so a
     // 201 create was followed by a 404 on every read, update and destroy.
-    `      await this.db.insert(schema.${tableName}).values({ id: aggregate.id as string, data: ${audited ? "stampInsert(data)" : "data"}, version: 1 });`,
+    `      await this.db.insert(schema.${tableName}).values({ id: aggregate.id as string, ${audited ? "data: stampInsert(data)" : "data"}, version: 1 });`,
     `    } else {`,
     ...(versioned
       ? [

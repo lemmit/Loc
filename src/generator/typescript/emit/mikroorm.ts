@@ -2913,13 +2913,15 @@ export function renderMikroDocumentRepository(
   // including its creator.  It surfaced only when `policy-document` gained a
   // `test e2e` — the caller runs on every behavioural leg, and the mikroorm leg
   // failed while drizzle passed.
-  const docData = docAudited ? "stampInsert(data)" : "data";
+  // Property SHORTHAND when unaudited (`data`, not `data: data`) so an
+  // aggregate with no lifecycle stamps emits byte-identically to before.
+  const docData = docAudited ? "data: stampInsert(data)" : "data";
   const saveLines = versioned
     ? [
         `    const expected = expectedVersion ?? aggregate.version;`,
         `    const existing = await em.findOne(${row}, { id: aggregate.id as string });`,
         `    if (existing === null) {`,
-        `      await em.insert(${row}, { id: aggregate.id as string, data: ${docData}, version: 1 });`,
+        `      await em.insert(${row}, { id: aggregate.id as string, ${docData}, version: 1 });`,
         `    } else {`,
         `      const affected = await em.nativeUpdate(${row}, { id: aggregate.id as string, version: expected }, { data, version: expected + 1 });`,
         `      if (affected === 0) throw new ConcurrencyError("${agg.name}", aggregate.id as string);`,
@@ -2928,7 +2930,7 @@ export function renderMikroDocumentRepository(
     : [
         `    const existing = await em.findOne(${row}, { id: aggregate.id as string });`,
         `    if (existing === null) {`,
-        `      await em.insert(${row}, { id: aggregate.id as string, data: ${docData}, version: 1 });`,
+        `      await em.insert(${row}, { id: aggregate.id as string, ${docData}, version: 1 });`,
         `    } else {`,
         `      await em.nativeUpdate(${row}, { id: aggregate.id as string }, { data, version: existing.version + 1 });`,
         `    }`,

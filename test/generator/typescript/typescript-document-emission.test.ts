@@ -248,6 +248,11 @@ describe("document save() applies the onCreate stamps", () => {
     const src = unstamped.get("db/repositories/cart-repository.ts") as string;
     expect(src, "the unstamped control repository was not emitted").toBeDefined();
     expect(src).not.toContain("stampInsert");
-    expect(src).toMatch(/\.insert\(schema\.carts\)\.values\(\{[^}]*data,/);
+    // EXACT: the property shorthand, not `data: data`.  A loose regex here
+    // passed on `data: data` — the byte-different form an unaudited
+    // aggregate must not emit.
+    expect(src).toContain(
+      "insert(schema.carts).values({ id: aggregate.id as string, data, version: 1 })",
+    );
   });
 });
