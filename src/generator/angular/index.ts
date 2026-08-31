@@ -352,6 +352,9 @@ export function generateAngularForContexts(
             bcByWorkflow,
             externFunctions: externFunctionNames,
             walkedComponents: walkedComponentNames,
+            // The route table an action body's `navigate(<Page>)` resolves
+            // against (the body walk above already receives it).
+            pageRoutes,
           });
     }
     const pagePath = `src/app/pages/${slug}.component.ts`;

@@ -488,7 +488,28 @@ export const flutterTarget: WalkerTarget = {
     if (call.kind !== "call") return null;
     const ofArg = namedArg(call, "of");
     const opArg = namedArg(call, "op");
-    if (ofArg?.kind !== "ref" || opArg?.kind !== "ref") return null;
+    if (ofArg?.kind !== "ref" || opArg?.kind !== "ref") {
+      // The INSTANCE-QUALIFIED shape (`OperationForm(<binding>.<op>)`) has no
+      // Flutter arm yet — `forms-emit.ts` builds an `<Op><Agg>Form` widget only
+      // for the by-name shape, so resolving it here would reference a widget
+      // nothing emits (`flutter-modal-instance-operationform`).
+      //
+      // DECLINE it explicitly rather than returning `null`: a null falls
+      // through to the SHARED walker, whose op-form path renders
+      // `primitive-modal`, which this procedural pack does not implement — and
+      // the pack's missing-renderer fallback is a Dart LINE comment, illegal in
+      // the expression position the slot occupies.  A `renderComment` is
+      // syntactically inert (`const SizedBox.shrink() /* … */`) and visible.
+      const inst = (call.args ?? []).find((_, i) => !(call.argNames ?? [])[i]);
+      if (inst?.kind === "member") {
+        return flutterTarget.renderComment(
+          `OperationForm(${inst.receiver.kind === "ref" ? inst.receiver.name : "?"}.${inst.member}): ` +
+            "the instance-qualified shape is not rendered on Flutter — use " +
+            "OperationForm { of: <Agg>, op: <op> }",
+        );
+      }
+      return null;
+    }
     const agg = ctx.aggregatesByName.get(ofArg.name);
     const op = agg?.operations.find((o) => o.name === opArg.name && o.visibility === "public");
     if (!agg || !op) return null;

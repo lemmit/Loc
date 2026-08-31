@@ -68,7 +68,7 @@ import {
   emitPythonProvenanceMigration,
   MIGRATE_PY,
 } from "./emit/migrations.js";
-import { wireTruncModHelper } from "./emit/numeric.js";
+import { wireNumericHelpers } from "./emit/numeric.js";
 import { OBS_LOG_PY, OBS_MIDDLEWARE_PY, renderPythonTracingFile } from "./emit/obs.js";
 import { emitPyProvenance } from "./emit/provenance.js";
 import { renderPySchema } from "./emit/schema.js";
@@ -798,7 +798,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // LAST — cross-backend `%` semantics (see emit/numeric.ts).  Runs over the
   // finished map so every module that rendered a `trunc_mod(` call gets the
   // import, whichever emitter produced it.
-  wireTruncModHelper(out);
+  wireNumericHelpers(out);
   return out;
 }
 

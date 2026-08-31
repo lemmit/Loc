@@ -128,6 +128,10 @@ export interface AngularPageShellInput {
   bcByAggregate?: ReadonlyMap<string, BoundedContextIR>;
   workflowsByName?: ReadonlyMap<string, WorkflowIR>;
   bcByWorkflow?: ReadonlyMap<string, BoundedContextIR>;
+  /** Page name -> route.  The BODY walk already receives this; the action walk
+   *  did not, so a `navigate(<Page>)` in an action body resolved the fallback
+   *  `/<snake(page)>` rather than the destination's declared `route:`. */
+  pageRoutes?: ReadonlyMap<string, string>;
   /** Extern frontend function names declared on this ui
    *  (`function f(…): T extern from "…"`) — an action-body call registers a
    *  use so the shell imports the shim and re-exposes it as a component member
@@ -398,7 +402,10 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     // `next()` must render `this.next()` (Proposal A Stage 1, Fix 1).  Include
     // every action name in the whole-word prefix set alongside state/derived.
     const actionNames = new Set(actions.map((a) => a.name));
-    const refNames = new Set<string>([...stateNames, ...derivedNames, ...actionNames]);
+    // `router` joins them: `angularTarget.renderNavigate` emits the bare
+    // `router.navigateByUrl(...)` a TEMPLATE binding wants, but an action body
+    // is a class METHOD, where the injected member needs `this.`.
+    const refNames = new Set<string>([...stateNames, ...derivedNames, ...actionNames, "router"]);
     // Transitively include any sibling action a used action's body calls so its
     // method emits too.
     const effectiveUsed = closeUsedActions(actions, result.usedActions);
@@ -428,6 +435,10 @@ export function renderAngularPage(input: AngularPageShellInput): string {
         // exactly like a main-body call.
         externFunctions: input.externFunctions ?? new Set(),
         usedExternFunctions: result.usedExternFunctions,
+        // A `navigate(<Page>)` in an action body resolves the DESTINATION's
+        // declared `route:` through this table; without it the resolver fell
+        // back to `/<snake(page)>` and the navigation went nowhere.
+        pageRoutes: input.pageRoutes,
       };
       const mctx: WalkContext = param
         ? { ...baseCtx, lambdaParams: extendLambdaParams(baseCtx, param, param) }

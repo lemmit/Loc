@@ -35,6 +35,7 @@ import {
   isCriterion,
   isDerivedProp,
   isEmitStmt,
+  isFilterDecl,
   isFindDecl,
   isFunctionDecl,
   isLetStmt,
@@ -45,6 +46,7 @@ import {
   isPolicyDecl,
   isPostfixChain,
   isPreconditionStmt,
+  isProjection,
   isRequiresStmt,
   isRetrieval,
   isRetrievalLiteral,
@@ -528,6 +530,22 @@ export function checkPredicateSlotArgs(model: Model, accept: ValidationAcceptor)
     } else if (isOperation(node)) {
       visit((node as Operation).gate);
       visit((node as Operation).when);
+    } else if (isFilterDecl(node)) {
+      // M-T6.18 gap #3, last live piece — a capability `filter` is a
+      // DECLARATION site, not a body: `filter InRegion(42)` against `criterion
+      // InRegion(region: string)` carries no lexical `Env` of its own, so the
+      // predicate call was arity-checked (`loom.criterion-arity`, model-wide)
+      // and never TYPE-checked.  `envForNode` binds the host aggregate as
+      // `this` + its members, which is all a filter predicate can reference.
+      visit(node.expr);
+    } else if (isProjection(node)) {
+      // The projection query clauses are declaration sites too — `where`, the
+      // `group by` keys, each `select` expression and each `join … on` id ref
+      // can all nest a criterion / policy-fn call.
+      visit(node.filter);
+      for (const g of node.groupBys) visit(g);
+      for (const sel of node.selects) visit(sel.expr);
+      for (const j of node.joins) visit(j.idRef);
     }
   }
 }

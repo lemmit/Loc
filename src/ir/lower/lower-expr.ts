@@ -814,25 +814,13 @@ function applySuffixToRecv(
       ...(argNames.some((n) => n !== undefined) ? { argNames } : {}),
     };
     // Result type after a method call — `memberType` handles collection
-    // ops, entity/VO members, and the string `.length` case.
+    // ops, entity/VO members, and the string `.length` case; the λ-body
+    // refinement `memberType` structurally cannot see is applied on top.
     let nextType = memberType(recvType, ms.member, env);
-    // `map(λ)` returns an array of the lambda's body type; `memberType`
-    // can't see the lambda, so type it here at the call site from the
-    // lowered lambda body (best-effort — falls back to the element type).
-    if (collectionOp && ms.member === "map") {
+    if (collectionOp) {
       const lam = args[0];
       const bodyT = lam?.kind === "lambda" && lam.body ? bodyTypeOf(lam.body) : undefined;
-      const elem = collectionElementType(recvType) ?? { kind: "primitive", name: "string" };
-      nextType = { kind: "array", element: bodyT ?? elem };
-    }
-    // `min(λ)`/`max(λ)` return the PROJECTED value, optional (empty → null).
-    // `memberType` can't see the lambda, so refine the element type here from
-    // the lowered lambda body (falls back to the collection element type).
-    if (collectionOp && (ms.member === "min" || ms.member === "max")) {
-      const lam = args[0];
-      const bodyT = lam?.kind === "lambda" && lam.body ? bodyTypeOf(lam.body) : undefined;
-      const elem = collectionElementType(recvType) ?? { kind: "primitive", name: "string" };
-      nextType = { kind: "optional", inner: bodyT ?? elem };
+      nextType = refineCollectionOpType(ms.member, recvType, bodyT, nextType);
     }
     return { recv: mcIR, recvType: nextType };
   }
@@ -973,6 +961,54 @@ function lowerLambda(expr: Lambda, env: Env, paramType: TypeIR): ExprIR {
  *  `optional` (`xs?.any(...)`) then reading the `array` element.  Returns
  *  `undefined` for a non-collection receiver so the caller can fall back to
  *  the plain lambda path. */
+/** Refine a collection-op's result type with the λ-BODY type the structural
+ *  `memberType` pass cannot see (it is handed a `TypeIR` receiver and a member
+ *  name; the lambda lives in the AST / the lowered arg list).
+ *
+ *  This lives in ONE place because both typing paths need it and they used to
+ *  disagree: `applySuffixToRecv` refined `map`/`min`/`max` at the call site
+ *  while `inferSuffixType` — the path that types a `let` binding through
+ *  `inferExprType` — called `memberType` raw.  So `let m = xs.map(λ)` was typed
+ *  `string` (`memberType` had no `map` arm at all) and every downstream
+ *  collection op on `m` mis-rendered on four of five backends (F2-EXPR-2), and
+ *  `sum(λ)`'s money-ness was dropped on BOTH paths because neither refined
+ *  `sum` (F2-EXPR-1: `Decimal * number` on node, `Decimal * float` on python).
+ *
+ *  `fallback` is `memberType`'s structural answer, kept whenever the λ body
+ *  types to nothing useful. */
+function refineCollectionOpType(
+  member: string,
+  recvType: TypeIR,
+  bodyT: TypeIR | undefined,
+  fallback: TypeIR,
+): TypeIR {
+  const elem = collectionElementType(recvType) ?? { kind: "primitive", name: "string" };
+  switch (member) {
+    // `map(λ)` yields an array of the λ body's type (identity projection ⇒ the
+    // element type).
+    case "map":
+      return { kind: "array", element: bodyT ?? elem };
+    // `min(λ)`/`max(λ)` yield the PROJECTED value, optional (empty → null).
+    case "min":
+    case "max":
+      return { kind: "optional", inner: bodyT ?? elem };
+    // `sum(λ)` folds the λ BODY, not the element: `lines.sum(l => l.price *
+    // l.qty)` over `Line[]` is money because the body is, even though the
+    // element is an entity.  Keeping the structural answer (`decimal`) made
+    // the IR disagree with the AST type-system, and the money-vs-decimal split
+    // is load-bearing on the two backends where they are different host types
+    // (Hono `Decimal` vs `number`, FastAPI `Decimal` vs `float`).  Non-money
+    // bodies keep the existing decimal widening — the fold is numeric either
+    // way and every backend already renders that shape.
+    case "sum":
+      return bodyT?.kind === "primitive" && bodyT.name === "money"
+        ? { kind: "primitive", name: "money" }
+        : fallback;
+    default:
+      return fallback;
+  }
+}
+
 function collectionElementType(t: TypeIR): TypeIR | undefined {
   const unwrapped = t.kind === "optional" ? t.inner : t;
   return unwrapped.kind === "array" ? unwrapped.element : undefined;
@@ -2448,6 +2484,14 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
           return { kind: "primitive", name: "money" };
         }
         return { kind: "primitive", name: "decimal" };
+      // `map` — an array of the ELEMENT type is the honest structural
+      // fallback; the call site refines the element to the λ body's type
+      // (`refineCollectionOpType`).  Without this arm `map` fell through to
+      // the `string` default below, so `let m = xs.map(λ)` bound a
+      // `string`-typed local and every downstream collection op on `m`
+      // mis-rendered (F2-EXPR-2).
+      case "map":
+        return { kind: "array", element: t.element };
       case "all":
       case "any":
       case "contains":
@@ -2541,7 +2585,23 @@ function inferSuffixType(t: TypeIR, suffix: PostfixSuffix, env: Env): TypeIR {
     return { kind: "primitive", name: "string" };
   }
   const ms = suffix as MemberSuffix;
-  return memberType(t, ms.member, env);
+  const base = memberType(t, ms.member, env);
+  // Apply the SAME λ-body refinement the lowering call site applies, so a
+  // `let` binding (typed through `inferExprType` → here) and the inline
+  // expression (typed through `applySuffixToRecv`) agree.  They did not: a
+  // `let` bound to a `map`/`sum(λ)` got the structural answer only.
+  if (t.kind === "array" && isCollectionOp(ms.member)) {
+    const arg = ms.args?.[0]?.value;
+    const bodyT =
+      arg && isLambda(arg) && arg.body
+        ? inferExprType(arg.body, {
+            ...env,
+            locals: new Map(env.locals).set(arg.param, { kind: "lambda", type: t.element }),
+          })
+        : undefined;
+    return refineCollectionOpType(ms.member, t, bodyT, base);
+  }
+  return base;
 }
 
 function memberOnEntity(target: Aggregate | EntityPart, name: string): TypeIR {

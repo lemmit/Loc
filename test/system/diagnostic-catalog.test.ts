@@ -327,4 +327,61 @@ describe("validator diagnostic-message catalog", () => {
       expect(text.trim(), key).not.toBe("");
     }
   });
+
+  // F2-FFE-9 — the CLI prints `${d.code} ${d.source}: ${d.message}`
+  // (src/cli/main.ts), and the UI / store / frontend checks pass the SAME
+  // human-readable location as both the diagnostic's `source` and the
+  // message's `where` param.  An entry that also LEADS with `${p.where}:`
+  // therefore prints the location twice:
+  //
+  //   loom.sub-primitive-misplaced page 'Home': page 'Home': `Tab` is a …
+  //   loom.…                       component 'TabbyTop': component 'TabbyTop': …
+  //
+  // The location belongs to `source`; the message says what is wrong.  This
+  // pins the whole class rather than the two codes that were noticed — a new
+  // check that copy-pastes the `${p.where}: ` lead fails here.
+  //
+  // Entries that weave `where` into a SENTENCE (`${p.where} uses a
+  // discriminated union…`) are fine and unaffected: only a bare
+  // `<where>:`/`<where> action …:` LEAD is a duplicated prefix.
+  // The `loom.domain-service-*` body gates are the ONE family whose `where`
+  // is not its `source`: `source` is the path `Ctx/Svc.op` while `where` spells
+  // the KIND out (`domainService 'Archiver' operation 'stash'`), so the lead
+  // adds information rather than repeating the prefix.  A waiver ratchets — if
+  // one of these is reworded or its call site starts passing `source: where`,
+  // drop its row here in the same change.
+  const WHERE_LEAD_NOT_A_DUPLICATE = new Set<string>([
+    "loom.domain-service-no-emit",
+    "loom.domain-service-no-mutation",
+    "loom.domain-service-no-repo-write",
+    "loom.domain-service-no-workflow-start",
+    "loom.domain-service-infra-call-from-aggregate",
+    "loom.domain-service-cross-context-read",
+    "loom.domain-service-read-unsupported",
+  ]);
+
+  it("no entry leads with its `where` param — the CLI already prints `source`", () => {
+    const anyParams = new Proxy({}, { get: (_t, prop) => `<${String(prop)}>` });
+    const leading: string[] = [];
+    for (const [key, entry] of Object.entries(DIAGNOSTIC_MESSAGES)) {
+      if (typeof entry === "string" || WHERE_LEAD_NOT_A_DUPLICATE.has(key)) continue;
+      const text = (entry as (p: unknown) => string)(anyParams);
+      if (!text.startsWith("<where>")) continue;
+      // The lead is a duplicated PREFIX when the `where` run is closed by a
+      // colon before the sentence starts (`<where>: …`, `<where> action 'x': …`).
+      const head = text.slice(0, text.indexOf(":") + 1);
+      if (text.includes(":") && /^<where>[^:]{0,40}:$/.test(head)) leading.push(`${key} → ${head}`);
+    }
+    expect(leading).toEqual([]);
+  });
+
+  it("every waived `where` lead is still a real waiver (no stale rows)", () => {
+    const anyParams = new Proxy({}, { get: (_t, prop) => `<${String(prop)}>` });
+    const stale = [...WHERE_LEAD_NOT_A_DUPLICATE].filter((key) => {
+      const entry = DIAGNOSTIC_MESSAGES[key as DiagnosticMessageKey];
+      if (typeof entry !== "function") return true;
+      return !(entry as (p: unknown) => string)(anyParams).startsWith("<where>");
+    });
+    expect(stale).toEqual([]);
+  });
 });

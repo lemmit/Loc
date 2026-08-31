@@ -1077,7 +1077,7 @@ function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): 
   }
   // navigate(<Page>, { … }) — Loom's cross-page navigation primitive.
   if (expr.name === "navigate") {
-    return renderNavigate(expr, ctx);
+    return renderNavigate(expr.args, ctx);
   }
   // toast(<msg>) — flash message.
   if (expr.name === "toast") {
@@ -1404,7 +1404,7 @@ function renderApiCall(call: ApiCallSite, ctx: WalkContext): string {
 // Navigation + toast.
 // ---------------------------------------------------------------------------
 
-function renderNavigate(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+function renderNavigate(navArgs: readonly ExprIR[], ctx: WalkContext): string {
   // navigate(<Page>, { customerId: x }) — first arg is the page
   // reference, second is the params object.  The router uses
   // `live "<route>", <Page>Live`; lowers to `push_navigate(socket,
@@ -1417,8 +1417,8 @@ function renderNavigate(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContex
   // src/generator/_walker/target.ts).  The `args[0].kind !== "ref"`
   // fallback stays walker-local because it's a parse-time invariant
   // failure, not a per-target rendering decision.
-  const target = expr.args[0];
-  const params = expr.args[1];
+  const target = navArgs[0];
+  const params = navArgs[1];
   if (target?.kind !== "ref") {
     return `push_navigate(socket, to: "/")`;
   }
@@ -2052,6 +2052,15 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
           actionArgSubst: subst,
         };
         return callee.body.map((s) => renderStmt(s, innerCtx)).join("\n      ");
+      }
+      // `navigate(<Page>)` — the DOCUMENTED navigation shape (docs/actions.md).
+      // It is a `private-operation` call, so it fell into the bare-call line
+      // below and emitted `|> tap(fn _ -> navigate(other) end)`: an undefined
+      // function AND an unbound `other`, i.e. an Elixir CompileError.  Routed
+      // through the SAME resolver the expression position uses; `then/2` gives
+      // the mid-pipe socket the `push_navigate(socket, …)` shape needs.
+      if (stmt.name === "navigate" && stmt.target === "private-operation") {
+        return `|> then(fn socket -> ${renderNavigate(stmt.args, ctx)} end)`;
       }
       // Bare function / private-operation call statement.  Evaluated for
       // its effect; the socket flows through unchanged via `tap`.

@@ -520,6 +520,21 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     verified: true,
   },
   {
+    // Same SHAPE bound as the two rows above, on the third body kind: the
+    // `reading` tier recognises a repository read only when it is the WHOLE
+    // expression (`matchRepoRead` requires `suffixes.length === 1`).  A read in
+    // MEMBER-RECEIVER position (`Accounts.byHolder(h).balance`) therefore never
+    // becomes a `repo-read`: the service is typed `pure`, no read port is
+    // threaded, and every backend emits the bare repository name.  Widening the
+    // detector (and re-applying the remaining suffixes in
+    // `lower-domain-service.ts`) retires this row.
+    code: "loom.domain-service-read-unsupported",
+    kind: "scope",
+    site: "src/ir/validate/checks/domain-service-checks.ts:233",
+    what: "a repository read used as a MEMBER RECEIVER in a domainService body — v1 binds it first",
+    verified: true,
+  },
+  {
     code: "loom.workflow-load-nullable-unsupported",
     kind: "scope",
     site: "src/ir/validate/checks/workflow-checks.ts:656",

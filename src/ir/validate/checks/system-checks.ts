@@ -72,7 +72,7 @@ import {
 } from "../../util/resolve-datasource.js";
 import { isDeepScopeFilter } from "../../util/tenant-stance.js";
 import { typeLabel } from "../../util/type-label.js";
-import { walkExprDeep, walkWorkflowStmtExprsDeep } from "../../util/walk.js";
+import { walkExprDeep, walkStmtsDeep, walkWorkflowStmtExprsDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { firstNonGateRef, GATE_ALLOWED_REFS } from "./query-checks.js";
 import { walkExpr } from "./shared.js";
@@ -3741,6 +3741,97 @@ export function validateProvenancedStorage(
 //     `elixir` (vanilla Phoenix) makes `serialize/1` redact (reading the principal
 //     from the process dictionary the Auth plug stashes), moving the raw map to
 //     `serialize_unmasked/1` for audit snapshots.
+// ---------------------------------------------------------------------------
+// `mask unless` LAUNDERING through `emit` (M-T3.15 B0).
+//
+// The query-time bound below refuses a projection that READS a masked
+// aggregate.  A FOLDED projection reaches the same value by a different road:
+// the aggregate emits an event carrying the masked field's value, and the
+// projection folds that payload into its own row — which every backend serves
+// unredacted (a projection row carries no mask marker and no principal is in
+// scope on its read routes).  A fold is the ordinary way to build a read model,
+// so it is the cheapest of the three bypasses, not the most exotic.
+//
+// The taint is computed per masked aggregate: an `emit`ted event field whose
+// value expression reads a `mask unless` field — directly (`salary`,
+// `this.salary`), through a `derived` that reads one, or through a `let` bound
+// to either — marks the EVENT as carrying masked data.  A projection folding
+// such an event is refused with the same code as the read bypass.
+// ---------------------------------------------------------------------------
+
+/** The masked field a single expression reads, or null.  `masked` holds the
+ *  aggregate's `mask unless` field names plus every `derived` that reads one;
+ *  `taintedLets` maps a body-local `let` name to the masked field it carries. */
+function firstMaskedRead(
+  e: ExprIR,
+  masked: ReadonlySet<string>,
+  taintedLets: ReadonlyMap<string, string>,
+): string | null {
+  let hit: string | null = null;
+  walkExprDeep(e, (n) => {
+    if (hit !== null) return;
+    if (n.kind === "ref") {
+      const selfProp =
+        n.refKind === "this-prop" || n.refKind === "this-vo-prop" || n.refKind === "this-derived";
+      if (selfProp && masked.has(n.name)) {
+        hit = n.name;
+        return;
+      }
+      if (n.refKind === "let") {
+        const via = taintedLets.get(n.name);
+        if (via !== undefined) hit = via;
+      }
+      return;
+    }
+    if (n.kind === "member" && n.receiver.kind === "this" && masked.has(n.member)) hit = n.member;
+  });
+  return hit;
+}
+
+/** Map every event whose emitted payload carries a `mask unless` value to the
+ *  `<Aggregate>.<field>` that laundered into it. */
+export function maskLaunderingEvents(ctx: BoundedContextIR): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const agg of ctx.aggregates) {
+    const maskedFields = agg.fields.filter((f) => f.maskUnless).map((f) => f.name);
+    if (maskedFields.length === 0) continue;
+    const masked = new Set(maskedFields);
+    // A `derived` whose expression reads a masked field carries the same value.
+    for (const d of agg.derived) {
+      if (firstMaskedRead(d.expr, masked, new Map())) masked.add(d.name);
+    }
+    for (const op of [...agg.operations, ...(agg.creates ?? []), ...(agg.destroys ?? [])]) {
+      const stmts: StmtIR[] = [];
+      for (const s of op.statements) walkStmtsDeep(s, (n) => stmts.push(n));
+      // Fixpoint over `let` bindings so declaration order (or nesting inside a
+      // lambda block) can't hide a chain `let a = salary` / `let b = a`.
+      const taintedLets = new Map<string, string>();
+      for (let changed = true; changed; ) {
+        changed = false;
+        for (const s of stmts) {
+          if (s.kind !== "let" || taintedLets.has(s.name)) continue;
+          const via = firstMaskedRead(s.expr, masked, taintedLets);
+          if (via !== null) {
+            taintedLets.set(s.name, via);
+            changed = true;
+          }
+        }
+      }
+      for (const s of stmts) {
+        if (s.kind !== "emit" || out.has(s.eventName)) continue;
+        for (const f of s.fields) {
+          const via = firstMaskedRead(f.value, masked, taintedLets);
+          if (via !== null) {
+            out.set(s.eventName, `${agg.name}.${via}`);
+            break;
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
 const FIELD_MASK_BACKENDS = new Set<string>(["node", "dotnet", "python", "java", "elixir"]);
 export function validateFieldMask(
   ctx: BoundedContextIR,
@@ -3789,6 +3880,7 @@ export function validateFieldMask(
     ctx.aggregates.filter((a) => a.fields.some((f) => f.maskUnless)).map((a) => a.name),
   );
   if (maskedAggNames.size > 0) {
+    const launderingEvents = maskLaunderingEvents(ctx);
     for (const proj of ctx.projections) {
       // `maskedAggNames` holds only aggregate names, so a `source` match is an
       // aggregate source (a workflow / projection source can't collide).
@@ -3816,6 +3908,23 @@ export function validateFieldMask(
             name: proj.name,
             src: joined.aggregate,
             via: "join",
+          }),
+          source: `${ctx.name}/projection/${proj.name}`,
+        });
+        continue;
+      }
+      // A FOLD launders the same value through the event bus: `emit Raised {
+      // newSalary: salary }` carries the masked column into a projection row
+      // that every backend serves in the clear.  Same rule, same code.
+      const laundered = proj.handlers.find((h) => launderingEvents.has(h.event));
+      if (laundered) {
+        diags.push({
+          severity: "error",
+          code: "loom.field-mask-projection-source",
+          message: diagMessage("loom.field-mask-projection-source#fold", {
+            name: proj.name,
+            event: laundered.event,
+            field: launderingEvents.get(laundered.event),
           }),
           source: `${ctx.name}/projection/${proj.name}`,
         });

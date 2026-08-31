@@ -50,21 +50,18 @@ export function waiverFor(
 }
 
 export const GENERATION_WAIVERS: readonly Waiver[] = [
-  {
-    // F1 — `shape: document` × `policy { allow … }`: the read ladder's
-    // `authz-filter` ExprIR reaches the GENERIC expression dispatcher instead
-    // of the backend's query-filter translator, and
-    // `src/generator/_expr/target.ts` throws its internal invariant.  Fires on
-    // the three backends whose document read path renders the filter through
-    // `renderExprWith`; .NET/EF and Elixir do not, so they generate.
-    platform: "node|java|python",
-    persistence: "*",
-    capability: "*",
-    shape: "document",
-    authz: "policyAllow",
-    reason:
-      "F1 — document shape × policy allow ladder: 'authz-filter' hits the generic ExprIR dispatcher and throws (renderExprWith invariant)",
-  },
+  // EMPTY, and that is the target state.  F1 (`shape: document` × `policy
+  // { allow … }` — the `authz-filter` sentinel reaching the generic expression
+  // dispatcher and blowing `renderExprWith`'s invariant) was the only entry;
+  // #2527 fixed it by desugaring the sentinel to ordinary `ExprIR` for the
+  // in-app document path (`src/generator/_expr/authz-filter-inapp.ts`), and the
+  // entry is deleted here.
+  //
+  // It outlived its fix by weeks for a structural reason worth recording: this
+  // leg had NO CI workflow, so the stale-waiver ratchet — which fails the gate
+  // the moment a waived crossing stops crashing — never got to fire.  A ratchet
+  // that nothing runs is a comment.  `pairwise.yml` now runs it.
+  //
   // NOTE — there is deliberately no entry for `dapper × policy allow`.  An
   // early build of this harness recorded one, because it ran phases ①–④ only:
   // without phase ⑦ the crossing reached codegen and threw.  With

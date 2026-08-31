@@ -291,3 +291,23 @@ export function walkWorkflowStmtsDeep(s: WorkflowStmtIR, visit: (s: WorkflowStmt
   visit(s);
   walkWorkflowStmtChildren(s, { workflowStmt: (c) => walkWorkflowStmtsDeep(c, visit) });
 }
+
+/** Visit `s` and every operation-body statement nested inside it — the
+ *  `variant-match` arm / else bodies AND the statement blocks of any
+ *  block-bodied lambda reachable from its expressions.
+ *
+ *  The `StmtIR` twin of {@link walkWorkflowStmtsDeep}.  Any check that asks
+ *  "does this body contain a statement of kind X anywhere" wants this rather
+ *  than a hand-rolled recursion — a nested `let`/`emit` inside a lambda block
+ *  is exactly the traversal dead-zone this module exists to prevent. */
+export function walkStmtsDeep(s: StmtIR, visit: (s: StmtIR) => void): void {
+  visit(s);
+  walkStmtChildren(
+    s,
+    (e) =>
+      walkExprDeep(e, (sub) =>
+        walkExprChildren(sub, { stmt: (nested) => walkStmtsDeep(nested, visit) }),
+      ),
+    (n) => walkStmtsDeep(n, visit),
+  );
+}

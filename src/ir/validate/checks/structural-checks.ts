@@ -22,6 +22,7 @@ import type {
   FindIR,
   FunctionIR,
   StmtIR,
+  TestIR,
   TypeIR,
 } from "../../types/loom-ir.js";
 import { allContexts } from "../../types/loom-ir.js";
@@ -1514,6 +1515,22 @@ export function validateResourceOpPlacement(ctx: BoundedContextIR, diags: LoomDi
   const flagStmts = (location: string, stmts: readonly StmtIR[]): void => {
     for (const s of stmts) walkExprsInStmt(s, (e) => flag(location, e));
   };
+  // A `test { }` body is the FOURTH statement-bearing surface (after
+  // operations, guards and function bodies), and it renders into ordinary
+  // target code — so a resource-op there fails exactly the five ways the gate
+  // exists to prevent: .NET and Java DIE mid-generation ("reached the renderer
+  // without a resource class mapping"), node and python emit `await` inside a
+  // non-async test fn against an unimported symbol, elixir alone degrades
+  // honestly.  `TestStmtIR` widens `StmtIR` with `expect` / `expect-throws`,
+  // whose `expr` is the most likely host of the call.
+  const flagTestStmts = (location: string, tests: readonly TestIR[]): void => {
+    for (const t of tests) {
+      for (const s of t.statements) {
+        if (s.kind === "expect" || s.kind === "expect-throws") flag(location, s.expr);
+        else walkExprsInStmt(s, (e) => flag(location, e));
+      }
+    }
+  };
   // An aggregate / part / value object — every member surface that renders into
   // domain (or route-gate) code.  `creates` / `destroys` are separate arrays
   // from `operations`, and a lifecycle `requires` guard is a statement inside
@@ -1529,6 +1546,7 @@ export function validateResourceOpPlacement(ctx: BoundedContextIR, diags: LoomDi
     }
     for (const d of agg.derived) flag(`${agg.name}.derived[${d.name}]`, d.expr);
     for (const fn of agg.functions) flagFunctionBody(`${agg.name}.function[${fn.name}]`, fn, flag);
+    flagTestStmts(`${agg.name}.test`, agg.tests);
     for (const part of agg.parts) {
       for (const inv of part.invariants) {
         flag(`${part.name}.invariant`, inv.expr);
@@ -1546,12 +1564,15 @@ export function validateResourceOpPlacement(ctx: BoundedContextIR, diags: LoomDi
     }
     for (const d of vo.derived) flag(`${vo.name}.derived[${d.name}]`, d.expr);
     for (const fn of vo.functions) flagFunctionBody(`${vo.name}.function[${fn.name}]`, fn, flag);
+    flagTestStmts(`${vo.name}.test`, vo.tests);
   }
   // Repository find filters lower to SQL / a query predicate; a resource-op
   // there has no renderable form on any backend either.
   for (const repo of ctx.repositories) {
     for (const f of repo.finds) flag(`repository[${repo.name}].find[${f.name}]`, f.filter);
   }
+  // Context-scoped integration tests — the fourth `TestIR[]` array.
+  flagTestStmts(`${ctx.name}.test`, ctx.tests);
   // Domain-service operation bodies — see the DOMAIN SERVICES header note: the
   // five emitters split 3 throws / 2 unimported-await-in-a-sync-function, so
   // this is the same class, not a per-backend gap.
@@ -1559,6 +1580,7 @@ export function validateResourceOpPlacement(ctx: BoundedContextIR, diags: LoomDi
     for (const op of svc.operations) {
       flagStmts(`domainService[${svc.name}].operation[${op.name}]`, op.body);
     }
+    flagTestStmts(`domainService[${svc.name}].test`, svc.tests);
   }
 }
 

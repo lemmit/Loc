@@ -129,7 +129,7 @@ export function pagesForAggregate(agg: Aggregate, ui: Ui): Page[] {
       // through `unfold`.  Left as `pageNum` because renaming it is emitted-
       // output churn across six frontends for no behavioural gain.
       state: [
-        ...filterStateFields(filters).map((f) => f.name),
+        ...filterStateFields(filters),
         "sortKey",
         "sortDir",
         { name: "pageNum", type: "int", init: 1 } as const,

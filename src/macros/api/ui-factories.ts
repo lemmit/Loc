@@ -31,6 +31,7 @@ import type {
   StateField,
   StringLit,
   TernaryExpr,
+  TypeRef,
   UiMember,
 } from "../../language/generated/ast.js";
 import {
@@ -283,16 +284,34 @@ export function pageMenuMeta(entries: Record<string, Expression>): PageMenuMeta 
 /** A typed state field.  `string` fields init to `""` (the shape the scaffolded
  * list filter/sort inputs bind to); `int` fields init to the given number (the
  * scaffolded pager's `page` state, M-T1.1).  Callers pass either a bare name
- * (⇒ `string`-init-`""`) or an explicit `StateFieldSpec`. */
+ * (⇒ `string`-init-`""`) or an explicit `StateFieldSpec`.
+ *
+ * `typeRef` is the escape hatch for a state field whose type is not one of the
+ * two primitives — a `decimal` filter input, or a `Customer id` FK filter
+ * (M-T1.15).  It must ALREADY be a clone (`cloneTypeRef`): an AST node has one
+ * `$container`, so handing over the declaration's own node re-parents it.  A
+ * `typeRef` field carries NO initializer, so every frontend's state emitter
+ * falls back to the type's zero value (`0` / `""`) — which is also what makes
+ * "unset" expressible without inventing a sentinel literal per type. */
 export interface StateFieldSpec {
   name: string;
   type: "string" | "int";
-  /** Initial value: string init for `string` fields, number init for `int`. */
+  /** Initial value: string init for `string` fields, number init for `int`.
+   *  Ignored when `typeRef` is set. */
   init?: string | number;
+  typeRef?: TypeRef;
 }
 
 function typedStateField(spec: StateFieldSpec): StateField {
   const origin = _currentOrigin();
+  if (spec.typeRef) {
+    const f = _tag(
+      mkStateField({ $type: "StateField", name: spec.name, type: spec.typeRef }),
+      origin,
+    );
+    _setContainer(spec.typeRef, f, "type");
+    return f;
+  }
   const base = _tag(mkPrimitiveType({ $type: "PrimitiveType", name: spec.type }), origin);
   const type = _tag(
     mkTypeRef({

@@ -76,6 +76,7 @@ export function validateDomainServices(
     for (const op of svc.operations) {
       checkOperationBody(ctx, svc, op, repoNames, workflowNames, diags);
       checkCrossContextRepoReads(ctx, svc, op, foreignRepos, diags);
+      checkNullableRepoLoad(ctx, svc, op, diags);
     }
     checkAnemic(ctx, svc, diags);
   }
@@ -83,6 +84,68 @@ export function validateDomainServices(
   // NON-pure services, then a scan of every aggregate body for a call
   // into one.  Run it once per context after the per-service checks.
   checkInfraCallsFromAggregates(ctx, diags);
+}
+
+// -------------------------------------------------------------------------
+// The THIRD body kind an optional repository load reaches.
+//
+// `loom.handler-load-nullable-unsupported` gates a `find …: Agg?` bound in a
+// command/query HANDLER body (`api-checks.ts`), and its twin gates the same
+// load in a WORKFLOW body (`workflow-checks.ts`) — because no backend emits a
+// null guard for it, so the bound name is dereferenced unguarded.  A
+// `domainService` operation body is the third place the same load can appear,
+// and it was covered by neither: on this checkout the probe emitted an
+// UNGUARDED deref on all five backends —
+//
+//   node    `const a = (await accounts.byHolder(holder)); return a.holder === …`
+//           against `byHolder(...): Promise<Account | null>`      → TS18047
+//   dotnet  `var a = (await _accounts.ByHolder(holder, ct)); return a.Holder …`
+//           against `Task<Account?>`                              → CS8602
+//   java    `var a = accountsRepository.byHolder(holder); … a.holder()` → NPE
+//   python  `a = (await accounts.by_holder(holder))` then `a.holder` → AttributeError
+//   elixir  `a = (case by_holder_account(holder) do … _ -> nil end)` then `a.holder`
+//                                                                  → KeyError on nil
+//
+// A domain-service body is `StmtIR[]` (not the workflow vocabulary), so the
+// load is a `let` bound to a `repo-read` CALL rather than a `repo-let`; the
+// optionality lives on the FIND's declared return type, not on the let's own
+// `type` stamp.  Resolve it through the repository the read names.
+//
+// `getById` is exempt for the same reason as in the handler gate: it is the
+// by-id reconstitution read every backend already renders with a
+// not-found/throw path.
+// -------------------------------------------------------------------------
+function checkNullableRepoLoad(
+  ctx: BoundedContextIR,
+  svc: DomainServiceIR,
+  op: DomainServiceOperationIR,
+  diags: LoomDiagnostic[],
+): void {
+  const flagged = new Set<string>();
+  for (const stmt of op.body) {
+    if (stmt.kind !== "let") continue;
+    const call = stmt.expr;
+    if (call.kind !== "call" || call.callKind !== "repo-read" || !call.repoRead) continue;
+    const { repo: repoName, method } = call.repoRead;
+    if (method === "getById") continue;
+    const find = ctx.repositories
+      .find((r) => r.name === repoName)
+      ?.finds.find((f) => f.name === method);
+    if (find?.returnType.kind !== "optional") continue;
+    const key = `${repoName}.${method}`;
+    if (flagged.has(key)) continue;
+    flagged.add(key);
+    diags.push({
+      severity: "error",
+      code: "loom.handler-load-nullable-unsupported",
+      message: diagMessage("loom.handler-load-nullable-unsupported#domain-service", {
+        name: `${svc.name}.${op.name}`,
+        repoName,
+        method,
+      }),
+      source: `${ctx.name}/${svc.name}.${op.name}`,
+    });
+  }
 }
 
 function checkOperationBody(
@@ -141,6 +204,34 @@ function checkOperationBody(
             severity: "error",
             code: "loom.domain-service-no-repo-write",
             message: diagMessage("loom.domain-service-no-repo-write", {
+              where,
+              recvName,
+              member: e.member,
+            }),
+            source,
+          });
+        } else if (e.kind === "method-call") {
+          // A NON-write call on an own-context repository that is STILL a
+          // `method-call` here did not lower to a `repo-read` — the detector
+          // (`matchRepoRead`) requires the call to be the WHOLE chain
+          // (`suffixes.length === 1`), so a read used as a MEMBER RECEIVER
+          // (`Accounts.byHolder(h).balance.amount`) never matches.
+          //
+          // The consequences are the cross-context gate's three, verbatim:
+          // `classifyDomainServiceTier` sees no `repo-read` and types the
+          // service `pure`, no backend threads a read port in, and every
+          // backend renders the bare source name — node `Accounts.byHolder(h)`
+          // (TS2304), dotnet `Accounts.ByHolder(h)` (CS0103), java "cannot find
+          // symbol", python F821 with no port param at all, and elixir
+          // `accounts.by_holder(h).balance` which is not valid Elixir AND
+          // splits ONE domainService across two modules (the `let`-bound
+          // sibling lands in the reading-tier context module).  The
+          // `let`-bound spelling two lines away is threaded correctly, which is
+          // what makes this silent rather than obviously broken.
+          diags.push({
+            severity: "error",
+            code: "loom.domain-service-read-unsupported",
+            message: diagMessage("loom.domain-service-read-unsupported", {
               where,
               recvName,
               member: e.member,

@@ -18,6 +18,7 @@ import {
   validateRetrievals,
   validateWorkflowInstanceReadGates,
 } from "./checks/query-checks.js";
+import { validateReservedSurfaces } from "./checks/reserved-surfaces.js";
 import { validateStores } from "./checks/store-checks.js";
 import {
   validateCurrentUserScope,
@@ -178,6 +179,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateApiResourceBindings(sys, diags);
     validateRemoteApiOpSupport(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);
+    validateReservedSurfaces(sys, diags);
     validateReactIdReferences(sys, diags);
     validateAuthUiFramework(sys, diags);
     validateCurrentUserNeedsAuthUi(sys, diags);

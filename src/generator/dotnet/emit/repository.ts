@@ -988,6 +988,14 @@ export function renderEventSourcedRepositoryImpl(
   // event-sourced aggregate failed CS0535: the port declares
   // `GetByIdForWriteAsync` whenever `agg.writeScopeFilter` is set (see the
   // interface emitter), and this impl had no implementation.
+  //
+  // The pairwise compile oracle reported the same CS0535 independently as F9,
+  // and its provenance is worth keeping: #2527's follow-up 2 fixed this exact
+  // error for the DOCUMENT shape (the comment on the document
+  // `writeScopeMethod` above says so) and left the event-sourced impl behind.
+  // That is the SHAPE-axis twin of F2's TARGET-axis partial fix — one more
+  // instance of a fix being marked closed when it lands on the first shape or
+  // target it was reported against.
   const writeScopeMethod = agg.writeScopeFilter
     ? [
         "",

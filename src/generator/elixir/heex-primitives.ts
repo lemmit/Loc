@@ -1638,7 +1638,13 @@ export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
     idx++;
     if (arg.kind === "call" && arg.name === "Tab") {
       const pos = arg.args.filter((_, j) => !arg.argNames?.[j]);
-      const labelArg = pos[0];
+      // Positional 0 is the CAPTION only when it is text-like.  Consuming a
+      // CALL there swallowed the panel: `Tab { title: "One", Text { "first" } }`
+      // leaves only the `Text` positional, which became the label (rendered
+      // through the tabLabel slot!) while `slice(1)` emptied the panel.  Mirror
+      // of the shared walker's `emitTabs` rule.
+      const labelIsTextLike = pos[0] !== undefined && pos[0].kind !== "call";
+      const labelArg = labelIsTextLike ? pos[0] : undefined;
       const label = labelArg && labelArg.kind === "literal" ? labelArg.value : `Tab ${idx}`;
       tabs.push({
         label,
@@ -1648,7 +1654,7 @@ export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
         // break every `JS.show` selector this switcher is built on.
         labelHeex: labelArg ? renderInTemplate(labelArg, ctx, "tabLabel") : undefined,
         slug: snake(label) || `tab-${idx}`,
-        body: pos.slice(1),
+        body: labelIsTextLike ? pos.slice(1) : pos,
       });
     } else {
       // Bare positional (e.g. `Tabs(Card(...), Card(...))`) — its own panel.

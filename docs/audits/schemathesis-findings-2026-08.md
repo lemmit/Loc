@@ -788,7 +788,34 @@ in the published request schema; the Spring binder maps a JSON `null` to a Java
 declared shape is published and never enforced.
 
 ### F24 — java: an adversarial query string 500s a paged find
-**Waiver:** W31 · **Severity: medium**
+**Waiver:** none — the CI leg never generates this case · **Severity: medium**
+
+**Status: OPEN, but NOT reproduced by the schemathesis leg** (2026-08-30). W31 was
+retired here because it had matched **nothing on every java run since the leg landed** —
+the 08-29 nightly (`38580cd`) and the 08-30 dispatch (`20a6745`) produce byte-identical
+attribution tables, `— W31` in both, so the leg failed on `STALE WAIVER W31` rather than
+on any finding. A waiver for a case the fuzzer does not produce is permanently stale and
+holds the leg permanently red.
+
+Retiring it is **not** a claim that F24 is fixed, and the staleness is **not** evidence
+that it is — the W10 episode (#2648) is the standing reminder that the ratchet's
+staleness half asks a question rather than answering one. Three things say the hazard is
+still live:
+
+- `JAVA_PAGED_QUERY_PARAMS` (`src/generator/java/emit/common.ts`) still binds `sort` and
+  `dir` as **unvalidated `String`** with defaults, while `page`/`pageSize` next to them
+  carry `@Min`/`@Max`. The repro above targets `sort`/`dir` precisely.
+- `#2667` is the only java-generator change since the register landed and it touches
+  `entity` / `query-projection-reads` / `service` / `render-jpql` — nothing on the
+  query-parameter binding path.
+- The GET route class **is** fuzzed: W32 (`status_code_conformance` on the same
+  `^GET /api/`) matched ×10 in both runs. Only the *server-error* check comes back empty,
+  so this is the fuzzer not generating the adversarial query string — not the route
+  going unvisited.
+
+So F24 needs a **targeted regression test** (validate `sort` against the aggregate's
+sortable fields, and `dir` against `asc`/`desc`), not a fuzzer waiver. Until that lands
+the finding stays open here with no rule attached.
 
 ```
 curl 'http://host/api/products?sort=%22&dir=%C3%9D5%03&…' → 500

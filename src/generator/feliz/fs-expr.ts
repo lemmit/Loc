@@ -307,6 +307,10 @@ export interface FsExprCtx {
    *  `pagedReadCmd` takes a `modelExpr`: reading `model.<Field>` there would
    *  issue the query with the value it just replaced. */
   modelExpr?: string;
+  /** Page name -> declared `route:`.  A `navigate(<Page>)` statement in an
+   *  action body resolves its destination here (`update-emit.ts`); absent on a
+   *  non-routed ui, where the arm degrades to the root path. */
+  pageRoutes?: ReadonlyMap<string, string>;
 }
 
 /** The empty route id — what an `id` read resolves to on a ui with no routing

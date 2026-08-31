@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "vitest";
-import { mixDepsGet } from "./support/mix-retry.js";
+import { mixDepsGet, mixLocalInstall } from "./support/mix-retry.js";
 import {
   assertHierarchyIsolation,
   freePort,
@@ -66,7 +66,7 @@ describe.skipIf(!ENABLED)(
         });
         const appDir = path.join(outDir, "d"); // deployable `d` → project root
 
-        execSync(`mix local.hex --force && mix local.rebar --force && ${mixDepsGet()}`, {
+        execSync(`${mixLocalInstall()} && ${mixDepsGet()}`, {
           cwd: appDir,
           stdio: "pipe",
           timeout: 600_000,

@@ -1335,6 +1335,9 @@ function renderAppFs(
     boundState,
     fileUploads,
     storeUrlArm,
+    // The route table a `navigate(<Page>)` STATEMENT in an action body resolves
+    // against — its MVU arm lives in `update-emit.ts`, outside every page view.
+    new Map(pages.filter((p) => p.route).map((p) => [p.name, p.route!])),
   );
   const wire = hasWire
     ? renderWireTypes(
