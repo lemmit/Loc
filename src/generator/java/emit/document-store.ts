@@ -225,6 +225,14 @@ export function renderJavaDocumentRepositoryImpl(
     finds.some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
     needsAccessor ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
     `import ${ctx.basePkg}.domain.ids.*;`,
+    // The enums wildcard, matching the RELATIONAL impl (repository.ts:305).
+    // A declared find's params are rendered with `renderJavaType`, which spells
+    // an enum param as the bare enum name — so `find byGrade(grade: Grade)` on a
+    // `shape: document` aggregate emitted `public List<Widget> byGrade(Grade
+    // grade)` with nothing importing `Grade`, and `javac` answered "cannot find
+    // symbol".  Found by compiling the F2-W-07 fixture; the defect is older and
+    // independent of paging.
+    `import ${ctx.basePkg}.domain.enums.*;`,
     ``,
     `/** Document repository — the whole aggregate round-trips one jsonb`,
     ` *  column in ${table} via a field-visibility Jackson mapper. */`,

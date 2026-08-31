@@ -41,14 +41,40 @@ export const PROVENANCED_WIRE_MEMBERS: readonly string[] = GENERIC_SHAPES.proven
   .fields({ kind: "none" })
   .map((f) => f.name);
 
-/** True iff the carrier's `lineage` member is nullable on the wire.  It is —
- *  a field that has never been written carries no lineage, and a backend that
- *  does not capture lineage still ships the carrier with `null` rather than a
- *  different shape.  Derived, so the emitters and the contract artifact agree. */
+/** True iff the carrier's `lineage` member may be ABSENT from the body.  It
+ *  may — a field that has never been written carries no lineage.  Derived, so
+ *  the emitters and the contract artifact agree. */
 export const PROVENANCED_LINEAGE_OPTIONAL: boolean =
   GENERIC_SHAPES.provenanced
     .fields({ kind: "none" })
     .find((f) => f.name === PROVENANCE_LINEAGE_FIELD)?.optional === true;
+
+/** True iff the carrier's `lineage` member may be `null` WHEN PRESENT.
+ *
+ *  F2-XB-7 — OPTIONALITY AND NULLABILITY ARE DIFFERENT CLAIMS, and this carrier
+ *  is where the toolchain conflated them.  `GENERIC_SHAPES.provenanced` declares
+ *  the member `optional: true` and nothing more, so each consumer picked a half
+ *  and they diverged four ways for ONE member:
+ *
+ *    .loom/wire-spec.json   `lineage: {"type":"object"}`, `required:["value"]`
+ *                           → optional, NOT nullable
+ *    elixir OpenApiSpex     `%Schema{type: :object}`      → optional, NOT nullable
+ *    node zod               `ProvenanceLineage.nullable()` inside the object,
+ *                           not `.optional()`             → required + nullable
+ *    python / the frontends `dict | None = None` / `.nullish()`
+ *                                                         → optional + nullable
+ *
+ *  What every backend actually PUTS ON THE WIRE is an explicit null — node
+ *  `lineage: root.total_provenance ?? null`, python `… if … else None`, elixir a
+ *  nullable jsonb column read straight out.  JSON Schema applies a member's
+ *  subschema whenever the key is PRESENT, and `required` does not save it, so a
+ *  row whose provenanced field has never been written ships a body that
+ *  violates the app's own published contract.
+ *
+ *  `src/util/provenance-carrier.ts` centralised the member NAMES so they could
+ *  not drift; this is the same job for the member's nullability — declared once,
+ *  read by every consumer, rather than re-decided per emitter. */
+export const PROVENANCED_LINEAGE_NULLABLE = true;
 
 /** The message every surface throws when a `Provenanced<T>` carrier turns up on
  *  the REQUEST side.  It cannot: `wireTypeForField` stamps the carrier onto the
