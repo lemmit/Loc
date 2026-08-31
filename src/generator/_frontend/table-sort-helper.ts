@@ -7,7 +7,7 @@
 
 /** Build the `src/lib/table-sort.ts` module source. */
 export function buildTableSortHelper(): string {
-  return `// Client-side row sort for interactive tables (generated — M-T1.1).
+  return `// Client-side row sort for interactive tables (generated).
 export function sortRows<T>(rows: readonly T[] | undefined, key: string, dir: string): T[] {
   if (!rows) {
     return [];
@@ -41,7 +41,7 @@ function sortValue(v: unknown): unknown {
   return Number.isNaN(n) ? v : n;
 }
 
-// Client-side row filter for interactive tables (generated — M-T1.1).
+// Client-side row filter for interactive tables (generated).
 // Case-insensitive substring match across every value of each row; an empty
 // query passes all rows.  Emitted alongside sortRows in the same module for
 // the strict-template frontends (Vue/Svelte/Angular); React inlines it.

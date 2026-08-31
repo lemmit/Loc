@@ -190,7 +190,7 @@ function renderUserModule(
     "    def guid_claim(self, name: str) -> str | None:",
     '        """The named claim parsed as a canonical UUID string, or None when it',
     "        is absent or malformed — a bad tenant claim scopes a read to nothing",
-    '        instead of raising (multi-tenancy; M-T3.7(c))."""',
+    '        instead of raising (multi-tenancy)."""',
     "        raw: object = getattr(self, name, None)",
     "        if raw is None:",
     "            return None",
@@ -552,7 +552,7 @@ function renderOidcModule(user: UserIR, auth: AuthIR): string {
   if (!scopeList.includes("offline_access")) scopeList.push("offline_access");
   const scopes = scopeList.join(" ");
   const buildUser = renderBuildUserKwargs(user, auth);
-  return `"""Generated OIDC verifier + redirect handshake (D-AUTH-OIDC).  Auto-generated.
+  return `"""Generated OIDC verifier + redirect handshake.  Auto-generated.
 
 Validates the inbound JWT against the issuer's JWKS and maps the configured
 claims onto User; the handshake router runs the authorization-code flow and

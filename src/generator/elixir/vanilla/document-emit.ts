@@ -349,7 +349,7 @@ export function renderDocChangeset(appModule: string, ctxModule: string, agg: Ag
       ? `
 
   # A full-replacement PUT carries every required field, so an ABSENT KEY is a
-  # missing field even when the loaded document still holds a value (RS-26).
+  # missing field even when the loaded document still holds a value.
   # The embed's \`validate_required/2\` cannot see that — \`cast_embed\` merges
   # onto the stored data first — so presence is checked here, against the raw
   # attrs.  The error shape is \`validate_required/2\`'s own, on the ROOT
@@ -377,7 +377,7 @@ defmodule ${changesetMod} do
     |> put_change(:version, version)
   end
 
-  @doc "The UPDATE seam — \`document_changeset/3\` plus the RS-26 raw-attrs presence check."
+  @doc "The UPDATE seam — \`document_changeset/3\` plus the raw-attrs presence check."
   def document_update_changeset(%${aggMod}{} = record, attrs, version) when is_map(attrs) do
     record
     |> cast(%{"data" => attrs}, [])${requireKeys}

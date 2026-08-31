@@ -79,7 +79,7 @@ export function renderVanillaProblemDetailsModule(
   const localizeFn = localizeMessages
     ? `
 
-  # Resolve a messaged rule's stable wire code (M-T1.11) against this project's
+  # Resolve a messaged rule's stable wire code against this project's
   # gettext catalog for the request locale, falling back to the authored text.
   defp localize(nil, message), do: message
 
@@ -90,7 +90,7 @@ export function renderVanillaProblemDetailsModule(
   end
 
   # The ambient request locale carries the Accept-Language header VERBATIM
-  # (D-CTX-SHAPE — it is the request-stable input, not a catalog-shaped one), so
+  # (it is the request-stable input, not a catalog-shaped one), so
   # the normalisation to a lookup tag lives here: the first listed language,
   # without its \`;q=\` weight.  An unknown tag is not an error for gettext —
   # it has no translations, so the msgid (the authored English) is returned.
@@ -246,7 +246,7 @@ export function renderVanillaProblemDetailsModule(
   @doc """
   Send a 422 ProblemDetails carrying an EXPLICIT \`errors[]\` list — the
   wire-validation rung for a denial that never builds an \`Ecto.Changeset\`
-  (M-T6.20: a messaged \`precondition\` over the operation's own request params,
+  (a messaged \`precondition\` over the operation's own request params,
   which the other four backends lift into the \`<Op>Request\` validator).  Each
   entry is \`%{pointer:, message:, code:}\`; the code resolves through the same
   catalog the changeset path uses, so both rungs localise identically.

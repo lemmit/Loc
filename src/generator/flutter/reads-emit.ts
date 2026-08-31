@@ -510,7 +510,7 @@ const PAGED_PREAMBLE = lines(
   "/// half of the `paged` wire envelope.  The pager only needs `totalPages`,",
   "/// but a page body can read any of them off its `QueryView` binding",
   '/// (`rows.total` — a "N results" label), and a member that is not decoded',
-  "/// here is a member the DSL cannot reach (M-T1.3 Defect B).",
+  "/// here is a member the DSL cannot reach.",
   "/// `totalPages` is clamped to at least 1 so an empty collection still reads",
   '/// "Page 1 of 1" rather than "of 0".',
   "class LoomPage<T> {",

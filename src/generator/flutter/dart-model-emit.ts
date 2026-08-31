@@ -481,7 +481,7 @@ const PROV_LINEAGE_CLASSES = lines(
   "}",
   "",
   "// `Provenanced<T>` — a provenanced field's value and the lineage of the write",
-  "// that produced it, travelling together as one JSON object (M-T6.12).  The",
+  "// that produced it, travelling together as one JSON object.  The",
   "// same shape every other Loom backend and frontend uses.",
   `class ${DART_PROVENANCED}<T> {`,
   "  final T value;",

@@ -286,7 +286,7 @@ function renderSeedFile(
       `namespace ${ns}.Infrastructure.Persistence;`,
       "",
       "/// <summary>First-boot seed data (database-seeding.md).  Ship-once per",
-      "/// dataset via the __loom_seed marker (D-SEED-IDEMPOTENCY); re-runs are",
+      "/// dataset via the __loom_seed marker; re-runs are",
       "/// no-ops.</summary>",
       "public static class Seed",
       "{",

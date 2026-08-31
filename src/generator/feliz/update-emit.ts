@@ -651,7 +651,7 @@ function renderUpdateStmt(stmt: ActionIR["body"][number], ctx: FsExprCtx): Updat
       throw new Error(
         "feliz: a `match await` (async effect) statement reached the per-statement update " +
           "renderer — a supported effect is projected at the update level, an unsupported one " +
-          "is gated at validation (loom.feliz-async-effect-unsupported). See M-T6.15.",
+          "is gated at validation (loom.feliz-async-effect-unsupported).",
       );
     default:
       // `precondition` / `requires` / `emit` / `return` are backend-only

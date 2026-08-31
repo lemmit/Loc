@@ -361,7 +361,7 @@ export const DIAGNOSTIC_MESSAGES = {
   "loom.es-tph-forced-own-table": (p: { name: unknown; why: unknown; baseName: unknown }) =>
     `'${p.name}' is ${p.why} but extends the sharedTable (TPH) base '${p.baseName}'. ` +
     `An event-sourced / document concrete cannot share the base table — declare ` +
-    `'inheritanceUsing: ownTable' on '${p.name}' (D-ES-TPH).`,
+    `'inheritanceUsing: ownTable' on '${p.name}'.`,
   "loom.tph-own-override-unsupported": (p: { name: unknown; baseName: unknown }) =>
     `'${p.name}' declares inheritanceUsing: ownTable under the sharedTable (TPH) base ` +
     `'${p.baseName}' — a per-concrete storage override (mixed strategy) is not supported ` +
@@ -493,7 +493,7 @@ export const DIAGNOSTIC_MESSAGES = {
     `Duplicate field '${p.name}' in seed row '${p.name2}'.`,
   "loom.seed-id-needs-raw":
     "An explicit `id` requires `seed raw { … }` — the domain create path mints ids. " +
-    "Cross-references use explicit ids on the raw path (D-SEED-XREF).",
+    "Cross-references use explicit ids on the raw path.",
   "loom.seed-raw-column-invalid": (p: { name: unknown }) =>
     `Raw seed column '${p.name}' is a value object / nested record — raw rows ` +
     "support scalar / enum / id columns only; use the domain path for value objects.",
@@ -712,8 +712,8 @@ export const DIAGNOSTIC_MESSAGES = {
     `a \`httpStatus ${p.name} -> <code>\` line to the api serving this context to set an ` +
     `explicit status.`,
   "loom.reserved-structural-error-name": (p: { name: unknown }) =>
-    `error '${p.name}' collides with a built-in structural-conflict name ` +
-    `(M-T3.4a). That name is reserved: its HTTP status defaults to 409 and a ` +
+    `error '${p.name}' collides with a built-in structural-conflict name. ` +
+    `That name is reserved: its HTTP status defaults to 409 and a ` +
     `\`httpStatus ${p.name} -> <code>\` line retargets the framework conflict, not ` +
     `just this payload. Rename the error to avoid the shadow.`,
   "loom.extern-on-private-operation": (p: { name: unknown; opName: unknown }) =>
@@ -1411,7 +1411,7 @@ export const DIAGNOSTIC_MESSAGES = {
     `<api>.<Agg>.<op>(args?) { <Variant> b => … … else? => … }\` — an aggregate instance op ` +
     `(with or without params), one or more named success/error arms, and an optional ` +
     `\`else\`.  Otherwise host this ui on an SPA frontend (React/Vue/Svelte/Angular), or ` +
-    `drive the op through a form primitive (CreateForm/OperationForm).  Tracked in M-T6.15.`,
+    `drive the op through a form primitive (CreateForm/OperationForm).`,
   "loom.flutter-async-effect-unsupported": (p: {
     where: unknown;
     uiName: unknown;
@@ -1423,7 +1423,7 @@ export const DIAGNOSTIC_MESSAGES = {
     `id.  A component carrying one is DROPPED: no widget is emitted for it and every call ` +
     `site renders an empty \`SizedBox.shrink()\`.  Move the \`match await\` into a PAGE ` +
     `action (Flutter renders it there), or drive the op through a form primitive ` +
-    `(CreateForm/OperationForm).  Tracked in M-T1.20.`,
+    `(CreateForm/OperationForm).`,
 
   // ----------------------------------------------------------------------
   // src/ir/validate/checks/system-checks.ts
@@ -1857,7 +1857,7 @@ export const DIAGNOSTIC_MESSAGES = {
     `Record the timestamp in an event instead, or drop persistedAs: eventLog.`,
   "loom.dapper-unsupported": (p: { name: unknown; subject: unknown; reason: unknown }) =>
     `Deployable '${p.name}' selects 'persistence: dapper', but ${p.subject} ${p.reason}. ` +
-    `The Dapper adapter is at full parity with EF Core (M-T6.9); the only shapes it now ` +
+    `The Dapper adapter is at full parity with EF Core; the only shapes it now ` +
     `rejects have no relational persistence mapping at all (efcore included) — restructure ` +
     `the model as the message suggests.`,
   // The hierarchical-tenancy boundary (M-T6.29) needs its OWN tail: the blanket
@@ -1954,7 +1954,7 @@ export const DIAGNOSTIC_MESSAGES = {
   }) =>
     `workflow '${p.name}' calls '${p.resourceName}.${p.operationId}' on the ` +
     `in-system api '${p.apiName}', but deployable '${p.depName}' (platform ` +
-    `'${p.platform}') emits no typed client for it yet (M-T4.8 slices 3-5).  ` +
+    `'${p.platform}') emits no typed client for it yet.  ` +
     `Use the untyped 'get'/'post' verbs over a 'storage restApi' binding until then.`,
   "loom.resource-api-unserved": (p: { name: unknown; apiName: unknown }) =>
     `resource '${p.name}' binds api '${p.apiName}', but no backend deployable serves it, ` +
@@ -2034,7 +2034,7 @@ export const DIAGNOSTIC_MESSAGES = {
     `aggregate '${p.name}' has \`mask unless\` field(s) ${p.names}, but read-mask redaction ` +
     `is not emitted by the ${p.unsupported} backend(s) yet (node emits it; the other ` +
     `backends are the stacked follow-on). Drop the \`mask unless\` clause for those targets, ` +
-    `or track authorization.md §5 (M-T3.2 item 6).`,
+    `or track authorization.md §5.`,
   "loom.field-mask-projection-source": (p: { name: unknown; src: unknown; via?: unknown }) =>
     `projection '${p.name}' ${p.via === "join" ? `joins` : `sources from`} aggregate '${p.src}', ` +
     `which has a \`mask unless\` field — query-time projection responses are not yet read-masked, ` +
@@ -2162,7 +2162,7 @@ export const DIAGNOSTIC_MESSAGES = {
     `on the record identified by the page's route \`:id\` — but this page (route ` +
     `"${p.route}") declares no \`:id\` param, so no record is in scope.  Host the ` +
     `effect on a detail page (\`route: "/…/:id"\`), or drive the op through a form primitive ` +
-    `(OperationForm).  M-T6.17.`,
+    `(OperationForm).`,
   "loom.match-await-arg-mismatch": (p: {
     where: unknown;
     aggregate: unknown;

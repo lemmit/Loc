@@ -75,8 +75,8 @@ export function renderChannelsModule(bindings: BrokerBinding[]): string {
   return (
     lines(
       "// Auto-generated.",
-      "// Broker transport for the deployable's wired channels (channels.md;",
-      "// M-T4.4 design §4-5).  CloudEvents 1.0 envelopes between deployables;",
+      "// Broker transport for the deployable's wired channels (channels.md).",
+      "// CloudEvents 1.0 envelopes between deployables;",
       "// the consumer loop feeds received events into the same in-process",
       "// dispatcher local reactors use.",
       hasRabbit ? 'import amqp from "amqplib";' : null,
@@ -109,7 +109,7 @@ export function renderChannelsModule(bindings: BrokerBinding[]): string {
       "}",
       "",
       "/** The publish/subscribe seam every transport implements — in-process,",
-      " * the broker drivers, and the realtime relay (M-T1.10) all sit on this",
+      " * the broker drivers, and the realtime relay all sit on this",
       " * interface.  `group` is null for broadcast (every subscriber sees every",
       " * envelope); a group name makes replicas competing consumers.",
       " *",
@@ -315,7 +315,7 @@ export function renderChannelsModule(bindings: BrokerBinding[]): string {
             " * offset advances — logged and kept, never a hot-loop. */",
             "export function createKafkaTransport(url: string): ChannelTransport {",
             "  // `kafka://user:pass@host:port[,host2:port2]` — userinfo (when",
-            "  // present) becomes SASL/PLAIN (M-T4.4 §7); a credential-less URL",
+            "  // present) becomes SASL/PLAIN; a credential-less URL",
             "  // stays on PLAINTEXT, the pre-auth contract.",
             '  const bare = url.replace(/^kafka:\\/\\//, "");',
             '  const at = bare.lastIndexOf("@");',

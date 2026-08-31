@@ -21,7 +21,7 @@ class ConcurrencyError(Exception):
 
 
 class DomainError(Exception):
-    """Precondition or invariant violation (surfaces as HTTP 422 — RS-15)."""
+    """Precondition or invariant violation (surfaces as HTTP 422)."""
 
 
 class AggregateNotFoundError(Exception):

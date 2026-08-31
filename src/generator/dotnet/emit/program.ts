@@ -262,7 +262,7 @@ app.MapGet("/api/realtime/events", async (HttpContext http, ${ns}.Infrastructure
   // api-client (`api.upload("/files")`, `FileRef.url = "/files/<key>"`) and Hono.
   const fileUpload = options?.fileUpload;
   const fileRoutesEndpoint = fileUpload
-    ? `// File upload/download (M-T1.2) — root /files over the bound objectStore.
+    ? `// File upload/download — root /files over the bound objectStore.
 app.MapPost("/files", async (IFormFile file) =>
 {
     var key = Guid.NewGuid().ToString();
@@ -276,7 +276,7 @@ app.MapPost("/files", async (IFormFile file) =>
 app.MapGet("/files/{key}", async (string key, HttpContext http, ILogger<${ns}.Api.DomainExceptionFilter> log) =>
 {
     var obj = await ${fileUpload.getBytes}(key);
-    // M-T6.39 — an absent object answers the app's ONE 404 envelope.  A minimal
+    // An absent object answers the app's ONE 404 envelope.  A minimal
     // API is outside MVC, so a throw here would never reach
     // DomainExceptionFilter; NotFoundProblem is that filter's own responder,
     // called directly, so the body, the status (incl. the httpStatus NotFound
@@ -319,7 +319,7 @@ app.MapGet("/files/{key}", async (string key, HttpContext http, ILogger<${ns}.Ap
     : options?.hasSubscriptions
       ? `// Domain event dispatch — in-process Mediator-notification dispatcher, teed\n// to the realtime wire; the broker tee (below) is outermost.\nbuilder.Services.AddScoped<InProcessDomainEventDispatcher>();\nbuilder.Services.AddScoped<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<InProcessDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`
       : `// Domain event dispatch — no-op inner, teed to the realtime SSE wire; the\n// broker tee (below) is outermost.\nbuilder.Services.AddSingleton<NoopDomainEventDispatcher>();\nbuilder.Services.AddSingleton<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<NoopDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`;
-  const channelTeeSuffix = `\n// Broker channel transport (channels.md; M-T4.4): the publish tee routes\n// broker-bound events to the broker (design §4 — co-located consumers\n// receive them via the subscription, not a local shortcut).\nbuilder.Services.AddSingleton<ChannelTransports>();\nbuilder.Services.AddScoped<IDomainEventDispatcher, ChannelPublishTeeDispatcher>();${
+  const channelTeeSuffix = `\n// Broker channel transport (channels.md): the publish tee routes\n// broker-bound events to the broker (design §4 — co-located consumers\n// receive them via the subscription, not a local shortcut).\nbuilder.Services.AddSingleton<ChannelTransports>();\nbuilder.Services.AddScoped<IDomainEventDispatcher, ChannelPublishTeeDispatcher>();${
     options?.hasChannelConsumers
       ? "\nbuilder.Services.AddHostedService<ChannelConsumerService>();"
       : ""
@@ -457,7 +457,7 @@ using (var seedScope = app.Services.CreateScope())
   // stores key off) and threaded in.  The EF path keeps the open generics.
   const portsDi = usesPersistencePorts
     ? usingDapper
-      ? `\n// Domain persistence ports (M-T6.9) — Dapper adapters over NpgsqlDataSource (closed bindings).\n${(options?.dapperPortRegistrations ?? []).join("\n")}`
+      ? `\n// Domain persistence ports — Dapper adapters over NpgsqlDataSource (closed bindings).\n${(options?.dapperPortRegistrations ?? []).join("\n")}`
       : `\n// Domain persistence ports — EF adapters over the scoped AppDbContext.\nbuilder.Services.AddScoped<${ns}.Domain.Common.IUnitOfWork, ${ns}.Infrastructure.Persistence.EfUnitOfWork>();\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IWorkflowEventStore<>), typeof(${ns}.Infrastructure.Persistence.EfWorkflowEventStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.ISagaStateStore<>), typeof(${ns}.Infrastructure.Persistence.EfSagaStateStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IReadModelStore<>), typeof(${ns}.Infrastructure.Persistence.EfReadModelStore<>));`
     : "";
 
@@ -525,7 +525,7 @@ ${externHandlers
 builder.Services.AddScoped<IUserVerifier, DevStubUserVerifier>();${
         oidc
           ? `
-// OIDC verifier (D-AUTH-OIDC) — validates the IdP's tokens against its
+// OIDC verifier — validates the IdP's tokens against its
 // JWKS and maps claims onto User.  Registered last so it wins over the
 // dev stub; configure the issuer / client via the env vars the
 // \`auth { oidc }\` block referenced.
@@ -647,7 +647,7 @@ builder.Logging.SetMinimumLevel((System.Environment.GetEnvironmentVariable("LOG_
     _ => Microsoft.Extensions.Logging.LogLevel.Information,
 });
 
-// OpenTelemetry tracing (M-T7.1).  AspNetCore instrumentation gives a SERVER
+// OpenTelemetry tracing.  AspNetCore instrumentation gives a SERVER
 // span per request (so Activity.Current.TraceId is populated on every request
 // — RequestContextMiddleware stamps the loom.* ids onto it and threads
 // trace_id/span_id onto the log scope).  The span is EXPORTED via OTLP/HTTP
@@ -753,7 +753,7 @@ builder.Services.AddControllers(opts =>
     // converter and emits a named string-enum schema for each enum type.
     opts.JsonSerializerOptions.Converters.Add(
         new System.Text.Json.Serialization.JsonStringEnumConverter());
-    // Canonical ISO-8601 UTC instants (RS-4): trim trailing zero fractional
+    // Canonical ISO-8601 UTC instants: trim trailing zero fractional
     // seconds so an instant with no sub-second part serializes as "…00Z" (not
     // System.Text.Json's fixed 7-digit "…00.0000000Z"), matching the node /
     // Python / Java backends.  Business DTOs carry datetime as a pre-formatted
@@ -778,7 +778,7 @@ builder.Services.Configure<ApiBehaviorOptions>(opts =>
 
 // The framework produces ProblemDetails of its own for the faults it answers
 // without reaching a controller at all — 415 being the common one.  Those
-// carry the rfc9110 \`type\` URI (not \`about:blank\`, RS-9), no \`detail\`, no
+// carry the rfc9110 \`type\` URI (not \`about:blank\`), no \`detail\`, no
 // \`instance\`, and a \`traceId\` on the body that every backend here moved to
 // the x-request-id header.  Normalise them to the emitted envelope; the
 // customizer is a no-op on responses already built in that shape.
@@ -800,7 +800,7 @@ builder.Services.AddProblemDetails(opts =>
 // session probe when auth is on) and any raw datetime a minimal endpoint
 // returns serialize through ConfigureHttpJsonOptions rather than the MVC
 // AddJsonOptions above.  Register the canonical instant converters here too so
-// their wire matches the controllers' (RS-4 temporal round-trip parity).
+// their wire matches the controllers' (temporal round-trip parity).
 builder.Services.ConfigureHttpJsonOptions(opts =>
 {
     opts.SerializerOptions.Converters.Add(
@@ -874,7 +874,7 @@ builder.Services.AddSwaggerGen(c =>
             ? null
             : char.ToLowerInvariant(action[0]) + action.Substring(1);
     });
-${schemaIdDictionary}    // Schema-name parity for the paged carrier (M-T2.6): the generic
+${schemaIdDictionary}    // Schema-name parity for the paged carrier: the generic
     // Paged<XResponse> return would otherwise get Swashbuckle's default
     // "PagedXResponse" component name — but Hono/Phoenix/Java/Python all name
     // the envelope "<Agg>Paged" (e.g. EngineerPaged).  Map the generic back to
@@ -1166,13 +1166,13 @@ export function renderCsproj(
   // RabbitMQ.Client (Apache-2.0, §6a) speaks AMQP 0-9-1 to the rabbitmq
   // sidecar.  Per-transport wiring-gated.
   const redisChannelRef = channelTransports.redis
-    ? `\n    <!-- Redis channel transport (channels.md, M-T4.4) -->\n    <PackageReference Include="StackExchange.Redis" Version="2.8.16" />`
+    ? `\n    <!-- Redis channel transport (channels.md) -->\n    <PackageReference Include="StackExchange.Redis" Version="2.8.16" />`
     : "";
   const kafkaChannelRef = channelTransports.kafka
-    ? `\n    <!-- Kafka channel transport (channels.md, M-T4.4; Confluent.Kafka, Apache 2.0) -->\n    <PackageReference Include="Confluent.Kafka" Version="2.6.1" />`
+    ? `\n    <!-- Kafka channel transport (channels.md; Confluent.Kafka, Apache 2.0) -->\n    <PackageReference Include="Confluent.Kafka" Version="2.6.1" />`
     : "";
   const rabbitChannelRef = channelTransports.rabbit
-    ? `\n    <!-- RabbitMQ channel transport (channels.md, M-T4.4) -->\n    <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />`
+    ? `\n    <!-- RabbitMQ channel transport (channels.md) -->\n    <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />`
     : "";
   const oidcRefs = oidc
     ? `\n    <!-- OIDC token validation (generated OidcUserVerifier) -->\n    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.19.2" />\n    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.19.2" />`
@@ -1315,7 +1315,7 @@ ${persistenceRefs}
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
     <!-- Prometheus metrics at /metrics (prometheus-net) -->
     <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />
-    <!-- OpenTelemetry tracing (M-T7.1): AspNetCore instrumentation gives a
+    <!-- OpenTelemetry tracing: AspNetCore instrumentation gives a
          SERVER span per request; exported via OTLP/HTTP only when a collector
          endpoint is set (Program.cs).  1.17.x clears the NU1902 advisories on
          the older 1.10/1.12 lines. -->

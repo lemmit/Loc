@@ -369,7 +369,7 @@ defmodule ${appModule}.MixProject do
       {:open_api_spex, "~> 3.0"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_metrics_prometheus_core, "~> 1.1"},
-      # OpenTelemetry tracing (M-T7.1): the RequestContext plug opens a SERVER
+      # OpenTelemetry tracing: the RequestContext plug opens a SERVER
       # span per request; exported via OTLP/HTTP only when a collector endpoint
       # is set (config/runtime.exs).
       {:opentelemetry_api, "~> 1.4"},
@@ -616,7 +616,7 @@ ${liveViewPlugs}${spaStaticPlug}  plug Plug.RequestId
   plug Plug.MethodOverride
   plug Plug.Head
   plug Plug.Session, @session_options
-  # The router is mounted THROUGH the app-global fault floor (M-T6.30), not
+  # The router is mounted THROUGH the app-global fault floor, not
   # directly: every fault raised at or below the router — a controller raise, a
   # plug in a pipeline, an \`Ecto\` timeout — is answered by us in RFC 7807
   # instead of by \`Phoenix.Endpoint.RenderErrors\` in whatever shape and content
@@ -860,7 +860,7 @@ defmodule ${appModule}Web.BodyParser do
   @moduledoc """
   \`Plug.Parsers\` with its failures answered by this app rather than by
   \`Phoenix.Endpoint.RenderErrors\` — see the RFC 7807 contract in
-  docs/conformance-semantics.md (RS-9).  Opts are \`Plug.Parsers\`' own.
+  docs/conformance-semantics.md.  Opts are \`Plug.Parsers\`' own.
   """
   @behaviour Plug
 
@@ -943,7 +943,7 @@ function renderVanillaFaultHandler(appModule: string): string {
 defmodule ${appModule}Web.FaultHandler do
   @moduledoc """
   The app-global RFC 7807 floor — see the contract in
-  docs/conformance-semantics.md (RS-9, RS-28).
+  docs/conformance-semantics.md.
 
   Mounts the router and answers ANY fault below it with the same
   ProblemDetails envelope every modelled error on this API answers, under
@@ -1005,7 +1005,7 @@ defmodule ${appModule}Web.FaultHandler do
     end
   end
 
-  # RS-28 — an error the server did not model is a SERVER fault, and its
+  # An error the server did not model is a SERVER fault, and its
   # message names modules, SQL text, hosts and connection strings.  The wire
   # gets the one sanitized literal all five backends send; the log line above
   # got the truth.
@@ -1219,7 +1219,7 @@ defmodule ${appModule}Web.ErrorJSON do
     }
   end
 
-  # RS-28 — a >= 500 is the fault nobody modelled, and the exception's message
+  # A >= 500 is the fault nobody modelled, and the exception's message
   # names modules, SQL text and hosts.  It gets the sanitized literal all five
   # backends send, never \`reason.message\`.  (\`${appModule}Web.FaultHandler\`
   # answers everything at or below the router, so what still renders here is a
@@ -1297,7 +1297,7 @@ config :logger, :default_formatter,
   format: {${appModule}.LogFormatter, :format},
   metadata: :all
 
-# OpenTelemetry (M-T7.1): a SERVER span opens per request (the RequestContext
+# OpenTelemetry: a SERVER span opens per request (the RequestContext
 # plug), threading trace_id/span_id onto Logger.metadata (log<->trace
 # correlation).  A batch processor buffers spans; the OTLP exporter is turned
 # ON in config/runtime.exs ONLY when a collector endpoint is set — default off
@@ -1391,7 +1391,7 @@ if config_env() == :prod do
     secret_key_base: secret_key_base
 end
 
-# OpenTelemetry export (M-T7.1): turn the OTLP/HTTP exporter ON only when a
+# OpenTelemetry export: turn the OTLP/HTTP exporter ON only when a
 # collector endpoint is set (the compose stack points it at the bundled jaeger
 # collector).  Applies in every env — spans are always created (so trace_id
 # rides the logs), but exported only here.  http/protobuf on the standard OTLP

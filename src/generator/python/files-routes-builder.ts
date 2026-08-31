@@ -8,7 +8,7 @@ import { lines } from "../../util/code-builder.js";
  *  `from app.domain.file_ref import FileRef`. */
 export function renderPyFileRefModel(): string {
   return lines(
-    '"""Shared FileRef wire model (M-T1.2).  Auto-generated."""',
+    '"""Shared FileRef wire model.  Auto-generated."""',
     "",
     "from typing import TypedDict",
     "",
@@ -34,7 +34,7 @@ export function renderPyFileRefModel(): string {
  *  `<fn>_put_bytes` / `<fn>_get_bytes` exist there (s3 + localDisk). */
 export function renderPyFilesRoutes(fn: string, module: string): string {
   return lines(
-    '"""File upload/download endpoints (M-T1.2).  Auto-generated."""',
+    '"""File upload/download endpoints.  Auto-generated."""',
     "",
     "from uuid import uuid4",
     "",

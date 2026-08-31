@@ -165,12 +165,12 @@ export function renderControllerSerialize(
   // type at the call site, which lives in the per-route action, not here.
   if (declared.decimal) {
     scalarClauses.push(
-      `  # RS-24 — a plain \`decimal\` is a JSON NUMBER on every other backend.` +
+      `  # A plain \`decimal\` is a JSON NUMBER on every other backend.` +
         `\n  defp serialize(%Decimal{} = value), do: Decimal.to_float(value)`,
     );
   } else if (declared.money) {
     scalarClauses.push(
-      `  # RS-12 — money rides the wire at the fixed \`NUMERIC(19,4)\` scale (Jason` +
+      `  # Money rides the wire at the fixed \`NUMERIC(19,4)\` scale (Jason` +
         `\n  # encodes a \`%Decimal{}\` as the string the other backends send).` +
         `\n  defp serialize(%Decimal{} = value), do: Decimal.round(value, ${MONEY_WIRE_SCALE})`,
     );

@@ -30,7 +30,7 @@ defmodule ${webModule}.FilesController do
   alias ${webModule}.ProblemDetails
 
   @moduledoc """
-  App-level file upload/download over the bound objectStore (M-T1.2).
+  App-level file upload/download over the bound objectStore.
   \`POST /files\` stores the uploaded bytes and returns a FileRef; \`GET /files/:key\`
   streams the object back with its stored content-type.
   """
@@ -65,7 +65,7 @@ defmodule ${webModule}.FilesController do
         |> send_resp(200, body)
 
       nil ->
-        # M-T6.39 — the absent object answers through the app's ONE 404
+        # The absent object answers through the app's ONE 404
         # producer, so it carries the same RFC 7807 envelope (and the same
         # \`httpStatus NotFound -> <Code>\` override) as every other absent read.
         ProblemDetails.not_found_response(conn, "File", key)

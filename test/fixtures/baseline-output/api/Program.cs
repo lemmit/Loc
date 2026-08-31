@@ -54,7 +54,7 @@ builder.Logging.SetMinimumLevel((System.Environment.GetEnvironmentVariable("LOG_
     _ => Microsoft.Extensions.Logging.LogLevel.Information,
 });
 
-// OpenTelemetry tracing (M-T7.1).  AspNetCore instrumentation gives a SERVER
+// OpenTelemetry tracing.  AspNetCore instrumentation gives a SERVER
 // span per request (so Activity.Current.TraceId is populated on every request
 // — RequestContextMiddleware stamps the loom.* ids onto it and threads
 // trace_id/span_id onto the log scope).  The span is EXPORTED via OTLP/HTTP
@@ -137,7 +137,7 @@ builder.Services.AddControllers(opts =>
     // converter and emits a named string-enum schema for each enum type.
     opts.JsonSerializerOptions.Converters.Add(
         new System.Text.Json.Serialization.JsonStringEnumConverter());
-    // Canonical ISO-8601 UTC instants (RS-4): trim trailing zero fractional
+    // Canonical ISO-8601 UTC instants: trim trailing zero fractional
     // seconds so an instant with no sub-second part serializes as "…00Z" (not
     // System.Text.Json's fixed 7-digit "…00.0000000Z"), matching the node /
     // Python / Java backends.  Business DTOs carry datetime as a pre-formatted
@@ -162,7 +162,7 @@ builder.Services.Configure<ApiBehaviorOptions>(opts =>
 
 // The framework produces ProblemDetails of its own for the faults it answers
 // without reaching a controller at all — 415 being the common one.  Those
-// carry the rfc9110 `type` URI (not `about:blank`, RS-9), no `detail`, no
+// carry the rfc9110 `type` URI (not `about:blank`), no `detail`, no
 // `instance`, and a `traceId` on the body that every backend here moved to
 // the x-request-id header.  Normalise them to the emitted envelope; the
 // customizer is a no-op on responses already built in that shape.
@@ -184,7 +184,7 @@ builder.Services.AddProblemDetails(opts =>
 // session probe when auth is on) and any raw datetime a minimal endpoint
 // returns serialize through ConfigureHttpJsonOptions rather than the MVC
 // AddJsonOptions above.  Register the canonical instant converters here too so
-// their wire matches the controllers' (RS-4 temporal round-trip parity).
+// their wire matches the controllers' (temporal round-trip parity).
 builder.Services.ConfigureHttpJsonOptions(opts =>
 {
     opts.SerializerOptions.Converters.Add(
@@ -254,7 +254,7 @@ builder.Services.AddSwaggerGen(c =>
             ? null
             : char.ToLowerInvariant(action[0]) + action.Substring(1);
     });
-    // Schema-name parity for the paged carrier (M-T2.6): the generic
+    // Schema-name parity for the paged carrier: the generic
     // Paged<XResponse> return would otherwise get Swashbuckle's default
     // "PagedXResponse" component name — but Hono/Phoenix/Java/Python all name
     // the envelope "<Agg>Paged" (e.g. EngineerPaged).  Map the generic back to
