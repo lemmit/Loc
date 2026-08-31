@@ -23,7 +23,7 @@ import { defaultInitForJs } from "../_walker/js-target-helpers.js";
  *  a list of literals); `undefined` for anything non-literal — an init
  *  expression would evaluate before the store exists, so it cannot reference
  *  state and is not admitted here. */
-export function renderStoreInitLiteral(e: ExprIR | undefined): string | undefined {
+function renderStoreInitLiteral(e: ExprIR | undefined): string | undefined {
   if (e === undefined) return undefined;
   if (e.kind === "literal") {
     if (e.lit === "string") return JSON.stringify(e.value);
