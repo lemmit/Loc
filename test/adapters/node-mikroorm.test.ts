@@ -763,13 +763,21 @@ describe("mikroorm — aggregate inheritance (wave 2)", () => {
     expect(repo).toContain('kind: "CreditCard"');
   });
 
-  it("TPH emits a polymorphic base reader dispatching on kind", async () => {
+  it("TPH emits a polymorphic base reader that DELEGATES to the concretes", async () => {
+    // It used to scan the shared Row itself (`em.find(PaymentMethodRow, {})`)
+    // and hydrate by `kind`, which read the shared table through none of the
+    // machinery the concrete repositories apply to it — no capability `filter`,
+    // no tenancy predicate, no contained parts (F2-CB-C12; the drizzle twin is
+    // fixed the same way).  Delegating makes all of that ride along.
     const { files } = await emit(inh("sharedTable"));
     const reader = files.get("api/db/repositories/paymentMethod-repository.ts")!;
     expect(reader).toContain("class PaymentMethodRepository");
-    expect(reader).toContain("switch (row.kind)");
-    expect(reader).toContain('case "CreditCard":');
-    expect(reader).toContain("em.find(PaymentMethodRow, {})");
+    expect(reader).toContain("new CreditCardRepository(em, events)");
+    expect(reader).toContain("this.creditCardRepo.all()");
+    expect(reader, "no direct read of the shared Row").not.toContain(
+      "em.find(PaymentMethodRow, {})",
+    );
+    expect(reader, "no inline kind dispatch").not.toContain("switch (row.kind)");
   });
 
   it("TPC gives each concrete its own table + a delegating base reader", async () => {

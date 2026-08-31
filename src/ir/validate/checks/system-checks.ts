@@ -53,6 +53,7 @@ import { backendServesRealtime } from "../../util/channels.js";
 import { bodyUsesChart } from "../../util/chart.js";
 import { dataGridHosts } from "../../util/data-grid.js";
 import { aggregateFileField } from "../../util/file-field.js";
+import { nonRootFilterFields, rootBaseOf } from "../../util/inheritance.js";
 import {
   firstUnlowerableForAdapter,
   isFindPredicateAdapter,
@@ -3608,6 +3609,31 @@ export function validateInheritanceStorage(
       }),
       source: `${ctx.name}/${agg.name}`,
     });
+  }
+  // .NET only: a TPH subtype's capability `filter` must be expressible as a
+  // ROOT query filter.  EF Core hosts every filter in an inheritance hierarchy
+  // on the root entity type, so a predicate reading a column that exists on one
+  // subtype alone cannot be registered at all — see `nonRootFilterFields` for
+  // the two workarounds and why each fails.  Without this gate the emitter
+  // either dropped the filter silently (the old `tph ? [] :` short-circuit, a
+  // read restriction absent from every emitted query) or emitted a lambda that
+  // does not compile.
+  if (backendPlatforms.has("dotnet")) {
+    for (const agg of ctx.aggregates) {
+      const stray = nonRootFilterFields(agg, ctx.aggregates);
+      if (stray.length === 0) continue;
+      const root = rootBaseOf(agg, ctx.aggregates);
+      diags.push({
+        severity: "error",
+        code: "loom.tph-filter-unsupported",
+        message: diagMessage("loom.tph-filter-unsupported", {
+          name: agg.name,
+          fields: stray.map((f) => `'${f}'`).join(", "),
+          root: root.name,
+        }),
+        source: `${ctx.name}/${agg.name}`,
+      });
+    }
   }
 }
 

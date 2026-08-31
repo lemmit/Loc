@@ -12,6 +12,7 @@ import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
+import type { AggPool } from "../../../ir/util/inheritance.js";
 import { escapeCsharpIdent, plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 import { unionFindAsOptionalTwin } from "../find-emit.js";
@@ -107,6 +108,9 @@ export function renderRepositoryImpl(
   agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
   ns: string,
+  /** The context's aggregate pool — resolves this aggregate's EF named-filter
+   *  identity, which is TPH-dependent (`queryFilterNames`). */
+  pool: AggPool,
   findBodies: Array<{
     name: string;
     ignoreClause: string;
@@ -293,7 +297,7 @@ export function renderRepositoryImpl(
   // names never appear on the domain PORT; the adapter owns the mapping).  One
   // `(capability, filterName)` pair per named filter that has a capability
   // origin (a base filter with no origin can only be dropped via `bypass.All`).
-  const filterNames = queryFilterNames(agg);
+  const filterNames = queryFilterNames(agg, pool);
   const filterOrigins = agg.contextFilterOrigins ?? [];
   const bypassPairs = filterNames
     .map((filter, i) => ({ cap: filterOrigins[i], filter }))
@@ -304,7 +308,7 @@ export function renderRepositoryImpl(
   // wins over an authored `ignoring *`), and then the droppable filters are
   // enumerated by name instead — or the branch disappears entirely when the
   // deny carve-out is the only filter.
-  const allBypassNames = hasNonBypassableFilter(agg) ? bypassableFilterNames(agg) : null;
+  const allBypassNames = hasNonBypassableFilter(agg) ? bypassableFilterNames(agg, pool) : null;
   const bypassAllLines =
     allBypassNames === null
       ? ["        if (bypass.All) __q = __q.IgnoreQueryFilters();"]

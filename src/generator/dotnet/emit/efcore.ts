@@ -11,7 +11,13 @@ import type {
 import { isMaterializedProjection } from "../../../ir/types/loom-ir.js";
 import { directParentName } from "../../../ir/util/containment-parent.js";
 import { aggregateHasFileField } from "../../../ir/util/file-field.js";
-import { isTphBase, ownFieldsOf } from "../../../ir/util/inheritance.js";
+import {
+  type AggPool,
+  isTphBase,
+  isTphConcrete,
+  ownFieldsOf,
+  tableOwnerName,
+} from "../../../ir/util/inheritance.js";
 import { isDenyFilter } from "../../../ir/util/tenant-stance.js";
 import { isValueCollectionType, valueCollectionsFor } from "../../../ir/util/value-collections.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
@@ -255,43 +261,57 @@ export function renderDbContext(
   // translates.  The member `TryParse`s the claim and yields `null` for a
   // non-guid / claim-less principal, so the filter fails CLOSED (id = NULL → no
   // rows) instead of throwing `FormatException`.
+  //
+  // TPH: a principal filter, like a static one, must be registered on the ROOT
+  // entity type — `modelBuilder.Entity<Car>()` on a subtype throws at MODEL
+  // BUILD ("A filter may only be applied to the root entity type 'Vehicle'"),
+  // so the generated app died on its first request.  The abstract TPH base was
+  // excluded from `entityAggs` entirely, so ITS principal filter was dropped
+  // silently on top.  Both are handled here: the base joins the walk, and a
+  // concrete's filter registers on its root, `kind`-guarded (and its NAME is
+  // prefixed by `queryFilterNames`, so two subtypes carrying the same
+  // capability don't overwrite each other's key).
+  const filterHostAggs = [
+    ...entityAggs.filter((a) => !isDoc(a.name) && !isEs(a.name)),
+    ...tphBases,
+  ];
   const principalFilterMembers: string[] = [];
-  const principalFilterLines = entityAggs
-    .filter((a) => !isDoc(a.name) && !isEs(a.name))
-    .flatMap((a) => {
-      const names = queryFilterNames(a);
-      return (a.contextFilters ?? [])
-        .map((predicate, i) => [predicate, i] as const)
-        .filter(([predicate]) => exprRefsCurrentUser(predicate))
-        .map(([predicate, i]) => {
-          let body = renderCsExpr(predicate, {
-            thisName: "x",
-            currentUserExpr: "_currentUser.User",
-            efQuery: true,
-          });
-          // Hoist a `new <Agg>Id(...)` self-scope construction out of the filter
-          // expression (EF can't translate the constructor in-tree).
-          const guidCtor = new RegExp(`new ${a.name}Id\\(Guid\\.Parse\\((.+?)\\)\\)`);
-          const directCtor = new RegExp(`new ${a.name}Id\\(((?:(?!Guid\\.Parse).)+?)\\)`);
-          const guidMatch = body.match(guidCtor);
-          const directMatch = guidMatch ? null : body.match(directCtor);
-          if (guidMatch || directMatch) {
-            const member = `__SelfScopeId_${a.name}_${i}`;
-            if (guidMatch) {
-              principalFilterMembers.push(
-                `    private ${a.name}Id? ${member} => Guid.TryParse(${guidMatch[1]}, out var __g) ? new ${a.name}Id(__g) : (${a.name}Id?)null;`,
-              );
-              body = body.replace(guidCtor, member);
-            } else if (directMatch) {
-              principalFilterMembers.push(
-                `    private ${a.name}Id? ${member} => new ${a.name}Id(${directMatch[1]});`,
-              );
-              body = body.replace(directCtor, member);
-            }
-          }
-          return `        modelBuilder.Entity<${a.name}>().HasQueryFilter(${JSON.stringify(names[i])}, x => ${body});`;
+  const principalFilterLines = filterHostAggs.flatMap((a) => {
+    const names = queryFilterNames(a, ctx.aggregates);
+    const host = tableOwnerName(a, ctx.aggregates);
+    const guardKind = isTphConcrete(a, ctx.aggregates) ? a.name : undefined;
+    return (a.contextFilters ?? [])
+      .map((predicate, i) => [predicate, i] as const)
+      .filter(([predicate]) => exprRefsCurrentUser(predicate))
+      .map(([predicate, i]) => {
+        let body = renderCsExpr(predicate, {
+          thisName: "x",
+          currentUserExpr: "_currentUser.User",
+          efQuery: true,
         });
-    });
+        // Hoist a `new <Agg>Id(...)` self-scope construction out of the filter
+        // expression (EF can't translate the constructor in-tree).
+        const guidCtor = new RegExp(`new ${a.name}Id\\(Guid\\.Parse\\((.+?)\\)\\)`);
+        const directCtor = new RegExp(`new ${a.name}Id\\(((?:(?!Guid\\.Parse).)+?)\\)`);
+        const guidMatch = body.match(guidCtor);
+        const directMatch = guidMatch ? null : body.match(directCtor);
+        if (guidMatch || directMatch) {
+          const member = `__SelfScopeId_${a.name}_${i}`;
+          if (guidMatch) {
+            principalFilterMembers.push(
+              `    private ${a.name}Id? ${member} => Guid.TryParse(${guidMatch[1]}, out var __g) ? new ${a.name}Id(__g) : (${a.name}Id?)null;`,
+            );
+            body = body.replace(guidCtor, member);
+          } else if (directMatch) {
+            principalFilterMembers.push(
+              `    private ${a.name}Id? ${member} => new ${a.name}Id(${directMatch[1]});`,
+            );
+            body = body.replace(directCtor, member);
+          }
+        }
+        return `        modelBuilder.Entity<${host}>().HasQueryFilter(${JSON.stringify(names[i])}, x => ${guardKind ? kindGuarded(guardKind, body) : body});`;
+      });
+  });
   const anyPrincipalFilter = principalFilterLines.length > 0;
   return (
     lines(
@@ -487,7 +507,6 @@ export function renderConfiguration(
   // would lose one at runtime.  Naming each filter makes them additive again —
   // every predicate applies — and lets a query selectively bypass a single one
   // via `IgnoreQueryFilters(["<Name>"])` instead of dropping them all.
-  const filterNames = queryFilterNames(agg);
   // A capability `filter this.x == currentUser.x` (tenancy) references the
   // principal.  An EF query filter is a STATIC lambda built once in
   // `OnModelCreating`, so it cannot close over a request-scoped `currentUser`
@@ -505,15 +524,29 @@ export function renderConfiguration(
   // the injected scoped `ICurrentUserAccessor` so EF re-evaluates per request.
   // Only genuinely-static, principal-free filters (e.g. softDelete
   // `!isDeleted`) stay here.
-  const filterLines = tph
+  //
+  // Under TPH the filters do not all belong to the config they were declared
+  // on.  EF applies a query filter to the ROOT entity type of a hierarchy only,
+  // so a `HasQueryFilter` on `IEntityTypeConfiguration<Car>` throws at model
+  // build ("A filter may only be applied to the root entity type 'Vehicle'").
+  // The whole list was therefore short-circuited to `[]` for every TPH
+  // participant — dropping every declared read restriction on a subtype with no
+  // compile error and no diagnostic (F2-CB-C2).  Instead: the BASE config hosts
+  // them all — its own filters unguarded, each concrete's guarded by the `kind`
+  // discriminator so it constrains that concrete's rows only — and the concrete
+  // config hosts none.  A concrete filter that reads a non-root column is not
+  // expressible this way at all and is gated (`loom.tph-filter-unsupported`,
+  // `nonRootFilterFields`), so it never reaches here.
+  const filterLines = isTphConcreteCfg
     ? []
-    : (agg.contextFilters ?? [])
-        .map((predicate, i) => [predicate, i] as const)
-        .filter(([predicate]) => !exprRefsCurrentUser(predicate))
-        .map(
-          ([predicate, i]) =>
-            `        builder.HasQueryFilter(${JSON.stringify(filterNames[i])}, x => ${renderCsExpr(predicate, { thisName: "x", efQuery: true })});`,
-        );
+    : [
+        ...staticQueryFilterLines(agg, ctx.aggregates),
+        ...(tph?.role === "base"
+          ? tph.concretes
+              .filter((c) => c.name !== agg.name)
+              .flatMap((c) => staticQueryFilterLines(c, ctx.aggregates, c.name))
+          : []),
+      ];
   // The config class never references the principal — those filters live on
   // AppDbContext — so it needs no ambient `RequestContext` import.
   const filterRefsCurrentUser = false;
@@ -654,11 +687,22 @@ function indexedColumnsFor(agg: AggregateIR, ctx: BoundedContextIR): Set<string>
  *  `ignoring <Cap>` clause to the same names via `agg.contextFilterOrigins`
  *  (named-filter-bypass.md §11).  Disambiguation (the rare two-filters-one-name
  *  case) MUST stay in lockstep between the config and the reads, so it lives
- *  here once. */
-export function queryFilterNames(agg: AggregateIR): string[] {
+ *  here once.
+ *
+ *  A TPH concrete's names are prefixed with its own name.  EF hosts every
+ *  filter in a hierarchy on the ROOT entity type (see `filterLines`), where two
+ *  concretes carrying the same capability would otherwise register the same
+ *  key twice — and a second registration under one key OVERWRITES the first,
+ *  so one subtype's read restriction would vanish.  The prefix is derived here,
+ *  in the one function both the registration and the `ignoring` bypass read, so
+ *  the two cannot drift.  `pool` is required for exactly that reason: an
+ *  optional one would let a call site silently resolve a TPH concrete as a
+ *  plain aggregate and emit bypass names that match nothing. */
+export function queryFilterNames(agg: AggregateIR, pool: AggPool): string[] {
+  const prefix = isTphConcrete(agg, pool) ? `${agg.name}_` : "";
   const seen = new Set<string>();
   return (agg.contextFilters ?? []).map((predicate, i) => {
-    let name = queryFilterName(predicate, agg.contextFilterRefs?.[i], i);
+    let name = `${prefix}${queryFilterName(predicate, agg.contextFilterRefs?.[i], i)}`;
     if (seen.has(name)) {
       let n = 2;
       while (seen.has(`${name}${n}`)) n++;
@@ -667,6 +711,37 @@ export function queryFilterNames(agg: AggregateIR): string[] {
     seen.add(name);
     return name;
   });
+}
+
+/** The `kind`-discriminator guard that scopes a root-hosted query filter to one
+ *  concrete's rows: `EF.Property<string>(x, "kind") != "<Concrete>" || (<pred>)`.
+ *
+ *  `EF.Property` (not `x is Car` / `((Car)x)`) because the guard has to survive
+ *  every query the root filter is applied to, including a SIBLING concrete's
+ *  `DbSet<Truck>` — where a CLR downcast fails to build the expression tree
+ *  ("No coercion operator is defined between types 'Truck' and 'Car'").  The
+ *  discriminator column exists on every type in the hierarchy, so the guard
+ *  itself always translates; the guarded predicate must only read root columns
+ *  (`nonRootFilterFields` gates the rest). */
+function kindGuarded(kind: string, body: string): string {
+  return `EF.Property<string>(x, "kind") != ${JSON.stringify(kind)} || (${body})`;
+}
+
+/** One `builder.HasQueryFilter("<Name>", x => …)` line per NON-principal
+ *  capability filter on `agg`.  `guardKind` is set when the filter is being
+ *  hosted on a foreign (TPH root) config, so it constrains only that
+ *  concrete's rows. */
+function staticQueryFilterLines(agg: AggregateIR, pool: AggPool, guardKind?: string): string[] {
+  const names = queryFilterNames(agg, pool);
+  return (agg.contextFilters ?? [])
+    .map((predicate, i) => [predicate, i] as const)
+    .filter(([predicate]) => !exprRefsCurrentUser(predicate))
+    .map(([predicate, i]) => {
+      const body = renderCsExpr(predicate, { thisName: "x", efQuery: true });
+      return `        builder.HasQueryFilter(${JSON.stringify(names[i])}, x => ${
+        guardKind ? kindGuarded(guardKind, body) : body
+      });`;
+    });
 }
 
 /** Does this aggregate carry a query filter no `ignoring` clause may drop?
@@ -682,9 +757,9 @@ export function hasNonBypassableFilter(agg: AggregateIR): boolean {
 /** The EF named-filter names an `ignoring *` clause may drop on this
  *  aggregate — every named query filter EXCEPT the non-bypassable ones
  *  (see {@link hasNonBypassableFilter}). */
-export function bypassableFilterNames(agg: AggregateIR): string[] {
+export function bypassableFilterNames(agg: AggregateIR, pool: AggPool): string[] {
   const filters = agg.contextFilters ?? [];
-  return queryFilterNames(agg).filter((_, i) => !isDenyFilter(filters[i]!));
+  return queryFilterNames(agg, pool).filter((_, i) => !isDenyFilter(filters[i]!));
 }
 
 /** The EF named-filter names an `ignoring` clause bypasses on this aggregate
@@ -695,10 +770,11 @@ export function bypassableFilterNames(agg: AggregateIR): string[] {
  *  both already validated). */
 export function bypassedFilterNames(
   agg: AggregateIR,
+  pool: AggPool,
   bypass: { bypassAll?: boolean; bypassCaps?: string[] },
 ): string[] {
-  if (bypass.bypassAll) return bypassableFilterNames(agg);
-  const names = queryFilterNames(agg);
+  if (bypass.bypassAll) return bypassableFilterNames(agg, pool);
+  const names = queryFilterNames(agg, pool);
   const caps = new Set(bypass.bypassCaps ?? []);
   if (caps.size === 0) return [];
   const origins = agg.contextFilterOrigins ?? [];

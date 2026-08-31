@@ -1999,6 +1999,16 @@ export const DIAGNOSTIC_MESSAGES = {
     `${p.hostNote}. Host the context on one of those deployables, or declare ` +
     `'inheritanceUsing: ownTable' to use the per-concrete (TPC) layout (all backends). ` +
     `Tracked in aggregate-inheritance.md I2/I3.`,
+  "loom.tph-filter-unsupported": (p: { name: unknown; fields: unknown; root: unknown }) =>
+    `aggregate '${p.name}' declares a capability 'filter' reading ${p.fields}, which ` +
+    `'${p.root}' does not declare. Under sharedTable (TPH) inheritance the .NET backend must ` +
+    `register every query filter in the hierarchy on the ROOT entity type '${p.root}' — ` +
+    `EF Core allows a filter "only on the root entity type" — and a root-hosted filter ` +
+    `cannot read a column that exists on one subtype alone (both workarounds fail when the ` +
+    `query source is a SIBLING subtype: a CLR downcast has no coercion operator, and ` +
+    `EF.Property names a property the sibling does not have). Move the field(s) to the ` +
+    `abstract base '${p.root}', declare 'inheritanceUsing: ownTable' (TPC — each concrete ` +
+    `owns its table, filters unrestricted), or host this context off the .NET backend.`,
   "loom.event-sourcing-backend-unsupported": (p: { name: unknown; hostNote: unknown }) =>
     `aggregate '${p.name}' is persistedAs: eventLog, but event-sourced storage emission ` +
     `is implemented for the Hono (node), .NET (dotnet), Java (java), Python (python) and elixir ` +
@@ -2485,6 +2495,35 @@ export const DIAGNOSTIC_MESSAGES = {
   "loom.tenancy-stance-unmarked": (p: { name: unknown }) =>
     `aggregate '${p.name}' declares no tenancy stance; add ` +
     `\`with tenantOwned\` (tenant data) or \`crossTenant\` (shared data).`,
+  // Same rule, different remedy — the author DID write the marker, on the
+  // abstract base.  The generic message above told them to add something they
+  // had already added, and its other suggestion (`crossTenant`) walks straight
+  // into `loom.tenancy-inherited-stance-conflict`.
+  "loom.tenancy-stance-unmarked#inherited": (p: {
+    name: unknown;
+    base: unknown;
+    marker: unknown;
+  }) =>
+    `aggregate '${p.name}' declares no tenancy stance. Its abstract base ` +
+    `'${p.base}' declares \`${p.marker}\`, but a stance does NOT propagate through ` +
+    `\`extends\`: only the base's FIELDS are inherited, so '${p.name}' has the tenant ` +
+    `column without the stamp that fills it or the filter that scopes reads by it. ` +
+    `Repeat \`${p.marker}\` on '${p.name}' — \`crossTenant\` would contradict the base ` +
+    `and is rejected.`,
+  "loom.tenancy-inherited-stance-conflict": (p: {
+    name: unknown;
+    base: unknown;
+    own: unknown;
+    baseMarker: unknown;
+  }) =>
+    `aggregate '${p.name}' declares \`${p.own}\` but its abstract base '${p.base}' ` +
+    `declares \`${p.baseMarker}\` — a subtype cannot take the opposite tenancy stance ` +
+    `from the base it inherits its columns from. The base's capability contributes the ` +
+    `\`tenant_id\` column (NOT NULL) to the row either way, while the subtype's stance ` +
+    `decides whether anything stamps or filters it: the two halves disagree at runtime, ` +
+    `so every write either persists an empty tenant with no isolation or fails the NOT ` +
+    `NULL constraint. Declare \`${p.baseMarker}\` on '${p.name}' too, or move the ` +
+    `capability off the base and onto the subtypes that want it.`,
   "loom.unique-missing-tenant-scope": (p: { source: unknown; name: unknown; columns: unknown }) =>
     `\`${p.source}\` on tenant-owned aggregate '${p.name}' omits the tenant ` +
     `discriminator — this is a GLOBAL unique across all tenants. Did you mean ` +

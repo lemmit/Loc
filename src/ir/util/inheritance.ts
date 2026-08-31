@@ -10,7 +10,8 @@
 // without importing across platform folders (the one-directional layering
 // rule: `generator/<platform>` knows nothing about other platforms).
 
-import type { AggregateIR, FieldIR } from "../types/loom-ir.js";
+import type { AggregateIR, ExprIR, FieldIR } from "../types/loom-ir.js";
+import { walkExprDeep } from "./walk.js";
 
 /** The aggregate pool a base is resolved within — a context's aggregate
  *  list.  All helpers take this so the base/concrete relationship resolves
@@ -150,4 +151,48 @@ export function discriminatorValue(agg: AggregateIR, pool: AggPool): string | un
  *  their columns in the single root table. */
 export function tphConcretesOf(base: AggregateIR, pool: AggPool): AggregateIR[] {
   return pool.filter((a) => descendsFrom(a, base.name, pool) && isTphConcrete(a, pool));
+}
+
+/** The field names a predicate reads off the candidate row — `this.x` member
+ *  access and the bare `this-prop` ref lowering produces for the same thing. */
+export function thisFieldsRead(e: ExprIR): Set<string> {
+  const out = new Set<string>();
+  walkExprDeep(e, (n) => {
+    if (n.kind === "member" && n.receiver.kind === "this") out.add(n.member);
+    if (n.kind === "ref" && n.refKind === "this-prop") out.add(n.name);
+  });
+  return out;
+}
+
+/** The fields a TPH concrete's capability `filter` reads that are NOT declared
+ *  on the hierarchy ROOT — i.e. columns that exist only on this (or a sibling)
+ *  concrete.
+ *
+ *  This is the .NET expressibility test, and it is a hard EF Core constraint,
+ *  not a Loom convention.  EF applies a query filter to the ROOT entity type of
+ *  an inheritance hierarchy only ("A filter may only be applied to the root
+ *  entity type 'Vehicle'"), and a root-hosted filter must typecheck against the
+ *  root for EVERY concrete the hierarchy contains — so both workarounds fail
+ *  when the query source is a SIBLING concrete: a CLR downcast raises "No
+ *  coercion operator is defined between types 'Truck' and 'Car'", and
+ *  `EF.Property<int>(x, "Doors")` raises "the specified property does not exist
+ *  on the entity type".  Both reproduced against EF Core 10.0.10.
+ *
+ *  A predicate that reads only root-declared fields (the common case — a
+ *  `tenantOwned` base contributes `tenantId` to the root) IS expressible: it
+ *  moves to the root config, discriminator-guarded so it constrains this
+ *  concrete's rows only.  Anything else gets the honest
+ *  `loom.tph-filter-unsupported` gate.  Empty for a non-TPH-concrete. */
+export function nonRootFilterFields(agg: AggregateIR, pool: AggPool): string[] {
+  if (!isTphConcrete(agg, pool)) return [];
+  const root = rootBaseOf(agg, pool);
+  const rootFields = new Set(root.fields.map((f) => f.name));
+  rootFields.add("id");
+  const out = new Set<string>();
+  for (const predicate of agg.contextFilters ?? []) {
+    for (const name of thisFieldsRead(predicate)) {
+      if (!rootFields.has(name)) out.add(name);
+    }
+  }
+  return [...out];
 }

@@ -130,7 +130,7 @@ export function buildRepositoryFile(
   // table (null when it has no non-principal capability filter).  Threaded
   // into each root-table read site below; child/containment reads
   // (parentId-keyed) are unaffected — the filter constrains root rows.
-  const filterPred = contextFilterPredicate(agg, lowerFirst(plural(agg.name)), ctx, drizzleOps);
+  const filterPred = contextFilterPredicate(agg, ctx, drizzleOps);
   // If any find or matching capability filter references currentUser, the
   // per-method signature gains a `currentUser: User` parameter that
   // the closure-captured Drizzle predicate reads.  Pull the User

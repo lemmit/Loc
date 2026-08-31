@@ -993,9 +993,7 @@ export function generateTypeScriptForContexts(
       place(
         "drizzle-repository",
         base.name,
-        usingMikro
-          ? renderMikroBaseReader(base, concretes, ctx)
-          : buildBaseReaderFile(base, concretes, ctx),
+        usingMikro ? renderMikroBaseReader(base, concretes) : buildBaseReaderFile(base, concretes),
         base.origin,
         baseConstruct,
       );

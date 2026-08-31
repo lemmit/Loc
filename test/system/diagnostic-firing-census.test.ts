@@ -322,6 +322,50 @@ system S {
   deployable d { platform: node contexts: [Orders] dataSources: [st] serves: Api port: 3000 auth: required }
 }`,
 
+  // --- inheritance × capability (the TPH cluster) --------------------------
+
+  // A TPH SUBTYPE whose capability `filter` reads a column only that subtype
+  // declares.  EF Core registers a query filter on the hierarchy ROOT entity
+  // type only, and a root-typed lambda has no such member — the one shape of
+  // TPH filter .NET structurally cannot express.  Before the gate the whole
+  // filter list was replaced by `[]` for every TPH participant, so the read
+  // restriction vanished from the emitted queries with no error at all.
+  "loom.tph-filter-unsupported": `
+system S {
+  subdomain Fleet { context Vehicles {
+    criterion Live of Car = this.doors > 0
+    abstract aggregate Vehicle { name: string }
+    aggregate Car extends Vehicle with crudish { doors: int  filter Live }
+    repository Cars for Car { }
+  } }
+  api Api from Fleet
+  storage pg { type: postgres }
+  resource st { for: Vehicles, kind: state, use: pg }
+  deployable d { platform: dotnet contexts: [Vehicles] dataSources: [st] serves: Api port: 8080 }
+}`,
+
+  // A subtype taking the OPPOSITE tenancy stance from the base it inherits its
+  // columns from.  The base capability still contributes `tenant_id NOT NULL`
+  // to the row; `crossTenant` means nothing stamps or filters it.  This parsed
+  // 0 errors on all five backends, and it is the exact spelling the old
+  // `loom.tenancy-stance-unmarked` message recommended.
+  "loom.tenancy-inherited-stance-conflict": `
+system S {
+  user { id: guid  tenantId: string }
+  tenancy by user.tenantId of Org
+  subdomain Fleet { context Vehicles {
+    aggregate Org with crudish { title: string }
+    abstract aggregate Vehicle with tenantOwned { name: string }
+    aggregate Car extends Vehicle crossTenant with crudish { doors: int }
+    repository Cars for Car { }
+    repository Orgs for Org { }
+  } }
+  api Api from Fleet
+  storage pg { type: postgres }
+  resource st { for: Vehicles, kind: state, use: pg }
+  deployable d { platform: node contexts: [Vehicles] dataSources: [st] serves: Api port: 3000 auth: required }
+}`,
+
   // A frontend deployable whose ui READS `currentUser` while the ui is not
   // served under auth (`auth: ui` absent) — arrived on `main` mid-PR, same as
   // the three above.

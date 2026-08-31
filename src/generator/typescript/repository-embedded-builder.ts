@@ -123,7 +123,7 @@ export function buildEmbeddedRepositoryFile(
   // (non-principal) capability `filter` AND-s into every root read as a Drizzle
   // SQL predicate — the same machinery the relational repository uses (DEBT-02).
   // null when the aggregate has no such filter → embedded reads stay identical.
-  const filterPred = contextFilterPredicate(agg, tableName, ctx, drizzleOps);
+  const filterPred = contextFilterPredicate(agg, ctx, drizzleOps);
 
   // Root-row column entries (reused from the relational save projection)
   // + ref-collection jsonb arrays + one jsonb entry per containment.

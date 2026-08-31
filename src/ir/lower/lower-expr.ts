@@ -1655,7 +1655,15 @@ function resolveNameRef(name: string, env: Env, node?: AstNode): ExprIR {
   const owner = env.part ?? env.aggregate ?? env.valueObject ?? env.workflow ?? env.projection;
   if (owner) {
     const isVo = !!env.valueObject;
-    for (const m of owner.members) {
+    // An aggregate's `this`-props include the ones it inherits through
+    // `extends` — the base's members are merged onto the subtype at ENRICH
+    // time, which is after this pass, so the chain has to be walked here (see
+    // `memberOwnerChain`).  Own members shadow the base's.
+    const ownerMembers =
+      owner === env.aggregate && isAggregate(owner)
+        ? memberOwnerChain(owner).flatMap((o) => o.members)
+        : owner.members;
+    for (const m of ownerMembers) {
       if (isProperty(m) && m.name === name) {
         return {
           kind: "ref",
@@ -2604,21 +2612,56 @@ function inferSuffixType(t: TypeIR, suffix: PostfixSuffix, env: Env): TypeIR {
   return base;
 }
 
+/** The member-declaration owners a `this.<name>` lookup must consult, nearest
+ *  first: the entity itself, then every abstract base it `extends`
+ *  (aggregate-inheritance.md), root last.
+ *
+ *  A subtype's inherited fields are merged onto its `fields` by the ENRICH pass
+ *  (phase ⑥), which runs AFTER expression lowering (⑤b) — so a lookup that
+ *  walked only `target.members` could not see a base-declared field and fell
+ *  through to the `string` fallback below.  That is not cosmetic: a
+ *  `criterion Live of Car = !this.retired` whose `retired` lives on the
+ *  abstract base typed as `string`, the Drizzle bool-column path then rejected
+ *  it, and the capability filter was dropped from every read with no
+ *  diagnostic (`F2-CB-C4`).  Resolving the chain here fixes the type at the
+ *  ONE place every consumer reads it from, so no backend has to re-derive it.
+ *
+ *  `seen` keeps a malformed `extends` cycle finite (the language-side
+ *  cycle validator rejects those upstream; this just prevents a hang). */
+function memberOwnerChain(target: Aggregate | EntityPart): (Aggregate | EntityPart)[] {
+  if (!isAggregate(target)) return [target];
+  const out: (Aggregate | EntityPart)[] = [target];
+  const seen = new Set<string>([target.name]);
+  let cur: Aggregate | undefined = target;
+  while (cur) {
+    const base: Aggregate | undefined = cur.superType?.ref;
+    if (!base || seen.has(base.name)) break;
+    seen.add(base.name);
+    out.push(base);
+    cur = base;
+  }
+  return out;
+}
+
 function memberOnEntity(target: Aggregate | EntityPart, name: string): TypeIR {
   if (name === "id") {
     const idValue: IdValueType = isAggregate(target) ? ("guid" as IdValueType) : "guid";
     return { kind: "id", targetName: target.name, valueType: idValue };
   }
-  for (const m of target.members) {
-    if (isProperty(m) && m.name === name) return lowerType(m.type);
-    if (isContainment(m) && m.name === name) {
-      const partName = m.partType?.ref?.name ?? "Unknown";
-      return m.collection
-        ? { kind: "array", element: { kind: "entity", name: partName } }
-        : { kind: "entity", name: partName };
-    }
-    if (isDerivedProp(m) && m.name === name) {
-      return lowerType(m.type);
+  // Own members shadow a like-named base member — the same precedence the
+  // enrich-pass field merge uses (`mergedFieldsFor`).
+  for (const owner of memberOwnerChain(target)) {
+    for (const m of owner.members) {
+      if (isProperty(m) && m.name === name) return lowerType(m.type);
+      if (isContainment(m) && m.name === name) {
+        const partName = m.partType?.ref?.name ?? "Unknown";
+        return m.collection
+          ? { kind: "array", element: { kind: "entity", name: partName } }
+          : { kind: "entity", name: partName };
+      }
+      if (isDerivedProp(m) && m.name === name) {
+        return lowerType(m.type);
+      }
     }
   }
   return { kind: "primitive", name: "string" };
