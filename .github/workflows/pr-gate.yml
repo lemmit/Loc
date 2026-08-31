@@ -105,6 +105,7 @@ on:
       - 'Langium generated files in sync'
       - 'Migration evolution (runtime e2e)'
       - 'Deploy landing page + playground to GitHub Pages'
+      - 'Pairwise combination corpus'
       - 'Phoenix / LiveView UI smoke (runtime e2e)'
       - 'Playground e2e (no-network)'
       - 'Playground e2e'

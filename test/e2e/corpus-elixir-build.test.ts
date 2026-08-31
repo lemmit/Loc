@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { corpusProjectDirs, materializeCorpusFixture } from "../fixtures/corpus/harness.js";
 import { CORPUS } from "../fixtures/corpus/manifest.js";
 import { type HexMirror, startHexMirror } from "./support/hex-mirror.js";
-import { mixDepsGet } from "./support/mix-retry.js";
+import { mixDepsGet, mixLocalInstall } from "./support/mix-retry.js";
 
 // ---------------------------------------------------------------------------
 // Phase 1 compile tier (docs/old/plans/global-test-coverage-plan.md) for the
@@ -88,7 +88,7 @@ function runMixCompile(projDir: string, mirror: HexMirror | undefined): void {
   execSync(
     `docker run --rm ${dockerArgs}-v ${projDir}:/app -v ${HEX_CACHE}:/root/.hex ` +
       `-w /app -e MIX_ENV=prod ${IMAGE} ` +
-      `bash -c '${shellPrefix}mix local.hex --force && mix local.rebar --force && ` +
+      `bash -c '${shellPrefix}${mixLocalInstall()} && ` +
       `${mixDepsGet("--only prod")} && mix compile --warnings-as-errors'`,
     { stdio: "inherit", timeout: 600_000 },
   );

@@ -93,6 +93,7 @@ on:
       - "Migration evolution (runtime e2e)"
       - "OIDC auth (full-compose runtime e2e)"
       - "OIDC auth — Elixir/Phoenix (full-compose runtime e2e)"
+      - "Pairwise combination corpus"
       - "Phoenix / LiveView UI smoke (runtime e2e)"
       - "Playground e2e"
       - "Playground worker-realm check"
