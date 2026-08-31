@@ -1,0 +1,198 @@
+{
+  "plan": "docs/new-plan/fleet-plan-2026-08-31.md",
+  "base": "main @ 0a3f189",
+  "created": "2026-08-31",
+  "scope": "docs/audits/real-todo-2026-08-30.md minus T7 (owner: out of scope), plus the remaining waves of docs/audits/targets-completeness-2026-08-30.waves.json",
+  "sharedResources": [
+    {
+      "resource": "src/diagnostics/messages.ts + src/diagnostics/unsupported-register.ts",
+      "contendedBy": "10 of 13 ledger packets (needsValidatorSlot)",
+      "protocol": "slot pre-allocation in wave 0-B; workers only RAISE a pre-minted code"
+    },
+    {
+      "resource": "test/behavioral/wire-golden/** (50 files)",
+      "contendedBy": "every behavioural packet",
+      "protocol": "one golden owner per wave; golden-touching packets land last, in the wave's fixed order"
+    },
+    {
+      "resource": "mission IDs in docs/new-plan/T*.md",
+      "contendedBy": "every packet that mints a mission",
+      "protocol": "dispatcher mints all IDs in wave 0-B; a worker never invents one"
+    }
+  ],
+  "waves": [
+    {
+      "wave": 0,
+      "name": "reconcile-and-preallocate",
+      "agents": 2,
+      "parallel": false,
+      "blocks": "all",
+      "exit": "remaining.json exists with a P0-P2 count; slot + mission-ID table published",
+      "packets": [
+        {
+          "id": "W0-A",
+          "name": "ledger-reconciliation",
+          "fileTrees": ["docs/audits/**", "docs/new-plan/**"],
+          "task": "status-field all 251 ledger rows against merged #2668/#2694/#2690 and open #2696/#2689/#2671-#2678; fold in real-todo-2026-08-30 findings and #2689's six new missions",
+          "size": "M"
+        },
+        {
+          "id": "W0-B",
+          "name": "slot-and-id-preallocation",
+          "fileTrees": ["src/diagnostics/**", "docs/new-plan/**"],
+          "task": "mint every loom.* code, messages.ts key, unsupported-register row and mission ID the waves need; if the register gates refuse un-raised rows, publish a reserved-names table instead",
+          "size": "S",
+          "dependsOn": ["W0-A"]
+        }
+      ]
+    },
+    {
+      "wave": 1,
+      "name": "ledger-p0-and-seams",
+      "agents": 7,
+      "parallel": true,
+      "dependsOn": [0],
+      "exit": "all P0 ledger rows drained",
+      "goldenOrder": ["elixir", "node-ts", "dotnet-adapters"],
+      "crossPacketSlices": [
+        {
+          "id": "seed-family",
+          "rows": "SEED-* + CB-C6",
+          "spans": ["dotnet-adapters", "node-ts", "elixir"],
+          "note": "one agent owns the slice across all three trees, dispatched BEFORE the per-packet agents"
+        },
+        {
+          "id": "tph-cluster",
+          "rows": "CB-C2/C3/C4/C10/C11/C12",
+          "spans": ["dotnet-adapters", "node-ts", "validator-diagnostics"],
+          "note": "same rule"
+        }
+      ],
+      "packets": [
+        { "id": "W1-1", "name": "walker-shared", "fileTrees": ["src/generator/_walker/**", "src/generator/_expr/**", "src/generator/_stmt/**", "src/generator/_frontend/**"], "rows": 12, "dispatchFirst": true, "note": "highest fan-out: every row changes 6-7 frontends at once; blocks wave 2" },
+        { "id": "W1-2", "name": "dotnet-adapters", "fileTrees": ["src/generator/dotnet/**"], "rows": 16, "p0": 3, "note": "ADP-2/ADP-3 as one decision, before ADP-9" },
+        { "id": "W1-3", "name": "node-ts", "fileTrees": ["src/platform/hono/**", "src/generator/typescript/**"], "rows": 18, "p0": 3, "extra": ["M-T6.51"] },
+        { "id": "W1-4", "name": "elixir", "fileTrees": ["src/generator/elixir/**"], "rows": 25, "p0": 3, "note": "ELX-ESCAPE-FUNNEL first" },
+        { "id": "W1-5", "name": "python", "fileTrees": ["src/generator/python/**"], "rows": 2, "extra": ["M-T6.50"] },
+        { "id": "W1-6", "name": "java", "fileTrees": ["src/generator/java/**"], "rows": 3, "note": "pair with python if agent budget is tight" },
+        { "id": "W1-7", "name": "macros", "fileTrees": ["src/macros/**"], "rows": 5, "extra": ["M-T5.25"] }
+      ]
+    },
+    {
+      "wave": 2,
+      "name": "frontends-behind-the-seam",
+      "agents": 5,
+      "parallel": true,
+      "dependsOn": ["W1-1"],
+      "exit": "walker seam landed and all frontends rebased onto it",
+      "packets": [
+        { "id": "W2-1", "name": "frontend-js", "fileTrees": ["src/generator/react/**", "src/generator/vue/**", "src/generator/svelte/**", "src/generator/angular/**", "designs/**"], "rows": 10, "extra": ["M-T1.26"] },
+        { "id": "W2-2", "name": "flutter", "fileTrees": ["src/generator/flutter/**"], "rows": 6, "note": "FE-3 (routes registered verbatim) first: only P1 that makes the shipped flutter example non-functional" },
+        { "id": "W2-3", "name": "feliz", "fileTrees": ["src/generator/feliz/**"], "rows": 7, "note": "FE-4 first" },
+        {
+          "id": "W2-4",
+          "name": "flutter-component-gate",
+          "source": "real-todo-2026-08-30 Finding 1",
+          "fileTrees": ["src/ir/validate/checks/ui-checks.ts", "test/ir/user-component-deferred.test.ts", "src/generator/flutter/component-emit.ts"],
+          "verifiedOn": "main @ 0a3f189",
+          "evidence": "ui-checks.ts:2139 COMPONENT_FILTERING_FRAMEWORKS = Set(['feliz','angular']); user-component-deferred.test.ts:73 types the matrix 'feliz' | 'angular'; store-showcase.ddd on platform: flutter emits `const SizedBox.shrink() /* unknown layout component: CartSummary */` with no diagnostic",
+          "ungatedDeferrals": [
+            { "condition": "usesStores", "site": "component-emit.ts:86" },
+            { "condition": "usesRouteId", "site": "component-emit.ts:84" },
+            { "condition": "stateful + read-bearing", "site": "isReadConsumer, component-emit.ts:139" },
+            { "condition": "derivedNeedsShell", "site": "component-emit.ts:161" }
+          ],
+          "alreadyGated": ["hasAsyncEffectAction -> loom.flutter-async-effect-unsupported"],
+          "rootCause": "the gate's scope is a hand-written literal, so its completeness test cannot ratchet; generalized in W5-4",
+          "size": "M",
+          "P": 1
+        },
+        { "id": "W2-5", "name": "wire-openapi", "fileTrees": ["src/system/**", "src/ir/util/openapi-errors.ts", "test/conformance/**"], "rows": 5, "dependsOn": ["W1-2", "W1-3", "W1-4", "W1-5", "W1-6"] }
+      ]
+    },
+    {
+      "wave": 3,
+      "name": "cross-feature-crossings",
+      "agents": 4,
+      "parallel": true,
+      "exit": "pairwise GENERATION_WAIVERS and TSC_WAIVERS both back to 0",
+      "checkFirst": "#2690 touched this register and re-opened two findings as half-fixed",
+      "packets": [
+        { "id": "W3-1", "name": "pairwise-F1", "bug": "shape: document x policy allow CRASHES codegen on node/java/python (authz-filter reaches the generic ExprIR dispatcher; renderExprWith throws)", "fileTrees": ["src/generator/_expr/target.ts", "the three document read paths"], "P": 0, "size": "M" },
+        { "id": "W3-2", "name": "pairwise-F2", "bug": "mask unless x non-relational shape on drizzle -> TS2339 (routes call repo.toWireMasked; only the relational builder emits it)", "fileTrees": ["src/platform/hono/**"], "P": 1, "size": "M", "note": "changes each repository's PORT surface; needs per-shape tests + the behavioural leg" },
+        { "id": "W3-3", "name": "pairwise-F5", "bug": "principal capability filter x shape: document x mikroorm -> TS2304 (in-app predicate reads currentUser with no requireCurrentUser() bind)", "fileTrees": ["src/generator/**/repository-document-builder (mikroorm arm)"], "P": 1, "size": "S" },
+        { "id": "W3-4", "name": "pairwise-dimensions", "task": "widen the corpus dimension set and re-run; three waivers from a young corpus is a discovery rate, not a bug count", "fileTrees": ["test/pairwise/**"], "P": 1, "size": "M", "leverage": "highest in this wave" }
+      ]
+    },
+    {
+      "wave": 4,
+      "name": "live-capability-gaps",
+      "agents": 7,
+      "parallel": true,
+      "context": "41 gap rows in unsupported-register.ts: ~12 live, ~24 latent seams (NOT backlog), ~5 misuse/semantic errors misfiled under the suffix",
+      "exit": "live gap rows down from ~12; register hygiene landed",
+      "ownerDecisionsFirst": [
+        { "topic": "DataGrid on HEEx (loom.datagrid-unsupported-target, the last KNOWN_HEEX_GAPS entry)", "ask": "re-examine deliberately or promote to a settled never like Flutter's, per D-DATAGRID-TARGETS. The neighbouring Chart pin sat unexamined for a phase on a premise that turned out false. Do not fleet it undecided." },
+        { "topic": "loom.toast-message-unsupported", "ask": "a v1 expression subset on EVERY target, not a parity gap. Widening it is a language ruling (which expressions may reach a toast) and needs one before it needs an agent." }
+      ],
+      "packets": [
+        { "id": "W4-1", "name": "frontend-collection-ops", "code": "loom.frontend-collection-op-unsupported", "gap": "every stdlib collection op except map is a hard error in any page/component/store body, on all six frontends: `orders.count` does not compile", "size": "L", "mission": "M-T1.20", "note": "most-felt language hole against the no-code-feel promise; fix shape is one op table per walker target, same seam as DART_LEAVES / FS_LEAVES" },
+        { "id": "W4-2", "name": "elixir-document", "code": "loom.vanilla-document-unsupported", "gap": "provenanced ops, derived-field predicates, cross-aggregate deref, VO/private/service/resource calls, reference collections", "size": "M", "mission": "mint" },
+        { "id": "W4-3", "name": "dapper-residue", "code": "loom.dapper-unsupported + find-predicate (dapper arm)", "gap": "aggregating projection over document/event-sourced source; deep/global tenancy scope filter; declared migration steps", "size": "M", "mission": "M-T6.35" },
+        { "id": "W4-4", "name": "mikroorm-residue", "code": "loom.mikroorm-unsupported + find-predicate (mikroorm arm)", "gap": "scalar-array root field under relational/embedded; abstract base owning contains; declared migration steps", "size": "M", "mission": "M-T6.35" },
+        { "id": "W4-5", "name": "store-persist-codecs", "code": "loom.store-lifetime-target-unsupported", "gap": "feliz and flutter cover DIFFERENT type sets, so a persist: store portable between them does not exist", "size": "S", "mission": "M-T1.20" },
+        { "id": "W4-6", "name": "component-async-effect", "code": "loom.feliz-async-effect-unsupported + loom.flutter-async-effect-unsupported", "gap": "match await in a component host", "size": "M", "mission": "M-T1.20", "note": "one seam, two targets; pairs naturally with W2-4" },
+        { "id": "W4-7", "name": "register-hygiene", "task": "rename the ~5 not-debt rows out of the -unsupported suffix (slice-2 precedent renamed 19); collapse handler-load-nullable + workflow-load-array + workflow-load-nullable into ONE mission - one design decision wearing three names", "size": "S", "mission": "M-T9.27 slice 4" }
+      ]
+    },
+    {
+      "wave": 5,
+      "name": "coverage-that-hides-gaps",
+      "agents": 4,
+      "parallel": true,
+      "exit": "flutter + feliz have a runtime leg; validator gate scopes derived rather than listed",
+      "packets": [
+        { "id": "W5-1", "name": "e2e-less-drain", "task": "E2E_LESS_CORPUS_FIXTURES is 12 and growing (9 on 08-17). #2696 takes policy-document + lifecycle-guard. Next tranche is the fixture-change class: extern, extern-handlers, handler-triad each need Order to gain a create before any caller is expressible", "size": "M" },
+        { "id": "W5-2", "name": "flutter-runtime-leg", "mission": "M-T9.38", "task": "Flutter is never booted; compile-only gates are structurally blind to Finding 1's shape", "unblockedBy": "#2678", "size": "L" },
+        { "id": "W5-3", "name": "feliz-runtime-leg", "mission": "M-T9.38", "unblockedBy": "#2674", "size": "L" },
+        { "id": "W5-4", "name": "gate-scope-derivation", "task": "audit every hand-enumerated Set/union in src/ir/validate/checks/ that names targets or frameworks (COMPONENT_FILTERING_FRAMEWORKS, CHART_FRAMEWORKS, PROJECTION_READ_FRAMEWORKS, DATA_GRID_FRAMEWORKS, the *_BACKENDS family); derive where derivable, pin with a completeness test where not", "size": "M", "leverage": "highest in the plan - converts a recurring bug class into a gate", "rootCauseOf": ["W2-4"] }
+      ]
+    },
+    {
+      "wave": 6,
+      "name": "unbuilt-subsystems",
+      "mode": "design-first",
+      "parallel": false,
+      "rule": "a fleet cannot parallelize an unproposed XL - 8 agents at an unagreed design produce 8 incompatible designs. One design agent per subsystem produces a proposal + mission decomposition; only then does a fleet run per APPROVED subsystem.",
+      "recommendedOrder": ["brownfield", "test-authoring-dsl", "callable-unification"],
+      "packets": [
+        { "id": "W6-1", "name": "brownfield", "mission": "M-T2.5", "size": "XL", "needsProposal": true, "why": "highest product value on the list: for a product whose pitch is 'the model is the source of truth', inability to adopt an existing schema is the biggest adoption blocker" },
+        { "id": "W6-2", "name": "test-authoring-dsl", "mission": "M-T5.19", "size": "M-L", "needsProposal": false, "why": "placement shipped, authoring unbuilt; compounds - it is how wave 5's runtime legs get written" },
+        { "id": "W6-3", "name": "timer-tail", "mission": "M-T4.1", "size": "M", "why": "timezone/overlap sugar + saga deadlines; the residue of a mostly-closed temporal hole" },
+        { "id": "W6-4", "name": "callable-unification", "mission": "M-T5.21", "size": "L", "needsProposal": false, "why": "design signed off in #2444 - can skip the design agent and go straight to an implementation fleet" },
+        { "id": "W6-5", "name": "dap-proxy", "mission": "M-T8.1", "size": "XL", "why": "src/dap-server/ ships the remap layer only; the js-debug/coreclr/JDWP proxy is unbuilt. Real work, low urgency" },
+        { "id": "W6-6", "name": "p3-tail", "missions": ["M-T5.14", "M-T4.9", "M-T4.10", "M-T8.4", "M-T8.9", "M-T8.10"], "why": "genuinely optional product surface - schedule against demand, not against the list" },
+        { "id": "W6-7", "name": "mutation-testing", "mission": "M-T8.8", "status": "parked", "why": "explicitly parked; leave parked" }
+      ]
+    }
+  ],
+  "notInPlan": [
+    { "item": "T7 - deployment & operations", "reason": "owner took it out of scope: proxy/gateway, ddd dev + ddd deploy, terraform, deployable networking, ops UI, k8s hardening" },
+    { "item": "merge queue", "reason": "39 gates already carry merge_group: triggers with stable names, drift-pinned by merge-queue-readiness.test.ts. Inert because GitHub offers merge queues only on org-owned repos. ADMIN action (move the repo under an org), not engineering work. M-T9.7, blocked(admin). Still the cheapest fix for 'main can go red after a green PR'." },
+    { "item": "the ~24 latent register rows", "reason": "they ship on every target and are the seam a NEW target would gate on. Draining one means deleting a gate - a decision, not a task. The matrix is frozen (2026-07-17), so no new target is coming to trip them." }
+  ],
+  "sizing": {
+    "implementationAgents": 29,
+    "wave0Agents": 2,
+    "wave6": "one design agent per subsystem, then a fleet per approved one",
+    "model": "Opus for every implementation packet - each is a cross-target correctness change with a mutation proof attached, precisely where a weaker model produces a green-looking PR that proves nothing"
+  },
+  "risks": [
+    { "risk": "register goes stale mid-wave (happened twice during the audit itself)", "mitigation": "W0-A re-runs at the head of EVERY wave, not just wave 0" },
+    { "risk": "two agents fix the same defect (f4df492 was an empty commit narrating an already-landed fix)", "mitigation": "all draft PRs opened before any implementation; a worker that finds its row drained stops and reports" },
+    { "risk": "the diagnostic catalog conflicts 10 ways", "mitigation": "slot pre-allocation (W0-B)" },
+    { "risk": "golden rebaseline churn", "mitigation": "one golden owner per wave, fixed order, landed last" },
+    { "risk": "a packet's fix is proven by a gate that never reaches it", "mitigation": "mutation proof stated in the PR body with the failing assertion NAMED - the recurring failure shape in experience_gathered.md sections 59/63/84. Revert with a file copy, never git checkout." },
+    { "risk": "wave 6 fleeted before design", "mitigation": "design agent per subsystem; no implementation fleet without an owner-signed proposal" }
+  ]
+}
