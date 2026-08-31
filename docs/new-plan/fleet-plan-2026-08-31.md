@@ -375,6 +375,19 @@ signed off, so it is a straight implementation fleet).
 - **Stay in your tree.** A packet that half-fixes into a neighbour's tree is worse than one
   that hands off — `#2668` deferred `F2-ADP-3` with a written handoff for exactly this
   reason, and that was the right call.
+- **Verify the ledger's proposed REMEDY, not just its defect.** A row is evidence that
+  something is broken; its suggested fix is a hypothesis, and the ledger's hypotheses have
+  been wrong. Wave 1 proved it: the TPH agent probed EF Core 10 in Docker *before*
+  implementing C2's suggested fix and got `A filter may only be applied to the root entity
+  type 'Vehicle'` — the ledger's remedy would have shipped an app that dies at model build.
+  Both obvious workarounds failed too (CLR downcast → *no coercion operator*;
+  `EF.Property` → *property does not exist*). Probe the target runtime first whenever a row
+  tells you what to write.
+- **Scope a new gate to the adapter, not the platform.** The same agent scoped
+  `loom.tph-filter-unsupported` to the **EF adapter** rather than `platform: dotnet`,
+  because Dapper handles the same shape in raw SQL — a platform-wide gate would have
+  rejected a model that works. Ask which axis the limitation actually lives on before
+  naming it.
 
 ### Sizing
 
