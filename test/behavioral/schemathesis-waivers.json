@@ -202,19 +202,6 @@
       "reason": "The consequence half of W29: 500 is not a declared response on any route. Clears with W29."
     },
     {
-      "id": "W31",
-      "findings": [
-        "F24"
-      ],
-      "check": "not_a_server_error",
-      "operations": "^GET /api/",
-      "backends": [
-        "java"
-      ],
-      "kind": "bug",
-      "reason": "F24 — a paged find with an adversarial query string 500s on java: the same NPE family as W29 reached through the query-parameter binder rather than the body (and Tomcat additionally rejects some of the fuzzer's chunks before the app sees them). Kept separate from W29 because the FIX is separate — the query side has its own binder — even though the shape is the same."
-    },
-    {
       "id": "W32",
       "findings": [
         "F25"
