@@ -34,6 +34,7 @@ import type { ApiRoute } from "../api-emit.js";
 import { emitWorkflowStateSchemas, stateModule } from "../dispatch-emit.js";
 import { renderExpr } from "../render-expr.js";
 import { denialOverrides, denialResponse } from "./denial.js";
+import { renderPathIdCastPlug } from "./problem-details-emit.js";
 
 /** Emit the saga-state schema(s) + the `WorkflowInstancesController` for one
  *  context, returning the instance read routes (`GET /workflows/<snake>/
@@ -72,6 +73,8 @@ defmodule ${webModule}.WorkflowInstancesController do
   correlation-state Ecto schema via the app Repo and encodes the
   cross-backend wire shape (camelCase keys).
   """
+
+${renderPathIdCastPlug()}
 
 ${actions}
 end

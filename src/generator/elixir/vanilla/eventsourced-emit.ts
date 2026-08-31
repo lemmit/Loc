@@ -46,6 +46,7 @@ import { denialOverrides, denialResponse, denialTerm, disallowedTerm } from "./d
 import { renderFindActions } from "./find-controller.js";
 import { foldStmtsUseParam, renderFoldStatement } from "./fold-stmt-emit.js";
 import { renderProblemVariantHelper } from "./operation-returns-emit.js";
+import { renderPathIdCastPlug } from "./problem-details-emit.js";
 import { renderWireSerialize } from "./wire-serialize.js";
 
 /** Truth-kind predicate — an aggregate whose persistence is its event log. */
@@ -671,6 +672,8 @@ defmodule ${appModule}Web.${aggPascal}Controller do
   use ${appModule}Web, :controller
   alias ${facadeMod}
   alias ${appModule}Web.ProblemDetails
+
+${renderPathIdCastPlug()}
 
   def index(conn, _params) do
     with {:ok, records} <- ${ctxModule}.list_${aggSnake}s() do
