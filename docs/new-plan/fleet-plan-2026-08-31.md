@@ -344,6 +344,39 @@ dressed as design. Until this plan is merged, the rule is:
 - Give each agent its rows **inline or via a scratchpad path**, never via a repo path that
   only exists on the dispatcher's branch.
 
+### Landing a wave — what the merge actually costs
+
+Wave 1 produced eight PRs against a repo with **no merge queue**, and landing them is not a
+formality. Measured, not estimated:
+
+- **Every PR conflicts with the one before it, in the same place.** `MAX_OPEN_GAPS` in
+  `test/system/unsupported-register.test.ts` is a single integer each packet bumps, so N PRs
+  means N−1 hand-resolved conflicts. The resolution is mechanical — the final pin is
+  `41 + (rows added) − (rows deleted)` across everything merged — and the register test
+  asserts *exact* equality, so it confirms or refutes the arithmetic immediately. Use that:
+  resolve, run `unsupported-register.test.ts`, and believe the test over your own count.
+  (Worked example from this wave: `main` reached 43 via TPH +1 and seed +1; java+wire was
+  net −1 because it deleted two phantom rows and added one; 42 was right, and the test said so.)
+- **Merging is CI-bound and strictly serial.** Each merge moves `main`, which invalidates the
+  next PR's rebase, which needs a fresh CI cycle before branch protection will merge it.
+  Eight PRs is eight sequential cycles.
+- **Never force-push and retarget a PR's base in the same minute.** Doing so fires two
+  overlapping event storms; GitHub's concurrency group cancels one *whole set* of runs, and
+  if `pr-gate`'s runs land in the cancelled set it never posts a conclusion at all — leaving
+  the PR permanently "expected" even though every gate it aggregates went green. That
+  happened here on #2705 (`PR gate` runs 22174 *and* 22175 both cancelled at 17:54:33, while
+  the workflows they aggregate all completed `success` at 18:42–18:45). Recovery is awkward:
+  `rerun_workflow_run` returns `403 Resource not accessible by integration` for this token,
+  and CLAUDE.md rightly forbids an empty commit to kick CI — so the only clean exit is a
+  *substantive* push (a real rebase onto the newer `main`, which is needed anyway).
+  **Sequence it: retarget first, then push — or push, then retarget once CI has settled.
+  Never both at once.**
+
+This is precisely the merge queue's job, and the queue is workflow-complete and inert (39
+gates carry `merge_group:` triggers, drift-pinned by `merge-queue-readiness.test.ts`) purely
+because GitHub restricts queues to org-owned repos. **This wave is the concrete price of
+that**, and it is the strongest argument yet for the admin action.
+
 ### Dispatcher checklist (once per wave)
 
 1. Re-run W0-A's reconciliation delta — **on fresh `main`**. A wave dispatched off a
