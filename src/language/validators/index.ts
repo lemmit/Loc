@@ -4,6 +4,7 @@
 
 export { checkIconOnlyButtonName, checkImageAltText, checkThemeContrast } from "./a11y.js";
 export { checkAuthBlock } from "./auth.js";
+export { checkBypassPlacement } from "./bypass-placement.js";
 export {
   checkBindableInputArgs,
   checkBuilderCallType,

@@ -197,6 +197,21 @@ const FIRING_FIXTURES: Record<string, string> = {
     aggregate Customer extends Party with crudish { creditLimit: int }
     repository Customers for Customer { }`),
 
+  // M-T5.25 — an `ignoring` bypass written on a `group by` operand.  It parses
+  // (a postfix chain admits the trailing clause anywhere an expression is
+  // admissible), binds to the GROUPING expression, and is then dropped: the
+  // read keeps applying every capability filter the author asked it to skip.
+  "loom.ignoring-clause-placement":
+    repoOnly(`    aggregate Order with crudish, softDeletable { code: string  total: int }
+    repository Orders for Order { }
+    projection TotalsByCode {
+      code: string
+      orders: int
+      from Order as o
+      group by o.code ignoring softDeletable
+      select code = o.code, orders = count()
+    }`),
+
   // --- variant match (structural-checks + the AST-level subject rule) ------
   "loom.match-unknown-variant": unionMatch(
     `outcome { Order o => o.code, Other x => x.resource, else => "" }`,

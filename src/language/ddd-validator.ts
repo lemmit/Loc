@@ -34,6 +34,7 @@ import {
   checkBinaryOperands,
   checkBindableInputArgs,
   checkBuilderCallType,
+  checkBypassPlacement,
   checkChannels,
   checkComponent,
   checkComponentPropTypes,
@@ -385,6 +386,11 @@ export class DddValidator {
     // TimerSource cadence: exactly-one-of cron/every, cron range-check, every
     // floor + cron-expressibility (scheduling.md, M-T4.1).
     guard("timers", model, () => checkTimers(model, accept));
+    // `ignoring` capability-filter bypass written where nothing reads it back
+    // (M-T5.25) — the clause rides `PostfixExpr`, so it parses on ANY
+    // expression (`group by o.status ignoring softDeletable`) and is then
+    // silently dropped.  See `validators/bypass-placement.ts`.
+    guard("bypass-placement", model, () => checkBypassPlacement(model, accept));
     // Implicit composition (finding 23): when the project has exactly one
     // `system { }`, the deployment-shape members written at file top level
     // fold into it (implicit-system-composition.md).  They must run through

@@ -128,6 +128,17 @@ export const DIAGNOSTIC_MESSAGES = {
     `Unknown builder type '${p.name}'. Expected a ValueObject, EntityPart, user-defined component, or stdlib walker primitive (e.g., Stack, CreateForm, Card).`,
 
   // ----------------------------------------------------------------------
+  // src/language/validators/bypass-placement.ts
+  // ----------------------------------------------------------------------
+  "loom.ignoring-clause-placement": (p: { clause: unknown }) =>
+    `'${p.clause}' sits in a position that DROPS it. A capability-filter bypass has three homes: ` +
+    "a repository 'find … ignoring …', a query-time projection's 'where' slot (before 'join' / " +
+    "'group by' / 'select'), or an inline read bound by a 'let' ('let xs = Repo.findAll(…) " +
+    "ignoring …'). Written on any other expression it parses, binds to that expression, and is " +
+    "never read back — the read still applies every filter you asked it to skip. Move the clause " +
+    "to the read it is meant to widen.",
+
+  // ----------------------------------------------------------------------
   // src/language/validators/channel.ts
   // ----------------------------------------------------------------------
   "loom.channel-key-missing-field": (p: { name: unknown; key: unknown; evName: unknown }) =>
