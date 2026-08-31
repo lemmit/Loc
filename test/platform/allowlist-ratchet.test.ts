@@ -296,6 +296,17 @@ const REGISTERED: Ratchet[] = [
     kind: "record",
     max: 0,
   },
+  // The corpus features whose cells stop at the COMPILE tier — nothing boots
+  // them, so no gate observes their runtime behaviour.  Signed with a reason
+  // each; M-T9.13 owns the drain.  Unlike the skip maps above this register is
+  // asserted set-EQUAL to the derived ledger, so it cannot go stale in the
+  // other direction either — but it can still GROW, which is what this pins.
+  {
+    file: "test/system/gate-ledger.test.ts",
+    name: "BEHAVIOURAL_ABSENT",
+    kind: "record",
+    max: 14,
+  },
 ];
 
 /** Extract the balanced `[...]` (set) or `{...}` (record) literal bound to
