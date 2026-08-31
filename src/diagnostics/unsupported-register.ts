@@ -157,7 +157,7 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
   {
     code: "loom.heex-component-host-state-unsupported",
     kind: "gap",
-    site: "src/ir/validate/checks/system-checks.ts:585",
+    site: "src/ir/validate/checks/system-checks.ts:597",
     what:
       "a form / QueryView / Table / FileUpload / Chart inside a `component` on phoenixLiveView — " +
       "#2646 lifted a component's `state` and `action`s into the host LiveView but not the " +
