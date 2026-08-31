@@ -18,11 +18,11 @@ import {
 } from "../../ir/types/loom-ir.js";
 import { sortableFields } from "../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
-import { aggregateIsAudited } from "./emit/audit-stamp.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { desugarAuthzFilterInApp } from "../_expr/authz-filter-inapp.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
+import { aggregateIsAudited } from "./emit/audit-stamp.js";
 import { synthProjectionFinds } from "./projection-finds.js";
 import { renderTsExpr } from "./render-expr.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";

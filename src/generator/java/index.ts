@@ -1617,6 +1617,9 @@ function emitAggregate(
       // Event-sourced / document aggregates have no normalised state
       // tables — the entity is a plain domain class (no JPA bindings;
       // ES folds the stream, document round-trips one jsonb column).
+      // A document root's claim stamps emit as plain methods the service calls
+      // — there is no JPA persistence context to fire an @PrePersist hook.
+      documentClaimStamps: isDocument && agg.persistedAs !== "eventLog",
       persistence:
         agg.persistedAs === "eventLog" || isDocument
           ? undefined

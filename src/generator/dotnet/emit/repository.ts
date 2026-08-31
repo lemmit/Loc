@@ -23,6 +23,7 @@ import {
   renderCsType,
 } from "../render-expr.js";
 import { bypassableFilterNames, hasNonBypassableFilter, queryFilterNames } from "./efcore.js";
+import { csClaimStampsFor } from "./entity.js";
 import { eventDbSetName, eventRecordClass } from "./event-store.js";
 import { joinDbSetName, joinEntityName, joinFkPropName } from "./join-entities.js";
 
@@ -695,6 +696,10 @@ export function renderDocumentRepositoryImpl(
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
   const setName = plural(upperFirst(agg.name));
   const snap = `${agg.name}Snapshot`;
+  // Both halves of the document-stamp contract read `csClaimStampsFor`: the
+  // entity emits `_StampOnCreate()` when it is non-empty, and the INSERT branch
+  // below emits the call.  Computing it twice is how the halves drift (§89).
+  const docCreateStamps = csClaimStampsFor(agg, "create").length > 0;
   const deser = `${agg.name}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snap}>(__d.Data, __json)!)`;
   // The aggregate's capability filters, AND-ed into ONE in-app predicate over
   // the rehydrated instance (see the header note).  Hoisted into a private
@@ -860,6 +865,13 @@ export function renderDocumentRepositoryImpl(
         ? [
             `        var __existing = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == aggregate.Id.Value, cancellationToken);`,
             "        var __nextVersion = __existing == null ? 1 : __existing.Version + 1;",
+            // INSERT only: a jsonb aggregate is not EF-tracked, so the
+            // AuditableInterceptor never stamps it.  Must run BEFORE the
+            // snapshot is serialized.  The update path rewrites the whole blob
+            // from the rehydrated aggregate, which already carries the stamps.
+            ...(docCreateStamps
+              ? ["        if (__existing == null) aggregate._StampOnCreate();"]
+              : []),
             "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot() with { Version = __nextVersion }, __json);",
             "        if (__existing == null)",
             "        {",
@@ -872,8 +884,15 @@ export function renderDocumentRepositoryImpl(
             "        }",
           ]
         : [
-            "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);",
+            // `__existing` is resolved BEFORE the snapshot here (it was the
+            // other way round) so the create-only stamps can be applied to the
+            // aggregate first — serializing an unstamped snapshot is what wrote
+            // rows with an empty tenant.
             `        var __existing = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == aggregate.Id.Value, cancellationToken);`,
+            ...(docCreateStamps
+              ? ["        if (__existing == null) aggregate._StampOnCreate();"]
+              : []),
+            "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);",
             "        if (__existing == null)",
             "        {",
             `            _db.${setName}.Add(new ${agg.name}Document { Id = aggregate.Id.Value, Data = __data, Version = 1 });`,

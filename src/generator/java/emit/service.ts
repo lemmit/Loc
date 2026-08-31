@@ -40,6 +40,7 @@ import {
   renderJavaHistoryServiceMethod,
 } from "./audit-history.js";
 import { javaNotFoundThrow } from "./common.js";
+import { claimStampsFor } from "./entity.js";
 import {
   declaredFinds,
   isPagedAutoAll,
@@ -165,6 +166,11 @@ export function renderJavaService(
   // method as the save / delete.  The route-driving create is the ES `create`
   // for an event-sourced aggregate, else the canonical create.
   const createAction = agg.persistedAs === "eventLog" ? agg.creates?.[0] : agg.canonicalCreate;
+  // See the call site below: document roots stamp explicitly.
+  const docClaimCreateStamps =
+    agg.savingShape === "document" &&
+    agg.persistedAs !== "eventLog" &&
+    claimStampsFor(agg, "create").length > 0;
   const auditCreate = !!createAction?.audited;
   const auditDestroy = !!agg.canonicalDestroy?.audited;
   // create: before is JSON null (NullNode → the `null` token, satisfying the
@@ -229,6 +235,14 @@ export function renderJavaService(
         ...lifecycleGateLines(createGates),
         ...createLets,
         `        var aggregate = ${agg.name}.create(${createArgs});`,
+        // A DOCUMENT root is a plain POJO with no JPA persistence context, so
+        // its claim stamps (`tenantOwned`'s tenantId/dataKey) cannot ride an
+        // @PrePersist hook — entity.ts emits them as a plain `_stampOnCreate()`
+        // and the call belongs here, mirroring python's route calling
+        // `_stamp_on_create`.  Both halves read `claimStampsFor` so a method
+        // without a caller (stamps nothing) or a caller without a method (does
+        // not compile) cannot drift apart (§89).
+        docClaimCreateStamps ? `        aggregate._stampOnCreate();` : null,
         `        repository.save(aggregate);`,
         ...createAuditLines,
         `        publishEvents(aggregate);`,
