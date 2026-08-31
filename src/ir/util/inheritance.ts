@@ -153,6 +153,19 @@ export function tphConcretesOf(base: AggregateIR, pool: AggPool): AggregateIR[] 
   return pool.filter((a) => descendsFrom(a, base.name, pool) && isTphConcrete(a, pool));
 }
 
+/** How many `extends` hops separate `agg` from its root base — 0 for a root,
+ *  1 for a direct subtype, and so on.
+ *
+ *  Emitters that dispatch on the RUNTIME type need this: a C# `switch (entity)`
+ *  over type patterns, a Java `instanceof` chain and a TS `instanceof` ladder
+ *  all require the most-derived arm first.  Emitted in declaration order, a
+ *  base arm ahead of its subtypes' makes those subtypes unreachable — which on
+ *  .NET is `error CS8120` under `/warnaserror`, so the generated project does
+ *  not build at all.  Sorting by this descending is the fix. */
+export function inheritanceDepth(agg: AggregateIR, pool: AggPool): number {
+  return chainOf(agg, pool).length;
+}
+
 /** The field names a predicate reads off the candidate row — `this.x` member
  *  access and the bare `this-prop` ref lowering produces for the same thing. */
 export function thisFieldsRead(e: ExprIR): Set<string> {

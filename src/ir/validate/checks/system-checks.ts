@@ -53,11 +53,11 @@ import { backendServesRealtime } from "../../util/channels.js";
 import { bodyUsesChart } from "../../util/chart.js";
 import { dataGridHosts } from "../../util/data-grid.js";
 import { aggregateFileField } from "../../util/file-field.js";
-import { nonRootFilterFields, rootBaseOf } from "../../util/inheritance.js";
 import {
   firstUnlowerableForAdapter,
   isFindPredicateAdapter,
 } from "../../util/find-predicate-capability.js";
+import { nonRootFilterFields, rootBaseOf } from "../../util/inheritance.js";
 import { readableProjectionNames } from "../../util/projection-read.js";
 import { opHasProvSite } from "../../util/prov-id.js";
 import {

@@ -1,5 +1,6 @@
 import type { AggregateIR, ContextStampIR, ExprIR } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { inheritanceDepth } from "../../../ir/util/inheritance.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";
@@ -42,9 +43,20 @@ export function renderAuditableInterceptor(
   // Each aggregate contributes zero or more stamping rules; group
   // by aggregate so we can emit one switch arm per type.  Skip
   // aggregates with no stamps so the switch stays tight.
+  //
+  // Ordered MOST-DERIVED FIRST.  `switch (entry.Entity)` matches on runtime
+  // type, so an inheritance base's arm ahead of its subtypes' makes those
+  // subtypes unreachable — `error CS8120` under `/warnaserror`, i.e. the
+  // generated project does not build.  That is exactly what `abstract aggregate
+  // Vehicle with tenantOwned` + `Car extends Vehicle with tenantOwned`
+  // produced.  Keeping the base's arm (rather than dropping it as
+  // uninstantiable) is deliberate: a subtype that declares no stamps of its own
+  // still inherits the base's columns, and falling through to the base arm is
+  // what stamps them.
   const stamping = aggregates
     .map((a) => ({ agg: a, rules: a.contextStamps ?? [] }))
-    .filter((x) => x.rules.length > 0);
+    .filter((x) => x.rules.length > 0)
+    .sort((a, b) => inheritanceDepth(b.agg, aggregates) - inheritanceDepth(a.agg, aggregates));
 
   // Build the switch body: for each aggregate, an arm that matches
   // entry.Entity to the concrete type and applies the relevant
