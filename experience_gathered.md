@@ -5239,3 +5239,66 @@ took "node has a name" to mean "node is addressed BY that name", which a
 address. It had been resolving on inherited addresses all along; the fix was to
 gate it on the same predicate. Expect a precision improvement to surface the
 places that were relying on the imprecision.
+
+## 90. Verifying that a mechanism EXISTS is not verifying it reaches the thing you named (2026-08-30)
+
+One session produced this mistake twice, in two unrelated layers. Both times the
+check I ran was real, passed honestly, and answered a question adjacent to the
+one that mattered.
+
+### The probe that could never see its target
+
+Watching a PR's CI, I armed a `Monitor` whose script `curl`ed
+`api.github.com/.../check-runs` and emitted on `pr-gate`'s conclusion. It ran 30
+minutes and said nothing. I diagnosed a filter bug — `pr-gate` does not exist
+until every other workflow finishes, so an empty match printed nothing — rewrote
+it with a heartbeat and failure arms, and armed it again. Another 30 minutes of
+silence.
+
+The filter was never the problem. **Direct GitHub API access is blocked in these
+sessions**: that `curl` returns `403 {"message":"GitHub access is not enabled for
+this session..."}`. Only the `mcp__github__*` tools are authorized, and a
+shell-based `Monitor` cannot call an MCP tool. Both probes were structurally
+incapable of reporting, and their silence was indistinguishable from "still
+queued" — which is exactly what I read it as, for an hour.
+
+One `curl -o /dev/null -w "%{http_code}"` before trusting either would have
+ended it in three seconds.
+
+### The waiver whose blocker I declared stale without reading the predicate
+
+`E2E_LESS_CORPUS_FIXTURES` waives corpus fixtures that carry no `test e2e`
+block. Two entries' waiver texts named blockers I believed had shipped:
+`lifecycle-guard` cited "a principal whose `permissions` claim the behavioural
+harness does not mint" plus "no negative-status assertion form", and
+`policy-document` cited the multi-principal harness (#2515).
+
+I confirmed `AUTHZ_LADDERS` (`test/behavioral/cases.mjs`) now carries
+`arms: { anonymous, unauthorized, authorized }` with 401/403 negative arms
+across all legs, and concluded both waivers were stale. Then I read what the
+fixtures actually gate on:
+
+- `read-gates.ddd` (the already-drained precedent) — `currentUser.role == "agent"`.
+- `policy-document.ddd` — `user { id, role, tenantId }`; role/tenant only.
+- `lifecycle-guard.ddd` — `currentUser.permissions.contains(permissions.manage)`.
+
+`DEV_CLAIMS` is `{ tenantId, orgId, role }`. There is **no `permissions` claim**,
+and the credential's own comment pins it to "strings only ... the non-node
+backends honour only string claims", so an array-valued claim is a five-leg
+harness extension, not a fixture edit. `lifecycle-guard`'s blocker (a) is fully
+alive; only its blocker (b) went stale. `policy-document` is genuinely drainable.
+
+The mechanism existed. It did not reach the named thing. Checking "is there a
+multi-principal harness" was the adjacent question; "does it mint the claim THIS
+predicate reads" was the real one.
+
+**Rule:** before declaring a blocker stale, resolve the blocker's own nouns down
+to the code that satisfies them — the claim, the route, the identifier — not to
+the subsystem that plausibly covers them. A waiver text names specifics on
+purpose; matching it against a capability's headline is how a stale-looking
+waiver survives being "drained".
+
+**Corollary for probes:** a monitoring probe deserves the same mutation proof as
+a test gate (§59, §63). Prove it can observe a KNOWN state before you trust its
+silence, because a probe that cannot reach its target and a target that has not
+moved produce byte-identical output.
