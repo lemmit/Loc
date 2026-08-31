@@ -8,7 +8,7 @@
 //   - `dataKey` off create/update inputs (managed) yet present on reads.
 
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles, generateSystemFilesUnchecked } from "../_helpers/generate.js";
+import { generateSystemFiles } from "../_helpers/generate.js";
 
 const SRC = `
   system Billder {
@@ -80,6 +80,18 @@ describe("tenantRegistry — registry tree columns flow through migrations + wir
 // PROVIDES the fields; the child-path computation (`dataKey := parent.dataKey +
 // "." + <segment>`) is ordinary domain logic: load the parent, create the child
 // with the immutable `parent` FK, set the managed `dataKey` off the parent's.
+//
+// `dataKey` stays `string?` — nullable by construction, since a ROOT org has no
+// parent path.  That is why the concatenation is written as a null-narrowing
+// ternary rather than a bare `+`: the guarded branch extends the parent's path,
+// and the null branch yields the bare segment, which is exactly the shape
+// `docs/tenancy.md` specifies ("Root orgs get a root-segment path; children
+// extend the parent's") and exactly what the `deep` prefix scan reads.  Until
+// ternary narrowing landed this could not be spelled type-correctly at all, and
+// this fixture ran through `generateSystemFilesUnchecked` as the standing
+// evidence for that gap.  It is now CHECKED — the end-to-end proof that a
+// documented-but-unspellable computation became spellable without changing
+// `dataKey`'s optionality.
 const SIGNUP_SRC = `
   system Billder {
     user { id: guid  tenantId: string }
@@ -96,7 +108,7 @@ const SIGNUP_SRC = `
           create(nm: string, par: Organization id) {
             let loaded = Organizations.getById(par)
             let org = Organization.create({ name: nm, parent: par })
-            org.setPath(loaded.dataKey + "." + nm)
+            org.setPath(loaded.dataKey != null ? loaded.dataKey + "." + nm : nm)
           }
         }
       }
@@ -117,24 +129,21 @@ const SIGNUP_SRC = `
 
 describe("tenantRegistry — dataKey built at signUp via workflow repo-let on the parent", () => {
   it("loads the parent, sets the immutable `parent` FK, and computes the managed `dataKey`", async () => {
-    const files = await generateSystemFilesUnchecked(
-      SIGNUP_SRC,
-      // The documented child-path computation is `dataKey := parent.dataKey + "." + seg`,
-      // and `dataKey` is the MANAGED path — nullable by construction (a root has
-      // none).  `+` requires both operands `string`, and the DSL has no
-      // null-coalescing or optional-unwrapping intrinsic, so the shape the
-      // tenancy design specifies cannot currently be spelled type-correctly.
-      // Kept as the evidence for that gap rather than silently rewritten:
-      // the emitted path logic below is what the design asks for.
-      "tenancy's documented dataKey path concatenates the nullable managed parent path, which the type system has no way to narrow",
-    );
+    const files = await generateSystemFiles(SIGNUP_SRC);
     const wf = [...files.entries()].find(([p]) => p.includes("workflow"))?.[1];
     expect(wf).toBeDefined();
     // repo-let load of the parent row.
     expect(wf!).toMatch(/getById\(par\)/);
     // factory-let: the child carries the immutable self-FK from the create input.
     expect(wf!).toMatch(/Organization\.create\(\{ name: nm, parent: par \}\)/);
-    // the managed dataKey is computed off the parent's path (materialized path).
-    expect(wf!).toMatch(/setPath\(loaded\.dataKey \+ "\." \+ nm\)/);
+    // The managed dataKey is computed off the parent's path (materialized
+    // path), through the null-narrowing ternary the guard requires.  Pinned
+    // WHOLE — condition, guarded concatenation, and root fallback — so this
+    // still fails if any of the three degrades:
+    //   • `!== null` because TS renders `!=` as strict inequality,
+    //   • the then-branch is the parent path extended by `"." + nm`,
+    //   • the else-branch is the BARE segment (a root's child gets no leading
+    //     dot — `docs/tenancy.md`: "Root orgs get a root-segment path").
+    expect(wf!).toContain('org.setPath(loaded.dataKey !== null ? loaded.dataKey + "." + nm : nm);');
   });
 });
