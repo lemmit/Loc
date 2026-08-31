@@ -326,6 +326,24 @@ signed off, so it is a straight implementation fleet).
 
 ## Fleet mechanics
 
+### ⚠ The plan is not on `main` — the PROMPT is the contract
+
+**Wave 1 dispatched every agent with "READ FIRST: `docs/new-plan/fleet-plan-2026-08-31.md`",
+and that file did not exist in any of their worktrees.** It lives only on the unmerged
+branch `claude/product-completion-audit-2bp7as`; agents branch off `origin/main`, so they
+saw neither the plan nor `…remaining.json`. One agent said so plainly and rebuilt its row
+list from `waves.json` + `ledger.json`; the others coped silently, which is worse, because
+nothing distinguished "read the bar" from "inferred the bar".
+
+The wave held only because the essential bar was **inlined in each prompt**. That was luck
+dressed as design. Until this plan is merged, the rule is:
+
+- **Inline the whole bar in every prompt.** Do not cite a path an agent cannot open.
+- If a prompt must reference the plan, tell the agent to fetch it explicitly:
+  `git fetch origin claude/product-completion-audit-2bp7as && git show FETCH_HEAD:docs/new-plan/fleet-plan-2026-08-31.md`.
+- Give each agent its rows **inline or via a scratchpad path**, never via a repo path that
+  only exists on the dispatcher's branch.
+
 ### Dispatcher checklist (once per wave)
 
 1. Re-run W0-A's reconciliation delta — **on fresh `main`**. A wave dispatched off a
