@@ -1,0 +1,896 @@
+{
+  "reconciledOn": "main @ 0a3f189 (2026-08-31)",
+  "method": "seven read-only Opus agents, one per packet group; every verdict re-derived from code or generated output, never from PR prose. Two packets re-verified after a stale-out/ contamination check.",
+  "measured": "the drain from #2668 (wave 1), #2694 (wave 2) and #2690, none of which recorded which rows they closed",
+  "totals": {
+    "reconciled": 134,
+    "open": 88,
+    "drained": 34,
+    "partial": 11,
+    "stale": 1,
+    "remaining": 99
+  },
+  "remainingByPriority": {
+    "0": 7,
+    "1": 29,
+    "2": 37,
+    "3": 26
+  },
+  "byPacket": {
+    "dotnet-adapters": {
+      "total": 16,
+      "open": 12,
+      "drained": 3,
+      "partial": 1,
+      "remaining": 13
+    },
+    "node-ts": {
+      "total": 18,
+      "open": 9,
+      "drained": 6,
+      "partial": 3,
+      "remaining": 12
+    },
+    "elixir": {
+      "total": 25,
+      "drained": 7,
+      "open": 16,
+      "stale": 1,
+      "partial": 1,
+      "remaining": 17
+    },
+    "python": {
+      "total": 2,
+      "drained": 2,
+      "remaining": 0
+    },
+    "validator-diagnostics": {
+      "total": 24,
+      "drained": 11,
+      "open": 12,
+      "partial": 1,
+      "remaining": 13
+    },
+    "wire-openapi": {
+      "total": 5,
+      "open": 5,
+      "remaining": 5
+    },
+    "walker-shared": {
+      "total": 12,
+      "drained": 3,
+      "open": 6,
+      "partial": 3,
+      "remaining": 9
+    },
+    "feliz": {
+      "total": 7,
+      "open": 7,
+      "remaining": 7
+    },
+    "frontend-js": {
+      "total": 10,
+      "open": 10,
+      "remaining": 10
+    },
+    "flutter": {
+      "total": 6,
+      "open": 6,
+      "remaining": 6
+    },
+    "cli": {
+      "total": 1,
+      "drained": 1,
+      "remaining": 0
+    },
+    "macros": {
+      "total": 5,
+      "drained": 1,
+      "partial": 1,
+      "open": 3,
+      "remaining": 4
+    },
+    "java": {
+      "total": 3,
+      "partial": 1,
+      "open": 2,
+      "remaining": 3
+    }
+  },
+  "claimedByOpenPr": 0,
+  "claimNote": "all 13 open PRs checked by every agent; none claims any ledger row",
+  "remainingRows": [
+    {
+      "id": "F2-CB-C2-tph-filter-dropped-dotnet",
+      "packet": "dotnet-adapters",
+      "P": 0,
+      "status": "open",
+      "evidence": "src/generator/dotnet/emit/efcore.ts:508 `const filterLines = tph ? [] : (agg.contextFilters ?? [])…`",
+      "note": "Re-reproduced on fresh src (not the stale out/): a `Car extends Vehicle` with `filter Live` emits CarConfiguration.cs with only Property+Ignore and no HasQueryFilter, LiveCriterion.cs referenced nowhere, and AppDbContext has no query filter either; no loom.* gate and no test pins it."
+    },
+    {
+      "id": "F2-ADP-3",
+      "packet": "dotnet-adapters",
+      "P": 0,
+      "status": "open",
+      "evidence": "emitted (fresh src): reader/Infrastructure/Persistence/DbSchema.cs `CREATE TABLE IF NOT EXISTS \"\"as\"\"` (public) vs writer/Infrastructure/Persistence/Configurations/AConfiguration.cs:15 `builder.ToTable(\"as\", \"alpha\")` + writer/Migrations `CREATE SCHEMA IF NOT EXISTS \"\"alpha\"\"`",
+      "note": "Confirms #2668's stated deferral: dapper still has no schema concept (src/generator/dotnet/emit/dapper.ts:123 `tableOf`), and the alternative IR gate does not exist — src/ir/validate/checks/migration-checks.ts:201 only covers declared migration intents on self-provisioning adapters, not a context hosted by both a self-provisioning and a migration-chain deployable."
+    },
+    {
+      "id": "F2-CB-C11-tph-base-owned-child-crosstenant",
+      "packet": "elixir",
+      "P": 0,
+      "status": "open",
+      "evidence": "src/ir/validate/checks/tenancy-checks.ts:483-495 — the `owned && cross` conflict is read off ONE aggregate's own capabilities; no supertype walk",
+      "note": "Re-reproduced: `abstract aggregate Vehicle with tenantOwned` + `aggregate Car extends Vehicle crossTenant` parses 0 errors/0 warnings, emits `vehicles.tenant_id TEXT NOT NULL` (migration:10) against car_repository.ex:22 `insert/1` that never stamps it."
+    },
+    {
+      "id": "F2-SEED-TENANT-NULL",
+      "packet": "elixir",
+      "P": 0,
+      "status": "open",
+      "evidence": "src/generator/elixir/vanilla/seed-emit.ts:218-220 emits the one-arg `<Agg>Repository.insert(attrs)` against the emitted `def insert(attrs, current_user \\\\ nil)` (out/…/invoice_repository.ex:49-53)",
+      "note": "Re-reproduced on a tenantOwned aggregate: seeds.ex:67 `insert!(\"default\", \"Invoice\", InvoiceRepository.insert(%{…}))` → tenant_id/data_key both nil; the fail-closed read filter then matches nothing. No validator gate exists (src/language/validators/seed.ts has 4 rules, none tenancy-aware)."
+    },
+    {
+      "id": "F2-CB-C3-tph-filter-node-wrong-table",
+      "packet": "node-ts",
+      "P": 0,
+      "status": "open",
+      "evidence": "src/generator/typescript/repository-builder.ts:133",
+      "note": "Still `contextFilterPredicate(agg, lowerFirst(plural(agg.name)), …)` while `retrievalTable = repoTableName(agg, ctx)` sits unused at :109; re-generated a TPH+tenantOwned system on fresh main and car-repository.ts:29/49/81 emit `eq(schema.cars.tenantId, …)` inside `from(schema.vehicles)` (schema.ts exports only `vehicles`/`orgs`)."
+    },
+    {
+      "id": "F2-CB-C4-tph-filter-node-base-field-dropped",
+      "packet": "node-ts",
+      "P": 0,
+      "status": "open",
+      "evidence": "src/generator/typescript/repository-find-predicate.ts:686 (`if (!l) return null`)",
+      "note": "Re-derived on fresh main: `criterion Live of Car = !this.retired` (retired declared on the abstract base) emits ZERO `liveCriterion` anywhere and no predicate on car-repository.ts:27/47/79, while the own-field variant `this.doors > 0` reifies correctly — the whole conjunction is still silently dropped rather than raised."
+    },
+    {
+      "id": "connection-secret-wiring",
+      "packet": "wire-openapi",
+      "P": 0,
+      "status": "open",
+      "evidence": "`grep -rln ConnectionSourceIR src/` → src/ir/types/loom-ir.ts and src/ir/lower/lower.ts (lowered at lower.ts:735) only — zero generator/system/platform readers; zero hits for 'connection' in src/diagnostics/messages.ts and src/diagnostics/unsupported-register.ts",
+      "note": "`connection:` on a storage still parses, validates and lowers into IR that nothing consumes and no diagnostic mentions, so declared credential wiring stays silently inert (the k8s Secret is still the `Host=db;` heuristic); untouched by every open PR."
+    },
+    {
+      "id": "F2-CB-C7-domainservice-in-requires-guard",
+      "packet": "dotnet-adapters",
+      "P": 1,
+      "status": "open",
+      "evidence": "src/generator/dotnet/cqrs/commands.ts:81 `for (const g of gates) collectCsExprUsings(g.expr, usings);` — `ns` omitted, so the `domain-service` arm at render-expr.ts:186 never adds `${ns}.Domain.Services`",
+      "note": "Half-fixed asymmetrically: OPERATION gates pass ns (commands.ts:123-124) but LIFECYCLE gates do not; regenerated fresh, DestroyOrderHandler.cs calls Rules.IsCancellable with no `using D.Domain.Services;` (CS0103), and node/java/python are still missing the import too — only elixir fully qualifies."
+    },
+    {
+      "id": "F2-ADP-7",
+      "packet": "dotnet-adapters",
+      "P": 1,
+      "status": "partial",
+      "evidence": ".NET drained — regenerated output shows `public void Update(string @case, int @do, string @lock)` and dapper row `public string @case { get; set; }`, pinned by test/generator/dotnet/cs-reserved-identifiers.test.ts + dapper-reserved-identifiers.test.ts (green). JAVA still open at src/generator/java/emit/entity.ts:429 `${renderJavaType(f.type)} ${f.name};`",
+      "note": "Remaining arm is JAVA (not an efcore-vs-dapper split — both .NET adapters are fixed): regenerated Ticket.java still emits `String case;` / `int do;` / `public String case() {` while the @Column half is backtick-quoted, so javac still fails."
+    },
+    {
+      "id": "G2644-M-T6.48-numeric-ingress",
+      "packet": "dotnet-adapters",
+      "P": 1,
+      "status": "open",
+      "evidence": "src/generator/dotnet/dto-mapping.ts:340 `return \\`decimal.Parse(${expr}, CultureInfo.InvariantCulture)\\`` — bare parse, no typed 4xx wrap (the channels twin is emit/channels.ts:71)",
+      "note": "Not claimed: open PRs #2675 (M-T6.47) and #2677 (M-T6.46) both explicitly say ingress/parse behaviour is M-T6.48's territory and that they do not touch it; no cross-backend ingress conformance matrix exists."
+    },
+    {
+      "id": "F2-SEED-DATASET-NAME-COLLISION",
+      "packet": "elixir",
+      "P": 1,
+      "status": "open",
+      "evidence": "src/generator/elixir/vanilla/seed-emit.ts:223 `defp seed_${snake(dataset)}(requested)` with no uniquification; reproduced → seeds.ex:65 and :75 are two identical `defp seed_default(requested)` clauses",
+      "note": "`seed default` + `seed Default` in one context still parses 0 errors/0 warnings; src/generator/_persistence/seed-datasets.ts is untouched since #2609 and no AST/IR rule rejects the collision."
+    },
+    {
+      "id": "F2-SEED-RAW-DOCUMENT",
+      "packet": "elixir",
+      "P": 1,
+      "status": "open",
+      "evidence": "src/generator/elixir/vanilla/seed-emit.ts:214 calls renderSeedRowInsert unconditionally for a `raw` row; reproduced → seeds.ex:66 `INSERT INTO \"cms\".\"articles\" (\"id\",\"title\",\"view_count\")` against a migration that creates only (id, data, version)",
+      "note": "`shape: document` × `seed wired raw` parses 0 errors/0 warnings and generates on all five; neither src/generator/sql-pg.ts nor src/language/validators/seed.ts learned the saving shape."
+    },
+    {
+      "id": "F2-SEED-EVENTSOURCED",
+      "packet": "elixir",
+      "P": 1,
+      "status": "open",
+      "evidence": "src/generator/elixir/vanilla/seed-emit.ts:83 (`!isEventSourced(a)`) + :92 (per-row `entries.filter`); reproduced → seeds.ex:67-68 emits only the `Note` row and then `mark_seeded(\"default\")`, the `Account` row silently gone",
+      "note": "Both named arms still reproduce: elixir drops the row while committing the ship-once marker, and java emits `Account.create(\"seeded-alice\", null)` (AccountsSeedRunner.java:48) against `create(String owner)` (Account.java:96) → javac error. No `seed` entry in src/diagnostics/unsupported-register.ts."
+    },
+    {
+      "id": "F2-FFE-4",
+      "packet": "feliz",
+      "P": 1,
+      "status": "open",
+      "evidence": "src/generator/feliz/component-emit.ts:523 (`inScope` seeded from `c.params`, never from `callSiteParams`); reproduced: fx/out-rich/web/src/App.fs:91 declares `let Counter (model: Model) (dispatch: Msg -> unit) …` while App.fs:109 (inside Panel) calls `Counter {| caption = \"inner\" |}` and App.fs:120 (page view) calls `Counter model dispatch {| … |}`",
+      "note": "SEQUENCING HEAD — still fully reproducible on 0a3f189 (re-derived by generating a two-component fixture): a stateful component invoked from ANOTHER component's body loses its curried model/dispatch args, so `dotnet fable` fails FS0001 and nothing else in this packet is compile-verifiable; #2674 touches feliz but not component-emit.ts."
+    },
+    {
+      "id": "F2-CFE-7",
+      "packet": "feliz",
+      "P": 1,
+      "status": "open",
+      "evidence": "src/generator/feliz/pack.ts:59-66 (`asChild` → `Html.text \"${s}\"` guarded by the `Html.`/`(` prefix heuristic in `isRenderedElement`); reproduced: fx/out-rt/web/src/App.fs:180 emits `Html.text \"Panel {| heading = \"in-cell\" |}\"`",
+      "note": "Unchanged: a user-component call inside a Table Column lambda is wrapped in an F# string literal with the inner quotes unescaped, so App.fs does not parse; ~20 other slots in pack.ts feed the same predicate."
+    },
+    {
+      "id": "F2-FFE-5",
+      "packet": "feliz",
+      "P": 1,
+      "status": "open",
+      "evidence": "src/generator/feliz/index.ts:629 (`pages.map(...)` — declaration order, no specificity sort); reproduced: fx/out-rt/web/src/App.fs:132-135 emits `| [ \"things\"; id ] -> ThingDetail id` BEFORE `| [ \"things\"; \"new\" ] -> ThingNew`",
+      "note": "A literal route declared after a sibling parameterised route is still an unreachable F# match rule (FS0026); only the scaffold macro's happens-to-work ordering hides it in shipped examples."
+    },
+    {
+      "id": "F2-FFE-3",
+      "packet": "flutter",
+      "P": 1,
+      "status": "open",
+      "evidence": "src/generator/flutter/index.ts:1152-1154 emits `routes: { '<routePath>': (context) => const <Page>(), … }` verbatim with no onGenerateRoute/onUnknownRoute; src/generator/flutter/flutter-target.ts:106-118 `dartRoute` interpolates the id into the pushed name. Regenerated web/src/examples/sales-system-flutter.ddd: web_app/lib/main.dart:33 `'/customers/:id': (context) => const CustomerDetailPage(),` vs web_app/lib/pages/order_detail_page.dart:27 `Navigator.of(context).pushNamed('/customers/' + orderById.customerId.toString())`",
+      "note": "VERIFIED FIRST AND CAREFULLY — still fully open on main: `grep -rn onGenerateRoute` over the whole generated tree returns nothing, so every `:id` route in the shipped example is a dead exact-string key and every detail link (customers, products, orders) resolves to no route. [Contamination check: the FIRST probe (05:41:33) predated the 05:42:55 rebuild and was therefore contaminated; RE-RUN 2026-08-31 05:53 UTC against the current build — '/customers/:id' still registered verbatim, still zero onGenerateRoute hits in the whole tree, still `pushNamed('/customers/' + …)`. Verdict unchanged: open. Independently corroborated: neither flutter/index.ts nor its emitter was touched by e0aff5a/bfdcdb5/05c3644.]"
+    },
+    {
+      "id": "F2-CFE-9",
+      "packet": "flutter",
+      "P": 1,
+      "status": "open",
+      "evidence": "src/generator/flutter/pack.ts:431-459 (`primitiveMoney` -> `.format(value)`, `primitiveDateDisplay` -> `DateFormat.yMMMd().format(value)`, `primitiveEnumBadge` -> `${value}.toString()`), none consulting optionality; regenerated p_page.dart:54 `NumberFormat.decimalPattern().format(row.total)` / `DateFormat.yMMMd().format(row.at)` / `Chip(label: Text(row.kind.toString()))` against models.dart:8-10 `double? total; DateTime? at; String? kind;`",
+      "note": "All three arms reproduce on main; the MONEY arm is incidentally covered by open PR #2678 (primitiveMoney becomes `LoomMoney.toNum(raw)`, whose signature is `static num toNum(Object? v)` — null-tolerant, so the compile error goes away though it then displays 0 rather than blank), but the DateDisplay and EnumBadge arms are untouched by every open PR. [Contamination check: bin/cli.js probe RE-RUN 2026-08-31 05:53 UTC against the post-05:42 rebuild (`npx tsc -b` clean, no-op); output byte-identical, verdict unchanged.]"
+    },
+    {
+      "id": "flutter-form-field-drops",
+      "packet": "flutter",
+      "P": 1,
+      "status": "open",
+      "evidence": "test/generator/flutter/parity-freeze.test.ts:74-96 `KNOWN_FLUTTER_GAPS` still pins all four markers (addr.geo, lines, flags, colors); src/generator/flutter/forms-emit.ts:184 still returns the Dart COMMENT `// TODO(flutter form-field): …`; `grep -rn flutter-form-field src/` returns nothing (no loom.* code exists)",
+      "note": "Unchanged since the audit base — the drop is still a comment in emitted Dart, not a diagnostic, and no diagnostic code was registered by #2668/#2690/#2694. [Contamination check: verdict derived from reading src/ (+ test files) only — immune to the stale out/ build; re-confirmed against the current working tree.]"
+    },
+    {
+      "id": "flutter-modal-instance-operationform",
+      "packet": "flutter",
+      "P": 1,
+      "status": "open",
+      "evidence": "src/generator/flutter/flutter-target.ts:589-616 `renderModal` resolves only `namedArg(formChild,\"of\")` + `namedArg(formChild,\"op\")` as refs and otherwise falls to `renderComment`; regenerated examples/showcase.ddd with a `platform: flutter` deployable on ui Admin: fe_cell/lib/pages/engineer_detail_page.dart:35 and squad_detail_page.dart:32 each contain `const SizedBox.shrink() /* Modal: OperationForm child must name of: <Agg> and op: <public op> */` as the SOLE child of the ops row",
+      "note": "Reproduced byte-for-byte at the same two file:lines the ledger cites; the instance-qualified `OperationForm { data.<op> }` shape the scaffold emits is still unhandled, so every write action on a scaffolded Flutter detail page is missing with no diagnostic. [Contamination check: bin/cli.js probe RE-RUN 2026-08-31 05:53 UTC against the post-05:42 rebuild (`npx tsc -b` clean, no-op); output byte-identical, verdict unchanged.]"
+    },
+    {
+      "id": "F2-CFE-8",
+      "packet": "frontend-js",
+      "P": 1,
+      "status": "open",
+      "evidence": "src/generator/angular/walker/angular-target.ts:348-359 (`if (paramName === undefined) continue;` drops the extra positional) + regenerated out: wng/src/app/pages/p.component.ts `<ng-container [ngComponentOutlet]=\"Panel\" [ngComponentOutletInputs]='{ label: \"a\" }'></ng-container>` with no ngComponentOutletContent; grep for the child text across wng/src returns nothing",
+      "note": "Re-derived on main with a Panel(label){Card{Text{label},Slot{}}} fixture: react emits `<Panel label=\"a\"><Text>child</Text></Panel>`, Angular drops the child entirely and emits no degradation comment (the doc comment at :337-338 admits the drop but nothing reaches the output). [Contamination check: bin/cli.js probe RE-RUN 2026-08-31 05:53 UTC against the post-05:42 rebuild (`npx tsc -b` clean, no-op); output byte-identical, verdict unchanged.]"
+    },
+    {
+      "id": "F2-FFE-2",
+      "packet": "frontend-js",
+      "P": 1,
+      "status": "open",
+      "evidence": "src/generator/react/walker/page-shell.ts:1319-1345 `collectExprRefs` (arms: ref/binary/unary/call-ARGS/convert, `default: return`) + regenerated wreact/src/components/Probe.tsx:13-16",
+      "note": "Byte-for-byte reproduction: `plain` gets [a], but `tern`/`nested`/`call` all get [] — a ternary, a member receiver and an intrinsic receiver each drop out of the dep array, so the memo freezes. [Contamination check: bin/cli.js probe RE-RUN 2026-08-31 05:53 UTC against the post-05:42 rebuild (`npx tsc -b` clean, no-op); output byte-identical, verdict unchanged.]"
+    },
+    {
+      "id": "F2-XB-2",
+      "packet": "frontend-js",
+      "P": 1,
+      "status": "open",
+      "evidence": "src/generator/angular/form-validators.ts:104-111 (`len-min`/`len-max`/`len-eq`/`len-range` -> Validators.minLength/maxLength) + regenerated wng/src/app/pages/product-new.component.ts:37 `Validators.minLength(3)` / `Validators.maxLength(8)` vs wreact/src/api/product.ts:8 `z.string().refine((s) => [...s].length >= 3)` and api/http/product.routes.ts:13 (code points)",
+      "note": "Confirmed on main: Angular is the only frontend deriving native validators from SingleFieldPattern and still counts UTF-16 code units; it emits no zod schema behind them, so there is no second correct gate. [Contamination check: bin/cli.js probe RE-RUN 2026-08-31 05:53 UTC against the post-05:42 rebuild (`npx tsc -b` clean, no-op); output byte-identical, verdict unchanged.]"
+    },
+    {
+      "id": "F2-CFE-2",
+      "packet": "frontend-js",
+      "P": 1,
+      "status": "open",
+      "evidence": "regenerated: wreact/src/pages/home.tsx (`const create` + the useForm destructure emitted TWICE in one function scope), wsv/src/routes/(app)/mixed/+page.svelte:8-11 (same, cross-aggregate), wng/src/app/pages/home.component.ts:28-37 (`itemCreate`/`itemForm`/`onSubmitItem` declared twice -> TS2300 x3), wvue/src/pages/mixed.vue (only useCreateItem imported; the Note form binds form.values.text and submits the Item mutation)",
+      "note": "All four arms reproduce unchanged: react/svelte/angular fail to build, vue compiles but silently POSTs Item data for the Note form; Angular's cross-aggregate mixed.component.ts is correct, so only the same-aggregate path collides there. [Contamination check: bin/cli.js probe RE-RUN 2026-08-31 05:53 UTC against the post-05:42 rebuild (`npx tsc -b` clean, no-op); output byte-identical, verdict unchanged.]"
+    },
+    {
+      "id": "F2-CFE-3",
+      "packet": "frontend-js",
+      "P": 1,
+      "status": "open",
+      "evidence": "regenerated from `QueryView { of: S.Item.all, data: rows => For { each: rows, r => Text { r.name } } }`: wreact/src/pages/p1.tsx (a `{...map(...)}` brace block in expression position after `&& (`), wfz/src/App.fs:81 (bare `yield!` inside a lambda body, not a seq), wfl/lib/pages/p1_page.dart:14 (`... spread` in expression position)",
+      "note": "Three of six frontends emit source that does not parse; vue (v-for template) / svelte / angular are fine, exactly as the row states. [Contamination check: bin/cli.js probe RE-RUN 2026-08-31 05:53 UTC against the post-05:42 rebuild (`npx tsc -b` clean, no-op); output byte-identical, verdict unchanged.]"
+    },
+    {
+      "id": "F2-FFE-1",
+      "packet": "frontend-js",
+      "P": 1,
+      "status": "open",
+      "evidence": "src/generator/react/store-builder.ts `storeFieldInit(type)` (type-only) and the vue/svelte twins + regenerated wreact/src/stores/mem.ts:12-14 `label: \"\", n: 0, flag: false`, wvue/src/stores/mem.ts:11, wsv/src/lib/stores/mem.svelte.ts:6, wreact/src/stores/url.ts:15 `p.get(\"label\") ?? \"\"`, and wng/src/app/stores/url.store.ts:22 `this.label.set(p.get(\"label\") ?? \"\")` overwriting the correct signal init at :14",
+      "note": "Reproduced with `label: string = \"hello\" / n: int = 7 / flag: bool = true`: react/vue/svelte drop the init on every lifetime, angular is correct except its url tier, flutter emits `const MemState(label: 'hello', n: 7, flag: true)`. [Contamination check: bin/cli.js probe RE-RUN 2026-08-31 05:53 UTC against the post-05:42 rebuild (`npx tsc -b` clean, no-op); output byte-identical, verdict unchanged.]"
+    },
+    {
+      "id": "M-T1.15-nonstring-filter-finds-dropped",
+      "packet": "macros",
+      "P": 1,
+      "status": "partial",
+      "evidence": "src/macros/stdlib/scaffold/_body-builders.ts:1111-1129 (filterParamKind) — `string`, `int`/`long` (NumberField) and `X id` render; every other type still returns null and the find is dropped at :1095. No `loom.scaffold-filter-param-unsupported` exists (grep over src/ + test/ → 0 hits). Test: test/macro/scaffold-body-builders.test.ts:499-560",
+      "note": "REMAINING KINDS (silent on all 7 targets): enum, decimal, money, bool, datetime, guid, and any array/optional param — the row's own headline example `find byStatus(s: Status)` is still dropped with no diagnostic. Blockers recorded in IMPL-NOTES §2/§3 sit in OTHER packets: the enum arm needs `stateTypeAsTsString` to stop typing enum state as bare `string` in all four JS frontends (frontend-js packet), decimal/money need a non-int zero sentinel for Feliz; IMPL-NOTES §4 also records a PRE-EXISTING feliz defect where a filter-find QueryView is never wired into the Elmish model (even the string arm fails to compile there) — belongs to the feliz packet."
+    },
+    {
+      "id": "F2-CB-C1-paged-nonrelational",
+      "packet": "node-ts",
+      "P": 1,
+      "status": "partial",
+      "evidence": "node drained at src/generator/typescript/repository-document-builder.ts:454 (+ embedded:360, eventsourced:259, mikroorm.ts:2874/3128), pinned by test/generator/typescript/paged-nonrelational.test.ts",
+      "note": "Remaining arms: dotnet, python and elixir — regenerated the paged-find-on-eventLog repro and got AccountRepository.cs:125 `ByOwner(string owner, CancellationToken)` against an `IAccountRepository` declaring the 5-param paged signature, python account_repository.py:58 `by_owner(self, owner) -> Account | None` against a 5-arg route call, and elixir account_repository.ex:88 `by_owner(owner)` against a /5 controller call; only node now derives arity+return from `pagedReturn`."
+    },
+    {
+      "id": "F2-XB-4",
+      "packet": "node-ts",
+      "P": 1,
+      "status": "open",
+      "evidence": "src/platform/hono/v4/projection-builder.ts:207-213",
+      "note": "The fold loop is still `if (stmt.kind === \"assign\")` with no else: probe B (`let stamped = e.at … at := stamped`) parses clean and emits d/http/projections.ts:52 `state.at = stamped;` with no `const stamped` (TS2304), and probe A (a resource-effect statement) is still silently dropped with no diagnostic — `foldImpurity` (src/ir/validate/checks/projection-checks.ts:616) covers only emit/call/precondition/requires, not the `expression` kind a resource call lowers to, and `let` is deliberately admitted."
+    },
+    {
+      "id": "timer-tz-overlap-inert",
+      "packet": "node-ts",
+      "P": 1,
+      "status": "partial",
+      "evidence": "honest half drained at src/ir/validate/checks/reserved-surfaces.ts:61-86, pinned by test/ir/reserved-not-emitted.test.ts; wiring still absent",
+      "note": "Step (1) landed as the general `loom.reserved-not-emitted` registry — `in:` and `overlap:` each raise a warning naming the real runtime consequence (confirmed by parsing examples/timers.ddd with both clauses added). Step (2), the real wiring, is untouched: `grep timezone/overlap` over src/generator + src/platform still finds zero scheduler consumers on any of the five backends."
+    },
+    {
+      "id": "fixed-slot-arity-membership-incomplete",
+      "packet": "walker-shared",
+      "P": 1,
+      "status": "open",
+      "evidence": "src/ir/validate/checks/ui-checks.ts:679-682 — FIXED_SLOT_PRIMITIVES is still only { Stat, KeyValueRow } (+ the op-form Modal arm at :719-733)",
+      "note": "Re-reproduced on fresh main: `EnumBadge { \"x\", \"dropped\" }` / `Image { \"/a.png\", \"/dropped.png\", alt: \"a\" }` / `Text { \"keep\", \"dropped\" }` parses 0 error(s), 0 warning(s) and the emitted home.tsx drops all three extra positionals; every other bounded-positional emitter (text.ts Money/DateDisplay/EnumBadge/Image, file-link.ts, timeline.ts, controls.ts) is still unguarded on all 7 targets."
+    },
+    {
+      "id": "queryview-single-lambda-paramtypes",
+      "packet": "walker-shared",
+      "P": 1,
+      "status": "partial",
+      "evidence": "src/generator/_walker/primitives/controls.ts:349-366 (STANDARD_AGG_OPS verb hop) + test/generator/_walker/queryview-single-agg-resolution.test.ts:85-110",
+      "note": "REMAINING TARGET: flutter — react/vue/svelte/angular/feliz now resolve `<handle>.<Agg>.all` and keep the OperationForm (parameterised test, mutation-proved), but flutterTarget.renderOperationForm now explicitly DECLINES the instance-qualified shape (`const SizedBox.shrink() /* the instance-qualified shape is not rendered on Flutter */`), so Flutter still renders no form; the widget itself is the open follow-on `flutter-modal-instance-operationform` (IMPL-NOTES §4)."
+    },
+    {
+      "id": "F2-CFE-1",
+      "packet": "walker-shared",
+      "P": 1,
+      "status": "partial",
+      "evidence": "src/generator/_walker/walker-core.ts (tryRenderNavigateCall arm in emitStmt `call`), src/generator/feliz/update-emit.ts (Cmd.navigatePath), src/generator/elixir/heex-walker-core.ts (push_navigate); test/generator/_walker/navigate-action-body.test.ts:145-190",
+      "note": "REMAINING TARGET: flutter only. Re-generated all targets on fresh main: react `navigate(\"/other\")` with `const navigate = useNavigate()`, vue `router.push`, svelte `goto as navigate`, angular `this.router.navigateByUrl`, feliz `Cmd.navigatePath(\"other\")` (the codegen CRASH is gone), heex `push_navigate(socket, to: ~p\"…\")` — all pinned incl. the declared-extern-navigate non-hijack; flutter still emits `// TODO(flutter full-parity): 'private-operation' call 'navigate' in a Notifier method` (documented residue: a Riverpod Notifier has no BuildContext), itself pinned by a test."
+    },
+    {
+      "id": "F2-FFE-7",
+      "packet": "walker-shared",
+      "P": 1,
+      "status": "partial",
+      "evidence": "SWALLOW half fixed: src/generator/_walker/primitives/layout.ts:264-291 (emitTabs text-like caption rule) + its HEEx twin; test/generator/_walker/tab-unknown-named-arg.test.ts (7 targets). GATE half open: no `loom.page-primitive-unknown-arg` anywhere (only the TODO reference at layout.ts:291 and IMPL-NOTES)",
+      "note": "REMAINING ON ALL 7 TARGETS: the unrecognised NAMED arg is still silently DROPPED — probe on fresh main (`Card { title: \"Bobs card\", Text { \"x\" } }` + `Tab { title: \"One\", Text { \"first\" } }`) parses 0 error(s), 0 warning(s), the tab body is now kept (fixed) but the caption renders as the generic \"Tab 1\" and \"Bobs card\" reaches neither the page nor the i18n catalog. The honest half (an IR gate, or accepting `title:` as an alias for Card/Tab positional 0) is unlanded."
+    },
+    {
+      "id": "F2-W-13",
+      "packet": "wire-openapi",
+      "P": 1,
+      "status": "open",
+      "evidence": "contract comment src/ir/util/openapi-errors.ts:170-175 ('the objectStore blob-absence 404 … stays literal') vs the emitters: src/generator/elixir/vanilla/files-controller-emit.ts:67-71 and src/generator/python/files-routes-builder.ts:73-77 route the blob miss through the shared not-found producer; reproduced on node with `httpStatus NotFound -> 409` — fx/out-fd/d/http/index.ts:120 throws AggregateNotFoundError and the onError arm at :182-185 answers `problem(409, \"Conflict\", …)`",
+      "note": "Still reproducible; note the direction is contested — the emitter comments cite M-T6.39 as DELIBERATELY unifying the blob 404 onto the remappable carrier, so the landing may be to correct openapi-errors.ts:173-174 instead, but the code and the shared table still contradict each other."
+    },
+    {
+      "id": "elixir-malformed-path-id-422",
+      "packet": "wire-openapi",
+      "P": 1,
+      "status": "open",
+      "evidence": "generated fx/out-el/d/lib/d_web/controllers/order_controller.ex:22-23 (`def show(conn, %{\"id\" => id}) do case Sales.get_order(id)` — no `Ecto.UUID.cast`), while fx/out-el/.../api spec publishes 422 + a `format: :uuid` path param (spec lines 90-98); `grep -rn 'Ecto.UUID' src/generator/elixir/` shows casts only in schema/fold/files emitters; test/generator/malformed-path-id-status.test.ts:60-118 still instantiates only the contract, java, python, node/.NET",
+      "note": "Untouched by #2687/#2686 (the two recent openapi merges); elixir still cannot answer the 422 it publishes — a non-uuid id falls to the app-global fault handler, never the `errors[]`/`pointer:\"/id\"` shape."
+    },
+    {
+      "id": "M-T3.9-dotnet-audit-masked-snapshot",
+      "packet": "dotnet-adapters",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/dotnet/cqrs/commands.ts:476-490 — `const maskNames = maskNamer();` then `__before`/`__after` built via `projectEntityExpr(..., { maskNames })`",
+      "note": "No `unmasked` option exists on projectEntityExpr/projectEntityArgs (grep of src/generator/dotnet/dto-mapping.ts finds only maskWrap), so the audit trail still depends on who performed the write."
+    },
+    {
+      "id": "dapper-no-schema-evolution",
+      "packet": "dotnet-adapters",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/dotnet/index.ts:991 `const hasMigrations = !usingDapper && …`; `grep -cE 'ALTER TABLE|ADD COLUMN' src/generator/dotnet/emit/dapper.ts` = 0",
+      "note": "Slice 2 still unlanded on both arms — the mikroorm twin at src/platform/hono/v4/emit.ts:632 is likewise unchanged; validateMigrationAdapterSupport (migration-checks.ts:225) still returns early when no migration block is declared, and there is no test:migration-evolution-dapper npm script."
+    },
+    {
+      "id": "F2-ADP-9",
+      "packet": "dotnet-adapters",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/dotnet/emit/dapper.ts:1202-1206 (`filterPrincipalRefs` from the FULL `capabilityFilters`) reused at :1451-1455; regenerated proof: DeepRepository.cs `AllDeep` emits `\"… FROM deeps WHERE (label <> '')\", new { __cu_tenantId = RequestContext.Current!.CurrentUser!.TenantId }`",
+      "note": "princSuffix/findPrincFields are still computed bypass-unaware, so an `ignoring *` read binds a parameter its SQL never names and still dereferences CurrentUser!."
+    },
+    {
+      "id": "G2667-D3-projection-join-unguarded-index",
+      "packet": "dotnet-adapters",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/dotnet/query-projection-emit.ts:1358 `return \\`${alias.mapVar}[${alias.keyExpr}].${upperFirst(expr.member)}\\``; node twin at src/platform/hono/v4/projection-query-routes-builder.ts:1047 `${alias.mapVar}.get(${alias.idRow} as string)!.${expr.member}`",
+      "note": "No TryGetValue / null-coalescing anywhere in query-projection-emit.ts; both sites still 500 when the join target is soft-deleted or capability-filtered out, and no RS rule was recorded."
+    },
+    {
+      "id": "G2667-D4-dotnet-explicit-route-id-coercion",
+      "packet": "dotnet-adapters",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/dotnet/explicit-handlers-emit.ts:620 and :635 — `const wire = t.valueType === \"guid\" ? \"Guid\" : t.valueType === \"int\" ? \"long\" : \"string\";`",
+      "note": "The local switch is unchanged and `csIdValueClrType` (dto-mapping.ts:809) is still not imported by explicit-handlers-emit.ts; latent while ids stay guid."
+    },
+    {
+      "id": "F2-W-06",
+      "packet": "elixir",
+      "P": 2,
+      "status": "open",
+      "evidence": "generated d/lib/d/cat/widget.ex:17 `field :released_at, :utc_datetime` + priv/repo/migrations/*.exs:14 `add :released_at, :utc_datetime, null: false`",
+      "note": "Still second-precision; nothing in src/generator/elixir/ emits `:utc_datetime_usec`, so a sub-second instant truncates on Phoenix only."
+    },
+    {
+      "id": "G2667-C7-heex-button-icon-loading",
+      "packet": "elixir",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/elixir/heex-primitives.ts:1382-1387 — Button's `passThroughAttrs` is [\"to\",\"disabled\",\"type\",\"variant\"]; `icon:`/`loading:`/`iconPosition:` are dropped with only the rationale comment at :1376-1381",
+      "note": "Still untracked by any waiver — test/generator/elixir/heex-parity.test.ts freezes only whole primitives lacking a HEEx renderer, so a prop-level drop can never reach the ratchet."
+    },
+    {
+      "id": "G2667-C8-heex-tab-slug-spaces",
+      "packet": "elixir",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/elixir/heex-primitives.ts:1656 `slug: snake(label) || \\`tab-${idx}\\`` vs the JSX targets' src/generator/_walker/shared/args.ts:11 `slugify`",
+      "note": "`snake()` (src/util/naming.ts:17) only case-splits and lowercases — it strips no spaces/punctuation — so \"My Tab\" is `my tab` on HEEx and `my-tab` on JSX; the ids still split across targets."
+    },
+    {
+      "id": "G2667-D6-elixir-seeder-not-atomic",
+      "packet": "elixir",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/elixir/vanilla/seed-emit.ts:204-232 `renderDatasetFn` — per-row `insert!`/`Repo.query!` lines followed by `mark_seeded(dataset)` last, with no `Repo.transaction`",
+      "note": "File unchanged since #2609 (8ad6f91); a mid-dataset crash still leaves rows behind with no marker, so the next boot re-seeds them."
+    },
+    {
+      "id": "F2-W-03",
+      "packet": "elixir",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/elixir/vanilla/problem-details-emit.ts:406 `base = %{pointer: pointer_of([field]), …}` — one segment, always (emitted at d/lib/d_web/problem_details.ex:183)",
+      "note": "Nothing walks `changeset.changes` for nested %Ecto.Changeset{}; the errors[] array is built by `List.flatten()` over the top-level keyword list only, so elixir stays structurally depth-1."
+    },
+    {
+      "id": "G2646-open-heex-in-component-degradation",
+      "packet": "elixir",
+      "P": 2,
+      "status": "open",
+      "evidence": "Reproduced: a `component Panel { body: Stack { CreateForm { of: Thing } } }` emits `<.simple_form for={@form} phx-submit=\"save_thing\">` in components/ui_components.ex while the host live/home_live.ex has an empty `mount/3`, no `:form` assign, no `handle_event(\"save_thing\", …)` and a call site `<….panel />` passing no attrs",
+      "note": "The state/action hoisting #2646 built was not extended to the form accumulator (nor query/upload/table-control) — src/generator/elixir/heex-walker-core.ts returns formBindings/queryBindings/uploadBindings/tableControls at :580-592 for the PAGE walk only."
+    },
+    {
+      "id": "G2646-open-heex-layout-inert",
+      "packet": "elixir",
+      "P": 2,
+      "status": "partial",
+      "evidence": "src/generator/elixir/heex-walker-core.ts:694 — `case \"i18nFormat\": return renderExpr(expr.inner, ctx)` (wrapper dropped, comment-only rationale)",
+      "note": "Grid≡Stack arm is STALE — `renderGrid` (heex-primitives.ts:1975-1981) emits `grid gap-4 grid-cols-N md:… lg:…` vs Stack's `flex flex-col gap-4`, and already did at the ledger's base. REMAINING arms: (a) the i18nFormat wrapper is still silently dropped, and (b) a non-server-paged Table still gets no pager on HEEx (verified on the non-paged fixture) — neither is pinned in any parity freeze list."
+    },
+    {
+      "id": "F2-W-04",
+      "packet": "elixir",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/elixir/vanilla/schema-emit.ts:475-481 `case \"valueobject\": … return \":map\"` → widget.ex:12 `field :dims, :map` + migration:9 `add :dims, :map, null: false`",
+      "note": "Still one jsonb column with no embeds_one and no inner-field validation (the changeset only casts `:dims` and validate_required's it), against flattened dims_width/dims_height/dims_label columns on the other four."
+    },
+    {
+      "id": "M-T1.16-invariant-validation-feliz-flutter",
+      "packet": "feliz",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/feliz/wire.ts:3226-3234 (`if <empty> then Some \"Required\" else None`, over `requiredValidatedFields` :3250) and src/generator/flutter/forms-emit.ts:963,968,989,996 ('Required' / 'Enter a number'); `grep -rln 'zod-refine|invariantRefine' src/generator/feliz src/generator/flutter` → 0 hits",
+      "note": "Neither self-hosting frontend derives client-side rules from wire-translatable invariants, and no loom.* code marks the divergence; open PR #2674 edits the same feliz/wire.ts form path but only for numeric-text parse errors, not invariants."
+    },
+    {
+      "id": "sourcemap-feliz-flutter-not-emitted",
+      "packet": "feliz",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/platform/feliz.ts:29 and src/platform/flutter.ts:37 (`emitProject({ contexts, sys, deployable })` — `sourcemap` not even destructured, cf. src/platform/react.ts:22,31); `grep -rln SourceMapRecorder src/generator/{react,vue,svelte,angular,feliz,flutter}` → react/vue/svelte/angular only",
+      "note": "`--sourcemap` still records nothing for feliz/flutter pages, so `ddd breakpoints`/`ddd trace` resolve nothing there; neither the honest-gate nor the real-emission landing has been taken."
+    },
+    {
+      "id": "F2-FFE-8",
+      "packet": "flutter",
+      "P": 2,
+      "status": "open",
+      "evidence": "regenerated store-showcase (flutter): web_app/lib/stores.dart:138 `_persistKey = 'loom.store.Draft'` and :146-149 `LoomStorePersist.write(_persistKey, <String, dynamic>{'note': s.note})` (FLAT); regenerated store-showcase (react): web_app/src/stores/draft.ts:12-19 zustand `persist(..., { name: \"loom.store.Draft\", storage: createJSONStorage(() => localStorage) })`, whose on-disk shape is `{\"state\":{…},\"version\":0}`. The interop claim is still asserted at src/generator/flutter/store-persist.ts:25-27 and :34-36",
+      "note": "Row was marked 'suspected' — re-derived and CONFIRMED: same key, different envelope. #2678 touches store-persist.ts but only changes the money scalar codec (double -> wire String); it adds no state/version wrapper, so the row is unclaimed. [Contamination check: bin/cli.js probe RE-RUN 2026-08-31 05:53 UTC against the post-05:42 rebuild (`npx tsc -b` clean, no-op); output byte-identical, verdict unchanged.]"
+    },
+    {
+      "id": "M-T3.15-C3-nav-vs-requires",
+      "packet": "frontend-js",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/react/templating/preparers/app-shell.ts:41-127 (`prepareAppShellVM` takes no PageIR[]; the stale comment at ~:101-107 still asserts scaffold pages carry no `requires`), src/generator/vue/index.ts:870-894 `deriveNavSections` iterates pages but never reads `page.requires`, src/generator/svelte/routes-emitter.ts:286-311 builds entries typed `{to,label,testId}` only; contrast src/generator/angular/index.ts:423-424 which sets `requiresJs` on the DEFAULT branch",
+      "note": "Premise re-verified: src/macros/stdlib/scaffold/_pages.ts:114 does clone the find-all gate onto the List page, and only the menu-derived path (_frontend/menu-emitter.ts:177,:245) gates; PR #2628 is docs-only (its two changed files are docs/auth.md and the M-T3.15 mission doc), so the bug remains unclaimed. [Contamination check: verdict derived from reading src/ (+ test files) only — immune to the stale out/ build; re-confirmed against the current working tree.]"
+    },
+    {
+      "id": "G2667-D8-pack-loader-global-handlebars",
+      "packet": "frontend-js",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/_packs/loader.ts:257-259 (the stale comment 'In practice each generation loads exactly one pack, so the global registration is fine') and :318 / :355 `Handlebars.registerPartial(...)` into the global registry; no `Handlebars.create()` anywhere in the file",
+      "note": "Still open and the comment is demonstrably stale — my own fixtures generated 5-6 frontend deployables (mantine/vuetify/shadcnSvelte/angularMaterial packs) in a single `generate system` run, so several packs share one registry; PR #2692's loader.ts hunk touches only an i18n doc comment at :179. [Contamination check: verdict derived from reading src/ (+ test files) only — immune to the stale out/ build; re-confirmed against the current working tree.]"
+    },
+    {
+      "id": "M-T1.12-raw-field-aria",
+      "packet": "frontend-js",
+      "P": 2,
+      "status": "open",
+      "evidence": "`grep -rl aria-invalid designs/` matches only shadcn/v3, shadcn/v4, coreComponents/v3, daisyui/v1; designs/flowbite/v1/primitive-field.hbs (error `<p>` with no id), designs/primeng/v1/primitive-field.hbs (bare `<label>`, input with no id), designs/spartanNg/v1/primitive-field.hbs, designs/angularMaterial/v1/primitive-field.hbs (`</mat-form-field>` closes BEFORE `<span class=\"loom-error\">`)",
+      "note": "Every detail of the row re-verified by reading the four templates; shadcnSvelte/v1 is in the same state (no aria), so the Svelte side is two packs, not one. [Contamination check: verdict derived from reading src/ (+ test files) only — immune to the stale out/ build; re-confirmed against the current working tree.]"
+    },
+    {
+      "id": "M-T1.8-error-boundary-five-targets",
+      "packet": "frontend-js",
+      "P": 2,
+      "status": "open",
+      "evidence": "`grep -rilE 'errorboundary|onErrorCaptured|svelte:boundary|ErrorHandler' designs/` matches only the 8 tsx packs (chakra v2/v3, mantine v7/v9, mui v5/v7, shadcn v3/v4) plus shadcnVue/v1 and vuetify/v3; zero hits over src/generator/{vue,svelte,angular,feliz,flutter,elixir}; src/generator/react/index.ts:306 emits src/ErrorBoundary.tsx",
+      "note": "Unchanged on main — Svelte, Angular, Feliz, Flutter and HEEx still ship no root render-time boundary and no `loom.*` code covers it. [Contamination check: verdict derived from reading src/ (+ test files) only — immune to the stale out/ build; re-confirmed against the current working tree.]"
+    },
+    {
+      "id": "nested-errors-pointer-shape",
+      "packet": "java",
+      "P": 2,
+      "status": "partial",
+      "evidence": "JAVA FIXED: src/generator/java/emit/api.ts:678,802 now call `pointerOf(...)`, helper emitted at api.ts:891-914, pinned by test/generator/java/errors-pointer-rfc6901.test.ts (4/4 pass). ELIXIR STILL OPEN: src/generator/elixir/vanilla/problem-details-emit.ts:200-206",
+      "note": "Remaining arm: elixir builds the 422 body from a flat `changeset.errors |> List.flatten()` walk with no `Ecto.Changeset.traverse_errors/2`, so a `cast_assoc` child violation still yields no `errors[]` entry; the java non-RFC-6901 `/lineTotals[0].unitPrice` half is drained."
+    },
+    {
+      "id": "provenanced-bare-read-in-page-body",
+      "packet": "macros",
+      "P": 2,
+      "status": "open",
+      "evidence": "reproduced on fresh main: hand-written `data: o => Text { o.total }` over `total: int provenanced` parses 0 error(s), 0 warning(s) and emits `<Text>{orderById.data.total}</Text>` while api/order.ts:32 types it `z.object({ value, lineage })`; no PROVENANCE_VALUE_FIELD anywhere under src/generator/_walker/ (only heex-walker-core.ts:64,849) and no `loom.provenanced-bare-read` in src/ir/validate/checks/",
+      "note": "Explicitly DEFERRED by #2694 (IMPL-NOTES §5) because both fix options land outside the macros packet — the walker auto-unwrap (walker-shared packet) or an IR gate in ui-checks.ts (validator packet); the scaffold half is already correct, so only hand-written bodies break, on the 6 JS/Feliz/Flutter frontends (HEEx is fine)."
+    },
+    {
+      "id": "F2-CB-C12-tph-polymorphic-base-reader-unfiltered",
+      "packet": "node-ts",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/typescript/base-reader-builder.ts:69-79",
+      "note": "The TPH base reader still emits bare `select().from(schema.vehicles)` for both findById and findAll with no capability predicate — regenerated vehicle-repository.ts:18-26 on a TPH + tenantOwned system while both concrete repos apply a tenant filter; the TPC form (:174-182) delegates to the concretes, the TPH one does not."
+    },
+    {
+      "id": "G2646-open-projection-on-event-no-channel",
+      "packet": "node-ts",
+      "P": 2,
+      "status": "partial",
+      "evidence": "warning added at src/ir/validate/checks/workflow-checks.ts:97-110, pinned by test/ir/workflow-correlation.test.ts:179",
+      "note": "The silence is closed — a channel-less `projection … on(Event)` now raises `loom.projection-event-uncarried` — but the emitter divergence is unchanged: `deriveEventSubscriptions` still early-returns on no channel (src/ir/enrich/enrichments.ts:1288) yet node emits `foldXIntoY` + `projectionTee` off `isMaterializedProjection`, while regenerating the same source on python and elixir produces no fold module at all. Node's behaviour now also contradicts the new warning's text ('this fold never runs')."
+    },
+    {
+      "id": "G2667-C4-mikroorm-save-no-transaction",
+      "packet": "node-ts",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/typescript/emit/mikroorm.ts:2377",
+      "note": "Every MikroORM save still opens only `this.em.fork({ keepTransactionContext: true })` — `grep transactional` over the file finds no `em.transactional(` call site at all (the three save emitters at :2377, :2718, :2964 share the shape), so a multi-statement save with associations/containments can still land partially outside an ambient transaction."
+    },
+    {
+      "id": "M-T5.14-reading-service-readport-not-threaded",
+      "packet": "node-ts",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/platform/hono/v4/explicit-handlers-builder.ts:464 (renderWorkflowStmtChunks with no readPortArgs) → src/generator/typescript/render-expr.ts:579",
+      "note": "Reproduced end to end: a `queryHandler` calling a reading service generates d/http/a-routes.ts:32 `Registration.isHolderFree(holder)` against d/domain/services.ts:6 `isHolderFree(accounts: AccountRepositoryPort, holder: string): Promise<boolean>` — arity-short, un-awaited, no diagnostic. `readPortArgs` is still supplied only by the two workflow builders, and `checkInfraCallsFromAggregates` (domain-service-checks.ts:366) still gates aggregate bodies only."
+    },
+    {
+      "id": "static-subpath-405-node-only",
+      "packet": "node-ts",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/platform/hono/v4/routes-builder.ts:349 is still the ONLY site; python's generated customer_routes.py has no guard",
+      "note": "Generated the same static-sub-path find on node and python: node emits `const staticSubpathMethods = { by_email: [\"GET\"] }` + a 405/`Allow` pre-binding guard, python registers only `@router.get(\"/by_email\")` so a wrong verb still falls through to the sibling `/{id}` param validator. No equivalent guard exists in the dotnet, java or elixir emitters (their 405 handling is the generic unmatched-route catch-all, which this request never reaches)."
+    },
+    {
+      "id": "M-T1.11-domain-floor-message-code",
+      "packet": "node-ts",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/platform/hono/v4/emit.ts:141-143",
+      "note": "The emitted `class DomainError extends Error { constructor(message: string) … }` still takes no `code`, and every domain-floor throw passes raw text only (src/generator/typescript/emit/value-objects.ts:71, render-stmt.ts:281, workflow-builder.ts:1861); `messageCode()` remains wire-rung-only, so a domain-only `message:` invariant is still unlocalizable on all five backends."
+    },
+    {
+      "id": "M-T3.8-sensitivity-phases-2-4",
+      "packet": "validator-diagnostics",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/ir/enrich/enrichments.ts:1590,1651 (inspect/ToString redaction only) and the single generator consumer src/generator/elixir/vanilla/inspect-emit.ts; `grep -i sensitiv src/diagnostics/*.ts` → 0 hits, incl. no row in src/diagnostics/unsupported-register.ts",
+      "note": "Neither option landed: no wire masking (phase 3) and no honest loom.sensitive-wire-unsupported register row, so `sensitive(pii)` is still served in cleartext silently."
+    },
+    {
+      "id": "domainservice-member-chained-repo-read",
+      "packet": "validator-diagnostics",
+      "P": 2,
+      "status": "partial",
+      "evidence": "HONEST GATE landed: src/ir/validate/checks/domain-service-checks.ts:233 (loom.domain-service-read-unsupported), test/ir/domain-service-validation.test.ts:370-412 (flag + 3 controls). STILL OPEN: src/ir/lower/repo-read.ts matchRepoRead still requires the repo call to be the whole postfix chain (suffixes.length === 1), so member-receiver reads never lower to callKind repo-read",
+      "note": "Remaining arm = the row's option (b), the repo-read detector widening + read-port threading (deferred to IMPL-NOTES.md by #2694); `Accounts.byHolder(h).balance` is now refused by name instead of mis-emitted on all five backends."
+    },
+    {
+      "id": "F2-CFE-12",
+      "packet": "walker-shared",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/_walker/primitives/forms.ts:934-947 — `emitControlledModal` is still tried only `if (!formChild)`, so `open:` + an OperationForm child with no `trigger:` falls to renderComment",
+      "note": "Re-reproduced: `Modal { open: showModal, title: \"Activate\", OperationForm { of: Item, op: activate } }` parses 0 error(s), 0 warning(s) and board.tsx:7 is just `{/* Modal: expects trigger: Button(...) and an OperationForm(<instance>.<operation>) child */}` — both halves dropped, on every target that rides the shared modal path."
+    },
+    {
+      "id": "G2667-D7-walker-flag-propagation-divergence",
+      "packet": "walker-shared",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/_walker/walker-core.ts:2104-2114 (propagateSinkFlags) vs :1232-1251 (propagateChildFlags) — still two near-copies; stmtIsAwaited at :1381-1383 still `return s.kind === \"variant-match\"` under a docstring (:1378-1380) claiming it covers \"a nested arm/else body\"",
+      "note": "propagateSinkFlags still omits usesTableSort, usesTableFilter, usesDataGrid, tabsDefault and the formOfs merge that its twin propagates; #2692 (open, comment-only) does not touch either site."
+    },
+    {
+      "id": "G2667-D9-i18n-slot-asymmetry",
+      "packet": "walker-shared",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/util/user-visible-slots.ts:36 (KeyValueRow — positional 0 only) vs :42-45 (Stat — label AND value)",
+      "note": "Still asymmetric; note the ledger's path is stale — the table moved from src/generator/_walker/user-visible-slots.ts to src/util/user-visible-slots.ts (the D7/D9 handoff line in #2694's message anticipated the move)."
+    },
+    {
+      "id": "M-T1.1-table-filter-silent-drop",
+      "packet": "walker-shared",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/generator/_walker/primitives/table.ts:94-99 — `filterActive` still requires `!serverPaged` + both target seams, and the arg is dropped with no marker otherwise; src/generator/elixir/heex-primitives.ts:604-660 renderTable still handles only rows/testid/sort/page (no `filter` arm); `grep '\"filter\"' src/ir/validate/checks/ui-checks.ts src/language/validators/ui.ts` → 0 hits",
+      "note": "Unchanged by #2668/#2690/#2694: `Table { filter: q }` is still silently ignored on phoenixLiveView and on ANY server-paged table across all frontends, with neither a rendered affordance nor a loom.* code."
+    },
+    {
+      "id": "queryview-lambda-int-plus-literal-concat",
+      "packet": "walker-shared",
+      "P": 2,
+      "status": "open",
+      "evidence": "reproduced on fresh main: `data: o => Text { string(o.qty + 1) }` over `qty: int` emits `<Text>{String((orderById.data.qty + String(1)))}</Text>` (0 error(s), 0 warning(s)); root: src/ir/lower/lower-expr.ts:2576 memberType's `string` fallback feeds binaryResultType (:2362-2389) which then picks implicit string concat",
+      "note": "Confirmed still open and NOT the collection-op typing #2694 fixed (that was map/min/max/sum in refineCollectionOpType); `o.qty * 2` and `o.qty + o.qty` stay correct, so only the `+`-with-literal arm mis-types — a wrong-value bug (\"51\" for qty=5) on react/vue/svelte/angular."
+    },
+    {
+      "id": "F2-XB-7",
+      "packet": "wire-openapi",
+      "P": 2,
+      "status": "open",
+      "evidence": "src/ir/stdlib/generics.ts:94 (`{ name: PROVENANCE_LINEAGE_FIELD, type: jsonType, optional: true }` — optional, never nullable); reproduced on corpus/provenance.ddd: .loom/wire-spec.json `total.properties.lineage = {\"type\":\"object\"}` with `required:[\"value\"]`, elixir d/lib/d_web/api/schemas/order_response.ex:16 the same, vs node d/http/order.routes.ts:58 `lineage: ProvenanceLineage.nullable()`",
+      "note": "Declaration half re-proved on disk: the wire-spec and the elixir OpenApiSpex schema both declare a non-nullable object for a field every backend ships as an explicit null; #2687's elixir openapi work does not touch it."
+    },
+    {
+      "id": "schemathesis-F11-int32-range",
+      "packet": "wire-openapi",
+      "P": 2,
+      "status": "open",
+      "evidence": "test/behavioral/schemathesis-waivers.json still carries W11 (not_a_server_error, kind bug, `^POST /api/orders/\\{id\\}/add_line$`) and W12 (status_code_conformance, same op); `grep -rn 2147483647 src/generator src/platform` → 0 hits",
+      "note": "No backend publishes or enforces the int32 range for `int`, so a contract-conforming out-of-int4 value still 500s; both waivers survive, as both open schemathesis PRs said they would."
+    },
+    {
+      "id": "F2-EXPR-7",
+      "packet": "dotnet-adapters",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/generator/dotnet/render-expr.ts:902 `first: (recv) => \\`${recv}.First()\\`` vs typescript/render-expr.ts:416 `${recv}[0]`, java:700 `.get(0)`, python:589 `[0]`, elixir:883 `List.first(${recv})`",
+      "note": "Only `firstOrNull` was hardened (the .NET value-type projection at render-expr.ts:911); `first` still diverges five ways and src/util/collection-ops.ts:23 still declares it as non-optional `T` with no pinned edge semantics."
+    },
+    {
+      "id": "F2-W-14",
+      "packet": "dotnet-adapters",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/generator/dotnet/emit/program.ts:844-865 AddSwaggerGen block registers ListResponseWrapperFilter / RequiredFromCtorParamFilter etc. but no `UseOneOfForPolymorphism()`; grep of src/ and test/ for UseOneOfForPolymorphism / SelectSubTypesUsing returns nothing",
+      "note": "The premise still holds structurally — the union DTO is an empty [JsonPolymorphic] abstract record (cqrs/dtos.ts:264) and nothing publishes a oneOf; runtime confirmation still needs a booted .NET app (no SDK here)."
+    },
+    {
+      "id": "M-T5.7-inheritance-tail",
+      "packet": "dotnet-adapters",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/diagnostics/unsupported-register.ts:309 (loom.polymorphic-id-ref-unsupported), :411 (loom.tph-backend-unsupported), :502 (loom.tph-own-override-unsupported) — all three still registered and still raised (language/validators/inheritance.ts:180,273; ir/validate/checks/system-checks.ts:3672)",
+      "note": "None of the three honest register rows drained; the `<Concrete>Id → <Base>Id` .NET threading has no caller (src/generator/dotnet/emit/base-reader.ts:20 says so explicitly)."
+    },
+    {
+      "id": "F2-W-09",
+      "packet": "elixir",
+      "P": 3,
+      "status": "open",
+      "evidence": "generated d/lib/d_web/api/schemas/widget_response.ex:14 declares `blueprint` as an inline `%OpenApiSpex.Schema{type: :object, properties: %{url…}}`, vs java's named component src/main/java/com/loom/d/domain/common/FileRef.java",
+      "note": "Unchanged: node/elixir inline the FileRef shape, dotnet/java/python name it — schemaNames and the property signature still diverge."
+    },
+    {
+      "id": "F2-W-12",
+      "packet": "elixir",
+      "P": 3,
+      "status": "open",
+      "evidence": "generated d/lib/d_web/api/schemas/widget_response.ex:15 `sku: %OpenApiSpex.Schema{type: :string}` — no `nullable: true`, and `sku` is absent from the `required:` list at :21 while the controller serializes the key unconditionally",
+      "note": "The elixir arm reproduces exactly as described; no `nullable` is emitted anywhere in the OpenApiSpex property emitter."
+    },
+    {
+      "id": "F2-W-08",
+      "packet": "elixir",
+      "P": 3,
+      "status": "open",
+      "evidence": "elixir emits the single component d/lib/d_web/api/schemas/dimensions.ex, against dotnet d/Application/Widgets/Responses/WidgetResponses.cs:10 `record DimensionsResponse(…)` and java features/widgets/Dimensions{Request,Response}.java",
+      "note": "Divergence intact (3 backends one component, 2 backends two); the elixir side is on the majority convention, so the work is on the .NET/java DTO emitters."
+    },
+    {
+      "id": "M-T6.2-s12-vanilla-document-gate",
+      "packet": "elixir",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/ir/validate/checks/system-checks.ts:2060-2108 `validateVanillaDocumentScope` still raises `loom.vanilla-document-unsupported` for `badOps` (:2087-2089, via `docOpUnsupported`/`opHasProvSite` :2056) and `badFinds` (:2082-2086)",
+      "note": "Honest gate, still live; the register row (src/diagnostics/unsupported-register.ts:446-452) carries it as an open `gap` and its scope text already matches the narrowed residue (provenanced ops, derived/dereferenced/non-scalar find predicates) — paged and union finds are admitted."
+    },
+    {
+      "id": "G2646-open-feliz-honest-residue",
+      "packet": "feliz",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/generator/feliz/fs-expr.ts:389, 483, 494, 510, 528 — five bare `throw new Error(\"feliz: …\")` sites with no `loom.*` code; no new ui-checks leaf covers them",
+      "note": "The parameterised-find sub-shapes still fail with a generate-time stack trace rather than a source-spanned diagnostic, and the `.map(λ)` page-body seam is still absent (only the pre-existing `loom.frontend-collection-op-unsupported` at ui-checks.ts:875 covers collection ops)."
+    },
+    {
+      "id": "M-T1.20-feliz-match-await",
+      "packet": "feliz",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/ir/validate/checks/store-checks.ts:429-456 (gate fires for every component host, plus unsupported subjects) with the classifier contract at src/ir/util/feliz-async-effect.ts:9-17; stale prose at docs/new-plan/T1-ui-frontend.md:268",
+      "note": "Neither slice landed — a route-id-less host and a non-aggregate-instance subject are still gated — and the mission line still reads flatly '`match await` unrenderable on Feliz' rather than naming the narrow residue."
+    },
+    {
+      "id": "F2-CFE-11",
+      "packet": "flutter",
+      "P": 3,
+      "status": "open",
+      "evidence": "regenerated twoforms fixture: wng/src/app/pages/home.component.ts:15 and :19 both carry `data-testid=\"items-new\"` (and items-new-input-name / items-new-submit); wfl/lib/pages/home_page.dart emits `const CreateItemForm(), const CreateItemForm(),`; grep for `second` across wng and wfl finds nothing, while wreact/src/pages/home.tsx, wvue/src/pages/home.vue and wsv/src/routes/(app)/+page.svelte all emit second / second-input-name / second-submit",
+      "note": "Confirmed open on both targets; note the row is filed kind=honest but there is no diagnostic — `ddd parse` on the fixture is 0 errors / 0 warnings, so it is silent in practice. [Contamination check: bin/cli.js probe RE-RUN 2026-08-31 05:53 UTC against the post-05:42 rebuild (`npx tsc -b` clean, no-op); output byte-identical, verdict unchanged.]"
+    },
+    {
+      "id": "F2-W-07",
+      "packet": "java",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/generator/java/emit/api.ts:382 (`public Paged<${agg}Response> …`) and src/generator/java/emit/openapi-customizer.ts:387-389 (paged-find route pushed with no successRef/wrapper)",
+      "note": "A DECLARED `find … paged` still returns the raw generic, so springdoc names the component `PagedWidgetResponse` while the auto-findAll at api.ts:468 emits the named `<Agg>Paged` the other four backends publish; the customizer registers `<Agg>Paged` only for `isPagedAutoAll` (line 305)."
+    },
+    {
+      "id": "M-T6.36",
+      "packet": "java",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/ir/validate/checks/system-checks.ts:2506,2513 and :2524,2531; register rows src/diagnostics/unsupported-register.ts:253,262",
+      "note": "Both honest rejections (`loom.java-workflow-instance-field-unsupported`, `loom.java-projection-field-unsupported`) are still live with their kind:\"gap\" register rows; no open PR touches these guards (#2682 edits system-checks.ts but only for the diagnostic-firing census)."
+    },
+    {
+      "id": "M-T5.5-stdlib-tail",
+      "packet": "macros",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/language/validators/toplevel-function.ts:7-9 (`loom.function-toplevel-block` still refuses the block form); src/ir/util/feliz-persist-codec.ts:27 and flutter-persist-codec.ts:84 still gate `duration` as non-storable; the prelude is still built in code at src/macros/prelude.ts (no std/*.ddd — `ls std` → nothing)",
+      "note": "All three sub-items untouched by #2668/#2690/#2694; honest gaps (a real diagnostic, not a silent drop), so nothing regressed — just unbuilt."
+    },
+    {
+      "id": "M-T3.7-e-claim-typed-capability-fields",
+      "packet": "macros",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/macros/prelude.ts:135-136 — buildTenantOwned still hardcodes `field(\"tenantId\", primType(\"string\"))`; the honest gate still fires at src/ir/validate/checks/tenancy-checks.ts:460-475 (`loom.tenant-owned-claim-type`)",
+      "note": "Unchanged; open PR #2696 touches tenantOwned but is a different defect (the document-shape create path never stamps tenantId), so it does not claim this row."
+    },
+    {
+      "id": "G2646-open-node-mounts-ui-false",
+      "packet": "node-ts",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/platform/metadata.ts:170",
+      "note": "node is still the sole `mountsUi: false` descriptor (mirrored at src/platform/hono/v4/index.ts:60), and docs/platforms.md records no settled non-goal for it — neither branch of the recorded fix was taken."
+    },
+    {
+      "id": "F2-CB-C10-tph-stance-not-inherited",
+      "packet": "validator-diagnostics",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/ir/util/tenant-stance.ts:527 hasTenantOwned reads `agg.capabilities` only, :568-576 classifyTenantStance never walks the supertype chain; message unchanged at src/diagnostics/messages.ts:2486. REPRODUCED: abstract `Vehicle with tenantOwned` + `Car extends Vehicle` → `loom.tenancy-stance-unmarked Fleet/Car`",
+      "note": "Neither remedy landed — the stance still does not inherit and the message still tells the author to add a marker they wrote on the base."
+    },
+    {
+      "id": "F2-CB-C9-requires-unknown-message",
+      "packet": "validator-diagnostics",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/language/validators/structural.ts:288 / statements.ts:157,254 still typeOf()-gate on bool; REPRODUCED verbatim: `destroy { requires Rules.isCancellable(quantity) }` → \"'requires' must be of type 'bool', got 'unknown'\", and the identical expression with `&& true` appended parses 0 errors",
+      "note": "The statement-level typeOf still fails to resolve a domainService member call's declared return type while the binary-chain checker resolves it — the two validators still disagree, and the workaround is still one token away."
+    },
+    {
+      "id": "F2-EXPR-5",
+      "packet": "validator-diagnostics",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/language/validators/types.ts:391-397 still applies literalPromotionAnchor BEFORE the arithmetic check; REPRODUCED: `derived a: money = discount * 2`, `= discount / 2`, `= discount * 2.5` all rejected as \"left is 'money', right is 'money'\" by a message that lists money × {int|long|decimal} as allowed",
+      "note": "#2670 (merged) fixed the RENDER leaves only; the AST-validator half (and the mirrored promotion in lower-expr.ts) is untouched — `discount * n` with an int VARIABLE still passes, so it is literal-only."
+    },
+    {
+      "id": "M-T1.20-collection-op-gate-misclassified",
+      "packet": "validator-diagnostics",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/diagnostics/unsupported-register.ts:235-242 still records loom.frontend-collection-op-unsupported as `kind: \"gap\"`, mission M-T1.20",
+      "note": "Not touched by #2682 (its diff is census pins in structural-checks/system-checks + test files only); the deliberate permanent gate is still registered as drainable."
+    },
+    {
+      "id": "M-T3.15-E2-getbyid-no-gate-surface",
+      "packet": "validator-diagnostics",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/diagnostics/messages.ts:660 loom.find-reserved-name still rejects shadowing `getById`, and no repository/policy surface admits a gate on the by-id read",
+      "note": "Unchanged; the row itself says it only needs its own fix if C2 (retiring the synthesized CRUD reads) is declined."
+    },
+    {
+      "id": "M-T5.19-a-workflow-test-anchor",
+      "packet": "validator-diagnostics",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/language/ddd.langium:1460-1461 `WorkflowMember: WorkflowCreateDecl | Apply | OnDecl | HandleDecl | Property | FunctionDecl;` — still no TestBlock arm",
+      "note": "Grammar, checkTestPlacement and WorkflowIR are all unchanged; the VO/domainService anchors remain the only test hosts."
+    },
+    {
+      "id": "F2-CFE-10",
+      "packet": "validator-diagnostics",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/language/validators/i18n-strings.ts:63-82 checkUserVisibleConcat rejects only a `+` chain (stringConcat at :40) and skips every other non-literal slot; src/generator/_walker/i18n-extract.ts:54 literalString returns undefined for a match/ternary, so its arms are never catalogued",
+      "note": "The asymmetry stands: `+` in a user-visible slot is a hard error, a `match` producing the same literals ships raw English past `ddd i18n check --strict` (shipped example web/src/examples/expression-showcase.ddd:231)."
+    },
+    {
+      "id": "M-T1.10-handler-vocabulary",
+      "packet": "validator-diagnostics",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/language/validators/ui.ts:390-440 checkUiNotification still admits exactly `toast(<expr>)` and `refetch(<Agg>…)`; anything else raises loom.ui-handler-statement-unknown",
+      "note": "Unchanged — navigate, a state write and an optimistic patch remain unreachable; this is a scope decision, not a defect."
+    },
+    {
+      "id": "M-T5.3-nested-carriers-and-option",
+      "packet": "validator-diagnostics",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/language/validators/generics.ts:103 still raises loom.generic-arg-not-carrier#nested-generic-carriers (message src/diagnostics/messages.ts:313); `T option` still lowers via src/ir/lower/lower-types.ts",
+      "note": "Unchanged; the row is a re-scope note (the open work is PATCH semantics + page-aware hooks, not the carrier)."
+    },
+    {
+      "id": "feliz-flutter-persist-codec-asymmetry",
+      "packet": "validator-diagnostics",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/ir/util/feliz-persist-codec.ts:81 felizPersistCodec still gates datetime/duration/guid/enum and maps json→string; src/ir/util/flutter-persist-codec.ts:64,76-84 flutterPersistCodec covers id/enum/datetime/guid and gates json — the two covered sets still differ in both directions",
+      "note": "No union drain and no set-equality matrix test; `persist:` over a datetime/enum ships on flutter and is refused on feliz, over json the reverse."
+    },
+    {
+      "id": "workflow-projection-rename-unexpressible",
+      "packet": "validator-diagnostics",
+      "P": 3,
+      "status": "open",
+      "evidence": "src/language/ddd.langium:111-112 `TableRename: fromTable=ID '->' toAggregate=[Aggregate:ID];` — live side still Aggregate-only",
+      "note": "Unchanged; today's behaviour stays honest only because the destructive-migration gate hard-stops the drop+create."
+    }
+  ]
+}

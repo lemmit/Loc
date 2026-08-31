@@ -73,11 +73,77 @@ an empty commit on `main` (`f4df492`/`#2419`) when two agents fixed the same def
 > **Resolved 2026-08-31 — a pre-allocation PR is impossible; the reserved-names table is the only form.** Both register gates refuse an un-raised entry, by design:
 > `test/system/unsupported-register.test.ts` invariant 2 — *"every registered code is STILL EMITTED — a drained gap must delete its row in the same PR, so the register ratchets down instead of becoming a graveyard"*; and `test/system/diagnostic-catalog.test.ts` invariant 3 — *"No orphans — every catalog entry is reachable from a call site."* A row minted ahead of its raiser fails both. That is the right behaviour and should not be weakened for a fleet's convenience.
 >
-> So W0-B publishes an **allocation table** instead, and each worker adds its own catalog row *in the same PR as the raiser*. Collision-free anyway, for a reason worth stating: `messages.ts` (514 keys) is **thematically grouped, not alphabetical** — so each packet's codes land in a different region of the file by construction, and disjoint-region inserts 3-way-merge cleanly. The table therefore assigns each reserved name **an anchor key to insert after**, not just the name. Workers insert at their anchor and never reflow the file.
+> So W0-B publishes an **allocation table** instead, and each worker adds its own catalog row *in the same PR as the raiser*. Collision-free anyway, for a better reason than the one first assumed: `messages.ts` is not merely "thematically grouped" — it is **sectioned by SOURCE FILE**, one banner per validator/check leaf (`// src/ir/validate/checks/ui-checks.ts`, `// src/language/validators/seed.ts`, …). That makes the allocation key mechanical rather than editorial:
+>
+> ### The allocation rule
+>
+> **Your new code goes in the section named after the check leaf you raise it from.** Two packets raising from different leaves land in different regions of the file automatically and 3-way-merge cleanly. Insert at your section; never reflow the file.
+>
+> ### Slot demand, measured (W0-A output)
+>
+> **33 of the 99 remaining rows need a new diagnostic.** By packet: elixir 6, walker-shared 5, dotnet-adapters 4, node-ts 4, feliz 4, macros 4, wire-openapi 2, flutter 2, frontend-js 1, java 1.
+>
+> ### The three contended sections — the only places the rule needs a tie-break
+>
+> | Section | Contending packets | Tie-break |
+> |---|---|---|
+> | `checks/ui-checks.ts` (the largest, ~780 catalog lines) | walker-shared, feliz, flutter, frontend-js | **walker-shared lands first** (it is dispatched first anyway and blocks the other three). The frontend packets rebase onto its section. |
+> | `checks/system-checks.ts` (~650 lines) | dotnet-adapters, node-ts, elixir, wire-openapi | Ordered by the wave's existing golden order: elixir → node-ts → dotnet-adapters, then wire-openapi (already sequenced last). |
+> | `validators/seed.ts` | elixir only — but the SEED family is a **cross-backend slice** (below) | The slice owner holds the section; per-packet agents do not touch it. |
+>
+> Everywhere else the leaf is unique to one packet, so the rule alone suffices and no table entry is needed.
 
-**Why W0-A is not optional:** two of my own audit's five recommendations were already
-overtaken within 24 hours. A fleet dispatched off a stale register spends its first hour
-rediscovering merges.
+**Why W0-A is not optional:** two of the audit's five recommendations were already overtaken
+within 24 hours. A fleet dispatched off a stale register spends its first hour rediscovering
+merges.
+
+### Wave 0-A — EXECUTED 2026-08-31 · all 134 P0–P2 rows reconciled
+
+Seven read-only Opus agents, one per packet group; every verdict re-derived from code or
+generated output, never from PR prose. Results are stamped per-row onto
+`targets-completeness-2026-08-30.ledger.json` (`reconciled` field) with
+[`…remaining.json`](../audits/targets-completeness-2026-08-30.remaining.json) as the
+dispatch input for waves 1–2.
+
+| | rows |
+|---|---|
+| drained by #2668 / #2694 / #2690 | **34** |
+| partial | **11** |
+| open | **88** |
+| stale (premise wrong when written) | 1 |
+| **remaining** | **99** — 7 P0 · 29 P1 · 37 P2 · 26 P3 |
+| claimed by an open PR | **0** (all 13 checked by every agent) |
+
+The three merges drained ~25% of the ledger — well short of the ~44 rows their bodies
+implied. Drain is very unevenly distributed, and that reshapes the waves below:
+
+- **`validator-diagnostics` is effectively done for this plan's purposes** — 11 of 24
+  drained, and **all nine of its P0/P1 rows** are drained with a fix site *and* a passing
+  test. Both sequencing prerequisites are confirmed closed, each by two agents
+  independently: **VAL-1** (`checkDerived` crash guard, `validators/types.ts:719`, pinned by
+  `validator-never-throws.test.ts:131`) and **`ir-warnings-invisible-in-cli`**
+  (`cli/main.ts:236-242` for `parse`, `:505-510` for `generate system`, pinned by
+  `parse-ir-validation.test.ts:151-175`). Every later "I added an honest gate" claim is now
+  provable. *Residue for a later wave: `ddd snapshot` (`main.ts:690`) and `ddd verify`
+  (`main.ts:855`) still drop warnings on the success path.*
+- **Wave 2 is fully intact** — `frontend-js` 10/10, `flutter` 6/6, `feliz` 7/7,
+  `wire-openapi` 5/5 open. Nothing merged touched them.
+- **The `SEED-*` family is untouched and is the sharpest unclaimed slice** — `seed-emit.ts`,
+  `_persistence/seed-datasets.ts` and `sql-pg.ts` have no commits since #2609
+  (independently confirmed by timestamp: `tsc -b` found nothing to rebuild in
+  `out/generator/elixir/vanilla/seed-emit.js`). It carries a P0 —
+  `F2-SEED-TENANT-NULL`, seeds inserting with `tenant_id` NULL on a `tenantOwned`
+  aggregate — plus three P1s, and it spans backends. Promote it to a **cross-packet slice
+  with its own owner**, alongside the TPH cluster.
+- **The TPH cluster is the other P0 concentration** — 3 of the 7 P0s
+  (`F2-CB-C2` dotnet, `F2-CB-C3`/`C4` node, `F2-CB-C11` elixir), one root cause, all
+  re-reproduced byte-for-byte. Already sequenced as a cross-packet slice; W0-A confirms it
+  is the right call.
+
+**Two corrections to the packet notes**, from the reconciliation:
+`F2-ADP-7`'s remaining arm is **Java** (`java/emit/entity.ts:429`), not an efcore-vs-dapper
+split — both .NET adapters are fixed. `F2-CB-C1-paged-nonrelational`'s remaining arms are
+**dotnet, python and elixir**; node is drained. Both rows therefore move packet.
 
 ---
 
