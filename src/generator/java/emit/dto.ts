@@ -183,7 +183,7 @@ export function renderDtoFiles(
         type: eff(f.type, !isRequiredCreateInput(f)),
       }))
     ).map((f) => {
-      collectWireImports(f.type, imports);
+      collectWireImports(f.type, imports, "Request");
       return `${wireJavaType(f.type, "Request")} ${f.name}`;
     });
     out.push({
@@ -198,7 +198,7 @@ export function renderDtoFiles(
     if (op.params.length === 0) continue;
     const imports = new Set<string>();
     const components = op.params.map((p) => {
-      collectWireImports(p.type, imports);
+      collectWireImports(p.type, imports, "Request");
       if (isOptionalType(p.type)) return `${wireJavaType(p.type, "Request")} ${p.name}`;
       // RS-26: an omitted operation param must be REJECTED, not silently
       // zero-valued.  A primitive component cannot express absence — Jackson
@@ -308,7 +308,7 @@ function voRecord(
   const imports = new Set<string>();
   const components = fields.map((f) => {
     const t = eff(f.type, f.optional);
-    collectWireImports(t, imports);
+    collectWireImports(t, imports, dir);
     return `${wireJavaType(t, dir)} ${f.name}`;
   });
   const body =
@@ -357,7 +357,7 @@ function wireRecord(
     const idW = forApiRead(wireFieldsFor(entity)).find((w) => w.source === "id");
     if (idW) {
       const t = wireFieldType(idW);
-      collectWireImports(t, imports);
+      collectWireImports(t, imports, "Response");
       components.push(`${wireJavaType(t, "Response")} ${idW.name}`);
       args.push(domainToWire(t, `value.${accessor(idW)}`));
     }
@@ -370,7 +370,7 @@ function wireRecord(
       if (provNames.has(f.name)) {
         imports.add(`${basePkg}.domain.common.${JAVA_PROVENANCED_RECORD}`);
         imports.add(`${basePkg}.domain.common.ProvLineage`);
-        collectWireImports(f.type, imports);
+        collectWireImports(f.type, imports, "Response");
         components.push(
           `${JAVA_PROVENANCED_RECORD}<${wireJavaType(f.type, "Response", true)}> ${f.name}`,
         );
@@ -392,7 +392,7 @@ function wireRecord(
       // component is shared by both mappers; `from` still projects the real value
       // (auto-boxed), only `fromMasked` may pass null.
       const t = masked ? eff(wireFieldType(w), true) : wireFieldType(w);
-      collectWireImports(t, imports);
+      collectWireImports(t, imports, "Response");
       const carried = provenancedCarrier(t);
       if (carried) {
         // The carrier is a generated `domain.common` record (M-T6.12); its
@@ -500,7 +500,7 @@ function payloadFieldJavaType(
     }
     return base.name;
   }
-  collectWireImports(t, imports);
+  collectWireImports(t, imports, "Response");
   return wireJavaType(t, "Response");
 }
 

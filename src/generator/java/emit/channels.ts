@@ -243,7 +243,19 @@ export function renderJavaChannelFiles(
         : []),
       `        Map<String, Object> data) {`,
       ``,
-      `    private static final JsonMapper JSON = JsonMapper.builder().build();`,
+      // WRITE_BIGDECIMAL_AS_PLAIN (M-T6.46): the REST response path no longer
+      // hands Jackson a `BigDecimal` (a response `decimal` is a `double`), but
+      // the CloudEvents `data` map still does — `toDataExpr` converts
+      // datetime/money/id/enum and passes a plain `decimal` through raw.  Left
+      // at the default, a negative-scale value serializes in SCIENTIFIC
+      // notation (`1E+40`), which a consumer on another backend reads as a
+      // different literal than the one java holds.  This pins PLAIN notation;
+      // it does not change the value, and it deliberately does NOT redefine the
+      // broker's numeric precision contract (that gap is cross-backend — .NET's
+      // channel codec has the identical raw-decimal shape).
+      `    private static final JsonMapper JSON = JsonMapper.builder()`,
+      `        .enable(tools.jackson.core.StreamWriteFeature.WRITE_BIGDECIMAL_AS_PLAIN)`,
+      `        .build();`,
       ``,
       `    public String toJson() {`,
       `        var m = new LinkedHashMap<String, Object>();`,

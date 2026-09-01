@@ -489,7 +489,7 @@ export function renderJavaService(
       // controller wraps it in `ResponseEntity.ok`).  Void ops (no returnType)
       // stay `void` + discard.
       const scalarReturn = !spec && !!op.returnType;
-      if (scalarReturn) collectWireImports(op.returnType!, imports);
+      if (scalarReturn) collectWireImports(op.returnType!, imports, "Response");
       const returnsValue = !!spec || scalarReturn;
       const retType = spec
         ? spec.name

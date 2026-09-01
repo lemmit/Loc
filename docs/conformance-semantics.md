@@ -728,7 +728,9 @@ the conforming backends, and the fix that established it.
   set reached the dapper + mikroorm legs. Tier: **behavioral**.
 
 ### RS-24 · A plain `decimal` is a JSON **number**; only `money` is a string
-- **Guarantee.** A `decimal` field serializes as a JSON number (`9.99`, `5`).
+- **Guarantee.** A `decimal` field serializes as a JSON number (`9.99`, `5`) —
+  and as the **same** number every other backend sends: the wire width is an
+  IEEE-754 double (≤17 significant digits), whatever the backend computes in.
   This is the deliberate counterpart to [RS-12](#rs-12--money-wire-scale-is-consistent-across-backends),
   where `money` is a fixed-scale **string** (`"19.5000"`) so no float rounding can
   touch a monetary amount. The two types differ on the wire, and a backend must
@@ -747,9 +749,36 @@ the conforming backends, and the fix that established it.
   plain-decimal wire entries — property, *derived*, and `decimal[]` element
   alike. `to_float` reproduces the **oracle** exactly rather than merely
   narrowing the gap: node's value is a float64 to begin with.
+- **The narrowing half.** "A JSON number" was never the whole rule — it is the
+  *same* number. A backend whose domain type is wider than a double has to
+  narrow at the **wire boundary**, response direction only:
+  - **.NET** (#2563 / #2575): a response `decimal` is a `double`. `System.Decimal`
+    carries ~15 significant digits, so a non-terminating `avg` shipped
+    `2.33333333333333` where the oracle shipped `2.3333333333333335`.
+  - **Java** (M-T6.46, amending this rule): the domain type is `BigDecimal` and a
+    `derived` division renders through `MathContext.DECIMAL128`, so an
+    un-narrowed response shipped up to **34** significant digits. Java's
+    conformance here was **partial** until then — the wire *was* a JSON number,
+    but only the projection `avg` arm was double-parity, and only by the
+    provider's accident of typing an average as a `Double`; sums, per-row and
+    derived reads all shipped exact digits.
+  - The **request** direction deliberately stays on the wide type in both:
+    a `double` request field turns an out-of-range **400** into a conversion
+    **500**. A client may send more precision than it reads back.
+- **Why the differential could not see the java half.** The wire-golden
+  comparator JSON-parses both bodies before diffing (`test/_helpers/wire-record.ts`),
+  which collapses every JSON number to a JS double. *Deficient* precision changes
+  the parsed double and fails; **excess** precision parses to the identical double
+  and can never fail. `WIRE_WAIVERS` is empty, and no golden moved when java was
+  fixed. See the audit's F16 → **M-T9.37**.
 - **Conforms.** node, dotnet, java, python, elixir.
 - **Provenance.** Found 2026-08-01 by the M-T9.11 gate on the elixir leg
-  (`value-collections` `$.lineItems[*].amount`). Tier: **behavioral**.
+  (`value-collections` `$.lineItems[*].amount`); extended to .NET by #2563/#2575;
+  amended 2026-08-24 for java by the numeric-types audit
+  ([F9](audits/numeric-types-audit-2026-08-23.md), register #2644) → M-T6.46.
+  Tier: **behavioral** (the java half is pinned statically by
+  `test/generator/java/java-decimal-wire.test.ts`, since the behavioral gate is
+  blind to it).
 
 ### RS-25 · `internal` / `secret` fields never reach the read wire
 - **Guarantee.** A field declared `internal` (domain-only state) or `secret`

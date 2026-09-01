@@ -319,7 +319,14 @@ export function emitJavaApiClients(
     // `JsonMapper.builder().build()`, not `new ObjectMapper()`: the Jackson 3
     // idiom the rest of the Java emitters use (module discovery is automatic,
     // so there is no `findAndRegisterModules()` to call).
-    "    private static final ObjectMapper MAPPER = JsonMapper.builder().build();",
+    // WRITE_BIGDECIMAL_AS_PLAIN (M-T6.46): a `decimal`/`money` call param is a
+    // `BigDecimal` here (`javaParamType`) and goes straight into the outbound
+    // body, so this mapper is one of the few places a BigDecimal still reaches
+    // a wire after the response-side narrowing.  Plain notation, not `1E+40` —
+    // the callee is another Loom backend whose ingress parses a JSON literal.
+    "    private static final ObjectMapper MAPPER = JsonMapper.builder()",
+    "        .enable(tools.jackson.core.StreamWriteFeature.WRITE_BIGDECIMAL_AS_PLAIN)",
+    "        .build();",
     "",
     "    private static String enc(String v) {",
     "        return URLEncoder.encode(v, StandardCharsets.UTF_8);",

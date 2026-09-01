@@ -269,7 +269,7 @@ export function renderJavaController(
         // it sits in a generic position — `ResponseEntity<boolean>` doesn't
         // compile (`operation taken(): bool`).
         const wireRet = wireJavaType(op.returnType, "Response", true);
-        collectWireImports(op.returnType, imports);
+        collectWireImports(op.returnType, imports, "Response");
         return [
           opMapping,
           hasParams

@@ -96,7 +96,7 @@ function renderInstanceResponseDto(wf: WorkflowIR, wctx: WorkflowInstancesCtx): 
   const wireImports = new Set<string>();
   const components = shape.map((f) => {
     guardInstanceField(wf, f);
-    collectWireImports(f.type, wireImports);
+    collectWireImports(f.type, wireImports, "Response");
     return `${wireJavaType(f.type, "Response")} ${f.name}`;
   });
   return lines(
