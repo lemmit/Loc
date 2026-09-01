@@ -5366,3 +5366,47 @@ fails as an unknown class rather than as a silent zero) — mutation-proved all
 three ways. The same pass found the register's line-range citations
 (`:492-579`) had moved twice; the doc rows now say *grep the array*, because a
 line range is the same cache with the same missing invalidation.
+
+## 92. A waiver names a suspicion, not a diagnosis — and `basename` is not a unique key (2026-09-01)
+
+Three fixtures have now been drained from `E2E_LESS_CORPUS_FIXTURES`. All
+three were hiding a live defect no compile tier could see, which is the
+register's whole thesis. The newer and more useful finding is about the
+**waiver text itself**: in two of the three, the blocker the entry NAMED was
+not the blocker.
+
+| Fixture | The waiver said | What was true |
+|---|---|---|
+| `policy-deny` | no runtime caller | `deny` rendered correctly into the *wrong query site* |
+| `policy-document` | blocked on the multi-principal harness (which had landed) | the harness was fine; `tenantOwned` + `shape: document` never stamped the tenant on 4 of 7 write paths |
+| `lifecycle-guard` | blocked on "the harness claim set" | widening the harness changes nothing — **four emitters** dropped the array claim before it reached `currentUser` |
+
+`lifecycle-guard` is the sharpest. Its entry said `DEV_CLAIMS` "is pinned to
+STRING claims because the non-node backends honour only strings". Every word
+is true, and the conclusion a reader draws from it — *edit the constant* — is
+wrong. The string-pinning was a SYMPTOM of four hard-coded emitter filters, and
+a widened constant would have been silently discarded exactly as before. I
+wrote that framing into two plan rows myself, from #2696, before auditing the
+emitters; the audit falsified it in one pass.
+
+**So: re-derive a waiver's blocker against the code before believing it.** A
+waiver is written at the moment someone gave up, by someone who had a theory.
+The theory is the least-verified thing in the file.
+
+The structural cause was one contract with four independent implementations —
+§89 one layer up. The fix was to make it one classifier with four readers;
+the proof is that seeding a defect in the shared classifier now fails all four
+backends' tests at once, which no per-backend copy could ever do.
+
+**And a mechanical trap worth its own line.** Backing up files before a
+mutation, I used `$(basename $f)` as the backup name over
+`dotnet/auth-emit.ts` and `elixir/auth-emit.ts`. Both basename to `auth-emit`,
+so the second backup silently clobbered the first and the "revert" copied the
+ELIXIR file over the DOTNET one. §84 says revert by file copy rather than
+`git checkout --`; the corollary it did not say is that **the backup name must
+be as unique as the path is**. Use the full path with separators flattened
+(`dotnet-auth-emit.bak`), and verify the revert restored the file you meant —
+`grep -c` for a token only that file contains — rather than assuming `cp`
+succeeded because it printed nothing. I caught it in seconds because `git
+status` showed two modified auth files where I expected one; without that
+glance the dotnet fix would have vanished into a "successful" mutation proof.

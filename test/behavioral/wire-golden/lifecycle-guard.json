@@ -1,0 +1,245 @@
+{
+  "case": "lifecycle-guard",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/shipments",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "GET",
+      "path": "/api/shipments/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "quantity": 0,
+        "reference": "SH-1",
+        "version": 1
+      }
+    },
+    {
+      "seq": 2,
+      "method": "POST",
+      "path": "/api/crates",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/crates/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "label": "C-1",
+        "version": 1
+      }
+    },
+    {
+      "seq": 4,
+      "method": "POST",
+      "path": "/api/shipments/{id}/restock",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 5,
+      "method": "DELETE",
+      "path": "/api/shipments/{id}",
+      "status": 403,
+      "body": {
+        "detail": "Forbidden: currentUser.permissions.contains(permissions.manage) && quantity == 0",
+        "instance": "/api/shipments/{id}",
+        "status": 403,
+        "title": "Forbidden",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/shipments/{id}",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "quantity": 3,
+        "reference": "SH-1",
+        "version": 2
+      }
+    },
+    {
+      "seq": 7,
+      "method": "POST",
+      "path": "/api/shipments",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 8,
+      "method": "DELETE",
+      "path": "/api/shipments/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 9,
+      "method": "GET",
+      "path": "/api/shipments/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Shipment {id} not found",
+        "instance": "/api/shipments/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/api/crates",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "<volatile:key>",
+            "label": "C-1",
+            "version": 1
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/api/shipments",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "<volatile:key>",
+            "quantity": 3,
+            "reference": "SH-1",
+            "version": 2
+          }
+        ],
+        "page": 1,
+        "pageSize": 20,
+        "total": 1,
+        "totalPages": 1
+      }
+    },
+    {
+      "seq": 12,
+      "method": "DELETE",
+      "path": "/api/crates/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 13,
+      "method": "GET",
+      "path": "/api/crates/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Crate {id} not found",
+        "instance": "/api/crates/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 14,
+      "method": "PATCH",
+      "path": "/api/shipments",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/shipments",
+        "instance": "/api/shipments",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 15,
+      "method": "GET",
+      "path": "/__loom_no_such_path",
+      "status": 404,
+      "body": {
+        "detail": "no route for GET /__loom_no_such_path",
+        "instance": "/__loom_no_such_path",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 16,
+      "method": "POST",
+      "path": "/api/shipments",
+      "status": 400,
+      "body": {
+        "detail": "Malformed JSON in request body",
+        "instance": "/api/shipments",
+        "status": 400,
+        "title": "Bad Request",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 17,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "permissions": []
+      }
+    },
+    {
+      "seq": 18,
+      "method": "POST",
+      "path": "/api/crates",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 19,
+      "method": "DELETE",
+      "path": "/api/crates/{id}",
+      "status": 403,
+      "body": {
+        "detail": "Forbidden: currentUser.permissions.contains(permissions.manage)",
+        "instance": "/api/crates/{id}",
+        "status": 403,
+        "title": "Forbidden",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 20,
+      "method": "DELETE",
+      "path": "/api/crates/{id}",
+      "status": 204,
+      "body": ""
+    }
+  ]
+}
