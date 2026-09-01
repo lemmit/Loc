@@ -5411,27 +5411,53 @@ succeeded because it printed nothing. I caught it in seconds because `git
 status` showed two modified auth files where I expected one; without that
 glance the dotnet fix would have vanished into a "successful" mutation proof.
 
-## 93. A cancelled CI run is a permanent red, and "up to date" beats "stale check" as the merge-block diagnosis (2026-09-01)
+## 93. A cancelled CI run is a permanent red — and the merge-block I "explained" I had not actually diagnosed (2026-09-01)
 
 Two merge blocks on one PR, both mis-diagnosed on the first pass, both worth
 recognising by shape.
 
-**Block 1 — «Required status check "pr-gate" is expected», with pr-gate
-already green on the head.** My first reading was the one `pr-gate.yml`'s own
-header invites: `workflow_run` delivery is best-effort, a dispatch got dropped,
-the `*/15` sweep will fix it. Wrong, and the evidence was in plain sight — the
-sweep had had **eight hours and ~32 passes** and changed nothing. The real
-cause: `main` had drifted 5 commits while the session idled, and under strict
-required-checks GitHub evaluates against the **updated merge ref**, where no
-checks have run. The required check is not stale, it is ABSENT for the state
-being merged. The sweep can never help, because it "posts only where it
-differs" and the check on the head SHA already says success.
+**Block 1 — «Required status check "pr-gate" is expected», with a SUCCESSFUL
+pr-gate check already on the head.** I produced two confident explanations and
+BOTH were wrong. The lasting value of this entry is that failure, not the
+symptom.
 
-The tell that separates them: **is the base behind?** `git rev-list --count
-origin/<branch>..origin/main`. Non-zero ⇒ update the branch
-(`update_pull_request_branch`, a merge commit — never a rebase or force-push on
-a PR branch). Zero ⇒ then it may really be a dropped dispatch, and the sweep is
-the remedy. Checking that costs one command and rules out the wrong fix.
+*First theory:* the one `pr-gate.yml`'s own header invites — `workflow_run`
+delivery is best-effort, a dispatch got dropped, the `*/15` sweep will fix it.
+Falsified by evidence already on screen: the sweep had had **eight hours and
+~32 passes** and changed nothing.
+
+*Second theory, which I wrote into this file as fact:* `main` had drifted 5
+commits, and under strict required-checks GitHub evaluates against the updated
+merge ref where no checks have run, so the check is ABSENT rather than stale.
+Plausible, tidy, and **false**. It was falsifiable from two commits of git
+history I already had: PR #2696 merged cleanly from base `b8de88919` while
+`main` was a commit ahead. This repo does not require an up-to-date branch —
+confirmed twice over when #2717 itself merged **4 commits behind** `main`.
+
+**What is actually known**, and all that should be claimed:
+- the merge 405'd while a `pr-gate` check run with `conclusion: success` sat on
+  the head SHA (posted 03:50:41Z on `df7196b03`);
+- the `*/15` sweep never cleared it;
+- what DID clear it: `update_pull_request_branch`, then a new commit (fresh
+  SHA), then a fresh `pr-gate` evaluation on that SHA. Which of those three was
+  load-bearing is **undetermined** — most likely the fresh evaluation, since
+  base drift is now ruled out.
+
+**The mechanism is unresolved. Do not invent one.** The evidence that would
+settle it: while a PR is in this state, compare the ruleset's required-check
+definition against the posted check run's `app` field — a required check pinned
+to a different integration identity than the one posting it would produce
+exactly this "expected" message. Until someone looks, the honest remedy is
+empirical: a fresh SHA and a fresh evaluation.
+
+**The meta-lesson, which is the real one.** §92 says a waiver names a suspicion,
+not a diagnosis. One entry later I did the same thing to myself: a plausible
+causal story, written down as mechanism, with a counter-example sitting in
+`git log`. A story that explains the symptom is not a diagnosis until you try
+to break it. When the fix is empirical and the mechanism is not established,
+**write down the fix and label the mechanism unknown** — a confident wrong
+cause in this file is worse than a blank, because the next reader stops
+looking.
 
 **Block 2 — a CANCELLED run is a permanent red.** `scripts/pr-gate.mjs:32-60`
 is explicit: a cancelled run counts as FAILED (`PASSING_CONCLUSIONS` is
