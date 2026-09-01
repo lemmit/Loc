@@ -5410,3 +5410,47 @@ be as unique as the path is**. Use the full path with separators flattened
 succeeded because it printed nothing. I caught it in seconds because `git
 status` showed two modified auth files where I expected one; without that
 glance the dotnet fix would have vanished into a "successful" mutation proof.
+
+## 93. A cancelled CI run is a permanent red, and "up to date" beats "stale check" as the merge-block diagnosis (2026-09-01)
+
+Two merge blocks on one PR, both mis-diagnosed on the first pass, both worth
+recognising by shape.
+
+**Block 1 — «Required status check "pr-gate" is expected», with pr-gate
+already green on the head.** My first reading was the one `pr-gate.yml`'s own
+header invites: `workflow_run` delivery is best-effort, a dispatch got dropped,
+the `*/15` sweep will fix it. Wrong, and the evidence was in plain sight — the
+sweep had had **eight hours and ~32 passes** and changed nothing. The real
+cause: `main` had drifted 5 commits while the session idled, and under strict
+required-checks GitHub evaluates against the **updated merge ref**, where no
+checks have run. The required check is not stale, it is ABSENT for the state
+being merged. The sweep can never help, because it "posts only where it
+differs" and the check on the head SHA already says success.
+
+The tell that separates them: **is the base behind?** `git rev-list --count
+origin/<branch>..origin/main`. Non-zero ⇒ update the branch
+(`update_pull_request_branch`, a merge commit — never a rebase or force-push on
+a PR branch). Zero ⇒ then it may really be a dropped dispatch, and the sweep is
+the remedy. Checking that costs one command and rules out the wrong fix.
+
+**Block 2 — a CANCELLED run is a permanent red.** `scripts/pr-gate.mjs:32-60`
+is explicit: a cancelled run counts as FAILED (`PASSING_CONCLUSIONS` is
+`success | neutral | skipped`), `latestPerName` keeps only the newest run per
+name, and — quoting the file — *"Nothing clears it: re-evaluation re-reads the
+same cancelled run and the sweep re-derives the same verdict, so the PR is
+unmergeable until it is force-pushed to a fresh SHA."* The comment describes the
+draft→ready double-suite case, where the newer suite supersedes the corpse. The
+case it does not cover is a **lone** cancelled run: nothing supersedes it, so
+the PR is stuck.
+
+So: after any CI cycle, don't only grep for `failure`. **`cancelled` on a run
+with no newer sibling of the same name is as fatal as a failure**, and it reads
+as innocuous ("superseded, normal") because on this repo it usually IS
+superseded. Distinguish by counting runs of that name on the head — one means
+fatal, more than one means look at the newest.
+
+And the cost rule underneath both: on a saturated runner pool (runs sat queued
+75+ min here), a fresh SHA restarts ~50 workflows. So establish *whether
+waiting can possibly work* before waiting. For block 1 the answer was no
+(absent, not stale); for block 2 the answer was no (the file says so). Both
+times, patience would have burned an hour to learn nothing.
