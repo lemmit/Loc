@@ -1566,6 +1566,21 @@ export const DIAGNOSTIC_MESSAGES = {
     `'state { … }' and named 'action's are lifted there today. The emitted project compiles, ` +
     `then fails at request time on the assign that was never made. Move '${p.primitive}' into ` +
     `the page body; the component can keep its layout, display, 'state' and 'action's.`,
+  "loom.page-form-locals-unsupported": (p: {
+    what: unknown;
+    dName: unknown;
+    fw: unknown;
+    labels: unknown;
+    hint: unknown;
+  }) =>
+    `${p.what} declares two forms that would emit the SAME page-local bindings on ` +
+    `deployable '${p.dName}' (frontend '${p.fw}'): ${p.labels}. Every JS frontend splices a ` +
+    `form's mutation hook and form handle in as page-scope consts ('const create = …', ` +
+    `'const { register, handleSubmit, … } = useForm(…)'), and those names come from the design ` +
+    `pack's form templates, so a second form redeclares them. ${p.hint} Split the forms across ` +
+    `two pages, or move one into its own 'component'. (Angular already scopes these locals by ` +
+    `aggregate, which is the shape the fix generalises to a per-form prefix — it needs the ~68 ` +
+    `pack templates that hardcode 'create'/'register'/'handleSubmit' to take one.)`,
   "loom.chart-unsupported-target": (p: { what: unknown; name: unknown; uiFramework: unknown }) =>
     `${p.what} uses 'Chart', which deployable '${p.name}' can't render ` +
     `(frontend '${p.uiFramework}'). Chart ships on every shipping frontend — react, vue, ` +

@@ -58,6 +58,7 @@ import {
   isFindPredicateAdapter,
 } from "../../util/find-predicate-capability.js";
 import { heexComponentHostStateUses } from "../../util/heex-component-host-state.js";
+import { FORM_LOCAL_FRAMEWORKS, formLocalCollisionHosts } from "../../util/form-locals.js";
 import { nonRootFilterFields, rootBaseOf } from "../../util/inheritance.js";
 import { readableProjectionNames } from "../../util/projection-read.js";
 import { opHasProvSite } from "../../util/prov-id.js";
@@ -602,6 +603,45 @@ export function validateHeexComponentHostState(sys: SystemIR, diags: LoomDiagnos
             dName: d.name,
           }),
           source: `${ui.name}/${component}`,
+/** Two forms on one page whose generated page-local bindings collide.
+ *
+ *  HONEST GAP, not a design rule.  Every JS frontend splices a form's mutation
+ *  hook + form handle in as page-scope consts named by the design pack's
+ *  `form-of-decls` / `form-op-decls` templates, and react / svelte / vue name
+ *  them BARE (`create`, `form`, `register`, `handleSubmit`) — so a second form
+ *  on the same page redeclares them.  React and Svelte then fail to build
+ *  (TS2300 / a Svelte compile error), which is loud; VUE dedupes the decl
+ *  strings and compiles, so the second form silently submits the FIRST form's
+ *  mutation with the first form's schema — a `CreateForm { of: Note }` that
+ *  posts an `Item`.  Angular already scopes the locals by aggregate and only
+ *  collides when two forms share an aggregate (+ op).
+ *
+ *  The rule per framework lives in `ir/util/form-locals.ts`, alongside the note
+ *  on which shapes were probed CLEAN and must not be flagged (`CreateForm` +
+ *  `OperationForm`; two `OperationForm`s over different ops).
+ *
+ *  Ratchet: the fix is Angular's aggregate prefix generalised to a per-FORM
+ *  prefix, threaded through the ~68 pack templates that hardcode these names.
+ *  The PR that lands it deletes this gate and its register row. */
+export function validateFormLocalCollisions(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const d of sys.deployables) {
+    for (const { ui, fw } of mountedUis(sys, d)) {
+      if (!FORM_LOCAL_FRAMEWORKS.has(fw)) continue;
+      for (const hit of formLocalCollisionHosts(ui, fw)) {
+        diags.push({
+          severity: "error",
+          code: "loom.page-form-locals-unsupported",
+          message: diagMessage("loom.page-form-locals-unsupported", {
+            what: hit.what,
+            dName: d.name,
+            fw,
+            labels: hit.labels.join(" and "),
+            hint:
+              fw === "vue"
+                ? "On vue this does NOT fail the build — the duplicate declarations are deduped, so the second form silently submits the first form's mutation and schema."
+                : "The duplicate declarations are a compile error in the generated project.",
+          }),
+          source: `${ui.name}/${hit.what}`,
         });
       }
     }

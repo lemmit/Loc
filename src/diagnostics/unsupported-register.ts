@@ -146,6 +146,22 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     mission: "M-T6.35",
   },
   {
+    code: "loom.page-form-locals-unsupported",
+    kind: "gap",
+    site: "src/ir/validate/checks/system-checks.ts:590",
+    what:
+      "two forms on ONE page whose generated page-local bindings collide.  Every JS frontend " +
+      "splices a form's mutation hook + form handle in as page-scope consts named by the design " +
+      "pack's `form-of-decls`/`form-op-decls` templates, and react/svelte/vue name them BARE " +
+      "(`create`, `form`, `register`, `handleSubmit`), so a second form redeclares them — react " +
+      "and svelte fail the generated build (TS2300), vue DEDUPES and silently submits the first " +
+      "form's mutation with the first form's schema.  Angular already scopes the locals by " +
+      "aggregate and only collides on a repeated aggregate(+op).  Drained by threading a " +
+      "per-FORM prefix through the ~68 pack templates that hardcode those names (Angular's " +
+      "aggregate prefix, generalised); that PR deletes this gate, this row, and lowers the pin.",
+    mission: "M-T1.1",
+  },
+  {
     code: "loom.datagrid-unsupported-target",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:353",

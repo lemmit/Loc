@@ -58,6 +58,7 @@ import {
 } from "./realtime-handlers-builder.js";
 import { type AngularRouteDesc, renderAngularRoutes, routePath } from "./routes-emitter.js";
 import { renderAngularStoreModule, storeFileSlug } from "./store-builder.js";
+import { buildAngularValidatorsHelper } from "./validators-helper.js";
 import { angularTarget } from "./walker/angular-target.js";
 import {
   pageComponentName,
@@ -159,6 +160,13 @@ export function generateAngularForContexts(
   // Interactive-table sort helper (M-T1.1) — re-exposed as a component member
   // by any page rendering a sortable Table; emitted unconditionally.
   out.set("src/lib/table-sort.ts", buildTableSortHelper());
+  // Code-point length validators (F2-XB-2) — Angular is the only frontend
+  // deriving NATIVE validators from a `SingleFieldPattern`, and its built-in
+  // `Validators.minLength`/`maxLength` count UTF-16 code units where Loom (and
+  // every other target, via the shared zod schema) counts code points.  Emitted
+  // unconditionally, imported only by the components that carry a length
+  // constraint.
+  out.set("src/lib/loom-validators.ts", buildAngularValidatorsHelper());
 
   // --- Pages — bodies walk through the SHARED markup walker with
   // `angularTarget`; the angularMaterial pack templates own the markup
