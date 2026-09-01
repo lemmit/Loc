@@ -1557,6 +1557,15 @@ export interface PrimitiveSpec {
    *  that renders several roots (a `Table` plus its pager) would occupy two
    *  grid cells instead of one. */
   childWrapper?: string;
+  /** Ready-made markup spliced into the inner block BEFORE / AFTER the
+   *  rendered children — the seam for a slot that is markup rather than an
+   *  attribute.  `Button`'s `icon:` is the case that needs it: the glyph is an
+   *  inline `<span>` inside the button, and it cannot be an attribute because
+   *  `<.button>` declares none (an undeclared attr on a Phoenix function
+   *  component is a `mix compile --warnings-as-errors` failure).  Computed by
+   *  the primitive's own renderer at call time, like `baseClass`. */
+  leadingChildHeex?: string;
+  trailingChildHeex?: string;
 }
 
 /** The attribute NAME of a rendered HEEx attribute fragment (`aria-label={…}` →
@@ -1672,13 +1681,15 @@ export function renderPrimitive(
       ? positional.map((c, i) => renderChild(c, ctx, positionalRole(expr.name, i)))
       : []),
   ];
-  const childrenHeex = (
-    spec.childWrapper
+  const childrenHeex = [
+    ...(spec.leadingChildHeex ? [spec.leadingChildHeex] : []),
+    ...(spec.childWrapper
       ? renderedChildren.map(
           (c) => `<${spec.childWrapper}>\n${indent(c, 2)}\n</${spec.childWrapper}>`,
         )
-      : renderedChildren
-  ).join("\n");
+      : renderedChildren),
+    ...(spec.trailingChildHeex ? [spec.trailingChildHeex] : []),
+  ].join("\n");
   const attrs = namedAttrs.length > 0 ? " " + namedAttrs.join(" ") : "";
   if (childrenHeex.length === 0) {
     return spec.tag.startsWith(".") ? `<${spec.tag}${attrs} />` : `<${spec.tag}${attrs} />`;
@@ -1909,7 +1920,11 @@ export function isAttrRenderable(arg: ExprIR): boolean {
 
 /** Render an attribute VALUE, or `undefined` when the authored value cannot be
  *  one (see {@link isAttrRenderable}) — callers must skip the attribute then. */
-function renderAttrValue(arg: ExprIR, ctx: WalkContext, isStatic: boolean): string | undefined {
+export function renderAttrValue(
+  arg: ExprIR,
+  ctx: WalkContext,
+  isStatic: boolean,
+): string | undefined {
   if (!isAttrRenderable(arg)) return undefined;
   // Quote a literal attribute value with `"` / `&` entity-escaped so a
   // `.ddd`-sourced value can't close the attribute or open an entity
