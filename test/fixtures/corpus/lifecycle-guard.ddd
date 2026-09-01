@@ -120,6 +120,69 @@ system LifecycleGuard {
     }
   }
 
+  // The AUTHORIZED half of every gate.  The denial half is the `AUTHZ_LADDERS`
+  // entry for this fixture (`test/behavioral/cases.mjs`) — the two are written
+  // together on purpose: an always-deny gate fails this block, a NO-OP gate
+  // fails the ladder's `unauthorized` arm, and neither alone can tell the
+  // difference.  That is the same two-halves rule `read-gates` states.
+  //
+  // This could not be written until the dev-stub claim mapper carried a
+  // `string[]`: the gate reads `currentUser.permissions.contains(...)` and four
+  // of five backends silently dropped the array claim, leaving `permissions`
+  // an empty list and every call below a 403 — the block would have asserted
+  // the denial three times over and pinned nothing.
+  test e2e "the manage permission opens all three gates, and the ungated control needs none" against d {
+    // ── GATE 1: principal-only CREATE (no `this` exists yet) ────────────────
+    let ship = api.shipments.create({ reference: "SH-1" })
+    let read = api.shipments.getById(ship)
+    expect(read.reference).toBe("SH-1")
+
+    // ── The UNGATED control: `Crate.create` carries no `requires`. ──────────
+    // Its presence is what stops a backend that gates EVERY route from passing
+    // this block: gate-everything and gate-nothing both satisfy a file where
+    // every call is gated.
+    let crate = api.crates.create({ label: "C-1" })
+    expect(api.crates.getById(crate).label).toBe("C-1")
+
+    // ── GATE 2: principal AND row — `destroy requires ... && quantity == 0` ──
+    // TWO rows, identical principal, different quantity — the only way to show
+    // the ROW half is really evaluated.  `restock` is ungated but carries
+    // `precondition by > 0`, so quantity moves one way only: a row is brought
+    // ABOVE zero, never back down.
+    api.shipments.restock(ship, { by: 3 })
+    // Principal half TRUE, row half FALSE -> refused, and 403 specifically:
+    // the gate denied, it did not fail to find the row (404) or blow up (500).
+    expect(api.shipments.destroy(ship)).toThrow(403)
+    // Still there — the refusal was real, not a swallowed error.
+    expect(api.shipments.getById(ship).reference).toBe("SH-1")
+
+    // A SECOND shipment, left at the default quantity 0.  Same principal, same
+    // route, both halves true -> it destroys.  A backend that evaluates only
+    // the principal half passes this one and fails the 403 above; one that
+    // refuses everything passes the 403 and fails here.  Neither row alone
+    // separates those two, which is why both are here.
+    let zeroed = api.shipments.create({ reference: "SH-2" })
+    api.shipments.destroy(zeroed)
+    expect(api.shipments.getById(zeroed)).toThrow(404)
+
+    // The ungated COLLECTION reads. Cheap, but they are the only assertion
+    // that the list routes answer at all under a permission-gated system —
+    // neither carries a `requires`, so a backend that gates every route (the
+    // inverse of the #2446 defect) shows up here rather than nowhere.
+    let crates = api.crates.all()
+    expect(crates.total).toBe(1)
+    let ships = api.shipments.all()
+    expect(ships.total).toBe(1)
+
+    // ── GATE 3: principal-ONLY destroy, on the audited aggregate ────────────
+    // The gate never reads the loaded row, so this is the arm where a backend
+    // that hoists the guard above the load still passes — and the audited
+    // write path is where a denial can land on the wrong side of the staged
+    // row (the .NET #2450 shape).
+    api.crates.destroy(crate)
+    expect(api.crates.getById(crate)).toThrow(404)
+  }
+
   api WarehouseApi from Ops
   storage primary { type: postgres }
   resource warehouseState { for: Warehouse, kind: state, use: primary }

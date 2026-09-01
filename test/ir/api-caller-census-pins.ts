@@ -338,6 +338,34 @@ export const R = {
   gateProbe:
     "unreachable: e2e has no can_<op> probe verb (the gate's 409 is exercised via the operation)",
   /**
+   * BLOCKED ON A LIVE DEFECT — an operation whose in-process subscriber CRASHES
+   * the backend, so a caller cannot be written without turning the tier red on
+   * a bug this PR does not own.
+   *
+   * The one pin: `lifecycle-guard`'s `Crate.release`.  It emits `CrateReady`,
+   * whose workflow subscriber creates a GUARDED `Shipment` from in-process code
+   * that has no request principal.  Calling it on the node leg kills the
+   * runner:
+   *
+   *     POST /api/crates/{id}/release  -> operation_invoked
+   *                                    -> event_dispatched
+   *                                    -> process exits 99, no verdict
+   *
+   * Two things are visible in that trace and both look wrong: the dispatched
+   * event is logged as `"event_type":"Object"` rather than `CrateReady`, and
+   * nothing handles the guarded create's refusal for a principal-less caller.
+   *
+   * This is the SAME class `policy-document` turned out to be — a route no
+   * runtime caller had ever driven, hiding a real defect — and it was only
+   * observable once this fixture gained a `test e2e` block at all.  It is NOT
+   * pinned to avoid work: it is pinned because the fix is the guarded-create
+   * seam split across five backends (the fixture's own header describes the
+   * Phoenix half), which is a mission, not a line.  Drain this by fixing that,
+   * and the caller is three lines.
+   */
+  principalLessSubscriberCrash:
+    "blocked: the in-process subscriber crashes the backend (guarded create, no request principal)",
+  /**
    * UN-AUTHORED — `crudish`'s canonical `update` (`POST /api/<aggs>/{id}/update`).
    * Reachable today (`api.<aggs>.update(id, { … })`), simply never written.
    * This is the exact route #2342 found carrying TWO contract bugs (a PATCH the
@@ -440,6 +468,13 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
   // it.  Only the `can_<op>` endpoint a UI polls stays uncalled.
   "corpus/state-gate": {
     canCancelOrder: R.gateProbe,
+  },
+  // ── The workflow door that kills the runner ──────────────────────────────
+  // Found by draining this fixture: the two collection reads and all three
+  // gates are driven, and `release` is the one route that cannot be.  See
+  // `R.principalLessSubscriberCrash` for the trace.
+  "corpus/lifecycle-guard": {
+    releaseCrate: R.principalLessSubscriberCrash,
   },
 };
 
@@ -587,26 +622,26 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // mutation-proven).  Drain: give `Order` a create, then drive `Echo` / `Sum`
   // — the two pure-computation routes need no data at all.
   "handler-triad",
-  // The lifecycle `requires` gate.  ENFORCEMENT is pinned structurally per
-  // backend in `test/generator/lifecycle-guard-render.test.ts` (mutation-proven
-  // against ten seeded emitter defects), but no RUNTIME caller exercises it.
+  // `lifecycle-guard` DRAINED — and, like `policy-document` before it, only
+  // after the thing it was hiding was FIXED.  Its two named blockers both fell,
+  // but not in the way the entry predicted:
   //
-  // ONE of the two blockers this used to name is now STALE, retired here so it
-  // is not re-derived: "the e2e DSL has no negative-status assertion form" is
-  // false — `expect(<call>).toThrow(404)` is the form, and `policy-deny` spells
-  // every one of its denials with it.
+  //   • "the e2e DSL has no negative-status assertion form" was already STALE —
+  //     `expect(<call>).toThrow(404)` is the form.
+  //   • the CLAIM-SET blocker was real, and was NOT a harness problem.  The
+  //     entry said `DEV_CLAIMS` "is pinned to STRING claims because the
+  //     non-node backends honour only strings", which reads as "widen the
+  //     constant".  Widening it would have changed nothing: dotnet, python,
+  //     java and elixir each built their `x-loom-dev-claims` mapper over
+  //     string-typed fields alone, so the array was dropped by the EMITTER
+  //     before it ever reached `currentUser`.  Four emitters, one shared
+  //     classifier (`src/generator/_auth/dev-claims.ts`), then the drain.
   //
-  // The BINDING blocker stands, and it is the CLAIM-SET one below: this fixture
-  // gates on `currentUser.permissions.contains(...)` over
-  // `user { id: string  permissions: string[] }`, and `DEV_CLAIMS` mints no
-  // `permissions`.  Worse for this entry specifically, the claim is an ARRAY and
-  // `DEV_CLAIMS` is pinned to STRING claims because the non-node backends honour
-  // only strings — so this one needs the claim-injection path widened, not just
-  // a key added.  Until then an e2e here would 403 on every call and assert the
-  // denial twice rather than pinning the gate from both sides (the two-halves
-  // rule `read-gates` states).  The runtime negative-authz proof for `requires`
-  // meanwhile lives in the M-T3.13 OIDC e2e legs.
-  "lifecycle-guard",
+  // The fixture now carries both halves, which is the point: the `test e2e`
+  // drives the AUTHORIZED side of all three gates plus the ungated control, and
+  // the `AUTHZ_LADDERS` entry drives the denial. Mutation-proved that neither
+  // half suffices — a NO-OP gate passes the e2e and fails the ladder, an
+  // ALWAYS-DENY gate passes the ladder's 403 and fails the e2e.
   // BROKER SIDECAR (the outbox relay's delivery half). Same home as
   // `channels-broker`.
   "outbox",
@@ -681,4 +716,5 @@ export const PIN_CLASS_CENSUS: Readonly<Record<string, number>> = {
   tenantRegistryRow: 20,
   seededListReadUnwritten: 2,
   gateProbe: 1,
+  principalLessSubscriberCrash: 1,
 };

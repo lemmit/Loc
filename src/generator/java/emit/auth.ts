@@ -12,6 +12,7 @@ import {
 } from "../../../ir/util/tenant-stance.js";
 import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { lines } from "../../../util/code-builder.js";
+import { devClaimFields } from "../../_auth/dev-claims.js";
 import { renderJavaType } from "../render-expr.js";
 
 /** The tenant registry (`implements tenantRegistry`) facts the
@@ -187,19 +188,28 @@ export function renderAuthFiles(
   const stubImports = new Set<string>();
   for (const f of fields) collectAuthImports(f.type, stubImports);
   const stubArgs = fields.map((f) => stubValue(f.type)).join(", ");
-  // Dev-claims override is limited to string-typed claims (the tenant-claim
-  // case) — a JSON string maps cleanly onto a `String` component; non-string
-  // components keep their built-in value.  FQNs avoid import churn.
-  const stubStringFields = fields.filter(
-    (f) => f.type.kind === "primitive" && f.type.name === "string",
+  // Dev-claims override carries the shapes the shared classifier admits —
+  // `String` and `List<String>`; every other component keeps its built-in
+  // value.  FQNs avoid import churn.  A list claim is element-checked, so a
+  // mixed array falls back rather than putting a non-text node in a
+  // `List<String>`.
+  const stubClaimKinds = new Map(
+    devClaimFields(fields).map(({ field, kind }) => [field.name, kind]),
   );
+  const stubStringFields = fields.filter((f) => stubClaimKinds.has(f.name));
   const overrideArgs = fields
-    .map((f) =>
-      f.type.kind === "primitive" && f.type.name === "string"
-        ? `claims.has("${f.name}") && claims.get("${f.name}").isTextual() ? claims.get("${f.name}").asText() : ${stubValue(f.type)}`
-        : stubValue(f.type),
-    )
+    .map((f) => {
+      const kind = stubClaimKinds.get(f.name);
+      if (kind === "string") {
+        return `claims.has("${f.name}") && claims.get("${f.name}").isTextual() ? claims.get("${f.name}").asText() : ${stubValue(f.type)}`;
+      }
+      if (kind === "stringList") {
+        return `devClaimStringList(claims, "${f.name}", ${stubValue(f.type)})`;
+      }
+      return stubValue(f.type);
+    })
     .join(", ");
+  const needsListHelper = [...stubClaimKinds.values()].includes("stringList");
   out.set(
     "DevStubUserVerifier.java",
     lines(
@@ -241,6 +251,25 @@ export function renderAuthFiles(
             `        }`,
             `        return new User(${stubArgs});`,
             `    }`,
+            // Element-checked list decode: a non-array node, or one holding a
+            // non-text element, falls back to the built-in value rather than
+            // half-filling a List<String>.
+            ...(needsListHelper
+              ? [
+                  ``,
+                  `    private static java.util.List<String> devClaimStringList(`,
+                  `            tools.jackson.databind.JsonNode claims, String key, java.util.List<String> fallback) {`,
+                  `        tools.jackson.databind.JsonNode node = claims.get(key);`,
+                  `        if (node == null || !node.isArray()) return fallback;`,
+                  `        java.util.List<String> out = new java.util.ArrayList<>();`,
+                  `        for (tools.jackson.databind.JsonNode e : node) {`,
+                  `            if (!e.isTextual()) return fallback;`,
+                  `            out.add(e.asText());`,
+                  `        }`,
+                  `        return java.util.List.copyOf(out);`,
+                  `    }`,
+                ]
+              : []),
           ]
         : [
             `    @Override`,

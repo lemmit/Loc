@@ -10,6 +10,7 @@ import type {
 import { hierarchyRegistry } from "../../ir/util/tenant-stance.js";
 import { AUTH_BASE_PATH } from "../../util/api-base.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { devClaimFields } from "../_auth/dev-claims.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix LiveView auth scaffolding — emitted per deployable when
@@ -272,10 +273,10 @@ function renderAuthPlug(
   // stub honours (dotnet/java/python parity).  Never in OIDC mode: a header
   // must not override verified claims.  Keyed by the declared field name; the
   // value lands on the built principal's snake_case key.
-  const devClaimStringFields = (user?.fields ?? []).filter(
-    (f) => f.type.kind === "primitive" && f.type.name === "string",
-  );
-  const devClaimsEnabled = !auth && devClaimStringFields.length > 0;
+  const devClaimEntries = devClaimFields(user?.fields);
+  const devClaimStringFields = devClaimEntries.map((c) => c.field);
+  const devClaimsEnabled = !auth && devClaimEntries.length > 0;
+  const devClaimNeedsList = devClaimEntries.some((c) => c.kind === "stringList");
   const buildUserCall =
     (devClaimsEnabled ? "merge_dev_claims(conn, build_user(claims))" : "build_user(claims)") +
     orgPathPipe;
@@ -290,8 +291,12 @@ function renderAuthPlug(
         with {:ok, json} <- Base.decode64(raw),
              {:ok, claims} <- Jason.decode(json) do
           user
-${devClaimStringFields
-  .map((f) => `          |> maybe_put_claim(:${snake(f.name)}, claims["${f.name}"])`)
+${devClaimEntries
+  .map(({ field: f, kind }) =>
+    kind === "stringList"
+      ? `          |> maybe_put_list_claim(:${snake(f.name)}, claims["${f.name}"])`
+      : `          |> maybe_put_claim(:${snake(f.name)}, claims["${f.name}"])`,
+  )
   .join("\n")}
         else
           _ -> user
@@ -304,7 +309,19 @@ ${devClaimStringFields
 
   defp maybe_put_claim(user, key, value) when is_binary(value), do: Map.put(user, key, value)
   defp maybe_put_claim(user, _key, _value), do: user
+${
+  devClaimNeedsList
+    ? `
+  # Element-checked: a non-list, or a list holding a non-binary, leaves the key
+  # at its built-in value rather than half-filling it.
+  defp maybe_put_list_claim(user, key, value) when is_list(value) do
+    if Enum.all?(value, &is_binary/1), do: Map.put(user, key, value), else: user
+  end
+
+  defp maybe_put_list_claim(user, _key, _value), do: user
 `
+    : ""
+}`
     : "";
   // OIDC verifier vs dev stub.  The OIDC path additionally needs the JWKS
   // discovery/verification helpers; the dev stub needs none.

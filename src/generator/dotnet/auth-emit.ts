@@ -10,6 +10,7 @@ import type {
 import { hierarchyRegistry } from "../../ir/util/tenant-stance.js";
 import { AUTH_BASE_PATH } from "../../util/api-base.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
+import { devClaimFields } from "../_auth/dev-claims.js";
 import { dapperAggregateTable } from "./emit/dapper.js";
 import { renderCsType } from "./render-expr.js";
 
@@ -560,12 +561,12 @@ function renderDevStubVerifier(user: UserIR, ns: string): string {
   const args = user.fields
     .map((f) => `${upperFirst(f.name)}: ${stubCsharpValueFor(f)}`)
     .join(",\n            ");
-  // Dev-claims override is limited to string-typed claims (the tenant-claim
-  // case) — a JSON string maps cleanly onto a `string` property; non-string
-  // fields keep their built-in value.
-  const stringFields = user.fields.filter(
-    (f) => !f.optional && f.type.kind === "primitive" && f.type.name === "string",
+  // Dev-claims override carries the shapes the shared classifier admits —
+  // `string` and `string[]`; every other field keeps its built-in value.
+  const claimKinds = new Map(
+    devClaimFields(user.fields).map(({ field, kind }) => [field.name, kind]),
   );
+  const stringFields = user.fields.filter((f) => claimKinds.has(f.name));
   if (stringFields.length === 0) {
     return `// Auto-generated.
 using System.Threading;
@@ -588,13 +589,33 @@ public sealed class DevStubUserVerifier : IUserVerifier
 `;
   }
   const arms = stringFields
-    .map(
-      (f) =>
-        `                    "${f.name}" => prop.Value.ValueKind == JsonValueKind.String ? user with { ${upperFirst(f.name)} = prop.Value.GetString()! } : user,`,
+    .map((f) =>
+      claimKinds.get(f.name) === "stringList"
+        ? // Element-checked: a non-array, or an array holding a non-string,
+          // leaves the field at its built-in value rather than half-filling it.
+          `                    "${f.name}" => DevClaimStringList(prop.Value) is { } __${f.name} ? user with { ${upperFirst(f.name)} = __${f.name} } : user,`
+        : `                    "${f.name}" => prop.Value.ValueKind == JsonValueKind.String ? user with { ${upperFirst(f.name)} = prop.Value.GetString()! } : user,`,
     )
     .join("\n");
+  const needsListHelper = [...claimKinds.values()].includes("stringList");
+  const listHelper = needsListHelper
+    ? `
+    private static List<string>? DevClaimStringList(JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Array) return null;
+        var items = new List<string>();
+        foreach (var element in value.EnumerateArray())
+        {
+            if (element.ValueKind != JsonValueKind.String) return null;
+            items.Add(element.GetString()!);
+        }
+        return items;
+    }
+`
+    : "";
   return `// Auto-generated.
 using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -638,7 +659,7 @@ ${arms}
         }
         return Task.FromResult<User?>(user);
     }
-}
+${listHelper}}
 `;
 }
 

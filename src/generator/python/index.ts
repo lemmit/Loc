@@ -32,6 +32,7 @@ import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
 import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { plural, snake } from "../../util/naming.js";
+import { devClaimFields } from "../_auth/dev-claims.js";
 import { brokerChannelBindings } from "../_channels/bindings.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { collectWireValidationMessages } from "../_i18n/validation-catalog.js";
@@ -1017,12 +1018,11 @@ function renderMain(
   // Dev-claims override (x-loom-dev-claims): keyed by the DECLARED field name
   // (e.g. `tenantId`), written onto the User's snake_case attribute
   // (`tenant_id`) — the header contract is the declared name, matching the
-  // node/java (camelCase) and dotnet/elixir (explicit-map) stubs.  String
-  // claims only; skipped entirely when the user has no string field.
-  const pyClaimStringFields = (authUser?.fields ?? []).filter(
-    (f) => f.type.kind === "primitive" && f.type.name === "string",
-  );
-  const pyDevClaims = authRequired && !oidc && pyClaimStringFields.length > 0;
+  // node/java (camelCase) and dotnet/elixir (explicit-map) stubs.  Carryable
+  // shapes come from the shared classifier, not a local filter; skipped
+  // entirely when the user declares no carryable field.
+  const pyClaimFields = devClaimFields(authUser?.fields);
+  const pyDevClaims = authRequired && !oidc && pyClaimFields.length > 0;
   return lines(
     `"""FastAPI application entrypoint.`,
     "",
@@ -1120,10 +1120,21 @@ function renderMain(
                   "        return user",
                   "    overrides: dict[str, Any] = {}",
                   // Header key = declared field name; attr = its snake_case form.
-                  ...pyClaimStringFields.flatMap((f) => [
-                    `    if isinstance((_v := claims.get("${f.name}")), str):`,
-                    `        overrides["${snake(f.name)}"] = _v`,
-                  ]),
+                  // A list claim is element-checked too: a mixed array would
+                  // otherwise land non-str items in a `list[str]` field.
+                  ...pyClaimFields.flatMap(({ field: f, kind }) =>
+                    kind === "stringList"
+                      ? [
+                          `    if isinstance((_v := claims.get("${f.name}")), list) and all(`,
+                          "        isinstance(_e, str) for _e in _v",
+                          "    ):",
+                          `        overrides["${snake(f.name)}"] = list(_v)`,
+                        ]
+                      : [
+                          `    if isinstance((_v := claims.get("${f.name}")), str):`,
+                          `        overrides["${snake(f.name)}"] = _v`,
+                        ],
+                  ),
                   "    return replace(user, **overrides) if overrides else user",
                 ]
               : [
