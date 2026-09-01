@@ -5,6 +5,7 @@ import {
   isRequiredCreateInput,
 } from "../../../ir/enrich/wire-projection.js";
 import type {
+  ContextStampIR,
   EnrichedAggregateIR,
   EnrichedEntityPartIR,
   ExprIR,
@@ -167,6 +168,16 @@ export interface JavaEntityOptions {
    *  threaded into the statement renderer so `emit` constructs records
    *  positionally in declaration order. */
   eventFields?: Map<string, readonly string[]>;
+  /** DOCUMENT aggregates only.  A `shape: document` root is a plain POJO —
+   *  `persistence` is undefined, so the JPA `@PrePersist` claim-stamp hook
+   *  below never emitted and the `tenantOwned` onCreate stamps never ran: the
+   *  row was written with an EMPTY tenantId and became invisible to every
+   *  principal including its creator.  With this set the SAME hook bodies emit
+   *  as PLAIN methods (no JPA annotations — there is no persistence context to
+   *  fire them), and the service's create/update path calls them explicitly,
+   *  the way python's `_stamp_on_create` is called by its route.
+   *  NOT set for event-sourced roots: their stamps are gated upstream. */
+  documentClaimStamps?: boolean;
   /** JPA mapping inputs — when present the class is annotated against
    *  the Flyway-owned schema (`schemaFromModule` naming).  The
    *  orchestrator always passes it; absent only in focused unit tests. */
@@ -213,6 +224,30 @@ export interface JavaEntityOptions {
    *  (non-extern) operation bodies — allocated by the caller only when a
    *  `SourceMapRecorder` is threaded in (zero cost otherwise). */
   opFragments?: OpFragment[];
+}
+
+/** Claim-valued principal stamps (`tenantId := currentUser.tenantId`) for one
+ *  lifecycle event.  A BARE `currentUser` value is excluded — it rides the
+ *  @CreatedBy/@LastModifiedBy annotation path instead.
+ *
+ *  THE SINGLE SOURCE both halves of the document-stamp contract read: this file
+ *  emits `_stampOnCreate()` / `_stampOnUpdate()` when it returns non-empty, and
+ *  `service.ts` emits the call when it does.  Computing that predicate twice is
+ *  how the two halves drift apart (experience_gathered.md §89) — a method with
+ *  no caller stamps nothing, a caller with no method does not compile. */
+export function claimStampsFor(
+  agg: { contextStamps?: ContextStampIR[] },
+  event: "create" | "update",
+): { field: string; value: ExprIR }[] {
+  return (agg.contextStamps ?? [])
+    .filter((r) => r.event === event)
+    .flatMap((r) => r.assignments)
+    .filter(
+      (a) =>
+        exprUsesCurrentUser(a.value) &&
+        !(a.value.kind === "ref" && a.value.refKind === "current-user"),
+    )
+    .map((a) => ({ field: a.field, value: a.value }));
 }
 
 export function renderJavaEntity(
@@ -926,12 +961,15 @@ export function renderJavaEntity(
   // principal-less save (seed / system) returns unstamped — the write-side
   // analogue of the repository filter's null-safe SpEL accessor.
   const claimStampHookLines: string[] = [];
-  if (persistence && claimStamps.length > 0) {
+  // A document root has no persistence context, so the methods emit WITHOUT the
+  // JPA annotations and the service calls them directly (see documentClaimStamps).
+  const plainStampHooks = !persistence && options.documentClaimStamps === true;
+  if ((persistence || plainStampHooks) && claimStamps.length > 0) {
     const claimAssign = (s: { field: string; value: ExprIR }): string =>
       `        this.${s.field} = ${renderJavaExpr(s.value, renderCtx)};`;
     const updateClaims = claimStamps.filter((s) => !s.createEvent);
     claimStampHookLines.push(
-      `    @PrePersist`,
+      ...(plainStampHooks ? [] : [`    @PrePersist`]),
       `    void _stampOnCreate() {`,
       `        var currentUser = CurrentUserAccessor.currentOrNull();`,
       `        if (currentUser == null) return;`,
@@ -941,7 +979,7 @@ export function renderJavaEntity(
     );
     if (updateClaims.length > 0) {
       claimStampHookLines.push(
-        `    @PreUpdate`,
+        ...(plainStampHooks ? [] : [`    @PreUpdate`]),
         `    void _stampOnUpdate() {`,
         `        var currentUser = CurrentUserAccessor.currentOrNull();`,
         `        if (currentUser == null) return;`,

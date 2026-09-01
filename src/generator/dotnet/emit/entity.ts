@@ -7,12 +7,15 @@ import {
   isRequiredCreateInput,
 } from "../../../ir/enrich/wire-projection.js";
 import type {
+  ContextStampIR,
   EnrichedAggregateIR,
   EnrichedEntityPartIR,
+  ExprIR,
   FieldIR,
   IdValueType,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import type { OriginRef } from "../../../ir/types/origin.js";
 import { resolveToSource } from "../../../ir/types/origin.js";
 import { typeIsFile } from "../../../ir/util/file-field.js";
@@ -153,6 +156,30 @@ export interface SuperTypeInfo {
   readonly derivedNames?: ReadonlySet<string>;
   readonly sharesIdentity?: boolean;
   readonly idValueType?: IdValueType;
+}
+
+/** Claim-valued principal stamps (`tenantId := currentUser.tenantId`) for one
+ *  lifecycle event.  A BARE `currentUser` value is excluded — the interceptor
+ *  stamps that one as the actor id.
+ *
+ *  THE SINGLE SOURCE both halves of the document-stamp contract read: this file
+ *  emits `_StampOnCreate()` when it returns non-empty, and repository.ts emits
+ *  the call when it does.  A method with no caller stamps nothing; a caller with
+ *  no method does not compile — computing the predicate twice is how those two
+ *  halves drift (experience_gathered.md §89). */
+export function csClaimStampsFor(
+  agg: { contextStamps?: ContextStampIR[] },
+  event: "create" | "update",
+): { field: string; value: ExprIR }[] {
+  return (agg.contextStamps ?? [])
+    .filter((r) => r.event === event)
+    .flatMap((r) => r.assignments)
+    .filter(
+      (a) =>
+        exprUsesCurrentUser(a.value) &&
+        !(a.value.kind === "ref" && a.value.refKind === "current-user"),
+    )
+    .map((a) => ({ field: a.field, value: a.value }));
 }
 
 export function renderEntity(
@@ -824,6 +851,37 @@ export function renderEntity(
   // `FromSnapshot` rebuilds it (running AssertInvariants once, AFTER
   // the contained parts are rehydrated, so part-dependent invariants
   // see the full tree — unlike `_Create`, which only knows fields).
+  // A DOCUMENT root persists as one jsonb column, so it is never an EF-tracked
+  // entity with mapped stamp COLUMNS — the AuditableInterceptor's
+  // `Entry(e).Property(x => x.TenantId)` write has nothing to bind to and the
+  // `tenantOwned` onCreate stamps never ran.  The row was written with an EMPTY
+  // TenantId and became invisible to every principal including its creator.
+  // Emit the stamps as an explicit method the document repository calls on its
+  // INSERT branch (mirroring node's `stampInsert` and python's
+  // `_stamp_on_create`); the update branch must NOT re-stamp, since the whole
+  // blob is rewritten from the rehydrated aggregate, which already carries them.
+  const docCreateStamps =
+    isRoot && document && isAgg(entity) ? csClaimStampsFor(entity, "create") : [];
+  const docStampLines =
+    docCreateStamps.length > 0
+      ? [
+          "    /// <summary>Applies the `onCreate` claim stamps from the ambient",
+          "    /// principal.  Called by the document repository on INSERT only —",
+          "    /// a jsonb aggregate is not EF-tracked, so the AuditableInterceptor",
+          "    /// never sees it.  A principal-less save (seed / system) is a no-op,",
+          "    /// matching the interceptor's null-safe behaviour.</summary>",
+          "    internal void _StampOnCreate()",
+          "    {",
+          "        var currentUser = RequestContext.Current?.CurrentUser;",
+          "        if (currentUser == null) return;",
+          ...docCreateStamps.map(
+            (st) => `        ${upperFirst(st.field)} = ${renderCsExpr(st.value, renderCtx)};`,
+          ),
+          "    }",
+          "",
+        ]
+      : [];
+
   const snapshotLines: string[] = [];
   if (document) {
     const toInit: string[] = [];
@@ -930,6 +988,7 @@ export function renderEntity(
       ...createPublicLines,
       ...(applierLines.length > 0 ? ["", ...applierLines] : []),
       ...esCreateFactoryLines,
+      ...(docStampLines.length > 0 ? ["", ...docStampLines] : []),
       ...(snapshotLines.length > 0 ? ["", ...snapshotLines] : []),
       "}",
     ) + "\n"

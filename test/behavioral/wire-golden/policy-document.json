@@ -1,0 +1,206 @@
+{
+  "case": "policy-document",
+  "oracle": "node",
+  "entries": [
+    {
+      "seq": 0,
+      "method": "POST",
+      "path": "/api/things",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 1,
+      "method": "GET",
+      "path": "/api/things/{id}",
+      "status": 200,
+      "body": {
+        "amount": 5,
+        "id": "<volatile:key>",
+        "label": "T-1",
+        "version": 1
+      }
+    },
+    {
+      "seq": 2,
+      "method": "GET",
+      "path": "/api/things",
+      "status": 200,
+      "body": [
+        {
+          "amount": 5,
+          "id": "<volatile:key>",
+          "label": "T-1",
+          "version": 1
+        }
+      ]
+    },
+    {
+      "seq": 3,
+      "method": "GET",
+      "path": "/api/things/by_label?l=T-1",
+      "status": 200,
+      "body": [
+        {
+          "amount": 5,
+          "id": "<volatile:key>",
+          "label": "T-1",
+          "version": 1
+        }
+      ]
+    },
+    {
+      "seq": 4,
+      "method": "GET",
+      "path": "/api/things/by_label?l=T-absent",
+      "status": 200,
+      "body": []
+    },
+    {
+      "seq": 5,
+      "method": "POST",
+      "path": "/api/things/{id}/update",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 6,
+      "method": "GET",
+      "path": "/api/things/{id}",
+      "status": 200,
+      "body": {
+        "amount": 5,
+        "id": "<volatile:key>",
+        "label": "T-2",
+        "version": 2
+      }
+    },
+    {
+      "seq": 7,
+      "method": "DELETE",
+      "path": "/api/things/{id}",
+      "status": 204,
+      "body": ""
+    },
+    {
+      "seq": 8,
+      "method": "GET",
+      "path": "/api/things/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Thing {id} not found",
+        "instance": "/api/things/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 9,
+      "method": "POST",
+      "path": "/api/notes",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 10,
+      "method": "GET",
+      "path": "/api/notes/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Note {id} not found",
+        "instance": "/api/notes/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 11,
+      "method": "GET",
+      "path": "/api/notes",
+      "status": 200,
+      "body": []
+    },
+    {
+      "seq": 12,
+      "method": "POST",
+      "path": "/api/notes/{id}/update",
+      "status": 404,
+      "body": {
+        "detail": "Note {id} not found",
+        "instance": "/api/notes/{id}/update",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 13,
+      "method": "DELETE",
+      "path": "/api/notes/{id}",
+      "status": 404,
+      "body": {
+        "detail": "Note {id} not found",
+        "instance": "/api/notes/{id}",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 14,
+      "method": "PATCH",
+      "path": "/api/things",
+      "status": 405,
+      "body": {
+        "detail": "method PATCH is not supported for /api/things",
+        "instance": "/api/things",
+        "status": 405,
+        "title": "Method Not Allowed",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 15,
+      "method": "GET",
+      "path": "/__loom_no_such_path",
+      "status": 404,
+      "body": {
+        "detail": "no route for GET /__loom_no_such_path",
+        "instance": "/__loom_no_such_path",
+        "status": 404,
+        "title": "Not Found",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 16,
+      "method": "POST",
+      "path": "/api/things",
+      "status": 400,
+      "body": {
+        "detail": "Malformed JSON in request body",
+        "instance": "/api/things",
+        "status": 400,
+        "title": "Bad Request",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 17,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200,
+      "body": {
+        "id": "<volatile:key>",
+        "role": "admin",
+        "tenantId": "<volatile:key>"
+      }
+    }
+  ]
+}

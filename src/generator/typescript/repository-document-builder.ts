@@ -22,6 +22,7 @@ import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { desugarAuthzFilterInApp } from "../_expr/authz-filter-inapp.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
+import { aggregateIsAudited } from "./emit/audit-stamp.js";
 import { synthProjectionFinds } from "./projection-finds.js";
 import { renderTsExpr } from "./render-expr.js";
 import type { FilterBypass } from "./repository-find-predicate.js";
@@ -75,6 +76,9 @@ export function buildDocumentRepositoryFile(
   // `crudish`) compiles: the routes call `repo.delete(id)` and
   // `repo.save(agg, expectedVersion)` regardless of saving shape.
   const versioned = aggregateIsVersioned(agg);
+  // Lifecycle stamps land on the doc payload at INSERT — see the save()
+  // comment below for why only the insert branch stamps.
+  const audited = aggregateIsAudited(agg);
   const emitsDelete = !!agg.canonicalDestroy;
   // Root rehydrate call — a versioned root takes the authoritative `version`
   // COLUMN (`<rowVar>.version`), not the stale blob copy (see entityFromDocFn).
@@ -154,7 +158,25 @@ export function buildDocumentRepositoryFile(
     ...(versioned ? [`    const expected = expectedVersion ?? aggregate.version;`] : []),
     `    const existing = await this.db.select({ version: schema.${tableName}.version }).from(schema.${tableName}).where(eq(schema.${tableName}.id, aggregate.id));`,
     `    if (existing.length === 0) {`,
-    `      await this.db.insert(schema.${tableName}).values({ id: aggregate.id as string, data, version: 1 });`,
+    // The `onCreate` stamps (`auditable`, `tenantOwned`'s tenantId/dataKey, a
+    // hand-written `stamp onCreate`) land HERE, on the doc payload, exactly as
+    // the relational path lands them on the row (`.values(stampInsert(row))`,
+    // emit/audit-stamp.ts).  A document aggregate has one opaque jsonb column,
+    // so the stamped fields live INSIDE `data` — but the helper is the same one,
+    // and the save is the same upsert, so the create lifecycle stamps once.
+    //
+    // Only the INSERT branch stamps.  `stampUpdate` STRIPS the create-only
+    // fields so a relational UPDATE cannot overwrite them, which is right for a
+    // partial column `set` and WRONG here: the update writes the whole blob, so
+    // stripping `tenantId`/`dataKey` would delete them from the document.  The
+    // rehydrated aggregate already carries both, so the update branch is
+    // correct doing nothing.
+    //
+    // Without this a `tenantOwned` document row was written with an EMPTY
+    // tenant and was invisible to every principal INCLUDING ITS CREATOR — the
+    // read filter is correct, and `"" === currentUser.tenantId` is false, so a
+    // 201 create was followed by a 404 on every read, update and destroy.
+    `      await this.db.insert(schema.${tableName}).values({ id: aggregate.id as string, ${audited ? "data: stampInsert(data)" : "data"}, version: 1 });`,
     `    } else {`,
     ...(versioned
       ? [
@@ -253,6 +275,7 @@ export function buildDocumentRepositoryFile(
     // `getById` command load, so key off the emitted body too (F2-ADP-5).
     (usesPrincipalFilter || /\brequireCurrentUser\(/.test(bodyScan)) &&
       `import { requireCurrentUser } from "../../auth/middleware";`,
+    audited && `import { stampInsert } from "../audit-stamp";`,
     `import { requestLog } from "../../obs/als";`,
     "",
     `type Db = NodePgDatabase<typeof schema>;`,

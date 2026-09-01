@@ -59,6 +59,7 @@ import {
   renderCsExpr,
   renderCsType,
 } from "../render-expr.js";
+import { csClaimStampsFor } from "./entity.js";
 import { renderRetrievalParamsWithCt } from "./repository.js";
 
 // ---------------------------------------------------------------------------
@@ -1970,11 +1971,42 @@ export function renderDapperDocumentRepository(
   // SaveAsync upsert — CAS-guarded on `version` when the aggregate is
   // `versioned` (the same optimistic-concurrency shape the relational Dapper
   // repository uses), a blind version-bumping upsert otherwise.
+  // Create-only claim stamps (`tenantOwned`'s tenantId/dataKey) on the DOCUMENT
+  // write path.  A jsonb aggregate is not EF-tracked, so the AuditableInterceptor
+  // never sees it, and unlike the EF document repository this save is a single
+  // `INSERT … ON CONFLICT DO UPDATE` with no insert branch to hang the stamp on.
+  //
+  // So when — and ONLY when — the aggregate carries such stamps, resolve
+  // existence first and stamp a genuinely new row before serializing.  It costs
+  // one extra round-trip on writes to stamped document aggregates; an unstamped
+  // one keeps the single-statement upsert, in its original line order, emitting
+  // byte-identically to before.
+  //
+  // Unconditional stamping is NOT safe: `csClaimStampsFor` returns create-event
+  // claim stamps, and re-applying one on update would rewrite a field the model
+  // says is set once.
+  //
+  // This adapter was the SEVENTH document write path of one bug (drizzle,
+  // mikroorm, EF, dapper, java, python, elixir).  Four needed the fix; python
+  // and elixir already stamped.
+  const docCreateStamps = csClaimStampsFor(agg, "create").length > 0;
+  const stampPrelude = [
+    `        var __isNew = await conn.ExecuteScalarAsync<int?>(new CommandDefinition("SELECT 1 FROM ${table} WHERE id = @id", new { id = aggregate.Id.Value }, ${audit.txArg}cancellationToken: cancellationToken)) is null;`,
+    "        if (__isNew) aggregate._StampOnCreate();",
+  ];
+  const serializeLine =
+    "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);";
+  const openLine =
+    "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);";
+  // Stamped: open → begin → probe → stamp → serialize (the stamp must precede
+  // the snapshot).  Unstamped: the original serialize → open → begin order.
+  const savePrelude = docCreateStamps
+    ? [openLine, audit.begin, ...stampPrelude, serializeLine]
+    : [serializeLine, openLine, audit.begin];
+
   const saveLines = versioned
     ? [
-        "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);",
-        "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
-        audit.begin,
+        ...savePrelude,
         "        var __expected = RequestContext.Current?.ExpectedVersion ?? aggregate.Version;",
         `        var __affected = await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (id, data, version) VALUES (@id, CAST(@data AS jsonb), 1) ON CONFLICT (id) DO UPDATE SET data = excluded.data, version = ${table}.version + 1 WHERE ${table}.version = @ExpectedVersion", new { id = aggregate.Id.Value, data = __data, ExpectedVersion = __expected }, ${audit.txArg}cancellationToken: cancellationToken));`,
         `        if (__affected == 0) throw new ConcurrencyConflictException("The resource was modified by another request; reload and retry.");`,
@@ -1982,9 +2014,7 @@ export function renderDapperDocumentRepository(
         audit.commit,
       ].filter((l): l is string => l !== null)
     : [
-        "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);",
-        "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
-        audit.begin,
+        ...savePrelude,
         `        await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (id, data, version) VALUES (@id, CAST(@data AS jsonb), 1) ON CONFLICT (id) DO UPDATE SET data = excluded.data, version = ${table}.version + 1", new { id = aggregate.Id.Value, data = __data }, ${audit.txArg}cancellationToken: cancellationToken));`,
         ...audit.flush,
         audit.commit,
