@@ -202,9 +202,9 @@
       "reason": "The consequence half of W29: 500 is not a declared response on any route. Clears with W29."
     },
     {
-      "id": "W32",
+      "id": "W35",
       "findings": [
-        "F25"
+        "F28"
       ],
       "check": "status_code_conformance",
       "operations": "^GET /api/",
@@ -212,7 +212,9 @@
         "java"
       ],
       "kind": "bug",
-      "reason": "F25 — `GET /api/products?pageSize=0` answers 400, and no read route declares a 400: the paged `page`/`pageSize` bounds that #2555 gave declared, enforced limits are enforced on java with a status the contract does not publish (the shared matrix declares 422). Also absorbs the 500s of W31 reaching this check."
+      "intermittent": true,
+      "intermittentReason": "The finding needs the fuzzer to generate a MALFORMED query chunk (a parameter with an empty name, `?=%C3%A0`) against a read route. It did so \u00d74 on run 33382822525 and \u00d70 on the two runs before it \u2014 the same low rate that made W31 look permanently stale and got it wrongly retired (see F24). Declared intermittent so the staleness half cannot ask that question again on two samples.",
+      "reason": "F28 \u2014 java answers 400 for an UNPARSEABLE query string and no read route declares a 400. Replaces W32 (F25), which is FIXED: the paged `page`/`pageSize` bounds now answer the declared 422, matching the other four backends and java's own published set. What is left is narrower and java-only: Tomcat refuses to parse a malformed chunk and throws before any handler runs, so the request never reaches the wire-validation tier that would make it a 422. The other four backends IGNORE the junk parameter and answer 200 (the deliberate decision W8 records), and Tomcat 11 exposes no leniency knob \u2014 no `parameterParsing*` attribute on Connector or Parameters \u2014 so java cannot join them by configuration. 400 is therefore the honest answer, and declaring it on the SHARED read contract would publish a status the other four never produce. Clearing this means either a container-level parser change or a java-only declaration; neither is a fuzzer fix."
     },
     {
       "id": "W33",

@@ -1248,8 +1248,70 @@ function renderTemporalBinary(
   return null;
 }
 
+/** True when an arm VALUE renders HEEx MARKUP rather than an Elixir term.
+ *
+ *  A registered primitive / authored component emits markup (`isHEExCall`),
+ *  and a nested `match` in template position emits a `<%= cond do %>` block of
+ *  its own — both of which are markup for this decision. */
+function armRendersMarkup(value: ExprIR, ctx: WalkContext): boolean {
+  if (value.kind === "call" && isHEExCall(value.name, ctx)) return true;
+  return value.kind === "match";
+}
+
 function renderMatch(expr: Extract<ExprIR, { kind: "match" }>, ctx: WalkContext): string {
   // `match { p => v; … else => f }` → Elixir `cond do … end`.
+  //
+  // HEEx has TWO `cond` spellings and they are not interchangeable:
+  //
+  //   EXPRESSION form   `<%= cond do  p -> term  end %>`   — arms are Elixir terms
+  //   BLOCK form        `<%= cond do %>`                   — arms are MARKUP
+  //                     `  <% p -> %>`
+  //                     `    <div>…</div>`
+  //                     `<% end %>`
+  //
+  // Rendering markup arms in the expression form emits a `<%= cond do` that is
+  // never closed — the arm bodies carry their own `<%= … %>` / `<% end %>`, so
+  // the outer `end` lands inside a nested block and Elixir reports the
+  // unclosed delimiter pages later:
+  //
+  //   ** (TokenMissingError) missing terminator: end
+  //    128 │           cond do      ← unclosed delimiter
+  //
+  // That is a WHOLE-PROJECT compile failure, not a bad render: `mix compile`
+  // fails, so the app never boots (schemathesis F27, found on the elixir leg,
+  // which could not fuzz at all). It reproduces on any page whose `match` arms
+  // are primitives — a list page with two filter-driven finds is the shape in
+  // `web/src/examples/storefront-elixir.ddd`.
+  //
+  // So pick the form by what the arms actually render. The block form is the
+  // same one the QueryView loading/error/empty/data ladder already emits
+  // (`heex-primitives.ts`), which is why nesting one inside the other is
+  // exactly the case that broke.
+  const markupArms =
+    ctx.position === "template" &&
+    (expr.arms.some((a) => armRendersMarkup(a.value, ctx)) ||
+      (expr.otherwise !== undefined && armRendersMarkup(expr.otherwise, ctx)));
+
+  if (markupArms) {
+    // `renderChild` gives each arm the right treatment individually: markup
+    // passes through, a plain term still gets its own `<%= … %>`. So a match
+    // that MIXES markup and term arms stays valid.
+    const lines: string[] = ["<%= cond do %>"];
+    for (const a of expr.arms) {
+      lines.push(`  <% ${renderExpr(a.cond, ctx)} -> %>`);
+      lines.push(`    ${renderChild(a.value, ctx)}`);
+    }
+    // `cond` raises CondClauseError when no arm matches, so the fallback is
+    // not cosmetic. Without an authored `else` the page renders nothing rather
+    // than crashing at request time.
+    lines.push(`  <% true -> %>`);
+    lines.push(
+      expr.otherwise !== undefined ? `    ${renderChild(expr.otherwise, ctx)}` : `    <%= nil %>`,
+    );
+    lines.push(`<% end %>`);
+    return lines.join("\n");
+  }
+
   // Delegates the bare `cond do … end` shape to `heexTarget.renderMatch`
   // (cross-framework contract — see src/generator/_walker/target.ts).
   // The `<%= … %>` template-position wrap stays here because it's
