@@ -5330,3 +5330,39 @@ claim was introduced by the policy rung, not by the fixture's own declarations.
 a test gate (§59, §63). Prove it can observe a KNOWN state before you trust its
 silence, because a probe that cannot reach its target and a target that has not
 moved produce byte-identical output.
+
+## 91. A count in prose is a cache with no invalidation — and my grep for it was wrong too (2026-09-01)
+
+`api-caller-census-pins.ts` opened with a hand-written tally of its own pins:
+`tenantRegistryRow (15)`, `seededListReadUnwritten (2)`, `gateProbe (1)`. It was
+**accurate on `main`**. Draining `policy-document` added five registry pins and
+the header went on saying 15, because nothing reads a comment. Same shape as
+§15's "derive, don't stamp", one layer up: the tally is a denormalized view of
+the pins below it, and the site that forgets to update it is the bug.
+
+Two things worth keeping from how it was found:
+
+**The doc was wrong in the *other* direction from what I assumed.** I opened this
+believing the file's self-count had rotted on `main` and my PR merely inherited
+it. It had not. I was the one who broke it. Writing "this PR is what broke them"
+into the header cost nothing and is the only version a later reader can act on;
+"drifted at some point" would have sent them looking upstream for a cause that
+was sitting in the diff.
+
+**My measurement of the staleness was itself stale-shaped.** I counted with
+`grep -c 'R\.tenantRegistryRow'` and got 22 — so I wrote 22 into the new gate.
+The gate failed against 20: the header prose and the `R.*` doc comments *mention*
+`R.tenantRegistryRow`, and grep counts prose. The number I would have shipped as
+the fix for a wrong number was itself wrong, by the same mechanism (counting
+text that describes the thing rather than the thing). Only writing the count as
+code that recomputes from `UNCALLED_PINS` caught it — a corrected constant would
+have been just as unverifiable as the comment it replaced.
+
+The rule: **when a number appears in prose, the fix is not a better number, it is
+to make the number code and gate it.** `PIN_CLASS_CENSUS` is recomputed from the
+pin entries and compared both ways (adding a pin without raising the count fails;
+draining one without lowering it fails; a reason that is not an `R.*` constant
+fails as an unknown class rather than as a silent zero) — mutation-proved all
+three ways. The same pass found the register's line-range citations
+(`:492-579`) had moved twice; the doc rows now say *grep the array*, because a
+line range is the same cache with the same missing invalidation.

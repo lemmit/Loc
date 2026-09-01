@@ -15,10 +15,19 @@
 //
 // UNREACHABLE from the `test e2e` surface as it stands — no amount of test
 // writing drains these; each needs a change to the harness, an emitter, or the
-// DSL: `tenantRegistryRow` (15) and `gateProbe` (1).
+// DSL: `tenantRegistryRow` and `gateProbe`.
 //
 // UN-AUTHORED — writable today, nobody has written them:
-// `seededListReadUnwritten` (2).
+// `seededListReadUnwritten`.
+//
+// The per-class COUNTS are not written here any more.  They used to be, and
+// this PR is what broke them: draining `policy-document` added five
+// `tenantRegistryRow` pins, the header still said 15, and nothing noticed —
+// a comment is not reachable from the thing it describes, so it cannot be
+// contradicted.  The counts live in `PIN_CLASS_CENSUS` at the foot of this file
+// instead, recomputed from the pins and gated by `api-caller-census.test.ts`,
+// so the next agent to add a pin gets a failing test rather than prose that has
+// quietly gone wrong.
 //
 // That second class was empty until M-T6.37 and is the interesting movement
 // here.  `unseededListRead` exited by having its HARNESS fixed (#2517): the node
@@ -113,7 +122,7 @@
 //      (a representation decision); the two sorted reads that hit it now sort by
 //      a timestamp instead, with the finding written down at both sites.
 //
-// WHAT IS LEFT, by class: tenantRegistryRow 15, seededListReadUnwritten 2, gateProbe 1.
+// WHAT IS LEFT, by class: see `PIN_CLASS_CENSUS` (gated; counts are not repeated in prose).
 
 /** Why an operation is pinned.  Grouped by CLASS — see the header. */
 export const R = {
@@ -365,8 +374,8 @@ export const R = {
 /** `<case key> → { <derived operationId>: reason }`.  Case keys match
  *  `POPULATION` in `api-caller-census.test.ts`. */
 export const UNCALLED_PINS: Record<string, Record<string, string>> = {
-  // ── The THREE TENANT REGISTRIES ──────────────────────────────────────────
-  // Fifteen pins, one cause: the derived self-scope filter narrows every read
+  // ── THE TENANT REGISTRIES ────────────────────────────────────────────────
+  // Many pins, one cause: the derived self-scope filter narrows every read
   // (and every write's load-before-save) to the row whose id IS the principal's
   // claim, and the harness principal's claim is not a row id.  See
   // `R.tenantRegistryRow` — draining them needs a harness change, not a test.
@@ -646,3 +655,30 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // `tenancy-e2e.yml`'s hierarchy legs (label/post-merge).
   "tenancy-hierarchy",
 ];
+
+/**
+ * How many pins each reason class currently carries — the header's old
+ * hand-written tallies, moved into code so they can be checked.
+ *
+ * The prose version was ACCURATE until this PR and then silently was not: the
+ * `policy-document` drain added five `tenantRegistryRow` pins (15 → 20) and the
+ * header went on saying 15, because nothing read it.  This constant IS read —
+ * `api-caller-census.test.ts` recomputes the census from `UNCALLED_PINS` and
+ * fails on any divergence, in either direction.  So it ratchets like the rest
+ * of this file: draining a pin without lowering its count is as loud as adding
+ * one without raising it.
+ *
+ * Counted from the pin ENTRIES, not by grepping the reason name — the header
+ * prose and the `R.*` doc comments mention `R.tenantRegistryRow` too, and a
+ * grep that includes them over-reports (it read 22 here, and 17 on the
+ * pre-drain tree where the true figure was the header's own 15).
+ *
+ * Only classes with at least one pin appear.  A class that drains to zero is
+ * deleted from here (its `R.*` reason stays, documenting the class for when it
+ * recurs — see `autoFindAll` and `crudishUpdate`).
+ */
+export const PIN_CLASS_CENSUS: Readonly<Record<string, number>> = {
+  tenantRegistryRow: 20,
+  seededListReadUnwritten: 2,
+  gateProbe: 1,
+};
