@@ -191,8 +191,15 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  with the first form's schema.  Angular is the existence proof of the fix —
  *  its locals are already aggregate-scoped — so draining this means
  *  generalising that to a per-FORM prefix through the ~68 pack templates that
- *  hardcode the names, which deletes the row and lowers this back to 47. */
-const MAX_OPEN_GAPS = 48;
+ *  hardcode the names, which deletes the row and lowers this back to 47.
+ *
+ *  48 → 49: `loom.component-children-unsupported`.  Same trade — the drop is
+ *  not new (angular's `renderUserComponent` has always dropped the children
+ *  positional, with only its own doc comment admitting it), only the honesty
+ *  is.  The child markup appeared NOWHERE in the emitted project.  Drained by
+ *  the selector-tag call site, which deletes the row and lowers this back to
+ *  48. */
+const MAX_OPEN_GAPS = 49;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

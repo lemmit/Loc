@@ -56,6 +56,7 @@ import {
   validateChannelWiring,
   validateChartSupport,
   validateColumnlessProjectionSources,
+  validateComponentChildrenSupport,
   validateComposeUniqueness,
   validateContextFilterSupport,
   validateCurrentUserNeedsAuthUi,
@@ -192,6 +193,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDataGridFramework(sys, diags);
     validateHeexComponentHostState(sys, diags);
     validateFormLocalCollisions(sys, diags);
+    validateComponentChildrenSupport(sys, diags);
     validateChartSupport(sys, diags);
     validateUiRealtimeSupport(sys, diags);
     validateUiProjectionReadFramework(sys, diags);

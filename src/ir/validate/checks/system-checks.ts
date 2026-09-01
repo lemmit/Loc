@@ -51,6 +51,7 @@ import {
 import { isMacroEmitted } from "../../types/origin.js";
 import { backendServesRealtime } from "../../util/channels.js";
 import { bodyUsesChart } from "../../util/chart.js";
+import { componentChildrenHosts } from "../../util/component-children.js";
 import { dataGridHosts } from "../../util/data-grid.js";
 import { aggregateFileField } from "../../util/file-field.js";
 import {
@@ -603,6 +604,47 @@ export function validateHeexComponentHostState(sys: SystemIR, diags: LoomDiagnos
             dName: d.name,
           }),
           source: `${ui.name}/${component}`,
+/** A user component invoked WITH CHILDREN on the Angular frontend.
+ *
+ *  HONEST GAP.  Angular has no PascalCase component tag, so a user component
+ *  is invoked through `<ng-container [ngComponentOutlet]="X" …>`, and
+ *  `ngComponentOutlet` cannot project content from a template
+ *  (`ngComponentOutletContent` takes pre-built DOM nodes — TS-side only).  So
+ *  the extra positional argument that every JSX-family frontend renders as
+ *  children was DROPPED, silently: the child markup appeared nowhere in the
+ *  emitted project, and `renderUserComponent`'s doc comment admitting the drop
+ *  was the only trace anywhere.
+ *
+ *  Angular-scoped on purpose — react / vue / svelte render the children into
+ *  the component's `Slot { }` correctly, and feliz / flutter / heex were not
+ *  probed, so naming them would be an unverified refusal.
+ *
+ *  Ratchet: a WALKED component already carries a kebab selector
+ *  (`components-emit.ts`) and its `Slot { }` already emits `<ng-content>`
+ *  (`angular-target.renderChildrenSlot`), so the call site can switch from the
+ *  outlet to `<app-x …>children</app-x>` with the class in the page's
+ *  standalone `imports: []`.  That PR narrows this gate to `extern` components
+ *  (no Loom-known selector) or deletes it. */
+export function validateComponentChildrenSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const d of sys.deployables) {
+    for (const { ui, fw } of mountedUis(sys, d)) {
+      if (fw !== "angular") continue;
+      for (const hit of componentChildrenHosts(ui)) {
+        diags.push({
+          severity: "error",
+          code: "loom.component-children-unsupported",
+          message: diagMessage("loom.component-children-unsupported", {
+            what: hit.what,
+            component: hit.component,
+            dName: d.name,
+          }),
+          source: `${ui.name}/${hit.what}`,
+        });
+      }
+    }
+  }
+}
+
 /** Two forms on one page whose generated page-local bindings collide.
  *
  *  HONEST GAP, not a design rule.  Every JS frontend splices a form's mutation

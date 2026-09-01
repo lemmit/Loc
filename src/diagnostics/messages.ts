@@ -1581,6 +1581,21 @@ export const DIAGNOSTIC_MESSAGES = {
     `two pages, or move one into its own 'component'. (Angular already scopes these locals by ` +
     `aggregate, which is the shape the fix generalises to a per-form prefix — it needs the ~68 ` +
     `pack templates that hardcode 'create'/'register'/'handleSubmit' to take one.)`,
+  "loom.component-children-unsupported": (p: {
+    what: unknown;
+    component: unknown;
+    dName: unknown;
+  }) =>
+    `${p.what} invokes component '${p.component}' with CHILDREN, which deployable '${p.dName}' ` +
+    `(frontend 'angular') drops. Angular has no PascalCase component tag, so a user component is ` +
+    `invoked through '<ng-container [ngComponentOutlet]=…>', and 'ngComponentOutlet' cannot ` +
+    `project content from a template — the extra positional argument has nowhere to go, so the ` +
+    `children vanish from the emitted project with no other symptom. Every other frontend ` +
+    `renders them into the component's 'Slot { }'. Pass the content as a declared parameter, or ` +
+    `host this page on another frontend. (The fix is Angular-local: a WALKED component already ` +
+    `has a kebab selector and its 'Slot { }' already emits '<ng-content>', so the call site can ` +
+    `switch from the outlet to '<app-x …>children</app-x>'; an extern component has no ` +
+    `Loom-known selector and keeps the outlet.)`,
   "loom.chart-unsupported-target": (p: { what: unknown; name: unknown; uiFramework: unknown }) =>
     `${p.what} uses 'Chart', which deployable '${p.name}' can't render ` +
     `(frontend '${p.uiFramework}'). Chart ships on every shipping frontend — react, vue, ` +

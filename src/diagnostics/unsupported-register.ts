@@ -146,6 +146,20 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     mission: "M-T6.35",
   },
   {
+    code: "loom.component-children-unsupported",
+    kind: "gap",
+    site: "src/ir/validate/checks/system-checks.ts:592",
+    what:
+      "a user component invoked WITH CHILDREN on angular.  Angular has no PascalCase component " +
+      "tag, so a call site is `<ng-container [ngComponentOutlet]=…>`, and `ngComponentOutlet` " +
+      "cannot project content from a template — the extra positional arg was dropped and the " +
+      "child markup appeared NOWHERE in the emitted project.  Every other JS frontend renders it " +
+      "into the component's `Slot { }`.  Drained by switching a WALKED component's call site to " +
+      "its own kebab selector (`<app-x …>children</app-x>`; the selector and the `<ng-content>` " +
+      "both already exist), which narrows this to `extern` components or deletes it.",
+    mission: "M-T1.1",
+  },
+  {
     code: "loom.page-form-locals-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/system-checks.ts:590",
