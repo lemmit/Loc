@@ -435,6 +435,13 @@ describe("scaffold instance builders — observable workflow pages", () => {
 /** A `FilterParam` for the builder tests.  `type` is only consulted for the
  *  `number` arm (it is cloned onto the state field), so a bare TypeRef stub is
  *  enough for the string/id arms. */
+const PRIM_FOR_KIND: Record<FilterParam["kind"], string> = {
+  string: "string",
+  ref: "string",
+  number: "int",
+  bool: "bool",
+};
+
 const fp = (name: string, kind: FilterParam["kind"] = "string"): FilterParam =>
   ({
     name,
@@ -445,7 +452,7 @@ const fp = (name: string, kind: FilterParam["kind"] = "string"): FilterParam =>
       $type: "TypeRef",
       array: false,
       optional: false,
-      base: { $type: "PrimitiveType", name: kind === "number" ? "int" : "string" },
+      base: { $type: "PrimitiveType", name: PRIM_FOR_KIND[kind] },
     },
   }) as unknown as FilterParam;
 
@@ -465,6 +472,36 @@ describe("scaffoldList filter-bar — find inputs + match switch", () => {
     expect(src).toContain("of: Order.byStatus(byStatusStatus),");
     expect(src).toContain("else => QueryView(");
     expect(src).toContain("of: Order.all(pageNum, 10, sortKey, sortDir),");
+    expect(
+      parseRawResult(inPage(src))
+        .parserErrors.map((e) => e.message)
+        .join("\n"),
+    ).toBe("");
+  });
+
+  // M-T1.15: a `bool` param is the one kind whose NATURAL input is WRONG rather
+  // than missing — a `Toggle` binds a bool state whose zero value is `false`,
+  // which collapses "filter for false" and "no filter" into one page state and
+  // puts half the domain out of reach.  The bar binds a three-state string
+  // select instead, and passes the comparison as the find argument.
+  it("a bool param binds a three-state SelectField and passes the comparison as the argument", () => {
+    const src = flat(
+      printExpr(
+        scaffoldList("Order", [text("status")], {
+          filters: [{ name: "byActive", params: [fp("active", "bool")] }],
+        }),
+      ),
+    );
+    expect(src).toContain(
+      'SelectField("Active", bind: byActiveActive, options: ["true", "false"], ' +
+        'testid: "orders-filter-by_active_active")',
+    );
+    // "unset" is `""` — NOT one of the two options, so both `true` and `false`
+    // stay reachable (the whole point of not using a Toggle here).
+    expect(src).toContain('byActiveActive != "" => QueryView(');
+    // the find takes a `bool`, so the comparison IS the argument
+    expect(src).toContain('of: Order.byActive(byActiveActive == "true"),');
+    expect(src).not.toContain("Toggle(");
     expect(
       parseRawResult(inPage(src))
         .parserErrors.map((e) => e.message)
@@ -550,6 +587,46 @@ describe("filterFindsForAggregate — resolves filter finds from the repository 
         ],
       },
       { name: "byTotal", params: [["total", "number"]] },
+    ]);
+  });
+
+  // M-T1.15: the per-param-type verdict, in ONE place — every renderable type
+  // is offered, every held-back one is dropped, and the reason each is on the
+  // side it is on is a fact about the FRONTENDS (see `filterParamKind`), not a
+  // preference.  `guid`/`datetime` are `z.string()` on the request wire and
+  // `string` in every frontend's state emitter, so a text box over them agrees
+  // by construction; `enum` is the `z.enum([...])` union against a `string`
+  // state (TS2322) and `decimal`/`money` have no type-checking zero sentinel.
+  it("offers guid / datetime / bool params, and still drops enum, decimal, money, arrays and optionals", async () => {
+    const { model, errors } = await parseString(`
+      system S {
+        context C {
+          enum Status { Draft, Confirmed }
+          aggregate Customer { name: string }
+          aggregate Order { reference: string }
+          repository Orders for Order {
+            find byCorr(corr: guid): Order[]
+            find byPlacedAt(at: datetime): Order[]
+            find byActive(a: bool): Order[]
+            find byBuyer(b: Customer id): Order[]
+            find byStatus(s: Status): Order[]
+            find byTotal(t: decimal): Order[]
+            find byPrice(p: money): Order[]
+            find byRefs(rs: string[]): Order[]
+            find byMaybe(m: string?): Order[]
+          }
+        }
+      }
+    `);
+    expect(errors).toEqual([]);
+    const order = findNode(model, "Aggregate", "Order");
+    expect(
+      filterFindsForAggregate(order).map((f) => [f.name, f.params.map((p) => p.kind)]),
+    ).toEqual([
+      ["byCorr", ["string"]],
+      ["byPlacedAt", ["string"]],
+      ["byActive", ["bool"]],
+      ["byBuyer", ["ref"]],
     ]);
   });
 });

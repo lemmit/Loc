@@ -337,6 +337,26 @@ projection PurgeAudit {
 }
 ```
 
+### Where the clause may be written
+
+`ignoring` has exactly three homes, each read by a different lowerer:
+
+| Position | Spelling |
+|---|---|
+| a repository `find` | `find recent(): Order[] where … ignoring softDeletable` |
+| a projection's `where` slot — **before** `join` / `group by` / `select` | `from Order as o ignoring softDeletable  group by …` |
+| an inline read bound by a `let` | `let xs = Orders.findAll(Big()) ignoring *` |
+
+Anywhere else it is an error (`loom.ignoring-clause-placement`). The clause rides the postfix-expression rule so an inline read can carry it, and a postfix chain is admissible wherever an expression is — so `group by o.status ignoring softDeletable` parses, binds to the *grouping expression*, and is then never read back. Before the gate, the same model with the word one clause later produced the opposite data:
+
+```ddd
+group by o.status ignoring softDeletable     // filter STILL applied — the clause is dropped
+ignoring softDeletable
+group by o.status                            // filter dropped, as asked
+```
+
+Hoisting the grammar instead would be wrong: `ignoring` means "bypass the **source's** capability filters", which has no per-expression reading.
+
 The bypass is visible in generated code only when a capability actually contributes a filter to that aggregate; with no `filter` capability installed there is nothing to suppress and the clause is a no-op. See [`../capabilities.md`](../capabilities.md) for the `filter` capability that produces these query-layer predicates.
 
 ## Shorthand projection — the `select`-less form
