@@ -29,11 +29,7 @@ import type {
 import { allContexts } from "../../types/loom-ir.js";
 import { isTphBase, isTphConcrete } from "../../util/inheritance.js";
 import { aggregateIsEventSourced, resolveDataSourceConfig } from "../../util/resolve-datasource.js";
-import {
-  walkExprDeep,
-  walkStmtExprsDeep as walkExprsInStmt,
-  walkWorkflowStmtExprsDeep as walkExprsInWorkflowStmt,
-} from "../../util/walk.js";
+import { walkExprDeep, walkStmtExprsDeep as walkExprsInStmt } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
 
@@ -1176,35 +1172,20 @@ export function validateVariantMatch(loom: EnrichedLoomModel, diags: LoomDiagnos
       }
     };
 
-  for (const c of allContexts(loom)) {
-    for (const wf of c.workflows) {
-      const v = visit(`${c.name}/${wf.name}`);
-      for (const st of wf.statements) walkExprsInWorkflowStmt(st, v);
-    }
-    for (const agg of c.aggregates) {
-      for (const op of agg.operations) {
-        const v = visit(`${c.name}/${agg.name}/${op.name}`);
-        for (const st of op.statements) walkExprsInStmt(st, v);
-      }
-      for (const ap of agg.appliers ?? []) {
-        const v = visit(`${c.name}/${agg.name}/apply(${ap.event})`);
-        for (const st of ap.statements) walkExprsInStmt(st, v);
-      }
-      for (const inv of agg.invariants) {
-        const v = visit(`${c.name}/${agg.name}/invariant`);
-        walkExpr(inv.expr, v);
-        walkExpr(inv.guard, v);
-      }
-      for (const d of agg.derived ?? []) {
-        walkExpr(d.expr, visit(`${c.name}/${agg.name}/${d.name}`));
-      }
-      for (const fn of agg.functions ?? []) {
-        const v = visit(`${c.name}/${agg.name}/${fn.name}`);
-        if ("expr" in fn.body) walkExpr(fn.body.expr, v);
-        else for (const st of fn.body.stmts) walkExprsInStmt(st, v);
-      }
-    }
-  }
+  // ONE outer loop (M-T9.40).  This check carried a straight copy of the
+  // outer loop `validateExprIntegrity` used to have, minus its ui half — so a
+  // `match` written anywhere the copy did not reach (a page or component body,
+  // a find filter, a handler, a criterion, a domain service, a test) was
+  // parsed, lowered and emitted with none of its four semantic gates run:
+  // non-union subject, unknown variant, duplicate variant, non-exhaustive.
+  //
+  // Widening produced ZERO new diagnostics across nine examples and all 59
+  // corpus fixtures, so no existing model was relying on the gap; the change
+  // is reach, not behaviour.  `ui` is ignored here — a variant match means the
+  // same thing on both sides of that line.
+  forEachModelExpr(loom, ({ expr, source }) => {
+    visit(source)(expr);
+  });
 }
 
 /** Flag every expression in a function body — the expression form walks the
