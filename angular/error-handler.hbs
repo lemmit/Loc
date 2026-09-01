@@ -1,0 +1,29 @@
+// Auto-generated.  Root render-time error handler — the Angular twin of
+// React's `src/ErrorBoundary.tsx` (M-T1.8).
+//
+// Angular has no component-level boundary: an exception thrown while a
+// component renders propagates to the application's `ErrorHandler`, and the
+// DEFAULT one only writes to the console — the view is left half-torn-down and
+// the user sees a blank or frozen page with nothing on screen to say why.
+// This handler records the error in a signal the app shell reads, so the shell
+// can render a readable fallback, and still logs through `console.error` (what
+// the Loom playground's "App logs" stream and Playwright's console capture
+// both read).
+import { ErrorHandler, Injectable, signal } from "@angular/core";
+
+@Injectable({ providedIn: "root" })
+export class LoomErrorHandler implements ErrorHandler {
+  /** The last uncaught error, or null.  Read by the app shell. */
+  readonly lastError = signal<Error | null>(null);
+
+  handleError(error: unknown): void {
+    const err = error instanceof Error ? error : new Error(String(error));
+    this.lastError.set(err);
+    console.error("Uncaught render error:", err);
+  }
+
+  /** Clear the banner — bound to the fallback's dismiss control. */
+  reset(): void {
+    this.lastError.set(null);
+  }
+}

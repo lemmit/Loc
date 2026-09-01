@@ -64,8 +64,10 @@ describe("angular menu-link gate", () => {
     expect(shell).toContain('@if (currentUser.role === "manager") { <a mat-list-item');
     expect(shell).toContain('routerLink="/secret"');
     expect(shell).toContain('routerLink="/public"');
-    // Exactly one nav link is gated.
-    expect(shell.match(/@if \(/g)?.length ?? 0).toBe(1);
+    // Exactly one nav link is gated.  Counted on the GATE shape, not on bare
+    // `@if`: the shell now always carries one more `@if` for the root
+    // error-handler banner (M-T1.8), which has nothing to do with nav gating.
+    expect(shell.match(/@if \(currentUser/g)?.length ?? 0).toBe(1);
   });
 
   it("rejects a gated link without auth: ui (the silent drop is closed)", async () => {
@@ -87,7 +89,10 @@ describe("angular menu-link gate", () => {
     );
     expect(shell).not.toContain("SessionService");
     expect(shell).not.toContain("currentUser");
-    expect(shell).not.toContain("@if");
-    expect(shell).toContain('import { Component } from "@angular/core";');
+    // No NAV gate.  (A bare `not.toContain("@if")` would now also forbid the
+    // root error-handler banner, which every shell carries — M-T1.8.)
+    expect(shell).not.toContain("@if (currentUser");
+    // `inject` is unconditional now: the shell injects `LoomErrorHandler`.
+    expect(shell).toContain('import { Component, inject } from "@angular/core";');
   });
 });

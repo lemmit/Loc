@@ -4,6 +4,7 @@
   import { QueryClient, QueryClientProvider } from "@tanstack/svelte-query";
 {{#if hasRealtimeHandlers}}  import RealtimeHandlers from "$lib/components/RealtimeHandlers.svelte";
 {{/if}}{{#if authUi}}  import AuthGate from "$lib/auth/AuthGate.svelte";
+{{/if}}{{#if i18nEnabled}}  import { t } from "$lib/i18n";
 {{/if}}  import { toast } from "$lib/toast.svelte";
 
   let { children } = $props();
@@ -14,13 +15,27 @@
 </script>
 
 <QueryClientProvider client={queryClient}>
-{{#if authUi}}  <AuthGate>
-{{#if hasRealtimeHandlers}}    <RealtimeHandlers />
+  <!-- Root render-time error boundary (M-T1.8).  Without it one throwing
+       component tears down the whole app and leaves a BLANK PAGE with nothing
+       on screen to say why — the failure mode React has been guarded against
+       since `src/ErrorBoundary.tsx` shipped.  `onerror` logs through
+       `console.error`, which is what the Loom playground's "App logs" stream
+       and Playwright's console capture both read. -->
+  <svelte:boundary onerror={(e) => console.error("Uncaught render error:", e)}>
+{{#if authUi}}    <AuthGate>
+{{#if hasRealtimeHandlers}}      <RealtimeHandlers />
+{{/if}}      {@render children()}
+    </AuthGate>
+{{else}}{{#if hasRealtimeHandlers}}    <RealtimeHandlers />
 {{/if}}    {@render children()}
-  </AuthGate>
-{{else}}{{#if hasRealtimeHandlers}}  <RealtimeHandlers />
-{{/if}}  {@render children()}
-{{/if}}  <div class="pointer-events-none fixed right-4 top-4 z-[100] flex w-80 flex-col gap-2">
+{{/if}}    {#snippet failed(error)}
+      <div role="alert" style="padding:16px;font-family:system-ui,sans-serif">
+        <h2 style="white-space:pre-wrap;color:#b91c1c">{{{errorTitleText}}}</h2>
+        <pre style="white-space:pre-wrap;color:#b91c1c">{error instanceof Error ? error.message : String(error)}</pre>
+      </div>
+    {/snippet}
+  </svelte:boundary>
+  <div class="pointer-events-none fixed right-4 top-4 z-[100] flex w-80 flex-col gap-2">
     {#each toast.items as t (t.id)}
       <div
         class={"pointer-events-auto rounded-lg border px-4 py-3 text-sm shadow-lg " + (t.kind === "success" ? "border-border bg-background" : "border-destructive bg-background text-destructive")}

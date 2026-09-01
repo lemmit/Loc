@@ -1,12 +1,13 @@
 // Auto-generated.
 import { provideHttpClient, withFetch } from "@angular/common/http";
-import { type ApplicationConfig, provideZoneChangeDetection } from "@angular/core";
+import { type ApplicationConfig, ErrorHandler, provideZoneChangeDetection } from "@angular/core";
 import { provideRouter } from "@angular/router";
 import { providePrimeNG } from "primeng/config";
 import { definePreset } from "@primeuix/themes";
 import Aura from "@primeuix/themes/aura";
 import { QueryClient, provideTanStackQuery } from "@tanstack/angular-query-experimental";
 import { routes } from "./app.routes";
+import { LoomErrorHandler } from "./error-handler";
 
 // Aura's stock light primary maps `--p-primary-color` to the `500` shade
 // (emerald `#10b981`), which clears only ~2.2–2.5:1 against white and the
@@ -43,5 +44,8 @@ export const appConfig: ApplicationConfig = {
     provideHttpClient(withFetch()),
     providePrimeNG({ theme: { preset: LoomAura } }),
     provideTanStackQuery(new QueryClient()),
+    // Root render-time error handler (M-T1.8) — Angular's default one only
+    // logs, leaving a torn-down view and a blank page.
+    { provide: ErrorHandler, useExisting: LoomErrorHandler },
   ],
 };

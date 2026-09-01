@@ -58,7 +58,9 @@ describe("svelte pack format groundwork", () => {
     const pack = loadPack(dir, { validateRequired: false });
     const rendered = pack.render("package-json", {});
     expect(rendered).toContain('"@tanstack/svelte-query"');
-    expect(rendered).toContain('"svelte": "^5.0.0"');
+    // 5.3 is the floor for `<svelte:boundary>`, which the root layout uses
+    // for the render-time error boundary (M-T1.8).
+    expect(rendered).toContain('"svelte": "^5.3.0"');
     expect(rendered).toContain('"@sveltejs/adapter-static"');
     // The svelte format reads only the `sveltekit/` shared dir — its
     // own dockerfile + api-client (the SvelteKit preview server needs
