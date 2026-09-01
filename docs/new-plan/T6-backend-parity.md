@@ -1001,7 +1001,7 @@ Found 2026-08-23 by the numeric-types audit ([F7](../audits/numeric-types-audit-
 
 Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F7/F18, plan.json N10, [fleet-bug-hunt A4/B3](../audits/fleet-bug-hunt-2026-07-19.md).
 
-## M-T6.45 — Python holds `decimal` as two types in one backend: `money * decimal` throws at runtime — `open` · **S–M** · P1
+## M-T6.45 — Python holds `decimal` as two types in one backend: `money * decimal` throws at runtime — `done` (2026-08-30) · **S–M** · P1
 
 Found 2026-08-23 by the numeric-types audit ([F8](../audits/numeric-types-audit-2026-08-23.md)). `PY_TYPE_TARGET` (`src/generator/python/render-expr.ts`) types decimal params/signatures `float` while ORM columns are `Decimal` — an operation body `self._price * f` with a wire-param `f: float` raises `TypeError: unsupported operand Decimal * float`. The same expression works when the decimal came off a column. One backend, two representations, and which one you get depends on where the value came from.
 
@@ -1010,6 +1010,8 @@ Found 2026-08-23 by the numeric-types audit ([F8](../audits/numeric-types-audit-
 **The fix:** the smallest coherent change wins — coerce the float operand at the money-arithmetic site (`Decimal(str(f))`), and state in one comment at the type table which representation rule (float domain, RS-24 spirit) the backend follows.
 
 **Verification when it lands.** A `money * decimal-param` generator test plus a behavioral witness; mutation-proved.
+
+**Closed by #2676.** Exactly the smallest-coherent-change shape the brief asked for: `renderBinary` lifts the `decimal`-typed operand of a money `*` / `/` through `Decimal(str(…))` in both operand orders (an `int / int` operand, which WIDENS to `decimal` and renders as a Python float, is caught by the same test), `collectPyExprImports` mirrors the trigger so the module imports `Decimal`, and the representation rule (float domain for plain `decimal`, `Decimal` for `money` alone) is stated once at `PY_TYPE_TARGET`. Witnesses at all three levels — per-shape unit arms + byte-identical `money * int`/`long` pins (`render-expr-kinds.test.ts`), a generator-level domain-module assertion (`money-decimal-scaling.test.ts`), and a python-only `money-scaling.ddd` in the LOOM_PYTHON_BUILD leg whose DSL `test` blocks drive `mypy --strict` (4 operand errors pre-fix) and `uv run pytest -q` (4 runtime `TypeError`s pre-fix) onto the real failure. Mutation-proved in both halves.
 
 Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F8, plan.json N11.
 

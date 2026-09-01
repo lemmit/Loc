@@ -1,0 +1,103 @@
+// Mixed `money × decimal` arithmetic on the python backend — the F8 /
+// M-T6.45 witness (numeric-types-audit-2026-08-23).
+//
+// This backend holds Loom `money` as `decimal.Decimal` and Loom `decimal` as
+// `float` (the representation rule is spelled out at `PY_TYPE_TARGET` in
+// `src/generator/python/render-expr.ts`).  `Decimal.__mul__` refuses a
+// `float`, so every scaling shape below emitted a straight native `*` / `/`
+// and raised `TypeError: unsupported operand type(s)` on the first call —
+// caught by `mypy --strict` statically AND by `uv run pytest -q` at runtime.
+//
+// Deliberately PYTHON-ONLY (not in test/fixtures/corpus/): this is a
+// single-backend representation bug, not a cross-backend wire contract, and
+// the other four backends hold money and decimal in one type family each.
+system PyMoneyScaling {
+  subdomain Pricing {
+    context Pricing {
+      aggregate Ticket {
+        label: string
+        basePrice: money
+        seats: int
+
+        create(label: string, basePrice: money, seats: int) {
+          label := label
+          basePrice := basePrice
+          seats := seats
+        }
+
+        // money × decimal — the wire-supplied `rate` is a Python `float`.
+        operation applyRate(rate: decimal) {
+          basePrice := basePrice * rate
+        }
+
+        // decimal × money — scaling is commutative in `moneyArithmetic`, so
+        // the `float` can also arrive on the LEFT of the operator.
+        operation applyRateReversed(rate: decimal) {
+          basePrice := rate * basePrice
+        }
+
+        // money ÷ decimal (`decimal ÷ money` is type-rejected).
+        operation divideByRate(rate: decimal) {
+          basePrice := basePrice / rate
+        }
+
+        // `int / int` WIDENS to `decimal` and renders as Python true division,
+        // i.e. a `float` — the same TypeError with no `decimal` in sight.
+        operation applyRatio(numerator: int, denominator: int) {
+          basePrice := basePrice * (numerator / denominator)
+        }
+
+        // money × int stays native `Decimal * int` — `int` needs no lift.
+        // Pinned so the fix does not widen past its domain.
+        operation scaleBySeats() {
+          basePrice := basePrice * seats
+        }
+
+        test "a decimal rate scales money" {
+          let t = Ticket.create({ label: "A", basePrice: money("10.00"), seats: 2 })
+          t.applyRate(1.5)
+          expect(t.basePrice).toBe(money("15.00"))
+        }
+
+        test "a decimal rate scales money from the left" {
+          let t = Ticket.create({ label: "B", basePrice: money("10.00"), seats: 2 })
+          t.applyRateReversed(1.5)
+          expect(t.basePrice).toBe(money("15.00"))
+        }
+
+        test "money divides by a decimal rate" {
+          let t = Ticket.create({ label: "C", basePrice: money("10.00"), seats: 2 })
+          t.divideByRate(4.0)
+          expect(t.basePrice).toBe(money("2.50"))
+        }
+
+        test "an int ratio widens to decimal and still scales money" {
+          let t = Ticket.create({ label: "D", basePrice: money("10.00"), seats: 2 })
+          t.applyRatio(5, 2)
+          expect(t.basePrice).toBe(money("25.00"))
+        }
+
+        test "money times an int seat count needs no lift" {
+          let t = Ticket.create({ label: "E", basePrice: money("10.00"), seats: 3 })
+          t.scaleBySeats()
+          expect(t.basePrice).toBe(money("30.00"))
+        }
+      }
+
+      repository Tickets for Ticket { }
+    }
+  }
+
+  api PricingApi from Pricing
+
+  storage pg { type: postgres }
+  resource pricingState { for: Pricing, kind: state, use: pg }
+
+  deployable api {
+    platform: python
+    contexts: [Pricing]
+    dataSources: [pricingState]
+    serves: PricingApi
+    port: 8000
+  }
+}
