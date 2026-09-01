@@ -470,7 +470,9 @@ export function renderConfiguration(
   // so a TPH base/concrete configures scalar columns + the discriminator only.
   const containmentLines = tph
     ? []
-    : agg.contains.flatMap((c) => containmentConfigLines(c, agg, options));
+    : agg.contains.flatMap((c) =>
+        containmentConfigLines(c, agg, options, "builder", "        ", 0, voLookup),
+      );
   // Reference-collection (`X id[]`) fields persist out-of-band.  Two shapes:
   //
   //   • relational / TPH (default): a separate join entity owns the link, so
@@ -1144,6 +1146,18 @@ function containmentConfigLines(
   builderVar = "builder",
   indent = "        ",
   depth = 0,
+  /** The system's value objects, keyed by name — threaded so a part's OWN
+   *  value-object field gets its columns NAMED to the migration's snake
+   *  convention, exactly as an aggregate-root field does.
+   *
+   *  Without it `fieldConfigLines` fell to the unnamed
+   *  `OwnsOne<Money>(x => x.UnitPrice)`, EF applied its default owned-type
+   *  naming (`UnitPrice_Amount`), and the migration had written
+   *  `unit_price_amount` — so EVERY read touching the part 500s with
+   *  `column o0.UnitPrice_Amount does not exist`.  The aggregate-root path
+   *  has always passed this; only the containment path did not (schemathesis:
+   *  the whole `Order` route family, list / detail / destroy alike). */
+  voLookup?: VoLookup,
 ): string[] {
   const part = agg.parts.find((p) => p.name === c.partName);
   const partFields = part?.fields ?? [];
@@ -1201,7 +1215,13 @@ function containmentConfigLines(
       `${indent}});`,
     ];
   }
-  const partFieldLines = partFields.flatMap((f) => fieldConfigLines(f, inner, childVar));
+  // `ownerName` is deliberately NOT passed: it selects the VO-ARRAY arm, whose
+  // child-table name is derived from the AGGREGATE, which would be wrong for a
+  // part.  A `Money[]` on a part therefore keeps its existing (unnamed)
+  // handling rather than acquiring a confidently-wrong table name here.
+  const partFieldLines = partFields.flatMap((f) =>
+    fieldConfigLines(f, inner, childVar, voLookup, false, undefined, false, options.schema),
+  );
   // A nested part FKs to (and its shadow `ParentId` column is named for) its
   // DIRECT parent — a sibling part for a part-in-part, else the aggregate root
   // — matching the shared migration DDL (`tableForPart`).
@@ -1229,7 +1249,7 @@ function containmentConfigLines(
       // Recurse into this part's OWN nested containments, configured against
       // THIS child builder so EF nests the owned graph (Order → Shipment → …).
       ...(part?.contains ?? []).flatMap((nc) =>
-        containmentConfigLines(nc, agg, options, childVar, inner, depth + 1),
+        containmentConfigLines(nc, agg, options, childVar, inner, depth + 1, voLookup),
       ),
       `${indent}});`,
       // The owned reference is OPTIONAL: a single containment starts unset
@@ -1262,7 +1282,7 @@ function containmentConfigLines(
     // Recurse: this part's OWN nested containments, configured against THIS
     // child builder so EF nests the owned graph (Order → Shipment → Label).
     ...(part?.contains ?? []).flatMap((nc) =>
-      containmentConfigLines(nc, agg, options, childVar, inner, depth + 1),
+      containmentConfigLines(nc, agg, options, childVar, inner, depth + 1, voLookup),
     ),
     `${indent}});`,
   ];
