@@ -50,7 +50,7 @@ system Docs {
       title: "Browse"
       state { chosen: string = "public" }
       body: Stack {
-        Field { label: "Visibility", bind: chosen },
+        Field { "Visibility", bind: chosen },
         QueryView {
           of: K.Doc.byVis(chosen),
           empty: Text { "No docs" },

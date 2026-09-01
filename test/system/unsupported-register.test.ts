@@ -138,8 +138,19 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  generated `list/4` plus a LiveView `handle_event` (and a server-side filter
  *  on the paged read); the second is the controlled shell rendered around the
  *  recorded OperationFormState on the four JSX/Dart targets.  Each deletes its
- *  row and lowers this by one. */
-const MAX_OPEN_GAPS = 44;
+ *  row and lowers this by one.
+ *
+ *  44 → 45: `loom.scaffold-filter-param-unsupported` (targets drain wave 3).
+ *  Again the gap is not new — M-T1.15 widened the scaffolded filter bar to
+ *  `string`/`guid`/`datetime`/`int`/`long`/`bool`/`<X> id` and left `enum` and
+ *  `decimal`/`money` out, which the macro handled by dropping the whole find
+ *  from the bar with no diagnostic anywhere.  What is new is that the drop is
+ *  announced.  Draining it is two frontend-side changes, not a macro change:
+ *  typing an `enum` `state {}` field as the emitted enum union instead of bare
+ *  `string` (`stateTypeAsTsString` and its React/Vue/Angular twins), and a
+ *  per-target zero-literal seam for `decimal`/`money`.  Both land the macro arm,
+ *  delete the row, and lower this back to 44. */
+const MAX_OPEN_GAPS = 45;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

@@ -839,7 +839,6 @@ system S {
     ui: WebApp { C: api } port: 4000
   }
 }`,
-
   // The state-controlled shell and the operation-form dialog do not combine on
   // react / vue / svelte / flutter — the WHOLE modal becomes a comment
   // (F2-CFE-12).  Angular, Feliz and HEEx render it, so the gate is per-target.
@@ -867,6 +866,65 @@ system S {
   deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
 }`,
 
+  // A named argument no emitter reads: `Card`'s caption is positional 0, so
+  // `title:` — and the content it carries — vanishes from every frontend
+  // without even reaching the message catalog (the named-arg half of A7).
+  "loom.page-primitive-unknown-arg": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: react
+    api C: Api
+    page Home { route: "/"  body: Card { title: "Caption", Text { "body" } } }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+  // The scaffolded list filter bar renders `string`/`guid`/`datetime`/`int`/
+  // `long`/`bool`/`<X> id` params; an `enum` one is dropped whole (the FRONTEND
+  // state emitters type an enum state as bare `string` while the query param is
+  // the zod enum union).
+  "loom.scaffold-filter-param-unsupported": `
+system S {
+  subdomain Sub { context C {
+    enum Status { Open, Closed }
+    aggregate Order with crudish { title: string  status: Status }
+    repository Orders for Order { find byStatus(s: Status): Order[] where this.status == s }
+  } }
+  api Api from Sub
+  ui WebApp with scaffold(aggregates: [Order]) {
+    framework: react
+    api C: Api
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+  // `OperationForm { of:, op: }` names no record, so every frontend targets the
+  // page's route `:id` — on a route that declares none it submits an empty id.
+  "loom.op-form-needs-route-id": `
+system S {
+  subdomain Sub { context C {
+    aggregate Item with crudish { name: string  operation activate() { } }
+    repository Items for Item { }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: react
+    api C: Api
+    page A { route: "/a"  body: Stack { OperationForm { of: Item, op: activate } } }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
   // --- frontend deployable without a `ui:` binding ------------------------
   "loom.react-deployable-missing-ui": spaMissingUi("react"),
   "loom.svelte-deployable-missing-ui": spaMissingUi("svelte"),

@@ -2270,6 +2270,37 @@ export const DIAGNOSTIC_MESSAGES = {
     `slot in any design pack and are silently DROPPED.  Use the state-controlled shape ` +
     `(\`Modal { …children, open: <stateBool> }\`), which IS a children container, or move the ` +
     `extra markup out of the modal.`,
+  "loom.page-primitive-unknown-arg": (p: {
+    where: unknown;
+    name: unknown;
+    arg: unknown;
+    known: unknown;
+  }) =>
+    `\`${p.name}\` has no \`${p.arg}:\` argument.  Every emitter reads a ` +
+    `primitive's named arguments BY NAME, so an unrecognised one — and whatever content it ` +
+    `carries — is silently DROPPED from every frontend (and never reaches the message ` +
+    `catalog either, so translators cannot even see it went missing).  On a fixed-slot ` +
+    `primitive it also DISPLACES the positional the content was meant to fill ` +
+    `(\`Tab { title: "One", … }\` renders as "Tab 1").  ${p.known}`,
+  "loom.page-primitive-unknown-arg#style-not-object": (p: { where: unknown; name: unknown }) =>
+    `\`${p.name}\`'s \`style:\` takes an OBJECT LITERAL of CSS declarations ` +
+    `(\`style: { padding: "1rem" }\`).  Any other expression is dropped during lowering, so ` +
+    `the styling silently never reaches the rendered element on any frontend.`,
+  "loom.scaffold-filter-param-unsupported": (p: {
+    where: unknown;
+    find: unknown;
+    param: unknown;
+    type: unknown;
+    aggregate: unknown;
+  }) =>
+    `the scaffolded list filter bar has no input for \`${p.param}: ${p.type}\`, ` +
+    `so repository find '${p.find}' is omitted from it entirely and '${p.aggregate}' cannot be ` +
+    `filtered by that column from this page.  The bar renders \`string\`, \`int\`, \`long\` and ` +
+    `\`<X> id\` params; \`decimal\`/\`money\` have no zero-sentinel that type-checks on Feliz, ` +
+    `an \`enum\` state field is typed as bare \`string\` by every frontend while the query ` +
+    `param is the zod enum union, and \`bool\`/\`datetime\`/\`guid\` have no input at all.  ` +
+    `Change the param's type, or write the page body by hand (\`page List { … }\` overrides the ` +
+    `scaffolded one by name) and bind the find yourself.`,
   "loom.slot-outside-component": (_p: { where: unknown }) =>
     `\`Slot { }\` renders the children a CALLER passed in, so it only means ` +
     `something inside a \`component\` body.  A page has no caller and no children ` +
@@ -2298,6 +2329,20 @@ export const DIAGNOSTIC_MESSAGES = {
     `"${p.route}") declares no \`:id\` param, so no record is in scope.  Host the ` +
     `effect on a detail page (\`route: "/…/:id"\`), or drive the op through a form primitive ` +
     `(OperationForm).`,
+  "loom.op-form-needs-route-id": (p: {
+    name: unknown;
+    route: unknown;
+    agg: unknown;
+    op: unknown;
+  }) =>
+    `\`OperationForm { of: ${p.agg}, op: ${p.op} }\` names the operation but no ` +
+    `RECORD, so every frontend targets the record identified by the page's route \`:id\` — and ` +
+    `this page (route "${p.route}") declares none.  The form still renders, and submitting it ` +
+    `posts the operation against an EMPTY id on all six frontends: a request whose path has an ` +
+    `empty segment (\`/…//${p.op}\`), which no backend route matches.  Host the form on a ` +
+    `detail route (\`route: "/…/:id"\`), or bind an in-scope record and use the instance ` +
+    `spelling (\`QueryView { of: …byId(id), single: true, data: row => OperationForm ` +
+    `{ row.${p.op} } }\`).`,
   "loom.match-await-arg-mismatch": (p: {
     where: unknown;
     aggregate: unknown;

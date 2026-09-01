@@ -16,12 +16,20 @@
 // The rule is now the one `emitCard` already used for its title: positional 0
 // is the caption only when it is TEXT-LIKE; a CALL there is body.  That covers
 // the swallow on the seven targets; naming the unrecognised `title:` itself is
-// an IR gate (`loom.page-primitive-unknown-arg` — see IMPL-NOTES.md), which is
-// the honest half and is not this file's subject.
+// an IR gate (`loom.page-primitive-unknown-arg`), which is the honest half and
+// is not this file's subject.
+//
+// That gate has since LANDED, so this fixture is by construction a model the
+// toolchain now REJECTS — which is exactly the point: the emit-side rule is
+// what keeps an ALREADY-WRITTEN source degrading gracefully (body rendered,
+// nothing swallowed) instead of losing content, and it is the behaviour a user
+// still sees on every editor keystroke before the diagnostic is fixed.  Hence
+// `generateSystemFilesUnchecked`: emitting from a rejected model IS the
+// subject here.
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/generate.js";
+import { generateSystemFilesUnchecked } from "../../_helpers/generate.js";
 
 const HOST: Record<string, string> = {
   react: "static",
@@ -75,7 +83,12 @@ const HOME_FILE =
   /(pages?\/home(_page|\.component)?\.(tsx|vue|ts|dart)|routes\/\(app\)\/\+page\.svelte|src\/App\.fs|live\/home_live\.ex)$/;
 
 async function homePage(source: string, label: string): Promise<string> {
-  const files = await generateSystemFiles(source);
+  const files = await generateSystemFilesUnchecked(
+    source,
+    "`Tab { title: … }` is rejected by `loom.page-primitive-unknown-arg`; this file's " +
+      "subject is that the walker still renders the BODY rather than swallowing it, which is " +
+      "what an author sees while the diagnostic is still on screen.",
+  );
   let out = "";
   for (const [p, c] of files) if (HOME_FILE.test(p)) out += `\n${c}`;
   expect(out, `no Home page emitted for ${label}`).not.toBe("");

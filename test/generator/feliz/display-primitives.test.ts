@@ -22,7 +22,7 @@ system Demo {
         Money { 42, currency: "USD" },
         DateDisplay { "2026-01-01" },
         EnumBadge { "active" },
-        Stat { label: "Users", value: "10" },
+        Stat { "Users", "10" },
         Loader { },
         Grid { Card { "c1" } },
         Section { Text { "s" } },

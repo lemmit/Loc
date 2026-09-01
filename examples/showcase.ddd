@@ -666,8 +666,9 @@ system DevPlatform {
             }
             body: Stack {
                 Section {
-                    heading: "Inline",
-                    body: Stack {
+                    id: "inline",
+                    Heading { "Inline", level: 3 },
+                    Stack {
                         Bold { "bold" },
                         Italic { "italic" },
                         InlineCode { "code" },

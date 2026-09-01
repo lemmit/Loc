@@ -30,6 +30,11 @@
 
 import { diagMessage } from "../../../diagnostics/messages.js";
 import { isCollectionOp } from "../../../util/collection-ops.js";
+import { RENDERABLE_FILTER_PRIMITIVES } from "../../../util/filter-param-kinds.js";
+import {
+  WALKER_PRIMITIVE_NAMED_ARGS,
+  walkerPrimitiveNamedArgs,
+} from "../../../util/walker-primitive-args.js";
 import {
   isWalkerPrimitive,
   WALKER_PRIMITIVE_SLOTS,
@@ -226,11 +231,28 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkBody(page.requires, ctx, diags);
         checkActionBodies(page.actions, ctx, diags);
         checkInstanceEffectRouteId(page, aggNames, apiParamNames, diags);
+        checkOpFormRouteId(page, diags);
         checkFrontendCollectionOps(page, pageWhere(page), mapRendered, diags);
         checkUnknownPageElements(page, pageWhere(page), callableNames, diags);
         checkSlotOutsideComponent(page, pageWhere(page), diags);
         checkUnresolvedPageRefs(page, pageWhere(page), callableNames, diags);
         checkFixedSlotArity(page, pageWhere(page), diags);
+        checkPrimitiveNamedArgs(page, pageWhere(page), diags);
+        // The scaffolded list page is the only one whose filter bar the macro
+        // builds, so the drop is only reportable there.
+        const pageKind = classifyPage(page, {
+          aggregateNames: [...aggNames],
+          workflowNames: [...workflowNames],
+        });
+        if (pageKind.kind === "aggregate-list") {
+          checkScaffoldFilterParams(
+            page,
+            pageKind.aggregateName,
+            findsByAggregate.get(pageKind.aggregateName),
+            pageWhere(page),
+            diags,
+          );
+        }
         checkSubPrimitivePlacement(page, pageWhere(page), diags);
         checkDataGridSelection(page.body, page.state, pageWhere(page), diags);
         // The `of:` receiver must be an API HANDLE — the walker's Pattern H
@@ -273,6 +295,7 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkUnknownPageElements(comp, `component '${comp.name}'`, callableNames, diags);
         checkUnresolvedPageRefs(comp, `component '${comp.name}'`, callableNames, diags);
         checkFixedSlotArity(comp, `component '${comp.name}'`, diags);
+        checkPrimitiveNamedArgs(comp, `component '${comp.name}'`, diags);
         checkSubPrimitivePlacement(comp, `component '${comp.name}'`, diags);
         checkDataGridSelection(comp.body, comp.state, `component '${comp.name}'`, diags);
         checkChartArgs(
@@ -963,6 +986,237 @@ function checkFixedSlotArity(
         code: "loom.page-primitive-extra-children",
         message: diagMessage("loom.page-primitive-extra-children#modal-op-form", { where }),
         source: where,
+      });
+    });
+  }
+}
+
+// -------------------------------------------------------------------------
+// `loom.page-primitive-unknown-arg` — the NAMED-ARGUMENT twin of the arity
+// gate above.
+//
+// Every emitter reads its named arguments BY NAME — `stringNamed(call,
+// "variant")`, `namedArgValue(call, "of")`, `lambdaArg(call, "onSubmit")`.  A
+// name outside a primitive's vocabulary is therefore read by NOBODY: it, and
+// whatever content it carries, vanishes from every one of the seven render
+// targets.  Worse than the extra-positional case, it does not even reach
+// `.loom/messages.en.json`, so a translator cannot see that a caption went
+// missing; and on a fixed-slot primitive it also DISPLACES the positional the
+// content was meant to fill —
+//
+//     Card { title: "Bob's card", Text { "x" } }   → the caption is gone
+//     Tabs { Tab { title: "One", … } }             → renders as "Tab 1"
+//
+// `title:` is the natural spelling (it IS a legal argument on `Alert`,
+// `Modal` and `CodeBlock`), which is exactly why the mistake is easy to make
+// and impossible to diagnose from the output.  The shipped
+// `examples/showcase.ddd` carried the same defect at a larger scale until this
+// gate found it: `Section { heading:, body: Stack { … } }` emitted a literal
+// `<section />`, dropping the whole inline-emphasis demo.
+//
+// The vocabulary is `WALKER_PRIMITIVE_NAMED_ARGS` (src/util/walker-primitive-
+// args.ts), pinned mechanically against the registry, `USER_VISIBLE_SLOTS` and
+// the emitters' own reads by
+// `test/language/type-system/walker-primitive-args-completeness.test.ts` — so
+// this gate can never reject an argument an emitter honours, and a new
+// primitive cannot land without declaring what it accepts.
+// -------------------------------------------------------------------------
+
+/** Reject a named argument no emitter reads.  One diagnostic per (host,
+ *  primitive, argument): a body that misspells `title:` on three `Card`s made
+ *  the same mistake three times, and hears about it once. */
+function checkPrimitiveNamedArgs(
+  host: PageIR | ComponentIR,
+  where: string,
+  diags: LoomDiagnostic[],
+): void {
+  const flagged = new Set<string>();
+  for (const root of walkerRenderedExprs(host)) {
+    walkExprDeep(root, (e) => {
+      if (e.kind !== "call" || e.callKind !== "free") return;
+      const accepted = walkerPrimitiveNamedArgs(e.name);
+      if (accepted === undefined) return; // a component / value object / extern call
+      for (const argName of e.argNames ?? []) {
+        if (argName === undefined) continue;
+        // A `style:` argument that survived lowering is one `hoistStyleArg`
+        // (src/ir/lower/lower-expr.ts) declined to lift, i.e. not an object
+        // literal — dropped there with the comment "validator surfaces a
+        // clearer diagnostic".  This is that diagnostic.
+        if (argName === "style") {
+          if (flagged.has(`${e.name}.style`)) continue;
+          flagged.add(`${e.name}.style`);
+          diags.push({
+            severity: "error",
+            code: "loom.page-primitive-unknown-arg",
+            message: diagMessage("loom.page-primitive-unknown-arg#style-not-object", {
+              where,
+              name: e.name,
+            }),
+            source: where,
+          });
+          continue;
+        }
+        if (accepted.has(argName)) continue;
+        const key = `${e.name}.${argName}`;
+        if (flagged.has(key)) continue;
+        flagged.add(key);
+        diags.push({
+          severity: "error",
+          code: "loom.page-primitive-unknown-arg",
+          message: diagMessage("loom.page-primitive-unknown-arg", {
+            where,
+            name: e.name,
+            arg: argName,
+            known: acceptedArgsSentence(e.name),
+          }),
+          source: where,
+        });
+      }
+    });
+  }
+}
+
+/** The "what IS accepted here" tail of the diagnostic — the primitive's own
+ *  vocabulary, or a plain statement that it takes children only. */
+function acceptedArgsSentence(name: string): string {
+  const own = WALKER_PRIMITIVE_NAMED_ARGS[name] ?? [];
+  const universal = "`testid:` and `style:` are accepted on every primitive";
+  if (own.length === 0) {
+    return `\`${name}\` takes positional children only — pass the content as a positional argument (${universal}).`;
+  }
+  return `\`${name}\` accepts ${own.map((a) => `\`${a}:\``).join(", ")} (${universal}).`;
+}
+
+// -------------------------------------------------------------------------
+// `loom.scaffold-filter-param-unsupported` — the scaffolded list page's
+// filter bar drops a find it cannot render an input for.
+//
+// `filterFindsForAggregate` (src/macros/stdlib/scaffold/_body-builders.ts)
+// wires one filter input per param of every array-returning `find`, and the
+// arm is ALL-OR-NOTHING: a find with a single unrenderable param is skipped
+// whole.  It renders `string`, `int`, `long` and `<X> id`; `decimal`/`money`,
+// `enum`, `bool`, `datetime` and `guid` are held back for reasons that live in
+// the FRONTEND emitters, not in the macro (see
+// `src/util/filter-param-kinds.ts`).  Until this gate the skip was silent: the
+// author declared `find byStatus(s: Status): Order[]`, the scaffolded list
+// page came out with no `Status` filter, and nothing anywhere said why.
+//
+// A WARNING, not an error: an aggregate may legitimately carry finds the
+// author never wanted in the bar (a workflow's lookup, a criterion-backed
+// read).  It is also suppressed when the page's own body already references
+// the find — a hand-written or overridden `page List` that binds it is doing
+// exactly what the message would ask for.
+// -------------------------------------------------------------------------
+
+/** Whether the scaffolded filter bar can render an input for a find param. */
+function filterParamRenderable(t: TypeIR): boolean {
+  if (t.kind === "id") return true;
+  return t.kind === "primitive" && RENDERABLE_FILTER_PRIMITIVES.has(t.name);
+}
+
+/** Every name a page body READS through a call or member access — enough to
+ *  tell "the author already bound this find here" from "the bar dropped it". */
+function namesReadByBody(host: PageIR | ComponentIR): Set<string> {
+  const out = new Set<string>();
+  for (const root of walkerRenderedExprs(host)) {
+    walkExprDeep(root, (e) => {
+      if (e.kind === "call") out.add(e.name);
+      else if (e.kind === "method-call") out.add(e.member);
+      else if (e.kind === "member") out.add(e.member);
+    });
+  }
+  return out;
+}
+
+/** Report each array-returning find the scaffolded filter bar had to drop. */
+function checkScaffoldFilterParams(
+  page: PageIR,
+  aggregateName: string,
+  finds: ReadonlyMap<string, FindIR> | undefined,
+  where: string,
+  diags: LoomDiagnostic[],
+): void {
+  if (!finds || finds.size === 0) return;
+  let bound: Set<string> | undefined;
+  for (const find of finds.values()) {
+    // `all` is the auto-`findAll` the bar renders unconditionally; the
+    // synthesized paged twin and the audit-history read are not user finds.
+    if (find.name === "all" || find.synthesized || find.auditHistory) continue;
+    if (find.returnType.kind !== "array" || find.params.length === 0) continue;
+    const bad = find.params.find((prm) => !filterParamRenderable(prm.type));
+    if (!bad) continue;
+    bound ??= namesReadByBody(page);
+    if (bound.has(find.name)) continue;
+    diags.push({
+      severity: "warning",
+      code: "loom.scaffold-filter-param-unsupported",
+      message: diagMessage("loom.scaffold-filter-param-unsupported", {
+        where,
+        find: find.name,
+        param: bad.name,
+        type: typeLabel(bad.type),
+        aggregate: aggregateName,
+      }),
+      source: where,
+    });
+  }
+}
+
+// -------------------------------------------------------------------------
+// `loom.op-form-needs-route-id` — the BY-NAME operation form on a page whose
+// route carries no `:id`.
+//
+// `OperationForm { of: <Agg>, op: <op> }` names the operation but no RECORD, so
+// every frontend resolves the target from the page's route id
+// (`emitFormOfOperationByName` pushes `idExpr: 'id ?? ""'`; the Angular /
+// Feliz / Flutter twins do the same).  On a page whose route declares no `:id`
+// that binding is `undefined`, and the form submits the operation against an
+// EMPTY id — `use<Op><Agg>("")`, a request to `/<aggs>//<op>` that no backend
+// route matches.
+//
+// Until wave 2 this shape ALSO failed to compile (`id` was never bound —
+// F2-CFE-5's TS2304); binding it fixed the compile error and left the semantic
+// one, which is this gate.  It is the exact twin of
+// `loom.instance-effect-needs-route-id` one site over — whose message, until
+// now, recommended `OperationForm` as the workaround for the very defect it
+// shares.
+//
+// Scope is the BY-NAME shape only (`of:` + `op:` named args).  The instance
+// spelling (`OperationForm { row.rename }`) carries its own record and is
+// fine, and a `component` body has no route to check against.
+// -------------------------------------------------------------------------
+
+/** Reject a by-name `OperationForm` on a route with no `:id` to target. */
+function checkOpFormRouteId(page: PageIR, diags: LoomDiagnostic[]): void {
+  if (pageRouteHasParam(page.route)) return;
+  const flagged = new Set<string>();
+  for (const root of walkerRenderedExprs(page)) {
+    walkExprDeep(root, (e) => {
+      if (e.kind !== "call" || e.callKind !== "free" || e.name !== "OperationForm") return;
+      const names = e.argNames ?? [];
+      const named = (n: string): ExprIR | undefined => {
+        for (let i = 0; i < e.args.length; i++) if (names[i] === n) return e.args[i];
+        return undefined;
+      };
+      const of = named("of");
+      const op = named("op");
+      if (of === undefined || op === undefined) return;
+      const aggName = of.kind === "ref" ? of.name : undefined;
+      const opName = op.kind === "ref" ? op.name : undefined;
+      if (aggName === undefined || opName === undefined) return;
+      const key = `${aggName}.${opName}`;
+      if (flagged.has(key)) return;
+      flagged.add(key);
+      diags.push({
+        severity: "error",
+        code: "loom.op-form-needs-route-id",
+        message: diagMessage("loom.op-form-needs-route-id", {
+          name: page.name,
+          route: page.route ?? "/",
+          agg: aggName,
+          op: opName,
+        }),
+        source: pageWhere(page),
       });
     });
   }
