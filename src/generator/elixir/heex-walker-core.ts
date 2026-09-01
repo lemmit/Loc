@@ -61,10 +61,10 @@ import {
 } from "../../ir/util/projection-read.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { elixirString, humanize, snake, upperFirst } from "../../util/naming.js";
-import { PROVENANCE_VALUE_FIELD } from "../../util/provenance-carrier.js";
 import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
 import { USER_VISIBLE_SLOTS } from "../../util/user-visible-slots.js";
 import { tryRenderGate } from "../_frontend/gate-expr.js";
+import { PROVENANCE_VALUE_FIELD, provenancedFieldNames } from "../_payload/provenanced-wire.js";
 import { icuFromConcat, messageKey } from "../_walker/i18n-extract.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
 import { heexTarget, renderHeexStoreActionCall, renderHeexStoreFieldRead } from "./heex-target.js";
@@ -847,33 +847,12 @@ function renderMember(expr: Extract<ExprIR, { kind: "member" }>, ctx: WalkContex
   if (
     expr.member === PROVENANCE_VALUE_FIELD &&
     expr.receiver.kind === "member" &&
-    provenancedFieldNames(ctx).has(expr.receiver.member)
+    provenancedFieldNames(ctx.aggregatesByName).has(expr.receiver.member)
   ) {
     return renderExpr(expr.receiver, ctx);
   }
   return `${renderExpr(expr.receiver, ctx)}.${snake(expr.member)}`;
 }
-
-/** Every `provenanced` field NAME declared by an aggregate (or entity part) in
- *  scope.  A page body carries unresolved receiver types (`walker-core.ts`
- *  documents the same limitation for the JSX walkers), so the carrier hop is
- *  recognised by field NAME rather than by type.  The residual ambiguity — a
- *  value object that happens to declare a field with the same name AS WELL AS a
- *  sub-field literally called `value` — is narrow, and the mis-render it would
- *  cause is a dropped `.value`, not a wrong value. */
-function provenancedFieldNames(ctx: WalkContext): ReadonlySet<string> {
-  const cached = provNamesCache.get(ctx.aggregatesByName);
-  if (cached) return cached;
-  const names = new Set<string>();
-  for (const agg of ctx.aggregatesByName.values()) {
-    for (const f of agg.fields) if (f.provenanced) names.add(f.name);
-    for (const p of agg.parts) for (const f of p.fields) if (f.provenanced) names.add(f.name);
-  }
-  provNamesCache.set(ctx.aggregatesByName, names);
-  return names;
-}
-
-const provNamesCache = new WeakMap<ReadonlyMap<string, AggregateIR>, ReadonlySet<string>>();
 
 /** JS-frontend collection ops that aren't in the shared `isCollectionOp`
  *  catalogue (`src/util/collection-ops.ts`) but DO render verbatim on the
