@@ -237,6 +237,19 @@ const FIRING_FIXTURES: Record<string, string> = {
       select orders = count
     }`),
 
+  // --- scalar intrinsics on a NULLABLE receiver ---------------------------
+  // `checkIntrinsicCalls` used to test `recvType.kind === "primitive"`, which a
+  // `T?` receiver never satisfies, so the ENTIRE catalogue check was skipped on
+  // one.  A real intrinsic on a `T?` is an unguarded deref every backend emits
+  // bare (`this.path.trim()` over a `string | null`).  The guarded form —
+  // `this.path != null ? this.path.trim() : ""` — narrows and passes.
+  "loom.intrinsic-nullable-receiver": repoOnly(`    aggregate Thing with crudish {
+      path: string?
+      label: string
+      operation relabel() { label := this.path.trim() }
+    }
+    repository Things for Thing { }`),
+
   // --- macro expansion (phase ②) ------------------------------------------
   "loom.macro-arg-missing": uiWith("scaffoldAggregate()"),
   "loom.macro-arg-duplicate": uiWith("scaffoldAggregate(of: Thing, of: Thing)"),
