@@ -522,7 +522,14 @@ export function generateAngularForContexts(
     );
   }
   if (i18nEnabled) appClassMembers.push("  protected readonly t = t;");
-  const errorTitleText = angularChromeText("rootErrorTitle", i18nEnabled);
+  // The IN-SHELL heading key (`chrome.somethingWentWrong`, no full stop), not
+  // React's `rootErrorTitle`: this banner renders inside the app shell, where
+  // that key already lives.  `rootErrorTitle` belongs to a STANDALONE root
+  // module mounted outside the shell — React's `src/ErrorBoundary.tsx` and,
+  // structurally, Svelte's root `+layout.svelte` — and spells the same idea
+  // with a full stop.  Using it here would leave "Something went wrong" in the
+  // shell bound to the wrong key (pack-chrome-i18n.test.ts catches exactly that).
+  const errorTitleText = angularChromeText("somethingWentWrong", i18nEnabled);
   const appClass =
     appClassMembers.length > 0
       ? `export class AppComponent {\n${appClassMembers.join("\n")}\n}`

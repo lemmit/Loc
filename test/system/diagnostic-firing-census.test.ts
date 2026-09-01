@@ -1038,6 +1038,54 @@ system P {
   deployable app { platform: angular targets: api ui: WebApp { C: api } port: 3001 }
 }`,
 
+  // Two `CreateForm`s on ONE page, over DIFFERENT aggregates.  React/Svelte
+  // emit the pack's bare `create` / `form` / `register` / `handleSubmit` twice
+  // in one scope (TS2300); Vue dedupes the declarations and COMPILES, so the
+  // second form silently submits the first form's mutation with the first
+  // form's schema.  (Angular scopes those locals by aggregate and would need
+  // the SAME aggregate twice — the fixture uses react, where the shape fires.)
+  "loom.page-form-locals-unsupported": `
+system P {
+  subdomain D { context C {
+    aggregate Order with crudish { customerId: string }
+    aggregate Note with crudish { text: string }
+  } }
+  api Api from D
+  ui WebApp {
+    api C: Api
+    page Home {
+      route: "/"
+      body: Stack { CreateForm { of: Order }, CreateForm { of: Note } }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable app { platform: react targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
+  // A user component invoked with CHILDREN on an Angular-hosted ui.  Angular
+  // has no PascalCase component tag, so the call site is
+  // `<ng-container [ngComponentOutlet]=…>` and `ngComponentOutlet` cannot
+  // project content from a template — the extra positional argument was
+  // dropped and the child markup appeared nowhere in the emitted project.
+  "loom.component-children-unsupported": `
+system P {
+  subdomain D { context C {
+    aggregate Order with crudish { customerId: string }
+  } }
+  api Api from D
+  ui WebApp {
+    api C: Api
+    component Panel(label: string) { body: Card { Text { label }, Slot { } } }
+    page Home { route: "/" body: Stack { Panel("a", Text { "child" }) } }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable app { platform: angular targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
   // A `toast(<expr>)` outside the v1 message subset every realtime renderer
   // implements — two-level member access off the event binding.  Without the
   // gate this aborts `ddd generate system` with a raw Error from

@@ -58,8 +58,8 @@ import {
   firstUnlowerableForAdapter,
   isFindPredicateAdapter,
 } from "../../util/find-predicate-capability.js";
-import { heexComponentHostStateUses } from "../../util/heex-component-host-state.js";
 import { FORM_LOCAL_FRAMEWORKS, formLocalCollisionHosts } from "../../util/form-locals.js";
+import { heexComponentHostStateUses } from "../../util/heex-component-host-state.js";
 import { nonRootFilterFields, rootBaseOf } from "../../util/inheritance.js";
 import { readableProjectionNames } from "../../util/projection-read.js";
 import { opHasProvSite } from "../../util/prov-id.js";
@@ -604,6 +604,12 @@ export function validateHeexComponentHostState(sys: SystemIR, diags: LoomDiagnos
             dName: d.name,
           }),
           source: `${ui.name}/${component}`,
+        });
+      }
+    }
+  }
+}
+
 /** A user component invoked WITH CHILDREN on the Angular frontend.
  *
  *  HONEST GAP.  Angular has no PascalCase component tag, so a user component

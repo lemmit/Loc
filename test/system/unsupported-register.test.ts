@@ -182,7 +182,7 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  five backends -- which deletes the row, the check module, and lowers this
  *  back to 46.
  *
- 47 → 48: `loom.page-form-locals-unsupported`.  The same trade this register
+ *  47 → 48: `loom.page-form-locals-unsupported`.  The same trade this register
  *  exists to record — the gap is not new (two forms on one page have always
  *  redeclared the bare `create` / `form` / `register` / `handleSubmit` the
  *  design packs emit), only the honesty is.  It was a TS2300 in the GENERATED

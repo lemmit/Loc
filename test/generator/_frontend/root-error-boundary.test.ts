@@ -51,6 +51,26 @@ describe("root render-time error boundary", () => {
     });
   }
 
+  it("svelte: the boundary heading is BOUND to the chrome catalog, not raw", async () => {
+    // The heading is pack chrome.  `chrome.rootErrorTitle` (with the full
+    // stop) is the STANDALONE-root-module key — React's src/ErrorBoundary.tsx
+    // and, structurally, Svelte's root +layout.svelte, both mounted outside the
+    // app shell.  The IN-shell banner (Angular's) uses
+    // `chrome.somethingWentWrong` instead; mixing them leaves a raw string
+    // bound to the wrong key, which pack-chrome-i18n.test.ts refuses.
+    const files = await project("svelte", "shadcnSvelte");
+    const layout = files.get("web/src/routes/+layout.svelte")!;
+    expect(layout).toContain('t("chrome.rootErrorTitle", "Something went wrong.")');
+    expect(layout).toContain('import { t } from "$lib/i18n";');
+    expect(files.get("web/src/lib/locales/en.json")!).toContain("rootErrorTitle");
+  });
+
+  it("angular: the banner heading uses the IN-SHELL chrome key", async () => {
+    const files = await project("angular", "angularMaterial");
+    const shell = files.get("web/src/app/app.component.ts")!;
+    expect(shell).toContain('t("chrome.somethingWentWrong", "Something went wrong")');
+  });
+
   it("svelte: the stack floor covers <svelte:boundary> (Svelte >= 5.3)", async () => {
     const files = await project("svelte", "shadcnSvelte");
     expect(files.get("web/package.json")!).toContain('"svelte": "^5.3.0"');
