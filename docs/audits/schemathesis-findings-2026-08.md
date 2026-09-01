@@ -723,7 +723,7 @@ contract rejects is accepted. F7's fix landed on the Hono emitter only
 (2026-08-16) — same defect, same declared schema, different answer.
 
 ### F18 — python + java: F8 (wrong verb on a static sub-path) is still open
-**Waiver:** W23 (python), W33 (java) · **Severity: low**
+**Waiver:** W23 (python), W33 (java), W36 (dotnet) · **Severity: low**
 
 ```
 curl -X DELETE http://host/api/customers/by_email
@@ -734,6 +734,20 @@ F8's fix is a hono middleware (`emitStaticSubpathMethodGuard`,
 `src/platform/hono/v4/routes-builder.ts`) with no counterpart on the other
 backends: FastAPI and Spring both match `DELETE /api/customers/{id}` with
 `id="by_email"` and answer the identifier validator's 422.
+
+**dotnet is the third (2026-09-01), and the route table says so out loud.**
+`DELETE /api/customers/by_email` answers 422 there too, and a `PUT` to the same
+path answers `405` with `Allow: DELETE, GET` — naming the `{id}` template that
+swallowed the DELETE.
+
+**Why this is not fixable per backend.** The obvious .NET fix is a route
+constraint, `[HttpDelete("{id:guid}")]`: `by_email` then fails to match, no
+action accepts DELETE on that path, and ASP.NET answers the honest 405. But it
+also makes `GET /api/orders/not-a-uuid` a 404 instead of the declared 422 that
+`test/generator/malformed-path-id-status.test.ts` pins on four backends. The two
+wants are in direct tension — an unconstrained `{id}` swallows the static
+sibling; a constrained one loses the malformed-id tier — so disambiguating them
+is a cross-backend design decision, not a patch. Left waived on all three.
 
 ### F19 — dotnet + java: a malformed declared `date-time` reaches the domain layer
 **Waiver:** W24/W25 (dotnet), W29/W30 (java) · **Severity: high**
@@ -777,7 +791,7 @@ accepted and the *read* then violates the published contract. Enforcing the
 declared bound on the write closes both.
 
 ### F22 — dotnet: a bodyless operation POST answers 415 before the path parameter is looked at
-**Waiver:** W26 · **Severity: low**
+**Waiver:** W26 (widened 2026-09-01) · **Severity: low**
 
 ```
 curl -X POST 'http://host/api/orders/%C2%A8/confirm'   → 415
@@ -788,6 +802,16 @@ malformed `{id}` AND no body is answered by the one thing the contract says leas
 about. 415 is not in the set of statuses that count as a rejection, so the fuzzer
 reads it as "schema-violating request accepted". The honest answer is the
 declared 422 for the unparseable identifier (or 400 for the absent body).
+
+**The rule was too narrow, and a later run proved it.** W26's pattern was written
+from the two `orders` routes of the discovery run, so the identical finding on
+`POST /api/customers/{id}/update` and `POST /api/wallets/{id}/freeze` arrived
+unwaived. Measured on a booted app, the 415 does not depend on the id being
+malformed at all — a VALID uuid with no `Content-Type` answers 415 too — so the
+shape is *every* operation POST, and the pattern now says that
+(`^POST /api/[a-z_]+/\{id\}/[a-z_]+$`). node, python and java are clean on this
+check in the same run, which is what makes the 415 a .NET divergence rather than
+a shared decision.
 
 ### F23 — java: a required body field arriving as JSON `null` NPEs in the domain layer
 **Waiver:** W29/W30 · **Severity: high**
@@ -973,6 +997,88 @@ silently dropped before the `include-hidden-files` fix.
 Not investigated further here — it belongs to the HEEx walker
 (`src/generator/elixir/heex-target.ts` / `heex-walker-core.ts`), not to the
 query-parameter path this session was working on.
+
+
+### F29 — dotnet: a value object on a containment PART maps to columns the migration never created
+**Waiver:** none — fixed · **Severity: high** · the whole `Order` route family 500s.
+
+**Status: FIXED (2026-09-01).**
+
+```
+GET /api/orders  →  500
+Npgsql.PostgresException: column o0.UnitPrice_Amount does not exist
+```
+
+The aggregate-root path threads the system's value objects into
+`fieldConfigLines`, which names the owned type's columns to the migration's
+convention. `containmentConfigLines` never received them, so a PART's VO field
+took the unnamed fallback — `o.OwnsOne<Money>(x => x.UnitPrice);` — EF applied
+its own default owned-type naming (`UnitPrice_Amount`), and the migration had
+written `unit_price_amount`.
+
+**Every compile gate was blind to it.** The C# compiles; the app boots (EF
+validates the *model*, not the database); it dies on the first query that reads
+the part. So `Order` — whose `Money` sits on a line — 500s on list, detail and
+destroy alike, while `Product` and `Wallet`, whose `Money` sits on the root, are
+fine. That asymmetry is the signature, and it accounted for **6 of the dotnet
+leg's 13 unwaived findings** (three routes × `not_a_server_error` +
+`status_code_conformance`).
+
+Measured on a booted stack (storefront-system + postgres + `dotnet run`):
+
+| request | before | after |
+|---|---|---|
+| `GET /api/orders` | 500 | **200** |
+| `GET /api/orders/{id}` | 500 | **404** (absent id) |
+| `DELETE /api/orders/{id}` | 500 | **404** |
+| `GET /api/{products,customers,wallets}` | 200 | 200 |
+
+plus a full round-trip — `POST /api/orders/{id}/add_line` with a `unitPrice`
+(204), then reading the order back returns
+`"unitPrice":{"amount":9.99,"currency":"USD"}`. An empty list would not have
+proved the column is genuinely written and read. Reverting the emitter
+reproduces `column o0.UnitPrice_Amount does not exist` verbatim. Gated by
+`test/generator/dotnet/part-valueobject-columns.test.ts`, which also asserts the
+EF config and the migration DDL agree in the same emission.
+
+### F30 — dotnet: a required value-object member of a VALUE TYPE can be omitted
+**Waiver:** W37 · **Severity: medium** · **Status: OPEN — the obvious fix is wrong.**
+
+```
+POST /api/products -d '{"sku":"A","price":{"currency":"USD"}}'   → 201
+GET  /api/products                          → {"amount":0,"currency":"USD"}
+```
+
+`ProductsMoneyRequest` publishes `required: [amount, currency]`. A zero-priced
+product is created from a body the contract forbids.
+
+**The asymmetry is the diagnosis.** Measured on a booted app:
+
+| body | answer |
+|---|---|
+| `{"amount":1.5,"currency":"USD"}` | 201 |
+| `{"amount":1.5}` — string missing | **422**, correctly refused |
+| `{"currency":"USD"}` — decimal missing | **201**, accepted |
+
+Both members are equally required; only the VALUE TYPE slips through, because
+DataAnnotations `[Required]` tests for null and a missing `decimal` binds to `0`.
+This is exactly the hole `dtoParam` already documents for operation bodies
+(RS-26), in the one slot its `[property: JsonRequired]` guard does not cover —
+a VO's own members.
+
+**Extending that guard was tried and rejected, on measurement.** With
+`[property: JsonRequired]` on VO members the omission IS refused — but the STJ
+failure lands in the `Malformed JSON in request body` **400** arm. That is wrong
+on its face (the JSON is well-formed; a member is absent), and it is a NEW
+divergence: the same endpoint answers 422 for an omitted `price`, and node and
+python answer 422 here too. It also moved the correctly-handled `currency` case
+from 422 to 400. Shipping it would have traded one contract bug for a parity bug.
+
+The fix that keeps the 422 tier is a nullable request-DTO value type
+(`decimal? Amount` + `[Required]`), letting the existing model-validation path
+see the absence. That moves every VO construction site in the .NET emitter, so
+it is its own slice rather than a rider on this one.
+
 
 ### The elixir leg
 It ships as a **discovery cell**: the matrix runs it, but `continue-on-error`
