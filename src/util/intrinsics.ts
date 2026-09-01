@@ -326,3 +326,14 @@ export function intrinsicReturnType(sig: IntrinsicSignature, receiver: string): 
 export function intrinsicsForReceiver(receiver: string): ReadonlyArray<IntrinsicSignature> {
   return INTRINSIC_SIGNATURES.filter((s) => s.receiver === receiver);
 }
+
+const ALL_INTRINSIC_NAMES: ReadonlySet<string> = new Set(INTRINSIC_SIGNATURES.map((s) => s.name));
+
+/** Is `name` a catalogue intrinsic on ANY receiver?  Receiver-agnostic on
+ *  purpose: the caller (ternary null-narrowing, `src/language/type-system.ts`)
+ *  is asking the PURITY question — "could this call mutate aggregate state?" —
+ *  which every catalogue row answers no to regardless of receiver.  Use
+ *  `intrinsicFor` whenever the receiver type actually matters. */
+export function isIntrinsicName(name: string): boolean {
+  return ALL_INTRINSIC_NAMES.has(name);
+}

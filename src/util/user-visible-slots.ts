@@ -33,7 +33,17 @@ export const USER_VISIBLE_SLOTS: Record<string, readonly UserVisibleSlot[]> = {
   InlineCode: [{ role: "code", kind: "positional", index: 0 }],
   Empty: [{ role: "empty", kind: "positional", index: 0 }],
   Anchor: [{ role: "anchor", kind: "positional", index: 0 }],
-  KeyValueRow: [{ role: "keyValue", kind: "positional", index: 0 }],
+  // BOTH halves of the row are authored prose.  Only the label was listed, so
+  // `KeyValueRow { "Status", "Open" }` translated its label and shipped its
+  // VALUE in English at every locale, while the visually identical
+  // `Stat { "Status", "Open" }` translated both (G2667 §D9).  The value slot is
+  // a literal-only slot in the emitter: a nested primitive there
+  // (`KeyValueRow { "Total", Money { … } }`) is an element and walks, and both
+  // consumers already skip a non-literal slot.
+  KeyValueRow: [
+    { role: "keyValue", kind: "positional", index: 0 },
+    { role: "keyValueValue", kind: "positional", index: 1 },
+  ],
   Badge: [{ role: "badge", kind: "positional", index: 0 }],
   Button: [
     { role: "button", kind: "positional", index: 0 },

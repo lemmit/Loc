@@ -16,6 +16,7 @@ import type {
   Expression,
   IntLit,
   Lambda,
+  ListLit,
   MatchArm,
   MatchExpr,
   MenuMetaEntry,
@@ -43,6 +44,7 @@ import {
   mkCallSuffix,
   mkIntLit,
   mkLambda,
+  mkListLit,
   mkMatchArm,
   mkMatchExpr,
   mkMenuMetaEntry,
@@ -97,6 +99,18 @@ export function boolLit(value: boolean): BoolLit {
 export function intLit(value: number): IntLit {
   const origin = _currentOrigin();
   return _tag(mkIntLit({ $type: "IntLit", value }), origin);
+}
+
+/** A list literal expression (`["true", "false"]`).  The elements are
+ * re-parented onto the node, so each must be a FRESH expression — an AST
+ * node has exactly one `$container`. */
+export function listLit(elements: Expression[]): ListLit {
+  const origin = _currentOrigin();
+  const node = _tag(mkListLit({ $type: "ListLit", elements }), origin);
+  elements.forEach((e, i) => {
+    _setContainer(e, node, "elements", i);
+  });
+  return node;
 }
 
 /** An expression-bodied lambda: `param => body` (e.g. a `Column`

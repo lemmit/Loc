@@ -197,6 +197,21 @@ const FIRING_FIXTURES: Record<string, string> = {
     aggregate Customer extends Party with crudish { creditLimit: int }
     repository Customers for Customer { }`),
 
+  // M-T5.25 — an `ignoring` bypass written on a `group by` operand.  It parses
+  // (a postfix chain admits the trailing clause anywhere an expression is
+  // admissible), binds to the GROUPING expression, and is then dropped: the
+  // read keeps applying every capability filter the author asked it to skip.
+  "loom.ignoring-clause-placement":
+    repoOnly(`    aggregate Order with crudish, softDeletable { code: string  total: int }
+    repository Orders for Order { }
+    projection TotalsByCode {
+      code: string
+      orders: int
+      from Order as o
+      group by o.code ignoring softDeletable
+      select code = o.code, orders = count()
+    }`),
+
   // --- variant match (structural-checks + the AST-level subject rule) ------
   "loom.match-unknown-variant": unionMatch(
     `outcome { Order o => o.code, Other x => x.resource, else => "" }`,
@@ -236,6 +251,19 @@ const FIRING_FIXTURES: Record<string, string> = {
       where o.lineCount + 1 > 5
       select orders = count
     }`),
+
+  // --- scalar intrinsics on a NULLABLE receiver ---------------------------
+  // `checkIntrinsicCalls` used to test `recvType.kind === "primitive"`, which a
+  // `T?` receiver never satisfies, so the ENTIRE catalogue check was skipped on
+  // one.  A real intrinsic on a `T?` is an unguarded deref every backend emits
+  // bare (`this.path.trim()` over a `string | null`).  The guarded form —
+  // `this.path != null ? this.path.trim() : ""` — narrows and passes.
+  "loom.intrinsic-nullable-receiver": repoOnly(`    aggregate Thing with crudish {
+      path: string?
+      label: string
+      operation relabel() { label := this.path.trim() }
+    }
+    repository Things for Thing { }`),
 
   // --- macro expansion (phase ②) ------------------------------------------
   "loom.macro-arg-missing": uiWith("scaffoldAggregate()"),
@@ -757,6 +785,88 @@ system S {
   deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
   deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
 }`,
+
+  // A client-side `Table { filter: … }` over a SERVER-PAGED table narrows one
+  // server window, so the walker drops the arg.  The auto-paged rewrite makes
+  // this the shape the simplest hand-written paged table lands in (M-T1.1).
+  "loom.table-filter-server-paged": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: react
+    api C: Api
+    page Home {
+      route: "/"
+      state { q: string = "" }
+      body: QueryView {
+        of: C.Thing.all,
+        data: rows => Table { rows: rows, filter: q, Column { "Name", o => Text { o.name } } }
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
+  // HEEx's parallel engine never reads `filter:` at all (M-T1.1).
+  "loom.table-filter-unsupported": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: phoenixLiveView
+    api C: Api
+    page Home {
+      route: "/"
+      state { q: string = "" }
+      body: QueryView {
+        of: C.Thing.all,
+        data: rows => Table { rows: rows, filter: q, Column { "Name", o => Text { o.name } } }
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api {
+    platform: elixir contexts: [C] dataSources: [st] serves: Api
+    ui: WebApp { C: api } port: 4000
+  }
+}`,
+
+  // The state-controlled shell and the operation-form dialog do not combine on
+  // react / vue / svelte / flutter — the WHOLE modal becomes a comment
+  // (F2-CFE-12).  Angular, Feliz and HEEx render it, so the gate is per-target.
+  "loom.modal-controlled-op-form-unsupported": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish {
+      name: string
+      operation activate() { }
+    }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: react
+    api C: Api
+    page Home {
+      route: "/"
+      state { shown: bool = false }
+      body: Modal { open: shown, OperationForm { of: Thing, op: activate } }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
   // --- frontend deployable without a `ui:` binding ------------------------
   "loom.react-deployable-missing-ui": spaMissingUi("react"),
   "loom.svelte-deployable-missing-ui": spaMissingUi("svelte"),

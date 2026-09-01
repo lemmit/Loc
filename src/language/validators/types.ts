@@ -266,7 +266,19 @@ export function checkAvgProjection(model: Model, accept: ValidationAcceptor): vo
 /** Validate scalar-intrinsic calls (src/util/intrinsics.ts) against their
  *  catalogue signature — call form, arity, no named args, and argument
  *  primitive types.  Fail-open everywhere the receiver or an argument
- *  types as `unknown` (anti-double-reporting, like the operand checks). */
+ *  types as `unknown` (anti-double-reporting, like the operand checks).
+ *
+ *  NULLABLE RECEIVERS.  A `T?` receiver is UNWRAPPED before the catalogue is
+ *  consulted, and the nullability is then judged on its own.  Before this,
+ *  the whole function was skipped on an optional receiver (`recvType.kind`
+ *  was `"optional"`, never `"primitive"`), so `s.totallyMadeUp("")` was
+ *  rejected on a `string` and silently ACCEPTED on a `string?` — the same
+ *  call, the same garbage emission, one of them un-gated.  Unwrapping
+ *  restores the whole catalogue check; the deref itself is then rejected by
+ *  `loom.intrinsic-nullable-receiver`, because every backend emits a bare
+ *  deref (`this.path.trim()` on a `string | null`) that the generated
+ *  project's own compiler rejects, or that crashes at runtime.  The guarded
+ *  form — `x != null ? x.trim() : …` — narrows and passes. */
 export function checkIntrinsicCalls(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {
     if (!isPostfixChain(node)) continue;
@@ -274,9 +286,31 @@ export function checkIntrinsicCalls(model: Model, accept: ValidationAcceptor): v
     const env = envForNode(chain);
     let recvType = typeOf(chain.head, env);
     for (const suffix of chain.suffixes) {
-      if (isMemberSuffix(suffix) && recvType.kind === "primitive") {
+      // A single optional level is transparent to member RESOLUTION (as it
+      // already is in `absentRecordMember` / `membersOfType`); whether the
+      // deref is legal is a separate judgement, made below.
+      const bare = recvType.kind === "optional" ? recvType.inner : recvType;
+      const nullableReceiver = recvType.kind === "optional";
+      if (isMemberSuffix(suffix) && bare.kind === "primitive") {
         const ms = suffix as MemberSuffix;
-        const sig = intrinsicFor(recvType.name, ms.member);
+        const sig = intrinsicFor(bare.name, ms.member);
+        // `matches` is the string regex operation — not a catalogue row, but
+        // a real call that derefs its receiver exactly like one.
+        const isStringMatches = bare.name === "string" && ms.member === "matches";
+        if ((sig || isStringMatches) && ms.call && nullableReceiver) {
+          // A REAL intrinsic on a possibly-null receiver — an unguarded
+          // deref.  Reported instead of the arity/arg checks below (one
+          // diagnostic per site; the receiver is the primary defect).
+          accept(
+            "error",
+            diagMessage("loom.intrinsic-nullable-receiver", {
+              member: ms.member,
+              recv: typeToString(recvType),
+            }),
+            { node: ms, property: "member", code: "loom.intrinsic-nullable-receiver" },
+          );
+          break;
+        }
         if (sig) {
           if (!ms.call) {
             accept(
@@ -333,25 +367,24 @@ export function checkIntrinsicCalls(model: Model, accept: ValidationAcceptor): v
               );
             }
           }
-        } else if (
-          ms.call &&
-          !isIntrinsicMatcher(ms.member) &&
-          !(recvType.name === "string" && ms.member === "matches")
-        ) {
+        } else if (ms.call && !isIntrinsicMatcher(ms.member) && !isStringMatches) {
           // Strict unknown-intrinsic gate: a CALL on a known primitive
           // receiver that matches no catalogue row (and is neither the
           // string regex `matches` nor a test matcher) is REJECTED, not
           // failed open — failing open renders garbage per backend.  Bare
           // member ACCESS stays un-gated (string `.length` is legal; a
           // field-style member should not need a catalogue change to
-          // parse).
-          const known = intrinsicsForReceiver(recvType.name)
+          // parse).  A `T?` receiver reaches here too — the member doesn't
+          // exist at all, which outranks its nullability, so this is the
+          // one diagnostic the site gets.  The rendered receiver keeps its
+          // `?` so the message names the type the author actually wrote.
+          const known = intrinsicsForReceiver(bare.name)
             .map((s) => s.name)
             .join(", ");
           accept(
             "error",
             diagMessage("loom.intrinsic-unknown", {
-              name: recvType.name,
+              name: typeToString(recvType),
               member: ms.member,
               known: known ? ` — available: ${known}` : "",
             }),

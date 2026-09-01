@@ -128,6 +128,17 @@ export const DIAGNOSTIC_MESSAGES = {
     `Unknown builder type '${p.name}'. Expected a ValueObject, EntityPart, user-defined component, or stdlib walker primitive (e.g., Stack, CreateForm, Card).`,
 
   // ----------------------------------------------------------------------
+  // src/language/validators/bypass-placement.ts
+  // ----------------------------------------------------------------------
+  "loom.ignoring-clause-placement": (p: { clause: unknown }) =>
+    `'${p.clause}' sits in a position that DROPS it. A capability-filter bypass has three homes: ` +
+    "a repository 'find … ignoring …', a query-time projection's 'where' slot (before 'join' / " +
+    "'group by' / 'select'), or an inline read bound by a 'let' ('let xs = Repo.findAll(…) " +
+    "ignoring …'). Written on any other expression it parses, binds to that expression, and is " +
+    "never read back — the read still applies every filter you asked it to skip. Move the clause " +
+    "to the read it is meant to widen.",
+
+  // ----------------------------------------------------------------------
   // src/language/validators/channel.ts
   // ----------------------------------------------------------------------
   "loom.channel-key-missing-field": (p: { name: unknown; key: unknown; evName: unknown }) =>
@@ -909,6 +920,9 @@ export const DIAGNOSTIC_MESSAGES = {
     `'${p.member}' argument ${p.i} is '${p.actual}' but the signature ${p.member}${p.signature} expects '${p.expected}'.`,
   "loom.intrinsic-unknown": (p: { name: unknown; member: unknown; known: unknown }) =>
     `'${p.name}' has no intrinsic '.${p.member}()'${p.known}.`,
+  "loom.intrinsic-nullable-receiver": (p: { member: unknown; recv: unknown }) =>
+    `'.${p.member}()' can't be called on '${p.recv}' — the receiver may be null and every backend emits a bare dereference. ` +
+    `Guard it with a null-narrowing ternary: '<expr> != null ? <expr>.${p.member}(…) : …'.`,
   "loom.ternary-condition": (p: { condT: unknown }) =>
     `Ternary condition must be of type 'bool', got '${p.condT}'.`,
   "loom.ternary-branches": (p: { thenT: unknown; elseT: unknown }) =>
@@ -2211,11 +2225,45 @@ export const DIAGNOSTIC_MESSAGES = {
     max: unknown;
     slots: unknown;
   }) =>
-    `\`${p.name}\` takes ${p.max} positional arguments (${p.slots}) — it is a fixed ` +
-    `SLOT primitive, not a children container like \`Stack\` or \`Card\`, so every design pack ` +
-    `renders exactly those ${p.max} and the extra ones are silently DROPPED from the page ` +
-    `(while still landing in the message catalog).  Wrap the extra content in a \`Stack { … }\` ` +
-    `and pass that as the last slot.`,
+    p.max === 0
+      ? `\`${p.name}\` renders NO positional arguments — it is configured entirely through its ` +
+        `named arguments, so a positional child has no slot in any design pack and is silently ` +
+        `DROPPED from the page (while still landing in the message catalog).  Move the content ` +
+        `to a sibling inside the enclosing container.`
+      : `\`${p.name}\` takes ${p.max} positional arguments (${p.slots}) — it is a fixed ` +
+        `SLOT primitive, not a children container like \`Stack\` or \`Card\`, so every design pack ` +
+        `renders exactly those ${p.max} and the extra ones are silently DROPPED from the page ` +
+        `(while still landing in the message catalog).  Wrap the extra content in a \`Stack { … }\` ` +
+        `and pass that as the last slot.`,
+  "loom.table-filter-unsupported": (p: {
+    where: unknown;
+    filter: unknown;
+    framework: unknown;
+    deployable: unknown;
+  }) =>
+    `\`Table { filter: ${p.filter} }\` binds a client-side search box, and the '${p.framework}' ` +
+    `walker has no filter seam — deployable '${p.deployable}' renders the table with the ` +
+    `argument silently DROPPED: no search box, no narrowing, and the bound state field left ` +
+    `unread.  Remove the \`filter:\` on this frontend, or render the ui through one of the ` +
+    `frameworks that supports it (react / vue / svelte / angular / feliz / flutter).`,
+  "loom.table-filter-server-paged": (p: { where: unknown; filter: unknown }) =>
+    `\`Table { filter: ${p.filter} }\` is a CLIENT-side filter, but this table is server-paged ` +
+    `(\`serverPaged: true\`) — its rows are one page the server already chose, so filtering them ` +
+    `in the browser would narrow that page rather than the result set.  The walker drops the ` +
+    `argument rather than lie about it.  Note that the simplest hand-written paged table becomes ` +
+    `server-paged automatically (the auto-paged rewrite), so \`filter:\` needs an explicitly ` +
+    `client-paged table — or a find parameter the read passes to the server.`,
+  "loom.modal-controlled-op-form-unsupported": (p: {
+    where: unknown;
+    framework: unknown;
+    deployable: unknown;
+  }) =>
+    `a \`Modal\` cannot combine the state-controlled shape (\`open: <stateBool>\`) with an ` +
+    `\`OperationForm\` child on '${p.framework}' — deployable '${p.deployable}' renders the ` +
+    `WHOLE modal, operation form included, as a comment, so the enclosing section comes out ` +
+    `empty.  Use the trigger shape (\`Modal { trigger: Button { … }, OperationForm { … } }\`), ` +
+    `which drives the dialog itself, or drop the \`OperationForm\` and put plain markup in the ` +
+    `controlled modal.`,
   "loom.page-primitive-extra-children#modal-op-form": (_p: { where: unknown }) =>
     `a \`Modal\` with an \`OperationForm\` child renders the TRIGGER button and the ` +
     `operation's generated field set — nothing else.  The other positional children have no ` +
