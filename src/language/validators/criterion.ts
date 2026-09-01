@@ -91,7 +91,12 @@ function checkOneCriterion(c: Criterion, accept: ValidationAcceptor): void {
   // --- purity: no mutating operation calls ----------------------------
   // `streamAst` includes the body root itself — a bare `close()` body is
   // the PostfixChain, which `streamAllContents` would skip.
-  if (candidate) {
+  // `c.body` is non-optional in the AST types, but parse recovery completes
+  // the rule with it undefined (`criterion Broken of Order =` mid-edit), and
+  // `streamAst(undefined)` THROWS — which aborted the whole `criteria` family
+  // and dropped every other criterion + use-site diagnostic in the document.
+  // Same bug class as the `derived` initializer guard in `checkDerived`.
+  if (candidate && c.body) {
     for (const n of AstUtils.streamAst(c.body)) {
       // `this.cancel()` / `x.cancel()` — a member call whose name is an
       // operation on the candidate aggregate.
@@ -142,6 +147,9 @@ function checkOneCriterion(c: Criterion, accept: ValidationAcceptor): void {
  *  criterion body, restricted to criteria declared in the same context. */
 function referencedCriteria(c: Criterion, byName: Map<string, Criterion>): string[] {
   const out: string[] = [];
+  // Parse recovery can leave `body` undefined; a body that never parsed
+  // references nothing.  Mirrors `referencedPolicyFns`' identical guard.
+  if (!c.body) return out;
   for (const n of AstUtils.streamAst(c.body)) {
     if (isNameRef(n) && byName.has(n.name)) out.push(n.name);
   }
