@@ -304,8 +304,23 @@ export function emitKeyValueRow(
   const positionals = positionalArgs(call);
   const labelArg = positionals[0];
   const childArg = positionals[1];
+  // The VALUE slot splits two ways.  A nested primitive (`KeyValueRow { "Total",
+  // Money { o.total } }`) is an ELEMENT and walks; a plain string LITERAL is
+  // authored PROSE and must translate — `Stat { "Status", "Open" }` t()-wraps
+  // both halves, and the visually identical `KeyValueRow { "Status", "Open" }`
+  // shipped `"Open"` raw and absent from `.loom/messages.en.json` (G2667 §D9:
+  // two rows that render the same, one translatable and one not, with nothing
+  // in the DSL to tell the author which they wrote).  Routed through the same
+  // `localizedText` the label uses, under its own `keyValueValue` role so the
+  // two halves of a row keep distinct catalog keys — exactly the
+  // `statLabel`/`statValue` split.  With i18n off `localizedRawOf` falls
+  // through to `renderTextContent`, which spells a string literal the same way
+  // `walk` does, so non-i18n output is byte-identical.
+  const childIsLiteral = childArg?.kind === "literal" && childArg.lit === "string";
   const childJsx = childArg
-    ? walk(childArg, ctx, depth + 2)
+    ? childIsLiteral
+      ? localizedText(call, ctx, "keyValueValue", '""', 1)
+      : walk(childArg, ctx, depth + 2)
     : ctx.target.renderComment("missing value");
   return renderPrimitive(ctx, "primitive-key-value-row", {
     // The label is a user-visible slot (`keyValue`), and the packs split on how

@@ -298,8 +298,25 @@ export function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   // directly).  This guard makes the function total if a stray
   // op-form is ever reached without its Modal wrapper: bail before
   // pushing a bogus `kind:"aggregate"` create binding.
+  //
+  // It is REACHED, and it used to `return ""`.  `QueryView { of: X.Agg.all,
+  // single: true, data: row => OperationForm { row.<op> } }` hands the op-form
+  // straight here with no Modal, and the emitted `kitchen_live.ex` rendered an
+  // EMPTY `true ->` arm: no form, no marker, no diagnostic — a blank panel that
+  // reads as "there is nothing here".  Every other target that cannot render
+  // this shape at least says so in the output (Flutter emits
+  // `const SizedBox.shrink() /* OperationForm(row.<op>): … */`); HEEx alone
+  // said nothing.  The marker is the honest minimum until the standalone
+  // instance op-form is rendered on LiveView (it needs the `handle_event` +
+  // form-binding half `renderModal` owns, so it is a feature, not a seam fix).
   const positional0 = expr.args.find((_, i) => !expr.argNames?.[i]);
-  if (positional0 && positional0.kind === "member") return "";
+  if (positional0 && positional0.kind === "member") {
+    const opName = positional0.member;
+    return (
+      `<%!-- OperationForm(<instance>.${opName}): the instance-qualified shape is only rendered ` +
+      `inside a Modal on Phoenix LiveView — use OperationForm { of: <Agg>, op: ${opName} } --%>`
+    );
+  }
   let ofTarget = "";
   let runsTarget = "";
   for (let i = 0; i < expr.args.length; i++) {
@@ -1069,7 +1086,14 @@ export function renderKeyValueRow(
   // The row label is a user-visible slot (`keyValue`), so a plain literal rides
   // the translation runtime under i18n (M-T1.11) and stays raw otherwise.
   const label = positionals[0] ? renderInTemplate(positionals[0], ctx, "keyValue") : "Field";
-  const value = positionals[1] ? renderInTemplate(positionals[1], ctx) : "";
+  // The VALUE is authored prose too, and it rode NO role — so the row's two
+  // halves diverged: the label translated and the value shipped in English at
+  // every locale (G2667 §D9).  `keyValueValue` is the same role the JSX walker
+  // uses, so the key the extraction pass writes and the key HEEx reads are one
+  // by construction.  Non-literals are unaffected (`localizedHeex` returns
+  // undefined for them), so this is byte-identical wherever the value is an
+  // expression or a nested primitive.
+  const value = positionals[1] ? renderInTemplate(positionals[1], ctx, "keyValueValue") : "";
   // The testid identifies the VALUE cell, not the row — the same placement the
   // React/Vue/Svelte packs use (`<div … data-testid={testid}>{children}</div>`
   // inside `KeyValueRow`), and what the emitted page objects assume: a detail

@@ -2225,11 +2225,45 @@ export const DIAGNOSTIC_MESSAGES = {
     max: unknown;
     slots: unknown;
   }) =>
-    `\`${p.name}\` takes ${p.max} positional arguments (${p.slots}) — it is a fixed ` +
-    `SLOT primitive, not a children container like \`Stack\` or \`Card\`, so every design pack ` +
-    `renders exactly those ${p.max} and the extra ones are silently DROPPED from the page ` +
-    `(while still landing in the message catalog).  Wrap the extra content in a \`Stack { … }\` ` +
-    `and pass that as the last slot.`,
+    p.max === 0
+      ? `\`${p.name}\` renders NO positional arguments — it is configured entirely through its ` +
+        `named arguments, so a positional child has no slot in any design pack and is silently ` +
+        `DROPPED from the page (while still landing in the message catalog).  Move the content ` +
+        `to a sibling inside the enclosing container.`
+      : `\`${p.name}\` takes ${p.max} positional arguments (${p.slots}) — it is a fixed ` +
+        `SLOT primitive, not a children container like \`Stack\` or \`Card\`, so every design pack ` +
+        `renders exactly those ${p.max} and the extra ones are silently DROPPED from the page ` +
+        `(while still landing in the message catalog).  Wrap the extra content in a \`Stack { … }\` ` +
+        `and pass that as the last slot.`,
+  "loom.table-filter-unsupported": (p: {
+    where: unknown;
+    filter: unknown;
+    framework: unknown;
+    deployable: unknown;
+  }) =>
+    `\`Table { filter: ${p.filter} }\` binds a client-side search box, and the '${p.framework}' ` +
+    `walker has no filter seam — deployable '${p.deployable}' renders the table with the ` +
+    `argument silently DROPPED: no search box, no narrowing, and the bound state field left ` +
+    `unread.  Remove the \`filter:\` on this frontend, or render the ui through one of the ` +
+    `frameworks that supports it (react / vue / svelte / angular / feliz / flutter).`,
+  "loom.table-filter-server-paged": (p: { where: unknown; filter: unknown }) =>
+    `\`Table { filter: ${p.filter} }\` is a CLIENT-side filter, but this table is server-paged ` +
+    `(\`serverPaged: true\`) — its rows are one page the server already chose, so filtering them ` +
+    `in the browser would narrow that page rather than the result set.  The walker drops the ` +
+    `argument rather than lie about it.  Note that the simplest hand-written paged table becomes ` +
+    `server-paged automatically (the auto-paged rewrite), so \`filter:\` needs an explicitly ` +
+    `client-paged table — or a find parameter the read passes to the server.`,
+  "loom.modal-controlled-op-form-unsupported": (p: {
+    where: unknown;
+    framework: unknown;
+    deployable: unknown;
+  }) =>
+    `a \`Modal\` cannot combine the state-controlled shape (\`open: <stateBool>\`) with an ` +
+    `\`OperationForm\` child on '${p.framework}' — deployable '${p.deployable}' renders the ` +
+    `WHOLE modal, operation form included, as a comment, so the enclosing section comes out ` +
+    `empty.  Use the trigger shape (\`Modal { trigger: Button { … }, OperationForm { … } }\`), ` +
+    `which drives the dialog itself, or drop the \`OperationForm\` and put plain markup in the ` +
+    `controlled modal.`,
   "loom.page-primitive-extra-children#modal-op-form": (_p: { where: unknown }) =>
     `a \`Modal\` with an \`OperationForm\` child renders the TRIGGER button and the ` +
     `operation's generated field set — nothing else.  The other positional children have no ` +

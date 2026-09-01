@@ -68,6 +68,7 @@ import {
   listShapedProjectionNames,
   readableProjectionNames,
 } from "../../ir/util/projection-read.js";
+import { walkStmtChildren } from "../../ir/util/walk.js";
 import { errorTypeUri } from "../../util/error-defaults.js";
 import { provableStringType } from "../../util/expr-body-type.js";
 import { snake } from "../../util/naming.js";
@@ -1373,11 +1374,30 @@ export function renderActionHandlers(
   return out.join("\n");
 }
 
-/** True when a statement (or a nested arm/else body) contains an awaited
- *  effect — a `variant-match` (whose subject is `await <op>()`).  Drives the
- *  `async` handler wrapper (async-actions-and-effects.md Stage 2). */
+/** True when a statement — or a nested arm / `else` body — contains an awaited
+ *  effect: a `variant-match`, whose subject is `await <op>()`.  Drives the
+ *  `async` handler wrapper (async-actions-and-effects.md Stage 2).
+ *
+ *  The recursion matches what the doc always claimed.  It was a bare
+ *  `kind === "variant-match"` test, which is only ever RIGHT by accident: the
+ *  sole statement kind that nests other statements IS `variant-match`, so a
+ *  nested one always has a `variant-match` ancestor at top level and the flat
+ *  test happened to see it.  The moment the page-statement vocabulary grows a
+ *  second nesting kind (an `if`, an `attempt` — M-T1.7/M-T1.8 both add one),
+ *  the flat test emits a NON-async handler whose body still `await`s, which is
+ *  a hard `tsc` failure in generated code.  Recursing now costs nothing
+ *  (byte-identical on every shape that exists) and removes the trap. */
 function stmtIsAwaited(s: StmtIR): boolean {
-  return s.kind === "variant-match";
+  if (s.kind === "variant-match") return true;
+  let nested = false;
+  walkStmtChildren(
+    s,
+    () => {},
+    (child) => {
+      if (stmtIsAwaited(child)) nested = true;
+    },
+  );
+  return nested;
 }
 
 /** Money(value, currency?, decimals?, testid?).  Renders
@@ -2092,24 +2112,6 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
   }
 }
 
-/** OR the walk's mutable BOOLEAN Sink flags from a child context back into its
- *  parent.  Needed when a child ctx was made by SPREAD (`{ ...ctx, lambdaParams }`)
- *  — the spread snapshots the booleans by value, so a body write inside the
- *  child (`usesState` from a `:=`, `usesNavigate` from a `navigate(…)`) would be
- *  lost.  Object sinks (imports / usedApiHooks / usedParams / …) stay shared by
- *  reference and need no copy-back. */
-function propagateSinkFlags(from: WalkContext, to: WalkContext): void {
-  to.usesState ||= from.usesState;
-  to.usesNavigate ||= from.usesNavigate;
-  to.usesRouteId ||= from.usesRouteId;
-  to.usesCurrentUser ||= from.usesCurrentUser;
-  to.usesRouterLink ||= from.usesRouterLink;
-  to.usesChildren ||= from.usesChildren;
-  to.usesCodeBlock ||= from.usesCodeBlock;
-  to.usesFileUpload ||= from.usesFileUpload;
-  if (from.usesFragment) to.usesFragment = true;
-}
-
 /** Add a named import the page/component shell must emit (`from` module →
  *  `name`).  A thin wrapper over `ctx.imports` (an `ImportMap`) so the
  *  variant-match envelope can pull in `ApiError` + the op's union response
@@ -2210,7 +2212,16 @@ function emitVariantMatch(
       ? { ...ctx, lambdaParams: extendLambdaParams(ctx, arm.binding, arm.binding) }
       : ctx;
     const body = arm.body.map((s) => emitStmt(s, armCtx));
-    if (armCtx !== ctx) propagateSinkFlags(armCtx, ctx);
+    // ONE propagator.  This used to be `propagateSinkFlags`, a near-copy of
+    // `propagateChildFlags` that had drifted five entries behind it
+    // (`usesTableSort`, `usesTableFilter`, `usesDataGrid`, `tabsDefault`, and
+    // the `formOfs` list).  Nothing a statement arm can write reaches those
+    // today — the page-statement vocabulary is assign/add/remove/let/
+    // expression/call/variant-match, none of which renders markup — so the
+    // divergence was latent, which is exactly why it survived: the copy stayed
+    // correct while the original grew.  Folding removes the second place to
+    // remember (G2667 §D7).
+    if (armCtx !== ctx) propagateChildFlags(armCtx, ctx);
     return { tag, binding: arm.binding, body, isError: isErrorTag(tag, arm.isError) };
   });
   // All error arms (not just the first) — each paired with the RFC-7807 `type`

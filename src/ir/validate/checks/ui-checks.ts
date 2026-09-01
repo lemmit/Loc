@@ -32,6 +32,7 @@ import { diagMessage } from "../../../diagnostics/messages.js";
 import { isCollectionOp } from "../../../util/collection-ops.js";
 import {
   isWalkerPrimitive,
+  WALKER_PRIMITIVE_SLOTS,
   WALKER_SUB_PRIMITIVE_PARENTS,
 } from "../../../util/walker-primitive-names.js";
 import { pagedReturn } from "../../stdlib/generics.js";
@@ -138,6 +139,23 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         const byFw = filteringHosts.get(uiName) ?? new Map<string, string>();
         if (!byFw.has(fw)) byFw.set(fw, d.name);
         filteringHosts.set(uiName, byFw);
+      }
+    }
+    // EVERY framework each ui is actually rendered through — the same per-ui
+    // resolution as `filteringHosts`, unfiltered.  The per-target body gates
+    // below (`loom.table-filter-unsupported`,
+    // `loom.modal-controlled-op-form-unsupported`) need it because a
+    // static-bundle host serves whichever bundle the ui declares, so the
+    // framework that renders a page is not the deployable's platform.
+    const renderingHosts = new Map<string, Map<string, string>>();
+    for (const d of sys.deployables) {
+      for (const uiName of [d.uiName, ...(d.hostedUiNames ?? [])]) {
+        if (!uiName) continue;
+        const fw = sys.uis.find((u) => u.name === uiName)?.framework ?? d.uiFramework;
+        if (!fw) continue;
+        const byFw = renderingHosts.get(uiName) ?? new Map<string, string>();
+        if (!byFw.has(fw)) byFw.set(fw, d.name);
+        renderingHosts.set(uiName, byFw);
       }
     }
     // Which uis this system renders through Feliz — the one frontend whose
@@ -289,6 +307,20 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
       // A `toast(<expr>)` outside the v1 message subset CRASHES every realtime
       // renderer (target-agnostic — the three switches are arm-for-arm equal).
       checkToastMessages(ui, diags);
+      // Two per-target body shapes that render on SOME frontends and are
+      // dropped on the rest.  Both are keyed on the rendering framework, so the
+      // gate stops firing for a target the moment it ports.
+      for (const [framework, dName] of renderingHosts.get(ui.name) ?? []) {
+        for (const page of ui.pages) {
+          checkTableFilterSupport(page, pageWhere(page), framework, dName, diags);
+          checkControlledModalOpForm(page, pageWhere(page), framework, dName, diags);
+        }
+        for (const comp of ui.components) {
+          const where = `component '${comp.name}'`;
+          checkTableFilterSupport(comp, where, framework, dName, diags);
+          checkControlledModalOpForm(comp, where, framework, dName, diags);
+        }
+      }
       // A user `component` whose shape the hosting frontend's component emitter
       // FILTERS OUT — the component and every call site of it vanish.
       for (const [framework, dName] of filteringHosts.get(ui.name) ?? []) {
@@ -667,25 +699,227 @@ function storeRenderedExprs(store: StoreIR): ExprIR[] {
 //                               renders the TRIGGER button only — the dialog
 //                               body is the op-form's generated field set
 //
-// A third positional on the first two, or any non-`OperationForm` positional
-// on the op-form `Modal`, was read by nobody: the content vanished from every
-// frontend while still landing in `.loom/messages.en.json`, the same
-// translators-get-a-key-nothing-renders symptom `Tab` had.  Widening the
-// packs is not the fix here (there is no second value slot to widen INTO), so
-// this is the honest gate — the other half of #2567's fix-or-gate rule.
+// A positional past a shape's slot count was read by nobody: the content
+// vanished from every frontend while still landing in
+// `.loom/messages.en.json`, the same translators-get-a-key-nothing-renders
+// symptom `Tab` had.  Widening the packs is not the fix here (there is no
+// second value slot to widen INTO), so this is the honest gate — the other
+// half of #2567's fix-or-gate rule.
+//
+// MEMBERSHIP is no longer hand-listed here.  It was, and it covered exactly
+// `Stat` / `KeyValueRow` / the op-form `Modal` while every other fixed-arity
+// read in the primitive table stayed unguarded — `EnumBadge { "x", "dropped" }`
+// and `Image { "/a.png", "/dropped.png", alt: "a" }` both parsed clean and both
+// emitted only the first positional.  The slot counts now come from the ONE
+// declaration of each primitive's argument surface,
+// `WALKER_PRIMITIVE_SLOTS` in `src/util/walker-primitive-names.ts`, which a
+// completeness test pins against the emitters' own positional reads.  A new primitive declares
+// its contract there or the completeness test fails; it can no longer land
+// silently outside this gate.
 // -------------------------------------------------------------------------
-
-/** Primitive → how many positionals its pack templates actually render. */
-const FIXED_SLOT_PRIMITIVES: Record<string, { readonly max: number; readonly slots: string }> = {
-  Stat: { max: 2, slots: "label and value" },
-  KeyValueRow: { max: 2, slots: "label and value" },
-};
 
 /** The positional args of a lowered call (named args carry an `argNames` entry
  *  at the same index).  Mirrors the walker's `positionalArgs`, which lives in
  *  the generator layer and cannot be imported here. */
 function positionalArgsOf(e: Extract<ExprIR, { kind: "call" }>): ExprIR[] {
   return e.args.filter((_, i) => !e.argNames?.[i]);
+}
+
+/** Visit every free call the walker DISPATCHES AS A PRIMITIVE.
+ *
+ *  A call sitting in the RECEIVER position of a member / method-call is not
+ *  one: the walker hands the whole access to `emitExpr`, never to the
+ *  primitive registry.  That distinction is load-bearing because a
+ *  user-declared value object may share a primitive's NAME —
+ *  `Stat { "valueObject", Money(9.99, "USD").currency }` in
+ *  `web/src/examples/expression-showcase.ddd` constructs the VO `Money`, and
+ *  reading it as the `Money` PRIMITIVE would reject shipped source over an
+ *  arity the emitter never applies to it.  So the receiver chain is skipped
+ *  while the ARGUMENTS are still walked (`rows.map(r => Text { r.name })`
+ *  renders its lambda body). */
+function walkRenderedPrimitives(
+  e: ExprIR,
+  visit: (call: Extract<ExprIR, { kind: "call" }>) => void,
+): void {
+  if (e.kind === "member" || e.kind === "method-call") {
+    const receiver = e.receiver;
+    walkExprChildren(e, {
+      expr: (c) => {
+        if (c !== receiver) walkRenderedPrimitives(c, visit);
+      },
+      stmt: (s) => walkStmtExprsDeep(s, (c) => walkRenderedPrimitives(c, visit)),
+    });
+    return;
+  }
+  if (e.kind === "call" && e.callKind === "free") visit(e);
+  walkExprChildren(e, {
+    expr: (c) => walkRenderedPrimitives(c, visit),
+    stmt: (s) => walkStmtExprsDeep(s, (c) => walkRenderedPrimitives(c, visit)),
+  });
+}
+
+// -------------------------------------------------------------------------
+// `loom.table-filter-unsupported` / `loom.table-filter-server-paged` (M-T1.1)
+//
+// `Table { filter: <state> }` binds a search box above the table that narrows
+// the rows client-side.  It renders on the six frameworks that ride the shared
+// `walkBody` core — all six declare the `renderFilteredRows` +
+// `renderFilterInput` seams — and on NOBODY else:
+//
+//   * HEEx runs a parallel engine (`elixir/heex-primitives.ts` `renderTable`),
+//     whose `else if` chain handles `rows` / `testid` / sort / page and lets
+//     `filter:` fall through into nothing.  No seam, no marker, no diagnostic.
+//   * A SERVER-PAGED table's rows are one server window, so a client filter
+//     would narrow that page rather than the result set — `table.ts` gates it
+//     off (`!serverPaged`) and drops the arg.  This is the common case, not the
+//     exotic one: `auto-paged-table.ts` REWRITES the simplest hand-written
+//     `QueryView { of: X.all, data: rows => Table { rows: rows, filter: q } }`
+//     into the server-paged shape, so the natural spelling loses its filter
+//     with `ddd parse` reporting `0 error(s), 0 warning(s)` and the bound state
+//     field left as a dead `useState`.
+//
+// Rendering it is a real slice on both sides (a `filter` param threaded into
+// the generated `list/4` + a `handle_event` on LiveView; a server-side filter
+// param on the paged read), so this is the honest half meanwhile.
+// -------------------------------------------------------------------------
+
+/** Frontends whose walker renders `Table { filter: … }` — the six that declare
+ *  `renderFilteredRows` + `renderFilterInput` on their `WalkerTarget`.
+ *
+ *  EXPORTED so its own test can prove the gate still bites: with the six
+ *  shipping frameworks listed, "the check works" and "the check is
+ *  unreachable" look identical from outside, and the only honest way to tell
+ *  them apart is to remove one and watch the diagnostic come back — the same
+ *  discipline `CHART_FRAMEWORKS` uses. */
+export const TABLE_FILTER_FRAMEWORKS: ReadonlySet<string> = new Set([
+  "react",
+  "vue",
+  "svelte",
+  "angular",
+  "feliz",
+  "flutter",
+]);
+
+/** True when a `Table` call carries a `filter:` bound to a page-state ref —
+ *  exactly what `emitTable`'s `refArgName(call, "filter")` reads. */
+function tableFilterRef(e: Extract<ExprIR, { kind: "call" }>): string | undefined {
+  const i = (e.argNames ?? []).indexOf("filter");
+  if (i < 0) return undefined;
+  const arg = e.args[i];
+  return arg?.kind === "ref" ? arg.name : undefined;
+}
+
+/** True when the call declares `serverPaged: true` — the flag `emitTable` reads
+ *  and `auto-paged-table.ts` stamps on the rewritten hand-written table. */
+function tableIsServerPaged(e: Extract<ExprIR, { kind: "call" }>): boolean {
+  const i = (e.argNames ?? []).indexOf("serverPaged");
+  if (i < 0) return false;
+  const arg = e.args[i];
+  return arg?.kind === "literal" && arg.lit === "bool" && arg.value === "true";
+}
+
+function checkTableFilterSupport(
+  host: PageIR | ComponentIR,
+  where: string,
+  framework: string,
+  deployable: string,
+  diags: LoomDiagnostic[],
+): void {
+  let flaggedUnsupported = false;
+  let flaggedPaged = false;
+  for (const root of walkerRenderedExprs(host)) {
+    walkRenderedPrimitives(root, (e) => {
+      if (e.name !== "Table") return;
+      const filter = tableFilterRef(e);
+      if (filter === undefined) return;
+      if (!TABLE_FILTER_FRAMEWORKS.has(framework)) {
+        if (flaggedUnsupported) return;
+        flaggedUnsupported = true;
+        diags.push({
+          severity: "error",
+          code: "loom.table-filter-unsupported",
+          message: diagMessage("loom.table-filter-unsupported", {
+            where,
+            filter,
+            framework,
+            deployable,
+          }),
+          source: where,
+        });
+        return;
+      }
+      if (!tableIsServerPaged(e) || flaggedPaged) return;
+      flaggedPaged = true;
+      diags.push({
+        severity: "error",
+        code: "loom.table-filter-server-paged",
+        message: diagMessage("loom.table-filter-server-paged", { where, filter }),
+        source: where,
+      });
+    });
+  }
+}
+
+// -------------------------------------------------------------------------
+// `loom.modal-controlled-op-form-unsupported` (F2-CFE-12)
+//
+// `Modal { open: <stateBool>, OperationForm { … } }` combines the two modal
+// shapes: the STATE-CONTROLLED shell (`emitControlledModal`) and the
+// OPERATION-FORM dialog (`emitModal`'s trigger + generated field set).
+// `emitModal` only reaches the controlled path when there is NO form child, so
+// with both present and no `trigger:` control falls through to
+// `renderComment("Modal: expects trigger: Button(...) and an
+// OperationForm(<instance>.<operation>) child")` — the whole modal, form
+// included, becomes a comment.  A `Tab` whose only child is that modal renders
+// an empty panel, and `ddd parse` reports no error.
+//
+// It is NOT universal: Angular and Feliz fork the primitive and render the
+// operation form (ignoring the `open:` binding, driving the dialog from their
+// own trigger), and HEEx's `renderModal` handles it too.  So this is a
+// per-target gap on the four that drop it, not a rejected shape.
+// -------------------------------------------------------------------------
+
+/** Frontends whose modal emitter renders an `OperationForm` child alongside an
+ *  `open:` binding.  EXPORTED for the same reason as
+ *  `TABLE_FILTER_FRAMEWORKS`: a gate whose Set names every target that can do
+ *  the thing is indistinguishable from a dead one unless a test removes an
+ *  entry and watches the diagnostic return. */
+export const CONTROLLED_MODAL_OP_FORM_FRAMEWORKS: ReadonlySet<string> = new Set([
+  "angular",
+  "feliz",
+  "phoenixLiveView",
+]);
+
+function checkControlledModalOpForm(
+  host: PageIR | ComponentIR,
+  where: string,
+  framework: string,
+  deployable: string,
+  diags: LoomDiagnostic[],
+): void {
+  if (CONTROLLED_MODAL_OP_FORM_FRAMEWORKS.has(framework)) return;
+  let flagged = false;
+  for (const root of walkerRenderedExprs(host)) {
+    walkRenderedPrimitives(root, (e) => {
+      if (flagged || e.name !== "Modal") return;
+      if ((e.argNames ?? []).indexOf("open") < 0) return;
+      const hasOpForm = positionalArgsOf(e).some(
+        (a) => a.kind === "call" && a.name === "OperationForm",
+      );
+      if (!hasOpForm) return;
+      flagged = true;
+      diags.push({
+        severity: "error",
+        code: "loom.modal-controlled-op-form-unsupported",
+        message: diagMessage("loom.modal-controlled-op-form-unsupported", {
+          where,
+          framework,
+          deployable,
+        }),
+        source: where,
+      });
+    });
+  }
 }
 
 /** Reject positionals no pack renders.  One diagnostic per (host, primitive):
@@ -697,9 +931,8 @@ function checkFixedSlotArity(
 ): void {
   const flagged = new Set<string>();
   for (const root of walkerRenderedExprs(host)) {
-    walkExprDeep(root, (e) => {
-      if (e.kind !== "call" || e.callKind !== "free") return;
-      const spec = FIXED_SLOT_PRIMITIVES[e.name];
+    walkRenderedPrimitives(root, (e) => {
+      const spec = WALKER_PRIMITIVE_SLOTS.get(e.name);
       if (spec) {
         if (positionalArgsOf(e).length <= spec.max || flagged.has(e.name)) return;
         flagged.add(e.name);
@@ -710,7 +943,7 @@ function checkFixedSlotArity(
             where,
             name: e.name,
             max: spec.max,
-            slots: spec.slots,
+            slots: spec.slots ?? "its declared slots",
           }),
           source: where,
         });

@@ -785,6 +785,88 @@ system S {
   deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
   deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
 }`,
+
+  // A client-side `Table { filter: … }` over a SERVER-PAGED table narrows one
+  // server window, so the walker drops the arg.  The auto-paged rewrite makes
+  // this the shape the simplest hand-written paged table lands in (M-T1.1).
+  "loom.table-filter-server-paged": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: react
+    api C: Api
+    page Home {
+      route: "/"
+      state { q: string = "" }
+      body: QueryView {
+        of: C.Thing.all,
+        data: rows => Table { rows: rows, filter: q, Column { "Name", o => Text { o.name } } }
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
+  // HEEx's parallel engine never reads `filter:` at all (M-T1.1).
+  "loom.table-filter-unsupported": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: phoenixLiveView
+    api C: Api
+    page Home {
+      route: "/"
+      state { q: string = "" }
+      body: QueryView {
+        of: C.Thing.all,
+        data: rows => Table { rows: rows, filter: q, Column { "Name", o => Text { o.name } } }
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api {
+    platform: elixir contexts: [C] dataSources: [st] serves: Api
+    ui: WebApp { C: api } port: 4000
+  }
+}`,
+
+  // The state-controlled shell and the operation-form dialog do not combine on
+  // react / vue / svelte / flutter — the WHOLE modal becomes a comment
+  // (F2-CFE-12).  Angular, Feliz and HEEx render it, so the gate is per-target.
+  "loom.modal-controlled-op-form-unsupported": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish {
+      name: string
+      operation activate() { }
+    }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: react
+    api C: Api
+    page Home {
+      route: "/"
+      state { shown: bool = false }
+      body: Modal { open: shown, OperationForm { of: Thing, op: activate } }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
   // --- frontend deployable without a `ui:` binding ------------------------
   "loom.react-deployable-missing-ui": spaMissingUi("react"),
   "loom.svelte-deployable-missing-ui": spaMissingUi("svelte"),
