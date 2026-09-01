@@ -25,6 +25,16 @@
 // (it creates and reads `public.as`), so the default is not gated — but an
 // EXPLICIT `schema:` / `tablePrefix:` on its binding IS a request the adapter
 // silently drops, and that is gated too.
+//
+// And the exemption BOTH arms need: `schema: "public"`.  There the two namings
+// converge on one physical table — `CREATE TABLE "public"."as"` from the
+// migration chain, and the unqualified `CREATE TABLE "as"` resolving through
+// Postgres's default `search_path` to the same place — so neither arm's claim
+// holds.  Verified by generating: the writer emits `builder.ToTable("as",
+// "public")` and `CREATE SCHEMA IF NOT EXISTS ""public""; CREATE TABLE
+// ""public"".""as""`, against the reader's unqualified DDL, and no emitted
+// connection string overrides `search_path`.  A `tablePrefix:` is NOT exempt
+// even beside `schema: "public"` — it renames the table rather than placing it.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -33,7 +43,7 @@ import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { parseString } from "../_helpers/parse.js";
 
 /** Two deployables over ONE context; the adapters are the only variables. */
-const CO_HOSTED = (writerPlatform: string, readerPlatform: string): string => `
+const CO_HOSTED = (writerPlatform: string, readerPlatform: string, bindingExtras = ""): string => `
 system Adp3 {
   subdomain S {
     context Alpha {
@@ -43,7 +53,7 @@ system Adp3 {
   }
   api AlphaApi from S
   storage primary { type: postgres }
-  resource alphaState { for: Alpha, kind: state, use: primary }
+  resource alphaState { for: Alpha, kind: state, use: primary${bindingExtras} }
   deployable writer {
     platform: ${writerPlatform}
     contexts: [Alpha]
@@ -139,5 +149,58 @@ describe("self-provisioning adapters vs. the dataSource's Postgres schema", () =
   it("an explicit schema on the DEFAULT adapter stays accepted — it is honoured there", async () => {
     const diags = await diagsFor(LONE("dotnet", `, schema: "legacy"`));
     expect(errorsWithCode(diags, "loom.dapper-unsupported")).toEqual([]);
+  });
+
+  // --- the `schema: "public"` exemption -----------------------------------
+  // Both arms above describe a divergence that does not exist here: naming
+  // `public` explicitly asks for exactly where an unqualified table already
+  // lands, so the two adapters address ONE table.
+
+  it("dapper beside efcore is ACCEPTED when the binding names `public` — one physical table", async () => {
+    const diags = await diagsFor(
+      CO_HOSTED("dotnet", "dotnet { persistence: dapper }", `, schema: "public"`),
+    );
+    expect(
+      errorsWithCode(diags, "loom.dapper-unsupported"),
+      "the split-brain message claims two DIFFERENT physical tables, and here there is one",
+    ).toEqual([]);
+  });
+
+  it("the mikroorm twin is accepted too — the exemption is about the schema, not the adapter", async () => {
+    const diags = await diagsFor(
+      CO_HOSTED("node", "node { persistence: mikroorm }", `, schema: "public"`),
+    );
+    expect(errorsWithCode(diags, "loom.mikroorm-unsupported")).toEqual([]);
+  });
+
+  it("a LONE dapper deployable naming `public` is accepted — the request IS honoured", async () => {
+    const diags = await diagsFor(LONE("dotnet { persistence: dapper }", `, schema: "public"`));
+    expect(
+      errorsWithCode(diags, "loom.dapper-unsupported"),
+      "the dropped-request message says the tables 'land in public' — which is what was asked for",
+    ).toEqual([]);
+  });
+
+  it('`tablePrefix:` beside `schema: "public"` is still refused, and the message names the PREFIX', async () => {
+    const diags = await diagsFor(
+      LONE("dotnet { persistence: dapper }", `, schema: "public", tablePrefix: "t_"`),
+    );
+    const gate = errorsWithCode(diags, "loom.dapper-unsupported");
+    expect(gate.length, JSON.stringify(diags.map((d) => d.code))).toBe(1);
+    // Quoting the exempt `schema:` clause here would point the author at the
+    // one clause they are allowed to keep.
+    expect(gate[0]!.message).toContain(`declares 'tablePrefix: "t_"'`);
+    expect(gate[0]!.message).not.toContain(`declares 'schema: "public"'`);
+  });
+
+  it("a prefix breaks the convergence for the CO-HOSTED arm too", async () => {
+    const diags = await diagsFor(
+      CO_HOSTED(
+        "dotnet",
+        "dotnet { persistence: dapper }",
+        `, schema: "public", tablePrefix: "t_"`,
+      ),
+    );
+    expect(errorsWithCode(diags, "loom.dapper-unsupported").length).toBe(1);
   });
 });
