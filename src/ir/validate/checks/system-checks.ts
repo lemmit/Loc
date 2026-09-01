@@ -57,8 +57,8 @@ import {
   firstUnlowerableForAdapter,
   isFindPredicateAdapter,
 } from "../../util/find-predicate-capability.js";
-import { nonRootFilterFields, rootBaseOf } from "../../util/inheritance.js";
 import { heexComponentHostStateUses } from "../../util/heex-component-host-state.js";
+import { nonRootFilterFields, rootBaseOf } from "../../util/inheritance.js";
 import { readableProjectionNames } from "../../util/projection-read.js";
 import { opHasProvSite } from "../../util/prov-id.js";
 import {
