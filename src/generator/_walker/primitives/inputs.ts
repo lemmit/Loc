@@ -95,7 +95,27 @@ export function emitField(
   const bind = stateBindArg(call, "bind", ctx);
   const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
   const error = inputErrorExpr(call, ctx);
+  // A11y ids (M-T1.12).  The packs that render a RAW `<input>` plus a sibling
+  // error element — flowbite, shadcnSvelte, primeng, spartanNg,
+  // angularMaterial — had no way to link the two: no id on the input, no id on
+  // the message, so `aria-invalid` / `aria-describedby` were absent and a
+  // screen reader announced a valid, unexplained field.  (The Mantine / MUI /
+  // Chakra / shadcn packs never needed this: their component library owns the
+  // wiring behind an `error` prop.)
+  //
+  // The id is derived, not counted: a `bind:` names a page-state field, which
+  // is unique within the page/component scope, so `loom-field-<bind>` is too.
+  // An UNBOUND field has no stable name to derive from, so it gets no id and
+  // the templates fall back to their previous markup — a display-only stub
+  // with no error slot is not the case this contract is about.
+  const fieldId = bind !== undefined ? `loom-field-${bind}` : undefined;
   return renderPrimitive(ctx, "primitive-field", {
+    fieldId,
+    errorId: fieldId !== undefined ? `${fieldId}-error` : undefined,
+    // Templates guard the aria attrs on this: an id alone is not enough,
+    // `aria-describedby` must point at an element that EXISTS, and the error
+    // element is itself conditional on `hasError`.
+    hasA11yIds: fieldId !== undefined,
     labelAttr,
     labelText,
     labelValue,
