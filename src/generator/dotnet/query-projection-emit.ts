@@ -184,7 +184,7 @@ function renderHandler(
   const joins = proj.query!.joins;
 
   const usings = new Set<string>();
-  for (const s of proj.query!.selects ?? []) collectCsExprUsings(s.expr, usings);
+  for (const s of proj.query!.selects ?? []) collectCsExprUsings(s.expr, usings, ns);
 
   // Authorization gate (default-deny) — the projection twin of a repository
   // `find … requires <gate>`: a `currentUser`-only predicate evaluated BEFORE
@@ -193,7 +193,7 @@ function renderHandler(
   const requires = proj.query!.requires;
   const gateUsesUser = exprUsesCurrentUser(requires);
   if (requires) {
-    collectCsExprUsings(requires, usings);
+    collectCsExprUsings(requires, usings, ns);
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
@@ -627,12 +627,12 @@ function renderAggregateHandler(
     : filter
       ? renderCsExpr(filter, { thisName: "o", efQuery: true })
       : undefined;
-  if (filter && !usingDapper) collectCsExprUsings(filter, usings);
+  if (filter && !usingDapper) collectCsExprUsings(filter, usings, ns);
 
   const requires = proj.query!.requires;
   const gateUsesUser = exprUsesCurrentUser(requires);
   if (requires) {
-    collectCsExprUsings(requires, usings);
+    collectCsExprUsings(requires, usings, ns);
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
@@ -820,13 +820,13 @@ function renderGroupedHandler(
     : filter
       ? renderCsExpr(filter, { thisName: "o", efQuery: true })
       : undefined;
-  if (filter && !usingDapper) collectCsExprUsings(filter, usings);
+  if (filter && !usingDapper) collectCsExprUsings(filter, usings, ns);
 
   // Authorization gate (default-deny) — same shape as the singleton arm.
   const requires = proj.query!.requires;
   const gateUsesUser = exprUsesCurrentUser(requires);
   if (requires) {
-    collectCsExprUsings(requires, usings);
+    collectCsExprUsings(requires, usings, ns);
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
@@ -1063,14 +1063,14 @@ function renderWorkflowHandler(
       ? whereToSql(filter)
       : renderCsExpr(filter, { thisName: "r", efQuery: true })
     : undefined;
-  if (filter && !usingDapper) collectCsExprUsings(filter, usings);
-  for (const s of proj.query!.selects ?? []) collectCsExprUsings(s.expr, usings);
+  if (filter && !usingDapper) collectCsExprUsings(filter, usings, ns);
+  for (const s of proj.query!.selects ?? []) collectCsExprUsings(s.expr, usings, ns);
 
   // Authorization gate (default-deny) — same shape as the aggregate handler.
   const requires = proj.query!.requires;
   const gateUsesUser = exprUsesCurrentUser(requires);
   if (requires) {
-    collectCsExprUsings(requires, usings);
+    collectCsExprUsings(requires, usings, ns);
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
@@ -1199,14 +1199,14 @@ function renderProjectionSourceHandler(
       ? whereToSql(filter)
       : renderCsExpr(filter, { thisName: "r", efQuery: true })
     : undefined;
-  if (filter && !usingDapper) collectCsExprUsings(filter, usings);
-  for (const s of proj.query!.selects ?? []) collectCsExprUsings(s.expr, usings);
+  if (filter && !usingDapper) collectCsExprUsings(filter, usings, ns);
+  for (const s of proj.query!.selects ?? []) collectCsExprUsings(s.expr, usings, ns);
 
   // Authorization gate (default-deny) — same shape as the aggregate/workflow handler.
   const requires = proj.query!.requires;
   const gateUsesUser = exprUsesCurrentUser(requires);
   if (requires) {
-    collectCsExprUsings(requires, usings);
+    collectCsExprUsings(requires, usings, ns);
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }

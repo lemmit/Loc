@@ -1707,9 +1707,9 @@ export function csWorkflowStmtTarget(
         const after = `__wfAuditAfter${n}`;
         return [
           ...gateLines,
-          `${indent}var ${before} = System.Text.Json.JsonSerializer.SerializeToNode(${projectEntityExpr(st.target, agg, ctx, { maskNames })});`,
+          `${indent}var ${before} = System.Text.Json.JsonSerializer.SerializeToNode(${projectEntityExpr(st.target, agg, ctx, { maskNames, unmasked: true })});`,
           callLine,
-          `${indent}var ${after} = System.Text.Json.JsonSerializer.SerializeToNode(${projectEntityExpr(st.target, agg, ctx, { maskNames })});`,
+          `${indent}var ${after} = System.Text.Json.JsonSerializer.SerializeToNode(${projectEntityExpr(st.target, agg, ctx, { maskNames, unmasked: true })});`,
           `${indent}_audit.Stage(new AuditRecord`,
           `${indent}{`,
           `${indent}    AuditId = Guid.NewGuid().ToString(),`,
@@ -2074,7 +2074,12 @@ function renderController(
   for (const wf of workflows) {
     for (const p of wf.params) collectWireUsings(p.type, ctx, usings);
     const cmdArgs = wf.params
-      .map((p) => wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx))
+      .map((p) =>
+        wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx, {
+          ns,
+          pointer: `/${p.name}`,
+        }),
+      )
       .join(",\n            ");
     // Error responses from the shared matrix: 400 always, + 403 when the
     // workflow has a `requires` guard (denies with ForbiddenException), + the
@@ -2337,7 +2342,7 @@ function renderInstancesController(
     // arm the command route's body gate uses.
     const gate = wf.instanceReadGate;
     if (gate) {
-      collectCsExprUsings(gate, usings);
+      collectCsExprUsings(gate, usings, ns);
       usings.add(`${ns}.Domain.Common`); // ForbiddenException
       if (exprUsesCurrentUser(gate)) {
         usings.add(`${ns}.Auth`); // ICurrentUserAccessor

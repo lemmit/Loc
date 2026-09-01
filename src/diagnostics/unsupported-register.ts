@@ -139,8 +139,10 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     site: "src/ir/validate/checks/system-checks.ts:2629",
     what:
       "the .NET Dapper residue after full EF parity: an AGGREGATING query-time projection over a " +
-      "document/event-sourced source, a hierarchical (deep/global) tenancy scope filter, and " +
-      "declared migration steps (self-provisioning adapter, migration-checks.ts:247)",
+      "document/event-sourced source, a hierarchical (deep/global) tenancy scope filter, and the " +
+      "two self-provisioning limits — declared migration steps and Postgres schema placement " +
+      "(migration-checks.ts, `validateMigrationAdapterSupport` / " +
+      "`validateSelfProvisioningSchemaSupport`)",
     mission: "M-T6.35",
   },
   {
@@ -261,7 +263,8 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     what:
       "on MikroORM: a primitive/enum SCALAR-ARRAY root field under relational/embedded " +
       "(#scalar-array — drizzle stores it natively), an abstract inheritance base owning " +
-      "`contains`, and declared migration steps (migration-checks.ts:254).  All five ONCE-gated " +
+      "`contains`, and the two self-provisioning limits — declared migration steps and Postgres " +
+      "schema placement (migration-checks.ts).  All five ONCE-gated " +
       "non-persistence features (query-time projections, SSE, outbox, timers, brokers) closed",
     mission: "M-T6.23",
   },

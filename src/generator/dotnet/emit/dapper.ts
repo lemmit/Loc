@@ -1147,6 +1147,10 @@ export function renderDapperRepository(
   const filterOrigins = agg.contextFilterOrigins ?? [];
   const capabilityFilterParts: {
     sql: string;
+    /** The predicate the `sql` was rendered from — kept so the principal-param
+     *  collection can be taken over the SURVIVING conjuncts (see
+     *  `filterPrincipalRefsFor`), not over the declared set. */
+    expr: ExprIR;
     origin: string | undefined;
     bypassable: boolean;
   }[] = capabilityFilters.map((p, i) => {
@@ -1155,7 +1159,12 @@ export function renderDapperRepository(
       // capability filter: deny wins over an authored `ignoring *`, so this
       // conjunct is never dropped (the raw-SQL twin of the EF rule in
       // `find-emit.ts` — and of the TPH discriminator rule just below).
-      return { sql: whereToSql(p, sqlCtx), origin: filterOrigins[i], bypassable: !isDenyFilter(p) };
+      return {
+        sql: whereToSql(p, sqlCtx),
+        expr: p,
+        origin: filterOrigins[i],
+        bypassable: !isDenyFilter(p),
+      };
     } catch {
       throw new Error(
         `dapper: capability filter on '${agg.name}' is outside the Dapper SQL subset; ` +
@@ -1163,22 +1172,39 @@ export function renderDapperRepository(
       );
     }
   });
-  /** The capability predicates a read carrying `bypass` still applies
+  /** The capability filter parts a read carrying `bypass` still applies
    *  (named-filter-bypass.md §11).  `ignoring *` drops every BYPASSABLE one;
    *  `ignoring A, B` drops the ones those capabilities contributed.  Dapper has
    *  no EF `IgnoreQueryFilters`, so the bypass is expressed by OMITTING the
-   *  conjunct from the generated WHERE — the raw-SQL equivalent. */
+   *  conjunct from the generated WHERE — the raw-SQL equivalent.
+   *
+   *  THE decision that both the SQL and its parameter binding must agree on
+   *  (F2-ADP-9): they used to disagree, because only the SQL consulted the
+   *  bypass. */
+  const keptFilterParts = (bypass?: { bypassAll?: boolean; bypassCaps?: string[] }) => {
+    const caps = new Set(bypass?.bypassCaps ?? []);
+    return capabilityFilterParts.filter(
+      (p) =>
+        !p.bypassable || !(bypass?.bypassAll === true || (p.origin != null && caps.has(p.origin))),
+    );
+  };
   const capabilityFilterSqlFor = (bypass?: {
     bypassAll?: boolean;
     bypassCaps?: string[];
   }): string | null => {
-    const caps = new Set(bypass?.bypassCaps ?? []);
-    const kept = capabilityFilterParts.filter(
-      (p) =>
-        !p.bypassable || !(bypass?.bypassAll === true || (p.origin != null && caps.has(p.origin))),
-    );
+    const kept = keptFilterParts(bypass);
     return kept.length > 0 ? kept.map((p) => p.sql).join(" AND ") : null;
   };
+  /** `currentUser.<claim>` refs the SURVIVING capability conjuncts read.
+   *
+   *  A read that bypasses every principal-bearing filter names no claim in its
+   *  SQL, so it must bind none.  Binding them anyway was two bugs at once: an
+   *  `@__cu_tenantId` parameter the statement never references, and — the one
+   *  that actually 500s — a `RequestContext.Current!.CurrentUser!` dereference
+   *  evaluated on a read whose whole point is that it runs without the
+   *  principal scope.  `ignoring *` on an unauthenticated call NREs. */
+  const filterPrincipalRefsFor = (bypass?: { bypassAll?: boolean; bypassCaps?: string[] }) =>
+    collectFilterPrincipalRefs(keptFilterParts(bypass).map((p) => p.expr));
   /** The full spliced WHERE fragment (TPH discriminator + surviving capability
    *  predicates).  The TPH discriminator is NEVER bypassable: it is a type
    *  mapping, not a query filter — EF's `IgnoreQueryFilters()` leaves it in
@@ -1199,7 +1225,7 @@ export function renderDapperRepository(
   // for a non-principal (or no) filter, so those SELECTs stay byte-identical.
   // GetById / FindManyByIds have no `currentUser` method param, so they bind
   // from the ambient accessor.
-  const filterPrincipalRefs = collectFilterPrincipalRefs(capabilityFilters);
+  const filterPrincipalRefs = filterPrincipalRefsFor();
   const princFields = principalFields(filterPrincipalRefs, AMBIENT_CURRENT_USER);
   // Comma-prefixed suffix appended inside a `new { … }` that already has fields
   // (GetById / FindManyByIds).
@@ -1440,8 +1466,10 @@ export function renderDapperRepository(
     // from the ambient accessor.
     const usesUser = findUsesCurrentUser(f);
     const principalBase = usesUser ? "currentUser" : AMBIENT_CURRENT_USER;
+    // Bypass-AWARE (F2-ADP-9): the same `f` that steers `andFilter` steers the
+    // claim set, so the parameter object binds exactly what the SELECT names.
     const findPrincipalRefs = dedupPrincipalRefs([
-      ...filterPrincipalRefs,
+      ...filterPrincipalRefsFor(f),
       ...collectFilterPrincipalRefs(f.filter ? [f.filter] : []),
     ]);
     const findPrincFields = principalFields(findPrincipalRefs, principalBase);

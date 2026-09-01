@@ -175,8 +175,8 @@ export function emitHistoryQueryAndHandler(
   // gate's ForbiddenException and (for the mask pass) RequestContext.
   const usings = new Set<string>([`${ns}.Application.Common`, `${ns}.Domain.Common`]);
   if (gateUsesUser) usings.add(`${ns}.Auth`);
-  if (find.requires) collectCsExprUsings(find.requires, usings);
-  for (const f of masked) collectCsExprUsings(f.maskUnless!, usings);
+  if (find.requires) collectCsExprUsings(find.requires, usings, ns);
+  for (const f of masked) collectCsExprUsings(f.maskUnless!, usings, ns);
   out.set(
     `Application/${aggFolder}/Queries/${historyQueryName(agg)}.cs`,
     renderQuery({
@@ -262,7 +262,7 @@ export function emitFindQueriesAndHandlers(
     const gateUsings = new Set<string>();
     if (find.requires) {
       gateUsings.add(`${ns}.Domain.Common`);
-      collectCsExprUsings(find.requires, gateUsings);
+      collectCsExprUsings(find.requires, gateUsings, ns);
     }
     out.set(
       `Application/${aggFolder}/Queries/${upperFirst(find.name)}Query.cs`,

@@ -966,7 +966,7 @@ export function renderAbstractBaseEntity(
     ? { thisName: "this", agg: base }
     : { thisName: "this", agg: base, idAccessor: "IdBoxed" };
   const usings = new Set<string>();
-  for (const d of base.derived) collectCsExprUsings(d.expr, usings);
+  for (const d of base.derived) collectCsExprUsings(d.expr, usings, ns);
   // A `File` field's type is the shared `FileRef` record in Domain.Common (M-T1.2)
   // — the base header (unlike the concrete one) does not import it unconditionally.
   if (base.fields.some((f) => typeIsFile(f.type))) usings.add(`${ns}.Domain.Common`);

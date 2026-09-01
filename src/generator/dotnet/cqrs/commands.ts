@@ -78,7 +78,7 @@ function lifecycleGate(
   if (gates.length === 0) return { body: "", deps: [], usings: [] };
   const usesUser = lifecycleGatesUseCurrentUser(action);
   const usings = new Set<string>();
-  for (const g of gates) collectCsExprUsings(g.expr, usings);
+  for (const g of gates) collectCsExprUsings(g.expr, usings, ns);
   // `ICurrentUserAccessor` lives in `<ns>.Auth`, which the base handler usings
   // do NOT carry — the operation handler adds it the same way.  Without it the
   // emitted handler is CS0246, which no tsc-level test can see.
@@ -177,7 +177,9 @@ export function emitCreateCommandAndHandler(
   // generated id; actor + correlation/scope/parent ids come from RequestContext.
   const auditCreate = !!opts?.auditCtx;
   const createAfterExpr = auditCreate
-    ? projectEntityExpr("aggregate", agg as EnrichedAggregateIR, opts!.auditCtx!)
+    ? projectEntityExpr("aggregate", agg as EnrichedAggregateIR, opts!.auditCtx!, {
+        unmasked: true,
+      })
     : "";
   const createAuditStage = auditCreate
     ? `        _audit.Stage(new AuditRecord\n` +
@@ -293,7 +295,7 @@ export function emitDestroyCommandAndHandler(
   // literal ("null"); actor + correlation/scope/parent ids from RequestContext.
   const auditDestroy = !!auditCtx;
   const destroyBeforeExpr = auditDestroy
-    ? projectEntityExpr("aggregate", agg as EnrichedAggregateIR, auditCtx)
+    ? projectEntityExpr("aggregate", agg as EnrichedAggregateIR, auditCtx, { unmasked: true })
     : "";
   const destroyAuditStage = auditDestroy
     ? `        _audit.Stage(new AuditRecord\n` +
@@ -479,7 +481,7 @@ export function emitOperationCommandAndHandler(
           "aggregate",
           agg as EnrichedAggregateIR,
           ctx,
-          { maskNames },
+          { maskNames, unmasked: true },
         )});\n`
       : "";
     const auditStage = audited
@@ -487,7 +489,7 @@ export function emitOperationCommandAndHandler(
           "aggregate",
           agg as EnrichedAggregateIR,
           ctx,
-          { maskNames },
+          { maskNames, unmasked: true },
         )});\n` +
         `        _audit.Stage(new AuditRecord\n` +
         `        {\n` +

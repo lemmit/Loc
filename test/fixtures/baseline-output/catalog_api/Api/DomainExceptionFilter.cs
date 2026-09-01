@@ -80,6 +80,40 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             context.ExceptionHandled = true;
             return;
         }
+        // Malformed WIRE value (M-T6.48) — money / datetime arrive as strings
+        // and the controller parses them before the command exists, so this is
+        // neither a FluentValidation failure (the validator runs on the COMMAND,
+        // downstream of the parse) nor a domain rule.  Same 422 + errors[]
+        // envelope as both, so a price of "12,50" reads identically on .NET
+        // and on Hono's zod moneySchema hook.
+        if (context.Exception is WireFormatException wfe)
+        {
+            var wireProblem = new ProblemDetails
+            {
+                Type = "about:blank",
+                Title = "Validation failed",
+                Status = 422,
+                Detail = "One or more fields are invalid.",
+                Instance = context.HttpContext.Request.Path,
+            };
+            // Anonymous type rather than Dictionary<,>: this arm is emitted
+            // unconditionally, and System.Collections.Generic is only imported
+            // when the project has validators.
+            wireProblem.Extensions["errors"] = new[]
+            {
+                new { pointer = wfe.FieldPointer, message = wfe.Message },
+            };
+            _log.LogWarning("{Event} message={Message} status={Status}", "domain_error", "Validation failed", 422);
+            global::CatalogApi.Observability.HttpMetrics.RecordDomainFault("domain_error");
+            context.HttpContext.Response.Headers["x-request-id"] = trace_id;
+            context.Result = new ObjectResult(wireProblem)
+            {
+                StatusCode = 422,
+                ContentTypes = { "application/problem+json" },
+            };
+            context.ExceptionHandled = true;
+            return;
+        }
         if (context.Exception is ForbiddenException fe)
         {
             _log.LogWarning("{Event} message={Message} status={Status}", "forbidden", fe.Message, 403);
