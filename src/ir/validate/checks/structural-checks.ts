@@ -1,3 +1,4 @@
+import { forEachModelExpr } from "../../util/model-exprs.js";
 // -------------------------------------------------------------------------
 // Structural checks — workspace-scope uniqueness, find-name collisions,
 // unimplemented generics, extern ops, event-sourced discipline,
@@ -1075,57 +1076,25 @@ export function validateExprIntegrity(loom: EnrichedLoomModel, diags: LoomDiagno
       }
     };
 
-  for (const sys of loom.systems) {
-    for (const ui of sys.uis) {
-      for (const page of ui.pages) {
-        const source = `${sys.name}/${ui.name}/${page.name}`;
-        const visit = visitor(source, true);
-        walkExpr(page.body, visit);
-        walkExpr(page.title, visit);
-        walkExpr(page.requires, visit);
-        for (const s of page.state) walkExpr(s.init, visit);
-      }
-    }
-  }
-
-  for (const c of allContexts(loom)) {
-    // Workflows — walk every expression-bearing statement.
-    for (const wf of c.workflows) {
-      const source = `${c.name}/${wf.name}`;
-      const visit = visitor(source);
-      for (const st of wf.statements) walkExprsInWorkflowStmt(st, visit);
-    }
-    // Aggregate operations + invariants.
-    for (const agg of c.aggregates) {
-      for (const op of agg.operations) {
-        const source = `${c.name}/${agg.name}/${op.name}`;
-        const visit = visitor(source);
-        for (const st of op.statements) walkExprsInStmt(st, visit);
-      }
-      for (const ap of agg.appliers ?? []) {
-        const source = `${c.name}/${agg.name}/apply(${ap.event})`;
-        const visit = visitor(source);
-        for (const st of ap.statements) walkExprsInStmt(st, visit);
-      }
-      for (const inv of agg.invariants) {
-        const source = `${c.name}/${agg.name}/invariant`;
-        const visit = visitor(source);
-        walkExpr(inv.expr, visit);
-        walkExpr(inv.guard, visit);
-      }
-      // Derived properties + function bodies — the canonical home for the
-      // collection transformation ops (`total = lines.map(...).sum()`), so the
-      // distinct/join correctness gates must reach them.
-      for (const d of agg.derived ?? []) {
-        walkExpr(d.expr, visitor(`${c.name}/${agg.name}/${d.name}`));
-      }
-      for (const fn of agg.functions ?? []) {
-        const visit = visitor(`${c.name}/${agg.name}/${fn.name}`);
-        if ("expr" in fn.body) walkExpr(fn.body.expr, visit);
-        else for (const st of fn.body.stmts) walkExprsInStmt(st, visit);
-      }
-    }
-  }
+  // ONE outer loop (M-T9.40).  This check used to carry its own — page
+  // body/title/requires/state plus the aggregate/workflow domain sites — and
+  // an A/B over five examples measured what that reached: 2,316 expressions
+  // against the 3,609 the model actually holds.  It silently skipped every
+  // find filter, criterion, retrieval, domain service, command/query handler,
+  // seed value, field default, context filter and stamp, every test, every
+  // value-object and entity-part member, and — on the UI side it partly
+  // covered — every component, store, action, named layout, menu and
+  // notification.
+  //
+  // `forEachModelExpr` hands over all of them, already deep, with the `ui` flag
+  // the render-scope arms need — a fact only the walk has, since `DerivedIR.expr`
+  // and `ActionIR.body` occur on both sides of that line.  Widening produced
+  // ZERO new diagnostics across six examples and all 59 corpus fixtures, so the
+  // rules were never being violated at the sites this could not see; the change
+  // is reach, not behaviour.
+  forEachModelExpr(loom, ({ expr, source, ui }) => {
+    visitor(source, ui)(expr);
+  });
 }
 
 // ---------------------------------------------------------------------------

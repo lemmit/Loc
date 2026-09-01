@@ -59,8 +59,6 @@ const BEHAVIOURAL_ABSENT: Record<string, string> = {
     "needs a broker container (the channels-e2e legs boot one; the corpus case does not)",
   "tenancy-hierarchy":
     "the deep/global/local read ladder is a runtime row-visibility question; `test:tenancy-hierarchy-*` boots it outside the corpus tier",
-  "policy-document":
-    "in-app authz ladder over a rehydrated jsonb blob — visible only in the rows a read returns",
   extern: "the user handler is scaffold-once; a booted leg needs a supplied implementation",
   "extern-handlers": "same scaffold-once shape as `extern`",
   "handler-resource-ops": "outbound I/O inside a handler body; needs the resource's container",

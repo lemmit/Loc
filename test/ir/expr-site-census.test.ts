@@ -7,8 +7,10 @@ import { declarationExprSites, exprSites, siteId } from "../_helpers/expr-sites.
 // Eleven modules walk the model's expression-bearing sites and each rolls its
 // own outer loop.  Nothing says how many sites there ARE, so "does this check
 // reach every expression" has never had an answer — and `validateExprIntegrity`,
-// the check whose name claims the whole surface, reaches no ui page, find,
-// projection, criterion, domain service, handler or test.
+// the check whose name claims the whole surface, reached 2,316 of the 3,609
+// expressions in five examples before it was migrated onto the enumeration —
+// missing every find filter, criterion, retrieval, domain service, handler,
+// seed value, test, component, store, action and named layout.
 //
 // `test/_helpers/expr-sites.ts` computes the answer from `loom-ir.ts` itself.
 // This file is that computation's own gate.  It deliberately does NOT pin the
@@ -34,12 +36,14 @@ describe("expression-site census", () => {
   });
 
   it("reaches the sites the existing partial walks do NOT", () => {
-    // These are the census' reason to exist: every one is an expression site
-    // that `validateExprIntegrity` cannot see, on a declaration kind its outer
-    // loop never visits.  If the analysis regresses, it regresses here first.
+    // These are the census' reason to exist: expression sites on declaration
+    // kinds the existing partial walks do not all reach.  If the analysis
+    // regresses, it regresses here first.
     for (const id of [
       "PageIR.body", // ui page bodies — the whole frontend surface
       "PageIR.requires", // page-level authz gate
+      "PageIR.derived",
+      "PageIR.actions",
       "ComponentIR.body",
       "ActionIR.body", // named page actions
       "FindIR.filter", // repository finds

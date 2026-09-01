@@ -117,20 +117,27 @@ function readDecls(): Map<string, Decl> {
       // `X | Y` payload union whose arms carry expressions.
       const props = new Map<string, ts.TypeNode>();
       const refs = referencedNames(t);
-      // An inline object arm inside a union (`{ kind: "x"; expr: ExprIR }`) has
-      // no name of its own; fold its properties into the alias so a site
-      // declared only there is still counted.
-      const foldLiterals = (n: ts.Node): void => {
-        if (ts.isTypeLiteralNode(n)) {
-          for (const m of n.members) {
-            if (ts.isPropertySignature(m) && m.type && m.name && ts.isIdentifier(m.name)) {
-              props.set(m.name.text, m.type);
-            }
+      // A union's own arms are usually inline object literals with no name of
+      // their own (`{ kind: "expect"; expr: ExprIR }`), so a site declared only
+      // there would go uncounted.  Fold the TOP-LEVEL arms in — and only those.
+      // Folding at any depth attributes a nested literal's field to the
+      // enclosing alias and invents a site that does not exist: `MenuLinkIR`
+      // has no `value` field, its `props: { name; value: ExprIR }[]` does, and
+      // that element is already covered by counting `props` itself.
+      // Intersections count for the same reason unions do: `EnrichedAggregateIR
+      // = AggregateIR & { … }` declares its own shape in that literal, and a
+      // field added there — on the enriched brand only — is a real site the
+      // base type does not carry.
+      const arms = ts.isUnionTypeNode(t) || ts.isIntersectionTypeNode(t) ? t.types : [t];
+      for (const arm of arms) {
+        const lit = ts.isParenthesizedTypeNode(arm) ? arm.type : arm;
+        if (!ts.isTypeLiteralNode(lit)) continue;
+        for (const m of lit.members) {
+          if (ts.isPropertySignature(m) && m.type && m.name && ts.isIdentifier(m.name)) {
+            props.set(m.name.text, m.type);
           }
         }
-        ts.forEachChild(n, foldLiterals);
-      };
-      foldLiterals(t);
+      }
       const prev = decls.get(st.name.text);
       if (prev) {
         for (const [k, v] of props) prev.props.set(k, v);
@@ -197,7 +204,19 @@ export const siteId = (s: Pick<ExprSite, "owner" | "field">): string => `${s.own
  *  what makes the remaining number mean something: it is the size of the OUTER
  *  loop — the walk over declarations that reaches those expressions in the
  *  first place — which is the half nothing owns. */
-const INTRA_EXPRESSION_OWNERS = new Set(["ExprIR", "StmtIR", "WorkflowStmtIR"]);
+const INTRA_EXPRESSION_OWNERS = new Set([
+  "ExprIR",
+  "StmtIR",
+  "WorkflowStmtIR",
+  // Sub-shapes of a single expression arm, not declarations of their own, and
+  // `walkExprChildren` already descends into both: the authz/tenancy sentinel's
+  // two principal-claim accessors (`walk.ts` `case "authz-filter"`) and the
+  // per-primitive `style: { … }` escape hatch's entry values (`case "call"`).
+  // Counting them as declaration sites would ask the outer loop to reach a
+  // place only the inner one can get to.
+  "AuthzFilterKind",
+  "StyleIR",
+]);
 
 /** Census sites that live on a DECLARATION rather than inside an expression —
  *  the sites a model-wide enumeration has to reach. */

@@ -70,7 +70,7 @@ current here; missions land in `docs/new-plan/`.
 |---|---|---|
 | C1 | **Gate ledger** — derive per-cell strongest tier from the registers that already exist; fail on a cell with no gate above `generate`. Deletion authority + silent-gap detector. | landed |
 | B2 | **Generation properties** — idempotence, no-spurious-touch, timezone independence, source-form independence, `--dry-run` fidelity (`test/cli/regeneration.test.ts`), plus per-shape determinism folded into the existing fuzzer. | landed |
-| C2 | **`--verify-ir`** — total IR structural checker run on every generation (M-T9.40). The denominator landed: 222 expression sites, 180 of them on declarations across 65 IR types, gated by `test/ir/expr-site-census.test.ts`. | part |
+| C2 | **`--verify-ir`** — total IR structural checker run on every generation (M-T9.40). Denominator + enumeration landed: 176 declaration expression sites, walked by `src/ir/util/model-exprs.ts`, its completeness asserted against an independently-derived census. The measurement it enabled: `validateExprIntegrity` reached 2,316 of 3,609 expressions; migrated onto the walk it reaches all of them, with zero new diagnostics and 31 net lines deleted. Verifier still open. | part |
 | C3 | **Universal IR proofs** — tenancy scope-filter, denyByDefault route gating, `mask unless` serialization closure. Proven once for all models; funds trimming per-backend runtime legs to faithfulness spot-checks. | planned |
 | B5 | `render-expr-kinds` evaluated rather than rendered — one value table executed on five backends. | planned |
 | B3 | Extend `wire-golden` to the uncovered corpus features + the route census. | planned |

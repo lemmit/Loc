@@ -305,7 +305,11 @@ const REGISTERED: Ratchet[] = [
     file: "test/system/gate-ledger.test.ts",
     name: "BEHAVIOURAL_ABSENT",
     kind: "record",
-    max: 14,
+    // 14 -> 13: #2696 gave `policy-document` a `test e2e` block and a golden
+    // while this branch was open, and the ledger's set-equality caught the
+    // stale entry on the first rebase — the drain direction working in the
+    // field rather than in a mutation.
+    max: 13,
   },
 ];
 
