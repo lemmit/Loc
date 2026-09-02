@@ -22,7 +22,13 @@ import { escapeCsharpIdent, lowerFirst, plural, snake, upperFirst } from "../../
 import { PG_INTRINSIC_SQL } from "../_expr/pg-intrinsics.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { MONEY_WIRE_SCALE } from "../money-scale.js";
-import { dtoParam, projectEntityArgs, projectToResponse, wireType } from "./dto-mapping.js";
+import {
+  csDecimalToWireDouble,
+  dtoParam,
+  projectEntityArgs,
+  projectToResponse,
+  wireType,
+} from "./dto-mapping.js";
 import {
   collectFilterPrincipalRefs,
   type DapperColumn,
@@ -475,6 +481,36 @@ function aggregateLandsOnDouble(s: AggregateSelect, ctx: EnrichedBoundedContextI
   return target === "double" || target === "double?";
 }
 
+/** True when the EF/LINQ aggregate result MATERIALISES as a `System.Decimal` —
+ *  which is decided by the AGGREGATED COLUMN's type, not the declared row
+ *  field's (F10/M-T6.47):
+ *
+ *    | op              | column    | LINQ result |
+ *    |-----------------|-----------|-------------|
+ *    | `count`         | —         | `int`       |
+ *    | `avg`           | integral  | `double`    |
+ *    | `avg`           | `decimal` | `decimal`   |
+ *    | `sum`/`max`/`min` | integral| `int`/`long`|
+ *    | `sum`/`max`/`min` | `decimal` | `decimal` |
+ *
+ *  Only the `decimal`-column rows need `csCoerce`'s narrowing to be correctly
+ *  rounded; every other row's `(double)` cast is an identity or an exact
+ *  widening, so it stays byte-for-byte as it was.  (`money` never reaches the
+ *  numeric tail at all — it takes the `asString` arm.)
+ *
+ *  DAPPER never takes this path: #2631 casts in SQL, so the row DTO already
+ *  declares `double?` and the coercion there is an identity conversion.  Adding
+ *  a Parse on top of a `double` would be converting twice, so the two EF call
+ *  sites pass `arrivesAsDecimal` and both dapper call sites pass `false`. */
+function efAggregateArrivesAsDecimal(s: AggregateSelect): boolean {
+  const agg = s.aggregate;
+  if (agg.op === "count" || !agg.arg) return false;
+  if (agg.arg.kind !== "member") return false;
+  const t = agg.arg.memberType;
+  const inner = t.kind === "optional" ? t.inner : t;
+  return inner.kind === "primitive" && inner.name === "decimal";
+}
+
 /** The Postgres aggregate call for one `select` — the raw-SQL twin of
  *  `csAggregate`.  `count` counts ROWS (no column) and casts to `int` so it
  *  lands on the same CLR type EF's `g.Count()` produces.
@@ -493,7 +529,10 @@ function aggregateLandsOnDouble(s: AggregateSelect, ctx: EnrichedBoundedContextI
  *  `avg` of 7/3 shipped `2.333333333333333` where every other backend ships the
  *  true nearest double `2.3333333333333335`, failing the wire-golden
  *  differential on the dapper leg alone (EF was green because its provider
- *  materialises `Average` as a real `double`).  Casting in SQL hands Npgsql a
+ *  materialises `Average` as a real `double` — but only when the aggregated
+ *  COLUMN is integral, which #2631's `avg(line_count)` fixture was; a `decimal`
+ *  column hits the same lossy cast on EF, fixed in `csCoerce` via
+ *  `efAggregateArrivesAsDecimal`).  Casting in SQL hands Npgsql a
  *  `float8` directly, and Postgres' own numeric→float8 conversion is correctly
  *  rounded — the same path node takes (numeric result → JS number).
  *
@@ -700,7 +739,9 @@ function renderAggregateHandler(
     const anon = aggregates
       .map((s) => `${upperFirst(s.field)} = ${csAggregate(s.aggregate)}`)
       .join(", ");
-    const args = aggregates.map((s) => csCoerce(s, `agg`, ctx)).join(", ");
+    const args = aggregates
+      .map((s) => csCoerce(s, `agg`, ctx, undefined, efAggregateArrivesAsDecimal(s)))
+      .join(", ");
     members = "";
     body =
       `        var agg = await _db.${dbSet}.AsNoTracking()${efIgnore}${where ? `.Where(o => ${where})` : ""}\n` +
@@ -895,6 +936,7 @@ function renderGroupedHandler(
         usingDapper ? "r" : "x",
         ctx,
         usingDapper ? snake(agg.field) : undefined,
+        !usingDapper && efAggregateArrivesAsDecimal(agg),
       );
     return "default!";
   });
@@ -1005,6 +1047,10 @@ function csCoerce(
    *  after the wire field (`Orders`); the Dapper row DTO is snake-named after
    *  the SQL alias (`orders`).  Same coercion either way. */
   member: string = upperFirst(s.field),
+  /** Whether the value being read is a `System.Decimal` — true only on the EF
+   *  arms over a `decimal` column (`efAggregateArrivesAsDecimal`).  Dapper
+   *  passes `false`: #2631 already made the SQL hand back a `float8`. */
+  arrivesAsDecimal = false,
 ): string {
   const c = aggregateCoercion(s);
   const read = `${aggVar}?.${member}`;
@@ -1030,6 +1076,26 @@ function csCoerce(
   // `decimal` then fails to compile (`CS1503: cannot convert from 'double' to
   // 'decimal'`).  Cast to the DECLARED wire type — the row is the contract.
   const target = wireType(s.type, ctx, "response");
+  // …except when the cast would be a LOSSY decimal→double narrowing: an EF
+  // aggregate over a `decimal` column materialises as `System.Decimal`, and
+  // `(double)` on it is not correctly rounded (F10 — the same class #2631 fixed
+  // for dapper at the SQL seam).  Route it through the shared
+  // `csDecimalToWireDouble` instead.  Safe here: both EF arms apply this AFTER
+  // materialisation (`FirstOrDefaultAsync` / `ToListAsync`, then an in-memory
+  // `Select`), so it is LINQ-to-Objects — there is no expression tree for EF to
+  // translate and no `double.Parse` ever reaches SQL.
+  if (arrivesAsDecimal && (target === "double" || target === "double?")) {
+    if (!c.optional) return csDecimalToWireDouble(`(${read} ?? 0)`);
+    // Pattern-match the unwrap: `agg?.X is { } v` yields a NON-nullable
+    // `decimal` for the Parse argument, so nullable analysis sees the
+    // `ToString` result as non-null (a `agg?.X!.Value.ToString(…)` chain
+    // stays `string?` and fails `/warnaserror` with CS8604).  The member name
+    // keeps the pattern variable unique when one row carries several optional
+    // decimal aggregates, and the `(double?)` keeps the conditional's type
+    // explicit rather than leaning on target-typing.
+    const v = `__dec${member}`;
+    return `(${read} is { } ${v} ? (double?)${csDecimalToWireDouble(v)} : null)`;
+  }
   return c.optional ? `(${target})${read}` : `(${target})(${read} ?? 0)`;
 }
 

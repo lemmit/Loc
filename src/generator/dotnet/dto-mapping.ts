@@ -133,6 +133,42 @@ function csCanonicalInstantWire(domainExpr: string): string {
   return `System.Text.RegularExpressions.Regex.Replace(${domainExpr}.ToUniversalTime().ToString("o"), @"\\.?0+Z$", "Z")`;
 }
 
+/** C# expression narrowing a `System.Decimal` to the `double` a declared
+ *  `decimal` crosses the wire as (#2563/RS-24) — **correctly rounded**, which
+ *  the language's own `(double)d` cast is not.
+ *
+ *  `(double)d` runs `DecCalc.VarR8FromDec`: `(double)mantissa / 10^scale`.  When
+ *  the mantissa exceeds 2^53 — every value whose shortest round-trip repr needs
+ *  17 significant digits — the NUMERATOR is rounded to a double first and the
+ *  quotient is then rounded again, so the result need not be the nearest double
+ *  to the stored decimal.  MEASURED on .NET 10.0.11 over 3M random doubles in
+ *  [0,100) written out as Postgres `numeric` and read back: 9.2% (275,923 of
+ *  3,000,000) do not
+ *  round-trip (`99.52989333734583` comes back `99.52989333734584`), while
+ *  `double.Parse` of the same digits misses zero times.  Every one
+ *  of the other four backends ships the true nearest double, so the .NET row is
+ *  the odd one out on the wire-golden differential.
+ *
+ *  `decimal.ToString` is exact (a base-10 type carries no hidden precision) and
+ *  `double.Parse` is correctly rounded on .NET Core 3.0+ (the generated TFM is
+ *  `net10.0`), so the pair is the nearest double to the stored value — the same
+ *  number node reads out of the same `numeric` column.  `InvariantCulture` on
+ *  BOTH halves pins the decimal separator, so a container locale cannot turn
+ *  `1.5` into `1,5` and then fail to parse it.
+ *
+ *  Cost is one string alloc + parse per decimal field per row, at a JSON
+ *  boundary that already allocates an order of magnitude more.  Both call sites
+ *  (`projectToResponse` here, `csCoerce`'s EF aggregate arm in
+ *  `query-projection-emit.ts`) render through this one helper so the two hops
+ *  cannot drift.  The type is fully qualified so no `using` wiring is needed at
+ *  either site. */
+export function csDecimalToWireDouble(domainExpr: string): string {
+  return (
+    `double.Parse(${domainExpr}.ToString(System.Globalization.CultureInfo.InvariantCulture), ` +
+    `System.Globalization.CultureInfo.InvariantCulture)`
+  );
+}
+
 /** C# DTO property type for a `TypeIR`.  `dir` selects the suffix for
  *  nested value-object DTOs (`Request` for inputs, `Response` for
  *  outputs); entities always nest as `<Name>Response`. */
@@ -513,8 +549,13 @@ export function projectToResponse(
       if (info.primitive === "decimal") {
         // The domain keeps `System.Decimal`; the RESPONSE field is a `double`
         // (#2563 — see `wireType`), so the narrowing happens here, once, at the
-        // wire boundary.
-        return `(double)${domainExpr}`;
+        // wire boundary.  It must be CORRECTLY ROUNDED — a `(double)` cast is
+        // not (F10/M-T6.47); see `csDecimalToWireDouble`.  Reading the column
+        // as `double` at the provider seam (#2631's fix for the dapper
+        // aggregate) is not available here: the DOMAIN property has to stay
+        // `System.Decimal` for domain arithmetic, so the narrowing belongs at
+        // the wire boundary, once.
+        return csDecimalToWireDouble(domainExpr);
       }
       return domainExpr;
     case "id":
