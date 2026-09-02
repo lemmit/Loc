@@ -11,7 +11,7 @@ import {
   renderSequenceDiagram,
   renderWorkflowDiagram,
 } from "../../src/system/mermaid.js";
-import { loadExampleModel, toLoomModel } from "../_helpers/index.js";
+import { buildLoomModel, loadExampleModel, toLoomModel } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // `<outdir>/.loom/domain.mmd` + `.loom/workflows.mmd` snapshots.  Lock
@@ -146,5 +146,74 @@ describe("deployment.mmd", () => {
     expect(out).not.toContain("deploy_webApp -->|serves|");
     // …but the honest relationship — calling its backend — is still drawn.
     expect(out).toContain("deploy_webApp -.->|calls| deploy_api");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The participant block and the message block are built from ONE source.
+//
+// They were not: participants came from a flat 3-kind loop over
+// `wf.statements` (`repo-let` / `factory-let` / `op-call`) while the message
+// walker recurses over eleven kinds.  Every lifeline reached through
+// `repo-run`, `repo-delete`, `if-let`, a resource / domain-service call, or
+// anything nested inside a `for-each` body was messaged but never declared —
+// mermaid then auto-creates it and appends it at the FAR RIGHT of the diagram,
+// which is exactly what the declaration block exists to prevent.
+//
+// The model below is the smallest one that reproduces it: a workflow whose
+// only read is a `repo-run` (`StockItems`) and whose only operation call is
+// nested in a `for-each` body (`StockItem`) — neither kind the old collector
+// looked at.
+// ---------------------------------------------------------------------------
+
+const SWEEP = `
+system Sweep {
+  subdomain Ops {
+    context Inventory {
+      aggregate StockItem {
+        warehouseId: string
+        counted: bool
+        operation markCounted() { counted := true }
+      }
+      retrieval ItemsToRecount(w: string) of StockItem {
+        where: this.warehouseId == w
+      }
+      repository StockItems for StockItem { }
+      workflow recountWarehouse {
+        create(w: string) {
+          let items = StockItems.run(ItemsToRecount(w), page: { offset: 0, limit: 100 })
+          for s in items {
+            s.markCounted()
+          }
+        }
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: Inventory, kind: state, use: pg }
+  deployable api {
+    platform: node
+    contexts: [Inventory]
+    dataSources: [st]
+    port: 3000
+  }
+}
+`;
+
+describe("sequence.mmd participants", () => {
+  it("declares every lifeline it sends a message to", async () => {
+    const sys = (await buildLoomModel(SWEEP)).systems[0]!;
+    const out = buildSequenceDiagram(sys);
+
+    const declared = new Set([...out.matchAll(/^ {2}participant (\S+)/gm)].map((m) => m[1]!));
+    const messaged = new Set(
+      [...out.matchAll(/^ {2}(\S+?)--?>>(\S+?):/gm)].flatMap((m) => [m[1]!, m[2]!]),
+    );
+
+    // Both halves of the defect: `StockItems` arrives via `repo-run`,
+    // `StockItem` via an `op-call` nested in a `for-each` body.
+    expect(messaged).toContain("StockItems");
+    expect(messaged).toContain("StockItem");
+    for (const lifeline of messaged) expect([...declared]).toContain(lifeline);
   });
 });

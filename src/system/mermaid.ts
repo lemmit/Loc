@@ -458,77 +458,118 @@ export function buildSequenceDiagram(sys: SystemIR): string {
     return lines(...head, `  note over WF: No workflows declared in this system.`);
   }
 
-  // Collect the lifelines each workflow talks to so participants are
-  // declared up front (stable left-to-right order).
-  const partners = new Set<string>();
-  for (const { wf } of wfs) {
-    for (const s of wf.statements) {
-      if (s.kind === "repo-let") partners.add(s.repoName);
-      else if (s.kind === "factory-let") partners.add(s.aggName);
-      else if (s.kind === "op-call") partners.add(s.aggName);
-    }
+  // Messages FIRST, participants derived from them.  The participant block
+  // used to be built by its own flat, 3-kind loop over `wf.statements`
+  // (`repo-let` / `factory-let` / `op-call`) while `sequenceMessages` below is
+  // recursive over ELEVEN kinds — so every lifeline reached through
+  // `repo-run`, `repo-delete`, `if-let`, a `resource-call`, a
+  // `domain-service-call`, or anything nested in a `for-each` / `if-let` body
+  // was messaged without ever being declared.  Mermaid auto-creates those and
+  // appends them at the FAR RIGHT, which defeats the one thing the declaration
+  // block exists for.  Deriving the set from the messages actually emitted
+  // means the two cannot drift again: a new `WorkflowStmtIR` kind that names a
+  // lifeline declares it for free.
+  const messages: SeqLine[] = [];
+  for (const { ctx, wf } of wfs) {
+    messages.push({ kind: "note", text: `${ctx} · ${wf.name}(${params(wf.params)})` });
+    for (const s of wf.statements) messages.push(...sequenceMessages(s));
   }
 
-  const body: string[] = [];
-  for (const { ctx, wf } of wfs) {
-    body.push(`  note over WF: ${label(`${ctx} · ${wf.name}(${params(wf.params)})`)}`);
-    for (const s of wf.statements) body.push(...sequenceMessages(s));
+  const partners = new Set<string>();
+  for (const m of messages) {
+    if (m.kind !== "msg") continue;
+    for (const lifeline of [m.from, m.to]) {
+      // `WF` is declared explicitly (with its `as Workflow` alias) below.
+      if (lifeline !== WF) partners.add(lifeline);
+    }
   }
 
   return lines(
     ...head,
     `  autonumber`,
-    `  participant WF as Workflow`,
+    `  participant ${WF} as Workflow`,
     [...partners].sort().map((p) => `  participant ${p}`),
-    body,
+    messages.map(renderSeqLine),
   );
 }
 
-function sequenceMessages(s: WorkflowStmtIR): string[] {
+/** The workflow's own lifeline id. */
+const WF = "WF";
+
+/** One rendered line of the sequence diagram, kept STRUCTURED until the very
+ *  end so the participant block can be derived from the same data the message
+ *  block is rendered from (see `buildSequenceDiagram`). */
+type SeqLine =
+  | { kind: "note"; text: string }
+  /** `arrow` is Mermaid's solid (request) vs dashed (response) arrow. */
+  | { kind: "msg"; from: string; to: string; arrow: "->>" | "-->>"; text: string };
+
+function renderSeqLine(l: SeqLine): string {
+  return l.kind === "note"
+    ? `  note over ${WF}: ${label(l.text)}`
+    : `  ${l.from}${l.arrow}${l.to}: ${l.text}`;
+}
+
+const note = (text: string): SeqLine => ({ kind: "note", text });
+/** WF → lifeline (a request). */
+const call = (to: string, text: string): SeqLine => ({
+  kind: "msg",
+  from: WF,
+  to,
+  arrow: "->>",
+  text,
+});
+/** lifeline ⇢ WF (a response). */
+const ret = (from: string, text: string): SeqLine => ({
+  kind: "msg",
+  from,
+  to: WF,
+  arrow: "-->>",
+  text,
+});
+
+function sequenceMessages(s: WorkflowStmtIR): SeqLine[] {
   switch (s.kind) {
     case "precondition":
     case "requires":
-      return [`  note over WF: ${label(`${s.kind}: ${s.source}`)}`];
+      return [note(`${s.kind}: ${s.source}`)];
     case "emit":
-      return [`  note over WF: ${label(`emit ${s.eventName}`)}`];
+      return [note(`emit ${s.eventName}`)];
     case "factory-let":
-      return [`  WF->>${s.aggName}: create()`, `  ${s.aggName}-->>WF: ${s.name}`];
+      return [call(s.aggName, "create()"), ret(s.aggName, s.name)];
     case "repo-let":
-      return [`  WF->>${s.repoName}: ${s.method}()`, `  ${s.repoName}-->>WF: ${s.name}`];
+      return [call(s.repoName, `${s.method}()`), ret(s.repoName, s.name)];
     case "op-call":
-      return [`  WF->>${s.aggName}: ${s.op}()`];
+      return [call(s.aggName, `${s.op}()`)];
     case "repo-delete":
-      return [`  WF->>${s.repoName}: delete(${s.aggName})`];
+      return [call(s.repoName, `delete(${s.aggName})`)];
     case "repo-run":
-      return [
-        `  WF->>${s.repoName}: run(${s.retrievalName})`,
-        `  ${s.repoName}-->>WF: ${s.name}[]`,
-      ];
+      return [call(s.repoName, `run(${s.retrievalName})`), ret(s.repoName, `${s.name}[]`)];
     case "for-each":
       return [
-        `  note over WF: ${label(`for ${s.var} in ${s.varAggName}[]`)}`,
+        note(`for ${s.var} in ${s.varAggName}[]`),
         ...s.body.flatMap(sequenceMessages),
       ];
     case "if-let":
       return [
-        `  WF->>${s.repoName}: find(${s.synthCriterion.name})`,
-        `  ${s.repoName}-->>WF: ${s.var}?`,
-        `  note over WF: ${label(`if let ${s.var}`)}`,
+        call(s.repoName, `find(${s.synthCriterion.name})`),
+        ret(s.repoName, `${s.var}?`),
+        note(`if let ${s.var}`),
         ...s.thenBody.flatMap(sequenceMessages),
         ...((s.elseBody ?? []).length > 0
-          ? [`  note over WF: else`, ...(s.elseBody ?? []).flatMap(sequenceMessages)]
+          ? [note("else"), ...(s.elseBody ?? []).flatMap(sequenceMessages)]
           : []),
       ];
     case "expr-let":
       return [];
     case "assign":
-      return [`  note over WF: ${label(`${s.target.segments.join(".")} := ...`)}`];
+      return [note(`${s.target.segments.join(".")} := ...`)];
     case "resource-call": {
       const op = s.call.kind === "call" ? s.call.resourceOp : undefined;
-      return [`  WF->>${op?.resourceName ?? "resource"}: ${op?.verb ?? "op"}()`];
+      return [call(op?.resourceName ?? "resource", `${op?.verb ?? "op"}()`)];
     }
     case "domain-service-call":
-      return [`  WF->>${s.service}: ${s.op}()`];
+      return [call(s.service, `${s.op}()`)];
   }
 }
 
