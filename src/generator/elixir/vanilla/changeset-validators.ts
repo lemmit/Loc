@@ -3,7 +3,7 @@ import {
   type SingleFieldPattern,
   singleFieldConstraints,
 } from "../../../ir/validate/invariant-classify.js";
-import { elixirRegexBody, snake } from "../../../util/naming.js";
+import { elixirRegexBody, elixirString, snake } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Shared Ecto-changeset validator rendering — the
@@ -34,7 +34,9 @@ type LengthArm = { cmp: "<" | ">" | "!="; bound: number; kind: "min" | "max" | "
  *  and any Gettext translator see no difference. */
 function lengthValidator(field: string, arms: readonly LengthArm[], message?: string): string {
   const error = (a: LengthArm): string =>
-    `[{:${field}, {${JSON.stringify(message ?? LENGTH_MESSAGE[a.kind])}, count: ${a.bound}, validation: :length, kind: :${a.kind}, type: :string}}]`;
+    // Through the shared escaping funnel: the author's `message "…"` is `.ddd`
+    // text, and a raw `#{` in it would INTERPOLATE when the closure runs.
+    `[{:${field}, {${elixirString(message ?? LENGTH_MESSAGE[a.kind])}, count: ${a.bound}, validation: :length, kind: :${a.kind}, type: :string}}]`;
   const count = "length(String.to_charlist(value))";
   if (arms.length === 1) {
     const a = arms[0] as LengthArm;
@@ -66,7 +68,8 @@ export function ectoValidator(field: string, p: SingleFieldPattern, message?: st
   // messaged single-field rule keeps its native `validate_*` enforcement AND
   // surfaces the author text (VOs have no residual carrier to route to). A
   // message-less rule is byte-identical.
-  const m = message ? `, message: ${JSON.stringify(message)}` : "";
+  // Same funnel as the length arm above — author text, never spliced raw.
+  const m = message ? `, message: ${elixirString(message)}` : "";
   switch (p.kind) {
     case "min":
       // Exclusive (`weight > 0.5` on a decimal/money field) → Ecto's strict

@@ -18,6 +18,7 @@ import { humanize, plural, snake } from "../../util/naming.js";
 import { iconA11yAttr } from "../_walker/a11y-emit.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
 import { isEntityHistoryRead } from "../_walker/history-read.js";
+import { lookupBuiltinIcon } from "../_walker/icons.js";
 import { queryShape } from "../_walker/paged-query.js";
 import { simpleAccessorField } from "../_walker/primitives/data-grid-shape.js";
 import { gridCols, slugify } from "../_walker/shared/args.js";
@@ -1398,10 +1399,11 @@ const CLOSED_PRIMITIVE_SPECS: Record<string, PrimitiveSpec> = {
   Badge: { tag: ".badge", takesChildren: true },
   // `to:`/`disabled:`/`type:`/`variant:` are the four knobs `<.button>` declares
   // (`to` = render as a nav link, `variant` = the pack's rank vocabulary,
-  // `disabled`/`type` its global/`attr`).  Everything else a `Button` can carry
-  // (`icon:`, `loading:`, `iconPosition:`) is dropped: an undeclared attribute
-  // on a Phoenix function component is a compile WARNING, i.e. a build failure
-  // under `mix compile --warnings-as-errors`.
+  // `disabled`/`type` its global/`attr`).  `icon:`/`iconSvg:`/`iconPosition:`/
+  // `loading:` are NOT attrs — an undeclared attribute on a Phoenix function
+  // component is a compile WARNING, i.e. a build failure under
+  // `--warnings-as-errors` — so `renderButton` routes them through the
+  // component's `inner_block` slot and `attr :rest, :global` instead.
   Button: {
     tag: ".button",
     takesChildren: true,
@@ -1959,8 +1961,67 @@ export function renderEmpty(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
 export function renderBadge(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Badge!, expr, ctx);
 }
+/** `Button("Save", icon: "plus", iconPosition: "left", loading: <expr>)`.
+ *
+ *  `icon:` / `iconSvg:` / `iconPosition:` / `loading:` used to be DROPPED here
+ *  (G2667-C7): the four are not attrs `<.button>` declares, and an undeclared
+ *  attribute on a Phoenix function component is a compile WARNING — a build
+ *  failure under `mix compile --warnings-as-errors`.  Both shipping HEEx packs'
+ *  buttons do, however, carry an `inner_block` slot and `attr :rest, :global`,
+ *  and that is enough to render all four without touching the pack:
+ *
+ *    - the glyph goes in the CHILDREN slot as a `<span class="loom-icon">`
+ *      sibling of the label — the exact shape the shadcn / flowbite /
+ *      shadcnSvelte templates emit — positioned by `iconPosition:`
+ *      (default `"right"`, matching `_walker/primitives/controls.ts`);
+ *    - `loading:` becomes `aria-busy={…}` (the `aria-` prefix is one of
+ *      Phoenix's global prefixes, so `:global` accepts it) AND disables the
+ *      button, since a busy button that still fires is the defect the drop was
+ *      hiding.  With an author `disabled:` the two OR together.
+ *
+ *  A builtin `icon:` name resolves through the SAME `lookupBuiltinIcon`
+ *  registry the JSX walker uses, so the two targets ship the same glyph. */
 export function renderButton(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Button!, expr, ctx);
+  const spec = CLOSED_PRIMITIVE_SPECS.Button!;
+  const iconName = stringNamedLit(expr, "icon");
+  const svg =
+    stringNamedLit(expr, "iconSvg") ?? (iconName ? lookupBuiltinIcon(iconName) : undefined);
+  // Decorative: the button's own text (or its `label:` aria-name) is the
+  // accessible name, so the glyph is hidden from assistive tech — the same
+  // stance `iconA11yAttr({ decorative: true })` takes on a bare `Icon`.
+  const glyph = svg ? `<span class="loom-icon" aria-hidden="true">${svg}</span>` : undefined;
+  const position = stringNamedLit(expr, "iconPosition") ?? "right";
+  const loading = namedArg(expr, "loading");
+  const disabled = namedArg(expr, "disabled");
+  const extraAttrs: string[] = [];
+  let overrideDisabled: string | undefined;
+  if (loading !== undefined && isAttrRenderable(loading)) {
+    const busy = renderExpr(loading, { ...ctx, position: "template" });
+    extraAttrs.push(`aria-busy={${busy}}`);
+    overrideDisabled =
+      disabled !== undefined && isAttrRenderable(disabled)
+        ? `disabled={${renderExpr(disabled, { ...ctx, position: "template" })} or ${busy}}`
+        : `disabled={${busy}}`;
+  }
+  return renderPrimitive(
+    {
+      ...spec,
+      // An explicit `disabled=` is emitted here (already OR-ed with `loading`),
+      // so the pass-through must not emit a second one.
+      passThroughAttrs: overrideDisabled
+        ? spec.passThroughAttrs?.filter((a) => a !== "disabled")
+        : spec.passThroughAttrs,
+      extraAttrs: [
+        ...(spec.extraAttrs ?? []),
+        ...extraAttrs,
+        ...(overrideDisabled ? [overrideDisabled] : []),
+      ],
+      ...(glyph && position === "left" ? { leadingChildren: glyph } : {}),
+      ...(glyph && position !== "left" ? { trailingChildren: glyph } : {}),
+    },
+    expr,
+    ctx,
+  );
 }
 /** `Paper(…children)` — a Card with no title slot (positional 0 is a child). */
 export function renderPaper(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
