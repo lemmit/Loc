@@ -543,7 +543,7 @@ Split the problem by where the rule lives:
 | `ProvenanceInfo(of:, field:)` | A "?" disclosure over a `provenanced` field's lineage (a native `<details>`/`<summary>`; [provenance.md](provenance.md)). Reads the co-located `<field>_provenance` lineage; scaffolded onto a provenanced field's detail row. Renders on **five of the six frontends** (all but Flutter) plus the Phoenix/HEEx server render — React/Vue/Svelte/Angular/Feliz off the JSON wire sibling; HEEx reads the string-keyed jsonb struct field server-side (`<%= if … %>`/`<%= for … %>`). |
 | `CodeBlock` | Syntax-highlighted code block (highlight.js at runtime). `title:` is a user-visible slot — a caption above the sample, translated through the message catalog. The code SOURCE deliberately is not: translating code breaks it, so an untitled block leaves a page string-less. |
 | `Table`, `Column` | Tabular display (data lambda accessors). `Column` is the sub-element of `Table`/`DataGrid`. `filter: <state>` binds a client-side search box above the table; it renders on the six `walkBody` frontends and on a CLIENT-paged table only. On HEEx there is no filter seam (`loom.table-filter-unsupported`), and a server-paged table's rows are one server window, so a client filter there would narrow that page rather than the result set (`loom.table-filter-server-paged`) — note the auto-paged rewrite turns the simplest hand-written `Table { rows: rows, filter: q }` over a paged `.all` into the server-paged shape. |
-| `DataGrid` | **React, Vue, Svelte, Angular, Feliz.** Interactive grid over the same `Column` children — multi-column sort, per-column filters, column-visibility toggles, client pagination, optional row selection. Backed by [TanStack Table](https://tanstack.com/table); see §9.1 below. Using it on HEEx or Flutter is a compile error (`loom.datagrid-unsupported-target`) — use `Table`, which sorts and pages on every frontend (its client `filter:` is the six `walkBody` frontends, client-paged only — see the `Table` row). |
+| `DataGrid` | **React, Vue, Svelte, Angular, Feliz.** Interactive grid over the same `Column` children — multi-column sort, per-column filters, column-visibility toggles, client pagination, optional row selection. Backed by [TanStack Table](https://tanstack.com/table); see §9.1 below. Sort, filter and pagination all run over the `rows:` it was handed — the grid issues no server read of its own. Using it on HEEx or Flutter is a permanent compile error (`loom.datagrid-unsupported-target`) — use `Table`, which sorts and pages on every frontend (its client `filter:` is the six `walkBody` frontends, client-paged only — see the `Table` row). |
 | `For { each: T[], empty?: markup, item => markup }` | List comprehension — emits the item lambda's markup once per element. TSX lowers to a keyed `.map` + `<Fragment>`, Vue to `<template v-for :key>`, Svelte to a keyed `{#each}`, Angular to an `@for (… ; track …)` block, Phoenix LiveView to a `for … do … end` block. A child primitive (nest inside a layout container — it isn't a standalone page body); the list key is the loop index. The optional `empty:` arm is rendered when the collection is empty — Svelte's native `{:else}`, a TSX `length === 0 ? … : .map(…)` ternary, a Vue `v-if` sibling `<template>`, Angular's `@for`/`@empty` block, a HEEx `Enum.empty?/1` guard. |
 | `QueryView { of:, loading:, error:, empty:, data:, single?:, paged?: }` | 4-arm query-state branching (collection or single-record). The `data:` binding also exposes the paged envelope's page metadata — see §9.2. |
 
@@ -692,14 +692,35 @@ computed column, closing over the typed row. `selection:` cannot be a direct
 write on Feliz (Elmish state lives in `update`), so the grid dispatches a
 `SetSelectedIds` Msg like any other bound input.
 
-The two remaining targets are honest gaps, not silent ones, and for different
-reasons. `loom.datagrid-unsupported-target` rejects a `DataGrid` on **HEEx**
-(LiveView has no client row model; `Table` is server-driven there instead) and
-on **Flutter** — permanently. `DataGrid` is a TanStack row model, so a target
-can host it only if it can host TanStack; there is no Dart adapter or port, and
-while Flutter *web* has `dart:js_interop`, the shipping target is a native build
-with no JS runtime. Flutter's own `DataTable`/`PaginatedDataTable` are the trap
-that decision exists to avoid: they give you *a* grid, not *the same* grid.
+The two remaining targets are honest gaps, not silent ones, and both are
+**permanent**. `loom.datagrid-unsupported-target` rejects a `DataGrid` on
+**Flutter** and on **HEEx**, under one rule: `DataGrid` is a TanStack row model,
+so a target can host it only if it can host TanStack *without forking its own
+contract*.
+
+- **Flutter** cannot host it at all: there is no Dart adapter or port, and while
+  Flutter *web* has `dart:js_interop`, the shipping target is a native build
+  with no JS runtime. Flutter's own `DataTable`/`PaginatedDataTable` are the
+  trap the decision exists to avoid — they give you *a* grid, not *the same*
+  grid.
+- **HEEx** could, and that is exactly why it does not. A hand-rolled
+  server-side grid is feasible — the rows are already in a socket assign, so
+  sort/filter/paging would be `Enum.sort_by`/`Enum.filter`/`Enum.slice` over it
+  — but it means re-deriving TanStack's `alphanumeric` ordering, multi-sort
+  tie-breaks, `includesString` filtering and pagination edges in Elixir. The
+  other road, a `phx-hook` mounting `table-core` over a `phx-update="ignore"`
+  subtree, buys the real row model by handing a DOM island to JS that LiveView
+  must not patch — forfeiting the server-rendered markup every other HEEx
+  primitive is built on. `Table` is server-driven on HEEx and carries real sort
+  + pagination, so Phoenix is not left degraded.
+
+> **Note — a `DataGrid` sorts, filters and pages the rows it was handed, on
+> every target.** It issues no server read of its own: `pageSize:` is a client
+> page size, and the sort/filter/pagination row models run over `rows:`. Over a
+> paged `.all` (the default shape), `rows` is one server window, so the grid's
+> interactions apply *within that window*. This is the same wrinkle
+> `loom.table-filter-server-paged` gates for `Table { filter: … }`; there is no
+> equivalent gate on `DataGrid` today.
 
 **Svelte and Feliz drive `@tanstack/table-core` directly rather than an adapter.**
 The official `@tanstack/svelte-table` peers on Svelte 3/4 — it predates runes —

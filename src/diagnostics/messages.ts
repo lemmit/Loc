@@ -1551,9 +1551,10 @@ export const DIAGNOSTIC_MESSAGES = {
     `${p.what} uses 'DataGrid', which deployable '${p.dName}' can't render ` +
     `(frontend '${p.fw}'). DataGrid is a TanStack row model, so it ships wherever ` +
     `TanStack can run: react, vue, svelte, angular and feliz. It is a permanent gap on flutter ` +
-    `(the native target has no JS runtime) and on heex (a client row model has no LiveView ` +
-    `analogue). Use 'Table' — it supports column sort and pagination on every frontend, ` +
-    `server-driven on Phoenix and Flutter — or host this page on one of the five above.`,
+    `(the native target has no JS runtime) and on heex (LiveView could only re-implement the ` +
+    `row model, forking its sort, filter and pagination semantics). Use 'Table' — it supports ` +
+    `column sort and pagination on every frontend, server-driven on Phoenix and Flutter — or ` +
+    `host this page on one of the five above.`,
   "loom.heex-component-host-state-unsupported": (p: {
     component: unknown;
     primitive: unknown;

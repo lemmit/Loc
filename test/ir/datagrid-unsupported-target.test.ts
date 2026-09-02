@@ -25,9 +25,32 @@ async function validateSource(src: string) {
 
 /** `platform:` for a ui's host.  The four static-bundle frameworks share the
  *  `static` host; Feliz and Flutter each only host their own (they build through
- *  their own toolchains), so the validator rejects them on `static`. */
-const hostFor = (framework: string): string =>
-  framework === "feliz" || framework === "flutter" ? framework : "static";
+ *  their own toolchains), so the validator rejects them on `static`; a
+ *  phoenixLiveView ui is served by its own `elixir` backend deployable. */
+const hostFor = (framework: string): string => {
+  if (framework === "feliz" || framework === "flutter") return framework;
+  if (framework === "phoenixLiveView") return "elixir";
+  return "static";
+};
+
+/** The deployable topology a ui's framework implies.  The five JS frontends are
+ *  a SEPARATE bundle deployable pointing at a node backend (`targets:`); a
+ *  phoenixLiveView ui is served BY its backend, and `targets:` is a
+ *  frontend-only clause the validator rejects on `platform: elixir` — so the
+ *  Phoenix leg is one self-hosting deployable, not two. */
+const topologyFor = (framework: string): { resource: string; deployables: string } =>
+  framework === "phoenixLiveView"
+    ? {
+        resource: "  resource st { for: Orders, kind: state, use: pg }",
+        deployables:
+          "  deployable app { platform: elixir, contexts: [Orders], dataSources: [st], " +
+          "serves: SalesApi, ui: WebApp { Sales: app }, port: 4000 }",
+      }
+    : {
+        resource: "",
+        deployables: `  deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+  deployable web { platform: ${hostFor(framework)}, targets: api, port: 3001, ui: WebApp { Sales: api } }`,
+      };
 
 const sys = (framework: string): string => `
 system S {
@@ -39,6 +62,7 @@ system S {
   }
   api SalesApi from Sales
   storage pg { type: postgres }
+${topologyFor(framework).resource}
   ui WebApp {
     framework: ${framework}
     api Sales: SalesApi
@@ -46,8 +70,7 @@ system S {
       Column("Name", o => o.name, sortable: true),
       rows: rows) } }
   }
-  deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
-  deployable web { platform: ${hostFor(framework)}, targets: api, port: 3001, ui: WebApp { Sales: api } }
+${topologyFor(framework).deployables}
 }
 `;
 
@@ -107,11 +130,24 @@ system S {
 `;
 
 describe("loom.datagrid-unsupported-target", () => {
-  // The frameworks with no `renderDataGridChild` seam.  Flutter emits Dart and
-  // its native build has no JS runtime, so TanStack cannot run there at all —
-  // a PERMANENT gap, deliberately, rather than an unported one (the rationale
-  // lives in `src/util/flutter-deferred-primitives.ts`).
-  for (const fw of ["flutter"]) {
+  // The frameworks with no `renderDataGridChild` seam.  Both are PERMANENT
+  // under D-DATAGRID-TARGETS' one rule — a frontend ships `DataGrid` iff it can
+  // host TanStack without forking its own contract — not unported legs:
+  //
+  //   * flutter emits Dart and its native build has no JS runtime, so TanStack
+  //     cannot run there at all (`src/util/flutter-deferred-primitives.ts`);
+  //   * phoenixLiveView COULD serve a grid — the rows are already in a socket
+  //     assign — and that is exactly the objection: a hand-rolled Elixir row
+  //     model re-derives TanStack's sort/filter/pagination semantics, and the
+  //     other road (a `phx-hook` over `phx-update="ignore"`) hands LiveView a
+  //     DOM island it must not patch.
+  //
+  // phoenixLiveView was NOT exercised here until the pin re-examination, even
+  // though `heex-parity.test.ts` and `page-metamodel.md` both promise "a
+  // DataGrid on HEEx is a compile error, not a blank space".  That promise was
+  // load-bearing (it is what makes the HEEx gap honest rather than silent) and
+  // untested — the gate's own coverage stopped at flutter.
+  for (const fw of ["flutter", "phoenixLiveView"]) {
     it(`rejects DataGrid on a ${fw} frontend`, async () => {
       const diags = await validateSource(sys(fw));
       const hit = diags.find((d) => d.code === "loom.datagrid-unsupported-target");
