@@ -396,7 +396,14 @@ const FILE: Case = {
  *  (`react-build-cases.ts`); Vue, Svelte and Angular never did.  Filterable +
  *  computed-cell + selection on purpose: those switch on the branches
  *  (`hasFilters`, the `@if` cell branch, the `selectionChange` output) a bare
- *  grid leaves unemitted. */
+ *  grid leaves unemitted.
+ *
+ *  It also carries the ZERO-PARAMETER find (`gold`) and a hand-written page
+ *  reading it — that page's component field is `useGoldCustomer()` with no
+ *  argument, so the emitted factory must not require one ("Expected 1
+ *  arguments, but got 0" under `ng build` otherwise).  Folded into this case
+ *  rather than given its own so the shape gets pack-matrix coverage without
+ *  adding a matrix cell. */
 const GRID: Case = {
   name: "grid",
   angularDir: "web",
@@ -410,11 +417,31 @@ const GRID: Case = {
           sequence: int
           spend: money
         }
-        repository Customers for Customer { }
+        repository Customers for Customer {
+          find gold(): Customer[] where this.tier == Gold
+        }
       } }
       api SalesApi from Sales
       ui WebApp {
         api Sales: SalesApi
+        page GoldCustomers {
+          route: "/gold"
+          title: "Gold customers"
+          body: Stack {
+            Heading { "Gold customers", level: 1 },
+            QueryView {
+              of: Sales.Customer.gold,
+              loading: Skeleton { count: 3 },
+              error: Alert { "Couldn't load customers" },
+              empty: Empty { "No gold customers yet." },
+              data: rows => Table {
+                rows: rows,
+                Column { "Name", o => Text { o.name } },
+                Column { "Tier", o => EnumBadge { o.tier } }
+              }
+            }
+          }
+        }
         page CustomerGrid {
           route: "/customers"
           title: "Customers"

@@ -29,7 +29,13 @@ system SGrid {
         spend: money
       }
 
-      repository Customers for Customer { }
+      repository Customers for Customer {
+        // A ZERO-PARAMETER find.  The `GoldCustomers` page below reads it with
+        // no arguments — the only shape that reaches the emitted hook's
+        // zero-arg call form, and the shape that used to be an "Expected 1
+        // arguments, but got 0" under svelte-check.
+        find gold(): Customer[] where this.tier == Gold
+      }
     }
   }
 
@@ -66,6 +72,29 @@ system SGrid {
           testid: "customer-data-grid"
         } },
         testid: "customer-grid-page"
+      }
+    }
+
+    // The zero-arg-find read, hand-written (not scaffolded): emits
+    // `useGoldCustomer()` against the accessor-shaped hook, so the accessor
+    // must carry a default.
+    page GoldCustomers {
+      route: "/gold"
+      title: "Gold customers"
+      body: Stack {
+        Heading { "Gold customers", level: 1 },
+        QueryView {
+          of: Sales.Customer.gold,
+          loading: Skeleton { count: 3 },
+          error: Alert { "Couldn't load customers" },
+          empty: Empty { "No gold customers yet." },
+          data: rows => Table {
+            rows: rows,
+            Column { "Name", o => Text { o.name } },
+            Column { "Tier", o => EnumBadge { o.tier } }
+          }
+        },
+        testid: "gold-customers-page"
       }
     }
   }
