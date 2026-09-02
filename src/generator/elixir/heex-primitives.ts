@@ -20,7 +20,7 @@ import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
 import { isEntityHistoryRead } from "../_walker/history-read.js";
 import { queryShape } from "../_walker/paged-query.js";
 import { simpleAccessorField } from "../_walker/primitives/data-grid-shape.js";
-import { gridCols } from "../_walker/shared/args.js";
+import { gridCols, slugify } from "../_walker/shared/args.js";
 import {
   escapeHeexAttr,
   escapeHeexText,
@@ -1677,7 +1677,16 @@ export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
         // stays derived from the source literal — a per-locale anchor would
         // break every `JS.show` selector this switcher is built on.
         labelHeex: labelArg ? renderInTemplate(labelArg, ctx, "tabLabel") : undefined,
-        slug: snake(label) || `tab-${idx}`,
+        // `slugify`, not `snake` — the SAME derivation the six JSX/markup
+        // targets use (`_walker/primitives/layout.ts`).  `snake/1` only splits
+        // camelCase and downcases, so a caption with a space came out as
+        // `order details` and went straight into an HTML `id` and the
+        // `JS.show(to: "#tabs-1-panel-order details")` selector this switcher is
+        // built on — a broken anchor, and a DIFFERENT id than every other target
+        // derives from the same caption, which splits cross-target e2e
+        // selectors.  The `|| tab-<idx>` fallback and the 1-based `idx` already
+        // match the shared walker's.
+        slug: slugify(label) || `tab-${idx}`,
         body: labelIsTextLike ? pos.slice(1) : pos,
       });
     } else {

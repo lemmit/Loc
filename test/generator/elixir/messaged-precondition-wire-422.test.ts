@@ -160,7 +160,9 @@ describe("elixir/vanilla — messaged precondition answers the wire-validation 4
     expect(pd).toContain('title: "Validation failed"');
     expect(pd).toContain('detail: "One or more fields are invalid."');
     // The changeset path delegates to it rather than building its own body.
-    expect(pd).toContain("send_validation_problem(conn, pointer_errors)\n  end");
+    expect(pd).toContain(
+      "send_validation_problem(conn, collect_changeset_errors(changeset, []))\n  end",
+    );
     // The wire path localises the code through the SAME catalog lookup.
     expect(pd).toContain("def validation_errors_response(conn, errors) when is_list(errors) do");
     expect(pd).toContain("message: localize(code, message)");

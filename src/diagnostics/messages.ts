@@ -1554,6 +1554,18 @@ export const DIAGNOSTIC_MESSAGES = {
     `(the native target has no JS runtime) and on heex (a client row model has no LiveView ` +
     `analogue). Use 'Table' — it supports column sort and pagination on every frontend, ` +
     `server-driven on Phoenix and Flutter — or host this page on one of the five above.`,
+  "loom.heex-component-host-state-unsupported": (p: {
+    component: unknown;
+    primitive: unknown;
+    dName: unknown;
+  }) =>
+    `component '${p.component}' uses '${p.primitive}', which deployable '${p.dName}' ` +
+    `(Phoenix LiveView) cannot render inside a component. A HEEx function component is a pure ` +
+    `render function with no process of its own, so '${p.primitive}' needs the host page's ` +
+    `LiveView to supply its assign, upload or handle_event clause — and only a component's ` +
+    `'state { … }' and named 'action's are lifted there today. The emitted project compiles, ` +
+    `then fails at request time on the assign that was never made. Move '${p.primitive}' into ` +
+    `the page body; the component can keep its layout, display, 'state' and 'action's.`,
   "loom.chart-unsupported-target": (p: { what: unknown; name: unknown; uiFramework: unknown }) =>
     `${p.what} uses 'Chart', which deployable '${p.name}' can't render ` +
     `(frontend '${p.uiFramework}'). Chart ships on every shipping frontend — react, vue, ` +

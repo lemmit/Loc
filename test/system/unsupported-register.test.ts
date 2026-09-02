@@ -149,8 +149,23 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  typing an `enum` `state {}` field as the emitted enum union instead of bare
  *  `string` (`stateTypeAsTsString` and its React/Vue/Angular twins), and a
  *  per-target zero-literal seam for `decimal`/`money`.  Both land the macro arm,
- *  delete the row, and lower this back to 44. */
-const MAX_OPEN_GAPS = 45;
+ *  delete the row, and lower this back to 44.
+ *
+ *  45 → 46: `loom.heex-component-host-state-unsupported` (W1b elixir packet,
+ *  ledger row `G2646-open-heex-in-component-degradation`).  The sharpest version
+ *  of this trade so far, because the thing it replaces is not a degradation at
+ *  all — it is a CRASH the compile gate cannot see.  A `CreateForm` (or
+ *  `OperationForm` / `WorkflowForm` / `DestroyForm` / `QueryView` / `Table` /
+ *  `FileUpload` / `Chart`) inside a `component` on phoenixLiveView emitted
+ *  `<.simple_form for={@form} phx-submit="save_thing">` into a function
+ *  component whose host LiveView has an empty `mount/3`, no `@form` assign and
+ *  no matching `handle_event` — output that passes `mix compile
+ *  --warnings-as-errors` and then raises on page load.  #2646 built exactly the
+ *  hoisting this needs for a component's `state { … }` and named `action`s and
+ *  stopped there; draining this extends the same `ComponentActionInfo` +
+ *  `gather*` seam to the walker's form / query / upload / table-control
+ *  accumulators, deletes the row, and lowers this back to 41. */
+const MAX_OPEN_GAPS = 46;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

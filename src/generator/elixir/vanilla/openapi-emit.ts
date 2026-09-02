@@ -918,6 +918,34 @@ function openApiType(t: TypeIR, schemasModule: string): string {
   }
 }
 
+/** Declare a nullable property `nullable: true` (F2-W-12).
+ *
+ *  Absence from `required[]` says the key may be OMITTED; it does not say the
+ *  value may be `null`.  The emitted serializer builds `"sku" => record.sku` for
+ *  every row, nil included, so an optional field's key is ALWAYS present and its
+ *  value is `null` — a body this app's own published schema forbade.  The three
+ *  backends that declare it: node `z.string().nullish()` (a null union), .NET
+ *  `string?` under `SupportNonNullableReferenceTypes()` (`nullable: true`), and
+ *  python `str | None` (a pydantic anyOf-with-null).
+ *
+ *  `nullable: true` is the OpenAPI 3.0 spelling, which is the dialect
+ *  `OpenApiSpex` emits — and the parity normalizer's `propTypeSig` already folds
+ *  it out (`{type: "string", nullable: true}` and `{type: "string"}` sign the
+ *  same), so this is documentation-only as far as the cross-backend diff is
+ *  concerned.
+ *
+ *  DELIBERATELY NOT applied to a `$ref`-shaped property (a nullable enum, value
+ *  object or containment part).  3.0 forbids a sibling keyword beside `$ref`, so
+ *  the valid spelling is `allOf: [$ref] + nullable: true` — and `propTypeSig`
+ *  does not fold `allOf`, so it would read as `object` where the other backends
+ *  read `ref:<Name>` and the parity gate would report a divergence this change
+ *  invented.  Those properties keep the pre-existing bare `$ref`. */
+function nullableSchema(schema: string, isNullable: boolean): string {
+  if (!isNullable) return schema;
+  if (!schema.startsWith("%OpenApiSpex.Schema{") || !schema.endsWith("}")) return schema;
+  return `${schema.slice(0, -1)}, nullable: true}`;
+}
+
 /** Render a list of fields into OpenApiSpex properties + required list.
  *  The `create` slot drops non-nullable `bool` fields from the `required`
  *  list: Phoenix's controller (like Hono's `z.boolean().default(false)` and
@@ -948,9 +976,10 @@ function renderProperties(
   // as `only-phoenix=[created_at,...]`.
   for (const f of fields) {
     const key = f.name;
-    const schema = openApiType(f.type, schemasModule);
-    propsLines.push(`      ${key}: ${schema}`);
     const info = wireTypeInfo(f.type, slot === "response" ? "response" : "request");
+    propsLines.push(
+      `      ${key}: ${nullableSchema(openApiType(f.type, schemasModule), info.isNullable)}`,
+    );
     // RS-26: scoped to CREATE.  An omitted create bool is well-defined
     // (`hasImplicitDefault`), but on an OPERATION body — `update` included —
     // there is nothing to construct, so an omitted field is a missing required

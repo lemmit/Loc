@@ -73,7 +73,12 @@ describe("vanilla — Slice 4 RFC 7807 ProblemDetails parity", () => {
   it("validation_error_response emits errors: [%{pointer, message}] entries", async () => {
     const files = await generateSystemFiles(VANILLA_SOURCE);
     const pd = files.get([...files.keys()].find((k) => k.endsWith("/problem_details.ex"))!)!;
-    expect(pd).toContain("%{pointer: pointer_of([field]), message: interpolated}");
+    // The pointer is built from the WHOLE path the error sits at — the walk's
+    // parent prefix, the field, and a value object's inner `loom_path` — not
+    // from the bare field, which could only ever produce a depth-1 pointer.
+    expect(pd).toContain(
+      "%{pointer: pointer_of(prefix ++ [field] ++ Keyword.get(opts, :loom_path, [])), message: interpolated}",
+    );
     expect(pd).toContain("errors: pointer_errors");
   });
 

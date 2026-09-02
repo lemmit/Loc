@@ -403,13 +403,33 @@ ${keyAliasPairs.join(",\n")}
 
   # Run a value object's validating constructor over a cast map field; an
   # invariant violation surfaces as a changeset error rather than persisting.
+  #
+  # The VO's OWN errors are forwarded verbatim — its authored message, its
+  # \`loom_code\`, and its inner field name carried on \`loom_path\` so
+  # ProblemDetails can render \`/sku/code\` rather than the whole object.  A flat
+  # \`[{field, "is invalid"}]\` threw all three away: the wire said only that
+  # something about \`/sku\` was wrong, so the frontend ACL could not bind the
+  # 422 to the control that caused it and the authored text never reached the
+  # user.  A VO persists as one jsonb \`:map\` column rather than an embed, so
+  # there is no child changeset for the ProblemDetails walk to find — this is
+  # the only place that path exists.
   defp validate_vo(changeset, field, new_fun) do
     validate_change(changeset, field, fn ^field, value ->
-      if is_map(value) and match?({:error, _}, new_fun.(value)),
-        do: [{field, "is invalid"}],
-        else: []
+      if is_map(value), do: __vo_errors(field, new_fun.(value)), else: []
     end)
-  end`
+  end
+
+  # An \`{:error, changeset}\` with an EMPTY error list would return \`[]\` here and
+  # persist a value the VO rejected, so the flat marker is kept as the floor —
+  # never a silent pass.
+  defp __vo_errors(field, {:error, %Ecto.Changeset{errors: [_ | _] = errors}}) do
+    Enum.map(errors, fn {inner_field, {msg, opts}} ->
+      {field, {msg, Keyword.put(opts, :loom_path, [inner_field])}}
+    end)
+  end
+
+  defp __vo_errors(field, {:error, _}), do: [{field, "is invalid"}]
+  defp __vo_errors(_field, _ok), do: []`
       : "";
 
   // `unique (...)` domain invariants (D-UNIQUE-DOMAIN) — one

@@ -75,6 +75,7 @@ import {
   validateFlutterPrimitiveSupport,
   validateGroupedProjectionBackend,
   validateGuardPrincipalWithoutAuth,
+  validateHeexComponentHostState,
   validateInheritanceStorage,
   validateJavaReservedIdentifiers,
   validateMikroOrmSupport,
@@ -187,6 +188,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateAuthUiFramework(sys, diags);
     validateCurrentUserNeedsAuthUi(sys, diags);
     validateDataGridFramework(sys, diags);
+    validateHeexComponentHostState(sys, diags);
     validateChartSupport(sys, diags);
     validateUiRealtimeSupport(sys, diags);
     validateUiProjectionReadFramework(sys, diags);

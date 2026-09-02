@@ -72,6 +72,7 @@ import {
   renderReturningOpControllerAction,
 } from "./operation-returns-emit.js";
 import { PAGE_CALL_ARGS, PAGE_WITH_CLAUSES, pagingElseArm } from "./page-param.js";
+import { renderPathIdCastPlug } from "./problem-details-emit.js";
 import { hasRefColls } from "./ref-collection-emit.js";
 import { emitsRestDelete } from "./rest-surface.js";
 import { stampUsesPrincipal } from "./stamp-emit.js";
@@ -883,6 +884,8 @@ defmodule ${appModule}Web.${aggPascal}Controller do
   require Logger
   alias ${facadeMod}
   alias ${appModule}Web.ProblemDetails
+
+${renderPathIdCastPlug()}
 
 ${indexAction}
 
