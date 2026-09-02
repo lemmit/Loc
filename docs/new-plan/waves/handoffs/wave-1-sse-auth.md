@@ -49,9 +49,13 @@
 - `npx tsc -b` — clean at every step.
 - `npx vitest run test/generator/_frontend/realtime-stream-auth.test.ts` — **16 passed** (new file).
 - `npx vitest run test/generator/{feliz/feliz-realtime,svelte/svelte-realtime,vue/vue-realtime,angular/angular-realtime,typescript/realtime-emission}.test.ts` — **27 passed**, unchanged (the `auth: none` byte-identical guarantee).
+- `npx vitest run test/system/local-run-mapping.test.ts test/system/pr-gate.test.ts test/platform/pipeline-layering.test.ts test/platform/backend-packages-layering.test.ts` — **185 passed** (the new `generator → ir/util` import is a legal downhill edge; the CI-gate mapping is unaffected).
+- `LOOM_TS_BUILD=1 LOOM_CORPUS_TSC_CASE=auth-oidc npx vitest run test/e2e/corpus-tsc-build.test.ts` — **1 passed**: the emitted node backend, with the new cookie arm, type-checks under strict `tsc`.
+- `npm install && npx tsc --noEmit` on the emitted **react SPA** from the probe (the `generated-react-build`-style typecheck) — clean; `new EventSource(url, { withCredentials: true })` satisfies `lib.dom`'s `EventSourceInit`.
 - `npx biome ci` over every changed file — clean.
 - `node bin/cli.js parse test/e2e/fixtures/auth-oidc-e2e.ddd` — 0 errors (2 pre-existing `find`-shape warnings).
 - Probe generation (`generate system`) before **and** after, diffing the emitted client / verifier / compose.
+- **Not completed locally:** the wide `npx vitest run test/generator/{_frontend,react,vue,svelte,angular}` sweep. The sandbox is at load average ~41 (a dozen parallel agents); two attempts ran >50 min without finishing and were killed. Its realtime-relevant content — all five `*-realtime*` suites plus the new file — was run separately and is green, and the only behavioural change outside those is gated on `auth: ui`, which no existing frontend fixture sets. Worth re-running on the fold.
 
 **Runtime verification:** the two OIDC runtime legs were **extended, not merely pinned** — `test/e2e/auth-oidc-e2e.test.ts` (`LOOM_AUTH_E2E=1`, backend native + dockerized Keycloak/postgres) and `test/e2e/auth-oidc-compose-e2e.test.ts` (`LOOM_AUTH_E2E_COMPOSE=1`, the turnkey `docker compose up`) now, with a **real Keycloak access token**:
 
