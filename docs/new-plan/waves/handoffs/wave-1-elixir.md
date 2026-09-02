@@ -105,8 +105,8 @@ visible LEFT-JOINs on all five backends — worth a line in
 | gate | result |
 |---|---|
 | `npx tsc -b` | clean |
-| `npx vitest run test/generator/elixir test/system/generated-output-sentinels.test.ts` | green (188 files / 1194 tests before the last two commits; re-run green after) |
-| elixir compile leg — `mix deps.get && mix compile --warnings-as-errors` in `hexpm/elixir:1.18.4-erlang-27.3.4`, `LOOM_HEX_MIRROR=1` | green on: 3 hostile-`#{` projects (aggregate / value-object / page+auth), the C7 button page, and corpus `projection-join`, `seeding`, `auth-oidc`, `validation-messages`, `core-domain` |
+| `npx vitest run test/generator/elixir test/system/generated-output-sentinels.test.ts` | **green — 189 files / 1200 tests**, on the final tree |
+| elixir compile leg — `mix deps.get && mix compile --warnings-as-errors` in `hexpm/elixir:1.18.4-erlang-27.3.4-debian-bookworm-20260610-slim`, `LOOM_HEX_MIRROR=1` | **green** on: the 3 hostile-`#{` projects (aggregate / value object / page), the C7 button page (which also carries the hostile page-state, action-guard and VO literals), and corpus `projection-join`, `seeding`, `auth-oidc`, `validation-messages`, `core-domain`. No app-level Elixir warning in any of them (the only `warning:` lines are Loom's own missing-index IR warnings and one deprecation inside a hex dependency). |
 | `LOOM_ELIXIR_BUILD=1 LOOM_HEX_MIRROR=1 LOOM_CORPUS_ELIXIR_CASE=validation-messages npx vitest run test/e2e/corpus-elixir-build.test.ts` | green |
 | `npx biome ci <changed files>` | clean (except the pre-existing `auth-emit.ts:277` warning above) |
 
