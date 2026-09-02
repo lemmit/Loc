@@ -550,11 +550,286 @@ Same pattern as `pipeline-layering` / `diagnostic-catalog`.
 
 ---
 
+# Slice 2 (W3) — widening the axes
+
+**Why.** All three registers had gone empty, and a separate 522-crossing single-feature sweep
+(58 corpus fixtures × 5 backends × both node/dotnet adapters) found **zero** new gaps. Read as
+a statement about the compiler that is reassuring; read as a statement about the corpus it is
+not. Three findings out of a young matrix is a **discovery rate**, and a discovery rate that
+has fallen to zero is a claim about the instrument. So the axes grew rather than the sweep
+re-running.
+
+## The two new axes, and the bug class each can catch
+
+| Axis | Values | What it can catch that nothing else could |
+|---|---|---|
+| `inheritance` | `none` / `tph` (`sharedTable`) / `tpc` (`ownTable`) | **Nothing in the corpus declared a base type at all.** Every value of the CAPABILITY axis stamps something onto the aggregate's row — an `audit_records` write, a `version` column, `deleted_at`, `tenant_id` — and inheritance is the axis that decides *which table* that lands on, and *with what nullability*. A stamp emitted per-concrete against a shared table is the #2321 shape; a read path written against a concrete's own table while the row lives in the base's is the #2412 shape. Wave 1 found TPH × `tenantOwned` did not compile on .NET at all. |
+| `read` | `plain` / `paged` | Every other axis leaves the wire shape **bare**. `paged` is the corpus's only CARRIER, and a carrier is where read-side concerns get dropped on the way through — a scope filter that reaches the page query but not the COUNT query reports a total the caller cannot page to; a `mask unless` has to reach each item *inside* the envelope. `paged.ddd` exists as a single-feature fixture with no capability, no authz and no non-relational shape. |
+
+Both were named as follow-ups by slice 1 ("Widen the axes — inheritance (TPH/TPC `extends`)…").
+
+## What it cost
+
+| | before | after |
+|---|---|---|
+| source systems (full cross product) | 100 | **600** |
+| generation crossings (× 5 backends × adapters) | 700 | **4200** |
+| generation wall-clock | ~15s | **~93s** |
+| all-pairs cover, per backend | 25 | **25** |
+| compile-leg wall-clock (node) | ~195s | **~194s** |
+
+The compile tier cost **nothing**, and that is the argument for all-pairs rather than more
+fixtures: a cover's size is bounded below by the largest single *pair* product, which is still
+`capability × authz` = 5 × 5 = 25. The greedy fill packs a 3-valued and a 2-valued newcomer
+into rows the 5×5 pairs already forced. The axes multiply; the sample does not. Only the
+generation leg — the one that costs nothing per case — carries the 6× width, and it is
+per-PR on a job budgeted at 15 minutes.
+
+Cover completeness is no longer taken on faith: `test/pairwise/axes.test.ts` re-derives every
+2-way combination from the axis constants and asserts the cover contains each one, per
+backend. A greedy heuristic that silently stopped covering an axis would otherwise keep
+returning rows and keep passing everything downstream.
+
+## Two composer adjustments, both measured
+
+The first run of the widened matrix spent **980 of 4200 crossings** bouncing off two named
+diagnostics instead of reaching an emitter. Both were the composer failing to write a system
+that means anything, in the sense the composer's own header already defines ("the only
+adjustments it makes are the ones a user would also have to make"):
+
+- `loom.es-tph-forced-own-table` × 700 — a `shape: document` / `persistedAs: eventLog` concrete
+  of a `sharedTable` base is *forced* to `ownTable`, and the diagnostic says so in as many
+  words. The concrete now declares it; the base keeps `sharedTable`, so `tph` and `tpc` stay
+  genuinely different systems.
+- `loom.persistence-mode-unsupported` × 280 — an abstract base is `persistedAs: state`
+  whatever its concrete is, so an event-sourced subject under inheritance needs a `state`
+  dataSource beside its `eventLog` one.
+
+Neither hides a finding: both diagnostics are honest, named, and still fire for anyone who
+writes the system the naive way. Both adjustments are pinned in `axes.test.ts`, because a
+later edit that quietly put those crossings back on the validator floor would leave the sweep
+**green** (a rejection is a legitimate verdict) while covering a sixth less.
+
+## The waiver register grew two fields, and they are REQUIRED
+
+`Waiver` now carries `inheritance` and `read`, mandatory rather than optional-defaulting-to-`*`.
+An omitted axis silently *widens* a waiver: an entry written for `embedded × tph` before the
+axis existed would, on the day it was added, quietly cover `embedded × tpc` and flat `embedded`
+too — and the stale-waiver ratchet cannot see that, because the entry keeps matching. A
+required field turns "I did not think about this axis" into a compile error at the register,
+which is the only place it can still be answered.
+
+---
+
+## Findings — slice 2
+
+Generation stayed clean: **4200 crossings, 3528 `ok`, 672 `rejected`, 0 `crashed`.** Every
+rejection carries a `loom.*` code. That is the expected shape — the generation oracle only
+sees a *throw*, and this bug class generates perfectly and then fails to compile. The compile
+oracles are where the axes paid.
+
+| # | Crossing | Backend | Symptom | Class | Status |
+|---|---|---|---|---|---|
+| **F11** | `shape: embedded` × TPH | node (+ python, .NET differently) | drizzle repository targets `schema.things`; the schema module only exports `thingBases` → 19 × TS2339 | compile | **registered** |
+| **F12** | `paged` × `document` / `eventLog` | python **and .NET** | the caller expects the envelope, the non-relational repository builders drop the carrier → mypy `call-arg` + 5 × `attr-defined`; CS0535 | compile | **registered** |
+| **F13** | `shape: embedded` × TPH, and `shape: embedded` × `paged` | python | `ThingBaseRow` and `PagedResult` used but never imported → ruff F821 | compile | **registered** (one-line import gate) |
+| **F14** | `paged` × `document` | elixir | the context delegate declares arity 5; the document-shape repository defines `by_label/3` | compile (not proven by a leg here) | **registered** |
+| **F15** | `softDeletable` × TPH | python | TPH makes the subtype's `is_deleted` column nullable, so `not_(...)` fails mypy --strict → 4 × `arg-type` | compile | **registered** |
+
+Nothing is fixed in this PR, and the reason is the same for all five: every one lives in a
+backend emitter, and this slice's tree is the harness. Each row below carries the diagnosis a
+fix needs — file, mechanism, and how far the fix has to reach.
+
+### F11 — `shape: embedded` × TPH is composed by no backend
+
+**Reaches:** exactly `embedded × tph` — **50 of the 600** node/default source crossings, which
+is every capability × every authz × both reads, and **not** `tpc`. Measured by scanning every
+emitted `.ts` for a `schema.<name>` reference the emitted `db/schema.ts` does not export.
+
+```
+db/repositories/thing-repository.ts(27,53): error TS2339:
+  Property 'things' does not exist on type 'typeof import(".../db/schema")'.
+   … × 19
+```
+
+**Where (node):** `src/generator/typescript/repository-embedded-builder.ts` takes its table as
+`lowerFirst(plural(agg.name))` (lines 102 and 344). The **relational** builder does not — it
+uses `tableOwnerName(agg, ctx.aggregates)` from `src/ir/util/inheritance.ts`, and even carries
+the comment naming the trap: *"not the subtype's own pluralised name, which has no `schema`
+export"*. The embedded builder was cloned before that fix and never picked it up — the same
+clone-and-diverge shape as F3/F5 (drizzle → MikroORM) one slice earlier.
+
+**Why the one-line fix is not the fix.** The schema emitter is the other half: for an embedded
+concrete of a TPH base it does *not* put the jsonb containment column on the owner table — it
+emits a relational `lines` child table instead:
+
+```ts
+export const thingBases = mainSchema.table("thing_bases", {
+  id, kind, note, version, label, amount,     // no `lines` jsonb column
+});
+export const lines = mainSchema.table("lines", { … parentId → thingBases.id … });
+```
+
+so re-pointing the repository at `thingBases` would move the error (excess property on the
+typed insert), not remove it.
+
+**Same crossing, other backends** — the shape of the bug differs, which is why it is one
+finding and not three:
+
+- **python** emits **both** tables — `thing_bases` (TPH, with the subtype columns) *and*
+  `things` (embedded, with the jsonb column) — so one aggregate is materialised twice and
+  `find_by_id` (reads `ThingRow`) and `by_label` (reads `ThingBaseRow`) read *different tables*.
+  It type-checks; it cannot work.
+- **.NET** emits a `ThingConfiguration` that maps no containment at all — no `OwnsMany`, no
+  `ToJson` for `lines`, only the two scalar column names. Compiles; fails at EF model build.
+
+**What a fix costs:** the drizzle schema emitter + the embedded repository builder + the
+phase-⑨ migration DDL, then the python schema emitter (stop emitting the duplicate table) and
+the .NET configuration emitter. A cross-emitter mission with its own per-backend gates.
+
+**Registered in:** `test/pairwise/waivers-compile.ts` (`platform: node`, `shape: embedded`,
+`inheritance: tph`).
+
+**Reproduce:**
+```bash
+LOOM_PAIRWISE=1 LOOM_PAIRWISE_DUMP=/tmp/pw npm run test:pairwise-corpus
+node bin/cli.js generate system /tmp/pw/node-audited-embedded-mask-tph-default.ddd -o /tmp/out
+grep -n 'schema.things' /tmp/out/d/db/repositories/thing-repository.ts
+grep -n 'export const'  /tmp/out/d/db/schema.ts     # only `thingBases` and `lines`
+```
+
+### F12 — `paged` × a non-relational shape drops the carrier (python **and .NET**)
+
+**Reaches:** every `document` / `eventLog` × `paged` row of both covers — **5 of python's 26**
+and **5 of .NET's 26**, the latter across *both* adapters (efcore and dapper), so it is not an
+adapter bug. Nothing else in either cover failed for this reason, and nothing that failed for
+this reason was outside those rows.
+
+The **caller** honours the carrier; the document / event-sourced repository builders do not.
+Two backends show the same defect from opposite sides:
+
+```
+# python — the route calls a five-argument method that isn't there
+app/http/thing_routes.py:97: error: Too many arguments for "by_label" of "ThingRepository"  [call-arg]
+app/http/thing_routes.py:99: error: "Thing" has no attribute "items"  [attr-defined]
+   … page / page_size / total / total_pages
+```
+```
+# .NET — the PORT declares the paged signature, the implementation emits the plain one
+error CS0535: 'ThingRepository' does not implement interface member
+  'IThingRepository.ByLabel(string, int, int, string, string, CancellationToken)'
+```
+
+That the .NET half is a *port/implementation* disagreement is worth keeping: it means the
+paged-ness of the find is known correctly at one emission site and lost at another, in the
+same backend — the failure is not "the backend cannot page a document", it is "two emitters
+disagree about whether it does".
+
+Measured across all four shapes on python, because *"python's paging is broken"* would have
+been the wrong summary:
+
+| shape | emitted signature | verdict |
+|---|---|---|
+| relational | `by_label(self, l, page, page_size, sort, dir) -> PagedResult[Thing]`, `PagedResult` imported | correct |
+| embedded | same signature, `PagedResult` **not imported** | F13 |
+| document | `by_label(self, l) -> Thing` — carrier gone, and not even a list | **F12** |
+| eventLog | same as document | **F12** |
+
+One construct, three behaviours, one backend. Node and Java get every shape right; .NET gets
+the document/eventLog rows wrong the CS0535 way above; Phoenix gets it wrong a fourth way
+(F14). Five backends, four different answers to one keyword.
+
+**Registered in:** `waivers-compile.ts` (`platform: python|dotnet`,
+`shape: document|eventLog`, `read: paged`).
+
+### F13 — two import gates the python embedded builder never grew
+
+Both ruff **F821 (undefined name)**, in the same generated file:
+
+```
+F821 Undefined name `ThingBaseRow`
+  --> app/db/repositories/thing_repository.py:46:52
+F821 Undefined name `PagedResult`
+  --> app/db/repositories/thing_repository.py:39:89
+```
+
+- `ThingBaseRow` — the find body *correctly* resolves the TPH owner table (unlike node, F11),
+  but the schema import line still reads `from app.db.schema import ThingRow`.
+- `PagedResult` — a `paged` find's return annotation **and** its constructor call, with no
+  `from app.domain.paging import PagedResult`. **Independent of inheritance**: reproduced on a
+  flat `shape: embedded` × `paged` system, which this cover does not currently sample (so the
+  register's entry is pinned to the `tph` rows that do fail, and this paragraph is the record
+  of the wider extent).
+
+Same class as the duplicate `authUserImport(...)` in this register's postscript, and
+typecheck-invisible for the same reason: the emitter builds strings, so a missing import
+type-checks exactly as well as a present one. **Both are one-line additions to the builder's
+import gate** — registered rather than fixed only because this slice's tree is the harness.
+
+**Registered in:** `waivers-compile.ts` (`platform: python`, `shape: embedded`,
+`inheritance: tph`).
+
+### F14 — `paged` × `document` on Phoenix: the delegate and the function disagree on arity
+
+Not proven by a compile leg here — the elixir leg measures 78 minutes and was not run in this
+slice — but read directly off the emitted source, and unambiguous:
+
+```elixir
+# lib/d/main.ex
+defdelegate by_label_thing(l, page \\ 1, page_size \\ 20, sort \\ "id", dir \\ "asc"),
+  to: D.Main.ThingRepository, as: :by_label
+
+# lib/d/main/thing_repository.ex  (shape: document)
+def by_label(l, page \\ 1, page_size \\ 20) do        # arity 3 — no sort/dir
+```
+
+The relational repository defines the 5-arity head; the document one does not. The controller
+always calls the 5-argument path (`Main.by_label_thing(params["l"], page_arg, page_size_arg,
+Map.get(params, "sort", "id"), Map.get(params, "dir", "asc"))`), so the document-shape paged
+find is dead on arrival — and `defdelegate` to a function that does not exist is a compile
+warning, which this backend builds as an error.
+
+**Not registered as a waiver**, deliberately: the elixir leg did not run, so there is no
+observed failure for an entry to match, and a waiver that matches nothing fails the ratchet as
+stale. Running `npm run test:pairwise-corpus-elixir` is what turns this row into an entry.
+
+### F15 — `softDeletable` × TPH: inheritance changed the column's nullability (python)
+
+```
+app/db/repositories/thing_repository.py:25: error: Argument 1 to "not_" has incompatible type
+  "InstrumentedAttribute[bool | None]"; expected "ColumnElement[bool] | …"  [arg-type]   × 4
+```
+
+TPH makes every **subtype** column nullable on the shared table — that is what sharing a table
+means — so the capability's own `is_deleted` column types as `Mapped[bool | None]` and no
+longer satisfies mypy --strict.
+
+This is the axis working exactly as intended: the capability is right, the layout is right,
+and the **interaction** is the defect. .NET refuses the same crossing *by name* —
+`loom.tph-filter-unsupported`, for a different EF-shaped reason ("EF Core allows a filter only
+on the root entity type") — which is the correct shape of an answer. Python neither refuses it
+nor compiles it, and that asymmetry is itself the finding: one backend has decided the
+crossing is unsupportable and says so, another emits code for it that does not build.
+
+**Registered in:** `waivers-compile.ts` (`platform: python`, `capability: softDeletable`,
+`shape: relational`, `inheritance: tph`).
+
+---
+
 ## Follow-up slices
 
-1. **Compile legs for dotnet / java / python / elixir.** Every recorded instance of this bug
-   class lives there (#2412 was .NET CS0128 + Python F821 — node compiled it fine). Slice 1's
-   node-only leg already found two; the waiver registers are in place for the rest.
-2. **Widen the axes** — inheritance (TPH/TPC `extends`), unions / payload carriers,
-   containment / part-in-part.
-3. **Fix F1 and F2** — one emitter (or validator) change each, with their own gates.
+1. ~~**Compile legs for dotnet / java / python / elixir.**~~ **Done** — #2690.
+2. **Widen the axes** — inheritance (TPH/TPC `extends`) and `paged` reads landed in slice 2
+   (W3). Still open: unions / payload carriers, containment / part-in-part, `ignoring`
+   filter-bypass, channels × broker.
+3. ~~**Fix F1 and F2**~~ — closed by #2527 / #2528.
+4. **Drain F11–F15.** F13 is minutes (two import-gate lines). F12, F14 and F15 are one
+   emitter each. F11 is a cross-emitter mission — the embedded jsonb shape and the TPH shared
+   table are not composed anywhere, on any backend.
+5. **Run the elixir compile leg on the widened cover** — it is the one backend whose paged ×
+   document defect (F14) is recorded from source rather than from a compiler.
+6. **A cheap static cross-reference oracle.** F11's true extent (50 of 600) was measured in
+   ~34 seconds by scanning every emitted `.ts` for a `schema.<name>` the emitted `db/schema.ts`
+   does not export — no `npm install`, no compiler. The compile tier samples 25 of 600 and pays
+   an install per case; a reference-integrity scan could run the *whole* space per PR. It would
+   have found F11 without the cover happening to sample it.
