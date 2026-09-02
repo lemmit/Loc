@@ -7,6 +7,11 @@
 > code read of every pane under `web/src/layout/`, `web/src/builder/`,
 > `web/src/workspace/` and `web/src/preview/`.
 >
+> Companion: [playground-landscape-research-2026-09.md](playground-landscape-research-2026-09.md)
+> looks outward at Replit / Lovable / v0 / Bolt, the compiler playgrounds and
+> the model-driven tools, and derives the target design the fixes below move
+> toward.
+>
 > Read against `main` @ `5dc8b4e`. Items marked **shipped** landed in the
 > same change as this document; everything else is a proposal, ranked by how
 > much it costs a user. **When this prose and the cited lines disagree, the
