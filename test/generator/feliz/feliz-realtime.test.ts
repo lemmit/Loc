@@ -74,8 +74,19 @@ describe("realtime SSE consumption — Feliz (`on <channel>.<Event>`)", () => {
     expect(app).toContain("let private realtimeSub (_: Model) : Sub<Msg> =");
     expect(app).toContain('let es = createEventSource "/api/realtime/events"');
     expect(app).toContain('es?addEventListener("OrderPlaced", fun (m: obj) ->');
-    // Toast: the v1 message subset, event field read dynamically + string-coerced.
-    expect(app).toContain('showToast ("Order " + (string (payload?order)) + " placed")');
+    // Toast: the message subset, read through the `toastField` helper.
+    //
+    // This was `(string (payload?order))` until the subset grew MULTI-LEVEL
+    // member access (2026-09-02).  Fable's `?` cannot carry a chain — it
+    // compiles to `payload.order.id` and THROWS on an absent `order` — so the
+    // renderer reads every depth through one `[<Emit>]` helper instead.  Depth 1
+    // changes with it, deliberately: `string undefined` rendered the literal
+    // text "undefined" into user-visible toast copy, where the JS and LiveView
+    // renderers both rendered "".  All four now answer "" for an absent field.
+    expect(app).toContain('showToast ("Order " + (toastField payload [| "order" |]) + " placed")');
+    expect(app).toContain(
+      "let private toastField (payload: obj) (path: string array) : string = jsNative",
+    );
     // Refetch.  This ui is SCAFFOLDED, so its list read is server-paged
     // (M-T2.6 Feliz leg) — and the subscription runs OUTSIDE `update`, with no
     // `model` in scope.  Re-issuing the read from here would have to guess the
