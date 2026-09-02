@@ -12,6 +12,7 @@ import { backendServesRealtime, realtimeEventTypes } from "../../ir/util/channel
 import { uiUsesChart } from "../../ir/util/chart.js";
 import { classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
 import { contextsHaveProvenancedField } from "../../ir/util/prov-id.js";
+import { realtimeStreamCredential } from "../../ir/util/realtime-rooms.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { humanize, lowerFirst } from "../../util/naming.js";
 import { AUTH_GATE_SVELTE, AUTH_SESSION_TS } from "../_frontend/auth-ui.js";
@@ -271,7 +272,18 @@ export function generateSvelteForContexts(
     ? [...new Set(contexts.flatMap((c) => [...realtimeEventTypes(c)]))].sort()
     : [];
   if (realtimeTypes.length > 0) {
-    out.set("src/lib/api/realtime.ts", renderRealtimeClient(realtimeTypes, "API_BASE_URL"));
+    out.set(
+      "src/lib/api/realtime.ts",
+      // Stream credential from the shared realtime plan (M-T4.12 RULE 2) — the
+      // SAME `auth: ui` / `auth: required` gate the api client's
+      // `credentials: "include"` rides, so the SSE stream authenticates exactly
+      // like an ordinary API call instead of 401-ing on an authenticated deployable.
+      renderRealtimeClient(
+        realtimeTypes,
+        "API_BASE_URL",
+        realtimeStreamCredential(deployable, target, sys.user),
+      ),
+    );
   }
   const hasRealtimeHandlers = realtimeTypes.length > 0 && (ui.notifications?.length ?? 0) > 0;
   if (hasRealtimeHandlers) {

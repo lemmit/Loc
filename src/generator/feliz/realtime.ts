@@ -23,6 +23,7 @@
 // Anything deeper fails loud here rather than emitting broken F#.
 
 import type { ExprIR, UiIR, UiNotificationIR } from "../../ir/types/loom-ir.js";
+import type { RealtimeStreamCredential } from "../../ir/util/realtime-rooms.js";
 import { lines } from "../../util/code-builder.js";
 import { type FelizRead, felizAllRead, refetchMsgCase } from "./wire.js";
 
@@ -58,7 +59,18 @@ export function felizHasRealtimeHandlers(ui: UiIR): boolean {
 /** The realtime subscription module (helpers + `realtimeSub`), spliced into
  *  `App.fs` after `update` (it references `Msg`/`Api`/the reads' `Loaded`
  *  cases) and wired via `Program.withSubscription realtimeSub`. */
-export function renderFelizRealtime(ui: UiIR, reads: readonly FelizRead[] = []): string {
+export function renderFelizRealtime(
+  ui: UiIR,
+  reads: readonly FelizRead[] = [],
+  /** Stream credential from the shared realtime plan (`realtimeStreamCredential`,
+   *  `src/ir/util/realtime-rooms.ts` RULE 2).  `"session-cookie"` emits the
+   *  `withCredentials: true` init — the F# twin of the JS clients'
+   *  `new EventSource(url, { withCredentials: true })`.  Feliz's routes are
+   *  relative + same-origin today, where a cookie flows either way; stating it
+   *  keeps the contract true if the base ever moves cross-origin.  `"none"`
+   *  keeps the v1 shim byte-identical. */
+  credential: RealtimeStreamCredential = "none",
+): string {
   // A CONTROLLED paged read can't be re-issued from here: the subscription runs
   // outside `update`, so it has no `model` and would have to guess the page and
   // sort — silently snapping the user back to page 1 of the default order.  It
@@ -125,7 +137,9 @@ export function renderFelizRealtime(ui: UiIR, reads: readonly FelizRead[] = []):
     `[<Fable.Core.Emit("${TOAST_EMIT_JS}")>]`,
     "let private showToast (message: string) : unit = jsNative",
     "",
-    '[<Fable.Core.Emit("new EventSource($0)")>]',
+    credential === "session-cookie"
+      ? '[<Fable.Core.Emit("new EventSource($0, { withCredentials: true })")>]'
+      : '[<Fable.Core.Emit("new EventSource($0)")>]',
     "let private createEventSource (url: string) : obj = jsNative",
     "",
     "let private realtimeSub (_: Model) : Sub<Msg> =",
