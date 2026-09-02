@@ -158,3 +158,83 @@ export function emitBaseReaders(
     sourcemap?.file(implPath, implContent, base.origin, construct);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Ambient-kernel pruning
+// ---------------------------------------------------------------------------
+
+/** Files this pass may drop: the shared `Domain/Enums/<E>.cs` /
+ *  `Domain/ValueObjects/<V>.cs` pair of directories.  The
+ *  `_namespace.cs` markers are never candidates — they are what keeps
+ *  `using <ns>.Domain.Enums;` resolving in a project with no enums left. */
+const AMBIENT_KERNEL_FILE = /^Domain\/(?:Enums|ValueObjects)\/([A-Za-z_][A-Za-z0-9_]*)\.cs$/;
+
+/** C# identifiers appearing anywhere in a file, `using` lines and comments
+ *  included.  Deliberately coarse — see {@link pruneUnreferencedAmbientKernel}. */
+function csIdentifiers(content: string): Set<string> {
+  return new Set(content.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []);
+}
+
+/**
+ * Drop the shared enum / value-object files no other file in this project
+ * names.
+ *
+ * Every root-level `valueobject` / `enum` is in scope for every context, so
+ * each .NET deployable used to emit ALL of them regardless of use: on the ERP
+ * example that is 26 files byte-identical modulo namespace across two
+ * services, none of which any DTO, route, entity or handler references.  Dead
+ * weight — and dead weight that still has to COMPILE, which is how a bug in
+ * the value-object emitter (a missing `Domain.Enums` using) took down two
+ * services through types neither of them used.
+ *
+ * The reachability question is answered over the EMITTED TEXT rather than by
+ * re-walking the IR, and that is the point: a C# file cannot reference a type
+ * without naming it, so a name absent from every other file is provably
+ * unreferenced, whatever emitted the file.  An IR walk would instead have to
+ * enumerate every construct that can mention a type — aggregate fields, parts,
+ * derived, operation params, workflows, projections, events, seeds, criteria,
+ * domain services, cross-context api clients, channel payloads, the `user`
+ * block — and would silently drop a live type the day a new emitter names one
+ * from somewhere that list forgot.  This errs the safe way instead: a name
+ * that only appears in a comment or a string literal keeps its file.
+ *
+ * Run LAST (after every emitter has contributed, before the layout namespace
+ * rewrite) — and iterated to a fixpoint, since a kept value object's own text
+ * is what references the enum it carries.
+ */
+export function pruneUnreferencedAmbientKernel(out: Map<string, string>): void {
+  const candidates = new Map<string, string>(); // path → declared type name
+  for (const path of out.keys()) {
+    const m = AMBIENT_KERNEL_FILE.exec(path);
+    if (m && m[1] !== "_namespace") candidates.set(path, m[1]);
+  }
+  if (candidates.size === 0) return;
+
+  // Every identifier named by a C# file that is NOT itself prunable.  A
+  // candidate whose name is in here is referenced by the project proper.
+  // Only `.cs` files are read: a C# type can only be referenced from C#
+  // source, and an embed host's `out` also carries the SPA's TS/TSX (whose
+  // own `Address` / `Priority` say nothing about the .NET compilation).
+  const referenced = new Set<string>();
+  for (const [path, content] of out) {
+    if (candidates.has(path) || !path.endsWith(".cs")) continue;
+    for (const id of csIdentifiers(content)) referenced.add(id);
+  }
+
+  // Fixpoint: keeping a candidate makes its own references live too.
+  const kept = new Set<string>();
+  for (;;) {
+    let grew = false;
+    for (const [path, name] of candidates) {
+      if (kept.has(path) || !referenced.has(name)) continue;
+      kept.add(path);
+      grew = true;
+      for (const id of csIdentifiers(out.get(path) ?? "")) referenced.add(id);
+    }
+    if (!grew) break;
+  }
+
+  for (const path of candidates.keys()) {
+    if (!kept.has(path)) out.delete(path);
+  }
+}

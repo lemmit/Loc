@@ -68,6 +68,7 @@ import {
   emitIds,
   emitStampingInterceptor,
   emitValueObjects,
+  pruneUnreferencedAmbientKernel,
 } from "./context-scaffolding-emit.js";
 import { domainUnionFiles } from "./cqrs/dtos.js";
 import { emitCqrs } from "./cqrs-emit.js";
@@ -1162,6 +1163,12 @@ function emitProjectFromContexts(
     // python embed hosts (see embedded-spa.ts).
     embedSpaInto(out, spaFiles, uiFw);
   }
+  // Ambient kernel: root-level enums / value objects are in scope for every
+  // context, so every deployable emitted every one of them.  Drop the ones no
+  // other file in THIS project names (see `pruneUnreferencedAmbientKernel`).
+  // Runs after the last emitter and before the layout rewrite, so it reads the
+  // complete project at its canonical `Domain/...` paths.
+  pruneUnreferencedAmbientKernel(out);
   // Layout-aware namespace rewrite (D-REALIZATION-AXES `directoryLayout:`):
   // when the layout adapter relocated files under `Features/`, make each
   // relocated file's C# namespace mirror its folder and fix every
@@ -1282,6 +1289,8 @@ function emitContext(
     hasOutbox,
   });
   emitTestProject(ctx, ns, out);
+  // Same ambient-kernel prune as the system path — see the call there.
+  pruneUnreferencedAmbientKernel(out);
 }
 
 // ---------------------------------------------------------------------------
