@@ -99,14 +99,28 @@ Ids are ledger ids. **VF** = verify-first: a merged PR body mentions the id (pos
 These are the repo's rules, restated because each one was violated at least once in the last month and cost a red `main` or a duplicate PR.
 
 1. **Fresh `main`, then verify the row.** `git fetch origin main && git switch -c <branch> origin/main`; grep the emitter/gate the row names; read the merged-PR body that mentions the id. A row that is fixed gets closed in the ledger, not rebuilt.
-2. **Claim with a draft PR titled by packet + row ids** before the first code change. Check the open drafts first (§1).
-3. **Stay inside the packet's tree fence.** A fix that needs a file outside it is *handed off* in the PR body (the W1b/W2 convention: an `IMPL-NOTES` section naming the row, the file, and the reason), never raced.
+2. **Claim inside the wave's single draft PR** (§3a) before the first code change: add your packet's row table to its body. Check the open drafts first (§1). Packets do not open PRs of their own.
+3. **Stay inside the packet's tree fence** (it is what lets packets merge into one wave branch without conflicts). A fix that needs a file outside it is *handed off* in the PR body (the W1b/W2 convention: an `IMPL-NOTES` section naming the row, the file, and the reason), never raced.
 4. **Silent → honest or fixed, never silent → different-silent.** A row closes either with the emitter fixed on every target that has it, or with a `loom.*` diagnostic (text in `src/diagnostics/messages.ts`, a row in `unsupported-register.ts` when it is a gap, the firing census updated).
 5. **Mutation-prove and name the assertion.** The PR body states which test fails when the fix is reverted (file copy, never `git checkout --`; unique backup names — §84/§87/§92). A green first run proves nothing.
 6. **Seam-first when the row has siblings.** If the same defect exists on ≥3 targets, land one classifier/helper in the shared layer with per-target readers, and a census test that a new reader cannot bypass (§89, §92). Do not land three copies of a fix.
 7. **Byte-identical gate on every refactor.** A seam extraction changes no emitted byte; prove it with the existing corpus snapshot diff before and after (the PR #843 / #607–#627 protocol).
-8. **Before pushing, `npx tsc -b` and `npm test` on the merged tree, and grep the open PR list for in-flight consumers of any rule you mint** (§86 — a validator, a required artifact, a matrix-fed fixture).
+8. **Before handing a packet to the coordinator, `npx tsc -b`, `npm test` and the packet's compile leg on the merged tree, and grep the open PR list for in-flight consumers of any rule you mint** (§86 — a validator, a required artifact, a matrix-fed fixture). Every CI gate has a local command (`docs/testing.md` → "Running any CI gate locally"); the wave PR is not where a packet finds out it is red.
 9. **Close the loop in docs**: ledger row → `done` bucket with the PR number; mission status line flipped with a file:line; no new counts in prose (§91 — make the number code).
+
+### 3a. PR shape — one PR per wave, pushed sparingly
+
+CI is the scarce resource (a ~20-slot shared runner pool; every push to a PR re-runs the whole per-PR set and re-evaluates `pr-gate`). The unit of CI is therefore the **wave**, not the packet:
+
+- **One draft PR per wave** (`wave-N` branch off fresh `main`), opened by the wave **coordinator** (a Sonnet agent) before any packet starts. Its body is the claim for every packet and row in the wave — the CLAUDE.md claiming protocol, satisfied once instead of seven times. Other agents reading the PR list see the whole wave's tree fence.
+- **Packets work on sub-branches** (`wave-N/<packet>`, pushed with no PR) and prove themselves with the **local** gates (rule 8). A packet is handed to the coordinator with its row table, its mutation-proof assertions and its local-gate results in the hand-off note.
+- **The coordinator folds packets into the wave branch in batches** — at most one push to the wave PR per day, after re-running `npm test` + the affected compile legs on the folded tree. A push is a CI run; batch them.
+- **Rebase the wave branch onto `main` only when something merged that it needs or conflicts with**, never as a routine (§87: this repo has no up-to-date rule, and each rebase-push is a full CI wave).
+- **Flip to ready once, when the whole wave is green locally.** Review happens on the wave PR; packet hand-off notes are the per-packet review unit inside it.
+- **Failure containment**: a red wave PR blocks every packet in it, so the coordinator folds a packet only with its local-gate results attached, and reverts a packet from the branch rather than holding the wave for a fix that is not ready. The reverted packet re-enters the next wave.
+- **Post-merge blind spot** stays the same as for any PR: the label-gated post-merge gates (`tenancy-e2e`, `*-obs-e2e`, `*-oidc-e2e`) run on the wave PR via the `run-*` labels the wave's tree touches — one labelled run per wave instead of one per packet is exactly the saving.
+
+Wave sizes below are chosen for this: Waves 1, 2 and 4 are one PR each; Wave 3 is two (the CI-workflow rewrite must land as its own change so a red there does not mask a code red).
 
 Model choice: **Opus** for anything security/data-integrity, cross-backend, needing a design ruling, or a seam refactor; **Sonnet** for register-driven S-size rows with a proven repro and a named tree, docs/ledger reconciliation, CI/config, and mechanical corpus promotion under a written recipe. Every agent gets the two-line RUNBOOK kickoff plus the packet block below.
 
@@ -118,15 +132,15 @@ Model choice: **Opus** for anything security/data-integrity, cross-backend, need
 
 Nothing new is built until the eight ready PRs are in; three of them touch the same hotspots the next wave needs (`ui-checks.ts`, `unsupported-register.ts`, the walker targets).
 
-- **0.1 Merge order** (minimises rebases): #2628 (docs) → #2713 (test infra only, no emitter change) → #2671 → #2672 → #2674 → #2678 (numeric fleet, in dependency order) → #2720 → #2721 → #2723 (W2 packets; each rebased after the previous lands — squash-merge invalidates stacked children, §87). A Sonnet agent drives each rebase, re-runs `npm test` + the packet's compile leg, and re-requests review; the owner merges.
+- **0.1 Merge order, no rebases**: #2628 (docs) → #2713 (test infra only, no emitter change) → #2671 → #2672 → #2674 → #2678 (numeric fleet, in dependency order) → #2720 → #2721 → #2723. These eight already carry green runs; the repo has no up-to-date rule (§87), so **merge them as they are** and let each existing run count. A Sonnet agent rebases a PR only if GitHub reports a real conflict after the previous merge, runs `npm test` + the packet's compile leg locally, and pushes once. Zero speculative pushes.
 - **0.2 Ledger reconciliation** (Sonnet, docs-only): move every row landed by W1/W1b/W2/#2719/#2726 into the ledger's `done` bucket with the PR number; re-count the `.md` header from the JSON (a script, not a hand tally); flip `M-T9.36 → open (unblocked)`, `M-T9.38 → blocked(#2678, #2674 merge)`; record the W1b `F2-ADP-3` handoff as a validator-packet row. This is the input Wave 1 agents trust.
 - **0.3 Open-PR collision scan** for W3/W4: #2729 and #2723 both edit `ui-checks.ts`; #2729 must rebase after #2723 merges. Note it on #2729.
 
-Exit: 0 ready PRs older than 3 days; ledger `open` count equals the §0 residue.
+Exit: 0 ready PRs older than 3 days; ledger `open` count equals the §0 residue. Wave 0.2 is the first commit on the `wave-1` branch, not a PR of its own.
 
-### Wave 1 — close the P0/P1 silent residue (1 week, 5 Opus + 2 Sonnet, tree-fenced)
+### Wave 1 — close the P0/P1 silent residue (1 week, 5 Opus + 2 Sonnet + 1 Sonnet coordinator, **one PR**)
 
-Parallel packets, one agent each, the wave plan's sequencing rules honoured (`cli` first; `VAL-1` before other validator rows; ESCAPE-FUNNEL first in elixir).
+Parallel packets, one agent each on `wave-1/<packet>`, folded into `wave-1` by the coordinator (§3a). The wave plan's sequencing rules are honoured inside the branch: the `cli` row is the first commit folded (every later warning-severity gate needs it to be mutation-provable from the CLI); `VAL-1` before the other validator rows; ESCAPE-FUNNEL first in elixir. Packet **1f** depends on #2720 having merged in Wave 0; if it has not by the time the rest of the wave is green, 1f moves to the Wave 2 PR rather than holding Wave 1.
 
 | packet | model | rows (in order) | tree |
 |---|---|---|---|
@@ -138,24 +152,24 @@ Parallel packets, one agent each, the wave plan's sequencing rules honoured (`cl
 | **1f frontend-js (after #2720)** | Sonnet | `F2-CFE-2` → `F2-CFE-8` → `M-T1.8` (error boundary on the five targets that lack it) → `M-T1.12` → `G2667-D8` | react/vue/svelte/angular, `designs/**` |
 | **1g SSE auth** | Opus | `M-T4.12` — every generated SPA 401s its own realtime stream under `auth: required`; land the `_frontend/realtime.ts` credential path per backend's auth style and the realtime plan contract (§F4) so stream auth stops being re-decided per backend | `src/generator/_frontend/realtime.ts`, `src/ir/util/realtime-rooms.ts`, per-backend SSE plugs |
 
-Each packet's PR body carries the row table (fixed / gated / handed-off / verified-already-done) in the W2 format. Exit: ledger P0 = 0, P1 silent = 0 or handed off with a named owner; `main` green after each merge (0.1's rebase protocol).
+Each packet's hand-off note carries the row table (fixed / gated / handed-off / verified-already-done) in the W2 format; the coordinator concatenates them into the wave PR body. Exit: ledger P0 = 0, P1 silent = 0 or handed off with a named owner; one green wave PR merged.
 
-### Wave 2 — seams: fix the class, not the next instance (1–2 weeks, Opus ×4, each byte-identical-gated)
+### Wave 2 — seams: fix the class, not the next instance (1–2 weeks, Opus ×4 + Sonnet ×1 + coordinator, **one PR**)
 
-Every item here is a defect family with ≥3 landed instances. Each PR is a refactor + a completeness census, and its diff on the corpus snapshots is empty.
+Every item here is a defect family with ≥3 landed instances. Each item is a refactor + a completeness census on its own `wave-2/<item>` sub-branch, and its diff on the corpus snapshots is empty — the coordinator re-checks the byte-identical claim on the folded tree, since two byte-identical refactors can compose into a non-identical one. Order of folding: 2.1–2.5 first; **2.6 last**, because a mechanical split of a hotspot file conflicts with every other change to it, so it is done once, on the folded branch, after everything else in the wave is in.
 
 - **2.1 M-T9.36 numeric wire-codec seam** (now unblocked). One per-backend codec table (money = F4 string, decimal = float64, int/long = integer) consumed at every read boundary; a boundary-enumeration test so a new read path must declare its codec. Sequenced after the numeric fleet merges (Wave 0). Retires the #2545→#2631→#2675/#2677 series for good.
 - **2.2 One string-escape funnel per target.** Elixir `#{`, HEEx attributes, Angular text slots (A15), F#/Dart string literals, Java/C# identifiers: one `escapeStringLiteral`/`escapeAttr` pair per target on the `ExprTarget`/`WalkerTarget` seams, and a lint-style test that fails on a `JSON.stringify(` splice in `src/generator/**` that lands in a non-JS literal position (173 such sites in the elixir emitters today; most are legitimate JSON, the test must classify by destination). Closes the class `F2-ELX-ESCAPE-FUNNEL` belongs to.
 - **2.3 No hand-rolled IR walks.** A census test: every `switch (e.kind)` / `switch (s.kind)` over `ExprIR`/`StmtIR`/`WorkflowStmtIR` outside `src/ir/util/walk.ts`, `_expr/target.ts`, `_stmt/target.ts`, `_workflow/stmt-target.ts` and the lowerers is either `never`-checked (exhaustive) or waived with a reason that ratchets. Migrate the offenders it finds (the #2720/#2705/M-T6.50 class). Pairs with #2713's `model-exprs.ts` census.
 - **2.4 Emission mode as a declared seam (§F2).** The java JPQL `principalAccessors` branch and its siblings become a declared *mode* on the shared render context that refuses out-of-vocabulary constructs, instead of a per-arm `if`. Small; mostly a contract test.
 - **2.5 Seeder contract (M-T6.52).** After W1's seed family: one shared "what does the seeder know" model (aggregate shape, principal, dataset identity) with five readers — the remaining event-sourced seeding on elixir/java/dotnet rides it.
-- **2.6 Hotspot splits (mechanical, Sonnet).** `system-checks.ts` (4.3k) and `ui-checks.ts` (3.0k) split into per-theme leaves the way `validate.ts` already fans out; `mikroorm.ts` (3.5k) split by shape (relational/document/embedded/ES). Diagnostic set byte-identical (the M-T9.33 firing census is the proof), emitted output byte-identical. Purpose: packet fences stop overlapping, and #2723-vs-#2729-style conflicts stop recurring.
+- **2.6 Hotspot splits (mechanical, Sonnet; the last commit of the wave).** `system-checks.ts` (4.3k) and `ui-checks.ts` (3.0k) split into per-theme leaves the way `validate.ts` already fans out; `mikroorm.ts` (3.5k) split by shape (relational/document/embedded/ES). Diagnostic set byte-identical (the M-T9.33 firing census is the proof), emitted output byte-identical. Purpose: packet fences stop overlapping, and #2723-vs-#2729-style conflicts stop recurring.
 
 Exit: the 08-24 §F queue rows F2/F3/F5 read `done`; M-T9.36 `done`; no new `G*-C` register row of the "same defect, next backend" shape in the following review.
 
-### Wave 3 — verification that can see runtime values (2–3 weeks, Opus ×3 + Sonnet ×3; starts once #2713 is in)
+### Wave 3 — verification that can see runtime values (2–3 weeks, Opus ×3 + Sonnet ×3 + coordinator, **two PRs**; starts once #2713 is in)
 
-The 08-31 audit's rule: one gate per feature×target cell at the strongest tier. Wave 1's P0s were all runtime-value defects behind green compile gates. This wave moves cells up a tier.
+The 08-31 audit's rule: one gate per feature×target cell at the strongest tier. Wave 1's P0s were all runtime-value defects behind green compile gates. This wave moves cells up a tier. **PR 3-A** (`wave-3`) carries the test/harness code — 3.1, 3.3, 3.4, 3.5, 3.6, 3.8. **PR 3-B** (`wave-3-ci`) carries the changes to what CI runs — 3.2's corpus promotions (they add compile and behavioural cells, i.e. CI minutes) and 3.7's workflow collapse — and lands after 3-A so a red in the workflow rewrite cannot be confused with a red in the harness code. 3-B is also the wave where the CI bill goes *down*, which is the reason it exists.
 
 - **3.1 M-T9.37 wire-golden precision** (Sonnet, S–M, P1): the comparator can never fail on excess precision — the gate that was blind to M-T6.46 by construction.
 - **3.2 M-T9.42 corpus promotion campaign** (Sonnet ×2, batches of ~5 scenarios): of the 42 scenarios duplicated across ≥3 target test dirs, 39 have no corpus fixture. Recipe per scenario: one `.ddd` + manifest row (five compile cells) → behavioural block + golden (five runtime cells) → delete the per-target string copies the ledger now proves redundant. `temporal` first (813 LOC → ~60). The gate ledger (#2713 C1) is the deletion authority; nothing is deleted on judgement.
@@ -168,7 +182,7 @@ The 08-31 audit's rule: one gate per feature×target cell at the strongest tier.
 
 Exit: gate-ledger compile-only cells 69 → ≤ 40 with the two leak cells and `tenancy-hierarchy` at the behavioural tier; the wire-golden set covers every numeric-divergence row the 08-23 audit listed.
 
-### Wave 4 — process, and the class no gate can see (continuous, Sonnet ×1, owner clicks)
+### Wave 4 — process, and the class no gate can see (continuous, Sonnet ×1, owner clicks; **one PR**, hooks + docs)
 
 - **4.1 §86 merge-pair defence in the hook layer.** The `PreToolUse` push hook already dry-runs `git merge-tree`; extend it to run `npx tsc -b` on the merged tree when the merge is clean (≈1 min; the §87 TS2304 case). The RUNBOOK gains the rule "a PR that mints a rule greps the open-PR list for consumers before merge".
 - **4.2 F6 fix-scope rule for remediation fleets** into the RUNBOOK (the W1b/W2 hand-off format becomes the written norm).
@@ -180,9 +194,13 @@ Exit: gate-ledger compile-only cells 69 → ≤ 40 with the two leak cells and `
 
 ## 5. Kickoff prompts
 
-Per packet (copy, replace the bracketed parts):
+Coordinator (one per wave, Sonnet):
 
-> Implement wave **[1b dotnet-adapters]** from `docs/new-plan/improvement-waves-2026-09.md` — rows **[F2-ADP-1, F2-ADP-4, F2-ADP-2, G2667-D3, M-T3.9 (verify-first), G2667-D4 (verify-first), dapper-no-schema-evolution (decision)]**, tree **`src/generator/dotnet/**`**. Follow `docs/new-plan/RUNBOOK.md` end to end and §3 of the wave plan: fresh `main`, verify each row against the code and the merged PR that mentions it, claim with a draft PR titled `W5 dotnet-adapters: …`, mutation-prove every fix and name the failing assertion in the PR body, hand off anything outside the tree, close the ledger rows in `docs/audits/targets-completeness-2026-08-30.ledger.json`.
+> Coordinate wave **[1]** from `docs/new-plan/improvement-waves-2026-09.md` per §3a: branch `wave-1` off fresh `main`, open ONE draft PR whose body lists every packet, row and tree fence in the wave, land the Wave 0.2 ledger reconciliation as its first commit, then fold each `wave-1/<packet>` sub-branch as it is handed over — in the sequencing order §Wave 1 states — re-running `npm test` and the affected compile legs locally on the folded tree before each push, at most one push per day. Rebase onto `main` only on a real conflict. Flip to ready once, when the whole wave is green locally; revert a packet rather than hold the wave for it.
+
+Packet (copy, replace the bracketed parts):
+
+> Implement packet **[1b dotnet-adapters]** of wave 1 from `docs/new-plan/improvement-waves-2026-09.md` — rows **[F2-ADP-1, F2-ADP-4, F2-ADP-2, G2667-D3, M-T3.9 (verify-first), G2667-D4 (verify-first), dapper-no-schema-evolution (decision)]**, tree **`src/generator/dotnet/**`**. Follow `docs/new-plan/RUNBOOK.md` and §3/§3a of the wave plan: branch `wave-1/dotnet-adapters` off the `wave-1` branch, add your row table to the wave PR's body as the claim (no PR of your own), verify each row against the code and the merged PR that mentions it, mutation-prove every fix and name the failing assertion, run `npm test` + the dotnet compile leg locally before hand-off, hand off anything outside the tree in the note, close the ledger rows in `docs/audits/targets-completeness-2026-08-30.ledger.json`, and hand the branch to the coordinator with the note.
 
 For a seam wave item, add: *"Byte-identical emission across the refactor is a hard gate — diff the corpus snapshots before and after and state the result; the census test must be mutation-proved by adding one unregistered [boundary / reader / walk]."*
 
@@ -196,5 +214,6 @@ For a seam wave item, add: *"Byte-identical emission across the refactor is a ha
 | `E2E_LESS_CORPUS_FIXTURES` | 13 | 13 | ≤ 8 (the two witness-by-design rows stay) |
 | "same defect, next backend" rows minted per review | 5 (08-24 §C/§D) | — | 0 |
 | `main` red incidents / week (M-T9.31 delta) | 0 this week | 0 | 0 |
+| PRs opened per wave (CI waves) | 7–13 per drain wave so far | 1 | 2 |
 
 The weekly quality delta (M-T9.31) is the pinned metric; if a wave moves the ledger but the delta shows new `fix:` cascades of one root cause, the wave was instance-level and the seam item it belongs to moves up.
