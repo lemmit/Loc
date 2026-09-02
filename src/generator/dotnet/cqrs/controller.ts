@@ -1,4 +1,3 @@
-import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
@@ -249,10 +248,18 @@ export function emitController(
       // inherited from the aggregate's list read — declared so the action's
       // OpenAPI 403 matches what the handler can actually throw.
       historyAction: repo?.historyFind ? { guarded: !!repo.historyFind.requires } : undefined,
+      // The create validator's existence is decided by the RECORD's field set,
+      // so probe `requiredFields` — the very list `emitRequestDtos` builds the
+      // record from (the event-sourced `create` action's params when the
+      // aggregate is event-sourced, `createInputFields` otherwise).  Probing
+      // `forCreateInput(agg.fields)` instead let the controller call a
+      // `Create<Agg>RequestValidator` the validator emitter never wrote, on any
+      // event-sourced aggregate whose FIELDS carry a rule-bearing VO its create
+      // params do not.
       createRequestValidator:
         requestVoValidatorName(
           `Create${agg.name}Request`,
-          forCreateInput(agg.fields).map((f) => ({ name: f.name, type: f.type })),
+          requiredFields.map((f) => ({ name: f.name, type: f.type })),
           ctx.valueObjects,
         ) ?? undefined,
       createCmdArgs: requiredFields.map((f) => {
