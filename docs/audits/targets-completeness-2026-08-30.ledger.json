@@ -1,42 +1,6 @@
 {
   "open": [
     {
-      "id": "F2-ADP-3",
-      "title": "dapper and efcore deployables over the SAME context read different physical tables (public.<t> vs <context>.<t>)",
-      "kind": "silent",
-      "class": null,
-      "confidence": "proven",
-      "targets": [
-        "dotnet/dapper",
-        "dotnet/efcore"
-      ],
-      "fileTrees": [
-        "src/generator/dotnet/emit/dapper.ts"
-      ],
-      "evidence": [
-        {
-          "fleet": 2,
-          "id": "F2-ADP-3",
-          "bucket": "fix-adapters",
-          "text": "scratchpad/adapters/shared.ddd — one `context Alpha`, one `resource alphaState`, two deployables: `reader` (`dotnet { persistence: dapper }`) and `writer` (`dotnet { persistence: efcore }`). Emitted out-shared/reader/Infrastructure/Persistence/DbSchema.cs:12 `CREATE TABLE IF NOT EXISTS \"\"as\"\" (…)` (public) and every reader statement is unqualified; emitted out-shared/writer/Infrastructure/Persistence/Configurations/AConfiguration.cs:15 `builder.ToTable(\"as\", \"alpha\");` and out-shared/writer/Migrations/20260101000000_Core_Initial.cs:23-24 `CREATE SCHEMA IF NOT EXISTS \"\"alpha\"\"; CREATE TABLE \"\"alpha\"\".\"\"as\"\" (…)`. Generation is clean — `node bin/cli.js parse` reports 0 errors, 0 warnings. Same root as ADP-2: src/generator/dotnet/emit/dapper.ts has no schema concept (`tableOf` :123), while the canonical layout is per-context."
-        }
-      ],
-      "repro": "scratchpad/adapters/shared.ddd, `node bin/cli.js generate system shared.ddd -o out-shared`; diff reader/Infrastructure/Persistence/DbSchema.cs against writer/Migrations/*.cs.",
-      "impact": "Two services declared over one state resource silently split-brain: writes through the EF service land in `alpha.as`, reads through the dapper service see an empty `public.as`. Also affects a single dapper deployable in the other direction — the migration chain a sibling emits provisions `alpha.as` that nothing ever reads, and switching a deployable from dapper to efcore silently changes which table its data lives in with no migration path.",
-      "fix": "Either schema-qualify the dapper adapter off `resolveDataSourceConfig(...).schema` (preferred — it makes the two adapters interchangeable and fixes ADP-2 at the same time), or add an IR gate refusing a context hosted by both a self-provisioning and a migration-chain deployable.",
-      "size": "M",
-      "sources": [
-        "fleet2:fix-adapters"
-      ],
-      "related_to": [],
-      "securityClass": true,
-      "P": 0,
-      "deferral": {
-        "pr": "#2708",
-        "note": "IR-layer gate; scheduled Wave 1 packet 1a"
-      }
-    },
-    {
       "id": "F2-CB-C7-domainservice-in-requires-guard",
       "title": "A `domainService` call inside a `requires` authorization guard passes validation and emits an unresolvable reference on four of five backends",
       "kind": "silent",
@@ -136,44 +100,6 @@
       "P": 1
     },
     {
-      "id": "eventlog-shape-silently-ignored",
-      "title": "`shape: document` / `shape: embedded` on a `persistedAs: eventLog` aggregate is silently ignored (M-T2.10 residue)",
-      "kind": "silent",
-      "class": null,
-      "confidence": "proven",
-      "targets": [
-        "node",
-        "dotnet",
-        "elixir",
-        "python",
-        "java"
-      ],
-      "fileTrees": [
-        "src/ir/validate/checks/system-checks.ts",
-        "src/language/validators/structural.ts",
-        "src/generator/typescript/emit/schema.ts"
-      ],
-      "evidence": [
-        {
-          "fleet": 1,
-          "id": "eventlog-shape-silently-ignored",
-          "text": "src/generator/typescript/emit/schema.ts:163-170 `if (agg.persistedAs === \"eventLog\") { continue; }` runs BEFORE `const shape = effectiveSavingShape(...)` at :171, so the `shape:` knob is never read on an ES aggregate. No gate anywhere: `src/language/validators/structural.ts:647` rejects `unique(...)` on eventLog|document|embedded, and `src/language/validators/inheritance.ts:145` rejects the ES/document inheritance combo, but NOTHING rejects eventLog+shape. PROVED on this checkout: examples/event-sourcing.ddd with `aggregate Account persistedAs: eventLog shape: document` → `ddd parse --json` reports `errors:0, warnings:0, diagnostics:[]`, and `ddd generate system` output is byte-identical to the same file WITHOUT `shape: document` (only the `#line` source-path strings differ). The roadmap line docs/new-plan/T2-data-evolution.md:40 calls this 'eventLog+document/embedded snapshot rehydration deferred behind appliers' — but a deferral that ACCEPTS the syntax and emits the other shape is silent, not deferred."
-        }
-      ],
-      "repro": null,
-      "impact": null,
-      "fix": "Cheap honest fix (S): add a `loom.shape-on-event-sourced` error in `src/language/validators/structural.ts` next to `checkUnique` (:643-654 is the exact template — same three-way `persistedAs === \"eventLog\"` test), message in `src/diagnostics/messages.ts`, negative test in test/language/. Real fix (L, separate mission): honour `shape:` as the ES SNAPSHOT format and wire `every:`/`retain:` (see gap `snapshot-policy-knobs-inert`).",
-      "size": "S",
-      "sources": [
-        "fleet1:t2-t4-data-workflow"
-      ],
-      "related_to": [
-        "M-T5.9-reserved-not-emitted"
-      ],
-      "securityClass": false,
-      "P": 1
-    },
-    {
       "id": "F2-CB-C1-paged-nonrelational",
       "title": "`find … paged` on a non-relational aggregate (eventLog / document / embedded) emits a route built for the paged contract against a repository built for the unpaged one",
       "kind": "silent",
@@ -206,7 +132,8 @@
       ],
       "related_to": [],
       "securityClass": false,
-      "P": 1
+      "P": 1,
+      "note": "Wave 1 packet 1c: all four node shapes carry the paged arm on both adapters; dotnet/python/elixir arms open."
     },
     {
       "id": "F2-CFE-1",
@@ -394,44 +321,6 @@
       "P": 1
     },
     {
-      "id": "timer-tz-overlap-inert",
-      "title": "`timerSource` `in: \"<tz>\"` and `overlap: allow` parse, lower, and are read by zero emitters — no diagnostic (M-T4.1)",
-      "kind": "silent",
-      "class": null,
-      "confidence": "proven",
-      "targets": [
-        "node",
-        "dotnet",
-        "elixir",
-        "python",
-        "java"
-      ],
-      "fileTrees": [
-        "src/generator/*/",
-        "src/platform/hono/",
-        "src/ir/validate/checks/"
-      ],
-      "evidence": [
-        {
-          "fleet": 1,
-          "id": "timer-tz-overlap-inert",
-          "text": "Grammar accepts both: src/language/ddd.langium:1375 `('in' ':' timezone=STRING ','?)?` and :1376 `('overlap' ':' overlap?='allow' ','?)?`. IR carries them: src/ir/types/loom-ir.ts:2384-2387 (`timezone?`/`overlap?`, doc-commented 'inert in Phase 1'). Lowering stamps them: src/ir/lower/lower.ts:809-810. CONSUMERS: zero — `grep -rn 'timezone' src/generator/ src/platform/ src/system/` returns only unrelated Python `DateTime(timezone=True)` hits, and `grep -rn '\\.overlap' src/generator/ src/platform/ src/ir/` returns ONLY the lower.ts:810 write. The `UNWIRED_KNOBS` honest-note pass (src/ir/validate/checks/system-checks.ts:3368-3383) covers only `DataSourceIR` knobs, not `TimerSourceIR`. PROVED: examples/timers.ddd with `in: \"America/New_York\", overlap: allow` added → `ddd parse --json` = `errors:0, warnings:0, diagnostics:[]`, and `generate system` output is byte-identical to the file without them. Net effect: a cron declared for a named timezone fires in UTC, and `overlap: allow` still skips on advisory-lock contention. docs/new-plan/T4-eventing-temporal.md:19 lists this as 'Remaining: timezone `in:` + `overlap: allow` sugar' without saying the surface already accepts it."
-        }
-      ],
-      "repro": null,
-      "impact": null,
-      "fix": "Two steps. (1) Immediate honest step (S): extend the unwired-knob pass to TimerSourceIR — add a sibling `validateTimerSourceUnwiredKnobs` in src/ir/validate/checks/system-checks.ts modelled on :3761-3778, emitting `loom.timersource-knob-unwired` warnings for `timezone`/`overlap`. (2) Real wiring (M): each backend's cron driver already has a tz/overlap seam — node pg-boss `boss.schedule(..., {tz})`, .NET Hangfire `RecurringJobOptions.TimeZone`, Java JobRunr `CronExpression` + ZoneId, Python procrastinate `periodic(cron=..., )` w/ zoneinfo, Elixir Oban `Oban.Plugins.Cron` `:timezone`. `overlap: allow` = skip the `pg_try_advisory_xact_lock` wrap in `scheduler.ts`/`TimerService`/`TimerScheduler`/`scheduling.py`/the timer GenServer.",
-      "size": "M",
-      "sources": [
-        "fleet1:t2-t4-data-workflow"
-      ],
-      "related_to": [
-        "M-T5.9-reserved-not-emitted — the missing `loom.reserved-not-emitted` meta-gate"
-      ],
-      "securityClass": false,
-      "P": 1
-    },
-    {
       "id": "G2646-open-projection-on-event-no-channel",
       "title": "#2646 documented, NOT fixed: `projection … on(Event)` with no `channel` folds on node only; the other four silently never subscribe",
       "kind": "silent",
@@ -533,7 +422,8 @@
       ],
       "related_to": [],
       "securityClass": true,
-      "P": 2
+      "P": 2,
+      "note": "Wave 1 packet 1a landed the diagnostic slice only: loom.sensitive-wire-unsupported warns when a sensitive field reaches the wire unmasked. Masking itself unbuilt."
     },
     {
       "id": "dapper-no-schema-evolution",
@@ -701,7 +591,7 @@
       ],
       "securityClass": false,
       "P": 2,
-      "note": "Packet 1b (dotnet-adapters, claude/wave-1, NOT YET on main): the dotnet arm is fixed on that branch. node/python/java/elixir arms remain open; needs an RS-rule for LEFT-JOIN semantics. Row stays open pending that branch's merge."
+      "note": "Packet 1b (dotnet-adapters, claude/wave-1, NOT YET on main): the dotnet arm is fixed on that branch. node/python/java/elixir arms remain open; needs an RS-rule for LEFT-JOIN semantics. Row stays open pending that branch's merge. | Wave 1: dotnet (1b), node (1c) and python (1e) arms LEFT-JOIN (source row survives, joined field absent); elixir and java arms open; the cross-backend RS rule for the absent value (node null vs .NET default!) is still to be ruled."
     },
     {
       "id": "G2667-D6-elixir-seeder-not-atomic",
@@ -797,38 +687,6 @@
       "w1bElixir": "PARTIALLY STALE — verified on a current build (W1b elixir, PR #2704). The \"Grid ≡ Stack\" arm is STALE: `renderGrid` emits real `grid-cols-N` (heex-primitives.ts) and did at the ledger's own base. The two arms that remain OPEN and untouched are the i18nFormat wrapper drop and the missing pager on a non-server-paged Table."
     },
     {
-      "id": "G2667-C4-mikroorm-save-no-transaction",
-      "title": "08-17 register #4: mikroorm save path opens no transaction (document/embedded/ES TS adapters likewise)",
-      "kind": "silent",
-      "class": null,
-      "confidence": "likely",
-      "targets": [
-        "node"
-      ],
-      "fileTrees": [
-        "src/generator/typescript/emit/mikroorm.ts"
-      ],
-      "evidence": [
-        {
-          "fleet": 1,
-          "id": "G2667-C4-mikroorm-save-no-transaction",
-          "text": "Documented and re-verified OPEN by register-only PR #2667 §C row 4: src/generator/typescript/emit/mikroorm.ts:2385 saves without opening a transaction; the document / embedded / event-sourced TS adapters share the shape. A multi-statement save can therefore land partially. Unclaimed."
-        }
-      ],
-      "repro": null,
-      "impact": null,
-      "fix": "Wrap the save in `em.transactional(...)` (mikro) / the adapter's equivalent, matching the drizzle adapter's tx boundary. Cross-check with register item 5's design ruling on outbox-insert atomicity so the two land coherently.",
-      "size": "M",
-      "sources": [
-        "fleet1:pr-registers"
-      ],
-      "related_to": [
-        "adjacency: #2667 edits emit/mikroorm.ts (for A3) but no transaction wrap; document/embedded/ES TS repo builders untouched"
-      ],
-      "securityClass": false,
-      "P": 2
-    },
-    {
       "id": "M-T1.16-invariant-validation-feliz-flutter",
       "title": "Invariant-derived client-side form validation is missing on BOTH self-hosting frontends — Feliz and Flutter enforce \"Required\" only",
       "kind": "silent",
@@ -899,7 +757,8 @@
         "domainservice-member-chained-repo-read (fresh-gate-probe) — same broken output (port-less domain-service call, non-compiling), different root cause"
       ],
       "securityClass": false,
-      "P": 2
+      "P": 2,
+      "note": "Wave 1 packet 1c: node arm verified fixed; python/java/.NET/elixir arms open — see handoffs/wave-1-node-ts.md for the per-backend shape."
     },
     {
       "id": "provenanced-bare-read-in-page-body",
@@ -1161,7 +1020,8 @@
       ],
       "related_to": [],
       "securityClass": false,
-      "P": 3
+      "P": 3,
+      "note": "Wave 1 packet 1a: root cause is a missing <DomainService>.<op>(...) arm in typeOfPostfixChain (src/language/type-system.ts); one-arm patch in handoffs/wave-1-validator-cli.md."
     },
     {
       "id": "F2-CFE-11",
@@ -1193,41 +1053,6 @@
       ],
       "related_to": [
         "fleet1 G2667-D12 (testid ESCAPING on flutter/feliz, claimed by #2667) — this is testid DROP on angular/flutter"
-      ],
-      "securityClass": false,
-      "P": 3
-    },
-    {
-      "id": "F2-EXPR-5",
-      "title": "Validator falsely rejects `money * <numeric literal>` and `money / <numeric literal>` — with a message that says the form is allowed",
-      "kind": "honest",
-      "class": null,
-      "confidence": "proven",
-      "targets": [
-        "all"
-      ],
-      "fileTrees": [
-        "src/language/validators/types.ts",
-        "src/language/validators/_shared.ts",
-        "src/language/type-system.ts"
-      ],
-      "evidence": [
-        {
-          "fleet": 2,
-          "id": "F2-EXPR-5",
-          "bucket": "probe-expr-stmt",
-          "text": "src/language/validators/types.ts:390-397 applies literal promotion BEFORE the arithmetic check: `literalPromotionAnchor(money)` returns \"money\" (src/language/validators/_shared.ts:193-197), so `canPromoteAstLitTo(2, \"money\")` rewrites the int literal's type to `money`, turning `money × int` into `money × money`, which `moneyArithmetic` (src/language/type-system.ts:742-765) rejects — and the failure branch at types.ts:435-445 then prints the money hint verbatim.\nTRANSCRIPT (`node bin/cli.js parse /tmp/claude-0/-home-user-Loc/51e0d493-39ca-59a9-9783-d320c97c6f95/scratchpad/expr/lit.ddd`), fixture has `derived a: money = discount * 2` / `derived c: money = discount / 2`:\n  lit.ddd:7:39 error: Operator '*' has incompatible operand types: left is 'money', right is 'money'. Allowed for money: money ± money, money × {int|long|decimal}, money ÷ {int|long|decimal}.\n  lit.ddd:9:39 error: Operator '/' has incompatible operand types: left is 'money', right is 'money'. Allowed for money: money ± money, money × {int|long|decimal}, money ÷ {int|long|decimal}.\nCharacterised: `discount * n` (int VARIABLE) passes; `discount + 1` passes (money ± money is legal); `discount * 2.5` also fails; `discount * decimal(2)` (explicit convert, not a literal) passes."
-        }
-      ],
-      "repro": "/tmp/claude-0/-home-user-Loc/51e0d493-39ca-59a9-9783-d320c97c6f95/scratchpad/expr/lit.ddd and lit2.ddd; `node bin/cli.js parse`.",
-      "impact": "`derived half: money = price / 2` and `total * 2` — about as basic as money arithmetic gets — are unwritable, and the diagnostic contradicts itself, so the author has no path to the workaround (`price / decimal(2)`). Note the lowering carries the same promotion (`literalPromotionAnchor` at src/ir/lower/lower-expr.ts:2092-2110), so simply relaxing the validator would push a `money × money` IR node into the renderers — both halves need the fix.",
-      "fix": "Don't promote a numeric literal to `money` when the operator is `*` or `/` (money scaling is by a SCALAR, not by money); leave promotion in place for `+`/`-` and comparisons. Same edit in validators/types.ts:390-397 and lower-expr.ts's promotion. Mutation-prove: seed `derived a: money = discount * 2` and check it both parses and emits `times(2)` / `.multiply(...)` / `Decimal.mult(...)`.",
-      "size": "S",
-      "sources": [
-        "fleet2:probe-expr-stmt"
-      ],
-      "related_to": [
-        "fleet1 G2644-M-T6.44 (claimed by #2670) fixes the RENDER leaves; this is the AST validator half"
       ],
       "securityClass": false,
       "P": 3
@@ -7620,6 +7445,41 @@
       "pr": "#2704",
       "sha": "bbdf4b0",
       "note": "stale/fixed: \"never validates its inner fields\" was wrong — `validate_vo/3` is emitted and the VO carries its invariants; the real residue was the error SHAPE, drained by F2-W-03/nested-errors-pointer-shape. The jsonb `:map` column stays a deliberate v1 stance, not a defect."
+    },
+    {
+      "id": "F2-ADP-3",
+      "title": "dapper and efcore deployables over the SAME context read different physical tables (public.<t> vs <context>.<t>)",
+      "pr": "#2708",
+      "sha": "e9ed36d",
+      "note": "Wave 1 packet 1a ran the ledger's repro on b826f87: dapper+efcore over one context → exit 1 with loom.dapper-unsupported. W1b landed the gate itself; the 'handed off' note was stale."
+    },
+    {
+      "id": "timer-tz-overlap-inert",
+      "title": "`timerSource` `in: \"<tz>\"` and `overlap: allow` parse, lower, and are read by zero emitters — no diagnostic (M-T4.1)",
+      "pr": "#2694",
+      "sha": "bfdcdb5",
+      "note": "Wave 1 packet 1a ran it: `in:`/`overlap:` raise two loom.reserved-not-emitted diagnostics."
+    },
+    {
+      "id": "eventlog-shape-silently-ignored",
+      "title": "`shape: document` / `shape: embedded` on a `persistedAs: eventLog` aggregate is silently ignored (M-T2.10 residue)",
+      "pr": "#2694",
+      "sha": "bfdcdb5",
+      "note": "Wave 1 packet 1a ran it: eventLog + shape: document is an error."
+    },
+    {
+      "id": "F2-EXPR-5",
+      "title": "Validator falsely rejects `money * <numeric literal>` and `money / <numeric literal>` — with a message that says the form is allowed",
+      "pr": "#2752 (wave 1, packet 1a)",
+      "sha": "b5c4af4",
+      "note": "money no longer anchors literal promotion under * and /; test/ir/money-literal-promotion.test.ts."
+    },
+    {
+      "id": "G2667-C4-mikroorm-save-no-transaction",
+      "title": "08-17 register #4: mikroorm save path opens no transaction (document/embedded/ES TS adapters likewise)",
+      "pr": "#2668 + #2752 (wave 1, packet 1c)",
+      "sha": "4a02c3f",
+      "note": "Save path was transactional on this base; the residue — the durable outbox row committed outside the save tx on mikro — is fixed in wave 1 (test/adapters/node-mikroorm-save-transaction.test.ts)."
     }
   ],
   "conflicts": [
@@ -7891,7 +7751,7 @@
     }
   ],
   "counts": {
-    "open": 169,
+    "open": 164,
     "byPriority": {
       "P0": 1,
       "P1": 11,
@@ -7927,7 +7787,7 @@
       "both": 1
     },
     "claimed": 64,
-    "done": 120,
+    "done": 125,
     "conflicts": 10,
     "checkedOk": 146,
     "waveRows": 134,

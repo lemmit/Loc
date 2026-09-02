@@ -10,20 +10,20 @@ Base: `main` @ 38580cd77 · built 2026-08-30 · claim map applied (PR #2667 = au
 
 | metric | value |
 |---|---|
-| open rows | **169** |
-| P0 | 1 |
-| P1 | 11 |
-| P2 | 20 |
-| P3 | 34 |
+| open rows | **164** |
+| P0 | 0 |
+| P1 | 9 |
+| P2 | 19 |
+| P3 | 33 |
 | P4 | 91 |
 | P5 | 12 |
-| kind: silent / honest / breadth / mission / stale-prose | 32 / 34 / 26 / 65 / 12 |
-| confidence: proven / likely / suspected | 35 / 132 / 2 |
+| kind: silent / honest / breadth / mission / stale-prose | 28 / 33 / 26 / 65 / 12 |
+| confidence: proven / likely / suspected | 31 / 131 / 2 |
 | class: faulty-fix / regression | 1 / 0 |
-| size S / M / L | 49 / 73 / 47 |
-| provenance: fleet1-only / fleet2-only / corroborated by both | 149 / 19 / 1 |
+| size S / M / L | 47 / 70 / 47 |
+| provenance: fleet1-only / fleet2-only / corroborated by both | 146 / 17 / 1 |
 | claimed by an open PR | 64 |
-| done / merged | 120 |
+| done / merged | 125 |
 | conflicts | 10 |
 | checkedOk entries | 146 |
 | rows scheduled into waves | 134 across 13 packets |
@@ -36,18 +36,15 @@ Sorted P0 (security / data-integrity, silent, proven) → P1 (other silent prove
 
 | P | id | kind/class | conf | targets | size | title |
 |---|---|---|---|---|---|---|
-| P0 ! | `F2-ADP-3` | silent | prov | dotnet/dapper, dotnet/efcore | M | dapper and efcore deployables over the SAME context read different physical tables (public.<t> vs <context>.<t>) |
 | P1 | `F2-CB-C7-domainservice-in-requires-guard` | silent | prov | node, dotnet, java, python | S | A `domainService` call inside a `requires` authorization guard passes validation and emits an unresolvable reference on four of five backends |
 | P1 | `F2-CFE-9` | silent | prov | flutter | S | Flutter's `Money` / `DateDisplay` / `EnumBadge` primitives do not null-guard an OPTIONAL field — two produce Dart that fails static analysis, the third renders the literal text "null" |
 | P1 | `F2-MT640-SORT-DEAD` | silent | prov | elixir | S | M-T6.40 shipped as option (a) — the non-paged elixir list page now compiles, but its sortable headers are a no-op refetch (and the mission row still reads `open`) |
-| P1 | `eventlog-shape-silently-ignored` | silent | prov | node, dotnet, elixir, python, java | S | `shape: document` / `shape: embedded` on a `persistedAs: eventLog` aggregate is silently ignored (M-T2.10 residue) |
 | P1 | `F2-CB-C1-paged-nonrelational` | silent | prov | node, dotnet, python, elixir | M | `find … paged` on a non-relational aggregate (eventLog / document / embedded) emits a route built for the paged contract against a repository built for the unpaged one |
 | P1 | `F2-CFE-1` | silent | prov | react, vue, svelte, angular, feliz, flutter, heex | M | `navigate(<Page>)` in a page `action` body — the only documented home for navigation — is broken on all 7 frontend targets (feliz hard-crashes codegen) |
 | P1 | `F2-XB-4` | silent | prov | node, dotnet, java, python, elixir | M | Every non-assignment statement in a folded-projection `on(e)` body is silently dropped on all five backends — and a `let` its own assignment references emits an undefined identifier |
 | P1 | `G2644-M-T6.48-numeric-ingress` | silent | prov | dotnet, java, python, elixir | M | #2644 F12 / M-T6.48 — malformed numeric input answers 500, not 4xx, on four backends |
 | P1 | `flutter-form-field-drops` | silent | prov | flutter | M | Four Flutter form-field drops are still emitted as Dart COMMENTS, not diagnostics — the parity freeze is unchanged since the 08-17 snapshot |
 | P1 | `flutter-modal-instance-operationform` | silent | prov | flutter | M | Flutter drops the ENTIRE operations row of every scaffolded Detail page — `renderModal` only matches `OperationForm { of:, op: }` |
-| P1 | `timer-tz-overlap-inert` | silent | prov | node, dotnet, elixir, python, java | M | `timerSource` `in: "<tz>"` and `overlap: allow` parse, lower, and are read by zero emitters — no diagnostic (M-T4.1) |
 | P2 ! | `G2646-open-projection-on-event-no-channel` | silent | like | dotnet, java, python, elixir | M | #2646 documented, NOT fixed: `projection … on(Event)` with no `channel` folds on node only; the other four silently never subscribe |
 | P2 ! | `M-T3.15-C3-nav-vs-requires` | silent | like | react, vue, svelte | M | C3 — the default sidebar shows links to routes the backend refuses (react/vue/svelte) |
 | P2 ! | `M-T3.8-sensitivity-phases-2-4` | silent | like | node, dotnet, java, python, elixir | L | `sensitive(...)` reaches exactly one emitter — no wire masking, no sink classification, and no diagnostic saying so |
@@ -59,7 +56,6 @@ Sorted P0 (security / data-integrity, silent, proven) → P1 (other silent prove
 | P2 | `G2667-D6-elixir-seeder-not-atomic` | silent | like | elixir | S | Debt: elixir seeder is not atomic per dataset — a mid-dataset crash re-seeds duplicates |
 | P2 | `M-T6.2-s14-audit-wiresnapshot` | silent | like | elixir | S | Elixir audit before/after snapshots still dump the raw snake_case Ecto struct while the other four record the wireShape |
 | P2 | `G2646-open-heex-layout-inert` | silent | like | elixir | M | #2646 documented, NOT fixed: HEEx layout primitives semantically inert (Grid ≡ Stack, bare divs); non-server-paged Table gets no pager; i18nFormat wrapper dropped |
-| P2 | `G2667-C4-mikroorm-save-no-transaction` | silent | like | node | M | 08-17 register #4: mikroorm save path opens no transaction (document/embedded/ES TS adapters likewise) |
 | P2 | `M-T1.16-invariant-validation-feliz-flutter` | silent | like | feliz, flutter | M | Invariant-derived client-side form validation is missing on BOTH self-hosting frontends — Feliz and Flutter enforce "Required" only |
 | P2 | `M-T5.14-reading-service-readport-not-threaded` | silent | like | node, python, dotnet, java, elixir | M | A `reading` domain service called from a command/query handler emits a port-less call — the generated module does not compile |
 | P2 | `provenanced-bare-read-in-page-body` | silent | like | react, vue, svelte, angular, feliz, flutter | M | Provenanced<T> (#2653, merged 2026-08-24) changed the wire shape of a `provenanced` field under every page-body read; only the scaffold macro was taught `.value`, so a hand-written body reading the field bare now emits an object into a text slot with no gate |
@@ -70,7 +66,6 @@ Sorted P0 (security / data-integrity, silent, proven) → P1 (other silent prove
 | P2 | `M-T1.11-domain-floor-message-code` | silent | like | node, dotnet, java, python, elixir | L | M-T1.11 item (c) — `DomainError` carries no `code` on any of the five backends, so a rule enforced only at the domain floor is unlocalizable |
 | P3 | `F2-CB-C9-requires-unknown-message` | honest | prov | validator | S | `requires <DomainService>.<op>(…)` is rejected as "got 'unknown'" — and appending `&& true` makes the identical expression valid |
 | P3 | `F2-CFE-11` | honest | prov | angular, flutter | S | `testid:` on `CreateForm` is silently dropped on Angular and Flutter (honoured on react/vue/svelte/feliz) |
-| P3 | `F2-EXPR-5` | honest | prov | all | S | Validator falsely rejects `money * <numeric literal>` and `money / <numeric literal>` — with a message that says the form is allowed |
 | P3 | `F2-W-09` | honest | prov | node, elixir, dotnet, java, python | S | A `File` field is an inline anonymous object on node/elixir and a named `FileRef` component on dotnet/java/python |
 | P3 | `F2-W-12` | honest | like | java, elixir | S | Optional-field nullability: java and elixir publish a non-nullable schema for fields they serialize as `null` |
 | P3 | `M-T3.15-E2-getbyid-no-gate-surface` | honest | like | language, validator | S | E2 — the by-id read has no author gate surface at all |
