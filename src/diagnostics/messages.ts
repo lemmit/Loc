@@ -2319,12 +2319,13 @@ export const DIAGNOSTIC_MESSAGES = {
   }) =>
     `the scaffolded list filter bar has no input for \`${p.param}: ${p.type}\`, ` +
     `so repository find '${p.find}' is omitted from it entirely and '${p.aggregate}' cannot be ` +
-    `filtered by that column from this page.  The bar renders \`string\`, \`int\`, \`long\` and ` +
-    `\`<X> id\` params; \`decimal\`/\`money\` have no zero-sentinel that type-checks on Feliz, ` +
-    `an \`enum\` state field is typed as bare \`string\` by every frontend while the query ` +
-    `param is the zod enum union, and \`bool\`/\`datetime\`/\`guid\` have no input at all.  ` +
-    `Change the param's type, or write the page body by hand (\`page List { … }\` overrides the ` +
-    `scaffolded one by name) and bind the find yourself.`,
+    `filtered by that column from this page.  The bar renders \`string\`, \`guid\`, ` +
+    `\`datetime\`, \`int\`, \`long\`, \`bool\` and \`<X> id\` params.  Two kinds are still held ` +
+    `back, each for a reason outside the scaffold macro: \`decimal\`/\`money\` have no ` +
+    `zero-sentinel that type-checks on Feliz (\`decimal <> 0\` is \`decimal <> int\`), and an ` +
+    `\`enum\` state field is typed as bare \`string\` by every frontend while the query param ` +
+    `is the zod enum union.  Change the param's type, or write the page body by hand ` +
+    `(\`page List { … }\` overrides the scaffolded one by name) and bind the find yourself.`,
   "loom.slot-outside-component": (_p: { where: unknown }) =>
     `\`Slot { }\` renders the children a CALLER passed in, so it only means ` +
     `something inside a \`component\` body.  A page has no caller and no children ` +
