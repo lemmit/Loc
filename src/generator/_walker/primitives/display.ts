@@ -157,6 +157,14 @@ export function emitBreadcrumbs(
   const closeIndent = "  ".repeat(depth);
   return renderPrimitive(ctx, "primitive-breadcrumbs", {
     hasChildren: children.length > 0,
+    // Both forms, like `Grid`: `childrenBlock` is the pre-joined block every
+    // pack that drops the crumbs straight into its container reads, and
+    // `children` is the unjoined list a pack needs when each crumb must be
+    // wrapped in its OWN element — Chakra's `<Breadcrumb.Item>` (v3) /
+    // `<BreadcrumbItem>` (v2), with a separator emitted between them.  Without
+    // the array a pack can only concatenate, which is why the chakra packs
+    // shipped crumbs with no list semantics and no separators.
+    children,
     childrenBlock: children.join(`${ctx.target.interChildSeparator ?? ""}\n${indent}`),
     indent,
     closeIndent,

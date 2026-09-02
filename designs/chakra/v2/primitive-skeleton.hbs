@@ -1,4 +1,4 @@
-{{#if isMulti}}<VStack gap={2}{{{testidAttr}}} aria-hidden="true">
+{{#if isMulti}}<VStack align="stretch" gap={2}{{{testidAttr}}} aria-hidden="true">
 { Array.from({ length: {{count}} }).map((_, i) => (
 <Skeleton key={i} height={ {{height}} } />
 )) }

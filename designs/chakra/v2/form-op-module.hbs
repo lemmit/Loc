@@ -33,9 +33,9 @@ function {{opPascal}}OpModal({ mut{{#if recordVar}}, record{{/if}} }: { mut: Ret
             })}
           >
             <ModalBody>
-              <VStack gap={4}>
+              <VStack align="stretch" gap={4}>
                 {{#if hasParams}}{{#each fieldHtmls}}{{{this}}}
-                {{/each}}{{else}}<Text color="gray.500">{{{chrome "noParameters"}}}</Text>
+                {{/each}}{{else}}<Text color="chakra-subtle-text">{{{chrome "noParameters"}}}</Text>
                 {{/if}}</VStack>
             </ModalBody>
             <ModalFooter gap={2}>

@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 
 export function EmptyValue() {
-  return <Text as="span" color="gray.400">—</Text>;
+  return <Text as="span" color="chakra-placeholder-color">—</Text>;
 }
 
 export function isEmpty(v: unknown): boolean {
@@ -49,7 +49,7 @@ export function BoolValue({ value }: { value: boolean | null | undefined }) {
   if (isEmpty(value)) return <EmptyValue />;
   return value
     ? <Text as="span" fontWeight={500}>{{{chrome "boolTrue"}}}</Text>
-    : <Text as="span" color="gray.500">{{{chrome "boolFalse"}}}</Text>;
+    : <Text as="span" color="chakra-subtle-text">{{{chrome "boolFalse"}}}</Text>;
 }
 
 export function NumberValue({ value, decimals = 0 }: { value: number | string | null | undefined; decimals?: number }) {
@@ -75,7 +75,7 @@ export function MoneyValue({ value, currency, decimals }: { value: number | stri
 }
 
 export function PlainValue({ value }: { value: unknown }) {
-  if (isEmpty(value)) return <Text as="span" color="gray.400">—</Text>;
+  if (isEmpty(value)) return <Text as="span" color="chakra-placeholder-color">—</Text>;
   return <Text as="span">{String(value)}</Text>;
 }
 
@@ -90,7 +90,7 @@ export function KeyValueRow({
 }) {
   return (
     <HStack alignItems="flex-start" gap={2}>
-      <Text as="span" color="gray.500" fontWeight={500} minW="140px" flexShrink={0}>{label}</Text>
+      <Text as="span" color="chakra-subtle-text" fontWeight={500} minW="140px" flexShrink={0}>{label}</Text>
       <HStack gap={2} flex={1} minW={0} flexWrap="wrap" data-testid={testid}>{children}</HStack>
     </HStack>
   );

@@ -1,5 +1,6 @@
 {{#if hasChildren}}<Breadcrumb.Root{{{testidAttr}}}>
 {{indent}}<Breadcrumb.List>
-{{indent}}{{{childrenBlock}}}
-{{indent}}</Breadcrumb.List>
+{{#each children}}{{../indent}}  <Breadcrumb.Item>{{{this}}}</Breadcrumb.Item>
+{{#unless @last}}{{../indent}}  <Breadcrumb.Separator />
+{{/unless}}{{/each}}{{indent}}</Breadcrumb.List>
 {{closeIndent}}</Breadcrumb.Root>{{else}}<Breadcrumb.Root{{{testidAttr}}} />{{/if}}
