@@ -29,6 +29,10 @@ import { uiUsesDataGrid } from "../../ir/util/data-grid.js";
 import { typeIsFile } from "../../ir/util/file-field.js";
 import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { readableProjectionNames } from "../../ir/util/projection-read.js";
+import {
+  type RealtimeStreamCredential,
+  realtimeStreamCredential,
+} from "../../ir/util/realtime-rooms.js";
 import { DAISYUI_THEMES } from "../../util/builtin-formats.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../util/naming.js";
@@ -1085,6 +1089,12 @@ function renderAppFs(
    *  (`backendServesRealtime`).  Gates the `on <channel>.<Event>` handler
    *  subscription — a frontend pointed at a non-SSE backend emits none. */
   backendRealtime = false,
+  /** Stream credential from the shared realtime plan (`realtimeStreamCredential`,
+   *  `src/ir/util/realtime-rooms.ts` RULE 2).  Feliz's wire routes are already
+   *  relative + same-origin (`/api/...`), where a cookie flows either way, but
+   *  the subscription states the credential explicitly so the contract holds if
+   *  the base ever moves cross-origin. */
+  realtimeCredential: RealtimeStreamCredential = "none",
 ): string {
   const pages = ui.pages;
   if (pages.length === 0) {
@@ -1619,7 +1629,7 @@ function renderAppFs(
     // Realtime subscription module (channels.md Part I) — references `Msg`,
     // `Api`, and the reads' `Loaded` cases, so it sits after `update`.
     hasRealtime ? "" : false,
-    hasRealtime ? renderFelizRealtime(ui, reads) : false,
+    hasRealtime ? renderFelizRealtime(ui, reads, realtimeCredential) : false,
     // DataGrid (M-T1.1) — the `@tanstack/table-core` interop bindings, then one
     // `[<ReactComponent>]` child per grid.  BEFORE the page views: F# is
     // order-sensitive and the views call these.  After `update`, so nothing here
@@ -1932,7 +1942,16 @@ export function generateFelizForContexts(
     hasEffects ||
     hasFileUploads;
   const backendRealtime = backendServesRealtime(target?.platform);
-  const appFs = renderAppFs(ui, contexts, authUi, sys.user, backendRealtime);
+  const appFs = renderAppFs(
+    ui,
+    contexts,
+    authUi,
+    sys.user,
+    backendRealtime,
+    // Stream credential from the shared realtime plan (M-T4.12 RULE 2) — the
+    // SAME gate the app's other authenticated traffic rides.
+    realtimeStreamCredential(deployable, target, sys.user),
+  );
   out.set("src/App.fs", appFs);
   // The emitted source is the authority for its own package refs — see above.
   out.set("App.fsproj", fsproj(hasHttp, appFs.includes(ROUTER_OPEN), authUi, hasFileUploads));

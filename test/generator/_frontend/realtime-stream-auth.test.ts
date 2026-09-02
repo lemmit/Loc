@@ -134,6 +134,26 @@ describe("realtime SSE stream carries the api client's credential (M-T4.12)", ()
     });
   }
 
+  it("feliz: an auth: ui app opens the stream with withCredentials", async () => {
+    // Feliz emits an F# `[<Emit>]` shim around the browser constructor rather
+    // than a `realtime.ts` module, and its routes are relative + same-origin
+    // (`/api/...`), where a cookie flows either way.  It states the credential
+    // anyway so the contract does not silently depend on that.
+    const all = await generateSystemFiles(authedSystem("feliz"));
+    const app = all.get("web_app/src/App.fs") ?? "";
+    expect(app).not.toBe("");
+    expect(app).toContain(
+      '[<Fable.Core.Emit("new EventSource($0, { withCredentials: true })")>]',
+    );
+  });
+
+  it("feliz: an auth: none app keeps the bare v1 shim", async () => {
+    const all = await generateSystemFiles(anonSystem("feliz"));
+    const app = all.get("web_app/src/App.fs") ?? "";
+    expect(app).toContain('[<Fable.Core.Emit("new EventSource($0)")>]');
+    expect(app).not.toContain("withCredentials");
+  });
+
   it("node's OIDC verifier accepts the session cookie the stream presents", async () => {
     // `EventSource` cannot set an `Authorization` header, so a header-only
     // verifier 401s the stream even WITH `withCredentials`.  Four backends
