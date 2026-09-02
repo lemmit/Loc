@@ -40,11 +40,18 @@ export const COMPILE_WAIVERS: readonly Waiver[] = [
     // containment at all) — a cross-emitter mission, not a harness slice.
     // See docs/audits/pairwise-corpus-findings-2026-08.md § F11.
     //
-    // SCOPE — deliberately narrow.  50 of the 600 node/default source
-    // crossings hit this, and they are exactly `embedded × tph`: every
-    // capability, every authz, both reads, and NOT `tpc`.  So the entry pins
-    // shape+inheritance and stars the rest, rather than waiving `embedded` on
-    // node wholesale (which would hide the next embedded bug).
+    // SCOPE — deliberately narrow, and each `*` MEASURED rather than assumed.
+    // 50 of the 600 node/default source crossings hit this, and they are
+    // exactly `embedded × tph`: every capability, every authz, both reads, and
+    // NOT `tpc`.  So the entry pins shape+inheritance and stars the rest,
+    // rather than waiving `embedded` on node wholesale (which would hide the
+    // next embedded bug).
+    //
+    // `persistence: "*"` is checked, not lazy: MikroORM has the same defect one
+    // name over — `db/entities.ts` exports `ThingBaseRow` and `LineRow`, and
+    // the repository imports `ThingRow`.  A starred axis that turned out to be
+    // clean would fire the STALE arm on the day the cover sampled it, which is
+    // the register's own way of catching a waiver written wider than the bug.
     platform: "node",
     persistence: "*",
     capability: "*",

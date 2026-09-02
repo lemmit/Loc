@@ -673,6 +673,12 @@ export const lines = mainSchema.table("lines", { … parentId → thingBases.id 
 so re-pointing the repository at `thingBases` would move the error (excess property on the
 typed insert), not remove it.
 
+**Same crossing, other node adapter.** MikroORM has the identical defect one name over:
+`db/entities.ts` exports `ThingBaseRow` and `LineRow`, and `thing-repository.ts` opens with
+`import { ThingRow } from "../entities"`. Checked rather than assumed, because the register
+entry stars the persistence axis and a starred axis that turned out to be clean would fire the
+stale arm the day the cover sampled it.
+
 **Same crossing, other backends** — the shape of the bug differs, which is why it is one
 finding and not three:
 
