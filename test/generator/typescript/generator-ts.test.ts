@@ -461,11 +461,15 @@ describe("typescript generator", () => {
       expect(repo).toMatch(
         /requestLog\(\)\.debug\(\{ event: "repository_save", aggregate: "Order", id: aggregate\.id as string \}\)/,
       );
-      // dispatcher: one event_dispatched info per pulled event.  The
-      // `(event as object).constructor.name` cast handles the corner case
-      // where the aggregate declares no events (pullEvents returns never[]).
+      // dispatcher: one event_dispatched info per pulled event, naming the
+      // event via its OWN `type` discriminator.  This used to pin
+      // `(event as object).constructor.name`, which read `"Object"` for every
+      // event — events are emitted as interfaces, so there is no subclass to
+      // name (see `event-dispatch-log.test.ts`).  The cast remains for the
+      // corner case where the aggregate declares no events and `pullEvents()`
+      // returns `never[]`.
       expect(repo).toMatch(
-        /requestLog\(\)\.info\(\{ event: "event_dispatched", event_type: \(event as object\)\.constructor\.name, aggregate: "Order", id: aggregate\.id as string \}\)/,
+        /requestLog\(\)\.info\(\{ event: "event_dispatched", event_type: \(event as \{ type: string \}\)\.type, aggregate: "Order", id: aggregate\.id as string \}\)/,
       );
       // find_executed debug at every find return — including the empty-rows
       // branch so a no-result query is still observable.

@@ -338,33 +338,55 @@ export const R = {
   gateProbe:
     "unreachable: e2e has no can_<op> probe verb (the gate's 409 is exercised via the operation)",
   /**
-   * BLOCKED ON A LIVE DEFECT — an operation whose in-process subscriber CRASHES
+   * BLOCKED ON A LIVE DEFECT — an operation whose in-process subscriber kills
    * the backend, so a caller cannot be written without turning the tier red on
-   * a bug this PR does not own.
+   * a bug that is not this fixture's.
    *
    * The one pin: `lifecycle-guard`'s `Crate.release`.  It emits `CrateReady`,
-   * whose workflow subscriber creates a GUARDED `Shipment` from in-process code
-   * that has no request principal.  Calling it on the node leg kills the
-   * runner:
+   * whose workflow subscriber creates a `Shipment` from in-process code with no
+   * request principal.  On the node leg:
    *
    *     POST /api/crates/{id}/release  -> operation_invoked
    *                                    -> event_dispatched
    *                                    -> process exits 99, no verdict
    *
-   * Two things are visible in that trace and both look wrong: the dispatched
-   * event is logged as `"event_type":"Object"` rather than `CrateReady`, and
-   * nothing handles the guarded create's refusal for a principal-less caller.
+   * WHAT THIS IS NOT, corrected after reading the emitted code.  The first
+   * write-up of this pin said the fix was "the guarded-create seam split across
+   * five backends" — the divergence the fixture's own header describes.  That
+   * is wrong, and generating the fixture disproves it in one grep: node's
+   * `Shipment.create` takes `(input)` and carries NO gate at all (the `requires`
+   * is enforced in the ROUTE layer), so the subscriber never reaches a guard and
+   * never refuses.  Whatever kills the process, it is not a principal-less
+   * create being denied.
    *
-   * This is the SAME class `policy-document` turned out to be — a route no
-   * runtime caller had ever driven, hiding a real defect — and it was only
-   * observable once this fixture gained a `test e2e` block at all.  It is NOT
-   * pinned to avoid work: it is pinned because the fix is the guarded-create
-   * seam split across five backends (the fixture's own header describes the
-   * Phoenix half), which is a mission, not a line.  Drain this by fixing that,
-   * and the caller is three lines.
+   * LEADING HYPOTHESIS, stated as one because it is not yet instrumented: the
+   * dispatch happens while the CALLER'S transaction is still open, and the
+   * subscriber runs its own queries on the ROOT `db` handle.  In the emitted
+   * code the route does `await db.transaction(async (tx) => { … repoTx.save() … })`;
+   * `save()` dispatches at the END of its own body but still inside that outer
+   * callback, and `createInProcessDispatcher(db)` closed over the root handle,
+   * so the subscriber's `db.select()` runs on a connection the open transaction
+   * owns.  The node behavioural leg is a single PGlite instance
+   * (`test/behavioral/run.mjs`), where that is a self-deadlock rather than a
+   * second connection.  Consistent with the trace: the log stops exactly at
+   * dispatch, with no error, no `request_end`, and no stack.
+   *
+   * TO CONFIRM OR KILL THAT HYPOTHESIS, in order of cheapness: log inside the
+   * subscriber before its first query and see whether that line is reached;
+   * pass `tx` to the dispatcher instead of `db` and see whether the hang
+   * clears; run the same fixture against a real multi-connection Postgres leg
+   * (dotnet / java / python) and see whether it survives.  Do not write a
+   * mechanism into this pin that has not passed one of those
+   * (`experience_gathered.md` §93).
+   *
+   * Same class as the two previous drains — a route no runtime caller had ever
+   * driven, hiding a real defect, observable only once the fixture gained a
+   * `test e2e` block. The second thing that trace showed, `"event_type":"Object"`
+   * on every dispatched event, WAS diagnosed and is fixed: the log read
+   * `constructor.name` off an object literal whose type is an interface.
    */
   principalLessSubscriberCrash:
-    "blocked: the in-process subscriber crashes the backend (guarded create, no request principal)",
+    "blocked: the in-process subscriber kills the backend (cause not yet established; see the pin)",
   /**
    * UN-AUTHORED — `crudish`'s canonical `update` (`POST /api/<aggs>/{id}/update`).
    * Reachable today (`api.<aggs>.update(id, { … })`), simply never written.

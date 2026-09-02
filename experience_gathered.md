@@ -5480,3 +5480,50 @@ And the cost rule underneath both: on a saturated runner pool (runs sat queued
 waiting can possibly work* before waiting. For block 1 the answer was no
 (absent, not stale); for block 2 the answer was no (the file says so). Both
 times, patience would have burned an hour to learn nothing.
+
+## 94. A log line is a claim about the code, and nothing type-checks it (2026-09-01)
+
+Every node repository logged `"event_type":"Object"` on every domain event it
+dispatched. The emitter read `(event as object).constructor.name`, under a
+comment asserting that this "is the emitted DomainEvent subclass name —
+reliable in TypeScript without depending on a per-event `type` discriminator".
+
+Both halves of that sentence were false about the code sitting beside it.
+`events.ts` emits each event as an **interface** carrying exactly the
+discriminator the comment says not to depend on:
+
+```ts
+export interface CrateReady { readonly type: "CrateReady"; readonly crate: Ids.CrateId }
+```
+
+Aggregates raise plain object literals, so there is no subclass and
+`constructor.name` is `"Object"`. The dispatcher three lines below switched
+correctly on `event.type` the whole time — the code was right and the log
+about the code was wrong.
+
+**Why every gate was blind, and this is the transferable part: the wrong value
+was still a `string`.** `tsc` is satisfied, the corpus compile gates are
+satisfied, the wire goldens never see it (logs aren't wire), and no unit test
+asserted the field's *content*. A log line is an assertion about program state
+that the compiler cannot check and the test suite usually does not read. It
+surfaced only when a workflow subscriber was driven at runtime for the first
+time — the same "no runtime caller had ever been here" class as §90/§92, one
+layer over.
+
+Elixir had it right all along (`event_type: "OrderPlaced"`, a literal baked in
+at emit time), and .NET is right by accident of language — C# events really are
+classes, so `GetType().Name` is the event name. Node was the lone outlier, and
+a .NET comment cross-referenced the node form as "the same identity", so the
+wrong belief had already propagated into a second backend's documentation.
+
+Two rules out of it:
+
+- **When a log names a thing, assert the name in a test.** The new gate reads
+  the emitted source for `event_type: (event as { type: string }).type` and,
+  separately, pins that events are emitted as interfaces — the fact that makes
+  `constructor.name` wrong. Mutation-proved both in the generator (revert →
+  fail) and at runtime (`"Object"` → `"OrderPlaced"` on the behavioural leg).
+- **A comment that explains *why* a form was chosen is a claim, and claims
+  rot.** This one justified itself against an emitted shape that either changed
+  or never existed. When a comment argues for a technique, check it against the
+  emitter's actual output, not against the comment's own confidence.

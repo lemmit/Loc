@@ -67,7 +67,7 @@ export class CustomerRepository implements CustomerRepositoryPort {
     requestLog().debug({ event: "repository_save", aggregate: "Customer", id: aggregate.id as string });
 
     for (const event of dispatchAfterCommit) {
-      requestLog().info({ event: "event_dispatched", event_type: (event as object).constructor.name, aggregate: "Customer", id: aggregate.id as string });
+      requestLog().info({ event: "event_dispatched", event_type: (event as { type: string }).type, aggregate: "Customer", id: aggregate.id as string });
       await this.events.dispatch(event);
     }
   }
