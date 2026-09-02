@@ -821,9 +821,11 @@ function renderBuildUser(user: UserIR | undefined, auth: AuthIR | undefined): st
     // OIDC: map via the configured claim path (id→sub default).  Dev stub:
     // read the flat claim by field name (the stub map uses field keys).
     const path = auth ? claimPathFor(f.name, auth) : key;
-    const read = auth
-      ? `get_claim(claims, ${JSON.stringify(path)})`
-      : `claims[${JSON.stringify(key)}]`;
+    // The claim PATH is `.ddd` text (`claims: { role: "realm_access.roles" }`),
+    // so it goes through the shared escaping funnel like every other authored
+    // string; the dev-stub key is the field's own `ID`, funnelled for one
+    // spelling.
+    const read = auth ? `get_claim(claims, ${elixirString(path)})` : `claims[${elixirString(key)}]`;
     const rhs = isArray ? `${read} || []` : read;
     return `      ${key}: ${rhs}`;
   });
@@ -946,7 +948,7 @@ defmodule ${webModule}.AuthController do
   No login form — the IdP hosts the credential pages.
   """
 
-  @scopes ${JSON.stringify(scopes)}
+  @scopes ${elixirString(scopes)}
 
 ${me}
 

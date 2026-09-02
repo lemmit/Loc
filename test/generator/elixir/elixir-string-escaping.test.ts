@@ -31,6 +31,8 @@
 //   8. the OIDC config literals — `auth-emit.ts` `elixirAuthValue` /
 //      `envOrDeclared`, i.e. a declared `issuer:` / `clientId:` string, read on
 //      every request by the emitted auth module and controller
+//   9. the declared CLAIM PATH — `auth-emit.ts` (`claims: { role: "…" }`),
+//      spliced into every principal projection's `get_claim/2`
 //
 // and two same-shape ones fixed alongside without a fixture here
 // (`store-emit.ts` `renderStoreLiteral`, `tests-emit.ts` `renderLiteral`).
@@ -191,7 +193,7 @@ const HOSTILE_AUTH = `system HostileAuth {
       clientId: "cid#{:erlang.halt(8)}"
     }
     sessions: cookie
-    claims: { role: "realm_access.roles" }
+    claims: { role: "realm_access#{:erlang.halt(9)}.roles" }
   }
   subdomain Support {
     context Tickets {
@@ -288,5 +290,10 @@ describe("Elixir emitters route `.ddd` strings through the escaping funnel", () 
     expectNoLiveInterpolation(
       findLine(files, "lib/d_web/controllers/auth_controller.ex", "defp client_id,"),
     );
+  });
+
+  it("a declared claim PATH does not interpolate", async () => {
+    const files = await generateSystemFiles(HOSTILE_AUTH);
+    expectNoLiveInterpolation(findLine(files, "lib/d_web/auth.ex", "role: get_claim(claims,"));
   });
 });
