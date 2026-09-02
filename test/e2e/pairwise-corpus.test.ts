@@ -15,7 +15,7 @@ import { GENERATION_WAIVERS, type Waiver, waiverFor } from "../pairwise/waivers.
 // compile" bug class does not live inside a feature — it lives at the
 // intersections (#2412 mask×audited, #2387/#2391 audited×dapper×document/ES,
 // #2492 policy-deny×dapper).  This suite runs the full compiler pipeline over
-// the cross product of capability × shape × authz × persistence on every
+// the cross product of capability × shape × authz × inheritance × read × persistence on every
 // backend and asserts the cheapest possible property:
 //
 //     a system a user could write must get an ANSWER, not an exception.
@@ -24,7 +24,7 @@ import { GENERATION_WAIVERS, type Waiver, waiverFor } from "../pairwise/waivers.
 // cannot coexist are supposed to be refused by name, and those are recorded
 // (with their code) rather than failed.  A THROW is the finding.
 //
-// Opt-in via LOOM_PAIRWISE=1: it is ~1000 pipeline runs, seconds not minutes,
+// Opt-in via LOOM_PAIRWISE=1: it is ~4200 pipeline runs, ~95s not minutes,
 // but it is a discovery sweep, not a per-PR floor.
 // ---------------------------------------------------------------------------
 
@@ -51,7 +51,7 @@ interface Row {
 describe.skipIf(!ENABLED)(
   "pairwise corpus — every crossing gets an answer, not an exception",
   () => {
-    it("cross product of capability × shape × authz × persistence, all backends", async () => {
+    it("cross product of capability × shape × authz × inheritance × read × persistence, all backends", async () => {
       const rows: Row[] = [];
       const usedWaivers = new Set<Waiver>();
 
