@@ -1,7 +1,12 @@
 import type { EnumIR, ValueObjectIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { upperFirst } from "../../../util/naming.js";
-import { collectCsExprUsings, renderCsExpr, renderCsType } from "../render-expr.js";
+import {
+  collectCsExprUsings,
+  collectCsTypeUsings,
+  renderCsExpr,
+  renderCsType,
+} from "../render-expr.js";
 import { collectCsStmtUsings, renderCsStatements } from "../render-stmt.js";
 
 // Enum → C# enum.  Value object → sealed record with explicit
@@ -37,6 +42,22 @@ export function renderValueObject(vo: ValueObjectIR, ns: string): string {
   for (const fn of vo.functions) {
     if ("expr" in fn.body) collectCsExprUsings(fn.body.expr, usings, ns);
     else collectCsStmtUsings(fn.body.stmts, usings, ns);
+  }
+  // …and the namespaces its rendered TYPES name.  The expression collectors
+  // above see only what a BODY reaches into, but every position below renders
+  // a `TypeIR` too — the property declarations, the constructor parameter
+  // list, the derived-property types and each function's params/return.  An
+  // enum-typed field (`country: Country`) renders a bare `Country` in three of
+  // them and lives in `<ns>.Domain.Enums`, a namespace no expression here
+  // mentions: without this the file does not compile (CS0246), which is
+  // exactly what the ERP example's `Address` / `Quantity` hit.  Collected
+  // rather than added unconditionally so a VO with no enum/id field keeps a
+  // using-clean header under `/warnaserror` (CS8019).
+  for (const f of vo.fields) collectCsTypeUsings(f.type, usings, ns);
+  for (const d of vo.derived) collectCsTypeUsings(d.type, usings, ns);
+  for (const fn of vo.functions) {
+    collectCsTypeUsings(fn.returnType, usings, ns);
+    for (const p of fn.params) collectCsTypeUsings(p.type, usings, ns);
   }
   const renderCtx = { thisName: "this" };
   const propLines = vo.fields.map(
