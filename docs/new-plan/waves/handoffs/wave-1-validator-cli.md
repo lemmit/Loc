@@ -15,6 +15,9 @@ that also carried #2699. The ledger's `open` array is stale for this packet
 because #2668 *shipped the fixes in the same PR that produced the ledger* — the
 JSON records the state the audit found, not the state that PR left behind.
 
+Packet 1e also handed over one wording row (`loom.scaffold-filter-param-unsupported`),
+fixed here.
+
 Three rows were genuinely open: `F2-EXPR-5` and the `M-T3.8` diagnostic slice
 are fixed here; `F2-CB-C9` is handed off, because its only clean fix is one file
 outside the packet fence. A fourth piece of work came out of the "confirm the
@@ -38,6 +41,7 @@ and `snapshot` / `verify` kept the identical defect. Fixed here.
 | **`F2-EXPR-5`** | **fixed** (`b5c4af4`) | `test/language/type-system/money-literal-promotion.test.ts` → "`price * 2` (money x int literal) validates" fails with the self-contradicting message; "the IR keeps the scalar literal scalar — money x int, not money x money" fails with `lit: "money"` where `lit: "int"` is expected. 5 of the 9 new cases fail under the mutation. | `money` no longer anchors literal promotion under `*` / `/` (it is closed under `+`/`-` and the comparisons only, per `moneyArithmetic`). Both mirrors moved together — `literalPromotionAnchor` in `src/language/validators/_shared.ts` and in `src/ir/lower/lower-expr.ts` — so no `money x money` node can reach a renderer. `long` / `decimal` anchor every operator as before; a TYPED `money * money` is still rejected. Emission verified by generating all five backends from one fixture (see the commit body for the six rendered expressions). **Regression risk is structurally zero:** the only behaviour that changed is a money-anchored literal under `*` / `/`, and every such expression was previously an ERROR — so no program that compiled before can generate different output now. Grepping `examples/`, `web/src/examples/` and `test/fixtures/corpus/` for money-scaling-by-literal returns nothing, which is what you would expect of a form the language refused. |
 | **`M-T3.8` diagnostic slice** | **fixed** (`27323db`) | `test/ir/sensitive-wire-unsupported.test.ts` → "warns on a sensitive field the wire actually serves" fails `expected +0 to be 1`; `test/system/diagnostic-firing-census.test.ts` → "loom.sensitive-wire-unsupported fires" fails "did not come out of its own fixture". 5 assertions fail under the mutation. | New `loom.sensitive-wire-unsupported` **warning** (`src/ir/validate/checks/sensitivity-checks.ts`). Says what `sensitive(...)` DOES buy (the synthesized `inspect` prints `<redacted>` on all five) and what it does not (the response DTO serves it in cleartext; no sink classification), and names the remedy that works today. Suppressed by `mask unless`, `internal` and `secret` — the three cases where the author already has the guarantee — so it marks real exposure only. `MAX_OPEN_GAPS` 46 → 47 with the reason written at the pin. **The masking itself was NOT built** (that is the T3 mission). |
 | **`F2-CB-C9`** | **handed off** — clean fix is outside the fence | — | See §Hand-off below. Re-reproduced on this base. |
+| **`loom.scaffold-filter-param-unsupported` wording** (handed over by packet 1e) | **fixed** (`df867a9`) | `test/ir/scaffold-filter-param-unsupported.test.ts` → "the message's type list matches the set the gate actually renders". Restoring the stale wording fails it on `message must keep the renders/refuses split`; adding `decimal` to `RENDERABLE_FILTER_PRIMITIVES` without touching the message fails it on `'decimal' renders — it belongs in the offered list, not below the hinge`. | The message told the author `bool` / `datetime` / `guid` params "have no input at all"; #2699 made all three render, so it sent them to change a type that already works and buried the two kinds still refused (`decimal`/`money`, `enum`) in a list of five. Text now offers exactly what the gate renders. **`unsupported-register.ts`'s row was already accurate — only the catalog text had rotted**, which is the argument for the pin: it is now derived from `RENDERABLE_FILTER_PRIMITIVES`, not hand-copied. Worth noting for whoever writes the next such pin: my first draft asserted only "the kind is named somewhere in the message" and **passed on the stale wording**, which named all three — as unsupported. The load-bearing property was never presence, it was WHICH SIDE of the sentence. |
 
 ## Files outside the fence (handed off)
 
@@ -121,7 +125,18 @@ already do), or accept the suppression variant? No packet in this wave fences
 ## Local gates run + results
 
 - `npx tsc -b` — clean.
-- `npx vitest run test/ir test/language test/cli test/system/diagnostic-catalog.test.ts test/system/diagnostic-firing-census.test.ts test/system/unsupported-register.test.ts` — see §Gate log below.
+- `npx vitest run test/ir test/language test/cli test/system/diagnostic-catalog.test.ts test/system/diagnostic-firing-census.test.ts test/system/unsupported-register.test.ts` —
+  **454/456 files, 4816 tests passed, 0 failing tests.** The two file-level
+  failures are `test/cli/breakpoints-cli.test.ts` and `test/cli/trace-cli.test.ts`,
+  both `Error: Hook timed out in 10000ms` in a `beforeAll` that shells out to
+  `ddd generate --sourcemap` — a contention artifact of seven agents on four
+  cores, not a regression. **Both pass 17/17 when re-run alone**, on this exact
+  tree. (Coordinator: if these two flake in the folded run, that is the cause;
+  their `beforeAll` has no explicit timeout.)
+- After the two late rows (the CLI residue fix and the 1e wording hand-off),
+  re-ran the suites they touch: `test/cli/parse-ir-validation.test.ts` 8/8,
+  `test/ir/scaffold-filter-param-unsupported.test.ts` + `diagnostic-catalog` +
+  `unsupported-register` 25/25, and the six `sensitive()`-bearing suites 112/112.
 - `npx biome ci <11 changed files>` — clean (0 errors, 0 warnings).
 - `node bin/cli.js generate system` on a money-arithmetic fixture × all five backends — all five emit correct scaling; no `money x money` node reaches a renderer.
 
