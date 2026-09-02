@@ -63,12 +63,16 @@ describe("gap ledger counts are derived, not hand-typed (§91)", () => {
     }
   });
 
-  it("F2-ADP-3 stays open with the W1b IR-layer-gate deferral note", () => {
+  it("F2-ADP-3 is closed by #2708 — W1b landed the gate the reconciliation had recorded as deferred", () => {
+    // Wave 1 packet 1a ran the ledger's own repro (dapper + efcore over one
+    // context) on b826f87 and got exit 1 with `loom.dapper-unsupported`; the
+    // "handed off" note was stale.  Running the repro beats reading the PR body.
     const ledger = loadLedger();
-    const row = (
-      ledger.open as Array<{ id: string; deferral?: { pr: string; note: string } }>
-    ).find((r) => r.id === "F2-ADP-3");
-    expect(row, "F2-ADP-3 should still be in the `open` bucket").toBeDefined();
-    expect(row?.deferral?.note).toBe("IR-layer gate; scheduled Wave 1 packet 1a");
+    const open = (ledger.open as Array<{ id: string }>).find((r) => r.id === "F2-ADP-3");
+    expect(open, "F2-ADP-3 must not be in the `open` bucket").toBeUndefined();
+    const done = (ledger.done as Array<{ id: string; pr: string }>).find(
+      (r) => r.id === "F2-ADP-3",
+    );
+    expect(done?.pr).toBe("#2708");
   });
 });
