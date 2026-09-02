@@ -331,11 +331,7 @@ export function defaultNavSections(
   }
   for (const wf of scaffoldedWorkflows) {
     wfEntries.push(
-      entry(
-        `/workflows/${snake(wf.name)}`,
-        humanize(wf.name),
-        `nav-workflow-${snake(wf.name)}`,
-      ),
+      entry(`/workflows/${snake(wf.name)}`, humanize(wf.name), `nav-workflow-${snake(wf.name)}`),
     );
   }
   if (wfEntries.length > 0) sections.push({ label: "Workflows", entries: wfEntries });

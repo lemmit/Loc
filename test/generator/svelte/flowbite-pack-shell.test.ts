@@ -96,9 +96,10 @@ describe("flowbite (svelte) pack — the shell contract a rendered page depends 
     // invisible.  It may stay (other templates use `text-primary`), but the
     // whole ramp must be there beside it.
     for (const shade of FLOWBITE_PRIMARY_SHADES) {
-      expect(css, `--color-primary-${shade} missing: bg-primary-${shade} would not exist`).toContain(
-        `--color-primary-${shade}:`,
-      );
+      expect(
+        css,
+        `--color-primary-${shade} missing: bg-primary-${shade} would not exist`,
+      ).toContain(`--color-primary-${shade}:`);
     }
     // Derived from the DSL's own theme token, not a hard-coded flowbite blue —
     // otherwise `theme { primary: … }` would be silently ignored by this pack.
@@ -109,7 +110,7 @@ describe("flowbite (svelte) pack — the shell contract a rendered page depends 
     const shell = (await files()).get("web_app/src/routes/(app)/+layout.svelte") ?? "";
     expect(shell).not.toBe("");
     const main = /<main[^>]*id="main-content"[^>]*>/.exec(shell)?.[0] ?? "";
-    expect(main, "no <main id=\"main-content\"> in the flowbite app shell").not.toBe("");
+    expect(main, 'no <main id="main-content"> in the flowbite app shell').not.toBe("");
     // `flex-1` without `min-w-0` keeps the flex item's automatic minimum size at
     // its content's min-content width — the document bleeds instead.
     expect(main).toContain("flex-1");
