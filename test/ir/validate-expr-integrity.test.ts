@@ -254,19 +254,46 @@ describe("validate-expr-integrity — A4 collection-op-in-UI gate", () => {
       .map((d) => d.code);
   }
 
+  // The three that stay.  Each is refused for a reason the frontend walkers'
+  // `renderCollectionOp` seam does NOT remove:
+  //   distinct — value equality, which Flutter's generated wire models define
+  //              no `operator ==` for, so a dedupe would silently keep the dups;
+  //   min/max  — an arithmetic fold over a `money` that is a `Decimal` OBJECT on
+  //              the JS frontends and Phoenix but a native scalar on F#/Dart.
+  // (The untyped identity λ keeps `reduction-non-comparable` quiet, so these
+  // isolate the UI-position gate.)
   for (const [label, body] of [
-    ["sortBy", mc("sortBy", [idLambda])],
     ["distinct", distinctMember],
-    ["take", mc("take", [litInt("2")])],
-    ["skip", mc("skip", [litInt("1")])],
-    // Reductions are UI-unsupported too — the untyped identity λ keeps the
-    // reduction-non-comparable gate quiet so this isolates the UI-position gate.
     ["min", mc("min", [idLambda])],
     ["max", mc("max", [idLambda])],
   ] as [string, ExprIR][]) {
     it(`rejects '.${label}' in a UI page body (loom.collection-op-in-ui)`, async () => {
       const codes = await codesForPageBody(body);
       expect(codes).toContain("loom.collection-op-in-ui");
+    });
+  }
+
+  // …and the three that LEFT.  This set shrank when the frontend walkers gained
+  // a real per-target `renderCollectionOp` table: the gate's original premise —
+  // "no valid JS/HEEx array-member spelling, so `arr.sortBy(…)` would emit
+  // verbatim" — stopped being true the moment they stopped being emitted
+  // verbatim (`[...arr].sort(…)` / `.slice(0, n)` / `.slice(n)` on the JS
+  // frontends, `List.sortBy` / `List.truncate` / a clamped `List.skip` on Feliz,
+  // `..sort` / `.take().toList()` / `.skip().toList()` on Flutter,
+  // `Enum.sort_by` / `Enum.take` / `Enum.drop` on the HEEx parallel walker).
+  //
+  // The *narrower* remainder is owned by `loom.frontend-collection-op-unsupported`
+  // (`test/ir/frontend-collection-op.test.ts`), which this set is a subset of;
+  // this pins that the two did not drift apart in the direction that matters —
+  // a body this gate refuses but no renderer needs it to.
+  for (const [label, body] of [
+    ["sortBy", mc("sortBy", [idLambda])],
+    ["take", mc("take", [litInt("2")])],
+    ["skip", mc("skip", [litInt("1")])],
+  ] as [string, ExprIR][]) {
+    it(`no longer rejects '.${label}' in a UI page body — every frontend renders it`, async () => {
+      const codes = await codesForPageBody(body);
+      expect(codes).not.toContain("loom.collection-op-in-ui");
     });
   }
 
