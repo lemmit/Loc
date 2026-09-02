@@ -161,6 +161,28 @@ async function parseProject(entryFile: string): Promise<ProjectParseResult> {
   return { loom, diagnostics, errorCount, warningCount, sourceTexts };
 }
 
+/** The phase-⑦ WARNING footer, shared by every command that runs
+ *  `validateLoomModel`.
+ *
+ *  Four commands compute IR diagnostics — `parse`, `generate system`,
+ *  `snapshot` and `verify` — and each of them, independently, printed the
+ *  warnings only from inside its `if (errors.length > 0)` branch (or not at
+ *  all).  So a model that VALIDATES prints its warnings nowhere, on exactly the
+ *  runs that succeed.  #2668 fixed two of the four; the other two kept the
+ *  defect, because the print was four copies of the same three lines rather
+ *  than one function.  It is one function now: a fifth command cannot inherit
+ *  the bug by forgetting to hoist a branch.
+ *
+ *  A warning NEVER affects an exit code — every caller prints and continues. */
+function printLoomWarnings(
+  diags: readonly { severity: string; source: string; message: string }[],
+) {
+  const warnings = diags.filter((d) => d.severity !== "error");
+  if (warnings.length === 0) return;
+  for (const d of warnings) console.error(`${d.source} ${d.severity}: ${d.message}`);
+  console.error(`${warnings.length} warning(s).`);
+}
+
 /** The AST-diagnostic footer.  Structurally typed on the three fields it
  *  reads, so it serves both the single-document `ParseResult` and the
  *  multi-file `ProjectParseResult`. */
@@ -492,11 +514,7 @@ async function runGenerate(
   // lived inside the `loomErrors.length > 0` branch above, so every phase-⑦
   // warning was computed and then dropped on exactly the runs that succeed.
   // Warnings never gate generation — they just have to reach the author.
-  const loomWarnings = loomDiags.filter((d) => d.severity !== "error");
-  if (loomWarnings.length > 0) {
-    for (const d of loomWarnings) console.error(`${d.source} ${d.severity}: ${d.message}`);
-    console.error(`${loomWarnings.length} warning(s).`);
-  }
+  printLoomWarnings(loomDiags);
   // Directory creation is deferred to the write loop below (and guarded by
   // `!options.dryRun`) so a `--dry-run` touches nothing on disk — not even
   // `mkdir`-ing the output dir.
@@ -682,6 +700,12 @@ async function runSnapshot(
     for (const d of loomDiags) console.error(`${d.source} ${d.severity}: ${d.message}`);
     process.exit(1);
   }
+  // The residue #2668 left behind: this print sat INSIDE the branch above, so a
+  // snapshot of a clean-but-warned model reported its warnings nowhere.  A
+  // provenance capture is exactly where a "validation accepts this but it is a
+  // no-op" warning matters — the snapshot is what a runtime trace is later
+  // explained against.  Exit code unchanged (0).
+  printLoomWarnings(loomDiags);
 
   const commit = gitCommitHash();
   if (commit) process.env.LOOM_COMMIT_HASH = commit;
@@ -841,11 +865,18 @@ async function runVerify(file: string, options: VerifyOptions): Promise<void> {
     process.exit(2);
   }
   const loom = enrichLoomModel(lowerModel(result.model));
-  const loomErrors = validateLoomModel(loom).filter((d) => d.severity === "error");
+  const loomDiags = validateLoomModel(loom);
+  const loomErrors = loomDiags.filter((d) => d.severity === "error");
   if (loomErrors.length > 0) {
     for (const d of loomErrors) console.error(`${d.source} error: ${d.message}`);
     process.exit(2);
   }
+  // `verify` used to filter the diagnostics down to errors before binding them,
+  // so its warnings were not merely unprinted — they were discarded at the call
+  // site.  A verification run is a Definition-of-Done verdict; a phase-⑦
+  // warning is exactly the kind of thing that should reach whoever reads it.
+  // Exit code unchanged (the verdict below still gates it).
+  printLoomWarnings(loomDiags);
   if (loom.requirements.length === 0) {
     console.error(`No \`requirement\` declarations in ${file} — nothing to verify.`);
     process.exit(2);
