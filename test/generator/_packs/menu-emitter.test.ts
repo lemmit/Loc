@@ -1,5 +1,9 @@
 // menu emitter.
 //
+// M-FT.6 (claim stub): the no-`ui.menu` case must MERGE the caller's default
+// sections with every custom page's `menu { … }` metadata — a custom page
+// carrying `menu { section: "Work" }` must not erase the scaffold's own links.
+//
 // Tests the explicit-menu-block path: when a `ui` declares
 // `menu { section "S" { link Page, link "L" -> "url" } }`, the
 // derived `NavSectionVM[]` must match the user's exact layout,
