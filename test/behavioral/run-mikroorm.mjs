@@ -38,7 +38,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { AUTHZ_LADDERS, DEV_CLAIMS, featureCases, resetDatabase, sharedSystemCases, unauthorizedCredentials } from "./cases.mjs";
+import { AUTHZ_LADDERS, declaresE2e, DEV_CLAIMS, featureCases, mountsFileRoutes, resetDatabase, sharedSystemCases, unauthorizedCredentials } from "./cases.mjs";
 import { stopServer, waitForPort, waitForPortFree } from "./proc.mjs";
 import { makeWireGate, recorderPreamble } from "./wire-differential.mjs";
 import { startMockIssuer } from "./oidc-mock.mjs";
@@ -108,20 +108,17 @@ const MIKRO_SKIP = {
   // canonical golden the drizzle leg produces.  That diff is the point: an
   // aggregate that coerced a numeric differently, or a filter that silently
   // stopped applying, is a VALUE divergence no compile tier can see.)
-  // Same class again, and the most honest entry in this map: the narrowing is
-  // DECLARED in the adapter's own capability descriptor.  `MIKROORM_SUBSET`
-  // (`src/ir/util/find-predicate-capability.ts`) lowers only comparisons, bare
-  // boolean columns, unary `!` and `&&`/`||` of them — no scalar intrinsic at
-  // all — so a `startsWith` predicate is refused at validation with
-  // `loom.find-predicate-unsupported` naming the shape and the subset.  Nothing
-  // is hidden by skipping: the fixture's whole point is a queryable intrinsic,
-  // and this adapter says up front it cannot lower one.  Widening the subset
-  // belongs to the remaining M-T6.23 mikroorm-emitter slices — slice 1 (#2516)
-  // landed the outbox/relay and did NOT touch the predicate lowerer — so delete
-  // this entry when `whereToMikroFilter` grows an intrinsic arm (and drop the
-  // `MIKROORM_SUBSET` narrowing that declares its absence in the same change).
-  "prefix-filter":
-    "mikroorm lowers no scalar intrinsic in a find/filter predicate — `MIKROORM_SUBSET` declares the narrowing and `loom.find-predicate-unsupported` refuses to generate (widen it in M-T6.23)",
+  // (`prefix-filter` was here, and its entry said to delete it "when
+  // `whereToMikroFilter` grows an intrinsic arm (and drop the `MIKROORM_SUBSET`
+  // narrowing that declares its absence in the same change)".  Both landed:
+  // `MIKRO_INTRINSIC_SQL` renders every `queryable` catalogue row as a `raw()`
+  // fragment — the same Postgres calls the drizzle twin makes, `starts_with`
+  // for the prefix match — and the table is now listed in
+  // `intrinsic-completeness.test.ts`, whose absence is what let the narrowing
+  // sit unexamined while every other SQL renderer had an arm.  The fixture
+  // boots here and its responses are diffed against the same canonical golden
+  // the drizzle leg produces — which is the point, since the delimiter and
+  // wildcard traps it asserts are VALUE divergences no compile tier can see.)
   // (`policy-deny` was here until the mikroorm authz slice: the adapter had no
   // `authz-filter` arm, so the deny sentinel could not lower and
   // `loom.find-predicate-unsupported` refused the whole system — while the deny
@@ -182,7 +179,7 @@ async function waitForHealth(base, timeoutMs = 30_000) {
 
 /** The e2e-run entry (bundled by esbuild): loads the emitted api suite and
  *  dispatches each request over real HTTP at the booted Hono/mikroorm server. */
-function entrySource(e2eFile, bearerToken, hasAuth, authzLadder, unauthorizedCreds) {
+function entrySource(e2eFile, bearerToken, hasAuth, authzLadder, unauthorizedCreds, mountsFiles) {
   const J = JSON.stringify;
   const bearerEnv = bearerToken ? `, E2E_BEARER_TOKEN: ${J(bearerToken)}` : "";
   return `
@@ -219,7 +216,7 @@ export async function run() {
   const results = await runTests(cases);
   // RS-9 — appended AFTER the tier so the probes never shift the ordinals the
   // golden aligns on, and so a failing tier is diagnosed on its own requests.
-  await __frameworkProbes(dispatch, { auth: ${J(!!hasAuth)} });
+  await __frameworkProbes(dispatch, { auth: ${J(!!hasAuth)}, files: ${J(!!mountsFiles)} });
   // M-T9.28 — the authorization ladder, on the cases that declare one.  Runs
   // last and off the RECORDER (see __authzLadder) so it neither shifts wire
   // ordinals nor perturbs the tier it follows.
@@ -243,7 +240,16 @@ async function runCase(c) {
     const deplDir = findNodeDeployable(genDir);
     const e2eDir = join(genDir, "e2e");
     const e2eFile = existsSync(e2eDir) ? (walk(e2eDir, (p) => p.endsWith(".e2e.test.ts"))[0] ?? null) : null;
-    if (!e2eFile) throw new Error("no emitted e2e suite (the system declares no `test e2e … against <node>`)");
+    // A UNIT-ONLY case (domain `test "…"`, no `test e2e`) emits no e2e suite —
+    // that is the declared shape, not an error: run the DB-free unit tier and
+    // skip the api/wire legs, the node oracle's derive-from-the-file-map
+    // posture (M-T6.44's numeric-operands is the first such fixture).  A case
+    // that DECLARES e2e and emits nothing is still an error.
+    if (!e2eFile && declaresE2e(c.source)) throw new Error("no emitted e2e suite (the system declares no `test e2e … against <node>`)");
+    // Unit-only case: nothing for the api tier to dispatch — the unit tier is
+    // pure-domain (persistence-independent) and already covered by run.mjs,
+    // exactly as the corpus comment below promises.
+    if (!e2eFile) return { results: [], wire: [] };
 
     // OIDC (`auth {}` block) → the generated verifier validates a real bearer
     // JWT against the issuer's JWKS.  Point the backend at the in-process mock
@@ -255,6 +261,9 @@ async function runCase(c) {
     // dev stub or OIDC)?  A frontend's `auth: ui` rides its target's.
     // Drives the anonymous `/api/auth/me` probe — see __frameworkProbes.
     const hasAuth = /\n\s*auth:\s*required\b/.test(c.source);
+    // Does this deployable mount the root /files pair (M-T6.39)?  Drives the
+    // absent-file probe — see __frameworkProbes.
+    const mountsFiles = mountsFileRoutes(c.source);
     const oidcEnv =
       isOidc && oidc
         ? { OIDC_ISSUER: oidc.issuer, OIDC_CLIENT_ID: "loom-behavioural", NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" }
@@ -302,6 +311,7 @@ async function runCase(c) {
         hasAuth,
         AUTHZ_LADDERS[c.name] ?? null,
         unauthorizedCredentials(isOidc ? "oidc" : hasAuth ? "devstub" : "none", isOidc && oidc ? oidc.unauthorizedToken : null),
+        mountsFiles,
       ),
     );
     await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });
@@ -395,7 +405,9 @@ for (const c of active) {
     process.stdout.write(`  ${ok ? "✓" : "✗"} [${r.tier ?? "api"}] ${r.name}\n`);
     if (!ok && r.error) process.stdout.write(`      ${String(r.error).split("\n")[0]}\n`);
   }
-  await wire.check(c.name, out.wire, out.results);
+  // Unit-only cases record no wire (the early return above) — keep them out
+  // of the differential instead of gating an empty recording on a golden.
+  if (declaresE2e(c.source)) await wire.check(c.name, out.wire, out.results);
 }
 
 await oidc?.stop();

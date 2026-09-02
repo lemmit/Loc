@@ -534,16 +534,16 @@ Split the problem by where the rule lives:
 | `Form { creates: T \| runs: workflow \| into: state, fields, onSubmit, then? }` | Input form bound to a typed request slice. |
 | `Dashboard(items: […])` | Composite read-only page; grid layout. |
 | `Review(of: T, onSubmit)` | Read-only summary view of a typed value, with a submit action. |
-| `Stack`, `Group`, `Grid`, `Tabs` (+ `Tab`), `Card`, `Toolbar`, `Container`, `Paper`, `Breadcrumbs`, `Divider`, `Section`, `Sticky` | Layout primitives. `Section` is a semantic anchor target; `Sticky` a sticky-position wrapper; `Tab` is the sub-element of `Tabs`. |
+| `Stack`, `Group`, `Grid`, `Tabs` (+ `Tab`), `Card`, `Toolbar`, `Container`, `Paper`, `Breadcrumbs`, `Divider`, `Section`, `Sticky` | Layout primitives. `Section` is a semantic anchor target; `Sticky` a sticky-position wrapper; `Tab` is the sub-element of `Tabs` — `Tab { <label>, …children }`, a children container like `Card`: every positional after the label renders in the panel. |
 | `Heading`, `Text`, `Bold`, `Italic`, `InlineCode`, `Badge`, `Stat`, `Empty`, `Anchor`, `Image`, `Avatar`, `Loader`, `Skeleton`, `Alert`, `KeyValueRow`, `Icon` | Display primitives. `Bold`/`Italic`/`InlineCode` are inline-emphasis spans; `Icon` is a builtin-name or `svg:` literal, decorative-by-default (`aria-hidden`) unless `label:` gives it meaning — which makes it a named `role="img"` and makes that name a user-visible slot, translated through the message catalog. |
 | `Field`, `NumberField`, `PasswordField`, `MultilineField`, `Toggle`, `SelectField { label, bind, options }`, `Select`, `Fieldset` | Bindable inputs. `MultilineField` is the textarea twin of `Field`; `SelectField` is a controlled single-select over a string-array `options:` expression. All accept an optional `error:` expression rendered in the pack's inline error slot (§8.2). |
 | `Action(operation, then?)`, `Button { label, on? }` | Action primitives. |
-| `Modal { trigger, … }` | Disclosure surface — hosts an `OperationForm` (scaffold detail pages) or a state-controlled `open:` body. The state-controlled form ships on **all six frontends**. Flutter's dialogs are imperative (`showDialog` pushes a route), so there is no widget to conditionally render: it bridges through a generated `LoomModalHost` that drives `showDialog` on the flag's rising edge and reports dismissal back, keeping the page's state the single source of truth. `title:` is a user-visible slot on both shapes — it is the dialog's title, translated through the message catalog. |
-| `Money`, `DateDisplay`, `EnumBadge`, `IdLink`, `FileLink` | Formatter primitives. |
+| `Modal { trigger, … }` | Disclosure surface — hosts an `OperationForm` (scaffold detail pages) or a state-controlled `open:` body. The state-controlled form ships on **all six frontends**. Flutter's dialogs are imperative (`showDialog` pushes a route), so there is no widget to conditionally render: it bridges through a generated `LoomModalHost` that drives `showDialog` on the flag's rising edge and reports dismissal back, keeping the page's state the single source of truth. `title:` is a user-visible slot on both shapes — it is the dialog's title, translated through the message catalog. The two shapes do not COMBINE on every target: `Modal { open: <stateBool>, OperationForm { … } }` renders on Angular, Feliz and HEEx (which drive the dialog from their own trigger) and collapses the whole modal to a comment on React/Vue/Svelte/Flutter, so it is a compile error there (`loom.modal-controlled-op-form-unsupported`) — use the trigger shape, which drives the dialog itself. |
+| `Money(value, currency?, decimals?)`, `DateDisplay`, `EnumBadge`, `IdLink`, `FileLink` | Formatter primitives. `Money` renders the wire value **verbatim** by default — its own digits, locale-neutral, with no `Number()` coercion, no grouping separators, no currency symbol and no re-scaling, so a `NUMERIC(19,4)` value's 4th decimal is visible (Loom `money` has no currency dimension, so nothing may be invented for it). `decimals: n` re-scales the digit string to exactly *n* fraction digits, half away from zero — the backends' own rounding family, never through a float. `currency: "EUR"` prefixes **the code you passed**, verbatim (`EUR 12.3456`). The contract is one shared implementation across all 15 design packs (`src/generator/_frontend/money-format.ts`; [design-packs.md](design-packs.md) § the money-display contract). Feliz already rendered the raw string and prefixes only a declared currency, so it matches by construction — it ignores `decimals:`; Flutter still formats through `NumberFormat.decimalPattern()` (M-T1.21). |
 | `ProvenanceInfo(of:, field:)` | A "?" disclosure over a `provenanced` field's lineage (a native `<details>`/`<summary>`; [provenance.md](provenance.md)). Reads the co-located `<field>_provenance` lineage; scaffolded onto a provenanced field's detail row. Renders on **five of the six frontends** (all but Flutter) plus the Phoenix/HEEx server render — React/Vue/Svelte/Angular/Feliz off the JSON wire sibling; HEEx reads the string-keyed jsonb struct field server-side (`<%= if … %>`/`<%= for … %>`). |
 | `CodeBlock` | Syntax-highlighted code block (highlight.js at runtime). `title:` is a user-visible slot — a caption above the sample, translated through the message catalog. The code SOURCE deliberately is not: translating code breaks it, so an untitled block leaves a page string-less. |
-| `Table`, `Column` | Tabular display (data lambda accessors). `Column` is the sub-element of `Table`/`DataGrid`. |
-| `DataGrid` | **React, Vue, Svelte, Angular, Feliz.** Interactive grid over the same `Column` children — multi-column sort, per-column filters, column-visibility toggles, client pagination, optional row selection. Backed by [TanStack Table](https://tanstack.com/table); see §9.1 below. Using it on HEEx or Flutter is a compile error (`loom.datagrid-unsupported-target`) — use `Table`, which sorts, pages and filters on every frontend. |
+| `Table`, `Column` | Tabular display (data lambda accessors). `Column` is the sub-element of `Table`/`DataGrid`. `filter: <state>` binds a client-side search box above the table; it renders on the six `walkBody` frontends and on a CLIENT-paged table only. On HEEx there is no filter seam (`loom.table-filter-unsupported`), and a server-paged table's rows are one server window, so a client filter there would narrow that page rather than the result set (`loom.table-filter-server-paged`) — note the auto-paged rewrite turns the simplest hand-written `Table { rows: rows, filter: q }` over a paged `.all` into the server-paged shape. |
+| `DataGrid` | **React, Vue, Svelte, Angular, Feliz.** Interactive grid over the same `Column` children — multi-column sort, per-column filters, column-visibility toggles, client pagination, optional row selection. Backed by [TanStack Table](https://tanstack.com/table); see §9.1 below. Using it on HEEx or Flutter is a compile error (`loom.datagrid-unsupported-target`) — use `Table`, which sorts and pages on every frontend (its client `filter:` is the six `walkBody` frontends, client-paged only — see the `Table` row). |
 | `For { each: T[], empty?: markup, item => markup }` | List comprehension — emits the item lambda's markup once per element. TSX lowers to a keyed `.map` + `<Fragment>`, Vue to `<template v-for :key>`, Svelte to a keyed `{#each}`, Angular to an `@for (… ; track …)` block, Phoenix LiveView to a `for … do … end` block. A child primitive (nest inside a layout container — it isn't a standalone page body); the list key is the loop index. The optional `empty:` arm is rendered when the collection is empty — Svelte's native `{:else}`, a TSX `length === 0 ? … : .map(…)` ternary, a Vue `v-if` sibling `<template>`, Angular's `@for`/`@empty` block, a HEEx `Enum.empty?/1` guard. |
 | `QueryView { of:, loading:, error:, empty:, data:, single?:, paged?: }` | 4-arm query-state branching (collection or single-record). The `data:` binding also exposes the paged envelope's page metadata — see §9.2. |
 
@@ -557,6 +557,31 @@ The narrative `Form { … }` snippets in §7 and the §12 wizard sketches
 predate that split — read them as the corresponding named-leaf form (the
 `into:` / `fields:` draft-binding shapes remain illustrative; multi-step
 draft forms are a §14 non-goal, not a shipped primitive).
+
+**Containers vs fixed slots.** A layout primitive (`Stack`, `Group`, `Card`,
+`Tab`, `Section`, `Toolbar`, `Container`, …) renders *every* positional as a
+child. Most display primitives are not containers but fixed SLOT shapes, and
+every design pack renders exactly their declared positions: `Stat { <label>,
+<value> }`, `KeyValueRow { <label>, <value> }`, `Text { <text> }`,
+`EnumBadge { <value> }`, `Image { <src> }`, `Icon { }` (named args only), and the
+op-form `Modal { trigger: …, OperationForm { … } }` (which renders the trigger
+button plus the operation's generated field set, and nothing else). Each
+primitive's slot count is declared once, in `WALKER_PRIMITIVE_SLOTS`
+(`src/util/walker-primitive-names.ts`), where every primitive is classified as
+capped or as a children container — so a new one cannot land outside the rule.
+An extra positional past the cap is rendered by nobody, so it is a validation error
+(`loom.page-primitive-extra-children`) rather than content that silently
+disappears — wrap the extra markup in a `Stack { … }` and pass that as the slot,
+or use the state-controlled `Modal { …children, open: <stateBool> }`, which *is*
+a children container.
+
+
+A bare name in a rendered slot must resolve to a route parameter, a `state`
+field, a `derived` binding, an enclosing lambda's parameter, or a store field.
+An unresolved one (`Text { nosuchthing }`) has nothing to read and used to emit
+a comment in its place — the content vanished from every frontend — so it is now
+rejected as `loom.unresolved-page-ref`, the ref-spelling twin of
+`loom.unknown-page-element`.
 
 `List` / `Detail` / `MasterDetail` were also retired: they were legacy
 archetype names that never had walker renderers (they silently degraded to a
@@ -875,6 +900,49 @@ Three layered scales of override, all the same mechanism — explicit
 - Stacked `scaffold` directives may not double-scaffold the same construct.
 - Two `scaffold` directives may not produce pages with identical generated
   names; explicit `page <Name>` overrides exactly one source.
+
+---
+
+## 10b. `area { … }` — page grouping, and the identity it defines
+
+An `area <Name> { … }` block groups pages (and nested areas) inside a `ui`.
+The scaffold emits one per aggregate (`area Orders { page List, page New,
+page Detail }`), and you can write them by hand and nest them freely.
+
+The area path is not cosmetic — **it is half of a page's identity**:
+
+- **File placement.**  A page inside `area Ops { area Billing { … } }` lands at
+  `src/pages/ops/billing/<page>.tsx` (`.vue`, `.dart`, `_live.ex`, … per
+  frontend).  Lowering resolves this into `PageIR.emitPath`.
+- **Emitted identifiers.**  `page.name` is unique only WITHIN one area scope, so
+  every emitted identifier is derived from the area path plus the name:
+  `area Ops { page Dashboard }` emits the React component `OpsDashboard`, the
+  Angular `OpsDashboardComponent`, the Feliz `Page` case `OpsDashboard`, the
+  Phoenix `OpsDashboardLive`, the Flutter `OpsDashboardPage`, and the Playwright
+  page object `e2e/pages/ops_dashboard.ts`.  A page with no area keeps its bare
+  name.  Scaffold aggregate pages are the one exception: their role name
+  (`List`) is replaced by the aggregate-qualified `OrderList`, which is already
+  unique.  (`pageEmitName` / `pageFileBase`, `src/ir/util/page-kind.ts` +
+  `src/generator/_frontend/page-identity.ts`.)
+
+Because that identity has to be unique, three rules are enforced:
+
+| Rule | Diagnostic |
+|---|---|
+| Page names are unique **within one scope** (the ui top level, or one area) | duplicate-page error in `checkPageScope` |
+| Area names are unique **within one scope** — two `area Ops { … }` blocks compute the same directory | `loom.ui-duplicate-area` |
+| No two pages may resolve to the same `emitPath`, or claim the same scaffold archetype slot | `loom.ui-page-path-collision` / `loom.ui-page-slot-collision` |
+
+The last two used to be silent: the file map kept whichever page was written
+last, so one page's body simply vanished from the build.
+
+**Overriding a scaffold page** means declaring yours in the SAME scope as the
+scaffold's area — `area Orders { page List { … } }` at ui top level.  The macro
+expander merges same-named areas and drops the synthesised `page List`, leaving
+exactly one page in the slot.  Declaring it in a DIFFERENT scope
+(`area Sales { area Orders { page List } }`) does not override anything: it is
+a second page claiming the same archetype, and `loom.ui-page-slot-collision`
+rejects it.
 
 ---
 

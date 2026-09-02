@@ -6,12 +6,12 @@
 // `sku.length > 0`, `email.matches(...)`) as idiomatic `validate_number` /
 // `validate_length` / `validate_format` lines (via `singleFieldConstraints`).
 // A CROSS-field invariant (`handle != email`, `startDate <= endDate`) fits no
-// single-field native chain, so the classifier returns null and — before this
-// module — it was **silently dropped on every path**: create, PATCH, and
-// operation persist all skipped it, while the other four backends 400 it at the
-// domain floor (`docs/audits/generated-code-ddd-review-2026-07.md`).
+// single-field native chain, so the classifier returns null.  Without this
+// module such an invariant is **silently dropped on every path** — create,
+// PATCH and operation persist all skip it — while the other four backends 400
+// it at the domain floor.
 //
-// The fix mirrors the other backends' `AssertInvariants()`: a custom Ecto
+// So this mirrors the other backends' `AssertInvariants()`: a custom Ecto
 // validation that reads the PROPOSED struct (`apply_changes/1` — the record with
 // the changeset's changes applied, valid or not) and `add_error`s when the
 // predicate is false.  The predicate is rendered by the same vanilla
@@ -30,7 +30,7 @@
 import type { AggregateIR, ExprIR, InvariantIR } from "../../../ir/types/loom-ir.js";
 import { pickErrorPath, singleFieldConstraints } from "../../../ir/validate/invariant-classify.js";
 import { messageCode } from "../../../util/message-code.js";
-import { snake } from "../../../util/naming.js";
+import { elixirString, snake } from "../../../util/naming.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 
 /** A scalar this-property / enum-value / literal reads cleanly off the applied
@@ -126,7 +126,7 @@ export function aggregateHasResidualInvariants(agg: AggregateIR): boolean {
 export function renderInvariantValidatorFn(agg: AggregateIR, contextModule: string): string {
   const residuals = residualInvariants(agg);
   if (residuals.length === 0) return "";
-  const rc: RenderCtx = { thisName: "data", contextModule, foundation: "vanilla" };
+  const rc: RenderCtx = { thisName: "data", contextModule };
   const fallbackField = agg.fields?.[0]?.name ?? "id";
 
   const checks = residuals.map((inv) => {
@@ -139,7 +139,10 @@ export function renderInvariantValidatorFn(agg: AggregateIR, contextModule: stri
     const codeOpt = inv.message
       ? `, loom_code: ${JSON.stringify(messageCode(inv.message.text))}`
       : "";
-    const violate = `add_error(changeset, :${field}, ${JSON.stringify(msg)}${codeOpt})`;
+    // The message goes through the shared escaping funnel: a raw `#{` in the
+    // author's `message "…"` (or in the derived `must satisfy: <source>`) would
+    // interpolate when the changeset runs, not read as text.
+    const violate = `add_error(changeset, :${field}, ${elixirString(msg)}${codeOpt})`;
     const guarded = inv.guard
       ? `    changeset =
       if ${renderExpr(inv.guard, rc)} do

@@ -4,7 +4,7 @@
 // vanilla-foundation-tdd-plan.md.
 //
 // Plain Ecto.Repo queries returning `{:ok, _} | {:error, _}` results.
-// Slice 8 (custom finds) emits one fn per
+// Custom finds emit one fn per
 // repository `find` declaration alongside the CRUD seam — a
 // parameterised Ecto query, return shape matched to the find's
 // declared type (`Customer?` → `Repo.one(query)`; `Customer[]` →
@@ -82,7 +82,7 @@ export function emitVanillaRepositories(
     const content = isAbstractBase(agg)
       ? renderBaseReader(appModule, ctxModule, agg, pool)
       : isVanillaDocAgg(agg, ctx, sys)
-        ? renderDocRepository(appModule, ctxModule, agg, customFindsOf(repo))
+        ? renderDocRepository(appModule, ctxModule, agg, customFindsOf(repo), principalIdKey)
         : renderRepository(appModule, ctxModule, agg, repo, principalIdKey, ctx, pool, sys);
     const path = `lib/${appSnake}/${ctxSnake}/${aggSnake}_repository.ex`;
     out.set(path, content);
@@ -183,13 +183,13 @@ function renderRepository(
   // discriminator (for a concrete sharing the base table).  A non-TPH aggregate
   // keeps `capEff === cap` so its output stays byte-identical.
   const capEff = combineWhere(kindFilter, cap);
-  // The WRITE-scope command-load filter (authorization Phase 3 P3.1) — null
+  // The WRITE-scope command-load filter (authorization) — null
   // unless the aggregate's write scope is narrower than its read scope.  When
   // present, a `find_by_id_for_write` mirrors `find_by_id` but scopes on it.
   const writeScope = vanillaWriteScopeFilter(agg, contextModule);
   const writeEff = combineWhere(kindFilter, writeScope);
   // Does the write-scope predicate actually reference the principal?  A DENY
-  // carve-out (`deny write on X`, authorization Phase 4) is always-false and uses
+  // carve-out (`deny write on X`, authorization) is always-false and uses
   // NO `current_user`, so the `find_by_id_for_write` principal param must be
   // underscored or `--warnings-as-errors` trips on the unused variable.  The
   // tenant-floor / deep write scopes DO reference it.
@@ -447,7 +447,7 @@ ${
   // TPH concrete keeps its kind discriminator.
   writeScope
     ? `
-  @doc "Command-load path (authorization Phase 3 P3.1): scope the by-id load to the WRITE scope; a readable-but-not-writable (or missing) row reads as :not_found → 404."
+  @doc "Command-load path (authorization): scope the by-id load to the WRITE scope; a readable-but-not-writable (or missing) row reads as :not_found → 404."
   @spec find_by_id_for_write(binary(), map() | nil) :: {:ok, ${aggModule}.t()} | {:error, :not_found}
   def find_by_id_for_write(id, ${writeScopeUsesPrincipal ? "current_user" : "_current_user"} \\\\ nil) when is_binary(id) do
     case Repo.one(from(record in ${aggModule}, where: record.id == ^id and (${writeEff}))) do
@@ -468,7 +468,7 @@ ${
   def update(%${aggModule}{} = record, attrs${updateStampActorParam}${versionedParam}) when is_map(attrs) do
 ${updateBody}
   end
-${updateProvHelper}${deleteBlock}  @doc "Persist a pre-built changeset (Slice 5c — named-operation seam)."
+${updateProvHelper}${deleteBlock}  @doc "Persist a pre-built changeset (the named-operation seam)."
   @spec persist_change(Ecto.Changeset.t()) ::
           {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()${versioned ? " | :conflict" : ""}}
   def persist_change(%Ecto.Changeset{data: %${aggModule}{}} = changeset) do
@@ -480,8 +480,8 @@ ${updateProvHelper}${deleteBlock}  @doc "Persist a pre-built changeset (Slice 5c
 /** One custom-find function — a parameterised Ecto query under the
  *  `record` Ecto binding, returning `{:ok, _}` shaped per the find's
  *  declared return type.  Shares the retrieval shape from
- *  `retrieval-emit.ts` (filterArgs + foundation: "vanilla" → `^pin`
- *  syntax, enum strings).  Convention-finds without a `where` clause
+ *  `retrieval-emit.ts` (`filterArgs` → `^pin` syntax, enum
+ *  strings).  Convention-finds without a `where` clause
  *  (params match aggregate property names; e.g. `byCustomer(customerId)`)
  *  fall through to a per-param `record.<param> == ^<param>` predicate
  *  generated here, matching the source-level convention spelled out in
@@ -538,7 +538,6 @@ function renderFindFn(
   const renderCtx: RenderCtx = {
     thisName: "record",
     contextModule,
-    foundation: "vanilla",
     // Params bind via Ecto pin syntax (`^needle`) inside the `from
     // ... where: ...` macro.  See render-expr.ts:filterArgs.
     filterArgs: true,

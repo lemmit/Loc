@@ -1,4 +1,4 @@
-// Context-scoped INTEGRATION test emission (test-placement.md, Phase 3b) — the
+// Context-scoped INTEGRATION test emission (test-placement.md) — the
 // Elixir/vanilla-Phoenix (Ecto) backend.  The Elixir twin of the node renderer,
 // but persistence goes through the plain CONTEXT MODULE (not a hand-built repo):
 // a `context`-nested `test` (or `test … for <Context>`) runs cross-aggregate

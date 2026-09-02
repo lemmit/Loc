@@ -26,9 +26,8 @@
  *  runtime reports it. `javaFqn` is set only for a Java frame — the
  *  dotted `pkg.pkg.Class.method` the frame line names. `col` (1-based,
  *  same base as `WireRegion.targetCol` in `resolve.ts`) is set only for a
- *  V8/Node frame — the only dialect this slice's native frames carry a
- *  column for (.NET/Java/Python/Elixir formats have no column and keep
- *  today's line-only behavior). */
+ *  V8/Node frame — the only dialect whose native frames carry a column
+ *  (.NET/Java/Python/Elixir formats have none and stay line-only). */
 export interface ParsedFrame {
   /** 0-based index into `logText.split("\n")` — lets `annotate.ts` splice
    *  the annotation back onto the exact source line. */

@@ -116,7 +116,6 @@ export interface OutlineContext {
   aggregates: OutlineDecl[];
   valueObjects: OutlineDecl[];
   workflows: string[];
-  pages: string[];
   enums: string[];
   events: string[];
   repositories: string[];
@@ -125,6 +124,14 @@ export interface OutlineContext {
 export interface OutlineSystem {
   name: string;
   contexts: OutlineContext[];
+  /** `ui` blocks and the surfaces inside them (pages — area path included in
+   *  the address — components, stores).
+   *
+   *  Uis are system-scoped, so they live here rather than as a
+   *  `pages: string[]` on OutlineContext: the grammar allows `Page` only as a
+   *  `UiMember`/`AreaMember`, never as a context member, so a context-level
+   *  list would always be empty. */
+  uis: OutlineDecl[];
   deployables: string[];
 }
 

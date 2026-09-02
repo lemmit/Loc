@@ -23,12 +23,13 @@ import type { NavSectionVM } from "../_frontend/menu-emitter.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { renderRequiresGuardInTemplate } from "./heex-walker-core.js";
+import { elixirI18nString } from "./i18n.js";
 
 export interface RenderSidebarComponentArgs {
   ui: UiIR;
   appName: string;
   appModule: string;
-  /** Served decl names for `classifyPage` (slice 3c — replaces stamped origin). */
+  /** Served decl names for `classifyPage` (replaces stamped origin). */
   nameCtx: PageNameCtx;
   /** True when this deployable runs `auth: required` — so `LiveAuth.on_mount`
    *  assigns `@current_user` into the LiveView scope and the app layout passes
@@ -39,6 +40,10 @@ export interface RenderSidebarComponentArgs {
   authEnabled?: boolean;
   /** The deployable's loaded HEEx design pack — owns the sidebar markup. */
   pack: LoadedPack;
+  /** True when this ui has extractable user-visible strings (M-T1.11) — the
+   *  nav labels then bind through `pgettext(<catalog key>, <English>)` instead
+   *  of shipping the source string at every locale.  False ⇒ byte-identical. */
+  i18nEnabled?: boolean;
 }
 
 /** One sidebar link as the pack's `sidebar-entry` template consumes it.
@@ -59,7 +64,17 @@ interface SidebarEntryVM {
 
 /** Emit the full Elixir source for `lib/<app>_web/components/sidebar.ex`. */
 export function renderSidebarComponent(args: RenderSidebarComponentArgs): string {
-  const { ui, appName, appModule, nameCtx, authEnabled = false, pack } = args;
+  const { ui, appName, appModule, nameCtx, authEnabled = false, pack, i18nEnabled = false } = args;
+
+  /** A nav label in HEEx TEXT position.  An AUTHORED label (one the extraction
+   *  pass keyed into the catalog — `menu.link.*` / `page.<P>.menu.label.*`)
+   *  binds through gettext under i18n; an emitter-DERIVED label (the default
+   *  aggregate/workflow sidebar) has no key, so it stays the escaped literal —
+   *  byte-identical to the pre-i18n sidebar.  A13b. */
+  const navLabel = (label: string, key: string | undefined): string =>
+    i18nEnabled && key
+      ? `<%= pgettext(${elixirI18nString(key)}, ${elixirI18nString(label)}) %>`
+      : escapeHeex(label);
 
   const navSections: NavSectionVM[] = deriveSidebarFromUi(ui, nameCtx) ?? buildDefaultSections(ui);
 
@@ -75,13 +90,13 @@ export function renderSidebarComponent(args: RenderSidebarComponentArgs): string
   const multi = navSections.length > 1;
   const sections = navSections.map((section) => ({
     labelled: multi && !!section.label,
-    label: escapeHeex(section.label),
+    label: navLabel(section.label, section.labelKey),
     entries: section.entries.map((entry): SidebarEntryVM => {
       // Every VM key is always present (empty string when inapplicable) —
       // the pack templates compile in Handlebars strict mode, which throws
       // on a missing field rather than rendering it blank.
       const base = {
-        label: escapeHeex(entry.label),
+        label: navLabel(entry.label, entry.labelKey),
         testId: escapeHeex(entry.testId),
         gate: gateByRoute.get(entry.to) ?? "",
       };

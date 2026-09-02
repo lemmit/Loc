@@ -2,7 +2,7 @@
 // Vanilla provenance runtime — the Elixir counterpart of the Hono
 // `domain/provenance.ts` SDK + the .NET `Domain/Common/ProvLineage.cs` +
 // `provenance_records` history table.  Emitted only when the project declares
-// at least one `provenanced` field on a `foundation: vanilla` deployable.
+// at least one `provenanced` field on a `platform: elixir` deployable.
 //
 //   - `<App>.Provenance` — the per-process trace buffer (`record/1` push,
 //     `drain/0` clear) + the transactional history flush (`flush/1`).  The BEAM
@@ -432,7 +432,6 @@ export function renderUpdateProvenanceCapture(agg: AggregateIR, contextModule: s
   const rc: RenderCtx = {
     thisName: "record",
     contextModule,
-    foundation: "vanilla",
     paramRenames,
   };
   const lineageVars: string[] = [];
@@ -457,7 +456,7 @@ export function renderUpdateProvenanceCapture(agg: AggregateIR, contextModule: s
     );
   });
   return `
-  # RS-18 — the generic update persists through \`update_changeset/2\`, so the
+  # The generic update persists through \`update_changeset/2\`, so the
   # synthesized \`operation update(...)\` body (and the inline lineage capture the
   # NAMED-operation path emits) never runs.  Re-capture it here against the
   # proposed row, so a provenanced field's lineage names the write that actually

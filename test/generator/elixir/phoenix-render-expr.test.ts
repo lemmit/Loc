@@ -386,7 +386,7 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
     ).toBe("record.order.shipped_at");
   });
 
-  it("collapses string.length → String.length(...)", () => {
+  it("collapses string.length → the CODE-POINT count (not String.length/1)", () => {
     expect(
       renderExpr(
         {
@@ -398,7 +398,7 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
         },
         ctx,
       ),
-    ).toBe("String.length(record.name)");
+    ).toBe("length(String.to_charlist(record.name))");
   });
 
   it("collapses array.count → Enum.count(...)", () => {
@@ -764,6 +764,112 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
     // int is a native integer → keep Enum.sum.
     expect(renderExpr(sumMc(INT, [proj("qty", INT)]), ctx)).toBe(
       "Enum.sum(Enum.map(record.items, fn x -> x.qty end))",
+    );
+
+    // A5 — an ARITHMETIC λ body (`l.price * l.qty`, the canonical order
+    // total).  Before `bodyTypeOf` grew its `binary` arm this typed as
+    // `undefined` and fell through to `Enum.sum` over `%Decimal{}` structs,
+    // which COMPILES CLEAN and raises ArithmeticError at runtime.
+    const arithLambda: ExprIR = {
+      kind: "lambda",
+      param: "l",
+      body: {
+        kind: "binary",
+        op: "*",
+        left: {
+          kind: "member",
+          receiver: { kind: "ref", name: "l", refKind: "lambda" },
+          member: "price",
+          receiverType: { kind: "entity", name: "Line" },
+          memberType: MONEY,
+        },
+        right: {
+          kind: "member",
+          receiver: { kind: "ref", name: "l", refKind: "lambda" },
+          member: "qty",
+          receiverType: { kind: "entity", name: "Line" },
+          memberType: INT,
+        },
+        leftType: MONEY,
+        rightType: INT,
+        resultType: MONEY,
+      },
+    };
+    expect(renderExpr(sumMc({ kind: "entity", name: "Line" }, [arithLambda]), ctx)).toBe(
+      "Enum.reduce(Enum.map(record.items, fn l -> Decimal.mult(l.price, l.qty) end), Decimal.new(0), &Decimal.add/2)",
+    );
+  });
+
+  // A12 — argless `xs.any()` means NON-EMPTY.  The default predicate used to be
+  // `fn _ -> false end`, i.e. ALWAYS FALSE: it compiled clean and disagreed
+  // with every sibling backend (`.some(() => true)` / `.Any(_ => true)` /
+  // `!isEmpty()` / `len(...) > 0`).  `all`'s own default was already correct.
+  it("renders argless `any()` as a NON-EMPTY test, not an always-false predicate (A12)", () => {
+    const arr: TypeIR = { kind: "array", element: STRING };
+    const mc = (member: string, args: ExprIR[]): ExprIR => ({
+      kind: "method-call",
+      receiver: thisProp("items"),
+      member,
+      args,
+      receiverType: arr,
+      isCollectionOp: true,
+    });
+    expect(renderExpr(mc("any", []), ctx)).toBe("Enum.any?(record.items, fn _ -> true end)");
+    // the dual, unchanged — `all()` over no predicate is vacuously true
+    expect(renderExpr(mc("all", []), ctx)).toBe("Enum.all?(record.items, fn _ -> true end)");
+    // a predicate argument still wins
+    const pred: ExprIR = {
+      kind: "lambda",
+      param: "x",
+      body: { kind: "ref", name: "x", refKind: "lambda" },
+    };
+    expect(renderExpr(mc("any", [pred]), ctx)).toBe("Enum.any?(record.items, fn x -> x end)");
+  });
+
+  // A5 — the same missing `binary` arm degraded the sortBy SORTER choice.
+  // `Enum.sort_by/2`'s default `&<=/2` is STRUCTURAL term comparison, so a
+  // `%Decimal{}` key sorts by `coef`/`exp` (2 before 1.5) with no error at all.
+  it("picks the Decimal sorter for a sortBy over an ARITHMETIC money key (A5)", () => {
+    const arithKey: ExprIR = {
+      kind: "lambda",
+      param: "l",
+      body: {
+        kind: "binary",
+        op: "*",
+        left: {
+          kind: "member",
+          receiver: { kind: "ref", name: "l", refKind: "lambda" },
+          member: "price",
+          receiverType: { kind: "entity", name: "Line" },
+          memberType: MONEY,
+        },
+        right: {
+          kind: "member",
+          receiver: { kind: "ref", name: "l", refKind: "lambda" },
+          member: "qty",
+          receiverType: { kind: "entity", name: "Line" },
+          memberType: INT,
+        },
+        leftType: MONEY,
+        rightType: INT,
+        resultType: MONEY,
+      },
+    };
+    const sortMc = (args: ExprIR[]): ExprIR => ({
+      kind: "method-call",
+      receiver: thisProp("items"),
+      member: "sortBy",
+      args,
+      receiverType: { kind: "array", element: { kind: "entity", name: "Line" } },
+      isCollectionOp: true,
+    });
+    expect(renderExpr(sortMc([arithKey]), ctx)).toBe(
+      "Enum.sort_by(record.items, fn l -> Decimal.mult(l.price, l.qty) end, Decimal)",
+    );
+    expect(
+      renderExpr(sortMc([arithKey, { kind: "literal", lit: "bool", value: "true" }]), ctx),
+    ).toBe(
+      "Enum.sort_by(record.items, fn l -> Decimal.mult(l.price, l.qty) end, {:desc, Decimal})",
     );
   });
 

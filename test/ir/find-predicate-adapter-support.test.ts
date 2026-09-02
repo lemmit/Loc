@@ -57,7 +57,17 @@ describe("find-predicate adapter support (P0)", () => {
     expect(errs).toEqual([]);
   });
 
-  it("still rejects a `currentUser.<field>` find predicate on MikroORM (no principal accessor)", async () => {
+  // Flipped: this used to assert the MikroORM narrowing for a
+  // `currentUser.<field>` predicate, on the descriptor's stated reason ("no
+  // principal accessor on the find path").  That reason was never true —
+  // `filterValue` has always rendered `requireCurrentUser().<claim>`.  The real
+  // defect was one layer out: three of the four repository variants did not
+  // declare the trailing `currentUser: User` parameter the Hono route passes,
+  // so the shape failed with TS2554 in the GENERATED project — which no
+  // predicate descriptor could have named.  All four declare it now, so the
+  // shape is admitted, and the emitted signature/call-arity agreement is pinned
+  // by `test/generator/typescript/mikroorm-predicate-subset.test.ts`.
+  it("admits a `currentUser.<field>` find predicate on MikroORM", async () => {
     const errs = await findPredicateErrors(`
       system S {
         user { id: guid  name: string }
@@ -74,7 +84,7 @@ describe("find-predicate adapter support (P0)", () => {
         deployable api { platform: node { persistence: mikroorm }, contexts: [C], port: 3000, auth: required }
       }
     `);
-    expect(errs.some((m) => /persistence: mikroorm/.test(m) && /currentUser/.test(m))).toBe(true);
+    expect(errs).toEqual([]);
   });
 
   it("admits the same MikroORM predicate when it is a plain comparison", async () => {

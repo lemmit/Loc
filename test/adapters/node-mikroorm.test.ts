@@ -581,6 +581,21 @@ describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
     expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toEqual([]);
   });
 
+  // A ROOT scalar collection is the one shape still behind drizzle — and it used
+  // to abort codegen with a raw `Error: mikroorm: unsupported field kind 'array'
+  // … (validator gap)` instead of failing validation.  `emit` returns before
+  // generating when the IR validator errors, so this asserts BOTH halves at once:
+  // the diagnostic is present, and no exception escapes.
+  it("refuses a root scalar-collection field as a diagnostic, not a codegen throw", async () => {
+    const { errors, files } = await emit(sys("mikroorm", "tags: string[]"));
+    expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toHaveLength(1);
+    expect(files.size).toBe(0);
+    // The same field on drizzle still generates (native Postgres array).
+    const drizzle = await emit(sys("drizzle", "tags: string[]"));
+    expect(drizzle.errors).toEqual([]);
+    expect(drizzle.files.size).toBeGreaterThan(0);
+  });
+
   it("accepts the supported subset (scalar / enum / VO / optional)", async () => {
     const { errors } = await emit(sys("mikroorm"));
     expect(errors).toEqual([]);
@@ -748,13 +763,21 @@ describe("mikroorm — aggregate inheritance (wave 2)", () => {
     expect(repo).toContain('kind: "CreditCard"');
   });
 
-  it("TPH emits a polymorphic base reader dispatching on kind", async () => {
+  it("TPH emits a polymorphic base reader that DELEGATES to the concretes", async () => {
+    // It used to scan the shared Row itself (`em.find(PaymentMethodRow, {})`)
+    // and hydrate by `kind`, which read the shared table through none of the
+    // machinery the concrete repositories apply to it — no capability `filter`,
+    // no tenancy predicate, no contained parts (F2-CB-C12; the drizzle twin is
+    // fixed the same way).  Delegating makes all of that ride along.
     const { files } = await emit(inh("sharedTable"));
     const reader = files.get("api/db/repositories/paymentMethod-repository.ts")!;
     expect(reader).toContain("class PaymentMethodRepository");
-    expect(reader).toContain("switch (row.kind)");
-    expect(reader).toContain('case "CreditCard":');
-    expect(reader).toContain("em.find(PaymentMethodRow, {})");
+    expect(reader).toContain("new CreditCardRepository(em, events)");
+    expect(reader).toContain("this.creditCardRepo.all()");
+    expect(reader, "no direct read of the shared Row").not.toContain(
+      "em.find(PaymentMethodRow, {})",
+    );
+    expect(reader, "no inline kind dispatch").not.toContain("switch (row.kind)");
   });
 
   it("TPC gives each concrete its own table + a delegating base reader", async () => {
@@ -1464,7 +1487,15 @@ describe("mikroorm — aggregate-inheritance participant + contained parts", () 
     expect(entities).toContain("export class SplitRow");
   });
 
-  it("still rejects an ABSTRACT inheritance base with its own contained parts (no repository owns it)", async () => {
+  // Promoted, not deleted.  This was the LAST `loom.mikroorm-unsupported` shape
+  // reject, and its argument named nothing adapter-specific: an abstract base
+  // owns no repository and concretes do not inherit its parts, so the part's
+  // table has no reader and no writer.  Generated on every other target, that
+  // held — the shape is silently dropped on drizzle / efcore / python / java,
+  // emitted as a dead FK'd table with no reader or writer on dapper, and
+  // half-built into a 500 on elixir.  So it is a target-neutral AST rule now
+  // (`loom.abstract-aggregate-contains`), and the adapter code is gone.
+  it("rejects an ABSTRACT inheritance base with its own contained parts — target-neutrally", async () => {
     const src = `system M {
   api A from S
   subdomain S {
@@ -1483,7 +1514,14 @@ describe("mikroorm — aggregate-inheritance participant + contained parts", () 
   deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
 }`;
     const { errors } = await emit(src);
-    expect(errors.some((e) => /abstract aggregate-inheritance base/.test(e))).toBe(true);
+    expect(
+      errors.some((e) => /cannot declare 'contains tags'/.test(e)),
+      `expected loom.abstract-aggregate-contains, got: ${errors.join(" | ")}`,
+    ).toBe(true);
+    // …and NOT under the adapter code any more: the same `.ddd` is refused with
+    // `persistence: drizzle` too (pinned in
+    // `test/language/parsing/aggregate-inheritance.test.ts`).
+    expect(errors.some((e) => /persistence: mikroorm/.test(e))).toBe(false);
   });
 });
 

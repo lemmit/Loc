@@ -8,7 +8,7 @@ import { lines } from "../../util/code-builder.js";
  *  `from app.domain.file_ref import FileRef`. */
 export function renderPyFileRefModel(): string {
   return lines(
-    '"""Shared FileRef wire model (M-T1.2).  Auto-generated."""',
+    '"""Shared FileRef wire model.  Auto-generated."""',
     "",
     "from typing import TypedDict",
     "",
@@ -34,13 +34,14 @@ export function renderPyFileRefModel(): string {
  *  `<fn>_put_bytes` / `<fn>_get_bytes` exist there (s3 + localDisk). */
 export function renderPyFilesRoutes(fn: string, module: string): string {
   return lines(
-    '"""File upload/download endpoints (M-T1.2).  Auto-generated."""',
+    '"""File upload/download endpoints.  Auto-generated."""',
     "",
     "from uuid import uuid4",
     "",
     "from fastapi import APIRouter, Response, UploadFile",
     "from fastapi.responses import JSONResponse",
     "",
+    "from app.domain.errors import AggregateNotFoundError",
     `from ${module} import ${fn}_get_bytes, ${fn}_put_bytes`,
     "",
     'router = APIRouter(prefix="/files", tags=["files"])',
@@ -69,7 +70,11 @@ export function renderPyFilesRoutes(fn: string, module: string): string {
     '    """Stream the stored object back with its content-type."""',
     `    obj = await ${fn}_get_bytes(key)`,
     "    if obj is None:",
-    '        return JSONResponse({"error": "not found"}, status_code=404)',
+    // M-T6.39 — raise the app's ONE 404 producer (the `AggregateNotFoundError`
+    // handler registered on the FastAPI app) rather than hand-building a body,
+    // so an absent object answers the same RFC 7807 envelope — and the same
+    // `httpStatus NotFound -> <Code>` override — as every other absent read.
+    '        raise AggregateNotFoundError(f"File {key} not found")',
     "    body, content_type = obj",
     "    return Response(content=body, media_type=content_type)",
     "",

@@ -1,5 +1,5 @@
-// First-boot database seeding for the Hono backend (database-seeding.md,
-// Phase 2).  Emits `db/seed.ts` from the context's `SeedIR` list.
+// First-boot database seeding for the Hono backend (database-seeding.md).
+// Emits `db/seed.ts` from the context's `SeedIR` list.
 //
 // Per D-SEED-PATH the default path is **through the domain `create`**: each
 // row becomes `await <agg>Repo.save(<Agg>.create({ … }))`, so the aggregate's
@@ -247,7 +247,7 @@ function renderSeedFile(
       "}",
       "",
       "/** First-boot seed data (database-seeding.md).  Ship-once per dataset via",
-      " *  the __loom_seed marker (D-SEED-IDEMPOTENCY); re-runs are no-ops. */",
+      " *  the __loom_seed marker; re-runs are no-ops. */",
       "export async function runSeeds(db: Db): Promise<void> {",
       "  await db.execute(",
       '    sql`CREATE TABLE IF NOT EXISTS "__loom_seed" ("dataset" text PRIMARY KEY, "applied_at" timestamptz NOT NULL DEFAULT now())`,',
@@ -355,7 +355,7 @@ function renderMikroSeedFile(
       "}",
       "",
       "/** First-boot seed data (database-seeding.md).  Ship-once per dataset via",
-      " *  the __loom_seed marker (D-SEED-IDEMPOTENCY); re-runs are no-ops. */",
+      " *  the __loom_seed marker; re-runs are no-ops. */",
       "export async function runSeeds(db: Db): Promise<void> {",
       "  await db.getConnection().execute(",
       '    \'CREATE TABLE IF NOT EXISTS "__loom_seed" ("dataset" text PRIMARY KEY, "applied_at" timestamptz NOT NULL DEFAULT now())\',',

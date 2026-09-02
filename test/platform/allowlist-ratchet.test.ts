@@ -126,11 +126,19 @@ const REGISTERED: Ratchet[] = [
   // `GetByIdForWriteAsync` (CS0535).  So the count goes up while the repo's
   // knowledge does too: the defects predate the entry, and were invisible
   // because no dapper fixture had a `tenantRegistry` the compiler ever saw.
+  //
+  // 1 -> 0 again: both leaks are fixed.  The hierarchy seam now emits ONE
+  // resolver per persistence adapter (`DapperOrgPathResolver.cs`, raw Npgsql
+  // over the registry's `data_key`), and the Dapper document repository carries
+  // the EF twin's `GetByIdForWriteAsync` — plus the in-app `_CapabilityVisible`
+  // read filter it had also never received, which was the SILENT half (a
+  // `tenantOwned` document aggregate read across tenants on this adapter).
+  // `policy-document` compiles clean here under /warnaserror.
   {
     file: "test/e2e/corpus-dotnet-dapper-build.test.ts",
     name: "DAPPER_COMPILE_SKIP",
     kind: "record",
-    max: 1,
+    max: 0,
   },
   // Capability boundaries the validator states honestly (`loom.dapper-unsupported`),
   // not gaps — these never reach the compiler.  1 -> 5: the reclassification
@@ -186,11 +194,25 @@ const REGISTERED: Ratchet[] = [
   // literal already names every backend family, and they have no second arm),
   // three driven by real fixtures through the `no db-owning deployable hosts
   // this context` arm the pinned four lack.
+  //
+  // 31 -> 17: the rest of the backend-capability cluster.  Eleven more latent
+  // gates plus the two java entity-field backstops are pinned — this time as
+  // CHECKED pins (`LATENT_GATES` re-reads each gate's real capability `Set` on
+  // every run, so a sixth backend family fails the pin instead of leaving a
+  // stale claim in prose).  `loom.field-mask-unsupported` was the one in the
+  // cluster that turned out drivable, through the same `anyBackend` arm.
+  //
+  // …and of those, the two java entity-field backstops are now GONE
+  // ENTIRELY rather than pinned (M-T6.36): a backend-named code for a shape
+  // the LANGUAGE refuses on every platform is a phantom, not a backstop, and
+  // it carried two undrainable rows in the M-T9.27 register.  The
+  // unreachability moved to a scope-layer test that fails if part-type scope
+  // widens.
   {
     file: "test/system/diagnostic-firing-census.data.ts",
     name: "UNCOVERED",
     kind: "set",
-    max: 31,
+    max: 0,
   },
   // The MikroORM behavioural leg's skip register.  It was NOT registered here
   // until `projection-join` (a query-time projection the adapter refuses) had to
@@ -212,9 +234,10 @@ const REGISTERED: Ratchet[] = [
   //           three without anyone noticing.
   //
   // `policy-deny` then drained too: the adapter grew the `authz-filter` arm the
-  // deny sentinel needed AND the write-scope pre-guard it had never read.  What
-  // remains is one gap: `prefix-filter` (the declared `MIKROORM_SUBSET`
-  // predicate narrowing — no scalar intrinsic in a find predicate).
+  // deny sentinel needed AND the write-scope pre-guard it had never read.  Then
+  // `prefix-filter`, the last one, when `MIKRO_INTRINSIC_SQL` gave the adapter a
+  // `raw()`-fragment arm for every `queryable` catalogue intrinsic — the
+  // register is EMPTY.
   //
   // NOTE it lives in a `.mjs` runner rather than a vitest file, which is also
   // why it has no per-adapter ORACLE like the dapper maps have — the asymmetry
@@ -223,9 +246,10 @@ const REGISTERED: Ratchet[] = [
     file: "test/behavioral/run-mikroorm.mjs",
     name: "MIKRO_SKIP",
     kind: "record",
-    // 2 → 1: `policy-deny` drained when the adapter grew an `authz-filter` arm
-    // and a write-scope pre-guard (the deny fixture now boots on this leg).
-    max: 1,
+    // 2 → 1 → 0.  `policy-deny` drained with the `authz-filter` arm + the
+    // write-scope pre-guard; `prefix-filter` with the intrinsic arm the entry
+    // itself named as its exit condition.
+    max: 0,
   },
   // The behavioural tier's OWN per-(platform, case) skip register — the sibling
   // of MIKRO_SKIP above, and unregistered for exactly as long.  It suppresses a
@@ -250,7 +274,17 @@ const REGISTERED: Ratchet[] = [
   // the next backend that wants to opt a whole case out of its leg.
   //
   // NOTE, as with MIKRO_SKIP: it lives in a `.mjs` runner, not a vitest file.
-  { file: "test/behavioral/cases.mjs", name: "BEHAVIOURAL_SKIP", kind: "nested-record", max: 0 },
+  // It moved out of `cases.mjs` into the dependency-free `registers.mjs` so the
+  // fast-suite golden-coverage gate can read it without test/behavioral's own
+  // node_modules; this ratchet is what NOTICED the move (`allowlist
+  // 'BEHAVIOURAL_SKIP' not found — did it move/rename?`), which is the point of
+  // pinning by file rather than by name alone.
+  {
+    file: "test/behavioral/registers.mjs",
+    name: "BEHAVIOURAL_SKIP",
+    kind: "nested-record",
+    max: 0,
+  },
   // The Elixir corpus compile tier's skip map — the fifth leg of the per-backend
   // set registered above (java / python / dotnet / tsc), left out only because
   // it lives in its own workflow (`corpus-elixir-build.yml`, split off for the

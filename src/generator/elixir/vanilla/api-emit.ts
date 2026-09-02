@@ -1,30 +1,23 @@
 // ---------------------------------------------------------------------------
-// Vanilla controllers — `lib/<app>_web/controllers/<agg>_controller.ex`.
-// Slice 1+2 of vanilla-foundation-tdd-plan.md.
+// Vanilla controllers — `lib/<app>_web/controllers/<agg>_controller.ex`
+// (vanilla-foundation-tdd-plan.md).
 //
-//   Slice 1: read path — `GET /<aggs>` (list) + `GET /<aggs>/{id}`
-//     (show), with `with`-block / `case` dispatch over
-//     `{:ok,_}|{:error,_}` from the Repository.
-//   Slice 2: write path — `POST /<aggs>` (create), `PATCH /<aggs>/{id}`
-//     (update), `DELETE /<aggs>/{id}` (destroy).  Validation errors
-//     from changeset surface as 422 ProblemDetails; not-found stays
-//     404.
+//   read path — `GET /<aggs>` (list) + `GET /<aggs>/{id}` (show), with
+//     `with`-block / `case` dispatch over `{:ok,_}|{:error,_}` from the
+//     Repository.
+//   write path — `POST /<aggs>` (create), `PATCH /<aggs>/{id}` (update),
+//     `DELETE /<aggs>/{id}` (destroy).  Validation errors from changeset
+//     surface as 422 ProblemDetails; not-found stays 404.
 //
-// Full RFC 7807 ProblemDetails parity (envelope fields, errors[]
-// extension shape byte-identical to the other backends) lands in Slice 4.
+// RFC 7807 ProblemDetails envelope fields and `errors[]` extension shape are
+// byte-identical to the other backends.
 // ---------------------------------------------------------------------------
 
 import {
   createInputFields,
   emitsRestCreate as sharedEmitsRestCreate,
 } from "../../../ir/enrich/wire-projection.js";
-import {
-  PAGED_DEFAULT_PAGE,
-  PAGED_DEFAULT_PAGE_SIZE,
-  PAGED_MAX_PAGE,
-  PAGED_MAX_PAGE_SIZE,
-  pagedReturn,
-} from "../../../ir/stdlib/generics.js";
+import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -78,6 +71,8 @@ import {
   renderProblemVariantHelper,
   renderReturningOpControllerAction,
 } from "./operation-returns-emit.js";
+import { PAGE_CALL_ARGS, PAGE_WITH_CLAUSES, pagingElseArm } from "./page-param.js";
+import { renderPathIdCastPlug } from "./problem-details-emit.js";
 import { hasRefColls } from "./ref-collection-emit.js";
 import { emitsRestDelete } from "./rest-surface.js";
 import { stampUsesPrincipal } from "./stamp-emit.js";
@@ -105,9 +100,9 @@ export interface VanillaApiEmitResult {
  *
  *   1. a CRUD-verb-named op other than `update` has no controller action to
  *      route to (the atom would collide with the Phoenix REST actions), so it
- *      is not served — and, since this helper drives the spec too, no longer
- *      DOCUMENTED either (the spec used to advertise every public op,
- *      including these phantom routes);
+ *      is not served — and, since this helper drives the spec too, not
+ *      DOCUMENTED either (a spec built from "every public op" advertises
+ *      these phantom routes);
  *   2. an event-sourced aggregate has no generic `update` surface (its only
  *      mutations are its per-op commands).
  *
@@ -167,7 +162,7 @@ export function servesHistory(ctx: BoundedContextIR, agg: AggregateIR): boolean 
  * on an EXPLICIT canonical `create` (`agg.canonicalCreate != null` — written
  * by hand or synthesised by `with crudish`), symmetric with how DELETE gates
  * on a canonical `destroy`.  Merely being constructible (`isConstructible`)
- * no longer exposes a POST — that predicate now gates only the DOMAIN factory
+ * does NOT expose a POST — that predicate gates only the DOMAIN factory
  * seeds/tests call.  Event-sourced aggregates keep the creation-event gate —
  * they are created via their declared `create` event.  An abstract
  * inheritance base is read-only (no `create` action emitted), so it never
@@ -203,7 +198,7 @@ export function emitVanillaApiControllers(
     // THE UNIFICATION SEAM (api-surface.ts): which routes exist and at which
     // path comes from the shared derivation — the SAME list the OpenAPI spec
     // (`openapi-emit.ts`) documents, so the router and the published contract
-    // can no longer diverge (they have, three separate times).  An abstract
+    // cannot diverge.  An abstract
     // base derives nothing (the derivation's aggregate skip): its read-only
     // index/show below stay an elixir-local extra, like the history route.
     const derivedOps = isAbstractBase(agg)
@@ -286,11 +281,10 @@ export function emitVanillaApiControllers(
     // generic PATCH is now gated on an EXPLICIT `update` operation (symmetric
     // with create/destroy), not merely on the aggregate having some operation.
     // (The canonical `update` route — `POST /:id/update`, `:update` action,
-    // NOT a member PATCH — now rides the served-operation loop below: the
+    // NOT a member PATCH — rides the served-operation loop below: the
     // derivation lifts `update` as an ordinary operation entry, and
-    // `servedOperationEntries` keeps this backend's two local stances.  The
-    // 12-line PATCH-vs-POST history that used to sit here lives on in
-    // experience_gathered.md §57 / the servedOperationEntries doc.)
+    // `servedOperationEntries` keeps this backend's two local stances.  See
+    // experience_gathered.md §57 for the PATCH-vs-POST reasoning.)
     const destroyEntry = derivedOps.find((o) => o.kind === "destroy");
     if (destroyEntry && emitsRestDelete(agg)) routes.push(routeOf(destroyEntry, ":delete"));
     // Per-operation member endpoints — `POST /<plural>/:id/<op>`, one per
@@ -367,7 +361,10 @@ function renderController(
     (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name),
   );
   const indexPaged = !readOnly && (listAllFind ? !!pagedReturn(listAllFind.returnType) : false);
-  const pagedListArgs = `page_param(params, "page", ${PAGED_DEFAULT_PAGE}, ${PAGED_MAX_PAGE}), page_param(params, "pageSize", ${PAGED_DEFAULT_PAGE_SIZE}, ${PAGED_MAX_PAGE_SIZE}), Map.get(params, "sort", "id"), Map.get(params, "dir", "asc")${principal ? ", current_user" : ""}`;
+  // The paging controls are bound by the `with` clauses `PAGE_WITH_CLAUSES`
+  // prepends (page-param.ts), so an out-of-range window 422s before the read
+  // instead of being clamped into a page the caller never asked for.
+  const pagedListArgs = `${PAGE_CALL_ARGS.join(", ")}, Map.get(params, "sort", "id"), Map.get(params, "dir", "asc")${principal ? ", current_user" : ""}`;
   // The LIST read's authorization gate — 403 before the query, the same
   // contract `renderFindActions` gives every NAMED find.  `index` is emitted
   // here, outside that loop (the list endpoint has its own paged shape), which
@@ -382,8 +379,9 @@ function renderController(
       ? "    current_user = Map.get(conn.assigns, :current_user)\n"
       : "";
   const indexBody = indexPaged
-    ? `    with {:ok, result} <- ${ctxModule}.list_${aggSnake}s(${pagedListArgs}) do
+    ? `    with ${[...PAGE_WITH_CLAUSES, `{:ok, result} <- ${ctxModule}.list_${aggSnake}s(${pagedListArgs})`].join(",\n         ")} do
       json(conn, %{result | items: Enum.map(result.items, &serialize/1)})
+${pagingElseArm(`${appModule}Web.ProblemDetails`, "    ")}
     end`
     : `    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) do
       json(conn, Enum.map(records, &serialize/1))
@@ -394,7 +392,7 @@ function renderController(
   const indexParamArg = indexPaged ? "params" : "_params";
   const indexAction = indexGate
     ? `  def index(conn, ${indexParamArg}) do
-${cuBind}${indexCuBind}    if not (${renderElixirExpr(indexGate, { thisName: "record", contextModule: facadeMod, foundation: "vanilla" })}) do
+${cuBind}${indexCuBind}    if not (${renderElixirExpr(indexGate, { thisName: "record", contextModule: facadeMod })}) do
       ${denialResponse(
         "forbidden",
         JSON.stringify(`Forbidden: find ${listAllFind!.name}`),
@@ -408,8 +406,8 @@ ${indexBody}
     : `  def index(conn, ${indexParamArg}) do
 ${cuBind}${indexBody}
   end`;
-  // Command-load context fn a MUTATION action loads through (authorization
-  // Phase 3 P3.1): `get_<agg>_for_write` when the aggregate's write scope is
+  // Command-load context fn a MUTATION action loads through (authorization.md):
+  // `get_<agg>_for_write` when the aggregate's write scope is
   // narrower than its read scope, else `get_<agg>` (byte-identical).  Reads
   // (`show`) always use `get_<agg>`.
   const cmdGet = agg.writeScopeFilter ? `get_${aggSnake}_for_write` : `get_${aggSnake}`;
@@ -487,7 +485,7 @@ ${cuBind}${indexBody}
   const opActions = memberOps
     .map((op) => {
       if (isReturningOperation(op)) {
-        return renderReturningOpControllerAction(ctxModule, agg, op, ctx);
+        return renderReturningOpControllerAction(appModule, ctxModule, agg, op, ctx);
       }
       const opSnake = snake(op.name);
       // An op whose guard/body references `currentUser` needs `current_user`
@@ -569,7 +567,7 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
       {:error, %Ecto.Changeset{} = changeset} ->
         ProblemDetails.validation_error_response(conn, changeset)${conflictArm}${denialArms}
     end
-${guardRescue(denialOverrides(ctx))}
+${guardRescue(appModule, denialOverrides(ctx))}
   end`;
     })
     .join("\n");
@@ -692,10 +690,10 @@ ${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
   // FK-restrict destroy conflict (M-T3.4a) — deleting a still-referenced
   // aggregate trips a Postgres foreign_key_violation (23503; a cross-aggregate
   // `X id` FK is ON DELETE RESTRICT), which `Repo.delete/1` raises as
-  // `Ecto.ConstraintError` (type `:foreign_key`).  Previously unhandled → 500,
-  // while the OpenAPI already declared 409 (a runtime/spec drift + cross-backend
-  // divergence — every other backend serves 409).  Reconcile by rescuing that
-  // ConstraintError and serving the resolved `ReferencedInUse` status (409 by
+  // `Ecto.ConstraintError` (type `:foreign_key`).  Left unhandled that is a
+  // 500 against the 409 the OpenAPI declares, and against what every other
+  // backend serves.  So rescue the ConstraintError and serve the resolved
+  // `ReferencedInUse` status (409 by
   // default, or the `httpStatus ReferencedInUse -> <Code>` override).  A non-FK
   // constraint can't fire on a delete, so any other type reraises (keeps its
   // 500).  Mirrors the Hono 23503 → 409 arm.
@@ -870,12 +868,10 @@ ${cuBind}${updateCuBind}${versionBind}
   const historyMapper = historyFind ? `\n\n${renderVanillaHistoryMapper(appModule, ctx, agg)}` : "";
 
   // Shared error-variant responder — emitted iff a rendered section actually
-  // CALLS it.  The old declarative gate (has-returning-op-error || has-union-find)
-  // drifted from the render sites the moment the find-absence arms moved to the
-  // token producer (#2448's elixir round): api-call's controller emitted the
-  // helper with zero callers, an unused private fn under --warnings-as-errors.
-  // Deriving the gate from the assembled sections cannot drift again
-  // (CLAUDE.md: derive, don't stamp).
+  // CALLS it.  A declarative gate (has-returning-op-error || has-union-find)
+  // drifts from the render sites: it emits the helper with zero callers, an
+  // unused private fn under --warnings-as-errors.  Deriving the gate from the
+  // assembled sections cannot drift (CLAUDE.md: derive, don't stamp).
   const problemVariant = [writeActions, findActions, opActions, canActions].some((s) =>
     s.includes("problem_variant("),
   )
@@ -888,6 +884,8 @@ defmodule ${appModule}Web.${aggPascal}Controller do
   require Logger
   alias ${facadeMod}
   alias ${appModule}Web.ProblemDetails
+
+${renderPathIdCastPlug()}
 
 ${indexAction}
 
@@ -918,8 +916,8 @@ ${((): string => {
         bind: "    record = row.data",
         idExpr: "row.id",
         // `version` lives on the root row (`field :version`), not the `:data`
-        // embed — read it off `row`, not the rehydrated `record` (which no longer
-        // carries it; B5).
+        // embed — read it off `row`, not the rehydrated `record`, which does
+        // not carry it.
         versionExpr: "row.version",
         contextModule: facadeMod,
       })

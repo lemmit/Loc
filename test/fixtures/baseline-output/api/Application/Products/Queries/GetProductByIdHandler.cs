@@ -22,6 +22,6 @@ public sealed class GetProductByIdHandler : IQueryHandler<GetProductByIdQuery, P
     public async ValueTask<ProductResponse?> Handle(GetProductByIdQuery query, CancellationToken cancellationToken)
     {
         var found = await _repo.GetByIdAsync(query.Id, cancellationToken);
-        return found is null ? null : new ProductResponse(found.Id.Value, found.Sku, new MoneyResponse((double)found.Price.Amount, found.Price.Currency), found.Version, found.Display);
+        return found is null ? null : new ProductResponse(found.Id.Value, found.Sku, new MoneyResponse(double.Parse(found.Price.Amount.ToString(System.Globalization.CultureInfo.InvariantCulture), System.Globalization.CultureInfo.InvariantCulture), found.Price.Currency), found.Version, found.Display);
     }
 }

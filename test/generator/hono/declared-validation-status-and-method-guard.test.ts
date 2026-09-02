@@ -154,6 +154,37 @@ describe("hono static sub-paths — a wrong verb answers 405, not the {id} valid
     expect(guard).not.toMatch(/app\.(all|on|delete|put|patch)\(/);
   });
 
+  it("the segment lookup is own-key only — a prototype member is not an `allow` list", async () => {
+    // The segment is CALLER-supplied, so a bare `staticSubpathMethods[seg]`
+    // reaches `Object.prototype`: `GET /api/orders/constructor` resolved to
+    // `Object`, passed the truthiness guard, and threw on `.includes` — a 500
+    // from an ordinary URL, on every emitted router that has a static
+    // sub-path.  Pinned as BOTH halves: the guarded read is present, and the
+    // unguarded index is gone.
+    const { order } = await routers();
+    expect(order).toContain("Object.hasOwn(staticSubpathMethods, __seg)");
+    expect(order, "a bare index on a caller-supplied segment reaches Object.prototype").not.toMatch(
+      /staticSubpathMethods\[c\.req\.path/,
+    );
+
+    // …and the emitted middleware really does answer `undefined` for an
+    // inherited key.  Executed, not just grepped: run the emitted lookup over
+    // the emitted table.
+    const table = /const staticSubpathMethods: Record<string, string\[\]> = (\{.*\});/.exec(
+      order,
+    )?.[1];
+    expect(table, "the guard table must exist to be exercised").toBeDefined();
+    const lookup = new Function(
+      "__seg",
+      `const staticSubpathMethods = ${table}; return Object.hasOwn(staticSubpathMethods, __seg) ? staticSubpathMethods[__seg] : undefined;`,
+    ) as (seg: string) => string[] | undefined;
+    for (const polluted of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      expect(lookup(polluted), `${polluted} must not resolve to an allow list`).toBeUndefined();
+    }
+    // The real segment still resolves — the guard narrows nothing legitimate.
+    expect(lookup("by_qty")).toEqual(["GET"]);
+  });
+
   it("an aggregate with no static sub-path emits no guard — nothing to discriminate", async () => {
     const { tag } = await routers();
     expect(tag, "Tag has no named find and no prepare route").not.toContain("staticSubpathMethods");

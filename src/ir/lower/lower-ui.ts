@@ -238,7 +238,7 @@ export function lowerUi(ui: Ui, user?: UserIR): UiIR {
   for (const m of ui.members) {
     if (m.$type === "Page") pages.push(lowerPage(m, user, storeIndex));
     else if (m.$type === "Area") collectArea(m, []);
-    else if (m.$type === "Component") components.push(lowerComponent(m, storeIndex));
+    else if (m.$type === "Component") components.push(lowerComponent(m, user, storeIndex));
     else if (m.$type === "Store") {
       const env: Env = { locals: new Map(), user, stores: storeIndex };
       stores.push(lowerStore(m, env));
@@ -392,7 +392,7 @@ function lowerPage(p: Page, user?: UserIR, stores?: Env["stores"]): PageIR {
         })),
       };
     } else if (prop.$type === "LayoutProp") {
-      // Phase 8: bare `ID` value resolves to either the two reserved
+      // A bare `ID` value resolves to either the two reserved
       // presets (`default` / `none`) or the name of a named `layout`
       // SystemMember declared in the same system.  Validator gates
       // the resolution — by lowering time, anything that's not a
@@ -435,7 +435,7 @@ function lowerPage(p: Page, user?: UserIR, stores?: Env["stores"]): PageIR {
   };
 }
 
-export function lowerComponent(c: Component, stores?: Env["stores"]): ComponentIR {
+export function lowerComponent(c: Component, user?: UserIR, stores?: Env["stores"]): ComponentIR {
   const params = c.params.map((param) => ({
     name: param.name,
     type: lowerType(param.type),
@@ -458,8 +458,12 @@ export function lowerComponent(c: Component, stores?: Env["stores"]): ComponentI
   }
   // Component-scoped env: params + state bind so `inferExprType`
   // resolves refs to their declared types (same reason as
-  // `lowerPage`; see comment there).
-  let env: Env = { locals: new Map(), user: undefined, stores };
+  // `lowerPage`; see comment there).  `user` is threaded for the same
+  // reason it is on a page: a component renders INTO a page, so a
+  // `currentUser` read in a component body is the same session read and
+  // must lower to a resolved `current-user` ref — otherwise it stays
+  // unresolved and escapes `loom.current-user-needs-auth-ui`.
+  let env: Env = { locals: new Map(), user, stores };
   for (const param of c.params) {
     env = withLocal(env, param.name, "param", lowerType(param.type));
   }

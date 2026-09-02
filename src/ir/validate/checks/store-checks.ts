@@ -13,6 +13,11 @@
 //        `persist: memory|local|session|url` ladder now ships on every
 //        frontend; a bad value is caught at the AST tier as
 //        loom.store-lifetime-invalid, validators/ui.ts.)
+//   loom.store-lifetime-target-unsupported — FIELD-scoped residue of that
+//        ladder on feliz / flutter: persistence there round-trips each cell
+//        through an untyped slot, so a type with no total F# / Dart codec
+//        would be silently dropped.  Its platform-wide arm is gone with the
+//        last entry of `LIFETIME_UNSUPPORTED_PLATFORMS`.
 //   loom.store-cross-store-on-liveview-invalid — a store action that calls
 //        a DIFFERENT store's action, on a `phoenixLiveView` deployable.  The
 //        LiveView projection seeds each used store as its OWN per-page assign
@@ -33,17 +38,13 @@
 import { diagMessage } from "../../../diagnostics/messages.js";
 import type { EnrichedLoomModel, StmtIR, StoreIR } from "../../types/loom-ir.js";
 import { classifyFelizAsyncEffect } from "../../util/feliz-async-effect.js";
+import { felizPersistCodec } from "../../util/feliz-persist-codec.js";
+import { flutterPersistCodec } from "../../util/flutter-persist-codec.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 
 // View-scoped effect builtins — illegal inside a store action (§3.2).  Mirrors
 // `VIEW_EFFECT_BUILTINS` in ui-checks.ts (a store has no router/socket).
 const VIEW_EFFECT_BUILTINS = new Set<string>(["navigate", "toast"]);
-
-/** Frontend PLATFORMS whose store emitter ignores the `persist:` lifetime
- *  ladder and builds an in-memory store regardless (`loom.store-lifetime-
- *  target-unsupported`).  A RATCHET: when a platform implements the ladder its
- *  entry is deleted here in the same PR, so a stale allowance can't survive. */
-const LIFETIME_UNSUPPORTED_PLATFORMS: ReadonlySet<string> = new Set(["feliz", "flutter"]);
 
 /** Render a `StoreIR.lifetime` enum back to its `persist:` source keyword for
  *  diagnostics (`persistLocal` → `local`). */
@@ -281,48 +282,81 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
       }
     }
 
-    // loom.store-lifetime-target-unsupported — the SAME gap as the LiveView
-    // lifetime gate above, on the two frontends that don't ride the SPA store
-    // runtime either.
+    // loom.store-lifetime-target-unsupported — FIELD-SCOPED now, on the two
+    // frontends whose `persist:` implementation crosses an UNTYPED boundary.
     //
-    //   flutter — `flutter/store-builder.ts` writes a `// TODO(flutter
-    //     full-parity): \`persist: <lifetime>\` is not implemented` comment and
-    //     then builds the store IN-MEMORY anyway.  A comment in emitted Dart is
-    //     not a diagnostic: `ddd parse` is clean, `flutter analyze` is clean,
-    //     and the author only discovers the cart didn't survive a restart at
-    //     runtime.
-    //   feliz — `src/generator/feliz` contains ZERO references to
-    //     `store.lifetime`.  The store folds into the single Elmish `Model`,
-    //     which lives for exactly one program run; `local`/`session`/`url` are
-    //     dropped without even a comment.
+    // The platform-wide arm of this code is GONE.  It named a frontend whose
+    // store emitter ignored `persist:` outright and built an in-memory store
+    // regardless, and `LIFETIME_UNSUPPORTED_PLATFORMS` was the ratchet holding
+    // it: the task that implements the ladder on a target deletes that target's
+    // entry in the same PR.  Both remaining entries have now been deleted —
+    // feliz by `generator/feliz/store-persist.ts` (Web Storage hydration at
+    // `init`, an `updateWithPersist` write-back wrapper, a `popstate` Elmish
+    // subscription for the `url` tier) and flutter by
+    // `generator/flutter/store-persist.ts` (a shared_preferences seed + a
+    // `ref.listenSelf` mirror, `Uri.base` / `SystemNavigator` for the `url`
+    // tier).  The ladder ships on every frontend, so the set drained to empty
+    // and its arm went with it rather than lingering as unreachable code.
     //
-    // Both are IMPLEMENTABLE (shared_preferences + a router rewrite on Flutter;
-    // Browser.WebStorage + a Feliz.Router hook on Feliz) and are planned — this
-    // gate is the honest placeholder, and the wave-2 tasks that implement them
-    // DELETE their arm from `LIFETIME_UNSUPPORTED_PLATFORMS` rather than
-    // leaving a stale allowance behind.
+    // What SURVIVES on those two is narrower and per FIELD.  Persistence there
+    // round-trips each cell through an untyped slot — a raw string out of Web
+    // Storage / the query string, converted in F#; a `dynamic` out of the
+    // decoded blob, in Dart — so a field type rides the ladder only when that
+    // language's codec has a TOTAL conversion for it.  On feliz that leaves out
+    // datetime / duration / guid / enum / entity / value object (and arrays of
+    // them); on flutter, json / File / entity / value object / optional.  Those
+    // cells would be silently dropped from the stored state, so they are named
+    // loudly instead — and the same ratchet applies: widen the codec table,
+    // delete the platform's block here.
     //
     // Detected off `dep.platform`, not `uiFramework`, for the reason the Feliz
     // block below spells out: `platform: feliz` / `platform: flutter` each host
     // only their own framework, and a bare declaration resolves `uiFramework`
     // to the frontend default rather than to the platform's own name.
     for (const dep of sys.deployables) {
-      if (!LIFETIME_UNSUPPORTED_PLATFORMS.has(dep.platform)) continue;
+      if (dep.platform !== "feliz") continue;
       const mounted = [dep.uiName, ...(dep.hostedUiNames ?? [])].filter((n): n is string => !!n);
       for (const uiName of mounted) {
         for (const store of storesByUi.get(uiName) ?? []) {
           if (store.lifetime === "memory") continue;
-          const where = `store '${store.name}'`;
-          diags.push({
-            severity: "error",
-            code: "loom.store-lifetime-target-unsupported",
-            message: diagMessage("loom.store-lifetime-target-unsupported", {
-              where,
-              lifetime: lifetimeKeyword(store.lifetime),
-              platform: dep.platform,
-            }),
-            source: where,
-          });
+          for (const f of store.state) {
+            if (felizPersistCodec(f.type)) continue;
+            const where = `store '${store.name}'`;
+            diags.push({
+              severity: "error",
+              code: "loom.store-lifetime-target-unsupported",
+              message: diagMessage("loom.store-lifetime-target-unsupported#field", {
+                where,
+                name: f.name,
+                lifetime: lifetimeKeyword(store.lifetime),
+              }),
+              source: where,
+            });
+          }
+        }
+      }
+    }
+
+    for (const dep of sys.deployables) {
+      if (dep.platform !== "flutter") continue;
+      const mounted = [dep.uiName, ...(dep.hostedUiNames ?? [])].filter((n): n is string => !!n);
+      for (const uiName of mounted) {
+        for (const store of storesByUi.get(uiName) ?? []) {
+          if (store.lifetime === "memory") continue;
+          for (const f of store.state) {
+            if (flutterPersistCodec(f.type)) continue;
+            const where = `store '${store.name}'`;
+            diags.push({
+              severity: "error",
+              code: "loom.store-lifetime-target-unsupported",
+              message: diagMessage("loom.store-lifetime-target-unsupported#flutter-field", {
+                where,
+                name: f.name,
+                lifetime: lifetimeKeyword(store.lifetime),
+              }),
+              source: where,
+            });
+          }
         }
       }
     }
@@ -418,6 +452,56 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
                   uiName,
                   name: dep.name,
                   reason,
+                }),
+                source: where,
+              });
+            });
+          }
+        }
+      }
+    }
+
+    // loom.flutter-async-effect-unsupported — the SAME component-host limitation
+    // as the Feliz arm above, on the frontend that fails it SILENTLY.
+    //
+    // `flutter/component-emit.ts`'s `candidates()` filters out every component
+    // with a `variant-match` action (`hasAsyncEffectAction`) because an async
+    // effect needs the page shell's notifier + route id.  A filtered component
+    // emits NO widget at all, and every call site of it renders
+    // `SizedBox.shrink() /* unknown layout component */` — the component, its
+    // body, and its effect vanish from the app with no diagnostic, no comment in
+    // the Dart, and a clean `flutter analyze`.  Feliz gates the identical
+    // limitation honestly; Flutter did not, so the same `.ddd` was refused on one
+    // target and silently emptied on the other.
+    //
+    // ONLY the component host gates: a PAGE-level `match await` renders fine on
+    // Flutter (the page notifier owns the effect), so — unlike the Feliz arm —
+    // there is no subject-shape classification here.  The Flutter filter keys on
+    // the statement KIND alone, and this gate mirrors exactly that.
+    //
+    // Detected off `dep.platform` for the reason the lifetime gate spells out:
+    // `platform: flutter` hosts only `framework: flutter`, and a bare declaration
+    // resolves `uiFramework` to the frontend default rather than `"flutter"`.
+    // Drains when the Flutter component emitter grows the async-effect path
+    // (M-T1.20), which deletes this arm.
+    for (const dep of sys.deployables) {
+      if (dep.platform !== "flutter") continue;
+      const mounted = [dep.uiName, ...(dep.hostedUiNames ?? [])].filter((n): n is string => !!n);
+      for (const uiName of mounted) {
+        const ui = sys.uis.find((u) => u.name === uiName);
+        if (!ui) continue;
+        for (const comp of ui.components) {
+          for (const action of comp.actions) {
+            forEachStmt(action.body, (s) => {
+              if (s.kind !== "variant-match") return;
+              const where = `component '${comp.name}' action '${action.name}'`;
+              diags.push({
+                severity: "error",
+                code: "loom.flutter-async-effect-unsupported",
+                message: diagMessage("loom.flutter-async-effect-unsupported", {
+                  where,
+                  uiName,
+                  name: dep.name,
                 }),
                 source: where,
               });

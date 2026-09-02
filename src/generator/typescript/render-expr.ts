@@ -5,7 +5,9 @@ import { bodyTypeOf } from "../../util/expr-body-type.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapeTsIdent, lowerFirst, upperFirst, workflowFnCamel } from "../../util/naming.js";
 import { DURATION_UNIT_MS } from "../../util/temporal.js";
+import { tsCodePointLength } from "../_expr/code-point.js";
 import { JS_INTRINSIC_RENDERERS } from "../_expr/js-intrinsics.js";
+import { asRegexLiteral } from "../_expr/regex-literal.js";
 import {
   type ExprTarget,
   type MarkedText,
@@ -46,7 +48,7 @@ export interface TsRenderContext {
    *  the scrutinee, so this maps e.g. `o` → `outcome`. */
   matchBindings?: ReadonlyMap<string, string>;
   /** Read-port handle expressions to PREPEND to a `domain-service` call's
-   *  arguments (domain-services.md rev. 4, Slice 1 — the `reading` tier).  A
+   *  arguments (domain-services.md rev. 4 — the `reading` tier).  A
    *  `reading` service operation takes one read-port parameter per repository
    *  it reads; the orchestrating caller (a `workflow`) supplies the matching
    *  handle here, keyed by `<service>.<op>`.  Returns `[]` (or is absent) for a
@@ -101,7 +103,13 @@ const TS_TARGET: ExprTarget<TsRenderContext> = {
   },
   newPart: renderNew,
   object: (fields) => `({ ${fields.map((f) => `${f.name}: ${f.value}`).join(", ")} })`,
-  unary: (op, operand) => `${op}${operand}`,
+  unary: (op, operand, e) =>
+    // `money` is a decimal.js `Decimal` here — `-d` coerces through
+    // `valueOf()` (a STRING) and types as `number`, so `-price` is both a
+    // TS2322 and a silently-wrong value.  Use `.neg()` (audit finding A11).
+    // Loom `decimal` is a plain JS `number` on this backend, so it keeps the
+    // native operator.
+    op === "-" && unaryOperandIsMoney(e) ? `${operand}.neg()` : `${op}${operand}`,
   binary: renderBinary,
   ternary: (cond, then, otherwise) => `${cond} ? ${then} : ${otherwise}`,
   convert: (value, e) => renderTsConvert(e.target, e.from, value),
@@ -180,7 +188,7 @@ export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string 
 }
 
 /** Marks-carrying sibling of `renderTsExpr` (span-tracking-emission.md, M15
- *  phase 7 slice 2) — same TS leaf table, composed through the level-wise
+ *  phase 7) — same TS leaf table, composed through the level-wise
  *  anchoring dispatcher instead of the plain one.  Only called from a
  *  recording path (the aggregate op-body loop, when a `SourceMapRecorder`
  *  is threaded in); never on the default flag-off path. */
@@ -287,13 +295,32 @@ function renderRef(e: RefExpr, ctx: TsRenderContext): string {
 }
 
 function renderMember(recv: string, e: MemberExpr): string {
-  // String length stays as `.length`; arrays expose collection ops without
-  // parentheses too — `lines.count` should compile to `.length`.
+  // Arrays expose collection ops without parentheses too — `lines.count`
+  // should compile to `.length`.
   if (e.receiverType.kind === "array" && e.member === "count") return `${recv}.length`;
   // `distinct` is property-style (no parens, like `count`) so it lowers to a
-  // member node — route it through the shared collection-op table.
+  // member node — route it through the shared collection-op table.  The table
+  // entry is receiver-type-aware (money dedupes by value, not identity), so
+  // hand it a method-call-shaped view of this member access.
   if (e.receiverType.kind === "array" && e.member === "distinct") {
-    return TS_COLLECTION_RENDERERS.distinct!(recv, []);
+    return TS_COLLECTION_RENDERERS.distinct!(recv, [], {
+      kind: "method-call",
+      receiver: e.receiver,
+      member: "distinct",
+      args: [],
+      receiverType: e.receiverType,
+      isCollectionOp: true,
+    });
+  }
+  // A string's `.length` is CODE POINTS, not JS's UTF-16 code units — the
+  // same count the wire validator and the published `minLength`/`maxLength`
+  // use (src/generator/_expr/code-point.ts).
+  if (
+    e.receiverType.kind === "primitive" &&
+    e.receiverType.name === "string" &&
+    e.member === "length"
+  ) {
+    return tsCodePointLength(recv);
   }
   return `${recv}.${e.member}`;
 }
@@ -374,14 +401,17 @@ export const TS_COLLECTION_RENDERERS: Record<
   all: (recv, args) => `${recv}.every(${args[0] ?? "() => true"})`,
   any: (recv, args) => `${recv}.some(${args[0] ?? "() => true"})`,
   // Array membership.  For value types this is JS's `.includes(value)` (===).
-  // For money the elements are decimal.js `Decimal` instances, whose `===` is
-  // reference identity — two value-equal Decimals never match — so a money
-  // membership test dispatches to a value-equality scan (`.some(x => x.eq(v))`),
-  // the same reason min/max/sum special-case money.
-  contains: (recv, args, e) =>
-    receiverElementIsMoney(e)
-      ? `${recv}.some((__x) => __x.eq(${args[0] ?? "undefined"}))`
-      : `${recv}.includes(${args[0] ?? "undefined"})`,
+  // For an OBJECT element — money (decimal.js `Decimal`) or a value object —
+  // `===` is reference identity and two value-equal elements never match, so
+  // the membership test dispatches to a value-equality scan through the
+  // element's own equality method (`.eq` / `.equals`), the same reason min/max/
+  // sum special-case money.
+  contains: (recv, args, e) => {
+    const eqm = receiverElementEqMethod(e);
+    return eqm
+      ? `${recv}.some((__x) => __x.${eqm}(${args[0] ?? "undefined"}))`
+      : `${recv}.includes(${args[0] ?? "undefined"})`;
+  },
   where: (recv, args) => `${recv}.filter(${args[0] ?? "() => true"})`,
   first: (recv) => `${recv}[0]`,
   firstOrNull: (recv) => `(${recv}[0] ?? null)`,
@@ -401,7 +431,18 @@ export const TS_COLLECTION_RENDERERS: Record<
         : "ka < kb ? -1 : ka > kb ? 1 : 0";
     return `[...${recv}].sort((__a, __b) => { const ka = (${args[0]})(__a), kb = (${args[0]})(__b); return ${cmp}; })`;
   },
-  distinct: (recv) => `[...new Set(${recv})]`,
+  // `new Set` dedupes by SameValueZero — reference identity for objects — so a
+  // `money[]` (decimal.js `Decimal` instances) or a value-object collection
+  // never dedupes at all: two value-equal elements are distinct references.
+  // Fall back to an equality-keyed first-occurrence filter for both, the same
+  // object-element special-case the `contains`/`sum`/`sortBy`/`min`/`max` rows
+  // already carry (audit A14; F2-EXPR-4 for the value-object half).
+  distinct: (recv, _args, e) => {
+    const eqm = receiverElementEqMethod(e);
+    return eqm
+      ? `${recv}.filter((__x, __i, __a) => __a.findIndex((__y) => __y.${eqm}(__x)) === __i)`
+      : `[...new Set(${recv})]`;
+  },
   take: (recv, args) => `${recv}.slice(0, ${args[0]})`,
   skip: (recv, args) => `${recv}.slice(${args[0]})`,
   join: (recv, args) => `${recv}.join(${args[0]})`,
@@ -428,15 +469,37 @@ function projectionBodyIsMoney(e?: Extract<ExprIR, { kind: "method-call" }>): bo
   return bodyT?.kind === "primitive" && bodyT.name === "money";
 }
 
-/** True iff a collection op's receiver element type is `money` — its elements
- *  are decimal.js `Decimal`s, so `contains` must use value equality (`.eq`)
- *  rather than `.includes` (reference identity). */
-function receiverElementIsMoney(e?: Extract<ExprIR, { kind: "method-call" }>): boolean {
+/** True iff a unary `-`'s operand types as `money` — a decimal.js `Decimal`,
+ *  which has no native negation operator (`.neg()` instead). */
+function unaryOperandIsMoney(e: Extract<ExprIR, { kind: "unary" }>): boolean {
+  const t = bodyTypeOf(e.operand);
+  const unwrapped = t?.kind === "optional" ? t.inner : t;
+  return unwrapped?.kind === "primitive" && unwrapped.name === "money";
+}
+
+/** The VALUE-equality method a collection op's element type carries, or null
+ *  when the element compares correctly with JS identity (`===`).
+ *
+ *  Both element kinds here are OBJECTS on this backend, so `.includes` /
+ *  `new Set` compare references and silently answer wrong: `money` elements are
+ *  decimal.js `Decimal`s (`.eq`), and a `valueobject` element is a generated
+ *  class carrying the field-wise `equals` every VO emits (emit/value-objects.ts
+ *  — a VO's defining property).  The validator ADMITS both element types on
+ *  `distinct`/`contains` (`loom.distinct-non-scalar` reads "requires a scalar or
+ *  value-object element"), and every other backend is structural by
+ *  construction — python frozen dataclass, .NET/java records, elixir maps —
+ *  so node was alone in returning duplicates from a dedupe and `false` from a
+ *  membership test (F2-EXPR-4). */
+function receiverElementEqMethod(
+  e?: Extract<ExprIR, { kind: "method-call" }>,
+): "eq" | "equals" | null {
   const rt = e?.receiverType;
-  if (!rt) return false;
+  if (!rt) return null;
   const unwrapped = rt.kind === "optional" ? rt.inner : rt;
   const elem = unwrapped.kind === "array" ? unwrapped.element : undefined;
-  return elem?.kind === "primitive" && elem.name === "money";
+  if (elem?.kind === "primitive" && elem.name === "money") return "eq";
+  if (elem?.kind === "valueobject") return "equals";
+  return null;
 }
 
 /** True iff a `sum` reduction's numeric type is `money` — the λ-body type for
@@ -496,7 +559,7 @@ function renderCall(
       return `(await ${op.resourceName}$${op.operationId}(${argList}))`;
     }
     case "resource-op": {
-      // A verb call on an ambient resource handle (Phase 4).  The
+      // A verb call on an ambient resource handle.  The
       // resource client module exports an async `<resource>$<verb>`
       // helper that owns the SDK mapping; the call site is uniform and
       // awaited inline so it composes in any expression position.
@@ -520,7 +583,7 @@ function renderCall(
     }
     case "repo-read": {
       // A read-only repository query in a `reading` domain-service body
-      // (domain-services.md rev. 4, Slice 1).  Renders against the THREADED
+      // (domain-services.md rev. 4).  Renders against the THREADED
       // read-port handle — `lowerFirst(repo)` (`Accounts` → `accounts`), the
       // param the service declaration takes and the orchestrating workflow
       // supplies — exactly the var the workflow's own repo reads use
@@ -576,6 +639,22 @@ function renderBinary(left: string, right: string, e: Extract<ExprIR, { kind: "b
   // class's method API.  Other primitives use native operators.
   if (e.leftType?.kind === "primitive" && e.leftType.name === "money") {
     return renderMoneyBinary(e.op, left, right);
+  }
+  // MIRROR arm (audit F7 / M-T6.44): `moneyArithmetic` admits `money × scalar`
+  // COMMUTATIVELY, so money can arrive on the RIGHT with an integral/decimal
+  // left (`qty * price`).  Only `money` maps to a `Decimal` here (plain
+  // `decimal` is a native number), so without this arm the expression fell to
+  // native `*` on a Decimal instance — TS2363, an uncompilable project.  Wrap
+  // the numeric left so the method receiver is a Decimal; the explicit
+  // numeric-left guard keeps string-concat `+` shapes out (same posture as
+  // Java's mirror arm, fleet-bug-hunt A4).
+  if (
+    e.rightType?.kind === "primitive" &&
+    e.rightType.name === "money" &&
+    e.leftType?.kind === "primitive" &&
+    (e.leftType.name === "int" || e.leftType.name === "long" || e.leftType.name === "decimal")
+  ) {
+    return renderMoneyBinary(e.op, `new Decimal(${left})`, right);
   }
   // A5 temporal: datetime ± duration / datetime − datetime / duration +
   // datetime.  duration ± duration and duration * int stay native number
@@ -676,7 +755,7 @@ const TS_TYPE_TARGET: TypeTarget = {
         return "Date";
       case "duration":
         // A5 temporal — absolute duration as plain milliseconds.
-        // Expression-only (never a field / wire type in this slice).
+        // Expression-only (never a field / wire type).
         return "number";
       case "json":
         return "unknown";
@@ -720,19 +799,6 @@ function renderUnionVariantTs(v: TypeIR): string {
   return `{ type: "${tag}"; value: ${renderTsType(v)} }`;
 }
 
-/** Convert a regex source string into a `/pattern/` literal.  Escapes the
- *  closing slash (`/` → `\/`); the value's other backslashes are part of the
- *  regex source and pass through unchanged.  Two edge cases can't sit in a
- *  `/…/` literal and fall back to the `RegExp` constructor (a plain string
- *  literal): an EMPTY pattern (bare `//` is a line comment) and a source that
- *  ends in a dangling odd backslash or contains a newline (the trailing `\`
- *  would escape our closing slash, breaking the file's parse). */
-function asRegexLiteral(source: string): string {
-  if (source === "") return 'new RegExp("")';
-  const escaped = source.replace(/\//g, "\\/");
-  const trailingBackslashes = /\\*$/.exec(escaped)?.[0].length ?? 0;
-  if (/[\n\r]/.test(escaped) || trailingBackslashes % 2 === 1) {
-    return `new RegExp(${JSON.stringify(source)})`;
-  }
-  return `/${escaped}/`;
-}
+// `asRegexLiteral` moved to `../_expr/regex-literal.ts` (imported above) so the
+// zod-refine and Angular emitters share this hardening instead of re-deriving a
+// bare slash-escape.

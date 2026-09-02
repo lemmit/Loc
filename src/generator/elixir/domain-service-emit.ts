@@ -27,8 +27,8 @@
 //
 // Operation bodies render through the shared statement/expression path —
 // parameters resolve as bare snake-cased locals (refKind `param`), there is no
-// `this`.  `precondition`/`requires` raise an `ArgumentError` guard (the exact
-// shape the aggregate-op body emits in render-stmt.ts).  An `or`-union return
+// `this`.  `precondition`/`requires` raise the typed `<App>.GuardError` guard
+// (the exact shape the aggregate-op body emits).  An `or`-union return
 // reuses the EXACT tagged-tuple convention the vanilla returning-op path emits
 // (`{:ok, value} | {:error, "<tag>", data_map}`) — no new union machinery; a
 // plain return is the bare value (Elixir's last-expression-is-the-result).
@@ -48,10 +48,11 @@ import {
 } from "../../ir/util/domain-service-tier.js";
 import { escapeElixirIdent, snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr, renderTypespec } from "./render-expr.js";
+import { appModuleOf, guardRaiseLine } from "./vanilla/denial.js";
 import { opCallParamFields } from "./vanilla/workflow-execution-emit.js";
 
 // ---------------------------------------------------------------------------
-// Tier-driven placement (domain-services.md rev. 4, Slice 1; Elixir decision B)
+// Tier-driven placement (domain-services.md rev. 4; Elixir decision B)
 //
 // Elixir is the structural OUTLIER among the five backends.  Where the others
 // thread a read-port HANDLE (param / injected repo) into a service that stays a
@@ -69,16 +70,28 @@ import { opCallParamFields } from "./vanilla/workflow-execution-emit.js";
 // emitter SKIPS a reading op from the `Domain.Services` module (and skips the
 // whole module when every op is reading), and `context-emit.ts` ADDS the reading
 // op as a context fn via `renderReadingServiceContextFn`.  A reading op whose
-// read-ports span MORE THAN ONE context is OUT OF SCOPE for Slice 1 — it would
+// read-ports span MORE THAN ONE context is OUT OF SCOPE for — it would
 // need a standalone module taking explicit `Repo`/context args; we keep it in
 // the `Domain.Services` module (so it still emits *something*) and flag it with a
 // `# loom.domain-service-multi-context-reading` note rather than crashing.
 // ---------------------------------------------------------------------------
 
 /** True when a reading op's read-ports all resolve to ONE context (this
- *  service's own) — the single-context case Slice 1 emits as a context fn.  A
+ *  service's own) — the single-context case, emitted as a context fn.  A
  *  port whose repository is not declared in `ctx` means the read spans another
- *  context (out of scope) — then we keep the standalone module form. */
+ *  context (out of scope) — then we keep the standalone module form.
+ *
+ *  CURRENTLY ALWAYS TRUE — kept DEFENSIVE, not load-bearing.  A read-port is
+ *  derived from a `repo-read` Call (`readPortsForOperation`), and
+ *  `lowerDomainService` resolves reads only against `env.ctx.members`, so a
+ *  port can never name a repository outside the service's own context: the
+ *  cross-context body it was written to catch never reaches this predicate.
+ *  What it DID reach was a `pure`-tier op whose unresolved receiver got
+ *  rendered verbatim (`is_nil(customers.by_name(r))` → "undefined variable
+ *  customers"), which is now rejected at phase ⑦ by
+ *  `loom.domain-service-cross-context-read` (domain-service-checks.ts).  The
+ *  guard below stays as a floor in case lowering ever widens the resolution
+ *  scope; it is not the thing that closes the gap. */
 export function readingIsSingleContext(
   op: DomainServiceOperationIR,
   ctx: BoundedContextIR,
@@ -110,7 +123,7 @@ export function placeMutatingInline(op: DomainServiceOperationIR, ctx: BoundedCo
 }
 
 // ---------------------------------------------------------------------------
-// Mutating-tier inlining (domain-services.md rev. 4, Slice 3 — Elixir vanilla).
+// Mutating-tier inlining (domain-services.md rev. 4 — Elixir vanilla).
 //
 // A `mutating` `Transfer.run(s, d, amount)` call in a workflow body lowers to
 // the `with`-chain of the SERVICE BODY's param-op calls, each rebound through
@@ -392,7 +405,7 @@ function renderOperation(
   // Out-of-scope guard: a `reading` op whose read-ports span MORE THAN ONE
   // context can't be a single-context fn, so it stays in the `Domain.Services`
   // module — but the module has no ambient `Repo`/context to resolve its repo
-  // reads.  Slice 1 does not emit that shape; flag it (a reviewed limitation,
+  // reads.  That shape is not emitted; flag it (a reviewed limitation,
   // not a crash) and emit a guard `raise` rather than a body that references a
   // non-existent context fn.
   const multiContextReading =
@@ -426,18 +439,18 @@ function renderOperation(
     .map((n) => `    _ = ${n}`);
 
   if (multiContextReading) {
-    // OUT OF SCOPE (Slice 1): a cross-context reading service.  Emit a guard
+    // OUT OF SCOPE: a cross-context reading service.  Emit a guard
     // raise + a visible flag note rather than a body whose repo reads name
     // context fns that don't exist in this module.
     const allDiscards = paramNames.map((n) => `    _ = ${n}`);
     return `${specLine}
   # loom.domain-service-multi-context-reading: '${op.name}' reads repositories
-  # across more than one context — out of scope for domain-services rev. 4 Slice 1
-  # (single-context reading only).  A cross-context reading service needs a
+  # across more than one context — only single-context reading is supported
+  # (domain-services.md rev. 4).  A cross-context reading service needs a
   # standalone module taking explicit Repo/context args; not emitted here.
   def ${fnName}(${paramNames.join(", ")}) do
 ${allDiscards.join("\n")}
-    raise "domain service '${op.name}': cross-context reading not yet supported (domain-services.md rev. 4 Slice 1)"
+    raise "domain service '${op.name}': cross-context reading not yet supported (domain-services.md rev. 4)"
   end`;
   }
 
@@ -470,13 +483,12 @@ function renderStatement(
     case "let":
       return `    ${escapeElixirIdent(snake(s.name))} = ${renderExpr(s.expr, rc)}`;
     case "precondition":
-      // Bug-shaped guard → raise (the same `ArgumentError` shape the aggregate
-      // operation body emits in render-stmt.ts).
-      // Derived message, NOT the author's `message "…"` — prefix-routed by
-      // `GUARD_RESCUE` at the controller.  See M-T6.20.
-      return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Precondition failed: ${s.source}`)})`;
     case "requires":
-      return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Forbidden: ${s.source}`)})`;
+      // Bug-shaped guard → raise the typed `<App>.GuardError` (the same shape
+      // the aggregate operation body emits).  The `:kind` field is the routing
+      // key the controller rescue reads, so `:message` carries the author's
+      // `message "…"` when there is one (M-T6.20).
+      return guardRaiseLine(s, renderExpr(s.expr, rc), appModuleOf(rc.contextModule));
     case "return": {
       const value = renderExpr(s.value, rc);
       if (!isUnion) {

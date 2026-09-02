@@ -57,6 +57,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { mixDepsGet, mixLocalInstall } from "./support/mix-retry.js";
 
 const ENABLED = process.env.LOOM_API_CALL_E2E === "1";
 
@@ -253,7 +254,7 @@ const CALLERS: Record<string, CallerSpec> = {
         `docker run --rm --network host -v "${cwd}":/src -w /src ` +
           `-v "${cacheDir("elixir", "hex")}":/root/.hex -v "${cacheDir("elixir", "mix")}":/root/.mix ` +
           `${PROXY_ENV.join(" ")} ${ELIXIR_IMAGE} ` +
-          `sh -c "mix local.hex --force && mix local.rebar --force && mix deps.get && mix compile"`,
+          `sh -c "${mixLocalInstall()} && ${mixDepsGet()} && mix compile"`,
       ),
     boot: (cwd, port, pg, ordersUrl) =>
       dockerRun(

@@ -70,7 +70,7 @@ export function renderFlutterI18nModule(ui: UiIR): string {
     ([key, message]) => `  ${dartStringLit(key)}: ${dartStringLit(message)},`,
   );
   return lines(
-    "// Generated translation runtime (Loom i18n, M-T1.11).",
+    "// Generated translation runtime (Loom i18n).",
     "//",
     "// Source-language lookup with a per-key fallback, plus ICU message",
     "// formatting via `package:intl`'s `MessageFormat`.  The `t(key, default,",

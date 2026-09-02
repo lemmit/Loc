@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Extern operation seam — the .NET domain extension point (extern (b) Phase 2).
+// Extern operation seam — the .NET domain extension point (extern (b)).
 //
 // An `operation X(...) extern { precondition … }` declares business logic the
 // DSL can't express: the body carries only preconditions, and the mutation is

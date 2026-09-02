@@ -3,8 +3,8 @@
 // `handle_event("<name>", …)` clause on the host LiveView (mirroring the
 // inline-lambda hoist), and a bare `onClick: next` reference renders as
 // `phx-click="<name>"` — binding the named clause instead of an `event_N`
-// gensym.  (Component-level actions, like component-level lambdas, do not
-// hoist to the host LiveView — a pre-existing HEEx limitation.)
+// gensym.  Component-level actions hoist to the host LiveView the same way —
+// see heex-component-state.test.ts.
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/index.js";
@@ -75,10 +75,11 @@ describe("Phoenix named `action` handlers", () => {
     expect(clauseA).not.toMatch(/\bb\(/);
   });
 
-  it("emits a pinned no-op marker (no undefined call) for a parameterised action→action call (HEEx parity gap)", async () => {
-    // A parameterised callee can't be cleanly inlined without param rewriting,
-    // so codegen emits a `tap(fn _ -> :ok end)` marker — NOT a call to an
-    // undefined `set_label/…` function (which would be broken Elixir).
+  it("inlines a PARAMETERISED sibling action, substituting the caller's arguments", async () => {
+    // Elixir cannot introduce a binding mid-pipe, so the inline IS the
+    // substitution: the callee's body renders with each parameter replaced by
+    // the caller's already-rendered argument.  This used to emit a
+    // `tap(fn _ -> :ok end)` marker — valid Elixir that silently did nothing.
     const src = await phoenixLive(`
       page P {
         route: "/p"
@@ -89,9 +90,24 @@ describe("Phoenix named `action` handlers", () => {
       }
     `);
     const clauseGo = src.match(/def handle_event\("go"[\s\S]*?\n {2}end/)?.[0] ?? "";
-    expect(clauseGo).toContain("tap(fn _ -> :ok end)");
-    expect(clauseGo).toContain("HEEx parity gap");
-    // The marker is a COMMENT; there is no real call to `set_label(...)`.
+    // The callee's write lands in the caller's clause with the argument bound.
+    expect(clauseGo).toContain('assign(:label, ("hi"))');
+    // No leftover no-op marker, and still no call to an undefined function.
+    expect(clauseGo).not.toContain("tap(fn _ -> :ok end)");
     expect(clauseGo).not.toMatch(/^\s*\|>\s*set_label\(/m);
+  });
+
+  it("substitutes a parameter that is itself an expression over page state", async () => {
+    const src = await phoenixLive(`
+      page P {
+        route: "/p"
+        state { n: int = 0 }
+        action addTo(delta: int) { n := n + delta }
+        action twice() { addTo(2) }
+        body: Stack { Button { "Go", onClick: twice } }
+      }
+    `);
+    const clause = src.match(/def handle_event\("twice"[\s\S]*?\n {2}end/)?.[0] ?? "";
+    expect(clause).toContain("assign(:n, socket.assigns.n + (2))");
   });
 });

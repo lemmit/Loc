@@ -82,6 +82,21 @@ and the one every other leg is measured against).
 
 Escape hatch for local debugging only: `LOOM_WIRE_OFF=1` skips the gate.
 
+## Adding a case — the golden is not optional
+
+Every case a runner records is compared, so a NEW case (a corpus fixture that
+grows a `test e2e`/`test` block, a new `../systems/*.ddd`, a new api entry in
+`../corpus.json`) must land with its golden in the same PR. Two gates say so:
+
+- **fast, no boot** — `../golden-coverage.test.ts` (part of plain `npm test`)
+  derives the required case set the way `../cases.mjs` does and fails naming any
+  case with no golden, plus any golden no case claims. This is what keeps the
+  omission out of `main` instead of discovering it on seven booted legs.
+- **booted** — `../wire-differential.mjs` fails the same way per backend.
+
+Deliberately leaving a case uncompared needs a signed `GOLDEN_OPT_OUT` entry in
+`../wire-differential.mjs`; it ratchets, like the waivers below.
+
 ## Known divergences
 
 Live exceptions are **explicit** in [`test/_helpers/wire-waivers.ts`](../../_helpers/wire-waivers.ts),

@@ -74,7 +74,7 @@ function renderProjectionResponseDto(proj: ProjectionIR, pctx: ProjectionReadsCt
   const wireImports = new Set<string>();
   const components = shape.map((f) => {
     guardProjectionField(proj, f);
-    collectWireImports(f.type, wireImports);
+    collectWireImports(f.type, wireImports, "Response");
     return `${wireJavaType(f.type, "Response")} ${f.name}`;
   });
   return lines(
@@ -241,16 +241,19 @@ function corrWire(proj: ProjectionIR): WireField {
 /** A VO-typed read-model row field projects through its `<Vo>Response` record,
  *  co-located in `application.workflows` by `renderReadModelVoResponseDtos`
  *  (`domainToWire` emits `<Vo>Response.from(...)`).  An entity (containment
- *  part) type would need a `<Part>Response` DTO — but a part type never
- *  resolves in projection scope, so this arm is an unreachable backstop
- *  mirrored by the `loom.java-projection-field-unsupported` validator gate. */
+ *  part) type would need a `<Part>Response` DTO — but a part type resolves only
+ *  inside its own aggregate (`ddd-scope.ts`), so `projection P { line: Line }`
+ *  never links and this arm is an INTERNAL INVARIANT, not a backend gap.  The
+ *  `loom.java-projection-field-unsupported` code that used to mirror it was
+ *  retired as a phantom (M-T6.36); the unreachability is pinned instead by
+ *  `test/generator/java/generator-java-readmodel-gates.test.ts`. */
 function guardProjectionField(proj: ProjectionIR, f: WireField): void {
   const t = f.type.kind === "optional" ? f.type.inner : f.type;
   const leaf =
     t.kind === "array" ? (t.element.kind === "optional" ? t.element.inner : t.element) : t;
   if (leaf.kind === "entity") {
     throw new Error(
-      `java projection-reads: row field '${f.name}' of '${proj.name}' is entity-typed — not yet supported on the java backend.`,
+      `java projection-reads: row field '${f.name}' of '${proj.name}' is entity-typed — unreachable: a part type never resolves in projection scope.`,
     );
   }
 }

@@ -19,13 +19,18 @@ import {
   type Aggregate,
   type BoundedContext,
   isAggregate,
+  isApply,
+  isArea,
   isBoundedContext,
+  isComponent,
   isEnumDecl,
   isEventDecl,
   isPage,
   isRepository,
+  isStore,
   isSubdomain,
   isSystem,
+  isUi,
   isValueObject,
   isWorkflow,
   type Model,
@@ -33,7 +38,15 @@ import {
   type ValueObject,
 } from "../generated/ast.js";
 
-/** Declaration keyword for a node's `$type`. */
+/** Declaration keyword for a node's `$type`.
+ *
+ *  Membership here means TWO things: the node gets this keyword, and — when it
+ *  is named — it contributes a qualifying segment to the addresses of
+ *  everything inside it.  That is why `Ui` / `Area` / `EntityPart` being absent
+ *  was not a cosmetic gap: a page under `ui Admin { area Back { … } }` had
+ *  NOTHING to qualify it, so two pages named alike in different `ui` blocks
+ *  produced one address, and an entity part's fields collapsed onto the
+ *  aggregate's own address. */
 const KEYWORD_BY_TYPE: Record<string, string> = {
   Model: "model",
   System: "system",
@@ -41,6 +54,9 @@ const KEYWORD_BY_TYPE: Record<string, string> = {
   Subdomain: "subdomain",
   Aggregate: "aggregate",
   ValueObject: "valueobject",
+  EntityPart: "entity",
+  Capability: "capability",
+  PayloadDecl: "payload",
   EnumDecl: "enum",
   EnumValue: "value",
   EventDecl: "event",
@@ -48,8 +64,12 @@ const KEYWORD_BY_TYPE: Record<string, string> = {
   FindDecl: "find",
   Deployable: "deployable",
   Workflow: "workflow",
+  Projection: "projection",
+  Ui: "ui",
+  Area: "area",
   Page: "page",
   Component: "component",
+  Store: "store",
   Operation: "operation",
   FunctionDecl: "function",
   Create: "create",
@@ -57,13 +77,51 @@ const KEYWORD_BY_TYPE: Record<string, string> = {
   Apply: "apply",
 };
 
-/** The nearest entity-like container (aggregate or value object) of a node —
- *  the unit a member address is qualified by.  Includes the node itself. */
-function entityContainer(node: AstNode): Aggregate | ValueObject | undefined {
-  return (
-    AstUtils.getContainerOfType(node, isAggregate) ??
-    AstUtils.getContainerOfType(node, isValueObject)
-  );
+/** Leaf members that carry an address of their own but no keyword — they read
+ *  under their enclosing declaration's keyword (`aggregate Sales.Order.total`),
+ *  which is what makes a member address say what KIND of thing encloses it. */
+const ADDRESSABLE_MEMBER_TYPES: ReadonlySet<string> = new Set([
+  "Property",
+  "DerivedProp",
+  "StateField",
+  "ActionDecl",
+]);
+
+/** The ambient scaffolding every address omits.  A `system` / `subdomain` is
+ *  addressable in its own right but never qualifies what it contains — an
+ *  address is read against a workspace, not a deployment. */
+const NOT_A_QUALIFIER: ReadonlySet<string> = new Set(["Model", "System", "Subdomain"]);
+
+/** True for a node that can be named as a patch target — a mapped declaration
+ *  or one of the leaf members above.  A `Parameter` is deliberately NOT one:
+ *  it lives under `params`, is not independently patchable, and would collide
+ *  with the entity-part field of the same name. */
+export function isAddressable(node: AstNode): boolean {
+  return KEYWORD_BY_TYPE[node.$type] !== undefined || ADDRESSABLE_MEMBER_TYPES.has(node.$type);
+}
+
+/** The keyword a node reads under.
+ *
+ *  A payload declaration keeps the spelling its author used — `command Foo`,
+ *  `query Foo`, `error Foo` are one AST type with a `kind`, and an address that
+ *  said `payload` for all four would name something the source does not. */
+function keywordOf(node: AstNode): string | undefined {
+  if (node.$type === "PayloadDecl") {
+    const kind = (node as { kind?: unknown }).kind;
+    if (typeof kind === "string" && kind.length > 0) return kind;
+  }
+  return KEYWORD_BY_TYPE[node.$type];
+}
+
+/** The path segment a node contributes.
+ *
+ *  `apply` is the one declaration with no name of its own — it is identified by
+ *  the event it folds (`apply(e: Opened)`), so THAT is its segment.  Without it
+ *  two appliers on one aggregate share an address, which is how
+ *  `apply Accounts.Account` came to name two different nodes. */
+function segmentOf(node: AstNode): string | undefined {
+  if (isApply(node)) return node.event?.ref?.name ?? node.event?.$refText ?? undefined;
+  return nameOf(node);
 }
 
 function nameOf(node: AstNode): string | undefined {
@@ -72,34 +130,46 @@ function nameOf(node: AstNode): string | undefined {
 }
 
 /**
- * Canonical address for an AST node, or `undefined` when it cannot be placed
- * (no enclosing named structure).  A member with its own keyword (operation /
- * function / create / …) is addressed under that keyword; a plain member
- * (property / containment / derived / invariant) is addressed under its
- * enclosing entity's keyword (`aggregate`/`valueobject`).  Best-effort: a node
- * with no name of its own resolves to its enclosing entity's address.
+ * Canonical address for an AST node: `<keyword> <segment>.<segment>…`.
+ *
+ * The path is every enclosing NAMED DECLARATION from the bounded context (or
+ * the `ui`) down to the node itself; the keyword names the innermost enclosing
+ * declaration kind.  So a plain field reads `aggregate Sales.Order.total`, a
+ * field of a nested entity part reads `entity Sales.Order.Line.qty`, and a page
+ * under an area reads `page Admin.Back.Board`.
+ *
+ * The chain is WALKED rather than read from a fixed pair of slots (one
+ * bounded-context, one aggregate/value-object).  A fixed pair silently
+ * mis-addresses everything that does not fit it: the whole `ui` subtree (no
+ * qualifier at all, so pages collide across `ui` blocks), entity-part fields
+ * (the part name dropped), and event/payload fields (no keyword, so they read
+ * `node Sales.at`).
+ *
+ * Returns `undefined` for a node with no addressable ancestry.
  */
 export function addressOf(node: AstNode): string | undefined {
-  const ctx = AstUtils.getContainerOfType(node, isBoundedContext);
-  // getContainerOfType includes the node itself, so for an aggregate / value
-  // object node `entity === node`.
-  const entity = entityContainer(node);
-  const name = nameOf(node);
+  const segments: string[] = [];
 
-  // Own keyword if mapped; otherwise (a plain member) the enclosing entity's.
-  let keyword: string | undefined = KEYWORD_BY_TYPE[node.$type];
-  if (!keyword && entity && entity !== node) keyword = KEYWORD_BY_TYPE[entity.$type];
-  if (!keyword) keyword = "node";
-
-  const segs: string[] = [];
-  if (ctx) segs.push(ctx.name);
-  if (entity && entity !== (node as unknown) && entity !== (ctx as unknown)) {
-    segs.push(entity.name);
+  // The node's own segment: a named declaration or leaf member contributes its
+  // name; anything else (a statement, an expression) contributes nothing and is
+  // addressed by whatever encloses it.
+  if (isAddressable(node)) {
+    const own = segmentOf(node);
+    if (own) segments.push(own);
   }
-  if (name && node !== (ctx as unknown as AstNode)) segs.push(name);
 
-  if (segs.length === 0) return undefined;
-  return `${keyword} ${segs.join(".")}`;
+  let keyword: string | undefined = keywordOf(node);
+  for (let cur = node.$container; cur; cur = cur.$container) {
+    const mapped = keywordOf(cur);
+    if (!mapped || NOT_A_QUALIFIER.has(cur.$type)) continue;
+    // The innermost mapped ancestor supplies the keyword for a leaf member.
+    if (!keyword) keyword = mapped;
+    const seg = segmentOf(cur);
+    if (seg) segments.unshift(seg);
+  }
+
+  if (segments.length === 0) return undefined;
+  return `${keyword ?? "node"} ${segments.join(".")}`;
 }
 
 /** Every BoundedContext under a system, flattening the optional subdomain
@@ -129,7 +199,6 @@ function outlineContext(ctx: BoundedContext): OutlineContext {
   const aggregates: OutlineDecl[] = [];
   const valueObjects: OutlineDecl[] = [];
   const workflows: string[] = [];
-  const pages: string[] = [];
   const enums: string[] = [];
   const events: string[] = [];
   const repositories: string[] = [];
@@ -147,7 +216,6 @@ function outlineContext(ctx: BoundedContext): OutlineContext {
       const d = outlineDecl(m);
       if (d) valueObjects.push(d);
     } else if (isWorkflow(m)) pushAddr(m, workflows);
-    else if (isPage(m)) pushAddr(m, pages);
     else if (isEnumDecl(m)) pushAddr(m, enums);
     else if (isEventDecl(m)) pushAddr(m, events);
     else if (isRepository(m)) pushAddr(m, repositories);
@@ -158,11 +226,33 @@ function outlineContext(ctx: BoundedContext): OutlineContext {
     aggregates,
     valueObjects,
     workflows,
-    pages,
     enums,
     events,
     repositories,
   };
+}
+
+/** Every `ui` under a system, each with the surfaces it holds.
+ *
+ *  Pages nest through `area` blocks to any depth, so the members are collected
+ *  by walking the ui subtree rather than reading one member list — the area
+ *  path is already carried IN each address (`page Admin.Back.Board`), so the
+ *  list stays flat without losing where a page lives. */
+function uisOf(system: System): OutlineDecl[] {
+  const out: OutlineDecl[] = [];
+  for (const m of system.members) {
+    if (!isUi(m)) continue;
+    const node = addressOf(m);
+    if (!node) continue;
+    const members: string[] = [];
+    for (const inner of AstUtils.streamAllContents(m)) {
+      if (!isPage(inner) && !isComponent(inner) && !isStore(inner) && !isArea(inner)) continue;
+      const a = addressOf(inner);
+      if (a && a !== node) members.push(a);
+    }
+    out.push({ node, members });
+  }
+  return out;
 }
 
 /** Deployable addresses declared directly under a system. */
@@ -191,6 +281,7 @@ export function buildOutline(model: Model): Outline {
       systems.push({
         name: member.name,
         contexts: contextsOf(member).map(outlineContext),
+        uis: uisOf(member),
         deployables: deployablesOf(member),
       });
     } else if (isBoundedContext(member)) {

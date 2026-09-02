@@ -180,3 +180,66 @@ describe("render-expr vanilla leaves", () => {
     expect(renderExpr(fn, opCtx)).toBe("is_draft(record)");
   });
 });
+
+// ---------------------------------------------------------------------------
+// M-T6.44 (numeric-types audit F7) — the decimal arm fires on EITHER stamped
+// operand.  With only `leftType` checked, `int * money` / `int + decimal`
+// emitted native arithmetic on a `%Decimal{}` (runtime ArithmeticError), and
+// `int < decimal` fell to native `<` — Erlang TERM ordering, where
+// number < map is ALWAYS true: silently wrong, no crash.  Inside a real Ecto
+// query the NATIVE operators remain correct (the column is Postgres `numeric`,
+// not a struct) — pinned below rather than asserted in prose.
+// ---------------------------------------------------------------------------
+describe("render-expr — money/decimal on the RIGHT of a binary (M-T6.44)", () => {
+  const memCtx: RenderCtx = { thisName: "record", contextModule: "Acme.Sales" };
+  const INT = { kind: "primitive", name: "int" } as const;
+  const MONEY = { kind: "primitive", name: "money" } as const;
+  const DECIMAL = { kind: "primitive", name: "decimal" } as const;
+  const prop = (name: string): ExprIR => ({ kind: "ref", name, refKind: "this-prop" });
+  const bin = (
+    op: "*" | "+" | "<" | "==",
+    lt: typeof INT | typeof DECIMAL,
+    rt: typeof MONEY | typeof DECIMAL,
+  ): ExprIR => ({
+    kind: "binary",
+    op,
+    left: { ...prop("count"), type: lt },
+    right: { ...prop("factor"), type: rt },
+    leftType: lt,
+    rightType: rt,
+    resultType: op === "<" || op === "==" ? { kind: "primitive", name: "bool" } : rt,
+  });
+
+  it("int * money dispatches Decimal.mult (was native `*` → ArithmeticError)", () => {
+    expect(renderExpr(bin("*", INT, MONEY), memCtx)).toBe(
+      "Decimal.mult(record.count, record.factor)",
+    );
+  });
+
+  it("int + decimal dispatches Decimal.add", () => {
+    expect(renderExpr(bin("+", INT, DECIMAL), memCtx)).toBe(
+      "Decimal.add(record.count, record.factor)",
+    );
+  });
+
+  it("int < decimal dispatches Decimal.compare (was Erlang term ordering: always true)", () => {
+    expect(renderExpr(bin("<", INT, DECIMAL), memCtx)).toBe(
+      "Decimal.compare(record.count, record.factor) == :lt",
+    );
+  });
+
+  it("int == decimal dispatches Decimal.compare (native `==` on int vs struct: always false)", () => {
+    expect(renderExpr(bin("==", INT, DECIMAL), memCtx)).toBe(
+      "Decimal.compare(record.count, record.factor) == :eq",
+    );
+  });
+
+  it("inside an Ecto query filter the NATIVE operator survives — the column is `numeric`, not a struct", () => {
+    // `filterArgs: true` is the real Ecto-query context (`from … where:`);
+    // `Decimal.compare` is not a valid query expression there, and the native
+    // `<` lowers to SQL comparison on the numeric column — the already-safe
+    // path, pinned so extending the in-memory arm can never leak into it.
+    expect(renderExpr(bin("<", INT, DECIMAL), ctx)).toBe("record.count < record.factor");
+    expect(renderExpr(bin("*", INT, MONEY), ctx)).toBe("record.count * record.factor");
+  });
+});

@@ -8,6 +8,7 @@ import { durableEventTypes } from "../../../ir/util/channels.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { collectJavaTypeImports, renderJavaType } from "../render-expr.js";
+import { hbIdent } from "../sql-ident.js";
 import {
   jpaClassAnnotations,
   jpaFieldAnnotations,
@@ -22,7 +23,7 @@ import {
 // platform-neutrally by `workflowStateTableShape` in the migrations builder)
 // plus a Spring Data `JpaRepository` over it.  This is the persistence
 // foundation the in-process dispatcher (load-or-allocate / route-or-drop) and
-// the read-only instance endpoints build on — slice 1 of the Java saga track
+// the read-only instance endpoints build on —
 // (docs/old/plans/workflow-debt-backend-parity.md).
 //
 // Field mapping mirrors the aggregate entity emitter (jpa-annotations.ts):
@@ -99,7 +100,7 @@ export function renderWorkflowStateEntity(
 
   const fieldLines: string[] = [
     `    @EmbeddedId`,
-    `    @AttributeOverride(name = "value", column = @Column(name = "${snake(corr)}"))`,
+    `    @AttributeOverride(name = "value", column = @Column(name = "${hbIdent(snake(corr))}"))`,
     `    ${corrIdClass(wf)} ${corr};`,
   ];
   for (const f of stateOnly) {

@@ -4,21 +4,22 @@
 // via the shared walk helpers.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
-import { localizedAriaLabelAttr, localizedNamedValue, localizedText } from "../i18n-emit.js";
-import { renderPrimitive } from "../render-primitive.js";
+import { escapeHtmlAttr } from "../a11y-emit.js";
 import {
-  namedArgValue,
-  numericNamed,
-  positionalArgs,
-  slugify,
-  stringNamed,
-} from "../shared/args.js";
+  localizedAriaLabelAttr,
+  localizedNamedValue,
+  localizedPositionalAttr,
+  localizedPositionalTranslation,
+  localizedText,
+} from "../i18n-emit.js";
+import { renderPrimitive } from "../render-primitive.js";
+import { gridCols, positionalArgs, slugify, stringNamed } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import { positionalChildren, styleAttr, styleWith, testidAttr, walk } from "../walker-core.js";
 
 /** Run `fn` with the walk one semantic heading-nesting level deeper — used
  *  by the `nesting: true` a11y-contract containers (`Section` / `Card`) so a
- *  `Heading` in their body derives a rank deeper (accessibility.md Phase 2).
+ *  `Heading` in their body derives a rank deeper (accessibility.md).
  *  Mutate-and-restore on the SAME context (not a spread copy) so every
  *  value-typed `Sink` flag a child writes (`usesNavigate`, `usesChildren`,
  *  …) still lands on the shared object — a shallow `{...ctx}` would silently
@@ -70,48 +71,17 @@ export function emitGroup(
   });
 }
 
-/** Read the `cols:` named arg on a Grid call.
- *
- *  Accepts two forms:
- *    - Scalar int literal:  `cols: 3`  →  all three breakpoints use 3.
- *    - List literal:        `cols: [3, 2, 1]`  →  `[desktop, tablet, mobile]`.
- *
- *  When a breakpoint slot is missing in the list form, conservative
- *  defaults apply: `tablet = ceil(desktop/2)`, `mobile = 1`.  When the
- *  arg itself is absent, returns `undefined` and consumers fall back
- *  to their own non-responsive default. */
-function gridColsArg(
-  call: ExprIR & { kind: "call" },
-): { desktop: number; tablet: number; mobile: number } | undefined {
-  const scalar = numericNamed(call, "cols");
-  if (scalar !== undefined) return { desktop: scalar, tablet: scalar, mobile: scalar };
-  const raw = namedArgValue(call, "cols");
-  if (raw?.kind !== "list") return undefined;
-  const intElements: number[] = [];
-  for (const el of raw.elements) {
-    if (el.kind === "literal" && el.lit === "int") {
-      const n = Number(el.value);
-      if (Number.isFinite(n)) intElements.push(n);
-    }
-  }
-  if (intElements.length === 0) return undefined;
-  const desktop = intElements[0]!;
-  const tablet = intElements[1] ?? Math.max(1, Math.ceil(desktop / 2));
-  const mobile = intElements[2] ?? 1;
-  return { desktop, tablet, mobile };
-}
-
 export function emitGrid(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
   // Each child wraps in a per-pack column container (Mantine's
   // <Grid.Col span="auto">; shadcn's plain `<div>` since gap is
-  // on the parent).  `cols:` (Phase 6) selects per-breakpoint column
+  // on the parent).  `cols:` selects per-breakpoint column
   // counts; when absent, every child takes `span="auto"` and the
   // pack picks an equal-weight default.
   const children = positionalChildren(call, ctx, depth + 2);
   const colIndent = "  ".repeat(depth + 1);
   const childIndent = "  ".repeat(depth + 2);
   const closeIndent = "  ".repeat(depth);
-  const cols = gridColsArg(call);
+  const cols = gridCols(call);
   // Translate column counts to Mantine/MUI `span` values out of 12.
   // `floor(12 / N)` matches the on-screen ratios users intend; an N
   // greater than 12 clamps to 1 so the math stays sane.
@@ -119,6 +89,21 @@ export function emitGrid(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   return renderPrimitive(ctx, "primitive-grid", {
     hasChildren: children.length > 0,
     children,
+    // Grid was the ONE children-bearing container that never passed
+    // `childrenBlock` — the pre-joined form every sibling container supplies
+    // (`Stack`/`Group`/`Section`/`Sticky`/`Container`/`Toolbar`).  The `.hbs`
+    // packs iterate `{{#each children}}` (each child in its own column
+    // wrapper), so they never noticed; the two PROCEDURAL packs read
+    // `childrenBlock` through their shared container helpers — Feliz's
+    // `containerEl` (`prop.children [ … ]`) and Flutter's `childrenList`
+    // (`<Widget>[ … ]`) — and silently rendered an EMPTY grid.  Flutter's
+    // was worse than silent: `<Widget>[\n,\n]` is a Dart syntax error.
+    // Joined on `childIndent` because the children were walked at `depth + 2`
+    // (the extra level is the per-child column wrapper the markup packs emit),
+    // so the join indent stays self-consistent with the child bodies.
+    childrenBlock: children.join(`${ctx.target.interChildSeparator ?? ""}\n${childIndent}`),
+    // `indent` is the name the procedural helpers read for the same value.
+    indent: childIndent,
     colIndent,
     childIndent,
     closeIndent,
@@ -147,7 +132,7 @@ export function emitSection(
   // theming (if any) varies per template.
   const id = stringNamed(call, "id");
   // `Section` is a `nesting: true` container in the a11y contract — its
-  // children's `Heading`s derive one rank deeper (accessibility.md Phase 2).
+  // children's `Heading`s derive one rank deeper (accessibility.md).
   const children = withHeadingNesting(ctx, () => positionalChildren(call, ctx, depth + 1));
   const indent = "  ".repeat(depth + 1);
   const closeIndent = "  ".repeat(depth);
@@ -209,20 +194,73 @@ export function emitContainer(
     testidAttr: testidAttr(call, ctx),
     styleAttr: styleAttr(call, ctx),
     // Vuetify has no `size` prop on `<v-container>`, so its pack expresses the
-    // size as its own `max-width` declaration — which used to sit NEXT TO
-    // `{{{styleAttr}}}` as a second `style` attribute (F2).  `styleWith` merges
-    // the pack's base declarations with the author's into one attribute.
+    // size as its own `max-width` declaration.  `styleWith` merges the pack's
+    // base declarations with the author's into ONE attribute — emitting it next
+    // to `{{{styleAttr}}}` would produce two `style` attributes.
     styleWith: styleWith(call, ctx),
   });
 }
 
+/** The four spellings of a `Tab`'s CAPTION — a user-visible slot (`tabLabel`,
+ *  M-T1.11) the packs render four different ways, so all four come from the
+ *  SAME `messageKey()` and the same translation decision:
+ *
+ *    `label`     — the markup TEXT token (`<Tabs.Tab>{{{label}}}</Tabs.Tab>`);
+ *    `labelAttr` — the complete bound ` label=…` attribute (MUI's `<Tab label=…/>`,
+ *                  Angular Material's `<mat-tab label=…>`, which needs the
+ *                  framework's own binding syntax, not a JSX brace);
+ *    `titleAttr` — the same fragment under the `title` name, for the one pack
+ *                  whose component spells the prop differently (flowbite's
+ *                  `<TabItem title=…>`).  Two names rather than one generic
+ *                  "attribute value" token because a Vue/Angular binding is
+ *                  `:title` / `[title]`, which a value-only token cannot spell;
+ *    `labelExpr` — the bare target-native EXPRESSION, always defined (the
+ *                  translation call under i18n, the target's string literal
+ *                  otherwise), for the packs that splice the caption into their
+ *                  own syntax: a Svelte object literal, Feliz's `prop.ariaLabel`,
+ *                  Flutter's `Tab(text: …)`.
+ *
+ *  `arg` is the `Tab(…)` call when its caption is a plain literal, `undefined`
+ *  for the two chrome fallbacks (a non-literal caption, a bare positional child)
+ *  — those are emitter-built `Tab N` text with no source string, so they carry
+ *  no catalog key and always render static. */
+function tabLabelForms(
+  arg: (ExprIR & { kind: "call" }) | undefined,
+  ctx: WalkContext,
+  labelStr: string,
+): { label: string; labelAttr: string; titleAttr: string; labelExpr: string } {
+  const translation = arg ? localizedPositionalTranslation(arg, ctx, "tabLabel") : undefined;
+  return {
+    label: arg ? localizedText(arg, ctx, "tabLabel", '""') : ctx.target.escapeText(labelStr),
+    labelAttr: arg
+      ? localizedPositionalAttr(arg, ctx, "tabLabel", "label")
+      : ` label="${escapeHtmlAttr(labelStr)}"`,
+    titleAttr: arg
+      ? localizedPositionalAttr(arg, ctx, "tabLabel", "title")
+      : ` title="${escapeHtmlAttr(labelStr)}"`,
+    labelExpr:
+      translation ?? ctx.target.renderStringLiteral?.(labelStr) ?? JSON.stringify(labelStr),
+  };
+}
+
 export function emitTabs(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth: number): string {
-  // Tabs(Tab("Overview", body), Tab("Settings", body))
-  // Each positional child must be a `Tab(label, body)` call;
+  // Tabs(Tab("Overview", ...body), Tab("Settings", ...body))
+  // Each positional child must be a `Tab(label, ...children)` call;
   // anything else lands as a placeholder so the page still
   // compiles.  Tab labels must be string literals in v0; non-
   // literal labels fall back to indexed slugs `tab-1`, …
+  //
+  // The panel body is EVERY remaining positional, not `tabPositionals[1]`
+  // alone: a tab panel is a children container like `Stack`/`Card` and joins
+  // its children the same way.  Taking only the first would render `A` and drop
+  // `B` from `Tab { "Ovw", Text { "A" }, Text { "B" } }` on all seven targets,
+  // silently — and the dropped literal would still reach
+  // `.loom/messages.en.json`, handing translators a key nothing renders.
   const positionals = positionalArgs(call);
+  const innerIndent = "  ".repeat(depth + 2);
+  /** Join already-walked panel children the way every other container does. */
+  const joinBody = (parts: readonly string[]): string =>
+    parts.join(`${ctx.target.interChildSeparator ?? ""}\n${innerIndent}`);
   const tabs = positionals.map((arg, i) => {
     if (arg.kind !== "call" || arg.name !== "Tab") {
       // Bare positional (e.g. `Tabs(Card(...), Card(...))`) — treat it as
@@ -230,25 +268,46 @@ export function emitTabs(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
       // this fallback, the panel would emit a JSX comment as its only
       // child and tsc rejects it (Mantine's `TabsPanelProps` requires
       // a non-empty `children`).
+      const only = walk(arg, ctx, depth + 2);
       return {
         value: `tab-${i + 1}`,
-        label: `Tab ${i + 1}`,
-        bodyJsx: walk(arg, ctx, depth + 2),
+        ...tabLabelForms(undefined, ctx, `Tab ${i + 1}`),
+        bodyJsx: only,
+        bodyChildren: [only],
       };
     }
     const tabPositionals = positionalArgs(arg);
     const labelArg = tabPositionals[0];
-    const bodyArg = tabPositionals[1];
-    const labelStr =
-      labelArg && labelArg.kind === "literal" && labelArg.lit === "string"
-        ? labelArg.value
-        : `Tab ${i + 1}`;
+    // Positional 0 is the CAPTION only when it is text-like — the same rule
+    // `emitCard` applies to its title (`titleIsTextLike`).  Reading it as the
+    // caption unconditionally made an unrecognised NAMED argument SWALLOW the
+    // tab's content: `Tab { title: "One", Text { "first" } }` puts nothing in
+    // positional 0 but the `Text`, so the body became the caption (rendered as
+    // the indexed fallback "Tab 1") and `slice(1)` left the panel empty — a
+    // `missing tab body` marker on every frontend, while the dropped literal
+    // still shipped to translators as a live catalog key.  A `Tab` whose
+    // positional 0 is a CALL now renders it as body; the unrecognised
+    // `title:` remains an author error the IR gate should name
+    // (`loom.page-primitive-unknown-arg`, see IMPL-NOTES.md).
+    const labelIsTextLike = labelArg !== undefined && labelArg.kind !== "call";
+    const bodyArgs = labelIsTextLike ? tabPositionals.slice(1) : tabPositionals;
+    const isLiteralLabel = labelArg?.kind === "literal" && labelArg.lit === "string";
+    const labelStr = isLiteralLabel ? labelArg.value : `Tab ${i + 1}`;
+    const bodyParts = bodyArgs.map((e) => walk(e, ctx, depth + 2));
     return {
+      // The switcher's anchor is derived from the SOURCE literal, never from the
+      // translated caption — a `value:` that changed per locale would break
+      // every selector, e2e spec and deep link the moment a translation landed.
       value: slugify(labelStr) || `tab-${i + 1}`,
-      label: ctx.target.escapeText(labelStr),
-      bodyJsx: bodyArg
-        ? walk(bodyArg, ctx, depth + 2)
-        : ctx.target.renderComment("missing tab body"),
+      ...tabLabelForms(isLiteralLabel ? arg : undefined, ctx, labelStr),
+      bodyJsx:
+        bodyParts.length > 0 ? joinBody(bodyParts) : ctx.target.renderComment("missing tab body"),
+      // The same children UNJOINED, for the two packs that emit a PROGRAMMING
+      // LANGUAGE rather than markup: Feliz splices them into an offside-
+      // sensitive `prop.children [ … ]` list (`;`-separated) and Flutter needs
+      // ONE widget per `TabBarView` child, so several fold into a `Column`.
+      // The walker's `\n`-joined `bodyJsx` is a syntax hazard in both.
+      bodyChildren: bodyParts,
     };
   });
   // Record the first tab group's default so the shell can declare the
@@ -305,10 +364,10 @@ export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   // `Card(child)` (single non-text-like positional)
   // renders a card with no heading.
   //
-  // The body used to be `positionals[1]` alone, so `Card { "T", Text { … },
-  // Slot { } }` rendered the `Text` and dropped the `Slot` — and every
-  // sibling after the first — without a word.  Card is a container like
-  // `Stack`/`Section`; it joins its children the same way they do.
+  // EVERY remaining positional is a body child, not `positionals[1]` alone:
+  // Card is a container like `Stack`/`Section` and joins its children the same
+  // way.  Taking only the first would drop the `Slot` from
+  // `Card { "T", Text { … }, Slot { } }` without a word.
   const positionals = positionalArgs(call);
   const titleArg = positionals[0];
   const titleIsTextLike = titleArg !== undefined && titleArg.kind !== "call";
@@ -321,7 +380,7 @@ export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
   const titleText =
     titleIsTextLike && titleArg ? localizedText(call, ctx, "cardTitle", '""', 0) : undefined;
   // `Card` is a `nesting: true` container in the a11y contract — its body
-  // `Heading`s derive one rank deeper (accessibility.md Phase 2).  The card
+  // `Heading`s derive one rank deeper (accessibility.md).  The card
   // title itself is not a `Heading` primitive, so it is unaffected.
   const contentParts = withHeadingNesting(ctx, () =>
     contentExprs.map((e) => walk(e, ctx, depth + 1)),
@@ -330,7 +389,7 @@ export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
     contentParts.length > 0
       ? contentParts.join(`${ctx.target.interChildSeparator ?? ""}\n${indent}`)
       : undefined;
-  // Phase 5 — visual rank.  `variant: "raised" | "flat" | "outline"`
+  // visual rank.  `variant: "raised" | "flat" | "outline"`
   // picks the card's elevation idiom per pack.  `shadow: "sm" | "md"
   // | "lg" | "none"` overrides the variant's default shadow level.
   const variant = stringNamed(call, "variant");

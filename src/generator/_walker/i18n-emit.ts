@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// i18n emission — the shared translation-runtime seam (M-T1.11, i18n.md Phase 2).
+// i18n emission — the shared translation-runtime seam (M-T1.11, i18n.md).
 //
 // `localizedText` is the drop-in replacement for the
 // `unwrapTextLiteral(firstPositionalContent(call, ctx), ctx.target.escapeText)`
@@ -54,8 +54,7 @@ const TRANSLATED: TypeIR = { kind: "primitive", name: "string" };
  *  import the JS frontends need.
  *
  *  The four JS frontends share one `t(key, default, values?)` shim, so the
- *  default spelling here is that JavaScript call — every existing call site is
- *  byte-identical to before this indirection.  A frontend whose runtime is a
+ *  default spelling here is that JavaScript call.  A frontend whose runtime is a
  *  different LANGUAGE (Feliz's F#, Flutter's Dart) supplies `renderTranslate`
  *  and spells the same call its own way; the key, the default message and the
  *  ICU hole values are the shared part, so the catalog is unchanged.
@@ -151,12 +150,12 @@ function localizedRawOf(
  *  `label: row.name` is dynamic but carries no translatable TEXT, so
  *  `icuFromConcat` rejects it and the caller's raw-expression branch still runs).
  *
- *  This lives here rather than at each call site because the ATTRIBUTE helpers
- *  originally had only two branches — literal and raw-expression — so an
- *  interpolated `label:`/`title:` fell straight through to concatenation while the
- *  extraction pass still wrote its ICU entry into the catalog.  That is the
- *  dead-key shape `user-visible-slot-coverage.test.ts` cannot see (the slot DOES
- *  render, just not through `t()`), and it emitted the very concatenation
+ *  This lives here rather than at each call site because ATTRIBUTE helpers with
+ *  only two branches — literal and raw-expression — send an interpolated
+ *  `label:`/`title:` straight to concatenation while the extraction pass still
+ *  writes its ICU entry into the catalog.  That is the dead-key shape
+ *  `user-visible-slot-coverage.test.ts` cannot see (the slot DOES render, just
+ *  not through `t()`), and it emits the very concatenation
  *  `loom.user-visible-concat` bans in `.ddd` source. */
 function icuTranslateCall(
   arg: ExprIR | undefined,
@@ -375,6 +374,36 @@ export function localizedNamedValue(
   const text = literal ?? defaultLabel;
   if (text === undefined || text === "") return undefined;
   return stringLiteral(ctx, text);
+}
+
+/** The translation-call EXPRESSION for a POSITIONAL user-visible slot, or
+ *  `undefined` when there is nothing to translate — i18n is off, the slot is
+ *  absent, or it is dynamic with no literal text.
+ *
+ *  The "caller keeps its own spelling" variant of {@link localizedNamedValue},
+ *  and it makes the same trade {@link localizedChromeIcuValue} does: a slot
+ *  whose raw form is spliced into the target's OWN string syntax — Flutter's
+ *  `InputDecoration(labelText: '…')`, Feliz's `prop.text "…"`, a TanStack
+ *  `header: "…"` column def — cannot be handed a re-spelled literal without
+ *  putting the pre-i18n bytes at the mercy of that re-spelling.  Returning
+ *  `undefined` leaves the existing raw path untouched BY CONSTRUCTION and hands
+ *  back an expression only when there is a real `t()` call to make.
+ *
+ *  `role` MUST match the slot's role in `USER_VISIBLE_SLOTS`, so the emitted key
+ *  equals the catalog key. */
+export function localizedPositionalTranslation(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+  role: string,
+  argIndex = 0,
+): string | undefined {
+  const arg = positionalArgs(call)[argIndex];
+  const literal = literalString(arg);
+  if (literal !== undefined) {
+    if (!ctx.i18nPrefix) return undefined;
+    return translateCall(ctx, messageKey(ctx.i18nPrefix, role, literal), literal);
+  }
+  return icuTranslateCall(arg, ctx, role);
 }
 
 /** A plain string literal in the target's own expression language — the

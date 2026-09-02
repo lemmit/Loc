@@ -134,6 +134,34 @@ describe("validator fault isolation — the fuzz gate never lets a throw escape"
       errors.join("\n"),
     ).toBe(true);
   });
+
+  it("keeps a context's other diagnostics when a `derived` initializer failed to parse", async () => {
+    // A `derived` whose NAME is a soft keyword (`page`) fails the `ID` token,
+    // and parse recovery completes the rule with `expr` undefined.  Streaming
+    // that undefined node threw inside `checkDerived`, which aborted the whole
+    // enclosing `context` family — so the author saw one parse error plus a
+    // crash notice INSTEAD of the real diagnostics for the same file.
+    const { errors } = await parseString(`
+      context Shop {
+        aggregate Order {
+          qty: int
+          derived page: int[] = [1, 2]
+          label: string = 42
+        }
+      }
+    `);
+    // The guard diagnostic must NOT appear — the check no longer crashes.
+    expect(
+      errors.filter((e) => /crashed and was skipped/.test(e)),
+      errors.join("\n"),
+    ).toEqual([]);
+    // …and the unrelated sibling diagnostic, declared AFTER the broken
+    // `derived` in the same aggregate, still surfaces.
+    expect(
+      errors.some((e) => /Default for 'label'/.test(e)),
+      errors.join("\n"),
+    ).toBe(true);
+  });
 });
 
 describe("runChecked — the per-theme guard", () => {

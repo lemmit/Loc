@@ -135,7 +135,7 @@ using ${ns}.Infrastructure.Persistence.Projections;
 
 namespace ${ns}.Application.Workflows;
 
-// Read-model fold via the domain IReadModelStore port (audit S7 Slice C), NOT
+// Read-model fold via the domain IReadModelStore port, NOT
 // the concrete AppDbContext.  FindAsync returns the EF change-TRACKED row, so
 // the ` +
     "`state.<Prop> = …; SaveChangesAsync()`" +
@@ -313,7 +313,7 @@ function renderProjectionsController(
     // who fails it cannot learn whether the key exists.
     const gate = proj.query?.requires;
     if (gate) {
-      collectCsExprUsings(gate, usings);
+      collectCsExprUsings(gate, usings, ns);
       usings.add(`${ns}.Domain.Common`); // ForbiddenException
       if (exprUsesCurrentUser(gate)) {
         usings.add(`${ns}.Auth`); // ICurrentUserAccessor
@@ -344,7 +344,10 @@ function renderProjectionsController(
         `    [HttpGet("${slug}/{key}")]\n` +
         `    [ProducesResponseType(typeof(${T}Response), 200)]\n` +
         forbiddenAttr +
-        `    [ProducesResponseType(typeof(ProblemDetails), 404)]\n` +
+        `    [ProducesResponseType(typeof(ProblemDetails), ${resolveErrorStatus(
+          "NotFound",
+          ctx.structuralErrorStatuses,
+        )})]\n` +
         `    public async Task<IActionResult> Get${T}(${corrClr} key)\n` +
         `    {\n` +
         gateLines +

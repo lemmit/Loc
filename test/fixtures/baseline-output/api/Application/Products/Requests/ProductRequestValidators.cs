@@ -8,7 +8,8 @@ public sealed class MoneyRequestValidator : AbstractValidator<MoneyRequest>
     public MoneyRequestValidator()
     {
         RuleFor(x => x.Amount).GreaterThanOrEqualTo(0);
-        RuleFor(x => x.Currency).Length(3, 3);
+        RuleFor(x => x.Currency).Must(v => v == null || v.EnumerateRunes().Count() == 3)
+            .WithMessage("'{PropertyName}' must be exactly 3 characters.");
     }
 }
 

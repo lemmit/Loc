@@ -1,0 +1,81 @@
+// Query-time AGGREGATION over a `shape: document` source — the one cell the
+// column gate (`loom.projection-columnless-source`) deliberately leaves open,
+// pinned as a POSITIVE fixture so the four backends that emit it keep emitting
+// it.
+//
+// A document aggregate persists as `(id, data, version)`, so `sum(o.total)` and
+// every `group by o.<field>` are refused: the declared fields live inside the
+// jsonb blob.  What survives is the ROW COUNT — `count(*)` over the `id` column
+// — and that really does run: drizzle `count()` over `schema.articles`,
+// mikroorm `raw("count(*)")` over `ArticleRow`, SQLAlchemy
+// `func.count()` over `ArticleRow`, Ecto `count(record.id)` over the document
+// schema, EF `_db.Articles.GroupBy(_ => 1).Count()` over
+// `DbSet<ArticleDocument>`, Dapper `SELECT count(*)::int FROM articles`.
+//
+// NO `java`.  Java's aggregation runs JPQL through the `EntityManager`
+// (`select count(e) from Article e`) and a document aggregate has NO JPA
+// `@Entity` at all — it round-trips one jsonb column through a `JdbcTemplate`
+// repository — so Hibernate fails the query with "could not resolve root
+// entity" at request time.  That cell is refused honestly by
+// `loom.projection-whole-table-aggregation-unsupported` (its `#document`
+// message variant); the manifest row
+// records the exclusion, and `test/ir/projection-document-aggregation.test.ts`
+// carries the negative proof.
+//
+// NOTHING FILTERED HERE, deliberately.  The moment the source carries a
+// read-filtering capability the aggregation becomes unemittable on every
+// backend (the predicates name `tenant_id` / `is_deleted`, which the triple has
+// not) and — worse — SILENT on .NET/EF, which registers no `HasQueryFilter` for
+// a document aggregate and so counts every tenant's rows.  That crossing is
+// refused by `loom.projection-document-source-capability-filtered` and lives in
+// the same negative test; the filtered RELATIONAL crossing is
+// `projection-agg-filters.ddd`.
+//
+// COMPILE-TIER ONLY — no `test e2e` block.  The generation gate proves the read
+// emits; asserting the number needs seeded rows the behavioural runners set up
+// per-fixture, and `document.ddd` already drives the document write path.
+system ProjectionDocumentAggregation {
+  subdomain Cms {
+    context Cms {
+      aggregate Article shape: document, with crudish {
+        title: string
+        viewCount: int
+      }
+
+      repository Articles for Article { }
+
+      // The whole-table row count — the ONLY aggregation a document source can
+      // express.  A backend that reached for a declared field here would name a
+      // jsonb key as a column; a backend with no document table to select from
+      // would not compile at all.
+      projection ArticleVolume {
+        articles: int
+        from Article as a
+        select articles = count()
+      }
+
+      // The PER-ROW arm over the same source, beside it: this one reads through
+      // the aggregate's repository (which hydrates the blob), so it is not
+      // shape-constrained and CAN name declared fields.  Keeping both in one
+      // fixture is what makes the contrast a regression: a backend that routed
+      // the aggregation through the repository, or the row read through the
+      // table, breaks exactly one of the two.
+      projection ArticleTitles {
+        heading: string
+        seen: int
+        from Article as a
+        select heading = a.title, seen = a.viewCount
+      }
+    }
+  }
+  api CmsApi from Cms
+  storage primary { type: postgres }
+  resource cmsState { for: Cms, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Cms]
+    dataSources: [cmsState]
+    serves: CmsApi
+    port: 4000
+  }
+}

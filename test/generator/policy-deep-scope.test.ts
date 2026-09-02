@@ -64,6 +64,27 @@ describe("policy deep — node (Hono/Drizzle)", () => {
   });
 });
 
+// The SECOND node persistence adapter.  Not a sixth backend: the same Hono
+// backend on `persistence: mikroorm`, whose FilterQuery operator vocabulary has
+// no prefix test at all — so the predicate rides a `raw()` SQL fragment used as
+// a FilterQuery KEY instead of an operator tree.  Deeper pins (binding arity,
+// the `raw` import, the resolver) live in
+// `test/generator/typescript/mikroorm-deep-scope.test.ts`.
+describe("policy deep — node (Hono/MikroORM)", () => {
+  it("emits the descendant-or-self prefix + NULL fallback as a raw() fragment", async () => {
+    const text = await allText("node { persistence: mikroorm }", "deep");
+    expect(text).toContain('.orgPath + "."');
+    expect(text).toContain("strpos(data_key, ?) = 1");
+    expect(text).toContain("data_key is null and tenant_id = ?");
+  });
+
+  it("`local` keeps the flat tenantId floor (no prefix, no raw fragment)", async () => {
+    const text = await allText("node { persistence: mikroorm }", "local");
+    expect(text).not.toContain("strpos(");
+    expect(text).not.toContain('.orgPath + "."');
+  });
+});
+
 describe("policy deep — .NET (EF Core)", () => {
   it("emits a static-expressible StartsWith prefix + NULL fallback", async () => {
     const text = await allText("dotnet", "deep");
@@ -115,6 +136,15 @@ describe("policy global — node (Hono/Drizzle)", () => {
   });
 });
 
+describe("policy global — node (Hono/MikroORM)", () => {
+  it("emits the root-subtree raw() fragment anchored at rootOrg (not orgPath)", async () => {
+    const text = await allText("node { persistence: mikroorm }", "global");
+    expect(text).toContain('.rootOrg + "."');
+    expect(text).toContain("strpos(data_key, ?) = 1");
+    expect(text).not.toContain('.orgPath + "."');
+  });
+});
+
 describe("policy global — .NET (EF Core)", () => {
   it("emits the StartsWith prefix anchored at RootOrg + NULL fallback", async () => {
     const text = await allText("dotnet", "global");
@@ -148,5 +178,102 @@ describe("policy global — Elixir (plain Ecto/Phoenix)", () => {
     expect(text).toContain("fragment(");
     expect(text).toContain("strpos(?, ? || '.') = 1");
     expect(text).toContain("current_user.root_org");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M-T3.17 — the subtree read must be INDEX-USABLE on every backend.
+//
+// `strpos`/`locate`/`StartsWith` are functions OF THE COLUMN, so Postgres can
+// never use the `data_key text_pattern_ops` index the tenancy migration derives
+// (`test/system/tenant-index.test.ts`) for them: every deep/global read
+// seq-scans.  The fix is an escaped prefix `LIKE` ANDed IN FRONT of the
+// anchored test as a sargable PREFILTER — the anchored test stays as the
+// recheck, which is what keeps the `orgXa.leak` wildcard trap green even if the
+// escaping is wrong (a bad escape can only WIDEN a LIKE).
+//
+// So the invariant this pins is a CONJUNCTION, per backend: the escaped LIKE is
+// present AND the anchored test is still present.  A backend that dropped the
+// recheck would be a cross-tenant leak; one that dropped the LIKE would be the
+// seq scan again.  The runtime proof that the index is actually chosen is
+// `test/e2e/tenancy-subtree-explain.test.ts`.
+// ---------------------------------------------------------------------------
+describe("M-T3.17 — the subtree read carries a sargable prefilter on every backend", () => {
+  const CASES: ReadonlyArray<{
+    platform: string;
+    label: string;
+    /** The escaped-LIKE prefilter, in that backend's spelling. */
+    prefilter: RegExp;
+    /** The anchored test that still DECIDES the row. */
+    recheck: RegExp;
+  }> = [
+    {
+      platform: "node",
+      label: "node (Hono/Drizzle)",
+      prefilter: /like \$\{.*\} escape '!'/,
+      recheck: /strpos\(/,
+    },
+    {
+      platform: "node { persistence: mikroorm }",
+      label: "node (Hono/MikroORM)",
+      prefilter: /data_key like \? escape '!'/,
+      recheck: /strpos\(data_key, \?\) = 1/,
+    },
+    {
+      platform: "dotnet",
+      label: ".NET (EF Core)",
+      prefilter: /EF\.Functions\.Like\(.*"!"\)/,
+      recheck: /\.StartsWith\(/,
+    },
+    {
+      platform: "java",
+      label: "Java (Spring Data JPA)",
+      prefilter: /like :#\{.*\} escape '!'/,
+      recheck: /locate\(concat\(/,
+    },
+    {
+      platform: "python",
+      label: "Python (FastAPI/SQLAlchemy)",
+      prefilter: /\.like\(.*escape="!"\)/,
+      recheck: /func\.strpos\(/,
+    },
+    {
+      platform: "elixir",
+      label: "Elixir (Phoenix/Ecto)",
+      prefilter: /LIKE \? ESCAPE '!'/,
+      recheck: /strpos\(\?, \? \|\| '\.'\) = 1/,
+    },
+  ];
+
+  for (const c of CASES) {
+    it(`${c.label} — escaped LIKE prefilter AND the anchored recheck`, async () => {
+      const text = await allText(c.platform, "deep");
+      expect(text, `${c.label}: no sargable LIKE prefilter — the read seq-scans`).toMatch(
+        c.prefilter,
+      );
+      expect(text, `${c.label}: the anchored recheck is gone — the LIKE can leak`).toMatch(
+        c.recheck,
+      );
+    });
+  }
+
+  it("the escaped set is the same three characters everywhere", async () => {
+    // The escape character itself FIRST, then the two LIKE wildcards.  A
+    // backend that escapes a different set would still pass the shape checks
+    // above while widening (or narrowing) its prefilter differently from its
+    // four siblings.
+    for (const [platform, chain] of [
+      ["node", '.replace(/[!%_]/g, "!$&")'],
+      ["dotnet", '.Replace("!", "!!").Replace("%", "!%").Replace("_", "!_")'],
+      ["java", "?.replace('!', '!!')?.replace('%', '!%')?.replace('_', '!_')"],
+      ["python", '.replace("!", "!!").replace("%", "!%").replace("_", "!_")'],
+      [
+        "elixir",
+        ' |> String.replace("!", "!!") |> String.replace("%", "!%") |> String.replace("_", "!_")',
+      ],
+    ] as const) {
+      const text = await allText(platform, "deep");
+      expect(text, `${platform}: escape chain drifted`).toContain(chain);
+    }
   });
 });

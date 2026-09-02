@@ -2,7 +2,12 @@ import type { AstNode } from "langium";
 import { AstUtils } from "langium";
 import type { PrimitiveName } from "../ir/types/loom-ir.js";
 import { COLLECTION_OP_SIGNATURES, isCollectionOp } from "../util/collection-ops.js";
-import { intrinsicFor, intrinsicReturnType, intrinsicsForReceiver } from "../util/intrinsics.js";
+import {
+  intrinsicFor,
+  intrinsicReturnType,
+  intrinsicsForReceiver,
+  isIntrinsicName,
+} from "../util/intrinsics.js";
 import { PRINCIPAL_ORG_PATH, PRINCIPAL_ROOT_ORG } from "../util/principal.js";
 import { durationUnitOf } from "../util/temporal.js";
 import type {
@@ -499,7 +504,153 @@ function envContext(env: Env): BoundedContext | undefined {
   return start ? AstUtils.getContainerOfType(start, isBoundedContext) : undefined;
 }
 
+// ---------------------------------------------------------------------------
+// Ternary null-narrowing (`x != null ? <x is T> : <x is T?>`).
+//
+// A `T?` is unusable in most positions — `+` wants two `string`s, an intrinsic
+// call wants a non-null receiver — and Loom has no `??`, no `if let` outside a
+// workflow, and no `match` for `T?` (`T option` is a different, tagged thing;
+// see `docs/payloads.md`).  The ternary is the one guard shape the language
+// already spells, and the EMITTED CODE WAS ALREADY CORRECT: the null test sits
+// in the condition, so every backend's `ternary` leaf renders the same bytes
+// whether or not the checker knows the branch is safe.  Only the checker was
+// missing.  Hence this is a TYPE-CHECKER-ONLY change — no grammar, no IR, no
+// emitter — and emitted output is byte-identical.
+//
+// SCOPE, deliberately tight:
+//   • Only a DIRECT null comparison on the ternary's OWN condition:
+//     `<path> != null` / `null != <path>` narrows the THEN branch,
+//     `<path> == null` / `null == <path>` narrows the ELSE branch.
+//   • Only a SIMPLE PATH — a `this` / bare-name head plus plain member
+//     accesses.  `f().x` names no stable storage location, so it never narrows
+//     even when spelled identically twice.
+//   • NO general flow analysis.  `&&` chains, `!`-negated tests, `precondition`
+//     guards, `let`-propagation and early-return guards are all out of scope by
+//     design; whether to go further is a separate decision.
+//
+// SOUNDNESS.  Narrowing is sound only if the value cannot change between the
+// test and the use.  Loom assignments are STATEMENTS and a ternary branch is an
+// EXPRESSION, so no assignment can run inside a branch — verified: an in-branch
+// `(path := null)` is a PARSE error.  That is NOT the whole story, and the
+// tempting conclusion is wrong: a branch CAN call a sibling `operation`, and an
+// operation body assigns freely, so
+//
+//     this.path != null ? this.bump() + this.path : ""
+//
+// with `private operation bump(): string { path := null }` really can null the
+// field between the test and the use — and the toolchain accepts that source
+// today.  (A `function` cannot: it is gated pure by `loom.function-block-
+// impure`.)  So an operation call is the one live mutation vector, and
+// `branchBlocksNarrowing` refuses to narrow any branch carrying a call it
+// cannot prove pure.
+// ---------------------------------------------------------------------------
+
+/** Canonical dotted key for a "simple path" — a `this` / bare-name head
+ *  followed only by PLAIN member accesses.  `undefined` for anything else (a
+ *  call, an operator expression, a literal): only a path naming a stable
+ *  storage location may take part in narrowing, so `<path>` in the condition
+ *  and `<path>` in the branch are the same location by construction rather
+ *  than by coincidence of spelling. */
+function simplePathKey(e: AstNode | undefined): string | undefined {
+  if (!e) return undefined;
+  if (isParenExpr(e)) return simplePathKey(e.inner);
+  if (isThisRef(e)) return "this";
+  if (isNameRef(e)) return e.name;
+  if (isPostfixChain(e)) {
+    const head = simplePathKey(e.head);
+    if (head === undefined) return undefined;
+    const parts = [head];
+    for (const s of e.suffixes) {
+      if (!isMemberSuffix(s) || s.call) return undefined;
+      parts.push(s.member);
+    }
+    return parts.join(".");
+  }
+  return undefined;
+}
+
+/** `e` with any grouping parens peeled. */
+function unparen(e: AstNode | undefined): AstNode | undefined {
+  let cur = e;
+  while (cur && isParenExpr(cur)) cur = cur.inner;
+  return cur;
+}
+
+/** Does `cond` DIRECTLY compare `key` against the `null` literal with `op`?
+ *  A single-op comparison chain only — `a != null && b != null` is a two-op
+ *  `&&` chain and deliberately does not narrow. */
+function condTestsNull(cond: AstNode | undefined, key: string, op: "==" | "!="): boolean {
+  const c = unparen(cond);
+  if (!c || !isBinaryChain(c)) return false;
+  if (c.ops.length !== 1 || c.ops[0] !== op) return false;
+  const left = unparen(c.head);
+  const right = unparen(c.rest[0]);
+  if (!left || !right) return false;
+  const lNull = isNullLit(left);
+  const rNull = isNullLit(right);
+  if (lNull === rNull) return false; // `null != null`, or neither side is null
+  return simplePathKey(lNull ? right : left) === key;
+}
+
+/** True when `branch` carries a call this pass cannot prove leaves aggregate
+ *  state alone — the mutation vector documented above.  Scalar intrinsics and
+ *  collection ops are the whitelist (pure by catalogue); a member call naming a
+ *  sibling `operation` is rejected outright, as is any bare / free call, whose
+ *  callee this syntactic pass does not resolve. */
+function branchBlocksNarrowing(branch: AstNode): boolean {
+  const opNames = new Set<string>();
+  for (const owner of [
+    AstUtils.getContainerOfType(branch, isAggregate),
+    AstUtils.getContainerOfType(branch, isEntityPart),
+  ]) {
+    if (!owner) continue;
+    for (const m of owner.members) if (isOperation(m)) opNames.add(m.name);
+  }
+  for (const n of [branch, ...AstUtils.streamAllContents(branch)]) {
+    if (isCallSuffix(n)) return true;
+    if (isMemberSuffix(n) && n.call) {
+      if (opNames.has(n.member)) return true;
+      if (!isIntrinsicName(n.member) && !isCollectionOp(n.member) && n.member !== "matches") {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** True when `node` sits in a ternary branch whose own condition proves `key`
+ *  non-null there.  Walks outward, so nested ternaries compose. */
+function isNarrowedNonNull(node: AstNode, key: string): boolean {
+  let child: AstNode = node;
+  let parent = child.$container;
+  while (parent) {
+    if (isTernaryExpr(parent)) {
+      const inThen = parent.thenExpr === child;
+      const inElse = parent.elseExpr === child;
+      if (inThen || inElse) {
+        const op = inThen ? "!=" : "==";
+        if (condTestsNull(parent.cond, key, op) && !branchBlocksNarrowing(child)) return true;
+      }
+    }
+    child = parent;
+    parent = child.$container;
+  }
+  return false;
+}
+
 export function typeOf(expr: Expression | undefined, env: Env): DddType {
+  const t = typeOfExpr(expr, env);
+  // Only an OPTIONAL result can narrow, so the ancestry walk never runs for any
+  // other expression — the common path pays one `kind` comparison.  Sensitivity
+  // tags carried by the optional move onto the unwrapped type: dropping them
+  // would let a null guard launder a `sensitive(...)` field clean.
+  if (!expr || t.kind !== "optional") return t;
+  const key = simplePathKey(expr);
+  if (key === undefined) return t;
+  return isNarrowedNonNull(expr, key) ? withTags(t.inner, t.sensitivity) : t;
+}
+
+function typeOfExpr(expr: Expression | undefined, env: Env): DddType {
   if (!expr) return T.unknown;
   if (isStringLit(expr)) return T.prim("string");
   // A6 string interpolation — a template always types as `string`; its holes
@@ -576,8 +727,8 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
     // than the historical `unknown`) lets `currentUser.<claim>` member access
     // type precisely, so a bare boolean gate such as
     // `requires currentUser.permissions.contains(permissions.x)` type-checks
-    // instead of falsely rejecting (previously it only passed when a
-    // surrounding `==`/`&&`/`||` forced the result to bool).
+    // instead of falsely rejecting — resolving it to `unknown` passes only
+    // when a surrounding `==`/`&&`/`||` forces the result to bool.
     if (expr.name === "currentUser") {
       const ub = userBlockFor(expr);
       if (ub) return { kind: "userclaim", ref: ub };
@@ -844,7 +995,7 @@ function typeOfFreeCall(name: string, env: Env): DddType {
   // (`CanApprove(cap)`) is a boolean predicate.
   if (lookupCriterionByName(name, env)) return T.prim("bool");
   if (lookupPolicyFnByName(name, env)) return T.prim("bool");
-  // Top-level (ambient) helper function (stdlib Phase B) — its declared
+  // Top-level (ambient) helper function (stdlib) — its declared
   // return type.  After the shadowing lookups above, before the duration
   // builtins (a user `function days(...)` shadows the `days()` builtin).
   const topFn = lookupTopLevelFunction(name, env);
@@ -1013,8 +1164,8 @@ function lookupPayloadMember(target: EventDecl | PayloadDecl, name: string): Ddd
  *  (`lower-expr.ts`), including its **fail-open** posture: an unknown member
  *  resolves to `string` rather than `unknown`, so introducing precise typing
  *  here never turns an already-valid `currentUser.<x>` reference into a new
- *  error — it only lets the *known* claim types (arrays, ints, …) flow into
- *  the collection-op / comparison checks that previously saw `unknown`. */
+ *  error — it only lets the *known* claim types (arrays, ints, …) reach the
+ *  collection-op / comparison checks, which would otherwise see `unknown`. */
 function lookupUserMember(target: UserBlock, name: string): DddType {
   if (name === PRINCIPAL_ORG_PATH || name === PRINCIPAL_ROOT_ORG) return T.prim("string");
   const f = target.fields.find((f) => f.name === name);
@@ -1215,7 +1366,7 @@ function lookupFunctionInScope(
   return undefined;
 }
 
-/** A TOP-LEVEL (ambient) helper `function` named `name` (stdlib Phase B) —
+/** A TOP-LEVEL (ambient) helper `function` named `name` (stdlib) —
  *  declared at file root or inside a `system { }`, visible workspace-wide.
  *  Checked AFTER local functions / VO ctors / criteria / policy fns (which
  *  shadow it), mirroring the lowerer's inline precedence (`inlineTopLevelFn`
@@ -1236,7 +1387,7 @@ function lookupTopLevelFunction(
       }
     }
   }
-  // Ambient std prelude (stdlib Phase C) — after any user-declared top-level
+  // Ambient std prelude (stdlib) — after any user-declared top-level
   // function (which shadows it), so a call to a prelude function types to its
   // declared return.
   return stdFunction(name);
@@ -1312,7 +1463,7 @@ function lookupCriterionByName(name: string, env: Env): Criterion | undefined {
 }
 
 /** Resolve a FUNCTION-form `policy` declaration by name against the enclosing
- *  bounded context (auth P3.2).  A reference to one in expression position
+ *  bounded context (auth).  A reference to one in expression position
  *  (e.g. a `requires PolicyName(args)` gate) types as `bool`.  Only the
  *  function form (carrying a `returnType`) is callable; a block-form
  *  `policy {}` read ladder is not. */
@@ -1426,10 +1577,10 @@ const lettingInFlight = new Set<import("./generated/ast.js").LetStmt>();
  * Mutates `bindings` in place.
  *
  * This computes the SAME type `checkStatement` (validators/statements.ts)
- * derives when it threads an operation body, unifying the two env builders:
- * previously `envForNode` bound every let to `T.unknown`, which silently
- * disengaged every operand check on a `let` operand (`let s = "hi"
- * requires s > 5` produced no diagnostic because `s` typed as `unknown`).
+ * derives when it threads an operation body, so the two env builders agree.
+ * Binding every let to `T.unknown` here instead silently disengages every
+ * operand check on a `let` operand (`let s = "hi" requires s > 5` produces no
+ * diagnostic, because `s` types as `unknown`).
  */
 function addTypedLets(
   bindings: Map<string, { type: DddType; origin: AstNode }>,

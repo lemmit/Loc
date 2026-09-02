@@ -76,9 +76,12 @@ system Acme {
   }
 
   // ── COMPOSITION: deployables ────────────────────────────────
+  resource ordersState { for: Orders, kind: state, use: primarySql }
+
   deployable salesApi {
     platform: node
     contexts: [Orders]
+    dataSources: [ordersState]
     serves: SalesApi
     port: 3000
   }

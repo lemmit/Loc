@@ -185,7 +185,11 @@ const SHOWCASE: Case = {
             OrderCount { },
             QueryView {
               of: Sales.Order.all,
-              loaded: rows => Table { of: rows, columns: [o => o.customerId, o => o.status] }
+              data: rows => Table {
+                Column { "Customer", o => Text { o.customerId } },
+                Column { "Status", o => Text { o.status } },
+                rows: rows
+              }
             },
             Anchor { "New order", to: "/orders/new" },
             QueryView {

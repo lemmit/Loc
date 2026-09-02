@@ -7,6 +7,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { type DurationExprIR, durationCtorOperand } from "../../ir/util/temporal.js";
 import {
+  DATA_KEY_LIKE_ESCAPE,
   DATA_KEY_PATH_DELIMITER,
   guidClaimAccessorName,
   guidFromStringSelfScope,
@@ -15,6 +16,7 @@ import {
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
 import { intrinsicFor, intrinsicKey, isQueryableBoolIntrinsic } from "../../util/intrinsics.js";
+import { javaSubtreeLikePattern } from "../_expr/subtree-like.js";
 import { boxedJavaType, collectJavaExprImports, renderJavaExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -50,11 +52,11 @@ function bool(e: ExprIR, ctx: CriteriaCtx): string {
       // so a missing arm is a `tsc` error here, not a silent authorization
       // bypass.
       switch (e.filter.kind) {
-        // DENY carve-out (authorization Phase 4 — deny-wins).  `cb.disjunction()`
+        // DENY carve-out (authorization — deny-wins).  `cb.disjunction`
         // is the JPA Criteria always-false predicate (an empty OR).
         case "deny":
           return "cb.disjunction()";
-        // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) —
+        // `deep`/`global` read level (multi-tenancy) —
         // descendant-or-self materialized-path scope with the NULL-dataKey
         // fallback to the tenant floor (see `DEEP_SCOPE_SEMANTICS`), as a JPA
         // Criteria predicate over the `tenantScope(User currentUser)`
@@ -94,7 +96,7 @@ function bool(e: ExprIR, ctx: CriteriaCtx): string {
     case "method-call":
       // (The `deep` / DENY authorization filter sentinels moved to the
       // discriminated `authz-filter` kind in M-T9.9 — handled in its own case
-      // above, no longer a `method-call` marker here.)
+      // above, not a `method-call` marker here.)
       // Reference-collection membership.
       if (e.member === "contains" && e.receiverType.kind === "array" && e.args.length === 1) {
         const segs = pathSegments(e.receiver);
@@ -407,10 +409,21 @@ function deepScopeCriteria(
   // — a cross-tenant read with no attacker, just an underscore in a name.
   // `cb.locate(x, pattern) = 1` has no pattern language; the needle is lifted
   // with `cb.literal` because `locate` takes Expressions, and it stays
-  // null-safe for an absent principal exactly as the old pattern did (a null
-  // needle yields a null predicate operand → no rows, fail-closed).
+  // null-safe for an absent principal (a null needle yields a null predicate
+  // operand → no rows, fail-closed).
   const orgNeedle = `cb.literal((currentUser == null ? null : currentUser.${orgMember}() + "${DATA_KEY_PATH_DELIMITER}"))`;
-  const descendant = `cb.equal(cb.locate(${dataKeyPath}, ${orgNeedle}), 1)`;
+  const anchored = `cb.equal(cb.locate(${dataKeyPath}, ${orgNeedle}), 1)`;
+  // SARGABLE PREFILTER (M-T3.17).  `locate(...) = 1` is a function of the
+  // column, so the planner cannot use the `data_key text_pattern_ops` index and
+  // every deep/global read seq-scans.  A prefix `like` IS what that opclass
+  // indexes, so it is ANDed IN FRONT as a prefilter with the anchored test kept
+  // as the recheck — an escaping slip could only WIDEN a LIKE, and the recheck
+  // still decides the row, so `acme_corp` can never reach `acmeXcorp.…`.  The
+  // pattern is `cb.literal`-lifted exactly like the needle, so a null principal
+  // yields a null literal (`like null` → no rows), same fail-closed stance.
+  const orgPattern = `cb.literal((currentUser == null ? null : ${javaSubtreeLikePattern(`currentUser.${orgMember}()`)}))`;
+  const prefilter = `cb.like(${dataKeyPath}, ${orgPattern}, '${DATA_KEY_LIKE_ESCAPE}')`;
+  const descendant = `cb.and(${prefilter}, ${anchored})`;
   return (
     `cb.or(` +
     `cb.and(cb.isNotNull(${dataKeyPath}), ` +

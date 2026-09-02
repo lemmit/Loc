@@ -9,13 +9,13 @@ import {
   aggregateUsesMoneyDeep,
   aggregateUsesPrincipalContextFilter,
   findUsesCurrentUser,
-  isQueryTimeProjection,
 } from "../../ir/types/loom-ir.js";
 import { tableOwnerName } from "../../ir/util/inheritance.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { aggregateIsAudited } from "./emit/audit-stamp.js";
+import { synthProjectionFinds } from "./projection-finds.js";
 import {
   contextFilterPredicate,
   findByIdMethod,
@@ -29,7 +29,7 @@ import {
   repoTableName,
   runMethod,
 } from "./repository-find-builder.js";
-import { writeScopePredicate } from "./repository-find-predicate.js";
+import { writeScopeGuardLines } from "./repository-find-predicate.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
 import { repoPortImportLine, repoPortName } from "./repository-port-builder.js";
 import { saveMethod } from "./repository-save-builder.js";
@@ -130,7 +130,7 @@ export function buildRepositoryFile(
   // table (null when it has no non-principal capability filter).  Threaded
   // into each root-table read site below; child/containment reads
   // (parentId-keyed) are unaffected — the filter constrains root rows.
-  const filterPred = contextFilterPredicate(agg, lowerFirst(plural(agg.name)), ctx, drizzleOps);
+  const filterPred = contextFilterPredicate(agg, ctx, drizzleOps);
   // If any find or matching capability filter references currentUser, the
   // per-method signature gains a `currentUser: User` parameter that
   // the closure-captured Drizzle predicate reads.  Pull the User
@@ -152,19 +152,10 @@ export function buildRepositoryFile(
   // Query-time projections (read-path-architecture.md rev.13) sourced from this
   // aggregate synthesise a parameterless-find repository read —
   // `repo.<projName>()` returns the filtered aggregate
-  // rows the projection route then follows (`join`) + projects (`select`).  A
-  // parameterised projection's `where` still lowers criterion params away at
-  // compile time, so the synthesised find stays parameterless.
-  const projectionFinds: FindIR[] = ctx.projections
-    .filter((p) => isQueryTimeProjection(p) && p.query?.source === agg.name)
-    .map((p) => ({
-      name: lowerFirst(p.name),
-      params: [],
-      returnType: { kind: "array", element: { kind: "entity", name: agg.name } },
-      filter: p.query?.filter,
-      bypassAll: p.query?.bypassAll,
-      bypassCaps: p.query?.bypassCaps,
-    }));
+  // rows the projection route then follows (`join`) + projects (`select`).
+  // Shared with the MikroORM + document builders (`projection-finds.ts`), which
+  // must emit the same method names for the same routes.
+  const projectionFinds: FindIR[] = synthProjectionFinds(agg.name, ctx);
 
   // Individual methods, hoisted so the same strings feed BOTH the class body
   // AND the derived repository PORT (audit S7 — the concrete `implements` a
@@ -316,7 +307,7 @@ export function buildRepositoryFile(
 
 /** `async getById(id)` — the command-load path (distinct from `findById`, the
  *  read path): every mutation route loads through this.  When the aggregate
- *  carries a `writeScopeFilter` (authorization Phase 3 P3.1 — the write scope is
+ *  carries a `writeScopeFilter` (authorization — the write scope is
  *  strictly narrower than the read scope), a write-scope existence pre-guard
  *  runs first: a row a caller may READ but not WRITE (out of write scope) is
  *  indistinguishable from a missing one (404), and the `findById` read filter
@@ -328,19 +319,9 @@ function getByIdMethod(
   drizzleOps: Set<string>,
 ): string {
   const tableName = repoTableName(agg, ctx);
-  const writePred = writeScopePredicate(agg, tableName, ctx, drizzleOps);
-  const guard: string[] = [];
-  if (writePred) {
-    drizzleOps.add("and");
-    drizzleOps.add("eq");
-    guard.push(
-      `    const inScope = await this.db.select({ id: schema.${tableName}.id }).from(schema.${tableName}).where(and(eq(schema.${tableName}.id, id), ${writePred})).limit(1);`,
-      `    if (inScope.length === 0) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
-    );
-  }
   return lines(
     `  async getById(id: Ids.${agg.name}Id): Promise<${agg.name}> {`,
-    ...guard,
+    ...writeScopeGuardLines(agg, tableName, ctx, drizzleOps),
     `    const found = await this.findById(id);`,
     `    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
     `    return found;`,

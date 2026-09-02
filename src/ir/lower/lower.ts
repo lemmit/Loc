@@ -269,8 +269,8 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
     }
   }
   setAmbientEnumIndex(ambientEnumIndex);
-  // Project-global index of TOP-LEVEL (ambient) helper `function`s (stdlib
-  // Phase B) — declared at file root or inside a `system { }`, visible
+  // Project-global index of TOP-LEVEL (ambient) helper `function`s —
+  // declared at file root or inside a `system { }`, visible
   // workspace-wide.  Expression-form functions INLINE at every call site
   // during lowering (`inlineTopLevelFn` in lower-expr.ts), so they need this
   // ambient index rather than an owning aggregate.  First declaration wins on
@@ -285,7 +285,7 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
     addTopLevelFn(m);
     if (isSystem(m)) for (const sm of m.members) addTopLevelFn(sm);
   }
-  // Ambient std prelude (stdlib Phase C) — merge the built-in functions LAST,
+  // Ambient std prelude (stdlib) — merge the built-in functions LAST,
   // and only for names the user did not declare, so a user top-level function
   // of the same name shadows the prelude (`addTopLevelFn` is first-wins).
   for (const [name, fn] of stdFunctions())
@@ -566,10 +566,10 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
       // more).  Provider-preset resolution lives in `lowerAuth`.
       auth = lowerAuth(m);
     } else if (isTenancyDecl(m)) {
-      // System-level tenancy declaration (multi-tenancy Phase 1a; real
-      // cross-references since 1b.1).  At most one per system (validator
-      // enforces; last wins if the parser accepts more).  Existence is the
-      // linker's job now — lowering stays total on an unresolved ref by
+      // System-level tenancy declaration (tenancy.md), over real
+      // cross-references.  At most one per system (validator enforces; last
+      // wins if the parser accepts more).  Existence is the linker's job —
+      // lowering stays total on an unresolved ref by
       // falling back to the source text, so the IR downstream is unchanged
       // (plain names).
       tenancy = {
@@ -669,16 +669,27 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
     // Test-kind dispatch.
     //   - `react` / `static` are frontend-only → only `ui` (Playwright).
     //   - `dotnet` / `hono` are backend-only → only `api` (vitest+fetch).
-    //   - `phoenixLiveView` is fullstack — emit BOTH a UI spec (driven
-    //     by Playwright page objects) AND an API spec (driven by
-    //     fetch against the deployable's HTTP surface).
+    //   - `phoenixLiveView` is fullstack — it can carry EITHER kind, so the
+    //     block's own CALL ROOT decides: a body written against `ui.<agg>.…`
+    //     lowers to the Playwright spec, one written against `api.<agg>.…` to
+    //     the fetch spec.
+    //
+    // Emitting BOTH kinds from a fullstack block is never right: the two
+    // renderers read DIFFERENT roots (`matchUiCall` wants `ui`, `matchApiCall`
+    // wants `api`) and every call in a body has exactly one of them, so the
+    // other half would be garbage — `.ui.spec.ts` files calling an undefined
+    // `api`, and `.e2e.test.ts` files calling an undefined `ui`.  Not merely
+    // cosmetic: a locator matcher (`toHaveText`, legal in a ui body) makes the
+    // api renderer throw outright, which would fail `generate system` on a
+    // perfectly valid ui block.
     const isFrontendOnly = !!targetPlatform && descriptorFor(targetPlatform).isFrontend;
     const isFullstack = targetPlatform === "elixir";
     if (isFrontendOnly) {
       e2eTests.push(lowerE2E(b, e2eEnv, "ui"));
     } else if (isFullstack) {
-      e2eTests.push(lowerE2E(b, e2eEnv, "ui"));
-      e2eTests.push(lowerE2E(b, e2eEnv, "api"));
+      for (const kind of fullstackE2EKinds(lowerE2E(b, e2eEnv, "api"))) {
+        e2eTests.push(lowerE2E(b, e2eEnv, kind));
+      }
     } else {
       e2eTests.push(lowerE2E(b, e2eEnv, "api"));
     }
@@ -763,7 +774,7 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
         ...(d.config.length ? { config: d.config.map(lowerConfigEntry) } : {}),
       };
     });
-  // Named `layout <Name> { … }` SystemMembers (Phase 8).  Each slot's
+  // Named `layout <Name> { … }` SystemMembers.  Each slot's
   // body is a page-body-shaped expression lowered against the same
   // env shape pages use.  No params or state — layouts are static
   // wrappers, not parametric components.
@@ -819,12 +830,12 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
   };
   // Scaffold post-passes.  A page's kind (`<Agg>` list/new/detail, `<Wf>`
   // form/instances, `<View>`, the singleton dashboards, or `custom`) is derived
-  // on demand from its role-scoped name + area via `classifyPage` — no stamped
-  // `origin` (slice 3c).  These passes drop the create surface for
+  // on demand from its role-scoped name + area via `classifyPage` — there is no
+  // stamped `origin`.  These passes drop the create surface for
   // non-constructible aggregates and apply per-page side effects (emit path,
   // auto-`id` param for detail pages).  Every scaffold page — dashboards
-  // included — already carries its full body from the macro, so there is no
-  // inline sentinel left to expand.
+  // included — carries its full body from the macro, so no pass expands inline
+  // sentinels.
   dropNonConstructibleNewPages(built);
   stripNonConstructibleListCreate(built);
   applyPageSideEffects(built);
@@ -832,8 +843,7 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
 }
 
 /** A page's classification context for the given ui — the served aggregate /
- *  workflow names `classifyPage` matches role-scoped page names against
- *  (slice 3c: replaces the stamped `PageIR.origin`). */
+ *  workflow names `classifyPage` matches role-scoped page names against. */
 function nameCtxOf(ctx: WalkerExpandContext): PageNameCtx {
   return {
     aggregateNames: [...ctx.aggregatesByName.keys()],
@@ -939,7 +949,7 @@ function applyPageSideEffects(sys: SystemIR): void {
     for (const page of ui.pages) {
       const kind = classifyPage(page, nameCtx);
       if (kind.kind === "custom") continue;
-      // `area` is authoritative for file placement (slice 3a): a page declared
+      // `area` is authoritative for file placement: a page declared
       // inside an `area { … }` block already had its `emitPath` set from the
       // area containment path in `lowerUi` (`src/pages/orders/list.tsx`).  Only
       // fall back to the conventional path for area-less scaffold pages (the
@@ -1063,6 +1073,71 @@ function lowerTheme(block: ThemeBlock): ThemeIR {
   return out;
 }
 
+/** Which spec kind(s) a `test e2e` block against a FULLSTACK deployable
+ *  (`platform: elixir`) lowers to, decided by the call root its body uses.
+ *
+ *  `ui.<agg>.create(…)` is the Playwright/page-object surface, `api.<agg>
+ *  .create(…)` the fetch surface; the two renderers each recognise only their
+ *  own root, so a body belongs to exactly one of them. A body that names
+ *  neither (or, pathologically, both) is left to emit both kinds — the
+ *  pre-existing behaviour, and the only answer that cannot silently drop a
+ *  test the author wrote. */
+function fullstackE2EKinds(lowered: TestE2EIR): ("api" | "ui")[] {
+  const roots = new Set<string>();
+  const visitExpr = (e: ExprIR | undefined): void => {
+    if (!e) return;
+    if (e.kind === "ref" && (e.name === "ui" || e.name === "api")) roots.add(e.name);
+    for (const child of exprChildren(e)) visitExpr(child);
+  };
+  for (const s of lowered.statements) {
+    if (s.kind === "expect" || s.kind === "expect-throws" || s.kind === "let") visitExpr(s.expr);
+    else if (s.kind === "expression") visitExpr(s.expr);
+    else if (s.kind === "call") for (const a of s.args) visitExpr(a);
+  }
+  if (roots.has("ui") && !roots.has("api")) return ["ui"];
+  if (roots.has("api") && !roots.has("ui")) return ["api"];
+  return ["ui", "api"];
+}
+
+/** Every sub-expression of `e`, for the root scan above. Deliberately a plain
+ *  structural walk rather than a shared visitor: it needs no types, no
+ *  ordering and no completeness beyond "reaches every `ref`". */
+function exprChildren(e: ExprIR): (ExprIR | undefined)[] {
+  switch (e.kind) {
+    case "method-call":
+      return [e.receiver, ...e.args];
+    case "member":
+      return [e.receiver];
+    case "binary":
+      return [e.left, e.right];
+    case "ternary":
+      return [e.cond, e.then, e.otherwise];
+    case "unary":
+      return [e.operand];
+    case "paren":
+      return [e.inner];
+    case "call":
+      return e.args;
+    case "new":
+    case "object":
+      return e.fields.map((f) => f.value);
+    case "list":
+      return e.elements;
+    case "lambda":
+      return [e.body];
+    case "convert":
+      return [e.value];
+    case "duration":
+      return [e.amount];
+    case "i18nFormat":
+      return [e.inner];
+    case "match":
+      return [...e.arms.flatMap((a) => [a.cond, a.value]), e.otherwise];
+    default:
+      return [];
+  }
+}
+
 function lowerE2E(block: TestE2E, env: Env, kind: "api" | "ui"): TestE2EIR {
   const inner = block.body;
   let curEnv = env;
@@ -1168,7 +1243,7 @@ function lowerContext(
   // `modulePermissions` (when set) does the same for the
   // `permissions.<name>` magic-identifier resolution; loose contexts
   // not bundled in a module pass undefined.
-  // Ambient resource handles in scope for this context (Phase 4):
+  // Ambient resource handles in scope for this context:
   // system-level `resource X { for: <thisCtx>, kind, … }` declarations,
   // keyed by name → infra kind.  Workflow bodies resolve `files.put(…)`
   // against this map.  Empty for loose contexts (no enclosing system).
@@ -1244,7 +1319,7 @@ function lowerContext(
     else if (isQueryHandler(m))
       queryHandlers.push(lowerQueryHandler(m, env, ctx, { aggregates, domainServices }));
   }
-  // `policy {}` read-reachability rules (multi-tenancy Phase 2 P2.4).  A pure
+  // `policy {}` read-reachability rules (tenancy.md).  A pure
   // structural projection — the per-aggregate `deep`/`global` rewrite of the
   // `tenantOwned` filter happens in enrichment; validation (tenant-owned-ness,
   // hierarchy requirement, unknown/duplicate target) is phase ⑦.
@@ -1254,7 +1329,7 @@ function lowerContext(
   for (const m of ctx.members) {
     if (!isPolicyDecl(m)) continue;
     for (const r of m.rules) {
-      // `deny [write] on X` (Phase 4) — the deny-wins carve-out.  All-or-nothing
+      // `deny [write] on X` — the deny-wins carve-out.  All-or-nothing
       // at the aggregate (no level); the optional `write` verb selects the
       // access.  Enrichment resolves deny-wins after the allow passes.
       if (r.effect === "deny") {
@@ -1266,8 +1341,8 @@ function lowerContext(
         });
         continue;
       }
-      // The optional `verb` (P3.1) selects the ladder: `write` gates
-      // mutations; bare / `read` is the Phase 2 read ladder.
+      // The optional `verb` selects the ladder: `write` gates mutations;
+      // bare / `read` is the read ladder.
       if (r.verb === "write") {
         policyWriteLevels.push({
           aggregate: r.target,
@@ -1283,7 +1358,7 @@ function lowerContext(
       }
     }
   }
-  // Context-scoped integration tests (test-placement.md, Phase 3): a `test`
+  // Context-scoped integration tests (test-placement.md): a `test`
   // nested directly in the `context` (no `for` — subject inferred as this
   // context) plus any hoisted `test … for <this context>` routed here.  Lowered
   // under the context env (no `this`; every aggregate/service resolvable).
@@ -1322,7 +1397,7 @@ function lowerContext(
   };
 }
 
-/** Lower a `channel <Name> { carries: … }` declaration (channels.md, Slice 1)
+/** Lower a `channel <Name> { carries: … }` declaration (channels.md)
  *  to its IR record.  Structural only — no expressions.  Knob defaults
  *  reproduce today's in-process broadcast/ephemeral dispatch. */
 function lowerChannel(c: Channel): ChannelIR {
@@ -1564,8 +1639,7 @@ function lowerAggregate(
     lowerOperation(op, inner),
   );
   // Lifecycle actions — kept in their own arrays so `operations`
-  // (consumed by every existing route/OpenAPI/page-object emitter) stays
-  // mutate-only until per-kind emission lands (Phase 3).
+  // (consumed by every route/OpenAPI/page-object emitter) stays mutate-only.
   const creates = (agg.members.filter(isCreate) as Create[]).map((c) => lowerCreate(c, inner));
   const destroys = (agg.members.filter(isDestroy) as Destroy[]).map((d) => lowerDestroy(d, inner));
   // `aggregate X audited { … }` — the aggregate-wide form, RESOLVED HERE into

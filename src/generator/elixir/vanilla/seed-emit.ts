@@ -80,6 +80,14 @@ export function emitVanillaSeeds(
   // Only a plain state-persisted, non-abstract aggregate has a repository
   // `insert/1`: an abstract inheritance base is read-only, and an
   // event-sourced one is created by appending its creation EVENT.
+  //
+  // This filter used to be able to SHRINK a dataset that the emitted
+  // `mark_seeded/1` then committed as applied — the dropped rows could never be
+  // written, on this or any later boot, with no diagnostic anywhere
+  // (`F2-SEED-EVENTSOURCED`).  It no longer can: `loom.seed-event-sourced-
+  // unsupported` and `loom.seed-abstract-aggregate` (src/language/validators/
+  // seed.ts) reject both shapes at the AST tier, so a row reaching here is
+  // always seedable and the two predicates are a backstop, not a policy.
   const seedableAggs = ctx.aggregates.filter((a) => !isAbstractBase(a) && !isEventSourced(a));
   const seedable = new Set(seedableAggs.map((a) => a.name));
   const aggByName = new Map<string, EnrichedAggregateIR>(seedableAggs.map((a) => [a.name, a]));
@@ -110,11 +118,11 @@ export function emitVanillaSeeds(
       `  @moduledoc """`,
       `  First-boot seed data for the ${ctx.name} context (database-seeding.md).`,
       ``,
-      `  Ship-once per dataset via the \`__loom_seed\` marker table`,
-      `  (D-SEED-IDEMPOTENCY) — re-runs are no-ops.  \`default\` always runs;`,
+      `  Ship-once per dataset via the \`__loom_seed\` marker table —`,
+      `  re-runs are no-ops.  \`default\` always runs;`,
       `  every other dataset opts in via the \`LOOM_SEED\` env var`,
       `  (comma-separated).  Domain rows go through the aggregate's changeset`,
-      `  (D-SEED-PATH) so its invariants run; \`raw\` rows are direct,`,
+      `  so its invariants run; \`raw\` rows are direct,`,
       `  schema-qualified INSERTs.`,
       `  """`,
       `  alias ${appModule}.Repo`,

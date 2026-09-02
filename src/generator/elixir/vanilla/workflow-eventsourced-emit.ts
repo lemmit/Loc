@@ -122,7 +122,7 @@ function renderFoldModule(contextModule: string, wf: WorkflowIR): string {
   const stateMod = `${contextModule}.Workflows.${upperFirst(wf.name)}State`;
   const eventsModule = `${contextModule}.Events`;
   const corr = wf.correlationField as string;
-  const renderCtx: RenderCtx = { thisName: "state", contextModule, foundation: "vanilla" };
+  const renderCtx: RenderCtx = { thisName: "state", contextModule };
 
   const seeds = [
     `${snake(corr)}: key`,
@@ -300,7 +300,7 @@ export function emitVanillaEsWorkflowFiles(
   /** The workflows' owning-context schema for the ES `<Wf>EventLog`
    *  `@schema_prefix`; undefined ⇒ unqualified. */
   schema?: string,
-  /** Source-map Milestone 13 collector (`--sourcemap`).  Each of these four
+  /** Source-map collector (`--sourcemap`).  Each of these four
    *  derived-machinery files is single-workflow-attributable — a whole-file
    *  `wf.origin` region only (no statement-granular fragments; there is no
    *  per-statement rendering here to anchor against). */
@@ -411,7 +411,6 @@ export function renderEsWorkflowHandler(
   const renderCtx: RenderCtx = {
     thisName: "state",
     contextModule,
-    foundation: "vanilla",
     paramRenames: { [sub.param]: "event" },
   };
 

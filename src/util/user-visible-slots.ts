@@ -33,7 +33,17 @@ export const USER_VISIBLE_SLOTS: Record<string, readonly UserVisibleSlot[]> = {
   InlineCode: [{ role: "code", kind: "positional", index: 0 }],
   Empty: [{ role: "empty", kind: "positional", index: 0 }],
   Anchor: [{ role: "anchor", kind: "positional", index: 0 }],
-  KeyValueRow: [{ role: "keyValue", kind: "positional", index: 0 }],
+  // BOTH halves of the row are authored prose.  Only the label was listed, so
+  // `KeyValueRow { "Status", "Open" }` translated its label and shipped its
+  // VALUE in English at every locale, while the visually identical
+  // `Stat { "Status", "Open" }` translated both (G2667 §D9).  The value slot is
+  // a literal-only slot in the emitter: a nested primitive there
+  // (`KeyValueRow { "Total", Money { … } }`) is an element and walks, and both
+  // consumers already skip a non-literal slot.
+  KeyValueRow: [
+    { role: "keyValue", kind: "positional", index: 0 },
+    { role: "keyValueValue", kind: "positional", index: 1 },
+  ],
   Badge: [{ role: "badge", kind: "positional", index: 0 }],
   Button: [
     { role: "button", kind: "positional", index: 0 },
@@ -61,4 +71,24 @@ export const USER_VISIBLE_SLOTS: Record<string, readonly UserVisibleSlot[]> = {
   // authored prose in text position.  The code SOURCE is deliberately not a
   // slot: it is code, and translating it would break it.
   CodeBlock: [{ role: "codeBlockTitle", kind: "named", name: "title" }],
+  // The controlled inputs' first positional is the field LABEL — the most-read
+  // authored prose in any form ("Email address", "Quantity").  All seven share
+  // ONE role: the same caption in a `Field` and in a `Toggle` is the same
+  // message, and a per-primitive role would split one translation into seven.
+  Field: [{ role: "inputLabel", kind: "positional", index: 0 }],
+  NumberField: [{ role: "inputLabel", kind: "positional", index: 0 }],
+  PasswordField: [{ role: "inputLabel", kind: "positional", index: 0 }],
+  MultilineField: [{ role: "inputLabel", kind: "positional", index: 0 }],
+  SelectField: [{ role: "inputLabel", kind: "positional", index: 0 }],
+  Toggle: [{ role: "inputLabel", kind: "positional", index: 0 }],
+  FileUpload: [{ role: "inputLabel", kind: "positional", index: 0 }],
+  // `Tab("Overview", body)` — the tab's visible caption.  The `value`/slug the
+  // switcher keys on is derived from the SOURCE literal, not from this slot, so
+  // translating the caption never moves the anchor.
+  Tab: [{ role: "tabLabel", kind: "positional", index: 0 }],
+  // `Column("Job Name", o => o.name)` — the table/grid header.  Shared by
+  // `Table` and `DataGrid`, which both read `Column` calls.  The `field:`/
+  // accessor (what sorting and filtering key on) is a separate arg, so a
+  // translated header cannot break either.
+  Column: [{ role: "columnHeader", kind: "positional", index: 0 }],
 };

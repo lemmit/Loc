@@ -2,6 +2,7 @@ import type { EventIR, SystemIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst } from "../../../util/naming.js";
 import type { BrokerBinding } from "../../_channels/bindings.js";
+import { javaLogEvent } from "../../_obs/render-java.js";
 
 // ---------------------------------------------------------------------------
 // Broker transport classes (M-T4.4 slices 6b + 7c — the Java/Spring Boot leg
@@ -25,7 +26,7 @@ import type { BrokerBinding } from "../../_channels/bindings.js";
 // reactor subscribes — the `ChannelConsumerService` invoking the SAME
 // dispatcher handler methods local events would reach.
 //
-// Producer path split (design §5, slice 7c): the tee publishes EPHEMERAL
+// Producer path split (design §5): the tee publishes EPHEMERAL
 // broker-routed events inline; DURABLE (`work`) events land in
 // `__loom_outbox` inside the caller's @Transactional write (the tee IS the
 // outbox recorder on java) and are published by the `OutboxRelayService` on
@@ -171,7 +172,7 @@ export function renderJavaChannelFiles(
    *  ChannelConsumerService (a pure producer ships publish-only). */
   consumerHandlers: ChannelConsumerHandler[],
   sys: SystemIR,
-  /** M-T4.4 slice 7c: hosted durable events ride a broker-bound
+  /** M-T4.4: hosted durable events ride a broker-bound
    *  `queue`/`work` channel — the tee records them in `__loom_outbox` and
    *  the relay publishes on drain (design §5).  False on consumers that
    *  don't host the durable channel's context (their module migrations
@@ -242,7 +243,19 @@ export function renderJavaChannelFiles(
         : []),
       `        Map<String, Object> data) {`,
       ``,
-      `    private static final JsonMapper JSON = JsonMapper.builder().build();`,
+      // WRITE_BIGDECIMAL_AS_PLAIN (M-T6.46): the REST response path no longer
+      // hands Jackson a `BigDecimal` (a response `decimal` is a `double`), but
+      // the CloudEvents `data` map still does — `toDataExpr` converts
+      // datetime/money/id/enum and passes a plain `decimal` through raw.  Left
+      // at the default, a negative-scale value serializes in SCIENTIFIC
+      // notation (`1E+40`), which a consumer on another backend reads as a
+      // different literal than the one java holds.  This pins PLAIN notation;
+      // it does not change the value, and it deliberately does NOT redefine the
+      // broker's numeric precision contract (that gap is cross-backend — .NET's
+      // channel codec has the identical raw-decimal shape).
+      `    private static final JsonMapper JSON = JsonMapper.builder()`,
+      `        .enable(tools.jackson.core.StreamWriteFeature.WRITE_BIGDECIMAL_AS_PLAIN)`,
+      `        .build();`,
       ``,
       `    public String toJson() {`,
       `        var m = new LinkedHashMap<String, Object>();`,
@@ -286,8 +299,8 @@ export function renderJavaChannelFiles(
       ``,
       `import java.util.function.Consumer;`,
       ``,
-      `/** The publish/subscribe seam every broker driver implements (M-T4.4;`,
-      ` *  shared with the realtime relay).  A null group is broadcast; a group`,
+      `/** The publish/subscribe seam every broker driver implements, shared`,
+      ` *  with the realtime relay.  A null group is broadcast; a group`,
       ` *  name makes replicas competing consumers. */`,
       `public interface ChannelTransport {`,
       `    void publish(String address, LoomEventEnvelope envelope);`,
@@ -348,7 +361,7 @@ export function renderJavaChannelFiles(
         `                try {`,
         `                    envelope = LoomEventEnvelope.fromJson(message);`,
         `                } catch (RuntimeException e) {`,
-        `                    CatalogLog.event("channel_consume_failed", "warn", "address", address, "error", "malformed envelope");`,
+        `                    CatalogLog.event(${javaLogEvent("channelConsumeFailed")}, "address", address, "error", "malformed envelope");`,
         `                    return;`,
         `                }`,
         `                handler.accept(envelope);`,
@@ -469,7 +482,7 @@ export function renderJavaChannelFiles(
         `                        // Malformed body: no retry can fix it — nack without`,
         `                        // requeue routes through the queue's DLX into the DLQ.`,
         `                        ch.basicNack(delivery.getDeliveryTag(), false, false);`,
-        `                        CatalogLog.event("channel_dead_lettered", "warn", "address", address,`,
+        `                        CatalogLog.event(${javaLogEvent("channelDeadLettered")}, "address", address,`,
         `                                "error", "malformed envelope");`,
         `                        return;`,
         `                    }`,
@@ -485,7 +498,7 @@ export function renderJavaChannelFiles(
         `                        if (attempts >= MAX_ATTEMPTS) {`,
         `                            // Parked, not lost: the DLX routes it into the DLQ.`,
         `                            ch.basicNack(delivery.getDeliveryTag(), false, false);`,
-        `                            CatalogLog.event("channel_dead_lettered", "warn", "address", address,`,
+        `                            CatalogLog.event(${javaLogEvent("channelDeadLettered")}, "address", address,`,
         `                                    "type", envelope.type(), "id", envelope.id(),`,
         `                                    "attempts", String.valueOf(attempts), "error", String.valueOf(e.getMessage()));`,
         `                        } else {`,
@@ -576,7 +589,7 @@ export function renderJavaChannelFiles(
         ``,
         `    public KafkaChannelTransport(String url) {`,
         `        // kafka://user:pass@host:port[,host2] — userinfo (when present)`,
-        `        // becomes SASL/PLAIN (M-T4.4 \u00a77); a credential-less URL stays`,
+        `        // becomes SASL/PLAIN; a credential-less URL stays`,
         `        // on PLAINTEXT, the pre-auth contract.`,
         `        var bare = url.startsWith("kafka://") ? url.substring("kafka://".length()) : url;`,
         `        var at = bare.lastIndexOf('@');`,
@@ -650,7 +663,7 @@ export function renderJavaChannelFiles(
         `        } catch (InterruptedException e) {`,
         `            Thread.currentThread().interrupt();`,
         `        } catch (Exception e) {`,
-        `            CatalogLog.event("channel_consume_failed", "warn", "address", address,`,
+        `            CatalogLog.event(${javaLogEvent("channelConsumeFailed")}, "address", address,`,
         `                    "error", "dlq park failed: " + e.getMessage());`,
         `        }`,
         `    }`,
@@ -691,7 +704,7 @@ export function renderJavaChannelFiles(
         `                        } catch (RuntimeException e) {`,
         `                            // Malformed record: park + advance (v1 log + park).`,
         `                            park(address, record.key(), record.value());`,
-        `                            CatalogLog.event("channel_dead_lettered", "warn", "address", address,`,
+        `                            CatalogLog.event(${javaLogEvent("channelDeadLettered")}, "address", address,`,
         `                                    "error", "malformed envelope");`,
         `                            continue;`,
         `                        }`,
@@ -701,7 +714,7 @@ export function renderJavaChannelFiles(
         `                            // v1 log + park: keep the partition moving (a raw`,
         `                            // retry would stall every record behind this one).`,
         `                            park(address, record.key(), record.value());`,
-        `                            CatalogLog.event("channel_dead_lettered", "warn", "address", address,`,
+        `                            CatalogLog.event(${javaLogEvent("channelDeadLettered")}, "address", address,`,
         `                                    "type", envelope.type(), "id", envelope.id(),`,
         `                                    "error", String.valueOf(e.getMessage()));`,
         `                        }`,
@@ -734,7 +747,7 @@ export function renderJavaChannelFiles(
         `        // retrying either way.`,
         `        try {`,
         `            if (!assigned.await(30, TimeUnit.SECONDS)) {`,
-        `                CatalogLog.event("channel_subscribe_slow", "warn", "address", address,`,
+        `                CatalogLog.event(${javaLogEvent("channelSubscribeSlow")}, "address", address,`,
         `                        "error", "no partition assignment within 30s");`,
         `            }`,
         `        } catch (InterruptedException e) {`,
@@ -1051,7 +1064,7 @@ export function renderJavaChannelFiles(
       `        }`,
       `        var envelope = ChannelEnvelopes.forData(type, ChannelCodec.toData(event), address, null);`,
       `        transports.forAddress(address).publish(address, envelope);`,
-      `        CatalogLog.event("channel_published", "info", "address", address, "type", type, "id", envelope.id());`,
+      `        CatalogLog.event(${javaLogEvent("channelPublished")}, "address", address, "type", type, "id", envelope.id());`,
       `    }`,
       `}`,
       ``,
@@ -1079,7 +1092,7 @@ export function renderJavaChannelFiles(
         `        }`,
         `        var envelope = ChannelEnvelopes.forData(type, data, address, eventId);`,
         `        transports.forAddress(address).publish(address, envelope);`,
-        `        CatalogLog.event("channel_published", "info", "address", address, "type", type, "id", eventId);`,
+        `        CatalogLog.event(${javaLogEvent("channelPublished")}, "address", address, "type", type, "id", eventId);`,
         `        return true;`,
         `    }`,
         ``,
@@ -1119,8 +1132,8 @@ export function renderJavaChannelFiles(
       `                    envelope -> {`,
       `                        dispatch(envelope);`,
       hasKafka
-        ? `                        CatalogLog.event("channel_consumed", "info", "address", binding.address(),\n                                "type", envelope.type(), "id", envelope.id(),\n                                "key", String.valueOf(envelope.loomKey()));`
-        : `                        CatalogLog.event("channel_consumed", "info", "address", binding.address(),\n                                "type", envelope.type(), "id", envelope.id());`,
+        ? `                        CatalogLog.event(${javaLogEvent("channelConsumed")}, "address", binding.address(),\n                                "type", envelope.type(), "id", envelope.id(),\n                                "key", String.valueOf(envelope.loomKey()));`
+        : `                        CatalogLog.event(${javaLogEvent("channelConsumed")}, "address", binding.address(),\n                                "type", envelope.type(), "id", envelope.id());`,
       `                    });`,
     ];
     const loggedSubscribe = [
@@ -1128,10 +1141,10 @@ export function renderJavaChannelFiles(
       `                    envelope -> executor.submit(() -> {`,
       `                        try {`,
       `                            dispatch(envelope);`,
-      `                            CatalogLog.event("channel_consumed", "info", "address", binding.address(),`,
+      `                            CatalogLog.event(${javaLogEvent("channelConsumed")}, "address", binding.address(),`,
       `                                    "type", envelope.type(), "id", envelope.id());`,
       `                        } catch (RuntimeException e) {`,
-      `                            CatalogLog.event("channel_consume_failed", "warn", "address", binding.address(),`,
+      `                            CatalogLog.event(${javaLogEvent("channelConsumeFailed")}, "address", binding.address(),`,
       `                                    "type", envelope.type(), "error", String.valueOf(e.getMessage()));`,
       `                        }`,
       `                    }));`,
@@ -1313,7 +1326,7 @@ export function renderJavaOutboxDelivery(basePkg: string): string {
   );
 }
 
-/** The transactional-outbox tier (M-T4.4 slice 7c — dispatch-delivery-
+/** The transactional-outbox tier (dispatch-delivery-
  *  semantics.md on java): the JPA entity mapped onto the MigrationsIR-owned
  *  `__loom_outbox` table, its Spring Data repository, and the polling relay
  *  that publishes drained rows to the broker (design §5; the tee in
@@ -1353,7 +1366,7 @@ export function renderJavaOutboxFiles(pkgs: {
         ``,
         `/** One owed durable event (dispatch-delivery-semantics.md): written by`,
         ` *  the ChannelPublishTee inside the caller's transaction, drained by`,
-        ` *  the OutboxRelayService (M-T4.4 design §5).  Maps the shared`,
+        ` *  the OutboxRelayService.  Maps the shared`,
         ` *  __loom_outbox table the module migrations own. */`,
         `@Entity`,
         `@Table(name = "__loom_outbox")`,
@@ -1476,7 +1489,7 @@ export function renderJavaOutboxFiles(pkgs: {
         `                try {`,
         `                    drain();`,
         `                } catch (RuntimeException e) {`,
-        `                    CatalogLog.event("outbox_relay_error", "warn", "error", String.valueOf(e.getMessage()));`,
+        `                    CatalogLog.event(${javaLogEvent("outboxRelayError")}, "error", String.valueOf(e.getMessage()));`,
         `                }`,
         `                try {`,
         `                    Thread.sleep(INTERVAL_MS);`,
@@ -1505,7 +1518,7 @@ export function renderJavaOutboxFiles(pkgs: {
         `                row.setAttempts(row.getAttempts() + 1);`,
         `                outbox.save(row);`,
         `                if (row.getAttempts() >= MAX_ATTEMPTS) {`,
-        `                    CatalogLog.event("event_dead_lettered", "warn", "type", row.getType(),`,
+        `                    CatalogLog.event(${javaLogEvent("eventDeadLettered")}, "type", row.getType(),`,
         `                            "attempts", String.valueOf(row.getAttempts()),`,
         `                            "error", String.valueOf(e.getMessage()));`,
         `                }`,
@@ -1695,7 +1708,7 @@ export function renderJavaStandaloneOutboxFiles(
         `                try {`,
         `                    drain();`,
         `                } catch (RuntimeException e) {`,
-        `                    CatalogLog.event("outbox_relay_error", "warn", "error", String.valueOf(e.getMessage()));`,
+        `                    CatalogLog.event(${javaLogEvent("outboxRelayError")}, "error", String.valueOf(e.getMessage()));`,
         `                }`,
         `                try {`,
         `                    Thread.sleep(INTERVAL_MS);`,
@@ -1724,7 +1737,7 @@ export function renderJavaStandaloneOutboxFiles(
         `                row.setAttempts(row.getAttempts() + 1);`,
         `                outbox.save(row);`,
         `                if (row.getAttempts() >= MAX_ATTEMPTS) {`,
-        `                    CatalogLog.event("event_dead_lettered", "warn", "type", row.getType(),`,
+        `                    CatalogLog.event(${javaLogEvent("eventDeadLettered")}, "type", row.getType(),`,
         `                            "attempts", String.valueOf(row.getAttempts()),`,
         `                            "error", String.valueOf(e.getMessage()));`,
         `                }`,

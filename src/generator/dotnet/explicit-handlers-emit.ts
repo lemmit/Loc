@@ -44,18 +44,23 @@ import type {
   ParamIR,
   QueryHandlerIR,
   RouteIR,
+  SystemIR,
   TypeIR,
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
 import { wireTypeInfo } from "../../ir/types/wire-types.js";
 import { normalizeHandlerReturn, requestRecordFor } from "../../ir/util/handler-contracts.js";
-import { plural, upperFirst } from "../../util/naming.js";
+import { escapeCsharpIdent, plural, upperFirst } from "../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
 import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
-import { projectEntityExpr, projectToResponse } from "./dto-mapping.js";
+import { csIdValueClrType, projectEntityExpr, projectToResponse } from "./dto-mapping.js";
 import { CS_PAGED_QUERY_PARAMS } from "./emit/common.js";
-import { renderCsType } from "./render-expr.js";
-import { csWorkflowStmtTarget, renderExprWithCmdParams } from "./workflow-emit.js";
+import { API_CLIENT_CLASS, renderCsType } from "./render-expr.js";
+import {
+  buildResourceClasses,
+  csWorkflowStmtTarget,
+  renderExprWithCmdParams,
+} from "./workflow-emit.js";
 
 const INDENT = "        ";
 
@@ -135,12 +140,33 @@ function returnEntityAgg(h: Handler, ctx: EnrichedBoundedContextIR): string | un
   return owning?.name;
 }
 
+/** Where a DSL-bodied handler's two files are filed.  A handler that touches an
+ *  aggregate files under it (`Application/Orders/Commands/…`); one that touches
+ *  NONE — a pure computation, or a body doing only resource I/O — has no home
+ *  aggregate, so it takes the same neutral `Application/Handlers/` folder the
+ *  extern handlers use.  (Before #2659 the aggregate-less handler was DROPPED
+ *  here — `if (!primaryAgg(h)) continue` — so a declared handler and its route
+ *  vanished from the .NET output while the other four backends emitted them.) */
+function handlerHome(
+  ns: string,
+  agg: string | undefined,
+  kind: "Command" | "Query",
+): { dir: string; ns: string } {
+  const folder = kind === "Command" ? "Commands" : "Queries";
+  return agg
+    ? {
+        dir: `Application/${plural(agg)}/${folder}`,
+        ns: `${ns}.Application.${plural(agg)}.${folder}`,
+      }
+    : { dir: "Application/Handlers", ns: EXTERN_HANDLERS_NS(ns) };
+}
+
 /** Render a handler's `<Name>Command` / `<Name>Query` record. */
 function renderRecord(
   h: Handler,
   ns: string,
   ctx: EnrichedBoundedContextIR,
-  agg: string,
+  agg: string | undefined,
   kind: "Command" | "Query",
 ): string {
   const recName = `${h.name}${kind}`;
@@ -157,7 +183,6 @@ function renderRecord(
         ? `ICommand<${renderCsType(ret)}>`
         : "ICommand"
       : `IQuery<${renderCsType(ret!)}>`;
-  const folder = kind === "Command" ? "Commands" : "Queries";
   // A record whose return type is an aggregate needs that aggregate's domain
   // namespace so `ICommand<Order>` / `IQuery<Order>` resolves.
   const retAgg = returnEntityAgg(h, ctx);
@@ -168,7 +193,7 @@ using ${ns}.Domain.Ids;
 using ${ns}.Domain.ValueObjects;
 using ${ns}.Domain.Enums;${retUsing}
 
-namespace ${ns}.Application.${plural(agg)}.${folder};
+namespace ${handlerHome(ns, agg, kind).ns};
 
 public sealed record ${recName}(${params}) : ${iface};
 `;
@@ -180,8 +205,13 @@ function renderHandlerClass(
   h: Handler,
   ns: string,
   ctx: EnrichedBoundedContextIR,
-  agg: string,
+  agg: string | undefined,
   kind: "Command" | "Query",
+  /** resourceName → static helper class, so a resource-op in this handler body
+   *  renders as `<Class>.<Resource>_<Verb>(...)`.  Empty when the deployable
+   *  binds no adapter-backed resource — then a body containing one is a bug the
+   *  renderer still reports loudly rather than dropping. */
+  resourceClasses: Map<string, string> = new Map(),
 ): string {
   const recName = `${h.name}${kind}`;
   const handlerName = `${h.name}Handler`;
@@ -213,7 +243,7 @@ function renderHandlerClass(
   const records = recordParamNames(h, ctx);
   const flatNames = new Set(h.params.filter((p) => !records.has(p.name)).map((p) => p.name));
   const renderArg = (e: ExprIR): string =>
-    renderExprWithCmdParams(e, flatNames, undefined, undefined, records);
+    renderExprWithCmdParams(e, flatNames, resourceClasses, undefined, records);
   // Guard every getById load with `?? throw` — a handler body always
   // dereferences its load (op-call target / return projection).
   const stmtLines = renderWorkflowStmtChunks(
@@ -232,9 +262,23 @@ function renderHandlerClass(
   // The `Handle` signature (`ValueTask<Order>`) needs the return aggregate's
   // domain namespace too — usually the same as the loaded one, but not always.
   const retAgg = returnEntityAgg(h, ctx);
-  const aggUsings = [...new Set([...repos.values(), agg, ...(retAgg ? [retAgg] : [])])]
-    .map((a) => `using ${ns}.Domain.${plural(a)};`)
-    .join("\n");
+  // An aggregate-less handler (no repo, no entity return) names no domain
+  // aggregate at all — the leading newline rides WITH each using so the header
+  // does not grow a stray blank line when the set is empty.
+  const aggUsings = [
+    ...new Set([...repos.values(), ...(agg ? [agg] : []), ...(retAgg ? [retAgg] : [])]),
+  ]
+    .map((a) => `\nusing ${ns}.Domain.${plural(a)};`)
+    .join("");
+  // `<ns>.Resources` — needed iff the RENDERED body actually names one of the
+  // static helper classes (a resource-op) or the typed api client.  Scanned off
+  // the emitted text rather than the IR so an unreferenced using can't slip
+  // through and trip CS8019 under `/warnaserror`.
+  const resourceUsing = [...new Set([...resourceClasses.values()]), API_CLIENT_CLASS].some((cls) =>
+    new RegExp(`\\b${cls}\\.`).test(body),
+  )
+    ? `\nusing ${ns}.Resources;`
+    : "";
 
   return `// Auto-generated.
 using System.Threading;
@@ -243,10 +287,9 @@ using Mediator;
 using ${ns}.Domain.Common;
 using ${ns}.Domain.Ids;
 using ${ns}.Domain.ValueObjects;
-using ${ns}.Domain.Enums;
-${aggUsings}
+using ${ns}.Domain.Enums;${resourceUsing}${aggUsings}
 
-namespace ${ns}.Application.${plural(agg)}.${kind === "Command" ? "Commands" : "Queries"};
+namespace ${handlerHome(ns, agg, kind).ns};
 
 public sealed class ${handlerName} : ${iface}
 {
@@ -372,7 +415,7 @@ const EXTERN_HANDLERS_NS = (ns: string): string => `${ns}.Application.Handlers`;
 /** The port method's C# param list + trailing CancellationToken. */
 function externPortParams(h: Handler): string {
   return [
-    ...h.params.map((p) => `${renderCsType(p.type)} ${p.name}`),
+    ...h.params.map((p) => `${renderCsType(p.type)} ${escapeCsharpIdent(p.name)}`),
     "CancellationToken cancellationToken",
   ].join(", ");
 }
@@ -510,21 +553,23 @@ export function emitExplicitHandlers(
   ctx: EnrichedBoundedContextIR,
   ns: string,
   out: Map<string, string>,
+  /** The composed system, for the resource-op → helper-class routing a handler
+   *  body needs.  Absent (legacy single-context `generate dotnet`) ⇒ no
+   *  resources are bound anyway, and the output stays byte-identical. */
+  sys?: SystemIR,
 ): void {
+  const resourceClasses = buildResourceClasses(sys);
   for (const h of ctx.commandHandlers ?? []) {
     if (h.extern) {
       emitExternHandler(h, ns, "Command", out);
       continue;
     }
     const agg = primaryAgg(h);
-    if (!agg) continue;
+    const home = handlerHome(ns, agg, "Command").dir;
+    out.set(`${home}/${h.name}Command.cs`, renderRecord(h, ns, ctx, agg, "Command"));
     out.set(
-      `Application/${plural(agg)}/Commands/${h.name}Command.cs`,
-      renderRecord(h, ns, ctx, agg, "Command"),
-    );
-    out.set(
-      `Application/${plural(agg)}/Commands/${h.name}Handler.cs`,
-      renderHandlerClass(h, ns, ctx, agg, "Command"),
+      `${home}/${h.name}Handler.cs`,
+      renderHandlerClass(h, ns, ctx, agg, "Command", resourceClasses),
     );
   }
   for (const h of ctx.queryHandlers ?? []) {
@@ -548,14 +593,11 @@ export function emitExplicitHandlers(
       continue;
     }
     const agg = primaryAgg(h);
-    if (!agg) continue;
+    const home = handlerHome(ns, agg, "Query").dir;
+    out.set(`${home}/${h.name}Query.cs`, renderRecord(h, ns, ctx, agg, "Query"));
     out.set(
-      `Application/${plural(agg)}/Queries/${h.name}Query.cs`,
-      renderRecord(h, ns, ctx, agg, "Query"),
-    );
-    out.set(
-      `Application/${plural(agg)}/Queries/${h.name}Handler.cs`,
-      renderHandlerClass(h, ns, ctx, agg, "Query"),
+      `${home}/${h.name}Handler.cs`,
+      renderHandlerClass(h, ns, ctx, agg, "Query", resourceClasses),
     );
   }
 }
@@ -573,28 +615,35 @@ function pathParamNames(path: string): Set<string> {
  *  wrapped in `new <Agg>Id`; scalar → direct. */
 function pathActionParam(p: ParamIR): { actionParam: string; commandArg: string } {
   const t: TypeIR = p.type;
+  const n = escapeCsharpIdent(p.name);
   if (t.kind === "id") {
-    const wire = t.valueType === "guid" ? "Guid" : t.valueType === "int" ? "long" : "string";
+    // The SHARED derivation (`csIdValueClrType`), not a local switch: the copy
+    // that used to live here mapped `int` to `long`, so an `int`-keyed
+    // aggregate bound a `long` route token and handed it to a ctor taking
+    // `int` — CS1503 (G2667-D4).  Latent only because ids are guid by default.
+    const wire = csIdValueClrType(t.valueType);
     return {
-      actionParam: `${wire} ${p.name}`,
-      commandArg: `new ${t.targetName}Id(${p.name})`,
+      actionParam: `${wire} ${n}`,
+      commandArg: `new ${t.targetName}Id(${n})`,
     };
   }
-  return { actionParam: `${renderCsType(t)} ${p.name}`, commandArg: p.name };
+  return { actionParam: `${renderCsType(t)} ${n}`, commandArg: n };
 }
 
 /** A `[FromQuery]` criterion param of a paged-run queryHandler: id → wire type
  *  coerced with `new <Agg>Id(...)`; scalar → the rendered domain type verbatim. */
 function queryActionParam(p: ParamIR): { actionParam: string; commandArg: string } {
   const t: TypeIR = p.type;
+  const n = escapeCsharpIdent(p.name);
   if (t.kind === "id") {
-    const wire = t.valueType === "guid" ? "Guid" : t.valueType === "int" ? "long" : "string";
+    // Same shared derivation as `pathActionParam` — see the note there.
+    const wire = csIdValueClrType(t.valueType);
     return {
-      actionParam: `[FromQuery] ${wire} ${p.name}`,
-      commandArg: `new ${t.targetName}Id(${p.name})`,
+      actionParam: `[FromQuery] ${wire} ${n}`,
+      commandArg: `new ${t.targetName}Id(${n})`,
     };
   }
-  return { actionParam: `[FromQuery] ${renderCsType(t)} ${p.name}`, commandArg: p.name };
+  return { actionParam: `[FromQuery] ${renderCsType(t)} ${n}`, commandArg: n };
 }
 
 const HTTP_ATTR: Record<string, string> = {
@@ -659,15 +708,11 @@ export function emitExplicitRouteController(
       continue;
     }
     const agg = primaryAgg(h);
-    // A DSL-bodied handler files under its home aggregate; an extern handler has
-    // none and lives in the neutral `Application/Handlers/` namespace.
-    if (!h.extern && !agg) continue;
+    // A DSL-bodied handler files under its home aggregate; an extern handler —
+    // and a DSL-bodied handler that touches no aggregate at all — lives in the
+    // neutral `Application/Handlers/` namespace.
     const kind: "Command" | "Query" = cmd ? "Command" : "Query";
-    nsUsings.add(
-      h.extern
-        ? EXTERN_HANDLERS_NS(ns)
-        : `${ns}.Application.${plural(agg!)}.${kind === "Command" ? "Commands" : "Queries"}`,
-    );
+    nsUsings.add(h.extern ? EXTERN_HANDLERS_NS(ns) : handlerHome(ns, agg, kind).ns);
 
     // Split params: those bound by a `{token}` in the route path stay URL params;
     // the rest ride in one `[FromBody]` request record. (Multiple bare complex

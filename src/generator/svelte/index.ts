@@ -29,6 +29,8 @@ import {
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import { MONEY_TEXT_SOURCE } from "../_frontend/money-format.js";
+import { JSX_NAV_LABELS, withNavLabelTokens } from "../_frontend/nav-labels.js";
 import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import {
@@ -115,7 +117,7 @@ export function generateSvelteForContexts(
   }
   const aggregatesByName = new Map<string, AggregateIR>();
   for (const { agg } of aggregates) aggregatesByName.set(agg.name, agg);
-  // Name-context for `classifyPage` / `pageEmitName` (slice 3c — replaces the
+  // Name-context for `classifyPage` / `pageEmitName` (replaces the
   // stamped page origin).  Derived once from the served contexts.
   const pageCtx: PageNameCtx = {
     aggregateNames: contexts.flatMap((c) => c.aggregates.map((a) => a.name)),
@@ -163,7 +165,7 @@ export function generateSvelteForContexts(
     out.set("src/lib/api/workflows.ts", buildWorkflowsApiModule(contexts));
   }
 
-  // Query-time projection clients (M-T1.3 Phase 1) — the SHARED builder React
+  // Query-time projection clients (M-T1.3) — the SHARED builder React
   // and Vue use, driven by the svelte-query leaves (PR #2366's decision: reuse
   // while the divergence is leaf-shaped).  `createQuery` + the thunked options
   // object + `../schemas` (this module lives at `src/lib/api/`, one hop below
@@ -253,7 +255,7 @@ export function generateSvelteForContexts(
   }
   out.set("src/lib/api/config.ts", pack.render("api-config", { apiBaseUrl }));
   out.set("src/lib/logger.ts", pack.render("logger", {}));
-  out.set("src/lib/format.ts", pack.render("format-helpers", {}));
+  out.set("src/lib/format.ts", pack.render("format-helpers", { moneySource: MONEY_TEXT_SOURCE }));
   // Interactive-table sort helper (M-T1.1) — imported by a page only when it
   // renders a sortable `Table`; emitted unconditionally (like format.ts).
   out.set("src/lib/table-sort.ts", buildTableSortHelper());
@@ -322,9 +324,11 @@ export function generateSvelteForContexts(
   const navSections =
     sidebarOverride?.map((s) => ({
       label: s.label,
+      labelKey: s.labelKey,
       entries: s.entries.map((e) => ({
         to: e.to,
         label: e.label,
+        labelKey: e.labelKey,
         testId: e.testId,
         // Per-link gate condition (auth: ui) — the app-shell `{#if}`-hides a
         // forbidden page's link.  Absent ⇒ link always shown.
@@ -336,11 +340,15 @@ export function generateSvelteForContexts(
   const navUsesSession = navSections.some(
     (s) => "entries" in s && s.entries.some((e) => "requiresJs" in e && !!e.requiresJs),
   );
+  // Nav labels → JSX-spelled tokens (Svelte shares JSX's single braces), so the
+  // `menu.*` catalog keys the extractor writes finally render (A13b).  Escaped
+  // raw string when i18n is off / the label has no key — byte-identical.
+  const navSectionsVM = withNavLabelTokens(navSections, i18nEnabled ? JSX_NAV_LABELS : undefined);
   out.set(
     "src/routes/(app)/+layout.svelte",
     pack.render("app-shell", {
       systemNameHuman: humanize(sys.name),
-      navSections,
+      navSections: navSectionsVM,
       hasNav: navSections.length > 0,
       navUsesSession,
       // Pack-chrome (M-T1.11): raw source string when i18n is off (byte-identical

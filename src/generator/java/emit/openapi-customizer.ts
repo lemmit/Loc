@@ -12,7 +12,11 @@ import type {
   TypeIR,
   WireField,
 } from "../../../ir/types/loom-ir.js";
-import { workflowEmitsCommandRoute, workflowIsGuarded } from "../../../ir/types/loom-ir.js";
+import {
+  workflowCanAnswerNotFound,
+  workflowEmitsCommandRoute,
+  workflowIsGuarded,
+} from "../../../ir/types/loom-ir.js";
 import {
   type ApiOperationIR,
   aggregateSegment,
@@ -28,6 +32,7 @@ import {
   problemTitle,
 } from "../../../ir/util/openapi-errors.js";
 import { lines } from "../../../util/code-builder.js";
+import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec, unionJsonSchema } from "../../_payload/union-wire.js";
 import { isPagedAutoAll, isPagedFind } from "./repository.js";
@@ -187,6 +192,16 @@ export function buildJavaOpenApiContract(
   for (const e of [...contexts.flatMap((c) => c.enums ?? [])]) allEnums.set(e.name, e);
 
   for (const ctx of contexts) {
+    // The `httpStatus` resolver for the HAND-ROLLED declared sets below.  The
+    // aggregate routes take theirs from `deriveContextOperations`, which
+    // resolves; the workflow-command and workflow-instance-by-id entries build
+    // theirs by calling `errorStatuses` directly and passed NO resolver, so an
+    // `httpStatus` clause moved the former and silently not the latter.
+    const resolveStatus = (name: string): number =>
+      resolveErrorStatus(name, {
+        ...ctx.errorStatusOverrides,
+        ...ctx.structuralErrorStatuses,
+      });
     const repoByAgg = new Map<string, RepositoryIR | undefined>(
       ctx.repositories.map((r) => [r.aggregateName, r]),
     );
@@ -197,8 +212,8 @@ export function buildJavaOpenApiContract(
       const repo = repoByAgg.get(agg.name);
       // THE UNIFICATION SEAM (api-surface.ts): every published path + declared
       // error set below comes from the same derived list the controller
-      // renders (emit/api.ts) — the customizer and the router can no longer
-      // disagree, which they have three separate times.  Workflow routes stay
+      // renders (emit/api.ts), so the customizer and the router cannot
+      // disagree.  Workflow routes stay
       // hand-built (`apiSurfaceCoverage.notLifted`).
       const derivedOps = deriveAggregateOperations(agg, repo, apiStatusContext(ctx));
       const pathOf = (o: ApiOperationIR): string => `${route}${relativeOpPath(o)}`;
@@ -370,6 +385,14 @@ export function buildJavaOpenApiContract(
           continue;
         }
         if (isPagedFind(f)) {
+          // F2-W-07 — the controller returns the concrete `<Agg>Paged` record
+          // (not the raw `Paged<T>` generic springdoc would have named
+          // `Paged<Agg>Response`), so the envelope's required set must be
+          // registered here too and not only under `isPagedAutoAll`: a
+          // document / embedded / event-sourced aggregate has a NON-paged
+          // auto-findAll and can still declare a paged find.  `setRequired` is
+          // a map write, so the auto-all case re-registering it is a no-op.
+          setRequired(`${agg.name}Paged`, ["items", "page", "pageSize", "total", "totalPages"]);
           routes.push({ method: "get", path: findPath, errors: findErrors });
           continue;
         }
@@ -380,10 +403,10 @@ export function buildJavaOpenApiContract(
           wrappers.set(listWrapper, `${agg.name}Response`);
           routes.push({ method: "get", path: findPath, listWrapper, errors: findErrors });
         } else {
-          // Optional find → 404 (+403 when gated).  NAMED FIX (unification): a
-          // GENUINELY-single find (bare `T`, not `T option`) no longer
-          // declares the optional convention's 404 — the derivation classifies
-          // it `findSingle`, matching what the controller answers.
+          // Optional find → 404 (+403 when gated).  A GENUINELY-single find
+          // (bare `T`, not `T option`) does NOT declare the optional
+          // convention's 404 — the derivation classifies it `findSingle`,
+          // matching what the controller answers.
           routes.push({ method: "get", path: findPath, errors: findErrors });
         }
       }
@@ -410,7 +433,7 @@ export function buildJavaOpenApiContract(
         routes.push({
           method: "get",
           path: `${instancesPath}/{id}`,
-          errors: err(errorStatuses("getById")),
+          errors: err(errorStatuses("getById", false, resolveStatus)),
         });
         for (const f of wf.instanceWireShape) noteEnumRefs(f.type, f.name);
         setRequired(`${T}InstanceResponse`, requiredWireFields(wf.instanceWireShape));
@@ -419,7 +442,11 @@ export function buildJavaOpenApiContract(
       routes.push({
         method: "post",
         path: `${routePrefix}/workflows/${snake(wf.name)}`,
-        errors: err(errorStatuses("workflow", workflowIsGuarded(wf))),
+        errors: err(
+          errorStatuses("workflow", workflowIsGuarded(wf), resolveStatus, {
+            readsAggregate: workflowCanAnswerNotFound(wf, ctx.repositories),
+          }),
+        ),
         // Workflow command operationId carries a `Workflow` suffix on the other
         // backends (`registerProjectWorkflow`); springdoc derives the bare name.
         operationId: `${lowerFirst(wf.name)}Workflow`,
@@ -451,7 +478,7 @@ export function buildJavaOpenApiContract(
       routes.push({
         method: "get",
         path: `${instancesPath}/{id}`,
-        errors: err(errorStatuses("getById")),
+        errors: err(errorStatuses("getById", false, resolveStatus)),
       });
       for (const w of wf.instanceWireShape) noteEnumRefs(w.type, w.name);
       setRequired(
@@ -496,12 +523,11 @@ function requiredWireFields(fields: readonly WireField[]): string[] {
 /** Required params for an OPERATION request DTO: every param that is not
  *  optional-typed.
  *
- *  RS-26.  A bare body-bool used to be dropped here too, on the reasoning that
- *  a non-nullable bool "defaults to false when omitted" — but that is a
- *  CREATE-input rule (`hasImplicitDefault`), and an operation body constructs
- *  nothing, so an omitted param is a missing required one.  Keeping the
- *  exclusion made the spec claim a PUT could omit `active: bool = true` when
- *  doing so silently stored `false`. */
+ *  RS-26.  A bare body-bool is NOT excluded: "defaults to false when omitted"
+ *  is a CREATE-input rule (`hasImplicitDefault`), and an operation body
+ *  constructs nothing, so an omitted param is a missing required one.
+ *  Excluding it makes the spec claim a PUT may omit `active: bool = true` when
+ *  doing so silently stores `false`. */
 function requiredParams(params: readonly { name: string; type: TypeIR }[]): string[] {
   return params.filter((p) => !isOptionalType(p.type)).map((p) => p.name);
 }

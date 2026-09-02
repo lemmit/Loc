@@ -35,7 +35,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { AUTHZ_LADDERS, DEV_CLAIMS, featureCases, resetDatabase, sharedSystemCases, unauthorizedCredentials } from "./cases.mjs";
+import { AUTHZ_LADDERS, declaresE2e, DEV_CLAIMS, featureCases, mountsFileRoutes, resetDatabase, sharedSystemCases, unauthorizedCredentials } from "./cases.mjs";
 import { stopServer, waitForPort, waitForPortFree } from "./proc.mjs";
 import { makeWireGate, recorderPreamble } from "./wire-differential.mjs";
 import { startMockIssuer } from "./oidc-mock.mjs";
@@ -125,7 +125,7 @@ function runPytestUnit(deplDir) {
 
 /** The e2e-run entry (bundled by esbuild): loads the emitted api suite and
  *  dispatches each request over real HTTP at the booted FastAPI server. */
-function entrySource(e2eFile, bearerToken, hasAuth, authzLadder, unauthorizedCreds) {
+function entrySource(e2eFile, bearerToken, hasAuth, authzLadder, unauthorizedCreds, mountsFiles) {
   const J = JSON.stringify;
   const bearerEnv = bearerToken ? `, E2E_BEARER_TOKEN: ${J(bearerToken)}` : "";
   return `
@@ -162,7 +162,7 @@ export async function run() {
   const results = await runTests(cases);
   // RS-9 — appended AFTER the tier so the probes never shift the ordinals the
   // golden aligns on, and so a failing tier is diagnosed on its own requests.
-  await __frameworkProbes(dispatch, { auth: ${J(!!hasAuth)} });
+  await __frameworkProbes(dispatch, { auth: ${J(!!hasAuth)}, files: ${J(!!mountsFiles)} });
   // M-T9.28 — the authorization ladder, on the cases that declare one.  Runs
   // last and off the RECORDER (see __authzLadder) so it neither shifts wire
   // ordinals nor perturbs the tier it follows.  Returned SEPARATELY from
@@ -188,7 +188,12 @@ async function runCase(c) {
     const deplDir = findPythonDeployable(genDir);
     const e2eDir = join(genDir, "e2e");
     const e2eFile = existsSync(e2eDir) ? (walk(e2eDir, (p) => p.endsWith(".e2e.test.ts"))[0] ?? null) : null;
-    if (!e2eFile) throw new Error("no emitted e2e suite (the system declares no `test e2e … against <python>`)");
+    // A UNIT-ONLY case (domain `test "…"`, no `test e2e`) emits no e2e suite —
+    // that is the declared shape, not an error: run the DB-free unit tier and
+    // skip the api/wire legs, the node oracle's derive-from-the-file-map
+    // posture (M-T6.44's numeric-operands is the first such fixture).  A case
+    // that DECLARES e2e and emits nothing is still an error.
+    if (!e2eFile && declaresE2e(c.source)) throw new Error("no emitted e2e suite (the system declares no `test e2e … against <python>`)");
 
     // OIDC (`auth {}` block) → the generated verifier validates a real bearer
     // JWT against the issuer's JWKS.  Point the backend at the in-process mock
@@ -200,6 +205,9 @@ async function runCase(c) {
     // dev stub or OIDC)?  A frontend's `auth: ui` rides its target's.
     // Drives the anonymous `/api/auth/me` probe — see __frameworkProbes.
     const hasAuth = /\n\s*auth:\s*required\b/.test(c.source);
+    // Does this deployable mount the root /files pair (M-T6.39)?  Drives the
+    // absent-file probe — see __frameworkProbes.
+    const mountsFiles = mountsFileRoutes(c.source);
     // NO_PROXY: the mock issuer is on loopback; without it the backend's JWKS
     // fetch would be routed through any ambient HTTP(S)_PROXY and fail.
     const oidcEnv =
@@ -224,6 +232,9 @@ async function runCase(c) {
       // failure is caught even if the uvicorn/Postgres boot is flaky.
       if (hasUnit) out.push(...runPytestUnit(deplDir));
     }
+
+    // Unit-only case: the unit tier IS the case — no api/wire legs.
+    if (!e2eFile) return { results: out, error: null };
 
     // The api tier boots uvicorn against a real Postgres.  Keep it in its own
     // try so an infra/boot failure is reported as an *errored* case WITHOUT
@@ -260,6 +271,7 @@ async function runCase(c) {
           hasAuth,
           AUTHZ_LADDERS[c.name] ?? null,
           unauthorizedCredentials(isOidc ? "oidc" : hasAuth ? "devstub" : "none", isOidc && oidc ? oidc.unauthorizedToken : null),
+          mountsFiles,
         ),
       );
       await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });

@@ -1,11 +1,14 @@
 // Honesty gate for `on <channel>.<Event>` live-event handlers (channels.md
-// Part I).  All five built-in frontends now consume the realtime SSE wire, so
-// the gate no longer bites them — but a handler still emits NOTHING when the
-// serving frontend can't reach a realtime source: an SSE-consuming frontend
-// pointed at a backend that doesn't serve the wire (the Phoenix/Elixir
-// backend), or a frontend framework with no realtime path at all (flutter).
-// Those cases warn (`loom.ui-realtime-unsupported`) rather than dropping the
-// handler silently.
+// Part I).  ALL SIX built-in frontends now consume the realtime SSE wire —
+// flutter was the last holdout and joined with `generator/flutter/realtime.ts`
+// — and ALL FIVE BACKENDS now SERVE it, elixir last
+// (`vanilla/realtime-emit.ts`).  So neither half of the gate bites a shipped
+// platform pairing any more.  Both stay as the SEAMS the next target gates on:
+// the `frontend-has-no-consumer` arm for a NEW frontend without a realtime
+// path, and the `backend-serves-no-sse` arm for an SSE frontend whose serving
+// deployable streams nothing (a `static` host with no backend behind it —
+// nothing there to open an EventSource against).  Those warn
+// (`loom.ui-realtime-unsupported`) rather than dropping the handler silently.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -62,17 +65,36 @@ describe("ui realtime honesty gate (`loom.ui-realtime-unsupported`)", () => {
     expect(await realtimeWarnings(sys("angular", "java"))).toEqual([]);
   });
 
-  it("warns for an SSE frontend targeting a backend without the wire (react → elixir)", async () => {
-    const warns = await realtimeWarnings(sys("react", "elixir"));
+  // The gap this closed: `platform: elixir` served no SSE endpoint, so an SPA
+  // pointed at it lost its `on` handler behind this warning.  Vanilla Phoenix
+  // now emits the stream (`vanilla/realtime-emit.ts`), so the warning is gone
+  // and the handler is real.
+  it("does not warn for react → elixir (vanilla Phoenix serves the SSE wire)", async () => {
+    expect(await realtimeWarnings(sys("react", "elixir"))).toEqual([]);
+  });
+
+  it("warns for an SSE frontend whose serving deployable streams nothing (react → static)", async () => {
+    const warns = await realtimeWarnings(sys("react", "static"));
     expect(warns.length).toBe(1);
     expect(warns[0]).toContain("does not serve the realtime SSE wire");
     expect(warns[0]).toContain("silently dropped");
   });
 
-  it("warns for a frontend framework with no realtime path (flutter → node)", async () => {
-    const warns = await realtimeWarnings(sys("flutter", "node"));
+  it("does not warn for flutter on a realtime-serving backend (flutter → node)", async () => {
+    expect(await realtimeWarnings(sys("flutter", "node"))).toEqual([]);
+  });
+
+  // …and elixir serves the wire now too, so the pairing that USED to be the
+  // flutter counter-example is clean as well.
+  it("does not warn for flutter → elixir (both halves ship)", async () => {
+    expect(await realtimeWarnings(sys("flutter", "elixir"))).toEqual([]);
+  });
+
+  // What still bites: an SSE frontend — flutter included — whose serving
+  // deployable streams nothing at all.
+  it("warns for flutter whose serving deployable streams nothing (flutter → static)", async () => {
+    const warns = await realtimeWarnings(sys("flutter", "static"));
     expect(warns.length).toBe(1);
-    expect(warns[0]).toContain("no realtime consumption");
-    expect(warns[0]).toContain("silently dropped");
+    expect(warns[0]).toContain("does not serve the realtime SSE wire");
   });
 });

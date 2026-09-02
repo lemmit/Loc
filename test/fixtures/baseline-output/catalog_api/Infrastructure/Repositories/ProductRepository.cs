@@ -53,9 +53,11 @@ public sealed class ProductRepository : IProductRepository
             if (__expected.HasValue) __version.OriginalValue = __expected.Value;
             __version.CurrentValue = __version.OriginalValue + 1;
         }
+        var __pending = aggregate.PullEvents();
+        var __deferred = await _events.RecordDurableAsync(__pending, null, cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
         _log.LogDebug("{Event} aggregate={Aggregate} id={Id}", "repository_save", "Product", aggregate.Id.Value);
-        foreach (var ev in aggregate.PullEvents())
+        foreach (var ev in __deferred)
         {
             _log.LogInformation("{Event} event_type={EventType} aggregate={Aggregate} id={Id}", "event_dispatched", ev.GetType().Name, "Product", aggregate.Id.Value);
             await _events.DispatchAsync(ev, cancellationToken);

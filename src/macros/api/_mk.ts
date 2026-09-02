@@ -45,6 +45,7 @@ import type {
   IntLit,
   Lambda,
   LetStmt,
+  ListLit,
   LValue,
   MatchArm,
   MatchExpr,
@@ -281,6 +282,10 @@ export function mkNowExpr(shape: AstLiteral<NowExpr>): NowExpr {
 
 export function mkIntLit(shape: AstLiteral<IntLit>): IntLit {
   return mkAst<IntLit>(shape);
+}
+
+export function mkListLit(shape: AstLiteral<ListLit>): ListLit {
+  return mkAst<ListLit>(shape);
 }
 
 export function mkLambda(shape: AstLiteral<Lambda>): Lambda {

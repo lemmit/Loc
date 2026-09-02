@@ -367,6 +367,22 @@ function isIntProperty(p: Property): boolean {
   return t.base?.$type === "PrimitiveType" && (t.base as PrimitiveType).name === "int";
 }
 
+/** The aggregate's own `isDeleted` PROPERTY, or undefined — the `softDeletable`
+ *  twin of {@link existingVersionMember}, same member-namespace rule. */
+function existingIsDeletedMember(agg: Aggregate): Property | undefined {
+  return agg.members.find(
+    (m): m is Property => m.$type === "Property" && (m as Property).name === "isDeleted",
+  );
+}
+
+/** True iff the property is a plain (non-optional, non-array) `bool` — the
+ *  exact shape the `softDeletable` capability would have spliced. */
+function isBoolProperty(p: Property): boolean {
+  const t = p.type;
+  if (!t || t.optional || t.array || t.alternatives.length > 0) return false;
+  return t.base?.$type === "PrimitiveType" && (t.base as PrimitiveType).name === "bool";
+}
+
 /** Record capability membership without splicing any member — the annotation
  *  lowering's `collectCapabilities` reads.  Mirrors the tail of
  *  `expandCapability`; used when the host already declares the capability's
@@ -396,7 +412,7 @@ function expandOneCall(
   if (!macro) {
     // No macro by this name — try a typed capability (typed-capabilities.md).
     // Macro wins on a name collision (a stdlib macro shadows a same-named
-    // capability) until the stdlib migrates in Phase 3; that keeps this
+    // capability) until the stdlib migrates; that keeps this
     // purely additive.
     const cap = inv.Capability.get(name);
     if (cap) {
@@ -621,6 +637,30 @@ function expandCapability(
         continue;
       }
     }
+    // The `isDeleted` collision — the G2 seam on `softDeletable`'s filter
+    // member (corpus-mutation cell M1.aggregate.isDeleted).  The spliced
+    // `filter !this.isDeleted` reads whatever member wins the name, so a
+    // non-bool user `isDeleted` makes every backend's soft-delete predicate
+    // negate a string/number — refused rather than silently mis-filtered or
+    // crashed at codegen (the Drizzle lowering rightly cannot lower it).  A
+    // BOOL user member is structurally the spliced field: `mergeScopedMembers`
+    // keeps the user's declaration and the splice proceeds for the rest.
+    if (cap.name === "softDeletable") {
+      const declared = existingIsDeletedMember(agg);
+      if (declared && !isBoolProperty(declared)) {
+        recordDiagnostic(doc, {
+          severity: "error",
+          code: "loom.softdelete-field-collision",
+          message: diagMessage("loom.softdelete-field-collision", {
+            name: agg.name,
+            name2: lowerFirstSafe(agg.name),
+          }),
+          node: declared,
+          property: "name",
+        });
+        continue;
+      }
+    }
     const cloned: unknown[] = (cap.members ?? []).map((m) => AstUtils.copyAstNode(m, buildRef));
     for (const m of cloned) {
       resolveSelfTypes(m as AstNode, agg.name, buildRef);
@@ -757,7 +797,7 @@ function memberListKey(target: object): "members" | "routes" {
  * of the same name only within the *same* container.  Two same-named `area`
  * blocks merge — their children combine recursively — so role-named pages
  * (`page List` repeated across per-aggregate `area Orders` / `area Products`
- * blocks) no longer collapse onto the first area's copy.  Wires the `$container`
+ * blocks) do NOT collapse onto the first area's copy.  Wires the `$container`
  * triple on every appended node. */
 function spliceIntoTarget(target: object, members: unknown[]): void {
   const key = memberListKey(target);

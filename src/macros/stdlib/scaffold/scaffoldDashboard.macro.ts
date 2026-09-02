@@ -14,6 +14,7 @@ import {
   ALIAS,
   dashboardProjectionName,
   dashboardSeriesName,
+  hasDashboardTable,
   ROW_COUNT,
   SERIES_COUNT,
   SERIES_DAY,
@@ -41,7 +42,7 @@ import {
  * Why a projection and not a page-side fold: `.all` is paged by default
  * (M-T2.6), so counting rows in the browser counts ONE PAGE — and the numbers
  * belong in the database anyway.  A whole-table aggregation is one `SELECT`
- * with `COUNT(*)`/`SUM(...)` and no rows materialised (M-T1.3 Phase 0).
+ * with `COUNT(*)`/`SUM(...)` and no rows materialised (M-T1.3).
  *
  * ONE PROJECTION PER AGGREGATE, not one per context: a query-time projection
  * has a single `from` source, so a per-context row would have nothing to
@@ -67,9 +68,17 @@ export default defineMacro({
     for (const decl of ctx.members) {
       if (!isAggregate(decl)) continue;
       const agg = decl as Aggregate;
-      // An abstract base owns no table (aggregate-inheritance.md), so there is
-      // nothing to aggregate over — its concretes carry their own projections.
-      if (agg.isAbstract) continue;
+      // Nothing this macro may aggregate over — an abstract base
+      // (aggregate-inheritance.md: its concretes carry their own projections),
+      // an event-sourced stream, or a `shape: document` blob whose only
+      // nameable column is `id`.  Every tile here is a direct-table
+      // aggregation, so each of those would be refused downstream
+      // (`loom.projection-columnless-source`, or — for a filtered document
+      // source — `loom.projection-document-source-capability-filtered`, or on
+      // java `loom.projection-whole-table-aggregation-unsupported#document`).
+      // Shared with the ui half (`dashboardFieldsFor`) so a card can never bind
+      // a projection this macro skipped.
+      if (!hasDashboardTable(agg)) continue;
       const projName = dashboardProjectionName(agg.name);
       // Skip when the context already declares that name: a hand-written
       // projection wins over the scaffold, and re-emitting would be a
@@ -85,6 +94,10 @@ export default defineMacro({
         // unrecognised and the projection would look like a GROUP BY.
         { field: ROW_COUNT, expr: callExpr("count", []) },
       ];
+      // `summableFields` is empty for a `shape: document` aggregate — its
+      // declared fields live inside the jsonb blob, not as columns.  Belt and
+      // braces: `hasDashboardTable` above already skipped that aggregate
+      // entirely, so this loop never sees one.
       for (const f of summableFields(agg)) {
         members.push(field(`${f.name}Sum`, primType(f.primitive)));
         selects.push({
@@ -94,7 +107,7 @@ export default defineMacro({
       }
       out.push(singletonProjection(projName, agg.name, ALIAS, members, selects));
 
-      // The per-day SERIES beside the totals (M-T1.3 Phase 5): one row per day
+      // The per-day SERIES beside the totals (M-T1.3): one row per day
       // with that day's count — what a dashboard chart plots.  It rides the
       // GROUPED read model (M-T4.2) with the catalogued
       // `datetime.startOfDay()` key, so buckets are cut by `date_trunc('day',

@@ -51,20 +51,18 @@ export function formatNumber(
   }).format(n);
 }
 
-/** Currency-formatted value.  Accepts numbers, decimal strings, and
- *  decimal.js instances (the money wire shape). */
+/** Money value, rendered VERBATIM (M-T1.25): the wire's own digits,
+ *  locale-neutral — no Number() coercion, no locale grouping, no
+ *  currency symbol, no re-scaling.  `currency` prefixes the CODE the
+ *  page source declared; `decimals` re-scales the digit string.
+ *  Semantics live in `moneyText` below. */
 export function formatMoney(
   value: number | string | { toString(): string } | null | undefined,
-  currency = "USD",
-  decimals = 2,
+  currency?: string,
+  decimals?: number,
 ): string {
   if (isEmpty(value)) return "—";
-  const n = typeof value === "number" ? value : Number(String(value));
-  if (Number.isNaN(n)) return String(value);
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency,
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  }).format(n);
+  return moneyText(value as number | string | { toString(): string }, currency, decimals);
 }
+
+{{{moneySource}}}

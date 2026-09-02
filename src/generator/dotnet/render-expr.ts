@@ -3,6 +3,7 @@ import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
+  DATA_KEY_LIKE_ESCAPE,
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
   deepScopeTenantClaim,
@@ -12,6 +13,8 @@ import {
 import { bodyTypeOf } from "../../util/expr-body-type.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapeCsharpIdent, upperFirst } from "../../util/naming.js";
+import { csCodePointLength } from "../_expr/code-point.js";
+import { csSubtreeLikePattern } from "../_expr/subtree-like.js";
 import {
   type BinaryExpr,
   type CallExpr,
@@ -60,7 +63,7 @@ export interface CsRenderContext {
   efQuery?: boolean;
   /** Resource-op call routing: resourceName → static C# helper class
    *  name (e.g. `salesFiles` → `S3Resources`).  Set on the workflow
-   *  render context (Phase 4c); a `resource-op` call renders to
+   *  render context; a `resource-op` call renders to
    *  `<class>.<Resource>_<Verb>(args)`.  When unset, a resource-op
    *  throws at emit (non-resource render contexts never see one). */
   resourceClasses?: Map<string, string>;
@@ -94,7 +97,7 @@ export interface CsRenderContext {
    *  are in scope. */
   paramExpr?: (name: string) => string | undefined;
   /** Read-port handle resolver for a `reading`-tier domain-service body
-   *  (domain-services.md rev. 4, Slice 1).  A `repo-read` Call
+   *  (domain-services.md rev. 4).  A `repo-read` Call
    *  (`Accounts.byHolder(holder)`, lowered to `callKind: "repo-read"`) renders
    *  against the repository the service has INJECTED — on .NET / EF a `reading`
    *  service is a DI'd `sealed class` whose ctor takes one `I<Aggregate>Repository`
@@ -105,7 +108,7 @@ export interface CsRenderContext {
    *  validator-caught bug). */
   repoReadHandle?: (repo: string) => string;
   /** Injected-service call resolver for a `reading`-tier domain-service call
-   *  (domain-services.md rev. 4, Slice 1).  On .NET a `reading` service is a
+   *  (domain-services.md rev. 4).  On .NET a `reading` service is a
    *  DI'd `sealed class`, so the orchestrating workflow injects it (`_registration`)
    *  and the call site is `await _registration.IsEmailAvailableAsync(holder, ct)` —
    *  NOT the static `Registration.IsEmailAvailable(holder)` a PURE service emits.
@@ -143,12 +146,17 @@ const DEFAULT: CsRenderContext = { thisName: "this" };
  *  exactly when this finds it. */
 export function collectCsExprUsings(
   e: ExprIR,
-  into: Set<string> = new Set(),
-  /** Project root namespace — when present, a `domain-service` call adds
+  into: Set<string>,
+  /** Project root namespace — a `domain-service` call adds
    *  `${ns}.Domain.Services` so the hosting file resolves the static class
-   *  the call leaf emits (`Pricing.Quote(...)`).  Omitted by collectors that
-   *  never sit beside a domain-service call (criteria, finds, validators). */
-  ns?: string,
+   *  the call leaf emits (`Pricing.Quote(...)`).  **Required**: it used to be
+   *  optional "for collectors that never sit beside a domain-service call",
+   *  and every collector that took that exemption was wrong — a `requires`
+   *  gate on a `destroy`, a value-object invariant and a projection gate all
+   *  admit `Svc.Op(...)`, and each shipped C# that does not compile (CS0103).
+   *  A caller cannot opt out any more; every emitter that renders an
+   *  expression knows its own root namespace. */
+  ns: string,
 ): Set<string> {
   switch (e.kind) {
     case "method-call":
@@ -180,7 +188,7 @@ export function collectCsExprUsings(
       // A domain-service member call (`Pricing.Quote(...)`) reaches into the
       // generated `Domain.Services` namespace — the call leaf renders the
       // class name unqualified, so the file must import it.
-      if (e.callKind === "domain-service" && ns !== undefined) {
+      if (e.callKind === "domain-service") {
         into.add(`${ns}.Domain.Services`);
       }
       for (const a of e.args) collectCsExprUsings(a, into, ns);
@@ -314,10 +322,8 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
   bindingRefText: (binding) => binding,
   // Union-find repos return `Agg?` (payloads.md §Union finds).
   absenceCheck: (subject) => `${subject} is not null`,
-  // List literals were walker-config sugar only (e.g. responsive Grid cols)
-  // until `[]` started parsing; `tags := […]` in a domain body is the first
-  // render context that actually reaches this leaf.  Doing so surfaced that
-  // the old `new[] { … }` was wrong in BOTH directions:
+  // A C# 12 collection expression, not `new[] { … }`, which is wrong in BOTH
+  // directions:
   //
   //   - empty    → CS0826, no element type to infer from `new[] {  }`;
   //   - NON-empty → CS0029, `new[] { "a" }` is a `string[]`, but a collection
@@ -328,8 +334,7 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
   // so neither `Array.Empty<T>()` nor `new List<T> { … }` is reachable here.
   // C# 12's collection expression is TARGET-TYPED — it takes its shape from
   // the assignment target — so one spelling serves `T[]`, `List<T>` and
-  // `IReadOnlyList<T>`, empty or not.  (Both arms verified by building the
-  // generated project under `/warnaserror`.)
+  // `IReadOnlyList<T>`, empty or not.
   list: (elements) => `[${elements.join(", ")}]`,
 };
 
@@ -360,11 +365,11 @@ function renderCsAuthzFilter(
   ctx: CsRenderContext,
 ): string {
   switch (e.filter.kind) {
-    // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false EF
+    // DENY carve-out (authorization — deny-wins).  An always-false EF
     // query-filter predicate; EF Core translates `Where(_ => false)` to no rows.
     case "deny":
       return "false";
-    // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) —
+    // `deep`/`global` read level (multi-tenancy) —
     // descendant-or-self materialized-path scope with the NULL-dataKey fallback
     // to the tenant floor (see `DEEP_SCOPE_SEMANTICS`).  Rendered as a
     // static-expressible EF query-filter lambda: `.StartsWith(...)` translates
@@ -396,8 +401,25 @@ function renderCsAuthzFilter(
       const startsWith = ctx.efQuery
         ? `${col}.StartsWith(${org} + ${prefix})`
         : `${col}.StartsWith(${org} + ${prefix}, StringComparison.Ordinal)`;
+      // SARGABLE PREFILTER (M-T3.17), EF-query positions only.  A parameterized
+      // `StartsWith` lowers to `left(col, length(@p)) = @p` (see the
+      // `string.startsWith` row in CS_INTRINSIC_QUERY_RENDERERS) — escaping-free
+      // and therefore correct, but a function of the column, so the planner
+      // cannot use the `data_key text_pattern_ops` index and every deep/global
+      // read seq-scans.  `EF.Functions.Like(col, pattern, "!")` emits a real
+      // `LIKE … ESCAPE '!'`, whose fixed prefix the planner turns into an index
+      // range; the `StartsWith` stays as the RECHECK, so an escaping slip in the
+      // pattern (which can only WIDEN a LIKE) cannot leak a foreign subtree.
+      // The pattern chain touches only the principal, never `x`, so EF
+      // funcletizes it into one bound parameter instead of translating
+      // `replace()`.  The in-app (document/jsonb) face has no query to index, so
+      // it keeps the bare anchored test.
+      const descendant = ctx.efQuery
+        ? `(EF.Functions.Like(${col}, ${csSubtreeLikePattern(org)}, ` +
+          `${JSON.stringify(DATA_KEY_LIKE_ESCAPE)}) && ${startsWith})`
+        : startsWith;
       return (
-        `((${col} != null && (${col} == ${org} || ${startsWith})) ` +
+        `((${col} != null && (${col} == ${org} || ${descendant})) ` +
         `|| (${col} == null && ${tenantCol} == ${tenant}))`
       );
     }
@@ -417,7 +439,7 @@ function renderCsBinary(left: string, right: string, e: BinaryExpr, efQuery: boo
     if (temporal !== null) return temporal;
   }
   // Self-id vs scalar comparison (`this.id == currentUser.<claim>` — the
-  // derived tenancy registry self-scope, Phase 1b).  The entity's `Id` is
+  // derived tenancy registry self-scope).  The entity's `Id` is
   // the strongly-typed `<Agg>Id` record struct, so a raw scalar operand
   // must be lifted into it: same-typed claims wrap directly
   // (`new OrgId(claim)`), a `string` claim against a guid id parses first
@@ -622,7 +644,10 @@ function renderRef(e: RefExpr, ctx: CsRenderContext): string {
       // use matches the (also-escaped) binding (`let base` → `@base`).
       return escapeCsharpIdent(e.name);
     case "param":
-      return ctx.paramExpr?.(e.name) ?? e.name;
+      // Same rule as `let`/`lambda`: a `.ddd` param named after a C# keyword
+      // (`case`, `do`, `lock`, …) reaches the generated signature as a
+      // verbatim identifier, so its USES have to match it (F2-ADP-7).
+      return ctx.paramExpr?.(e.name) ?? escapeCsharpIdent(e.name);
     case "this-prop":
     case "this-vo-prop":
     case "this-derived":
@@ -672,7 +697,9 @@ function renderMember(recv: string, e: MemberExpr): string {
     e.receiverType.name === "string" &&
     e.member === "length"
   ) {
-    return `${recv}.Length`;
+    // CODE POINTS, not `string.Length`'s UTF-16 code units — see
+    // src/generator/_expr/code-point.ts.
+    return csCodePointLength(recv);
   }
   return `${recv}.${upperFirst(e.member)}`;
 }
@@ -799,7 +826,7 @@ function renderMethodCall(
 ): string {
   // (The `deep` / DENY authorization filter sentinels moved to the
   // discriminated `authz-filter` kind in M-T9.9 — handled by
-  // `renderCsAuthzFilter` before the shared dispatch, no longer a `method-call`
+  // `renderCsAuthzFilter` before the shared dispatch, not a `method-call`
   // marker here.)
   // `this.<refColl>.contains(x)` — membership over a reference
   // collection.  Lowers to a join-table subquery, mirroring TS's
@@ -981,7 +1008,7 @@ function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {
       return `(await ${API_CLIENT_CLASS}.${upperFirst(op.resourceName)}_${upperFirst(op.operationId)}(${coerced.join(", ")}))`;
     }
     case "resource-op": {
-      // Resource-op (Phase 4c) → `<Class>.<Resource>_<Verb>(args)`, an
+      // Resource-op → `<Class>.<Resource>_<Verb>(args)`, an
       // async static helper the .NET ResourceAdapter emits.  Awaited by
       // the statement renderer.  The class is routed by sourceType via
       // `ctx.resourceClasses`; a missing entry means this render context
@@ -1016,7 +1043,7 @@ function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {
     }
     case "repo-read": {
       // A read-only repository query in a `reading` domain-service body
-      // (domain-services.md rev. 4, Slice 1).  Renders against the INJECTED
+      // (domain-services.md rev. 4).  Renders against the INJECTED
       // repository the service holds — `ctx.repoReadHandle(repo)` resolves the
       // field (`Accounts` → `_accounts`), and the method is the resolved repo
       // method (the .NET method name shape, no re-recognition).  `await`-wrapped
@@ -1060,7 +1087,7 @@ function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {
 }
 
 /** The .NET repository method name a `repo-read` (`callKind: "repo-read"`) in a
- *  `reading` domain-service body resolves to (domain-services.md rev. 4, Slice 1).
+ *  `reading` domain-service body resolves to (domain-services.md rev. 4).
  *  Mirrors the names the repository emitter generates:
  *   - a named `getById` read → `GetByIdAsync` (the built-in load-or-null, which
  *     carries the `Async` suffix, like the workflow `repoLet`);
@@ -1134,7 +1161,7 @@ const CS_TYPE_TARGET: TypeTarget = {
         return "FileRef";
       case "duration":
         // A5 temporal — absolute duration as a native TimeSpan.
-        // Expression-only (never a field / wire type in this slice);
+        // Expression-only (never a field / wire type);
         // reachable for duration-typed locals in operation bodies.
         return "TimeSpan";
     }

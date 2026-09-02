@@ -74,8 +74,14 @@ export function contextsHaveProvenanced(contexts: BoundedContextIR[]): boolean {
  *  capture, the save persist, the hydrate restore, and the migration so all
  *  agree. */
 export function provColumn(fieldName: string): string {
-  return `${snake(fieldName)}_provenance`;
+  return `${snake(fieldName)}${PY_PROV_SUFFIX}`;
 }
+
+/** The suffix `provColumn` appends.  Exported so a serializer holding an
+ *  ATTRIBUTE EXPRESSION rather than a field name (`root.total` →
+ *  `root.total_provenance`) derives the sibling by the same rule instead of
+ *  re-spelling it. */
+export const PY_PROV_SUFFIX = "_provenance";
 
 /** `app/domain/provenance.py` — the `ProvLineage` dataclass + ContextVar
  *  trace buffer.  Pure (no db imports), so it stays in the domain layer. */
@@ -229,9 +235,9 @@ export function provenanceMigrationTag(): string {
 /** The co-located-column ALTERs, rendered as a single `.sql` file split into
  *  one statement per `--> statement-breakpoint` (asyncpg runs one statement per
  *  call).  Each ALTER is schema-qualified to the owning aggregate's table.  The
- *  `provenance_records` history table used to be created here as well; it is
- *  now a shared MigrationsIR companion table (`provenanceTableShape`) and
- *  arrives in the ordinary module migration. */
+ *  `provenance_records` history table is NOT created here — it is a shared
+ *  MigrationsIR companion table (`provenanceTableShape`) arriving in the
+ *  ordinary module migration. */
 export function renderPyProvenanceMigration(
   provAggs: Array<{ agg: AggregateIR; fields: FieldIR[]; schema?: string }>,
 ): string {

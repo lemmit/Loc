@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "vitest";
+import { mixDepsGet, mixLocalInstall } from "./support/mix-retry.js";
 import {
   assertCrossTenantIsolation,
   freePort,
@@ -73,7 +74,7 @@ describe.skipIf(!ENABLED)(
         // Deps + DB schema.  Unlike the CRUD-only obs fixture, the tenancy
         // fixture emits real migrations (invoices / organizations / plans), so
         // ecto.migrate is required in addition to ecto.create.
-        execSync("mix local.hex --force && mix local.rebar --force && mix deps.get", {
+        execSync(`${mixLocalInstall()} && ${mixDepsGet()}`, {
           cwd: appDir,
           stdio: "pipe",
           timeout: 600_000,

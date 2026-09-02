@@ -18,7 +18,11 @@ const SOURCE = `
           name: string
           invariant name.length >= 2 && name.length <= 120 message "Name must be 2-120 characters"
           invariant sku.length > 0
-          create(n: string, s: string) { name := n  sku := s }
+          // Empty body on purpose: on a state-based aggregate the canonical
+          // create's assignments are DROPPED (loom.lifecycle-body-dropped) —
+          // each field takes its value from the request body.  The declaration
+          // is still what makes the aggregate constructible.
+          create(name: string, sku: string) { }
           operation restock(amount: int) {
             precondition amount >= 1 message "Amount must be positive"
             name := name
@@ -49,7 +53,7 @@ describe("message clause — wire refine carrier", () => {
   it("renders a messaged invariant as a refine with the text + a stable loomCode", async () => {
     const { reactApi } = await gen();
     expect(reactApi).toContain(
-      `.refine((data: any) => data.name.length >= 2 && data.name.length <= 120, { path: ["name"], message: "Name must be 2-120 characters"`,
+      `.refine((data: any) => [...data.name].length >= 2 && [...data.name].length <= 120, { path: ["name"], message: "Name must be 2-120 characters"`,
     );
   });
 
@@ -68,10 +72,12 @@ describe("message clause — wire refine carrier", () => {
     expect(reactApi).not.toContain("amount: z.number().int().min(1)");
   });
 
-  it("keeps a message-LESS invariant as a byte-identical native chain", async () => {
+  it("keeps a message-LESS invariant on the native chain", async () => {
     const { reactApi } = await gen();
-    // `invariant sku.length > 0` (no message) stays `z.string().min(1)`.
-    expect(reactApi).toContain("sku: z.string().min(1)");
+    // `invariant sku.length > 0` (no message) stays on the chain rather than
+    // becoming a messaged refine.  A string LENGTH bound is a code-point
+    // predicate, not zod's code-unit `.min` (RS-31).
+    expect(reactApi).toContain("sku: z.string().refine((s) => [...s].length >= 1)");
   });
 });
 

@@ -7,9 +7,8 @@
 // `function days(...)` shadows the builtin — `resolveCallKind` checks
 // user decls first, and only the `"free"` fallback becomes a duration
 // node).  `duration` itself is likewise NOT in the grammar's
-// `PrimitiveType` rule — it is expression-only by unavailability
-// (no storable duration fields in this slice; Postgres `interval`
-// columns are a follow-on).
+// `PrimitiveType` rule — it is expression-only, since there are no storable
+// duration fields (Postgres `interval` columns are unimplemented).
 //
 // Lives in `src/util/` because BOTH the language layer (type-system,
 // validators) and the IR layer (lowering) need the runtime vocabulary,

@@ -337,6 +337,26 @@ projection PurgeAudit {
 }
 ```
 
+### Where the clause may be written
+
+`ignoring` has exactly three homes, each read by a different lowerer:
+
+| Position | Spelling |
+|---|---|
+| a repository `find` | `find recent(): Order[] where … ignoring softDeletable` |
+| a projection's `where` slot — **before** `join` / `group by` / `select` | `from Order as o ignoring softDeletable  group by …` |
+| an inline read bound by a `let` | `let xs = Orders.findAll(Big()) ignoring *` |
+
+Anywhere else it is an error (`loom.ignoring-clause-placement`). The clause rides the postfix-expression rule so an inline read can carry it, and a postfix chain is admissible wherever an expression is — so `group by o.status ignoring softDeletable` parses, binds to the *grouping expression*, and is then never read back. Before the gate, the same model with the word one clause later produced the opposite data:
+
+```ddd
+group by o.status ignoring softDeletable     // filter STILL applied — the clause is dropped
+ignoring softDeletable
+group by o.status                            // filter dropped, as asked
+```
+
+Hoisting the grammar instead would be wrong: `ignoring` means "bypass the **source's** capability filters", which has no per-expression reading.
+
 The bypass is visible in generated code only when a capability actually contributes a filter to that aggregate; with no `filter` capability installed there is nothing to suppress and the clause is a no-op. See [`../capabilities.md`](../capabilities.md) for the `filter` capability that produces these query-layer predicates.
 
 ## Shorthand projection — the `select`-less form
@@ -415,3 +435,27 @@ The shape discipline (each its own diagnostic):
 - **Grouping columns are source columns** — `o.status`, optionally bucketed by a supported grouping transform (`o.placedAt.startOfDay()`, the midnight-UTC daily bucket — `date_trunc('day', …)` in SQL, still a `datetime`).  Any other computed key (`o.total + 1`) is rejected (`loom.projection-groupby-key-not-columnar`).  A key `select` must repeat the grouping expression EXACTLY, transform included — `select day = o.placedAt` against `group by o.placedAt.startOfDay()` is per-row, not per-group.
 - **Aggregation arguments are bare source columns too** — `sum(o.total)`, never a computed expression (`sum(o.total + o.tax)`) or a bare unqualified name (`sum(total)`): SQL aggregates a column, not a per-row computation (`loom.projection-aggregate-arg-not-columnar`; applies to the singleton whole-table aggregation as well).
 - **No `join`, no `keyed by`** — a join is an app-level by-id load after the query (`loom.projection-groupby-join-invalid`), and a grouped projection's rows are the groups, not id-keyed entities (`loom.projection-groupby-keyed-invalid`).
+
+### The source has to have columns
+
+Both **direct-table** arms — the singleton whole-table aggregation and the grouped read above — name columns on the source aggregate's own table, because the whole point of the shape is that the arithmetic happens in SQL with no rows materialised. Three source shapes have no such columns, and the read is refused on **every** backend (`loom.projection-columnless-source` — not an adapter boundary, so switching `persistence:` or hosting the projection elsewhere does not help):
+
+| source | why there is nothing to name |
+|---|---|
+| `persistedAs: eventLog` | no state table at all — the truth is the `<ctx>_events` stream |
+| `shape: document` | the table is `(id, data, version)`; the declared fields live inside the `data` jsonb blob |
+| TPC abstract base (`inheritanceUsing: ownTable`) | no table of its own — each concrete is a separate table |
+
+`shape: document` is refused **per column named**, not wholesale: `id` is a real column, so `select n = count()` over a document source is fine while `sum(o.total)`, `where o.total > 0` and `group by o.code` are not.
+
+The way out is a different *read*, not a different deployable: drop the aggregation for the **per-row** arm (which hydrates each row through the aggregate's repository, so its fields never have to be columns), or fold the number into a **materialized** projection with an `on(e: …)` handler.
+
+#### …and two more things that only bite the document row count
+
+The surviving `count()` over a `shape: document` source carries two further conditions, each its own diagnostic.
+
+**Capability filters have no column either** (`loom.projection-document-source-capability-filtered`, universal). The direct-table arms bypass the aggregate's repository, so each backend's aggregation emitter splices the source aggregate's capability filters (`tenantOwned`'s tenant scope, `softDeletable`, any `filter` capability) into the query itself. Those predicates name `tenant_id` / `is_deleted` — columns the `(id, data, version)` triple does not have. Four backends emit the missing reference (drizzle `TS2339`, mikroorm's `FilterQuery`, SQLAlchemy `AttributeError`, Ecto compile error, Dapper Postgres `42703`), and **.NET/EF emits no predicate at all**: EF applies capability filters through `modelBuilder.Entity<T>().HasQueryFilter(…)`, which Loom registers only for a relationally-mapped aggregate, while a document aggregate's filters run in-app inside the repository's `_CapabilityVisible`. So the EF read compiles, ships, and counts every tenant's rows. Because one cell is silent, the refusal is universal rather than per-backend. Ways out: the per-row arm, a materialized projection, storing the aggregate relationally, or waiving the filters deliberately with `ignoring` (`ignoring *`, or `ignoring <Capability>` for the ones you name — a filter you did not name still has to be applied, so it still gates).
+
+**Java cannot aggregate a document table at all** (`loom.projection-whole-table-aggregation-unsupported` for the singleton arm and `loom.projection-groupby-unsupported-backend` for the grouped one — the `#document` message variants of the two codes that already mean "this backend has not ported this aggregation arm"; per-backend). Java's aggregation runs JPQL through the `EntityManager` (`select count(e) from Order e`), and a document aggregate has no JPA `@Entity` anywhere in the emitted project — it round-trips one jsonb column through a `JdbcTemplate` repository — so Hibernate fails the query with *could not resolve root entity* at request time. Broken with no capabilities at all, which is why it is a separate gate from the one above. The other four backends emit the row count correctly (`test/fixtures/corpus/projection-document-aggregation.ddd` pins that they keep doing so).
+
+Between the two, `scaffoldDashboard` no longer claims a dashboard for a `shape: document` aggregate at all — see [scaffold-macros.md](../scaffold-macros.md).

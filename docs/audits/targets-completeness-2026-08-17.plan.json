@@ -1,702 +1,1580 @@
 {
-  "meta": {
-    "source": "docs/audits/targets-completeness-2026-08-17.md",
-    "snapshotCommit": "5b88573b402af6eb78bd25311c7680cc323ceba8",
-    "branch": "claude/targets-implementation-gaps-2aeoz4",
-    "generated": "2026-08-17",
-    "waveRule": "Wave 1 = correctness (silent cells + stale ratchet entries that mask real state). Wave 2 = honest-gap feature ports, disjoint per backend/frontend so they parallelize. Wave 3 = breadth, coverage tiers and roadmap missions. Within a wave, tasks sharing a src/ tree carry conflictsWith and must be sequenced or merged.",
-    "processRule": "Every task follows the repo rules: re-sync onto fresh main first, open a DRAFT PR naming the files before implementing, mutation-prove any gate the task adds (revert via file copy, never git checkout), and delete the ratchet/waiver entry the fix closes in the SAME PR."
+ "meta": {
+  "source": "docs/audits/targets-completeness-2026-08-17.md",
+  "snapshotCommit": "5b88573b402af6eb78bd25311c7680cc323ceba8",
+  "branch": "claude/targets-implementation-gaps-2aeoz4",
+  "generated": "2026-08-17",
+  "waveRule": "Wave 1 = correctness (silent cells + stale ratchet entries that mask real state). Wave 2 = honest-gap feature ports, disjoint per backend/frontend so they parallelize. Wave 3 = breadth, coverage tiers and roadmap missions. Within a wave, tasks sharing a src/ tree carry conflictsWith and must be sequenced or merged.",
+  "processRule": "Every task follows the repo rules: re-sync onto fresh main first, open a DRAFT PR naming the files before implementing, mutation-prove any gate the task adds (revert via file copy, never git checkout), and delete the ratchet/waiver entry the fix closes in the SAME PR.",
+  "dispositionsAsOf": "2026-08-23",
+  "dispositionNote": "Wave 1 (21/21) and Wave 2 shipped and merged, except the three in-flight PRs noted per-item (#2619 flutter quartet, #2622/#2623 mikroorm stack tail). Wave 3 batch 1 (6 items) claimed via draft PRs 2026-08-23; remaining 7 wave-3 items planned. Post-audit findings tracked outside this file: feliz page-derived + dapper deep-scope/direct-table (shipped, #2613-#2617), domain-service resource clients (shipped, #2618), column-less-source projection gate (shipped as a UNIVERSAL gate, not an adapter row — see W2-dapper-directtable-projection), .NET/Java 400-vs-422, handler-leg resource-ops (planned)."
+ },
+ "claimed": [
+  {
+   "gap": "Timeline degrades to a comment on feliz + flutter (audit F16)",
+   "pr": 2569,
+   "note": "draft; HEEx third already shipped on main (registry.ts:624) — the PR can drop that leg"
   },
-
-  "claimed": [
-    { "gap": "Timeline degrades to a comment on feliz + flutter (audit F16)", "pr": 2569, "note": "draft; HEEx third already shipped on main (registry.ts:624) — the PR can drop that leg" },
-    { "gap": "Read-bearing user components vanish on feliz + flutter (audit F17)", "pr": 2568, "note": "ready; W1-component-derived-state must STACK on this branch — same component-emit.ts files" },
-    { "gap": "Schemathesis W1 (non-JSON Content-Type -> 500) + W7 (z.coerce accepts false) + W5 (undeclared 500, clears with W1) on node (audit F28 partial)", "pr": 2566, "note": "W4/W6/W9 remain unclaimed" },
-    { "gap": "wire-golden capture of 4xx authorization responses", "pr": 2541 },
-    { "gap": "projection-join wire-golden capture", "pr": 2590 },
-    { "gap": "phase 7 validation drain / generateSystemFiles asserts phase 7 (M-T9.34 slice 2)", "pr": "2587 + 2574" },
-    { "gap": "page identity derived + `area` block authoring", "pr": 2583 },
-    { "gap": "scaffolded pages inherit the route read gate (requires placement)", "pr": 2581 },
-    { "gap": "money/decimal follow-ups from #2560", "pr": 2575, "note": "POSSIBLE OVERLAP with W2-dotnet-decimal-wire (audit F27, waiver #2563) — the assigned agent must read #2575 first and stand down if it already covers the System.Decimal representation decision" },
-    { "gap": "this audit itself", "pr": 2592 }
-  ],
-
-  "alreadyComplete": {
-    "statement": "These axes were re-verified uniform on this commit (gate set AND at least one named emitter per target). They are the denominator: a fleet agent must NOT re-implement them, and two open missions that claim otherwise are stale (see stale-drain W1-close-overturned-missions).",
-    "backendAxesUniformAcrossAllFive": [
-      "capability filter — relational non-principal",
-      "capability filter — relational principal (currentUser / tenancy)",
-      "capability filter — shape(embedded)",
-      "ignoring <Cap> filter-bypass (platform axis; the dapper ADAPTER cell is the exception, W1-dapper-filter-bypass)",
-      "shape(relational) and shape(embedded) persistence",
-      "shape(document) persistence (elixir included, via the system-checks.ts:1571-1573 widening)",
-      "event-sourced aggregate (persistedAs: eventLog)",
-      "event-sourced WORKFLOW",
-      "TPH inheritance",
-      "provenanced fields",
-      "per-operation audited",
-      "audited lifecycle (create / destroy)",
-      "mask unless field read-redaction",
-      "paged queryHandler",
-      "query-time projection",
-      "projection whole-table aggregation",
-      "projection group by",
-      "projection sourced from a workflow",
-      "projection sourced from a projection",
-      "generic carriers (paged<T>, envelope<T>)",
-      "discriminated unions",
-      "when canCommand gate + can_<op> probe (at the ROUTE layer; off-route is W1-when-gate-off-route)",
-      "operation union returns",
-      "typed in-system api call (REMOTE_API_OP_UNSUPPORTED is the empty set)",
-      "per-context integration test emission",
-      "timerSource scheduling",
-      "channels: 3 brokers x 5 backends (15 cells)",
-      "resource kinds: 7 sourceTypes x 5 backends",
-      "extern / criterion / domainService"
-    ],
-    "frontendAxesUniform": [
-      "i18n t() runtime — all six frontends PLUS the HEEx render path",
-      "58 validator-accepted primitives on every frontend",
-      "expression leaf tables pinned complete both ways (jsExprLeaves x4, FS_LEAVES, DART_LEAVES)",
-      "required-emit set fully covered by real renderers on feliz (47/45) and flutter (45/43); both no-renderer sentinels dormant",
-      "stores, QueryView, FileLink, standalone FileUpload, Chart on all six",
-      "DataGrid on react/vue/svelte/angular/feliz (flutter + HEEx are settled exclusions)",
-      "45-cell sweep (4 frameworks x 15 pack versions x 3 showcase UIs) + 22 Chart/DataGrid cells: zero throws, zero fallback markers"
-    ],
-    "registersFullyDrained": [
-      "TS_COMPILE_SKIP", "DOTNET_COMPILE_SKIP", "JAVA_COMPILE_SKIP", "PYTHON_COMPILE_SKIP", "ELIXIR_COMPILE_SKIP", "DAPPER_COMPILE_SKIP",
-      "DAPPER_SKIP (run-dapper.mjs)",
-      "BEHAVIOURAL_SKIP.node / .dotnet / .java",
-      "KNOWN_DEGRADATIONS + KNOWN_VERBATIM_INTRINSICS (render-degradation)",
-      "GAPS (frontend-showcase-render)",
-      "pipeline-layering ALLOWED, dead-generator-exports ALLOW, feature-doc KNOWN_GAPS"
-    ]
+  {
+   "gap": "Read-bearing user components vanish on feliz + flutter (audit F17)",
+   "pr": 2568,
+   "note": "ready; W1-component-derived-state must STACK on this branch — same component-emit.ts files"
   },
-
-  "gaps": [
-    {
-      "id": "W1-mikroorm-authz-seam",
-      "title": "MikroORM: policy deny read crashes codegen, and writeScopeFilter is never consumed (authorization bypass)",
-      "kind": "silent",
-      "targets": ["node + persistence: mikroorm"],
-      "fileTrees": ["src/generator/typescript/emit/mikroorm.ts", "src/ir/validate/checks/system-checks.ts"],
-      "fix": "Two defects in one emitter, merged because they touch the same file. (1) Add an `authz-filter` arm to whereToMikroFilter/predicateEntry (mikroorm.ts:1104) so the childless deny sentinel lowers to a false predicate — mirror dapper.ts:712/740-763 which renders it as `1 = 0`; today the unguarded call site at :1695 throws `unsupported find predicate 'authz-filter'` with no loom.* code. (2) Port drizzle's write-scope pre-guard (repository-builder.ts:325-348) into all four mikroorm getById variants (:1989, :2310, :2532, :2751) — writeScopeFilter has ZERO references across 3033 lines, so a `deny write` carve-out silently succeeds. While in system-checks.ts, widen the mikroorm deep-scope gate (:3006) to scan writeScopeFilter the way dapper's (:2871) already does.",
-      "tests": ["test/behavioral: delete MIKRO_SKIP[policy-deny] (run-mikroorm.mjs:144) and run `node run-mikroorm.mjs policy-deny`", "behavioral-e2e-mikroorm.yml", "a generator unit test asserting the deny predicate and the getById pre-guard appear in emitted mikroorm output", "mutation-prove: restore the missing arm/guard and watch the new assertions fail"],
-      "size": "M",
-      "wave": 1,
-      "conflictsWith": ["W1-dapper-filter-bypass", "W1-adapter-migration-chain-gate", "W1-direct-table-contextfilters", "W1-stale-gate-prose", "W2-mikroorm-deep-scope-tenancy", "W2-mikroorm-find-predicate-subset"]
-    },
-    {
-      "id": "W1-dapper-filter-bypass",
-      "title": "`ignoring <Cap>` is accepted on persistence: dapper and the emitted SQL still applies the bypassed filter",
-      "kind": "silent",
-      "targets": ["dotnet + persistence: dapper"],
-      "fileTrees": ["src/generator/dotnet/emit/dapper.ts", "src/ir/validate/checks/system-checks.ts"],
-      "fix": "The bypass gate is family-level — FILTER_BYPASS_FAMILIES (system-checks.ts:2517) and bypassSupported() (:2523-2527) read only dep.platform — while the Dapper repository splices agg.contextFilters into every SELECT unconditionally (dapper.ts:1073-1098, capabilityFilters -> filterSql -> andFilter), with zero bypassAll/bypassCaps references in the file. Teach the Dapper repo the bypass set the way efcore.ts:672-682 / find-emit.ts:20-28 do for EF (there the mechanism is .IgnoreQueryFilters, EF-only, so Dapper needs its own: omit the predicate from the generated WHERE for the bypassed capabilities). If the emit turns out larger than one slice, land the honest gate first: make bypassSupported adapter-aware so `ignoring` on dapper raises loom.filter-bypass-unsupported instead of lying.",
-      "tests": ["a dapper generator test asserting the bypassed capability predicate is ABSENT from the emitted find SQL", "`node run-dapper.mjs read-gates` after W1-drain-behavioural-skip-dapper re-arms it", "behavioral-e2e-dapper.yml", "mutation-prove by re-adding the predicate"],
-      "size": "M",
-      "wave": 1,
-      "conflictsWith": ["W1-mikroorm-authz-seam", "W1-adapter-migration-chain-gate", "W1-dapper-identifier-quoting", "W1-stale-gate-prose", "W2-dapper-deep-scope-tenancy", "W2-dapper-directtable-projection"]
-    },
-    {
-      "id": "W1-adapter-migration-chain-gate",
-      "title": "dapper and mikroorm skip the MigrationsIR chain entirely — declared migrations are never applied",
-      "kind": "silent",
-      "targets": ["dotnet + persistence: dapper", "node + persistence: mikroorm"],
-      "fileTrees": ["src/generator/dotnet/index.ts", "src/platform/hono/v4/emit.ts", "src/ir/validate/checks/system-checks.ts"],
-      "fix": "dotnet/index.ts:983 (`!usingDapper`) and hono/v4/emit.ts:1030 (`!usingMikro`, plus :1038 for the provenance migration) drop the chain; schema instead comes from CREATE TABLE IF NOT EXISTS at boot (dapper.ts:2031-2035, 2248-2265) or orm.schema.updateSchema() (:1624-1629). Neither adapter validator mentions migrations. Slice 1 (this task): raise loom.dapper-unsupported#migrations / loom.mikroorm-unsupported#migrations whenever system.migrations is non-empty, so a declared rename/backfill/sql block fails honestly instead of silently no-op'ing (dapper) or drop+add'ing with data loss (mikroorm). Slice 2 (follow-up, size L): actually run the chain on both adapters and add the two cells to migration-evolution-e2e. Message text goes in src/diagnostics/messages.ts.",
-      "tests": ["an IR-validate test per adapter proving the new code fires on a migration block", "npm run test:schema-load unaffected", "for slice 2: npm run test:migration-evolution-dotnet with persistence: dapper forced", "mutation-prove: remove the gate clause and watch the test fail"],
-      "size": "M",
-      "wave": 1,
-      "conflictsWith": ["W1-mikroorm-authz-seam", "W1-dapper-filter-bypass", "W1-dapper-identifier-quoting", "W1-stale-gate-prose"]
-    },
-    {
-      "id": "W1-resource-op-scope-gate",
-      "title": "A resource-op inside an aggregate operation/guard body is ungated: throws on 3 backends, emits unbound identifiers on 2",
-      "kind": "silent",
-      "targets": ["node", "dotnet", "java", "python", "elixir"],
-      "fileTrees": ["src/ir/validate/checks/", "src/diagnostics/messages.ts"],
-      "fix": "A resource handle is ambient over the whole context (lower.ts:1175-1195 puts `resources` in the ONE Env aggregates also use; lower-expr.ts:1544-1561 resolves the bare name before locals; :672-690 lowers to callKind 'resource-op'), but the routing map only reaches renderers in workflow/handler contexts — so dotnet render-expr.ts:983-996, java :773-782 and elixir :1041-1053 THROW, while typescript :498-505 and python :632-637 emit an unbound `(await res$verb(...))`. docs/resources.md:165 already states the rule ('workflows only'); no validator implements it. Add one target-neutral IR check (new code loom.resource-op-outside-workflow) walking operation / create / destroy / guard bodies, modelled on the workflow-scoped checks at workflow-checks.ts:1071-1105. Note structural-checks.ts:1798-1802 argues a lifecycle GUARD resource-op is renderable — settle that explicitly rather than by accident.",
-      "tests": ["one negative IR-validate test", "test/system/diagnostic-catalog.test.ts (new message entry)", "mutation-prove: delete the check and confirm the 3 throwing backends crash on the fixture"],
-      "size": "S",
-      "wave": 1,
-      "conflictsWith": ["W1-subprimitive-placement-gate", "W1-store-persist-honest-gate", "W1-stale-gate-prose"]
-    },
-    {
-      "id": "W1-subprimitive-placement-gate",
-      "title": "A misplaced `Tab` / `Column` silently vanishes on react, vue, svelte, angular and HEEx",
-      "kind": "silent",
-      "targets": ["react", "vue", "svelte", "angular", "phoenixLiveView"],
-      "fileTrees": ["src/ir/validate/checks/ui-checks.ts", "src/diagnostics/messages.ts", "src/generator/_walker/walker-core.ts"],
-      "fix": "`body: Stack { Tab(\"x\") }` (or a bare `Column(...)`) passes AST validation AND IR validation with zero diagnostics, then degrades to `{/* Tab: not supported by the React walker yet */}` (walker-core.ts:1135-1136) or `<%!-- ... --%>` (heex-walker-core.ts:1052), because registry.ts:737-743 gives the two `group: \"sub\"` primitives no tsx renderer. Add a placement check modelled EXACTLY on loom.slot-outside-component (ui-checks.ts:469-491, landed by #2567): `Tab` only inside `Tabs`, `Column` only inside `Table`/`DataGrid`. Also fix the fallback comment, which says 'the React walker' on vue/svelte/angular.",
-      "tests": ["negative IR-validate tests for both primitives x page and component hosts", "test/generator/_walker/render-degradation.test.ts should stay green (its sentinel already matches the message but the fixture never reaches it — see W3-render-degradation-sentinels)", "mutation-prove: revert the gate via file copy and confirm the fixture emits the comment again"],
-      "size": "S",
-      "wave": 1,
-      "conflictsWith": ["W1-resource-op-scope-gate", "W1-store-persist-honest-gate"]
-    },
-    {
-      "id": "W1-flutter-fileref-dart",
-      "title": "A File-typed aggregate field makes Flutter emit non-parsing Dart (`FileRef?? x`, .toJson() on a nullable receiver)",
-      "kind": "silent",
-      "targets": ["flutter"],
-      "fileTrees": ["src/generator/flutter/dart-model-emit.ts", ".github/workflows/generated-flutter-build.yml"],
-      "fix": "copyWithParam (dart-model-emit.ts:99-104) blindly appends `?` to dartType(base(f.type)), but dartType already returns \"FileRef?\" for a File primitive (dart-types.ts:42, with an explicit guard at :70-71 saying so) — emitting `FileRef?? blob,` at models.dart:58 and :146. Same file, toJsonEntry (:89-94) keys off the IR `optional` flag rather than Dart nullability and emits an unconditional `blob.toJson()` at :51 and :139. Reuse the sibling helper's correct test (riverpod-emit.ts:335-347 checks `dt.endsWith(\"?\")`) in both places. CRITICAL second half: the flutter CI fixture has a File only in page STATE, never as an aggregate field, so `flutter analyze` never sees a FileRef wire model — add one to the workflow's embedded .ddd or the fix ships unguarded.",
-      "tests": ["npm run test:... flutter generator unit test asserting no `??` in emitted models.dart and a null-aware toJson", "generated-flutter-build.yml (`flutter analyze`) with the widened fixture", "mutation-prove: revert dart-model-emit.ts via file copy and confirm analyze fails"],
-      "size": "S",
-      "wave": 1,
-      "conflictsWith": ["W1-flutter-file-form-field", "W1-component-derived-state"]
-    },
-    {
-      "id": "W1-flutter-file-form-field",
-      "title": "Flutter renders an in-form `File` field as a plain text input and submits a string (guaranteed 422)",
-      "kind": "silent",
-      "targets": ["flutter"],
-      "fileTrees": ["src/generator/flutter/forms-emit.ts"],
-      "fix": "scalarInputKind (forms-emit.ts:183-212) sends the File primitive down `default: return \"text\"` at :208, and FlutterInputKind (:88-97) has no file member — so there is not even a drop marker. Emitted forms.dart gets a TextEditingController and `'blob': _blobController.text` against a backend requiring {url,key,contentType,size}. Add a `file` FlutterInputKind wired to the machinery the STANDALONE FileUpload primitive already ships (flutter/pack.ts:678 does file_picker -> multipart POST /files -> FileRef write-back) — the pieces exist, only the form-field path is unwired. Minimum acceptable fallback if the wiring is larger than one slice: add File to the droppedMarker family (forms-emit.ts:173) so it becomes an honest, frozen drop like the other four shapes.",
-      "tests": ["test/generator/flutter/parity-freeze.test.ts (either a 5th pinned marker or its removal once the input lands)", "a form emission test asserting a FileRef payload, not a String", "generated-flutter-build.yml"],
-      "size": "M",
-      "wave": 1,
-      "conflictsWith": ["W1-flutter-fileref-dart", "W1-component-derived-state"]
-    },
-    {
-      "id": "W1-feliz-file-form-field",
-      "title": "Feliz renders an in-form `File` field as a plain text input and submits a string (guaranteed 422)",
-      "kind": "silent",
-      "targets": ["feliz"],
-      "fileTrees": ["src/generator/feliz/wire.ts", "src/generator/feliz/pack.ts"],
-      "fix": "FelizInputKind (wire.ts:363) has no file member and inputKindFor (:589-611) sends File down `default: return \"text\"` at :606 — emitted App.fs carries `blob: string`, `Encode.string form.blob` and a plain Html.input. Add a `file` kind bound to the existing standalone FileUpload machinery (feliz/pack.ts:814 already does the daisyUI file input + File state cell), so the form submits a FileRef object. Same shape as the flutter half (W1-flutter-file-form-field) — the two are disjoint trees and can run in parallel, but should agree on the payload shape. No marker exists on feliz at all, so if the input is deferred, add the loud marker first.",
-      "tests": ["test/generator/feliz/file-upload.test.ts extended to the FORM-field case", "generated-feliz-build.yml (dotnet + Fable build + Playwright)", "mutation-prove by reverting wire.ts"],
-      "size": "M",
-      "wave": 1,
-      "conflictsWith": ["W2-feliz-store-persist"]
-    },
-    {
-      "id": "W1-store-persist-honest-gate",
-      "title": "`persist: local|session|url` silently degrades to in-memory on feliz and flutter — make it honest",
-      "kind": "silent",
-      "targets": ["feliz", "flutter"],
-      "fileTrees": ["src/ir/validate/checks/store-checks.ts", "src/diagnostics/messages.ts"],
-      "fix": "store-checks.ts gates store lifetime ONLY for LiveView (:230-249, loom.store-lifetime-liveview-invalid). flutter/store-builder.ts:76-88 emits a TODO comment and builds an in-memory notifier anyway; feliz has ZERO .lifetime references anywhere in src/generator/feliz (stores fold into the single Elmish Model) so there is not even a TODO. Extend the LiveView gate to feliz+flutter — a non-`memory` lifetime becomes an honest error — which converts two silent cells into one existing, well-shaped diagnostic. The IMPLEMENTATIONS are separate wave-2 tasks (W2-feliz-store-persist, W2-flutter-store-persist) that delete their arm of this gate when they land.",
-      "tests": ["negative IR-validate test per target", "test/system/diagnostic-catalog.test.ts", "mutation-prove: remove the arm and confirm the fixture generates an in-memory store with no error"],
-      "size": "S",
-      "wave": 1,
-      "conflictsWith": ["W1-resource-op-scope-gate", "W1-subprimitive-placement-gate", "W2-feliz-store-persist", "W2-flutter-store-persist"]
-    },
-    {
-      "id": "W1-component-derived-state",
-      "title": "`derived`-bearing user components vanish on feliz + flutter; `state`-bearing ones vanish on feliz",
-      "kind": "silent",
-      "targets": ["feliz", "flutter"],
-      "fileTrees": ["src/generator/feliz/component-emit.ts", "src/generator/flutter/component-emit.ts"],
-      "fix": "NOT covered by #2568, which closes the read-bearing case only — but it touches the SAME two files, so STACK this PR on #2568's branch rather than racing it. feliz isCandidate (component-emit.ts:112-121) requires state/derived/actions all empty; flutter (:18-22, :129-133) lists derived among the non-threaded shapes. Both emit `unknown layout component: X`. Thread `derived` first (it is a pure function of props — compute it in the builder before the body walk), then on feliz thread `state` + `actions` by folding them into the Elmish Model the way the store path already does (feliz/index.ts:1034-1052); flutter already emits the stateful case as a StatefulWidget, so its residue is derived-only.",
-      "tests": ["a per-target component test with a derived binding (and a stateful one on feliz)", "test/generator/_walker/render-degradation.test.ts once W3-render-degradation-sentinels widens the fixture to a state/derived-bearing component", "generated-feliz-build.yml + generated-flutter-build.yml"],
-      "size": "M",
-      "wave": 1,
-      "conflictsWith": ["W1-flutter-fileref-dart", "W1-flutter-file-form-field", "PR#2568", "PR#2569"]
-    },
-    {
-      "id": "W1-elixir-seeder",
-      "title": "platform: elixir emits no seeder — every `seed` dataset is silently dropped",
-      "kind": "silent",
-      "targets": ["elixir"],
-      "fileTrees": ["src/generator/elixir/", "src/generator/_persistence/seed-datasets.ts"],
-      "fix": "Roadmap M-T6.37, verified silent: priv/repo/seeds.exs is only a layout slot (elixir/adapters/by-feature-layout.ts:66,181-182) and a doc comment (elixir/index.ts:28) — no emitter writes it and nothing reads ctx.seeds, while the other four import _persistence/seed-datasets.ts. Emit an Ecto seeder: domain rows through the context `create` path (D-SEED-PATH so invariants run), raw rows as SCHEMA-QUALIFIED INSERTs (the qualifier bug #2517 fixed on node/.NET), the ship-once `__loom_seed` marker (D-SEED-IDEMPOTENCY), LOOM_SEED dataset gating, invoked at boot beside the migrations. Closest model to mirror: java's `<Ctx>SeedRunner` (java/emit/seed.ts:106).",
-      "tests": ["ACCEPTANCE = delete BEHAVIOURAL_SKIP.elixir['seed-values'] (cases.mjs:340-341) and run `node run-elixir.mjs seeding` in the Elixir docker image — NOT a string assertion", "behavioral-e2e-elixir.yml", "npm run test:elixir-corpus (LOOM_HEX_MIRROR=1)"],
-      "size": "M",
-      "wave": 1,
-      "conflictsWith": ["W1-elixir-listpage-arity", "W2-elixir-document-capability-filter", "W2-elixir-sse-realtime"]
-    },
-    {
-      "id": "W1-elixir-listpage-arity",
-      "title": "A non-paged author `find all` + a scaffolded Elixir list page emits a project that will not compile",
-      "kind": "silent",
-      "targets": ["elixir"],
-      "fileTrees": ["src/generator/elixir/liveview-emit.ts", "src/generator/elixir/vanilla/context-emit.ts"],
-      "fix": "Roadmap M-T6.40, verified: liveview-emit.ts:1070 emits `case ${ctxModule}.list_${aggSnake}s(${listArgs}) do` with 4-arity listArgs against the bare 0-arity defdelegate emitted by vanilla/context-emit.ts — three call sites, and `mix compile --warnings-as-errors` fails. Derive the call arity from the same query-builder facts the context delegate is built from (single source), or emit the paged delegate when the page needs one. If some shape genuinely cannot meet, gate it — but the arity mismatch itself is a derivation bug, not a capability gap.",
-      "tests": ["npm run test:phoenix (LOOM_PHOENIX_VANILLA_BUILD=1 LOOM_HEX_MIRROR=1) on a fixture with a non-paged find all + scaffolded list page", "corpus-elixir-build.yml", "mutation-prove: revert the arity derivation and confirm mix compile fails"],
-      "size": "M",
-      "wave": 1,
-      "conflictsWith": ["W1-elixir-seeder", "W2-elixir-sse-realtime", "W2-elixir-vanilla-document-scope"]
-    },
-    {
-      "id": "W1-dapper-identifier-quoting",
-      "title": "persistence: dapper emits unquoted identifiers — a reserved-word column makes the DDL a syntax error",
-      "kind": "silent",
-      "targets": ["dotnet + persistence: dapper"],
-      "fileTrees": ["src/generator/dotnet/emit/dapper.ts", "test/fixtures/corpus/"],
-      "fix": "Roadmap M-T6.41 (line 590), verified: dapper.ts builds `CREATE TABLE IF NOT EXISTS ${tableOf(agg.name)}` at :2080, :2099, :2145, :2155, :2171, :2180, :2211 with NO identifier-quoting helper anywhere in the file, so a field named order/user/group/end is a Postgres syntax error at boot. Add a quoteIdent helper applied at all seven sites, mirroring the quoting the shared Postgres renderer (src/generator/sql-pg.ts) already does for the MigrationsIR path. Compiles green today because emitted schema is data, not code.",
-      "tests": ["npm run test:schema-load (LOOM_SCHEMA_LOAD=1) — the oracle for this class — WITH a new reserved-word corpus fixture, otherwise the gate cannot see it", "npm run test:dapper-corpus", "mutation-prove: revert the helper and confirm psql -f fails"],
-      "size": "M",
-      "wave": 1,
-      "conflictsWith": ["W1-dapper-filter-bypass", "W1-adapter-migration-chain-gate", "W2-dapper-deep-scope-tenancy", "W2-dapper-directtable-projection"]
-    },
-    {
-      "id": "W1-direct-table-contextfilters",
-      "title": "A direct-table aggregation projection applies NO capability contextFilters on drizzle or mikroorm (silent wrong answer)",
-      "kind": "silent",
-      "targets": ["node + drizzle", "node + mikroorm"],
-      "fileTrees": ["src/platform/hono/v5/", "src/platform/hono/v4/", "src/generator/typescript/emit/mikroorm.ts"],
-      "fix": "Roadmap M-T6.41 (line 108). A query-time aggregation projection reads the source table directly and neither node adapter ANDs in the aggregate's capability contextFilters — a softDeletable source counts soft-deleted rows, a tenantOwned source counts foreign tenants. Thread contextFilters (minus the `ignoring` bypass set) into the direct-table select on both paths; mikroContextFilters(agg, bypass) already accepts a bypass set, so the seam exists on the mikro side. Check the other three backends' direct-table arms for the same omission before declaring it node-only.",
-      "tests": ["a behavioural assertion that a soft-deleted row does not move the aggregation count (behavioral-e2e.yml + behavioral-e2e-mikroorm.yml)", "a generator test asserting the filter predicate appears in the emitted direct-table select", "wire-golden differential (the number is a response VALUE)"],
-      "size": "M",
-      "wave": 1,
-      "conflictsWith": ["W1-mikroorm-authz-seam", "W2-mikroorm-deep-scope-tenancy"]
-    },
-    {
-      "id": "W1-when-gate-off-route",
-      "title": "A `when` state gate is not enforced off the aggregate route — workflow steps and extern handlers bypass it",
-      "kind": "silent",
-      "targets": ["node", "dotnet", "java", "python", "elixir"],
-      "fileTrees": ["src/platform/hono/v4/routes-builder.ts", "src/generator/dotnet/cqrs/", "src/generator/java/emit/service.ts", "src/generator/python/routes-builder.ts", "src/generator/elixir/vanilla/api-emit.ts"],
-      "fix": "Roadmap M-T6.38. The `when` predicate is emitted at the route/handler layer only (node whenGateLine in routes-builder.ts; dotnet <Op>Handler.cs), while a workflow step / saga cascade / extern commandHandler calls the DOMAIN method directly, which carries no gate — so the write lands with no DisallowedError and no 409. FIRST re-verify the java/python/elixir rows, which the mission explicitly marks unverified; the node and dotnet rows were verified empirically. Then move (or duplicate) the gate to the domain-method entry so every caller path evaluates it. This is the absence of a refusal, not a wire-shape divergence, so a wire-golden diff cannot see it — the proof must be a behavioural invoke-from-workflow case.",
-      "tests": ["a behavioural case per backend: a when-gated op invoked from an on(e) workflow step must 409/refuse", "context-integration-e2e.yml", "mutation-prove: remove the domain-level gate and confirm the write lands"],
-      "size": "L",
-      "wave": 1,
-      "conflictsWith": ["W2-notfound-status-override", "W2-openapi-declares-what-it-answers"]
-    },
-    {
-      "id": "W1-drain-policy-document-dotnet",
-      "title": "Stale: the corpus manifest still excludes dotnet from the policy-document row",
-      "kind": "stale-drain",
-      "targets": ["dotnet"],
-      "fileTrees": ["test/fixtures/corpus/manifest.ts"],
-      "fix": "manifest.ts:93 keys the policy-document row on IN_APP_DOCUMENT_FILTER (node/java/python, :24), citing two defects that are BOTH fixed: _CapabilityVisible on the document repo impl (dotnet/emit/repository.ts:694, applied :740/:804/:817) and GetByIdForWriteAsync on it (:708). The audit proved it by generating the fixture (106 files) and running dotnet build /warnaserror in mcr.microsoft.com/dotnet/sdk:10.0 — 0 warnings, 0 errors. Widen the row to include dotnet and rewrite the note so it describes only the LIVE elixir exclusion. Do not touch the elixir cell: it fires (2x loom.context-filter-unsupported).",
-      "tests": ["npm run test:dotnet-corpus with the widened row (LOOM_CORPUS_DOTNET_CASE=policy-document)", "npm run test:dapper-corpus"],
-      "size": "S",
-      "wave": 1,
-      "conflictsWith": []
-    },
-    {
-      "id": "W1-drain-behavioural-skip-dapper",
-      "title": "Stale: three of four BEHAVIOURAL_SKIP entries claim a dapper refusal that no longer happens",
-      "kind": "stale-drain",
-      "targets": ["dotnet + persistence: dapper"],
-      "fileTrees": ["test/behavioral/cases.mjs"],
-      "fix": "cases.mjs:307-319 skips projection-aggregation, projection-groupby and read-gates on the Dapper leg claiming loom.dapper-unsupported 'refuses to generate'. It does not: M-T6.25 landed the raw-Npgsql query-time arms (dotnet/query-projection-emit.ts:314-337, 499-546, 686-777), the gate narrowed to dapperQueryProjectionGap, and the dapper oracle (corpus-dotnet-dapper-build.test.ts:123-161) passes with DAPPER_UNSUPPORTED = {tenancy-hierarchy} only. Delete all three entries. Deleting RE-ARMS a boot that has never run for these cases, so pair each deletion with an actual `node run-dapper.mjs <case>` run and fix whatever it surfaces — read-gates is the costliest (the leg currently asserts no runtime denial for any of its three read-gate kinds). Bonus: projection-groupby on dapper is exactly the case the one live wire waiver (#2563) is scoped to.",
-      "tests": ["node run-dapper.mjs projection-aggregation | projection-groupby | read-gates", "behavioral-e2e-dapper.yml", "test/platform/allowlist-ratchet.test.ts once W1-register-skip-ratchets registers this map"],
-      "size": "S",
-      "wave": 1,
-      "conflictsWith": ["W1-register-skip-ratchets", "W1-dapper-filter-bypass"]
-    },
-    {
-      "id": "W1-register-skip-ratchets",
-      "title": "Governance: BEHAVIOURAL_SKIP and ELIXIR_COMPILE_SKIP are the two registers with no size ratchet",
-      "kind": "ratchet-drain",
-      "targets": ["all"],
-      "fileTrees": ["test/platform/allowlist-ratchet.test.ts"],
-      "fix": "allowlist-ratchet.test.ts's REGISTERED list (:43-197) covers 13 constructs including MIKRO_SKIP — added, per its own comment at :168-175, precisely because it 'had been growing unwatched'. BEHAVIOURAL_SKIP (cases.mjs:282) and ELIXIR_COMPILE_SKIP (corpus-elixir-build.test.ts:51-54) are not in it. Register both with exact pins (BEHAVIOURAL_SKIP at 1 AFTER W1-drain-behavioural-skip-dapper lands, ELIXIR_COMPILE_SKIP at 0), and add BEHAVIOURAL_SKIP a per-key oracle like the dapper maps have (corpus-dotnet-dapper-build.test.ts:123-161) so an entry claiming a refusal must actually reproduce one.",
-      "tests": ["npm test (test/platform/allowlist-ratchet.test.ts)", "mutation-prove: add a bogus skip entry and confirm the ratchet fails"],
-      "size": "S",
-      "wave": 1,
-      "conflictsWith": ["W1-drain-behavioural-skip-dapper", "W1-diagnostic-census-reclassify", "W1-stale-gate-prose"]
-    },
-    {
-      "id": "W1-diagnostic-census-reclassify",
-      "title": "Ratchet drain: at least 2 of the 38 UNCOVERED diagnostic codes are provably unreachable",
-      "kind": "ratchet-drain",
-      "targets": ["all"],
-      "fileTrees": ["test/system/diagnostic-firing-census.data.ts", "test/platform/allowlist-ratchet.test.ts"],
-      "fix": "diagnostic-firing-census.data.ts:386+ holds 38 UNCOVERED entries (pinned max 38). Two are unreachable rather than merely uncovered: loom.projection-query-time-unsupported (PROJECTION_QT_SUPPORTED = all five, system-checks.ts:122, consumed :231) and loom.saving-shape-unsupported (every shipping backend has all three shapes once the elixir document widening at :1571-1573 applies). Move them to the file's own UNREACHABLE_PINS exit (:384-385) and lower the pin — no implementation work required. Then run the same check over the siblings of the same 'N-backend-era' shape: loom.audited-backend-unsupported, loom.event-sourcing-backend-unsupported, loom.provenanced-backend-unsupported, loom.union-unsupported, loom.when-unsupported.",
-      "tests": ["npm test (diagnostic-firing-census + allowlist-ratchet)", "for each moved code, a one-line argument in the pin comment naming the set literal that makes it unreachable"],
-      "size": "S",
-      "wave": 1,
-      "conflictsWith": ["W1-register-skip-ratchets", "W1-stale-gate-prose"]
-    },
-    {
-      "id": "W1-stale-gate-prose",
-      "title": "Stale in-code references and one user-visible diagnostic message that understates elixir support",
-      "kind": "stale-drain",
-      "targets": ["all"],
-      "fileTrees": ["src/ir/validate/checks/system-checks.ts", "src/diagnostics/messages.ts", "src/util/platform-axes.ts", "src/generator/_packs/required-primitives.ts", "src/generator/_walker/registry.ts", "src/generator/_walker/target.ts", "test/platform/allowlist-ratchet.test.ts"],
-      "fix": "Six stale claims that read as live limits. USER-VISIBLE (fix first): the elixir document-filter message (system-checks.ts:2445-2447 -> messages.ts) says filters are 'only wired for relational aggregates on the elixir backend' — embedded IS wired (:2358) — and advises hosting on .NET, the backend the corpus manifest row excludes. Then: system-checks.ts:1612 cites loom.vanilla-containment-unsupported, a code that exists NOWHERE in src/; :2185 cites loom.java-embedded-refcoll-unsupported in the past tense with no raise site; platform-axes.ts:31 omits `document` for elixir while :1571-1573 adds it back (annotate or fix the table); required-primitives.ts:126-129 (FileUpload pinned as a HEEx gap it is not — it has a heex renderer at registry.ts:406-412), :46-51 (surviving AshPhoenix.Form reference) and :236-246 (the 'vue/svelte/angular have no chart' claim, contradicted by CHART_FRAMEWORKS); registry.ts:334-335 and :659-661 (Section/CodeBlock/Icon described as having no heex renderer — all three do); target.ts:39 ('13 methods' — it is 72); allowlist-ratchet.test.ts:51-55 (claims ProjectionJoin/ProjectionSelect are gated by an inert code). Also delete or implement the documented-but-dead renderStoreModule seam (target.ts:1125-1183) — no frontend implements it.",
-      "tests": ["npm test (diagnostic-catalog + walker-stdlib-completeness stay green)", "grep-prove each deleted claim has no live raise site before removing it"],
-      "size": "S",
-      "wave": 1,
-      "conflictsWith": ["W1-mikroorm-authz-seam", "W1-dapper-filter-bypass", "W1-adapter-migration-chain-gate", "W1-resource-op-scope-gate", "W1-register-skip-ratchets", "W1-diagnostic-census-reclassify"]
-    },
-    {
-      "id": "W1-close-overturned-missions",
-      "title": "Stale: two open missions (M-T6.32, M-T6.34) rest on premises the code overturns",
-      "kind": "stale-drain",
-      "targets": ["all"],
-      "fileTrees": ["docs/new-plan/T6-backend-parity.md"],
-      "fix": "Highest-leverage cheap item: these two rows will otherwise send a fleet agent to build already-shipped work. M-T6.34 ('Event-sourced storage exists on one backend of five') is false — EVENT_SOURCING_BACKENDS (system-checks.ts:3704) and EVENT_SOURCING_WORKFLOW_BACKENDS (:3744) are both full 5/5, the aggregate half is pinned per-backend by backend-parity-gates.test.ts:198-214 and the workflow half has five emitters; it also cites line numbers ~440 lines adrift. M-T6.32 ('the four capabilities that gate honestly and emit nothing') is likewise closed on the platform axis — all four sets are 5/5 with named emitters; its own text says 'First step is a re-verify', and this audit is it. Close both, or rewrite each to its true residue: the ADAPTER cells (W1-dapper-filter-bypass) and the elixir document cell (W2-elixir-document-capability-filter). Also resolve the M-T6.41 duplicate ID (line 108 vs line 590) so the two tasks stay separable.",
-      "tests": ["none (tracker correction) — but each closure line must cite the set literal + emitter that overturned it, per the repo's evidence rule"],
-      "size": "S",
-      "wave": 1,
-      "conflictsWith": []
-    },
-
-    {
-      "id": "W2-elixir-document-capability-filter",
-      "title": "elixir x shape(document) capability filters — the single platform hold-out in the whole gate-set inventory",
-      "kind": "honest",
-      "targets": ["elixir"],
-      "fileTrees": ["src/generator/elixir/vanilla/document-emit.ts", "src/generator/elixir/vanilla/repository-emit.ts", "src/ir/validate/checks/system-checks.ts", "test/fixtures/corpus/manifest.ts"],
-      "fix": "supportsNonRelationalFilter (system-checks.ts:2355-2364) admits elixir for `embedded` only; document-emit.ts never imports ./capability-filter.js and repository-emit.ts:84-85 routes document aggregates to a filter-less renderDocRepository. Implement in-app filtering on the elixir document read path — the four other backends all do it and java/emit/document-store.ts:50-58,228 is the closest analog (python/repository-document-builder.ts:65-73,283 and dotnet/emit/repository.ts:694 are the others). Then widen supportsNonRelationalFilter AND supportsPrincipalNonRelationalFilter (:2382-2391), and widen the corpus manifest policy-document row (manifest.ts:93) to include elixir — that widening is the acceptance test.",
-      "tests": ["npm run test:elixir-corpus with policy-document enabled (LOOM_HEX_MIRROR=1)", "node run-elixir.mjs policy-document", "backend-parity-gates.test.ts with the shape: document variant from W3-parity-gates-matrix-extension", "mutation-prove: revert the filter and confirm the corpus row fails"],
-      "size": "L",
-      "wave": 2,
-      "conflictsWith": ["W1-elixir-seeder", "W2-elixir-vanilla-document-scope", "W1-drain-policy-document-dotnet"]
-    },
-    {
-      "id": "W2-elixir-sse-realtime",
-      "title": "The elixir backend serves no SSE wire, so an SPA frontend's `on <channel>.<Event>` handler is dropped with only a warning",
-      "kind": "honest",
-      "targets": ["elixir"],
-      "fileTrees": ["src/generator/elixir/vanilla/", "src/ir/util/channels.ts", "src/ir/validate/checks/system-checks.ts"],
-      "fix": "backendServesRealtime (ir/util/channels.ts:14-18) lists node/dotnet/java/python only; a react/vue/svelte/angular/feliz UI pointed at platform: elixir gets loom.ui-realtime-unsupported#backend-serves-no-sse at severity WARNING (system-checks.ts:672-673) and the handler silently vanishes. A LiveView UI is legitimately N/A (it pushes over its own socket, elixir/realtime-liveview.ts). Emit the SSE endpoint + broadcast tee on vanilla Phoenix, mirroring the four shipped emitters (hono/v4/realtime-builder.ts, dotnet/emit/realtime.ts, java/emit/realtime.ts, python realtime), then add elixir to backendServesRealtime. If the emit is deferred, at minimum raise the warning to an ERROR — a warning is a silent gap wearing a hat.",
-      "tests": ["a runtime SSE round-trip against the booted Phoenix backend (the pattern of the other four legs)", "npm run test:phoenix", "an IR-validate test that the warning is gone / the error fires"],
-      "size": "L",
-      "wave": 2,
-      "conflictsWith": ["W1-elixir-seeder", "W1-elixir-listpage-arity", "W2-flutter-realtime-sse"]
-    },
-    {
-      "id": "W2-flutter-realtime-sse",
-      "title": "Flutter has no realtime consumer — the handler compiles clean and drops (warning only)",
-      "kind": "honest",
-      "targets": ["flutter"],
-      "fileTrees": ["src/generator/flutter/", "src/ir/validate/checks/system-checks.ts"],
-      "fix": "Roadmap M-T1.18 Phase 3 (M-F). No flutter realtime emitter exists; system-checks.ts:685-696 pushes loom.ui-realtime-unsupported#frontend-has-no-consumer at severity WARNING. Port the SSE consumer that feliz already ships (feliz/realtime.ts:1-188 — EventSource subscription, per-event listener, toast, refetch) onto Dart/Riverpod, then add flutter to SSE_REALTIME_FRONTENDS (system-checks.ts:619-627). Deliberately paired in wave 2 with W2-elixir-sse-realtime because both cells are the same warning-only class on opposite sides of the wire.",
-      "tests": ["test/generator/flutter realtime unit test", "generated-flutter-build.yml (flutter analyze + flutter test)", "an IR-validate test that the warning no longer fires"],
-      "size": "M",
-      "wave": 2,
-      "conflictsWith": ["W2-flutter-auth-ui", "W2-flutter-store-persist", "W2-flutter-provenance-info", "W2-elixir-sse-realtime"]
-    },
-    {
-      "id": "W2-flutter-auth-ui",
-      "title": "`auth: ui` is the one frontend capability flutter cannot do (honest error)",
-      "kind": "honest",
-      "targets": ["flutter"],
-      "fileTrees": ["src/generator/flutter/", "src/ir/validate/checks/system-checks.ts"],
-      "fix": "AUTH_UI_FRAMEWORKS (system-checks.ts:103) = react/vue/svelte/angular/feliz; loom.auth-ui-unsupported-framework raises at :548-561, and the emitter hard-codes the absence (flutter/index.ts:348 `false, // authUi`, riverpod-emit.ts:107, component-emit.ts:99). Port the session guard feliz shipped — feliz/auth-gate.ts (186 lines) wired at feliz/index.ts:51,147,1209 is the direct analog and the most recent one, so its shape is current. Then add flutter to AUTH_UI_FRAMEWORKS and check the sibling validateCurrentUserNeedsAuthUi (:580-610) still behaves.",
-      "tests": ["test/generator/flutter auth-gate test", "generated-flutter-build.yml", "an IR-validate test that the gate no longer fires for flutter", "docs/new-plan/T1-ui-frontend.md:267's M-T1.20 row updated (its feliz half is ALREADY stale)"],
-      "size": "M",
-      "wave": 2,
-      "conflictsWith": ["W2-flutter-realtime-sse", "W2-flutter-store-persist", "W2-flutter-provenance-info"]
-    },
-    {
-      "id": "W2-feliz-store-persist",
-      "title": "Implement store `persist: local|session|url` on feliz",
-      "kind": "honest",
-      "targets": ["feliz"],
-      "fileTrees": ["src/generator/feliz/index.ts", "src/generator/feliz/feliz-target.ts", "src/ir/validate/checks/store-checks.ts"],
-      "fix": "Feliz stores fold into the single Elmish Model (feliz/index.ts:215-243, 1034-1052) and nothing reads .lifetime. Add persistence at the fold boundary: hydrate from localStorage/sessionStorage/query-param on init and write back in the update loop. The four JSX store-builders (react :254-289, vue :251-313, svelte :264-319, angular :280-314) define the semantics to match — same keys, same url-param shape. Delete the feliz arm of the honest gate W1-store-persist-honest-gate added, in this PR.",
-      "tests": ["test/generator/feliz store test asserting hydration + write-back", "generated-feliz-build.yml (dotnet + Fable build + Playwright)", "the frontend-fullstack-e2e feliz leg"],
-      "size": "M",
-      "wave": 2,
-      "conflictsWith": ["W1-feliz-file-form-field", "W1-store-persist-honest-gate"]
-    },
-    {
-      "id": "W2-flutter-store-persist",
-      "title": "Implement store `persist: local|session|url` on flutter",
-      "kind": "honest",
-      "targets": ["flutter"],
-      "fileTrees": ["src/generator/flutter/store-builder.ts", "src/ir/validate/checks/store-checks.ts"],
-      "fix": "store-builder.ts:76-88 emits `// TODO(flutter full-parity): persist: <x> is not implemented` and builds an in-memory Riverpod notifier anyway. Back the notifier with shared_preferences (local/session) and the router query string (url), matching the key + shape the four JSX store-builders use. Delete the flutter arm of the honest gate from W1-store-persist-honest-gate in this PR, and delete the TODO marker.",
-      "tests": ["test/generator/flutter/store.test.ts extended", "generated-flutter-build.yml", "mutation-prove: revert and confirm the gate/marker returns"],
-      "size": "M",
-      "wave": 2,
-      "conflictsWith": ["W2-flutter-realtime-sse", "W2-flutter-auth-ui", "W2-flutter-provenance-info", "W1-store-persist-honest-gate"]
-    },
-    {
-      "id": "W2-mikroorm-deep-scope-tenancy",
-      "title": "MikroORM rejects hierarchical (deep/global) tenancy scope",
-      "kind": "honest",
-      "targets": ["node + persistence: mikroorm"],
-      "fileTrees": ["src/generator/typescript/emit/mikroorm.ts", "src/platform/hono/v4/emit.ts", "src/ir/validate/checks/system-checks.ts"],
-      "fix": "system-checks.ts:3006-3013 rejects any isDeepScopeFilter contextFilter under mikroorm because the FilterQuery subset cannot express the descendant-or-self predicate and the emitter would SWALLOW the failure (:1193-1205 try/catch) — i.e. a silent cross-tenant read. Also hono/v4/emit.ts:1568 refuses to register the orgPath resolver on mikro (`wireOrgPath = !!orgPathRegistryTable && !usingMikro`). Express the materialized-path predicate through MikroORM's raw/expr escape hatch, register the orgPath resolver, then delete the gate. Analog: the drizzle path plus the dapper twin (W2-dapper-deep-scope-tenancy) — do them as a pair so the two adapters agree.",
-      "tests": ["npm run test:tenancy-hierarchy against the mikroorm adapter", "behavioral-e2e-mikroorm.yml", "the orgXa.leak wildcard trap must stay green", "mutation-prove: reinstate the gate and confirm the new runtime assertion is what proves the fix, not a string match"],
-      "size": "L",
-      "wave": 2,
-      "conflictsWith": ["W1-mikroorm-authz-seam", "W1-direct-table-contextfilters", "W2-mikroorm-find-predicate-subset"]
-    },
-    {
-      "id": "W2-dapper-deep-scope-tenancy",
-      "title": "Dapper rejects hierarchical (deep/global) tenancy scope — the last DAPPER_UNSUPPORTED entry",
-      "kind": "honest",
-      "targets": ["dotnet + persistence: dapper"],
-      "fileTrees": ["src/generator/dotnet/emit/dapper.ts", "src/ir/validate/checks/system-checks.ts"],
-      "fix": "system-checks.ts:2871-2887 raises loom.dapper-unsupported#deep-scope for any isDeepScopeFilter in contextFilters OR writeScopeFilter, because the Dapper principal-param collector cannot bind @__cu_* inside the materialized-path sentinel. The principal-FREE deny sentinel is already handled (dapper.ts:712, 740-763 render it as `1 = 0`), so the machinery is half there — extend the param collector to walk the sentinel and bind its principal params. Draining this empties DAPPER_UNSUPPORTED (corpus-dotnet-dapper-build.test.ts:69-76) to zero.",
-      "tests": ["npm run test:tenancy-hierarchy-dotnet with persistence: dapper forced", "npm run test:dapper-corpus with tenancy-hierarchy re-armed", "allowlist-ratchet.test.ts:120-133 pin lowered 1 -> 0 in the same PR"],
-      "size": "L",
-      "wave": 2,
-      "conflictsWith": ["W1-dapper-filter-bypass", "W1-dapper-identifier-quoting", "W2-dapper-directtable-projection"]
-    },
-    {
-      "id": "W2-mikroorm-find-predicate-subset",
-      "title": "MIKROORM_SUBSET narrows two shapes — one real (method-call), one stale (currentUser)",
-      "kind": "honest",
-      "targets": ["node + persistence: mikroorm"],
-      "fileTrees": ["src/ir/util/find-predicate-capability.ts", "src/generator/typescript/emit/mikroorm.ts"],
-      "fix": "Two entries in one file, merged. (a) STALE OVER-GATE: find-predicate-capability.ts:129-133 rejects currentUser.<field> with 'no principal accessor on the MikroORM find path' — but emit/mikroorm.ts:1027-1034 renders requireCurrentUser().<claim> with a body-scan-driven import (:2054-2062, :2377-2384). Verify against emitted output, then drop the narrowing. (b) REAL: a method-call predicate (startsWith) falls through at :125, so MIKRO_SKIP[prefix-filter] is honest — add an intrinsic arm to whereToMikroFilter and drop the narrowing at :138-145. The contains-membership arm (:122-123) stays: there is genuinely no join subquery. Delete MIKRO_SKIP[prefix-filter] (run-mikroorm.mjs:123-124) when (b) lands; the size pin is allowlist-ratchet.test.ts:191-196 (max 2, no slack).",
-      "tests": ["node run-mikroorm.mjs prefix-filter", "behavioral-e2e-mikroorm.yml", "an IR-validate test that the currentUser find predicate is accepted", "allowlist-ratchet pin lowered in the same PR"],
-      "size": "M",
-      "wave": 2,
-      "conflictsWith": ["W1-mikroorm-authz-seam", "W2-mikroorm-deep-scope-tenancy"]
-    },
-    {
-      "id": "W2-dapper-directtable-projection",
-      "title": "Dapper rejects the direct-table query-time projection arm over a column-less source",
-      "kind": "honest",
-      "targets": ["dotnet + persistence: dapper"],
-      "fileTrees": ["src/generator/dotnet/query-projection-emit.ts", "src/generator/dotnet/emit/dapper.ts", "src/ir/util/query-projection-arm.ts", "src/ir/validate/checks/system-checks.ts"],
-      "fix": "system-checks.ts:2731-2747 (loom.dapper-unsupported#feature) rejects only the two DIRECT-TABLE arms (grouped / whole-table singleton) over a source with no columns — persistedAs: eventLog, shape: document, or a TPC abstract base — classified by the shared src/ir/util/query-projection-arm.ts:75-102, which gate and emitter both read so they cannot drift. The repository/workflow/projection-sourced arms already emit raw Npgsql (query-projection-emit.ts:314-337, 499-546, 686-777). Teach the direct-table arm to read the column-less sources' actual storage (the event log table / the jsonb blob / the concrete tables of a TPC base), mirroring what efcore does for the same three source kinds; then narrow or delete the classifier arm.",
-      "tests": ["npm run test:dapper-corpus with the projection fixtures", "node run-dapper.mjs projection-aggregation / projection-groupby (re-armed by W1-drain-behavioural-skip-dapper)", "the gate and classifier must be updated together — a test asserting gate-XOR-emit per arm"],
-      "size": "L",
-      "wave": 2,
-      "conflictsWith": ["W1-dapper-filter-bypass", "W1-dapper-identifier-quoting", "W2-dapper-deep-scope-tenancy"]
-    },
-    {
-      "id": "W2-notfound-status-override",
-      "title": "`httpStatus NotFound -> N` is honoured on elixir only — four backends ignore the author's override",
-      "kind": "honest",
-      "targets": ["node", "dotnet", "java", "python"],
-      "fileTrees": ["src/ir/util/openapi-errors.ts", "src/platform/hono/v4/routes-builder.ts", "src/generator/dotnet/", "src/generator/java/emit/", "src/generator/python/routes-builder.ts"],
-      "fix": "Roadmap M-T5.20 (partial). openapi-errors.ts:79-97 resolves ReferencedInUse / DomainError / Forbidden through the httpStatus override but deliberately NOT NotFound ('the 404 rung is deliberately NOT resolved here (M-T5.20 gap)'), and the override-status-census carries four waivers (override-status-census.test.ts:501-550) that assert-still-broken and pass. Route every bare-404 return site on the four backends through resolveErrorStatus and update their DECLARED response sets. The 404 has two producers and which fires is backend-dependent (hono throws into onError; .NET/java/python bare-return) — that split is the actual work. Drift risk is documented: #2462 silently reverted the shipped half, #2340 restored it, so pin it per-file, not with a joined-output toContain.",
-      "tests": ["delete the four override-status-census WAIVERS in the same PR (that census is the acceptance test)", "denial-ladder-override-parity.test.ts", "conformance-parity.yml (the declared response set changes)", "mutation-prove: revert one backend's resolution and confirm exactly that census row fails"],
-      "size": "L",
-      "wave": 2,
-      "conflictsWith": ["W1-when-gate-off-route", "W2-openapi-declares-what-it-answers"]
-    },
-    {
-      "id": "W2-openapi-declares-what-it-answers",
-      "title": "Schemathesis W4 + W9: routes answer a 422 they never declare, and a wrong verb on a static sub-path answers 422 instead of 405",
-      "kind": "honest",
-      "targets": ["node"],
-      "fileTrees": ["src/platform/hono/v4/routes-builder.ts", "src/generator/typescript/emit/routes.ts", "test/behavioral/schemathesis-waivers.json"],
-      "fix": "Two ratcheting waivers, one file tree. W4: GET /{id} declares 200/404, DELETE /{id} declares 204/404/409, the collection GET declares 200 alone — yet the validation hook answers 422 (problem-details.ts:50-72) whenever a param or query fails, so every read/delete route can produce a status its own OpenAPI never mentions and generated clients are blind to it. Declare 422 wherever a request schema is validated. W9: the 405 probe lives ONLY inside app.notFound (emit/routes.ts:549-560), so `DELETE /api/<agg>/by_email` MATCHES the sibling delete /{id} route and the param validator answers 422 first — add a static-segment-vs-{id} discrimination before the param validator. NOTE: #2566 is in flight on W1+W7 in this same routes-builder — coordinate or stack.",
-      "tests": ["npm run test:schemathesis (LOOM_SCHEMATHESIS=1) — the two waiver rules must be DELETED in the same PR (a rule that stops reproducing fails the run)", "wire-golden differential (a new declared status is a wire-contract change)", "docs/audits/schemathesis-findings-2026-08.md register updated"],
-      "size": "M",
-      "wave": 2,
-      "conflictsWith": ["W1-when-gate-off-route", "W2-notfound-status-override", "PR#2566"]
-    },
-    {
-      "id": "W2-codepoint-length-validation",
-      "title": "Schemathesis W6: string lengths validate in UTF-16 code units while the emitted JSON Schema declares code points",
-      "kind": "honest",
-      "targets": ["node", "and by inspection the other four"],
-      "fileTrees": ["src/generator/_frontend/zod-schemas.ts", "src/platform/hono/v4/"],
-      "fix": "`grep -rn codePoint src/` returns zero hits: string length constraints lower to zod .min()/.max()/.length() (zod-schemas.ts:70, api-module.ts:629) which count UTF-16 code units, while the emitted JSON Schema declares minLength/maxLength in code points — so an astral character is counted twice. Lower to a code-point-aware refinement ([...s].length) on the wire boundary, and check the other four backends' equivalents (they will have the same mismatch in their own runtime's string semantics). The waiver itself notes its real exit: graduate the intermittent fuzz rule to a PINNED deterministic case + wire golden, because an `intermittent` rule can never be proven fixed by the fuzz gate.",
-      "tests": ["a deterministic astral-character case pinned as a wire golden (the waiver's own stated exit)", "npm run test:schemathesis with the W6 rule deleted", "cross-backend wire differential"],
-      "size": "M",
-      "wave": 2,
-      "conflictsWith": []
-    },
-    {
-      "id": "W2-dotnet-decimal-wire",
-      "title": "The one live wire waiver: .NET System.Decimal truncates a projection `avg` that is float64 on four backends",
-      "kind": "honest",
-      "targets": ["dotnet"],
-      "fileTrees": ["src/generator/dotnet/", "src/ir/util/openapi-*.ts", "test/_helpers/wire-waivers.ts"],
-      "fix": "READ #2575 FIRST (money/decimal follow-ups from #2560) and stand down if it already covers this — the overlap is unresolved. Otherwise: wire-waivers.ts:65-72 (#2563) is the registry's only entry, scoped to projection-groupby $[*].avgLines, and it still reproduces (the two-way ratchet at wire-record.ts:381-393 would fail the leg otherwise). A wire `decimal` is float64 on four backends and System.Decimal on .NET, so avg truncates at ~15 significant digits (2.33333333333333 vs 2.3333333333333335). The exit is a GLOBAL representation decision — response records + OpenAPI schema — not a projection-emitter tweak, so scope the decision before coding.",
-      "tests": ["delete the waiver in the same PR (a waiver that stops matching fails the run)", "behavioral-e2e-dotnet.yml + behavioral-e2e-dapper.yml (W1-drain-behavioural-skip-dapper re-arms projection-groupby on the second adapter)", "cross-backend wire differential against the goldens"],
-      "size": "L",
-      "wave": 2,
-      "conflictsWith": ["PR#2575"]
-    },
-    {
-      "id": "W2-flutter-provenance-info",
-      "title": "Flutter `ProvenanceInfo` degrades to a comment (a pinned decision worth reversing)",
-      "kind": "honest",
-      "targets": ["flutter"],
-      "fileTrees": ["src/generator/flutter/flutter-target.ts", "test/generator/_walker/provenance-info-cross-target.test.ts"],
-      "fix": "_walker/primitives/provenance-info.ts:47-62 has react/vue/svelte/angular arms and a renderComment default; flutter supplies no renderProvenanceInfo. Unlike Timeline this IS pinned as a reviewed degradation (provenance-info-cross-target.test.ts:220-233 asserts the comment text AND that no provLineageSchema is carried) and the underlying value still renders, so it is the least urgent frontend cell — but feliz already ships the override (feliz-target.ts:418, with an F# ProvLineage record + Thoth decoder), so the Dart port is well-precedented. Update the pinned test from 'degrades' to 'renders' in the same PR.",
-      "tests": ["provenance-info-cross-target.test.ts (flip the flutter arm)", "generated-flutter-build.yml"],
-      "size": "S",
-      "wave": 2,
-      "conflictsWith": ["W2-flutter-realtime-sse", "W2-flutter-auth-ui", "W2-flutter-store-persist"]
-    },
-    {
-      "id": "W2-elixir-vanilla-document-scope",
-      "title": "Elixir vanilla document shape: provenanced ops and non-scalar predicates stay gated (M-T6.2 §12 residue)",
-      "kind": "honest",
-      "targets": ["elixir"],
-      "fileTrees": ["src/generator/elixir/vanilla/", "src/ir/validate/checks/system-checks.ts"],
-      "fix": "validateVanillaDocumentScope (system-checks.ts:1793-1840, loom.vanilla-document-unsupported, elixir-only at :1799) admits scalar ops/finds but rejects provenanced-site ops (docOpUnsupported :1789-1791) and non-scalar predicate shapes (docExprUnsupported :1682+). Roadmap M-T6.2 also names the §14 tail (four serialize/1 snake_case leak sites) and §13 LiveView action residue. Close the shapes one at a time against the relational elixir path as the analog, narrowing docExprUnsupported/docOpUnsupported as each lands — the gate is a live predicate, not a hand-list, so it shrinks by itself. Pair with W2-elixir-document-capability-filter, which touches the same document emitter.",
-      "tests": ["npm run test:elixir-corpus per shape", "node run-elixir.mjs against the document fixtures", "an IR-validate test per narrowed shape, mutation-proven"],
-      "size": "L",
-      "wave": 2,
-      "conflictsWith": ["W2-elixir-document-capability-filter", "W1-elixir-listpage-arity"]
-    },
-    {
-      "id": "W2-mikroorm-abstract-parts-verify",
-      "title": "The abstract-base-with-parts reject exists on exactly one adapter — verify what the others emit",
-      "kind": "honest",
-      "targets": ["node + drizzle", "dotnet", "java", "python", "elixir"],
-      "fileTrees": ["src/ir/validate/checks/system-checks.ts", "src/ir/validate/checks/structural-checks.ts"],
-      "fix": "system-checks.ts:3071-3078 rejects `parts`/`contains` on an abstract inheritance base — but only under `if (dep.persistence !== \"mikroorm\") continue;` (:2945), and no other gate pairs isAbstract with parts/contains (grep across ir/validate/checks and language/validators yields only inheritance lifecycle/TPH rules). The comment at :3067-3070 argues the shape is 'genuinely unmappable' (an abstract base owns no repository; concretes do not inherit its parts) — if that is true it is true on every adapter. This task is a VERIFY-FIRST: generate the shape on drizzle/efcore/java/python/elixir and read the output. Then either promote the reject to a target-neutral structural rule, or delete the mikroorm-only gate and its justification. The audit verified only the gate's absence, not the emitters' behaviour.",
-      "tests": ["generate + compile the shape on each backend before deciding", "one negative structural test if the rule is promoted", "test/platform/backend-parity-gates.test.ts if it becomes a per-backend cell"],
-      "size": "M",
-      "wave": 2,
-      "conflictsWith": ["W1-mikroorm-authz-seam"]
-    },
-
-    {
-      "id": "W3-parity-gates-matrix-extension",
-      "title": "backend-parity-gates.test.ts pins 5 features of ~19 and never varies `shape:` — so the one real hold-out is outside the matrix",
-      "kind": "breadth",
-      "targets": ["all backends"],
-      "fileTrees": ["test/platform/backend-parity-gates.test.ts"],
-      "fix": "The gated-XOR-emitted matrix (DOMAIN_BACKENDS :41 x FEATURES :158-238, assertions :292-338 incl. the two-way cross-check against gate-set membership) is the single best structural defence in the tree — and it covers 5 features. Lift in the ~14 sets it omits: paged queryHandler (system-checks.ts:112), query-time projection (:122), whole-table aggregation (:136), group-by (:172), workflow-source (:258) and projection-source (:294) projections, field mask (:3825), audited LIFECYCLE (:3921 — the fixture exercises `operation ... audited` only), event-sourced WORKFLOW (:3744), generic carriers (structural :329), unions (:503), `when` (:572), union returns (:604), filter bypass (:2517). Then add `shape: document` and `shape: embedded` variants of filterDdd — without them the capability-filter feature is only ever probed on the relational non-principal cell, precisely where all five agree, which is why the elixir document hold-out (W2-elixir-document-capability-filter) was invisible to it.",
-      "tests": ["npm test — the new cells must be gated-XOR-emitted today; any cell that is NEITHER is a new silent finding", "mutation-prove: remove one backend from a gate set and confirm exactly its row fails"],
-      "size": "M",
-      "wave": 3,
-      "conflictsWith": []
-    },
-    {
-      "id": "W3-render-degradation-sentinels",
-      "title": "The two render-degradation ratchets structurally cannot reach the drops they exist for",
-      "kind": "ratchet-drain",
-      "targets": ["react", "vue", "svelte", "angular", "feliz", "flutter", "phoenixLiveView"],
-      "fileTrees": ["test/generator/_walker/render-degradation.test.ts", "web/src/examples/expression-showcase.ddd"],
-      "fix": "KNOWN_DEGRADATIONS (:92-106) and KNOWN_VERBATIM_INTRINSICS (:117-130) are both empty and 23/23 pass — because the gate cannot see the failures. Three fixes: (1) add a SENTINELS pattern (:74-84) matching the `not yet supported on <framework>` comment shape emitted by timeline.ts:55 and provenance-info.ts:59; (2) give the fixture a state-bearing AND a derived-bearing AND a read-bearing component (today its only component is props-only, expression-showcase.ddd:76) so the `unknown layout component` sentinel that IS in the list becomes reachable; (3) place a sub-primitive at top level so the `not supported by the \\w+ walker yet` sentinel becomes reachable. SEQUENCING: run this AFTER #2569 (Timeline), #2568 (read-bearing components), W1-component-derived-state and W1-subprimitive-placement-gate land — otherwise it goes red for known, in-flight reasons. Three silent findings in this audit were each within one fixture line of this gate.",
-      "tests": ["npm test — the widened fixture must pass with an EMPTY KNOWN_DEGRADATIONS after the four prerequisites land", "mutation-prove each new sentinel by re-introducing one drop"],
-      "size": "M",
-      "wave": 3,
-      "conflictsWith": ["W1-component-derived-state", "W1-subprimitive-placement-gate", "PR#2568", "PR#2569"]
-    },
-    {
-      "id": "W3-showcase-render-flutter-heex",
-      "title": "The cross-frontend showcase render matrix omits flutter and phoenixLiveView entirely",
-      "kind": "breadth",
-      "targets": ["flutter", "phoenixLiveView"],
-      "fileTrees": ["test/conformance/frontend-showcase-render.test.ts"],
-      "fix": "FRONTENDS (:46) = react, vue, svelte, angular, feliz x 3 showcase UIs = 15 cells, GAPS (:40-44) empty. flutter and the HEEx render path have no showcase-level matrix cell at all — HEEx's only structural coverage is heex-parity.test.ts's registry-shape check plus per-primitive suites. Add both as rows, scanning for the same FALLBACK_MARKERS (:70-75) plus the flutter/heex-specific sentinels (`flutter pack: no renderer`, `not supported by Phoenix LiveView target`). Expect new GAPS entries on first run — each is a finding, and each should be filed rather than pinned silently.",
-      "tests": ["npm test", "each new GAPS entry needs a written justification or a fix"],
-      "size": "M",
-      "wave": 3,
-      "conflictsWith": []
-    },
-    {
-      "id": "W3-schemathesis-backend-legs",
-      "title": "Spec-driven contract fuzzing runs on one backend of five",
-      "kind": "breadth",
-      "targets": ["python", "java", "dotnet", "elixir"],
-      "fileTrees": ["test/behavioral/run-schemathesis.mjs", "package.json", ".github/workflows/schemathesis.yml"],
-      "fix": "run-schemathesis.mjs:119-127 hard-requires exactly one Hono deployable and bundles with platform: 'node' (:237); package.json:85 defines only test:schemathesis; the workflow is a single job with no matrix. Every W-rule in the register is therefore a node-only observation — the same defect class (coercion, undeclared 422/500, verb-vs-{id} capture) is UNMEASURED on the other four. Generalize the runner the way the behavioural runners are generalized (run-python.mjs / run-dotnet.mjs / run-java.mjs / run-elixir.mjs each boot a real process against a postgres sidecar and re-point the same suite), add four npm scripts and a workflow matrix. Expect a wave of new findings; each needs a ROOT-CAUSE waiver rule (an unattributed finding fails the run) and a row in docs/audits/schemathesis-findings-2026-08.md.",
-      "tests": ["npm run test:schemathesis-{python,java,dotnet,elixir}", "schemathesis.yml as a matrix", "the waiver registry stays ratcheting in both directions"],
-      "size": "L",
-      "wave": 3,
-      "conflictsWith": []
-    },
-    {
-      "id": "W3-flutter-behavioral-leg",
-      "title": "Flutter is the only frontend with no full-stack runtime round-trip at any tier",
-      "kind": "breadth",
-      "targets": ["flutter"],
-      "fileTrees": ["test/behavioral/", ".github/workflows/"],
-      "fix": "test/behavioral/corpus.json has no flutter case and the harness structurally cannot host one: run-ui.mjs:111-114 builds the frontend with `npm install` + `npm run build`, which a Flutter SDK project has no analogue for, and frontend-fullstack-e2e.yml's matrix is vue/svelte/angular/feliz. Its only gates are compile-only (flutter analyze + flutter build web) — which is exactly why the non-parsing-Dart finding (W1-flutter-fileref-dart) survived: the CI fixture never exercised the shape. Add a flutter leg that builds via the Flutter SDK (`flutter build web`) and drives the built bundle with the emitted Playwright smoke spec against a Hono-on-PGlite origin, i.e. the run-ui.mjs topology with a different build command. Nightly cadence is acceptable (matching the other non-React frontends).",
-      "tests": ["a new run-ui-flutter.mjs leg + workflow", "it must catch a seeded defect (mutation-prove with the FileRef?? shape before its fix, or a re-introduced one)"],
-      "size": "L",
-      "wave": 3,
-      "conflictsWith": []
-    },
-    {
-      "id": "W3-heex-ui-behavioral-leg",
-      "title": "The HEEx render path has no per-PR runtime UI assertion",
-      "kind": "breadth",
-      "targets": ["phoenixLiveView"],
-      "fileTrees": ["test/behavioral/", ".github/workflows/"],
-      "fix": "No HEEx/LiveView case exists in test/behavioral/corpus.json; run-ui.mjs boots 'built SPA + Hono on PGlite' (:118-121), a topology LiveView does not have (it serves its own UI from the Phoenix app). HEEx UI coverage lives entirely outside the behavioral tier in `npm run test:phoenix-ui-e2e`, which is post-merge / run-e2e label only. Either promote a scoped subset of phoenix-ui-e2e to per-PR, or add a behavioural leg that boots the generated Phoenix app + postgres and drives the emitted Playwright spec against it. Distinct from the heex-parity frozen set (which is primitive COVERAGE) — this is whether the rendered LiveView round-trips.",
-      "tests": ["the new leg must assert a real create -> list -> detail round-trip, not just a 200", "wire it into pr-gate's workflow_run list if it becomes per-PR (test/system/pr-gate.test.ts pins completeness)"],
-      "size": "L",
-      "wave": 3,
-      "conflictsWith": []
-    },
-    {
-      "id": "W3-angular-pack-render-invariant",
-      "title": "Five Angular pack-render names are reachable in the shared walker but absent from every Angular pack",
-      "kind": "breadth",
-      "targets": ["angular"],
-      "fileTrees": ["test/platform/", "src/generator/_packs/required-primitives.ts"],
-      "fix": "Diffing the 48 template names reachable via renderPrimitive/ctx.pack.render against flattenRequired ∪ shared-sources leaves five uncovered on angular: primitive-form-of, primitive-modal, form-default-onsubmit and the whole field-input-* family — absent from angularMaterial/primeng/spartanNg manifests and the shared angular/ dir. They are unreachable TODAY only because angularTarget forks every form primitive and never returns null for a real call (angular-target.ts:292-328); any future fork returning null reaches renderPrimitive('primitive-form-of') (forms.ts:473) and HARD-THROWS at generate time. Nothing tests that. Add a static test that computes the same reachable-minus-available diff per format and fails on a non-empty result for a name not explicitly exempted — turning an accidental invariant into a pinned one. (Note primitive-modal-controlled at forms.ts:826 is the only guarded pack.render in the tree; consider whether the guard pattern should be the default.)",
-      "tests": ["npm test — the new static test", "mutation-prove: make one angular form override return null and confirm the test fails BEFORE generation throws"],
-      "size": "S",
-      "wave": 3,
-      "conflictsWith": []
-    },
-    {
-      "id": "W3-phoenix-problem-details-floor",
-      "title": "Vanilla Phoenix has no app-global RFC 7807 arm (M-T6.30)",
-      "kind": "mission",
-      "targets": ["elixir"],
-      "fileTrees": ["src/generator/elixir/vanilla/shell-emit.ts"],
-      "fix": "Roadmap M-T6.30. Give the generated Phoenix app a 7807-shaped error view + application/problem+json at the SHELL level (renderVanillaErrorJson) so every unmodelled fault inherits a floor, and check the 404/400 templates. No existing gate can see this: the wire golden reaches only modelled faults and conformance-parity compares DECLARED responses. Same root cause and shape as M-T6.25's node fix (a root app onError carrying the full ladder, with per-router handlers as refinements) — mirror that.",
-      "tests": ["internal-fault-parity.test.ts (a per-FILE assertion, not a joined-output toContain — a sibling router always satisfies the latter)", "npm run test:phoenix"],
-      "size": "M",
-      "wave": 3,
-      "conflictsWith": ["W1-elixir-listpage-arity", "W2-elixir-sse-realtime"]
-    },
-    {
-      "id": "W3-elixir-unused-let-underscore",
-      "title": "An unused workflow `let` binding warns — fatal under mix compile --warnings-as-errors (M-T6.21)",
-      "kind": "mission",
-      "targets": ["elixir"],
-      "fileTrees": ["src/generator/elixir/vanilla/workflow-execution-emit.ts"],
-      "fix": "Roadmap M-T6.21, latent today. A workflow `let x` never referenced downstream emits an unused-variable warning, which is a hard failure under the emitted project's --warnings-as-errors build. Underscore the binding when nothing downstream reads it — but MUST NOT underscore the bindName result slot nor break fallible-op `{:ok, _}` gating; several clause-assembly sites are involved, so treat the downstream-read analysis as the real work.",
-      "tests": ["npm run test:phoenix (LOOM_PHOENIX_VANILLA_BUILD=1 LOOM_HEX_MIRROR=1) with an unused-let fixture", "corpus-elixir-build.yml", "mutation-prove: revert and confirm mix compile fails"],
-      "size": "S",
-      "wave": 3,
-      "conflictsWith": ["W2-elixir-vanilla-document-scope"]
-    },
-    {
-      "id": "W3-files-404-envelope",
-      "title": "The /files/{key} absent-object 404 is a fourth envelope shape, on zero backends (M-T6.39)",
-      "kind": "mission",
-      "targets": ["node", "dotnet", "java", "python", "elixir"],
-      "fileTrees": ["per-backend file endpoint emitters (POST /files, GET /files/{key})"],
-      "fix": "Roadmap M-T6.39. The file endpoint's absent-object 404 body matches none of the three envelopes M-T6.31 unified — it is the one absent-read site outside M-T6.31's five, and it diverges on all five backends at once (so it is a uniform defect, not a parity cell). Fold it into the same problem-details envelope the other absent-read sites use, per backend.",
-      "tests": ["cross-backend wire differential (the response BODY changes on all five)", "conformance-parity.yml", "the emitted OpenAPI's declared 404 schema for the files route"],
-      "size": "M",
-      "wave": 3,
-      "conflictsWith": []
-    },
-    {
-      "id": "W3-tenancy-subtree-sargable",
-      "title": "The tenancy subtree read is correct but no longer index-usable (M-T3.17)",
-      "kind": "mission",
-      "targets": ["node", "dotnet", "java", "python", "elixir"],
-      "fileTrees": ["src/ir/util/tenant-stance.ts", "per-backend tenancy predicate emitters"],
-      "fix": "Roadmap M-T3.17 (from #2562). `strpos(data_key, anchor||'.')=1` is correct but not sargable, so every deep/global tenancy read is a sequential scan. Four options (escaped LIKE / the ^@ operator / a half-open range / accept the cost), none free — pick one and apply it identically on all five backends. HARD CONSTRAINT: the orgXa.leak wildcard trap must stay green on all five (that trap is why the naive LIKE was rejected in the first place).",
-      "tests": ["tenant-index.test.ts", "npm run test:tenancy-hierarchy{,-python,-java,-dotnet,-elixir} — all five legs", "an EXPLAIN-shaped assertion that the index is used, otherwise the fix is unprovable"],
-      "size": "L",
-      "wave": 3,
-      "conflictsWith": ["W2-mikroorm-deep-scope-tenancy", "W2-dapper-deep-scope-tenancy"]
-    },
-    {
-      "id": "W3-elixir-precondition-messages",
-      "title": "Elixir precondition custom messages: path 2 still emits derived text (M-T6.20)",
-      "kind": "mission",
-      "targets": ["elixir"],
-      "fileTrees": ["src/generator/elixir/vanilla/", "src/generator/elixir/render-stmt.ts"],
-      "fix": "Roadmap M-T6.20 (partial). Path 2 (raise -> prefix-routed GUARD_RESCUE) is open: swapping in author text makes the message-prefix routing MISS and reraise into a 500, so the emitter still falls back to the derived text. The routing key must stop being the message itself — carry the classification out of band (a structured exception field) rather than by string prefix. The wire code question (option (a) vs (b)) is unresolved and should be settled before coding; the mission brief is docs/new-plan/missions/M-T6.20-elixir-precondition-messages-brief.md.",
-      "tests": ["a runtime assertion that the author's message reaches the 422 body (npm run test:phoenix / behavioral-e2e-elixir)", "cross-backend wire differential on the message field", "the i18n validation catalog keys must still resolve (msg.<hash>)"],
-      "size": "M",
-      "wave": 3,
-      "conflictsWith": ["W2-elixir-vanilla-document-scope", "W3-phoenix-problem-details-floor"]
-    },
-    {
-      "id": "W3-provenanced-wire-pair",
-      "title": "Fold provenanced value + lineage into one Provenanced<T> carrier so all targets agree (M-T6.12)",
-      "kind": "mission",
-      "targets": ["node", "dotnet", "java", "python", "elixir", "all frontends"],
-      "fileTrees": ["src/ir/enrich/wire-projection.ts", "src/generator/_expr/target.ts", "per-backend dto emitters"],
-      "fix": "Roadmap M-T6.12. Today three backends bolt an extra lineage key onto the wire shape, so the five do not agree on the provenanced representation. Fold value+lineage into one `Provenanced<T> = {value, lineage}` carrier in wireShape (the enrichment is the single source every DTO emitter consumes, so the change lands once), including the `.value` read-site unwrap via ONE ExprTarget leaf rather than five. Phases 1-6 per the mission. This is a wire-contract change: rebaseline the goldens deliberately.",
-      "tests": ["cross-backend wire differential (LOOM_WIRE_UPDATE=1 node run.mjs, then review the golden diff as the contract change it is)", "conformance-parity.yml", "provenance-info-cross-target.test.ts (the frontends read the new shape)"],
-      "size": "L",
-      "wave": 3,
-      "conflictsWith": ["W2-flutter-provenance-info"]
-    }
-  ],
-
-  "counts": {
-    "gapsTotal": 51,
-    "wave1": 21,
-    "wave2": 17,
-    "wave3": 13,
-    "byKind": { "silent": 15, "honest": 17, "ratchet-drain": 3, "stale-drain": 4, "breadth": 6, "mission": 6 },
-    "claimedExclusions": 10,
-    "note": "Wave 1 is 15 silent cells + 4 stale-drains + 2 ratchet-drains (one ratchet-drain, W3-render-degradation-sentinels, is deliberately deferred to wave 3 because it goes red until #2568/#2569 and two wave-1 tasks land). Sizes: S x 13, M x 24, L x 14."
+  {
+   "gap": "Schemathesis W1 (non-JSON Content-Type -> 500) + W7 (z.coerce accepts false) + W5 (undeclared 500, clears with W1) on node (audit F28 partial)",
+   "pr": 2566,
+   "note": "W4/W6/W9 remain unclaimed"
+  },
+  {
+   "gap": "wire-golden capture of 4xx authorization responses",
+   "pr": 2541
+  },
+  {
+   "gap": "projection-join wire-golden capture",
+   "pr": 2590
+  },
+  {
+   "gap": "phase 7 validation drain / generateSystemFiles asserts phase 7 (M-T9.34 slice 2)",
+   "pr": "2587 + 2574"
+  },
+  {
+   "gap": "page identity derived + `area` block authoring",
+   "pr": 2583
+  },
+  {
+   "gap": "scaffolded pages inherit the route read gate (requires placement)",
+   "pr": 2581
+  },
+  {
+   "gap": "money/decimal follow-ups from #2560",
+   "pr": 2575,
+   "note": "POSSIBLE OVERLAP with W2-dotnet-decimal-wire (audit F27, waiver #2563) — the assigned agent must read #2575 first and stand down if it already covers the System.Decimal representation decision"
+  },
+  {
+   "gap": "this audit itself",
+   "pr": 2592
   }
+ ],
+ "alreadyComplete": {
+  "statement": "These axes were re-verified uniform on this commit (gate set AND at least one named emitter per target). They are the denominator: a fleet agent must NOT re-implement them, and two open missions that claim otherwise are stale (see stale-drain W1-close-overturned-missions).",
+  "backendAxesUniformAcrossAllFive": [
+   "capability filter — relational non-principal",
+   "capability filter — relational principal (currentUser / tenancy)",
+   "capability filter — shape(embedded)",
+   "ignoring <Cap> filter-bypass (platform axis; the dapper ADAPTER cell is the exception, W1-dapper-filter-bypass)",
+   "shape(relational) and shape(embedded) persistence",
+   "shape(document) persistence (elixir included, via the system-checks.ts:1571-1573 widening)",
+   "event-sourced aggregate (persistedAs: eventLog)",
+   "event-sourced WORKFLOW",
+   "TPH inheritance",
+   "provenanced fields",
+   "per-operation audited",
+   "audited lifecycle (create / destroy)",
+   "mask unless field read-redaction",
+   "paged queryHandler",
+   "query-time projection",
+   "projection whole-table aggregation",
+   "projection group by",
+   "projection sourced from a workflow",
+   "projection sourced from a projection",
+   "generic carriers (paged<T>, envelope<T>)",
+   "discriminated unions",
+   "when canCommand gate + can_<op> probe (at the ROUTE layer; off-route is W1-when-gate-off-route)",
+   "operation union returns",
+   "typed in-system api call (REMOTE_API_OP_UNSUPPORTED is the empty set)",
+   "per-context integration test emission",
+   "timerSource scheduling",
+   "channels: 3 brokers x 5 backends (15 cells)",
+   "resource kinds: 7 sourceTypes x 5 backends",
+   "extern / criterion / domainService"
+  ],
+  "frontendAxesUniform": [
+   "i18n t() runtime — all six frontends PLUS the HEEx render path",
+   "58 validator-accepted primitives on every frontend",
+   "expression leaf tables pinned complete both ways (jsExprLeaves x4, FS_LEAVES, DART_LEAVES)",
+   "required-emit set fully covered by real renderers on feliz (47/45) and flutter (45/43); both no-renderer sentinels dormant",
+   "stores, QueryView, FileLink, standalone FileUpload, Chart on all six",
+   "DataGrid on react/vue/svelte/angular/feliz (flutter + HEEx are settled exclusions)",
+   "45-cell sweep (4 frameworks x 15 pack versions x 3 showcase UIs) + 22 Chart/DataGrid cells: zero throws, zero fallback markers"
+  ],
+  "registersFullyDrained": [
+   "TS_COMPILE_SKIP",
+   "DOTNET_COMPILE_SKIP",
+   "JAVA_COMPILE_SKIP",
+   "PYTHON_COMPILE_SKIP",
+   "ELIXIR_COMPILE_SKIP",
+   "DAPPER_COMPILE_SKIP",
+   "DAPPER_SKIP (run-dapper.mjs)",
+   "BEHAVIOURAL_SKIP.node / .dotnet / .java",
+   "KNOWN_DEGRADATIONS + KNOWN_VERBATIM_INTRINSICS (render-degradation)",
+   "GAPS (frontend-showcase-render)",
+   "pipeline-layering ALLOWED, dead-generator-exports ALLOW, feature-doc KNOWN_GAPS"
+  ]
+ },
+ "gaps": [
+  {
+   "id": "W1-mikroorm-authz-seam",
+   "title": "MikroORM: policy deny read crashes codegen, and writeScopeFilter is never consumed (authorization bypass)",
+   "kind": "silent",
+   "targets": [
+    "node + persistence: mikroorm"
+   ],
+   "fileTrees": [
+    "src/generator/typescript/emit/mikroorm.ts",
+    "src/ir/validate/checks/system-checks.ts"
+   ],
+   "fix": "Two defects in one emitter, merged because they touch the same file. (1) Add an `authz-filter` arm to whereToMikroFilter/predicateEntry (mikroorm.ts:1104) so the childless deny sentinel lowers to a false predicate — mirror dapper.ts:712/740-763 which renders it as `1 = 0`; today the unguarded call site at :1695 throws `unsupported find predicate 'authz-filter'` with no loom.* code. (2) Port drizzle's write-scope pre-guard (repository-builder.ts:325-348) into all four mikroorm getById variants (:1989, :2310, :2532, :2751) — writeScopeFilter has ZERO references across 3033 lines, so a `deny write` carve-out silently succeeds. While in system-checks.ts, widen the mikroorm deep-scope gate (:3006) to scan writeScopeFilter the way dapper's (:2871) already does.",
+   "tests": [
+    "test/behavioral: delete MIKRO_SKIP[policy-deny] (run-mikroorm.mjs:144) and run `node run-mikroorm.mjs policy-deny`",
+    "behavioral-e2e-mikroorm.yml",
+    "a generator unit test asserting the deny predicate and the getById pre-guard appear in emitted mikroorm output",
+    "mutation-prove: restore the missing arm/guard and watch the new assertions fail"
+   ],
+   "size": "M",
+   "wave": 1,
+   "conflictsWith": [
+    "W1-dapper-filter-bypass",
+    "W1-adapter-migration-chain-gate",
+    "W1-direct-table-contextfilters",
+    "W1-stale-gate-prose",
+    "W2-mikroorm-deep-scope-tenancy",
+    "W2-mikroorm-find-predicate-subset"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-dapper-filter-bypass",
+   "title": "`ignoring <Cap>` is accepted on persistence: dapper and the emitted SQL still applies the bypassed filter",
+   "kind": "silent",
+   "targets": [
+    "dotnet + persistence: dapper"
+   ],
+   "fileTrees": [
+    "src/generator/dotnet/emit/dapper.ts",
+    "src/ir/validate/checks/system-checks.ts"
+   ],
+   "fix": "The bypass gate is family-level — FILTER_BYPASS_FAMILIES (system-checks.ts:2517) and bypassSupported() (:2523-2527) read only dep.platform — while the Dapper repository splices agg.contextFilters into every SELECT unconditionally (dapper.ts:1073-1098, capabilityFilters -> filterSql -> andFilter), with zero bypassAll/bypassCaps references in the file. Teach the Dapper repo the bypass set the way efcore.ts:672-682 / find-emit.ts:20-28 do for EF (there the mechanism is .IgnoreQueryFilters, EF-only, so Dapper needs its own: omit the predicate from the generated WHERE for the bypassed capabilities). If the emit turns out larger than one slice, land the honest gate first: make bypassSupported adapter-aware so `ignoring` on dapper raises loom.filter-bypass-unsupported instead of lying.",
+   "tests": [
+    "a dapper generator test asserting the bypassed capability predicate is ABSENT from the emitted find SQL",
+    "`node run-dapper.mjs read-gates` after W1-drain-behavioural-skip-dapper re-arms it",
+    "behavioral-e2e-dapper.yml",
+    "mutation-prove by re-adding the predicate"
+   ],
+   "size": "M",
+   "wave": 1,
+   "conflictsWith": [
+    "W1-mikroorm-authz-seam",
+    "W1-adapter-migration-chain-gate",
+    "W1-dapper-identifier-quoting",
+    "W1-stale-gate-prose",
+    "W2-dapper-deep-scope-tenancy",
+    "W2-dapper-directtable-projection"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-adapter-migration-chain-gate",
+   "title": "dapper and mikroorm skip the MigrationsIR chain entirely — declared migrations are never applied",
+   "kind": "silent",
+   "targets": [
+    "dotnet + persistence: dapper",
+    "node + persistence: mikroorm"
+   ],
+   "fileTrees": [
+    "src/generator/dotnet/index.ts",
+    "src/platform/hono/v4/emit.ts",
+    "src/ir/validate/checks/system-checks.ts"
+   ],
+   "fix": "dotnet/index.ts:983 (`!usingDapper`) and hono/v4/emit.ts:1030 (`!usingMikro`, plus :1038 for the provenance migration) drop the chain; schema instead comes from CREATE TABLE IF NOT EXISTS at boot (dapper.ts:2031-2035, 2248-2265) or orm.schema.updateSchema() (:1624-1629). Neither adapter validator mentions migrations. Slice 1 (this task): raise loom.dapper-unsupported#migrations / loom.mikroorm-unsupported#migrations whenever system.migrations is non-empty, so a declared rename/backfill/sql block fails honestly instead of silently no-op'ing (dapper) or drop+add'ing with data loss (mikroorm). Slice 2 (follow-up, size L): actually run the chain on both adapters and add the two cells to migration-evolution-e2e. Message text goes in src/diagnostics/messages.ts.",
+   "tests": [
+    "an IR-validate test per adapter proving the new code fires on a migration block",
+    "npm run test:schema-load unaffected",
+    "for slice 2: npm run test:migration-evolution-dotnet with persistence: dapper forced",
+    "mutation-prove: remove the gate clause and watch the test fail"
+   ],
+   "size": "M",
+   "wave": 1,
+   "conflictsWith": [
+    "W1-mikroorm-authz-seam",
+    "W1-dapper-filter-bypass",
+    "W1-dapper-identifier-quoting",
+    "W1-stale-gate-prose"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-resource-op-scope-gate",
+   "title": "A resource-op inside an aggregate operation/guard body is ungated: throws on 3 backends, emits unbound identifiers on 2",
+   "kind": "silent",
+   "targets": [
+    "node",
+    "dotnet",
+    "java",
+    "python",
+    "elixir"
+   ],
+   "fileTrees": [
+    "src/ir/validate/checks/",
+    "src/diagnostics/messages.ts"
+   ],
+   "fix": "A resource handle is ambient over the whole context (lower.ts:1175-1195 puts `resources` in the ONE Env aggregates also use; lower-expr.ts:1544-1561 resolves the bare name before locals; :672-690 lowers to callKind 'resource-op'), but the routing map only reaches renderers in workflow/handler contexts — so dotnet render-expr.ts:983-996, java :773-782 and elixir :1041-1053 THROW, while typescript :498-505 and python :632-637 emit an unbound `(await res$verb(...))`. docs/resources.md:165 already states the rule ('workflows only'); no validator implements it. Add one target-neutral IR check (new code loom.resource-op-outside-workflow) walking operation / create / destroy / guard bodies, modelled on the workflow-scoped checks at workflow-checks.ts:1071-1105. Note structural-checks.ts:1798-1802 argues a lifecycle GUARD resource-op is renderable — settle that explicitly rather than by accident.",
+   "tests": [
+    "one negative IR-validate test",
+    "test/system/diagnostic-catalog.test.ts (new message entry)",
+    "mutation-prove: delete the check and confirm the 3 throwing backends crash on the fixture"
+   ],
+   "size": "S",
+   "wave": 1,
+   "conflictsWith": [
+    "W1-subprimitive-placement-gate",
+    "W1-store-persist-honest-gate",
+    "W1-stale-gate-prose"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-subprimitive-placement-gate",
+   "title": "A misplaced `Tab` / `Column` silently vanishes on react, vue, svelte, angular and HEEx",
+   "kind": "silent",
+   "targets": [
+    "react",
+    "vue",
+    "svelte",
+    "angular",
+    "phoenixLiveView"
+   ],
+   "fileTrees": [
+    "src/ir/validate/checks/ui-checks.ts",
+    "src/diagnostics/messages.ts",
+    "src/generator/_walker/walker-core.ts"
+   ],
+   "fix": "`body: Stack { Tab(\"x\") }` (or a bare `Column(...)`) passes AST validation AND IR validation with zero diagnostics, then degrades to `{/* Tab: not supported by the React walker yet */}` (walker-core.ts:1135-1136) or `<%!-- ... --%>` (heex-walker-core.ts:1052), because registry.ts:737-743 gives the two `group: \"sub\"` primitives no tsx renderer. Add a placement check modelled EXACTLY on loom.slot-outside-component (ui-checks.ts:469-491, landed by #2567): `Tab` only inside `Tabs`, `Column` only inside `Table`/`DataGrid`. Also fix the fallback comment, which says 'the React walker' on vue/svelte/angular.",
+   "tests": [
+    "negative IR-validate tests for both primitives x page and component hosts",
+    "test/generator/_walker/render-degradation.test.ts should stay green (its sentinel already matches the message but the fixture never reaches it — see W3-render-degradation-sentinels)",
+    "mutation-prove: revert the gate via file copy and confirm the fixture emits the comment again"
+   ],
+   "size": "S",
+   "wave": 1,
+   "conflictsWith": [
+    "W1-resource-op-scope-gate",
+    "W1-store-persist-honest-gate"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-flutter-fileref-dart",
+   "title": "A File-typed aggregate field makes Flutter emit non-parsing Dart (`FileRef?? x`, .toJson() on a nullable receiver)",
+   "kind": "silent",
+   "targets": [
+    "flutter"
+   ],
+   "fileTrees": [
+    "src/generator/flutter/dart-model-emit.ts",
+    ".github/workflows/generated-flutter-build.yml"
+   ],
+   "fix": "copyWithParam (dart-model-emit.ts:99-104) blindly appends `?` to dartType(base(f.type)), but dartType already returns \"FileRef?\" for a File primitive (dart-types.ts:42, with an explicit guard at :70-71 saying so) — emitting `FileRef?? blob,` at models.dart:58 and :146. Same file, toJsonEntry (:89-94) keys off the IR `optional` flag rather than Dart nullability and emits an unconditional `blob.toJson()` at :51 and :139. Reuse the sibling helper's correct test (riverpod-emit.ts:335-347 checks `dt.endsWith(\"?\")`) in both places. CRITICAL second half: the flutter CI fixture has a File only in page STATE, never as an aggregate field, so `flutter analyze` never sees a FileRef wire model — add one to the workflow's embedded .ddd or the fix ships unguarded.",
+   "tests": [
+    "npm run test:... flutter generator unit test asserting no `??` in emitted models.dart and a null-aware toJson",
+    "generated-flutter-build.yml (`flutter analyze`) with the widened fixture",
+    "mutation-prove: revert dart-model-emit.ts via file copy and confirm analyze fails"
+   ],
+   "size": "S",
+   "wave": 1,
+   "conflictsWith": [
+    "W1-flutter-file-form-field",
+    "W1-component-derived-state"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-flutter-file-form-field",
+   "title": "Flutter renders an in-form `File` field as a plain text input and submits a string (guaranteed 422)",
+   "kind": "silent",
+   "targets": [
+    "flutter"
+   ],
+   "fileTrees": [
+    "src/generator/flutter/forms-emit.ts"
+   ],
+   "fix": "scalarInputKind (forms-emit.ts:183-212) sends the File primitive down `default: return \"text\"` at :208, and FlutterInputKind (:88-97) has no file member — so there is not even a drop marker. Emitted forms.dart gets a TextEditingController and `'blob': _blobController.text` against a backend requiring {url,key,contentType,size}. Add a `file` FlutterInputKind wired to the machinery the STANDALONE FileUpload primitive already ships (flutter/pack.ts:678 does file_picker -> multipart POST /files -> FileRef write-back) — the pieces exist, only the form-field path is unwired. Minimum acceptable fallback if the wiring is larger than one slice: add File to the droppedMarker family (forms-emit.ts:173) so it becomes an honest, frozen drop like the other four shapes.",
+   "tests": [
+    "test/generator/flutter/parity-freeze.test.ts (either a 5th pinned marker or its removal once the input lands)",
+    "a form emission test asserting a FileRef payload, not a String",
+    "generated-flutter-build.yml"
+   ],
+   "size": "M",
+   "wave": 1,
+   "conflictsWith": [
+    "W1-flutter-fileref-dart",
+    "W1-component-derived-state"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-feliz-file-form-field",
+   "title": "Feliz renders an in-form `File` field as a plain text input and submits a string (guaranteed 422)",
+   "kind": "silent",
+   "targets": [
+    "feliz"
+   ],
+   "fileTrees": [
+    "src/generator/feliz/wire.ts",
+    "src/generator/feliz/pack.ts"
+   ],
+   "fix": "FelizInputKind (wire.ts:363) has no file member and inputKindFor (:589-611) sends File down `default: return \"text\"` at :606 — emitted App.fs carries `blob: string`, `Encode.string form.blob` and a plain Html.input. Add a `file` kind bound to the existing standalone FileUpload machinery (feliz/pack.ts:814 already does the daisyUI file input + File state cell), so the form submits a FileRef object. Same shape as the flutter half (W1-flutter-file-form-field) — the two are disjoint trees and can run in parallel, but should agree on the payload shape. No marker exists on feliz at all, so if the input is deferred, add the loud marker first.",
+   "tests": [
+    "test/generator/feliz/file-upload.test.ts extended to the FORM-field case",
+    "generated-feliz-build.yml (dotnet + Fable build + Playwright)",
+    "mutation-prove by reverting wire.ts"
+   ],
+   "size": "M",
+   "wave": 1,
+   "conflictsWith": [
+    "W2-feliz-store-persist"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-store-persist-honest-gate",
+   "title": "`persist: local|session|url` silently degrades to in-memory on feliz and flutter — make it honest",
+   "kind": "silent",
+   "targets": [
+    "feliz",
+    "flutter"
+   ],
+   "fileTrees": [
+    "src/ir/validate/checks/store-checks.ts",
+    "src/diagnostics/messages.ts"
+   ],
+   "fix": "store-checks.ts gates store lifetime ONLY for LiveView (:230-249, loom.store-lifetime-liveview-invalid). flutter/store-builder.ts:76-88 emits a TODO comment and builds an in-memory notifier anyway; feliz has ZERO .lifetime references anywhere in src/generator/feliz (stores fold into the single Elmish Model) so there is not even a TODO. Extend the LiveView gate to feliz+flutter — a non-`memory` lifetime becomes an honest error — which converts two silent cells into one existing, well-shaped diagnostic. The IMPLEMENTATIONS are separate wave-2 tasks (W2-feliz-store-persist, W2-flutter-store-persist) that delete their arm of this gate when they land.",
+   "tests": [
+    "negative IR-validate test per target",
+    "test/system/diagnostic-catalog.test.ts",
+    "mutation-prove: remove the arm and confirm the fixture generates an in-memory store with no error"
+   ],
+   "size": "S",
+   "wave": 1,
+   "conflictsWith": [
+    "W1-resource-op-scope-gate",
+    "W1-subprimitive-placement-gate",
+    "W2-feliz-store-persist",
+    "W2-flutter-store-persist"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-component-derived-state",
+   "title": "`derived`-bearing user components vanish on feliz + flutter; `state`-bearing ones vanish on feliz",
+   "kind": "silent",
+   "targets": [
+    "feliz",
+    "flutter"
+   ],
+   "fileTrees": [
+    "src/generator/feliz/component-emit.ts",
+    "src/generator/flutter/component-emit.ts"
+   ],
+   "fix": "NOT covered by #2568, which closes the read-bearing case only — but it touches the SAME two files, so STACK this PR on #2568's branch rather than racing it. feliz isCandidate (component-emit.ts:112-121) requires state/derived/actions all empty; flutter (:18-22, :129-133) lists derived among the non-threaded shapes. Both emit `unknown layout component: X`. Thread `derived` first (it is a pure function of props — compute it in the builder before the body walk), then on feliz thread `state` + `actions` by folding them into the Elmish Model the way the store path already does (feliz/index.ts:1034-1052); flutter already emits the stateful case as a StatefulWidget, so its residue is derived-only.",
+   "tests": [
+    "a per-target component test with a derived binding (and a stateful one on feliz)",
+    "test/generator/_walker/render-degradation.test.ts once W3-render-degradation-sentinels widens the fixture to a state/derived-bearing component",
+    "generated-feliz-build.yml + generated-flutter-build.yml"
+   ],
+   "size": "M",
+   "wave": 1,
+   "conflictsWith": [
+    "W1-flutter-fileref-dart",
+    "W1-flutter-file-form-field",
+    "PR#2568",
+    "PR#2569"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-elixir-seeder",
+   "title": "platform: elixir emits no seeder — every `seed` dataset is silently dropped",
+   "kind": "silent",
+   "targets": [
+    "elixir"
+   ],
+   "fileTrees": [
+    "src/generator/elixir/",
+    "src/generator/_persistence/seed-datasets.ts"
+   ],
+   "fix": "Roadmap M-T6.37, verified silent: priv/repo/seeds.exs is only a layout slot (elixir/adapters/by-feature-layout.ts:66,181-182) and a doc comment (elixir/index.ts:28) — no emitter writes it and nothing reads ctx.seeds, while the other four import _persistence/seed-datasets.ts. Emit an Ecto seeder: domain rows through the context `create` path (D-SEED-PATH so invariants run), raw rows as SCHEMA-QUALIFIED INSERTs (the qualifier bug #2517 fixed on node/.NET), the ship-once `__loom_seed` marker (D-SEED-IDEMPOTENCY), LOOM_SEED dataset gating, invoked at boot beside the migrations. Closest model to mirror: java's `<Ctx>SeedRunner` (java/emit/seed.ts:106).",
+   "tests": [
+    "ACCEPTANCE = delete BEHAVIOURAL_SKIP.elixir['seed-values'] (cases.mjs:340-341) and run `node run-elixir.mjs seeding` in the Elixir docker image — NOT a string assertion",
+    "behavioral-e2e-elixir.yml",
+    "npm run test:elixir-corpus (LOOM_HEX_MIRROR=1)"
+   ],
+   "size": "M",
+   "wave": 1,
+   "conflictsWith": [
+    "W1-elixir-listpage-arity",
+    "W2-elixir-document-capability-filter",
+    "W2-elixir-sse-realtime"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-elixir-listpage-arity",
+   "title": "A non-paged author `find all` + a scaffolded Elixir list page emits a project that will not compile",
+   "kind": "silent",
+   "targets": [
+    "elixir"
+   ],
+   "fileTrees": [
+    "src/generator/elixir/liveview-emit.ts",
+    "src/generator/elixir/vanilla/context-emit.ts"
+   ],
+   "fix": "Roadmap M-T6.40, verified: liveview-emit.ts:1070 emits `case ${ctxModule}.list_${aggSnake}s(${listArgs}) do` with 4-arity listArgs against the bare 0-arity defdelegate emitted by vanilla/context-emit.ts — three call sites, and `mix compile --warnings-as-errors` fails. Derive the call arity from the same query-builder facts the context delegate is built from (single source), or emit the paged delegate when the page needs one. If some shape genuinely cannot meet, gate it — but the arity mismatch itself is a derivation bug, not a capability gap.",
+   "tests": [
+    "npm run test:phoenix (LOOM_PHOENIX_VANILLA_BUILD=1 LOOM_HEX_MIRROR=1) on a fixture with a non-paged find all + scaffolded list page",
+    "corpus-elixir-build.yml",
+    "mutation-prove: revert the arity derivation and confirm mix compile fails"
+   ],
+   "size": "M",
+   "wave": 1,
+   "conflictsWith": [
+    "W1-elixir-seeder",
+    "W2-elixir-sse-realtime",
+    "W2-elixir-vanilla-document-scope"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-dapper-identifier-quoting",
+   "title": "persistence: dapper emits unquoted identifiers — a reserved-word column makes the DDL a syntax error",
+   "kind": "silent",
+   "targets": [
+    "dotnet + persistence: dapper"
+   ],
+   "fileTrees": [
+    "src/generator/dotnet/emit/dapper.ts",
+    "test/fixtures/corpus/"
+   ],
+   "fix": "Roadmap M-T6.41 (line 590), verified: dapper.ts builds `CREATE TABLE IF NOT EXISTS ${tableOf(agg.name)}` at :2080, :2099, :2145, :2155, :2171, :2180, :2211 with NO identifier-quoting helper anywhere in the file, so a field named order/user/group/end is a Postgres syntax error at boot. Add a quoteIdent helper applied at all seven sites, mirroring the quoting the shared Postgres renderer (src/generator/sql-pg.ts) already does for the MigrationsIR path. Compiles green today because emitted schema is data, not code.",
+   "tests": [
+    "npm run test:schema-load (LOOM_SCHEMA_LOAD=1) — the oracle for this class — WITH a new reserved-word corpus fixture, otherwise the gate cannot see it",
+    "npm run test:dapper-corpus",
+    "mutation-prove: revert the helper and confirm psql -f fails"
+   ],
+   "size": "M",
+   "wave": 1,
+   "conflictsWith": [
+    "W1-dapper-filter-bypass",
+    "W1-adapter-migration-chain-gate",
+    "W2-dapper-deep-scope-tenancy",
+    "W2-dapper-directtable-projection"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-direct-table-contextfilters",
+   "title": "A direct-table aggregation projection applies NO capability contextFilters on drizzle or mikroorm (silent wrong answer)",
+   "kind": "silent",
+   "targets": [
+    "node + drizzle",
+    "node + mikroorm"
+   ],
+   "fileTrees": [
+    "src/platform/hono/v5/",
+    "src/platform/hono/v4/",
+    "src/generator/typescript/emit/mikroorm.ts"
+   ],
+   "fix": "Roadmap M-T6.41 (line 108). A query-time aggregation projection reads the source table directly and neither node adapter ANDs in the aggregate's capability contextFilters — a softDeletable source counts soft-deleted rows, a tenantOwned source counts foreign tenants. Thread contextFilters (minus the `ignoring` bypass set) into the direct-table select on both paths; mikroContextFilters(agg, bypass) already accepts a bypass set, so the seam exists on the mikro side. Check the other three backends' direct-table arms for the same omission before declaring it node-only.",
+   "tests": [
+    "a behavioural assertion that a soft-deleted row does not move the aggregation count (behavioral-e2e.yml + behavioral-e2e-mikroorm.yml)",
+    "a generator test asserting the filter predicate appears in the emitted direct-table select",
+    "wire-golden differential (the number is a response VALUE)"
+   ],
+   "size": "M",
+   "wave": 1,
+   "conflictsWith": [
+    "W1-mikroorm-authz-seam",
+    "W2-mikroorm-deep-scope-tenancy"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-when-gate-off-route",
+   "title": "A `when` state gate is not enforced off the aggregate route — workflow steps and extern handlers bypass it",
+   "kind": "silent",
+   "targets": [
+    "node",
+    "dotnet",
+    "java",
+    "python",
+    "elixir"
+   ],
+   "fileTrees": [
+    "src/platform/hono/v4/routes-builder.ts",
+    "src/generator/dotnet/cqrs/",
+    "src/generator/java/emit/service.ts",
+    "src/generator/python/routes-builder.ts",
+    "src/generator/elixir/vanilla/api-emit.ts"
+   ],
+   "fix": "Roadmap M-T6.38. The `when` predicate is emitted at the route/handler layer only (node whenGateLine in routes-builder.ts; dotnet <Op>Handler.cs), while a workflow step / saga cascade / extern commandHandler calls the DOMAIN method directly, which carries no gate — so the write lands with no DisallowedError and no 409. FIRST re-verify the java/python/elixir rows, which the mission explicitly marks unverified; the node and dotnet rows were verified empirically. Then move (or duplicate) the gate to the domain-method entry so every caller path evaluates it. This is the absence of a refusal, not a wire-shape divergence, so a wire-golden diff cannot see it — the proof must be a behavioural invoke-from-workflow case.",
+   "tests": [
+    "a behavioural case per backend: a when-gated op invoked from an on(e) workflow step must 409/refuse",
+    "context-integration-e2e.yml",
+    "mutation-prove: remove the domain-level gate and confirm the write lands"
+   ],
+   "size": "L",
+   "wave": 1,
+   "conflictsWith": [
+    "W2-notfound-status-override",
+    "W2-openapi-declares-what-it-answers"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-drain-policy-document-dotnet",
+   "title": "Stale: the corpus manifest still excludes dotnet from the policy-document row",
+   "kind": "stale-drain",
+   "targets": [
+    "dotnet"
+   ],
+   "fileTrees": [
+    "test/fixtures/corpus/manifest.ts"
+   ],
+   "fix": "manifest.ts:93 keys the policy-document row on IN_APP_DOCUMENT_FILTER (node/java/python, :24), citing two defects that are BOTH fixed: _CapabilityVisible on the document repo impl (dotnet/emit/repository.ts:694, applied :740/:804/:817) and GetByIdForWriteAsync on it (:708). The audit proved it by generating the fixture (106 files) and running dotnet build /warnaserror in mcr.microsoft.com/dotnet/sdk:10.0 — 0 warnings, 0 errors. Widen the row to include dotnet and rewrite the note so it describes only the LIVE elixir exclusion. Do not touch the elixir cell: it fires (2x loom.context-filter-unsupported).",
+   "tests": [
+    "npm run test:dotnet-corpus with the widened row (LOOM_CORPUS_DOTNET_CASE=policy-document)",
+    "npm run test:dapper-corpus"
+   ],
+   "size": "S",
+   "wave": 1,
+   "conflictsWith": [],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-drain-behavioural-skip-dapper",
+   "title": "Stale: three of four BEHAVIOURAL_SKIP entries claim a dapper refusal that no longer happens",
+   "kind": "stale-drain",
+   "targets": [
+    "dotnet + persistence: dapper"
+   ],
+   "fileTrees": [
+    "test/behavioral/cases.mjs"
+   ],
+   "fix": "cases.mjs:307-319 skips projection-aggregation, projection-groupby and read-gates on the Dapper leg claiming loom.dapper-unsupported 'refuses to generate'. It does not: M-T6.25 landed the raw-Npgsql query-time arms (dotnet/query-projection-emit.ts:314-337, 499-546, 686-777), the gate narrowed to dapperQueryProjectionGap, and the dapper oracle (corpus-dotnet-dapper-build.test.ts:123-161) passes with DAPPER_UNSUPPORTED = {tenancy-hierarchy} only. Delete all three entries. Deleting RE-ARMS a boot that has never run for these cases, so pair each deletion with an actual `node run-dapper.mjs <case>` run and fix whatever it surfaces — read-gates is the costliest (the leg currently asserts no runtime denial for any of its three read-gate kinds). Bonus: projection-groupby on dapper is exactly the case the one live wire waiver (#2563) is scoped to.",
+   "tests": [
+    "node run-dapper.mjs projection-aggregation | projection-groupby | read-gates",
+    "behavioral-e2e-dapper.yml",
+    "test/platform/allowlist-ratchet.test.ts once W1-register-skip-ratchets registers this map"
+   ],
+   "size": "S",
+   "wave": 1,
+   "conflictsWith": [
+    "W1-register-skip-ratchets",
+    "W1-dapper-filter-bypass"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-register-skip-ratchets",
+   "title": "Governance: BEHAVIOURAL_SKIP and ELIXIR_COMPILE_SKIP are the two registers with no size ratchet",
+   "kind": "ratchet-drain",
+   "targets": [
+    "all"
+   ],
+   "fileTrees": [
+    "test/platform/allowlist-ratchet.test.ts"
+   ],
+   "fix": "allowlist-ratchet.test.ts's REGISTERED list (:43-197) covers 13 constructs including MIKRO_SKIP — added, per its own comment at :168-175, precisely because it 'had been growing unwatched'. BEHAVIOURAL_SKIP (cases.mjs:282) and ELIXIR_COMPILE_SKIP (corpus-elixir-build.test.ts:51-54) are not in it. Register both with exact pins (BEHAVIOURAL_SKIP at 1 AFTER W1-drain-behavioural-skip-dapper lands, ELIXIR_COMPILE_SKIP at 0), and add BEHAVIOURAL_SKIP a per-key oracle like the dapper maps have (corpus-dotnet-dapper-build.test.ts:123-161) so an entry claiming a refusal must actually reproduce one.",
+   "tests": [
+    "npm test (test/platform/allowlist-ratchet.test.ts)",
+    "mutation-prove: add a bogus skip entry and confirm the ratchet fails"
+   ],
+   "size": "S",
+   "wave": 1,
+   "conflictsWith": [
+    "W1-drain-behavioural-skip-dapper",
+    "W1-diagnostic-census-reclassify",
+    "W1-stale-gate-prose"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-diagnostic-census-reclassify",
+   "title": "Ratchet drain: at least 2 of the 38 UNCOVERED diagnostic codes are provably unreachable",
+   "kind": "ratchet-drain",
+   "targets": [
+    "all"
+   ],
+   "fileTrees": [
+    "test/system/diagnostic-firing-census.data.ts",
+    "test/platform/allowlist-ratchet.test.ts"
+   ],
+   "fix": "diagnostic-firing-census.data.ts:386+ holds 38 UNCOVERED entries (pinned max 38). Two are unreachable rather than merely uncovered: loom.projection-query-time-unsupported (PROJECTION_QT_SUPPORTED = all five, system-checks.ts:122, consumed :231) and loom.saving-shape-unsupported (every shipping backend has all three shapes once the elixir document widening at :1571-1573 applies). Move them to the file's own UNREACHABLE_PINS exit (:384-385) and lower the pin — no implementation work required. Then run the same check over the siblings of the same 'N-backend-era' shape: loom.audited-backend-unsupported, loom.event-sourcing-backend-unsupported, loom.provenanced-backend-unsupported, loom.union-unsupported, loom.when-unsupported.",
+   "tests": [
+    "npm test (diagnostic-firing-census + allowlist-ratchet)",
+    "for each moved code, a one-line argument in the pin comment naming the set literal that makes it unreachable"
+   ],
+   "size": "S",
+   "wave": 1,
+   "conflictsWith": [
+    "W1-register-skip-ratchets",
+    "W1-stale-gate-prose"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-stale-gate-prose",
+   "title": "Stale in-code references and one user-visible diagnostic message that understates elixir support",
+   "kind": "stale-drain",
+   "targets": [
+    "all"
+   ],
+   "fileTrees": [
+    "src/ir/validate/checks/system-checks.ts",
+    "src/diagnostics/messages.ts",
+    "src/util/platform-axes.ts",
+    "src/generator/_packs/required-primitives.ts",
+    "src/generator/_walker/registry.ts",
+    "src/generator/_walker/target.ts",
+    "test/platform/allowlist-ratchet.test.ts"
+   ],
+   "fix": "Six stale claims that read as live limits. USER-VISIBLE (fix first): the elixir document-filter message (system-checks.ts:2445-2447 -> messages.ts) says filters are 'only wired for relational aggregates on the elixir backend' — embedded IS wired (:2358) — and advises hosting on .NET, the backend the corpus manifest row excludes. Then: system-checks.ts:1612 cites loom.vanilla-containment-unsupported, a code that exists NOWHERE in src/; :2185 cites loom.java-embedded-refcoll-unsupported in the past tense with no raise site; platform-axes.ts:31 omits `document` for elixir while :1571-1573 adds it back (annotate or fix the table); required-primitives.ts:126-129 (FileUpload pinned as a HEEx gap it is not — it has a heex renderer at registry.ts:406-412), :46-51 (surviving AshPhoenix.Form reference) and :236-246 (the 'vue/svelte/angular have no chart' claim, contradicted by CHART_FRAMEWORKS); registry.ts:334-335 and :659-661 (Section/CodeBlock/Icon described as having no heex renderer — all three do); target.ts:39 ('13 methods' — it is 72); allowlist-ratchet.test.ts:51-55 (claims ProjectionJoin/ProjectionSelect are gated by an inert code). Also delete or implement the documented-but-dead renderStoreModule seam (target.ts:1125-1183) — no frontend implements it.",
+   "tests": [
+    "npm test (diagnostic-catalog + walker-stdlib-completeness stay green)",
+    "grep-prove each deleted claim has no live raise site before removing it"
+   ],
+   "size": "S",
+   "wave": 1,
+   "conflictsWith": [
+    "W1-mikroorm-authz-seam",
+    "W1-dapper-filter-bypass",
+    "W1-adapter-migration-chain-gate",
+    "W1-resource-op-scope-gate",
+    "W1-register-skip-ratchets",
+    "W1-diagnostic-census-reclassify"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W1-close-overturned-missions",
+   "title": "Stale: two open missions (M-T6.32, M-T6.34) rest on premises the code overturns",
+   "kind": "stale-drain",
+   "targets": [
+    "all"
+   ],
+   "fileTrees": [
+    "docs/new-plan/T6-backend-parity.md"
+   ],
+   "fix": "Highest-leverage cheap item: these two rows will otherwise send a fleet agent to build already-shipped work. M-T6.34 ('Event-sourced storage exists on one backend of five') is false — EVENT_SOURCING_BACKENDS (system-checks.ts:3704) and EVENT_SOURCING_WORKFLOW_BACKENDS (:3744) are both full 5/5, the aggregate half is pinned per-backend by backend-parity-gates.test.ts:198-214 and the workflow half has five emitters; it also cites line numbers ~440 lines adrift. M-T6.32 ('the four capabilities that gate honestly and emit nothing') is likewise closed on the platform axis — all four sets are 5/5 with named emitters; its own text says 'First step is a re-verify', and this audit is it. Close both, or rewrite each to its true residue: the ADAPTER cells (W1-dapper-filter-bypass) and the elixir document cell (W2-elixir-document-capability-filter). Also resolve the M-T6.41 duplicate ID (line 108 vs line 590) so the two tasks stay separable.",
+   "tests": [
+    "none (tracker correction) — but each closure line must cite the set literal + emitter that overturned it, per the repo's evidence rule"
+   ],
+   "size": "S",
+   "wave": 1,
+   "conflictsWith": [],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W2-elixir-document-capability-filter",
+   "title": "elixir x shape(document) capability filters — the single platform hold-out in the whole gate-set inventory",
+   "kind": "honest",
+   "targets": [
+    "elixir"
+   ],
+   "fileTrees": [
+    "src/generator/elixir/vanilla/document-emit.ts",
+    "src/generator/elixir/vanilla/repository-emit.ts",
+    "src/ir/validate/checks/system-checks.ts",
+    "test/fixtures/corpus/manifest.ts"
+   ],
+   "fix": "supportsNonRelationalFilter (system-checks.ts:2355-2364) admits elixir for `embedded` only; document-emit.ts never imports ./capability-filter.js and repository-emit.ts:84-85 routes document aggregates to a filter-less renderDocRepository. Implement in-app filtering on the elixir document read path — the four other backends all do it and java/emit/document-store.ts:50-58,228 is the closest analog (python/repository-document-builder.ts:65-73,283 and dotnet/emit/repository.ts:694 are the others). Then widen supportsNonRelationalFilter AND supportsPrincipalNonRelationalFilter (:2382-2391), and widen the corpus manifest policy-document row (manifest.ts:93) to include elixir — that widening is the acceptance test.",
+   "tests": [
+    "npm run test:elixir-corpus with policy-document enabled (LOOM_HEX_MIRROR=1)",
+    "node run-elixir.mjs policy-document",
+    "backend-parity-gates.test.ts with the shape: document variant from W3-parity-gates-matrix-extension",
+    "mutation-prove: revert the filter and confirm the corpus row fails"
+   ],
+   "size": "L",
+   "wave": 2,
+   "conflictsWith": [
+    "W1-elixir-seeder",
+    "W2-elixir-vanilla-document-scope",
+    "W1-drain-policy-document-dotnet"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W2-elixir-sse-realtime",
+   "title": "The elixir backend serves no SSE wire, so an SPA frontend's `on <channel>.<Event>` handler is dropped with only a warning",
+   "kind": "honest",
+   "targets": [
+    "elixir"
+   ],
+   "fileTrees": [
+    "src/generator/elixir/vanilla/",
+    "src/ir/util/channels.ts",
+    "src/ir/validate/checks/system-checks.ts"
+   ],
+   "fix": "backendServesRealtime (ir/util/channels.ts:14-18) lists node/dotnet/java/python only; a react/vue/svelte/angular/feliz UI pointed at platform: elixir gets loom.ui-realtime-unsupported#backend-serves-no-sse at severity WARNING (system-checks.ts:672-673) and the handler silently vanishes. A LiveView UI is legitimately N/A (it pushes over its own socket, elixir/realtime-liveview.ts). Emit the SSE endpoint + broadcast tee on vanilla Phoenix, mirroring the four shipped emitters (hono/v4/realtime-builder.ts, dotnet/emit/realtime.ts, java/emit/realtime.ts, python realtime), then add elixir to backendServesRealtime. If the emit is deferred, at minimum raise the warning to an ERROR — a warning is a silent gap wearing a hat.",
+   "tests": [
+    "a runtime SSE round-trip against the booted Phoenix backend (the pattern of the other four legs)",
+    "npm run test:phoenix",
+    "an IR-validate test that the warning is gone / the error fires"
+   ],
+   "size": "L",
+   "wave": 2,
+   "conflictsWith": [
+    "W1-elixir-seeder",
+    "W1-elixir-listpage-arity",
+    "W2-flutter-realtime-sse"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W2-flutter-realtime-sse",
+   "title": "Flutter has no realtime consumer — the handler compiles clean and drops (warning only)",
+   "kind": "honest",
+   "targets": [
+    "flutter"
+   ],
+   "fileTrees": [
+    "src/generator/flutter/",
+    "src/ir/validate/checks/system-checks.ts"
+   ],
+   "fix": "Roadmap M-T1.18 Phase 3 (M-F). No flutter realtime emitter exists; system-checks.ts:685-696 pushes loom.ui-realtime-unsupported#frontend-has-no-consumer at severity WARNING. Port the SSE consumer that feliz already ships (feliz/realtime.ts:1-188 — EventSource subscription, per-event listener, toast, refetch) onto Dart/Riverpod, then add flutter to SSE_REALTIME_FRONTENDS (system-checks.ts:619-627). Deliberately paired in wave 2 with W2-elixir-sse-realtime because both cells are the same warning-only class on opposite sides of the wire.",
+   "tests": [
+    "test/generator/flutter realtime unit test",
+    "generated-flutter-build.yml (flutter analyze + flutter test)",
+    "an IR-validate test that the warning no longer fires"
+   ],
+   "size": "M",
+   "wave": 2,
+   "conflictsWith": [
+    "W2-flutter-auth-ui",
+    "W2-flutter-store-persist",
+    "W2-flutter-provenance-info",
+    "W2-elixir-sse-realtime"
+   ],
+   "disposition": {
+    "state": "in-flight",
+    "pr": 2619
+   }
+  },
+  {
+   "id": "W2-flutter-auth-ui",
+   "title": "`auth: ui` is the one frontend capability flutter cannot do (honest error)",
+   "kind": "honest",
+   "targets": [
+    "flutter"
+   ],
+   "fileTrees": [
+    "src/generator/flutter/",
+    "src/ir/validate/checks/system-checks.ts"
+   ],
+   "fix": "AUTH_UI_FRAMEWORKS (system-checks.ts:103) = react/vue/svelte/angular/feliz; loom.auth-ui-unsupported-framework raises at :548-561, and the emitter hard-codes the absence (flutter/index.ts:348 `false, // authUi`, riverpod-emit.ts:107, component-emit.ts:99). Port the session guard feliz shipped — feliz/auth-gate.ts (186 lines) wired at feliz/index.ts:51,147,1209 is the direct analog and the most recent one, so its shape is current. Then add flutter to AUTH_UI_FRAMEWORKS and check the sibling validateCurrentUserNeedsAuthUi (:580-610) still behaves.",
+   "tests": [
+    "test/generator/flutter auth-gate test",
+    "generated-flutter-build.yml",
+    "an IR-validate test that the gate no longer fires for flutter",
+    "docs/new-plan/T1-ui-frontend.md:267's M-T1.20 row updated (its feliz half is ALREADY stale)"
+   ],
+   "size": "M",
+   "wave": 2,
+   "conflictsWith": [
+    "W2-flutter-realtime-sse",
+    "W2-flutter-store-persist",
+    "W2-flutter-provenance-info"
+   ],
+   "disposition": {
+    "state": "in-flight",
+    "pr": 2619
+   }
+  },
+  {
+   "id": "W2-feliz-store-persist",
+   "title": "Implement store `persist: local|session|url` on feliz",
+   "kind": "honest",
+   "targets": [
+    "feliz"
+   ],
+   "fileTrees": [
+    "src/generator/feliz/index.ts",
+    "src/generator/feliz/feliz-target.ts",
+    "src/ir/validate/checks/store-checks.ts"
+   ],
+   "fix": "Feliz stores fold into the single Elmish Model (feliz/index.ts:215-243, 1034-1052) and nothing reads .lifetime. Add persistence at the fold boundary: hydrate from localStorage/sessionStorage/query-param on init and write back in the update loop. The four JSX store-builders (react :254-289, vue :251-313, svelte :264-319, angular :280-314) define the semantics to match — same keys, same url-param shape. Delete the feliz arm of the honest gate W1-store-persist-honest-gate added, in this PR.",
+   "tests": [
+    "test/generator/feliz store test asserting hydration + write-back",
+    "generated-feliz-build.yml (dotnet + Fable build + Playwright)",
+    "the frontend-fullstack-e2e feliz leg"
+   ],
+   "size": "M",
+   "wave": 2,
+   "conflictsWith": [
+    "W1-feliz-file-form-field",
+    "W1-store-persist-honest-gate"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W2-flutter-store-persist",
+   "title": "Implement store `persist: local|session|url` on flutter",
+   "kind": "honest",
+   "targets": [
+    "flutter"
+   ],
+   "fileTrees": [
+    "src/generator/flutter/store-builder.ts",
+    "src/ir/validate/checks/store-checks.ts"
+   ],
+   "fix": "store-builder.ts:76-88 emits `// TODO(flutter full-parity): persist: <x> is not implemented` and builds an in-memory Riverpod notifier anyway. Back the notifier with shared_preferences (local/session) and the router query string (url), matching the key + shape the four JSX store-builders use. Delete the flutter arm of the honest gate from W1-store-persist-honest-gate in this PR, and delete the TODO marker.",
+   "tests": [
+    "test/generator/flutter/store.test.ts extended",
+    "generated-flutter-build.yml",
+    "mutation-prove: revert and confirm the gate/marker returns"
+   ],
+   "size": "M",
+   "wave": 2,
+   "conflictsWith": [
+    "W2-flutter-realtime-sse",
+    "W2-flutter-auth-ui",
+    "W2-flutter-provenance-info",
+    "W1-store-persist-honest-gate"
+   ],
+   "disposition": {
+    "state": "in-flight",
+    "pr": 2619
+   }
+  },
+  {
+   "id": "W2-mikroorm-deep-scope-tenancy",
+   "title": "MikroORM rejects hierarchical (deep/global) tenancy scope",
+   "kind": "honest",
+   "targets": [
+    "node + persistence: mikroorm"
+   ],
+   "fileTrees": [
+    "src/generator/typescript/emit/mikroorm.ts",
+    "src/platform/hono/v4/emit.ts",
+    "src/ir/validate/checks/system-checks.ts"
+   ],
+   "fix": "system-checks.ts:3006-3013 rejects any isDeepScopeFilter contextFilter under mikroorm because the FilterQuery subset cannot express the descendant-or-self predicate and the emitter would SWALLOW the failure (:1193-1205 try/catch) — i.e. a silent cross-tenant read. Also hono/v4/emit.ts:1568 refuses to register the orgPath resolver on mikro (`wireOrgPath = !!orgPathRegistryTable && !usingMikro`). Express the materialized-path predicate through MikroORM's raw/expr escape hatch, register the orgPath resolver, then delete the gate. Analog: the drizzle path plus the dapper twin (W2-dapper-deep-scope-tenancy) — do them as a pair so the two adapters agree.",
+   "tests": [
+    "npm run test:tenancy-hierarchy against the mikroorm adapter",
+    "behavioral-e2e-mikroorm.yml",
+    "the orgXa.leak wildcard trap must stay green",
+    "mutation-prove: reinstate the gate and confirm the new runtime assertion is what proves the fix, not a string match"
+   ],
+   "size": "L",
+   "wave": 2,
+   "conflictsWith": [
+    "W1-mikroorm-authz-seam",
+    "W1-direct-table-contextfilters",
+    "W2-mikroorm-find-predicate-subset"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W2-dapper-deep-scope-tenancy",
+   "title": "Dapper rejects hierarchical (deep/global) tenancy scope — the last DAPPER_UNSUPPORTED entry",
+   "kind": "honest",
+   "targets": [
+    "dotnet + persistence: dapper"
+   ],
+   "fileTrees": [
+    "src/generator/dotnet/emit/dapper.ts",
+    "src/ir/validate/checks/system-checks.ts"
+   ],
+   "fix": "system-checks.ts:2871-2887 raises loom.dapper-unsupported#deep-scope for any isDeepScopeFilter in contextFilters OR writeScopeFilter, because the Dapper principal-param collector cannot bind @__cu_* inside the materialized-path sentinel. The principal-FREE deny sentinel is already handled (dapper.ts:712, 740-763 render it as `1 = 0`), so the machinery is half there — extend the param collector to walk the sentinel and bind its principal params. Draining this empties DAPPER_UNSUPPORTED (corpus-dotnet-dapper-build.test.ts:69-76) to zero.",
+   "tests": [
+    "npm run test:tenancy-hierarchy-dotnet with persistence: dapper forced",
+    "npm run test:dapper-corpus with tenancy-hierarchy re-armed",
+    "allowlist-ratchet.test.ts:120-133 pin lowered 1 -> 0 in the same PR"
+   ],
+   "size": "L",
+   "wave": 2,
+   "conflictsWith": [
+    "W1-dapper-filter-bypass",
+    "W1-dapper-identifier-quoting",
+    "W2-dapper-directtable-projection"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W2-mikroorm-find-predicate-subset",
+   "title": "MIKROORM_SUBSET narrows two shapes — one real (method-call), one stale (currentUser)",
+   "kind": "honest",
+   "targets": [
+    "node + persistence: mikroorm"
+   ],
+   "fileTrees": [
+    "src/ir/util/find-predicate-capability.ts",
+    "src/generator/typescript/emit/mikroorm.ts"
+   ],
+   "fix": "Two entries in one file, merged. (a) STALE OVER-GATE: find-predicate-capability.ts:129-133 rejects currentUser.<field> with 'no principal accessor on the MikroORM find path' — but emit/mikroorm.ts:1027-1034 renders requireCurrentUser().<claim> with a body-scan-driven import (:2054-2062, :2377-2384). Verify against emitted output, then drop the narrowing. (b) REAL: a method-call predicate (startsWith) falls through at :125, so MIKRO_SKIP[prefix-filter] is honest — add an intrinsic arm to whereToMikroFilter and drop the narrowing at :138-145. The contains-membership arm (:122-123) stays: there is genuinely no join subquery. Delete MIKRO_SKIP[prefix-filter] (run-mikroorm.mjs:123-124) when (b) lands; the size pin is allowlist-ratchet.test.ts:191-196 (max 2, no slack).",
+   "tests": [
+    "node run-mikroorm.mjs prefix-filter",
+    "behavioral-e2e-mikroorm.yml",
+    "an IR-validate test that the currentUser find predicate is accepted",
+    "allowlist-ratchet pin lowered in the same PR"
+   ],
+   "size": "M",
+   "wave": 2,
+   "conflictsWith": [
+    "W1-mikroorm-authz-seam",
+    "W2-mikroorm-deep-scope-tenancy"
+   ],
+   "disposition": {
+    "state": "in-flight",
+    "pr": 2622
+   }
+  },
+  {
+   "id": "W2-dapper-directtable-projection",
+   "title": "Dapper rejects the direct-table query-time projection arm over a column-less source",
+   "kind": "honest",
+   "targets": [
+    "all five backends (was: dotnet + persistence: dapper)"
+   ],
+   "fileTrees": [
+    "src/ir/util/query-projection-arm.ts",
+    "src/ir/validate/checks/system-checks.ts",
+    "src/macros/stdlib/scaffold/_dashboard-shared.ts",
+    "src/generator/dotnet/query-projection-emit.ts"
+   ],
+   "fix": "RESOLVED (not as scoped). The premise below — that EF Core reads the column-less sources and Dapper merely has to catch up — was FALSE, and was the reason this sat as an adapter row. EF Core maps a `shape: document` aggregate to a hand-rolled `<Agg>Document` row type, so `o.Total` is CS1061 there too; an event-sourced source has no `DbSet` at all; a TPC base has no table. Every backend named the same missing column (node `sum(schema.orders.total)` → TS2339, JPQL `sum(e.total)`, SQLAlchemy `OrderRow.total`, Ecto `record.total`). So the refusal became UNIVERSAL: `loom.projection-columnless-source`, raised by `validateColumnlessProjectionSources` off the backend-neutral `columnlessProjectionSource` classifier (renamed from `dapperQueryProjectionGap`), and the dapper projection block + `loom.dapper-unsupported#feature` are gone. The gate is precise about the document case — a document table has a real `id` column, so `select n = count()` still emits everywhere, which is the row-count tile `scaffoldDashboard` synthesises. ORIGINAL SCOPE (still open as an emitter task, on all five backends rather than one adapter): teach the direct-table arm to read the column-less sources' actual storage — the event-log table, the jsonb blob, the concrete tables of a TPC base — and narrow the classifier as each lands.",
+   "tests": [
+    "npm run test:dapper-corpus with the projection fixtures",
+    "node run-dapper.mjs projection-aggregation / projection-groupby (re-armed by W1-drain-behavioural-skip-dapper)",
+    "the gate and classifier must be updated together — a test asserting gate-XOR-emit per arm"
+   ],
+   "size": "L",
+   "wave": 2,
+   "conflictsWith": [
+    "W1-dapper-filter-bypass",
+    "W1-dapper-identifier-quoting",
+    "W2-dapper-deep-scope-tenancy"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W2-notfound-status-override",
+   "title": "`httpStatus NotFound -> N` is honoured on elixir only — four backends ignore the author's override",
+   "kind": "honest",
+   "targets": [
+    "node",
+    "dotnet",
+    "java",
+    "python"
+   ],
+   "fileTrees": [
+    "src/ir/util/openapi-errors.ts",
+    "src/platform/hono/v4/routes-builder.ts",
+    "src/generator/dotnet/",
+    "src/generator/java/emit/",
+    "src/generator/python/routes-builder.ts"
+   ],
+   "fix": "Roadmap M-T5.20 (partial). openapi-errors.ts:79-97 resolves ReferencedInUse / DomainError / Forbidden through the httpStatus override but deliberately NOT NotFound ('the 404 rung is deliberately NOT resolved here (M-T5.20 gap)'), and the override-status-census carries four waivers (override-status-census.test.ts:501-550) that assert-still-broken and pass. Route every bare-404 return site on the four backends through resolveErrorStatus and update their DECLARED response sets. The 404 has two producers and which fires is backend-dependent (hono throws into onError; .NET/java/python bare-return) — that split is the actual work. Drift risk is documented: #2462 silently reverted the shipped half, #2340 restored it, so pin it per-file, not with a joined-output toContain.",
+   "tests": [
+    "delete the four override-status-census WAIVERS in the same PR (that census is the acceptance test)",
+    "denial-ladder-override-parity.test.ts",
+    "conformance-parity.yml (the declared response set changes)",
+    "mutation-prove: revert one backend's resolution and confirm exactly that census row fails"
+   ],
+   "size": "L",
+   "wave": 2,
+   "conflictsWith": [
+    "W1-when-gate-off-route",
+    "W2-openapi-declares-what-it-answers"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W2-openapi-declares-what-it-answers",
+   "title": "Schemathesis W4 + W9: routes answer a 422 they never declare, and a wrong verb on a static sub-path answers 422 instead of 405",
+   "kind": "honest",
+   "targets": [
+    "node"
+   ],
+   "fileTrees": [
+    "src/platform/hono/v4/routes-builder.ts",
+    "src/generator/typescript/emit/routes.ts",
+    "test/behavioral/schemathesis-waivers.json"
+   ],
+   "fix": "Two ratcheting waivers, one file tree. W4: GET /{id} declares 200/404, DELETE /{id} declares 204/404/409, the collection GET declares 200 alone — yet the validation hook answers 422 (problem-details.ts:50-72) whenever a param or query fails, so every read/delete route can produce a status its own OpenAPI never mentions and generated clients are blind to it. Declare 422 wherever a request schema is validated. W9: the 405 probe lives ONLY inside app.notFound (emit/routes.ts:549-560), so `DELETE /api/<agg>/by_email` MATCHES the sibling delete /{id} route and the param validator answers 422 first — add a static-segment-vs-{id} discrimination before the param validator. NOTE: #2566 is in flight on W1+W7 in this same routes-builder — coordinate or stack.",
+   "tests": [
+    "npm run test:schemathesis (LOOM_SCHEMATHESIS=1) — the two waiver rules must be DELETED in the same PR (a rule that stops reproducing fails the run)",
+    "wire-golden differential (a new declared status is a wire-contract change)",
+    "docs/audits/schemathesis-findings-2026-08.md register updated"
+   ],
+   "size": "M",
+   "wave": 2,
+   "conflictsWith": [
+    "W1-when-gate-off-route",
+    "W2-notfound-status-override",
+    "PR#2566"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W2-codepoint-length-validation",
+   "title": "Schemathesis W6: string lengths validate in UTF-16 code units while the emitted JSON Schema declares code points",
+   "kind": "honest",
+   "targets": [
+    "node",
+    "and by inspection the other four"
+   ],
+   "fileTrees": [
+    "src/generator/_frontend/zod-schemas.ts",
+    "src/platform/hono/v4/"
+   ],
+   "fix": "`grep -rn codePoint src/` returns zero hits: string length constraints lower to zod .min()/.max()/.length() (zod-schemas.ts:70, api-module.ts:629) which count UTF-16 code units, while the emitted JSON Schema declares minLength/maxLength in code points — so an astral character is counted twice. Lower to a code-point-aware refinement ([...s].length) on the wire boundary, and check the other four backends' equivalents (they will have the same mismatch in their own runtime's string semantics). The waiver itself notes its real exit: graduate the intermittent fuzz rule to a PINNED deterministic case + wire golden, because an `intermittent` rule can never be proven fixed by the fuzz gate.",
+   "tests": [
+    "a deterministic astral-character case pinned as a wire golden (the waiver's own stated exit)",
+    "npm run test:schemathesis with the W6 rule deleted",
+    "cross-backend wire differential"
+   ],
+   "size": "M",
+   "wave": 2,
+   "conflictsWith": [],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W2-dotnet-decimal-wire",
+   "title": "The one live wire waiver: .NET System.Decimal truncates a projection `avg` that is float64 on four backends",
+   "kind": "honest",
+   "targets": [
+    "dotnet"
+   ],
+   "fileTrees": [
+    "src/generator/dotnet/",
+    "src/ir/util/openapi-*.ts",
+    "test/_helpers/wire-waivers.ts"
+   ],
+   "fix": "READ #2575 FIRST (money/decimal follow-ups from #2560) and stand down if it already covers this — the overlap is unresolved. Otherwise: wire-waivers.ts:65-72 (#2563) is the registry's only entry, scoped to projection-groupby $[*].avgLines, and it still reproduces (the two-way ratchet at wire-record.ts:381-393 would fail the leg otherwise). A wire `decimal` is float64 on four backends and System.Decimal on .NET, so avg truncates at ~15 significant digits (2.33333333333333 vs 2.3333333333333335). The exit is a GLOBAL representation decision — response records + OpenAPI schema — not a projection-emitter tweak, so scope the decision before coding.",
+   "tests": [
+    "delete the waiver in the same PR (a waiver that stops matching fails the run)",
+    "behavioral-e2e-dotnet.yml + behavioral-e2e-dapper.yml (W1-drain-behavioural-skip-dapper re-arms projection-groupby on the second adapter)",
+    "cross-backend wire differential against the goldens"
+   ],
+   "size": "L",
+   "wave": 2,
+   "conflictsWith": [
+    "PR#2575"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W2-flutter-provenance-info",
+   "title": "Flutter `ProvenanceInfo` degrades to a comment (a pinned decision worth reversing)",
+   "kind": "honest",
+   "targets": [
+    "flutter"
+   ],
+   "fileTrees": [
+    "src/generator/flutter/flutter-target.ts",
+    "test/generator/_walker/provenance-info-cross-target.test.ts"
+   ],
+   "fix": "_walker/primitives/provenance-info.ts:47-62 has react/vue/svelte/angular arms and a renderComment default; flutter supplies no renderProvenanceInfo. Unlike Timeline this IS pinned as a reviewed degradation (provenance-info-cross-target.test.ts:220-233 asserts the comment text AND that no provLineageSchema is carried) and the underlying value still renders, so it is the least urgent frontend cell — but feliz already ships the override (feliz-target.ts:418, with an F# ProvLineage record + Thoth decoder), so the Dart port is well-precedented. Update the pinned test from 'degrades' to 'renders' in the same PR.",
+   "tests": [
+    "provenance-info-cross-target.test.ts (flip the flutter arm)",
+    "generated-flutter-build.yml"
+   ],
+   "size": "S",
+   "wave": 2,
+   "conflictsWith": [
+    "W2-flutter-realtime-sse",
+    "W2-flutter-auth-ui",
+    "W2-flutter-store-persist"
+   ],
+   "disposition": {
+    "state": "in-flight",
+    "pr": 2619
+   }
+  },
+  {
+   "id": "W2-elixir-vanilla-document-scope",
+   "title": "Elixir vanilla document shape: provenanced ops and non-scalar predicates stay gated (M-T6.2 §12 residue)",
+   "kind": "honest",
+   "targets": [
+    "elixir"
+   ],
+   "fileTrees": [
+    "src/generator/elixir/vanilla/",
+    "src/ir/validate/checks/system-checks.ts"
+   ],
+   "fix": "validateVanillaDocumentScope (system-checks.ts:1793-1840, loom.vanilla-document-unsupported, elixir-only at :1799) admits scalar ops/finds but rejects provenanced-site ops (docOpUnsupported :1789-1791) and non-scalar predicate shapes (docExprUnsupported :1682+). Roadmap M-T6.2 also names the §14 tail (four serialize/1 snake_case leak sites) and §13 LiveView action residue. Close the shapes one at a time against the relational elixir path as the analog, narrowing docExprUnsupported/docOpUnsupported as each lands — the gate is a live predicate, not a hand-list, so it shrinks by itself. Pair with W2-elixir-document-capability-filter, which touches the same document emitter.",
+   "tests": [
+    "npm run test:elixir-corpus per shape",
+    "node run-elixir.mjs against the document fixtures",
+    "an IR-validate test per narrowed shape, mutation-proven"
+   ],
+   "size": "L",
+   "wave": 2,
+   "conflictsWith": [
+    "W2-elixir-document-capability-filter",
+    "W1-elixir-listpage-arity"
+   ],
+   "disposition": {
+    "state": "shipped"
+   }
+  },
+  {
+   "id": "W2-mikroorm-abstract-parts-verify",
+   "title": "The abstract-base-with-parts reject exists on exactly one adapter — verify what the others emit",
+   "kind": "honest",
+   "targets": [
+    "node + drizzle",
+    "dotnet",
+    "java",
+    "python",
+    "elixir"
+   ],
+   "fileTrees": [
+    "src/ir/validate/checks/system-checks.ts",
+    "src/ir/validate/checks/structural-checks.ts"
+   ],
+   "fix": "system-checks.ts:3071-3078 rejects `parts`/`contains` on an abstract inheritance base — but only under `if (dep.persistence !== \"mikroorm\") continue;` (:2945), and no other gate pairs isAbstract with parts/contains (grep across ir/validate/checks and language/validators yields only inheritance lifecycle/TPH rules). The comment at :3067-3070 argues the shape is 'genuinely unmappable' (an abstract base owns no repository; concretes do not inherit its parts) — if that is true it is true on every adapter. This task is a VERIFY-FIRST: generate the shape on drizzle/efcore/java/python/elixir and read the output. Then either promote the reject to a target-neutral structural rule, or delete the mikroorm-only gate and its justification. The audit verified only the gate's absence, not the emitters' behaviour.",
+   "tests": [
+    "generate + compile the shape on each backend before deciding",
+    "one negative structural test if the rule is promoted",
+    "test/platform/backend-parity-gates.test.ts if it becomes a per-backend cell"
+   ],
+   "size": "M",
+   "wave": 2,
+   "conflictsWith": [
+    "W1-mikroorm-authz-seam"
+   ],
+   "disposition": {
+    "state": "in-flight",
+    "pr": 2623
+   }
+  },
+  {
+   "id": "W3-parity-gates-matrix-extension",
+   "title": "backend-parity-gates.test.ts pins 5 features of ~19 and never varies `shape:` — so the one real hold-out is outside the matrix",
+   "kind": "breadth",
+   "targets": [
+    "all backends"
+   ],
+   "fileTrees": [
+    "test/platform/backend-parity-gates.test.ts"
+   ],
+   "fix": "The gated-XOR-emitted matrix (DOMAIN_BACKENDS :41 x FEATURES :158-238, assertions :292-338 incl. the two-way cross-check against gate-set membership) is the single best structural defence in the tree — and it covers 5 features. Lift in the ~14 sets it omits: paged queryHandler (system-checks.ts:112), query-time projection (:122), whole-table aggregation (:136), group-by (:172), workflow-source (:258) and projection-source (:294) projections, field mask (:3825), audited LIFECYCLE (:3921 — the fixture exercises `operation ... audited` only), event-sourced WORKFLOW (:3744), generic carriers (structural :329), unions (:503), `when` (:572), union returns (:604), filter bypass (:2517). Then add `shape: document` and `shape: embedded` variants of filterDdd — without them the capability-filter feature is only ever probed on the relational non-principal cell, precisely where all five agree, which is why the elixir document hold-out (W2-elixir-document-capability-filter) was invisible to it.",
+   "tests": [
+    "npm test — the new cells must be gated-XOR-emitted today; any cell that is NEITHER is a new silent finding",
+    "mutation-prove: remove one backend from a gate set and confirm exactly its row fails"
+   ],
+   "size": "M",
+   "wave": 3,
+   "conflictsWith": [],
+   "disposition": {
+    "state": "claimed",
+    "batch": "wave3-batch1"
+   }
+  },
+  {
+   "id": "W3-render-degradation-sentinels",
+   "title": "The two render-degradation ratchets structurally cannot reach the drops they exist for",
+   "kind": "ratchet-drain",
+   "targets": [
+    "react",
+    "vue",
+    "svelte",
+    "angular",
+    "feliz",
+    "flutter",
+    "phoenixLiveView"
+   ],
+   "fileTrees": [
+    "test/generator/_walker/render-degradation.test.ts",
+    "web/src/examples/expression-showcase.ddd"
+   ],
+   "fix": "KNOWN_DEGRADATIONS (:92-106) and KNOWN_VERBATIM_INTRINSICS (:117-130) are both empty and 23/23 pass — because the gate cannot see the failures. Three fixes: (1) add a SENTINELS pattern (:74-84) matching the `not yet supported on <framework>` comment shape emitted by timeline.ts:55 and provenance-info.ts:59; (2) give the fixture a state-bearing AND a derived-bearing AND a read-bearing component (today its only component is props-only, expression-showcase.ddd:76) so the `unknown layout component` sentinel that IS in the list becomes reachable; (3) place a sub-primitive at top level so the `not supported by the \\w+ walker yet` sentinel becomes reachable. SEQUENCING: run this AFTER #2569 (Timeline), #2568 (read-bearing components), W1-component-derived-state and W1-subprimitive-placement-gate land — otherwise it goes red for known, in-flight reasons. Three silent findings in this audit were each within one fixture line of this gate.",
+   "tests": [
+    "npm test — the widened fixture must pass with an EMPTY KNOWN_DEGRADATIONS after the four prerequisites land",
+    "mutation-prove each new sentinel by re-introducing one drop"
+   ],
+   "size": "M",
+   "wave": 3,
+   "conflictsWith": [
+    "W1-component-derived-state",
+    "W1-subprimitive-placement-gate",
+    "PR#2568",
+    "PR#2569"
+   ],
+   "disposition": {
+    "state": "claimed",
+    "batch": "wave3-batch1"
+   }
+  },
+  {
+   "id": "W3-showcase-render-flutter-heex",
+   "title": "The cross-frontend showcase render matrix omits flutter and phoenixLiveView entirely",
+   "kind": "breadth",
+   "targets": [
+    "flutter",
+    "phoenixLiveView"
+   ],
+   "fileTrees": [
+    "test/conformance/frontend-showcase-render.test.ts"
+   ],
+   "fix": "FRONTENDS (:46) = react, vue, svelte, angular, feliz x 3 showcase UIs = 15 cells, GAPS (:40-44) empty. flutter and the HEEx render path have no showcase-level matrix cell at all — HEEx's only structural coverage is heex-parity.test.ts's registry-shape check plus per-primitive suites. Add both as rows, scanning for the same FALLBACK_MARKERS (:70-75) plus the flutter/heex-specific sentinels (`flutter pack: no renderer`, `not supported by Phoenix LiveView target`). Expect new GAPS entries on first run — each is a finding, and each should be filed rather than pinned silently.",
+   "tests": [
+    "npm test",
+    "each new GAPS entry needs a written justification or a fix"
+   ],
+   "size": "M",
+   "wave": 3,
+   "conflictsWith": [],
+   "disposition": {
+    "state": "planned"
+   }
+  },
+  {
+   "id": "W3-schemathesis-backend-legs",
+   "title": "Spec-driven contract fuzzing runs on one backend of five",
+   "kind": "breadth",
+   "targets": [
+    "python",
+    "java",
+    "dotnet",
+    "elixir"
+   ],
+   "fileTrees": [
+    "test/behavioral/run-schemathesis.mjs",
+    "package.json",
+    ".github/workflows/schemathesis.yml"
+   ],
+   "fix": "run-schemathesis.mjs:119-127 hard-requires exactly one Hono deployable and bundles with platform: 'node' (:237); package.json:85 defines only test:schemathesis; the workflow is a single job with no matrix. Every W-rule in the register is therefore a node-only observation — the same defect class (coercion, undeclared 422/500, verb-vs-{id} capture) is UNMEASURED on the other four. Generalize the runner the way the behavioural runners are generalized (run-python.mjs / run-dotnet.mjs / run-java.mjs / run-elixir.mjs each boot a real process against a postgres sidecar and re-point the same suite), add four npm scripts and a workflow matrix. Expect a wave of new findings; each needs a ROOT-CAUSE waiver rule (an unattributed finding fails the run) and a row in docs/audits/schemathesis-findings-2026-08.md.",
+   "tests": [
+    "npm run test:schemathesis-{python,java,dotnet,elixir}",
+    "schemathesis.yml as a matrix",
+    "the waiver registry stays ratcheting in both directions"
+   ],
+   "size": "L",
+   "wave": 3,
+   "conflictsWith": [],
+   "disposition": {
+    "state": "planned"
+   }
+  },
+  {
+   "id": "W3-flutter-behavioral-leg",
+   "title": "Flutter is the only frontend with no full-stack runtime round-trip at any tier",
+   "kind": "breadth",
+   "targets": [
+    "flutter"
+   ],
+   "fileTrees": [
+    "test/behavioral/",
+    ".github/workflows/"
+   ],
+   "fix": "test/behavioral/corpus.json has no flutter case and the harness structurally cannot host one: run-ui.mjs:111-114 builds the frontend with `npm install` + `npm run build`, which a Flutter SDK project has no analogue for, and frontend-fullstack-e2e.yml's matrix is vue/svelte/angular/feliz. Its only gates are compile-only (flutter analyze + flutter build web) — which is exactly why the non-parsing-Dart finding (W1-flutter-fileref-dart) survived: the CI fixture never exercised the shape. Add a flutter leg that builds via the Flutter SDK (`flutter build web`) and drives the built bundle with the emitted Playwright smoke spec against a Hono-on-PGlite origin, i.e. the run-ui.mjs topology with a different build command. Nightly cadence is acceptable (matching the other non-React frontends).",
+   "tests": [
+    "a new run-ui-flutter.mjs leg + workflow",
+    "it must catch a seeded defect (mutation-prove with the FileRef?? shape before its fix, or a re-introduced one)"
+   ],
+   "size": "L",
+   "wave": 3,
+   "conflictsWith": [],
+   "disposition": {
+    "state": "planned"
+   }
+  },
+  {
+   "id": "W3-heex-ui-behavioral-leg",
+   "title": "The HEEx render path has no per-PR runtime UI assertion",
+   "kind": "breadth",
+   "targets": [
+    "phoenixLiveView"
+   ],
+   "fileTrees": [
+    "test/behavioral/",
+    ".github/workflows/"
+   ],
+   "fix": "No HEEx/LiveView case exists in test/behavioral/corpus.json; run-ui.mjs boots 'built SPA + Hono on PGlite' (:118-121), a topology LiveView does not have (it serves its own UI from the Phoenix app). HEEx UI coverage lives entirely outside the behavioral tier in `npm run test:phoenix-ui-e2e`, which is post-merge / run-e2e label only. Either promote a scoped subset of phoenix-ui-e2e to per-PR, or add a behavioural leg that boots the generated Phoenix app + postgres and drives the emitted Playwright spec against it. Distinct from the heex-parity frozen set (which is primitive COVERAGE) — this is whether the rendered LiveView round-trips.",
+   "tests": [
+    "the new leg must assert a real create -> list -> detail round-trip, not just a 200",
+    "wire it into pr-gate's workflow_run list if it becomes per-PR (test/system/pr-gate.test.ts pins completeness)"
+   ],
+   "size": "L",
+   "wave": 3,
+   "conflictsWith": [],
+   "disposition": {
+    "state": "planned"
+   }
+  },
+  {
+   "id": "W3-angular-pack-render-invariant",
+   "title": "Five Angular pack-render names are reachable in the shared walker but absent from every Angular pack",
+   "kind": "breadth",
+   "targets": [
+    "angular"
+   ],
+   "fileTrees": [
+    "test/platform/",
+    "src/generator/_packs/required-primitives.ts"
+   ],
+   "fix": "Diffing the 48 template names reachable via renderPrimitive/ctx.pack.render against flattenRequired ∪ shared-sources leaves five uncovered on angular: primitive-form-of, primitive-modal, form-default-onsubmit and the whole field-input-* family — absent from angularMaterial/primeng/spartanNg manifests and the shared angular/ dir. They are unreachable TODAY only because angularTarget forks every form primitive and never returns null for a real call (angular-target.ts:292-328); any future fork returning null reaches renderPrimitive('primitive-form-of') (forms.ts:473) and HARD-THROWS at generate time. Nothing tests that. Add a static test that computes the same reachable-minus-available diff per format and fails on a non-empty result for a name not explicitly exempted — turning an accidental invariant into a pinned one. (Note primitive-modal-controlled at forms.ts:826 is the only guarded pack.render in the tree; consider whether the guard pattern should be the default.)",
+   "tests": [
+    "npm test — the new static test",
+    "mutation-prove: make one angular form override return null and confirm the test fails BEFORE generation throws"
+   ],
+   "size": "S",
+   "wave": 3,
+   "conflictsWith": [],
+   "disposition": {
+    "state": "claimed",
+    "batch": "wave3-batch1"
+   }
+  },
+  {
+   "id": "W3-phoenix-problem-details-floor",
+   "title": "Vanilla Phoenix has no app-global RFC 7807 arm (M-T6.30)",
+   "kind": "mission",
+   "targets": [
+    "elixir"
+   ],
+   "fileTrees": [
+    "src/generator/elixir/vanilla/shell-emit.ts"
+   ],
+   "fix": "Roadmap M-T6.30. Give the generated Phoenix app a 7807-shaped error view + application/problem+json at the SHELL level (renderVanillaErrorJson) so every unmodelled fault inherits a floor, and check the 404/400 templates. No existing gate can see this: the wire golden reaches only modelled faults and conformance-parity compares DECLARED responses. Same root cause and shape as M-T6.25's node fix (a root app onError carrying the full ladder, with per-router handlers as refinements) — mirror that.",
+   "tests": [
+    "internal-fault-parity.test.ts (a per-FILE assertion, not a joined-output toContain — a sibling router always satisfies the latter)",
+    "npm run test:phoenix"
+   ],
+   "size": "M",
+   "wave": 3,
+   "conflictsWith": [
+    "W1-elixir-listpage-arity",
+    "W2-elixir-sse-realtime"
+   ],
+   "disposition": {
+    "state": "claimed",
+    "batch": "wave3-batch1"
+   }
+  },
+  {
+   "id": "W3-elixir-unused-let-underscore",
+   "title": "An unused workflow `let` binding warns — fatal under mix compile --warnings-as-errors (M-T6.21)",
+   "kind": "mission",
+   "targets": [
+    "elixir"
+   ],
+   "fileTrees": [
+    "src/generator/elixir/vanilla/workflow-execution-emit.ts"
+   ],
+   "fix": "Roadmap M-T6.21, latent today. A workflow `let x` never referenced downstream emits an unused-variable warning, which is a hard failure under the emitted project's --warnings-as-errors build. Underscore the binding when nothing downstream reads it — but MUST NOT underscore the bindName result slot nor break fallible-op `{:ok, _}` gating; several clause-assembly sites are involved, so treat the downstream-read analysis as the real work.",
+   "tests": [
+    "npm run test:phoenix (LOOM_PHOENIX_VANILLA_BUILD=1 LOOM_HEX_MIRROR=1) with an unused-let fixture",
+    "corpus-elixir-build.yml",
+    "mutation-prove: revert and confirm mix compile fails"
+   ],
+   "size": "S",
+   "wave": 3,
+   "conflictsWith": [
+    "W2-elixir-vanilla-document-scope"
+   ],
+   "disposition": {
+    "state": "claimed",
+    "batch": "wave3-batch1"
+   }
+  },
+  {
+   "id": "W3-files-404-envelope",
+   "title": "The /files/{key} absent-object 404 is a fourth envelope shape, on zero backends (M-T6.39)",
+   "kind": "mission",
+   "targets": [
+    "node",
+    "dotnet",
+    "java",
+    "python",
+    "elixir"
+   ],
+   "fileTrees": [
+    "per-backend file endpoint emitters (POST /files, GET /files/{key})"
+   ],
+   "fix": "Roadmap M-T6.39. The file endpoint's absent-object 404 body matches none of the three envelopes M-T6.31 unified — it is the one absent-read site outside M-T6.31's five, and it diverges on all five backends at once (so it is a uniform defect, not a parity cell). Fold it into the same problem-details envelope the other absent-read sites use, per backend.",
+   "tests": [
+    "cross-backend wire differential (the response BODY changes on all five)",
+    "conformance-parity.yml",
+    "the emitted OpenAPI's declared 404 schema for the files route"
+   ],
+   "size": "M",
+   "wave": 3,
+   "conflictsWith": [],
+   "disposition": {
+    "state": "claimed",
+    "batch": "wave3-batch1"
+   }
+  },
+  {
+   "id": "W3-tenancy-subtree-sargable",
+   "title": "The tenancy subtree read is correct but no longer index-usable (M-T3.17)",
+   "kind": "mission",
+   "targets": [
+    "node",
+    "dotnet",
+    "java",
+    "python",
+    "elixir"
+   ],
+   "fileTrees": [
+    "src/ir/util/tenant-stance.ts",
+    "per-backend tenancy predicate emitters"
+   ],
+   "fix": "Roadmap M-T3.17 (from #2562). `strpos(data_key, anchor||'.')=1` is correct but not sargable, so every deep/global tenancy read is a sequential scan. Four options (escaped LIKE / the ^@ operator / a half-open range / accept the cost), none free — pick one and apply it identically on all five backends. HARD CONSTRAINT: the orgXa.leak wildcard trap must stay green on all five (that trap is why the naive LIKE was rejected in the first place).",
+   "tests": [
+    "tenant-index.test.ts",
+    "npm run test:tenancy-hierarchy{,-python,-java,-dotnet,-elixir} — all five legs",
+    "an EXPLAIN-shaped assertion that the index is used, otherwise the fix is unprovable"
+   ],
+   "size": "L",
+   "wave": 3,
+   "conflictsWith": [
+    "W2-mikroorm-deep-scope-tenancy",
+    "W2-dapper-deep-scope-tenancy"
+   ],
+   "disposition": {
+    "state": "planned"
+   }
+  },
+  {
+   "id": "W3-elixir-precondition-messages",
+   "title": "Elixir precondition custom messages: path 2 still emits derived text (M-T6.20)",
+   "kind": "mission",
+   "targets": [
+    "elixir"
+   ],
+   "fileTrees": [
+    "src/generator/elixir/vanilla/",
+    "src/generator/elixir/render-stmt.ts"
+   ],
+   "fix": "Roadmap M-T6.20 (partial). Path 2 (raise -> prefix-routed GUARD_RESCUE) is open: swapping in author text makes the message-prefix routing MISS and reraise into a 500, so the emitter still falls back to the derived text. The routing key must stop being the message itself — carry the classification out of band (a structured exception field) rather than by string prefix. The wire code question (option (a) vs (b)) is unresolved and should be settled before coding; the mission brief is docs/new-plan/missions/M-T6.20-elixir-precondition-messages-brief.md.",
+   "tests": [
+    "a runtime assertion that the author's message reaches the 422 body (npm run test:phoenix / behavioral-e2e-elixir)",
+    "cross-backend wire differential on the message field",
+    "the i18n validation catalog keys must still resolve (msg.<hash>)"
+   ],
+   "size": "M",
+   "wave": 3,
+   "conflictsWith": [
+    "W2-elixir-vanilla-document-scope",
+    "W3-phoenix-problem-details-floor"
+   ],
+   "disposition": {
+    "state": "planned"
+   }
+  },
+  {
+   "id": "W3-provenanced-wire-pair",
+   "title": "Fold provenanced value + lineage into one Provenanced<T> carrier so all targets agree (M-T6.12)",
+   "kind": "mission",
+   "targets": [
+    "node",
+    "dotnet",
+    "java",
+    "python",
+    "elixir",
+    "all frontends"
+   ],
+   "fileTrees": [
+    "src/ir/enrich/wire-projection.ts",
+    "src/generator/_expr/target.ts",
+    "per-backend dto emitters"
+   ],
+   "fix": "Roadmap M-T6.12. Today three backends bolt an extra lineage key onto the wire shape, so the five do not agree on the provenanced representation. Fold value+lineage into one `Provenanced<T> = {value, lineage}` carrier in wireShape (the enrichment is the single source every DTO emitter consumes, so the change lands once), including the `.value` read-site unwrap via ONE ExprTarget leaf rather than five. Phases 1-6 per the mission. This is a wire-contract change: rebaseline the goldens deliberately.",
+   "tests": [
+    "cross-backend wire differential (LOOM_WIRE_UPDATE=1 node run.mjs, then review the golden diff as the contract change it is)",
+    "conformance-parity.yml",
+    "provenance-info-cross-target.test.ts (the frontends read the new shape)"
+   ],
+   "size": "L",
+   "wave": 3,
+   "conflictsWith": [
+    "W2-flutter-provenance-info"
+   ],
+   "disposition": {
+    "state": "planned"
+   }
+  }
+ ],
+ "counts": {
+  "gapsTotal": 51,
+  "wave1": 21,
+  "wave2": 17,
+  "wave3": 13,
+  "byKind": {
+   "silent": 15,
+   "honest": 17,
+   "ratchet-drain": 3,
+   "stale-drain": 4,
+   "breadth": 6,
+   "mission": 6
+  },
+  "claimedExclusions": 10,
+  "note": "Wave 1 is 15 silent cells + 4 stale-drains + 2 ratchet-drains (one ratchet-drain, W3-render-degradation-sentinels, is deliberately deferred to wave 3 because it goes red until #2568/#2569 and two wave-1 tasks land). Sizes: S x 13, M x 24, L x 14."
+ }
 }

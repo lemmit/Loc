@@ -32,6 +32,7 @@ the heavy cross-backend/runtime behavioral coverage is nightly.
 | **Langium drift** | `ddd.langium` ↔ committed `src/language/generated/` are in sync. | `npm run langium:generate` | `langium-generated.yml` | ✅ |
 | **Behavioral — api / unit** | The **generated Hono backend** behaves: boots on PGlite (in-process, no docker) and runs the DSL-emitted `test e2e … against <node>` (api) + aggregate `test "…"` (unit) suites. DoD rollup onto the requirements graph. | `cd test/behavioral && npm ci && node run.mjs` | `behavioral-e2e.yml` | ✅ |
 | **Behavioral — ui** | The **generated React frontend** behaves: `vite build` it, serve it + the Hono backend from one in-process origin, run the emitted `test e2e … against <react>` Playwright round-trips in headless Chromium. | `cd test/behavioral && npm ci && node run-ui.mjs` | `behavioral-ui-e2e.yml` | ✅ |
+| **Behavioral — HEEx ui** | The **rendered LiveView** behaves: boot the generated Phoenix app against a real postgres, then drive a create → LIST → detail round-trip through the rendered DOM in headless Chromium (the emitted `.ui.spec.ts` + the hand-written list leg). Asserts on rendered TEXT, so a 200 with an empty page fails. | `npm run test:behavioral-heex-ui` | `behavioral-heex-ui-e2e.yml` | ✅ |
 | **Per-backend build** | Generated backend **compiles** clean. TS (`tsc --noEmit` + tsup), .NET (`build /warnaserror`), Java (`gradle bootJar`), Python (`uv` + ruff + mypy + pytest), Elixir (plain Ecto/Phoenix `mix compile --warnings-as-errors`). | `npm run test:tsc` / `:dotnet` / `:java` / `:python` / `:phoenix` | `hono-build` / `dotnet-build` / `java-build` / `python-build` / `elixir-vanilla-build` | ✅ |
 | **Generated frontend build** | Generated frontend typechecks + `vite build`s, per `{example × pack}`. React (`tsc`), Svelte (`svelte-check` + build), Vue (`vue-tsc` + build). | `npm run test:tsc-react` / `:svelte-build` / `:vue-build` | `generated-react-build` / `generated-svelte-build` / `generated-vue-build` | ✅ |
 | **Generated frontend runtime** | The built Vue/Svelte bundle actually **runs** — `vite preview` + the emitted Playwright smoke spec (every param-less route loads). Pure client-side, no backend. | `npm run test:vue-e2e` / `:svelte-e2e` | `generated-vue-e2e` / `generated-svelte-e2e` | ✅ |
@@ -156,13 +157,15 @@ fails the fast suite.
 | `behavioral-e2e-elixir.yml` | `cd test/behavioral && node run-elixir.mjs` | pg, mirror |
 | `behavioral-e2e-mikroorm.yml` | `cd test/behavioral && node run-mikroorm.mjs` | pg |
 | `behavioral-ui-e2e.yml` | `cd test/behavioral && node run-ui.mjs` | — |
+| `behavioral-heex-ui-e2e.yml` | `npm run test:behavioral-heex-ui` (add `LOOM_HEX_MIRROR=1` behind a TLS-fingerprint proxy) | pg, mirror |
 | `conformance-parity.yml` | `LOOM_E2E_STRICT_PARITY=1 npx vitest run test/e2e/e2e.test.ts` (spec-level parity, no stack boot) | — |
 | `conformance-full.yml` | `LOOM_E2E=1 npm run test:e2e` | docker |
 | `differential-report.yml` | `LOOM_DIFF_REPORT=1 npx vitest run test/e2e/e2e.test.ts` | docker |
 | `schema-load.yml` | `npm run test:schema-load` (or point `LOOM_MIGRATION_PG_URL` at a running pg) | docker |
-| `schemathesis.yml` | `npm run test:schemathesis` (needs `uv tool install schemathesis` + `cd test/behavioral && npm ci`) | — |
+| `pairwise.yml` | `npm run test:pairwise-corpus` (per-PR leg) · `test:pairwise-corpus-tsc` · `test:pairwise-corpus-schema-load` (or `LOOM_MIGRATION_PG_URL`); shard the compile leg with `LOOM_PAIRWISE_COMPILE_CASE=<case-id>`, dump the composed sources with `LOOM_PAIRWISE_DUMP=<dir>`, get the verdict census with `LOOM_PAIRWISE_REPORT=<file>` | docker (schema-load leg) |
+| `schemathesis.yml` | `npm run test:schemathesis{,-python,-java,-dotnet,-elixir}` (needs `uv tool install schemathesis` + `cd test/behavioral && npm ci`; the four booted legs need a pg and must run ONE AT A TIME against it — each resets the schemas per case) | docker (all but node) |
 | `migration-evolution-e2e.yml` | `npm run test:migration-evolution{,-python,-java,-dotnet,-elixir}` | docker |
-| `tenancy-e2e.yml` | `npm run test:tenancy{,-python,-java,-dotnet,-elixir}` + `test:tenancy-hierarchy{…}` (or `LOOM_TENANCY_PG_URL`) | docker |
+| `tenancy-e2e.yml` | `npm run test:tenancy{,-python,-java,-dotnet,-elixir}` + `test:tenancy-hierarchy{,-python,-java,-dotnet,-elixir,-mikroorm}` + `test:tenancy-subtree-explain` (or `LOOM_TENANCY_PG_URL`) | docker |
 | `hono-obs-e2e.yml` | `npm run test:obs` | — |
 | `dotnet-obs-e2e.yml` | `npm run test:obs-dotnet` | docker |
 | `java-obs-e2e.yml` | `npm run test:obs-java` (or `LOOM_OBS_PG_URL`) | docker |
@@ -183,7 +186,7 @@ fails the fast suite.
 | `k8s-build.yml` | `npm run test:k8s` (helm + kubeconform on PATH) | — |
 | `k8s-e2e.yml` | `kind create cluster` then `npm run test:k8s-e2e` (kind + kubectl + helm) | docker |
 | `generated-a11y.yml` | `LOOM_A11Y_E2E=1 LOOM_A11Y_PACK=<pack> npx vitest run test/e2e/generated-a11y-e2e.test.ts` (Playwright chromium) | — |
-| `frontend-fullstack-e2e.yml` | `cd test/behavioral && node run-ui.mjs <case>` (non-React cases) | — |
+| `frontend-fullstack-e2e.yml` | `cd test/behavioral && node run-ui.mjs <case>` (non-React cases); the **flutter** cell is `npm run test:ui-flutter` (= `node test/behavioral/run-ui-flutter.mjs`) and needs the Flutter SDK on `PATH` (or `FLUTTER=/path/to/flutter`) plus `npx playwright install chromium` | — |
 | `playground-e2e.yml` | `cd web && npm ci && npm run e2e` (network-gated: esm.sh/jsdelivr/npm) | network |
 | `playground-e2e-no-network.yml` | `cd web && npx playwright test --project=chromium <workspace/history/builder/requirements/editor specs>` + `node scripts/check-eager-chunks.mjs` | — |
 | `playground-realm-check.yml` | `cd web && npm run e2e:realm` | — |

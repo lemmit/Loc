@@ -342,13 +342,15 @@ jobs:
             subdomain Sales {
               context Orders {
                 aggregate Product with crudish { name: string  price: money }
+                aggregate Customer with crudish { name: string  email: string }
                 repository Products for Product { }
+                repository Customers for Customer { }
               }
             }
             api ShopApi from Sales
             storage pg { type: postgres }
             resource ordersState { for: Orders, kind: state, use: pg }
-            ui App with scaffold(aggregates: [Product]) { api Shop: ShopApi }
+            ui App with scaffold(aggregates: [Product, Customer]) { api Shop: ShopApi }
             deployable api { platform: node contexts: [Orders] dataSources: [ordersState] serves: ShopApi port: 3000 }
             deployable app { platform: flutter targets: api ui: App { Shop: api } port: 3006 }
           }
@@ -357,11 +359,146 @@ jobs:
       - name: Locate the scaffold project
         id: sproj
         run: echo "dir=$(dirname "$(find ci-flutter-scaffold/out -name pubspec.yaml | head -1)")" >> "$GITHUB_OUTPUT"
+      # PER-AGGREGATE PAGE IDENTITY — the assertion the build alone cannot make.
+      # The scaffold names aggregate pages by ROLE (`List` inside `area Products`),
+      # so an emitter keying its file/class on the bare `page.name` collapses
+      # EVERY aggregate's list onto one `lib/pages/list_page.dart` + one
+      # `ListPage`, and `main.dart` routes both `/products` and `/customers` to
+      # whichever was written last — `/products` renders the Customers list.
+      # Dart grades a duplicate import as an `info`, and this job runs
+      # `flutter analyze --no-fatal-infos`, so the collision compiled, tested and
+      # built CLEAN.  That is why the scaffold case declares TWO aggregates now
+      # (it had exactly one, which cannot express the bug) and why the check is
+      # an explicit assertion rather than another build step.
+      - name: Assert per-aggregate scaffold pages are distinct
+        working-directory: ${{ steps.sproj.outputs.dir }}
+        run: |
+          set -eu
+          echo "--- lib/pages ---"; ls lib/pages
+          for f in product_list_page.dart product_detail_page.dart \
+                   customer_list_page.dart customer_detail_page.dart; do
+            test -f "lib/pages/$f" || { echo "MISSING lib/pages/$f — per-aggregate pages collapsed onto one file"; exit 1; }
+          done
+          test ! -f lib/pages/list_page.dart || { echo "lib/pages/list_page.dart exists — role-named page file is back"; exit 1; }
+          grep -q "const ProductListPage()" lib/main.dart || { echo "no ProductListPage route in main.dart"; exit 1; }
+          grep -q "const CustomerListPage()" lib/main.dart || { echo "no CustomerListPage route in main.dart"; exit 1; }
+          # Each import URI appears exactly once — a repeated one means two pages
+          # resolved to a single module.
+          dupes=$(grep "^import 'pages/" lib/main.dart | sort | uniq -d)
+          test -z "$dupes" || { echo "duplicate page imports in main.dart:"; echo "$dupes"; exit 1; }
       - name: Drop in the Table-controls widget test
         working-directory: ${{ steps.sproj.outputs.dir }}
         run: cp "$GITHUB_WORKSPACE/scripts/flutter-table-controls-test.dart" test/table_controls_test.dart
       - name: flutter analyze + test + build web (scaffold)
         working-directory: ${{ steps.sproj.outputs.dir }}
+        run: |
+          flutter pub get
+          flutter analyze --no-fatal-warnings --no-fatal-infos
+          flutter test
+          flutter build web --release
+
+      # APP-SHELL PARITY — `auth: ui` + realtime SSE + the `persist:` store
+      # ladder + `ProvenanceInfo`, the four features that all land in the SAME
+      # place: `main.dart`'s root and the per-page shell.  They compose (the
+      # session gate and the realtime subscription share `MaterialApp.builder`;
+      # the url store wraps `MaterialApp`; a gated page binds `currentUser`
+      # before its route args), and NOTHING above exercises any of them — the
+      # showcase is unauthenticated and store-free.  Each also pulls a pub
+      # package on demand (`url_launcher` / `web` / `shared_preferences`), so
+      # this leg is the only place a resolution conflict would surface.
+      - name: Generate the app-shell parity app (auth + realtime + persist + provenance)
+        run: |
+          mkdir -p ci-flutter-shell
+          cat > ci-flutter-shell/shell.ddd <<'DDD'
+          system Quartet {
+            user { id: string  role: string  permissions: string[] }
+            auth { provider: keycloak oidc { issuer: env("OIDC_ISSUER") clientId: env("OIDC_CLIENT_ID") } }
+            subdomain Sales {
+              context Orders {
+                aggregate Order {
+                  code: string
+                  quantity: int
+                  unitPrice: int
+                  total: int provenanced
+                  operation reprice(qty: int, price: int) {
+                    quantity := qty
+                    unitPrice := price
+                    total := qty * price
+                  }
+                  operation approve() requires currentUser.role == "admin" { code := code }
+                  derived display: string = code
+                }
+                repository Orders for Order { }
+                event OrderPlaced { order: Order id, at: datetime }
+                channel Lifecycle { carries: OrderPlaced  delivery: broadcast  retention: ephemeral }
+              }
+            }
+            api ShopApi from Sales
+            storage pg { type: postgres }
+            resource ordersState { for: Orders, kind: state, use: pg }
+            deployable api {
+              platform: node contexts: [Orders] dataSources: [ordersState] serves: ShopApi port: 3000 auth: required
+            }
+            ui MobileApp {
+              framework: flutter
+              api Shop: ShopApi
+              channel Live: Orders.Lifecycle
+              on Live.OrderPlaced(e) { toast("Order " + e.order + " placed") refetch(Order) }
+              store Cart persist: local {
+                state { lines: string[]  count: int = 0  subtotal: money }
+                action add(sku: string) { lines += sku  count += 1 }
+              }
+              store Recent persist: session {
+                state { lastCode: string = "" }
+                action remember(c: string) { lastCode := c }
+              }
+              store Filters persist: url {
+                state { q: string = ""  pageNo: int = 1  onlyOpen: bool = false }
+                action setQ(v: string) { q := v }
+              }
+              page Home {
+                route: "/"
+                body: Stack {
+                  Heading { "Orders", level: 1 },
+                  Text { currentUser.id },
+                  Text { Filters.q },
+                  Text { Recent.lastCode },
+                  For { each: Cart.lines, l => Card { l } },
+                  QueryView {
+                    of: Shop.Order.all,
+                    loading: Text { "Loading…" }, error: Text { "Failed" }, empty: Text { "None yet." },
+                    data: rows => Stack { For { each: rows, o => Card { o.code } } }
+                  }
+                }
+              }
+              page Admin {
+                route: "/admin"
+                requires currentUser.role == "admin"
+                body: Stack { Heading { "Admin", level: 1 } }
+              }
+              page OrderDetail {
+                route: "/orders/:id"
+                body: QueryView {
+                  of: Shop.Order.byId(id),
+                  loading: Text { "Loading…" }, error: Text { "Failed" }, empty: Text { "Not found." },
+                  data: o => Stack {
+                    Text { o.code },
+                    Text { o.total },
+                    ProvenanceInfo { of: o, field: "total" },
+                    Action { o.approve }
+                  }
+                }
+              }
+            }
+            deployable app { platform: flutter targets: api ui: MobileApp { Shop: api } port: 3006 auth: ui }
+          }
+          DDD
+          node bin/cli.js generate system ci-flutter-shell/shell.ddd -o ci-flutter-shell/out
+      - name: Locate the app-shell project
+        id: shproj
+        run: echo "dir=$(dirname "$(find ci-flutter-shell/out -name pubspec.yaml | head -1)")" >> "$GITHUB_OUTPUT"
+      - name: flutter analyze + test + build web (app shell)
+        working-directory: ${{ steps.shproj.outputs.dir }}
         run: |
           flutter pub get
           flutter analyze --no-fatal-warnings --no-fatal-infos
@@ -382,7 +519,16 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      # One bounded retry on the SDK install: a transient CDN corruption
+      # ("Error on ZipFile unknown archive", run 32761021024) killed the whole
+      # apk gate before any project code ran — the same transient-infra class
+      # the elixir gates retry (docker pull, mix deps.get).  A second failure
+      # is real and still fails the job.
       - uses: android-actions/setup-android@v3
+        id: setup-android
+        continue-on-error: true
+      - uses: android-actions/setup-android@v3
+        if: steps.setup-android.outcome == 'failure'
       - name: Generate a minimal (FileUpload-free) app for the native apk gate
         run: |
           mkdir -p ci-flutter-apk

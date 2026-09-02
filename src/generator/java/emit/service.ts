@@ -25,6 +25,7 @@ import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { upperFirst } from "../../../util/naming.js";
 import { isServerSourcedDefault } from "../../_frontend/server-default.js";
+import { javaLogEvent } from "../../_obs/render-java.js";
 import {
   collectJavaExprImports,
   collectJavaTypeImports,
@@ -39,6 +40,7 @@ import {
   renderJavaHistoryServiceMethod,
 } from "./audit-history.js";
 import { javaNotFoundThrow } from "./common.js";
+import { claimStampsFor } from "./entity.js";
 import {
   declaredFinds,
   isPagedAutoAll,
@@ -130,12 +132,11 @@ export function renderJavaService(
       collectJavaExprImports(dflt, imports);
       return `        var ${f.name} = ${raw} != null ? ${wireToDomain(f.type, raw)} : ${renderJavaExpr(dflt)};`;
     }
-    // Every OTHER default now belongs to the factory (`javaFactoryDefault` in
+    // Every OTHER default belongs to the factory (`javaFactoryDefault` in
     // emit/entity.ts), which reads `null` as "the caller omitted this".  The
-    // service used to coalesce here too; keeping both would restate one rule in
-    // two places, which is the exact duplication that produced the node /
-    // elixir / java drift bugs (#2329, #2392).  So an omittable input passes
-    // straight through, null and all.
+    // service deliberately does NOT coalesce as well: restating one rule in two
+    // places is what produces cross-backend default drift.  So an omittable
+    // input passes straight through, null and all.
     if (!ctx.esCreateParams && !isRequiredCreateInput(f as FieldIR)) {
       return `        var ${f.name} = ${wireToDomain(eff(f.type, true), raw)};`;
     }
@@ -158,13 +159,18 @@ export function renderJavaService(
   // @LastModifiedDate / @LastModifiedBy) filled by the AuditingEntityListener
   // at flush — there is no service call site (the §5 dedup move).  The
   // JpaAuditingConfig's AuditorAware<UUID> supplies the principal for
-  // @CreatedBy / @LastModifiedBy, so the service no longer threads currentUser
+  // @CreatedBy / @LastModifiedBy, so the service does not thread currentUser
   // for stamping.  See §5c of docs/old/plans/capability-stamp-dedup-simulation.md.
   // Audited lifecycle (audit-and-logging.md): the route-driving create / the
   // canonical destroy stage an audit_records row in the SAME @Transactional
   // method as the save / delete.  The route-driving create is the ES `create`
   // for an event-sourced aggregate, else the canonical create.
   const createAction = agg.persistedAs === "eventLog" ? agg.creates?.[0] : agg.canonicalCreate;
+  // See the call site below: document roots stamp explicitly.
+  const docClaimCreateStamps =
+    agg.savingShape === "document" &&
+    agg.persistedAs !== "eventLog" &&
+    claimStampsFor(agg, "create").length > 0;
   const auditCreate = !!createAction?.audited;
   const auditDestroy = !!agg.canonicalDestroy?.audited;
   // create: before is JSON null (NullNode → the `null` token, satisfying the
@@ -187,7 +193,7 @@ export function renderJavaService(
         `            RequestContext.correlationId(),`,
         `            RequestContext.scopeId(),`,
         `            RequestContext.parentId()));`,
-        `        CatalogLog.event("audit_recorded", "debug", "action", "create", "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`,
+        `        CatalogLog.event(${javaLogEvent("auditRecorded")}, "action", "create", "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`,
       ]
     : [];
   // --- the canonical create / destroy authorization gate ----------------------
@@ -229,6 +235,14 @@ export function renderJavaService(
         ...lifecycleGateLines(createGates),
         ...createLets,
         `        var aggregate = ${agg.name}.create(${createArgs});`,
+        // A DOCUMENT root is a plain POJO with no JPA persistence context, so
+        // its claim stamps (`tenantOwned`'s tenantId/dataKey) cannot ride an
+        // @PrePersist hook — entity.ts emits them as a plain `_stampOnCreate()`
+        // and the call belongs here, mirroring python's route calling
+        // `_stamp_on_create`.  Both halves read `claimStampsFor` so a method
+        // without a caller (stamps nothing) or a caller without a method (does
+        // not compile) cannot drift apart (§89).
+        docClaimCreateStamps ? `        aggregate._stampOnCreate();` : null,
         `        repository.save(aggregate);`,
         ...createAuditLines,
         `        publishEvents(aggregate);`,
@@ -347,6 +361,11 @@ export function renderJavaService(
   // can_<op> companion returns.
   const gatedOps = agg.operations.filter((op) => op.visibility === "public" && !!op.when);
   if (gatedOps.length > 0) imports.add(`${ctx.basePkg}.domain.common.DisallowedException`);
+  // …and the predicate's OWN imports, exactly as the hoisted `requires` gate
+  // below collects its own (audit A17): the state gate renders here and in the
+  // `can_<op>` companion, so `Objects.equals` / `Pattern.compile` / `Instant`
+  // must be imported by THIS file — nothing else scans `op.when`.
+  for (const op of gatedOps) collectJavaExprImports(op.when!, imports);
   // The 403 the hoisted `requires` gate throws now lives HERE rather than in
   // the entity (op-gates.ts), so the service pulls the exception in.
   if (agg.operations.some((op) => operationGates(op).length > 0)) {
@@ -362,10 +381,10 @@ export function renderJavaService(
   const requiresGateLines = (op: (typeof agg.operations)[number]): string[] =>
     operationGates(op).map((g) => {
       // The gate's own expression imports (`java.util.Objects` for a string
-      // comparison, enum/id types, …) used to ride in on the ENTITY's
-      // `collectJavaStmtImports` sweep over `op.statements`.  The gate lives
-      // here now, so this file has to collect them — a `tsc`-green emitter can
-      // still emit Java that doesn't compile.
+      // comparison, enum/id types, …) are collected HERE, since the gate lives
+      // in this file rather than the ENTITY's `collectJavaStmtImports` sweep
+      // over `op.statements` — a `tsc`-green emitter can still emit Java that
+      // doesn't compile.
       collectJavaExprImports(g.expr, imports);
       return `        if (!(${renderJavaExpr(g.expr, {
         thisName: "aggregate",
@@ -439,7 +458,7 @@ export function renderJavaService(
         ", ",
       );
       if (op.extern) {
-        // Extern op (extern-domain-extension-point.md §3a, Phase 2): the op is a
+        // Extern op (extern-domain-extension-point.md §3a): the op is a
         // real aggregate method now — it runs its preconditions, delegates to the
         // co-located scaffold-once `<Agg>Extern` hook, and re-asserts invariants
         // internally (all inside `aggregate.<op>(...)`).  The service just loads,
@@ -470,7 +489,7 @@ export function renderJavaService(
       // controller wraps it in `ResponseEntity.ok`).  Void ops (no returnType)
       // stay `void` + discard.
       const scalarReturn = !spec && !!op.returnType;
-      if (scalarReturn) collectWireImports(op.returnType!, imports);
+      if (scalarReturn) collectWireImports(op.returnType!, imports, "Response");
       const returnsValue = !!spec || scalarReturn;
       const retType = spec
         ? spec.name
@@ -513,7 +532,7 @@ export function renderJavaService(
         audited ? `            RequestContext.scopeId(),` : null,
         audited ? `            RequestContext.parentId()));` : null,
         audited
-          ? `        CatalogLog.event("audit_recorded", "debug", "action", ${JSON.stringify(op.name)}, "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`
+          ? `        CatalogLog.event(${javaLogEvent("auditRecorded")}, "action", ${JSON.stringify(op.name)}, "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`
           : null,
         `        publishEvents(aggregate);`,
         spec
@@ -560,7 +579,7 @@ export function renderJavaService(
                 `            RequestContext.correlationId(),`,
                 `            RequestContext.scopeId(),`,
                 `            RequestContext.parentId()));`,
-                `        CatalogLog.event("audit_recorded", "debug", "action", "destroy", "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`,
+                `        CatalogLog.event(${javaLogEvent("auditRecorded")}, "action", "destroy", "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`,
               ]
             : []),
           `        repository.delete(aggregate);`,
@@ -666,7 +685,7 @@ export function renderJavaService(
     // The domain-event narrative line fires at the dispatch seam regardless of
     // whether the event has in-process subscribers — when it does, the in-VM
     // publish follows.
-    `            CatalogLog.event("event_dispatched", "info", "event_type", event.getClass().getSimpleName(), "aggregate", "${agg.name}");`,
+    `            CatalogLog.event(${javaLogEvent("eventDispatched")}, "event_type", event.getClass().getSimpleName(), "aggregate", "${agg.name}");`,
     dispatches ? `            eventPublisher.publishEvent(event);` : null,
     `        }`,
     `    }`,

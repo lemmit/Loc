@@ -89,12 +89,78 @@ function e2eInputParamType(
   return `Partial<{ ${body} }>`;
 }
 
+// ---------------------------------------------------------------------------
+// Detail-page readers — the SHARED contract with `_frontend/
+// page-objects-builder.ts`.
+//
+// `field(name)` returns a **Locator**, not an awaited string.  That is not a
+// style choice: `src/system/ui-e2e-render.ts` (which lowers a `test e2e … `
+// block against a `platform: elixir` deployable — fullstack, so it emits BOTH
+// an api spec and a `.ui.spec.ts`) renders detail reads as
+// `expect(read.field("x")).toHaveText(…)` and `await read.field("x")
+// .innerText()`.  Both forms need a Locator — returning `Promise<string>`
+// here makes every emitted Phoenix UI spec call `.innerText()` on a string.
+// Same reason the
+// contained-collection accessors are here: the renderer lowers
+// `read.<coll>.length` to `<handle>.<coll>Rows()`.
+// ---------------------------------------------------------------------------
+function detailReaderLines(slug: string, agg: AggregateIR): string[] {
+  const lines: string[] = [];
+  lines.push(``);
+  lines.push(`  /** Locator for a primitive / enum field's value cell. */`);
+  lines.push(`  field(name: string): Locator {`);
+  lines.push(`    return this.page.getByTestId(\`${slug}-detail-\${name}\`);`);
+  lines.push(`  }`);
+  for (const c of agg.contains) {
+    if (!c.collection) continue;
+    if (!agg.parts.some((p) => p.name === c.partName)) continue;
+    lines.push(``);
+    lines.push(`  /** Locator for one row of the contained \`${c.name}\` collection. */`);
+    lines.push(`  ${c.name}Row(id: string): Locator {`);
+    lines.push(`    return this.page.getByTestId(\`${slug}-detail-${c.name}-row-\${id}\`);`);
+    lines.push(`  }`);
+    lines.push(``);
+    lines.push(
+      `  /** Locator for the rows of the contained \`${c.name}\` table — assert with toHaveCount. */`,
+    );
+    lines.push(`  ${c.name}Rows(): Locator {`);
+    lines.push(`    return this.page.getByTestId("${slug}-detail-${c.name}").locator("tbody tr");`);
+    lines.push(`  }`);
+  }
+  return lines;
+}
+
+/** The `e2e/`-relative path the page-object module for `page` is written to.
+ *
+ *  The scaffold archetypes (list / new / detail) collapse onto ONE module per
+ *  aggregate, `e2e/pages/<aggregate-camel>.ts` — exactly where the SPA
+ *  frontends put theirs (`react/pages-emitter.ts`) and, decisively, exactly
+ *  where `src/system/ui-e2e-render.ts` imports them from.  Emitting one file
+ *  per PAGE (`widget_list.ts` / `widget_new.ts` / `widget_detail.ts`) left the
+ *  emitted `.ui.spec.ts` importing `./pages/widget`, a module that did not
+ *  exist — and re-declared `<Agg>NewPage` / `<Agg>DetailPage` in three files.
+ *
+ *  Everything else (custom/walker pages, workflow forms, the index pages)
+ *  keeps the per-page `e2e/pages/<page-snake>.ts` namespace; the two cannot
+ *  collide (camel aggregate vs snake page name). */
+export function pageObjectPathFor(page: PageIR, ctx: PageNameCtx): string {
+  const kind = classifyPage(page, ctx);
+  if (
+    kind.kind === "aggregate-list" ||
+    kind.kind === "aggregate-new" ||
+    kind.kind === "aggregate-detail"
+  ) {
+    return `e2e/pages/${lowerFirst(kind.aggregateName)}.ts`;
+  }
+  return `e2e/pages/${snake(pageEmitName(page, ctx))}.ts`;
+}
+
 /** Emit a Playwright page-object TypeScript module for one Phoenix LiveView
- *  page.  Caller writes the result to `e2e/pages/<page-snake>.ts`. */
+ *  page.  Caller writes the result to {@link pageObjectPathFor}. */
 export function buildPlaywrightPageObject(args: BuildPlaywrightPageObjectArgs): string {
   const { page, aggregatesByName, contextByAggName } = args;
   // The page's kind + emitted name are derived from its role-scoped name + area
-  // (slice 3c — no stamped `origin`).
+  // (no stamped `origin`).
   const workflowNames: string[] = [];
   for (const bc of contextByAggName.values()) {
     for (const wf of bc.workflows) workflowNames.push(wf.name);
@@ -261,9 +327,7 @@ function buildAggregateListPageObject(
   lines.push(`    return this;`);
   lines.push(`  }`);
   lines.push(``);
-  lines.push(`  async field(name: string): Promise<string> {`);
-  lines.push(`    return await this.page.getByTestId(\`${slug}-detail-\${name}\`).innerText();`);
-  lines.push(`  }`);
+  lines.push(...detailReaderLines(slug, agg));
   const ops = agg.operations.filter((o) => o.visibility === "public");
   for (const op of ops) {
     const opCamel = lowerFirst(op.name);
@@ -329,7 +393,7 @@ function buildAggregateNewPageObject(
 
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
-  lines.push(`import type { Page } from "@playwright/test";`);
+  lines.push(`import type { Page, Locator } from "@playwright/test";`);
   lines.push(``);
   lines.push(`export class ${className} {`);
   lines.push(`  static readonly url = ${JSON.stringify(route)};`);
@@ -374,10 +438,7 @@ function buildAggregateNewPageObject(
   lines.push(`    await this.page.getByTestId("${slug}-detail").waitFor();`);
   lines.push(`    return this;`);
   lines.push(`  }`);
-  lines.push(``);
-  lines.push(`  async field(name: string): Promise<string> {`);
-  lines.push(`    return await this.page.getByTestId(\`${slug}-detail-\${name}\`).innerText();`);
-  lines.push(`  }`);
+  lines.push(...detailReaderLines(slug, agg));
   lines.push(`}`);
   lines.push(``);
 
@@ -400,7 +461,7 @@ function buildAggregateDetailPageObject(
 
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
-  lines.push(`import type { Page } from "@playwright/test";`);
+  lines.push(`import type { Page, Locator } from "@playwright/test";`);
   lines.push(``);
   lines.push(`export class ${className} {`);
   lines.push(`  readonly page: Page;`);
@@ -419,10 +480,7 @@ function buildAggregateDetailPageObject(
   lines.push(`    await this.page.getByTestId("${slug}-detail").waitFor();`);
   lines.push(`    return this;`);
   lines.push(`  }`);
-  lines.push(``);
-  lines.push(`  async field(name: string): Promise<string> {`);
-  lines.push(`    return await this.page.getByTestId(\`${slug}-detail-\${name}\`).innerText();`);
-  lines.push(`  }`);
+  lines.push(...detailReaderLines(slug, agg));
   for (const op of ops) {
     const opCamel = lowerFirst(op.name);
     if (op.params.length === 0) {

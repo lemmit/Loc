@@ -68,8 +68,10 @@ import {
   listShapedProjectionNames,
   readableProjectionNames,
 } from "../../ir/util/projection-read.js";
+import { walkStmtChildren } from "../../ir/util/walk.js";
 import { errorTypeUri } from "../../util/error-defaults.js";
 import { provableStringType } from "../../util/expr-body-type.js";
+import { snake } from "../../util/naming.js";
 import { DURATION_UNIT_MS } from "../../util/temporal.js";
 import { WALKER_LAYOUT_PRIMITIVES } from "../../util/walker-primitive-names.js";
 import type { LoadedPack } from "../_packs/loader.js";
@@ -103,10 +105,10 @@ function renderDerived(ctx: WalkContext, name: string, position: RenderPosition)
 }
 
 /** Per-source named-import map — `from` module → set of named
- *  exports the page needs from it.  Replaces the old single-source
- *  `Set<MantineImport>` so primitives ported through the pack
- *  contract can declare their own imports (shadcn pulls
- *  `@/components/ui/button`, lucide-react, etc., not just Mantine).
+ *  exports the page needs from it.  Per-source rather than a single
+ *  `Set<MantineImport>`, so primitives ported through the pack contract can
+ *  declare their own imports (shadcn pulls `@/components/ui/button`,
+ *  lucide-react, etc., not just Mantine).
  *
  *  Existing emit functions that haven't yet been ported to the
  *  pack contract use `addMantineImport` (below) which appends to
@@ -347,11 +349,10 @@ const NON_PAGE_BODY_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set<string>([
   "Action",
   // For — list-comprehension; renders as JSX children, not a page body.
   "For",
-  // (MultilineField / SelectField used to sit here while they had no
-  // renderer; they are real controlled inputs now — page-body-eligible
-  // exactly like Field / Toggle.  `Switch` left the stdlib entirely:
-  // page-metamodel.md subsumed it under `match`, Toggle is the bool
-  // input.)
+  // (MultilineField / SelectField are NOT here: they are real controlled
+  // inputs, page-body-eligible exactly like Field / Toggle.  `Switch` is not in
+  // the stdlib at all — page-metamodel.md subsumes it under `match`, and Toggle
+  // is the bool input.)
 ]);
 
 export const STDLIB_LAYOUT_COMPONENTS: ReadonlySet<string> = new Set(
@@ -668,7 +669,7 @@ export interface WalkEnv {
    *  reference; the shell imports each used one from its
    *  `src/lib/<name>` conformance shim. */
   externFunctions?: ReadonlySet<string>;
-  /** Semantic heading-nesting depth (accessibility.md Phase 2, Layer 3 —
+  /** Semantic heading-nesting depth (accessibility.md, Layer 3 —
    *  derived whole-page structure).  Incremented by the `nesting: true`
    *  containers in the a11y contract (`Section` / `Card`) when they walk
    *  their children; consumed by `emitHeading` to derive the heading rank
@@ -903,8 +904,7 @@ export interface OperationFormState extends FormStateBase {
    *  because packs render the title in both positions: `modalTitle` for a
    *  markup-text slot (`<DialogTitle>…</DialogTitle>`), `modalTitleExpr` for a
    *  JS prop (Mantine's `modals.open({ title: … })`).  Undefined ⇒ no authored
-   *  title; the page-shell falls back to the humanized op name, which is what
-   *  every pack hardcoded before this slot was honoured at all. */
+   *  title; the page-shell falls back to the humanized op name. */
   modalTitle?: string;
   modalTitleExpr?: string;
   /** The op-module template's Cancel button label, routed through the stable
@@ -982,7 +982,41 @@ function adjustFindHookArgs(
   return { ...hookUse, argsRendered: [bag], reactiveQuery: true };
 }
 
-const STANDARD_AGG_OPS: ReadonlySet<string> = new Set([
+/** Resolve a `navigate(<Page>[, <state>])` CALL — in `then:` position (where
+ *  `emitActionThen` has always handled it) or as a bare STATEMENT in a page
+ *  `action` body (where nothing did, so it fell through to the generic
+ *  `${name}(${args})` line and emitted `navigate(/* unresolved: Other *​/
+ *  undefined)` against a `navigate` the shell never imported).  Returns
+ *  undefined when the call is not a navigate, so a caller can fall through.
+ *
+ *  The page-ref → route derivation stays here (it reads `ctx.pageRoutes`, a
+ *  walker concern) and the target contributes only its own navigation form
+ *  through `renderNavigate`; `usesNavigate` is the shell's cue to bind the
+ *  navigator (`useNavigate` / `useRouter` / `inject(Router)`). */
+export function tryRenderNavigateCall(
+  name: string,
+  args: readonly ExprIR[],
+  ctx: WalkContext,
+): string | undefined {
+  if (name !== "navigate") return undefined;
+  const pageRef = args[0];
+  const route =
+    pageRef && pageRef.kind === "ref"
+      ? (ctx.pageRoutes?.get(pageRef.name) ?? `/${snake(pageRef.name)}`)
+      : "/";
+  ctx.usesNavigate = true;
+  // A second arg is an opaque route-state expression (`navigate(Page, sel)`);
+  // the contract's `stateExpr` escape hatch embeds it verbatim.
+  const stateArg = args[1];
+  const stateExpr = stateArg ? emitExpr(stateArg, ctx) : undefined;
+  return ctx.target.renderNavigate(route, [], stateExpr);
+}
+
+/** The compiler-owned repository verbs a `<handle>.<Agg>.<verb>` read can name.
+ *  Exported because a caller resolving the AGGREGATE out of such a read has to
+ *  recognise the verb to look past it: `Ops.Item.all` is a MEMBER chain whose
+ *  last hop is the verb, not the aggregate (`primitives/controls.ts`). */
+export const STANDARD_AGG_OPS: ReadonlySet<string> = new Set([
   "all",
   "byId",
   "create",
@@ -1151,9 +1185,9 @@ function emitComponent(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth:
   // Surface a comment either way, so the gap is visible in generated output
   // rather than silently producing nothing useful.
   //
-  // NOT "the React walker": this core is shared by React, Vue, Svelte, Angular,
-  // Feliz and Flutter through `WalkerTarget`, so the old wording put React's
-  // name in the Angular/Flutter output too.
+  // The message must not name React: this core is shared by React, Vue,
+  // Svelte, Angular, Feliz and Flutter through `WalkerTarget`, so React's name
+  // would land in the Angular/Flutter output too.
   if (def) {
     return ctx.target.renderComment(`${call.name}: not supported by the walker yet`);
   }
@@ -1340,18 +1374,39 @@ export function renderActionHandlers(
   return out.join("\n");
 }
 
-/** True when a statement (or a nested arm/else body) contains an awaited
- *  effect — a `variant-match` (whose subject is `await <op>()`).  Drives the
- *  `async` handler wrapper (async-actions-and-effects.md Stage 2). */
+/** True when a statement — or a nested arm / `else` body — contains an awaited
+ *  effect: a `variant-match`, whose subject is `await <op>()`.  Drives the
+ *  `async` handler wrapper (async-actions-and-effects.md Stage 2).
+ *
+ *  The recursion matches what the doc always claimed.  It was a bare
+ *  `kind === "variant-match"` test, which is only ever RIGHT by accident: the
+ *  sole statement kind that nests other statements IS `variant-match`, so a
+ *  nested one always has a `variant-match` ancestor at top level and the flat
+ *  test happened to see it.  The moment the page-statement vocabulary grows a
+ *  second nesting kind (an `if`, an `attempt` — M-T1.7/M-T1.8 both add one),
+ *  the flat test emits a NON-async handler whose body still `await`s, which is
+ *  a hard `tsc` failure in generated code.  Recursing now costs nothing
+ *  (byte-identical on every shape that exists) and removes the trap. */
 function stmtIsAwaited(s: StmtIR): boolean {
-  return s.kind === "variant-match";
+  if (s.kind === "variant-match") return true;
+  let nested = false;
+  walkStmtChildren(
+    s,
+    () => {},
+    (child) => {
+      if (stmtIsAwaited(child)) nested = true;
+    },
+  );
+  return nested;
 }
 
 /** Money(value, currency?, decimals?, testid?).  Renders
- *  through the pack's `MoneyValue` runtime helper (Intl.NumberFormat
- *  with `style: "currency"`).  First positional or `value:` named
- *  arg is the numeric value; `currency:` and `decimals:` are
- *  optional named args. */
+ *  through the pack's `MoneyValue` runtime helper, which delegates to
+ *  the shared `moneyText` (src/generator/_frontend/money-format.ts):
+ *  the wire's own digits verbatim — no locale, no fabricated currency,
+ *  no rescale.  First positional or `value:` named arg is the value;
+ *  `decimals:` (half-away-from-zero digit-string rescale) and
+ *  `currency:` (verbatim code prefix) are optional named args. */
 // Leaf text & media primitives (Heading, Text, Money, DateDisplay,
 // EnumBadge, Anchor, Image, Avatar, Loader, Empty, KeyValueRow) live
 // in walker/primitives/text.ts.
@@ -1496,6 +1551,18 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // already tags these with `refKind: "let"`; emit the bare
       // name so the generated code references the local.
       if (expr.refKind === "let") return expr.name;
+      // A bare enum-member reference (`o.vis == Public`).  A frontend never
+      // sees the enum as a type: it rides the wire as the member's bare NAME
+      // string (`z.enum(["Public", …])` in _frontend/zod-schemas.ts, `String`
+      // in flutter/dart-types.ts, `string` in feliz/wire.ts `wireFieldType`),
+      // which is why the two other frontend renderers of this ref — the ui
+      // gate (`_frontend/gate-expr.ts`) and the seed defaults
+      // (`_frontend/default-seed.ts`) — both emit `JSON.stringify(e.name)`.
+      // Rendered through the literal seam so each embedded language spells the
+      // string its own way (JS/F# `"Public"`, Dart `'Public'`) — no new seam.
+      // Last, after the name-scoped lookups above, so a state / param / shell
+      // local of the same name still wins (lowering already shadows it too).
+      if (expr.refKind === "enum-value") return ctx.target.exprLiteral("string", expr.name);
       return `/* unresolved: ${expr.name} */ undefined`;
     case "binary": {
       const left = emitExpr(expr.left, ctx);
@@ -1610,9 +1677,9 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       }
       // A VALUE-OBJECT construction (`Money(9.99, "USD")`).  Lowering gives it
       // `callKind: "free"`, indistinguishable here from an extern function or
-      // a typo'd component name — so it used to emit a bare `Money(9.99,
-      // "USD")` call, which is TS2304 (no such JS binding exists; a VO has no
-      // emitted constructor on the client).
+      // a typo'd component name.  Emitting a bare `Money(9.99, "USD")` call
+      // would be TS2304 — no such JS binding exists, since a VO has no emitted
+      // constructor on the client.
       //
       // On the wire a value object IS a plain record, so the correct frontend
       // rendering is the wire-shaped object literal — the same shape the API
@@ -1704,8 +1771,7 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // reaches `emitExpr` directly: builder primitives that take a lambda
       // (`For`, `Table` column accessors, `onSubmit`) destructure `.body` /
       // `.block` themselves and never pass the lambda node here, so this arm
-      // fires only for the inline-collection-op case that used to emit
-      // `/* unsupported expr: lambda */ undefined`.
+      // fires only for the inline-collection-op case.
       //
       // The param binds to its own JS name (the JS frontends spell the
       // binding identically); refs to it inside the body resolve through
@@ -1861,10 +1927,10 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // degrading to a `/* unsupported expr: … */ undefined` placeholder that
       // makes the generated project blank or NaN at that spot.
       //
-      // That placeholder is what let `paren` emit `undefined * c` unnoticed
-      // for as long as it did.  It no longer exists: a kind that genuinely
-      // cannot render on a frontend gets an explicit arm that throws (or a
-      // `loom.*` validator gate), never a comment.
+      // Such a placeholder is how `paren` would emit `undefined * c`
+      // unnoticed.  A kind that genuinely cannot render on a frontend gets an
+      // explicit arm that throws (or a `loom.*` validator gate), never a
+      // comment.
       const never: never = expr;
       throw new Error(
         `walker: no emitExpr arm for ExprIR kind '${(never as ExprIR).kind}'. ` +
@@ -2016,6 +2082,25 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
         return `${ctx.target.renderStoreActionCall({ storeName: stmt.store, action: stmt.name, local: storeLocalFor(ctx, stmt.store, stmt.name) }, callArgs)};`;
       }
       if (ctx.externFunctions?.has(stmt.name)) ctx.usedExternFunctions?.add(stmt.name);
+      // `navigate(<Page>)` — the DOCUMENTED home for navigation (docs/actions.md
+      // §navigate; the lambda form is refused by `loom.effect-in-lambda`), and
+      // the one shape with no arm here: it fell through to the generic call line
+      // below, emitting `navigate(/* unresolved: Other */ undefined)` against a
+      // `navigate` the shell never bound.  Routed through the SAME resolver the
+      // `then:` path uses, so both spellings agree by construction.
+      //
+      // Narrowed to `private-operation` — the target `navigate` lowers to when
+      // it resolves to nothing — and skipped for a DECLARED extern ui
+      // `function navigate(...)`, which lowers to the same target but has a
+      // real binding: hijacking it emitted `navigate("/")` alongside BOTH an
+      // `import { navigate }` and a `const navigate = useNavigate()`, i.e. a
+      // redeclaration.  A sibling `action` / store action is already excluded
+      // by its own arm above.  (Feliz gets the same ordering for free from arm
+      // position in `update-emit.ts`.)
+      if (stmt.target === "private-operation" && !ctx.externFunctions?.has(stmt.name)) {
+        const nav = tryRenderNavigateCall(stmt.name, stmt.args, ctx);
+        if (nav !== undefined) return `${nav};`;
+      }
       const args = stmt.args.map((a) => emitExpr(a, ctx)).join(", ");
       return `${stmt.name}(${args});`;
     }
@@ -2027,24 +2112,6 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
         "it has no meaning in a React page event handler",
       );
   }
-}
-
-/** OR the walk's mutable BOOLEAN Sink flags from a child context back into its
- *  parent.  Needed when a child ctx was made by SPREAD (`{ ...ctx, lambdaParams }`)
- *  — the spread snapshots the booleans by value, so a body write inside the
- *  child (`usesState` from a `:=`, `usesNavigate` from a `navigate(…)`) would be
- *  lost.  Object sinks (imports / usedApiHooks / usedParams / …) stay shared by
- *  reference and need no copy-back. */
-function propagateSinkFlags(from: WalkContext, to: WalkContext): void {
-  to.usesState ||= from.usesState;
-  to.usesNavigate ||= from.usesNavigate;
-  to.usesRouteId ||= from.usesRouteId;
-  to.usesCurrentUser ||= from.usesCurrentUser;
-  to.usesRouterLink ||= from.usesRouterLink;
-  to.usesChildren ||= from.usesChildren;
-  to.usesCodeBlock ||= from.usesCodeBlock;
-  to.usesFileUpload ||= from.usesFileUpload;
-  if (from.usesFragment) to.usesFragment = true;
 }
 
 /** Add a named import the page/component shell must emit (`from` module →
@@ -2147,7 +2214,16 @@ function emitVariantMatch(
       ? { ...ctx, lambdaParams: extendLambdaParams(ctx, arm.binding, arm.binding) }
       : ctx;
     const body = arm.body.map((s) => emitStmt(s, armCtx));
-    if (armCtx !== ctx) propagateSinkFlags(armCtx, ctx);
+    // ONE propagator.  This used to be `propagateSinkFlags`, a near-copy of
+    // `propagateChildFlags` that had drifted five entries behind it
+    // (`usesTableSort`, `usesTableFilter`, `usesDataGrid`, `tabsDefault`, and
+    // the `formOfs` list).  Nothing a statement arm can write reaches those
+    // today — the page-statement vocabulary is assign/add/remove/let/
+    // expression/call/variant-match, none of which renders markup — so the
+    // divergence was latent, which is exactly why it survived: the copy stayed
+    // correct while the original grew.  Folding removes the second place to
+    // remember (G2667 §D7).
+    if (armCtx !== ctx) propagateChildFlags(armCtx, ctx);
     return { tag, binding: arm.binding, body, isError: isErrorTag(tag, arm.isError) };
   });
   // All error arms (not just the first) — each paired with the RFC-7807 `type`
@@ -2171,8 +2247,8 @@ function emitVariantMatch(
 }
 
 /** A page event-handler statement the React walker can't lower.  We throw
- *  rather than emit a `/* unsupported *\/` comment: the old comment compiled
- *  fine but silently dropped the statement at runtime (e.g. a button whose
+ *  rather than emit a `/* unsupported *\/` comment: such a comment compiles
+ *  fine but silently drops the statement at runtime (e.g. a button whose
  *  handler does nothing).  Failing generation surfaces the gap loudly — see
  *  the same rationale in src/ir/validate/validate.ts (test-body fallbacks). */
 /** Immutable React state write for a (possibly nested) `state` target.
@@ -2231,6 +2307,75 @@ export function stringOrRefArgValue(
     }
   }
   return undefined;
+}
+
+/** A resolved navigation destination for `Anchor(to:)` / `Button(to:)`.
+ *
+ *  `expr` is the destination in the TARGET's own expression language (JS for
+ *  the JSX family, F# for Feliz, Dart for Flutter) — a quoted string literal
+ *  for a static path, any rendered expression otherwise.  `literal` carries the
+ *  raw source string when (and only when) the destination is a string literal,
+ *  so a markup call site can spell a STATIC attribute (` to="/orders"`) instead
+ *  of a bound one. */
+export interface NavTarget {
+  readonly expr: string;
+  readonly dynamic: boolean;
+  readonly literal?: string;
+}
+
+/** Read a named arg as a navigation destination.
+ *
+ *  Any expression is accepted — `to: "/greet/" + who`, `to: row.url`, `to: id`
+ *  — and rendered through `emitExpr`, i.e. through the SAME leaf table the rest
+ *  of the body uses.  This is finding A12: the previous helper
+ *  ({@link stringOrRefArgValue}) accepted only a string literal or a bare
+ *  route-param ref and returned `undefined` for everything else, so a computed
+ *  `to:` was SILENTLY DROPPED — the anchor/button rendered with no navigation
+ *  at all, on six of the seven frontends, with no diagnostic.  (HEEx, which
+ *  runs its own engine, renders it correctly — that is the intended
+ *  semantics.)  A param ref must not come back as a JS TEMPLATE LITERAL
+ *  (`` `${id}` ``), which is neither valid in a JSX/HTML attribute position nor
+ *  valid F#/Dart at all.
+ *
+ *  Returns undefined when the arg is absent — the deliberate "no destination"
+ *  case every target renders as a plain, unlinked label. */
+export function navArgValue(
+  call: ExprIR & { kind: "call" },
+  name: string,
+  ctx: WalkContext,
+): NavTarget | undefined {
+  const argNames = call.argNames ?? [];
+  for (let i = 0; i < call.args.length; i++) {
+    if (argNames[i] !== name) continue;
+    const a = call.args[i]!;
+    if (a.kind === "literal" && a.lit === "string") {
+      return { expr: ctx.target.exprLiteral("string", a.value), dynamic: false, literal: a.value };
+    }
+    return { expr: emitExpr(a, ctx), dynamic: true };
+  }
+  return undefined;
+}
+
+/** The markup ATTRIBUTE fragment (leading space included) carrying a nav
+ *  destination — the value packs splice via `{{{navAttr "<name>"}}}`.
+ *
+ *  The attribute NAME is the pack's decision (`to` on a React `RouterLink`,
+ *  `href` on a plain `<a>`, `routerLink` on Angular), the SPELLING is the
+ *  framework's: a static path is a plain quoted attribute, a computed one rides
+ *  `renderAttrBinding` (` to={expr}` on JSX/Svelte, ` :to="expr"` on Vue,
+ *  ` [to]="expr"` on Angular).  Angular binds even the static case
+ *  (`navAttrAlwaysBound`), since `[routerLink]='"/x"'` is what its packs have
+ *  always emitted. */
+export function navAttrFragment(
+  nav: NavTarget | undefined,
+  ctx: WalkContext,
+  name: string,
+): string {
+  if (!nav) return "";
+  if (!nav.dynamic && nav.literal !== undefined && !ctx.target.navAttrAlwaysBound) {
+    return ` ${name}="${escapeHtmlAttr(nav.literal)}"`;
+  }
+  return ctx.target.renderAttrBinding(name, nav.expr);
 }
 
 /** Read the `style:` IR field hoisted from a `style: { … }` named arg
@@ -2313,7 +2458,7 @@ export function styleWith(
       // NUMBER stays unquoted so `weight: 700` keeps emitting `fontWeight: 700`
       // rather than the string `"700"` — React would otherwise be free to treat
       // a numeric length differently from its string form (it appends `px` to
-      // numbers), and the packs' own declarations were numeric before this merge.
+      // numbers), and the packs' own declarations are numeric.
       const numeric = /^-?\d+(\.\d+)?$/.test(literal);
       return [{ key, rendered: numeric ? literal : JSON.stringify(literal), literal }];
     });

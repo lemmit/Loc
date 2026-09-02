@@ -120,9 +120,16 @@ and elixir has no `document` shape at all.  See *Deferred cases* below.
   query selectively bypass just one via `IgnoreQueryFilters(["<Name>"])`.
   Emission is per-entity-type; the filter applies to *every* query of that
   aggregate (capability application was resolved earlier, at expansion +
-  lowering).  EF Core resolves the DI-scoped
-  principal and queries jsonb transparently, so .NET is the one
-  backend with no deferred cases.  See
+  lowering).  **Under `sharedTable` (TPH) inheritance the entity type is the
+  hierarchy ROOT** — EF accepts a filter nowhere else — so a subtype's filter is
+  registered on the root config, guarded by the `kind` discriminator
+  (`EF.Property<string>(x, "kind") != "Car" || (…)`) and prefixed
+  (`"Car_LiveFilter"`) so two subtypes carrying the same capability keep
+  distinct keys.  A subtype filter reading a column only that subtype declares
+  is the one shape EF cannot express and is gated
+  (`loom.tph-filter-unsupported`, docs/inheritance.md).  EF Core resolves the
+  DI-scoped principal and queries jsonb transparently, so .NET has no other
+  deferred cases.  See
   `src/generator/dotnet/emit/efcore.ts`.
 - **Hono / Drizzle** — Drizzle has no global query filter, so the
   repository builder AND-s each predicate into every root-table read

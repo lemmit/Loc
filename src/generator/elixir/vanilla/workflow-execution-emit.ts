@@ -1,59 +1,59 @@
 // ---------------------------------------------------------------------------
 // Vanilla workflow execution emit — `lib/<app>/<ctx>/workflows/<wf>.ex` +
-// `lib/<app>_web/controllers/workflows_controller.ex`.  Slice 5c of
-// vanilla-foundation-tdd-plan.md.
+// `lib/<app>_web/controllers/workflows_controller.ex`
+// (vanilla-foundation-tdd-plan.md).
 //
 // Workflows are plain Elixir modules.  A workflow becomes a module with
 // `run/1` returning `{:ok, _} | {:error, _}`; `transactional`
 // workflows wrap their body in `Repo.transaction/1`.  Cross-aggregate
 // operation calls (`<aggregate>.<op>(args)` in the workflow body)
 // route through the per-context named-operation functions emitted
-// by `context-emit.ts` (Slice 5c prerequisite).
+// by `context-emit.ts`.
 //
-// Body lowering by WorkflowStmtIR kind (incremental):
-//   ✓ factory-let → `{:ok, <name>} <- Context.create_<agg>(%{...})`
-//   ✓ op-call     → `{:ok, _}      <- Context.<op>_<agg>(target, %{...})`
-//   ✓ precondition → `:ok <- (if <cond>, do: :ok, else: {:error, :precondition_failed})`
-//   ✓ requires     → `:ok <- (if <cond>, do: :ok, else: {:error, :forbidden})`
-//   ✓ expr-let     → `<name> <- (<expr>)` (always succeeds; binds `name`)
-//   ✓ repo-let     → `{:ok, <name>} <- Context.get_<agg>(id)` (getById)
-//                    OR `{:ok, <name>} <- Context.<find>_<agg>(args...)`
-//                    (custom find via the per-find defdelegate emitted by
-//                    `context-emit.ts` → `repository-emit.ts:renderFindFn`)
-//   ✓ emit         → `Phoenix.PubSub.broadcast(App.PubSub, "events",
-//                     %App.Ctx.Events.<Name>{...})` — rendered INSIDE the
-//                    with-chain's do-branch so a failed precondition / op
-//                    short-circuits and the broadcast is skipped.  The
-//                    `Events.<Name>` struct module is emitted by the
-//                    orchestrator's `emitVanillaEventModules` hook.
-//   ✓ resource-call → `_ = <App>.Resources.<Type>.<res>_<verb>(args)` —
-//                     bare side-effect call (Phase 4), rendered INSIDE
-//                     the with-chain's do-branch like `emit`.  The
-//                     adapter helper modules are emitted by the
-//                     orchestrator's `emitPhoenixResourceFiles` reuse.
-//   ✓ repo-run     → `{:ok, <name>} <- Context.run_<ret>_<agg>(args..., limit:, offset:)`
-//                     against the per-context retrieval defdelegate (the
-//                     vanilla retrieval `run/N` returns `{:ok, [_]}`).
-//                     Pagination opts ride as a trailing keyword list.
-//   ✓ for-each     → `{:ok, _} <- Enum.reduce_while(xs, {:ok, nil}, fn x, _acc ->
-//                                    case Context.<op>_<agg>(x, %{}) do ... end
-//                                  end)` — first body-op failure halts the
-//                     reduce and bubbles `{:error, _}` up the with-chain.  A
-//                     single op-call keeps the flat `case` shape; a broader
-//                     body (op-call + factory-let / emit / expr-let / guards)
-//                     lowers through a per-iteration `with`-chain whose first
-//                     failed clause halts the reduce.
-//   ✓ if-let       → `{:ok, _} <- (var = case ...run_<ret>...; if var != nil
-//                     do <thenBody> else <elseBody> end)`.  Both branches lower
-//                     the full statement set (op-call / factory-let / emit /
-//                     expr-let; a guard-bearing branch wraps in a `with`-chain
-//                     so a failed `precondition` / `requires` threads `{:error,
-//                     tag}` up the outer with-chain).
-// Every WorkflowStmtIR kind now lowers to real Elixir — there is no
-// `default:` / `# TODO` fallthrough remaining.  The switch over
-// `lowerStatement` is exhaustive over the IR union; if a new kind is
-// added to `WorkflowStmtIR`, TypeScript fails compile until a matching
-// arm is added here AND in `collectWorkflowStmtParamRefs`.
+// Body lowering by WorkflowStmtIR kind:
+//   factory-let  → `{:ok, <name>} <- Context.create_<agg>(%{...})`
+//   op-call      → `{:ok, _}      <- Context.<op>_<agg>(target, %{...})`
+//   precondition → `:ok <- (if <cond>, do: :ok, else: {:error, :precondition_failed})`
+//   requires     → `:ok <- (if <cond>, do: :ok, else: {:error, :forbidden})`
+//   expr-let     → `<name> <- (<expr>)` (always succeeds; binds `name`)
+//   repo-let     → `{:ok, <name>} <- Context.get_<agg>(id)` (getById)
+//                  OR `{:ok, <name>} <- Context.<find>_<agg>(args...)`
+//                  (custom find via the per-find defdelegate emitted by
+//                  `context-emit.ts` → `repository-emit.ts:renderFindFn`)
+//   emit         → `Phoenix.PubSub.broadcast(App.PubSub, "events",
+//                  %App.Ctx.Events.<Name>{...})` — rendered INSIDE the
+//                  with-chain's do-branch so a failed precondition / op
+//                  short-circuits and the broadcast is skipped.  The
+//                  `Events.<Name>` struct module is emitted by the
+//                  orchestrator's `emitVanillaEventModules` hook.
+//   resource-call → `_ = <App>.Resources.<Type>.<res>_<verb>(args)` — bare
+//                   side-effect call, rendered INSIDE the with-chain's
+//                   do-branch like `emit`.  The adapter helper modules are
+//                   emitted by the orchestrator's `emitPhoenixResourceFiles`
+//                   reuse.
+//   repo-run     → `{:ok, <name>} <- Context.run_<ret>_<agg>(args..., limit:, offset:)`
+//                   against the per-context retrieval defdelegate (the vanilla
+//                   retrieval `run/N` returns `{:ok, [_]}`).  Pagination opts
+//                   ride as a trailing keyword list.
+//   for-each     → `{:ok, _} <- Enum.reduce_while(xs, {:ok, nil}, fn x, _acc ->
+//                                  case Context.<op>_<agg>(x, %{}) do ... end
+//                                end)` — first body-op failure halts the reduce
+//                   and bubbles `{:error, _}` up the with-chain.  A single
+//                   op-call keeps the flat `case` shape; a broader body
+//                   (op-call + factory-let / emit / expr-let / guards) lowers
+//                   through a per-iteration `with`-chain whose first failed
+//                   clause halts the reduce.
+//   if-let       → `{:ok, _} <- (var = case ...run_<ret>...; if var != nil
+//                   do <thenBody> else <elseBody> end)`.  Both branches lower
+//                   the full statement set (op-call / factory-let / emit /
+//                   expr-let; a guard-bearing branch wraps in a `with`-chain
+//                   so a failed `precondition` / `requires` threads `{:error,
+//                   tag}` up the outer with-chain).
+//
+// The switch over `lowerStatement` is exhaustive over the IR union — there is
+// no `default:` / `# TODO` fallthrough.  Adding a kind to `WorkflowStmtIR`
+// fails the TypeScript compile until a matching arm is added here AND in
+// `collectWorkflowStmtParamRefs`.
 //
 // Param surfacing: a workflow body that references a declared
 // create-param (`create(initialTitle: string) { … initialTitle … }`)
@@ -64,10 +64,10 @@
 //
 // The KEY is the declared param name verbatim; only the BOUND LOCAL is
 // snake_cased.  `params` is Phoenix's decoded JSON map, so its keys are the
-// camelCase wire names every other backend also accepts — this used to
-// destructure `"initial_title"` and raise `MatchError` at runtime on any
-// multi-word param, on a workflow that compiled perfectly.  `mix compile`
-// cannot see it; only a booted request can, which is how it was found.
+// camelCase wire names every other backend also accepts.  Destructuring the
+// snake_cased key instead (`"initial_title"`) raises `MatchError` at runtime on
+// any multi-word param, on a workflow that compiles perfectly — `mix compile`
+// cannot see it, only a booted request can.
 // ---------------------------------------------------------------------------
 
 import {
@@ -87,6 +87,7 @@ import {
 import type { OriginRef } from "../../../ir/types/origin.js";
 import { classifyDomainServiceTier } from "../../../ir/util/domain-service-tier.js";
 import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js";
+import { walkExprDeep, walkWorkflowStmtChildren } from "../../../ir/util/walk.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import { lineCount, type SourceMapRecorder } from "../../_trace/sourcemap.js";
@@ -238,20 +239,79 @@ export interface BodyLine {
   origin?: OriginRef;
 }
 
+/** Does `st` DEFINITELY contribute a `bindName` to the with-chain?  The LAST
+ *  such statement fills `assembleBody`'s `{:ok, <lastBind>}` result slot, so
+ *  every EARLIER bind is `_`-discardable when unread.  `domain-service-call` is
+ *  deliberately absent: its clauses only carry a `bindName` when the mutating
+ *  shape resolves, and guessing wrong here would silently move the workflow's
+ *  return value.  Omitting it can only leave a warning unfixed, never change
+ *  what a workflow returns. */
+function definitelyBinds(st: WorkflowStmtIR): boolean {
+  return (
+    st.kind === "factory-let" ||
+    st.kind === "repo-let" ||
+    st.kind === "repo-run" ||
+    st.kind === "assign"
+  );
+}
+
+/** Everything beyond the following statements that can still READ a binding,
+ *  plus whether this statement's bind may be discarded at all. */
+interface ReadScope {
+  /** Expressions evaluated AFTER the whole statement list.  The explicit
+   *  `commandHandler` / `queryHandler` path (`explicit-handlers-emit.ts`) ends
+   *  its with-chain's do-branch with `{:ok, <return expr>}`, and that expression
+   *  is not a `WorkflowStmtIR` — so without it a `let` whose ONLY reader is the
+   *  `return` looked unread, got `_`-prefixed, and the do-branch then referenced
+   *  an undefined variable (a hard `** (CompileError)`, not a warning). */
+  trailing?: readonly ExprIR[];
+  /** `true` when this statement's `{:ok, <name>}` tuple bind is NOT the
+   *  with-chain's result slot and may therefore be `_`-prefixed if unread.
+   *  Defaults to `false`, so every call path that has not reasoned about the
+   *  result slot (nested loop bodies, legacy callers) keeps today's real name. */
+  discardableBind?: boolean;
+}
+
+const NO_READS: ReadScope = {};
+
+/** How the CALLER closes the with-chain — which decides whether any statement's
+ *  bind is load-bearing as the result. */
+export interface LowerBodyOptions {
+  /** Expressions evaluated after the list — see `ReadScope.trailing`. */
+  trailing?: readonly ExprIR[];
+  /** `true` when the caller renders its OWN result expression instead of
+   *  `assembleBody`'s `{:ok, <lastBind>}` — then no statement's bind is the
+   *  result slot and every unread bind is discardable.  The explicit
+   *  `commandHandler` / `queryHandler` path sets this: `assembleHandlerBody`
+   *  closes with `{:ok, <return expr>}`, never with the last bound name. */
+  ownResult?: boolean;
+}
+
 export function lowerStatements(
   stmts: WorkflowStmtIR[],
   contextModule: string,
   renderCtx: RenderCtx,
   ctx?: BoundedContextIR,
+  opts: LowerBodyOptions = {},
 ): BodyLine[] {
+  const { trailing = [], ownResult = false } = opts;
   const lines: BodyLine[] = [];
+  // M-T6.21 — the LAST statement that definitely binds fills the with-chain's
+  // `{:ok, <result>}` slot (`assembleBody`), so its name is read by
+  // construction; every earlier bind is discardable when nothing reads it.
+  let resultSlot = -1;
+  if (!ownResult)
+    for (let i = 0; i < stmts.length; i++) if (definitelyBinds(stmts[i]!)) resultSlot = i;
   for (let i = 0; i < stmts.length; i++) {
     const st = stmts[i]!;
-    // M-T6.21 — pass the downstream statements so a `let` binding no later
-    // statement references can be `_`-prefixed; an unread real-named bind trips
+    // Pass the downstream statements so a `let` binding no later statement
+    // references can be `_`-prefixed; an unread real-named bind trips
     // `mix compile --warnings-as-errors` (the same move the for-each / if-let
     // body binds already make via `bindUsedLater`).
-    for (const line of lowerStatement(st, contextModule, renderCtx, ctx, stmts.slice(i + 1))) {
+    for (const line of lowerStatement(st, contextModule, renderCtx, ctx, stmts.slice(i + 1), {
+      trailing,
+      discardableBind: i !== resultSlot,
+    })) {
       lines.push({ ...line, origin: st.origin });
     }
   }
@@ -264,6 +324,7 @@ function lowerStatement(
   renderCtx: RenderCtx,
   ctx?: BoundedContextIR,
   rest: WorkflowStmtIR[] = [],
+  reads: ReadScope = NO_READS,
 ): BodyLine[] {
   switch (st.kind) {
     case "factory-let": {
@@ -274,11 +335,15 @@ function lowerStatement(
         .join(", ");
       const action = `create_${snake(st.aggName)}`;
       const call = `${contextModule}.${action}(%{${fields}})`;
+      // M-T6.21 — `{:ok, _order} <- …` when nothing downstream reads the new
+      // aggregate and it is not the workflow's return; the `:ok` match still
+      // gates the chain, so a failed create still rolls back.
+      const { pattern, bindName } = tupleBind(st.name, rest, reads);
       return [
         {
           kind: "with-clause",
-          text: `{:ok, ${snake(st.name)}} <- ${call}`,
-          bindName: snake(st.name),
+          text: `{:ok, ${pattern}} <- ${call}`,
+          bindName,
         },
       ];
     }
@@ -337,8 +402,13 @@ function lowerStatement(
       // (e.g. `let label = match … { … }` with no following use) is
       // `_`-prefixed so `mix compile --warnings-as-errors` stays clean; the
       // expression is still evaluated, only the binding is discarded.
+      // `reads.trailing` carries the explicit handler's `return <expr>` — its
+      // refs are reads too, and omitting them underscored a binding the
+      // do-branch then referenced (`** (CompileError) undefined variable`).
       const expr = renderExpr(st.expr, renderCtx);
-      const bind = bindUsedLater(st.name, rest) ? snake(st.name) : `_${snake(st.name)}`;
+      const bind = bindUsedLater(st.name, rest, reads.trailing)
+        ? snake(st.name)
+        : `_${snake(st.name)}`;
       return [
         {
           kind: "with-clause",
@@ -383,11 +453,14 @@ function lowerStatement(
           ? `get_${snake(st.aggName)}`
           : `${snake(st.method)}_${snake(st.aggName)}`;
       const call = `${contextModule}.${action}(${argList})`;
+      // M-T6.21 — a read whose row nothing downstream touches (an existence
+      // probe, say) binds `{:ok, _wallet}` rather than tripping -Werror.
+      const { pattern, bindName } = tupleBind(st.name, rest, reads);
       return [
         {
           kind: "with-clause",
-          text: `{:ok, ${snake(st.name)}} <- ${call}`,
-          bindName: snake(st.name),
+          text: `{:ok, ${pattern}} <- ${call}`,
+          bindName,
         },
       ];
     }
@@ -401,7 +474,7 @@ function lowerStatement(
       // broadcast is skipped — listeners only see events for successful
       // workflows.  Inside `Repo.transaction(fn -> ...)` the broadcast
       // fires before commit; that matches the standard Phoenix pattern
-      // (a separate "after-commit" hook is out of scope for this slice).
+      // (there is no separate "after-commit" hook).
       const fields = st.fields
         .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
         .join(", ");
@@ -416,7 +489,7 @@ function lowerStatement(
     }
 
     case "resource-call": {
-      // `files.put(k, v)` (bare statement form, Phase 4) →
+      // `files.put(k, v)` (bare statement form) →
       // `<App>.Resources.<ResourceType>.<resource>_<verb>(args)`.
       // The expression renderer routes the call through `resourceModules`
       // (threaded into renderCtx by the orchestrator).  A bare resource-op
@@ -440,7 +513,7 @@ function lowerStatement(
 
     case "domain-service-call": {
       // `Transfer.run(s, d, amount)` — a bare orchestrator call into a
-      // `mutating` `domainService` (domain-services.md rev. 4, Slice 3).  On
+      // `mutating` `domainService` (domain-services.md rev. 4).  On
       // Elixir a mutating service is pure SUGAR for the `with`-chain of its
       // body's param-op calls, each routed through its aggregate's context
       // mutating fn (changeset + `Repo.update` via `persist_change`) — there is
@@ -496,11 +569,13 @@ function lowerStatement(
       if (optEntries.length > 0) args.push(optEntries.join(", "));
       const action = `run_${snake(st.retrievalName)}_${snake(st.aggName)}`;
       const call = `${contextModule}.${action}(${args.join(", ")})`;
+      // M-T6.21 — same discard rule as the other two fallible binds.
+      const { pattern, bindName } = tupleBind(st.name, rest, reads);
       return [
         {
           kind: "with-clause",
-          text: `{:ok, ${snake(st.name)}} <- ${call}`,
-          bindName: snake(st.name),
+          text: `{:ok, ${pattern}} <- ${call}`,
+          bindName,
         },
       ];
     }
@@ -610,7 +685,9 @@ function lowerStatement(
             } else if (NESTED_FLOW_KINDS.has(inner.kind)) {
               // Nested loop / if-let / repo bind — reuse `lowerStatement` so it
               // lowers to a `<-` clause that threads {:error, _} up this branch.
-              pushNestedFlow(inner, contextModule, renderCtx, clauses, tail, ctx);
+              // The branch's own result is `{:ok, <present>}`, so a nested bind
+              // nothing later reads is `_`-discardable (M-T6.21).
+              pushNestedFlow(inner, contextModule, renderCtx, clauses, tail, ctx, rest, true);
             } else {
               // emit / resource-call — pure side-effects, run in the do-branch.
               tail.push(...renderBranchStmt(inner, renderCtx, contextModule, [], ctx));
@@ -670,7 +747,7 @@ function opCallSource(
 }
 
 /** Resolve a `mutating` `domain-service-call` to its inlined with-clauses
- *  (domain-services.md rev. 4, Slice 3).  Looks the service op up in `ctx`,
+ *  (domain-services.md rev. 4).  Looks the service op up in `ctx`,
  *  then delegates to `inlineMutatingServiceCall`, which expands the body's
  *  param-op calls into context mutating-fn with-clauses.  Returns `[]` when
  *  `ctx` is absent (legacy/test path) or the op isn't resolvable/mutating — the
@@ -798,9 +875,18 @@ function pushNestedFlow(
   clauses: string[],
   sideEffects: string[],
   ctx?: BoundedContextIR,
+  /** Statements that follow `inner` in the same body/branch. */
+  rest: WorkflowStmtIR[] = [],
+  /** See `ReadScope.discardableBind`.  A LOOP body threads the produced bind out
+   *  as its `{:cont, {:ok, <last>}}` result, so it passes `false` (the default)
+   *  and keeps the real name; an `if-let` BRANCH ends in its own
+   *  `{:ok, <present>}`, so an unread nested bind there is safe to discard. */
+  discardableBind = false,
 ): string | undefined {
   let bind: string | undefined;
-  for (const bl of lowerStatement(inner, contextModule, renderCtx, ctx)) {
+  for (const bl of lowerStatement(inner, contextModule, renderCtx, ctx, rest, {
+    discardableBind,
+  })) {
     if (bl.kind === "with-clause") {
       clauses.push(bl.text);
       if (bl.bindName) bind = bl.bindName;
@@ -960,130 +1046,81 @@ function renderLoopBody(
   ];
 }
 
-/** Collect every `ref` name reachable from `e` (any refKind) into `acc`. */
+/** Collect every `ref` name reachable from `e` (any refKind) into `acc`.
+ *
+ *  Rides the SHARED `walkExprDeep` rather than a local `ExprIR.kind` switch.
+ *  The local copy had already lost this exact bet twice — the variant-`match`
+ *  `subject` arm below the previous comment, and (on the statement side) the
+ *  `repo-run` `page:` bounds — and each miss has the same shape: the name reads
+ *  as unread, M-T6.21 `_`-prefixes the bind to satisfy
+ *  `--warnings-as-errors`, and the renderer that DOES read it then names an
+ *  undefined variable → `CompileError` on every `mix compile`.
+ *
+ *  `walkExprChildren` carries a trailing-`never` guard, so a new `ExprIR.kind`
+ *  is a compile error there instead of a silent hole here. */
 function collectRefNames(e: ExprIR | undefined, acc: Set<string>): void {
-  if (!e) return;
-  switch (e.kind) {
-    case "ref":
-      acc.add(e.name);
-      return;
-    case "member":
-      collectRefNames(e.receiver, acc);
-      return;
-    case "method-call":
-      collectRefNames(e.receiver, acc);
-      for (const a of e.args) collectRefNames(a, acc);
-      return;
-    case "call":
-      for (const a of e.args) collectRefNames(a, acc);
-      return;
-    case "lambda":
-      collectRefNames(e.body, acc);
-      return;
-    case "new":
-    case "object":
-      for (const f of e.fields) collectRefNames(f.value, acc);
-      return;
-    case "list":
-      for (const el of e.elements) collectRefNames(el, acc);
-      return;
-    case "paren":
-      collectRefNames(e.inner, acc);
-      return;
-    case "unary":
-      collectRefNames(e.operand, acc);
-      return;
-    case "binary":
-      collectRefNames(e.left, acc);
-      collectRefNames(e.right, acc);
-      return;
-    case "ternary":
-      collectRefNames(e.cond, acc);
-      collectRefNames(e.then, acc);
-      collectRefNames(e.otherwise, acc);
-      return;
-    case "convert":
-      collectRefNames(e.value, acc);
-      return;
-    case "match":
-      // BOTH match forms.  The boolean form has `arms`; the VARIANT form has a
-      // `subject` plus `variantArms`, and the subject was missing here — so a
-      // `let` whose only use was as a variant-match scrutinee looked unread,
-      // got `_`-prefixed to satisfy `--warnings-as-errors`, and then the arm
-      // referenced the un-prefixed name: `** (CompileError) undefined variable`.
-      //
-      // Only reachable from an `expr-let` binding (a `repo-let` binds the
-      // `{:ok, x}` tuple pattern, which this rule never touches), which is why
-      // it went unnoticed until a typed in-system api call produced one.
-      for (const arm of e.arms) {
-        collectRefNames(arm.cond, acc);
-        collectRefNames(arm.value, acc);
-      }
-      collectRefNames(e.subject, acc);
-      for (const arm of e.variantArms ?? []) collectRefNames(arm.value, acc);
-      collectRefNames(e.otherwise, acc);
-      return;
-  }
+  walkExprDeep(e, (sub) => {
+    if (sub.kind === "ref") acc.add(sub.name);
+  });
 }
 
-/** Is `name` referenced by any statement in `rest`?  Used to decide whether a
- *  branch/loop `let`-bind needs its real name or can be `_`-discarded (an
- *  unread real-named bind trips `mix compile --warnings-as-errors`). */
-function bindUsedLater(name: string, rest: WorkflowStmtIR[]): boolean {
+/** Is `name` referenced by any statement in `rest` — or by any `trailing`
+ *  expression the caller evaluates after the list (`ReadScope.trailing`)?  Used
+ *  to decide whether a branch/loop/with-chain `let`-bind needs its real name or
+ *  can be `_`-discarded (an unread real-named bind trips
+ *  `mix compile --warnings-as-errors`). */
+function bindUsedLater(
+  name: string,
+  rest: WorkflowStmtIR[],
+  trailing: readonly ExprIR[] = [],
+): boolean {
   const refs = new Set<string>();
   for (const st of rest) collectWorkflowStmtParamRefsAll(st, refs);
+  for (const e of trailing) collectRefNames(e, refs);
   return refs.has(name);
+}
+
+/** M-T6.21 — the `{:ok, <name>}` half of a fallible bind (`factory-let` /
+ *  `repo-let` / `repo-run`).  Returns the pattern to bind and the `BodyLine`
+ *  `bindName` that goes with it.
+ *
+ *  Underscoring is gated on BOTH halves of `ReadScope`: the name must be unread
+ *  downstream AND the bind must not be the with-chain's result slot.  The `:ok`
+ *  side of the tuple is untouched either way, so a fallible call still GATES the
+ *  chain — only the produced value is discarded.  A discarded bind clears
+ *  `bindName` too, so `assembleBody` can never pick `_name` as the result. */
+function tupleBind(
+  name: string,
+  rest: WorkflowStmtIR[],
+  reads: ReadScope,
+): { pattern: string; bindName: string | undefined } {
+  const bare = snake(name);
+  if (!reads.discardableBind || bindUsedLater(name, rest, reads.trailing)) {
+    return { pattern: bare, bindName: bare };
+  }
+  return { pattern: `_${bare}`, bindName: undefined };
 }
 
 /** Like `collectWorkflowStmtParamRefs` but collects ALL ref names (not just
  *  declared create-params) — feeds the unused-bind discard check. */
 function collectWorkflowStmtParamRefsAll(st: WorkflowStmtIR, acc: Set<string>): void {
-  switch (st.kind) {
-    case "precondition":
-    case "requires":
-    case "expr-let":
-      collectRefNames(st.expr, acc);
-      return;
-    case "factory-let":
-    case "emit":
-      for (const f of st.fields) collectRefNames(f.value, acc);
-      return;
-    case "op-call":
-      acc.add(st.target);
-      for (const a of st.args) collectRefNames(a, acc);
-      return;
-    case "repo-let":
-      for (const a of st.args) collectRefNames(a, acc);
-      return;
-    case "repo-delete":
-      collectRefNames(st.entity, acc);
-      return;
-    case "resource-call":
-      collectRefNames(st.call, acc);
-      return;
-    case "domain-service-call":
-      // `Transfer.run(a, b, q)` — its call args may reference an earlier
-      // `let q = …`; without this the binding reads as unused and gets wrongly
-      // `_`-prefixed, then the service call references an undefined variable.
-      collectRefNames(st.call, acc);
-      return;
-    case "assign":
-      // `total := q.amount` reads the binding `q`.
-      collectRefNames(st.value, acc);
-      return;
-    case "repo-run":
-      for (const a of st.retrievalArgs) collectRefNames(a, acc);
-      return;
-    case "for-each":
-      collectRefNames(st.iterable, acc);
-      for (const inner of st.body) collectWorkflowStmtParamRefsAll(inner, acc);
-      return;
-    case "if-let":
-      for (const a of st.retrievalArgs) collectRefNames(a, acc);
-      for (const inner of st.thenBody) collectWorkflowStmtParamRefsAll(inner, acc);
-      for (const inner of st.elseBody ?? []) collectWorkflowStmtParamRefsAll(inner, acc);
-      return;
-  }
+  // The `op-call` TARGET is not an expression — it is the bound aggregate the
+  // call mutates (`order.confirm()`), so it has no child-expression slot for a
+  // walker to hand over and is added here.
+  if (st.kind === "op-call") acc.add(st.target);
+  // Everything else rides the SHARED, `never`-guarded child walker.  The
+  // hand-enumerated switch this replaces read only `repo-run`'s `retrievalArgs`
+  // and never its `page:` bounds — which the renderer DOES read — so a `let`
+  // used solely as a page offset/limit was `_`-prefixed by the M-T6.21
+  // underscore rule while the emitted `Repo.run(...)` still named it:
+  // `** (CompileError) undefined variable "x"` on every `mix compile`.
+  //
+  // A new `WorkflowStmtIR` kind (or a new child slot on an existing one) is now
+  // a compile error in `walkWorkflowStmtChildren`, not a silent hole here.
+  walkWorkflowStmtChildren(st, {
+    expr: (e) => collectRefNames(e, acc),
+    workflowStmt: (inner) => collectWorkflowStmtParamRefsAll(inner, acc),
+  });
 }
 
 /** Render a single `if-let` branch statement (`thenBody` / `elseBody`) as the
@@ -1157,8 +1194,8 @@ function renderBranchStmt(
       // `renderBranch` routes guards + nested control flow / repo binds through
       // the with-chain path (they must short-circuit to `{:error, _}`), so the
       // flat path never sees them.  If that routing ever changes, fail loudly
-      // here — an Elixir `# TODO` comment compiles, so the old fallthrough
-      // shipped mutilated output that `mix compile` accepted.
+      // here.  A `# TODO` fallthrough would be worse than useless: an Elixir
+      // comment compiles, so `mix compile` accepts the mutilated output.
       throw new Error(
         `internal: if-let branch statement kind '${st.kind}' must lower through the ` +
           "with-chain path, not the flat branch renderer. Please file a bug.",
@@ -1265,9 +1302,9 @@ function collectParamRefsInStmt(s: StmtIR, acc: Set<string>): void {
   }
 }
 
-/** Collect referenced create-params from EVERY lowered statement kind —
- *  every kind now lowers to real code emitting its param refs, so the
- *  full WorkflowStmtIR union is covered.  Must stay in lock-step with
+/** Collect referenced create-params from EVERY lowered statement kind: each
+ *  lowers to real code emitting its param refs, so the full WorkflowStmtIR
+ *  union is covered.  Must stay in lock-step with
  *  `lowerStatement`; if a future kind is added without a matching arm
  *  here, an unused param destructure could trip `--warnings-as-errors`. */
 export function collectWorkflowStmtParamRefs(st: WorkflowStmtIR, acc: Set<string>): void {
@@ -1462,9 +1499,8 @@ function renderWorkflowModule(
   const renderCtx: RenderCtx = {
     thisName: "record",
     contextModule: contextModuleFq,
-    foundation: "vanilla",
     resourceModules,
-    // Domain-service call wiring (domain-services.md rev. 4, Slice 1; Elixir
+    // Domain-service call wiring (domain-services.md rev. 4, Elixir
     // decision B).  A workflow that calls a `reading`-tier service (e.g.
     // `precondition Registration.isEmailAvailable(holder)`) renders it as a
     // CONTEXT FUNCTION on this context module — `<Context>.is_email_available(…)`

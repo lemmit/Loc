@@ -121,7 +121,7 @@ function renderService(svc: DomainServiceIR, ctx: BoundedContextIR): string {
 }
 
 function renderOperation(op: DomainServiceOperationIR, ctx: BoundedContextIR): string {
-  // Read-port parameters (domain-services.md rev. 4, Slice 1): a `reading`-tier
+  // Read-port parameters (domain-services.md rev. 4): a `reading`-tier
   // op takes one repository handle per repo it reads, AHEAD of the user params —
   // `accounts: AccountRepository` — exactly the handle the body's `repo-read`
   // arms render against (`await accounts.byHolder(holder)`) and the orchestrating

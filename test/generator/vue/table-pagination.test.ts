@@ -24,7 +24,8 @@ async function genPage(body: string, state = `state { pageNum: int = 1 }`) {
         api Sales: SalesApi
         page X { route: "/x"  ${state}  body: ${body} }
       }
-      deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+      resource ordersState { for: Orders, kind: state, use: pg }
+      deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
       deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
     }
   `);
@@ -43,7 +44,12 @@ describe("Table client-side pagination (Vue)", () => {
     expect(content).toContain('@click="pageNum = pageNum - 1"');
     expect(content).toContain('@click="pageNum = pageNum + 1"');
     expect(content).toContain(':disabled="pageNum <= 1"');
-    expect(content).toContain("Page {{ pageNum }} of {{ Math.max(1, Math.ceil(");
+    // One ICU chrome message: the fixture's `Column` headers are translatable
+    // text (the `columnHeader` slot), so the app has an i18n runtime and the
+    // pager binds through it instead of spelling the sentence in the template.
+    expect(content).toContain(
+      't("chrome.pageOf", "Page {page} of {pages}", { page: pageNum, pages: Math.max(1, Math.ceil(',
+    );
     // The int state ref initialises to 1 (honours the `= 1` initializer).
     expect(content).toContain("const pageNum = ref(1);");
   });

@@ -131,6 +131,144 @@ describe("loom.resource-op-outside-workflow — the gate", () => {
     expect(d?.message).toMatch(/workflow/);
   });
 
+  // ---------------------------------------------------------------------
+  // Domain services.  The first cut of this gate called a `domainService`
+  // operation body a LEGAL site (matching the ambient-resource `Env` and the
+  // three sites `deriveNeeds` scans).  Re-verified against a real generation,
+  // it fails the same five ways the aggregate bodies did:
+  //
+  //   .NET / Java / Phoenix — `ddd generate system` THROWS out of each
+  //       backend's `domain-service` emitter ("reached the … renderer without
+  //       a resource class mapping"), writing nothing.
+  //   TS     — `domain/services.ts:6` gets `(await salesFiles$list(…))` inside
+  //       a non-async `export function`, in a file importing no resource
+  //       client → TS1308 + TS2304.
+  //   Python — `app/domain/services/archiver.py:9` gets the same `await` in a
+  //       bare `def` → SyntaxError + F821.
+  // ---------------------------------------------------------------------
+  it("flags a LET-BOUND resource-op in a domainService operation body", async () => {
+    expect(
+      await codes(`
+        aggregate Order with crudish { name: string }
+        repository Orders for Order { }
+        domainService Archiver {
+          operation archived(name: string): bool {
+            let existing = salesFiles.list("orders/" + name)
+            return existing.count > 0
+          }
+        }
+      `),
+    ).toContain(CODE);
+  });
+
+  it("flags a BARE resource-op statement in a domainService operation body", async () => {
+    expect(
+      await codes(`
+        aggregate Order with crudish { name: string }
+        repository Orders for Order { }
+        domainService Archiver {
+          operation stash(name: string) { salesFiles.put("orders/" + name, name) }
+        }
+      `),
+    ).toContain(CODE);
+  });
+
+  it("names the SERVICE and operation in the domainService diagnostic", async () => {
+    const d = (
+      await diagnostics(`
+        aggregate Order with crudish { name: string }
+        repository Orders for Order { }
+        domainService Archiver {
+          operation stash(name: string) { salesFiles.put("orders/" + name, name) }
+        }
+      `)
+    ).find((x) => x.code === CODE);
+    expect(d?.severity).toBe("error");
+    expect(d?.message).toMatch(/salesFiles\.put/);
+    expect(d?.message).toMatch(/domainService\[Archiver\]\.operation\[stash\]/);
+  });
+
+  // ---------------------------------------------------------------------
+  // F2-XB-3 — `test { }` blocks, the FOURTH statement-bearing surface.  The
+  // gate walked operations / guards / invariants / derived / functions / find
+  // filters / domainService bodies, but none of the four `TestIR[]` arrays —
+  // so an aggregate whose ONLY resource-op sat in a unit test parsed `0
+  // error(s), 0 warning(s)` and then failed the same five ways the gate
+  // exists to close: .NET and Java DIE mid-`generate system` ("resource
+  // operation 'salesFiles.put' reached the … renderer without a resource
+  // class mapping"), node emits `await` in a non-async arrow against an
+  // unimported symbol (TS1308 + TS2304), python emits `await` in a bare `def`
+  // (SyntaxError on import), elixir alone degrades honestly.
+  // ---------------------------------------------------------------------
+  it("flags a resource-op in an AGGREGATE `test` block", async () => {
+    expect(
+      await codes(`
+        aggregate Order {
+          name: string
+          create(name: string) { }
+          test "resource op in a test block" {
+            let o = Order.create({ name: "x" })
+            salesFiles.put("t", o.name)
+            expect(o.name).toBe("x")
+          }
+        }
+        repository Orders for Order { }
+      `),
+    ).toContain(CODE);
+  });
+
+  it("flags a resource-op inside a test `expect(...)` expression", async () => {
+    expect(
+      await codes(`
+        aggregate Order {
+          name: string
+          create(name: string) { }
+          test "resource op in an expect" {
+            let o = Order.create({ name: "x" })
+            expect(salesFiles.list("orders/").count).toBe(0)
+          }
+        }
+        repository Orders for Order { }
+      `),
+    ).toContain(CODE);
+  });
+
+  it("flags a resource-op in a VALUE OBJECT `test` block", async () => {
+    expect(
+      await codes(`
+        aggregate Order with crudish { name: string }
+        repository Orders for Order { }
+        valueobject Label {
+          text: string
+          test "vo test" { salesFiles.put("t", "x") }
+        }
+      `),
+    ).toContain(CODE);
+  });
+
+  it("flags a resource-op in a domainService `test` block", async () => {
+    expect(
+      await codes(`
+        aggregate Order with crudish { name: string }
+        repository Orders for Order { }
+        domainService Naming {
+          operation label(name: string): string { return "order-" + name }
+          test "svc test" { salesFiles.put("t", "x") }
+        }
+      `),
+    ).toContain(CODE);
+  });
+
+  it("flags a resource-op in a CONTEXT-level `test` block", async () => {
+    expect(
+      await codes(`
+        aggregate Order with crudish { name: string }
+        repository Orders for Order { }
+        test "context test" { salesFiles.put("t", "x") }
+      `),
+    ).toContain(CODE);
+  });
+
   it("reports ONE diagnostic for an operation calling the same verb twice", async () => {
     const hits = (
       await diagnostics(`
@@ -159,6 +297,18 @@ describe("loom.resource-op-outside-workflow — what it must NOT flag", () => {
             let prev = salesFiles.get("orders/" + name)
             salesFiles.put("orders/" + name, name)
           }
+        }
+      `),
+    ).not.toContain(CODE);
+  });
+
+  it("POSITIVE CONTROL: a domainService that touches no resource is clean", async () => {
+    expect(
+      await codes(`
+        aggregate Order with crudish { name: string }
+        repository Orders for Order { }
+        domainService Naming {
+          operation label(name: string): string { return "order-" + name }
         }
       `),
     ).not.toContain(CODE);

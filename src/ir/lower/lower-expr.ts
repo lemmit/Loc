@@ -42,6 +42,7 @@ import {
   isListLit,
   isMatchExpr,
   isMemberSuffix,
+  isModel,
   isMoneyLit,
   isNameRef,
   isNowExpr,
@@ -86,6 +87,7 @@ import { lowerStatement } from "./lower-stmt.js";
 import {
   cstText,
   type Env,
+  findAmbientEnumForValue,
   findApiOperations,
   findDomainServiceByName,
   findEntityByName,
@@ -93,6 +95,7 @@ import {
   findFunctionInEnv,
   findOperationInEnv,
   findPayloadByName,
+  findProjectionByName,
   findValueObjectByName,
   findWorkflowByName,
   inAggregate,
@@ -118,7 +121,7 @@ const NO_PAREN_CALL_COLLECTION_OPS = new Set(["first", "firstOrNull"]);
 
 /** Synthetic entity name used to type an ambient resource handle.  A
  *  `.verb(...)` call on a ref of this type lowers to a `resource-op`;
- *  the name carries no members of its own (Phase 4). */
+ *  the name carries no members of its own. */
 const RESOURCE_HANDLE_SHAPE = "__ResourceHandle";
 
 // ── Ambient root-level enum index ─────────────────────────────────────
@@ -144,8 +147,8 @@ export function setAmbientEnumIndex(index: ReadonlyMap<string, string>): void {
   ambientEnumIndex = index;
 }
 
-// Project-global index of TOP-LEVEL (ambient) helper `function`s (stdlib
-// Phase B), name → decl.  Installed once by `lowerModel` before any body is
+// Project-global index of TOP-LEVEL (ambient) helper `function`s, name →
+// decl.  Installed once by `lowerModel` before any body is
 // lowered (single synchronous pass, so the module-global is safe — same
 // posture as `ambientEnumIndex`).  A call to one of these inlines its
 // expression body at the call site (`inlineTopLevelFn`), so it needs no
@@ -359,7 +362,7 @@ function lowerPostfixChain(chain: PostfixChain, env: Env): ExprIR {
     return recv;
   }
   // Named policy-function CALL at the chain head (`IsManager()` /
-  // `CanApprove(amount)`, auth P3.2) — inline the ambient predicate body with
+  // `CanApprove(amount)`, auth) — inline the ambient predicate body with
   // the call arguments, then apply any trailing suffixes.  Handled here (not
   // via the `recv.kind === "ref"` call branch below) because a PARAMETERLESS
   // policy function resolves eagerly to its inlined body in `resolveNameRef`,
@@ -431,8 +434,7 @@ function applySuffixToRecv(
     const argNames = callArgs.map((a) => a.name || undefined);
     const named = argNames.some((n) => n !== undefined);
     // When the receiver IR is a `ref` (we lowered a bare NameRef
-    // head), produce the same `call` IR the old CallExpr branch did;
-    // resolution of callKind matches the original semantics.
+    // head), produce the same `call` IR the CallExpr branch produces.
     if (recv.kind === "ref") {
       // Parameterised criterion call (`InRegion("EU")`) — inline the
       // predicate body with the call arguments substituted for its
@@ -445,7 +447,7 @@ function applySuffixToRecv(
         };
       }
       // Parameterised policy-function call (`CanApprove(cap)`) — inline the
-      // ambient predicate body with the call arguments substituted (auth P3.2).
+      // ambient predicate body with the call arguments substituted (auth).
       const policyFn = findPolicyFnInEnv(env, recv.name);
       if (policyFn) {
         return {
@@ -454,7 +456,7 @@ function applySuffixToRecv(
         };
       }
       const callKind = resolveCallKind(recv.name, env);
-      // Top-level (ambient) helper `function` call (stdlib Phase B) — inline
+      // Top-level (ambient) helper `function` call (stdlib) — inline
       // its expression body with the arguments substituted.  Gated on
       // `callKind === "free"` so a LOCAL member (aggregate/VO/workflow
       // function, operation, VO ctor) of the same name shadows the top-level
@@ -627,7 +629,7 @@ function applySuffixToRecv(
       }
     }
     // `<resource>.<verb>(args)` — a verb call on an ambient resource
-    // handle lowers to a `resource-op` call (Phase 4).  The verb's
+    // handle lowers to a `resource-op` call.  The verb's
     // capability comes from the resource-verb registry; an unknown verb
     // still lowers (carrying the raw name) so the IR validator can emit
     // a precise diagnostic rather than the lowering silently dropping it.
@@ -812,25 +814,13 @@ function applySuffixToRecv(
       ...(argNames.some((n) => n !== undefined) ? { argNames } : {}),
     };
     // Result type after a method call — `memberType` handles collection
-    // ops, entity/VO members, and the string `.length` case.
+    // ops, entity/VO members, and the string `.length` case; the λ-body
+    // refinement `memberType` structurally cannot see is applied on top.
     let nextType = memberType(recvType, ms.member, env);
-    // `map(λ)` returns an array of the lambda's body type; `memberType`
-    // can't see the lambda, so type it here at the call site from the
-    // lowered lambda body (best-effort — falls back to the element type).
-    if (collectionOp && ms.member === "map") {
+    if (collectionOp) {
       const lam = args[0];
       const bodyT = lam?.kind === "lambda" && lam.body ? bodyTypeOf(lam.body) : undefined;
-      const elem = collectionElementType(recvType) ?? { kind: "primitive", name: "string" };
-      nextType = { kind: "array", element: bodyT ?? elem };
-    }
-    // `min(λ)`/`max(λ)` return the PROJECTED value, optional (empty → null).
-    // `memberType` can't see the lambda, so refine the element type here from
-    // the lowered lambda body (falls back to the collection element type).
-    if (collectionOp && (ms.member === "min" || ms.member === "max")) {
-      const lam = args[0];
-      const bodyT = lam?.kind === "lambda" && lam.body ? bodyTypeOf(lam.body) : undefined;
-      const elem = collectionElementType(recvType) ?? { kind: "primitive", name: "string" };
-      nextType = { kind: "optional", inner: bodyT ?? elem };
+      nextType = refineCollectionOpType(ms.member, recvType, bodyT, nextType);
     }
     return { recv: mcIR, recvType: nextType };
   }
@@ -848,7 +838,17 @@ function applySuffixToRecv(
         (m) => isEnumDecl(m) && m.name === enumName && m.values.some((v) => v.name === ms.member),
       ) ?? false;
     const rootEnum = ambientEnumIndex.get(ms.member) === enumName;
-    if (localEnum || rootEnum) {
+    // Same shape from a `ui` body (`Visibility.Public` in a page): there is no
+    // `ctx` to scan and the root-level index is blind to a context-nested enum,
+    // so resolve through the document-wide index the BARE form uses below —
+    // otherwise the receiver stays unresolved and the frontends emit
+    // `undefined.Public`.  Gated to ui bodies for the same reason the bare form
+    // is (see `resolveNameRef`): an `e2e` body must keep reporting instead.
+    const uiEnum =
+      !env.ctx &&
+      (env.actions !== undefined || env.stores !== undefined) &&
+      uiEnumOwnerFor(ms.member, suffix) === enumName;
+    if (localEnum || rootEnum || uiEnum) {
       return {
         recv: {
           kind: "ref",
@@ -961,6 +961,54 @@ function lowerLambda(expr: Lambda, env: Env, paramType: TypeIR): ExprIR {
  *  `optional` (`xs?.any(...)`) then reading the `array` element.  Returns
  *  `undefined` for a non-collection receiver so the caller can fall back to
  *  the plain lambda path. */
+/** Refine a collection-op's result type with the λ-BODY type the structural
+ *  `memberType` pass cannot see (it is handed a `TypeIR` receiver and a member
+ *  name; the lambda lives in the AST / the lowered arg list).
+ *
+ *  This lives in ONE place because both typing paths need it and they used to
+ *  disagree: `applySuffixToRecv` refined `map`/`min`/`max` at the call site
+ *  while `inferSuffixType` — the path that types a `let` binding through
+ *  `inferExprType` — called `memberType` raw.  So `let m = xs.map(λ)` was typed
+ *  `string` (`memberType` had no `map` arm at all) and every downstream
+ *  collection op on `m` mis-rendered on four of five backends (F2-EXPR-2), and
+ *  `sum(λ)`'s money-ness was dropped on BOTH paths because neither refined
+ *  `sum` (F2-EXPR-1: `Decimal * number` on node, `Decimal * float` on python).
+ *
+ *  `fallback` is `memberType`'s structural answer, kept whenever the λ body
+ *  types to nothing useful. */
+function refineCollectionOpType(
+  member: string,
+  recvType: TypeIR,
+  bodyT: TypeIR | undefined,
+  fallback: TypeIR,
+): TypeIR {
+  const elem = collectionElementType(recvType) ?? { kind: "primitive", name: "string" };
+  switch (member) {
+    // `map(λ)` yields an array of the λ body's type (identity projection ⇒ the
+    // element type).
+    case "map":
+      return { kind: "array", element: bodyT ?? elem };
+    // `min(λ)`/`max(λ)` yield the PROJECTED value, optional (empty → null).
+    case "min":
+    case "max":
+      return { kind: "optional", inner: bodyT ?? elem };
+    // `sum(λ)` folds the λ BODY, not the element: `lines.sum(l => l.price *
+    // l.qty)` over `Line[]` is money because the body is, even though the
+    // element is an entity.  Keeping the structural answer (`decimal`) made
+    // the IR disagree with the AST type-system, and the money-vs-decimal split
+    // is load-bearing on the two backends where they are different host types
+    // (Hono `Decimal` vs `number`, FastAPI `Decimal` vs `float`).  Non-money
+    // bodies keep the existing decimal widening — the fold is numeric either
+    // way and every backend already renders that shape.
+    case "sum":
+      return bodyT?.kind === "primitive" && bodyT.name === "money"
+        ? { kind: "primitive", name: "money" }
+        : fallback;
+    default:
+      return fallback;
+  }
+}
+
 function collectionElementType(t: TypeIR): TypeIR | undefined {
   const unwrapped = t.kind === "optional" ? t.inner : t;
   return unwrapped.kind === "array" ? unwrapped.element : undefined;
@@ -1160,7 +1208,7 @@ function lowerExprInner(expr: Expression | undefined, env: Env): ExprIR {
     return lowerPostfixChain(expr, env);
   }
   if (isNameRef(expr)) {
-    return resolveNameRef(expr.name, env);
+    return resolveNameRef(expr.name, env, expr);
   }
   return lit("null", "null");
 }
@@ -1245,10 +1293,9 @@ function inferBuilderCallType(expr: BuilderCall, env: Env): TypeIR {
  * Lower a builder-entry value against its DECLARED slot type, when known.
  *
  * This is `lowerExprInContext` — the promotion seam `emit` fields, `:=`, field
- * defaults and workflow params all use — reached from the builder-call path,
- * which previously lowered every entry context-free.  Routing through the
- * shared seam rather than post-hoc rewriting the lowered `args` matters for
- * three reasons:
+ * defaults and workflow params all use — reached from the builder-call path.
+ * Routing through the shared seam rather than post-hoc rewriting the lowered
+ * `args` matters for three reasons:
  *
  *   1. it promotes against the slot's OWN primitive (`money` stays `money`),
  *      where a blanket int→decimal rewrite silently mis-resolves a `money`
@@ -1350,7 +1397,7 @@ function findCriterionInEnv(env: Env, name: string): Criterion | undefined {
 }
 
 /** Locate a FUNCTION-form `policy` declaration by name in the enclosing
- *  context (authorization Phase 3.2).  A block-form `policy {}` (read ladder)
+ *  context (authorization.md).  A block-form `policy {}` (read ladder)
  *  has no `returnType`; only the function form is a callable predicate. */
 function findPolicyFnInEnv(env: Env, name: string): PolicyDecl | undefined {
   if (!env.ctx) return undefined;
@@ -1361,7 +1408,7 @@ function findPolicyFnInEnv(env: Env, name: string): PolicyDecl | undefined {
 }
 
 /** Inline a named policy-function reference into the host expression
- *  (authorization Phase 3.2).  Unlike a criterion, a policy function is
+ *  (authorization.md).  Unlike a criterion, a policy function is
  *  AMBIENT — it has no candidate aggregate, so the body sees only
  *  `currentUser`, its own parameters (substituted by the caller's already-
  *  lowered arguments), and context-level ambient names (module `permissions`,
@@ -1406,8 +1453,8 @@ function inlinePolicyFn(fn: PolicyDecl, args: ExprIR[], env: Env): ExprIR {
  *  (`InRegion("EU")`) — return the criterion name + its lowered argument
  *  expressions; otherwise `undefined` (composed / anonymous clause).
  *
- *  Reified-criteria Slice 2b: lets retrieval/find lowering record the
- *  reference so a backend can consume the reified `Criterion` / Specification,
+ *  Lets retrieval/find lowering record the reference so a backend can consume
+ *  the reified `Criterion` / Specification,
  *  even though the use-site otherwise keeps no provenance (the clause is still
  *  inlined into the IR for every non-reifying backend). */
 export function criterionRefOf(
@@ -1477,8 +1524,8 @@ function findTopLevelFn(name: string): FunctionDecl | undefined {
   return topLevelFnIndex.get(name);
 }
 
-/** Inline a top-level (ambient) helper `function` at the call site (stdlib
- *  Phase B).  Like `inlinePolicyFn`, the body is AMBIENT — it sees only its
+/** Inline a top-level (ambient) helper `function` at the call site.
+ *  Like `inlinePolicyFn`, the body is AMBIENT — it sees only its
  *  own parameters (substituted by the caller's already-lowered arguments),
  *  context-level ambient names (root enums, sibling top-level functions), and
  *  `currentUser` if present; the enclosing aggregate/part/VO/workflow scope is
@@ -1519,7 +1566,34 @@ function inlineTopLevelFn(fn: FunctionDecl, args: ExprIR[], env: Env): ExprIR {
   return { kind: "paren", inner: inlined };
 }
 
-function resolveNameRef(name: string, env: Env): ExprIR {
+/** Per-document `enum` VALUE → owning enum name index, memoised on the
+ *  document root.  Built by streaming the whole AST, so it sees an enum at any
+ *  nesting depth (`subdomain { context { enum … } }` included) — unlike the two
+ *  `members`-walking ambient indices `lowerProject` installs.  First
+ *  declaration wins on a value-name collision, matching those indices. */
+const uiEnumIndexByRoot = new WeakMap<AstNode, ReadonlyMap<string, string>>();
+
+function uiEnumIndexFor(root: AstNode): ReadonlyMap<string, string> {
+  const cached = uiEnumIndexByRoot.get(root);
+  if (cached) return cached;
+  const index = new Map<string, string>();
+  for (const n of AstUtils.streamAllContents(root)) {
+    if (!isEnumDecl(n)) continue;
+    for (const v of n.values) if (!index.has(v.name)) index.set(v.name, n.name);
+  }
+  uiEnumIndexByRoot.set(root, index);
+  return index;
+}
+
+/** The enum owning value `name` as seen from a `ui` body: the ui's own document
+ *  first (any depth), then the cross-document ambient kernel index. */
+function uiEnumOwnerFor(name: string, node: AstNode | undefined): string | undefined {
+  const root = node ? AstUtils.getContainerOfType(node, isModel) : undefined;
+  const local = root ? uiEnumIndexFor(root).get(name) : undefined;
+  return local ?? findAmbientEnumForValue(name)?.name;
+}
+
+function resolveNameRef(name: string, env: Env, node?: AstNode): ExprIR {
   // Criterion-parameter substitution — while inlining a criterion body, a
   // bare reference to one of its parameters resolves to the caller's
   // already-lowered argument expression.  Wins over candidate fields so a
@@ -1542,7 +1616,7 @@ function resolveNameRef(name: string, env: Env): ExprIR {
     };
   }
   // Ambient resource handle (`files`, `jobs`, …) — a `resource X { for:
-  // <thisCtx>, … }` declaration in scope (Phase 4).  Resolved before
+  // <thisCtx>, … }` declaration in scope.  Resolved before
   // locals so it isn't shadowable, mirroring `currentUser`.  The type is
   // a synthetic marker; a `.verb(...)` call on this ref lowers to a
   // `resource-op` (see `applySuffixToRecv`).
@@ -1581,7 +1655,15 @@ function resolveNameRef(name: string, env: Env): ExprIR {
   const owner = env.part ?? env.aggregate ?? env.valueObject ?? env.workflow ?? env.projection;
   if (owner) {
     const isVo = !!env.valueObject;
-    for (const m of owner.members) {
+    // An aggregate's `this`-props include the ones it inherits through
+    // `extends` — the base's members are merged onto the subtype at ENRICH
+    // time, which is after this pass, so the chain has to be walked here (see
+    // `memberOwnerChain`).  Own members shadow the base's.
+    const ownerMembers =
+      owner === env.aggregate && isAggregate(owner)
+        ? memberOwnerChain(owner).flatMap((o) => o.members)
+        : owner.members;
+    for (const m of ownerMembers) {
       if (isProperty(m) && m.name === name) {
         return {
           kind: "ref",
@@ -1636,7 +1718,7 @@ function resolveNameRef(name: string, env: Env): ExprIR {
       return inlineCriterion(crit, [], env);
     }
     // Parameterless policy-function reference (`IsManager`) — inline the
-    // ambient predicate body (auth P3.2).  A parameterised policy function
+    // ambient predicate body (auth).  A parameterised policy function
     // referenced bare falls through; the validator reports the arity mismatch
     // (`loom.policy-fn-arity`).
     const policyFn = findPolicyFnInEnv(env, name);
@@ -1678,6 +1760,42 @@ function resolveNameRef(name: string, env: Env): ExprIR {
       enumName: ambientEnum,
       type: { kind: "enum", name: ambientEnum },
     };
+  }
+  // UI body enum value (`o.vis == Public` in a page / component / store).
+  //
+  // A `ui` body has NO enclosing `ctx` — it sits at the system level and may
+  // read several contexts through its api params — so both scans above are
+  // skipped and a bare enum-value reference fell all the way to
+  // `refKind: "unknown"`.  Every shared-walker frontend then emitted
+  // `/* unresolved: Public */ undefined` (an undeclared identifier in Dart,
+  // an unbound variable on HEEx) with zero diagnostics: valid `.ddd` in,
+  // silently wrong output out.
+  //
+  // Resolution walks the ui's OWN document (every `enum` at any depth — the
+  // two ambient indices installed by `lowerProject` are built by walking
+  // `members`, and a `subdomain` holds its contexts in `contexts`, so a
+  // `subdomain { context { enum … } }` never reaches either of them), then
+  // falls back to the cross-document ambient kernel index.  Reached only after
+  // locals / params / state / derived / actions / criteria, so a same-named
+  // binding still shadows the enum member exactly as before.
+  //
+  // Gated to UI bodies: an `e2e` test body is likewise ctx-less, and there a
+  // bare domain name must STAY unresolved so `loom.e2e-unresolved-ref` can
+  // tell the author to write the wire string (test/ir/e2e-unresolved-ref).
+  // The two ui-only Env indices mark the body: `actions` is set on every
+  // page/component/store body env, `stores` on every body of a ui that
+  // declares one (a store's own state inits lower before `actions` binds).
+  if (!env.ctx && (env.actions !== undefined || env.stores !== undefined)) {
+    const owner = uiEnumOwnerFor(name, node);
+    if (owner) {
+      return {
+        kind: "ref",
+        name,
+        refKind: "enum-value",
+        enumName: owner,
+        type: { kind: "enum", name: owner },
+      };
+    }
   }
   return { kind: "ref", name, refKind: "unknown" };
 }
@@ -1970,8 +2088,10 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     }
     // Criterion candidate alias (`of T as o`) — types as the candidate entity,
     // exactly like `this`, so `o.field` member access resolves against it.
-    if (expr.name === env.candidateAlias && env.aggregate) {
-      return { kind: "entity", name: env.aggregate.name };
+    if (expr.name === env.candidateAlias) {
+      if (env.aggregate) return { kind: "entity", name: env.aggregate.name };
+      if (env.workflow) return { kind: "entity", name: env.workflow.name };
+      if (env.projection) return { kind: "entity", name: env.projection.name };
     }
     // Parameterless criterion / policy-function reference types as a boolean
     // predicate.
@@ -1979,7 +2099,7 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     if (crit && crit.params.length === 0) return { kind: "primitive", name: "bool" };
     const policyFn = findPolicyFnInEnv(env, expr.name);
     if (policyFn && policyFn.params.length === 0) return { kind: "primitive", name: "bool" };
-    const ref = resolveNameRef(expr.name, env);
+    const ref = resolveNameRef(expr.name, env, expr);
     if (ref.kind === "ref" && ref.type) return ref.type;
     return { kind: "primitive", name: "string" };
   }
@@ -2342,7 +2462,7 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
   // with a friendlier message.
   if (t.kind === "entity" && t.name === USER_SHAPE_NAME && env.user) {
     // `currentUser.orgPath` — the derived tenant materialized-path member
-    // (multi-tenancy Phase 2, P2.1).  Not a `user {}` claim; computed per
+    // (tenancy.md).  Not a `user {}` claim; computed per
     // backend from the tenancy claim, typed as the DataKey path (a string).
     if (name === PRINCIPAL_ORG_PATH || name === PRINCIPAL_ROOT_ORG)
       return { kind: "primitive", name: "string" };
@@ -2372,6 +2492,14 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
           return { kind: "primitive", name: "money" };
         }
         return { kind: "primitive", name: "decimal" };
+      // `map` — an array of the ELEMENT type is the honest structural
+      // fallback; the call site refines the element to the λ body's type
+      // (`refineCollectionOpType`).  Without this arm `map` fell through to
+      // the `string` default below, so `let m = xs.map(λ)` bound a
+      // `string`-typed local and every downstream collection op on `m`
+      // mis-rendered (F2-EXPR-2).
+      case "map":
+        return { kind: "array", element: t.element };
       case "all":
       case "any":
       case "contains":
@@ -2420,6 +2548,8 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
     // state fields (workflow-and-applier.md A2).
     const wf = findWorkflowByName(env, t.name);
     if (wf) return memberOnWorkflow(wf, name);
+    const proj = findProjectionByName(env, t.name);
+    if (proj) return memberOnProjection(proj, name);
   }
   if (t.kind === "valueobject") {
     const vo = findValueObjectByName(env, t.name);
@@ -2463,7 +2593,54 @@ function inferSuffixType(t: TypeIR, suffix: PostfixSuffix, env: Env): TypeIR {
     return { kind: "primitive", name: "string" };
   }
   const ms = suffix as MemberSuffix;
-  return memberType(t, ms.member, env);
+  const base = memberType(t, ms.member, env);
+  // Apply the SAME λ-body refinement the lowering call site applies, so a
+  // `let` binding (typed through `inferExprType` → here) and the inline
+  // expression (typed through `applySuffixToRecv`) agree.  They did not: a
+  // `let` bound to a `map`/`sum(λ)` got the structural answer only.
+  if (t.kind === "array" && isCollectionOp(ms.member)) {
+    const arg = ms.args?.[0]?.value;
+    const bodyT =
+      arg && isLambda(arg) && arg.body
+        ? inferExprType(arg.body, {
+            ...env,
+            locals: new Map(env.locals).set(arg.param, { kind: "lambda", type: t.element }),
+          })
+        : undefined;
+    return refineCollectionOpType(ms.member, t, bodyT, base);
+  }
+  return base;
+}
+
+/** The member-declaration owners a `this.<name>` lookup must consult, nearest
+ *  first: the entity itself, then every abstract base it `extends`
+ *  (aggregate-inheritance.md), root last.
+ *
+ *  A subtype's inherited fields are merged onto its `fields` by the ENRICH pass
+ *  (phase ⑥), which runs AFTER expression lowering (⑤b) — so a lookup that
+ *  walked only `target.members` could not see a base-declared field and fell
+ *  through to the `string` fallback below.  That is not cosmetic: a
+ *  `criterion Live of Car = !this.retired` whose `retired` lives on the
+ *  abstract base typed as `string`, the Drizzle bool-column path then rejected
+ *  it, and the capability filter was dropped from every read with no
+ *  diagnostic (`F2-CB-C4`).  Resolving the chain here fixes the type at the
+ *  ONE place every consumer reads it from, so no backend has to re-derive it.
+ *
+ *  `seen` keeps a malformed `extends` cycle finite (the language-side
+ *  cycle validator rejects those upstream; this just prevents a hang). */
+function memberOwnerChain(target: Aggregate | EntityPart): (Aggregate | EntityPart)[] {
+  if (!isAggregate(target)) return [target];
+  const out: (Aggregate | EntityPart)[] = [target];
+  const seen = new Set<string>([target.name]);
+  let cur: Aggregate | undefined = target;
+  while (cur) {
+    const base: Aggregate | undefined = cur.superType?.ref;
+    if (!base || seen.has(base.name)) break;
+    seen.add(base.name);
+    out.push(base);
+    cur = base;
+  }
+  return out;
 }
 
 function memberOnEntity(target: Aggregate | EntityPart, name: string): TypeIR {
@@ -2471,16 +2648,20 @@ function memberOnEntity(target: Aggregate | EntityPart, name: string): TypeIR {
     const idValue: IdValueType = isAggregate(target) ? ("guid" as IdValueType) : "guid";
     return { kind: "id", targetName: target.name, valueType: idValue };
   }
-  for (const m of target.members) {
-    if (isProperty(m) && m.name === name) return lowerType(m.type);
-    if (isContainment(m) && m.name === name) {
-      const partName = m.partType?.ref?.name ?? "Unknown";
-      return m.collection
-        ? { kind: "array", element: { kind: "entity", name: partName } }
-        : { kind: "entity", name: partName };
-    }
-    if (isDerivedProp(m) && m.name === name) {
-      return lowerType(m.type);
+  // Own members shadow a like-named base member — the same precedence the
+  // enrich-pass field merge uses (`mergedFieldsFor`).
+  for (const owner of memberOwnerChain(target)) {
+    for (const m of owner.members) {
+      if (isProperty(m) && m.name === name) return lowerType(m.type);
+      if (isContainment(m) && m.name === name) {
+        const partName = m.partType?.ref?.name ?? "Unknown";
+        return m.collection
+          ? { kind: "array", element: { kind: "entity", name: partName } }
+          : { kind: "entity", name: partName };
+      }
+      if (isDerivedProp(m) && m.name === name) {
+        return lowerType(m.type);
+      }
     }
   }
   return { kind: "primitive", name: "string" };
@@ -2619,6 +2800,8 @@ function stepInto(t: TypeIR, name: string, env: Env): TypeIR {
     if (payload) return memberOnPayload(payload, name);
     const wf = findWorkflowByName(env, t.name);
     if (wf) return memberOnWorkflow(wf, name);
+    const proj = findProjectionByName(env, t.name);
+    if (proj) return memberOnProjection(proj, name);
   }
   if (t.kind === "valueobject") {
     const vo = findValueObjectByName(env, t.name);

@@ -37,6 +37,7 @@ async function genPage(
   state: string,
   body: string,
   platform: "static" | "svelte" = "static",
+  action = "",
 ): Promise<string> {
   const files = await generateSystemFiles(`
     system S {
@@ -46,10 +47,13 @@ async function genPage(
         page X {
           route: "/x"
           ${state}
+          ${action}
           body: ${body}
         }
       }
-      deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+      storage loomDb { type: postgres }
+      resource ordersState { for: Orders, kind: state, use: loomDb }
+      deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
       deployable web {
         platform: ${platform === "svelte" ? "svelte" : "static"},
         targets: api, ui: WebApp { Sales: api }, port: 3001
@@ -61,15 +65,21 @@ async function genPage(
   return files.get(key)!;
 }
 
-/** A body that writes the named array field, so it survives into the output. */
-const writesArray = (field: string, lit: string): string =>
-  `Stack { Button("pick", onClick: e => { ${field} := ${lit} }) }`;
+/** A body that writes the named array field, so it survives into the output —
+ *  through a named `action`, the only form that may carry an effect
+ *  (`loom.effect-in-lambda`).  Returns the body; `writesArrayAction` is its
+ *  matching `action` declaration. */
+const writesArray = (): string => `Stack { Button("pick", onClick: pick) }`;
+const writesArrayAction = (field: string, lit: string): string =>
+  `action pick() { ${field} := ${lit} }`;
 
 describe("array-typed page state — React", () => {
   it("declares the element type and seeds the empty array", async () => {
     const page = await genPage(
       `state { selectedIds: string[] }`,
-      writesArray("selectedIds", `["a"]`),
+      writesArray(),
+      "static",
+      writesArrayAction("selectedIds", `["a"]`),
     );
     expect(page).toContain("const [selectedIds, setSelectedIds] = useState<string[]>([]);");
     // `any` defeats the tsc build gate on every read of the field; `undefined`
@@ -79,14 +89,21 @@ describe("array-typed page state — React", () => {
   });
 
   it("maps the element type through, not just string", async () => {
-    const page = await genPage(`state { tiers: int[] }`, writesArray("tiers", "[1]"));
+    const page = await genPage(
+      `state { tiers: int[] }`,
+      writesArray(),
+      "static",
+      writesArrayAction("tiers", "[1]"),
+    );
     expect(page).toContain("useState<number[]>([])");
   });
 
   it("leaves scalar state untouched", async () => {
     const page = await genPage(
       `state { note: string = "hi"  n: int }`,
-      `Stack { Text { note }, Button("inc", onClick: e => { n := n + 1 }) }`,
+      `Stack { Text { note }, Button("inc", onClick: inc) }`,
+      "static",
+      `action inc() { n := n + 1 }`,
     );
     expect(page).toContain(`const [note, setNote] = useState<string>("hi");`);
     expect(page).toContain("const [n, setN] = useState<number>(0);");
@@ -97,8 +114,9 @@ describe("array-typed page state — Svelte", () => {
   it("declares the element type, not `any`", async () => {
     const page = await genPage(
       `state { selectedIds: string[] }`,
-      writesArray("selectedIds", `["a"]`),
+      writesArray(),
       "svelte",
+      writesArrayAction("selectedIds", `["a"]`),
     );
     expect(page).toContain("string[]");
     expect(page).not.toContain(": any");

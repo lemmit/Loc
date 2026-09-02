@@ -10,7 +10,7 @@ import type {
 import { findGateUsesCurrentUser, findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { maskedHistoryFields } from "../../../ir/util/audit-history.js";
 import { upperFirst } from "../../../util/naming.js";
-import { projectEntityExpr } from "../dto-mapping.js";
+import { projectEntityExpr, projectionNamesDomainCommon } from "../dto-mapping.js";
 import {
   HISTORY_RETURN_TYPE,
   historyHandlerName,
@@ -20,11 +20,14 @@ import {
 import { renderQuery, renderQueryHandler } from "../emit.js";
 import { collectCsExprUsings, renderCsExpr, renderCsType } from "../render-expr.js";
 
-/** `<ns>.Domain.Common` is where `RequestContext` lives; a read handler that
- *  projects a `mask unless` field references `RequestContext.Current` in its
- *  DTO projection (see `dto-mapping.maskWrap`), so it needs that using. */
-function maskUsings(agg: EnrichedAggregateIR, ns: string): string[] {
-  return agg.fields.some((f) => f.maskUnless) ? [`${ns}.Domain.Common`] : [];
+/** `<ns>.Domain.Common` holds the types a DTO PROJECTION can name —
+ *  `RequestContext` (a `mask unless` field's `maskWrap`) and `Provenanced<T>`
+ *  (a `provenanced` field's wire carrier, M-T6.12).  A read handler inlines the
+ *  projection into its own file, so it needs the using whenever either applies;
+ *  `projectionNamesDomainCommon` is the single predicate both the mask and the
+ *  carrier register with, so a third such type cannot be forgotten here. */
+function projectionUsings(agg: EnrichedAggregateIR, ns: string): string[] {
+  return projectionNamesDomainCommon(agg) ? [`${ns}.Domain.Common`] : [];
 }
 
 // ---------------------------------------------------------------------------
@@ -72,7 +75,13 @@ export function emitCanOpQueriesAndHandlers(
         handlerName: `Can${opName}Handler`,
         queryName: `Can${opName}Query`,
         returnType: "CanResponse",
-        extraUsings: [`${ns}.Domain.Common`],
+        // The predicate is an arbitrary expression rendered into THIS file and
+        // scanned nowhere else, so it carries its own namespaces
+        // (`System.Text.RegularExpressions` for `matches`, audit A17).
+        extraUsings: [
+          `${ns}.Domain.Common`,
+          ...collectCsExprUsings(op.when!, new Set<string>(), ns),
+        ],
         body:
           `        var aggregate = await _repo.GetByIdAsync(query.Id, cancellationToken)\n` +
           `            ?? throw new AggregateNotFoundException($"${agg.name} {query.Id} not found");\n` +
@@ -108,7 +117,7 @@ export function emitGetByIdQueryAndHandler(
       handlerName: `Get${agg.name}ByIdHandler`,
       queryName: `Get${agg.name}ByIdQuery`,
       returnType: `${agg.name}Response?`,
-      extraUsings: maskUsings(agg, ns),
+      extraUsings: projectionUsings(agg, ns),
       body:
         `        var found = await _repo.GetByIdAsync(query.Id, cancellationToken);\n` +
         `        return found is null ? null : ${projectEntityExpr("found", agg, ctx)};\n`,
@@ -166,8 +175,8 @@ export function emitHistoryQueryAndHandler(
   // gate's ForbiddenException and (for the mask pass) RequestContext.
   const usings = new Set<string>([`${ns}.Application.Common`, `${ns}.Domain.Common`]);
   if (gateUsesUser) usings.add(`${ns}.Auth`);
-  if (find.requires) collectCsExprUsings(find.requires, usings);
-  for (const f of masked) collectCsExprUsings(f.maskUnless!, usings);
+  if (find.requires) collectCsExprUsings(find.requires, usings, ns);
+  for (const f of masked) collectCsExprUsings(f.maskUnless!, usings, ns);
   out.set(
     `Application/${aggFolder}/Queries/${historyQueryName(agg)}.cs`,
     renderQuery({
@@ -253,7 +262,7 @@ export function emitFindQueriesAndHandlers(
     const gateUsings = new Set<string>();
     if (find.requires) {
       gateUsings.add(`${ns}.Domain.Common`);
-      collectCsExprUsings(find.requires, gateUsings);
+      collectCsExprUsings(find.requires, gateUsings, ns);
     }
     out.set(
       `Application/${aggFolder}/Queries/${upperFirst(find.name)}Query.cs`,
@@ -288,7 +297,7 @@ export function emitFindQueriesAndHandlers(
             ...(needsUser ? [`${ns}.Auth`] : []),
             ...pagedUsings,
             ...gateUsings,
-            ...maskUsings(agg, ns),
+            ...projectionUsings(agg, ns),
           ]),
         ],
       }),

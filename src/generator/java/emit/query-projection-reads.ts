@@ -20,8 +20,19 @@ import {
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { MONEY_WIRE_SCALE, MONEY_WIRE_ZERO } from "../../money-scale.js";
+import {
+  bypassDrops,
+  bypassedPromotedCaps,
+  type FilterBypass,
+  promotedCapabilities,
+} from "../capability-filter.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
-import { JPQL_INTRINSIC_SQL, renderJpqlWhere } from "../render-jpql.js";
+import {
+  JPQL_INTRINSIC_SQL,
+  principalBindExpr,
+  principalParamName,
+  renderJpqlWhere,
+} from "../render-jpql.js";
 import { projectionRepoField } from "./projection-reads.js";
 import { projectionRowClass } from "./projection-state.js";
 import { collectWireImports, domainToWire, wireJavaType } from "./wire.js";
@@ -97,6 +108,119 @@ interface JoinMap {
   keyExpr: string;
 }
 
+/** A projection's `ignoring <Cap>` / `ignoring *` stance as the bypass spec the
+ *  capability-filter triage takes — the same one the synthesised source find is
+ *  threaded, so an aggregation and a row read drop the same filters. */
+function filterBypassOf(p: ProjectionIR): FilterBypass | undefined {
+  const q = p.query;
+  if (!q) return undefined;
+  if (!q.bypassAll && (q.bypassCaps?.length ?? 0) === 0) return undefined;
+  return { bypassAll: q.bypassAll, bypassCaps: q.bypassCaps };
+}
+
+/** The direct-table read's scoping for an aggregation (whole-table or grouped).
+ *
+ *  An aggregation runs raw JPQL through the `EntityManager` rather than through
+ *  the aggregate's repository, so the capability filters the repository applies
+ *  have to be reproduced here — otherwise the aggregation counts rows every
+ *  other read of the same table excludes.  The two halves land differently on
+ *  Java, exactly as they do on the row path:
+ *
+ *  - NON-principal filters ride the entity's `@SQLRestriction` (or an
+ *    `autoEnabled` promoted `@Filter`), which Hibernate applies to this query
+ *    too — nothing to add, but a read that `ignoring`s a PROMOTED capability
+ *    must DISABLE that named filter for the query (`disableCaps`).
+ *  - PRINCIPAL (tenancy) filters have no static SQL form, so they are AND-ed
+ *    into the JPQL here.  The repository's `@Query` spells the principal as
+ *    Spring Data SpEL; `createQuery` has no SpEL layer, so the claims bind as
+ *    ordinary named parameters off the static `CurrentUserAccessor` (`binds`) —
+ *    a missing principal binds null, which is the same fail-closed `= NULL`. */
+interface AggregationScope {
+  /** ` where …`, already prefixed, or `""`. */
+  where: string;
+  /** Principal claim accessors the query must `setParameter`. */
+  binds: string[];
+  /** Promoted Hibernate named filters this read runs with DISABLED. */
+  disableCaps: string[];
+}
+
+function aggregationScope(
+  proj: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+  enumsPkg: string,
+  imports: Set<string>,
+): AggregationScope {
+  const principalAccessors = new Set<string>();
+  const jpqlCtx = { alias: "e", enumsPkg, principalAccessors };
+  const filter = proj.query!.filter;
+  const ownWhere = filter ? renderJpqlWhere(filter, jpqlCtx) : null;
+  if (filter) collectJavaExprImports(filter, imports);
+  const capWheres: string[] = [];
+  const sourceAgg = ctx.aggregates.find((a) => a.name === proj.query!.source);
+  const bypass = filterBypassOf(proj);
+  const origins = sourceAgg?.contextFilterOrigins ?? [];
+  for (const [i, pred] of (sourceAgg?.contextFilters ?? []).entries()) {
+    if (!exprUsesCurrentUser(pred)) continue;
+    const origin = origins[i];
+    if (origin !== undefined && bypassDrops(origin, bypass)) continue;
+    capWheres.push(`(${renderJpqlWhere(pred, jpqlCtx)})`);
+    collectJavaExprImports(pred, imports);
+  }
+  // The projection's own `where` is parenthesised only when a capability
+  // conjunct joins it — an unparenthesised top-level `or` would otherwise bind
+  // tighter than the appended `and` and widen the read.  With no capability
+  // filter the clause stays byte-identical to what it always was.
+  const conjuncts = [
+    ...(ownWhere === null ? [] : [capWheres.length > 0 ? `(${ownWhere})` : ownWhere]),
+    ...capWheres,
+  ];
+  return {
+    where: conjuncts.length > 0 ? ` where ${conjuncts.join(" and ")}` : "",
+    binds: [...principalAccessors],
+    disableCaps: sourceAgg
+      ? bypassedPromotedCaps(new Set(promotedCapabilities(sourceAgg, ctx)), bypass)
+      : [],
+  };
+}
+
+/** The `entityManager.createQuery(<jpql>)` chain for an aggregation, with each
+ *  principal claim bound off the static ambient accessor.  Rendered as one
+ *  expression so the caller keeps its single-statement read. */
+function aggregationQueryExpr(jpql: string, scope: AggregationScope): string {
+  const binds = scope.binds
+    .map(
+      (a) =>
+        `.setParameter(${JSON.stringify(principalParamName(a))}, ${principalBindExpr(a, "__cu")})`,
+    )
+    .join("");
+  return `entityManager.createQuery(${JSON.stringify(jpql)})${binds}`;
+}
+
+/** Method-body prelude for an aggregation: the ambient principal read every
+ *  `setParameter` binding above reads from, and nothing when the query binds
+ *  no claim. */
+function aggregationPrelude(scope: AggregationScope, basePkg: string): string[] {
+  if (scope.binds.length === 0) return [];
+  return [`        var __cu = ${basePkg}.auth.CurrentUserAccessor.currentOrNull();`];
+}
+
+/** Run an aggregation body with the PROMOTED capabilities it `ignoring`s
+ *  disabled, re-arming them in a `finally` so the rest of the session keeps the
+ *  always-on semantics.  The repository-impl twin is `wrapWithFilterBypass`;
+ *  this one unwraps the service's `entityManager` field instead of `em`. */
+function wrapAggregationBypass(caps: readonly string[], bodyLines: string[]): string[] {
+  if (caps.length === 0) return bodyLines;
+  return [
+    `        var __session = entityManager.unwrap(org.hibernate.Session.class);`,
+    ...caps.map((c) => `        __session.disableFilter(${JSON.stringify(c)});`),
+    `        try {`,
+    ...bodyLines.map((l) => `    ${l}`),
+    `        } finally {`,
+    ...caps.map((c) => `            __session.enableFilter(${JSON.stringify(c)});`),
+    `        }`,
+  ];
+}
+
 export function renderJavaQueryProjections(
   ctx: EnrichedBoundedContextIR,
   qpctx: QueryProjectionCtx,
@@ -141,7 +265,7 @@ export function renderJavaQueryProjections(
     // Row record from the projection's wire shape.
     const rowImports = new Set<string>();
     const components = shape.map((f) => {
-      collectWireImports(f.type, rowImports);
+      collectWireImports(f.type, rowImports, "Response");
       return `${wireJavaType(f.type, "Response")} ${f.name}`;
     });
     out.set(`${rowName}.java`, {
@@ -200,13 +324,12 @@ export function renderJavaQueryProjections(
       const keyCols = grouped.keys.map((k) => keyCol(k.expr));
       const groupCols = grouped.groupBy.map(keyCol);
       const aggCols = grouped.aggregates.map((a) => jpqlAggregate(a.aggregate));
-      const filter = proj.query!.filter;
-      const where = filter
-        ? ` where ${renderJpqlWhere(filter, { alias: "e", enumsPkg: `${qpctx.basePkg}.domain.enums` })}`
-        : "";
-      if (filter) collectJavaExprImports(filter, imports);
+      // The projection's own `where` AND the source aggregate's capability
+      // filters — the read reads the table directly, so nothing else applies
+      // them (see `aggregationScope`).
+      const scope = aggregationScope(proj, ctx, `${qpctx.basePkg}.domain.enums`, imports);
       const jpql =
-        `select ${[...keyCols, ...aggCols].join(", ")} from ${source} e${where}` +
+        `select ${[...keyCols, ...aggCols].join(", ")} from ${source} e${scope.where}` +
         ` group by ${groupCols.join(", ")} order by ${groupCols.join(", ")}`;
       // A TRANSFORMED key rides HQL's `function(…)` escape, for which Hibernate
       // has no static return type — the driver may hand back a
@@ -236,27 +359,27 @@ export function renderJavaQueryProjections(
             groupKeyOf(k.expr)?.transform !== undefined,
           ),
         ),
-        ...grouped.aggregates.map((a, i) => {
-          if (jpqlNeedsBigDecimal(a)) imports.add("java.math.BigDecimal");
-          return jpqlCoerce(a, groupedCol(grouped.keys.length + i));
-        }),
+        ...grouped.aggregates.map((a, i) => jpqlCoerce(a, groupedCol(grouped.keys.length + i))),
       ];
       // The raw `Query` list needs the one @SuppressWarnings the untyped JPA API
       // forces, whichever row element type it carries.
       methods.push(
         `    public List<${rowName}> ${findName}() {`,
-        `        @SuppressWarnings("unchecked")`,
-        `        List<${groupedCols === 1 ? "Object" : "Object[]"}> rows = entityManager.createQuery(${JSON.stringify(jpql)}).getResultList();`,
-        `        return rows.stream()`,
-        `            .map(r -> new ${rowName}(${args.join(", ")}))`,
-        `            .toList();`,
+        ...aggregationPrelude(scope, qpctx.basePkg),
+        ...wrapAggregationBypass(scope.disableCaps, [
+          `        @SuppressWarnings("unchecked")`,
+          `        List<${groupedCols === 1 ? "Object" : "Object[]"}> rows = ${aggregationQueryExpr(jpql, scope)}.getResultList();`,
+          `        return rows.stream()`,
+          `            .map(r -> new ${rowName}(${args.join(", ")}))`,
+          `            .toList();`,
+        ]),
         `    }`,
         ``,
       );
       // NO `continue` — fall through to the shared `requires`-gate + list-route
       // block below, exactly like the per-row arms.
     } else if (aggregates) {
-      // WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0) — ONE JPQL query with
+      // WHOLE-TABLE AGGREGATION (M-T1.3) — ONE JPQL query with
       // `count`/`sum`/`avg`/`min`/`max`, no rows materialised.  The shape exists
       // precisely to avoid the naive read: a `findAll()` stream over the whole
       // table with every row hydrated into an entity to produce one integer.
@@ -269,12 +392,9 @@ export function renderJavaQueryProjections(
       imports.add("jakarta.persistence.EntityManager");
       imports.add("jakarta.persistence.PersistenceContext");
       const cols = aggregates.map((a) => jpqlAggregate(a.aggregate)).join(", ");
-      const filter = proj.query!.filter;
-      const where = filter
-        ? ` where ${renderJpqlWhere(filter, { alias: "e", enumsPkg: `${qpctx.basePkg}.domain.enums` })}`
-        : "";
-      if (filter) collectJavaExprImports(filter, imports);
-      const jpql = `select ${cols} from ${source} e${where}`;
+      // Same scoping as the grouped arm — see `aggregationScope`.
+      const scope = aggregationScope(proj, ctx, `${qpctx.basePkg}.domain.enums`, imports);
+      const jpql = `select ${cols} from ${source} e${scope.where}`;
       // `getSingleResult()` returns an `Object[]` only for a MULTI-column
       // selection; a SINGLE `select` (`select total = count()`) hands back the
       // bare scalar, so the `(Object[])` cast would ClassCastException → 500 on
@@ -282,16 +402,16 @@ export function renderJavaQueryProjections(
       // it through the SAME `jpqlCoerce` the multi-column arm uses for that
       // column — only the READ expression changes with the arity.
       const single = aggregates.length === 1;
-      const args = aggregates.map((a, i) => {
-        if (jpqlNeedsBigDecimal(a)) imports.add("java.math.BigDecimal");
-        return jpqlCoerce(a, single ? "r" : `r[${i}]`);
-      });
+      const args = aggregates.map((a, i) => jpqlCoerce(a, single ? "r" : `r[${i}]`));
       methods.push(
         `    public ${rowName} ${findName}() {`,
-        single
-          ? `        Object r = entityManager.createQuery(${JSON.stringify(jpql)}).getSingleResult();`
-          : `        Object[] r = (Object[]) entityManager.createQuery(${JSON.stringify(jpql)}).getSingleResult();`,
-        `        return new ${rowName}(${args.join(", ")});`,
+        ...aggregationPrelude(scope, qpctx.basePkg),
+        ...wrapAggregationBypass(scope.disableCaps, [
+          single
+            ? `        Object r = ${aggregationQueryExpr(jpql, scope)}.getSingleResult();`
+            : `        Object[] r = (Object[]) ${aggregationQueryExpr(jpql, scope)}.getSingleResult();`,
+          `        return new ${rowName}(${args.join(", ")});`,
+        ]),
         `    }`,
         ``,
       );
@@ -606,13 +726,6 @@ function jpqlAggregate(agg: ProjectionAggregateIR): string {
   return `${agg.op}(e.${arg.member})`;
 }
 
-/** Whether coercing this aggregate needs `java.math.BigDecimal` imported. */
-function jpqlNeedsBigDecimal(s: AggregateSelect): boolean {
-  const c = aggregateCoercion(s);
-  const inner = s.type.kind === "optional" ? s.type.inner : s.type;
-  return !c.isCount && !c.asString && inner.kind === "primitive" && inner.name === "decimal";
-}
-
 /** Coerce one JPQL aggregate result to the row's declared wire type.
  *
  *  JPQL hands back `Object`s whose runtime types are provider-chosen (`Long`
@@ -648,9 +761,16 @@ function jpqlCoerce(s: AggregateSelect, read: string): string {
       : `${read} == null ? "0" : ${read}.toString()`;
   }
   if (inner.kind === "primitive" && inner.name === "decimal") {
+    // decimal → the row's `double` component (RS-24 / M-T6.46).  The provider
+    // types an aggregate result by its own choice — `BigDecimal` for a `sum`
+    // over a numeric column, `Double` for an `avg` — so the read goes through
+    // `Number` rather than a cast, and lands on the SAME double every other
+    // backend ships.  Before this, only `avg` was double-parity, and only by
+    // the provider's accident; `sum`/`min`/`max` re-wrapped into a
+    // `BigDecimal` and serialized the stored column's full precision.
     return c.optional
-      ? `${read} == null ? null : new BigDecimal(${read}.toString())`
-      : `${read} == null ? BigDecimal.ZERO : new BigDecimal(${read}.toString())`;
+      ? `${read} == null ? null : ((Number) ${read}).doubleValue()`
+      : `${read} == null ? 0.0 : ((Number) ${read}).doubleValue()`;
   }
   const asLong = inner.kind === "primitive" && inner.name === "long";
   const num = `((Number) ${read}).${asLong ? "longValue" : "intValue"}()`;
@@ -689,8 +809,12 @@ function groupKeyCoerce(
       case "long":
         return `((Number) ${read}).longValue()`;
       case "decimal":
-        imports.add("java.math.BigDecimal");
-        return `new BigDecimal(${read}.toString())`;
+        // decimal → the row's `double` component (RS-24 / M-T6.46), the same
+        // narrowing `domainToWire` applies on a per-row read.  A key column
+        // comes back as the entity's own mapped `BigDecimal`, so it still goes
+        // through `Number` rather than a cast — but it lands on a double, not
+        // on a re-wrapped BigDecimal carrying the stored column's full scale.
+        return `((Number) ${read}).doubleValue()`;
       case "money":
         // money → wire STRING at the fixed money scale (RS-12), matching
         // `domainToWire`.

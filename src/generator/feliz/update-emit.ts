@@ -5,7 +5,8 @@
 
 import type { ActionIR, StateFieldIR, StoreIR } from "../../ir/types/loom-ir.js";
 import { typeIsFile } from "../../ir/util/file-field.js";
-import { upperFirst } from "../../util/naming.js";
+import { snake, upperFirst } from "../../util/naming.js";
+import { felizRouteSegments } from "./feliz-target.js";
 import {
   type FsExprCtx,
   ROUTE_ID_FROM_MODEL,
@@ -31,6 +32,7 @@ import type {
 import {
   fileSelectMsg,
   fileUploadedMsg,
+  findReadCmd,
   formFileSelectMsg,
   formFileUploadedMsg,
   formHasFieldErrors,
@@ -40,6 +42,7 @@ import {
   pagedReadCmd,
   readLoadedType,
   refetchMsgCase,
+  wfHasForm,
 } from "./wire.js";
 
 /** The F# Model type for a `state {}` field.  A `File`-typed field holds the
@@ -93,7 +96,11 @@ function boundSetMsg(b: FelizBoundState): string {
  *  scaffolded list's `pageNum`/`sortKey`/`sortDir`): the arm then binds the
  *  updated model first and fires the read off THAT, so the request carries the
  *  new page/sort rather than the one it just replaced. */
-function boundSetArm(b: FelizBoundState, refetch?: FelizRead): string {
+function boundSetArm(
+  b: FelizBoundState,
+  refetch?: FelizRead,
+  renderFindArgs: (r: FelizRead) => string[] = () => [],
+): string {
   const field = upperFirst(b.name);
   const fs = typeToFs(b.type);
   const conv =
@@ -105,10 +112,16 @@ function boundSetArm(b: FelizBoundState, refetch?: FelizRead): string {
           ? "(match System.Decimal.TryParse v with | true, n -> n | _ -> 0m)"
           : "v";
   if (refetch) {
-    return (
-      `  | Set${field} v -> let __m = { model with ${field} = ${conv} } in ` +
-      `__m, ${pagedReadCmd(refetch, "__m")}`
-    );
+    // A find read's ARGUMENT is a control in exactly the way a paged read's
+    // page/sort cell is: change it and the query has to be re-issued off the
+    // UPDATED model, or the view keeps showing the answer to the previous
+    // question.  (Riverpod gets this for free — the Flutter `.family` provider
+    // is re-watched with the new argument — so this arm is what keeps the two
+    // frontends behaving the same.)
+    const cmd = refetch.find
+      ? findReadCmd(refetch, renderFindArgs(refetch))
+      : pagedReadCmd(refetch, "__m");
+    return `  | Set${field} v -> let __m = { model with ${field} = ${conv} } in __m, ${cmd}`;
   }
   return `  | Set${field} v -> { model with ${field} = ${conv} }, Cmd.none`;
 }
@@ -131,6 +144,18 @@ function refetchByControlField(reads: readonly FelizRead[]): Map<string, FelizRe
     const c = r.paging?.controls;
     if (!c) continue;
     for (const f of [c.pageField, c.sortDirField]) m.set(f, r);
+  }
+  // A user-declared find read is controlled by the state cells its ARGUMENTS
+  // name — `QueryView { of: K.Doc.byVis(chosen) }` beside a `Select(bind:
+  // chosen)`.  Registered after the paged controls so a cell that is both keeps
+  // the paged refetch (which re-issues the whole page/sort request), never two
+  // fetches for one keystroke.
+  for (const r of reads) {
+    for (const a of r.find?.argExprs ?? []) {
+      if (a.kind !== "ref") continue;
+      const f = upperFirst(a.name);
+      if (!m.has(f)) m.set(f, r);
+    }
   }
   return m;
 }
@@ -254,9 +279,22 @@ export function renderModel(
 export function renderPageCmd(reads: readonly FelizRead[] = []): string {
   const byId = reads.filter((r) => r.single);
   if (byId.length === 0) return "";
-  const arms = byId.map(
-    (r) => `  | ${r.pageCase} id -> Cmd.OfAsync.perform Api.${r.apiFn} id ${r.msgCase}`,
-  );
+  // Two page-entry reads can share ONE hosting `Page` case — a detail page's
+  // byId read plus its entity-history read.  One arm per CASE, batching the
+  // fetches: a second `| OrderDetail id ->` arm would be unreachable (FS0026)
+  // and its fetch would silently never fire.  A lone read keeps the unbatched
+  // arm, byte-identical to before.
+  const byCase = new Map<string, FelizRead[]>();
+  for (const r of byId) {
+    const key = r.pageCase ?? "";
+    byCase.set(key, [...(byCase.get(key) ?? []), r]);
+  }
+  const arms = [...byCase.entries()].map(([pageCase, rs]) => {
+    const cmds = rs.map((r) => `Cmd.OfAsync.perform Api.${r.apiFn} id ${r.msgCase}`);
+    return cmds.length === 1
+      ? `  | ${pageCase} id -> ${cmds[0]}`
+      : `  | ${pageCase} id -> Cmd.batch [ ${cmds.join("; ")} ]`;
+  });
   return `let pageCmd (page: Page) : Cmd<Msg> =\n  match page with\n${arms.join("\n")}\n  | _ -> Cmd.none`;
 }
 
@@ -272,8 +310,28 @@ export function renderInit(
   forms: readonly FormRecord[] = [],
   authUi = false,
   pageGate = false,
+  /** Model-field name → an init expression that REPLACES the field's declared
+   *  initializer.  Fed by the store-persistence layer (`persist: local|session|
+   *  url`), which seeds a persisted store field from its backing store instead
+   *  of from the `.ddd` default — the Feliz answer to Zustand's `persist`
+   *  hydration.  Empty on every other app, so their `init` is byte-identical. */
+  initOverrides: ReadonlyMap<string, string> = new Map(),
 ): string {
   const hasPageCmd = routed && reads.some((r) => r.single);
+  // A user-declared find read is issued with its ARGUMENTS, and those are
+  // page `state {}` cells / store fields / the route id.  `init` binds the
+  // initial record as `__m` before building the `Cmd`s (the same trick a
+  // page/sort-controlled paged read already uses), so the arguments resolve
+  // against the record this very `init` is returning.
+  const findArgCtx: FsExprCtx = {
+    stateNames: new Set(state.map((f) => f.name)),
+    locals: new Set(),
+    modelExpr: "__m",
+    ...(routed ? { routeId: ROUTE_ID_FROM_URL } : {}),
+  };
+  const findArgs = (r: FelizRead): string[] =>
+    (r.find?.argExprs ?? []).map((a) => renderFsExpr(a, findArgCtx));
+  const hasFindArgs = reads.some((r) => (r.find?.argExprs.length ?? 0) > 0);
   const inits = [
     ...(authUi ? ["      Session = Checking"] : []),
     ...(pageGate ? ["      CurrentUser = None"] : []),
@@ -293,8 +351,13 @@ export function renderInit(
         locals: new Set(),
         ...(routed ? { routeId: ROUTE_ID_FROM_URL } : {}),
       };
-      const v = f.init ? decimalLit(renderFsExpr(f.init, ctx), f.type) : stateFieldZero(f);
-      return `      ${upperFirst(f.name)} = ${v}`;
+      const modelField = upperFirst(f.name);
+      // A persisted store field hydrates from its backing store; the declared
+      // `= <init>` becomes the FALLBACK inside the loader, not the seed here.
+      const override = initOverrides.get(modelField);
+      const v =
+        override ?? (f.init ? decimalLit(renderFsExpr(f.init, ctx), f.type) : stateFieldZero(f));
+      return `      ${modelField} = ${v}`;
     }),
     ...reads.flatMap((r) => [
       `      ${r.field} = Loading`,
@@ -320,7 +383,9 @@ export function renderInit(
       // sort, so it can't disagree with what the pager renders.
       r.paging?.controls
         ? pagedReadCmd(r, "__m")
-        : `Cmd.OfAsync.perform Api.${r.apiFn} () ${r.msgCase}`,
+        : r.find
+          ? findReadCmd(r, findArgs(r))
+          : `Cmd.OfAsync.perform Api.${r.apiFn} () ${r.msgCase}`,
     );
   if (hasPageCmd) cmds.push("pageCmd page");
   // The auth gate probes the session at init (batched with the reads).
@@ -338,7 +403,7 @@ export function renderInit(
   // A paged read's init `Cmd` reads the model's own page/sort cells, so the
   // record has to be BOUND before the `Cmd` is built rather than returned
   // inline as the tuple's first element.
-  if (reads.some((r) => r.paging?.controls)) {
+  if (reads.some((r) => r.paging?.controls) || hasFindArgs) {
     const body = inits.map((l) => `  ${l}`).join("\n");
     return `${prefix}  let __m =\n    {\n${body}\n    }\n  __m, ${cmd}`;
   }
@@ -363,8 +428,13 @@ export function renderMsg(
   opActions: readonly FelizAction[] = [],
   boundState: readonly FelizBoundState[] = [],
   fileUploads: readonly FelizFileUpload[] = [],
+  /** The `StoreUrlChanged` case a `persist: url` store's `popstate`
+   *  subscription dispatches (`store-persist.ts`).  One case for the whole app
+   *  — every url store reads the same query string. */
+  urlStoreMsg?: string,
 ): string {
   const cases = [
+    ...(urlStoreMsg ? [`  | ${urlStoreMsg}`] : []),
     // Under a page gate the probe carries the decoded claims (None on 401);
     // otherwise it's a bare authenticated? boolean.
     ...(authUi ? [`  | SessionChecked of ${pageGate ? "CurrentUser option" : "bool"}`] : []),
@@ -550,6 +620,19 @@ function renderUpdateStmt(stmt: ActionIR["body"][number], ctx: FsExprCtx): Updat
         const head = storeMsgCase(stmt.store, stmt.name);
         return { cmd: `Cmd.ofMsg (${args.length === 0 ? head : `${head} ${args.join(" ")}`})` };
       }
+      // `navigate(<Page>)` — the DOCUMENTED navigation shape (docs/actions.md).
+      // It lowers as a `private-operation` call, so it used to reach the throw
+      // below and KILL `ddd generate system` outright for the whole system, not
+      // just this deployable.  Routed to Feliz.Router the same way the `then:`
+      // path already was (`felizTarget.renderNavigate`).
+      if (stmt.name === "navigate") {
+        const pageRef = stmt.args[0];
+        const route =
+          pageRef?.kind === "ref"
+            ? (ctx.pageRoutes?.get(pageRef.name) ?? `/${snake(pageRef.name)}`)
+            : "/";
+        return { cmd: `Cmd.navigatePath(${felizRouteSegments(route).join(", ")})` };
+      }
       // `private-operation`: a backend concept with no frontend arm.  Fail fast
       // rather than silently dropping it.
       throw new Error(
@@ -568,7 +651,7 @@ function renderUpdateStmt(stmt: ActionIR["body"][number], ctx: FsExprCtx): Updat
       throw new Error(
         "feliz: a `match await` (async effect) statement reached the per-statement update " +
           "renderer — a supported effect is projected at the update level, an unsupported one " +
-          "is gated at validation (loom.feliz-async-effect-unsupported). See M-T6.15.",
+          "is gated at validation (loom.feliz-async-effect-unsupported).",
       );
     default:
       // `precondition` / `requires` / `emit` / `return` are backend-only
@@ -602,6 +685,13 @@ export function renderUpdate(
   opActions: readonly FelizAction[] = [],
   boundState: readonly FelizBoundState[] = [],
   fileUploads: readonly FelizFileUpload[] = [],
+  /** The `| StoreUrlChanged -> …` arm re-seeding every `persist: url` store
+   *  field from the query string (`store-persist.ts`); undefined when the app
+   *  has no url store, so its `update` is byte-identical. */
+  storeUrlArm?: string,
+  /** Page name -> declared `route:` — what a `navigate(<Page>)` statement in an
+   *  action body resolves against.  Empty on a non-routed ui. */
+  pageRoutes: ReadonlyMap<string, string> = new Map(),
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
   // An update arm runs outside every page view fn, so a body that reads the
@@ -612,7 +702,20 @@ export function renderUpdate(
   // A control of a server-paged read turns its setter into a refetch; every
   // other bound input keeps the plain `Cmd.none` assignment.
   const refetches = refetchByControlField(reads);
-  const boundArms = boundState.map((b) => boundSetArm(b, refetches.get(upperFirst(b.name))));
+  // A refetched find read's arguments resolve against `__m` — the record the
+  // arm has just bound with the new control value — for the same reason
+  // `pagedReadCmd` is handed `"__m"` there.
+  const refetchArgCtx: FsExprCtx = {
+    stateNames,
+    locals: new Set(),
+    modelExpr: "__m",
+    ...armRouteId,
+  };
+  const boundArms = boundState.map((b) =>
+    boundSetArm(b, refetches.get(upperFirst(b.name)), (r) =>
+      (r.find?.argExprs ?? []).map((a) => renderFsExpr(a, refetchArgCtx)),
+    ),
+  );
   // Per standalone `FileUpload(bind:)`: the file-picked trigger fires the upload
   // `Cmd` (multipart POST /files), and the result sets the `File` Model field to
   // `Some ref` on success (an error is dropped — the field stays as it was).
@@ -674,7 +777,12 @@ export function renderUpdate(
   };
   const actionArms = actions.map((a) => {
     const p = a.params[0];
-    const ctx: FsExprCtx = { stateNames, locals: new Set(p ? [p.name] : []), ...armRouteId };
+    const ctx: FsExprCtx = {
+      stateNames,
+      locals: new Set(p ? [p.name] : []),
+      pageRoutes,
+      ...armRouteId,
+    };
     const head = p ? `  | ${msgCase(a.name)} ${p.name} ->` : `  | ${msgCase(a.name)} ->`;
     return assembleArm(head, a.body, ctx);
   });
@@ -689,6 +797,7 @@ export function renderUpdate(
         stateNames,
         locals: new Set(p ? [p.name] : []),
         storeScope: { store: store.name, fields },
+        pageRoutes,
         ...armRouteId,
       };
       const msg = storeMsgCase(store.name, a.name);
@@ -781,6 +890,15 @@ export function renderUpdate(
   const workflowArms = workflowForms.map((f) => {
     const setters = formFieldSetterArms(f);
     const nav = `Cmd.navigatePath(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
+    // A PARAM-LESS workflow (`run()`) has no form record: the submit posts `()`
+    // (empty body) and the done arm doesn't reset a form field.
+    if (!wfHasForm(f)) {
+      return [
+        `  | ${f.submitMsg} -> model, Cmd.OfAsync.perform Api.${f.apiFn} () ${f.doneMsg}`,
+        `  | ${f.doneMsg} (Ok ()) -> model, ${nav}`,
+        `  | ${f.doneMsg} (Error _) -> model, Cmd.none`,
+      ].join("\n");
+    }
     return [
       ...setters,
       ...touchArm(f),
@@ -849,6 +967,7 @@ export function renderUpdate(
   });
   const arms = [
     ...authArms,
+    ...(storeUrlArm ? [storeUrlArm] : []),
     ...routeArms,
     ...boundArms,
     ...fileUploadArms,

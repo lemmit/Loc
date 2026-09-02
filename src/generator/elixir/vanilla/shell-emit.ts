@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
-// Shell renderers — plain Phoenix + Ecto skeleton.  Slice 0 of
-// vanilla-foundation-tdd-plan.md: emit a minimal project that
+// Shell renderers — plain Phoenix + Ecto skeleton
+// (vanilla-foundation-tdd-plan.md): a minimal project that
 // `mix compile --warnings-as-errors` accepts.
-// Slice 1: router now accepts per-aggregate routes spliced into /api.
+// The router accepts per-aggregate routes spliced into /api.
 // Observability: `renderApplication` / `renderLogFormatter` /
 // `renderTelemetry` in `../shell/runtime.ts` + `../telemetry-emit.ts` are
 // wired through here so the backend emits the same cross-backend log-event
@@ -38,6 +38,7 @@ import {
 } from "../shell/runtime.js";
 import { renderLayouts } from "../shell/web.js";
 import { renderTelemetry } from "../telemetry-emit.js";
+import { renderGuardErrorModule } from "./denial.js";
 import { renderObanConfig } from "./scheduler-emit.js";
 
 export function emitVanillaShellFiles(
@@ -96,8 +97,8 @@ export function emitVanillaShellFiles(
   // Either source of translatable strings turns the runtime on.
   const i18nEnabled = i18nUi !== undefined || validationMessages.length > 0;
   // The SECOND-tier i18n gate (D-I18N-HEEX-ICU): an ICU engine ships only for a
-  // ui that actually INTERPOLATES.  A translatable-but-literal-only app keeps
-  // the byte-identical dep list it had before this slice.
+  // ui that actually INTERPOLATES, so a translatable-but-literal-only app pays
+  // for no ICU dep.
   const icuEnabled = i18nUi !== undefined && heexIcuEnabled(i18nUi);
   // Swoosh boots its default API client (Hackney) when the `:swoosh`
   // application starts — even for the SMTP adapter, which sends through
@@ -168,6 +169,12 @@ export function emitVanillaShellFiles(
   // Ambient execution-context carrier (Logger.metadata) — the Plug is mounted
   // in the endpoint after Plug.RequestId.
   out.set(`lib/${appName}/request_context.ex`, renderRequestContext(appModule));
+  // The typed guard denial a pure body (`function` / `domainService` /
+  // pure-core op) raises — `<App>.GuardError`, with the rung in its `:kind`
+  // field so the controller rescue routes on a FIELD rather than on the
+  // message prefix.  Domain layer, not `<App>Web.*`: `function-emit` /
+  // `domain-service-emit` render into `lib/<app>/` (M-T6.20).
+  out.set(`lib/${appName}/guard_error.ex`, renderGuardErrorModule(appModule));
   out.set(
     `lib/${appName}_web.ex`,
     // The TEMPLATE-side gate is the ui, not the merged catalog: `pgettext/2` in
@@ -226,10 +233,9 @@ export function emitVanillaShellFiles(
   // Two halves, one `.po` tree: a Loom key is globally unique and is always the
   // `msgctxt`, so `mix gettext.merge` and every `.po` importer see one catalog.
   //
-  // NOT LiveView-gated (it used to be, when the ui was the only source of
-  // strings): a JSON-API-only deployable with an authored `message "…"` needs
-  // the backend + catalog too, and its 422 handler resolves through them.
-  // Neither half ⇒ byte-identical (no module, no `priv/gettext`, no dep).
+  // NOT LiveView-gated: a JSON-API-only deployable with an authored
+  // `message "…"` needs the backend + catalog too, and its 422 handler resolves
+  // through them.  Neither half ⇒ no module, no `priv/gettext`, no dep.
   if (i18nEnabled) {
     out.set(`lib/${appName}_web/gettext.ex`, renderGettextBackend(appName, appModule));
     // The active HEEx pack's DECLARED chrome (D-PACK-CHROME) — English baked
@@ -254,6 +260,7 @@ export function emitVanillaShellFiles(
   }
   out.set(`lib/${appName}_web/controllers/error_json.ex`, renderVanillaErrorJson(appModule));
   out.set(`lib/${appName}_web/body_parser.ex`, renderVanillaBodyParser(appModule));
+  out.set(`lib/${appName}_web/fault_handler.ex`, renderVanillaFaultHandler(appModule));
   out.set(
     `lib/${appName}_web/controllers/not_found_controller.ex`,
     renderVanillaNotFoundController(appModule),
@@ -362,7 +369,7 @@ defmodule ${appModule}.MixProject do
       {:open_api_spex, "~> 3.0"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_metrics_prometheus_core, "~> 1.1"},
-      # OpenTelemetry tracing (M-T7.1): the RequestContext plug opens a SERVER
+      # OpenTelemetry tracing: the RequestContext plug opens a SERVER
       # span per request; exported via OTLP/HTTP only when a collector endpoint
       # is set (config/runtime.exs).
       {:opentelemetry_api, "~> 1.4"},
@@ -609,7 +616,12 @@ ${liveViewPlugs}${spaStaticPlug}  plug Plug.RequestId
   plug Plug.MethodOverride
   plug Plug.Head
   plug Plug.Session, @session_options
-  plug ${appModule}Web.Router
+  # The router is mounted THROUGH the app-global fault floor, not
+  # directly: every fault raised at or below the router — a controller raise, a
+  # plug in a pipeline, an \`Ecto\` timeout — is answered by us in RFC 7807
+  # instead of by \`Phoenix.Endpoint.RenderErrors\` in whatever shape and content
+  # type the framework picks.  See ${appModule}Web.FaultHandler.
+  plug ${appModule}Web.FaultHandler
 end
 `;
 }
@@ -629,7 +641,15 @@ function renderVanillaRouter(
   // `/openapi.json`, so they stay reachable without a token.  Bare paths splice
   // into `scope "/api"` as before.
   const rootApiRoutes = apiRoutes.filter((r) => r.path.startsWith("!root:"));
-  const scopedApiRoutes = apiRoutes.filter((r) => !r.path.startsWith("!root:"));
+  // `!sse:` — the realtime SSE stream (channels.md Part I).  It CANNOT ride the
+  // `:api` pipeline: `plug :accepts, ["json"]` answers 406 to the
+  // `Accept: text/event-stream` an `EventSource` sends.  Spliced into its own
+  // `:sse` pipeline at the router root instead (the path already carries the
+  // `/api` prefix, so the served URL is unchanged from the other backends').
+  const sseRoutes = apiRoutes.filter((r) => r.path.startsWith("!sse:"));
+  const scopedApiRoutes = apiRoutes.filter(
+    (r) => !r.path.startsWith("!root:") && !r.path.startsWith("!sse:"),
+  );
   const routeLines = scopedApiRoutes
     .map((r) => `    ${r.method} "${r.path}", ${r.controller}, ${r.action}`)
     .join("\n");
@@ -644,6 +664,39 @@ function renderVanillaRouter(
   scope "/" do
     pipe_through :api
 ${rootApiLines}
+  end
+`
+    : "";
+  // Auth plug — populates `conn.assigns.current_user` from the Bearer JWT so
+  // principal (tenancy) filters can scope reads by the actor, and 401s a
+  // request that carries no valid credentials.  Shared by the `:api` and
+  // `:sse` pipelines, so the split below cannot drift into an auth hole.
+  const authApiPlug = authEnabled ? `\n    plug ${appModule}Web.Auth` : "";
+  // The SSE pipeline runs no `:accepts` negotiation (see above) — that split is
+  // the ONLY reason it exists, since `plug :accepts, ["json"]` answers 406 to
+  // the `Accept: text/event-stream` an `EventSource` sends.  It DOES carry the
+  // same Auth plug: an `auth: required` deployable must not serve an
+  // unauthenticated stream, and an untenanted broadcast event carries its FULL
+  // payload on this wire (only tenant-scoped events degrade to a refetch
+  // ticket).  Hono mounts `/api/realtime` behind `authMiddleware` and python's
+  // `AuthMiddleware` covers it — both 401 without credentials — so this is
+  // parity, not a Phoenix-specific restriction.  (An earlier comment here
+  // claimed those two streams were "likewise unauthenticated".  They are not.)
+  const sseLines = sseRoutes
+    .map((r) => {
+      const path = r.path.slice("!sse:".length);
+      return `    ${r.method} "${path}", ${appModule}Web.${r.controller}, ${r.action}`;
+    })
+    .join("\n");
+  const sseBlock = sseLines
+    ? `
+  pipeline :sse do
+    plug :fetch_query_params${authApiPlug}
+  end
+
+  scope "/" do
+    pipe_through :sse
+${sseLines}
   end
 `
     : "";
@@ -699,9 +752,8 @@ ${liveLines}
   end
 `
     : "";
-  // Auth plug in the :api pipeline — populates `conn.assigns.current_user` from
-  // the Bearer JWT so principal (tenancy) filters can scope reads by the actor.
-  const authApiPlug = authEnabled ? `\n    plug ${appModule}Web.Auth` : "";
+  // (`authApiPlug` — the :api / :sse Auth plug — is defined above, next to the
+  // `:sse` pipeline it also feeds.)
   // `/api/auth/me` session probe (+ OIDC login/callback/logout handshake when an
   // `auth { oidc }` block is present).  Piped through :api so the Auth plug
   // verifies the principal first.
@@ -763,7 +815,7 @@ ${browserPipeline}${spaPipeline}
   scope "/metrics" do
     get "/", ${appModule}Web.MetricsController, :index
   end
-${rootApiScope}${liveScope}${authScope}${spaScope}
+${rootApiScope}${sseBlock}${liveScope}${authScope}${spaScope}
   scope "/api", ${appModule}Web do
     pipe_through :api
 ${routeLines}
@@ -808,7 +860,7 @@ defmodule ${appModule}Web.BodyParser do
   @moduledoc """
   \`Plug.Parsers\` with its failures answered by this app rather than by
   \`Phoenix.Endpoint.RenderErrors\` — see the RFC 7807 contract in
-  docs/conformance-semantics.md (RS-9).  Opts are \`Plug.Parsers\`' own.
+  docs/conformance-semantics.md.  Opts are \`Plug.Parsers\`' own.
   """
   @behaviour Plug
 
@@ -846,6 +898,132 @@ defmodule ${appModule}Web.BodyParser do
       |> Plug.Conn.send_resp(status, body)
       |> Plug.Conn.halt()
   end
+end
+`;
+}
+
+function renderVanillaFaultHandler(appModule: string): string {
+  // ── the app-global RFC 7807 floor (M-T6.30) ──────────────────────────────
+  //
+  // The four non-elixir backends install an APP-GLOBAL unhandled-exception
+  // handler — `app.onError` (hono), `DomainExceptionFilter` (.NET),
+  // `ApiExceptionAdvice` (java), `install_error_handlers` (python) — so ANY
+  // unmodelled fault, on any route, in any system, answers the RFC 7807
+  // envelope.  Vanilla Phoenix had none: its sanitized arm lived only inside
+  // the `respond/2` dispatchers that `workflow-execution-emit` /
+  // `explicit-handlers-emit` render, so a plain CRUD system emitted no such arm
+  // AT ALL and a controller raise fell through to the framework — an HTML
+  // debug page in dev (`debug_errors: true`), and in prod a body rendered
+  // through `Phoenix.Endpoint.RenderErrors` under `application/json`, with the
+  // exception's own message as `detail`.  Three ways to violate the contract on
+  // the most common system shape.
+  //
+  // This is the mirror of node's ROOT `app.onError`: the floor sits at the
+  // outermost point that still belongs to this app, and the per-router /
+  // per-dispatcher arms stay as REFINEMENTS above it — a workflow's `respond/2`
+  // still answers its own ladder; this only catches what nothing else did.
+  //
+  // WHY A WRAPPER PLUG.  `Plug.Builder` compiles `plug A` / `plug B` into
+  // `B.call(A.call(conn))`, so a plug listed in the endpoint cannot rescue the
+  // plugs that come AFTER it — a wrapping plug has to invoke the rest itself.
+  // That is the same reason `BodyParser` wraps `Plug.Parsers` rather than
+  // sitting in front of it, and it buys the same two properties: the content
+  // type is ours (`render_errors` exposes no knob for it, and its `json` format
+  // is `application/json`), and dev and prod answer IDENTICALLY, because
+  // `Plug.Debugger` never sees an exception we already turned into a response.
+  //
+  // Faults raised by the endpoint plugs ABOVE this one (`Plug.RequestId`,
+  // `Plug.Session`, `Plug.Head`, …) still reach `RenderErrors` — nothing in a
+  // plug pipeline can wrap what runs before it.  They are framework plugs on a
+  // request that has not reached this app's code yet, and `ErrorJSON` renders
+  // the same 7807 members for them (the content type is the residue).  The
+  // parsers, the one such plug that fails on ordinary bad input, are already
+  // covered by `BodyParser`.
+  return `# Auto-generated.
+defmodule ${appModule}Web.FaultHandler do
+  @moduledoc """
+  The app-global RFC 7807 floor — see the contract in
+  docs/conformance-semantics.md.
+
+  Mounts the router and answers ANY fault below it with the same
+  ProblemDetails envelope every modelled error on this API answers, under
+  \`application/problem+json\`.  A route that maps the fault itself (a
+  workflow's \`respond/2\`, an aggregate controller's rescue clauses) answers
+  first and never reaches here; this is what the rest of the app inherits.
+  """
+  @behaviour Plug
+
+  require Logger
+
+  alias ${appModule}Web.ProblemDetails
+
+  @impl true
+  def init(opts), do: opts
+
+  @impl true
+  def call(conn, _opts) do
+    ${appModule}Web.Router.call(conn, ${appModule}Web.Router.init([]))
+  rescue
+    # \`Phoenix.Router\`'s dispatch wraps a raise from a controller or pipeline
+    # plug in a \`WrapperError\` carrying the conn AS IT WAS at the raise — the
+    # one with the request id and any response headers already put.  Prefer it.
+    #
+    # \`e.kind\`, not a hardcoded \`:error\`: a WrapperError also wraps a THROW or
+    # an EXIT (\`kind: :throw | :exit\`), and the kind is load-bearing twice
+    # below — \`Exception.format/3\` formats a thrown term as an exception and
+    # garbles the log line, and the already-sent re-raise
+    # (\`:erlang.raise(kind, …)\`) would convert an exit into an error and lose
+    # the original failure signal.
+    e in Plug.Conn.WrapperError ->
+      handle(e.conn || conn, e.kind, e.reason, e.stack)
+
+    e ->
+      handle(conn, :error, e, __STACKTRACE__)
+  catch
+    # A throw or an exit (an \`Ecto\` pool checkout timeout is the common one)
+    # is just as unmodelled as a raise, and reaches the wire the same way.
+    kind, reason ->
+      handle(conn, kind, reason, __STACKTRACE__)
+  end
+
+  defp handle(conn, kind, reason, stack) do
+    # The operator keeps everything; the caller gets none of it.  This is the
+    # only place the fault is recorded in full, because the sanitized detail
+    # below deliberately carries nothing about it.
+    Logger.error(Exception.format(kind, reason, stack))
+
+    status = status_for(kind, reason)
+
+    # A response already on the wire cannot be replaced — a chunked SSE stream
+    # that raises mid-send is past the point where an envelope is possible.
+    # Re-raise so the framework tears the connection down instead of us
+    # crashing on \`Plug.Conn.AlreadySentError\` and losing the original fault.
+    if conn.state in [:unset, :set, :set_chunked, :set_file] do
+      respond(conn, status)
+    else
+      :erlang.raise(kind, reason, stack)
+    end
+  end
+
+  # An error the server did not model is a SERVER fault, and its
+  # message names modules, SQL text, hosts and connection strings.  The wire
+  # gets the one sanitized literal all five backends send; the log line above
+  # got the truth.
+  defp respond(conn, status) when status >= 500 do
+    ProblemDetails.problem_response(conn, 500, "Internal Server Error", "internal")
+  end
+
+  # A \`Plug.Exception\` that names a 4xx classified the request, not the server
+  # (\`Ecto.NoResultsError\` -> 404, \`Phoenix.ActionClauseError\` -> 400).  Honour
+  # the status; the reason phrase is the detail, sanitized by construction the
+  # same way \`BodyParser\` sanitizes the parser faults.
+  defp respond(conn, status) do
+    phrase = Plug.Conn.Status.reason_phrase(status)
+    ProblemDetails.problem_response(conn, status, phrase, phrase)
+  end
+
+  defp status_for(:error, %{__exception__: true} = e), do: Plug.Exception.status(e)
+  defp status_for(_kind, _reason), do: 500
 end
 `;
 }
@@ -1018,11 +1196,10 @@ function renderVanillaErrorJson(appModule: string): string {
   //
   // This is RFC 7807, the same envelope `ProblemDetails` gives every DOMAIN
   // error, because a client parses ONE error shape per API or it parses two.
-  // It used to be Phoenix's scaffold default, `%{errors: %{detail: …}}` — so a
-  // wrong verb answered a shape that appears nowhere else on the API and
-  // satisfies none of RS-9 (`type` present and "about:blank").  Measured
-  // across the five backends, framework errors produced three statuses and
-  // five body shapes while every domain error was byte-identical.
+  // Phoenix's scaffold default, `%{errors: %{detail: …}}`, would answer a
+  // wrong verb with a shape that appears nowhere else on the API and satisfies
+  // none of RS-9 (`type` present and "about:blank") — framework errors are
+  // where the five backends diverge most, so this pins the envelope.
   //
   // `template` is "404.json" / "405.json" / "500.json"; the status prefix is
   // the authority for the numeric member, and `status_message_from_template`
@@ -1037,16 +1214,27 @@ defmodule ${appModule}Web.ErrorJSON do
       type: "about:blank",
       title: title,
       status: status,
-      detail: detail_for(assigns, title),
+      detail: detail_for(status, assigns, title),
       instance: instance_for(assigns)
     }
   end
 
-  # Phoenix passes the raised exception when there is one; its message is a
-  # better \`detail\` than the bare reason phrase ("no route found for PUT
-  # /api/items").  Falls back to the phrase so the member is never absent.
-  defp detail_for(%{reason: %{message: message}}, _title) when is_binary(message), do: message
-  defp detail_for(_assigns, title), do: title
+  # A >= 500 is the fault nobody modelled, and the exception's message
+  # names modules, SQL text and hosts.  It gets the sanitized literal all five
+  # backends send, never \`reason.message\`.  (\`${appModule}Web.FaultHandler\`
+  # answers everything at or below the router, so what still renders here is a
+  # fault in an endpoint plug above it — but the leak must not depend on which
+  # of the two paths a request happened to take.)
+  defp detail_for(status, _assigns, _title) when status >= 500, do: "internal"
+
+  # Below 500, phoenix passes the raised exception when there is one; its
+  # message is a better \`detail\` than the bare reason phrase ("no route found
+  # for PUT /api/items").  Falls back to the phrase so the member is never
+  # absent.
+  defp detail_for(_status, %{reason: %{message: message}}, _title) when is_binary(message),
+    do: message
+
+  defp detail_for(_status, _assigns, title), do: title
 
   defp instance_for(%{conn: %{request_path: path}}) when is_binary(path), do: path
   defp instance_for(_assigns), do: nil
@@ -1109,7 +1297,7 @@ config :logger, :default_formatter,
   format: {${appModule}.LogFormatter, :format},
   metadata: :all
 
-# OpenTelemetry (M-T7.1): a SERVER span opens per request (the RequestContext
+# OpenTelemetry: a SERVER span opens per request (the RequestContext
 # plug), threading trace_id/span_id onto Logger.metadata (log<->trace
 # correlation).  A batch processor buffers spans; the OTLP exporter is turned
 # ON in config/runtime.exs ONLY when a collector endpoint is set — default off
@@ -1203,7 +1391,7 @@ if config_env() == :prod do
     secret_key_base: secret_key_base
 end
 
-# OpenTelemetry export (M-T7.1): turn the OTLP/HTTP exporter ON only when a
+# OpenTelemetry export: turn the OTLP/HTTP exporter ON only when a
 # collector endpoint is set (the compose stack points it at the bundled jaeger
 # collector).  Applies in every env — spans are always created (so trace_id
 # rides the logs), but exported only here.  http/protobuf on the standard OTLP

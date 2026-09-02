@@ -15,6 +15,7 @@ import {
 import { lines } from "../../../util/code-builder.js";
 import { messageCode } from "../../../util/message-code.js";
 import { upperFirst } from "../../../util/naming.js";
+import { javaCodePointLength } from "../../_expr/code-point.js";
 import {
   collectJavaExprImports,
   collectJavaRegexLiterals,
@@ -127,9 +128,8 @@ function commandSpecs(
   const createInputs = forCreateInput(agg.fields);
   // A create validator exists only when there's a field-derived Create<Agg>Request
   // to validate.  Skip when there's no REST create at all, and for event-sourced
-  // aggregates (whose create request is keyed by the `create` action's params,
-  // not the field set — the old service-floor create validator was skipped there
-  // too, `!ctx.esCreateParams`).
+  // aggregates, whose create request is keyed by the `create` action's params
+  // rather than the field set (`!ctx.esCreateParams`).
   if (emitsRestCreate(agg) && agg.persistedAs !== "eventLog") {
     specs.push({
       className: `Create${agg.name}Validator`,
@@ -427,14 +427,21 @@ function patternCheck(
       return [fail(cmp(pattern.exclusive ? "<" : "<=", pattern.n))];
     case "between":
       return [fail(`${cmp(">=", pattern.lo)} && ${cmp("<=", pattern.hi)}`)];
+    // CODE POINTS, not `String.length()`'s UTF-16 code units — the same count
+    // the emitted OpenAPI publishes as `minLength`/`maxLength`
+    // (src/generator/_expr/code-point.ts).
     case "len-min":
-      return [fail(`${field}.length() >= ${pattern.n}`)];
+      return [fail(`${javaCodePointLength(field)} >= ${pattern.n}`)];
     case "len-max":
-      return [fail(`${field}.length() <= ${pattern.n}`)];
+      return [fail(`${javaCodePointLength(field)} <= ${pattern.n}`)];
     case "len-eq":
-      return [fail(`${field}.length() == ${pattern.n}`)];
+      return [fail(`${javaCodePointLength(field)} == ${pattern.n}`)];
     case "len-range":
-      return [fail(`${field}.length() >= ${pattern.lo} && ${field}.length() <= ${pattern.hi}`)];
+      return [
+        fail(
+          `${javaCodePointLength(field)} >= ${pattern.lo} && ${javaCodePointLength(field)} <= ${pattern.hi}`,
+        ),
+      ];
     case "regex": {
       let name = regexFields.get(pattern.pattern);
       if (!name) {

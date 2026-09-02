@@ -23,7 +23,7 @@ import { workflowStateClass } from "./workflow-state.js";
 
 // ---------------------------------------------------------------------------
 // Read-only workflow-instance endpoints (workflow-instance-visibility.md),
-// Java saga slice 3.  For every observable workflow (a correlation-state row +
+// Java saga.  For every observable workflow (a correlation-state row +
 // enriched `instanceWireShape`) emit an instance Response record and a
 // controller exposing `GET /workflows/<snake>/instances` (list) +
 // `/instances/{id}` (one by correlation id, 404 if absent) over the persisted
@@ -33,7 +33,7 @@ import { workflowStateClass } from "./workflow-state.js";
 // of the command route, so an event-triggered-only saga is still observed.
 //
 // The row is read through the saga-state Spring Data `<Wf>StateRepository`
-// (slice 1): `findAll()` for the list, `findById(<Corr>Id)` for one.  Each row
+// `findAll()` for the list, `findById(<Corr>Id)` for one.  Each row
 // projects through `instanceWireShape` (the same camelCase wire key the .NET
 // `<Wf>InstanceResponse` uses), id → `.value()`, datetime/money ISO-/plain-
 // coded exactly like the aggregate `<Agg>Response`.
@@ -96,7 +96,7 @@ function renderInstanceResponseDto(wf: WorkflowIR, wctx: WorkflowInstancesCtx): 
   const wireImports = new Set<string>();
   const components = shape.map((f) => {
     guardInstanceField(wf, f);
-    collectWireImports(f.type, wireImports);
+    collectWireImports(f.type, wireImports, "Response");
     return `${wireJavaType(f.type, "Response")} ${f.name}`;
   });
   return lines(
@@ -340,16 +340,19 @@ function idTargetName(f: WireField): string {
  *  which `renderReadModelVoResponseDtos` co-locates in `application.workflows`
  *  (`domainToWire` emits `<Vo>Response.from(...)`).  An entity (containment
  *  part) type would need a `<Part>Response` DTO — but a part type never
- *  resolves in workflow scope (parts are private to their aggregate), so this
- *  arm is an unreachable backstop mirrored by the
- *  `loom.java-workflow-instance-field-unsupported` validator gate. */
+ *  resolves in workflow scope (parts are private to their aggregate — the rule
+ *  lives in `ddd-scope.ts`, so `workflow W { line: Line }` never links), so this
+ *  arm is an INTERNAL INVARIANT, not a backend gap.  The
+ *  `loom.java-workflow-instance-field-unsupported` code that used to mirror it
+ *  was retired as a phantom (M-T6.36); the unreachability is pinned instead by
+ *  `test/generator/java/generator-java-readmodel-gates.test.ts`. */
 function guardInstanceField(wf: WorkflowIR, f: WireField): void {
   const t = f.type.kind === "optional" ? f.type.inner : f.type;
   const leaf =
     t.kind === "array" ? (t.element.kind === "optional" ? t.element.inner : t.element) : t;
   if (leaf.kind === "entity") {
     throw new Error(
-      `java workflow-instances: instance field '${f.name}' of '${wf.name}' is entity-typed — not yet supported on the java backend.`,
+      `java workflow-instances: instance field '${f.name}' of '${wf.name}' is entity-typed — unreachable: a part type never resolves in workflow scope.`,
     );
   }
 }

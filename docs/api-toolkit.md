@@ -67,7 +67,7 @@ interface JsonDiagnostic {
 }
 ```
 
-`GenerateReport` is `ValidateReport` minus `outline`, plus `deployables: GenerateDeployable[]` (`{ name, platform, port? }`). `Outline` is the node address book — `{ systems: OutlineSystem[]; contexts: OutlineContext[] }`, each context listing its aggregates / valueObjects (each an `OutlineDecl` of `{ node, members[] }`) plus workflows / views / pages / enums / events / repositories — the same address space `node` and `ModelPatch.target` use.
+`GenerateReport` is `ValidateReport` minus `outline`, plus `deployables: GenerateDeployable[]` (`{ name, platform, port? }`). `Outline` is the node address book — `{ systems: OutlineSystem[]; contexts: OutlineContext[] }`, each context listing its aggregates / valueObjects (each an `OutlineDecl` of `{ node, members[] }`) plus workflows / enums / events / repositories, and each system additionally listing its `uis` (an `OutlineDecl` per `ui`, whose members are the pages / components / stores inside it) — the same address space `node` and `ModelPatch.target` use. An address qualifies a node by every named declaration enclosing it, so a page reads `page <Ui>.<Area>.<Page>` and an entity part's field reads `entity <Context>.<Aggregate>.<Part>.<field>`.
 
 The contract also pins the navigational results: `FindSymbolResult = NavSymbol | NavError`, `ReferencesResult`, `HoverResult`, and the rewrite results `RenameResult | QuickfixResult | UnfoldMacroResult` (each an `EditResult { edits: NavTextEdit[]; title? }` or an `EditError`). An unresolved or ambiguous symbol returns `NavError` with candidate addresses — never a silent pick.
 

@@ -77,9 +77,9 @@ describe("vanilla LiveView operation-action bang seams (§13)", () => {
 
   it("the operation controller action maps a raised guard to 403/422 (not 500)", async () => {
     // `confirm` has `requires currentUser.role == "manager"` — its domain core
-    // raises `ArgumentError, "Forbidden: …"` on rejection.  Without a rescue that
-    // propagates to Phoenix's default 500; the controller action must map it to
-    // 403 (requires) / 422 (precondition, RS-15), the statuses the other
+    // raises `<App>.GuardError, kind: :forbidden` on rejection.  Without a rescue
+    // that propagates to Phoenix's default 500; the controller action must map it
+    // to 403 (requires) / 422 (precondition, RS-15), the statuses the other
     // backends return.
     const files = await generateSystemFiles(withOps(""));
     const ctrlKey = [...files.keys()].find((k) => k.endsWith("/customer_controller.ex"))!;
@@ -87,14 +87,22 @@ describe("vanilla LiveView operation-action bang seams (§13)", () => {
     // The confirm action carries the rescue clause.
     const confirm = ctrl.slice(ctrl.indexOf("def confirm("));
     expect(confirm).toContain("rescue");
-    expect(confirm).toContain('String.starts_with?(guard_msg, "Forbidden: ")');
+    // M-T6.20 — routed on the exception's `:kind` FIELD, not on the message
+    // prefix.  The prefix `cond` made the detail the routing key, which is why
+    // an authored `message "…"` could not be emitted on the raise path at all.
+    expect(confirm).toContain("guard_error in Api.GuardError ->");
+    expect(confirm).toContain("case guard_error.kind do");
+    expect(confirm).toContain(":forbidden ->");
     expect(confirm).toContain('ProblemDetails.problem_response(conn, 403, "Forbidden", guard_msg)');
-    expect(confirm).toContain('String.starts_with?(guard_msg, "Precondition failed: ")');
     expect(confirm).toContain(
       'ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", guard_msg)',
     );
-    // A non-guard ArgumentError still reraises → 500 (unchanged).
-    expect(confirm).toContain("reraise(guard_error, __STACKTRACE__)");
+    // The routing no longer reads the message at all.
+    expect(confirm).not.toContain("String.starts_with?(guard_msg");
+    // A non-guard exception is not rescued and propagates with its own
+    // stacktrace → still a 500 for a genuine bug, with no `reraise` arm to keep
+    // in lockstep.
+    expect(confirm).not.toContain("reraise(guard_error, __STACKTRACE__)");
   });
 
   it("emits <op>_<agg>!(record) per operation, raising on {:error, _}", async () => {

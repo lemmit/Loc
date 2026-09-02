@@ -56,8 +56,8 @@ async function readPackageJsonSafe(dir: string): Promise<RawPackageJson | null> 
 
 /** One-line discovery warning on stderr.  A malformed manifest, an unknown
  *  family/version, or a core-version mismatch is a package-author mistake the
- *  adopter must see — never a silent skip (which is how a mis-pinned backend
- *  used to vanish with no explanation). */
+ *  adopter must see — never a silent skip, which is how a mis-pinned backend
+ *  vanishes with no explanation. */
 function warnDiscovery(pkg: string, message: string): void {
   console.warn(`loom: backend discovery skipped '${pkg}' — ${message}`);
 }

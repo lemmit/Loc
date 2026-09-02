@@ -104,7 +104,7 @@ export default function ProductDetail() {
               </Stack>
             </Card>
             <Group>
-              <Button variant="filled" onClick={() => openUpdateModal(update)} data-testid="products-op-update">Update</Button>
+              <Button variant="filled" onClick={() => openUpdateModal(update)} data-testid="products-op-update">{t("page.Detail.button.uk4kus", "Update")}</Button>
     
             </Group>
           </Stack>

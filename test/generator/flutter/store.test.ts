@@ -8,7 +8,7 @@
 // it projects onto the same Riverpod triad `riverpod-emit.ts` already builds.
 
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/index.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/index.js";
 
 const SYS = (extra = "") => `
 system Shop {
@@ -42,6 +42,11 @@ system Shop {
 }`;
 
 const gen = (extra = "") => generateSystemFiles(SYS(extra));
+
+/** For the ONE leg whose subject is a lifetime the flutter target refuses:
+ *  `loom.store-lifetime-target-unsupported` firing is the premise, since the
+ *  test asserts the emitter says so out loud instead of downgrading silently. */
+const genUnchecked = (extra: string, why: string) => generateSystemFilesUnchecked(SYS(extra), why);
 
 describe("flutter stores (Stage 5)", () => {
   it("no longer throws on a store-bearing ui", async () => {
@@ -105,15 +110,28 @@ describe("flutter stores (Stage 5)", () => {
     expect(dart).toContain("void setPageNo(int v) {");
   });
 
-  it("marks a non-memory lifetime instead of silently downgrading it", async () => {
+  // The lifetime ladder used to be a `// TODO(flutter full-parity)` comment over
+  // an in-memory store; it now really persists (`store-persist.ts`), and its own
+  // contract lives in `store-persist.test.ts`.  This case only pins that the
+  // TRIAD is unchanged by it — the same `<Store>State` / `<Store>Notifier` /
+  // `<store>Provider` a `memory` store gets.
+  it("keeps the plain Riverpod triad under a non-memory lifetime", async () => {
     const dart = (
-      await gen(`store Draft persist: local {
+      await genUnchecked(
+        `store Draft persist: local {
       state { note: string = "" }
       action write(t: string) { note := t }
-    }`)
+    }`,
+        "`persist: local` on flutter IS the subject — loom.store-lifetime-target-unsupported " +
+          "is the gate that keeps the degradation honest, and this pins the emitter half of it",
+      )
     ).get("app/lib/stores.dart")!;
-    expect(dart).toContain("TODO(flutter full-parity): `persist: persistLocal` is not implemented");
+    expect(dart).not.toContain("TODO(flutter full-parity)");
     expect(dart).toContain("class DraftNotifier extends Notifier<DraftState> {");
+    expect(dart).toContain("void write(String t) {");
+    expect(dart).toContain(
+      "final draftProvider = NotifierProvider<DraftNotifier, DraftState>(DraftNotifier.new);",
+    );
   });
 
   it("emits no stores file for a ui that declares none", async () => {
@@ -122,7 +140,9 @@ system Plain {
   subdomain S { context C { aggregate A { n: string } repository As for A { } } }
   api PlainApi from S
   ui App { api P: PlainApi  page Home { route: "/"  body: Stack { Heading { "hi", level: 1 } } } }
-  deployable api { platform: node contexts: [C] serves: PlainApi port: 3000 }
+  storage loomDb { type: postgres }
+  resource cState { for: C, kind: state, use: loomDb }
+  deployable api { platform: node contexts: [C] dataSources: [cState] serves: PlainApi port: 3000 }
   deployable app { platform: flutter targets: api ui: App { P: api } port: 3006 }
 }`);
     expect(files.has("app/lib/stores.dart")).toBe(false);

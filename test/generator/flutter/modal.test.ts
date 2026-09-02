@@ -55,8 +55,10 @@ describe("flutter Modal (op-form dialog)", () => {
     );
     // …wrapping the generated op-form widget (addressed by the route id).
     expect(src).toContain("AddNoteOrderForm(id: id)");
-    // The button carries the trigger's label.
-    expect(src).toContain("child: Text('Add note'))");
+    // The button carries the trigger's label — TRANSLATED, like the title: it
+    // is the `button` user-visible slot, so the extractor keys it and this
+    // renderer used to ship it raw (a live catalog entry nothing rendered, A13).
+    expect(src).toMatch(/child: Text\(t\('page\.\w+\.button\.\w+', 'Add note'\)\)\)/);
   });
 
   it("emits the op-form widget the dialog references into forms.dart", async () => {

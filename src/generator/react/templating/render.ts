@@ -57,7 +57,7 @@ export function renderAppShell(
   pack: LoadedPack,
   hasScaffoldHome: boolean = true,
   outOfShellRoutes: import("./preparers/app-shell.js").ExtraPageRoute[] | undefined = undefined,
-  /** Phase 8 step 2: pre-built named-layout VMs (slot JSX + route
+  /** step 2: pre-built named-layout VMs (slot JSX + route
    *  buckets), and the deduped pack imports those slots need. */
   namedLayouts:
     | ReadonlyArray<{
@@ -94,6 +94,10 @@ export function renderAppShell(
   /** Whether this UI is i18n-enabled — threads to the shell chrome tokens +
    *  the `{ t }` import (M-T1.11, pack-chrome). */
   i18nEnabled = false,
+  /** Conventional-slot → emitted module specifier for this ui's pages
+   *  (`buildPageModuleIndex`).  Lets the shell import where each scaffold page
+   *  ACTUALLY landed instead of reconstructing the path by convention. */
+  pageModules: ReadonlyMap<string, string> = new Map(),
 ): string {
   return pack.render("app-shell", {
     hasRealtimeHandlers,
@@ -111,6 +115,7 @@ export function renderAppShell(
       hasWorkflowsIndex,
       authUi,
       i18nEnabled,
+      pageModules,
     ),
     // Router 7 (stack v3) renamed the package react-router-dom →
     // react-router; library mode keeps the v6 API so only the
@@ -132,7 +137,6 @@ export function renderMain(pack: LoadedPack, basename?: string, authUi = false):
   });
 }
 
-// BoundedContextIR is re-exported below for callers that import
-// it via this module — preserves the original import surface even
-// though render.ts no longer needs it directly.
+// BoundedContextIR is re-exported below for callers that import it via this
+// module; render.ts itself does not use it.
 export type { BoundedContextIR };

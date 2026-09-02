@@ -507,7 +507,7 @@ system DevPlatform {
 
         // Component with slot + action params (SlotType + ActionType).
         component Panel(head: slot, onPick: action(Project)) {
-            body: Stack { Slot { "head" }, Button { "Pick" } }
+            body: Stack { head, Button { "Pick" } }
         }
 
         // Project list — Stack / Breadcrumbs / Anchor / Text / Toolbar /
@@ -592,7 +592,7 @@ system DevPlatform {
                 Grid {
                     cols: [2, 1],
                     Group {
-                        Avatar { "P" },
+                        Avatar { src: "/avatar.png", alt: "Project owner" },
                         Image { "/logo.png", alt: "Acme logo" },
                         Heading { "Project detail", level: 2 }
                     },
@@ -639,7 +639,7 @@ system DevPlatform {
             state {
                 hovered: bool = false
             }
-            body: Stack { Badge { label }, Slot { "extra" } }
+            body: Stack { Badge { label }, Slot { } }
         }
 
         // Projects browse page — a hand-written `QueryView` over the aggregate's
@@ -666,8 +666,9 @@ system DevPlatform {
             }
             body: Stack {
                 Section {
-                    heading: "Inline",
-                    body: Stack {
+                    id: "inline",
+                    Heading { "Inline", level: 3 },
+                    Stack {
                         Bold { "bold" },
                         Italic { "italic" },
                         InlineCode { "code" },

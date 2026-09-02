@@ -21,7 +21,7 @@ public sealed class RequiredFromCtorParamFilter : ISchemaFilter
         if (s.Properties is null || s.Properties.Count == 0) return;
         s.Required ??= new HashSet<string>();
 
-        // Paged carrier (M-T2.6): the generic Paged<T> record's members
+        // Paged carrier: the generic Paged<T> record's members
         // (items/page/pageSize/total/totalPages) are all non-optional, but
         // Swashbuckle's non-nullable detection can't read nullability off an
         // OPEN generic parameter, so it leaves the required set empty — while

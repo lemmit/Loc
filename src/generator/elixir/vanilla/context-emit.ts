@@ -4,7 +4,7 @@
 //
 // Plain Elixir context module.  Façade that
 // re-exports the per-aggregate Repository functions plus named-
-// operation handlers (Slice 5c prerequisite — workflows on vanilla
+// operation handlers (workflows on vanilla
 // need `<op>_<agg>(record, params)` for cross-aggregate operation
 // calls in the workflow body).
 // ---------------------------------------------------------------------------
@@ -34,7 +34,7 @@ import { walkStmtExprsDeep } from "../../../ir/util/walk.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import { statementSubRegions } from "../../_trace/sourcemap.js";
-import type { ElixirChannelsCfg } from "../channels-emit.js";
+import { type ElixirChannelsCfg, opEmitsDurableEvent } from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import { renderReadingServiceContextFns } from "../domain-service-emit.js";
@@ -67,6 +67,7 @@ import {
   opHasGuards,
   opHasWhenGate,
   persistPutBodies,
+  renderDurableEmitDispatchParts,
   renderEmitDispatchLines,
   renderReturningOpFunction,
   renderReturningStmt,
@@ -155,7 +156,7 @@ export function emitVanillaContextModule(
   out: Map<string, string>,
   sys?: SystemIR,
   sourcemap?: SourceMapRecorder,
-  /** Broker channels (M-T4.4 slice 6c) — re-routes op-emit dispatch lines
+  /** Broker channels (M-T4.4) — re-routes op-emit dispatch lines
    *  through the `<App>.Channels` tee (see channels-emit.ts). */
   channels?: ElixirChannelsCfg,
   extraChannels: ChannelIR[] = [],
@@ -371,8 +372,8 @@ function renderContextModule(
     // LiveView form lifecycle calls (`change_<agg>(%Agg{})` for a create form,
     // `change_<agg>(record, params)` for validate).  Delegates to the
     // per-aggregate Changeset module's `base_changeset/2`.  A DOCUMENT
-    // aggregate has no `base_changeset` (it round-trips via `document_changeset`),
-    // so skip the facade there — its form path is out of scope for this slice.
+    // aggregate has no `base_changeset` (it round-trips via
+    // `document_changeset`), so the facade is skipped there.
     const changesetMod = `${facadeMod}.${aggPascal}Changeset`;
     const changeFacade = isDoc
       ? ""
@@ -397,7 +398,6 @@ function renderContextModule(
     const destroyGateRc: RenderCtx = {
       thisName: "record",
       contextModule: facadeMod,
-      foundation: "vanilla",
       agg: agg as EnrichedAggregateIR,
     };
     const destroyClauses = lifecycleEnsureClauses(agg.canonicalDestroy, destroyGateRc);
@@ -496,7 +496,6 @@ ${body}
               const rc: RenderCtx = {
                 thisName: "record",
                 contextModule: facadeMod,
-                foundation: "vanilla",
                 agg: agg as EnrichedAggregateIR,
               };
               return `\n
@@ -527,7 +526,6 @@ ${body}
     const createClauses = lifecycleEnsureClauses(agg.canonicalCreate, {
       thisName: "record",
       contextModule: facadeMod,
-      foundation: "vanilla",
       agg: agg as EnrichedAggregateIR,
     });
     const createStampsActor = stampUsesPrincipal(agg);
@@ -651,7 +649,7 @@ ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}${functi
   // unused.
   const requireLogger = contextEmitsEvent(ctx) ? "\n  require Logger" : "";
 
-  // Reading-tier domain services (domain-services.md rev. 4, Slice 1; Elixir
+  // Reading-tier domain services (domain-services.md rev. 4; Elixir
   // decision B — ambient `Repo`).  A single-context `reading` service op lowers
   // to a CONTEXT FUNCTION on THIS module (not a `Domain.Services` module), so
   // its body's repo reads resolve against the ambient `Repo` via the
@@ -938,8 +936,9 @@ function renderContextRefCollHelpers(appModule: string, includeResolve: boolean)
 // Runs the preconditions (`ensure/2` guard chain), delegates to the co-located,
 // user-owned `<Agg>ExternImpl.<op>(record, params)` hook, then persists the
 // returned (mutated) struct's scalar columns via `force_change` and re-asserts
-// invariants.  Replaces the old empty-`change(%{})` no-op that silently returned
-// 204.  A missing user impl `raise`s (loud 500), never a silent success.
+// invariants — an empty `change(%{})` here would persist nothing and answer a
+// silent 204.  A missing user impl `raise`s (loud 500), never succeeds
+// silently.
 function renderExternOpFunction(
   facadeMod: string,
   agg: AggregateIR,
@@ -954,7 +953,6 @@ function renderExternOpFunction(
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
-    foundation: "vanilla",
     agg: agg as EnrichedAggregateIR,
   };
   // `when` state gate + preconditions → a leading `with :ok <- ensure(...)` chain
@@ -980,9 +978,9 @@ function renderExternOpFunction(
   const invPipe = aggregateHasResidualInvariants(agg)
     ? `\n      |> ${changesetMod}.validate_invariants()`
     : "";
-  // Persist EVERY scalar column off the returned struct (not the old empty
-  // `change(%{})`): `force_change` because the changeset data already carries the
-  // new value.  See `externPersistForceChanges`.
+  // Persist EVERY scalar column off the returned struct, not an empty
+  // `change(%{})`: `force_change`, because the changeset data already carries
+  // the new value.  See `externPersistForceChanges`.
   const forceChanges = externPersistForceChanges(agg)
     .map((b) => `\n      |> ${b}`)
     .join("");
@@ -1009,10 +1007,10 @@ function renderNamedOpFunction(
   /** Containment fields persisted as child tables (relational §11c) — these
    *  `put_assoc` rather than `put_embed`.  Empty = embedded output (default). */
   relationalContainments: ReadonlySet<string> = new Set(),
-  /** Source-map Milestone 3 collector (`--sourcemap`) — only allocated by the
+  /** Source-map collector (`--sourcemap`) — only allocated by the
    *  caller when a recorder is present (zero cost otherwise). */
   opFragments?: OpFragment[],
-  /** Broker channels (M-T4.4 slice 6c) — see renderEmitDispatchLines. */
+  /** Broker channels (M-T4.4) — see renderEmitDispatchLines. */
   channels?: ElixirChannelsCfg,
   extraChannels: ChannelIR[] = [],
 ): string {
@@ -1040,7 +1038,6 @@ function renderNamedOpFunction(
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
-    foundation: "vanilla",
     captureProvenance: hasProv,
     // The enriched aggregate, so the body renderer can detect reference-
     // collection (`X id[]`) add/remove and normalise to id lists (the persist
@@ -1051,7 +1048,9 @@ function renderNamedOpFunction(
   // The `before` wire snapshot — taken from the ORIGINAL `record` before the
   // body rebinds any field, so it reflects the pre-mutation state (parity with
   // the Hono/Python `before` captured before the mutation).
-  const beforeBind = hasAudit ? `    audit_before = ${wireSnapshot("record")}\n` : "";
+  const beforeBind = hasAudit
+    ? `    audit_before = ${wireSnapshot("record", false, facadeMod.split(".")[0]!)}\n`
+    : "";
 
   // Bind only the params the body references, so an unused param never trips
   // `mix compile --warnings-as-errors`.  (`record` is always used — the persist
@@ -1070,17 +1069,42 @@ function renderNamedOpFunction(
   // persists, so the `{:ok, saved}` seam always exists.
   const emits = opEmitsEvent(op);
   const hasDispatcher = contextHasDispatcher(ctx as EnrichedBoundedContextIR, extraChannels);
-  const dispatchLines = emits
-    ? renderEmitDispatchLines(
+  // Transactional outbox (dispatch-delivery-semantics.md §1, docs/channels.md):
+  // when one of the emitted events is DURABLE, `<App>.Channels.dispatch/2` does
+  // not fan out — it INSERTs an `__loom_outbox` row, and that row has to commit
+  // with the aggregate change.  So the persist + emit pair is wrapped in one
+  // `Repo.transaction`; the emit lines then sit two columns deeper.  An
+  // ephemeral-only (or channel-less) op keeps the post-commit fan-out and its
+  // byte-identical layout.
+  const txWrapEmits = emits && opEmitsDurableEvent(op, channels);
+  const dispatchLines =
+    emits && !txWrapEmits
+      ? renderEmitDispatchLines(
+          op,
+          rc,
+          hasDispatcher,
+          "        ",
+          `${ctx.name}.${agg.name}.${op.name}`,
+          opFragments,
+          channels,
+        )
+      : [];
+  // Durable emit: the phases straddle the transaction — event binds ahead of it
+  // (keeping `loom_event_<i>` in scope on both sides), the `__loom_outbox`
+  // INSERT inside it, the PubSub broadcast only after it commits.  Broadcasting
+  // inside the tx let SSE / LiveView subscribers observe an event whose write
+  // then rolled back.
+  const durableEmit = txWrapEmits
+    ? renderDurableEmitDispatchParts(
         op,
         rc,
         hasDispatcher,
-        "        ",
+        { bind: "    ", dispatch: "          ", broadcast: "        " },
         `${ctx.name}.${agg.name}.${op.name}`,
         opFragments,
         channels,
       )
-    : [];
+    : { bind: [], dispatch: [], broadcast: [] };
 
   // Render the body (guards / assigns / let) — shared with the returning-op
   // path; a non-returning body never carries a `return` arm.  The statement index
@@ -1201,14 +1225,51 @@ function renderNamedOpFunction(
         targetType: aggPascalName,
         targetId: "saved.id",
         before: "audit_before",
-        after: wireSnapshot("saved"),
+        after: wireSnapshot("saved", false, appModule),
         indent: "          ",
       }),
     );
   }
   const dispatchBlock = dispatchLines.join("\n");
   let persist: string;
-  if (hasProv || hasAudit) {
+  if (txWrapEmits) {
+    // Durable emit: the outbox INSERT rides `Repo.transaction` together with
+    // the persist (+ any prov/audit rows), so "aggregate saved" and "event
+    // owed" commit or roll back as one.
+    //
+    // The PubSub BROADCAST does not ride it.  That is the SSE / LiveView wire,
+    // and a broadcast inside the tx is observable before the commit — a
+    // rollback then leaves subscribers holding an event whose write never
+    // happened.  So: bind the event structs first, INSERT inside, broadcast in
+    // the post-commit `{:ok, saved}` arm (the ordering the non-durable branches
+    // below already use).  `Repo.transaction`'s result is unwrapped through
+    // `tx_result` so the outer `{:ok, saved}` / `{:error, reason}` shape is
+    // unchanged.
+    persist = `${durableEmit.bind.length > 0 ? `${durableEmit.bind.join("\n")}\n\n` : ""}    changeset =
+      ${persistBase}
+      |> Ecto.Changeset.change(%{})${putBlock6}${opLockPipe6}${invPipe6}
+
+    tx_result =
+      ${appModule}.Repo.transaction(fn ->
+      case ${repoMod}.persist_change(changeset) do
+        {:ok, saved} ->
+${txTail.length > 0 ? `${txTail.join("\n")}\n` : ""}${durableEmit.dispatch.join("\n")}
+          saved
+
+        {:error, reason} ->
+          ${appModule}.Repo.rollback(reason)
+      end
+    end)
+
+    case tx_result do
+      {:ok, saved} ->
+${durableEmit.broadcast.join("\n")}
+        {:ok, saved}
+
+      {:error, reason} ->
+        {:error, reason}
+    end`;
+  } else if (hasProv || hasAudit) {
     persist = emits
       ? // Emit + prov/audit: commit the state change (+ derived rows) in the
         // transaction, then dispatch AFTER commit (outside the tx fn) so a
@@ -1253,9 +1314,9 @@ ${txTail.join("\n")}
     end)`;
   } else {
     persist = emits
-      ? // Emit, no prov/audit: persist then dispatch after `{:ok, saved}` — a
-        // phantom event can no longer fire on a failed write, and the event
-        // reaches the context Dispatcher (saga seam) + the raw broadcast.
+      ? // Emit, no prov/audit: persist then dispatch after `{:ok, saved}`, so a
+        // failed write cannot fire a phantom event, and the event reaches the
+        // context Dispatcher (saga seam) + the raw broadcast.
         `    changeset =
       ${persistBase}
       |> Ecto.Changeset.change(%{})${putBlock6}${opLockPipe6}${invPipe6}

@@ -14,6 +14,7 @@ import { diagMessage } from "../../diagnostics/messages.js";
 import type { Aggregate, IdType, Model, Repository } from "../generated/ast.js";
 import {
   isAggregate,
+  isContainment,
   isCreate,
   isDestroy,
   isIdType,
@@ -89,6 +90,51 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
       }
     }
 
+    // Rule 3b — an abstract base declares no `contains` either.  Same v1
+    // reasoning as Rule 3, one step further: a containment needs an owner that
+    // can be READ and WRITTEN, and an abstract base has neither.  It owns no
+    // repository (Rule 5 below rejects one pointed at it) and concretes do not
+    // inherit its parts, so the part's child table would have no reader and no
+    // writer — the tree is unreachable in both directions.
+    //
+    // This was a `persistence: mikroorm`-only reject
+    // (`loom.mikroorm-unsupported`) until the shape was generated on every
+    // other target and the output READ.  The premise held everywhere; only the
+    // failure mode differed, and every one of them is worse than a diagnostic:
+    //
+    //   drizzle / efcore / python — silently DROPPED.  No column, no table, no
+    //     domain field; only a dead `<Part>Id` type survives.  The shared
+    //     `wireShape` still declares `addresses` REQUIRED on the base, so
+    //     `.loom/wire-spec.json` promises a field nothing can serve.
+    //   java — same drop, plus a `toString()` that prints the literal
+    //     `"addresses: [Address[]]"` for a field the class does not have.
+    //   dapper — creates a real `addresses` child table with a FK to the base
+    //     row, and emits NO reader and NO writer for it: a dead table.
+    //   elixir — the worst.  It emits the full `Address` Ecto schema, a
+    //     `has_many :addresses` on the base, an `AddressResponse` OpenAPI
+    //     schema, and a polymorphic `PartyController` whose `serialize/1` calls
+    //     `Enum.map(record.addresses || [], …)` — while the migration never
+    //     creates the `addresses` table and the repository never preloads.
+    //     `%Ecto.Association.NotLoaded{}` is truthy, so `||` does not save it:
+    //     `GET /api/partys` raises `Protocol.UndefinedError` → 500.
+    //
+    // So the reject is target-NEUTRAL and belongs here, at the AST layer, where
+    // it is one rule instead of six divergent silences.  Put the `contains` on
+    // the CONCRETE subtype instead — that shape is supported everywhere (its
+    // child tables FK the shared TPH row or the concrete's own TPC table), and
+    // is what `dapper-tph-parts.ddd` / `mikroorm-inheritance-parts.ddd` cover.
+    if (agg.isAbstract) {
+      for (const m of agg.members) {
+        if (isContainment(m)) {
+          accept(
+            "error",
+            diagMessage("loom.abstract-aggregate-contains", { name: agg.name, member: m.name }),
+            { node: m, property: "name", code: "loom.abstract-aggregate-contains" },
+          );
+        }
+      }
+    }
+
     // Rule 4 — D-ES-TPH: an event-sourced (`persistedAs: eventLog`) or
     // document (`shape: document`) concrete cannot share its base table, so
     // it cannot live under a `sharedTable` (TPH) base.  The validator raises
@@ -135,8 +181,7 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
         );
       }
     }
-    // (A `contains` part on a TPH concrete used to be gated here — Rule 4c,
-    // `loom.tph-contains-unsupported`.  It is now supported: the part emits its
+    // (A `contains` part on a TPH concrete is NOT gated: the part emits its
     // own table FK'd to the shared base table (Pattern 4, TPT-via-`contains`),
     // since a TPH concrete's id is the shared-table row id.  See
     // emit/schema.ts + migrations-builder.ts `tableForPart`.)

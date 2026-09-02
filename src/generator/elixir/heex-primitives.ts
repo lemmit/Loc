@@ -17,15 +17,19 @@ import type { EnumIR, ExprIR, TypeIR, ValueObjectIR } from "../../ir/types/loom-
 import { humanize, plural, snake } from "../../util/naming.js";
 import { iconA11yAttr } from "../_walker/a11y-emit.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
-import { skipsEntityHistoryRead } from "../_walker/history-read.js";
+import { isEntityHistoryRead } from "../_walker/history-read.js";
 import { queryShape } from "../_walker/paged-query.js";
 import { simpleAccessorField } from "../_walker/primitives/data-grid-shape.js";
+import { gridCols, slugify } from "../_walker/shared/args.js";
 import {
   escapeHeexAttr,
   escapeHeexText,
+  hostStateAssign,
   indent,
+  isAttrRenderable,
   localizedHeexAttr,
   type PrimitiveSpec,
+  positionalRole,
   renderChild,
   renderExpr,
   renderInTemplate,
@@ -47,8 +51,15 @@ import {
  *  `id="<%= … %>"` or `data-testid="x <> y"`) produces a HEEx tokenizer
  *  ParseError ("expected attribute name").  This is the single seam that
  *  every primitive funnels dynamic attribute values through, so the bug class
- *  can't reappear one renderer at a time. */
+ *  can't reappear one renderer at a time.
+ *
+ *  A value that is not renderable as an attribute at all (a LIST / OBJECT /
+ *  LAMBDA — see `isAttrRenderable`) degrades to the empty string: these call
+ *  sites (`src:`, `alt:`, `id:`, `testid:`) have a required attribute to fill,
+ *  and an empty one is inert markup where the raw splice was a render-time
+ *  crash in Phoenix's attribute escaper. */
 export function attrValue(arg: ExprIR, ctx: WalkContext): string {
+  if (!isAttrRenderable(arg)) return `""`;
   return arg.kind === "literal"
     ? `"${escapeHeexAttr(arg.value)}"`
     : `{${renderExpr(arg, { ...ctx, position: "template" })}}`;
@@ -91,7 +102,7 @@ export function renderBreadcrumbs(
 export function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let label = "";
   let toLiteral: string | undefined;
-  let toExpr = "";
+  let toExpr: string | undefined;
   const positional: ExprIR[] = [];
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -114,6 +125,13 @@ export function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
     }
     return `<a href="${toLiteral}"${testidAttr}>${label}</a>`;
   }
+  // NO `to:` at all — a breadcrumb leaf / plain label, exactly what the JSX
+  // family renders as a bare `<Anchor>`/`<a>` and Feliz as `Html.span`.  Routed
+  // into the dynamic branch below it would emit `<.link navigate={}>` with an
+  // EMPTY expression attribute — a tokenizer ParseError at `mix compile`, so
+  // one linkless Anchor takes the whole LiveView app out.  `renderIdLink`
+  // spells the same no-destination case as a `<span>`.
+  if (toExpr === undefined) return `<span${testidAttr}>${label}</span>`;
   // Dynamic route expression — emit it as a HEEx expression attribute.
   return `<.link navigate={${toExpr}}${testidAttr}>${label}</.link>`;
 }
@@ -224,17 +242,22 @@ ${heading}${childrenHeex}
   });
 
   // Trigger button surface from the `trigger: Button(...)` arg.
-  let label = humanize(opName);
-  let testid = "";
+  // The trigger's label is a `Button` first-positional — the `button`
+  // user-visible slot the extraction pass already writes to the catalog as
+  // `page.<Page>.button.<hash>`.  It was read RAW (`a.value`), two lines below
+  // the modal TITLE which is translated, so the key existed and nothing
+  // rendered it: English at every locale (audit finding A13).  `renderInTemplate`
+  // with the same role emits `<%= pgettext(<key>, <default>) %>` and derives the
+  // identical key; with i18n off it is the escaped literal, byte-identical.
+  let label = escapeHeexText(humanize(opName));
   if (triggerExpr && triggerExpr.kind === "call" && triggerExpr.name === "Button") {
     for (let i = 0; i < triggerExpr.args.length; i++) {
       const n = triggerExpr.argNames?.[i];
       const a = triggerExpr.args[i]!;
-      if (!n && a.kind === "literal") label = a.value;
-      else if (n === "testid" && a.kind === "literal") testid = a.value;
+      if (!n && a.kind === "literal") label = renderInTemplate(a, ctx, "button");
     }
   }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const heading = title || humanize(opName);
 
   const inputs =
@@ -275,8 +298,25 @@ export function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   // directly).  This guard makes the function total if a stray
   // op-form is ever reached without its Modal wrapper: bail before
   // pushing a bogus `kind:"aggregate"` create binding.
+  //
+  // It is REACHED, and it used to `return ""`.  `QueryView { of: X.Agg.all,
+  // single: true, data: row => OperationForm { row.<op> } }` hands the op-form
+  // straight here with no Modal, and the emitted `kitchen_live.ex` rendered an
+  // EMPTY `true ->` arm: no form, no marker, no diagnostic — a blank panel that
+  // reads as "there is nothing here".  Every other target that cannot render
+  // this shape at least says so in the output (Flutter emits
+  // `const SizedBox.shrink() /* OperationForm(row.<op>): … */`); HEEx alone
+  // said nothing.  The marker is the honest minimum until the standalone
+  // instance op-form is rendered on LiveView (it needs the `handle_event` +
+  // form-binding half `renderModal` owns, so it is a feature, not a seam fix).
   const positional0 = expr.args.find((_, i) => !expr.argNames?.[i]);
-  if (positional0 && positional0.kind === "member") return "";
+  if (positional0 && positional0.kind === "member") {
+    const opName = positional0.member;
+    return (
+      `<%!-- OperationForm(<instance>.${opName}): the instance-qualified shape is only rendered ` +
+      `inside a Modal on Phoenix LiveView — use OperationForm { of: <Agg>, op: ${opName} } --%>`
+    );
+  }
   let ofTarget = "";
   let runsTarget = "";
   for (let i = 0; i < expr.args.length; i++) {
@@ -292,6 +332,12 @@ export function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   }
   const submitEvent = ofTarget ? `save_${ofTarget}` : runsTarget ? `run_${runsTarget}` : "submit";
   const testidAttr = testIdAttr(expr, ctx);
+  // The form's testid is also the NAMESPACE its controls hang off — the
+  // emitted Playwright page objects address `<ns>-input-<field>` and
+  // `<ns>-submit` (see `page-objects-emit.ts`), and until the HEEx UI
+  // behavioural leg ran one of those specs nothing had noticed that the HEEx
+  // form emitted neither.  Only a LITERAL testid can be concatenated.
+  const testidNs = literalTestid(expr);
   // Register a form binding so the LiveView emitter can assign @form
   // in mount/3.  We track the PascalCase name; emitter handles
   // module-name resolution against contexts + workflows.
@@ -329,6 +375,8 @@ export function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
             ctx.enumsByName,
             ctx.idOptionsBindings,
             ctx.valueObjectsByName,
+            "@",
+            testidNs ? `${testidNs}-input-${f.name}` : undefined,
           )}`,
         );
       }
@@ -337,14 +385,30 @@ export function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   if (inputs.length === 0) {
     inputs.push(`  <.input field={@form[:_placeholder]} label="Field" />`);
   }
+  // The submit control the page objects click (`<ns>-submit`).  Without it a
+  // driver has to fall back to text matching, which breaks under i18n.
+  const submitTestid = testidNs ? ` data-testid="${escapeHeexAttr(`${testidNs}-submit`)}"` : "";
   return [
     `<.simple_form for={@form} phx-submit="${submitEvent}"${testidAttr}>`,
     ...inputs,
     `  <:actions>`,
-    `    <.button type="submit">Submit</.button>`,
+    `    <.button type="submit"${submitTestid}>Submit</.button>`,
     `  </:actions>`,
     `</.simple_form>`,
   ].join("\n");
+}
+
+/** A call's LITERAL `testid:` value, or `undefined` when absent or dynamic.
+ *
+ *  The per-field / per-control testids a form derives (`<ns>-input-<f>`,
+ *  `<ns>-submit`) are STRING CONCATENATIONS of the namespace, so they can only
+ *  be built from a compile-time literal.  A dynamic `testid:` yields no derived
+ *  ids rather than a malformed attribute — the same conservative stance
+ *  `attrValue` takes. */
+function literalTestid(expr: Extract<ExprIR, { kind: "call" }>): string | undefined {
+  const idx = (expr.argNames ?? []).indexOf("testid");
+  const arg = idx >= 0 ? expr.args[idx] : undefined;
+  return arg?.kind === "literal" ? arg.value : undefined;
 }
 
 /** Extract a named arg whose value is a `ref` and return its
@@ -392,9 +456,18 @@ function renderFieldInputForField(
    *  form is a local variable bound by `:let={…}` (`f_form[:sub]`,
    *  no `@`). */
   assignPrefix = "@",
+  /** The `data-testid` this control is addressed by — `<form-ns>-input-<field>`,
+   *  matching what `page-objects-emit.ts` fills.  `undefined` when the form
+   *  carries no literal `testid:`, in which case nothing is emitted (rather
+   *  than an unaddressable placeholder). */
+  testid?: string,
 ): string {
   const fieldName = snake(f.name);
   const label = humanize(f.name);
+  // `.input` collects unknown attributes into its `:global` rest and spreads
+  // them onto the rendered `<input>`/`<select>`/`<textarea>`, so `data-testid`
+  // rides straight through to the element Playwright fills.
+  const tid = testid ? ` data-testid="${escapeHeexAttr(testid)}"` : "";
   // Enum fields render as `<.input type="select" options={[...]}>`.
   // Phoenix CoreComponents' `<.input>` accepts an `options` list of
   // strings (when label == value) or `{label, value}` tuples.  Loom
@@ -406,7 +479,7 @@ function renderFieldInputForField(
     const en = enumsByName.get(inner.name);
     if (en) {
       const options = en.values.map((v) => JSON.stringify(v)).join(", ");
-      return `<.input field={${assignPrefix}${formAssign}[:${fieldName}]} type="select" label="${label}" options={[${options}]} />`;
+      return `<.input field={${assignPrefix}${formAssign}[:${fieldName}]} type="select" label="${label}" options={[${options}]}${tid} />`;
     }
   }
   // `X id` fields render as `<.input type="select" options={@x_options}>`.
@@ -417,7 +490,7 @@ function renderFieldInputForField(
   if (inner.kind === "id" && idOptionsBindings) {
     idOptionsBindings.add(inner.targetName);
     const optionsVar = `${snake(inner.targetName)}_options`;
-    return `<.input field={${assignPrefix}${formAssign}[:${fieldName}]} type="select" label="${label}" options={@${optionsVar}} />`;
+    return `<.input field={${assignPrefix}${formAssign}[:${fieldName}]} type="select" label="${label}" options={@${optionsVar}}${tid} />`;
   }
   // Value-object fields render as `<.inputs_for :let={<f>_form}>`
   // with one nested `<.input>` per VO field.  The `:let` local
@@ -444,6 +517,10 @@ function renderFieldInputForField(
             idOptionsBindings,
             valueObjectsByName,
             "",
+            // Nested VO controls extend the parent's testid with the sub-field
+            // name (`…-input-price-amount`), the exact shape `fillBlock`
+            // drives for a value-object create input.
+            testid ? `${testid}-${sub.name}` : undefined,
           ),
         )
         .join(" ");
@@ -461,7 +538,7 @@ function renderFieldInputForField(
     : isMoney
       ? ` pattern="^-?\\d+(\\.\\d+)?$" inputmode="decimal"`
       : "";
-  return `<.input field={${assignPrefix}${formAssign}[:${fieldName}]} type="${inputType}" label="${label}"${extraAttrs} />`;
+  return `<.input field={${assignPrefix}${formAssign}[:${fieldName}]} type="${inputType}" label="${label}"${extraAttrs}${tid} />`;
 }
 
 /** Map a TypeIR to the HTML `<input type="…">` attribute the form
@@ -578,9 +655,19 @@ export function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   // and the hoisted `handle_event` clauses (liveview-emit.ts) re-run
   // `list_<agg>s/4` with the new arguments.  Absent args ⇒ every branch below
   // is skipped and the emitted table is byte-identical to before.
-  const sortKey = stateRefArg(expr, "sortKey", ctx);
-  const sortDir = stateRefArg(expr, "sortDir", ctx);
-  const pageRef = stateRefArg(expr, "page", ctx);
+  //
+  // They are ALSO skipped for a CLIENT-paged table (`serverPaged:` absent —
+  // the shape a document/embedded/event-sourced/inheritance aggregate's
+  // non-paged `find all` produces).  The JSX targets slice and sort such a list
+  // in the browser; HEEx has no client-side sort, so the refetch the hoisted
+  // clause performs calls the argument-less `list_<agg>s/0` and returns the
+  // very same rows — clickable headers that flip an arrow and change nothing
+  // (F2-MT640-SORT-DEAD).  Emitting no affordance is the honest rendering: the
+  // UI stops advertising a capability the repository does not expose.
+  const serverPaged = isTrueLit(namedArg(expr, "serverPaged"));
+  const sortKey = serverPaged ? stateRefArg(expr, "sortKey", ctx) : undefined;
+  const sortDir = serverPaged ? stateRefArg(expr, "sortDir", ctx) : undefined;
+  const pageRef = serverPaged ? stateRefArg(expr, "page", ctx) : undefined;
   const sortActive = sortKey !== undefined && sortDir !== undefined;
   if (sortActive || pageRef !== undefined) {
     ctx.tableControls.push({ sortKey, sortDir, page: pageRef });
@@ -589,10 +676,10 @@ export function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   const sortAttrs = sortActive ? ` sort_key={@${sortKey}} sort_dir={@${sortDir}}` : "";
 
   const colSlots = cols
-    .map((c) =>
+    .map((c, i) =>
       c.kind === "call"
-        ? renderTableColumn(c, ctx, sortActive)
-        : `<:col :let={_row} label="Column">${renderChild(c, ctx)}</:col>`,
+        ? renderTableColumn(c, ctx, sortActive, i)
+        : `<:col :let={_row} label="Column ${i + 1}">${renderChild(c, ctx)}</:col>`,
     )
     .join("\n");
   const table = [
@@ -607,8 +694,7 @@ export function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   // `totalPages`; a client-side (non-server-paged) list has no count to show
   // without slicing in the template, so the pager is server-only here.
   const totalPagesArg = namedArg(expr, "totalPages");
-  const serverPaged = isTrueLit(namedArg(expr, "serverPaged"));
-  if (pageRef !== undefined && serverPaged && totalPagesArg) {
+  if (pageRef !== undefined && totalPagesArg) {
     const totalPages = renderPagedEnvelopeRead(totalPagesArg, ctx);
     return `${table}\n<.pager page={@${pageRef}} total_pages={${totalPages}} />`;
   }
@@ -663,25 +749,40 @@ export function renderTableColumn(
    *  pair.  Only then does a `sortable:` column emit `sort_field`, which is
    *  what turns its header into a `phx-click="loom-sort"` button. */
   sortActive = false,
+  /** 0-based position in the enclosing Table, for the `Column N` fallback
+   *  header a non-literal label gets (see below). */
+  index = 0,
 ): string {
   if (expr.name !== "Column") {
     // Unexpected shape — emit a stub slot.
-    return `<:col :let={_row} label="Column">${renderChild(expr, ctx)}</:col>`;
+    return `<:col :let={_row} label="Column ${index + 1}">${renderChild(expr, ctx)}</:col>`;
   }
   // First positional arg: label string
   // Second positional arg: accessor lambda `fn cell -> renderCell(cell) end`
-  let label = "Column";
+  //
+  // The header is a STATIC attribute on the `<:col>` slot, so only a string
+  // LITERAL can supply it, and it must be entity-escaped: an unescaped label
+  // carrying a `"` closes the attribute mid-word (`label="Na"me"`) and the
+  // whole template fails to parse.  A non-literal header (a state ref, a
+  // concatenation) has no attribute spelling at all — splicing the rendered
+  // Elixir expression inside the quotes (`label="@q"`) heads the column with a
+  // variable name.  Both degrade to the JSX side's
+  // `Column N` fallback (`_walker/primitives/table.ts`'s `emitColumn`), so the
+  // two frontends show the same header for the same source.
   let cellHeex = "<%= row %>";
-  const labelArg = expr.args.find((_, i) => !expr.argNames?.[i]);
   const lambdaArg = expr.args.find((a, i) => !expr.argNames?.[i] && a.kind === "lambda");
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
-  if (positionals[0]) {
-    label =
-      positionals[0].kind === "literal"
-        ? positionals[0].value
-        : renderExpr(positionals[0], { ...ctx, position: "template" });
-  }
-  void labelArg;
+  const labelArg = positionals[0];
+  const isLiteralLabel = labelArg?.kind === "literal" && labelArg.lit === "string";
+  const label = isLiteralLabel ? labelArg.value : `Column ${index + 1}`;
+  // The header is a user-visible slot (`columnHeader`, M-T1.11): a plain literal
+  // rides `pgettext` through the `{…}` expression-attribute form the `<:col>`
+  // slot's `label` takes.  Off i18n it is the quoted literal — byte-identical.
+  // A NON-literal header keeps the escaped `Column N` fallback (HEEx has no
+  // attribute interpolation for an arbitrary expression here).
+  const labelAttrValue = isLiteralLabel
+    ? localizedHeexAttr(labelArg, ctx, "columnHeader")
+    : undefined;
   const accessor = lambdaArg ?? positionals[1];
   if (accessor && accessor.kind === "lambda" && accessor.body) {
     // The row variable is a :let={o} slot binding — a local variable, NOT
@@ -697,7 +798,8 @@ export function renderTableColumn(
   // (unsortable) header rather than emitting a sort key the server can't map.
   const sortField = sortActive ? columnSortField(expr) : undefined;
   const sortAttr = sortField ? ` sort_field="${sortField}"` : "";
-  return `<:col :let={${renderColLetVar(accessor, ctx)}} label="${label}"${sortAttr}>${cellHeex}</:col>`;
+  const labelAttr = labelAttrValue ? `label=${labelAttrValue}` : `label="${escapeHeexAttr(label)}"`;
+  return `<:col :let={${renderColLetVar(accessor, ctx)}} ${labelAttr}${sortAttr}>${cellHeex}</:col>`;
 }
 
 /** The field a `sortable:` Column sorts by: the explicit `field:` string arg,
@@ -789,14 +891,17 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
     return a?.kind === "literal" && a.value === "true";
   };
   const ofNode = expr.args[names.indexOf("of")];
-  // Entity-history read: Phoenix maps the read onto `list_<aggs>` (the LIST,
-  // not the trail), so the whole view is skipped with a visible comment until
-  // the LiveView read layer learns the derived `history(id)` find.  See
-  // `_walker/history-read.ts` — one predicate, shared with the JSX walker, so
-  // the two engines can't disagree about which targets serve this read.
-  if (skipsEntityHistoryRead("phoenixLiveView", ofNode, ctx.aggregatesByName)) {
-    return `<%!-- entity history not yet supported on phoenixLiveView --%>`;
-  }
+  // Entity-history read (`<Agg>.history(id)`, docs/audit.md) — NOT an ordinary
+  // aggregate read: it scans `audit_records` for one target, so binding it as
+  // one would load `list_<aggs>` (the LIST, not the trail).  Tagged here and
+  // loaded by the LiveView's page-private `load_<agg>_history/2`, which is why
+  // `phoenixLiveView` is in `HISTORY_CAPABLE_FRAMEWORKS` and there is no skip
+  // branch here — the JSX walker still consults the shared predicate for the
+  // targets that have NOT ported the read.
+  const historyRead =
+    ofNode && isEntityHistoryRead(ofNode, ctx.aggregatesByName)
+      ? resolveQueryAggregate(ofNode)
+      : undefined;
   // Detector context, shared by the shape derivation and the Pattern H probe
   // below so the two can't answer from different name sets.
   const detectCtx = {
@@ -807,7 +912,7 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
     listShapedProjections: ctx.listShapedProjections,
   };
   const shape = ofNode ? queryShape(ofNode, detectCtx) : { paged: false, single: false };
-  // Pattern H — `QueryView { of: <api>.<Projection> }` (M-T1.3 Phase 1).  The
+  // Pattern H — `QueryView { of: <api>.<Projection> }` (M-T1.3).  The
   // read resolves to the query-time projection's own `run/1`, in-process: a
   // LiveView deployable hosts its contexts in the SAME OTP app, so what the SPA
   // frontends reach over `GET /projections/<slug>` is one function call here.
@@ -824,8 +929,13 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
   // one of them would assign `:t` and the last load would win: every tile
   // showing the same aggregate's numbers, with nothing to see in the diff.
   if (projectionRead) assignName = snake(projectionRead);
-  // Flag OR fact: an author may still opt in explicitly (the scaffold does),
-  // but omitting the flag no longer means "not paged" / "not single".
+  // A history read names its assign after the AGGREGATE (`:order_history`) for
+  // the same reason: the scaffold's `data:` lambda param is `entries`, which is
+  // a name any hand-written read could also pick — and a detail page carrying
+  // both would have the two loads fight over one assign.
+  if (historyRead) assignName = `${snake(historyRead)}_history`;
+  // Flag OR fact: an author may opt in explicitly (the scaffold does), but
+  // omitting the flag does NOT mean "not paged" / "not single".
   const isSingle = litTrue(names.indexOf("single")) || shape.single;
   const explicitPaged = litTrue(names.indexOf("paged"));
   const isPaged = explicitPaged || shape.paged;
@@ -855,7 +965,7 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
         // Map the lambda param name to a LiveView assign.
         // Convention: "rows" → @items (list pages), "data" → @data (detail pages)
         // A projection read already took its assign from the projection name.
-        if (!projectionRead) assignName = dataVar === "rows" ? "items" : dataVar;
+        if (!projectionRead && !historyRead) assignName = dataVar === "rows" ? "items" : dataVar;
         // Build a remapping so ref("rows") → @items, ref("data") → @data, etc.
         const remapping = new Map<string, string>([
           [dataVar, autoPaged ? `${assignName}.items` : assignName],
@@ -892,11 +1002,25 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
       source: "projection",
     });
   }
-  const aggName = projectionRead
-    ? undefined
-    : ofArgNode
-      ? resolveQueryAggregate(ofArgNode)
-      : undefined;
+  if (historyRead) {
+    // The entity-history read.  `listArgs` carries the entity id the `of:` call
+    // passed (`socket.assigns.id` on a scaffolded detail page) — the loader
+    // takes it as an argument rather than reaching for `@id`, so a hand-written
+    // `history(someOtherId)` loads what it asked for.
+    ctx.queryBindings.push({
+      kind: "list",
+      assign: assignName,
+      aggregate: historyRead,
+      source: "history",
+      listArgs: queryCallArgs(ofArgNode, ctx),
+    });
+  }
+  const aggName =
+    projectionRead || historyRead
+      ? undefined
+      : ofArgNode
+        ? resolveQueryAggregate(ofArgNode)
+        : undefined;
   if (aggName) {
     ctx.queryBindings.push({
       kind: isSingle ? "single" : "list",
@@ -957,35 +1081,38 @@ export function renderKeyValueRow(
   expr: Extract<ExprIR, { kind: "call" }>,
   ctx: WalkContext,
 ): string {
-  let testid = "";
-  for (let i = 0; i < expr.args.length; i++) {
-    const name = expr.argNames?.[i];
-    const arg = expr.args[i]!;
-    if (name === "testid" && arg.kind === "literal") testid = arg.value;
-  }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   // The row label is a user-visible slot (`keyValue`), so a plain literal rides
   // the translation runtime under i18n (M-T1.11) and stays raw otherwise.
   const label = positionals[0] ? renderInTemplate(positionals[0], ctx, "keyValue") : "Field";
-  const value = positionals[1] ? renderInTemplate(positionals[1], ctx) : "";
-  return `<div class="key-value-row"${testidAttr}>\n  <dt class="key-value-label">${label}</dt>\n  <dd class="key-value-value">${value}</dd>\n</div>`;
+  // The VALUE is authored prose too, and it rode NO role — so the row's two
+  // halves diverged: the label translated and the value shipped in English at
+  // every locale (G2667 §D9).  `keyValueValue` is the same role the JSX walker
+  // uses, so the key the extraction pass writes and the key HEEx reads are one
+  // by construction.  Non-literals are unaffected (`localizedHeex` returns
+  // undefined for them), so this is byte-identical wherever the value is an
+  // expression or a nested primitive.
+  const value = positionals[1] ? renderInTemplate(positionals[1], ctx, "keyValueValue") : "";
+  // The testid identifies the VALUE cell, not the row — the same placement the
+  // React/Vue/Svelte packs use (`<div … data-testid={testid}>{children}</div>`
+  // inside `KeyValueRow`), and what the emitted page objects assume: a detail
+  // read is `expect(detail.field("name")).toHaveText("Sprocket")`, which is an
+  // EXACT text match and would see "Name Sprocket" if the id sat on the row.
+  return `<div class="key-value-row">\n  <dt class="key-value-label">${label}</dt>\n  <dd class="key-value-value"${testidAttr}>${value}</dd>\n</div>`;
 }
 
 /** `Skeleton(count: N)` → `<div class="animate-pulse">` repeated loading lines. */
-export function renderSkeleton(expr: Extract<ExprIR, { kind: "call" }>, _ctx: WalkContext): string {
+export function renderSkeleton(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let count = 3;
-  let testid = "";
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (name === "count" && arg.kind === "literal") {
       count = parseInt(arg.value, 10) || 3;
-    } else if (name === "testid" && arg.kind === "literal") {
-      testid = arg.value;
     }
   }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const lines = Array.from(
     { length: count },
     () => `  <div class="h-4 bg-gray-200 rounded animate-pulse mb-2"></div>`,
@@ -1023,17 +1150,15 @@ export function renderAlert(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   let color = "red";
   let message = "";
   let title = "";
-  let testid = "";
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   if (positionals[0]) message = renderInTemplate(positionals[0], ctx, "alert");
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (name === "color" && arg.kind === "literal") color = arg.value;
-    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
     else if (name === "title") title = renderInTemplate(arg, ctx, "alertTitle");
   }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const titleEl = title ? `<p class="font-medium">${title}</p>` : "";
   return `<div class="alert ${alertVariant(color)}" role="alert"${testidAttr}>${titleEl}${message}</div>`;
 }
@@ -1041,7 +1166,6 @@ export function renderAlert(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
 /** `IdLink(value, of: Aggregate)` → `<.link navigate={...}>value</.link>` */
 export function renderIdLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let aggName = "";
-  let testid = "";
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const valueExpr = positionals[0];
   const valueHeex = valueExpr ? renderInTemplate(valueExpr, ctx) : "";
@@ -1049,9 +1173,8 @@ export function renderIdLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (name === "of" && arg.kind === "ref") aggName = snake(plural(arg.name));
-    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
   }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   if (aggName && valueExpr) {
     const idVal = renderExpr(valueExpr, { ...ctx, position: "template" });
     return `<.link navigate={~p"/${aggName}/#{${idVal}}"}${testidAttr}>${valueHeex}</.link>`;
@@ -1065,13 +1188,7 @@ export function renderIdLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
  *  optional `File?` that is `nil` renders an em-dash (a required `File` is
  *  always truthy). */
 export function renderFileLink(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  let testid = "";
-  for (let i = 0; i < expr.args.length; i++) {
-    const name = expr.argNames?.[i];
-    const arg = expr.args[i]!;
-    if (name === "testid" && arg.kind === "literal") testid = arg.value;
-  }
-  const testidAttr = testid ? ` data-testid="${escapeHeexAttr(testid)}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const valueArg = namedArg(expr, "value") ?? positionals[0];
   if (!valueArg) return `<span${testidAttr}>—</span>`;
@@ -1178,13 +1295,7 @@ export function renderDateDisplay(
   expr: Extract<ExprIR, { kind: "call" }>,
   ctx: WalkContext,
 ): string {
-  let testid = "";
-  for (let i = 0; i < expr.args.length; i++) {
-    const name = expr.argNames?.[i];
-    const arg = expr.args[i]!;
-    if (name === "testid" && arg.kind === "literal") testid = arg.value;
-  }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const dateExpr = positionals[0];
   if (!dateExpr) return `<time${testidAttr}></time>`;
@@ -1194,13 +1305,7 @@ export function renderDateDisplay(
 
 /** `EnumBadge(enum_value)` → `<.badge>` with the enum value. */
 export function renderEnumBadge(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  let testid = "";
-  for (let i = 0; i < expr.args.length; i++) {
-    const name = expr.argNames?.[i];
-    const arg = expr.args[i]!;
-    if (name === "testid" && arg.kind === "literal") testid = arg.value;
-  }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const val = positionals[0] ? renderInTemplate(positionals[0], ctx) : "";
   return `<span class="badge badge-enum"${testidAttr}>${val}</span>`;
@@ -1209,17 +1314,63 @@ export function renderEnumBadge(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
 // ---------------------------------------------------------------------------
 // Closed primitive library — HEEx component dispatch.
 // ---------------------------------------------------------------------------
+/** Tailwind utility classes for the pure-LAYOUT primitives.
+ *
+ *  These live in the WALKER, not in a design pack, and that split is the whole
+ *  HEEx pack contract: a pack owns the design VOCABULARY (the `<.button>` /
+ *  `<.table>` / `<.card>` function components in `core_components.ex`), while
+ *  flex/grid geometry is design-neutral — daisyUI adds a component vocabulary,
+ *  not a layout one, so `coreComponents` and `daisyui` would carry byte-
+ *  identical copies of these strings.  Both packs build Tailwind through the
+ *  same assets pipeline and both scan `../lib/<app>_web/**\/*.*ex`, so a literal
+ *  class emitted here survives either pack's production purge.
+ *
+ *  The strings mirror the shadcn (Tailwind) React templates — `primitive-stack`
+ *  = `flex flex-col gap-4`, `primitive-toolbar` = `… justify-between …` — so a
+ *  page laid out on React and on Phoenix reads the same. */
+const LAYOUT_CLASSES = {
+  Stack: "flex flex-col gap-4",
+  Group: "flex flex-row items-center gap-4",
+  Toolbar: "flex flex-row items-center justify-between gap-4",
+  Grid: "grid gap-4",
+  Container: "container mx-auto px-4",
+} as const;
+
+/** `Container(size: "md")` → the max-width utility for that size.
+ *
+ *  Sizes mirror the vuetify pack's pixel ladder (540 / 720 / 960 / 1140 / 1320)
+ *  at the nearest Tailwind step; an absent or unrecognised `size:` keeps the
+ *  default centred `container` (what the shadcn template emits). */
+const CONTAINER_MAX_W: Record<string, string> = {
+  xs: "max-w-xl",
+  sm: "max-w-3xl",
+  md: "max-w-5xl",
+  lg: "max-w-6xl",
+  xl: "max-w-7xl",
+};
+
 /** Per-primitive HEEx spec for the generic `renderPrimitive` helper.
  *  Listed inline so the small set is easy to scan.  The registered
  *  per-primitive exports (`renderStack`, `renderHeading`, …) bind to
  *  these specs; the typed dispatch table at
  *  src/generator/_walker/registry.ts wires them up by name. */
 const CLOSED_PRIMITIVE_SPECS: Record<string, PrimitiveSpec> = {
-  Stack: { tag: "div", staticAttrs: ["class"], takesChildren: true },
+  Stack: {
+    tag: "div",
+    staticAttrs: ["class"],
+    takesChildren: true,
+    baseClass: LAYOUT_CLASSES.Stack,
+  },
   // Heading is rendered by the bespoke `renderHeading` (raw `<h{n}>` with a
   // structure-derived rank), not through this generic spec table.
   Text: { tag: "p", takesChildren: true },
-  Card: { tag: "div", staticAttrs: ["class"], takesChildren: true },
+  // `Card`/`Paper` render through the PACK's `<.card>` function component (see
+  // `renderCard`) — the card surface is design vocabulary, and the two packs
+  // spell it differently (daisyUI `card card-bordered` + `card-body`, neutral
+  // Tailwind on coreComponents).  The spec's `passThroughAttrs` names the
+  // component's own attrs; `title`/`variant`/`shadow` are supplied by the
+  // renderer, so nothing here has to be authored to reach the tag.
+  Card: { tag: ".card", takesChildren: true },
   // `{role:"toolbar", needsName:true}` — "Actions" is the FALLBACK name; an
   // author's `label:` overrides it (and translates), which needs
   // `labelAsAriaLabel` or the label lands as a bogus `label=` attr on the div
@@ -1230,8 +1381,14 @@ const CLOSED_PRIMITIVE_SPECS: Record<string, PrimitiveSpec> = {
     takesChildren: true,
     labelAsAriaLabel: true,
     extraAttrs: ['role="toolbar"', 'aria-label="Actions"'],
+    baseClass: LAYOUT_CLASSES.Toolbar,
   },
-  Group: { tag: "div", staticAttrs: ["class"], takesChildren: true },
+  Group: {
+    tag: "div",
+    staticAttrs: ["class"],
+    takesChildren: true,
+    baseClass: LAYOUT_CLASSES.Group,
+  },
   // `Empty("No results yet")` carries the author's message in positional 0 (the
   // `empty` user-visible slot).  It rendered as a childless `<.empty />`, so the
   // message was discarded and every Phoenix app showed the core component's
@@ -1239,15 +1396,32 @@ const CLOSED_PRIMITIVE_SPECS: Record<string, PrimitiveSpec> = {
   // one.  `.empty` now takes an inner block (keeping that text as its fallback).
   Empty: { tag: ".empty", takesChildren: true },
   Badge: { tag: ".badge", takesChildren: true },
-  Button: { tag: ".button", takesChildren: true, labelAsAriaLabel: true },
+  // `to:`/`disabled:`/`type:`/`variant:` are the four knobs `<.button>` declares
+  // (`to` = render as a nav link, `variant` = the pack's rank vocabulary,
+  // `disabled`/`type` its global/`attr`).  Everything else a `Button` can carry
+  // (`icon:`, `loading:`, `iconPosition:`) is dropped: an undeclared attribute
+  // on a Phoenix function component is a compile WARNING, i.e. a build failure
+  // under `mix compile --warnings-as-errors`.
+  Button: {
+    tag: ".button",
+    takesChildren: true,
+    labelAsAriaLabel: true,
+    passThroughAttrs: ["to", "disabled", "type", "variant"],
+    staticAttrs: ["variant", "type"],
+  },
   // --- inline-emphasis primitives — plain HTML inline elements, the
   //     Phoenix analogue of the TSX `<strong>`/`<em>`/`<code>` spans. ---
   Bold: { tag: "strong", takesChildren: true },
   Italic: { tag: "em", takesChildren: true },
   InlineCode: { tag: "code", takesChildren: true },
   // --- scaffold expander primitives ---
-  Paper: { tag: "div", staticAttrs: ["class"], takesChildren: true },
-  Grid: { tag: "div", staticAttrs: ["class"], takesChildren: true },
+  // `Paper` is a titleless `Card` (same surface, no header) — same pack
+  // component, so the two stay visually consistent by construction.
+  Paper: { tag: ".card", takesChildren: true },
+  // `Grid`'s per-breakpoint column classes come from `cols:` (see `renderGrid`);
+  // each child rides its own `<div>` grid item, mirroring the JSX packs' column
+  // wrapper so a multi-root child (a `Table` + its pager) occupies ONE cell.
+  Grid: { tag: "div", staticAttrs: ["class"], takesChildren: true, childWrapper: "div" },
   Container: { tag: "div", staticAttrs: ["class"], takesChildren: true },
 };
 
@@ -1271,7 +1445,6 @@ export function renderStack(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
  *  typography so the visual result is unchanged. */
 export function renderHeading(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let level: number | undefined;
-  let testid = "";
   const positional: ExprIR[] = [];
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -1280,13 +1453,11 @@ export function renderHeading(expr: Extract<ExprIR, { kind: "call" }>, ctx: Walk
       positional.push(arg);
     } else if (name === "level" && arg.kind === "literal") {
       level = Number(arg.value);
-    } else if (name === "testid" && arg.kind === "literal") {
-      testid = arg.value;
     }
   }
   const rank = level ?? Math.min(6, 2 + (ctx.headingDepth ?? 0));
   const text = positional[0] ? renderInTemplate(positional[0], ctx, "heading") : "";
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   return `<h${rank} class="text-lg font-semibold leading-8 text-zinc-800"${testidAttr}>${text}</h${rank}>`;
 }
 export function renderText(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
@@ -1313,15 +1484,13 @@ export function renderInlineCode(
  *  translating text the app never showed.  Every JSX pack composes the same
  *  three-element form for exactly this reason (#2388), so HEEx does too. */
 export function renderDivider(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  let testid = "";
   let label = "";
   for (let i = 0; i < expr.args.length; i++) {
     const arg = expr.args[i]!;
     const name = expr.argNames?.[i];
-    if (name === "testid" && arg.kind === "literal") testid = arg.value;
-    else if (name === "label") label = renderInTemplate(arg, ctx, "dividerLabel");
+    if (name === "label") label = renderInTemplate(arg, ctx, "dividerLabel");
   }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   if (!label) return `<hr${testidAttr} />`;
   return (
     `<div class="flex items-center gap-3 my-4"${testidAttr}>` +
@@ -1350,12 +1519,7 @@ export function renderImage(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
 /** `Stat(label, value)` → a small headline-stat block (dimmed label +
  *  bold value), the HEEx analogue of the TSX `primitive-stat` template. */
 export function renderStat(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  let testid = "";
-  for (let i = 0; i < expr.args.length; i++) {
-    const arg = expr.args[i]!;
-    if (expr.argNames?.[i] === "testid" && arg.kind === "literal") testid = arg.value;
-  }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const label = positionals[0] ? renderInTemplate(positionals[0], ctx, "statLabel") : "";
   const value = positionals[1] ? renderInTemplate(positionals[1], ctx, "statValue") : "";
@@ -1385,13 +1549,8 @@ export function renderAvatar(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
 
 /** `Loader(size?)` → an animated spinner.  The optional `size:` is dropped
  *  (a single spinner size, like the packs that don't vary it). */
-export function renderLoader(expr: Extract<ExprIR, { kind: "call" }>, _ctx: WalkContext): string {
-  let testid = "";
-  for (let i = 0; i < expr.args.length; i++) {
-    const arg = expr.args[i]!;
-    if (expr.argNames?.[i] === "testid" && arg.kind === "literal") testid = arg.value;
-  }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+export function renderLoader(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  const testidAttr = testIdAttr(expr, ctx);
   return `<div class="animate-spin h-6 w-6 rounded-full border-2 border-gray-300 border-t-transparent" role="status" aria-label="Loading"${testidAttr}></div>`;
 }
 
@@ -1409,11 +1568,11 @@ export function renderLoader(expr: Extract<ExprIR, { kind: "call" }>, _ctx: Walk
  *      raises FunctionClauseError on a binary;
  *    - a LITERAL (`Money(value: 9.99)`) is a float, which raises the same way.
  *
- *  So the narrower cast was wrong for two of the three, and identical for the
- *  third.  The TYPED money cast (`string(x: money)` in `render-expr.ts`) keeps
+ *  So a narrower `Decimal.to_string/1` cast is wrong for two of the three and
+ *  identical for the third.  The TYPED money cast (`string(x: money)` in
+ *  `render-expr.ts`) keeps
  *  `Decimal.to_string/1` — there the operand's type is known. */
 export function renderMoney(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  let testid = "";
   let currency: string | undefined;
   let valueArg: ExprIR | undefined;
   for (let i = 0; i < expr.args.length; i++) {
@@ -1421,10 +1580,9 @@ export function renderMoney(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
     const arg = expr.args[i]!;
     if (name === "value") valueArg = arg;
     else if (name === "currency" && arg.kind === "literal") currency = arg.value;
-    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
     else if (!name && !valueArg) valueArg = arg;
   }
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const val = valueArg ? renderExpr(valueArg, { ...ctx, position: "template" }) : "0";
   const prefix = currency ? `${currency} ` : "";
   return `<span class="money"${testidAttr}>${prefix}<%= to_string(${val}) %></span>`;
@@ -1448,12 +1606,10 @@ export function renderDestroyForm(
   ctx: WalkContext,
 ): string {
   let ofName: string | undefined;
-  let testid = "";
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (name === "of" && arg.kind === "ref") ofName = arg.name;
-    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
   }
   if (!ofName) return `<!-- DestroyForm: expected (of: <Agg>) -->`;
   const agg = ctx.aggregatesByName.get(ofName);
@@ -1474,7 +1630,7 @@ export function renderDestroyForm(
     });
   }
   const human = humanize(ofName);
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   return `<.button phx-click="${eventName}" phx-value-id={@id} data-confirm="Delete this ${human.toLowerCase()}? This cannot be undone." class="btn-danger"${testidAttr}>Delete ${human}</.button>`;
 }
 
@@ -1486,26 +1642,56 @@ export function renderDestroyForm(
  *  role-based e2e spec is portable across React and HEEx.  Each Tabs instance
  *  gets a unique `tabs-<n>` id so its toggle selectors stay scoped. */
 export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  let testid = "";
-  const tabs: Array<{ label: string; slug: string; body: ExprIR | undefined }> = [];
+  // `body` is EVERY panel child, not just the first: `Tab { "Ovw", Text { "A" },
+  // Text { "B" } }` used to read `pos[1]` alone and drop `B` (the JSX engine's
+  // twin defect — `_walker/primitives/layout.ts`).  A panel is a children
+  // container like `Card`, which this engine already walks correctly.
+  const tabs: Array<{
+    label: string;
+    /** The caption already rendered for HEEx TEXT position — a `<%= pgettext(…)
+     *  %>` call under i18n, undefined when the raw escaped label is right. */
+    labelHeex?: string;
+    slug: string;
+    body: ExprIR[];
+  }> = [];
   let idx = 0;
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
-    if (name === "testid" && arg.kind === "literal") {
-      testid = arg.value;
-      continue;
-    }
-    if (name) continue; // other named args (style, …) not consumed here
+    if (name) continue; // named args (testid, style, …) not consumed here
     idx++;
     if (arg.kind === "call" && arg.name === "Tab") {
       const pos = arg.args.filter((_, j) => !arg.argNames?.[j]);
-      const labelArg = pos[0];
+      // Positional 0 is the CAPTION only when it is text-like.  Consuming a
+      // CALL there swallowed the panel: `Tab { title: "One", Text { "first" } }`
+      // leaves only the `Text` positional, which became the label (rendered
+      // through the tabLabel slot!) while `slice(1)` emptied the panel.  Mirror
+      // of the shared walker's `emitTabs` rule.
+      const labelIsTextLike = pos[0] !== undefined && pos[0].kind !== "call";
+      const labelArg = labelIsTextLike ? pos[0] : undefined;
       const label = labelArg && labelArg.kind === "literal" ? labelArg.value : `Tab ${idx}`;
-      tabs.push({ label, slug: snake(label) || `tab-${idx}`, body: pos[1] });
+      tabs.push({
+        label,
+        // The caption is a user-visible slot (`tabLabel`, M-T1.11): under i18n
+        // it renders through `pgettext`, else as the escaped literal.  The SLUG
+        // stays derived from the source literal — a per-locale anchor would
+        // break every `JS.show` selector this switcher is built on.
+        labelHeex: labelArg ? renderInTemplate(labelArg, ctx, "tabLabel") : undefined,
+        // `slugify`, not `snake` — the SAME derivation the six JSX/markup
+        // targets use (`_walker/primitives/layout.ts`).  `snake/1` only splits
+        // camelCase and downcases, so a caption with a space came out as
+        // `order details` and went straight into an HTML `id` and the
+        // `JS.show(to: "#tabs-1-panel-order details")` selector this switcher is
+        // built on — a broken anchor, and a DIFFERENT id than every other target
+        // derives from the same caption, which splits cross-target e2e
+        // selectors.  The `|| tab-<idx>` fallback and the 1-based `idx` already
+        // match the shared walker's.
+        slug: slugify(label) || `tab-${idx}`,
+        body: labelIsTextLike ? pos.slice(1) : pos,
+      });
     } else {
       // Bare positional (e.g. `Tabs(Card(...), Card(...))`) — its own panel.
-      tabs.push({ label: `Tab ${idx}`, slug: `tab-${idx}`, body: arg });
+      tabs.push({ label: `Tab ${idx}`, slug: `tab-${idx}`, body: [arg] });
     }
   }
   if (tabs.length === 0) return `<!-- Tabs: no tabs -->`;
@@ -1519,17 +1705,17 @@ export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
         ` |> JS.show(to: "#${id}-panel-${t.slug}")` +
         ` |> JS.remove_class("tab-active", to: "[data-tabs-tab='${id}']")` +
         ` |> JS.add_class("tab-active", to: "#${id}-tab-${t.slug}")`;
-      return `    <button type="button" role="tab" id="${id}-tab-${t.slug}" data-tabs-tab="${id}" class="tab${active}" phx-click={${js}}>${esc(t.label)}</button>`;
+      return `    <button type="button" role="tab" id="${id}-tab-${t.slug}" data-tabs-tab="${id}" class="tab${active}" phx-click={${js}}>${t.labelHeex ?? esc(t.label)}</button>`;
     })
     .join("\n");
   const panels = tabs
     .map((t, i) => {
       const hidden = i === 0 ? "" : " hidden";
-      const body = t.body ? renderChild(t.body, ctx) : "";
+      const body = t.body.map((child) => renderChild(child, ctx)).join("\n");
       return `  <div role="tabpanel" id="${id}-panel-${t.slug}" data-tabs="${id}" class="tab-panel${hidden}">\n${indent(body, 4)}\n  </div>`;
     })
     .join("\n");
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   return `<div class="tabs"${testidAttr}>\n  <div role="tablist" class="tab-bar">\n${triggers}\n  </div>\n${panels}\n</div>`;
 }
 
@@ -1552,27 +1738,43 @@ function controlledInput(
   type: "text" | "number" | "password" | "textarea" | "select" | "checkbox",
 ): string {
   let label = "";
+  let labelArg: ExprIR | undefined;
   let bind: string | undefined;
-  let testid = "";
   let optionsExpr: ExprIR | undefined;
   let seenPositional = false;
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (!name) {
-      if (!seenPositional && arg.kind === "literal") label = arg.value;
+      if (!seenPositional) {
+        labelArg = arg;
+        if (arg.kind === "literal") label = arg.value;
+      }
       seenPositional = true;
     } else if (name === "bind" && arg.kind === "ref") bind = arg.name;
     else if (name === "options") optionsExpr = arg;
-    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
   }
-  const labelAttr = label ? ` label="${label.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"` : "";
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  // The label is a user-visible slot (`inputLabel`, M-T1.11): a plain literal
+  // rides `pgettext` through the `{…}` expression-attribute form, so the
+  // most-read prose in any generated form translates like the `Select…`
+  // placeholder beside it already did.  Off i18n it is the quoted literal —
+  // byte-identical.
+  const labelValue = labelArg ? localizedHeexAttr(labelArg, ctx, "inputLabel") : undefined;
+  const labelAttr = labelValue
+    ? ` label=${labelValue}`
+    : label
+      ? ` label="${label.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"`
+      : "";
+  const testidAttr = testIdAttr(expr, ctx);
   if (!bind || !ctx.stateNames.has(bind)) {
     const opt = type === "select" ? ` options={[]}` : "";
     return `<.input type="${type}" name="_unbound"${labelAttr}${opt} value="" disabled${testidAttr} />`;
   }
-  const field = snake(bind);
+  // A component's state lives in the HOST LiveView's assigns under its
+  // namespaced name (heex-walker-core `hostStateAssign`), and the write-back
+  // clause hoisted just below runs THERE — so the assign, the form field name
+  // and the `phx-change` payload key all spell that one name.
+  const field = hostStateAssign(ctx.stateOwner, bind);
   const isCheckbox = type === "checkbox";
   const eventName = isCheckbox ? `toggle_${field}` : `update_${field}`;
   // Hoist the write-back handler once per bound field.
@@ -1644,21 +1846,22 @@ export function renderFileUpload(
   expr: Extract<ExprIR, { kind: "call" }>,
   ctx: WalkContext,
 ): string {
-  let label = "";
+  let labelArg: ExprIR | undefined;
   let bind: string | undefined;
-  let testid = "";
   let seenPositional = false;
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
     const arg = expr.args[i]!;
     if (!name) {
-      if (!seenPositional && arg.kind === "literal") label = arg.value;
+      if (!seenPositional) labelArg = arg;
       seenPositional = true;
     } else if (name === "bind" && arg.kind === "ref") bind = arg.name;
-    else if (name === "testid" && arg.kind === "literal") testid = arg.value;
   }
-  const labelText = label ? escapeHeexText(label) : "";
-  const testidAttr = testid ? ` data-testid="${escapeHeexAttr(testid)}"` : "";
+  // The label is a user-visible slot (`inputLabel`, M-T1.11) — rendered in TEXT
+  // position here (the `<label>` wraps the input), so it rides `renderInTemplate`,
+  // which yields `<%= pgettext(…) %>` under i18n and the escaped literal off it.
+  const labelText = labelArg ? renderInTemplate(labelArg, ctx, "inputLabel") : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const field = bind ? snake(bind) : undefined;
   if (!field || !ctx.stateNames.has(field)) {
     // Nothing to two-way bind to — a disabled plain file input, so the page
@@ -1691,14 +1894,58 @@ export function renderFileUpload(
     .filter((l) => l !== "")
     .join("\n");
 }
-export function renderCard(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+/** The literal value of a named arg, or undefined when absent / non-literal. */
+function stringNamedLit(expr: Extract<ExprIR, { kind: "call" }>, name: string): string | undefined {
+  const arg = namedArg(expr, name);
+  return arg?.kind === "literal" && arg.lit === "string" ? arg.value : undefined;
+}
+
+/** `Card("Title", …children)` / `Paper(…children)` → the pack's `<.card>`.
+ *
+ *  The card SURFACE is design vocabulary (border/elevation/padding/title
+ *  typography), so it goes through the pack's function component rather than
+ *  hardcoded classes in the walker — `daisyui` renders `card card-bordered
+ *  bg-base-100` + `card-body`/`card-title`, `coreComponents` a neutral
+ *  `rounded-lg border border-zinc-200 bg-white` — exactly the split
+ *  `<.button>` / `<.table>` / `<.badge>` already use.
+ *
+ *  Title handling mirrors the JSX `emitCard`: positional 0 is the title when it
+ *  is text-LIKE (not itself a primitive call), every remaining positional is a
+ *  body child.  It is a user-visible slot (`cardTitle`), so it rides the
+ *  translation runtime as an ATTRIBUTE expression under i18n (D-I18N-ATTR).
+ *  `variant:`/`shadow:` are CONSUMED as component attrs — the pack maps them to
+ *  its own elevation idiom — rather than leaking as bare HTML attributes. */
+function renderCardLike(
+  expr: Extract<ExprIR, { kind: "call" }>,
+  ctx: WalkContext,
+  takesTitle: boolean,
+): string {
+  const positional = expr.args.filter((_, i) => !expr.argNames?.[i]);
+  const titleArg = takesTitle && positional[0]?.kind !== "call" ? positional[0] : undefined;
+  const bodyExprs = titleArg ? positional.slice(1) : positional;
+
+  const attrs: string[] = [];
+  if (titleArg) {
+    const value =
+      localizedHeexAttr(titleArg, ctx, positionalRole("Card", 0)) ?? attrValue(titleArg, ctx);
+    attrs.push(`title=${value}`);
+  }
+  for (const knob of ["variant", "shadow"] as const) {
+    const value = stringNamedLit(expr, knob);
+    if (value) attrs.push(`${knob}="${escapeHeexAttr(value)}"`);
+  }
+  const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
   // A Card is a heading-nesting level (like the JSX `emitCard`): a `Heading`
-  // inside it derives a rank one deeper (accessibility.md Phase 2).  Pass a
-  // depth-incremented context so `renderPrimitive`'s child walk sees it.
-  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Card!, expr, {
-    ...ctx,
-    headingDepth: (ctx.headingDepth ?? 0) + 1,
-  });
+  // inside it derives a rank one deeper (accessibility.md).
+  const childCtx: WalkContext = { ...ctx, headingDepth: (ctx.headingDepth ?? 0) + 1 };
+  const children = bodyExprs.map((c) => renderChild(c, childCtx)).join("\n");
+  const testidAttr = testIdAttr(expr, ctx);
+  if (children.length === 0) return `<.card${attrStr}${testidAttr} />`;
+  return `<.card${attrStr}${testidAttr}>\n${indent(children, 2)}\n</.card>`;
+}
+
+export function renderCard(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  return renderCardLike(expr, ctx, true);
 }
 export function renderToolbar(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Toolbar!, expr, ctx);
@@ -1715,14 +1962,45 @@ export function renderBadge(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
 export function renderButton(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Button!, expr, ctx);
 }
+/** `Paper(…children)` — a Card with no title slot (positional 0 is a child). */
 export function renderPaper(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Paper!, expr, ctx);
+  return renderCardLike(expr, ctx, false);
 }
+
+/** `Grid(cols: 3 | [3,2,1], …children)` → a CSS grid.
+ *
+ *  `cols:` is read through the SHARED `gridCols` reader the JSX walker uses, so
+ *  `cols: [3, 2, 1]` means `[desktop, tablet, mobile]` on Phoenix exactly as it
+ *  does on React — and it is CONSUMED into the class list.  Left to the
+ *  generic named-attr path it emits `cols={[3, 2, 1]}`: a LIST reaching
+ *  Phoenix's attribute escaper, i.e. a page that compiles and then raises on
+ *  first render.
+ *
+ *  Tailwind is mobile-first, so the breakpoint ladder reads
+ *  `grid-cols-<mobile> md:grid-cols-<tablet> lg:grid-cols-<desktop>` — the same
+ *  spelling the shadcn `primitive-grid` template emits. */
 export function renderGrid(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Grid!, expr, ctx);
+  const cols = gridCols(expr);
+  const colClasses = cols
+    ? `grid-cols-${cols.mobile} md:grid-cols-${cols.tablet} lg:grid-cols-${cols.desktop}`
+    : "grid-cols-3";
+  return renderPrimitive(
+    { ...CLOSED_PRIMITIVE_SPECS.Grid!, baseClass: `${LAYOUT_CLASSES.Grid} ${colClasses}` },
+    expr,
+    ctx,
+  );
 }
+
+/** `Container(size: "md", …children)` → a centred max-width wrapper.
+ *
+ *  `size:` is CONSUMED into a `max-w-*` utility (see {@link CONTAINER_MAX_W});
+ *  left to the generic named-attr path it leaks as `size="md"`, an attribute
+ *  no `<div>` has. */
 export function renderContainer(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Container!, expr, ctx);
+  const size = stringNamedLit(expr, "size");
+  const maxW = size ? CONTAINER_MAX_W[size] : undefined;
+  const baseClass = maxW ? `mx-auto w-full px-4 ${maxW}` : LAYOUT_CLASSES.Container;
+  return renderPrimitive({ ...CLOSED_PRIMITIVE_SPECS.Container!, baseClass }, expr, ctx);
 }
 
 /** `Section(...children, id: "anchor")` → `<section id="anchor">…</section>`.
@@ -1733,7 +2011,6 @@ export function renderContainer(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
  *  pipeline. */
 export function renderSection(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let id: string | undefined;
-  let testid = "";
   const positional: ExprIR[] = [];
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -1742,14 +2019,12 @@ export function renderSection(expr: Extract<ExprIR, { kind: "call" }>, ctx: Walk
       positional.push(arg);
     } else if (name === "id" && arg.kind === "literal") {
       id = arg.value;
-    } else if (name === "testid" && arg.kind === "literal") {
-      testid = arg.value;
     }
   }
   const idAttr = id ? ` id="${id}"` : "";
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   // A Section is a heading-nesting level (like the JSX `emitSection`): a
-  // `Heading` in its body derives a rank one deeper (accessibility.md Phase 2).
+  // `Heading` in its body derives a rank one deeper (accessibility.md).
   const childCtx: WalkContext = { ...ctx, headingDepth: (ctx.headingDepth ?? 0) + 1 };
   const childrenHeex = positional.map((c) => renderChild(c, childCtx)).join("\n");
   if (childrenHeex.length === 0) {
@@ -1765,7 +2040,6 @@ export function renderSection(expr: Extract<ExprIR, { kind: "call" }>, ctx: Walk
  *  the same way as `renderSection`. */
 export function renderSticky(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let top = "0";
-  let testid = "";
   const positional: ExprIR[] = [];
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -1774,12 +2048,10 @@ export function renderSticky(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
       positional.push(arg);
     } else if (name === "top" && arg.kind === "literal") {
       top = arg.value;
-    } else if (name === "testid" && arg.kind === "literal") {
-      testid = arg.value;
     }
   }
   const style = `style="position: sticky; top: ${top}; z-index: 100"`;
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const childrenHeex = positional.map((c) => renderChild(c, ctx)).join("\n");
   if (childrenHeex.length === 0) {
     return `<div ${style}${testidAttr} />`;
@@ -1797,7 +2069,6 @@ export function renderCodeBlock(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
   let source = "";
   let title: string | undefined;
   let language = "";
-  let testid = "";
   const positional: ExprIR[] = [];
   for (let i = 0; i < expr.args.length; i++) {
     const name = expr.argNames?.[i];
@@ -1811,12 +2082,10 @@ export function renderCodeBlock(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
       title = renderInTemplate(arg, ctx, "codeBlockTitle");
     } else if (name === "language" && arg.kind === "literal") {
       language = arg.value;
-    } else if (name === "testid" && arg.kind === "literal") {
-      testid = arg.value;
     }
   }
   if (positional[0]?.kind === "literal") source = positional[0].value;
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   const langClass = language ? ` class="language-${language}"` : "";
   const escaped = escapeHeexText(source);
   if (title) {
@@ -1840,7 +2109,6 @@ export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   let name: string | undefined;
   let customSvg: string | undefined;
   let size: string | undefined;
-  let testid = "";
   let label: string | undefined;
   let labelArg: ExprIR | undefined;
   let decorative = false;
@@ -1850,7 +2118,6 @@ export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
     if (argName === "name" && arg.kind === "literal") name = arg.value;
     else if (argName === "svg" && arg.kind === "literal") customSvg = arg.value;
     else if (argName === "size" && arg.kind === "literal") size = arg.value;
-    else if (argName === "testid" && arg.kind === "literal") testid = arg.value;
     else if (argName === "label") {
       labelArg = arg;
       if (arg.kind === "literal") label = arg.value;
@@ -1867,7 +2134,7 @@ export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   void name;
   const svg = customSvg ?? "";
   const sizeClass = size ? ` loom-icon-${size}` : "";
-  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  const testidAttr = testIdAttr(expr, ctx);
   // Decorative-by-default (icon a11y contract): hidden from assistive tech
   // unless a `label:` gives it meaning, in which case the glyph becomes a NAMED
   // `role="img"`.  HEEx shares the HTML spelling with the JSX/markup packs
@@ -1892,7 +2159,7 @@ export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
 }
 
 // ---------------------------------------------------------------------------
-// Chart (M-T1.3 Phase 4, HEEx leg).
+// Chart (M-T1.3, HEEx leg).
 // ---------------------------------------------------------------------------
 
 /** `Chart { kind: "bar"|"line", of: <api>.<Projection>, x: r => …, y: r => … }`

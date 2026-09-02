@@ -256,6 +256,7 @@ export function renderCustomLayoutPage(
   let actionLines = "";
   let usesStateForActions = false;
   let usesRouteIdForActions = false;
+  let usesNavigateForActions = false;
   if (actions.length > 0 && usedActions && usedActions.size > 0) {
     const actx: WalkContext = {
       target: tsxTarget,
@@ -264,6 +265,11 @@ export function renderCustomLayoutPage(
       paramNames,
       usedParams,
       usesNavigate,
+      // An action body may `navigate(<Page>)` (docs/actions.md — the documented
+      // home for navigation), which resolves the destination page's ROUTE.  The
+      // action ctx omitted the table, so the resolver fell back to
+      // `/<snake(page)>` and a page with a custom `route:` navigated nowhere.
+      pageRoutes,
       stateNames,
       derivedNames,
       authUi: false,
@@ -308,6 +314,10 @@ export function renderCustomLayoutPage(
     // An awaited op mutation hoists `use<Op><Agg>(id)` off the route id, so the
     // shell must destructure `id` from `useParams` even if the body never did.
     usesRouteIdForActions = actx.usesRouteId;
+    // …and a `navigate(<Page>)` in the body needs the navigator bound.  Only
+    // `usesState`/`usesRouteId` were read back, so an action-only navigation
+    // emitted a `navigate(…)` call with no `useNavigate` import — a TS2304.
+    usesNavigateForActions = actx.usesNavigate;
   }
   // Render the title expression through emitExpr
   // (sharing the body's tracking state so the shell destructures
@@ -452,7 +462,8 @@ export function renderCustomLayoutPage(
   const needsUseParams = hasParams || effectiveUsesRouteId;
   const routerSpecifiers: string[] = [];
   if (needsUseParams) routerSpecifiers.push("useParams");
-  if (usesNavigate || form.usesNavigate) routerSpecifiers.push("useNavigate");
+  if (usesNavigate || usesNavigateForActions || form.usesNavigate)
+    routerSpecifiers.push("useNavigate");
   if (usesRouterLink) routerSpecifiers.push("Link as RouterLink");
   const reactRouterImport =
     routerSpecifiers.length > 0
@@ -500,7 +511,9 @@ export function renderCustomLayoutPage(
         ? `  useParams${paramsType}();\n`
         : "";
   const navigateLine =
-    usesNavigate || form.usesNavigate ? `  const navigate = useNavigate();\n` : "";
+    usesNavigate || usesNavigateForActions || form.usesNavigate
+      ? `  const navigate = useNavigate();\n`
+      : "";
   // Page-level `requires` UI gate (D-AUTH-OIDC): bind the verified session user
   // and render a `<Forbidden/>` fallback when the currentUser-only predicate
   // fails.  The guard lands AFTER every hook (useSession is itself a hook, so it
@@ -537,8 +550,7 @@ ${gate.import}${reactImport}${decimalImportFor(belowImports, decimalImport)}${re
  *  `useState<Decimal>(new Decimal("0"))` needs the binding.  That misses every
  *  OTHER way a page body produces a `Decimal`: `jsExprLeaves.exprConvert`
  *  emits `new Decimal(…)` for a cast to money, and the shared intrinsic table
- *  emits `Decimal.min`/`Decimal.max`/`Decimal.ROUND_HALF_UP` — which is why
- *  those three arms had to be declined before this existed.
+ *  emits `Decimal.min`/`Decimal.max`/`Decimal.ROUND_HALF_UP`.
  *
  *  Deciding it by scanning the RENDERED file body covers all three producers
  *  at once and cannot drift as the tables change — the same detect-once shape
@@ -846,6 +858,13 @@ export function renderUserComponentFile(
   body: ExprIR,
   pack: LoadedPack,
   userComponents: ReadonlyMap<string, readonly ParamIR[]>,
+  /** UI api parameters — the SAME list the page shell threads.  A component
+   *  body is a read-bearing region like any page body (`QueryView { of:
+   *  Sales.Order.all }`), so the handle (`Sales`) has to resolve here too.
+   *  Handed an empty list, `emitExpr`'s ref fallthrough emitted `/* unresolved:
+   *  Sales *​/ undefined` and appended the member chain to it — a guaranteed
+   *  TypeError that also fails `tsc --noEmit`. */
+  apiParams: ReadonlyArray<UiApiParamIR> = [],
   /** Aggregates / owning BCs reachable from this UI — needed for
    *  `Action(<instance>.<op>)` operation + mutation-hook resolution. */
   aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
@@ -892,13 +911,14 @@ export function renderUserComponentFile(
     usedStores,
     usesFragment,
     hoistedModuleDecls,
+    usedApiHooks,
   } = walkBodyToTsx(
     body,
     pack,
     paramNames,
     stateNames,
     userComponents,
-    [],
+    apiParams,
     aggregatesByName,
     bcByAggregate,
     new Map(),
@@ -963,6 +983,7 @@ export function renderUserComponentFile(
   // page shell; Proposal A Stage 1).
   let actionLines = "";
   let usesStateForActions = false;
+  let usesNavigateForActions = false;
   if (actions.length > 0 && usedActions && usedActions.size > 0) {
     const actx: WalkContext = {
       target: tsxTarget,
@@ -971,6 +992,9 @@ export function renderUserComponentFile(
       paramNames,
       usedParams,
       usesNavigate,
+      // A component has no route table of its own (a `navigate(<Page>)` in a
+      // component action falls back to `/<snake(page)>`, as the body walk does).
+      pageRoutes,
       stateNames,
       derivedNames,
       authUi: false,
@@ -1009,11 +1033,33 @@ export function renderUserComponentFile(
         .join("\n")}\n`;
     }
     usesStateForActions = actx.usesState;
+    usesNavigateForActions = actx.usesNavigate;
   }
   const compUsesState = usesState || usesStateForDerived || usesStateForActions;
   // Components live at `src/components/<Name>.tsx` (one hop to `src/`),
   // so api imports for Action mutation hooks resolve via `../api/<agg>`.
   const actionWiring = renderActionMutations(actionMutations, "../");
+  // Api-read hoisting — the component twin of the page shell's block above.
+  // A read in a component body (`QueryView { of: Sales.Order.all }`) records
+  // the same `ApiHookUse`, so it gets the same `use<Op><Agg>()` import + the
+  // same `const <var> = use…()` declaration.  One hop to `src/`, so the
+  // default `"../"` prefix is already right.
+  const apiHookImports = renderApiHookImports(usedApiHooks, "../");
+  const apiHookDecls = tsxTarget
+    .renderApiHoisting(
+      [...usedApiHooks.values()].map((h) => ({
+        apiHandle: "",
+        aggregateName: "",
+        operation: "",
+        kind: "query" as const,
+        args: [],
+        varName: h.varName,
+        hookName: h.hookName,
+        argsRendered: h.argsRendered,
+      })),
+    )
+    .map((line) => `  ${line}\n`)
+    .join("");
   // Form wiring (create / workflow / operation forms) — same as the
   // page shell: module-scope `<Op>Form` components + function-top hook
   // decls.  Component files sit one hop from `src/`, so the api/format
@@ -1041,7 +1087,8 @@ export function renderUserComponentFile(
   // Components don't have routes — useNavigate/Link still legal in
   // a component subtree (e.g. Button(to:) inside).
   const routerSpecifiers: string[] = [];
-  if (usesNavigate || form.usesNavigate) routerSpecifiers.push("useNavigate");
+  if (usesNavigate || usesNavigateForActions || form.usesNavigate)
+    routerSpecifiers.push("useNavigate");
   if (usesRouterLink) routerSpecifiers.push("Link as RouterLink");
   const reactRouterImport =
     routerSpecifiers.length > 0
@@ -1107,11 +1154,11 @@ export function renderUserComponentFile(
       }
       return action.arg ? "(arg: string) => void" : "() => void";
     }
-    // Component props carry their DECLARED type.  This used to call
-    // `typeRefAsTsString`, whose `string` answer is right for a ROUTE param
-    // (React Router hands every `:id` over as a string) but wrong here: it
-    // typed `component Badge(level: int)` as `level: string`, making `level >
-    // 2` a TS2365 and `<Badge level={count} />` a TS2322.  Shared with Vue and
+    // Component props carry their DECLARED type — NOT `typeRefAsTsString`,
+    // whose `string` answer is right for a ROUTE param (React Router hands
+    // every `:id` over as a string) but wrong here: it types
+    // `component Badge(level: int)` as `level: string`, making `level > 2` a
+    // TS2365 and `<Badge level={count} />` a TS2322.  Shared with Vue and
     // Svelte — all three emit the same language.
     return componentPropTsType(p.type, aggregatesByName, dtoImports);
   };
@@ -1135,7 +1182,9 @@ export function renderUserComponentFile(
   const propDestructure =
     destructureNames.length > 0 ? `{ ${destructureNames.join(", ")} }: ${name}Props` : "";
   const navigateLine =
-    usesNavigate || form.usesNavigate ? `  const navigate = useNavigate();\n` : "";
+    usesNavigate || usesNavigateForActions || form.usesNavigate
+      ? `  const navigate = useNavigate();\n`
+      : "";
   const stateLines = compUsesState
     ? state.map((f) => `  ${renderUseState(f, pack)}\n`).join("")
     : "";
@@ -1159,9 +1208,9 @@ export function renderUserComponentFile(
   // page shell above; a user `component` can host a DataGrid too.
   const moduleDecls = (hoistedModuleDecls ?? []).join("\n");
   return `// Auto-generated.  Do not edit by hand.
-${gate.import}${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${dtoImportLines}${actionWiring.imports}${store.imports}${userComponentImports}${externFunctionImports}${propsType}${form.moduleScope}${moduleDecls === "" ? "" : `${moduleDecls}\n`}
+${gate.import}${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${apiHookImports}${dtoImportLines}${actionWiring.imports}${store.imports}${userComponentImports}${externFunctionImports}${propsType}${form.moduleScope}${moduleDecls === "" ? "" : `${moduleDecls}\n`}
 export default function ${name}(${propDestructure}) {
-${navigateLine}${store.decls}${actionWiring.decls}${form.decls}${stateLines}${derivedLines}${actionLines}${gate.guard}  return (
+${navigateLine}${store.decls}${actionWiring.decls}${form.decls}${stateLines}${apiHookDecls}${derivedLines}${actionLines}${gate.guard}  return (
     ${indentJsx(tsx, "    ")}
   );
 }

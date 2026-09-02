@@ -1,4 +1,4 @@
-// Repository `find` checks (read-path-architecture.md, migration slice 6).
+// Repository `find` checks (read-path-architecture.md, migration).
 //
 //   - loom.repository-find-deprecated — a wire-shaped LIST `find` on a
 //     repository (a bespoke list query returning `T[]` or `T paged`) is

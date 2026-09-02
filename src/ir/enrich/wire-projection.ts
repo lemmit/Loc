@@ -196,9 +196,7 @@ export function omittableCreateInputs(agg: AggregateIR): ReadonlySet<string> {
  *   - `null`     — an optional-typed field with no default.
  *
  * So a defaulted field's value is never lost just because it became optional
- * input.  WHERE that happens is per-backend, and this comment used to claim a
- * uniformity that does not exist — it said backends apply it "factory `?? …`",
- * which none of node/python/dotnet/java does:
+ * input.  WHERE that happens is per-backend — there is no single uniform site:
  *
  *   - the WIRE boundary applies it on all five (zod `.default`, a Pydantic
  *     field initialiser, a record positional default, a Java service-side
@@ -233,9 +231,9 @@ export function createOmissionValue(f: FieldIR): CreateOmissionValue {
  *  `bool = true`** — or `undefined` when the field has no `= default`.  A
  *  *bare* `bool` (no explicit default) still returns `undefined`: its
  *  implicit-false optionality is owned by each backend's existing bool rule.
- *  Previously this dropped the default for *every* bool, so a declared
- *  `bool = true` silently arrived `false` at the wire boundary (the backend's
- *  hardcoded `.default(false)` won).  Backends render the result in their
+ *  Dropping the default for *every* bool would make a declared `bool = true`
+ *  silently arrive `false` at the wire boundary (the backend's hardcoded
+ *  `.default(false)` winning).  Backends render the result in their
  *  native default slot — Hono zod `.default(…)`, .NET record `= …`, Phoenix
  *  changeset default — so a defaulted field is optional input uniformly. */
 export function wireCreateDefault(f: FieldIR): ExprIR | undefined {
@@ -268,11 +266,10 @@ export function wireCreateDefault(f: FieldIR): ExprIR | undefined {
  * state) is NOT constructible by a plain create: it is built via an
  * operation / event / seed instead.
  *
- * This replaces the defaults-based `isSynthesizedCreate` gate — whether a
- * field has a default no longer decides constructibility (a default only
- * makes that field optional *input*; see `CreateInputFieldIR`).  An
- * aggregate with required, undefaulted fields but no blocking invariant is
- * now constructible: those fields become required create params. */
+ * Defaults do NOT decide constructibility — a default only makes that field
+ * optional *input* (see `CreateInputFieldIR`).  An aggregate with required,
+ * undefaulted fields but no blocking invariant is constructible: those fields
+ * become required create params. */
 export function isConstructible(agg: AggregateIR): boolean {
   if (agg.canonicalCreate != null) return true;
   const available = new Set(forCreateInput(agg.fields).map((f) => f.name));
@@ -384,6 +381,28 @@ function containmentTypeFor(partName: string, collection: boolean): TypeIR {
     : { kind: "entity", name: partName };
 }
 
+/**
+ * The WIRE type of a declared property — its domain type, except that a
+ * `provenanced` field ships as the `Provenanced<T>` carrier
+ * `{ value: T, lineage: json | null }` (M-T6.12,
+ * `docs/old/proposals/provenanced-wire-pair.md`).
+ *
+ * This is the ONE place the value/lineage pairing is decided.  Before it
+ * existed each backend appended a trailing `<field>_provenance` SIBLING key out
+ * of band — five backends and six frontends spelling the same convention by
+ * hand, invisible to `wireShape` and therefore to `.loom/wire-spec.json`, to
+ * `forApiRead`'s access filtering, and to `mask unless` redaction.  Folding the
+ * lineage INSIDE the field's own wire entry means every one of those inherits
+ * it for free, and no backend can diverge by forgetting the bolt-on.
+ *
+ * STORAGE is unaffected — the column pair (typed value + jsonb lineage) stays
+ * exactly as it is (§7 of the proposal); this is a DTO/serialization shape
+ * only, and the in-memory domain object keeps the scalar field.
+ */
+export function wireTypeForField(f: FieldIR): TypeIR {
+  return f.provenanced ? { kind: "genericInstance", ctor: "provenanced", arg: f.type } : f.type;
+}
+
 export function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
   const out: WireField[] = [
     {
@@ -395,7 +414,7 @@ export function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
     },
   ];
   for (const f of agg.fields) {
-    // `tenantOwned`'s `dataKey` (multi-tenancy P2.3) is a persistence-only
+    // `tenantOwned`'s `dataKey` (multi-tenancy) is a persistence-only
     // materialized-path column — `authorization.md §2` calls for it "kept
     // out of wireShape" entirely, unlike `tenantId` which stays in wireShape
     // as `internal` (excluded from API reads by `forApiRead`, still visible
@@ -405,7 +424,7 @@ export function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
     if (f.name === TENANT_OWNED_DATA_KEY_FIELD && hasTenantOwned(agg)) continue;
     out.push({
       name: f.name,
-      type: f.type,
+      type: wireTypeForField(f),
       optional: f.optional,
       source: "property",
       access: f.access ?? "editable",
@@ -455,7 +474,7 @@ export function wireFieldsForPart(part: EntityPartIR): WireField[] {
   for (const f of part.fields) {
     out.push({
       name: f.name,
-      type: f.type,
+      type: wireTypeForField(f),
       optional: f.optional,
       source: "property",
       access: f.access ?? "editable",
@@ -487,6 +506,10 @@ export function wireFieldsForValueObject(vo: ValueObjectIR): WireField[] {
   for (const f of vo.fields) {
     out.push({
       name: f.name,
+      // Deliberately NOT `wireTypeForField`: a value object has no identity, no
+      // row, and no write-site instrumentation, so no backend emits a lineage
+      // sibling for a VO member.  Wrapping one in the carrier would advertise a
+      // `lineage` the serializer has nothing to fill it from.
       type: f.type,
       optional: f.optional,
       source: "property",

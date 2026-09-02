@@ -326,9 +326,37 @@ to fulfill the contract.
 | `package-json` | `package.json` for the generated app.  Declares pack-specific dependencies. |
 | `tsconfig` | `tsconfig.json`.  shadcn adds path mappings for `@/*`. |
 | `vite-config` | `vite.config.ts`.  shadcn adds Vite resolver alias for `@/*`. |
-| `format-helpers` | Per-pack runtime helpers (`IdValue`, `DateTimeValue`, `BoolValue`, `NumberValue`, `EmptyValue`, `KeyValueRow`).  Output written to `src/lib/format.tsx`. |
+| `format-helpers` | Per-pack runtime helpers (`IdValue`, `DateTimeValue`, `BoolValue`, `NumberValue`, `EmptyValue`, `KeyValueRow`, and the money helper — see the money-display contract below).  Output written to `src/lib/format.tsx` (`src/lib/format.ts` on Vue/Svelte/Angular). |
 | `app-shell` | App-shell layout: navbar/sidebar/main outlet. |
 | `home` | Home/dashboard page. |
+
+#### The money-display contract (a pack does not own it)
+
+Loom `money` has **no currency dimension** and rides the wire as the RS-12
+fixed-scale decimal **string** (`"12.3456"`, scale 4).  A pack must therefore not
+invent a symbol or a fraction-digit count of its own: money display is one
+toolchain-wide contract, not fifteen pack opinions.
+
+The algorithm lives in **`src/generator/_frontend/money-format.ts`** as the
+`MONEY_TEXT_SOURCE` constant, spliced into every pack's `format-helpers` emit
+through the `{{{moneySource}}}` variable the React / Vue / Svelte / Angular
+emitters always pass.  A pack's own helper (`MoneyValue` on React, `formatMoney`
+elsewhere) keeps its markup wrapper and **delegates** to `moneyText(value,
+currency?, decimals?)`:
+
+- **default = verbatim, locale-neutral** — the value's own digits, with no
+  `Number()` coercion, no locale grouping, no currency, no re-scaling, so the
+  stored 4th decimal is visible on screen;
+- **`decimals: n`** re-scales the digit string to exactly *n* fraction digits,
+  half away from zero (the backends' and Postgres' rounding family), never
+  through a float;
+- **`currency: "EUR"`** prefixes the code the page source passed, verbatim
+  (`EUR 12.3456`) — never a symbol the toolchain guessed.
+
+Both knobs are pre-existing, user-declared `Money(…)` arguments; there is no
+pack-manifest knob.  A new pack that hand-rolls its own money formatter fails
+`test/generator/_packs/money-display-cross-pack.test.ts`, which bans `"USD"`,
+`style: "currency"` and `Number(` on the money path across every pack at once.
 
 ### Page templates (4)
 
@@ -473,6 +501,39 @@ registers these helpers globally:
   `value={{expr valueExpr}}`.
 - `json <value>` — JSON-stringifies the value.  Use for inline
   literals: `defaultRadius={{json radius}}`.
+
+Some view-models additionally carry a **context function** — called like a
+helper, but supplied per render by the walker because its output is
+framework-shaped.  `primitive-anchor` has one:
+
+- `navAttr "<attr>"` — the whole link attribute (leading space included) for
+  the `Anchor(to:)` destination.  The PACK picks the attribute name (`to` on a
+  React `RouterLink`, `href` on a plain `<a>`, `routerLink` on Angular); the
+  walker picks the spelling, so a literal path renders `to="/orders"` while a
+  computed one (`to: "/greet/" + who`) renders the framework's bound form
+  (` to={…}` / ` :to="…"` / ` [routerLink]="…"`).  Splice it with a triple
+  stache and NO `=`:
+
+  ```hbs
+  {{#if hasTo}}<a class="loom-anchor"{{{navAttr "href"}}}>{{{label}}}</a>{{else}}…{{/if}}
+  ```
+
+  Spelling the attribute by hand (`href={{{to}}}`) drops every computed
+  destination on the floor — `to` is the bare expression, kept only for the two
+  procedural packs (Feliz, Flutter) whose output is not HTML.
+
+The `app-shell`'s nav entries carry the same split for their LABELS, because a
+label authored in a `menu { … }` block is a translatable catalog string:
+
+- `labelText` — the label in text position, already escaped (i18n off) or bound
+  as `{t(key, default)}` / `{{ t(…) }}` (i18n on).
+- `labelAttr "<attr>"` — the same value as a whole attribute, for a pack that
+  passes the label as a prop (`{{{labelAttr "primary"}}}` on MUI's
+  `<ListItemText>`, `{{{labelAttr "label"}}}` on Mantine's `<NavLink>`).
+
+Both are triple-stache values. `{{label}}` still exists (the raw string) but
+rendering it directly re-opens the dead-catalog-key bug: the key is extracted,
+the app shows English at every locale.
 - Standard Handlebars: `{{#each}}`, `{{#if}}`, `{{#unless}}`,
   `{{> partial-name}}`, etc.
 
@@ -704,6 +765,26 @@ elixir generator via `pack.render`:
 | `assets-js` | `assets/js/app.js` | `{}` |
 | `tailwind-config` | `assets/tailwind.config.js` | `{ appName }` |
 | `package-json` | `assets/package.json` | `{ appName }` |
+
+Because a page renders through those component calls, `core-components`
+is a CONTRACT, not just a file: the walker emits `<.button>`,
+`<.table>`, `<.input>`, `<.modal>`, `<.badge>`, `<.empty>`, `<.pager>`,
+`<.header>`, `<.error>`, `<.label>`, `<.simple_form>`, `<.flash_group>`
+and `<.card>`, so a HEEx pack must define every one of them (with the
+attrs the walker passes — e.g. `<.button variant=…>`, `<.card
+title=… variant=… shadow=…>`).  A missing component or an undeclared
+attr is a `mix compile --warnings-as-errors` failure in the generated
+app, not a silent style regression.
+
+Where the line falls between walker and pack: the walker owns
+design-NEUTRAL geometry — `Stack`/`Group`/`Grid`/`Container`/`Toolbar`
+emit Tailwind flex/grid utilities inline, since daisyUI (and any other
+LiveView design system) adds a COMPONENT vocabulary, not a layout one,
+and both packs build Tailwind from the same content globs.  The pack
+owns anything a design system actually decides — the card surface's
+border/elevation/padding/title typography, a button's rank — which is
+why `Card`/`Paper` render through `<.card>` rather than a hardcoded
+class string.
 
 The assets files build into `priv/static/assets/app.{css,js}` via the
 generated `assets/package.json` (tailwind + esbuild) — the Dockerfile's

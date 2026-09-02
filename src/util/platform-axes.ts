@@ -17,11 +17,10 @@ import type { Platform, SavingShape } from "../ir/types/loom-ir.js";
  *  (a `family@version` pin resolves via `platformFamily` in the validator).
  *  Frontend platforms (`react`/`static`) own no persistence and are omitted.
  *
- *  The check is keyed by PLATFORM, not by adapter.  This header used to
- *  add "and the generator persistence adapters
- *  (`PersistenceAdapter.supportedShapes`)" as a second consumer; that field
- *  was read by nothing and has been removed, so the sole consumer is
- *  `validateSavingShapeSupport`. */
+ *  The check is keyed by PLATFORM, not by adapter, and its sole consumer is
+ *  `validateSavingShapeSupport` — the generator persistence adapters carry no
+ *  `supportedShapes` mirror of this (see
+ *  `generator/_adapters/persistence-surface.ts`). */
 export const PLATFORM_SAVING_SHAPES: Partial<Record<Platform, readonly SavingShape[]>> = {
   dotnet: ["relational", "embedded", "document"],
   node: ["relational", "embedded", "document"],

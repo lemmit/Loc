@@ -1,5 +1,5 @@
 // Svelte's `DataGrid` child component — the `.svelte` half of the
-// `renderDataGridChild` seam (M-T1.1 slice 10).
+// `renderDataGridChild` seam (M-T1.1).
 //
 // WHY `table-core` AND NOT THE SVELTE ADAPTER
 // -------------------------------------------
@@ -293,7 +293,9 @@ function columnDefs(columns: readonly DataGridColumn[], selection: boolean): str
   for (const c of columns) {
     const parts = [`id: ${JSON.stringify(c.id)}`];
     if (c.accessorKey) parts.push(`accessorKey: ${JSON.stringify(c.accessorKey)}`);
-    parts.push(`header: ${JSON.stringify(c.header)}`);
+    // The header is a user-visible slot (`columnHeader`): under i18n it arrives
+    // as a `t()` expression, otherwise quoted exactly as before.
+    parts.push(`header: ${c.headerValue ?? JSON.stringify(c.header)}`);
     parts.push(`enableSorting: ${c.sortable}`);
     parts.push(`enableColumnFilter: ${c.filterable}`);
     // A money/decimal column needs an explicit numeric comparator — see

@@ -61,6 +61,7 @@ import type {
   CommandHandlerIR,
   EnrichedBoundedContextIR,
   EnumIR,
+  ExprIR,
   QueryHandlerIR,
   RouteIR,
   TypeIR,
@@ -75,13 +76,16 @@ import {
 import { normalizeHandlerReturn, requestRecordFor } from "../../../ir/util/handler-contracts.js";
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
+import { walkExprDeep, walkWorkflowStmtExprsDeep } from "../../../ir/util/walk.js";
 import { resolveErrorStatus } from "../../../util/error-defaults.js";
 import { lowerFirst, plural, snake } from "../../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../../util/scaffold-once.js";
-import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
+import { emitWireSchema, QUERY_BOOL, wireToDomainExpr, zodFor } from "./routes-builder.js";
 import {
   collectReposForWorkflow,
   honoWorkflowStmtTarget,
+  mergeHandlerReadPortRepos,
+  readPortResolver,
   renderExprWithParams,
 } from "./workflow-builder.js";
 
@@ -139,7 +143,9 @@ function pathParamZod(t: TypeIR): string {
       case "long":
         return "z.coerce.number().int()";
       case "bool":
-        return "z.coerce.boolean()";
+        // A path segment is a string, so `z.coerce.boolean()` bound
+        // `/flag/false` to `true`.  Same four-spelling parse as a query bool.
+        return QUERY_BOOL;
       default:
         return "z.string()";
     }
@@ -237,7 +243,9 @@ function emitPagedRunHandler(
     `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
   out.push(
-    `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    `      ${resolveErrorStatus("NotFound", ctx.structuralErrorStatuses)}: { description: ${JSON.stringify(
+      problemTitle(resolveErrorStatus("NotFound", ctx.structuralErrorStatuses)),
+    )}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
   out.push(`    },`);
   out.push(`  }),`);
@@ -376,7 +384,9 @@ function emitRouteHandler(
     `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
   out.push(
-    `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    `      ${resolveErrorStatus("NotFound", ctx.structuralErrorStatuses)}: { description: ${JSON.stringify(
+      problemTitle(resolveErrorStatus("NotFound", ctx.structuralErrorStatuses)),
+    )}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
   // 415 only where there IS a body to refuse — declared under exactly the
   // condition the handler's `requireJsonContentType` guard is emitted.  Last
@@ -433,7 +443,21 @@ function emitRouteHandler(
   // Repos constructed inline on the request `db` (matches aggregate/workflow
   // routes).  `getById` throws AggregateNotFoundError → 404 via onError, so a
   // load needs no explicit guard.
-  const repos = collectReposForWorkflow(h);
+  // A handler orchestrates `reading`-tier domain services exactly as a workflow
+  // does, so it must construct the read-port repositories those services take —
+  // even when its own body never reads them directly.  It did not, and it also
+  // rendered its `return` expression without the port resolver, so
+  // `return Registration.isHolderFree(holder)` emitted an arity-short,
+  // un-awaited call against `async isHolderFree(accounts, holder)` — TS2554 +
+  // a Promise serialised as `{}`, with no diagnostic (M-T5.14).  The statement
+  // path was already correct (`honoWorkflowStmtTarget` threads the resolver);
+  // only these two seams were missing.
+  const repos = mergeHandlerReadPortRepos(
+    collectReposForWorkflow(h),
+    h.statements,
+    hasReturn && h.returnValue ? [h.returnValue] : [],
+    ctx,
+  );
   const repoVarByAgg = new Map(repos.map((r) => [r.aggName, lowerFirst(r.repoName)]));
   for (const r of repos) {
     out.push(`    const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
@@ -453,6 +477,7 @@ function emitRouteHandler(
   }
   // Load → mutate → save body, rendered through the shared Hono workflow stmt
   // target (handlers carry no `this` state, so the default `thisName` is inert).
+  const readPortArgs = readPortResolver(ctx);
   const chunks = renderWorkflowStmtChunks(
     h.statements,
     honoWorkflowStmtTarget(ctx, paramExprs, "this"),
@@ -463,7 +488,7 @@ function emitRouteHandler(
     out.push(`    await ${lowerFirst(save.repoName)}.save(${save.name});`);
   }
   if (hasReturn) {
-    const retExpr = renderExprWithParams(h.returnValue!, paramExprs, "this");
+    const retExpr = renderExprWithParams(h.returnValue!, paramExprs, "this", readPortArgs);
     // A domain entity/part return projects to its wire shape via the owning
     // repo's `toWire(...)`; a collection maps each element.  A single-entity
     // return additionally casts to the typed 200's inferred schema (the
@@ -500,6 +525,11 @@ export function buildExplicitRoutesFile(
   apiName: string,
   routes: readonly RouteIR[],
   contexts: readonly EnrichedBoundedContextIR[],
+  /** resourceName → sourceType, so a handler body's resource-ops can import
+   *  their `<resource>$<verb>` helpers from `../resources/<sourceType>` — the
+   *  same map (and the same derivation) the workflow leg gets.  Defaulted so a
+   *  caller with no system context stays byte-identical. */
+  resourceSourceTypes: Map<string, string> = new Map(),
 ): string | undefined {
   const byName = new Map(contexts.map((c) => [c.name, c] as const));
   const routeBlocks: string[][] = [];
@@ -514,6 +544,28 @@ export function buildExplicitRoutesFile(
   // file that exports them (the same import `http/views.ts` uses), so the typed
   // 200 body resolves in-scope without re-declaring the composite schema.
   const responseImports = new Map<string, string>();
+  // Resource-op verb helpers a routed handler body calls: `../resources/<st>`
+  // module → the `<resource>$<verb>` names to import from it.  Collected with
+  // the DEEP walker (a resource-op nested inside another expression is legal
+  // and would otherwise lose its import and fail `tsc`), mirroring the workflow
+  // leg's typed-api-helper scan.
+  const resourceHelperByModule = new Map<string, Set<string>>();
+  /** Typed in-system api helpers (`<resource>$<operationId>`) — one module. */
+  const apiHelpers = new Set<string>();
+  const collectResourceHelpers = (e: ExprIR): void => {
+    if (e.kind !== "call") return;
+    if (e.callKind === "remote-api-op" && e.remoteApiOp) {
+      apiHelpers.add(`${e.remoteApiOp.resourceName}$${e.remoteApiOp.operationId}`);
+      return;
+    }
+    if (e.callKind !== "resource-op" || !e.resourceOp) return;
+    const sourceType = resourceSourceTypes.get(e.resourceOp.resourceName);
+    if (!sourceType) return;
+    const mod = `../resources/${sourceType}`;
+    const set = resourceHelperByModule.get(mod) ?? new Set<string>();
+    set.add(`${e.resourceOp.resourceName}$${e.resourceOp.verb}`);
+    resourceHelperByModule.set(mod, set);
+  };
   for (const r of routes) {
     const ctx = byName.get(r.target.context);
     if (!ctx) continue;
@@ -521,6 +573,8 @@ export function buildExplicitRoutesFile(
     const qry = (ctx.queryHandlers ?? []).find((hd) => hd.name === r.target.handler);
     const h = cmd ?? qry;
     if (!h) continue;
+    for (const st of h.statements) walkWorkflowStmtExprsDeep(st, collectResourceHelpers);
+    if (h.returnValue) walkExprDeep(h.returnValue, collectResourceHelpers);
     const pathNames = new Set([...r.path.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!));
     // Seed the VO/enum wire-schema closure from every body-bound field.  A
     // record param contributes its individual field types (the body deserialises
@@ -639,10 +693,14 @@ export function buildExplicitRoutesFile(
   const exDisallowedStatus = resolveErrorStatus("Disallowed", structuralMap);
   const exUniquenessStatus = resolveErrorStatus("UniquenessConflict", structuralMap);
   const exConcurrencyStatus = resolveErrorStatus("ConcurrencyConflict", structuralMap);
+  // The domain not-found rung — an extern/explicit handler that loads by id
+  // raises the same `AggregateNotFoundError` the aggregate routes do, so it
+  // must answer the same `httpStatus`-resolved status.
+  const exNotFoundStatus = resolveErrorStatus("NotFound", structuralMap);
   const exStatuses = new Set<number>([
     400,
     exForbiddenStatus,
-    404,
+    exNotFoundStatus,
     422,
     exDomainStatus,
     500,
@@ -671,7 +729,7 @@ export function buildExplicitRoutesFile(
     `    if (err instanceof DomainError) return problem(${exDomainStatus}, ${JSON.stringify(problemTitle(exDomainStatus))}, err.message);`,
   );
   body.push(
-    `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
+    `    if (err instanceof AggregateNotFoundError) return problem(${exNotFoundStatus}, ${JSON.stringify(problemTitle(exNotFoundStatus))}, err.message);`,
   );
   if (exHasUniqueKeys) {
     body.push(
@@ -781,6 +839,31 @@ export function buildExplicitRoutesFile(
   }
   if (voEnumReferenced.length > 0) {
     imports.push(`import { ${voEnumReferenced.join(", ")} } from "../domain/value-objects";`);
+  }
+  // Domain-service namespaces a routed handler body calls (`Registration.…`),
+  // imported from the generated `domain/services.ts` — the handler-leg twin of
+  // workflow-builder's block, and missing entirely until now: a handler that
+  // called a service emitted `Registration.isHolderFree(…)` against a name the
+  // file never imported (TS2304, on top of the arity/await defect the read-port
+  // threading above fixes — M-T5.14).  Same body-text filter as the workflow
+  // side, so a service-free routes file stays byte-identical.
+  const servicesReferenced = contexts
+    .flatMap((c) => c.domainServices.map((sv) => sv.name))
+    .filter((n) => new RegExp(`\\b${n}\\.\\w`).test(bodyStr));
+  if (servicesReferenced.length > 0) {
+    imports.push(`import { ${servicesReferenced.sort().join(", ")} } from "../domain/services";`);
+  }
+  // Resource-op verb helpers (the handler-leg twin of workflow-builder's
+  // block).  Grouped by client module, one named import per (resource, verb)
+  // the routed handler bodies actually call — a routes file whose handlers do
+  // no resource I/O emits nothing here and stays byte-identical.
+  for (const [mod, helpers] of [...resourceHelperByModule].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    imports.push(`import { ${[...helpers].sort().join(", ")} } from "${mod}";`);
+  }
+  if (apiHelpers.size > 0) {
+    imports.push(
+      `import { ${[...apiHelpers].sort().join(", ")} } from "../resources/api-clients";`,
+    );
   }
 
   const schemaSection = schemaDecls.length > 0 ? [...schemaDecls, ""] : [];

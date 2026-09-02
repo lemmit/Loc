@@ -399,7 +399,7 @@ export function renderSveltePage(
     tableHelperNames.length > 0
       ? `  import { ${tableHelperNames.join(", ")} } from "$lib/table-sort";\n`
       : "";
-  // The chart component (`Chart`, M-T1.3 Phase 4).  Keyed off the same MARKER
+  // The chart component (`Chart`, M-T1.3).  Keyed off the same MARKER
   // the template carries rather than a walker import, so the emitted file and
   // its import cannot dangle apart — the discipline the Flutter and Vue shells
   // already use for `LoomModalHost` / `LoomChart`.
@@ -581,6 +581,14 @@ export function renderSvelteComponentFile(
   body: ExprIR,
   pack: LoadedPack,
   userComponents: ReadonlyMap<string, readonly ParamIR[]>,
+  /** UI api parameters — the SAME list the page shell threads.  A component
+   *  body reads (`QueryView { of: Sales.Order.all }`) exactly as a page body
+   *  does, so the handle (`Sales`) has to resolve here too; handed an empty
+   *  list the walk emitted `{#if /* unresolved: Sales *​/ undefined.Order.all
+   *  .isLoading}` — uncompilable under `svelte-check`.  The hook imports and
+   *  `$derived` declarations below were already wired; only the input was
+   *  missing. */
+  apiParams: ReadonlyArray<UiApiParamIR> = [],
   aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
   pageRoutes: ReadonlyMap<string, string> = new Map(),
@@ -629,7 +637,7 @@ export function renderSvelteComponentFile(
     paramNames,
     stateNames,
     userComponents,
-    [],
+    apiParams,
     aggregatesByName,
     bcByAggregate,
     new Map(),

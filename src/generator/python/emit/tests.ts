@@ -1,4 +1,4 @@
-import { createOmissionValue, forCreateInput } from "../../../ir/enrich/wire-projection.js";
+import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -52,14 +52,14 @@ export function renderPyTestsFile(agg: AggregateIR, ctx: BoundedContextIR): stri
   });
 }
 
-/** Value-object unit-test module (test-placement.md, Phase 2).  The VO is
+/** Value-object unit-test module (test-placement.md).  The VO is
  *  imported through the shared `app.domain.value_objects` narrowing — no
  *  dedicated subject import. */
 export function renderPyVoTestsFile(vo: ValueObjectIR, ctx: BoundedContextIR): string | null {
   return renderPySubjectTests(vo.name, vo.tests, ctx, null);
 }
 
-/** Domain-service unit-test module (test-placement.md, Phase 2).  A service op
+/** Domain-service unit-test module (test-placement.md).  A service op
  *  renders as a bare module-level function (`snake(op)(…)`), so the test imports
  *  the referenced op functions from `app.domain.services.<snake(svc)>`. */
 export function renderPyServiceTestsFile(
@@ -265,14 +265,12 @@ export function renderCreateInput(
   const declared = new Map(forCreateInput(agg.fields).map((f) => [f.name, f.type] as const));
   // Emit EXACTLY the fields the test author wrote.
   //
-  // This used to iterate the whole create-input set and fill each omission,
-  // because `create` was keyword-only with no kwarg defaults and an omission
-  // was `mypy --strict: Missing named argument`.  That made the assertion
-  // vacuous — `test "an omitted default is applied at construction"` writes
-  // `Item.create(name="N")` and checks `qty == 1`, and the fill emitted
-  // `Item.create(name="N", qty=1, …)`, passing the value it then asserted.
+  // Filling each omission from the create-input set would make the assertion
+  // vacuous: `test "an omitted default is applied at construction"` writes
+  // `Item.create(name="N")` and checks `qty == 1`, and the fill would emit
+  // `Item.create(name="N", qty=1, …)`, passing the value it then asserts.
   //
-  // The factory now defaults omittable inputs itself (`factoryDefault` in
+  // The factory defaults omittable inputs itself (`factoryDefault` in
   // emit/aggregate.ts), so the omission both type-checks AND exercises the
   // domain rule under test.
   return obj.fields
@@ -339,7 +337,16 @@ export function renderExplicitMatcher(
     receiver = receiver.receiver;
   }
   const inner = receiver.kind === "paren" ? receiver.inner : receiver;
-  const actual = renderTestExpr(inner, ctx, lets);
+  const rendered = renderTestExpr(inner, ctx, lets);
+  // Python CHAINS comparisons: `a == b == True` parses as
+  // `(a == b) and (b == True)`, so an `expect(a == b).toBe(true)` whose actual
+  // is itself a comparison must be parenthesized or the assert silently tests
+  // the wrong thing (found by numeric-operands, M-T6.44 — the first test block
+  // to wrap a comparison in a matcher).  Only the hazard shapes get parens so
+  // every existing emission stays byte-identical.
+  const chains =
+    inner.kind === "binary" && ["==", "!=", "<", "<=", ">", ">=", "&&", "||"].includes(inner.op);
+  const actual = chains ? `(${rendered})` : rendered;
   const expected = expr.args.map((a) => renderTestExpr(a, ctx, lets)).join(", ");
   const cmp = `${actual} ${op} ${expected}`;
   return negate ? `    assert not (${cmp})` : `    assert ${cmp}`;

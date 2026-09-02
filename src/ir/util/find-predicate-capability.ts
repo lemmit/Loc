@@ -13,7 +13,10 @@
 //   - Dapper   (`src/generator/dotnet/emit/dapper.ts` whereToSql)
 //       emits a `NotImplementedException` stub body.
 //   - Drizzle  (`src/generator/typescript/repository-find-predicate.ts`)
-//       lowers `null` → the find body falls back to a TODO comment.
+//       lowers `null`, and every caller of `lowerToDrizzle` on a find /
+//       retrieval / criterion path turns that into a LOUD generation-time
+//       throw ("… could not lower to Drizzle, but the validator should have
+//       caught this") — no TODO-comment stub survives to the generated tree.
 //
 // EF Core (`efcore`) lowers the RICHEST subset — exactly the queryable
 // sublanguage admitted by `firstNonQueryableNode` (this.<field> compared to
@@ -27,6 +30,7 @@
 // the validator can fail fast.  It does NOT extend any lowerer.
 // -------------------------------------------------------------------------
 
+import { intrinsicFor } from "../../util/intrinsics.js";
 import type { ExprIR, TypeIR } from "../types/loom-ir.js";
 
 /** The persistence adapters that lower a `find` / `filter` / retrieval
@@ -61,12 +65,16 @@ function isContainsMembership(e: ExprIR): boolean {
   );
 }
 
-/** `currentUser.<field>` — a row-level principal reference.  EF Core /
- *  Drizzle thread the request principal into the query; Dapper / MikroORM
- *  have no principal accessor in their find path, so they reject it. */
-function isCurrentUserMember(e: ExprIR): boolean {
-  return e.kind === "member" && e.receiver.kind === "ref" && e.receiver.refKind === "current-user";
-}
+// (`isCurrentUserMember` lived here.  It flagged `currentUser.<field>` as a
+// MikroORM narrowing, on the stated reason that the adapter has "no principal
+// accessor on the find path".  That reason was never true — `filterValue` has
+// always rendered `requireCurrentUser().<claim>` — and the narrowing survived
+// because the REAL defect was one layer out: the find METHOD did not declare
+// the trailing `currentUser: User` parameter the Hono route passes it, so the
+// generated project failed with TS2554 rather than anything this descriptor
+// could name.  The three MikroORM repository variants that omitted it now
+// declare it, like the drizzle repository and the adapter's own event-sourced
+// variant always have, and the narrowing is gone.)
 
 /** A bare boolean column standing alone in a boolean position (`filter
  *  this.isActive` / `filter !this.isDeleted`).  EF Core / Drizzle lower it to
@@ -79,6 +87,20 @@ function isBareBooleanColumn(e: ExprIR): boolean {
   return false;
 }
 
+/** A `queryable` scalar intrinsic over a primitive receiver
+ *  (`this.name.trim()`, `this.path.startsWith(p)`).  The catalogue's
+ *  `queryable` flag is the shared source of truth for the set every SQL
+ *  renderer must cover, and `intrinsic-completeness.test.ts` gates that each
+ *  renderer's table is exhaustive against it — so accepting the flag here
+ *  cannot outrun any single adapter's table. */
+function isQueryableIntrinsicCall(e: ExprIR): boolean {
+  return (
+    e.kind === "method-call" &&
+    e.receiverType.kind === "primitive" &&
+    intrinsicFor(e.receiverType.name, e.member)?.queryable === true
+  );
+}
+
 const COMPARE_OPS: ReadonlySet<string> = new Set(["==", "!=", "<", "<=", ">", ">="]);
 
 const FULL_SUBSET: FindPredicateCapability = () => null;
@@ -87,22 +109,28 @@ const FULL_SUBSET: FindPredicateCapability = () => null;
  *  params, this-prop / enum-value refs, literals, `currentUser.<claim>`
  *  (lowered to a `@__cu_<claim>` param bound from the ambient request
  *  principal — same accessor the capability-filter path uses), AND
- *  `this.<refColl>.contains(x)` membership (M-T6.9 wave 2 — lowered to an
+ *  `this.<refColl>.contains(x)` membership (lowered to an
  *  EXISTS join subquery correlated on the owner row's `id`, the raw-SQL mirror
  *  of EF's `_db.<JoinDbSet>.Any(...)`).  Dapper now matches the full queryable
  *  subset, so it narrows nothing versus the EF Core / drizzle baseline. */
 const DAPPER_SUBSET: FindPredicateCapability = FULL_SUBSET;
 
-/** MikroORM (`whereToMikroFilter`): comparisons (`col <op> value`), bare
+/** MikroORM (`whereToMikroFilter`): comparisons (`col <op> value` — in EITHER
+ *  operand order; `value <op> col` is commuted with its operator mirrored by
+ *  `src/ir/util/comparison-operands.ts`, since a FilterQuery has no left-hand
+ *  value position), bare
  *  boolean columns (`this.active` → `{ active: true }`), unary `!` (NOT — via
- *  FilterQuery `$not` / a `false` boolean entry), and `&&` / `||` of predicate
- *  positions.  It still does NOT lower the reference-collection membership
- *  subquery or a `currentUser.<field>` principal reference (no join / no
- *  principal accessor on the find path), so those two shapes are the only
- *  remaining narrowings versus the EF Core / drizzle baseline. */
+ *  FilterQuery `$not` / a `false` boolean entry), `&&` / `||` of predicate
+ *  positions, `currentUser.<field>` principal references, the authorization /
+ *  tenancy sentinels, and queryable scalar intrinsics (`this.name.trim()`,
+ *  `this.path.startsWith(p)`) through `raw()` SQL fragments.
+ *
+ *  ONE narrowing is left versus the EF Core / drizzle baseline: the
+ *  reference-collection membership subquery (`this.<refColl>.contains(x)`),
+ *  which needs a correlated join the adapter emits nowhere. */
 const MIKROORM_SUBSET: FindPredicateCapability = (e) => {
   const NOT_SUPPORTED =
-    "MikroORM v1 lowers comparisons (col <op> value), bare boolean columns, unary '!' and &&/|| of them";
+    "MikroORM v1 lowers comparisons (col <op> value), bare boolean columns, unary '!', &&/||, queryable intrinsics and principal references";
   // Walk a PREDICATE position.  Comparisons / `&&` / `||` / `!` / bare boolean
   // columns are valid here.
   const walkPredicate = (n: ExprIR): string | null => {
@@ -119,28 +147,28 @@ const MIKROORM_SUBSET: FindPredicateCapability = (e) => {
       return `arithmetic '${inner.op}' — ${NOT_SUPPORTED}`;
     }
     if (inner.kind === "unary" && inner.op === "!") return walkPredicate(inner.operand);
-    // Authorization/tenancy sentinels (M-T9.9).  `deny` IS lowerable — the
-    // MikroORM adapter renders it as the always-false FilterQuery contradiction
-    // `$and: [{ id: null }, { id: { $ne: null } }]`, the twin of Dapper's
-    // `1 = 0`.  The `deep`/`global` SCOPE sentinel is not (no prefix test in the
-    // FilterQuery subset); it is separately refused by the mikroorm capability
-    // gate, and naming it here keeps this descriptor honest on its own.
-    if (inner.kind === "authz-filter") {
-      return inner.filter.kind === "deny"
-        ? null
-        : `a hierarchical ('deep'/'global') tenancy scope filter — ${NOT_SUPPORTED}`;
-    }
+    // Authorization/tenancy sentinels — BOTH lower.  `deny` is the always-false
+    // FilterQuery contradiction `$and: [{ id: null }, { id: { $ne: null } }]`
+    // (the twin of Dapper's `1 = 0`); the `deep`/`global` SCOPE sentinel is the
+    // descendant-or-self subtree predicate, rendered through a `raw()`
+    // FilterQuery key because the operator vocabulary has no prefix test.
+    if (inner.kind === "authz-filter") return null;
     if (isContainsMembership(inner))
       return `'this.<refColl>.contains(x)' membership — ${NOT_SUPPORTED}`;
     if (isBareBooleanColumn(inner)) return null;
+    // A bool-returning queryable intrinsic standing alone in a PREDICATE
+    // position (`filter this.path.startsWith(p)`).  The FilterQuery vocabulary
+    // has no function-call position, so it lowers through a `raw()` fragment —
+    // `starts_with(path, ?)`, the same Postgres call the drizzle twin makes.
+    if (isQueryableIntrinsicCall(inner)) return null;
     return `${inner.kind} — ${NOT_SUPPORTED}`;
   };
   // Walk a comparison OPERAND (value) position — only the adapter-wide
   // rejected references matter here.
   const walkValue = (n: ExprIR): string | null => {
     const inner = n.kind === "paren" ? n.inner : n;
-    if (isCurrentUserMember(inner))
-      return "'currentUser.<field>' principal reference (no principal accessor on the MikroORM find path)";
+    if (isContainsMembership(inner))
+      return `'this.<refColl>.contains(x)' membership — ${NOT_SUPPORTED}`;
     return null;
   };
   return walkPredicate(e);

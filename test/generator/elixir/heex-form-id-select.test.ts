@@ -27,7 +27,7 @@
 //      wrapper unwraps before the id check).
 
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/index.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/index.js";
 
 const phoenixSystem = (orderField: string): string => `
   system Demo {
@@ -53,8 +53,10 @@ const phoenixSystem = (orderField: string): string => `
         body: CreateForm { of: Order }
       }
     }
+    storage loomDb { type: postgres }
+    resource cState { for: C, kind: state, use: loomDb }
     deployable phoenixApp {
-      platform: elixir, contexts: [C], serves: DemoApi,
+      platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
       ui: DemoUi, port: 4000
     }
   }
@@ -104,7 +106,8 @@ describe("HEEx form — `X id` field renders as <.input type='select'>", () => {
     // for id-selects without one we fall back to showing the uuid as
     // the option label so the select stays functional (right value
     // flows through on submit).
-    const files = await generateSystemFiles(`
+    const files = await generateSystemFilesUnchecked(
+      `
       system Demo {
         subdomain M {
           context C {
@@ -121,12 +124,17 @@ describe("HEEx form — `X id` field renders as <.input type='select'>", () => {
         ui DemoUi {
           page NewOrder { route: "/orders/new" body: CreateForm { of: Order } }
         }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
         deployable phoenixApp {
-          platform: elixir, contexts: [C], serves: DemoApi,
+          platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }
-    `);
+    `,
+      "an id-ref to an aggregate with no `derived display` is exactly what " +
+        "loom.ui-id-ref-no-display rejects — the uuid-label FALLBACK is the subject",
+    );
     const heex = findNewOrderHeex(files);
     // Fallback {to_string(id), id} shape in the Enum.map over the vanilla
     // tuple-returning list fetch.
@@ -159,8 +167,10 @@ describe("HEEx form — `X id` field renders as <.input type='select'>", () => {
             body: CreateForm { of: Order }
           }
         }
+        storage loomDb { type: postgres }
+        resource cState { for: C, kind: state, use: loomDb }
         deployable phoenixApp {
-          platform: elixir, contexts: [C], serves: DemoApi,
+          platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }

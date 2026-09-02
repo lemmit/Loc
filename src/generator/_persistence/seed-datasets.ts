@@ -13,7 +13,7 @@
 // Pure structural derivation over the shared IR (no target-backend IR, no
 // upward import): lives at the generator layer, imported *down* by each
 // `src/generator/<platform>/emit/seed.ts` — see docs/new-plan/missions/
-// M-T9.2-persistence-seam-design.md §Slice 3.
+// M-T9.2-persistence-seam-design.md §.
 // ---------------------------------------------------------------------------
 
 import type { EnrichedBoundedContextIR, SeedRowIR } from "../../ir/types/loom-ir.js";
@@ -30,7 +30,15 @@ export interface Dataset {
   entries: Entry[];
 }
 
-/** Group every `SeedIR` row by dataset, preserving source order + path. */
+/** Group every `SeedIR` row by dataset, preserving source order + path.
+ *
+ *  Datasets are keyed by their RAW name, and each backend derives the seeder
+ *  function's identifier by casing that name (`snake` on elixir/python,
+ *  `upperFirst` on node/java/.NET) with no uniquifier — so two datasets whose
+ *  names collide under either transform would emit one duplicated function
+ *  (`F2-SEED-DATASET-NAME-COLLISION`).  The uniqueness that makes this keying
+ *  safe is enforced upstream by `loom.seed-dataset-name-collision`
+ *  (src/language/validators/seed.ts), not here. */
 export function groupByDataset(ctx: EnrichedBoundedContextIR): Dataset[] {
   const byName = new Map<string, Dataset>();
   const order: string[] = [];

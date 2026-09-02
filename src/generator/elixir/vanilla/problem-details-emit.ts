@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Vanilla ProblemDetails — `lib/<app>_web/problem_details.ex`.
-// Slice 4 of vanilla-foundation-tdd-plan.md (exception-less alignment).
+// vanilla-foundation-tdd-plan.md (exception-less alignment).
 //
 // RFC-7807 envelope — `about:blank` type, camelCased JSON pointers in
 // `errors[]`, `Validation failed` title, `application/problem+json` content
@@ -10,7 +10,6 @@
 // ---------------------------------------------------------------------------
 
 import { problemTitle } from "../../../ir/util/openapi-errors.js";
-import { errorTitle } from "../../../util/error-defaults.js";
 import { renderPhoenixDomainFault, renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 
 export function renderVanillaProblemDetailsModule(
@@ -35,10 +34,10 @@ export function renderVanillaProblemDetailsModule(
    *  — the `requires` authorization gate (`Forbidden`, 403 by default), the
    *  `when` state gate (`Disallowed`, 409) and the FK-restrict destroy
    *  (`ReferencedInUse`, 409).  They are not written into a response body here;
-   *  they key the CATALOG-EVENT classifier below, which used to be a literal
-   *  `case status do 403 … 409 … 404` and therefore silently reclassified every
-   *  remapped rung as `domain_error` (M-T9.25 round 2, probe 1).  Defaults
-   *  reproduce the literal arms exactly ⇒ byte-identical. */
+   *  they key the CATALOG-EVENT classifier below.  A literal
+   *  `case status do 403 … 409 … 404` there silently reclassifies every
+   *  remapped rung as `domain_error`; the defaults here are those same literal
+   *  statuses. */
   forbiddenStatus = 403,
   disallowedStatus = 409,
   referencedInUseStatus = 409,
@@ -80,7 +79,7 @@ export function renderVanillaProblemDetailsModule(
   const localizeFn = localizeMessages
     ? `
 
-  # Resolve a messaged rule's stable wire code (M-T1.11) against this project's
+  # Resolve a messaged rule's stable wire code against this project's
   # gettext catalog for the request locale, falling back to the authored text.
   defp localize(nil, message), do: message
 
@@ -91,7 +90,7 @@ export function renderVanillaProblemDetailsModule(
   end
 
   # The ambient request locale carries the Accept-Language header VERBATIM
-  # (D-CTX-SHAPE — it is the request-stable input, not a catalog-shaped one), so
+  # (it is the request-stable input, not a catalog-shaped one), so
   # the normalisation to a lookup tag lives here: the first listed language,
   # without its \`;q=\` weight.  An unknown tag is not an error for gettext —
   # it has no translations, so the msgid (the authored English) is returned.
@@ -198,13 +197,7 @@ export function renderVanillaProblemDetailsModule(
     { name: "status", valueExpr: "422" },
   ]);
   // The 422 body — shared by the plain (no-`unique`) and the unique-aware forms.
-  const body422 = `    pointer_errors =
-      changeset.errors
-      |> List.flatten()
-      |> Enum.map(&render_changeset_error/1)
-      |> Enum.reject(&is_nil/1)
-
-    send_validation_problem(conn, pointer_errors)`;
+  const body422 = `    send_validation_problem(conn, collect_changeset_errors(changeset, []))`;
   // The one §3.2 `errors[]` 422 SENDER.  Both rungs that produce this body pass
   // through it — the changeset path above and, when the app has one, the
   // wire-translatable `precondition` path below (M-T6.20) — so the two can never
@@ -247,7 +240,7 @@ export function renderVanillaProblemDetailsModule(
   @doc """
   Send a 422 ProblemDetails carrying an EXPLICIT \`errors[]\` list — the
   wire-validation rung for a denial that never builds an \`Ecto.Changeset\`
-  (M-T6.20: a messaged \`precondition\` over the operation's own request params,
+  (a messaged \`precondition\` over the operation's own request params,
   which the other four backends lift into the \`<Op>Request\` validator).  Each
   entry is \`%{pointer:, message:, code:}\`; the code resolves through the same
   catalog the changeset path uses, so both rungs localise identically.
@@ -340,10 +333,29 @@ defmodule ${appModule}Web.ProblemDetails do
 ${responseFns}${sendValidationProblemFn}${wireErrorsFn}
 
   @doc """
+  Send the 422 a MALFORMED path \`{id}\` earns.
+
+  A path \`{id}\` is declared \`format: uuid\` in this app's own OpenAPI document,
+  and the per-operation error matrix publishes 422 for a value that will not
+  parse ("a path \`{id}\` is parsed as a uuid … and a failure answers the same 422
+  the body tier does").  Ecto raises \`Ecto.Query.CastError\` out of \`Repo.get/2\`
+  on a malformed \`:binary_id\`, and the app-global fault floor answers whatever
+  \`Plug.Exception.status/1\` says — measured on a booted app: \`400 "Bad Request"\`,
+  with NO \`errors[]\` and no pointer.  So the app refused a request its own spec
+  says answers 422, on a rung with nothing a client can bind to.  The
+  controller-edge \`__cast_path_id\` plug routes it here instead, so the answer is
+  the same §3.2 \`errors[]\` envelope the body tier emits (\`pointer: "/id"\`) and
+  the same 422 the other four backends already answer.
+  """
+  def invalid_path_id_response(conn, param) do
+    send_validation_problem(conn, [%{pointer: pointer_of([param]), message: "Expected UUID."}])
+  end
+
+  @doc """
   Send a 404 ProblemDetails response for a missing record.
   """
   def not_found_response(conn, kind, id) do
-    problem_response(conn, ${notFoundStatus}, ${JSON.stringify(errorTitle("NotFound"))}, "#{kind} #{id} not found")
+    problem_response(conn, ${notFoundStatus}, ${JSON.stringify(problemTitle(notFoundStatus))}, "#{kind} #{id} not found")
   end
 
   @doc """
@@ -393,18 +405,63 @@ ${classifyArms}
   # Internal helpers — Ecto.Changeset error → RFC 6901 pointer + message.
   # ---------------------------------------------------------------------------
 
+  # Collect EVERY error a changeset tree carries, as \`%{pointer, message}\` maps
+  # whose pointer names the full path to the offending field.
+  #
+  # \`changeset.errors\` holds the TOP LEVEL ONLY.  A \`cast_embed\` / \`cast_assoc\`
+  # child (a containment part, a value-object collection row) keeps its errors on
+  # its OWN changeset, parked under \`changes\`, and a collection parks a LIST of
+  # them — so the flat walk this replaces answered 422 with \`errors: []\` for a
+  # nested violation: a body the frontend ACL cannot bind to any control, and the
+  # only one of the five backends that could not name the field it rejected
+  # (.NET's \`PointerOf\`, node's \`pointerOf(issue.path)\` and python's
+  # \`_pointer(loc)\` all walk the whole path).
+  #
+  # The parent's field — and, inside a collection, the child's INDEX — is
+  # prefixed onto each child pointer, so \`/lines/0/qty\` comes out as an RFC 6901
+  # pointer rather than java's \`/lines[0].qty\`.
+  defp collect_changeset_errors(%Ecto.Changeset{} = changeset, prefix) do
+    own =
+      changeset.errors
+      |> Enum.map(&render_changeset_error(&1, prefix))
+      |> Enum.reject(&is_nil/1)
+
+    own ++ Enum.flat_map(changeset.changes, &collect_nested_errors(&1, prefix))
+  end
+
+  defp collect_nested_errors({field, %Ecto.Changeset{} = child}, prefix) do
+    collect_changeset_errors(child, prefix ++ [field])
+  end
+
+  defp collect_nested_errors({field, values}, prefix) when is_list(values) do
+    values
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {%Ecto.Changeset{} = child, index} -> collect_changeset_errors(child, prefix ++ [field, index])
+      {_other, _index} -> []
+    end)
+  end
+
+  defp collect_nested_errors(_change, _prefix), do: []
+
   # Ecto.Changeset.errors is a list of \`{field, {message, opts}}\`
   # tuples.  Convert each to the cross-backend \`%{pointer, message}\`
-  # map: pointer is "/<camelizedField>", message has the \`%{key}\`
-  # placeholders interpolated from \`opts\` (matching the
+  # map: pointer is "/<camelizedField>" under the caller's path prefix, message
+  # has the \`%{key}\` placeholders interpolated from \`opts\` (matching the
   # \`Ecto.Changeset.traverse_errors/2\` substitution).
-  defp render_changeset_error({field, {msg, opts}}) do
+  #
+  # A VALUE OBJECT is not an embed — it persists as one jsonb \`:map\` column, so
+  # its validating constructor runs under \`validate_change/3\` and there is no
+  # child changeset for the walk above to find.  It therefore hands its inner
+  # field path forward on the \`loom_path\` opt, which is spliced in here so
+  # \`/sku/code\` comes out rather than the whole object's \`/sku\`.
+  defp render_changeset_error({field, {msg, opts}}, prefix) do
     interpolated =
       Enum.reduce(opts, msg, fn {key, value}, acc ->
         String.replace(acc, "%{#{key}}", error_opt_to_string(value))
       end)
 
-    base = %{pointer: pointer_of([field]), message: ${
+    base = %{pointer: pointer_of(prefix ++ [field] ++ Keyword.get(opts, :loom_path, [])), message: ${
       localizeMessages ? "localize(Keyword.get(opts, :loom_code), interpolated)" : "interpolated"
     }}
 
@@ -417,7 +474,7 @@ ${classifyArms}
     end
   end
 
-  defp render_changeset_error(_), do: nil${localizeFn}
+  defp render_changeset_error(_error, _prefix), do: nil${localizeFn}
 
   # Interpolate an Ecto error opt value into the message.  Enum.reduce above
   # evaluates this for EVERY opt (even ones whose placeholder isn't in the
@@ -435,9 +492,9 @@ ${classifyArms}
   # shape the schemas emit); RFC 6901 escapes apply (\`~\` → \`~0\`,
   # \`/\` → \`~1\`).
   #
-  # The only caller passes a one-element list (\`[field]\`), so an empty-list
-  # clause would be dead code — Elixir 1.18's compiler flags unreachable
-  # clauses, which \`--warnings-as-errors\` rejects.
+  # Every caller passes a NON-EMPTY list, so an empty-list clause would be dead
+  # code — Elixir 1.18's compiler flags unreachable clauses, which
+  # \`--warnings-as-errors\` rejects.
   defp pointer_of(segments) do
     encoded =
       segments
@@ -468,4 +525,51 @@ ${classifyArms}
   end
 end
 `;
+}
+
+/** The controller-edge guard for a MALFORMED path `{id}`.
+ *
+ *  `GET /api/orders/not-a-uuid` is a WIRE-VALIDATION failure on every backend:
+ *  Hono's `z.string().uuid()` param → `defaultHook`, .NET's `[FromRoute] Guid`
+ *  → `InvalidModelStateResponseFactory`, java's
+ *  `MethodArgumentTypeMismatchException` arm, python's `Path(pattern=…)`.  All
+ *  four answer the declared 422.  Phoenix bound the raw string and handed it to
+ *  `Repo.get/2`, where a malformed `:binary_id` raises `Ecto.Query.CastError`
+ *  out of Ecto — so the only thing that could answer was the app-global fault
+ *  floor.  Measured on a booted app, that is `400 "Bad Request"` with no
+ *  `errors[]` and no pointer (`Plug.Exception.status/1` maps `CastError` to 400):
+ *  the wrong rung, and a body naming no field.
+ *
+ *  The guard is a CONTROLLER PLUG rather than a per-action `case`: a controller
+ *  gains actions over time (`show`, `delete`, `update`, each named operation,
+ *  each `can_<op>`, `history`, the workflow-instance read) and a per-action
+ *  guard is the one the next action's emitter forgets.  `plug/1` runs ahead of
+ *  all of them, present and future, and falls through on an action whose route
+ *  binds no `{id}` (`index`, `create`, every repository find).
+ *
+ *  It is opt-in per controller — deliberately NOT emitted into the shared
+ *  `<App>Web` `controller` quote — because an api's explicit `route` list may
+ *  declare a `{id}` of its own that is not an aggregate id
+ *  (`explicit-handlers-emit.ts` splices any `{name}` straight through as a Plug
+ *  param).  The controllers that DO opt in are exactly the ones whose `{id}`
+ *  this app's own OpenAPI declares `format: uuid` (`openapi-emit.ts`
+ *  `idParamSchema`): the aggregate CRUD controller, the event-sourced aggregate
+ *  controller, and the workflow-instances reader.
+ *
+ *  @param problemDetailsAlias the alias under which the emitting controller
+ *  refers to `<App>Web.ProblemDetails` (every opting controller aliases it). */
+export function renderPathIdCastPlug(problemDetailsAlias = "ProblemDetails"): string {
+  return `  plug :__cast_path_id
+
+  # Refuse a malformed path \`{id}\` at the controller edge with the 422 this
+  # app's OpenAPI already publishes for it, rather than letting an
+  # \`Ecto.Query.CastError\` out of \`Repo.get/2\` fall to the fault floor's 400.
+  defp __cast_path_id(%Plug.Conn{path_params: %{"id" => id}} = conn, _opts) when is_binary(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, _} -> conn
+      :error -> halt(${problemDetailsAlias}.invalid_path_id_response(conn, "id"))
+    end
+  end
+
+  defp __cast_path_id(conn, _opts), do: conn`;
 }

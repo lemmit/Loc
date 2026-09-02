@@ -1,4 +1,4 @@
-// Tenancy declaration checks (multi-tenancy Phase 1a, slice 1a.3 —
+// Tenancy declaration checks (multi-tenancy —
 // docs/old/plans/multi-tenancy-implementation.md §1) — the system-level
 // `tenancy by user.<claim> of <Registry>` line.
 //
@@ -41,7 +41,7 @@ export function checkTenancyDecls(system: System, accept: ValidationAcceptor): v
 
 // ---------------------------------------------------------------------------
 // `currentUser.orgPath` / `currentUser.rootOrg` require a tenancy declaration
-// (multi-tenancy Phase 2, plans P2.1 / P2.5).  Both are derived materialized-
+// (multi-tenancy, plans /).  Both are derived materialized-
 // path members — `orgPath` is resolved per-request from the tenant registry
 // keyed by the tenancy claim, and `rootOrg` is its first segment — so without a
 // `tenancy by user.<claim> of <Registry>` line there is no claim to resolve

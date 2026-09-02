@@ -9,7 +9,9 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { hierarchyRegistry } from "../../ir/util/tenant-stance.js";
 import { AUTH_BASE_PATH } from "../../util/api-base.js";
-import { plural, upperFirst } from "../../util/naming.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
+import { devClaimFields } from "../_auth/dev-claims.js";
+import { dapperAggregateTable } from "./emit/dapper.js";
 import { renderCsType } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -31,14 +33,19 @@ import { renderCsType } from "./render-expr.js";
 // fails fast at startup if no verifier is registered (Program.cs check).
 // ---------------------------------------------------------------------------
 
-export function emitAuthFiles(sys: SystemIR, ns: string, out: Map<string, string>): void {
+export function emitAuthFiles(
+  sys: SystemIR,
+  ns: string,
+  out: Map<string, string>,
+  usingDapper = false,
+): void {
   if (!sys.user) return;
   const orgPathClaim = sys.tenancy?.claimField;
-  // Hierarchy (multi-tenancy P2.2): when the registry opts into
+  // Hierarchy (multi-tenancy): when the registry opts into
   // `tenantRegistry` (a `dataKey` column exists), `currentUser.orgPath` becomes
   // a per-request memoized read of the caller org's materialized `data_key`,
   // resolved by UserMiddleware via a scoped `IOrgPathResolver` and memoized on
-  // the request principal.  Without it (flat tenancy), the P2.1 claim-copy
+  // the request principal.  Without it (flat tenancy), the claim-copy
   // computed property stands.  `registry` (undefined ⇒ flat) is the single
   // signal both the User record and the middleware branch on.
   const registry = orgPathClaim ? hierarchyRegistry(sys) : undefined;
@@ -49,15 +56,26 @@ export function emitAuthFiles(sys: SystemIR, ns: string, out: Map<string, string
   out.set("Auth/ICurrentUserAccessor.cs", renderAccessorInterface(ns));
   out.set("Auth/HttpContextCurrentUserAccessor.cs", renderAccessorImpl(ns));
   out.set("Auth/UserMiddleware.cs", renderMiddleware(ns, !!sys.auth, orgPathClaimExpr));
-  // The registry-lookup seam (P2.2): the interface lives in Auth (where the
-  // middleware calls it); the EF implementation lives in Infrastructure/
-  // Persistence (where the DbContext + registry entity are known).  Registered
-  // in Program.cs (AddScoped) under hierarchy only.
+  // The registry-lookup seam: the interface lives in Auth (where the
+  // middleware calls it); the IMPLEMENTATION lives in Infrastructure/Persistence
+  // (where the registry's storage is known).  Registered in Program.cs
+  // (AddScoped) under hierarchy only.
+  //
+  // ONE implementation per persistence adapter.  The EF file was emitted
+  // unconditionally until #2599 pinned the fallout: it opens
+  // `using Microsoft.EntityFrameworkCore;` and takes an `AppDbContext`, so a
+  // `persistence: dapper` deployable with a `tenantRegistry` TREE failed to
+  // compile (CS0234 + 2x CS0246) — generation and the IR validator both clean.
+  // The Dapper twin reads the same `data_key` with one raw Npgsql statement.
   if (registry) {
     out.set("Auth/IOrgPathResolver.cs", renderOrgPathResolverInterface(ns));
     out.set(
-      "Infrastructure/Persistence/EfOrgPathResolver.cs",
-      renderEfOrgPathResolver(ns, registry),
+      usingDapper
+        ? "Infrastructure/Persistence/DapperOrgPathResolver.cs"
+        : "Infrastructure/Persistence/EfOrgPathResolver.cs",
+      usingDapper
+        ? renderDapperOrgPathResolver(ns, registry)
+        : renderEfOrgPathResolver(ns, registry),
     );
   }
   out.set("Auth/DevStubUserVerifier.cs", renderDevStubVerifier(sys.user, ns));
@@ -156,7 +174,7 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace ${ns}.Auth;
 
-/// <summary>Generated OIDC verifier (D-AUTH-OIDC).  Validates the bearer
+/// <summary>Generated OIDC verifier.  Validates the bearer
 /// token's signature against the issuer's JWKS (discovered + cached via
 /// <see cref="ConfigurationManager{T}"/>), checks iss / aud / exp, then
 /// projects the configured claims onto the <see cref="User"/> shape.
@@ -354,7 +372,7 @@ using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 
 namespace ${ns}.Auth;
 
-/// <summary>OIDC redirect handshake (D-AUTH-OIDC).  <c>/auth/login</c> starts
+/// <summary>OIDC redirect handshake.  <c>/auth/login</c> starts
 /// the authorization-code flow, <c>/auth/callback</c> exchanges the code and
 /// issues the local <c>session</c> cookie (read by OidcUserVerifier),
 /// <c>/auth/logout</c> clears it.  No login form — the IdP hosts the
@@ -543,12 +561,12 @@ function renderDevStubVerifier(user: UserIR, ns: string): string {
   const args = user.fields
     .map((f) => `${upperFirst(f.name)}: ${stubCsharpValueFor(f)}`)
     .join(",\n            ");
-  // Dev-claims override is limited to string-typed claims (the tenant-claim
-  // case) — a JSON string maps cleanly onto a `string` property; non-string
-  // fields keep their built-in value.
-  const stringFields = user.fields.filter(
-    (f) => !f.optional && f.type.kind === "primitive" && f.type.name === "string",
+  // Dev-claims override carries the shapes the shared classifier admits —
+  // `string` and `string[]`; every other field keeps its built-in value.
+  const claimKinds = new Map(
+    devClaimFields(user.fields).map(({ field, kind }) => [field.name, kind]),
   );
+  const stringFields = user.fields.filter((f) => claimKinds.has(f.name));
   if (stringFields.length === 0) {
     return `// Auto-generated.
 using System.Threading;
@@ -571,13 +589,33 @@ public sealed class DevStubUserVerifier : IUserVerifier
 `;
   }
   const arms = stringFields
-    .map(
-      (f) =>
-        `                    "${f.name}" => prop.Value.ValueKind == JsonValueKind.String ? user with { ${upperFirst(f.name)} = prop.Value.GetString()! } : user,`,
+    .map((f) =>
+      claimKinds.get(f.name) === "stringList"
+        ? // Element-checked: a non-array, or an array holding a non-string,
+          // leaves the field at its built-in value rather than half-filling it.
+          `                    "${f.name}" => DevClaimStringList(prop.Value) is { } __${f.name} ? user with { ${upperFirst(f.name)} = __${f.name} } : user,`
+        : `                    "${f.name}" => prop.Value.ValueKind == JsonValueKind.String ? user with { ${upperFirst(f.name)} = prop.Value.GetString()! } : user,`,
     )
     .join("\n");
+  const needsListHelper = [...claimKinds.values()].includes("stringList");
+  const listHelper = needsListHelper
+    ? `
+    private static List<string>? DevClaimStringList(JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Array) return null;
+        var items = new List<string>();
+        foreach (var element in value.EnumerateArray())
+        {
+            if (element.ValueKind != JsonValueKind.String) return null;
+            items.Add(element.GetString()!);
+        }
+        return items;
+    }
+`
+    : "";
   return `// Auto-generated.
 using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -621,7 +659,7 @@ ${arms}
         }
         return Task.FromResult<User?>(user);
     }
-}
+${listHelper}}
 `;
 }
 
@@ -676,23 +714,23 @@ function renderUserRecord(
     })
     .join(", ");
   // Derived `currentUser.orgPath` — the caller's tenant materialized path
-  // (multi-tenancy Phase 2).  A member (not a positional param), so every
+  // (multi-tenancy).  A member (not a positional param), so every
   // construction site (dev stub / OIDC verifier) is untouched.
   //
-  //  - flat tenancy (P2.1): a computed property whose interpolation
+  //  - flat tenancy: a computed property whose interpolation
   //    stringifies the tenancy claim null-safely (the root-segment path).
-  //  - hierarchy (P2.2): a settable slot backed by `_orgPath`, defaulting to
+  //  - hierarchy: a settable slot backed by `_orgPath`, defaulting to
   //    the claim (so a use site is never null) — UserMiddleware resolves the
   //    caller org's registry `data_key` once per request and memoizes it here.
   //    On a missing row / dataKey the slot stays unset ⇒ the claim fallback,
   //    fail-safe (never null/crash).
-  // `currentUser.rootOrg` (P2.5): the ROOT-org segment — the first segment of
+  // `currentUser.rootOrg`: the ROOT-org segment — the first segment of
   // `OrgPath` (up to the first `.`).  A computed property off `OrgPath` (pure,
   // no extra read), so it is correct under both flat and hierarchy tenancy and
   // anchors the `global` read level's root-subtree widening.
   const rootOrgProp = `
     /// <summary>The caller's ROOT-org segment (<c>currentUser.rootOrg</c>) —
-    /// the first segment of <c>OrgPath</c> (multi-tenancy Phase 2, P2.5).</summary>
+    /// the first segment of <c>OrgPath</c> (multi-tenancy).</summary>
     public string RootOrg
     {
         get
@@ -711,7 +749,7 @@ function renderUserRecord(
     /// <summary>The caller's tenant materialized path
     /// (<c>currentUser.orgPath</c>) — the caller org's registry <c>data_key</c>,
     /// resolved once per request by UserMiddleware and memoized here
-    /// (multi-tenancy Phase 2, P2.2).  Falls back to the tenancy claim (the
+    /// (multi-tenancy).  Falls back to the tenancy claim (the
     /// root-segment path) until the resolver sets it, or when the caller's row
     /// has no <c>data_key</c> — never null.</summary>
     public string OrgPath
@@ -725,7 +763,7 @@ ${rootOrgProp}
 {
     /// <summary>The caller's tenant materialized path
     /// (<c>currentUser.orgPath</c>) — derived per-request from the tenancy
-    /// claim (multi-tenancy Phase 2, P2.1).</summary>
+    /// claim (multi-tenancy).</summary>
     public string OrgPath => $"{${upperFirst(orgPathClaim)}}";
 ${rootOrgProp}
 }`;
@@ -825,14 +863,14 @@ function renderMiddleware(ns: string, oidc: boolean, orgPathClaimExpr?: string):
         "${AUTH_BASE_PATH}/logout",
         "${AUTH_BASE_PATH}/refresh",`
     : "";
-  // Hierarchy (multi-tenancy P2.2): method-inject the scoped `IOrgPathResolver`
+  // Hierarchy (multi-tenancy): method-inject the scoped `IOrgPathResolver`
   // and, once the principal is attached, resolve the caller org's materialized
   // `data_key` and memoize it on the request principal.  `null` (missing row /
   // dataKey / parse failure) leaves OrgPath at its claim fallback — fail-safe.
   const resolverParam = orgPathClaimExpr ? ", IOrgPathResolver orgPathResolver" : "";
   const orgPathResolve = orgPathClaimExpr
     ? `
-        // Hierarchy (multi-tenancy P2.2): resolve the caller org's materialized
+        // Hierarchy (multi-tenancy): resolve the caller org's materialized
         // \`data_key\` once per request and memoize it on the principal; a
         // missing row / dataKey (or any failure) leaves OrgPath at its claim
         // fallback — fail-safe, never null/crash.
@@ -925,7 +963,7 @@ public sealed class UserMiddleware
 }
 
 /** The C# expression reading the tenancy claim off the resolved principal, as
- *  a `string` argument to `IOrgPathResolver.ResolveAsync` (multi-tenancy P2.2).
+ *  a `string` argument to `IOrgPathResolver.ResolveAsync` (multi-tenancy).
  *  A `string` claim reads directly (`user.TenantId`); any other declared claim
  *  type stringifies (`user.TenantId.ToString()`) so the resolver's id-wrapping
  *  parses it uniformly. */
@@ -936,7 +974,7 @@ function userClaimExpr(user: UserIR, claimField: string): string {
   return isString ? prop : `${prop}.ToString()`;
 }
 
-/** `Auth/IOrgPathResolver.cs` — the registry-lookup seam (multi-tenancy P2.2).
+/** `Auth/IOrgPathResolver.cs` — the registry-lookup seam (multi-tenancy).
  *  The interface lives beside the middleware that calls it; the EF
  *  implementation (which knows the DbContext + registry entity) lives in
  *  Infrastructure/Persistence. */
@@ -949,7 +987,7 @@ namespace ${ns}.Auth;
 
 /// <summary>Resolves the caller's tenant materialized path
 /// (<c>currentUser.orgPath</c>) from the registry's <c>data_key</c> column,
-/// keyed by the tenancy claim (multi-tenancy Phase 2, P2.2).  UserMiddleware
+/// keyed by the tenancy claim (multi-tenancy).  UserMiddleware
 /// calls it once per request and memoizes the result on the principal;
 /// <c>null</c> (missing row / <c>data_key</c> / unparseable claim) means "fall
 /// back to the claim" — the fail-safe root-segment path.</summary>
@@ -961,7 +999,7 @@ public interface IOrgPathResolver
 }
 
 /** `Infrastructure/Persistence/EfOrgPathResolver.cs` — the EF-backed
- *  `IOrgPathResolver` (multi-tenancy P2.2).  Reads the caller org's
+ *  `IOrgPathResolver` (multi-tenancy).  Reads the caller org's
  *  materialized `data_key` (`SELECT data_key FROM <registry> WHERE id =
  *  @claim`) via the request-scoped `AppDbContext`, ignoring the registry's
  *  own self-scope query filter (an explicit id lookup).  Every failure path —
@@ -984,9 +1022,9 @@ using ${ns}.Domain.Ids;
 
 namespace ${ns}.Infrastructure.Persistence;
 
-/// <summary>EF-backed <see cref="IOrgPathResolver"/> (multi-tenancy Phase 2,
-/// P2.2).  Reads the caller org's materialized <c>data_key</c> from the
-/// registry table keyed by the tenancy claim, memoized per request by
+/// <summary>EF-backed <see cref="IOrgPathResolver"/> (multi-tenancy).  Reads
+/// the caller org's materialized <c>data_key</c> from the registry table
+/// keyed by the tenancy claim, memoized per request by
 /// UserMiddleware.  Ignores the registry's own self-scope query filter (an
 /// explicit id lookup) and returns <c>null</c> on any failure — an unparseable
 /// claim, a missing row, a null <c>data_key</c>, or a DB error — so the caller
@@ -1019,8 +1057,95 @@ ${wrap}
 `;
 }
 
+/** `Infrastructure/Persistence/DapperOrgPathResolver.cs` — the raw-Npgsql
+ *  `IOrgPathResolver` (multi-tenancy), the `persistence: dapper` twin of
+ *  `renderEfOrgPathResolver`.  Identical CONTRACT — read the caller org's
+ *  materialized `data_key` keyed by the tenancy claim, ignore the registry's
+ *  own self-scope filter (this is an explicit id lookup, and the Dapper
+ *  adapter's filters live in the repositories, not here), and yield `null` on
+ *  every failure path so the middleware falls back to the claim.  Emitting the
+ *  EF file regardless of adapter does not compile on a Dapper deployable: no
+ *  `Microsoft.EntityFrameworkCore`, no `AppDbContext`. */
+function renderDapperOrgPathResolver(ns: string, registry: AggregateIR): string {
+  const table = dapperAggregateTable(registry.name);
+  const dataKeyColumn = snake("dataKey");
+  // The claim is bound as the RAW scalar (Dapper has no id-value-type handler),
+  // guarded so a malformed claim fails safe — the raw-parameter mirror of the
+  // EF path's `idWrapForClaim` strong-id wrap.
+  const wrap = rawIdWrapForClaim(registry.idValueType);
+  return `// Auto-generated.  Dapper \`IOrgPathResolver\` (persistence: dapper).
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Dapper;
+using Npgsql;
+using ${ns}.Auth;
+
+namespace ${ns}.Infrastructure.Persistence;
+
+/// <summary>Dapper-backed <see cref="IOrgPathResolver"/> (multi-tenancy).
+/// Reads the caller org's materialized <c>${dataKeyColumn}</c> from the
+/// registry table keyed by the tenancy claim, memoized per request by
+/// UserMiddleware.  Returns <c>null</c> on any failure — an unparseable claim, a
+/// missing row, a null <c>${dataKeyColumn}</c>, or a DB error — so the caller
+/// falls back to the claim (the fail-safe root-segment path).</summary>
+public sealed class DapperOrgPathResolver : IOrgPathResolver
+{
+    private readonly NpgsqlDataSource _db;
+
+    public DapperOrgPathResolver(NpgsqlDataSource db) => _db = db;
+
+    public async Task<string?> ResolveAsync(string claim, CancellationToken cancellationToken)
+    {
+${wrap}
+        try
+        {
+            await using var conn = await _db.OpenConnectionAsync(cancellationToken);
+            return await conn.ExecuteScalarAsync<string?>(new CommandDefinition(
+                "SELECT ${dataKeyColumn} FROM ${table} WHERE id = @id",
+                new { id },
+                cancellationToken: cancellationToken));
+        }
+#pragma warning disable CA1031 // a lookup failure falls back to the claim, never 500
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            return null;
+        }
+    }
+}
+`;
+}
+
+/** The C# guard + `var id = …` binding the string tenancy claim to the RAW
+ *  scalar Dapper parameterizes with (the Dapper twin of `idWrapForClaim`, which
+ *  wraps into the strongly-typed id class EF's LINQ comparison needs).  Guarded
+ *  parses (guid / int / long) short-circuit to `null` on a bad claim; a string
+ *  id is the key verbatim. */
+function rawIdWrapForClaim(idValueType: string): string {
+  const parser =
+    idValueType === "guid"
+      ? "Guid.TryParse"
+      : idValueType === "int"
+        ? "int.TryParse"
+        : idValueType === "long"
+          ? "long.TryParse"
+          : null;
+  if (!parser) {
+    return `        if (string.IsNullOrEmpty(claim))
+        {
+            return null;
+        }
+        var id = claim;`;
+  }
+  return `        if (string.IsNullOrEmpty(claim) || !${parser}(claim, out var id))
+        {
+            return null;
+        }`;
+}
+
 /** The C# guard + `var id = …` that wraps the string tenancy claim to the
- *  registry's strongly-typed id (multi-tenancy P2.2).  Guarded parses (guid /
+ *  registry's strongly-typed id (multi-tenancy).  Guarded parses (guid /
  *  int / long) short-circuit to `null` on a bad claim; a string id needs no
  *  parse.  Mirrors the derived self-scope's binding (`Guid.Parse`), fail-safe. */
 function idWrapForClaim(idValueType: string, idClass: string): string {

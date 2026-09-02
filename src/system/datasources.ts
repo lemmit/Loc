@@ -8,7 +8,7 @@ import { isRelational } from "../util/source-types.js";
 // `.loom/datasources.md` — a derived markdown view of how `dataSource`
 // declarations route domain contexts to physical storage.
 //
-// The Phase B / C / D validators (`src/ir/validate/validate.ts` +
+// The dataSource validators (`src/ir/validate/validate.ts` +
 // `src/language/validators/datasource.ts`) catch errors against this
 // graph; this artifact catches *intent drift* — a reviewer skimming
 // a PR diff can see "before" vs. "after" of the resolved routing

@@ -1,13 +1,16 @@
 import type { ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
+  DATA_KEY_LIKE_ESCAPE,
   DATA_KEY_PATH_DELIMITER,
+  deepScopeAnchorClaim,
   guidClaimAccessorName,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import type { DurationUnit } from "../../util/temporal.js";
+import { javaSubtreeLikePattern, spelSubtreeLikePattern } from "../_expr/subtree-like.js";
 
 // ---------------------------------------------------------------------------
 // Find-filter → JPQL renderer.  Spring Data derived method names can't
@@ -38,6 +41,78 @@ export interface JpqlCtx {
   alias: string;
   /** Fully-qualified package of the generated enums (for enum literals). */
   enumsPkg: string;
+  /** When present, a `currentUser.<claim>` reference renders as a PLAIN JPQL
+   *  named parameter (`:__cuTenantId`) instead of the Spring Data SpEL bean
+   *  form, and the accessor it needs is recorded here for the caller to bind.
+   *  `EntityManager.createQuery` has no SpEL layer — `:#{…}` is not a legal
+   *  parameter name there — so the reads that build JPQL directly (query-time
+   *  projection aggregations) bind the principal themselves. */
+  principalAccessors?: Set<string>;
+}
+
+/** Marker prefix for a recorded binding that is not a bare claim read but the
+ *  DERIVED subtree-LIKE pattern built from one (`<anchor escaped>.%`).  The
+ *  SpEL form builds that pattern inside the `:#{…}` expression; a
+ *  `principalAccessors` caller has no SpEL layer, so the pattern has to be
+ *  computed in Java at the bind site instead — see {@link principalBindExpr}. */
+const SUBTREE_LIKE_BIND = "subtreeLike:";
+
+/** JPQL parameter name for a recorded `JpqlCtx.principalAccessors` binding —
+ *  a bare claim accessor, or a `subtreeLike:<accessor>` derived pattern.
+ *  Prefixed so it cannot collide with a find's own `:param` bindings. */
+export function principalParamName(entry: string): string {
+  const derived = entry.startsWith(SUBTREE_LIKE_BIND);
+  const accessor = derived ? entry.slice(SUBTREE_LIKE_BIND.length) : entry;
+  const cap = `${accessor.charAt(0).toUpperCase()}${accessor.slice(1)}`;
+  return derived ? `__cuSubtree${cap}` : `__cu${cap}`;
+}
+
+/** The Java expression a `principalAccessors` caller binds one recorded entry
+ *  with, given the name of its nullable principal local.  Keeping it here —
+ *  beside the renderer that recorded the entry — is what stops the two halves
+ *  from drifting: a new derived binding kind adds an arm here rather than
+ *  needing every call site to learn about it. */
+export function principalBindExpr(entry: string, principalVar: string): string {
+  if (entry.startsWith(SUBTREE_LIKE_BIND)) {
+    const accessor = entry.slice(SUBTREE_LIKE_BIND.length);
+    const read = `${principalVar}.${accessor}()`;
+    // Null anchor ⇒ null pattern ⇒ `like null` is UNKNOWN, i.e. fail-closed —
+    // exactly what the safe-navigated SpEL chain yields for an absent
+    // principal, and what the anchored `locate(...)` recheck beside it does.
+    return `${principalVar} == null || ${read} == null ? null : ${javaSubtreeLikePattern(read)}`;
+  }
+  return `${principalVar} == null ? null : ${principalVar}.${entry}()`;
+}
+
+/** Render a `currentUser.<accessor>` reference for `ctx`: a bound named
+ *  parameter when the caller opted into `principalAccessors`, else the Spring
+ *  Data SpEL bean read. */
+function renderPrincipal(accessor: string, ctx: JpqlCtx): string {
+  if (ctx.principalAccessors) {
+    ctx.principalAccessors.add(accessor);
+    return `:${principalParamName(accessor)}`;
+  }
+  return `:#{@${CURRENT_USER_BEAN}.user()?.${accessor}()}`;
+}
+
+/** The deep/global-scope sargable prefilter's LIKE pattern.  Two spellings,
+ *  because the two modes have different parameter layers under them:
+ *
+ *   - `@Query` (Spring Data) — SpEL builds the escape chain inside the
+ *     `:#{…}` parameter expression.
+ *   - `EntityManager.createQuery` (`principalAccessors`) — there IS no SpEL
+ *     layer, and `:#{…}` is not a legal HQL parameter name: Hibernate throws
+ *     at parse and every read over the scoped aggregate 500s.  So the pattern
+ *     is recorded as a derived binding and computed in Java at the
+ *     `setParameter` site, exactly as the plain claims already are.
+ *     (The .NET twin splits the same way on `ctx.efQuery`.) */
+function renderSubtreeLikePattern(accessor: string, ctx: JpqlCtx): string {
+  if (ctx.principalAccessors) {
+    const entry = `${SUBTREE_LIKE_BIND}${accessor}`;
+    ctx.principalAccessors.add(entry);
+    return `:${principalParamName(entry)}`;
+  }
+  return `:#{${spelSubtreeLikePattern(`@${CURRENT_USER_BEAN}.user()?.${accessor}()`)}}`;
 }
 
 // JPQL-side scalar-intrinsic snippets (src/util/intrinsics.ts) — how a
@@ -108,7 +183,7 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
       // `currentUser.<field>` → SpEL reading the ambient request principal off
       // the CurrentUserAccessor bean (null-safe → fail-closed).
       if (e.receiver.kind === "ref" && e.receiver.refKind === "current-user") {
-        return `:#{@${CURRENT_USER_BEAN}.user()?.${e.member}()}`;
+        return renderPrincipal(e.member, ctx);
       }
       // Property navigation: `this.shipTo.city` → `e.shipTo.city`
       // (embedded path).  JPQL navigates record components by name.
@@ -125,11 +200,11 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
       // so a missing arm is a `tsc` error here, not a silent authorization
       // bypass.
       switch (e.filter.kind) {
-        // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false
+        // DENY carve-out (authorization — deny-wins).  An always-false
         // JPQL predicate; no row satisfies `1 = 0`.
         case "deny":
           return "1 = 0";
-        // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) —
+        // `deep`/`global` read level (multi-tenancy) —
         // descendant-or-self materialized-path scope with the NULL-dataKey
         // fallback to the tenant floor (see `DEEP_SCOPE_SEMANTICS`).  The
         // principal claims render as the same null-safe SpEL accessors the
@@ -147,7 +222,18 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
           // portable anchored position test (→ Postgres `position(search in
           // source)`) and has no pattern language, matching how
           // `string.startsWith` lowers in JPQL_INTRINSICS.
-          const descendant = `locate(concat(${org}, '${DATA_KEY_PATH_DELIMITER}'), ${col}) = 1`;
+          const anchored = `locate(concat(${org}, '${DATA_KEY_PATH_DELIMITER}'), ${col}) = 1`;
+          // SARGABLE PREFILTER (M-T3.17).  `locate(...) = 1` is a function of
+          // the column, so Postgres cannot use the `data_key text_pattern_ops`
+          // index for it and every deep/global read seq-scans.  A prefix `like`
+          // IS what that opclass indexes, so it goes IN FRONT of the anchored
+          // test as a prefilter, with the anchored test kept as the recheck: an
+          // escaping slip in the pattern could only WIDEN the prefilter, and
+          // the recheck still decides the row, so `acme_corp` can never reach
+          // `acmeXcorp.…`.  The pattern is safe-navigated in both modes, so an
+          // absent principal yields a null pattern → `like null` → no rows.
+          const pattern = renderSubtreeLikePattern(deepScopeAnchorClaim(e), ctx);
+          const descendant = `(${col} like ${pattern} escape '${DATA_KEY_LIKE_ESCAPE}' and ${anchored})`;
           return (
             `(${col} is not null and (${col} = ${org} or ${descendant})) ` +
             `or (${col} is null and ${tenantCol} = ${tenant})`
@@ -162,7 +248,7 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
     case "method-call": {
       // (The `deep` / DENY authorization filter sentinels moved to the
       // discriminated `authz-filter` kind in M-T9.9 — handled in its own case
-      // above, no longer a `method-call` marker here.)
+      // above, not a `method-call` marker here.)
       // Reference-collection membership: `this.<refColl>.contains(x)`.  The
       // collection is an `@ElementCollection` of an embeddable id
       // (`PokemonId(UUID value)`), so `:x member of e.<refColl>` throws at
@@ -263,7 +349,7 @@ function renderBinary(e: Extract<ExprIR, { kind: "binary" }>, ctx: JpqlCtx): str
   }
   const op = jpqlOp(e.op);
   // Self-id vs principal-claim comparison (`this.id == currentUser.<claim>` —
-  // the derived tenancy registry self-scope, Phase 1b).  The entity key is an
+  // the derived tenancy registry self-scope).  The entity key is an
   // `@EmbeddedId` record (`OrganizationId(UUID value)`), so the comparison
   // navigates into its component (`e.id.value`) and the SpEL principal side
   // binds the claim AS the id's value type: a same-typed claim binds directly
@@ -287,7 +373,7 @@ function renderBinary(e: Extract<ExprIR, { kind: "binary" }>, ctx: JpqlCtx): str
         idType.valueType === "guid" && claimIsString
           ? guidClaimAccessorName(claim.member)
           : claim.member;
-      const spel = `:#{@${CURRENT_USER_BEAN}.user()?.${accessor}()}`;
+      const spel = renderPrincipal(accessor, ctx);
       return idSide === e.left ? `${idPath} ${op} ${spel}` : `${spel} ${op} ${idPath}`;
     }
   }

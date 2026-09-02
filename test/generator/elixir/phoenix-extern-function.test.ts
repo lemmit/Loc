@@ -27,8 +27,10 @@ const SOURCE = `system MiniLiveView {
     function initials(name: string): string extern from "helpers/format"
     page Home { route: "/" body: Heading { initials("Ada Lovelace") } }
   }
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
   deployable phoenixApp {
-    platform: elixir, contexts: [Sales], serves: SalesApi, ui: SalesAdmin, port: 4000
+    platform: elixir, contexts: [Sales], dataSources: [salesState], serves: SalesApi, ui: SalesAdmin, port: 4000
   }
 }
 `;

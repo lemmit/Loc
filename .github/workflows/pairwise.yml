@@ -1,0 +1,266 @@
+name: Pairwise combination corpus
+
+# M-T9.29 — the FEATURE-INTERSECTION oracle.
+#
+# The curated corpus (`test/fixtures/corpus/`) is one fixture per FEATURE, and
+# its five compile gates (corpus-build, corpus-elixir-build, dotnet-build,
+# java-build, python-build) already run per-PR on all five backends.  That tier
+# is solid for a feature in isolation.  It is structurally blind to the bug
+# class that lives where two ordinary features MEET — #2412 (`mask unless` ×
+# `audited`), #2387 / #2391 (`audited` × dapper × document / eventLog), #2321
+# (`versioned` × a like-named column), #2492 (`policy { deny }` × dapper).
+# Every one of those is a two-factor interaction that no single-feature fixture
+# crosses, and an all-pairs cover finds every two-factor bug in ~25 cases
+# instead of 200.
+#
+# WHY THIS FILE EXISTS AT ALL.  The harness (`test/pairwise/`) and all three
+# oracles shipped in slice 1 and then ran NOWHERE: `grep -rn 'test:pairwise'
+# .github/workflows/` matched nothing, so no workflow invoked any of the three
+# npm scripts — not per-PR, not nightly, not even `workflow_dispatch`.  It ran
+# only when a human typed it.  (Grep for the npm SCRIPT, not for
+# `LOOM_PAIRWISE`: the env var is set inside package.json's script, so a
+# workflow that runs the gate correctly never mentions the variable — the
+# sibling `schema-load.yml` looks dark by that reading and is not.)  These
+# registers
+# ratchet in both directions (an unwaived crash fails; a waiver that stops
+# matching fails as stale), and the second direction is the one a dark gate
+# silently forfeits: the first re-run after three weeks of `main` found FOUR
+# stale waivers — F1 fixed by #2527, F2 + F5 by #2528 — so `main` had been red
+# on this leg since those PRs landed and nothing said so.  A ratchet nothing
+# runs is a comment.  See docs/audits/pairwise-corpus-findings-2026-08.md
+# ("Re-run on `main` @ 3a7199c7").
+#
+# TIERS, and why they differ.  The three legs have genuinely different costs:
+#
+#   generation   — ~700 crossings through phases ①–⑦ + codegen, no toolchain,
+#                  ~19s.  PER-PR.  Its `crashed` verdict (valid-looking source
+#                  that takes the compiler down instead of answering with a
+#                  named `loom.*` diagnostic) is the highest-signal finding
+#                  class in the repo, and it is cheap enough to owe every PR.
+#   tsc          — 25 cases, each an `npm install` + strict `tsc --noEmit` over
+#                  the emitted node project, ~3min.  Nightly + label + dispatch.
+#   schema-load  — 25 cases, `psql -f` the emitted migration chain into a
+#                  throwaway database, ~1min + a postgres service.  Nightly +
+#                  label + dispatch, alongside tsc.
+#
+# The node-only compile leg is slice 1's deliberate scope ("this slice's job is
+# to prove the harness earns them").  The dotnet / java / python / elixir
+# compile legs are the named follow-up; they need their toolchain containers,
+# which the five per-backend build workflows already stand up.
+#
+# Local: `npm run test:pairwise-corpus` / `-tsc` / `-schema-load`.
+# Findings register: docs/audits/pairwise-corpus-findings-2026-08.md.
+# Waiver registers: test/pairwise/waivers{,-tsc,-schema}.ts — all three ratchet.
+
+on:
+  push:
+    branches: [main]
+    paths: &pairwise_paths
+      # Every phase a crossing walks (parse → macro expand → lower → enrich →
+      # IR validate → compose), plus every emitter the cover reaches and the
+      # harness itself.  Same path-coverage discipline as the corpus gates —
+      # pinned by test/system/workflow-path-coverage.test.ts.
+      - 'src/language/**'
+      - 'src/macros/**'
+      - 'src/ir/**'
+      - 'src/system/**'
+      - 'src/util/**'
+      - 'src/generator/**'
+      - 'src/platform/**'
+      - 'test/pairwise/**'
+      - 'test/e2e/pairwise-corpus.test.ts'
+      - 'test/e2e/pairwise-corpus-tsc.test.ts'
+      - 'test/e2e/pairwise-corpus-schema-load.test.ts'
+      - 'test/e2e/support/migration-evolution-harness.ts'
+      - 'package.json'
+      - '.github/workflows/pairwise.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    paths: *pairwise_paths
+  schedule:
+    - cron: '0 3 * * *'      # 03:00 UTC nightly — an hour ahead of schemathesis
+  workflow_dispatch:
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # PER-PR.  Seconds, no toolchain — every PR that touches the pipeline owes it.
+  # ---------------------------------------------------------------------------
+  generation:
+    name: generation sweep (all crossings, 5 backends)
+    # Draft-gated like every other per-PR fan-out job (docs/ci-gating.md →
+    # "Draft PRs and the runner queue").  Spelled out rather than inherited:
+    # `draft-gate.test.ts` classifies a workflow carrying `labeled:` in its
+    # `types:` as label-opt-in and does NOT require the gate here, so this job
+    # would otherwise rejoin the draft fan-out unchecked — the precise rot that
+    # suite's header warns about.
+    #
+    # It deliberately does NOT also skip the `labeled` event, though skipping
+    # looks right (the label exists for the heavy legs below, and re-running a
+    # per-PR job on it is redundant).  That version SILENTLY LOST THE JOB on
+    # #2690: `concurrency.cancel-in-progress` means the `labeled` run cancels
+    # the `opened` run, and the `labeled` run then skipped generation — so on
+    # any PR that gets a label after opening, the per-PR sweep never ran at all,
+    # and `pr-gate` only sees what actually ran.  Nineteen seconds of duplicate
+    # work is the cheaper mistake.
+    if: >
+      github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install toolchain deps
+        run: npm ci
+      - name: Build toolchain
+        run: npm run build
+      - name: Sweep every crossing for an ANSWER, not an exception
+        run: npm run test:pairwise-corpus
+        env:
+          LOOM_PAIRWISE_REPORT: ${{ runner.temp }}/pairwise-report.txt
+      - name: Upload the per-crossing verdict census
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pairwise-generation-census
+          path: ${{ runner.temp }}/pairwise-report.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # NIGHTLY / label / dispatch — the COMPILE oracle, one cell per backend.
+  #
+  # Slice 1 ran this on node alone, which is the tier blind to its own
+  # motivating class: every recorded intersection bug GENERATED cleanly and
+  # failed to compile somewhere OTHER than node (#2412 .NET CS0128 + Python
+  # F821, #2387/#2391 uncompilable .NET, #2181 .NET /warnaserror).  Node is also
+  # the backend a fix lands on first, so it is the one most likely to be already
+  # green — measured again on this leg's first five-backend run, which found
+  # 7 python, 1 .NET and 1 elixir compile failure with node and java clean.
+  # The elixir one surfaced only after a SECOND harness fix: each leg truncated
+  # the captured log to its first 4000 characters and a compiler prints its
+  # diagnostic LAST, so a real finding read as progress noise for three runs.
+  #
+  # `fail-fast: false` — each cell is an independent backend verdict, and one
+  # backend's toolchain trouble must not hide another's real finding.
+  #
+  # dotnet / java / elixir shell out to their own toolchain CONTAINER (the same
+  # images docs/tools.md documents), so they need only docker, which the runner
+  # has; python needs `uv` on the host.  A cell that cannot reach its toolchain
+  # now fails as a HARNESS FAULT rather than as 25 fake findings — see the
+  # infra-vs-finding classifier in test/pairwise/compile-leg.ts.
+  # ---------------------------------------------------------------------------
+  compile:
+    name: compile oracle (${{ matrix.backend }})
+    if: >
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      github.event_name == 'merge_group' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'run-pairwise'))
+    runs-on: ubuntu-latest
+    # 150min, not 60: the elixir cell MEASURED 78min for its full cover on an
+    # uncontended sandbox with a warm hex archive, and a CI runner starts cold.
+    # The first budget here was 60min, sized from a single-case extrapolation
+    # (81s x 25) that was wrong by more than 2x — every case rebuilds the whole
+    # dependency tree from source, because `deps/` and `_build/` are NOT shared
+    # across cases the way the node leg shares `node_modules`.  Sharing them
+    # (hash `mix.exs`, mount both) is the obvious follow-up and would cut this
+    # cell by most of its runtime; until then the budget has to match reality.
+    # The other four cells finish in single-digit minutes and are unaffected.
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # MEASURED wall-clocks, not estimates: node ~2.8min, python ~3min,
+          # dotnet ~4.5min, java ~4.4min (all warm, contended sandbox);
+          # elixir 78min uncontended with a warm hex archive.
+          - backend: node
+            script: test:pairwise-corpus-tsc
+          - backend: python
+            script: test:pairwise-corpus-python
+          - backend: dotnet
+            script: test:pairwise-corpus-dotnet
+          - backend: java
+            script: test:pairwise-corpus-java
+          - backend: elixir
+            script: test:pairwise-corpus-elixir
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install uv (python leg only)
+        if: matrix.backend == 'python'
+        uses: astral-sh/setup-uv@v5
+      - name: Install toolchain deps
+        run: npm ci
+      - name: Build toolchain
+        run: npm run build
+      - name: Compile the emitted project for every cover case
+        run: npm run ${{ matrix.script }}
+        env:
+          # Every leg is gated on LOOM_PAIRWISE plus its own backend var; the
+          # npm scripts set both, so nothing extra is needed here.  The elixir
+          # leg's hex mirror is a SANDBOX workaround for a TLS-fingerprinting
+          # egress proxy — CI runners reach hex.pm directly, so it stays off.
+          LOOM_PAIRWISE: '1'
+
+  # ---------------------------------------------------------------------------
+  # NIGHTLY / label / dispatch.  The emitted DDL is data — no compiler reads it,
+  # so only Postgres can say whether it is accepted.
+  # ---------------------------------------------------------------------------
+  schema-load:
+    name: schema-load oracle (psql the emitted chain)
+    if: >
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      github.event_name == 'merge_group' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'run-pairwise'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install toolchain deps
+        run: npm ci
+      - name: Build toolchain
+        run: npm run build
+      # `psql` is preinstalled on ubuntu-latest (the migration-evolution and
+      # tenancy-hierarchy gates rely on the same).  The harness drops+creates its
+      # own throwaway databases, so the URL supplies host/port/credentials only.
+      - name: Load every emitted migration chain into Postgres
+        run: npm run test:pairwise-corpus-schema-load
+        env:
+          LOOM_MIGRATION_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/app

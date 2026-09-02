@@ -34,6 +34,7 @@ import {
   isOperation,
   isPayloadDecl,
   isPrimitiveType,
+  isProjection,
   isProperty,
   isSlotType,
   isSystem,
@@ -135,7 +136,7 @@ export interface Env {
   /** Resources in scope for the enclosing context — `resource X { for:
    *  <thisCtx>, kind, … }` declarations, keyed by name to their infra
    *  kind.  Drives resolution of an ambient resource handle
-   *  (`files.put(...)`) in workflow bodies (Phase 4).  Undefined / empty
+   *  (`files.put(...)`) in workflow bodies.  Undefined / empty
    *  outside a context or when none are declared for it. */
   resources?: Map<string, DataSourceKind>;
   /** For each in-system api-bound resource in scope, the `api` it binds
@@ -528,6 +529,19 @@ export function findWorkflowByName(env: Env, name: string): Workflow | undefined
   return undefined;
 }
 
+/** Look up a context-level `projection` declaration by name.  A projection ROW
+ *  is a state-bearing record like a workflow (projection.md): its `Property`
+ *  members are the row columns, and a `this` / source-alias reference inside a
+ *  query-time comprehension types as `{ kind: "entity", name }` resolved back
+ *  through this lookup — the projection twin of `findWorkflowByName`. */
+export function findProjectionByName(env: Env, name: string): Projection | undefined {
+  if (!env.ctx) return undefined;
+  for (const m of env.ctx.members) {
+    if (isProjection(m) && m.name === name) return m;
+  }
+  return undefined;
+}
+
 /** Look up a context-level `enum` declaration by name.  Used by the
  *  env-aware NamedType fallback when a macro-emitted reference (e.g.
  *  `crudish`'s update params) lacks a `$refNode` and the Langium linker
@@ -539,6 +553,29 @@ export function findEnumByName(env: Env, name: string): EnumDecl | undefined {
     }
   }
   return ambientDeclIndex.enums.get(name);
+}
+
+/** The ambient `enum` whose VALUE set contains `valueName`, or undefined —
+ *  the value-keyed view of the same index `findEnumByName` reads by enum name.
+ *
+ *  Used for a body that has NO enclosing `ctx` to resolve against but is still
+ *  domain-aware: a `ui` page / component / store body sits at the system level
+ *  yet reads aggregates whose enum-typed fields it compares against bare member
+ *  names (`o.vis == Public`).  Insertion order (= first declaration) wins on a
+ *  value-name collision across enums, matching every other ambient index here;
+ *  the value's WIRE form is the bare member name on every target, so a
+ *  collision picks a different `enumName` but never a different emitted value.
+ *
+ *  Reach: `lowerProject` builds this index by walking `members`, and a
+ *  `subdomain` holds its contexts in `contexts`, so an enum nested in
+ *  `subdomain { context { … } }` is NOT here.  The ui-body caller in
+ *  lower-expr.ts therefore consults its own document-wide index first and uses
+ *  this only as the cross-document fallback. */
+export function findAmbientEnumForValue(valueName: string): EnumDecl | undefined {
+  for (const e of ambientDeclIndex.enums.values()) {
+    if (e.values.some((v) => v.name === valueName)) return e;
+  }
+  return undefined;
 }
 
 /** Look up a context-level `event` declaration by name.  Used to

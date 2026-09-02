@@ -265,6 +265,38 @@ describe("py renderPyExpr — collection ops", () => {
     expect(renderPyExpr(arr("sum"))).toBe("sum(self._lines)");
   });
 
+  // A5 — an ARITHMETIC λ body (`l.price * l.qty`, the canonical order total).
+  // A money sum needs the explicit `Decimal(0)` start: bare `sum(...)` seeds
+  // the int `0`, which mypy --strict rejects and which returns int `0` (not
+  // `Decimal("0")`) for an empty collection.  Before `bodyTypeOf` grew its
+  // `binary` arm this body typed as `undefined` and lost the start.
+  it("sum over an ARITHMETIC money selector gets the Decimal(0) start (A5)", () => {
+    const arith: ExprIR = lam({
+      kind: "binary",
+      op: "*",
+      left: {
+        kind: "member",
+        receiver: { kind: "ref", name: "l", refKind: "lambda" },
+        member: "price",
+        receiverType: { kind: "entity", name: "OrderLine" },
+        memberType: MONEY,
+      },
+      right: {
+        kind: "member",
+        receiver: { kind: "ref", name: "l", refKind: "lambda" },
+        member: "quantity",
+        receiverType: { kind: "entity", name: "OrderLine" },
+        memberType: INT,
+      },
+      leftType: MONEY,
+      rightType: INT,
+      resultType: MONEY,
+    });
+    expect(renderPyExpr(arr("sum", [arith]))).toBe(
+      "sum(((lambda l: l.price * l.quantity)(__x) for __x in self._lines), Decimal(0))",
+    );
+  });
+
   it("all / any → builtin folds", () => {
     expect(renderPyExpr(arr("all", [lam(litBool("true"))]))).toBe(
       "all((lambda l: True)(__x) for __x in self._lines)",
@@ -420,6 +452,16 @@ describe("py renderPyExpr — operators / ternary / match / convert", () => {
     expect(renderPyExpr({ kind: "unary", op: "-", operand: litInt("5") })).toBe("-5");
   });
 
+  // A11 — the audit flagged unary `-` on money as a bare `${op}${operand}` on
+  // four targets.  On python it is CORRECT as-is: `money` is a stdlib
+  // `decimal.Decimal`, which implements `__neg__`.  Pinned so the money-aware
+  // arms added to the TS/Java targets are not "fixed" here too.
+  it("keeps unary `-` on money native — Decimal implements __neg__ (A11)", () => {
+    expect(
+      renderPyExpr({ kind: "unary", op: "-", operand: { ...thisProp("total"), type: MONEY } }),
+    ).toBe("-self._total");
+  });
+
   it("money arithmetic stays native (Decimal overloads operators)", () => {
     expect(
       renderPyExpr({
@@ -495,7 +537,10 @@ describe("py renderPyExpr — A1 int-division widening + divTrunc", () => {
   });
 
   // `a.divTrunc(b)` — truncating integer division toward zero via `int(...)`.
-  it("renders the `divTrunc` intrinsic as `int(recv / arg)`", () => {
+  // `int(recv / arg)` was a FLOAT round-trip: wrong past 2^53 on the one backend
+  // with exact integers.  `trunc_div` truncates toward zero in integer space
+  // (`//` floors, so it is not the answer for negatives).
+  it("renders the `divTrunc` intrinsic as an exact `trunc_div(recv, arg)`", () => {
     expect(
       renderPyExpr({
         kind: "method-call",
@@ -506,7 +551,7 @@ describe("py renderPyExpr — A1 int-division widening + divTrunc", () => {
         memberType: INT,
         isCollectionOp: false,
       }),
-    ).toBe("int(self._a / 2)");
+    ).toBe("trunc_div(self._a, 2)");
   });
 });
 
@@ -632,5 +677,112 @@ describe("py collectPyExprImports", () => {
       isCollectionOp: false,
     };
     expect([...collectPyExprImports(matches)]).toEqual(["re"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M-T6.45 / numeric-types audit F8 — mixed money × decimal arithmetic.
+//
+// This backend holds `money` as `decimal.Decimal` and `decimal` as `float`
+// (the representation rule is stated at `PY_TYPE_TARGET`).  `Decimal`'s
+// arithmetic dunders accept `int` and `Decimal` only, so every mixed shape
+// `moneyArithmetic` admits — `money * decimal`, `decimal * money`,
+// `money / decimal` — used to emit a bare native operator and raise
+// `TypeError: unsupported operand type(s)` at runtime (and fail
+// `mypy --strict` statically).  The `decimal` side is lifted with
+// `Decimal(str(…))`: value-identical whether the operand arrived off the wire
+// as a `float` or off a `Numeric` column as a `Decimal`.
+// ---------------------------------------------------------------------------
+describe("py renderPyExpr — money × decimal lifts the float operand (M-T6.45)", () => {
+  const DECIMAL: TypeIR = { kind: "primitive", name: "decimal" };
+  const LONG: TypeIR = { kind: "primitive", name: "long" };
+  const money = thisProp("price");
+  const rate = refParam("rate");
+
+  const scale = (
+    op: "*" | "/" | "+" | "-",
+    left: ExprIR,
+    right: ExprIR,
+    leftType: TypeIR,
+    rightType: TypeIR,
+  ): ExprIR => ({ kind: "binary", op, left, right, leftType, rightType, resultType: MONEY });
+
+  it("lifts the RIGHT operand for `money * decimal`", () => {
+    expect(renderPyExpr(scale("*", money, rate, MONEY, DECIMAL))).toBe(
+      "self._price * Decimal(str(rate))",
+    );
+  });
+
+  it("lifts the LEFT operand for `decimal * money` (scaling is commutative)", () => {
+    expect(renderPyExpr(scale("*", rate, money, DECIMAL, MONEY))).toBe(
+      "Decimal(str(rate)) * self._price",
+    );
+  });
+
+  it("lifts the divisor for `money / decimal`", () => {
+    expect(renderPyExpr(scale("/", money, rate, MONEY, DECIMAL))).toBe(
+      "self._price / Decimal(str(rate))",
+    );
+  });
+
+  // `int / int` WIDENS to `decimal` (isIntDivWidenedToDecimal) and Python's
+  // true division hands back a `float` — the same TypeError with no `decimal`
+  // operand written anywhere in the source.
+  it("lifts an int/int-division operand widened to decimal", () => {
+    const ratio: ExprIR = {
+      kind: "paren",
+      inner: {
+        kind: "binary",
+        op: "/",
+        left: refParam("numerator"),
+        right: refParam("denominator"),
+        leftType: INT,
+        rightType: INT,
+        resultType: DECIMAL,
+      },
+    };
+    expect(renderPyExpr(scale("*", money, ratio, MONEY, DECIMAL))).toBe(
+      "self._price * Decimal(str((numerator / denominator)))",
+    );
+  });
+
+  // The lift's domain stops at `decimal`: `int` / `long` are Python `int`,
+  // which `Decimal` mixes with natively, and `money ± money` is Decimal on
+  // both sides.  These pins are byte-identical to the pre-fix output.
+  it("leaves `money * int` native — Decimal mixes with int", () => {
+    expect(renderPyExpr(scale("*", money, thisProp("seats"), MONEY, INT))).toBe(
+      "self._price * self._seats",
+    );
+    expect(renderPyExpr(scale("*", thisProp("seats"), money, INT, MONEY))).toBe(
+      "self._seats * self._price",
+    );
+  });
+
+  it("leaves `money / int` and `money * long` native", () => {
+    expect(renderPyExpr(scale("/", money, thisProp("seats"), MONEY, INT))).toBe(
+      "self._price / self._seats",
+    );
+    expect(renderPyExpr(scale("*", money, refParam("batch"), MONEY, LONG))).toBe(
+      "self._price * batch",
+    );
+  });
+
+  it("leaves money ± money and plain decimal × decimal native", () => {
+    expect(renderPyExpr(scale("+", money, litMoney("1.50"), MONEY, MONEY))).toBe(
+      'self._price + Decimal("1.50")',
+    );
+    expect(renderPyExpr(scale("*", rate, refParam("other"), DECIMAL, DECIMAL))).toBe(
+      "rate * other",
+    );
+  });
+
+  // The import mirror: without it a `price * rate` off two refs emits an
+  // undefined `Decimal` — an import-time NameError / ruff F821.
+  it("collectPyExprImports mirrors the lift's `Decimal` need", () => {
+    expect([...collectPyExprImports(scale("*", money, rate, MONEY, DECIMAL))]).toEqual(["decimal"]);
+    expect([...collectPyExprImports(scale("*", rate, money, DECIMAL, MONEY))]).toEqual(["decimal"]);
+    expect([...collectPyExprImports(scale("/", money, rate, MONEY, DECIMAL))]).toEqual(["decimal"]);
+    // No lift, no import — `money * int` off two refs reaches for nothing.
+    expect([...collectPyExprImports(scale("*", money, thisProp("seats"), MONEY, INT))]).toEqual([]);
   });
 });

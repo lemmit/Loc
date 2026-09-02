@@ -48,8 +48,124 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  rather than silent, which is exactly the trade this register exists to
  *  record: a gap that appears here is a gap that stopped shipping broken
  *  output.  Drained by the wave-2 tasks that implement the ladder on both
- *  targets, which delete the row and lower this back to 37. */
-const MAX_OPEN_GAPS = 38;
+ *  targets, which delete the row and lower this back to 37.
+ *
+ *  38 → 39: `loom.flutter-async-effect-unsupported`.  Same trade again — the gap
+ *  is not new (the Flutter component emitter has always filtered out a component
+ *  whose action carries a `match await`, emitting NO widget and rendering every
+ *  call site as `SizedBox.shrink()`), only the honesty is.  Feliz gated the
+ *  identical component-host limitation from the start; Flutter dropped it
+ *  silently.  Drained by the M-T1.20 slice that gives the Flutter component
+ *  emitter the notifier/route-id path, which deletes the row and lowers this
+ *  back to 38.
+ *
+ *  39 → 39 (2026-08 prose audit, no count change).  Re-reading every row against
+ *  the Set / emitter it names showed the register had frozen in a three-backend
+ *  era: ~20 rows said "missing on some backends" while their gate already named
+ *  every shipping target.  Those rows' PROSE was rewritten (they are now marked
+ *  "latent seam" / "dormant" / "unreachable backstop"); their `kind` was NOT,
+ *  because the codes are still emitted in `src/` and invariant (1) demands a row
+ *  for each.  Consequence for this pin: it counts LIVE gaps and LATENT gates
+ *  together, so it is not a backlog depth — a latent row lowers it only when the
+ *  seam itself is deleted, a live one when the last target ports.  Do not "drain"
+ *  a latent row by deleting it while its code still fires from `src/`; test (2)
+ *  is the thing that would catch the reverse mistake.
+ *
+ *  39 → 40: `loom.toast-message-unsupported`.  The trade this register exists to
+ *  record, in its sharpest form yet — the gap is not new and the degradation was
+ *  not even a degradation: an `on <chan>.<Event> { toast(<expr>) }` message
+ *  outside the v1 subset (a literal, the event binding, single-level member
+ *  access off it, paren, binary) THREW a raw `Error` out of all three realtime
+ *  renderers, aborting `ddd generate system` with a stack trace and no `loom.*`
+ *  code.  The validator bounded the handler STATEMENT vocabulary and never
+ *  looked inside the `toast(…)`.  Drained by the renderers growing the general
+ *  expression path (M-T1.10), which deletes the row and lowers this back to 39.
+ *
+ *  40 → 41: `loom.audited-returning-operation-unsupported` (generator review
+ *  2026-08-24, A6).  Same trade as the rows above, and the same reason to raise
+ *  rather than dodge: the gap is not new — the Hono route builder has always
+ *  routed an `audited`/`provenanced` operation that DECLARES a return type into
+ *  the void-204 handler, discarding the tagged result and auditing `status:
+ *  "ok"` even on the error variant.  What is new is that it stopped shipping a
+ *  contract the backend silently drops.  Python already emits both halves, so
+ *  this is a one-backend gap; draining it folds the audit transaction into
+ *  `emitReturningOperationRoute`, deletes the row, and lowers this back to 40.
+ *
+ *  41 → 42: `loom.tph-filter-unsupported`.  Same trade, and the sharpest example
+ *  of it in this register: the .NET config emitter replaced the WHOLE query-filter
+ *  list with `[]` for any TPH participant, so a declared read restriction on a
+ *  subtype (`filter Live`, a `softDeletable` visibility rule, a tenancy filter)
+ *  was absent from every emitted query with no compile error and no diagnostic.
+ *  Most of that gap is now EMITTED rather than gated — filters reading root
+ *  columns move to the root config discriminator-guarded — and only the residue
+ *  EF Core structurally cannot express (a subtype-only column) is gated here.
+ *  Drains when .NET moves capability filters off `HasQueryFilter` onto the
+ *  per-read LINQ `.Where(...)`, which is per-`DbSet` and therefore subtype-typed.
+ *
+ *  42 → 43: `loom.seed-event-sourced-unsupported` (targets-completeness
+ *  2026-08-30, `F2-SEED-EVENTSOURCED`; M-T6.52).  The gap is not new — no
+ *  backend has ever had an event-append seed path.  What is new is that it
+ *  stopped being INVISIBLE: elixir dropped the row and still wrote the
+ *  dataset's ship-once marker, while java/.NET emitted a `create(...)` call
+ *  that does not compile against the declared factory.  Raising the pin buys
+ *  five backends refusing identically instead of three diverging silently;
+ *  M-T6.52 lands the seed path, deletes the row, and lowers this back to 42.
+ *
+ *  43 → 42 (net −1: two rows out, one in).  OUT, as PHANTOMS:
+ *  `loom.java-projection-field-unsupported` and
+ *  `loom.java-workflow-instance-field-unsupported` (M-T6.36).  Both refused an
+ *  ENTITY-typed read-model field; probing the mission's premise showed the shape
+ *  is unreachable — a part type resolves only inside its own aggregate, so
+ *  `projection P { line: Line }` fails at phase ③ on EVERY platform.  Two rows
+ *  nothing could ever drain, against a backend that was never limited.  This is
+ *  the one case where deleting a row is right even though its cause was never
+ *  implemented: there was nothing to implement.  IN:
+ *  `loom.java-reserved-identifier-unsupported` (F2-ADP-7's java arm) — the trade
+ *  this register records, again: `aggregate T { case: string }` used to emit
+ *  `String case;` and fail javac with zero diagnostics; it now refuses.
+ *
+ *  42 → 44: `loom.table-filter-unsupported` and
+ *  `loom.modal-controlled-op-form-unsupported` (targets-completeness W1,
+ *  `M-T1.1-table-filter-silent-drop` / `F2-CFE-12`).  Same trade, and the same
+ *  reason to raise rather than dodge: NEITHER gap is new.  `Table { filter: q }`
+ *  has always been dropped on HEEx (whose `renderTable` never reads the arg) and
+ *  on any server-paged table — and since the auto-paged rewrite, the simplest
+ *  hand-written paged table IS server-paged, so the natural spelling lost its
+ *  filter with `ddd parse` reporting no error and the bound state left as a dead
+ *  `useState`.  `Modal { open: …, OperationForm { … } }` has always collapsed the
+ *  whole modal to a comment on react/vue/svelte/flutter.  What is new is that
+ *  both stopped being silent.  Draining the first is a `filter` param on the
+ *  generated `list/4` plus a LiveView `handle_event` (and a server-side filter
+ *  on the paged read); the second is the controlled shell rendered around the
+ *  recorded OperationFormState on the four JSX/Dart targets.  Each deletes its
+ *  row and lowers this by one.
+ *
+ *  44 → 45: `loom.scaffold-filter-param-unsupported` (targets drain wave 3).
+ *  Again the gap is not new — M-T1.15 widened the scaffolded filter bar to
+ *  `string`/`guid`/`datetime`/`int`/`long`/`bool`/`<X> id` and left `enum` and
+ *  `decimal`/`money` out, which the macro handled by dropping the whole find
+ *  from the bar with no diagnostic anywhere.  What is new is that the drop is
+ *  announced.  Draining it is two frontend-side changes, not a macro change:
+ *  typing an `enum` `state {}` field as the emitted enum union instead of bare
+ *  `string` (`stateTypeAsTsString` and its React/Vue/Angular twins), and a
+ *  per-target zero-literal seam for `decimal`/`money`.  Both land the macro arm,
+ *  delete the row, and lower this back to 44.
+ *
+ *  45 → 46: `loom.heex-component-host-state-unsupported` (W1b elixir packet,
+ *  ledger row `G2646-open-heex-in-component-degradation`).  The sharpest version
+ *  of this trade so far, because the thing it replaces is not a degradation at
+ *  all — it is a CRASH the compile gate cannot see.  A `CreateForm` (or
+ *  `OperationForm` / `WorkflowForm` / `DestroyForm` / `QueryView` / `Table` /
+ *  `FileUpload` / `Chart`) inside a `component` on phoenixLiveView emitted
+ *  `<.simple_form for={@form} phx-submit="save_thing">` into a function
+ *  component whose host LiveView has an empty `mount/3`, no `@form` assign and
+ *  no matching `handle_event` — output that passes `mix compile
+ *  --warnings-as-errors` and then raises on page load.  #2646 built exactly the
+ *  hoisting this needs for a component's `state { … }` and named `action`s and
+ *  stopped there; draining this extends the same `ComponentActionInfo` +
+ *  `gather*` seam to the walker's form / query / upload / table-control
+ *  accumulators, deletes the row, and lowers this back to 41. */
+const MAX_OPEN_GAPS = 46;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

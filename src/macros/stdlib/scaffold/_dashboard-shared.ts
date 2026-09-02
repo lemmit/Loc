@@ -12,6 +12,50 @@
 import type { Aggregate, BoundedContext, Projection } from "../../../language/generated/ast.js";
 import { isBoundedContext, isProjection, isProperty } from "../../../language/generated/ast.js";
 
+/** Whether this aggregate can carry a dashboard at all — the precondition for
+ *  every tile, since all of them are direct-table aggregations computed in SQL.
+ *
+ *  THREE shapes are excluded, and each is a shape some phase-⑦ gate refuses:
+ *
+ *  - an `abstract` base owns no table (its concretes each have their own) and
+ *    an event-sourced aggregate has none either (its truth is the `<ctx>_events`
+ *    stream) — both refused by `loom.projection-columnless-source`;
+ *  - a `shape: document` aggregate persists as `(id, data, version)`, so the
+ *    only tile it could ever carry is the ROW COUNT (`count(*)` over the `id`
+ *    column; every per-field sum and the per-day series name keys inside the
+ *    jsonb blob, which `loom.projection-columnless-source` refuses).  That lone
+ *    tile is NOT worth what it costs:
+ *
+ *      * the moment the aggregate carries a read-filtering capability
+ *        (`tenantOwned`, `softDeletable`, any `filter`) the tile is refused by
+ *        `loom.projection-document-source-capability-filtered` — and BEFORE
+ *        that gate existed it was a silent cross-tenant leak on EF Core, which
+ *        registers no `HasQueryFilter` for a document aggregate;
+ *      * on `platform: java` it is refused outright by
+ *        `loom.projection-whole-table-aggregation-unsupported` (and its grouped
+ *        twin `loom.projection-groupby-unsupported-backend`), because a document
+ *        aggregate has no JPA entity for the JPQL to name.
+ *
+ *    A scaffold whose default output fails `ddd parse` on a supported backend
+ *    is worse than one tile short, so the document case is skipped in the macro
+ *    rather than gated after it.  A row count over a document aggregate is
+ *    still perfectly writable BY HAND on the four backends that emit it — this
+ *    only decides what the scaffold claims unasked. */
+export function hasDashboardTable(agg: Aggregate): boolean {
+  return !agg.isAbstract && agg.persistedAs !== "eventLog" && fieldsAreColumns(agg);
+}
+
+/** Whether the aggregate's DECLARED FIELDS are columns.  A `shape: document`
+ *  aggregate persists as `(id, data, version)`; its fields live inside the
+ *  jsonb blob, so nothing but `id` is nameable in a direct-table aggregation.
+ *
+ *  Header-visible only: a dataSource binding may override `shape:` at the system
+ *  level, which phase ② cannot see.  That residual is caught honestly by the IR
+ *  gate rather than miscompiled. */
+export function fieldsAreColumns(agg: Aggregate): boolean {
+  return agg.shape !== "document";
+}
+
 /** The projection name the dashboard scaffold uses for an aggregate.
  *  `Order` → `OrderTotals`. */
 export function dashboardProjectionName(aggName: string): string {
@@ -46,6 +90,7 @@ export const SERIES_COUNT = "rowCount";
  *  the same reason `summableFields` excludes them: NULL rows would vanish from
  *  the series while still counting in the `rowCount` tile beside it. */
 export function seriesDateField(agg: Aggregate): string | null {
+  if (!fieldsAreColumns(agg)) return null;
   const datetimes: string[] = [];
   for (const m of agg.members) {
     if (!isProperty(m)) continue;
@@ -66,6 +111,7 @@ export function seriesDateField(agg: Aggregate): string | null {
 export function dashboardSeriesFor(agg: Aggregate): { projection: string } | null {
   const ctx = agg.$container;
   if (!isBoundedContext(ctx)) return null;
+  if (!hasDashboardTable(agg)) return null;
   const name = dashboardSeriesName(agg.name);
   const declared = ctx.members.find((m): m is Projection => isProjection(m) && m.name === name);
   if (declared) {
@@ -98,6 +144,7 @@ export function dashboardFieldsFor(
 ): { projection: string; fields: string[] } | null {
   const ctx = agg.$container;
   if (!isBoundedContext(ctx)) return null;
+  if (!hasDashboardTable(agg)) return null;
   const name = dashboardProjectionName(agg.name);
   const declared = ctx.members.find((m): m is Projection => isProjection(m) && m.name === name);
   if (declared) {
@@ -140,6 +187,7 @@ export type Summable = "money" | "int" | "long" | "decimal";
 const SUMMABLE: ReadonlySet<string> = new Set<Summable>(["money", "int", "long", "decimal"]);
 
 export function summableFields(agg: Aggregate): Array<{ name: string; primitive: Summable }> {
+  if (!fieldsAreColumns(agg)) return [];
   const out: Array<{ name: string; primitive: Summable }> = [];
   for (const m of agg.members) {
     if (!isProperty(m)) continue;

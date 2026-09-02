@@ -3,9 +3,13 @@
 // PROJECTION off `state {}` + named `action`s (§2/§3b); the `view` rides the
 // shared `walkBody` with `felizTarget` + the procedural Feliz pack (§4).
 //
-// v1 scope: a single-page app (the first example is Counter-class).  Routing
-// across multiple pages is a follow-up; a >1-page ui emits every page's view
-// but wires only the first into `Program` (with a visible TODO).
+// Multi-page routing ships: a ui is `routed` when it has >1 page OR any page
+// carries a route param (`:1086`).  A routed ui emits the `Page` union +
+// `parseUrl` (`renderRouting`, `:446`) ahead of the Model, one `<page>View` per
+// page, and a `React.router` root that dispatches on the active `Page`; a detail
+// page's case carries its route param and the `routeId` accessor resolves an
+// `id` read from outside a page view fn (`update`/`init`).  A single-page ui
+// still emits the one flat root `view` with no routing table.
 
 import type {
   AggregateIR,
@@ -69,6 +73,15 @@ import { FELIZ_INTL_MESSAGEFORMAT, felizI18nEnabled, renderFelizI18nModule } fro
 import { felizPack } from "./pack.js";
 import { felizRealtimeRefetchAggregates, renderFelizRealtime } from "./realtime.js";
 import {
+  felizPersistedStores,
+  renderStorePersistModule,
+  renderStoreUrlSub,
+  renderUpdateWithPersist,
+  STORE_URL_MSG,
+  storePersistInitOverrides,
+  storeUrlUpdateArm,
+} from "./store-persist.js";
+import {
   msgCase,
   renderInit,
   renderModel,
@@ -103,6 +116,7 @@ import {
   opHasForm,
   renderApiModule,
   renderAsyncOutcomeTypes,
+  renderAuditEntryType,
   renderEncoders,
   renderFileRefType,
   renderFormTypes,
@@ -110,6 +124,7 @@ import {
   renderValidation,
   renderViewModule,
   renderWireTypes,
+  wfHasForm,
 } from "./wire.js";
 
 /** The `Remote<'T>` envelope every read's Model field carries — the MVU
@@ -254,6 +269,85 @@ function storeWrappers(
   return lines;
 }
 
+/** True when every `ref` in a page-`derived` expression resolves to something
+ *  the page view has in scope, so `renderFsExpr` spells it as real F# rather
+ *  than a bare undefined name.
+ *
+ *  In scope: the page's own `state {}` cells (Model fields), an EARLIER derived
+ *  (a `let` above), a lambda parameter (bound by the lambda itself), and a
+ *  dotted `<Store>.<field>` read (the namespaced Model field).  Anything else —
+ *  a read field's `Remote<'T>` envelope, `currentUser` outside a page gate, a
+ *  resource handle — would emit F# that names something absent, so the derived
+ *  keeps its pre-existing behaviour (no `let`, and the body read stays the
+ *  `(* ref: … *)` give-up comment) instead of turning a silent drop into a
+ *  build break. */
+function derivedResolvableInPageScope(
+  e: import("../../ir/types/loom-ir.js").ExprIR,
+  stateNames: ReadonlySet<string>,
+  locals: ReadonlySet<string>,
+): boolean {
+  if (e.kind === "ref") {
+    if (e.refKind === "store-field" && e.storeName) return true;
+    if (e.refKind === "lambda" || e.refKind === "enum-value") return true;
+    if (locals.has(e.name) || stateNames.has(e.name)) return true;
+    return false;
+  }
+  for (const [, v] of Object.entries(e)) {
+    if (Array.isArray(v)) {
+      for (const c of v) {
+        if (
+          c &&
+          typeof c === "object" &&
+          "kind" in c &&
+          !derivedResolvableInPageScope(c as never, stateNames, locals)
+        ) {
+          return false;
+        }
+      }
+    } else if (
+      v &&
+      typeof v === "object" &&
+      "kind" in v &&
+      !derivedResolvableInPageScope(v as never, stateNames, locals)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** One `let <name> = <F#>` per page `derived` binding, in declaration order so
+ *  a later one may read an earlier (F# resolves top-to-bottom) — the PAGE twin
+ *  of `component-emit.ts`'s `renderDerivedBinds`.  A `derived` is a pure
+ *  function of the page's `state {}` (Model fields) and of earlier derived, so
+ *  it needs no Msg case and no Model field: it is recomputed on every render,
+ *  which is exactly the Elmish equivalent of React's `useMemo`.
+ *
+ *  Returns the binding lines AND the names that actually bound — the walk gets
+ *  the latter as its `derivedNames`, so a read resolves to the bare local only
+ *  where a `let` really exists (`felizTarget.renderDerivedRead` spells the bare
+ *  name). */
+function pageDerivedBinds(page: PageIR): { binds: string[]; names: Set<string> } {
+  const stateNames = new Set(page.state.map((s) => s.name));
+  const locals = new Set<string>();
+  const binds: string[] = [];
+  for (const d of page.derived) {
+    if (!derivedResolvableInPageScope(d.expr, stateNames, locals)) continue;
+    let fs: string;
+    try {
+      fs = renderFsExpr(d.expr, { stateNames, locals });
+    } catch {
+      // `renderFsExpr` throws on a method it has no F# arm for; a derived that
+      // can't render keeps its pre-existing drop rather than breaking the build.
+      continue;
+    }
+    // Visible to the NEXT derived — as a bare local, which is what a `let` is.
+    locals.add(d.name);
+    binds.push(`    let ${d.name} = ${fs}`);
+  }
+  return { binds, names: locals };
+}
+
 /** Render one page's view function under `fnName` (`view` for a single-page
  *  ui, `<pageCamel>View` under routing).  Threads the ui's api params +
  *  reachable aggregates so the shared walker's api-hook detection fires on
@@ -264,7 +358,11 @@ function renderPageView(
   aggregatesByName: ReadonlyMap<string, AggregateIR>,
   workflowsByName: ReadonlyMap<string, WorkflowIR>,
   fnName: string,
-  takesRouteId = false,
+  /** The page's route params, in URL order — one `(<name>: string)` argument
+   *  each on the view fn, and the SAME names threaded into the walk so a body
+   *  reference to one resolves (`routeParamNames`).  Empty for a paramless page
+   *  and for the single-page (non-routed) branch. */
+  routeParams: readonly string[] = [],
   /** Aggregate/workflow → owning bounded context, so a form seam can resolve an
    *  enum-typed field's values (→ a `<select>`). */
   bcByAggregate: ReadonlyMap<string, EnrichedBoundedContextIR> = new Map(),
@@ -305,17 +403,27 @@ function renderPageView(
    *  False → the prefix stays undefined and the body is byte-identical. */
   i18nEnabled = false,
 ): string {
-  // A detail page's view takes the route `id` (bound by its `Page` case); the
-  // body's `byId(id)` renders through the `renderRouteId` seam to this local.
-  const idParam = takesRouteId ? " (id: string)" : "";
+  // A page's view takes ONE argument per route param, under the param's own
+  // name (bound by its `Page` case).  A detail page's `/:id` therefore still
+  // spells `(id: string)` — the local the body's `byId(id)` reaches through the
+  // `renderRouteId` seam — while `/greet/:who` binds `who`, which is the name
+  // the body actually uses.  Renaming the first param to `id` and dropping the
+  // rest binds locals no body refers to.
+  const idParam = routeParams.map((n) => ` (${n}: string)`).join("");
   const head = `let ${fnName} (model: Model) (dispatch: Msg -> unit)${idParam} =`;
   if (!page.body) return `${head}\n    Html.none`;
   const stateNames = new Set(page.state.map((s) => s.name));
+  // `derived` first: pure over `state {}` + earlier derived, so it renders
+  // without walking anything — and the names that BOUND are what the walk may
+  // read bare (`renderDerivedRead`).
+  const derived = pageDerivedBinds(page);
   const result = walkBody(
     page.body,
     felizTarget,
     felizPack(),
-    new Set(),
+    // Route params: the view fn's own arguments, so a body ref to one renders
+    // as the bare local instead of `/* unresolved: <name> */ undefined`.
+    new Set(routeParams),
     stateNames,
     externComponents, // userComponents (extern only)
     ui.apiParams,
@@ -326,7 +434,9 @@ function renderPageView(
     new Map(), // paramTypes
     new Map(), // pageRoutes
     externFunctionNames, // extern frontend function names
-    new Set(), // derivedNames (Feliz has no page-derived bindings)
+    // `derived` bindings — read BARE (the `let`s emitted in the preamble
+    // below), which is what `felizTarget.renderDerivedRead` spells.
+    derived.names,
     authUi, // gate `Action` buttons on currentUser-only op `requires`
     // i18n key prefix — `page.<Name>` matches the catalog (the scaffold's
     // role-scoped `page.name`, e.g. `List`, not the router emit name);
@@ -342,6 +452,11 @@ function renderPageView(
   const wrappers = [
     ...dispatchWrappers(page, result.usedActions ?? new Set(), asyncEffectActions),
     ...storeWrappers(page, ui, result.usedStores ?? new Map()),
+    // `derived` lets LAST in the preamble — the same order a component's
+    // declaration uses (action dispatchers, then the derived `let`s).  Neither
+    // reads the other: a derived's store read renders the namespaced Model
+    // field directly, not the wrapper local.
+    ...derived.binds,
   ];
   const body = indentBlock(result.tsx, 4);
   const preamble = wrappers.length > 0 ? `${wrappers.join("\n")}\n` : "";
@@ -420,26 +535,73 @@ function pageCase(page: PageIR, nameCtx: PageNameCtx): string {
 function pageViewFn(page: PageIR, nameCtx: PageNameCtx): string {
   return `${lowerFirst(pageEmitName(page, nameCtx))}View`;
 }
+/** The `:param` names a page's `route:` binds, IN URL ORDER
+ *  (`/greet/:who/:mood` → `["who", "mood"]`).
+ *
+ *  The route — not the page's declared `params` — is the source of truth here,
+ *  for the same reason React reads `useParams()` by route key: `parseUrl`
+ *  destructures URL SEGMENTS, so their order and spelling is the contract.  It
+ *  also covers the scaffold's Detail pages, which carry `/:id` with NO declared
+ *  param (the body reads the magic `id` through `renderRouteId`).
+ *
+ *  A name repeated in one route binds ONCE (the later segment matches `_`) — F#
+ *  rejects a duplicate binding in a single pattern. */
+function routeParamNames(page: PageIR): string[] {
+  return routeParamSegments(page.route).filter((n): n is string => n !== undefined);
+}
+
+/** Per URL segment: the name it BINDS, or undefined for a literal segment / a
+ *  duplicate name.  Shared by {@link routeParamNames} and {@link routePattern}
+ *  so the pattern and the view-fn signature can never disagree. */
+function routeParamSegments(route: string | undefined): Array<string | undefined> {
+  const seen = new Set<string>();
+  return (route ?? "/")
+    .split("/")
+    .filter((s) => s.length > 0)
+    .map((s) => {
+      if (!s.startsWith(":")) return undefined;
+      const name = s.slice(1);
+      if (name === "" || seen.has(name)) return undefined;
+      seen.add(name);
+      return name;
+    });
+}
+
 /** A page carries a route param when its `route:` has a `:param` segment
- *  (`/products/:id`) — a detail page.  v1 binds only the FIRST such param, as
- *  the magic route `id`. */
+ *  (`/products/:id`) — a detail page, or any page with a named param. */
 function hasRouteParam(page: PageIR): boolean {
-  return (page.route ?? "/").split("/").some((s) => s.startsWith(":"));
+  return routeParamNames(page).length > 0;
 }
 /** URL segments of a page's `route:` as an F# list pattern.  `/` → `[]`;
- *  `/orders/:id` → `[ "orders"; id ]` (the first `:param` binds the local `id`,
- *  further params match as `_` — single-param detail routes are the v1 shape). */
+ *  `/orders/:id` → `[ "orders"; id ]`; `/greet/:who` → `[ "greet"; who ]`.
+ *
+ *  Each `:param` binds under ITS OWN name.  Renaming the first param to `id`
+ *  and matching every other as `_` binds a local nothing in the body refers to,
+ *  while a named param (`/greet/:who`) resolves nowhere — the walker renders
+ *  `/* unresolved: who *​/ undefined` into F# source that cannot compile. */
 function routePattern(route: string | undefined): string {
   const segs = (route ?? "/").split("/").filter((s) => s.length > 0);
   if (segs.length === 0) return "[]";
-  let bound = false;
-  const pats = segs.map((s) => {
+  const binds = routeParamSegments(route);
+  const pats = segs.map((s, i) => {
     if (!s.startsWith(":")) return `"${s}"`;
-    if (bound) return "_";
-    bound = true;
-    return "id";
+    return binds[i] ?? "_";
   });
   return `[ ${pats.join("; ")} ]`;
+}
+
+/** The union-case payload for a page's route params: `""` (no params),
+ *  ` of string`, ` of string * string`, … */
+function caseFields(n: number): string {
+  return n === 0 ? "" : ` of ${Array.from({ length: n }, () => "string").join(" * ")}`;
+}
+
+/** A `Page` case's binder/constructor argument list for `n` route params —
+ *  `""` (nullary), `" id"` (single field), `" (who, mood)"` (a tuple). */
+function caseArgs(names: readonly string[]): string {
+  if (names.length === 0) return "";
+  if (names.length === 1) return ` ${names[0]}`;
+  return ` (${names.join(", ")})`;
 }
 
 /** The `Page` union + `parseUrl` — URL segments → the active `Page`.  A detail
@@ -460,15 +622,14 @@ function renderRouting(
   withRouteId = false,
 ): string {
   const caseDecl = (p: PageIR): string =>
-    hasRouteParam(p) ? `  | ${pageCase(p, nameCtx)} of string` : `  | ${pageCase(p, nameCtx)}`;
-  const ctor = (p: PageIR): string =>
-    hasRouteParam(p) ? `${pageCase(p, nameCtx)} id` : pageCase(p, nameCtx);
+    `  | ${pageCase(p, nameCtx)}${caseFields(routeParamNames(p).length)}`;
+  const ctor = (p: PageIR): string => `${pageCase(p, nameCtx)}${caseArgs(routeParamNames(p))}`;
   const union = `type Page =\n${pages.map(caseDecl).join("\n")}`;
   const arms = pages.map((p) => `  | ${routePattern(p.route)} -> ${ctor(p)}`);
   const fallback = pages.find((p) => !hasRouteParam(p)) ?? pages[0]!;
-  const fallbackCtor = hasRouteParam(fallback)
-    ? `${pageCase(fallback, nameCtx)} ""`
-    : pageCase(fallback, nameCtx);
+  const fallbackCtor = `${pageCase(fallback, nameCtx)}${caseArgs(
+    routeParamNames(fallback).map(() => `""`),
+  )}`;
   const parse =
     `let parseUrl (segments: string list) : Page =\n  match segments with\n` +
     `${arms.join("\n")}\n  | _ -> ${fallbackCtor}`;
@@ -476,7 +637,14 @@ function renderRouting(
   // One arm per param-carrying case; the wildcard covers the paramless ones and
   // is OMITTED when every case binds an id (F# would flag it as a rule that can
   // never match).
-  const idArms = pages.filter(hasRouteParam).map((p) => `  | ${pageCase(p, nameCtx)} id -> id`);
+  // `routeId` is the FIRST route param of the active page — the "record this
+  // page is about" the MVU paths read outside a view fn.  A multi-param page
+  // wildcards the rest.
+  const idArms = pages.filter(hasRouteParam).map((p) => {
+    const names = routeParamNames(p);
+    const binder = caseArgs(names.map((n, i) => (i === 0 ? n : "_")));
+    return `  | ${pageCase(p, nameCtx)}${binder} -> ${names[0]}`;
+  });
   const wildcard = pages.every(hasRouteParam) ? [] : ['  | _ -> ""'];
   const accessor =
     `let ${ROUTE_ID_FN} (page: Page) : string =\n  match page with\n` +
@@ -544,11 +712,11 @@ function renderRootView(
   brand = "",
   i18nEnabled = false,
 ): string {
-  const arms = pages.map((p) =>
-    hasRouteParam(p)
-      ? `        | ${pageCase(p, nameCtx)} id -> ${pageViewFn(p, nameCtx)} model dispatch id`
-      : `        | ${pageCase(p, nameCtx)} -> ${pageViewFn(p, nameCtx)} model dispatch`,
-  );
+  const arms = pages.map((p) => {
+    const names = routeParamNames(p);
+    const args = names.length > 0 ? ` ${names.join(" ")}` : "";
+    return `        | ${pageCase(p, nameCtx)}${caseArgs(names)} -> ${pageViewFn(p, nameCtx)} model dispatch${args}`;
+  });
   const navbar = renderNavbar(pages, brand, i18nEnabled);
   const router = [
     "    React.router [",
@@ -642,8 +810,8 @@ function readsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizRead[]
   // User COMPONENTS host reads too — an Elmish read is a field on the ONE Model,
   // so a `component X() { body: QueryView { of: Api.Order.all, … } }` needs the
   // same Model field / init `Cmd` / `Loaded` arm a page's read gets.  Without
-  // this the component walk resolved `model.AllOrders` against a field nothing
-  // declared, which is why `component-emit.ts` used to drop the whole component
+  // this the component walk resolves `model.AllOrders` against a field nothing
+  // declares, leaving `component-emit.ts` to drop the whole component
   // (declaration AND every call site) rather than emit unbuildable F#.
   for (const component of ui.components ?? []) {
     for (const r of collectComponentReads(
@@ -999,10 +1167,15 @@ function renderAppFs(
   const asyncEffectActions = new Map(asyncEffects.map((e) => [e.action, e] as const));
   const hasEffects = asyncEffects.length > 0;
   // Shared form-record wiring (Model field + `type <X>Form` + encoder).  A
-  // PARAM-LESS op (`confirm()`) has NO form record — it wires only a trigger +
-  // submit + empty-`{}` POST — so it's excluded here but still in `operationForms`
-  // for its Msg / update arm / Api fn / view.
-  const formRecords = [...forms, ...operationForms.filter(opHasForm), ...workflowForms];
+  // PARAM-LESS op (`confirm()`) or workflow (`run()`) has NO form record — it
+  // wires only a trigger + submit + empty-`{}` POST — so it's excluded here but
+  // still in `operationForms` / `workflowForms` for its Msg / update arm / Api
+  // fn / view.
+  const formRecords = [
+    ...forms,
+    ...operationForms.filter(opHasForm),
+    ...workflowForms.filter(wfHasForm),
+  ];
   // Foreign-key `idselect` fields need the target aggregate's `.all` loaded to
   // populate their options — an IMPLICIT list read per target, merged into the
   // page's read set (deduped against any explicit QueryView `.all` of it) so the
@@ -1038,7 +1211,17 @@ function renderAppFs(
   }
   const hasReads = reads.length > 0;
   const hasPagedRead = reads.some((r) => r.paging);
+  // An entity-history read (docs/audit.md) decodes the fixed `AuditEntry`
+  // records — their type + decoders must ship ahead of the Model
+  // (`Remote<AuditEntry list>`) and the Api fn that reference them.
+  const hasHistoryRead = reads.some((r) => r.history);
   const hasForms = formRecords.length > 0;
+  // A PARAM-LESS op (`confirm()`) / workflow (`run()`) has NO form record, but it
+  // still POSTs through `Api` and navigates on success — so the Http + Router
+  // wiring keys off the full form LISTS, not just the records that survive
+  // `opHasForm` / `wfHasForm`.  (The Thoth open stays on `hasForms`: a param-less
+  // submit posts a literal `"{}"`, so it needs no encoder.)
+  const hasFormSubmits = hasForms || operationForms.length > 0 || workflowForms.length > 0;
   // Standalone `FileUpload(bind:)` fields across the ui — each drives an upload
   // Cmd (`Api.uploadFile` → multipart POST /files) + a `FileRef` result Msg.
   const fileUploads = fileUploadsForUi(ui);
@@ -1063,7 +1246,7 @@ function renderAppFs(
   const hasHttp =
     hasReads ||
     mutations.length > 0 ||
-    hasForms ||
+    hasFormSubmits ||
     authUi ||
     hasEffects ||
     pageGate ||
@@ -1103,8 +1286,22 @@ function renderAppFs(
   // Controlled inputs (`Field`/`Toggle`/… via `bind:`, `Modal` via `open:`)
   // two-way-bind page `state` — each needs a `Set<Field>` Msg + update arm.
   const boundState = boundStateForUi(ui);
+  // Store persistence (`persist: local|session|url`) — the lifetime ladder rides
+  // the SAME fold: `init` seeds each persisted field from its backing store, and
+  // the `update` wrapper mirrors the Model back (`store-persist.ts`).
+  const persistedStores = felizPersistedStores(ui);
+  const storeUrlArm = storeUrlUpdateArm(persistedStores);
+  const storeUrlSub = renderStoreUrlSub(persistedStores);
   const model = renderModel(state, reads, routed, formRecords, authUi, pageGate);
-  const init = renderInit(state, reads, routed, formRecords, authUi, pageGate);
+  const init = renderInit(
+    state,
+    reads,
+    routed,
+    formRecords,
+    authUi,
+    pageGate,
+    storePersistInitOverrides(persistedStores),
+  );
   const msg = renderMsg(
     msgActions,
     reads,
@@ -1119,6 +1316,7 @@ function renderAppFs(
     opActions,
     boundState,
     fileUploads,
+    storeUrlArm ? STORE_URL_MSG : undefined,
   );
   const update = renderUpdate(
     actions,
@@ -1136,6 +1334,10 @@ function renderAppFs(
     opActions,
     boundState,
     fileUploads,
+    storeUrlArm,
+    // The route table a `navigate(<Page>)` STATEMENT in an action body resolves
+    // against — its MVU arm lives in `update-emit.ts`, outside every page view.
+    new Map(pages.filter((p) => p.route).map((p) => [p.name, p.route!])),
   );
   const wire = hasWire
     ? renderWireTypes(
@@ -1150,10 +1352,15 @@ function renderAppFs(
   // reference it (F# is order-sensitive).  Detected off the rendered records
   // (`wireFieldType` spells a File field `FileRef`).
   const hasFileWire = wire.domain.includes("FileRef");
-  // A `provenanced` aggregate wire field decodes to the `ProvLineage` record, so
-  // its type + `provLineageDecoder` must ship AHEAD of the domain decoders that
-  // reference it (detected off the rendered records, like `hasFileWire`).
-  const hasProvWire = wire.domain.includes("ProvLineage");
+  // A `provenanced` aggregate wire field decodes to the `Provenanced<'T>`
+  // carrier (M-T6.12), whose `lineage` member is the `ProvLineage` record — so
+  // both types + `provenancedDecoder` / `provLineageDecoder` must ship AHEAD of
+  // the domain decoders that reference them (detected off the rendered records,
+  // like `hasFileWire`).  Keyed on the CARRIER spelling: since the fold, a
+  // record names `Provenanced<…>` and never `ProvLineage` directly, so the old
+  // `ProvLineage` probe silently stopped matching and the emitted F# referenced
+  // an undeclared decoder.
+  const hasProvWire = wire.domain.includes("Provenanced<");
   // Multi-variant async effects emit a discriminated-union outcome type, placed
   // right after the domain records (its cases reference them).
   const asyncOutcomes = renderAsyncOutcomeTypes(asyncEffects);
@@ -1221,7 +1428,7 @@ function renderAppFs(
             aggregatesByName,
             workflowsByName,
             pageViewFn(p, nameCtx),
-            hasRouteParam(p),
+            routeParamNames(p),
             bcByAggregate,
             bcByWorkflow,
             userComponents,
@@ -1243,7 +1450,7 @@ function renderAppFs(
           aggregatesByName,
           workflowsByName,
           rootFn,
-          false, // single-page (non-routed) branch: no `:id` route param
+          [], // single-page (non-routed) branch: no route params
           bcByAggregate,
           bcByWorkflow,
           userComponents,
@@ -1296,7 +1503,7 @@ function renderAppFs(
     // Feliz.Router provides `React.router` (routed), `Cmd.navigate` (any form
     // navigates on success), and `Router.navigatePath` (a `to:` navigation
     // anywhere in a page body).
-    (routed || hasForms || viewsNavigate) && ROUTER_OPEN,
+    (routed || hasFormSubmits || viewsNavigate) && ROUTER_OPEN,
     "open Elmish",
     "open Elmish.React",
     // Thoth is needed for decoders (reads + async effects), encoders (forms),
@@ -1315,7 +1522,11 @@ function renderAppFs(
     // `createObj` through `.JsInterop`.  (Caught by `feliz-build` on the
     // SCAFFOLD app, which carries neither a DataGrid nor realtime and so was the
     // first app to emit the i18n module with only `.JsInterop` opened.)
-    (hasRealtime || used.usesDataGrid || i18nEnabled) && "open Fable.Core",
+    // The store-persistence module reaches Web Storage / `URLSearchParams` /
+    // `history.replaceState` through the SAME `Emit` + `jsNative` escape hatch
+    // (no `Fable.Browser.*` package reference), so it needs `Fable.Core` too.
+    (hasRealtime || used.usesDataGrid || i18nEnabled || persistedStores.length > 0) &&
+      "open Fable.Core",
     (hasFileUploads || hasRealtime || used.usesDataGrid || i18nEnabled) &&
       "open Fable.Core.JsInterop",
     // Translation runtime (M-T1.11) — catalog + `t`/`tf`.  Ahead of everything
@@ -1346,6 +1557,10 @@ function renderAppFs(
     // decodes to it.
     hasProvWire && "",
     hasProvWire && renderProvLineageType(),
+    // AuditEntry records + decoders (entity history, docs/audit.md) — before the
+    // Model / Api that reference them (F# is order-sensitive).
+    hasHistoryRead && "",
+    hasHistoryRead && renderAuditEntryType(),
     // Wire layer — domain records + decoders when there are reads OR async
     // effects; the `Remote` envelope is reads-only (async effects don't use it).
     hasWire && "",
@@ -1382,6 +1597,9 @@ function renderAppFs(
     routed && renderRouting(pages, nameCtx, usesRouteIdFn(update, init)),
     "",
     model,
+    // Store persistence — AFTER `Model` (its `save` takes one) and BEFORE `init`
+    // (which calls its loaders); F# is order-sensitive.
+    ...renderStorePersistModule(persistedStores),
     "",
     msg,
     // `pageCmd` (byId reads only) fires a detail read on entry; sits after Msg
@@ -1392,6 +1610,12 @@ function renderAppFs(
     init,
     "",
     update,
+    // The persistence write-back wrapper + the `url` tier's `popstate`
+    // subscription — both reference `update` / `Msg`, so they follow it.
+    persistedStores.length > 0 ? "" : false,
+    persistedStores.length > 0 ? renderUpdateWithPersist() : false,
+    storeUrlSub ? "" : false,
+    storeUrlSub || undefined,
     // Realtime subscription module (channels.md Part I) — references `Msg`,
     // `Api`, and the reads' `Loaded` cases, so it sits after `update`.
     hasRealtime ? "" : false,
@@ -1412,8 +1636,18 @@ function renderAppFs(
     "",
     views.join("\n"),
     "",
-    "Program.mkProgram init update view",
-    hasRealtime ? "|> Program.withSubscription realtimeSub" : false,
+    // A persisting app runs `updateWithPersist` — `update` plus the storage /
+    // URL mirror — in place of `update`.
+    `Program.mkProgram init ${persistedStores.length > 0 ? "updateWithPersist" : "update"} view`,
+    // `Sub<'msg>` is a LIST of (id, start) pairs, so two subscriptions compose by
+    // concatenation — `withSubscription` itself takes only one.
+    hasRealtime && storeUrlSub
+      ? "|> Program.withSubscription (fun m -> realtimeSub m @ storeUrlSub m)"
+      : hasRealtime
+        ? "|> Program.withSubscription realtimeSub"
+        : storeUrlSub
+          ? "|> Program.withSubscription storeUrlSub"
+          : false,
     '|> Program.withReactSynchronous "root"',
     "|> Program.run",
     "",
@@ -1664,11 +1898,12 @@ export function generateFelizForContexts(
   // fsproj package refs must match what `renderAppFs` emits: SimpleHttp/Thoth
   // when there's any Http (reads or mutations/forms).
   //
-  // Feliz.Router is no longer a SECOND predicate over the model — it is read off
-  // the emitted App.fs below (`open Feliz.Router`).  Two independent conditions
-  // for one invariant is what let them disagree: the open gained a
-  // navigating-body case while this side still asked "routed or any form", and
-  // the mismatch is a package reference missing for code that uses it.  Deriving
+  // Feliz.Router is NOT a second predicate over the model — it is read off the
+  // emitted App.fs below (`open Feliz.Router`).  Two independent conditions for
+  // one invariant disagree the moment either moves (the open gaining a
+  // navigating-body case while this side still asks "routed or any form"), and
+  // the mismatch is a package reference missing for code that uses it.
+  // Deriving
   // it from the source makes them agree by construction.
   // Auth gate (D-AUTH-OIDC, `auth: ui`): this feliz deployable opts in AND its
   // target backend enforces auth AND the system declares a `user { }` claim
@@ -1687,7 +1922,7 @@ export function generateFelizForContexts(
     formsHaveFileField([
       ...formsForUi(ui, contexts),
       ...operationFormsForUi(ui, contexts).filter(opHasForm),
-      ...workflowFormsForUi(ui, contexts),
+      ...workflowFormsForUi(ui, contexts).filter(wfHasForm),
     ]);
   const hasHttp =
     readsForUi(ui, contexts).length > 0 ||

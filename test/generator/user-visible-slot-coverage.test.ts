@@ -152,8 +152,12 @@ const PROBES: readonly Probe[] = [
   },
   {
     primitive: "KeyValueRow",
-    body: `KeyValueRow { "SlotKeyValue", Text { "v" } }`,
-    sentinels: { keyValue: "SlotKeyValue" },
+    // BOTH halves.  A nested primitive in the value slot (the previous probe's
+    // `Text { "v" }`) is an ELEMENT and localizes itself, which is exactly why
+    // the row's own VALUE slot went unnoticed: a plain literal there shipped in
+    // English at every locale while the label beside it translated (G2667 §D9).
+    body: `KeyValueRow { "SlotKeyValue", "SlotKeyValueValue" }`,
+    sentinels: { keyValue: "SlotKeyValue", keyValueValue: "SlotKeyValueValue" },
   },
   { primitive: "Badge", body: `Badge { "SlotBadge" }`, sentinels: { badge: "SlotBadge" } },
   {
@@ -206,6 +210,68 @@ const PROBES: readonly Probe[] = [
     body: `CodeBlock { "let x = 1", language: "typescript", title: "SlotCodeBlockTitle" }`,
     sentinels: { codeBlockTitle: "SlotCodeBlockTitle" },
   },
+  // The seven controlled inputs share one `inputLabel` role, so each needs its
+  // own probe: the packs render the label three different ways (a prop, element
+  // text, a native-language string), and they do not split along primitive
+  // lines — `Toggle` is an attribute where `Field` is text on the same pack.
+  {
+    primitive: "Field",
+    body: `Field { "SlotFieldLabel", bind: name }`,
+    state: `state { name: string = "" }`,
+    sentinels: { inputLabel: "SlotFieldLabel" },
+  },
+  {
+    primitive: "NumberField",
+    body: `NumberField { "SlotNumberFieldLabel", bind: qty }`,
+    state: `state { qty: int = 0 }`,
+    sentinels: { inputLabel: "SlotNumberFieldLabel" },
+  },
+  {
+    primitive: "PasswordField",
+    body: `PasswordField { "SlotPasswordFieldLabel", bind: secret }`,
+    state: `state { secret: string = "" }`,
+    sentinels: { inputLabel: "SlotPasswordFieldLabel" },
+  },
+  {
+    primitive: "MultilineField",
+    body: `MultilineField { "SlotMultilineFieldLabel", bind: notes }`,
+    state: `state { notes: string = "" }`,
+    sentinels: { inputLabel: "SlotMultilineFieldLabel" },
+  },
+  {
+    primitive: "SelectField",
+    body: `SelectField { "SlotSelectFieldLabel", bind: choice, options: ["a", "b"] }`,
+    state: `state { choice: string = "" }`,
+    sentinels: { inputLabel: "SlotSelectFieldLabel" },
+  },
+  {
+    primitive: "Toggle",
+    body: `Toggle { "SlotToggleLabel", bind: flag }`,
+    state: `state { flag: bool = false }`,
+    sentinels: { inputLabel: "SlotToggleLabel" },
+  },
+  {
+    primitive: "FileUpload",
+    body: `FileUpload { "SlotFileUploadLabel", bind: doc }`,
+    state: `state { doc: File }`,
+    sentinels: { inputLabel: "SlotFileUploadLabel" },
+  },
+  {
+    primitive: "Tab",
+    body: `Tabs { Tab { "SlotTabLabel", Text { "panel" } } }`,
+    sentinels: { tabLabel: "SlotTabLabel" },
+  },
+  {
+    // `Column` is shared by `Table` and `DataGrid`; the Table path is the one
+    // every target renders (Flutter has no grid), so it is what the probe
+    // authors.  The grid path has its own per-slot test in the walker suite.
+    primitive: "Column",
+    body: `QueryView {
+      of: Shop.Product.all,
+      data: rows => Table { rows: rows, Column { "SlotColumnHeader", o => Text { o.name } } }
+    }`,
+    sentinels: { columnHeader: "SlotColumnHeader" },
+  },
 ];
 
 // --- waivers ---------------------------------------------------------------
@@ -240,16 +306,21 @@ const phoenixSystem = (t: Target, body: string, state: string): string => `
         repository Products for Product { }
       }
     }
+    storage db { type: postgres }
+    resource s { for: Cat, kind: state, use: db }
     ui WebApp {
+      api Shop: ShopApi
       page Home {
         route: "/"
         ${state}
         body: ${body}
       }
     }
+    storage loomDb { type: postgres }
+    resource catState { for: Cat, kind: state, use: loomDb }
     deployable phoenixApp {
-      platform: elixir, contexts: [Cat], serves: ShopApi,
-      design: "${t.pack}", ui: WebApp, port: 4000
+      platform: elixir, contexts: [Cat], dataSources: [catState], serves: ShopApi,
+      design: "${t.pack}", ui: WebApp { Shop: phoenixApp }, port: 4000
     }
   }
 `;

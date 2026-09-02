@@ -51,7 +51,7 @@ public sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outbox
 /** The outbox-recording dispatcher: durable events INSERT into the outbox
  *  (the relay delivers); everything else delegates to the inner dispatcher —
  *  the in-process Mediator one where reactors live, the Noop in the
- *  workflow-less durable-broker producer shape (M-T4.4 slice 7b). */
+ *  workflow-less durable-broker producer shape (M-T4.4). */
 export function renderOutboxDispatcher(
   ns: string,
   durableTypes: readonly string[],
@@ -100,6 +100,37 @@ public sealed class OutboxDomainEventDispatcher : IDomainEventDispatcher
         }
         await _inner.DispatchAsync(ev, cancellationToken);
     }
+
+    /// <summary>Transactional capture (design §1): stages the durable events'
+    /// outbox rows on the SHARED AppDbContext without saving, so the caller's
+    /// single SaveChangesAsync commits them in the same transaction as the
+    /// aggregate write.  Returns the ephemeral remainder for post-commit
+    /// dispatch.  The <paramref name="transaction"/> argument is unused on the
+    /// EF path — the scoped DbContext already IS the unit of work.</summary>
+    public Task<IReadOnlyList<IDomainEvent>> RecordDurableAsync(
+        IReadOnlyList<IDomainEvent> events,
+        System.Data.Common.DbTransaction? transaction = null,
+        CancellationToken cancellationToken = default)
+    {
+        var deferred = new List<IDomainEvent>();
+        foreach (var ev in events)
+        {
+            var type = ev.GetType().Name;
+            if (DurableEventTypes.Contains(type))
+            {
+                _db.LoomOutbox.Add(new OutboxMessage
+                {
+                    Type = type,
+                    Payload = JsonSerializer.Serialize((object)ev),
+                });
+            }
+            else
+            {
+                deferred.Add(ev);
+            }
+        }
+        return Task.FromResult<IReadOnlyList<IDomainEvent>>(deferred);
+    }
 }
 `;
 }
@@ -135,7 +166,7 @@ public static class OutboxDelivery
  *  (ordered by occurred_at) through the in-process dispatcher; failures bump
  *  `attempts` and dead-letter (log only — the row stays) after MaxAttempts.
  *
- *  `durableBroker` (M-T4.4 slice 7b, design §5): drained rows whose channel
+ *  `durableBroker` (design §5): drained rows whose channel
  *  is broker-bound publish via `ChannelRelayPublisher` (envelope id = row
  *  id) instead of redelivering locally.  `hasSubscriptions: false` is the
  *  workflow-less durable-broker producer — there is no in-process dispatcher

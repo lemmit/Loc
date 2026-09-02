@@ -22,8 +22,8 @@ import { renderTsStatements } from "../render-stmt.js";
 export function renderEnumsAndValueObjects(ctx: BoundedContextIR): string {
   const needsDomainError = ctx.valueObjects.some((v) => v.invariants.length > 0);
   // A `money` VO field renders as decimal.js `Decimal` (renderTsType), so the
-  // class needs the import — previously missing (latent tsc break on any VO
-  // carrying money).
+  // class needs the import — without it any VO carrying money is a tsc
+  // break.
   const usesMoney = ctx.valueObjects.some((v) => v.fields.some((f) => typeUsesMoney(f.type)));
   return (
     lines(

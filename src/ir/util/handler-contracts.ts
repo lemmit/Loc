@@ -15,7 +15,7 @@ import type { BoundedContextIR, PayloadIR, TypeIR } from "../types/loom-ir.js";
 
 /** The `command`/`query` request-record a handler param binds to, or `undefined`
  *  when the param is a plain id / scalar / value-object (bound from the route
- *  path or as a scalar body field the old way).  A record param means the
+ *  path, or as a scalar body field).  A record param means the
  *  request body (command) / path+query-string (query) deserialises into this
  *  payload's already-emitted DTO, and the handler body reads `param.<field>`. */
 export function requestRecordFor(type: TypeIR, ctx: BoundedContextIR): PayloadIR | undefined {

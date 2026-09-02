@@ -18,11 +18,17 @@ import {
   wholeTableAggregates,
 } from "../../ir/util/projection-aggregate.js";
 import { queryProjectionArm } from "../../ir/util/query-projection-arm.js";
-import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { escapeCsharpIdent, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { PG_INTRINSIC_SQL } from "../_expr/pg-intrinsics.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { MONEY_WIRE_SCALE } from "../money-scale.js";
-import { dtoParam, projectEntityArgs, projectToResponse, wireType } from "./dto-mapping.js";
+import {
+  csDecimalToWireDouble,
+  dtoParam,
+  projectEntityArgs,
+  projectToResponse,
+  wireType,
+} from "./dto-mapping.js";
 import {
   collectFilterPrincipalRefs,
   type DapperColumn,
@@ -33,6 +39,7 @@ import {
   whereToSql,
 } from "./emit/dapper.js";
 import { dapperProjectionColumns, dapperWorkflowStateColumns } from "./emit/dapper-workflow.js";
+import { queryFilterNames } from "./emit/efcore.js";
 import {
   projectionRowClass,
   projectionRowDbSet,
@@ -157,7 +164,7 @@ function renderHandler(
   //   - GROUPED (`group by`, M-T4.2) first — a grouped projection mixes per-row
   //     key selects with aggregates, so falling through would hand the per-row
   //     arm an unresolved aggregate;
-  //   - then the WHOLE-TABLE aggregation (M-T1.3 Phase 0), which queries the
+  //   - then the WHOLE-TABLE aggregation (M-T1.3), which queries the
   //     table directly rather than through a repository, because the point of
   //     the shape is to materialise no rows;
   //   - then the workflow / folded-projection sources, which have no aggregate
@@ -183,7 +190,7 @@ function renderHandler(
   const joins = proj.query!.joins;
 
   const usings = new Set<string>();
-  for (const s of proj.query!.selects ?? []) collectCsExprUsings(s.expr, usings);
+  for (const s of proj.query!.selects ?? []) collectCsExprUsings(s.expr, usings, ns);
 
   // Authorization gate (default-deny) — the projection twin of a repository
   // `find … requires <gate>`: a `currentUser`-only predicate evaluated BEFORE
@@ -192,7 +199,7 @@ function renderHandler(
   const requires = proj.query!.requires;
   const gateUsesUser = exprUsesCurrentUser(requires);
   if (requires) {
-    collectCsExprUsings(requires, usings);
+    collectCsExprUsings(requires, usings, ns);
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
@@ -352,9 +359,13 @@ function dapperFilterSeam(
   filter: ExprIR | undefined,
   ns: string,
   usings: Set<string>,
+  /** Source-aggregate capability filters spliced into the same SELECT (the
+   *  aggregation arms) — their principal claims bind through the same object. */
+  capabilityFilters: readonly ExprIR[] = [],
 ): { needsPrincipal: boolean; paramArg: string } {
-  if (!usingDapper || !filter) return { needsPrincipal: false, paramArg: "" };
-  const refs = collectFilterPrincipalRefs([filter]);
+  const preds = [...(filter ? [filter] : []), ...capabilityFilters];
+  if (!usingDapper || preds.length === 0) return { needsPrincipal: false, paramArg: "" };
+  const refs = collectFilterPrincipalRefs(preds);
   if (refs.length === 0) return { needsPrincipal: false, paramArg: "" };
   usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   return {
@@ -363,14 +374,174 @@ function dapperFilterSeam(
   };
 }
 
+/** The source aggregate's capability filters (`tenantOwned`, `softDeletable`,
+ *  any `filter <expr>`) that apply to an AGGREGATION read of `proj`, honouring
+ *  its `ignoring <Cap>` / `ignoring *` clause.
+ *
+ *  An aggregation reads the source TABLE directly rather than through the
+ *  repository, so on Dapper — which has no EF `HasQueryFilter` — nothing else
+ *  applies them: the read counted rows every repository read of the same table
+ *  excludes (cross-tenant with `tenantOwned`, a wrong number with
+ *  `softDeletable`).  The EF arm inherits the model-level query filter and needs
+ *  none of this.  A raw-table source (workflow saga state / folded `<Proj>Row`)
+ *  has no source aggregate and so contributes nothing. */
+function aggregationCapabilityFilters(proj: ProjectionIR, ctx: EnrichedBoundedContextIR): ExprIR[] {
+  const agg = ctx.aggregates.find((a) => a.name === proj.query?.source);
+  if (!agg) return [];
+  const q = proj.query!;
+  const bypassAll = q.bypassAll ?? false;
+  const bypassCaps = q.bypassCaps ?? [];
+  const origins = agg.contextFilterOrigins ?? [];
+  // Only a CAPABILITY-contributed filter is bypassable; a bare/hand-written
+  // one (`undefined` origin) always applies.
+  return (agg.contextFilters ?? []).filter((_, i) => {
+    const origin = origins[i];
+    if (origin === undefined) return true;
+    return !(bypassAll || bypassCaps.includes(origin));
+  });
+}
+
+/** The EF twin of {@link aggregationCapabilityFilters}: the
+ *  `.IgnoreQueryFilters(…)` clause an aggregation over an `ignoring` source
+ *  needs.
+ *
+ *  EF installs each capability predicate as a MODEL-level named query filter,
+ *  so the aggregation inherits them for free — which is exactly why the arms
+ *  used to read `aggregationCapabilityFilters` only under Dapper.  But that
+ *  also made `ignoring <Cap>` / `ignoring *` DEAD on EF: the filters it names
+ *  kept applying, while the Dapper arm simply left the predicate out of its
+ *  SQL and the repository read path already honoured the same clause
+ *  (`ignoreFiltersClause`, emit/repository.ts).  One model, three answers.
+ *
+ *  Partial bypass is expressible because EF Core 10's filters are NAMED:
+ *  `ignoring <OneCap>` names only the filters that capability contributed and
+ *  every other one stays armed, so bypassing soft-delete cannot widen the read
+ *  across tenants.  Bypass is capability-origin-only (#2603/#2637, and
+ *  language-reference §11: "`ignoring *` drops every CAPABILITY filter"), which
+ *  is why even `*` names its filters rather than taking the parameterless
+ *  overload — see below. */
+function efAggregationIgnoreClause(
+  proj: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+  usingDapper: boolean,
+): string {
+  if (usingDapper) return "";
+  const agg = ctx.aggregates.find((a) => a.name === proj.query?.source);
+  if (!agg) return "";
+  const q = proj.query!;
+  const bypassAll = q.bypassAll ?? false;
+  const caps = new Set(q.bypassCaps ?? []);
+  if (!bypassAll && caps.size === 0) return "";
+  // Index-for-index the INVERSE of `aggregationCapabilityFilters` above: the
+  // named filter at position i drops exactly when that function would have
+  // dropped the predicate at position i.  Spelled out rather than reusing the
+  // repository's `ignoreFiltersClause`, because that helper maps `*` to the
+  // PARAMETERLESS `IgnoreQueryFilters()` — which also drops a bare
+  // (origin-less) `filter <expr>`, while `ignoring *` is documented, and
+  // implemented by the Dapper twin, as "every CAPABILITY filter".
+  const names = queryFilterNames(agg, ctx.aggregates);
+  const origins = agg.contextFilterOrigins ?? [];
+  const dropped = names.filter((_, i) => {
+    const origin = origins[i];
+    return origin != null && (bypassAll || caps.has(origin));
+  });
+  if (dropped.length === 0) return "";
+  return `.IgnoreQueryFilters([${dropped.map((n) => JSON.stringify(n)).join(", ")}])`;
+}
+
+/** The Dapper `WHERE` body for an aggregation: the projection's own filter
+ *  AND the applicable capability filters, each already parenthesised by
+ *  `whereToSql`.  `undefined` ⇒ no `WHERE` at all. */
+function dapperAggregationWhere(
+  proj: ProjectionIR,
+  capabilityFilters: readonly ExprIR[],
+): string | undefined {
+  const filter = proj.query!.filter;
+  const parts = [...(filter ? [filter] : []), ...capabilityFilters].map((p) => {
+    try {
+      return whereToSql(p);
+    } catch {
+      throw new Error(
+        `dapper: a filter on query-time projection '${proj.name}' is outside the Dapper SQL ` +
+          `subset; use 'persistence: efcore' or simplify the predicate.`,
+      );
+    }
+  });
+  return parts.length > 0 ? parts.join(" AND ") : undefined;
+}
+
+/** True when this aggregate's DECLARED wire field crosses as a float64.
+ *  #2563/RS-24: a `decimal` RESPONSE field is a JSON number, so .NET types it
+ *  `double` (`wireType`).  `count` is an `int` and money/guid go out as
+ *  formatted strings, so neither is affected. */
+function aggregateLandsOnDouble(s: AggregateSelect, ctx: EnrichedBoundedContextIR): boolean {
+  const c = aggregateCoercion(s);
+  if (c.isCount || c.asString) return false;
+  const target = wireType(s.type, ctx, "response");
+  return target === "double" || target === "double?";
+}
+
+/** True when the EF/LINQ aggregate result MATERIALISES as a `System.Decimal` —
+ *  which is decided by the AGGREGATED COLUMN's type, not the declared row
+ *  field's (F10/M-T6.47):
+ *
+ *    | op              | column    | LINQ result |
+ *    |-----------------|-----------|-------------|
+ *    | `count`         | —         | `int`       |
+ *    | `avg`           | integral  | `double`    |
+ *    | `avg`           | `decimal` | `decimal`   |
+ *    | `sum`/`max`/`min` | integral| `int`/`long`|
+ *    | `sum`/`max`/`min` | `decimal` | `decimal` |
+ *
+ *  Only the `decimal`-column rows need `csCoerce`'s narrowing to be correctly
+ *  rounded; every other row's `(double)` cast is an identity or an exact
+ *  widening, so it stays byte-for-byte as it was.  (`money` never reaches the
+ *  numeric tail at all — it takes the `asString` arm.)
+ *
+ *  DAPPER never takes this path: #2631 casts in SQL, so the row DTO already
+ *  declares `double?` and the coercion there is an identity conversion.  Adding
+ *  a Parse on top of a `double` would be converting twice, so the two EF call
+ *  sites pass `arrivesAsDecimal` and both dapper call sites pass `false`. */
+function efAggregateArrivesAsDecimal(s: AggregateSelect): boolean {
+  const agg = s.aggregate;
+  if (agg.op === "count" || !agg.arg) return false;
+  if (agg.arg.kind !== "member") return false;
+  const t = agg.arg.memberType;
+  const inner = t.kind === "optional" ? t.inner : t;
+  return inner.kind === "primitive" && inner.name === "decimal";
+}
+
 /** The Postgres aggregate call for one `select` — the raw-SQL twin of
  *  `csAggregate`.  `count` counts ROWS (no column) and casts to `int` so it
- *  lands on the same CLR type EF's `g.Count()` produces; every other operator
- *  casts to `numeric`, which is what `csCoerce` then converts to the row's
- *  DECLARED wire type (`money` → an InvariantCulture string, `decimal`/`int`
- *  → a cast).  Casting uniformly is what keeps `avg` over an `int` column off
- *  the `double`-vs-`decimal` mismatch EF needed the same cast for. */
-function sqlAggregate(agg: ProjectionAggregateIR): string {
+ *  lands on the same CLR type EF's `g.Count()` produces.
+ *
+ *  Every other operator casts to the SQL type whose Npgsql mapping IS the row
+ *  DTO's CLR type, so nothing is converted in C#:
+ *
+ *    - a field that crosses as `double` (a declared `decimal`, #2563) casts to
+ *      `double precision`;
+ *    - everything else (money / guid → formatted string, `int`) casts to
+ *      `numeric` and lands on `decimal`.
+ *
+ *  The `double precision` arm is load-bearing, not tidiness.  `numeric` maps to
+ *  `System.Decimal`, and the `(double)` coercion that follows is a
+ *  decimal→double conversion, which .NET rounds to **15 significant digits**:
+ *  `avg` of 7/3 shipped `2.333333333333333` where every other backend ships the
+ *  true nearest double `2.3333333333333335`, failing the wire-golden
+ *  differential on the dapper leg alone (EF was green because its provider
+ *  materialises `Average` as a real `double` — but only when the aggregated
+ *  COLUMN is integral, which #2631's `avg(line_count)` fixture was; a `decimal`
+ *  column hits the same lossy cast on EF, fixed in `csCoerce` via
+ *  `efAggregateArrivesAsDecimal`).  Casting in SQL hands Npgsql a
+ *  `float8` directly, and Postgres' own numeric→float8 conversion is correctly
+ *  rounded — the same path node takes (numeric result → JS number).
+ *
+ *  Note the aggregate itself still computes in `numeric` (`avg`/`sum` over an
+ *  `integer` or `numeric` column return `numeric`); only the RESULT is
+ *  converted.  Casting the argument instead would move the accumulation into
+ *  binary floating point and diverge from the other backends for real. */
+function sqlAggregate(s: AggregateSelect, ctx: EnrichedBoundedContextIR): string {
+  const agg = s.aggregate;
   if (agg.op === "count" || !agg.arg) return "count(*)::int";
   const arg = agg.arg;
   if (arg.kind !== "member") {
@@ -378,15 +549,19 @@ function sqlAggregate(agg: ProjectionAggregateIR): string {
       "internal: a whole-table aggregation argument must be a source column reference",
     );
   }
-  return `${agg.op}(${sqlIdent(snake(arg.member))})::numeric`;
+  const cast = aggregateLandsOnDouble(s, ctx) ? "double precision" : "numeric";
+  return `${agg.op}(${sqlIdent(snake(arg.member))})::${cast}`;
 }
 
-/** The CLR type the aggregate's aliased column lands on. `count` is never
- *  NULL (0 rows counts 0); every other aggregate is NULL over no rows, which
- *  `csCoerce` turns into the declared field's zero (or keeps as null for an
- *  optional field). */
-function sqlAggregateRowCs(agg: ProjectionAggregateIR): string {
-  return agg.op === "count" || !agg.arg ? "int" : "decimal?";
+/** The CLR type the aggregate's aliased column lands on — the Npgsql mapping of
+ *  the cast `sqlAggregate` emitted, so the two must move together. `count` is
+ *  never NULL (0 rows counts 0); every other aggregate is NULL over no rows,
+ *  which `csCoerce` turns into the declared field's zero (or keeps as null for
+ *  an optional field). */
+function sqlAggregateRowCs(s: AggregateSelect, ctx: EnrichedBoundedContextIR): string {
+  const agg = s.aggregate;
+  if (agg.op === "count" || !agg.arg) return "int";
+  return aggregateLandsOnDouble(s, ctx) ? "double?" : "decimal?";
 }
 
 /** One grouping key as raw Postgres SQL — the column, or the catalogued
@@ -451,7 +626,7 @@ function dapperRowMap(
   return `    private static ${pocoFqn} ${fnName}(${rowCls} r) => new()\n    {\n${inits}\n    };`;
 }
 
-/** Render the handler for a WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0).
+/** Render the handler for a WHOLE-TABLE AGGREGATION (M-T1.3).
  *
  *  ONE SQL query, no rows materialised — the shape exists precisely to avoid
  *  the naive read (a `SELECT *` over the whole table with every row rehydrated
@@ -483,21 +658,24 @@ function renderAggregateHandler(
   // SQL itself, through the one predicate→SQL lowering this adapter already
   // has (`whereToSql`, shared with every Dapper find / retrieval / capability
   // filter).  A second lowering here would be a second dialect to keep true.
-  const where = filter
-    ? usingDapper
-      ? whereToSql(filter)
-      : renderCsExpr(filter, { thisName: "o", efQuery: true })
-    : undefined;
-  if (filter && !usingDapper) collectCsExprUsings(filter, usings);
+  const caps = usingDapper ? aggregationCapabilityFilters(proj, ctx) : [];
+  // …and its EF twin: the model-level query filters this read BYPASSES.
+  const efIgnore = efAggregationIgnoreClause(proj, ctx, usingDapper);
+  const where = usingDapper
+    ? dapperAggregationWhere(proj, caps)
+    : filter
+      ? renderCsExpr(filter, { thisName: "o", efQuery: true })
+      : undefined;
+  if (filter && !usingDapper) collectCsExprUsings(filter, usings, ns);
 
   const requires = proj.query!.requires;
   const gateUsesUser = exprUsesCurrentUser(requires);
   if (requires) {
-    collectCsExprUsings(requires, usings);
+    collectCsExprUsings(requires, usings, ns);
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
-  const seam = dapperFilterSeam(usingDapper, filter, ns, usings);
+  const seam = dapperFilterSeam(usingDapper, filter, ns, usings, caps);
 
   const dbType = usingDapper ? "NpgsqlDataSource" : "AppDbContext";
   const fields: string[] = [`    private readonly ${dbType} _db;`];
@@ -538,18 +716,19 @@ function renderAggregateHandler(
     // `QuerySingleAsync`, not `…OrDefault`.  Each aggregate is aliased to its
     // wire field's snake name, which is also the row property name, so Dapper's
     // column→property match is exact.
-    const cols = aggregates.map(
-      (s) => `${sqlAggregate(s.aggregate)} AS ${sqlIdent(snake(s.field))}`,
-    );
+    const cols = aggregates.map((s) => `${sqlAggregate(s, ctx)} AS ${sqlIdent(snake(s.field))}`);
     members = aggregates
       .map(
-        (s) => `        public ${sqlAggregateRowCs(s.aggregate)} ${snake(s.field)} { get; set; }`,
+        (s) =>
+          `        public ${sqlAggregateRowCs(s, ctx)} ${escapeCsharpIdent(snake(s.field))} { get; set; }`,
       )
       .join("\n");
     const sql = `SELECT ${cols.join(", ")} FROM ${sqlIdent(dapperAggregateTable(source))}${
       where ? ` WHERE ${where}` : ""
     }`;
-    const args = aggregates.map((s) => csCoerce(s, `agg`, ctx, snake(s.field))).join(", ");
+    const args = aggregates
+      .map((s) => csCoerce(s, `agg`, ctx, escapeCsharpIdent(snake(s.field))))
+      .join(", ");
     body =
       `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);\n` +
       `        var agg = await conn.QuerySingleAsync<AggRow>(new CommandDefinition("${sql}"${seam.paramArg}, cancellationToken: cancellationToken));\n` +
@@ -560,10 +739,12 @@ function renderAggregateHandler(
     const anon = aggregates
       .map((s) => `${upperFirst(s.field)} = ${csAggregate(s.aggregate)}`)
       .join(", ");
-    const args = aggregates.map((s) => csCoerce(s, `agg`, ctx)).join(", ");
+    const args = aggregates
+      .map((s) => csCoerce(s, `agg`, ctx, undefined, efAggregateArrivesAsDecimal(s)))
+      .join(", ");
     members = "";
     body =
-      `        var agg = await _db.${dbSet}.AsNoTracking()${where ? `.Where(o => ${where})` : ""}\n` +
+      `        var agg = await _db.${dbSet}.AsNoTracking()${efIgnore}${where ? `.Where(o => ${where})` : ""}\n` +
       `            .GroupBy(_ => 1)\n` +
       `            .Select(g => new { ${anon} })\n` +
       `            .FirstOrDefaultAsync(cancellationToken);\n` +
@@ -671,22 +852,26 @@ function renderGroupedHandler(
 
   const usings = new Set<string>();
   const filter = proj.query!.filter;
-  const where = filter
-    ? usingDapper
-      ? whereToSql(filter)
-      : renderCsExpr(filter, { thisName: "o", efQuery: true })
-    : undefined;
-  if (filter && !usingDapper) collectCsExprUsings(filter, usings);
+  // Same capability-filter splice as the singleton arm — see
+  // `aggregationCapabilityFilters` and `efAggregationIgnoreClause`.
+  const caps = usingDapper ? aggregationCapabilityFilters(proj, ctx) : [];
+  const efIgnore = efAggregationIgnoreClause(proj, ctx, usingDapper);
+  const where = usingDapper
+    ? dapperAggregationWhere(proj, caps)
+    : filter
+      ? renderCsExpr(filter, { thisName: "o", efQuery: true })
+      : undefined;
+  if (filter && !usingDapper) collectCsExprUsings(filter, usings, ns);
 
   // Authorization gate (default-deny) — same shape as the singleton arm.
   const requires = proj.query!.requires;
   const gateUsesUser = exprUsesCurrentUser(requires);
   if (requires) {
-    collectCsExprUsings(requires, usings);
+    collectCsExprUsings(requires, usings, ns);
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
-  const seam = dapperFilterSeam(usingDapper, filter, ns, usings);
+  const seam = dapperFilterSeam(usingDapper, filter, ns, usings, caps);
 
   const dbType = usingDapper ? "NpgsqlDataSource" : "AppDbContext";
   const fields: string[] = [`    private readonly ${dbType} _db;`];
@@ -751,6 +936,7 @@ function renderGroupedHandler(
         usingDapper ? "r" : "x",
         ctx,
         usingDapper ? snake(agg.field) : undefined,
+        !usingDapper && efAggregateArrivesAsDecimal(agg),
       );
     return "default!";
   });
@@ -770,7 +956,7 @@ function renderGroupedHandler(
       const expr = sqlGroupKeyExpr(k.expr, proj.name);
       return expr === alias ? alias : `${expr} AS ${alias}`;
     }),
-    ...grouped.aggregates.map((s) => `${sqlAggregate(s.aggregate)} AS ${sqlIdent(snake(s.field))}`),
+    ...grouped.aggregates.map((s) => `${sqlAggregate(s, ctx)} AS ${sqlIdent(snake(s.field))}`),
   ].join(", ");
   const groupSql =
     `SELECT ${selectSql} FROM ${sqlIdent(dapperAggregateTable(source))}` +
@@ -783,7 +969,7 @@ function renderGroupedHandler(
           col: snake(s.field),
           sql: "",
           nullable: true,
-          rowCs: sqlAggregateRowCs(s.aggregate),
+          rowCs: sqlAggregateRowCs(s, ctx),
           cast: "",
           save: "",
           stateProp: "",
@@ -795,7 +981,7 @@ function renderGroupedHandler(
     ? `        await using var conn = await _db.OpenConnectionAsync(cancellationToken);\n` +
       `        var groups = await conn.QueryAsync<GroupRow>(new CommandDefinition("${groupSql}"${seam.paramArg}, cancellationToken: cancellationToken));\n` +
       `        return groups.Select(r => new ${rowName}(${args.join(", ")})).ToList();\n`
-    : `        var groups = await _db.${dbSet}.AsNoTracking()${where ? `.Where(o => ${where})` : ""}\n` +
+    : `        var groups = await _db.${dbSet}.AsNoTracking()${efIgnore}${where ? `.Where(o => ${where})` : ""}\n` +
       `            .GroupBy(o => new { ${cols.map((c) => c.decl).join(", ")} })\n` +
       `            .Select(g => new { ${members} })\n` +
       `            ${orderBy}\n` +
@@ -861,6 +1047,10 @@ function csCoerce(
    *  after the wire field (`Orders`); the Dapper row DTO is snake-named after
    *  the SQL alias (`orders`).  Same coercion either way. */
   member: string = upperFirst(s.field),
+  /** Whether the value being read is a `System.Decimal` — true only on the EF
+   *  arms over a `decimal` column (`efAggregateArrivesAsDecimal`).  Dapper
+   *  passes `false`: #2631 already made the SQL hand back a `float8`. */
+  arrivesAsDecimal = false,
 ): string {
   const c = aggregateCoercion(s);
   const read = `${aggVar}?.${member}`;
@@ -886,6 +1076,26 @@ function csCoerce(
   // `decimal` then fails to compile (`CS1503: cannot convert from 'double' to
   // 'decimal'`).  Cast to the DECLARED wire type — the row is the contract.
   const target = wireType(s.type, ctx, "response");
+  // …except when the cast would be a LOSSY decimal→double narrowing: an EF
+  // aggregate over a `decimal` column materialises as `System.Decimal`, and
+  // `(double)` on it is not correctly rounded (F10 — the same class #2631 fixed
+  // for dapper at the SQL seam).  Route it through the shared
+  // `csDecimalToWireDouble` instead.  Safe here: both EF arms apply this AFTER
+  // materialisation (`FirstOrDefaultAsync` / `ToListAsync`, then an in-memory
+  // `Select`), so it is LINQ-to-Objects — there is no expression tree for EF to
+  // translate and no `double.Parse` ever reaches SQL.
+  if (arrivesAsDecimal && (target === "double" || target === "double?")) {
+    if (!c.optional) return csDecimalToWireDouble(`(${read} ?? 0)`);
+    // Pattern-match the unwrap: `agg?.X is { } v` yields a NON-nullable
+    // `decimal` for the Parse argument, so nullable analysis sees the
+    // `ToString` result as non-null (a `agg?.X!.Value.ToString(…)` chain
+    // stays `string?` and fails `/warnaserror` with CS8604).  The member name
+    // keeps the pattern variable unique when one row carries several optional
+    // decimal aggregates, and the `(double?)` keeps the conditional's type
+    // explicit rather than leaning on target-typing.
+    const v = `__dec${member}`;
+    return `(${read} is { } ${v} ? (double?)${csDecimalToWireDouble(v)} : null)`;
+  }
   return c.optional ? `(${target})${read}` : `(${target})(${read} ?? 0)`;
 }
 
@@ -919,14 +1129,14 @@ function renderWorkflowHandler(
       ? whereToSql(filter)
       : renderCsExpr(filter, { thisName: "r", efQuery: true })
     : undefined;
-  if (filter && !usingDapper) collectCsExprUsings(filter, usings);
-  for (const s of proj.query!.selects ?? []) collectCsExprUsings(s.expr, usings);
+  if (filter && !usingDapper) collectCsExprUsings(filter, usings, ns);
+  for (const s of proj.query!.selects ?? []) collectCsExprUsings(s.expr, usings, ns);
 
   // Authorization gate (default-deny) — same shape as the aggregate handler.
   const requires = proj.query!.requires;
   const gateUsesUser = exprUsesCurrentUser(requires);
   if (requires) {
-    collectCsExprUsings(requires, usings);
+    collectCsExprUsings(requires, usings, ns);
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }
@@ -1055,14 +1265,14 @@ function renderProjectionSourceHandler(
       ? whereToSql(filter)
       : renderCsExpr(filter, { thisName: "r", efQuery: true })
     : undefined;
-  if (filter && !usingDapper) collectCsExprUsings(filter, usings);
-  for (const s of proj.query!.selects ?? []) collectCsExprUsings(s.expr, usings);
+  if (filter && !usingDapper) collectCsExprUsings(filter, usings, ns);
+  for (const s of proj.query!.selects ?? []) collectCsExprUsings(s.expr, usings, ns);
 
   // Authorization gate (default-deny) — same shape as the aggregate/workflow handler.
   const requires = proj.query!.requires;
   const gateUsesUser = exprUsesCurrentUser(requires);
   if (requires) {
-    collectCsExprUsings(requires, usings);
+    collectCsExprUsings(requires, usings, ns);
     usings.add(`${ns}.Domain.Common`); // ForbiddenException
     if (gateUsesUser) usings.add(`${ns}.Auth`); // ICurrentUserAccessor
   }

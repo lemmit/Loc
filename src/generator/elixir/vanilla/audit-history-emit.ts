@@ -55,6 +55,15 @@ export function vanillaHistoryMapperName(agg: AggregateIR): string {
   return `${snake(agg.name)}_audit_entry`;
 }
 
+/** True when this aggregate's `principalSource: "param"` mapper takes the
+ *  trailing `current_user` argument — i.e. it has at least one `mask unless`
+ *  field to test it against.  Exposed so the LiveView caller emits the matching
+ *  arity: an unused parameter is a `--warnings-as-errors` failure, and a
+ *  missing one is an UndefinedFunctionError. */
+export function vanillaHistoryMapperTakesPrincipal(agg: AggregateIR): boolean {
+  return maskedHistoryFields(agg as EnrichedAggregateIR).length > 0;
+}
+
 /** The repository's enrichment-derived history find, when this aggregate serves
  *  one.  Read off `RepositoryIR.historyFind` rather than re-deriving "is this
  *  audited" — the derived find carries the gate and the `ignoring` stance
@@ -124,14 +133,18 @@ defmodule ${appModule}.Audit.History do
   on the way in, so only the derived \`changes\` output is a cross-backend
   contract.
 
-  The snake_case fallback is a wart of THIS backend's write side, recorded
-  rather than hidden: an audited \`create\`/\`destroy\` snapshots through the
-  controller's wire serializer (camelCase wire keys), while an audited
-  \`operation\` snapshots the Ecto struct directly (\`Map.from_struct\`, i.e. schema
-  column names).  Both spellings are consistent WITHIN a row — both sides of one
-  entry always come from the same projection — so falling back cannot invent a
-  change; it only stops a multi-word field from silently vanishing from the
-  timeline of every operation entry.
+  The snake_case fallback reads LEGACY rows only.  Every capture site now
+  snapshots through one projection — \`Audit.Wire.wire/1\`, the aggregate's
+  \`wireShape\` — so an audited \`operation\` writes the same camelCase keys an
+  audited \`create\`/\`destroy\` does, and the same keys the other four backends
+  write.  Before that, an \`operation\` dumped the Ecto struct
+  (\`Map.from_struct\`, i.e. schema column names), so rows written by an older
+  build of this app still carry snake_case keys; \`audit_records\` is append-only
+  history and survives redeploys, so those rows are still read here.  Both
+  spellings stay consistent WITHIN a row — both sides of one entry always come
+  from the same projection — so falling back cannot invent a change; it only
+  stops a multi-word field from vanishing from the timeline of a pre-existing
+  operation entry.
   """
   @spec snapshot_value(term(), String.t()) :: term()
   def snapshot_value(snapshot, key) when is_map(snapshot) do
@@ -165,7 +178,6 @@ function predicateCtx(appModule: string, ctx: BoundedContextIR, agg: AggregateIR
   return {
     thisName: "record",
     contextModule: `${appModule}.${upperFirst(ctx.name)}`,
-    foundation: "vanilla",
     agg: agg as EnrichedAggregateIR,
   };
 }
@@ -178,11 +190,25 @@ export function renderVanillaHistoryMapper(
   appModule: string,
   ctx: BoundedContextIR,
   agg: AggregateIR,
+  /** Where the mapper reads the principal its `mask unless` predicates test.
+   *
+   *  `"ambient"` (the controller) — `Process.get(:loom_current_user)`, stashed
+   *  by the Auth plug in the HTTP request process.
+   *
+   *  `"param"` (the LiveView) — a trailing `current_user` ARGUMENT.  A LiveView
+   *  is a separate socket process with its own `socket.assigns.current_user`,
+   *  so the ambient read is `nil` there and every masked entry would drop for a
+   *  caller entitled to see it.  Same reasoning (and same fix) as the context
+   *  gates' explicit principal argument — see `context-emit.ts`'s header. */
+  principalSource: "ambient" | "param" = "ambient",
 ): string {
   const unmasked = unmaskedHistoryFields(agg as EnrichedAggregateIR);
   const masked = maskedHistoryFields(agg as EnrichedAggregateIR);
   const history = `${appModule}.Audit.History`;
-  const lines: string[] = [`  defp ${vanillaHistoryMapperName(agg)}(row) do`];
+  const takesPrincipal = principalSource === "param" && masked.length > 0;
+  const lines: string[] = [
+    `  defp ${vanillaHistoryMapperName(agg)}(row${takesPrincipal ? ", current_user" : ""}) do`,
+  ];
   if (unmasked.length > 0) {
     const keys = unmasked.map((f) => JSON.stringify(f.name)).join(", ");
     lines.push(
@@ -202,7 +228,7 @@ export function renderVanillaHistoryMapper(
   } else {
     lines.push(`    changes = []`, ``);
   }
-  if (masked.length > 0) {
+  if (masked.length > 0 && !takesPrincipal) {
     // The ambient principal — the SAME one the redacting `serialize/1` masks
     // against, so history can never disclose a field the entity read hid.  An
     // unauthenticated caller has none, and every masked entry drops.

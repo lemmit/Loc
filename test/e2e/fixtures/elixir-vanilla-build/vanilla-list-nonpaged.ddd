@@ -1,0 +1,53 @@
+// The NON-PAGED `find all` paired with a scaffolded list page, COMPILED.
+//
+// The paged pairing is `vanilla-list-read-gate.ddd`.  This is its twin: an
+// author-declared `find all(): Order[]` (no `paged`) exposes `list_orders/0`,
+// so the scaffold's `all` QueryView is CLIENT-paged — `serverPaged:` absent.
+//
+// Two things have to hold and only a compiler proves the first:
+//
+//   * the LiveView must call the delegate at the arity the repository defines.
+//     M-T6.40 fixed the `list_orders/4` vs `list_orders/0` break, and nothing
+//     in the corpus paired the two, so the fixed arity had never reached
+//     `mix compile`;
+//   * the page must not advertise SORT or PAGE controls it cannot honour.  The
+//     JSX frontends slice and sort a client-paged list in the browser; HEEx has
+//     no client-side sort, so the hoisted `handle_event` clauses could only
+//     re-run the same argument-less `list_orders()` and return the same rows —
+//     clickable headers that flip an arrow and change nothing
+//     (F2-MT640-SORT-DEAD).  The emitter now drops the affordance on this shape;
+//     `test/generator/elixir/heex-table-controls.test.ts` pins the markup, this
+//     fixture keeps the compile tier reaching the pairing.
+system Sales {
+  subdomain Sales {
+    context Sales {
+      aggregate Order {
+        code: string
+        total: money
+        derived display: string = code
+      }
+      repository Orders for Order {
+        // NOT `paged` — the whole point of this fixture.
+        find all(): Order[]
+      }
+    }
+  }
+
+  api SalesApi from Sales
+
+  ui SalesAdmin with scaffold(subdomains: [Sales]) {
+    api Sales: SalesApi
+  }
+
+  storage primary { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primary }
+
+  deployable phoenixApp {
+    platform: elixir
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    ui: SalesAdmin { Sales: phoenixApp }
+    port: 4000
+  }
+}

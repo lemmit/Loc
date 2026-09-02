@@ -11,6 +11,7 @@
 // Pure leaf — the find method builders depend on these, never the reverse.
 
 import type {
+  BoundedContextIR,
   CriterionIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -18,6 +19,8 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { orientComparison } from "../../ir/util/comparison-operands.js";
+import { tableOwnerName } from "../../ir/util/inheritance.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
@@ -31,6 +34,7 @@ import {
 import { intrinsicFor, intrinsicKey, isQueryableBoolIntrinsic } from "../../util/intrinsics.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
+import { SQL_LIKE_ESCAPE_CLAUSE, tsSubtreeLikePattern } from "../_expr/subtree-like.js";
 import { joinColumnName, joinTableConstName } from "./emit.js";
 import { TS_INTRINSIC_RENDERERS } from "./render-expr.js";
 import { associationsOf } from "./repository-associations-builder.js";
@@ -153,7 +157,7 @@ export function lowerToDrizzle(
     // a missing arm is a `tsc` error here, not a silent authorization bypass.
     if (e.kind === "authz-filter") {
       switch (e.filter.kind) {
-        // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false
+        // DENY carve-out (authorization — deny-wins).  An always-false
         // term: a column can't be both NULL and NOT NULL, so
         // `and(isNull(id), isNotNull(id))` matches no row.  Self-contained (uses
         // the always-present `id` column and standard Drizzle ops), so it needs
@@ -163,7 +167,7 @@ export function lowerToDrizzle(
           const idCol = `schema.${tableName}.id`;
           return `and(isNull(${idCol}), isNotNull(${idCol}))`;
         }
-        // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) — the
+        // `deep`/`global` read level (multi-tenancy) — the
         // materialized-path descendant-or-self scope with the NULL-dataKey
         // fallback to the tenant floor (see `DEEP_SCOPE_SEMANTICS`).  Renders as
         // a Drizzle operator tree.
@@ -176,17 +180,23 @@ export function lowerToDrizzle(
           // NOT the row column above, which only coincides when the author
           // happened to name the claim `tenantId`.
           const tenant = `${principal}.${deepScopeTenantClaim(e)}`;
-          // Descendant test as an ANCHORED POSITION, not `LIKE <org> || '.%'`.
-          // The anchor is a principal CLAIM, so it is data, and `_`/`%` inside
-          // it are LIKE wildcards: an org legitimately named `acme_corp` gets
-          // the pattern `acme_corp.%`, which matches `acmeXcorp.…` — a
-          // cross-tenant read with no attacker involved, just an underscore in
-          // a name.  Binding the value (which Drizzle does) stops injection,
-          // not wildcard semantics.  `strpos(col, needle) = 1` has no pattern
-          // language at all, which is the same reason `string.startsWith`
-          // lowers this way in DRIZZLE_INTRINSIC_SQL above.
+          // Descendant test = SARGABLE PREFILTER **and** ANCHORED RECHECK
+          // (M-T3.17).  The anchor is a principal CLAIM, so it is data, and
+          // `_`/`%` inside it are LIKE wildcards: an org legitimately named
+          // `acme_corp` gets the pattern `acme_corp.%`, which matches
+          // `acmeXcorp.…` — a cross-tenant read with no attacker involved, just
+          // an underscore in a name.  Binding the value (which Drizzle does)
+          // stops injection, not wildcard semantics.  So the row is DECIDED by
+          // `strpos(col, needle) = 1`, which has no pattern language at all —
+          // the same reason `string.startsWith` lowers this way in
+          // DRIZZLE_INTRINSIC_SQL above.  The escaped `LIKE … ESCAPE '!'` in
+          // front of it exists only so the planner can ride the
+          // `data_key text_pattern_ops` index instead of seq-scanning; an
+          // escaping slip could only widen it, and the recheck still gates.
           for (const op of ["or", "and", "eq", "isNull", "isNotNull", "sql"]) ops.add(op);
-          const descendant = `sql\`strpos(\${${col}}, \${${org} + ${JSON.stringify(DATA_KEY_PATH_DELIMITER)}}) = 1\``;
+          const prefilter = `sql\`\${${col}} like \${${tsSubtreeLikePattern(org)}} ${SQL_LIKE_ESCAPE_CLAUSE}\``;
+          const anchored = `sql\`strpos(\${${col}}, \${${org} + ${JSON.stringify(DATA_KEY_PATH_DELIMITER)}}) = 1\``;
+          const descendant = `and(${prefilter}, ${anchored})`;
           return (
             `or(and(isNotNull(${col}), or(eq(${col}, ${org}), ` +
             `${descendant})), ` +
@@ -248,12 +258,26 @@ export function lowerToDrizzle(
           return `${drizzleFn}(${l}, ${r})`;
         }
       }
-      const colExpr = renderColumnRef(e.left) ?? renderColumnRef(e.right);
-      const valueExpr =
-        renderColumnRef(e.left) === null ? renderValue(e.left) : renderValue(e.right);
+      // Drizzle's operator vocabulary is `<fn>(<column>, <value>)` — there is
+      // no left-hand value position — so a predicate written with the column
+      // on the RIGHT (`where 100 < this.qty`) has to be commuted, and the
+      // operator mirrored with it.  Both halves come from the shared
+      // normalizer; keeping only the first half is how `100 < this.qty`
+      // used to emit `lt(qty, 100)`, the exact opposite read.
+      const oriented = orientComparison(
+        e.op,
+        e.left,
+        e.right,
+        (operand) => renderColumnRef(operand) !== null,
+      );
+      if (oriented === null) return null;
+      const orientedFn = COMPARE_OP_TO_DRIZZLE[oriented.op];
+      if (!orientedFn) return null;
+      const colExpr = renderColumnRef(oriented.column);
+      const valueExpr = renderValue(oriented.value);
       if (colExpr === null || valueExpr === null) return null;
-      ops.add(drizzleFn);
-      return `${drizzleFn}(${colExpr}, ${valueExpr})`;
+      ops.add(orientedFn);
+      return `${orientedFn}(${colExpr}, ${valueExpr})`;
     }
     if (e.kind === "unary" && e.op === "!") {
       // A bare boolean column under `!` — `!this.isDeleted` — has no
@@ -507,16 +531,24 @@ export function lowerToDrizzle(
 // EF Core installs these once via `HasQueryFilter` and applies them to
 // every query automatically.  Drizzle has no global query filter, so the
 // generated repository must AND each predicate into every root-table read
-// site (findById / findManyByIds / find*).  Principal-
-// referencing filters (tenancy: `currentUser.tenantId`) are deferred —
-// the IR validator (`validatePrincipalContextFilterSupport`) rejects them
-// on Hono — so only non-principal predicates reach codegen here.
+// site (findById / findManyByIds / find*).
+//
+// PRINCIPAL-REFERENCING filters (tenancy: `currentUser.tenantId`) are
+// APPLIED, not rejected: `contextFilterPredicate` below lowers them with
+// `{ principalAccessor: "requireCurrentUser()" }`, so the predicate reads
+// the ambient per-request principal and the read needs no `currentUser`
+// parameter (DEBT-01).  The only thing such a filter cannot do is REIFY
+// into a module-level `<name>Criterion(...)` fn — that fn has no
+// `currentUser` in scope — so it always inlines.
 // ---------------------------------------------------------------------------
 
-/** The non-principal capability-filter predicates for an aggregate, in
- *  declaration order.  Principal-referencing predicates are filtered out
- *  (the validator has already rejected them on Hono), so what remains
- *  always lowers to a closed Drizzle expression. */
+/** The capability-filter predicates for an aggregate that lower to a CLOSED
+ *  Drizzle expression — i.e. every predicate except the principal-referencing
+ *  ones, in declaration order.  Callers are the ones that need a predicate
+ *  with no ambient-principal dependency: the drizzle-op import walk (which
+ *  lowers each predicate without a `principalAccessor`) and the criterion
+ *  reifier.  Every root read still applies the FULL set — principal filters
+ *  included — via `contextFilterPredicate`. */
 export function nonPrincipalContextFilters(agg: EnrichedAggregateIR): ExprIR[] {
   return (agg.contextFilters ?? []).filter((p) => !exprUsesCurrentUser(p));
 }
@@ -611,20 +643,36 @@ export function renderCriterionArg(e: ExprIR): string {
   return "undefined as never";
 }
 
+/** The Drizzle table const a repository reads `agg` from — the shared TPH base
+ *  table for a TPH concrete, otherwise the aggregate's own table.  Lives here
+ *  (rather than beside the find builders) so the predicate lowerer can derive
+ *  it itself: every read a capability filter AND-s into targets this table, and
+ *  a caller that passed the subtype's own plural instead emitted
+ *  `schema.cars.tenantId` against `select().from(schema.vehicles)` — a table
+ *  object that does not exist under TPH (`F2-CB-C3`, 7 × TS2339). */
+export function repoTableName(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string {
+  return lowerFirst(plural(tableOwnerName(agg, ctx.aggregates)));
+}
+
 /** Lower an aggregate's capability filters to a single Drizzle predicate
  *  string (conjoined with `and(...)` when there is more than one), or
  *  null when the aggregate has none.  Adds the Drizzle ops it uses to
  *  `ops` so the import-narrowing in the repository builders pulls them
- *  in.  Returns null (rather than throwing) on a non-lowerable predicate
- *  — the validator guarantees selectability, so that path is unreachable
- *  for valid models. */
+ *  in.
+ *
+ *  The table is DERIVED (`repoTableName`), never passed in — see that
+ *  function.  Throws on a non-lowerable predicate: the validator guarantees
+ *  every capability filter is selectable, so reaching that path means an IR
+ *  shape got past the gate, and returning null there silently dropped the
+ *  WHOLE conjunction — a declared read restriction absent from the emitted SQL
+ *  with no compile error and no diagnostic (`F2-CB-C4`). */
 export function contextFilterPredicate(
   agg: EnrichedAggregateIR,
-  tableName: string,
   ctx: EnrichedBoundedContextIR,
   ops: Set<string>,
   bypass?: FilterBypass,
 ): string | null {
+  const tableName = repoTableName(agg, ctx);
   const entries = allContextFilterEntries(agg, bypass);
   if (entries.length === 0) return null;
   const lowered: string[] = [];
@@ -653,7 +701,15 @@ export function contextFilterPredicate(
     const l = lowerToDrizzle(e.predicate, tableName, ctx, {
       principalAccessor: "requireCurrentUser()",
     });
-    if (!l) return null;
+    if (!l) {
+      throw new Error(
+        `Loom internal: capability \`filter\` on aggregate '${agg.name}' is not lowerable to ` +
+          `a Drizzle predicate, so the read restriction it declares cannot be emitted. ` +
+          `The IR validator is supposed to reject a non-selectable filter before codegen ` +
+          `(loom.criterion-not-selectable) — this shape reached the emitter instead. ` +
+          `Dropping it would ship unfiltered reads, so this is a hard stop.`,
+      );
+    }
     for (const op of l.ops) ops.add(op);
     lowered.push(l.expr);
   }
@@ -662,7 +718,7 @@ export function contextFilterPredicate(
   return `and(${lowered.join(", ")})`;
 }
 
-/** Lower an aggregate's `writeScopeFilter` (authorization Phase 3 P3.1 — the
+/** Lower an aggregate's `writeScopeFilter` (authorization — the
  *  WRITE-ladder guard) to a single Drizzle predicate string, or null when the
  *  aggregate has no write-scope narrowing.  Renders `currentUser.<field>`
  *  against the ambient `requireCurrentUser()` accessor, exactly like the read
@@ -680,6 +736,31 @@ export function writeScopePredicate(
   if (!l) return null;
   for (const op of l.ops) ops.add(op);
   return l.expr;
+}
+
+/** The write-scope existence PRE-GUARD lines for a QUERYABLE-COLUMN shape
+ *  (relational / `shape: embedded`): a one-row probe matching BOTH the id and
+ *  the write scope, ahead of the ordinary `findById` load.  Every mutation
+ *  route loads through `getById`, so that is where a narrowing write scope is
+ *  enforced — a row the caller may READ but not WRITE is indistinguishable
+ *  from a missing one (404), and the read filter still hydrates it afterwards.
+ *  Empty (byte-identical emission) when nothing narrows.  Shared by the
+ *  relational and embedded builders — the MikroORM adapter's twin is
+ *  `mikroGetByIdLines` (emit/mikroorm.ts). */
+export function writeScopeGuardLines(
+  agg: EnrichedAggregateIR,
+  tableName: string,
+  ctx: EnrichedBoundedContextIR,
+  ops: Set<string>,
+): string[] {
+  const pred = writeScopePredicate(agg, tableName, ctx, ops);
+  if (!pred) return [];
+  ops.add("and");
+  ops.add("eq");
+  return [
+    `    const inScope = await this.db.select({ id: schema.${tableName}.id }).from(schema.${tableName}).where(and(eq(schema.${tableName}.id, id), ${pred})).limit(1);`,
+    `    if (inScope.length === 0) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
+  ];
 }
 
 /** Combine a capability-filter predicate with an existing read predicate.

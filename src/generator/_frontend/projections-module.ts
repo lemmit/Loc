@@ -3,7 +3,7 @@
 // `src/api/projections.ts` aggregating every readable projection in the
 // deployable.  The frontend twin of the backend's `http/query-projections.ts`.
 //
-// Why this exists (M-T1.3 Phase 1): projections were BACKEND-ONLY read models.
+// Why this exists (M-T1.3): projections were BACKEND-ONLY read models.
 // Each owned an HTTP route that no generated frontend ever called, and a page
 // that tried (`QueryView { of: Sales.SalesTotals }`) validated clean and emitted
 // `/* unresolved: Sales */ undefined.SalesTotals` — a runtime TypeError and a
@@ -11,13 +11,13 @@
 //
 // Scope: the UNKEYED query-time projection — the whole-table read model whose
 // response is one object (the shape a dashboard KPI reads), plus the `group by`
-// LIST shape (one row per group, a `z.array` of the same row — M-T1.3 Phase 4).
+// LIST shape (one row per group, a `z.array` of the same row — M-T1.3).
 // A keyed projection is read by key off its materialized row table; it is gated
 // (`loom.ui-projection-read-unsupported`) until that lands.
 //
 // ---------------------------------------------------------------------------
 // HOW THE REMAINING FRONTENDS PORT INTO THIS MODULE  (decided on the Vue port,
-// M-T1.3 Phase 1; read this BEFORE reaching for a per-framework seam)
+// M-T1.3; read this BEFORE reaching for a per-framework seam)
 // ---------------------------------------------------------------------------
 //
 // This module stays ONE shared emitter widened by a plain options object — it

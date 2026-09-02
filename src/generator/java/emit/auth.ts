@@ -12,11 +12,12 @@ import {
 } from "../../../ir/util/tenant-stance.js";
 import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { lines } from "../../../util/code-builder.js";
+import { devClaimFields } from "../../_auth/dev-claims.js";
 import { renderJavaType } from "../render-expr.js";
 
-/** The tenant registry (`implements tenantRegistry`) facts the P2.2
+/** The tenant registry (`implements tenantRegistry`) facts the
  *  `currentUser.orgPath` resolver needs.  Present only under hierarchy — its
- *  presence flips the `orgPath()` accessor from P2.1's claim-copy to a real,
+ * presence flips the `orgPath` accessor from claim-copy to a real,
  *  per-request memoized registry `data_key` read. */
 export interface OrgPathRegistry {
   /** `plural(snake(registry.name))` — the registry's Flyway state table
@@ -48,10 +49,10 @@ export function renderAuthFiles(
   /** Fullstack mode: only guard routes under this prefix ("/api"), so
    *  the SPA bundle + client-side routes stay public. */
   guardPrefix?: string,
-  /** Hierarchy (multi-tenancy P2.2): when the tenant registry opts into
+  /** Hierarchy (multi-tenancy): when the tenant registry opts into
    *  `tenantRegistry` (a `data_key` column exists) AND its table is reachable
    *  from this deployable, `orgPath()` reads it per request.  `undefined` for
-   *  flat tenancy — the P2.1 claim-copy accessor stands. */
+   *  flat tenancy — the claim-copy accessor stands. */
   orgPathRegistry?: OrgPathRegistry,
 ): Map<string, string> {
   const out = new Map<string, string>();
@@ -74,9 +75,9 @@ export function renderAuthFiles(
     })
     .join(", ");
   // Derived `currentUser.orgPath` — the caller's tenant materialized path
-  // (multi-tenancy P2.1).  An extra record accessor (not a component), so
-  // every `new User(...)` site is untouched; stringified null-safely.  P2.1
-  // resolves it to the tenancy claim value (the root path); P2.2 swaps the
+  // (multi-tenancy).  An extra record accessor (not a component), so
+  // every `new User(...)` site is untouched; stringified null-safely.
+  // resolves it to the tenancy claim value (the root path); swaps the
   // body for a memoized registry `dataKey` lookup.
   const orgPathClaim = sys.tenancy?.claimField;
   const claimAsString = orgPathClaim
@@ -88,7 +89,7 @@ export function renderAuthFiles(
           ``,
           `    /** The caller's tenant materialized path (\`currentUser.orgPath\`) —`,
           `     *  the tenant registry's \`data_key\`, resolved once per request and`,
-          `     *  memoized (multi-tenancy Phase 2, P2.2).  Falls back to the claim`,
+          `     *  memoized (multi-tenancy).  Falls back to the claim`,
           `     *  (the root-segment path) when the row / dataKey is absent or the`,
           `     *  lookup errors — fail-safe, never null / never throws. */`,
           `    public String orgPath() {`,
@@ -98,13 +99,13 @@ export function renderAuthFiles(
       : [
           ``,
           `    /** The caller's tenant materialized path (\`currentUser.orgPath\`) —`,
-          `     *  derived per-request from the tenancy claim (Phase 2, P2.1). */`,
+          `     *  derived per-request from the tenancy claim. */`,
           `    public String orgPath() {`,
           `        return ${claimAsString};`,
           `    }`,
         ]
     : [];
-  // `currentUser.rootOrg` (P2.5): the ROOT-org segment — the first segment of
+  // `currentUser.rootOrg`: the ROOT-org segment — the first segment of
   // `orgPath()` (up to the first `.`).  A record accessor off `orgPath()`
   // (pure, no extra read), correct under both flat and hierarchy tenancy;
   // anchors the `global` read level's root-subtree widening.
@@ -112,7 +113,7 @@ export function renderAuthFiles(
     ? [
         ``,
         `    /** The caller's ROOT-org segment (\`currentUser.rootOrg\`) — the first`,
-        `     *  segment of \`orgPath()\` (multi-tenancy Phase 2, P2.5). */`,
+        `     *  segment of \`orgPath()\` (multi-tenancy). */`,
         `    public String rootOrg() {`,
         `        String path = orgPath();`,
         `        int i = path.indexOf('.');`,
@@ -187,19 +188,28 @@ export function renderAuthFiles(
   const stubImports = new Set<string>();
   for (const f of fields) collectAuthImports(f.type, stubImports);
   const stubArgs = fields.map((f) => stubValue(f.type)).join(", ");
-  // Dev-claims override is limited to string-typed claims (the tenant-claim
-  // case) — a JSON string maps cleanly onto a `String` component; non-string
-  // components keep their built-in value.  FQNs avoid import churn.
-  const stubStringFields = fields.filter(
-    (f) => f.type.kind === "primitive" && f.type.name === "string",
+  // Dev-claims override carries the shapes the shared classifier admits —
+  // `String` and `List<String>`; every other component keeps its built-in
+  // value.  FQNs avoid import churn.  A list claim is element-checked, so a
+  // mixed array falls back rather than putting a non-text node in a
+  // `List<String>`.
+  const stubClaimKinds = new Map(
+    devClaimFields(fields).map(({ field, kind }) => [field.name, kind]),
   );
+  const stubStringFields = fields.filter((f) => stubClaimKinds.has(f.name));
   const overrideArgs = fields
-    .map((f) =>
-      f.type.kind === "primitive" && f.type.name === "string"
-        ? `claims.has("${f.name}") && claims.get("${f.name}").isTextual() ? claims.get("${f.name}").asText() : ${stubValue(f.type)}`
-        : stubValue(f.type),
-    )
+    .map((f) => {
+      const kind = stubClaimKinds.get(f.name);
+      if (kind === "string") {
+        return `claims.has("${f.name}") && claims.get("${f.name}").isTextual() ? claims.get("${f.name}").asText() : ${stubValue(f.type)}`;
+      }
+      if (kind === "stringList") {
+        return `devClaimStringList(claims, "${f.name}", ${stubValue(f.type)})`;
+      }
+      return stubValue(f.type);
+    })
     .join(", ");
+  const needsListHelper = [...stubClaimKinds.values()].includes("stringList");
   out.set(
     "DevStubUserVerifier.java",
     lines(
@@ -241,6 +251,25 @@ export function renderAuthFiles(
             `        }`,
             `        return new User(${stubArgs});`,
             `    }`,
+            // Element-checked list decode: a non-array node, or one holding a
+            // non-text element, falls back to the built-in value rather than
+            // half-filling a List<String>.
+            ...(needsListHelper
+              ? [
+                  ``,
+                  `    private static java.util.List<String> devClaimStringList(`,
+                  `            tools.jackson.databind.JsonNode claims, String key, java.util.List<String> fallback) {`,
+                  `        tools.jackson.databind.JsonNode node = claims.get(key);`,
+                  `        if (node == null || !node.isArray()) return fallback;`,
+                  `        java.util.List<String> out = new java.util.ArrayList<>();`,
+                  `        for (tools.jackson.databind.JsonNode e : node) {`,
+                  `            if (!e.isTextual()) return fallback;`,
+                  `            out.add(e.asText());`,
+                  `        }`,
+                  `        return java.util.List.copyOf(out);`,
+                  `    }`,
+                ]
+              : []),
           ]
         : [
             `    @Override`,
@@ -376,7 +405,7 @@ export function renderAuthFiles(
       `            chain.doFilter(request, response);`,
       `        } finally {`,
       `            accessor.clear();`,
-      // Hierarchy (P2.2): drop the per-request orgPath memo so a pooled thread
+      // Hierarchy: drop the per-request orgPath memo so a pooled thread
       // never serves a stale tenant path to the next request.
       orgPathRegistry ? `            OrgPathResolver.clearRequestCache();` : null,
       `        }`,
@@ -418,7 +447,7 @@ export function renderAuthFiles(
     out.set("OidcUserVerifier.java", renderOidcVerifier(fields, oidc, pkg));
   }
 
-  // Hierarchy (multi-tenancy P2.2): the registry-backed `orgPath` resolver.
+  // Hierarchy (multi-tenancy): the registry-backed `orgPath` resolver.
   // The `User` record can't inject beans, so `orgPath()` delegates to a static
   // holder (`OrgPathResolver`) that memoizes the lookup per request; a boot
   // @Component (`OrgPathResolverConfig`) registers a JdbcTemplate closure
@@ -432,7 +461,7 @@ export function renderAuthFiles(
 }
 
 // ---------------------------------------------------------------------------
-// currentUser.orgPath under hierarchy (multi-tenancy P2.2) — the registry
+// currentUser.orgPath under hierarchy (multi-tenancy) — the registry
 // `data_key` read.  Two files:
 //
 //   OrgPathResolver       — a static holder the `User.orgPath()` accessor
@@ -456,7 +485,7 @@ function renderOrgPathResolver(pkg: string): string {
     ``,
     `/** Resolves \`currentUser.orgPath\` — the caller org's materialized`,
     ` *  \`data_key\` from the tenant registry table, memoized per request`,
-    ` *  (multi-tenancy Phase 2, P2.2).  A boot closure (OrgPathResolverConfig)`,
+    ` *  (multi-tenancy).  A boot closure (OrgPathResolverConfig)`,
     ` *  supplies the db-backed lookup; a missing row / null dataKey / any error`,
     ` *  falls back to the claim (the root-segment path) — fail-safe, never`,
     ` *  null / never throws.  Unregistered (flat tenancy), \`resolve\` is the`,
@@ -541,9 +570,9 @@ function renderOrgPathResolverConfig(pkg: string, registry: OrgPathRegistry): st
     ``,
     `import jakarta.annotation.PostConstruct;`,
     ``,
-    `/** Wires the tenant-registry \`orgPath\` lookup at boot (multi-tenancy`,
-    ` *  Phase 2, P2.2): \`currentUser.orgPath\` = the caller org's materialized`,
-    ` *  \`data_key\`, read from the registry table keyed by the tenancy claim.`,
+    `/** Wires the tenant-registry \`orgPath\` lookup at boot (multi-tenancy):`,
+    ` *  \`currentUser.orgPath\` = the caller org's materialized \`data_key\`, read`,
+    ` *  from the registry table keyed by the tenancy claim.`,
     ` *  A missing row / null dataKey / bad claim falls back to the claim`,
     ` *  (fail-safe — handled in OrgPathResolver). */`,
     `@Component`,
@@ -671,7 +700,7 @@ function renderOidcVerifier(fields: FieldIR[], auth: AuthIR, pkg: string): strin
     `import jakarta.servlet.http.Cookie;`,
     `import jakarta.servlet.http.HttpServletRequest;`,
     ``,
-    `/** Generated OIDC verifier (D-AUTH-OIDC).  Validates the bearer token's`,
+    `/** Generated OIDC verifier.  Validates the bearer token's`,
     ` *  signature against the issuer's JWKS (discovered + cached via Nimbus),`,
     ` *  checks iss / exp, then projects the configured claims onto User.`,
     ` *  Returns null to reject (-> 401).  @Primary so it wins over the dev`,
@@ -949,7 +978,7 @@ function renderHandshakeMethods(auth: AuthIR): string[] {
   const scopesLiteral = JSON.stringify(scopeList.join(" "));
   return [
     ``,
-    `    // --- OIDC redirect handshake (D-AUTH-OIDC) -------------------------`,
+    `    // --- OIDC redirect handshake -------------------------`,
     `    private static final String ISSUER = stripTrailingSlashes(${issuerExpr});`,
     `    private static final String CLIENT_ID = orEmpty(${clientIdExpr});`,
     `    private static final String CLIENT_SECRET = ${clientSecretExpr};`,

@@ -28,12 +28,12 @@
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../_helpers/generate.js";
 
-// Carries a WORKFLOW deliberately.  On vanilla Phoenix the sanitized arm lives
-// in the `respond/2` dispatcher that `workflow-execution-emit` /
-// `explicit-handlers-emit` render — a plain CRUD system emits no such arm at all
-// (see the "app-global gap" note at the bottom of this file).  The other four
-// backends install an app-global handler and would pass either way, so the
-// fixture is shaped to the narrowest backend.
+// Carries a WORKFLOW deliberately: it reaches each backend's PER-ROUTE
+// sanitized arm (the `respond/2` dispatcher on elixir, the per-router ladders
+// elsewhere), which is a different construct from the app-global floor the
+// second describe block below pins on a plain-CRUD fixture.  Both matter — the
+// route arms are refinements that answer FIRST, the floor is what everything
+// else inherits — so both are gated, on the fixture that reaches each.
 const SOURCE = (platform: string) => `
 system Faults {
   subdomain Ops {
@@ -186,30 +186,229 @@ system Ext {
 });
 
 // ---------------------------------------------------------------------------
-// FINDING, not covered by RS-28 — vanilla Phoenix has no app-global 7807 arm.
+// M-T6.30 — the APP-GLOBAL floor, on the system shape that has nothing else.
 //
-// Writing the gate above surfaced a divergence larger than the one the rule was
-// minted for, and it is recorded here rather than quietly designed around.
+// The block above reaches each backend's per-ROUTE sanitized arm, and it needed
+// a workflow to do it.  That is precisely what hid this: vanilla Phoenix's arm
+// lived ONLY in the `respond/2` dispatchers `workflow-execution-emit` /
+// `explicit-handlers-emit` render, so a plain CRUD system — the most common
+// shape there is — emitted no such arm at all.  A controller raise fell through
+// to phoenix's own machinery: an HTML debug page in dev (`debug_errors: true`),
+// and in prod a body rendered by `Phoenix.Endpoint.RenderErrors` under
+// `application/json` with the exception's own message as `detail`.  The other
+// four install an app-global handler and pass either way, which is why a
+// fixture shaped to them proves nothing here.
 //
-// The four non-elixir backends install an APP-GLOBAL unhandled-exception handler
-// (`app.onError`, `DomainExceptionFilter`, `ApiExceptionAdvice`,
-// `install_error_handlers`), so ANY unmodelled fault — on any route, in any
-// system — answers the RFC 7807 envelope.  Vanilla Phoenix's sanitized arm lives
-// only in the `respond/2` dispatchers rendered for workflows and extern
-// handlers.  A plain CRUD system emits none, and an unhandled exception falls
-// through to Phoenix's `ErrorJSON`:
+// So this block drops the workflow, and asserts PER FILE.  Both halves are
+// load-bearing:
 //
-//     %{errors: %{detail: Phoenix.Controller.status_message_from_template(t)}}
+//   THE FIXTURE — a system whose only fault path is the floor.  With a workflow
+//   present, elixir's `respond/2` satisfies a search for the sanitized arm and
+//   the floor can be missing entirely.
 //
-// which is a DIFFERENT SHAPE, not merely a different detail — `{"errors":
-// {"detail":"Internal Server Error"}}` against the other four's `{"type",
-// "title","status","detail","instance"}`.  A client parsing 7807 gets nothing it
-// can read.
-//
-// Left open deliberately: closing it means giving the generated Phoenix app a
-// 7807-shaped error view + content-type at the shell level (`shell-emit.ts`),
-// which is a different unit from M-T6.24's denial-protocol edges and is not
-// something to bolt onto a test file.  The M-T9.11 golden cannot see it either —
-// no shared fixture reaches an unmodelled fault.  Tracked in
-// docs/new-plan/T6-backend-parity.md.
+//   PER-FILE — a joined-output `toMatch` over all emitted files is satisfied by
+//   ANY sibling that happens to carry the shape, so it cannot tell "the floor
+//   is installed" from "some route has a ladder".  That is the exact trap
+//   `framework-error-contract-parity` documents twice (the node arm in #2472,
+//   the elixir `route_info` probe), and the reason each assertion below names
+//   the ONE file the construct must live in and reads only that file.
 // ---------------------------------------------------------------------------
+
+/** Same system as `SOURCE`, with the workflow removed — nothing in it maps an
+ *  unmodelled fault, so the ONLY thing that can answer one is the floor. */
+const CRUD_SOURCE = (platform: string) => `
+system Faults {
+  subdomain Ops {
+    context Ops {
+      aggregate Job {
+        label: string
+        create(label: string) { }
+        operation finish() { label := "done" }
+      }
+      repository Jobs for Job { }
+    }
+  }
+  api OpsApi from Ops
+  storage primary { type: postgres }
+  resource opsState { for: Ops, kind: state, use: primary }
+  deployable api {
+    platform: ${platform}
+    contexts: [Ops]
+    dataSources: [opsState]
+    serves: OpsApi
+    port: 8080
+  }
+}
+`;
+
+type FileAssertion = {
+  /** What the construct is, and what its absence costs — the failure message. */
+  why: string;
+  /** The ONE emitted file the construct must live in. */
+  file: RegExp;
+  shape: RegExp;
+  /** When set, the file must NOT match — the pre-fix shape. */
+  absent?: boolean;
+};
+
+/** Each backend's app-global floor: the handler that answers a fault nothing
+ *  else mapped, and the line that installs it for the WHOLE app.  Both are
+ *  needed — a handler nothing mounts is not a floor. */
+const FLOOR: Record<(typeof PLATFORMS)[number], FileAssertion[]> = {
+  node: [
+    {
+      why: "the root app's onError — the floor every mounted sub-app inherits",
+      file: /(^|\/)http\/index\.ts$/,
+      shape: /app\.onError\(\(err, c\) => \{/,
+    },
+    {
+      why: "the sanitized 500 tail on the ROOT handler (not a sub-router's)",
+      file: /(^|\/)http\/index\.ts$/,
+      shape: /frameworkProblem\(c, 500, "internal"\)/,
+    },
+  ],
+  dotnet: [
+    {
+      why: "DomainExceptionFilter's unhandled-exception tail",
+      file: /DomainExceptionFilter\.cs$/,
+      shape: /Problem\(context, 500, "Internal Server Error", "internal"/,
+    },
+    {
+      why: "the filter registered app-globally in the MVC pipeline",
+      file: /(^|\/)Program\.cs$/,
+      shape: /Filters\.Add<DomainExceptionFilter>\(\)/,
+    },
+  ],
+  java: [
+    {
+      why: "ApiExceptionAdvice's Exception.class tail",
+      file: /ApiExceptionAdvice\.java$/,
+      shape: /@ExceptionHandler\(Exception\.class\)/,
+    },
+    {
+      why: "the advice applied app-globally",
+      file: /ApiExceptionAdvice\.java$/,
+      shape: /@RestControllerAdvice/,
+    },
+    {
+      why: "the sanitized 500 the tail sends",
+      file: /ApiExceptionAdvice\.java$/,
+      shape: /problem\(500, "Internal Server Error", "internal", request\)/,
+    },
+  ],
+  python: [
+    {
+      why: "the catch-all Exception handler",
+      file: /app\/http\/problem\.py$/,
+      shape: /@app\.exception_handler\(Exception\)/,
+    },
+    {
+      why: "the sanitized 500 it sends",
+      file: /app\/http\/problem\.py$/,
+      shape: /problem\(request, 500, "Internal Server Error", "internal"\)/,
+    },
+    {
+      why: "the handlers installed onto the app",
+      file: /app\/main\.py$/,
+      shape: /^install_error_handlers\(app\)$/m,
+    },
+  ],
+  elixir: [
+    // The floor itself.  M-T6.30: before it, this file did not exist and NO
+    // file in a plain-CRUD emission carried the literal.
+    {
+      why: "the FaultHandler's sanitized 500 — the arm a plain CRUD system had none of",
+      file: /fault_handler\.ex$/,
+      shape: /problem_response\(conn, 500, "Internal Server Error", "internal"\)/,
+    },
+    {
+      why: "the floor rescuing what the router raises (a controller raise arrives wrapped)",
+      file: /fault_handler\.ex$/,
+      shape: /e in Plug\.Conn\.WrapperError ->/,
+    },
+    // A `WrapperError` also wraps a THROW or an EXIT (`kind: :throw | :exit`),
+    // and the handler used to pass a hardcoded `:error` on.  That kind is
+    // load-bearing twice: `Exception.format(kind, …)` formats a thrown term as
+    // an exception (a garbled operator log line — the ONE place the fault is
+    // recorded in full), and the already-sent path re-raises with
+    // `:erlang.raise(kind, …)`, which would turn an exit into an error.
+    {
+      why: "the wrapped fault's own KIND is forwarded, not collapsed to `:error`",
+      file: /fault_handler\.ex$/,
+      shape: /handle\(e\.conn \|\| conn, e\.kind, e\.reason, e\.stack\)/,
+    },
+    {
+      why: "the router mounted THROUGH the floor — a handler nothing mounts is not a floor",
+      file: /endpoint\.ex$/,
+      shape: /^ {2}plug \w+Web\.FaultHandler$/m,
+    },
+    // The mutation this pins is the one that reads as harmless: putting the
+    // router back in the endpoint directly.  Every other assertion here can
+    // stay green while the floor is bypassed.
+    {
+      why: "the router is NOT ALSO mounted directly, which would bypass the floor",
+      file: /endpoint\.ex$/,
+      shape: /^ {2}plug \w+Web\.Router$/m,
+      absent: true,
+    },
+    // `ErrorJSON` still renders for a fault raised by an endpoint plug ABOVE
+    // the floor (nothing in a plug pipeline can wrap what runs before it), so
+    // the sanitization must hold on that path too — the leak must not depend on
+    // which of the two paths a request happened to take.
+    {
+      why: "ErrorJSON sanitizes its own >= 500 detail",
+      file: /error_json\.ex$/,
+      shape: /defp detail_for\(status, _assigns, _title\) when status >= 500, do: "internal"/,
+    },
+    {
+      why: "…and does so BEFORE the reason.message clause, or the message wins",
+      file: /error_json\.ex$/,
+      shape: /when status >= 500, do: "internal"[\s\S]*%\{reason: %\{message: message\}\}/,
+    },
+  ],
+};
+
+describe("M-T6.30 — a plain CRUD system has an app-global 7807 floor (all five)", () => {
+  for (const platform of PLATFORMS) {
+    it(`${platform}: installs the floor, in the file that owns it`, async () => {
+      const files = await generateSystemFiles(CRUD_SOURCE(platform));
+      for (const { why, file, shape, absent } of FLOOR[platform]) {
+        const matched = [...files].filter(([rel]) => file.test(rel));
+        expect(
+          matched.map(([rel]) => rel),
+          `${platform}: no emitted file matches ${file} — the file that must carry ${why}`,
+        ).not.toHaveLength(0);
+        // Read each candidate's OWN content.  Never a join: a sibling file
+        // carrying the same shape would satisfy a concatenation and the
+        // assertion would stop naming the construct it claims to gate.
+        const hit = matched.some(([, content]) => shape.test(content));
+        if (absent) {
+          expect(
+            matched.filter(([, content]) => shape.test(content)).map(([rel]) => rel),
+            `${platform}: ${why}`,
+          ).toHaveLength(0);
+        } else {
+          expect(hit, `${platform} is missing ${why} (searched ${matched.length} file(s))`).toBe(
+            true,
+          );
+        }
+      }
+    });
+  }
+
+  it("elixir's floor does not put the fault itself on the wire", async () => {
+    // The floor is the one place that sees the raw exception, so it is the one
+    // place that can leak it.  RS-28's DETAIL claim, asserted where the fault
+    // actually arrives rather than on the arm it falls through to.
+    const files = await generateSystemFiles(CRUD_SOURCE("elixir"));
+    const [, floor] = [...files].find(([rel]) => /fault_handler\.ex$/.test(rel)) ?? [];
+    expect(floor, "no fault_handler.ex emitted").toBeDefined();
+    for (const leak of [
+      /problem_response\([^)]*inspect\(/,
+      /problem_response\([^)]*Exception\.message\(/,
+      /problem_response\([^)]*reason\.message/,
+    ]) {
+      expect(floor, "the unmodelled fault is reaching the wire from the floor").not.toMatch(leak);
+    }
+  });
+});

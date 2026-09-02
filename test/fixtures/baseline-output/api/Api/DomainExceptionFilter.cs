@@ -80,6 +80,40 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             context.ExceptionHandled = true;
             return;
         }
+        // Malformed WIRE value (M-T6.48) — money / datetime arrive as strings
+        // and the controller parses them before the command exists, so this is
+        // neither a FluentValidation failure (the validator runs on the COMMAND,
+        // downstream of the parse) nor a domain rule.  Same 422 + errors[]
+        // envelope as both, so a price of "12,50" reads identically on .NET
+        // and on Hono's zod moneySchema hook.
+        if (context.Exception is WireFormatException wfe)
+        {
+            var wireProblem = new ProblemDetails
+            {
+                Type = "about:blank",
+                Title = "Validation failed",
+                Status = 422,
+                Detail = "One or more fields are invalid.",
+                Instance = context.HttpContext.Request.Path,
+            };
+            // Anonymous type rather than Dictionary<,>: this arm is emitted
+            // unconditionally, and System.Collections.Generic is only imported
+            // when the project has validators.
+            wireProblem.Extensions["errors"] = new[]
+            {
+                new { pointer = wfe.FieldPointer, message = wfe.Message },
+            };
+            _log.LogWarning("{Event} message={Message} status={Status}", "domain_error", "Validation failed", 422);
+            global::Api.Observability.HttpMetrics.RecordDomainFault("domain_error");
+            context.HttpContext.Response.Headers["x-request-id"] = trace_id;
+            context.Result = new ObjectResult(wireProblem)
+            {
+                StatusCode = 422,
+                ContentTypes = { "application/problem+json" },
+            };
+            context.ExceptionHandled = true;
+            return;
+        }
         if (context.Exception is ForbiddenException fe)
         {
             _log.LogWarning("{Event} message={Message} status={Status}", "forbidden", fe.Message, 403);
@@ -104,7 +138,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             context.ExceptionHandled = true;
             return;
         }
-        // RS-15: a domain-floor rejection (precondition / invariant) is 422 —
+        // A domain-floor rejection (precondition / invariant) is 422 —
         // the request is well-formed, the domain refuses it on semantic
         // grounds.  400 stays for a malformed request.
         if (context.Exception is DomainException de)
@@ -127,16 +161,15 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         {
             // 500 — the user handler threw, which is an internal
             // failure from the framework's POV, so the body is
-            // sanitized to "internal" like every other 500 arm (RS-28).
+            // sanitized to "internal" like every other 500 arm.
             //
-            // This previously sent xh.Message, whose intent was to name
-            // the offending op + aggregate so operators didn't have to grep
-            // logs.  But that message interpolates the INNER exception the
-            // user handler threw — driver text, URLs, connection strings —
-            // into a public, potentially unauthenticated response.  The
-            // operator-facing half is unaffected: aggregate, op and the full
-            // inner exception all reach the catalog's extern_handler_threw
-            // event below.  Same shape the Hono onError arm emits.
+            // Deliberately NOT xh.Message: it interpolates the INNER
+            // exception the user handler threw — driver text, URLs,
+            // connection strings — into a public, potentially
+            // unauthenticated response.  Operators lose nothing: aggregate,
+            // op and the full inner exception all reach the catalog's
+            // extern_handler_threw event below.  Same shape the Hono
+            // onError arm emits.
             _log.LogError(xh, "{Event} aggregate={Aggregate} op={Op} error={Error}", "extern_handler_threw", xh.AggName, xh.OpName, xh.Message);
             context.Result = Problem(context, 500, "Internal Server Error", "internal", trace_id);
             context.ExceptionHandled = true;
@@ -168,5 +201,43 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             StatusCode = status,
             ContentTypes = { "application/problem+json" },
         };
+    }
+
+    // The same 404 envelope, for the routes MVC cannot reach.
+    //
+    // This class is an `IExceptionFilter`: it only ever sees exceptions raised
+    // inside the MVC pipeline.  The root `/files/{key}` download is a MINIMAL
+    // API (Program.cs `app.MapGet`), so a throw from it bypasses this filter
+    // entirely and ASP.NET answers it bodiless — which `UseStatusCodePages`
+    // then fills with the FRAMEWORK-miss sentence ("no route for GET /files/…"),
+    // a lie: the route exists, the object does not.
+    //
+    // Rather than hand-build a second problem body in Program.cs, the minimal
+    // API calls this — one construction site, the same resolved
+    // `httpStatus NotFound -> <Code>` status and title as the
+    // `AggregateNotFoundException` arm above, the same header, the same log
+    // event and the same fault counter.
+    //
+    // `Results.Problem` is deliberately NOT used: it applies
+    // `ProblemDetailsDefaults`, which stamps the rfc9110 `type` URI and leaves
+    // `instance` null — the exact divergence `Problem(...)` above exists to
+    // avoid.
+    // (The logger parameter is spelled `_log` so the catalog log line below is
+    // the SAME rendered call as the filter arms above — one catalog renderer,
+    // one event shape, whether the 404 came through MVC or a minimal API.)
+    public static Microsoft.AspNetCore.Http.IResult NotFoundProblem(Microsoft.AspNetCore.Http.HttpContext http, ILogger<DomainExceptionFilter> _log, string detail)
+    {
+        var trace_id = Activity.Current?.TraceId.ToString() ?? "";
+        _log.LogWarning("{Event} status={Status}", "not_found", 404);
+        global::Api.Observability.HttpMetrics.RecordDomainFault("not_found");
+        http.Response.Headers["x-request-id"] = trace_id;
+        return Microsoft.AspNetCore.Http.Results.Json(new ProblemDetails
+        {
+            Type = "about:blank",
+            Title = "Not Found",
+            Status = 404,
+            Detail = detail,
+            Instance = http.Request.Path,
+        }, statusCode: 404, contentType: "application/problem+json");
     }
 }

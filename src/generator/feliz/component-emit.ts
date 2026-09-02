@@ -223,7 +223,7 @@ function isCandidate(c: ComponentIR, emittedRecords: ReadonlySet<string>): boole
  *  one is a component calling a sibling that itself takes the Model, and this
  *  function has no Model of its own to pass on.
  *
- *  `dispatch` is NO LONGER blanket-disqualifying — a component's own named
+ *  `dispatch` is NOT blanket-disqualifying — a component's own named
  *  `action`s fold into the one `Msg`/`update`, and this function binds them
  *  itself (`let <a> () = dispatch <Msg>`) exactly as a page shell does.  What is
  *  scanned here is the walked BODY, which references those bindings by their

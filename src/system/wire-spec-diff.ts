@@ -98,7 +98,11 @@ export function renderPropType(p: SchemaProperty): string {
   if ("$ref" in p) return p.$ref;
   if (p.type === "array") return `array<${renderPropType(p.items)}>`;
   if ("format" in p && p.format) return `${p.type}(${p.format})`;
-  return p.type;
+  // A nullable member spells its type as a JSON Schema type ARRAY
+  // (`["object","null"]` — the `provenanced` carrier's lineage, F2-XB-7).
+  // Rendered as `object|null` so a diff that GAINS or LOSES nullability reads
+  // as a type change rather than as `object` → `object`.
+  return Array.isArray(p.type) ? p.type.join("|") : p.type;
 }
 
 /** Whether two property schemas are structurally identical.  The generator

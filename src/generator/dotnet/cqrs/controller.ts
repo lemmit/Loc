@@ -16,7 +16,7 @@ import {
 } from "../../../ir/util/api-surface.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
-import { plural, upperFirst } from "../../../util/naming.js";
+import { escapeCsharpIdent, plural, upperFirst } from "../../../util/naming.js";
 import { isServerSourcedDefault } from "../../_frontend/server-default.js";
 import { findUnionSpec, unionMembers } from "../../_payload/union-wire.js";
 import {
@@ -78,7 +78,10 @@ export function buildOperationSpec(
     // for the C# action method + command type.
     routeSlug: op.routeSlug,
     cmdArgs: op.params.map((p) =>
-      wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx),
+      wireToCommandArgument(`request.${upperFirst(p.name)}`, p.type, ctx, {
+        ns,
+        pointer: `/${p.name}`,
+      }),
     ),
     // Wire-shape key set for --trace's wire_in line.  Param names
     // are lowerCamel in the IR — same form the JSON wire uses
@@ -253,7 +256,10 @@ export function emitController(
           ctx.valueObjects,
         ) ?? undefined,
       createCmdArgs: requiredFields.map((f) => {
-        const wireArg = wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx);
+        const wireArg = wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx, {
+          ns,
+          pointer: `/${f.name}`,
+        });
         // Widened to VALUE-OBJECT defaults alongside the server-sourced ones:
         // both are emitted as a NULLABLE request param (neither is a C#
         // compile-time constant), so both coalesce here.  `renderCsExpr` yields
@@ -323,14 +329,19 @@ export function emitController(
                 p.type.kind === "optional"
                   ? ""
                   : "[Microsoft.AspNetCore.Mvc.ModelBinding.BindRequired] ";
-              return `[FromQuery] ${bind}${wireType(p.type, ctx, "request")} ${p.name}`;
+              return `[FromQuery] ${bind}${wireType(p.type, ctx, "request")} ${escapeCsharpIdent(p.name)}`;
             }),
             // Paged finds auto-gain 1-based page/pageSize + sort/dir query
             // params with defaults (P3b / M-T2.6), mirroring the Hono contract.
             ...(paged ? CS_PAGED_QUERY_PARAMS : []),
           ].join(", "),
           queryConstructorArgs: [
-            ...find.params.map((p) => wireToCommandArgument(p.name, p.type, ctx)),
+            ...find.params.map((p) =>
+              wireToCommandArgument(escapeCsharpIdent(p.name), p.type, ctx, {
+                ns,
+                pointer: `/${p.name}`,
+              }),
+            ),
             ...(paged ? ["page", "pageSize", "sort", "dir"] : []),
           ].join(", "),
           guarded: find.requires !== undefined,

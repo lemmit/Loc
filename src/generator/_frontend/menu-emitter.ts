@@ -27,8 +27,9 @@
 // `prepareAppShellVM`.
 
 import type { PageIR, UiIR } from "../../ir/types/loom-ir.js";
-import { classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
+import { areaQualifiedName, classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
 import { plural, snake } from "../../util/naming.js";
+import { messageKey } from "../_walker/i18n-extract.js";
 import { renderGateExpr } from "./gate-expr.js";
 
 /** A page's declared `title:` as a plain string, usable as a default menu
@@ -58,6 +59,14 @@ export interface NavEntryVM {
   href?: string;
   /** Visible link text. */
   label: string;
+  /** The catalog key for {@link label} (M-T1.11), when the label is an AUTHORED
+   *  string the extraction pass recorded — `menu.link.<hash>` for a
+   *  `menu { … }` link, `page.<Page>.menu.label.<hash>` for a page's own
+   *  `menu { label: … }` metadata.  Absent for an emitter-DERIVED label (the
+   *  default aggregate/workflow sidebar, a page name used as a fallback): those
+   *  are not in the catalog, so translating them would emit a key that resolves
+   *  to nothing.  Consumed by `withNavLabelTokens` (`_frontend/nav-labels.ts`). */
+  labelKey?: string;
   /** Stable testid for Playwright drivers. */
   testId: string;
   /** Argument list (verbatim) to splice into `isActive(...)` —
@@ -80,6 +89,10 @@ export interface NavEntryVM {
  *  omitted by the preparers so templates don't need empty-guards. */
 export interface NavSectionVM {
   label: string;
+  /** Catalog key for the section heading — `menu.section.<hash>` from a
+   *  `menu { section "…" }` block, `page.<Page>.menu.section.<hash>` from a
+   *  page's own metadata.  Same contract as {@link NavEntryVM.labelKey}. */
+  labelKey?: string;
   entries: NavEntryVM[];
 }
 
@@ -95,6 +108,9 @@ export function deriveSidebarFromUi(
     return ui.menu.sections.map(
       (section): NavSectionVM => ({
         label: section.label,
+        // Keyed exactly as `collectUiMessages` records it, so the shell's
+        // `t()` call and the catalog entry cannot drift (A13b).
+        ...(section.label ? { labelKey: messageKey("menu", "section", section.label) } : {}),
         entries: section.links
           .map((link) => navEntryForLink(link, ui, nameCtx, authUi))
           .filter((e): e is NavEntryVM => e !== undefined),
@@ -138,12 +154,22 @@ export function deriveSidebarFromUi(
     });
     sections.push({
       label: sectionLabel,
+      // The heading is one page's `menu { section: … }` metadata, extracted
+      // under THAT page's prefix — every page in the group carries the same
+      // message, so the first one's key is as good as any (A13b).
+      ...(sectionLabel && pages[0]
+        ? { labelKey: messageKey(`page.${pages[0].name}`, "menu.section", sectionLabel) }
+        : {}),
       entries: pages.map((p): NavEntryVM => {
-        const label = readMenuMetaString(p, "label") ?? pageTitleLabel(p) ?? p.name;
+        const metaLabel = readMenuMetaString(p, "label");
+        const label = metaLabel ?? pageTitleLabel(p) ?? p.name;
         const tIdAndActive = testIdAndActive(p, nameCtx);
         return {
           to: p.route ?? "",
           label,
+          ...(metaLabel !== undefined
+            ? { labelKey: messageKey(`page.${p.name}`, "menu.label", metaLabel) }
+            : {}),
           testId: tIdAndActive.testId,
           activeArgs: tIdAndActive.activeArgs,
           // Hide the nav link when the page's `requires` gate fails (auth: ui).
@@ -172,6 +198,7 @@ function navEntryForLink(
       external: true,
       href: link.url,
       label: link.label,
+      labelKey: messageKey("menu", "link", link.label),
       testId: `nav-ext-${slugifyLabel(link.label)}`,
       activeArgs: `""`,
     };
@@ -189,12 +216,24 @@ function navEntryForLink(
   const overrideLabel = stringPropOf(link.props, "label");
   const metaLabel = readMenuMetaString(page, "label");
   const label = overrideLabel ?? metaLabel ?? pageTitleLabel(page) ?? page.name;
+  // Only the two AUTHORED spellings are in the catalog: the link's own `label:`
+  // (extracted under the `menu` prefix) and the page's `menu { label: … }`
+  // metadata (extracted under the page's prefix).  A page title / page name
+  // fallback is not extracted, so it carries no key and stays untranslated
+  // rather than emitting a key that resolves to nothing.
+  const labelKey =
+    overrideLabel !== undefined
+      ? messageKey("menu", "link", overrideLabel)
+      : metaLabel !== undefined
+        ? messageKey(`page.${page.name}`, "menu.label", metaLabel)
+        : undefined;
   // Identify well-known page kinds via `classifyPage` so testid
   // and active-route semantics match main's hardcoded conventions.
   const tIdAndActive = testIdAndActive(page, nameCtx);
   return {
     to: page.route ?? "",
     label,
+    ...(labelKey ? { labelKey } : {}),
     testId: tIdAndActive.testId,
     activeArgs: tIdAndActive.activeArgs,
     // Per-link auth: when the deployable is `auth: ui` and the linked
@@ -248,10 +287,13 @@ function testIdAndActive(
     case "home":
       return { testId: "nav-home", activeArgs: `"/", { exact: true }` };
     default: {
-      // Explicit page (no archetype) — use the page name as
-      // the testid suffix and exact-match the route.
+      // Explicit page (no archetype) — use the page's AREA-QUALIFIED name as
+      // the testid suffix and exact-match the route.  The bare name is unique
+      // only within one area, so two `page Dashboard` blocks in sibling areas
+      // both produced `nav-dashboard` and every page object / e2e locator
+      // built on it matched two links (Playwright strict mode: ambiguous).
       return {
-        testId: `nav-${snake(page.name)}`,
+        testId: `nav-${snake(areaQualifiedName(page))}`,
         activeArgs: route ? JSON.stringify(route) : `""`,
       };
     }

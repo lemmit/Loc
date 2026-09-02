@@ -2,17 +2,21 @@
 // ProvenanceInfo disclosure — scaffold + cross-frontend render gate.
 //
 // A `provenanced` field records the lineage of every value it holds
-// (docs/provenance.md).  The lineage rides the wire as a co-located
-// `<field>_provenance` sibling; on a scaffolded DETAIL page the field's value
-// now pairs with a `ProvenanceInfo` "?" disclosure that reveals where the value
-// came from (rule id + computed value + the input list).
+// (docs/provenance.md).  Since M-T6.12 the value and its lineage ride the wire
+// as ONE `Provenanced<T>` carrier — `{ value, lineage }` — stamped into
+// `wireShape` once by `wireTypeForField`, so EVERY frontend's response type
+// carries the lineage rather than the React-first opt-in it used to be.  On a
+// scaffolded DETAIL page the figure reads `<record>.<field>.value` and pairs
+// with a `ProvenanceInfo` "?" disclosure over `<record>.<field>.lineage`.
 //
-// React-first (the chosen scope): the React generator surfaces the lineage on
-// the response schema (`provLineageSchema`) and renders a native `<details>`
-// disclosure.  The other JSX frontends fall through to a visible comment — the
-// value still renders, only the "?" is absent — and DON'T carry the lineage on
-// their schema (byte-identical to before).  This proves both halves end-to-end
-// through the real generators.
+// This suite is the cross-target gate on BOTH halves: that each frontend types
+// the carrier (not a bare `T`, and not the old trailing `<field>_provenance`
+// sibling), and that each renders the disclosure off the carrier's lineage
+// member — through the real generators, not a unit stub.
+//
+// HEEx is the documented exception: Phoenix LiveView renders server-side off
+// the Ecto struct, where the pair is still SPLIT, so it reads the value column
+// and the `<field>_provenance` jsonb column directly.
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it } from "vitest";
@@ -57,80 +61,113 @@ function allFiles(files: Map<string, string>): string {
   return all;
 }
 
+/** The FRONTEND deployable's files only.  The negative assertions below ("no
+ *  trailing `<field>_provenance` key any more") have to be scoped: the BACKEND
+ *  in the same system still names that column everywhere — its Drizzle schema,
+ *  its domain class, its migration — because STORAGE keeps the pair split.
+ *  Only the wire folded. */
+function webFiles(files: Map<string, string>): string {
+  let all = "";
+  for (const [path, content] of files) if (path.startsWith("web/")) all += `\n${content}`;
+  return all;
+}
+
 describe("ProvenanceInfo — React renders a `<details>` disclosure over the lineage", () => {
   it("surfaces the lineage on the response schema + shared lib", async () => {
-    const out = allFiles(await generateSystemFiles(provScaffoldSystem("react")));
+    const files = await generateSystemFiles(provScaffoldSystem("react"));
+    const out = allFiles(files);
+    const web = webFiles(files);
     // The shared lib exports the nullable lineage carrier.
     expect(out).toContain("export const provLineageSchema = z.object({");
     expect(out).toContain("snapshotId: z.string()");
-    // The Order response schema carries the co-located sibling + imports it.
+    // The Order response schema types the field as the CARRIER, not a bare
+    // number and not a trailing sibling key.
     expect(out).toContain('import { provLineageSchema } from "../lib/schemas";');
-    expect(out).toContain("total_provenance: provLineageSchema.nullish(),");
+    expect(out).toContain(
+      "total: z.object({ value: z.number().int(), lineage: provLineageSchema.nullish() }),",
+    );
+    expect(web).not.toContain("total_provenance");
   });
 
   it("renders the disclosure on the scaffolded detail page", async () => {
     const out = allFiles(await generateSystemFiles(provScaffoldSystem("react")));
     expect(out).toContain('data-testid="orders-detail-total-prov"');
     expect(out).toMatch(/<details className="loom-provenance"/);
-    // Null-guarded, then the rule id + computed value + input list.
-    expect(out).toMatch(/\.total_provenance != null \? \(/);
-    expect(out).toContain(".total_provenance.snapshotId}");
+    // Null-guarded on the carrier's lineage half, then rule id + computed value
+    // + input list.
+    expect(out).toMatch(/\.total\.lineage != null \? \(/);
+    expect(out).toContain(".total.lineage.snapshotId}");
     expect(out).toContain("String(");
-    expect(out).toMatch(/\.total_provenance\.inputs\.map\(\(inp\) => \(/);
-    // The value itself still renders next to the disclosure (inside a Group).
-    expect(out).toContain(".total}");
+    expect(out).toMatch(/\.total\.lineage\.inputs\.map\(\(inp\) => \(/);
+    // The FIGURE renders next to the disclosure, through the carrier's value
+    // half — a bare `.total}` would render the whole object.
+    expect(out).toContain(".total.value}");
   });
 });
 
 describe("ProvenanceInfo — Vue renders a `<details v-if>` disclosure over the lineage", () => {
   it("surfaces the lineage on the response schema + shared lib", async () => {
-    const out = allFiles(await generateSystemFiles(provScaffoldSystem("vue")));
+    const files = await generateSystemFiles(provScaffoldSystem("vue"));
+    const out = allFiles(files);
+    const web = webFiles(files);
     expect(out).toContain("export const provLineageSchema = z.object({");
     expect(out).toContain('import { provLineageSchema } from "../lib/schemas";');
-    expect(out).toContain("total_provenance: provLineageSchema.nullish(),");
+    expect(out).toContain(
+      "total: z.object({ value: z.number().int(), lineage: provLineageSchema.nullish() }),",
+    );
+    expect(web).not.toContain("total_provenance");
   });
 
   it("renders the disclosure on the scaffolded detail page", async () => {
     const out = allFiles(await generateSystemFiles(provScaffoldSystem("vue")));
     expect(out).toContain('data-testid="orders-detail-total-prov"');
     // Vue guards with `v-if`, interpolates with `{{ }}`, iterates with `v-for`.
-    expect(out).toMatch(/<details v-if="[\w.]+\.total_provenance != null" class="loom-provenance"/);
-    expect(out).toContain(".total_provenance.snapshotId }}");
-    expect(out).toMatch(/v-for="inp in [\w.]+\.total_provenance\.inputs" :key="inp\.path"/);
+    expect(out).toMatch(/<details v-if="[\w.]+\.total\.lineage != null" class="loom-provenance"/);
+    expect(out).toContain(".total.lineage.snapshotId }}");
+    expect(out).toMatch(/v-for="inp in [\w.]+\.total\.lineage\.inputs" :key="inp\.path"/);
   });
 });
 
 describe("ProvenanceInfo — Svelte renders an `{#if}`/`{#each}` disclosure", () => {
   it("surfaces the lineage on the response schema + shared lib", async () => {
-    const out = allFiles(await generateSystemFiles(provScaffoldSystem("svelte")));
+    const files = await generateSystemFiles(provScaffoldSystem("svelte"));
+    const out = allFiles(files);
+    const web = webFiles(files);
     expect(out).toContain("export const provLineageSchema = z.object({");
     expect(out).toContain('import { provLineageSchema } from "../schemas";');
-    expect(out).toContain("total_provenance: provLineageSchema.nullish(),");
+    expect(out).toContain(
+      "total: z.object({ value: z.number().int(), lineage: provLineageSchema.nullish() }),",
+    );
+    expect(web).not.toContain("total_provenance");
   });
 
   it("renders the disclosure on the scaffolded detail page", async () => {
     const out = allFiles(await generateSystemFiles(provScaffoldSystem("svelte")));
     expect(out).toContain('data-testid="orders-detail-total-prov"');
     // Svelte guards with `{#if}`, interpolates with `{expr}`, iterates keyed.
-    expect(out).toMatch(/\{#if [\w.]+\.total_provenance != null\}/);
-    expect(out).toContain("{orderById.data.total_provenance.snapshotId}");
-    expect(out).toMatch(/\{#each [\w.]+\.total_provenance\.inputs as inp \(inp\.path\)\}/);
+    expect(out).toMatch(/\{#if [\w.]+\.total\.lineage != null\}/);
+    expect(out).toContain("{orderById.data.total.lineage.snapshotId}");
+    expect(out).toMatch(/\{#each [\w.]+\.total\.lineage\.inputs as inp \(inp\.path\)\}/);
   });
 });
 
 describe("ProvenanceInfo — Angular renders an `@if (…; as prov)` disclosure", () => {
   it("surfaces the lineage on the response interface (no shared zod lib)", async () => {
-    const out = allFiles(await generateSystemFiles(provScaffoldSystem("angular")));
-    // Angular has no zod lib — the lineage is a plain TS interface + a field.
+    const files = await generateSystemFiles(provScaffoldSystem("angular"));
+    const out = allFiles(files);
+    const web = webFiles(files);
+    // Angular has no zod lib — the lineage is a plain TS interface, and the
+    // carrier is spelled inline on the field.
     expect(out).toContain("export interface ProvLineage {");
-    expect(out).toContain("total_provenance?: ProvLineage | null;");
+    expect(out).toContain("total: { value: number; lineage: ProvLineage | null };");
+    expect(web).not.toContain("total_provenance");
   });
 
   it("renders the disclosure on the scaffolded detail page", async () => {
     const out = allFiles(await generateSystemFiles(provScaffoldSystem("angular")));
     expect(out).toContain('data-testid="orders-detail-total-prov"');
     // A signal-call result can't narrow in place — the `as prov` alias binds it.
-    expect(out).toMatch(/@if \([\w.()!]+\.total_provenance; as prov\)/);
+    expect(out).toMatch(/@if \([\w.()!]+\.total\.lineage; as prov\)/);
     expect(out).toContain("{{ prov.snapshotId }}");
     // `unknown` values ride `$any(...)` (templates can't call `String`).
     expect(out).toContain("{{ $any(prov.computedValue) }}");
@@ -140,19 +177,26 @@ describe("ProvenanceInfo — Angular renders an `@if (…; as prov)` disclosure"
 
 describe("ProvenanceInfo — Feliz renders an F# `Html.details` disclosure", () => {
   it("carries the lineage as an F# ProvLineage record + Thoth decoder", async () => {
-    const out = allFiles(await generateSystemFiles(provScaffoldSystem("feliz")));
+    const files = await generateSystemFiles(provScaffoldSystem("feliz"));
+    const out = allFiles(files);
+    const web = webFiles(files);
     expect(out).toContain("type ProvLineage =");
     expect(out).toContain("let provLineageDecoder : Decoder<ProvLineage> =");
-    // The Order record field + its optional decode.
-    expect(out).toContain("total_provenance: ProvLineage option");
+    // The generic carrier record + its decoder factory, and the Order field
+    // typed through them.  Without the carrier arm the field fell through to
+    // `obj` / `Decode.string` — a silent degradation, not a compile error.
+    expect(out).toContain("type Provenanced<'T> =");
     expect(out).toContain(
-      'total_provenance = get.Optional.Field "total_provenance" provLineageDecoder',
+      "let provenancedDecoder (inner: Decoder<'T>) : Decoder<Provenanced<'T>> =",
     );
+    expect(out).toContain("total: Provenanced<int>");
+    expect(out).toContain('total = get.Required.Field "total" (provenancedDecoder Decode.int)');
+    expect(web).not.toContain("total_provenance");
   });
 
   it("renders the disclosure (Some/None match over the lineage option)", async () => {
     const out = allFiles(await generateSystemFiles(provScaffoldSystem("feliz")));
-    expect(out).toMatch(/match [\w.]+\.total_provenance with Some __p -> Html\.details/);
+    expect(out).toMatch(/match [\w.]+\.total\.lineage with Some __p -> Html\.details/);
     expect(out).toContain('Html.details [ prop.className "loom-provenance"');
     expect(out).toContain("for __i in __p.inputs");
     // The scaffold's Group wrapper is paren-wrapped (the walker fix that
@@ -217,17 +261,43 @@ describe("ProvenanceInfo — HEEx renders a native `<details>` off the Ecto stru
   });
 });
 
-describe("ProvenanceInfo — not-yet-ported frontends degrade honestly (value only)", () => {
-  for (const frontend of ["flutter"]) {
-    it(`${frontend}: the "?" falls through to a comment and the lineage is not carried`, async () => {
-      const out = allFiles(await generateSystemFiles(provScaffoldSystem(frontend)));
-      // The primitive comments itself out — the value still renders.
-      expect(out).toContain(`provenance disclosure not yet supported on ${frontend}`);
-      // No lineage carrier on the FRONTEND: `provLineageSchema` is unique to the
-      // ported zod frontends — the backend's own lineage column/DTO
-      // (`total_provenance`, `ProvLineage`) is emitted regardless of frontend, so
-      // it's the camelCase schema name that must be absent here.
-      expect(out).not.toContain("provLineageSchema");
-    });
-  }
+describe("ProvenanceInfo — Flutter renders an ExpansionTile disclosure over the lineage", () => {
+  it("carries the lineage on the Dart wire model", async () => {
+    const files = await generateSystemFiles(provScaffoldSystem("flutter"));
+    const out = allFiles(files);
+    const web = webFiles(files);
+    // The fixed lineage classes ship (the Dart analogue of `provLineageSchema` /
+    // Feliz's `ProvLineage` record) …
+    expect(out).toContain("class ProvLineage {");
+    expect(out).toContain("class ProvInput {");
+    expect(out).toContain("final String snapshotId;");
+    // … plus the generic carrier class, and the Order model's field typed
+    // through it (the value decoder is passed in, so the carried type keeps its
+    // own conversion).
+    expect(out).toContain("class Provenanced<T> {");
+    expect(out).toContain("final Provenanced<int> total;");
+    expect(out).toContain(
+      "total: Provenanced.fromJson(json['total'] as Map<String, dynamic>, (__v) => __v as int),",
+    );
+    expect(web).not.toContain("total_provenance");
+  });
+
+  it("renders the disclosure on the scaffolded detail page", async () => {
+    const out = allFiles(await generateSystemFiles(provScaffoldSystem("flutter")));
+    // No fall-through comment any more — the seam owns the primitive.
+    expect(out).not.toContain("provenance disclosure not yet supported on flutter");
+    // A null-BINDING switch pattern (a property read off a model class is not
+    // type-promotable in Dart) into the Material disclosure.
+    expect(out).toMatch(/\(switch \([\w.]*\.total\.lineage\) \{ final __p\? => ExpansionTile\(/);
+    expect(out).toContain("Semantics(label: 'How this value was computed'");
+    // Rule id + computed value + the input list, same three rows as every other
+    // frontend's disclosure.
+    expect(out).toContain("Text(__p.snapshotId)");
+    expect(out).toContain("Text(__p.computedValue)");
+    expect(out).toContain("...__p.inputs.map((__i) =>");
+    expect(out).toContain("Text(__i.path)");
+    // No lineage carrier: `provLineageSchema` is unique to the zod frontends —
+    // Dart decodes through its own class instead.
+    expect(out).not.toContain("provLineageSchema");
+  });
 });

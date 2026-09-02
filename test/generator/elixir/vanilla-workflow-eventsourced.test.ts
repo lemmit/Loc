@@ -19,7 +19,7 @@ const SRC = `system FulfillmentSys {
       event FulfillmentCancelled { order: Order id }
       aggregate Order {
         status: string
-        create place() { status := "Placed"  emit OrderPlaced { order: id, at: now() } }
+        create() { }
       }
       repository Orders for Order { }
       channel Lifecycle { carries: OrderPlaced, PaymentRegistered, FulfillmentCancelled  delivery: broadcast  retention: ephemeral }

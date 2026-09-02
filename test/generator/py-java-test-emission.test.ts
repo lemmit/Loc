@@ -46,8 +46,10 @@ system Demo {
     }
   }
   api ProjectsApi from Projects
-  deployable pyApi   { platform: python contexts: [Catalog] serves: ProjectsApi port: 8000 }
-  deployable javaApi { platform: java   contexts: [Catalog] serves: ProjectsApi port: 8080 }
+  deployable pyApi   { platform: python contexts: [Catalog] dataSources: [catalogState] serves: ProjectsApi port: 8000 }
+  storage loomDb { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: loomDb }
+  deployable javaApi { platform: java   contexts: [Catalog] dataSources: [catalogState] serves: ProjectsApi port: 8080 }
 }
 `;
 
@@ -81,8 +83,10 @@ system Demo2 {
     }
   }
   api SalesApi from Sales
-  deployable pyApi   { platform: python contexts: [Orders] serves: SalesApi port: 8000 }
-  deployable javaApi { platform: java   contexts: [Orders] serves: SalesApi port: 8080 }
+  deployable pyApi   { platform: python contexts: [Orders] dataSources: [ordersState] serves: SalesApi port: 8000 auth: required }
+  storage loomDb { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: loomDb }
+  deployable javaApi { platform: java   contexts: [Orders] dataSources: [ordersState] serves: SalesApi port: 8080 auth: required }
 }
 `;
 

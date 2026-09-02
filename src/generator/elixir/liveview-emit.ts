@@ -23,15 +23,24 @@ import type {
   DeployableIR,
   EnumIR,
   PageIR,
+  StateFieldIR,
   SystemIR,
   TypeIR,
   UiIR,
   UiNotificationIR,
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
-import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import {
+  aggregateUsesPrincipalContextFilter,
+  exprUsesCurrentUser,
+} from "../../ir/types/loom-ir.js";
 import { lifecycleGates, lifecycleGatesUseCurrentUser } from "../../ir/util/op-gates.js";
-import { type PageNameCtx, pageConstructId, pageEmitName } from "../../ir/util/page-kind.js";
+import {
+  classifyPage,
+  type PageNameCtx,
+  pageConstructId,
+  pageEmitName,
+} from "../../ir/util/page-kind.js";
 import { isFrontendReadableProjection } from "../../ir/util/projection-read.js";
 import { listReadGate } from "../../ir/util/read-gates.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
@@ -47,6 +56,8 @@ import { opUsesCurrentUser } from "./domain/predicates.js";
 import {
   type ActionBinding,
   type HandleEventClause,
+  hostStateAssign,
+  liftedStateAttrs,
   type QueryBinding,
   renderRequiresGuard,
   stateInitFor,
@@ -55,10 +66,17 @@ import {
   walkBodyToHeex,
 } from "./heex-walker.js";
 import { heexI18nEnabled } from "./i18n.js";
-import { buildPlaywrightPageObject } from "./page-objects-emit.js";
+import { buildPlaywrightPageObject, pageObjectPathFor } from "./page-objects-emit.js";
 import { exprUsesBind, REALTIME_TOPIC, renderMessageExprElixir } from "./realtime-liveview.js";
 import { renderExpr as renderDomainExpr } from "./render-expr.js";
 import { renderStoreModule } from "./store-emit.js";
+import {
+  aggregateServesHistoryRoute,
+  renderVanillaHistoryMapper,
+  vanillaHistoryFind,
+  vanillaHistoryMapperName,
+  vanillaHistoryMapperTakesPrincipal,
+} from "./vanilla/audit-history-emit.js";
 
 /** One router entry the orchestrator splices into router.ex. */
 export interface LiveRoute {
@@ -66,7 +84,7 @@ export interface LiveRoute {
   liveModule: string;
 }
 
-/** Where a page-body projection read lands on the Phoenix leg (M-T1.3 Phase 1).
+/** Where a page-body projection read lands on the Phoenix leg (M-T1.3).
  *  Resolved once per deployable from the hosted contexts, then consumed by the
  *  `handle_params` load block. */
 interface ProjectionRead {
@@ -80,16 +98,48 @@ interface ProjectionRead {
   fields: readonly string[];
 }
 
+/** Where a page-body entity-history read lands on the Phoenix leg
+ *  (docs/audit.md — `QueryView { of: <api>.<Agg>.history(id) }`).
+ *
+ *  The four SPA frontends fetch `GET /<plural>/{id}/history`; a LiveView hosts
+ *  the same contexts in the SAME OTP app, so the read is an in-process scan of
+ *  `audit_records` — no api client, exactly like the projection read above.
+ *  What it must NOT skip are the three guards the controller's `history` action
+ *  applies, in the same order, or the LiveView would serve a trail the HTTP
+ *  route 403s/404s: the find's gate, entity reachability, and the field mask. */
+interface HistoryRead {
+  /** `<App>.<Ctx>` — the context facade the reachability probe calls. */
+  ctxModule: string;
+  /** `<App>.Audit.History` — the shared query module. */
+  historyModule: string;
+  /** `<App>.Repo`. */
+  repoModule: string;
+  /** `target_type` of the audit rows: the aggregate's PascalCase name. */
+  targetType: string;
+  /** `get_<agg>` — the reachability probe (guard 2). */
+  getFn: string;
+  /** True when the aggregate's reads carry a principal capability filter, so
+   *  `get_<agg>` takes the actor as its trailing argument. */
+  principal: boolean;
+  /** The find's `requires` predicate rendered as Elixir (guard 1), or null. */
+  gate: string | null;
+  /** True when that predicate reads `current_user`. */
+  gateUsesUser: boolean;
+  /** `<agg>_audit_entry` — the row → wire-entry mapper (guard 3, the mask). */
+  mapperName: string;
+  /** The mapper source, spliced into the LiveView module as a `defp`. */
+  mapperSource: string;
+  /** True when the mapper takes the principal as its second argument (it has
+   *  at least one `mask unless` field). */
+  mapperTakesPrincipal: boolean;
+}
+
 export function emitLiveViewPages(args: {
   contexts: BoundedContextIR[];
   deployable: DeployableIR;
   sys: SystemIR;
   appName: string;
   appModule: string;
-  /** Persistence foundation of the host deployable.  Always `"vanilla"`
-   *  (plain Ecto/Phoenix LiveView — no Ash).  Kept on the options shape only
-   *  so the caller's `foundation: "vanilla"` still type-checks; ignored. */
-  foundation?: "vanilla";
   /** Generate-time source-map recorder (`--sourcemap`).  Records one region
    *  per emitted LiveView module AND per Playwright page object, both
    *  against the page's `origin` — a scaffolded page's origin is a
@@ -162,12 +212,15 @@ export function emitLiveViewPages(args: {
   // (matching the domain emitter).  An aggregate's parts live in its
   // owning context's module namespace.
   const partContextModule = new Map<string, string>();
-  // Frontend-readable query-time projections a page body may read (M-T1.3
-  // Phase 1), keyed by projection name.  The Phoenix leg needs no api client
+  // Frontend-readable query-time projections a page body may read, keyed by
+  // projection name.  The Phoenix leg needs no api client
   // for these: a LiveView deployable hosts its contexts in the SAME OTP app, so
   // what the SPA frontends fetch over `GET /projections/<slug>` is an
   // in-process `run/1` call here.
   const projectionReads = new Map<string, ProjectionRead>();
+  // Entity-history reads a page body may render (docs/audit.md), keyed by the
+  // audited aggregate's name — same in-process story as the projections above.
+  const historyReads = new Map<string, HistoryRead>();
   for (const ctx of contexts) {
     const ctxModule = `${appModule}.${upperFirst(ctx.name)}`;
     for (const proj of ctx.projections ?? []) {
@@ -182,7 +235,6 @@ export function emitLiveViewPages(args: {
           ? renderDomainExpr(proj.query.requires, {
               thisName: "record",
               contextModule: ctxModule,
-              foundation: "vanilla",
             })
           : null,
         fields: (proj.wireShape ?? []).map((f) => f.name),
@@ -207,9 +259,36 @@ export function emitLiveViewPages(args: {
           expr: renderDomainExpr(listGate, {
             thisName: "record",
             contextModule: ctxModule,
-            foundation: "vanilla",
           }),
           usesUser: exprUsesCurrentUser(listGate),
+        });
+      }
+      // Entity history — the READ side of the `audited` trail.  Gated on the
+      // SAME `aggregateServesHistoryRoute` predicate that mounts the controller
+      // route, so a page can never read a trail the REST surface does not
+      // serve (and the two can't drift into disagreeing about which aggregates
+      // have one).
+      if (aggregateServesHistoryRoute(ctx, agg)) {
+        const find = vanillaHistoryFind(ctx, agg)!;
+        historyReads.set(agg.name, {
+          ctxModule,
+          historyModule: `${appModule}.Audit.History`,
+          repoModule: `${appModule}.Repo`,
+          targetType: upperFirst(agg.name),
+          getFn: `get_${snake(agg.name)}`,
+          principal: aggregateUsesPrincipalContextFilter(agg),
+          gate: find.requires
+            ? renderDomainExpr(find.requires, {
+                thisName: "record",
+                contextModule: ctxModule,
+              })
+            : null,
+          gateUsesUser: !!find.requires && exprUsesCurrentUser(find.requires),
+          mapperName: vanillaHistoryMapperName(agg),
+          // `principalSource: "param"` — a LiveView is its own process, so the
+          // controller's ambient `Process.get(:loom_current_user)` is nil here.
+          mapperSource: renderVanillaHistoryMapper(appModule, ctx, agg, "param"),
+          mapperTakesPrincipal: vanillaHistoryMapperTakesPrincipal(agg),
         });
       }
     }
@@ -255,22 +334,39 @@ export function emitLiveViewPages(args: {
       contextModuleByAggName,
       contextByAggName,
       i18nEnabled ? `component.${c.name}` : undefined,
+      c.name,
     );
     componentInfo.set(c.name, {
       actionBindings: w.actionBindings,
       usedComponents: w.usedComponents,
       usedStores: w.usedStores,
       handlers: w.handlers,
+      state: c.state,
+      componentUses: w.componentUses,
     });
     anyChart ||= w.usesChart;
   }
 
-  // Name-context for `pageEmitName` (slice 3c — derives the emitted name from
+  // Name-context for `pageEmitName` (derives the emitted name from
   // the page's role-scoped name + area against the served decls).
   const nameCtx: PageNameCtx = {
     aggregateNames: [...aggregatesByName.keys()],
     workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
   };
+  // Which page each page-object module is BUILT from.  The three scaffold
+  // archetypes of one aggregate collapse onto a single module, and the LIST
+  // page's builder is the only one that emits all three classes
+  // (List + New + Detail), so it wins whenever it exists; otherwise the first
+  // routed page claiming that path does.
+  const preferredPageObjectPages = new Map<string, PageIR>();
+  for (const page of ui.pages) {
+    if (!page.route) continue;
+    const path = pageObjectPathFor(page, nameCtx);
+    const held = preferredPageObjectPages.get(path);
+    if (!held || classifyPage(page, nameCtx).kind === "aggregate-list") {
+      preferredPageObjectPages.set(path, page);
+    }
+  }
   for (const page of ui.pages) {
     if (!page.route) continue; // can't emit a router entry without one
     // Phoenix derives the module + file stem from the page's emit name
@@ -292,6 +388,7 @@ export function emitLiveViewPages(args: {
       contextModuleByAggName,
       projectionReads,
       listReadGateByAggName,
+      historyReads,
       partContextModule,
       componentInfo,
       authEnabled,
@@ -302,19 +399,31 @@ export function emitLiveViewPages(args: {
     sourcemap?.file(filePath, source, page.origin, pageConstructId(ui.name, page));
     routes.push({ route: page.route, liveModule });
 
-    // Playwright page object emission.  Mirrors the React
-    // generator's per-page `e2e/pages/<page>.ts` so `test e2e ui`
-    // blocks (src/system/ui-e2e-render.ts) drive the Phoenix
-    // deployable identically to a React one.
-    const pageObjectSource = buildPlaywrightPageObject({
-      page,
-      appName,
-      aggregatesByName,
-      contextByAggName,
-    });
-    const pageObjectPath = `e2e/pages/${snake(emitName)}.ts`;
-    out.set(pageObjectPath, pageObjectSource);
-    sourcemap?.file(pageObjectPath, pageObjectSource, page.origin, pageConstructId(ui.name, page));
+    // Playwright page object emission.  Mirrors the React generator's
+    // `e2e/pages/<aggregate-camel>.ts` (one module per aggregate, carrying the
+    // List/New/Detail classes) so `test e2e` blocks (src/system/
+    // ui-e2e-render.ts) drive the Phoenix deployable identically to a React
+    // one — that renderer imports the aggregate-keyed path, so a per-PAGE
+    // module left every emitted Phoenix `.ui.spec.ts` importing a file that
+    // was never written.  `pageObjectPathFor` owns the mapping; the LIST
+    // archetype is preferred as the module's source because its builder emits
+    // all three classes in one go (`preferredPageObjectSource`).
+    if (preferredPageObjectPages.get(pageObjectPathFor(page, nameCtx)) === page) {
+      const pageObjectSource = buildPlaywrightPageObject({
+        page,
+        appName,
+        aggregatesByName,
+        contextByAggName,
+      });
+      const pageObjectPath = pageObjectPathFor(page, nameCtx);
+      out.set(pageObjectPath, pageObjectSource);
+      sourcemap?.file(
+        pageObjectPath,
+        pageObjectSource,
+        page.origin,
+        pageConstructId(ui.name, page),
+      );
+    }
   }
 
   // Playwright harness + route-driven smoke spec — the same e2e surface
@@ -357,7 +466,7 @@ export function emitLiveViewPages(args: {
   }
 
   // `Chart { … }` → the shared inline-SVG function component the call sites
-  // invoke fully qualified (M-T1.3 Phase 4).  One per deployable, and only when
+  // invoke fully qualified (M-T1.3).  One per deployable, and only when
   // a chart is actually rendered — a chartless app is byte-identical.
   if (anyChart) {
     out.set(`lib/${appName}_web/components/loom_chart.ex`, renderLoomChartComponent(webModule));
@@ -397,6 +506,9 @@ interface RenderArgs {
    *  repository declares one.  Every seam that loads the collection consults
    *  this, so the LiveView cannot serve rows the HTTP `index` 403s. */
   listReadGateByAggName: ReadonlyMap<string, ListReadGate>;
+  /** Aggregate → its entity-history read (docs/audit.md), for the aggregates
+   *  whose repository carries the enrichment-derived `historyFind`. */
+  historyReads: ReadonlyMap<string, HistoryRead>;
   /** Module-qualified context keyed by entity-part name — qualifies a
    *  page-body `new Part { … }` struct literal (`%<Ctx>.<Part>{…}`). */
   partContextModule: ReadonlyMap<string, string>;
@@ -416,13 +528,19 @@ interface ComponentActionInfo {
    *  so its mount seeds the `:store` assign + `alias` even when the store is
    *  only touched inside the (stateless) component. */
   usedStores: readonly string[];
-  /** The component's own `handle_event` clauses (named-action handlers) — a
-   *  store-mutating component action (`addOne() { Cart.add(...) }`) must hoist
-   *  its handler to the host page LiveView, since the component is a stateless
-   *  function component with no LiveView of its own.  Only store-touching
-   *  handlers are hoisted (see `gatherStoreHandlers`); the rest stay the
-   *  pre-existing component-named-action gap. */
+  /** The component's own `handle_event` clauses (named-action handlers, plus
+   *  any inline-lambda handler its body hoisted).  A HEEx function component is
+   *  a pure render function with no LiveView of its own, so EVERY one of these
+   *  must hoist to the host page LiveView or its `phx-click` names a clause
+   *  that does not exist — a `FunctionClauseError` on the first click.  See
+   *  `gatherComponentHandlers`. */
   handlers: readonly HandleEventClause[];
+  /** The component's `state { … }` fields, lifted into the host page's assigns
+   *  under `hostStateAssign(component, field)` (see `heex-walker-core.ts`). */
+  state: readonly StateFieldIR[];
+  /** How many times this component's body invokes each nested component —
+   *  multiplied along the render tree to count live instances. */
+  componentUses: ReadonlyMap<string, number>;
 }
 
 /** Transitive closure: every `ActionBinding` reachable from a page —
@@ -475,18 +593,28 @@ function gatherUsedStores(
   return [...stores];
 }
 
-/** The store-touching `handle_event` clauses from every component a page
- *  renders (transitively).  A component is a stateless function component, so a
- *  store-mutating component action (`addOne() { Cart.add(...) }`) only works if
- *  its handler is hoisted to the host page's LiveView (which owns the `:cart`
- *  assign).  Only clauses whose body references `update(:` (a store mutation)
- *  are hoisted — page-local component actions that mutate nothing the page owns
- *  stay the pre-existing component-named-action HEEx gap.  Deduped by name. */
-function gatherStoreHandlers(
+/** EVERY `handle_event` clause from every component a page renders
+ *  (transitively).  A component is a stateless function component, so a clause
+ *  it declares has nowhere of its own to live: the `phx-click="bump"` its
+ *  markup emits is dispatched to the HOST LiveView, and without the hoist that
+ *  click raises `FunctionClauseError`.  Component state referenced by these
+ *  bodies was lifted to host assigns by the walker, so the clause is
+ *  self-contained here.  Deduped by event name; a genuine collision between two
+ *  DIFFERENT bodies is raised rather than silently resolved, since keeping the
+ *  first would make the loser's button do the winner's work.
+ *
+ *  `ownHandlers` are the page's own clauses — passed in so a page action and a
+ *  component action sharing a name collide loudly here rather than emitting two
+ *  clauses of which Elixir can only ever reach the first. */
+function gatherComponentHandlers(
   seedComponents: readonly string[],
   componentInfo: ReadonlyMap<string, ComponentActionInfo>,
+  ownHandlers: readonly HandleEventClause[],
+  pageName: string,
 ): HandleEventClause[] {
   const byName = new Map<string, HandleEventClause>();
+  for (const h of ownHandlers) byName.set(h.name, h);
+  const hoisted = new Map<string, HandleEventClause>();
   const seen = new Set<string>();
   const queue = [...seedComponents];
   while (queue.length > 0) {
@@ -496,12 +624,81 @@ function gatherStoreHandlers(
     const info = componentInfo.get(name);
     if (!info) continue;
     for (const h of info.handlers) {
-      const touchesStore = h.body.some((l) => l.includes("update(:"));
-      if (touchesStore && !byName.has(h.name)) byName.set(h.name, h);
+      const clash = byName.get(h.name);
+      if (clash) {
+        if (clash.body.join("\n") !== h.body.join("\n")) {
+          throw new Error(
+            `platform: elixir — page '${pageName}' hoists two different \`${h.name}\` handlers into one LiveView (component '${name}' collides with another handler of that name). Rename one of the \`action\`s: a LiveView dispatches every \`phx-click\` by name, so only one of them could ever run.`,
+          );
+        }
+        continue;
+      }
+      byName.set(h.name, h);
+      hoisted.set(h.name, h);
     }
     queue.push(...info.usedComponents);
   }
-  return [...byName.values()];
+  return [...hoisted.values()];
+}
+
+/** The lifted state assigns a page must seed in `mount/3`: every state field of
+ *  every component it renders, transitively.  Ordered by component then
+ *  declaration so the emitted `mount` is stable. */
+function gatherLiftedState(
+  seedComponents: readonly string[],
+  componentInfo: ReadonlyMap<string, ComponentActionInfo>,
+): { assign: string; field: StateFieldIR }[] {
+  const out = new Map<string, { assign: string; field: StateFieldIR }>();
+  const seen = new Set<string>();
+  const queue = [...seedComponents];
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const info = componentInfo.get(name);
+    if (!info) continue;
+    for (const f of info.state) {
+      const assign = hostStateAssign(name, f.name);
+      if (!out.has(assign)) out.set(assign, { assign, field: f });
+    }
+    queue.push(...info.usedComponents);
+  }
+  return [...out.values()];
+}
+
+/** Guard the one slice lifting to host assigns genuinely cannot express: a
+ *  component that declares `state` and is rendered more than once on a page.
+ *  React gives each `<Counter/>` its own `useState`; one host assign per
+ *  component NAME gives them a shared cell, so two counters would move
+ *  together.  Fail at codegen rather than ship that.
+ *
+ *  Instance count is the product along the render tree — a component used twice
+ *  that itself renders a stateful child yields two of the child. */
+function assertSingleInstancePerStatefulComponent(
+  pageUses: ReadonlyMap<string, number>,
+  componentInfo: ReadonlyMap<string, ComponentActionInfo>,
+  pageName: string,
+): void {
+  const total = new Map<string, number>();
+  const walk = (uses: ReadonlyMap<string, number>, multiplier: number, chain: string[]): void => {
+    for (const [name, n] of uses) {
+      const count = n * multiplier;
+      total.set(name, (total.get(name) ?? 0) + count);
+      // A cycle is impossible in a well-formed component graph (the validator
+      // owns that); the chain guard keeps codegen finite regardless.
+      if (chain.includes(name)) continue;
+      const info = componentInfo.get(name);
+      if (info) walk(info.componentUses, count, [...chain, name]);
+    }
+  };
+  walk(pageUses, 1, []);
+  for (const [name, count] of total) {
+    if (count > 1 && (componentInfo.get(name)?.state.length ?? 0) > 0) {
+      throw new Error(
+        `platform: elixir — page '${pageName}' renders component '${name}' ${count} times, but '${name}' declares \`state\`. A HEEx function component holds no state of its own, so Loom lifts it into the host LiveView's assigns — one cell per component, which ${count} instances would share. Render it once, or move the state into a page \`state { … }\` field passed down as a param.`,
+      );
+    }
+  }
 }
 
 /** A hoisted `Action` `handle_event` clause: load the instance by id,
@@ -616,6 +813,11 @@ function renderLiveView(a: RenderArgs): { source: string; usesChart: boolean } {
   // domain `emit` topic on mount and handles each carried event natively via
   // `handle_info`.  A ui with no handlers keeps byte-identical output.
   const subscribeRealtime = (ui.notifications?.length ?? 0) > 0;
+  // Component-local `state { … }`, lifted into this page's assigns — a HEEx
+  // function component owns none of its own.  Guarded first: one assign per
+  // component name cannot serve two live instances.
+  assertSingleInstancePerStatefulComponent(walked.componentUses, componentInfo, page.name);
+  const liftedState = gatherLiftedState(walked.usedComponents, componentInfo);
   const mount = renderMount(
     page,
     walked.formBindings,
@@ -625,6 +827,7 @@ function renderLiveView(a: RenderArgs): { source: string; usesChart: boolean } {
     usedStores,
     walked.uploadBindings,
     subscribeRealtime ? appModule : null,
+    liftedState,
   );
   const handleParams = renderHandleParams(
     page,
@@ -635,6 +838,7 @@ function renderLiveView(a: RenderArgs): { source: string; usesChart: boolean } {
     contextModuleByAggName,
     a.projectionReads,
     a.listReadGateByAggName,
+    a.historyReads,
   );
   const detailBaseRoute = page.route ? page.route.replace(/\/:[^/]+$/, "") : null;
   // Hoist `Action(...)` handlers from the page body + every component
@@ -644,17 +848,23 @@ function renderLiveView(a: RenderArgs): { source: string; usesChart: boolean } {
     contextModuleByAggName,
     aggregatesByName,
   );
-  // Store-mutating component named-action handlers (`addOne() { Cart.add(...) }`)
-  // hoist to the host page's LiveView — the component is a stateless function
-  // component, so its `phx-click="add_one"` needs the page to carry the clause
-  // (and the page already carries the `:cart` assign via gatherUsedStores).
-  const storeHandlers = gatherStoreHandlers(walked.usedComponents, componentInfo);
+  // Component named-action + inline-lambda handlers hoist to the host page's
+  // LiveView — the component is a stateless function component, so its
+  // `phx-click="add_one"` needs the page to carry the clause (and the page
+  // already carries the `:cart` assign via gatherUsedStores, and the lifted
+  // state assign via `liftedState` below).
+  const componentHandlers = gatherComponentHandlers(
+    walked.usedComponents,
+    componentInfo,
+    handlers,
+    page.name,
+  );
   // The list route a create-form success navigates back to — the create
   // ("new") page route with the trailing `/new` segment stripped
   // (`/customers/new` → `/customers`).
   const createSuccessRoute = page.route ? page.route.replace(/\/new$/, "") : null;
   const handleEventClauses =
-    renderHandleEventClauses([...handlers, ...actionHandlers, ...storeHandlers]) +
+    renderHandleEventClauses([...handlers, ...actionHandlers, ...componentHandlers]) +
     renderCreateEventClauses(
       walked.formBindings,
       contextModuleByAggName,
@@ -685,9 +895,13 @@ function renderLiveView(a: RenderArgs): { source: string; usesChart: boolean } {
   // seam.  Persists the completed entry and assigns the FileRef into state.
   const uploadHandlers = renderUploadProgressHandlers(walked.uploadBindings, appName);
 
-  // One `defp load_<proj>(socket)` per projection the page reads (M-T1.3
-  // Phase 1) — the in-process `run/1` call plus the wire→snake rekey.
+  // One `defp load_<proj>(socket)` per projection the page reads — the
+  // in-process `run/1` call plus the wire→snake rekey.
   const projectionLoaders = renderProjectionLoaders(walked.queryBindings, a.projectionReads);
+
+  // One `defp load_<agg>_history(socket, id)` + its `defp <agg>_audit_entry/…`
+  // mapper per audited aggregate whose trail this page renders (docs/audit.md).
+  const historyLoaders = renderHistoryLoaders(walked.queryBindings, a.historyReads);
 
   return {
     usesChart: walked.usesChart,
@@ -698,7 +912,7 @@ ${aliasLines.length > 0 ? `\n${aliasLines}\n` : ""}
 ${mount}
 
 ${handleParams}
-${handleEventClauses}${uploadHandlers}${realtimeClauses}${projectionLoaders}
+${handleEventClauses}${uploadHandlers}${realtimeClauses}${projectionLoaders}${historyLoaders}
   @impl true
   def render(assigns) do
     ~H"""
@@ -930,6 +1144,11 @@ function renderMount(
    *  topic on connect (the ui declares `on` handlers), else `null` — a
    *  `null` keeps mount byte-identical to the pre-realtime output. */
   realtimeAppModule: string | null = null,
+  /** Lifted component state (`gatherLiftedState`) — one
+   *  `|> assign(:<component>_<field>, <init>)` each, seeded exactly like the
+   *  page's own state.  Empty ⇒ byte-identical to a page that renders no
+   *  stateful component. */
+  liftedState: readonly { assign: string; field: StateFieldIR }[] = [],
 ): string {
   // `if connected?(socket), do: subscribe` — only the live (websocket-
   // connected) mount subscribes; the initial static render skips it.  Prepended
@@ -944,6 +1163,10 @@ function renderMount(
     // scaffold and custom pages, and across frontends (every other target
     // already honours `init`).
     assigns.push(`      |> assign(:${snake(f.name)}, ${stateInitFor(f)})`);
+  }
+  // Component state lifted into this page (heex-walker-core `hostStateAssign`).
+  for (const { assign, field } of liftedState) {
+    assigns.push(`      |> assign(:${assign}, ${stateInitFor(field)})`);
   }
   // Per-store assign — one `%<Store>{}` (struct defaults) per used store.
   for (const storeName of usedStores) {
@@ -1090,7 +1313,7 @@ ${read.replace(/^ {6}/gm, "        ")}
 }
 
 /** The `handle_params` load line for a `QueryView { of: <api>.<Projection> }`
- *  (M-T1.3 Phase 1) — a call into the page-private loader below. */
+ *  (M-T1.3) — a call into the page-private loader below. */
 function renderProjectionLoadBlock(qb: import("./heex-walker.js").QueryBinding): string {
   return `    socket = assign(socket, :${qb.assign}, ${projectionLoaderName(qb.aggregate)}(socket))`;
 }
@@ -1100,7 +1323,7 @@ function projectionLoaderName(projection: string): string {
   return `load_${snake(projection)}`;
 }
 
-/** The page-private loader for each projection a page reads (M-T1.3 Phase 1) —
+/** The page-private loader for each projection a page reads (M-T1.3) —
  *  one `defp load_<proj>(socket)` per DISTINCT projection, spliced into the
  *  LiveView module body.
  *
@@ -1161,6 +1384,86 @@ ${guarded}
   return fns.length > 0 ? `\n${fns.join("\n\n")}\n` : "";
 }
 
+/** The page-private loader function name for one aggregate's history read. */
+function historyLoaderName(aggregate: string): string {
+  return `load_${snake(aggregate)}_history`;
+}
+
+/** The `handle_params` load line for a `QueryView { of: <api>.<Agg>.history(id) }`
+ *  — a call into the page-private loader below.
+ *
+ *  The id comes from the `of:` call's own argument (rendered handler-position by
+ *  the walker), not from `@id`: a hand-written `history(order.parentId)` must
+ *  load the trail it asked for, and the scaffolded page's `history(id)` renders
+ *  to `socket.assigns.id` anyway. */
+function renderHistoryLoadBlock(qb: import("./heex-walker.js").QueryBinding): string {
+  const id = qb.listArgs?.[0] ?? "socket.assigns.id";
+  return `    socket = assign(socket, :${qb.assign}, ${historyLoaderName(qb.aggregate)}(socket, ${id}))`;
+}
+
+/** The page-private loader + mapper for each entity trail a page reads
+ *  (docs/audit.md) — one `defp load_<agg>_history(socket, id)` plus the
+ *  aggregate's `defp <agg>_audit_entry/…` mapper, per DISTINCT aggregate.
+ *
+ *  It is a function rather than an inline `assign` for the same two reasons the
+ *  projection loader is:
+ *
+ *  1. THE READ.  `audit_records` lives in the same OTP app as the LiveView, so
+ *     what the four SPA frontends fetch over `GET /<plural>/{id}/history` is
+ *     one in-process `Audit.History.for_target/3` call here — no api client.
+ *  2. THE GUARDS.  All three the controller's `history` action applies, in the
+ *     same order, because each closes a different hole: the find's `requires`
+ *     gate (a denied caller must not even probe for the row), ENTITY
+ *     reachability (`audit_records` carries no tenant column — nothing for a
+ *     capability filter to scope — so scoping rides `get_<agg>`, which already
+ *     carries every predicate), and the field mask inside the mapper.  A
+ *     denial or a miss assigns the `:error` sentinel the view's error arm
+ *     renders — the LiveView shape of the route's 403/404, and the reason the
+ *     loader returns a value instead of assigning one itself. */
+function renderHistoryLoaders(
+  queryBindings: readonly QueryBinding[],
+  historyReads: ReadonlyMap<string, HistoryRead>,
+): string {
+  const seen = new Set<string>();
+  const fns: string[] = [];
+  for (const qb of queryBindings) {
+    if (qb.source !== "history" || seen.has(qb.aggregate)) continue;
+    const read = historyReads.get(qb.aggregate);
+    if (!read) continue;
+    seen.add(qb.aggregate);
+    // `current_user` is bound only when something reads it — an unused binding
+    // fails `--warnings-as-errors`.
+    const needsUser = read.principal || read.gateUsesUser || read.mapperTakesPrincipal;
+    const socketParam = needsUser ? "socket" : "_socket";
+    const cuBind = needsUser ? "    current_user = Map.get(socket.assigns, :current_user)\n\n" : "";
+    const getArgs = read.principal ? "id, current_user" : "id";
+    const mapper = read.mapperTakesPrincipal
+      ? `fn row -> ${read.mapperName}(row, current_user) end`
+      : `&${read.mapperName}/1`;
+    const inner = `    case ${read.ctxModule}.${read.getFn}(${getArgs}) do
+      {:ok, _record} ->
+        ${read.historyModule}.for_target(${read.repoModule}, ${JSON.stringify(read.targetType)}, id)
+        |> Enum.map(${mapper})
+
+      _ ->
+        :error
+    end`;
+    const body = read.gate
+      ? `    if ${read.gate} do
+${inner.replace(/^ {4}/gm, "      ")}
+    else
+      :error
+    end`
+      : inner;
+    fns.push(`  defp ${historyLoaderName(qb.aggregate)}(${socketParam}, id) do
+${cuBind}${body}
+  end
+
+${read.mapperSource}`);
+  }
+  return fns.length > 0 ? `\n${fns.join("\n\n")}\n` : "";
+}
+
 function renderHandleParams(
   page: PageIR,
   ui: UiIR,
@@ -1170,6 +1473,7 @@ function renderHandleParams(
   contextModuleByAggName: ReadonlyMap<string, string>,
   projectionReads: ReadonlyMap<string, ProjectionRead>,
   listReadGateByAggName: ReadonlyMap<string, ListReadGate>,
+  historyReads: ReadonlyMap<string, HistoryRead>,
 ): string {
   const paramAssigns: string[] = [];
   for (const p of page.params) {
@@ -1194,6 +1498,13 @@ function renderHandleParams(
         loadedProjections.add(qb.aggregate);
         loadBlocks.push(renderProjectionLoadBlock(qb));
       }
+      continue;
+    }
+    if (qb.source === "history") {
+      // The entity trail (docs/audit.md).  One call into the page-private
+      // loader below, which carries the three guards; a missing read means the
+      // aggregate serves no history, and the walker would not have tagged it.
+      if (historyReads.has(qb.aggregate)) loadBlocks.push(renderHistoryLoadBlock(qb));
       continue;
     }
     const ctxModule = contextModuleByAggName.get(qb.aggregate);
@@ -1328,7 +1639,23 @@ function renderCreateEventClauses(
   if (!ctxModule) return "";
   const aggSnake = snake(fb.name);
   const human = humanizeOp(`create_${aggSnake}`);
-  const nav = listRoute ? `\n         |> push_navigate(to: ~p"${listRoute}")` : "";
+  // Success lands on the CREATED RECORD's detail page, not back on the list.
+  // Two reasons, and the second is the load-bearing one:
+  //   * parity — the React/Vue/Svelte/Angular scaffolds all navigate to the new
+  //     record after a create, and the emitted Playwright page objects encode
+  //     that shared contract (`NewPage.submit()` waits for `<slug>-detail` and
+  //     reads the id off the URL).  Landing on the list made every emitted
+  //     Phoenix `.ui.spec.ts` unrunnable — which nothing noticed until the HEEx
+  //     UI behavioural leg executed one.
+  //   * the id is otherwise unobtainable: the list gives a driver no handle on
+  //     WHICH row was just created.
+  // Falls back to the list route when the record has no detail route to go to.
+  const detailRoute = listRoute ? `${listRoute}/#{record.id}` : null;
+  const navTarget = detailRoute ?? listRoute;
+  const nav = navTarget ? `\n         |> push_navigate(to: ~p"${navTarget}")` : "";
+  // `record` is referenced by the detail route, so it must be bound rather than
+  // discarded — an unused binding would trip `--warnings-as-errors`.
+  const okBinding = detailRoute ? "record" : "_record";
   // The GUARDED create: the gate lives in the context (`create_<agg>/2`) so this
   // form cannot walk around it — but the context can only evaluate a principal
   // term if this handler passes one, and a LiveView's principal is its own
@@ -1343,7 +1670,7 @@ function renderCreateEventClauses(
   return `\n  @impl true
   def handle_event("save_${aggSnake}", %{"${aggSnake}" => params}, socket) do
 ${usesUser ? "    current_user = Map.get(socket.assigns, :current_user)\n" : ""}    case ${ctxModule}.create_${aggSnake}(params${gated ? (usesUser ? ", current_user" : ", nil") : ""}) do
-      {:ok, _record} ->
+      {:ok, ${okBinding}} ->
         {:noreply,
          socket
          |> put_flash(:info, "${human} succeeded")${nav}}
@@ -1479,6 +1806,9 @@ function renderUiComponents(args: {
         params: c.params,
         state: c.state,
         derived: c.derived,
+        // The component's `action`s are in scope for its body — an
+        // action→action call inside one inlines the sibling's body.
+        actions: c.actions,
         body: c.body,
       } as PageIR;
       const walked = walkBodyToHeex(
@@ -1494,10 +1824,21 @@ function renderUiComponents(args: {
         contextModuleByAggName,
         args.bcByAggregate,
         args.i18nEnabled ? `component.${c.name}` : undefined,
+        c.name,
       );
-      const attrLines = c.params
-        .map((p) => `  attr :${snake(p.name)}, ${attrType(p.type)}, required: true`)
-        .join("\n");
+      // Lifted state arrives as an attr of the same namespaced name the host
+      // assigns under, so an intermediate component forwards it verbatim.  It
+      // carries the field's own initial value as the attr default: the host
+      // always passes it, and a default keeps a component rendered from
+      // somewhere unforeseen showing its declared initial value rather than
+      // failing to compile.
+      const attrLines = [
+        ...c.params.map((p) => `  attr :${snake(p.name)}, ${attrType(p.type)}, required: true`),
+        ...liftedStateAttrs(c, ui).map(
+          ({ assign, field }) =>
+            `  attr :${assign}, ${attrType(field.type)}, default: ${stateInitFor(field)}`,
+        ),
+      ].join("\n");
       // A `Slot()` in the body declares the `:inner_block` slot it renders via
       // `{render_slot(@inner_block)}` (walker sets `usesSlot`).
       const slotLine = walked.usesSlot ? "  slot :inner_block, required: true\n" : "";
@@ -1520,7 +1861,7 @@ end
 void plural;
 
 /** The shared `LoomChart` function component — the HEEx leg of the `Chart`
- *  primitive (M-T1.3 Phase 4), emitted once per deployable when any page
+ *  primitive (M-T1.3), emitted once per deployable when any page
  *  renders a chart.
  *
  *  Inline SVG, no charting library and no JavaScript: the rows a chart plots

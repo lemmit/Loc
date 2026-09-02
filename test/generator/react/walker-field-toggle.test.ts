@@ -54,7 +54,7 @@ describe("Field + Toggle with bind: state binding", () => {
     // useState declaration emitted (bind: triggered usesState).
     expect(content).toMatch(/const \[name, setName\] = useState<string>\(""\);/);
     expect(content).toMatch(
-      /<TextInput label="Your name" value=\{name\} onChange=\{\(e\) => setName\(e\.currentTarget\.value\)\} \/>/,
+      /<TextInput label=\{t\("page\.\w+\.inputLabel\.\w+", "Your name"\)\} value=\{name\} onChange=\{\(e\) => setName\(e\.currentTarget\.value\)\} \/>/,
     );
   });
 
@@ -82,7 +82,7 @@ describe("Field + Toggle with bind: state binding", () => {
     expect(content).toMatch(/import \{ Switch \} from "@mantine\/core";/);
     expect(content).toMatch(/const \[active, setActive\] = useState<boolean>\(false\);/);
     expect(content).toMatch(
-      /<Switch label="Active" checked=\{active\} onChange=\{\(e\) => setActive\(e\.currentTarget\.checked\)\} \/>/,
+      /<Switch label=\{t\("page\.\w+\.inputLabel\.\w+", "Active"\)\} checked=\{active\} onChange=\{\(e\) => setActive\(e\.currentTarget\.checked\)\} \/>/,
     );
   });
 
@@ -97,12 +97,13 @@ describe("Field + Toggle with bind: state binding", () => {
               name:    string = ""
               welcome: bool   = false
             }
+            action reset() { name := "" }
             body: Stack {
               Heading { "Profile" },
               Field { "Your name", bind: name },
               Toggle { "Show welcome", bind: welcome },
               Text { \`Hello, {name}\` },
-              Button { "Reset", onClick: e => { name := "" } }
+              Button { "Reset", onClick: reset }
             }
           }
         }
@@ -151,7 +152,7 @@ describe("Field + Toggle with bind: state binding", () => {
     `);
     const content = files.get("web/src/pages/x.tsx")!;
     // No controlled-input wiring — just label.
-    expect(content).toMatch(/<TextInput label="Bare" \/>/);
+    expect(content).toMatch(/<TextInput label=\{t\("page\.\w+\.inputLabel\.\w+", "Bare"\)\} \/>/);
     expect(content).not.toMatch(/onChange=/);
     expect(content).not.toMatch(/useState/);
   });
@@ -196,7 +197,7 @@ describe("Field + Toggle with bind: state binding", () => {
     expect(content).toMatch(/value=\{password\} onChange=\{[^}]*\} \/>/);
   });
 
-  it("Field label accepts a binary-op (state interpolation in label)", async () => {
+  it("Field label accepts an interpolated template (state in the label)", async () => {
     const files = await buildAndGenerate(`
       system S {
         subdomain M { context C { } }
@@ -207,7 +208,7 @@ describe("Field + Toggle with bind: state binding", () => {
               kind: string = "Name"
               v:    string = ""
             }
-            body:  Field { kind + ":", bind: v }
+            body:  Field { \`{kind}:\`, bind: v }
           }
         }
         deployable api { platform: node, contexts: [C], port: 3000 }
@@ -220,7 +221,12 @@ describe("Field + Toggle with bind: state binding", () => {
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
-    // Label slot accepts binary op as JSX expr.
-    expect(content).toMatch(/<TextInput label=\{\(kind \+ ":"\)\} value=\{v\}/);
+    // The label is a user-visible slot (`inputLabel`, M-T1.11), so a label with
+    // state in it is authored as a TEMPLATE — `kind + ":"` is now rejected by
+    // `loom.user-visible-concat` — and lands as one ICU message with the hole
+    // bound, rather than a concatenation no locale could reorder.
+    expect(content).toMatch(
+      /<TextInput label=\{t\("page\.X\.inputLabel\.\w+", "\{kind\}:", \{ kind: kind \}\)\} value=\{v\}/,
+    );
   });
 });

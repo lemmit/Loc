@@ -3,13 +3,14 @@
 // lambdas rebind their source param to the emitted `row` identifier via
 // the shared lambda-scope helpers. emitColumn is private to this module.
 
-import type { ExprIR, StateFieldIR } from "../../../ir/types/loom-ir.js";
+import type { ExprIR, StateFieldIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { provableStringType } from "../../../util/expr-body-type.js";
 import {
   localizedChromeIcuText,
   localizedChromeIcuValue,
   localizedChromeText,
   localizedChromeValue,
+  localizedPositionalTranslation,
 } from "../i18n-emit.js";
 import { registerI18nImport, renderPrimitive } from "../render-primitive.js";
 import {
@@ -34,6 +35,11 @@ import {
   testidAttr,
   walk,
 } from "../walker-core.js";
+
+/** `t()` returns a `string`, so the interpolation seam is told so — the two
+ *  targets that read `exprType` then skip the redundant coercion around an
+ *  already-textual value (mirrors `TRANSLATED` in `i18n-emit.ts`). */
+const TRANSLATED: TypeIR = { kind: "primitive", name: "string" };
 
 /** Build a `StateRef` for a page-state field named `name`.  Sort state is
  *  always string-typed (`sortKey: ""`, `sortDir: "asc"`); mirrors the ad-hoc
@@ -306,10 +312,10 @@ export function emitTable(
   // group in a `<>…</>` fragment; the multi-root-tolerant frameworks
   // (Vue/Svelte/Angular) omit the seam.
   //
-  // Applied to the PAGER too, not just the filter box.  It used to be
-  // filter-only on the reasoning that a pager always sits under a pack wrapper
-  // (`<Paper>`) in scaffolded pages — true of the scaffold, and not something
-  // this primitive can know.  A hand-written page that gets a pager emits the
+  // Applied to the PAGER too, not just the filter box.  Filter-only would rest
+  // on a pager always sitting under a pack wrapper (`<Paper>`) — true of
+  // scaffolded pages, but not something this primitive can know.  A
+  // hand-written page that gets a pager emits the
   // table and the pager as bare siblings and fails to compile (TS2657), so the
   // wrap belongs where the sibling is ADDED rather than where it happens to be
   // contained.  The redundant fragment inside a `<Paper>` is inert.
@@ -335,10 +341,10 @@ function emitColumn(
   const positionals = positionalArgs(call);
   const headerArg = positionals[0];
   const accessorArg = positionals[1];
-  const headerStr =
-    headerArg && headerArg.kind === "literal" && headerArg.lit === "string"
-      ? headerArg.value
-      : `Column ${index + 1}`;
+  const headerIsLiteral = headerArg?.kind === "literal" && headerArg.lit === "string";
+  const headerStr = headerIsLiteral ? headerArg.value : `Column ${index + 1}`;
+  // Keyed off the SOURCE literal, never the translated header — a per-locale
+  // column key would break every selector and page object built on it.
   const key = slugify(headerStr) || `col-${index + 1}`;
 
   const rowVar = "row";
@@ -368,13 +374,30 @@ function emitColumn(
   // header driving the page's `sortKey`/`sortDir` state.  The sort field is
   // the explicit `field:` arg, else the accessor's member (`o => o.name` →
   // `"name"`); a column whose field can't be resolved stays a plain header.
-  let header = ctx.target.escapeText(headerStr);
-  let headerMarkup = false;
+  // The header is a user-visible slot (`columnHeader`, M-T1.11): a plain
+  // literal translates through `t()` under i18n, which makes it an already-
+  // RENDERED token (`{t(…)}` / `Html.text (I18n.t …)` / `Text(t(…))`) rather
+  // than raw text — the same shape a sortable header has, so it rides the
+  // existing `headerMarkup` flag the packs already branch on.  A dynamic header
+  // has no source string and keeps the `Column N` fallback.
+  const headerTranslation = headerIsLiteral
+    ? localizedPositionalTranslation(call, ctx, "columnHeader")
+    : undefined;
+  let header =
+    headerTranslation === undefined
+      ? ctx.target.escapeText(headerStr)
+      : ctx.target.renderInterpolation(headerTranslation, TRANSLATED);
+  let headerMarkup = headerTranslation !== undefined;
   if (boolNamed(call, "sortable") && sortRefs && ctx.target.renderSortableHeader) {
     const field = stringNamed(call, "field") ?? sortFieldFromAccessor(accessorArg);
     if (field) {
       header = ctx.target.renderSortableHeader({
+        // The sort button's content, in both spellings: `header` is the markup
+        // token (already the `{t(…)}` interpolation under i18n), which the four
+        // JSX/markup targets splice as-is; `headerValue` is the bare expression
+        // for the two that splice a STRING into their own syntax.
         header,
+        headerValue: headerTranslation,
         field,
         sortKey: sortRefs.sortKeyRef,
         sortDir: sortRefs.sortDirRef,

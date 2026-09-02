@@ -367,6 +367,18 @@ export function escapeJavaIdent(name: string): string {
   return JAVA_KEYWORDS.has(name) ? `${name}_` : name;
 }
 
+/** Does `name` collide with a Java reserved word?  Exported for the IR-level
+ *  `loom.java-reserved-identifier-unsupported` gate, which must REFUSE such a name rather
+ *  than escape it: `escapeJavaIdent` is a RENAME (`case` → `case_`), safe for a
+ *  local binding the emitter also declares, but not for a DECLARED field —
+ *  a renamed record component is a renamed JSON property, so escaping a wire
+ *  field would silently move the wire.  C# has no such problem (`@case` is
+ *  lexically the identifier `case`), which is why the .NET arm of F2-ADP-7
+ *  escapes where java refuses. */
+export function isJavaKeyword(name: string): boolean {
+  return JAVA_KEYWORDS.has(name);
+}
+
 /** Escape a (already snake_cased) local identifier that collides with a
  *  Python keyword with a trailing underscore (`class` → `class_`); pass
  *  through otherwise. */

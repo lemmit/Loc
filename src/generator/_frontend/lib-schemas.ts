@@ -7,8 +7,8 @@
 //
 // The provenance-lineage schema mirrors the Hono route's `ProvenanceLineage`
 // zod shape byte-for-byte (src/platform/hono/v4/routes-builder.ts) so the
-// frontend parses the co-located `<field>_provenance` wire sibling into a typed
-// `ProvLineage` a `ProvenanceInfo` disclosure reads (docs/provenance.md).
+// frontend parses the `lineage` half of the `Provenanced<T>` wire carrier into
+// a typed `ProvLineage` a `ProvenanceInfo` disclosure reads (docs/provenance.md).
 //
 // Two forms so the money + provenance combinations stay minimal:
 //   - `LIB_SCHEMAS_PROV_TS`      — standalone file (own header + z import) for a
@@ -19,9 +19,9 @@
 
 export const PROV_LINEAGE_SCHEMA_BLOCK = `
 /**
- * Provenance lineage for a \`provenanced\` field — the co-located
- * \`<field>_provenance\` wire sibling.  Nullable: absent on backends that carry
- * the field but don't capture lineage.
+ * Provenance lineage for a \`provenanced\` field — the \`lineage\` half of the
+ * \`Provenanced<T>\` wire carrier (\`{ value, lineage }\`).  Nullable: a field that
+ * has never been written carries no lineage yet.
  */
 export const provLineageSchema = z.object({
   snapshotId: z.string(),

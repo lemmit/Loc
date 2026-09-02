@@ -7,6 +7,7 @@ import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
 import { desugarAuthzFilterInApp } from "../../_expr/authz-filter-inapp.js";
+import { javaLogEvent } from "../../_obs/render-java.js";
 import { bypassDrops, type FilterBypass } from "../capability-filter.js";
 import { collectJavaExprImports, renderJavaExpr, renderJavaType } from "../render-expr.js";
 import { javaNotFoundThrow } from "./common.js";
@@ -18,6 +19,7 @@ import {
   isPagedFind,
   unionFindAsOptionalTwin,
 } from "./repository.js";
+import { javaBlobWriteGuardLines, writeScopeUsesPrincipal } from "./write-scope.js";
 
 // ---------------------------------------------------------------------------
 // Document-shaped persistence (`shape: document`, D-DOCUMENT-AXIS) — the
@@ -60,7 +62,7 @@ export function renderJavaDocumentRepositoryImpl(
   const origins = agg.contextFilterOrigins ?? [];
   // The (predicate, origin) entries, split by whether the predicate reads the
   // request principal (`currentUser`).  Non-principal filters are applied in-app
-  // over the rehydrated aggregate as before; PRINCIPAL filters (DEBT-02 Slice B,
+  // over the rehydrated aggregate as before; PRINCIPAL filters (,
   // e.g. `filter this.tenantId == currentUser.tenantId`) are also applied in-app
   // here — a document aggregate can't push them to SQL/JPQL (the relational path
   // does via a SpEL @Query) — but they need the `currentUser` local bound from
@@ -73,6 +75,10 @@ export function renderJavaDocumentRepositoryImpl(
   // with `accessorProps` so `currentUser.tenantId` → `currentUser.tenantId()`.
   const principalPreds: ExprIR[] = (agg.contextFilters ?? []).filter(exprUsesCurrentUser);
   const hasPrincipal = aggregateUsesPrincipalContextFilter(agg);
+  // The command load's IN-APP write-scope guard can read the principal
+  // even when no READ filter does, and it is the only other user of the
+  // accessor bean — so the injection gate is the union of the two.
+  const needsAccessor = hasPrincipal || writeScopeUsesPrincipal(agg);
   // An `authz-filter` SENTINEL (`policy { allow deep … }` / `deny`) is desugared
   // to ordinary IR first — it exists to be intercepted by a QUERY-filter
   // translator (the relational path's JPQL/Criteria/@SQLRestriction renderers),
@@ -110,6 +116,10 @@ export function renderJavaDocumentRepositoryImpl(
   };
   const capRec = alwaysOn("rec");
   const capX = alwaysOn("x");
+  // aggregate_loaded (debug) — shared by the plain and the write-scoped command
+  // load so the two emissions stay one log line, not two spellings.
+  const aggregateLoadedLog = `        CatalogLog.event(${javaLogEvent("aggregateLoaded")}, "aggregate", "${agg.name}", "id", String.valueOf(id.value()), "found", found.isPresent());`;
+  const writeGuardLines = javaBlobWriteGuardLines(agg, idClass, aggregateLoadedLog);
 
   // Expression imports the in-app find / capability predicates need — notably
   // `java.util.Objects` for a string/ref `==` (renders to `Objects.equals`).
@@ -117,7 +127,16 @@ export function renderJavaDocumentRepositoryImpl(
   // document aggregate with a string-equality find failed to compile.)
   const exprImports = new Set<string>();
   for (const f of finds) if (f.filter) collectJavaExprImports(f.filter, exprImports);
-  for (const p of agg.contextFilters ?? []) collectJavaExprImports(p, exprImports);
+  // The in-app filters are rendered from the DESUGARED IR (an `authz-filter`
+  // sentinel carries no expression nodes of its own), so collect their imports
+  // from the same desugared tree the renderer sees — otherwise a `policy { allow
+  // deep … }` tenant floor emits `Objects.equals(...)` with no
+  // `import java.util.Objects`, and the generated project fails to compile.
+  for (const p of agg.contextFilters ?? [])
+    collectJavaExprImports(desugarAuthzFilterInApp(p, agg.name), exprImports);
+  // Same for the command load's in-app write-scope guard.
+  if (agg.writeScopeFilter)
+    collectJavaExprImports(desugarAuthzFilterInApp(agg.writeScopeFilter, agg.name), exprImports);
 
   // Retrievals (`retrieval` bundles) can't query the jsonb document, so each
   // `run<Name>` rehydrates every row and evaluates its `where` + `sort` in
@@ -135,7 +154,7 @@ export function renderJavaDocumentRepositoryImpl(
   // count (paged → total, list → size, single → 0/1).  Mirrors the relational
   // repo + .NET/Hono document emission.
   const findExecutedLog = (name: string, rowsExpr: string): string =>
-    `        CatalogLog.event("find_executed", "debug", "aggregate", "${agg.name}", "find", "${name}", "rows", ${rowsExpr});`;
+    `        CatalogLog.event(${javaLogEvent("findExecuted")}, "aggregate", "${agg.name}", "find", "${name}", "rows", ${rowsExpr});`;
   const findLines = finds.flatMap((f) => {
     const params = f.params.map((p) => `${renderJavaType(p.type)} ${p.name}`);
     const ownFilter = f.filter
@@ -204,8 +223,16 @@ export function renderJavaDocumentRepositoryImpl(
     ctx.domainPkg !== ctx.infraPkg ? `import ${ctx.domainPkg}.${agg.name}Repository;` : null,
     `import ${ctx.basePkg}.domain.common.AggregateNotFoundException;`,
     finds.some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
-    hasPrincipal ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
+    needsAccessor ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
     `import ${ctx.basePkg}.domain.ids.*;`,
+    // The enums wildcard, matching the RELATIONAL impl (repository.ts:305).
+    // A declared find's params are rendered with `renderJavaType`, which spells
+    // an enum param as the bare enum name — so `find byGrade(grade: Grade)` on a
+    // `shape: document` aggregate emitted `public List<Widget> byGrade(Grade
+    // grade)` with nothing importing `Grade`, and `javac` answered "cannot find
+    // symbol".  Found by compiling the F2-W-07 fixture; the defect is older and
+    // independent of paging.
+    `import ${ctx.basePkg}.domain.enums.*;`,
     ``,
     `/** Document repository — the whole aggregate round-trips one jsonb`,
     ` *  column in ${table} via a field-visibility Jackson mapper. */`,
@@ -225,18 +252,18 @@ export function renderJavaDocumentRepositoryImpl(
     `        .build();`,
     ``,
     `    private final JdbcTemplate jdbc;`,
-    // DEBT-02 Slice B: a principal (tenancy) capability filter is applied in-app
+    // A principal (tenancy) capability filter is applied in-app
     // over the rehydrated document, so the impl needs the request principal —
     // inject the same CurrentUserAccessor bean the relational path uses.  Only
     // wired when the aggregate carries such a filter (non-principal document
     // aggregates stay byte-identical: no field, no ctor param, no import).
-    hasPrincipal ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
+    needsAccessor ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
     ``,
-    hasPrincipal
+    needsAccessor
       ? `    public ${agg.name}RepositoryImpl(JdbcTemplate jdbc, CurrentUserAccessor currentUserAccessor) {`
       : `    public ${agg.name}RepositoryImpl(JdbcTemplate jdbc) {`,
     `        this.jdbc = jdbc;`,
-    hasPrincipal ? `        this.currentUserAccessor = currentUserAccessor;` : null,
+    needsAccessor ? `        this.currentUserAccessor = currentUserAccessor;` : null,
     `    }`,
     ``,
     `    @Override`,
@@ -268,7 +295,7 @@ export function renderJavaDocumentRepositoryImpl(
     `        }`,
     // repository_save (debug) — after the upsert; (aggregate, id) prefix mirrors
     // the relational repo + .NET/Hono emission (children omitted).
-    `        CatalogLog.event("repository_save", "debug", "aggregate", "${agg.name}", "id", String.valueOf(aggregate.id().value()));`,
+    `        CatalogLog.event(${javaLogEvent("repositorySave")}, "aggregate", "${agg.name}", "id", String.valueOf(aggregate.id().value()));`,
     `        return aggregate;`,
     `    }`,
     ``,
@@ -285,15 +312,23 @@ export function renderJavaDocumentRepositoryImpl(
       : [`        return rows.isEmpty() ? Optional.empty() : Optional.of(fromJson(rows.get(0)));`]),
     `    }`,
     ``,
-    `    @Override`,
-    `    public ${agg.name} getById(${idClass} id) {`,
-    `        var found = findById(id);`,
-    // aggregate_loaded (debug) — `found` is a bool so a downstream filter can
-    // grep failed loads by (event="aggregate_loaded", found=false).
-    `        CatalogLog.event("aggregate_loaded", "debug", "aggregate", "${agg.name}", "id", String.valueOf(id.value()), "found", found.isPresent());`,
-    `        return found.orElseThrow(() ->`,
-    `            ${javaNotFoundThrow(agg.name)});`,
-    `    }`,
+    // `getById` IS the command load on java (the read route calls `findById`;
+    // every mutation calls this), so the write-scope guard lives here.  A
+    // document blob has no queryable columns for a `findByIdForWrite` @Query, so
+    // the scope is checked IN-APP over the rehydrated aggregate — the same place
+    // this repository already evaluates its capability READ filters.  Without a
+    // write scope the load stays byte-identical.
+    ...(writeGuardLines ?? [
+      `    @Override`,
+      `    public ${agg.name} getById(${idClass} id) {`,
+      `        var found = findById(id);`,
+      // aggregate_loaded (debug) — `found` is a bool so a downstream filter can
+      // grep failed loads by (event="aggregate_loaded", found=false).
+      aggregateLoadedLog,
+      `        return found.orElseThrow(() ->`,
+      `            ${javaNotFoundThrow(agg.name)});`,
+      `    }`,
+    ]),
     ``,
     `    @Override`,
     `    public List<${agg.name}> findAll() {`,

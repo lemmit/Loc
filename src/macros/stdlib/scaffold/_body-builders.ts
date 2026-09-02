@@ -11,9 +11,9 @@
 // `scaffoldList` (per-type columns + `rowTestid` + the find-filter bar),
 // `scaffoldNewForm`, `scaffoldDetails` (value-object sub-rows + related-entity
 // cards), `scaffoldOperations`, `scaffoldWorkflowForm`, the
-// workflow-instance list/detail, and the `scaffoldHome` / `scaffoldWorkflowsIndex`
-// dashboards.  (The old IR-phase ⑤c expanders these once
-// mirrored are deleted — there is no sentinel layer left.)
+// workflow-instance list/detail, and the `scaffoldHome` /
+// `scaffoldWorkflowsIndex` dashboards.  Each builds its FINAL body here — there
+// is no sentinel layer and no later expansion pass.
 
 import type {
   Aggregate,
@@ -26,17 +26,22 @@ import type {
   ValueObject,
   Workflow,
 } from "../../../language/generated/ast.js";
+import { aggregateServesHistory } from "../../../util/audit-ast.js";
 import { AUDIT_HISTORY_FIND } from "../../../util/audit-names.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { PROVENANCE_VALUE_FIELD } from "../../../util/provenance-carrier.js";
 import {
   binaryExpr,
   boolLit,
   callExpr,
+  cloneTypeRef,
   intLit,
   lambda,
+  listLit,
   matchExpr,
   memberAccess,
   nameRefExpr,
+  type StateFieldSpec,
   stringLit,
   ternaryExpr,
 } from "../../api/index.js";
@@ -385,7 +390,7 @@ export function scaffoldInstanceList(wf: Workflow): Expression {
     cols.push({
       value: callExpr("Column", [
         { value: stringLit(humanize(name)) },
-        { value: lambda("i", columnAccessor(name, kind, "i")) },
+        { value: lambda("i", columnAccessor(name, kind, "i", !!p.provenanced)) },
       ]),
     });
   }
@@ -535,70 +540,6 @@ export function scaffoldInstanceDetails(wf: Workflow): Expression {
  *  param when the aggregate is served over one. */
 export function scaffoldDetails(agg: Aggregate, opts: { apiHandle?: string } = {}): Expression {
   return callExpr("Stack", scaffoldDetailsParts(agg, opts));
-}
-
-/** Whether a scaffolded Detail page gets a History section — the MACRO-TIME
- *  (AST) mirror of the enrichment's `aggServesHistory` (`src/ir/util/
- *  audit-history.ts`), which the scaffolder cannot call because it runs at
- *  phase ② over the Langium AST, before there is an `AggregateIR` to ask.
- *
- *  It must not over-approximate: an aggregate whose repository ends up WITHOUT
- *  a `historyFind` gets no `history()` client method, so a History section over
- *  it would call a hook that was never emitted and fail `tsc`.  Every clause
- *  below therefore mirrors one clause of the IR rule, and each errs toward
- *  emitting nothing:
- *
- *    - abstract bases own no repository and emit no table (`ensureHistoryFind`
- *      skips them);
- *    - the audit target — the same "at least one audited public command"
- *      question `aggHasAuditedTarget` asks, read off the AST flags the lowerer
- *      resolves (`aggregate X audited` marks every public command; a `private
- *      operation` is never audited — the opt-out);
- *    - at least one diffable field, so the timeline could say something.  The
- *      declared non-`internal`/`secret`/`managed`/`token` properties are a
- *      SUBSET of the IR's `historyDiffFields` (which also counts derived +
- *      containments), so a false here is a safe under-emit;
- *    - an author-declared `find history(...)` WINS over the derived read
- *      (`ensureHistoryFind` bails), and it keeps its own generic route + object-
- *      shaped client hook — so the scaffold must not claim the derived one. */
-export function aggregateServesHistory(agg: Aggregate): boolean {
-  if (agg.isAbstract) return false;
-  if (!aggregateHasAuditedCommand(agg)) return false;
-  if (!agg.members.some(isHistoryDiffProperty)) return false;
-  if (aggregateHasDeclaredHistoryFind(agg)) return false;
-  return true;
-}
-
-/** AST mirror of `aggHasAuditedTarget` — at least one audited PUBLIC command
- *  action (`operation` / `create` / `destroy`).  The aggregate-header `audited`
- *  is the aggregate-wide form the lowerer resolves into the per-command flags
- *  (`lowerAggregate`), so it counts only when such a command exists. */
-function aggregateHasAuditedCommand(agg: Aggregate): boolean {
-  return agg.members.some((m) => {
-    if (m.$type === "Operation") return !m.private && (m.audited || agg.audited);
-    if (m.$type === "Create" || m.$type === "Destroy") return m.audited || agg.audited;
-    return false;
-  });
-}
-
-/** A declared property that could carry a per-entry field change: the API-read
- *  set (`forApiRead`) minus the server-lifecycle stamp churn `forHistoryDiff`
- *  drops (`managed` / `token`). */
-function isHistoryDiffProperty(m: { $type: string }): boolean {
-  if (m.$type !== "Property") return false;
-  const access = (m as Property).access;
-  return access !== "internal" && access !== "secret" && access !== "managed" && access !== "token";
-}
-
-/** An author-declared `find history(...)` on this aggregate's repository — the
- *  one that WINS over the synthesized read (same rule as `all`). */
-function aggregateHasDeclaredHistoryFind(agg: Aggregate): boolean {
-  for (const m of agg.$container.members) {
-    if (m.$type !== "Repository") continue;
-    if (m.aggregate.ref?.name !== agg.name && m.aggregate.$refText !== agg.name) continue;
-    if (m.finds.some((f) => f.name === AUDIT_HISTORY_FIND)) return true;
-  }
-  return false;
 }
 
 /** The Detail page's History section — a framed `Timeline` over the derived
@@ -758,13 +699,20 @@ function buildDataCardParts(
       continue;
     }
     const kind = kindForType(f.type, true)!; // non-array, VO handled above ⇒ always a cell
-    const cell = typedCell(() => memberAccess(nameRefExpr(cellVar), name), kind);
+    // A `provenanced` field ships as the `Provenanced<T>` wire carrier
+    // (M-T6.12), so the FIGURE is `<record>.<field>.value` — reading
+    // `<record>.<field>` would render the whole `{ value, lineage }` object.
+    // The cell's own type is still the carried one, so the typed formatting
+    // (money / datetime / …) applies to the value, as before.
+    const cellAccess = f.provenanced
+      ? () => memberAccess(memberAccess(nameRefExpr(cellVar), name), PROVENANCE_VALUE_FIELD)
+      : () => memberAccess(nameRefExpr(cellVar), name);
+    const cell = typedCell(cellAccess, kind);
     // A `provenanced` field pairs its value with a "?" disclosure over the
-    // value's lineage (docs/provenance.md): `Group(value, ProvenanceInfo)` so
-    // the figure and its "why" sit side by side.  ProvenanceInfo reads the
-    // co-located `<field>_provenance` wire sibling the React response schema
-    // carries; other frontends render the value alone (the primitive comments
-    // itself out — React-first).
+    // value's lineage: `Group(value, ProvenanceInfo)` so the figure and its
+    // "why" sit side by side.  ProvenanceInfo reads the carrier's `lineage`
+    // half off the same field — every frontend carries it now that the lineage
+    // is part of `wireShape` rather than a per-frontend opt-in append.
     const valueCell = f.provenanced
       ? callExpr("Group", [
           { value: cell },
@@ -809,7 +757,7 @@ function relatedCard(c: Containment, part: EntityPart, cellVar: string, slug: st
     const cols = columnsFromProperties(propertiesOf(part.members)).map((col) => ({
       value: callExpr("Column", [
         { value: stringLit(humanize(col.name)) },
-        { value: lambda("row", columnAccessor(col.name, col.kind, "row")) },
+        { value: lambda("row", columnAccessor(col.name, col.kind, "row", col.provenanced)) },
       ]),
     }));
     const table = callExpr("Table", [
@@ -921,6 +869,11 @@ export type ColumnKind =
 export interface ScaffoldColumn {
   name: string;
   kind: ColumnKind;
+  /** The property is declared `provenanced`, so its WIRE value is the
+   *  `Provenanced<T>` carrier `{ value, lineage }` (M-T6.12) — the cell reads
+   *  `<row>.<field>.value`, not `<row>.<field>` (which would render the whole
+   *  carrier object). */
+  provenanced?: boolean;
 }
 
 /** A type-dispatched cell renderer rooted at an arbitrary receiver — the
@@ -958,9 +911,21 @@ function typedCell(receiver: () => Expression, kind: ColumnKind): Expression {
   }
 }
 
-/** One table cell accessor `<rowVar>.<field>`, dispatched by type. */
-function columnAccessor(fieldName: string, kind: ColumnKind, rowVar: string): Expression {
-  return typedCell(() => memberAccess(nameRefExpr(rowVar), fieldName), kind);
+/** One table cell accessor `<rowVar>.<field>`, dispatched by type.  A
+ *  `provenanced` column reads through the wire carrier's `value` member. */
+function columnAccessor(
+  fieldName: string,
+  kind: ColumnKind,
+  rowVar: string,
+  provenanced = false,
+): Expression {
+  return typedCell(
+    () =>
+      provenanced
+        ? memberAccess(memberAccess(nameRefExpr(rowVar), fieldName), PROVENANCE_VALUE_FIELD)
+        : memberAccess(nameRefExpr(rowVar), fieldName),
+    kind,
+  );
 }
 
 /** Resolve an aggregate's scalar list columns from its AST — one `ScaffoldColumn`
@@ -979,7 +944,7 @@ function columnsFromProperties(props: readonly Property[]): ScaffoldColumn[] {
   const out: ScaffoldColumn[] = [];
   for (const p of props) {
     const kind = columnKindForType(p.type);
-    if (kind) out.push({ name: String(p.name), kind });
+    if (kind) out.push({ name: String(p.name), kind, provenanced: !!p.provenanced });
   }
   return out;
 }
@@ -1050,16 +1015,81 @@ function columnKindForType(type: TypeRef): ColumnKind | null {
   return kindForType(type, false);
 }
 
-/** A repository `find` the list filter-bar turns into a text-input arm — its
- *  name and the (all-string) param names the inputs bind to. */
+/** How the list filter bar renders one param of a filter `find`, and what the
+ *  page-state field it binds to is typed as.
+ *
+ *  M-T1.15: the bar used to accept ONLY plain `string` params, so
+ *  `find byAmount(min: int)` and `find forCustomer(c: Customer id)` were
+ *  declared, emitted as backend routes, and produced NO input — a filter bar
+ *  that quietly omitted the author's find, with no diagnostic.  The kinds
+ *  below are the ones whose state type and the generated query-param type
+ *  AGREE, so the emitted page type-checks on every frontend:
+ *
+ *    string           → `Field`        state `string`,         unset = `""`
+ *    int / long       → `NumberField`  state <the param type>, unset = `0`
+ *    `X id`           → `Field`        state `string`,         unset = `""`
+ *    guid / datetime  → `Field`        state `string`,         unset = `""`
+ *    bool             → `SelectField`  state `string`,         unset = `""`
+ *
+ *  `guid` and `datetime` are STRING-shaped end to end — the request zod for
+ *  both is a bare `z.string()` (`zodForRequest`, `_frontend/api-module.ts`) and
+ *  every frontend's state emitter already types them `string`
+ *  (`stateTypeAsTsString` and its Vue/Svelte/Angular/Feliz/Flutter twins) — so
+ *  a text box over them binds and calls with the types agreeing, exactly like
+ *  the `X id` arm.
+ *
+ *  `bool` is the one kind whose NATURAL input is wrong rather than missing: a
+ *  `Toggle` binds a `bool` state whose zero value is `false`, which makes
+ *  "filter for false" and "no filter" the same page state and puts half the
+ *  domain out of reach.  So the bar binds a THREE-state string select instead
+ *  (`""` unset / `"true"` / `"false"`) and passes `<state> == "true"` as the
+ *  find argument — the whole domain, with an unset state that is genuinely
+ *  distinct.
+ *
+ *  Still dropped, each for a reason that lives outside this macro:
+ *
+ *    enum            — every frontend's state emitter types an enum-valued
+ *                      `state {}` field as bare `string`
+ *                      (`stateTypeAsTsString`), while the generated query param
+ *                      is the `z.enum([...])` UNION, so the call is TS2322.
+ *                      A frontend-emitter fix; see IMPL-NOTES.md §2.
+ *    decimal / money — the "unset" sentinel would be the int literal `0`, which
+ *                      Feliz types `decimal <> int` (FS0001); `money` binds a
+ *                      `Decimal` state `NumberField` does not accept at all.
+ *                      IMPL-NOTES.md §3.
+ *    value objects, arrays, optionals
+ *                    — no single input has a matching state type. */
+export type FilterParamKind = "string" | "number" | "ref" | "bool";
+
+/** The walker input primitive each filter kind binds through.  One table so the
+ *  input choice and the "unset" sentinel below can't drift apart. */
+const FILTER_INPUT_PRIMITIVE: Record<FilterParamKind, string> = {
+  string: "Field",
+  ref: "Field",
+  number: "NumberField",
+  bool: "SelectField",
+};
+
+/** One param of a filter find: the name the input binds through, how it renders,
+ *  and the param's own declared type (cloned onto the page-state field so the
+ *  state and the find ARGUMENT agree by construction). */
+export interface FilterParam {
+  name: string;
+  kind: FilterParamKind;
+  type: TypeRef;
+}
+
+/** A repository `find` the list filter-bar turns into an input arm — its name
+ *  and the params the inputs bind to. */
 export interface FilterFind {
   name: string;
-  params: readonly string[];
+  params: readonly FilterParam[];
 }
 
 /** Resolve a list's filter finds from the aggregate's repository in the same
- *  context: each `find` (excluding the synthetic `all`) whose params are all
- *  plain non-array/non-optional strings and whose return is an unwrapped list.
+ *  context: each `find` (excluding the synthetic `all`) whose return is an
+ *  unwrapped list and whose params are ALL renderable by `filterParamKind`
+ *  (non-array, non-optional, and one of the kinds tabulated there).
  *  Filters the aggregate's repository finds to the bar-eligible ones — the repository
  *  is a sibling `ContextMember`, so it's reachable from the aggregate's AST
  *  without lowering. */
@@ -1092,20 +1122,50 @@ export function filterFindsForAggregate(agg: Aggregate): FilterFind[] {
       if (f.name === "all") continue;
       if (!f.returnType.array) continue;
       if (f.params.length === 0) continue;
-      if (!f.params.every((p) => isPlainString(p.type))) continue;
-      out.push({ name: f.name, params: f.params.map((p) => String(p.name)) });
+      const kinds = f.params.map((p) => filterParamKind(p.type));
+      // ALL-OR-NOTHING per find: the bar's arm is active only when every input
+      // of the find is set, so a find with one unrenderable param has no
+      // meaningful partial form.
+      if (kinds.some((k) => k === null)) continue;
+      out.push({
+        name: f.name,
+        params: f.params.map((p, i) => ({
+          name: String(p.name),
+          kind: kinds[i]!,
+          type: cloneTypeRef(p.type),
+        })),
+      });
     }
   }
   return out;
 }
 
-function isPlainString(type: TypeRef): boolean {
-  return (
-    !type.array &&
-    !type.optional &&
-    type.base.$type === "PrimitiveType" &&
-    type.base.name === "string"
-  );
+/** The filter-bar input kind for a find param's declared type, or null when no
+ *  input renders it (see the {@link FilterParam} note). */
+function filterParamKind(type: TypeRef): FilterParamKind | null {
+  if (type.array || type.optional) return null;
+  if (type.base.$type === "IdType") return "ref";
+  if (type.base.$type !== "PrimitiveType") return null;
+  switch (type.base.name) {
+    case "string":
+    // `guid` and `datetime` are string-shaped on the wire (`z.string()`) and
+    // string-typed in every frontend's state emitter, so a text box over them
+    // binds and calls with the types agreeing — same arm as a plain `string`.
+    case "guid":
+    case "datetime":
+      return "string";
+    case "int":
+    case "long":
+      return "number";
+    case "bool":
+      return "bool";
+    default:
+      // `decimal` and `money` are held back deliberately, not forgotten: their
+      // "unset" sentinel would be the int literal `0`, and Feliz types that
+      // comparison `decimal <> 0` / `Decimal` against an `int` literal, which
+      // does not type-check there.  See IMPL-NOTES.md §3.
+      return null;
+  }
 }
 
 /** The page-state field name a filter input binds to: `<find><Param>`
@@ -1114,11 +1174,26 @@ export function stateNameFor(findName: string, param: string): string {
   return `${findName}${param[0]!.toUpperCase()}${param.slice(1)}`;
 }
 
-/** The page-state fields the scaffolded filter inputs bind to — one `string`
- *  field (init `""`) per find param.  The page builder attaches these as the
- *  page's `state { }` block when wiring `scaffoldList`'s filter form. */
-export function filterStateFields(filters: readonly FilterFind[]): Array<{ name: string }> {
-  return filters.flatMap((f) => f.params.map((p) => ({ name: stateNameFor(f.name, p) })));
+/** The page-state fields the scaffolded filter inputs bind to — one per find
+ *  param, typed as the PARAM is (M-T1.15).  A plain `string` param keeps the
+ *  bare-name spec (`string`, init `""`) so its emission stays byte-identical;
+ *  every other kind carries the param's cloned `TypeRef` and no initializer, so
+ *  each frontend's state emitter falls back to that type's zero value.  The page
+ *  builder attaches these as the page's `state { }` block when wiring
+ *  `scaffoldList`'s filter form. */
+export function filterStateFields(filters: readonly FilterFind[]): Array<string | StateFieldSpec> {
+  return filters.flatMap((f) =>
+    f.params.map((p): string | StateFieldSpec =>
+      p.kind === "number"
+        ? { name: stateNameFor(f.name, p.name), type: "string", typeRef: cloneTypeRef(p.type) }
+        : // `string`, `X id`, `guid`/`datetime` and `bool` all bind a `string`
+          // state: an id's wire form IS a string (`z.string().uuid()`), guid and
+          // datetime are `z.string()`, and the bool select's three states are
+          // `""`/`"true"`/`"false"`.  A bare-name spec keeps the string arm's
+          // emission byte-identical.
+          stateNameFor(f.name, p.name),
+    ),
+  );
 }
 
 /** `scaffoldList` — scaffolds the list page body: breadcrumbs, a toolbar with
@@ -1179,7 +1254,7 @@ export function scaffoldList(
     ...columns.map((c) => ({
       value: callExpr("Column", [
         { value: stringLit(humanize(c.name)) },
-        { value: lambda("o", columnAccessor(c.name, c.kind, "o")) },
+        { value: lambda("o", columnAccessor(c.name, c.kind, "o", c.provenanced)) },
         { name: "sortable", value: boolLit(true) },
         { name: "field", value: stringLit(c.name) },
       ]),
@@ -1271,11 +1346,26 @@ export function scaffoldList(
   if (filters.length > 0) {
     for (const f of filters) {
       for (const p of f.params) {
-        const stateName = stateNameFor(f.name, p);
+        const stateName = stateNameFor(f.name, p.name);
+        // `NumberField` for a numeric param, a three-state `SelectField` for a
+        // bool, `Field` (text) otherwise — an `X id` filter is a raw-id box
+        // until a walker-level FK picker exists (IMPL-NOTES.md), which is still
+        // strictly better than the silent drop.
         filterFields.push({
-          value: callExpr("Field", [
-            { value: stringLit(humanize(p)) },
+          value: callExpr(FILTER_INPUT_PRIMITIVE[p.kind], [
+            { value: stringLit(humanize(p.name)) },
             { name: "bind", value: nameRefExpr(stateName) },
+            // The bool select's options are the two SET states; "unset" is the
+            // state's own zero value (`""`), which the picker's placeholder
+            // row already offers.
+            ...(p.kind === "bool"
+              ? [
+                  {
+                    name: "options",
+                    value: listLit([stringLit("true"), stringLit("false")]) as Expression,
+                  },
+                ]
+              : []),
             { name: "testid", value: stringLit(`${slug}-filter-${snake(stateName)}`) },
           ]),
         });
@@ -1286,13 +1376,31 @@ export function scaffoldList(
         cond: f.params
           .map(
             (p): Expression =>
-              binaryExpr(nameRefExpr(stateNameFor(f.name, p)), "!=", stringLit("")),
+              // "Unset" is the state type's zero value: `""` for a string / id /
+              // guid / datetime box AND for the bool select, `0` for a number
+              // box.  Same trade the string arm always made — a filter FOR the
+              // zero value is indistinguishable from no filter, which is why the
+              // input starts there.  (The bool select is the exception by
+              // construction: its zero value `""` is not one of its two options,
+              // so both `true` and `false` stay reachable.)
+              binaryExpr(
+                nameRefExpr(stateNameFor(f.name, p.name)),
+                "!=",
+                p.kind === "number" ? intLit(0) : stringLit(""),
+              ),
           )
           .reduce((acc, e) => binaryExpr(acc, "&&", e)),
         value: makeQueryView(
           memberAccess(queryRoot(), f.name, {
             call: true,
-            args: f.params.map((p) => nameRefExpr(stateNameFor(f.name, p))),
+            // A bool param's state is the select's `"true"`/`"false"` STRING;
+            // the find takes a `bool`, so the comparison is the argument.
+            args: f.params.map(
+              (p): Expression =>
+                p.kind === "bool"
+                  ? binaryExpr(nameRefExpr(stateNameFor(f.name, p.name)), "==", stringLit("true"))
+                  : nameRefExpr(stateNameFor(f.name, p.name)),
+            ),
           }),
           false,
         ),

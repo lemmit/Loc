@@ -151,7 +151,7 @@ function projectionRoutes(proj: ProjectionIR, ctx: EnrichedBoundedContextIR): st
   );
   const key = 'key: Annotated[str, Path(json_schema_extra={"format": "uuid"})]';
   const byKey = lines(
-    `@router.get("/${slug}/{key}", response_model=${T}Response, operation_id="get${T}"${gate ? errorResponsesKwarg("findOptional", true, [], resolve) : errorResponsesKwarg("getById")})`,
+    `@router.get("/${slug}/{key}", response_model=${T}Response, operation_id="get${T}"${gate ? errorResponsesKwarg("findOptional", true, [], resolve) : errorResponsesKwarg("getById", false, [], resolve)})`,
     `async def ${slug}_get(${key}, ${userParam}session: SessionDep) -> dict[str, object]:`,
     // Gate first: a caller who fails it must not learn whether the key exists.
     gateLines,

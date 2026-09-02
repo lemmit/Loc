@@ -43,7 +43,7 @@ system Reads {
           error: Alert { "Couldn't load products" },
           empty: Empty { "No products yet." },
           data: rows => Stack {
-            For { each: rows, p => Card { title: p.name, Text { p.name } } }
+            For { each: rows, p => Card { p.name, Text { p.name } } }
           }
         }
       }

@@ -32,12 +32,17 @@ import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixDomainOperation, renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import { type SourceMapSubRegion, statementSubRegions } from "../../_trace/sourcemap.js";
 import { MONEY_WIRE_SCALE } from "../../money-scale.js";
-import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js";
+import {
+  type ElixirChannelsCfg,
+  elixirDispatchCall,
+  opEmitsDurableEvent,
+} from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import {
+  appModuleOf,
   denialClause,
   denialOverrides,
   denialResponse,
@@ -45,6 +50,8 @@ import {
   disallowedResponse,
   disallowedTerm,
   type ErrorStatusMap,
+  guardErrorModule,
+  guardRaiseLine,
   opHasWireDenial,
   wireValidationResponse,
 } from "./denial.js";
@@ -250,8 +257,7 @@ function renderWhenGateClause(aggName: string, op: OperationIR, rc: RenderCtx): 
 /** All hoisted guard with-clauses for an op, in evaluation order: the `when`
  *  state gate (→ `:disallowed` / 409) first, then each `requires` (→ `:forbidden`
  *  / 403) and `precondition` (→ `:precondition_failed` / 422) in body order.
- *  Byte-identical to the old requires/precondition-only list when the op has no
- *  `when`, so a guard-free / `when`-free op is unchanged. */
+ *  An op with no `when` contributes only its requires/precondition clauses. */
 export function collectOpGuardClauses(aggName: string, op: OperationIR, rc: RenderCtx): string[] {
   const clauses: string[] = [];
   if (op.when) clauses.push(renderWhenGateClause(aggName, op, rc));
@@ -365,15 +371,66 @@ export function renderEmitDispatchLines(
   /** Dotted construct id (`Ctx.Agg.op`) — only needed when `opFragments` is
    *  passed. */
   construct?: string,
-  /** Source-map Milestone 13 collector (`--sourcemap`) — only allocated by
+  /** Source-map collector (`--sourcemap`) — only allocated by
    *  the caller when a recorder is present (zero cost otherwise). */
   opFragments?: OpFragment[],
-  /** Broker channels (M-T4.4 slice 6c) — presence re-routes the dispatch
+  /** Broker channels (M-T4.4) — presence re-routes the dispatch
    *  line through the `<App>.Channels` tee (see channels-emit.ts). */
   channels?: ElixirChannelsCfg,
 ): string[] {
-  const appModule = rc.contextModule.split(".")[0]!;
+  const flat = { bind: baseIndent, dispatch: baseIndent, broadcast: baseIndent };
   const lines: string[] = [];
+  for (const p of emitParts(op, rc, hasDispatcher, flat, channels)) {
+    const emitLines = [...p.bind, ...p.dispatch, ...p.broadcast];
+    lines.push(...emitLines);
+    if (opFragments && construct) {
+      opFragments.push({
+        fragmentText: emitLines.join("\n"),
+        subRegions: [{ rel: [1, emitLines.length], origin: p.origin, construct }],
+      });
+    }
+  }
+  return lines;
+}
+
+/** The three PHASES of one hoisted `emit`, kept separable because a DURABLE
+ *  channel has to split them across the persist-transaction boundary. */
+interface OneEmitParts {
+  /** `loom_event_<i> = %<Ctx>.Events.<E>{…}` + the `event_dispatched` narrative
+   *  line.  Reads only `record` / params, so it is hoistable ahead of the
+   *  transaction — which is what puts the event variable in scope on BOTH
+   *  sides of it. */
+  bind: string[];
+  /** The `Dispatcher` / `<App>.Channels` call.  For a DURABLE channel this is
+   *  the `__loom_outbox` INSERT, so it MUST run inside the persist transaction:
+   *  "row saved" and "event owed" commit or roll back as one. */
+  dispatch: string[];
+  /** `Phoenix.PubSub.broadcast(...)` — the SSE / LiveView wire.  MUST run AFTER
+   *  the transaction commits.  Inside it, a commit failure still rolls the write
+   *  back, but the broadcast has already left: a subscriber observes an event
+   *  whose write never happened, and there is no compensating "unsend". */
+  broadcast: string[];
+  origin: Extract<StmtIR, { kind: "emit" }>["origin"];
+}
+
+interface EmitIndents {
+  bind: string;
+  dispatch: string;
+  broadcast: string;
+}
+
+/** Per-`emit` phase builder shared by {@link renderEmitDispatchLines} (which
+ *  concatenates the three phases back together at one indent — byte-identical
+ *  to the pre-split rendering) and {@link renderDurableEmitDispatchParts}. */
+function emitParts(
+  op: OperationIR,
+  rc: RenderCtx,
+  hasDispatcher: boolean,
+  indents: EmitIndents,
+  channels?: ElixirChannelsCfg,
+): OneEmitParts[] {
+  const appModule = rc.contextModule.split(".")[0]!;
+  const out: OneEmitParts[] = [];
   let i = 0;
   for (const s of op.statements) {
     if (s.kind !== "emit") continue;
@@ -387,22 +444,63 @@ export function renderEmitDispatchLines(
       { name: "event_type", valueExpr: `"${upperFirst(s.eventName)}"` },
       ...(rc.agg ? [{ name: "aggregate", valueExpr: `"${upperFirst(rc.agg.name)}"` }] : []),
     ]);
-    const emitLines = [`${baseIndent}${evVar} = ${struct}`, `${baseIndent}${logCall}`];
     const dispatchCall = elixirDispatchCall(evVar, rc.contextModule, hasDispatcher, channels);
-    if (dispatchCall) emitLines.push(`${baseIndent}${dispatchCall}`);
-    emitLines.push(
-      `${baseIndent}Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", ${evVar})`,
-    );
-    lines.push(...emitLines);
-    if (opFragments && construct) {
-      opFragments.push({
-        fragmentText: emitLines.join("\n"),
-        subRegions: [{ rel: [1, emitLines.length], origin: s.origin, construct }],
-      });
-    }
+    out.push({
+      bind: [`${indents.bind}${evVar} = ${struct}`, `${indents.bind}${logCall}`],
+      dispatch: dispatchCall ? [`${indents.dispatch}${dispatchCall}`] : [],
+      broadcast: [
+        `${indents.broadcast}Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", ${evVar})`,
+      ],
+      origin: s.origin,
+    });
     i++;
   }
-  return lines;
+  return out;
+}
+
+/** The DURABLE-emit split of {@link renderEmitDispatchLines}: the event binds
+ *  hoisted ahead of the persist transaction, the outbox INSERT inside it, and
+ *  the PubSub broadcast after it commits.
+ *
+ *  Why the split exists.  A durable channel's `dispatch` is a table INSERT, so
+ *  it has to share the persist transaction — but the broadcast rode along with
+ *  it, which meant SSE and LiveView subscribers could observe an event whose
+ *  write then failed to commit.  The non-durable branches already document (and
+ *  do) the right thing: dispatch AFTER `{:ok, saved}`.  This makes the durable
+ *  branch agree, without giving up the outbox's atomicity.
+ *
+ *  Hoisting the BIND is what makes it possible: `loom_event_<i>` is then in
+ *  scope both inside the transaction fn and in the post-commit arm, and the
+ *  struct's field expressions read `record` / params, which are bound earlier
+ *  still. */
+export function renderDurableEmitDispatchParts(
+  op: OperationIR,
+  rc: RenderCtx,
+  hasDispatcher: boolean,
+  indents: EmitIndents,
+  construct?: string,
+  opFragments?: OpFragment[],
+  channels?: ElixirChannelsCfg,
+): { bind: string[]; dispatch: string[]; broadcast: string[] } {
+  const bind: string[] = [];
+  const dispatch: string[] = [];
+  const broadcast: string[] = [];
+  for (const p of emitParts(op, rc, hasDispatcher, indents, channels)) {
+    bind.push(...p.bind);
+    dispatch.push(...p.dispatch);
+    broadcast.push(...p.broadcast);
+    // The three phases are not contiguous, so the source map anchors on the
+    // BIND chunk — the lines that actually carry the `emit`'s own
+    // expressions.  (`fragment()` silently skips text it cannot locate, so a
+    // split fragment would just lose coverage.)
+    if (opFragments && construct) {
+      opFragments.push({
+        fragmentText: p.bind.join("\n"),
+        subRegions: [{ rel: [1, p.bind.length], origin: p.origin, construct }],
+      });
+    }
+  }
+  return { bind, dispatch, broadcast };
 }
 
 /** Does this aggregate have any public returning operation (→ the controller
@@ -448,10 +546,10 @@ export function renderReturningOpFunction(
    *  §11c) — those `put_assoc` rather than `put_embed`.  Caller computes via
    *  `usesRelationalContainments`; empty (the default) keeps embedded output. */
   relationalContainments: ReadonlySet<string> = new Set(),
-  /** Source-map Milestone 3 collector (`--sourcemap`) — only allocated by the
+  /** Source-map collector (`--sourcemap`) — only allocated by the
    *  caller when a recorder is present (zero cost otherwise). */
   opFragments?: OpFragment[],
-  /** Broker channels (M-T4.4 slice 6c) — see renderEmitDispatchLines. */
+  /** Broker channels (M-T4.4) — see renderEmitDispatchLines. */
   channels?: ElixirChannelsCfg,
   extraChannels: ChannelIR[] = [],
 ): string {
@@ -473,7 +571,6 @@ export function renderReturningOpFunction(
   const renderCtx: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
-    foundation: "vanilla",
     captureProvenance: hasProv,
     // The enriched aggregate, so the body renderer detects a reference-collection
     // (`X id[]` → `many_to_many`) add/remove and normalises it to an id-list local
@@ -494,9 +591,11 @@ export function renderReturningOpFunction(
   // body rebinds any field (parity with the non-returning path + the other
   // backends' returning-op `__before` capture).  Relational only: a document
   // aggregate can't carry a named operation on vanilla (validate-gated by
-  // `loom.vanilla-document-unsupported`), so the struct-drop snapshot always
+  // `loom.vanilla-document-unsupported`), so the relational projection always
   // applies here.
-  const beforeBind = hasAudit ? [`    audit_before = ${wireSnapshot("record")}`] : [];
+  const beforeBind = hasAudit
+    ? [`    audit_before = ${wireSnapshot("record", false, appModule)}`]
+    : [];
   // A body that doesn't end in an explicit `return` falls through to its
   // aggregate success variant (`Order` in `Order or NotFound`) — the mutated
   // `record`.  That fall-through success branch is the only place a state change
@@ -532,17 +631,37 @@ export function renderReturningOpFunction(
   // body ending in a non-committing return) keeps the legacy inline emit.
   const hoistEmits = opEmitsEvent(op) && persists;
   const hasDispatcher = contextHasDispatcher(ctx as EnrichedBoundedContextIR, extraChannels);
-  const dispatchLines = hoistEmits
-    ? renderEmitDispatchLines(
+  // Transactional outbox (dispatch-delivery-semantics.md §1): a DURABLE emit is
+  // an `__loom_outbox` INSERT, not a fan-out, so it has to ride the SAME
+  // `Repo.transaction` as the persist — see the `txWrapEmits` tail below.  The
+  // dispatch lines then sit two columns deeper.
+  const txWrapEmits = hoistEmits && opEmitsDurableEvent(op, channels);
+  const dispatchLines =
+    hoistEmits && !txWrapEmits
+      ? renderEmitDispatchLines(
+          op,
+          renderCtx,
+          hasDispatcher,
+          "        ",
+          `${ctx.name}.${agg.name}.${op.name}`,
+          opFragments,
+          channels,
+        )
+      : [];
+  // Durable emit: the three phases straddle the transaction — binds ahead of it
+  // (so the event var is in scope on both sides), the outbox INSERT inside it,
+  // the PubSub broadcast only after it commits.
+  const durableEmit = txWrapEmits
+    ? renderDurableEmitDispatchParts(
         op,
         renderCtx,
         hasDispatcher,
-        "        ",
+        { bind: "    ", dispatch: "          ", broadcast: "        " },
         `${ctx.name}.${agg.name}.${op.name}`,
         opFragments,
         channels,
       )
-    : [];
+    : { bind: [], dispatch: [], broadcast: [] };
   const lastIdx = op.statements.length - 1;
   // Per-statement index disambiguates provenance temp vars across writes.  When
   // persisting, the hoisted `emit`s and the relocated trailing success `return`
@@ -555,10 +674,10 @@ export function renderReturningOpFunction(
   // The `when` state gate + `requires`/`precondition` guards are hoisted out of
   // the linear body into a leading `with :ok <- ensure(...)` chain (below), so a
   // failed guard returns a typed denial tuple (`:disallowed` 409 / `:forbidden`
-  // 403 / `:precondition_failed` 422) instead of raising (→ 500).  Exclude the
-  // guard STATEMENTS from the in-body statements (they no longer render inline;
-  // the `when` gate is a predicate field, not a statement, so it needs no
-  // exclusion).
+  // 403 / `:precondition_failed` 422) instead of raising (→ 500).  The guard
+  // STATEMENTS are excluded from the in-body statements, since they render in
+  // that chain rather than inline; the `when` gate is a predicate field, not a
+  // statement, so it needs no exclusion.
   const guardClauses = collectOpGuardClauses(agg.name, op, renderCtx);
   const bodyStmts = op.statements.filter((s, idx) => {
     if (s.kind === "requires" || s.kind === "precondition") return false;
@@ -657,6 +776,26 @@ export function renderReturningOpFunction(
   const shapeCReturn = (): string =>
     renderReturningStmt(trailingReturn!, ctx, renderCtx, lastIdx).trimStart();
 
+  // Derived rows that must commit with the state change (provenance flush /
+  // audit record) — hoisted out of the prov/audit branch so the durable-outbox
+  // branch below can reuse the same transaction tail.
+  const txTail: string[] = [];
+  if (hasProv) txTail.push(`          ${appModule}.Provenance.flush(${appModule}.Repo)`);
+  if (hasAudit) {
+    txTail.push(
+      auditRecordCall({
+        appModule,
+        operationId: `${op.name}${aggPascal}`,
+        action: op.name,
+        targetType: aggPascal,
+        targetId: "saved.id",
+        before: "audit_before",
+        after: wireSnapshot("saved", false, appModule),
+        indent: "          ",
+      }),
+    );
+  }
+
   let tailLines: string[];
   if (!persists) {
     // Non-committing: a pure read/return (or one ending in an unconditional ERROR
@@ -664,28 +803,61 @@ export function renderReturningOpFunction(
     // projection; an explicit `return` is rendered inline in `bodyLines`.
     // Byte-identical to pre-S12 for these shapes.
     tailLines = fallThrough ? [`    {:ok, ${wireMap("record", false)}}`] : [];
+  } else if (txWrapEmits) {
+    // Durable emit (dispatch-delivery-semantics.md §1): `Channels.dispatch/2`
+    // INSERTs an `__loom_outbox` row instead of fanning out, so persist + the
+    // outbox INSERT (+ any prov/audit rows) run in ONE `Repo.transaction` —
+    // commit records "this event is owed", rollback erases both.  The result is
+    // unwrapped post-commit so the returned tuple shape is unchanged.
+    //
+    // The PubSub BROADCAST does NOT ride that transaction.  It is the
+    // SSE / LiveView wire, and a broadcast inside the tx is observable before
+    // the commit: a rollback then leaves subscribers holding an event whose
+    // write never happened, with no way to retract it.  So the event struct is
+    // bound BEFORE the transaction (that is what keeps `loom_event_<i>` in
+    // scope on both sides), the outbox INSERT stays inside, and the broadcast
+    // fires in the `{:ok, saved}` arm — the same after-commit ordering the
+    // non-durable branch below already documents.
+    const txBody = [
+      `    tx_result =`,
+      `      ${appModule}.Repo.transaction(fn ->`,
+      `      case ${repoMod}.persist_change(changeset) do`,
+      `        {:ok, saved} ->`,
+      ...txTail,
+      ...durableEmit.dispatch,
+      `          saved`,
+      ``,
+      `        {:error, reason} ->`,
+      `          ${appModule}.Repo.rollback(reason)`,
+      `      end`,
+      `    end)`,
+      ``,
+    ];
+    tailLines = [
+      ...durableEmit.bind,
+      ...(durableEmit.bind.length > 0 ? [``] : []),
+      `    changeset =`,
+      `      record`,
+      `      |> Ecto.Changeset.change(%{})${putBlock}${versionLock}`,
+      ``,
+      ...txBody,
+      `    case tx_result do`,
+      `      {:ok, saved} ->`,
+      ...durableEmit.broadcast,
+      ...(aggregateSuccess
+        ? [`        {:ok, ${wireMap("saved", mutatesRefColl)}}`]
+        : [`        record = saved`, `        ${shapeCReturn()}`]),
+      ``,
+      `      {:error, reason} ->`,
+      `        {:error, reason}`,
+      `    end`,
+    ];
   } else if (hasProv || hasAudit) {
     // Forced transaction: persist the assigned columns, flush provenance and/or
     // record the audit row — all in ONE transaction so the derived rows commit
     // atomically with the state change.  A persist failure rolls back to
     // `{:error, changeset}` (the controller's `_result/2` gains a matching
     // validation clause).
-    const txTail: string[] = [];
-    if (hasProv) txTail.push(`          ${appModule}.Provenance.flush(${appModule}.Repo)`);
-    if (hasAudit) {
-      txTail.push(
-        auditRecordCall({
-          appModule,
-          operationId: `${op.name}${aggPascal}`,
-          action: op.name,
-          targetType: aggPascal,
-          targetId: "saved.id",
-          before: "audit_before",
-          after: wireSnapshot("saved"),
-          indent: "          ",
-        }),
-      );
-    }
     tailLines = aggregateSuccess
       ? hoistEmits
         ? [
@@ -844,9 +1016,16 @@ export function renderReturningOpFunction(
       ? [...beforeBind, ...paramReads, ...wrapOpBodyWithGuards(guardClauses, innerLines)]
       : [...beforeBind, ...paramReads, ...innerLines]
   ).join("\n");
-  // The guard denial adds an `{:error, atom()}` outcome to the result union; the
-  // controller's `<op>_<agg>_result/2` gains the matching 403/422 clauses.
-  const denialSpec = guardClauses.length > 0 ? " | {:error, atom()}" : "";
+  // The guard denial adds a TYPED-DENIAL outcome to the result union; the
+  // controller's `<op>_<agg>_result/2` gains the matching 403/409/422 clauses.
+  //
+  // The reason is a 2-TUPLE, not a bare atom: since the typed denial protocol
+  // (`denial.ts`) a guard short-circuits to `{:error, {:forbidden, msg}}` /
+  // `{:precondition_failed, msg}` / `{:disallowed, msg}` /
+  // `{:validation_failed, [%{…}]}` — the tag carries the rung and the second
+  // element the RFC 7807 `detail` (or the `errors[]` list).  The spec said
+  // `{:error, atom()}`, which no denial this function can produce matches.
+  const denialSpec = guardClauses.length > 0 ? " | {:error, {atom(), term()}}" : "";
 
   return `  @doc "Returning operation \`${op.name}\` on \`${aggPascal}\` (exception-less)."
   @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
@@ -913,8 +1092,8 @@ function taggedSuccess(value: string, s: Extract<StmtIR, { kind: "return" }>): s
  *  containment list (jsonb `{:array, :map}`) or arithmetic on a scalar column.
  *  A bare `call` (`f(args)`) lowers to a discarding no-op — vanilla emits no
  *  aggregate-`function` helpers, so there is no callable target, and a bare
- *  call discards its result anyway.  The switch is now exhaustive over
- *  `StmtIR` — there is no `# TODO` fallthrough. */
+ *  call discards its result anyway.  The switch is exhaustive over `StmtIR` —
+ *  there is no `# TODO` fallthrough. */
 export function renderReturningStmt(
   s: StmtIR,
   ctx: BoundedContextIR,
@@ -971,20 +1150,13 @@ export function renderReturningStmt(
     case "let":
       return `    ${escapeElixirIdent(snake(s.name))} = ${renderExpr(s.expr, rc)}`;
     case "precondition":
-      // Raise form — reached only by the pure-core / document / function paths
-      // (HTTP-boundary ops hoist guards to `with ensure(…)` for a 422 denial).
-      // NOTE the message is the DERIVED form even when the author wrote
-      // `message "…"`: `GUARD_RESCUE` below routes this raise to its status by
-      // MESSAGE PREFIX, so an authored message would miss the prefix and
-      // `reraise` into a 500.  The `ensure` path has no such coupling and does
-      // honour the clause.  Closing this needs the typed-exception reshape —
-      // M-T6.20.
-      return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Precondition failed: ${s.source}`)})`;
     case "requires":
       // Raise form — reached only by the pure-core / document / function paths
-      // (HTTP-boundary ops hoist guards to `with ensure(…)` for a 403 denial).
-      // Prefix-routed by `GUARD_RESCUE`, same coupling as the precondition arm.
-      return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Forbidden: ${s.source}`)})`;
+      // (HTTP-boundary ops hoist guards to `with ensure(…)` for a 422 / 403
+      // denial).  The typed `<App>.GuardError` carries the classification in its
+      // `:kind` field, so the `:message` is the SAME `denialMessage(s)` the
+      // `ensure` path emits — the author's `message "…"` when there is one.
+      return guardRaiseLine(s, renderExpr(s.expr, rc), appModuleOf(rc.contextModule));
     case "assign": {
       // `field := value` → struct-update the threaded `record`, so the
       // fall-through success branch serialises the mutated aggregate.
@@ -1119,40 +1291,42 @@ function renderProvenancedAssign(
  *  load the aggregate, run the op, then translate the tagged result — a success
  *  to 200 + body, each error variant to its RFC-7807 ProblemDetails status. */
 // A rejected `requires` / `precondition` in an operation / function /
-// domain-service body RAISES `raise(ArgumentError, "Forbidden: …")` /
-// `"Precondition failed: …")` (the message prefixes here are the contract —
-// they must stay in lockstep with the `case "precondition"/"requires"` arms in
-// `renderStatement` above, and the `function-emit` / `domain-service-emit`
+// domain-service body RAISES the typed `<App>.GuardError` (`guardRaise` in
+// `denial.ts`, shared with the `function-emit` / `domain-service-emit`
 // siblings).  A controller action appends this `rescue` clause so the raise maps
 // to the same HTTP status the other backends return — `requires` → 403 (Hono
 // `ForbiddenError`), `precondition` → 422 (RS-15 — a domain-floor rejection is
 // well-formed-but-semantically-rejected, not malformed; the typed-denial path
 // below has always answered 422, so this rescue arm was the odd one out) —
-// instead of propagating to Phoenix's default 500.  Any other `ArgumentError`
-// reraises unchanged (still a 500 for a genuine bug).
-// The two prefixes below are the CONTRACT this `cond` routes on — do not
-// reword them without rewording the matching `raise(ArgumentError, …)` in
-// `renderStatement` / `function-emit` / `domain-service-emit`, or the raise
-// misses its prefix and `reraise`s into a 500.  Only the STATUS + TITLE are
-// resolved (M-T5.20); the message prefixes stay literal.
-export function guardRescue(overrides?: ErrorStatusMap): string {
+// instead of propagating to Phoenix's default 500.
+//
+// The ROUTING KEY is the exception's `:kind` FIELD, never its message.  A
+// `cond` over `String.starts_with?(guard_msg, "Precondition failed: ")` would
+// make the message load-bearing and therefore unwritable: an author's
+// `message "…"` misses the prefix and falls to the `reraise` → 500.  With the
+// classification out of band the detail is free text, and no `reraise`
+// arm is needed either — an exception that is not a `<App>.GuardError` is
+// simply not rescued and propagates with its own stacktrace (still a 500 for a
+// genuine bug, one construct less to keep in lockstep).  Only the STATUS +
+// TITLE are resolved (M-T5.20).
+export function guardRescue(appModule: string, overrides?: ErrorStatusMap): string {
   return `  rescue
-    guard_error in ArgumentError ->
+    guard_error in ${guardErrorModule(appModule)} ->
       guard_msg = Exception.message(guard_error)
 
-      cond do
-        String.starts_with?(guard_msg, "Forbidden: ") ->
+      case guard_error.kind do
+        :forbidden ->
           ${denialResponse("forbidden", "guard_msg", overrides)}
 
-        String.starts_with?(guard_msg, "Precondition failed: ") ->
+        _ ->
           ${denialResponse("precondition", "guard_msg", overrides)}
-
-        true ->
-          reraise(guard_error, __STACKTRACE__)
       end`;
 }
 
 export function renderReturningOpControllerAction(
+  /** The APP module (`Api`), not the aliased context (`Sales`) — the rescue
+   *  below names `<App>.GuardError`, which lives in the domain root. */
+  appModule: string,
   ctxModule: string,
   agg: AggregateIR,
   op: OperationIR,
@@ -1268,7 +1442,7 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
       {:error, :not_found} ->
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
     end
-${guardRescue(denialOverrides(ctx))}
+${guardRescue(appModule, denialOverrides(ctx))}
   end
 
 ${resultClauses}`;

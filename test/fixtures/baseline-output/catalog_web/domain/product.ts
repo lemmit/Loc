@@ -41,7 +41,7 @@ export class Product {
   }
 
   private _assertInvariants(): void {
-    if (!(this._sku.length > 0)) throw new DomainError("Invariant violated: sku.length > 0");
+    if (!([...this._sku].length > 0)) throw new DomainError("Invariant violated: sku.length > 0");
   }
 
   static _create(state: { id: Ids.ProductId; sku: string; price: Money; version: number }): Product {

@@ -29,6 +29,33 @@ system TenantClaimName {
       repository Invoices for Invoice {
         find byNumber(n: string): Invoice[] where this.number == n
       }
+
+      // The realtime half of the claim-name bug class.  A broadcast channel
+      // over a tenant-owned context makes the four SSE backends emit a
+      // ROOM-KEYED wire whose key is read off the principal — and the
+      // principal's claim here is `orgId`, not `tenantId`.  A backend that
+      // spells the row column on the principal side references a member the
+      // `User` shape does not have: .NET/Java fail to compile, python raises
+      // per publish, node silently reads `undefined` and every connection
+      // joins no room (so every tenant-scoped event degrades to a broadcast).
+      //
+      // Compile-tier witness only: nothing emits these, deliberately.  An
+      // `operation` here would add an API route with no caller (the
+      // api-caller census) and a request the wire golden has never recorded;
+      // the claim-name bug is in the EMITTED realtime module, which the
+      // channel declaration alone is enough to produce.
+      event InvoiceIssued { invoice: Invoice id  at: datetime }
+      // Carries NO `<Agg> id` reference — the A4 witness.  Classifying by
+      // "does it carry an id pointing at a tenantOwned aggregate" put this in
+      // the GLOBAL set, streaming one tenant's invoice number to every
+      // connected tenant.  It is tenant-scoped by default now, degrading to a
+      // `type`-only ticket when the tenant key can't be derived.
+      event InvoiceReminderSent { note: string  at: datetime }
+      channel Lifecycle {
+        carries: InvoiceIssued, InvoiceReminderSent
+        delivery: broadcast
+        retention: ephemeral
+      }
     }
     context Accounts {
       aggregate Organization with crudish {

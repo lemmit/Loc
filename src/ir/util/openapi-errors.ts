@@ -21,21 +21,36 @@
 //   getById (GET  /<aggs>/{id})       → 404, 422
 //   destroy (DELETE /<aggs>/{id})     → [403 if guarded], 404, 409, 422
 //   operation (POST /<aggs>/{id}/op)  → 400, 415, [403 if guarded], 404, 422
-//   find (optional return)            → 404, [422 if it validates a request part]
-//   workflow (POST /workflows/<wf>)   → 400, 415, [403 if guarded], 422
-//   list / non-optional find          → [422 if it validates a request part]
+//   find (single return, optional or not) → 404, [422 if it validates a part]
+//   workflow (POST /workflows/<wf>)   → 400, 415, [403 if guarded], 422,
+//                                       [404 if the body reads an aggregate]
+//   list / collection find            → [422 if it validates a request part]
+//
+// WHERE THE NOT-FOUND RUNG COMES FROM.  The four `404`s above look like a fact
+// about the ROUTE SHAPE — the path carries an `{id}`, the handler loads it, an
+// absent row is a 404 — and for those four they are.  But the rung's actual
+// producer is the READ: every repository read whose declared return type is a
+// single non-optional aggregate has nowhere to put an empty result set, so the
+// emitted method throws the shared not-found carrier and the router renders it.
+// Shape and read agree wherever a path id is what gets read, and DIVERGE in the
+// two places a non-optional read happens without one — a non-optional `find`
+// route, and a workflow body that loads.  Both answered an undeclared 404 for
+// as long as this table keyed the rung on shape alone (F10 + F13 in
+// docs/audits/schemathesis-findings-2026-08.md); `findSingle` therefore
+// declares it like `findOptional` does, and `workflow` declares it under the
+// body predicate `workflowCanAnswerNotFound` (loom-ir.ts) that the five
+// backends thread in as `opts.readsAggregate`.
 //
 // 415 (Unsupported Media Type, RFC 9110 §15.5.16) is declared on exactly the
 // BODY-CARRYING kinds — create / operation / workflow.  A request whose
 // `Content-Type` is not `application/json` cannot be parsed into the declared
 // request schema, and every backend refuses it before the handler runs
-// (schemathesis F1: Hono used to skip validation silently and 500 on the
-// undefined body, so the node emitter now guards it explicitly; ASP.NET,
-// Spring and Plug.Parsers already answer 415 at the framework layer).  A
+// (the node emitter guards it explicitly; ASP.NET, Spring and Plug.Parsers
+// answer 415 at the framework layer).  A
 // read/delete route carries no body, so it declares none.
 //
 // 422 (Unprocessable Entity) is the validation-failure code declared per
-// docs/old/proposals/validation-error-extension.md — Phase D.  Body carries the
+// docs/old/proposals/validation-error-extension.md —.  Body carries the
 // §3.2 `errors[]` extension array (per-field `{ pointer, message }`)
 // consumed by the frontend ACL's `applyServerErrors` (#769).  500 is the
 // universal fallback every route can produce; like most specs we don't
@@ -113,13 +128,17 @@ export function errorStatuses(
   guarded = false,
   /** Resolver for the app-global denial-ladder rungs — maps an error name to
    *  its `httpStatus`-overridden status, defaulting to that name's stdlib code.
-   *  Originally only the structural conflicts (M-T3.4a: the destroy FK-restrict
-   *  `ReferencedInUse`); M-T5.20 extended it to the `DomainError` domain floor
-   *  and the `Forbidden` rung so the DECLARED response set moves in lockstep
-   *  with the runtime handler arm. (`NotFound` is deliberately excluded — see
-   *  the note below.) Omitted ⇒ the literal defaults (409 / 422 / 403 —
-   *  byte-identical output). */
+   *  Covers the structural conflicts (the destroy FK-restrict
+   *  `ReferencedInUse`), the `DomainError` domain floor, `Forbidden` and
+   *  `NotFound`, so the DECLARED response set moves in lockstep with the
+   *  runtime handler arm.  Omitted ⇒ the literal defaults
+   *  (409 / 422 / 403 / 404). */
   resolve?: (name: string) => number,
+  /** Facts about the ROUTE'S BODY that its `kind` cannot carry.  Today one:
+   *  `readsAggregate` — the `workflow` arm's not-found predicate.  See the
+   *  "WHERE THE NOT-FOUND RUNG COMES FROM" note above the `notFound` binding
+   *  below for why the rung needs a body fact at all. */
+  opts?: { readsAggregate?: boolean },
 ): number[] {
   const referencedInUse = resolve?.("ReferencedInUse") ?? 409;
   // The domain floor (RS-15: a well-formed request the domain refuses on
@@ -128,14 +147,46 @@ export function errorStatuses(
   // the emitted set is unchanged.
   const domain = resolve?.("DomainError") ?? 422;
   const forbidden = resolve?.("Forbidden") ?? 403;
-  // NOTE the 404 rung is deliberately NOT resolved here (M-T5.20 gap): the
-  // aggregate-not-found 404 has TWO producers and they differ per backend — the
-  // exception handler (Hono's `AggregateNotFoundError` → onError) and a bare
-  // framework return (`NotFound()` / `ResponseEntity.notFound()` / a `None`
-  // check) on the find / getById / projection / workflow read paths.  Moving
-  // only the handler arm would make Hono's getById answer the override while
-  // .NET's answered 404, i.e. trade one drift for a worse cross-backend one.
-  // Closing it means converting every bare-404 return site too.
+  // The DOMAIN not-found rung — the aggregate/projection/workflow-instance a
+  // request addressed does not exist.  Resolvable here because each backend has
+  // exactly ONE producer for it: the exception-handler arm
+  // (`AggregateNotFoundError` → Hono's `onError`, `AggregateNotFoundException`
+  // → the .NET filter / the Spring advice, `AggregateNotFoundError` → FastAPI's
+  // handler).  Read paths route through that same carrier rather than a BARE
+  // framework return (`NotFound()` / `ResponseEntity.notFound().build()` / a
+  // `None` check), which would publish a status those paths never answer — and
+  // would answer an EMPTY-bodied framework 404 instead of a ProblemDetails one.
+  // The runtime arms below read the same resolved value.
+  //
+  // ONE 404 is deliberately NOT this rung and stays literal on all five
+  // backends (elixir included, so the reference stays the reference): the
+  // FRAMEWORK routing 404 — `no route for <verb> <path>` — which is about the
+  // URL space, not about a domain record.
+  //
+  // The objectStore blob-absence 404 on a `resource … kind: objectStore`
+  // download route IS this rung, deliberately (M-T6.39 / #2645).  This comment
+  // used to claim the opposite — that the blob miss "addresses a bucket key,
+  // not an aggregate id" and therefore stays literal — and F2-W-13 was filed
+  // against the emitters for not honouring it.  The emitters are right and the
+  // comment was stale.  M-T6.39's whole finding was that all five backends
+  // hand-rolled that 404 (`{"error":"not found"}` / a bodiless 4xx the
+  // container filled with the FALSE sentence `no route for GET /files/<key>`),
+  // and its fix was to route every one of them through the app's ONE not-found
+  // producer.  Reaching the shared producer is what makes an `httpStatus
+  // NotFound -> <code>` override reach this route, and that is ASSERTED, not
+  // incidental: `test/conformance/files-absent-object-envelope-parity.test.ts`
+  // ("an httpStatus NotFound override retargets the files 404 too, on all
+  // five") fails if the blob miss is given a literal carrier of its own.  An
+  // author who remaps `NotFound` is remapping the app's not-found envelope; the
+  // file route answers that envelope.
+  //
+  // What IS still open on this route is the other half of F2-W-13: no backend
+  // DECLARES the /files/{key} 404 in its OpenAPI document (node does not
+  // publish the route at all), so the status is undeclared — see M-T6.39's
+  // "left for a follow-up" note.  That is a missing declaration, not a wrong
+  // resolution, and this matrix is per-DOMAIN-operation, which that route is
+  // not.
+  const notFound = resolve?.("NotFound") ?? 404;
   const set = (...statuses: number[]): number[] => [...new Set(statuses)].sort((a, b) => a - b);
   switch (kind) {
     // 400 = a malformed/unparseable body; 422 = the wire-validation tier
@@ -154,7 +205,7 @@ export function errorStatuses(
     // the workflow-instance-by-id read declare against, and all three validate
     // the same `{id}`.
     case "getById":
-      return set(404, UNPROCESSABLE_ENTITY);
+      return set(notFound, UNPROCESSABLE_ENTITY);
     // destroy (DELETE /<aggs>/{id}) → 404 (not found) + 409 (still
     // referenced: cross-aggregate `X id` FK is ON DELETE RESTRICT — the
     // `ReferencedInUse` structural conflict, remappable via `httpStatus`).
@@ -163,16 +214,25 @@ export function errorStatuses(
     // id still answers 404, matching the operation routes.
     case "destroy":
       return guarded
-        ? set(forbidden, 404, referencedInUse, UNPROCESSABLE_ENTITY)
-        : set(404, referencedInUse, UNPROCESSABLE_ENTITY);
+        ? set(forbidden, notFound, referencedInUse, UNPROCESSABLE_ENTITY)
+        : set(notFound, referencedInUse, UNPROCESSABLE_ENTITY);
     case "operation":
       return guarded
-        ? set(400, forbidden, 404, UNSUPPORTED_MEDIA_TYPE, 422, domain)
-        : set(400, 404, UNSUPPORTED_MEDIA_TYPE, 422, domain);
-    case "workflow":
+        ? set(400, forbidden, notFound, UNSUPPORTED_MEDIA_TYPE, 422, domain)
+        : set(400, notFound, UNSUPPORTED_MEDIA_TYPE, 422, domain);
+    // A workflow command route has NO path `{id}`, so — unlike every arm above
+    // — the not-found rung is not implied by its shape.  It is implied by its
+    // BODY: a body that reads an aggregate throws on an absent row and the
+    // route answers `notFound`; a body that touches no repository cannot.
+    // `opts.readsAggregate` is that fact, computed once by
+    // `workflowCanAnswerNotFound` (loom-ir.ts) and threaded by all five
+    // backends, so the conditional rung stays one decision instead of five.
+    case "workflow": {
+      const wfNotFound = opts?.readsAggregate ? [notFound] : [];
       return guarded
-        ? set(400, forbidden, UNSUPPORTED_MEDIA_TYPE, 422, domain)
-        : set(400, UNSUPPORTED_MEDIA_TYPE, 422, domain);
+        ? set(400, forbidden, ...wfNotFound, UNSUPPORTED_MEDIA_TYPE, 422, domain)
+        : set(400, ...wfNotFound, UNSUPPORTED_MEDIA_TYPE, 422, domain);
+    }
     // The gated FIND arms resolve `forbidden` for the same reason `operation`
     // and `workflow` do — and they are here because they did NOT.  M-T5.20
     // converted the two command arms above and left these three as literal
@@ -182,10 +242,21 @@ export function errorStatuses(
     // existing gate: with no override `forbidden` IS 403, so default emission
     // cannot tell a resolved 403 from a hardcoded one.
     case "findOptional":
-      return guarded ? set(forbidden, 404) : [404];
+      return guarded ? set(forbidden, notFound) : [notFound];
+    // A collection find answers `[]` for "no rows" — there is no absent case
+    // and so no rung.
     case "findList":
-    case "findSingle":
       return guarded ? [forbidden] : [];
+    // A NON-optional single find declares the rung for the same reason the
+    // optional one does, arrived at from the opposite direction.  The optional
+    // find RETURNS its absence (the `none` unit is the stdlib 404); the
+    // non-optional one has nowhere to put an empty result set, so every
+    // backend's emitted repository method THROWS the shared not-found carrier
+    // and the aggregate router renders it as `notFound`.  Same status, same
+    // ProblemDetails body, and until this arm it was published by exactly one
+    // of the two (F13 in docs/audits/schemathesis-findings-2026-08.md).
+    case "findSingle":
+      return guarded ? set(forbidden, notFound) : [notFound];
     // `list` is the auto-`findAll`, which carries no `requires` of its own.
     case "list":
       return [];
@@ -211,6 +282,11 @@ export function problemTitle(status: number): string {
       return "Not Found";
     case 409:
       return "Conflict";
+    // A natural retarget for the `NotFound` rung — `httpStatus NotFound -> 410`
+    // is the canonical "this id is gone" remap.  Without an entry here every
+    // backend titles it the generic "Error".
+    case 410:
+      return "Gone";
     // The body-carrying kinds' media-type refusal (see UNSUPPORTED_MEDIA_TYPE).
     case 415:
       return "Unsupported Media Type";

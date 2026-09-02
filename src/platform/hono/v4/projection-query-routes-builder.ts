@@ -3,11 +3,17 @@ import { MONEY_WIRE_SCALE } from "../../../generator/money-scale.js";
 import { whereToMikroFilter } from "../../../generator/typescript/emit/mikroorm.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import {
+  allContextFilterEntries,
   DRIZZLE_INTRINSIC_SQL,
+  type FilterBypass,
   lowerToDrizzle,
 } from "../../../generator/typescript/repository-find-predicate.js";
-import { wireProjectionValue } from "../../../generator/typescript/repository-wire-builder.js";
+import {
+  canonicalIsoExpr,
+  wireProjectionValue,
+} from "../../../generator/typescript/repository-wire-builder.js";
 import type {
+  EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
   ProjectionAggregateIR,
@@ -53,7 +59,7 @@ import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// The persistence-adapter seam (M-T6.23 slice 4).
+// The persistence-adapter seam (M-T6.23).
 //
 // Three of the four query-projection shapes read the SOURCE TABLE directly
 // rather than through a repository — a whole-table aggregation, a grouped
@@ -75,13 +81,10 @@ import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 // synthesises the very same projection find (`synthProjectionFinds`), so those
 // route bodies are byte-identical between adapters and are not part of the seam.
 //
-// All four are ported.  The raw-table arm was missing in the first version of
-// this slice while its gate was already deleted, so the shape fell through to
-// the drizzle branch and emitted `db.select().from(schema.…)` into an
-// EntityManager file with no `schema` import (an owner review caught it).  If a
-// FIFTH shape is ever added, add its mikro arm in the same change as the emit —
-// a fall-through here is a generate-then-broken-build, which is worse than the
-// gate that used to stand in its place.
+// All four are ported.  A FIFTH shape needs its mikro arm added in the SAME
+// change as the emit: a fall-through here lands the drizzle branch's
+// `db.select().from(schema.…)` in an EntityManager file with no `schema`
+// import — a generate-then-broken-build, which is worse than an honest gate.
 //
 // One MikroORM constraint shapes the emission: a `raw()` fragment is
 // SINGLE-USE per query ("Trying to modify a raw query fragment that was already
@@ -89,10 +92,23 @@ import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 // BY is emitted as three separate `raw()` calls of the same SQL text.
 // ---------------------------------------------------------------------------
 
+/** The internal-error text for a projection `where` that reached emission
+ *  without lowering to Drizzle.  The IR validator rejects a non-queryable
+ *  projection `where` (`loom.projection-where-not-queryable`, the twin of the
+ *  find/retrieval gates), so this is unreachable from valid input — and it is a
+ *  THROW rather than a silent `where: undefined` because dropping the filter
+ *  would serve every row of the table from a route the author scoped. */
+function unloweredWhere(projName: string): string {
+  return (
+    `internal: where-clause for projection '${projName}' could not lower to Drizzle, ` +
+    "but the validator should have caught this. Please file a bug."
+  );
+}
+
 export function buildQueryProjectionsFile(
   ctx: EnrichedBoundedContextIR,
   /** `persistence: mikroorm` — read the direct-table shapes through the
-   *  EntityManager's QueryBuilder instead of Drizzle (M-T6.23 slice 4).  Default
+   *  EntityManager's QueryBuilder instead of Drizzle (M-T6.23).  Default
    *  false keeps the Drizzle output byte-identical. */
   usingMikro = false,
 ): string {
@@ -129,10 +145,9 @@ export function buildQueryProjectionsFile(
     let where: string | undefined;
     if (p.query.filter) {
       const lowered = lowerToDrizzle(p.query.filter, tableBare, ctx);
-      if (lowered) {
-        where = lowered.expr;
-        for (const op of lowered.ops) rawDrizzleOps.add(op);
-      }
+      if (!lowered) throw new Error(unloweredWhere(p.name));
+      where = lowered.expr;
+      for (const op of lowered.ops) rawDrizzleOps.add(op);
     }
     rawReads.set(p.name, { table: `schema.${tableBare}`, where });
   }
@@ -149,6 +164,16 @@ export function buildQueryProjectionsFile(
   // the `where` silently dropped — a wrong answer rather than a broken build.
   // Both paths name the table identically (`lowerFirst(plural(source))`), so one
   // lowering serves both.
+  //
+  // The source aggregate's CAPABILITY filters (`softDeletable`'s
+  // `!this.isDeleted`, `tenantOwned`'s `this.tenantId == currentUser.<claim>`)
+  // are ANDed in alongside the projection's own `where`.  They were not, and
+  // that was a SILENT WRONG ANSWER rather than a broken build: the
+  // repository-sourced arm gets them for free (it reads through the synthesised
+  // find, which applies them), so a `count()` over the same aggregate answered
+  // a DIFFERENT number than its `.all` — soft-deleted rows counted, foreign
+  // tenants' rows counted.  A read's `ignoring *` / `ignoring <Cap>` drops the
+  // capability-origin predicates it names, exactly as on the repository arm.
   const aggWheres = new Map<string, string | undefined>();
   for (const p of projections) {
     const grouped = groupedAggregates(p);
@@ -158,26 +183,42 @@ export function buildQueryProjectionsFile(
     // A COMPUTED grouping key (`group by o.placedAt.startOfDay()`) renders
     // through the Drizzle intrinsic snippets, which build a `sql` template.
     if ((grouped?.groupBy ?? []).some((e) => groupKeyOf(e)?.transform)) rawDrizzleOps.add("sql");
-    if (!p.query.filter) {
-      aggWheres.set(p.name, undefined);
-      continue;
-    }
-    const lowered = lowerToDrizzle(p.query.filter, lowerFirst(plural(p.query.source)), ctx);
-    if (lowered) {
-      aggWheres.set(p.name, lowered.expr);
+    const table = lowerFirst(plural(p.query.source));
+    const parts: string[] = [];
+    if (p.query.filter) {
+      const lowered = lowerToDrizzle(p.query.filter, table, ctx);
+      if (!lowered) throw new Error(unloweredWhere(p.name));
+      parts.push(lowered.expr);
       for (const op of lowered.ops) rawDrizzleOps.add(op);
-    } else {
-      aggWheres.set(p.name, undefined);
+    }
+    parts.push(...drizzleCapabilityPredicates(p, ctx, table, rawDrizzleOps));
+    if (parts.length === 0) aggWheres.set(p.name, undefined);
+    else if (parts.length === 1) aggWheres.set(p.name, parts[0]);
+    else {
+      rawDrizzleOps.add("and");
+      aggWheres.set(p.name, `and(${parts.join(", ")})`);
     }
   }
   // MikroORM WHERE lowering for the same direct-table shapes: a FilterQuery
   // object built by the shared `whereToMikroFilter` (the lowering every mikro
-  // find already uses), keyed per projection.  `undefined` = no filter.
+  // find already uses), keyed per projection.  `undefined` = no filter.  Same
+  // capability-filter conjunction as the drizzle side above — `$and`-composed
+  // exactly as the mikro repository composes a read's base filter with them.
   const mikroWheres = new Map<string, string | undefined>();
   if (usingMikro) {
     for (const p of projections) {
       const f = p.query?.filter;
-      mikroWheres.set(p.name, f ? mikroFilterFor(f) : undefined);
+      const parts = [...(f ? [mikroFilterFor(f)] : []), ...mikroCapabilityFilters(p, ctx)].filter(
+        (x): x is string => x !== undefined,
+      );
+      mikroWheres.set(
+        p.name,
+        parts.length === 0
+          ? undefined
+          : parts.length === 1
+            ? parts[0]
+            : `{ $and: [${parts.join(", ")}] }`,
+      );
     }
   }
   const allAggs = new Set([...sourceAggs, ...followAggs]);
@@ -289,13 +330,13 @@ export function buildQueryProjectionsFile(
   // BACKEND disagreeing with itself, so `httpStatus DomainError -> N` moved a
   // system's operation routes and silently not its projection routes.
   //
-  // Found by censusing the emitted statuses per backend and noticing node still
-  // had literals after the sweep; no test caught it because the override
-  // fixtures carry no projection.  `denial-ladder-override-parity` now does.
+  // `denial-ladder-override-parity` is the fixture that covers it — an
+  // override fixture with no projection cannot.
   const projDomainStatus = resolveErrorStatus("DomainError", ctx.structuralErrorStatuses);
   const projForbiddenStatus = resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses);
+  const projNotFoundStatus = resolveErrorStatus("NotFound", ctx.structuralErrorStatuses);
   const projProblemUnion = [
-    ...new Set<number>([400, projForbiddenStatus, 404, 422, projDomainStatus, 500]),
+    ...new Set<number>([400, projForbiddenStatus, projNotFoundStatus, 422, projDomainStatus, 500]),
   ]
     .sort((a, b) => a - b)
     .join(" | ");
@@ -309,7 +350,7 @@ export function buildQueryProjectionsFile(
     `    if (err instanceof DomainError) return problem(${projDomainStatus}, ${JSON.stringify(problemTitle(projDomainStatus))}, err.message);`,
   );
   lines.push(
-    `    if (err instanceof AggregateNotFoundError) return problem(404, "Not Found", err.message);`,
+    `    if (err instanceof AggregateNotFoundError) return problem(${projNotFoundStatus}, ${JSON.stringify(problemTitle(projNotFoundStatus))}, err.message);`,
   );
   lines.push(
     // RS-28 — sanitized; the inner exception reaches the log, not the wire.
@@ -328,7 +369,19 @@ export function buildQueryProjectionsFile(
   lines.push("");
   lines.push(`  return app;`);
   lines.push(`}`);
-  const file = lines.join("\n");
+  // A PRINCIPAL capability filter (tenancy) on a direct-table read renders
+  // `currentUser.<claim>` against the ambient accessor, exactly as the
+  // repository path does — so this file needs the import when (and only when)
+  // one is actually emitted.  Body-scanned, so a projection over an untenanted
+  // aggregate stays byte-identical.
+  const withPrincipal = (body: string): string =>
+    /\brequireCurrentUser\(/.test(body)
+      ? body.replace(
+          `import { type DomainEventDispatcher } from "../domain/events";`,
+          `import { type DomainEventDispatcher } from "../domain/events";\nimport { requireCurrentUser } from "../auth/middleware";`,
+        )
+      : body;
+  const file = withPrincipal(lines.join("\n"));
   if (!usingMikro) return `${file}\n`;
   // Body-scan the emitted routes for the mikro-only names: `raw` (the SQL
   // fragments) and each Row entity class a direct-table shape reads.  A
@@ -445,7 +498,7 @@ function emitQueryProjectionRoute(
     // back to ENTITY PROPERTY names, which silently rewrites any select alias
     // that happens to be a real column: a `customer_id` grouping key came back
     // as `customerId`, so reading `r.customer_id` yielded undefined and the wire
-    // carried the string "undefined" (M-T6.23 slice 4 — found by the
+    // carried the string "undefined" (found by the
     // `projection-groupby` behavioural case; the aggregate aliases were
     // unaffected precisely because `avg_lines` is not a column).  Verbatim
     // aliases keep the read keyed by what the SELECT actually asked for.
@@ -544,7 +597,7 @@ function emitQueryProjectionRoute(
   // alias → { mapVar, idRow } — the loaded-map var and the source-row expression
   // that yields this alias's key (the join's `on <idRef>`, rendered off `r`).
   const aliasMap = new Map<string, { mapVar: string; idRow: string }>();
-  // RAW-TABLE source on the mikro adapter (M-T6.23 slice 4, completed after an
+  // RAW-TABLE source on the mikro adapter (completed after an
   // owner review): a WORKFLOW source reads its saga-state Row, a PROJECTION
   // source the folded read-model Row.  `em.find` hands back ENTITIES whose
   // property names are exactly what the shared `select` projection reads off
@@ -668,6 +721,80 @@ function mikroRowClassFor(p: ProjectionIR, source: string): string {
  *  plausible WRONG number. */
 function mikroFilterFor(filter: ExprIR): string {
   return whereToMikroFilter(filter);
+}
+
+// ---------------------------------------------------------------------------
+// Capability `filter` predicates on a DIRECT-TABLE projection read.
+//
+// The repository-sourced arm reads through the synthesised `repo.<proj>()`
+// find, so the aggregate's capability filters ride along automatically.  The
+// three direct-table shapes bypass the repository by design (an aggregation
+// must push down to SQL), and until this they bypassed the capability filters
+// with it — a soft-deleted row entered the COUNT, a foreign tenant's rows
+// entered the SUM.  Silent: the SQL is valid, the number is wrong, and the two
+// arms of the same feature disagreed with each other.
+// ---------------------------------------------------------------------------
+
+/** The projection's source AGGREGATE, or undefined for a raw-table source
+ *  (`from <Workflow>` / `from <Projection>` — neither carries capabilities). */
+function projectionSourceAggregate(
+  p: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+): EnrichedAggregateIR | undefined {
+  const kind = p.query?.sourceKind;
+  if (kind === "workflow" || kind === "projection") return undefined;
+  const name = p.query?.source;
+  return name ? ctx.aggregates.find((a) => a.name === name) : undefined;
+}
+
+/** The read's `ignoring` stance, in the shape the shared bypass filter takes. */
+function projectionBypass(p: ProjectionIR): FilterBypass {
+  return { bypassAll: p.query?.bypassAll, bypassCaps: p.query?.bypassCaps };
+}
+
+/** The source aggregate's applicable capability filters as Drizzle predicate
+ *  expressions.
+ *
+ *  Deliberately NOT `contextFilterPredicate`: that one reifies a filter that is
+ *  exactly one named criterion into a `<name>Criterion(...)` call, and those
+ *  module-level fns are emitted into the REPOSITORY file — naming one here
+ *  would be an undefined identifier.  Inlining every predicate is what this
+ *  file can compile.  A principal filter renders against the ambient
+ *  `requireCurrentUser()` accessor (same as the repository path), which the
+ *  import walk below picks up by body scan. */
+function drizzleCapabilityPredicates(
+  p: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+  table: string,
+  ops: Set<string>,
+): string[] {
+  const agg = projectionSourceAggregate(p, ctx);
+  if (!agg) return [];
+  const out: string[] = [];
+  for (const e of allContextFilterEntries(agg, projectionBypass(p))) {
+    const l = lowerToDrizzle(e.predicate, table, ctx, {
+      principalAccessor: "requireCurrentUser()",
+    });
+    // Unlowerable is unreachable for a valid model (the queryable check + the
+    // adapter gate run first); dropping it silently is the bug this closes, so
+    // fail loudly instead.
+    if (!l)
+      throw new Error(
+        `query projection '${p.name}': capability filter on '${agg.name}' is not Drizzle-lowerable`,
+      );
+    for (const op of l.ops) ops.add(op);
+    out.push(l.expr);
+  }
+  return out;
+}
+
+/** The same set as MikroORM FilterQuery literals. */
+function mikroCapabilityFilters(p: ProjectionIR, ctx: EnrichedBoundedContextIR): string[] {
+  const agg = projectionSourceAggregate(p, ctx);
+  if (!agg) return [];
+  return allContextFilterEntries(agg, projectionBypass(p)).map((e) =>
+    whereToMikroFilter(e.predicate),
+  );
 }
 
 /** The SQL aggregate expression for one `select`, aliased column-qualified so it
@@ -860,7 +987,7 @@ function coerceGroupKey(
   //             `date_trunc(...)` arrives as the wire STRING
   //             ("2026-08-01 00:00:00+00").  `as Date` compiles and then
   //             `.toISOString()` throws `is not a function` at runtime — which
-  //             is exactly how this was found (M-T6.23 slice 4, the
+  //             is exactly how this was found (the
   //             `projection-groupby` behavioural case 500'd on the computed
   //             `startOfDay` key while every other shape passed).
   const tsType = key.transform ? GROUP_KEY_TRANSFORM_TS_TYPE[key.transform] : undefined;
@@ -894,7 +1021,9 @@ function groupKeyWireExpr(inner: TypeIR, expr: string): string {
       // three.
       return `new Decimal(${expr}).toFixed(${MONEY_WIRE_SCALE})`;
     case "datetime":
-      return `${expr}.toISOString()`;
+      // Same canonical trim the aggregate wire applies (RS-4) — a projection
+      // row and an aggregate read must spell the same instant identically.
+      return canonicalIsoExpr(expr);
     default:
       return expr;
   }

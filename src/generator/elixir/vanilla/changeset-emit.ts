@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Vanilla per-aggregate Changeset module — `lib/<app>/<ctx>/<agg>_changeset.ex`.
-// Slice 2 of vanilla-foundation-tdd-plan.md.
+// vanilla-foundation-tdd-plan.md.
 //
 // Plain Ecto.Changeset cast/3 + validate_required.  Per-action
 // `change_<op>/2` helpers wrap the basic cast with the action's param
@@ -39,7 +39,7 @@ import { ectoValidator, voHasConstraints } from "./changeset-validators.js";
 import { isVanillaDocAgg, renderDocChangeset } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { isAbstractBase } from "./inheritance-emit.js";
-import { NORMALIZE_KEYS_DEFP } from "./key-normalize.js";
+import { isVoValuedType, NORMALIZE_KEYS_DEFP, NORMALIZE_VO_KEYS_DEFP } from "./key-normalize.js";
 import { managedTimestampNames } from "./managed-timestamps.js";
 import { isRefCollField, refCollFieldNames } from "./ref-collection-emit.js";
 import { usesRelationalContainments } from "./schema-emit.js";
@@ -380,6 +380,21 @@ ${keyAliasPairs.join(",\n")}
     })
     .filter((l): l is string => l !== null);
   const voBlock = voFieldLines.length > 0 ? `\n${voFieldLines.join("\n")}` : "";
+  // A single VALUE OBJECT is a `field :<name>, :map` jsonb column — cast
+  // verbatim, with no nested changeset to recurse through — so neither
+  // `__normalize_keys/1` (top level only) nor `cast_assoc`/`cast_embed` reaches
+  // its sub-keys.  `{"dims": {"maxWidth": 3}}` was therefore STORED camelCase
+  // while every read site (`wire-serialize.ts`, the expression renderer's VO
+  // sub-field read, the VO's own `new/1`) looks up `:max_width`: a multi-word VO
+  // field round-tripped as `null` on Phoenix and nowhere else (F2-W-01).  Snake
+  // is the canonical stored key, so the sub-map is normalized on the way IN.
+  const voKeyFields = allFields
+    .filter((f) => isVoValuedType(f.type))
+    .map((f) => JSON.stringify(snake(f.name)));
+  const voKeyNormalizeLine =
+    voKeyFields.length > 0
+      ? `attrs = __normalize_vo_keys(attrs, [${voKeyFields.join(", ")}])\n    `
+      : "";
   // The shared helper is emitted only when a VO field uses it (no unused defp
   // under `mix compile --warnings-as-errors`).
   const voHelper =
@@ -388,13 +403,33 @@ ${keyAliasPairs.join(",\n")}
 
   # Run a value object's validating constructor over a cast map field; an
   # invariant violation surfaces as a changeset error rather than persisting.
+  #
+  # The VO's OWN errors are forwarded verbatim — its authored message, its
+  # \`loom_code\`, and its inner field name carried on \`loom_path\` so
+  # ProblemDetails can render \`/sku/code\` rather than the whole object.  A flat
+  # \`[{field, "is invalid"}]\` threw all three away: the wire said only that
+  # something about \`/sku\` was wrong, so the frontend ACL could not bind the
+  # 422 to the control that caused it and the authored text never reached the
+  # user.  A VO persists as one jsonb \`:map\` column rather than an embed, so
+  # there is no child changeset for the ProblemDetails walk to find — this is
+  # the only place that path exists.
   defp validate_vo(changeset, field, new_fun) do
     validate_change(changeset, field, fn ^field, value ->
-      if is_map(value) and match?({:error, _}, new_fun.(value)),
-        do: [{field, "is invalid"}],
-        else: []
+      if is_map(value), do: __vo_errors(field, new_fun.(value)), else: []
     end)
-  end`
+  end
+
+  # An \`{:error, changeset}\` with an EMPTY error list would return \`[]\` here and
+  # persist a value the VO rejected, so the flat marker is kept as the floor —
+  # never a silent pass.
+  defp __vo_errors(field, {:error, %Ecto.Changeset{errors: [_ | _] = errors}}) do
+    Enum.map(errors, fn {inner_field, {msg, opts}} ->
+      {field, {msg, Keyword.put(opts, :loom_path, [inner_field])}}
+    end)
+  end
+
+  defp __vo_errors(field, {:error, _}), do: [{field, "is invalid"}]
+  defp __vo_errors(_field, _ok), do: []`
       : "";
 
   // `unique (...)` domain invariants (D-UNIQUE-DOMAIN) — one
@@ -472,7 +507,7 @@ ${keyAliasPairs.join(",\n")}
     ? `
 
   # A full-replacement PUT carries every required field, so an ABSENT KEY is a
-  # missing field even when the loaded row still holds a value (RS-26).
+  # missing field even when the loaded row still holds a value.
   # \`validate_required/2\` cannot see that — it reads through \`get_field/2\`, which
   # falls back to the struct's data — so presence is checked here, against the raw
   # attrs, before \`cast\` can hide it behind the stored value.  The error shape is
@@ -491,7 +526,7 @@ ${keyAliasPairs.join(",\n")}
     ? `\n\n  @doc "Update changeset — the generic PATCH seam.  Casts only the update-editable wire fields and does NOT touch contained parts (their mutation goes through the aggregate's own operations)${versioned ? "; guards the write with optimistic_lock(:version)" : ""}."
   def update_changeset(struct, attrs) do
     attrs = __normalize_keys(attrs)
-    ${updateVcPrep}struct
+    ${voKeyNormalizeLine}${updateVcPrep}struct
     |> cast(attrs, ${updateColsList})${presenceLine}
     |> validate_required(${updateReqList})${validatorBlock}${castAssocBlock}${voBlock}${uniqueBlock}${invBlock}${optimisticLine}
   end`
@@ -521,7 +556,12 @@ ${keyAliasPairs.join(",\n")}
   // SNAKE-cased column atoms verbatim, so the top-level keys are snaked before any
   // cast (§15).  Nested `cast_assoc`/`cast_embed` children snake their own keys in
   // their own changesets (`key-normalize.ts`).
-  const keyNormalizeHelper = `\n\n${NORMALIZE_KEYS_DEFP}`;
+  //
+  // A single VALUE OBJECT is the one shape neither pass reaches — see
+  // `voKeyFields` above.
+  const keyNormalizeHelper = `\n\n${NORMALIZE_KEYS_DEFP}${
+    voKeyFields.length > 0 ? `\n\n${NORMALIZE_VO_KEYS_DEFP}` : ""
+  }`;
 
   return `# Auto-generated.
 defmodule ${changesetMod} do
@@ -535,7 +575,7 @@ defmodule ${changesetMod} do
   @doc "Default cast/3 helper applied by every per-action changeset below."
   def base_changeset(struct \\\\ %${aggPascal}{}, attrs) do
     attrs = __normalize_keys(attrs)
-    ${valueCollections.length > 0 ? "attrs = prepare_vc_attrs(attrs)\n\n    " : ""}struct
+    ${voKeyNormalizeLine}${valueCollections.length > 0 ? "attrs = prepare_vc_attrs(attrs)\n\n    " : ""}struct
     |> cast(attrs, @all_fields)${defaultBlock}
     |> validate_required(@required_fields)${validatorBlock}${castEmbedBlock}${castAssocBlock}${voBlock}${uniqueBlock}${invBlock}
   end${updateChangesetBlock}${invariantFnBlock}${keyNormalizeHelper}${presenceHelper}${defaultHelper}${voHelper}${normalizeHelper}${ordinalHelper}

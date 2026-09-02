@@ -230,3 +230,195 @@ describe("IR validator — domainService no-infra contract", () => {
     expect(d.filter((x) => x.code.startsWith("loom.domain-service-"))).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// `loom.domain-service-cross-context-read` — the `reading` tier is scoped to
+// the service's OWN context.
+//
+// `lowerDomainService` indexes the repositories it resolves reads against from
+// `env.ctx.members` alone, so a body naming ANOTHER context's repository never
+// lowers to a `repo-read`: the receiver stays a `ref` with
+// `refKind: "unknown"`, the tier classifier calls the op `pure`, no read-port
+// is derived, and all five backends render the unresolved name verbatim
+// (TS2304 / CS0103 / "cannot find symbol" / NameError / "undefined variable" —
+// see the emitted-output half in
+// `test/generator/domain-service-cross-context-read.test.ts`).  It used to pass
+// validation with ZERO diagnostics.
+// ---------------------------------------------------------------------------
+
+/** Two contexts in one subdomain: `Billing` declares `Customers`, `Ordering`
+ *  declares `Orders` and hosts the service under test. */
+async function crossDiags(orderingBody: string) {
+  const { model, errors } = await parseString(`
+    system Shop {
+      subdomain Sales {
+        context Billing {
+          aggregate Customer { name: string }
+          repository Customers for Customer {
+            find byName(name: string): Customer? where this.name == name
+          }
+        }
+        context Ordering {
+          aggregate Order { ref: string }
+          repository Orders for Order {
+            find byRef(ref: string): Order? where this.ref == ref
+          }
+          ${orderingBody}
+        }
+      }
+    }
+  `);
+  expect(errors).toEqual([]);
+  return validateLoomModel(enrichLoomModel(lowerModel(model)));
+}
+
+const crossCode = "loom.domain-service-cross-context-read";
+
+describe("IR validator — domainService cross-context repository reads", () => {
+  it("rejects a domain-service body reading another context's repository", async () => {
+    const d = await crossDiags(`
+      domainService Naming {
+        operation isFree(r: string): bool {
+          return Customers.byName(r) == null
+        }
+      }
+    `);
+    const hit = d.find((x) => x.code === crossCode);
+    expect(hit).toBeDefined();
+    expect(hit!.severity).toBe("error");
+    // The message must name BOTH sides of the boundary and the workaround —
+    // the whole point of an honest gate is that the source tells you what to do.
+    expect(hit!.message).toContain("'Customers'");
+    expect(hit!.message).toContain("'Billing'");
+    expect(hit!.message).toContain("'Ordering'");
+    expect(hit!.message).toContain("pass the value in");
+    expect(hit!.source).toBe("Ordering/Naming.isFree");
+  });
+
+  it("does NOT flag a read of the service's OWN context repository", async () => {
+    const d = await crossDiags(`
+      domainService Naming {
+        operation isFree(r: string): bool {
+          return Orders.byRef(r) == null
+        }
+      }
+    `);
+    expect(d.some((x) => x.code === crossCode)).toBe(false);
+  });
+
+  it("catches a cross-context WRITE too — the repo-write gate is context-local", async () => {
+    // `loom.domain-service-no-repo-write` keys on `ctx.repositories`, so a
+    // cross-context `Customers.save(x)` is invisible to it.  This gate is the
+    // only thing standing between that body and five dangling identifiers.
+    const d = await crossDiags(`
+      domainService Naming {
+        operation isFree(r: string): bool {
+          let x = Customers.save(r)
+          return true
+        }
+      }
+    `);
+    expect(d.some((x) => x.code === "loom.domain-service-no-repo-write")).toBe(false);
+    expect(d.some((x) => x.code === crossCode)).toBe(true);
+  });
+
+  it("reports one diagnostic per foreign repository, not per mention", async () => {
+    const d = await crossDiags(`
+      domainService Naming {
+        operation isFree(r: string): bool {
+          let a = Customers.byName(r)
+          let b = Customers.byName(r)
+          return a == null && b == null
+        }
+      }
+    `);
+    expect(d.filter((x) => x.code === crossCode)).toHaveLength(1);
+  });
+
+  it("does NOT flag a local name that merely shadows a foreign repository", async () => {
+    // A parameter named `Customers` resolves (`refKind: "param"`), so it is not
+    // an unresolved cross-context receiver — the gate must leave it alone.
+    const d = await crossDiags(`
+      domainService Naming {
+        operation isFree(Customers: string): bool {
+          return Customers == ""
+        }
+      }
+    `);
+    expect(d.some((x) => x.code === crossCode)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `loom.domain-service-read-unsupported` (domainservice-member-chained-repo-read).
+//
+// `matchRepoRead` (src/ir/lower/repo-read.ts) requires the repository call to
+// be the WHOLE postfix chain (`suffixes.length === 1`), so a read used as a
+// MEMBER RECEIVER — `Customers.byTier(t).tier` — never lowers to a `repo-read`
+// Call.  It stays a `method-call` on an `unknown` ref, which means
+// `classifyDomainServiceTier` types the service `pure`, no backend threads a
+// read port in, and all five emit the bare source name: node/dotnet/java a
+// dangling identifier (TS2304 / CS0103 / "cannot find symbol"), python F821
+// with no port param at all, elixir `customers.by_tier(t).tier` — not valid
+// Elixir, and the misclassification splits ONE service across two modules.
+//
+// The `let`-bound sibling one line away IS threaded correctly, which is what
+// made this silent rather than obviously broken.  Until the detector is widened
+// (the real fix), refuse it by name.
+// ---------------------------------------------------------------------------
+describe("a repository read in MEMBER-RECEIVER position is refused, not mis-emitted", () => {
+  const CODE = "loom.domain-service-read-unsupported";
+
+  it("flags `Repo.find(...).member` in a domain-service body", async () => {
+    const d = await diags(`
+      domainService Lookup {
+        operation tierOf(t: string): string {
+          return Customers.byTier(t).tier
+        }
+      }
+    `);
+    const hit = d.find((x) => x.code === CODE);
+    expect(hit, `got: ${d.map((x) => x.code).join(", ") || "(none)"}`).toBeDefined();
+    expect(hit!.severity).toBe("error");
+    expect(hit!.source).toBe("Sales/Lookup.tierOf");
+    expect(hit!.message).toContain("Customers.byTier");
+    // The message must name the WORKING spelling, not just the rule.
+    expect(hit!.message).toContain("let x = Customers.byTier(…)");
+  });
+
+  it("CONTROL — the `let`-bound spelling is the supported one and stays clean", async () => {
+    const d = await diags(`
+      domainService Lookup {
+        operation isFree(t: string): bool {
+          let c = Customers.byTier(t)
+          return c == null
+        }
+      }
+    `);
+    expect(d.some((x) => x.code === CODE)).toBe(false);
+  });
+
+  it("CONTROL — a whole-chain read in return position stays clean", async () => {
+    const d = await diags(`
+      domainService Lookup {
+        operation isFree(t: string): bool {
+          return Customers.byTier(t) == null
+        }
+      }
+    `);
+    expect(d.some((x) => x.code === CODE)).toBe(false);
+  });
+
+  it("CONTROL — a repository WRITE keeps its own, more specific diagnostic", async () => {
+    const d = await diags(`
+      domainService Pricing {
+        operation quote(cart: Cart): money {
+          let r = Carts.save(cart)
+          return cart.subtotal
+        }
+      }
+    `);
+    expect(d.some((x) => x.code === "loom.domain-service-no-repo-write")).toBe(true);
+    expect(d.some((x) => x.code === CODE)).toBe(false);
+  });
+});

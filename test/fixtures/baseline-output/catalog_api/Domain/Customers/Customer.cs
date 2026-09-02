@@ -53,8 +53,8 @@ public sealed class Customer
     {
         if (!(this.Username != this.Email)) throw new DomainException("Invariant violated: username != email");
         if (!(Regex.IsMatch(this.Username, "^[a-z][a-z0-9_]*$"))) throw new DomainException("Invariant violated: username.matches(\"^[a-z][a-z0-9_]*$\")");
-        if (!(this.Username.Length >= 3 && this.Username.Length <= 32)) throw new DomainException("Invariant violated: username check username.length >= 3 && username.length <= 32");
-        if (!(Regex.IsMatch(this.Email, "^[^@]+@[^@]+\\.[^@]+$") && this.Email.Length <= 120)) throw new DomainException("Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120");
+        if (!(this.Username.EnumerateRunes().Count() >= 3 && this.Username.EnumerateRunes().Count() <= 32)) throw new DomainException("Invariant violated: username check username.length >= 3 && username.length <= 32");
+        if (!(Regex.IsMatch(this.Email, "^[^@]+@[^@]+\\.[^@]+$") && this.Email.EnumerateRunes().Count() <= 120)) throw new DomainException("Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120");
         if (!(this.Age >= 18 && this.Age <= 150)) throw new DomainException("Invariant violated: age check age >= 18 && age <= 150");
     }
 

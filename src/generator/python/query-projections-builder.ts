@@ -21,6 +21,7 @@ import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { responsePyType } from "./emit/http-models.js";
 import {
+  contextFilterPredicate,
   lowerProjectionFilterToSqlAlchemy,
   lowerToSqlAlchemy,
   lowerWorkflowFilterToSqlAlchemy,
@@ -29,7 +30,18 @@ import {
 } from "./find-predicate.js";
 import { rowClassName } from "./py-columns.js";
 import { renderPyExpr, renderPyNegatedGuard } from "./render-expr.js";
-import { wireValue } from "./repository-builder.js";
+import { authUserImport, wireValue } from "./repository-builder.js";
+
+/** Conjoin a projection's own `where` with the source aggregate's capability
+ *  filters — either may be absent; two present become one `and_(...)`. */
+function conjoinPy(own: PyPredicate | null, caps: PyPredicate | null): PyPredicate | null {
+  if (!own) return caps;
+  if (!caps) return own;
+  return {
+    expr: `and_(${own.expr}, ${caps.expr})`,
+    ops: new Set<string>([...own.ops, ...caps.ops, "and_"]),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Query-time projection routes — `app/http/query_projections_routes.py`,
@@ -45,6 +57,23 @@ import { wireValue } from "./repository-builder.js";
 // `<map>[str(<idRow>)].name`.  The Python twin of the Hono
 // `projection-query-routes-builder.ts`.
 // ---------------------------------------------------------------------------
+
+/** A projection `where` that reached emission without lowering to SQLAlchemy.
+ *  The IR validator rejects a non-queryable projection `where`
+ *  (`loom.projection-where-not-queryable`, the twin of the find/retrieval
+ *  gates), so this is unreachable from valid input.  It THROWS rather than
+ *  emitting the route with no `.where(...)`: dropping the filter would serve
+ *  every row of the table from an endpoint the author scoped — a wrong answer
+ *  that generates, compiles and boots clean. */
+function requireLowered(proj: ProjectionIR, pred: PyPredicate | null): PyPredicate {
+  if (!pred) {
+    throw new Error(
+      `internal: where-clause for projection '${proj.name}' could not lower to SQLAlchemy, ` +
+        "but the validator should have caught this. Please file a bug.",
+    );
+  }
+  return pred;
+}
 
 export function buildPyQueryProjectionsFile(
   ctx: EnrichedBoundedContextIR,
@@ -75,13 +104,15 @@ export function buildPyQueryProjectionsFile(
       const wf = wfByName.get(p.query!.source!)!;
       rowLowered.set(
         p.name,
-        p.query!.filter ? lowerWorkflowFilterToSqlAlchemy(p.query!.filter, wf) : null,
+        p.query!.filter
+          ? requireLowered(p, lowerWorkflowFilterToSqlAlchemy(p.query!.filter, wf))
+          : null,
       );
     } else if (isProjectionSourced(p)) {
       rowLowered.set(
         p.name,
         p.query!.filter
-          ? lowerProjectionFilterToSqlAlchemy(p.query!.filter, p.query!.source!)
+          ? requireLowered(p, lowerProjectionFilterToSqlAlchemy(p.query!.filter, p.query!.source!))
           : null,
       );
     }
@@ -93,14 +124,27 @@ export function buildPyQueryProjectionsFile(
   // because the point of the shape is to materialise no source rows at all.
   // Its `where` lowers here so a filtered aggregation keeps its filter
   // (mirrors `rowLowered` above).
+  //
+  // The source aggregate's CAPABILITY filters ride along: they are what the
+  // repository-sourced arm applies for free (it reads through the synthesised
+  // find), so without them a `count()` over an aggregate answers a DIFFERENT
+  // number than its `.all` — soft-deleted rows counted, foreign tenants'
+  // counted.  A silent wrong answer, not a broken build.  A read's `ignoring`
+  // clause drops the capability predicates it names, as on the repository arm.
   const aggLowered = new Map<string, PyPredicate | null>();
   for (const p of projections) {
     if ((!wholeTableAggregates(p) && !groupedAggregates(p)) || !p.query?.source) continue;
     const agg = ctx.aggregates.find((a) => a.name === p.query!.source);
-    aggLowered.set(
-      p.name,
-      agg && p.query.filter ? lowerToSqlAlchemy(p.query.filter, agg, ctx) : null,
-    );
+    const own = p.query.filter
+      ? requireLowered(p, agg ? lowerToSqlAlchemy(p.query.filter, agg, ctx) : null)
+      : null;
+    const caps = agg
+      ? contextFilterPredicate(agg, ctx, {
+          bypassAll: p.query.bypassAll,
+          bypassCaps: p.query.bypassCaps,
+        })
+      : null;
+    aggLowered.set(p.name, conjoinPy(own, caps));
   }
   const routeBlocks = projections.map((p) => {
     const grouped = groupedAggregates(p);
@@ -197,7 +241,11 @@ export function buildPyQueryProjectionsFile(
     // A `requires` auth gate (or a currentUser-scoped where/select) binds the
     // request principal — `current_user: User` off the request scope — and a
     // failing gate raises `ForbiddenError` (→ 403) before the query runs.
-    refersTo("User") ? "from app.auth.user import User" : null,
+    // A PRINCIPAL capability filter on a direct-table read weaves the ambient
+    // `require_current_user()` accessor into the query (the repository path's
+    // rule), so the import is gated on ACTUAL usage — an unused one is ruff
+    // F401 on the generated project.
+    authUserImport(refersTo("User"), refersTo("require_current_user")),
     "from app.db.engine import get_session",
     // `iso()` — a `datetime` grouping key crosses the wire as its ISO-8601
     // string (see `pyKeyCoerce`).  `money_str()` — the RS-12 money scale a
@@ -343,7 +391,7 @@ function projectionRoute(
   return out.join("\n");
 }
 
-/** `GET /projections/<name>` for a WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0):
+/** `GET /projections/<name>` for a WHOLE-TABLE AGGREGATION (M-T1.3):
  *  one SQL query with `COUNT(*)`/`SUM(...)` over the source table, no rows
  *  materialised.  The shape exists precisely to avoid the naive read — a
  *  `SELECT *` over the whole table with every row rehydrated into a domain

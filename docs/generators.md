@@ -60,22 +60,27 @@ remaining gaps + sequencing are in
 | Feature | node | dotnet | java | python | elixir | Gate set |
 | --- | :-: | :-: | :-: | :-: | :-: | --- |
 | Event-sourced storage `persistedAs: eventLog` | ✓ | ✓ | ✓ | ✓ | ✓ | `EVENT_SOURCING_BACKENDS` |
-| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | 🚫 | `EVENT_SOURCING_WORKFLOW_BACKENDS` |
+| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | ✓ | `EVENT_SOURCING_WORKFLOW_BACKENDS` |
 | TPH inheritance `inheritanceUsing: sharedTable` | ✓ | ✓ | ✓ | ✓ | ✓ | `TPH_CAPABLE` |
 | TPC inheritance `inheritanceUsing: ownTable` | ✓ | ✓ | ✓ | ✓ | ✓ | (universal) |
 | Discriminated unions / generic carriers (`paged`/`envelope`) | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_UNION_BACKENDS` |
 | `when` canCommand gate + `can_<op>` query | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_WHEN_BACKENDS` |
 | Exception-less returns (`op(): X or NotFound`) | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_RETURN_BACKENDS` |
 | Capability `filter` — relational (non-principal) | ✓ | ✓ | ✓ | ✓ | ✓ | `LIMITED_FAMILIES` |
-| Capability `filter` — principal (`currentUser`/tenancy) | ✓ | ✓ | ✓ | 🚫 | ✓ | system-checks.ts |
+| Capability `filter` — principal (`currentUser`/tenancy) | ✓ | ✓ | ✓ | ✓ | ✓ | system-checks.ts |
 | Provenanced fields (runtime trace) | ✓ | ✓ | ✓ | ✓ | ✓ | `PROVENANCE_BACKENDS` |
-| Per-operation `audited` | ✓ | ✓ | 🚫 | 🚫 | 🚫 | `AUDIT_OP_BACKENDS` |
-| Audited **lifecycle** (`audited create`/`destroy`) | ✓ | 🚫 | 🚫 | 🚫 | 🚫 | `AUDIT_LIFECYCLE_BACKENDS` |
+| Per-operation `audited` | ✓ | ✓ | ✓ | ✓ | ✓ | `AUDIT_OP_BACKENDS` |
+| Audited **lifecycle** (`audited create`/`destroy`) | ✓ | ✓ | ✓ | ✓ | ✓ | `AUDIT_LIFECYCLE_BACKENDS` |
 | Audit/context stamping (`with audit`) | ✓ | ✓ | ✓ | ✓ | ✓ | (universal) |
 
-Open gaps (tracked in the plan): principal Python filters (W1b), per-op/
-lifecycle `audited` beyond node/dotnet (W3), and event-sourced workflow
-(saga applier) support on Elixir (W4).
+**Re-verified 2026-08-23 against `src/ir/validate/checks/system-checks.ts`: every
+gate set in this table now holds all five backends** — `EVENT_SOURCING_WORKFLOW_BACKENDS`,
+`LIMITED_FAMILIES` + `supportsPrincipalFilter`, `AUDIT_OP_BACKENDS` and
+`AUDIT_LIFECYCLE_BACKENDS` each list `node, dotnet, java, python, elixir`. The
+former open gaps (principal Python filters W1b, per-op/lifecycle `audited`
+beyond node/dotnet W3, event-sourced workflow on Elixir W4) are **closed**. The
+gaps that remain are language-level rather than per-backend — see
+[`audits/language-gaps-2026-08.md`](audits/language-gaps-2026-08.md).
 
 | Construct | TypeScript (Hono + Drizzle) | .NET (ASP.NET + EF + Mediator) | React (Vite + RQ + Mantine) |
 | --- | --- | --- | --- |
@@ -515,14 +520,25 @@ the bare local. The `persist:` lifetime ladder **ships on the SPA frontends** �
 `store <Name> persist: memory|local|session|url { … }` is real grammar, and
 React / Vue / Svelte / Angular honour it, so the blanket
 `loom.store-lifetime-unsupported` is retired (a bad value is rejected earlier as
-`loom.store-lifetime-invalid`). Three targets do **not** implement the ladder,
-and each refuses a non-`memory` lifetime rather than degrading silently:
-Phoenix LiveView (`loom.store-lifetime-liveview-invalid` — a server-side
-per-process struct has no browser storage, and URL state belongs to the page's
-`handle_params`), and **Feliz and Flutter**
-(`loom.store-lifetime-target-unsupported` — both emitters build the store
-in-memory regardless; support is planned, tracked as a `gap` row in
-`src/diagnostics/unsupported-register.ts`). A `persist: url` store reflects its fields into
+`loom.store-lifetime-invalid`). **Feliz** honours it too, differently: a Feliz
+store has no module of its own — it folds into the single Elmish `Model`, so the
+ladder rides that fold (`generator/feliz/store-persist.ts`). `init` seeds each
+persisted field through a `StorePersist.load<Store><Field> ()` loader, an
+`updateWithPersist` wrapper mirrors the Model back after every message, and the
+`url` tier adds a `popstate` Elmish subscription so back/forward moves the state.
+Keys and shapes match the JS builders byte-for-byte (`loom.store.<Name>` + a JSON
+object keyed by the bare field name; one query param per field, empties dropped),
+so the same blob and the same URL round-trip across frontends. Every frontend now
+implements the ladder; the one target that does **not** is Phoenix LiveView, which
+refuses a non-`memory` lifetime rather than degrading silently
+(`loom.store-lifetime-liveview-invalid` — a server-side per-process struct has no
+browser storage, and URL state belongs to the page's `handle_params`). What
+survives of `loom.store-lifetime-target-unsupported` is FIELD-scoped, on the two
+frontends whose persistence crosses an untyped boundary per field: on **Feliz** a
+type with no total F# conversion (datetime / duration / guid / enum / entity /
+value object, and arrays of them), and on **Flutter** one with no total Dart
+conversion (json / File / entity / value object / optional). Both are tracked as
+one `gap` row in `src/diagnostics/unsupported-register.ts`. A `persist: url` store reflects its fields into
 query params, which carry only scalars, so an array / entity / value-object field
 there is rejected (`loom.store-url-field-invalid`). `sync:` remains reserved.
 Validator gates: a store action can't call a
@@ -926,6 +942,14 @@ seam because Dart list literals are comma-separated.
 
 A scalar array form field (`tags: string[]` / `scores: int[]`) renders as a repeatable add/remove row list (one `TextEditingController` per row, managed in state; numeric arrays parse each row on submit).
 
+**Stores** (`store X { … }`) project onto the same Riverpod triad a stateful page does (`store-builder.ts`), and the `persist: local|session|url` lifetime ladder ships (`store-persist.ts`): `build()` seeds each cell from its backing store, a `ref.listenSelf` mirror writes the whole state back after every transition, `local`/`session` ride `shared_preferences` with `setPrefix('')` (so the web key is the bare `loom.store.<Name>` the JS builders write) and `url` rides `Uri.base.queryParameters` + `SystemNavigator.routeInformationUpdated` with a `LoomUrlStoreSync` back/forward observer.  `session` is the same backing CLEARED at boot — Dart has no per-tab store on every surface.  A field type with no total Dart codec (`json` / `File` / entity / value-object / optional) is refused rather than silently dropped (`loom.store-lifetime-target-unsupported`, `#flutter-field`).
+
+**`auth: ui`** ships (`auth-gate.ts`): a `sessionProvider` (`FutureProvider<CurrentUser?>`) over `GET /auth/me`, sign-in / sign-out redirects to the backend's own handshake via `url_launcher`, an `AuthGate` on `MaterialApp.builder` (spinner → sign-in prompt → routes; on the `builder` and not around `MaterialApp`, so its Material widgets have Theme/Directionality ancestors and the app never unmounts mid-probe), a page `requires` guard rendering `ForbiddenView`, and `Action`-button gating on a currentUser-only op `requires`.
+
+**Realtime** (`on <channel>.<Event>`) ships (`realtime.ts`): one subscription against `/realtime/events` mounted on `MaterialApp.builder`, a `SnackBar` per `toast(…)`, and `ref.invalidate(<var>Provider)` per `refetch(<Agg>)` — invalidating a `.family` refetches every live instance, so a server-paged table reloads the page the user is on.  The transport is a conditional import: the browser's own `EventSource` on the web (`package:web`; `package:http`'s browser client buffers the whole body, so it cannot stream) and a line parser over a streamed `package:http` response natively.
+
+**`ProvenanceInfo`** renders a native `ExpansionTile` disclosure over the co-located `<field>_provenance` (a `ProvLineage?` on the decoded model — `dart-model-emit.ts`).
+
 A user `component Foo(params) { body }` emits a Dart widget into `lib/components.dart` (`component-emit.ts`); an invocation `Foo(a: x)` renders as a widget constructor call and the page imports `../components.dart`.  A **stateless** component (value params, no own state) becomes a `StatelessWidget` (one final field per param, the walked body as `build`).  A **stateful** component (`state {}` + named `action`s) becomes a `StatefulWidget` whose `State` holds an immutable `<Comp>Model` (the same data-class shape a Riverpod page projects), built in `initState`, exposes each param as a `widget.<param>` getter, and wraps each action body in `setState` — reusing the page path's `renderNotifierStmt` (a write is `state = state.copyWith(field: value)`).  State is **per-instance** (each `Foo(...)` its own `State`), which a shared Riverpod provider would get wrong.  A **read-bearing** component (a `QueryView { of: … }` body, no own `state {}`) becomes a Riverpod `ConsumerWidget` — exactly the shape a read-bearing PAGE takes: `build(BuildContext context, WidgetRef ref)` hoists `final <var> = ref.watch(<var>Provider…)` through the same `renderApiHoisting` seam, and `collectFlutterReads` scans component bodies so the provider it watches is emitted into `lib/reads.dart`.  Only USED components are emitted; an `extern` component, a `derived` binding, an async-effect (`match await`) action, a store read, a `byId` read (the route `id` is a local only a page shell binds), or a stateful component that ALSO reads (that would need `ConsumerStatefulWidget`) falls back to the diagnostic comment.
 
 An array-of-value-object form field (`lines: LineItem[]`) renders each row as a group of `TextFormField`s over the VO's scalar sub-fields (a `List<List<TextEditingController>>` in state), submitting a `{sub: value, …}` map per row — when every sub-field is text/numeric (a bool/enum/datetime/nested sub-field defers the whole array).
@@ -981,6 +1005,7 @@ phoenix_app/
 └── lib/phoenix_app_web/
     ├── endpoint.ex                               # Phoenix.Endpoint
     ├── router.ex                                 # `live "<route>", <Page>Live` per PageIR
+    ├── controllers/realtime_controller.ex        # broadcast channels only: chunked SSE at GET /api/realtime/events
     ├── components/
     │   ├── core_components.ex                    # <.input>, <.button>, <.modal>, <.simple_form>, <.table>
     │   ├── layouts.ex                            # use Phoenix.Component
@@ -1009,12 +1034,13 @@ Aggregate IR maps onto Ecto/Phoenix:
 | `workflow placeOrder(...) { ... }` | a context function wrapping `Repo.transaction(fn -> with … end)` |
 | `emit OrderConfirmed { … }` | `Phoenix.PubSub.broadcast(<App>.PubSub, "events", %Events.OrderConfirmed{…})`; inside an in-process dispatch handler, `emit` re-enters `<Ctx>.Dispatcher.dispatch(%Events.OrderConfirmed{…})` so choreography chains run. |
 | `on(e: Event)` reactor / event-triggered `create(e: Event) by …` (channel-carried) | one `<Ctx>.Workflows.<Wf>.On<Event>` / `.Start<Event>` module with `handle(event)`, routed by a per-context `<Ctx>.Dispatcher` that pattern-matches each event struct. Correlation persists through a `<Wf>State` `Ecto.Schema` keyed by the correlation field (`create` loads-or-allocates, `on` routes-or-drops + logs `event_unrouted`). An event-triggered-only workflow emits no `run/2` / HTTP route / UI form page. See [`workflow.md`](workflow.md) §Triggers and [`channels.md`](old/proposals/channels.md). |
+| `channel X { delivery: broadcast }` (realtime SSE, for an SPA frontend) | `<App>Web.RealtimeController` — a chunked `text/event-stream` response at `GET /api/realtime/events`, subscribed to the SAME `"events"` PubSub topic every `emit` above already broadcasts on (so no dispatcher decorator is needed, unlike Hono's `realtimeTee`). One `frame/1` clause per carried event → `event: <Type>` + camelCase JSON `data:` carrying `type`; a 15s `event: ping` keep-alive. Routed through its own `:sse` router pipeline — the `:api` pipeline's `plug :accepts, ["json"]` would 406 an `EventSource`. A tenant-scoped event degrades to a refetch ticket (`type` + `<Agg> id` refs only). `queue`-only ⇒ nothing emitted (`vanilla/realtime-emit.ts`). |
 | `abstract aggregate Party` + `extends` (TPC) | base emits no schema; each concrete is a standalone `Ecto.Schema` on its own table; the context module gains `list_parties/0` (the union of the concrete `list_<concrete>/0` reads). |
 | `abstract aggregate Party` + `inheritanceUsing: sharedTable` (TPH) | the concretes share one table: each concrete `Ecto.Schema` declares `schema "<base_plural>"`, a `:kind` string field defaulted to its own name, and every read self-filters on `where: c.kind == "<Concrete>"` so it reads/writes only its rows. The base owns no schema; the context module gains the same polymorphic `list_parties/0` union reader. See [`phoenix-tph-emission.md`](old/proposals/phoenix-tph-emission.md). |
 | `persistedAs: eventLog` + `apply(...)` (event sourcing) | **Supported** (`src/generator/elixir/vanilla/eventsourced-emit.ts`): an append-only `<agg>_events` stream + `apply` fold + rehydrator, the elixir sibling of the node/.NET/python/java event stores. |
 | `shape: document` persistence | **Supported (CRUD + finds/ops — DEBT-07; Route A)** — `src/generator/elixir/vanilla/document-emit.ts`: the whole aggregate persists as one jsonb blob in an `(id, data, version)` table, where `data` is a **typed `embeds_one :data, <Agg>.Data` embed** cast via `cast_embed` (the same `validate_required` / invariant validators the relational `base_changeset` runs); reads merge `data` back over the id. **Custom finds** filter in memory (`Repo.all |> Enum.filter`), **named operations** run their body, pure **`function`s** compile, and **returning ops** (`: A or B`) emit the tagged tuple — all in **struct mode** over the loaded `row.data` struct (Route A slices 1–2 deleted the old string-keyed `docMap` fork), incl. value-object-subfield reads. The residual (audited/provenanced ops, collection mutation, derived / dereferenced-entity / collection-method reads, paged/union finds) stays gated (`loom.vanilla-document-unsupported`). `shape: embedded` (DEBT-32, `src/generator/elixir/vanilla/schema-emit.ts`): each entity part is an Ecto `embedded_schema` module the root `embeds_many`s (value objects fold to `:map`), stored inline in the parent's jsonb column — a containment-mutating op (`lines += Line{…}`) appends the struct + `put_embed`s. `contains` on a *relational*-shape aggregate persists as child TABLES (§11c): each part is a table-backed schema the owner `has_many`s + `cast_assoc`s + preloads, INCLUDING **deep part-in-part** (M-T6.2 Drain C — a part's own `contains` becomes a `has_many` on its grandchild table, FK'd to the direct parent; the migration emitter's part tier now emits grandchild tables and the read/update preload nests `[lines: :tags]`; boot-verified). The `loom.vanilla-containment-unsupported` gate is **fully retired**. |
 | `test "…" { … }` | **ExUnit** → `test/<ctx>/<agg>_test.exs` (`use ExUnit.Case, async: true`) + a once-per-project `test/test_helper.exs`. (`src/generator/elixir/vanilla/tests-emit.ts`) ports the full Loom idiom onto a **pure domain core** emitted on the aggregate module (`domain-core-emit.ts`): `def create(attrs) = base_changeset \|> Ecto.Changeset.apply_action(:insert)` and `def <op>(record, params)` = precondition + in-memory mutation — both Repo-free. So `Agg.create({…})` → `{:ok, p} = Agg.create(%{…})`, `expect(create({bad})).toThrow()` → `assert {:error, _} = …`, `o.op(x)` → `o = Agg.op(o, %{…})`, precondition `toThrow` → `assert_raise`, field reads → `assert ==` (money/decimal via `Decimal`). Verified green under `mix test` with no DB. A **value-object construction invariant** (`expect(Money{…}).toThrow()`) lowers to the VO's validating constructor — `assert {:error, _} = Money.new(%{…})` (F5; `valueobject-emit.ts` emits `<VO>.new/1`, and the aggregate `base_changeset` runs it via `validate_vo` so the invariant is enforced at the real create/update path, not just in tests). A `config/test.exs` is emitted so `mix test` can load (never copied into the prod image). See [`docs/audits/test-parity-generated-backends.md`](audits/test-parity-generated-backends.md). |
-| `seed [name] [raw] { … }` | **NOT EMITTED — the one silent gap left in this table.** Every other backend emits a first-boot seeder and runs it after migrating (`db/seed.ts` / `app/db/seed.py` / `<Ctx>SeedRunner` / `Seed.cs`); on this backend nothing reads `ctx.seeds`, so a declared dataset is dropped with no diagnostic. The layout adapter reserves the `priv/repo/seeds.exs` slot but no emitter writes it. See [B19](audits/behavioral-parity-bugs-2026-07.md#b19--elixir--seed-datasets-emit-no-seeder-at-all-silently-dropped) and mission M-T6.37 (`docs/new-plan/T6-backend-parity.md`). |
+| `seed [name] [raw] { … }` | **Supported** (`src/generator/elixir/vanilla/seed-emit.ts`, M-T6.37) — one `<Ctx>.Seeds` module per context that declares a `seed` block, run at boot after migrating and also reachable manually via the emitted `priv/repo/seeds.exs` (`mix run priv/repo/seeds.exs`). Domain-path rows go through `<Agg>Repository.insert(%{…})` so the aggregate's `base_changeset` invariants run (a bad seed fails at boot rather than writing a corrupt row); `raw` rows bypass the domain and emit the shared cross-backend INSERT via `renderSeedRowInsert`, **schema-qualified** because Phoenix aggregates live in per-context Postgres schemas. Idempotent per D-SEED-IDEMPOTENCY: a `__loom_seed` marker table records each applied dataset (ship-once), `default` always runs and other datasets opt in via the `LOOM_SEED` env var. Closes [B19](audits/behavioral-parity-bugs-2026-07.md#b19--elixir--seed-datasets-emit-no-seeder-at-all-silently-dropped) — the last silent gap in this table (verified 2026-08-23). |
 
 ### Per-page detail
 

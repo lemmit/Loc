@@ -1,0 +1,104 @@
+// shape: collection-op / operator SHAPES that no other fixture witnesses.
+//
+// Minted by the 2026-08-17 generator code review (findings A5/A10–A14).  Every
+// expression below rendered WRONG on at least one backend — and none of them
+// appeared anywhere in the corpus, the examples, or `journey/`, so no compile
+// gate could see it.  Each `derived` is one of those shapes:
+//
+//   lineTotal     A5   arithmetic λ-body `sum` over money  (node tsc-fail,
+//                      elixir runtime ArithmeticError, python mypy-fail)
+//   dearest       A5   money-typed `max(λ)` with an arithmetic body
+//   byPriceDesc   A10  DESCENDING sortBy — javac rejected `comparing(λ).reversed()`
+//   uniquePrices  A14  `distinct` over a money[] — `new Set` never dedupes Decimals
+//   hasLines      A12  ARGLESS `any()` — elixir defaulted it to always-false
+//   owed          A11  unary `-` on money — `-BigDecimal` / `-Decimal` don't compile
+//
+// and `dropCode` is A13 (`-=` over an `int[]`: Java's `List<Integer>.remove`
+// binds the INDEX overload without an explicit box).
+//
+// `dropCode`/`addCode` also caught an UNFILED sibling of A13 on .NET: a scalar
+// array is emitted as a writable public `List<int> Codes` with no backing
+// field, so routing its mutation through `_codes` was CS0103 and the generated
+// project did not build.  Fixed alongside (`dotnet/render-stmt.ts`'s
+// `renderPrivatePath`); pinned by `test/generator/dotnet/scalar-array-mutation
+// .test.ts`.  Both halves existed because NO fixture had ever mutated a scalar
+// array — the compile tier could not reach the path.
+//
+// No `test e2e` block: this fixture exists for the per-backend COMPILE tiers
+// (corpus-build) and the generation gate.  Adding one would mint recorded wire
+// cases whose goldens cannot be captured from here.
+//
+// Verified by actually compiling the emission, not just generating it:
+// node `tsc --noEmit` ✓, java `gradle testClasses bootJar` (JDK 25) ✓,
+// dotnet `dotnet build /warnaserror` (net10.0) ✓, python `uv sync` + ruff +
+// `mypy --strict` + pytest ✓.  Elixir `mix compile` was NOT run here (needs
+// the hex mirror); `corpus-elixir-build.yml` covers it.
+system CollectionOpShapes {
+  subdomain Sales {
+    context Sales {
+      aggregate Order {
+        customer: string
+        discount: money
+        codes: int[]
+        contains lines: LineItem[]
+        entity LineItem {
+          sku: string
+          qty: int
+          price: money
+        }
+
+        // A5 — the canonical order total.  `money * int → money`, so the fold
+        // must seed a Decimal/BigDecimal, not the integer 0.
+        derived lineTotal: money = lines.sum(l => l.price * l.qty)
+        // A5 — the same arithmetic body under a reduction whose comparator is
+        // also money-dispatched (elixir's default sorter mis-orders Decimals).
+        derived dearest: money? = lines.max(l => l.price * l.qty)
+        // A10 — descending sort; ascending already compiled everywhere.
+        derived byPriceDesc: LineItem[] = lines.sortBy(l => l.price, true)
+        // A14 — value-dedupe over decimal instances.  The `money[]` receiver is
+        // PROJECTED from the containment rather than a stored `prices: money[]`
+        // field on purpose: a stored scalar money array does not round-trip
+        // through the node repository today (drizzle maps the column to
+        // `string[]`, the domain holds `Decimal[]`, and neither insert nor
+        // hydrate converts — `Type 'Decimal[]' is not assignable to
+        // 'string[]'`).  That is a SEPARATE, pre-existing gap found by writing
+        // this fixture; it belongs to the repository wire builders, not to the
+        // expression renderers this file witnesses, so it is not smuggled in
+        // here.  Projecting keeps the `distinct`-over-money witness real
+        // without making the fixture hostage to that bug.
+        derived linePrices: money[] = lines.map(l => l.price)
+        derived uniquePrices: money[] = linePrices.distinct
+        // A12 — argless `any()` is NON-EMPTY, not "some element is truthy".
+        derived hasLines: bool = lines.any()
+        // A11 — unary minus on money.
+        derived owed: money = -discount
+
+        operation addLine(sku: string, qty: int, price: money) {
+          lines += LineItem { sku: sku, qty: qty, price: price }
+        }
+        // A13 — remove BY VALUE from an int collection.
+        operation dropCode(code: int) {
+          codes -= code
+        }
+        operation addCode(code: int) {
+          codes += code
+        }
+      }
+
+      // Auto-`findAll` only — the derived fields above are what this fixture
+      // is for, and they ride every read route.
+      repository Orders for Order { }
+    }
+  }
+
+  api SalesApi from Sales
+  storage primary { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    port: 4000
+  }
+}

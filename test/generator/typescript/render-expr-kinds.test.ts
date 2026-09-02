@@ -431,6 +431,153 @@ describe("ts renderTsExpr — sum type-awareness (money folds decimal.js)", () =
       "(this._items).reduce((acc, x) => acc + ((x) => x.d)(x), 0)",
     );
   });
+
+  // A5 — the canonical order total.  Before `bodyTypeOf` grew its `binary`
+  // arm this typed as `undefined` and fell through to the native `+`/`0`
+  // reduce, which tsc rejects (`number + Decimal`).
+  it("folds an ARITHMETIC money `sum(l => l.price * l.qty)` via `.plus` / `new Decimal(0)`", () => {
+    const arith: ExprIR = {
+      kind: "lambda",
+      param: "l",
+      body: {
+        kind: "binary",
+        op: "*",
+        left: {
+          kind: "member",
+          receiver: { kind: "ref", name: "l", refKind: "lambda" },
+          member: "price",
+          receiverType: { kind: "entity", name: "Line" },
+          memberType: MONEY,
+        },
+        right: {
+          kind: "member",
+          receiver: { kind: "ref", name: "l", refKind: "lambda" },
+          member: "qty",
+          receiverType: { kind: "entity", name: "Line" },
+          memberType: INT,
+        },
+        leftType: MONEY,
+        rightType: INT,
+        resultType: MONEY,
+      },
+    };
+    expect(renderTsExpr(sumMc({ kind: "entity", name: "Line" }, [arith]))).toBe(
+      "(this._items).reduce((acc, x) => acc.plus(((l) => l.price.times(l.qty))(x)), new Decimal(0))",
+    );
+  });
+});
+
+describe("ts renderTsExpr — unary `-` on money (A11)", () => {
+  it("renders `-money` via decimal.js `.neg()` (native `-` coerces through valueOf)", () => {
+    expect(
+      renderTsExpr({ kind: "unary", op: "-", operand: { ...thisProp("total"), type: MONEY } }),
+    ).toBe("this._total.neg()");
+  });
+
+  it("keeps `-int` on the native operator (int/decimal are plain `number` here)", () => {
+    expect(
+      renderTsExpr({ kind: "unary", op: "-", operand: { ...thisProp("qty"), type: INT } }),
+    ).toBe("-this._qty");
+  });
+
+  it("sees through a binary operand — `-(price * qty)` is still money", () => {
+    const arith: ExprIR = {
+      kind: "binary",
+      op: "*",
+      left: { ...thisProp("price"), type: MONEY },
+      right: { ...thisProp("qty"), type: INT },
+      leftType: MONEY,
+      rightType: INT,
+      resultType: MONEY,
+    };
+    expect(renderTsExpr({ kind: "unary", op: "-", operand: { kind: "paren", inner: arith } })).toBe(
+      "(this._price.times(this._qty)).neg()",
+    );
+  });
+
+  it("keeps `!bool` on the native operator", () => {
+    expect(
+      renderTsExpr({ kind: "unary", op: "!", operand: { ...thisProp("ok"), type: BOOL } }),
+    ).toBe("!this._ok");
+  });
+});
+
+describe("ts renderTsExpr — `distinct` value-dedupe on money (A14)", () => {
+  const distinctOf = (elem: TypeIR): ExprIR => ({
+    kind: "member",
+    receiver: thisProp("prices"),
+    member: "distinct",
+    receiverType: { kind: "array", element: elem },
+    memberType: { kind: "array", element: elem },
+  });
+
+  it("dedupes a `money[]` by VALUE — `new Set` compares Decimal references", () => {
+    expect(renderTsExpr(distinctOf(MONEY))).toBe(
+      "this._prices.filter((__x, __i, __a) => __a.findIndex((__y) => __y.eq(__x)) === __i)",
+    );
+  });
+
+  it("keeps a non-money `distinct` on `[...new Set(…)]` (byte-identical)", () => {
+    expect(renderTsExpr(distinctOf(STRING))).toBe("[...new Set(this._prices)]");
+  });
+
+  // F2-EXPR-4.  A VALUE-OBJECT element is an object too, so `new Set` /
+  // `.includes` compare references and silently answer wrong — a dedupe that
+  // returns duplicates and a membership test that is always false.  The
+  // validator ADMITS this element type (`loom.distinct-non-scalar`: "requires a
+  // scalar or value-object element") and every generated VO carries the
+  // field-wise `equals` these arms call, so node was alone in getting it wrong.
+  const TAG: TypeIR = { kind: "valueobject", name: "Tag" };
+  const containsOf = (elem: TypeIR, arg: ExprIR): ExprIR => ({
+    kind: "method-call",
+    receiver: thisProp("prices"),
+    member: "contains",
+    args: [arg],
+    receiverType: { kind: "array", element: elem },
+    memberType: BOOL,
+    isCollectionOp: true,
+  });
+  const newTag = (label: string): ExprIR => ({
+    kind: "call",
+    callKind: "value-object-ctor",
+    name: "Tag",
+    args: [litStr(label)],
+  });
+
+  it("dedupes a value-object collection through the VO's own `equals`", () => {
+    expect(renderTsExpr(distinctOf(TAG))).toBe(
+      "this._prices.filter((__x, __i, __a) => __a.findIndex((__y) => __y.equals(__x)) === __i)",
+    );
+  });
+
+  it("tests value-object membership through `equals`, not `.includes`", () => {
+    expect(renderTsExpr(containsOf(TAG, newTag("x")))).toBe(
+      '(this._prices).some((__x) => __x.equals(new Tag("x")))',
+    );
+    // Money keeps its `.eq` spelling; a scalar element keeps `.includes`.
+    expect(renderTsExpr(containsOf(MONEY, litMoney("3")))).toBe(
+      '(this._prices).some((__x) => __x.eq(new Decimal("3")))',
+    );
+    expect(renderTsExpr(containsOf(STRING, litStr("x")))).toBe('(this._prices).includes("x")');
+  });
+
+  // The defect was a WRONG ANSWER, not a compile break, so evaluate the two
+  // rendered expressions against a stand-in for the generated VO class (which
+  // carries exactly this `equals`) and assert what they compute.
+  it("computes the right answers at runtime", () => {
+    class Tag {
+      constructor(public label: string) {}
+      equals(other: Tag): boolean {
+        return this.label === other.label;
+      }
+    }
+    const self = { _prices: [new Tag("x"), new Tag("x"), new Tag("y")] };
+    const evalIn = (expr: string): unknown =>
+      new Function("Tag", `return ${expr};`).call(self, Tag);
+    expect((evalIn(renderTsExpr(distinctOf(TAG))) as Tag[]).length).toBe(2);
+    expect(evalIn(renderTsExpr(containsOf(TAG, newTag("x"))))).toBe(true);
+    expect(evalIn(renderTsExpr(containsOf(TAG, newTag("zz"))))).toBe(false);
+  });
 });
 
 describe("ts renderTsExpr — call kinds", () => {
@@ -712,3 +859,57 @@ describe("ts renderTsType — generic carriers (P3b)", () => {
 });
 
 void BOOL;
+
+// ---------------------------------------------------------------------------
+// M-T6.44 (numeric-types audit F7) — the MIRROR money arm.  `moneyArithmetic`
+// admits `money × scalar` commutatively, so money arrives on the RIGHT with an
+// integral/decimal left; the gate used to read `leftType` alone, and
+// `qty * price` fell to native `*` on a decimal.js Decimal — TS2363, an
+// uncompilable generated project.  The numeric left is wrapped so the method
+// receiver is a Decimal.
+// ---------------------------------------------------------------------------
+describe("ts renderTsExpr — money on the RIGHT of a binary (M-T6.44 mirror arm)", () => {
+  const DECIMAL: TypeIR = { kind: "primitive", name: "decimal" };
+  const LONG: TypeIR = { kind: "primitive", name: "long" };
+  const mul = (lt: TypeIR, l: ExprIR): ExprIR => ({
+    kind: "binary",
+    op: "*",
+    left: l,
+    right: { ...thisProp("price"), type: MONEY },
+    leftType: lt,
+    rightType: MONEY,
+    resultType: MONEY,
+  });
+
+  it("int * money dispatches through the Decimal method API with a wrapped left", () => {
+    expect(renderTsExpr(mul(INT, { ...thisProp("qty"), type: INT }))).toBe(
+      "new Decimal(this._qty).times(this._price)",
+    );
+  });
+
+  it("long * money takes the same arm", () => {
+    expect(renderTsExpr(mul(LONG, { ...thisProp("qty"), type: LONG }))).toBe(
+      "new Decimal(this._qty).times(this._price)",
+    );
+  });
+
+  it("decimal * money takes the same arm (plain decimal is a native number here)", () => {
+    expect(renderTsExpr(mul(DECIMAL, { ...thisProp("rate"), type: DECIMAL }))).toBe(
+      "new Decimal(this._rate).times(this._price)",
+    );
+  });
+
+  it("string + string is untouched by the mirror arm (concat stays native)", () => {
+    expect(
+      renderTsExpr({
+        kind: "binary",
+        op: "+",
+        left: { ...thisProp("first"), type: STRING },
+        right: { ...thisProp("last"), type: STRING },
+        leftType: STRING,
+        rightType: STRING,
+        resultType: STRING,
+      }),
+    ).toBe("this._first + this._last");
+  });
+});

@@ -119,7 +119,7 @@ export function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagno
       // `this.id` is admitted: a capability filter is aggregate-rooted, and
       // the key is a real stored column on every backend — the derived
       // tenancy registry self-scope (`this.id == currentUser.<claim>`,
-      // Phase 1b) is exactly this shape.
+      // is exactly this shape.
       const unknown = firstUnknownColumnRef(predicate, agg, ctx, { allowSelfId: true });
       if (unknown) {
         diags.push({
@@ -349,12 +349,9 @@ export function validateFindGates(ctx: BoundedContextIR, diags: LoomDiagnostic[]
 // It applies to BOTH projection kinds.  A query-time projection evaluates it
 // before the comprehension runs; a folded (materialized) projection evaluates it
 // on its read-model routes (`GET /projections/<p>` and `.../{key}`), which are
-// just as client-reachable.  There used to be a
-// `loom.projection-gate-without-source` rejecting the folded case — its stated
-// reason was that a folded projection "has nothing to protect", which was never
-// true: it protects a table of rows.  The real reason was that the gate lived
-// inside the query-clause fragment, so a folded projection could not spell one,
-// and then that no backend emitted it.  Both are fixed; the check is gone.
+// just as client-reachable.  The folded case is NOT exempt: a folded
+// projection protects a table of rows, it can spell a gate, and every backend
+// emits one.
 export function validateProjectionGates(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   for (const proj of ctx.projections) {
     const gate = proj.query?.requires;

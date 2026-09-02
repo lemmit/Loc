@@ -11,7 +11,7 @@ import {
   isAllFind,
   relativeOpPath,
 } from "../../../ir/util/api-surface.js";
-import { problemTitle } from "../../../ir/util/openapi-errors.js";
+import { problemTitle, UNPROCESSABLE_ENTITY } from "../../../ir/util/openapi-errors.js";
 import { listReadFind } from "../../../ir/util/read-gates.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
@@ -22,6 +22,7 @@ import {
   resolveErrorStatus,
 } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { javaLogEvent } from "../../_obs/render-java.js";
 import { findUnionSpec } from "../../_payload/union-wire.js";
 import {
   collectJavaExprImports,
@@ -243,7 +244,7 @@ export function renderJavaController(
           hasParams
             ? `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id, @Valid @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
             : `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id${ifMatchHeaderParam}) {`,
-          `        CatalogLog.event("operation_invoked", "info", "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
+          `        CatalogLog.event(${javaLogEvent("operationInvoked")}, "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
           `        httpMetrics.recordDomainOperation("${agg.name}", "${op.name}");`,
           hasParams
             ? `        var result = service.${op.name}(new ${idClass}(id), request${ifMatchServiceArg});`
@@ -268,13 +269,13 @@ export function renderJavaController(
         // it sits in a generic position — `ResponseEntity<boolean>` doesn't
         // compile (`operation taken(): bool`).
         const wireRet = wireJavaType(op.returnType, "Response", true);
-        collectWireImports(op.returnType, imports);
+        collectWireImports(op.returnType, imports, "Response");
         return [
           opMapping,
           hasParams
             ? `    public ResponseEntity<${wireRet}> ${op.name}${agg.name}(@PathVariable ${idJava} id, @Valid @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
             : `    public ResponseEntity<${wireRet}> ${op.name}${agg.name}(@PathVariable ${idJava} id${ifMatchHeaderParam}) {`,
-          `        CatalogLog.event("operation_invoked", "info", "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
+          `        CatalogLog.event(${javaLogEvent("operationInvoked")}, "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
           `        httpMetrics.recordDomainOperation("${agg.name}", "${op.name}");`,
           hasParams
             ? `        var result = service.${op.name}(new ${idClass}(id), request${ifMatchServiceArg});`
@@ -291,7 +292,7 @@ export function renderJavaController(
         hasParams
           ? `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id, @Valid @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
           : `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id${ifMatchHeaderParam}) {`,
-        `        CatalogLog.event("operation_invoked", "info", "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
+        `        CatalogLog.event(${javaLogEvent("operationInvoked")}, "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
         `        httpMetrics.recordDomainOperation("${agg.name}", "${op.name}");`,
         hasParams
           ? `        service.${op.name}(new ${idClass}(id), request${ifMatchServiceArg});`
@@ -335,13 +336,11 @@ export function renderJavaController(
         const absent =
           spec.absent.kind === "none"
             ? // RS-22/RS-27 — THROW, so the `@RestControllerAdvice` renders the
-              // five-member envelope.  This used to be
-              // `ResponseEntity.notFound().build()`: Spring's own bare 404 with
-              // an EMPTY BODY, which never reaches the advice — the identical
-              // defect RS-27 fixed on the by-id read, at the arm that reads
-              // `null` and answers locally.  It also made this controller emit
-              // two different wires for shapes `payloads.md` declares
-              // wire-identical, since the `error`-variant branch below builds a
+              // five-member envelope.  `ResponseEntity.notFound().build()` is
+              // Spring's own bare 404 with an EMPTY BODY and never reaches the
+              // advice; it would also make this controller emit two different
+              // wires for shapes `payloads.md` declares wire-identical, since
+              // the `error`-variant branch below builds a
               // real ProblemDetail.
               [`            throw ${JAVA_FIND_ABSENCE_THROW};`]
             : (() => {
@@ -376,11 +375,19 @@ export function renderJavaController(
       if (isPagedFind(f)) {
         const pagedParams = [...declared, ...JAVA_PAGED_QUERY_PARAMS].join(", ");
         const pagedArgs = [args, "page, pageSize, sort, dir"].filter(Boolean).join(", ");
+        // F2-W-07 — return the CONCRETE `<Agg>Paged` record, exactly as the
+        // auto-findAll route below does.  Returning the raw `Paged<T>` generic
+        // made springdoc name the component `Paged<Agg>Response`, while node
+        // (`.openapi("<Agg>Paged")`), python (`response_model=<Agg>Paged`),
+        // elixir (`<Agg>Paged` schema) and .NET (`CustomSchemaIds` mapping
+        // `Paged<T>` → `<Agg>Paged`) all publish `<Agg>Paged` for the same
+        // route.  The service still returns `Paged<T>`; the controller wraps.
         return [
           `    @GetMapping("${relativeOpPath(entry)}")`,
-          `    public Paged<${agg.name}Response> ${f.name}${agg.name}(${pagedParams}) {`,
+          `    public ${agg.name}Paged ${f.name}${agg.name}(${pagedParams}) {`,
           ...(f.requires ? findGateLines(f) : []),
-          `        return service.${f.name}(${pagedArgs});`,
+          `        var result = service.${f.name}(${pagedArgs});`,
+          `        return new ${agg.name}Paged(result.items(), result.page(), result.pageSize(), result.total(), result.totalPages());`,
           `    }`,
           ``,
         ];
@@ -430,7 +437,7 @@ export function renderJavaController(
         `    @PostMapping${relativeOpPath(createEntry) === "" ? "" : `("${relativeOpPath(createEntry)}")`}`,
         `    public ResponseEntity<Create${agg.name}Response> create${agg.name}(@Valid @RequestBody Create${agg.name}Request request) {`,
         `        var id = service.create${agg.name}(request);`,
-        `        CatalogLog.event("aggregate_created", "info", "aggregate", "${agg.name}", "id", id.value());`,
+        `        CatalogLog.event(${javaLogEvent("aggregateCreated")}, "aggregate", "${agg.name}", "id", id.value());`,
         `        httpMetrics.recordDomainOperation("${agg.name}", "create");`,
         `        return ResponseEntity.created(URI.create("${ctx.routePrefix ?? ""}/${route}/" + id.value()))`,
         `            .body(new Create${agg.name}Response(id.value()));`,
@@ -444,12 +451,11 @@ export function renderJavaController(
     ...createRoute,
     `    @GetMapping("${relativeOpPath(getByIdEntry)}")`,
     `    public ResponseEntity<${agg.name}Response> get${agg.name}ById(@PathVariable ${idJava} id) {`,
-    // RS-27 — the service THROWS AggregateNotFoundException on a miss now
-    // (never returns null), so the `@RestControllerAdvice` renders the RFC-9457
-    // envelope with the `"<Agg> <id> not found"` detail.  This route used to
-    // answer `ResponseEntity.notFound().build()` — Spring's own bare 404 with an
-    // EMPTY BODY — which is why the java behavioural leg read `golden {…} ≠
-    // java ""` on the first test that ever drove a 404-by-id.
+    // RS-27 — the service THROWS AggregateNotFoundException on a miss (it
+    // never returns null), so the `@RestControllerAdvice` renders the RFC-9457
+    // envelope with the `"<Agg> <id> not found"` detail.  Answering
+    // `ResponseEntity.notFound().build()` here would send Spring's own bare 404
+    // with an EMPTY BODY instead.
     `        return ResponseEntity.ok(service.get${agg.name}ById(new ${idClass}(id)));`,
     `    }`,
     ``,
@@ -498,7 +504,9 @@ export function renderJavaController(
     ``,
     ctx.applicationPkg !== ctx.pkg ? `import ${ctx.applicationPkg}.*;` : null,
     ...[...unionImports].sort().map((i) => `import ${i};`),
-    declaredFinds(repo).some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
+    // No `Paged;` import: since F2-W-07 the controller never names the generic
+    // — both paged arms (declared find + auto-findAll) return `<Agg>Paged` and
+    // bind the service's `Paged<T>` through `var`.
     anyFindGate ? `import ${ctx.basePkg}.domain.common.ForbiddenException;` : null,
     anyFindAbsenceThrow ? `import ${ctx.basePkg}.domain.common.AggregateNotFoundException;` : null,
     anyFindGateUsesUser ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
@@ -594,12 +602,16 @@ export function renderApiExceptionAdvice(
   const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", structuralErrorStatuses);
   // M-T5.20 — the domain floor and the `requires` denial resolve through the
   // same `httpStatus` map as the structural conflicts above, instead of the
-  // hardcoded 422 / 403 literals they used to be. Defaults collapse to those
-  // same literals, so output is byte-identical with no override.
+  // same `httpStatus` map; the defaults are those same 422 / 403 literals.
   const domainStatus = resolveErrorStatus("DomainError", structuralErrorStatuses);
   const forbiddenStatus = resolveErrorStatus("Forbidden", structuralErrorStatuses);
+  // The domain not-found rung — the ladder's last literal.  The FRAMEWORK 404
+  // arm further down (`no route for <verb> <path>`) is a different concern and
+  // stays literal, on this backend and on the other four.
+  const notFoundStatus = resolveErrorStatus("NotFound", structuralErrorStatuses);
   const domainTitle = problemTitle(domainStatus);
   const forbiddenTitle = problemTitle(forbiddenStatus);
+  const notFoundTitle = problemTitle(notFoundStatus);
   return lines(
     `package ${basePkg}.api;`,
     ``,
@@ -626,6 +638,7 @@ export function renderApiExceptionAdvice(
     `import org.springframework.web.bind.annotation.ExceptionHandler;`,
     `import org.springframework.web.bind.annotation.RestControllerAdvice;`,
     `import org.springframework.web.context.request.WebRequest;`,
+    `import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;`,
     ``,
     `import ${basePkg}.domain.common.AggregateNotFoundException;`,
     `import ${basePkg}.domain.common.DisallowedException;`,
@@ -655,7 +668,7 @@ export function renderApiExceptionAdvice(
     // key (a messaged rule); the message-less sentinel code is omitted.
     `    @ExceptionHandler(MethodArgumentNotValidException.class)`,
     `    public ResponseEntity<ProblemDetail> onValidation(MethodArgumentNotValidException e, WebRequest request) {`,
-    `        CatalogLog.event("domain_error", "warn", "message", "Validation failed", "status", 422);`,
+    `        CatalogLog.event(${javaLogEvent("domainError")}, "message", "Validation failed", "status", 422);`,
     `        httpMetrics.recordDomainFault("domain_error");`,
     `        var problem = problem(422, "Validation failed", "One or more fields are invalid.", request);`,
     // The lookup locale is the AMBIENT request locale (D-CTX-SHAPE), not Spring's
@@ -668,7 +681,7 @@ export function renderApiExceptionAdvice(
     `        problem.setProperty("errors", e.getBindingResult().getFieldErrors().stream()`,
     `            .map(err -> {`,
     `                var entry = new java.util.LinkedHashMap<String, Object>();`,
-    `                entry.put("pointer", "/" + err.getField());`,
+    `                entry.put("pointer", pointerOf(err.getField()));`,
     // A FieldError IS a MessageSourceResolvable: MessageSource tries its codes
     // (the `msg.<hash>` i18n key) and falls back to getDefaultMessage() — the
     // authored English — when the bundle has no entry for this locale.  The
@@ -700,7 +713,7 @@ export function renderApiExceptionAdvice(
     localizeMessages && ``,
     `    @ExceptionHandler(ForbiddenException.class)`,
     `    public ResponseEntity<ProblemDetail> onForbidden(ForbiddenException e, WebRequest request) {`,
-    `        CatalogLog.event("forbidden", "warn", "message", e.getMessage(), "status", ${forbiddenStatus});`,
+    `        CatalogLog.event(${javaLogEvent("forbidden")}, "message", e.getMessage(), "status", ${forbiddenStatus});`,
     `        httpMetrics.recordDomainFault("forbidden");`,
     `        return respond(problem(${forbiddenStatus}, "${forbiddenTitle}", e.getMessage(), request), ${forbiddenStatus});`,
     `    }`,
@@ -714,14 +727,14 @@ export function renderApiExceptionAdvice(
     // request.  M-T5.20 makes the rung remappable via `httpStatus DomainError
     // -> <Code>`, resolved through the SAME map every structural conflict
     // uses, so the runtime arm and its OpenAPI declaration can't drift.
-    `        CatalogLog.event("domain_error", "warn", "message", e.getMessage(), "status", ${domainStatus});`,
+    `        CatalogLog.event(${javaLogEvent("domainError")}, "message", e.getMessage(), "status", ${domainStatus});`,
     `        httpMetrics.recordDomainFault("domain_error");`,
     `        return respond(problem(${domainStatus}, "${domainTitle}", e.getMessage(), request), ${domainStatus});`,
     `    }`,
     ``,
     `    @ExceptionHandler(DisallowedException.class)`,
     `    public ResponseEntity<ProblemDetail> onDisallowed(DisallowedException e, WebRequest request) {`,
-    `        CatalogLog.event("disallowed", "warn", "message", e.getMessage(), "status", ${disallowedStatus});`,
+    `        CatalogLog.event(${javaLogEvent("disallowed")}, "message", e.getMessage(), "status", ${disallowedStatus});`,
     `        httpMetrics.recordDomainFault("disallowed");`,
     `        return respond(problem(${disallowedStatus}, "Disallowed", e.getMessage(), request), ${disallowedStatus});`,
     `    }`,
@@ -735,11 +748,11 @@ export function renderApiExceptionAdvice(
       `        // \`unique (...)\` breach (23505 unique_violation → \`UniquenessConflict\`).`,
       `        // Either way return a friendly conflict instead of leaking a 500.`,
       `        if ("23503".equals(sqlState(e))) {`,
-      `            CatalogLog.event("conflict", "warn", "message", "This resource is still referenced and cannot be deleted.", "status", ${referencedInUseStatus});`,
+      `            CatalogLog.event(${javaLogEvent("conflict")}, "message", "This resource is still referenced and cannot be deleted.", "status", ${referencedInUseStatus});`,
       `            httpMetrics.recordDomainFault("conflict");`,
       `            return respond(problem(${referencedInUseStatus}, "Conflict", "This resource is still referenced and cannot be deleted.", request), ${referencedInUseStatus});`,
       `        }`,
-      `        CatalogLog.event("disallowed", "warn", "message", "A resource with these values already exists.", "status", ${uniquenessStatus});`,
+      `        CatalogLog.event(${javaLogEvent("disallowed")}, "message", "A resource with these values already exists.", "status", ${uniquenessStatus});`,
       `        httpMetrics.recordDomainFault("disallowed");`,
       `        return respond(problem(${uniquenessStatus}, "Conflict", "A resource with these values already exists.", request), ${uniquenessStatus});`,
       `    }`,
@@ -753,7 +766,7 @@ export function renderApiExceptionAdvice(
       `        // load→save window lost a race (the repository's guarded version bump`,
       `        // matched zero rows — write-time CAS).`,
       `        // Return a friendly 409 instead of leaking a 500.`,
-      `        CatalogLog.event("conflict", "warn", "message", "The resource was modified by another request; reload and retry.", "status", ${concurrencyStatus});`,
+      `        CatalogLog.event(${javaLogEvent("conflict")}, "message", "The resource was modified by another request; reload and retry.", "status", ${concurrencyStatus});`,
       `        httpMetrics.recordDomainFault("conflict");`,
       `        return respond(problem(${concurrencyStatus}, "Conflict", "The resource was modified by another request; reload and retry.", request), ${concurrencyStatus});`,
       `    }`,
@@ -761,14 +774,118 @@ export function renderApiExceptionAdvice(
     ],
     `    @ExceptionHandler(AggregateNotFoundException.class)`,
     `    public ResponseEntity<ProblemDetail> onNotFound(AggregateNotFoundException e, WebRequest request) {`,
-    `        CatalogLog.event("not_found", "warn", "status", 404);`,
+    `        CatalogLog.event(${javaLogEvent("notFound")}, "status", ${notFoundStatus});`,
     `        httpMetrics.recordDomainFault("not_found");`,
-    `        return respond(problem(404, "Not Found", e.getMessage(), request), 404);`,
+    `        return respond(problem(${notFoundStatus}, "${notFoundTitle}", e.getMessage(), request), ${notFoundStatus});`,
     `    }`,
     ``,
     `    @ExceptionHandler(HttpMessageNotReadableException.class)`,
     `    public ResponseEntity<ProblemDetail> onUnreadable(HttpMessageNotReadableException e, WebRequest request) {`,
     `        return respond(problem(400, "Bad Request", "Malformed JSON in request body", request), 400);`,
+    `    }`,
+    ``,
+    // A path `{id}` / typed query param that will not CONVERT — `GET
+    // /api/orders/not-a-uuid` against `@PathVariable UUID id`.  Spring raises
+    // MethodArgumentTypeMismatchException, which — measured on a booted app,
+    // not assumed — does NOT implement `ErrorResponse`, so the 4xx branch of
+    // `onUnhandled` below never saw it and the catch-all answered
+    // `500 "internal"`: a CLIENT fault reported as a server fault, telling the
+    // caller to retry a request that can never succeed.
+    //
+    // `errorStatuses("getById")` PUBLISHES 422 for exactly this failure ("a
+    // path `{id}` is parsed as a uuid … and a failure answers the same 422 the
+    // body tier does", src/ir/util/openapi-errors.ts), and Hono's
+    // `defaultHook` / .NET's `InvalidModelStateResponseFactory` already answer
+    // it.  A request-part parse failure is the wire-validation tier on every
+    // backend; keep it there on Java too, with the same `errors[]` pointer
+    // shape the body tier emits (`/id`, not the whole document).
+    `    @ExceptionHandler(MethodArgumentTypeMismatchException.class)`,
+    `    public ResponseEntity<ProblemDetail> onParamTypeMismatch(MethodArgumentTypeMismatchException e, WebRequest request) {`,
+    `        CatalogLog.event("domain_error", "warn", "message", "Validation failed", "status", ${UNPROCESSABLE_ENTITY});`,
+    `        httpMetrics.recordDomainFault("domain_error");`,
+    `        var problem = problem(${UNPROCESSABLE_ENTITY}, "Validation failed", "One or more fields are invalid.", request);`,
+    `        var entry = new java.util.LinkedHashMap<String, Object>();`,
+    `        entry.put("pointer", pointerOf(e.getName()));`,
+    `        var required = e.getRequiredType();`,
+    `        entry.put("message", required != null`,
+    `            ? "Expected " + required.getSimpleName() + "."`,
+    `            : "Invalid value.");`,
+    `        problem.setProperty("errors", java.util.List.of(entry));`,
+    `        return respond(problem, ${UNPROCESSABLE_ENTITY});`,
+    `    }`,
+    ``,
+    // A PAGED BOUND REFUSED — `GET /api/customers?pageSize=0`, outside the
+    // `@Min(1)`/`@Max(500)` that `JAVA_PAGED_QUERY_PARAMS` both publishes and
+    // enforces.  Spring raises HandlerMethodValidationException, which — unlike
+    // the two arms below — DOES implement `ErrorResponse`, carrying 400.  So it
+    // was answered correctly-shaped but with the WRONG STATUS: the other four
+    // backends all answer 422 for the same request (`z.coerce.number().min(1)`
+    // → Hono's `defaultHook`; `Query(ge=1, le=…)` → FastAPI's
+    // RequestValidationError; `[Range(1, …)]` → .NET's
+    // `InvalidModelStateResponseFactory`), and java's OWN published contract
+    // declares 200 + 422 on these routes and no 400.
+    //
+    // A rejected query parameter is the WIRE-VALIDATION tier on every backend —
+    // the same tier as a malformed path `{id}` (the arm below) and a body field
+    // (`MethodArgumentNotValidException`, above).  It answers that tier's 422
+    // here too, with the same `errors[]` pointer shape, so one client ACL
+    // handles all three (schemathesis F25).
+    //
+    // NOT to be confused with the malformed-query arm that follows: THAT one is
+    // an UNPARSEABLE request (400 is right, and stays), this one is a
+    // well-formed request carrying an out-of-contract value.
+    `    @ExceptionHandler(org.springframework.web.method.annotation.HandlerMethodValidationException.class)`,
+    `    public ResponseEntity<ProblemDetail> onParamValidation(org.springframework.web.method.annotation.HandlerMethodValidationException e, WebRequest request) {`,
+    `        CatalogLog.event("domain_error", "warn", "message", "Validation failed", "status", ${UNPROCESSABLE_ENTITY});`,
+    `        httpMetrics.recordDomainFault("domain_error");`,
+    `        var problem = problem(${UNPROCESSABLE_ENTITY}, "Validation failed", "One or more fields are invalid.", request);`,
+    `        var entries = new java.util.ArrayList<java.util.Map<String, Object>>();`,
+    `        for (var result : e.getParameterValidationResults()) {`,
+    // `getParameterName()` needs javac's `-parameters`, which Spring Boot's
+    // Gradle plugin sets by default (and the controllers rely on already —
+    // their `@RequestParam` declarations name no value). Guarded anyway so a
+    // toolchain that drops the flag degrades to the whole-document pointer
+    // rather than emitting `/null`.
+    `            var name = result.getMethodParameter().getParameterName();`,
+    `            for (var err : result.getResolvableErrors()) {`,
+    `                var entry = new java.util.LinkedHashMap<String, Object>();`,
+    `                entry.put("pointer", pointerOf(name != null ? name : ""));`,
+    `                entry.put("message", err.getDefaultMessage() != null ? err.getDefaultMessage() : "Invalid value.");`,
+    `                entries.add(entry);`,
+    `            }`,
+    `        }`,
+    `        problem.setProperty("errors", entries);`,
+    `        return respond(problem, ${UNPROCESSABLE_ENTITY});`,
+    `    }`,
+    ``,
+    // A MALFORMED QUERY STRING — `GET /api/customers?=%C3%A0`, a parameter with
+    // an empty name.  Tomcat refuses to parse the chunk and throws
+    // `InvalidParameterException` out of the first `getParameter()` call, which
+    // on a paged read is Spring's own argument resolution.  It extends
+    // IllegalStateException and does NOT implement `ErrorResponse`, so — exactly
+    // like MethodArgumentTypeMismatchException above — it fell past the 4xx
+    // branch of `onUnhandled` and the catch-all answered `500 "internal"`: the
+    // third instance of this file's recurring bug, a CLIENT fault reported as a
+    // server fault (schemathesis F24, `not_a_server_error` on every paged
+    // collection read).
+    //
+    // Measured on a booted backend, not assumed: `GET /api/customers?=%C3%A0`
+    // → 500 before this arm, 400 after; `?pageSize=467` (in-contract, and the
+    // other half of the fuzzer's repro) answers 200 either way, so the declared
+    // `@Max` bound is not involved.
+    //
+    // Tomcat has already decided the status — `getErrorCode()` is the 400 it
+    // would have sent itself — so take it rather than hardcoding one, and fall
+    // back to 400 if a future version leaves it unset.  The type is named
+    // fully-qualified (no import added, as with the validation annotations in
+    // common.ts); `spring-boot-starter-web` is emitted unconditionally and
+    // brings Tomcat, so the class is always on the classpath.
+    `    @ExceptionHandler(org.apache.tomcat.util.http.InvalidParameterException.class)`,
+    `    public ResponseEntity<ProblemDetail> onMalformedQuery(org.apache.tomcat.util.http.InvalidParameterException e, WebRequest request) {`,
+    `        var status = e.getErrorCode() >= 400 ? e.getErrorCode() : 400;`,
+    `        var reason = HttpStatus.valueOf(status).getReasonPhrase();`,
+    `        CatalogLog.event(${javaLogEvent("clientError")}, "error", "Malformed query string", "status", status);`,
+    `        return respond(problem(status, reason, "Malformed query string", request), status);`,
     `    }`,
     ``,
     `    @ExceptionHandler(Exception.class)`,
@@ -809,10 +926,10 @@ export function renderApiExceptionAdvice(
     `                case 405 -> "method " + servletRequest.getMethod() + " is not supported for " + path;`,
     `                default -> er.getBody().getDetail() != null ? er.getBody().getDetail() : reason;`,
     `            };`,
-    `            CatalogLog.event("client_error", "warn", "error", detail, "status", status);`,
+    `            CatalogLog.event(${javaLogEvent("clientError")}, "error", detail, "status", status);`,
     `            return respond(problem(status, reason, detail, request), status);`,
     `        }`,
-    `        CatalogLog.event("internal_error", "error", "error", e.getMessage(), "status", 500);`,
+    `        CatalogLog.event(${javaLogEvent("internalError")}, "error", e.getMessage(), "status", 500);`,
     `        e.printStackTrace();`,
     `        return respond(problem(500, "Internal Server Error", "internal", request), 500);`,
     `    }`,
@@ -840,6 +957,42 @@ export function renderApiExceptionAdvice(
     `            .contentType(MediaType.APPLICATION_PROBLEM_JSON)`,
     `            .body(problem);`,
     `    }`,
+    ``,
+    // RFC 6901 JSON pointer for a Spring binding path (M-T9.25 / F1
+    // nested-errors-pointer-shape).  Spring spells a nested VO-collection
+    // violation `lineTotals[0].unitPrice` — Java property-path notation, NOT a
+    // pointer — so a nested `errors[]` entry shipped `/lineTotals[0].unitPrice`
+    // while .NET/node/python all shipped `/lineTotals/0/unitPrice` for the same
+    // model.  Split on `.`, turn each `[i]` indexer into its own numeric
+    // segment, and apply the RFC 6901 escapes (`~` → `~0`, `/` → `~1`) inside
+    // each segment.  Java record components are already camelCase, so (unlike
+    // .NET's `PointerOf`) no case conversion is needed.  Empty input → the
+    // empty pointer (the whole document).
+    `    private static String pointerOf(String path) {`,
+    `        if (path == null || path.isEmpty()) return "";`,
+    `        var segments = new java.util.ArrayList<String>();`,
+    `        for (var dotPart : path.split("\\\\.", -1)) {`,
+    `            int idx = 0;`,
+    `            while (idx < dotPart.length()) {`,
+    `                int bracket = dotPart.indexOf('[', idx);`,
+    `                if (bracket < 0) {`,
+    `                    segments.add(dotPart.substring(idx));`,
+    `                    break;`,
+    `                }`,
+    `                if (bracket > idx) segments.add(dotPart.substring(idx, bracket));`,
+    `                int close = dotPart.indexOf(']', bracket);`,
+    `                if (close < 0) break;`,
+    `                segments.add(dotPart.substring(bracket + 1, close));`,
+    `                idx = close + 1;`,
+    `            }`,
+    `        }`,
+    `        var out = new StringBuilder();`,
+    `        for (var seg : segments) {`,
+    `            out.append('/').append(seg.replace("~", "~0").replace("/", "~1"));`,
+    `        }`,
+    `        return out.toString();`,
+    `    }`,
+
     // The SQLState reader is emitted only alongside the DataIntegrityViolation
     // handler that calls it (gated on `hasUniqueKeys`), so a unique-free project
     // stays byte-identical.

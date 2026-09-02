@@ -12,7 +12,7 @@ import {
 } from "../../../language/validators/data/platform-rules.js";
 import { descriptorFor } from "../../../platform/metadata.js";
 import { FLUTTER_DEFERRED_BUILDER_NAMES } from "../../../util/flutter-deferred-primitives.js";
-import { lowerFirst, plural, snake } from "../../../util/naming.js";
+import { isJavaKeyword, lowerFirst, plural, snake } from "../../../util/naming.js";
 import {
   capabilitiesFor,
   configSchemaFor,
@@ -57,9 +57,15 @@ import {
   firstUnlowerableForAdapter,
   isFindPredicateAdapter,
 } from "../../util/find-predicate-capability.js";
+import { heexComponentHostStateUses } from "../../util/heex-component-host-state.js";
+import { nonRootFilterFields, rootBaseOf } from "../../util/inheritance.js";
 import { readableProjectionNames } from "../../util/projection-read.js";
 import { opHasProvSite } from "../../util/prov-id.js";
-import { dapperQueryProjectionGap } from "../../util/query-projection-arm.js";
+import {
+  columnlessProjectionSource,
+  documentAggregationSource,
+  unappliedCapabilityFilters,
+} from "../../util/query-projection-arm.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
@@ -67,7 +73,8 @@ import {
   resolveDataSourceConfig,
 } from "../../util/resolve-datasource.js";
 import { isDeepScopeFilter } from "../../util/tenant-stance.js";
-import { walkExprDeep, walkWorkflowStmtExprsDeep } from "../../util/walk.js";
+import { typeLabel } from "../../util/type-label.js";
+import { walkExprDeep, walkStmtsDeep, walkWorkflowStmtExprsDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { firstNonGateRef, GATE_ALLOWED_REFS } from "./query-checks.js";
 import { walkExpr } from "./shared.js";
@@ -94,13 +101,16 @@ import { validateE2ETest } from "./test-checks.js";
 // just a string/uuid and doesn't depend on a display label.
 // ---------------------------------------------------------------------------
 
-// `auth: ui` (the frontend OIDC guard) is emitted by the React, Vue, Svelte,
-// Angular and Feliz generators (`generator/feliz/auth-gate.ts` — the Elmish
-// session model + `AuthGate` view, driven end-to-end by the `authgate`
-// scenario in `generated-feliz-build.yml`).  A deployable whose resolved UI
-// framework is none of those (flutter) would silently emit no guard — reject
-// it loudly so the limitation is visible rather than a no-op.
-const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular", "feliz"]);
+// `auth: ui` (the frontend OIDC guard) is emitted by every shipped frontend
+// generator: React, Vue, Svelte, Angular, Feliz (`generator/feliz/auth-gate.ts`
+// — the Elmish session model + `AuthGate` view, driven end-to-end by the
+// `authgate` scenario in `generated-feliz-build.yml`) and Flutter
+// (`generator/flutter/auth-gate.ts` — the `sessionProvider` probe, the `AuthGate`
+// wrapper around `MaterialApp`, and the `ForbiddenView` page guard).  The set is
+// KEPT, not deleted: it is the seam a new frontend gates on until it ports, and
+// the diagnostic below is its message — a deployable whose resolved UI framework
+// is absent would otherwise silently emit no guard at all.
+const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular", "feliz", "flutter"]);
 
 // paged-run (paged-queryHandler): a `queryHandler H(...): <Agg> paged` is
 // emitted by each backend whose explicit-handler emitter has grown the paged
@@ -109,7 +119,7 @@ const AUTH_UI_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular", "feliz"
 // return-type render, so gate a paged queryHandler hosted on such a deployable
 // with an honest diagnostic until its emitter fans out — a reviewed gap rather
 // than a silent codegen crash.
-const PAGED_QH_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"]);
+export const PAGED_QH_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"]);
 
 // query-time projection (read-path-architecture.md rev.13): the always-current
 // read model (`projection X { from … where … join … select … }`, no folds) is
@@ -119,7 +129,7 @@ const PAGED_QH_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"
 // until its port lands — the same reviewed-gap discipline as the paged gate.
 // All five backends have ported it: node (PR-C), python (PR-D), elixir (PR-E),
 // java (PR-F), dotnet (PR-G).
-const PROJECTION_QT_SUPPORTED = new Set(["node", "python", "elixir", "java", "dotnet"]);
+export const PROJECTION_QT_SUPPORTED = new Set(["node", "python", "elixir", "java", "dotnet"]);
 
 // Whole-table aggregation in a query-time projection's `select`
 // (`select orders = count`, `select revenue = sum(o.total)`) — the SINGLETON
@@ -130,10 +140,10 @@ const PROJECTION_QT_SUPPORTED = new Set(["node", "python", "elixir", "java", "do
 // Backends in `PROJECTION_AGG_SUPPORTED` have ported it; the rest gate HONESTLY
 // rather than emit the operator name as a free identifier.  Same reviewed-gap
 // discipline as `validateQueryTimeProjectionBackend` above; node is first.
-// All five backends now emit the SQL push-down (node #1, then python / dotnet /
-// java / elixir).  The set is kept — not deleted — because it is the seam a new
-// backend gates on until it ports, and the diagnostic below is its message.
-const PROJECTION_AGG_SUPPORTED = new Set(["node", "python", "dotnet", "java", "elixir"]);
+// Every shipping backend emits the SQL push-down, so the set is currently
+// exhaustive.  It is kept — not deleted — because it is the seam a new backend
+// gates on until it ports, and the diagnostic below is its message.
+export const PROJECTION_AGG_SUPPORTED = new Set(["node", "python", "dotnet", "java", "elixir"]);
 
 export function validateWholeTableAggregationBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
@@ -169,7 +179,7 @@ export function validateWholeTableAggregationBackend(sys: SystemIR, diags: LoomD
 // per-row read (rows mapped in the app), so a new backend gates on it
 // separately until its port lands — the same reviewed-gap discipline as
 // `PROJECTION_AGG_SUPPORTED` above.  All five current backends emit it.
-const PROJECTION_GROUPBY_SUPPORTED = new Set(["node", "python", "dotnet", "java", "elixir"]);
+export const PROJECTION_GROUPBY_SUPPORTED = new Set(["node", "python", "dotnet", "java", "elixir"]);
 
 export function validateGroupedProjectionBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
@@ -190,6 +200,189 @@ export function validateGroupedProjectionBackend(sys: SystemIR, diags: LoomDiagn
           }),
           source: `${c.name}/${p.name}`,
         });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// COLUMN-LESS direct-table projection source — universal, not per-backend.
+//
+// The two direct-table arms (`select n = count()/sum(o.x)`, `group by`) push
+// the aggregation into SQL, which means they name COLUMNS on the source
+// aggregate's own table.  Three source shapes have no such columns:
+// `persistedAs: eventLog` (no state table at all), `shape: document` (one
+// `(id, data, version)` triple, declared fields inside the jsonb blob), and a
+// TPC abstract base (no table of its own).  Every backend then emitted a
+// reference to something that does not exist — `schema.orders.total` (TS2339),
+// `_db.Orders` / `o.Total` (CS0117 / CS1061), `sum(e.total)` in JPQL,
+// `OrderRow.total` in SQLAlchemy, `record.total` in Ecto — with nothing said at
+// generate time.
+//
+// This was a `persistence: dapper` gate until now, on the premise that EF Core
+// translated the JSON itself.  It does not; Loom maps a document aggregate to
+// a hand-rolled `<Agg>Document` row type.  So the gate is universal, and it is
+// NOT a gate-SET: no backend emits this correctly, so there is no per-platform
+// membership to keep honest.
+//
+// It stays PRECISE about the document case: a document table really does have
+// an `id` column, so `select n = count()` over a document source emits and runs
+// on all five backends — and must keep doing so, since that is the row-count
+// tile `scaffoldDashboard` synthesises.  Only a reference to some OTHER member
+// is refused.  The condition is `columnlessProjectionSource`, which keys off the
+// same `queryProjectionArm` classification the .NET emitter switches on
+// (`ir/util/query-projection-arm.ts`), so the gate and the emission arm cannot
+// disagree about WHICH arm is being refused.
+// ---------------------------------------------------------------------------
+export function validateColumnlessProjectionSources(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const sd of sys.subdomains) {
+    for (const ctx of sd.contexts) {
+      for (const p of ctx.projections ?? []) {
+        if (!isQueryTimeProjection(p)) continue;
+        const reason = columnlessProjectionSource(p, ctx, sys);
+        if (!reason) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.projection-columnless-source",
+          message: diagMessage("loom.projection-columnless-source", {
+            name: p.name,
+            ctxName: ctx.name,
+            reason,
+          }),
+          source: `${ctx.name}/${p.name}`,
+        });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CAPABILITY-FILTERED direct-table aggregation over a `shape: document` source
+// — universal, and the one gate here that closes a SILENT DATA LEAK rather
+// than a miscompile.
+//
+// `columnlessProjectionSource` above deliberately lets `select n = count()`
+// through over a document source: a document table really is `(id, data,
+// version)`, so a row count names a real column and four of the five backends
+// emit it correctly.  What that gate cannot see is the OTHER half of the SQL —
+// the capability filters (tenancy scope, `softDeletable`, any `filter`
+// capability) that the aggregation emitters splice in themselves, because the
+// read bypasses the repository that would otherwise apply them.  Those
+// predicates name `tenant_id` / `is_deleted`, and a document table has neither:
+//
+//   node/drizzle    `eq(schema.orders.tenantId, …)`        TS2339
+//   node/mikroorm   `qb.where({ tenantId: … })`            not a property of OrderRow
+//   python          `OrderRow.tenant_id == …`              AttributeError / mypy
+//   elixir          `record.tenant_id`                     `mix compile` error
+//   dotnet/dapper   `WHERE tenant_id = @__cu_org`          Postgres 42703 at runtime
+//   dotnet/EF       — NOTHING —                            counts every tenant's rows
+//
+// The last row is why this is refused universally instead of being left to the
+// per-backend compile.  EF applies capability filters through
+// `modelBuilder.Entity<T>().HasQueryFilter(…)`, which Loom registers only for a
+// RELATIONALLY-mapped aggregate; a document aggregate's filters live in-app, in
+// the repository's `_CapabilityVisible`.  So the EF aggregation compiles clean,
+// ships, and silently counts other tenants' (and soft-deleted) rows — the exact
+// failure a compile gate can never catch.
+//
+// `ignoring` is honoured: a projection that explicitly waives the filters needs
+// none applied, so it is not gated (`unappliedCapabilityFilters`).  That is the
+// documented way out for an author who genuinely wants the unscoped total.
+// ---------------------------------------------------------------------------
+export function validateDocumentAggregationFilters(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const sd of sys.subdomains) {
+    for (const ctx of sd.contexts) {
+      for (const p of ctx.projections ?? []) {
+        if (!isQueryTimeProjection(p)) continue;
+        const agg = documentAggregationSource(p, ctx, sys);
+        if (!agg) continue;
+        const caps = unappliedCapabilityFilters(p, agg);
+        if (caps.length === 0) continue;
+        diags.push({
+          severity: "error",
+          code: "loom.projection-document-source-capability-filtered",
+          message: diagMessage("loom.projection-document-source-capability-filtered", {
+            name: p.name,
+            ctxName: ctx.name,
+            source: agg.name,
+            caps: caps.join(", "),
+          }),
+          source: `${ctx.name}/${p.name}`,
+        });
+      }
+    }
+  }
+}
+
+// Direct-table aggregation over a `shape: document` source — the BARE case, the
+// one `validateDocumentAggregationFilters` above leaves alone.  Four backends
+// aggregate a document table correctly (`count(*)` over `(id, data, version)`
+// is a real query): node/drizzle and node/mikroorm select over the row table,
+// python over the `OrderRow` model, elixir over the document Ecto schema, and
+// both .NET adapters over `DbSet<OrderDocument>` / the raw table.
+//
+// Java cannot.  Its aggregation runs JPQL through the `EntityManager`
+// (`select count(e) from Order e`), and a document aggregate has NO JPA
+// `@Entity` at all — it round-trips one jsonb column through a `JdbcTemplate`
+// repository — so Hibernate fails the query with "could not resolve root
+// entity" at request time.  Broken with NO capabilities in play, which is what
+// makes this a SECOND, per-backend gate rather than part of the universal one
+// above.
+//
+// It reuses the two codes that already mean exactly "deployable D (platform P)
+// cannot generate this aggregation arm" —
+// `loom.projection-whole-table-aggregation-unsupported` for the singleton arm
+// and `loom.projection-groupby-unsupported-backend` for the grouped one — via
+// their `#document` message variants.  Minting a third code would have said the
+// same thing in a third way, and both of these are already carried as `gap`
+// rows in the `*-unsupported` register: this membership set is a REFINEMENT of
+// theirs (which source shapes the ported emitter can reach), not a new kind of
+// claim.  The set is the seam java's emitter drops out of the moment it learns
+// to read a document table (a native `select count(*) from <schema>.<table>`).
+const PROJECTION_DOCUMENT_AGG_SUPPORTED = new Set(["node", "python", "elixir", "dotnet"]);
+
+export function validateDocumentAggregationBackend(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map(sys.subdomains.flatMap((sd) => sd.contexts.map((c) => [c.name, c])));
+  for (const d of sys.deployables) {
+    if (!platformOwnsBackend(d.platform)) continue;
+    if (PROJECTION_DOCUMENT_AGG_SUPPORTED.has(platformFamily(d.platform) ?? "")) continue;
+    for (const cn of d.contextNames) {
+      const c = ctxByName.get(cn);
+      if (!c) continue;
+      for (const p of c.projections ?? []) {
+        if (!isQueryTimeProjection(p)) continue;
+        const agg = documentAggregationSource(p, c, sys);
+        if (!agg) continue;
+        const params = {
+          name: p.name,
+          source: agg.name,
+          dName: d.name,
+          platform: d.platform,
+        };
+        // Two separate pushes, each with a LITERAL `code:`, rather than one
+        // push with a ternary — `test/ir/diagnostic-codes-completeness.test.ts`
+        // reads the code straight out of the source text, and a computed code is
+        // exactly the "which code does this arm raise?" question it exists to
+        // keep answerable by grep.
+        const where = `${c.name}/${p.name}`;
+        if (isGroupedProjection(p)) {
+          diags.push({
+            severity: "error",
+            code: "loom.projection-groupby-unsupported-backend",
+            message: diagMessage("loom.projection-groupby-unsupported-backend#document", params),
+            source: where,
+          });
+        } else {
+          diags.push({
+            severity: "error",
+            code: "loom.projection-whole-table-aggregation-unsupported",
+            message: diagMessage(
+              "loom.projection-whole-table-aggregation-unsupported#document",
+              params,
+            ),
+            source: where,
+          });
+        }
       }
     }
   }
@@ -255,7 +448,13 @@ export function validateQueryTimeProjectionBackend(sys: SystemIR, diags: LoomDia
 // `PROJECTION_WF_SOURCE_SUPPORTED` have ported it; others gate the read HONESTLY
 // (rather than emit a broken reference to a non-existent workflow repository)
 // until their port lands.  Mirrors `validateQueryTimeProjectionBackend`.
-const PROJECTION_WF_SOURCE_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"]);
+export const PROJECTION_WF_SOURCE_SUPPORTED = new Set([
+  "node",
+  "python",
+  "java",
+  "dotnet",
+  "elixir",
+]);
 
 export function validateWorkflowSourceProjectionBackend(
   sys: SystemIR,
@@ -291,7 +490,13 @@ export function validateWorkflowSourceProjectionBackend(
 // repository — a distinct per-backend emit path.  Backends in
 // `PROJECTION_PROJ_SOURCE_SUPPORTED` have ported it; others gate the read
 // HONESTLY until their port lands.  Mirrors `validateWorkflowSourceProjectionBackend`.
-const PROJECTION_PROJ_SOURCE_SUPPORTED = new Set(["node", "python", "java", "dotnet", "elixir"]);
+export const PROJECTION_PROJ_SOURCE_SUPPORTED = new Set([
+  "node",
+  "python",
+  "java",
+  "dotnet",
+  "elixir",
+]);
 
 export function validateProjectionSourceProjectionBackend(
   sys: SystemIR,
@@ -362,6 +567,47 @@ export function validateDataGridFramework(sys: SystemIR, diags: LoomDiagnostic[]
   }
 }
 
+/** A page-body primitive that needs HOST-LIVEVIEW state, written inside a
+ *  `component`, on a phoenixLiveView ui.
+ *
+ *  A HEEx function component is a pure render function with no process of its
+ *  own, so its `state { … }` and named `action`s are LIFTED into the host page's
+ *  LiveView (#2646).  That hoisting was never extended to the walker's form /
+ *  query / upload / table-control accumulators, so these primitives emit their
+ *  markup inside the component while the host gets no assign, no
+ *  `allow_upload/3` and no `handle_event/3`.
+ *
+ *  It is a COMPILE ERROR rather than a documented degrade because the emitted
+ *  project passes `mix compile --warnings-as-errors` and then dies at REQUEST
+ *  time on the missing assign — a page that raises on load, or a form whose submit
+ *  silently does nothing.  A gate the author reads is strictly better than a
+ *  crash they meet in the running app.  The workaround is exact and local: move
+ *  the primitive into the page body (components may still hold layout, display,
+ *  `state` and `action`s).
+ *
+ *  Drains when the four accumulators hoist the way state and actions already do
+ *  — the same `ComponentActionInfo` + `gather*` seam, plus the multi-instance
+ *  question `componentUses` exists to answer for state. */
+export function validateHeexComponentHostState(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const d of sys.deployables) {
+    for (const { ui, fw } of mountedUis(sys, d)) {
+      if (fw !== "phoenixLiveView") continue;
+      for (const { component, primitive } of heexComponentHostStateUses(ui)) {
+        diags.push({
+          severity: "error",
+          code: "loom.heex-component-host-state-unsupported",
+          message: diagMessage("loom.heex-component-host-state-unsupported", {
+            component,
+            primitive,
+            dName: d.name,
+          }),
+          source: `${ui.name}/${component}`,
+        });
+      }
+    }
+  }
+}
+
 /** Every ui a deployable actually mounts, with the framework that will render
  *  it.  `hosts: [A, B]` mounts SEVERAL (D-PHOENIX-SURFACE); `ui:` sugar/compose
  *  mounts one — a gate reading `d.uiName` alone never scans past the first, so
@@ -379,18 +625,16 @@ function mountedUis(sys: SystemIR, d: DeployableIR): { ui: UiIR; fw: string }[] 
   return out;
 }
 
-/** Frontends that can render `Chart` (M-T1.3 Phase 4).
+/** Frontends that can render `Chart`.
  *
  *  react reaches a charting LIBRARY through its design pack; the other three
  *  need none — see the rollout note on the gate below. */
-/** `Chart` on a target that can't render it (M-T1.3 Phase 4).
+/** `Chart` on a target that can't render it.
  *
- *  The gate was per-PACK during the staged rollout (mantine v9 was the only
- *  pack shipping a `primitive-chart` template + a chart dependency).  The
- *  backfill is complete — all EIGHT tsx packs ship both — so `primitive-chart`
- *  is now in `REQUIRED_PRIMITIVES.tsx.core`, which makes a react pack missing
- *  it a pack-LOAD failure rather than something to re-check here.  What remains
- *  is the per-FRAMEWORK rule, exactly like `validateDataGridFramework`.
+ *  `primitive-chart` is in `REQUIRED_PRIMITIVES.tsx.core`, so a react pack
+ *  missing it is a pack-LOAD failure rather than something to re-check here.
+ *  This gate is the per-FRAMEWORK rule, exactly like
+ *  `validateDataGridFramework`.
  *
  *  Phoenix, Feliz and Flutter join react by rendering the chart THEMSELVES —
  *  inline SVG (HEEx, Feliz) and a `CustomPainter` (Flutter), computed from rows
@@ -405,8 +649,8 @@ function mountedUis(sys: SystemIR, d: DeployableIR): { ui: UiIR; fw: string }[] 
  *  so it conflicts on rebase.  Resolve by keeping EVERY framework already
  *  present plus yours — never by taking one side wholesale.
  *
- *  With the last frontend ported the Set names every shipping framework, so the
- *  gate no longer fires for anything that exists — it is the seam a NEW frontend
+ *  The Set names every shipping framework, so the gate fires for nothing that
+ *  exists today — it is the seam a NEW frontend
  *  gates on until it ports, not dead code.  EXPORTED so its own test can prove
  *  it still bites: with nothing left to gate, "the check works" and "the check
  *  is unreachable" are indistinguishable from the outside, and the only honest
@@ -451,7 +695,7 @@ export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): vo
 }
 
 // Frontends whose generated client can READ a query-time projection
-// (M-T1.3 Phase 1).  These ship a projections api module + the walker's
+// These ship a projections api module + the walker's
 // Pattern H; the remaining frontends have no client, so a page reading a
 // projection there would emit an unresolved receiver — `undefined.<Projection>`,
 // a runtime TypeError and a build break.  Gate honestly until each ports, the
@@ -461,8 +705,8 @@ export function validateChartSupport(sys: SystemIR, diags: LoomDiagnostic[]): vo
 // port PR, so it conflicts on rebase.  Resolve by keeping EVERY framework
 // already present plus yours — never by taking one side wholesale.
 //
-// With the last frontend ported the Set names every shipping framework, so the
-// gate no longer fires for anything that exists — it is the seam a NEW frontend
+// The Set names every shipping framework, so the gate fires for nothing that
+// exists today — it is the seam a NEW frontend
 // gates on until it ports, not dead code.  EXPORTED so its own test can prove
 // it still bites: with nothing left to gate, "the check works" and "the check
 // is unreachable" are indistinguishable from the outside, and the only honest
@@ -583,11 +827,7 @@ export function validateCurrentUserNeedsAuthUi(sys: SystemIR, diags: LoomDiagnos
     if (d.auth?.ui || d.auth?.required) continue;
     for (const { ui } of mountedUis(sys, d)) {
       // Components are walked for the same reason charts and grids are — a
-      // read moved into one renders into the page all the same.  (Today a
-      // component's `currentUser` lowers to an UNRESOLVED ref, because
-      // `lowerComponent` threads `user: undefined` where `lowerPage` threads
-      // the system's user block; when that is threaded through, this arm
-      // starts biting with no edit here.)
+      // read moved into one renders into the page all the same.
       const hosts: { what: string; host: UiRenderHost }[] = [
         ...ui.pages.map((p) => ({ what: `page '${p.name}'`, host: p as UiRenderHost })),
         ...ui.components.map((c) => ({ what: `component '${c.name}'`, host: c as UiRenderHost })),
@@ -611,9 +851,17 @@ export function validateCurrentUserNeedsAuthUi(sys: SystemIR, diags: LoomDiagnos
 
 /** The render-scope members a page and a component share — every place a
  *  `currentUser` read can hide in one.  (`PageIR` carries more; only these
- *  four are walked here.) */
+ *  five are walked here.)
+ *
+ *  `requires` is page-only (a component has no gate expression) and is the
+ *  SECURITY-shaped member: `page { requires currentUser.role == "admin" }` is
+ *  precisely the place a `currentUser` read is load-bearing.  Without a session
+ *  binding the gate expression renders against nothing (`_frontend/gate-expr.ts`
+ *  emits the read verbatim), so an unauthenticated ui would ship an access check
+ *  that can never evaluate — clean validation, no guard. */
 interface UiRenderHost {
   body?: ExprIR;
+  requires?: ExprIR;
   state: { init?: ExprIR }[];
   derived: { expr: ExprIR }[];
   actions: { body: StmtIR[] }[];
@@ -621,6 +869,7 @@ interface UiRenderHost {
 
 function hostReadsCurrentUser(host: UiRenderHost): boolean {
   if (exprUsesCurrentUser(host.body)) return true;
+  if (exprUsesCurrentUser(host.requires)) return true;
   if (host.state.some((s) => exprUsesCurrentUser(s.init))) return true;
   if (host.derived.some((d) => exprUsesCurrentUser(d.expr))) return true;
   return host.actions.some((a) => a.body.some(stmtUsesCurrentUser));
@@ -636,6 +885,10 @@ const SSE_REALTIME_FRONTENDS = new Set<string>([
   "svelte",
   "angular",
   "feliz",
+  // Flutter subscribes through `generator/flutter/realtime.ts` — the browser's
+  // own `EventSource` on the web, a line parser over a streamed `package:http`
+  // response natively, behind one conditional-import façade.
+  "flutter",
   "static",
 ]);
 // Frontends that realize realtime NATIVELY (Phoenix LiveView pushes over its
@@ -644,10 +897,12 @@ const NATIVE_REALTIME_FRONTENDS = new Set<string>(["elixir", "phoenixLiveView"])
 
 /** Honesty gate for `on <channel>.<Event>` live-event handlers (channels.md
  *  Part I).  A handler on a ui whose serving frontend can't consume realtime
- *  — a framework with no realtime path (e.g. `flutter`), or an SSE-consuming
- *  frontend pointed at a backend that doesn't serve the SSE wire (e.g. a react
- *  ui targeting the Phoenix/Elixir backend) — compiles clean today but emits
- *  nothing.  Warn so the silent drop is a reviewed decision, not a surprise.
+ *  — a framework with no realtime path, or an SSE-consuming frontend pointed
+ *  at a serving deployable that doesn't stream the SSE wire — compiles clean
+ *  today but emits nothing.  Warn so the silent drop is a reviewed decision,
+ *  not a surprise.  Neither arm names a shipped pairing any more (all six
+ *  frontends consume, all five backends serve); both stay as the seam the
+ *  next target gates on.
  *
  *  Capability-driven (the two frontend sets + `backendServesRealtime`) rather
  *  than hard-coding a frontend list, so a future frontend without the wire
@@ -682,7 +937,10 @@ export function validateUiRealtimeSupport(sys: SystemIR, diags: LoomDiagnostic[]
         });
         continue;
       }
-      // Unknown / non-consuming frontend (e.g. flutter) — no realtime path.
+      // Unknown / non-consuming frontend — no realtime path.  No SHIPPED
+      // frontend sits here any more (flutter was the last, and joined
+      // `SSE_REALTIME_FRONTENDS`); this is the seam a new one warns on until it
+      // grows realtime consumption.
       diags.push({
         severity: "warning",
         code: "loom.ui-realtime-unsupported",
@@ -775,7 +1033,7 @@ export function validateFlutterPrimitiveSupport(sys: SystemIR, diags: LoomDiagno
 //     client-reachable, so they are excluded.
 //
 // Read endpoints — **views** and repository **finds** — are in scope too: each
-// is a GET endpoint, and both now carry an optional `requires <expr>` gate (the
+// is a GET endpoint, and both carry an optional `requires <expr>` gate (the
 // read-side twin of an operation's in-handler 403).  An ungated read under
 // denyByDefault serves to any caller; `requires true` is the explicit
 // intentionally-public escape.
@@ -829,7 +1087,7 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
         }
       }
       // Repository finds: each author-declared named find is its own GET route
-      // and now carries the same optional `requires <expr>` gate.  The aggregate
+      // and carries the same optional `requires <expr>` gate.  The aggregate
       // list-all endpoint (the auto-injected `find all`) is out of scope — it is
       // compiler-synthesized and has no author source line to attach a gate to;
       // gating it needs an aggregate-level default-read surface (follow-up).
@@ -875,12 +1133,9 @@ export function validateDefaultDeny(sys: SystemIR, diags: LoomDiagnostic[]): voi
       // one), so under denyByDefault an ungated one publishes its rows to any
       // caller exactly as an ungated find publishes an aggregate's.
       //
-      // This was the last read surface default-deny walked past.  It could not
-      // have been enforced before: a folded projection was unable to SPELL a
-      // gate (the keyword lived in the query-clause fragment) and no backend
-      // emitted one, so demanding a gate would have been demanding the
-      // impossible.  Both halves are fixed, so the requirement is now
-      // satisfiable and the exemption has no reason left.
+      // Folded projections are in scope like every other read surface: a
+      // projection can SPELL a `requires` gate and the backends emit it, so
+      // demanding one is satisfiable.
       for (const proj of c.projections) {
         if (proj.query?.requires) continue;
         // A MACRO-emitted projection has no declaration header, so the
@@ -1213,7 +1468,7 @@ export function validateComposeUniqueness(sys: SystemIR, diags: LoomDiagnostic[]
 }
 
 // ---------------------------------------------------------------------------
-// Channel wiring (channels.md §"Surface — transport binding", M-T4.4 slice 1).
+// Channel wiring (channels.md §"Surface — transport binding").
 // Cross-file/system-level twins of the AST-level channelSource matrix checks:
 //
 //   - `loom.channelsource-unbound` (warning) — a channelSource no deployable
@@ -1606,31 +1861,61 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
 // op/find shapes still need machinery the document path deliberately omits, and
 // those stay gated (an honest error rather than a mis-emit):
 //
-//   - a RETURNING op (`: A or B`), an AUDITED op, a PROVENANCED op — all persist
-//     a pre-built changeset over struct columns inside a forced transaction;
-//   - COLLECTION mutation (`items += …`).  This clause used to lean on "a
-//     document's contained parts are gated separately
-//     (`loom.vanilla-containment-unsupported`) anyway" — that gate is RETIRED
-//     (M-T6.2 Drain C landed relational part-in-part; the code has zero raise
-//     sites in `src/`), so the clause now stands on its own: the document path
-//     itself has no emitter for a containment mutation;
-//   - a body/filter that reads a VALUE-OBJECT sub-field, a DERIVED, or calls a
-//     `function` / value-object constructor — these need the loaded struct / list
-//     the jsonb map can't reconstruct in-place;
-//   - a PAGED or UNION-returning custom find (the wire-envelope / tagged-result
-//     shapes the document find path doesn't build).
+//   - a PROVENANCED op — it drains a per-write history buffer into co-located
+//     `<field>_provenance` COLUMNS, and a jsonb blob has none;
+//   - a body/filter that reads a DERIVED (not persisted, so no `data` key) or a
+//     *dereferenced-entity* member (a cross-aggregate `X id` → needs a join);
+//   - a value-object METHOD call, or a value-object / private-operation /
+//     domain-service / resource call — these need the loaded struct the blob
+//     stores as a plain map;
+//   - a collection op over a REFERENCE collection (`X id[]`): the relational
+//     path resolves it through a `many_to_many` join table, and a blob has no
+//     join to resolve.
 //
-// Everything else — scalar `assign` / `+=` / `-=` / `precondition` / `requires`
-// / `let` / `emit`, and scalar/convention/`where`-clause finds — is emitted.
+// Everything else is emitted — scalar `assign` / `+=` / `-=` / `precondition` /
+// `requires` / `let` / `emit`, value-object SUB-field reads, pure `function`
+// calls, RETURNING and AUDITED ops (the persist tail runs in a
+// `Repo.transaction`), containment mutation, paged and union finds, and
+// collection READS over the aggregate's own in-memory lists (Route A made a
+// containment a real `embeds_many` and a scalar array an `{:array, _}` field,
+// so `lines.sum(l => l.qty)` renders through the shared collection-op table
+// verbatim — see `docInMemoryList`).
 // ---------------------------------------------------------------------------
 const VANILLA_DOC_CRUD_OPS = new Set(["create", "update", "delete", "destroy", "list", "get"]);
 
+/** Is `e` a read of a list the DOCUMENT path holds IN MEMORY?
+ *
+ *  Route A made a containment a real `embeds_many` on the `<Agg>.Data` embed,
+ *  so `record.lines` rehydrates to a list of part STRUCTS and a scalar array is
+ *  an `{:array, _}` field — both are ordinary Elixir lists by the time an op
+ *  body or find predicate runs, which is exactly what the shared collection-op
+ *  renderers expect.
+ *
+ *  A REFERENCE collection (`X id[]`) is NOT one of these: the relational path
+ *  resolves it through a `many_to_many` join table (`__ref_id_list` /
+ *  `__resolve_refs`), and a jsonb blob has no join to resolve. */
+function docInMemoryList(e: ExprIR, agg: AggregateIR): boolean {
+  // Both spellings of the same read: the bare `lines` an op body writes
+  // (`refKind: "this-prop"`) and the explicit `this.lines`.
+  const field =
+    e.kind === "ref" && (e.refKind === "this-prop" || e.refKind === "this-vo-prop")
+      ? e.name
+      : e.kind === "member" && e.receiver.kind === "this"
+        ? e.member
+        : undefined;
+  if (field === undefined) return false;
+  if (agg.contains.some((c) => c.name === field)) return true;
+  const f = agg.fields.find((x) => x.name === field);
+  return !!f && f.type.kind === "array" && f.type.element.kind !== "id";
+}
+
 /** Does an expression reach a shape the vanilla document scalar path can't emit?
  *  A derived read, a *dereferenced-entity* member (cross-aggregate `X id` join),
- *  a collection METHOD (`.sum`/`.filter`/`.contains` — lambdas over jsonb maps),
- *  a constructor / match / lambda — anything beyond scalar arithmetic,
- *  whole-field / value-object-subfield / `.count` reads over the `data` map, and
- *  (when `allowFnCall`) calls to the aggregate's own pure `function`s.
+ *  a collection METHOD over anything but an in-memory list, a constructor /
+ *  match — anything beyond scalar arithmetic, whole-field /
+ *  value-object-subfield / `.count` reads over the `data` map, collection reads
+ *  over the aggregate's own containments, and (when `allowFnCall`) calls to the
+ *  aggregate's own pure `function`s.
  *
  *  `allowFnCall` is true when the aggregate's `function` members are all
  *  themselves doc-safe (verified once per aggregate) — then a `callKind:
@@ -1638,34 +1923,54 @@ const VANILLA_DOC_CRUD_OPS = new Set(["create", "update", "delete", "destroy", "
  *  It is also passed `true` while verifying each function body, so a function
  *  that calls a sibling function stays admissible (the sibling is verified too —
  *  the whole call graph is checked, no recursion needed here). */
-function docExprUnsupported(e: ExprIR, allowFnCall: boolean): boolean {
-  const bad = (x: ExprIR): boolean => docExprUnsupported(x, allowFnCall);
+function docExprUnsupported(e: ExprIR, allowFnCall: boolean, agg: AggregateIR): boolean {
+  const bad = (x: ExprIR): boolean => docExprUnsupported(x, allowFnCall, agg);
   switch (e.kind) {
     case "ref":
       // A `this-derived` read has no stored `data` key (derived aren't
       // persisted); every other ref (this-prop / this-vo-prop whole read / param
-      // / let / enum-value / current-user) is a plain scalar/map read.
+      // / let / enum-value / current-user / a lambda binding) is a plain read.
       return e.refKind === "this-derived";
     case "member":
       // Supported: `this.<scalar>` (receiver `this`, entity type → `data[k]`), a
       // value-object SUB-field (`this.money.amount` → `data["money"]["amount"]`),
-      // an array `.count`/`.length` (→ `Enum.count`).  NOT supported: a member off
-      // a *dereferenced* entity (a cross-aggregate ref → needs a join the document
-      // path can't do) — an entity receiver that isn't the aggregate's own `this`.
-      if (e.receiverType.kind === "entity" && e.receiver.kind !== "this") return true;
+      // an array `.count`/`.length` (→ `Enum.count`), and a field of a
+      // LAMBDA-BOUND containment element (`lines.sum(l => l.qty)` → `l.qty` over
+      // the `%OrderLine{}` structs the embed rehydrates to — the enclosing
+      // collection-op arm is what vouches for the list itself).  NOT supported:
+      // a member off a *dereferenced* entity (a cross-aggregate `X id` ref →
+      // needs a join the document path can't do).
+      if (
+        e.receiverType.kind === "entity" &&
+        e.receiver.kind !== "this" &&
+        !(e.receiver.kind === "ref" && e.receiver.refKind === "lambda")
+      ) {
+        return true;
+      }
       return bad(e.receiver);
     case "method-call":
-      // A collection op (`.sum`/`.filter`/`.contains`) runs a lambda over the
-      // jsonb list of string-keyed maps — the loaded-struct machinery the scalar
-      // path lacks; a value-object method is the same story.  A scalar-receiver
-      // method (string/number) is fine.
+      // A collection op over an IN-MEMORY list — the aggregate's own containment
+      // or a scalar array — renders through the shared collection-op table
+      // verbatim (`lines.sum(l => l.qty)` → `Enum.sum(Enum.map(record.lines, fn
+      // l -> l.qty end))`), because Route A already made those real lists on the
+      // rehydrated embed.  Over anything else it is still gated: a REFERENCE
+      // collection needs the join table a blob has no equivalent for, and a
+      // value-object method needs the loaded VO struct the blob stores as a map.
+      if (e.isCollectionOp) {
+        return !docInMemoryList(e.receiver, agg) || bad(e.receiver) || e.args.some(bad);
+      }
       return (
-        e.isCollectionOp ||
         e.receiverType.kind === "valueobject" ||
         e.receiverType.kind === "array" ||
         bad(e.receiver) ||
         e.args.some(bad)
       );
+    case "lambda":
+      // Only reachable as a collection-op argument (the arm above vouches for
+      // the receiver list); its body is checked like any other expression.  A
+      // statement-bodied lambda has no `body` expression — it is not a shape
+      // the document path emits.
+      return e.body === undefined || bad(e.body);
     case "call":
       // A pure aggregate `function` call is emittable when the aggregate's
       // functions are doc-safe; every other call kind (value-object ctor, private
@@ -1692,8 +1997,8 @@ function docExprUnsupported(e: ExprIR, allowFnCall: boolean): boolean {
     case "this":
       return false;
     default:
-      // new / object / match / lambda / list / *-call — all need the struct /
-      // list / tuple machinery the document scalar path omits.
+      // new / match / list / *-call — all need the struct / list / tuple
+      // machinery the document scalar path omits.
       return true;
   }
 }
@@ -1701,7 +2006,7 @@ function docExprUnsupported(e: ExprIR, allowFnCall: boolean): boolean {
 /** Does a pure `function` body reach a non-doc-safe shape?  Sibling-function
  *  calls are admitted (`allowFnCall` true) because every function is checked, so
  *  the whole graph is verified without recursing here. */
-function docFunctionUnsupported(fn: FunctionIR): boolean {
+function docFunctionUnsupported(fn: FunctionIR, agg: AggregateIR): boolean {
   const body = fn.body;
   const exprs: ExprIR[] = "expr" in body ? [body.expr] : [];
   if ("stmts" in body) {
@@ -1722,19 +2027,23 @@ function docFunctionUnsupported(fn: FunctionIR): boolean {
       }
     }
   }
-  return exprs.some((e) => docExprUnsupported(e, /* allowFnCall */ true));
+  return exprs.some((e) => docExprUnsupported(e, /* allowFnCall */ true, agg));
 }
 
 /** Is the value of a containment `+=`/`-=` a doc-safe part constructor?  Route A:
  *  `lines += OrderLine { sku: …, qty: … }` appends a part struct to the embed's
  *  `embeds_many` list, so the value must be a part ctor (`new`/`object`) whose
  *  field values are themselves doc-safe scalars/VOs. */
-function docContainmentValueUnsupported(e: ExprIR, allowFnCall: boolean): boolean {
+function docContainmentValueUnsupported(
+  e: ExprIR,
+  allowFnCall: boolean,
+  agg: AggregateIR,
+): boolean {
   if (e.kind === "new" || e.kind === "object") {
-    return e.fields.some((f) => docExprUnsupported(f.value, allowFnCall));
+    return e.fields.some((f) => docExprUnsupported(f.value, allowFnCall, agg));
   }
   // A `-=` may pass a bare element/predicate — fall back to the scalar check.
-  return docExprUnsupported(e, allowFnCall);
+  return docExprUnsupported(e, allowFnCall, agg);
 }
 
 /** Does an operation statement fall outside the vanilla document op surface?
@@ -1742,7 +2051,7 @@ function docContainmentValueUnsupported(e: ExprIR, allowFnCall: boolean): boolea
  *  CONTAINMENT collection (embeds_many — mutable on document, Route A) from a
  *  reference/value collection (still gated). */
 function docStmtUnsupported(s: StmtIR, allowFnCall: boolean, agg: AggregateIR): boolean {
-  const bad = (e: ExprIR): boolean => docExprUnsupported(e, allowFnCall);
+  const bad = (e: ExprIR): boolean => docExprUnsupported(e, allowFnCall, agg);
   switch (s.kind) {
     case "precondition":
     case "requires":
@@ -1759,14 +2068,16 @@ function docStmtUnsupported(s: StmtIR, allowFnCall: boolean, agg: AggregateIR): 
       // Scalar compound arithmetic (`total += n`) is fine.  A COLLECTION mutation
       // is supported ONLY for a CONTAINMENT (`lines += Item{…}`): the relational
       // add/remove arm appends/removes a part struct and the op re-embeds the
-      // mutated list via `put_embed` (Route A slice 4b — boot-verified).  A
+      // mutated list via `put_embed` (boot-verified).  A
       // reference collection (`X id[]` → many_to_many) and a scalar value
       // collection stay gated (no join table / not-yet-wired on a document blob).
       if (s.collection) {
         const field = snake(s.target.segments[0] ?? "");
         const isContainment = agg.contains.some((c) => snake(c.name) === field);
         if (!isContainment) return true;
-        return s.target.segments.length > 1 || docContainmentValueUnsupported(s.value, allowFnCall);
+        return (
+          s.target.segments.length > 1 || docContainmentValueUnsupported(s.value, allowFnCall, agg)
+        );
       }
       return s.target.segments.length > 1 || bad(s.value);
     }
@@ -1787,8 +2098,8 @@ function docStmtUnsupported(s: StmtIR, allowFnCall: boolean, agg: AggregateIR): 
 /** A user-defined document operation the path can't emit.  `allowFnCall` is set
  *  once per aggregate from whether its `function`s are all doc-safe.  A RETURNING
  *  op is admitted (persisting tagged tuple, #1774) and CONTAINMENT mutation is
- *  admitted (Route A); an AUDITED op — named (slice 4e) or returning (slice 4f) —
- *  is admitted (the persist tail records an audit row in a `Repo.transaction`).  A
+ *  admitted; an AUDITED op — named or returning — is admitted (the persist tail
+ *  records an audit row in a `Repo.transaction`).  A
  *  PROVENANCED op stays gated (a jsonb blob has no co-located `<field>_provenance`
  *  columns to drain a history buffer into). */
 function docOpUnsupported(op: OperationIR, allowFnCall: boolean, agg: AggregateIR): boolean {
@@ -1811,17 +2122,17 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
         // aggregate is itself doc-safe (they render in the same `docMap` mode —
         // reading the jsonb `data` map); if any is not, a body that calls one is
         // gated.  Computed once here and threaded into the op/find checks.
-        const allowFnCall = (agg.functions ?? []).every((fn) => !docFunctionUnsupported(fn));
+        const allowFnCall = (agg.functions ?? []).every((fn) => !docFunctionUnsupported(fn, agg));
         // A custom find is unsupported only when its predicate reads a non-scalar
-        // shape.  PAGED finds (Route A slice 4c) and UNION finds (Route A slice 4d)
-        // are now supported: `renderDocFindFn` returns the single-get `{:ok, nil}`/
+        // shape.  PAGED and UNION finds are supported: `renderDocFindFn`
+        // returns the single-get `{:ok, nil}`/
         // `{:ok, record}` tuple the shared find controller translates to the tagged
         // union wire (found → 200 body, absent → 404 / RFC-7807 via `problem_variant`).
         const badFinds = (
           (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name)?.finds ?? []
         )
           .filter((f) => f.name !== "all")
-          .filter((f) => f.filter != null && docExprUnsupported(f.filter, allowFnCall));
+          .filter((f) => f.filter != null && docExprUnsupported(f.filter, allowFnCall, agg));
         const badOps = agg.operations
           .filter((op) => !VANILLA_DOC_CRUD_OPS.has(op.name))
           .filter((op) => docOpUnsupported(op, allowFnCall, agg));
@@ -1964,41 +2275,29 @@ export function validateElixirOpSelfCallPosition(sys: SystemIR, diags: LoomDiagn
 // unidirectional @OneToMany.
 
 // ---------------------------------------------------------------------------
-// Lifecycle-stamp rejections (M-T6.33).
+// Lifecycle-stamp rejections.
 //
-// This check USED to carry five codes — `loom.{node,dotnet,java,python,elixir}
-// -stamp-unsupported` — one per backend, over a shared body.  The M-T9.27
-// re-verify killed that framing on two counts:
+// TWO codes, neither backend-named.  The body reads only `dep.auth`,
+// `sys.user` and `agg.persistedAs` — facts about the MODEL — and never
+// consults a backend capability; the per-backend stamp mechanisms (Java
+// `_stampOnCreate`, .NET EF `AuditableInterceptor`, node Hono
+// `_stampOnCreate`, python pre-persist, Elixir Ecto `put_change`) only select
+// a message noun.
 //
-//   1. NEITHER ARM IS BACKEND-SPECIFIC.  The body below reads only `dep.auth`,
-//      `sys.user` and `agg.persistedAs` — facts about the MODEL.  It never
-//      consults a backend capability.  The per-backend stamp MECHANISMS do
-//      differ (Java `_stampOnCreate` entity methods; .NET EF
-//      `AuditableInterceptor`; node Hono `_stampOnCreate`; python pre-persist;
-//      Elixir Ecto `put_change`) — but none of them is what these two arms are
-//      about, so the family only ever selected a message noun.
-//   2. NEITHER ARM IS A GAP.  A backend-named `-unsupported` code promises
-//      "not yet, on this target".  Both arms are permanent:
+// Both arms are permanent language rules, not gaps waiting on a port:
 //
-//        * a principal stamp on a deployable with no auth has NO PRINCIPAL TO
-//          READ.  No backend can implement that; it is a misuse, and the
-//          message says how to fix it (add `auth: required`, or use a
-//          non-principal stamp).  A plain language rule.
-//        * a stamp on an event-sourced aggregate contradicts the storage model
-//          — stamps mutate state fields, and an event-sourced aggregate's state
-//          is FOLDED FROM ITS EVENT STREAM.  Semantically impossible, on every
-//          backend, forever.
+//   * a principal stamp on a deployable with no auth has NO PRINCIPAL TO READ.
+//     No backend can implement that; the message says how to fix it (add
+//     `auth: required`, or use a non-principal stamp).
+//   * a stamp on an event-sourced aggregate contradicts the storage model —
+//     stamps mutate state fields, and an event-sourced aggregate's state is
+//     FOLDED FROM ITS EVENT STREAM.
 //
-// So the five collapse to TWO codes named for what they mean, not for who
-// rejected them — and they leave the `*-unsupported` register entirely (that
-// register holds work; these are not work).  Splitting by meaning rather than
-// merging to one `loom.stamp-unsupported` is deliberate: the two arms are
-// different failures with different fixes, and a caller matching on identity
-// should be able to tell them apart.
-//
-// Naming follows M-T9.27 slice 2 (`-invalid` = impossible or refused) and
-// M-T5.21 §Symptom 1 (a target name never belongs in a code identity — it
-// becomes a lie the day that target supports it).
+// They stay SPLIT rather than merged into one `loom.stamp-invalid`: the two
+// failures have different fixes, so a caller matching on identity must be able
+// to tell them apart.  `-invalid` marks "impossible or refused", and a target
+// name never belongs in a code identity — it becomes a lie the day that target
+// supports it.
 // ---------------------------------------------------------------------------
 
 /** The noun for the missing request principal.  Elixir says "principal
@@ -2180,95 +2479,141 @@ export function validateGuardPrincipalWithoutAuth(sys: SystemIR, diags: LoomDiag
   }
 }
 
-// M-T6.19: `shape: embedded` reference collections (`X id[]`) now map on
-// java.  The jsonb id-array column rides a per-target `AttributeConverter`
+// `shape: embedded` reference collections (`X id[]`) map on java: the jsonb
+// id-array column rides a per-target `AttributeConverter`
 // (`<Target>IdJsonListConverter`, emitted in domain.ids) that unwraps the
-// `List<XId>` to its bare `value`s so the Jackson FormatMapper serialises
-// `["v1","v2"]` — the same physical jsonb shape .NET / node / elixir produce
-// — instead of the structured-JSON aggregate path that bypassed it.  Nested
-// part-in-part containments (single AND collection) likewise map
-// (`directParentOf`).
+// `List<XId>` to its bare `value`s, so the Jackson FormatMapper serialises
+// `["v1","v2"]` — the same physical jsonb shape .NET / node / elixir produce.
+// Nested part-in-part containments (single AND collection) likewise map
+// (`directParentOf`).  There is no gate: `loom.java-embedded-refcoll-unsupported`
+// has no raise site, and `test/generator/java/generator-java-shapes.test.ts`
+// pins that it is never raised.
+
+// ---------------------------------------------------------------------------
+// M-T6.36 — the two `loom.java-{workflow-instance,projection}-field-unsupported`
+// gates USED TO LIVE HERE, and were retired 2026-08-31 as PHANTOMS.
 //
-// The gate this replaced was `loom.java-embedded-refcoll-unsupported`.  It is
-// RETIRED — the code has zero raise sites in `src/`; the only surviving
-// mention is the negative pin in
-// `test/generator/java/generator-java-shapes.test.ts`, which asserts it is NOT
-// raised.  Named here only so a reader grepping the old code finds this note
-// instead of concluding the grep failed.
+// Both refused an ENTITY (containment-part) typed read-model field.  The
+// mission asked for the refused shapes to be emitted; probing the premise on
+// fresh `main` showed there is nothing to emit, because the shape is
+// UNREACHABLE.  A part type resolves only inside its own aggregate
+// (`src/language/ddd-scope.ts`), so `projection P { line: Line }` and
+// `workflow W { line: Line }` both fail at phase ③ with `Could not resolve
+// reference to NamedDecl named 'Line'` — on EVERY platform, before any
+// java-specific check runs.  A backend-named code for a shape the language
+// refuses is the M-T5.21 §Symptom 1 lie in its purest form: it made java read
+// as uniquely limited and carried two rows in the open-gap register that
+// nothing could ever drain.
+//
+// The emitters keep their `guardInstanceField` / `guardProjectionField` throws
+// as internal invariants (that is what an unreachable arm should be), and
+// `test/generator/java/generator-java-readmodel-gates.test.ts` now pins the
+// unreachability at the scope layer — so if that rule ever widens, the gap
+// becomes visible again as a test failure rather than as silent output.
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Java read-model backstop gates.  Cross-aggregate `follows` and VO-typed
-// read-model fields (workflow-instance / projection) are now emitted
-// (the read-model VO records in java/emit/dto.ts).  What
-// remains here is a defensive gate for an ENTITY (containment-part) read-model
-// field: it would need a `<Part>Response` DTO the emitter doesn't build, but a
-// part type never resolves in workflow / projection scope, so the gate is an
-// unreachable backstop mirroring the emitters' `guardInstanceField` /
-// `guardProjectionField` throws — kept so the shape fails honestly rather than
-// crashing if that scope rule ever changes.
+// F2-ADP-7 (java arm) — a `.ddd` name that is a JAVA RESERVED WORD.
+//
+// The SQL half of this was closed by M-T6.42/M-T6.43: `@Column(name = …)` runs
+// through `hbIdent`, so a column called `case` is quoted.  The HOST-IDENTIFIER
+// half was left bare — `src/generator/java/emit/entity.ts` emits `String case;`
+// and `public String case() {`, and the DTO records emit
+// `record TicketResponse(String case, int do, …)`.  `javac` rejects all of it,
+// and codegen reports zero diagnostics, so the failure surfaces only in a
+// compile tier.
+//
+// WHY THIS REFUSES INSTEAD OF ESCAPING (probed, not assumed).  The .NET arm
+// escapes — `@case` is a C# VERBATIM IDENTIFIER: lexically the identifier
+// `case`, so the emitted member name, and therefore the JSON property
+// System.Text.Json derives from it, are byte-identical to today.  Java has no
+// verbatim-identifier syntax (JLS §3.9: a keyword is never an identifier), so
+// the only "escape" available is a RENAME — which is what `escapeJavaIdent`
+// does for LOCALS (`case` → `case_`).  Renaming a DECLARED field renames the
+// Java record component, and a record component name IS the Jackson property
+// name: `{"case": …}` would silently become `{"case_": …}` on java and java
+// only.  A wire divergence introduced to fix a compile error is a worse bug
+// than the compile error, so the honest answer at this layer is to refuse the
+// name while a java deployable hosts the declaration.
+//
+// SCOPED TO THE AXIS THE LIMITATION LIVES ON: it fires only for a context
+// hosted by a `platform: java` deployable.  The same model on node / python /
+// elixir / dotnet is untouched — `get case()`, `def case`, `field :case` and
+// `@case` are all legal there.
 // ---------------------------------------------------------------------------
 
-/** Peel optional / array wrappers to the leaf type kind — the emitters' own
- *  guard shape: `T?` → `T`, `T[]` → element, `T?[]` element-optional → `T`. */
-function wireLeafKind(t: TypeIR): TypeIR["kind"] {
-  const inner = t.kind === "optional" ? t.inner : t;
-  const leaf =
-    inner.kind === "array"
-      ? inner.element.kind === "optional"
-        ? inner.element.inner
-        : inner.element
-      : inner;
-  return leaf.kind;
+/** Every `.ddd`-declared name in `ctx` that the java emitters put in a bare
+ *  Java identifier position, as `[what, owner, name]`. */
+function javaIdentifierPositions(ctx: BoundedContextIR): [string, string, string][] {
+  const out: [string, string, string][] = [];
+  const members = (owner: string, fields: { name: string }[], what: string): void => {
+    for (const f of fields) out.push([what, owner, f.name]);
+  };
+  const action = (owner: string, op: OperationIR): void => {
+    // The canonical `create` / `destroy` are unnamed — they emit as `create` /
+    // `destroy`, never as a `.ddd` name, so only their PARAMS are at risk.
+    if (!op.canonical) out.push(["operation", owner, op.name]);
+    for (const p of op.params) out.push(["parameter", `${owner}.${op.name}`, p.name]);
+  };
+  for (const agg of ctx.aggregates) {
+    members(agg.name, agg.fields, "field");
+    members(agg.name, agg.contains, "containment");
+    members(agg.name, agg.derived, "derived field");
+    for (const fn of agg.functions) {
+      out.push(["function", agg.name, fn.name]);
+      for (const p of fn.params) out.push(["parameter", `${agg.name}.${fn.name}`, p.name]);
+    }
+    for (const op of [...agg.operations, ...(agg.creates ?? []), ...(agg.destroys ?? [])])
+      action(agg.name, op);
+    for (const part of agg.parts) {
+      members(`${agg.name}.${part.name}`, part.fields, "field");
+      members(`${agg.name}.${part.name}`, part.contains, "containment");
+      members(`${agg.name}.${part.name}`, part.derived, "derived field");
+    }
+  }
+  for (const vo of ctx.valueObjects) {
+    members(vo.name, vo.fields, "field");
+    members(vo.name, vo.derived, "derived field");
+  }
+  for (const ev of ctx.events) members(ev.name, ev.fields, "field");
+  for (const proj of ctx.projections) {
+    members(proj.name, proj.stateFields, "field");
+    for (const p of proj.params) out.push(["parameter", proj.name, p.name]);
+  }
+  for (const wf of ctx.workflows) {
+    members(wf.name, wf.stateFields ?? [], "field");
+    for (const p of wf.params) out.push(["parameter", wf.name, p.name]);
+  }
+  return out;
 }
 
-export function validateJavaReadModelShapes(sys: SystemIR, diags: LoomDiagnostic[]): void {
+export function validateJavaReservedIdentifiers(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  // One diagnostic per offending NAME, not per hosting deployable — two java
+  // deployables serving the same context describe one defect, not two.
+  const seen = new Set<string>();
   for (const dep of sys.deployables) {
     if (platformFamily(dep.platform) !== "java") continue;
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
-
-      // (1) Entity-typed saga instance read-model field.  VO-typed fields now emit
-      // (their `<Vo>Response` is co-located in application.workflows); an entity
-      // (containment part) field would need a `<Part>Response` DTO — but a part
-      // type never resolves in workflow scope, so this is a defensive backstop
-      // for a shape the grammar/scope already forbids.  Only observable
-      // workflows (those with an `instanceWireShape`) reach the instance emitter.
-      for (const wf of ctx.workflows) {
-        for (const f of wf.instanceWireShape ?? []) {
-          if (wireLeafKind(f.type) !== "entity") continue;
-          diags.push({
-            severity: "error",
-            message: diagMessage("loom.java-workflow-instance-field-unsupported", {
-              name: dep.name,
-              ctxName,
-              wfName: wf.name,
-              fName: f.name,
-            }),
-            source: `${sys.name}/${dep.name}`,
-            code: "loom.java-workflow-instance-field-unsupported",
-          });
-        }
-      }
-
-      // (2) Entity-typed projection row field — same defensive backstop as (1).
-      for (const proj of ctx.projections) {
-        for (const f of proj.wireShape ?? []) {
-          if (wireLeafKind(f.type) !== "entity") continue;
-          diags.push({
-            severity: "error",
-            message: diagMessage("loom.java-projection-field-unsupported", {
-              name: dep.name,
-              ctxName,
-              projName: proj.name,
-              fName: f.name,
-            }),
-            source: `${sys.name}/${dep.name}`,
-            code: "loom.java-projection-field-unsupported",
-          });
-        }
+      for (const [what, owner, name] of javaIdentifierPositions(ctx)) {
+        if (!isJavaKeyword(name)) continue;
+        const key = `${ctxName}/${owner}/${what}/${name}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        diags.push({
+          severity: "error",
+          message: diagMessage("loom.java-reserved-identifier-unsupported", {
+            what,
+            owner,
+            name,
+            ctxName,
+          }),
+          source: `${sys.name}/${ctxName}/${owner}`,
+          code: "loom.java-reserved-identifier-unsupported",
+        });
       }
     }
   }
@@ -2278,222 +2623,47 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
 
-  // Backends that gate one or both of the deferred capability-filter cases.
-  // .NET supports BOTH (EF `HasQueryFilter` on the mapped-column shapes, an
-  // in-app predicate on `document`), so it gates neither.
-  // Canonical families (D-NODE-PLATFORM / D-ELIXIR-PLATFORM): `node` (was
-  // `hono`), `elixir` (was `phoenix` / `phoenixLiveView`).
-  // `python` is included because it now emits the non-principal relational case
-  // (W1a), the PRINCIPAL relational case (DEBT-02), AND both `embedded` cases
-  // (DEBT-02 tail): `contextFilterPredicate` in
-  // `src/generator/python/find-predicate.ts` AND-s them into every root read
-  // (principal predicates render `current_user.<claim>` against the ambient
-  // `require_current_user()` accessor).  Only the `document` shape stays gated —
-  // `supportsNonRelationalFilter`/`supportsPrincipalNonRelationalFilter` admit
-  // python for `embedded` but not `document` — so it must be in this set for the
-  // per-case logic below to reject that one shape (and accept the relational +
-  // embedded cases, principal or not).
-  // .NET is included NOT because it has an unwired shape (EF `HasQueryFilter`
-  // supports every case — the `supports*` predicates below all return true for
-  // it) but so the PRINCIPAL-filter-needs-auth gate reaches it: a `currentUser`
-  // filter compiles to `HasQueryFilter(... RequestContext.Current!.CurrentUser!
-  // ...)`, which NREs on every read when the deployable has no auth.  Excluding
-  // .NET here skipped that gate entirely (finding 20 / B16).
-  const LIMITED_FAMILIES = new Set(["node", "elixir", "java", "python", "dotnet"]);
-  // Backends that now wire PRINCIPAL-referencing filters (`currentUser.x`) on
-  // relational aggregates — node/elixir/java/python all do.  python renders the
-  // predicate against the ambient `require_current_user()` accessor (a
-  // module-level `ContextVar[User | None]` set in the auth middleware) inside
-  // every root read (the SQLAlchemy analogue of node's `requireCurrentUser()`).
-  // node renders the
-  // predicate against the ambient `requireCurrentUser()` accessor inside every
-  // root read (the Drizzle analogue of .NET's `HasQueryFilter`).  elixir (plain
-  // Ecto) AND-s the predicate into each read as `^(current_user &&
-  // current_user.f)`.  **java** AND-s a SpEL-principal JPQL clause
-  // (`:#{@currentUserAccessor.user()?.f()}`) into every find/retrieval +
-  // the scoped `findAll`/`findById` overrides (the static `@SQLRestriction`
-  // still carries the non-principal filters).
-  const supportsPrincipalFilter = (family: string): boolean => {
-    if (family === "node") return true;
-    if (family === "elixir") return true;
-    if (family === "java") return true;
-    // .NET wires a principal relational filter via EF `HasQueryFilter`
-    // (`RequestContext.Current!.CurrentUser!.<claim>`); it's in LIMITED_FAMILIES
-    // only for the auth gate, so it must report as fully supported here.
-    if (family === "dotnet") return true;
-    // python (DEBT-02 last-backend parity): a principal capability filter on a
-    // RELATIONAL aggregate renders `current_user.<claim>` against an ambient
-    // ContextVar accessor (`require_current_user()`) AND-ed into every root read
-    // — the SQLAlchemy analogue of node's `requireCurrentUser()` weave / .NET's
-    // `HasQueryFilter`.  (The non-relational principal case has since landed
-    // too — `supportsPrincipalNonRelationalFilter` below lists python for BOTH
-    // `embedded` and `document`; it is no longer gated.)
-    if (family === "python") return true;
-    return false;
-  };
-  // Backends that wire a NON-principal capability filter into a NON-relational
-  // (document/embedded) aggregate.  node handles both shapes: a `document`
-  // aggregate filters in-app over the rehydrated doc; an `embedded` aggregate's
-  // root scalars are real columns, so the predicate AND-s into the SQL read like
-  // the relational path.  java handles BOTH too: a `document` aggregate's store
-  // filters every read in-app via `findAll().stream()`; an `embedded`
-  // aggregate's root entity is a real JPA table whose root scalars are columns,
-  // so the static non-principal predicate rides Hibernate's `@SQLRestriction`
-  // exactly like the relational path (`emit/entity.ts`).  elixir handles
-  // `embedded` (its only non-relational shape — `document` is unsupported there,
-  // gated by `validateSavingShapeSupport`): an embedded aggregate's root
-  // scalars are real columns, so the predicate AND-s into the Ecto read exactly
-  // like the relational path.  **python** handles `embedded` too (DEBT-02 tail):
-  // an embedded aggregate's root scalars are real columns, so
-  // `contextFilterPredicate` AND-s into the embedded SQL reads exactly like the
-  // relational path (`repository-embedded-builder.ts`).  **python also handles
-  // `document`** now (DEBT-02 tail complete): the blob is one JSONB column, not
-  // per-field queryable, so the predicate is evaluated IN-APP over the rehydrated
-  // instance (`documentCapabilityBody` → a list-comprehension filter in
-  // `repository-document-builder.ts`), mirroring node.  **.NET** handles all
-  // shapes too, but NOT all of them through EF: `relational`/`embedded` ride the
-  // EF `HasQueryFilter` (real mapped columns), while `document` — whose fields
-  // live inside one jsonb blob, so EF has no column to hang a filter on — is
-  // filtered IN-APP over the rehydrated aggregate (`_CapabilityVisible` in
-  // `emit/repository.ts`'s `renderDocumentRepositoryImpl`), exactly like
-  // node/java/python.  That document arm did NOT exist until #2530: this
-  // function asserted .NET filtered every shape while the emitter emitted no
-  // document filter at all — a SILENT cross-tenant read (#2527's follow-up 1).
-  // A PRINCIPAL filter on a `document` shape is wired on node/Java/python
-  // **and dotnet** (DEBT-02 Slice B — the actor binds into the in-app
-  // predicate; see `supportsPrincipalNonRelationalFilter` below and the
-  // `document-tenancy.ddd` ts-/java-/python-build fixtures); it stays gated
-  // only for elixir (no `document` shape there).
+  // Every backend family x every saving shape wires capability filters, so this
+  // gate carries no per-backend deferral table — including elixir +
+  // `shape: document`, which evaluates the predicate IN-APP over the rehydrated
+  // `%<Agg>.Data{}` embed on every read (`vanillaDocCapabilityFilter`).  A
+  // stale deferral table is worse than none: it reads as an authoritative
+  // statement of what a backend cannot do, and sends the author to a
+  // workaround they do not need.
   //
-  // NET RESIDUE of this whole function, as of the two tables below: exactly
-  // ONE (family, shape) cell is unwired — **elixir + `document`**.  Every
-  // other pair is supported, so any wording here that generalises to
-  // "relational only" is wrong.
-  const supportsNonRelationalFilter = (family: string, shp: string): boolean =>
-    (family === "node" && (shp === "document" || shp === "embedded")) ||
-    (family === "java" && (shp === "document" || shp === "embedded")) ||
-    (family === "elixir" && shp === "embedded") ||
-    (family === "python" && (shp === "document" || shp === "embedded")) ||
-    // .NET filters every shape — `embedded` via the EF query filter (its root
-    // scalars are real columns), `document` in-app over the rehydrated
-    // aggregate (its fields are inside the jsonb blob).  It is in
-    // LIMITED_FAMILIES for the auth gate, not because a shape is unwired.
-    (family === "dotnet" && (shp === "document" || shp === "embedded"));
-  // PRINCIPAL (`currentUser.x`) filter on a NON-relational shape (DEBT-02, the
-  // actor + non-relational intersection).  An `embedded` aggregate's root
-  // scalars are real columns, so node/elixir/java reuse their relational
-  // principal path (node weaves `requireCurrentUser()` into the embedded SQL
-  // read; elixir AND-s the `current_user` predicate into the embedded Ecto
-  // read; java AND-s the SpEL-principal clause into the embedded scoped reads).
-  // A `document` aggregate filters IN-APP over the rehydrated
-  // doc, so a principal predicate there evaluates the actor in-app (Slice B):
-  // node binds `requireCurrentUser()` into the in-app predicate; java injects
-  // the `CurrentUserAccessor` bean and binds it before the `.stream().filter`;
-  // **python** binds `current_user = require_current_user()` before its
-  // list-comprehension filter (DEBT-02 tail complete).
-  // **python** also wires the embedded principal case: the embedded
-  // root scalars are real columns, so the `currentUser.<claim>` predicate renders
-  // against the ambient `require_current_user()` accessor and AND-s into the
-  // embedded SQL read like the relational principal path.  `document` stays off
-  // only for elixir (no `document` shape).
-  const supportsPrincipalNonRelationalFilter = (family: string, shp: string): boolean =>
-    (shp === "embedded" &&
-      (family === "node" ||
-        family === "elixir" ||
-        family === "java" ||
-        family === "python" ||
-        family === "dotnet")) ||
-    (shp === "document" &&
-      (family === "node" || family === "java" || family === "python" || family === "dotnet"));
+  // What this check DOES enforce is shape- and backend-independent: a principal-referencing filter needs a REQUEST PRINCIPAL to scope
+  // by.  Without `auth: required` on the deployable and a system `user {}`
+  // block there is no actor at all — node/python never emit the ambient
+  // `requireCurrentUser()` accessor, elixir has no `current_user` to thread,
+  // and .NET's `HasQueryFilter` NREs on `RequestContext.Current!.CurrentUser!`
+  // on every read (finding 20 / B16).  Mirrors the `validateStampSupport`
+  // precedent with a clear, actionable error.
+  //
+  // Scoped to the five DOMAIN backend families (canonical names per
+  // D-NODE-PLATFORM / D-ELIXIR-PLATFORM): a deployable with no database read
+  // path never carries a capability filter to begin with.
+  const DOMAIN_FAMILIES = new Set(["node", "elixir", "java", "python", "dotnet"]);
 
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);
-    if (!fam || !LIMITED_FAMILIES.has(fam)) continue;
+    if (!fam || !DOMAIN_FAMILIES.has(fam)) continue;
+    if (dep.auth?.required && sys.user) continue;
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
       for (const agg of ctx.aggregates) {
-        const enriched = agg as EnrichedAggregateIR;
-        const filters = enriched.contextFilters ?? [];
-        if (filters.length === 0) continue;
-        const usesPrincipal = filters.some((p) => exprUsesCurrentUser(p));
-        const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
-        const nonRelational = shape !== "relational";
-        // Does THIS family wire a principal filter on THIS shape?  Relational →
-        // `supportsPrincipalFilter`; non-relational → the `embedded`-only
-        // `supportsPrincipalNonRelationalFilter`.
-        const principalSupportedHere = nonRelational
-          ? supportsPrincipalNonRelationalFilter(fam, shape)
-          : supportsPrincipalFilter(fam);
-        // The shape itself must be wired (any filter); then, if the filter is
-        // principal-referencing, that intersection must be wired too.
-        const nonRelationalUnsupported = nonRelational && !supportsNonRelationalFilter(fam, shape);
-        const principalUnsupported = usesPrincipal && !principalSupportedHere;
-        // A principal filter on a backend that DOES wire it (incl. embedded on
-        // node/elixir/java) still needs a request principal to scope by — so the
-        // deployable must enforce auth (and the system must declare a `user {}`
-        // block).  Without it the ambient `requireCurrentUser()` accessor isn't
-        // even emitted.  Mirror the `validateStampSupport` precedent with a
-        // clear, actionable error.
-        if (
-          usesPrincipal &&
-          principalSupportedHere &&
-          !nonRelationalUnsupported &&
-          !(dep.auth?.required && sys.user)
-        ) {
-          diags.push({
-            severity: "error",
-            code: "loom.context-filter-unsupported",
-            message: diagMessage("loom.context-filter-unsupported#no-auth-user", {
-              name: dep.name,
-              platform: dep.platform,
-              ctxName,
-              aggName: agg.name,
-            }),
-            source: `${sys.name}/${dep.name}`,
-          });
-          continue;
-        }
-        // A non-relational shape gates on the families that don't yet wire it
-        // (DEBT-02); a principal filter gates where the actor intersection isn't
-        // wired (relational: python; non-relational: document everywhere).
-        if (!principalUnsupported && !nonRelationalUnsupported) continue;
-        // The unwired shape is the harder limitation — report it first when both
-        // apply.  Otherwise it's a principal filter on a shape whose actor
-        // intersection isn't wired (a `document` aggregate filters in-app, so a
-        // principal predicate there needs in-app actor evaluation — Slice B).
-        // The ONLY unwired cell left in this whole function is elixir +
-        // `document` — every other (family, shape) pair is covered by
-        // `supportsNonRelationalFilter` / `supportsPrincipalNonRelationalFilter`
-        // above.  So the reason must name the SHAPE as the residue, not
-        // "relational only": elixir does wire `embedded`, and saying otherwise
-        // sends the reader to a workaround they do not need.
-        const reason = nonRelationalUnsupported
-          ? `is persisted as shape(${shape}); the ${fam} backend wires capability filters on ` +
-            `relational and shape(embedded) aggregates, but not yet on shape(${shape}) ones`
-          : nonRelational
-            ? `references currentUser (e.g. a tenancy filter) on a shape(${shape}) aggregate; ` +
-              `principal-referencing filters on ${shape} aggregates are not yet wired on the ` +
-              `${fam} backend (they evaluate in-app, not as a column predicate)`
-            : `references currentUser (e.g. a tenancy filter); principal-referencing capability ` +
-              `filters are not yet wired on the ${fam} backend`;
+        const filters = (agg as EnrichedAggregateIR).contextFilters ?? [];
+        if (!filters.some((p) => exprUsesCurrentUser(p))) continue;
         diags.push({
           severity: "error",
-          message: diagMessage("loom.context-filter-unsupported#unsupported-predicate", {
+          code: "loom.context-filter-unsupported",
+          message: diagMessage("loom.context-filter-unsupported#no-auth-user", {
             name: dep.name,
             platform: dep.platform,
             ctxName,
             aggName: agg.name,
-            reason,
-            hosts: nonRelationalUnsupported
-              ? `a node / dotnet / java / python deployable (all four wire capability filters ` +
-                `on shape(${shape}) aggregates), or change this aggregate's shape to ` +
-                `relational or embedded`
-              : `a backend that wires principal-referencing filters on shape(${shape}) ` +
-                `aggregates (node / dotnet / java / python)`,
           }),
           source: `${sys.name}/${dep.name}`,
-          code: "loom.context-filter-unsupported",
         });
       }
     }
@@ -2506,8 +2676,7 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
 // A read (repository `find`, or inline `Repo.findAll(...)`/`Repo.run`)
 // may carry an `ignoring *` / `ignoring <Cap>, …` clause that bypasses a
 // capability's query-filter(s).  Three fail-fast gates run over the FULLY-
-// RESOLVED IR (the capability provenance lives on `agg.contextFilterOrigins`,
-// Slice 0):
+// RESOLVED IR (the capability provenance lives on `agg.contextFilterOrigins`):
 //
 //   loom.filter-bypass-unknown-capability — `ignoring X` where the target
 //       aggregate does NOT implement capability X (X ∉ agg.capabilities).
@@ -2524,13 +2693,13 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
 //       disabled per-read via the Hibernate Session), and python (SQLAlchemy
 //       has no global filter, so each read AND-s its predicates explicitly —
 //       a bypassing find/inline-run simply OMITS the named conjunct).
-//       Every honoring family is now in the set; the diagnostic only fires for
+//       Every honoring family is in the set, so the diagnostic only fires for
 //       a backend with no DB read path (which never carries `ignoring`).
 // ---------------------------------------------------------------------------
 
 /** Backend families that honor an `ignoring` filter-bypass clause.  `dotnet`
- *  (EF `IgnoreQueryFilters`, Slice 1), `node` (Drizzle — omits the bypassed
- *  conjunct from the `and(...)` chain, Slice 2), `elixir` (plain Ecto omits the
+ *  (EF `IgnoreQueryFilters`), `node` (Drizzle — omits the bypassed conjunct
+ *  from the `and(...)` chain), `elixir` (plain Ecto omits the
  *  bypassed `where:`), and `java` (§11.6 hybrid — a bypassed capability leaves the
  *  always-on `@SQLRestriction` for a bypassable Hibernate named `@Filter`, which
  *  a bypassing read disables via `session.disableFilter`/`enableFilter`;
@@ -2540,7 +2709,7 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
  *  bypassing find omits the named conjunct statically, and a shared
  *  `run_<retrieval>` omits the union of its inline call-sites' bypasses) all
  *  honor it. */
-const FILTER_BYPASS_FAMILIES = new Set(["dotnet", "node", "elixir", "java", "python"]);
+export const FILTER_BYPASS_FAMILIES = new Set(["dotnet", "node", "elixir", "java", "python"]);
 
 /** Whether `dep`'s backend honors `ignoring` filter-bypass.  A backend must
  *  not pass this gate while still silently filtering — a family is supported
@@ -2705,15 +2874,15 @@ export function validateFilterBypassSupport(sys: SystemIR, diags: LoomDiagnostic
 }
 
 // ---------------------------------------------------------------------------
-// `persistence: dapper` capability gate (D-REALIZATION-AXES Phase 5c).
+// `persistence: dapper` capability gate (D-REALIZATION-AXES).
 //
-// The .NET Dapper adapter is now at FULL PARITY with EF Core (M-T6.9, drained
-// across 7 waves): every relational/document/embedded/ES/inheritance shape,
-// containment (incl. recursive part-in-part), associations, audit/provenance,
-// managed fields, retrievals, seeds, and the workflow outbox all emit.  This
-// check now fires ONLY for a genuinely-impossible shape (an un-owned by-value
-// entity-array part field — no relational storage form on any adapter), a
-// fail-fast guard like the category-A stamp guard.
+// The .NET Dapper adapter is at full parity with EF Core: every
+// relational/document/embedded/ES/inheritance shape, containment (incl.
+// recursive part-in-part), associations, audit/provenance, managed fields,
+// retrievals, seeds, and the workflow outbox all emit.  This check fires ONLY
+// for a genuinely-impossible shape (an un-owned by-value entity-array part
+// field — no relational storage form on any adapter), a fail-fast guard like
+// the category-A stamp guard.
 // ---------------------------------------------------------------------------
 // Element kinds a Dapper part collection field can round-trip as one `jsonb`
 // column (System.Text.Json list serialisation) — kept in lockstep with
@@ -2736,55 +2905,28 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
-      // QUERY-TIME PROJECTIONS used to be refused WHOLESALE here:
-      // `query-projection-emit.ts` had no dapper branch at all, so it emitted
-      // the EF shape unconditionally — `using Microsoft.EntityFrameworkCore;` +
-      // `private readonly AppDbContext _db;`, neither of which exists on this
-      // adapter — and the generated project did not COMPILE (CS0234 / CS0246).
-      // M-T6.25 ported the four direct-table arms to raw Npgsql (the same
-      // `NpgsqlDataSource` + private row DTO + `Map` shape the FOLDED read
-      // controller already used), so the feature EMITS here now and the blanket
-      // refusal is gone.
+      // Not gated here, and why:
       //
-      // What survives is the ONE thing raw SQL genuinely cannot reach: the two
-      // arms that AGGREGATE (`select total = count()` / `group by`) name
-      // COLUMNS on the source aggregate's table, and an aggregate whose fields
-      // are not columns — a `shape: document` jsonb blob, an event-sourced
-      // stream with no state table — has nothing for `sum(total)` to name.  EF
-      // Core hides that behind its own JSON translation; Dapper cannot.  The
-      // condition is computed by `dapperQueryProjectionGap`, which the emitter
-      // reads too, so the gate and the emission arm cannot drift.
-      for (const p of ctx.projections ?? []) {
-        if (!isQueryTimeProjection(p)) continue;
-        const gap = dapperQueryProjectionGap(p, ctx, sys);
-        if (gap) {
-          diags.push({
-            severity: "error",
-            message: diagMessage("loom.dapper-unsupported#feature", {
-              name: dep.name,
-              ctxName,
-              projection: p.name,
-              reason: gap,
-            }),
-            source: `${sys.name}/${dep.name}`,
-            code: "loom.dapper-unsupported",
-          });
-        }
-      }
-      // `retrieval` bundles are now supported on Dapper — `Run<Name>Async`
-      // renders as parameterised SQL (where + sort + offset/limit paging); a
-      // predicate outside the Dapper subset stubs (NotImplementedException),
-      // mirroring the find path.  No gate.
-      // `seed` data is now supported — the Dapper seeder (Seed.cs) frames the
-      // marker table / raw inserts on Npgsql+Dapper while reusing the
-      // persistence-agnostic domain-`Create` path (I<Agg>Repository.SaveAsync).
-      // Workflow event subscriptions (and therefore channels/outbox) are now
-      // wired on the Dapper adapter (M-T6.9): the saga handlers depend on the
+      // QUERY-TIME PROJECTIONS emit — the four direct-table arms render as raw
+      // Npgsql (the same `NpgsqlDataSource` + private row DTO + `Map` shape the
+      // FOLDED read controller uses).  A direct-table arm over a COLUMN-LESS
+      // source is refused UNIVERSALLY in
+      // `validateColumnlessProjectionSources`, not per-adapter: every backend
+      // names the same missing column (a document aggregate maps to a
+      // hand-rolled `<Agg>Document` row type, so `o.Total` is CS1061 on EF
+      // Core too).
+      // `retrieval` bundles emit — `Run<Name>Async` renders as parameterised
+      // SQL (where + sort + offset/limit paging); a predicate outside the
+      // Dapper subset stubs (NotImplementedException), mirroring the find path.
+      // `seed` data emits — the Dapper seeder (Seed.cs) frames the marker table
+      // / raw inserts on Npgsql+Dapper while reusing the persistence-agnostic
+      // domain-`Create` path (I<Agg>Repository.SaveAsync).
+      // Workflow event subscriptions (and therefore channels/outbox) are wired
+      // on the Dapper adapter: the saga handlers depend on the
       // persistence-neutral Domain.Common ports, whose raw-Npgsql adapters
       // (DapperPersistencePorts.cs) replace the EF AppDbContext ones; the outbox
       // dispatcher/relay + workflow-instances read controller + saga / outbox /
-      // event tables are all emitted through NpgsqlDataSource + DbSchema.  No
-      // gate.
+      // event tables are all emitted through NpgsqlDataSource + DbSchema.
       for (const agg of ctx.aggregates) {
         const a = agg as EnrichedAggregateIR;
         const where = `aggregate '${ctxName}.${agg.name}'`;
@@ -2793,7 +2935,7 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // domain/CQRS layer.  An event-sourced aggregate has no state table,
         // so the `shape: ...` axis is moot — skip that check for it.
         const shape = effectiveSavingShape(a, resolveDataSourceConfig(a, ctx, sys));
-        // shape: document IS supported now (D-DOCUMENT-AXIS, Dapper edition): the
+        // shape: document IS supported (D-DOCUMENT-AXIS, Dapper edition): the
         // whole aggregate persists as one JSONB `data` blob (a `(id, data,
         // version)` table), reusing the persistence-agnostic ToSnapshot/
         // FromSnapshot round-trip.  Contained parts + `X id[]` references fold
@@ -2847,12 +2989,12 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // `contains` (in any shape) needs no gate on an event-sourced aggregate.
         //
         // Nested entity parts + reference-collection associations (`X id[]`)
-        // NOW COMPOSE (wave 4): every read hydrates the child tables through
-        // `_Create(State)` first, then `LoadRefsAsync` post-sets the writable
-        // ref-collection list on the reconstructed roots — the two hydrate
-        // paths run in sequence, not exclusively.
+        // COMPOSE: every read hydrates the child tables through `_Create(State)`
+        // first, then `LoadRefsAsync` post-sets the writable ref-collection list
+        // on the reconstructed roots — the two hydrate paths run in sequence,
+        // not exclusively.
         //
-        // Part-in-part (a contained part with its OWN `contains`) is now drained
+        // Part-in-part (a contained part with its OWN `contains`) is supported
         // for BOTH shapes.  RELATIONAL child-table shape: `partChildrenOf` builds
         // the containment TREE, each grandchild a table FK'd to its DIRECT parent
         // part; hydration recurses bottom-up (children grouped by parent-part id,
@@ -2868,13 +3010,10 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // supported — it stores as one `jsonb` column holding the serialised
         // list (System.Text.Json round-trip, the raw-Npgsql mirror of EF's
         // primitive-collection JSON mapping).  A part FIELD typed as an array of
-        // a sibling ENTITY used to be gated here as an "impossible storage
-        // shape", but since `contains` became optional (#2161) such a field
-        // lowers to a containment (its own grandchild table, part-in-part above),
-        // never a by-value column — and a cross-aggregate entity is a structural
-        // error — so no un-owned entity collection can reach this check.  The
-        // gate (and its `DAPPER_ARRAY_ELEM_KINDS` set) was therefore unreachable
-        // dead code and has been removed.
+        // a sibling ENTITY needs no gate: it lowers to a containment (its own
+        // grandchild table, part-in-part above), never a by-value column, and a
+        // cross-aggregate entity is a structural error — so no un-owned entity
+        // collection can reach this check.
         // Lifecycle stamping is supported (onUpdate mutates the aggregate
         // pre-save; onCreate binds INSERT-only parameters excluded from the
         // upsert SET), INCLUDING principal-referencing stamp values — the
@@ -2884,16 +3023,13 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
         // the EF AuditableInterceptor.  A principal stamp on a no-auth
         // deployable stays rejected by the category-A loom.stamp-principal-without-auth.
         //
-        // HIERARCHICAL TENANCY (M-T6.29).  The `deep`/`global` read level lowers
-        // to the materialized-path `authz-filter` sentinel, whose
-        // `currentUser.<claim>` sub-expressions the Dapper principal-param
-        // collector does not descend into — so it cannot bind the `@__cu_*`
-        // params the fragment would need.  This USED to escape the gate entirely
-        // and crash codegen (`capability filter … is outside the Dapper SQL
-        // subset`) — the corpus map claimed the validator rejected it, and it did
-        // not.  Now it is what that map always said: an honest boundary.  The
-        // `deny` sentinel is principal-free and DOES render (`1 = 0`), so it is
-        // deliberately not gated here.
+        // HIERARCHICAL TENANCY.  The `deep`/`global` read level lowers to the
+        // materialized-path `authz-filter` sentinel, whose `currentUser.<claim>`
+        // sub-expressions the Dapper principal-param collector does not descend
+        // into — so it cannot bind the `@__cu_*` params the fragment would need.
+        // Gated here as an honest boundary rather than left to crash codegen.
+        // The `deny` sentinel is principal-free and DOES render (`1 = 0`), so it
+        // is deliberately not gated.
         for (const f of [...(a.contextFilters ?? []), a.writeScopeFilter].filter(
           (x): x is ExprIR => x != null,
         )) {
@@ -2929,231 +3065,91 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
 }
 
 // ---------------------------------------------------------------------------
-// `persistence: mikroorm` capability gate (D-REALIZATION-AXES Phase 5d).
+// `persistence: mikroorm` capability gate (D-REALIZATION-AXES).
 //
 // The node/hono MikroORM adapter is the SECOND node persistence backend
-// (alongside the default `drizzle`), at full parity with drizzle on the
-// PERSISTENCE axis (M-T6.9, drained across 7 waves): every shape/inheritance/
-// containment/association/audit/provenance/managed-field/seed/ES intersection
-// emits.  Two distinct families of reject live here:
+// (alongside the default `drizzle`).  On the PERSISTENCE axis it is at full
+// parity with drizzle: every shape / inheritance / containment / association /
+// audit / provenance / managed-field / seed / event-sourcing intersection
+// emits; persist-time audit stamping injects the audit columns into
+// `em.upsert(...)` from the ambient principal; and server-managed access
+// (`managed` / `token` / `internal` / `secret`) stores as an ordinary column.
+// Hierarchical (`deep`/`global`) tenancy scope is expressible through a `raw()`
+// FilterQuery key, so it is not gated here either.
 //
-//  (a) SHAPE rejects (`reject`) — a genuinely-impossible mapping, drizzle
-//      included.  Only one survives M-T6.9: an abstract inheritance base that
-//      owns its own `contains` (the base has no repository and concretes do not
-//      inherit its parts, so its tables would have no reader/writer).
-//  (b) FEATURE rejects (M-T6.23) — GONE, all five.  Parity is persistence-only,
-//      but five NON-persistence features were once gated `&& !usingMikro` in the
-//      Hono emitter and emitted NOTHING: query-time projections, realtime SSE,
-//      the transactional outbox, timers (`scheduler.ts`) and broker channel
-//      drivers.  Each was first made an honest error here, then closed by its
-//      emitter — the gate was always the interim, never the answer
-//      (`docs/old/proposals/integrity-audit-2026-07-residue.md` R1 named the
-//      projection case; the other four were unrecorded).  Nothing about a
-//      non-persistence feature is gated on this adapter any more; if a new one
-//      is ever `!usingMikro`-gated, gate it HERE rather than dropping it
-//      silently, and delete the clause with the emitter that closes it.
-//
-// Persist-time audit stamping IS supported (node-persist-time-auditing): the
-// MikroORM `save()` injects the audit columns into `em.upsert(...)` from the
-// ambient request principal (`stampInsert`, db/audit-stamp.ts), keeping
-// createdAt/createdBy immutable on conflict via `onConflictExcludeFields`.
-//
-// Server-managed access (`managed` / `token` / `internal` / `secret`) is NO
-// LONGER gated either: the data-mapper stores such a field as an ordinary
-// column that round-trips through the shared save/hydrate seams (the access
-// modifier shapes only the API wire surface).  Provenanced fields stay gated.
+// The `loom.mikroorm-unsupported` CODE is also raised by `migration-checks.ts`
+// (`#migrations`), for declared migration steps this adapter's
+// `orm.schema.updateSchema()` can never apply.  Before adding a clause under
+// it, answer both questions this gate exists to ask: is the shape really
+// inexpressible on THIS adapter, and is it really specific to it?  A shape
+// impossible on every backend belongs in a target-neutral AST rule instead —
+// abstract-inheritance-base-with-`contains` lives in
+// `loom.abstract-aggregate-contains`
+// (`src/language/validators/inheritance.ts` Rule 3b) for exactly that reason.
 // ---------------------------------------------------------------------------
+//
+// ONE adapter-specific reject lives here, and it answers both
+// questions: a SCALAR collection field on the aggregate root (`tags: string[]`,
+// `kinds: Status[]`).  Inexpressible on THIS adapter (no column arm — see the
+// function body), and specific to it (drizzle stores the same field as a
+// native Postgres array).
 export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
 
   for (const dep of sys.deployables) {
     if (dep.persistence !== "mikroorm") continue;
-    const reject = (subject: string, reason: string): void => {
-      diags.push({
-        severity: "error",
-        message: diagMessage("loom.mikroorm-unsupported", { name: dep.name, subject, reason }),
-        source: `${sys.name}/${dep.name}`,
-        code: "loom.mikroorm-unsupported",
-      });
-    };
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
-      // --- Feature gates (M-T6.23) -----------------------------------------
-      // (1) Query-time projections: CLOSED by M-T6.23 slice 4 — the routes emit
-      // on this adapter.  The aggregation shapes (whole-table and grouped) push
-      // down through the mikro QueryBuilder with `raw()` SQL fragments and a
-      // `whereToMikroFilter` WHERE; the raw-table (`from <Workflow>` /
-      // `from <Projection>`) shape reads its Row entity the same way; and the
-      // repository-sourced shape was adapter-neutral already, since the mikro
-      // repository synthesises the same `repo.<projName>()` find.  A `where`
-      // outside the FilterQuery subset is refused by
-      // `validateFindPredicateAdapterSupport` (which now walks projection
-      // filters), so an aggregation can never silently drop its filter.
-      // (2) Realtime SSE: CLOSED by M-T6.23 slice 5, the last of the five —
-      // `http/realtime.ts` and the boot tee emit on this adapter, so a
-      // `delivery: broadcast` channel keeps its browser-observable wire and a
-      // frontend's EventSource has a route to subscribe to.  The
-      // consumer-dependent severity split that used to live here (error when a
-      // frontend targeted the backend, warning otherwise) goes with the gap it
-      // described: the module reads no `db`, so there is nothing left to gate.
-      // (3) Transactional outbox: CLOSED by M-T6.23 slice 1 — the adapter emits
-      // the `__loom_outbox` Row entity + `createOutboxDispatcher` /
-      // `startOutboxRelay` over the EntityManager, so a durable channel
-      // (`retention: log | work`) is at-least-once here exactly as on drizzle
-      // (dispatch-delivery-semantics.md).  Nothing to gate.
-      // Context `retrieval` query bundles ARE supported (DEBT-17): emitted as
-      // `run<Name>` methods, the MikroORM analogue of the drizzle `runMethod`.
-      // A retrieval whose `where` falls outside the MikroORM FilterQuery subset
-      // emits a runtime-throwing stub at codegen (same as a find predicate), so
-      // there's no validate-time gate here — mirrors the .NET Dapper v1 path.
-      // `seed` data IS supported: `emitMikroSeeds` threads the same dataset
-      // functions (domain `create` → `<Agg>Repository.save`) through the
-      // EntityManager, with raw INSERTs + the `__loom_seed` marker via
-      // `em.getConnection().execute`.  The mikro seed CLI inits the ORM +
-      // `updateSchema()` before running; the boot path runs it after schema
-      // update — so no gate here.
       for (const agg of ctx.aggregates) {
         const a = agg as EnrichedAggregateIR;
         const where = `aggregate '${ctxName}.${agg.name}'`;
-        // (4) HIERARCHICAL tenancy scope.  `emitMikroContextFilters` lowers each
-        // capability filter through `whereToMikroFilter`, whose FilterQuery
-        // subset cannot express the descendant-or-self subtree predicate — and
-        // it CATCHES that failure and leaves the filter unapplied rather than
-        // throwing.  For a `deep`/`global` scope that is not a degraded read:
-        // it is NO tenant predicate at all, so every tenant's rows become
-        // readable on every read of this aggregate.  The adapter's own comment
-        // assumed the shape was unreachable here ("not generated on the mikro
-        // adapter today") — a belief, not a gate.  A `tenancy … of <Registry>`
-        // system with `persistence: mikroorm` validates, generates and compiles
-        // clean today and silently serves cross-tenant rows.  Refuse it until
-        // the subtree predicate is expressible (M-T6.23's remaining half).
+        // SCALAR COLLECTION field on the aggregate ROOT (`tags: string[]`,
+        // `kinds: Status[]`).  `columnsOf` (typescript/emit/mikroorm.ts) filters
+        // out the two collection shapes it CAN map — `X id[]` (a pivot Row) and
+        // `<VO>[]` (one inline jsonb column) — and routes everything else into
+        // `columnsForType`, whose four arms are primitive / enum / id / value
+        // object.  An `array` falls to the default arm, which THROWS
+        // `unsupported field kind 'array' … (validator gap)` — codegen aborts on
+        // a `.ddd` that parsed and validated clean.  The throw named the gap; it
+        // was never gated.  Drizzle stores the same field as a native Postgres
+        // array, so this is the one place mikroorm is genuinely BEHIND drizzle
+        // rather than at parity — hence its own `#scalar-array` message instead
+        // of the "no relational mapping anywhere" generic tail.
         //
-        // `writeScopeFilter` is scanned alongside the read filters (as dapper's
-        // gate already does): a `deep` WRITE ladder derives the same subtree
-        // sentinel, and the write-scope pre-guard lowers it through the very
-        // same `whereToMikroFilter` — so an ungated one throws at codegen
-        // instead of being an honest refusal.
-        if (
-          [...(a.contextFilters ?? []), a.writeScopeFilter]
-            .filter((x): x is ExprIR => x != null)
-            .some((f) => isDeepScopeFilter(f))
-        ) {
-          reject(
-            `${where} carries a hierarchical tenancy scope (a 'deep'/'global' subtree read)`,
-            `the descendant-or-self predicate that scopes it (the FilterQuery subset ` +
-              `cannot express it, and an unlowerable principal filter is dropped ` +
-              `silently) — leaving every tenant's rows readable`,
-          );
+        // Scoped to the shapes that actually reach the row emitter:
+        //   • `persistedAs: eventLog` — no state table; the collection folds
+        //     in-memory from the event stream, so `columnsOf` never runs.
+        //   • `shape: document` — the whole aggregate is one jsonb blob, arrays
+        //     included (verified: it generates).  `relational` and `embedded`
+        //     BOTH go through the root column emitter, so both are gated.
+        // The safe interim fix per the parity policy: an honest refusal now, and
+        // it drains when the emitter grows a jsonb (or PG-array) column arm —
+        // exactly the one a contained PART's collection field already gets.
+        const rootShape = effectiveSavingShape(a, resolveDataSourceConfig(a, ctx, sys));
+        if (a.persistedAs !== "eventLog" && rootShape !== "document") {
+          for (const f of a.fields) {
+            const t = f.type.kind === "optional" ? f.type.inner : f.type;
+            if (t.kind !== "array") continue;
+            // `X id[]` (pivot table) and `<VO>[]` (inline jsonb) are mapped —
+            // only a PRIMITIVE / ENUM element array has no column arm.
+            if (t.element.kind !== "primitive" && t.element.kind !== "enum") continue;
+            diags.push({
+              severity: "error",
+              code: "loom.mikroorm-unsupported",
+              message: diagMessage("loom.mikroorm-unsupported#scalar-array", {
+                name: dep.name,
+                subject: where,
+                field: f.name,
+                element: typeLabel(t.element),
+              }),
+              source: `${sys.name}/${dep.name}`,
+            });
+          }
         }
-        // Event sourcing IS supported on this adapter (appliers): the
-        // `<agg>_events` stream + fold reuse the persistence-agnostic
-        // domain/CQRS layer.  An event-sourced aggregate has no state table,
-        // so the `shape: ...` axis is moot for it — every saving shape is now
-        // supported (no per-shape reject remains), so the shape need not be
-        // resolved here.
-        // `shape: embedded` IS supported (wave 2): the root stays queryable
-        // columns and each containment folds into a jsonb column, (de)serialised
-        // through the shared `<part>ToDoc`/`<part>FromDoc` helpers (the MikroORM
-        // analogue of the drizzle embedded repository).  An `Id[]` reference
-        // collection FOLDS onto the root as one jsonb id-string array (no pivot
-        // table — `embeddedColumnsOf` + the embedded repo's hydrate/save fold),
-        // the embedded analogue of the relational pivot and the mirror of the
-        // drizzle `emitEmbeddedTable` ref-collection column.  `shape: document`
-        // IS supported (wave 3): the whole aggregate tree collapses to one `(id,
-        // data, version)` jsonb blob round-tripped through the shared doc
-        // (de)serialisers — no per-field / containment / pivot columns, so
-        // reference collections + parts ride inside the blob (unbounded).
-        // Aggregate inheritance IS supported (aggregate-inheritance.md): TPH
-        // (`sharedTable`) maps the hierarchy to one shared Row discriminated by
-        // `kind` — concrete repos read/write it scoped to their `kind`, a
-        // polymorphic `<Base>Repository` dispatches on it; TPC (`ownTable`)
-        // gives each concrete its own table with a delegating base reader.
-        // Both mirror the drizzle inheritance slice.
-        // `Id[]` reference-collection associations ARE supported on a state
-        // aggregate: each persists as a composite-PK pivot Row entity, bulk-
-        // loaded on read and full-list-replaced on save (the MikroORM analogue
-        // of the drizzle join table).  On an EVENT-SOURCED aggregate they need
-        // no pivot table at all — an ES aggregate has no state table (its truth
-        // is the `<ctx>_events` stream), so the reference collection folds
-        // IN-MEMORY from the stream via the `apply(...)` bodies (`_fromEvents`),
-        // exactly as on drizzle.  The relational pivot emitters never run for an
-        // ES aggregate (the entities loop skips it), so there is nothing to gate.
-        // Contained entity parts ARE supported (relational child tables): each
-        // part persists as a parent-scoped `<Part>Row` child table, bulk-loaded
-        // on read and diff-synced on save (the MikroORM analogue of the drizzle
-        // containment path).  NESTED parts (part-in-part) are supported — a
-        // nested part FKs to its DIRECT parent part's row (`directParentName`,
-        // shared with migrations-builder), recursively loaded (deepest-first
-        // `<nc>ByParent` maps) / saved (tree-position-stamped FK) / cascade-
-        // deleted (no DB FK, so descendants cleared explicitly).  A COLLECTION
-        // field on a part (array of scalar / enum / VO / id) folds into one jsonb
-        // column (shared serialise/deserialise), the mirror of the Dapper
-        // part-collection path.  An EVENT-SOURCED aggregate's parts fold
-        // IN-MEMORY from the event stream (the `apply(...)` bodies rebuild the
-        // containment tree through `_fromEvents`) — an ES aggregate has no state
-        // table, so the relational child-table emitters never run for it; the
-        // parts ride in the folded aggregate exactly as on the .NET Dapper ES
-        // path, so there is nothing to gate.  A CONCRETE aggregate-inheritance
-        // participant (`extends` a base) composes the inheritance repo with the
-        // containment hydrate pass: its part child tables FK the row that owns
-        // the concrete (the shared TPH row / the concrete's own TPC table), so
-        // the containment tree round-trips like any state aggregate's parts (the
-        // relational repo already emits both).  Only an ABSTRACT inheritance base
-        // with its OWN parts stays gated — an abstract base owns no repository
-        // (validator-forbidden) and concretes do not inherit its `contains`, so
-        // its part tables would have no reader/writer: genuinely unmappable.
-        if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0) {
-          if (a.isAbstract)
-            reject(
-              where,
-              "contains nested entity parts on an abstract aggregate-inheritance base " +
-                "(the base owns no repository, and concretes do not inherit its parts)",
-            );
-        }
-        // `filter` capability predicates ARE supported: the repository ANDs each
-        // non-principal predicate (a MikroORM FilterQuery) into every root read
-        // via `$and`, honoring a read's `ignoring` bypass (the FilterQuery
-        // analogue of drizzle's per-read predicate).  A predicate outside the
-        // FilterQuery subset is caught by `validateFindPredicateAdapterSupport`
-        // (which already iterates contextFilters), and principal-referencing
-        // filters are rejected on Hono by `validatePrincipalContextFilterSupport`
-        // — so only closed, lowerable predicates reach codegen.
-        // Server-managed access (`managed` / `token` / `internal` / `secret`)
-        // is NO LONGER gated: like drizzle, the MikroORM data-mapper stores such
-        // a field as an ordinary column that round-trips through the shared
-        // save-projection / hydrate seams (the access modifier only shapes the
-        // API wire surface, not persistence).  Audit-stamp targets are filled by
-        // the persist-time stamp (`stampInsert` in `em.upsert`) and the default-
-        // on `version` token by the guarded version-CAS `nativeUpdate` — both
-        // already supported.
-        // Provenanced fields ARE supported (wave 3): each `<field>_provenance`
-        // co-located lineage jsonb column rides the mikro Row + save projection
-        // (the shared `provColumnEntries`/`hydrateRootExpr` seams), and the
-        // per-write history flush runs on the EntityManager — see below.
-        //
-        // Per-operation / lifecycle `audited` writes ARE supported (wave 3): the
-        // history row that the SHARED (drizzle-shaped) routes-builder writes in
-        // the save transaction is now ported to the EntityManager API behind a
-        // `usingMikro` branch — `db.transactional(...em.insert(AuditRecordRow /
-        // ProvenanceRecordRow, {...}))` over the mikro history-Row entities, with
-        // the save joining the same transaction via the repos' fork
-        // `keepTransactionContext`.  Persist-time audit STAMPING (`auditable` /
-        // `with audit` → `stampInsert` in `em.upsert`) stays supported too.
       }
     }
-    // (4) Timers: CLOSED by M-T6.23 slice 3 — `scheduler.ts` emits on this
-    // adapter (pg-boss for `cron:`, setInterval + a transaction-scoped advisory
-    // lock for `every:`), with the `loom_timer_runs` watermark and the lock query
-    // running through the EntityManager (`TimerStore` in scheduler-builder.ts).
-    // Nothing to gate.
-    // (5) Broker-bound channels: CLOSED by M-T6.23 slice 2 — `channelBindings` is
-    // no longer emptied for a mikroorm deployable, so `http/channels.ts` (the
-    // driver, producer tee and consumer loop) and the boot-time transport /
-    // consumer wiring emit here exactly as on drizzle.  The module reads no
-    // `db`, and the outbox relay it publishes drained rows through landed in
-    // slice 1 — nothing left to gate.
   }
 }
 
@@ -3215,11 +3211,10 @@ export function validateFindPredicateAdapterSupport(sys: SystemIR, diags: LoomDi
       // A QUERY-TIME projection's `where` lowers into a relational SELECT too —
       // through the synthesised `repo.<projName>()` find for the row-sourced
       // shape, and directly into the aggregation query for the pushed-down ones.
-      // It was the one predicate position this gate did not walk, which mattered
-      // as of M-T6.23 slice 4: on the MikroORM adapter an aggregation whose
-      // filter fell outside the FilterQuery subset would otherwise answer a
-      // plausible WRONG NUMBER (the filter silently dropped) instead of being
-      // refused. Adapter-generic, like every other position here.
+      // Walked here because on the MikroORM adapter an aggregation whose filter
+      // falls outside the FilterQuery subset would otherwise answer a plausible
+      // WRONG NUMBER (the filter silently dropped) instead of being refused.
+      // Adapter-generic, like every other position here.
       for (const proj of ctx.projections ?? []) {
         if (!isQueryTimeProjection(proj)) continue;
         check(proj.query?.filter, `query-time projection '${proj.name}'`);
@@ -3258,10 +3253,9 @@ export function validateFindPredicateAdapterSupport(sys: SystemIR, diags: LoomDi
 // coarser "kind supported by sourceType" check (with editor squiggles),
 // so this only reports a *capability* gap on a kind the sourceType DOES
 // support — avoiding a duplicate diagnostic for a plain kind/type
-// mismatch.  In Phase 1 every supported kind offers all its
-// capabilities, so this is silent for valid models; it becomes load-
-// bearing once kinds carry capabilities a sourceType may partially
-// support.
+// mismatch.  Every supported kind currently offers all its capabilities, so
+// this is silent for valid models; it becomes load-bearing once kinds carry
+// capabilities a sourceType may partially support.
 // ---------------------------------------------------------------------------
 
 export function validateNeedCapabilities(sys: EnrichedSystemIR, diags: LoomDiagnostic[]): void {
@@ -3295,26 +3289,24 @@ export function validateNeedCapabilities(sys: EnrichedSystemIR, diags: LoomDiagn
 }
 
 // ---------------------------------------------------------------------------
-// Typed remote-call backend support (M-T4.8).  Slice 2 lands the LOWERING —
-// `orders.getOrderById(id)` resolves against the callee's derived operation set
-// and types its result — but no backend emits the typed client yet (slices
-// 3-5).  Without this gate, such a model reaches the renderer and dies on a
-// stack trace.  This is the repo's HONEST-gap stance: a `loom.*` code the user
-// can read, not a silent mis-emit.
+// Typed remote-call backend support.  `orders.getOrderById(id)` resolves
+// against the callee's derived operation set and types its result; a backend
+// with no typed client would reach the renderer and die on a stack trace.  This
+// gate is the repo's HONEST-gap stance: a `loom.*` code the user can read, not
+// a silent mis-emit.
 //
-// The set is now EMPTY — every backend (node, python, dotnet, java, elixir)
-// emits a typed client, which is what "M-T4.8 is done" means.
-//
-// The check is deliberately KEPT rather than deleted with the last entry.  It
-// costs one `.some()` early-exit on models with no api binding, and it is the
+// The set is EMPTY — every backend (node, python, dotnet, java, elixir) emits a
+// typed client.  The check is deliberately KEPT rather than deleted with the
+// last entry.  It costs one `.some()` early-exit on models with no api binding,
+// and it is the
 // honest-gap net for the NEXT backend: a sixth platform added without a client
 // would otherwise reach a `render-expr.ts` arm that has no idea what to emit.
 // Adding the new platform key here turns that into a readable `loom.*` error at
 // validation time, which is the whole stance this check exists to hold.
 // ---------------------------------------------------------------------------
 
-/** Backends with no typed in-system api client.  Empty as of slice 4d — add a
- *  key here when introducing a backend before its client exists. */
+/** Backends with no typed in-system api client.  Currently empty — add a key
+ *  here when introducing a backend before its client exists. */
 export const REMOTE_API_OP_UNSUPPORTED: ReadonlySet<Platform> = new Set<Platform>([]);
 
 export function validateRemoteApiOpSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
@@ -3606,7 +3598,7 @@ function coverageGapReason(kind: string, ctx: BoundedContextIR): string | undefi
 //   - `keyPrefix`      — would gate the same Redis cache adapter
 //                        gated by `ttl`
 //
-// `isolationLevel` used to be on this list; it now flows through
+// `isolationLevel` is NOT on this list: it flows through
 // `resolveWorkflowIsolation` into the .NET BeginTransactionAsync and
 // Phoenix `Repo.transaction` opts when a workflow in the context is
 // transactional and doesn't carry its own per-workflow isolation.
@@ -3727,6 +3719,55 @@ export function validateInheritanceStorage(
   }
 }
 
+// ---------------------------------------------------------------------------
+// EF Core only: a TPH subtype's capability `filter` must be expressible as a
+// ROOT query filter.
+//
+// EF hosts every query filter in an inheritance hierarchy on the root entity
+// type, so a predicate reading a column that exists on ONE subtype cannot be
+// registered at all — `nonRootFilterFields` carries the two workarounds and the
+// EF Core 10.0.10 errors that rule each of them out.  Without this gate the
+// emitter either dropped the filter whole (the old `tph ? [] :` short-circuit,
+// a declared read restriction absent from every emitted query with no error at
+// all) or emitted a root-typed lambda naming a member the root does not have.
+//
+// Scoped to the EF adapter, NOT to `platform: dotnet`.  The Dapper adapter
+// splices its capability predicates into raw SQL against the shared table, where
+// a subtype column is simply a column — so the same model is fine there, and a
+// platform-wide gate would reject a shape that works.  Every other backend
+// filters per-read, so none of them is affected either.
+// ---------------------------------------------------------------------------
+export function validateTphFilterExpressibility(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  const seen = new Set<string>();
+  for (const dep of sys.deployables) {
+    if (dep.platform !== "dotnet" || dep.persistence === "dapper") continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        const stray = nonRootFilterFields(agg, ctx.aggregates);
+        if (stray.length === 0) continue;
+        // One diagnostic per aggregate, however many .NET deployables host it.
+        const key = `${ctx.name}/${agg.name}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        diags.push({
+          severity: "error",
+          code: "loom.tph-filter-unsupported",
+          message: diagMessage("loom.tph-filter-unsupported", {
+            name: agg.name,
+            fields: stray.map((f) => `'${f}'`).join(", "),
+            root: rootBaseOf(agg, ctx.aggregates).name,
+          }),
+          source: key,
+        });
+      }
+    }
+  }
+}
+
 // Event-sourced storage emission (`persistedAs: eventLog`, appliers A2) is
 // implemented for the Hono (`node`) and .NET (`dotnet`, EF Core) backends:
 // the `<agg>_events` stream table + fold-on-load repository. So an
@@ -3737,7 +3778,7 @@ export function validateInheritanceStorage(
 //
 // Phoenix (plain Ecto/Phoenix) hosts pure ES via the per-aggregate stream +
 // fold-on-load data layer (D-VANILLA-ES-HOME), so elixir is ES-capable.
-const EVENT_SOURCING_BACKENDS = new Set(["node", "dotnet", "python", "java", "elixir"]);
+export const EVENT_SOURCING_BACKENDS = new Set(["node", "dotnet", "python", "java", "elixir"]);
 
 export function validateEventSourcedStorage(
   ctx: BoundedContextIR,
@@ -3777,7 +3818,13 @@ export function validateEventSourcedStorage(
 // mutable `<Wf>State` row + dispatcher, and drop the appliers entirely).  A
 // parsed-but-unemitted feature is a footgun, so it fails fast — exactly like the
 // event-sourced *aggregate* storage gate.
-const EVENT_SOURCING_WORKFLOW_BACKENDS = new Set(["node", "dotnet", "python", "java", "elixir"]);
+export const EVENT_SOURCING_WORKFLOW_BACKENDS = new Set([
+  "node",
+  "dotnet",
+  "python",
+  "java",
+  "elixir",
+]);
 export function validateEventSourcedWorkflowStorage(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
@@ -3843,13 +3890,12 @@ export function validateProvenancedStorage(
 //   - loom.field-mask-unsupported — the field is hosted by a backend whose DTO
 //     projection doesn't yet emit the redaction.  A parsed-but-unredacted mask
 //     is a SECURITY footgun (the sensitive value ships in the clear), so it
-//     fails fast rather than silently no-op'ing.  The supported set is EMPTY in
-//     this foundation slice (grammar + IR + validation + wire-spec landed; the
-//     per-backend read redaction is the stacked follow-on), so a `mask unless`
-//     field is currently a compile error on every backend rather than an
-//     unenforced no-op.  Each backend redaction slice adds its platform here.
+//     fails fast rather than silently no-op'ing.  A backend absent from the set
+//     makes a `mask unless` field a compile error there rather than an
+//     unenforced no-op; adding read redaction to a backend adds its platform
+//     here.
 //     `node` emits response-boundary read redaction (`toWireMasked`) across its
-//     read routes + explicit handlers (M-T3.2 item 6, slice 2); `dotnet` redacts
+//     read routes + explicit handlers; `dotnet` redacts
 //     each masked field's DTO-projection arg via the ambient principal; `python`
 //     routes response boundaries through `to_wire_masked` (reads the ambient
 //     `current_user()` and redacts fail-closed); `java` adds a `<Agg>Response
@@ -3858,7 +3904,98 @@ export function validateProvenancedStorage(
 //     `elixir` (vanilla Phoenix) makes `serialize/1` redact (reading the principal
 //     from the process dictionary the Auth plug stashes), moving the raw map to
 //     `serialize_unmasked/1` for audit snapshots.
-const FIELD_MASK_BACKENDS = new Set<string>(["node", "dotnet", "python", "java", "elixir"]);
+// ---------------------------------------------------------------------------
+// `mask unless` LAUNDERING through `emit` (M-T3.15 B0).
+//
+// The query-time bound below refuses a projection that READS a masked
+// aggregate.  A FOLDED projection reaches the same value by a different road:
+// the aggregate emits an event carrying the masked field's value, and the
+// projection folds that payload into its own row — which every backend serves
+// unredacted (a projection row carries no mask marker and no principal is in
+// scope on its read routes).  A fold is the ordinary way to build a read model,
+// so it is the cheapest of the three bypasses, not the most exotic.
+//
+// The taint is computed per masked aggregate: an `emit`ted event field whose
+// value expression reads a `mask unless` field — directly (`salary`,
+// `this.salary`), through a `derived` that reads one, or through a `let` bound
+// to either — marks the EVENT as carrying masked data.  A projection folding
+// such an event is refused with the same code as the read bypass.
+// ---------------------------------------------------------------------------
+
+/** The masked field a single expression reads, or null.  `masked` holds the
+ *  aggregate's `mask unless` field names plus every `derived` that reads one;
+ *  `taintedLets` maps a body-local `let` name to the masked field it carries. */
+function firstMaskedRead(
+  e: ExprIR,
+  masked: ReadonlySet<string>,
+  taintedLets: ReadonlyMap<string, string>,
+): string | null {
+  let hit: string | null = null;
+  walkExprDeep(e, (n) => {
+    if (hit !== null) return;
+    if (n.kind === "ref") {
+      const selfProp =
+        n.refKind === "this-prop" || n.refKind === "this-vo-prop" || n.refKind === "this-derived";
+      if (selfProp && masked.has(n.name)) {
+        hit = n.name;
+        return;
+      }
+      if (n.refKind === "let") {
+        const via = taintedLets.get(n.name);
+        if (via !== undefined) hit = via;
+      }
+      return;
+    }
+    if (n.kind === "member" && n.receiver.kind === "this" && masked.has(n.member)) hit = n.member;
+  });
+  return hit;
+}
+
+/** Map every event whose emitted payload carries a `mask unless` value to the
+ *  `<Aggregate>.<field>` that laundered into it. */
+export function maskLaunderingEvents(ctx: BoundedContextIR): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const agg of ctx.aggregates) {
+    const maskedFields = agg.fields.filter((f) => f.maskUnless).map((f) => f.name);
+    if (maskedFields.length === 0) continue;
+    const masked = new Set(maskedFields);
+    // A `derived` whose expression reads a masked field carries the same value.
+    for (const d of agg.derived) {
+      if (firstMaskedRead(d.expr, masked, new Map())) masked.add(d.name);
+    }
+    for (const op of [...agg.operations, ...(agg.creates ?? []), ...(agg.destroys ?? [])]) {
+      const stmts: StmtIR[] = [];
+      for (const s of op.statements) walkStmtsDeep(s, (n) => stmts.push(n));
+      // Fixpoint over `let` bindings so declaration order (or nesting inside a
+      // lambda block) can't hide a chain `let a = salary` / `let b = a`.
+      const taintedLets = new Map<string, string>();
+      for (let changed = true; changed; ) {
+        changed = false;
+        for (const s of stmts) {
+          if (s.kind !== "let" || taintedLets.has(s.name)) continue;
+          const via = firstMaskedRead(s.expr, masked, taintedLets);
+          if (via !== null) {
+            taintedLets.set(s.name, via);
+            changed = true;
+          }
+        }
+      }
+      for (const s of stmts) {
+        if (s.kind !== "emit" || out.has(s.eventName)) continue;
+        for (const f of s.fields) {
+          const via = firstMaskedRead(f.value, masked, taintedLets);
+          if (via !== null) {
+            out.set(s.eventName, `${agg.name}.${via}`);
+            break;
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+export const FIELD_MASK_BACKENDS = new Set<string>(["node", "dotnet", "python", "java", "elixir"]);
 export function validateFieldMask(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
@@ -3906,6 +4043,7 @@ export function validateFieldMask(
     ctx.aggregates.filter((a) => a.fields.some((f) => f.maskUnless)).map((a) => a.name),
   );
   if (maskedAggNames.size > 0) {
+    const launderingEvents = maskLaunderingEvents(ctx);
     for (const proj of ctx.projections) {
       // `maskedAggNames` holds only aggregate names, so a `source` match is an
       // aggregate source (a workflow / projection source can't collide).
@@ -3933,6 +4071,23 @@ export function validateFieldMask(
             name: proj.name,
             src: joined.aggregate,
             via: "join",
+          }),
+          source: `${ctx.name}/projection/${proj.name}`,
+        });
+        continue;
+      }
+      // A FOLD launders the same value through the event bus: `emit Raised {
+      // newSalary: salary }` carries the masked column into a projection row
+      // that every backend serves in the clear.  Same rule, same code.
+      const laundered = proj.handlers.find((h) => launderingEvents.has(h.event));
+      if (laundered) {
+        diags.push({
+          severity: "error",
+          code: "loom.field-mask-projection-source",
+          message: diagMessage("loom.field-mask-projection-source#fold", {
+            name: proj.name,
+            event: laundered.event,
+            field: launderingEvents.get(laundered.event),
           }),
           source: `${ctx.name}/projection/${proj.name}`,
         });
@@ -4016,6 +4171,56 @@ export function validateAuditedOperationSupport(
   }
 }
 
+// ---------------------------------------------------------------------------
+// `audited` / `provenanced` × a RETURNING operation (audit 2026-08-24, A6).
+//
+// The Hono route builder dispatches to `emitReturningOperationRoute` only when
+// `op.returnType && !audit && !prov && !op.extern`; otherwise the operation
+// falls into the void-204 handler.  For
+// `operation take(n: int) audited : Item or NotFound` that means the route
+// DECLARES 204 only, throws the tagged result away, and audits `status: "ok"`
+// even when the operation returned its error variant — one keyword silently
+// rewriting the HTTP contract, with no diagnostic anywhere.  An in-code comment
+// called it "a later slice"; nothing gated it.
+//
+// Python emits both halves correctly (the audit record AND the tagged result +
+// its 7807 translation), so this is a per-backend gap, not a language one —
+// hence a hosting check rather than a structural one.  The refusal is the
+// honest version of the existing behaviour until the node returning route
+// folds the audit transaction in.
+const AUDITED_RETURNING_UNSUPPORTED = new Set(["node"]);
+export function validateAuditedReturningOperationSupport(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
+): void {
+  const offending = [...backendPlatforms].filter((p) => AUDITED_RETURNING_UNSUPPORTED.has(p));
+  if (offending.length === 0) return;
+  for (const agg of ctx.aggregates) {
+    for (const op of agg.operations) {
+      // Only a PUBLIC op drives a route at all, and only a route can lose a
+      // return contract — mirrors `auditOps`/`provOps` in the route builder.
+      if (!op.returnType || op.visibility !== "public") continue;
+      // `extern` returning ops are a separate (declared) seam — the body lives
+      // outside the toolchain, so the void fall-through is not this bug.
+      if (op.extern) continue;
+      const modifier = op.audited ? "audited" : opHasProvSite(op) ? "provenanced" : undefined;
+      if (!modifier) continue;
+      diags.push({
+        severity: "error",
+        code: "loom.audited-returning-operation-unsupported",
+        message: diagMessage("loom.audited-returning-operation-unsupported", {
+          name: agg.name,
+          op: op.name,
+          modifier,
+          platforms: offending.join(", "),
+        }),
+        source: `${ctx.name}/${agg.name}`,
+      });
+    }
+  }
+}
+
 export function validateDataSourceUnwiredKnobs(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const ds of sys.dataSources) {
     for (const knob of UNWIRED_KNOBS) {
@@ -4088,15 +4293,6 @@ export function validateAuth(sys: SystemIR, diags: LoomDiagnostic[]): void {
     }
   }
 }
-
-// `validateScaffoldDoubles` deleted.  Cross-directive
-// double-scaffold detection now happens at the AST level: two
-// scaffold directives producing the same generated page name surface
-// either as a duplicate-symbol error from Langium's linker (when both
-// pages reach the AST) or as a no-op in the expander (the second
-// synthesis is suppressed by the per-ui name set).  Keeping the IR-
-// level fallback would either duplicate the error or produce a
-// confusing second diagnostic; better to let the AST layer own it.
 
 export function validatePermissions(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const mod of sys.subdomains) {

@@ -30,10 +30,17 @@
 
 import { diagMessage } from "../../../diagnostics/messages.js";
 import { isCollectionOp } from "../../../util/collection-ops.js";
+import { RENDERABLE_FILTER_PRIMITIVES } from "../../../util/filter-param-kinds.js";
+import {
+  WALKER_PRIMITIVE_NAMED_ARGS,
+  walkerPrimitiveNamedArgs,
+} from "../../../util/walker-primitive-args.js";
 import {
   isWalkerPrimitive,
+  WALKER_PRIMITIVE_SLOTS,
   WALKER_SUB_PRIMITIVE_PARENTS,
 } from "../../../util/walker-primitive-names.js";
+import { pagedReturn } from "../../stdlib/generics.js";
 import type {
   ActionIR,
   AggregateIR,
@@ -41,13 +48,17 @@ import type {
   DerivedIR,
   EnrichedLoomModel,
   ExprIR,
+  FindIR,
   PageIR,
   ProjectionIR,
   StateFieldIR,
   StmtIR,
+  StoreIR,
   TypeIR,
+  UiIR,
 } from "../../types/loom-ir.js";
 import { allAggregates, allContexts } from "../../types/loom-ir.js";
+import { classifyPage, pageSlotKey } from "../../util/page-kind.js";
 import { groupedProjectionNames, readableProjectionNames } from "../../util/projection-read.js";
 import { typeLabel } from "../../util/type-label.js";
 import {
@@ -103,8 +114,55 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
   for (const c of allContexts(loom)) {
     for (const p of c.projections) projectionsByIrName.set(p.name, p);
   }
+  // aggregate → its repository's finds by name.  The Angular component gate
+  // reads it to tell a REACTIVE query (a user `find`, or a paged `all`, whose
+  // args the query re-reads lazily) from a plain hoisted read — the same
+  // distinction `adjustFindHookArgs` makes in the walker.
+  const findsByAggregate = new Map<string, Map<string, FindIR>>();
+  for (const c of allContexts(loom)) {
+    for (const r of c.repositories) {
+      const m = findsByAggregate.get(r.aggregateName) ?? new Map<string, FindIR>();
+      for (const f of r.finds) m.set(f.name, f);
+      findsByAggregate.set(r.aggregateName, m);
+    }
+  }
 
   for (const sys of loom.systems) {
+    // Frontends whose COMPONENT emitter filters its emitted set (feliz /
+    // angular), per mounted ui.  The framework is resolved per-ui —
+    // `ui.framework` wins, then the deployable's platform-derived
+    // `uiFramework` — because a static-bundle host serves whichever bundle the
+    // ui declares (`mountedUis` in system-checks.ts uses the same resolution).
+    // Deduped per framework: two deployables serving the same bundle are one
+    // gap, not two diagnostics.
+    const filteringHosts = new Map<string, Map<string, string>>();
+    for (const d of sys.deployables) {
+      for (const uiName of [d.uiName, ...(d.hostedUiNames ?? [])]) {
+        if (!uiName) continue;
+        const fw = sys.uis.find((u) => u.name === uiName)?.framework ?? d.uiFramework;
+        if (!fw || !COMPONENT_FILTERING_FRAMEWORKS.has(fw)) continue;
+        const byFw = filteringHosts.get(uiName) ?? new Map<string, string>();
+        if (!byFw.has(fw)) byFw.set(fw, d.name);
+        filteringHosts.set(uiName, byFw);
+      }
+    }
+    // EVERY framework each ui is actually rendered through — the same per-ui
+    // resolution as `filteringHosts`, unfiltered.  The per-target body gates
+    // below (`loom.table-filter-unsupported`,
+    // `loom.modal-controlled-op-form-unsupported`) need it because a
+    // static-bundle host serves whichever bundle the ui declares, so the
+    // framework that renders a page is not the deployable's platform.
+    const renderingHosts = new Map<string, Map<string, string>>();
+    for (const d of sys.deployables) {
+      for (const uiName of [d.uiName, ...(d.hostedUiNames ?? [])]) {
+        if (!uiName) continue;
+        const fw = sys.uis.find((u) => u.name === uiName)?.framework ?? d.uiFramework;
+        if (!fw) continue;
+        const byFw = renderingHosts.get(uiName) ?? new Map<string, string>();
+        if (!byFw.has(fw)) byFw.set(fw, d.name);
+        renderingHosts.set(uiName, byFw);
+      }
+    }
     // Which uis this system renders through Feliz — the one frontend whose
     // walker cannot render `.map(λ)` (see `MAP_UNRENDERED_FRAMEWORK`).  A ui
     // declares its own `framework:`, but the LEGACY binding leaves it unset and
@@ -173,9 +231,28 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkBody(page.requires, ctx, diags);
         checkActionBodies(page.actions, ctx, diags);
         checkInstanceEffectRouteId(page, aggNames, apiParamNames, diags);
+        checkOpFormRouteId(page, diags);
         checkFrontendCollectionOps(page, pageWhere(page), mapRendered, diags);
         checkUnknownPageElements(page, pageWhere(page), callableNames, diags);
         checkSlotOutsideComponent(page, pageWhere(page), diags);
+        checkUnresolvedPageRefs(page, pageWhere(page), callableNames, diags);
+        checkFixedSlotArity(page, pageWhere(page), diags);
+        checkPrimitiveNamedArgs(page, pageWhere(page), diags);
+        // The scaffolded list page is the only one whose filter bar the macro
+        // builds, so the drop is only reportable there.
+        const pageKind = classifyPage(page, {
+          aggregateNames: [...aggNames],
+          workflowNames: [...workflowNames],
+        });
+        if (pageKind.kind === "aggregate-list") {
+          checkScaffoldFilterParams(
+            page,
+            pageKind.aggregateName,
+            findsByAggregate.get(pageKind.aggregateName),
+            pageWhere(page),
+            diags,
+          );
+        }
         checkSubPrimitivePlacement(page, pageWhere(page), diags);
         checkDataGridSelection(page.body, page.state, pageWhere(page), diags);
         // The `of:` receiver must be an API HANDLE — the walker's Pattern H
@@ -216,6 +293,9 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkActionBodies(comp.actions, ctx, diags);
         checkFrontendCollectionOps(comp, `component '${comp.name}'`, mapRendered, diags);
         checkUnknownPageElements(comp, `component '${comp.name}'`, callableNames, diags);
+        checkUnresolvedPageRefs(comp, `component '${comp.name}'`, callableNames, diags);
+        checkFixedSlotArity(comp, `component '${comp.name}'`, diags);
+        checkPrimitiveNamedArgs(comp, `component '${comp.name}'`, diags);
         checkSubPrimitivePlacement(comp, `component '${comp.name}'`, diags);
         checkDataGridSelection(comp.body, comp.state, `component '${comp.name}'`, diags);
         checkChartArgs(
@@ -232,6 +312,46 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
           aggByName,
           apiParamNames,
           aggNames,
+          diags,
+        );
+      }
+      // A `store`'s state initialisers and action bodies are the THIRD frontend
+      // expression surface.  A store action is emitted by each frontend's own
+      // store builder (`react`'s
+      // zustand slice, `flutter/store-builder.ts`'s Riverpod notifier, the Feliz
+      // Elmish `update` arm), and none of them renders a collection op either:
+      // `action tidy() { tags := tags.distinct() }` CRASHES the Feliz emitter
+      // (`feliz/fs-expr.ts` has no leaf for it) and emits uncompilable Dart
+      // (`state.tags.distinct()`) on Flutter — from a `.ddd` that validated
+      // clean.  Same vocabulary gap, same gate.
+      for (const store of ui.stores) {
+        checkFrontendCollectionOps(store, `store '${store.name}'`, mapRendered, diags);
+      }
+      // A `toast(<expr>)` outside the v1 message subset CRASHES every realtime
+      // renderer (target-agnostic — the three switches are arm-for-arm equal).
+      checkToastMessages(ui, diags);
+      // Two per-target body shapes that render on SOME frontends and are
+      // dropped on the rest.  Both are keyed on the rendering framework, so the
+      // gate stops firing for a target the moment it ports.
+      for (const [framework, dName] of renderingHosts.get(ui.name) ?? []) {
+        for (const page of ui.pages) {
+          checkTableFilterSupport(page, pageWhere(page), framework, dName, diags);
+          checkControlledModalOpForm(page, pageWhere(page), framework, dName, diags);
+        }
+        for (const comp of ui.components) {
+          const where = `component '${comp.name}'`;
+          checkTableFilterSupport(comp, where, framework, dName, diags);
+          checkControlledModalOpForm(comp, where, framework, dName, diags);
+        }
+      }
+      // A user `component` whose shape the hosting frontend's component emitter
+      // FILTERS OUT — the component and every call site of it vanish.
+      for (const [framework, dName] of filteringHosts.get(ui.name) ?? []) {
+        checkUserComponentSupport(
+          ui,
+          framework,
+          dName,
+          { aggByName, apiParamNames, aggNames, findsByAggregate },
           diags,
         );
       }
@@ -575,11 +695,660 @@ function checkSubPrimitivePlacement(
   for (const root of walkerRenderedExprs(host)) visit(root, undefined);
 }
 
+/** Every expression surface of a STORE a frontend emits: the state
+ *  initialisers.  (Its action bodies are walked separately, exactly as a
+ *  page's are.)  A store has no `body`/`title`/`derived`, so it cannot go
+ *  through `walkerRenderedExprs`. */
+function storeRenderedExprs(store: StoreIR): ExprIR[] {
+  const out: ExprIR[] = [];
+  for (const s of store.state) if (s.init) out.push(s.init);
+  return out;
+}
+
+// -------------------------------------------------------------------------
+// `loom.page-primitive-extra-children` — the ARITY twin of the multi-child
+// container sweep (#2567's `Card`, and `Tab` alongside this change).
+//
+// A container primitive (`Stack`, `Card`, `Tab`, …) renders EVERY positional
+// as a child.  A handful of primitives are not containers at all: they are
+// fixed SLOT shapes whose pack templates interpolate a known number of
+// positions and have nowhere to put an extra one —
+//
+//   Stat(label, value)          two stacked text elements, `{{{label}}}` +
+//                               `{{{value}}}` on all 15 packs
+//   KeyValueRow(label, value)   a `<dt>`/`<dd>` pair; the value cell takes ONE
+//                               already-walked element on Feliz/Flutter
+//   Modal(trigger:, OperationForm(…))
+//                               renders the TRIGGER button only — the dialog
+//                               body is the op-form's generated field set
+//
+// A positional past a shape's slot count was read by nobody: the content
+// vanished from every frontend while still landing in
+// `.loom/messages.en.json`, the same translators-get-a-key-nothing-renders
+// symptom `Tab` had.  Widening the packs is not the fix here (there is no
+// second value slot to widen INTO), so this is the honest gate — the other
+// half of #2567's fix-or-gate rule.
+//
+// MEMBERSHIP is no longer hand-listed here.  It was, and it covered exactly
+// `Stat` / `KeyValueRow` / the op-form `Modal` while every other fixed-arity
+// read in the primitive table stayed unguarded — `EnumBadge { "x", "dropped" }`
+// and `Image { "/a.png", "/dropped.png", alt: "a" }` both parsed clean and both
+// emitted only the first positional.  The slot counts now come from the ONE
+// declaration of each primitive's argument surface,
+// `WALKER_PRIMITIVE_SLOTS` in `src/util/walker-primitive-names.ts`, which a
+// completeness test pins against the emitters' own positional reads.  A new primitive declares
+// its contract there or the completeness test fails; it can no longer land
+// silently outside this gate.
+// -------------------------------------------------------------------------
+
+/** The positional args of a lowered call (named args carry an `argNames` entry
+ *  at the same index).  Mirrors the walker's `positionalArgs`, which lives in
+ *  the generator layer and cannot be imported here. */
+function positionalArgsOf(e: Extract<ExprIR, { kind: "call" }>): ExprIR[] {
+  return e.args.filter((_, i) => !e.argNames?.[i]);
+}
+
+/** Visit every free call the walker DISPATCHES AS A PRIMITIVE.
+ *
+ *  A call sitting in the RECEIVER position of a member / method-call is not
+ *  one: the walker hands the whole access to `emitExpr`, never to the
+ *  primitive registry.  That distinction is load-bearing because a
+ *  user-declared value object may share a primitive's NAME —
+ *  `Stat { "valueObject", Money(9.99, "USD").currency }` in
+ *  `web/src/examples/expression-showcase.ddd` constructs the VO `Money`, and
+ *  reading it as the `Money` PRIMITIVE would reject shipped source over an
+ *  arity the emitter never applies to it.  So the receiver chain is skipped
+ *  while the ARGUMENTS are still walked (`rows.map(r => Text { r.name })`
+ *  renders its lambda body). */
+function walkRenderedPrimitives(
+  e: ExprIR,
+  visit: (call: Extract<ExprIR, { kind: "call" }>) => void,
+): void {
+  if (e.kind === "member" || e.kind === "method-call") {
+    const receiver = e.receiver;
+    walkExprChildren(e, {
+      expr: (c) => {
+        if (c !== receiver) walkRenderedPrimitives(c, visit);
+      },
+      stmt: (s) => walkStmtExprsDeep(s, (c) => walkRenderedPrimitives(c, visit)),
+    });
+    return;
+  }
+  if (e.kind === "call" && e.callKind === "free") visit(e);
+  walkExprChildren(e, {
+    expr: (c) => walkRenderedPrimitives(c, visit),
+    stmt: (s) => walkStmtExprsDeep(s, (c) => walkRenderedPrimitives(c, visit)),
+  });
+}
+
+// -------------------------------------------------------------------------
+// `loom.table-filter-unsupported` / `loom.table-filter-server-paged` (M-T1.1)
+//
+// `Table { filter: <state> }` binds a search box above the table that narrows
+// the rows client-side.  It renders on the six frameworks that ride the shared
+// `walkBody` core — all six declare the `renderFilteredRows` +
+// `renderFilterInput` seams — and on NOBODY else:
+//
+//   * HEEx runs a parallel engine (`elixir/heex-primitives.ts` `renderTable`),
+//     whose `else if` chain handles `rows` / `testid` / sort / page and lets
+//     `filter:` fall through into nothing.  No seam, no marker, no diagnostic.
+//   * A SERVER-PAGED table's rows are one server window, so a client filter
+//     would narrow that page rather than the result set — `table.ts` gates it
+//     off (`!serverPaged`) and drops the arg.  This is the common case, not the
+//     exotic one: `auto-paged-table.ts` REWRITES the simplest hand-written
+//     `QueryView { of: X.all, data: rows => Table { rows: rows, filter: q } }`
+//     into the server-paged shape, so the natural spelling loses its filter
+//     with `ddd parse` reporting `0 error(s), 0 warning(s)` and the bound state
+//     field left as a dead `useState`.
+//
+// Rendering it is a real slice on both sides (a `filter` param threaded into
+// the generated `list/4` + a `handle_event` on LiveView; a server-side filter
+// param on the paged read), so this is the honest half meanwhile.
+// -------------------------------------------------------------------------
+
+/** Frontends whose walker renders `Table { filter: … }` — the six that declare
+ *  `renderFilteredRows` + `renderFilterInput` on their `WalkerTarget`.
+ *
+ *  EXPORTED so its own test can prove the gate still bites: with the six
+ *  shipping frameworks listed, "the check works" and "the check is
+ *  unreachable" look identical from outside, and the only honest way to tell
+ *  them apart is to remove one and watch the diagnostic come back — the same
+ *  discipline `CHART_FRAMEWORKS` uses. */
+export const TABLE_FILTER_FRAMEWORKS: ReadonlySet<string> = new Set([
+  "react",
+  "vue",
+  "svelte",
+  "angular",
+  "feliz",
+  "flutter",
+]);
+
+/** True when a `Table` call carries a `filter:` bound to a page-state ref —
+ *  exactly what `emitTable`'s `refArgName(call, "filter")` reads. */
+function tableFilterRef(e: Extract<ExprIR, { kind: "call" }>): string | undefined {
+  const i = (e.argNames ?? []).indexOf("filter");
+  if (i < 0) return undefined;
+  const arg = e.args[i];
+  return arg?.kind === "ref" ? arg.name : undefined;
+}
+
+/** True when the call declares `serverPaged: true` — the flag `emitTable` reads
+ *  and `auto-paged-table.ts` stamps on the rewritten hand-written table. */
+function tableIsServerPaged(e: Extract<ExprIR, { kind: "call" }>): boolean {
+  const i = (e.argNames ?? []).indexOf("serverPaged");
+  if (i < 0) return false;
+  const arg = e.args[i];
+  return arg?.kind === "literal" && arg.lit === "bool" && arg.value === "true";
+}
+
+function checkTableFilterSupport(
+  host: PageIR | ComponentIR,
+  where: string,
+  framework: string,
+  deployable: string,
+  diags: LoomDiagnostic[],
+): void {
+  let flaggedUnsupported = false;
+  let flaggedPaged = false;
+  for (const root of walkerRenderedExprs(host)) {
+    walkRenderedPrimitives(root, (e) => {
+      if (e.name !== "Table") return;
+      const filter = tableFilterRef(e);
+      if (filter === undefined) return;
+      if (!TABLE_FILTER_FRAMEWORKS.has(framework)) {
+        if (flaggedUnsupported) return;
+        flaggedUnsupported = true;
+        diags.push({
+          severity: "error",
+          code: "loom.table-filter-unsupported",
+          message: diagMessage("loom.table-filter-unsupported", {
+            where,
+            filter,
+            framework,
+            deployable,
+          }),
+          source: where,
+        });
+        return;
+      }
+      if (!tableIsServerPaged(e) || flaggedPaged) return;
+      flaggedPaged = true;
+      diags.push({
+        severity: "error",
+        code: "loom.table-filter-server-paged",
+        message: diagMessage("loom.table-filter-server-paged", { where, filter }),
+        source: where,
+      });
+    });
+  }
+}
+
+// -------------------------------------------------------------------------
+// `loom.modal-controlled-op-form-unsupported` (F2-CFE-12)
+//
+// `Modal { open: <stateBool>, OperationForm { … } }` combines the two modal
+// shapes: the STATE-CONTROLLED shell (`emitControlledModal`) and the
+// OPERATION-FORM dialog (`emitModal`'s trigger + generated field set).
+// `emitModal` only reaches the controlled path when there is NO form child, so
+// with both present and no `trigger:` control falls through to
+// `renderComment("Modal: expects trigger: Button(...) and an
+// OperationForm(<instance>.<operation>) child")` — the whole modal, form
+// included, becomes a comment.  A `Tab` whose only child is that modal renders
+// an empty panel, and `ddd parse` reports no error.
+//
+// It is NOT universal: Angular and Feliz fork the primitive and render the
+// operation form (ignoring the `open:` binding, driving the dialog from their
+// own trigger), and HEEx's `renderModal` handles it too.  So this is a
+// per-target gap on the four that drop it, not a rejected shape.
+// -------------------------------------------------------------------------
+
+/** Frontends whose modal emitter renders an `OperationForm` child alongside an
+ *  `open:` binding.  EXPORTED for the same reason as
+ *  `TABLE_FILTER_FRAMEWORKS`: a gate whose Set names every target that can do
+ *  the thing is indistinguishable from a dead one unless a test removes an
+ *  entry and watches the diagnostic return. */
+export const CONTROLLED_MODAL_OP_FORM_FRAMEWORKS: ReadonlySet<string> = new Set([
+  "angular",
+  "feliz",
+  "phoenixLiveView",
+]);
+
+function checkControlledModalOpForm(
+  host: PageIR | ComponentIR,
+  where: string,
+  framework: string,
+  deployable: string,
+  diags: LoomDiagnostic[],
+): void {
+  if (CONTROLLED_MODAL_OP_FORM_FRAMEWORKS.has(framework)) return;
+  let flagged = false;
+  for (const root of walkerRenderedExprs(host)) {
+    walkRenderedPrimitives(root, (e) => {
+      if (flagged || e.name !== "Modal") return;
+      if ((e.argNames ?? []).indexOf("open") < 0) return;
+      const hasOpForm = positionalArgsOf(e).some(
+        (a) => a.kind === "call" && a.name === "OperationForm",
+      );
+      if (!hasOpForm) return;
+      flagged = true;
+      diags.push({
+        severity: "error",
+        code: "loom.modal-controlled-op-form-unsupported",
+        message: diagMessage("loom.modal-controlled-op-form-unsupported", {
+          where,
+          framework,
+          deployable,
+        }),
+        source: where,
+      });
+    });
+  }
+}
+
+/** Reject positionals no pack renders.  One diagnostic per (host, primitive):
+ *  a body over-filling `Stat` twice made one mistake. */
+function checkFixedSlotArity(
+  host: PageIR | ComponentIR,
+  where: string,
+  diags: LoomDiagnostic[],
+): void {
+  const flagged = new Set<string>();
+  for (const root of walkerRenderedExprs(host)) {
+    walkRenderedPrimitives(root, (e) => {
+      const spec = WALKER_PRIMITIVE_SLOTS.get(e.name);
+      if (spec) {
+        if (positionalArgsOf(e).length <= spec.max || flagged.has(e.name)) return;
+        flagged.add(e.name);
+        diags.push({
+          severity: "error",
+          code: "loom.page-primitive-extra-children",
+          message: diagMessage("loom.page-primitive-extra-children", {
+            where,
+            name: e.name,
+            max: spec.max,
+            slots: spec.slots ?? "its declared slots",
+          }),
+          source: where,
+        });
+        return;
+      }
+      // The op-form `Modal` shape: `primitive-modal` emits the trigger button
+      // and nothing else, so every positional besides the `OperationForm`
+      // child is dropped.  The state-controlled shape (`open: <state>`) IS a
+      // children container and walks all of them — leave it alone.
+      if (e.name !== "Modal" || flagged.has("Modal")) return;
+      const positionals = positionalArgsOf(e);
+      const hasOpForm = positionals.some((a) => a.kind === "call" && a.name === "OperationForm");
+      if (!hasOpForm || positionals.length <= 1) return;
+      flagged.add("Modal");
+      diags.push({
+        severity: "error",
+        code: "loom.page-primitive-extra-children",
+        message: diagMessage("loom.page-primitive-extra-children#modal-op-form", { where }),
+        source: where,
+      });
+    });
+  }
+}
+
+// -------------------------------------------------------------------------
+// `loom.page-primitive-unknown-arg` — the NAMED-ARGUMENT twin of the arity
+// gate above.
+//
+// Every emitter reads its named arguments BY NAME — `stringNamed(call,
+// "variant")`, `namedArgValue(call, "of")`, `lambdaArg(call, "onSubmit")`.  A
+// name outside a primitive's vocabulary is therefore read by NOBODY: it, and
+// whatever content it carries, vanishes from every one of the seven render
+// targets.  Worse than the extra-positional case, it does not even reach
+// `.loom/messages.en.json`, so a translator cannot see that a caption went
+// missing; and on a fixed-slot primitive it also DISPLACES the positional the
+// content was meant to fill —
+//
+//     Card { title: "Bob's card", Text { "x" } }   → the caption is gone
+//     Tabs { Tab { title: "One", … } }             → renders as "Tab 1"
+//
+// `title:` is the natural spelling (it IS a legal argument on `Alert`,
+// `Modal` and `CodeBlock`), which is exactly why the mistake is easy to make
+// and impossible to diagnose from the output.  The shipped
+// `examples/showcase.ddd` carried the same defect at a larger scale until this
+// gate found it: `Section { heading:, body: Stack { … } }` emitted a literal
+// `<section />`, dropping the whole inline-emphasis demo.
+//
+// The vocabulary is `WALKER_PRIMITIVE_NAMED_ARGS` (src/util/walker-primitive-
+// args.ts), pinned mechanically against the registry, `USER_VISIBLE_SLOTS` and
+// the emitters' own reads by
+// `test/language/type-system/walker-primitive-args-completeness.test.ts` — so
+// this gate can never reject an argument an emitter honours, and a new
+// primitive cannot land without declaring what it accepts.
+// -------------------------------------------------------------------------
+
+/** Reject a named argument no emitter reads.  One diagnostic per (host,
+ *  primitive, argument): a body that misspells `title:` on three `Card`s made
+ *  the same mistake three times, and hears about it once. */
+function checkPrimitiveNamedArgs(
+  host: PageIR | ComponentIR,
+  where: string,
+  diags: LoomDiagnostic[],
+): void {
+  const flagged = new Set<string>();
+  for (const root of walkerRenderedExprs(host)) {
+    walkExprDeep(root, (e) => {
+      if (e.kind !== "call" || e.callKind !== "free") return;
+      const accepted = walkerPrimitiveNamedArgs(e.name);
+      if (accepted === undefined) return; // a component / value object / extern call
+      for (const argName of e.argNames ?? []) {
+        if (argName === undefined) continue;
+        // A `style:` argument that survived lowering is one `hoistStyleArg`
+        // (src/ir/lower/lower-expr.ts) declined to lift, i.e. not an object
+        // literal — dropped there with the comment "validator surfaces a
+        // clearer diagnostic".  This is that diagnostic.
+        if (argName === "style") {
+          if (flagged.has(`${e.name}.style`)) continue;
+          flagged.add(`${e.name}.style`);
+          diags.push({
+            severity: "error",
+            code: "loom.page-primitive-unknown-arg",
+            message: diagMessage("loom.page-primitive-unknown-arg#style-not-object", {
+              where,
+              name: e.name,
+            }),
+            source: where,
+          });
+          continue;
+        }
+        if (accepted.has(argName)) continue;
+        const key = `${e.name}.${argName}`;
+        if (flagged.has(key)) continue;
+        flagged.add(key);
+        diags.push({
+          severity: "error",
+          code: "loom.page-primitive-unknown-arg",
+          message: diagMessage("loom.page-primitive-unknown-arg", {
+            where,
+            name: e.name,
+            arg: argName,
+            known: acceptedArgsSentence(e.name),
+          }),
+          source: where,
+        });
+      }
+    });
+  }
+}
+
+/** The "what IS accepted here" tail of the diagnostic — the primitive's own
+ *  vocabulary, or a plain statement that it takes children only. */
+function acceptedArgsSentence(name: string): string {
+  const own = WALKER_PRIMITIVE_NAMED_ARGS[name] ?? [];
+  const universal = "`testid:` and `style:` are accepted on every primitive";
+  if (own.length === 0) {
+    return `\`${name}\` takes positional children only — pass the content as a positional argument (${universal}).`;
+  }
+  return `\`${name}\` accepts ${own.map((a) => `\`${a}:\``).join(", ")} (${universal}).`;
+}
+
+// -------------------------------------------------------------------------
+// `loom.scaffold-filter-param-unsupported` — the scaffolded list page's
+// filter bar drops a find it cannot render an input for.
+//
+// `filterFindsForAggregate` (src/macros/stdlib/scaffold/_body-builders.ts)
+// wires one filter input per param of every array-returning `find`, and the
+// arm is ALL-OR-NOTHING: a find with a single unrenderable param is skipped
+// whole.  It renders `string`, `int`, `long` and `<X> id`; `decimal`/`money`,
+// `enum`, `bool`, `datetime` and `guid` are held back for reasons that live in
+// the FRONTEND emitters, not in the macro (see
+// `src/util/filter-param-kinds.ts`).  Until this gate the skip was silent: the
+// author declared `find byStatus(s: Status): Order[]`, the scaffolded list
+// page came out with no `Status` filter, and nothing anywhere said why.
+//
+// A WARNING, not an error: an aggregate may legitimately carry finds the
+// author never wanted in the bar (a workflow's lookup, a criterion-backed
+// read).  It is also suppressed when the page's own body already references
+// the find — a hand-written or overridden `page List` that binds it is doing
+// exactly what the message would ask for.
+// -------------------------------------------------------------------------
+
+/** Whether the scaffolded filter bar can render an input for a find param. */
+function filterParamRenderable(t: TypeIR): boolean {
+  if (t.kind === "id") return true;
+  return t.kind === "primitive" && RENDERABLE_FILTER_PRIMITIVES.has(t.name);
+}
+
+/** Every name a page body READS through a call or member access — enough to
+ *  tell "the author already bound this find here" from "the bar dropped it". */
+function namesReadByBody(host: PageIR | ComponentIR): Set<string> {
+  const out = new Set<string>();
+  for (const root of walkerRenderedExprs(host)) {
+    walkExprDeep(root, (e) => {
+      if (e.kind === "call") out.add(e.name);
+      else if (e.kind === "method-call") out.add(e.member);
+      else if (e.kind === "member") out.add(e.member);
+    });
+  }
+  return out;
+}
+
+/** Report each array-returning find the scaffolded filter bar had to drop. */
+function checkScaffoldFilterParams(
+  page: PageIR,
+  aggregateName: string,
+  finds: ReadonlyMap<string, FindIR> | undefined,
+  where: string,
+  diags: LoomDiagnostic[],
+): void {
+  if (!finds || finds.size === 0) return;
+  let bound: Set<string> | undefined;
+  for (const find of finds.values()) {
+    // `all` is the auto-`findAll` the bar renders unconditionally; the
+    // synthesized paged twin and the audit-history read are not user finds.
+    if (find.name === "all" || find.synthesized || find.auditHistory) continue;
+    if (find.returnType.kind !== "array" || find.params.length === 0) continue;
+    const bad = find.params.find((prm) => !filterParamRenderable(prm.type));
+    if (!bad) continue;
+    bound ??= namesReadByBody(page);
+    if (bound.has(find.name)) continue;
+    diags.push({
+      severity: "warning",
+      code: "loom.scaffold-filter-param-unsupported",
+      message: diagMessage("loom.scaffold-filter-param-unsupported", {
+        where,
+        find: find.name,
+        param: bad.name,
+        type: typeLabel(bad.type),
+        aggregate: aggregateName,
+      }),
+      source: where,
+    });
+  }
+}
+
+// -------------------------------------------------------------------------
+// `loom.op-form-needs-route-id` — the BY-NAME operation form on a page whose
+// route carries no `:id`.
+//
+// `OperationForm { of: <Agg>, op: <op> }` names the operation but no RECORD, so
+// every frontend resolves the target from the page's route id
+// (`emitFormOfOperationByName` pushes `idExpr: 'id ?? ""'`; the Angular /
+// Feliz / Flutter twins do the same).  On a page whose route declares no `:id`
+// that binding is `undefined`, and the form submits the operation against an
+// EMPTY id — `use<Op><Agg>("")`, a request to `/<aggs>//<op>` that no backend
+// route matches.
+//
+// Until wave 2 this shape ALSO failed to compile (`id` was never bound —
+// F2-CFE-5's TS2304); binding it fixed the compile error and left the semantic
+// one, which is this gate.  It is the exact twin of
+// `loom.instance-effect-needs-route-id` one site over — whose message, until
+// now, recommended `OperationForm` as the workaround for the very defect it
+// shares.
+//
+// Scope is the BY-NAME shape only (`of:` + `op:` named args).  The instance
+// spelling (`OperationForm { row.rename }`) carries its own record and is
+// fine, and a `component` body has no route to check against.
+// -------------------------------------------------------------------------
+
+/** Reject a by-name `OperationForm` on a route with no `:id` to target. */
+function checkOpFormRouteId(page: PageIR, diags: LoomDiagnostic[]): void {
+  if (pageRouteHasParam(page.route)) return;
+  const flagged = new Set<string>();
+  for (const root of walkerRenderedExprs(page)) {
+    walkExprDeep(root, (e) => {
+      if (e.kind !== "call" || e.callKind !== "free" || e.name !== "OperationForm") return;
+      const names = e.argNames ?? [];
+      const named = (n: string): ExprIR | undefined => {
+        for (let i = 0; i < e.args.length; i++) if (names[i] === n) return e.args[i];
+        return undefined;
+      };
+      const of = named("of");
+      const op = named("op");
+      if (of === undefined || op === undefined) return;
+      const aggName = of.kind === "ref" ? of.name : undefined;
+      const opName = op.kind === "ref" ? op.name : undefined;
+      if (aggName === undefined || opName === undefined) return;
+      const key = `${aggName}.${opName}`;
+      if (flagged.has(key)) return;
+      flagged.add(key);
+      diags.push({
+        severity: "error",
+        code: "loom.op-form-needs-route-id",
+        message: diagMessage("loom.op-form-needs-route-id", {
+          name: page.name,
+          route: page.route ?? "/",
+          agg: aggName,
+          op: opName,
+        }),
+        source: pageWhere(page),
+      });
+    });
+  }
+}
+
+// -------------------------------------------------------------------------
+// `loom.unresolved-page-ref` — the last silent-drop door in a page body.
+//
+// A bare name in a rendered position resolves at emit time against the route
+// params, the `state { }` fields, the `derived` bindings, an enclosing
+// lambda's parameter, a `<Store>.<field>` read, or a `let`.  Anything else
+// lowers to `refKind: "unknown"` and the walker emits a COMMENT —
+// `{/* ref: nosuchthing */}` on the four JS frontends, `Html.none` on Feliz,
+// `SizedBox.shrink()` on Flutter.  `Text { nosuchthing }` therefore compiles
+// green on all six with its content gone: a typo deletes the content, exactly
+// like the `Text(Fooo(x))` case `loom.unknown-page-element` closed for the
+// CALL spelling.  The REF spelling had no gate at any tier — this is it.
+//
+// Scope is deliberately the walker's own: the direct positional arguments of a
+// rendered call (and the operand/arm sub-expressions inside one), never a
+// member or method-call RECEIVER — `Status.Open` and `Shop.Thing.all` root at
+// an `unknown` ref by design (an enum name, an api handle), and those are
+// resolved by the member walk, not by the ref.
+// -------------------------------------------------------------------------
+
+/** Collect the refs a rendered slot resolves DIRECTLY, stopping at any
+ *  receiver-rooted shape (member / method-call / nested call). */
+function directlyRenderedRefs(e: ExprIR, out: Extract<ExprIR, { kind: "ref" }>[]): void {
+  switch (e.kind) {
+    case "ref":
+      out.push(e);
+      return;
+    case "paren":
+      directlyRenderedRefs(e.inner, out);
+      return;
+    case "unary":
+      directlyRenderedRefs(e.operand, out);
+      return;
+    case "binary":
+      directlyRenderedRefs(e.left, out);
+      directlyRenderedRefs(e.right, out);
+      return;
+    case "ternary":
+      directlyRenderedRefs(e.cond, out);
+      directlyRenderedRefs(e.then, out);
+      directlyRenderedRefs(e.otherwise, out);
+      return;
+    default:
+      return;
+  }
+}
+
+/** Named primitive slots whose argument is a VALUE the frontend reads and
+ *  renders — as opposed to the structural slots (`of:` / `op:` / `workflow:` /
+ *  `to:` / `data:` …) that name a DECLARATION the walker resolves against the
+ *  model.  Only these carry the silent-drop / `undefined`-emitting failure the
+ *  ref gate exists to close, so only these are scanned for unresolved refs. */
+const VALUE_SLOT_ARGS: ReadonlySet<string> = new Set([
+  "value",
+  "label",
+  "text",
+  "title",
+  "subtitle",
+  "caption",
+  "placeholder",
+  "help",
+  "hint",
+  "alt",
+  "message",
+  "description",
+  "emptyText",
+]);
+
+/** Reject an unresolved bare ref in a rendered slot.  One diagnostic per
+ *  (host, name): a page spelling the same typo three times made one mistake. */
+function checkUnresolvedPageRefs(
+  host: PageIR | ComponentIR,
+  where: string,
+  names: CallableNames,
+  diags: LoomDiagnostic[],
+): void {
+  const flagged = new Set<string>();
+  for (const root of walkerRenderedExprs(host)) {
+    walkExprDeep(root, (e) => {
+      if (e.kind !== "call" || e.callKind !== "free") return;
+      // Only calls the walker RENDERS: a stdlib primitive or a declared
+      // component.  Anything else is `loom.unknown-page-element`'s business.
+      if (!isWalkerPrimitive(e.name) && !names.components.has(e.name)) return;
+      const slots: Extract<ExprIR, { kind: "ref" }>[] = [];
+      e.args.forEach((arg, i) => {
+        const argName = e.argNames?.[i];
+        // A POSITIONAL arg is a rendered slot outright.  A NAMED arg is a
+        // rendered slot only when the name is a VALUE slot: `Text { value:
+        // nosuchthing }` emits `<Text></Text>` with the content silently gone,
+        // and `Money { value: alsomissing }` emits `<MoneyValue value={ /*
+        // unresolved: alsomissing */ undefined } />` — a guaranteed TypeError
+        // that also fails `tsc --noEmit` / `svelte-check` / `vue-tsc`.  Scanning
+        // positionals ONLY let that identical defect through on the spelling
+        // authors actually use for a value.
+        //
+        // The other named slots are STRUCTURAL: `of:` / `op:` / `workflow:` name
+        // a DECLARATION (an aggregate, an operation, a workflow), which lowers
+        // to `refKind: "unknown"` by design because the walker resolves it
+        // against the model rather than the page's value scope — the same class
+        // as the `Status.Open` enum receiver this walk already stops at.  Every
+        // scaffolded page in the corpus spells them, so reading them as value
+        // slots would reject shipped output.  Keyed on the slot NAME rather than
+        // on "is this a declared name?" because the latter has to enumerate
+        // every declaration namespace and silently reopens the hole for the one
+        // it forgets.
+        if (argName !== undefined && !VALUE_SLOT_ARGS.has(argName)) return;
+        directlyRenderedRefs(arg, slots);
+      });
+      for (const ref of slots) {
+        if (ref.refKind !== "unknown" || flagged.has(ref.name)) continue;
+        flagged.add(ref.name);
+        diags.push({
+          severity: "error",
+          code: "loom.unresolved-page-ref",
+          message: diagMessage("loom.unresolved-page-ref", { where, name: ref.name }),
+          source: where,
+        });
+      }
+    });
+  }
+}
+
 /** F3 — reject a stdlib collection op anywhere the frontend walker renders it.
  *  One diagnostic per (host, op name): a body reading `rows.count` twice is one
  *  authoring mistake, not two. */
 function checkFrontendCollectionOps(
-  host: PageIR | ComponentIR,
+  host: PageIR | ComponentIR | StoreIR,
   where: string,
   mapRendered: boolean,
   diags: LoomDiagnostic[],
@@ -618,7 +1387,9 @@ function checkFrontendCollectionOps(
     });
   };
   const empty: ReadonlySet<string> = new Set<string>();
-  for (const e of walkerRenderedExprs(host)) visit(e, empty);
+  // `lifetime` is StoreIR's discriminator — a page/component never carries one.
+  const roots = "lifetime" in host ? storeRenderedExprs(host) : walkerRenderedExprs(host);
+  for (const e of roots) visit(e, empty);
   for (const action of host.actions) for (const s of action.body) visitStmt(s, empty);
 }
 
@@ -916,8 +1687,8 @@ function isStringArray(t: TypeIR): boolean {
 
 // -------------------------------------------------------------------------
 // `loom.chart-of-not-grouped` / `loom.chart-kind-invalid` /
-// `loom.chart-accessor-not-field` — the `Chart` primitive's arg shapes
-// (M-T1.3 Phase 4).  The walker resolves each arg by NAME with no types in
+// `loom.chart-accessor-not-field` — the `Chart` primitive's arg shapes.
+// The walker resolves each arg by NAME with no types in
 // scope, so a wrong shape would emit a chart keyed on an empty string or
 // bound to a one-object singleton read (`.data ?? []` of an object → `[]`, a
 // permanently empty chart with no diagnostic).  Gated here instead, where the
@@ -1017,10 +1788,9 @@ function checkChartArgs(
 }
 
 /** Fix 4 — run the same IR body checks over every named action's body, with
- *  the action's params in scope.  Action bodies previously escaped the page's
- *  IR checks entirely (only `page.body/title/requires` were walked); this gives
- *  them the F1/F2/payload checks and, via the `inActionBody` flag, the
- *  action-only purity checks (Fix 3 body-call + Fix 5 await-floor). */
+ *  the action's params in scope: the F1/F2/payload checks and, via the
+ *  `inActionBody` flag, the action-only purity checks (Fix 3 body-call +
+ *  Fix 5 await-floor). */
 function checkActionBodies(
   actions: readonly ActionIR[],
   baseCtx: BodyCheckCtx,
@@ -1475,20 +2245,20 @@ function checkMethodCallReceiver(
 
 /** F3 — `loom.ui-projection-read-unsupported`, the FLAVOUR half.
  *
- *  A page/component reading a `projection` (`QueryView { of:
- *  <ApiHandle>.<Projection> }`) used to validate clean and emit
+ *  An unreadable `projection` read (`QueryView { of:
+ *  <ApiHandle>.<Projection> }`) would otherwise emit
  *  `/* unresolved: <Handle> *␣/ undefined.<Projection>` — a runtime `TypeError`
- *  AND a build break, from a model with no diagnostic.  The hole was
- *  structural: F2 above exempts an api-handle receiver root, correct for an
- *  aggregate (`Sales.Customer`) but it let a PROJECTION member through, and
- *  nothing downstream resolved it.
+ *  AND a build break, from a model with no diagnostic.  F2 above exempts an
+ *  api-handle receiver root, correct for an aggregate (`Sales.Customer`), but
+ *  that exemption lets a PROJECTION member through and nothing downstream
+ *  resolves it.
  *
- *  M-T1.3 Phase 1 shipped the read path for the SINGLETON QUERY-TIME flavour
- *  (one object out — the dashboard KPI shape); Phase 4 added the GROUPED
- *  (`group by`) flavour, whose LIST response list-binds through `QueryView`
- *  exactly like a find-all (the query-shape derivation answers `single:
- *  false`, so the collection arms read `.length` of a real array) or feeds a
- *  `Chart`.  What stays rejected here is every other flavour, on every
+ *  Two flavours ARE readable and pass: the SINGLETON QUERY-TIME one (one object
+ *  out — the dashboard KPI shape), and the GROUPED (`group by`) one, whose LIST
+ *  response list-binds through `QueryView` exactly like a find-all (the
+ *  query-shape derivation answers `single: false`, so the collection arms read
+ *  `.length` of a real array) or feeds a `Chart`.  Every other flavour is
+ *  rejected here, on every
  *  target: a KEYED projection returns an array parameterised by key, and a
  *  FOLDED one is read by key off its materialized row table.  Whether a
  *  *readable* projection's frontend has the client is a per-framework
@@ -1723,4 +2493,493 @@ function describeReceiver(e: ExprIR): string {
   if (e.kind === "method-call") return `${describeReceiver(e.receiver)}.${e.member}(…)`;
   if (e.kind === "paren") return describeReceiver(e.inner);
   return "<expr>";
+}
+
+// -------------------------------------------------------------------------
+// PAGE EMIT IDENTITY — `loom.ui-page-path-collision` /
+// `loom.ui-page-slot-collision`.
+//
+// A page's identity is its `area` path + name, which lowering has already
+// resolved into `emitPath`.  Two pages that resolve to the SAME emit path, or
+// that fill the SAME conventional archetype slot, are indistinguishable to
+// every downstream emitter — and every emitter resolved that the same silent
+// way: last write wins on the file map, first write wins on the page-object
+// map.  A duplicated `area Ops { … }` block in one scope parses clean
+// (`checkPageScope` scopes page uniqueness per area NODE, not per area NAME),
+// both areas compute `src/pages/ops/…`, and one page's body simply vanishes
+// from the build with no diagnostic anywhere.
+//
+// Checking it HERE, on `emitPath`, covers every frontend at once (React, Vue,
+// Svelte, Angular, Feliz, Flutter and Phoenix all key their emission on the
+// same derivation) rather than seven per-frontend guards that each catch their
+// own topology's half of the problem.
+// -------------------------------------------------------------------------
+
+export function validateUiPageIdentity(loom: EnrichedLoomModel, diags: LoomDiagnostic[]): void {
+  const nameCtx = {
+    aggregateNames: allContexts(loom).flatMap((c) => c.aggregates.map((a) => a.name)),
+    workflowNames: allContexts(loom).flatMap((c) => c.workflows.map((w) => w.name)),
+  };
+  for (const sys of loom.systems) {
+    for (const ui of sys.uis) {
+      const byPath = new Map<string, PageIR>();
+      const bySlot = new Map<string, PageIR>();
+      for (const page of ui.pages) {
+        const path = page.emitPath;
+        if (path !== undefined) {
+          const prior = byPath.get(path);
+          if (prior) {
+            diags.push({
+              severity: "error",
+              message: diagMessage("loom.ui-page-path-collision", {
+                ui: ui.name,
+                first: pageLabel(prior),
+                second: pageLabel(page),
+                path,
+              }),
+              source: sys.name,
+              code: "loom.ui-page-path-collision",
+            });
+          } else {
+            byPath.set(path, page);
+          }
+        }
+        const slot = pageSlotKey(classifyPage(page, nameCtx));
+        if (slot === undefined) continue;
+        const priorSlot = bySlot.get(slot);
+        if (priorSlot) {
+          diags.push({
+            severity: "error",
+            message: diagMessage("loom.ui-page-slot-collision", {
+              ui: ui.name,
+              first: pageLabel(priorSlot),
+              second: pageLabel(page),
+              slot: slotLabel(slot),
+            }),
+            source: sys.name,
+            code: "loom.ui-page-slot-collision",
+          });
+        } else {
+          bySlot.set(slot, page);
+        }
+      }
+    }
+  }
+}
+
+/** `page 'List'` / `page 'List' (in area ops/orders)` — enough for the author
+ *  to find which of the two declarations to change. */
+function pageLabel(p: PageIR): string {
+  const area = p.area ?? [];
+  return area.length === 0 ? `page '${p.name}'` : `page '${p.name}' in area ${area.join("/")}`;
+}
+
+/** Human name for a conventional archetype slot key. */
+function slotLabel(slot: string): string {
+  const parts = slot.split(":");
+  if (parts[0] === "agg") return `the ${parts[2]} page of aggregate '${parts[1]}'`;
+  if (parts[0] === "wf") return `the ${parts[2]} page of workflow '${parts[1]}'`;
+  return `the '${slot}' page`;
+}
+
+// -------------------------------------------------------------------------
+// `loom.user-component-deferred-target` — a user `component` whose SHAPE the
+// Feliz / Angular component emitter defers.
+//
+// THE SILENT VANISH.  Both emitters build their emitted set by FILTERING:
+// `emitFelizUserComponents` / `emitAngularUserComponents` keep only the
+// components whose walked shape their shell can assemble, and a filtered
+// component is not merely degraded — it is not emitted AT ALL.  Its name never
+// enters the walker's `userComponents` map either, so every call site falls
+// through to `walk()`'s give-up comment (`(* unknown layout component: X *)` /
+// `<!-- unknown layout component: X -->`).  Declaration and use disappear
+// together: `ddd parse` clean, codegen clean, `dotnet fable` / `ng build`
+// clean, and the component is simply not in the app.
+//
+// The two emitters gate their OWN async-effect shape honestly already
+// (`loom.feliz-async-effect-unsupported`, `loom.flutter-async-effect-
+// unsupported` for the Flutter twin) — every other filtered shape was silent.
+//
+// EACH ARM MIRRORS A FILTER, and says which.  The arms below were not read off
+// the emitter source alone: every one was MEASURED on this HEAD by generating
+// the shape and confirming the `unknown layout component` sentinel appears (and
+// the companion negative shapes confirming it does not) — see
+// `test/ir/user-component-deferred.test.ts`, which re-asserts both halves so an
+// arm cannot outlive the filter it mirrors.
+//
+// NOT mirrored, deliberately:
+//   • `component-emit.ts`'s `derivedNeedsPageScope` `currentUser` leg and its
+//     `emittedRecords` param check.  The first does not reproduce (a `derived`
+//     reading `currentUser` emits fine today, measured); the second is a
+//     function of which wire RECORDS App.fs happens to emit — a generator-side
+//     fact the IR cannot derive without re-running the read collector.
+//   • the Feliz `needsMvuScope` backstop (a surviving bare `model`/`dispatch`
+//     in the rendered F#).  It is a scan of GENERATED text, not a shape.
+//   • an async-effect action on either frontend — already gated (see above).
+// -------------------------------------------------------------------------
+
+/** Frameworks whose component emitter FILTERS its emitted set.  Keyed by the
+ *  resolved ui framework, which is what actually renders (`ui.framework` wins
+ *  over the deployable's platform-derived default — a `platform: static` host
+ *  serves whichever bundle the ui declares). */
+const COMPONENT_FILTERING_FRAMEWORKS = new Set(["feliz", "angular"]);
+
+/** One deferral: what the emitter filtered on, in the emitter's own terms. */
+interface ComponentDeferral {
+  reason: string;
+  /** The emitter site this arm mirrors — quoted in the diagnostic so the next
+   *  reader can check the arm against the filter rather than trusting it. */
+  emitter: string;
+}
+
+/** Lookups the deferral arms need — the ui's api handles plus the domain
+ *  vocabulary the api-read patterns resolve against. */
+interface DeferCtx {
+  aggByName: ReadonlyMap<string, AggregateIR>;
+  apiParamNames: ReadonlySet<string>;
+  aggNames: ReadonlySet<string>;
+  /** aggregate name → its repository's user finds, by name.  A read that
+   *  resolves to one is hoisted as a REACTIVE query on Angular (its args are
+   *  re-read lazily), which is what exempts it from the input-fed-read arm. */
+  findsByAggregate: ReadonlyMap<string, ReadonlyMap<string, FindIR>>;
+}
+
+/** The api read a walked expression denotes, mirroring the walker's
+ *  `tryDetectApiHook` patterns A/B (`<handle>.<Agg>.<op>`) and D/E
+ *  (`<Agg>.<op>`, no handle) — the aggregate-rooted ones, which are the only
+ *  patterns the arms below key on.  Returns `undefined` for anything else. */
+function detectAggregateRead(
+  e: ExprIR,
+  ctx: DeferCtx,
+): { aggregate: string; operation: string; args: readonly ExprIR[] } | undefined {
+  if (e.kind === "member" && e.receiver.kind === "member") {
+    const inner = e.receiver;
+    if (inner.receiver.kind === "ref" && ctx.apiParamNames.has(inner.receiver.name)) {
+      return { aggregate: inner.member, operation: e.member, args: [] };
+    }
+  }
+  if (e.kind === "method-call" && e.receiver.kind === "member") {
+    const inner = e.receiver;
+    if (inner.receiver.kind === "ref" && ctx.apiParamNames.has(inner.receiver.name)) {
+      return { aggregate: inner.member, operation: e.member, args: e.args };
+    }
+  }
+  if (e.kind === "member" && e.receiver.kind === "ref" && ctx.aggNames.has(e.receiver.name)) {
+    return { aggregate: e.receiver.name, operation: e.member, args: [] };
+  }
+  if (e.kind === "method-call" && e.receiver.kind === "ref" && ctx.aggNames.has(e.receiver.name)) {
+    return { aggregate: e.receiver.name, operation: e.member, args: e.args };
+  }
+  return undefined;
+}
+
+/** The walker's standard aggregate operations (`walker-core.ts`
+ *  `STANDARD_AGG_OPS`) — the ops whose hook args are NOT rewritten into a
+ *  reactive query bag. */
+const STANDARD_AGG_OPS: ReadonlySet<string> = new Set([
+  "all",
+  "byId",
+  "create",
+  "update",
+  "delete",
+]);
+
+/** True when a read is hoisted as a REACTIVE query — a user `find`, or a
+ *  paged `all`, whose rendered args become a query bag the query re-reads
+ *  (`adjustFindHookArgs` in `src/generator/_walker/walker-core.ts`).  Such a
+ *  read is exempt from the Angular input-fed-read filter: its args are wrapped
+ *  in a `() => (…)`, so an `@Input()` is read lazily rather than in the
+ *  constructor. */
+function isReactiveQueryRead(aggregate: string, operation: string, ctx: DeferCtx): boolean {
+  const find = ctx.findsByAggregate.get(aggregate)?.get(operation);
+  if (!find) return false;
+  const paged = pagedReturn(find.returnType) !== null;
+  return !STANDARD_AGG_OPS.has(operation) || paged;
+}
+
+/** Names read by an expression — every `ref`, at any depth.  Used to ask
+ *  whether a read's ARGUMENT reaches for a component parameter, which is what
+ *  the Angular filter asks of the RENDERED argument text. */
+function refNamesIn(e: ExprIR): Set<string> {
+  const out = new Set<string>();
+  walkExprDeep(e, (x) => {
+    if (x.kind === "ref") out.add(x.name);
+  });
+  return out;
+}
+
+/** True when the expression tree reaches for the magic route `id`
+ *  (`{ kind: "id" }` — what `walker-core.ts` sets `ctx.usesRouteId` on). */
+function readsRouteId(e: ExprIR | undefined): boolean {
+  let found = false;
+  walkExprDeep(e, (x) => {
+    if (x.kind === "id") found = true;
+  });
+  return found;
+}
+
+/** Params the Feliz / Angular props layer has no spelling for. */
+function paramDeferrals(c: ComponentIR, framework: string): ComponentDeferral[] {
+  const out: ComponentDeferral[] = [];
+  for (const p of c.params) {
+    const inner = p.type.kind === "optional" ? p.type.inner : p.type;
+    if (inner.kind === "slot") {
+      out.push({
+        reason: `parameter '${p.name}' is a \`slot\``,
+        emitter:
+          framework === "feliz"
+            ? "src/generator/feliz/component-emit.ts `propType` — a slot has no props-record spelling"
+            : "src/generator/angular/components-emit.ts `hasSlotOrActionParam` — `ngComponentOutletInputs` sets INPUTS and has no content-projection channel",
+      });
+    } else if (inner.kind === "action") {
+      out.push({
+        reason: `parameter '${p.name}' is an \`action\` callback`,
+        emitter:
+          framework === "feliz"
+            ? "src/generator/feliz/component-emit.ts `propType` — an action has no props-record spelling"
+            : "src/generator/angular/components-emit.ts `hasSlotOrActionParam` — a callback through the inputs object loses `this`",
+      });
+    } else if (framework === "feliz" && p.type.kind === "optional") {
+      out.push({
+        reason: `parameter '${p.name}' is optional`,
+        emitter:
+          "src/generator/feliz/component-emit.ts `propType` — an F# anonymous record is EXACT, so a call site omitting the field would not typecheck",
+      });
+    }
+  }
+  return out;
+}
+
+/** The Feliz filters, in `component-emit.ts` order: the `isCandidate` param /
+ *  derived gates, then the post-walk `renderOne` gates. */
+function felizDeferrals(c: ComponentIR, ctx: DeferCtx): ComponentDeferral[] {
+  const out = [...paramDeferrals(c, "feliz")];
+  // `isCandidate` → `derivedNeedsPageScope`: the route `id` is bound by a PAGE
+  // view fn, not by a component function.
+  for (const d of c.derived) {
+    if (readsRouteId(d.expr)) {
+      out.push({
+        reason: `\`derived ${d.name}\` reads the route \`id\`, which only a PAGE view binds`,
+        emitter: "src/generator/feliz/component-emit.ts `derivedNeedsPageScope`",
+      });
+    }
+  }
+  // `renderOne` → `result.usesRouteId`.  Three body shapes set it: an explicit
+  // `id`, and the two primitives the Feliz target forks onto a dispatch that
+  // carries the route id (`felizTarget.renderAction` / `renderDestroyForm` both
+  // set `ctx.usesRouteId = true` before returning their F#).
+  const routeIdCauses: string[] = [];
+  walkExprDeep(c.body, (e) => {
+    if (e.kind === "id") routeIdCauses.push("reads the route `id`");
+    if (e.kind !== "call") return;
+    if (e.name === "DestroyForm") {
+      const ofIdx = (e.argNames ?? []).indexOf("of");
+      const ofArg = ofIdx >= 0 ? e.args[ofIdx] : undefined;
+      if (ofArg?.kind === "ref") {
+        routeIdCauses.push("renders `DestroyForm`, which deletes the record at the route `id`");
+      }
+    }
+    if (e.name === "Action") {
+      // `felizTarget.renderAction` resolves the receiver through the walk's
+      // aggregate-typed params and requires a PARAMETERLESS public op; anything
+      // else renders a comment instead (and never touches `usesRouteId`).
+      const argNames = e.argNames ?? [];
+      const opRef = (e.args ?? []).find((_, i) => !argNames[i]);
+      if (opRef?.kind !== "member" || opRef.receiver.kind !== "ref") return;
+      const paramType = c.params.find(
+        (p) => p.name === (opRef.receiver as { name: string }).name,
+      )?.type;
+      const aggName = paramType?.kind === "entity" ? paramType.name : undefined;
+      const agg = aggName ? ctx.aggByName.get(aggName) : undefined;
+      const op = agg?.operations.find(
+        (o) => o.name === opRef.member && o.visibility === "public" && o.params.length === 0,
+      );
+      if (op) {
+        routeIdCauses.push(
+          `renders \`Action { ${opRef.receiver.name}.${opRef.member} }\`, which dispatches with the route \`id\``,
+        );
+      }
+    }
+  });
+  for (const cause of [...new Set(routeIdCauses)]) {
+    out.push({
+      reason: `its body ${cause} — a component function has no route of its own`,
+      emitter:
+        "src/generator/feliz/component-emit.ts `renderOne` (`result.usesRouteId`); the route `id` is bound by a page view fn",
+    });
+  }
+  // `renderOne` → `(result.usedStores?.size ?? 0) > 0`.
+  const stores = new Set<string>();
+  walkExprDeep(c.body, (e) => {
+    if (e.kind === "ref" && e.refKind === "store-field" && e.storeName) stores.add(e.storeName);
+    if (e.kind === "call" && e.storeAction) stores.add(e.storeAction.store);
+    if (e.kind === "action-ref" && e.storeName) stores.add(e.storeName);
+  });
+  for (const store of [...stores].sort()) {
+    out.push({
+      reason: `its body reads store '${store}'`,
+      emitter: "src/generator/feliz/component-emit.ts `renderOne` (`result.usedStores`)",
+    });
+  }
+  // `renderOne` → `needsMvuScope`: a `byId` read renders `model.<Agg>ById`, a
+  // Model field `collectComponentReads` deliberately does NOT declare (its
+  // fetch is fired by `pageCmd` on ROUTE entry, keyed to the hosting page's
+  // `Page` case — which a component has none of).
+  const byIdAggs = new Set<string>();
+  walkExprDeep(c.body, (e) => {
+    const read = detectAggregateRead(e, ctx);
+    if (read?.operation === "byId") byIdAggs.add(read.aggregate);
+  });
+  for (const agg of [...byIdAggs].sort()) {
+    out.push({
+      reason: `its body issues a \`${agg}.byId(…)\` read, whose fetch a PAGE fires on route entry`,
+      emitter:
+        "src/generator/feliz/wire.ts `collectBodyReads` (a component passes no `pageCase`, so no Model field is declared) + `component-emit.ts` `needsMvuScope`",
+    });
+  }
+  return out;
+}
+
+/** The Angular filters, in `components-emit.ts` order. */
+function angularDeferrals(c: ComponentIR, ctx: DeferCtx): ComponentDeferral[] {
+  const out = [...paramDeferrals(c, "angular")];
+  // `renderOne` → the input-fed-read guard.  The page shell hoists an api read
+  // as a class FIELD initializer, which runs in the constructor — before
+  // Angular has set any `@Input()` — so the read would fire on `undefined`.
+  // A REACTIVE query is exempt: a user `find`'s args are wrapped in a
+  // `() => (…)` the query re-reads, so the input is read lazily.
+  const inputNames = new Set(c.params.map((p) => p.name));
+  const seen = new Set<string>();
+  walkExprDeep(c.body, (e) => {
+    const read = detectAggregateRead(e, ctx);
+    if (!read || read.args.length === 0) return;
+    if (isReactiveQueryRead(read.aggregate, read.operation, ctx)) return;
+    const fed = read.args.flatMap((a) => [...refNamesIn(a)]).filter((n) => inputNames.has(n));
+    if (fed.length === 0) return;
+    const key = `${read.aggregate}.${read.operation}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({
+      reason:
+        `its body issues a \`${key}(…)\` read whose argument reads the \`@Input()\` ` +
+        `'${fed[0]}' — the hoisted read runs in the constructor, before Angular sets inputs`,
+      emitter: "src/generator/angular/components-emit.ts `renderOne` (the `readsAnInput` guard)",
+    });
+  });
+  return out;
+}
+
+/** Raise one diagnostic per (component, deferred shape) for every ui rendered
+ *  by a filtering frontend. */
+function checkUserComponentSupport(
+  ui: UiIR,
+  framework: string,
+  dName: string,
+  ctx: DeferCtx,
+  diags: LoomDiagnostic[],
+): void {
+  for (const c of ui.components) {
+    // An `extern` component is a hand-written shim the emitter always wires,
+    // and a bodyless one has nothing to walk.
+    if (c.extern || c.body === undefined) continue;
+    const deferrals = framework === "feliz" ? felizDeferrals(c, ctx) : angularDeferrals(c, ctx);
+    for (const d of deferrals) {
+      diags.push({
+        severity: "error",
+        code: "loom.user-component-deferred-target",
+        message: diagMessage("loom.user-component-deferred-target", {
+          name: c.name,
+          uiName: ui.name,
+          framework,
+          dName,
+          reason: d.reason,
+          emitter: d.emitter,
+        }),
+        source: `component '${c.name}'`,
+      });
+    }
+  }
+}
+
+// -------------------------------------------------------------------------
+// `loom.toast-message-unsupported` — an `on <chan>.<Event>(e) { toast(<expr>) }`
+// message expression outside the v1 subset every realtime renderer implements.
+//
+// THE SILENT CRASH.  The AST validator (`checkUiNotification`,
+// `src/language/validators/ui.ts`) bounds the handler STATEMENT vocabulary —
+// `toast(<one expression>)` / `refetch(<Agg>…)` — but accepts ANY expression
+// inside the `toast(…)`.  All three renderers then implement the SAME narrow
+// v1 subset and `throw` on anything else:
+//
+//   src/generator/_frontend/realtime.ts   `renderMessageExpr`      (React/Vue/Svelte/Angular)
+//   src/generator/feliz/realtime.ts       `renderFsToastMessage`   (Feliz)
+//   src/generator/elixir/realtime-liveview.ts `renderMessageExprElixir` (LiveView)
+//
+// so `toast(e.order.id)` / `toast(x ? "a" : "b")` / `toast(string(e.at))` parses
+// and validates, then aborts `ddd generate system` with a raw `Error` and a
+// stack trace — no `loom.*` code, no source location.  Measured on this HEAD
+// for all three renderers.  This check makes the throw a defensive backstop.
+//
+// The gate is the INTERSECTION of the three, which is also their union: the
+// three `switch`es are arm-for-arm identical (literal / the event binding /
+// single-level member off it / paren / binary), so one target-agnostic rule
+// covers every frontend rather than three per-framework arms.
+// -------------------------------------------------------------------------
+
+/** Why `e` is outside the toast subset, or `undefined` when it is inside.
+ *  Mirrors the three renderers' `switch` arms exactly. */
+function toastMessageProblem(
+  e: ExprIR,
+  bind: string,
+): { kind: string; detail: string } | undefined {
+  switch (e.kind) {
+    case "literal":
+      return undefined;
+    case "ref":
+      return e.name === bind
+        ? undefined
+        : {
+            kind: "ref",
+            detail:
+              `reads '${e.name}', which is not in scope — only the handler's event ` +
+              `binding '${bind}' is`,
+          };
+    case "member":
+      if (e.receiver.kind === "ref" && e.receiver.name === bind) return undefined;
+      return {
+        kind: "member",
+        detail:
+          `reads \`${describeReceiver(e)}\` — a toast message admits SINGLE-LEVEL member ` +
+          `access off the event binding '${bind}' only`,
+      };
+    case "paren":
+      return toastMessageProblem(e.inner, bind);
+    case "binary":
+      return toastMessageProblem(e.left, bind) ?? toastMessageProblem(e.right, bind);
+    default:
+      return {
+        kind: e.kind,
+        detail: `uses a \`${e.kind}\` expression`,
+      };
+  }
+}
+
+function checkToastMessages(ui: UiIR, diags: LoomDiagnostic[]): void {
+  for (const n of ui.notifications ?? []) {
+    const where = `ui '${ui.name}': \`on ${n.paramName}.${n.eventType}\` handler`;
+    for (const t of n.toasts) {
+      const problem = toastMessageProblem(t, n.bind);
+      if (!problem) continue;
+      diags.push({
+        severity: "error",
+        code: "loom.toast-message-unsupported",
+        message: diagMessage("loom.toast-message-unsupported", {
+          where,
+          kind: problem.kind,
+          detail: problem.detail,
+        }),
+        source: where,
+      });
+    }
+  }
 }

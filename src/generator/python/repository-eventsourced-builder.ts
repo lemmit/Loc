@@ -7,12 +7,21 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
+import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { contextEventRowClassName } from "./py-columns.js";
 import { wireHelperImport } from "./py-type-imports.js";
 import { renderPyExpr } from "./render-expr.js";
-import { emittableFinds, findExecutedLine, writeGuardAlias } from "./repository-builder.js";
+import {
+  aggHasFieldMask,
+  authUserImport,
+  emittableFinds,
+  findExecutedLine,
+  toWireMaskedMethod,
+  writeGuardInApp,
+  writeGuardInAppUsesPrincipal,
+} from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
 // Event-sourced repository — `persistedAs: eventLog` aggregates persist
@@ -66,7 +75,10 @@ export function buildPyEventSourcedRepositoryFile(
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
-    ...writeGuardAlias(agg),
+    // Command load (authorization): an event stream has no
+    // queryable state columns, so the write-scope guard is checked IN-APP over
+    // the FOLDED aggregate.
+    ...writeGuardInApp(agg),
     "",
     `    async def all(self) -> list[${agg.name}]:`,
     "        rows = (",
@@ -84,7 +96,22 @@ export function buildPyEventSourcedRepositoryFile(
     "        ]",
     ...emittableFinds(repo).flatMap((f) => ["", inMemoryFind(agg, f)]),
     "",
-    `    async def save(self, aggregate: ${agg.name}) -> None:`,
+    // `expected_version` (pairwise F8): the routes emit
+    // `repo.save(found, expected_version=_expected)` for EVERY `versioned`
+    // aggregate (`versionedSave`, routes-builder.ts) regardless of saving shape,
+    // and this signature did not accept it — mypy `call-arg`.
+    //
+    // The guard is NOT the relational/document one.  Those default the
+    // expectation to `aggregate.version`; an event-sourced aggregate cannot,
+    // because `_from_events` folds the stream with `_version = 0` and never
+    // increments it, so `.version` is ALWAYS 0 here.  The authoritative version
+    // of an event-sourced aggregate is its STREAM HEAD, which is `prior` below.
+    // So an explicit expectation (the `If-Match` echo) is compared against the
+    // head, and absent one there is nothing to compare — the (stream_id,
+    // version) PK already rejects a concurrent append on its own.
+    aggregateIsVersioned(agg)
+      ? `    async def save(self, aggregate: ${agg.name}, expected_version: int | None = None) -> None:`
+      : `    async def save(self, aggregate: ${agg.name}) -> None:`,
     "        pending = aggregate.pull_events()",
     "        if pending:",
     "            prior = (",
@@ -95,6 +122,12 @@ export function buildPyEventSourcedRepositoryFile(
     "                )",
     "            ).scalar()",
     "            version = prior or 0",
+    ...(aggregateIsVersioned(agg)
+      ? [
+          "            if expected_version is not None and version != expected_version:",
+          `                raise ConcurrencyError(f"${agg.name} {aggregate.id} was modified concurrently")`,
+        ]
+      : []),
     "            for ev in pending:",
     "                version += 1",
     // The (stream_id, version) PK IS the event stream's optimistic-concurrency
@@ -126,6 +159,12 @@ export function buildPyEventSourcedRepositoryFile(
     eventToData(events),
     "",
     toWireStub(agg, ctx),
+    // `mask unless` response redaction (pairwise F6 — the python half of F2).
+    // Routes call `repo.to_wire_masked(x)` for every masked aggregate whatever
+    // its saving shape; only the relational builder emitted it.  The shared
+    // helper projects through `to_wire`, which `toWireStub` above emits, so an
+    // event-sourced aggregate needs nothing shape-specific either.
+    ...(aggHasFieldMask(agg) ? [toWireMaskedMethod(agg)] : []),
   );
 
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
@@ -149,6 +188,16 @@ export function buildPyEventSourcedRepositoryFile(
     "from sqlalchemy.exc import IntegrityError",
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
+    // ONE call, both reasons — `require_current_user` when the in-app
+    // write-scope guard binds it (#2694), `current_user` for
+    // `to_wire_masked`'s fail-closed principal read (F6).  It has to be one
+    // call: the helper owns the module path AND the sorted name list, so two
+    // calls emit two `from app.auth.user import …` lines, and an unused or
+    // duplicated import fails the python build on ruff.  The merge of #2694
+    // into this branch produced exactly that pair, and only the stale
+    // `writeGuardAlias` import beside it made the compiler say so — the
+    // duplicate itself typechecks fine and would have shipped.
+    authUserImport(false, writeGuardInAppUsesPrincipal(agg), aggHasFieldMask(agg)),
     `from app.db.schema import ${row}`,
     wireHelperImport(refersTo),
     "from app.domain.errors import AggregateNotFoundError, ConcurrencyError",

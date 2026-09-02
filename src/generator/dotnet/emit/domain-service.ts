@@ -118,7 +118,7 @@ function renderDomainService(
     if (op.returnType) addAggregateNamespaces(op.returnType, ctx, ns, usings);
   }
 
-  // Read-ports (domain-services.md rev. 4, Slice 1): a `reading`-tier service
+  // Read-ports (domain-services.md rev. 4): a `reading`-tier service
   // reads repositories, so on .NET / EF it CANNOT stay a static class (the read
   // needs the scoped repository, hence the scoped DbContext).  It becomes a DI'd
   // `sealed class` with one constructor-injected `I<Aggregate>Repository` per
@@ -218,8 +218,8 @@ function addAggregateNamespaces(
  *  static`.  In a `reading` (sealed) service an op is an instance method; if THIS
  *  op reads a repository (has read-ports) it becomes `async Task<…>` with a
  *  trailing `CancellationToken cancellationToken = default`, and its `repo-read`
- *  Calls render against the injected `_<repo>` fields (domain-services.md rev. 4,
- *  Slice 1).  A non-reading op inside a reading service stays a synchronous
+ *  Calls render against the injected `_<repo>` fields
+ *  (domain-services.md rev. 4).  A non-reading op inside a reading service stays a synchronous
  *  instance method. */
 function renderOperation(
   op: DomainServiceOperationIR,

@@ -9,7 +9,9 @@ import type {
   ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
 import { elixirString, escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
+import { elixirCodePointLength } from "../../_expr/code-point.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
+import { appModuleOf, guardErrorModule } from "./denial.js";
 import { pureDerivedAccessorNames } from "./domain-core-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -39,7 +41,7 @@ import { pureDerivedAccessorNames } from "./domain-core-emit.js";
 
 export interface Env {
   /** The aggregate under test, or `null` for a value-object / domain-service
-   *  subject (test-placement.md, Phase 2) — those have no aggregate identity, so
+   *  subject (test-placement.md) — those have no aggregate identity, so
    *  the agg-op / create paths are inert. */
   agg: AggregateIR | null;
   /** Fully-qualified module of the aggregate under test, e.g. `App.Ctx.Order`;
@@ -132,7 +134,7 @@ export function renderVanillaAggregateTestModule(
   return renderSubjectTestModule(agg.name, agg.tests, contextModule, env);
 }
 
-/** Value-object test module (test-placement.md, Phase 2) — no aggregate
+/** Value-object test module (test-placement.md) — no aggregate
  *  identity; the invariant-throw path (`<VO>.new/1`) is what these exercise. */
 export function renderVanillaVoTestModule(
   vo: ValueObjectIR,
@@ -151,7 +153,7 @@ export function renderVanillaVoTestModule(
   return renderSubjectTestModule(vo.name, vo.tests, contextModule, env);
 }
 
-/** Domain-service test module (test-placement.md, Phase 2) — exercises the
+/** Domain-service test module (test-placement.md) — exercises the
  *  service's PURE ops via `App.Domain.Services.<Name>.<op>(…)`. */
 export function renderVanillaServiceTestModule(
   svc: DomainServiceIR,
@@ -265,8 +267,11 @@ function renderThrows(expr: ExprIR, env: Env): string {
     return `assert {:error, _} = ${renderCreate(inner, env)}`;
   }
   if (inner.kind === "method-call" && isAggOp(inner, env)) {
-    // A failed precondition raises ArgumentError before any persist.
-    return `assert_raise ArgumentError, fn -> ${renderOp(inner, env)} end`;
+    // A failed `precondition` / `requires` raises the typed `<App>.GuardError`
+    // before any persist.  ONE exception type for both rungs (the `:kind` field
+    // separates them) is what lets this assertion stay shape-agnostic — a
+    // `toThrow()` expression doesn't say which rung the op will trip.
+    return `assert_raise ${guardErrorModule(appModuleOf(env.ctxModule))}, fn -> ${renderOp(inner, env)} end`;
   }
   // A value-object construction invariant (F5): `expect(Money{-1}).toThrow()` →
   // the VO's validating constructor returns {:error, _}.  Only VOs that declare
@@ -311,7 +316,9 @@ export function vtExpr(e: ExprIR, env: Env): string {
         e.receiverType.name === "string" &&
         e.member === "length"
       ) {
-        return `String.length(${recv})`;
+        // CODE POINTS, matching the runtime renderer (`render-expr.ts`) and the
+        // published `minLength`/`maxLength` — `String.length/1` counts graphemes.
+        return elixirCodePointLength(recv);
       }
       // A derived-field read has no struct field on elixir — route it to the
       // pure-core accessor `Agg.<derived>(record)` (B18) when the receiver is the

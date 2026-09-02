@@ -1,21 +1,21 @@
 import { diagMessage } from "../../../diagnostics/messages.js";
-import type { SystemIR, TypeIR } from "../../types/loom-ir.js";
+import type { AggregateIR, SystemIR, TypeIR } from "../../types/loom-ir.js";
 import {
   classifyTenantStance,
   hasTenantOwned,
   hasTenantRegistry,
   hierarchyRegistry,
+  type TenantStance,
   tenancyClaimBinding,
 } from "../../util/tenant-stance.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 
 // ---------------------------------------------------------------------------
-// Tenancy checks (multi-tenancy Phase 1a, slice 1a.3 —
-// docs/old/plans/multi-tenancy-implementation.md §1).
+// Tenancy checks (tenancy.md).
 //
 // The AST-level tenancy rule (duplicate `tenancy by`) lives in
 // `src/language/validators/tenancy.ts`; claim / registry existence is the
-// LINKER's job since 1b.1 (both bindings are real cross-references — an
+// LINKER's job (both bindings are real cross-references — an
 // unknown name is a parse-level "Could not resolve reference …", not the
 // former `loom.tenancy-registry-unknown` / `loom.tenancy-unknown-claim`).
 // This leaf owns everything that needs the merged, fully-lowered model:
@@ -35,6 +35,14 @@ import type { LoomDiagnostic } from "./diagnostic.js";
 //     `loom.cross-tenant-without-tenancy` (warning — intent declared,
 //     nothing to opt out of)
 //   - `loom.tenancy-conflicting-stance` — both markers on one aggregate.
+//   - `loom.tenancy-inherited-stance-conflict` — a subtype taking the OPPOSITE
+//     stance from the abstract base it `extends`.  The base's capability
+//     contributes the `tenant_id` column to the subtype's row either way (the
+//     enrich pass merges the base's fields), while the subtype's stance decides
+//     whether anything stamps or filters it — so the halves disagree at
+//     runtime.  Its twin is the `#inherited` variant of the unmarked message
+//     above, which names that asymmetry instead of asking the author for a
+//     marker they already wrote on the base.
 //
 // Stance is DERIVED per aggregate via `classifyTenantStance`
 // (`src/ir/util/tenant-stance.ts`) — never stamped on the IR.
@@ -46,7 +54,7 @@ function typeName(t: TypeIR): string {
 }
 
 /** Structural checks for the `tenantRegistry` hierarchy capability
- *  (multi-tenancy Phase 2, plan P2.2).  The capability PROVIDES the registry
+ *  (tenancy.md).  The capability PROVIDES the registry
  *  tree fields (`parent: Self id?`, managed `dataKey`); this verifies the
  *  facts the design lists that aren't field-presence (which the capability
  *  guarantees by construction): it is opted into only under a `tenancy by`
@@ -117,7 +125,7 @@ function validateTenantRegistry(sys: SystemIR, diags: LoomDiagnostic[]): void {
 }
 
 /** Validate `policy { allow <level> on <Aggregate> }` read-reachability rules
- *  (authorization.md §3; multi-tenancy Phase 2 P2.4).  Fail-closed:
+ *  (authorization.md §3; tenancy.md).  Fail-closed:
  *
  *   - `loom.policy-unknown-aggregate` — the target names no aggregate in the
  *     policy's own context (the read ladder scopes a concrete tenant-owned
@@ -201,15 +209,15 @@ function validatePolicyReadLevels(sys: SystemIR, diags: LoomDiagnostic[]): void 
   }
 }
 
-/** Validate `policy { allow write <level> on <Aggregate> }` rules (authorization
- *  Phase 3 P3.1 — `docs/old/plans/authorization-phase3.md`).  Fail-closed:
+/** Validate `policy { allow write <level> on <Aggregate> }` rules
+ *  (`docs/old/plans/authorization-phase3.md`).  Fail-closed:
  *
  *   - the shared target checks (`loom.policy-unknown-aggregate`,
  *     `loom.policy-target-not-tenant-owned`, `loom.policy-duplicate-target`) —
  *     a write rule scopes a concrete tenant-owned aggregate, and a context may
  *     hold at most one write rule per aggregate.
  *   - `loom.policy-write-global-invalid` — `write global` is rejected in
- *     P3.1 (root-subtree-wide mutation is a footgun); only `write local` (the
+ * (root-subtree-wide mutation is a footgun); only `write local` (the
  *     floor) and `write deep` are offered.
  *   - `loom.policy-level-requires-hierarchy` — `write deep` needs the
  *     materialized-path tree (`implements tenantRegistry`), same as read `deep`.
@@ -320,8 +328,8 @@ function validatePolicyWriteLevels(sys: SystemIR, diags: LoomDiagnostic[]): void
   }
 }
 
-/** Validate `policy { deny [write] on <Aggregate> }` carve-outs (authorization
- *  Phase 4 — deny-wins, docs/old/plans/authorization-phase4-deny.md):
+/** Validate `policy { deny [write] on <Aggregate> }` carve-outs (deny-wins —
+ *  docs/old/plans/authorization-phase4-deny.md):
  *
  *   - `loom.policy-deny-unknown-aggregate` — the target names no aggregate in the
  *     policy's own context (a carve-out scopes a concrete local aggregate).
@@ -412,8 +420,8 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
   // re-check needed (an unresolved ref lowers with its `$refText`, and the
   // lookups below simply find no aggregate and skip).
   if (tenancy) {
-    // The derived registry self-scope filter (Phase 1b, capstone decision 4)
-    // compares `<Registry>.id == currentUser.<claim>` — the `tenantId ≡
+    // The derived registry self-scope filter compares
+    // `<Registry>.id == currentUser.<claim>` — the `tenantId ≡
     // <Registry>.id` identity — so the claim's declared type must bind
     // against the registry's id value type: same-typed always works, and a
     // `string` claim binds as a guid at each backend's accessor site
@@ -540,16 +548,57 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
           continue;
         }
 
+        // Inheritance and stance (aggregate-inheritance.md × tenancy.md).
+        // A base's FIELDS are merged onto a subtype by the enrich pass, so the
+        // base's `tenantOwned` puts `tenant_id NOT NULL` on the subtype's row —
+        // but its STANCE is read off `agg.capabilities` alone and does not
+        // propagate.  The two rules below are the two halves of that asymmetry:
+        // C11 (the subtype takes the opposite side) is a contradiction the
+        // model must not express at all, and C10 (the subtype takes no side) is
+        // the existing lint, told to say what is actually true.
+        const baseStance = inheritedStance(agg, ctx.aggregates, sys);
+        if (baseStance && baseStance.stance !== stance && stance !== "unscoped") {
+          diags.push({
+            severity: "error",
+            code: "loom.tenancy-inherited-stance-conflict",
+            message: diagMessage("loom.tenancy-inherited-stance-conflict", {
+              name: agg.name,
+              base: baseStance.base,
+              own: stance === "tenantOwned" ? "with tenantOwned" : "crossTenant",
+              baseMarker: baseStance.stance === "tenantOwned" ? "with tenantOwned" : "crossTenant",
+            }),
+            source: `${ctx.name}/${agg.name}`,
+          });
+          continue;
+        }
+
         // Explicit-stance lint: every row-persisting aggregate under a
         // tenancy system must pick a side.  Abstract bases are exempt (no
         // repository, no table — aggregate-inheritance.md I1).
         if (stance === "unscoped" && !agg.isAbstract) {
-          diags.push({
-            severity: "error",
-            code: "loom.tenancy-stance-unmarked",
-            message: diagMessage("loom.tenancy-stance-unmarked", { name: agg.name }),
-            source: `${ctx.name}/${agg.name}`,
-          });
+          // When the base DID declare a stance, the generic remedy ("add `with
+          // tenantOwned` or `crossTenant`") names something the author already
+          // wrote and offers a second option that is now an error — so the two
+          // remedies are two SITES, each rendering its own catalog key.
+          if (baseStance) {
+            diags.push({
+              severity: "error",
+              code: "loom.tenancy-stance-unmarked",
+              message: diagMessage("loom.tenancy-stance-unmarked#inherited", {
+                name: agg.name,
+                base: baseStance.base,
+                marker: baseStance.stance === "tenantOwned" ? "with tenantOwned" : "crossTenant",
+              }),
+              source: `${ctx.name}/${agg.name}`,
+            });
+          } else {
+            diags.push({
+              severity: "error",
+              code: "loom.tenancy-stance-unmarked",
+              message: diagMessage("loom.tenancy-stance-unmarked", { name: agg.name }),
+              source: `${ctx.name}/${agg.name}`,
+            });
+          }
         }
 
         // Tenant-scope lint (uniqueness-and-indexes.md §5): a `unique (...)`
@@ -575,4 +624,33 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
       }
     }
   }
+}
+
+/** The tenancy stance an aggregate inherits from its `extends` chain — the
+ *  nearest ancestor that declares one — or `undefined` when no ancestor picks a
+ *  side (or the aggregate is a root).
+ *
+ *  This is deliberately NOT a change to `classifyTenantStance`: resolving the
+ *  stance through the chain would silence `loom.tenancy-stance-unmarked` while
+ *  the subtype still gets no stamp and no read filter (those are driven by the
+ *  base's own `contextFilters`/stamps, which do not propagate either), turning
+ *  an honest error into a silent isolation hole.  The rule stays "declare it on
+ *  each concrete"; the inherited stance is used only to say something TRUE
+ *  about that rule, and to reject a subtype that contradicts it. */
+function inheritedStance(
+  agg: AggregateIR,
+  pool: readonly AggregateIR[],
+  sys: Pick<SystemIR, "tenancy">,
+): { base: string; stance: TenantStance } | undefined {
+  const seen = new Set<string>([agg.name]);
+  let cur = agg;
+  while (cur.extendsAggregate && !seen.has(cur.extendsAggregate)) {
+    seen.add(cur.extendsAggregate);
+    const base = pool.find((a) => a.name === cur.extendsAggregate);
+    if (!base) return undefined;
+    const stance = classifyTenantStance(base, sys);
+    if (stance === "tenantOwned" || stance === "crossTenant") return { base: base.name, stance };
+    cur = base;
+  }
+  return undefined;
 }

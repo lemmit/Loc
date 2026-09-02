@@ -24,6 +24,7 @@ import {
   localizedNamedValue,
   localizedPageChromeText,
   localizedPageChromeValue,
+  localizedText,
 } from "../i18n-emit.js";
 import { renderFormField } from "../render-form-field.js";
 import {
@@ -39,14 +40,12 @@ import {
   namedArgValue,
   positionalArgs,
   stringNamed,
-  unwrapTextLiteral,
 } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import {
   emitExpr,
   emitStmt,
   extendLambdaParams,
-  firstPositionalContent,
   propagateChildFlags,
   testidAttr,
   walk,
@@ -214,6 +213,67 @@ export function emitWorkflowForm(
   return emitFormRuns(call, ctx, depth, runsArg);
 }
 
+/** Chrome BOTH OperationForm shapes need, whether or not an enclosing `Modal`
+ *  ever runs.  The page shell ALWAYS emits the op-form's module-scope component
+ *  from the recorded `formOfs` state, and that component references the pack
+ *  modal shell (toast lib, modals manager, `Button`/`Group`,
+ *  `applyServerErrors`) — specifiers that live on `imports["primitive-modal"]`.
+ *  Registering them here rather than relying on `emitModal` to have run is what
+ *  lets a BARE `OperationForm(…)` in a hand-written page body compile.
+ *
+ *  This used to sit inline in `emitFormOfOperation` only, so the by-name shape
+ *  (`OperationForm(of:, op:)`) still emitted a component referencing
+ *  un-imported `modals`/`notifications`/`Button`/`Group` — a Svelte page that
+ *  called `createForm` / declared `LoomForm<…>` / called `toast.*` with none of
+ *  the three imported.  A no-op for packs that ship no `primitive-modal` key;
+ *  idempotent when a Modal registers it too. */
+function registerOperationFormChrome(ctx: WalkContext): void {
+  addImportsForPrimitive(ctx, "primitive-modal");
+}
+
+/** The id an op form mutates when there is no in-scope record to read it off:
+ *  the ROUTE `id` (a `/things/:id` page).  Marking it used is not enough — the
+ *  shells gate the whole `id` binding on `usesRouteId` (React destructures
+ *  `useParams<{ id: string }>()`, Svelte `$derived(page.params.id ?? "")`, Vue
+ *  `route.params.id`), so without the flag every target emitted
+ *  `use<Op><Agg>(id ?? "")` against a name it never bound — a TS2304 on the
+ *  page.  Same pair `emitDestroyForm` sets for the same reason. */
+function routeIdExpr(ctx: WalkContext): string {
+  ctx.usedParams.add("id");
+  ctx.usesRouteId = true;
+  return `id ?? ""`;
+}
+
+/** The op form's OWN trigger — what a BARE `OperationForm(…)` (one no `Modal`
+ *  wraps) renders.  `emitModal` walks its form child for the recorded state and
+ *  DISCARDS the returned markup, rendering `primitive-modal` itself from the
+ *  authored trigger; so returning the default trigger here reaches only the
+ *  un-wrapped shape, which previously returned `""` and rendered NOTHING — the
+ *  page-shell emitted the opener + form component and no call site ever reached
+ *  them (React), or `{@render <op>OpModal(<op>Form)}` was never emitted at all
+ *  (Svelte).  Label/emphasis are the same defaults the state carries. */
+function renderBareOperationFormTrigger(ctx: WalkContext, aggOpLabel: string, opName: string) {
+  // Deliberately UNGUARDED (no `ctx.pack.templates.has` probe), matching the
+  // `emitModal` call site this mirrors.  A probe here would mark
+  // `primitive-modal` guarded for the whole `_walker/` scrape in
+  // `test/platform/pack-render-reachability.test.ts`, hiding the fact that
+  // `emitModal` still renders it unguarded on a format whose packs are not
+  // obliged to ship it (angular).  The formats that reach this path — react /
+  // vue / svelte — all ship it; angular, feliz and flutter each FORK
+  // `renderOperationForm` and never fall through (flutter's decline for the
+  // instance-qualified shape is explicit in `flutter-target.ts` for exactly
+  // this reason: its procedural pack has no `primitive-modal`, and its
+  // missing-renderer fallback is a line comment).
+  return renderPrimitive(ctx, "primitive-modal", {
+    label: aggOpLabel,
+    emphasisPrimary: true,
+    opPascal: upperFirst(opName),
+    opCamel: lowerFirst(opName),
+    testidAttr: "",
+    recordVar: undefined,
+  });
+}
+
 /** Like `emitFormOfOperation` but addressed by aggregate name +
  *  op name (`OperationForm(of: <Agg>, op: <opName>)`) instead of an
  *  instance-qualified member.  No in-scope record needed — the
@@ -242,6 +302,7 @@ function emitFormOfOperationByName(
   const fields = op.params;
   const fieldsForHelpers = fields.map((f) => ({ ...f, optional: false }));
   const testidNamespace = stringNamed(call, "testid") ?? `${snake(plural(agg.name))}-op-${op.name}`;
+  registerOperationFormChrome(ctx);
   const prepared = prepareFormFields(ctx, fields, fieldsForHelpers, bc, testidNamespace);
   addImport(
     ctx,
@@ -265,7 +326,7 @@ function emitFormOfOperationByName(
     bc,
     formStateType: opFormStateType,
     fields,
-    idExpr: `id ?? ""`,
+    idExpr: routeIdExpr(ctx),
     idTargets: prepared.idTargets,
     useController: prepared.useController,
     defaultValuesTs: prepared.defaultValuesTs,
@@ -276,7 +337,10 @@ function emitFormOfOperationByName(
     triggerLabel: humanize(op.name),
     triggerPrimary: true,
   });
-  return "";
+  // An enclosing `Modal` discards this and renders its own authored trigger; a
+  // BARE by-name form keeps it, so the shell-emitted opener/component is
+  // actually reachable.
+  return renderBareOperationFormTrigger(ctx, humanize(op.name), op.name);
 }
 
 interface PreparedForm {
@@ -692,7 +756,7 @@ function emitFormOfOperation(
   // scope at function-top), fall back to the route `id`.
   const idExpr = ctx.paramNames.has(instanceName)
     ? `${emitExpr(opRef.receiver, ctx)}.id`
-    : `id ?? ""`;
+    : routeIdExpr(ctx);
   // Op params carry no `optional` flag — adapt for form-helpers
   // exactly as the workflow-form variant does.
   const fields = op.params;
@@ -708,17 +772,7 @@ function emitFormOfOperation(
     fieldsForHelpers.some((f) => defaultUsesThis(f.default));
   const seedRecordVar = wantsRecord ? "record" : undefined;
   const testidNamespace = stringNamed(call, "testid") ?? `${snake(plural(agg.name))}-op-${op.name}`;
-  // The page shell ALWAYS emits this op-form's module-scope component from the
-  // recorded `formOfs` state — whether or not an enclosing `Modal { … }` wraps
-  // it — and that component references the pack modal shell (toast lib, modals
-  // manager, `Button`/`Group`, `applyServerErrors`).  Those specifiers live on
-  // `imports["primitive-modal"]`.  Register them here rather than relying on
-  // `emitModal` to have run, so a BARE `OperationForm(<instance>.<op>)` in a
-  // hand-written page body still compiles instead of emitting a component that
-  // references un-imported `modals`/`notifications`/`Button`/`Group`.  A
-  // no-op for packs that ship no `primitive-modal` key; idempotent when a
-  // Modal also registered it.
-  addImportsForPrimitive(ctx, "primitive-modal");
+  registerOperationFormChrome(ctx);
   const prepared = prepareFormFields(
     ctx,
     fields,
@@ -784,9 +838,10 @@ function emitFormOfOperation(
         }
       : {}),
   });
-  // No inline JSX — the Modal primitive renders the trigger and
-  // the shell emits the module-scope form component.
-  return "";
+  // An enclosing Modal discards this and renders its own authored trigger; a
+  // BARE instance-qualified form keeps it, so the shell-emitted opener + form
+  // component is reachable instead of dead module-scope code.
+  return renderBareOperationFormTrigger(ctx, humanize(op.name), op.name);
 }
 
 /** Whether a param default reads `this` (so it seeds from the loaded record) —
@@ -910,10 +965,15 @@ export function emitModal(
       `Modal: child must be OperationForm(<instance>.<op>) or OperationForm(of:, op:)`,
     );
   }
-  const label = unwrapTextLiteral(
-    firstPositionalContent(triggerArg, ctx) ?? '"Action"',
-    ctx.target.escapeText,
-  );
+  // The trigger's label is a `Button` first-positional — the `button`
+  // user-visible slot, which the extraction pass ALREADY writes to the catalog
+  // as `page.<Page>.button.<hash>`.  Reading it raw here meant the key existed
+  // and nothing ever rendered it: a translator translated a string the app
+  // showed in English at every locale (audit finding A13).  Routed through the
+  // same helper the plain `Button` path uses, so the emitted key equals the
+  // extracted one by construction.  With i18n off, `localizedText` is the raw
+  // literal — byte-identical to the `firstPositionalContent` it replaces.
+  const label = localizedText(triggerArg, ctx, "button", '"Action"');
   // Platform-neutral emphasis token from the scaffold-expander
   // (`primary` for the aggregate's first public op, `secondary`
   // for the rest).  Each pack's template maps it to its own button

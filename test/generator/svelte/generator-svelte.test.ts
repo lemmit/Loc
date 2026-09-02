@@ -51,9 +51,10 @@ system Shop {
             route: "/welcome"
             title: "Welcome"
             state { count: int = 0 }
+            action bump() { count := count + 1 }
             body: Stack {
                 Heading { "Shop", level: 1 },
-                Button { "Bump", onClick: e => { count := count + 1 }, testid: "bump" }
+                Button { "Bump", onClick: bump, testid: "bump" }
             }
         }
     }
@@ -207,7 +208,9 @@ describe("svelte generator — project shape", () => {
             body: QueryView { of: Sales.Item.byId(id), single: true, data: o => Text { o.name } }
           }
         }
-        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource ordersState { for: Orders, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
         deployable web { platform: svelte, targets: api, ui: WebApp { Sales: api }, port: 3002 }
       }
     `);

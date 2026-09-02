@@ -32,10 +32,10 @@
 // Hono's emitted bytes against this list, and each backend has a
 // `test/generator/<backend>/api-surface-render.test.ts` sibling.
 //
-// SCOPE (honest partial).  This slice lifts the AGGREGATE surface: create,
+// SCOPE (honest partial).  Only the AGGREGATE surface is lifted: create,
 // getById, destroy, domain operations + their gate probes, and repository
 // finds.  Workflow, explicit-handler, projection and `prepare` routes are NOT
-// yet lifted — see `apiSurfaceCoverage` below, which names them so a consumer
+// — see `apiSurfaceCoverage` below, which names them so a consumer
 // can tell "no such operation" from "not yet derived" instead of silently
 // treating the set as complete.
 //
@@ -428,6 +428,13 @@ export function deriveAggregateOperations(
 ): ApiOperationIR[] {
   const base = aggregateBase(agg.name);
   const out: ApiOperationIR[] = [];
+  /** The one `httpStatus` resolver every arm of this derivation shares.  It was
+   *  spelled inline at two call sites and OMITTED at the two `getById` ones,
+   *  which is how `httpStatus NotFound -> 410` came to move a `find`'s declared
+   *  404 while `GET /<aggs>/{id}` and the `can_<op>` gate probe next to it kept
+   *  publishing 404 — the same intra-function split the `Forbidden` rung had. */
+  const resolveStatus = (name: string): number =>
+    resolveErrorStatus(name, denialOverridesFor(statuses));
 
   const push = (
     kind: ApiOperationIR["kind"],
@@ -481,9 +488,7 @@ export function deriveAggregateOperations(
       // A `requires` in the canonical `create` declares 403 — the gate is
       // rendered by every backend (route / command handler / service /
       // context), so the derivation must publish what they answer.
-      errorStatuses("create", lifecycleGates(agg.canonicalCreate).length > 0, (name) =>
-        resolveErrorStatus(name, denialOverridesFor(statuses)),
-      ),
+      errorStatuses("create", lifecycleGates(agg.canonicalCreate).length > 0, resolveStatus),
     );
   }
 
@@ -512,7 +517,7 @@ export function deriveAggregateOperations(
     `${base}/{id}`,
     [idParam()],
     entityType(agg.name),
-    errorStatuses("getById"),
+    errorStatuses("getById", false, resolveStatus),
   );
 
   // DELETE /api/<aggs>/{id} — only when the aggregate exposes a REST destroy
@@ -534,9 +539,7 @@ export function deriveAggregateOperations(
       // exactly as the `operation` kind does; `ReferencedInUse` is unaffected —
       // the structural fold enumerates all four structural names by
       // construction and is spread last, so it still wins.
-      errorStatuses("destroy", lifecycleGates(agg.canonicalDestroy).length > 0, (name) =>
-        resolveErrorStatus(name, denialOverridesFor(statuses)),
-      ),
+      errorStatuses("destroy", lifecycleGates(agg.canonicalDestroy).length > 0, resolveStatus),
     );
   }
 
@@ -581,7 +584,7 @@ export function deriveAggregateOperations(
         `${base}/{id}/can_${slug}`,
         [idParam()],
         { kind: "primitive", name: "bool" },
-        errorStatuses("getById"),
+        errorStatuses("getById", false, resolveStatus),
         { operation: op },
       );
     }

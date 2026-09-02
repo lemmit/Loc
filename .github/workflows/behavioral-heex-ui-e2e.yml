@@ -1,0 +1,171 @@
+name: Behavioral UI e2e — HEEx / LiveView
+
+# The per-PR runtime gate on the RENDERED LiveView (W3-heex-ui-behavioral-leg).
+#
+# What was uncovered before this.  Three gates touch the Elixir target and none
+# of them looks at a rendered page:
+#
+#   * generated-elixir-vanilla-build  — `mix compile --warnings-as-errors`.
+#     Proves the emitted Elixir is valid Elixir; a HEEx template that renders
+#     an empty table compiles perfectly.
+#   * behavioral-e2e-elixir           — boots the same app against postgres and
+#     HTTP-dispatches the emitted **api** suite.  Never opens a browser.
+#   * phoenix-ui-e2e                  — DOES render LiveView, but is `push: main`
+#     + `run-e2e`-label only, AND runs the emitted `smoke.spec.ts`, which
+#     navigates each param-less route and asserts its URL.  A page that mounts
+#     and renders nothing passes it.
+#
+# So a HEEx primitive arm could stop emitting a table cell, a form input or a
+# detail field and every per-PR check stayed green.  This leg closes that: it
+# boots the generated Phoenix app + postgres and drives a real create → LIST →
+# detail round-trip through the rendered DOM, asserting on rendered TEXT (see
+# test/behavioral/run-heex-ui.mjs).  It runs BOTH the EMITTED
+# `<System>.ui.spec.ts` (which `src/system/ui-e2e-render.ts` lowers from the
+# fixture's `test e2e` block) and the hand-written list leg the DSL cannot yet
+# spell.
+#
+# NOT behavioral-ui-e2e.yml's topology: that leg serves a `vite build` bundle
+# with `/api` proxied to Hono-on-PGlite.  LiveView is its own server and needs a
+# real database, so this is a separate workflow with a postgres service and a
+# BEAM toolchain.
+#
+# Paths: the five pipeline phases every `generate system` walks (language /
+# macros / ir / system / util — a change confined to any one of them reaches
+# this gate's subject; the same list phoenix-ui-e2e.yml carries since #2397 and
+# that test/system/workflow-path-coverage.test.ts exists to defend), plus the
+# HEEx emitter, the shared frontend generators, the HEEx design packs, and the
+# harness itself.  CI runners have direct hex.pm access, so no hex mirror is
+# needed here (local runs behind a TLS-fingerprint egress proxy need
+# LOOM_HEX_MIRROR=1 — see docs/tools.md).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'bin/**'
+      - 'designs/coreComponents/**'
+      - 'designs/daisyui/**'
+      - 'test/behavioral/**'
+      - 'package.json'
+      - '.github/workflows/behavioral-heex-ui-e2e.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      # The generation path — every phase `generate system` walks, whatever the
+      # backend.  A change confined to one of these reaches this gate's subject.
+      - 'src/language/**'
+      - 'src/macros/**'
+      - 'src/ir/**'
+      - 'src/system/**'
+      - 'src/util/**'
+      # The HEEx render path itself + the shared frontend emitters the page
+      # objects and the e2e harness come from.
+      - 'src/generator/elixir/**'
+      - 'src/generator/_frontend/**'
+      - 'src/platform/elixir.ts'
+      - 'designs/coreComponents/**'
+      - 'designs/daisyui/**'
+      - 'test/behavioral/**'
+      - '.github/workflows/behavioral-heex-ui-e2e.yml'
+  workflow_dispatch:
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Same split as behavioral-e2e-elixir.yml: on a PR ref a superseded push
+  # SHOULD cancel the stale run (only the newest SHA is gated, and a queued
+  # Phoenix boot from a dead commit is pure runner-slot waste), while a
+  # push:main run must be allowed to finish — main's commit cadence would
+  # otherwise cancel this job before the BEAM setup + compile ever completes.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  behavioral-heex-ui:
+    # Draft PRs run only the fast lane (test.yml, langium-generated, workflow-lint,
+    # pr-gate); this and the rest of the fan-out fire when the PR is marked ready
+    # for review -- see docs/ci-gating.md, "Draft PRs and the runner queue".
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    # One case, not a corpus: hex deps + one Phoenix compile (~4-6 min cold,
+    # ~1 min on a cache hit) + the assets build + a chromium download + a
+    # handful of browser round-trips.  20 leaves headroom on a cold 2-core
+    # runner without letting a genuine hang burn half an hour.
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: heex_ui
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Consumed by run-heex-ui.mjs instead of its docker sidecar.
+      LOOM_HEEX_UI_PG_URL: 'postgres://postgres:postgres@127.0.0.1:5432/heex_ui'
+      OTP_VERSION: '27.3'
+      ELIXIR_VERSION: '1.18.4'
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # Pinned to match behavioral-e2e-elixir.yml / phoenix-ui-e2e.yml so the
+      # generated project's dep set resolves deterministically.
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+
+      - name: Cache hex archives
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.hex
+            ~/.mix
+          key: hex-mix-heexui-otp${{ env.OTP_VERSION }}-ex${{ env.ELIXIR_VERSION }}-${{ hashFiles('src/generator/elixir/vanilla/shell-emit.ts') }}
+          restore-keys: |
+            hex-mix-heexui-otp${{ env.OTP_VERSION }}-ex${{ env.ELIXIR_VERSION }}-
+            hex-mix-heexui-
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Install behavioral harness deps
+        working-directory: test/behavioral
+        run: npm ci || npm install --no-audit --no-fund
+
+      - name: Run the HEEx/LiveView behavioral UI leg
+        working-directory: test/behavioral
+        run: node run-heex-ui.mjs
+
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: heex-ui-playwright-traces
+          # The runner lifts them out of its tmpdir before cleanup.
+          path: test/behavioral/.work-heex-ui/test-results/**
+          # Dot-directory: without this, upload-artifact@v4 silently ships
+          # nothing (see the note in schemathesis.yml).
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7

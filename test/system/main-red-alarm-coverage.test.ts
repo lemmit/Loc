@@ -16,7 +16,16 @@
 //
 // So the rule is now mechanical, and this test is what enforces it:
 //
-//     every workflow that runs on `push: main` is on the watchlist.
+//     every workflow that runs UNATTENDED on main is on the watchlist —
+//     `push: main` gates AND `schedule:` ones.
+//
+// The SCHEDULE half was added on 2026-08-23, after the same hole reopened one
+// tier up. `Schemathesis contract fuzzing` is nightly-only, so it was outside
+// a rule that read `push: main`, and it ran red on three consecutive nights
+// with nothing listening. The alarm's own recovery job had assumed otherwise
+// the whole time ("a nightly schedule failure alarms the same as a push
+// failure, so recovery has to clear it too") — so a nightly failure could hold
+// the `ci-red` issue SHUT while never being able to open it.
 //
 // `workflow_run.workflows` takes literal names (no expressions, no globs), so
 // the list has to be spelled out in the YAML; this test is what keeps that
@@ -74,6 +83,41 @@ function pushesOnMain(source: string): boolean {
   return false;
 }
 
+/**
+ * Does this workflow run on a `schedule:` (cron)?
+ *
+ * Same deliberately-small block-style reader as `pushesOnMain`; a scheduled run
+ * carries `head_branch: main` (schedules fire on the default branch), which is
+ * what the alarm's `if` filters on, so a scheduled failure is a main failure.
+ */
+function runsOnSchedule(source: string): boolean {
+  const lines = source.split("\n").map((l) => l.replace(/\r$/, ""));
+  let inOn = false;
+  for (const line of lines) {
+    if (/^\s*#/.test(line)) continue;
+    if (/^\S/.test(line)) {
+      inOn = /^on:\s*$/.test(line);
+      continue;
+    }
+    if (inOn && /^ {2}schedule:/.test(line)) return true;
+  }
+  return false;
+}
+
+/**
+ * Scheduled workflows deliberately left OFF the watchlist, each with the reason
+ * it is not a main-health signal.  An allowlist ratchets: an entry naming a
+ * workflow that no longer exists fails below, so a stale exemption cannot
+ * outlive the thing it exempts.
+ */
+const UNWATCHED_SCHEDULES: Record<string, string> = {
+  // Its cron is a */15 sweep over OPEN PRS — a safety net for dropped
+  // `workflow_run` dispatches, not a gate on main.  A broken sweep would post
+  // 96 comments a day onto the single `ci-red` issue, which is how an alarm
+  // stops being read.
+  "pr-gate.yml": "the */15 cron sweeps open PRs, not main",
+};
+
 /** The `workflows:` list of the alarm's `workflow_run` trigger. */
 function watchlist(source: string): string[] {
   const lines = source.split("\n");
@@ -108,6 +152,33 @@ describe("main-red alarm coverage", () => {
     expect(
       unwatched,
       "these gates run on main but nothing alarms when they fail — add their `name:` to ci-red-alarm.yml",
+    ).toEqual([]);
+  });
+
+  it("watches every workflow that runs on a `schedule:`", () => {
+    // The tier `flake-budget` can only ever describe as "flaky": a nightly gate
+    // that is red every night has a steady state, not a transition, and only
+    // the alarm speaks in that shape.
+    const watched = new Set(watchlist(read(ALARM)));
+    const unwatched = files
+      .filter((f) => runsOnSchedule(read(f)) && !(f in UNWATCHED_SCHEDULES))
+      .map((f) => ({ file: f, name: workflowName(read(f)) as string }))
+      .filter((w) => !watched.has(w.name))
+      .map((w) => `${w.name}  (${w.file})`);
+    expect(
+      unwatched,
+      "these gates run unattended on a schedule but nothing alarms when they fail — " +
+        "add their `name:` to ci-red-alarm.yml, or exempt them in UNWATCHED_SCHEDULES with a reason",
+    ).toEqual([]);
+  });
+
+  it("every schedule exemption still names a real scheduled workflow", () => {
+    const stale = Object.keys(UNWATCHED_SCHEDULES).filter(
+      (f) => !files.includes(f) || !runsOnSchedule(read(f)),
+    );
+    expect(
+      stale,
+      "UNWATCHED_SCHEDULES entries that no longer exist or no longer run on a schedule",
     ).toEqual([]);
   });
 

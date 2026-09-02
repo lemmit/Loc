@@ -473,8 +473,8 @@ function lowerHandlerBody(
   return { statements, ...(returnValue ? { returnValue } : {}) };
 }
 
-// Lower an `on(e: Event) { … }` reactor member to its IR (workflow-and-applier.md
-// Phase A2, surface slice).  Mirrors `lowerApply`: the event instance binds as a
+// Lower an `on(e: Event) { … }` reactor member to its IR
+// (workflow-and-applier.md).  Mirrors `lowerApply`: the event instance binds as a
 // `refKind: "param"` local typed as the event entity, so `e.field` accesses
 // resolve through the same machinery.  The body reuses `lowerWorkflowStatement`
 // (a reactor is a workflow continuation and may load/save aggregates and emit).
@@ -905,7 +905,7 @@ function lowerWorkflowStatementInner(
   if (isAssignOrCallStmt(stmt)) {
     const lv = stmt.target;
     if (!stmt.op && lv.call && lv.tail.length === 1) {
-      // `files.put(args)` — a bare resource-op call (Phase 4).  When the
+      // `files.put(args)` — a bare resource-op call.  When the
       // head is an ambient resource handle, lower to a `resource-call`
       // statement; otherwise it's an op-call on a let binding.
       const resourceKind = env.resources?.get(lv.head);

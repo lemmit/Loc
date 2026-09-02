@@ -1,0 +1,93 @@
+// shape: RIGHT-HAND money/decimal operands — the commutative shapes the
+// validator admits that no fixture had ever written down.
+//
+// Minted by the 2026-08-23 numeric-types audit (finding F7 / M-T6.44).  The
+// type system admits `money × scalar` COMMUTATIVELY (`moneyArithmetic`),
+// numeric widening admits `int + decimal` in both orders, and `comparable`
+// admits `int < decimal` — but the TS and Elixir binary renderers gated their
+// money/decimal dispatch on `leftType` ALONE, so every shape below emitted
+// native operators against a Decimal struct:
+//
+//   lineTotal    int * money   node: TS2363 (the generated project does not
+//                              compile); elixir: runtime ArithmeticError
+//   adjusted     int + decimal elixir: runtime ArithmeticError
+//   underTarget  int < decimal elixir: native `<` on a %Decimal{} falls to
+//                              Erlang TERM ordering (number < map ⇒ ALWAYS
+//                              true) — silently wrong, no crash
+//   sameAsGoal   int == decimal elixir: native `==` on int vs struct is
+//                              always false — the equality twin
+//
+// Java carries the mirror arm already (fleet-bug-hunt A4); .NET and Python
+// coerce natively (C# implicit int→decimal; Python Decimal.__rmul__) — the
+// per-backend arm tests pin those not-affected claims.
+//
+// The decimal literals are BINARY-EXACT (`0.5`, `0.25`) on purpose: the unit
+// assertions then agree on all five backends whatever the still-un-ruled
+// cross-backend decimal-arithmetic representation (audit F11 / M-T5.22) says.
+// No `test e2e` block for the same reason — a wire golden minted here would
+// pre-empt that ruling; the fixture rides the generation gate, the per-backend
+// COMPILE tiers, and every backend's UNIT tier (the `test` block below runs as
+// real ExUnit/vitest/pytest/JUnit/xUnit assertions — the Elixir run is the
+// runtime proof the term-ordering comparison actually flipped).
+system NumericOperands {
+  subdomain Sales {
+    context Sales {
+      aggregate Order {
+        qty: int
+        price: money
+        count: int
+        factor: decimal
+
+        // int * money — money on the RIGHT of the commutative product.
+        derived lineTotal: money = qty * price
+        // int + decimal — widening with the decimal on the RIGHT.
+        derived adjusted: decimal = count + factor
+        // int < decimal — the silently-always-true comparison on elixir.
+        derived underTarget: bool = count < factor
+        // int == decimal — the always-false equality twin.
+        derived sameAsGoal: bool = count == factor
+
+        operation restock(by: int) {
+          count := count + by
+        }
+
+        // Pure-domain (unit) test — runs on every backend's unit tier.  The
+        // values are chosen so a term-ordering `<` (always true) and a native
+        // struct `==` (always false) both FLIP an assertion: count=3 vs
+        // factor=2.5 makes `underTarget` false and, after restock(-1),
+        // count=2 vs 2.5 makes it true; factor=2.5 is binary-exact so
+        // `adjusted` is 5.5 on every backend regardless of representation.
+        test "right-hand money/decimal operands compute, compare, and equal correctly" {
+          let o = Order.create({ qty: 3, price: money("2.5000"), count: 3, factor: 2.5 })
+          expect(o.lineTotal == money("7.5000")).toBe(true)
+          expect(o.adjusted).toBe(5.5)
+          expect(o.underTarget).toBe(false)
+          expect(o.sameAsGoal).toBe(false)
+          o.restock(-1)
+          expect(o.underTarget).toBe(true)
+        }
+      }
+
+      // Auto-findAll only.  A decimal-param `find … where this.factor < limit`
+      // was WRITTEN here and then removed: it exposed a PRE-EXISTING node gap
+      // (drizzle types a numeric column `string`, the wire param is `number`,
+      // so the emitted `lt(col, param)` is TS2769 — the generated project does
+      // not compile), which belongs to the repository find builders, not to
+      // the expression gates this fixture witnesses.  Recorded in the M-T6.44
+      // PR body as a named finding; the Ecto-filter-path safety is pinned by
+      // the filter-context cases in vanilla-render-expr.test.ts instead.
+      repository Orders for Order { }
+    }
+  }
+
+  api SalesApi from Sales
+  storage primary { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    port: 4000
+  }
+}

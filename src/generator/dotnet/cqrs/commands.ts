@@ -12,7 +12,7 @@ import {
   operationGates,
   operationGatesUseCurrentUser,
 } from "../../../ir/util/op-gates.js";
-import { plural, upperFirst } from "../../../util/naming.js";
+import { escapeCsharpIdent, plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 import { maskNamer, projectEntityExpr, projectToResponse, wireType } from "../dto-mapping.js";
 import { renderCommand, renderCommandHandler } from "../emit.js";
@@ -78,7 +78,7 @@ function lifecycleGate(
   if (gates.length === 0) return { body: "", deps: [], usings: [] };
   const usesUser = lifecycleGatesUseCurrentUser(action);
   const usings = new Set<string>();
-  for (const g of gates) collectCsExprUsings(g.expr, usings);
+  for (const g of gates) collectCsExprUsings(g.expr, usings, ns);
   // `ICurrentUserAccessor` lives in `<ns>.Auth`, which the base handler usings
   // do NOT carry — the operation handler adds it the same way.  Without it the
   // emitted handler is CS0246, which no tsc-level test can see.
@@ -112,13 +112,26 @@ function whenGate(agg: AggregateIR, op: AggregateIR["operations"][number]): stri
   return `        if (!(${pred})) throw new DisallowedException("operation '${op.name}' is not allowed in the current state of ${agg.name}.");\n`;
 }
 
+/** Namespaces the gates rendered INTO the handler body reach into — the `when`
+ *  state gate and the hoisted `requires` gates both render arbitrary predicate
+ *  expressions here, and nothing else scans them, so `when this.code.matches(…)`
+ *  emitted `Regex.IsMatch` with no `using System.Text.RegularExpressions`
+ *  (CS0103 — audit A17).  `lifecycleGate` already does the same for create /
+ *  destroy. */
+function gateUsings(op: AggregateIR["operations"][number], ns: string): string[] {
+  const usings = new Set<string>();
+  if (op.when) collectCsExprUsings(op.when, usings, ns);
+  for (const g of operationGates(op)) collectCsExprUsings(g.expr, usings, ns);
+  return [...usings];
+}
+
 // ---------------------------------------------------------------------------
 // Create command + handler
 // ---------------------------------------------------------------------------
 
 /** The repo method a MUTATION command handler loads through: `GetByIdForWriteAsync`
  *  when the aggregate's write scope is narrower than its read scope
- *  (authorization Phase 3 P3.1), else the ordinary `GetByIdAsync` (byte-
+ *  (authorization), else the ordinary `GetByIdAsync` (byte-
  *  identical).  Query (read) handlers always use `GetByIdAsync`. */
 function writeCmdLoad(agg: AggregateIR): string {
   return agg.writeScopeFilter ? "GetByIdForWriteAsync" : "GetByIdAsync";
@@ -164,7 +177,9 @@ export function emitCreateCommandAndHandler(
   // generated id; actor + correlation/scope/parent ids come from RequestContext.
   const auditCreate = !!opts?.auditCtx;
   const createAfterExpr = auditCreate
-    ? projectEntityExpr("aggregate", agg as EnrichedAggregateIR, opts!.auditCtx!)
+    ? projectEntityExpr("aggregate", agg as EnrichedAggregateIR, opts!.auditCtx!, {
+        unmasked: true,
+      })
     : "";
   const createAuditStage = auditCreate
     ? `        _audit.Stage(new AuditRecord\n` +
@@ -222,13 +237,13 @@ export function emitCreateCommandAndHandler(
         // The gate runs BEFORE the factory: a denied create constructs nothing
         // and stages no audit row.
         createGate.body +
-        // NAMED arguments, not positional: the factory now trails its
-        // defaultable parameters (C# CS1737 requires optional params last), so
-        // its signature order no longer matches the declared field order this
-        // list is in.  Naming them decouples the two — and a create factory is
-        // exactly the call site where positional args were least readable.
+        // NAMED arguments, not positional: the factory trails its defaultable
+        // parameters (C# CS1737 requires optional params last), so its
+        // signature order does not match the declared field order this list is
+        // in.  Naming them decouples the two — and a create factory is exactly
+        // the call site where positional args read worst.
         `        var aggregate = ${agg.name}.Create(${requiredFields
-          .map((f) => `${f.name}: command.${upperFirst(f.name)}`)
+          .map((f) => `${escapeCsharpIdent(f.name)}: command.${upperFirst(f.name)}`)
           .join(", ")});\n` +
         createAuditStage +
         `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
@@ -280,7 +295,7 @@ export function emitDestroyCommandAndHandler(
   // literal ("null"); actor + correlation/scope/parent ids from RequestContext.
   const auditDestroy = !!auditCtx;
   const destroyBeforeExpr = auditDestroy
-    ? projectEntityExpr("aggregate", agg as EnrichedAggregateIR, auditCtx)
+    ? projectEntityExpr("aggregate", agg as EnrichedAggregateIR, auditCtx, { unmasked: true })
     : "";
   const destroyAuditStage = auditDestroy
     ? `        _audit.Stage(new AuditRecord\n` +
@@ -428,15 +443,18 @@ export function emitOperationCommandAndHandler(
     // its `User` into the call.  Any non-auth-aware op stays
     // untouched — no DI changes, no handler-ctor surface widening.
     const usesUser = operationBodyUsesCurrentUser(op);
-    // The gate is evaluated by the handler now, so it needs the accessor
-    // injected even when the remaining body no longer takes a principal.
+    // The handler evaluates the gate, so it needs the accessor injected even
+    // when the remaining body takes no principal.
     const gateUsesUser = operationGatesUseCurrentUser(op);
     const baseCallArgs = op.params.map((p) => `command.${upperFirst(p.name)}`);
     const callArgs = (usesUser ? [...baseCallArgs, "_currentUser.User"] : baseCallArgs).join(", ");
     const userExtraDeps =
       usesUser || gateUsesUser ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }] : [];
-    const userExtraUsings = usesUser || gateUsesUser ? [`${ns}.Auth`] : [];
-    // Extern (b) Phase 2: an `extern` op is now an ordinary aggregate method
+    const userExtraUsings = [
+      ...(usesUser || gateUsesUser ? [`${ns}.Auth`] : []),
+      ...gateUsings(op, ns),
+    ];
+    // Extern (b): an `extern` op is now an ordinary aggregate method
     // (its body runs preconditions, calls the `<Op>Core` partial hook, and
     // re-asserts invariants — see `emit/entity.ts`), so it flows through the
     // SAME command-handler path below as any other op (`aggregate.<Op>(...)`).
@@ -463,7 +481,7 @@ export function emitOperationCommandAndHandler(
           "aggregate",
           agg as EnrichedAggregateIR,
           ctx,
-          { maskNames },
+          { maskNames, unmasked: true },
         )});\n`
       : "";
     const auditStage = audited
@@ -471,7 +489,7 @@ export function emitOperationCommandAndHandler(
           "aggregate",
           agg as EnrichedAggregateIR,
           ctx,
-          { maskNames },
+          { maskNames, unmasked: true },
         )});\n` +
         `        _audit.Stage(new AuditRecord\n` +
         `        {\n` +

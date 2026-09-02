@@ -28,6 +28,7 @@ import {
 import { type GroupKey, groupKeyOf, sameGroupKey } from "../../util/projection-aggregate.js";
 import { walkExprDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
+import { firstNonQueryableNode } from "./shared.js";
 
 /** The whole-table (keyless) aggregation vocabulary a singleton projection's
  *  `select` reaches for (read-path-architecture.md rev. 8).  Spelled bare
@@ -241,6 +242,32 @@ function validateQueryComprehension(
       source: `${ctx.name}/${proj.name}`,
     });
   }
+  // The `where` is a SELECTION position, exactly like a `find … where` and a
+  // `retrieval` `where` — so it carries the SAME queryable-subset contract, and
+  // for the same reason: every backend pushes it down to SQL.  It reaches SQL by
+  // three different roads (a synthesised repository find, a direct-table read
+  // for a workflow-/projection-sourced projection, a direct-table read for an
+  // aggregation) and each one lowers through a predicate lowerer that can only
+  // render the queryable subset.  Until this check existed, a richer `where`
+  // (arithmetic, a collection op, a lambda) parsed and validated CLEAN and then
+  // took one of two bad exits: node/drizzle threw the "validator should have
+  // caught this" internal error at generate time, while the direct-table paths
+  // on node and python DROPPED the filter silently — an endpoint returning
+  // every row.  Reject it here, where the find/retrieval twins already do.
+  if (q.filter) {
+    const offending = firstNonQueryableNode(q.filter);
+    if (offending) {
+      diags.push({
+        severity: "error",
+        code: "loom.projection-where-not-queryable",
+        message: diagMessage("loom.projection-where-not-queryable", {
+          name: proj.name,
+          offending,
+        }),
+        source: `${ctx.name}/${proj.name}`,
+      });
+    }
+  }
   // Row-fill discipline for a query-time projection (read-path-architecture.md
   // rev.13).  A `select` fills the declared row; its absence has two legal /
   // illegal shapes:
@@ -320,8 +347,8 @@ function validateQueryComprehension(
       // — every backend renders it as the bare column inside SQL's own
       // aggregate (`SUM(total)` / `g.Sum(o => o.Total)` / `sum(e.total)`), so
       // a computed expression (`sum(o.total + o.tax)`) or a bare unqualified
-      // name (`sum(total)`) has no rendering and used to CRASH codegen with an
-      // internal error from a model that validated clean.  Gate it honestly.
+      // name (`sum(total)`) has no rendering at all and would CRASH codegen
+      // with an internal error.  Gate it honestly.
       const arg = s.aggregate.arg;
       // The test is `member`, NOT `member on this` — deliberately, and the
       // difference is not cosmetic.  Every backend's `aggregateColumn` renders
@@ -585,17 +612,51 @@ function validateHandlers(
 }
 
 /** The impurity phrase for a fold statement, or `undefined` when it is a pure
- *  fold statement (assign / add / remove / let / derivation). */
+ *  fold statement (assign / add / remove / let).
+ *
+ *  FAIL-CLOSED, deliberately.  This used to list the impure kinds and return
+ *  `undefined` in the `default:` arm, so every kind nobody had thought about
+ *  was silently *admitted* — and the backends' fold emitters then dropped it
+ *  just as silently.  A `files.put(k, v)` in a fold lowers to `kind:
+ *  "expression"` (`lower-stmt.ts`, the resource-op statement arm) and so
+ *  passed this check, generated nothing on node, and shipped a projection
+ *  whose declared effect never ran.  The four kinds a replayable fold can
+ *  express are now the allowlist; everything else — present or future — is an
+ *  error here, which is also what makes the node/elixir emitters' loud
+ *  `default:` arms unreachable rather than merely unlikely. */
 function foldImpurity(stmt: StmtIR): string | undefined {
   switch (stmt.kind) {
+    // The pure, replayable fold vocabulary.
+    case "assign":
+    case "add":
+    case "remove":
+    case "let":
+      return undefined;
     case "emit":
       return "emits an event";
     case "call":
-      return `calls '${(stmt as { name?: string }).name ?? "out"}'`;
+      return `calls '${stmt.name}'`;
     case "precondition":
     case "requires":
       return `contains a '${stmt.kind}' guard`;
-    default:
-      return undefined;
+    case "expression":
+      // A bare call written for its EFFECT — a resource verb
+      // (`files.put(…)`), a domain-service member call, a method call on some
+      // receiver.  Every one of them reaches outside the event, which is
+      // precisely the projection/reactor boundary this check draws.
+      return `calls '${effectCallName(stmt.expr)}' for its effect`;
+    case "return":
+      return "contains a 'return'";
+    case "variant-match":
+      return "contains an effect-form 'match'";
   }
+}
+
+/** Best-effort name of the call a bare expression-statement performs, for the
+ *  impurity phrase.  Falls back to the expression kind when the statement is
+ *  not call-shaped (the message stays readable either way). */
+function effectCallName(e: ExprIR): string {
+  if (e.kind === "call") return e.name;
+  if (e.kind === "method-call") return e.member;
+  return e.kind;
 }

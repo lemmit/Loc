@@ -241,7 +241,9 @@ const frontendSystem = (platform: string): string => `
     ui Web {
       page Landing { route: "/" body: ${BODY} }
     }
-    deployable api { platform: node, contexts: [C], port: 3000 }
+    storage loomDb { type: postgres }
+    resource cState { for: C, kind: state, use: loomDb }
+    deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
     deployable web { platform: ${platform}, targets: api, ui: Web, port: 3001 }
   }
 `;
@@ -258,8 +260,10 @@ const phoenixSystem = (): string => `
     ui Web {
       page Landing { route: "/" body: ${BODY} }
     }
+    storage loomDb { type: postgres }
+    resource cState { for: C, kind: state, use: loomDb }
     deployable phoenixApp {
-      platform: elixir, contexts: [C], serves: DemoApi,
+      platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
       ui: Web, port: 4000
     }
   }
@@ -360,7 +364,9 @@ describe("attribute-escaping — quotes in testid / label attributes (F3)", () =
           }
         }
       }
-      deployable api { platform: node, contexts: [C], port: 3000 }
+      storage loomDb { type: postgres }
+      resource cState { for: C, kind: state, use: loomDb }
+      deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
       deployable web { platform: ${platform}, targets: api, ui: Web, port: 3001 }
     }
   `;
@@ -418,7 +424,9 @@ describe("style-attribute merging — pack base declarations + author style (F2)
           }
         }
       }
-      deployable api { platform: node, contexts: [C], port: 3000 }
+      storage loomDb { type: postgres }
+      resource cState { for: C, kind: state, use: loomDb }
+      deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
       deployable web { platform: ${platform}, targets: api, ui: Web, port: 3001, design: ${design} }
     }
   `;

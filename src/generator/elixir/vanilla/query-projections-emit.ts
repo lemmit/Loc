@@ -35,6 +35,7 @@ import type {
   ExprIR,
   ProjectionAggregateIR,
   ProjectionIR,
+  SystemIR,
   TypeIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
@@ -57,8 +58,17 @@ import { MONEY_WIRE_SCALE } from "../../money-scale.js";
 import type { ApiRoute } from "../api-emit.js";
 import { projectionRowModule, stateModule } from "../dispatch-emit.js";
 import { ECTO_INTRINSIC_FRAGMENTS, type RenderCtx, renderExpr } from "../render-expr.js";
-import { combineWhere, vanillaCapabilityFilter } from "./capability-filter.js";
+import {
+  combineWhere,
+  DOC_DENY_HELPER,
+  DOC_DENY_PREDICATE,
+  liftDocRootId,
+  renderDocPredicate,
+  vanillaCapabilityFilter,
+  vanillaDocCapabilityFilter,
+} from "./capability-filter.js";
 import { denialOverrides, denialResponse } from "./denial.js";
+import { docFilterLambdaArg, docPredReadsRecord, isVanillaDocAgg } from "./document-emit.js";
 import { hasRefColls, preloadSuffix } from "./ref-collection-emit.js";
 import { renderWireSerialize } from "./wire-serialize.js";
 
@@ -77,6 +87,11 @@ export function emitVanillaQueryProjectionModules(
   ctx: EnrichedBoundedContextIR,
   out: Map<string, string>,
   sourcemap?: SourceMapRecorder,
+  /** The hosting system — resolves each source aggregate's EFFECTIVE saving
+   *  shape (a `shape: document` source is read in-app, not through Ecto
+   *  columns).  Absent in a few legacy test paths; the aggregate header alone
+   *  then decides, matching `isVanillaDocAgg`. */
+  sys?: SystemIR,
 ): VanillaQueryProjectionRef[] {
   const projs = ctx.projections.filter(isQueryTimeProjection);
   if (projs.length === 0) return [];
@@ -98,12 +113,23 @@ export function emitVanillaQueryProjectionModules(
       aggsByName,
       wfsByName,
       projsByName,
+      sys,
     );
     out.set(path, content);
     sourcemap?.file(path, content, proj.origin, `${ctx.name}.${proj.name}`);
     refs.push({ ctx, proj });
   }
   return refs;
+}
+
+/** `fn row -> record = row.data; <body> end` — the in-app lambda a DOCUMENT
+ *  source's row expressions run under.  The embed bind (and the `row` parameter
+ *  itself) is dropped when the body never reads it: an unused binding fails
+ *  `mix compile --warnings-as-errors`. */
+function docRowLambda(body: string): string {
+  return docPredReadsRecord(body)
+    ? `fn ${docFilterLambdaArg(body)} -> record = row.data; ${body} end`
+    : `fn ${docFilterLambdaArg(body)} -> ${body} end`;
 }
 
 /** A query-time projection module: source find + per-`join` bulk-load-by-id map
@@ -118,6 +144,7 @@ function renderQueryProjectionModule(
   aggsByName: Map<string, AggregateIR>,
   wfsByName: Map<string, WorkflowIR>,
   projsByName: Map<string, ProjectionIR>,
+  sys?: SystemIR,
 ): string {
   const query = proj.query!;
   const source = query.source!;
@@ -157,9 +184,12 @@ function renderQueryProjectionModule(
     thisName: "record",
     contextModule,
     typesModule,
-    foundation: "vanilla",
   };
   const queryCtx: RenderCtx = { ...renderCtx, filterArgs: true };
+  // In-app rendering context for a `shape: document` source (`isDocSource`
+  // below): `record` is the rehydrated `%<Agg>.Data{}` embed, and the leaves
+  // take their in-memory Elixir forms rather than Ecto `fragment(...)` SQL.
+  const docRenderCtx: RenderCtx = { ...renderCtx, docStruct: true };
 
   // The source read honours the source aggregate's capability filter (soft
   // delete / tenancy) exactly like every other read; a principal (tenancy)
@@ -180,10 +210,45 @@ function renderQueryProjectionModule(
   const filter = query.filter ? renderExpr(query.filter, queryCtx) : null;
   const where = combineWhere(filter, cap);
 
+  // A `shape: document` source has NO flattened columns — the whole tree is one
+  // jsonb `data` embed on an `(id, data, version)` row — so every per-row read
+  // over it has to run the way node/python/dotnet run theirs: load the rows,
+  // then filter + project IN-APP over the rehydrated `%<Agg>.Data{}` embed
+  // (`record = row.data`).  Rendering the Ecto form instead named `record.title`
+  // / `record.is_deleted` as columns and failed `mix compile` — silently, since
+  // nothing gated it.  The two DIRECT-TABLE arms (whole-table + grouped
+  // aggregation) are untouched: they only ever name `id` over a document source
+  // (everything else is refused by `loom.projection-columnless-source`, and a
+  // capability-filtered one by `loom.projection-document-source-capability-filtered`).
+  const isDocSource = !!sourceAgg && isVanillaDocAgg(sourceAgg, ctx, sys);
+  // In-app twins of `filter` / `cap` above, over the `record` embed + `row` root.
+  const docFilter =
+    isDocSource && query.filter
+      ? renderDocPredicate(query.filter, sourceAgg!, contextModule, "row")
+      : null;
+  const docCap = isDocSource
+    ? vanillaDocCapabilityFilter(sourceAgg!, contextModule, "row", {
+        actor: principal,
+        bypass:
+          query.bypassAll || (query.bypassCaps?.length ?? 0) > 0
+            ? { bypassAll: query.bypassAll, bypassCaps: query.bypassCaps }
+            : undefined,
+      })
+    : null;
+  const docWhere =
+    docFilter && docCap ? `(${docFilter}) and (${docCap})` : (docFilter ?? docCap ?? null);
+  // A `deny` carve-out renders in-app as a call to `__denied?/1` (it must not be
+  // the literal `false` — Elixir folds that into a typing violation).  The
+  // document REPOSITORY emits that helper for its own reads; this module has to
+  // emit its own copy, or the call is an undefined private function.
+  const denyHelper = docWhere?.includes(DOC_DENY_PREDICATE) ? `\n\n${DOC_DENY_HELPER}` : "";
+
   // A shorthand row is the source aggregate's own wire serialization, so any
   // reference-collection relationships must be preloaded on the source read (the
   // aggregate's own findAll preloads them too) for `__ref_ids/1` to project ids.
-  const preload = isShorthand && sourceAgg ? preloadSuffix(sourceAgg).trim() : "";
+  // A document row has no associations at all (`X id[]` rides inside the blob),
+  // so there is nothing to preload.
+  const preload = isShorthand && sourceAgg && !isDocSource ? preloadSuffix(sourceAgg).trim() : "";
 
   const lines: string[] = [];
   lines.push(principal ? "" : "    _ = current_user");
@@ -289,7 +354,7 @@ ${
 `;
   }
 
-  // WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0) — ONE Ecto query with
+  // WHOLE-TABLE AGGREGATION (M-T1.3) — ONE Ecto query with
   // `count`/`sum`/`avg`/`min`/`max` in the `select`, no rows loaded.  The shape
   // exists precisely to avoid the naive read: `Repo.all/1` over the whole table
   // with every row hydrated into a struct to produce one integer.
@@ -331,7 +396,23 @@ ${moneyWireHelper(aggregates)}end
   }
 
   lines.push("    rows =");
-  if (where) {
+  if (isDocSource) {
+    // Document source: load, then narrow IN-APP (see `isDocSource` above).
+    if (docWhere) {
+      lines.push(`      ${sourceMod}`);
+      lines.push(`      |> Repo.all()`);
+      if (docPredReadsRecord(docWhere)) {
+        lines.push(`      |> Enum.filter(fn ${docFilterLambdaArg(docWhere)} ->`);
+        lines.push(`        record = row.data`);
+        lines.push(`        ${docWhere}`);
+        lines.push(`      end)`);
+      } else {
+        lines.push(`      |> Enum.filter(fn ${docFilterLambdaArg(docWhere)} -> ${docWhere} end)`);
+      }
+    } else {
+      lines.push(`      Repo.all(${sourceMod})`);
+    }
+  } else if (where) {
     lines.push(`      from(record in ${sourceMod}, where: ${where})`);
     lines.push(`      |> Repo.all()`);
   } else {
@@ -349,10 +430,23 @@ ${moneyWireHelper(aggregates)}end
     const join = joins[i];
     const mapVar = snake(aux.mapVar);
     const followMod = `${contextModule}.${upperFirst(aux.aggName)}`;
-    const idRow = join ? renderExpr(join.idRef, renderCtx) : `record.${snake(aux.path[0] ?? "id")}`;
+    // Over a document source the id lives inside the `data` embed, so the join
+    // key renders against `record = row.data` (with a root `id` lifted back to
+    // the row) and the id-collecting lambda binds the embed — the same in-app
+    // shape the source read above takes.  The Ecto binding is renamed `joined`
+    // there so it can't shadow that lambda's `row`.
+    const idRow = join
+      ? isDocSource
+        ? renderDocPredicate(join.idRef, sourceAgg!, contextModule, "row")
+        : renderExpr(join.idRef, renderCtx)
+      : isDocSource
+        ? liftDocRootId(`record.${snake(aux.path[0] ?? "id")}`, "row")
+        : `record.${snake(aux.path[0] ?? "id")}`;
     lines.push(`    ${mapVar} =`);
     lines.push(
-      `      from(row in ${followMod}, where: row.id in ^Enum.map(rows, fn record -> ${idRow} end))`,
+      isDocSource
+        ? `      from(joined in ${followMod}, where: joined.id in ^Enum.map(rows, ${docRowLambda(idRow)}))`
+        : `      from(row in ${followMod}, where: row.id in ^Enum.map(rows, fn record -> ${idRow} end))`,
     );
     lines.push(`      |> Repo.all()`);
     lines.push(`      |> Map.new(&{&1.id, &1})`);
@@ -372,7 +466,19 @@ ${moneyWireHelper(aggregates)}end
   let usesMoneyRound = false;
   if (isShorthand && sourceAgg) {
     lines.push(`    Enum.map(rows, &serialize/1)`);
-    const wire = renderWireSerialize(sourceAgg, ctx, { contextModule });
+    // A DOCUMENT row's wire fields live on the `:data` embed while `id` /
+    // `version` stay on the root row — exactly the rooting the document REST
+    // controller's serializer already uses (`controller-serialize.ts`), so it is
+    // reused verbatim rather than re-derived.
+    const wire = isDocSource
+      ? renderWireSerialize(sourceAgg, ctx, {
+          headVar: "row",
+          bind: "    record = row.data",
+          idExpr: "row.id",
+          versionExpr: "row.version",
+          contextModule,
+        })
+      : renderWireSerialize(sourceAgg, ctx, { contextModule });
     const refIds = hasRefColls(sourceAgg)
       ? `
 
@@ -398,18 +504,40 @@ ${moneyWireHelper(aggregates)}end
       const inner = t.kind === "optional" ? t.inner : t;
       return inner.kind === "primitive" && inner.name === "money";
     };
-    lines.push(`    Enum.map(rows, fn record ->`);
-    lines.push(`      %{`);
-    selects.forEach((s, i) => {
+    // Over a document source the projected values read the rehydrated embed
+    // (`record = row.data`), with a root `id`/`version` lifted back to the row —
+    // the same rooting the document controller's `serialize/1` uses.
+    const entries = selects.map((s, i) => {
       const tail = i === selects.length - 1 ? "" : ",";
-      const rendered = renderSelectEcto(s.expr, aliasMap, renderCtx);
+      const base = renderSelectEcto(s.expr, aliasMap, isDocSource ? docRenderCtx : renderCtx);
+      const rendered = isDocSource ? liftDocRootId(base, "row") : base;
       const ve = isMoney(rowFieldType.get(s.field)) ? `__money_round(${rendered})` : rendered;
       if (ve !== rendered) usesMoneyRound = true;
-      lines.push(`        ${s.field}: ${ve}${tail}`);
+      return `        ${s.field}: ${ve}${tail}`;
     });
+    if (isDocSource) {
+      // Bind the embed only when some projected value reads it — an unused
+      // binding fails `mix compile --warnings-as-errors`.
+      const mapBody = entries.join("\n");
+      lines.push(`    Enum.map(rows, fn ${docFilterLambdaArg(mapBody)} ->`);
+      if (docPredReadsRecord(mapBody)) lines.push(`      record = row.data`);
+    } else {
+      lines.push(`    Enum.map(rows, fn record ->`);
+    }
+    lines.push(`      %{`);
+    for (const e of entries) lines.push(e);
     lines.push(`      }`);
     lines.push(`    end)`);
   }
+
+  const body = lines.filter((l) => l !== "").join("\n");
+  // `import Ecto.Query` only when the body actually builds a query.  The
+  // unfiltered, join-less per-row read is a bare `Repo.all(<Mod>)` — and an
+  // Elixir import nothing uses is a warning, which `mix compile
+  // --warnings-as-errors` turns into a failed build.  Every OTHER shape here
+  // (both aggregation arms, any `where`, any `join`) emits a `from(...)`, so
+  // their modules keep the import byte-identically.
+  const ectoQueryImport = /\bfrom\(/.test(body) ? "  import Ecto.Query\n" : "";
 
   return `# Auto-generated.
 defmodule ${moduleName} do
@@ -421,14 +549,13 @@ defmodule ${moduleName} do
   Foundation: vanilla (plain Ecto).
   """
 
-  import Ecto.Query
-  alias ${appModule}.Repo
+${ectoQueryImport}  alias ${appModule}.Repo
 
   @doc "Execute the query-time projection and return the projected rows."
   @spec run(any()) :: [map()]
   def run(current_user \\\\ nil) do
-${lines.filter((l) => l !== "").join("\n")}
-  end${projectionHelpers}${
+${body}
+  end${projectionHelpers}${denyHelper}${
     usesMoneyRound
       ? `\n\n  defp __money_round(nil), do: nil\n\n  defp __money_round(%Decimal{} = dec), do: Decimal.round(dec, ${MONEY_WIRE_SCALE})`
       : ""
@@ -464,7 +591,7 @@ function moneyWireHelper(
   )
     return "";
   return `
-  # RS-12 money scale: a SQL aggregate echoes the scale its rows were STORED
+  # Money scale: a SQL aggregate echoes the scale its rows were STORED
   # at, and a grouping KEY echoes the scale its row was WRITTEN at, so pin the
   # wire value to the canonical scale every other read uses.
   defp __money_wire(%Decimal{} = dec), do: dec |> Decimal.round(${MONEY_WIRE_SCALE}) |> to_string()
@@ -636,7 +763,6 @@ function renderQueryProjectionAction(
     ? renderExpr(proj.query.requires, {
         thisName: "record",
         contextModule,
-        foundation: "vanilla",
       })
     : null;
   if (gate) {

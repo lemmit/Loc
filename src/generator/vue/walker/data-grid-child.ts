@@ -1,5 +1,5 @@
 // Vue's `DataGrid` child component — the SFC half of the `renderDataGridChild`
-// seam (M-T1.1 slice 10).
+// seam (M-T1.1).
 //
 // WHY A SIBLING FILE, NOT A MODULE DECLARATION
 // --------------------------------------------
@@ -144,8 +144,8 @@ function renderSfc(spec: DataGridSpec): string {
   // markup with no import-registration channel, so the whole set comes in
   // unconditionally and the generated tsconfig keeps `noUnusedLocals` off.
   // The child needs its OWN copy because a computed cell's markup lands here,
-  // not on the page — a `DateDisplay` column rendered `formatDateTime(...)`
-  // against nothing at all before this line existed.
+  // not on the page — without it a `DateDisplay` column renders
+  // `formatDateTime(...)` against nothing at all.
   const formatImport = `import { ${FORMAT_MODULE_EXPORTS.join(", ")} } from "../lib/format";`;
 
   return `${lines(
@@ -282,7 +282,9 @@ function columnDefs(columns: readonly DataGridColumn[], selection: boolean): str
   for (const c of columns) {
     const parts = [`id: ${JSON.stringify(c.id)}`];
     if (c.accessorKey) parts.push(`accessorKey: ${JSON.stringify(c.accessorKey)}`);
-    parts.push(`header: ${JSON.stringify(c.header)}`);
+    // The header is a user-visible slot (`columnHeader`): under i18n it arrives
+    // as a `t()` expression, otherwise quoted exactly as before.
+    parts.push(`header: ${c.headerValue ?? JSON.stringify(c.header)}`);
     parts.push(`enableSorting: ${c.sortable}`);
     parts.push(`enableColumnFilter: ${c.filterable}`);
     // A money/decimal column needs an explicit numeric comparator — see

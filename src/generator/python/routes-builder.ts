@@ -136,7 +136,7 @@ export function buildPyRoutesFile(
   // `<Parent>Response` that references it (`list[LabelResponse]`) — no Pydantic
   // forward-ref.  Byte-identical when there is no part-in-part nesting.
   const parts: EnrichedEntityPartIR[] = partsChildrenFirst(agg.parts);
-  // Extern ops (docs/extern.md, extern (b) Phase 2) route exactly like any
+  // Extern ops (docs/extern.md, extern (b)) route exactly like any
   // other public operation: the aggregate's `<op>` method (preconditions → hook
   // → invariants) is a real method now, so `found.<op>(…)` drives the whole
   // framework flow — no separate registry dispatch.
@@ -228,7 +228,7 @@ export function buildPyRoutesFile(
     // so the read surface cannot disagree with the gate / `ignoring` stance
     // enrichment resolved.
     historyFind
-      ? ["", "", renderPyHistoryMapper(agg), "", "", historyRoute(agg, historyFind)]
+      ? ["", "", renderPyHistoryMapper(agg), "", "", historyRoute(agg, historyFind, ctx)]
       : null,
     destroyOp ? ["", "", destroyRoute(agg, conflictResolver(ctx), destroyOp)] : null,
     ...opEntries.map((e) => ["", "", operationRoute(agg, e.operation!, ctx, e)]),
@@ -322,15 +322,23 @@ export function buildPyRoutesFile(
         ))
       ? "from app.auth.user import User"
       : null,
-    // The history mapper's masked-field blocks read the ambient principal
-    // through `current_user()` (the non-raising getter — an unauthenticated
-    // caller drops every masked entry).  Imported only when the aggregate
-    // actually serves history AND masks something, else ruff flags F401.
-    // Emitted separately from the `User` line above because the two conditions
-    // are independent: a masked history needs the accessor but not the type.
-    historyFind && maskedHistoryFields(agg).length > 0
-      ? "from app.auth.user import current_user"
-      : null,
+    // The history path has TWO independent principal readers, and they want
+    // DIFFERENT accessors — emitted separately from the `User` line above
+    // because neither needs the type:
+    //
+    //  * the MAPPER's masked-field blocks read `current_user()`, the
+    //    non-raising getter — an unauthenticated caller simply drops every
+    //    masked entry rather than erroring;
+    //  * the ROUTE's inherited `requires` gate binds
+    //    `current_user_ = require_current_user()` and dereferences a claim on
+    //    it, so it takes the fail-closed raising accessor (`User`, not
+    //    `User | None` — the non-raising one made the gate `mypy --strict`
+    //    union-attr red and an `AttributeError` at runtime).
+    //
+    // Both are demand-gated, or ruff flags the unused import (F401).  Missing
+    // the gate reader entirely is what emitted a call to an unimported name on
+    // a GATED-but-UNMASKED history find (ruff F821 → `NameError`).
+    historyAccessorImport(historyFind, agg),
     historyFind
       ? "from app.audit.history import AuditEntryListResponse, audit_snapshot_value, audit_value_changed"
       : null,
@@ -349,6 +357,10 @@ export function buildPyRoutesFile(
     refersTo(agg.name) ? `from app.domain.${snake(agg.name)} import ${agg.name}` : null,
     hasDispatch ? null : "from app.domain.events import NoopDomainEventDispatcher",
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
+    // The shared `FileRef` TypedDict a `File`-typed wire field is annotated
+    // with (M-T6.39) — demand-driven like every import above, so a File-free
+    // aggregate's module is byte-identical.
+    refersTo("FileRef") ? "from app.domain.file_ref import FileRef" : null,
     [...enumNames, ...voDomainNames].length > 0
       ? `from app.domain.value_objects import ${[...enumNames, ...voDomainNames].sort().join(", ")}`
       : null,
@@ -373,7 +385,7 @@ export function buildPyRoutesFile(
 
 /** `app.http.problem` names this routes file references. */
 /** The repo method a MUTATION route loads through: `get_by_id_for_write` when
- *  the aggregate carries a `writeScopeFilter` (authorization Phase 3 P3.1 — the
+ *  the aggregate carries a `writeScopeFilter` (authorization — the
  *  write scope is narrower than the read scope), else `get_by_id` (byte-
  *  identical).  Read routes always use `get_by_id`. */
 function cmdLoad(agg: EnrichedAggregateIR): string {
@@ -401,8 +413,11 @@ export function errorResponsesKwarg(
    *  `destroy` FK-restrict declaration (`ReferencedInUse`) moves with the
    *  `httpStatus` override; omitted ⇒ literal 409 (byte-identical default). */
   resolve?: (name: string) => number,
+  /** Body facts the `kind` cannot carry — `readsAggregate` for the workflow
+   *  arm's conditional not-found rung.  See `errorStatuses`. */
+  opts?: { readsAggregate?: boolean },
 ): string {
-  const statuses = [...new Set([...errorStatuses(kind, guarded, resolve), ...extra])].sort(
+  const statuses = [...new Set([...errorStatuses(kind, guarded, resolve, opts), ...extra])].sort(
     (a, b) => a - b,
   );
   if (statuses.length === 0) return "";
@@ -444,11 +459,35 @@ export const PY_PAGED_CONTROLS: readonly string[] = [
   `pageSize: Annotated[int, Query(ge=1, le=${PAGED_MAX_PAGE_SIZE})] = ${PAGED_DEFAULT_PAGE_SIZE}`,
 ];
 
+/** The canonical dashed-hex uuid form — the same shape `z.string().uuid()`,
+ *  `Guid`-binding and `UUID.fromString` accept on the sibling backends. */
+export const UUID_PATTERN =
+  "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
+
 /** `{id}` path-param annotation carrying the uuid format every backend
  *  declares (paramTypeDiffs parity).  Shared with the workflow-instance
  *  byId route (workflows-builder.ts), whose correlation-id param must
- *  carry the same format. */
-export const ID_PARAM = 'id: Annotated[str, Path(json_schema_extra={"format": "uuid"})]';
+ *  carry the same format.
+ *
+ *  `pattern=` ENFORCES what `format` only documented.  The param bound as a
+ *  bare `str`, so a malformed `{id}` sailed past FastAPI into the repository
+ *  and asyncpg refused the uuid comparison — a 500 where the published
+ *  contract says 422 (`errorStatuses("getById")` declares it: "a path `{id}`
+ *  is parsed as a uuid … and a failure answers the same 422 the body tier
+ *  does").  A `pattern` miss raises `RequestValidationError`, which the
+ *  emitted handler already renders as the 422 problem envelope.  Invisible to
+ *  the paramTypeDiffs parity dimension, which compares `type` + `format`
+ *  only — both unchanged.
+ *
+ *  PRECONDITION: every user of this constant must have a `guid` id.  True by
+ *  construction for an aggregate (`lowerAggregate` sets `idValueType` to
+ *  `"guid"` unconditionally); the one caller that CAN see a non-guid key —
+ *  the workflow-instance byId route — already branches on
+ *  `workflowCorrIdValueType` and takes `id: str` / `id: int` instead.  The
+ *  `format: uuid` this replaces carried the same precondition, so the pattern
+ *  adds no new coupling — but if non-guid aggregate ids ever land, this needs
+ *  the workflow side's branch, not just a different annotation. */
+export const ID_PARAM = `id: Annotated[str, Path(pattern=r"${UUID_PATTERN}", json_schema_extra={"format": "uuid"})]`;
 
 /** The domain error names this routes file actually references. */
 function errorImports(refersTo: (n: string) => boolean): string | null {
@@ -478,10 +517,11 @@ function responseModel(
   ctx: EnrichedBoundedContextIR,
   declared?: PayloadIR,
 ): string {
-  // Co-located provenance lineage (provenance.md): each `provenanced` field
-  // exposes a trailing `<field>_provenance` carrying the current lineage on
-  // the wire (root-only; parts never carry provenanced fields).
-  const provFields = ent.fields.filter((f) => f.provenanced);
+  // (M-T6.12) A provenanced field's lineage rides INSIDE its own response key
+  // as the `Provenanced[T]` carrier — no trailing `<field>_provenance` model
+  // field.  A DECLARED response record names DOMAIN types, so the wrap is
+  // re-applied below for those (the wireShape path already carries it).
+  const provenanced = new Set(ent.fields.filter((f) => f.provenanced).map((f) => f.name));
   // M-T5.10 (PR4): when the context declares a `response <Agg>Response` record
   // (spliced by `scaffoldHandlers`), READ that record's fields instead of
   // re-deriving from `wireShape` — byte-identical for the scaffolded form,
@@ -495,13 +535,17 @@ function responseModel(
       `class ${name}Response(BaseModel):`,
       idWf ? `    ${idWf.name}: ${responsePyType(idWf.type, ctx)}` : [],
       declared.fields.map((f) => {
-        const t = payloadFieldPyType(f.type, ctx);
+        const t = payloadFieldPyType(
+          provenanced.has(f.name)
+            ? { kind: "genericInstance", ctor: "provenanced", arg: f.type }
+            : f.type,
+          ctx,
+        );
         const optional = f.optional || f.type.kind === "optional";
         const suffix =
           optional && !t.endsWith("| None") ? " | None = None" : optional ? " = None" : "";
         return `    ${f.name}: ${t}${suffix}`;
       }),
-      provFields.map((f) => `    ${provColumn(f.name)}: dict[str, object] | None = None`),
       "",
       "",
     );
@@ -522,7 +566,6 @@ function responseModel(
         optional && !t.endsWith("| None") ? " | None = None" : optional ? " = None" : "";
       return `    ${wf.name}: ${t}${suffix}`;
     }),
-    provFields.map((f) => `    ${provColumn(f.name)}: dict[str, object] | None = None`),
     "",
     "",
   );
@@ -936,6 +979,24 @@ function byIdRoute(agg: EnrichedAggregateIR, apiOp: ApiOperationIR): string {
   );
 }
 
+/** The `app.auth.user` accessor import the history path needs, or `null`.
+ *
+ *  Two readers, two accessors (see the call site): the mapper's mask blocks
+ *  take the non-raising `current_user`, the route's `requires` gate takes the
+ *  fail-closed `require_current_user`.  A gated AND masked history imports
+ *  both; neither reader present imports nothing (ruff F401). */
+function historyAccessorImport(
+  historyFind: FindIR | undefined,
+  agg: EnrichedAggregateIR,
+): string | null {
+  if (!historyFind) return null;
+  const names = [
+    maskedHistoryFields(agg).length > 0 ? "current_user" : null,
+    findGateUsesCurrentUser(historyFind) ? "require_current_user" : null,
+  ].filter((n): n is string => n !== null);
+  return names.length > 0 ? `from app.auth.user import ${names.join(", ")}` : null;
+}
+
 /** `GET /{id}/history` — the per-entity audit trail (docs/audit.md).
  *
  *  Three guards, in order, mirroring the Hono port exactly:
@@ -946,15 +1007,25 @@ function byIdRoute(agg: EnrichedAggregateIR, apiOp: ApiOperationIR): string {
  *       caller cannot read 404s here rather than yielding a readable timeline;
  *    3. the per-caller mask, applied inside the mapper.
  */
-function historyRoute(agg: EnrichedAggregateIR, find: FindIR): string {
+function historyRoute(
+  agg: EnrichedAggregateIR,
+  find: FindIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
   const gateUsesUser = findGateUsesCurrentUser(find);
   return lines(
-    `@router.get("/{id}/history", response_model=AuditEntryListResponse, operation_id="${camelId(opFind(agg.name, "history"))}"${errorResponsesKwarg("getById")})`,
+    `@router.get("/{id}/history", response_model=AuditEntryListResponse, operation_id="${camelId(opFind(agg.name, "history"))}"${errorResponsesKwarg("getById", false, [], conflictResolver(ctx))})`,
     `async def history_${snake(agg.name)}(${ID_PARAM}, session: SessionDep) -> list[dict[str, object]]:`,
     "    repo = _repo(session)",
-    gateUsesUser ? "    current_user_ = current_user()" : null,
+    // The FAIL-CLOSED accessor: the gate dereferences a claim on the
+    // principal, so "no principal" must reject, not `AttributeError` on
+    // `None` (which the non-raising getter would hand it — also
+    // `mypy --strict` union-attr red).  Same seam the always-on principal
+    // capability filters use.  The mask blocks in the mapper keep the
+    // non-raising getter: there, absence means "drop the entry".
+    gateUsesUser ? "    current_user_ = require_current_user()" : null,
     find.requires
-      ? `    if not (${renderPyExpr(find.requires, { thisName: "self", currentUserExpr: "current_user_" })}):\n        raise ForbiddenError("Forbidden")`
+      ? `    if ${renderPyNegatedGuard(find.requires, { thisName: "self", currentUserExpr: "current_user_" })}:\n        raise ForbiddenError("Forbidden")`
       : null,
     // (2) — reachability, not a predicate on the audit table.
     `    await repo.get_by_id(${agg.name}Id(id))`,
@@ -1070,9 +1141,8 @@ function lifecycleGate(action: OperationIR | null | undefined, thisName?: string
 
 function whenGate(agg: EnrichedAggregateIR, op: OperationIR): string[] {
   if (!op.when) return [];
-  const pred = renderPyExpr(op.when, { thisName: "found" });
   return [
-    `    if not (${pred}):`,
+    `    if ${renderPyNegatedGuard(op.when, { thisName: "found" })}:`,
     `        raise DisallowedError(${JSON.stringify(
       `operation '${op.name}' is not allowed in the current state of ${agg.name}.`,
     )})`,

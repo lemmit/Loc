@@ -63,7 +63,7 @@ system Shop {
     context Cat {
       enum Status { active inactive }
       valueobject Contact { email: string  phone: string }
-      aggregate Category with crudish { name: string }
+      aggregate Category with crudish { name: string  derived display: string = name }
       aggregate Product with crudish {
         name:     string
         price:    money
@@ -130,13 +130,13 @@ system Shop {
           error: Alert { "Failed" },
           empty: Text { "None" },
           data: rows => Table {
-            each: rows,
-            row: p => Stack {
+            rows: rows,
+            Column { "Product", p => Stack {
               Text { p.name },
               Money { p.price },
               EnumBadge { p.status },
               Button { "Open", to: "/p/:id" }
-            }
+            } }
           }
         }
       }

@@ -11,13 +11,7 @@
 // same edge translation the exception-less operation routes emit.
 // ---------------------------------------------------------------------------
 
-import {
-  PAGED_DEFAULT_PAGE,
-  PAGED_DEFAULT_PAGE_SIZE,
-  PAGED_MAX_PAGE,
-  PAGED_MAX_PAGE_SIZE,
-  pagedReturn,
-} from "../../../ir/stdlib/generics.js";
+import { pagedReturn } from "../../../ir/stdlib/generics.js";
 import { variantTag } from "../../../ir/stdlib/unions.js";
 import type { AggregateIR, BoundedContextIR, FindIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
@@ -30,6 +24,12 @@ import { plugRelativePath } from "./api-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { denialOverrides, denialResponse } from "./denial.js";
 import { isAbstractBase } from "./inheritance-emit.js";
+import {
+  PAGE_CALL_ARGS,
+  PAGE_PARAM_HELPER,
+  PAGE_WITH_CLAUSES,
+  pagingElseArm,
+} from "./page-param.js";
 
 /** Non-`all` custom finds an aggregate's repository declares — the ones that
  *  earn an HTTP `GET /<plural>/<find>` endpoint (`all` is the
@@ -207,8 +207,10 @@ export function renderFindActions(
       // shared cross-backend defaults.
       ...(paged
         ? [
-            `page_param(params, "page", ${PAGED_DEFAULT_PAGE}, ${PAGED_MAX_PAGE})`,
-            `page_param(params, "pageSize", ${PAGED_DEFAULT_PAGE_SIZE}, ${PAGED_MAX_PAGE_SIZE})`,
+            // Bound by the `with` clauses `PAGE_WITH_CLAUSES` prepends, so an
+            // out-of-range window 422s before the repository is reached
+            // (page-param.ts) rather than being silently clamped.
+            ...PAGE_CALL_ARGS,
             // Sort controls (M-T2.6) — strings passed through; the repo whitelists.
             `Map.get(params, "sort", "id")`,
             `Map.get(params, "dir", "asc")`,
@@ -231,7 +233,6 @@ ${cuLine}${innerBody}
       const gate = renderExpr(f.requires, {
         thisName: "record",
         contextModule,
-        foundation: "vanilla",
       });
       return `
   def ${findSnake}(conn, ${paramArg}) do
@@ -253,8 +254,10 @@ ${innerBody}
       // totalPages}` envelope (atom keys) — only `items` needs per-record
       // serialisation; the scalar counters pass straight through to the
       // canonical camelCase JSON.
-      return wrap(`    with {:ok, result} <- ${call} do
+      const clauses = [...PAGE_WITH_CLAUSES, `{:ok, result} <- ${call}`].join(",\n         ");
+      return wrap(`    with ${clauses} do
       json(conn, %{result | items: Enum.map(result.items, &serialize/1)})
+${pagingElseArm(`${webModule}.ProblemDetails`, "    ")}
     end`);
     }
 
@@ -269,11 +272,11 @@ ${innerBody}
         absent.kind === "none"
           ? // RS-22/RS-27 — the `T option` miss goes through the SHARED
             // producer, with the canonical `"not_found"` token as `detail`.
-            // It used to call `problem_variant(…, "Not Found", %{})`, whose
-            // helper sets `detail: title` — so elixir answered `"Not Found"`
-            // where node/python/java/dotnet answer `"not_found"`.  Two
+            // NOT `problem_variant(…, "Not Found", %{})`, whose helper sets
+            // `detail: title` — that answers `"Not Found"` where
+            // node/python/java/dotnet answer `"not_found"`, and puts two
             // spellings of one 404 inside ONE controller (the `T?` arm below
-            // said `"<Agg> not found"`), which is this rule's own lesson:
+            // says `"<Agg> not found"`), which is this rule's own lesson:
             // don't hand-roll a 404, reach the producer.
             `        ${denialResponse("notFound", '"not_found"', denialOverrides(ctx))}`
           : `        problem_variant(conn, ${absent.status}, ${JSON.stringify(absent.type)}, ${JSON.stringify(absent.title)}, ${absent.hasResource ? `%{resource: ${JSON.stringify(aggPascal)}}` : "%{}"})`;
@@ -296,54 +299,43 @@ ${absentArm}
       // declares no error status, and its default is the (softened) A4 question.
       //
       // The `detail` is the canonical `"not_found"` TOKEN (RS-27 scopes the
-      // find miss out of the by-id sentence).  It used to interpolate the
-      // aggregate — `"<Agg> not found"` — which reads like the by-id sentence
-      // but carries no id and matched no other backend; the first callers for
-      // `by_email` / `by_reference` / `by_code` / `by_sku` are what surfaced it.
-      if (f.returnType.kind === "optional") {
-        return wrap(`    case ${call} do
+      // find miss out of the by-id sentence).  Interpolating the aggregate —
+      // `"<Agg> not found"` — reads like the by-id sentence but carries no id,
+      // and matches no other backend.
+      //
+      // A NON-optional single find takes the SAME arm, and the sentence above
+      // is why: it has even less of an absent representation than the optional
+      // one.  The bare `: X` case used to keep `json(conn, nil)` — a 200 whose
+      // `null` body is not a valid `<Agg>Response`, i.e. the same violation of
+      // its own declared 200 this comment describes fixing for `X?` — and the
+      // reason recorded here was that `findSingle` declared no error status.
+      // It does now: the rung is a fact about the READ, not about the route's
+      // shape (F13), so the justification is gone and so is the divergence.
+      return wrap(`    case ${call} do
       {:ok, nil} ->
         ${denialResponse("notFound", '"not_found"', denialOverrides(ctx))}
 
       {:ok, record} ->
         json(conn, serialize(record))
     end`);
-      }
-      return wrap(`    case ${call} do
-      {:ok, nil} -> json(conn, nil)
-      {:ok, record} -> json(conn, serialize(record))
-    end`);
     }
     return wrap(`    with {:ok, records} <- ${call} do
       json(conn, Enum.map(records, &serialize/1))
     end`);
   });
-  // A `page_param/3` coercion helper — once per controller — backs every paged
-  // find's `page`/`pageSize` query reads (Phoenix delivers params as strings; a
-  // missing/blank/non-integer param falls back to the shared default).  The
-  // auto-`findAll` `index` is paged-by-default now (M-T2.6), so the helper is
-  // required on every non-abstract controller even without an explicit paged find.
+  // The `page_param/4` reader — once per controller — backs every paged find's
+  // `page`/`pageSize` query reads.  ONE definition, shared with the
+  // queryHandler controller (`page-param.ts`), rather than a copy in each that
+  // clamps where the OpenAPI document publishes bounds.  The auto-`findAll`
+  // `index` is paged by default, so the helper is required on every
+  // non-abstract controller even without an explicit paged find.
   const indexAllFind = (ctx.repositories ?? [])
     .find((r) => r.aggregateName === agg.name)
     ?.finds?.find((f) => f.name === "all");
   const indexPaged =
     !isAbstractBase(agg) && !!(indexAllFind && pagedReturn(indexAllFind.returnType));
   const hasPaged = indexPaged || httpFindsOf(ctx, agg).some((f) => pagedReturn(f.returnType));
-  const pageParamHelper = hasPaged
-    ? `
-  defp page_param(params, key, default, limit) do
-    case params[key] do
-      v when is_integer(v) and v >= 1 -> min(v, limit)
-      v when is_binary(v) ->
-        case Integer.parse(v) do
-          {n, _} when n >= 1 -> min(n, limit)
-          _ -> default
-        end
-
-      _ -> default
-    end
-  end`
-    : "";
+  const pageParamHelper = hasPaged ? PAGE_PARAM_HELPER : "";
 
   // Typed query-param coercion for the finds' OWN params — same reason
   // `page_param/3` exists (Phoenix delivers query params as strings), applied to

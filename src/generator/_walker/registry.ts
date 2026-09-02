@@ -23,10 +23,10 @@
 //                            currently fall through with a visible
 //                            comment in generated output).
 //
-// Before this registry existed, both walkers hand-coded a `switch`
-// over primitive names and the language-side stdlib mirrored them
-// with three `ReadonlySet<string>` exports — three sources of truth
-// kept in sync by code review.  Now:
+// Without this registry both walkers hand-code a `switch` over primitive
+// names and the language-side stdlib mirrors them with three
+// `ReadonlySet<string>` exports — three sources of truth kept in sync by
+// code review.  Instead:
 //
 //   - The walkers consume `WALKER_PRIMITIVES[name].tsx?.(call, ctx,
 //     depth)` (or `.heex(call, ctx)`).  No switches.
@@ -208,15 +208,14 @@ export interface PrimitiveDef {
    *
    *  Only the two non-JSX targets care: Feliz turns each read into a Model
    *  field + `Msg` case + init `Cmd` + update arm, and Flutter into a Riverpod
-   *  provider.  Both used to enumerate the read-bearing primitives BY NAME in
-   *  their own collectors, and `Chart` — the second such primitive ever — was
-   *  duly missed by both: a chart-only page named a Model field nothing
-   *  declared (Feliz) and watched a provider nothing wrote (Flutter).  Two
-   *  copies of a list that must match this registry is one copy too many, so
-   *  the fact is declared HERE, where primitives are declared, and both
+   *  provider.  Enumerating the read-bearing primitives BY NAME in each
+   *  collector is a copy of a list that must match this registry, and a new
+   *  primitive gets missed by both: a chart-only page names a Model field
+   *  nothing declared (Feliz) and watches a provider nothing wrote (Flutter).
+   *  So the fact is declared HERE, where primitives are declared, and both
    *  collectors ask `isOfReadPrimitive` (see `_walker/of-reads.ts`).
    *
-   *  Adding a third read-bearing primitive is now this flag, and nothing else. */
+   *  Adding a read-bearing primitive is this flag, and nothing else. */
   readsOf?: true;
   /** React/TSX target renderer, or undefined if the TSX walker does
    *  NOT dispatch on this primitive directly (e.g. `Tab`/`Column` only
@@ -232,7 +231,7 @@ export interface PrimitiveDef {
    *  single source of truth for the a11y semantics later phases render
    *  (accessibility.md).  Either `"presentational"` (no ARIA obligation)
    *  or a concrete `A11yObligation`.  REQUIRED: a new primitive without
-   *  an a11y decision fails to type-check.  Phase 1 is data only — no
+   * an a11y decision fails to type-check. is data only — no
    *  emit consumes it yet. */
   a11y: A11yContract;
 }
@@ -330,7 +329,7 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     heex: renderKeyValueRowHeex,
     a11y: "presentational",
   },
-  // --- Phase 6 — semantic anchor target + sticky-position wrapper -------
+  // --- Semantic anchor target + sticky-position wrapper ---------
   // Both Section and Sticky DO render on HEEx (`renderSectionHeex` /
   // `renderStickyHeex` below) — a `<section>` and a `position: sticky`
   // wrapper are plain markup with no LiveView divergence.  (This block used
@@ -543,7 +542,7 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     a11y: { role: "table", owns: "Column" },
   },
   // Kind-discriminated (line | bar) chart over a GROUPED query-time projection
-  // (M-T1.3 Phase 4).  The `tsx` renderer serves react — all eight packs, each
+  // (M-T1.3).  The `tsx` renderer serves react — all eight packs, each
   // binding its own charting library — AND, through the `renderChartData` seam
   // plus their procedural packs, Feliz and Flutter, which render it as inline
   // SVG / a `CustomPainter` with no library at all.  HEEx has its own renderer
@@ -667,7 +666,7 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     heex: renderModalHeex,
     a11y: { role: "dialog", modal: true, needsName: true, focus: "trap-restore" },
   },
-  // --- Phase 3 — code/icon primitives ------------------------------------
+  // --- Code / icon primitives ------------------------------------
   // Both CodeBlock and Icon DO render on HEEx (`renderCodeBlockHeex` /
   // `renderIconHeex` below).  Same correction as the Section/Sticky block
   // above: the note claiming the HEEx renderer was "intentionally absent"

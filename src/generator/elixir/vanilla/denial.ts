@@ -2,21 +2,21 @@
 // failed `requires` / `precondition` short-circuits to, and the controller
 // clause that turns it into an RFC 7807 response.
 //
-// Why it exists.  A guard denial used to be a bare atom (`{:error, :forbidden}`
-// / `{:error, :precondition_failed}`), which carried the STATUS but not the
-// MESSAGE — so every controller answered with a hardcoded generic string
-// ("A precondition failed"), while node/dotnet/java/python all name the failed
-// predicate ("Precondition failed: status != \"cancelled\"").  RFC 7807 wants
-// `detail` specific to the OCCURRENCE, and the M-T9.11 wire-golden gate can't
-// carry an error-envelope assertion while one backend's `detail` is generic
-// (the golden is byte-exact — a waiver would only park the divergence).
+// Why it exists.  A bare atom (`{:error, :forbidden}` /
+// `{:error, :precondition_failed}`) carries the STATUS but not the MESSAGE, so
+// every controller answers with a hardcoded generic string ("A precondition
+// failed") where node/dotnet/java/python name the failed predicate
+// ("Precondition failed: status != \"cancelled\"").  RFC 7807 wants `detail`
+// specific to the OCCURRENCE, and the wire-golden gate is byte-exact — it
+// cannot carry an error-envelope assertion while one backend's `detail` is
+// generic.
 //
-// So a denial is now a 2-TUPLE — `{:precondition_failed, "<message>"}` — and
-// the reason term flows through `{:error, reason}` catch-alls exactly as the
-// bare atom did.  The message is built by the SAME rule the other four
-// backends use (`renderStatement`'s `raise(ArgumentError, …)` path here, and
-// the `DomainError`/`DomainException` throws there): an explicit `message:` if
-// the statement declares one, else the derived `"<Prefix>: <source>"`.
+// So a denial is a 2-TUPLE — `{:precondition_failed, "<message>"}` — and the
+// reason term flows through `{:error, reason}` catch-alls exactly as a bare
+// atom would.  The message is built by the SAME rule the other four
+// backends use (the `raise(<App>.GuardError, …)` path below here, and the
+// `DomainError`/`DomainException` throws there): an explicit `message:` if the
+// statement declares one, else the derived `"<Prefix>: <source>"`.
 //
 // Every producer (`operation-returns-emit`, `eventsourced-emit`,
 // `workflow-execution-emit`, `workflow-eventsourced-emit`, `dispatch-emit`) and
@@ -37,6 +37,7 @@ import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { classifyForWire, pickErrorPath } from "../../../ir/validate/invariant-classify.js";
 import { errorTitle, resolveErrorStatus } from "../../../util/error-defaults.js";
 import { messageCode } from "../../../util/message-code.js";
+import { elixirString } from "../../../util/naming.js";
 
 type GuardStmt = Extract<StmtIR | WorkflowStmtIR, { kind: "requires" | "precondition" }>;
 
@@ -93,19 +94,26 @@ export function denialStatus(rung: DenialRung, overrides?: ErrorStatusMap): numb
  *  the status next to it (elixir shipped a "Precondition Failed" title against a
  *  422 status until #2300 — exactly the drift a hardcoded pair invites).
  *
- *  Two derivations, because the ladder genuinely has two kinds of rung:
- *   - the NAMED rungs (`Disallowed` / `Forbidden` / `NotFound`) title on the
- *     error NAME humanised, matching java's `problem(disallowedStatus,
- *     "Disallowed", …)` — the name is the stable identity, the status is the
- *     remappable projection of it;
- *   - the DOMAIN FLOOR has no error name on the wire (its title has always been
- *     the status reason phrase, "Unprocessable Entity" on all five backends), so
- *     it titles on the RESOLVED status — `httpStatus DomainError -> 400` moves
- *     the title to "Bad Request" alongside it. */
+ *  Two derivations, because the ladder genuinely has two kinds of rung — and
+ *  the split is per-rung EMPIRICAL, read off what the other four backends
+ *  emit, not a principle applied uniformly:
+ *
+ *   - `Disallowed` titles on the error NAME humanised.  Every backend spells
+ *     that one as the literal `"Disallowed"` next to a resolved status
+ *     (`java/emit/api.ts`, `dotnet/emit/api.ts`, `python/index.ts`,
+ *     `hono/v4/routes-builder.ts`), so the name is the cross-backend contract.
+ *   - `Forbidden` / `NotFound` / the DOMAIN FLOOR title on the RESOLVED
+ *     status, via `problemTitle(...)` — which is what those same four
+ *     backends do (`problemTitle(forbiddenStatus)` /
+ *     `problemTitle(notFoundStatus)`).  Identical to the name at the stdlib
+ *     defaults ("Forbidden" / "Not Found"), and only observably different
+ *     under an `httpStatus` override: `httpStatus NotFound -> 410` must title
+ *     "Gone", not "Not Found".  Elixir titled those two on the NAME until this
+ *     was fixed — a divergence the status-only census could not see. */
 export function denialTitle(rung: DenialRung, overrides?: ErrorStatusMap): string {
-  return rung === "precondition"
-    ? problemTitle(denialStatus(rung, overrides))
-    : errorTitle(RUNG_ERROR_NAME[rung]);
+  return rung === "disallowed"
+    ? errorTitle(RUNG_ERROR_NAME[rung])
+    : problemTitle(denialStatus(rung, overrides));
 }
 
 /** A whole `ProblemDetails.problem_response(conn, <status>, <title>, <detail>)`
@@ -143,6 +151,92 @@ export function denialMessage(s: GuardStmt): string {
   return s.message ? s.message.text : `Precondition failed: ${s.source}`;
 }
 
+// ---------------------------------------------------------------------------
+// The RAISE path — the TYPED GUARD EXCEPTION (M-T6.20 path 2).
+//
+// The `ensure` chain above is only reachable from an HTTP-boundary operation.
+// A guard in a PURE body — an aggregate `function`, a `domainService`, the
+// pure-core operation form — has no `with` chain to short-circuit through, so
+// it RAISES, and a controller `rescue` maps the raise to a status.
+//
+// That rescue used to route by MESSAGE PREFIX: `raise(ArgumentError,
+// "Precondition failed: …")` and `String.starts_with?(guard_msg, "Precondition
+// failed: ")`.  Which made the message the ROUTING KEY — so an authored
+// `message "…"` could not be emitted at all: it would miss the prefix and
+// `reraise` into a 500.  Both raise sites carried a comment saying exactly
+// that, and the derived text shipped instead of the author's on this one
+// backend, on this one construct.
+//
+// The classification is now OUT OF BAND: one domain-layer `defexception`
+// carrying a `kind` field (`:forbidden` / `:precondition`) that the rescue
+// reads.  The `:message` is free text again, so `denialMessage(s)` — the SAME
+// rule the `ensure` path and the other four backends' `DomainException` /
+// `DomainError` use — can be spelled here verbatim.
+//
+// The module lives in the DOMAIN layer (`<App>.GuardError`, under
+// `lib/<app>/`), not `<App>Web.*`: `function-emit` / `domain-service-emit`
+// render into `lib/<app>/` and must not reference the Web namespace.
+//
+// ONE module with a `kind` field rather than two exception types, because the
+// generated ExUnit domain tests assert on it too (`assert_raise <App>.GuardError`
+// in `tests-emit.ts`) and cannot tell from a `toThrow()` expression which rung
+// the op will trip.
+// ---------------------------------------------------------------------------
+
+/** The app module a `<App>.<Ctx>` context module belongs to — the prefix
+ *  `RenderCtx.contextModule` carries at every raise site. */
+export function appModuleOf(contextModule: string): string {
+  return contextModule.split(".")[0] ?? contextModule;
+}
+
+/** `<App>.GuardError` — the typed exception a guard raises on the pure paths. */
+export function guardErrorModule(appModule: string): string {
+  return `${appModule}.GuardError`;
+}
+
+/** The `raise(<App>.GuardError, kind: …, message: …)` call a failed guard
+ *  raises.  `kind` is the routing key the controller rescue reads; `message` is
+ *  the author's `message "…"` when there is one, byte-identical to the string
+ *  the `ensure` path puts in the same denial's `detail`. */
+export function guardRaise(s: GuardStmt, appModule: string): string {
+  const kind = s.kind === "requires" ? ":forbidden" : ":precondition";
+  return `raise(${guardErrorModule(appModule)}, kind: ${kind}, message: ${elixirString(
+    denialMessage(s),
+  )})`;
+}
+
+/** The whole `if not (<pred>), do: raise(…)` guard line, at the four-space body
+ *  indent every pure-body renderer emits at.  One helper so the three raise
+ *  sites (`operation-returns-emit` / `function-emit` / `domain-service-emit`)
+ *  cannot drift from each other or from the rescue that catches them. */
+export function guardRaiseLine(s: GuardStmt, predicate: string, appModule: string): string {
+  return `    if not (${predicate}), do: ${guardRaise(s, appModule)}`;
+}
+
+/** The `lib/<app>/guard_error.ex` source — the one `defexception` both the
+ *  raise sites and the controller rescue go through. */
+export function renderGuardErrorModule(appModule: string): string {
+  return `# Auto-generated.
+defmodule ${guardErrorModule(appModule)} do
+  @moduledoc """
+  A domain guard denial raised from a PURE body — an aggregate \`function\`, a
+  \`domainService\`, or the pure-core operation form, none of which has a
+  \`with\` chain to short-circuit through.
+
+  \`:kind\` is the ROUTING KEY the controller rescue reads to pick the HTTP
+  status (\`:forbidden\` -> 403, \`:precondition\` -> 422).  It used to read the
+  message PREFIX instead, which made the message unusable as a message: an
+  author's \`message "..."\` missed the prefix and reraised into a 500.  With
+  the classification out of band, \`:message\` is free text and carries exactly
+  what the other four backends put in their \`DomainException\` / \`DomainError\`.
+  """
+  defexception [:message, :kind]
+
+  @type kind :: :forbidden | :precondition
+end
+`;
+}
+
 /** The Elixir reason TERM a failed guard short-circuits to:
  *  `{:forbidden, "Forbidden: …"}` / `{:precondition_failed, "Precondition
  *  failed: …"}`.  Rendered into `ensure(<cond>, <term>)` and into the inline
@@ -150,7 +244,7 @@ export function denialMessage(s: GuardStmt): string {
 export function denialTerm(s: GuardStmt, wireAvailable?: ReadonlySet<string>): string {
   if (deniesAtWire(s, wireAvailable)) return wireValidationTerm(s);
   const tag = s.kind === "requires" ? ":forbidden" : ":precondition_failed";
-  return `{${tag}, ${JSON.stringify(denialMessage(s))}}`;
+  return `{${tag}, ${elixirString(denialMessage(s))}}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -209,7 +303,9 @@ export function wireValidationTerm(s: GuardStmt): string {
   const text = denialMessage(s);
   const entry = [
     `pointer: ${JSON.stringify(pointer)}`,
-    `message: ${JSON.stringify(text)}`,
+    // The author's `message "…"` goes through the shared escaping funnel — a
+    // raw `#{` here would interpolate into the 422 body at request time.
+    `message: ${elixirString(text)}`,
     `code: ${JSON.stringify(messageCode(text))}`,
   ].join(", ");
   return `{:validation_failed, [%{${entry}}]}`;

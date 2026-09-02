@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Pure three-way merge core for locale catalogs (M-T1.11, i18n.md Phase 3).
+// Pure three-way merge core for locale catalogs (M-T1.11, i18n.md).
 //
 // `git merge` for strings.  Three inputs, all flat `{ key: message }` objects:
 //

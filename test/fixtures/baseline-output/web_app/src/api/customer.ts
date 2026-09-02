@@ -5,17 +5,17 @@ import { api } from "./client";
 
 
 export const CreateCustomerRequest = z.object({
-  username: z.string().min(3).max(32),
+  username: z.string().refine((s) => [...s].length >= 3 && [...s].length <= 32),
   email: z.string(),
   age: z.number().int().min(18).max(150),
-}).refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && data.email.length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
+}).refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && [...data.email].length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 export type CreateCustomerRequest = z.infer<typeof CreateCustomerRequest>;
 
 export const UpdateCustomerRequest = z.object({
-  username: z.string().min(3).max(32),
+  username: z.string().refine((s) => [...s].length >= 3 && [...s].length <= 32),
   email: z.string(),
   age: z.number().int().min(18).max(150),
-}).refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && data.email.length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
+}).refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && [...data.email].length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 export type UpdateCustomerRequest = z.infer<typeof UpdateCustomerRequest>;
 
 export const AllQuery = z.object({

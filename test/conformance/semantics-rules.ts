@@ -590,7 +590,7 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     title: "A plain `decimal` is a JSON NUMBER on the wire; only `money` is a string",
     trigger: "a GET returning an aggregate (or nested value object) with a `decimal` field",
     observable:
-      'the value is a JSON number (`9.99`, `5`). This is the deliberate counterpart to RS-12, where `money` is a fixed-scale STRING (`"19.5000"`) so no float rounding can touch a monetary amount — the two types differ on the wire, and a backend must not collapse them.',
+      'the value is a JSON number (`9.99`, `5`) — and the SAME number every other backend sends: the wire width is an IEEE-754 double (≤17 significant digits), whatever the backend computes in. This is the deliberate counterpart to RS-12, where `money` is a fixed-scale STRING (`"19.5000"`) so no float rounding can touch a monetary amount — the two types differ on the wire, and a backend must not collapse them.',
     // 4-vs-1 again, and a textbook FRAMEWORK-MEDIATED shape: nothing in the
     // vanilla emitter chose a string.  Jason's `Decimal` encoder emits a JSON
     // string, so every `%Decimal{}` that reached the serializer un-transformed
@@ -609,6 +609,9 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
       'found 2026-08-01 by the M-T9.11 golden gate on the elixir leg: value-collections #1 GET /api/invoices/{id} at $.lineItems[*].amount — golden 9.99 / 5 vs "9.99" / "5"',
       'root-caused by running Jason.encode!(%{a: Decimal.new("9.99")}) against the real library rather than reading the emitter',
       "fixed (elixir): src/generator/elixir/vanilla/wire-serialize.ts __decimal_num/1",
+      "#2563 / #2575 (dotnet): a response `decimal` is a `double`, not a `System.Decimal` — the rule is not just 'a number', it is the SAME number, and .NET's ~15-significant-digit type could not reproduce the oracle's double",
+      "amended 2026-08-24 by the numeric-types audit F9 (#2644) / M-T6.46: java conformed only PARTIALLY — the wire was a JSON number, but the VALUE carried up to 34 significant digits (domain `BigDecimal`, `MathContext.DECIMAL128` division) against everyone else's ≤17.  Only the projection `avg` arm was double-parity, and only by the provider's accident of typing an average as a `Double`",
+      "fixed (java): src/generator/java/emit/wire.ts response-direction `double` + `.doubleValue()`, plus the JPQL aggregate / GROUP-BY-key coercions, the SSE realtime frame and the explicit-handler scalar return",
     ],
     tier: "behavioral",
   },
@@ -687,12 +690,13 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     provenance: [
       "found 2026-08-01 while reconciling where `= default` belongs (domain vs wire): the emitted UpdateItemRequest carried `active: z.coerce.boolean().default(false)` against a model declaring `active: bool = true`",
       "fixed (node): zodFor gained a `create-body` context so the implicit-bool rule fires only on create — src/platform/hono/v4/routes-builder.ts",
-      "fixed (node, round 2): dropping the `.default(false)` was not enough — `z.coerce.boolean()` is `Boolean(input)`, so a coerced bool still ACCEPTED an omitted key as `false` and zod-to-openapi (which reads `schema.isOptional()`) dropped it from the served `required[]`.  Body bools are now UNCOERCED `z.boolean()`; only query params keep the coercion — src/platform/hono/v4/routes-builder.ts",
+      "fixed (node, round 2): dropping the `.default(false)` was not enough — `z.coerce.boolean()` is `Boolean(input)`, so a coerced bool still ACCEPTED an omitted key as `false` and zod-to-openapi (which reads `schema.isOptional()`) dropped it from the served `required[]`.  Body bools are now UNCOERCED `z.boolean()` — src/platform/hono/v4/routes-builder.ts",
       "fixed (python): requestFieldDecl gained a `slot` so the implicit bool `= False` fires only on create — src/generator/python/routes-builder.ts",
       "fixed (elixir): SPEC-only divergence — `@update_required` already listed every bool at runtime while the OpenApiSpex schema did not; renderProperties gained a slot — src/generator/elixir/vanilla/openapi-emit.ts",
       "fixed (dotnet): `[Required]` on a non-nullable value type cannot reject absence (RequiredAttribute tests for null; an omitted int/bool binds to 0/false). Operation params gained `[property: JsonRequired]` ALONGSIDE `[Required]` — presence is a deserialization question — src/generator/dotnet/dto-mapping.ts",
       "fixed (java): BOTH halves were wrong — the record used primitives (`int qty`, `boolean active`), so Jackson silently supplied 0/false for an omitted key while RequiredSet claimed qty required; operation components are now boxed + @NotNull (emit/dto.ts) and requiredParams no longer drops bare bools (emit/openapi-customizer.ts)",
       "regressed 2026-08-03 (elixir) by #2377's `isRequiredUpdateInput`, which tested the implicit-bool rule and never reached the explicit default, so `active: bool = true` came back omittable and `@update_required` stopped listing it — while the OpenApiSpex schema still advertised it. Elixir promised what it did not enforce; fixed by making the predicate `!isNullable(f)` (a default of EITHER kind is a construction rule, so neither relaxes a full-replacement update) — src/ir/enrich/wire-projection.ts",
+      'extended 2026-08-24 (node): the query/path half kept `z.coerce.boolean()`, which is the SAME `Boolean(input)` defect one slot over — `?f=false` bound `true`, since a query value is always a string.  Both textual slots now parse the four legal spellings through `QUERY_BOOL` and still publish `{"type":"boolean"}` — src/platform/hono/v4/routes-builder.ts',
       "the gate missed that regression because its elixir arm read update_item_request.ex (the OpenApiSpex SCHEMA) and not item_changeset.ex (validate_required, which ENFORCES); it now asserts both, and the fixture gained a bare `flag: bool` — the case that separates the create seam from the update seam",
     ],
     // Static: assertable against each backend's emitted update-request contract
@@ -924,6 +928,52 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     // since it also starts covering RS-22's extension-member rule with a name
     // that can actually diverge.
     tier: "static",
+  },
+  {
+    id: "RS-31",
+    title:
+      "A string `.length` bound counts Unicode code points, not the host's native string length",
+    trigger:
+      "any `.length` on a string \u2014 a `len-*` invariant/precondition (`code.length >= 3`, `label.length <= 16`) or a bare `.length` read in a domain rule \u2014 evaluated against a value containing an astral character",
+    observable:
+      "the count is the number of Unicode CODE POINTS. `\u201c\ud83d\ude00X\u201d` is 2, not 3: the emoji is one code point and two UTF-16 code units. This is the unit the emitted JSON Schema already publishes as `minLength`/`maxLength`, so the bound a backend enforces and the bound it advertises are the same number.",
+    // The host primitives disagree about what a "character" is: JS `s.length`,
+    // C# `s.Length` and Java `s.length()` count UTF-16 CODE UNITS; python's
+    // `len` counts code points; elixir's `String.length/1` counts GRAPHEMES.
+    // Three of the five therefore accepted a value their OWN published
+    // `maxLength`/`minLength` forbade — the write side persisted data the read
+    // side could not legally serve (schemathesis F5).
+    //
+    // Both length CARRIERS are in scope, because they are separate code paths:
+    // a message-less single-field shape rides each backend's native validator
+    // chain (zod `.min`/`.max`, FluentValidation `.MinimumLength`, …), while a
+    // messaged rule and the domain floor ride the expression renderer.  A fix
+    // to one carrier alone leaves the other wrong, which is why the pinned case
+    // exercises both directions.
+    //
+    // ELIXIR was the last hold-out (`String.length/1` and Ecto's
+    // `validate_length/3` both count GRAPHEMES) and was signed off as a residual
+    // on the theory that graphemes and code points diverge only on combining
+    // sequences.  They do — but NFD-normalised accented Latin, emoji ZWJ
+    // sequences and regional-indicator flags are all combining sequences, so the
+    // exposure was never as narrow as the residual note implied.  Both carriers
+    // moved together: Ecto has no `:codepoints` option, so the native chain's
+    // length arm is now a `validate_change/3` closure over the shared code-point
+    // snippet, carrying Ecto's own error tuple (message text, `count`,
+    // `validation: :length`, `kind`, `type`) so the 422 body is unchanged.
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    targets: [],
+    provenance: [
+      "found 2026-08-06 by the M-T9.21 schemathesis leg (finding F5, waiver W6): a 2-code-point currency was accepted on write and then served back in violation of the `minLength: 3` the same server published",
+      "fixed on node/.NET/java via one shared definition, src/generator/_expr/code-point.ts, consumed by BOTH the domain rule renderer and the wire-boundary validator emitter so the two cannot drift; python was already correct",
+      "the Hono routes re-attach `.openapi({ minLength, maxLength })` because zod cannot describe a `.refine` to the OpenAPI emitter — the published bound is byte-identical to before",
+      "pinned in test/fixtures/corpus/validation-messages.ddd and recorded in wire-golden/validation-messages.json (a 2-code-point label DENIED by `>= 3`, a 9-code-point/18-code-unit label ADMITTED by `<= 16` and round-tripped); verified to fail with each half of the fix reverted independently",
+      "statically pinned per backend by test/generator/string-length-code-points.test.ts",
+      "elixir closed 2026-08-30 (the last hold-out): `elixirCodePointLength` in the same shared module feeds render-expr.ts, the ExUnit value renderer, and a hand-rolled `validate_change/3` length arm in changeset-validators.ts — both carriers in one change, since moving one alone made elixir disagree with itself",
+    ],
+    // BEHAVIORAL: the golden records both directions, so every backend leg
+    // gates it per-PR.
+    tier: "behavioral",
   },
 ];
 

@@ -45,7 +45,7 @@ system Shop {
         QueryView {
           of: Sales.Order.all,
           empty: Text { "none" },
-          data: rows => Table { of: rows, columns: [display] }
+          data: rows => Table { rows: rows, Column { "Display", o => o.display } }
         }
       }
     }

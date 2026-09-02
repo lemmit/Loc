@@ -192,10 +192,9 @@ export const heexTarget: WalkerTarget = {
   },
 
   /** Flat quoted CSS string — the HEEx spelling of the `style: {…}`
-   *  escape hatch.  Behaviour-identical to the old body-walker
-   *  `styleAttrHeex` helper: string-literal values verbatim, other
-   *  values via their rendered expression, `"` entity-escaped so the
-   *  attribute stays well-formed. */
+   *  escape hatch: string-literal values verbatim, other values via their
+   *  rendered expression, `"` entity-escaped so the attribute stays
+   *  well-formed. */
   renderStyleAttr(
     entries: ReadonlyArray<{ key: string; rendered: string; literal?: string }>,
   ): string {

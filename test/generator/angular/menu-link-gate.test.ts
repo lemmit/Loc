@@ -68,17 +68,16 @@ describe("angular menu-link gate", () => {
     expect(shell.match(/@if \(/g)?.length ?? 0).toBe(1);
   });
 
-  it("emits no gating when the frontend has no auth: ui", async () => {
-    const shell = find(
-      await generateSystemFiles(
+  it("rejects a gated link without auth: ui (the silent drop is closed)", async () => {
+    // This used to assert the output emitted UNGUARDED — an access check
+    // declared in the model and silently absent from the output.  Phase ⑦
+    // now refuses the model instead (`requires` joined the currentUser-read
+    // placements), so the unguarded output is output no user can obtain.
+    await expect(
+      generateSystemFiles(
         SYS({ authUi: false, gate: 'requires currentUser.role == "manager"\n      ' }),
       ),
-      "web/src/app/app.component.ts",
-    );
-    expect(shell).not.toContain("SessionService");
-    expect(shell).not.toContain("currentUser");
-    expect(shell).not.toContain("@if");
-    expect(shell).toContain('import { Component } from "@angular/core";');
+    ).rejects.toThrow("loom.current-user-needs-auth-ui");
   });
 
   it("emits no gating when no nav link is gated (no page requires)", async () => {

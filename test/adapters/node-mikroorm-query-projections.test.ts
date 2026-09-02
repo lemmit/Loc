@@ -206,7 +206,7 @@ describe("MikroORM query-time projections", () => {
     expect(src).toContain(`qb.orderBy([{ [raw("${trunc}")]: "asc" }]);`);
     // The key comes back as the wire STRING (no per-column decoder on a raw
     // QueryBuilder select), so it is DECODED, not cast.
-    expect(src).toContain("day: new Date(r.day as string).toISOString(),");
+    expect(src).toContain('day: new Date(r.day as string).toISOString().replace(/\\.?0+Z$/, "Z"),');
     expect(src).not.toContain("(r.day as Date)");
   });
 
@@ -286,24 +286,36 @@ describe("a projection filter outside the adapter's subset is refused, not dropp
   // aggregation whose `where` cannot lower would otherwise run UNFILTERED and
   // answer a plausible wrong number.  `validateFindPredicateAdapterSupport` now
   // walks query-time projection filters for every adapter — this pins the
-  // mikroorm case (a `currentUser` principal reference, which that adapter's
-  // find path cannot bind).
-  const principalFiltered = (persistence: string) => `
+  // mikroorm case.
+  //
+  // The WITNESS moved.  It used to be a `currentUser` principal reference,
+  // "which that adapter's find path cannot bind".  That was never true —
+  // `filterValue` has always rendered `requireCurrentUser().<claim>`, and the
+  // narrowing that claimed otherwise was really describing a missing
+  // `currentUser: User` parameter on three repository variants (a GENERATED-
+  // project TS2554, not a lowering limit).  With that fixed and queryable
+  // intrinsics lowering through `raw()` fragments, ONE narrowing is left:
+  // `this.<refColl>.contains(x)`, which needs a correlated join subquery the
+  // adapter emits nowhere.  So the gate is pinned with that instead — the
+  // property under test (a projection `where` outside the subset is REFUSED,
+  // not silently dropped into an unfiltered aggregation) is unchanged.
+  const unlowerableFilter = (persistence: string) => `
 system M {
   api A from Sales
-  user { sub: string, tenant: string }
-  auth { }
   subdomain Sales {
     context Orders {
+      aggregate Tag with crudish { label: string }
       aggregate Order with crudish {
         owner: string
         total: money
+        tags: Tag id[]
       }
       repository Orders for Order { }
+      repository Tags for Tag { }
       projection MyTotals {
         orders: int
         from Order as o
-        where o.owner == currentUser.sub
+        where o.tags.contains(o.id)
         select orders = count
       }
     }
@@ -315,14 +327,13 @@ system M {
     contexts: [Orders]
     dataSources: [s]
     serves: A
-    auth: required
     port: 8080
   }
 }`;
 
   it("reports loom.find-predicate-unsupported naming the projection", async () => {
     const services = createDddServices(NodeFileSystem);
-    const doc = await parseHelper(services.Ddd)(principalFiltered("mikroorm"), {
+    const doc = await parseHelper(services.Ddd)(unlowerableFilter("mikroorm"), {
       validation: true,
     });
     const diags = validateLoomModel(enrichLoomModel(lowerModel(doc.parseResult.value as Model)))
@@ -334,7 +345,9 @@ system M {
 
   it("stays clean on the drizzle adapter (the gate keys on the adapter)", async () => {
     const services = createDddServices(NodeFileSystem);
-    const doc = await parseHelper(services.Ddd)(principalFiltered("drizzle"), { validation: true });
+    const doc = await parseHelper(services.Ddd)(unlowerableFilter("drizzle"), {
+      validation: true,
+    });
     const codes = validateLoomModel(
       enrichLoomModel(lowerModel(doc.parseResult.value as Model)),
     ).map((d) => d.code);

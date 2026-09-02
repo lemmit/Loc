@@ -40,7 +40,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { AUTHZ_LADDERS, DEV_CLAIMS, featureCases, resetDatabase, sharedSystemCases, unauthorizedCredentials } from "./cases.mjs";
+import { AUTHZ_LADDERS, declaresE2e, DEV_CLAIMS, featureCases, mountsFileRoutes, resetDatabase, sharedSystemCases, unauthorizedCredentials } from "./cases.mjs";
 import { stopServer, waitForPort, waitForPortFree } from "./proc.mjs";
 import { makeWireGate, recorderPreamble } from "./wire-differential.mjs";
 import { startMockIssuer } from "./oidc-mock.mjs";
@@ -134,6 +134,42 @@ function appNameOf(mixExs) {
   return /\bapp:\s*:([a-z0-9_]+)/.exec(mixExs)?.[1] ?? null;
 }
 
+// ── Bounded retry on the hex FETCH ───────────────────────────────────────────
+// hex.pm answers a tarball fetch with a transient 500 often enough to kill an
+// otherwise-green CI cell ("Package fetch failed and no cached copy available").
+// The vitest e2e harnesses splice a shell snippet from test/e2e/support/mix-
+// retry.ts into their command lines; this file is a standalone .mjs that invokes
+// `mix` argv-style (no shell), so it carries the same policy as this wrapper —
+// the ONE place this harness fetches deps.
+//
+// ONLY `deps.get` retries.  `deps.compile` / `ecto.*` / `test` / `phx.server`
+// must keep failing fast: their failures are the signal this tier exists for.
+const DEPS_GET_BACKOFF_S = [5, 20];
+
+/** One `mix <args>` with a bounded retry (3 attempts, 5s then 20s backoff).
+ *  Only ever wrapped around a TOOLCHAIN FETCH — `deps.get` and the
+ *  `local.hex`/`local.rebar` install.  `mix compile` and friends must keep
+ *  failing fast: a compile error is the signal this harness exists to deliver. */
+function mixWithRetry(args, cwd, env) {
+  const label = `mix ${args.join(" ")}`;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return execFileSync("mix", args, { cwd, stdio: "pipe", env });
+    } catch (err) {
+      const wait = DEPS_GET_BACKOFF_S[attempt - 1];
+      if (wait === undefined) throw err;
+      process.stdout.write(`  [retry] ${label} failed, attempt ${attempt + 1} of ${DEPS_GET_BACKOFF_S.length + 1} after ${wait}s\n`);
+      // Synchronous sleep — this harness is a straight-line script.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait * 1000);
+    }
+  }
+}
+
+/** `mix deps.get` with the bounded retry. */
+function mixDepsGet(cwd, env) {
+  return mixWithRetry(["deps.get"], cwd, env);
+}
+
 /** Fetch + compile the dep tree ONCE into `warm`, from this case's project.
  *  `mix deps.compile` builds dependencies only — the app is not compiled here
  *  (and is pruned defensively below), so the warm tree can never carry emitted
@@ -142,7 +178,7 @@ function primeWarm(deplDir, warm, appName) {
   rmSync(warm, { recursive: true, force: true });
   mkdirSync(warm, { recursive: true });
   const shared = { MIX_DEPS_PATH: join(warm, "deps"), MIX_BUILD_ROOT: join(warm, "_build") };
-  execFileSync("mix", ["deps.get"], { cwd: deplDir, stdio: "pipe", env: mixEnv(shared) });
+  mixDepsGet(deplDir, mixEnv(shared));
   for (const env of MIX_ENVS) {
     execFileSync("mix", ["deps.compile"], { cwd: deplDir, stdio: "pipe", env: mixEnv({ ...shared, MIX_ENV: env }) });
   }
@@ -197,8 +233,11 @@ function pruneUnusedWarmTrees() {
 let mixToolingReady = false;
 function ensureMixTooling(cwd) {
   if (mixToolingReady) return;
-  execFileSync("mix", ["local.hex", "--force"], { cwd, stdio: "pipe", env: mixEnv() });
-  execFileSync("mix", ["local.rebar", "--force"], { cwd, stdio: "pipe", env: mixEnv() });
+  // Retried like the fetch below it: `--force` re-downloads
+  // builds.hex.pm/installs/hex.csv every time, and that one call cost the
+  // pairwise elixir leg 17 of 25 cases when it timed out under load.
+  mixWithRetry(["local.hex", "--force"], cwd, mixEnv());
+  mixWithRetry(["local.rebar", "--force"], cwd, mixEnv());
   mixToolingReady = true;
 }
 
@@ -247,7 +286,7 @@ async function waitForReady(base, timeoutMs = 60_000) {
 
 /** The e2e-run entry (bundled by esbuild): loads the emitted api suite and
  *  dispatches each request over real HTTP at the booted Phoenix server. */
-function entrySource(e2eFile, bearerToken, hasAuth, authzLadder, unauthorizedCreds) {
+function entrySource(e2eFile, bearerToken, hasAuth, authzLadder, unauthorizedCreds, mountsFiles) {
   const J = JSON.stringify;
   const bearerEnv = bearerToken ? `, E2E_BEARER_TOKEN: ${J(bearerToken)}` : "";
   return `
@@ -284,7 +323,7 @@ export async function run() {
   const results = await runTests(cases);
   // RS-9 — appended AFTER the tier so the probes never shift the ordinals the
   // golden aligns on, and so a failing tier is diagnosed on its own requests.
-  await __frameworkProbes(dispatch, { auth: ${J(!!hasAuth)} });
+  await __frameworkProbes(dispatch, { auth: ${J(!!hasAuth)}, files: ${J(!!mountsFiles)} });
   // M-T9.28 — the authorization ladder, on the cases that declare one.  Runs
   // last and off the RECORDER (see __authzLadder) so it neither shifts wire
   // ordinals nor perturbs the tier it follows.
@@ -314,7 +353,12 @@ async function runCase(c) {
     const deplDir = findElixirDeployable(genDir);
     const e2eDir = join(genDir, "e2e");
     const e2eFile = existsSync(e2eDir) ? (walk(e2eDir, (p) => p.endsWith(".e2e.test.ts"))[0] ?? null) : null;
-    if (!e2eFile) throw new Error("no emitted e2e suite (the system declares no `test e2e … against <elixir>`)");
+    // A UNIT-ONLY case (domain `test "…"`, no `test e2e`) emits no e2e suite —
+    // that is the declared shape, not an error: run the DB-free unit tier and
+    // skip the api/wire legs, the node oracle's derive-from-the-file-map
+    // posture (M-T6.44's numeric-operands is the first such fixture).  A case
+    // that DECLARES e2e and emits nothing is still an error.
+    if (!e2eFile && declaresE2e(c.source)) throw new Error("no emitted e2e suite (the system declares no `test e2e … against <elixir>`)");
 
     // OIDC (`auth {}` block) → point the Phoenix app at the in-process mock
     // issuer + forward its signed token.  Detect from source (verifier path is
@@ -324,6 +368,9 @@ async function runCase(c) {
     // dev stub or OIDC)?  A frontend's `auth: ui` rides its target's.
     // Drives the anonymous `/api/auth/me` probe — see __frameworkProbes.
     const hasAuth = /\n\s*auth:\s*required\b/.test(c.source);
+    // Does this deployable mount the root /files pair (M-T6.39)?  Drives the
+    // absent-file probe — see __frameworkProbes.
+    const mountsFiles = mountsFileRoutes(c.source);
     const oidcEnv =
       isOidc && oidc
         ? { OIDC_ISSUER: oidc.issuer, OIDC_CLIENT_ID: "loom-behavioural", NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" }
@@ -382,14 +429,14 @@ async function runCase(c) {
       /** Every mix invocation for this case, with the shared deps path folded in. */
       const menv = (extra = {}) => mixEnv({ ...(warmDeps ? { MIX_DEPS_PATH: warmDeps } : {}), ...extra });
       try {
-        execFileSync("mix", ["deps.get"], { cwd: deplDir, stdio: "pipe", env: menv() });
+        mixDepsGet(deplDir, menv());
       } catch (err) {
         // A warm tree that no longer RESOLVES (truncated cache restore, a dep
         // dir deleted underneath us) must not fail the case: discard it — marker
         // and all, so the next case re-primes — and fetch cold.
         if (!warmDeps) throw err;
         dropWarm(err, false);
-        execFileSync("mix", ["deps.get"], { cwd: deplDir, stdio: "pipe", env: menv() });
+        mixDepsGet(deplDir, menv());
       }
       const depsMs = Date.now() - tDeps;
 
@@ -422,6 +469,9 @@ async function runCase(c) {
           unitResults.push({ tier: "unit", name: "mix test", status: "fail", error: "no ExUnit summary (compile error?)" });
         }
       }
+
+      // Unit-only case: the unit tier IS the case — no api/wire legs.
+      if (!e2eFile) return { results: unitResults, error: null };
 
       const unitMs = Date.now() - tUnit;
 
@@ -464,6 +514,7 @@ async function runCase(c) {
         hasAuth,
         AUTHZ_LADDERS[c.name] ?? null,
         unauthorizedCredentials(isOidc ? "oidc" : hasAuth ? "devstub" : "none", isOidc && oidc ? oidc.unauthorizedToken : null),
+        mountsFiles,
       ),
     );
     await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });

@@ -78,7 +78,10 @@ function ariaLabelExpr(c: Ctx, fallback = ""): string {
  *  otherwise wrap the raw text directly. */
 function styledText(value: string, styleExpr: string): string {
   const t = value.trim();
-  if (/^[A-Za-z_][\w.]*\(/.test(t) || t.startsWith("(")) {
+  // The optional `const ` prefix covers the degradation sentinel (`const
+  // SizedBox.shrink() /* … */`) and any other const widget — styling it beats
+  // stringifying it into `Text('const SizedBox…')`, which SHOWED Dart source.
+  if (/^(?:const\s+)?[A-Za-z_][\w.]*\(/.test(t) || t.startsWith("(")) {
     return `DefaultTextStyle.merge(style: ${styleExpr}, child: ${t})`;
   }
   return `Text('${dartStr(t)}', style: ${styleExpr})`;
@@ -92,7 +95,14 @@ function asWidget(s: string | undefined): string {
   // Already a Dart widget/expression (a constructor call `Foo(…)`, a member
   // access, or a parenthesised expression) — pass through verbatim.  Otherwise
   // it is raw text the walker handed unquoted (a string literal): wrap it.
-  if (/^[A-Za-z_][\w.]*\(/.test(t) || t.startsWith("(")) return t;
+  //
+  // The optional `const ` prefix matters: the target's degradation sentinel is
+  // `const SizedBox.shrink() /* … */` (`flutterTarget.renderComment` — a bare
+  // comment is not a legal Dart child).  Without the prefix here the sentinel
+  // failed this probe and came back as `Text('const SizedBox.shrink() /* … */')`
+  // — the generated app PRINTED Dart source on screen wherever a slot degraded
+  // (a table cell, a tab body, a Card child, a KeyValueRow slot).
+  if (/^(?:const\s+)?[A-Za-z_][\w.]*\(/.test(t) || t.startsWith("(")) return t;
   return `Text('${dartStr(t)}')`;
 }
 
@@ -103,6 +113,12 @@ function asText(s: string | undefined): string {
   const t = (s ?? "").trim();
   if (t === "") return "const SizedBox.shrink()";
   if (/^Text\(/.test(t) || t.startsWith("(")) return t;
+  // A leading-`const` widget is the degradation sentinel (`const
+  // SizedBox.shrink() /* … */`), not text and not a value to interpolate — it
+  // passes through as itself.  Every slot fed from here (`Chip.label`,
+  // `Card.title`, an empty-state `child`) is Widget-typed, so a zero-size widget
+  // fits where a `Text` would; interpolating it printed Dart source on screen.
+  if (/^const\s+[A-Za-z_][\w.]*\(/.test(t)) return t;
   if (/^[A-Za-z_][\w.]*\(/.test(t)) return `Text('\${${t}}')`;
   return `Text('${dartStr(t)}')`;
 }
@@ -376,9 +392,12 @@ function primitiveAnchor(c: Ctx): string {
   // as visible text.
   const label = asText(String(c.label ?? ""));
   if (!c.hasTo) return label;
-  const to = String(c.to ?? '"/"');
-  const lit = to.match(/^"(.*)"$/);
-  const route = lit ? `'${dartStr(lit[1])}'` : to;
+  // `to` arrives as a DART EXPRESSION (rendered through the target's own leaf
+  // table): `'/products'` for a literal path, `'/greet/' + who` for a computed
+  // one.  Used verbatim: unwrapping it from a JS-quoted literal and
+  // re-escaping splices a computed destination into Dart source as JS (a
+  // template literal, in backticks).
+  const route = String(c.to ?? "'/'");
   return `TextButton(onPressed: () => Navigator.of(context).pushNamed(${route}), child: ${label})`;
 }
 
@@ -441,7 +460,7 @@ function primitiveEnumBadge(c: Ctx): string {
 
 /** Stat(label, value) — a labelled metric block. */
 /** Chart(kind:, of:, x:, y:) — `LoomChart(...)` (lib/chart.dart), a
- *  `CustomPainter` over the rows the page already watches (M-T1.3 Phase 4).
+ *  `CustomPainter` over the rows the page already watches (M-T1.3).
  *
  *  No charting package: the rows are decoded on this side, so the geometry is
  *  arithmetic — see `chart-runtime.ts` for why the widget takes a flat point
@@ -552,8 +571,8 @@ function primitiveTable(c: Ctx): string {
 /** A QueryView branch (loading / error / empty / data) is ALREADY a walked
  *  widget string — the shared walker rendered it through this same pack.  Only
  *  a missing branch (the walker's `"null"` sentinel / empty) needs the neutral
- *  empty widget; everything else passes through verbatim (unlike `asWidget`,
- *  which re-wraps a leading-`const` widget — `const Center(…)` — as text). */
+ *  empty widget; everything else passes through verbatim — a branch is ALWAYS a
+ *  widget, so it skips `asWidget`'s raw-text probe entirely. */
 function branchWidget(s: string | undefined): string {
   const t = (s ?? "").trim();
   return t === "" || t === "null" ? "const SizedBox.shrink()" : t;
@@ -615,7 +634,7 @@ function primitiveButton(c: Ctx): string {
 // type-agnostic); Tabs is the one container here (DefaultTabController + TabBar +
 // TabBarView); FileUpload picks a file (file_picker), POSTs it multipart to
 // `/files`, and writes the returned `FileRef` back to state.  EVERY page
-// primitive now renders — the `FLUTTER_UNRENDERED_PRIMITIVES` gate is empty.
+// primitive renders, so the `FLUTTER_UNRENDERED_PRIMITIVES` gate is empty.
 // Forms (Create/Operation/Workflow/Destroy) and Modal are NOT here — they render
 // via the `flutterTarget` walker SEAMS.
 // ---------------------------------------------------------------------------
@@ -625,9 +644,21 @@ function boundRead(c: Ctx): string {
   return `state.${String(c.bind ?? "")}`;
 }
 
-/** A field's `InputDecoration(labelText: '…')` from the walked label. */
+/** An input LABEL as a Dart string expression: the walker's translation call
+ *  under i18n (`labelValue`, the `inputLabel` slot — M-T1.11), else the raw
+ *  label spelled as a Dart literal exactly as this pack always spelled it.
+ *
+ *  `InputDecoration(labelText:)` takes a `String`, so — unlike a child slot —
+ *  the WIDGET form `labelText` carries under i18n (`Text(t(…))`) cannot ride
+ *  here; it would not even type-check. */
+function labelExpr(c: Ctx): string {
+  const value = c.labelValue;
+  return value === undefined ? `'${dartStr(String(c.labelText ?? "").trim())}'` : String(value);
+}
+
+/** A field's `InputDecoration(labelText: …)` from the walked label. */
 function inputDecoration(c: Ctx): string {
-  return `InputDecoration(labelText: '${dartStr(String(c.labelText ?? "").trim())}')`;
+  return `InputDecoration(labelText: ${labelExpr(c)})`;
 }
 
 /** `onChanged` callback — a bare setter call, or `null` (disabled) with no bind.
@@ -652,9 +683,15 @@ function primitivePasswordField(c: Ctx): string {
 }
 
 function primitiveToggle(c: Ctx): string {
-  const label = dartStr(String(c.labelText ?? "").trim());
   const value = c.hasBind ? boundRead(c) : "false";
-  return `SwitchListTile(${arg(testidKey(c))}title: const Text('${label}'), value: ${value}, onChanged: ${onChangedSetter(c)})`;
+  return `SwitchListTile(${arg(testidKey(c))}title: ${constText(c)}, value: ${value}, onChanged: ${onChangedSetter(c)})`;
+}
+
+/** The label as a `Text` widget, `const` only when it really is constant — a
+ *  translated label is a runtime call, and `const Text(t(…))` does not compile.
+ *  With i18n off this is the exact `const Text('…')` the pack always emitted. */
+function constText(c: Ctx): string {
+  return c.labelValue === undefined ? `const Text(${labelExpr(c)})` : `Text(${labelExpr(c)})`;
 }
 
 function primitiveSelectField(c: Ctx): string {
@@ -676,9 +713,8 @@ function primitiveNumberField(c: Ctx): string {
 }
 
 function primitiveFileUpload(c: Ctx): string {
-  const label = dartStr(String(c.labelText ?? "").trim());
   const button = (onPressed: string) =>
-    `OutlinedButton.icon(${arg(testidKey(c))}icon: const Icon(Icons.upload_file), label: const Text('${label}'), onPressed: ${onPressed})`;
+    `OutlinedButton.icon(${arg(testidKey(c))}icon: const Icon(Icons.upload_file), label: ${constText(c)}, onPressed: ${onPressed})`;
   if (!c.hasBind) return button("null");
   // Pick a file (with bytes — web needs `withData`), POST it as multipart to
   // `/files`, and write the returned `FileRef` back through the setter.  The
@@ -704,10 +740,33 @@ function primitiveTabs(c: Ctx): string {
   // wrap the body in a scroll view where `Expanded` has no bound).  The walked
   // per-tab body widget arrives as `tabs[i].bodyJsx`.
   const tabs =
-    (c.tabs as unknown as { value: string; label: string; bodyJsx: string }[] | undefined) ?? [];
+    (c.tabs as unknown as
+      | {
+          value: string;
+          label: string;
+          /** The caption as a Dart string expression — a translation call under
+           *  i18n (`tabLabel`, M-T1.11), the Dart literal otherwise.  `Tab(text:)`
+           *  takes a `String`, so the widget form `label` cannot ride it. */
+          labelExpr: string;
+          bodyJsx: string;
+          bodyChildren?: readonly string[];
+        }[]
+      | undefined) ?? [];
   if (tabs.length === 0) return "const SizedBox.shrink()";
-  const bar = tabs.map((t) => `Tab(text: '${dartStr(t.label)}')`).join(", ");
-  const views = tabs.map((t) => asWidget(t.bodyJsx)).join(", ");
+  const bar = tabs.map((t) => `Tab(text: ${t.labelExpr})`).join(", ");
+  // A `TabBarView` takes exactly ONE widget per tab, so a panel with several
+  // children folds into a `Column` — the walker's `,`-joined `bodyJsx` would
+  // be several list elements and shift every later tab onto the wrong panel.
+  // The children arrive unjoined (`bodyChildren`); a caller that only sets
+  // `bodyJsx` (the missing-body comment) still works.
+  const views = tabs
+    .map((t) => {
+      const kids = (t.bodyChildren ?? []).map((k) => asWidget(String(k)));
+      if (kids.length === 0) return asWidget(t.bodyJsx);
+      if (kids.length === 1) return kids[0]!;
+      return `Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[${kids.join(", ")}])`;
+    })
+    .join(", ");
   return `DefaultTabController(length: ${tabs.length}, child: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[ TabBar(tabs: <Widget>[ ${bar} ]), SizedBox(height: 360, child: TabBarView(children: <Widget>[ ${views} ])) ]))`;
 }
 

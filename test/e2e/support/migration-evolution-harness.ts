@@ -203,8 +203,13 @@ export function fingerprintSchema(s: PgServer, db: string): string {
   const notTables = TRACKING_TABLES.map((x) => `'${x}'`).join(",");
   const q = `
 SELECT string_agg(line, E'\\n' ORDER BY line) FROM (
-  SELECT format('COL %s.%s | %s | %s | nullable=%s | default=%s',
+  SELECT format('COL %s.%s | %s | %s(%s,%s) | nullable=%s | default=%s',
                 c.table_schema, c.table_name, c.column_name, c.data_type,
+                -- M-T2.14: bounds are part of a numeric column's identity —
+                -- 'numeric' alone made CHECK 1 structurally blind to a
+                -- DECIMAL vs NUMERIC(19,4) disagreement between the migrated
+                -- chain and a fresh create (audit F15's gate half).
+                coalesce(c.numeric_precision::text,'-'), coalesce(c.numeric_scale::text,'-'),
                 c.is_nullable, coalesce(c.column_default,'-')) AS line
   FROM information_schema.columns c
   JOIN information_schema.tables t
@@ -232,11 +237,17 @@ SELECT string_agg(line, E'\\n' ORDER BY line) FROM (
 // full Initial(v2) — the fresh-create side of CHECK 1.
 // ---------------------------------------------------------------------------
 
-export function generate(source: string, platform: string, outDir: string): void {
+export function generate(
+  source: string,
+  platform: string,
+  outDir: string,
+  opts: { allowDestructive?: boolean } = {},
+): void {
   const dddPath = path.join(outDir, "app.ddd");
   fs.writeFileSync(dddPath, source.replaceAll("__PLATFORM__", platform));
   try {
-    execSync(`node ${cli} generate system ${dddPath} -o ${outDir}`, {
+    const flag = opts.allowDestructive ? " --allow-destructive" : "";
+    execSync(`node ${cli} generate system ${dddPath} -o ${outDir}${flag}`, {
       stdio: "pipe",
       cwd: repoRoot,
     });
@@ -482,4 +493,126 @@ export async function runMigrationEvolutionGate(driver: BackendDriver): Promise<
 /** Give a killed detached child a moment to release its port before the reboot. */
 function settle(): Promise<void> {
   return new Promise((r) => setTimeout(r, 1_500));
+}
+
+// ---------------------------------------------------------------------------
+// M-T2.14 (numeric-types audit F15) — the pre-#2575 money-bounds CATCH-UP.
+//
+// #2575 bounded money's DDL to NUMERIC(19,4), but the diff comparator was
+// kind-only, so a database created BEFORE it (bare DECIMAL money column, and a
+// baseline snapshot with no bounds) never received an alterColumnType — the
+// table and every ORM model reading it disagreed forever.  This gate builds
+// that exact pre-#2575 world with psql alone (no backend boot — seconds, not
+// minutes), then proves the two halves of the fix:
+//   (a) regeneration now DIFFS the bound change out, but refuses to apply it
+//       silently — the catch-up rounds >4-dp rows, so it is destructive and
+//       aborts without --allow-destructive;
+//   (b) with the flag, the delta applies: information_schema reports (19,4)
+//       and an existing 6-dp row survives rounded, exactly as reviewed.
+// ---------------------------------------------------------------------------
+export async function runMoneyBoundsCatchUpGate(): Promise<void> {
+  const base = readFixture("base");
+  const tree = fs.mkdtempSync(path.join(os.tmpdir(), "loom-mev-money-bounds-"));
+  let server: PgServer | undefined;
+  try {
+    generate(base, "node", tree);
+    const migDir = path.join(tree, "d", "db", "migrations");
+    const initial = fs.readdirSync(migDir).find((f) => f.endsWith(".sql"));
+    if (!initial) throw new Error(`no initial migration emitted under ${migDir}`);
+    const initialSql = fs.readFileSync(path.join(migDir, initial), "utf8");
+    if (!initialSql.includes("DECIMAL(19, 4)")) {
+      throw new Error("fixture no longer carries a money column — the gate needs one");
+    }
+
+    server = await startPgServer();
+    resetDatabase(server, "catchup");
+
+    // A genuine pre-#2575 database: the same schema with the money bound
+    // erased — exactly what the old DDL emitter created.
+    psql(server, "catchup", initialSql.replaceAll("DECIMAL(19, 4)", "DECIMAL"));
+
+    // …and the matching pre-#2575 baseline: strip the bounds from the money
+    // column in the committed snapshot (schema/table/column discovered from
+    // the snapshot itself, not hard-coded).
+    const snapDir = path.join(tree, ".loom", "snapshots");
+    const snapFile = fs.readdirSync(snapDir).find((f) => f.endsWith(".snapshot.json"));
+    if (!snapFile) throw new Error(`no baseline snapshot under ${snapDir}`);
+    const snapPath = path.join(snapDir, snapFile);
+    const snap = JSON.parse(fs.readFileSync(snapPath, "utf8"));
+    let stripped = 0;
+    let moneyTable = "";
+    let moneyColumn = "";
+    let moneySchema: string | undefined;
+    for (const t of snap.tables ?? []) {
+      for (const c of t.columns ?? []) {
+        if (c.type?.kind === "decimal" && c.type.precision !== undefined) {
+          c.type = { kind: "decimal" };
+          stripped++;
+          moneyTable = t.name;
+          moneyColumn = c.name;
+          moneySchema = t.schema;
+        }
+      }
+    }
+    if (stripped !== 1)
+      throw new Error(`expected exactly one bounded money column, saw ${stripped}`);
+    fs.writeFileSync(snapPath, JSON.stringify(snap, null, 2));
+    const qualifiedTable = moneySchema ? `"${moneySchema}"."${moneyTable}"` : `"${moneyTable}"`;
+
+    // A row only the unbounded column can hold: 6 fractional digits.
+    psql(
+      server,
+      "catchup",
+      `INSERT INTO ${qualifiedTable} ("id", "name", "${moneyColumn}") ` +
+        `VALUES (gen_random_uuid(), 'pre-2575 row', 9.999995)`,
+    );
+
+    // (a) The catch-up is diffed out but GATED: regeneration without the flag
+    // must abort naming the destructive review path.
+    let refused = "";
+    try {
+      generate(base, "node", tree);
+    } catch (e) {
+      refused = (e as Error).message;
+    }
+    if (!/destructive/i.test(refused)) {
+      throw new Error(
+        `expected regeneration to abort as destructive without --allow-destructive; got: ${
+          refused || "success"
+        }`,
+      );
+    }
+
+    // (b) With the flag: a delta migration exists and applies.
+    generate(base, "node", tree, { allowDestructive: true });
+    const delta = fs
+      .readdirSync(migDir)
+      .filter((f) => f.endsWith(".sql") && f !== initial)
+      .sort();
+    if (delta.length !== 1) {
+      throw new Error(`expected exactly one delta migration, saw [${delta.join(", ")}]`);
+    }
+    psql(server, "catchup", fs.readFileSync(path.join(migDir, delta[0]!), "utf8"));
+
+    const bounds = psql(
+      server,
+      "catchup",
+      `SELECT numeric_precision || ',' || numeric_scale FROM information_schema.columns ` +
+        `WHERE table_name = '${moneyTable}' AND column_name = '${moneyColumn}'`,
+    );
+    if (bounds !== "19,4") {
+      throw new Error(`money column bounds after catch-up: expected 19,4 got '${bounds}'`);
+    }
+    const value = psql(server, "catchup", `SELECT "${moneyColumn}" FROM ${qualifiedTable}`);
+    if (value !== "10.0000") {
+      throw new Error(`expected the 6-dp row to survive rounded to 10.0000, got '${value}'`);
+    }
+  } finally {
+    server?.stop();
+    try {
+      fs.rmSync(tree, { recursive: true, force: true });
+    } catch {
+      /* best-effort */
+    }
+  }
 }

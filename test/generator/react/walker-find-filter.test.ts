@@ -22,7 +22,9 @@ const SCAFFOLD_SRC = `
     ui WebApp with scaffold(subdomains: [Sub]) {
       api Sub: SalesApi
     }
-    deployable api { platform: node, contexts: [Sales], serves: SalesApi, port: 3000 }
+    storage loomDb { type: postgres }
+    resource salesState { for: Sales, kind: state, use: loomDb }
+    deployable api { platform: node, contexts: [Sales], dataSources: [salesState], serves: SalesApi, port: 3000 }
     deployable web { platform: static, targets: api, ui: WebApp { Sub: api }, port: 3001 }
   }
 `;
@@ -60,13 +62,34 @@ describe("find-filter list UI — scaffolded list pages", () => {
     );
   });
 
-  it("a paged or non-string-param find is not offered as a filter (v1 eligibility)", async () => {
+  // M-T1.15: an `int` / `long` / `X id` / `guid` / `datetime` / `bool` param
+  // used to be dropped from the bar SILENTLY — declared, emitted as a backend
+  // route, no input, no diagnostic.  Each now renders with its state type and
+  // the generated query-param type AGREEING (number → `NumberField`; id, guid
+  // and datetime → the text box the string case gets, since all three are
+  // `z.string()` on the request wire; bool → a three-state select).  A `decimal`
+  // param and a PAGED find still decline.
+  it("offers int, `X id`, guid, datetime and bool filter params, and still declines decimal and a paged find", async () => {
     const files = await generateSystemFiles(`
       system S {
         subdomain Sub { context Sales {
-          aggregate Order { total: int }
+          aggregate Customer { name: string  derived display: string = name }
+          aggregate Order {
+            total: int
+            placedAt: datetime
+            corr: guid
+            active: bool
+            rate: decimal
+            customer: Customer id
+          }
+          repository Customers for Customer { }
           repository Orders for Order {
             find expensive(min: int): Order[] where this.total > min
+            find forCustomer(c: Customer id): Order[] where this.customer == c
+            find since(d: datetime): Order[] where this.placedAt >= d
+            find byCorr(k: guid): Order[] where this.corr == k
+            find byActive(a: bool): Order[] where this.active == a
+            find byRate(r: decimal): Order[] where this.rate == r
             find recent(): Order paged
           }
         } }
@@ -74,12 +97,41 @@ describe("find-filter list UI — scaffolded list pages", () => {
         ui WebApp with scaffold(subdomains: [Sub]) {
           api Sub: SalesApi
         }
-        deployable api { platform: node, contexts: [Sales], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource salesState { for: Sales, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [Sales], dataSources: [salesState], serves: SalesApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp { Sub: api }, port: 3001 }
       }
     `);
     const list = files.get("web/src/pages/orders/list.tsx")!;
-    expect(list).not.toContain("useExpensiveOrder");
+    // int → a NUMBER input bound to a number state; "unset" is 0.
+    expect(list).toContain("const [expensiveMin, setExpensiveMin] = useState<number>(0);");
+    expect(list).toContain('data-testid="orders-filter-expensive_min"');
+    expect(list).toContain("const orderExpensive = useExpensiveOrder({ min: expensiveMin });");
+    expect(list).toContain("((expensiveMin !== 0)) ? (");
+    // `X id` → the string box, since an id's wire form IS a string.
+    expect(list).toContain('const [forCustomerC, setForCustomerC] = useState<string>("");');
+    expect(list).toContain("const orderForCustomer = useForCustomerOrder({ c: forCustomerC });");
+    expect(list).toContain('((forCustomerC !== "")) ? (');
+    // `guid` and `datetime` → the same string box: both are `z.string()` on the
+    // request wire and `string` in the state emitter, so the call type-checks.
+    expect(list).toContain('const [sinceD, setSinceD] = useState<string>("");');
+    expect(list).toContain("const orderSince = useSinceOrder({ d: sinceD });");
+    expect(list).toContain('const [byCorrK, setByCorrK] = useState<string>("");');
+    expect(list).toContain("const orderByCorr = useByCorrOrder({ k: byCorrK });");
+    // `bool` → a three-state STRING select, not a Toggle: a Toggle's zero value
+    // is `false`, which would make "filter for false" and "no filter" the same
+    // page state.  Unset is `""`, and the comparison is the find argument.
+    expect(list).toContain('const [byActiveA, setByActiveA] = useState<string>("");');
+    expect(list).toContain('data={ ["true", "false"] }');
+    expect(list).toContain(
+      'const orderByActive = useByActiveOrder({ a: (byActiveA === "true") });',
+    );
+    expect(list).toContain('((byActiveA !== "")) ? (');
+    // A `decimal` param has no type-checking zero sentinel (Feliz would see
+    // `decimal <> int`), and a PAGED find is not a filter arm at all — both
+    // still decline.
+    expect(list).not.toContain("useByRateOrder");
     expect(list).not.toContain("useRecentOrder");
     expect(list).toContain(
       "const orderAll = useAllOrders({ page: pageNum, pageSize: 10, sort: sortKey, dir: sortDir });",

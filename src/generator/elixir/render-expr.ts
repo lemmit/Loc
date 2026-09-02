@@ -1,6 +1,7 @@
 import type { BinOp, EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
+  DATA_KEY_LIKE_ESCAPE,
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
   deepScopeTenantClaim,
@@ -18,6 +19,8 @@ import {
   upperFirst,
 } from "../../util/naming.js";
 import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
+import { elixirCodePointLength } from "../_expr/code-point.js";
+import { exSubtreeLikePattern } from "../_expr/subtree-like.js";
 import {
   type BinaryExpr,
   type CallExpr,
@@ -79,7 +82,7 @@ export interface RenderCtx {
    *  membership form inside repository `where` clauses, so other
    *  emission contexts (derived, invariant) shouldn't reach it. */
   agg?: EnrichedAggregateIR;
-  /** Resource-op routing (Phase 4c): resourceName → fully-qualified
+  /** Resource-op routing: resourceName → fully-qualified
    *  Elixir helper module (e.g. `salesFiles` → `MyApp.Resources.S3`).
    *  A `resource-op` call renders `<Module>.<resource>_<verb>(args)`.
    *  Unset outside workflow rendering — a resource-op there throws. */
@@ -92,12 +95,6 @@ export interface RenderCtx {
    *  parameters.  Off everywhere else (op / derived / invariant bodies use
    *  plain locals + the in-memory `Decimal.*` API). */
   filterArgs?: boolean;
-  /** Foundation the expression is rendered for.  `platform: elixir` only ever
-   *  emits the vanilla foundation (plain Ecto/Phoenix), so this is always
-   *  `"vanilla"`; the field is retained so the many vanilla call sites that
-   *  pass `foundation: "vanilla"` keep type-checking, but it no longer
-   *  selects a code path. */
-  foundation?: "vanilla";
   /** Renders the aggregate-`id` expression (`{kind:"id"}`) as this bare
    *  local instead of `<thisName>.id`.  Set by the event-sourced create
    *  command runner, where the new aggregate id is a freshly generated
@@ -120,7 +117,7 @@ export interface RenderCtx {
    *  (so `s.order` → `event.order`); other refs are unaffected. */
   paramRenames?: Record<string, string>;
   /** Tier resolver for a `reading`-tier domain-service CALL (domain-services.md
-   *  rev. 4, Slice 1; Elixir decision B — ambient `Repo`).  On the
+   *  rev. 4; Elixir decision B — ambient `Repo`).  On the
    *  Elixir/vanilla backend a `reading` service op lowers to a CONTEXT FUNCTION
    *  on its aggregate's context module (so it has the ambient `Repo`), NOT a
    *  standalone `<App>.Domain.Services.<Name>` module — the latter is reserved
@@ -138,7 +135,7 @@ export interface RenderCtx {
    *  reading fn itself is emitted INTO this module by `domain-service-emit.ts`.
    *  Defaults to `contextModule` when unset. */
   readingServiceModule?: string;
-  /** Document-shape STRUCT rendering (Route A slice 2).  A `shape: document`
+  /** Document-shape STRUCT rendering (Route A).  A `shape: document`
    *  aggregate now rehydrates its blob into a typed `%<Agg>.Data{}` struct, so a
    *  `this.<field>` read is genuine struct access (`record.<field>`) — same as the
    *  relational path — NOT a `data["<field>"]` bracket.  But the blob keeps enums
@@ -267,7 +264,7 @@ const ELIXIR_FILTER_TARGET: ExprTarget<RenderCtx> = {
   duration: (_unit, amount) => `(${amount})`,
 };
 
-// Document-shape STRUCT rendering target (`docStruct` — Route A slice 2).
+// Document-shape STRUCT rendering target (`docStruct` — Route A).
 // Shares the FILTER target's native-value leaves (the jsonb blob keeps enums
 // as strings and money/decimal as native JSON numbers), but its predicates
 // run IN-MEMORY (`Enum.filter` over rehydrated `%<Agg>.Data{}` embeds), so
@@ -288,11 +285,11 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
   // `scope` sentinel first — this arm keeps `renderExpr` total for it too.)
   if (e.kind === "authz-filter") {
     switch (e.filter.kind) {
-      // DENY carve-out (authorization Phase 4 — deny-wins).  Ecto's always-false
+      // DENY carve-out (authorization — deny-wins).  Ecto's always-false
       // query fragment; no row satisfies it.
       case "deny":
         return 'fragment("false")';
-      // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) — the pinned
+      // `deep`/`global` read level (multi-tenancy) — the pinned
       // fail-closed materialized-path scope fragment.
       case "scope":
         return renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(e), deepScopeTenantClaim(e));
@@ -309,7 +306,7 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
   // — not `Decimal` structs — so it shares the native-operator filter target
   // (params still render as plain locals: the `^`-pin lives in `renderRef`'s
   // `filterArgs` arm, which `docMap` does NOT set).
-  // `docStruct` (Route A slice 2) reads struct fields off the rehydrated
+  // `docStruct` (Route A) reads struct fields off the rehydrated
   // `%<Agg>.Data{}` embed, but the embed keeps enums as `:string` + money/decimal
   // as native JSON numbers, so it shares the native-value leaves (without any
   // bracket projection — `this.<field>` renders as `record.<field>`).  Its
@@ -325,7 +322,7 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
 }
 
 /** The context-facade find fn that fronts a repository read in a `reading`
- *  domain-service body (domain-services.md rev. 4, Slice 1; Elixir decision B —
+ * domain-service body (domain-services.md rev. 4; Elixir decision B —
  *  ambient `Repo`).  Mirrors the workflow `repo-let` lowering exactly
  *  (`workflow-execution-emit.ts`): the built-in `getById` maps to the
  *  `get_<agg>/1` (`find_by_id`) facade; a custom find maps to the per-find
@@ -531,7 +528,14 @@ function renderMember(recv: string, e: MemberExpr, ctx: RenderCtx): string {
     e.receiverType.name === "string" &&
     e.member === "length"
   ) {
-    return `String.length(${recv})`;
+    // CODE POINTS — the unit `.length` is defined in and the unit the emitted
+    // `minLength`/`maxLength` publish (RS-31 / src/generator/_expr/code-point.ts).
+    // `String.length/1` would count GRAPHEMES, which disagrees with the served
+    // OpenAPI (and with the other four backends) on every combining sequence.
+    // The changeset half moved with it — `changeset-validators.ts` hand-rolls
+    // `validate_change/3` closures over the same count, because Ecto's
+    // `validate_length/3` has no `:codepoints` option.
+    return elixirCodePointLength(recv);
   }
   // Value-object SUB-field read (`this.money.amount`) — issue #1660.  A value
   // object has THREE inconsistent runtime shapes on vanilla: a single VO field is
@@ -725,7 +729,7 @@ function renderMethodCall(recv: string, args: string[], e: MethodCallExpr, ctx: 
   return `${recv}.${snake(e.member)}(${args.join(", ")})`;
 }
 
-/** The `deep` read-level sentinel (multi-tenancy Phase 2 P2.4) as a raw Ecto
+/** The `deep` read-level sentinel (multi-tenancy) as a raw Ecto
  *  `fragment` inside a `where:` — descendant-or-self materialized-path scope
  *  with the NULL-dataKey fallback to the tenant floor (see
  *  `DEEP_SCOPE_SEMANTICS`).  A SQL `fragment` sidesteps Ecto's `is_nil`/`like`
@@ -748,15 +752,63 @@ export function renderDeepScopeEcto(
   // `tid` row column above, which only coincides when the author happened to
   // name the claim `tenantId`.
   const tenant = `^(current_user && current_user.${snake(tenantClaim)})`;
-  // Descendant test as an ANCHORED POSITION, not `LIKE ? || '.%'`.  The anchor
-  // is a principal CLAIM, so `_`/`%` inside it are LIKE wildcards: an org named
-  // `acme_corp` yields the pattern `acme_corp.%`, which matches `acmeXcorp.…` —
-  // a cross-tenant read with no attacker, just an underscore in a name.  Ecto
-  // pins the value (`^`), which stops injection but not wildcard semantics.
-  // `strpos(col, needle) = 1` has no pattern language, matching how
-  // `string.startsWith` lowers elsewhere in this file.
-  const sql = `(? IS NOT NULL AND (? = ? OR strpos(?, ? || '${DATA_KEY_PATH_DELIMITER}') = 1)) OR (? IS NULL AND ? = ?)`;
-  return `fragment(${JSON.stringify(sql)}, ${dk}, ${dk}, ${org}, ${dk}, ${org}, ${dk}, ${tid}, ${tenant})`;
+  // Descendant test = SARGABLE PREFILTER **and** ANCHORED RECHECK (M-T3.17).
+  // The row is DECIDED by `strpos(col, needle) = 1`, which has no pattern
+  // language: the anchor is a principal CLAIM, so `_`/`%` inside it would be
+  // LIKE wildcards — an org named `acme_corp` yields `acme_corp.%`, which
+  // matches `acmeXcorp.…`, a cross-tenant read with no attacker, just an
+  // underscore in a name.  Ecto pins the value (`^`), which stops injection but
+  // not wildcard semantics.  The escaped `LIKE ? ESCAPE '!'` in front is a pure
+  // prefilter so the planner can ride the `data_key text_pattern_ops` index
+  // instead of seq-scanning; an escaping slip could only widen it, and the
+  // recheck still gates.  The pattern is built through the nil-safe
+  // INTERPOLATION the in-app twin uses (`"#{nil}"` is `""`, while
+  // `String.replace(nil, …)` raises) — a nil actor then yields the pattern
+  // `".%"`, which no materialized path matches, and the recheck's NULL needle
+  // keeps the branch false regardless.
+  const anchorStr = `"#{current_user && current_user.${snake(anchorClaim)}}"`;
+  const pattern = `^(${exSubtreeLikePattern(anchorStr)})`;
+  const sql =
+    `(? IS NOT NULL AND (? = ? OR (? LIKE ? ESCAPE '${DATA_KEY_LIKE_ESCAPE}' ` +
+    `AND strpos(?, ? || '${DATA_KEY_PATH_DELIMITER}') = 1))) OR (? IS NULL AND ? = ?)`;
+  return (
+    `fragment(${JSON.stringify(sql)}, ${dk}, ${dk}, ${org}, ${dk}, ${pattern}, ` +
+    `${dk}, ${org}, ${dk}, ${tid}, ${tenant})`
+  );
+}
+
+/** The `deep`/`global` read-level sentinel as an IN-MEMORY Elixir predicate —
+ *  the document-shape twin of {@link renderDeepScopeEcto}.  Same
+ *  `DEEP_SCOPE_SEMANTICS`, evaluated over the rehydrated `%<Agg>.Data{}` embed
+ *  (`recordVar`) because a jsonb blob has no column to hang a `where:` on.
+ *
+ *  Two differences from the SQL fragment, both about a NIL claim:
+ *
+ *    * Nothing is `^`-pinned (there is no query), so each claim reads through
+ *      the nil-safe `(current_user && current_user.<claim>)`.
+ *    * The descendant prefix is built by INTERPOLATION, not `<>`.  Elixir's
+ *      `nil <> "."` RAISES (an ArgumentError → a 500 for an ordinary token
+ *      missing the `orgPath` claim), while `"#{nil}."` is `"."`, which no
+ *      materialized path starts with — so a nil anchor makes the descendant
+ *      branch false and the read degrades to the tenant floor, exactly as
+ *      `strpos(?, NULL || '.')` does in SQL.
+ *
+ *  Already fail-closed on the principal side, so the caller must NOT run this
+ *  through the in-app principal guard again. */
+export function renderDeepScopeInApp(
+  recordVar: string,
+  anchorClaim = ORG_PATH_CLAIM_FIELD,
+  tenantClaim = TENANT_OWNED_TENANT_ID_FIELD,
+): string {
+  const dk = `${recordVar}.${snake(TENANT_OWNED_DATA_KEY_FIELD)}`;
+  const tid = `${recordVar}.${snake(TENANT_OWNED_TENANT_ID_FIELD)}`;
+  const org = `(current_user && current_user.${snake(anchorClaim)})`;
+  const tenant = `(current_user && current_user.${snake(tenantClaim)})`;
+  const descendant = `String.starts_with?(${dk}, "#{${org}}${DATA_KEY_PATH_DELIMITER}")`;
+  return (
+    `((${dk} != nil and (${dk} == ${org} or ${descendant})) or ` +
+    `(${dk} == nil and ${tid} == ${tenant}))`
+  );
 }
 
 /** The `"guid-from-string"` registry self-scope (`this.id ==
@@ -818,7 +870,14 @@ export const ELIXIR_COLLECTION_RENDERERS: Record<
         ? `Enum.sum(Enum.map(${recv}, ${args[0]}))`
         : `Enum.sum(${recv})`,
   all: (recv, args) => `Enum.all?(${recv}, ${args[0] ?? "fn _ -> true end"})`,
-  any: (recv, args) => `Enum.any?(${recv}, ${args[0] ?? "fn _ -> false end"})`,
+  // Argless `xs.any()` means NON-EMPTY (`all`'s dual: `all` over no predicate
+  // is vacuously true, `any` over no predicate is "there is an element").  The
+  // default lambda was `fn _ -> false end` — always false, compiling clean and
+  // silently disagreeing with every sibling backend (`.some(() => true)` /
+  // `.Any(_ => true)` / `!isEmpty()` / `len(...) > 0`).  Audit finding A12.
+  // Note `Enum.any?/1` would NOT do: it tests element TRUTHINESS, so a
+  // `bool[]` of `false`s (or a list with a `nil`) would answer wrongly.
+  any: (recv, args) => `Enum.any?(${recv}, ${args[0] ?? "fn _ -> true end"})`,
   contains: (recv, args) => `Enum.member?(${recv}, ${args[0] ?? "nil"})`,
   where: (recv, args) => `Enum.filter(${recv}, ${args[0] ?? "fn _ -> true end"})`,
   first: (recv) => `List.first(${recv})`,
@@ -988,7 +1047,7 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
     }
     case "repo-read": {
       // Read-only repository query in a `reading` domain-service body
-      // (domain-services.md rev. 4, Slice 1; Elixir decision B — ambient
+      // (domain-services.md rev. 4; Elixir decision B — ambient
       // `Repo`).  The reading op is emitted as a CONTEXT FUNCTION (it has the
       // ambient `Repo`), so a repo read renders against the SAME context-facade
       // find fn the workflow `repo-let` lowering calls: `getById` → `get_<agg>`,
@@ -1039,7 +1098,7 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
       return `${app}.Resources.ApiClients.${snake(op.resourceName)}_${snake(op.operationId)}(${args.join(", ")})`;
     }
     case "resource-op": {
-      // Resource-op (Phase 4c) → `<Module>.<resource>_<verb>(args)`, a
+      // Resource-op → `<Module>.<resource>_<verb>(args)`, a
       // helper function the Phoenix ResourceAdapter emits.  Routed by
       // sourceType via `ctx.resourceModules`.
       const op = e.resourceOp!;
@@ -1053,7 +1112,7 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
     }
     case "domain-service": {
       // Two shapes, decided by the operation's TIER (domain-services.md rev. 4,
-      // Slice 1; Elixir decision B):
+      // Elixir decision B):
       //
       //   - `pure` (or no tier resolver) → `Shop.Domain.Services.Pricing.quote(…)`,
       //     a plain stateless module fully qualified under the app's
@@ -1238,7 +1297,25 @@ function renderBinary(
   // Inside an Ecto query filter money/decimal lower to the data layer via the
   // native operators — `Decimal.compare`/`Decimal.add` are invalid there — so
   // only the native op-body path dispatches through `Decimal.*`.
-  if (!inFilter && e.leftType?.kind === "primitive" && isDecimalStruct(e.leftType.name)) {
+  //
+  // The arm fires on EITHER stamped operand being a decimal struct (audit
+  // F7 / M-T6.44): the validator admits `int * money` commutatively, numeric
+  // widening admits `int + decimal` both orders, and `comparable` admits
+  // `int < decimal` — with only the left checked, all three fell to native
+  // operators on a `%Decimal{}`: arithmetic raised `ArithmeticError` at
+  // runtime, and a comparison silently used Erlang TERM ordering
+  // (number < map ⇒ always true).  `Decimal.*` coerces an integer operand on
+  // either side, so no boxing is needed; the integral-left guard on the
+  // mirror keeps string-concat `+` (and every non-numeric left) out.
+  const rightIsDecimalStruct =
+    e.rightType?.kind === "primitive" && isDecimalStruct(e.rightType.name);
+  const leftIsIntegral =
+    e.leftType?.kind === "primitive" && (e.leftType.name === "int" || e.leftType.name === "long");
+  if (
+    !inFilter &&
+    ((e.leftType?.kind === "primitive" && isDecimalStruct(e.leftType.name)) ||
+      (rightIsDecimalStruct && leftIsIntegral))
+  ) {
     return renderDecimalBinary(e.op, l, r);
   }
   // Integer division widened to decimal (`int / int` → decimal): native Elixir
@@ -1478,7 +1555,7 @@ export function renderTypespec(t: TypeIR, contextModule: string, typesModule?: s
         case "duration":
           // A5 temporal — an absolute duration is plain integer milliseconds
           // on this backend (see the temporal section above).  Expression-only
-          // (never a field / wire type in this slice), so this arm serves
+          // (never a field / wire type), so this arm serves
           // inferred spec positions (e.g. a duration-typed `let` flowing into
           // a `function` signature) rather than stored attributes.
           return "integer()";

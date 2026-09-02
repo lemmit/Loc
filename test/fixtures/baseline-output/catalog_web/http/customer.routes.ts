@@ -10,17 +10,17 @@ import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, E
 
 
 const CreateCustomerRequest = z.object({
-  username: z.string().min(3).max(32),
+  username: z.string().refine((s) => [...s].length >= 3 && [...s].length <= 32).openapi({ minLength: 3, maxLength: 32 }),
   email: z.string(),
   age: z.number().int().min(18).max(150),
-}).openapi("CreateCustomerRequest").refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && data.email.length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
+}).openapi("CreateCustomerRequest").refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && [...data.email].length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 const CreateCustomerResponse = z.object({ id: z.string() }).openapi("CreateCustomerResponse");
 
 const UpdateCustomerRequest = z.object({
-  username: z.string().min(3).max(32),
+  username: z.string().refine((s) => [...s].length >= 3 && [...s].length <= 32).openapi({ minLength: 3, maxLength: 32 }),
   email: z.string(),
   age: z.number().int().min(18).max(150),
-}).openapi("UpdateCustomerRequest").refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && data.email.length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
+}).openapi("UpdateCustomerRequest").refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && [...data.email].length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 
 const AllQuery = z.object({
   page: z.coerce.number().int().min(1).max(1000000).default(1),
@@ -54,7 +54,14 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
   // method probe (http/index.ts) is unaffected.
   const staticSubpathMethods: Record<string, string[]> = { by_email: ["GET"] };
   app.use("/:__seg", async (c, next) => {
-    const allow = staticSubpathMethods[c.req.path.slice(c.req.path.lastIndexOf("/") + 1)];
+    const __seg = c.req.path.slice(c.req.path.lastIndexOf("/") + 1);
+    // `Object.hasOwn`, never a bare index: the segment is CALLER-supplied,
+    // so a plain lookup reaches Object.prototype — `/api/items/constructor`
+    // resolved to a function, passed the truthiness guard, and threw on
+    // `.includes` (a 500 from an ordinary URL).  Own keys only.
+    const allow = Object.hasOwn(staticSubpathMethods, __seg)
+      ? staticSubpathMethods[__seg]
+      : undefined;
     if (allow && !allow.includes(c.req.method)) {
       return c.body(
         frameworkProblemBody(405, `method ${c.req.method} is not supported for ${c.req.path}`, c.req.path),

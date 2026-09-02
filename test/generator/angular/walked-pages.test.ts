@@ -163,9 +163,11 @@ const BUTTON_SOURCE = `
         route: "/"
         title: "Home"
         state { count: int = 0 }
+        action inc() { count := count + 1 }
+        action reset() { count := 0 }
         body: Stack {
-          Button { "Increment", onClick: e => { count := count + 1 }, variant: "primary", testid: "inc" },
-          Button { "Reset", onClick: e => { count := 0 }, testid: "reset" }
+          Button { "Increment", onClick: inc, variant: "primary", testid: "inc" },
+          Button { "Reset", onClick: reset, testid: "reset" }
         }
       }
     }
@@ -184,8 +186,14 @@ async function buttonPage(): Promise<string> {
 describe("angular generator — Button + event-handler seam", () => {
   it("binds the onClick handler as a STATEMENT, not a discarded arrow", async () => {
     const page = await buttonPage();
-    expect(page).toContain("(click)='count.set((count() + 1))'");
-    expect(page).toContain("(click)='count.set(0)'");
+    // The handler is a named `action` (the only form `loom.effect-in-lambda`
+    // admits), so it hoists to a component METHOD and the binding invokes it.
+    // Both halves matter: the binding is a statement, and the write it performs
+    // is the signal `.set` — not an arrow the template would discard.
+    expect(page).toContain("(click)='inc()'");
+    expect(page).toContain("(click)='reset()'");
+    expect(page).toContain("inc() { this.count.set((this.count() + 1)); }");
+    expect(page).toContain("reset() { this.count.set(0); }");
     // The JSX arrow wrapper must NOT survive into an Angular event binding.
     expect(page).not.toContain("() =>");
   });
@@ -352,7 +360,9 @@ describe("angular generator — inline / media / layout primitives", () => {
   it("registers MatTabsModule + MatProgressSpinnerModule (Grid/Avatar etc. stay import-free)", async () => {
     const page = await inlinePage();
     expect(page).toContain("<mat-tab-group>");
-    expect(page).toContain('<mat-tab label="Overview">');
+    // The tab caption is a user-visible slot (`tabLabel`, M-T1.11), so Angular
+    // binds the translated value rather than baking the English into the prop.
+    expect(page).toContain(`<mat-tab [label]='t("page.Home.tabLabel.`);
     expect(page).toContain('<mat-progress-spinner mode="indeterminate"');
     expect(page).toContain('import { MatTabsModule } from "@angular/material/tabs";');
     expect(page).toContain(
@@ -690,7 +700,9 @@ describe("angular generator — standalone state-bound inputs", () => {
     expect(page).toContain('<textarea matInput [value]="bio()"');
     expect(page).toContain('<input matInput type="password" [value]="passcode()"');
     expect(page).toContain(
-      '<mat-slide-toggle [checked]="notify()" (change)="notify.set($event.checked)">Notify me</mat-slide-toggle>',
+      // The label is a user-visible slot (`inputLabel`, M-T1.11) — the caption
+      // resolves through the runtime, the binding around it is unchanged.
+      '<mat-slide-toggle [checked]="notify()" (change)="notify.set($event.checked)">{{ t("page.Settings.inputLabel.ec0di2", "Notify me") }}</mat-slide-toggle>',
     );
     expect(page).toContain(
       '<mat-select [value]="size()" (selectionChange)="size.set($event.value)">',

@@ -108,12 +108,16 @@ describe("vanilla shape: document persistence (DEBT-07)", () => {
     // default-on versioning (M-T3.4) guards the write with `optimistic_lock`
     // over the client's expected version (stamped as the changeset's current
     // version), bumping it by one — a stale write raises StaleEntryError →
-    // {:error, :conflict}.  No manual Map.merge.
+    // {:error, :conflict}.  No manual Map.merge.  The UPDATE head is the
+    // presence-checking one (M-T6.26): the merge is exactly what hides an
+    // omitted required key from the embed's `validate_required/2`.
     expect(repo).toContain(
       "def update(%Api.Carts.Cart{} = record, attrs, expected_version \\\\ nil)",
     );
     expect(repo).toContain("record = %{record | version: expected_version || record.version}");
-    expect(repo).toContain("|> Api.Carts.CartChangeset.document_changeset(attrs, record.version)");
+    expect(repo).toContain(
+      "|> Api.Carts.CartChangeset.document_update_changeset(attrs, record.version)",
+    );
     expect(repo).toContain("|> Ecto.Changeset.optimistic_lock(:version)");
     expect(repo).toContain("Ecto.StaleEntryError -> {:error, :conflict}");
     expect(repo).not.toContain("Map.merge(record.data");

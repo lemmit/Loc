@@ -5,12 +5,12 @@ import type { OriginRef } from "../../ir/types/origin.js";
 // ---------------------------------------------------------------------------
 // Shared ExprIR dispatch — the `ExprTarget` contract.
 //
-// Every domain-logic backend (TypeScript / .NET / Phoenix LiveView) renders
-// the *same* fully-resolved Loom `ExprIR` to source.  The 17-arm `kind`
-// dispatch and **all** recursion into sub-expressions are identical across
-// backends — only the leaves diverge (operator spelling, name casing, money
-// arithmetic, collection-op shape, `refColl.contains` membership, regex,
-// `ref` role, `callKind` call syntax).
+// All five domain-logic backends (TypeScript / .NET / Phoenix LiveView /
+// Python / Java) render the *same* fully-resolved Loom `ExprIR` to source.
+// The 17-arm `kind` dispatch and **all** recursion into sub-expressions are
+// identical across backends — only the leaves diverge (operator spelling,
+// name casing, money arithmetic, collection-op shape, `refColl.contains`
+// membership, regex, `ref` role, `callKind` call syntax).
 //
 // `renderExprWith` owns the dispatch + recursion once; an `ExprTarget`
 // supplies the per-backend leaves.  Sub-expressions are rendered here and
@@ -20,7 +20,7 @@ import type { OriginRef } from "../../ir/types/origin.js";
 // callKind / refKind tables) also receive the original IR node.
 //
 // Mirrors the body-walker's `WalkerTarget` extraction (src/generator/_walker/
-// target.ts).  Adding a backend = one target table, not a fourth dispatcher;
+// target.ts).  Adding a backend = one target table, not a sixth dispatcher;
 // adding an `ExprIR.kind` = one arm here + one method on the interface (the
 // exhaustive switch makes both fail to type-check until done).
 // ---------------------------------------------------------------------------
@@ -285,9 +285,18 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
           // lets a backend swap the alias (TS → subject) for the real
           // bound identifier (native backends → the binding name).
           const bindingText = a.binding ? t.bindingRefText(a.binding, subject) : undefined;
+          // EXTEND the inherited map, never replace it: `match` nests, and an
+          // inner arm may read an OUTER arm's binding.  A fresh single-entry
+          // map dropped every enclosing binding, so that read fell back to the
+          // bare `.ddd` name — an identifier the target never declares (TS2304
+          // and its per-backend twins).  Native-pattern backends escaped only
+          // by coincidence, because their bound name IS the source name.
           const armCtx: Ctx =
             a.binding && bindingText !== undefined
-              ? { ...ctx, matchBindings: new Map([[a.binding, bindingText]]) }
+              ? {
+                  ...ctx,
+                  matchBindings: new Map([...(ctx.matchBindings ?? []), [a.binding, bindingText]]),
+                }
               : ctx;
           return {
             tag: variantTag(a.varType),
@@ -335,7 +344,7 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
 
 // ---------------------------------------------------------------------------
 // Span-tracking emission — the marks-carrying twin of `renderExprWith`
-// (docs/old/plans/span-tracking-emission.md, M15 phase 7 slice 2).
+// (docs/old/plans/span-tracking-emission.md).
 //
 // LEVEL-WISE ANCHORING: `renderExprWith` already renders every child via its
 // local `r` BEFORE handing the child STRINGS to the leaf method, so the
@@ -365,9 +374,8 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
 // strings exactly as `renderExprWith` calls it today, so a backend's target
 // table needs no changes to support this.  `renderExprWith` itself is also
 // untouched — this is a parallel entry a caller opts into only when a
-// `SourceMapRecorder` is actually threaded in (the TS aggregate op-body
-// loop, this slice); the flag-off path never calls this function and pays
-// no extra allocation.
+// `SourceMapRecorder` is actually threaded in (the TS aggregate op-body loop);
+// the flag-off path never calls this function and pays no extra allocation.
 // ---------------------------------------------------------------------------
 
 /** One mark discovered while composing an expression's rendered text —
@@ -530,9 +538,18 @@ export function renderExprWithMarks<Ctx extends ExprCtxBase>(
         }
         const arms = e.variantArms.map((a) => {
           const bindingText = a.binding ? t.bindingRefText(a.binding, subject.text) : undefined;
+          // EXTEND the inherited map, never replace it: `match` nests, and an
+          // inner arm may read an OUTER arm's binding.  A fresh single-entry
+          // map dropped every enclosing binding, so that read fell back to the
+          // bare `.ddd` name — an identifier the target never declares (TS2304
+          // and its per-backend twins).  Native-pattern backends escaped only
+          // by coincidence, because their bound name IS the source name.
           const armCtx: Ctx =
             a.binding && bindingText !== undefined
-              ? { ...ctx, matchBindings: new Map([[a.binding, bindingText]]) }
+              ? {
+                  ...ctx,
+                  matchBindings: new Map([...(ctx.matchBindings ?? []), [a.binding, bindingText]]),
+                }
               : ctx;
           const value = renderExprWithMarks(a.value, t, armCtx);
           return {

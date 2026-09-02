@@ -12,6 +12,7 @@ import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { upperFirst } from "../../../util/naming.js";
+import { javaLogEvent } from "../../_obs/render-java.js";
 import {
   bypassedPromotedCaps,
   type FilterBypass,
@@ -435,7 +436,7 @@ export function renderJavaSpringDataRepository(
       ``,
     );
   }
-  // Command-load path (authorization Phase 3 P3.1): a WRITE-scope-narrowed
+  // Command-load path (authorization): a WRITE-scope-narrowed
   // `findByIdForWrite` the impl's `getById` loads through when the aggregate's
   // write scope is narrower than its read scope.  Same SpEL-principal @Query
   // shape as the read override, but with the write predicate — a row a caller
@@ -630,7 +631,7 @@ export function renderJavaRepositoryImpl(
   // elements, list → size, single nullable → 0/1).  Mirrors the .NET/Hono repo
   // emission so cross-backend consumers see the same event identity + fields.
   const findExecutedLog = (f: FindIR, rowsExpr: string): string =>
-    `        CatalogLog.event("find_executed", "debug", "aggregate", "${agg.name}", "find", "${f.name}", "rows", ${rowsExpr});`;
+    `        CatalogLog.event(${javaLogEvent("findExecuted")}, "aggregate", "${agg.name}", "find", "${f.name}", "rows", ${rowsExpr});`;
   const delegateLines = finds.flatMap((f) => {
     const sig = findSignature(f, imports);
     const findBypass: FilterBypass = { bypassAll: f.bypassAll, bypassCaps: f.bypassCaps };
@@ -796,14 +797,14 @@ export function renderJavaRepositoryImpl(
           `                RequestContext.parentId()));`,
           `        }`,
           `        if (!__prov.isEmpty()) {`,
-          `            CatalogLog.event("provenance_recorded", "debug", "aggregate", "${agg.name}", "count", __prov.size());`,
+          `            CatalogLog.event(${javaLogEvent("provenanceRecorded")}, "aggregate", "${agg.name}", "count", __prov.size());`,
           `        }`,
         ]
       : []),
     // repository_save (debug) — after the save committed; field set mirrors the
     // Hono/.NET emission's (aggregate, id) prefix (children omitted — not
     // cheaply available here).
-    `        CatalogLog.event("repository_save", "debug", "aggregate", "${agg.name}", "id", String.valueOf(saved.id().value()));`,
+    `        CatalogLog.event(${javaLogEvent("repositorySave")}, "aggregate", "${agg.name}", "id", String.valueOf(saved.id().value()));`,
     `        return saved;`,
     `    }`,
     ``,
@@ -814,7 +815,7 @@ export function renderJavaRepositoryImpl(
     ``,
     `    @Override`,
     `    public ${agg.name} getById(${idClass} id) {`,
-    // Command load (authorization Phase 3 P3.1): when the aggregate's write
+    // Command load (authorization): when the aggregate's write
     // scope is narrower than its read scope, load through the write-scoped
     // `findByIdForWrite` @Query — a readable-but-not-writable (or missing) row
     // → 404.  Otherwise the ordinary read-scoped `findById` (byte-identical).
@@ -822,7 +823,7 @@ export function renderJavaRepositoryImpl(
     // aggregate_loaded (debug) — mirrors the Hono/.NET repo emission; `found` is
     // a bool so a downstream filter can grep failed loads by
     // (event="aggregate_loaded", found=false).
-    `        CatalogLog.event("aggregate_loaded", "debug", "aggregate", "${agg.name}", "id", String.valueOf(id.value()), "found", found.isPresent());`,
+    `        CatalogLog.event(${javaLogEvent("aggregateLoaded")}, "aggregate", "${agg.name}", "id", String.valueOf(id.value()), "found", found.isPresent());`,
     `        return found.orElseThrow(() ->`,
     `            ${javaNotFoundThrow(agg.name)});`,
     `    }`,
@@ -842,7 +843,7 @@ export function renderJavaRepositoryImpl(
           `        String __sortField = java.util.List.of(${pagedAllSortWhitelist}).contains(sort) ? sort : "id";`,
           `        Sort __sort = Sort.by("desc".equals(dir) ? Sort.Direction.DESC : Sort.Direction.ASC, __sortField);`,
           `        var result = jpa.findAllPaged(PageRequest.of(page - 1, pageSize, __sort));`,
-          `        CatalogLog.event("find_executed", "debug", "aggregate", "${agg.name}", "find", "all", "rows", result.getTotalElements());`,
+          `        CatalogLog.event(${javaLogEvent("findExecuted")}, "aggregate", "${agg.name}", "find", "all", "rows", result.getTotalElements());`,
           `        return new Paged<>(result.getContent(), page, pageSize, (int) result.getTotalElements(), result.getTotalPages());`,
           `    }`,
           ``,

@@ -26,6 +26,7 @@ import { partsChildrenFirst } from "../../ir/util/containment-parent.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { aggregateHasProvenanced, historyHookName } from "../_frontend/api-module.js";
+import { provenancedEntries } from "../_payload/provenanced-wire.js";
 
 // ---------------------------------------------------------------------------
 // Per-aggregate Angular API module (`src/api/<agg>.ts`).
@@ -48,8 +49,9 @@ import { aggregateHasProvenanced, historyHookName } from "../_frontend/api-modul
 // `<VO>Response`, enum fields as a `<Enum>` string union, containment parts as
 // `<Part>Response` (all emitted as nested interfaces alongside) — so a
 // detail page that dereferences `x.price.amount`, narrows an enum, or walks
-// `order.lines[i].quantity` compiles under `ng build` (previously `unknown` →
-// TS2571).  REQUEST-side value-object / enum fields stay `unknown` (the reactive
+// `order.lines[i].quantity` compiles under `ng build`, where a blanket
+// `unknown` is TS2571.  REQUEST-side value-object / enum fields stay `unknown`
+// (the reactive
 // form holds a VO field as a nested `FormGroup` and an enum as a `""` control,
 // both assignable to `unknown`); request-side precise typing is a separate
 // concern.  (Request-side `id` fields are always `string`, not `unknown` — the
@@ -85,6 +87,14 @@ function wireTsType(t: TypeIR, precise = false): string {
       }
     case "id":
       return "string";
+    case "provenanced":
+      // `{ value: number; lineage: ProvLineage | null }` (M-T6.12) — the wire
+      // carrier, spelled inline (Angular's api module emits plain interfaces,
+      // no shared generic).  The members come from the shared carrier shape, so
+      // the key set matches every other target's by construction.
+      return `{ ${provenancedEntries(wireTsType(info.carried!, precise), "ProvLineage | null")
+        .map(([k, v]) => `${k}: ${v}`)
+        .join("; ")} }`;
     default:
       if (precise && t.kind === "valueobject") return `${t.name}Response`;
       if (precise && t.kind === "enum") return t.name;
@@ -162,17 +172,6 @@ const PROV_LINEAGE_INTERFACE: string[] = [
   "",
 ];
 
-/** Co-located provenance-lineage interface fields for a node's provenanced
- *  properties — `<field>_provenance?: ProvLineage | null` — appended after the
- *  regular wire fields (parity with the api-module.ts twin's Zod append).  A
- *  no-op (empty) when the node has no provenanced field, so a plain aggregate
- *  stays byte-identical. */
-function provResponseFields(ent: { fields: { name: string; provenanced?: boolean }[] }): string[] {
-  return ent.fields
-    .filter((f) => f.provenanced)
-    .map((f) => `  ${f.name}_provenance?: ProvLineage | null;`);
-}
-
 /** `export interface <Part>Response { … }` over a containment part's canonical
  *  wire shape (its `id` + declared fields + nested containments + derived) — the
  *  precise type an aggregate's `contains lines: OrderLine[]` field points at.
@@ -184,7 +183,6 @@ function emitPartResponseInterface(part: EntityPartIR): string[] {
     ...forApiRead(wireFieldsFor(part)).map(
       (f) => `  ${f.name}: ${f.source === "id" ? "string" : wireTsType(f.type, true)};`,
     ),
-    ...provResponseFields(part),
     "}",
     "",
   ];
@@ -510,7 +508,6 @@ export function buildAngularApiModule(
     ...fields.map(
       (f) => `  ${f.name}: ${f.source === "id" ? "string" : wireTsType(f.type, true)};`,
     ),
-    ...provResponseFields(agg),
     "}",
     "",
     // Client-suppliable create payload (server-controlled fields dropped).

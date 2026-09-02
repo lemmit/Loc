@@ -147,9 +147,9 @@ export function buildSvelteApiModule(
   lines.push("");
 
   for (const part of agg.parts) {
-    lines.push(...emitResponseSchema(part, ctx, /*isAgg*/ false, carryProv));
+    lines.push(...emitResponseSchema(part, ctx, /*isAgg*/ false));
   }
-  lines.push(...emitResponseSchema(agg, ctx, /*isAgg*/ true, carryProv));
+  lines.push(...emitResponseSchema(agg, ctx, /*isAgg*/ true));
   lines.push(`export const ${agg.name}ListResponse = z.array(${agg.name}Response);`);
   lines.push(`export type ${agg.name}ListResponse = z.infer<typeof ${agg.name}ListResponse>;`);
   {

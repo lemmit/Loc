@@ -13,10 +13,16 @@
 //
 // Per-backend renderers consume this catalog — Hono/pino in
 // `render-hono.ts`, .NET (`ILogger`) in `render-dotnet.ts`, Phoenix
-// (`Logger`) in `render-phoenix.ts` — so the same event surfaces with
+// (`Logger`) in `render-phoenix.ts`, Java (the emitted `CatalogLog`
+// facade) in `render-java.ts` — so the same event surfaces with
 // the same level + fields on every backend.  A log consumer (dashboard,
 // alert, `jq` query) sees one schema.  This is the `wireShape` pattern
 // applied to logs.
+//
+// Python is the one backend with no renderer here: its emitters spell
+// `log("<level>", "<event>", …)` inside template strings, and the
+// name/level pair is held to the catalog by the regex scan in
+// `test/generator/_obs/catalog-parity.test.ts` instead.
 //
 // Stability: treat the catalog like a wire contract — additive changes
 // (new events, new optional fields) are safe; renaming / removing
@@ -145,7 +151,7 @@ export const LogEvents = {
   // Timer sources (scheduling.md §8, M-T4.1).  The infrastructure scheduler
   // that fires tick events on a wall-clock cadence.  Cross-backend parity —
   // every backend that emits a scheduler logs the same four events.
-  // Broker channel transport (channels.md; M-T4.4 slice 2).  The producer
+  // Broker channel transport (channels.md; M-T4.4).  The producer
   // tee announces each envelope handed to the broker; the consumer loop
   // announces each envelope delivered into the in-process dispatcher, and
   // logs a recoverable warn when a handler (or a malformed envelope) fails —
@@ -161,7 +167,7 @@ export const LogEvents = {
     level: "warn",
     fields: ["address", "type", "error"],
   },
-  // M-T4.4 slice 3 / M-T4.3 dead-letter surface: a poisoned message exhausts
+  // / M-T4.3 dead-letter surface: a poisoned message exhausts
   // its bounded retries (or is malformed beyond parsing) and parks in the
   // transport's dead-letter spot (`loom.dlq.<address>` on RabbitMQ) — kept,
   // not lost, and announced once.
@@ -170,13 +176,23 @@ export const LogEvents = {
     level: "warn",
     fields: ["address", "type", "id", "attempts", "error"],
   },
+  /** A Kafka consumer joined its group but the broker assigned it no
+   *  partition inside the bounded wait — logged once, never fatal (the
+   *  subscriber keeps retrying).  Emitted by the java / dotnet / elixir
+   *  Kafka subscribers; catalogued here so the name is not re-spelled
+   *  per backend. */
+  channelSubscribeSlow: {
+    event: "channel_subscribe_slow",
+    level: "warn",
+    fields: ["address", "error"],
+  },
 
   timerFired: { event: "timer_fired", level: "info", fields: ["timer"] },
   timerSkippedOverlap: { event: "timer_skipped_overlap", level: "info", fields: ["timer"] },
   timerLockContended: { event: "timer_lock_contended", level: "debug", fields: ["timer"] },
   timerEmitFailed: { event: "timer_emit_failed", level: "error", fields: ["timer", "error"] },
   // A boundary missed while every replica was down, replayed once on recovery
-  // (coalesce-once catch-up — the durable-driver missed-run path, M-T4.1 Phase 2).
+  // (coalesce-once catch-up — the durable-driver missed-run path, M-T4.1).
   timerCatchup: { event: "timer_catchup", level: "info", fields: ["timer", "boundary"] },
 
   // ─── domain — warn (client/domain fault, recoverable) ────────────────

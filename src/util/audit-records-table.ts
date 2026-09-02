@@ -3,22 +3,19 @@
 // This table is emitted five different ways: the platform-neutral DDL
 // (`system/migrations-builder.ts` → MigrationsIR), the Hono Drizzle `pgTable`,
 // the MikroORM entity, the EF Core POCO + EntityTypeConfiguration, the JPA
-// entity, and the Dapper `DbSchema` CREATE TABLE.  Every one of them used to
-// carry its own hand-written column list.
+// entity, and the Dapper `DbSchema` CREATE TABLE.  A hand-written column list
+// in each of them drifts, and the drift is invisible: `before` / `after` are
+// NULLABLE (a `create` has no before-state, a `destroy` has no after-state, and
+// the writers pass `null` on exactly those paths), so a Drizzle schema
+// declaring them `.notNull()` — or a MikroORM entity with `nullable: false` —
+// hits a NOT NULL violation while the emitted `.sql` migration says the
+// opposite.  (`web/src/runtime/ddl.ts` synthesises the behavioral DDL from the
+// DRIZZLE schema, not from the migration, so the two halves are compared only
+// at runtime.)
 //
-// They drifted, and it cost two CI legs: `before` / `after` are NULLABLE (a
-// `create` has no before-state, a `destroy` has no after-state, and the writers
-// pass `null` on exactly those paths), but the Drizzle schema declared them
-// `.notNull()` and the MikroORM entity `nullable: false`.  Because
-// `web/src/runtime/ddl.ts` synthesises the behavioral DDL from the DRIZZLE
-// schema rather than from the migration, those inserts hit a NOT NULL violation
-// while the emitted `.sql` migration said the opposite.
-//
-// `migrations-builder` already carried the comment "deriving the shape once
-// means the DDL and the writers can no longer disagree" — but only the DDL
-// derived, and the writers cannot import it (`generator/` may not depend on
-// `system/`).  Hence this module: it sits in `util/`, which every consumer may
-// import, so the FACTS live in one place.
+// Deriving the shape in `migrations-builder` alone is not enough: the writers
+// cannot import it (`generator/` may not depend on `system/`).  Hence this
+// module, in `util/`, which every consumer may import.
 //
 // The rendering stays per-backend (each has its own type vocabulary and casing
 // conventions); what is shared is the column set, the property names and — the

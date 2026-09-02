@@ -69,6 +69,8 @@ defmodule {{webModule}}.CoreComponents do
   attr :type, :string, default: "button"
   attr :class, :string, default: nil
   attr :to, :string, default: nil, doc: "when set, renders as a navigation link"
+  attr :variant, :string, default: nil, values: ["primary", "secondary", "ghost", nil],
+    doc: "visual rank — the DSL Button's `variant:` named arg"
   attr :testid, :string, default: nil, doc: "data-testid forwarded to the root element"
   attr :rest, :global, include: ~w(form name value disabled phx-click phx-submit phx-disable-with)
   slot :inner_block, required: true
@@ -76,21 +78,37 @@ defmodule {{webModule}}.CoreComponents do
   def button(assigns) do
     classes =
       [
-        "btn btn-primary btn-sm",
+        "btn btn-sm",
+        case assigns.variant do
+          "secondary" -> "btn-outline"
+          "ghost" -> "btn-ghost"
+          _ -> "btn-primary"
+        end,
         assigns.class
       ]
 
     assigns = assign(assigns, :classes, classes)
 
+    # `testid:` is an ALIAS for `data-testid`, folded into @rest rather than
+    # written as its own attribute.  Written as `data-testid={@testid}` next to
+    # a `{@rest}` spread, an unset (nil) testid SHADOWS a caller-supplied
+    # `data-testid` and the attribute never reaches the DOM — measured against
+    # a running LiveView, which is how the HEEx UI behavioural leg found it.
+    # Folding makes the two channels additive instead of competing.
+    assigns =
+      if assigns.testid,
+        do: assign(assigns, :rest, Map.put(assigns.rest, :"data-testid", assigns.testid)),
+        else: assigns
+
     if assigns.to do
       ~H"""
-      <.link navigate={@to} class={@classes} data-testid={@testid} {@rest}>
+      <.link navigate={@to} class={@classes} {@rest}>
         {render_slot(@inner_block)}
       </.link>
       """
     else
       ~H"""
-      <button type={@type} class={@classes} data-testid={@testid} {@rest}>
+      <button type={@type} class={@classes} {@rest}>
         {render_slot(@inner_block)}
       </button>
       """
@@ -347,22 +365,76 @@ defmodule {{webModule}}.CoreComponents do
   @doc "Colored pill — used for status / enum displays."
   attr :class, :string, default: nil
   slot :inner_block, required: true
+  # The walker addresses this component with `data-testid` (and can pass
+  # `aria-*`/`phx-*`); without a `:global` rest those attributes are DROPPED
+  # with only a compile warning, so a Playwright selector aimed at it never
+  # matches.  Spread on the root element below.
+  attr :rest, :global
 
   def badge(assigns) do
     ~H"""
-    <span class={["badge badge-ghost text-xs font-medium", @class]}>
+    <span class={["badge badge-ghost text-xs font-medium", @class]} {@rest}>
       {render_slot(@inner_block)}
     </span>
     """
   end
 
+  @doc """
+  Card surface — the `Card` / `Paper` page primitives render through here.
+
+  The walker emits geometry (flex/grid utilities) inline because that is
+  design-neutral; the card SURFACE is this pack's vocabulary — daisyUI's
+  `card` / `card-body` / `card-title` component classes.  `variant`
+  (`raised`/`flat`/`outline`) and `shadow` (`none`/`sm`/`md`/`lg`) are the
+  DSL `Card`'s visual-rank knobs; `title` is its first positional slot
+  (already translated by the caller under i18n).
+  """
+  attr :title, :any, default: nil
+  attr :variant, :string, default: nil, values: ["raised", "flat", "outline", nil]
+  attr :shadow, :string, default: nil, values: ["none", "sm", "md", "lg", nil]
+  attr :class, :string, default: nil
+  attr :testid, :string, default: nil
+  slot :inner_block
+
+  def card(assigns) do
+    ~H"""
+    <section
+      class={[
+        "card bg-base-100",
+        @variant != "flat" && "card-bordered",
+        card_shadow(@variant, @shadow),
+        @class
+      ]}
+      data-testid={@testid}
+    >
+      <div class="card-body p-4">
+        <h3 :if={@title} class="card-title text-base">{@title}</h3>
+        {render_slot(@inner_block)}
+      </div>
+    </section>
+    """
+  end
+
+  defp card_shadow(_variant, "none"), do: nil
+  defp card_shadow(_variant, "sm"), do: "shadow-sm"
+  defp card_shadow(_variant, "md"), do: "shadow-md"
+  defp card_shadow(_variant, "lg"), do: "shadow-lg"
+  defp card_shadow("raised", _), do: "shadow-md"
+  defp card_shadow("flat", _), do: nil
+  defp card_shadow(_, _), do: "shadow-sm"
+
   @doc "Empty-state placeholder rendered when a list is empty."
   attr :class, :string, default: nil
   slot :inner_block
+  # The walker addresses this component with `data-testid` (and can pass
+  # `aria-*`/`phx-*`); without a `:global` rest those attributes are DROPPED
+  # with only a compile warning, so a Playwright selector aimed at it never
+  # matches.  Spread on the root element below.
+  attr :rest, :global
 
   def empty(assigns) do
     ~H"""
-    <div class={["text-center text-sm text-base-content/60 py-8", @class]}>
+    <div class={["text-center text-sm text-base-content/60 py-8", @class]} {@rest}>
       <%= if @inner_block == [] do %>{{{chrome "emptyList"}}}<% else %>{render_slot(@inner_block)}<% end %>
     </div>
     """

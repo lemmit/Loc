@@ -8,6 +8,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../../util/naming.js";
+import { javaLogEvent } from "../../_obs/render-java.js";
 import { renderSeedRowInsert } from "../../sql-pg.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
 
@@ -100,7 +101,7 @@ export function renderJavaSeedRunner(ctx: EnrichedBoundedContextIR, sctx: SeedCt
     `import ${sctx.basePkg}.config.CatalogLog;`,
     ``,
     `/** First-boot seed data (database-seeding.md).  Ship-once per dataset`,
-    ` *  via the __loom_seed marker (D-SEED-IDEMPOTENCY); re-runs are no-ops.`,
+    ` *  via the __loom_seed marker; re-runs are no-ops.`,
     ` *  \`default\` always runs; other datasets opt in via LOOM_SEED. */`,
     `@Component`,
     `public class ${ctx.name}SeedRunner implements ApplicationRunner {`,
@@ -165,7 +166,7 @@ function renderDatasetFn(
     `        if (alreadySeeded(${JSON.stringify(dataset)})) return;`,
     ...rowLines,
     `        markSeeded(${JSON.stringify(dataset)});`,
-    `        CatalogLog.event("seed_applied", "info", "dataset", ${JSON.stringify(dataset)});`,
+    `        CatalogLog.event(${javaLogEvent("seedApplied")}, "dataset", ${JSON.stringify(dataset)});`,
     `    }`,
     ``,
   ];

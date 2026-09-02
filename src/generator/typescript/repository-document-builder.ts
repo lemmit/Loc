@@ -1,8 +1,11 @@
+import { wireFieldsForAggregate } from "../../ir/enrich/wire-projection.js";
+import { pagedReturn } from "../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EntityPartIR,
+  ExprIR,
   FindIR,
   RepositoryIR,
   TypeIR,
@@ -10,14 +13,20 @@ import type {
 import {
   aggregateUsesMoneyDeep,
   aggregateUsesPrincipalContextFilter,
+  exprUsesCurrentUser,
   findUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
+import { sortableFields } from "../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { desugarAuthzFilterInApp } from "../_expr/authz-filter-inapp.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
+import { aggregateIsAudited } from "./emit/audit-stamp.js";
+import { synthProjectionFinds } from "./projection-finds.js";
 import { renderTsExpr } from "./render-expr.js";
+import type { FilterBypass } from "./repository-find-predicate.js";
+import { allContextFilterEntries } from "./repository-find-predicate.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
 import { repoPortImportLine, repoPortName } from "./repository-port-builder.js";
 import { aggHasFieldMask, toWireMaskedMethod, toWireMethod } from "./repository-wire-builder.js";
@@ -54,7 +63,7 @@ export function buildDocumentRepositoryFile(
   // concern, independent of the saving shape.
   const repoUsesUser = (repo?.finds ?? []).some(findUsesCurrentUser) || aggHasFieldMask(agg);
   // A principal-referencing (tenancy) capability filter evaluates the request
-  // actor IN-APP over the rehydrated document (DEBT-02 Slice B): each read binds
+  // actor IN-APP over the rehydrated document: each read binds
   // `requireCurrentUser()` so the in-app predicate (`currentUser.tenantId`) can
   // read it.  Fail-closed — the accessor throws when unauthenticated.
   const usesPrincipalFilter = aggregateUsesPrincipalContextFilter(agg);
@@ -67,6 +76,9 @@ export function buildDocumentRepositoryFile(
   // `crudish`) compiles: the routes call `repo.delete(id)` and
   // `repo.save(agg, expectedVersion)` regardless of saving shape.
   const versioned = aggregateIsVersioned(agg);
+  // Lifecycle stamps land on the doc payload at INSERT — see the save()
+  // comment below for why only the insert branch stamps.
+  const audited = aggregateIsAudited(agg);
   const emitsDelete = !!agg.canonicalDestroy;
   // Root rehydrate call — a versioned root takes the authoritative `version`
   // COLUMN (`<rowVar>.version`), not the stale blob copy (see entityFromDocFn).
@@ -75,7 +87,19 @@ export function buildDocumentRepositoryFile(
       ? `${lowerFirst(agg.name)}FromDoc(${rowVar}.data as ${agg.name}Doc, ${rowVar}.version)`
       : `${lowerFirst(agg.name)}FromDoc(${rowVar}.data as ${agg.name}Doc)`;
 
-  const findMethods = (repo?.finds ?? []).map((find) => documentFindMethod(agg, find, ctx));
+  // Declared finds PLUS the query-time projections sourced from this aggregate.
+  // A query-time projection route calls `repo.<projName>()` by name, and it does
+  // that whatever the aggregate's SAVING SHAPE — the relational and MikroORM
+  // builders both synthesise the read, and this one silently did not, so a
+  // `projection … from <document aggregate>` emitted a project whose routes
+  // named a method the repository never declared (TS2339 on `tsc`, an
+  // AttributeError-equivalent at request time).  The synthesised finds are
+  // parameterless array reads whose `filter` is the projection's own `where`, so
+  // `documentFindMethod` renders them exactly like a declared filtered find:
+  // load the table, rehydrate, narrow in-app.
+  const findMethods = [...(repo?.finds ?? []), ...synthProjectionFinds(agg.name, ctx)].map((find) =>
+    documentFindMethod(agg, find, ctx),
+  );
 
   // Capability filter (e.g. soft-delete / tenancy) applied in-app on the by-id
   // reads so a hidden / cross-tenant record reads as not-found, matching the
@@ -114,11 +138,7 @@ export function buildDocumentRepositoryFile(
       : [`    return ${fromDocOf("row")};`]),
     `  }`,
     "",
-    `  async getById(id: ${idVar}): Promise<${agg.name}> {`,
-    `    const found = await this.findById(id);`,
-    `    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
-    `    return found;`,
-    `  }`,
+    ...blobGetByIdLines(agg, idVar),
     "",
     `  async findManyByIds(ids: ${idVar}[]): Promise<${agg.name}[]> {`,
     `    if (ids.length === 0) return [];`,
@@ -138,7 +158,25 @@ export function buildDocumentRepositoryFile(
     ...(versioned ? [`    const expected = expectedVersion ?? aggregate.version;`] : []),
     `    const existing = await this.db.select({ version: schema.${tableName}.version }).from(schema.${tableName}).where(eq(schema.${tableName}.id, aggregate.id));`,
     `    if (existing.length === 0) {`,
-    `      await this.db.insert(schema.${tableName}).values({ id: aggregate.id as string, data, version: 1 });`,
+    // The `onCreate` stamps (`auditable`, `tenantOwned`'s tenantId/dataKey, a
+    // hand-written `stamp onCreate`) land HERE, on the doc payload, exactly as
+    // the relational path lands them on the row (`.values(stampInsert(row))`,
+    // emit/audit-stamp.ts).  A document aggregate has one opaque jsonb column,
+    // so the stamped fields live INSIDE `data` — but the helper is the same one,
+    // and the save is the same upsert, so the create lifecycle stamps once.
+    //
+    // Only the INSERT branch stamps.  `stampUpdate` STRIPS the create-only
+    // fields so a relational UPDATE cannot overwrite them, which is right for a
+    // partial column `set` and WRONG here: the update writes the whole blob, so
+    // stripping `tenantId`/`dataKey` would delete them from the document.  The
+    // rehydrated aggregate already carries both, so the update branch is
+    // correct doing nothing.
+    //
+    // Without this a `tenantOwned` document row was written with an EMPTY
+    // tenant and was invisible to every principal INCLUDING ITS CREATOR — the
+    // read filter is correct, and `"" === currentUser.tenantId` is false, so a
+    // 201 create was followed by a 404 on every read, update and destroy.
+    `      await this.db.insert(schema.${tableName}).values({ id: aggregate.id as string, ${audited ? "data: stampInsert(data)" : "data"}, version: 1 });`,
     `    } else {`,
     ...(versioned
       ? [
@@ -231,9 +269,13 @@ export function buildDocumentRepositoryFile(
       : `import { AggregateNotFoundError } from "../../domain/errors";`,
     `import type { DomainEventDispatcher } from "../../domain/events";`,
     // A principal-referencing capability filter (tenancy) binds
-    // `requireCurrentUser()` into the in-app document predicate (DEBT-02 Slice
-    // B), the same ambient-accessor path the relational/embedded builders use.
-    usesPrincipalFilter && `import { requireCurrentUser } from "../../auth/middleware";`,
+    // `requireCurrentUser()` into the in-app document predicate, the same
+    // ambient-accessor path the relational/embedded builders use.
+    // …and a principal-referencing WRITE scope binds the same accessor in the
+    // `getById` command load, so key off the emitted body too (F2-ADP-5).
+    (usesPrincipalFilter || /\brequireCurrentUser\(/.test(bodyScan)) &&
+      `import { requireCurrentUser } from "../../auth/middleware";`,
+    audited && `import { stampInsert } from "../audit-stamp";`,
     `import { requestLog } from "../../obs/als";`,
     "",
     `type Db = NodePgDatabase<typeof schema>;`,
@@ -253,22 +295,36 @@ export function buildDocumentRepositoryFile(
  *  the aggregate's filters, or null.  A principal/tenancy predicate renders its
  *  `currentUser.<claim>` access against a `currentUser` binding the caller
  *  introduces (`requireCurrentUser()` for by-id reads, the find's own
- *  `currentUser` param when it has one) — DEBT-02 Slice B.
+ *  `currentUser` param when it has one).
  *
  *  An `authz-filter` SENTINEL (`policy { allow deep … }` / `deny`) is desugared
  *  to ordinary IR first: it exists to be intercepted by a backend's
  *  QUERY-filter translator, and this path has no query to translate into
  *  (pairwise finding F1 — the sentinel reached the generic dispatcher and blew
  *  its invariant).  In-app, both decisions are plain expressions over the
- *  rehydrated row. */
-export function documentCapabilityBody(agg: EnrichedAggregateIR, varName: string): string | null {
-  const preds = (agg.contextFilters ?? []).map(
-    (p) => `(${renderTsExpr(desugarAuthzFilterInApp(p, agg.name), { thisName: varName })})`,
+ *  rehydrated row.
+ *
+ *  `bypass` is the READ's OWN `ignoring <Cap>` / `ignoring *` clause.  It used
+ *  to be absent here, so the predicate came from the aggregate's default filter
+ *  set and every find reused it: a declared `find … ignoring softDeletable` on
+ *  a `shape: document` aggregate STILL filtered the soft-deleted rows out —
+ *  wrong data, fail-closed, no diagnostic (M-T6.51; the elixir twin is §A11,
+ *  fixed in #2667).  Bypassed entries are now dropped through the same
+ *  `allContextFilterEntries` the relational and MikroORM builders use, so all
+ *  three adapters answer `ignoring` from one rule. */
+export function documentCapabilityBody(
+  agg: EnrichedAggregateIR,
+  varName: string,
+  bypass?: FilterBypass,
+): string | null {
+  const preds = allContextFilterEntries(agg, bypass).map(
+    (e) =>
+      `(${renderTsExpr(desugarAuthzFilterInApp(e.predicate, agg.name), { thisName: varName })})`,
   );
   return preds.length > 0 ? preds.join(" && ") : null;
 }
 
-/** The aggregate's `writeScopeFilter` (authorization Phase 3 P3.1 — the WRITE
+/** The aggregate's `writeScopeFilter` (authorization — the WRITE
  *  scope is strictly narrower than the read scope) as an IN-APP boolean over a
  *  rehydrated aggregate bound to `varName`, or null when nothing narrows.
  *
@@ -293,6 +349,108 @@ export function writeScopeDeniesAll(agg: EnrichedAggregateIR): boolean {
   return f !== undefined && f.kind === "authz-filter" && f.filter.kind === "deny";
 }
 
+/** The `getById` body lines for a BLOB shape (`shape: document`, event-sourced
+ *  stream) on the DRIZZLE adapter — the in-app twin of the relational
+ *  pre-guard, and the exact shape `mikroBlobGetByIdLines` (emit/mikroorm.ts)
+ *  already emits on the MikroORM adapter.  Every mutation route loads through
+ *  `getById`, so that is where a narrowed write scope is enforced: a row the
+ *  caller may READ but not WRITE reads as missing (404).  Byte-identical to the
+ *  plain `findById` + not-found throw when nothing narrows. */
+export function blobGetByIdLines(agg: EnrichedAggregateIR, idVar: string): readonly string[] {
+  const notFound = `throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`;
+  // `deny write` → the in-app form is the constant `false`, so no row is ever
+  // writable: answer not-found without loading (and without emitting the
+  // `if (!(false))` a constant-condition lint would flag).
+  if (writeScopeDeniesAll(agg)) {
+    return [
+      `  async getById(id: ${idVar}): Promise<${agg.name}> {`,
+      `    // policy { deny write on ${agg.name} } — no row is in write scope.`,
+      `    ${notFound}`,
+      `  }`,
+    ];
+  }
+  const pred = documentWriteScopeBody(agg, "found");
+  const bind =
+    pred && exprUsesCurrentUser(agg.writeScopeFilter as ExprIR)
+      ? [`    const currentUser = requireCurrentUser();`]
+      : [];
+  return [
+    `  async getById(id: ${idVar}): Promise<${agg.name}> {`,
+    ...bind,
+    `    const found = await this.findById(id);`,
+    `    if (!found) ${notFound}`,
+    ...(pred ? [`    if (!(${pred})) ${notFound}`] : []),
+    `    return found;`,
+    `  }`,
+  ];
+}
+
+/** The extra parameters a PAGED find carries, in the order every route /
+ *  workflow caller passes them (the relational builder's `pagedParams`). */
+export const PAGED_TAIL_PARAMS = [
+  "page: number",
+  "pageSize: number",
+  "sort: string",
+  "dir: string",
+] as const;
+
+/** The wrapper type a paged find returns — identical on every saving shape,
+ *  because the ROUTE contract (`<Agg>Paged`) does not vary with persistence. */
+export function pagedReturnType(aggName: string): string {
+  return `{ items: ${aggName}[]; page: number; pageSize: number; total: number; totalPages: number }`;
+}
+
+/** IN-MEMORY paging tail for a BLOB shape (`shape: document`, event-sourced
+ *  stream) — the body lines after `matchedVar` holds the full filtered list.
+ *
+ *  Neither shape has queryable columns to push `ORDER BY`/`LIMIT` into, so the
+ *  page is taken over the rehydrated list, exactly as java's document/event
+ *  stores do (`inMemoryPagedSortLines` + `skip`/`limit`).  The comparator table
+ *  is the SAME `?sort=` whitelist every other layer validates against
+ *  (`sortableFields`), with an unknown key falling back to `id` — so a paged
+ *  find answers the same contract on every saving shape (F2-CB-C1: these
+ *  builders used to classify only `array` / `optional` returns, so a `paged`
+ *  find fell through to the single-get branch and the emitted repository did
+ *  not match the route built for it). */
+export function inMemoryPagedTailLines(
+  agg: EnrichedAggregateIR,
+  matchedVar: string,
+  findName: string,
+): string[] {
+  const cmpEntries = sortableFields(agg).map((f) => {
+    const t = wireFieldsForAggregate(agg).find((w) => w.name === f)?.type;
+    const prim = t?.kind === "optional" ? t.inner : t;
+    const name = prim?.kind === "primitive" ? prim.name : undefined;
+    // `Number(...)` covers every ordered scalar this backend represents as a
+    // number-like: int/long/decimal are numbers, money is a decimal.js
+    // `Decimal` (numeric `valueOf`), bool coerces to 0/1, and a `Date` coerces
+    // to its epoch milliseconds.  Everything else (string, enum, json) orders
+    // as text — the same two families the SQL `ORDER BY` collapses to.
+    const numeric =
+      name === "int" ||
+      name === "long" ||
+      name === "decimal" ||
+      name === "money" ||
+      name === "bool" ||
+      name === "datetime";
+    const cmp = numeric
+      ? `Number(a.${f} ?? 0) - Number(b.${f} ?? 0)`
+      : `String(a.${f} ?? "") < String(b.${f} ?? "") ? -1 : String(a.${f} ?? "") > String(b.${f} ?? "") ? 1 : 0`;
+    return `${JSON.stringify(f)}: (a, b) => (${cmp})`;
+  });
+  return [
+    `    const __cmps: Record<string, (a: ${agg.name}, b: ${agg.name}) => number> = { ${cmpEntries.join(", ")} };`,
+    `    const __base = __cmps[sort] ?? __cmps["id"]!;`,
+    `    const __cmp = dir === "desc" ? (a: ${agg.name}, b: ${agg.name}) => -__base(a, b) : __base;`,
+    `    const total = ${matchedVar}.length;`,
+    `    const totalPages = pageSize > 0 ? Math.ceil(total / pageSize) : 0;`,
+    `    const offset = (page - 1) * pageSize;`,
+    `    const items = [...${matchedVar}].sort(__cmp).slice(offset, offset + pageSize);`,
+    `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${findName}", rows: total`)}`,
+    `    return { items, page, pageSize, total, totalPages };`,
+  ];
+}
+
 function documentFindMethod(
   agg: EnrichedAggregateIR,
   find: FindIR,
@@ -308,8 +466,16 @@ function documentFindMethod(
   const ret = isArray ? `${agg.name}[]` : isOptional ? `${agg.name} | null` : agg.name;
   // Capability filter narrows `all` to the visible set BEFORE the find's own
   // predicate runs, so a find never returns a capability-hidden (soft-deleted)
-  // record.
-  const cap = documentCapabilityBody(agg, "x");
+  // record — UNLESS this find carries its own `ignoring` clause, in which case
+  // the named (or all) capability conjuncts are dropped for this read only.
+  // Recomputed PER FIND: the aggregate-wide predicate that used to be reused
+  // here could not see `bypassAll` / `bypassCaps` at all (M-T6.51).  The
+  // synthesised query-time-projection reads carry the projection's own bypass
+  // on their `FindIR` (`projection-finds.ts`), so they inherit this correctly.
+  const cap = documentCapabilityBody(agg, "x", {
+    bypassAll: find.bypassAll,
+    bypassCaps: find.bypassCaps,
+  });
   const allExpr = cap ? `all.filter((x) => ${cap})` : "all";
   const selector = isArray
     ? pred
@@ -323,11 +489,29 @@ function documentFindMethod(
   // already takes a `currentUser: User` param (findUsesCurrentUser) reuses it;
   // otherwise bind the ambient accessor (fail-closed).
   const needsPrincipalBind = aggregateUsesPrincipalContextFilter(agg) && !usesUser;
-  return lines(
-    `  async ${find.name}(${params}): Promise<${ret}> {`,
+  const loadLines = [
     ...(needsPrincipalBind ? [`    const currentUser = requireCurrentUser();`] : []),
     `    const rows = await this.db.select().from(schema.${tableName});`,
     `    const all = rows.map((r) => ${lowerFirst(agg.name)}FromDoc(r.data as ${agg.name}Doc${aggregateIsVersioned(agg) ? ", r.version" : ""}));`,
+  ];
+  // `find … paged` — the route is built for the paged contract, so the
+  // repository has to answer it (F2-CB-C1).  The match set is the same
+  // capability-filtered, predicate-filtered list the array branch computes;
+  // only the tail (sort + slice + totals) differs.
+  if (pagedReturn(find.returnType)) {
+    const pagedParams = [...baseParams, ...PAGED_TAIL_PARAMS];
+    const pagedAll = (usesUser ? [...pagedParams, "currentUser: User"] : pagedParams).join(", ");
+    return lines(
+      `  async ${find.name}(${pagedAll}): Promise<${pagedReturnType(agg.name)}> {`,
+      ...loadLines,
+      `    const matched = ${pred ? `${allExpr}.filter(${pred})` : allExpr};`,
+      ...inMemoryPagedTailLines(agg, "matched", find.name),
+      `  }`,
+    );
+  }
+  return lines(
+    `  async ${find.name}(${params}): Promise<${ret}> {`,
+    ...loadLines,
     `    const result = ${selector};`,
     `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: ${rowsExpr}`)}`,
     `    return result;`,

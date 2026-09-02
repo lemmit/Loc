@@ -56,21 +56,18 @@ export function formatNumber(
   }).format(n);
 }
 
-/** Currency-formatted numeric value (USD default). */
+/** Money value, rendered VERBATIM (M-T1.25): the wire's own digits,
+ *  locale-neutral — no Number() coercion, no locale grouping, no
+ *  currency symbol, no re-scaling.  `currency` prefixes the CODE the
+ *  page source declared; `decimals` re-scales the digit string.
+ *  Semantics live in `moneyText` below. */
 export function formatMoney(
-  value: number | string | null | undefined,
-  currency = "USD",
-  decimals = 2,
+  value: number | string | { toString(): string } | null | undefined,
+  currency?: string,
+  decimals?: number,
 ): string {
   if (isEmpty(value)) return EMPTY;
-  const n = typeof value === "number" ? value : Number(value);
-  if (Number.isNaN(n)) return String(value);
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency,
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  }).format(n);
+  return moneyText(value as number | string | { toString(): string }, currency, decimals);
 }
 
 /** Generic value display with empty-state handling. */
@@ -78,3 +75,5 @@ export function formatPlain(value: unknown): string {
   if (isEmpty(value)) return EMPTY;
   return String(value);
 }
+
+{{{moneySource}}}

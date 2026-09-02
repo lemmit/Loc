@@ -158,6 +158,15 @@ and, unless the generate run passes `--allow-destructive`, **aborts** with a
   that accepts the drop+add (and its data loss).
 - **Drops.** A `dropColumn` or `dropTable` that survives rename-collapse is
   destructive → blocked unless `--allow-destructive`.
+- **Column type changes.** An `alterColumnType` is destructive (`USING col::t`
+  can fail or truncate at apply time) — with one carve-out since money's DDL
+  became `NUMERIC(19,4)` (#2575): a provably-total **decimal widening** (bounded
+  → unbounded, or fractional *and* integer digits both grow) can neither fail
+  nor change a value, so it needs no flag. The reverse — including the one-time
+  **pre-#2575 money catch-up**, where an unbounded column becomes
+  `NUMERIC(19,4)` — rounds >4-dp rows and stays behind `--allow-destructive`
+  as a deliberate, reviewed step. Note `(19,4) → (19,8)` is a *narrowing in
+  disguise*: scale grows but integer digits shrink 15 → 11, so it is gated too.
 - **Required-column adds.** A NOT-NULL `addColumn` with no default on a
   previously-existing table fails on any populated table → blocked unless a
   **backfill step** covers it (see § Data migrations — the safe sequence with
@@ -357,9 +366,12 @@ CREATE INDEX orders_customer_id_idx ON orders (customer_id);
 ```
 
 A `Customer id` field becomes a `customer_id` FK (`ON DELETE RESTRICT`) plus a
-covering index. Type mapping: `int→INTEGER`, `long→BIGINT`, `decimal`/`money→
-DECIMAL`, `string→TEXT`, `bool→BOOLEAN`, `datetime→TIMESTAMP WITH TIME ZONE`,
-`guid→UUID`, `json→JSONB`.
+covering index. Type mapping: `int→INTEGER`, `long→BIGINT`, `decimal→DECIMAL`
+(unbounded), `money→DECIMAL(19, 4)` (the canonical bound every ORM layer also
+declares — see `money-scale.ts`), `string→TEXT`, `bool→BOOLEAN`,
+`datetime→TIMESTAMP WITH TIME ZONE`, `guid→UUID`, `json→JSONB`. Bounds are part
+of the column's identity in the diff: a bare-`DECIMAL` baseline against a
+bounded target emits an `alterColumnType` (see § Destructive changes).
 
 **Containments → child tables.** A contained entity part gets its own table with
 a `<parent>_id` FK (`ON DELETE CASCADE`) back to the owner. The FK-dependency

@@ -51,7 +51,7 @@ export function renderTestsFile(
   );
 }
 
-/** Value-object unit-test class (test-placement.md, Phase 2).  The VO lives in
+/** Value-object unit-test class (test-placement.md).  The VO lives in
  *  `${ns}.Domain.ValueObjects`, already among the shared usings — no dedicated
  *  subject using needed. */
 export function renderVoTestsFile(
@@ -62,7 +62,7 @@ export function renderVoTestsFile(
   return renderSubjectTestsFile(vo.name, vo.tests, ctx, ns, "ValueObjects", null);
 }
 
-/** Domain-service unit-test class (test-placement.md, Phase 2).  The service
+/** Domain-service unit-test class (test-placement.md).  The service
  *  lives in `${ns}.Domain.Services`. */
 export function renderServiceTestsFile(
   svc: DomainServiceIR,
@@ -148,14 +148,12 @@ function renderTest(t: TestIR, ctx: BoundedContextIR): string[] {
  *  `Agg.Create(...)` — the same shape the workflow `factory-let` emitter
  *  produces.  Emits exactly the inputs the test author named.
  *
- *  The factory's OMITTABLE parameters now carry `= null` and materialize
- *  their declared default in the body (`csFactoryDefault` in emit/entity.ts),
- *  so naming a subset compiles.  This used to fill every omission with its
- *  omission value — required back when the factory took each create-input as
- *  a positional parameter with no C# default (CS7036) — which made
+ *  The factory's OMITTABLE parameters carry `= null` and materialize their
+ *  declared default in the body (`csFactoryDefault` in emit/entity.ts), so
+ *  naming a subset compiles.  Filling each omission instead would make
  *  `test "an omitted default is applied at construction"` assert a value the
- *  emitter had just passed in.  Named args keep the source field order free
- *  of the CS1737 required-before-optional reordering.
+ *  emitter just passed in.  Named args keep the source field order free of the
+ *  CS1737 required-before-optional reordering.
  *
  *  Returns `null` when the expression isn't an aggregate create call, so
  *  the caller falls back to the generic expression renderer (a bare
@@ -201,13 +199,12 @@ export function renderCreateCall(e: ExprIR, ctx: BoundedContextIR): string | nul
     const rendered = renderCsExpr(f.value);
     return `${f.name}: ${t ? coerceLiteralToCsType(t, f.value, rendered) : rendered}`;
   });
-  // Emit EXACTLY what the test author wrote.  This used to append every
-  // omitted create input filled from `createOmissionValue`, because the factory
-  // required all of them — which made the assertion vacuous:
+  // Emit EXACTLY what the test author wrote.  Appending every omitted create
+  // input from `createOmissionValue` makes the assertion vacuous:
   // `test "an omitted default is applied at construction"` writes
-  // `Item.Create(name: "N")` and checks `Qty == 1`, and the fill emitted
-  // `Item.Create(name: "N", qty: 1, …)`, passing the value it then asserted.
-  // The factory now defaults omittable inputs itself (`csFactoryDefault` in
+  // `Item.Create(name: "N")` and checks `Qty == 1`, and the fill would emit
+  // `Item.Create(name: "N", qty: 1, …)`, passing the value it then asserts.
+  // The factory defaults omittable inputs itself (`csFactoryDefault` in
   // emit/entity.ts), so the omission compiles AND exercises the domain rule.
   return `${agg.name}.Create(${provided.join(", ")})`;
 }
@@ -227,7 +224,14 @@ export function renderExplicitMatcherToAwesome(expr: ExprIR): string | null {
     receiver = receiver.receiver;
   }
   const inner = receiver.kind === "paren" ? receiver.inner : receiver;
-  const actual = renderCsExpr(inner);
+  // A binary or unary actual must be parenthesized: `.Should()` is postfix
+  // member access, which binds tighter than every C# operator, so
+  // `a == b.Should().Be(true)` compares `a` to the assertion object (CS0019 —
+  // the generated project does not build).  Found by numeric-operands
+  // (M-T6.44), the first test block to wrap a comparison in a matcher; every
+  // non-hazard emission stays byte-identical.
+  const rendered = renderCsExpr(inner);
+  const actual = inner.kind === "binary" || inner.kind === "unary" ? `(${rendered})` : rendered;
   const arg = expr.args[0] !== undefined ? renderCsExpr(expr.args[0]) : "";
   // FluentAssertions/AwesomeAssertions verb (post `.Should().`) — `Not`
   // prefix when negated.

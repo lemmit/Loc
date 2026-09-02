@@ -33,9 +33,9 @@ export interface StyleAdapter {
    *      → the deployable R3 check → `loom.platform-knob-style-layout-mismatch`.
    *
    *  Changing a value here fails the consistency test until the mirror
-   *  follows, and then changes what the validator rejects.  (Its dead
-   *  sibling `supportedStrategies` was removed — see persistence-surface.ts
-   *  for why the unread capability declarations went.) */
+   *  follows, and then changes what the validator rejects.  (This is the one
+   *  live capability declaration on an adapter surface — see
+   *  persistence-surface.ts for why the others do not exist.) */
   readonly supportedLayouts: readonly LayoutShape[];
   /** HTTP / message-bus endpoint for an aggregate operation —
    *  controller / route entry that hands off to a handler or service.

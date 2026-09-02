@@ -34,8 +34,10 @@ system Demo {
       }
     }
   }
+  storage loomDb { type: postgres }
+  resource cState { for: C, kind: state, use: loomDb }
   deployable phoenixApp {
-    platform: elixir, contexts: [C], serves: DemoApi,
+    platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
     ui: DemoUi, port: 4000
   }
 }
@@ -52,8 +54,10 @@ async function landingHeex(): Promise<string> {
 describe("HEEx standalone form inputs (parity finding #5)", () => {
   it("renders <.input> bound to the page-state assign with a phx-change", async () => {
     const heex = await landingHeex();
-    expect(heex).toContain(
-      `<.input type="text" name="draft" value={@draft} label="Name" phx-change="update_draft" />`,
+    // The label is a user-visible slot (`inputLabel`, M-T1.11): it rides
+    // `pgettext` through HEEx's `{…}` expression-attribute form.
+    expect(heex).toMatch(
+      /<\.input type="text" name="draft" value=\{@draft\} label=\{pgettext\("page\.\w+\.inputLabel\.\w+", "Name"\)\} phx-change="update_draft" \/>/,
     );
     expect(heex).toMatch(/<\.input type="number" name="count" value=\{@count\}/);
     expect(heex).toMatch(/<\.input type="select" name="region"[^>]*options=\{\["EU", "US"\]\}/);

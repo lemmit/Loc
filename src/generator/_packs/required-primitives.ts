@@ -43,11 +43,10 @@ export interface RequiredSet {
    *  (entry point, package config, theme tokens, build config).
    *  Shared between formats. */
   shell: readonly string[];
-  /** Form-field templates per FieldIR type.  Not used by HEEx: the Ash
-   *  foundation (and its `AshPhoenix.Form`) was removed, and plain
-   *  Ecto/Phoenix renders inputs through the pack's `core-components`
-   *  shell template instead, so no per-field Loom-side templates
-   *  participate on that format. */
+  /** Form-field templates per FieldIR type.  Not used by HEEx: plain
+   *  Ecto/Phoenix renders inputs through the pack's `core-components` shell
+   *  template, so no per-field Loom-side templates participate on that
+   *  format. */
   fieldInput?: readonly string[];
   /** Form-level templates (form-of-decls, op-decls, etc.).  Not used by
    *  HEEx, same reason as `fieldInput`. */
@@ -129,7 +128,7 @@ const TSX_ONLY_PRIMITIVES: readonly string[] = [
   // HAS a HEEx renderer (`renderFileUploadHeex`, wired in
   // `_walker/registry.ts`, using LiveView's native
   // `allow_upload`/`<.live_file_input>` flow), and `KNOWN_HEEX_GAPS` in
-  // heex-parity.test.ts no longer lists it — `DataGrid` is the sole entry.
+  // heex-parity.test.ts does not list it — `DataGrid` is the sole entry.
   // It is exempt because heex's required set is `SHARED_PRIMITIVES` only:
   // HEEx packs own no call-site primitive templates at all.
   "primitive-file-upload",
@@ -138,6 +137,30 @@ const TSX_ONLY_PRIMITIVES: readonly string[] = [
   "primitive-section",
   "primitive-sticky",
 ];
+
+// `Modal { open: <state-bool> }` — the STATE-CONTROLLED dialog (distinct from
+// the operation-form modal above).  `_walker/primitives/forms.ts:
+// emitControlledModal` dispatches it behind a `templates.has(...)` probe and
+// falls back to a stub when the pack ships no template, so a pack that omits
+// it degrades SILENTLY — the page compiles, the dialog just never opens.  All
+// 15 JSX-family packs ship the template today; requiring it turns the next
+// pack that forgets into a load-time failure instead of a dead dialog.
+//
+// Kept OUT of `TSX_ONLY_PRIMITIVES` because that list is filtered per format
+// for `primitive-modal`, and the controlled modal's format story is DIFFERENT
+// from the op-dialog modal's on every format that diverges:
+//   - angular DROPS `primitive-modal` (inline Reactive Forms) but KEEPS this
+//     one: `renderAngularModal` forks only the op-dialog shape and returns null
+//     for `open:`, so the walker falls through to the pack template.
+//   - flutter DROPS `primitive-modal` (`FLUTTER_INLINE_OR_DEFERRED`) but ships a
+//     real `primitiveModalControlled` (a `LoomModalHost`), and feliz ships one
+//     too — both PROCEDURAL packs genuinely pack-dispatch it, so it belongs in
+//     their required surface (enforced by the *-pack-groundwork tests rather
+//     than the load-time gate, which procedural packs never reach).
+//   - heex is the ONLY exemption: its walker emits the modal inline through
+//     `renderModalHeex`, and a HEEx pack owns no call-site primitive templates
+//     at all (`heex.core` is empty).
+const CONTROLLED_MODAL_PRIMITIVES: readonly string[] = ["primitive-modal-controlled"];
 
 // Primitives the Flutter walking-skeleton pack renders INLINE via the walker
 // seams (Track B/D) or DEFERS to full parity — never as a `flutter` pack
@@ -240,7 +263,7 @@ const TSX_FORM: readonly string[] = [
 const DATA_GRID_PRIMITIVES: readonly string[] = ["primitive-data-grid"];
 
 // `Chart` — the line/bar chart over a grouped projection's LIST response
-// (M-T1.3 Phase 4).  Required of the TSX packs ONLY, and that is a statement
+// (M-T1.3).  Required of the TSX packs ONLY, and that is a statement
 // about WHERE THE TEMPLATE LIVES, not about which frameworks can draw a chart.
 //
 // tsx is per-PACK because each tsx pack binds its own charting library
@@ -264,10 +287,8 @@ const DATA_GRID_PRIMITIVES: readonly string[] = ["primitive-data-grid"];
 //
 // So `Chart` reaches ALL SEVEN frameworks, which is why `CHART_FRAMEWORKS`
 // (`src/ir/validate/checks/system-checks.ts`) lists all seven and
-// `loom.chart-unsupported-target` no longer fires for anything that ships — it
-// is the seam a NEW frontend gates on until it ports, not a live gap.  (This
-// block used to say vue/svelte/angular "ship no chart template … so every one
-// of those stays an honest gap"; both halves were false.)
+// `loom.chart-unsupported-target` fires for nothing that ships — it is the
+// seam a NEW frontend gates on until it ports, not a live gap.
 const CHART_PRIMITIVES: readonly string[] = ["primitive-chart"];
 
 export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", RequiredSet> = {
@@ -275,6 +296,7 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", Requi
     core: [
       ...SHARED_PRIMITIVES,
       ...TSX_ONLY_PRIMITIVES,
+      ...CONTROLLED_MODAL_PRIMITIVES,
       ...DATA_GRID_PRIMITIVES,
       ...CHART_PRIMITIVES,
     ],
@@ -304,7 +326,12 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", Requi
   // projects need a `svelte-config` shell template (svelte.config.js)
   // that the TSX/Vite world has no counterpart for.
   svelte: {
-    core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES, ...DATA_GRID_PRIMITIVES],
+    core: [
+      ...SHARED_PRIMITIVES,
+      ...TSX_ONLY_PRIMITIVES,
+      ...CONTROLLED_MODAL_PRIMITIVES,
+      ...DATA_GRID_PRIMITIVES,
+    ],
     shell: [...SHARED_SHELL, "svelte-config"],
     fieldInput: TSX_FIELD_INPUT,
     form: TSX_FORM,
@@ -315,7 +342,12 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", Requi
   // no shell template beyond the shared set (vite config / theme /
   // app shell are all covered by SHARED_SHELL names).
   vue: {
-    core: [...SHARED_PRIMITIVES, ...TSX_ONLY_PRIMITIVES, ...DATA_GRID_PRIMITIVES],
+    core: [
+      ...SHARED_PRIMITIVES,
+      ...TSX_ONLY_PRIMITIVES,
+      ...CONTROLLED_MODAL_PRIMITIVES,
+      ...DATA_GRID_PRIMITIVES,
+    ],
     shell: SHARED_SHELL,
     fieldInput: TSX_FIELD_INPUT,
     // Vue packs additionally own the operation-dialog wrapper the
@@ -336,6 +368,10 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", Requi
     core: [
       ...SHARED_PRIMITIVES.filter((p) => p !== "primitive-form-of"),
       ...TSX_ONLY_PRIMITIVES.filter((p) => p !== "primitive-modal"),
+      // The op-dialog `primitive-modal` is dropped (inline Reactive Forms), but
+      // the STATE-CONTROLLED one is not: `renderAngularModal` returns null for
+      // the `open:` shape, so the walker falls through to the pack template.
+      ...CONTROLLED_MODAL_PRIMITIVES,
       ...DATA_GRID_PRIMITIVES,
     ],
     shell: [
@@ -369,6 +405,10 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", Requi
     core: [
       ...SHARED_PRIMITIVES.filter((p) => !FLUTTER_INLINE_OR_DEFERRED.has(p)),
       ...TSX_ONLY_PRIMITIVES.filter((p) => !FLUTTER_INLINE_OR_DEFERRED.has(p)),
+      // Not subtracted with `primitive-modal`: the op-dialog modal renders
+      // through the walker seam, but the STATE-CONTROLLED one has a real
+      // `primitiveModalControlled` renderer in the flutter pack.
+      ...CONTROLLED_MODAL_PRIMITIVES,
     ],
     shell: ["pubspec"],
   },
@@ -390,6 +430,7 @@ export const REQUIRED_PRIMITIVES: Record<PackFormat | "flutter" | "feliz", Requi
     core: [
       ...SHARED_PRIMITIVES.filter((p) => p !== "primitive-form-of"),
       ...TSX_ONLY_PRIMITIVES,
+      ...CONTROLLED_MODAL_PRIMITIVES,
       ...DATA_GRID_PRIMITIVES,
     ],
     shell: [],

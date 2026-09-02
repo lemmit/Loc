@@ -32,6 +32,12 @@ on:
       - 'web/src/examples/sales-system.ddd'
       - 'web/src/examples/storefront-system.ddd'
       - 'test/behavioral/**'
+      # The typed corpus manifest + its fixtures are this tier's CASE LIST:
+      # `cases.mjs` derives every feature case from them, so a fixture that
+      # grows a `test e2e`/`test` block mints a case (and needs a wire golden)
+      # here.  Without this a pure-fixture PR fires none of the behavioural
+      # legs — `corpus-build.yml` watches the same dir for the compile tier.
+      - 'test/fixtures/corpus/**'
       # The cross-backend wire differential (M-T9.11): a change to the differ or
       # to the canonical goldens must re-verify THIS backend against them.
       - 'test/_helpers/wire-record.ts'
@@ -49,6 +55,12 @@ on:
       - 'web/src/examples/sales-system.ddd'
       - 'web/src/examples/storefront-system.ddd'
       - 'test/behavioral/**'
+      # The typed corpus manifest + its fixtures are this tier's CASE LIST:
+      # `cases.mjs` derives every feature case from them, so a fixture that
+      # grows a `test e2e`/`test` block mints a case (and needs a wire golden)
+      # here.  Without this a pure-fixture PR fires none of the behavioural
+      # legs — `corpus-build.yml` watches the same dir for the compile tier.
+      - 'test/fixtures/corpus/**'
       # The cross-backend wire differential (M-T9.11): a change to the differ or
       # to the canonical goldens must re-verify THIS backend against them.
       - 'test/_helpers/wire-record.ts'

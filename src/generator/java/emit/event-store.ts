@@ -1,5 +1,7 @@
 import type { EnrichedAggregateIR, RepositoryIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
+import { desugarAuthzFilterInApp } from "../../_expr/authz-filter-inapp.js";
+import { javaLogEvent } from "../../_obs/render-java.js";
 import {
   collectJavaExprImports,
   javaValueTypeForId,
@@ -16,6 +18,7 @@ import {
   unionFindAsOptionalTwin,
 } from "./repository.js";
 import { esEventLogTable } from "./workflow-eventsourced.js";
+import { javaBlobWriteGuardLines, writeScopeUsesPrincipal } from "./write-scope.js";
 
 // ---------------------------------------------------------------------------
 // Event-sourced persistence (`persistedAs: eventLog`, appliers A2) — the
@@ -63,12 +66,16 @@ export function renderJavaEventSourcedRepositoryImpl(
   // sorted retrieval).  The retrieval helper appends its own below.
   const exprImports = new Set<string>();
   for (const f of finds) if (f.filter) collectJavaExprImports(f.filter, exprImports);
+  // The command load's in-app write-scope guard renders from the
+  // DESUGARED IR, so its imports come from that same tree.
+  if (agg.writeScopeFilter)
+    collectJavaExprImports(desugarAuthzFilterInApp(agg.writeScopeFilter, agg.name), exprImports);
 
   // find_executed (debug) per declared find — `rows` is an integer count
   // (paged → total, list → size, single → 0/1).  Mirrors the relational repo +
   // .NET/Hono event-store emission.
   const findExecutedLog = (name: string, rowsExpr: string): string =>
-    `        CatalogLog.event("find_executed", "debug", "aggregate", "${agg.name}", "find", "${name}", "rows", ${rowsExpr});`;
+    `        CatalogLog.event(${javaLogEvent("findExecuted")}, "aggregate", "${agg.name}", "find", "${name}", "rows", ${rowsExpr});`;
   const findLines = finds.flatMap((f) => {
     const params = f.params.map((p) => `${renderJavaType(p.type)} ${p.name}`);
     const filter = f.filter
@@ -115,6 +122,12 @@ export function renderJavaEventSourcedRepositoryImpl(
   // imports (and Comparator for sorted retrievals) to `exprImports`.
   const retrievalLines = inMemoryRetrievalLines(agg, ctx.retrievals ?? [], exprImports);
 
+  // aggregate_loaded (debug) — shared by the plain and the write-scoped command
+  // load so the two emissions stay one log line, not two spellings.
+  const aggregateLoadedLog = `        CatalogLog.event(${javaLogEvent("aggregateLoaded")}, "aggregate", "${agg.name}", "id", String.valueOf(id.value()), "found", found.isPresent());`;
+  const writeGuardLines = javaBlobWriteGuardLines(agg, idClass, aggregateLoadedLog);
+  const needsAccessor = writeScopeUsesPrincipal(agg);
+
   const methodLines = [...findLines, ...retrievalLines];
   while (methodLines.length > 0 && methodLines[methodLines.length - 1] === "") methodLines.pop();
 
@@ -141,6 +154,12 @@ export function renderJavaEventSourcedRepositoryImpl(
     // DomainEvent rides the events wildcard (it lives in domain.events).
     `import ${ctx.basePkg}.domain.events.*;`,
     `import ${ctx.basePkg}.domain.ids.*;`,
+    // The enums wildcard, matching the RELATIONAL impl (repository.ts:305) and
+    // the document twin.  A declared find's params render through
+    // `renderJavaType`, which spells an enum param as the bare enum name, so
+    // this file had the same "cannot find symbol" hole the document store did.
+    `import ${ctx.basePkg}.domain.enums.*;`,
+    needsAccessor ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
     `import ${ctx.basePkg}.config.CatalogLog;`,
     ``,
     `/** Event-sourced repository — appends to ${table}, folds on load`,
@@ -150,9 +169,17 @@ export function renderJavaEventSourcedRepositoryImpl(
     `    private static final ObjectMapper JSON = JsonMapper.builder().findAndAddModules().build();`,
     ``,
     `    private final JdbcTemplate jdbc;`,
+    // The in-app write-scope guard reads the request principal, so the
+    // impl injects the same CurrentUserAccessor bean the relational path uses.
+    // Only wired when the write scope references it — otherwise no field, no
+    // ctor param, no import (byte-identical emission).
+    needsAccessor ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
     ``,
-    `    public ${agg.name}RepositoryImpl(JdbcTemplate jdbc) {`,
+    needsAccessor
+      ? `    public ${agg.name}RepositoryImpl(JdbcTemplate jdbc, CurrentUserAccessor currentUserAccessor) {`
+      : `    public ${agg.name}RepositoryImpl(JdbcTemplate jdbc) {`,
     `        this.jdbc = jdbc;`,
+    needsAccessor ? `        this.currentUserAccessor = currentUserAccessor;` : null,
     `    }`,
     ``,
     `    @Override`,
@@ -180,12 +207,12 @@ export function renderJavaEventSourcedRepositoryImpl(
     `                } catch (tools.jackson.core.JacksonException e) {`,
     `                    throw new IllegalStateException("event serialization failed", e);`,
     `                }`,
-    `                CatalogLog.event("event_dispatched", "info", "event_type", ev.getClass().getSimpleName(), "aggregate", "${agg.name}");`,
+    `                CatalogLog.event(${javaLogEvent("eventDispatched")}, "event_type", ev.getClass().getSimpleName(), "aggregate", "${agg.name}");`,
     `            }`,
     `        }`,
     // repository_save (debug) — after the stream append; (aggregate, id) prefix
     // mirrors the relational repo + .NET/Hono emission (children omitted).
-    `        CatalogLog.event("repository_save", "debug", "aggregate", "${agg.name}", "id", String.valueOf(aggregate.id().value()));`,
+    `        CatalogLog.event(${javaLogEvent("repositorySave")}, "aggregate", "${agg.name}", "id", String.valueOf(aggregate.id().value()));`,
     `        return aggregate;`,
     `    }`,
     ``,
@@ -195,15 +222,22 @@ export function renderJavaEventSourcedRepositoryImpl(
     `        return events.isEmpty() ? Optional.empty() : Optional.of(${agg.name}._fromEvents(id, events));`,
     `    }`,
     ``,
-    `    @Override`,
-    `    public ${agg.name} getById(${idClass} id) {`,
-    `        var found = findById(id);`,
-    // aggregate_loaded (debug) — `found` is a bool so a downstream filter can
-    // grep failed loads by (event="aggregate_loaded", found=false).
-    `        CatalogLog.event("aggregate_loaded", "debug", "aggregate", "${agg.name}", "id", String.valueOf(id.value()), "found", found.isPresent());`,
-    `        return found.orElseThrow(() ->`,
-    `            ${javaNotFoundThrow(agg.name)});`,
-    `    }`,
+    // `getById` IS the command load on java (the read route calls `findById`;
+    // every mutation calls this), so the write-scope guard lives here.  An
+    // event stream has no queryable state columns for a `findByIdForWrite`
+    // @Query, so the scope is checked IN-APP over the FOLDED aggregate.  Without
+    // a write scope the load stays byte-identical.
+    ...(writeGuardLines ?? [
+      `    @Override`,
+      `    public ${agg.name} getById(${idClass} id) {`,
+      `        var found = findById(id);`,
+      // aggregate_loaded (debug) — `found` is a bool so a downstream filter can
+      // grep failed loads by (event="aggregate_loaded", found=false).
+      aggregateLoadedLog,
+      `        return found.orElseThrow(() ->`,
+      `            ${javaNotFoundThrow(agg.name)});`,
+      `    }`,
+    ]),
     ``,
     `    @Override`,
     `    public List<${agg.name}> findAll() {`,

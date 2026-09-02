@@ -23,9 +23,11 @@ system TV {
     }
   }
   api SApi from S
-  deployable h { platform: node            contexts: [C] serves: SApi port: 3000 }
-  deployable d { platform: dotnet          contexts: [C] serves: SApi port: 8080 }
-  deployable p { platform: elixir contexts: [C] serves: SApi port: 4000 }
+  deployable h { platform: node            contexts: [C] dataSources: [cState] serves: SApi port: 3000 }
+  deployable d { platform: dotnet          contexts: [C] dataSources: [cState] serves: SApi port: 8080 }
+  storage loomDb { type: postgres }
+  resource cState { for: C, kind: state, use: loomDb }
+  deployable p { platform: elixir contexts: [C] dataSources: [cState] serves: SApi port: 4000 }
 }
 `;
 

@@ -8,8 +8,11 @@
 // leaves forward to the shared F# leaf table (`FS_LEAVES`).
 
 import type { BoundedContextIR, ExprIR, FieldIR, ParamIR, TypeIR } from "../../ir/types/loom-ir.js";
+import { AUDIT_HISTORY_FIND } from "../../util/audit-names.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
-import { stringNamed } from "../_walker/shared/args.js";
+import { PROVENANCE_LINEAGE_FIELD } from "../_payload/provenanced-wire.js";
+import { localizedPositionalTranslation } from "../_walker/i18n-emit.js";
+import { namedArgValue, stringNamed } from "../_walker/shared/args.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { emitExpr, walk } from "../_walker/walker-core.js";
 import { opActionGate } from "./auth-gate.js";
@@ -35,9 +38,11 @@ import {
   felizOperationForm,
   felizWorkflowForm,
   fieldErrorFn,
+  findFieldName,
   formFileSelectMsg,
   formTouchedField,
   formTouchMsg,
+  historyFieldName,
   idLabelsFrom,
   pageMetaFieldName,
   pageMetaMember,
@@ -237,6 +242,17 @@ function routerNavigate(
   routeTemplate: string,
   args: ReadonlyArray<{ name: string; value: string }>,
 ): string {
+  return `Router.navigatePath(${felizRouteSegments(routeTemplate, args).join(", ")})`;
+}
+
+/** The rendered `Router.navigate*` ARG LIST for a route template — shared by the
+ *  view-side `Router.navigatePath(...)` above and the MVU-side
+ *  `Cmd.navigatePath(...)` an action body's `navigate(<Page>)` becomes
+ *  (`update-emit.ts`), so the two spellings segment a route identically. */
+export function felizRouteSegments(
+  routeTemplate: string,
+  args: ReadonlyArray<{ name: string; value: string }> = [],
+): string[] {
   const byName = new Map(args.map((a) => [a.name, a.value]));
   const segs = routeTemplate.split("/").filter((s) => s.length > 0);
   const rendered = segs.map((s) => {
@@ -245,9 +261,8 @@ function routerNavigate(
     // `Router.navigate` args are `obj[]`; a param value renders as `string <v>`.
     return `(string ${byName.get(name) ?? name})`;
   });
-  // `Router.navigate` needs ≥1 arg; the root path (`/`) navigates to `""`.
-  if (rendered.length === 0) return `Router.navigatePath("")`;
-  return `Router.navigatePath(${rendered.join(", ")})`;
+  // `Router.navigate` needs >=1 arg; the root path (`/`) navigates to `""`.
+  return rendered.length === 0 ? ['""'] : rendered;
 }
 
 /** Collapse a walked markup fragment to ONE line.  The walker joins children
@@ -321,7 +336,7 @@ export const felizTarget: WalkerTarget = {
   // value QueryView matches on, and `renderApiHoisting` emits nothing (there is
   // no page-top hoist to make).
   buildHookUse: (detected) => {
-    // A query-time PROJECTION read (M-T1.3 Phase 1) resolves to its own Model
+    // A query-time PROJECTION read (M-T1.3) resolves to its own Model
     // field, filled by the init Cmd.  Its Remote payload — and so which
     // `View.*` matcher renders it — follows the projection's RESPONSE SHAPE:
     // `Remote<<Proj>Row option>` + `remoteOne` for the whole-table aggregation,
@@ -331,14 +346,26 @@ export const felizTarget: WalkerTarget = {
       const field = projectionFieldName(detected.aggregateName);
       return { varName: field, hookName: lowerFirst(field), importFrom: "", argsRendered: [] };
     }
-    // A `byId` read resolves to the `<Agg>ById` Model field (its `Remote<'T
-    // option>` envelope); `all` (and any other read) to `All<Plural>`.  The
-    // page-entry `Cmd` — not this call — issues the byId fetch, so the view
-    // only names the field it matches on.
+    // Every read resolves to its OWN Model field, keyed by the OPERATION:
+    // `all` → `All<Plural>`, `byId` → `<Agg>ById` (its `Remote<'T option>`
+    // envelope), the derived entity-history read (docs/audit.md) →
+    // `<Agg>History`, and a user-declared repository find → `<Agg><Find>`.
+    //
+    // There is deliberately NO `All<Plural>` fallback: it keeps feliz out of
+    // `HISTORY_CAPABLE_FRAMEWORKS` and binds every parameterised find
+    // (`Doc.byVis(v)`) to the unfiltered list — a `model.AllDocs` no Model
+    // declares, no `Cmd` filled and no update arm stored, for a query never
+    // issued.  Instead:
+    // the read collector (`collectBodyReads`) throws on any operation that is
+    // not one of these four, so a field named here always exists.
     const field =
-      detected.operation === "byId"
-        ? byIdFieldName(detected.aggregateName)
-        : readFieldName(detected.aggregateName);
+      detected.operation === "all"
+        ? readFieldName(detected.aggregateName)
+        : detected.operation === "byId"
+          ? byIdFieldName(detected.aggregateName)
+          : detected.operation === AUDIT_HISTORY_FIND
+            ? historyFieldName(detected.aggregateName)
+            : findFieldName(detected.aggregateName, detected.operation);
     return { varName: field, hookName: lowerFirst(field), importFrom: "", argsRendered: [] };
   },
   renderApiCall: (call) => call.varName ?? readFieldName(call.aggregateName),
@@ -433,7 +460,8 @@ export const felizTarget: WalkerTarget = {
   },
 
   // `ProvenanceInfo(of: <record>, field: "<name>")` → a native `<details>`
-  // disclosure over the co-located `<field>_provenance` (a `ProvLineage option`
+  // disclosure over `<field>.lineage` (the `ProvLineage option` half of the
+  // `Provenanced<'T>` wire carrier
   // on the decoded record).  Feliz forks because its "markup" is F# (`Html.details
   // [ … ]`).  A SINGLE-LINE expression (the walker doesn't re-indent seam output),
   // wrapped in `Html.span` so it starts with `Html.` (a bare `(match …)` list item
@@ -448,7 +476,7 @@ export const felizTarget: WalkerTarget = {
     if (!ofArg || fieldArg?.kind !== "literal") {
       return felizTarget.renderComment("ProvenanceInfo: missing record or field");
     }
-    const lineage = `${emitExpr(ofArg, ctx)}.${String(fieldArg.value)}_provenance`;
+    const lineage = `${emitExpr(ofArg, ctx)}.${String(fieldArg.value)}.${PROVENANCE_LINEAGE_FIELD}`;
     const rule =
       'Html.div [ prop.children [ Html.dt [ prop.text "Rule" ]; Html.dd [ Html.code [ prop.text __p.snapshotId ] ] ] ]';
     const value =
@@ -459,6 +487,37 @@ export const felizTarget: WalkerTarget = {
     const details = `Html.details [ prop.className "loom-provenance"; prop.children [ Html.summary [ prop.text "?" ]; ${dl} ] ]`;
     const match = `(match ${lineage} with Some __p -> ${details} | None -> Html.none)`;
     return `Html.span [ prop.children [ ${match} ] ]`;
+  },
+
+  // `Timeline(of: <entries>)` → the entity audit trail (docs/audit.md) as a
+  // native ordered list, mirroring the React renderer semantically: per entry an
+  // action span, a `<time>` (the ISO `at`, verbatim — like the Angular arm), the
+  // actor when recorded, and a `<dl>` of field changes when non-empty ("—" for a
+  // null before/after: a create has no before, a destroy no after).  Feliz forks
+  // the shared primitive because its "markup" is F# (`Html.orderedList [ … ]`),
+  // not an HTML string.  The entries expression is the QueryView data-lambda
+  // binding — already the unwrapped `AuditEntry list` (the `Loaded` arm bound
+  // it), so no `?? []` guard is needed here.  SINGLE-LINE (the walker doesn't
+  // re-indent seam output); the entry header renders even when `changes` is
+  // empty — "someone ran `recalc` at 14:02" is information.
+  renderTimeline: (call, ctx) => {
+    if (call.kind !== "call") return null;
+    const argNames = call.argNames ?? [];
+    const named = argNames.indexOf("of");
+    const arg = named >= 0 ? call.args[named] : (call.args ?? []).find((_, i) => !argNames[i]);
+    if (!arg) return null;
+    const entries = emitExpr(arg, ctx);
+    const tid = stringNamed(call, "testid");
+    const tidP = tid ? `prop.custom("data-testid", "${tid}"); ` : "";
+    const side = (v: string): string =>
+      `(match __c.${v} with Some __v -> string __v | None -> "—")`;
+    const changeRow = `Html.div [ prop.children [ Html.dt [ prop.text __c.field ]; Html.dd [ prop.text (${side("before")} + " → " + ${side("after")}) ] ] ]`;
+    const changes = `(if List.isEmpty __e.changes then Html.none else Html.dl [ prop.className "loom-timeline-changes"; prop.children (__e.changes |> List.map (fun __c -> ${changeRow})) ])`;
+    const actor = `(match __e.actor with Some __a -> Html.span [ prop.className "loom-timeline-actor"; prop.text __a ] | None -> Html.none)`;
+    const time = `Html.time [ prop.custom("dateTime", __e.at); prop.text __e.at ]`;
+    const action = `Html.span [ prop.className "loom-timeline-action"; prop.text __e.action ]`;
+    const entry = `Html.li [ prop.className "loom-timeline-entry"; prop.children [ ${action}; ${time}; ${actor}; ${changes} ] ]`;
+    return `Html.orderedList [ ${tidP}prop.className "loom-timeline"; prop.children (${entries} |> List.map (fun (__e: AuditEntry) -> ${entry})) ]`;
   },
 
   // `Action { <instance>.<op> }` → a one-click operation button that DISPATCHES
@@ -600,7 +659,7 @@ export const felizTarget: WalkerTarget = {
   // (paramless) submit button dispatching `Submit<Wf>Form`.  The form state +
   // encoder + POST `/workflows/<wf>` Cmd live in `update`/`Api` (wired by
   // index.ts's `collectPageWorkflowForms`).  Falls through when `runs:` isn't a
-  // ref to a reachable workflow with scalar params.
+  // ref to a reachable workflow.
   renderWorkflowForm: (call, ctx) => {
     if (call.kind !== "call") return null;
     const names = call.argNames ?? [];
@@ -614,7 +673,11 @@ export const felizTarget: WalkerTarget = {
       idLabelsFrom(ctx.aggregatesByName.values()),
       vosFromBc(ctx.bcByWorkflow.get(wfName)),
     );
-    if (form.fields.length === 0 && form.fieldArrays.length === 0) return null;
+    // A PARAM-LESS workflow (`run()`) renders too — an empty form with just the
+    // submit (no inputs, no validity guard), matching `renderOperationForm`'s
+    // param-less op.  (Returning null here dropped the whole primitive: the
+    // shared fallback emits `primitive-form-of`, which the feliz pack has no
+    // renderer for, so the form vanished into a pack comment.)
     // Testid namespace: the scaffold's `testid:` arg (`workflow-place_order`) or
     // the `workflow-<snake(wf)>` default the workflow page-object builder computes.
     const base = stringNamed(call, "testid") ?? `workflow-${snake(wf.name)}`;
@@ -646,7 +709,19 @@ export const felizTarget: WalkerTarget = {
     if (!formChild) return null;
     const form = felizTarget.renderOperationForm?.(formChild, ctx, 0);
     if (!form) return null;
+    // The trigger label is the `button` user-visible slot — already extracted
+    // into the catalog as `page.<Page>.button.<hash>`, and read RAW here, so the
+    // key was dead and the summary shipped in English at every locale (A13).
+    // `localizedPositionalTranslation` hands back an `I18n.t <key> <default>`
+    // F# expression under i18n and `undefined` otherwise, which keeps the raw
+    // `prop.text "…"` spelling byte-identical when i18n is off.
+    const triggerCall = namedArgValue(call, "trigger");
+    const labelT =
+      triggerCall?.kind === "call"
+        ? localizedPositionalTranslation(triggerCall, ctx, "button")
+        : undefined;
     const label = modalTriggerLabel(call).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    const summaryText = labelT ? `prop.text (${labelT})` : `prop.text "${label}"`;
     // The op page-object method CLICKS the trigger (`<slug>-op-<op>`) before it
     // waits for the form (`<slug>-op-<op>-form`, on the OperationForm wrapper the
     // seam above emits).  The scaffold puts that trigger testid on the Modal's
@@ -665,7 +740,7 @@ export const felizTarget: WalkerTarget = {
     // the enclosing Group's children list; paren-wrapped against sibling absorption.
     // A native <details> styled as a daisyUI `collapse` disclosure — the summary
     // is the trigger, the operation form the revealed `collapse-content`.
-    return `(Html.details [ prop.className "collapse collapse-arrow border border-base-300 bg-base-200"; prop.children [ Html.summary [ ${summaryTid}prop.className "collapse-title font-medium"; prop.text "${label}" ]; Html.div [ prop.className "collapse-content"; prop.children [ ${form} ] ] ] ])`;
+    return `(Html.details [ prop.className "collapse collapse-arrow border border-base-300 bg-base-200"; prop.children [ Html.summary [ ${summaryTid}prop.className "collapse-title font-medium"; ${summaryText} ]; Html.div [ prop.className "collapse-content"; prop.children [ ${form} ] ] ] ])`;
   },
 
   defaultInitFor: (type) => fsZeroValue(type),
@@ -759,6 +834,12 @@ export const felizTarget: WalkerTarget = {
 
   // --- Markup seams — F# flavoured ---------------------------------------
   renderComment: (text: string) => `(* ${text} *)`,
+  // A VISIBLE degradation notice — an F# comment inside a `children` list is
+  // not an expression at all, so on this target the "honest skip" was neither
+  // honest (the reader saw an empty card) nor safe.  `Html.p` renders through
+  // the same Feliz DSL every other text node uses.
+  renderNotice: (text: string) =>
+    `Html.p [ prop.className "loom-unsupported"; prop.text "${text.replace(/"/g, '\\"')}" ]`,
   // Child-position interpolation → a text node.  `Html.text` takes a `string`,
   // so a non-string value is coerced with F#'s `string` function; a value the
   // call site knows is already a `string` (a string literal, a Yes/No ternary
@@ -814,7 +895,7 @@ export const felizTarget: WalkerTarget = {
     }
   },
 
-  // --- DataGrid seam (M-T1.1 slice 10e) ----------------------------------
+  // --- DataGrid seam (M-T1.1) ----------------------------------
   //
   // Feliz hosts the REAL TanStack row model — `@tanstack/table-core` through
   // Fable interop — so the grid behaves identically to the four JSX frontends
@@ -857,7 +938,10 @@ export const felizTarget: WalkerTarget = {
     // reading as a header rather than a control.
     return (
       `Html.button [ prop.className "btn btn-ghost btn-xs px-1 font-bold"; prop.type'.button; ` +
-      `prop.onClick (${onClick}); prop.text ("${header}" + ${indicator}) ]`
+      // The caption is a user-visible slot (`columnHeader`): under i18n it
+      // arrives as an F# translation EXPRESSION, otherwise as raw text this
+      // spells as a string literal — byte-identical to before.
+      `prop.onClick (${onClick}); prop.text (${spec.headerValue ?? `"${header}"`} + ${indicator}) ]`
     );
   },
 
@@ -1010,9 +1094,9 @@ export const felizTarget: WalkerTarget = {
 
   // Scalar intrinsics — the SAME F# table the MVU update path uses
   // (`renderFsMethodCall`), so `s.replace(a, b)` cannot mean one thing in a
-  // page body and another in an action body.  Before this seam was supplied
-  // the view path had no intrinsic arm at all and emitted Loom's own spelling
-  // verbatim (`(model.Name.toUpper())`), which is not F#.
+  // page body and another in an action body.  Without this seam the view path
+  // has no intrinsic arm and emits Loom's own spelling verbatim
+  // (`(model.Name.toUpper())`), which is not F#.
   renderIntrinsic: (receiverType, member, recv, args) =>
     renderFsIntrinsic(receiverType, member, recv, args),
 };

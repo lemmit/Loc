@@ -22,6 +22,7 @@ import type {
   FindIR,
   FunctionIR,
   StmtIR,
+  TestIR,
   TypeIR,
 } from "../../types/loom-ir.js";
 import { allContexts } from "../../types/loom-ir.js";
@@ -34,6 +35,15 @@ import {
 } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
+
+// Backend platforms that render the paged generic carrier / the `or`-union
+// operation return.  Both are EXPORTED so the diagnostic-firing census can
+// check the claim its UNREACHABLE_PIN makes: each set today contains every
+// backend-owning platform, so `unsupported` is always empty and the gate
+// cannot fire.  A sixth backend that has not ported either feature makes the
+// gate live again — and fails that pin, which is the point.
+export const SUPPORTED_PAGED_BACKENDS = new Set(["node", "dotnet", "elixir", "python", "java"]);
+export const SUPPORTED_RETURN_BACKENDS = new Set(["node", "dotnet", "python", "java", "elixir"]);
 
 // ---------------------------------------------------------------------------
 // Workspace uniqueness — multi-file (Stage A) makes it easy to declare
@@ -326,7 +336,6 @@ export function validateGenericInstancesUnimplemented(
   // (the legacy `phoenix` / `phoenixLiveView` platform aliases canonicalize
   // to `elixir` per D-ELIXIR-PLATFORM).  All four backends now emit
   // generic carriers.
-  const SUPPORTED_PAGED_BACKENDS = new Set(["node", "dotnet", "elixir", "python", "java"]);
   const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_PAGED_BACKENDS.has(p));
   if (unsupported.length === 0) return;
 
@@ -416,9 +425,9 @@ function containsUnion(type: TypeIR): boolean {
  * payload whose only permitted field is `resource: string` (filled with the
  * aggregate name; other fields can't be derived from absence).  Anything else
  * (aggregate-or-aggregate, three-plus variants, scalar variants, named payload
- * unions) has no derivable selection and is rejected here — previously these
- * shapes generated runtime stubs (`NotImplementedException` on .NET, an
- * untagged body on Hono).
+ * unions) has no derivable selection and is rejected here rather than left to
+ * generate a runtime stub (`NotImplementedException` on .NET, an untagged body
+ * on Hono).
  *
  * Backend scope: enforced for every backend host (node / dotnet / java /
  * python / elixir) and for the legacy no-deployable path (`generate ts` /
@@ -601,7 +610,6 @@ export function validateOperationReturnsUnimplemented(
   // and elixir (plain Ecto/Phoenix) followed — every backend emits it for any
   // returning op.  No backend (legacy single-context path) → emittable, gate
   // stays quiet.
-  const SUPPORTED_RETURN_BACKENDS = new Set(["node", "dotnet", "python", "java", "elixir"]);
 
   const isCapable = (p: string): boolean => SUPPORTED_RETURN_BACKENDS.has(p);
 
@@ -763,7 +771,7 @@ export function validateExternOperations(ctx: BoundedContextIR, diags: LoomDiagn
 }
 
 // ---------------------------------------------------------------------------
-// Event-sourcing body discipline (D-DOCUMENT-AXIS, appliers Phase A1).
+// Event-sourcing body discipline (D-DOCUMENT-AXIS, appliers).
 //
 // `persistedAs: eventLog` makes an aggregate event-sourced: its truth is
 // the event stream, and state is a fold of that stream.  That imposes a
@@ -1451,10 +1459,40 @@ export function validateFieldDefaults(ctx: BoundedContextIR, diags: LoomDiagnost
 // them for free, since a lifecycle `requires` is a statement in the
 // create/destroy body.
 //
-// The LEGAL sites are the three the `deriveNeeds` enrichment already scans for
-// usage-derived resource needs: workflow bodies, command/query handler bodies,
-// and domain-service operation bodies.  Everything else on an aggregate / part
-// / value object is rejected.
+// The LEGAL sites are workflow bodies and command/query handler bodies —
+// the application layer, which owns the transaction and all outbound I/O.
+// Everything else on an aggregate / part / value object is rejected.
+//
+// DOMAIN SERVICES ARE *NOT* A LEGAL SITE.  The first cut of this gate listed
+// `domainService` operation bodies as legal, matching the ambient-resource
+// `Env` and the three sites `deriveNeeds` scans.  No domain-service emitter
+// threads a resource client in, so the "legal" third site failed in the SAME
+// five ways the aggregate bodies did — re-verified against a `domainService
+// Archiver { operation archived(name: string): bool { let existing =
+// salesFiles.list("orders/" + name) … } }`:
+//
+//   .NET   — THROWS "reached the .NET renderer without a resource class
+//            mapping" out of `emit/domain-service.ts` → `renderOperation`.
+//   Java   — THROWS the Java twin out of `emit/domain-service.ts`.
+//   Phoenix— THROWS "reached the Phoenix renderer without a module mapping"
+//            out of `domain-service-emit.ts` → `renderOperation`.
+//   TS     — emits `(await salesFiles$list(…))` into `domain/services.ts`, a
+//            file importing no resource client, inside a NON-async
+//            `export function` → TS1308 + TS2304.
+//   Python — emits the same `await` into a bare `def` in
+//            `app/domain/services/<svc>.py` → SyntaxError + F821.
+//
+// And porting it is a LANGUAGE change, not plumbing.  `docs/domain-services.md`
+// defines a domain service as a stateless calculator whose only infrastructure
+// touch is a read-only repository query, with the `workflow` owning "the
+// transaction and all outbound I/O"; a resource-op is outbound I/O.  Admitting
+// one would also (1) re-open the aggregate hole this gate just closed — a
+// `pure`-tier op is callable from an aggregate `operation`, so the tier ladder
+// (`classifyDomainServiceTier`) would need a new tier plus a call-site gate,
+// (2) force async signatures onto the sync static/module shapes four of five
+// backends emit for the pure/reading tiers, and (3) let a resource-op hide from
+// `loom.resource-op-in-transaction`, which only walks the workflow span.  So
+// the honest answer is an error at the source, not five silent failures.
 // ---------------------------------------------------------------------------
 
 /** Push one diagnostic per (location, resource.verb) — an operation calling the
@@ -1484,6 +1522,22 @@ export function validateResourceOpPlacement(ctx: BoundedContextIR, diags: LoomDi
   const flagStmts = (location: string, stmts: readonly StmtIR[]): void => {
     for (const s of stmts) walkExprsInStmt(s, (e) => flag(location, e));
   };
+  // A `test { }` body is the FOURTH statement-bearing surface (after
+  // operations, guards and function bodies), and it renders into ordinary
+  // target code — so a resource-op there fails exactly the five ways the gate
+  // exists to prevent: .NET and Java DIE mid-generation ("reached the renderer
+  // without a resource class mapping"), node and python emit `await` inside a
+  // non-async test fn against an unimported symbol, elixir alone degrades
+  // honestly.  `TestStmtIR` widens `StmtIR` with `expect` / `expect-throws`,
+  // whose `expr` is the most likely host of the call.
+  const flagTestStmts = (location: string, tests: readonly TestIR[]): void => {
+    for (const t of tests) {
+      for (const s of t.statements) {
+        if (s.kind === "expect" || s.kind === "expect-throws") flag(location, s.expr);
+        else walkExprsInStmt(s, (e) => flag(location, e));
+      }
+    }
+  };
   // An aggregate / part / value object — every member surface that renders into
   // domain (or route-gate) code.  `creates` / `destroys` are separate arrays
   // from `operations`, and a lifecycle `requires` guard is a statement inside
@@ -1499,6 +1553,7 @@ export function validateResourceOpPlacement(ctx: BoundedContextIR, diags: LoomDi
     }
     for (const d of agg.derived) flag(`${agg.name}.derived[${d.name}]`, d.expr);
     for (const fn of agg.functions) flagFunctionBody(`${agg.name}.function[${fn.name}]`, fn, flag);
+    flagTestStmts(`${agg.name}.test`, agg.tests);
     for (const part of agg.parts) {
       for (const inv of part.invariants) {
         flag(`${part.name}.invariant`, inv.expr);
@@ -1516,11 +1571,23 @@ export function validateResourceOpPlacement(ctx: BoundedContextIR, diags: LoomDi
     }
     for (const d of vo.derived) flag(`${vo.name}.derived[${d.name}]`, d.expr);
     for (const fn of vo.functions) flagFunctionBody(`${vo.name}.function[${fn.name}]`, fn, flag);
+    flagTestStmts(`${vo.name}.test`, vo.tests);
   }
   // Repository find filters lower to SQL / a query predicate; a resource-op
   // there has no renderable form on any backend either.
   for (const repo of ctx.repositories) {
     for (const f of repo.finds) flag(`repository[${repo.name}].find[${f.name}]`, f.filter);
+  }
+  // Context-scoped integration tests — the fourth `TestIR[]` array.
+  flagTestStmts(`${ctx.name}.test`, ctx.tests);
+  // Domain-service operation bodies — see the DOMAIN SERVICES header note: the
+  // five emitters split 3 throws / 2 unimported-await-in-a-sync-function, so
+  // this is the same class, not a per-backend gap.
+  for (const svc of ctx.domainServices) {
+    for (const op of svc.operations) {
+      flagStmts(`domainService[${svc.name}].operation[${op.name}]`, op.body);
+    }
+    flagTestStmts(`domainService[${svc.name}].test`, svc.tests);
   }
 }
 
@@ -1986,12 +2053,12 @@ export function validateLifecycleBodyDropped(ctx: BoundedContextIR, diags: LoomD
       ["destroy", agg.canonicalDestroy],
     ] as const) {
       // ── the guard's READABLE SURFACE ────────────────────────────────────
-      // Runs for EVERY lifecycle guard, event-sourced included.  It used to sit
-      // below the ES `continue` guarding the drop report, so an ES create's
-      // guard was never checked at all — and an ES create body IS rendered (into
-      // the domain `_init`), which makes it the one place where an unreadable
-      // guard reaches a compiler rather than a diagnostic.  The exemption below
-      // is about whether a body is DROPPED; it was never a statement about what
+      // Runs for EVERY lifecycle guard, event-sourced included — deliberately
+      // ABOVE the ES `continue` that guards the drop report.  An ES create body
+      // IS rendered (into the domain `_init`), which makes it the one place
+      // where an unreadable guard would reach a compiler rather than a
+      // diagnostic.  The exemption below is about whether a body is DROPPED;
+      // it is not a statement about what
       // a guard may read, and reusing it for both conflated two questions.
       //
       // WHICH LAYER OWNS THE ES CASE.  This check answers "what may a guard

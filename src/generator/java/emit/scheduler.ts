@@ -1,4 +1,4 @@
-// Timer scheduler emission (scheduling.md) — the Java/Spring backend, Phase 2.
+// Timer scheduler emission (scheduling.md) — the Java/Spring backend.
 //
 // A `timerSource` fires a plain domain event on a wall-clock cadence.  The two
 // cadences split by where durability matters:
@@ -26,6 +26,7 @@
 import type { EventIR, FieldIR, TimerSourceIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
+import { javaLogEvent } from "../../_obs/render-java.js";
 import { mainSourcePath } from "../naming.js";
 import { collectJavaTypeImports } from "../render-expr.js";
 
@@ -204,7 +205,7 @@ export function renderJavaTimerScheduler(
     `    // and skips.  The in-process guard skips an overlapping tick on THIS replica.`,
     `    private void tick(String name, AtomicBoolean running, Supplier<Object> build) {`,
     `        if (!running.compareAndSet(false, true)) {`,
-    `            CatalogLog.event("timer_skipped_overlap", "info", "timer", name);`,
+    `            CatalogLog.event(${javaLogEvent("timerSkippedOverlap")}, "timer", name);`,
     `            return;`,
     `        }`,
     `        try {`,
@@ -213,15 +214,15 @@ export function renderJavaTimerScheduler(
     `                Boolean locked = jdbc.queryForObject(`,
     `                    "SELECT pg_try_advisory_xact_lock(?)", Boolean.class, lockKey);`,
     `                if (locked == null || !locked) {`,
-    `                    CatalogLog.event("timer_lock_contended", "debug", "timer", name);`,
+    `                    CatalogLog.event(${javaLogEvent("timerLockContended")}, "timer", name);`,
     `                    return;`,
     `                }`,
     `                events.publishEvent(build.get());`,
-    `                CatalogLog.event("timer_fired", "info", "timer", name);`,
+    `                CatalogLog.event(${javaLogEvent("timerFired")}, "timer", name);`,
     `            });`,
     `        } catch (Exception err) {`,
     `            CatalogLog.event(`,
-    `                "timer_emit_failed", "error", "timer", name, "error", String.valueOf(err.getMessage()));`,
+    `                ${javaLogEvent("timerEmitFailed")}, "timer", name, "error", String.valueOf(err.getMessage()));`,
     `        } finally {`,
     `            running.set(false);`,
     `        }`,
@@ -284,10 +285,10 @@ export function renderJavaTimerJob(
     `    public void execute() {`,
     `        try {`,
     `            events.publishEvent(${construct});`,
-    `            CatalogLog.event("timer_fired", "info", "timer", ${JSON.stringify(ts.name)});`,
+    `            CatalogLog.event(${javaLogEvent("timerFired")}, "timer", ${JSON.stringify(ts.name)});`,
     `        } catch (RuntimeException err) {`,
     `            CatalogLog.event(`,
-    `                "timer_emit_failed", "error", "timer", ${JSON.stringify(ts.name)},`,
+    `                ${javaLogEvent("timerEmitFailed")}, "timer", ${JSON.stringify(ts.name)},`,
     `                "error", String.valueOf(err.getMessage()));`,
     `            throw err; // let JobRunr's automatic retry engage`,
     `        }`,
@@ -331,7 +332,7 @@ export function renderJobRunrConfig(timers: readonly TimerSourceIR[], basePkg: s
     ``,
     `import ${basePkg}.*;`,
     ``,
-    `/** Durable cron timerSources (scheduling.md Phase 2) on JobRunr core.`,
+    `/** Durable cron timerSources (scheduling.md) on JobRunr core.`,
     ` *`,
     ` *  JobRunr has no Spring-Boot-4 starter yet, so we wire its core directly`,
     ` *  (the documented "without Spring Boot starter" path): a SQL StorageProvider`,

@@ -35,11 +35,14 @@
 //     "the arm throws" from "the arm was renamed"; the negative alone cannot
 //     tell "it throws" from "the route was deleted".  Each backend asserts both.
 //
-// Deliberately NOT asserted here: `GET /files/{key}`'s absent-object 404.  That
-// is a FOURTH shape (node/python/elixir `{"error":"not found"}` as
-// `application/json`; dotnet/java empty-bodied) and none of the five is 7807 —
-// a separate wire change on three backends, recorded on M-T6.31 rather than
-// silently folded in here.
+// Not asserted here: `GET /files/{key}`'s absent-object 404 — a FOURTH shape
+// (node/python/elixir `{"error":"not found"}` as `application/json`;
+// dotnet/java empty-bodied), none of the five 7807.  It was deferred out of
+// this gate as a separate wire change on all five backends, and has since
+// landed with its own suite: `files-absence-envelope-parity.test.ts`.  It stays
+// a separate gate because its 404 is deliberately NOT the remappable `NotFound`
+// rung this file's sites all resolve through (it addresses a bucket key, not an
+// aggregate id — see `ir/util/openapi-errors.ts`).
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../_helpers/generate.js";

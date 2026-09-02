@@ -69,6 +69,11 @@ on:
       - 'src/generator/elixir/vanilla/api-emit.ts'
       - 'src/generator/elixir/vanilla/openapi-emit.ts'
       - 'src/platform/hono/**'
+      # The MikroORM adapter's own emitter: it owns the hierarchical subtree
+      # predicate (a `raw()` FilterQuery key) that the `node-mikroorm` cell
+      # boots.  Missing from this list, a mikroorm-emitter-only change skipped
+      # the whole workflow.
+      - 'src/generator/typescript/emit/mikroorm.ts'
       - 'test/e2e/tenancy-isolation.test.ts'
       - 'test/e2e/tenancy-isolation-python.test.ts'
       - 'test/e2e/tenancy-isolation-java.test.ts'
@@ -79,6 +84,8 @@ on:
       - 'test/e2e/tenancy-hierarchy-java.test.ts'
       - 'test/e2e/tenancy-hierarchy-dotnet.test.ts'
       - 'test/e2e/tenancy-hierarchy-elixir.test.ts'
+      - 'test/e2e/tenancy-hierarchy-mikroorm.test.ts'
+      - 'test/e2e/tenancy-subtree-explain.test.ts'
       - 'test/e2e/support/tenancy-isolation-harness.ts'
       - 'test/fixtures/corpus/tenancy-owned.ddd'
       - 'test/fixtures/corpus/tenancy-hierarchy.ddd'
@@ -147,6 +154,28 @@ jobs:
           - backend: elixir
             suite: hierarchy
             script: test:tenancy-hierarchy-elixir
+          # The SECOND node persistence adapter.  Not a sixth backend — the same
+          # Hono backend on `persistence: mikroorm`, whose subtree predicate is
+          # lowered by completely different machinery (a `raw()` SQL FilterQuery
+          # key, since the operator vocabulary has no prefix test) than the
+          # drizzle operator tree above.  A raw fragment's SQL text, `?` binding
+          # arity and single-use cache key are all invisible to `tsc`, so this
+          # boot is the only gate on them.
+          - backend: node-mikroorm
+            suite: hierarchy
+            script: test:tenancy-hierarchy-mikroorm
+          # M-T3.17 — the subtree read is INDEX-USABLE, not merely correct.
+          # Boots nothing: it builds the schema from the emitted migration SQL,
+          # lifts the predicate verbatim out of a generated repository, seeds
+          # 20k rows and asserts the PLAN (`Index Scan` / `Index Cond` on
+          # `<table>_data_key_idx`).  The structural tiers can only see that a
+          # LIKE is present; only the planner can say the index is used, and
+          # that is exactly the claim #2562 lost silently.  Spins its own
+          # postgres container (it needs `docker exec … psql` to EXPLAIN), so it
+          # ignores the service container above.
+          - backend: node
+            suite: explain
+            script: test:tenancy-subtree-explain
     name: tenancy-e2e (${{ matrix.backend }} / ${{ matrix.suite }})
     services:
       postgres:

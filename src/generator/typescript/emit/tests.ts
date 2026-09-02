@@ -1,4 +1,4 @@
-import { createOmissionValue, forCreateInput } from "../../../ir/enrich/wire-projection.js";
+import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -46,14 +46,14 @@ export function renderTestsFile(agg: AggregateIR, ctx: BoundedContextIR): string
   });
 }
 
-/** Value-object unit-test file (test-placement.md, Phase 2).  The VO is a
+/** Value-object unit-test file (test-placement.md).  The VO is a
  *  member of `ctx.valueObjects`, so it's imported from `./value-objects` by the
  *  shared narrowing — no dedicated subject import needed. */
 export function renderVoTestsFile(vo: ValueObjectIR, ctx: BoundedContextIR): string | null {
   return renderTestsCore(vo.name, vo.tests, ctx, null);
 }
 
-/** Domain-service unit-test file (test-placement.md, Phase 2).  The service is
+/** Domain-service unit-test file (test-placement.md).  The service is
  *  emitted as a namespace in `./services`. */
 export function renderServiceTestsFile(svc: DomainServiceIR, ctx: BoundedContextIR): string | null {
   return renderTestsCore(svc.name, svc.tests, ctx, {
@@ -90,10 +90,16 @@ function renderTestsCore(
   const voNames = ctx.valueObjects.map((v) => v.name).filter(refs);
   const enumNames = ctx.enums.map((e) => e.name).filter(refs);
   const usesIds = /\bIds\.\w/.test(bodyStr);
+  // A money literal / money expression in a test body renders as
+  // `new Decimal("…")` / `.eq(...)` receivers (M-T6.44's fixture was the first
+  // test block to reference the money PRIMITIVE directly — every earlier
+  // fixture asserted a VO's scalar `amount`, so the import was never needed).
+  const usesDecimal = /\bnew Decimal\(/.test(bodyStr);
 
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   lines.push(`import { describe, it, expect } from "vitest";`);
+  if (usesDecimal) lines.push(`import Decimal from "decimal.js";`);
   if (subjectImport && subjectNames.length > 0) {
     lines.push(`import { ${subjectNames.join(", ")} } from "${subjectImport.modulePath}";`);
   }
@@ -200,21 +206,19 @@ export function renderCreateInput(
   const declared = new Map(forCreateInput(agg.fields).map((f) => [f.name, f.type] as const));
   // Emit EXACTLY the fields the test author wrote.
   //
-  // This used to iterate the whole create-input set and fill each omission from
-  // `createOmissionValue`, because the factory's input type required every
-  // field and an omitted one failed `tsc` in the generated project.  That fix
-  // made the assertion vacuous: `test "an omitted default is applied at
-  // construction"` writes `Item.create({ name: "N" })` and checks `qty == 1`,
-  // and the fill turned it into `Item.create({ name: "N", qty: 1, … })` —
-  // passing the value it then asserted.  The test could not fail.
+  // Filling each omission from `createOmissionValue` makes the assertion
+  // vacuous: `test "an omitted default is applied at construction"` writes
+  // `Item.create({ name: "N" })` and checks `qty == 1`, and the fill turns it
+  // into `Item.create({ name: "N", qty: 1, … })` — passing the value it then
+  // asserts, so the test cannot fail.
   //
-  // The factory now defaults omittable inputs itself (see `factoryDefault` in
+  // The factory defaults omittable inputs itself (see `factoryDefault` in
   // emit/aggregate.ts), so an omission both compiles AND exercises the domain
-  // rule the author was testing.  Filling here again would re-vacuum it.
+  // rule the author is testing.
   const parts = obj.fields.map((f) => {
     const t = declared.get(f.name);
     // An unknown key isn't the emitter's to diagnose — it renders verbatim and
-    // the generated project's own typecheck names it, the same as before.
+    // the generated project's own typecheck names it.
     return `${f.name}: ${t === undefined ? renderTestExpr(f.value, ctx) : coerceCreateValue(f.value, t, ctx)}`;
   });
   return parts.length === 0 ? "{}" : `{ ${parts.join(", ")} }`;

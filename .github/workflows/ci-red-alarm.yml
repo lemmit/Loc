@@ -9,14 +9,32 @@ name: main-red alarm
 # `workflow_run` fires after the monitored workflow completes, on the default
 # branch, with the repo's own token — no external secret, no Slack webhook.
 #
-# THE LIST BELOW IS EVERY WORKFLOW THAT RUNS ON `push: main`, and that is the
-# whole rule: if a gate runs on main, its failure alarms. A hand-curated
-# subset is what let `api-call-e2e` sit red on 100% of its main pushes for two
-# days — it was never watched, so nothing said so. `workflows:` takes literal
-# names (no expressions), so the list is spelled out here and
+# THE LIST BELOW IS EVERY WORKFLOW THAT RUNS UNATTENDED ON `main` — every
+# `push: main` gate AND every `schedule:` one — and that is the whole rule: if
+# nobody is watching a run, its failure alarms. A hand-curated subset is what
+# let `api-call-e2e` sit red on 100% of its main pushes for two days — it was
+# never watched, so nothing said so. `workflows:` takes literal names (no
+# expressions), so the list is spelled out here and
 # `test/system/main-red-alarm-coverage.test.ts` fails the fast suite the
 # moment it drifts from the workflow directory. Adding a main gate therefore
 # means adding its name here; the test tells you so.
+#
+# THE SCHEDULE HALF was missing until 2026-08-23, and the recovery job below
+# had ALREADY assumed it was there — "a nightly schedule failure alarms the
+# same as a push failure, so recovery has to clear it too". It did not: the
+# nine nightly/weekly gates ran on main every night with nothing listening, so
+# the alarm could be held SHUT by a nightly failure it would never open for.
+# `Schemathesis contract fuzzing` proved it — red on three consecutive nights
+# (2026-08-21/22/23) with an actionable one-line diagnosis in its log, and the
+# only thing that ever mentioned it was `flake-budget`, which correctly files a
+# *flake* issue and so reads as "occasionally flaky" rather than "broken since
+# Friday".
+#
+# `PR gate` is the one deliberate omission: its `schedule:` is a */15 sweep over
+# OPEN PRS (a safety net for dropped `workflow_run` dispatches), not a gate on
+# main, and a broken sweep would post 96 comments a day onto the single `ci-red`
+# issue. The exclusion is spelled out in the coverage test, not left to
+# whoever reads this next.
 #
 # Noise is bounded by design: every failure lands as a comment on the ONE
 # issue labelled `ci-red`, not as a new issue per gate.
@@ -29,6 +47,7 @@ on:
       - ".NET observability events (runtime e2e)"
       - "API call (typed in-system call runtime e2e)"
       - "Behavioral UI e2e (headless, no docker)"
+      - "Behavioral UI e2e — HEEx / LiveView"
       - "Behavioral e2e (headless, no docker)"
       - "Behavioral e2e — .NET (ASP.NET + EF Core)"
       - "Behavioral e2e — .NET (persistence: dapper)"
@@ -37,14 +56,19 @@ on:
       - "Behavioral e2e — Python (FastAPI)"
       - "Behavioral e2e — node/Hono (MikroORM)"
       - "Channels (broker runtime e2e)"
+      - "Cleanup old workflow artifacts"
+      - "Conformance full (nightly)"
       - "Conformance parity (per-PR)"
       - "Context integration (runtime e2e)"
       - "Corpus compile gate (Elixir)"
       - "Corpus compile gates"
+      - "Cross-backend response differential (report-only)"
       - "Deploy landing page + playground to GitHub Pages"
       - "Elixir / Vanilla VO wire round-trip (runtime e2e)"
       - "Elixir / Vanilla build verification"
       - "Elixir / Vanilla runtime e2e (observability)"
+      - "Flake budget (per-leg pass rates)"
+      - "Frontend full-stack e2e (nightly, no docker)"
       - "Generated Angular build"
       - "Generated Angular e2e"
       - "Generated Feliz build"
@@ -55,11 +79,13 @@ on:
       - "Generated Svelte e2e"
       - "Generated Vue build"
       - "Generated Vue e2e"
+      - "Generated a11y (axe-core)"
       - "Hono OIDC auth (runtime e2e)"
       - "Hono observability events (runtime e2e)"
       - "Java OIDC auth (runtime e2e)"
       - "Java build verification"
       - "Java observability e2e"
+      - "Kubernetes cluster e2e (kind)"
       - "Kubernetes/Helm validation"
       - "Langium generated files in sync"
       - "Lint GitHub Actions workflows"
@@ -67,13 +93,16 @@ on:
       - "Migration evolution (runtime e2e)"
       - "OIDC auth (full-compose runtime e2e)"
       - "OIDC auth — Elixir/Phoenix (full-compose runtime e2e)"
+      - "Pairwise combination corpus"
       - "Phoenix / LiveView UI smoke (runtime e2e)"
       - "Playground e2e"
       - "Playground worker-realm check"
       - "Python OIDC auth (runtime e2e)"
       - "Python build verification"
       - "Python observability e2e"
+      - "Quality delta (weekly)"
       - "Schema load (emitted DDL)"
+      - "Schemathesis contract fuzzing"
       - "Tenancy isolation (runtime e2e)"
       - "Tests + coverage"
       - "TypeScript (Hono) build verification"

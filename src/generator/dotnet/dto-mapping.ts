@@ -19,7 +19,9 @@ import {
 } from "../../ir/types/wire-types.js";
 import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { PROVENANCED_REQUEST_ERROR } from "../_payload/provenanced-wire.js";
 import { MONEY_WIRE_SCALE } from "../money-scale.js";
+import { csProvSibling, PROVENANCED_CS_RECORD } from "./emit/provenance.js";
 import { renderCsExpr } from "./render-expr.js";
 
 /** Allocator for the C# pattern-variable names `maskWrap` binds.
@@ -131,6 +133,42 @@ function csCanonicalInstantWire(domainExpr: string): string {
   return `System.Text.RegularExpressions.Regex.Replace(${domainExpr}.ToUniversalTime().ToString("o"), @"\\.?0+Z$", "Z")`;
 }
 
+/** C# expression narrowing a `System.Decimal` to the `double` a declared
+ *  `decimal` crosses the wire as (#2563/RS-24) — **correctly rounded**, which
+ *  the language's own `(double)d` cast is not.
+ *
+ *  `(double)d` runs `DecCalc.VarR8FromDec`: `(double)mantissa / 10^scale`.  When
+ *  the mantissa exceeds 2^53 — every value whose shortest round-trip repr needs
+ *  17 significant digits — the NUMERATOR is rounded to a double first and the
+ *  quotient is then rounded again, so the result need not be the nearest double
+ *  to the stored decimal.  MEASURED on .NET 10.0.11 over 3M random doubles in
+ *  [0,100) written out as Postgres `numeric` and read back: 9.2% (275,923 of
+ *  3,000,000) do not
+ *  round-trip (`99.52989333734583` comes back `99.52989333734584`), while
+ *  `double.Parse` of the same digits misses zero times.  Every one
+ *  of the other four backends ships the true nearest double, so the .NET row is
+ *  the odd one out on the wire-golden differential.
+ *
+ *  `decimal.ToString` is exact (a base-10 type carries no hidden precision) and
+ *  `double.Parse` is correctly rounded on .NET Core 3.0+ (the generated TFM is
+ *  `net10.0`), so the pair is the nearest double to the stored value — the same
+ *  number node reads out of the same `numeric` column.  `InvariantCulture` on
+ *  BOTH halves pins the decimal separator, so a container locale cannot turn
+ *  `1.5` into `1,5` and then fail to parse it.
+ *
+ *  Cost is one string alloc + parse per decimal field per row, at a JSON
+ *  boundary that already allocates an order of magnitude more.  Both call sites
+ *  (`projectToResponse` here, `csCoerce`'s EF aggregate arm in
+ *  `query-projection-emit.ts`) render through this one helper so the two hops
+ *  cannot drift.  The type is fully qualified so no `using` wiring is needed at
+ *  either site. */
+export function csDecimalToWireDouble(domainExpr: string): string {
+  return (
+    `double.Parse(${domainExpr}.ToString(System.Globalization.CultureInfo.InvariantCulture), ` +
+    `System.Globalization.CultureInfo.InvariantCulture)`
+  );
+}
+
 /** C# DTO property type for a `TypeIR`.  `dir` selects the suffix for
  *  nested value-object DTOs (`Request` for inputs, `Response` for
  *  outputs); entities always nest as `<Name>Response`. */
@@ -182,6 +220,13 @@ export function wireType(
       break;
     case "entity":
       s = `${info.base}Response`;
+      break;
+    case "provenanced":
+      // `Provenanced<int> Total` — the shared generic record from
+      // Domain.Common (see `renderProvLineage`).  The carried type recurses
+      // through this same function, so a `Money provenanced` lands as
+      // `Provenanced<string>` exactly as the bare money field would.
+      s = `${PROVENANCED_CS_RECORD}<${wireType(info.carried!, ctx, dir)}>`;
       break;
   }
   if (info.isCollection) s = `IReadOnlyList<${s}>`;
@@ -281,11 +326,69 @@ export function dtoParam(
   return `${attr}${csType} ${name}`;
 }
 
+/** How a wire→command conversion reports a MALFORMED value (M-T6.48).
+ *
+ *  `money` and `datetime` cross the wire as strings and used to be parsed with
+ *  a bare `decimal.Parse` / `DateTime.Parse`.  `{"price": "12,50"}` therefore
+ *  threw `FormatException`, which no `DomainExceptionFilter` arm catches — the
+ *  caller got a **500** for input the server itself rejected, while node
+ *  answered 422 with `errors: [{ pointer, message }]` from `moneySchema`.
+ *
+ *  Both halves are needed at the leaf: `ns` to name the exception the filter
+ *  matches (`Domain.Common` is only conditionally imported by the controller,
+ *  so the throw is fully qualified), and `pointer` to say WHICH field was
+ *  malformed — the same RFC-6901 pointer node's zod issue carries. */
+export interface WireArgSite {
+  /** Project root namespace. */
+  readonly ns: string;
+  /** RFC-6901 pointer to the offending wire field, e.g. `/newPrice`. */
+  readonly pointer: string;
+}
+
+/** A C# expression that parses `expr` or throws a typed 422.
+ *
+ *  `throw` is an expression in C# 7+, and `out var` in an argument position
+ *  declares into the enclosing block, so the whole guard fits where the bare
+ *  `Parse(...)` used to sit — no statement hoisting, no emitter restructuring:
+ *
+ *      decimal.TryParse(request.NewPrice, NumberStyles.Number,
+ *          CultureInfo.InvariantCulture, out var __wp_request_NewPrice)
+ *        ? __wp_request_NewPrice
+ *        : throw new global::D.Domain.Common.WireFormatException(
+ *            "/newPrice", "Invalid decimal: \"12,50\"")
+ *
+ *  The out-variable name is derived from `expr`, so two fields in one argument
+ *  list never collide and the same field twice would be the same declaration
+ *  (which cannot happen — one wire field maps to one command argument).
+ *  A collection element parses inside its own `.Select(__e => …)` lambda, whose
+ *  body is its own scope.
+ *
+ *  `label` mirrors the noun node's Zod issue uses (`Invalid decimal: "…"`), so
+ *  the two backends' `errors[].message` read identically. */
+function wireParseGuard(
+  expr: string,
+  site: WireArgSite,
+  label: string,
+  tryParse: (outVar: string) => string,
+): string {
+  const outVar = `__wp_${expr.replace(/[^A-Za-z0-9]/g, "_")}`;
+  // Interpolated so the message quotes the value the caller actually sent.
+  // `{{` / `}}` are not needed: the only interpolation hole is the raw value.
+  const message = `$"Invalid ${label}: \\"{${expr}}\\""`;
+  return (
+    `${tryParse(outVar)}\n                ? ${outVar}\n                : throw new global::${site.ns}` +
+    `.Domain.Common.WireFormatException(${JSON.stringify(site.pointer)}, ${message})`
+  );
+}
+
 /** Map a wire-shaped expression to a domain-typed argument for a command. */
 export function wireToCommandArgument(
   expr: string,
   t: TypeIR,
   ctx: EnrichedBoundedContextIR,
+  /** Where this value came from on the wire — see {@link WireArgSite}.
+   *  Required: an omitted site is a bare parse, i.e. a 500 on bad input. */
+  site: WireArgSite,
 ): string {
   const info = wireTypeInfo(t, "request");
   if (info.isNullable) {
@@ -304,12 +407,16 @@ export function wireToCommandArgument(
       (inner.refKind === "primitive" &&
         inner.primitive !== "string" &&
         inner.primitive !== "money" &&
-        inner.primitive !== "datetime");
+        inner.primitive !== "datetime" &&
+        // `File` crosses the wire as the `FileRef` RECORD, not a value type —
+        // `request.Doc!.Value` on it is CS1061 (M-T6.39; the sibling of the
+        // same omission in `csIsValueType` below).
+        inner.primitive !== "File");
     const unwrap = valueWire ? `${expr}!.Value` : `${expr}!`;
-    return `(${expr} is null ? null : ${wireToCommandArgument(unwrap, innerT, ctx)})`;
+    return `(${expr} is null ? null : ${wireToCommandArgument(unwrap, innerT, ctx, site)})`;
   }
   if (info.isCollection) {
-    return `${expr}.Select(__e => ${wireToCommandArgument("__e", peelCollection(t), ctx)}).ToList()`;
+    return `${expr}.Select(__e => ${wireToCommandArgument("__e", peelCollection(t), ctx, site)}).ToList()`;
   }
   switch (info.refKind) {
     case "primitive":
@@ -319,12 +426,31 @@ export function wireToCommandArgument(
         // string.  CultureInfo + DateTimeStyles live in
         // System.Globalization, outside the SDK's implicit-usings set
         // (declared via collectWireUsings on the emitter side).
-        return `DateTime.Parse(${expr}, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal)`;
+        //
+        // TryParse, not Parse: a malformed value is the CALLER's error, so it
+        // becomes a typed 422 (see `wireParseGuard`), not an uncaught
+        // FormatException the filter renders as 500.
+        return wireParseGuard(
+          expr,
+          site,
+          "datetime",
+          (out) =>
+            `DateTime.TryParse(${expr}, CultureInfo.InvariantCulture, ` +
+            `DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var ${out})`,
+        );
       }
       if (info.primitive === "money") {
         // Wire string → System.Decimal.  InvariantCulture so a locale's
-        // comma-vs-dot doesn't flip the parse.
-        return `decimal.Parse(${expr}, CultureInfo.InvariantCulture)`;
+        // comma-vs-dot doesn't flip the parse — and TryParse so `"12,50"`
+        // answers 422 like node's `moneySchema` instead of 500 (M-T6.48).
+        return wireParseGuard(
+          expr,
+          site,
+          "decimal",
+          (out) =>
+            `decimal.TryParse(${expr}, NumberStyles.Number, CultureInfo.InvariantCulture, ` +
+            `out var ${out})`,
+        );
       }
       return expr;
     case "id":
@@ -337,12 +463,19 @@ export function wireToCommandArgument(
       const vo = ctx.valueObjects.find((v) => v.name === info.base);
       if (!vo) return expr;
       const args = vo.fields
-        .map((f) => wireToCommandArgument(`${expr}.${upperFirst(f.name)}`, f.type, ctx))
+        .map((f) =>
+          wireToCommandArgument(`${expr}.${upperFirst(f.name)}`, f.type, ctx, {
+            ...site,
+            pointer: `${site.pointer}/${f.name}`,
+          }),
+        )
         .join(", ");
       return `new ${info.base}(${args})`;
     }
     case "entity":
       return expr;
+    case "provenanced":
+      throw new Error(PROVENANCED_REQUEST_ERROR);
   }
 }
 
@@ -362,6 +495,10 @@ export function collectWireUsings(
   if (info.isCollection) return collectWireUsings(peelCollection(t), ctx, into);
   if (info.refKind === "primitive") {
     if (info.primitive === "datetime" || info.primitive === "money") {
+      // `CultureInfo` + `DateTimeStyles` + `NumberStyles` all live here.  The
+      // `WireFormatException` the guard throws is fully qualified at the call
+      // site, so it needs no using of its own — `Domain.Common` is only
+      // conditionally imported by the controller.
       into.add("System.Globalization");
     }
     return into;
@@ -412,8 +549,13 @@ export function projectToResponse(
       if (info.primitive === "decimal") {
         // The domain keeps `System.Decimal`; the RESPONSE field is a `double`
         // (#2563 — see `wireType`), so the narrowing happens here, once, at the
-        // wire boundary.
-        return `(double)${domainExpr}`;
+        // wire boundary.  It must be CORRECTLY ROUNDED — a `(double)` cast is
+        // not (F10/M-T6.47); see `csDecimalToWireDouble`.  Reading the column
+        // as `double` at the provider seam (#2631's fix for the dapper
+        // aggregate) is not available here: the DOMAIN property has to stay
+        // `System.Decimal` for domain arithmetic, so the narrowing belongs at
+        // the wire boundary, once.
+        return csDecimalToWireDouble(domainExpr);
       }
       return domainExpr;
     case "id":
@@ -446,6 +588,13 @@ export function projectToResponse(
           .find((x) => x.part.name === info.base);
       if (!part) return domainExpr;
       return projectEntityExpr(domainExpr, part.part, ctx, { maskNames: names });
+    }
+    case "provenanced": {
+      // Fold the domain's two co-located members into the one wire carrier.
+      // `domainExpr` is the VALUE property (`found.Total`); its lineage sibling
+      // is named by the same rule the entity emitter declared it with.
+      const value = projectToResponse(domainExpr, info.carried!, ctx, names);
+      return `new ${PROVENANCED_CS_RECORD}<${wireType(info.carried!, ctx, "response")}>(${value}, ${csProvSibling(domainExpr)})`;
     }
   }
 }
@@ -487,6 +636,8 @@ export function domainToRequestExpr(
     }
     case "entity":
       return domainExpr;
+    case "provenanced":
+      throw new Error(PROVENANCED_REQUEST_ERROR);
   }
 }
 
@@ -499,12 +650,25 @@ function csIsValueType(t: TypeIR): boolean {
   if (info.isCollection) return false;
   switch (info.refKind) {
     case "primitive":
-      return info.primitive !== "string";
+      // The question is about the DOMAIN representation, not the wire one:
+      // `money` and `datetime` render as wire strings but ARE `decimal` /
+      // `DateTime` in the domain, so `T?` is a `Nullable<T>` and `.Value`
+      // unwraps it. Two Loom primitives are reference types on the domain side
+      // and must be unwrapped with `!` instead:
+      //   • `string`
+      //   • `File` — the shared `FileRef` RECORD (see the CS_PRIMITIVE map
+      //     above). An optional `File?` field projected `.Value` on it, which
+      //     is CS1061; no fixture had a nullable `File` until `file-download`
+      //     (M-T6.39), so no compile tier had ever reached this arm.
+      return info.primitive !== "string" && info.primitive !== "File";
     case "id":
     case "enum":
       return true;
     case "valueObject":
     case "entity":
+    // The carrier is a `record` (a reference type), so `T?` is a plain
+    // nullable reference — no `.Value` unwrap.
+    case "provenanced":
       return false;
   }
 }
@@ -530,6 +694,17 @@ export function projectEntityArgs(
      *  operation's before/after snapshots); omit it and this projection gets a
      *  private one.  See `MaskNamer`. */
     maskNames?: MaskNamer;
+    /** Project the raw value for every `mask unless` field instead of the
+     *  redacting wrap (M-T3.9).
+     *
+     *  `maskWrap` reads the REQUEST's principal, so a projection that feeds the
+     *  AUDIT TRAIL recorded whatever the writer happened to be allowed to see:
+     *  the same operation, run by two actors, wrote two different `before` /
+     *  `after` snapshots, and the one written by the less-privileged actor
+     *  recorded `null` for the very field the audit exists to evidence.  An
+     *  audit record is not an API read — it is never returned to the actor who
+     *  produced it — so it projects unmasked.  NOT for any wire path. */
+    unmasked?: boolean;
   },
 ): string {
   // `wireFieldsFor` recomputes the wire shape from the enriched node's fields.
@@ -558,7 +733,7 @@ export function projectEntityArgs(
       // The nested projection shares this scope's namer.  A C# lambda body is
       // not an escape hatch (shadowing an enclosing local is CS0136), so were a
       // contained part ever to carry a mask it must not reuse an outer name.
-      const nested = { maskNames: names };
+      const nested = { maskNames: names, ...(opts?.unmasked ? { unmasked: true } : {}) };
       args.push(
         wireTypeInfo(wf.type, "response").isCollection
           ? `${accessor}.Select(__e => ${projectEntityExpr("__e", part, ctx, nested)}).ToList()`
@@ -567,23 +742,20 @@ export function projectEntityArgs(
             : projectEntityExpr(accessor, part, ctx, nested),
       );
     } else {
-      args.push(
-        maskWrap(
-          projectToResponse(`${domainExpr}.${upperFirst(wf.name)}`, wf.type, ctx, names),
-          wf,
-          ctx,
-          names,
-        ),
+      const projected = projectToResponse(
+        `${domainExpr}.${upperFirst(wf.name)}`,
+        wf.type,
+        ctx,
+        names,
       );
+      // The record's parameter for a masked field is already nullable, so the
+      // unmasked (non-null) value fits it without a cast.
+      args.push(opts?.unmasked ? projected : maskWrap(projected, wf, ctx, names));
     }
   }
-  // Provenance: trailing `<Field>Provenance` lineage args, in field order,
-  // matching the response record's trailing params (see `responseRecordParams`).
-  if (!opts?.unionVariant) {
-    for (const f of entity.fields.filter((pf) => pf.provenanced)) {
-      args.push(`${domainExpr}.${upperFirst(f.name)}Provenance`);
-    }
-  }
+  // (M-T6.12) No trailing `<Field>Provenance` args any more: the lineage rides
+  // inside the provenanced field's own `Provenanced<T>` argument, folded by
+  // `projectToResponse`'s `provenanced` arm.
   return args.join(", ");
 }
 
@@ -591,7 +763,7 @@ export function projectEntityExpr(
   domainExpr: string,
   entity: EnrichedAggregateIR | EnrichedEntityPartIR,
   ctx: EnrichedBoundedContextIR,
-  opts?: { unionVariant?: boolean; maskNames?: MaskNamer },
+  opts?: { unionVariant?: boolean; maskNames?: MaskNamer; unmasked?: boolean },
 ): string {
   return `new ${entity.name}Response(${projectEntityArgs(domainExpr, entity, ctx, opts)})`;
 }
@@ -629,14 +801,16 @@ export function responseParamsFromPayload(
   const parts: string[] = [];
   // The DTO leads with `Guid Id` even though the record omits it.
   parts.push(dtoParam(csIdValueClrType(agg.idValueType), "Id"));
+  // A declared record names DOMAIN types (`total: int`), so a field the
+  // aggregate declares `provenanced` is wrapped in the wire carrier here — the
+  // same wrap `wireTypeForField` applies on the wireShape path, so the record's
+  // params still line up with `projectEntityArgs`'s carrier argument.
+  const provenanced = new Set(agg.fields.filter((f) => f.provenanced).map((f) => f.name));
   for (const f of payload.fields) {
-    parts.push(dtoParam(payloadFieldCsType(f.type, ctx), upperFirst(f.name)));
-  }
-  // Provenance — identical trailing logic to `responseRecordParams`.
-  for (const f of agg.fields.filter((pf) => pf.provenanced)) {
-    parts.push(
-      `[property: JsonPropertyName(${JSON.stringify(`${snake(f.name)}_provenance`)})] ProvLineage? ${upperFirst(f.name)}Provenance`,
-    );
+    const t: TypeIR = provenanced.has(f.name)
+      ? { kind: "genericInstance", ctor: "provenanced", arg: f.type }
+      : f.type;
+    parts.push(dtoParam(payloadFieldCsType(t, ctx), upperFirst(f.name)));
   }
   return parts.join(", ");
 }
@@ -697,21 +871,43 @@ function responseRecordParams(
       parts.push(dtoParam(csType, upperFirst(wf.name)));
     }
   }
-  // Provenance (provenance.md): expose each provenanced field's current lineage
-  // as a trailing nullable `<Field>Provenance` response param (no `[Required]` —
-  // a never-written field has null lineage).  Lockstep with `projectEntityArgs`.
-  for (const f of ent.fields.filter((pf) => pf.provenanced)) {
-    parts.push(
-      `[property: JsonPropertyName(${JSON.stringify(`${snake(f.name)}_provenance`)})] ProvLineage? ${upperFirst(f.name)}Provenance`,
-    );
-  }
+  // (M-T6.12) No trailing `<Field>Provenance` param any more: the provenanced
+  // field's own param is `Provenanced<T>`, carrying the lineage with the value.
   return parts.join(", ");
 }
 
-/** True iff the entity exposes any provenanced field on its response (so the
- *  emitter adds the `using <ns>.Domain.Common;` the `ProvLineage?` param needs). */
+/** True iff the entity exposes any provenanced field on its response — so the
+ *  DTO's `Provenanced<T>` component (and its `ProvLineage` member) need
+ *  `using <ns>.Domain.Common;`. */
 export function entityExposesProvenance(ent: { fields: FieldIR[] }): boolean {
   return ent.fields.some((f) => f.provenanced);
+}
+
+/**
+ * True iff PROJECTING this aggregate to its response DTO emits an expression
+ * that NAMES a type from `<ns>.Domain.Common` — so every emitter that inlines
+ * `projectEntityExpr` / `projectToResponse` into a file must add that using or
+ * the file fails to compile.
+ *
+ * Two triggers, and they are different from the DTO's own
+ * (`entityExposesProvenance`) because a projection can name a Common type the
+ * record declaration doesn't, and vice versa:
+ *
+ *   - `mask unless` — `maskWrap` reads `RequestContext.Current`.
+ *   - `provenanced` — the projection CONSTRUCTS the carrier,
+ *     `new Provenanced<int>(found.Total, found.TotalProvenance)` (M-T6.12).
+ *     Before the carrier this arm was a bare property read
+ *     (`found.TotalProvenance`), which named no type and so needed no using —
+ *     which is exactly why every read handler over a provenanced aggregate
+ *     started failing `CS0246: The type or namespace name 'Provenanced<>'
+ *     could not be found`.
+ */
+export function projectionNamesDomainCommon(agg: EnrichedAggregateIR): boolean {
+  return (
+    agg.fields.some((f) => f.maskUnless) ||
+    entityExposesProvenance(agg) ||
+    agg.parts.some((p) => entityExposesProvenance(p))
+  );
 }
 
 function isPart(ent: EnrichedAggregateIR | EnrichedEntityPartIR): ent is EnrichedEntityPartIR {

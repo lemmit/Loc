@@ -11,6 +11,7 @@
 // `// TODO(flutter full-parity):` in `dart-model-emit.ts`.
 
 import type { PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
+import { MONEY_WIRE_SCALE } from "../money-scale.js";
 
 /** Peel a single `optional` layer — the wire optionality is carried once, at
  *  the field level, so the codec never double-wraps. */
@@ -49,6 +50,9 @@ function dartPrimitive(name: PrimitiveName): string {
 /** Non-nullable Dart type spelling for a wire `TypeIR`.  An `optional` inner
  *  layer appends `?`; the caller adds `?` for a wire field whose optionality is
  *  carried by the `WireField.optional` flag rather than an `optional` type. */
+/** The Dart spelling of the shared `Provenanced<T>` wire carrier. */
+export const DART_PROVENANCED = "Provenanced";
+
 export function dartType(t: TypeIR): string {
   switch (t.kind) {
     case "primitive":
@@ -66,6 +70,13 @@ export function dartType(t: TypeIR): string {
       return t.name;
     case "array":
       return `List<${dartType(t.element)}>`;
+    case "genericInstance":
+      // `Provenanced<int>` (M-T6.12) — the value + lineage wire carrier.  An
+      // explicit arm, not the `dynamic` fallthrough: a dynamic here would
+      // silently drop the value's type out of the model and out of every page
+      // that reads it.
+      if (t.ctor === "provenanced") return `${DART_PROVENANCED}<${dartType(t.arg)}>`;
+      return "dynamic";
     case "optional": {
       // `File` already spells the nullable `FileRef?`, so `File?` must not
       // double-up to `FileRef??`.
@@ -85,9 +96,13 @@ export function isIdentityJson(t: TypeIR): boolean {
   switch (base.kind) {
     case "primitive":
       // Every scalar (incl. `double`/`int`/`bool`/`dynamic`) is JSON-native;
-      // `datetime` needs ISO-string conversion and `File` is the `FileRef`
-      // object (`.toJson()` / `.fromJson`).
-      return base.name !== "datetime" && base.name !== "File";
+      // `datetime` needs ISO-string conversion, `File` is the `FileRef`
+      // object (`.toJson()` / `.fromJson`), and `money` rides the wire as a
+      // decimal STRING — `MONEY_WIRE_SCALE` digits, the shape every backend
+      // serves and every backend's request schema validates (`z.string()`).
+      // It was in this set, so a Flutter client POSTed a bare JSON number the
+      // backend rejects.
+      return base.name !== "datetime" && base.name !== "File" && base.name !== "money";
     case "id":
     case "enum":
       return true;
@@ -110,8 +125,22 @@ export function dartFromJson(t: TypeIR, access: string): string {
         case "long":
           return `${access} as int`;
         case "decimal":
-        case "money":
+          // `decimal` rides the wire as a JSON NUMBER (`z.number()` in the
+          // shared frontend contract) — unchanged.
           return `(${access} as num).toDouble()`;
+        case "money":
+          // `money` rides the wire as a decimal STRING at MONEY_WIRE_SCALE
+          // digits (`money-scale.ts`, RS-12) — every backend serves
+          // `"12.5000"`, and the emitted `wire-spec.json` declares
+          // `{"type":"string","format":"decimal"}`.  This used to read
+          // `(x as num).toDouble()`, so EVERY money read threw
+          // `String is not a subtype of num` at runtime — invisible to
+          // `flutter analyze`/`build`, which cannot see a cast.
+          //
+          // The parse is tolerant of a bare number too (`'$x'` stringifies
+          // either shape): a hand-rolled `extern` endpoint outside the
+          // generated contract is then merely imprecise rather than fatal.
+          return `double.parse('\${${access}}')`;
         case "bool":
           return `${access} as bool`;
         case "datetime":
@@ -131,6 +160,14 @@ export function dartFromJson(t: TypeIR, access: string): string {
       return `${base.name}.fromJson(${access} as Map<String, dynamic>)`;
     case "array":
       return `(${access} as List<dynamic>).map((e) => ${dartFromJson(base.element, "e")}).toList()`;
+    case "genericInstance":
+      if (base.ctor === "provenanced") {
+        // The carrier's `fromJson` takes a decoder for the value half, so the
+        // carried type keeps its own conversion (a `datetime` value still
+        // parses, a nested VO still builds its class).
+        return `${DART_PROVENANCED}.fromJson(${access} as Map<String, dynamic>, (__v) => ${dartFromJson(base.arg, "__v")})`;
+      }
+      return access;
     default:
       return access;
   }
@@ -144,8 +181,14 @@ export function dartToJson(t: TypeIR, access: string): string {
   if (isIdentityJson(base)) return access;
   switch (base.kind) {
     case "primitive":
-      // Non-identity primitives: `File` (the `FileRef` object) and `datetime`.
-      return base.name === "File" ? `${access}.toJson()` : `${access}.toIso8601String()`;
+      // Non-identity primitives: `File` (the `FileRef` object), `datetime`,
+      // and `money` — which goes back out as the same fixed-scale decimal
+      // STRING the backend's request schema validates (`z.string()` +
+      // `^-?\d+(\.\d+)?$`).  A bare `double` here was rejected at the wire
+      // boundary on every write.
+      if (base.name === "File") return `${access}.toJson()`;
+      if (base.name === "money") return `${access}.toStringAsFixed(${MONEY_WIRE_SCALE})`;
+      return `${access}.toIso8601String()`;
     case "valueobject":
     case "entity":
       return `${access}.toJson()`;

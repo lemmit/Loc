@@ -130,6 +130,51 @@ system Demo {
     expect(await repoCodes('find inR(): Order[] where InRegion("EU")')).not.toContain(TYPE);
   });
 
+  // --- capability `filter` declaration site --------------------------------
+  // The last live piece of gap #3: a `filter <Criterion>(args)` on an aggregate
+  // is a DECLARATION, not a body, so it carries no lexical `Env` and
+  // `checkExprCallArgs` was never run over it.  `filter InRegion(42)` against
+  // `criterion InRegion(r: string)` validated with ZERO diagnostics while the
+  // identical call in a `when` gate two lines away was rejected.
+  it("flags a wrong-typed criterion arg on a capability `filter`", async () => {
+    expect(await codes("filter InRegion(42)")).toContain(TYPE);
+  });
+
+  it("is CLEAN for a correctly-typed criterion arg on a `filter`", async () => {
+    expect(await codes('filter InRegion("EU")')).not.toContain(TYPE);
+  });
+
+  it("does not report an arity mismatch on a `filter` as a type error", async () => {
+    expect(await codes('filter InRegion("EU", "US")')).not.toContain(TYPE);
+  });
+
+  // --- projection query clauses --------------------------------------------
+  it("flags a wrong-typed criterion arg in a projection `where`", async () => {
+    const { diagnostics } = await parseString(
+      `
+system Demo {
+  subdomain S {
+    context C {
+      criterion InRegion(r: string) of Order = region == r
+      aggregate Order with crudish { region: string  qty: int }
+      repository Orders for Order { }
+      projection Regional {
+        qty: int
+        from Order
+        where InRegion(5)
+        select qty = sum(qty)
+      }
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: C, kind: state, use: primary }
+  deployable api { platform: node contexts: [C] dataSources: [st] port: 3000 }
+}`,
+      { validate: true },
+    );
+    expect(codesOf(diagnostics)).toContain(TYPE);
+  });
+
   // --- no double-report of arity as a type error ---------------------------
   it("does not report an arity mismatch in a gate as a type error", async () => {
     expect(

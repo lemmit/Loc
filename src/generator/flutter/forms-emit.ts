@@ -51,6 +51,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { MONEY_WIRE_SCALE } from "../money-scale.js";
 
 // ---------------------------------------------------------------------------
 // Widget-name helpers — the ONE place the view seam and the class emitter agree
@@ -113,6 +114,11 @@ export interface FlutterFormField {
   required: boolean;
   /** For an `enum` field, the allowed values (rendered as dropdown items). */
   enumValues?: string[];
+  /** `money` — the input is still a numeric `TextFormField`, but the SUBMIT
+   *  value is the fixed-scale decimal STRING the wire carries
+   *  (`money-scale.ts`, RS-12), not a bare JSON number the backend's
+   *  `z.string()` request schema rejects. */
+  money?: boolean;
   /** When flattened from a value object, the JSON object key it nests under
    *  (`cost` for a `cost: Money` VO expanded to `costAmount`/`costCurrency`). */
   objectKey?: string;
@@ -124,6 +130,8 @@ export interface FlutterFormField {
    *  per-row keyboard + parse (a `string[]` submits the raw list; a numeric array
    *  parses each row). */
   elementKind?: "text" | "number-int" | "number-double";
+  /** `money[]` — the elements submit as fixed-scale decimal strings. */
+  elementMoney?: boolean;
   /** For an `object-array` field (`items: LineItem[]`), the value object's
    *  scalar sub-fields in order — each row is a group of `TextFormField`s, one
    *  per sub-field, and submits a `{sub: value, …}` map per row. */
@@ -131,6 +139,8 @@ export interface FlutterFormField {
     jsonKey: string;
     label: string;
     kind: "text" | "number-int" | "number-double";
+    /** `money` sub-field — submits as a fixed-scale decimal string. */
+    money?: boolean;
   }[];
 }
 
@@ -156,8 +166,8 @@ export interface FlutterFormSpec {
    *  sub-field, mixed value-object array, enum/bool/datetime/id element array,
    *  unresolved value-object field).  Emitted into the widget class so the drop
    *  is visible in the generated Dart AND counted by the parity lint's
-   *  `TODO_LINE` regex — the drop is no longer silent.  Empty for a fully
-   *  rendered form. */
+   *  `TODO_LINE` regex, rather than silent.  Empty for a fully rendered
+   *  form. */
   dropped: string[];
   /** Whether this form styles its submit as a destructive (error-coloured)
    *  action (destroy forms). */
@@ -177,6 +187,13 @@ function droppedMarker(field: string, reason: string): string {
 /** Peel a single `optional` layer. */
 function peel(t: TypeIR): TypeIR {
   return t.kind === "optional" ? t.inner : t;
+}
+
+/** `money` — a numeric input whose SUBMIT value is a fixed-scale decimal
+ *  string, not a JSON number (`money-scale.ts`, RS-12). */
+function isMoney(t: TypeIR): boolean {
+  const b = peel(t);
+  return b.kind === "primitive" && b.name === "money";
 }
 
 /** The Flutter input kind for a scalar wire type, or `undefined` when the type
@@ -210,8 +227,8 @@ function scalarInputKind(
         // (`{url,key,contentType,size}`) — NOT a string.  It renders as the same
         // pick → multipart `POST /files` → `FileRef` write-back the standalone
         // `FileUpload` page primitive ships (`pack.ts`), and submits the
-        // `FileRef` map.  Before this it fell through to `"text"` and posted a
-        // bare `String`, which every backend rejected with a 422.
+        // `FileRef` map.  Falling through to `"text"` posts a bare `String`,
+        // which every backend rejects with a 422.
         return "file";
       default:
         return "text"; // string, guid, json
@@ -242,6 +259,7 @@ function buildField(
     kind,
     required: !optional,
     enumValues,
+    money: isMoney(type) || undefined,
     objectKey,
     fkCollection,
   };
@@ -307,7 +325,12 @@ function prepareFields(
         for (const sub of voFieldsOfElem) {
           const k = scalarInputKind(sub.type, enumsByName, aggregatesByName);
           if (k === "text" || k === "number-int" || k === "number-double") {
-            objectFields.push({ jsonKey: sub.name, label: humanize(sub.name), kind: k });
+            objectFields.push({
+              jsonKey: sub.name,
+              label: humanize(sub.name),
+              kind: k,
+              money: isMoney(sub.type) || undefined,
+            });
           } else {
             allScalar = false;
             break;
@@ -340,6 +363,7 @@ function prepareFields(
           kind: "scalar-array",
           required: !fieldOptional,
           elementKind: elemKind,
+          elementMoney: isMoney(base.element) || undefined,
         });
       } else {
         const eb = peel(base.element);
@@ -845,10 +869,16 @@ function fieldValueExpr(f: FlutterFormField): string {
       return f.required
         ? `int.tryParse(${ctrl})`
         : `${ctrl}.isEmpty ? null : int.tryParse(${ctrl})`;
-    case "number-double":
-      return f.required
-        ? `double.tryParse(${ctrl})`
-        : `${ctrl}.isEmpty ? null : double.tryParse(${ctrl})`;
+    case "number-double": {
+      // `money` leaves as the fixed-scale decimal STRING the wire carries
+      // (`money-scale.ts`, RS-12) — the backend's request schema is
+      // `z.string()` over `^-?\d+(\.\d+)?$`, so a bare JSON number is
+      // rejected at the boundary.  `decimal` stays a JSON number.
+      const parsed = f.money
+        ? `double.tryParse(${ctrl})?.toStringAsFixed(${MONEY_WIRE_SCALE})`
+        : `double.tryParse(${ctrl})`;
+      return f.required ? parsed : `${ctrl}.isEmpty ? null : ${parsed}`;
+    }
     case "bool":
       return stateId(f.wireName);
     case "enum":
@@ -866,7 +896,9 @@ function fieldValueExpr(f: FlutterFormField): string {
         return `${ctrls}.map((c) => int.tryParse(c.text)).whereType<int>().toList()`;
       }
       if (f.elementKind === "number-double") {
-        return `${ctrls}.map((c) => double.tryParse(c.text)).whereType<double>().toList()`;
+        return f.elementMoney
+          ? `${ctrls}.map((c) => double.tryParse(c.text)?.toStringAsFixed(${MONEY_WIRE_SCALE})).whereType<String>().toList()`
+          : `${ctrls}.map((c) => double.tryParse(c.text)).whereType<double>().toList()`;
       }
       return `${ctrls}.map((c) => c.text).toList()`;
     }
@@ -879,7 +911,9 @@ function fieldValueExpr(f: FlutterFormField): string {
             sf.kind === "number-int"
               ? `int.tryParse(${cell})`
               : sf.kind === "number-double"
-                ? `double.tryParse(${cell})`
+                ? sf.money
+                  ? `double.tryParse(${cell})?.toStringAsFixed(${MONEY_WIRE_SCALE})`
+                  : `double.tryParse(${cell})`
                 : cell;
           return `'${dartStr(sf.jsonKey)}': ${val}`;
         })

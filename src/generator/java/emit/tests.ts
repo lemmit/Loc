@@ -38,7 +38,7 @@ export function renderJavaTestsFile(
   return renderJavaSubjectTests(agg.name, agg.tests, ctx, basePkg, pkg, userFields, false);
 }
 
-/** Value-object unit-test class (test-placement.md, Phase 2).  The VO is
+/** Value-object unit-test class (test-placement.md).  The VO is
  *  reachable through the shared `${basePkg}.domain.valueobjects.*` wildcard. */
 export function renderJavaVoTestsFile(
   vo: ValueObjectIR,
@@ -50,7 +50,7 @@ export function renderJavaVoTestsFile(
   return renderJavaSubjectTests(vo.name, vo.tests, ctx, basePkg, pkg, userFields, false);
 }
 
-/** Domain-service unit-test class (test-placement.md, Phase 2).  Adds the
+/** Domain-service unit-test class (test-placement.md).  Adds the
  *  `${basePkg}.domain.services.*` wildcard so `<Service>.<op>(…)` resolves. */
 export function renderJavaServiceTestsFile(
   svc: DomainServiceIR,

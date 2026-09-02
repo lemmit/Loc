@@ -4,6 +4,10 @@ import {
 } from "../../../generator/_frontend/server-default.js";
 import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
 import {
+  PROVENANCED_REQUEST_ERROR,
+  provenancedEntries,
+} from "../../../generator/_payload/provenanced-wire.js";
+import {
   discriminatedUnionZod,
   findUnionSpec,
   type UnionMemberField,
@@ -22,6 +26,8 @@ import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import { aggHasFieldMask } from "../../../generator/typescript/repository-wire-builder.js";
 import {
   chainSingleFieldNative,
+  openapiLengthMeta,
+  orderSingleFieldPatterns,
   refineClauseFor,
   takeSingleFieldChain,
 } from "../../../generator/zod-refine.js";
@@ -59,8 +65,6 @@ import {
   aggregateUsesMoneyDeep,
   findGateUsesCurrentUser,
   findUsesCurrentUser,
-  operationIsGuarded,
-  operationUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
 import {
   peelCollection,
@@ -171,7 +175,17 @@ function txWrapperCall(usingMikro: boolean): string {
  *  All three are needed: the gate alone leaks across tenants, reachability
  *  alone leaks masked fields to legitimate readers, and the mask alone leaves
  *  the endpoint open. */
-function emitHistoryRoute(agg: EnrichedAggregateIR, find: FindIR, usingMikro: boolean): string[] {
+function emitHistoryRoute(
+  agg: EnrichedAggregateIR,
+  find: FindIR,
+  usingMikro: boolean,
+  /** The `httpStatus`-resolved `NotFound` rung.  This route's declared set is
+   *  hand-rolled (the history find is `synthesized`, so `deriveContextOperations`
+   *  skips it — see `apiSurfaceCoverage.notLifted`), which is exactly why the
+   *  status has to be passed in rather than left a literal: the runtime answer
+   *  comes from the router's shared `AggregateNotFoundError` arm, which resolves. */
+  notFoundStatus: number,
+): string[] {
   const out: string[] = [];
   const aggSlug = snake(plural(agg.name));
   out.push(`app.openapi(`);
@@ -191,7 +205,7 @@ function emitHistoryRoute(agg: EnrichedAggregateIR, find: FindIR, usingMikro: bo
     );
   }
   out.push(
-    `      404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+    `      ${notFoundStatus}: { description: ${JSON.stringify(httpStatusText(notFoundStatus))}, content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
   // The `{id}` uuid parse — same wire-validation tier every other `{id}` route
   // declares.  Hand-rolled here (history is `apiSurfaceCoverage.notLifted`),
@@ -361,7 +375,14 @@ function emitStaticSubpathMethodGuard(statics: Record<string, string[]>): string
     "  // method probe (http/index.ts) is unaffected.",
     `  const staticSubpathMethods: Record<string, string[]> = { ${entries} };`,
     '  app.use("/:__seg", async (c, next) => {',
-    '    const allow = staticSubpathMethods[c.req.path.slice(c.req.path.lastIndexOf("/") + 1)];',
+    '    const __seg = c.req.path.slice(c.req.path.lastIndexOf("/") + 1);',
+    "    // `Object.hasOwn`, never a bare index: the segment is CALLER-supplied,",
+    "    // so a plain lookup reaches Object.prototype — `/api/items/constructor`",
+    "    // resolved to a function, passed the truthiness guard, and threw on",
+    "    // `.includes` (a 500 from an ordinary URL).  Own keys only.",
+    "    const allow = Object.hasOwn(staticSubpathMethods, __seg)",
+    "      ? staticSubpathMethods[__seg]",
+    "      : undefined;",
     "    if (allow && !allow.includes(c.req.method)) {",
     "      return c.body(",
     "        frameworkProblemBody(405, `method ${c.req.method} is not supported for ${c.req.path}`, c.req.path),",
@@ -431,9 +452,9 @@ export function buildRoutesFile(
   // too: a deployable with auditing off writes no rows, and a route serving an
   // always-empty timeline reads as authoritative while saying nothing.
   const historyFind = emitAudit ? repo?.historyFind : undefined;
-  // Lifecycle stamps (audit / softDelete) no longer touch the route handler:
-  // node-persist-time-auditing relocated stamping into the drizzle save()
-  // (db/audit-stamp.ts), reading the principal from the ambient request context.
+  // Lifecycle stamps (audit / softDelete) do NOT touch the route handler:
+  // stamping happens persist-time in the drizzle save() (db/audit-stamp.ts),
+  // reading the principal from the ambient request context.
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   if (aggregateUsesMoneyDeep(agg, ctx.valueObjects)) {
@@ -486,7 +507,7 @@ export function buildRoutesFile(
   if (whenEnums.size > 0) {
     lines.push(`import { ${[...whenEnums].sort().join(", ")} } from "../domain/value-objects";`);
   }
-  // Extern operations (extern (b) Phase 2) are now aggregate-owned hooks: the
+  // Extern operations (extern (b)) are now aggregate-owned hooks: the
   // route calls `aggregate.<op>(...)` like any other operation, so there is no
   // handler-registry import.
   if (needsTx) {
@@ -911,10 +932,10 @@ export function buildRoutesFile(
       })
       .join(", ");
     lines.push(`      const created = ${agg.name}.create({ ${createArgs} });`);
-    // Lifecycle stamps (createdAt/createdBy/…) are NO LONGER set here.
-    // node-persist-time-auditing relocated stamping into the drizzle save()
-    // (db/audit-stamp.ts), which reads the principal from the ambient request
-    // context — so the handler is just create → save.
+    // Lifecycle stamps (createdAt/createdBy/…) are NOT set here: stamping
+    // happens persist-time in the drizzle save() (db/audit-stamp.ts), which
+    // reads the principal from the ambient request context, so the handler is
+    // just create → save.
     if (auditCreate) {
       // Audited create — persist + write the lifecycle audit row in ONE
       // transaction (mirrors the operation audit path).  Asymmetry: create
@@ -1035,7 +1056,14 @@ export function buildRoutesFile(
   // cannot be shadowed by the `/{id}` param route below the way a static
   // one-segment find can; registered here anyway to keep the reads together.
   if (historyFind) {
-    lines.push(...emitHistoryRoute(agg, historyFind, usingMikro).map((l) => `  ${l}`));
+    lines.push(
+      ...emitHistoryRoute(
+        agg,
+        historyFind,
+        usingMikro,
+        resolveErrorStatus("NotFound", ctx.structuralErrorStatuses),
+      ).map((l) => `  ${l}`),
+    );
     lines.push("");
   }
 
@@ -1250,24 +1278,28 @@ export function buildRoutesFile(
   const disallowedStatus = resolveErrorStatus("Disallowed", ctx.structuralErrorStatuses);
   const uniquenessStatus = resolveErrorStatus("UniquenessConflict", ctx.structuralErrorStatuses);
   const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", ctx.structuralErrorStatuses);
-  // M-T5.20 — the domain floor and the `requires` denial resolve through the
-  // api's `httpStatus` map exactly like the structural conflicts above,
-  // instead of the hardcoded 422 / 403 literals they used to be. Defaults
-  // collapse to those same literals, so output is byte-identical with no
-  // override. `denialOverridesFor`-equivalent merge: neither rung has a
+  // The domain floor and the `requires` denial resolve through the api's
+  // `httpStatus` map exactly like the structural conflicts above; the defaults
+  // are the 422 / 403 literals. `denialOverridesFor`-equivalent merge: neither
+  // rung has a
   // per-context tag (both surface in this app-global handler), so both maps
   // are read — `errorStatusOverrides` for a directly-declared name,
   // `structuralErrorStatuses` for the app-wide fold M-T5.20 widened to carry
   // every mapped name, not just the four structural conflicts.
   const domainStatus = resolveErrorStatus("DomainError", ctx.structuralErrorStatuses);
   const forbiddenStatus = resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses);
+  // The domain NOT-FOUND rung — the last literal of the ladder (M-T5.20 final
+  // slice).  Resolved here and read by BOTH the `AggregateNotFoundError` arm
+  // below and the declared response sets, which come off the shared
+  // `errorStatuses` table and now resolve the same name.
+  const notFoundStatus = resolveErrorStatus("NotFound", ctx.structuralErrorStatuses);
   // The status literals this router's `problem()` helper is actually called
   // with — the always-present base set plus each structural-conflict status
   // whose arm is emitted (gated exactly as the arms below). With no override
   // every conflict is 409, so the union stays `403 | 404 | 409 | 422 | 500`.
   const emittedProblemStatuses = new Set<number>([
     forbiddenStatus,
-    404,
+    notFoundStatus,
     domainStatus,
     500,
     disallowedStatus,
@@ -1332,9 +1364,13 @@ export function buildRoutesFile(
   );
   lines.push(`    }`);
   lines.push(`    if (err instanceof AggregateNotFoundError) {`);
-  lines.push(`      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: 404`)}`);
+  lines.push(
+    `      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: ${notFoundStatus}`)}`,
+  );
   lines.push(`      recordDomainFault("not_found");`);
-  lines.push(`      return problem(404, "Not Found", err.message);`);
+  lines.push(
+    `      return problem(${notFoundStatus}, ${JSON.stringify(problemTitle(notFoundStatus))}, err.message);`,
+  );
   lines.push(`    }`);
   // PG unique_violation (SQLSTATE 23505) — a `unique (...)` domain invariant
   // was breached (the DB unique index is the enforcement contract,
@@ -1583,8 +1619,8 @@ function emitOperationRoute(
   emitTrace: boolean,
   usingMikro = false,
 ): string[] {
-  // Lifecycle stamps are applied persist-time in the drizzle save()
-  // (node-persist-time-auditing); the operation route no longer stamps.
+  // Lifecycle stamps are applied persist-time in the drizzle save(); the
+  // operation route does not stamp.
   const aggSlug = snake(plural(agg.name));
   // Exception-less operation (`operation foo(): X or NotFound`): the route
   // captures the tagged-union result and translates an `error`-variant to an
@@ -1659,8 +1695,8 @@ function emitOperationRoute(
   // when the method still declares the parameter.
   const usesUser = operationBodyUsesCurrentUser(op);
   // The operation body reads the typed `currentUser` only when it references
-  // it directly; lifecycle stamps no longer thread the principal through the
-  // handler (stamped persist-time in the drizzle save()).
+  // it directly; lifecycle stamps do not thread the principal through the
+  // handler (they are stamped persist-time in the drizzle save()).
   if (usesUser || operationGatesUseCurrentUser(op)) {
     out.push(
       `    const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
@@ -1672,7 +1708,7 @@ function emitOperationRoute(
   // The mutation block — extern dispatch or the direct method call —
   // operates on `aggregate` and is independent of which repo loaded it,
   // so it's shared verbatim between the plain and transactional paths.
-  // Extern operations (extern (b) Phase 2) re-home to an aggregate-owned hook,
+  // Extern operations (extern (b)) re-home to an aggregate-owned hook,
   // so the operation method itself runs preconditions → hook → invariants —
   // the route calls it exactly like a non-extern op.
   const mutation = (pad: string): string[] => [
@@ -1818,8 +1854,8 @@ function emitReturningOperationRoute(
   entry: ApiOperationIR,
   emitTrace: boolean,
 ): string[] {
-  // Lifecycle stamps are applied persist-time in the drizzle save()
-  // (node-persist-time-auditing); the operation route no longer stamps.
+  // Lifecycle stamps are applied persist-time in the drizzle save(); the
+  // operation route does not stamp.
   const aggSlug = snake(plural(agg.name));
   const variants = op.returnType?.kind === "union" ? op.returnType.variants : [];
   const errorVariants = variants.filter((vv) => isErrorVariant(vv, ctx));
@@ -1887,7 +1923,7 @@ function emitReturningOperationRoute(
   out.push(...requiresGateLines(op, "    ", ctx));
   out.push(...whenGateLine(agg, op, "    "));
   // Lifecycle stamps are applied persist-time in the drizzle save()
-  // (node-persist-time-auditing) — the handler no longer stamps.
+  // — the handler does not stamp.
   out.push(`    const result = aggregate.${lowerFirst(op.name)}(${callArgs});`);
   out.push(`    await repo.save(aggregate);`);
   // Translate each error variant to a ProblemDetails before the success path.
@@ -2012,8 +2048,8 @@ function emitFindRoute(
   // ForbiddenError is mapped to a 403 ProblemDetails by the file's onError
   // filter — the read-side analogue of an operation `requires` gate.  The 403
   // `detail` carries the source label (`Forbidden: find <name>`) exactly as the
-  // operation gates and the other four backends do — node's read gates used to
-  // drop it, the lone bare-`Forbidden` outlier across all five backends.
+  // operation gates and the other four backends do; dropping it makes node's
+  // read gates the lone bare-`Forbidden` outlier across all five backends.
   if (find.requires) {
     out.push(
       `    if (!(${renderTsExpr(find.requires)})) throw new ForbiddenError(${JSON.stringify(`Forbidden: find ${find.name}`)});`,
@@ -2134,8 +2170,16 @@ function emitResponseDtoSchema(
     : undefined;
   if (declaredResponse) {
     lines.push(`  id: z.string(),`);
+    // A declared record names DOMAIN types, so a field the aggregate declares
+    // `provenanced` is wrapped in the wire carrier here — the same wrap
+    // `wireTypeForField` applies on the wireShape path below, so both paths
+    // emit the identical schema (M-T6.12).
+    const provenanced = new Set(ent.fields.filter((f) => f.provenanced).map((f) => f.name));
     for (const f of declaredResponse.fields) {
-      lines.push(`  ${f.name}: ${zodForResponseField(f.type, f.optional, ctx)},`);
+      const t: TypeIR = provenanced.has(f.name)
+        ? { kind: "genericInstance", ctor: "provenanced", arg: f.type }
+        : f.type;
+      lines.push(`  ${f.name}: ${zodForResponseField(t, f.optional, ctx)},`);
     }
   } else {
     const fields = forApiRead(wireFieldsFor(ent));
@@ -2150,11 +2194,9 @@ function emitResponseDtoSchema(
       }
     }
   }
-  // Co-located provenance rides the wire DTO (see repo.toWire); the
-  // lineage object is nullable when the field was never written.
-  for (const f of ent.fields.filter((f) => f.provenanced)) {
-    lines.push(`  ${f.name}_provenance: ProvenanceLineage.nullable(),`);
-  }
+  // (M-T6.12) No trailing `<field>_provenance` sibling any more: the lineage
+  // rides inside the provenanced field's own key as the `Provenanced<T>`
+  // carrier, emitted by `zodForResponse`'s `provenanced` arm.
   lines.push(`}).openapi("${name}");`);
   return lines;
 }
@@ -2203,13 +2245,36 @@ function emitResponseDtoSchema(
 const BODY_DATETIME =
   "z.string().datetime({ offset: true, local: true }).transform((s: string) => new Date(s))";
 
+/** A query-string / path-segment `bool`, parsed from its four legal textual
+ *  spellings.
+ *
+ *  `z.coerce.boolean()` is `Boolean(input)`, and a query value is ALWAYS a
+ *  string — so `?f=false`, `?f=0` and `?f=` all bound `true` (only the absent
+ *  key differed), and the find answered with exactly the rows the caller asked
+ *  to exclude, at 200.  .NET, FastAPI and Spring all parse `"false"` as false,
+ *  so it was a cross-backend wire divergence as well as a wrong answer.  #2566
+ *  fixed this class for BODIES (`BODY_PRIMITIVE`, uncoerced); this is the
+ *  query/path half of the same rule.
+ *
+ *  `preprocess` rather than `z.enum([...]).transform(...)` because the
+ *  published declaration has to stay `{"type":"boolean"}` — the cross-backend
+ *  spec diff compares it against four other backends that declare a boolean
+ *  query param as a boolean.  Verified on BOTH pinned majors: zod 3 +
+ *  `@hono/zod-openapi@0.19` and zod 4 + `@hono/zod-openapi@1` each publish
+ *  `{"type":"boolean"}` for this chain, and `v` infers as `unknown` from
+ *  `preprocess`'s own signature under `--strict` on both (and the coercion's spurious
+ *  `nullable: true` goes away with it, exactly as it did for `BODY_DATETIME`).
+ *  An unrecognised spelling falls through to `z.boolean()`, i.e. a typed 422. */
+export const QUERY_BOOL =
+  'z.preprocess((v) => (v === "true" || v === "1" ? true : v === "false" || v === "0" ? false : v), z.boolean())';
+
 const QUERY_PRIMITIVE: Record<WirePrimitive, string> = {
   int: "z.coerce.number().int()",
   long: "z.coerce.number().int()",
   decimal: "z.coerce.number()",
   money: "moneySchema",
   string: "z.string()",
-  bool: "z.coerce.boolean()",
+  bool: QUERY_BOOL,
   datetime: "z.coerce.date()",
   guid: "z.string()",
   json: "z.unknown()",
@@ -2267,8 +2332,8 @@ export function zodFor(t: TypeIR, context: "create-body" | "body" | "query" = "b
       // alike).  An operation parameter has no default to fall back on, so an
       // omitted one is a client error, not a `false`.
       //
-      // Query params keep the plain coercion (Phoenix doesn't special-case
-      // query bools).
+      // Query params carry a textual bool, parsed by `QUERY_BOOL` — the four
+      // legal spellings, never `Boolean(input)` (see that constant).
       //
       // A body bool must NOT be coerced.  `z.coerce.boolean()` is
       // `Boolean(input)`, and `Boolean(undefined) === false` — so a coerced
@@ -2313,6 +2378,10 @@ export function zodFor(t: TypeIR, context: "create-body" | "body" | "query" = "b
       return `${info.base}Schema`;
     case "entity":
       return "z.unknown()";
+    case "provenanced":
+      // Unreachable: the `Provenanced<T>` carrier rides the RESPONSE wire shape
+      // only — a create/update body carries the bare value the caller supplies.
+      throw new Error(PROVENANCED_REQUEST_ERROR);
   }
 }
 
@@ -2367,6 +2436,16 @@ function zodForResponseInner(t: TypeIR): string {
       return `${info.base}Schema`;
     case "entity":
       return `${info.base}Response`;
+    case "provenanced":
+      // `{ value, lineage }` — the value's own response zod plus the shared
+      // nullable `ProvenanceLineage` object, keyed off the carrier's member
+      // list so this route schema and every other target name the same two keys.
+      return `z.object({ ${provenancedEntries(
+        zodForResponseInner(info.carried!),
+        "ProvenanceLineage.nullable()",
+      )
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(", ")} })`;
   }
 }
 
@@ -2454,7 +2533,7 @@ export function emitWireSchema(
   openapiName: string, // component name passed to `.openapi(...)`
   // `default` (when set) is the zod `.default(...)` literal; it is appended
   // AFTER the single-field invariant chain, because `.default(x)` returns a
-  // `ZodDefault` that no longer exposes `.min`/`.max` — emitting
+  // `ZodDefault` that does not expose `.min`/`.max` — emitting
   // `.default(3).min(1)` is a type error that poisons the whole object
   // schema's inferred type (every `body.<field>` then becomes `unknown`).
   fields: { name: string; base: string; default?: string; optional?: boolean }[],
@@ -2484,7 +2563,17 @@ export function emitWireSchema(
     let schema = f.base;
     const patterns = chainByField.get(f.name);
     if (patterns) {
-      for (const p of patterns) schema = chainSingleFieldNative(schema, p);
+      for (const p of orderSingleFieldPatterns(patterns))
+        schema = chainSingleFieldNative(schema, p);
+      // A `len-*` bound is CHECKED as a code-point refine, which zod cannot
+      // describe to the OpenAPI emitter — re-declare it so `/openapi.json`
+      // still publishes the `minLength`/`maxLength` it always did (and now
+      // publishes a bound the server actually enforces, per code-point.ts).
+      const lengths = openapiLengthMeta(patterns);
+      if (lengths) {
+        const entries = Object.entries(lengths).map(([k, v]) => `${k}: ${v}`);
+        schema = `${schema}.openapi({ ${entries.join(", ")} })`;
+      }
     }
     // `.default(...)` / `.optional()` last: each wraps the (now constrained)
     // schema in a ZodDefault / ZodOptional, so any `.min`/`.max` must already
@@ -2557,5 +2646,9 @@ export function wireToDomainExpr(expr: string, t: TypeIR, ctx?: BoundedContextIR
     }
     case "entity":
       return expr;
+    case "provenanced":
+      // Unreachable: request-side only (see `zodFor`).  The domain keeps the
+      // scalar — the carrier is a serialization shape, not an in-memory one.
+      throw new Error(PROVENANCED_REQUEST_ERROR);
   }
 }

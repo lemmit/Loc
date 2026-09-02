@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type HexMirror, startHexMirror } from "./support/hex-mirror";
+import { mixDepsGet, mixLocalInstall } from "./support/mix-retry";
 
 // ---------------------------------------------------------------------------
 // Runtime auth UI-gate smoke — proves the auth gate WORKS at runtime, not just
@@ -340,8 +341,8 @@ describe.skipIf(!PHX_RUN)("auth UI-gate runtime smoke (phoenix / server-rendered
     //    authenticates LiveViews as the built-in admin on its own.
     phxLog = path.join(workDir, "phx.log");
     const bootCmd =
-      `${shellPrefix}mix local.hex --force && mix local.rebar --force && ` +
-      `mix deps.get && mix ecto.create && mix ecto.migrate && ` +
+      `${shellPrefix}${mixLocalInstall()} && ` +
+      `${mixDepsGet()} && mix ecto.create && mix ecto.migrate && ` +
       `mix phx.server`;
     const dockerRun = [
       "docker",

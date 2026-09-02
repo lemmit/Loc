@@ -12,10 +12,9 @@
 //   Pattern H: `member(ref:apiParam, <Projection>)`                        — `Sales.SalesTotals`
 //
 // Detection is PURE IR analysis — no framework assumptions, no
-// emission.  Splitting it out of `react/walker/api-hooks.ts` (where it
-// previously lived) lets a future Vue/Svelte/Blazor walker reuse the
-// detector verbatim and plug in its own naming via the WalkerTarget's
-// `buildHookUse` method.
+// emission.  Kept out of `react/walker/api-hooks.ts` so any walker
+// (Vue/Svelte/Blazor included) can reuse the detector verbatim and plug in its
+// own naming via the WalkerTarget's `buildHookUse` method.
 //
 // The returned `DetectedApiCall` carries everything the framework-
 // specific naming layer needs: which aggregate is invoked,

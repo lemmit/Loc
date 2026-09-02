@@ -1,14 +1,12 @@
 // criteria-emit — reified `criterion` declarations as Domain-layer
 // `Criterion<T>` specifications (the *evaluate* face: `IsSatisfiedBy`).
 //
-// Reified-criteria Slice 1 (additive, .NET-only, compile-gated). Today
-// criteria are inlined at lowering with no use-site provenance (see
-// `inlineCriterion` in `src/ir/lower/lower-expr.ts`), so this slice only
-// *emits* the reified specification classes — it does NOT yet rewire
-// invariants / preconditions onto them (that needs a `criterion-ref`
-// `ExprIR` node, a later slice) nor add the query face (`ToExpression()` /
-// EF `Specification<T>`). The classes exist and compile under
-// `dotnet build /warnaserror`, the same precedent PR3-A set for `run<Name>`.
+// .NET-only.  Criteria are inlined at lowering with no use-site provenance
+// (see `inlineCriterion` in `src/ir/lower/lower-expr.ts`), so this only
+// *emits* the reified specification classes: invariants / preconditions are
+// NOT rewired onto them (that needs a `criterion-ref` `ExprIR` node), and
+// there is no query face (`ToExpression()` / EF `Specification<T>`). The
+// classes compile under `dotnet build /warnaserror`.
 //
 // Eligibility: entity-candidate criteria whose body does not reference
 // `currentUser`. Ambient (`of bool`) criteria and principal-referencing
@@ -113,7 +111,7 @@ function renderCriterion(c: CriterionIR, candidate: string, ns: string): string 
     `${ns}.Domain.Ids`,
     "System.Linq",
   ]);
-  for (const u of collectCsExprUsings(c.body)) usings.add(u);
+  collectCsExprUsings(c.body, usings, ns);
   if (queryable) usings.add("System.Linq.Expressions");
   return lines(
     "// Auto-generated.",

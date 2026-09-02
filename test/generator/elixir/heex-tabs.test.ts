@@ -27,8 +27,10 @@ system Demo {
       }
     }
   }
+  storage loomDb { type: postgres }
+  resource cState { for: C, kind: state, use: loomDb }
   deployable phoenixApp {
-    platform: elixir, contexts: [C], serves: DemoApi,
+    platform: elixir, contexts: [C], dataSources: [cState], serves: DemoApi,
     ui: DemoUi, port: 4000
   }
 }
@@ -47,8 +49,10 @@ describe("HEEx Tabs (parity finding #5)", () => {
     const heex = await landingHeex();
     expect(heex).toMatch(/role="tablist"/);
     expect((heex.match(/role="tab"/g) ?? []).length).toBe(2);
-    expect(heex).toContain(">Overview</button>");
-    expect(heex).toContain(">Settings</button>");
+    // The caption is a user-visible slot (`tabLabel`, M-T1.11), so the trigger
+    // renders it through `pgettext` rather than as raw text.
+    expect(heex).toMatch(/><%= pgettext\("page\.\w+\.tabLabel\.\w+", "Overview"\) %><\/button>/);
+    expect(heex).toMatch(/><%= pgettext\("page\.\w+\.tabLabel\.\w+", "Settings"\) %><\/button>/);
   });
 
   it("switches tabs with a Phoenix.LiveView.JS toggle (no server round-trip)", async () => {
@@ -67,5 +71,65 @@ describe("HEEx Tabs (parity finding #5)", () => {
     expect(heex).toMatch(/role="tabpanel" id="tabs-1-panel-settings"[^>]*class="tab-panel hidden"/);
     expect(heex).toContain("the overview");
     expect(heex).toContain("the settings");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G2667 §C row 8 — the HEEx tab slug came from `snake/1`, which only splits
+// camelCase and downcases.  A caption with a SPACE therefore produced
+// `order details`: a literal space inside an HTML `id` and inside the
+// `JS.show(to: "#tabs-1-panel-order details")` selector the whole switcher is
+// built on — a broken anchor.  And because the six JSX/markup targets derive
+// theirs with `slugify` (`_walker/primitives/layout.ts`), the SAME caption got a
+// DIFFERENT id on Phoenix than on React/Vue/Svelte/Angular/Feliz/Flutter, so a
+// cross-target e2e selector could not be written once.
+// ---------------------------------------------------------------------------
+
+const CROSS_TARGET = `
+system X {
+  subdomain M {
+    context C {
+      aggregate Doc { name: string  derived display: string = name }
+      repository Docs for Doc { }
+    }
+  }
+  api XApi from M
+  ui XUi {
+    page Landing {
+      route: "/"
+      body: Tabs {
+        Tab("Order Details", Text { "one" }),
+        Tab("Shipping & Returns", Text { "two" })
+      }
+    }
+  }
+  storage loomDb { type: postgres }
+  resource cState { for: C, kind: state, use: loomDb }
+  deployable phoenixApp {
+    platform: elixir, contexts: [C], dataSources: [cState], serves: XApi,
+    ui: XUi, port: 4000
+  }
+  deployable web { platform: react, targets: phoenixApp, ui: XUi, port: 3000 }
+}
+`;
+
+describe("a tab caption yields the SAME id on HEEx and on the JSX targets", () => {
+  it("multi-word and punctuated captions slugify identically", async () => {
+    const files = await generateSystemFiles(CROSS_TARGET);
+    const heex = [...files].find(([p]) => p.endsWith("/landing_live.ex"))?.[1];
+    const tsx = [...files].find(([p]) => p.endsWith("/pages/landing.tsx"))?.[1];
+    expect(heex, "landing_live.ex not emitted").toBeDefined();
+    expect(tsx, "pages/landing.tsx not emitted").toBeDefined();
+
+    // The slug both sides must agree on.  `snake("Order Details")` was
+    // `order details` — note the space, which is what made the id invalid.
+    expect(heex!).toContain('id="tabs-1-panel-order-details"');
+    expect(heex!).toContain('id="tabs-1-panel-shipping-returns"');
+    expect(heex!).not.toMatch(/id="tabs-1-panel-[a-z-]* /);
+
+    // …and the React target derives exactly the same values from the same
+    // captions, so one selector serves both.
+    expect(tsx!).toContain('<Tabs.Panel value="order-details">');
+    expect(tsx!).toContain('<Tabs.Panel value="shipping-returns">');
   });
 });

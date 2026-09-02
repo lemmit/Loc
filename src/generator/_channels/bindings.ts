@@ -98,8 +98,7 @@ export function brokerChannelBindings(deployable: DeployableIR, sys: SystemIR): 
   return out;
 }
 
-/** The redis (Valkey) subset — slice 2's scope; the Python leg (slice 2b)
- *  still consumes exactly this view. */
+/** The redis (Valkey) subset; the Python leg consumes exactly this view. */
 export function redisChannelBindings(deployable: DeployableIR, sys: SystemIR): BrokerBinding[] {
   return brokerChannelBindings(deployable, sys).filter((b) => b.transport === "redis");
 }

@@ -48,6 +48,7 @@ import {
   localizedChromeIcuText,
   localizedChromeText,
   localizedChromeValue,
+  localizedPositionalTranslation,
 } from "../i18n-emit.js";
 import {
   boolNamed,
@@ -175,11 +176,11 @@ export function emitDataGrid(
           nextLabel: localizedChromeText(ctx, "next"),
           filterPlaceholderAttr: localizedChromeAttr(ctx, "placeholder", "filter"),
           // The position counter — one ICU message, not a "Page " + n + " of "
-          // + m concatenation the packs used to spell inline, so a locale can
+          // + m concatenation spelled inline in each pack, so a locale can
           // re-order the two numbers.  The hole EXPRESSIONS come from here
-          // rather than staying in each template because the message around
-          // them now belongs to the catalog: leaving `Page …` in fifteen `.hbs`
-          // files and the holes here would be one sentence with two owners.
+          // rather than each template because the message around them belongs
+          // to the catalog: `Page …` in fifteen `.hbs` files with the holes
+          // here would be one sentence with two owners.
           // They read `table`, the TanStack instance every one of those
           // templates already binds, so this is the same vocabulary the pack
           // markup around it uses.
@@ -292,10 +293,16 @@ function resolveColumn(
   const positionals = positionalArgs(call);
   const headerArg = positionals[0];
   const accessorArg = positionals[1];
-  const headerStr =
-    headerArg && headerArg.kind === "literal" && headerArg.lit === "string"
-      ? headerArg.value
-      : `Column ${index + 1}`;
+  const headerIsLiteral = headerArg?.kind === "literal" && headerArg.lit === "string";
+  const headerStr = headerIsLiteral ? headerArg.value : `Column ${index + 1}`;
+  // The header is a user-visible slot (`columnHeader`, M-T1.11).  A grid header
+  // is a VALUE in a column definition, not markup — every target spells it
+  // `header: "Job Name"` inside a TanStack-shaped object — so the translated
+  // form is the bare `t()` expression and `undefined` keeps the raw spelling
+  // (byte-identical).  A dynamic header has no source string to translate.
+  const headerValue = headerIsLiteral
+    ? localizedPositionalTranslation(call, ctx, "columnHeader")
+    : undefined;
 
   // Read through the shared shape leaf, which the i18n extractor also consults
   // — `chrome.filter` must be in the catalog exactly when a filter input is
@@ -320,6 +327,7 @@ function resolveColumn(
   return {
     id: accessorKey ?? `col${index + 1}`,
     header: headerStr,
+    headerValue,
     accessorKey,
     cell,
     // A column with no resolvable field can't be sorted or filtered BY VALUE,

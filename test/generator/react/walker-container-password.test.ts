@@ -110,7 +110,7 @@ describe("Container + PasswordField primitives", () => {
     expect(content).toMatch(/import \{ PasswordInput \} from "@mantine\/core";/);
     expect(content).toMatch(/const \[pwd, setPwd\] = useState<string>\(""\);/);
     expect(content).toMatch(
-      /<PasswordInput label="Password" value=\{pwd\} onChange=\{\(e\) => setPwd\(e\.currentTarget\.value\)\} \/>/,
+      /<PasswordInput label=\{t\("page\.\w+\.inputLabel\.\w+", "Password"\)\} value=\{pwd\} onChange=\{\(e\) => setPwd\(e\.currentTarget\.value\)\} \/>/,
     );
   });
 
@@ -134,7 +134,9 @@ describe("Container + PasswordField primitives", () => {
       }
     `);
     const content = files.get("web/src/pages/x.tsx")!;
-    expect(content).toMatch(/<PasswordInput label="Bare" \/>/);
+    expect(content).toMatch(
+      /<PasswordInput label=\{t\("page\.\w+\.inputLabel\.\w+", "Bare"\)\} \/>/,
+    );
     expect(content).not.toMatch(/onChange=/);
   });
 
@@ -175,7 +177,9 @@ describe("Container + PasswordField primitives", () => {
       /import \{ Button, Container, PasswordInput, Stack, TextInput, Title \} from "@mantine\/core";/,
     );
     expect(content).toMatch(/<Container size="xs">/);
-    expect(content).toMatch(/<TextInput label="Email"/);
-    expect(content).toMatch(/<PasswordInput label="Password"/);
+    expect(content).toMatch(/<TextInput label=\{t\("page\.\w+\.inputLabel\.\w+", "Email"\)\}/);
+    expect(content).toMatch(
+      /<PasswordInput label=\{t\("page\.\w+\.inputLabel\.\w+", "Password"\)\}/,
+    );
   });
 });

@@ -5,6 +5,7 @@ import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall, renderDotnetLogCallWithException } from "../../_obs/render-dotnet.js";
 import { OTEL_ENDPOINT_ENV, OTEL_SERVICE_NAME_ENV } from "../../_obs/tracing.js";
+import type { SchemaIdOverride } from "../schema-ids.js";
 import { DAPPER_PROJECT_DEPS, renderDapperConnectionSetup } from "./dapper.js";
 
 // Program.cs is top-level statements, not a class — so the renderer's
@@ -84,6 +85,11 @@ export function renderProgram(
      *  tenant (off the ambient RequestContext, never a client value) and joins
      *  its room via `hub.Subscribe(tenant)`.  Off ⇒ the broadcast `Subscribe()`. */
     realtimeRoomScoped?: boolean;
+    /** The `User` property the room key is read from — the bound `tenancy by
+     *  user.<claim>`, Pascal-cased.  Read only under `realtimeRoomScoped`; the
+     *  ROW column `TenantId` is NOT a valid default here (the two names differ
+     *  whenever the claim is not called `tenantId`). */
+    realtimeTenantClaim?: string;
     /** Persistence selection (D-REALIZATION-AXES `persistence:`): when true,
      *  the deployable uses Dapper — Program.cs registers an `NpgsqlDataSource`
      *  (not a `DbContext`) and applies the self-contained `DbSchema` at
@@ -105,7 +111,7 @@ export function renderProgram(
      *  rows stamp the per-dispatch frame's scope / parent ids, so it also
      *  forces the `ExecutionContextBehavior` frame-opener to be registered. */
     hasProvenance?: boolean;
-    /** Tenant hierarchy (multi-tenancy P2.2): the registry opts into
+    /** Tenant hierarchy (multi-tenancy): the registry opts into
      *  `tenantRegistry`, so register the scoped `IOrgPathResolver` →
      *  `EfOrgPathResolver` that UserMiddleware calls per request to materialize
      *  `currentUser.orgPath` from the registry's `data_key`.  Implies
@@ -116,18 +122,18 @@ export function renderProgram(
      *  `AddHostedService<…>()` per owned timer).  Empty ⇒ no registration, so
      *  a timer-free deployable's Program.cs stays byte-identical. */
     timerServices?: string[];
-    /** Broker channels (M-T4.4 slice 6a): the deployable wires a broker-bound
+    /** Broker channels (M-T4.4): the deployable wires a broker-bound
      *  channelSource — register the ChannelTransports singleton and wrap the
      *  dispatcher chain in the publish tee (design §4 delivery uniformity). */
     hasChannels?: boolean;
-    /** M-T4.4 slice 7b: the workflow-less durable-broker producer shape — the
+    /** M-T4.4: the workflow-less durable-broker producer shape — the
      *  outbox dispatcher wraps the Noop (no in-process dispatcher exists), so
      *  register the Noop concretely instead of the InProcess scoped line. */
     outboxNoopInner?: boolean;
     /** A hosted reactor subscribes to a carried event — start the consumer
      *  BackgroundService feeding envelopes into the in-process dispatch. */
     hasChannelConsumers?: boolean;
-    /** TimerSource durable scheduling (scheduling.md Phase 2): the deployable
+    /** TimerSource durable scheduling (scheduling.md): the deployable
      *  owns at least one `cron:` timer, so wire Hangfire (`AddHangfire` +
      *  `AddHangfireServer`, Hangfire.PostgreSql storage) + register its recurring
      *  jobs.  `every:`-only + timer-free deployables leave this false — no
@@ -147,8 +153,42 @@ export function renderProgram(
      *  `POST /files` + `GET /files/{key}` over them.  Undefined ⇒ no File field,
      *  no routes (byte-identical). */
     fileUpload?: { putBytes: string; getBytes: string };
+    /** OpenAPI schema-id overrides for the wire DTO short names that collide
+     *  across this project's per-aggregate namespaces (F14, `schema-ids.ts`).
+     *  Empty/absent ⇒ Program.cs keeps the bare `return t.Name;` fallback and
+     *  emits no dictionary (byte-identical to a collision-free project). */
+    schemaIdOverrides?: readonly SchemaIdOverride[];
   },
 ): string {
+  // Schema-id collision guard (F14).  Two aggregates each emit their own
+  // `Application.<Aggregates>.Requests` / `.Responses` namespace, so a value
+  // object used by both produces two CLR types with the same SHORT name.
+  // Swashbuckle's default schemaId selector is that short name and a collision
+  // THROWS — `GET /openapi.json` 500s and the deployable publishes no contract
+  // at all.  Only the genuinely colliding types are re-mapped (keyed by CLR
+  // full name, computed at emit time in `schema-ids.ts`); every other type
+  // keeps its short name so the component set stays comparable with the four
+  // other backends.  No collision ⇒ both fragments are empty.
+  const schemaOverrides = options?.schemaIdOverrides ?? [];
+  const schemaIdDictionary =
+    schemaOverrides.length === 0
+      ? ""
+      : `    // Wire DTO short names this project emits in more than one namespace
+    // (a value object shared by two aggregates).  Swashbuckle would throw on
+    // the duplicate schemaId and fail the WHOLE document, so each colliding
+    // type publishes its owning namespace's qualified id instead.
+    var collidingSchemaIds = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+${schemaOverrides.map((o) => `        ["${o.clrFullName}"] = "${o.schemaId}",\n`).join("")}    };
+`;
+  const schemaIdLookup =
+    schemaOverrides.length === 0
+      ? ""
+      : `        if (t.FullName is not null && collidingSchemaIds.TryGetValue(t.FullName, out var qualified))
+        {
+            return qualified;
+        }
+`;
   const authRequired = !!options?.authRequired;
   const oidc = !!options?.oidc;
   const orgPathResolver = !!options?.orgPathResolver;
@@ -178,8 +218,9 @@ export function renderProgram(
   // principal's tenant room (off the ambient RequestContext — never a
   // client-supplied value; an unauthenticated connection joins no room).  The
   // untenanted wire keeps the broadcast `Subscribe()`.
+  const realtimeTenantClaim = options?.realtimeTenantClaim ?? "";
   const realtimeSubscribe = realtimeRoomScoped
-    ? `var tenant = ${ns}.Domain.Common.RequestContext.Current?.CurrentUser is { } __rtUser ? __rtUser.TenantId.ToString() : null;
+    ? `var tenant = ${ns}.Domain.Common.RequestContext.Current?.CurrentUser is { } __rtUser ? __rtUser.${realtimeTenantClaim}.ToString() : null;
     var (id, reader) = hub.Subscribe(tenant);`
     : "var (id, reader) = hub.Subscribe();";
   // The SSE endpoint — one long-lived text/event-stream per browser connection,
@@ -221,7 +262,7 @@ app.MapGet("/api/realtime/events", async (HttpContext http, ${ns}.Infrastructure
   // api-client (`api.upload("/files")`, `FileRef.url = "/files/<key>"`) and Hono.
   const fileUpload = options?.fileUpload;
   const fileRoutesEndpoint = fileUpload
-    ? `// File upload/download (M-T1.2) — root /files over the bound objectStore.
+    ? `// File upload/download — root /files over the bound objectStore.
 app.MapPost("/files", async (IFormFile file) =>
 {
     var key = Guid.NewGuid().ToString();
@@ -232,10 +273,18 @@ app.MapPost("/files", async (IFormFile file) =>
     await ${fileUpload.putBytes}(key, bytes, contentType);
     return Results.Json(new { url = "/files/" + key, key, contentType, size = bytes.Length }, statusCode: 201);
 }).DisableAntiforgery();
-app.MapGet("/files/{key}", async (string key) =>
+app.MapGet("/files/{key}", async (string key, HttpContext http, ILogger<${ns}.Api.DomainExceptionFilter> log) =>
 {
     var obj = await ${fileUpload.getBytes}(key);
-    return obj is null ? Results.NotFound() : Results.File(obj.Value.Bytes, obj.Value.ContentType);
+    // An absent object answers the app's ONE 404 envelope.  A minimal
+    // API is outside MVC, so a throw here would never reach
+    // DomainExceptionFilter; NotFoundProblem is that filter's own responder,
+    // called directly, so the body, the status (incl. the httpStatus NotFound
+    // override), the x-request-id header, the catalog event and the fault
+    // counter are all the ones every other absent read produces.
+    return obj is null
+        ? ${ns}.Api.DomainExceptionFilter.NotFoundProblem(http, log, $"File {key} not found")
+        : Results.File(obj.Value.Bytes, obj.Value.ContentType);
 });
 `
     : "";
@@ -270,7 +319,7 @@ app.MapGet("/files/{key}", async (string key) =>
     : options?.hasSubscriptions
       ? `// Domain event dispatch — in-process Mediator-notification dispatcher, teed\n// to the realtime wire; the broker tee (below) is outermost.\nbuilder.Services.AddScoped<InProcessDomainEventDispatcher>();\nbuilder.Services.AddScoped<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<InProcessDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`
       : `// Domain event dispatch — no-op inner, teed to the realtime SSE wire; the\n// broker tee (below) is outermost.\nbuilder.Services.AddSingleton<NoopDomainEventDispatcher>();\nbuilder.Services.AddSingleton<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<NoopDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`;
-  const channelTeeSuffix = `\n// Broker channel transport (channels.md; M-T4.4): the publish tee routes\n// broker-bound events to the broker (design §4 — co-located consumers\n// receive them via the subscription, not a local shortcut).\nbuilder.Services.AddSingleton<ChannelTransports>();\nbuilder.Services.AddScoped<IDomainEventDispatcher, ChannelPublishTeeDispatcher>();${
+  const channelTeeSuffix = `\n// Broker channel transport (channels.md): the publish tee routes\n// broker-bound events to the broker (design §4 — co-located consumers\n// receive them via the subscription, not a local shortcut).\nbuilder.Services.AddSingleton<ChannelTransports>();\nbuilder.Services.AddScoped<IDomainEventDispatcher, ChannelPublishTeeDispatcher>();${
     options?.hasChannelConsumers
       ? "\nbuilder.Services.AddHostedService<ChannelConsumerService>();"
       : ""
@@ -310,7 +359,7 @@ app.MapGet("/files/{key}", async (string key) =>
           .map((fqn) => `builder.Services.AddHostedService<${fqn}>();`)
           .join("\n")}`
       : "";
-  // TimerSource `cron:` schedulers (scheduling.md Phase 2) run on Hangfire with
+  // TimerSource `cron:` schedulers (scheduling.md) run on Hangfire with
   // Hangfire.PostgreSql storage: the recurring-job scheduler is store-coordinated
   // (single-fire across replicas), retries a failed job with backoff, and fires an
   // overdue recurring job on server start (native missed-run replay).
@@ -318,7 +367,7 @@ app.MapGet("/files/{key}", async (string key) =>
   const hangfireJobDiRegistrations = options?.hangfireJobDiRegistrations ?? [];
   const hangfireRecurringRegistrations = options?.hangfireRecurringRegistrations ?? [];
   const hangfireDiBlock = hangfireCronTimers
-    ? `\n// Durable cron timers (scheduling.md Phase 2) — Hangfire + Hangfire.PostgreSql.\n// The storage schema is created automatically on first use.\nbuilder.Services.AddHangfire(cfg => cfg\n    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)\n    .UseSimpleAssemblyNameTypeSerializer()\n    .UseRecommendedSerializerSettings()\n    .UsePostgreSqlStorage(o => o.UseNpgsqlConnection(builder.Configuration.GetConnectionString("Default"))));\nbuilder.Services.AddHangfireServer();\n${hangfireJobDiRegistrations.join("\n")}`
+    ? `\n// Durable cron timers (scheduling.md) — Hangfire + Hangfire.PostgreSql.\n// The storage schema is created automatically on first use.\nbuilder.Services.AddHangfire(cfg => cfg\n    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)\n    .UseSimpleAssemblyNameTypeSerializer()\n    .UseRecommendedSerializerSettings()\n    .UsePostgreSqlStorage(o => o.UseNpgsqlConnection(builder.Configuration.GetConnectionString("Default"))));\nbuilder.Services.AddHangfireServer();\n${hangfireJobDiRegistrations.join("\n")}`
     : "";
   const hangfireRecurringBlock = hangfireCronTimers
     ? `\n// Register the durable cron timerSources as Hangfire recurring jobs (standard\n// 5-field cron).  Uses the service-based IRecurringJobManager (the static\n// RecurringJob API needs JobStorage.Current, unset on the DI path).  AddOrUpdate\n// is idempotent per stable id — re-registers on boot.\nusing (var hangfireScope = app.Services.CreateScope())\n{\n    var recurring = hangfireScope.ServiceProvider.GetRequiredService<IRecurringJobManager>();\n${hangfireRecurringRegistrations.join("\n")}\n}\n`
@@ -362,7 +411,7 @@ using (var seedScope = app.Services.CreateScope())
     )
     .join("\n");
 
-  // Reading-tier domain services (domain-services.md rev. 4, Slice 1): a
+  // Reading-tier domain services (domain-services.md rev. 4): a
   // `reading` service is a DI'd `sealed class` (it injects an
   // I<Aggregate>Repository per read-port), so it must be registered as a scoped
   // service the orchestrating workflow handler can inject.  A `pure` service is
@@ -393,7 +442,7 @@ using (var seedScope = app.Services.CreateScope())
     ? `\n// Entity history — the read port over audit_records (GET /<agg>/{id}/history).\nbuilder.Services.AddScoped<${ns}.Application.Common.IAuditHistoryReader, ${ns}.Infrastructure.Persistence.AuditHistoryReader>();`
     : "";
 
-  // Domain persistence-port adapters (audit S7 Slice C): the orchestration
+  // Domain persistence-port adapters: the orchestration
   // handlers (transactional workflow command, saga reactors, projection fold)
   // depend on IUnitOfWork / IWorkflowEventStore / ISagaStateStore /
   // IReadModelStore instead of the concrete AppDbContext.  All scoped over the
@@ -408,15 +457,15 @@ using (var seedScope = app.Services.CreateScope())
   // stores key off) and threaded in.  The EF path keeps the open generics.
   const portsDi = usesPersistencePorts
     ? usingDapper
-      ? `\n// Domain persistence ports (M-T6.9) — Dapper adapters over NpgsqlDataSource (closed bindings).\n${(options?.dapperPortRegistrations ?? []).join("\n")}`
-      : `\n// Domain persistence ports (audit S7 Slice C) — EF adapters over the scoped AppDbContext.\nbuilder.Services.AddScoped<${ns}.Domain.Common.IUnitOfWork, ${ns}.Infrastructure.Persistence.EfUnitOfWork>();\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IWorkflowEventStore<>), typeof(${ns}.Infrastructure.Persistence.EfWorkflowEventStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.ISagaStateStore<>), typeof(${ns}.Infrastructure.Persistence.EfSagaStateStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IReadModelStore<>), typeof(${ns}.Infrastructure.Persistence.EfReadModelStore<>));`
+      ? `\n// Domain persistence ports — Dapper adapters over NpgsqlDataSource (closed bindings).\n${(options?.dapperPortRegistrations ?? []).join("\n")}`
+      : `\n// Domain persistence ports — EF adapters over the scoped AppDbContext.\nbuilder.Services.AddScoped<${ns}.Domain.Common.IUnitOfWork, ${ns}.Infrastructure.Persistence.EfUnitOfWork>();\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IWorkflowEventStore<>), typeof(${ns}.Infrastructure.Persistence.EfWorkflowEventStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.ISagaStateStore<>), typeof(${ns}.Infrastructure.Persistence.EfSagaStateStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IReadModelStore<>), typeof(${ns}.Infrastructure.Persistence.EfReadModelStore<>));`
     : "";
 
   // Extern application-layer handlers ([ExternHandler] scan targets).  Since
-  // extern (b) Phase 2, an extern aggregate OPERATION is a domain partial-method
+  // extern (b), an extern aggregate OPERATION is a domain partial-method
   // hook (no injected handler, no `[ExternHandler]`, no DI registration — a
   // missing implementation is a COMPILE error), so ONLY the extern
-  // commandHandler / queryHandler application members (Phase 1's case-2 home)
+  // commandHandler / queryHandler application members (case-2 home)
   // register through the Scrutor scan.  Their user impl carries `[ExternHandler]`;
   // the same scan registers it under `I<Name>Handler` and the startup verify
   // fails fast when the user hasn't supplied one.
@@ -476,7 +525,7 @@ ${externHandlers
 builder.Services.AddScoped<IUserVerifier, DevStubUserVerifier>();${
         oidc
           ? `
-// OIDC verifier (D-AUTH-OIDC) — validates the IdP's tokens against its
+// OIDC verifier — validates the IdP's tokens against its
 // JWKS and maps claims onto User.  Registered last so it wins over the
 // dev stub; configure the issuer / client via the env vars the
 // \`auth { oidc }\` block referenced.
@@ -487,11 +536,11 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserAccessor, HttpContextCurrentUserAccessor>();${
         orgPathResolver
           ? `
-// Tenant hierarchy (multi-tenancy P2.2): the per-request \`orgPath\` resolver —
+// Tenant hierarchy (multi-tenancy): the per-request \`orgPath\` resolver —
 // currentUser.orgPath = the caller org's materialized \`data_key\`, read once
 // per request by UserMiddleware and memoized on the principal (fail-safe to
-// the claim).  Scoped: it holds the request-scoped AppDbContext.
-builder.Services.AddScoped<IOrgPathResolver, EfOrgPathResolver>();`
+// the claim).  Scoped: it holds the request-scoped ${usingDapper ? "connection source" : "AppDbContext"}.
+builder.Services.AddScoped<IOrgPathResolver, ${usingDapper ? "DapperOrgPathResolver" : "EfOrgPathResolver"}>();`
           : ""
       }
 `
@@ -598,7 +647,7 @@ builder.Logging.SetMinimumLevel((System.Environment.GetEnvironmentVariable("LOG_
     _ => Microsoft.Extensions.Logging.LogLevel.Information,
 });
 
-// OpenTelemetry tracing (M-T7.1).  AspNetCore instrumentation gives a SERVER
+// OpenTelemetry tracing.  AspNetCore instrumentation gives a SERVER
 // span per request (so Activity.Current.TraceId is populated on every request
 // — RequestContextMiddleware stamps the loom.* ids onto it and threads
 // trace_id/span_id onto the log scope).  The span is EXPORTED via OTLP/HTTP
@@ -704,7 +753,7 @@ builder.Services.AddControllers(opts =>
     // converter and emits a named string-enum schema for each enum type.
     opts.JsonSerializerOptions.Converters.Add(
         new System.Text.Json.Serialization.JsonStringEnumConverter());
-    // Canonical ISO-8601 UTC instants (RS-4): trim trailing zero fractional
+    // Canonical ISO-8601 UTC instants: trim trailing zero fractional
     // seconds so an instant with no sub-second part serializes as "…00Z" (not
     // System.Text.Json's fixed 7-digit "…00.0000000Z"), matching the node /
     // Python / Java backends.  Business DTOs carry datetime as a pre-formatted
@@ -729,7 +778,7 @@ builder.Services.Configure<ApiBehaviorOptions>(opts =>
 
 // The framework produces ProblemDetails of its own for the faults it answers
 // without reaching a controller at all — 415 being the common one.  Those
-// carry the rfc9110 \`type\` URI (not \`about:blank\`, RS-9), no \`detail\`, no
+// carry the rfc9110 \`type\` URI (not \`about:blank\`), no \`detail\`, no
 // \`instance\`, and a \`traceId\` on the body that every backend here moved to
 // the x-request-id header.  Normalise them to the emitted envelope; the
 // customizer is a no-op on responses already built in that shape.
@@ -751,7 +800,7 @@ builder.Services.AddProblemDetails(opts =>
 // session probe when auth is on) and any raw datetime a minimal endpoint
 // returns serialize through ConfigureHttpJsonOptions rather than the MVC
 // AddJsonOptions above.  Register the canonical instant converters here too so
-// their wire matches the controllers' (RS-4 temporal round-trip parity).
+// their wire matches the controllers' (temporal round-trip parity).
 builder.Services.ConfigureHttpJsonOptions(opts =>
 {
     opts.SerializerOptions.Converters.Add(
@@ -825,7 +874,7 @@ builder.Services.AddSwaggerGen(c =>
             ? null
             : char.ToLowerInvariant(action[0]) + action.Substring(1);
     });
-    // Schema-name parity for the paged carrier (M-T2.6): the generic
+${schemaIdDictionary}    // Schema-name parity for the paged carrier: the generic
     // Paged<XResponse> return would otherwise get Swashbuckle's default
     // "PagedXResponse" component name — but Hono/Phoenix/Java/Python all name
     // the envelope "<Agg>Paged" (e.g. EngineerPaged).  Map the generic back to
@@ -839,7 +888,7 @@ builder.Services.AddSwaggerGen(c =>
             var stem = inner.EndsWith("Response", StringComparison.Ordinal) ? inner.Substring(0, inner.Length - "Response".Length) : inner;
             return stem + "Paged";
         }
-        return t.Name;
+${schemaIdLookup}        return t.Name;
     });
 });
 
@@ -1117,13 +1166,13 @@ export function renderCsproj(
   // RabbitMQ.Client (Apache-2.0, §6a) speaks AMQP 0-9-1 to the rabbitmq
   // sidecar.  Per-transport wiring-gated.
   const redisChannelRef = channelTransports.redis
-    ? `\n    <!-- Redis channel transport (channels.md, M-T4.4) -->\n    <PackageReference Include="StackExchange.Redis" Version="2.8.16" />`
+    ? `\n    <!-- Redis channel transport (channels.md) -->\n    <PackageReference Include="StackExchange.Redis" Version="2.8.16" />`
     : "";
   const kafkaChannelRef = channelTransports.kafka
-    ? `\n    <!-- Kafka channel transport (channels.md, M-T4.4; Confluent.Kafka, Apache 2.0) -->\n    <PackageReference Include="Confluent.Kafka" Version="2.6.1" />`
+    ? `\n    <!-- Kafka channel transport (channels.md; Confluent.Kafka, Apache 2.0) -->\n    <PackageReference Include="Confluent.Kafka" Version="2.6.1" />`
     : "";
   const rabbitChannelRef = channelTransports.rabbit
-    ? `\n    <!-- RabbitMQ channel transport (channels.md, M-T4.4) -->\n    <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />`
+    ? `\n    <!-- RabbitMQ channel transport (channels.md) -->\n    <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />`
     : "";
   const oidcRefs = oidc
     ? `\n    <!-- OIDC token validation (generated OidcUserVerifier) -->\n    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.19.2" />\n    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.19.2" />`
@@ -1149,7 +1198,7 @@ export function renderCsproj(
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />`;
-  // Resource-client NuGet refs (Phase 4c) — AWSSDK.S3 / RabbitMQ.Client
+  // Resource-client NuGet refs — AWSSDK.S3 / RabbitMQ.Client
   // etc., one row per package the deployable's consumed resources need.
   const resourceRefs = Object.entries(resourceNugetDeps)
     .sort(([a], [b]) => a.localeCompare(b))
@@ -1174,7 +1223,7 @@ export function renderCsproj(
     usesSpecifications && !usingDapper
       ? `\n    <!-- Ardalis.Specification — reified retrieval/criterion query objects -->\n    <PackageReference Include="Ardalis.Specification" Version="9.3.1" />\n    <PackageReference Include="Ardalis.Specification.EntityFrameworkCore" Version="9.3.1" />`
       : "";
-  // Hangfire — durable `timerSource … cron:` scheduling (scheduling.md Phase 2)
+  // Hangfire — durable `timerSource … cron:` scheduling (scheduling.md)
   // on Hangfire.PostgreSql storage.  Ships only when an owned timer uses a real
   // cron cadence (an `every:`-only deployable uses PeriodicTimer and needs no
   // dep).  Newtonsoft.Json is pinned to 13.x to override the vulnerable 11.0.1
@@ -1238,8 +1287,16 @@ export function renderCsproj(
          registered handler.  Loom emits domain-event notifications that have
          no in-process subscriber by design (they exist for the outbox / event
          log / external consumers), so this fires on every such event — it's a
-         false positive for this codegen model, not a missing handler. -->
-    <NoWarn>CA1707;CA1848;CA1873;CA1862;CA1847;CA1304;CA1310;CA1311;MSG0005</NoWarn>
+         false positive for this codegen model, not a missing handler.
+         CA1827: a .ddd string \`.length\` is a CODE-POINT count
+         (src/generator/_expr/code-point.ts), emitted as
+         \`s.EnumerateRunes().Count()\`.  \`invariant name.length > 0\` is one
+         of the most common rules in the language, and CA1827 reads that
+         \`Count() > 0\` as "use Any()" — which would answer a different
+         question.  The alternative spelling that dodges the rule
+         (\`s.Length - s.Count(char.IsLowSurrogate)\`) evaluates the receiver
+         twice, duplicating the whole sub-expression on a composed receiver. -->
+    <NoWarn>CA1707;CA1848;CA1873;CA1862;CA1847;CA1304;CA1310;CA1311;CA1827;MSG0005</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <!-- Test files live in the sibling Tests/${ns}.Tests project -->
@@ -1258,7 +1315,7 @@ ${persistenceRefs}
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
     <!-- Prometheus metrics at /metrics (prometheus-net) -->
     <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />
-    <!-- OpenTelemetry tracing (M-T7.1): AspNetCore instrumentation gives a
+    <!-- OpenTelemetry tracing: AspNetCore instrumentation gives a
          SERVER span per request; exported via OTLP/HTTP only when a collector
          endpoint is set (Program.cs).  1.17.x clears the NU1902 advisories on
          the older 1.10/1.12 lines. -->

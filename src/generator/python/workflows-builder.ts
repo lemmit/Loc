@@ -1,13 +1,13 @@
 import {
   type BoundedContextIR,
   type EnrichedBoundedContextIR,
-  type ExprIR,
   exprUsesCurrentUser,
   type OperationIR,
   type SystemIR,
   type WireField,
   type WorkflowIR,
   type WorkflowStmtIR,
+  workflowCanAnswerNotFound,
   workflowIsGuarded,
   workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
@@ -25,9 +25,9 @@ import {
   opWorkflowInstances,
 } from "../../ir/util/openapi-ids.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
+import { walkWorkflowStmtExprsDeep } from "../../ir/util/walk.js";
 import { commandWorkflowsOf } from "../../ir/util/workflow-command-route.js";
 import { workflowCorrIdValueType } from "../../ir/util/workflow-instances.js";
-import { walkExpr } from "../../ir/validate/checks/shared.js";
 import { type LinesPart, lines } from "../../util/code-builder.js";
 import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { snake, upperFirst, workflowFnSnake } from "../../util/naming.js";
@@ -97,14 +97,14 @@ export function buildPyWorkflowsFile(
   ctx: EnrichedBoundedContextIR,
   hasDispatch = false,
   sys?: SystemIR,
-  /** Source-map Milestone 11 (workflow-body statement regions) — allocated by
+  /** Source-map (workflow-body statement regions) — allocated by
    *  the caller (`src/generator/python/index.ts`) ONLY when a recorder is
    *  present.  `app/http/workflows_routes.py` pools every command workflow,
    *  so it never gets a `sourcemap.file(...)` whole-file region (mirrors the
    *  Elixir pooled-file precedent) — these fragment-only statement regions
    *  are the only mapping this file gets.  Reactor / event-`create` starter
-   *  bodies live in `dispatch-builder.ts` (`app/dispatch.py`), out of scope
-   *  for this slice. */
+   *  bodies live in `dispatch-builder.ts` (`app/dispatch.py`), out of
+   *  scope. */
   opFragments?: OpFragment[],
 ): string | null {
   const wfs = commandWorkflowsOf(ctx);
@@ -154,7 +154,7 @@ export function buildPyWorkflowsFile(
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
   const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
   // Includes the read-port repos a `reading`-tier domain-service call needs
-  // (domain-services.md rev. 4, Slice 1): the route constructs them, so the
+  // (domain-services.md rev. 4): the route constructs them, so the
   // file must import their classes even when the workflow body never reads them.
   const repoAggs = [
     ...new Set(
@@ -342,7 +342,7 @@ function reposFor(wf: WorkflowIR): RepoNeed[] {
   return [...out.values()];
 }
 
-// --- read-port wiring (domain-services.md rev. 4, Slice 1) -----------------
+// --- read-port wiring (domain-services.md rev. 4) -----------------
 //
 // A `reading`-tier domain-service operation declares one read-port repository
 // parameter per repo it reads; the orchestrating workflow constructs each
@@ -367,59 +367,32 @@ function workflowReadPortResolver(
   };
 }
 
-/** Every read-port a workflow's `reading`-tier domain-service calls require —
- *  the repositories those services read, so the workflow constructs them even
- *  when its own body never reads that repository directly.  De-duplicated by
- *  repository name across all service calls in the body. */
+/** Every read-port a workflow's domain-service calls require — the
+ *  repositories those services read, so the workflow constructs them even when
+ *  its own body never reads that repository directly.  De-duplicated by
+ *  repository name across all service calls in the body.
+ *
+ *  On the SHARED, `never`-checked walker (`ir/util/walk.ts`), like
+ *  `collectUsedLetNames` below.  The hand-enumerated `switch` it replaced had
+ *  no `domain-service-call` arm — the statement form a BARE `Audit.record(s, c)`
+ *  lowers to — so a service invoked as a statement (rather than
+ *  `let x = Svc.op(…)`) contributed no port.  The call site still rendered the
+ *  handle argument (`await record(ledgers, s, code)`), so the route referenced
+ *  a repository local it never constructed: ruff F821 → runtime `NameError`.
+ *  Only invisible when the service happens to read a repository the workflow
+ *  also reads itself. */
 function collectServiceReadPorts(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): ReadPort[] {
   const byRepo = new Map<string, ReadPort>();
-  const visit = (e: ExprIR | undefined): void =>
-    walkExpr(e, (n) => {
-      if (n.kind === "call" && n.callKind === "domain-service" && n.serviceRef) {
-        const svc = ctx.domainServices.find((s) => s.name === n.serviceRef!.service);
-        const operation = svc?.operations.find((o) => o.name === n.serviceRef!.op);
-        if (operation) {
-          for (const p of readPortsForOperation(operation)) {
-            if (!byRepo.has(p.repo)) byRepo.set(p.repo, p);
-          }
-        }
+  for (const st of wf.statements)
+    walkWorkflowStmtExprsDeep(st, (n) => {
+      if (n.kind !== "call" || n.callKind !== "domain-service" || !n.serviceRef) return;
+      const svc = ctx.domainServices.find((s) => s.name === n.serviceRef?.service);
+      const operation = svc?.operations.find((o) => o.name === n.serviceRef?.op);
+      if (!operation) return;
+      for (const p of readPortsForOperation(operation)) {
+        if (!byRepo.has(p.repo)) byRepo.set(p.repo, p);
       }
     });
-  const walkStmts = (stmts: WorkflowStmtIR[]): void => {
-    for (const st of stmts) {
-      switch (st.kind) {
-        case "precondition":
-        case "requires":
-        case "expr-let":
-          visit(st.expr);
-          break;
-        case "emit":
-        case "factory-let":
-          for (const f of st.fields) visit(f.value);
-          break;
-        case "repo-let":
-        case "op-call":
-          for (const a of st.args) visit(a);
-          break;
-        case "repo-run":
-          for (const a of st.retrievalArgs) visit(a);
-          break;
-        case "resource-call":
-          visit(st.call);
-          break;
-        case "for-each":
-          visit(st.iterable);
-          walkStmts(st.body);
-          break;
-        case "if-let":
-          for (const a of st.retrievalArgs) visit(a);
-          walkStmts(st.thenBody);
-          if (st.elseBody) walkStmts(st.elseBody);
-          break;
-      }
-    }
-  };
-  walkStmts(wf.statements);
   return [...byRepo.values()];
 }
 
@@ -448,50 +421,24 @@ function mergeReadPortRepos(
  *  unused local (F841), so the emitter drops the binding and keeps the (still
  *  side-effecting) RHS as a bare statement.  Aggregate-binding lets
  *  (`repo-let` / `factory-let` / `repo-run`) save at exit and are never
- *  considered unused. */
+ *  considered unused.
+ *
+ *  Rides the SHARED, `never`-checked walker (`ir/util/walk.ts`) rather than a
+ *  hand-enumerated `switch`: a missed statement kind here is not a cosmetic
+ *  traversal gap, it emits a reference to a name the body never binds.  The
+ *  hand-rolled copy this replaced had no `assign` / `domain-service-call` /
+ *  `repo-delete` arm, so a `let` read only by `total := q.amount`,
+ *  `Transfer.run(s, d, fee)` or `Orders.delete(o)` was scored "unused", its
+ *  binding dropped, and the emitted body referenced an undefined name (ruff
+ *  F821 → runtime `NameError`).  With the shared walker, the next
+ *  `WorkflowStmtIR` kind fails `tsc` in ONE place instead of silently
+ *  regressing this collector. */
 export function collectUsedLetNames(sts: WorkflowStmtIR[]): Set<string> {
   const used = new Set<string>();
-  const addExpr = (e: ExprIR | undefined): void =>
-    walkExpr(e, (n) => {
+  for (const st of sts)
+    walkWorkflowStmtExprsDeep(st, (n) => {
       if (n.kind === "ref" && n.refKind === "let") used.add(n.name);
     });
-  const visit = (list: WorkflowStmtIR[]): void => {
-    for (const st of list) {
-      switch (st.kind) {
-        case "precondition":
-        case "requires":
-        case "expr-let":
-          addExpr(st.expr);
-          break;
-        case "emit":
-        case "factory-let":
-          for (const f of st.fields) addExpr(f.value);
-          break;
-        case "repo-let":
-        case "op-call":
-          for (const a of st.args) addExpr(a);
-          break;
-        case "repo-run":
-          for (const a of st.retrievalArgs) addExpr(a);
-          addExpr(st.page?.offset);
-          addExpr(st.page?.limit);
-          break;
-        case "for-each":
-          addExpr(st.iterable);
-          visit(st.body);
-          break;
-        case "if-let":
-          for (const a of st.retrievalArgs) addExpr(a);
-          visit(st.thenBody);
-          if (st.elseBody) visit(st.elseBody);
-          break;
-        case "resource-call":
-          addExpr(st.call);
-          break;
-      }
-    }
-  };
-  visit(sts);
   return used;
 }
 
@@ -560,7 +507,7 @@ function workflowRoute(
   ctx: EnrichedBoundedContextIR,
   dispatcherExpr: string,
   sys?: SystemIR,
-  /** Source-map Milestone 11 — see `buildPyWorkflowsFile`'s `opFragments`. */
+  /** Source-map — see `buildPyWorkflowsFile`'s `opFragments`. */
   opFragments?: OpFragment[],
 ): string {
   // A `requires`-guarded workflow declares its 403 outcome; a
@@ -573,7 +520,15 @@ function workflowRoute(
     "session: SessionDep",
   ].join(", ");
   const out: string[] = [
-    `@router.post("/${snake(wf.name)}", status_code=204, operation_id="${camelId(opWorkflow(wf.name))}"${errorResponsesKwarg("workflow", workflowIsGuarded(wf), [], conflictResolver(ctx))})`,
+    `@router.post("/${snake(wf.name)}", status_code=204, operation_id="${camelId(opWorkflow(wf.name))}"${errorResponsesKwarg(
+      "workflow",
+      workflowIsGuarded(wf),
+      [],
+      conflictResolver(ctx),
+      {
+        readsAggregate: workflowCanAnswerNotFound(wf, ctx.repositories),
+      },
+    )})`,
     // A route-invoked workflow runs in a child frame under the request root, so
     // its audit / provenance rows are distinguishable from a direct operation's.
     "@in_child_context",
@@ -597,7 +552,7 @@ function workflowRoute(
   for (const p of wf.params) {
     out.push(`    ${snake(p.name)} = ${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`);
   }
-  // Read-port repos (domain-services.md rev. 4, Slice 1): a `reading`-tier
+  // Read-port repos (domain-services.md rev. 4): a `reading`-tier
   // domain-service call the workflow makes needs a live repository handle, so
   // the workflow constructs `<Agg>Repository(session, …)` for those repos even
   // when its own body never reads them — `mergeReadPortRepos` folds the service
@@ -613,15 +568,15 @@ function workflowRoute(
   // pre-flattened `renderWorkflowStmts` — byte-identical either way
   // (`renderWorkflowStmts` IS `chunks.flat()` by construction), but the
   // per-chunk list lets us surface per-statement sub-regions to the caller
-  // that owns the recorder + this file's final content (source-map
-  // Milestone 11).  No re-indent transform sits between here and the final
+  // that owns the recorder + this file's final content (source-map).
+  // No re-indent transform sits between here and the final
   // file (unlike the .NET transactional path), so the chunk texts collected
   // here are already the exact text that lands in `workflows_routes.py`.
   const stmtChunks = renderWorkflowStmtChunks(
     wf.statements,
     // Thread the read-port resolver so a `reading`-tier domain-service call in
     // the body is supplied its repository handle(s) ahead of the user args
-    // (domain-services.md rev. 4, Slice 1).  PURE service calls resolve to
+    // (domain-services.md rev. 4).  PURE service calls resolve to
     // `[]` → byte-identical.
     pyWorkflowStmtTarget(
       { thisName: "self", readPortArgs: workflowReadPortResolver(ctx) },
@@ -713,7 +668,7 @@ function instanceRoutes(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
   const listKwarg = errorResponsesKwarg("findList", !!gate, [], resolve);
   const byIdKwarg = gate
     ? errorResponsesKwarg("findOptional", true, [], resolve)
-    : errorResponsesKwarg("getById");
+    : errorResponsesKwarg("getById", false, [], resolve);
   const slug = snake(wf.name);
   const row = `${wf.name}Row`;
   const shape = wf.instanceWireShape ?? [];

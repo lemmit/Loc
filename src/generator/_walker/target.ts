@@ -99,8 +99,22 @@ export interface StateRef {
 /** The data a target needs to render a sortable `Table` column header
  *  (M-T1.1 — the `renderSortableHeader` seam). */
 export interface SortableHeaderSpec {
-  /** Already-escaped header content (the column's display label). */
+  /** Already-escaped header content (the column's display label) — under i18n
+   *  the already-rendered interpolation of the translation call (`{t(…)}`),
+   *  which the four JSX/markup targets splice into the button exactly as they
+   *  splice the raw text (M-T1.11, the `columnHeader` slot). */
   header: string;
+  /** The header as a target-native TRANSLATION expression (`t("page.…", "Job
+   *  Name")`), or `undefined` when there is nothing to translate — i18n off, or
+   *  a dynamic header with no source string (M-T1.11, the `columnHeader` slot).
+   *
+   *  Every target renders the header as the sort button's CONTENT, but they
+   *  disagree on what content is: the four JSX/markup targets splice markup and
+   *  need the interpolated form, while Feliz and Flutter splice a STRING into
+   *  their own syntax (`prop.text ("…" + arrow)`, `Text('…')`) and need the bare
+   *  expression.  Handing both keeps the i18n-off path byte-identical: a target
+   *  that ignores this field emits exactly what it emitted before. */
+  headerValue?: string;
   /** Row property this column sorts by (`"name"`, `"id"`, …). */
   field: string;
   /** Page-state field holding the active sort column. */
@@ -192,12 +206,10 @@ export interface PagerSpec {
 
 /** The pack chrome a pager renders, pre-resolved by `primitives/table.ts`.
  *
- *  A target used to spell "Prev" / "Next" / "Page N of M" as literals inside
- *  its markup string, which made them the one class of user-visible text no
- *  locale could reach.  They arrive here instead, already decided: under i18n a
- *  `t()` binding keyed to the shared `chrome.*` catalog, otherwise the same raw
- *  English as before — so an un-migrated target and a string-less app are both
- *  byte-identical.
+ *  "Prev" / "Next" / "Page N of M" arrive here already decided — under i18n a
+ *  `t()` binding keyed to the shared `chrome.*` catalog, otherwise raw English.
+ *  A target that spelled them as literals inside its markup string would make
+ *  them the one class of user-visible text no locale can reach.
  *
  *  TWO forms of each, and the split is the one D-I18N-ATTR already draws: the
  *  four JSX/markup targets splice a rendered FRAGMENT, while Feliz and Flutter
@@ -231,15 +243,14 @@ export interface PagerChrome {
 /** What a target needs to build the CLIENT-side page window under a paged
  *  `Table` (M-T1.1 — the `renderClientPaging` seam).
  *
- *  Windowing used to be built generically in `primitives/table.ts` with literal
- *  JavaScript (`.slice(…)`, `Math.max`, `Math.ceil`, `.length`).  That is fine
- *  for the four JSX targets — which share JS — but it is not source the F# and
- *  Dart targets can host, so client paging was structurally unreachable for
- *  them no matter what `renderPager` did.  The arithmetic is now a seam with
- *  the JS form as its default, so the JSX targets stay byte-identical and a
- *  non-JS target can express the same window in its own language. */
+ *  The arithmetic is a seam with the JS form as its default.  Building the
+ *  window generically in `primitives/table.ts` with literal JavaScript
+ *  (`.slice(…)`, `Math.max`, `Math.ceil`, `.length`) works for the four JSX
+ *  targets, which share JS, but is not source the F# and Dart targets can host
+ *  — client paging would be structurally unreachable for them no matter what
+ *  `renderPager` did. */
 /** What a target needs to build the plotted-data expression under a `Chart`
- *  (M-T1.3 Phase 4 — the `renderChartData` seam).  The `of:` read is already
+ *  (the `renderChartData` seam).  The `of:` read is already
  *  rendered; what differs per target is only how rows are reached and how the
  *  series is coerced to a number. */
 export interface ChartDataSpec {
@@ -292,6 +303,15 @@ export interface DataGridColumn {
   id: string;
   /** Header label, already escaped for the target. */
   header: string;
+  /** The header as a target-native TRANSLATION expression (`t("page.…", "Job
+   *  Name")`), or `undefined` when there is nothing to translate — i18n off, or
+   *  a dynamic header (M-T1.11, the `columnHeader` slot).
+   *
+   *  A grid header is a VALUE inside a TanStack-shaped column definition, not
+   *  markup, so every child renderer spells it `header: <value>` and reads this
+   *  in preference to quoting {@link header}.  `undefined` keeps each renderer's
+   *  own quoting, which is what makes the i18n-off output byte-identical. */
+  headerValue?: string;
   /** Row field this column reads, when the accessor is a simple member. */
   accessorKey?: string;
   /** Already-rendered target markup for a non-trivial accessor, with the row
@@ -769,6 +789,20 @@ export interface WalkerTarget {
    *  HEEx: `<%!-- text --%>`. */
   renderComment(text: string): string;
 
+  /** OPTIONAL — render a VISIBLE degradation notice in markup-child position.
+   *
+   *  A comment is the right shape for a diagnostic aimed at whoever reads the
+   *  generated source.  It is the WRONG shape when the missing thing had a
+   *  visible frame around it: the scaffolded Detail page's History card renders
+   *  its border and its translated "History" heading either way, so a comment
+   *  leaves the reader an empty panel that says the entity was never touched —
+   *  a lie with no compile-time signal anywhere.  A target that cannot serve a
+   *  whole section implements this to say so on the page instead.
+   *
+   *  Defaults to `renderComment` for the targets whose every unported primitive
+   *  IS just a missing widget (the JSX family), so nothing changes for them. */
+  renderNotice?(text: string): string;
+
   /** Render a JS expression in markup TEXT/child position — the
    *  framework's inline interpolation.  TSX and Svelte share JSX's
    *  `{expr}`; Vue uses the mustache `\{\{ expr \}\}`; HEEx's own
@@ -804,6 +838,17 @@ export interface WalkerTarget {
    *  never reach the aria-`t()` path), so it is an optional data field, not a
    *  method every target must implement. */
   ariaAttrPrefix?: string;
+
+  /** OPTIONAL — bind a NAVIGATION attribute (`to` / `href` / `routerLink`)
+   *  through `renderAttrBinding` even when the destination is a static string
+   *  literal.  Angular sets it: its packs have always spelled a static link
+   *  `[routerLink]='"/orders"'` (a property binding over a JS string), and a
+   *  plain `routerLink="/orders"` — while equally valid — would be a gratuitous
+   *  change of emitted bytes.  Every other frontend leaves it undefined and
+   *  spells a static path as a plain quoted attribute (` to="/orders"`), which
+   *  is what they emitted before computed destinations were supported at all.
+   *  Read only by `navAttrFragment`. */
+  navAttrAlwaysBound?: boolean;
 
   /** OPTIONAL — the SPELLING of a plain STRING LITERAL in the target's own
    *  expression language (M-T1.11).  Needed only where a user-visible string
@@ -891,7 +936,7 @@ export interface WalkerTarget {
    *  literal, its raw text (`literal`).  TSX camel-cases keys into a
    *  JSX object (` style={{ backgroundColor: v }}`); Svelte emits a
    *  CSS string with `{expr}` interpolation; HEEx emits the flat
-   *  quoted CSS string (lifted from the old styleAttrHeex helper). */
+   *  quoted CSS string. */
   renderStyleAttr(
     entries: ReadonlyArray<{ key: string; rendered: string; literal?: string }>,
   ): string;
@@ -1156,11 +1201,6 @@ export interface WalkerTarget {
   // (`src/generator/{react,vue,svelte,angular}/store-builder.ts`, and
   // `src/generator/elixir/store-emit.ts` for LiveView), outside `walkBody`.
   //
-  // A third method, `renderStoreModule(store)`, was declared here for that
-  // file and was implemented by NO target and called by NOTHING — the
-  // builders had already taken the job.  It has been removed; the builders
-  // are the contract.
-  //
   // The React reference (`tsx-target.ts`) implements both use-site methods
   // against Zustand:
   //
@@ -1262,13 +1302,18 @@ export interface WalkerTarget {
    *  `Table`, even though it implements the control seams.  Server mode needs
    *  two things the client mode doesn't: a `totalPages` off the paged ENVELOPE,
    *  and a refetch that feeds the sort/page state back through the query's
-   *  `of:` args.  Feliz's wire layer decodes only the envelope's `items` into a
-   *  plain `'T list` (M-T2.6 left the Feliz envelope unwrap pinned), so
-   *  `rows.totalPages` doesn't type-check and a sortable header would write
-   *  state nothing refetches on.  Suppressing both there renders the table as
-   *  the plain, server-ORDERED page it already is — correct, just not
-   *  interactive — rather than emitting a control that lies.  Omitted → server
-   *  mode is supported (every JSX target). */
+   *  `of:` args.  Suppressing both renders the table as the plain,
+   *  server-ORDERED page it already is — correct, just not interactive —
+   *  rather than emitting a control that lies.
+   *
+   *  **NO TARGET SETS THIS TODAY.**  Feliz was the one that did (its wire layer
+   *  decoded only the envelope's `items`, so `rows.totalPages` didn't
+   *  type-check); M-T2.6's Feliz leg landed both halves — a controlled `.all`
+   *  decodes the page count into a sibling Model field and the control setters
+   *  refetch — and the flag came off (`test/generator/feliz/table-controls.test.ts`
+   *  §"feliz server-paged scaffold list").  The slot stays for the NEXT
+   *  non-JS target that arrives without an envelope unwrap.  Omitted → server
+   *  mode is supported, which is every target as things stand. */
   serverPagedControls?: boolean;
 
   /** Clamp the SERVER-supplied page count to at least 1.  Omitted → the JS
@@ -1316,7 +1361,7 @@ export interface WalkerTarget {
    *  untouched either way. */
   joinRoots?(parts: readonly string[]): string;
 
-  // --- DataGrid seam (M-T1.1 slice 10) ------------------------------------
+  // --- DataGrid seam (M-T1.1) ------------------------------------
   //
   // Unlike the `Table` seams above, a `DataGrid` cannot be expressed as markup
   // around a rows expression: it is a TanStack row model driven by a component
@@ -1425,10 +1470,13 @@ export interface WalkerTarget {
    *  no arm for it" and the caller falls through to its ordinary method-call
    *  emission — so a target may implement this partially.  The four JS targets
    *  supply the shared `_expr/js-intrinsics.ts` table via `jsExprLeaves`
-   *  (they emit the same language the TypeScript backend does).  Feliz /
-   *  Flutter leave it undefined for now and keep today's verbatim behaviour —
-   *  each needs its own leaf table (F# `.ToUpper()`, Dart `.toUpperCase()`),
-   *  which is tracked separately. */
+   *  (they emit the same language the TypeScript backend does).  **Feliz and
+   *  Flutter supply it too** — each routes to its own leaf table
+   *  (`renderFsIntrinsic` in `feliz/fs-expr.ts`, `renderDartIntrinsic` in
+   *  `flutter/dart-expr.ts`), deliberately the SAME table its non-view path
+   *  uses (the Feliz MVU `update` walk, the Flutter notifier/action walk), so
+   *  `s.replace(a, b)` cannot mean one thing in a page body and another in an
+   *  action body.  No target is left on the verbatim fallback. */
   renderIntrinsic?(
     receiverType: TypeIR,
     member: string,

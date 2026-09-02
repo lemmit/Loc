@@ -1,4 +1,4 @@
-// Built-in capability prelude (typed-capabilities.md, Phase 3).
+// Built-in capability prelude (typed-capabilities.md).
 //
 // Macros are delivered by *code* (registered in the macro registry at toolchain
 // start), so any `.ddd` can use them with nothing declared.  A `capability` is
@@ -10,12 +10,12 @@
 // `expander.ts`).  A user-declared capability of the same name wins (the prelude
 // is a default, not an override).
 //
-// The capabilities are BUILT with the same AST factories the macros used (not
-// parsed from source) so their nodes — crucially their cross-references — match
-// the old macro output exactly.  A factory reference carries no `$refNode`, so a
-// `createdBy: User id` whose `User` isn't declared fails resolution *silently*
-// (no diagnostic; lowering reads the `$refText`) — identical to the macro, and
-// unlike a parsed reference which would surface a "could not resolve" error.
+// The capabilities are BUILT with the AST factories, not parsed from source, so
+// their nodes — crucially their cross-references — match what a macro emits.  A
+// factory reference carries no `$refNode`, so a `createdBy: User id` whose
+// `User` isn't declared fails resolution *silently* (no diagnostic; lowering
+// reads the `$refText`), unlike a parsed reference which would surface a "could
+// not resolve" error.
 //
 // Pure-mixin only (fields + filter + stamp) — operations/structure stay macros.
 // `auditable` collapses the former `auditable` (fields) + `audit` (stamps) macro
@@ -89,8 +89,8 @@ function buildSoftDeletable(): Capability {
 /** `capability tenantOwned { tenantId (internal) + dataKey (internal) +
  * onCreate stamp from the principal's claim + orgPath + filter this.tenantId
  * == currentUser.tenantId }` — the tenant-data marker of multi-tenancy Phase
- * 1a (docs/old/plans/multi-tenancy-implementation.md, slice 1a.2), extended by
- * Phase 2 slice P2.3 (docs/old/plans/multi-tenancy-phase2.md) with the
+ * 1a (docs/old/plans/multi-tenancy-implementation.md), extended by
+ * (docs/old/plans/multi-tenancy-phase2.md) with the
  * materialized `dataKey` path.  Combines `auditable`'s principal-stamp shape
  * with `softDeletable`'s filter shape: every read is scoped to the caller's
  * tenant, every create is stamped with it, and `internal` keeps both
@@ -109,22 +109,22 @@ function buildSoftDeletable(): Capability {
  * different thing and stays put: that is the ROW column this capability
  * provides.  Only the `currentUser.` side is claim-dependent.
  *
- * (An earlier version of this note claimed the tenancy validators verified the
- * declared claim is literally `tenantId`.  They never did — they check the
- * claim EXISTS on the principal and that its TYPE binds, not its name — so a
- * non-`tenantId` claim emitted a backend referencing a claim the principal did
- * not have: a compile error on node/.NET/Java, a per-request 500 on
- * Python/Elixir.  See `test/fixtures/corpus/tenancy-claim-name.ddd`.)
+ * (The tenancy validators do NOT check that the declared claim is literally
+ * named `tenantId` — they check the claim EXISTS on the principal and that its
+ * TYPE binds.  So the claim name has to be bound HERE: hardcoding `tenantId`
+ * emits a backend referencing a claim the principal does not have — a compile
+ * error on node/.NET/Java, a per-request 500 on Python/Elixir.  See
+ * `test/fixtures/corpus/tenancy-claim-name.ddd`.)
  *
  * `dataKey := currentUser.orgPath` is a pure claim-copy stamp exactly like
  * `tenantId`'s — it rides the same `contextStamp` pipeline, no per-backend
  * code needed (every backend already renders `currentUser.orgPath` for the
- * P2.1/P2.2 filter use-site; a stamp assignment is the same expression
+ * filter use-site; a stamp assignment is the same expression
  * renderer, different call site).  It is stamped **unconditionally** — not
  * gated on the system having opted the registry into `implements
- * tenantRegistry` (P2.2) — because `currentUser.orgPath` is never a
+ * tenantRegistry` — because `currentUser.orgPath` is never a
  * placeholder: under flat tenancy (no registry hierarchy) it resolves to the
- * tenancy claim itself (P2.1's defined fallback, the correct *root-only*
+ * tenancy claim itself (defined fallback, the correct *root-only*
  * path), and once a hierarchy exists it resolves to the real materialized
  * path with no code here needing to change. `authorization.md §2` calls
  * `dataKey` a persistence column only — it is dropped from `wireShape`
@@ -151,8 +151,8 @@ function buildTenantOwned(): Capability {
 }
 
 /** `capability tenantRegistry { parent: Self id? (immutable) + dataKey: string?
- * (managed) }` — the tenant-registry TREE capability of multi-tenancy Phase 2
- * (docs/old/plans/multi-tenancy-phase2.md, slice P2.2).  The registry aggregate —
+ * (managed) }` — the tenant-registry TREE capability of multi-tenancy
+ * (docs/old/plans/multi-tenancy-phase2.md, slice).  The registry aggregate —
  * the `of <Registry>` target of `tenancy by user.<claim> of <Registry>` — opts
  * into hierarchy by carrying `implements tenantRegistry`, which PROVIDES:
  *

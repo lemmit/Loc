@@ -72,6 +72,137 @@ describe("policy deny — node (Hono/Drizzle)", () => {
   });
 });
 
+// F2-ADP-5.  The write-scope command-load guard shipped on the RELATIONAL
+// drizzle shape only — and then on all four MikroORM shapes — leaving the
+// DEFAULT adapter's `shape: embedded` / `shape: document` / `persistedAs:
+// eventLog` repositories with a guard-free `getById`, i.e. `deny write`
+// silently NOT ENFORCED on the default backend.
+describe("policy deny write — drizzle non-relational shapes (embedded / document / event-sourced)", () => {
+  const shapesSystem = `
+    system Shop {
+      user { id: guid  tenantId: string }
+      tenancy by user.tenantId of Org
+      subdomain S {
+        context C {
+          event Opened { ledger: Ledger id, owner: string }
+          aggregate Emb shape: embedded, with crudish, tenantOwned {
+            code: string
+            contains lines: Line[]
+            entity Line { label: string }
+          }
+          aggregate Doc shape: document, with crudish, tenantOwned { code: string }
+          aggregate Ledger crossTenant persistedAs: eventLog {
+            owner: string
+            create open(owner: string) { emit Opened { ledger: id, owner: owner } }
+            operation rename(owner: string) { emit Opened { ledger: id, owner: owner } }
+            apply(e: Opened) { owner := e.owner }
+          }
+          repository Embs for Emb { }
+          repository Docs for Doc { }
+          repository Ledgers for Ledger { }
+          policy {
+            deny write on Emb
+            deny write on Doc
+            deny write on Ledger
+          }
+        }
+        context Registry {
+          aggregate Org with crudish { name: string  implements tenantRegistry }
+          repository Orgs for Org { }
+        }
+      }
+      api ShopApi from S
+      storage primarySql { type: postgres }
+      resource shopState { for: C, kind: state, use: primarySql }
+      resource shopLog { for: C, kind: eventLog, use: primarySql }
+      resource registryState { for: Registry, kind: state, use: primarySql }
+      deployable api {
+        platform: node
+        contexts: [C, Registry]
+        dataSources: [shopState, registryState, shopLog]
+        serves: ShopApi
+        port: 3001
+        auth: required
+      }
+    }
+  `;
+
+  it("guards the command load on all three non-relational shapes", async () => {
+    const out = await generateSystemFiles(shapesSystem);
+    const pick = (n: string) => [...out].find(([p]) => p.includes(n))?.[1] ?? "";
+    // Embedded keeps queryable root columns → the same SQL existence pre-guard
+    // the relational shape emits.
+    const emb = pick("emb-repository");
+    expect(emb).toContain(
+      "const inScope = await this.db.select({ id: schema.embs.id }).from(schema.embs).where(and(eq(schema.embs.id, id), and(isNull(schema.embs.id), isNotNull(schema.embs.id)))).limit(1);",
+    );
+    expect(emb).toContain(
+      "if (inScope.length === 0) throw new AggregateNotFoundError(`Emb ${id} not found`);",
+    );
+    // The blob shapes have no queryable columns → an unconditional not-found
+    // command load (and no `if (!(false))` constant condition).
+    const doc = pick("doc-repository");
+    const ledger = pick("ledger-repository");
+    expect(doc).toContain("// policy { deny write on Doc } — no row is in write scope.");
+    expect(doc).toMatch(
+      /async getById\(id: Ids\.DocId\): Promise<Doc> \{\n[^\n]*\n\s*throw new AggregateNotFoundError/,
+    );
+    expect(ledger).toContain("// policy { deny write on Ledger } — no row is in write scope.");
+    expect(ledger).toMatch(
+      /async getById\(id: Ids\.LedgerId\): Promise<Ledger> \{\n[^\n]*\n\s*throw new AggregateNotFoundError/,
+    );
+    expect(doc).not.toContain("if (!(false))");
+    expect(ledger).not.toContain("if (!(false))");
+    // The control: an aggregate with no rule keeps the bare load.
+    const org = pick("org-repository");
+    expect(org).not.toContain("inScope");
+    expect(org).not.toContain("no row is in write scope");
+  });
+
+  it("narrows the command load in-app on a document shape when the write scope only tightens", async () => {
+    // `allow global on Doc` widens the READ scope, so the fail-closed default
+    // restores the tenant floor as the WRITE scope — a currentUser-referencing
+    // predicate rather than the always-false sentinel.
+    const out = await generateSystemFiles(`
+      system Shop {
+        user { id: guid  tenantId: string }
+        tenancy by user.tenantId of Org
+        subdomain S {
+          context C {
+            aggregate Doc shape: document, with crudish, tenantOwned { code: string }
+            repository Docs for Doc { }
+            policy { allow global on Doc }
+          }
+          context Registry {
+            aggregate Org with crudish { name: string  implements tenantRegistry }
+            repository Orgs for Org { }
+          }
+        }
+        api ShopApi from S
+        storage primarySql { type: postgres }
+        resource shopState { for: C, kind: state, use: primarySql }
+        resource registryState { for: Registry, kind: state, use: primarySql }
+        deployable api {
+          platform: node
+          contexts: [C, Registry]
+          dataSources: [shopState, registryState]
+          serves: ShopApi
+          port: 3001
+          auth: required
+        }
+      }
+    `);
+    const doc = [...out].find(([p]) => p.includes("doc-repository"))?.[1] ?? "";
+    expect(doc).toContain(
+      "if (!(found.tenantId === currentUser.tenantId)) throw new AggregateNotFoundError(`Doc ${id} not found`);",
+    );
+    // …and the ambient accessor it names is imported (the read scope is global,
+    // so nothing else in the file pulls it in).
+    expect(doc).toContain('import { requireCurrentUser } from "../../auth/middleware";');
+    expect(doc).toContain("const currentUser = requireCurrentUser();");
+  });
+});
+
 describe("policy deny — .NET (EF Core)", () => {
   it("renders `false` into the query filter (deny read) and write in-scope (deny write)", async () => {
     const text = await allText("dotnet");

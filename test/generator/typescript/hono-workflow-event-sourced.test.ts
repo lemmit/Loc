@@ -4,10 +4,8 @@
 // the saga analogue of a `persistedAs: eventLog` aggregate — instead of a
 // mutable correlation-state row.  Asserts the shared stream table, the fold
 // helpers, and the fold-load / append-own-events dispatch seam.
-
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles } from "../../_helpers/index.js";
 
 const SRC = `system S { subdomain O { context O {
   aggregate Order { status: string  operation place() { status := "P"  emit OrderPlaced { order: id } } }
@@ -22,12 +20,12 @@ const SRC = `system S { subdomain O { context O {
     on(pr: PaymentReceived) by pr.order { emit PaymentReceived { order: pr.order, amount: total } }
     apply(pr: PaymentReceived) { total := total + pr.amount }
   }
-} } api A from O storage pg { type: postgres } deployable api { platform: node contexts: [O] serves: A port: 8080 } }`;
+} } api A from O storage pg { type: postgres }
+  resource oState { for: O, kind: state, use: pg }
+  deployable api { platform: node contexts: [O] serves: A dataSources: [oState] port: 8080 } }`;
 
 async function gen(): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(SRC);
-  if (errors.length) throw new Error(errors.join("\n"));
-  return generateSystems(model).files;
+  return await generateSystemFiles(SRC);
 }
 
 const file = (files: Map<string, string>, suffix: string): string =>
@@ -38,13 +36,16 @@ describe("hono event-sourced workflows", () => {
     const schema = file(await gen(), "db/schema.ts");
     // The ES workflow's stream lives in the shared per-context event log,
     // discriminated by stream_type — not a per-workflow `tally_events` table.
-    expect(schema).toContain('pgTable("o_events"');
+    // Schema-qualified — the deployable binds a `dataSource` for context `O`
+    // (which every accepted model must), so its tables live in the `o` schema.
+    expect(schema).toContain('export const oSchema = pgSchema("o");');
+    expect(schema).toContain('oSchema.table("o_events"');
     expect(schema).toContain('streamType: text("stream_type").notNull(),');
     expect(schema).toContain("streamId: text(");
     expect(schema).toContain("version: integer(");
-    expect(/pgTable\("tally_events"/.test(schema)).toBe(false);
+    expect(/\.table\("tally_events"/.test(schema)).toBe(false);
     // No mutable correlation-state table for the event-sourced workflow.
-    expect(/pgTable\("tally",/.test(schema)).toBe(false);
+    expect(/\.table\("tally",/.test(schema)).toBe(false);
   });
 
   it("emits the fold helpers (state type, fold, apply, load, append)", async () => {

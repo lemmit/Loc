@@ -16,7 +16,7 @@ versioning works.
 
 | `platform:` keyword | Surface file | Default port | Needs DB | Mounts UI |
 |---|---|---|---|---|
-| `node` (default `node@v4`; Hono web framework) | `src/platform/hono/v4/index.ts` | 3000 | ✓ | ✗ |
+| `node` (default `node@v5`; Hono web framework — `node@v4` stays resolvable as a pin) | `src/platform/hono/v5/index.ts` (v4: `src/platform/hono/v4/index.ts`) | 3000 | ✓ | ✗ |
 | `dotnet` (default `dotnet@v10`) | `src/platform/dotnet.ts` | 8080 | ✓ | ✓ (when `ui:` is declared) |
 | `elixir` (default `elixir@v1`; legacy aliases `phoenix` / `phoenixLiveView` desugar to it) | `src/platform/elixir.ts` | 4000 | ✓ | ✓ (fullstack) |
 | `python` (default `python@v1`) | `src/platform/python.ts` | 8000 | ✓ | ✓ (when `ui:` is declared — dotnet-style dual mode) |
@@ -65,23 +65,28 @@ Resolution happens in two parts (see `parseBuiltinPlatformRef` in
 `src/platform/registry.ts`):
 
 1. **Bareword backend** — resolves through `BUILTIN_PLATFORM_LATEST`
-   to today's default version.  Currently: `node → v4`,
-   `dotnet → v8`, `elixir → v1`, `python → v1`, `java → v1`.
+   to today's default version.  Currently: `node → v5`,
+   `dotnet → v10`, `elixir → v1`, `python → v1`, `java → v1`.
+   Older in-tree versions stay resolvable through an explicit pin —
+   `node@v4` is the one such extra registration today
+   (`BUILTIN_PLATFORM_EXTRA_VERSIONS` in `src/platform/metadata.ts`).
    Frontend platforms (`react`, `vue`, `svelte`, `angular`, `static`)
    intentionally aren't versioned at the platform layer — their
    version lives on the design pack / stack axis (see
    [`design-packs.md`](design-packs.md)).
 
-   > **What `vN` means.** A backend package's Loom version mirrors the
-   > **major version of its defining framework/runtime**, *not* the
-   > platform's own name. So `node@v4` tracks **Hono 4** (the `hono:
-   > ^4.x` pin in `src/platform/hono/v4/pins.ts`; `v5` is reserved for
-   > the next Hono major), exactly as `dotnet@v10` tracks **.NET 10** and
-   > `mantine@v9` tracks Mantine 9. `node@v4` is therefore *not* "Node.js
-   > 4" — the `node` platform names the JS runtime, while the `4` versions
-   > the Hono web framework it emits. (Sources never spell this out: every
-   > deployable uses the bareword `platform: node`, and `@v4` is only the
-   > internal qualified ref the resolver fills in.)
+   > **What `vN` means.** A backend package's Loom version tracks the
+   > **package's own dependency-major evolution**, *not* the platform's
+   > name and *not* the JS runtime. `node@v4` was cut around **Hono 4 +
+   > zod 3 + TS 5** (`src/platform/hono/v4/pins.ts`); `node@v5` — today's
+   > default — is the cross-major successor carrying **zod 4, TypeScript 6,
+   > vitest 4** (`src/platform/hono/v5/pins.ts`), with Hono itself still on
+   > 4.x because there is no Hono 5. Elsewhere the number does line up with
+   > the defining framework (`dotnet@v10` tracks **.NET 10**, `mantine@v9`
+   > tracks Mantine 9). What `node@v5` is definitely *not* is "Node.js 5".
+   > (Sources never spell this out: every deployable uses the bareword
+   > `platform: node`, and `@v5` is only the internal qualified ref the
+   > resolver fills in.)
 2. **Pinned `family@version`** — looked up directly in the
    registered backend surfaces.  Unknown versions are a validation
    error that lists the available pins (`backendVersionsForFamily`).
@@ -120,11 +125,15 @@ available. The matured axis today is **`persistence:`**:
   embedded / event-sourced / inheritance (TPH+TPC) shape, containment (incl.
   recursive part-in-part), associations, filters, audit / provenance / managed
   fields, retrievals, seeds, and the workflow outbox all emit. `dapper` ≡ EF
-  Core; `mikroorm` ≡ Drizzle. `loom.dapper-unsupported` /
-  `loom.mikroorm-unsupported` now fire ONLY for one genuinely-impossible shape
-  each (Dapper: an un-owned by-value entity-array part *field*; MikroORM: an
-  abstract inheritance base owning its own `contains`) — fail-fast guards, not
-  subset boundaries. The alternates share the generated **domain layer**
+  Core; `mikroorm` ≡ Drizzle. Neither adapter rejects a SHAPE any more:
+  `loom.mikroorm-unsupported` now fires only for declared migration steps
+  (`orm.schema.updateSchema()` has no rename intent to consult), and its last
+  shape reject — an abstract inheritance base owning its own `contains` — turned
+  out to be impossible on every target and became the target-neutral
+  `loom.abstract-aggregate-contains` (see [`inheritance.md`](inheritance.md)).
+  The remaining adapter-specific narrowing is on the FIND-PREDICATE axis
+  (`loom.find-predicate-unsupported`): MikroORM lowers no reference-collection
+  membership subquery. The alternates share the generated **domain layer**
   with the default and only swap the persistence layer (Dapper SQL
   repositories / MikroORM `EntitySchema` + `EntityManager`), so a project
   can switch persistence without touching its domain code.
@@ -168,11 +177,16 @@ The document sub-case below is the one feature with a partial story:
 ¹ `vanilla` emits the document CRUD surface (an `(id, data, version)` jsonb
 table) plus **custom finds** (in-memory `Enum.filter` over the `data` map, incl.
 value-object-subfield reads), **named operations** (body over the `data` map →
-`update/2`), pure **functions** (over the `data` map), and **returning ops**
-(`: A or B` → tagged tuple) — DEBT-07. Only a small residual stays gated —
-audited/provenanced ops, collection mutation, derived / dereferenced-entity /
-collection-method reads, and paged/union finds; host those on
-node/dotnet/python/java.
+`update/2`), pure **functions** (over the `data` map), **returning ops**
+(`: A or B` → tagged tuple), paged and union finds, containment mutation, and
+**collection reads over the aggregate's own in-memory lists** (`lines.sum(l =>
+l.qty)` / `.count` / `.any(λ)` over a containment `embeds_many`, `.contains`
+over a scalar array) — DEBT-07 + Route A. It also applies **capability filters**
+(`filter` / `policy` / tenancy) on every document read, evaluated in-app over
+the rehydrated `%<Agg>.Data{}` embed. The residual that stays gated:
+provenanced ops, derived and dereferenced-entity reads, collection ops over a
+REFERENCE collection (`X id[]` — a join table a jsonb blob has no equivalent
+for), and value-object METHOD calls; host those on node/dotnet/python/java.
 
 ² An `apply(e: E) { … }` fold rebinds in-memory state (an ES aggregate has no
 state table), so EVERY fold shape emits — `src/generator/elixir/vanilla/fold-stmt-emit.ts`
@@ -249,6 +263,30 @@ self-contained — no cross-platform calls.  The system orchestrator
 in `src/system/` composes the resulting per-deployable file maps into
 one tree and writes the cross-cutting `docker-compose.yml`,
 `db-init/`, and `.loom/` artefacts on top.
+
+### `platform: node` does not mount a UI — a settled non-goal
+
+`node` is the only backend with `mountsUi: false`, and that is **deliberate,
+not a gap**: the Hono emitter serves JSON only.  It emits no static-asset
+middleware (`serveStatic` appears nowhere in `src/platform/hono/`), so there is
+nothing for a `ui:` binding to be served *by*.  A React/Vue/Svelte/Angular UI
+against a node backend is its own deployable — an nginx-served bundle with
+`targets:` pointed at the API — which is the shape every shipped example uses.
+The four `mountsUi: true` backends (dotnet, java, python, elixir) each host a
+bundle from their own web server; node's runtime has no equivalent story that
+does not amount to reimplementing one.
+
+Re-open this only with the static-serving emission in hand, not the flag:
+flipping `mountsUi` alone would admit a `ui:` binding that generates a
+deployable serving 404s for every page.
+
+> **Known inconsistency (recorded, not fixed):** node's descriptor still
+> declares `hostableFrameworks: STATIC_BUNDLE_FRAMEWORKS`.  That field is
+> read only by the `loom.ui-framework-unhostable` rule, which is itself
+> guarded by `platformMountsUi(...)` — so on node it is unreachable data
+> that reads as a capability claim the emitter does not honour.  Emptying it
+> touches the `adapter-metadata.ts` mirror and its consistency test, so it is
+> a separate change.
 
 ## Cross-references
 

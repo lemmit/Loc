@@ -33,7 +33,7 @@ system S {
         name: string
         quantity: int
         status: string
-        create(n: string) { name := n  quantity := 0  status := "open" }
+        create(name: string) { }
 
         // Messaged + param-only → the WIRE rung.
         operation restock(amount: int) {
@@ -71,7 +71,7 @@ system P {
     context Cat {
       aggregate Widget {
         quantity: int
-        create() { quantity := 0 }
+        create() { }
         operation ship(amount: int) {
           precondition amount >= 1
           quantity := quantity - amount
@@ -160,7 +160,9 @@ describe("elixir/vanilla — messaged precondition answers the wire-validation 4
     expect(pd).toContain('title: "Validation failed"');
     expect(pd).toContain('detail: "One or more fields are invalid."');
     // The changeset path delegates to it rather than building its own body.
-    expect(pd).toContain("send_validation_problem(conn, pointer_errors)\n  end");
+    expect(pd).toContain(
+      "send_validation_problem(conn, collect_changeset_errors(changeset, []))\n  end",
+    );
     // The wire path localises the code through the SAME catalog lookup.
     expect(pd).toContain("def validation_errors_response(conn, errors) when is_list(errors) do");
     expect(pd).toContain("message: localize(code, message)");
@@ -178,12 +180,129 @@ describe("elixir/vanilla — messaged precondition answers the wire-validation 4
     expect(catchAllIdx).toBeGreaterThan(wireIdx);
   });
 
-  it("is gated: a project with no messaged param precondition emits no wire responder", async () => {
+  it("is gated: a project with no messaged param precondition tags no wire denial", async () => {
     const files = await generateSystemFiles(PLAIN);
-    const pd = file(files, "/problem_details.ex");
-    expect(pd).not.toContain("validation_errors_response");
-    expect(pd).not.toContain("render_wire_error");
     const ctrl = file(files, "/controllers/widget_controller.ex");
+    // The CONTROLLER side is what M-T6.20 gates: without a messaged, param-only
+    // precondition nothing is tagged `:validation_failed`, so nothing reaches
+    // the wire rung and the denial stays on the domain floor.
     expect(ctrl).not.toContain(":validation_failed");
+
+    // The RESPONDER, however, is no longer exclusive to this feature.  The
+    // paging-bounds refusal (audit A16 — an out-of-range `page`/`pageSize` now
+    // 422s instead of being clamped past the bounds the OpenAPI document
+    // publishes) sends through the SAME `validation_errors_response/2`, and the
+    // auto-`findAll` makes every non-abstract controller paged — so its
+    // presence no longer implies a messaged precondition.  Asserting its
+    // ABSENCE here would pin a coincidence, not the gate.
+    const pd = file(files, "/problem_details.ex");
+    expect(pd).toContain("def validation_errors_response(conn, errors) when is_list(errors) do");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M-T6.20 PATH 2 — the RAISE path (`function` / `domainService` / pure-core).
+//
+// The `ensure` chain above is only reachable from an HTTP-boundary operation.
+// A guard in a PURE body has no `with` chain to short-circuit through, so it
+// RAISES and a controller `rescue` maps the raise to a status.
+//
+// That rescue used to route by MESSAGE PREFIX — `String.starts_with?(guard_msg,
+// "Precondition failed: ")` — which made the message the ROUTING KEY, so an
+// authored `message "…"` was UNEMITTABLE: it would miss the prefix and fall to
+// the `reraise` arm, answering 500 instead of 422.  Both raise sites carried a
+// comment saying so and shipped the derived text instead.
+//
+// The classification is now out of band, in the `:kind` field of a typed
+// `<App>.GuardError`.  Three things must hold together, and each is asserted on
+// the ONE file that owns it (a joined search over all files would be satisfied
+// by any sibling that happens to carry the shape):
+//   1. the exception module exists in the DOMAIN layer (`lib/<app>/`, not
+//      `<App>Web.*` — `function-emit` / `domain-service-emit` render there);
+//   2. the raise carries `kind:` + the AUTHOR'S message;
+//   3. the controller rescue routes on `guard_error.kind`, and reads the
+//      message nowhere.
+// ---------------------------------------------------------------------------
+
+const RAISE_PATH = `
+system S {
+  subdomain Sales {
+    context Cat {
+      aggregate Product {
+        name: string
+        quantity: int
+
+        function checkRestockable(amount: int): bool {
+          precondition amount >= 1 message "A pure function keeps its authored message"
+          return true
+        }
+
+        create(name: string, quantity: int) { }
+
+        operation restock(amount: int) {
+          let ok = checkRestockable(amount)
+          quantity := quantity + amount
+        }
+      }
+      repository Products for Product { }
+
+      domainService Quotes {
+        operation quote(p: Product): int {
+          requires currentUser.level > 2
+          return p.quantity
+        }
+      }
+    }
+  }
+  user { id: string  level: int }
+  api CatApi from Sales
+  storage db { type: postgres }
+  resource st { for: Cat, kind: state, use: db }
+  deployable api { platform: elixir contexts: [Cat] dataSources: [st] serves: CatApi port: 8080 auth: required }
+}
+`;
+
+describe("elixir/vanilla — the RAISE path carries the author's message (M-T6.20 path 2)", () => {
+  it("emits the typed guard exception in the DOMAIN layer", async () => {
+    const files = await generateSystemFiles(RAISE_PATH);
+    const mod = file(files, "/api/guard_error.ex");
+    expect(mod).toContain("defmodule Api.GuardError do");
+    expect(mod).toContain("defexception [:message, :kind]");
+    expect(mod).toContain("@type kind :: :forbidden | :precondition");
+    // Domain layer, NOT `<App>Web.*` — the raise sites live under `lib/<app>/`
+    // and must not reference the Web namespace.
+    expect(mod).not.toContain("ApiWeb");
+    const key = [...files.keys()].find((k) => k.endsWith("/api/guard_error.ex"))!;
+    expect(key).toMatch(/\/lib\/api\/guard_error\.ex$/);
+  });
+
+  it("a `function` precondition raises with the AUTHOR'S message, not the derived form", async () => {
+    const ctx = file(await generateSystemFiles(RAISE_PATH), "/api/cat.ex");
+    expect(ctx).toContain(
+      'raise(Api.GuardError, kind: :precondition, message: "A pure function keeps its authored message")',
+    );
+    // The derived form is what shipped while the prefix was the routing key.
+    expect(ctx, "derived detail emitted despite an authored message").not.toContain(
+      "Precondition failed: amount >= 1",
+    );
+  });
+
+  it("a `domainService` requires raises the same typed exception", async () => {
+    const svc = file(await generateSystemFiles(RAISE_PATH), "/domain/services/quotes.ex");
+    expect(svc).toContain(
+      'raise(Api.GuardError, kind: :forbidden, message: "Forbidden: currentUser.level > 2")',
+    );
+  });
+
+  it("the controller rescue routes on the :kind FIELD, and reads the message nowhere", async () => {
+    const ctrl = file(await generateSystemFiles(RAISE_PATH), "/controllers/product_controller.ex");
+    expect(ctrl).toContain("guard_error in Api.GuardError ->");
+    expect(ctrl).toContain("case guard_error.kind do");
+    expect(ctrl).toContain(":forbidden ->\n          ProblemDetails.problem_response(conn, 403,");
+    expect(ctrl).toContain("_ ->\n          ProblemDetails.problem_response(conn, 422,");
+    // The routing key is the field; the message is free text again.  These two
+    // absences ARE the fix — with either one back, an authored message reroutes.
+    expect(ctrl).not.toContain("String.starts_with?(guard_msg");
+    expect(ctrl).not.toContain('"Precondition failed: "');
   });
 });

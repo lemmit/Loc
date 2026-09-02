@@ -115,11 +115,14 @@ describe("Dapper query-time projection handlers", () => {
 
     // The aggregation happens IN SQL — every operator, and the criterion `where`
     // folded into the SAME statement rather than applied after.  The `::int` /
-    // `::numeric` casts are load-bearing: they pin the CLR type each aggregate
-    // lands on, which is what `csCoerce` then converts to the declared row type.
+    // `::numeric` / `::double precision` casts are load-bearing: they pin the
+    // CLR type each aggregate lands on, which is what `csCoerce` then converts
+    // to the declared row type.  See the dedicated suite below for why
+    // `avgLines` (a declared `decimal`, so a `double` on the wire) must NOT
+    // arrive as `numeric`.
     expect(src!).toContain(
       'new CommandDefinition("SELECT count(*)::int AS orders, sum(total)::numeric AS revenue, ' +
-        "avg(line_count)::numeric AS avg_lines FROM orders WHERE (status = 'Confirmed')\", " +
+        "avg(line_count)::double precision AS avg_lines FROM orders WHERE (status = 'Confirmed')\", " +
         "cancellationToken: cancellationToken)",
     );
     // No GROUP BY ⇒ Postgres always returns exactly one row (count 0 / NULL
@@ -198,5 +201,140 @@ describe("Dapper query-time projection handlers", () => {
     expect(grouped).toContain("private readonly AppDbContext _db;");
     expect(grouped).toContain(".GroupBy(o => new { PlacedAtStartOfDay = o.PlacedAt.Date })");
     expect(grouped).not.toContain("date_trunc");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A `double`-on-the-wire aggregate must arrive from Postgres AS a double.
+//
+// #2575 retyped .NET wire `decimal` RESPONSE fields to `double` (RS-24: the
+// other four backends carry the JSON number through an IEEE-754 double, and
+// `System.Decimal` truncated it).  On EF that is invisible — the provider
+// materialises `Average` as a real `double`.  On DAPPER the SQL said
+// `avg(line_count)::numeric`, Npgsql maps `numeric` to `System.Decimal`, and
+// the `(double)` coercion that follows is a decimal→double conversion which
+// .NET rounds to **15 significant digits**:
+//
+//     avg of 7/3  ->  2.333333333333333        (dapper, wrong)
+//                     2.3333333333333335       (every other backend, and the
+//                                               true nearest double)
+//
+// That turned the wire-golden differential red on `behavioral-dapper` — on
+// `main` itself and on every open PR — while the dapper compile leg stayed
+// green, because the divergence lives in a SQL string literal and a runtime
+// numeric conversion. Not a golden rebaseline: node is the oracle and correct.
+//
+// The fix is one cast, and the two halves must move TOGETHER — the SQL cast and
+// the row DTO's CLR type are the same decision, and a mismatch is a silent
+// Npgsql conversion, not a compile error.  Hence both are pinned here.
+//
+// The aggregate still ACCUMULATES in `numeric` (`avg`/`sum` over `integer` or
+// `numeric` return `numeric`); only the result is converted, by Postgres'
+// correctly-rounded numeric→float8. Casting the ARGUMENT instead would move the
+// accumulation into binary floating point and diverge for real.
+// ---------------------------------------------------------------------------
+describe("dapper aggregates land on the CLR type their wire field crosses as", () => {
+  it("a `decimal`-declared aggregate casts to `double precision`, and its row DTO is `double?`", async () => {
+    const files = generateSystems(await build(SOURCE("dapper"))).files;
+    const src = files.get(SINGLETON)!;
+    expect(src).toContain("avg(line_count)::double precision AS avg_lines");
+    expect(src).toContain("public double? avg_lines { get; set; }");
+    // The `(double)` coercion is now an identity conversion — no narrowing.
+    expect(src).toContain("(double)(agg?.avg_lines ?? 0)");
+    // The defect, stated so a regression reads as itself.
+    expect(
+      src,
+      "numeric -> System.Decimal -> double rounds to 15 significant digits",
+    ).not.toContain("avg(line_count)::numeric");
+  });
+
+  it("money aggregates stay `numeric`/`decimal` — they ship as a fixed-scale STRING", async () => {
+    const files = generateSystems(await build(SOURCE("dapper"))).files;
+    const src = files.get(SINGLETON)!;
+    // `revenue` is declared `money`, so it never becomes a JSON number: it is
+    // formatted `F4` from a decimal (RS-12).  Casting it to float8 would lose
+    // the exactness that scale depends on.
+    expect(src).toContain("sum(total)::numeric AS revenue");
+    expect(src).toContain("public decimal? revenue { get; set; }");
+  });
+
+  it("`count` is unchanged — an int is an int on every backend", async () => {
+    const files = generateSystems(await build(SOURCE("dapper"))).files;
+    expect(files.get(SINGLETON)!).toContain("count(*)::int AS orders");
+    expect(files.get(SINGLETON)!).toContain("public int orders { get; set; }");
+  });
+
+  it("the GROUPED arm takes the same decision — one classifier, both arms", async () => {
+    const files = generateSystems(await build(SOURCE("dapper"))).files;
+    const grouped = files.get(GROUPED)!;
+    // This fixture's grouped projection aggregates only `count` and a money
+    // `sum`, so the pin here is that neither is disturbed…
+    expect(grouped).toContain("count(*)::int AS orders");
+    expect(grouped).toContain("sum(total)::numeric AS revenue");
+    // …and that the arm reads the shared helper rather than a second copy: a
+    // `double` field in the SINGLETON arm implies the same rule applies here,
+    // which `corpus-dotnet-dapper-build`'s `projection-groupby` fixture (whose
+    // `ByStatus` groups an `avgLines: decimal`) exercises end to end.
+    expect(grouped).not.toContain("::double precision");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// …and dapper does NOT then convert a second time (M-T6.47).
+//
+// The continuation of the fix above took the two hops #2631 could not reach —
+// the per-row response funnel and the EF aggregate arm over a `decimal` COLUMN
+// — and routes both through a correctly-rounded
+// `double.Parse(d.ToString(InvariantCulture), InvariantCulture)`.
+//
+// Dapper must stay exactly as #2631 left it.  After the SQL cast the row DTO
+// already declares `double?`, so the value arriving in C# IS a double: adding a
+// Parse would be converting an already-converted number — harmless
+// numerically, but it would put a `decimal`-shaped fix on a path that has no
+// decimal, and the next edit to either arm would have two conversions to keep
+// in step instead of one decision. Hence a `decimal` COLUMN is added here too,
+// and pinned to the SQL-side answer.
+// ---------------------------------------------------------------------------
+const DECIMAL_COLUMN_SOURCE = SOURCE("dapper")
+  .replace("        lineCount: int\n", "        lineCount: int\n        price: decimal\n")
+  .replace(
+    "      projection RevenueByDay {",
+    `      projection PriceStats {
+        avgPrice: decimal
+        from Order as o
+        select avgPrice = avg(o.price)
+      }
+
+      projection RevenueByDay {`,
+  );
+
+describe("dapper fixes the decimal narrowing in SQL, and only there", () => {
+  it("a `decimal`-COLUMN aggregate still casts in SQL and grows no `double.Parse`", async () => {
+    const files = generateSystems(await build(DECIMAL_COLUMN_SOURCE)).files;
+    const src = files.get("d/Application/Projections/PriceStatsQpHandler.cs")!;
+    // Postgres' own numeric→float8 is correctly rounded, so the value reaches
+    // C# already narrowed — nothing left to convert.
+    expect(src).toContain("avg(price)::double precision AS avg_price");
+    expect(src).toContain("public double? avg_price { get; set; }");
+    expect(src).toContain("(double)(agg?.avg_price ?? 0)");
+    expect(
+      src,
+      "the dapper value is already a double — a Parse here would convert twice",
+    ).not.toContain("double.Parse");
+  });
+
+  it("the EF twin of the same projection DOES parse — one decision, two seams", async () => {
+    // The false case of the classifier, on the identical `.ddd`: EF has no SQL
+    // to cast in, so it narrows in C#.  Both arms end up shipping the nearest
+    // double to the stored value; only the seam differs.
+    const files = generateSystems(
+      await build(DECIMAL_COLUMN_SOURCE.replace("dapper", "efcore")),
+    ).files;
+    const src = files.get("d/Application/Projections/PriceStatsQpHandler.cs")!;
+    expect(src).toContain(
+      "double.Parse((agg?.AvgPrice ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture), " +
+        "System.Globalization.CultureInfo.InvariantCulture)",
+    );
+    expect(src).not.toContain("::double precision");
   });
 });

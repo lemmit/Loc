@@ -92,8 +92,11 @@ describe("vanilla — Slice 1 CRUD read path", () => {
     const ctl = files.get(ctlKey)!;
     expect(ctl).toContain("def index(conn, params)");
     expect(ctl).toContain('def show(conn, %{"id" => id})');
+    // The paged read's `with` opens with the two paging-control clauses (audit
+    // A16 — an out-of-range `page`/`pageSize` 422s rather than being clamped
+    // past the published bounds), then the read over the bound values.
     expect(ctl).toContain(
-      'with {:ok, result} <- Tracker.list_tasks(page_param(params, "page", 1, 1000000), page_param(params, "pageSize", 20, 500), Map.get(params, "sort", "id"), Map.get(params, "dir", "asc"))',
+      'with {:ok, page_arg} <- page_param(params, "page", 1, 1000000),\n         {:ok, page_size_arg} <- page_param(params, "pageSize", 20, 500),\n         {:ok, result} <- Tracker.list_tasks(page_arg, page_size_arg, Map.get(params, "sort", "id"), Map.get(params, "dir", "asc"))',
     );
     expect(ctl).toContain("case Tracker.get_task(id) do");
     expect(ctl).toContain("{:ok, record}");

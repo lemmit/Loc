@@ -43,7 +43,7 @@ export function renderHttpIndex(
      *  `<resource>$getBytes`).  Absent → no `/files` routes emitted
      *  (byte-identical output). */
     fileUpload?: { resource: string; sourceType: string };
-    /** M-T4.4 slice 3: durable events ride a broker-bound `queue`/`work`
+    /** M-T4.4: durable events ride a broker-bound `queue`/`work`
      *  channel — the outbox must capture them even when this deployable hosts
      *  no reactor (a pure producer), so the relay can publish on drain. */
     forceOutbox?: boolean;
@@ -86,7 +86,7 @@ export function renderHttpIndex(
     const args = needsTx ? `${repoArg}, db, events` : repoArg;
     return `  app.route("${API_BASE_PATH}/${snake(plural(a.name))}", ${lowerFirst(a.name)}Routes(${args}));`;
   });
-  // Extern operations (extern (b) Phase 2) re-home to aggregate-owned hooks
+  // Extern operations (extern (b)) re-home to aggregate-owned hooks
   // implemented by a scaffold-once subclass — a missing implementation is a
   // COMPILE error (unimplemented abstract), so there is no boot-time registry
   // verify anymore.
@@ -114,19 +114,19 @@ export function renderHttpIndex(
   // FOLDED projections drive the event-fold tee + `http/projections.ts` mount.
   // Query-time projections (read-path-architecture.md rev.13) have no folds —
   // they mount their own `/projections` router from `http/query-projections.ts`.
-  // FOLDED projections now emit on BOTH persistence adapters (the MikroORM
-  // read-model store + fold routes land via `buildProjectionsFile(..., usingMikro)`),
-  // so the fold tee + `/projections` mount are no longer drizzle-gated.
+  // FOLDED projections emit on BOTH persistence adapters (the MikroORM
+  // read-model store + fold routes ride `buildProjectionsFile(..., usingMikro)`),
+  // so the fold tee + `/projections` mount are NOT drizzle-gated.
   const hasProjections = ctx.projections.some(isMaterializedProjection);
-  // Persistence-neutral since M-T6.23 slice 4 (the query-projection routes emit
-  // on both adapters), so the `/projections` mount is no longer drizzle-gated.
+  // Persistence-neutral (the query-projection routes emit on both adapters),
+  // so the `/projections` mount is NOT drizzle-gated.
   const hasQueryProjections = ctx.projections.some(isQueryTimeProjection);
   // Transactional-outbox tier (dispatch-delivery-semantics.md): when any
   // channel asks for durability (`retention: log | work`), createApp's
   // default dispatcher wraps the in-process one — durable events are
   // recorded in __loom_outbox and the relay (started by index.ts) delivers
   // them; ephemeral events keep the inline at-most-once path.
-  // Persistence-neutral since M-T6.23 slice 1: the MikroORM adapter emits the
+  // Persistence-neutral since M-T6.23: the MikroORM adapter emits the
   // same two exports over the `LoomOutboxRow` EntitySchema, so a durable channel
   // is at-least-once on both adapters (it silently degraded to the at-most-once
   // in-process path here before).
@@ -134,9 +134,8 @@ export function renderHttpIndex(
   // Realtime SSE wire (channels.md Part I): any `delivery: broadcast`
   // channel makes its carried events UI-observable — createApp wraps its
   // default dispatcher with the realtime tee and mounts GET /realtime/events.
-  // Persistence-neutral since M-T6.23 slice 5: `http/realtime.ts` emits on both
-  // adapters (it reads no `db`), so the tee + the `/realtime` mount are no longer
-  // drizzle-gated.
+  // Persistence-neutral: `http/realtime.ts` emits on both adapters (it reads no
+  // `db`), so the tee + the `/realtime` mount are NOT drizzle-gated.
   const wireRealtime = realtimeEventTypes(ctx).size > 0;
   const realtimeImport = wireRealtime
     ? `import { realtimeRoutes, realtimeTee } from "./realtime";`
@@ -163,7 +162,7 @@ export function renderHttpIndex(
         : `import { createInProcessDispatcher, workflowsRoutes } from "./workflows";`
       : `import { workflowsRoutes } from "./workflows";`
     : null;
-  // Pure-producer outbox wire (M-T4.4 slice 3): createOutboxDispatcher lives
+  // Pure-producer outbox wire (M-T4.4): createOutboxDispatcher lives
   // in ./workflows (emitted for durable-broker producers even without
   // workflows); the workflow import above only covers the hasWorkflows case.
   const outboxImport =
@@ -237,8 +236,15 @@ export function renderHttpIndex(
         `  });`,
         `  // File download — streams the stored object back with its contentType.`,
         `  app.get("/files/:key", async (c) => {`,
-        `    const obj = await ${fileUpload.resource}$getBytes(c.req.param("key"));`,
-        `    if (!obj) return c.json({ error: "not found" }, 404);`,
+        `    const key = c.req.param("key");`,
+        `    const obj = await ${fileUpload.resource}$getBytes(key);`,
+        // M-T6.39 — an absent object raises the app's ONE 404 producer instead of
+        // hand-building a body.  This route is mounted on the ROOT app, which
+        // carries the domain ladder below (M-T6.28), so the throw is rendered as
+        // the same RFC 7807 envelope every other absent read answers with —
+        // including the `httpStatus NotFound -> <Code>` override, which a
+        // hand-built body would not honour.
+        "    if (!obj) throw new AggregateNotFoundError(`File ${key} not found`);",
         `    // Copy into a standalone ArrayBuffer — Hono's c.body() rejects a`,
         `    // Uint8Array whose backing buffer is only ArrayBufferLike.`,
         `    const ab = obj.body.buffer.slice(`,
@@ -272,11 +278,15 @@ export function renderHttpIndex(
     "ConcurrencyConflict",
     ctx.structuralErrorStatuses,
   );
+  // The domain NOT-FOUND rung, resolved like every other one (M-T5.20 final
+  // slice).  Distinct from the FRAMEWORK 404 below it (`no route for …`), which
+  // is about the URL space and stays literal on all five backends.
+  const rootNotFoundStatus = resolveErrorStatus("NotFound", ctx.structuralErrorStatuses);
   const rootNeedsConcurrency = aggregatesNeedConcurrency(ctx.aggregates);
   const rootHasUniqueKeys = aggregatesHaveUniqueKeys(ctx.aggregates);
   const rootProblemStatuses = new Set<number>([
     rootForbiddenStatus,
-    404,
+    rootNotFoundStatus,
     rootDomainStatus,
     500,
     rootDisallowedStatus,
@@ -314,9 +324,9 @@ export function renderHttpIndex(
     `      return problem(${rootDomainStatus}, ${JSON.stringify(problemTitle(rootDomainStatus))}, err.message);`,
     "    }",
     "    if (err instanceof AggregateNotFoundError) {",
-    `      ${renderHonoBaseLogCall("notFound", "status: 404")}`,
+    `      ${renderHonoBaseLogCall("notFound", `status: ${rootNotFoundStatus}`)}`,
     '      recordDomainFault("not_found");',
-    '      return problem(404, "Not Found", err.message);',
+    `      return problem(${rootNotFoundStatus}, ${JSON.stringify(problemTitle(rootNotFoundStatus))}, err.message);`,
     "    }",
     ...(rootHasUniqueKeys
       ? [

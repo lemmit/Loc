@@ -1,4 +1,4 @@
-// Shared channel-transport vocabulary (channels.md, M-T4.4 slice 1).
+// Shared channel-transport vocabulary (channels.md, M-T4.4).
 //
 // Single source of truth for the delivery×retention → storage-type
 // compatibility matrix, the set of storage types that have (or will have) a
@@ -46,7 +46,7 @@ export const CHANNEL_COMPATIBILITY: Record<string, ReadonlySet<string>> = {
 export const SHIPPED_COMBOS: Record<string, ReadonlySet<string>> = {
   redis: new Set(["broadcast/ephemeral"]),
   rabbitmq: new Set(["queue/ephemeral", "queue/work"]),
-  // Kafka (slice 4): the log — per-partition ordering keyed by `loomkey` ??
+  // Kafka: the log — per-partition ordering keyed by `loomkey` ??
   // envelope id; one consumer group per deployable (a `broadcast` deployable's
   // group sees every record, `queue` replicas compete within their group).
   kafka: new Set(["broadcast/log", "queue/work"]),

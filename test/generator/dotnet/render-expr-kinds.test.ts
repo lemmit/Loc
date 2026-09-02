@@ -131,7 +131,8 @@ describe("dotnet renderCsExpr — member + method-call", () => {
     }
   });
 
-  it("maps string `.length` to `.Length`", () => {
+  // CODE POINTS, not `string.Length`'s UTF-16 code units (RS-31).
+  it("maps string `.length` to a code-point count", () => {
     expect(
       renderCsExpr({
         kind: "member",
@@ -140,7 +141,7 @@ describe("dotnet renderCsExpr — member + method-call", () => {
         receiverType: STRING,
         memberType: INT,
       }),
-    ).toBe("this.Name.Length");
+    ).toBe("this.Name.EnumerateRunes().Count()");
   });
 
   it("renders `string.matches(literal)` as `Regex.IsMatch(recv, pattern)`", () => {
@@ -561,6 +562,19 @@ describe("dotnet renderCsExpr — binary, unary, paren, ternary", () => {
     expect(renderCsExpr({ kind: "unary", op: "!", operand: thisProp("active") })).toBe(
       "!this.Active",
     );
+  });
+
+  // A11 — the audit flagged unary `-` on money as a bare `${op}${operand}` on
+  // four targets.  On .NET it is CORRECT as-is: Loom `money` AND `decimal` are
+  // both C# `System.Decimal`, which defines `operator -`.  Pinned so the
+  // money-aware arms added to the TS/Java targets are not "fixed" here too.
+  it("keeps unary `-` on money/decimal native — System.Decimal has operator - (A11)", () => {
+    expect(
+      renderCsExpr({ kind: "unary", op: "-", operand: { ...thisProp("total"), type: MONEY } }),
+    ).toBe("-this.Total");
+    expect(
+      renderCsExpr({ kind: "unary", op: "-", operand: { ...thisProp("rate"), type: DECIMAL } }),
+    ).toBe("-this.Rate");
   });
 
   it("renders paren as `(inner)`", () => {

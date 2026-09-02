@@ -3,13 +3,10 @@
 //
 // Plain Phoenix + Ecto.  Called from `../index.ts`.
 //
-// Per docs/old/plans/vanilla-foundation-tdd-plan.md — built in TDD slices.
-//   Slice 0: shell.
-//   Slice 1: per-aggregate schema + repository + context module + read
-//     controllers + spliced router routes.
-//   Slice 2 (current scope): + changeset module + create/update/destroy
-//     controller actions + write-path routes.
-//   Later slices: policies, ProblemDetails parity, workflows + views, CI.
+// Per docs/old/plans/vanilla-foundation-tdd-plan.md.  What it emits: the
+// project shell; per-aggregate schema + repository + context module + read
+// controllers + spliced router routes; the changeset module + the
+// create/update/destroy controller actions + write-path routes.
 // ---------------------------------------------------------------------------
 
 import { deriveEventSubscriptions } from "../../../ir/enrich/enrichments.js";
@@ -74,6 +71,7 @@ import { emitExplicitHandlers, emitExplicitRoutesController } from "./explicit-h
 import { emitVanillaExternModules } from "./extern-emit.js";
 import { emitVanillaFilesController } from "./files-controller-emit.js";
 import { emitOpenApiSpec } from "./openapi-emit.js";
+import { contextsHavePagedReads } from "./page-param.js";
 import { renderVanillaProblemDetailsModule } from "./problem-details-emit.js";
 import {
   emitVanillaProjectionSchemas,
@@ -86,6 +84,7 @@ import {
   emitVanillaQueryProjectionsController,
   type VanillaQueryProjectionRef,
 } from "./query-projections-emit.js";
+import { emitVanillaRealtime } from "./realtime-emit.js";
 import { emitVanillaRepositories } from "./repository-emit.js";
 import { emitVanillaRetrievals } from "./retrieval-emit.js";
 import { emitVanillaScheduler } from "./scheduler-emit.js";
@@ -123,7 +122,7 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
   // needed.
   pack?.setChromeI18n(i18nUi !== undefined);
 
-  // Shared cross-controller helper modules (Slice 4).  Emitted once
+  // Shared cross-controller helper modules.  Emitted once
   // per project; controllers `alias` the public functions.  The 23505 → 409
   // conflict branch is emitted only when some aggregate declares a `unique (...)`
   // key, so a unique-free project stays byte-identical (strict additivity).
@@ -167,9 +166,14 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
   // M-T6.20 — does any aggregate operation carry a WIRE-RUNG denial (a messaged
   // `precondition` over the op's own params)?  Gates the extra
   // `validation_errors_response/2` responder; false ⇒ byte-identical.
-  const hasWireDenials = contexts.some((c) =>
-    c.aggregates.some((agg) => (agg.operations ?? []).some((op) => opHasWireDenial(op))),
-  );
+  // …OR a paged read: an out-of-range `page`/`pageSize` now answers the same
+  // `errors[]` 422 rather than being clamped past the bounds this app's own
+  // OpenAPI document publishes (page-param.ts), and it sends through the same
+  // responder.  An app with neither stays byte-identical.
+  const hasWireDenials =
+    contexts.some((c) =>
+      c.aggregates.some((agg) => (agg.operations ?? []).some((op) => opHasWireDenial(op))),
+    ) || contextsHavePagedReads(contexts);
   out.set(
     `lib/${appName}_web/problem_details.ex`,
     renderVanillaProblemDetailsModule(
@@ -285,12 +289,21 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
     ? {
         appModule,
         brokerEvents: new Set(channelBindings.flatMap((b) => b.events)),
+        // The broker tee's `@durable_routing` set — the events whose dispatch
+        // is an outbox INSERT (design §5), so the emit site must open a
+        // transaction around persist + emit.
+        durableEvents: durableBrokerEvents,
         foreignEventModules: eventOwnerModule,
       }
     : standaloneOutbox
       ? // Route the emit seams through the standalone `<App>.Channels` tee (no
         // broker widening / foreign structs — every durable event is hosted).
-        { appModule, brokerEvents: new Set(), foreignEventModules: new Map() }
+        {
+          appModule,
+          brokerEvents: new Set(),
+          durableEvents: hostedDurable,
+          foreignEventModules: new Map(),
+        }
       : undefined;
 
   // Per-context emit: schema, changeset, repository, context module,
@@ -440,19 +453,9 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
     // its own `run/1` module here and a `QueryProjectionsController` after the
     // loop (sibling of the folded ProjectionsController).
     allQueryProjections.push(
-      ...emitVanillaQueryProjectionModules(appName, appModule, ctx, out, sourcemap),
+      ...emitVanillaQueryProjectionModules(appName, appModule, ctx, out, sourcemap, sys),
     );
-    emitDispatch(
-      appName,
-      ctx,
-      appModule,
-      out,
-      sys,
-      "vanilla",
-      sourcemap,
-      channelsCfg,
-      wiredForeignChannels,
-    );
+    emitDispatch(appName, ctx, appModule, out, sys, sourcemap, channelsCfg, wiredForeignChannels);
     // First-boot seed data (database-seeding.md, M-T6.37) — one
     // `<Ctx>.Seeds` module per context that declares a `seed` block, run at
     // Application boot right after the supervision tree is up (so the Repo is
@@ -464,9 +467,17 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
     });
     if (seedMod) seedModules.push(seedMod.module);
     // Domain `test "..."` blocks → ExUnit (pure-subset; see tests-emit.ts).
-    if (emitAggregateTests(ctx, appModule, "vanilla", out)) hasDomainTests = true;
+    if (emitAggregateTests(ctx, appModule, out)) hasDomainTests = true;
   }
   if (hasDomainTests) emitTestHelper(out);
+  // Realtime SSE wire (channels.md Part I) — one deployable-level
+  // `RealtimeController` streaming every hosted context's broadcast-carried
+  // events at GET /api/realtime/events, the same wire the other four backends
+  // serve and the SPA frontends' `EventSource` client consumes.  The tee is
+  // Phoenix's own PubSub: every domain `emit` already broadcasts the event
+  // struct on the shared "events" topic.  No broadcast channel ⇒ no controller,
+  // no route (byte-identical).
+  apiRoutes.push(...emitVanillaRealtime(appName, appModule, contexts, out, sys));
   // One deployable-level ProjectionsController over every hosted context's
   // projections (the per-context schema emit above intentionally does NOT write
   // the controller — sibling of ViewsController).
@@ -517,7 +528,7 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
   // type + the transactional `record/2` insert) plus the late migration that
   // creates `audit_records`.  No-op unless an aggregate carries an audited
   // command action (operation / create / destroy) (audit-and-logging.md).
-  emitVanillaAudit(appName, appModule, contexts, out);
+  emitVanillaAudit(appName, appModule, contexts, out, sys);
 
   // --- LiveView pages --------------------------------------------------------
   // A deployable that mounts a HEEx `ui:` (not an embedded SPA) emits Phoenix
@@ -587,7 +598,6 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
       sys,
       appName,
       appModule,
-      foundation: "vanilla",
       sourcemap,
     });
     for (const [path, content] of liveFiles) out.set(path, content);
@@ -609,6 +619,7 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
           nameCtx,
           authEnabled: deployable.auth?.required === true,
           pack,
+          i18nEnabled: i18nUi !== undefined,
         }),
       );
       hasSidebar = true;
@@ -673,7 +684,7 @@ export function generateVanillaElixirProject(args: GenerateVanillaElixirArgs): M
     channelsCfg,
     wiredForeignChannels,
   );
-  // Broker transport files (M-T4.4 slice 6c) — channel-less projects stay
+  // Broker transport files (M-T4.4) — channel-less projects stay
   // byte-identical.  Foreign vocabulary first: a consumed event owned by a
   // non-hosted context emits its struct module under the OWNER's namespace,
   // so dispatcher/handler pattern-matches and the consumer's decode agree.

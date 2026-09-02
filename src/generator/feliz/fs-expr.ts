@@ -13,7 +13,7 @@
 // sub-expressions, exactly like the backend `ExprTarget` leaves in
 // src/generator/_expr/target.ts.  This is the frontend's F# leaf table; the
 // JS leaf table (React/Vue/Svelte/Angular) stays inline in walker-core until
-// the seam extraction (slice 4) converts it.
+// the seam extraction converts it.
 
 import type { BinOp, ExprIR, LiteralKind, PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
@@ -300,6 +300,17 @@ export interface FsExprCtx {
    *  resolve to — it renders as the empty string there, the F# analogue of
    *  React's absent `useParams()` entry. */
   routeId?: string;
+  /** The F# expression naming the model a state ref resolves against — `model`
+   *  by default (every `update` arm), but `__m` where the emission site has
+   *  BOUND the updated/initial record and must read the NEW values off it
+   *  (`init`'s find-read `Cmd`s, a control's refetch arm).  Same reason
+   *  `pagedReadCmd` takes a `modelExpr`: reading `model.<Field>` there would
+   *  issue the query with the value it just replaced. */
+  modelExpr?: string;
+  /** Page name -> declared `route:`.  A `navigate(<Page>)` statement in an
+   *  action body resolves its destination here (`update-emit.ts`); absent on a
+   *  non-routed ui, where the arm degrades to the root path. */
+  pageRoutes?: ReadonlyMap<string, string>;
 }
 
 /** The empty route id — what an `id` read resolves to on a ui with no routing
@@ -347,10 +358,9 @@ export function storeMsgCase(store: string, action: string): string {
  *  `List.length`) is handled here; every SCALAR op routes through the shared
  *  `FS_INTRINSIC_RENDERERS` table above — the same table the VIEW path reaches
  *  via `felizTarget.renderIntrinsic`, so the two paths cannot diverge on what
- *  `s.replace(a, b)` means (this file's whole premise, and previously true of
- *  the leaves but NOT of the intrinsics: the view path had no table at all and
- *  emitted the Loom spelling verbatim, while this path knew seven ops and threw
- *  on the rest).
+ *  `s.replace(a, b)` means — this file's whole premise.  A view path with no
+ *  intrinsic table of its own emits the Loom spelling verbatim while this path
+ *  renders the F#.
  *
  *  An unrecognised method still fails fast rather than emitting a
  *  `.member(args)` call that would not compile under Fable. */
@@ -396,15 +406,20 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       // A dotted `<Store>.<field>` read (page/component body) — resolved to the
       // namespaced Model field regardless of scope.
       if (e.refKind === "store-field" && e.storeName) {
-        return `model.${storeModelField(e.storeName, e.name)}`;
+        return `${ctx.modelExpr ?? "model"}.${storeModelField(e.storeName, e.name)}`;
       }
       // Inside a store action body the store's own fields are `let` locals; a
       // bare ref to one resolves to its namespaced Model field.
       if (ctx.storeScope?.fields.has(e.name)) {
-        return `model.${storeModelField(ctx.storeScope.store, e.name)}`;
+        return `${ctx.modelExpr ?? "model"}.${storeModelField(ctx.storeScope.store, e.name)}`;
       }
+      // An enum VALUE (`Visibility.Public`) is a string on the Feliz wire
+      // (`wireFieldType` spells every enum `string`), so it renders as its
+      // quoted name — the same answer `auth-gate.ts` gives.  The bare name this
+      // used to emit was an F# identifier nothing binds.
+      if (e.refKind === "enum-value") return JSON.stringify(e.name);
       if (ctx.locals.has(e.name)) return e.name;
-      if (ctx.stateNames.has(e.name)) return `model.${upperFirst(e.name)}`;
+      if (ctx.stateNames.has(e.name)) return `${ctx.modelExpr ?? "model"}.${upperFirst(e.name)}`;
       return e.name;
     case "binary": {
       const left = r(e.left);
@@ -460,27 +475,31 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
       return renderFsMethodCall(e, r(e.receiver), e.args.map(r));
     case "match": {
       // Predicate-arm form only (`match { cond => value }`) — an F#
-      // `if/elif/else` chain.  A value-position match needs a total `else`;
-      // the variant-discriminating form (`match subject { … }`) belongs to the
-      // union/async subsystem and is gated at validation, not reached here.
+      // `if/elif/else` chain.  The variant-discriminating form
+      // (`match subject { … }`) belongs to the union/async subsystem and is
+      // gated at validation, not reached here.
       if (e.subject) {
         throw new Error(
           "feliz: variant-match expression in an F# action body is not rendered here — " +
             "it is gated at validation (loom.feliz-async-effect-unsupported).",
         );
       }
-      if (e.otherwise === undefined) {
+      // An `if/elif` chain in F# is an EXPRESSION, so it needs a total tail.
+      // With no `else` arm the LAST arm's value becomes it — the same right-fold
+      // promotion the shared view walker applies (walker-core's `match` arm), so
+      // the update path and the view path agree and a no-`else` value match
+      // renders instead of crashing codegen (the validator only warns about it).
+      if (e.arms.length === 0 && e.otherwise === undefined) {
         throw new Error(
-          "feliz: a `match` in a value position needs an `otherwise` arm to render a total " +
-            "F# if/elif/else expression.",
+          "feliz: a `match` with neither arms nor an `otherwise` arm has no value to render.",
         );
       }
-      const chain = e.arms.map(
+      const tail = e.otherwise ?? e.arms[e.arms.length - 1]!.value;
+      const tested = e.otherwise === undefined ? e.arms.slice(0, -1) : e.arms;
+      const chain = tested.map(
         (a, i) => `${i === 0 ? "if" : "elif"} ${r(a.cond)} then ${r(a.value)}`,
       );
-      return chain.length === 0
-        ? `(${r(e.otherwise)})`
-        : `(${chain.join(" ")} else ${r(e.otherwise)})`;
+      return chain.length === 0 ? `(${r(tail)})` : `(${chain.join(" ")} else ${r(tail)})`;
     }
     case "lambda":
       // Single-expression form (`x => expr`) → the shared F# lambda leaf.  A

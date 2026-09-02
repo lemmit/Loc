@@ -90,7 +90,7 @@ function formArrayMemberLines(
 
 // ---------------------------------------------------------------------------
 // Angular page shell — assembles a generated standalone component around a
-// walked page body (angular-frontend-plan.md Slice 4b).
+// walked page body (angular-frontend-plan.md).
 //
 // Batch 1 scope: static content + signal state + router navigation.  The
 // walked markup lands in the component's inline `template`; `state` fields
@@ -114,7 +114,7 @@ export interface AngularPageShellInput {
    *  guard below — without it, a `requires` predicate stays purely a
    *  server-side 403. */
   authUi?: boolean;
-  /** Served decl names for the component's emitted identifier (slice 3c). */
+  /** Served decl names for the component's emitted identifier. */
   nameCtx: PageNameCtx;
   /** The ui's api handles (`api Sales: SalesApi`) — needed so an action body
    *  that awaits a remote op (`match await Sales.Order.op()`,
@@ -128,6 +128,10 @@ export interface AngularPageShellInput {
   bcByAggregate?: ReadonlyMap<string, BoundedContextIR>;
   workflowsByName?: ReadonlyMap<string, WorkflowIR>;
   bcByWorkflow?: ReadonlyMap<string, BoundedContextIR>;
+  /** Page name -> route.  The BODY walk already receives this; the action walk
+   *  did not, so a `navigate(<Page>)` in an action body resolved the fallback
+   *  `/<snake(page)>` rather than the destination's declared `route:`. */
+  pageRoutes?: ReadonlyMap<string, string>;
   /** Extern frontend function names declared on this ui
    *  (`function f(…): T extern from "…"`) — an action-body call registers a
    *  use so the shell imports the shim and re-exposes it as a component member
@@ -398,7 +402,10 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     // `next()` must render `this.next()` (Proposal A Stage 1, Fix 1).  Include
     // every action name in the whole-word prefix set alongside state/derived.
     const actionNames = new Set(actions.map((a) => a.name));
-    const refNames = new Set<string>([...stateNames, ...derivedNames, ...actionNames]);
+    // `router` joins them: `angularTarget.renderNavigate` emits the bare
+    // `router.navigateByUrl(...)` a TEMPLATE binding wants, but an action body
+    // is a class METHOD, where the injected member needs `this.`.
+    const refNames = new Set<string>([...stateNames, ...derivedNames, ...actionNames, "router"]);
     // Transitively include any sibling action a used action's body calls so its
     // method emits too.
     const effectiveUsed = closeUsedActions(actions, result.usedActions);
@@ -428,6 +435,10 @@ export function renderAngularPage(input: AngularPageShellInput): string {
         // exactly like a main-body call.
         externFunctions: input.externFunctions ?? new Set(),
         usedExternFunctions: result.usedExternFunctions,
+        // A `navigate(<Page>)` in an action body resolves the DESTINATION's
+        // declared `route:` through this table; without it the resolver fell
+        // back to `/<snake(page)>` and the navigation went nowhere.
+        pageRoutes: input.pageRoutes,
       };
       const mctx: WalkContext = param
         ? { ...baseCtx, lambdaParams: extendLambdaParams(baseCtx, param, param) }
@@ -639,15 +650,15 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   //
   // The producers are the shared intrinsic table's money arms —
   // `Decimal.min` / `Decimal.max` / `toDecimalPlaces(…, Decimal.ROUND_HALF_UP)`
-  // — which `renderJsIntrinsic` used to DECLINE precisely because the page
-  // shells had no way to bring the binding into scope.  Declining fell through
-  // to a verbatim `amt.min(x)`, which decimal.js has no instance method for.
+  // — which `renderJsIntrinsic` renders only because the page shell brings the
+  // binding into scope here.  Declining them instead falls through to a
+  // verbatim `amt.min(x)`, which decimal.js has no instance method for.
   if (usesDecimalBinding(result.tsx)) {
     imports.push(`import Decimal from "decimal.js";`);
     members.push(`  protected readonly Decimal = Decimal;`);
   }
 
-  // The chart component (`Chart`, M-T1.3 Phase 4) — a standalone component used
+  // The chart component (`Chart`, M-T1.3) — a standalone component used
   // BY TAG, so it takes one import line and one `imports: []` entry, exactly
   // like a hoisted `DataGrid` child.  Marker-keyed off the emitted tag so the
   // file and its registration cannot dangle apart.
@@ -1140,7 +1151,7 @@ export function renderAngularPageStub(page: PageIR, nameCtx: PageNameCtx, authUi
   if (requires) {
     const gate = renderGateExpr(requires, "currentUser");
     return [
-      "// Auto-generated (stub — body needs api/forms support, a later Slice 4b batch).",
+      "// Auto-generated (stub — the body needs api/forms support).",
       'import { Component, inject } from "@angular/core";',
       'import { SessionService } from "../auth/session.service";',
       "",
@@ -1164,7 +1175,7 @@ export function renderAngularPageStub(page: PageIR, nameCtx: PageNameCtx, authUi
   }
 
   return [
-    "// Auto-generated (stub — body needs api/forms support, a later Slice 4b batch).",
+    "// Auto-generated (stub — the body needs api/forms support).",
     'import { Component } from "@angular/core";',
     "",
     "@Component({",

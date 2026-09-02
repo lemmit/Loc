@@ -1689,8 +1689,13 @@ describe("typescript generator", () => {
       // real number, and coercing accepted `false`/`"12"` for a field the spec
       // declares `{"type":"number"}` (schemathesis F7).
       expect(orderRoutes).toMatch(/amount: z\.number\(\)\.min\(0\)/);
-      expect(orderRoutes).toMatch(/currency: z\.string\(\)\.length\(3\)/);
-      // No leftover `.refine(` for the single-field shapes.
+      // A LENGTH bound is a CODE-POINT predicate, not zod's code-unit
+      // `.length(3)` — and the routes re-attach the `minLength`/`maxLength`
+      // the OpenAPI schema published all along (RS-31).
+      expect(orderRoutes).toMatch(
+        /currency: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length === 3\)\.openapi\(\{ minLength: 3, maxLength: 3 \}\)/,
+      );
+      // No leftover OBJECT-level `.refine(` for the single-field shapes.
       const moneyBlock = orderRoutes.match(
         /const MoneySchema = z\.object\(\{[\s\S]*?\}\)\.openapi\("Money"\)([^;]*);/,
       )!;
@@ -1716,7 +1721,7 @@ describe("typescript generator", () => {
       // update is rejected at the wire boundary (422) instead of the domain floor.
       const customerRoutes = files.get("http/customer.routes.ts")!;
       expect(customerRoutes).toMatch(
-        /UpdateCustomerRequest = z\.object\(\{[\s\S]*email: z\.string\(\)\.min\(1\)/,
+        /UpdateCustomerRequest = z\.object\(\{[\s\S]*email: z\.string\(\)\.refine\(\(s\) => \[\.\.\.s\]\.length >= 1\)/,
       );
     });
 

@@ -1,7 +1,8 @@
-// `auth: ui` framework gate (Phase 6).  The frontend OIDC guard is emitted
-// by the React, Vue, Svelte, Angular and Feliz generators, so a deployable
-// whose resolved UI framework is none of those (phoenixLiveView) is rejected
-// at the IR level rather than silently emitting no guard.
+// `auth: ui` framework gate (Phase 6).  The frontend OIDC guard is emitted by
+// every shipped frontend generator — React, Vue, Svelte, Angular, Feliz and now
+// Flutter (`generator/flutter/auth-gate.ts`) — so a deployable whose resolved UI
+// framework is none of those (phoenixLiveView) is rejected at the IR level
+// rather than silently emitting no guard.
 //
 // Feliz is the case the gate got WRONG for a while: `generator/feliz/
 // auth-gate.ts` ships the Elmish session model + `AuthGate` view (CI drives it
@@ -76,6 +77,14 @@ describe("auth: ui framework gate", () => {
     expect(await authUiErrors(sys("feliz"))).toEqual([]);
   });
 
+  it("allows auth: ui on a flutter frontend", async () => {
+    expect(await authUiErrors(sys("flutter"))).toEqual([]);
+  });
+
+  it("allows auth: ui on a ui that declares framework: flutter", async () => {
+    expect(await authUiErrors(sysWithDeclaredFramework("flutter"))).toEqual([]);
+  });
+
   // The explicit-`framework:` spelling — the one the stale gate rejected even
   // though the Feliz auth-gate emitter has shipped all along.
   it("allows auth: ui on a ui that declares framework: feliz", async () => {
@@ -87,6 +96,6 @@ describe("auth: ui framework gate", () => {
     expect(errs.length).toBe(1);
     // The list is rendered FROM the gate's own Set, so it can't advertise a
     // stale roster after a port widens it.
-    expect(errs[0]).toContain("only supported on react, vue, svelte, angular, feliz");
+    expect(errs[0]).toContain("only supported on react, vue, svelte, angular, feliz, flutter");
   });
 });

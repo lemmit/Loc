@@ -29,7 +29,12 @@
 // `ir/types` → `ir/util`; the reverse edge (walk.ts → loom-ir.ts) is `import
 // type` only (erased at emit), so no runtime cycle forms.
 import type { DurationUnit } from "../../util/temporal.js";
-import { walkExprDeep, walkStmtExprsDeep, walkWorkflowStmtExprsDeep } from "../util/walk.js";
+import {
+  walkExprDeep,
+  walkStmtExprsDeep,
+  walkWorkflowStmtExprsDeep,
+  walkWorkflowStmtsDeep,
+} from "../util/walk.js";
 import type { OriginRef } from "./origin.js";
 
 export type IdValueType = "guid" | "int" | "long" | "string";
@@ -61,7 +66,7 @@ export type PrimitiveName =
   | "File"
   /** An ABSOLUTE span of time (A5 temporal, docs/old/plans/stdlib.md) — fixed
    *  millisecond width per unit, so it renders uniformly on every backend.
-   *  EXPRESSION-ONLY in this slice: not in the grammar's `PrimitiveType`
+   *  EXPRESSION-ONLY: not in the grammar's `PrimitiveType`
    *  rule, so it can never appear in field / param / wire position — it only
    *  arises from the `days(n)`/`hours(n)`/`minutes(n)` constructors and the
    *  temporal arithmetic rules (`datetime - datetime`, `duration ±
@@ -160,13 +165,22 @@ export type TypeIR =
    *  callback argument type; undefined for a bare zero-arg `action`. */
   | { kind: "action"; arg?: TypeIR; sensitivity?: SensitivityTags };
 
-/** The blessed closed set of generic-payload **record** carriers — the ones
- *  that monomorphize to a `PayloadIR` record.  Kept in lockstep with the
- *  record arms of the `GenericCtor` grammar rule and the stdlib registry in
- *  `src/ir/stdlib/generics.ts`.  The grammar's third ctor, `option`, is a
- *  *union* carrier: `T option` lowers straight to `union[T, none]` rather than
- *  a `genericInstance`, so it never appears here. */
-export type GenericCtorName = "paged" | "envelope";
+/** The blessed closed set of generic-payload **record** carriers.  Kept in
+ *  lockstep with the record arms of the `GenericCtor` grammar rule and the
+ *  stdlib registry in `src/ir/stdlib/generics.ts`.  The grammar's third ctor,
+ *  `option`, is a *union* carrier: `T option` lowers straight to
+ *  `union[T, none]` rather than a `genericInstance`, so it never appears here.
+ *
+ *  `paged` / `envelope` are AUTHOR-WRITTEN (`customer paged`) and monomorphize
+ *  to a named `PayloadIR` record.  `provenanced` is the odd one out: it has no
+ *  grammar arm at all — nobody writes `int provenanced` as a *type*, they write
+ *  `total: int provenanced` as a field MODIFIER — and the enrichment pass
+ *  synthesizes the instance into `wireShape` from `FieldIR.provenanced`
+ *  (`wireTypeForField`, `src/ir/enrich/wire-projection.ts`).  It is also
+ *  rendered STRUCTURALLY (an inline `{ value, lineage }` object) rather than
+ *  monomorphized to a named DTO, so it never reaches
+ *  `monomorphizeGenericInstances`. */
+export type GenericCtorName = "paged" | "envelope" | "provenanced";
 
 export interface ParamIR {
   name: string;
@@ -212,9 +226,9 @@ export interface FieldIR {
   provenanced?: boolean;
   /** Information-flow sensitivity tags declared at the property site via
    * `sensitive(<tag>, ...)`.  Sorted + deduped; omitted when the field
-   * declared no tags.  Phase 1 only captures the declaration; later
-   * phases wire it through the wire-shape, DTO emitters, and sink
-   * type-checking.  See `docs/old/proposals/sensitivity-and-compliance.md`. */
+   * declared no tags.  Captured at the declaration site only — neither the
+   * wire-shape, the DTO emitters, nor sink type-checking read it yet.  See
+   * `docs/old/proposals/sensitivity-and-compliance.md`. */
   sensitivity?: SensitivityTags;
   /** Resolved access role.  Populated by `enrichLoomModel`; lowering
    * leaves this undefined when the source declared no modifier so
@@ -429,7 +443,7 @@ export interface OperationIR {
   /** True for an unnamed canonical `create(...)` / `destroy { }`.  The
    * synthesised `name` is then the keyword itself (`"create"` /
    * `"destroy"`).  Drives the bare-collection-URL route slug derived in
-   * Phase 2 (`urlStyle` enrichment).  Only meaningful on create/destroy. */
+   * the `urlStyle` enrichment.  Only meaningful on create/destroy. */
   canonical?: boolean;
   /** HTTP path segment for this action, derived in enrichment from the
    * surfacing api's `urlStyle` (D-URLSTYLE).  `undefined` ⇒ a canonical
@@ -483,7 +497,7 @@ export interface OperationIR {
  * — assignment statements and derivations only (enforced by
  * `validateEventSourcedDiscipline` in phase ⑦); no `emit`, no
  * side-effecting calls.  Not yet consumed by backends (emission is the
- * deferred Phase A2; the event-store/fold/projection layer).  See
+ * deferred; the event-store/fold/projection layer).  See
  * docs/old/proposals/workflow-and-applier.md. */
 export interface ApplyIR {
   /** The event type this applier folds, by name (resolved to a context
@@ -556,12 +570,12 @@ export interface AggregateIR {
   /** Mutate-kind actions only (the legacy `operation` keyword).
    * `create` / `destroy` actions are intentionally NOT here — they live
    * in `creates` / `destroys` so the ~50 existing operation consumers
-   * (route emitters, OpenAPI, page-objects, …) keep seeing only
-   * mutate-style endpoints until per-kind emission lands (Phase 3). */
+   * (route emitters, OpenAPI, page-objects, …) see only mutate-style
+   * endpoints. */
   operations: OperationIR[];
   /** `kind: "create"` lifecycle factory actions.  Populated by lowering;
-   * empty array when the aggregate declares none.  Not yet consumed by
-   * backends (Phase 3). */
+   * empty array when the aggregate declares none.  No backend consumes it
+   * yet. */
   creates?: OperationIR[];
   /** `kind: "destroy"` lifecycle terminator actions.  Populated by
    * lowering; empty array when none. */
@@ -611,8 +625,7 @@ export interface AggregateIR {
    * additive — no consumer until the bypass surface lands, so byte-neutral. */
   contextFilterOrigins?: (string | undefined)[];
   /** The WRITE-scope predicate an INSTANCE mutation's command load must satisfy
-   *  (authorization Phase 3 P3.1 — `docs/old/plans/authorization-phase3.md`).
-   *  Derived in enrichment from the aggregate's `policy` read + write levels,
+   *  (`docs/old/plans/authorization-phase3.md`).  Derived in enrichment from the aggregate's `policy` read + write levels,
    *  and set **only when the write scope is strictly narrower than the read
    *  scope** — i.e. when the mutation load (which reuses the read filter on
    *  every backend) must be tightened below what a read can see.  Two shapes:
@@ -677,13 +690,13 @@ export interface AggregateIR {
    * validator (phase ⑦) rejects appliers on state-sourced aggregates and
    * requires a matching applier for every emitted event.  Omitted /
    * empty when the aggregate declares none.  Not yet consumed by
-   * backends (deferred Phase A2). */
+   * backends (deferred). */
   appliers?: ApplyIR[];
   /** Aggregate-inheritance (aggregate-inheritance.md, I1).  `true` for an
    * `abstract aggregate` base — never instantiated, no repository, emits no
    * table of its own.  Omitted (≡ false) for ordinary/concrete aggregates. */
   isAbstract?: boolean;
-  /** Tenancy header flag (multi-tenancy Phase 1a).  `true` for an
+  /** Tenancy header flag (tenancy.md).  `true` for an
    * `crossTenant aggregate X { … }` — shared reference data that opts out
    * of the tenant filter under a `tenancy by` system.  Omitted (≡ false)
    * when not declared.  The aggregate's tenancy *stance* (owned / cross /
@@ -787,7 +800,7 @@ export interface ValueObjectIR {
   functions: FunctionIR[];
   /** Unit tests anchored to this value object (nested `test` member, or a
    *  hoisted `test … for <VO>`).  Same `TestIR` shape as `AggregateIR.tests`;
-   *  emitted as a colocated unit file (test-placement.md, Phase 2). */
+   *  emitted as a colocated unit file (test-placement.md). */
   tests: TestIR[];
   /** Provenance chain back to the `.ddd` source — see
    * src/ir/types/origin.ts.  Populated at lowering; absent on purely
@@ -805,7 +818,7 @@ export interface EventIR {
 }
 
 /** A channel — the publisher-side contract for how a context's events are
- *  transported (channels.md, Slice 1).  Declared as a context member; its
+ *  transported (channels.md).  Declared as a context member; its
  *  `carries` list names events of the enclosing context, and the orthogonal
  *  `delivery` x `retention` knobs select pub/sub vs work-queue vs durable
  *  stream.  The contract is transport-neutral — a `ChannelSourceIR` binds it
@@ -978,7 +991,7 @@ export interface DomainServiceIR {
   /** Unit tests anchored to this domain service (nested `test` member, or a
    *  hoisted `test … for <Service>`).  Same `TestIR` shape as
    *  `AggregateIR.tests`; emitted as a colocated unit file
-   *  (test-placement.md, Phase 2). */
+   *  (test-placement.md). */
   tests: TestIR[];
 }
 
@@ -1062,7 +1075,7 @@ export interface BoundedContextIR {
   workflows: WorkflowIR[];
   /** Top-level `commandHandler` application-layer members
    *  (unfoldable-api-derivation.md, Layer 3).  Present when the context declares
-   *  any; ride alongside the IR, unread by backends in this slice. */
+   *  any; they ride alongside the IR, unread by any backend. */
   commandHandlers?: CommandHandlerIR[];
   /** Top-level `queryHandler` application-layer members
    *  (unfoldable-api-derivation.md, Layer 3). */
@@ -1072,7 +1085,7 @@ export interface BoundedContextIR {
   /** Stateless pure-calculator domain services declared in this context
    *  (domain-services.md, v1 Shape A). */
   domainServices: DomainServiceIR[];
-  /** Channel declarations in this context (channels.md, Slice 1) — the
+  /** Channel declarations in this context (channels.md) — the
    *  publisher-side transport contracts over this context's events. */
   channels: ChannelIR[];
   /** Projection read models declared in this context (projection.md) — read
@@ -1085,12 +1098,12 @@ export interface BoundedContextIR {
    *  Platform-neutral; the system-level seed builder (phase ⑨) groups these
    *  per (module, dataset) and the backends emit native seeders. */
   seeds: SeedIR[];
-  /** Context-scoped INTEGRATION tests (test-placement.md, Phase 3) — a `test`
+  /** Context-scoped INTEGRATION tests (test-placement.md) — a `test`
    *  nested in the `context` (no `for`) or hoisted with `for <Ctx>`.  Same
    *  `TestIR` shape as the per-subject unit tests, but lowered under the context
    *  env (every aggregate/service in scope) so it exercises cross-aggregate
-   *  behaviour.  Not yet emitted by any backend (gated `loom.context-test-unsupported`
-   *  until the Phase 3a integration renderer lands). */
+   *  behaviour.  No backend emits these yet — gated by
+   *  `loom.context-test-unsupported`. */
   tests: TestIR[];
   /** Per-error HTTP status overrides reaching this context, merged from the
    *  `httpStatus <Error> -> <Code>` clauses of every api over its subdomain
@@ -1103,7 +1116,7 @@ export interface BoundedContextIR {
    *  `ReferencedInUse` — expressible-builtins.md §3 / M-T3.4a). Folded across
    *  every api (first-declared `httpStatus` wins), defaulting each to 409.
    *  The backend runtime arms + OpenAPI declarations for the hardcoded 409s read
-   *  `structuralErrorStatuses?.[name] ?? 409` so the two can no longer drift and
+   *  `structuralErrorStatuses?.[name] ?? 409` so the two cannot drift and
    *  `httpStatus UniquenessConflict -> 422` retargets both. Populated by
    *  `enrichLoomModel`; undefined in single-context (no-api) lowering. */
   structuralErrorStatuses?: Record<string, number>;
@@ -1112,7 +1125,7 @@ export interface BoundedContextIR {
    * derived nodes. */
   origin?: OriginRef;
   /** Per-aggregate read reachability levels declared by `policy {}` blocks in
-   *  this context (authorization.md §3; multi-tenancy Phase 2 P2.4).  Each
+   *  this context (authorization.md §3; tenancy.md).  Each
    *  entry names a tenant-owned aggregate and its directional read level
    *  (`local`/`deep`/`global`).  Consumed by `enrichLoomModel`
    *  (`applyPolicyReadLevels`), which rewrites the aggregate's `tenantOwned`
@@ -1120,8 +1133,8 @@ export interface BoundedContextIR {
    *  Undefined / empty when the context declares no policy. */
   policyReadLevels?: PolicyReadLevelIR[];
   /** Per-aggregate WRITE reachability levels declared by `policy { allow write
-   *  <level> on X }` blocks in this context (authorization Phase 3 P3.1 —
-   *  `docs/old/plans/authorization-phase3.md`).  A write level gates INSTANCE
+   *  <level> on X }` blocks in this context
+   *  (`docs/old/plans/authorization-phase3.md`).  A write level gates INSTANCE
    *  mutations (update-style ops, destroy, applier dispatch) on the target
    *  row's write scope; `local` is the flat `tenantId ==` floor (the default),
    *  `deep` the caller's org + descendants.  Consumed by `enrichLoomModel`,
@@ -1130,8 +1143,8 @@ export interface BoundedContextIR {
    *  `allow write` rule. */
   policyWriteLevels?: PolicyWriteLevelIR[];
   /** Per-aggregate DENY carve-outs declared by `policy { deny [write] on X }`
-   *  blocks in this context (authorization Phase 4 —
-   *  docs/old/plans/authorization-phase4-deny.md).  Each entry names an aggregate
+   *  blocks in this context
+   *  (docs/old/plans/authorization-phase4-deny.md).  Each entry names an aggregate
    *  and the access it denies (`read` = total carve-out, the aggregate becomes
    *  invisible; `write` = read-only carve-out).  Consumed by `enrichLoomModel`
    *  (`applyPolicyDenies`), which — AFTER the allow read/write-level passes, so
@@ -1144,7 +1157,7 @@ export interface BoundedContextIR {
 
 /** One `allow <level> on <Aggregate>` rule lowered from a `policy {}` block —
  *  a tenant-owned aggregate's directional read reachability level
- *  (multi-tenancy Phase 2 P2.4).  `local` is today's `tenantId ==` tenant
+ *  (tenancy.md).  `local` is the flat `tenantId ==` tenant
  *  floor (and the default when no policy names an aggregate); `deep` widens to
  *  the caller's org + all descendants (a `dataKey` materialized-path prefix
  *  match); `global` is all rows in the caller's tenant (tenant-root-floored). */
@@ -1159,10 +1172,10 @@ export interface PolicyReadLevelIR {
 }
 
 /** One `allow write <level> on <Aggregate>` rule lowered from a `policy {}`
- *  block (authorization Phase 3 P3.1).  `local` is the flat `tenantId ==`
+ *  block (authorization.md).  `local` is the flat `tenantId ==`
  *  tenant floor (and the default write scope when no rule names an aggregate);
  *  `deep` widens to the caller's org + all descendants (a `dataKey`
- *  materialized-path prefix).  `global` parses but is rejected in P3.1
+ *  materialized-path prefix).  `global` parses but is rejected
  *  (`loom.policy-write-global-invalid`). */
 export interface PolicyWriteLevelIR {
   /** The tenant-owned aggregate this write level applies to (by name, in this
@@ -1175,7 +1188,7 @@ export interface PolicyWriteLevelIR {
 }
 
 /** One `deny [write] on <Aggregate>` carve-out lowered from a `policy {}` block
- *  (authorization Phase 4 — deny-wins, docs/old/plans/authorization-phase4-deny.md).
+ *  (deny-wins — docs/old/plans/authorization-phase4-deny.md).
  *  Deny is all-or-nothing at the aggregate (no level word).  `read` denies reads
  *  (the aggregate becomes invisible; because the write command load reuses the
  *  read filter, writes fail too); `write` denies only mutations (reads stay).
@@ -1193,7 +1206,7 @@ export interface PolicyDenyIR {
 }
 
 /** A first-boot seed dataset for a context's aggregates
- *  (database-seeding.md).  Declarative form only in this slice: each row is
+ *  (database-seeding.md).  Declarative form only: each row is
  *  the create-parameter shape of one aggregate, lowered through the domain
  *  `create` by default (D-SEED-PATH).  `module` is attached later by the
  *  system-level builder; at context-lowering time only `dataset`/`path`/`rows`
@@ -1256,7 +1269,7 @@ export interface WorkflowIR {
    *  `params`/`statements`/`savesAtExit` are a facade over the primary one. */
   creates: CreateIR[];
   /** Event-subscription reactors declared via `on(e: Event) [by <expr>] { … }`
-   *  members (workflow-and-applier.md Phase A2, surface slice).  Omitted when
+   *  members (workflow-and-applier.md, surface slice).  Omitted when
    *  the workflow declares none.  Consumed by the in-process dispatcher
    *  emission on node / dotnet / python (channels.md); the `by`
    *  correlation-field type-check runs in the IR validator (workflow-checks.ts).
@@ -1771,8 +1784,8 @@ export type WorkflowStmtIR =
       origin?: OriginRef;
     }
   | {
-      // A bare (unbound) resource-op call statement — `files.put(k, v)`
-      // (Phase 4).  The `let`-bound form (`let x = files.get(k)`) rides
+      // A bare (unbound) resource-op call statement — `files.put(k, v)`.
+      // The `let`-bound form (`let x = files.get(k)`) rides
       // `expr-let` instead.  `call` is the lowered `resource-op` call IR.
       kind: "resource-call";
       call: ExprIR;
@@ -2114,8 +2127,8 @@ export type EnrichedSystemIR = Omit<SystemIR, "subdomains"> & {
   needs: NeedIR[];
   /** Resolved default access interface per resource name (RFC §3.5),
    *  derived from the resource's sourceType + kind.  A consuming
-   *  operation may override it once the consumption surface exists
-   *  (Phase 4); until then this is the per-resource default. */
+   *  operation may override it once the consumption surface exists; until
+   *  then this is the per-resource default. */
   resourceInterfaces: Record<string, LoomInterface>;
   /** App-wide resolved HTTP status for each structural-conflict built-in —
    *  see `BoundedContextIR.structuralErrorStatuses`. Threaded to the app-global
@@ -2297,7 +2310,7 @@ export interface SystemIR {
    *  `user { ... }` block (validator enforces).  Drives the generated
    *  OIDC verifier + `/auth/*` handshake on opted-in deployables. */
   auth?: AuthIR;
-  /** Optional system-wide tenancy declaration (multi-tenancy Phase 1a).
+  /** Optional system-wide tenancy declaration (tenancy.md).
    *  Populated when the source declares `tenancy by user.<claim> of
    *  <Registry>` at system scope.  At most one per system (validator
    *  enforces).  Claim-exists / registry-exists / stance checks are the
@@ -2332,10 +2345,10 @@ export interface SystemIR {
    *  …).  Deployables list which dataSources they host via the
    *  `dataSources:` clause. */
   dataSources: DataSourceIR[];
-  /** ChannelSource declarations at system scope (channels.md, Slice 1) —
-   *  the physical binding of a `channel` to a `storage`, the messaging twin
-   *  of `dataSource`.  Deployables will list which they wire in a later
-   *  slice; Slice 1 carries the bindings and emits `.loom/asyncapi.yaml`. */
+  /** ChannelSource declarations at system scope (channels.md) — the physical
+   *  binding of a `channel` to a `storage`, the messaging twin of
+   *  `dataSource`.  Deployables do not yet list which they wire; these
+   *  bindings drive the `.loom/asyncapi.yaml` emission. */
   channelSources: ChannelSourceIR[];
   /** TimerSource declarations at system scope (scheduling.md, M-T4.1) — a
    *  wall-clock cadence that fires a plain domain `event`, which workflows
@@ -2344,14 +2357,14 @@ export interface SystemIR {
    *  here): the backend deployable whose `migrationsOwner` owns the for-event's
    *  context emits the scheduler, so single-fire lock and DB owner coincide. */
   timerSources: TimerSourceIR[];
-  /** Named `layout <Name> { … }` SystemMembers (Phase 8).  Pages
+  /** Named `layout <Name> { … }` SystemMembers.  Pages
    *  reference one via `layout: <Name>` — the React generator emits
    *  one `<Name>Layout` wrapper component per entry and routes
    *  matching pages through it. */
   layouts: LayoutIR[];
 }
 
-/** Physical binding of a `channel` to a `storage` (channels.md, Slice 1).
+/** Physical binding of a `channel` to a `storage` (channels.md).
  *  System-scope, mirroring `DataSourceIR`.  `channelName` is the bare
  *  channel name; `storageName` the bound storage instance. */
 export interface ChannelSourceIR {
@@ -2365,16 +2378,16 @@ export interface ChannelSourceIR {
  *  name of the plain `EventDecl` the timer fires; `context` is the bounded
  *  context that declares it (used to derive the emit/lock owner from the
  *  subdomain's `migrationsOwner`).  `cadence` is discriminated by which of the
- *  grammar's `cron:` / `every:` fields was set.  `timezone` / `overlap` parse in
- *  Phase 1 but are inert (Phase 2). */
+ *  grammar's `cron:` / `every:` fields was set.  `timezone` / `overlap` parse
+ *  and are carried, but no emitter reads them. */
 export interface TimerSourceIR {
   name: string;
   event: string;
   context: string;
   cadence: TimerCadenceIR;
-  /** `in: "<tz>"` — inert in Phase 1, carried for Phase 2 timezone support. */
+  /** `in: "<tz>"` — inert; carried for future timezone support. */
   timezone?: string;
-  /** `overlap: allow` — inert in Phase 1 (default is skip-on-overlap). */
+  /** `overlap: allow` — inert; the emitted scheduler always skips on overlap. */
   overlap?: boolean;
 }
 
@@ -2544,13 +2557,12 @@ export interface AuthIR {
   enforcement: "denyByDefault" | "opt";
 }
 
-/** System-level tenancy declaration (multi-tenancy Phase 1a —
- *  docs/old/plans/multi-tenancy-implementation.md).  Lowered from
+/** System-level tenancy declaration (tenancy.md).  Lowered from
  *  `tenancy by user.<claimField> of <registryName>`: `claimField` names
  *  the `user { … }` claim that partitions the data; `registryName` the
  *  aggregate acting as the tenant registry.  Both are plain names here,
- *  read off real cross-references at lowering (1b.1) — existence is the
- *  linker's job, singularity the tenancy validators' (slice 1a.3), and
+ *  read off real cross-references at lowering — existence is the
+ *  linker's job, singularity the tenancy validators', and
  *  an aggregate's tenancy *stance* is derived on demand from
  *  `crossTenant` + capabilities (derive-don't-stamp), never stored on
  *  the IR. */
@@ -2696,7 +2708,7 @@ export interface ApiIR {
   /** URL slug style for lifecycle actions surfaced by this api.
    *  `"literal"` (default) emits the action name verbatim; `"resource"`
    *  pluralises it.  Drives `OperationIR.routeSlug` derivation in
-   *  enrichment (D-URLSTYLE / lifecycle-operations.md Phase 2). */
+   *  enrichment (D-URLSTYLE / lifecycle-operations.md). */
   urlStyle: "literal" | "resource";
   /** Per-error HTTP status overrides declared via `httpStatus <Error> -> <Code>`
    *  in the api block (exception-less.md A1).  Keyed by error-payload name; an
@@ -2705,7 +2717,7 @@ export interface ApiIR {
   errorStatuses: Record<string, number>;
   /** Explicit transport bindings declared via `route <METHOD> <PATH> ->
    *  <Context>.<Handler>` in the api block (unfoldable-api-derivation.md,
-   *  Layer 4).  Ride alongside the api; unread by backends in this slice.
+   *  Layer 4).  Ride alongside the api, unread by any backend.
    *  Empty when the api declares none. */
   routes: RouteIR[];
 }
@@ -2738,14 +2750,14 @@ export interface UiApiParamIR {
  *  - `{ kind: "preset", name: "none" }` — mounted at the top of the
  *    router with no chrome at all (v1 escape hatch).
  *  - `{ kind: "named", ref: string }` — wrapped by a named `layout`
- *    SystemMember declared in the same system (Phase 8).  The
+ *    SystemMember declared in the same system.  The
  *    React generator emits one `<X>Layout` component per declared
  *    `LayoutIR` and routes pages through the matching layout-route. */
 export type PageLayoutIR =
   | { kind: "preset"; name: "default" | "none" }
   | { kind: "named"; ref: string };
 
-/** A named `layout <Name> { … }` SystemMember (Phase 8).  Each slot's
+/** A named `layout <Name> { … }` SystemMember.  Each slot's
  *  body is a single page-body-shaped `ExprIR` evaluated against the
  *  same walker-stdlib + user-component scope as a page body.  The
  *  `main` slot is implicit — it's the React Router `<Outlet />`
@@ -2881,12 +2893,6 @@ export interface StateFieldIR {
    *  spec §6). */
   init?: ExprIR;
 }
-
-// `ScaffoldIR` / `ScaffoldSelector` were removed when `scaffold`
-// migrated from a hardcoded language directive to the `scaffold`
-// stdlib macro.  Page synthesis now goes through the macro
-// expander → AST splice → standard page lowering path; no IR-
-// level scaffold representation is required.
 
 /** Per-page sidebar metadata.  Bare entries — validator
  *  enforces the allowed key names (`section` / `label` / `order` /
@@ -3127,7 +3133,7 @@ export interface DeployableIR {
   dataSourceNames: string[];
   /** Names of channelSource declarations the deployable wires up — the
    *  messaging twin of `dataSourceNames` (channels.md §"Surface — transport
-   *  binding", M-T4.4 slice 1).  Listing a binding routes the channel's
+   *  binding").  Listing a binding routes the channel's
    *  events over its broker for this deployable (producer and/or consumer
    *  side is derived from the hosted contexts).  Empty ⇒ the channel's
    *  events reach this deployable only via in-process dispatch. */
@@ -3169,9 +3175,8 @@ export interface DeployableIR {
    *
    *  `directoryLayout` maps onto the D-ADAPTER-HOME adapter kind `layout`;
    *  `persistence` onto the `persistence` adapter.  Both carry real
-   *  per-backend choice.  (The application/style axis was removed — each
-   *  backend has a single fixed emission style, resolved internally by
-   *  `resolveStyle`; it is not a user knob.) */
+   *  per-backend choice.  There is no application/style axis: each backend
+   *  has one fixed emission style, resolved internally by `resolveStyle`. */
   persistence?: string;
   directoryLayout?: string;
   /** Per-deployable auth opt-in.  Populated when the source declares
@@ -3406,7 +3411,7 @@ export type RefKind =
   | "workflow-fn" // a bare reference to a workflow's own `function` helper (rendered as the scoped name)
   | "enum-value"
   | "current-user" // magic identifier — system's `user` block shape
-  | "resource" // ambient resource handle — `files`, `jobs`, … (Phase 4)
+  | "resource" // ambient resource handle — `files`, `jobs`, …
   | "store-field" // a `<Store>.<field>` read from a page/component/store body (Stage 5)
   | "match-binding" // the narrowed variant binding of a variant-`match` arm (variant-match.md)
   | "unknown";
@@ -3416,7 +3421,7 @@ export type CallKind =
   | "workflow-fn" // calls a workflow's own `function` helper — emitted as a per-workflow-scoped module helper
   | "value-object-ctor" // calls a value-object constructor
   | "private-operation" // calls a private operation
-  | "resource-op" // a verb call on an ambient resource handle (Phase 4)
+  | "resource-op" // a verb call on an ambient resource handle
   | "remote-api-op" // a TYPED call on an in-system api-bound resource (M-T4.8)
   | "repo-read" // a read-only repository query in a `reading` domain-service body (domain-services.md rev. 4)
   | "domain-service" // a member call on a `domainService` (domain-services.md)
@@ -3449,14 +3454,14 @@ export type BinOp =
  * build break).
  *
  *  - `deny` — the always-false carve-out (`deny [write] on <Agg>`,
- *    authorization Phase 4, deny-wins).  Principal-FREE: it routes to each
+ *    deny-wins).  Principal-FREE: it routes to each
  *    backend's STATIC filter path (no ambient-principal parameter), which is
  *    what keeps a denied aggregate's read/write seam free of the unused-param
  *    trap.  Every backend renders it to its native always-false fragment
  *    (Drizzle `and(isNull, isNotNull)` / EF `false` / JPQL `1 = 0` /
  *    `cb.disjunction()` / SQLAlchemy contradiction / Ecto `fragment("false")`).
  *  - `scope` — the descendant-or-self materialized-path subtree scope
- *    (`deep`/`global` read levels, multi-tenancy Phase 2).  PRINCIPAL-referencing
+ *    (`deep`/`global` read levels).  PRINCIPAL-referencing
  *    (carries `currentUser.<anchor>` + `currentUser.tenantId` as resolved
  *    member sub-expressions), so it routes to the ambient-principal filter
  *    path and `exprUsesCurrentUser` classifies it by walking those children.
@@ -3492,7 +3497,7 @@ export type ExprIR =
       type?: TypeIR;
       /** Populated when `refKind === "resource"` — the resource's
        *  declared name and infra kind, so a `.verb(...)` call on it can
-       *  lower to a `resource-op` without re-resolving (Phase 4). */
+       *  lower to a `resource-op` without re-resolving. */
       resourceName?: string;
       resourceKind?: DataSourceKind;
       /** Populated when the resource binds an in-system `api` (M-T4.8) — a
@@ -3561,7 +3566,7 @@ export type ExprIR =
        *  helper (a workflow body is not a class), so backends render the call as
        *  the scoped, per-backend-cased name `<wf><fn>(args)`. */
       wfScope?: string;
-      /** Populated when `callKind === "resource-op"` (Phase 4) — the
+      /** Populated when `callKind === "resource-op"` — the
        *  resolved resource binding, verb, the capability it requires,
        *  and the access interface (default from
        *  `EnrichedSystemIR.resourceInterfaces`, with per-verb override).
@@ -3615,8 +3620,8 @@ export type ExprIR =
        *  to render against the generated repository, and `readKind` the recognised
        *  shape (`named` declared find / `getById`, vs the criterion `find`/`findAll`
        *  vs retrieval `run`).  Backends render a real call into the generated
-       *  repository without re-recognising the AST.  Per-backend EMISSION is a
-       *  later slice (this slice is the IR foundation only). */
+       *  repository without re-recognising the AST.  No backend emits from it
+       *  yet — this is the IR foundation. */
       repoRead?: {
         repo: string;
         aggregate: string;
@@ -3736,7 +3741,7 @@ export type ExprIR =
    * (Drizzle contradiction, EF `false`, JPQL `1 = 0`, Ecto `fragment("false")`,
    * …).  Making it a first-class `ExprIR.kind` — rather than a `method-call`
    * every backend already handles — is the safety payoff: a backend that
-   * omits a filter arm can no longer fall through to the generic expression
+   * omits a filter arm cannot fall through to the generic expression
    * dispatcher and emit a silent authorization bypass.  Instead the shared
    * dispatcher THROWS on it (like `action-ref`), the queryable-subset gate
    * and child-walker force an explicit arm, and each backend switches on
@@ -3753,9 +3758,9 @@ export type ExprIR =
       kind: "authz-filter";
       /** The discriminated policy decision this sentinel encodes. */
       filter: AuthzFilterKind;
-      /** Name of the aggregate the filter guards (formerly the marker's
-       *  `receiverType.name`).  Backends key the row's table/alias off their
-       *  render context, not this — it is carried for provenance / debugging. */
+      /** Name of the aggregate the filter guards.  Backends key the row's
+       *  table/alias off their render context, not this — it is carried for
+       *  provenance / debugging. */
       aggregate: string;
       origin?: OriginRef;
     }
@@ -3835,8 +3840,7 @@ export type ExprIR =
    * raw ICU format text (`", number, ::currency/USD"`, leading comma + spaces
    * preserved).  Created by `lowerTemplateString` ONLY when the source hole
    * spelled a `, format` suffix (`` `Total: {order.total, number,
-   * ::currency/USD}` ``); a format-less hole gets NO wrapper, so its lowering
-   * is byte-identical to before this node existed.
+   * ::currency/USD}` ``); a format-less hole gets NO wrapper.
    *
    * INERT on the raw path: every backend + Feliz/Flutter/HEEx renders it as
    * exactly `inner` (the string-converted concat operand) — the format is
@@ -4013,6 +4017,86 @@ export function operationIsGuarded(op: OperationIR): boolean {
  *  contract as a guarded operation. */
 export function workflowIsGuarded(wf: WorkflowIR): boolean {
   return wf.statements.some((s) => s.kind === "requires");
+}
+
+/** True when the workflow's command route can answer the DOMAIN NOT-FOUND rung
+ *  — i.e. its body performs a repository read that THROWS when the row is
+ *  absent, so the route really sends that status and must declare it.
+ *
+ *  WHY A PREDICATE AND NOT A KIND.  `errorStatuses` publishes the not-found
+ *  rung per `OpErrorKind`, which works because for `getById` / `destroy` /
+ *  `operation` the rung follows from the ROUTE SHAPE: the path carries an
+ *  `{id}`, the handler loads it, an absent row is a 404 unconditionally.  A
+ *  workflow command route has no path id — the rung follows from what the BODY
+ *  does, and a workflow that touches no repository genuinely cannot send it.
+ *  Declaring 404 on every workflow would be as wrong in the other direction
+ *  (schemathesis' `status_code_conformance` reads an undeclared status and an
+ *  unreachable declared one with equal suspicion), so the shape the honest
+ *  contract needs is this predicate, threaded into the table.
+ *
+ *  WHAT THROWS.  Two producers, and only two:
+ *
+ *  1. A `repo-let` (`let w = Wallets.getById(id)` / `let w = Wallets.byRef(r)`).
+ *     Always throwing: `getById` throws by construction on every backend, and
+ *     a repo-let bound to a DECLARED find is validator-constrained to a
+ *     non-optional, non-array return (`loom.workflow-load-nullable-unsupported`
+ *     / `loom.workflow-load-array-unsupported`), which leaves the emitted
+ *     repository method no way to report an empty result except by throwing.
+ *  2. A NAMED read inside an expression — the `reading` domain-service tier
+ *     (`domain-services.md`), whose read port is threaded from this very
+ *     workflow.  Here optionality is NOT validator-constrained (the canonical
+ *     example compares the result to `null`), so the find's declared return
+ *     type decides: an optional or collection return answers with a value, a
+ *     non-optional one throws.
+ *
+ *     This arm is a FORWARD GUARD, not a currently-reachable path, and saying
+ *     so is the point: the reading tier's per-backend emission is still a later
+ *     slice (`ExprIR.repoRead` carries "Per-backend EMISSION is a later slice"
+ *     for the same reason), and today a `reading` service body emits a call
+ *     against a read-port handle that was never threaded.  When that lands, the
+ *     rung follows the read into it without anyone having to rediscover this
+ *     function — which is cheaper than the arm is dead-weight.
+ *
+ *  Everything else that reads is absence-shaped and cannot throw: `repo-run` /
+ *  `findAll` return arrays, `if-let` exists precisely to handle the empty case,
+ *  and a criterion `find` read renders as `[0] ?? null`. */
+export function workflowCanAnswerNotFound(
+  wf: WorkflowIR,
+  repositories: readonly RepositoryIR[],
+): boolean {
+  /** A named repository read throws on an absent row when the declared return
+   *  type leaves it nothing else to return.  An unresolvable method is not
+   *  evidence that it throws — a repository/method that does not exist is a
+   *  phase-⑦ error (`loom.workflow-unknown-repository{,-method}`), so the
+   *  declared set for a model that does not compile is moot either way. */
+  const readThrows = (repoName: string, method: string): boolean => {
+    if (method === "getById") return true;
+    const find = repositories
+      .find((r) => r.name === repoName)
+      ?.finds.find((f) => f.name === method);
+    if (!find) return false;
+    return find.returnType.kind !== "optional" && find.returnType.kind !== "array";
+  };
+
+  let canNotFound = false;
+  for (const top of wf.statements) {
+    // Producer 1 — the statement form.  Deep, so a read inside a `for-each`
+    // body or an `if-let` branch counts; a hand-rolled recursion here is the
+    // drifting copy `ir/util/walk.ts` exists to prevent.
+    walkWorkflowStmtsDeep(top, (s) => {
+      if (s.kind === "repo-let") canNotFound = true;
+    });
+    // Producer 2 — the expression form (a `reading` domain service's own
+    // repository read).  `walkWorkflowStmtExprsDeep` already descends through
+    // the nested bodies, so one pass per top-level statement is the whole body.
+    walkWorkflowStmtExprsDeep(top, (e) => {
+      if (e.kind !== "call" || e.callKind !== "repo-read") return;
+      const read = e.repoRead;
+      if (!read || read.readKind !== "named") return;
+      if (readThrows(read.repo, read.method)) canNotFound = true;
+    });
+  }
+  return canNotFound;
 }
 
 /** True when the workflow exposes an HTTP/UI command surface — its facade
@@ -4268,6 +4352,20 @@ export function valueObjectUsesMoney(vo: ValueObjectIR): boolean {
 export function contextUsesMoney(ctx: BoundedContextIR): boolean {
   if (ctx.aggregates.some(aggregateUsesMoney)) return true;
   if (ctx.valueObjects.some(valueObjectUsesMoney)) return true;
+  // Aggregates and value objects were the whole test, and they are not the
+  // whole surface a `money` type reaches.  An EVENT field, a PROJECTION state
+  // column, a WORKFLOW state field or a PAYLOAD/handler record can each be the
+  // only money in a system — and each is emitted as a `Decimal` on the TS
+  // backends.  With no money-bearing aggregate the flag read false, so
+  // `domain/events.ts` shipped `import Decimal from "decimal.js"` while
+  // `package.json` omitted the dependency: TS2307, a generated project that
+  // does not install-and-compile.  (Reproduced with an event carrying
+  // `amount: money` and a projection folding it, then `npm install && tsc`.)
+  if (ctx.events.some((e) => e.fields.some((f) => typeUsesMoney(f.type)))) return true;
+  if (ctx.projections.some((p) => p.stateFields.some((f) => typeUsesMoney(f.type)))) return true;
+  if (ctx.workflows.some((w) => (w.stateFields ?? []).some((f) => typeUsesMoney(f.type))))
+    return true;
+  if (ctx.payloads.some((p) => p.fields.some((f) => typeUsesMoney(f.type)))) return true;
   return false;
 }
 /** True when the ui declares a money-typed `state {}` field on any page

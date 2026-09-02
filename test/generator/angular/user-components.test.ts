@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateSystemFiles } from "../../_helpers/index.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // User (non-`extern`) components — Angular flavour
@@ -27,6 +27,22 @@ import { generateSystemFiles } from "../../_helpers/index.js";
 
 async function angularFiles(src: string): Promise<Map<string, string>> {
   const all = await generateSystemFiles(src);
+  return webSlice(all);
+}
+
+/** For the DEFERRAL legs: the fixture is rejected by
+ *  loom.user-component-deferred-target on purpose, and emitting from it is the
+ *  subject — the leg proves the emitter arm the gate documents still drops the
+ *  component rather than writing a half-bound class. */
+async function angularFilesUnchecked(src: string): Promise<Map<string, string>> {
+  const all = await generateSystemFilesUnchecked(
+    src,
+    "the angular emitter's deferral of this rejected component shape is the subject; the gate that refuses the model documents that same deferral",
+  );
+  return webSlice(all);
+}
+
+function webSlice(all: Map<string, string>): Map<string, string> {
   const out = new Map<string, string>();
   for (const [p, c] of all) {
     if (p.startsWith("web/")) out.set(p.slice("web/".length), c);
@@ -163,7 +179,7 @@ describe("user components — Angular", () => {
     // channel, so a `slot` param has nowhere to land.  The component stays out of
     // the emitted set and the call site keeps the honest comment — never a
     // reference to a class that was not written.
-    const files = await angularFiles(
+    const files = await angularFilesUnchecked(
       sys(`
       component Panel(head: slot) { body: Card { head } }
       page Home { route: "/" body: Stack { Panel(head: Text { "hi" }) } }`),
@@ -192,7 +208,7 @@ describe("user components — Angular", () => {
     // constructor — before Angular sets any input — so `useOrderById(this.oid)`
     // would throw on `undefined` at construction.  Compiles, breaks at runtime:
     // exactly the class this deferral exists to keep out.
-    const files = await angularFiles(
+    const files = await angularFilesUnchecked(
       sys(`
       component OrderCard(oid: string) {
         body: QueryView { of: Sales.Order.byId(oid), single: true, data: o => Text { o.customerId } }
@@ -256,7 +272,9 @@ describe("user components — Angular", () => {
         ui WebApp {
           page Home { route: "/" body: Stack { Ribbon(label: "sale") } }
         }
-        deployable api { platform: node, contexts: [Sales], port: 3000 }
+        storage loomDb { type: postgres }
+        resource salesState { for: Sales, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [Sales], dataSources: [salesState], port: 3000 }
         deployable web { platform: angular, targets: api, port: 3001, ui: WebApp }
       }
     `);

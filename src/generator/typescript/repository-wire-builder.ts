@@ -15,7 +15,9 @@ import type {
   WireField,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
+import { provenancedEntries } from "../_payload/provenanced-wire.js";
 import { MONEY_WIRE_SCALE } from "../money-scale.js";
+import { tsProvSibling } from "./prov-names.js";
 import { renderTsExpr } from "./render-expr.js";
 
 export function toWireMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
@@ -115,12 +117,25 @@ function wireProjectionEntity(
       `${wf.name}: ${wireProjectionValue(`${varExpr}.${wf.name}`, wf.type, ctx, wf.optional)}`,
     );
   }
-  // Co-located provenance rides the wire DTO so any GET surfaces the
-  // current lineage inline (the field's own value still emits above).
-  for (const f of ent.fields.filter((f) => f.provenanced)) {
-    parts.push(`${f.name}_provenance: ${varExpr}.${f.name}_provenance`);
-  }
+  // (M-T6.12) No trailing `<field>_provenance` key any more: the lineage rides
+  // inside the provenanced field's own value as the `Provenanced<T>` carrier,
+  // folded by `wireProjectionValue`'s carrier branch below.
   return `{ ${parts.join(", ")} }`;
+}
+
+/** A `Date` expression → the CANONICAL `datetime` wire string (RS-4,
+ *  docs/conformance-semantics.md): ISO-8601 UTC with trailing zero fractional
+ *  seconds trimmed, so a whole-second instant spells `…T00:00:00Z`.
+ *
+ *  `Date.toISOString()` alone always pads the fraction to exactly three digits
+ *  (`…T00:00:00.000Z`), which made node the ONLY backend to put a fraction on a
+ *  whole-second instant — .NET trims with this same regex, java's
+ *  `Instant.toString()` omits a zero fraction, python's `isoformat()` omits it,
+ *  and elixir's `:utc_datetime` has no fractional part at all (F2-W-05).  The
+ *  trim is safe because the input always carries the `.mmm` group: the regex
+ *  can only bite the fraction, never the seconds field. */
+export function canonicalIsoExpr(dateExpr: string): string {
+  return `${dateExpr}.toISOString().replace(/\\.?0+Z$/, "Z")`;
 }
 
 /** Render one DOMAIN value to its wire form.  Exported because the query-time
@@ -140,8 +155,8 @@ export function wireProjectionValue(
   if (t.kind === "primitive") {
     if (t.name === "datetime")
       return optional
-        ? `(${expr} == null ? null : (${expr} as Date).toISOString())`
-        : `(${expr} as Date).toISOString()`;
+        ? `(${expr} == null ? null : ${canonicalIsoExpr(`(${expr} as Date)`)})`
+        : canonicalIsoExpr(`(${expr} as Date)`);
     // money carries a FIXED wire scale (RS-12): decimal.js `.toJSON()`
     // normalizes trailing zeros (`"12.50"` → `"12.5"`), so serialize with the
     // canonical scale (4, matching money's NUMERIC(19,4) storage) instead — the
@@ -174,5 +189,18 @@ export function wireProjectionValue(
     return `${expr}.map((a) => (${wireProjectionValue("a", t.element, ctx, false)}))`;
   }
   if (t.kind === "entity") return expr;
+  if (t.kind === "genericInstance" && t.ctor === "provenanced") {
+    // Fold the domain's split pair into the one wire carrier: the value's own
+    // projection plus the co-located lineage getter the entity emitter
+    // declared.  `?? null` because a never-written provenanced field has no
+    // lineage yet and the response schema says nullable, not optional.
+    const members = provenancedEntries(
+      wireProjectionValue(expr, t.arg, ctx, optional),
+      `${tsProvSibling(expr)} ?? null`,
+    )
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(", ");
+    return `{ ${members} }`;
+  }
   return expr;
 }

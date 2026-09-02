@@ -19,7 +19,7 @@
 import { describe, expect, it } from "vitest";
 import type { BoundedContextIR, LoomModel } from "../../../src/ir/types/loom-ir.js";
 import { deriveContextOperations } from "../../../src/ir/util/api-surface.js";
-import { generateSystemFiles } from "../../_helpers/generate.js";
+import { generateSystemFiles, generateSystemFilesUnchecked } from "../../_helpers/generate.js";
 import { buildLoomModel } from "../../_helpers/ir.js";
 
 const SOURCE = `
@@ -39,6 +39,7 @@ system P {
     }
   }
   api SalesApi from D { urlStyle: resource }
+  user { id: string  role: string }
   storage pg { type: postgres }
   resource st { for: Orders, kind: state, use: pg }
   deployable d {
@@ -46,6 +47,7 @@ system P {
     contexts: [Orders]
     dataSources: [st]
     port: 3000
+    auth: required
   }
 }
 `;
@@ -150,7 +152,7 @@ system P {
       aggregate Order {
         code: string
         status: string
-        create(code: string) { code := code }
+        create(code: string) { }
         destroy archive() { status := "archived" }
       }
       repository Orders for Order { }
@@ -161,18 +163,38 @@ system P {
   deployable d { platform: java contexts: [Orders] dataSources: [st] port: 3000 }
 }
 `;
-    const files = await generateSystemFiles(src);
+    // Deliberately invalid: a named-only destroy is refused outright by
+    // `loom.named-lifecycle-dropped` (it reaches no backend).  That refusal IS
+    // the premise here — this pins that the emitter ALSO stops mounting a
+    // generic DELETE for it, so the two halves agree instead of one shipping a
+    // route the other says cannot exist.
+    const files = await generateSystemFilesUnchecked(
+      src,
+      "a named-only destroy is refused by loom.named-lifecycle-dropped; the " +
+        "emitter's behaviour under that refusal is exactly what this pins",
+    );
     const mounted = scrapeControllerRoutes(files).map(key);
     expect(mounted.some((k) => k.startsWith("delete "))).toBe(false);
     const published = [...scrapeCustomizerRoutes(files).keys()];
     expect(published.some((k) => k.startsWith("delete "))).toBe(false);
   });
 
-  it("a genuinely-single find declares no 404 (findSingle, not the optional convention)", async () => {
-    // NAMED FIX (iii): the customizer's non-array bucket declared
-    // `findOptional`'s 404 for a bare-`T` find; the derivation classifies it
-    // `findSingle` → [] (matching what the controller answers on the happy
-    // path — the ladder's 404 belongs to ABSENCE-capable returns).
+  it("a genuinely-single find declares the 404 its own controller throws", async () => {
+    // NAMED FIX (iii) said the opposite — `findSingle` → [], "matching what the
+    // controller answers on the happy path".  The happy path was the whole
+    // error: read two lines further and this same controller says
+    //
+    //     var response = service.newest();
+    //     if (response == null) throw new AggregateNotFoundException("not_found");
+    //
+    // so the route it declared `[]` for answers 404 on every miss.  The premise
+    // that "the ladder's 404 belongs to ABSENCE-capable returns" inverts the
+    // rule: a NON-optional return is the one with nowhere to PUT an absence, so
+    // it can only throw.  Corrected with F13 —
+    // docs/audits/schemathesis-findings-2026-08.md — which also brought .NET
+    // (EF `FirstAsync` → 500) and elixir (`json(conn, nil)` → `200 null`) onto
+    // the same answer.  Cross-backend coverage:
+    // test/conformance/not-found-declaration-parity.test.ts.
     const src = `
 system P {
   subdomain D {
@@ -193,6 +215,6 @@ system P {
 `;
     const files = await generateSystemFiles(src);
     const published = scrapeCustomizerRoutes(files);
-    expect(published.get("get /api/orders/newest")).toEqual([]);
+    expect(published.get("get /api/orders/newest")).toEqual([404]);
   });
 });

@@ -32,6 +32,9 @@ import {
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import { MONEY_TEXT_SOURCE } from "../_frontend/money-format.js";
+import { VUE_NAV_LABELS, withNavLabelTokens } from "../_frontend/nav-labels.js";
+import { pageEmitPath } from "../_frontend/page-identity.js";
 import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import {
@@ -84,7 +87,7 @@ import { vueTarget } from "./walker/vue-target.js";
 // Query import specifier differs), same two-stage vite-build /
 // vite-preview docker runtime.
 //
-// Slice 3 scope (vue-frontend-plan.md): project shell + api modules +
+// Scope (vue-frontend-plan.md): project shell + api modules +
 // router + page SKELETONS.  Page bodies walk through the shared
 // markup walker with `vueTarget` in the next slice; until then each
 // declared page emits a stub SFC (route + testid + title) so the
@@ -179,10 +182,7 @@ export function generateVueForContexts(
     const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
     out.set(
       `src/api/${agg.name[0]!.toLowerCase()}${agg.name.slice(1)}.ts`,
-      buildApiModule(agg, repo, ctx, {
-        queryPackage: "@tanstack/vue-query",
-        carryProvenance: true,
-      }),
+      buildApiModule(agg, repo, ctx, { queryPackage: "@tanstack/vue-query" }),
     );
   }
 
@@ -207,7 +207,7 @@ export function generateVueForContexts(
   }
   const pageRoutes = new Map<string, string>();
   for (const page of pages) pageRoutes.set(page.name, page.route!);
-  // Name-context for `classifyPage` (slice 3c — replaces the stamped `origin`).
+  // Name-context for `classifyPage` (replaces the stamped `origin`).
   const pageCtx: PageNameCtx = {
     aggregateNames: [...aggregatesIRByName.keys()],
     workflowNames: [...workflowsByName.keys()],
@@ -281,6 +281,10 @@ export function generateVueForContexts(
       c.body!,
       pack,
       userComponents,
+      // The ui's api handles — the SAME list the page shell gets.  A component
+      // body reads (`QueryView { of: Sales.Order.all }`) exactly as a page body
+      // does; handed `[]` the handle resolved to nothing.
+      ui.apiParams,
       aggregatesIRByName,
       bcByAggregate,
       pageRoutes,
@@ -358,6 +362,9 @@ export function generateVueForContexts(
       apiParams: ui.apiParams,
       aggregatesByName: aggregatesIRByName,
       bcByAggregate,
+      // The route table a `navigate(<Page>)` in an ACTION body resolves against
+      // (the body walk above already gets it).
+      pageRoutes,
     });
     out.set(renderedPagePath, renderedPageContent);
     // Sibling component files a primitive hoisted out of the page — a Vue SFC
@@ -381,7 +388,7 @@ export function generateVueForContexts(
     out.set(`src/stores/${snake(store.name)}.ts`, renderVueStoreModule(store));
   }
 
-  // Named layouts (Phase 8).  A page selects one via `layout: <Name>`;
+  // Named layouts.  A page selects one via `layout: <Name>`;
   // `layout: none` mounts outside all chrome.  When any page uses a
   // non-default layout we restructure into nested vue-router routes:
   // the default chrome moves to `src/layouts/DefaultLayout.vue`, App.vue
@@ -419,8 +426,8 @@ export function generateVueForContexts(
       : renderRouter(pages, routerBasename),
   );
 
-  // Page objects + the Playwright e2e harness (vue-frontend-plan.md
-  // Slice 6).  Page objects are framework-neutral — testid/DOM only,
+  // Page objects + the Playwright e2e harness (vue-frontend-plan.md).
+  // Page objects are framework-neutral — testid/DOM only,
   // driven by `@loom/ui-test-driver` — so the SAME builders the React
   // generator uses emit them here; the testid contract is identical
   // because the vuetify templates splice the same `{{{testidAttr}}}`
@@ -450,7 +457,7 @@ export function generateVueForContexts(
     );
   }
 
-  // Query-time projection clients (M-T1.3 Phase 1) — same shared builder as
+  // Query-time projection clients (M-T1.3) — same shared builder as
   // React, differing only in the query-package import: `@tanstack/vue-query`'s
   // `useQuery` is API-compatible with the React one, so the emitted module is
   // otherwise identical.  Emitted only when the deployable actually serves a
@@ -475,7 +482,10 @@ export function generateVueForContexts(
     out.set("src/auth/AuthGate.vue", AUTH_GATE_VUE);
   }
   out.set("src/logger.ts", renderShell(pack, "logger", {}));
-  out.set("src/lib/format.ts", renderShell(pack, "format-helpers", {}));
+  out.set(
+    "src/lib/format.ts",
+    renderShell(pack, "format-helpers", { moneySource: MONEY_TEXT_SOURCE }),
+  );
   // Interactive-table sort helper (M-T1.1) — imported by a page only when it
   // renders a sortable `Table`; emitted unconditionally (like format.ts).
   out.set("src/lib/table-sort.ts", buildTableSortHelper());
@@ -531,9 +541,11 @@ export function generateVueForContexts(
   const sidebarOverride = deriveSidebarFromUi(ui, pageCtx, authUi);
   const navSections: Array<{
     label: string;
+    labelKey?: string;
     entries: Array<{
       to: string;
       label: string;
+      labelKey?: string;
       testId: string;
       exact?: boolean;
       external?: boolean;
@@ -543,9 +555,11 @@ export function generateVueForContexts(
   }> = sidebarOverride
     ? sidebarOverride.map((s) => ({
         label: s.label,
+        labelKey: s.labelKey,
         entries: s.entries.map((e) => ({
           to: e.to,
           label: e.label,
+          labelKey: e.labelKey,
           testId: e.testId,
           // The Vue templates append `, { exact: true }` to `isActive(...)`
           // off this flag; the shared emitter carries it inside `activeArgs`.
@@ -576,9 +590,15 @@ export function generateVueForContexts(
   // `:aria-label='t(…)'` (single-quoted, the `t()` call holds double quotes)
   // under i18n, else the static `aria-label="…"`.
   const primaryNavAria = shellChromeAttr("aria-label", "primaryNav", i18nEnabled);
+  // Nav labels → their Vue-spelled tokens (`{{ t(key, def) }}` in text
+  // position, `:attr='t(key, def)'` bound): the `menu.section.*`/`menu.link.*`
+  // catalog keys the extractor has always written finally render (A13b).  With
+  // i18n off — and for the emitter-DERIVED default sidebar, which carries no
+  // key — the token is the escaped raw string, byte-identical to `{{label}}`.
+  const navSectionsVM = withNavLabelTokens(navSections, i18nEnabled ? VUE_NAV_LABELS : undefined);
   const chromeVM = {
     systemNameHuman: humanize(sys.name),
-    navSections,
+    navSections: navSectionsVM,
     navUsesSession,
     hasRealtimeHandlers,
     hasToastHost,
@@ -676,8 +696,11 @@ function renderShell(pack: LoadedPack, name: string, vm: unknown): string {
  *  `.vue` in place of `.tsx` (scaffold pages keep their conventional
  *  `src/pages/<plural>/list.vue` shape via `emitPath`). */
 function pagePath(page: PageIR): string {
-  if (page.emitPath) return page.emitPath.replace(/\.tsx$/, ".vue");
-  return `src/pages/${snake(page.name)}.vue`;
+  // One derivation, shared with every other frontend
+  // (`src/generator/_frontend/page-identity.ts`) — Vue was already the only
+  // frontend that got this family right, so it becomes the helper's caller
+  // rather than its own copy.
+  return pageEmitPath(page, ".vue");
 }
 
 /** Pascal component name for a page's router import, derived from its

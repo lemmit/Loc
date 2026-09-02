@@ -124,9 +124,19 @@ function recordParamNames(h: Handler, ctx: EnrichedBoundedContextIR): ReadonlySe
  *  the output stays byte-identical), or a `recordParams`-carrying context when
  *  the handler takes a `command`/`query` record (so `cmd.<field>` collapses to
  *  the flattened flat param). */
-function handlerRenderCtx(h: Handler, ctx: EnrichedBoundedContextIR): JavaRenderContext {
+function handlerRenderCtx(
+  h: Handler,
+  ctx: EnrichedBoundedContextIR,
+  /** resourceName → resource-client class, so a resource-op in the handler body
+   *  renders as `S3Resources.salesFilesPut(...)`.  Without it `renderJavaExpr`
+   *  THREW "reached the Java renderer without a resource class mapping" at
+   *  generate time — on a body site the IR gate declares legal. */
+  resourceClasses?: Map<string, string>,
+): JavaRenderContext {
   const records = recordParamNames(h, ctx);
-  return records.size > 0 ? { thisName: "this", recordParams: records } : baseRenderCtx;
+  const resources = resourceClasses?.size ? { resourceClasses } : undefined;
+  if (records.size === 0 && !resources) return baseRenderCtx;
+  return { thisName: "this", ...(records.size > 0 ? { recordParams: records } : {}), ...resources };
 }
 
 // --- Extern handler (bodyless) — port + scaffold-once impl bean -------------
@@ -349,6 +359,7 @@ function renderHandlerClass(
   ctx: EnrichedBoundedContextIR,
   entityPkgOf: (agg: string) => string,
   repoPkgOf: (agg: string) => string,
+  resources?: { classes: Map<string, string>; pkg: string },
 ): string {
   const handlerName = `${h.name}Handler`;
   const imports = new Set<string>();
@@ -358,7 +369,7 @@ function renderHandlerClass(
   // `query` record params (M-T5.10) so a `cmd.<field>` access collapses to the
   // flattened flat param; a flat-param handler reuses the base context, so its
   // output stays byte-identical.
-  const renderCtx = handlerRenderCtx(h, ctx);
+  const renderCtx = handlerRenderCtx(h, ctx, resources?.classes);
   const bodyLines = renderWorkflowStmtChunks(
     h.statements,
     javaWorkflowStmtTarget(ctx, imports, renderCtx, undefined, collectUnionFindLets(h.statements)),
@@ -415,6 +426,20 @@ function renderHandlerClass(
   // it out so the import header stays tight.
   const usesCatalog = bodyLines.some((l) => l.includes("CatalogLog"));
 
+  // `<resourcesPkg>.*` — the wildcard the workflow leg uses, gated on the
+  // RENDERED body actually naming a resource-client class so an unused import
+  // can't reach the file.  A handler doing no resource I/O emits nothing here
+  // and stays byte-identical.
+  const bodyText = [...bodyLines, ...returnLines].join("\n");
+  const resourceImport =
+    resources && resources.pkg !== appPkg
+      ? [...new Set(resources.classes.values())].some((cls) =>
+          new RegExp(`\\b${cls}\\.`).test(bodyText),
+        )
+        ? `import ${resources.pkg}.*;`
+        : null
+      : null;
+
   const tx = kind === "command" ? "@Transactional" : "@Transactional(readOnly = true)";
 
   return lines(
@@ -426,6 +451,7 @@ function renderHandlerClass(
     `import org.springframework.transaction.annotation.Transactional;`,
     ``,
     ...aggImports,
+    resourceImport,
     `import ${basePkg}.domain.common.*;`,
     `import ${basePkg}.domain.enums.*;`,
     `import ${basePkg}.domain.ids.*;`,
@@ -456,6 +482,9 @@ export function emitExplicitHandlers(
   appPkg: string,
   entityPkgOf: (agg: string) => string,
   repoPkgOf: (agg: string) => string,
+  /** Resource-client routing for handler bodies that issue a resource-op — the
+   *  same `{classes, pkg}` pair the workflow emitter receives. */
+  resources?: { classes: Map<string, string>; pkg: string },
 ): { name: string; content: string }[] {
   const files: { name: string; content: string }[] = [];
   const pushHandler = (h: Handler, kind: "command" | "query"): void => {
@@ -488,7 +517,7 @@ export function emitExplicitHandlers(
     }
     files.push({
       name: `${h.name}Handler.java`,
-      content: renderHandlerClass(h, kind, basePkg, appPkg, ctx, entityPkgOf, repoPkgOf),
+      content: renderHandlerClass(h, kind, basePkg, appPkg, ctx, entityPkgOf, repoPkgOf, resources),
     });
   };
   for (const h of ctx.commandHandlers ?? []) pushHandler(h, "command");
@@ -606,9 +635,10 @@ function emitPagedRunAction(
  *  of .NET C1 #1830).  An entity return (aggregate or part) is projected to its
  *  `<Agg>Response` — the SAME static factory the auto-derived read endpoints use
  *  (`emit/wire.ts` domainToWire; `service.ts` `<Agg>Response::from`) — so the
- *  route serialises the wire contract, not the raw JPA entity.  Id / scalar / VO
- *  returns serialise as-is (`result`).  Records the owning aggregate's response
- *  DTO package into `responsePkgs` so the controller header can import it. */
+ *  route serialises the wire contract, not the raw JPA entity.  Id / VO returns
+ *  serialise as-is (`result`); a plain `decimal` narrows (see below).  Records
+ *  the owning aggregate's response DTO package into `responsePkgs` so the
+ *  controller header can import it. */
 function projectReturn(
   retType: TypeIR,
   ctx: EnrichedBoundedContextIR,
@@ -616,6 +646,20 @@ function projectReturn(
   responsePkgs: Set<string>,
 ): string {
   const info = wireTypeInfo(retType, "response");
+  // A plain `decimal` narrows to the response wire's `double` (RS-24 /
+  // M-T6.46) — an explicit handler returning `decimal` is the same response
+  // direction as an aggregate read, so it cannot ship the domain BigDecimal's
+  // full `MathContext.DECIMAL128` precision where the REST DTO ships a double.
+  // `domainToWire` carries the optional / `decimal[]` arms.
+  //
+  // NOTE (reported, not fixed here): the `return "result"` below still passes
+  // `id` / `money` / `datetime` scalar returns through UN-projected, so an
+  // explicit handler returning one of those diverges from the DTO wire. That is
+  // a separate, pre-existing explicit-handler gap; only the decimal arm is in
+  // M-T6.46's scope.
+  if (info.refKind === "primitive" && info.primitive === "decimal") {
+    return domainToWire(retType, "result");
+  }
   if (info.refKind !== "entity") return "result";
   const owning =
     ctx.aggregates.find((a) => a.name === info.base) ??

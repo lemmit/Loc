@@ -22,11 +22,21 @@ command="$(printf '%s' "$input" | jq -r '.tool_input.command // ""' 2>/dev/null)
 # Matches `git push`, `git -C dir push`, `git --no-pager push`, and pushes
 # inside compound commands / retry loops.  Read-only commands that merely
 # mention "push" in a string are not git pushes and fall through.
-if ! [[ "$command" =~ (^|[^[:alnum:]_/.])git([[:space:]]+-[^[:space:]]+)*[[:space:]]+push([[:space:]]|$) ]]; then
+if ! [[ "$command" =~ (^|[^[:alnum:]_/.])git([[:space:]]+-C[[:space:]]+[^[:space:]]+|[[:space:]]+-[^[:space:]]+)*[[:space:]]+push([[:space:]]|$) ]]; then
   exit 0
 fi
 
-cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0
+# Evaluate the push in the repo it actually targets. `CLAUDE_PROJECT_DIR` is
+# the SHARED checkout — a subagent pushing from a git worktree would be judged
+# against whatever branch the shared checkout happens to sit on (observed as a
+# false positive by five parallel worktree agents). The hook input's `cwd` is
+# the invoking Bash call's working directory, so prefer it; an explicit
+# `git -C <dir> push` overrides both (resolved relative to that cwd).
+cwd="$(printf '%s' "$input" | jq -r '.cwd // ""' 2>/dev/null)"
+cd "${cwd:-${CLAUDE_PROJECT_DIR:-.}}" 2>/dev/null || exit 0
+if [[ "$command" =~ git[[:space:]]+-C[[:space:]]+([^[:space:]]+)[[:space:]] ]]; then
+  cd "${BASH_REMATCH[1]}" 2>/dev/null || exit 0
+fi
 command -v git >/dev/null 2>&1 || exit 0
 command -v jq  >/dev/null 2>&1 || exit 0
 git rev-parse --git-dir >/dev/null 2>&1 || exit 0

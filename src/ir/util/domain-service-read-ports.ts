@@ -1,5 +1,5 @@
 // Read-port derivation for a `reading`-tier domain-service operation
-// (domain-services.md rev. 4, Slice 1).
+// (domain-services.md rev. 4).
 //
 // A `reading` domain-service operation runs read-only repository queries
 // (lowered to `repo-read` Calls).  Its generated declaration gains one

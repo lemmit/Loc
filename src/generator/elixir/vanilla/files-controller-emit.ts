@@ -1,7 +1,7 @@
 import type { ApiRoute } from "../api-emit.js";
 
 // ---------------------------------------------------------------------------
-// File upload/download endpoints (M-T1.2 slice 2d) — the app-level HTTP
+// File upload/download endpoints (M-T1.2) — the app-level HTTP
 // `POST /files` + `GET /files/:key` the JSX frontends hit (distinct from the
 // HEEx LiveView `allow_upload` channel path).  Root-mounted (`!root:`, not under
 // `/api`) to match the frontend api-client (`api.upload("/files")`, the
@@ -27,8 +27,10 @@ export function emitVanillaFilesController(
 defmodule ${webModule}.FilesController do
   use ${webModule}, :controller
 
+  alias ${webModule}.ProblemDetails
+
   @moduledoc """
-  App-level file upload/download over the bound objectStore (M-T1.2).
+  App-level file upload/download over the bound objectStore.
   \`POST /files\` stores the uploaded bytes and returns a FileRef; \`GET /files/:key\`
   streams the object back with its stored content-type.
   """
@@ -63,9 +65,10 @@ defmodule ${webModule}.FilesController do
         |> send_resp(200, body)
 
       nil ->
-        conn
-        |> put_status(404)
-        |> json(%{"error" => "not found"})
+        # The absent object answers through the app's ONE 404
+        # producer, so it carries the same RFC 7807 envelope (and the same
+        # \`httpStatus NotFound -> <Code>\` override) as every other absent read.
+        ProblemDetails.not_found_response(conn, "File", key)
     end
   end
 end

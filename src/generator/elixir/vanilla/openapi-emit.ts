@@ -21,7 +21,11 @@ import type {
   ValueObjectIR,
   WireField,
 } from "../../../ir/types/loom-ir.js";
-import { workflowEmitsCommandRoute, workflowIsGuarded } from "../../../ir/types/loom-ir.js";
+import {
+  workflowCanAnswerNotFound,
+  workflowEmitsCommandRoute,
+  workflowIsGuarded,
+} from "../../../ir/types/loom-ir.js";
 import {
   peelCollection,
   peelNullable,
@@ -55,6 +59,7 @@ import {
   opWorkflowInstances,
 } from "../../../ir/util/openapi-ids.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { PROVENANCE_VALUE_FIELD, provenancedEntries } from "../../_payload/provenanced-wire.js";
 import { unionMembers } from "../../_payload/union-wire.js";
 import type { ApiRoute } from "../api-emit.js";
 import { servedOperationEntries, servesHistory } from "./api-emit.js";
@@ -62,17 +67,14 @@ import { denialOverrides, denialStatus } from "./denial.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 import { emitsRestDelete } from "./rest-surface.js";
 
-/** Substitute the shared derivation's literal 404 with elixir's
- *  `httpStatus`-resolved `NotFound` status (M-T5.20, elixir leg — the
- *  `notFound` rung `denialStatus` already resolves for the RUNTIME arm via
- *  `not_found_response`/`problem_response`).  The shared `errorStatuses()`
- *  matrix (`src/ir/util/openapi-errors.ts`) deliberately leaves 404 a raw
- *  literal — `NotFound` has two producers on the four non-elixir backends
- *  (an exception-handler arm AND ~10 bare-404 return sites), so converting
- *  only the declaration there would document a status the runtime never
- *  answers.  Elixir has ONE producer (`ProblemDetails.not_found_response` /
- *  `problem_response`), already fully resolved, so its declared side can
- *  safely follow without that hazard. */
+/** Substitute a literal 404 with the `httpStatus`-resolved `NotFound` status.
+ *
+ *  `errorStatuses()` now resolves the rung itself on all five backends, so the
+ *  sets that come THROUGH it arrive already-resolved and this is a no-op on
+ *  them (there is no 404 left to substitute).  What it still does the work for
+ *  is the HAND-ROLLED sets beside them — the audit-history read and the
+ *  `?? [404]` fallback below, neither of which is lifted into
+ *  `deriveContextOperations` (`apiSurfaceCoverage.notLifted`). */
 function withResolvedNotFound(statuses: readonly number[], notFoundStatus: number): number[] {
   if (notFoundStatus === 404) return [...statuses];
   return [...new Set(statuses.map((s) => (s === 404 ? notFoundStatus : s)))].sort((a, b) => a - b);
@@ -141,12 +143,6 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
   const files = new Map<string, string>();
   const routes: ApiRoute[] = [];
 
-  // No served Api → no spec.  `serves` can be absent on a hand-built /
-  // under-shaped deployable (some unit fixtures omit it), so guard the access.
-  if (!deployable.serves || deployable.serves.length === 0) {
-    return { files, routes };
-  }
-
   const webModule = `${appModule}Web`;
 
   // Collect all aggregates, workflows across all contexts.
@@ -171,11 +167,20 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
   }
 
   // --- Per-Api spec module ---------------------------------------------------
-  // In Loom v0, there is one spec module per deployable (one api per deployable).
-  // Use the first serves entry as the spec name.
-  const apiName = deployable.serves[0]!;
-  const apiSnake = snake(apiName);
-  const apiPascal = upperFirst(apiName);
+  // In Loom v0, there is one spec module per deployable (one api per deployable),
+  // named after the served `api` when the deployable declares one.
+  //
+  // `serves:` is OPTIONAL, and it only ever named the module: every path and
+  // schema below is derived from the hosted `contexts`, not from the `api`
+  // declaration.  So a deployable declared with `contexts:` alone falls back to
+  // the app name and still publishes the same route-derived document the other
+  // four backends publish either way (F15,
+  // `docs/audits/schemathesis-findings-2026-08.md`).  Without the fallback such
+  // a deployable emits no spec module, no OpenapiController and no
+  // `/openapi.json` route at all.
+  const servedApi = deployable.serves?.[0];
+  const apiSnake = servedApi ? snake(servedApi) : appName;
+  const apiPascal = servedApi ? upperFirst(servedApi) : appModule;
 
   const specPath = `lib/${appName}_web/api/${apiSnake}_spec.ex`;
   files.set(
@@ -374,8 +379,11 @@ function errorResponseEntries(
    *  409 (`ReferencedInUse`) through the `httpStatus` mapper so the OpenAPI
    *  declaration moves with the runtime arm.  Omitted ⇒ literal 409. */
   resolve?: (name: string) => number,
+  /** Body facts the `kind` cannot carry — `readsAggregate` for the workflow
+   *  arm's conditional not-found rung.  See `errorStatuses`. */
+  opts?: { readsAggregate?: boolean },
 ): string {
-  return statusResponseEntries(errorStatuses(kind, guarded, resolve), schemasModule);
+  return statusResponseEntries(errorStatuses(kind, guarded, resolve, opts), schemasModule);
 }
 
 /** The same ProblemDetails response-map entries for an explicit status list —
@@ -412,7 +420,7 @@ function renderApiSpec(
   const pathEntries: string[] = [];
 
   // Workflow paths: POST /workflows/<slug>
-  for (const { wf } of allWorkflows) {
+  for (const { ctx, wf } of allWorkflows) {
     const slug = snake(wf.name);
     const reqMod = `${schemasModule}.${upperFirst(wf.name)}Request`;
     pathEntries.push(`      "/workflows/${slug}" => %OpenApiSpex.PathItem{
@@ -430,7 +438,9 @@ function renderApiSpec(
             200 => %OpenApiSpex.Response{
               description: "Success",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: %OpenApiSpex.Schema{type: :object}}}
-            }${errorResponseEntries("workflow", schemasModule, workflowIsGuarded(wf))}
+            }${errorResponseEntries("workflow", schemasModule, workflowIsGuarded(wf), undefined, {
+              readsAggregate: workflowCanAnswerNotFound(wf, ctx.repositories),
+            })}
           }
         }
       }`);
@@ -659,9 +669,9 @@ ${pagingQueryParams()}
       );
     }
 
-    // Per-operation paths — the SERVED entries (router parity by
-    // construction; the spec used to document every public op, including the
-    // CRUD-verb-named ones the router never mounts and the ES `update`).
+    // Per-operation paths — the SERVED entries, so router parity holds by
+    // construction.  Documenting every public op instead would publish the
+    // CRUD-verb-named ones the router never mounts, and the ES `update`.
     for (const entry of served.opEntries) {
       const op = entry.operation!;
       const opReqMod = `${schemasModule}.${upperFirst(op.name)}${agg.name}Request`;
@@ -772,9 +782,9 @@ ${pagingQueryParams()}
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${findRespMod}}}
             }${
-              // The declared set (gated 403 included, union-absent status
-              // resolved) is the derived one — the union arm here used to
-              // omit the 403 a gated union find answers.
+              // The declared set is the DERIVED one, so it carries the 403 a
+              // gated union find answers and the resolved union-absent
+              // status.
               statusResponseEntries(
                 withResolvedNotFound(entry.errorStatuses, notFoundStatus),
                 schemasModule,
@@ -891,7 +901,49 @@ function openApiType(t: TypeIR, schemasModule: string): string {
       // Containment part → its `<Part>Response`, as a module atom so the
       // part schema is registered in components.
       return `${schemasModule}.${info.base}Response`;
+    case "provenanced": {
+      // The `Provenanced<T>` carrier (M-T6.12), inlined like a value object —
+      // the value's own schema plus the opaque nullable lineage object.  Before
+      // this arm the Phoenix spec published a provenanced field as a bare `T`
+      // and never mentioned the lineage at all, so its OpenAPI document
+      // disagreed with the JSON the controller actually served.
+      const props = provenancedEntries(
+        openApiType(info.carried!, schemasModule),
+        `${OPENAPI_PRIMITIVE.json}`,
+      )
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(", ");
+      return `%OpenApiSpex.Schema{type: :object, properties: %{${props}}, required: [:${PROVENANCE_VALUE_FIELD}]}`;
+    }
   }
+}
+
+/** Declare a nullable property `nullable: true` (F2-W-12).
+ *
+ *  Absence from `required[]` says the key may be OMITTED; it does not say the
+ *  value may be `null`.  The emitted serializer builds `"sku" => record.sku` for
+ *  every row, nil included, so an optional field's key is ALWAYS present and its
+ *  value is `null` — a body this app's own published schema forbade.  The three
+ *  backends that declare it: node `z.string().nullish()` (a null union), .NET
+ *  `string?` under `SupportNonNullableReferenceTypes()` (`nullable: true`), and
+ *  python `str | None` (a pydantic anyOf-with-null).
+ *
+ *  `nullable: true` is the OpenAPI 3.0 spelling, which is the dialect
+ *  `OpenApiSpex` emits — and the parity normalizer's `propTypeSig` already folds
+ *  it out (`{type: "string", nullable: true}` and `{type: "string"}` sign the
+ *  same), so this is documentation-only as far as the cross-backend diff is
+ *  concerned.
+ *
+ *  DELIBERATELY NOT applied to a `$ref`-shaped property (a nullable enum, value
+ *  object or containment part).  3.0 forbids a sibling keyword beside `$ref`, so
+ *  the valid spelling is `allOf: [$ref] + nullable: true` — and `propTypeSig`
+ *  does not fold `allOf`, so it would read as `object` where the other backends
+ *  read `ref:<Name>` and the parity gate would report a divergence this change
+ *  invented.  Those properties keep the pre-existing bare `$ref`. */
+function nullableSchema(schema: string, isNullable: boolean): string {
+  if (!isNullable) return schema;
+  if (!schema.startsWith("%OpenApiSpex.Schema{") || !schema.endsWith("}")) return schema;
+  return `${schema.slice(0, -1)}, nullable: true}`;
 }
 
 /** Render a list of fields into OpenApiSpex properties + required list.
@@ -924,9 +976,10 @@ function renderProperties(
   // as `only-phoenix=[created_at,...]`.
   for (const f of fields) {
     const key = f.name;
-    const schema = openApiType(f.type, schemasModule);
-    propsLines.push(`      ${key}: ${schema}`);
     const info = wireTypeInfo(f.type, slot === "response" ? "response" : "request");
+    propsLines.push(
+      `      ${key}: ${nullableSchema(openApiType(f.type, schemasModule), info.isNullable)}`,
+    );
     // RS-26: scoped to CREATE.  An omitted create bool is well-defined
     // (`hasImplicitDefault`), but on an OPERATION body — `update` included —
     // there is nothing to construct, so an omitted field is a missing required
@@ -988,7 +1041,7 @@ end
  *  message }` array) that the runtime emits on 422 validation responses.
  *  All fields optional — base 5 per the spec core; `errors` is only
  *  present on 422 validation responses (consumed by the frontend ACL's
- *  `applyServerErrors`).  Phase D of validation-error-extension.md —
+ * `applyServerErrors`).  validation-error-extension.md —
  *  all three backends (Hono / .NET / Phoenix) declare the same shape in
  *  lockstep so the cross-backend parity gate stays green. */
 function renderProblemDetailsSchema(webModule: string): string {
@@ -1121,10 +1174,18 @@ function declaredResponseProps(
   const props: Array<{ name: string; type: TypeIR; optional: boolean }> = [];
   const idField = forApiRead(wireFieldsFor(agg)).find((w) => w.source === "id");
   if (idField) props.push({ name: idField.name, type: idField.type, optional: idField.optional });
+  // A declared record names DOMAIN types, so a field the aggregate declares
+  // `provenanced` is wrapped in the wire carrier here — the same wrap
+  // `wireTypeForField` applies on the wireShape path, so both paths publish the
+  // identical schema (M-T6.12).
+  const provenanced = new Set(agg.fields.filter((f) => f.provenanced).map((f) => f.name));
   for (const f of payload.fields) {
+    const declaredType = normalizeDeclaredType(f.type, payloads);
     props.push({
       name: f.name,
-      type: normalizeDeclaredType(f.type, payloads),
+      type: provenanced.has(f.name)
+        ? { kind: "genericInstance", ctor: "provenanced", arg: declaredType }
+        : declaredType,
       optional: f.optional,
     });
   }
@@ -1229,9 +1290,8 @@ function pagedFindName(ctx: EnrichedBoundedContextIR, agg: EnrichedAggregateIR):
  *
  *  `page` / `pageSize` publish the same declared `minimum` / `maximum` the
  *  other four backends do (`PAGED_MAX_PAGE` / `PAGED_MAX_PAGE_SIZE`); the
- *  controller's `page_param/4` clamps to the same ceiling, so an unbounded
- *  `page * pageSize` can no longer overflow the SQL `OFFSET` (schemathesis
- *  F4). */
+ *  controller's `page_param/4` bounds to the same ceiling, so an unbounded
+ *  `page * pageSize` cannot overflow the SQL `OFFSET` (schemathesis F4). */
 function pagingQueryParams(): string {
   return [
     `            %OpenApiSpex.Parameter{name: :page, in: :query, required: false, schema: %OpenApiSpex.Schema{type: :integer, minimum: 1, maximum: ${PAGED_MAX_PAGE}}}`,

@@ -32,12 +32,18 @@ import type {
   UiIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
-import { classifyPage, type PageNameCtx, pageConstructId } from "../../ir/util/page-kind.js";
+import {
+  classifyPage,
+  type PageNameCtx,
+  pageConstructId,
+  pageEmitName,
+} from "../../ir/util/page-kind.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
 import {
   buildExternFunctionShim,
   buildExternFunctionSignature,
 } from "../_frontend/extern-functions.js";
+import { pageFileBase } from "../_frontend/page-identity.js";
 import { buildPageObjectModule } from "../_frontend/page-objects-builder.js";
 import { buildWalkerPageObject } from "../_frontend/walker-page-objects.js";
 import { buildWorkflowPageObject } from "../_frontend/workflow-page-object.js";
@@ -190,6 +196,10 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
       c.body!,
       ctx.pack,
       userComponents,
+      // The ui's api handles — the SAME list the page shell gets.  A component
+      // body reads (`QueryView { of: Sales.Order.all }`) exactly as a page body
+      // does; handed `[]` the handle resolved to nothing.
+      ui.apiParams,
       ctx.aggregatesByName,
       buildBcByAggregate(ctx),
       pageRoutes,
@@ -308,7 +318,7 @@ export function defaultNavSections(
  *  pages get a per-page class from their collected testids).  Only
  *  the api-module import root differs (`src/lib/api` in SvelteKit
  *  projects). */
-/** Served decl names for `classifyPage` (slice 3c — replaces stamped `origin`). */
+/** Served decl names for `classifyPage` (replaces stamped `origin`). */
 function sveltePageNameCtx(ctx: SveltePageEmitContext): PageNameCtx {
   const workflowNames: string[] = [];
   for (const bc of ctx.contextsByName.values()) {
@@ -402,12 +412,15 @@ export function emitSveltePageObjectsForUi(
       ctx.aggregatesByName,
       bcByAggregate,
     );
-    const path = `e2e/pages/${snake(page.name)}.ts`;
+    // Keyed on the page's emit identity, not its bare name — see the React
+    // sibling: two custom pages sharing a name across areas collapsed onto one
+    // `e2e/pages/<name>.ts` and the second was silently dropped.
+    const path = `e2e/pages/${pageFileBase(page, pageCtx)}.ts`;
     if (out.has(path)) continue;
     out.set(
       path,
       buildWalkerPageObject({
-        pageName: page.name,
+        pageName: pageEmitName(page, pageCtx),
         params: page.params,
         route: page.route ?? "",
         testids: collectedTestids,

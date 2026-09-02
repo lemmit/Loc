@@ -22,7 +22,12 @@
 //   LOOM_WIRE_OFF=1     skip the gate entirely (local debugging escape hatch).
 // ---------------------------------------------------------------------------
 
-import { build } from "esbuild";
+// `esbuild` is a DYNAMIC import inside `loadWireCore` for the same reason
+// `cases.mjs` defers its own: it is a runner-only dependency (this directory's
+// pinned `package.json`), and the fast suite imports THIS module for
+// `GOLDEN_OPT_OUT` — the register that decides which cases may run ungated
+// (test/behavioral/golden-coverage.test.ts).  A static import would break that
+// import at resolution time.
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -31,6 +36,17 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "..", "..");
 const GOLDEN_DIR = join(HERE, "wire-golden");
 const SYSTEMS_DIR = join(HERE, "systems");
+
+// Pure registers — kept dependency-free so the fast-suite golden-coverage gate
+// can import them without test/behavioral/node_modules (see registers.mjs).
+import {
+  GOLDEN_OPT_OUT,
+  goldenPath,
+  requiredGoldenCases,
+  sharedSystemGoldenCases,
+} from "./registers.mjs";
+
+export { GOLDEN_OPT_OUT, goldenPath, requiredGoldenCases, sharedSystemGoldenCases };
 
 export const WIRE_OFF = process.env.LOOM_WIRE_OFF === "1";
 export const WIRE_UPDATE = process.env.LOOM_WIRE_UPDATE === "1";
@@ -42,6 +58,7 @@ let corePromise = null;
 export function loadWireCore(workDir) {
   if (corePromise) return corePromise;
   corePromise = (async () => {
+    const { build } = await import("esbuild");
     mkdirSync(workDir, { recursive: true });
     const shim = join(workDir, "_wire-core-entry.mts");
     writeFileSync(
@@ -63,46 +80,6 @@ export function loadWireCore(workDir) {
   return corePromise;
 }
 
-/** The shared `systems/*.ddd` cases, DERIVED from the directory rather than a
- *  hand-list — a new shared system is gated the moment it lands, and a golden
- *  can't be deleted to dodge the gate. */
-export function sharedSystemGoldenCases() {
-  return readdirSync(SYSTEMS_DIR)
-    .filter((f) => f.endsWith(".ddd"))
-    .map((f) => f.replace(/\.ddd$/, ""))
-    .sort();
-}
-
-/**
- * Cases deliberately allowed to run with NO golden.
- *
- * EMPTY, and meant to stay that way.  Every case the tier records is compared;
- * an entry here is a signed decision to leave one uncompared, and it needs the
- * same thing a wire waiver needs — a reason and a named exit.
- *
- * This list exists because the alternative is what `main` did until this
- * change: a missing golden was only a failure for the shared systems, and for
- * every FEATURE case it returned `none` — no comparison, no message.  Four
- * cases (`field-mask`, `policy-deny`, `seed-values`, `vo-field-default`) had
- * been running that way on every backend leg, two of them authorization-shaped.
- * Nothing was wrong with them; nothing was checking them either.
- *
- * That is the failure mode the skip-outcome comment below already names — "a
- * silently-off gate is worse than an absent one" — so the missing-golden branch
- * now holds to the same standard: a new fixture fails with the capture command
- * until someone decides, rather than joining the tier ungated by default.
- *
- * @type {ReadonlyArray<{case: string, reason: string}>}
- */
-export const GOLDEN_OPT_OUT = [];
-
-/** Every case that must carry a golden: all of them, minus the signed opt-outs. */
-export function requiredGoldenCases() {
-  const optedOut = new Set(GOLDEN_OPT_OUT.map((o) => o.case));
-  return { optedOut, shared: sharedSystemGoldenCases() };
-}
-
-export const goldenPath = (caseName) => join(GOLDEN_DIR, `${caseName}.json`);
 
 function readGolden(caseName) {
   const p = goldenPath(caseName);
@@ -401,6 +378,28 @@ const __frameworkProbes = async (dispatch, opts = {}) => {
   // already pins.
   if (opts.auth) {
     await dispatch({ method: "GET", url: origin + "/api/auth/me", headers: {} });
+  }
+  // ── the absent-FILE probe (M-T6.39) ───────────────────────────────────────
+  // \`GET /files/{key}\` is a root-mounted read like the two above, and it had the
+  // same blind spot for the same reason — the \`test e2e\` DSL speaks
+  // \`api.<agg>.<op>\`, so no emitted suite can ask for an object key that does
+  // not exist. It shipped a FOURTH envelope shape, wrong on all five backends
+  // at once: node/python/elixir \`{"error":"not found"}\` as plain
+  // \`application/json\`, dotnet/java bodiless (then filled by
+  // \`UseStatusCodePages\` / the container with the FRAMEWORK-miss sentence "no
+  // route for GET /files/…", which is a lie — the route exists, the object does
+  // not). Every golden was green throughout, because none reached the route.
+  //
+  // \`opts.files\` — whether this case's deployable mounts the pair at all,
+  // decided by the runner via \`mountsFileRoutes\` (cases.mjs), the same shape as
+  // \`opts.auth\` above. Without the gate this would fire on the ~48 cases that
+  // mount no such route and freeze 48 copies of the framework miss
+  // \`/__loom_no_such_path\` already pins.
+  //
+  // Fired LAST in this function, after the auth probe, so it can only APPEND a
+  // trailing ordinal — never shift one an existing golden aligns on.
+  if (opts.files) {
+    await dispatch({ method: "GET", url: origin + "/files/__loom_absent", headers: { ...__authHeaders } });
   }
 };
 

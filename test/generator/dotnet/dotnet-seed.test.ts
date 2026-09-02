@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { generateDotnet } from "../../../src/generator/dotnet/index.js";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
+import { generateSystemFiles, parseString } from "../../_helpers/index.js";
 
 // Mirrors the Hono seed fixture (string / int / enum / value-object fields),
 // targeting a `platform: dotnet` deployable.  Namespace derives from the
@@ -29,9 +28,12 @@ const FIXTURE = `system AcmeSeed {
     }
   }
   api ShopApi from Shop
+  storage primary { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: primary }
   deployable api {
     platform: dotnet
     contexts: [Catalog]
+    dataSources: [catalogState]
     serves: ShopApi
     port: 8080
   }
@@ -39,9 +41,7 @@ const FIXTURE = `system AcmeSeed {
 `;
 
 async function build(src = FIXTURE): Promise<Map<string, string>> {
-  const { model, errors } = await parseString(src);
-  if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
-  return generateSystems(model).files;
+  return await generateSystemFiles(src);
 }
 
 function find(files: Map<string, string>, re: RegExp): string {
@@ -138,15 +138,21 @@ describe("dotnet seeding — raw explicit-id path", () => {
       }
     } }
     api A from Sales
-    deployable api { platform: dotnet contexts: [Sales] serves: A port: 8080 }
+    storage primary { type: postgres }
+    resource salesState { for: Sales, kind: state, use: primary }
+    deployable api { platform: dotnet contexts: [Sales] dataSources: [salesState] serves: A port: 8080 }
   }`;
 
   it("emits ExecuteSqlRawAsync INSERTs with explicit id + FK", async () => {
     const seed = find(await build(RAW), /Seed\.cs$/);
+    // Schema-qualified, because every accepted model qualifies — see the
+    // RAW_WITH_SCHEMA note below.
     expect(seed).toContain(
-      'await db.Database.ExecuteSqlRawAsync(@"INSERT INTO ""customers"" (""id"", ""name"") VALUES (\'c1\', \'Acme\')", cancellationToken);',
+      'await db.Database.ExecuteSqlRawAsync(@"INSERT INTO ""sales"".""customers"" (""id"", ""name"") VALUES (\'c1\', \'Acme\')", cancellationToken);',
     );
-    expect(seed).toContain('INSERT INTO ""orders"" (""id"", ""customer_id"", ""status"")');
+    expect(seed).toContain(
+      'INSERT INTO ""sales"".""orders"" (""id"", ""customer_id"", ""status"")',
+    );
     expect(seed).not.toContain("Customer.Create(");
   });
 
@@ -155,8 +161,10 @@ describe("dotnet seeding — raw explicit-id path", () => {
   // INSERT was built unqualified, so a `default` dataset carrying raw rows
   // failed at first boot (`relation "customers" does not exist`).  python and
   // java qualified theirs from the start; the .NET and node halves are fixed
-  // together in #2517.  The no-binding fixture above still emits unqualified
-  // SQL, which is correct there: those tables are unqualified too.
+  // together in #2517.  The fixture above used to skip the binding and pin the
+  // unqualified SQL — but a backend deployable hosting a context MUST bind a
+  // dataSource (`loom.persistence-mode-unsupported`), so the unqualified shape
+  // is unreachable in the product and both fixtures now bind one (M-T9.35).
   const RAW_WITH_SCHEMA = `system S {
     subdomain Sales { context Sales {
       aggregate Customer with crudish { name: string }
@@ -176,5 +184,42 @@ describe("dotnet seeding — raw explicit-id path", () => {
     expect(find(files, /Seed\.cs$/)).toContain('INSERT INTO ""sales"".""customers""');
     // The EF mapping for the same table, so the two agree.
     expect(find(files, /CustomerConfiguration\.cs$/)).toContain('ToTable("customers", "sales")');
+  });
+
+  // …and the SAME model on the Dapper adapter (F2-ADP-2).  `persistence: dapper`
+  // is SELF-PROVISIONING: no migration chain, its DDL is `DbSchema.EnsureAsync`,
+  // and every Dapper statement names tables UNQUALIFIED.  Qualifying the raw
+  // seed off the per-context dataSource schema therefore inserted into a schema
+  // nothing ever created — `RunSeeds` threw `3F000 schema "sales" does not
+  // exist` on first boot, invisible to the .NET compile gate (it is a C# string
+  // literal) and to schema-load (which loads the migration chain this adapter
+  // does not use).
+  const RAW_DAPPER = RAW_WITH_SCHEMA.replace(
+    "platform: dotnet ",
+    "platform: dotnet { persistence: dapper } ",
+  );
+
+  /** Every table an emitted C# file provisions (`CREATE TABLE [IF NOT EXISTS]
+   *  <t>`) or writes (`INSERT INTO <t>`), normalised to `schema.table` with the
+   *  C#-literal quoting (`""` / `\"`) stripped. */
+  function sqlTables(src: string, verb: "CREATE TABLE" | "INSERT INTO"): string[] {
+    const re = new RegExp(`${verb}(?: IF NOT EXISTS)? ((?:[^\\s(]|\\\\")+)`, "g");
+    return [...src.matchAll(re)].map((m) => m[1]!.replace(/\\"|""|"/g, ""));
+  }
+
+  it("dapper: every raw seed INSERT targets a table the emitted DDL creates", async () => {
+    const files = await build(RAW_DAPPER);
+    const seed = find(files, /Seed\.cs$/);
+    const provisioned = new Set([
+      ...sqlTables(find(files, /DbSchema\.cs$/), "CREATE TABLE"),
+      // the `__loom_seed` idempotency marker Seed.cs provisions itself
+      ...sqlTables(seed, "CREATE TABLE"),
+    ]);
+    const written = sqlTables(seed, "INSERT INTO");
+    expect(written.length).toBeGreaterThan(0);
+    for (const t of written) expect([...provisioned]).toContain(t);
+    // Concretely: unqualified on both sides, matching the adapter's layout.
+    expect(seed).toContain('INSERT INTO ""customers""');
+    expect(seed).not.toContain('""sales"".""customers""');
   });
 });

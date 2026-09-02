@@ -36,12 +36,25 @@ import type {
   ProjectionIR,
   TypeIR,
   ValueObjectIR,
+  WireField,
 } from "../../ir/types/loom-ir.js";
+import {
+  AUDIT_ENTRY_TYPE,
+  AUDIT_FIELD_CHANGE_TYPE,
+  auditEntryWireShape,
+  auditFieldChangeWireShape,
+} from "../../ir/util/audit-history.js";
 import { isFrontendReadableProjection } from "../../ir/util/projection-read.js";
 import { lines } from "../../util/code-builder.js";
 import { upperFirst } from "../../util/naming.js";
 import { type UnionMember, unionMembers } from "../_payload/union-wire.js";
-import { dartFromJson, dartToJson, dartType, isIdentityJson } from "./dart-types.js";
+import {
+  DART_PROVENANCED,
+  dartFromJson,
+  dartToJson,
+  dartType,
+  isIdentityJson,
+} from "./dart-types.js";
 
 /** One field of a Dart wire model — the JSON key (kept verbatim from the wire
  *  shape), its domain type, and whether it is optional (nullable). */
@@ -56,6 +69,12 @@ export interface DartField {
 export interface DartRecord {
   className: string;
   fields: DartField[];
+  /** Read-only wire model — never the target of a nested page-state write, so
+   *  skip the `copyWith`.  Load-bearing for the audit models: `copyWith` spells
+   *  every param as the nullable `<T>?`, and a `json` field's Dart type is
+   *  `dynamic` — `dynamic?` is an `unnecessary_question_mark` analyzer error
+   *  under flutter_lints, not just noise. */
+  omitCopyWith?: boolean;
 }
 
 /** Peel a single `optional` layer (optionality is carried by `DartField`). */
@@ -160,7 +179,7 @@ export function renderDartModel(record: DartRecord): string {
     "  Map<String, dynamic> toJson() => {",
     ...fields.map(toJsonEntry),
     "      };",
-    ...copyWithMethod(className, fields),
+    ...(record.omitCopyWith ? [] : copyWithMethod(className, fields)),
     "}",
   );
 }
@@ -173,7 +192,22 @@ function toDartField(w: { name: string; type: TypeIR; optional: boolean }): Dart
   return { name: w.name, type: w.type, optional: w.optional || w.type.kind === "optional" };
 }
 
-/** The Dart wire model for an aggregate (its `wireShape`, api-read filtered). */
+/** True when any aggregate / entity part in these contexts declares a
+ *  `provenanced` property — the emit gate for the fixed `ProvLineage` classes,
+ *  so a provenance-free app's `models.dart` stays byte-identical. */
+export function contextsCarryProvenance(contexts: readonly BoundedContextIR[]): boolean {
+  return contexts.some((c) =>
+    c.aggregates.some(
+      (a) =>
+        a.fields.some((f) => f.provenanced) ||
+        a.parts.some((p) => p.fields.some((f) => f.provenanced)),
+    ),
+  );
+}
+
+/** The Dart wire model for an aggregate (its `wireShape`, api-read filtered),
+ *  (a `provenanced` property's lineage rides inside its own `Provenanced<T>`
+ *  field — M-T6.12 — so there is no sibling to append). */
 export function dartRecordForAggregate(agg: AggregateIR): DartRecord {
   return {
     className: upperFirst(agg.name),
@@ -205,7 +239,7 @@ export function dartRecordForEvent(ev: EventIR): DartRecord {
   };
 }
 
-/** The Dart wire model for a query-time PROJECTION's row (M-T1.3 Phase 1).
+/** The Dart wire model for a query-time PROJECTION's row (M-T1.3).
  *
  *  `<Proj>Row`, off the SAME `wireShape` the backend's row DTO and every other
  *  frontend's row type are built from — which is the whole reason a projection
@@ -217,6 +251,48 @@ export function dartRecordForProjection(proj: ProjectionIR): DartRecord {
     className: `${upperFirst(proj.name)}Row`,
     fields: (proj.wireShape ?? []).map(toDartField),
   };
+}
+
+/** A history wire field → `DartField`.  One deviation from `toDartField`: a
+ *  `json` leaf spells `dynamic` in Dart, which is ALREADY nullable — carrying
+ *  the wire `optional` flag through would emit `dynamic?`, an
+ *  `unnecessary_question_mark` analyzer error under flutter_lints.  The decode
+ *  is unchanged either way (a `json` value passes through `fromJson`/`toJson`
+ *  as identity, null included). */
+function auditDartField(w: WireField): DartField {
+  const isJson = w.type.kind === "primitive" && w.type.name === "json";
+  return { name: w.name, type: w.type, optional: w.optional && !isJson };
+}
+
+/** The two entity-history wire models (docs/audit.md) — `AuditFieldChange` and
+ *  `AuditEntry`, built off the SAME canonical wire shapes every backend serves
+ *  (`auditEntryWireShape` / `auditFieldChangeWireShape` in
+ *  `ir/util/audit-history.ts`), so the Dart decode lines up with the
+ *  `GET /<coll>/{id}/history` route by construction.  `changes` is `json[]` on
+ *  the wire (TypeIR has no nested-record leaf); the client narrows the ELEMENT
+ *  to `AuditFieldChange` so `__c.field` resolves in the Timeline — the same
+ *  narrowing the JS clients' `z.array(AuditFieldChange)` does.  Both are
+ *  read-only (`omitCopyWith`) — see `DartRecord`. */
+export function dartAuditRecords(): DartRecord[] {
+  const changes: DartField = {
+    name: "changes",
+    type: { kind: "array", element: { kind: "entity", name: AUDIT_FIELD_CHANGE_TYPE } },
+    optional: false,
+  };
+  return [
+    {
+      className: AUDIT_FIELD_CHANGE_TYPE,
+      fields: auditFieldChangeWireShape().map(auditDartField),
+      omitCopyWith: true,
+    },
+    {
+      className: AUDIT_ENTRY_TYPE,
+      fields: auditEntryWireShape().map((w) =>
+        w.name === "changes" ? changes : auditDartField(w),
+      ),
+      omitCopyWith: true,
+    },
+  ];
 }
 
 /** The Dart wire model for a record-shaped payload (command / query / response /
@@ -352,18 +428,104 @@ const FILE_REF_CLASS = lines(
   "}",
 );
 
+/** The fixed provenance-lineage wire classes — the Dart analogue of the JSX
+ *  frontends' `provLineageSchema` and of Feliz's `ProvLineage` record
+ *  (docs/provenance.md).  `computedValue` and each input `value` are `unknown`
+ *  JSON, so both ride a permissive scalar→String coercion (the same display-only
+ *  narrowing every other frontend applies); `target` is dropped (not displayed).
+ *  Emitted only when a provenanced property is in scope. */
+const PROV_LINEAGE_CLASSES = lines(
+  "// Provenance lineage — the `lineage` half of the `Provenanced<T>` wire",
+  "// carrier a `provenanced` field ships as.",
+  "// `computedValue` / `value` are opaque JSON scalars, coerced to String for",
+  "// display (the same narrowing the JSX + Feliz frontends apply).",
+  "String _provScalar(dynamic v) => v == null ? '' : v.toString();",
+  "",
+  "class ProvInput {",
+  "  final String path;",
+  "  final String value;",
+  "",
+  "  const ProvInput({required this.path, required this.value});",
+  "",
+  "  factory ProvInput.fromJson(Map<String, dynamic> json) => ProvInput(",
+  "        path: _provScalar(json['path']),",
+  "        value: _provScalar(json['value']),",
+  "      );",
+  "",
+  "  Map<String, dynamic> toJson() => {",
+  "        'path': path,",
+  "        'value': value,",
+  "      };",
+  "}",
+  "",
+  "class ProvLineage {",
+  "  final String snapshotId;",
+  "  final String computedValue;",
+  "  final List<ProvInput> inputs;",
+  "",
+  "  const ProvLineage({required this.snapshotId, required this.computedValue, required this.inputs});",
+  "",
+  "  factory ProvLineage.fromJson(Map<String, dynamic> json) => ProvLineage(",
+  "        snapshotId: _provScalar(json['snapshotId']),",
+  "        computedValue: _provScalar(json['computedValue']),",
+  "        inputs: ((json['inputs'] as List<dynamic>?) ?? const <dynamic>[])",
+  "            .map((e) => ProvInput.fromJson(e as Map<String, dynamic>))",
+  "            .toList(),",
+  "      );",
+  "",
+  "  Map<String, dynamic> toJson() => {",
+  "        'snapshotId': snapshotId,",
+  "        'computedValue': computedValue,",
+  "        'inputs': inputs.map((e) => e.toJson()).toList(),",
+  "      };",
+  "}",
+  "",
+  "// `Provenanced<T>` — a provenanced field's value and the lineage of the write",
+  "// that produced it, travelling together as one JSON object.  The",
+  "// same shape every other Loom backend and frontend uses.",
+  `class ${DART_PROVENANCED}<T> {`,
+  "  final T value;",
+  "  final ProvLineage? lineage;",
+  "",
+  `  const ${DART_PROVENANCED}({required this.value, this.lineage});`,
+  "",
+  // `fromValue` decodes the carried half, so the carrier stays generic over any
+  // wire type (a `datetime` value still parses, a nested VO still builds).
+  `  factory ${DART_PROVENANCED}.fromJson(`,
+  "    Map<String, dynamic> json,",
+  "    T Function(dynamic) fromValue,",
+  "  ) =>",
+  `      ${DART_PROVENANCED}(`,
+  "        value: fromValue(json['value']),",
+  "        lineage: json['lineage'] == null",
+  "            ? null",
+  "            : ProvLineage.fromJson(json['lineage'] as Map<String, dynamic>),",
+  "      );",
+  "",
+  "  Map<String, dynamic> toJson() => {",
+  "        'value': value,",
+  "        'lineage': lineage?.toJson(),",
+  "      };",
+  "}",
+);
+
 export function renderDartModels(
   contexts: readonly BoundedContextIR[],
-  opts: { fileRef?: boolean } = {},
+  opts: { fileRef?: boolean; auditEntry?: boolean } = {},
 ): string {
   const seen = new Set<string>();
   const blocks: string[] = [];
   if (opts.fileRef) blocks.push(FILE_REF_CLASS);
+  if (contextsCarryProvenance(contexts)) blocks.push(PROV_LINEAGE_CLASSES);
   const addRecord = (r: DartRecord | null): void => {
     if (!r || seen.has(r.className)) return;
     seen.add(r.className);
     blocks.push(renderDartModel(r));
   };
+  // The entity-history entry DTOs (docs/audit.md) — only when the ui collects a
+  // history read (the `history` flag on a `FlutterRead`), so audit-free
+  // projects stay byte-identical.
+  if (opts.auditEntry) for (const r of dartAuditRecords()) addRecord(r);
   const addUnion = (p: PayloadIR, ctx: BoundedContextIR): void => {
     const name = upperFirst(p.name);
     if (!p.variants || seen.has(name)) return;

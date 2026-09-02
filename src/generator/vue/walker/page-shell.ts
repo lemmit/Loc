@@ -16,6 +16,7 @@ import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/n
 import { coerceMoneyStateInit, usesDecimalBinding } from "../../_expr/js-intrinsics.js";
 import { componentPropTsType } from "../../_frontend/component-prop-type.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
+import { pageEmitPath } from "../../_frontend/page-identity.js";
 import type { ImportSpec, LoadedPack } from "../../_packs/loader.js";
 import { storeHookName, storeMemberLocal } from "../../_walker/js-target-helpers.js";
 import { addImportToMap, I18N_MODULE, needsPackChromeT } from "../../_walker/render-primitive.js";
@@ -107,7 +108,7 @@ function recordQualifiedSeed(
 // ---------------------------------------------------------------------------
 // Vue page shell — assembles a generated `.vue` SFC around a walked
 // page body.  The Vue analogue of `react/walker/page-shell.ts`, v1
-// scope (vue-frontend-plan.md Slice 4):
+// scope (vue-frontend-plan.md):
 //
 //   - `<script setup lang="ts">` carries the api-composable hoists,
 //     route-param reads, `ref()` state fields, and the `navigate`
@@ -117,8 +118,7 @@ function recordQualifiedSeed(
 //     TOP-LEVEL refs — `customerAll.data` in a `v-if` would otherwise
 //     be an always-truthy Ref.  `reactive()` deep-unwraps, so the
 //     SAME rendered expression reads correctly in template and
-//     script positions.  (This is the vue-query surface decision the
-//     plan gates in this slice.)
+//     script positions.
 //   - the walker emits `navigate("/path")` for `Button(to:)` — a
 //     local `const navigate = (to: string) => { void router.push(to) }`
 //     adapter keeps that contract without a new WalkerTarget seam.
@@ -167,6 +167,10 @@ export interface VuePageShellInput {
   /** Bounded-context map keyed by aggregate name — classifies the awaited
    *  union's error variant (via the owning context's `error` payloads). */
   bcByAggregate?: ReadonlyMap<string, BoundedContextIR>;
+  /** Page name -> route.  The BODY walk already receives this; the action walk
+   *  did not, so a `navigate(<Page>)` in an action body resolved the fallback
+   *  `/<snake(page)>` rather than the destination's declared `route:`. */
+  pageRoutes?: ReadonlyMap<string, string>;
 }
 
 export function renderVuePage(input: VuePageShellInput): string {
@@ -200,8 +204,6 @@ export function renderVuePage(input: VuePageShellInput): string {
   // mounts the toast host (gated on `hasToastHost` in index.ts).
   const usesFormToast = formNeedsToast(aggFormState) || formNeedsToast(wfFormState);
   // Create + workflow forms' default submit bodies navigate.
-  const needsNavigate =
-    result.usesNavigate || aggFormState !== undefined || wfFormState !== undefined;
   const idExprParams = new Set<string>();
   for (const state of opFormStates) {
     for (const p of routeParams) {
@@ -266,6 +268,7 @@ export function renderVuePage(input: VuePageShellInput): string {
       aggregatesByName: input.aggregatesByName,
       bcByAggregate: input.bcByAggregate,
       usedApiHooks: result.usedApiHooks,
+      pageRoutes: input.pageRoutes,
     },
   );
   const actionLines = actionResult.lines;
@@ -277,6 +280,15 @@ export function renderVuePage(input: VuePageShellInput): string {
   // on a non-detail page still needs `id` declared (it reads `undefined` at
   // runtime there, typed via the `as string` cast — same as React's generic).
   const usesRouteId = result.usesRouteId || actionResult.usesRouteId;
+  // A `navigate(<Page>)` in a BODY, in an ACTION body, or the default submit of
+  // a create/workflow form all need `useRouter()` bound.  The action term was
+  // missing, so an action-only navigation emitted a `router.push(...)` against
+  // an unbound `router`.
+  const needsNavigate =
+    result.usesNavigate ||
+    actionResult.usesNavigate ||
+    aggFormState !== undefined ||
+    wfFormState !== undefined;
   const routeIdParam = usesRouteId ? ["id"] : [];
   const usedParams = [
     ...new Set([
@@ -636,7 +648,7 @@ export function renderVuePage(input: VuePageShellInput): string {
     }
     script.push(`import { ${[...names].sort().join(", ")} } from "${from}";`);
   }
-  // The chart component (`Chart`, M-T1.3 Phase 4).  It cannot ride
+  // The chart component (`Chart`, M-T1.3).  It cannot ride
   // `result.imports` like a pack component: the loop above drops every RELATIVE
   // specifier (React-pipeline leakage), and a Vue SFC is a DEFAULT export,
   // which the walker's named-import map cannot express either.  So the page
@@ -797,9 +809,9 @@ function adjustDepth(importFrom: string, input: VuePageShellInput): string {
 }
 
 function pageDirDepth(page: PageIR): number {
-  const path = page.emitPath
-    ? page.emitPath.replace(/\.tsx$/, ".vue")
-    : `src/pages/${snake(page.name)}.vue`;
+  // Same shared derivation the router import and the file write use — see
+  // `src/generator/_frontend/page-identity.ts`.
+  const path = pageEmitPath(page, ".vue");
   // segments under src/ minus the filename = number of `../` hops
   // back to src/.
   return path.replace(/^src\//, "").split("/").length - 1;
@@ -933,6 +945,12 @@ export function renderVueComponentFile(
   body: ExprIR,
   pack: LoadedPack,
   userComponents: ReadonlyMap<string, readonly ParamIR[]>,
+  /** UI api parameters — the SAME list the page shell threads.  A component
+   *  body reads (`QueryView { of: Sales.Order.all }`) exactly as a page body
+   *  does, so the handle (`Sales`) has to resolve here too; handed an empty
+   *  list the walk emitted `<template v-if="/* unresolved: Sales *​/ undefined
+   *  .Order.all.isLoading">` — uncompilable under `vue-tsc`. */
+  apiParams: ReadonlyArray<UiApiParamIR> = [],
   aggregatesByName: ReadonlyMap<string, AggregateIR> = new Map(),
   bcByAggregate: ReadonlyMap<string, BoundedContextIR> = new Map(),
   pageRoutes: ReadonlyMap<string, string> = new Map(),
@@ -970,7 +988,7 @@ export function renderVueComponentFile(
     paramNames,
     stateNames,
     userComponents,
-    [],
+    apiParams,
     aggregatesByName,
     bcByAggregate,
     new Map(),
@@ -1100,6 +1118,27 @@ export function renderVueComponentFile(
     const names = apiImports.get(from) ?? new Set<string>();
     names.add(m.hookName);
     apiImports.set(from, names);
+  }
+  // Api-read hoists — the component twin of the page shell's `usedApiHooks`
+  // loop.  A read in a component body (`QueryView { of: Sales.Order.all }`)
+  // records the same `ApiHookUse`, so it gets the same `reactive(use…())`
+  // declaration and the same `../api/<agg>` import; `importFrom` is already
+  // recorded one hop from `src/`, which is exactly where a component file
+  // sits (no `adjustDepth` needed).  Args flow through `rewriteScript` below
+  // with the mutation hoists, so a read parameterised by a prop reads
+  // `props.<name>`.
+  for (const use of result.usedApiHooks.values()) {
+    if (seenVars.has(use.varName)) continue;
+    seenVars.add(use.varName);
+    const args = (use.argsRendered ?? []).join(", ");
+    // Same reactive-query rule as the page shell: a parameterised `find`
+    // takes a getter so vue-query re-runs when the bound input changes.
+    const callArg = use.reactiveQuery && args !== "" ? `() => (${args})` : args;
+    hookLines.push(`const ${use.varName} = reactive(${use.hookName}(${callArg}));`);
+    vueImports.add("reactive");
+    const names = apiImports.get(use.importFrom) ?? new Set<string>();
+    names.add(use.hookName);
+    apiImports.set(use.importFrom, names);
   }
   const rewrittenHooks = hookLines.map(rewriteScript);
 
@@ -1431,6 +1470,10 @@ interface ActionWalkCtx {
   imports?: Map<string, Set<string>>;
   aggregatesByName?: ReadonlyMap<string, AggregateIR>;
   bcByAggregate?: ReadonlyMap<string, BoundedContextIR>;
+  /** Page name -> route, so a `navigate(<Page>)` in an action body resolves the
+   *  destination's declared `route:` instead of falling back to
+   *  `/<snake(page)>` (docs/actions.md - the documented home for navigation). */
+  pageRoutes?: ReadonlyMap<string, string>;
 }
 
 function buildActionLines(
@@ -1446,11 +1489,13 @@ function buildActionLines(
   lines: string[];
   usesState: boolean;
   usesRouteId: boolean;
+  usesNavigate: boolean;
   imports: Map<string, Set<string>>;
 } {
   const lines: string[] = [];
   let usesState = false;
   let usesRouteId = false;
+  let usesNavigate = false;
   // Shared across every action's handler walk: the mutation hooks a
   // `variant-match` registers (the shell hoists them from here) and the
   // reification imports (`ApiError`, the op's union response type) it needs.
@@ -1469,6 +1514,7 @@ function buildActionLines(
       paramNames,
       usedParams: new Set(),
       usesNavigate: false,
+      pageRoutes: ctxOpts.pageRoutes,
       stateNames,
       derivedNames: new Set(),
       authUi: false,
@@ -1505,11 +1551,13 @@ function buildActionLines(
     // An awaited op mutation hoists `use<Op><Agg>(id)` off the route id, so the
     // shell must bind `id` from `route.params` even if the body never did.
     if (handlerCtx.usesRouteId) usesRouteId = true;
+    // ...and a `navigate(<Page>)` needs `useRouter()` bound in the script setup.
+    if (handlerCtx.usesNavigate) usesNavigate = true;
     // A body that awaits a remote effect (`variant-match`) must be `async`.
     const isAsync = action.body.some((s) => s.kind === "variant-match");
     lines.push(`const ${action.name} = ${isAsync ? "async " : ""}(${param ?? ""}) => { ${body} };`);
   }
-  return { lines, usesState, usesRouteId, imports };
+  return { lines, usesState, usesRouteId, usesNavigate, imports };
 }
 
 /** True when a form state renders the pack's default-submit body — an

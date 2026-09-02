@@ -43,7 +43,9 @@ async function genPage(body: string, state = ""): Promise<string> {
         api Sales: SalesApi
         page X { route: "/x"  ${state}  body: ${body} }
       }
-      deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+      storage loomDb { type: postgres }
+      resource ordersState { for: Orders, kind: state, use: loomDb }
+      deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
       deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
     }
   `);
@@ -79,7 +81,9 @@ describe("DataGrid — child-component emission", () => {
           api Sales: SalesApi
           page CustomersGrid { route: "/g"  body: ${GRID} }
         }
-        deployable api { platform: node, contexts: [Orders], serves: SalesApi, port: 3000 }
+        storage loomDb { type: postgres }
+        resource ordersState { for: Orders, kind: state, use: loomDb }
+        deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
         deployable web { platform: static, targets: api, ui: WebApp { Sales: api }, port: 3001 }
       }
     `);
@@ -100,12 +104,16 @@ describe("DataGrid — child-component emission", () => {
 describe("DataGrid — TanStack wiring", () => {
   it("builds column defs with accessorKey from simple accessors", async () => {
     const page = await genPage(GRID);
-    expect(page).toContain(
-      `{ id: "name", accessorKey: "name", header: "Name", enableSorting: true, enableColumnFilter: true },`,
+    // The header is a user-visible slot (`columnHeader`, M-T1.11), so the column
+    // def carries the runtime call rather than the English.  Matched by SHAPE:
+    // the key is a content hash, and pinning it here would re-key the assertion
+    // on every rephrase of a header this test does not care about.
+    expect(page).toMatch(
+      /\{ id: "name", accessorKey: "name", header: t\("page\.X\.columnHeader\.\w+", "Name"\), enableSorting: true, enableColumnFilter: true \},/,
     );
     // `sortable:` without `filterable:` must not enable filtering.
-    expect(page).toContain(
-      `{ id: "tier", accessorKey: "tier", header: "Tier", enableSorting: true, enableColumnFilter: false },`,
+    expect(page).toMatch(
+      /\{ id: "tier", accessorKey: "tier", header: t\("page\.X\.columnHeader\.\w+", "Tier"\), enableSorting: true, enableColumnFilter: false \},/,
     );
   });
 
@@ -293,8 +301,10 @@ describe("DataGrid — money columns get a numeric comparator", () => {
     );
     // Only the money column — a string and an int compare correctly already,
     // and overriding them would FORK TanStack's `text`/`alphanumeric` choice.
-    expect(page).toContain(
-      '{ id: "amount", accessorKey: "amount", header: "Amount", enableSorting: true, enableColumnFilter: false, sortingFn: compareDecimal }',
+    // The header translates (`columnHeader` slot); the comparator is what this
+    // case is about, so the key is matched by shape.
+    expect(page).toMatch(
+      /\{ id: "amount", accessorKey: "amount", header: t\("page\.X\.columnHeader\.\w+", "Amount"\), enableSorting: true, enableColumnFilter: false, sortingFn: compareDecimal \}/,
     );
     expect(page).not.toMatch(/id: "ref"[^}]*sortingFn/);
     expect(page).not.toMatch(/id: "qty"[^}]*sortingFn/);

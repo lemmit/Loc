@@ -8,7 +8,7 @@ function {{opPascal}}OpModal({ mut{{#if recordVar}}, record{{/if}} }: { mut: Ret
   const { fields: {{this.name}}Fields, append: append{{this.pascal}}, remove: remove{{this.pascal}} } = useFieldArray({ control, name: "{{this.name}}" });{{/each}}
   return (
     <>
-      <Button variant="{{#if triggerPrimary}}contained{{else}}outlined{{/if}}" onClick={() => setOpen(true)} data-testid="{{slug}}-op-{{opName}}">{{triggerLabel}}</Button>
+      <Button variant="{{#if triggerPrimary}}contained{{else}}outlined{{/if}}" onClick={() => setOpen(true)} data-testid="{{slug}}-op-{{opName}}">{{{triggerLabel}}}</Button>
       <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>{{{modalTitle}}}</DialogTitle>
         <form

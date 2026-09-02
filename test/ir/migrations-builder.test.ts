@@ -2275,3 +2275,132 @@ system Fleet {
     expect(out.steps.some((s) => s.op === "dropTable")).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// M-T2.14 (numeric-types audit F15) — decimal BOUNDS are part of a column's
+// identity in the diff.  Before this, `columnTypeEqual` compared `kind` only,
+// and `decimal`/`money` share kind "decimal" — so a pre-#2575 baseline's bare
+// `DECIMAL` money column compared EQUAL to the bounded `NUMERIC(19,4)` the
+// emitters now declare: no `alterColumnType` was ever diffed out, and a
+// user-visible `decimal ↔ money` field retype produced no migration at all.
+// The destructive gate also grew its one carve-out: a provably-total decimal
+// widening (bounded → unbounded, or both bounds growing) can neither fail nor
+// change a value, so it no longer demands `--allow-destructive`; the pre-#2575
+// money catch-up is a NARROWING (rounds >4-dp rows) and stays gated.
+// ---------------------------------------------------------------------------
+describe("diffSchema — decimal bounds (M-T2.14)", () => {
+  const MONEY_SOURCE = `
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate Order {
+        total: money
+      }
+      repository Orders for Order { }
+    }
+  }
+}
+`;
+  const DECIMAL_SOURCE = MONEY_SOURCE.replace("total: money", "total: decimal");
+
+  async function moduleOf(src: string) {
+    const loom = await buildLoomModel(src);
+    return loom.systems[0]!.subdomains[0]!;
+  }
+
+  /** The exact pre-#2575 shape: same schema, but the money column's bounds
+   *  stripped — what every baseline snapshot captured while the DDL emitted
+   *  bare `DECIMAL`. */
+  function stripMoneyBounds(snap: SchemaSnapshot): SchemaSnapshot {
+    return withModifiedTable(snap, "orders", (t) => ({
+      ...t,
+      columns: t.columns.map((c) =>
+        c.name === "total" ? { ...c, type: { kind: "decimal" as const } } : c,
+      ),
+    }));
+  }
+
+  it("a pre-#2575 baseline (bare DECIMAL money column) diffs out an alterColumnType to NUMERIC(19,4)", async () => {
+    const next = schemaFromModule(await moduleOf(MONEY_SOURCE));
+    const prev = stripMoneyBounds(next);
+    const raw = diffSchema(prev, next);
+    const alters = raw.filter(
+      (s): s is Extract<MigrationStep, { op: "alterColumnType" }> => s.op === "alterColumnType",
+    );
+    expect(alters).toEqual([
+      {
+        op: "alterColumnType",
+        table: "orders",
+        schema: undefined,
+        name: "total",
+        from: { kind: "decimal" },
+        to: { kind: "decimal", precision: 19, scale: 4 },
+      },
+    ]);
+    // The catch-up is destructive (rounds >4-dp rows), so it passes the policy
+    // only under the flag…
+    const gated = applyDestructivePolicy(raw, prev, { allowDestructive: true, module: "Sales" });
+    const step = gated.find((s) => s.op === "alterColumnType")!;
+    // …and renders the same reviewed DDL on the SQL backends and Phoenix alike.
+    expect(renderPgStep(step)).toBe(
+      'ALTER TABLE "orders" ALTER COLUMN "total" TYPE DECIMAL(19, 4) USING "total"::DECIMAL(19, 4);',
+    );
+    expect(renderEctoStep(step)).toEqual([
+      `execute("ALTER TABLE \\"orders\\" ALTER COLUMN \\"total\\" TYPE DECIMAL(19, 4) USING \\"total\\"::DECIMAL(19, 4)")`,
+    ]);
+  });
+
+  it("a decimal -> money field retype produces a migration", async () => {
+    const prev = schemaFromModule(await moduleOf(DECIMAL_SOURCE));
+    const next = schemaFromModule(await moduleOf(MONEY_SOURCE));
+    const steps = diffSchema(prev, next);
+    expect(steps.some((s) => s.op === "alterColumnType")).toBe(true);
+  });
+
+  it("a money -> decimal retype is a widening: emitted, and NOT destructive-gated", async () => {
+    const prev = schemaFromModule(await moduleOf(MONEY_SOURCE));
+    const next = schemaFromModule(await moduleOf(DECIMAL_SOURCE));
+    const raw = diffSchema(prev, next);
+    expect(raw.some((s) => s.op === "alterColumnType")).toBe(true);
+    // Bounded -> unbounded accepts every value unchanged: no flag needed.
+    const out = applyDestructivePolicy(raw, prev, { allowDestructive: false, module: "Sales" });
+    expect(out.some((s) => s.op === "alterColumnType")).toBe(true);
+  });
+
+  it("a narrowing bound change stays behind --allow-destructive", async () => {
+    const prev = schemaFromModule(await moduleOf(DECIMAL_SOURCE));
+    const next = schemaFromModule(await moduleOf(MONEY_SOURCE));
+    const raw = diffSchema(prev, next);
+    expect(() =>
+      applyDestructivePolicy(raw, prev, { allowDestructive: false, module: "Sales" }),
+    ).toThrow(MigrationDestructiveError);
+  });
+
+  it("a scale-grows-but-integer-digits-shrink change is a narrowing in disguise", () => {
+    // (19,4) -> (19,8): fractional digits grow 4 -> 8 while integer digits
+    // shrink 15 -> 11 — Postgres errors on any row past 11 integer digits, so
+    // the widening carve-out must NOT fire.  Hand-built snapshots because no
+    // Loom type currently spells (19,8); the predicate is type-driven.
+    const idCol = { name: "id", type: { kind: "uuid" as const }, nullable: false };
+    const at = (precision: number, scale: number): SchemaSnapshot => ({
+      schemaVersion: 1,
+      tables: [
+        tbl("orders", [
+          idCol,
+          { name: "total", type: { kind: "decimal" as const, precision, scale }, nullable: false },
+        ]),
+      ],
+    });
+    const raw = diffSchema(at(19, 4), at(19, 8));
+    expect(raw.some((s) => s.op === "alterColumnType")).toBe(true);
+    expect(() =>
+      applyDestructivePolicy(raw, at(19, 4), { allowDestructive: false, module: "M" }),
+    ).toThrow(MigrationDestructiveError);
+  });
+
+  it("identical bounds still diff to nothing (regeneration stays a no-op)", async () => {
+    const next = schemaFromModule(await moduleOf(MONEY_SOURCE));
+    const prev = schemaFromModule(await moduleOf(MONEY_SOURCE));
+    expect(diffSchema(prev, next)).toEqual([]);
+  });
+});
