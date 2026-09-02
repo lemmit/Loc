@@ -443,7 +443,12 @@ export function buildAngularApiModule(
       " *  callback re-reads `query()` so a page-state-bound filter live-refetches",
       " *  (the query key + fetch track the getter).  Keyed on the resolved query as",
       " *  the shared cache's `[tag, find, name, query]` entry. */",
-      `export function ${fn}(query: () => ${findQueryType(f)}) {`,
+      // A zero-parameter find's query interface is EMPTY and the walker's call
+      // site passes nothing (`useOpenIssuesIssue()`) — an "Expected 1
+      // arguments, but got 0" under `ng build`.  Default the reactive getter
+      // so the zero-arg call site type-checks; the interface only ever carries
+      // the find's own params, so `{}` satisfies it exactly.
+      `export function ${fn}(query: () => ${findQueryType(f)}${f.params.length === 0 ? " = () => ({})" : ""}) {`,
       `  const service = inject(${serviceName});`,
       "  return injectQuery(() => ({",
       `    queryKey: ["${tag}", "find", "${snake(f.name)}", query()] as const,`,

@@ -500,12 +500,23 @@ export function buildApiModule(
       const queryType = paged
         ? `${upperFirst(find.name)}QueryInput`
         : `${upperFirst(find.name)}Query`;
+      // A ZERO-PARAMETER find (`find openIssues(): Issue[] where …`) has an
+      // EMPTY query object, and every call site the walker emits for it passes
+      // no argument at all (`adjustFindHookArgs` renders a bag only when the
+      // call had args).  Without a default the emitted page is a TS2554
+      // ("Expected 1 arguments, but got 0") and, if it ever ran, `Object.
+      // entries(undefined)` would throw inside `queryFn`.  Defaulting the
+      // parameter is what makes the zero-arg call site legal — `{}` is
+      // assignable to both the empty `<Find>Query` and a paged
+      // `<Find>QueryInput` (whose page/pageSize/sort/dir all carry wire
+      // defaults, so `z.input` makes them optional).
+      const queryDefault = find.params.length === 0 ? " = {}" : "";
       if (isVueQuery) {
         // Reactive: the arg is a getter/ref; `computed(toValue)` makes
         // the query key (and fetch) track its source so a bound filter
         // input live-refetches.
         lines.push(
-          `export function use${upperFirst(find.name)}${agg.name}(query: MaybeRefOrGetter<${queryType}>) {`,
+          `export function use${upperFirst(find.name)}${agg.name}(query: MaybeRefOrGetter<${queryType}>${queryDefault}) {`,
         );
         lines.push(`  const queryArgs = computed(() => toValue(query));`);
         lines.push(`  return useQuery({`);
@@ -524,7 +535,9 @@ export function buildApiModule(
         lines.push("");
         continue;
       }
-      lines.push(`export function use${upperFirst(find.name)}${agg.name}(query: ${queryType}) {`);
+      lines.push(
+        `export function use${upperFirst(find.name)}${agg.name}(query: ${queryType}${queryDefault}) {`,
+      );
       lines.push(`  return useQuery({`);
       lines.push(`    queryKey: ["${tag}", "find", "${findSnake}", query],`);
       lines.push(`    queryFn: async () => {`);
