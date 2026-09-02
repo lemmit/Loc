@@ -60,6 +60,7 @@ import { allAggregates, allContexts } from "../../types/loom-ir.js";
 import {
   collectionOpOnBinding,
   collectionOpSite,
+  FRONTEND_RENDERED_COLLECTION_OPS,
   pagedEnvelopeLambdaParam,
   rowSetLambdaParam,
 } from "../../util/collection-op-site.js";
@@ -396,11 +397,15 @@ function pageRouteHasParam(route: string | undefined): boolean {
 //
 // The gate is now a REMAINDER, not the whole answer.  Nine of the seventeen ops
 // have a real per-target renderer, reached through the walker's
-// `renderCollectionOp` seam (`FRONTEND_RENDERED_COLLECTION_OPS` below names
-// them and their tables), so `rows.count` and `rows.where(λ).count` are
+// `renderCollectionOp` seam, so `rows.count` and `rows.where(λ).count` are
 // ordinary page-body expressions on all six frontends AND on the HEEx parallel
-// walker.  What is still refused is the eight the frontends genuinely disagree
-// about, and the disagreement is about REPRESENTATION, not effort:
+// walker.  WHICH ops those are is not decided here: it is
+// `FRONTEND_RENDERED_COLLECTION_OPS` in `ir/util/collection-op-site.ts`, one
+// definition shared with the emitters, because "what the gate lets through"
+// and "what every target's table must answer for" are the same list and must
+// not be two lists.  What is still refused is the eight the frontends
+// genuinely disagree about, and the disagreement is about REPRESENTATION, not
+// effort:
 //
 //   • `sum` / `min` / `max` / `avg` fold ARITHMETIC over the projected values,
 //     and `money` is a decimal.js `Decimal` on the JS frontends and an Elixir
@@ -449,38 +454,6 @@ function pageRouteHasParam(route: string | undefined): boolean {
 // so a domain field genuinely named `count` / `first` / `min` never trips the
 // gate.
 // -------------------------------------------------------------------------
-
-/** Collection ops the frontend walkers DO render, so the gate lets them
- *  through — the ops that RESHAPE a collection (size it, filter it, test it,
- *  order it, window it, print it) without folding arithmetic over it or
- *  reaching for an element.
- *
- *  Each has a real per-target renderer, one table per embedded language,
- *  routed through the walker's `renderCollectionOp` seam:
- *
- *    react/vue/svelte/angular  `_expr/js-collection-ops.ts` — the SAME table
- *                              the Hono backend renders a `derived` with
- *                              (Angular re-spells `sortBy` alone: its template
- *                              grammar rejects a block-bodied arrow)
- *    feliz                     `feliz/fs-expr.ts` `FS_COLLECTION_RENDERERS`
- *    flutter                   `flutter/dart-expr.ts` `DART_COLLECTION_RENDERERS`
- *    phoenixLiveView           `elixir/heex-walker-core.ts` `renderCollectionOp`
- *                              (the parallel walker — it shares no seam with
- *                              the five above, so it is covered separately)
- *
- *  Grow this set only alongside a real renderer on EVERY frontend; the eight
- *  still absent are listed in the block comment above. */
-const FRONTEND_RENDERED_COLLECTION_OPS: ReadonlySet<string> = new Set([
-  "count",
-  "where",
-  "any",
-  "all",
-  "map",
-  "sortBy",
-  "take",
-  "skip",
-  "join",
-]);
 
 /** The unsupported collection-op name this node uses, or undefined.
  *

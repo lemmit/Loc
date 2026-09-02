@@ -12,6 +12,7 @@
 // are byte-for-byte what `emitExpr` produced inline before the extraction.
 
 import type { BinOp, ExprIR, LiteralKind, PrimitiveName } from "../../ir/types/loom-ir.js";
+import { FRONTEND_RENDERED_COLLECTION_OPS } from "../../ir/util/collection-op-site.js";
 import { JS_COLLECTION_RENDERERS } from "../_expr/js-collection-ops.js";
 import { renderJsIntrinsic } from "../_expr/js-intrinsics.js";
 import type { WalkerTarget } from "./target.js";
@@ -31,44 +32,6 @@ type ExprLeaves = Pick<
   | "renderIntrinsic"
   | "renderCollectionOp"
 >;
-
-/** Collection ops the FRONTEND walkers render.  A strict subset of the
- *  `JS_COLLECTION_RENDERERS` table, and the reason is not JavaScript — the
- *  table's JS arms are all correct — but the OTHER frontends, since
- *  `loom.frontend-collection-op-unsupported` is target-agnostic: an op is
- *  ungated only where every frontend renders it right.  The eight excluded
- *  here are excluded for two reasons, both about representation rather than
- *  effort:
- *
- *    • `sum` / `min` / `max` / `avg` fold ARITHMETIC over the projected
- *      values, and `money` is a decimal.js `Decimal` on this surface but a
- *      native `decimal` on Feliz and a `double` on Flutter — one table cannot
- *      be right on all three without per-target money work.
- *    • `first` / `firstOrNull` / `distinct` / `contains` diverge on
- *      PARTIALITY and EQUALITY: `first` yields `undefined` here but THROWS on
- *      F# `List.head` / Dart `.first`; `firstOrNull` is `T | null` here and
- *      `'T option` on F#; and Flutter's wire models declare no
- *      `operator ==`, so `toSet()` / `.contains` there are identity-based and
- *      would silently return duplicates and `false` for a value-object
- *      element — the exact defect this table's own `receiverElementEqMethod`
- *      exists to prevent on the JS side.
- *
- *  Each is still refused by the gate, with the remainder named in the
- *  `unsupported-register.ts` row.  Declining them HERE as well keeps this
- *  list the single readable statement of what the frontends render — and, if
- *  the gate ever regressed, keeps the failure a declined seam rather than a
- *  verbatim emit. */
-const FRONTEND_RENDERED_OPS: ReadonlySet<string> = new Set([
-  "count",
-  "where",
-  "any",
-  "all",
-  "map",
-  "sortBy",
-  "take",
-  "skip",
-  "join",
-]);
 
 /** The JS leaf formatters — pure string→string, sub-expressions pre-rendered. */
 export const jsExprLeaves: ExprLeaves = {
@@ -141,7 +104,8 @@ export const jsExprLeaves: ExprLeaves = {
 };
 
 /** Render a collection op to JavaScript, or `undefined` when the frontends
- *  don't render this op (see `FRONTEND_RENDERED_OPS`).  The receiver is
+ *  don't render this op (`FRONTEND_RENDERED_COLLECTION_OPS` — the ONE
+ *  definition, shared with the gate that refuses the rest).  The receiver is
  *  parenthesised exactly as the TypeScript backend parenthesises it before
  *  calling the same table, so a page body and a `derived` produce the same
  *  string for the same node. */
@@ -151,7 +115,7 @@ export function renderJsCollectionOp(spec: {
   args: readonly string[];
   call?: Extract<ExprIR, { kind: "method-call" }>;
 }): string | undefined {
-  if (!FRONTEND_RENDERED_OPS.has(spec.op)) return undefined;
+  if (!FRONTEND_RENDERED_COLLECTION_OPS.has(spec.op)) return undefined;
   const render = JS_COLLECTION_RENDERERS[spec.op];
   return render?.(`(${spec.recv})`, [...spec.args], spec.call);
 }

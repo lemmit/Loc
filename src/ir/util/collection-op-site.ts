@@ -32,6 +32,49 @@
 import { isCollectionOp } from "../../util/collection-ops.js";
 import type { ExprIR, TypeIR } from "../types/loom-ir.js";
 
+/** The collection ops the FRONTENDS render — the ops that RESHAPE a collection
+ *  (size it, filter it, test it, order it, window it, print it) without
+ *  folding arithmetic over it or reaching for an element.
+ *
+ *  ONE definition, because it is simultaneously a VALIDATOR policy (what
+ *  `loom.frontend-collection-op-unsupported` lets through) and an EMITTER
+ *  contract (what every target's `renderCollectionOp` table must answer for),
+ *  and the two disagreeing is the failure this whole module exists to make
+ *  unrepresentable.  It lives at the `ir/util` layer because that is the one
+ *  both the gate (`ir/validate/checks/ui-checks.ts`) and the generators sit
+ *  downstream of.
+ *
+ *  The per-target TABLES cannot be derived from it — each is real code in a
+ *  different language — so they are pinned against it instead, by
+ *  `test/generator/_walker/collection-op-coverage.test.ts`.
+ *
+ *  The catalogue's other eight are refused, and each for a REPRESENTATION
+ *  divergence rather than for want of a spelling:
+ *
+ *    • `sum` / `min` / `max` / `avg` fold ARITHMETIC, and `money` is a
+ *      decimal.js / Elixir `Decimal` OBJECT on the JS frontends and Phoenix but
+ *      a native `decimal` on Feliz and a `double` on Flutter — a naive `+`/`<`
+ *      is silently wrong on the first two.
+ *    • `first` / `firstOrNull` differ on PARTIALITY (`undefined` on the JS
+ *      frontends, a raise on F# `List.head` / Dart `.first`) and on the
+ *      optional type (`T | null` vs `'T option`).
+ *    • `distinct` / `contains` need VALUE equality, and Flutter's generated
+ *      wire models declare no `operator ==`.
+ *
+ *  Grow this set only alongside a real renderer on EVERY frontend, and expect
+ *  the coverage test to tell you which one you forgot. */
+export const FRONTEND_RENDERED_COLLECTION_OPS: ReadonlySet<string> = new Set([
+  "count",
+  "where",
+  "any",
+  "all",
+  "map",
+  "sortBy",
+  "take",
+  "skip",
+  "join",
+]);
+
 /** A recognised collection-op application, in the shape both consumers want. */
 export interface CollectionOpSite {
   /** Catalogue op name — `count`, `where`, `sortBy`, … */
