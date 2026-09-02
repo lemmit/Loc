@@ -134,11 +134,20 @@ Coordinator owns the ledger; these are the ids to move to `done`:
   shipped; the row stays open with its scope narrowed to phases 2-4 (the wire
   masking + sink classification). Note the new `loom.sensitive-wire-unsupported`
   register row, which the closing PR must delete.
-- Already-done, verified here against code on this base (close if not already):
-  `ir-warnings-invisible-in-cli`, `F2-VAL-1`, `F2-ADP-3`, `timer-tz-overlap-inert`,
-  `eventlog-shape-silently-ignored`, `M-T5.9-reserved-not-emitted`,
+- **Still `open` in the RECONCILED ledger (checked against `origin/claude/wave-1`
+  @ `4182b84`, after fold 0.2) but proven closed by RUNNING them here — close
+  these three:**
+  - `F2-ADP-3` (the ledger's only remaining P0) — the ledger's own repro now
+    exits 1 with `loom.dapper-unsupported`.
+  - `timer-tz-overlap-inert` — `in:` / `overlap:` each emit
+    `loom.reserved-not-emitted`.
+  - `eventlog-shape-silently-ignored` — `persistedAs: eventLog` + `shape: document`
+    is an error (`loom.shape-on-event-sourced`).
+- Already `done` in the reconciled ledger and re-verified here, no action:
+  `ir-warnings-invisible-in-cli` (but see the residue note above — the CLASS was
+  not drained when the row closed), `F2-VAL-1`, `M-T5.9-reserved-not-emitted`,
   `M-T6.18-gap3-criterion-arg-types`, `F2-CB-C10-tph-stance-not-inherited`.
-  `M-T5.25` (a mission, not a ledger row) is likewise done — its status line in
+- `M-T5.25` (a mission, not a ledger row) is likewise done — its status line in
   `docs/new-plan/T5-language-core.md:161` still reads `open` and should flip.
 - `F2-CB-C9-requires-unknown-message` — stays open, now carrying the exact patch
   above and a named fence reason.
@@ -152,15 +161,24 @@ Coordinator owns the ledger; these are the ids to move to `done`:
 1. **The `F2-CB-C9` ruling** (§Hand-off): apply the one-arm `type-system.ts`
    patch, or take the seven-gate `unknown`-suppression variant? Recommended: the
    arm.
-2. **The ledger is stale for this packet, not wrong-by-drift.** #2668 both
+2. **Fold 0.2's reconciliation still under-closed this packet by three rows.**
+   `F2-ADP-3`, `timer-tz-overlap-inert` and `eventlog-shape-silently-ignored`
+   remain `open` at `4182b84`; all three fire on that base and I have the CLI
+   transcript for each (§Row table). `F2-ADP-3` is the one that matters — it was
+   being carried as the ledger's last open P0. The pattern to watch: a
+   reconciliation that reads PR bodies finds what a PR *claimed*; running the
+   row's own repro finds what it *did*. W1b's #2708 body does name F2-ADP-3, so
+   this one was findable from prose too.
+
+3. **The ledger is stale for this packet in a specific, repeatable way.** #2668 both
    *produced* the ledger and *fixed* five of its rows; anyone reading `open` as a
    worklist will rebuild merged work, as I nearly did seven times. Worth a note in
    the ledger header — or better, a `verifiedAgainst` sha per row so `open` means
    "open at that sha" rather than "open".
-3. **The branch name** — `claude/wave-1/<packet>` is unrepresentable in git while
+4. **The branch name** — `claude/wave-1/<packet>` is unrepresentable in git while
    `claude/wave-1` exists as a leaf ref. Every packet hits this; the wave-1.md
    fold protocol should say `claude/wave-1-<packet>`.
-4. **A ledger row's `fileTrees` is a sample, not a census.** `ir-warnings-invisible-in-cli`
+5. **A ledger row's `fileTrees` is a sample, not a census.** `ir-warnings-invisible-in-cli`
    named `src/cli/main.ts` and, in its evidence, `runParse` + `runGenerate`. Two
    more commands in the same file had the identical defect, and the fix that
    closed the row left them. Worth asking every "fixed" row whether the *class*
