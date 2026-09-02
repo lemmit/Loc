@@ -1,5 +1,7 @@
 # T2 — Data & schema evolution
 
+> **Completed missions for this track live in [`archive/T2-done.md`](archive/T2-done.md)** (6 closed as of 2026-09-02). This file lists only the live missions.
+
 *Weak-spot #2: the structural diff engine is real (ALTER, FK-ordered, destructive-gated), but nothing protects data through evolution. Silent data loss is the one unforgivable bug class for a platform that claims "business apps".*
 
 ## M-T2.1 — explicit rename intent (column + table) — `partial` · **M** · P1
@@ -9,20 +11,8 @@
 Sources: `src/system/migrations-builder.ts` (`diffTable`/`diffSchema` rename passes, `resolveRenames`/`resolveTableRenames`), weak-spots §2.
 Acceptance (met): two simultaneous column renames on one table → two `renameColumn` + zero drops; an aggregate rename with parts + value-collection + association → root + 2 child `renameTable` + 3 FK `renameColumn`, zero drop/create (`test/ir/migrations-builder.test.ts` → "explicit renames (M-T2.1)" / "table/aggregate rename intent (M-T2.1)"); destructive gate untouched.
 
-## M-T2.2 — Migration-baseline safety guards — `done` (PR #1895, 2026-07-14) · **M** · P1
-Sources: `src/system/snapshot.ts`, `src/system/migration-artifacts.ts`, weak-spots §2, [migrations.md](../migrations.md).
-
-## M-T2.3 — Data-migration surface — `done` (v1 PR #1983; deferred slices 2026-07-18) · **M** · P1 (design-first)
-Sources: weak-spots §2, `migrations-builder.ts` destructive policy, the design doc.
-
-## M-T2.4 — Shape/strategy-change migrations — `done` (2026-07-18) · **M** · P2
-Sources: [aggregate-inheritance](../old/proposals/aggregate-inheritance.md) §migration, [document-and-json-hierarchies](../old/proposals/document-and-json-hierarchies.md), the M-T2.3 design appendix, `src/system/migrations-builder.ts` (`detectReshapes`, `MigrationShapeChangeError`, `stampReshapeMetadata`).
-
 ## M-T2.5 — Brownfield adoption (existing database) — `open` · **XL** · P3 (proposal needed)
 Nothing introspects an existing schema; Loom is greenfield-only. A future `ddd adopt` that introspects Postgres into a baseline snapshot (+ partial `.ddd` skeleton) would open the largest user segment. Write the proposal; don't start code before T2.1–T2.3 land.
-
-## M-T2.6 — Bound the implicit `find all()` (DEBT-28) — `done` · **M** · P2 ⚠ coordinated
-Sources: [pagination-design-note](../old/proposals/pagination-design-note.md) DEBT-28.
 
 ## M-T2.7 — Seeding tail — `partial` · **M** · P3
 Phases 5–7: imperative workflow-body `seed`, `seed-spec.json` + compose seed step + `saas` template wiring, `ddd seed` runner + `--reset` + `key:` natural-key upsert for reference data.
@@ -47,18 +37,3 @@ Sources: [encrypted-at-rest](../old/proposals/encrypted-at-rest.md).
 ## M-T2.12 — Money currency dimension + reporting queries — `open` · **L** · P3
 From the completeness audit: `money` has precision but no currency dimension; no cross-row aggregation/reporting query surface (`sum of Order.total where …`). Both are language-level designs — write proposals; reporting may fold into `projection` (M-T4.2) + `view` extensions.
 Sources: [completeness-audit-2026-07](../audits/completeness-audit-2026-07.md).
-
-## M-T2.13 — Migration-evolution gate — `done` (PR #2264) · **M** · P2
-Sources: `docs/migrations.md`, weak-spots §"silent data loss"; runtime companion to M-T2.1 (rename intent) + M-T2.2 (baseline safety) + M-T2.3 (data migrations).
-
-## M-T2.14 — `columnTypeEqual` is blind to precision/scale: #2575's `NUMERIC(19,4)` never reaches an existing database — `open` · **S–M** · P1 ⭐ the migration #2575 promised but did not deliver
-
-Found 2026-08-23 by the numeric-types audit ([F15](../audits/numeric-types-audit-2026-08-23.md)), confirmed twice independently. [#2575](https://github.com/lemmit/Loc/pull/2575) bounded money's DDL to `NUMERIC(19,4)` and claimed migration safety ("`alterColumnType` already existed with a `USING` cast, so an existing database gets a real type-change migration"). It does not: `columnTypeEqual` (`src/system/migrations-builder.ts`) compares `kind` only, and `decimal`/`money` share `kind: "decimal"` — a baseline's `{kind:"decimal"}` compares **equal** to `{kind:"decimal", precision:19, scale:4}`, so no `alterColumnType` is ever diffed out. Every pre-#2575 database keeps the unbounded column (the storage half of #2549, resurfaced for migrated schemas), and a user-visible `decimal ↔ money` field retype produces **no migration at all**.
-
-**Why every existing gate is green.** `schema-load` loads *fresh* chains (the fresh DDL is correct); `migration-evolution` has no fixture evolving a pre-bounds baseline across the #2575 boundary.
-
-**The fix:** compare `precision`/`scale` in `columnTypeEqual` so a bounds change diffs out through the existing `alterColumnType`/`USING` path — minding the destructive-gating semantics (a widening bound is safe; a narrowing one belongs behind `--allow-destructive` review).
-
-**Verification when it lands.** A migration-evolution witness evolving a pre-#2575 baseline to `NUMERIC(19,4)`, plus a `decimal → money` retype producing a migration; mutation-proved by reverting the comparator.
-
-Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F15, plan.json N6, #2549/#2575. Relates to M-T2.2 (baseline safety), M-T2.13 (the gate that gets the witness).

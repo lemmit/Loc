@@ -1,5 +1,7 @@
 # T4 — Eventing, workflow & temporal
 
+> **Completed missions for this track live in [`archive/T4-done.md`](archive/T4-done.md)** (3 closed as of 2026-09-02). This file lists only the live missions.
+
 *Weak-spot #4: scheduling was the language's temporal hole — no timers, no jobs, no saga deadlines. `timerSource` Phases 1 + 2 now close the timer half on all five backends (in-process scheduler + advisory-lock single-fire, plus durable Postgres-backed `cron:` drivers with store-coordinated single-fire, retry, and coalesce-once missed-run catch-up; only timezone/overlap sugar + saga deadlines still pending). Deployables are no longer pure runtime islands: external-broker transport (M-T4.4) is **done** — Redis (`broadcast`/`ephemeral`), RabbitMQ (`queue`/`ephemeral`+`queue`/`work`), and Kafka (`broadcast`/`log`+`queue`/`work`) all ship on all five backends, plus service-to-service broker auth and a k8s broker subchart (`src/generator/_channels/bindings.ts` `SHIPPED_COMBOS`; the elixir kafka leg rides `brod`, `src/generator/elixir/channels-emit.ts`; `src/system/helm.ts` `renderBrokerTemplate`). Two honest gaps remain: redis provisions only `broadcast/ephemeral` (no `queue/ephemeral` — rabbitmq is the only queue-capable transport for that combo, per `SHIPPED_COMBOS`), and elixir has no `last_event_id` consumer-side dedup (ack-reliant, same stance as java). The `test:channels*` e2e suite is CI-wired via `channels-e2e.yml` (`run-channels` label; #2386 fixed the "subscribed must mean the broker said yes" readiness defect across all five backends, #2336 its elixir leg). The saga/workflow core is otherwise solid and at full 5-backend parity.*
 
 ## M-T4.1 — `timerSource` (scheduling) — `partial` · **XL** · P1 (design-first)
@@ -57,12 +59,6 @@ Sources: [projection.md](../old/proposals/projection.md) (draft 2026-07-05), [re
    Related asymmetry to settle in the same ruling: java's explicit command handlers are class-`@Transactional` while .NET/node commit per `SaveAsync` (§D5) — a partial-write window java does not have. **Design first, then drain**: state the rule (which writes and which emits share a transaction, and what a shape with no write tx does instead), then make each backend implement it. This is an owner decision, not an emitter bug.
 Sources: [dispatch-delivery-semantics](../old/proposals/dispatch-delivery-semantics.md), ddd-review S5(d) (closed), M-T4.4 slices 7a–7d, [generator-code-review-2026-08-24](../audits/generator-code-review-2026-08-24.md) §Follow-up register (2026-08-30) rows 2–3.
 
-## M-T4.4 — Cross-deployable eventing (external brokers) — `done` · **XL** · P2 (slice plan complete 2026-07-21; residuals: java/elixir saga `last_event_id` dedup — broker-ack stance recorded in 7c/7d; M-T4.2 replay-cursor hook stays future)
-Sources: [channels.md](../old/proposals/channels.md) §brokers, production-readiness §3.3, weak-spots (runtime islands).
-
-## M-T4.5 — Saga hardening slices (review remediation) — `done` · **S–M** · P1 (all four slices landed + test-pinned on `main`, re-verified 2026-07-27, #2228 — note: this `done` was silently reverted by #2283's stale-base doc merge and re-applied 2026-08-05; a status flip is as exposed to the stale-base hazard as code)
-Sources: [phoenix-event-delivery-s5a](../old/plans/phoenix-event-delivery-s5a.md), [saga-starter-guard-s5b](../old/plans/saga-starter-guard-s5b.md), [java-uniform-publisher-s5c](../old/plans/java-uniform-publisher-s5c.md), [phoenix-op-guards-403-422](../old/plans/phoenix-op-guards-403-422.md).
-
 ## M-T4.6 — Day-one batteries: `job`, `email`, object `storage` — `partial` · **L** · P1
 The ~100%-of-apps integrations: an email adapter (resource kind — smtp/ses/sendgrid), object-storage `File`/`Upload` surface, and `job` (folds into M-T4.1 timers). **Object-storage `File` slice 1 shipped** (PR #2007, tracked under M-T1.2): the `File` field type + `FileRef` wire contract on all five backends + a dependency-free `localDisk` store + Hono `POST /files`/`GET /files/:key` endpoints. (The `files.put/get/signedUrl` workflow-body verbs already rendered; this adds the declarative field type they hang off.)
 **Email landed (foundation + all-five-backend emission):** surface `kind: mailer` → infra kind `email`; sourceTypes smtp/ses/sendgrid; one `mail.send(to, subject, body)` verb consumed from workflows. Grammar/IR/registry/verb-table + ResourceAdapters on hono (nodemailer), .NET (MailKit), java (Jakarta Mail), python (aiosmtplib), phoenix (Swoosh) — each with SES/SendGrid siblings — plus a Mailpit dev compose sidecar. Call-site rendering was already verb-name-generic (no per-backend change). Unit-gated (registry/lowering/negative-verb/cross-backend emission/compose). **4.6-email-b landing** (PRs #2051/#2059/#2065): the emitted vendor clients are compile-gated per backend via the corpus/elixir-vanilla build fixtures (with a `<NuGetAuditSuppress>` for MailKit's transitive NU1902), and a `LOOM_EMAIL_E2E` **Mailpit** runtime leg — fanned across all five backends — boots the generated backend and asserts `mail.send(...)` delivers into a Mailpit inbox. **Remaining:** templated/HTML email (4.6-email-c, own proposal), `job`, and the File follow-ons (other-backend endpoints, s3 presign, the `FileUpload` UI primitive) tracked under M-T1.2.
@@ -85,12 +81,6 @@ Sources: [channels.md](../old/proposals/channels.md) Part II, production-readine
 
 ## M-T4.10 — Backend-to-backend calls — `open` · **L** · P3 (proposal needed)
 Typed inter-deployable invocation (peer-URL IR, client emission, authn between services). Referenced by production-readiness §3.10 and deployable-networking's out-of-scope note; no owning proposal yet — write it. **Cross-ref (2026-08):** the typed-invocation half is substantially delivered by M-T4.8's in-system `kind: api` call (#2291 et al.); what remains distinct here is the standalone-proposal scope (peer authn, cross-stack peers) — re-scope against that delivery, don't start from scratch.
-
-## M-T4.11 — (withdrawn) Event-sourcing storage parity — see [M-T6.34](T6-backend-parity.md)
-Minted 2026-08-10 from M-T9.27 register unit 9, then found to duplicate **M-T6.34** (same scope, same two register codes, same source) — the cross-track duplicate this plan exists to prevent. M-T6.34 owns the gap; this ID is retired, kept as a tombstone so it is never re-minted.
-
-**2026-08-17:** M-T6.34 has since **closed on an overturned premise** — `EVENT_SOURCING_BACKENDS` and `EVENT_SOURCING_WORKFLOW_BACKENDS` are both 5/5, so there was no parity gap to own. Both halves of the withdrawn scope are therefore settled; nothing routes back here.
-
 
 ## M-T4.12 — Realtime needs a plan-level contract — and no generated SPA can authenticate its own SSE stream — `open` · **M** · P1 (security-shaped)
 
