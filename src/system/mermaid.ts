@@ -546,10 +546,7 @@ function sequenceMessages(s: WorkflowStmtIR): SeqLine[] {
     case "repo-run":
       return [call(s.repoName, `run(${s.retrievalName})`), ret(s.repoName, `${s.name}[]`)];
     case "for-each":
-      return [
-        note(`for ${s.var} in ${s.varAggName}[]`),
-        ...s.body.flatMap(sequenceMessages),
-      ];
+      return [note(`for ${s.var} in ${s.varAggName}[]`), ...s.body.flatMap(sequenceMessages)];
     case "if-let":
       return [
         call(s.repoName, `find(${s.synthCriterion.name})`),

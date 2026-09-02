@@ -126,6 +126,18 @@ export interface GenerateSystemOptions {
    *  No effect unless `sourcemap` is also true.  See
    *  docs/old/proposals/source-map-and-debugging.md §8. */
   sourceTexts?: ReadonlyMap<string, string>;
+  /** Inline each `.ddd`'s FULL text into every Source Map v3 sidecar as
+   *  `sourcesContent`.  OFF by default: one sidecar per generated file, each
+   *  carrying a complete copy of its originating source, is quadratic — 112
+   *  sidecars totalling 763 KB on the ERP example, against a 201 KB
+   *  consolidated `.loom/sourcemap.json` that covers MORE files.  A debugger
+   *  resolves the absolute path in `sources` off disk, so those copies buy
+   *  nothing wherever the `.ddd` is actually there (the CLI).
+   *
+   *  The browser playground is the caller that DOES need them — its VFS has no
+   *  filesystem for a devtools pane to read the `.ddd` from — so it passes
+   *  `true`.  No effect unless `sourcemap` and `sourceTexts` are both set. */
+  inlineSources?: boolean;
   /** On-disk migration-file inventory used by the baseline-safety guards
    *  (M-T2.2).  When provided, `generate system` refuses to silently
    *  re-baseline over an existing migration history, verifies files against
@@ -196,7 +208,9 @@ export function generateSystemsFromLoom(
       if (!(path.endsWith(".ts") || path.endsWith(".tsx"))) continue;
       const content = out.get(path);
       if (content === undefined) continue;
-      const rendered = renderSourceMapV3(regions, path, options.sourceTexts);
+      const rendered = renderSourceMapV3(regions, path, options.sourceTexts, {
+        inlineSources: options.inlineSources,
+      });
       if (!rendered) continue;
       const mapPath = `${path}.map`;
       out.set(mapPath, rendered);

@@ -65,14 +65,46 @@ describe("ddd generate system --sourcemap (CLI wiring)", () => {
     const v3 = JSON.parse(fs.readFileSync(mapPath, "utf8")) as {
       version: number;
       sources: string[];
-      sourcesContent: string[];
+      sourcesContent?: string[];
     };
     expect(v3.version).toBe(3);
+    // The ABSOLUTE path is what a debugger resolves the source through, so it
+    // is the load-bearing half — and by default it is the ONLY half: the
+    // source text is not inlined (see the next case).
     expect(v3.sources).toContain(dddPath);
-    expect(v3.sourcesContent[v3.sources.indexOf(dddPath)]).toBe(SOURCE);
+    expect(v3.sourcesContent).toBeUndefined();
 
     const tsContent = fs.readFileSync(path.join(outDir, "hono_api", "domain", "order.ts"), "utf8");
     expect(tsContent.endsWith("//# sourceMappingURL=order.ts.map\n")).toBe(true);
+  });
+
+  // Every sidecar used to carry a full copy of the `.ddd` it came from — 112
+  // sidecars × the whole source = 763 KB on the ERP example, against a 201 KB
+  // consolidated `.loom/sourcemap.json` covering more files.  The copies are
+  // pure duplication wherever `sources`' absolute path resolves (a local
+  // tree), so they became opt-in.
+  it("inlines the .ddd text only under --inline-sources, and that costs real bytes", () => {
+    const lean = path.join(tmp, "lean");
+    const fat = path.join(tmp, "fat");
+    execSync(`node ${cli} generate system ${dddPath} -o ${lean} --sourcemap`, { encoding: "utf8" });
+    execSync(`node ${cli} generate system ${dddPath} -o ${fat} --sourcemap --inline-sources`, {
+      encoding: "utf8",
+    });
+
+    const inlined = JSON.parse(
+      fs.readFileSync(path.join(fat, "hono_api", "domain", "order.ts.map"), "utf8"),
+    ) as { sources: string[]; sourcesContent: string[] };
+    expect(inlined.sourcesContent[inlined.sources.indexOf(dddPath)]).toBe(SOURCE);
+
+    const bytes = (dir: string) =>
+      walk(dir)
+        .filter((p) => p.endsWith(".map"))
+        .reduce((n, p) => n + fs.statSync(p).size, 0);
+    // Same map count, materially fewer bytes.
+    expect(walk(lean).filter((p) => p.endsWith(".map")).length).toBe(
+      walk(fat).filter((p) => p.endsWith(".map")).length,
+    );
+    expect(bytes(lean)).toBeLessThan(bytes(fat));
   });
 
   it("emits neither sidecars nor directives without the flag", () => {

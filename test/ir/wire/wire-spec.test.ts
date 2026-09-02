@@ -162,3 +162,64 @@ describe("wire-spec — primitive mappings", () => {
     expect(jsonPropertyForType(idRow.type)).toEqual({ type: "string", format: "uuid" });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Enum CONSTRAINTS, not just the carrier type.
+//
+// Every `enum` field degraded to `{"type":"string"}` — `grep -c '"enum"'` over
+// a 25-aggregate system's wire-spec.json returned 0, while the same pipeline
+// emitted `z.enum(["New","Qualified","Converted","Lost"])` into the zod /
+// OpenAPI layer three files away.  Since this artifact exists for diff-based
+// contract-change detection (docs/loom-artifacts.md), that made REMOVING an
+// enum value — a breaking wire change — produce a byte-identical artifact.
+// ---------------------------------------------------------------------------
+
+describe("wire-spec.json enum constraints", () => {
+  const withValues = (values: string) => `
+system Crm {
+  subdomain S {
+    context Sales {
+      enum LeadStatus { ${values} }
+      aggregate Lead {
+        name: string
+        status: LeadStatus
+        history: LeadStatus[]
+        previous: LeadStatus?
+      }
+      repository Leads for Lead { }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: Sales, kind: state, use: pg }
+  deployable api { platform: node contexts: [Sales] dataSources: [st] port: 3000 }
+}`;
+
+  it("publishes an enum field's declared values, in declaration order", async () => {
+    const loom = await buildLoomModel(withValues("New Qualified Converted Lost"));
+    const lead = buildWireSpec(loom.systems[0]!).aggregates["Lead"]!;
+    expect(lead.properties["status"]).toEqual({
+      type: "string",
+      enum: ["New", "Qualified", "Converted", "Lost"],
+    });
+    // …through a collection and through an optional, too — the constraint
+    // rides the same recursion the carrier type does.
+    expect(lead.properties["history"]).toEqual({
+      type: "array",
+      items: { type: "string", enum: ["New", "Qualified", "Converted", "Lost"] },
+    });
+    expect(lead.properties["previous"]).toEqual({
+      type: "string",
+      enum: ["New", "Qualified", "Converted", "Lost"],
+    });
+  });
+
+  it("removing an enum value changes the artifact (the whole point of publishing it)", async () => {
+    const before = renderWireSpec(
+      (await buildLoomModel(withValues("New Qualified Lost"))).systems[0]!,
+    );
+    const after = renderWireSpec((await buildLoomModel(withValues("New Qualified"))).systems[0]!);
+    expect(before).not.toBe(after);
+    expect(before).toContain("Lost");
+    expect(after).not.toContain("Lost");
+  });
+});

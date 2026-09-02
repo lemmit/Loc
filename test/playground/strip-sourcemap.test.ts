@@ -62,7 +62,12 @@ async function generateAcmeOffAndOn(): Promise<{ off: VirtualFile[]; on: Virtual
   expect(errors).toEqual([]);
   const sourceTexts = new Map([[doc.uri.path, source]]);
   const off = toVirtualFiles(generateSystems(model).files);
-  const on = toVirtualFiles(generateSystems(model, { sourcemap: true, sourceTexts }).files);
+  // `inlineSources: true` mirrors `web/src/build/build.worker.ts` — the
+  // playground has no filesystem behind `sources`, so its sidecars must carry
+  // the `.ddd` text (the CLI's default omits it; see GenerateSystemOptions).
+  const on = toVirtualFiles(
+    generateSystems(model, { sourcemap: true, sourceTexts, inlineSources: true }).files,
+  );
   return { off, on };
 }
 

@@ -46,7 +46,15 @@ describe("generateSystems sourcemap sidecars (playground fixture)", () => {
     // the CLI's `parseFile` do.
     const sourceTexts = new Map([[doc.uri.path, source]]);
 
-    const withFlag = generateSystems(model, { sourcemap: true, sourceTexts }).files;
+    // `inlineSources: true` is part of the derivation the worker performs —
+    // the playground's VFS has no filesystem for a devtools pane to read the
+    // `.ddd` from, so the sidecars must carry the text.  (The CLI's default
+    // omits it: `sources` names the file's absolute path on disk.)
+    const withFlag = generateSystems(model, {
+      sourcemap: true,
+      sourceTexts,
+      inlineSources: true,
+    }).files;
 
     const mapEntries = [...withFlag.entries()].filter(
       ([path]) => path.endsWith(".ts.map") && path.includes("/domain/"),

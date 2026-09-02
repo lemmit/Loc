@@ -56,20 +56,16 @@ async function generateOnce(file: string): Promise<Map<string, string>> {
 }
 
 describe("generate system is deterministic", () => {
-  it.each(CASES)(
-    "%s generates byte-identical output twice",
-    async (file) => {
-      const first = await generateOnce(file);
-      const second = await generateOnce(file);
+  it.each(CASES)("%s generates byte-identical output twice", async (file) => {
+    const first = await generateOnce(file);
+    const second = await generateOnce(file);
 
-      // Same file set, in the same order.
-      expect([...second.keys()]).toEqual([...first.keys()]);
+    // Same file set, in the same order.
+    expect([...second.keys()]).toEqual([...first.keys()]);
 
-      // Same bytes.  Report the DIFFERING PATHS (not a 400k-line diff) so a
-      // failure names the emitter that drifted.
-      const drifted = [...first.keys()].filter((p) => first.get(p) !== second.get(p));
-      expect(drifted).toEqual([]);
-    },
-    60_000,
-  );
+    // Same bytes.  Report the DIFFERING PATHS (not a 400k-line diff) so a
+    // failure names the emitter that drifted.
+    const drifted = [...first.keys()].filter((p) => first.get(p) !== second.get(p));
+    expect(drifted).toEqual([]);
+  }, 60_000);
 });

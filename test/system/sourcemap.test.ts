@@ -1232,6 +1232,10 @@ describe("Source Map v3 sidecars", () => {
     const files = generateSystems(model, {
       sourcemap: true,
       sourceTexts,
+      // The full-map assertions below (index-aligned `sourcesContent`) are
+      // about the opt-in shape; the default omits the inlined text — see
+      // `sourcemap-v3.test.ts` "omits sourcesContent unless the caller opts in".
+      inlineSources: true,
     }).files;
 
     const tsPath = "hono_api/domain/order.ts";
