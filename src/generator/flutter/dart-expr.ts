@@ -118,7 +118,9 @@ export const DART_LEAVES = {
 
 /** The ops with a Dart arm.  The catalogue's other eight (`sum`/`min`/`max`/
  *  `avg`, `first`/`firstOrNull`/`distinct`/`contains`) are deliberately absent
- *  and stay gated — see `_walker/js-expr-leaves.ts`'s `FRONTEND_RENDERED_OPS`.
+ *  and stay gated — see `ir/util/collection-op-site.ts`'s
+ *  `FRONTEND_RENDERED_COLLECTION_OPS`, the ONE definition this table is pinned
+ *  against by `test/generator/_walker/collection-op-coverage.test.ts`.
  *  For this target the sharpest of those reasons is EQUALITY: the generated
  *  wire models (`dart-model-emit.ts`) declare no `operator ==`, so `.toSet()`
  *  and `.contains` compare by IDENTITY and would silently return duplicates

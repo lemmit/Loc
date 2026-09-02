@@ -146,9 +146,11 @@ export const FS_LEAVES = {
 
 /** The ops with an F# arm.  The catalogue's other eight (`sum`/`min`/`max`/
  *  `avg`, `first`/`firstOrNull`/`distinct`/`contains`) are deliberately absent
- *  and stay gated — see `_walker/js-expr-leaves.ts`'s `FRONTEND_RENDERED_OPS`
- *  for why each one is, in every case a REPRESENTATION divergence across the
- *  frontends rather than a missing spelling here.  (`contains` does have an
+ *  and stay gated — see `ir/util/collection-op-site.ts`'s
+ *  `FRONTEND_RENDERED_COLLECTION_OPS` for why each one is, in every case a
+ *  REPRESENTATION divergence across the frontends rather than a missing
+ *  spelling here.  (That constant is the ONE definition; this table is pinned
+ *  against it by `test/generator/_walker/collection-op-coverage.test.ts`.)  (`contains` does have an
  *  arm on the update path below, from before the gate existed; it is not
  *  reachable from a gated body.) */
 export const FS_COLLECTION_RENDERERS: Record<
