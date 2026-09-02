@@ -380,10 +380,40 @@ function projectionRoute(
   const rowFieldType = new Map(proj.stateFields.map((f) => [f.name, f.type] as const));
   out.push("    return [");
   out.push("        {");
+  // One walrus temp per join-alias-reading select, unique inside the dict
+  // comprehension's scope (two selects off the same or different aliases are
+  // two bindings in ONE scope).
+  let joinTmp = 0;
   for (const s of proj.query!.selects ?? []) {
-    const rendered = renderProjectionSelect(s.expr, aliasMap);
     const t = rowFieldType.get(s.field);
-    out.push(`            "${s.field}": ${t ? wireValue(rendered, t, ctx, false) : rendered},`);
+    const joined = joinAliasRead(s.expr, aliasMap);
+    let valueExpr: string;
+    if (joined) {
+      // A select reading a JOIN alias goes through a TOTAL lookup (G2667-D3,
+      // dotnet arm: #b75ce2c).  The bulk load is `find_many_by_ids` THROUGH
+      // the joined aggregate's repository, so its capability filters apply —
+      // a soft-deleted or out-of-tenant target, or an ordinary dangling
+      // reference, is simply ABSENT from the map.  Indexing it directly threw
+      // `KeyError` — a 500 on data the model permits, from a read that is not
+      // even about the missing row.
+      //
+      // LEFT JOIN semantics (matching the dotnet ruling): the source row
+      // survives, the joined field carries `None`.  Dropping the source row
+      // instead would let a FOREIGN aggregate's filters change this
+      // projection's row count while the source aggregate's own list still
+      // shows the row — one silent failure traded for another.  The wire
+      // transform (`iso(...)`/`money_str(...)`/…) sits INSIDE the guard, so
+      // it never runs on the absent row (`.isoformat()` on `None` would
+      // AttributeError right where the guard exists to prevent exactly that).
+      const tmp = `__j${joinTmp++}`;
+      const raw = `${tmp}.${snake(joined.member)}`;
+      const wired = t ? wireValue(raw, t, ctx, false) : raw;
+      valueExpr = `(${wired} if (${tmp} := ${joined.mapVar}.get(str(${joined.idRow}))) is not None else None)`;
+    } else {
+      const rendered = renderPyExpr(s.expr, { thisName: "r" });
+      valueExpr = t ? wireValue(rendered, t, ctx, false) : rendered;
+    }
+    out.push(`            "${s.field}": ${valueExpr},`);
   }
   out.push("        }");
   out.push("        for r in rows");
@@ -626,16 +656,22 @@ function rowSourcedProjectionRoute(
   return out.join("\n");
 }
 
-/** Render a `select` expression against the source row `r` + join alias maps.
- *  A member access on a join alias (`c.name`) → `<map>[str(<idRow>)].name`;
- *  source reads (`o.id`, bare fields) lower to `this` and render off `r`. */
-function renderProjectionSelect(
+/** Detect a `select` expression that reads a JOIN alias (`c.name`) rather
+ *  than the source candidate (`o.id`, a bare field — those render off `r`).
+ *  The caller (G2667-D3) turns this into a TOTAL lookup instead of the direct
+ *  `<mapVar>[str(<idRow>)].<member>` index this used to render unconditionally
+ *  — the joined aggregate's own capability filters can leave the id genuinely
+ *  absent from the bulk-loaded map (soft-deleted / out-of-tenant / a dangling
+ *  reference), so an unconditional index raised `KeyError` on ordinary,
+ *  model-permitted data.  Mirrors `joinAliasRead` in the .NET emitter
+ *  (query-projection-emit.ts), the sibling arm of the same row. */
+function joinAliasRead(
   expr: ExprIR,
   aliasMap: Map<string, { mapVar: string; idRow: string }>,
-): string {
+): { mapVar: string; idRow: string; member: string } | undefined {
   if (expr.kind === "member" && expr.receiver.kind === "ref") {
     const alias = aliasMap.get(expr.receiver.name);
-    if (alias) return `${alias.mapVar}[str(${alias.idRow})].${snake(expr.member)}`;
+    if (alias) return { ...alias, member: expr.member };
   }
-  return renderPyExpr(expr, { thisName: "r" });
+  return undefined;
 }
