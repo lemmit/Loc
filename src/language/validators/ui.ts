@@ -404,13 +404,13 @@ export function checkUiNotification(n: UiNotification, ui: Ui, accept: Validatio
       // toast(<message>).  This gate bounds the handler's STATEMENT vocabulary
       // only — the message EXPRESSION is checked one layer down, by
       // `loom.toast-message-unsupported` in `src/ir/validate/checks/ui-checks.ts`.
-      // Deliberately there and not here: the three realtime renderers
+      // Deliberately there and not here: the four realtime renderers
       // (`_frontend/realtime.ts`, `feliz/realtime.ts`,
-      // `elixir/realtime-liveview.ts`) switch on the LOWERED `ExprIR.kind` and
-      // throw on anything outside their shared v1 subset, so the check that
-      // mirrors them has to see the same node kinds they do.  Accepting any
-      // expression here without that check is what turned `toast(e.order.id)`
-      // into a codegen crash with no `loom.*` code.
+      // `elixir/realtime-liveview.ts`, `flutter/realtime.ts`) switch on the
+      // LOWERED `ExprIR.kind` and throw on anything outside their shared
+      // subset, so the check that mirrors them has to see the same node kinds
+      // they do.  Accepting any expression here without that check is what
+      // turned `toast(string(e.at))` into a codegen crash with no `loom.*` code.
       continue;
     }
     if (isBareCall && head === "refetch") {

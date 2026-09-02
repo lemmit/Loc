@@ -438,13 +438,16 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     kind: "gap",
     site: "src/ir/validate/checks/ui-checks.ts:2193",
     what:
-      "an `on <chan>.<Event> { toast(<expr>) }` message outside the v1 subset all three realtime " +
-      "renderers implement (literal / the event binding / single-level member off it / paren / " +
-      "binary).  Not latent and not per-target: the three `switch`es are arm-for-arm identical " +
-      "(`_frontend/realtime.ts`, `feliz/realtime.ts`, `elixir/realtime-liveview.ts`) and each " +
-      "THREW on anything else, so the gate replaces a codegen abort.  Drains when the renderers " +
-      "grow the general expression path (they would then share the walker's expression emitter " +
-      "rather than three hand-written subsets)",
+      "an `on <chan>.<Event> { toast(<expr>) }` message outside the subset all FOUR realtime " +
+      "renderers implement.  NARROWED 2026-09-02: a member access CHAIN of any depth off the " +
+      "event binding (`e.order.id`) now renders on all four, so what remains refused is a " +
+      "conversion (`string(e.at)`), a method call (`e.name.toUpper()`), a ternary, and a chain " +
+      "rooted at anything but the binding (`currentUser.email`).  Not latent and not " +
+      "per-target: the four `switch`es are arm-for-arm identical (`_frontend/realtime.ts`, " +
+      "`feliz/realtime.ts`, `elixir/realtime-liveview.ts`, `flutter/realtime.ts`) and each " +
+      "still THROWS on the remainder, so the gate replaces a codegen abort.  Drains when the " +
+      "renderers grow the general expression path (they would then share the walker's " +
+      "expression emitter rather than four hand-written subsets)",
     mission: "M-T1.10",
   },
   {

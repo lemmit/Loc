@@ -17,15 +17,26 @@
 // stays the gate), so the handler re-fetches through the Api rather than
 // trusting the frame body.
 //
-// The toast message is the validator-bounded v1 subset
+// The toast message is the validator-bounded subset
 // (`loom.ui-handler-statement-unknown` admits only `toast(<expr>)`): literals,
-// the event binding, single-level member access off it, and operators.
-// Anything deeper fails loud here rather than emitting broken F#.
+// the event binding, MULTI-LEVEL member access off it, and operators.
+// Anything outside that fails loud here rather than emitting broken F# — the
+// throw is the defensive backstop behind `loom.toast-message-unsupported`.
 
 import type { ExprIR, UiIR, UiNotificationIR } from "../../ir/types/loom-ir.js";
 import type { RealtimeStreamCredential } from "../../ir/util/realtime-rooms.js";
 import { lines } from "../../util/code-builder.js";
+import { toastMemberPath } from "../_frontend/realtime.js";
 import { type FelizRead, felizAllRead, refetchMsgCase } from "./wire.js";
+
+// Safe field read down a decoded-JSON payload: walk the path, and yield '' the
+// moment a link is null/undefined (or the leaf itself is).  This is why a Feliz
+// toast reads a chain through `toastField` rather than Fable's `?` operator —
+// `payload?order?id` compiles to `payload.order.id`, which THROWS when `order`
+// is absent.  Single quotes only, so it nests inside `[<Emit("…")>]` unescaped.
+const TOAST_FIELD_EMIT_JS =
+  "(function(o,p){var c=o;for(var i=0;i<p.length;i++){" +
+  "if(c==null)return '';c=c[p[i]];}return c==null?'':String(c);})($0,$1)";
 
 // A single self-contained JS toast: append a transient message element to a
 // fixed-position host in document.body (created on first use), auto-removed
@@ -137,6 +148,15 @@ export function renderFelizRealtime(
     `[<Fable.Core.Emit("${TOAST_EMIT_JS}")>]`,
     "let private showToast (message: string) : unit = jsNative",
     "",
+    ...(felizNeedsToastField(ui)
+      ? [
+          "// Field read down the decoded payload: '' as soon as a link is absent, so",
+          "// a chain through a null link renders empty rather than throwing.",
+          `[<Fable.Core.Emit("${TOAST_FIELD_EMIT_JS}")>]`,
+          "let private toastField (payload: obj) (path: string array) : string = jsNative",
+          "",
+        ]
+      : []),
     credential === "session-cookie"
       ? '[<Fable.Core.Emit("new EventSource($0, { withCredentials: true })")>]'
       : '[<Fable.Core.Emit("new EventSource($0)")>]',
@@ -168,10 +188,34 @@ function exprReadsBinding(e: ExprIR, bind: string): boolean {
   }
 }
 
-/** Render the v1 toast-message subset to an F# string expression.  The
- *  event binding decodes to `payload` (a Thoth-free `JSON.parse` obj);
- *  member access reads a field dynamically (`payload?<member>`) and every
- *  leaf is `string`-coerced so binary `+` stays a string concatenation. */
+/** True when any toast in the ui reads a FIELD off its event binding — gates
+ *  the `toastField` helper's emission, so a literal-only / refetch-only ui does
+ *  not carry an unused private binding. */
+function felizNeedsToastField(ui: UiIR): boolean {
+  const reads = (e: ExprIR, bind: string): boolean => {
+    switch (e.kind) {
+      case "member":
+        return toastMemberPath(e, bind) !== undefined;
+      case "paren":
+        return reads(e.inner, bind);
+      case "binary":
+        return reads(e.left, bind) || reads(e.right, bind);
+      default:
+        return false;
+    }
+  };
+  return (ui.notifications ?? []).some((n) => n.toasts.some((t) => reads(t, n.bind)));
+}
+
+/** Render the toast-message subset to an F# string expression.  The event
+ *  binding decodes to `payload` (a Thoth-free `JSON.parse` obj); a member chain
+ *  off it reads through the `toastField` helper and every leaf is
+ *  `string`-coerced so binary `+` stays a string concatenation.
+ *
+ *  NULLABLE LINKS.  `toastField` yields `""` the moment a link is
+ *  null/undefined — matching the JS renderer's `?.` + `?? ""` and the LiveView
+ *  renderer's `&&` guard.  Fable's `?` operator cannot serve here: `payload?a?b`
+ *  compiles to `payload.a.b` and throws on an absent `a`. */
 function renderFsToastMessage(e: ExprIR, bind: string): string {
   switch (e.kind) {
     case "literal":
@@ -185,12 +229,14 @@ function renderFsToastMessage(e: ExprIR, bind: string): string {
         `Feliz realtime: unsupported name '${e.name}' in toast message (only the event binding '${bind}' is in scope).`,
       );
     case "member": {
-      if (e.receiver.kind !== "ref" || e.receiver.name !== bind) {
+      const path = toastMemberPath(e, bind);
+      if (!path) {
         throw new Error(
-          "Feliz realtime: toast messages support single-level member access off the event binding only.",
+          "Feliz realtime: toast messages support member access off the event binding only.",
         );
       }
-      return `(string (payload?${e.member}))`;
+      const arr = path.map((m) => JSON.stringify(m)).join("; ");
+      return `(toastField payload [| ${arr} |])`;
     }
     case "paren":
       return `(${renderFsToastMessage(e.inner, bind)})`;

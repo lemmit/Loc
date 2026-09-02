@@ -1,27 +1,36 @@
 // `loom.toast-message-unsupported` — an `on <chan>.<Event>(e) { toast(<expr>) }`
-// message expression outside the v1 subset every realtime renderer implements.
+// message expression outside the subset every realtime renderer implements.
 //
 // THE SILENT CRASH.  The AST validator (`checkUiNotification`,
 // `src/language/validators/ui.ts`) bounds the handler STATEMENT vocabulary —
 // `toast(<one expression>)` / `refetch(<Agg>…)` — but accepts ANY expression
-// inside the `toast(…)`.  All three renderers then implement the same narrow v1
+// inside the `toast(…)`.  All FOUR renderers then implement the same narrow
 // subset and `throw` a raw `Error` on anything else:
 //
-//   src/generator/_frontend/realtime.ts       `renderMessageExpr`      (React/Vue/Svelte/Angular)
-//   src/generator/feliz/realtime.ts           `renderFsToastMessage`   (Feliz)
+//   src/generator/_frontend/realtime.ts       `renderMessageExpr`       (React/Vue/Svelte/Angular)
+//   src/generator/feliz/realtime.ts           `renderFsToastMessage`    (Feliz)
 //   src/generator/elixir/realtime-liveview.ts `renderMessageExprElixir` (LiveView)
+//   src/generator/flutter/realtime.ts         `renderDartToastMessage`  (Flutter)
 //
-// So `toast(e.order.id)` parsed, validated, and then aborted `ddd generate
-// system` with a stack trace and no `loom.*` code.  Measured on this HEAD for
-// all three (the `renders … today` / `crashes codegen today` halves below).
+// So `toast(string(e.at))` parses, validates, and then aborts `ddd generate
+// system` with a stack trace and no `loom.*` code.  That half is still asserted
+// below (`crashes codegen today`) — it is the whole property the gate exists
+// for, and it must survive every widening of the subset.
 //
-// The gate is target-agnostic because the three `switch`es are arm-for-arm
-// identical — literal / the event binding / SINGLE-LEVEL member off it / paren /
-// binary — which is asserted here rather than assumed: `OUT_OF_SUBSET` is run
-// through the JS and Feliz emitters end-to-end, and through the LiveView
-// renderer directly.
+// The gate is target-agnostic because the four `switch`es are arm-for-arm
+// identical — literal / the event binding / a MULTI-LEVEL member chain off it /
+// paren / binary — which is asserted here rather than assumed: `OUT_OF_SUBSET`
+// is run through the JS, Feliz and Flutter emitters end-to-end, and through the
+// LiveView renderer directly.
+//
+// MULTI-LEVEL MEMBER (2026-09-02).  `e.id` rendering while `e.order.id` crashed
+// was arbitrary from the author's side.  The renderers were widened FIRST and
+// the gate relaxed SECOND; `renders the same chain on every target` pins the
+// exact per-target emission, including what a chain through a NULL link does —
+// the empty string on all four.
 
 import { describe, expect, it } from "vitest";
+import { toastMemberPath } from "../../src/generator/_frontend/realtime.js";
 import { renderMessageExprElixir } from "../../src/generator/elixir/realtime-liveview.js";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
@@ -60,12 +69,17 @@ system RtShop {
   deployable webApp { platform: ${platform}  targets: backend  ui: WebApp { Fulfillment: backend }  port: 3001 }
 }`;
 
-/** The v1 subset — every renderer emits these. */
+/** The subset — every renderer emits these. */
 const IN_SUBSET: ReadonlyArray<{ label: string; toast: string }> = [
   { label: "a string literal", toast: `toast("an order was placed")` },
   { label: "a non-string literal", toast: `toast(42)` },
   { label: "the bare event binding", toast: `toast(e)` },
   { label: "single-level member off the binding", toast: `toast(e.order)` },
+  { label: "MULTI-LEVEL member off the binding", toast: `toast(e.order.id)` },
+  {
+    label: "a multi-level chain inside a concatenation",
+    toast: `toast("Order " + e.order.id + " placed")`,
+  },
   { label: "binary concatenation of both", toast: `toast("Order " + e.order + " placed")` },
   { label: "parenthesised", toast: `toast(("x" + e.order))` },
 ];
@@ -80,19 +94,9 @@ const OUT_OF_SUBSET: ReadonlyArray<{
   elixirProbe: ExprIR;
 }> = [
   {
-    label: "two-level member access",
-    toast: `toast(e.order.id)`,
-    detail: /SINGLE-LEVEL member access/,
-    elixirProbe: {
-      kind: "member",
-      receiver: { kind: "member", receiver: { kind: "ref", name: "e" }, member: "order" },
-      member: "id",
-    } as ExprIR,
-  },
-  {
     label: "a method call on the binding",
     toast: `toast(e.order.toUpper())`,
-    detail: /`method-call` expression|SINGLE-LEVEL member access/,
+    detail: /`method-call` expression/,
     elixirProbe: {
       kind: "method-call",
       receiver: { kind: "ref", name: "e" },
@@ -123,7 +127,7 @@ const OUT_OF_SUBSET: ReadonlyArray<{
     } as ExprIR,
   },
   {
-    label: "a name that is not the event binding",
+    label: "a chain rooted at a name that is not the event binding",
     toast: `toast(currentUser.email)`,
     detail: /member access off the event binding 'e' only/,
     elixirProbe: {
@@ -141,17 +145,101 @@ const diagsOf = async (src: string) => {
 };
 const codesOf = async (src: string) => (await diagsOf(src)).map((d) => d.code);
 
+const oneLine = (files: Map<string, string>, needle: string): string => {
+  for (const c of files.values())
+    for (const l of c.split("\n")) if (l.includes(needle)) return l.trim();
+  throw new Error(`no emitted line containing ${JSON.stringify(needle)}`);
+};
+
 describe("loom.toast-message-unsupported", () => {
-  describe("the v1 subset stays accepted", () => {
+  describe("the subset stays accepted", () => {
     for (const { label, toast } of IN_SUBSET) {
       it(`${label} validates clean`, async () => {
         expect(await codesOf(sys(toast, "static"))).not.toContain(CODE);
       });
-      it(`${label} renders on the JS and Feliz emitters today`, async () => {
+      it(`${label} renders on the JS, Feliz and Flutter emitters today`, async () => {
         await expect(generateSystemFiles(sys(toast, "static"))).resolves.toBeInstanceOf(Map);
         await expect(generateSystemFiles(sys(toast, "feliz"))).resolves.toBeInstanceOf(Map);
-      }, 120_000);
+        await expect(generateSystemFiles(sys(toast, "flutter"))).resolves.toBeInstanceOf(Map);
+      }, 180_000);
     }
+  });
+
+  // The renderers-first half of the multi-level widening, pinned per target.
+  //
+  // A CHAIN THROUGH A NULL LINK renders as the EMPTY STRING on all four — the
+  // one cross-target contract, spelled four different ways because each target
+  // needs a different guard:
+  //   JS      `?.` on every hop past the first, then `?? ""`
+  //   Feliz   the `toastField` Emit helper — Fable's `?` compiles to `a.b.c`
+  //           and THROWS on an absent link, so it cannot serve here
+  //   Flutter the null-aware index `?[]`, then `?? ''`
+  //   Elixir  an `&&` guard per hop (a struct has no `Access`, and `nil.id`
+  //           RAISES); `to_string(nil)` is `""`
+  describe("renders the same chain on every target", () => {
+    it("React/Vue/Svelte/Angular — optional chain + empty-string fallback", async () => {
+      const f = await generateSystemFiles(sys(`toast("Order " + e.order.id)`, "static"));
+      expect(oneLine(f, "String(event")).toContain(`"Order " + String(event.order?.id ?? "")`);
+    }, 180_000);
+
+    it("Feliz — the toastField helper, declared once and called with the path", async () => {
+      const f = await generateSystemFiles(sys(`toast("Order " + e.order.id)`, "feliz"));
+      expect(oneLine(f, `showToast ("Order`)).toContain(
+        `showToast ("Order " + (toastField payload [| "order"; "id" |]))`,
+      );
+      // The helper is emitted, and its JS body short-circuits to '' on a null
+      // link — the reason Fable's `?` operator is not used for the chain.
+      expect(oneLine(f, "let private toastField")).toContain(
+        "let private toastField (payload: obj) (path: string array) : string = jsNative",
+      );
+      expect(oneLine(f, "if(c==null)return")).toContain("if(c==null)return '';c=c[p[i]];");
+    }, 180_000);
+
+    it("Flutter — null-aware index + empty-string fallback", async () => {
+      const f = await generateSystemFiles(sys(`toast("Order " + e.order.id)`, "flutter"));
+      expect(oneLine(f, "_toast('Order")).toContain(
+        `_toast('Order ' + '\${payload['order']?['id'] ?? ''}');`,
+      );
+    }, 180_000);
+
+    it("LiveView — an `&&` nil guard per hop past the first", () => {
+      const chain = (...ms: string[]): ExprIR =>
+        ms.reduce<ExprIR>((r, member) => ({ kind: "member", receiver: r, member }) as ExprIR, {
+          kind: "ref",
+          name: "e",
+        } as ExprIR);
+      expect(renderMessageExprElixir(chain("order", "id"), "e")).toBe(
+        "to_string(e.order && e.order.id)",
+      );
+      expect(renderMessageExprElixir(chain("order", "lineItem", "id"), "e")).toBe(
+        "to_string(e.order && e.order.line_item && e.order.line_item.id)",
+      );
+      // Depth 1 is unchanged — the binding itself is always bound, so it needs
+      // no guard and the pre-widening emission stands byte for byte.
+      expect(renderMessageExprElixir(chain("orderId"), "e")).toBe("to_string(e.order_id)");
+    });
+  });
+
+  // `toastMemberPath` is THE definition of "a toast member chain" — all four
+  // renderers call it, so the shape they accept cannot drift apart per target.
+  describe("toastMemberPath — the one shared chain definition", () => {
+    const ref = (name: string): ExprIR => ({ kind: "ref", name }) as ExprIR;
+    const dot = (receiver: ExprIR, member: string): ExprIR =>
+      ({ kind: "member", receiver, member }) as ExprIR;
+
+    it("flattens a chain rooted at the binding, outermost last", () => {
+      expect(toastMemberPath(dot(ref("e"), "id"), "e")).toEqual(["id"]);
+      expect(toastMemberPath(dot(dot(ref("e"), "order"), "id"), "e")).toEqual(["order", "id"]);
+      expect(toastMemberPath(dot(dot(dot(ref("e"), "a"), "b"), "c"), "e")).toEqual(["a", "b", "c"]);
+    });
+
+    it("refuses a chain rooted at anything else", () => {
+      expect(toastMemberPath(dot(ref("currentUser"), "email"), "e")).toBeUndefined();
+      // A parenthesised root: no renderer has a receiver to walk down from.
+      expect(
+        toastMemberPath(dot({ kind: "paren", inner: ref("e") } as ExprIR, "id"), "e"),
+      ).toBeUndefined();
+    });
   });
 
   describe("outside the subset the gate fires", () => {
@@ -171,9 +259,10 @@ describe("loom.toast-message-unsupported", () => {
         expect(mine[0]!.source).toContain("`on Live.OrderPlaced` handler");
       });
 
-      // The other half of the trade: without the gate this is not a
-      // degradation, it is an ABORT.  Both SPA renderers are exercised
-      // end-to-end; the LiveView one directly (it has no SPA deployable).
+      // The other half of the trade, and the property the whole gate exists
+      // for: without it this is not a degradation, it is an ABORT with a raw
+      // Error and no `loom.*` code.  Widening the subset must never move a
+      // shape out of the gate's reach while a renderer still throws on it.
       it(`${label} crashes codegen today (which is what the gate replaces)`, async () => {
         // The unchecked helper: the fixture is rejected by the gate under test
         // on purpose, and the CRASH the gate replaces is the subject — the
@@ -186,18 +275,32 @@ describe("loom.toast-message-unsupported", () => {
         await expect(generateSystemFilesUnchecked(sys(toast, "feliz"), why)).rejects.toThrow(
           /Feliz realtime: /,
         );
-      }, 120_000);
+        await expect(generateSystemFilesUnchecked(sys(toast, "flutter"), why)).rejects.toThrow(
+          /Flutter realtime: /,
+        );
+      }, 240_000);
     }
 
     for (const { label, elixirProbe } of OUT_OF_SUBSET) {
-      it(`${label} also throws in the LiveView renderer (same subset, three emitters)`, () => {
+      it(`${label} also throws in the LiveView renderer (same subset, four emitters)`, () => {
         expect(() => renderMessageExprElixir(elixirProbe, "e")).toThrow(/realtime handle_info: /);
       });
     }
   });
 
+  // THE property the gate exists for, asserted from the user's side rather
+  // than the validator's: an out-of-subset message must come back as the
+  // `loom.*` diagnostic, NOT as the renderer's raw `Error`.  Disabling the gate
+  // makes this fail with `RealtimeHandlers: unsupported expression kind
+  // 'convert' in toast message.` — the original silent crash, verbatim.
+  it("an out-of-subset message reaches the user as a diagnostic, never a raw throw", async () => {
+    await expect(generateSystemFiles(sys(`toast(string(e.at))`, "static"))).rejects.toThrow(
+      /loom\.toast-message-unsupported/,
+    );
+  }, 180_000);
+
   it("the gate is target-agnostic — it fires on a Feliz host too", async () => {
-    expect(await codesOf(sys(`toast(e.order.id)`, "feliz"))).toContain(CODE);
+    expect(await codesOf(sys(`toast(string(e.at))`, "feliz"))).toContain(CODE);
   });
 
   it("a refetch-only handler is untouched", async () => {

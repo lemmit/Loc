@@ -61,6 +61,15 @@ handler as the event arrives.  A handler body admits two actions
 (anything else is `loom.ui-handler-statement-unknown`):
 
 - `toast(<expr>)` — show the arriving event as a message notification.
+  The message is a bounded expression subset, identical on every target: a
+  literal, the event binding `e`, a **member access chain of any depth** off
+  it (`e.order.id`), parentheses, and binary operators between those.  A
+  conversion (`string(e.at)`), a method call (`e.name.toUpper()`), a ternary,
+  or a chain rooted at anything but the binding is
+  `loom.toast-message-unsupported` — compute those server-side and carry the
+  result on the event.  **A chain through a null link renders as the empty
+  string** on all four renderers, rather than throwing or printing
+  `null`/`undefined`.
 - `refetch(<Aggregate>[, …])` — invalidate that aggregate's query cache,
   the realtime twin of a mutation's `onSuccess` invalidation.  Each target
   must name an aggregate declared in the system (`loom.ui-handler-refetch-target`
@@ -77,7 +86,7 @@ client (react-/vue-/svelte-query alike).
 ```ddd
 channel Orders: Fulfillment.Lifecycle
 on Orders.OrderShipped(e) {
-  toast("Order " + e.orderNumber + " shipped")
+  toast("Order " + e.order.id + " shipped")
   refetch(Order)
 }
 ```
@@ -89,10 +98,30 @@ const qc = useQueryClient();
 // …
 switch (event.type) {
   case "OrderShipped":
-    notifications.show({ message: "Order " + String(event.orderNumber ?? "") + " shipped" });
+    notifications.show({ message: "Order " + String(event.order?.id ?? "") + " shipped" });
     qc.invalidateQueries({ queryKey: ["orders"] });
     break;
 }
+```
+
+The same message on the other three renderers — each spells the null guard
+its own way, and all four answer `""` for a chain through a null link:
+
+```fsharp
+// Feliz, src/App.fs — `toastField` walks the path and stops at the first
+// null link (Fable's `?` compiles to `payload.order.id`, which would throw).
+showToast ("Order " + (toastField payload [| "order"; "id" |]) + " shipped")
+```
+
+```dart
+// Flutter, lib/realtime.dart — null-aware index, then `?? ''`.
+_toast('Order ' + '${payload['order']?['id'] ?? ''}' + ' shipped');
+```
+
+```elixir
+# Phoenix LiveView, the page's handle_info/2 — a struct has no `Access`, and
+# `nil.id` raises, so each hop past the first is `&&`-guarded.
+put_flash(socket, :info, "Order " <> to_string(e.order && e.order.id) <> " shipped")
 ```
 
 ---

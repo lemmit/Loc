@@ -80,6 +80,11 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  code.  The validator bounded the handler STATEMENT vocabulary and never
  *  looked inside the `toast(…)`.  Drained by the renderers growing the general
  *  expression path (M-T1.10), which deletes the row and lowers this back to 39.
+ *  (Two corrections since, recorded here rather than by rewriting the entry:
+ *  there are FOUR such renderers, not three — `flutter/realtime.ts` was missed —
+ *  and on 2026-09-02 the subset grew MULTI-LEVEL member access off the binding,
+ *  so the row NARROWED to conversions / method calls / ternaries / chains rooted
+ *  elsewhere.  The count does not move: the code still fires.)
  *
  *  40 → 41: `loom.audited-returning-operation-unsupported` (generator review
  *  2026-08-24, A6).  Same trade as the rows above, and the same reason to raise

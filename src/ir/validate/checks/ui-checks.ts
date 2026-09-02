@@ -2903,31 +2903,42 @@ function checkUserComponentSupport(
 
 // -------------------------------------------------------------------------
 // `loom.toast-message-unsupported` — an `on <chan>.<Event>(e) { toast(<expr>) }`
-// message expression outside the v1 subset every realtime renderer implements.
+// message expression outside the subset every realtime renderer implements.
 //
 // THE SILENT CRASH.  The AST validator (`checkUiNotification`,
 // `src/language/validators/ui.ts`) bounds the handler STATEMENT vocabulary —
 // `toast(<one expression>)` / `refetch(<Agg>…)` — but accepts ANY expression
-// inside the `toast(…)`.  All three renderers then implement the SAME narrow
-// v1 subset and `throw` on anything else:
+// inside the `toast(…)`.  All FOUR renderers then implement the SAME narrow
+// subset and `throw` on anything else:
 //
-//   src/generator/_frontend/realtime.ts   `renderMessageExpr`      (React/Vue/Svelte/Angular)
-//   src/generator/feliz/realtime.ts       `renderFsToastMessage`   (Feliz)
-//   src/generator/elixir/realtime-liveview.ts `renderMessageExprElixir` (LiveView)
+//   src/generator/_frontend/realtime.ts       `renderMessageExpr`       (React/Vue/Svelte/Angular)
+//   src/generator/feliz/realtime.ts           `renderFsToastMessage`    (Feliz)
+//   src/generator/elixir/realtime-liveview.ts `renderMessageExprElixir`  (LiveView)
+//   src/generator/flutter/realtime.ts         `renderDartToastMessage`  (Flutter)
 //
-// so `toast(e.order.id)` / `toast(x ? "a" : "b")` / `toast(string(e.at))` parses
-// and validates, then aborts `ddd generate system` with a raw `Error` and a
-// stack trace — no `loom.*` code, no source location.  Measured on this HEAD
-// for all three renderers.  This check makes the throw a defensive backstop.
+// so `toast(x ? "a" : "b")` / `toast(string(e.at))` parses and validates, then
+// aborts `ddd generate system` with a raw `Error` and a stack trace — no
+// `loom.*` code, no source location.  This check makes the throw a defensive
+// backstop rather than the only defence.
 //
-// The gate is the INTERSECTION of the three, which is also their union: the
-// three `switch`es are arm-for-arm identical (literal / the event binding /
-// single-level member off it / paren / binary), so one target-agnostic rule
-// covers every frontend rather than three per-framework arms.
+// The gate is the INTERSECTION of the four, which is also their union: the four
+// `switch`es are arm-for-arm identical (literal / the event binding /
+// MULTI-LEVEL member off it / paren / binary), so one target-agnostic rule
+// covers every frontend rather than four per-framework arms.
+//
+// MULTI-LEVEL MEMBER was widened in on 2026-09-02, renderers first.  `e.id`
+// working while `e.order.id` crashed was arbitrary from the author's side, and
+// every renderer already walked a receiver chain for the single-level case.
+// The four now flatten the chain through ONE shared helper (`toastMemberPath`,
+// `src/generator/_frontend/realtime.ts`) and guard each hop past the first
+// against a null link, so a chain through a nil link renders as the EMPTY
+// STRING on all four.  `ir/` cannot import from `generator/`, so the walk below
+// re-implements that helper; the two are pinned together by
+// `test/ir/toast-message-subset.test.ts`.
 // -------------------------------------------------------------------------
 
 /** Why `e` is outside the toast subset, or `undefined` when it is inside.
- *  Mirrors the three renderers' `switch` arms exactly. */
+ *  Mirrors the four renderers' `switch` arms exactly. */
 function toastMessageProblem(
   e: ExprIR,
   bind: string,
@@ -2944,14 +2955,21 @@ function toastMessageProblem(
               `reads '${e.name}', which is not in scope — only the handler's event ` +
               `binding '${bind}' is`,
           };
-    case "member":
-      if (e.receiver.kind === "ref" && e.receiver.name === bind) return undefined;
+    case "member": {
+      // A member CHAIN of any depth is in the subset as long as it bottoms out
+      // at a bare reference to the handler's event binding.  Rooted at anything
+      // else — another name (`currentUser.email`), a paren, a call — it is not:
+      // no renderer has a receiver to walk down from.
+      let root: ExprIR = e;
+      while (root.kind === "member") root = root.receiver;
+      if (root.kind === "ref" && root.name === bind) return undefined;
       return {
         kind: "member",
         detail:
-          `reads \`${describeReceiver(e)}\` — a toast message admits SINGLE-LEVEL member ` +
+          `reads \`${describeReceiver(e)}\` — a toast message admits member ` +
           `access off the event binding '${bind}' only`,
       };
+    }
     case "paren":
       return toastMessageProblem(e.inner, bind);
     case "binary":

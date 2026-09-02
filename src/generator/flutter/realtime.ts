@@ -30,14 +30,16 @@
 // live-event handler — the same use-driven rule `file_picker` / `url_launcher`
 // follow.
 //
-// The toast message is the validator-bounded v1 subset
+// The toast message is the validator-bounded subset
 // (`loom.ui-handler-statement-unknown` admits only `toast(<expr>)`): literals,
-// the event binding, single-level member access off it, and operators.
-// Anything deeper fails loud here rather than emitting broken Dart.
+// the event binding, MULTI-LEVEL member access off it, and operators.
+// Anything outside that fails loud here rather than emitting broken Dart — the
+// throw is the defensive backstop behind `loom.toast-message-unsupported`.
 // ---------------------------------------------------------------------------
 
 import type { ExprIR, UiIR, UiNotificationIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
+import { toastMemberPath } from "../_frontend/realtime.js";
 import { dartString } from "./dart-expr.js";
 import type { FlutterRead } from "./reads-emit.js";
 
@@ -191,10 +193,16 @@ function exprReadsBinding(e: ExprIR, bind: string): boolean {
   }
 }
 
-/** Render the v1 toast-message subset to a Dart String expression.  The event
- *  binding decodes to `payload` (a `Map<String, dynamic>`); member access reads
- *  a key off it, and every leaf is `String`-coerced so a binary `+` stays a
- *  string concatenation rather than a `dynamic` addition. */
+/** Render the toast-message subset to a Dart String expression.  The event
+ *  binding decodes to `payload` (a `Map<String, dynamic>`); a member chain off
+ *  it reads key by key, and every leaf is `String`-coerced so a binary `+` stays
+ *  a string concatenation rather than a `dynamic` addition.
+ *
+ *  NULLABLE LINKS.  Every hop past the first uses the null-aware index `?[]`
+ *  (`payload['order']?['id']`) — a plain `[]` on a null link is a
+ *  `NoSuchMethodError` — and the chain falls back to `''`, so a missing link
+ *  renders EMPTY rather than interpolating the literal text `null`.  Matches the
+ *  JS `?.` + `?? ""` chain, Feliz's `toastField`, and LiveView's `&&` guard. */
 function renderDartToastMessage(e: ExprIR, bind: string): string {
   switch (e.kind) {
     case "literal":
@@ -205,12 +213,17 @@ function renderDartToastMessage(e: ExprIR, bind: string): string {
         `Flutter realtime: unsupported name '${e.name}' in toast message (only the event binding '${bind}' is in scope).`,
       );
     case "member": {
-      if (e.receiver.kind !== "ref" || e.receiver.name !== bind) {
+      const path = toastMemberPath(e, bind);
+      if (!path) {
         throw new Error(
-          "Flutter realtime: toast messages support single-level member access off the event binding only.",
+          "Flutter realtime: toast messages support member access off the event binding only.",
         );
       }
-      return `'\${payload[${dartString(e.member)}]}'`;
+      // `payload` is always a Map, so only the hops PAST the first need `?[]`.
+      const chain = path
+        .map((m, i) => (i === 0 ? `[${dartString(m)}]` : `?[${dartString(m)}]`))
+        .join("");
+      return `'\${payload${chain} ?? ${dartString("")}}'`;
     }
     case "paren":
       return `(${renderDartToastMessage(e.inner, bind)})`;

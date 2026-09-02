@@ -1,0 +1,85 @@
+// Vanilla LiveView REALTIME-TOAST fixture — the `handle_info` half of
+// `on <chan>.<Event>(e) { toast(<expr>) refetch(<Agg>) }`, compiled for real.
+//
+// WHY THIS EXISTS.  `renderMessageExprElixir`
+// (`src/generator/elixir/realtime-liveview.ts`) had NO compile gate at all —
+// no fixture in this directory declared a `channel` on a `ui`, so every
+// assertion about its output was a string comparison in vitest and the emitted
+// Elixir was never handed to `mix`.  It is the one target of the four with no
+// runtime leg AND (until now) no compile leg.
+//
+// It pins three shapes in one `handle_info` clause:
+//   `toast(e.at)`                        — depth 1, a bare `to_string(e.at)`
+//   `toast("Order " + e.order.id)`       — depth 2, the `&&` nil guard
+//   `refetch(Order)`                     — the binding is also captured, so the
+//                                          `%…{} = e` head is exercised
+//
+// The depth-2 arm is the reason for the guard: a struct has no `Access`
+// implementation, so `get_in` is unavailable and `nil.id` RAISES.  The emitter
+// renders `to_string(e.order && e.order.id)`, which short-circuits to `nil`,
+// and `to_string(nil)` is `""` — the same empty string the JS, Feliz and
+// Flutter renderers produce for a chain through a null link.
+system VanillaRealtimeToast {
+  subdomain Shipping {
+    context Fulfillment {
+      aggregate Order with crudish {
+        customerId: string
+        status: string
+      }
+      repository Orders for Order { }
+
+      event OrderPlaced { order: Order id, at: datetime }
+
+      channel Lifecycle {
+        carries: OrderPlaced
+        delivery: broadcast
+        retention: ephemeral
+      }
+    }
+  }
+
+  api FulfillmentApi from Shipping
+  storage primary { type: postgres }
+  resource fulfillmentState { for: Fulfillment, kind: state, use: primary }
+
+  ui OrdersAdmin {
+    channel Live: Fulfillment.Lifecycle
+
+    // Depth 1 + depth 2 + a refetch, all on one handler.
+    on Live.OrderPlaced(e) {
+      toast("Order " + e.order.id + " placed at " + e.at)
+      refetch(Order)
+    }
+
+    page Orders {
+      route: "/orders"
+      body: Stack {
+        Heading { "Orders" },
+        QueryView {
+          of:      Order.all,
+          loading: Loader {},
+          error:   Alert { "Couldn't load orders" },
+          empty:   Empty { "No orders yet." },
+          data:    rows => Paper {
+            Table {
+              rows: rows,
+              Column { "ID",       o => IdLink { o.id, of: Order } },
+              Column { "Customer", o => Text { o.customerId } },
+              Column { "Status",   o => Text { o.status } }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  deployable phoenixApp {
+    platform: elixir
+    design: coreComponents
+    contexts: [Fulfillment]
+    dataSources: [fulfillmentState]
+    serves: FulfillmentApi
+    ui: OrdersAdmin
+    port: 4000
+  }
+}
