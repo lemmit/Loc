@@ -28,6 +28,27 @@
   --color-destructive: hsl(var(--destructive));
   --color-border: hsl(var(--border));
   --color-primary: var(--loom-primary);
+  /* flowbite-svelte addresses the brand colour as a NUMBERED Tailwind palette,
+     not as a single `primary` token: its Button theme is
+     `text-white bg-primary-700 hover:bg-primary-800`, and its Badge / Alert /
+     Card variants reach for `primary-100` / `-200` / `-800`.  With only
+     `--color-primary` defined none of those utilities exist — Tailwind emits
+     nothing for them, so every `color="primary"` component renders with a
+     transparent background under the `text-white` that DOES exist: an invisible
+     button.  Derive the whole ramp from the single token the DSL's `theme {}`
+     block sets, so the pack honours the authored primary instead of pinning
+     flowbite's own blue. */
+  --color-primary-50: color-mix(in oklab, var(--loom-primary) 8%, white);
+  --color-primary-100: color-mix(in oklab, var(--loom-primary) 16%, white);
+  --color-primary-200: color-mix(in oklab, var(--loom-primary) 32%, white);
+  --color-primary-300: color-mix(in oklab, var(--loom-primary) 50%, white);
+  --color-primary-400: color-mix(in oklab, var(--loom-primary) 74%, white);
+  --color-primary-500: var(--loom-primary);
+  --color-primary-600: color-mix(in oklab, var(--loom-primary) 86%, black);
+  --color-primary-700: color-mix(in oklab, var(--loom-primary) 74%, black);
+  --color-primary-800: color-mix(in oklab, var(--loom-primary) 60%, black);
+  --color-primary-900: color-mix(in oklab, var(--loom-primary) 48%, black);
+  --color-primary-950: color-mix(in oklab, var(--loom-primary) 32%, black);
   --font-sans: var(--loom-font-family);
   --font-mono: var(--loom-font-family-mono);
 }
