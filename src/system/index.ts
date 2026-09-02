@@ -288,10 +288,15 @@ function emitSystem(
   }
 
   out.set("docker-compose.yml", renderDockerCompose(sys));
-  // Prometheus collector scrape config (M-T7.1) — mounted by the compose
-  // `prometheus` service; one job per backend deployable's /metrics.
+  // Observability is OPT-IN (M-FT.13 / finding G7): the base compose stays
+  // lean — a hello-world `docker compose up` starts the app and its database,
+  // nothing else.  The collector pair plus the per-backend OTLP export env
+  // live in an overlay file, so ONE command turns the whole bundle on:
+  //   docker compose -f docker-compose.yml -f docker-compose.obs.yml up
+  // The scrape config it mounts is emitted alongside it.
   if (metricsScrapeTargets(sys).length > 0) {
     out.set("monitoring/prometheus.yml", renderPrometheusConfig(sys));
+    out.set(OBS_OVERLAY_FILE, renderObsOverlayCompose(sys));
   }
   out.set("db-init/00-create-databases.sql", renderDbInit(sys));
   // Broker auth provisioning (§7): each wired rabbitmq
@@ -617,9 +622,69 @@ function renderPrometheusConfig(sys: SystemIR): string {
   return lines.join("\n") + "\n";
 }
 
+/** The opt-in observability overlay's filename.  A compose OVERLAY (rather
+ *  than a `profiles:` block in the base file) because the bundle is two
+ *  things that must switch together: the collector services AND the
+ *  per-backend OTLP export env.  Compose can gate a whole service on a
+ *  profile but not a single `environment:` key, so a profile would leave
+ *  every backend pointed at a collector that a plain `up` never starts. */
+const OBS_OVERLAY_FILE = "docker-compose.obs.yml";
+
+/** `docker-compose.obs.yml` — the observability bundle, applied on top of the
+ *  base stack with
+ *
+ *    docker compose -f docker-compose.yml -f docker-compose.obs.yml up
+ *
+ *  It adds the two collectors (Prometheus scraping every backend's
+ *  `GET /metrics` through the mounted `monitoring/prometheus.yml`, UI on
+ *  `:9090`; Jaeger all-in-one ingesting OTLP and serving the trace UI on
+ *  `:16686`) and merges `OTEL_EXPORTER_OTLP_ENDPOINT`/`OTEL_SERVICE_NAME`
+ *  into each backend service — setting the endpoint is what turns span
+ *  EXPORT on.  No `depends_on` on either collector: both tolerate their
+ *  targets being down and retry. */
+function renderObsOverlayCompose(sys: SystemIR): string {
+  const lines: string[] = [];
+  lines.push("# Auto-generated.  Observability overlay (opt-in):");
+  lines.push(`#   docker compose -f docker-compose.yml -f ${OBS_OVERLAY_FILE} up`);
+  lines.push("#");
+  lines.push("# Prometheus UI: http://localhost:9090");
+  lines.push(`# Jaeger UI:     http://localhost:${TRACE_COLLECTOR.uiPort}`);
+  lines.push("services:");
+  // Per-backend OTLP export env, merged onto the base service definition.
+  for (const d of sys.deployables) {
+    if (platformFor(d.platform).isFrontend) continue;
+    const slug = serviceSlug(d.name);
+    lines.push(`  ${slug}:`);
+    lines.push("    environment:");
+    lines.push(`      ${OTEL_ENDPOINT_ENV}: ${JSON.stringify(collectorEndpoint())}`);
+    lines.push(`      ${OTEL_SERVICE_NAME_ENV}: ${JSON.stringify(slug)}`);
+  }
+  lines.push("  prometheus:");
+  lines.push("    image: prom/prometheus:v3.1.0");
+  lines.push("    volumes:");
+  lines.push("      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro");
+  lines.push("    ports:");
+  lines.push('      - "9090:9090"');
+  lines.push(`  ${TRACE_COLLECTOR.service}:`);
+  lines.push(`    image: ${TRACE_COLLECTOR.image}`);
+  lines.push("    ports:");
+  lines.push(`      - "${TRACE_COLLECTOR.uiPort}:${TRACE_COLLECTOR.uiPort}"`);
+  return lines.join("\n") + "\n";
+}
+
 function renderDockerCompose(sys: SystemIR): string {
   const lines: string[] = [];
   lines.push("# Auto-generated.");
+  // The base stack is exactly the app: every deployable, its database, and the
+  // infrastructure a declared `storage` needs.  Observability (Prometheus +
+  // Jaeger + the OTLP export env) is opt-in through the overlay below, so a
+  // hello-world `docker compose up` does not start two collectors it will
+  // never be asked about.
+  if (metricsScrapeTargets(sys).length > 0) {
+    lines.push("#");
+    lines.push("# Metrics + traces are opt-in — add the observability overlay:");
+    lines.push(`#   docker compose -f docker-compose.yml -f ${OBS_OVERLAY_FILE} up`);
+  }
   lines.push("services:");
   lines.push("  db:");
   lines.push("    image: postgres:18-alpine");
@@ -669,29 +734,6 @@ function renderDockerCompose(sys: SystemIR): string {
   const sidecars = renderStorageSidecars(sys);
   for (const svc of sidecars.services) {
     lines.push(...svc.map((l) => `  ${l}`));
-    lines.push("");
-  }
-  // Prometheus collector (M-T7.1): scrapes every backend's GET /metrics via
-  // the mounted scrape config (monitoring/prometheus.yml), so `docker compose
-  // up` gives a running monitoring surface out of the box (UI on :9090).
-  // No depends_on — Prometheus tolerates targets being down and retries.
-  if (metricsScrapeTargets(sys).length > 0) {
-    lines.push("  prometheus:");
-    lines.push("    image: prom/prometheus:v3.1.0");
-    lines.push("    volumes:");
-    lines.push("      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro");
-    lines.push("    ports:");
-    lines.push('      - "9090:9090"');
-    lines.push("");
-    // OTel trace collector (M-T7.1): jaeger all-in-one accepts OTLP directly
-    // and ships a query UI, so `docker compose up` gives a running trace
-    // surface out of the box (the trace twin of the Prometheus UI on :9090).
-    // Every backend's OTEL_EXPORTER_OTLP_ENDPOINT points here.  No depends_on —
-    // the OTLP batch exporter retries, so backends tolerate it being down.
-    lines.push(`  ${TRACE_COLLECTOR.service}:`);
-    lines.push(`    image: ${TRACE_COLLECTOR.image}`);
-    lines.push("    ports:");
-    lines.push(`      - "${TRACE_COLLECTOR.uiPort}:${TRACE_COLLECTOR.uiPort}"`);
     lines.push("");
   }
   lines.push("volumes:");
@@ -1094,14 +1136,13 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
     if (origins.length > 0) {
       lines.push(`    CORS_ORIGIN: ${JSON.stringify(origins.join(","))}`);
     }
-    // OpenTelemetry export (M-T7.1): point every backend at the bundled
-    // jaeger collector so `docker compose up` gives a running trace surface
-    // out of the box.  `OTEL_SERVICE_NAME` groups the deployable's spans in
-    // the trace UI.  Backends create spans regardless; setting the endpoint
-    // is what turns EXPORT on.
-    lines.push(`    ${OTEL_ENDPOINT_ENV}: ${JSON.stringify(collectorEndpoint())}`);
-    lines.push(`    ${OTEL_SERVICE_NAME_ENV}: ${JSON.stringify(slug)}`);
   }
+  // NOTE: the OpenTelemetry export env (`OTEL_EXPORTER_OTLP_ENDPOINT` /
+  // `OTEL_SERVICE_NAME`) is NOT set here — it lives in the observability
+  // overlay next to the collector it points at (`renderObsOverlayCompose`).
+  // The emitted tracing init treats an unset endpoint as "create spans so
+  // trace_id rides the logs, never export", so the lean stack stays quiet
+  // instead of retrying against a collector nobody started.
   // Same-origin proxy target for a vite-served frontend.  Its bundle fetches
   // `/api` relative, and `vite preview` proxies that to the backend — but
   // inside the compose network the backend is its SERVICE name (not the

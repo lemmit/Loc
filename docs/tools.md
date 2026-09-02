@@ -98,10 +98,13 @@ ddd new acme --platform python                 # FastAPI backend + React (mantin
 | `-o, --out <dir>` | `./<name>` | Output directory. |
 | `--force` | off | Scaffold into an existing, non-empty directory. |
 
-It writes exactly three files — `main.ddd`, `README.md` (the run steps),
-and a commented `.loomignore` — and **validates the rendered model
-in-memory before writing anything**, so a starter is never emitted in a
-broken state. It does not emit the project tree; the README walks you
+It writes exactly four files — `main.ddd`, `README.md` (the run steps),
+a commented `.loomignore`, and `LICENSE` (the MIT grant over generated
+output; see [`license-faq.md`](license-faq.md)) — and **validates the
+rendered model in-memory before writing anything**, so a starter is never
+emitted in a broken state.  `ddd generate` writes none of these: it emits
+build output into a tree whose identity files are yours (M-FT.13, finding
+G9). It does not emit the project tree; the README walks you
 through `ddd generate system main.ddd -o .` and `docker compose up`.
 
 `generate ts` / `generate dotnet` work on **legacy** sources (bare
@@ -799,6 +802,17 @@ trusts them — the Dockerfile already declares the necessary `COPY` and
 `update-ca-certificates`/`NODE_EXTRA_CA_CERTS` lines.  An empty
 `certs/` is a no-op, so this costs nothing in environments that don't
 need it.
+
+**Every build stage, not just the main one.**  A fullstack image has
+more than one: the Phoenix LiveView `assets-build` stage and the
+embedded-SPA `spa-build` stages on the .NET / Java / Python / Phoenix
+images each run their own `npm install`, so each opens with its own
+`COPY certs/` *before* that install.  The Phoenix `assets-build` stage
+used to install first and copy the CAs afterwards, which made elixir
+the one platform in the matrix that could not build behind a
+TLS-terminating proxy (M-FT.13, finding G10).  The ordering is pinned
+by `test/system/generation-defaults.test.ts`, which walks each emitted
+Dockerfile stage by stage.
 
 The opt-in `LOOM_E2E_CA_DIR` environment variable (used by
 `test/e2e.test.ts`) just copies the host's CAs into each deployable's

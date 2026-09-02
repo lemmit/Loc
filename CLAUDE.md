@@ -79,7 +79,7 @@ it if `docker info` starts failing mid-session.
 ### CLI
 
 ```bash
-node bin/cli.js new <name> [--platform node|dotnet|elixir|java|python] [--template blank|crud] [--design <pack>]  # scaffold a starter project (main.ddd + README + .loomignore), validated before writing
+node bin/cli.js new <name> [--platform node|dotnet|elixir|java|python] [--template blank|crud] [--design <pack>]  # scaffold a starter project (main.ddd + README + .loomignore + LICENSE), validated before writing
 node bin/cli.js parse <file.ddd>                       # parse + validate (AST + IR, multi-file aware), exit non-zero on errors
 node bin/cli.js generate ts     <file.ddd> -o <out>    # single Hono project (legacy single-context mode)
 node bin/cli.js generate dotnet <file.ddd> -o <out>    # single .NET project (legacy)

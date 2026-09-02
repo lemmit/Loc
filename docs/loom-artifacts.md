@@ -9,6 +9,8 @@ consumption.
 ```
 <outdir>/
 ├── docker-compose.yml
+├── docker-compose.obs.yml   # opt-in observability overlay (see docs/observability.md)
+├── monitoring/prometheus.yml
 ├── db-init/
 ├── <deployable-1>/
 ├── <deployable-2>/

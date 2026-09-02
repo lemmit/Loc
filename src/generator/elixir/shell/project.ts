@@ -5,6 +5,12 @@
 // `vanilla/shell-emit.ts`.
 // ---------------------------------------------------------------------------
 
+import {
+  DEBIAN_CERTS_BLOCK,
+  NODE_CERTS_BLOCK,
+  NPM_INSTALL_BLOCK,
+} from "../../_docker/node-stage.js";
+
 export function renderDockerfile(
   appName: string,
   embedReact = false,
@@ -42,20 +48,18 @@ export function renderDockerfile(
     : feliz
       ? `FROM mcr.microsoft.com/dotnet/sdk:8.0 AS spa-build
 WORKDIR /spa
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \\
+${DEBIAN_CERTS_BLOCK}RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \\
   && apt-get install -y --no-install-recommends nodejs \\
   && rm -rf /var/lib/apt/lists/*
 COPY assets/ ./
 RUN dotnet tool restore
-RUN npm install
-RUN npm run build
+${NPM_INSTALL_BLOCK}RUN npm run build
 
 `
       : `FROM node:24-alpine AS spa-build
 WORKDIR /spa
-COPY assets/package.json assets/package-lock.json* ./
-RUN npm ci --prefer-offline --no-audit --no-fund || npm install
-COPY assets/ ./
+${NODE_CERTS_BLOCK}COPY assets/package.json ./
+${NPM_INSTALL_BLOCK}COPY assets/ ./
 RUN npm run build
 
 `;
@@ -72,9 +76,8 @@ RUN npm run build
   const assetsBuildStage = hasLiveViewAssets
     ? `FROM node:24-alpine AS assets-build
 WORKDIR /assets
-COPY assets/package.json ./
-RUN npm install --no-audit --no-fund
-COPY assets/ ./
+${NODE_CERTS_BLOCK}COPY assets/package.json ./
+${NPM_INSTALL_BLOCK}COPY assets/ ./
 COPY lib /lib
 RUN mkdir -p /priv/static/assets && npm run build
 

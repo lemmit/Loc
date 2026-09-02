@@ -4,6 +4,11 @@ import { readPortsForOperation } from "../../../ir/util/domain-service-read-port
 import { isTphBase } from "../../../ir/util/inheritance.js";
 import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { plural, upperFirst } from "../../../util/naming.js";
+import {
+  DEBIAN_CERTS_BLOCK,
+  NODE_CERTS_BLOCK,
+  NPM_INSTALL_BLOCK,
+} from "../../_docker/node-stage.js";
 import { renderDotnetLogCall, renderDotnetLogCallWithException } from "../../_obs/render-dotnet.js";
 import { OTEL_ENDPOINT_ENV, OTEL_SERVICE_NAME_ENV } from "../../_obs/tracing.js";
 import type { SchemaIdOverride } from "../schema-ids.js";
@@ -1431,13 +1436,12 @@ export function renderDockerfile(
 
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS spa-build
 WORKDIR /spa
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \\
+${DEBIAN_CERTS_BLOCK}RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \\
   && apt-get install -y --no-install-recommends nodejs \\
   && rm -rf /var/lib/apt/lists/*
 COPY ClientApp/ ./
 RUN dotnet tool restore
-RUN npm install
-RUN npm run build
+${NPM_INSTALL_BLOCK}RUN npm run build
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS dotnet-build
 WORKDIR /src
@@ -1475,9 +1479,8 @@ ENTRYPOINT ["dotnet", "${ns}.dll"]
 
 FROM node:24-alpine AS spa-build
 WORKDIR /spa
-COPY ClientApp/package.json ClientApp/package-lock.json* ./
-RUN npm ci --prefer-offline --no-audit --no-fund || npm install
-COPY ClientApp/ ./
+${NODE_CERTS_BLOCK}COPY ClientApp/package.json ./
+${NPM_INSTALL_BLOCK}COPY ClientApp/ ./
 RUN npm run build
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS dotnet-build

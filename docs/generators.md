@@ -1214,6 +1214,8 @@ writes everything to a flat tree:
 ├── catalog_web/
 ├── web_app/
 ├── docker-compose.yml    # postgres + every deployable + healthchecks
+├── docker-compose.obs.yml       # opt-in: prometheus + jaeger + the OTLP export env
+├── monitoring/prometheus.yml    # the overlay's scrape config, one job per backend
 ├── db-init/
 │   └── 00-create-databases.sql  # CREATE DATABASE per backend deployable
 └── e2e/                  # generated DSL-level e2e suite (vitest+fetch)

@@ -239,13 +239,24 @@ consumer migration.
 ## Metrics collector (Prometheus)
 
 Every generated **backend** also exposes a Prometheus scrape target at
-**`GET /metrics`** (M-T7.1). The system composer wires a collector so
-`docker compose up` gives a running monitoring surface with zero setup:
+**`GET /metrics`** (M-T7.1). The system composer wires a collector into an
+**opt-in overlay**, so one command gives a running monitoring surface with
+zero setup — and a plain `docker compose up` stays the app and its database,
+nothing else (M-FT.13):
 
-- The compose file adds a `prometheus` service (UI on **`:9090`**) that
-  mounts **`monitoring/prometheus.yml`** — a scrape config with one job per
-  backend deployable, hitting its `/metrics` on the compose network. Pure
+```bash
+docker compose -f docker-compose.yml -f docker-compose.obs.yml up
+```
+
+- **`docker-compose.obs.yml`** adds a `prometheus` service (UI on **`:9090`**)
+  that mounts **`monitoring/prometheus.yml`** — a scrape config with one job
+  per backend deployable, hitting its `/metrics` on the compose network. Pure
   static frontends emit no metrics and get no job.
+- The overlay also merges the OTLP export env onto each backend service (see
+  *Tracing* below). Both halves of the bundle switch together, which is why
+  this is an overlay rather than a compose `profiles:` block — Compose can gate
+  a whole service on a profile, but not a single `environment:` key, so a
+  profile would leave every backend exporting spans into a void.
 - On **Kubernetes** (`generate system --k8s`, and the Helm chart), each
   backend pod carries the standard scrape-discovery annotations, so a
   cluster Prometheus finds them automatically:
@@ -256,7 +267,9 @@ Every generated **backend** also exposes a Prometheus scrape target at
   prometheus.io/path: /metrics
   ```
 
-Both are additive — a frontend-only system emits no collector.
+Both are additive — a system with no backend deployable emits neither the
+overlay nor the scrape config, and the base compose does not advertise an
+overlay that is not there.
 
 ## Tracing (OpenTelemetry)
 
@@ -303,21 +316,29 @@ Per-backend client library (the standard OTel SDK for each platform):
 | **Python** | `opentelemetry-{api,sdk,exporter-otlp-proto-http}` | `app/obs/tracing.py` + the ASGI `ObservabilityMiddleware` |
 | **Phoenix** | `opentelemetry_api` / `opentelemetry` / `opentelemetry_exporter` | the `RequestContext` Plug (`register_before_send` closes the span) |
 
-**Bundled collector.** The system composer wires a **Jaeger all-in-one**
-service into `docker-compose.yml` (OTLP ingest on `:4318`, query UI on
-**`:16686`** — the trace twin of the Prometheus UI on `:9090`) and points every
-backend's `OTEL_EXPORTER_OTLP_ENDPOINT` at it, so `docker compose up` gives a
-running trace surface with zero setup. On Kubernetes each backend carries
-`OTEL_SERVICE_NAME` plus an overridable (empty) `OTEL_EXPORTER_OTLP_ENDPOINT`
-that an operator points at their cluster collector via the chart's `env:`
-overlay — export stays off until then.
+**Bundled collector (opt-in).** The system composer wires a **Jaeger
+all-in-one** service into **`docker-compose.obs.yml`** (OTLP ingest on `:4318`,
+query UI on **`:16686`** — the trace twin of the Prometheus UI on `:9090`),
+and the same overlay merges each backend's `OTEL_EXPORTER_OTLP_ENDPOINT` /
+`OTEL_SERVICE_NAME` onto its service, so one command gives a running trace
+surface with zero setup.
+
+The base `docker-compose.yml` sets **neither** var. That is deliberate and it
+is what makes the lean stack quiet: with no endpoint the SDK builds no
+exporter at all, so a plain `docker compose up` still stamps `trace_id` on
+every log line without a single failed export (M-FT.13, finding G7). On
+Kubernetes each backend carries `OTEL_SERVICE_NAME` plus an overridable
+(empty) `OTEL_EXPORTER_OTLP_ENDPOINT` that an operator points at their cluster
+collector via the chart's `env:` overlay — export stays off until then.
 
 ```bash
-# The bundled Jaeger UI (after `docker compose up`).
+# Start the stack WITH metrics + traces, then open the bundled Jaeger UI.
+docker compose -f docker-compose.yml -f docker-compose.obs.yml up
 open http://localhost:16686
 
 # Repoint at any OTLP-compatible backend (Tempo, an OTel Collector, a vendor).
-OTEL_EXPORTER_OTLP_ENDPOINT=http://my-collector:4318 docker compose up
+OTEL_EXPORTER_OTLP_ENDPOINT=http://my-collector:4318 \
+  docker compose -f docker-compose.yml -f docker-compose.obs.yml up
 ```
 
 **Stability:** the span attribute keys / env names / log-field names are a wire

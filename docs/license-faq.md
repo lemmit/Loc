@@ -39,9 +39,15 @@ Concretely:
 - Every project Loom emits — `<outdir>/api/`, `<outdir>/web_app/`,
   `<outdir>/catalog_web/`, the docker-compose.yml, the e2e suite —
   is yours to ship under whatever license your project uses.
-- The CLI writes a `LICENSE` file at the output-directory root
-  containing the MIT grant for the generated code, so this posture
-  is self-documenting in your repo.
+- `ddd new` writes a `LICENSE` file at the project root containing
+  the MIT grant for the generated code, alongside the `main.ddd` /
+  `README.md` / `.loomignore` it scaffolds — so this posture is
+  self-documenting in a project Loom started.  `ddd generate` does
+  **not** write one: it emits build output into a tree you may have
+  already licensed differently, and a licence it re-created after
+  every delete would be the wrong default (M-FT.13, finding G9).
+  The posture below holds either way — it is a property of the
+  generator's licence, not of a file in your output directory.
 - Any small runtime helper snippets the generator embeds verbatim
   into the output (error classes, mapping helpers, page-object
   bases, etc.) are dual-licensed **MIT OR Apache-2.0** when they
