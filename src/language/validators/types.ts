@@ -422,8 +422,8 @@ export function checkSingleBinaryOperands(chain: BinaryChain, accept: Validation
       continue;
     }
     // Literal promotion at this fold-step — mirrors lowerExpr.
-    const lAnchor = literalPromotionAnchor(lt);
-    const rAnchor = literalPromotionAnchor(rt);
+    const lAnchor = literalPromotionAnchor(lt, op);
+    const rAnchor = literalPromotionAnchor(rt, op);
     if (lAnchor && canPromoteAstLitTo(rhsExpr, lAnchor)) {
       rt = T.prim(lAnchor);
     }
