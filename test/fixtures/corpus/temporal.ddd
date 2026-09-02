@@ -1,0 +1,193 @@
+// A5 temporal — duration arithmetic in BOTH positions: in-app (a `derived`
+// evaluated over the loaded instance) and column-side (a `find … where` whose
+// predicate adds an interval to a datetime column, pushed into SQL).
+//
+// WHY THE ASSERTIONS ARE SHAPED THIS WAY.  The five per-backend tests this
+// fixture replaces asserted the RENDERED ARITHMETIC as text — `((this._
+// gracePeriod) * 86400000) + ((30) * 60000)` on node, `make_interval(days =>
+// 30)` in the repository, and a `java.time.Duration` spelling on Java.  Each
+// pinned one emitter's spelling of a unit conversion; none could tell whether
+// the conversion was CORRECT, and none ran on more than the backend it was
+// written for.
+//
+// So every value asserted below is chosen to FLIP when a unit is wrong, and
+// none of them depends on the datetime wire format (no corpus e2e pins a
+// datetime read-back, and that shape is a separate contract with its own RS
+// rules — hinging a temporal proof on it would couple two unrelated things):
+//
+//   * `overdueBy("2026-01-15…")` — INV-A's dueDate is 2026-01-01, so
+//     `dueDate + days(30)` = 2026-01-31, which is NOT before the query date and
+//     excludes it.  Render `days` as HOURS and 2026-01-02 IS before it, so the
+//     row comes back and the count is 2 instead of 1.  The interval unit is
+//     therefore observable as row MEMBERSHIP, which is format-independent and
+//     survives every backend's datetime serialization.
+//   * `slack` — INV-A's span is exactly 1 day against a window of
+//     `days(1) + minutes(30)`, so it is true by 30 minutes.  Collapse
+//     `minutes(30)` to 30 milliseconds and the window rounds to one day, the
+//     comparison goes false, and the read flips.  It also exercises `dt − dt`,
+//     which has no column-side equivalent.
+//
+// `dueWithin` is declared but never CALLED: its predicate reads `now()`, so a
+// recorded response would not be reproducible.  Declaring it still buys the
+// compile tier on all five backends — a duration in a `find` parameterised by
+// an int, which is the shape that needs a bound parameter inside the interval
+// rather than a literal.
+system TemporalShop {
+  subdomain Billing {
+    context Invoicing {
+      // Reified as a named predicate object on the backends that have one (a
+      // JPA `Specification` on Java, a composed filter elsewhere) — the
+      // temporal arithmetic has to survive that indirection intact, which is a
+      // different emission path from an inline `find … where`.
+      criterion OverdueAt(q: datetime) of Invoice = this.dueDate + days(30) < q
+      aggregate Invoice with crudish {
+        code: string
+        dueDate: datetime
+        orderedAt: datetime
+        deliveredAt: datetime
+        gracePeriod: int
+        // in-app: `dt − dt` compared against composed duration units
+        derived slack: bool = (deliveredAt - orderedAt) < (days(gracePeriod) + minutes(30))
+        // in-app: duration SCALED by an int — a separate arm from `+`
+        derived roomy: bool = (deliveredAt - orderedAt) < (days(gracePeriod) * 2)
+        // in-app: datetime MINUS a duration (the sign-folding arm)
+        derived tight: bool = (deliveredAt - hours(30)) > orderedAt
+        // in-app: the COMMUTED `duration + datetime` form
+        derived padded: bool = (hours(30) + orderedAt) > deliveredAt
+      }
+      repository Invoices for Invoice {
+        // column-side: an interval added to a datetime COLUMN, pushed to SQL
+        find overdueBy(q: datetime): Invoice[] where this.dueDate + days(30) < q
+        // column-side with a bound parameter inside the interval
+        find dueWithin(n: int): Invoice[] where this.dueDate - hours(n) < now()
+        // VALUE-side: the interval is added to the bound comparand, not the
+        // column, so it lowers on the fragment side of the predicate instead
+        find dueBefore(q: datetime): Invoice[] where this.dueDate < q + days(2)
+        // the same column-side predicate again, but through the criterion
+        find overdueVia(q: datetime): Invoice[] where OverdueAt(q)
+      }
+    }
+  }
+  api BillingApi from Billing
+  storage primary { type: postgres }
+  resource invoiceState { for: Invoicing, kind: state, use: primary, index: [Invoice.dueDate] }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Invoicing]
+    dataSources: [invoiceState]
+    serves: BillingApi
+    port: 4000
+  }
+
+  test e2e "duration units are observable as row membership and a derived bool" against d {
+    // INV-A: due 2026-01-01, delivered exactly one day after it was ordered.
+    let a = api.invoices.create({
+      code: "INV-A",
+      dueDate: "2026-01-01T00:00:00Z",
+      orderedAt: "2026-01-01T00:00:00Z",
+      deliveredAt: "2026-01-02T00:00:00Z",
+      gracePeriod: 1
+    })
+    // INV-B: due well before A, delivered two days after ordering.
+    let b = api.invoices.create({
+      code: "INV-B",
+      dueDate: "2025-11-01T00:00:00Z",
+      orderedAt: "2026-01-01T00:00:00Z",
+      deliveredAt: "2026-01-03T00:00:00Z",
+      gracePeriod: 1
+    })
+
+    // COLUMN-SIDE, asserted as a PAIR of queries whose counts bracket the
+    // interval.  The test DSL has no list indexing, so membership is pinned by
+    // moving the query date across the boundary the interval creates rather
+    // than by reading a row out of the array.
+    //
+    //   q = 2026-01-15 → `dueDate + days(30) < q`
+    //     INV-A  2026-01-01 + 30d = 2026-01-31  → not before  → excluded
+    //     INV-B  2025-11-01 + 30d = 2025-12-01  → before      → included   = 1
+    //   q = 2026-02-15 → INV-A's 2026-01-31 IS now before it                = 2
+    //
+    // Render `days` as hours and INV-A joins the first query (1 becomes 2),
+    // which is why the pair is decisive where either count alone is not.
+    let overdue = api.invoices.overdueBy({ q: "2026-01-15T00:00:00Z" })
+    expect(overdue.length).toBe(1)
+    let laterOverdue = api.invoices.overdueBy({ q: "2026-02-15T00:00:00Z" })
+    expect(laterOverdue.length).toBe(2)
+
+    // VALUE-SIDE, bracketed the same way: `dueDate < q + days(2)`.
+    //   q = 2025-12-30 → q+2d = 2026-01-01
+    //     INV-A  dueDate 2026-01-01 → not < → excluded
+    //     INV-B  dueDate 2025-11-01 → <     → included               = 1
+    //   q = 2025-12-31 → q+2d = 2026-01-02 → INV-A is now <          = 2
+    // Render `days` as hours on the value side and 2025-12-31 + 2h is still
+    // before INV-A's dueDate, so the second count stays 1.
+    let beforeEarly = api.invoices.dueBefore({ q: "2025-12-30T00:00:00Z" })
+    expect(beforeEarly.length).toBe(1)
+    let beforeLate = api.invoices.dueBefore({ q: "2025-12-31T00:00:00Z" })
+    expect(beforeLate.length).toBe(2)
+
+    // THROUGH THE CRITERION: same predicate, reified.  It must agree with the
+    // inline `overdueBy` on both sides of the boundary — a criterion that
+    // dropped or mis-scaled its interval would diverge here while the inline
+    // find stayed correct.
+    let viaEarly = api.invoices.overdueVia({ q: "2026-01-15T00:00:00Z" })
+    expect(viaEarly.length).toBe(1)
+    let viaLate = api.invoices.overdueVia({ q: "2026-02-15T00:00:00Z" })
+    expect(viaLate.length).toBe(2)
+
+    // IN-APP.  span vs `days(gracePeriod) + minutes(30)`:
+    //   INV-A  1 day  <  1 day 30 min  → true  (true only BECAUSE of the 30 min)
+    //   INV-B  2 days <  1 day 30 min  → false
+    let readA = api.invoices.getById(a)
+    expect(readA.slack).toBe(true)
+    let readB = api.invoices.getById(b)
+    expect(readB.slack).toBe(false)
+
+    // SCALING.  span vs `days(gracePeriod) * 2` = 2 days:
+    //   INV-A  1 day  < 2 days → true
+    //   INV-B  2 days < 2 days → false  (exactly on the boundary, so dropping
+    //                                    the `* 2` flips A and keeping a wrong
+    //                                    unit flips both)
+    expect(readA.roomy).toBe(true)
+    expect(readB.roomy).toBe(false)
+
+    // SUBTRACTION, `deliveredAt - hours(30) > orderedAt`:
+    //   INV-A  2026-01-02 − 30h = 2025-12-31 18:00 > 2026-01-01 → false
+    //   INV-B  2026-01-03 − 30h = 2026-01-01 18:00 > 2026-01-01 → true
+    // Drop the subtraction and both go true (A flips); render `hours` as days
+    // and both go false (B flips) — so the pair pins operator AND unit.
+    expect(readA.tight).toBe(false)
+    expect(readB.tight).toBe(true)
+
+    // COMMUTED, `hours(30) + orderedAt > deliveredAt` — the duration is the
+    // LEFT operand, which is a distinct renderer arm on every backend:
+    //   INV-A  2026-01-01 + 30h = 2026-01-02 06:00 > 2026-01-02 → true
+    //   INV-B  same left side              06:00 > 2026-01-03 → false
+    // Drop the addition and both go false (A flips); render `hours` as days
+    // and both go true (B flips).
+    expect(readA.padded).toBe(true)
+    expect(readB.padded).toBe(false)
+
+    // The `crudish` routes this fixture also derives, driven LAST and in this
+    // order on purpose: `update` and `destroy` MODIFY the table, and every
+    // bracketed count above is read against the stable two-row state, so a
+    // write placed earlier would move the boundary the intervals are pinned to.
+    // `all` takes `{ sort, dir }` because it returns more than one row and the
+    // wire golden diffs item ORDER as its own divergence kind.
+    let listed = api.invoices.all({ sort: "code", dir: "asc" })
+    expect(listed.total).toBe(2)
+    api.invoices.update(b, {
+      code: "INV-B2",
+      dueDate: "2025-11-01T00:00:00Z",
+      orderedAt: "2026-01-01T00:00:00Z",
+      deliveredAt: "2026-01-03T00:00:00Z",
+      gracePeriod: 1
+    })
+    let updated = api.invoices.getById(b)
+    expect(updated.code).toBe("INV-B2")
+    // INV-B is unreferenced, so the delete is not refused by a foreign key.
+    api.invoices.destroy(b)
+    let afterDestroy = api.invoices.all({ sort: "code", dir: "asc" })
+    expect(afterDestroy.total).toBe(1)
+  }
+}
