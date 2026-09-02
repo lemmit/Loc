@@ -2197,6 +2197,18 @@ export const DIAGNOSTIC_MESSAGES = {
     `output is byte-identical without the clause.  At runtime ${p.consequence}.  ` +
     `Drop the clause until the feature lands (the warning disappears with it), or keep it as ` +
     `intent and treat the behaviour above as what actually ships.`,
+  // ----------------------------------------------------------------------
+  // src/ir/validate/checks/sensitivity-checks.ts
+  // ----------------------------------------------------------------------
+  "loom.sensitive-wire-unsupported": (p: { field: unknown; aggregate: unknown; tags: unknown }) =>
+    `'${p.aggregate}.${p.field}' is declared \`sensitive(${p.tags})\`, and that tag reaches ` +
+    `exactly one consequence today: the synthesized \`inspect\` prints \`<redacted>\` instead ` +
+    `of the value on all five backends.  It does NOT reach the wire — every backend builds ` +
+    `the response DTO from the wire shape with no sensitivity arm, so this field is ` +
+    `serialized in cleartext to any caller allowed to read '${p.aggregate}', and it is ` +
+    `unmarked in logs, events and outbound resource calls.  To redact it on a read TODAY, ` +
+    `add \`mask unless <predicate>\`, or mark the field \`internal\` / \`secret\` so it is ` +
+    `not served at all.`,
   "loom.user-duplicate-field": (p: { name: unknown; fName: unknown }) =>
     `system '${p.name}': user block declares field '${p.fName}' more than once.`,
   "loom.auth-no-user-block": (p: { name: unknown; sysName: unknown }) =>
