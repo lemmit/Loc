@@ -142,9 +142,7 @@ describe("realtime SSE stream carries the api client's credential (M-T4.12)", ()
     const all = await generateSystemFiles(authedSystem("feliz"));
     const app = all.get("web_app/src/App.fs") ?? "";
     expect(app).not.toBe("");
-    expect(app).toContain(
-      '[<Fable.Core.Emit("new EventSource($0, { withCredentials: true })")>]',
-    );
+    expect(app).toContain('[<Fable.Core.Emit("new EventSource($0, { withCredentials: true })")>]');
   });
 
   it("feliz: an auth: none app keeps the bare v1 shim", async () => {
