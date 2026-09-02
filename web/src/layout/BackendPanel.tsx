@@ -310,8 +310,10 @@ export function BackendBody({ ctx }: Props): JSX.Element {
       ) : (
         <Text size="xs" c="dimmed">
           {honoBundle
-            ? "Click Boot to spin up PGlite + the generated Hono app."
-            : "Generate and Bundle first to enable the runtime."}
+            ? "Click Boot to start the generated API and an in-browser Postgres. You can then call endpoints and run SQL here."
+            : isDesktop
+              ? "Generate, then Bundle, to enable Boot — the runtime runs the bundled backend."
+              : "Tap Run to generate, bundle and boot the backend."}
         </Text>
       )}
     </Box>
@@ -367,21 +369,50 @@ function DatabaseView({
 
       <SqlConsole runQuery={runQuery} isDesktop={isDesktop} />
 
-      <Stack gap={4}>
+      <ResetDatabase runWipe={runWipe} />
+    </Stack>
+  );
+}
+
+// Two-step reset: the first click reveals the consequence and a confirm,
+// so one stray click can't drop every row.  The explanation sits ABOVE
+// the button so it is read before, not after, the action.
+function ResetDatabase({ runWipe }: { runWipe: () => void }): JSX.Element {
+  const [armed, setArmed] = useState(false);
+  return (
+    <Stack gap={4}>
+      <Text size="xs" c="dimmed">
+        Reset drops every row and re-applies the schema. The table structure stays — only your data is cleared.
+      </Text>
+      {armed ? (
+        <Group gap={6}>
+          <Button
+            size="xs"
+            color="red"
+            onClick={() => {
+              setArmed(false);
+              runWipe();
+            }}
+            data-testid="btn-wipe-confirm"
+          >
+            Yes, clear all rows
+          </Button>
+          <Button size="xs" variant="subtle" color="gray" onClick={() => setArmed(false)}>
+            Cancel
+          </Button>
+        </Group>
+      ) : (
         <Button
           size="xs"
           variant="default"
           color="red"
-          onClick={runWipe}
+          onClick={() => setArmed(true)}
           style={{ alignSelf: "flex-start" }}
           data-testid="btn-wipe"
         >
-          Reset database
+          Reset database…
         </Button>
-        <Text size="xs" c="dimmed">
-          Drops every row and re-applies the schema. The table structure stays — only your data is cleared.
-        </Text>
-      </Stack>
+      )}
     </Stack>
   );
 }

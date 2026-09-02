@@ -9,6 +9,7 @@ import {
   Switch,
   Text,
   Title,
+  Tooltip,
 } from "@mantine/core";
 import { PackPicker } from "../workspace/PackPicker";
 import { WorkspaceDrawer } from "../workspace/WorkspaceDrawer";
@@ -81,30 +82,51 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
         <WorkspaceTree workspaceStore={workspace.store} buildClient={buildClient} />
       </Group>
       <Group gap="xs" wrap="wrap">
-        <Button
-          size="xs"
-          onClick={runGenerate}
-          loading={pipeline.generating}
-          disabled={errorCount > 0}
-          variant="filled"
-          data-testid="btn-generate"
+        {/* Disabled buttons swallow pointer events, so the tooltip that
+            explains WHY they are disabled has to sit on a wrapper. */}
+        <Tooltip
+          label={`Fix the ${errorCount} error${errorCount === 1 ? "" : "s"} in your source first (Output → Problems).`}
+          disabled={errorCount === 0}
+          withArrow
         >
-          Generate
-        </Button>
-        <Button
-          size="xs"
-          onClick={runBundle}
-          loading={pipeline.bundling}
-          disabled={!generateSuccess || generateSuccess.files.length === 0}
-          variant="default"
-          data-testid="btn-bundle"
+          <Box component="span">
+            <Button
+              size="xs"
+              onClick={runGenerate}
+              loading={pipeline.generating}
+              disabled={errorCount > 0}
+              variant="filled"
+              data-testid="btn-generate"
+            >
+              Generate
+            </Button>
+          </Box>
+        </Tooltip>
+        <Tooltip
+          label="Generate first — Bundle compiles the generated backend and frontend."
+          disabled={!!generateSuccess && generateSuccess.files.length > 0}
+          withArrow
         >
-          Bundle
-        </Button>
-        <Badge color="red" variant={errorCount > 0 ? "filled" : "light"} size="sm">
+          <Box component="span">
+            <Button
+              size="xs"
+              onClick={runBundle}
+              loading={pipeline.bundling}
+              disabled={!generateSuccess || generateSuccess.files.length === 0}
+              variant="default"
+              data-testid="btn-bundle"
+            >
+              Bundle
+            </Button>
+          </Box>
+        </Tooltip>
+        {/* Neutral (grey) at zero: a red "0 errors" badge is a permanent
+            false alarm; colour should only appear when there is something
+            to look at. */}
+        <Badge color={errorCount > 0 ? "red" : "gray"} variant={errorCount > 0 ? "filled" : "light"} size="sm">
           {errorCount} error{errorCount === 1 ? "" : "s"}
         </Badge>
-        <Badge color="yellow" variant={warningCount > 0 ? "filled" : "light"} size="sm">
+        <Badge color={warningCount > 0 ? "yellow" : "gray"} variant={warningCount > 0 ? "filled" : "light"} size="sm">
           {warningCount} warning{warningCount === 1 ? "" : "s"}
         </Badge>
         <Switch
@@ -207,11 +229,11 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
           <Menu.Dropdown>
             <Menu.Label>
               <Group gap={6}>
-                <Badge color="red" variant={errorCount > 0 ? "filled" : "light"} size="xs">
-                  {errorCount} err
+                <Badge color={errorCount > 0 ? "red" : "gray"} variant={errorCount > 0 ? "filled" : "light"} size="xs">
+                  {errorCount} error{errorCount === 1 ? "" : "s"}
                 </Badge>
-                <Badge color="yellow" variant={warningCount > 0 ? "filled" : "light"} size="xs">
-                  {warningCount} warn
+                <Badge color={warningCount > 0 ? "yellow" : "gray"} variant={warningCount > 0 ? "filled" : "light"} size="xs">
+                  {warningCount} warning{warningCount === 1 ? "" : "s"}
                 </Badge>
               </Group>
             </Menu.Label>

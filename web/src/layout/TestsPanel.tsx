@@ -259,8 +259,15 @@ export function TestsBody({
   if (!hasAny) {
     return (
       <Text c="dimmed" size="sm" p="sm">
-        This system declares no <Code>test</Code> blocks. Add some (and
-        Generate) to run them here.
+        {ctx.generateSuccess ? (
+          <>
+            This system declares no <Code>test</Code> blocks. Add a <Code>test</Code> to an
+            aggregate or a <Code>test e2e</Code> to the system, then {ctx.isDesktop ? "Generate" : "Run"}{" "}
+            to run them here.
+          </>
+        ) : (
+          <>Nothing generated yet — {ctx.isDesktop ? "click Generate" : "tap Run"} to discover the tests this system declares.</>
+        )}
       </Text>
     );
   }

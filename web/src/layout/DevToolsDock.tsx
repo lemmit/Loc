@@ -25,7 +25,9 @@ type DotColour = "red" | "yellow" | "green" | "gray" | null;
 export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
   const { ddl } = ctx;
 
-  const backendDot: DotColour = ddl ? "green" : "gray";
+  // Green once booted; nothing while offline — a permanent grey dot reads
+  // as "something needs attention" and dilutes the red/yellow ones.
+  const backendDot: DotColour = ddl ? "green" : null;
 
   const tabs: { id: DockTab; label: string; dot: DotColour }[] = [
     { id: "output", label: "Output", dot: outputAggregateDot(ctx) },

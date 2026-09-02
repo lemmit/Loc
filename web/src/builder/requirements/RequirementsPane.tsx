@@ -203,6 +203,14 @@ const VERDICT_COLOR: Record<RequirementVerdict, string> = {
   UNTESTED: "gray",
   UNVERIFIED: "yellow",
 };
+// Hover text for the verdict badge — UNTESTED vs UNVERIFIED is not a
+// distinction a reader can guess from the two words alone.
+const VERDICT_HINT: Record<RequirementVerdict, string> = {
+  VERIFIED: "Verified: every test case for this requirement ran and passed",
+  FAILING: "Failing: at least one test case for this requirement failed",
+  UNTESTED: "Untested: no test case verifies this requirement yet",
+  UNVERIFIED: "Unverified: test cases exist but have not been run (or have no executable test)",
+};
 const TESTCASE_STATUS_COLOR: Record<TestCaseStatus, string> = {
   VERIFIED: "green",
   FAILING: "red",
@@ -577,12 +585,15 @@ function renderReqRow(
             {type.replace("AcceptanceCriteria", "AC")}
           </Badge>
         )}
-        <Text size="sm" fw={500}>{r.name}</Text>
+        {/* The badges must not shrink: in a narrow list they were the
+            first thing flex squeezed, leaving "INPRO…" / "UNT…" / "0…"
+            stubs while the (truncatable) title kept its width. */}
+        <Text size="sm" fw={500} style={{ whiteSpace: "nowrap", flexShrink: 0 }}>{r.name}</Text>
         <Text size="sm" c="dimmed" truncate style={{ flex: 1, minWidth: 0 }}>
           {title ?? ""}
         </Text>
         {status && (
-          <Badge size="xs" color={STATUS_COLOR[status] ?? "gray"} variant="outline">
+          <Badge size="xs" color={STATUS_COLOR[status] ?? "gray"} variant="outline" style={{ flexShrink: 0 }} title={`Status: ${status}`}>
             {status}
           </Badge>
         )}
@@ -591,6 +602,8 @@ function renderReqRow(
             size="xs"
             color={VERDICT_COLOR[verdict]}
             variant="filled"
+            style={{ flexShrink: 0 }}
+            title={VERDICT_HINT[verdict]}
             data-testid={`req-verdict-${r.name}`}
           >
             {verdict}
@@ -600,12 +613,13 @@ function renderReqRow(
           size="xs"
           color={tcCount > 0 ? "green" : "gray"}
           variant="light"
-          title={`${tcCount} test case${tcCount === 1 ? "" : "s"}`}
+          style={{ flexShrink: 0 }}
+          title={`${tcCount} test case${tcCount === 1 ? "" : "s"} verify this requirement`}
         >
           {tcCount} TC
         </Badge>
         {!hasSolution && type === "UserStory" && (
-          <Badge size="xs" color="orange" variant="light" title="No solution declared">
+          <Badge size="xs" color="orange" variant="light" style={{ flexShrink: 0 }} title="No solution declared for this user story">
             no sol
           </Badge>
         )}

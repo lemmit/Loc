@@ -508,7 +508,9 @@ function GeneratorBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   if (generateResult == null) {
     return (
       <Text c="dimmed" size="sm" p="sm">
-        Not generated yet.
+        {ctx.isDesktop
+          ? "Not generated yet — click Generate to build the project from your source."
+          : "Not generated yet — tap Run to build the project from your source."}
       </Text>
     );
   }
@@ -618,10 +620,20 @@ function BundlerBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   if (honoBundleResult == null && reactBundleResult == null) {
     return (
       <Text c="dimmed" size="sm" p="sm">
-        No bundle yet.
+        {ctx.isDesktop
+          ? "No bundle yet — click Bundle (after Generate) to compile the backend and frontend."
+          : "No bundle yet — tap Run to generate and bundle."}
       </Text>
     );
   }
+
+  // The in-browser bundler installs real npm tarballs; when the registry
+  // (or the same-origin mirror) is unreachable every failure surfaces as a
+  // bare `Failed to fetch`, which reads like a bug rather than a network
+  // condition.  Say what it usually means and what to do.
+  const looksLikeNetwork = [honoBundleResult, reactBundleResult].some(
+    (r) => r != null && !r.ok && r.diagnostics.some((d) => /failed to fetch|networkerror|load failed/i.test(d.message)),
+  );
 
   if (!honoFailed && !reactFailed) {
     return (
@@ -649,10 +661,17 @@ function BundlerBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   return (
     <ScrollArea style={{ flex: 1, minHeight: 0 }}>
       <Box p="xs">
+        {looksLikeNetwork && (
+          <Text size="sm" mb="xs" data-testid="bundle-network-hint">
+            The bundler could not download a dependency — this usually means the npm registry is
+            unreachable (offline, a blocked network, or an ad/privacy blocker). Check your connection
+            and {ctx.isDesktop ? "click Bundle" : "tap Run"} again.
+          </Text>
+        )}
         {honoFailed && (
           <>
             <Text size="xs" fw={600} tt="uppercase" c="red" mb={4}>
-              Hono bundle errors
+              Backend bundle errors
             </Text>
             <Stack gap={2} mb={reactFailed ? "sm" : 0}>
               {honoBundleResult!.diagnostics.map((d, i) => (
@@ -667,7 +686,7 @@ function BundlerBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         {reactFailed && (
           <>
             <Text size="xs" fw={600} tt="uppercase" c="red" mb={4}>
-              React bundle errors
+              Frontend bundle errors
             </Text>
             <Stack gap={2}>
               {reactBundleResult!.diagnostics.map((d, i) => (
