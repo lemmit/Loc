@@ -35,7 +35,21 @@ on:
   # storms (post-merge heavy sets, label spawns) GitHub drops dispatches, and
   # a dropped final event parked a green PR at in_progress (#2464, 08:42Z).
   # The sweep re-derives every open PR's verdict and posts only where it
-  # differs, capping any dropped-event outage at one interval.
+  # differs.
+  #
+  # It does NOT cap the outage at one cron interval, and this comment used to
+  # claim it did.  GitHub runs this schedule far slower than asked: the 30 most
+  # recent `schedule` runs of this workflow span 135 HOURS — mean gap 4.7 h,
+  # median 4.6 h, and the shortest gap anywhere in that window 110 min.  Not
+  # one 15-minute gap in 29.  Actions cron is best-effort, and a high-frequency
+  # schedule on a busy account is heavily deprioritised: the cron below is a
+  # request, not a guarantee.  (Re-measure before trusting either figure — list
+  # this workflow's runs filtered to `event=schedule` and diff `created_at`.)
+  #
+  # So a dropped dispatch parks a green PR for HOURS, not minutes.  If you are
+  # waiting on a parked `pr-gate`, do not wait for the sweep — get a fresh
+  # evaluation (a new SHA, or a re-run of any workflow on the branch, both of
+  # which fire `workflow_run: completed`).
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
