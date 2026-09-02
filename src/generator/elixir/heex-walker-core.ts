@@ -2040,7 +2040,9 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
       // page handler can't raise the way a domain action does.
       const pred = renderExpr(stmt.expr, { ...ctx, position: "handler" });
       const msg = stmt.kind === "requires" ? "Forbidden" : "Precondition failed";
-      return `|> then(fn socket -> if ${pred}, do: socket, else: put_flash(socket, :error, ${JSON.stringify(`${msg}: ${stmt.source}`)}) end)`;
+      // `stmt.source` is verbatim `.ddd` source text (it can carry a string
+      // literal, hence a `#{`) — through the escaping funnel, not spliced raw.
+      return `|> then(fn socket -> if ${pred}, do: socket, else: put_flash(socket, :error, ${elixirString(`${msg}: ${stmt.source}`)}) end)`;
     }
     case "emit": {
       // Broadcast a domain event over Phoenix.PubSub.  No changeset in a
@@ -2439,7 +2441,10 @@ export function stateInitFor(f: StateFieldIR): string {
 function elixirLiteral(lit: string, value: string): string {
   switch (lit) {
     case "string":
-      return JSON.stringify(value);
+      // Through the shared escaping funnel — a page `state` string init is
+      // `.ddd` text spliced into the LiveView `mount/3` assigns, so a raw `#{`
+      // would interpolate as Elixir when the page mounts.
+      return elixirString(value);
     case "int":
     case "long":
       return value;
@@ -2452,7 +2457,8 @@ function elixirLiteral(lit: string, value: string): string {
     case "null":
       return "nil";
     default:
-      return JSON.stringify(value);
+      // datetime / date / any other string-carried literal — same funnel.
+      return elixirString(value);
   }
 }
 
