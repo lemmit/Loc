@@ -61,6 +61,24 @@
 
 This is the first runtime coverage realtime has had on any backend (`M-T1.10-realtime-no-runtime-e2e` recorded that it had none — which is exactly why the auth hole shipped green). Both legs are opt-in and post-merge-only; the `run-auth` / OIDC feature labels force them onto a PR.
 
+**Those legs could not be executed locally** — Keycloak never finishes booting in this shared sandbox (a standalone `quay.io/keycloak/keycloak:26.0 start-dev` sat in "installing your custom providers" for >20 min under the CPU contention of a dozen parallel agents; `LOOM_AUTH_E2E=1` failed in `beforeAll` on `keycloak discovery never ready within 180000ms`, before reaching any assertion). The compose leg is CI-only by its own header for the same class of reason.
+
+**So the same three assertions were proven locally against a live generated backend** using the behavioural tier's in-process mock OIDC issuer (`test/behavioral/oidc-mock.mjs` — real RS256 keypair, real discovery + JWKS, real signed token; the SAME generated `auth/oidc.ts` verifier runs the actual JWT path) plus a dockerized postgres, driving the emitted node backend natively:
+
+```
+PASS  bearer header still authenticates /api/auth/me            (no regression)
+PASS  RULE 1: uncredentialed GET /api/realtime/events -> 401    got 401
+PASS  RULE 2: /api/auth/me by session cookie -> 200             cookie header was
+                                                                `theme=dark; session=<JWT>; other=1`
+                                                                — the emitted parser picks
+                                                                `session` out of a multi-cookie
+                                                                header, roles projected as "agent"
+PASS  RULE 2: GET /api/realtime/events by session cookie -> 200  ct text/event-stream
+PASS  a forged session cookie is rejected -> 401                 got 401
+```
+
+(The probe script lives in the scratchpad, not the repo — the committed coverage is the two OIDC legs, which run these assertions against real Keycloak in CI. The one assertion that reported FAIL in the probe run was the probe's own `Array.isArray(roles)` check: the mock issuer mints `realm_access.roles` as a bare string while Keycloak mints an array. Status was 200 and `roles == "agent"`, i.e. the cookie authenticated; the committed leg's `expect(user.roles).toContain("agent")` mirrors the bearer assertion sitting three lines above it in the same test, which passes against Keycloak today.)
+
 **Open questions for the coordinator:**
 
 1. **Flutter is a genuine hand-off, not a skip.** Its stream (`loomEventSource(apiUri('/realtime/events'), …)`) carries no credential — but neither does any flutter API call: they are bare top-level `http.get/post`, with no `BrowserClient..withCredentials` and no cookie jar anywhere in `src/generator/flutter/**`. There is no "same credential path" to inherit, so fixing only the stream would be theatre. The exact change, for whoever picks it up: (i) give flutter an authenticated http client — `BrowserClient()..withCredentials = true` on web, a cookie jar or bearer store on native; (ii) thread the credential into `renderFlutterRealtime` and emit `web.EventSource(uri.toString(), web.EventSourceInit(withCredentials: true))` in `REALTIME_SOURCE_WEB_DART`; (iii) **decide the native story** — an HttpOnly cookie cannot exist on a mobile client, so native needs a bearer the IO transport sets on the request, which is a *different* credential and therefore a plan amendment (a third rule), not a port. That decision is above this packet's pay grade.
