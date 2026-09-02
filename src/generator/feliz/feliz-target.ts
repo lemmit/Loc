@@ -24,6 +24,7 @@ import {
   FS_LEAVES,
   fsString,
   fsTemporalBinary,
+  renderFsCollectionOp,
   renderFsIntrinsic,
   storeModelField,
 } from "./fs-expr.js";
@@ -1108,6 +1109,20 @@ export const felizTarget: WalkerTarget = {
   // (`(model.Name.toUpper())`), which is not F#.
   renderIntrinsic: (receiverType, member, recv, args) =>
     renderFsIntrinsic(receiverType, member, recv, args),
+
+  // Collection ops — likewise the SAME F# table the MVU update path uses.
+  // Without it the view path emitted `allCustomers.count` verbatim, which is
+  // not F# (`loom.frontend-collection-op-unsupported` refused the body rather
+  // than let `dotnet fable` fail on it).
+  renderCollectionOp: (spec) => renderFsCollectionOp(spec),
+
+  // A lambda in EXPRESSION position (a collection op's callback) is `fun p ->
+  // body`, not the shared default's JS arrow.  This seam is what retires the
+  // gate's Feliz `map` carve-out: `rows.map(o => o.name)` was ungated
+  // everywhere else and shipped `(o) => o.name` — verbatim JavaScript in an
+  // `.fs` file — on this one target, so `MAP_UNRENDERED_FRAMEWORK` had to gate
+  // the op here alone.
+  exprLambda: (param, body) => FS_LEAVES.lambda(param, body),
 };
 
 export { fsString };

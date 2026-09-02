@@ -1,23 +1,39 @@
-// `loom.frontend-collection-op-unsupported` (M-T1.3 Defect A).
+// `loom.frontend-collection-op-unsupported` (M-T1.3 Defect A, M-T1.20).
 //
-// The stdlib collection ops are a BACKEND vocabulary — every backend renders
-// them through `_expr/target.ts`'s `isCollectionOp` arm, the shared frontend
-// walker (`_walker/walker-core.ts`) has NO such arm.  Its `member` arm emits
+// The stdlib collection ops started as a BACKEND vocabulary — every backend
+// rendered them through `_expr/target.ts`'s `isCollectionOp` arm, the frontend
+// walkers had NO such arm.  The shared `walker-core.ts` `member` arm emitted
 // `<recv>.<member>` and its `method-call` arm `<recv>.<member>(<args>)`,
-// verbatim, so `QueryView { of: X.all, data: rows => Stat("n", rows.count) }`
+// VERBATIM, so `QueryView { of: X.all, data: rows => Stat("n", rows.count) }`
 // validated clean and then failed at `tsc` (TS2339 — `Property 'count' does
-// not exist on type 'Customer[]'`), at `ng build`, at `dotnet fable`.
+// not exist on type 'Customer[]'`), at `ng build`, at `dotnet fable`.  Hence
+// this gate.
 //
-// This suite pins the gate that moves that failure to the model tier, and —
-// just as importantly — pins the three things it must NOT flag:
+// The gate is now a REMAINDER.  Nine of the seventeen ops have a real
+// per-target renderer behind `WalkerTarget.renderCollectionOp` (and, on the
+// HEEx parallel walker, its own `renderCollectionOp`), so this suite pins two
+// things that must both stay true:
+//
+//   • the nine RESHAPING ops are ACCEPTED on every frontend — the split is
+//     uniform, with no per-framework carve-out left (`WalkerTarget.exprLambda`
+//     retired the Feliz `map` one);
+//   • the eight the frontends disagree about on REPRESENTATION are still
+//     REFUSED — `sum`/`min`/`max`/`avg` (arithmetic folds over `money`, an
+//     object on JS/HEEx and a native scalar on F#/Dart), `first`/`firstOrNull`
+//     (partiality + the optional type), `distinct`/`contains` (value equality,
+//     which Flutter's models don't define).
+//
+// …plus the three things it must NOT flag at all:
 //
 //   1. a repository read (`Sales.Customer.all()`), which lowering marks
 //      `isCollectionOp: true` off the NAME alone with a primitive receiver;
-//   2. `.map(λ)`, the one op the frontend walkers really render (native
-//      `Array.prototype.map` / HEEx `Enum.map/2`, DEBT-31);
+//   2. a BACKEND collection op — the gate is frontend-only;
 //   3. `page { requires currentUser.permissions.contains(…) }`, a GATE
 //      expression rendered by the closed `_frontend/gate-expr.ts` — whose one
 //      admitted method is that very collection op.
+//
+// What each ACCEPTED op actually emits, per target, is
+// `test/generator/_walker/collection-ops.test.ts`; this file owns the gate.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -68,36 +84,55 @@ const queryViewPage = (statValue: string) => `
   }`;
 
 describe("loom.frontend-collection-op-unsupported — the gate", () => {
-  it("flags the property form (`rows.count`) — the reported defect", async () => {
-    expect(await codes(queryViewPage("rows.count"))).toContain(CODE);
-  });
-
-  it("flags the call form (`rows.count()`)", async () => {
-    expect(await codes(queryViewPage("rows.count()"))).toContain(CODE);
-  });
-
-  it("flags every other catalogue op reachable from a page body", async () => {
+  it("flags the ARITHMETIC folds — money is an object on JS/HEEx, a scalar on F#/Dart", async () => {
+    // `avg` desugars at lowering into `count == 0 ? null : sum(λ) / count`, so
+    // it is refused via its `sum` — which is why it belongs in this group and
+    // not with the reshaping ops its `count` half now renders.
     for (const op of [
-      "rows.where(o => o.tier > 1).count",
       "rows.sum(o => o.tier)",
-      "rows.any(o => o.tier > 1)",
-      "rows.all(o => o.tier > 1)",
       "rows.min(o => o.tier)",
       "rows.max(o => o.tier)",
       "rows.avg(o => o.tier)",
-      "rows.distinct",
-      "rows.take(3)",
-      "rows.skip(3)",
-      "rows.sortBy(o => o.tier)",
-      'rows.map(o => o.name).join(", ")',
-      "rows.first",
-      "rows.firstOrNull",
     ]) {
       expect(await codes(queryViewPage(op)), `expected ${op} to be gated`).toContain(CODE);
     }
   });
 
-  it("is target-agnostic — the same body fails on every SPA frontend", async () => {
+  it("flags the PARTIAL / optional-returning ops — `undefined` here, a raise on F#/Dart", async () => {
+    for (const op of ["rows.first", "rows.firstOrNull"]) {
+      expect(await codes(queryViewPage(op)), `expected ${op} to be gated`).toContain(CODE);
+    }
+  });
+
+  it("flags the EQUALITY ops — Flutter's wire models define no `operator ==`", async () => {
+    expect(await codes(queryViewPage("rows.distinct")), "expected rows.distinct gated").toContain(
+      CODE,
+    );
+    // `contains` needs a TYPED collection receiver to be a collection op at
+    // all: `string.contains` is also a scalar intrinsic, and lowering keys
+    // `isCollectionOp` off the receiver TYPE to tell the two apart
+    // (`lower-expr.ts`).  A `QueryView` row-set binding carries the `string`
+    // placeholder, so `rows.contains(x)` lowers as the substring test, not as
+    // membership — pre-existing, and not this gate's to decide.
+    expect(
+      await codes(`
+      page X {
+        route: "/x"
+        state { tags: string[] = [] }
+        body: Text(string(tags.contains("x")))
+      }`),
+      "expected a typed `.contains` gated",
+    ).toContain(CODE);
+  });
+
+  it("flags the call form as well as the property form", async () => {
+    // `sum` in both spellings: the call form lowers to a `method-call` with
+    // `isCollectionOp`, `distinct` written without parens to a plain `member`.
+    expect(await codes(queryViewPage("rows.sum(o => o.tier)"))).toContain(CODE);
+    expect(await codes(queryViewPage("rows.distinct"))).toContain(CODE);
+  });
+
+  it("is target-agnostic — a refused op fails on every SPA frontend", async () => {
     for (const [framework, platform] of [
       ["react", "static"],
       ["vue", "static"],
@@ -107,16 +142,72 @@ describe("loom.frontend-collection-op-unsupported — the gate", () => {
       ["flutter", "flutter"],
     ] as const) {
       expect(
-        await codes(queryViewPage("rows.count"), framework, platform),
+        await codes(queryViewPage("rows.sum(o => o.tier)"), framework, platform),
         `expected the gate on ${framework}`,
       ).toContain(CODE);
     }
   });
 
-  it("fires on Phoenix/HEEx too, even though its parallel walker maps `count`", async () => {
-    // HEEx renders `Enum.count(@items)` here — but `join` / `first` are still
-    // invalid Elixir, so it is not a portable escape hatch.  The gate stays
-    // target-agnostic: the `.ddd` works on every target or fails on every one.
+  it("…and target-agnostic the other way: an ACCEPTED op is clean on every frontend", async () => {
+    // The half that used to be impossible.  `rows.count` is the exact body the
+    // defect was reported against; `rows.where(λ).count` is the chained form
+    // whose receiver types as an array only because lowering tracked the chain.
+    for (const [framework, platform] of [
+      ["react", "static"],
+      ["vue", "static"],
+      ["svelte", "static"],
+      ["angular", "static"],
+      ["feliz", "feliz"],
+      ["flutter", "flutter"],
+    ] as const) {
+      for (const op of ["rows.count", "rows.where(o => o.tier > 1).count"]) {
+        expect(
+          await codes(queryViewPage(op), framework, platform),
+          `expected ${op} to be accepted on ${framework}`,
+        ).not.toContain(CODE);
+      }
+    }
+  });
+
+  it("keeps refusing an op off an EXPLICITLY-PAGED binding — it is not a row set", async () => {
+    // `paged: true` binds the `Paged<T>` ENVELOPE, not the rows — that is what
+    // lets a scaffolded body read `rows.items` and `rows.totalPages`.  So
+    // `rows.count` there would be a `.length` on an object: a type error on the
+    // JSX frontends and a silently different value elsewhere.  The row-set
+    // scope declines it, so the op is still refused — the same answer as before
+    // the reshaping ops were ungated, and the same answer the WALKER gives
+    // (both read `rowSetLambdaParam`).
+    expect(
+      await codes(`
+      page X {
+        route: "/x"
+        body: QueryView { of: C.Customer.all, paged: true, data: rows => Stat("n", rows.count) }
+      }`),
+    ).toContain(CODE);
+  });
+
+  it("accepts every RESHAPING op from a page body", async () => {
+    for (const op of [
+      "rows.count",
+      "rows.where(o => o.tier > 1).count",
+      "rows.any(o => o.tier > 1)",
+      "rows.all(o => o.tier > 1)",
+      "rows.take(3).count",
+      "rows.skip(3).count",
+      "rows.sortBy(o => o.tier).count",
+      "rows.sortBy(o => o.tier, true).count",
+      'rows.map(o => o.name).join(", ")',
+    ]) {
+      expect(await codes(queryViewPage(op)), `expected ${op} to be accepted`).not.toContain(CODE);
+    }
+  });
+
+  it("fires on Phoenix/HEEx too — its parallel walker gets the same split", async () => {
+    // HEEx does NOT consume the shared `walkBody`; `elixir/heex-walker-core.ts`
+    // is a separate engine with its own `renderCollectionOp`.  It renders the
+    // same nine ops (see `test/generator/elixir/heex-collection-ops.test.ts`)
+    // and refuses the same eight, so the gate stays target-agnostic: a `.ddd`
+    // works on every target or fails on every one.
     const src = `
 system Demo {
   subdomain S {
@@ -127,7 +218,7 @@ system Demo {
   }
   api A from S
   ui Web {
-    page X { route: "/x"  body: QueryView { of: C.Customer.all, data: rows => Stat("n", rows.count) } }
+    page X { route: "/x"  body: QueryView { of: C.Customer.all, data: rows => Stat("n", rows.sum(o => o.tier)) } }
   }
   deployable phoenixApp { platform: elixir  contexts: [C]  serves: A  ui: Web  port: 4000 }
 }`;
@@ -144,17 +235,29 @@ system Demo {
       page X {
         route: "/x"
         body: QueryView { of: C.Customer.all, data: rows =>
-          Stack(Stat("a", rows.count), Stat("b", rows.count), Stat("c", rows.sum(o => o.tier))) }
+          Stack(Stat("a", rows.first), Stat("b", rows.first), Stat("c", rows.sum(o => o.tier))) }
       }`)
     ).filter((d) => d.code === CODE);
-    expect(found.map((d) => d.message.match(/`\.(\w+)`/)?.[1]).sort()).toEqual(["count", "sum"]);
+    expect(found.map((d) => d.message.match(/`\.(\w+)`/)?.[1]).sort()).toEqual(["first", "sum"]);
   });
 
   it("names the op and points at the server-side read path", async () => {
-    const d = (await diags(queryViewPage("rows.count"))).find((x) => x.code === CODE)!;
+    const d = (await diags(queryViewPage("rows.sum(o => o.tier)"))).find((x) => x.code === CODE)!;
     expect(d.severity).toBe("error");
-    expect(d.message).toContain("`.count`");
+    expect(d.message).toContain("`.sum`");
     expect(d.message).toContain("projection");
+  });
+
+  it("names the ops it DOES render, so the remainder reads as a boundary", async () => {
+    // The message has to distinguish "not implemented yet" from "these six
+    // frontends disagree about what this MEANS" — otherwise the honest gate
+    // reads as an arbitrary one.
+    const d = (await diags(queryViewPage("rows.first"))).find((x) => x.code === CODE)!;
+    for (const op of ["count", "where", "sortBy", "join"]) {
+      expect(d.message, `expected the message to name the rendered op ${op}`).toContain(
+        `\`${op}\``,
+      );
+    }
   });
 
   it("covers a page `derived` binding, a `state` initialiser and an action body", async () => {
@@ -163,7 +266,7 @@ system Demo {
       await codes(`
       page X {
         route: "/x"
-        derived n: int = [1, 2, 3].count
+        derived n: int = [1, 2, 3].first
         body: Text("x")
       }`),
     ).toContain(CODE);
@@ -172,7 +275,7 @@ system Demo {
       await codes(`
       page X {
         route: "/x"
-        state { n: int = [1, 2, 3].count }
+        state { n: int = [1, 2, 3].first }
         body: Text("x")
       }`),
     ).toContain(CODE);
@@ -182,7 +285,7 @@ system Demo {
       page X {
         route: "/x"
         state { n: int = 0 }
-        action bump() { n := [1, 2, 3].count }
+        action bump() { n := [1, 2, 3].first }
         body: Button("go", onClick: bump)
       }`),
     ).toContain(CODE);
@@ -191,7 +294,7 @@ system Demo {
   it("covers a component body, not just a page", async () => {
     expect(
       await codes(`
-      component Totals(rows: Customer[]) { body: Stat("n", rows.count) }
+      component Totals(rows: Customer[]) { body: Stat("n", rows.first) }
       page X { route: "/x"  body: Text("x") }`),
     ).toContain(CODE);
   });
@@ -211,7 +314,7 @@ describe("loom.frontend-collection-op-unsupported — what it must NOT flag", ()
     ).not.toContain(CODE);
   });
 
-  it("leaves `.map(λ)` alone — the one op the frontend walkers render (DEBT-31)", async () => {
+  it("leaves `.map(λ)` alone — a rendered op on every frontend (DEBT-31)", async () => {
     expect(
       await codes(`
       page X {
@@ -282,33 +385,33 @@ system Demo {
 });
 
 // ---------------------------------------------------------------------------
-// …with ONE framework carved back out of the `.map` exemption.
+// The per-framework carve-out is GONE, and this describe is what keeps it gone.
 //
-// `map` is exempt because the walker's fall-through — `<recv>.map(<args>)` with
-// a hardcoded JS arrow, since there is no `exprLambda` seam — happens to BE the
-// right code on the JS frontends, is valid Dart on Flutter, and HEEx runs its
-// own engine.  On FELIZ it is verbatim JavaScript inside an F# file, which
-// `dotnet fable` rejects: the exemption turned a build break into a SILENT one
-// (0 diagnostics, unbuildable output).  Until the walker grows a lambda seam and
-// Feliz renders `List.map`, `map` is gated there like every other collection op.
+// `map` used to be exempt everywhere EXCEPT Feliz: the walker had no lambda
+// seam, so `<recv>.map(<args>)` came out with a hardcoded JS arrow — the right
+// code on the JS frontends, valid Dart on Flutter, HEEx running its own engine,
+// and verbatim JavaScript inside an `.fs` file on Feliz, which `dotnet fable`
+// rejects.  `WalkerTarget.exprLambda` closed that (Feliz renders
+// `(fun n -> …)`), so the accepted set is once again uniform — which is what
+// makes this check target-agnostic in FACT and not just in intent.
+//
+// A per-framework carve-out is a thing worth being able to reintroduce, and a
+// thing worth noticing: these tests fail loudly if one comes back by accident.
 // ---------------------------------------------------------------------------
-describe("loom.frontend-collection-op-unsupported — `.map` is exempt per FRAMEWORK", () => {
+describe("loom.frontend-collection-op-unsupported — no per-framework carve-out", () => {
   const mapBody = `
       page X {
         route: "/x"
         body: Stack { For { each: [1, 2, 3].map(n => n), n => Bold { "x" } } }
       }`;
 
-  it("gates `.map(λ)` on Feliz — the walker would emit a JS arrow into F#", async () => {
-    expect(await codes(mapBody, "feliz", "feliz")).toContain(CODE);
-  });
-
-  it("still exempts it on every frontend whose walker really renders it", async () => {
+  it("accepts `.map(λ)` on EVERY frontend, Feliz included", async () => {
     for (const [framework, platform] of [
       ["react", "static"],
       ["vue", "static"],
       ["svelte", "static"],
       ["angular", "static"],
+      ["feliz", "feliz"],
       ["flutter", "flutter"],
     ] as const) {
       expect(
@@ -318,9 +421,11 @@ describe("loom.frontend-collection-op-unsupported — `.map` is exempt per FRAME
     }
   });
 
-  it("gates a Feliz ui detected only by its HOST deployable's platform", async () => {
+  it("accepts it on a Feliz ui detected only by its HOST deployable's platform", async () => {
     // The legacy binding leaves `ui { framework: … }` unset, so the framework
-    // comes from the hosting deployable — the gate has to consult both.
+    // came from the hosting deployable — the shape the old carve-out had to
+    // consult both channels for.  Kept as a regression: a reintroduced
+    // carve-out that reads only `ui.framework` would still pass the test above.
     const src = `
 system Demo {
   subdomain S {
@@ -341,23 +446,24 @@ system Demo {
 }`;
     const { model, errors } = await parseString(src);
     if (errors.length) throw new Error(`unexpected parse/validation errors:\n${errors.join("\n")}`);
-    expect(validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code)).toContain(
+    expect(validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code)).not.toContain(
       CODE,
     );
   });
 
-  it("keeps gating the OTHER ops on Feliz (the carve-out is `map`-only)", async () => {
-    expect(
-      await codes(queryViewPage("rows.count"), "feliz", "feliz"),
-      "expected `.count` to stay gated on feliz",
-    ).toContain(CODE);
-  });
-
-  it("names Feliz in the message, so the carve-out is discoverable", async () => {
-    const { model, errors } = await parseString(wrap(mapBody, "feliz", "feliz"));
-    if (errors.length) throw new Error(`unexpected parse/validation errors:\n${errors.join("\n")}`);
-    const d = validateLoomModel(enrichLoomModel(lowerModel(model))).find((x) => x.code === CODE)!;
-    expect(d.message).toContain("Feliz");
+  it("refuses the SAME ops on Feliz as everywhere else — the split is uniform", async () => {
+    for (const op of ["rows.sum(o => o.tier)", "rows.first", "rows.distinct"]) {
+      expect(
+        await codes(queryViewPage(op), "feliz", "feliz"),
+        `expected ${op} to stay gated on feliz`,
+      ).toContain(CODE);
+    }
+    for (const op of ["rows.count", "rows.sortBy(o => o.tier).count"]) {
+      expect(
+        await codes(queryViewPage(op), "feliz", "feliz"),
+        `expected ${op} to be accepted on feliz`,
+      ).not.toContain(CODE);
+    }
   });
 });
 
@@ -384,7 +490,7 @@ describe("loom.frontend-collection-op-unsupported — store surfaces", () => {
   }
   page X { route: "/x"  body: Text("x") }`;
 
-  it("flags a collection op in a STORE ACTION body — the reported crash", async () => {
+  it("flags a refused collection op in a STORE ACTION body — the reported crash", async () => {
     expect(await codes(storeUi("action tidy() { tags := tags.distinct() }"))).toContain(CODE);
   });
 
@@ -400,16 +506,8 @@ describe("loom.frontend-collection-op-unsupported — store surfaces", () => {
     }
   });
 
-  it("flags the property form and every other catalogue op in a store action", async () => {
-    for (const op of [
-      "tags.count",
-      "tags.first",
-      "tags.take(3)",
-      "tags.skip(3)",
-      "tags.sortBy(t => t)",
-      'tags.where(t => t != "").count',
-      'tags.join(", ")',
-    ]) {
+  it("keeps refusing the REPRESENTATION-divergent ops in a store action", async () => {
+    for (const op of ["tags.first", "tags.distinct.count", "tags.sum(t => 1)"]) {
       expect(
         await codes(storeUi(`state { n: int = 0 }  action tidy() { n := ${op} }`)),
         `expected ${op} to be gated in a store action`,
@@ -417,11 +515,39 @@ describe("loom.frontend-collection-op-unsupported — store surfaces", () => {
     }
   });
 
+  it("accepts the RESHAPING ops in a store action — the Feliz action path renders them", async () => {
+    // The store action body is the one surface that does NOT go through the
+    // shared walker on Feliz: `renderFsExpr` owns it, and it used to THROW on
+    // any collection op it had no arm for.  It reaches the same table now.
+    for (const op of [
+      "tags.count",
+      "tags.take(3).count",
+      "tags.skip(3).count",
+      "tags.sortBy(t => t).count",
+      'tags.where(t => t != "").count',
+    ]) {
+      for (const [framework, platform] of [
+        ["react", "static"],
+        ["feliz", "feliz"],
+        ["flutter", "flutter"],
+      ] as const) {
+        expect(
+          await codes(
+            storeUi(`state { n: int = 0 }  action tidy() { n := ${op} }`),
+            framework,
+            platform,
+          ),
+          `expected ${op} to be accepted in a store action on ${framework}`,
+        ).not.toContain(CODE);
+      }
+    }
+  });
+
   it("flags a collection op in a store STATE INITIALISER", async () => {
     expect(
       await codes(`
   store Cart {
-    state { n: int = [1, 2, 3].count }
+    state { n: int = [1, 2, 3].first }
   }
   page X { route: "/x"  body: Text("x") }`),
     ).toContain(CODE);
@@ -435,7 +561,7 @@ describe("loom.frontend-collection-op-unsupported — store surfaces", () => {
     expect(found.message).toContain("`.distinct`");
   });
 
-  it("leaves `.map(λ)` in a store alone on the frameworks that render it", async () => {
+  it("leaves `.map(λ)` in a store alone on every frontend, Feliz included", async () => {
     const mapStore = `
   store Cart {
     state { tags: string[] }
@@ -444,8 +570,7 @@ describe("loom.frontend-collection-op-unsupported — store surfaces", () => {
   page X { route: "/x"  body: Text("x") }`;
     expect(await codes(mapStore, "react", "static")).not.toContain(CODE);
     expect(await codes(mapStore, "flutter", "flutter")).not.toContain(CODE);
-    // …and keeps the Feliz carve-out, exactly as on a page body.
-    expect(await codes(mapStore, "feliz", "feliz")).toContain(CODE);
+    expect(await codes(mapStore, "feliz", "feliz")).not.toContain(CODE);
   });
 
   it("leaves an ordinary store action alone — no false positive", async () => {

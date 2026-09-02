@@ -50,6 +50,7 @@ import {
   dartTemporalBinary,
   dartZeroValue,
   FLUTTER_CHILD_PARAM,
+  renderDartCollectionOp,
   renderDartIntrinsic,
 } from "./dart-expr.js";
 import {
@@ -1009,4 +1010,14 @@ export const flutterTarget: WalkerTarget = {
   // not Dart.
   renderIntrinsic: (receiverType, member, recv, args) =>
     renderDartIntrinsic(receiverType, member, recv, args),
+
+  // Collection ops — likewise ONE table for both walks.  Without it the walk
+  // emitted `customerAll.count` verbatim, which is not Dart
+  // (`loom.frontend-collection-op-unsupported` refused the body rather than
+  // let `flutter analyze` fail on it).
+  //
+  // No `exprLambda` seam: Dart spells a lambda `(p) => body`, exactly as
+  // JavaScript does, so the shared default is already right here — the seam
+  // exists for Feliz's `fun p -> body`.
+  renderCollectionOp: (spec) => renderDartCollectionOp(spec),
 };

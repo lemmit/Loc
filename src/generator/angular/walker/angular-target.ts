@@ -15,8 +15,10 @@
 // ---------------------------------------------------------------------------
 
 import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
+import { isDescendingSort } from "../../../ir/util/collection-op-site.js";
+import { projectionBodyIsMoney } from "../../_expr/js-collection-ops.js";
 import type { DetectedApiCall } from "../../_walker/api-hook-detector.js";
-import { jsExprLeaves } from "../../_walker/js-expr-leaves.js";
+import { jsExprLeaves, renderJsCollectionOp } from "../../_walker/js-expr-leaves.js";
 import {
   defaultInitForJs,
   escapeJsFamilyText,
@@ -69,6 +71,37 @@ export const angularTarget: WalkerTarget = {
   },
   // Expression-syntax leaves (JS) — shared by all JSX-family frontends.
   ...jsExprLeaves,
+
+  /** Collection ops — the shared JS table, with `sortBy` re-spelled.
+   *
+   *  Angular's template expression grammar is a SUBSET of JavaScript, and the
+   *  shared `sortBy` arm lands outside it: its comparator is a BLOCK-bodied
+   *  arrow (`(__a, __b) => { const ka = …; return … }`), and the Angular
+   *  compiler answers `Parser Error: Multi-line arrow functions are not
+   *  supported` — measured against `@angular/compiler` 22 with
+   *  `parseTemplate`, not inferred.  A one-expression comparator IS accepted
+   *  (so are `.filter`/`.some`/`.every` with single-expression arrows and the
+   *  `[...xs]` spread, all measured the same way), so the fix is to re-spell
+   *  this ONE arm rather than to gate the op on Angular.
+   *
+   *  The key λ is applied twice per comparison instead of once — Loom
+   *  expressions are pure, so that is a cost, not a semantic change.  Money
+   *  keys keep the `.lt`/`.gt` treatment for the same reason the shared arm
+   *  has it: a decimal.js `Decimal`'s `<`/`>` coerce through `valueOf()` to a
+   *  STRING and order lexicographically (`Decimal(10) < Decimal(9)`). */
+  renderCollectionOp(spec) {
+    if (spec.op !== "sortBy") return renderJsCollectionOp(spec);
+    const key = spec.args[0];
+    if (key === undefined) return undefined;
+    const desc = spec.call ? isDescendingSort(spec.call) : false;
+    const [lo, hi] = desc ? ["__b", "__a"] : ["__a", "__b"];
+    const ka = `(${key})(${lo})`;
+    const kb = `(${key})(${hi})`;
+    const cmp = projectionBodyIsMoney(spec.call)
+      ? `${ka}.lt(${kb}) ? -1 : ${ka}.gt(${kb}) ? 1 : 0`
+      : `${ka} < ${kb} ? -1 : ${ka} > ${kb} ? 1 : 0`;
+    return `[...(${spec.recv})].sort((__a, __b) => (${cmp}))`;
+  },
 
   // --- State seam ---------------------------------------------------------
 

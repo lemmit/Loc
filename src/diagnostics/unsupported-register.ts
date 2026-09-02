@@ -239,10 +239,18 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
   {
     code: "loom.frontend-collection-op-unsupported",
     kind: "gap",
-    site: "src/ir/validate/checks/ui-checks.ts:616",
+    site: "src/ir/validate/checks/ui-checks.ts:1349",
     what:
-      "every stdlib collection op except `map` over a collection receiver in a walker-rendered " +
-      "page/component/store expression — target-agnostic; `map` is gated on feliz too",
+      "EIGHT of the seventeen stdlib collection ops over a collection receiver in a " +
+      "walker-rendered page/component/store expression. The nine that RESHAPE a collection " +
+      "(count / where / any / all / map / sortBy / take / skip / join) render on all six " +
+      "frontends AND on the HEEx parallel walker. The eight refused are the ones the " +
+      "frontends genuinely disagree about, all on REPRESENTATION: `sum`/`min`/`max`/`avg` " +
+      "fold arithmetic and money is a decimal.js/Elixir `Decimal` object on JS+HEEx but a " +
+      "native scalar on feliz/flutter; `first`/`firstOrNull` differ on partiality and on the " +
+      "optional type (`undefined` vs a raising `List.head`; `T | null` vs `'T option`); " +
+      "`distinct`/`contains` need value equality, which flutter's wire models have no " +
+      "`operator ==` for. Target-agnostic — no per-framework carve-out remains",
     mission: "M-T1.20",
   },
   {
