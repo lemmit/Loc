@@ -1557,6 +1557,17 @@ export interface PrimitiveSpec {
    *  that renders several roots (a `Table` plus its pager) would occupy two
    *  grid cells instead of one. */
   childWrapper?: string;
+  /** Markup emitted INSIDE the tag, before / after the rendered children.
+   *
+   *  The seam a primitive uses to place its own decoration in the children
+   *  slot rather than as an attribute — `Button`'s `icon:` glyph is the one
+   *  case: the JSX packs render it as a `<span class="loom-icon">` sibling of
+   *  the label, and a Phoenix function component's inner block accepts exactly
+   *  that, where a NEW attribute on `<.button>` would be an undeclared attr
+   *  (i.e. a `--warnings-as-errors` build failure).  Suppresses the
+   *  self-closing form, since the tag then has content. */
+  leadingChildren?: string;
+  trailingChildren?: string;
 }
 
 /** The attribute NAME of a rendered HEEx attribute fragment (`aria-label={…}` →
@@ -1672,13 +1683,15 @@ export function renderPrimitive(
       ? positional.map((c, i) => renderChild(c, ctx, positionalRole(expr.name, i)))
       : []),
   ];
-  const childrenHeex = (
-    spec.childWrapper
+  const childrenHeex = [
+    ...(spec.leadingChildren ? [spec.leadingChildren] : []),
+    ...(spec.childWrapper
       ? renderedChildren.map(
           (c) => `<${spec.childWrapper}>\n${indent(c, 2)}\n</${spec.childWrapper}>`,
         )
-      : renderedChildren
-  ).join("\n");
+      : renderedChildren),
+    ...(spec.trailingChildren ? [spec.trailingChildren] : []),
+  ].join("\n");
   const attrs = namedAttrs.length > 0 ? " " + namedAttrs.join(" ") : "";
   if (childrenHeex.length === 0) {
     return spec.tag.startsWith(".") ? `<${spec.tag}${attrs} />` : `<${spec.tag}${attrs} />`;
