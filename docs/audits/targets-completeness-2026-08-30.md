@@ -10,20 +10,20 @@ Base: `main` @ 38580cd77 · built 2026-08-30 · claim map applied (PR #2667 = au
 
 | metric | value |
 |---|---|
-| open rows | **162** |
+| open rows | **161** |
 | P0 | 0 |
 | P1 | 9 |
 | P2 | 17 |
-| P3 | 33 |
+| P3 | 32 |
 | P4 | 91 |
 | P5 | 12 |
-| kind: silent / honest / breadth / mission / stale-prose | 26 / 33 / 26 / 65 / 12 |
-| confidence: proven / likely / suspected | 31 / 129 / 2 |
+| kind: silent / honest / breadth / mission / stale-prose | 26 / 32 / 26 / 65 / 12 |
+| confidence: proven / likely / suspected | 30 / 129 / 2 |
 | class: faulty-fix / regression | 1 / 0 |
-| size S / M / L | 45 / 70 / 47 |
-| provenance: fleet1-only / fleet2-only / corroborated by both | 144 / 17 / 1 |
+| size S / M / L | 44 / 70 / 47 |
+| provenance: fleet1-only / fleet2-only / corroborated by both | 144 / 16 / 1 |
 | claimed by an open PR | 64 |
-| done / merged | 127 |
+| done / merged | 128 |
 | conflicts | 10 |
 | checkedOk entries | 146 |
 | rows scheduled into waves | 134 across 13 packets |
@@ -62,7 +62,6 @@ Sorted P0 (security / data-integrity, silent, proven) → P1 (other silent prove
 | P2 | `sourcemap-feliz-flutter-not-emitted` | silent | like | feliz, flutter | M | `--sourcemap` records NOTHING for the feliz and flutter frontends — the plan files it as a test-parity skew, but the emission is absent |
 | P2 | `static-subpath-405-node-only` | silent | like | dotnet, java, python, elixir | M | The F8 static-sub-path 405 guard landed on the Hono emitter alone — a wrong verb on a static sub-path still answers the sibling `/{id}` route's 422 on dotnet / java / python / elixir |
 | P2 | `M-T1.11-domain-floor-message-code` | silent | like | node, dotnet, java, python, elixir | L | M-T1.11 item (c) — `DomainError` carries no `code` on any of the five backends, so a rule enforced only at the domain floor is unlocalizable |
-| P3 | `F2-CB-C9-requires-unknown-message` | honest | prov | validator | S | `requires <DomainService>.<op>(…)` is rejected as "got 'unknown'" — and appending `&& true` makes the identical expression valid |
 | P3 | `F2-CFE-11` | honest | prov | angular, flutter | S | `testid:` on `CreateForm` is silently dropped on Angular and Flutter (honoured on react/vue/svelte/feliz) |
 | P3 | `F2-W-09` | honest | prov | node, elixir, dotnet, java, python | S | A `File` field is an inline anonymous object on node/elixir and a named `FileRef` component on dotnet/java/python |
 | P3 | `F2-W-12` | honest | like | java, elixir | S | Optional-field nullability: java and elixir publish a non-nullable schema for fields they serialize as `null` |

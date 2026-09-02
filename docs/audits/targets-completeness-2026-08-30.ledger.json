@@ -927,41 +927,6 @@
       "P": 2
     },
     {
-      "id": "F2-CB-C9-requires-unknown-message",
-      "title": "`requires <DomainService>.<op>(…)` is rejected as \"got 'unknown'\" — and appending `&& true` makes the identical expression valid",
-      "kind": "honest",
-      "class": null,
-      "confidence": "proven",
-      "targets": [
-        "validator"
-      ],
-      "fileTrees": [
-        "src/language/validators/statements.ts",
-        "src/language/validators/structural.ts",
-        "src/language/validators/types.ts",
-        "src/ir/lower/lower-expr.ts"
-      ],
-      "evidence": [
-        {
-          "fleet": 2,
-          "id": "F2-CB-C9-requires-unknown-message",
-          "bucket": "probe-combos-backend",
-          "text": "The gate is `src/language/validators/statements.ts:250 const t = typeOf(stmt.expr, env); if (t.kind !== \"primitive\" || t.name !== \"bool\")` (precondition) and `:154` / `src/language/validators/structural.ts:287` (requires). The binary-chain checker at `src/language/validators/types.ts:400-406` requires BOTH operands to be bool and DOES fire on a real mismatch (`requires <bool> && quantity` ⇒ `Operator '&&' requires boolean operands; got 'bool' and 'int'.`) — so the domain-service call types as bool THERE and as `unknown` in the statement-level `typeOf`. `src/ir/lower/lower-expr.ts:1900-1917` shows the IR layer does resolve the call's declared return type; the AST-layer statement path does not."
-        }
-      ],
-      "repro": "scratchpad/combo/f3-domsvc-requires-only.ddd → `destroy { requires Rules.isCancellable(quantity) }` ⇒ `10:28 error: 'requires' must be of type 'bool', got 'unknown'.` on all five. scratchpad/combo/f6.ddd, the same file with `&& true` appended ⇒ `node bin/cli.js parse` prints `0 error(s), 0 warning(s). OK`. f2-domsvc-sites.ddd shows the same for `precondition Rules.isPositive(by)` ⇒ `'precondition' must be of type 'bool', got 'unknown'.`",
-      "impact": "The message names a constraint that does not exist (the expression is bool). Worse, the obvious workaround an author reaches for — `&& true`, or pairing the call with a permission check, which is the natural spelling anyway — silently opens the door to C7's uncompilable emission. Two validators disagreeing about the same expression is what turns an honest rejection into a trap.",
-      "fix": "Make the statement-level `typeOf` resolve a `domainService` member call to its declared return type (mirror the `types.ts` chain arm / `lower-expr.ts:1900` arm). If domain-service calls are genuinely not permitted in a guard position, say so with a dedicated code and enforce it inside `&&` too.",
-      "size": "S",
-      "sources": [
-        "fleet2:probe-combos-backend"
-      ],
-      "related_to": [],
-      "securityClass": false,
-      "P": 3,
-      "note": "Wave 1 packet 1a: root cause is a missing <DomainService>.<op>(...) arm in typeOfPostfixChain (src/language/type-system.ts); one-arm patch in handoffs/wave-1-validator-cli.md."
-    },
-    {
       "id": "F2-CFE-11",
       "title": "`testid:` on `CreateForm` is silently dropped on Angular and Flutter (honoured on react/vue/svelte/feliz)",
       "kind": "honest",
@@ -7432,6 +7397,13 @@
       "pr": "#2752 (wave 1, packet 1d)",
       "sha": "00f6f26",
       "note": "Re-verified OPEN on b826f87 (#2719 did not close it); one Repo.transaction/1 per dataset, rows + marker commit together."
+    },
+    {
+      "id": "F2-CB-C9-requires-unknown-message",
+      "title": "`requires <DomainService>.<op>(…)` is rejected as \"got 'unknown'\" — and appending `&& true` makes the identical expression valid",
+      "pr": "#2752 (wave 1, sweeper)",
+      "sha": "6a0a6cd",
+      "note": "Wave 1 sweeper: <DomainService>.<op>(...) arm added to typeOfPostfixChain; test/language/type-system/domainservice-requires-typing.test.ts."
     }
   ],
   "conflicts": [
@@ -7703,7 +7675,7 @@
     }
   ],
   "counts": {
-    "open": 162,
+    "open": 161,
     "byPriority": {
       "P0": 1,
       "P1": 11,
@@ -7739,7 +7711,7 @@
       "both": 1
     },
     "claimed": 64,
-    "done": 127,
+    "done": 128,
     "conflicts": 10,
     "checkedOk": 146,
     "waveRows": 134,
