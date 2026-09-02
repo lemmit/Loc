@@ -358,8 +358,13 @@ describe("projection comprehension — Hono emission", () => {
     expect(handler).toContain(
       "var customerById = (await _customerRepo.FindManyByIdsAsync(domain.Select(d => d.CustomerId).ToList(), cancellationToken)).ToDictionary(__a => __a.Id);",
     );
-    // …and `select customerName = c.name` reads through the loaded dictionary.
-    expect(handler).toContain("customerById[d.CustomerId].Name");
+    // …and `select customerName = c.name` reads through the loaded dictionary,
+    // via the TOTAL lookup (G2667-D3): a join target the joined aggregate's own
+    // capability filters exclude is absent from that dictionary, and indexing it
+    // directly was a `KeyNotFoundException` 500 on data the model permits.
+    expect(handler).toContain(
+      "(customerById.TryGetValue(d.CustomerId, out var __j0) ? __j0.Name : default!)",
+    );
     // The synthesised find lands on the Order repository impl with the inlined `where`.
     const repo = [...files.entries()].find(([p]) =>
       p.endsWith("Repositories/OrderRepository.cs"),
