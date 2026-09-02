@@ -40,6 +40,38 @@ function sys(shape: string): string {
   }`;
 }
 
+/** A DURABLE channel (`retention: work`) on the mikro adapter — the only shape
+ *  in which the outbox tier is emitted at all. */
+const DURABLE_CHANNEL_SYS = `
+  system CS {
+    subdomain Sales { context Orders {
+      aggregate Order {
+        status: string
+        operation place() {
+          precondition status == "Draft"
+          status := "Placed"
+          emit OrderPlaced { order: id, at: now() }
+        }
+      }
+      repository Orders for Order { }
+      event OrderPlaced { order: Order id, at: datetime }
+      channel Lifecycle { carries: OrderPlaced  delivery: queue  retention: work }
+    }}
+    api OrdersApi from Sales
+    storage pg { type: postgres }
+    storage bus { type: rabbitmq }
+    resource ordersState { for: Orders, kind: state, use: pg }
+    channelSource lifecycleBus { for: Lifecycle, use: bus }
+    deployable d {
+      platform: node { persistence: mikroorm }
+      contexts: [Orders]
+      dataSources: [ordersState]
+      channels: [lifecycleBus]
+      serves: OrdersApi
+      port: 4000
+    }
+  }`;
+
 async function saveMethod(shape: string): Promise<string> {
   const files = await generateSystemFiles(sys(shape));
   const k = [...files.keys()].find((key) => key.endsWith("db/repositories/order-repository.ts"));
@@ -77,8 +109,70 @@ describe.each([
   it("event dispatch stays OUTSIDE the transaction (after commit)", async () => {
     const body = await saveMethod(shape);
     // Dispatching inside would fan handlers out on uncommitted state — the
-    // drizzle sibling drains after the tx closes for the same reason.
-    expect(body.indexOf("});")).toBeLessThan(body.indexOf("aggregate.pullEvents()"));
+    // drizzle sibling dispatches after the tx closes for the same reason.
+    // (The relational shape now DRAINS `pullEvents()` before the tx so the
+    // durable ones can be recorded on its handle, so the loop — not the drain —
+    // is what has to sit after the close.)
+    const dispatch = body.indexOf("await this.events.dispatch(event);");
+    expect(dispatch, "the dispatch loop is emitted").toBeGreaterThanOrEqual(0);
+    expect(body.indexOf("\n    });")).toBeLessThan(dispatch);
+  });
+});
+
+// The atomicity question #2667 register item 5 left open, answered the way the
+// drizzle sibling already answers it.  `createOutboxDispatcher`'s `dispatch`
+// arm inserts the outbox row on `em.fork({ keepTransactionContext: true })`,
+// which only JOINS an ambient transaction — and an ordinary mutation route
+// opens none (only the audited / provenanced routes do).  So with the save's
+// own transaction closed before the dispatch loop ran, the outbox row committed
+// SEPARATELY: a crash in that window left the aggregate written and the durable
+// event owed to nobody.  Drizzle has always captured it on the save
+// transaction's handle via `recordDurable(pendingEvents, tx)`.
+describe("mikroorm relational save — the durable outbox row commits WITH the state", () => {
+  it("drains the events before the tx and records the durable ones on its handle", async () => {
+    const body = await saveMethod("");
+    const drain = body.indexOf("const pendingEvents = aggregate.pullEvents();");
+    const tx = body.indexOf(".transactional(");
+    const record = body.indexOf("this.events.recordDurable?.(pendingEvents, em)");
+    const close = body.indexOf("\n    });", tx);
+    expect(drain, "the pre-tx drain is emitted").toBeGreaterThanOrEqual(0);
+    expect(record, "recordDurable is called").toBeGreaterThanOrEqual(0);
+    // drain → open tx → record → close tx.  `em` is the transactional
+    // callback's own EntityManager, so the insert is in that transaction.
+    expect(drain).toBeLessThan(tx);
+    expect(record).toBeGreaterThan(tx);
+    expect(record).toBeLessThan(close);
+  });
+
+  it("dispatches only what recordDurable hands back, after the commit", async () => {
+    const body = await saveMethod("");
+    // A dispatcher with no durable channel has no hook, so `?? pendingEvents`
+    // keeps every event on the after-commit path — behaviour unchanged there.
+    expect(body).toContain("let dispatchAfterCommit = pendingEvents;");
+    expect(body).toContain(
+      "dispatchAfterCommit = (await this.events.recordDurable?.(pendingEvents, em)) ?? pendingEvents;",
+    );
+    expect(body).toContain("for (const event of dispatchAfterCommit) {");
+    // …and the loop must not re-drain, which would dispatch nothing at all.
+    const loop = body.slice(body.indexOf("for (const event of dispatchAfterCommit)"));
+    expect(loop).not.toContain("pullEvents()");
+  });
+
+  it("the mikro outbox dispatcher exposes the transactional capture hook", async () => {
+    const files = await generateSystemFiles(DURABLE_CHANNEL_SYS);
+    const k = [...files.keys()].find((key) => key.endsWith("http/workflows.ts"));
+    expect(k, "workflows.ts not emitted").toBeDefined();
+    const wf = files.get(k!)!;
+    // The mikro half of the tier had ONLY the `dispatch` arm, so the repository's
+    // optional-chained call resolved to undefined and every durable event fell
+    // through to the after-commit path — where `dispatch` inserted the row on a
+    // fork with no ambient transaction to keep.
+    expect(wf).toContain("async recordDurable(events: readonly Events.DomainEvent[], tx: unknown)");
+    expect(wf).toContain("const txEm = tx as EntityManager;");
+    expect(wf).toContain("await txEm.insert(LoomOutboxRow, {");
+    // The non-durable events come back for in-process delivery, exactly as on
+    // drizzle — the hook is a capture, not a swallow.
+    expect(wf).toContain("return events.filter((e) => !DURABLE_EVENT_TYPES.has(e.type));");
   });
 });
 
