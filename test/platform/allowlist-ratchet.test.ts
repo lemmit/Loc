@@ -296,6 +296,24 @@ const REGISTERED: Ratchet[] = [
     kind: "record",
     max: 0,
   },
+  // The corpus features whose cells stop at the COMPILE tier — nothing boots
+  // them, so no gate observes their runtime behaviour.  Signed with a reason
+  // each; M-T9.13 owns the drain.  Unlike the skip maps above this register is
+  // asserted set-EQUAL to the derived ledger, so it cannot go stale in the
+  // other direction either — but it can still GROW, which is what this pins.
+  {
+    file: "test/system/gate-ledger.test.ts",
+    name: "BEHAVIOURAL_ABSENT",
+    kind: "record",
+    // 14 -> 13 -> 12, on two consecutive rebases: #2696 gave `policy-document`
+    // a `test e2e` block and a golden, then #2717 did the same for
+    // `lifecycle-guard` (its dev-stub array-claim fix is what made a permission
+    // gate testable at all).  Both times the ledger's set-equality caught the
+    // stale entry the moment `main` moved under this branch — the drain
+    // direction working in the field rather than in a mutation, twice in two
+    // days, which is the rate a hand-maintained matrix would have rotted at.
+    max: 12,
+  },
 ];
 
 /** Extract the balanced `[...]` (set) or `{...}` (record) literal bound to

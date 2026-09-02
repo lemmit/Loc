@@ -93,6 +93,35 @@ describe("pipeline fuzz — a crash on a valid model is always a bug", () => {
     ).toEqual([]);
   }, 600_000);
 
+  it("emits the same bytes twice for every shape it generates", async () => {
+    // The CLI-level twin of this (`test/cli/regeneration.test.ts`) proves
+    // determinism end-to-end, across processes and timezones — but on ONE
+    // fixture shape.  Nondeterminism that only a particular model reaches (an
+    // unstable sort over a `Set` built from optional fields, a `Map` keyed by
+    // something only a containment produces) is invisible to a single fixture
+    // and is exactly what a shape generator is for.  Same models as the run
+    // above, generated twice in-process and compared.
+    //
+    // A subset, because this is the expensive half: each seed costs a second
+    // full codegen, and the shapes repeat long before the seeds do.
+    const diverged: string[] = [];
+    for (let seed = 1; seed <= SEEDS; seed += 10) {
+      const source = genModel(seed).replaceAll("__PLATFORM__", platformFor(seed));
+      const a = await generateSystemFiles(source);
+      const b = await generateSystemFiles(source);
+      const paths = [...new Set([...a.keys(), ...b.keys()])].sort();
+      for (const p of paths) {
+        if (a.get(p) !== b.get(p)) diverged.push(`seed ${seed}: ${p}`);
+      }
+    }
+    expect(
+      diverged.slice(0, 5),
+      "two generations of the SAME model disagreed. Something ambient reached the output — " +
+        "a clock, a uuid, an iteration order that is not a function of the model. The path " +
+        "names the emitter.",
+    ).toEqual([]);
+  }, 600_000);
+
   it("is deterministic — the same seed yields the same model", () => {
     // Guards the harness itself. If the generator ever picked up ambient
     // randomness, a failure would stop reproducing from its seed and the whole
