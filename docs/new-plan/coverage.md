@@ -113,7 +113,7 @@
 | resource-model-and-source-types.md | partial | M-T4.8 |
 | retrieval.md | partial | M-T5.4(e) |
 | scaffolded-navigation.md | proposed | M-T1.13 |
-| scheduling.md | proposed | M-T4.1 |
+| scheduling.md | shipped — `timerSource` `every:`/`cron:` on all five backends; M-T4.1 closed 2026-09-02 (its sugar tail is not open work) | [M-T4.1](archive/T4-done.md) |
 | sensitivity-and-compliance.md | partial (1+2-lite) | M-T3.8 |
 | server-side-generation.md | proposed (refactors shipped) | M-T8.7 (evaluate with packaging split) |
 | source-map-and-debugging.md | partial (§6E remap shipped) | M-T8.1, M-T8.2 |

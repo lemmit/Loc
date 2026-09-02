@@ -10,4 +10,4 @@
 
 **Rules.** A mission id is minted once and never reused or deleted: the unsupported-diagnostic register (`src/diagnostics/unsupported-register.ts`) cites ids, and `test/system/unsupported-register.test.ts` requires each cited id to appear as exactly one `## ` heading somewhere under `docs/new-plan/` — the archive counts. When a live mission closes, move its whole `## M-Tx.y` section here (see `../RUNBOOK.md` §5); when a closed mission turns out not to be done, move it back and say why in its status line.
 
-Archived on 2026-09-02 (against `main` @ `5dc8b4e`): 75 missions — T1 5 · T2 6 · T3 5 · T4 3 · T5 6 · T6 38 · T7 1 · T8 2 · T9 9 — and 11 design docs.
+Archived on 2026-09-02 (against `main` @ `5dc8b4e`): 76 missions — T1 5 · T2 6 · T3 5 · T4 4 · T5 6 · T6 38 · T7 1 · T8 2 · T9 9 — and 11 design docs.
