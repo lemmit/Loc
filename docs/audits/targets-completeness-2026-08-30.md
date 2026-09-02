@@ -10,20 +10,20 @@ Base: `main` @ 38580cd77 · built 2026-08-30 · claim map applied (PR #2667 = au
 
 | metric | value |
 |---|---|
-| open rows | **164** |
+| open rows | **162** |
 | P0 | 0 |
 | P1 | 9 |
-| P2 | 19 |
+| P2 | 17 |
 | P3 | 33 |
 | P4 | 91 |
 | P5 | 12 |
-| kind: silent / honest / breadth / mission / stale-prose | 28 / 33 / 26 / 65 / 12 |
-| confidence: proven / likely / suspected | 31 / 131 / 2 |
+| kind: silent / honest / breadth / mission / stale-prose | 26 / 33 / 26 / 65 / 12 |
+| confidence: proven / likely / suspected | 31 / 129 / 2 |
 | class: faulty-fix / regression | 1 / 0 |
-| size S / M / L | 47 / 70 / 47 |
-| provenance: fleet1-only / fleet2-only / corroborated by both | 146 / 17 / 1 |
+| size S / M / L | 45 / 70 / 47 |
+| provenance: fleet1-only / fleet2-only / corroborated by both | 144 / 17 / 1 |
 | claimed by an open PR | 64 |
-| done / merged | 125 |
+| done / merged | 127 |
 | conflicts | 10 |
 | checkedOk entries | 146 |
 | rows scheduled into waves | 134 across 13 packets |
@@ -51,9 +51,7 @@ Sorted P0 (security / data-integrity, silent, proven) → P1 (other silent prove
 | P2 ! | `dapper-no-schema-evolution` | silent | like | dotnet | L | `persistence: dapper` has no ALTER path at all — every post-first-boot model change is silently unapplied (migrations-on-adapters slice 2) |
 | P2 | `F2-FFE-8` | silent | susp | feliz, flutter | S | Flutter and Feliz persisted stores write a FLAT JSON blob under the same `loom.store.<Name>` key the JS frontends use for zustand's `{state,version}` envelope |
 | P2 | `F2-W-06` | silent | like | elixir | S | elixir persists `datetime` at SECOND precision (`:utc_datetime`) where the other four use TIMESTAMPTZ(µs) |
-| P2 | `G2667-C7-heex-button-icon-loading` | silent | like | elixir | S | 08-17 register #7: Button { icon: / loading: } dropped on HEEx |
 | P2 | `G2667-D3-projection-join-unguarded-index` | silent | like | dotnet, node | S | Debt: query-time projection `join` indexes the joined dictionary unguarded — 500 from ordinary data |
-| P2 | `G2667-D6-elixir-seeder-not-atomic` | silent | like | elixir | S | Debt: elixir seeder is not atomic per dataset — a mid-dataset crash re-seeds duplicates |
 | P2 | `M-T6.2-s14-audit-wiresnapshot` | silent | like | elixir | S | Elixir audit before/after snapshots still dump the raw snake_case Ecto struct while the other four record the wireShape |
 | P2 | `G2646-open-heex-layout-inert` | silent | like | elixir | M | #2646 documented, NOT fixed: HEEx layout primitives semantically inert (Grid ≡ Stack, bare divs); non-server-paged Table gets no pager; i18nFormat wrapper dropped |
 | P2 | `M-T1.16-invariant-validation-feliz-flutter` | silent | like | feliz, flutter | M | Invariant-derived client-side form validation is missing on BOTH self-hosting frontends — Feliz and Flutter enforce "Required" only |

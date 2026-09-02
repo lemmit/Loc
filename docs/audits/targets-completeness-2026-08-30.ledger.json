@@ -527,38 +527,6 @@
       "w1bElixir": "OPEN, BUT MIS-SIZED — verified reproducing on a current build (W1b elixir, PR #2704): `field :released_at, :utc_datetime` + `add :released_at, :utc_datetime` against the shared MigrationsIR's `TIMESTAMP WITH TIME ZONE`, so a write silently truncates to second precision. NOT an \"S\": moving declared datetime columns to `:utc_datetime_usec` also requires deleting the truncation machinery that exists ONLY because of the old type (`__truncate_dt/1` in context-emit.ts, `stampFieldIsDatetime` in stamp-emit.ts, the operation-returns `force_change` wrap) — leaving it would truncate on the wider column and half-fix the row — and it moves the SERIALIZED precision too (`DateTime.to_iso8601` gains fractional seconds where node emits milliseconds), which is a five-backend wire decision, not an elixir-local one. Its correct home is a dedicated slice gated by generated-stack-verifier (migrations apply + a real datetime round-trip) and the wire-golden differential. Deferred deliberately, not dropped."
     },
     {
-      "id": "G2667-C7-heex-button-icon-loading",
-      "title": "08-17 register #7: Button { icon: / loading: } dropped on HEEx",
-      "kind": "silent",
-      "class": null,
-      "confidence": "likely",
-      "targets": [
-        "elixir"
-      ],
-      "fileTrees": [
-        "src/generator/elixir/heex-primitives.ts"
-      ],
-      "evidence": [
-        {
-          "fleet": 1,
-          "id": "G2667-C7-heex-button-icon-loading",
-          "text": "Documented and re-verified OPEN by register-only PR #2667 §C row 7: the drop is now rationalised in a comment at src/generator/elixir/heex-primitives.ts:1342-1354 but remains untracked by any mission or waiver — a silent degradation with a code comment is still silent to the ratchet."
-        }
-      ],
-      "repro": null,
-      "impact": null,
-      "fix": "Either render the two slots through the HEEx core-components button (icon slot + aria-busy), or pin the drop in the heex-parity freeze list with a reason so it becomes a reviewed decision rather than a comment.",
-      "size": "S",
-      "sources": [
-        "fleet1:pr-registers"
-      ],
-      "related_to": [
-        "adjacency: #2667 edits heex-primitives.ts (A21/C6) — no icon/loading arm"
-      ],
-      "securityClass": false,
-      "P": 2
-    },
-    {
       "id": "G2667-D3-projection-join-unguarded-index",
       "title": "Debt: query-time projection `join` indexes the joined dictionary unguarded — 500 from ordinary data",
       "kind": "silent",
@@ -591,37 +559,7 @@
       ],
       "securityClass": false,
       "P": 2,
-      "note": "Packet 1b (dotnet-adapters, claude/wave-1, NOT YET on main): the dotnet arm is fixed on that branch. node/python/java/elixir arms remain open; needs an RS-rule for LEFT-JOIN semantics. Row stays open pending that branch's merge. | Wave 1: dotnet (1b), node (1c) and python (1e) arms LEFT-JOIN (source row survives, joined field absent); elixir and java arms open; the cross-backend RS rule for the absent value (node null vs .NET default!) is still to be ruled."
-    },
-    {
-      "id": "G2667-D6-elixir-seeder-not-atomic",
-      "title": "Debt: elixir seeder is not atomic per dataset — a mid-dataset crash re-seeds duplicates",
-      "kind": "silent",
-      "class": null,
-      "confidence": "likely",
-      "targets": [
-        "elixir"
-      ],
-      "fileTrees": [
-        "src/generator/elixir/vanilla/seed-emit.ts"
-      ],
-      "evidence": [
-        {
-          "fleet": 1,
-          "id": "G2667-D6-elixir-seeder-not-atomic",
-          "text": "Documented by register-only PR #2667 §D6: src/generator/elixir/vanilla/seed-emit.ts:205-235 commits per row and writes the completion marker LAST, so a crash mid-dataset leaves rows behind with no marker and the next boot re-seeds them. Python's seeder is one commit."
-        }
-      ],
-      "repro": null,
-      "impact": null,
-      "fix": "Wrap the per-dataset seed loop in `Repo.transaction(fn -> … end)` at seed-emit.ts:205-235 so the rows and the marker commit together, matching python.",
-      "size": "S",
-      "sources": [
-        "fleet1:pr-registers"
-      ],
-      "related_to": [],
-      "securityClass": false,
-      "P": 2
+      "note": "Packet 1b (dotnet-adapters, claude/wave-1, NOT YET on main): the dotnet arm is fixed on that branch. node/python/java/elixir arms remain open; needs an RS-rule for LEFT-JOIN semantics. Row stays open pending that branch's merge. | Wave 1: dotnet (1b), node (1c) and python (1e) arms LEFT-JOIN (source row survives, joined field absent); elixir and java arms open; the cross-backend RS rule for the absent value (node null vs .NET default!) is still to be ruled. | Wave 1 packet 1d: elixir arm LEFT-JOINs too (total __joined/2). Only the java arm is open."
     },
     {
       "id": "M-T6.2-s14-audit-wiresnapshot",
@@ -7480,6 +7418,20 @@
       "pr": "#2668 + #2752 (wave 1, packet 1c)",
       "sha": "4a02c3f",
       "note": "Save path was transactional on this base; the residue — the durable outbox row committed outside the save tx on mikro — is fixed in wave 1 (test/adapters/node-mikroorm-save-transaction.test.ts)."
+    },
+    {
+      "id": "G2667-C7-heex-button-icon-loading",
+      "title": "08-17 register #7: Button { icon: / loading: } dropped on HEEx",
+      "pr": "#2752 (wave 1, packet 1d)",
+      "sha": "00f6f26",
+      "note": "Rendered, not pinned: icon → inner_block glyph span, loading → aria-busy + disabled; designs/ untouched."
+    },
+    {
+      "id": "G2667-D6-elixir-seeder-not-atomic",
+      "title": "Debt: elixir seeder is not atomic per dataset — a mid-dataset crash re-seeds duplicates",
+      "pr": "#2752 (wave 1, packet 1d)",
+      "sha": "00f6f26",
+      "note": "Re-verified OPEN on b826f87 (#2719 did not close it); one Repo.transaction/1 per dataset, rows + marker commit together."
     }
   ],
   "conflicts": [
@@ -7751,7 +7703,7 @@
     }
   ],
   "counts": {
-    "open": 164,
+    "open": 162,
     "byPriority": {
       "P0": 1,
       "P1": 11,
@@ -7787,7 +7739,7 @@
       "both": 1
     },
     "claimed": 64,
-    "done": 125,
+    "done": 127,
     "conflicts": 10,
     "checkedOk": 146,
     "waveRows": 134,
