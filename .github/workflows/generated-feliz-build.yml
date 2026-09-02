@@ -150,6 +150,19 @@ jobs:
                   }
                 }
                 repository Products for Product { }
+                // Realtime toast (channels.md Part I).  Carried here because the
+                // Feliz realtime emitter had NO compile gate: no fixture on any
+                // gate declared a `channel` on a `ui`, so `renderFsToastMessage`
+                // was only ever checked by vitest string comparison.  The `ui`
+                // below toasts a MULTI-LEVEL chain, which emits the `toastField`
+                // `[<Emit>]` helper — a two-parameter jsNative binding taking a
+                // `string array`.  Only `dotnet fable` proves that typechecks.
+                event ProductRestocked { product: Product id, at: datetime }
+                channel Lifecycle {
+                  carries: ProductRestocked
+                  delivery: broadcast
+                  retention: ephemeral
+                }
                 // M-T1.3 Phase 1 — a query-time SINGLETON projection.  Unlike
                 // every other read in this app it is id-less AND single-shaped,
                 // so it fires from `init` yet renders through `View.remoteOne`;
@@ -187,6 +200,14 @@ jobs:
 
             ui WebApp {
               api Shop: ShopApi
+              // Realtime handler — depth-1 and depth-2 member reads plus a
+              // refetch, so the emitted subscription carries both the `payload`
+              // decode and the `toastField` helper.
+              channel Live: Cat.Lifecycle
+              on Live.ProductRestocked(e) {
+                toast("Product " + e.product.id + " restocked at " + e.at)
+                refetch(Product)
+              }
               // Store persistence (`persist:` — M-T1.20).  All four lifetimes, so
               // `dotnet fable` actually compiles the `StorePersist` module: Web
               // Storage hydration + write-back (local / session, incl. the int /

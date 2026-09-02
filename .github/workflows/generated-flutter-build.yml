@@ -443,7 +443,10 @@ jobs:
               framework: flutter
               api Shop: ShopApi
               channel Live: Orders.Lifecycle
-              on Live.OrderPlaced(e) { toast("Order " + e.order + " placed") refetch(Order) }
+              // `e.order.id` is MULTI-LEVEL on purpose: it emits the null-aware
+              // index chain (`payload['order']?['id'] ?? ''`), which only a real
+              // `flutter build` typechecks.  `e.at` keeps the depth-1 arm covered.
+              on Live.OrderPlaced(e) { toast("Order " + e.order.id + " placed at " + e.at) refetch(Order) }
               store Cart persist: local {
                 state { lines: string[]  count: int = 0  subtotal: money }
                 action add(sku: string) { lines += sku  count += 1 }
