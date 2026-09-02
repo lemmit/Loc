@@ -442,8 +442,9 @@ export function findQueryMethod(
     const ret = `{ items: ${agg.name}[]; page: number; pageSize: number; total: number; totalPages: number }`;
     // Server-side sort (M-T2.6): a whitelist maps each accepted `sort` key to
     // its root-table column; an unknown key falls back to `id` (the stable
-    // default order).  The route's zod enum already rejects out-of-whitelist
-    // keys, so the `?? id` is just belt-and-suspenders.
+    // default order).  The route's zod enum rejects out-of-whitelist keys at
+    // the contract boundary; the `Object.hasOwn` below is the defence for
+    // every other caller (and against the prototype chain — see its comment).
     const sortCols = sortableFields(agg)
       .map((f) => `${JSON.stringify(f)}: schema.${tableName}.${f}`)
       .join(", ");
@@ -451,7 +452,15 @@ export function findQueryMethod(
       `  async ${find.name}(${pagedAll}): Promise<${ret}> {`,
       `    const offset = (page - 1) * pageSize;`,
       `    const sortColumns: Record<string, AnyPgColumn> = { ${sortCols} };`,
-      `    const sortColumn = sortColumns[sort] ?? schema.${tableName}.id;`,
+      // `Object.hasOwn`, never a bare index: `sort` is CALLER-supplied, and a
+      // plain lookup reaches `Object.prototype` — `?sort=constructor` resolved
+      // to a Function (bound as an ORDER BY parameter, silently destroying the
+      // ordering) and `?sort=__proto__` threw inside drizzle at query-build
+      // time, a 500 from a spec-conformant query string.  `??` does not help:
+      // it only guards null/undefined, and an inherited member is neither.
+      // The route's zod enum is the outer boundary; this is the one that holds
+      // for every OTHER caller of the repository.
+      `    const sortColumn = Object.hasOwn(sortColumns, sort) ? sortColumns[sort]! : schema.${tableName}.id;`,
       `    const orderBy = dir === "desc" ? desc(sortColumn) : asc(sortColumn);`,
       `    const countRows = await this.db.select({ value: count() }).from(schema.${tableName})${whereClause};`,
       `    const total = Number(countRows[0]?.value ?? 0);`,

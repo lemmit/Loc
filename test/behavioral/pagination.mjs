@@ -160,12 +160,38 @@ async function main() {
       check("past-last page still reports total=1000", past.body.total === N, `total=${past.body.total}`);
     }
 
-    // 6. An unknown sort field falls back to the id whitelist default — no
-    //    crash, still a well-formed envelope over all 1000.
+    // 6. An out-of-whitelist sort key is REFUSED at the contract boundary,
+    //    never executed.  `sort` is a declared zod enum of the server-side
+    //    whitelist, so the shared validation hook answers 422 ProblemDetails
+    //    (this backend's declared status for input-shape rejection — see
+    //    `defaultHook`) before any query is built.
     {
       const { status, body } = await getJson("/api/widgets?page=1&pageSize=5&sort=DROP&dir=asc");
-      check("unknown sort field falls back (200, no crash)", status === 200, `status=${status}`);
-      check("unknown sort field still totals 1000", body.total === N, `total=${body.total}`);
+      check("unknown sort field is refused (422)", status === 422, `status=${status}`);
+      check(
+        "unknown sort field names the offending field",
+        body?.errors?.some?.((e) => e.pointer === "/sort"),
+        JSON.stringify(body?.errors),
+      );
+    }
+
+    // 6b. PROTOTYPE-CHAIN sort keys.  A bare `sortColumns[sort]` index reached
+    //     `Object.prototype`, and `?? id` does not guard an inherited member:
+    //     `?sort=constructor` bound a Function as the ORDER BY parameter
+    //     (silently wrong order, 200) and `?sort=__proto__` threw inside the
+    //     query builder — an uncaught 500 from a spec-conformant query string.
+    //     Both must now be ordinary client errors, and NEVER a 5xx.
+    for (const key of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+      const { status } = await getJson(`/api/widgets?page=1&pageSize=5&sort=${key}&dir=asc`);
+      check(`sort=${key} is a client error, not a 500`, status === 422, `status=${status}`);
+    }
+
+    // 6c. The empty sort the scaffold list sends on first render stays valid
+    //     (it is part of the declared enum) and falls back to the id order.
+    {
+      const { status, body } = await getJson("/api/widgets?page=1&pageSize=5&sort=&dir=asc");
+      check("empty sort is accepted (200)", status === 200, `status=${status}`);
+      check("empty sort still totals 1000", body.total === N, `total=${body.total}`);
     }
 
     // 7. Bare list (no query params) — the emitted defaults apply

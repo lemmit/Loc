@@ -102,6 +102,7 @@ import {
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
 import { aggregateIsEventSourced } from "../../../ir/util/resolve-datasource.js";
+import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { walkExpr } from "../../../ir/validate/checks/shared.js";
 import type {
@@ -723,14 +724,26 @@ export function buildRoutesFile(
         lines.push(`  ${p.name}: ${zodFor(p.type, "query")},`);
       }
       if (paged) {
-        // Server-side pagination + sort controls (M-T2.6).  `sort`/`dir` are
-        // plain strings (the client binds them to its sort state, which starts
-        // empty = unsorted); the repository whitelists the column server-side
-        // (`sortColumns[sort] ?? id`), so an enum boundary is unnecessary — and
-        // would reject the empty initial sort the scaffold list sends.
+        // Server-side pagination + sort controls (M-T2.6).  `sort` is a
+        // DECLARED enum of the server-side whitelist — `sortableFields(agg)`,
+        // the same list the repository builds its `sortColumns` map from — plus
+        // the empty string the scaffold list's initial (unsorted) state sends.
         //
-        // Both carry a DECLARED upper bound (`PAGED_MAX_PAGE` /
-        // `PAGED_MAX_PAGE_SIZE`).  With only `.min(1)` the published contract
+        // It used to be a bare `z.string()`, on the reasoning that "the
+        // repository whitelists the column server-side (`sortColumns[sort] ??
+        // id`), so an enum boundary is unnecessary".  Both halves of that were
+        // wrong.  A bare index into an object literal reaches
+        // `Object.prototype`, and `??` only guards null/undefined, so
+        // `?sort=constructor` bound a Function as an ORDER BY parameter and
+        // `?sort=__proto__` threw at query-build time — an uncaught 500 from a
+        // spec-CONFORMANT query string.  (The repository now uses `Object.hasOwn`
+        // as well; this enum is the outer, contract-level boundary — a typo'd
+        // sort key is answered, not silently re-ordered by `id`.)  Publishing the
+        // accepted keys also makes the OpenAPI contract honest: a fuzzer reads
+        // the enum instead of guessing, and the client learns its typo.
+        //
+        // `page` and `pageSize` both carry a DECLARED upper bound
+        // (`PAGED_MAX_PAGE` / `PAGED_MAX_PAGE_SIZE`).  With only `.min(1)` the published contract
         // permitted a `page × pageSize` product that overflows the SQL
         // `OFFSET` — a 500 the caller reached by obeying the spec
         // (schemathesis F4).  The bound is part of the contract, so the same
@@ -738,7 +751,7 @@ export function buildRoutesFile(
         lines.push(
           `  page: z.coerce.number().int().min(1).max(${PAGED_MAX_PAGE}).default(${PAGED_DEFAULT_PAGE}),`,
           `  pageSize: z.coerce.number().int().min(1).max(${PAGED_MAX_PAGE_SIZE}).default(${PAGED_DEFAULT_PAGE_SIZE}),`,
-          `  sort: z.string().default("id"),`,
+          `  sort: z.enum([${[...sortableFields(agg), ""].map((f) => JSON.stringify(f)).join(", ")}]).default("id"),`,
           `  dir: z.string().default("asc"),`,
         );
       }

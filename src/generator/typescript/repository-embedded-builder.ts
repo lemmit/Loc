@@ -383,7 +383,15 @@ function embeddedFindMethod(
       `  async ${find.name}(${pagedAll}): Promise<${pagedReturnType(agg.name)}> {`,
       `    const offset = (page - 1) * pageSize;`,
       `    const sortColumns: Record<string, AnyPgColumn> = { ${sortCols} };`,
-      `    const sortColumn = sortColumns[sort] ?? schema.${tableName}.id;`,
+      // `Object.hasOwn`, never a bare index: `sort` is CALLER-supplied, and a
+      // plain lookup reaches `Object.prototype` — `?sort=constructor` resolved
+      // to a Function (bound as an ORDER BY parameter, silently destroying the
+      // ordering) and `?sort=__proto__` threw inside drizzle at query-build
+      // time, a 500 from a spec-conformant query string.  `??` does not help:
+      // it only guards null/undefined, and an inherited member is neither.
+      // The route's zod enum is the outer boundary; this is the one that holds
+      // for every OTHER caller of the repository.
+      `    const sortColumn = Object.hasOwn(sortColumns, sort) ? sortColumns[sort]! : schema.${tableName}.id;`,
       `    const orderBy = dir === "desc" ? desc(sortColumn) : asc(sortColumn);`,
       `    const countRows = await this.db.select({ value: count() }).from(schema.${tableName})${whereClause};`,
       `    const total = Number(countRows[0]?.value ?? 0);`,
