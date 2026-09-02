@@ -305,11 +305,14 @@ const REGISTERED: Ratchet[] = [
     file: "test/system/gate-ledger.test.ts",
     name: "BEHAVIOURAL_ABSENT",
     kind: "record",
-    // 14 -> 13: #2696 gave `policy-document` a `test e2e` block and a golden
-    // while this branch was open, and the ledger's set-equality caught the
-    // stale entry on the first rebase — the drain direction working in the
-    // field rather than in a mutation.
-    max: 13,
+    // 14 -> 13 -> 12, on two consecutive rebases: #2696 gave `policy-document`
+    // a `test e2e` block and a golden, then #2717 did the same for
+    // `lifecycle-guard` (its dev-stub array-claim fix is what made a permission
+    // gate testable at all).  Both times the ledger's set-equality caught the
+    // stale entry the moment `main` moved under this branch — the drain
+    // direction working in the field rather than in a mutation, twice in two
+    // days, which is the rate a hand-maintained matrix would have rotted at.
+    max: 12,
   },
 ];
 

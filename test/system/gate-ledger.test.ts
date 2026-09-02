@@ -66,7 +66,6 @@ const BEHAVIOURAL_ABSENT: Record<string, string> = {
   resources: "objectStore / queue / api / mailer clients need their containers",
   "api-call":
     "in-system api call; needs both deployables booted (the `api-call-e2e` leg does this outside the corpus tier)",
-  "lifecycle-guard": "guard rejection is a status code, not a token in the emitted source",
   "collection-op-shapes":
     "collection-op VALUE semantics (empty sum, avg of none, sort stability) — the exact class a string assertion cannot see",
 };
