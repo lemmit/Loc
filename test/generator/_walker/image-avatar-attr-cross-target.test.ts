@@ -28,11 +28,21 @@
 //     the same spelling `renderAttrBinding` uses for those two targets).
 //   - dynamic, feliz/flutter → the bare expression (their packs read `src`/
 //     `alt` as a raw value in their own language, never spliced markup).
-//   - dynamic, vue/angular → STILL UNFIXED (hand-off, not this file's claim):
-//     both need the pack's hardcoded `src=` prefix replaced with a
-//     `{{{srcAttr}}}`-shaped splice (mirroring `{{{navAttr "to"}}}`) before a
-//     genuinely correct `:src="expr"` / `[src]="expr"` can render — that's a
-//     `designs/**` change, out of this file's fence.
+//
+// vue/angular — fixed separately (wave-1 sweeper), in `designs/**` only.  The
+// walker (`text.ts`/`walker-core.ts`) hands every pack the SAME `src`/`alt`
+// string it always has (a literal is `JSON.stringify`'d, a dynamic value is
+// the raw rendered JS expression) — no new field, no `_walker/**` edit. Each
+// vue/angular pack template now calls a Handlebars helper
+// (`{{{vueAttr "src" src}}}` / `{{{ngAttr "src" src}}}`, registered in
+// `src/generator/_packs/loader.ts`) instead of hardcoding ` src={{{src}}}`:
+// the helper detects a LITERAL value by whether it round-trips through
+// `JSON.parse`/`JSON.stringify` unchanged (true for every literal, and for a
+// dynamic value only when treating it as one is still correct) and renders
+// the plain attribute unchanged; a genuinely dynamic value binds properly
+// (`:src="expr"` / `[src]="expr"`, quoted the same way `renderAttrBinding`
+// already quotes `to:` on these targets) instead of splicing raw JS text
+// into a plain attribute.
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it } from "vitest";
@@ -160,4 +170,128 @@ describe("the fixed react output is syntactically valid JSX (not just regex-shap
     // JSX — confirmed directly against `tsc` while building this fix.
     expect(content).not.toMatch(/src=`[^`]*`/);
   });
+});
+
+// ---------------------------------------------------------------------------
+// vue/angular — every pack (wave-1 sweeper, `designs/**` only, no
+// `_walker/**` edit).  Mirrors `test/generator/a11y-contract-cross-pack.test
+// .ts`'s cross-pack pattern: `design: "<pack>"` selects the pack directly,
+// rather than relying on whatever a bare `platform:` defaults to, so every
+// pack is genuinely exercised — not just the default one.
+// ---------------------------------------------------------------------------
+
+interface PackTarget {
+  readonly pack: string;
+  readonly platform: "vue" | "angular";
+  readonly page: RegExp;
+  /** The computed `src` reaches the Image BOUND (`:src='…'` / `[src]='…'`),
+   *  not silently dropped and not spliced as a plain (inert on Vue, literal-
+   *  string-valued on Angular) attribute. */
+  readonly dynamicImage: RegExp;
+  /** A bare route-param ref reaches the Avatar's src, bound the same way. */
+  readonly refAvatar: RegExp;
+  /** A literal path still renders exactly as every pack has always emitted
+   *  it — the byte-identity claim for the unchanged case. */
+  readonly staticImage: RegExp;
+  /** The old, broken/silently-wrong shapes this pack's dynamic/ref case must
+   *  NOT contain any more (the raw JS text spliced into a plain attribute). */
+  readonly mustNotContain: readonly string[];
+}
+
+const VUE_ANGULAR_PACKS: readonly PackTarget[] = [
+  {
+    pack: "shadcnVue",
+    platform: "vue",
+    page: /\/pages\/gallery\.vue$/,
+    dynamicImage: /:src='\("\/img\/" \+ slug\)'/,
+    refAvatar: /:src="slug"/,
+    staticImage: /src="\/logo\.png"/,
+    mustNotContain: ['src=("/img/" + slug)', "src=slug "],
+  },
+  {
+    pack: "vuetify",
+    platform: "vue",
+    page: /\/pages\/gallery\.vue$/,
+    dynamicImage: /:src='\("\/img\/" \+ slug\)'/,
+    refAvatar: /:src="slug"/,
+    staticImage: /src="\/logo\.png"/,
+    mustNotContain: ['src=("/img/" + slug)', "src=slug "],
+  },
+  {
+    pack: "spartanNg",
+    platform: "angular",
+    page: /\/pages\/gallery\.component\.ts$/,
+    dynamicImage: /\[src\]='\("\/img\/" \+ slug\)'/,
+    refAvatar: /\[src\]="slug"/,
+    staticImage: /src="\/logo\.png"/,
+    mustNotContain: ['src=("/img/" + slug)', "src=slug "],
+  },
+  {
+    pack: "angularMaterial",
+    platform: "angular",
+    page: /\/pages\/gallery\.component\.ts$/,
+    dynamicImage: /\[src\]='\("\/img\/" \+ slug\)'/,
+    refAvatar: /\[src\]="slug"/,
+    staticImage: /src="\/logo\.png"/,
+    mustNotContain: ['src=("/img/" + slug)', "src=slug "],
+  },
+  {
+    pack: "primeng",
+    platform: "angular",
+    page: /\/pages\/gallery\.component\.ts$/,
+    dynamicImage: /\[src\]='\("\/img\/" \+ slug\)'/,
+    refAvatar: /\[src\]="slug"/,
+    staticImage: /src="\/logo\.png"/,
+    mustNotContain: ['src=("/img/" + slug)', "src=slug "],
+  },
+];
+
+function vueAngularSystem(t: PackTarget): string {
+  return `
+  system Demo {
+    subdomain S { context C { } }
+    ui Web {
+      page Landing { route: "/" body: Stack { Text { "home" } } }
+      page Gallery(slug: string) { route: "/gallery/:slug" body: ${BODY} }
+    }
+    storage loomDb { type: postgres }
+    resource cState { for: C, kind: state, use: loomDb }
+    deployable api { platform: node, contexts: [C], dataSources: [cState], port: 3000 }
+    deployable web { platform: ${t.platform}, design: "${t.pack}", targets: api, ui: Web, port: 3001 }
+  }
+`;
+}
+
+async function renderPackGallery(t: PackTarget): Promise<string> {
+  const files = await generateSystemFiles(vueAngularSystem(t));
+  const matched = [...files].filter(([p]) => t.page.test(p));
+  expect(
+    matched.length,
+    `${t.pack}: no emitted path matched ${t.page} — the assertions below would be vacuous`,
+  ).toBeGreaterThan(0);
+  return matched.map(([, c]) => c).join("\n");
+}
+
+describe("Image/Avatar src:/alt: — vue/angular, every pack (M-T1.26)", () => {
+  for (const t of VUE_ANGULAR_PACKS) {
+    it(`${t.pack} (${t.platform}): a computed src reaches the Image, properly bound`, async () => {
+      const content = await renderPackGallery(t);
+      expect(content).toMatch(t.dynamicImage);
+      for (const bad of t.mustNotContain) expect(content).not.toContain(bad);
+    });
+
+    it(`${t.pack} (${t.platform}): a route-param ref reaches the Avatar's src, properly bound`, async () => {
+      const content = await renderPackGallery(t);
+      expect(content).toMatch(t.refAvatar);
+      for (const bad of t.mustNotContain) expect(content).not.toContain(bad);
+    });
+
+    it(`${t.pack} (${t.platform}): a literal src still renders exactly as before (byte-identical)`, async () => {
+      const content = await renderPackGallery(t);
+      expect(content).toMatch(t.staticImage);
+      // The literal case must NOT get the bound spelling — that would be a
+      // needless output-shape regression for the case that was never broken.
+      expect(content).not.toMatch(/(:src|\[src\])='"\/logo\.png"'/);
+    });
+  }
 });
