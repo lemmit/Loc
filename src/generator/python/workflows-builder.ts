@@ -34,6 +34,7 @@ import { snake, upperFirst, workflowFnSnake } from "../../util/naming.js";
 import { LogEvents } from "../_obs/log-events.js";
 import { statementSubRegions } from "../_trace/sourcemap.js";
 import { renderWorkflowStmtChunks, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
+import { zeroFor } from "./dispatch-builder.js";
 import type { OpFragment } from "./emit/aggregate.js";
 import { domainServiceImportLinesForWorkflow } from "./emit/domain-service.js";
 import { responsePyType, wireModelImport } from "./emit/http-models.js";
@@ -198,6 +199,9 @@ export function buildPyWorkflowsFile(
     `from pydantic import ${["BaseModel", refersTo("RootModel") ? "RootModel" : null].filter(Boolean).join(", ")}`,
     refersTo("select") ? "from sqlalchemy import select" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
+    // Own-state scratch namespace for an uncorrelated command workflow
+    // (M-T6.50) — see `workflowRoute`'s `usesOwnState` guard.
+    refersTo("SimpleNamespace") ? "from types import SimpleNamespace" : null,
     "from typing import Annotated",
     "",
     anyUser ? "from app.auth.user import User" : null,
@@ -305,6 +309,38 @@ function lookupOp(
   opName: string,
 ): OperationIR | undefined {
   return ctx.aggregates.find((a) => a.name === aggName)?.operations.find((o) => o.name === opName);
+}
+
+/** True when the body writes OR reads one of the workflow's own `stateFields`
+ *  (M-T6.50) — an `assign` (`field := value`, the only own-state-write
+ *  `WorkflowStmtIR` kind: `+=`/`-=` desugar to it too) anywhere in the tree,
+ *  or a bare reference to an own-state field (`this-prop` / `this-vo-prop` /
+ *  `this-derived` — the refKinds `lower-expr.ts` gives an own-state name)
+ *  reached through any statement's expressions.  `walkWorkflowStmtExprsDeep`
+ *  visits an `assign`'s VALUE but not its PathIR target, so the write half is
+ *  checked directly; recurses into `for-each` / `if-let` nested bodies for
+ *  both halves. */
+function usesOwnState(statements: WorkflowStmtIR[]): boolean {
+  const hasAssign = (sts: WorkflowStmtIR[]): boolean =>
+    sts.some((s) => {
+      if (s.kind === "assign") return true;
+      if (s.kind === "for-each") return hasAssign(s.body);
+      if (s.kind === "if-let") return hasAssign(s.thenBody) || hasAssign(s.elseBody ?? []);
+      return false;
+    });
+  if (hasAssign(statements)) return true;
+  let found = false;
+  for (const s of statements) {
+    walkWorkflowStmtExprsDeep(s, (e) => {
+      if (
+        e.kind === "ref" &&
+        (e.refKind === "this-prop" || e.refKind === "this-vo-prop" || e.refKind === "this-derived")
+      ) {
+        found = true;
+      }
+    });
+  }
+  return found;
 }
 
 interface RepoNeed {
@@ -551,6 +587,28 @@ function workflowRoute(
   // Wire params → domain locals (brand ids, build VOs) once up front.
   for (const p of wf.params) {
     out.push(`    ${snake(p.name)} = ${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`);
+  }
+  // Own-state (`field := value`) on an UNCORRELATED command workflow (M-T6.50):
+  // there is no persisted saga row to write through (that's the dispatch-file
+  // path, gated on `correlationField`), and this route is a module-level
+  // `async def`, not a method — so the render context's default `self._x`
+  // mapping (`pyWorkflowStmtTarget`'s `assign` arm) has no `self` to land on.
+  // Seed a genuine local namespace instead: scratch state that lives only for
+  // this one request, typed-zeroed exactly like a fresh saga row allocates
+  // (`allocateKwargs`/`zeroFor` in dispatch-builder.ts) so a read-before-write
+  // sees the same starting value the correlated path would.  Skipped when the
+  // body never touches own state (dead `self = SimpleNamespace()` would trip
+  // ruff F841), and when the workflow IS correlated — its own-state path (the
+  // dispatch-file reactor) already maps correctly onto the persisted row.
+  if (!wf.correlationField && usesOwnState(wf.statements)) {
+    // Attribute names carry the leading underscore: every own-state read/write
+    // renders `self._<field>` (the same `self._foo` private-backing-field
+    // convention an aggregate operation's own fields use — `render-expr.ts`'s
+    // `this-prop` case, unchanged here), so the namespace's attrs must match.
+    const initKwargs = (wf.stateFields ?? [])
+      .map((f) => `_${snake(f.name)}=${f.optional ? "None" : zeroFor(f)}`)
+      .join(", ");
+    out.push(`    self = SimpleNamespace(${initKwargs})`);
   }
   // Read-port repos (domain-services.md rev. 4): a `reading`-tier
   // domain-service call the workflow makes needs a live repository handle, so
