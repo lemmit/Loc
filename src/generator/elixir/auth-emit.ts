@@ -9,7 +9,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { hierarchyRegistry } from "../../ir/util/tenant-stance.js";
 import { AUTH_BASE_PATH } from "../../util/api-base.js";
-import { snake, upperFirst } from "../../util/naming.js";
+import { elixirString, snake, upperFirst } from "../../util/naming.js";
 import { devClaimFields } from "../_auth/dev-claims.js";
 
 // ---------------------------------------------------------------------------
@@ -836,8 +836,12 @@ function renderBuildUser(user: UserIR | undefined, auth: AuthIR | undefined): st
  *  loudly rather than mis-resolving. */
 function elixirAuthValue(v: AuthValueIR | undefined, fallback = '""'): string {
   if (!v) return fallback;
-  if (v.kind === "literal") return JSON.stringify(v.value);
-  return `System.get_env(${JSON.stringify(v.env)}, "")`;
+  // Through the shared escaping funnel: an auth `issuer:` / `clientId:` literal
+  // is `.ddd` text, and a raw `#{` in it would INTERPOLATE as Elixir in the
+  // emitted auth config (read on every request).  The env NAME is an `ID`-shaped
+  // `env("…")` argument, but funnelled too so the seam has one spelling.
+  if (v.kind === "literal") return elixirString(v.value);
+  return `System.get_env(${elixirString(v.env)}, "")`;
 }
 
 /** `System.get_env(<canonical var>, <declared>)` — the deploy env overrides
@@ -847,10 +851,11 @@ function elixirAuthValue(v: AuthValueIR | undefined, fallback = '""'): string {
  *  becomes the fallback read. */
 function envOrDeclared(envVar: string, v: AuthValueIR | undefined): string {
   if (v?.kind === "env" && v.env !== envVar) {
-    return `System.get_env(${JSON.stringify(envVar)}) || System.get_env(${JSON.stringify(v.env)}, "")`;
+    return `System.get_env(${elixirString(envVar)}) || System.get_env(${elixirString(v.env)}, "")`;
   }
-  const fallback = v?.kind === "literal" ? JSON.stringify(v.value) : '""';
-  return `System.get_env(${JSON.stringify(envVar)}, ${fallback})`;
+  // Same funnel as `elixirAuthValue` — the declared literal is author text.
+  const fallback = v?.kind === "literal" ? elixirString(v.value) : '""';
+  return `System.get_env(${elixirString(envVar)}, ${fallback})`;
 }
 
 // ---------------------------------------------------------------------------

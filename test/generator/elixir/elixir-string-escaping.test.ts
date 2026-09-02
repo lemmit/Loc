@@ -15,7 +15,7 @@
 //   3. the residual-invariant message  — `changeset-invariant-emit.ts`
 //   4. the realtime LiveView toast     — `realtime-liveview.ts`
 //
-// Wave 1 (packet 1d) re-swept the emitter for the same shape and found three
+// Wave 1 (packet 1d) re-swept the emitter for the same shape and found FOUR
 // MORE bare-`JSON.stringify` splices of `.ddd`-authored text, each proven by
 // generation:
 //
@@ -28,6 +28,9 @@
 //      `elixirLiteral`, spliced into the LiveView `mount/3` assigns
 //   7. the page-handler `requires` / `precondition` flash — same file, which
 //      splices `stmt.source` (verbatim `.ddd` text, so it can carry a literal)
+//   8. the OIDC config literals — `auth-emit.ts` `elixirAuthValue` /
+//      `envOrDeclared`, i.e. a declared `issuer:` / `clientId:` string, read on
+//      every request by the emitted auth module and controller
 //
 // and two same-shape ones fixed alongside without a fixture here
 // (`store-emit.ts` `renderStoreLiteral`, `tests-emit.ts` `renderLiteral`).
@@ -174,6 +177,48 @@ const HOSTILE_PAGE = `system HostilePage {
   }
 }`;
 
+// A declared (non-`env(...)`) OIDC issuer / clientId: `.ddd` text that lands as
+// the `System.get_env/2` default in the emitted auth module AND controller.
+const HOSTILE_AUTH = `system HostileAuth {
+  user {
+    id: string
+    role: string
+  }
+  auth {
+    provider: keycloak
+    oidc {
+      issuer: "https://idp.example/#{:erlang.halt(7)}"
+      clientId: "cid#{:erlang.halt(8)}"
+    }
+    sessions: cookie
+    claims: { role: "realm_access.roles" }
+  }
+  subdomain Support {
+    context Tickets {
+      aggregate Ticket with crudish {
+        subject: string
+        open: bool
+        operation close() {
+          requires currentUser.role == "agent"
+          open := false
+        }
+      }
+      repository Tickets for Ticket { }
+    }
+  }
+  api SupportApi from Support
+  storage primary { type: postgres }
+  resource ticketState { for: Tickets, kind: state, use: primary }
+  deployable d {
+    platform: elixir
+    contexts: [Tickets]
+    dataSources: [ticketState]
+    serves: SupportApi
+    auth: required
+    port: 4000
+  }
+}`;
+
 function findLine(files: Map<string, string>, suffix: string, needle: string): string {
   const path = [...files.keys()].find((p) => p.endsWith(suffix));
   expect(path, `no emitted file ends with ${suffix}`).toBeTruthy();
@@ -233,5 +278,15 @@ describe("Elixir emitters route `.ddd` strings through the escaping funnel", () 
     const files = await generateSystemFiles(HOSTILE_PAGE);
     const line = findLine(files, "lib/d_web/live/home_live.ex", "put_flash(socket, :error,");
     expectNoLiveInterpolation(line);
+  });
+
+  it("a declared OIDC issuer / clientId does not interpolate", async () => {
+    const files = await generateSystemFiles(HOSTILE_AUTH);
+    // Both emit sites: the auth module and the auth controller read the same
+    // declared literal through their own copy of the `System.get_env/2` default.
+    expectNoLiveInterpolation(findLine(files, "lib/d_web/auth.ex", "def issuer,"));
+    expectNoLiveInterpolation(
+      findLine(files, "lib/d_web/controllers/auth_controller.ex", "defp client_id,"),
+    );
   });
 });
