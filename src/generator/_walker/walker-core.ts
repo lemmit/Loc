@@ -1401,10 +1401,12 @@ function stmtIsAwaited(s: StmtIR): boolean {
 }
 
 /** Money(value, currency?, decimals?, testid?).  Renders
- *  through the pack's `MoneyValue` runtime helper (Intl.NumberFormat
- *  with `style: "currency"`).  First positional or `value:` named
- *  arg is the numeric value; `currency:` and `decimals:` are
- *  optional named args. */
+ *  through the pack's `MoneyValue` runtime helper, which delegates to
+ *  the shared `moneyText` (src/generator/_frontend/money-format.ts):
+ *  the wire's own digits verbatim — no locale, no fabricated currency,
+ *  no rescale.  First positional or `value:` named arg is the value;
+ *  `decimals:` (half-away-from-zero digit-string rescale) and
+ *  `currency:` (verbatim code prefix) are optional named args. */
 // Leaf text & media primitives (Heading, Text, Money, DateDisplay,
 // EnumBadge, Anchor, Image, Avatar, Loader, Empty, KeyValueRow) live
 // in walker/primitives/text.ts.

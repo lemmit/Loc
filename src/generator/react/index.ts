@@ -20,6 +20,7 @@ import { buildApiModule } from "../_frontend/api-module.js";
 import { AUTH_GATE_TSX, AUTH_SESSION_TS } from "../_frontend/auth-ui.js";
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
+import { MONEY_TEXT_SOURCE } from "../_frontend/money-format.js";
 import { buildPageModuleIndex } from "../_frontend/page-identity.js";
 import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
@@ -313,7 +314,10 @@ export function generateReactForContexts(
       pack,
     ),
   );
-  out.set("src/lib/format.tsx", renderShellFile("format-helpers", {}, pack));
+  out.set(
+    "src/lib/format.tsx",
+    renderShellFile("format-helpers", { moneySource: MONEY_TEXT_SOURCE }, pack),
+  );
   // Frontend ACL shared utilities — pack-agnostic, emitted into every
   // React project.  `strict-field-map.ts` is type-only (zero runtime
   // cost; erased at compile time).  `apply-server-errors.ts` decodes

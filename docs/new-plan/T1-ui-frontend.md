@@ -328,11 +328,13 @@ Found 2026-08-23 by the numeric-types audit ([F4+F5+F6](../audits/numeric-types-
 
 Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F4/F5/F6 + annex, plan.json N4. Conflicts with M-T1.23/M-T1.25 in shared trees.
 
-## M-T1.25 — Money display fabricates "$"/USD and rounds to 2dp — `open` · **S** · P3
+## M-T1.25 — Money display fabricates "$"/USD and rounds to 2dp — `done` (2026-08-24) · **S** · P3
 
 Found 2026-08-23 by the numeric-types audit ([S6](../audits/numeric-types-audit-2026-08-23.md)). Every JSX/Angular/Vue/Svelte pack's `format-helpers` money formatter coerces through `Number(value)`, defaults `decimals=2`, and invents a currency symbol Loom money does not have (no currency dimension — M-T2.12 owns adding one). A wire `"12.3456"` displays `"$12.35"` and there is **no way to see the stored 4dp value in the UI**; Feliz shows the raw string, Flutter differs again — three display behaviors for one type.
 
 **The work:** stop fabricating the symbol; default display shows the wire value faithfully (4dp, locale-neutral); if a format knob is wanted it becomes a declared design decision, not a hardcode. Display-only — no wire change.
+
+**Landed 2026-08-24.** One owner — `MONEY_TEXT_SOURCE` in `src/generator/_frontend/money-format.ts` — is spliced into the `src/lib/format.*` all four Handlebars frontends already emit, and all **15** packs' money helper delegates to it. Default is **verbatim**: the wire's own digits, locale-neutral, no `Number()` hop, no symbol, no re-scale. `decimals: n` re-scales the digit string half-away-from-zero (never through a float, so `NUMERIC(19,4)`'s 19 digits survive); `currency:` prefixes the caller's code verbatim. Both stay the pre-existing, user-declared `Money(…)` arguments — no new pack knob. Witnessed by a transpile-and-execute behavioural test on `MONEY_TEXT_SOURCE` plus a cross-pack gate banning `"USD"` / `style: "currency"` / `Number(` on the money path in every pack, both mutation-proved. Deliberately excluded: Feliz (already conforms; its `decimals:` gap is unchanged), Flutter (M-T1.21 owns it), and `formatNumber`'s `Math.max(decimals, 2)` on plain `decimal` — same shape, different type, recorded not changed.
 
 Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) S6, plan.json N5. Relates to M-T2.12 (currency dimension). Conflicts with M-T1.24 in the pack trees.
 
