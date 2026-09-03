@@ -464,9 +464,9 @@ function BodyPicker({ members, selected, testidPrefix, onSelect }: {
       gap={4}
       px={6}
       py={4}
-      bg="dark.7"
+      bg="var(--loom-bg)"
       wrap="wrap"
-      style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+      style={{ borderBottom: "1px solid var(--loom-border)" }}
       data-testid={`${testidPrefix}s`}
     >
       <Text size="xs" c="dimmed" mr={2}>
@@ -530,8 +530,8 @@ function HeaderInput({ label, value, width, placeholder, testid, onCommit }: {
  *  views: bindings & writes are solid (commit-shaped), reads & constraints are
  *  dashed (observation-shaped), event emissions get their own accent. */
 const EDGE_STYLE: Record<string, { stroke: string; dash?: string; labelFill?: string; opacity?: number; strokeWidth?: number }> = {
-  binding:    { stroke: "var(--mantine-color-dark-2)" },
-  next:       { stroke: "var(--mantine-color-dark-2)" },
+  binding:    { stroke: "var(--loom-edge)" },
+  next:       { stroke: "var(--loom-edge)" },
   writes:     { stroke: "var(--mantine-color-teal-4)" },
   reads:      { stroke: "var(--mantine-color-gray-5)", dash: "4 3", labelFill: "var(--mantine-color-gray-5)" },
   constrains: { stroke: "var(--mantine-color-yellow-5)", dash: "2 3", labelFill: "var(--mantine-color-yellow-5)" },
@@ -539,7 +539,7 @@ const EDGE_STYLE: Record<string, { stroke: string; dash?: string; labelFill?: st
   // Containment edges (root → child) are a faint structural backdrop —
   // visible enough to read the tree shape, dim enough that the semantic
   // edges (reads/writes/etc.) stay foreground.
-  contains:   { stroke: "var(--mantine-color-dark-3)", opacity: 0.5, strokeWidth: 1 },
+  contains:   { stroke: "var(--loom-border-strong)", opacity: 0.5, strokeWidth: 1 },
 };
 
 function toRfEdges(g: ViewGraph): Edge[] {
@@ -551,7 +551,7 @@ function toRfEdges(g: ViewGraph): Edge[] {
     // peripheral containment trace. Pivot contains attach to the BOTTOM
     // handle; peripheral ones attach to LEFT / RIGHT.
     const isPivotContains = e.kind === "contains" && e.sourceHandle === "bottom";
-    const stroke = isPivotContains ? "var(--mantine-color-dark-1)" : styleSpec.stroke;
+    const stroke = isPivotContains ? "var(--loom-edge-strong)" : styleSpec.stroke;
     const opacity = isPivotContains ? 0.85 : styleSpec.opacity;
     const strokeWidth = isPivotContains ? 1.5 : styleSpec.strokeWidth;
     return {
@@ -599,9 +599,9 @@ function Breadcrumb({ path, onJump, onOverview, trailing }: {
       gap={4}
       px={8}
       py={4}
-      bg="dark.7"
+      bg="var(--loom-bg)"
       wrap="wrap"
-      style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+      style={{ borderBottom: "1px solid var(--loom-border)" }}
       data-testid="c4system-v2-breadcrumb"
     >
       {trailing && <Box style={{ order: 1, marginLeft: "auto" }}>{trailing}</Box>}
@@ -1583,8 +1583,8 @@ function Inner({ ctx, path, setPath, onOverview }: {
         gap={4}
         px={6}
         py={4}
-        bg="dark.7"
-        style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+        bg="var(--loom-bg)"
+        style={{ borderBottom: "1px solid var(--loom-border)" }}
         data-testid="c4system-v2-op-inspector"
       >
         <Group gap={6} wrap="wrap" align="center">

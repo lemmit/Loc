@@ -359,20 +359,25 @@ export function TestsBody({
         </Group>
       )}
       {error && <TestError error={error} ctx={ctx} />}
-      {hasProofs && (
-        <Group px="sm" py={6} justify="flex-end">
-          <Button
-            size="compact-xs"
-            variant="light"
-            onClick={() =>
-              downloadProofReport(traceability, verification, results)
-            }
-            data-testid="btn-download-proofs"
-          >
-            Download proofs
-          </Button>
-        </Group>
-      )}
+      {/* Always in the toolbar, disabled until a run has produced proofs
+          (audit L4).  It used to materialise the moment the first suite
+          finished, pushing everything below it down mid-read. */}
+      <Group px="sm" py={6} justify="flex-end">
+        <Button
+          size="compact-xs"
+          variant="light"
+          disabled={!hasProofs}
+          onClick={() => downloadProofReport(traceability, verification, results)}
+          data-testid="btn-download-proofs"
+          title={
+            hasProofs
+              ? "Download the traceability + verification proof bundle."
+              : "Run the tests first — the proof bundle is built from their results."
+          }
+        >
+          Download proofs
+        </Button>
+      </Group>
       <ScrollArea style={{ flex: 1, minHeight: 0 }}>
         <Box px="sm" pb="sm">
           {traceability && verification && (

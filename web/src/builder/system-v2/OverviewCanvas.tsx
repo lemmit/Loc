@@ -73,7 +73,7 @@ const KIND_COLOR: Record<NodeKind, string> = {
 const COVERAGE_COLOR: Record<CoverageStatus, string> = {
   covered: "var(--mantine-color-green-8)",
   uncovered: "var(--mantine-color-red-8)",
-  none: "var(--mantine-color-dark-4)",
+  none: "var(--loom-border)",
 };
 
 const SEVERITY_COLOR = { error: "var(--mantine-color-red-6)", warning: "var(--mantine-color-yellow-5)" } as const;
@@ -183,7 +183,7 @@ function toRfEdges(graph: SystemGraph, grouped = false): Edge[] {
     target: remap(e.target),
     label: e.label,
     labelStyle: { fontSize: 9, fill: "var(--mantine-color-dimmed)" },
-    style: { stroke: "var(--mantine-color-dark-2)" },
+    style: { stroke: "var(--loom-edge)" },
   }));
 }
 
@@ -419,10 +419,10 @@ export default function OverviewCanvas({ ctx, onClose, onOpen }: {
       gap={4}
       px={8}
       py={4}
-      bg="dark.7"
+      bg="var(--loom-bg)"
       wrap="wrap"
       align="center"
-      style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+      style={{ borderBottom: "1px solid var(--loom-border)" }}
       data-testid="c4system-v2-overview-toolbar"
     >
       <Button
@@ -563,7 +563,7 @@ export default function OverviewCanvas({ ctx, onClose, onOpen }: {
           style={{
             width: 260,
             minWidth: 260,
-            borderLeft: "1px solid var(--mantine-color-dark-4)",
+            borderLeft: "1px solid var(--loom-border)",
             padding: 8,
             display: "flex",
             flexDirection: "column",

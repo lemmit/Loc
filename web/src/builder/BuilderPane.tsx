@@ -384,7 +384,7 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
       onKeyDown={paneUndoKeyHandler(ctx.editorHandleRef)}
       data-testid="c4builder-pane"
     >
-      <Group px="xs" py={4} bg="dark.7" gap="xs" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+      <Group px="xs" py={4} bg="var(--loom-bg)" gap="xs" style={{ borderBottom: "1px solid var(--loom-border)" }}>
         <UndoRedo handleRef={ctx.editorHandleRef} testidPrefix="c4builder" />
         {scaffolded.length > 0 && (
           // Real pages AND scaffolded ones: the generated pages sit behind one

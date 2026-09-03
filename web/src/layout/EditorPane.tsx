@@ -141,8 +141,8 @@ export function EditorPane({ ctx, border = "none" }: Props): JSX.Element | null 
         // has no in-pane explorer (it's the left panel), so this is just
         // the editor.
         flexDirection: "column",
-        borderRight: border === "right" ? "1px solid var(--mantine-color-dark-4)" : undefined,
-        borderBottom: border === "bottom" ? "1px solid var(--mantine-color-dark-4)" : undefined,
+        borderRight: border === "right" ? "1px solid var(--loom-border)" : undefined,
+        borderBottom: border === "bottom" ? "1px solid var(--loom-border)" : undefined,
       }}
     >
       {explorer}

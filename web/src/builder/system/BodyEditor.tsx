@@ -529,7 +529,7 @@ function NestedList({ label, src, list, step, path, nested, onSrc, error, onClea
   // naming this list and the child's position in it.
   const childPath = (i: number): StmtPath => [...(path ?? []), { index: i, list: step }];
   return (
-    <Stack gap={2} style={{ paddingLeft: 12, borderLeft: "1px solid var(--mantine-color-dark-4)" }} data-testid="c4system-stmt-nested">
+    <Stack gap={2} style={{ paddingLeft: 12, borderLeft: "1px solid var(--loom-border)" }} data-testid="c4system-stmt-nested">
       <Text size="xs" tt="uppercase" c="dimmed">{label}</Text>
       {list.items.length === 0 && <Text size="xs" c="dimmed">empty</Text>}
       {list.items.map((child, i) => {

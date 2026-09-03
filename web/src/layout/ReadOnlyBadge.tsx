@@ -37,7 +37,7 @@ export function ReadOnlyBadge({ reason, size = "xs" }: Props): JSX.Element | nul
         data-testid="read-only-badge"
         data-reason={reason}
       >
-        {READ_ONLY.badge}
+        {READ_ONLY.badge[reason]}
       </Badge>
     </Tooltip>
   );

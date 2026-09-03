@@ -191,9 +191,9 @@ function NodeRow({
             ...baseRowStyle,
             paddingLeft,
             background: pressed
-              ? "var(--mantine-color-dark-5)"
+              ? "var(--loom-bg-active)"
               : hover
-                ? "var(--mantine-color-dark-6)"
+                ? "var(--loom-bg-raised)"
                 : "transparent",
           }}
         >
@@ -275,9 +275,9 @@ function NodeRow({
         background: selected
           ? "var(--mantine-color-blue-9)"
           : pressed
-            ? "var(--mantine-color-dark-5)"
+            ? "var(--loom-bg-active)"
             : hover
-              ? "var(--mantine-color-dark-6)"
+              ? "var(--loom-bg-raised)"
               : "transparent",
         color: selected ? "white" : "inherit",
         borderRadius: 0,

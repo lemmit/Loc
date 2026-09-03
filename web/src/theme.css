@@ -1,0 +1,47 @@
+/* ---------------------------------------------------------------------------
+ * Loom playground — semantic colour tokens (M-T8.23 slice 4, audit M16).
+ *
+ * The playground was written against Mantine's RAW dark palette: ~108 uses of
+ * `dark.N` / `--mantine-color-dark-N` spread across 25 files.  A raw shade is
+ * not a role, so nothing could adapt: a viewer whose stored Mantine scheme was
+ * light got white-on-white panels, and M-T8.16 had to pin `forceColorScheme`
+ * to stop it.  Every one of those literals now resolves through a token here.
+ *
+ * Two rules make this safe to land in one pass:
+ *
+ *   1. **Every dark-scheme value is the shade it replaced.**  `--loom-border`
+ *      is `dark-4` in dark, `--loom-bg-raised` is `dark-6`, and so on, so the
+ *      dark rendering is unchanged and only the light half is new.
+ *   2. **`light-dark()` needs `color-scheme`**, which Mantine sets on the root
+ *      from the active scheme — so these follow the provider, including its
+ *      `auto` (system) setting.  Where Mantine already ships the right role
+ *      (`--mantine-color-body`, `--mantine-color-default-border`) the token is
+ *      an alias rather than a second opinion.
+ *
+ * A NEW `dark.N` literal under `web/src/` fails
+ * `test/playground/theme-tokens.test.ts`.  Add a role here instead.
+ * ------------------------------------------------------------------------- */
+
+:root {
+  /* Hairlines between regions, rows and panels — by far the commonest use
+     (56 of the 110 literals were `--mantine-color-dark-4` on a border). */
+  --loom-border: var(--mantine-color-default-border);
+  /* A visible divider / dashed outline / graph handle — one step stronger. */
+  --loom-border-strong: light-dark(var(--mantine-color-gray-5), var(--mantine-color-dark-3));
+
+  /* The pane ground: what a panel's body sits on. */
+  --loom-bg: var(--mantine-color-body);
+  /* A raised strip against that ground — region headers, rails, toolbars,
+     graph nodes. */
+  --loom-bg-raised: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6));
+  /* A sunken well — a code surface inside a pane. */
+  --loom-bg-sunken: light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-8));
+  /* The selected / active row in a list or tree. */
+  --loom-bg-active: light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-5));
+
+  /* Graph edge strokes and gutter numerals — foreground, not a surface, so it
+     must stay legible ON the pane ground in both schemes. */
+  --loom-edge: light-dark(var(--mantine-color-gray-6), var(--mantine-color-dark-2));
+  /* The emphasised edge (the pivot's containment lines). */
+  --loom-edge-strong: light-dark(var(--mantine-color-gray-7), var(--mantine-color-dark-1));
+}

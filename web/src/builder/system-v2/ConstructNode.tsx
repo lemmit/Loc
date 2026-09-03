@@ -285,7 +285,7 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
       <Handle
         type="target"
         position={Position.Top}
-        style={{ background: "var(--mantine-color-dark-3)", visibility: d.isRoot ? "hidden" : undefined }}
+        style={{ background: "var(--loom-border-strong)", visibility: d.isRoot ? "hidden" : undefined }}
       />
       {/* Left/right side handles on the root let `contains` edges leave the
        *  banner's sides and trace down the periphery, keeping the centre of
@@ -296,13 +296,13 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
             type="source"
             id="left"
             position={Position.Left}
-            style={{ background: "var(--mantine-color-dark-3)", visibility: "hidden" }}
+            style={{ background: "var(--loom-border-strong)", visibility: "hidden" }}
           />
           <Handle
             type="source"
             id="right"
             position={Position.Right}
-            style={{ background: "var(--mantine-color-dark-3)", visibility: "hidden" }}
+            style={{ background: "var(--loom-border-strong)", visibility: "hidden" }}
           />
         </>
       )}
@@ -559,7 +559,7 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
         type="source"
         id="bottom"
         position={Position.Bottom}
-        style={{ background: "var(--mantine-color-dark-3)" }}
+        style={{ background: "var(--loom-border-strong)" }}
       />
     </Box>
   );

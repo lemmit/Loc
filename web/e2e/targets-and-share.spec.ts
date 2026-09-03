@@ -106,11 +106,16 @@ test("#view=1 renders without the editing chrome and refuses edits", async ({ pa
     .poll(async () => await readEditorSource(page), { timeout: 45_000 })
     .toContain("system Shared");
 
-  // ONE read-only explanation, and it says WHICH read-only this is (audit L1).
-  const badge = page.getByTestId("read-only-badge");
+  // ONE read-only explanation — the same badge component everywhere, saying
+  // WHICH read-only this is (audit L1).  The header carries it; the panes that
+  // also show it render the identical component, never a second wording.
+  const badge = page.getByRole("banner").getByTestId("read-only-badge");
   await expect(badge).toBeVisible();
   await expect(badge).toHaveAttribute("data-reason", "view");
-  await expect(badge).toHaveCount(1);
+  await expect(badge).toHaveText("Read-only view");
+  // Every other read-only surface on the page says the same words.
+  const all = page.getByTestId("read-only-badge");
+  for (const text of await all.allTextContents()) expect(text).toBe("Read-only view");
 
   // No editing chrome: no workspace switcher, no overflow menu, no targets.
   await expect(page.getByTestId("header-menu")).toHaveCount(0);
@@ -128,7 +133,10 @@ test("#view=1 renders without the editing chrome and refuses edits", async ({ pa
 test("#embed=1 is read-only and drops the dock", async ({ page }) => {
   await page.goto(`/#embed=1&s=${encodeForHash(SHARED)}`);
   await expect(page.getByRole("heading", { name: /Loom Playground/i })).toBeVisible();
-  await expect(page.getByTestId("read-only-badge")).toHaveAttribute("data-reason", "view");
+  await expect(page.getByRole("banner").getByTestId("read-only-badge")).toHaveAttribute(
+    "data-reason",
+    "view",
+  );
   // The dock and its tabs are gone entirely — not merely collapsed.
   await expect(page.getByTestId("devtools-tab-problems")).toHaveCount(0);
   await expect(page.getByTestId("dock-toggle")).toHaveCount(0);

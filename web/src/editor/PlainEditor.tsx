@@ -137,7 +137,7 @@ export function PlainEditor({
         width: "100%",
         height: "100%",
         display: "flex",
-        background: "var(--mantine-color-dark-8)",
+        background: "var(--loom-bg-sunken)",
         overflow: "hidden",
       }}
       data-testid="plain-editor"
@@ -149,8 +149,8 @@ export function PlainEditor({
           overflow: "hidden",
           padding: `${PAD}px 6px ${PAD}px 8px`,
           textAlign: "right",
-          color: "var(--mantine-color-dark-2)",
-          background: "var(--mantine-color-dark-7)",
+          color: "var(--loom-edge)",
+          background: "var(--loom-bg)",
           fontFamily: MONO,
           fontSize: FONT,
           lineHeight: `${LINE_H}px`,

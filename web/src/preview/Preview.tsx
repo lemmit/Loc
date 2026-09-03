@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActionIcon, Box, Group, Text, Tooltip } from "@mantine/core";
+import { useMediaQuery } from "@mantine/hooks";
 import type { RuntimeDispatcher } from "../engine";
 import { SandboxBridge } from "./bridge/parent-bridge";
 import {
@@ -105,6 +106,9 @@ export function Preview({
   runtime,
   onAppLog,
 }: PreviewProps): JSX.Element {
+  // Does this device have a pointer that HOVERS — i.e. a mouse, and by
+  // implication a keyboard with an Esc key?  Used only for copy (audit L3).
+  const hasKeyboard = useMediaQuery("(hover: hover)", true) ?? true;
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   // Current route the preview app is showing (the path under the
   // sandbox basename, e.g. "/" or "/products").  Polled from the iframe
@@ -333,8 +337,8 @@ export function Preview({
       <Box
         px="sm"
         py={4}
-        bg="dark.6"
-        style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+        bg="var(--loom-bg-raised)"
+        style={{ borderBottom: "1px solid var(--loom-border)" }}
       >
         <Group justify="space-between" wrap="nowrap" gap="xs">
           {/* The app's current route — more useful than repeating the
@@ -353,7 +357,16 @@ export function Preview({
             {route}
           </Text>
           <Tooltip
-            label={isMaximized ? "Exit full screen (Esc)" : "Open full screen"}
+            // "(Esc)" only where there IS an Esc key (audit L3): on a touch
+            // device the hint named a key the user does not have, and the
+            // button itself is the exit.  `hover: none` is the media query
+            // that actually separates the two — not viewport width, which a
+            // tablet and a small window share.
+            label={
+              isMaximized
+                ? `Exit full screen${hasKeyboard ? " (Esc)" : ""}`
+                : "Open full screen"
+            }
             withArrow
             position="left"
             openDelay={300}

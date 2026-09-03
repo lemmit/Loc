@@ -483,13 +483,15 @@ export const SHARE = {
  *  it three ways).  Every surface renders `READ_ONLY.reason[...]` and appends
  *  nothing of its own. */
 export const READ_ONLY = {
-  reason: {
-    view: "Read-only view — this link opens the source without an editor.",
-    "other-tab": "Another tab owns this workspace, so edits here would fight it.",
-    ephemeral: "This session has no workspace store, so edits cannot be saved.",
+  /** The short badge label, per reason.  One shape — "Read-only" plus what
+   *  makes THIS one read-only — so a user seeing it in two panes reads one
+   *  condition, not two.  The full sentence stays in the badge's tooltip
+   *  (`readOnlyMessage`, the one catalogue of reasons). */
+  badge: {
+    view: "Read-only view",
+    "other-tab": "Read-only — another tab",
+    ephemeral: "Read-only — not saved",
   },
-  /** The short badge every pane shows instead of re-explaining. */
-  badge: "Read-only",
 } as const;
 
 /** The `README.md` the exported ZIP carries at its root. */

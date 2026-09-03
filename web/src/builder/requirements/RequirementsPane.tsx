@@ -367,7 +367,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
       tabIndex={-1}
       onKeyDown={paneUndoKeyHandler(ctx.editorHandleRef)}
     >
-    <Group px="xs" py={2} bg="dark.7" gap="xs" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+    <Group px="xs" py={2} bg="var(--loom-bg)" gap="xs" style={{ borderBottom: "1px solid var(--loom-border)" }}>
       <UndoRedo handleRef={ctx.editorHandleRef} testidPrefix="requirements" />
     </Group>
     <RefusalLine refusal={refusal} />
@@ -386,7 +386,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
         <Box
           style={{
             width: isDesktop ? 320 : "100%",
-            borderRight: isDesktop ? "1px solid var(--mantine-color-dark-4)" : undefined,
+            borderRight: isDesktop ? "1px solid var(--loom-border)" : undefined,
             minHeight: 0,
             display: "flex",
             flexDirection: "column",
@@ -482,7 +482,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
               px="sm"
               py={6}
               wrap="nowrap"
-              style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+              style={{ borderBottom: "1px solid var(--loom-border)" }}
             >
               <Button
                 size="xs"
@@ -498,7 +498,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
             </Group>
           )}
           {pendingSelect !== undefined && selected !== null && (
-            <Box px="sm" py={6} style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+            <Box px="sm" py={6} style={{ borderBottom: "1px solid var(--loom-border)" }}>
               <InlineConfirm
                 spec={confirmSites.discardFormEdits(selected.id)}
                 size="compact-xs"
@@ -757,7 +757,7 @@ function Row({
         padding: "4px 6px",
         borderRadius: 4,
         cursor: "pointer",
-        background: active ? "var(--mantine-color-dark-5)" : "transparent",
+        background: active ? "var(--loom-bg-active)" : "transparent",
       }}
     >
       {children}

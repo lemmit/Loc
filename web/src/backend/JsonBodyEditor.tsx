@@ -114,7 +114,7 @@ export function JsonBodyEditor(props: JsonBodyEditorProps): JSX.Element {
       data-testid="req-body"
       style={{
         height: props.isDesktop ? 140 : 200,
-        border: "1px solid var(--mantine-color-dark-4)",
+        border: "1px solid var(--loom-border)",
         borderRadius: 4,
         overflow: "hidden",
       }}

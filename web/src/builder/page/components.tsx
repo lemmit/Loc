@@ -23,7 +23,7 @@ const boxStyle = (selected: boolean, errored = false): React.CSSProperties => ({
     ? "2px solid var(--mantine-color-red-6)"
     : selected
       ? "2px solid var(--mantine-color-blue-5)"
-      : "1px dashed var(--mantine-color-dark-3)",
+      : "1px dashed var(--loom-border-strong)",
   borderRadius: 4,
   padding: 6,
   margin: 2,
@@ -51,7 +51,7 @@ function disp(v: string | number | undefined): string {
 function renderLeaf(name: PrimitiveName, p: Props): ReactNode {
   switch (name) {
     case "Divider":
-      return <div style={{ borderTop: "1px solid var(--mantine-color-dark-3)", height: 0 }} />;
+      return <div style={{ borderTop: "1px solid var(--loom-border-strong)", height: 0 }} />;
     case "Heading":
       return <span style={{ fontWeight: 700, fontSize: 22 - (Number(p.level ?? 2) - 1) * 2 }}>{disp(p.text) || "Heading"}</span>;
     case "Text":
@@ -61,10 +61,10 @@ function renderLeaf(name: PrimitiveName, p: Props): ReactNode {
     case "Italic":
       return <span style={{ fontStyle: "italic" }}>{disp(p.text) || "Italic"}</span>;
     case "InlineCode":
-      return <code style={{ fontFamily: "monospace", background: "var(--mantine-color-dark-5)", borderRadius: 3, padding: "0 4px" }}>{disp(p.text) || "code"}</code>;
+      return <code style={{ fontFamily: "monospace", background: "var(--loom-bg-active)", borderRadius: 3, padding: "0 4px" }}>{disp(p.text) || "code"}</code>;
     case "CodeBlock":
       return (
-        <div style={{ fontFamily: "monospace", fontSize: 11, whiteSpace: "pre-wrap", background: "var(--mantine-color-dark-5)", borderRadius: 4, padding: 4 }}>
+        <div style={{ fontFamily: "monospace", fontSize: 11, whiteSpace: "pre-wrap", background: "var(--loom-bg-active)", borderRadius: 4, padding: 4 }}>
           <div style={{ fontSize: 10, color: "var(--mantine-color-dimmed)" }}>{disp(p.title) || "CodeBlock"}{p.language ? ` · ${disp(p.language)}` : ""}</div>
           {disp(p.source) || disp(p.code) || "…"}
         </div>
@@ -110,11 +110,11 @@ function renderLeaf(name: PrimitiveName, p: Props): ReactNode {
     case "Field":
     case "NumberField":
     case "PasswordField":
-      return <span>{disp(p.label) || name}: <span style={{ display: "inline-block", minWidth: 48, borderBottom: "1px solid var(--mantine-color-dark-3)" }} /></span>;
+      return <span>{disp(p.label) || name}: <span style={{ display: "inline-block", minWidth: 48, borderBottom: "1px solid var(--loom-border-strong)" }} /></span>;
     case "MultilineField":
-      return <span>{disp(p.label) || name}: <span style={{ display: "inline-block", minWidth: 48, height: 18, border: "1px solid var(--mantine-color-dark-3)", borderRadius: 3, verticalAlign: "middle" }} /></span>;
+      return <span>{disp(p.label) || name}: <span style={{ display: "inline-block", minWidth: 48, height: 18, border: "1px solid var(--loom-border-strong)", borderRadius: 3, verticalAlign: "middle" }} /></span>;
     case "SelectField":
-      return <span>{disp(p.label) || name}: <span style={{ display: "inline-block", minWidth: 48, borderBottom: "1px solid var(--mantine-color-dark-3)" }} /> ▾</span>;
+      return <span>{disp(p.label) || name}: <span style={{ display: "inline-block", minWidth: 48, borderBottom: "1px solid var(--loom-border-strong)" }} /> ▾</span>;
     case "FileUpload":
       return <span>{disp(p.label) || name}: <span style={{ fontStyle: "italic", color: "var(--mantine-color-dimmed)" }}>choose file…</span></span>;
     case "Toggle":
@@ -142,7 +142,7 @@ function makeContainer(name: PrimitiveName): ComponentType<{ children?: ReactNod
       .map(String);
     const diag = props.__diag ? String(props.__diag) : undefined;
     return (
-      <div ref={ref} data-testid={`c4node-${name}`} title={diag} data-diag={diag ? "1" : undefined} data-selected={selected ? "1" : undefined} style={{ ...boxStyle(selected, diag != null), background: "var(--mantine-color-dark-6)" }}>
+      <div ref={ref} data-testid={`c4node-${name}`} title={diag} data-diag={diag ? "1" : undefined} data-selected={selected ? "1" : undefined} style={{ ...boxStyle(selected, diag != null), background: "var(--loom-bg-raised)" }}>
         <div style={{ fontSize: 10, color: "var(--mantine-color-dimmed)", marginBottom: 4 }}>
           {extras.length ? `${name}: ${extras.join(" · ")}` : name}
         </div>

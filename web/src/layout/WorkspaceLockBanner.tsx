@@ -11,11 +11,9 @@
 // reading, and a dialog would demand a decision the user did not ask to make.
 // ---------------------------------------------------------------------------
 
-import { Badge, Button, Group, Tooltip } from "@mantine/core";
-import {
-  OTHER_TAB_MESSAGE,
-  type WorkspaceReadOnlyReason,
-} from "../workspace/workspace-sources";
+import { Button, Group } from "@mantine/core";
+import type { WorkspaceReadOnlyReason } from "../workspace/workspace-sources";
+import { ReadOnlyBadge } from "./ReadOnlyBadge";
 
 export interface WorkspaceLockBannerProps {
   /** Why the workspace is read-only, or `null` when it isn't.  Keyed on the
@@ -34,16 +32,14 @@ export function WorkspaceLockBanner({
   onTakeOver,
   size = "xs",
 }: WorkspaceLockBannerProps): JSX.Element | null {
-  // Ephemeral mode has its own, longer-standing explanation in the file tree
-  // and History panel; this banner is only about the multi-tab case.
+  // Only the multi-tab case gets an ACTION.  The other reasons still say
+  // read-only — through the same `ReadOnlyBadge` every other surface uses
+  // (audit L1) — but there is nothing to click, so the banner stays out of the
+  // way and the file tree / History panel render the badge themselves.
   if (reason !== "other-tab") return null;
   return (
     <Group gap={6} wrap="nowrap" data-testid="workspace-readonly-banner">
-      <Tooltip label={OTHER_TAB_MESSAGE} withArrow multiline w={280} openDelay={200}>
-        <Badge color="orange" variant="light" size={size === "sm" ? "sm" : "xs"}>
-          Read-only — open in another tab
-        </Badge>
-      </Tooltip>
+      <ReadOnlyBadge reason={reason} size={size} />
       <Button
         size={size === "sm" ? "xs" : "compact-xs"}
         variant="light"
