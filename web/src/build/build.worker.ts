@@ -202,6 +202,10 @@ async function generateFromAst(input: {
       generateSystems(input.model, {
         sourcemap: input.sourcemap,
         sourceTexts: input.sourceTexts,
+        // The playground has no filesystem behind `sources`, so the sidecars
+        // must carry the `.ddd` text itself or devtools has nothing to show.
+        // The CLI leaves this off (see GenerateSystemOptions.inlineSources).
+        inlineSources: true,
       }).files,
     );
   }
@@ -240,6 +244,8 @@ async function generateFromLoom(input: {
       generateSystemsFromLoom(loom, {
         sourcemap: input.sourcemap,
         sourceTexts: input.sourceTexts,
+        // See the single-file path above: no filesystem behind `sources`.
+        inlineSources: true,
       }).files,
     );
   }

@@ -40,7 +40,12 @@ to the source map. For Node/V8 frames (the only dialect whose frames carry a col
 the column selects the expression-level `targetCol` region containing it and the
 annotation prints the exact `.ddd` `path:line:col` of that sub-expression; every other
 format (and any column matching no region) keeps the line-granular `path:line`.
-See [`loom-artifacts.md`](loom-artifacts.md).
+The Source Map v3 `.ts.map` sidecars it also writes name their `.ddd` by absolute
+path and do not inline its text; pass `--inline-sources` alongside `--sourcemap`
+to embed a copy in each sidecar (only worth it when the maps will be read where
+the `.ddd` files are not — on the ERP example it takes the sidecars from 95 KB to
+763 KB). See [`loom-artifacts.md`](loom-artifacts.md) and
+[`debugging.md`](debugging.md).
 
 `ddd breakpoints <file.ddd> --line <n>` is the reverse lookup: given a
 `.ddd` source line, it prints every generated `file:line` that line produced

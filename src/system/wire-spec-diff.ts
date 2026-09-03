@@ -98,6 +98,12 @@ export function renderPropType(p: SchemaProperty): string {
   if ("$ref" in p) return p.$ref;
   if (p.type === "array") return `array<${renderPropType(p.items)}>`;
   if ("format" in p && p.format) return `${p.type}(${p.format})`;
+  // An enum-constrained string renders its MEMBERS, so dropping a value —
+  // which `sameType` already classifies as a (breaking) type change now that
+  // the spec carries the constraint — reads as
+  // `enum(New|Qualified|Lost)` → `enum(New|Qualified)` instead of the useless
+  // `string` → `string`.
+  if ("enum" in p && p.enum) return `enum(${p.enum.join("|")})`;
   // A nullable member spells its type as a JSON Schema type ARRAY
   // (`["object","null"]` — the `provenanced` carrier's lineage, F2-XB-7).
   // Rendered as `object|null` so a diff that GAINS or LOSES nullability reads

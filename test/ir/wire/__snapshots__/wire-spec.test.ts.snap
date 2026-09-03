@@ -57,6 +57,12 @@ exports[`wire-spec.json > emits the expected document shape for examples/acme.dd
           "type": "string",
         },
         "status": {
+          "enum": [
+            "Draft",
+            "Confirmed",
+            "Shipped",
+            "Cancelled",
+          ],
           "type": "string",
         },
         "version": {

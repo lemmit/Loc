@@ -41,7 +41,13 @@
           "type": "string"
         },
         "status": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "Draft",
+            "Confirmed",
+            "Shipped",
+            "Cancelled"
+          ]
         },
         "placedAt": {
           "type": "string",

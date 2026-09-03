@@ -189,6 +189,63 @@ export async function generateSystemResult(
   return generateSystems(await assertGeneratable(source), options);
 }
 
+/**
+ * The MULTI-FILE twin of `generateSystemFiles`: load a `.ddd` entry file from
+ * disk with the import-graph project loader — the same path `ddd generate
+ * system` takes — assert the same three phases, and emit.
+ *
+ * The string-source helpers above cannot express this: `parseString` has no
+ * filesystem behind it, so an entry that `import`s siblings (the ERP example's
+ * six files) is unreachable through them, and a test that wants one had no
+ * option but to import the orchestrator directly — the thing
+ * `direct-generate-systems-ratchet.test.ts` exists to stop.  A FRESH Langium
+ * service instance per call, so two calls share no parser or document state.
+ *
+ * Phase ④ is read off every document in the graph, not just the entry.
+ */
+export async function generateSystemFilesFromProject(
+  absEntryFile: string,
+  options: GenerateSystemOptions = {},
+): Promise<Map<string, string>> {
+  const { URI } = await import("langium");
+  const { NodeFileSystem } = await import("langium/node");
+  const { createDddServices } = await import("../../src/language/ddd-module.js");
+  const { loadProject } = await import("../../src/language/project-loader.js");
+  const { lowerProject } = await import("../../src/ir/lower/lower.js");
+
+  const services = createDddServices(NodeFileSystem);
+  const { all } = await loadProject(URI.file(absEntryFile), services.shared);
+
+  const syntaxErrors = all.flatMap((d) => d.parseResult.parserErrors);
+  if (syntaxErrors.length) {
+    throw new Error(
+      `${absEntryFile}: ${syntaxErrors.length} syntax error(s) across the import graph — ` +
+        `the emitted AST is error-recovered:\n` +
+        syntaxErrors.map((e) => `  ${e.message}`).join("\n"),
+    );
+  }
+  const astErrors = all.flatMap((d) => extractErrors(d.diagnostics ?? []));
+  if (astErrors.length) {
+    throw new Error(
+      `${absEntryFile}: ${astErrors.length} AST-validation error(s) (phase ④) — ` +
+        `\`ddd generate\` would exit non-zero on it:\n${astErrors.map((e) => `  ${e}`).join("\n")}`,
+    );
+  }
+  const loom = enrichLoomModel(lowerProject(all.map((d) => d.parseResult.value as Model)));
+  // Phases ⑤/⑥ then ⑦ — the same order, and the same two calls, the
+  // single-source path makes in `assertGeneratable`.
+  assertLoomModelVerifies(loom, absEntryFile);
+  const irErrors = validateLoomModel(loom).filter((d) => d.severity === "error");
+  if (irErrors.length) {
+    throw new Error(
+      `${absEntryFile}: ${irErrors.length} IR-validation error(s) (phase ⑦):\n` +
+        irErrors.map((d) => `  ${d.code ?? "?"} ${d.message}`).join("\n"),
+    );
+  }
+  const { generateSystemsFromLoom } = await import("../../src/system/index.js");
+  return generateSystemsFromLoom(loom, options).files;
+}
+
 /** Re-exported for symmetry — generates the single .NET project file map. */
 /** Re-exported — full multi-deployable system emission orchestrator. */
 export { generateDotnet, generateSystems };

@@ -47,6 +47,10 @@ interface JsonSchemaObject {
 
 type JsonSchemaProperty =
   | { type: "string"; format?: "date-time" | "uuid" | "decimal" }
+  /** A `string` closed to a declared value set — the `enum` type's members, in
+   *  declaration order.  JSON Schema's own `enum` keyword, so a consumer that
+   *  understands the rest of this document understands this too. */
+  | { type: "string"; enum: string[] }
   | { type: "number" }
   | { type: "integer" }
   | { type: "boolean" }
@@ -79,6 +83,17 @@ type RefResolver = (bucket: "parts" | "valueObjects", name: string) => string;
 
 const bareRef: RefResolver = (bucket, name) => `#/${bucket}/${name}`;
 
+/** Resolves an `enum` type's declared values, in the REFERER's context.
+ *  Threaded the same way `RefResolver` is: an enum is INLINED at its use site
+ *  (there is no `#/enums/...` bucket), so two contexts declaring the same bare
+ *  enum name with different members each get their own correct value list. */
+type EnumResolver = (name: string) => readonly string[] | undefined;
+
+/** No enum values known — every `enum` degrades to a bare `string`.  The
+ *  standalone `jsonPropertyForType` export (unit tests, the money/json
+ *  emission gates) has no context to resolve against. */
+const noEnums: EnumResolver = () => undefined;
+
 interface CollectedEntry<T> {
   ctx: string;
   name: string;
@@ -91,7 +106,7 @@ interface CollectedEntry<T> {
  *  dedupe to a single bare-name entry, exactly as before. */
 function collidingNames<T>(
   entries: CollectedEntry<T>[],
-  shapeOf: (n: T) => WireField[],
+  sigOf: (e: CollectedEntry<T>) => string,
 ): Set<string> {
   const sigsByName = new Map<string, Set<string>>();
   for (const e of entries) {
@@ -100,11 +115,38 @@ function collidingNames<T>(
       sigs = new Set();
       sigsByName.set(e.name, sigs);
     }
-    sigs.add(JSON.stringify(shapeOf(e.node)));
+    sigs.add(sigOf(e));
   }
   const out = new Set<string>();
   for (const [name, sigs] of sigsByName) if (sigs.size > 1) out.add(name);
   return out;
+}
+
+/** Every enum NAME reachable from a wire shape, paired with the values it
+ *  resolves to in this entry's context.  Part of the collision signature: the
+ *  wire FIELDS of two same-named aggregates can be identical (`status:
+ *  Status`) while the `Status` each context declares is not — and those two
+ *  now emit different schemas, so without this they would dedupe to one
+ *  bare-name key and one of them would be silently dropped. */
+function enumSignature(fields: WireField[], enumValues: EnumResolver): string {
+  const names = new Set<string>();
+  const walk = (t: TypeIR): void => {
+    switch (t.kind) {
+      case "enum":
+        names.add(t.name);
+        return;
+      case "array":
+        walk(t.element);
+        return;
+      case "optional":
+        walk(t.inner);
+        return;
+      default:
+        return;
+    }
+  };
+  for (const f of fields) walk(f.type);
+  return JSON.stringify([...names].sort().map((n) => [n, enumValues(n) ?? null]));
 }
 
 export function buildWireSpec(sys: EnrichedSystemIR): WireSpecDoc {
@@ -132,11 +174,27 @@ export function buildWireSpec(sys: EnrichedSystemIR): WireSpecDoc {
     }
   }
 
-  const shapeOf = (n: EnrichedAggregateIR | EnrichedEntityPartIR | EnrichedValueObjectIR) =>
-    wireFieldsFor(n);
-  const collidedAgg = collidingNames(aggs, shapeOf);
-  const collidedPart = collidingNames(parts, shapeOf);
-  const collidedVo = collidingNames(vos, shapeOf);
+  // Declared enum members, per context.  Enrichment has already folded the
+  // root-level (`rootEnums`) ambient kernel into every context's `enums`, so
+  // this one lookup covers both — an enum's members are exactly what the
+  // context can see under that name.
+  const enumsByCtx = new Map<string, Map<string, readonly string[]>>();
+  for (const m of sys.subdomains) {
+    for (const ctx of m.contexts) {
+      enumsByCtx.set(ctx.name, new Map(ctx.enums.map((e) => [e.name, e.values] as const)));
+    }
+  }
+  const enumsIn =
+    (ctx: string): EnumResolver =>
+    (name) =>
+      enumsByCtx.get(ctx)?.get(name);
+
+  const sigOf = (
+    e: CollectedEntry<EnrichedAggregateIR | EnrichedEntityPartIR | EnrichedValueObjectIR>,
+  ) => JSON.stringify(wireFieldsFor(e.node)) + enumSignature(wireFieldsFor(e.node), enumsIn(e.ctx));
+  const collidedAgg = collidingNames(aggs, sigOf);
+  const collidedPart = collidingNames(parts, sigOf);
+  const collidedVo = collidingNames(vos, sigOf);
 
   // A colliding name is written as `Context.Name`; a non-colliding one stays
   // bare (so output is byte-identical for every collision-free model).
@@ -156,18 +214,21 @@ export function buildWireSpec(sys: EnrichedSystemIR): WireSpecDoc {
     doc.aggregates[keyOf(collidedAgg, e.ctx, e.name)] = objectSchemaFromWireShape(
       wireFieldsFor(e.node),
       refIn(e.ctx),
+      enumsIn(e.ctx),
     );
   }
   for (const e of parts) {
     doc.parts[keyOf(collidedPart, e.ctx, e.name)] = objectSchemaFromWireShape(
       wireFieldsFor(e.node),
       refIn(e.ctx),
+      enumsIn(e.ctx),
     );
   }
   for (const e of vos) {
     doc.valueObjects[keyOf(collidedVo, e.ctx, e.name)] = objectSchemaFromWireShape(
       wireFieldsFor(e.node),
       refIn(e.ctx),
+      enumsIn(e.ctx),
     );
   }
   return doc;
@@ -176,11 +237,12 @@ export function buildWireSpec(sys: EnrichedSystemIR): WireSpecDoc {
 function objectSchemaFromWireShape(
   fields: WireField[],
   ref: RefResolver = bareRef,
+  enumValues: EnumResolver = noEnums,
 ): JsonSchemaObject {
   const properties: Record<string, JsonSchemaProperty> = {};
   const required: string[] = [];
   for (const f of fields) {
-    properties[f.name] = jsonPropertyForType(f.type, ref);
+    properties[f.name] = jsonPropertyForType(f.type, ref, enumValues);
     if (!f.optional) required.push(f.name);
   }
   return {
@@ -191,7 +253,11 @@ function objectSchemaFromWireShape(
   };
 }
 
-export function jsonPropertyForType(t: TypeIR, ref: RefResolver = bareRef): JsonSchemaProperty {
+export function jsonPropertyForType(
+  t: TypeIR,
+  ref: RefResolver = bareRef,
+  enumValues: EnumResolver = noEnums,
+): JsonSchemaProperty {
   switch (t.kind) {
     // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":
@@ -251,16 +317,28 @@ export function jsonPropertyForType(t: TypeIR, ref: RefResolver = bareRef): Json
         case "string":
           return { type: "string" };
       }
-    case "enum":
-      return { type: "string" };
+    case "enum": {
+      // The CONSTRAINT, not just the carrier type.  This artifact's stated job
+      // (docs/loom-artifacts.md) is diff-based contract-change detection, and
+      // every enum degraded to a bare `{"type":"string"}` — so REMOVING an
+      // enum value, a breaking wire change the zod/OpenAPI emitters do publish
+      // (`z.enum([...])`), produced a byte-identical wire-spec.json.  Values
+      // in declaration order; a name that resolves to nothing (the bare
+      // `jsonPropertyForType` export, with no context to resolve against)
+      // keeps the old shape rather than emitting an empty `enum: []`.
+      const values = enumValues(t.name);
+      return values && values.length > 0
+        ? { type: "string", enum: [...values] }
+        : { type: "string" };
+    }
     case "valueobject":
       return { $ref: ref("valueObjects", t.name) };
     case "entity":
       return { $ref: ref("parts", t.name) };
     case "array":
-      return { type: "array", items: jsonPropertyForType(t.element, ref) };
+      return { type: "array", items: jsonPropertyForType(t.element, ref, enumValues) };
     case "optional":
-      return jsonPropertyForType(t.inner, ref);
+      return jsonPropertyForType(t.inner, ref, enumValues);
     case "action":
     case "slot":
       throw new Error(
@@ -284,7 +362,7 @@ export function jsonPropertyForType(t: TypeIR, ref: RefResolver = bareRef): Json
           // the app's own response violates (F2-XB-7).  The nullability is read
           // off the carrier's one declaration, not decided here.
           properties[m.name] = m.type
-            ? jsonPropertyForType(m.type, ref)
+            ? jsonPropertyForType(m.type, ref, enumValues)
             : PROVENANCED_LINEAGE_NULLABLE
               ? { type: ["object", "null"] }
               : { type: "object" };

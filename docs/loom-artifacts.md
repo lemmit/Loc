@@ -46,7 +46,7 @@ traceability coverage, or migration baselines.
 
 | File | Producer | What it is |
 |---|---|---|
-| `wire-spec.json` | `src/system/wire-spec.ts` (phase ⑨) | JSON-Schema-shaped derivation from every aggregate / part / value object's `wireShape`.  Language-agnostic; the canonical source of truth for what the JSON over the wire looks like.  Diffable — wire-contract drift between regens shows up as a clean JSON diff. |
+| `wire-spec.json` | `src/system/wire-spec.ts` (phase ⑨) | JSON-Schema-shaped derivation from every aggregate / part / value object's `wireShape`.  Language-agnostic; the canonical source of truth for what the JSON over the wire looks like.  Diffable — wire-contract drift between regens shows up as a clean JSON diff.  Carries the CONSTRAINTS the drift check needs, not just carrier types: an `enum` field publishes its declared members (`{"type":"string","enum":["New","Qualified"]}`, in declaration order, resolved in the referring context), so removing an enum value — a breaking change — moves the file instead of leaving it byte-identical. |
 
 ## i18n catalog
 

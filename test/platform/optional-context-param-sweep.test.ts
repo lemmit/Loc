@@ -219,6 +219,16 @@ const ALLOWLIST: Readonly<Record<string, string>> = {
     "benign-boundary: the wire-spec builder passes refIn(ctx); bareRef is the single-context default",
   "src/system/wire-spec.ts::jsonPropertyForType::ref":
     "benign-boundary: called with refIn(ctx) and threaded through recursion; bareRef is the single-context default",
+  // `enumValues` is `ref`'s exact twin, added with the enum-constraint fix: the
+  // builder passes `enumsIn(ctx)` and the recursion threads it, and the
+  // `noEnums` default degrades to the SHAPE THAT SHIPPED BEFORE the fix (a bare
+  // `{"type":"string"}`), which is what the standalone `jsonPropertyForType`
+  // export — a pure type query with no context to resolve an enum name in —
+  // must keep returning.
+  "src/system/wire-spec.ts::objectSchemaFromWireShape::enumValues":
+    "benign-boundary: the wire-spec builder passes enumsIn(ctx); noEnums is the no-context default",
+  "src/system/wire-spec.ts::jsonPropertyForType::enumValues":
+    "benign-boundary: called with enumsIn(ctx) and threaded through recursion; noEnums is the no-context default",
 
   // --- BENIGN: an opt-in traversal channel, not output context -------------
   // `nestedStmt` lets a visitor descend into `variant-match` arm bodies.

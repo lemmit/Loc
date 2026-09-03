@@ -49,6 +49,21 @@ This adds, alongside the normal output:
 - **`out/.vscode/launch.json`** — one launch configuration per debuggable
   deployable (node / .NET / Java), pre-wired to the metadata above.
 
+The `.ts.map` sidecars name their `.ddd` by **absolute path** in `sources`,
+and a debugger reads the file from there — so by default they do **not**
+inline the source text. Inlining it would repeat the whole `.ddd` once per
+generated file (112 sidecars, 763 KB, on the ERP example — versus 95 KB
+without, and a 201 KB `.loom/sourcemap.json` that covers more files). Add
+`--inline-sources` when the maps will be read somewhere the `.ddd` files are
+not, and each sidecar carries its own `sourcesContent`:
+
+```bash
+node bin/cli.js generate system app.ddd -o out --sourcemap --inline-sources
+```
+
+The browser playground always inlines — its VFS has no filesystem behind
+`sources` for devtools to read.
+
 ## 2. Native editor debugging (recommended)
 
 **In the browser playground:** the Run/boot path always bundles the

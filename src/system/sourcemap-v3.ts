@@ -89,6 +89,7 @@ export function renderSourceMapV3(
   regions: readonly SourceMapRegion[],
   generatedFileName: string,
   sourceTexts: ReadonlyMap<string, string>,
+  options: { inlineSources?: boolean } = {},
 ): string | undefined {
   const resolved: ResolvedRegion[] = [];
   for (const region of regions) {
@@ -110,7 +111,18 @@ export function renderSourceMapV3(
 
   const sources = [...new Set(resolved.map((r) => r.path))].sort();
   const sourceIndexOf = new Map(sources.map((p, i) => [p, i] as const));
-  const sourcesContent = sources.map((p) => sourceTexts.get(p)!);
+  // `sourcesContent` is OPT-IN because it is quadratic in the worst case: one
+  // sidecar per generated file, each inlining the ENTIRE `.ddd` it came from.
+  // On the six-file ERP example that was 112 sidecars carrying 763 KB of
+  // duplicated source — against a 201 KB consolidated `.loom/sourcemap.json`
+  // that covers MORE files.  Where the `.ddd` is on disk (the CLI: `sources`
+  // holds its absolute path, and a debugger loads it from there) the copies buy
+  // nothing.  Where it is NOT — the browser playground, whose VFS has no
+  // filesystem for a devtools pane to read — they are the only way the source
+  // reaches the debugger, so that caller opts in.
+  const sourcesContent = options.inlineSources
+    ? sources.map((p) => sourceTexts.get(p)!)
+    : undefined;
 
   const maxLine = Math.max(...resolved.map((r) => r.target[1]));
   let prevSourceIndex = 0;
@@ -177,7 +189,7 @@ export function renderSourceMapV3(
     version: 3,
     file,
     sources,
-    sourcesContent,
+    ...(sourcesContent ? { sourcesContent } : {}),
     names: [],
     mappings: lineGroups.join(";"),
   })}\n`;

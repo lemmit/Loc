@@ -3,19 +3,8 @@ import { byFeatureLayoutAdapter } from "../generator/elixir/adapters/by-feature-
 import { ectoPersistenceAdapter } from "../generator/elixir/adapters/ecto-persistence.js";
 import { layeredStyleAdapter } from "../generator/elixir/adapters/layered-style.js";
 import { generateElixirProject } from "../generator/elixir/index.js";
+import { deterministicHex } from "../util/deterministic-secret.js";
 import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
-
-/** A cryptographically-random lowercase-hex string of `bytes` bytes (2 hex
- *  chars each).  Uses the Web Crypto global (`getRandomValues`) — available in
- *  both Node (≥19) and the browser playground — so the Elixir surface stays
- *  browser-safe (no `node:crypto` import). */
-function randomHex(bytes: number): string {
-  const buf = new Uint8Array(bytes);
-  globalThis.crypto.getRandomValues(buf);
-  let out = "";
-  for (const b of buf) out += b.toString(16).padStart(2, "0");
-  return out;
-}
 
 // ---------------------------------------------------------------------------
 // Elixir platform — fullstack Phoenix deployable
@@ -86,17 +75,22 @@ const elixirPlatform: PlatformSurface = {
       sourcemap,
     });
   },
-  composeService({ slug }): ComposeServiceShape {
+  composeService({ slug, sys }): ComposeServiceShape {
     return {
       env: [
         ["DATABASE_URL", `ecto://postgres:postgres@db:5432/${slug}`],
         // Phoenix signs/encrypts sessions with secret_key_base and requires
-        // ≥64 bytes.  Generated per project at `generate` time (64 random
-        // bytes → 128 hex chars) so no two generated stacks — and no two
-        // deployables — share a session-signing key, instead of the old
-        // hard-coded shared literal.  (`mix phx.gen.secret` is the manual
-        // equivalent.)  k8s routes it to a Secret; see `secretEnvKeys`.
-        ["SECRET_KEY_BASE", randomHex(64)],
+        // ≥64 bytes.  DERIVED per (system, deployable) — 64 bytes → 128 hex
+        // chars — so no two deployables and no two systems share a
+        // session-signing key, without `generate system` losing determinism:
+        // the previous `crypto.getRandomValues()` re-minted this line on every
+        // run, so a regen always rewrote `docker-compose.yml`, showed up as a
+        // spurious VCS diff, and rotated the key of a RUNNING dev stack
+        // (logging every user out).  Dev default only — `config/runtime.exs`
+        // raises in prod unless the environment supplies `SECRET_KEY_BASE`,
+        // and k8s routes it to a Secret (see `secretEnvKeys`).  To rotate,
+        // override the env var (`mix phx.gen.secret` still mints one).
+        ["SECRET_KEY_BASE", deterministicHex(64, "SECRET_KEY_BASE", sys.name, slug)],
         ["PHX_HOST", "localhost"],
         ["PHX_SERVER", "true"],
         ["PORT", "4000"],

@@ -87,7 +87,12 @@ describe("renderSourceMapV3 (unit)", () => {
       region([1, 2], "/a/one.ddd", 0, 13),
       region([3, 4], "/b/two.ddd", TEXT_B.indexOf("aggregate"), TEXT_B.indexOf("aggregate") + 9),
     ];
-    const rendered = renderSourceMapV3(regions, "out/gen.ts", sourceTexts);
+    // `inlineSources` opt-in: this case is about `sourcesContent` being
+    // INDEX-ALIGNED with the deduped+sorted `sources`, which only exists when
+    // the caller asks for the text (the default omits it — see the case below).
+    const rendered = renderSourceMapV3(regions, "out/gen.ts", sourceTexts, {
+      inlineSources: true,
+    });
     expect(rendered).toBeDefined();
     const v3 = JSON.parse(rendered!) as {
       file: string;
@@ -109,6 +114,29 @@ describe("renderSourceMapV3 (unit)", () => {
     expect(segments[0]).toMatchObject({ genLine: 0, sourceLine: 0, sourceCol: 0 });
     expect(segments[2]).toMatchObject({ genLine: 2, sourceLine: 2, sourceCol: 4 });
     expect(segments[3]).toMatchObject({ genLine: 3, sourceLine: 2, sourceCol: 4 });
+  });
+
+  // Each sidecar used to inline the ENTIRE originating `.ddd`, once per
+  // generated file — 763 KB across 112 sidecars on the ERP example, versus a
+  // 201 KB consolidated `.loom/sourcemap.json` covering more.  `sources` still
+  // names the `.ddd` (by absolute path, which is what a debugger resolves),
+  // so the copies are opt-in now.
+  it("omits sourcesContent unless the caller opts in", () => {
+    const sourceTexts = new Map([["/a/one.ddd", TEXT_A]]);
+    const regions: SourceMapRegion[] = [region([1, 1], "/a/one.ddd", 0, 13)];
+
+    const lean = JSON.parse(renderSourceMapV3(regions, "gen.ts", sourceTexts)!) as {
+      sources: string[];
+      sourcesContent?: string[];
+    };
+    expect(lean.sources).toEqual(["/a/one.ddd"]);
+    expect(lean.sourcesContent).toBeUndefined();
+    expect(JSON.stringify(lean)).not.toContain(TEXT_A);
+
+    const fat = JSON.parse(
+      renderSourceMapV3(regions, "gen.ts", sourceTexts, { inlineSources: true })!,
+    ) as { sourcesContent?: string[] };
+    expect(fat.sourcesContent).toEqual([TEXT_A]);
   });
 
   it("drops regions whose source text is missing, keeping the rest", () => {
