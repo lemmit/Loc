@@ -65,6 +65,7 @@ import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
 import { USER_VISIBLE_SLOTS } from "../../util/user-visible-slots.js";
 import { tryRenderGate } from "../_frontend/gate-expr.js";
 import { PROVENANCE_VALUE_FIELD, provenancedFieldNames } from "../_payload/provenanced-wire.js";
+import { GIVE_UP_SENTINEL } from "../_walker/give-up.js";
 import { icuFromConcat, messageKey } from "../_walker/i18n-extract.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
 import { heexTarget, renderHeexStoreActionCall, renderHeexStoreFieldRead } from "./heex-target.js";
@@ -1122,7 +1123,7 @@ function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): 
   // positions (`isHEExCall` also keeps every registered primitive in markup
   // position, so the wrap does not arise).
   if (def) {
-    return `<%!-- ${expr.name}: not supported by Phoenix LiveView target --%>`;
+    return `<%!-- ${GIVE_UP_SENTINEL} ${expr.name}: not supported by Phoenix LiveView target --%>`;
   }
   // Helper function call.
   if (expr.callKind === "function" || expr.callKind === "free") {

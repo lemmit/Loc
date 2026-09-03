@@ -7,6 +7,7 @@ import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { tryRenderGate } from "../../_frontend/gate-expr.js";
 import { tryDetectApiHook } from "../api-hook-detector.js";
+import { giveUp, giveUpNotice } from "../give-up.js";
 import { skipsEntityHistoryRead } from "../history-read.js";
 import { localizedAriaLabelAttr, localizedNamedValue, localizedText } from "../i18n-emit.js";
 import { lookupBuiltinIcon } from "../icons.js";
@@ -53,7 +54,7 @@ export function emitIdLink(
         ? ofArg.value
         : undefined;
   if (!aggName) {
-    return ctx.target.renderComment(`IdLink: missing 'of:' aggregate ref`);
+    return giveUp(ctx.target, `IdLink: missing 'of:' aggregate ref`);
   }
   // When aggregate IR is in scope, prefer the official
   // aggregate's plural-snake slug over our local pluralisation
@@ -198,7 +199,8 @@ export function emitAction(
   if (override != null) return override;
   const opRef = positionalArgs(call)[0];
   if (opRef?.kind !== "member" || opRef.receiver.kind !== "ref") {
-    return ctx.target.renderComment(
+    return giveUp(
+      ctx.target,
       `Action: first argument must be <instance>.<operation> (e.g. order.confirm)`,
     );
   }
@@ -206,19 +208,19 @@ export function emitAction(
   const opName = opRef.member;
   const aggName = ctx.paramTypes?.get(instanceName);
   if (!aggName) {
-    return ctx.target.renderComment(
+    return giveUp(
+      ctx.target,
       `Action(${instanceName}.${opName}): '${instanceName}' is not an in-scope aggregate instance`,
     );
   }
   const agg = ctx.aggregatesByName.get(aggName);
   if (!agg) {
-    return ctx.target.renderComment(
-      `Action(${instanceName}.${opName}): aggregate ${aggName} not found`,
-    );
+    return giveUp(ctx.target, `Action(${instanceName}.${opName}): aggregate ${aggName} not found`);
   }
   const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
   if (!op) {
-    return ctx.target.renderComment(
+    return giveUp(
+      ctx.target,
       `Action(${instanceName}.${opName}): no public operation '${opName}' on ${agg.name}`,
     );
   }
@@ -375,7 +377,7 @@ export function emitQueryView(
 ): string {
   const ofArg = namedArgValue(call, "of");
   if (!ofArg) {
-    return ctx.target.renderComment(`QueryView: missing 'of:' query expression`);
+    return giveUp(ctx.target, `QueryView: missing 'of:' query expression`);
   }
   // Entity-history read on a frontend that can't serve one — skip the WHOLE
   // view (see `_walker/history-read.ts`).  Bail BEFORE `emitExpr` below, which
@@ -390,7 +392,7 @@ export function emitQueryView(
   // joins `HISTORY_CAPABLE_FRAMEWORKS`.
   if (skipsEntityHistoryRead(ctx.target.framework, ofArg, ctx.aggregatesByName)) {
     const text = `History is not yet supported on ${ctx.target.framework}`;
-    return ctx.target.renderNotice?.(text) ?? ctx.target.renderComment(text);
+    return giveUpNotice(ctx.target, text);
   }
   // Render the query expression; this triggers `tryDetectApiHook`
   // so the page-shell registers the matching `useAll<X>()` (or

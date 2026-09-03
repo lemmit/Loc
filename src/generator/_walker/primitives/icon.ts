@@ -14,6 +14,7 @@
 // icon's intrinsic dimensions.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { giveUp } from "../give-up.js";
 import { localizedAriaLabelAttr, localizedNamedValue } from "../i18n-emit.js";
 import { lookupBuiltinIcon } from "../icons.js";
 import { renderPrimitive } from "../render-primitive.js";
@@ -37,7 +38,7 @@ export function emitIcon(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
     // Unknown name + no `svg:` literal — emit a visible comment so
     // the gap is loud at review time.  Pages still compile.
     const hint = name ? `unknown icon name '${name}'` : `Icon needs name: or svg:`;
-    return ctx.target.renderComment(`${hint}`);
+    return giveUp(ctx.target, `${hint}`);
   }
   // Decorative-by-default (the `Icon` a11y contract): a glyph beside a labelled
   // control conveys nothing and must be hidden, or it double-announces.  A

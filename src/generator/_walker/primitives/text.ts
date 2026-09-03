@@ -4,6 +4,7 @@
 // value child via the shared `walk`.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { giveUp } from "../give-up.js";
 import { localizedChromeAria, localizedPositionalAttr, localizedText } from "../i18n-emit.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
@@ -372,7 +373,7 @@ export function emitKeyValueRow(
     ? childIsLiteral
       ? localizedText(call, ctx, "keyValueValue", '""', 1)
       : walk(childArg, ctx, depth + 2)
-    : ctx.target.renderComment("missing value");
+    : giveUp(ctx.target, "missing value");
   return renderPrimitive(ctx, "primitive-key-value-row", {
     // The label is a user-visible slot (`keyValue`), and the packs split on how
     // they render it — a `<span>` on the seven layout-markup packs, a component

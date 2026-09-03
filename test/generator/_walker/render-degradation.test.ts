@@ -146,11 +146,11 @@ const SENTINELS: ReadonlyArray<{
     origins: [
       {
         file: "src/generator/flutter/pack.ts",
-        template: '`// flutter pack: no renderer for "${name}"`',
+        template: '`// ${GIVE_UP_SENTINEL} flutter pack: no renderer for "${name}"`',
       },
       {
         file: "src/generator/feliz/pack.ts",
-        template: '`(* feliz pack: no renderer for "${name}" *)`',
+        template: '`(* ${GIVE_UP_SENTINEL} feliz pack: no renderer for "${name}" *)`',
       },
     ],
   },
@@ -190,7 +190,8 @@ const SENTINELS: ReadonlyArray<{
       },
       {
         file: "src/generator/elixir/heex-walker-core.ts",
-        template: "`<%!-- ${expr.name}: not supported by Phoenix LiveView target --%>`",
+        template:
+          "`<%!-- ${GIVE_UP_SENTINEL} ${expr.name}: not supported by Phoenix LiveView target --%>`",
       },
     ],
   },

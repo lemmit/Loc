@@ -233,7 +233,9 @@ describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
     `);
     const tsx = files.get("web/src/pages/broken.tsx")!;
     expect(tsx).toBeDefined();
-    expect(tsx).toMatch(/\{\/\* CreateForm\(of: …\): missing 'of:' aggregate ref \*\/\}/);
+    expect(tsx).toMatch(
+      /\{\/\* loom:unrendered CreateForm\(of: …\): missing 'of:' aggregate ref \*\/\}/,
+    );
   });
 });
 

@@ -18,6 +18,7 @@ import {
 } from "../../_frontend/form-helpers.js";
 import { serverSourcedDefaultFields } from "../../_frontend/server-default.js";
 import { prepareFormFieldVM } from "../form-fields-vm.js";
+import { giveUp } from "../give-up.js";
 import {
   localizedNamedAttr,
   localizedNamedText,
@@ -109,7 +110,8 @@ export function emitOperationForm(
   if (opRef && opRef.kind === "member" && opRef.receiver.kind === "ref") {
     return emitFormOfOperation(call, ctx, opRef);
   }
-  return ctx.target.renderComment(
+  return giveUp(
+    ctx.target,
     `OperationForm: expected (of: <Agg>, op: <opName>) or (<instance>.<op>)`,
   );
 }
@@ -135,14 +137,15 @@ export function emitDestroyForm(
   void depth;
   const ofArg = namedArgValue(call, "of");
   if (ofArg?.kind !== "ref") {
-    return ctx.target.renderComment(`DestroyForm: expected (of: <Agg>)`);
+    return giveUp(ctx.target, `DestroyForm: expected (of: <Agg>)`);
   }
   const agg = ctx.aggregatesByName.get(ofArg.name);
   if (!agg) {
-    return ctx.target.renderComment(`DestroyForm(of: ${ofArg.name}): aggregate not found`);
+    return giveUp(ctx.target, `DestroyForm(of: ${ofArg.name}): aggregate not found`);
   }
   if (!agg.canonicalDestroy) {
-    return ctx.target.renderComment(
+    return giveUp(
+      ctx.target,
       `DestroyForm(of: ${agg.name}): no canonical destroy — declare 'destroy { }' (or use 'with crudish')`,
     );
   }
@@ -208,7 +211,7 @@ export function emitWorkflowForm(
   if (override != null) return override;
   const runsArg = namedArgValue(call, "runs");
   if (!runsArg) {
-    return ctx.target.renderComment(`WorkflowForm: missing 'runs: <Workflow>'`);
+    return giveUp(ctx.target, `WorkflowForm: missing 'runs: <Workflow>'`);
   }
   return emitFormRuns(call, ctx, depth, runsArg);
 }
@@ -289,13 +292,12 @@ function emitFormOfOperationByName(
   const agg = ctx.aggregatesByName.get(aggName);
   const bc = ctx.bcByAggregate.get(aggName);
   if (!agg || !bc) {
-    return ctx.target.renderComment(
-      `OperationForm(of: ${aggName}, op: ${opName}): aggregate not found`,
-    );
+    return giveUp(ctx.target, `OperationForm(of: ${aggName}, op: ${opName}): aggregate not found`);
   }
   const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
   if (!op) {
-    return ctx.target.renderComment(
+    return giveUp(
+      ctx.target,
       `OperationForm(of: ${aggName}, op: ${opName}): no public operation '${opName}' on ${aggName}`,
     );
   }
@@ -562,12 +564,13 @@ function emitFormOfAggregate(
         ? ofArg.value
         : undefined;
   if (!aggName) {
-    return ctx.target.renderComment(`CreateForm(of: …): missing 'of:' aggregate ref`);
+    return giveUp(ctx.target, `CreateForm(of: …): missing 'of:' aggregate ref`);
   }
   const agg = ctx.aggregatesByName.get(aggName);
   const bc = ctx.bcByAggregate.get(aggName);
   if (!agg || !bc) {
-    return ctx.target.renderComment(
+    return giveUp(
+      ctx.target,
       `CreateForm(of: ${aggName}): aggregate not found in this UI's reachable contexts`,
     );
   }
@@ -665,12 +668,13 @@ function emitFormRuns(
         ? runsArg.value
         : undefined;
   if (!wfName) {
-    return ctx.target.renderComment(`WorkflowForm(runs: …): missing 'runs:' workflow ref`);
+    return giveUp(ctx.target, `WorkflowForm(runs: …): missing 'runs:' workflow ref`);
   }
   const workflow = ctx.workflowsByName.get(wfName);
   const bc = ctx.bcByWorkflow.get(wfName);
   if (!workflow || !bc) {
-    return ctx.target.renderComment(
+    return giveUp(
+      ctx.target,
       `WorkflowForm(runs: ${wfName}): workflow not found in this UI's reachable contexts`,
     );
   }
@@ -733,20 +737,20 @@ function emitFormOfOperation(
   const opName = opRef.member;
   const aggName = instanceName ? ctx.paramTypes?.get(instanceName) : undefined;
   if (!instanceName || !aggName) {
-    return ctx.target.renderComment(
+    return giveUp(
+      ctx.target,
       `Form(${instanceName ?? "?"}.${opName}): '${instanceName ?? "?"}' is not an in-scope aggregate instance`,
     );
   }
   const agg = ctx.aggregatesByName.get(aggName);
   const bc = ctx.bcByAggregate.get(aggName);
   if (!agg || !bc) {
-    return ctx.target.renderComment(
-      `Form(${instanceName}.${opName}): aggregate ${aggName} not found`,
-    );
+    return giveUp(ctx.target, `Form(${instanceName}.${opName}): aggregate ${aggName} not found`);
   }
   const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
   if (!op) {
-    return ctx.target.renderComment(
+    return giveUp(
+      ctx.target,
       `Form(${instanceName}.${opName}): no public operation '${opName}' on ${agg.name}`,
     );
   }
@@ -941,7 +945,8 @@ export function emitModal(
     if (controlled !== undefined) return controlled;
   }
   if (!formChild || !triggerArg || triggerArg.kind !== "call") {
-    return ctx.target.renderComment(
+    return giveUp(
+      ctx.target,
       `Modal: expects trigger: Button(...) and an OperationForm(<instance>.<operation>) child`,
     );
   }
@@ -961,7 +966,8 @@ export function emitModal(
   })();
   const opName = opRef && opRef.kind === "member" ? opRef.member : opNameNamed;
   if (!opName) {
-    return ctx.target.renderComment(
+    return giveUp(
+      ctx.target,
       `Modal: child must be OperationForm(<instance>.<op>) or OperationForm(of:, op:)`,
     );
   }

@@ -8,6 +8,7 @@
 // renderers own.
 
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import { giveUp } from "../give-up.js";
 import { lambdaArg, namedArgValue, positionalArgs } from "../shared/args.js";
 import type { WalkContext } from "../walker-core.js";
 import { emitExpr, extendLambdaParams, propagateChildFlags, walk } from "../walker-core.js";
@@ -38,7 +39,8 @@ export function emitFor(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth
   // Collection: `each:` named arg, else the first positional non-lambda.
   const collArg = namedArgValue(call, "each") ?? positionals.find((a) => a.kind !== "lambda");
   if (!collArg) {
-    return ctx.target.renderComment(
+    return giveUp(
+      ctx.target,
       `For: missing 'each:' collection expression (e.g. For { each: orders, o => … })`,
     );
   }
@@ -47,14 +49,15 @@ export function emitFor(call: ExprIR & { kind: "call" }, ctx: WalkContext, depth
     positionals.find((a): a is ExprIR & { kind: "lambda" } => a.kind === "lambda") ??
     lambdaArg(call, "render");
   if (!itemLam) {
-    return ctx.target.renderComment(
+    return giveUp(
+      ctx.target,
       `For: missing item lambda (e.g. For { each: orders, o => Card { … } })`,
     );
   }
   if (!itemLam.body) {
     // Block-body lambdas have no markup result — a For item must be an
     // expression (markup).  Surface the gap rather than emit nothing.
-    return ctx.target.renderComment(`For: item lambda must be an expression body, not a block`);
+    return giveUp(ctx.target, `For: item lambda must be an expression body, not a block`);
   }
 
   const collExpr = emitExpr(collArg, ctx);

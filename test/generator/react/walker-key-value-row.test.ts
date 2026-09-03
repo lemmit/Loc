@@ -67,10 +67,10 @@ describe("KeyValueRow primitive", () => {
     expect(tsx).toMatch(/<KeyValueRow [^>]*\bdata-testid="row-status"/);
   });
 
-  it("missing value emits a visible placeholder, no crash", async () => {
+  it("loom:unrendered missing value emits a visible placeholder, no crash", async () => {
     const tsx = await emit(`KeyValueRow { "Status" }`);
     expect(tsx).toMatch(
-      /<KeyValueRow label=\{t\("[^"]*", "Status"\)\}>\{\/\* missing value \*\/\}<\/KeyValueRow>/,
+      /<KeyValueRow label=\{t\("[^"]*", "Status"\)\}>\{\/\* loom:unrendered missing value \*\/\}<\/KeyValueRow>/,
     );
   });
 

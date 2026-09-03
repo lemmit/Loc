@@ -5,6 +5,7 @@
 
 import type { ExprIR, StateFieldIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { provableStringType } from "../../../util/expr-body-type.js";
+import { giveUp } from "../give-up.js";
 import {
   localizedChromeIcuText,
   localizedChromeIcuValue,
@@ -348,7 +349,7 @@ function emitColumn(
   const key = slugify(headerStr) || `col-${index + 1}`;
 
   const rowVar = "row";
-  let cellJsx = ctx.target.renderComment("missing accessor");
+  let cellJsx = giveUp(ctx.target, "missing accessor");
   if (accessorArg && accessorArg.kind === "lambda") {
     const childCtx: WalkContext = {
       ...ctx,
