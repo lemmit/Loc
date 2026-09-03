@@ -3087,6 +3087,19 @@ export const DIAGNOSTIC_MESSAGES = {
   // ----------------------------------------------------------------------
   "loom.ir-internal#generation": (p: { err: unknown }) =>
     `IR phase failed before generation: ${p.err}`,
+
+  // ----------------------------------------------------------------------
+  // src/language/parse-errors.ts  (phase ①)
+  // ----------------------------------------------------------------------
+  // Chevrotain's own text for this is a numbered dump of every lookahead
+  // path it considered — 14 lines for a mistyped design pack, over a hundred
+  // in a member position.  Every alternation the author can hit is a CLOSED
+  // SET, so the reply is the nearest legal spelling plus a sample of the set.
+  "loom.parse-error#unexpected-token": (p: {
+    found: unknown;
+    suggestion: unknown;
+    candidates: unknown;
+  }) => `Unexpected '${p.found}'.${p.suggestion} Expected one of: ${p.candidates}.`,
 } satisfies Record<string, MessageEntry>;
 
 type Catalog = typeof DIAGNOSTIC_MESSAGES;

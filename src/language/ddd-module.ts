@@ -9,6 +9,8 @@ import {
   type PartialLangiumSharedServices,
 } from "langium/lsp";
 import { bootMacros, getMacroRefDeps } from "../macros/index.js";
+import { DddDocumentValidator } from "./ddd-document-validator.js";
+import { DddLinker } from "./ddd-linker.js";
 import { DddScopeComputation, DddScopeProvider } from "./ddd-scope.js";
 import { DddValidator, registerValidationChecks } from "./ddd-validator.js";
 import { DddGeneratedModule, DddGeneratedSharedModule } from "./generated/module.js";
@@ -22,6 +24,7 @@ import { DddReferencesProvider } from "./lsp/ddd-references.js";
 import { DddRenameProvider } from "./lsp/ddd-rename.js";
 import { DddSemanticTokenProvider } from "./lsp/ddd-semantic-tokens.js";
 import { DddSignatureHelpProvider } from "./lsp/ddd-signature-help.js";
+import { DddParserErrorMessageProvider } from "./parse-errors.js";
 import { DddTokenBuilder, DddValueConverter } from "./template-support.js";
 
 export type DddAddedServices = {
@@ -35,6 +38,9 @@ export type DddServices = LangiumServices & DddAddedServices;
 export const DddModule: Module<DddServices, PartialLangiumServices & DddAddedServices> = {
   validation: {
     DddValidator: (services) => new DddValidator(services as DddServices),
+    // Stop after a lex/parse error, and report only the first — see
+    // `ddd-document-validator.ts` for why a broken AST must not be spoken over.
+    DocumentValidator: (services: LangiumServices) => new DddDocumentValidator(services),
   },
   // A6 string interpolation — the multi-mode lexer (backtick template
   // terminals live in an `interpolation` mode so `}`-leading MIDDLE/END
@@ -42,10 +48,16 @@ export const DddModule: Module<DddServices, PartialLangiumServices & DddAddedSer
   parser: {
     TokenBuilder: () => new DddTokenBuilder(),
     ValueConverter: () => new DddValueConverter(),
+    // A short "unexpected X, did you mean Y" in place of chevrotain's
+    // numbered token-sequence dump (`parse-errors.ts`).
+    ParserErrorMessageProvider: () => new DddParserErrorMessageProvider(),
   },
   references: {
     ScopeProvider: (services: LangiumServices) => new DddScopeProvider(services),
     ScopeComputation: (services: LangiumServices) => new DddScopeComputation(services),
+    // Same linking errors, without the "before ComputedScopes" stderr warning
+    // Loom's pre-link macro pass provokes by design (`ddd-linker.ts`).
+    Linker: (services: LangiumServices) => new DddLinker(services),
   },
   lsp: {
     HoverProvider: (services: LangiumServices) => new DddHoverProvider(services),

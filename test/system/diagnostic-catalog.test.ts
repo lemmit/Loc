@@ -57,6 +57,12 @@ function catalogedSources(): string[] {
   out.push(path.join("src", "macros", "expander.ts"));
   out.push(path.join("src", "api", "evolve.ts"));
   out.push(path.join("src", "api", "index.ts"));
+  // Phase ① — the parser's own error text.  It attaches no `loom.*` code
+  // (Langium stamps `parsing-error` and `src/api/report.ts` maps that to
+  // `loom.parse-error`), so invariants 1/2/4 have nothing to check here; it
+  // is listed so invariant 3 counts its catalog entries as REACHED rather
+  // than orphaned.
+  out.push(path.join("src", "language", "parse-errors.ts"));
   return out;
 }
 
