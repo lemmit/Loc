@@ -40,12 +40,22 @@ export const PY_NUMERIC: NumericTarget = {
   },
 };
 
-/** `fromData`'s (`repository-eventsourced-builder.ts`) `decimal` arm: the
- *  SAME `repo-read` transform as `PY_NUMERIC.decimal["repo-read"]`, but
- *  reading an untyped `dict` value needs the union cast `hydrateScalar`'s
- *  typed-column read does not.  A second export rather than a second
- *  `NumericTarget` slot — see `javaMoneyProjectionKeyEncode` for the same
- *  pattern on the java backend. */
+/** `fromData`'s (`repository-eventsourced-builder.ts`) and `fromPayload`'s
+ *  (`dispatch-builder.ts`, the dispatcher's own event-payload decode — the
+ *  SAME shape) `decimal` arm: the SAME `repo-read` transform as
+ *  `PY_NUMERIC.decimal["repo-read"]`, but reading an untyped `dict` value
+ *  needs the union cast `hydrateScalar`'s typed-column read does not.  A
+ *  second export rather than a second `NumericTarget` slot — see
+ *  `javaMoneyProjectionKeyEncode` for the same pattern on the java backend. */
 export function pyEventSourcedDecimalDecode(access: string): string {
   return `float(cast("int | float", ${access}))`;
+}
+
+/** `repository-document-builder.ts`'s `deserialize` `decimal` arm: the
+ *  document-shape repository reads an untyped jsonb value, so it casts
+ *  through the bare `float` type rather than `hydrateScalar`'s union —
+ *  a THIRD shape sharing the `repo-read` boundary's underlying decision
+ *  (lossy-by-design narrowing) with a third cast spelling. */
+export function pyDocumentDecimalDecode(access: string): string {
+  return `float(cast(float, ${access}))`;
 }

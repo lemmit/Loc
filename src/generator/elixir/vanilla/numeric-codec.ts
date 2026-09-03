@@ -29,6 +29,10 @@ export const ELIXIR_NUMERIC: NumericTarget = {
     // result (`__money_wire/1`) — explicitly piped through `to_string()`
     // rather than left to Jason's encoder.
     "projection-read": (e) => `${e} |> Decimal.round(${MONEY_WIRE_SCALE}) |> to_string()`,
+    // find-param: an operation param binds straight off the decoded request
+    // map (`coerceOpParam`) — `to_string` first so a JSON number and a JSON
+    // string both land on the same `%Decimal{}`, the wire allowing either.
+    "find-param": (e) => `Decimal.new(to_string(${e}))`,
   },
   decimal: {
     // dto-map: RS-24 — a plain `decimal` is a JSON NUMBER on every other
@@ -40,5 +44,9 @@ export const ELIXIR_NUMERIC: NumericTarget = {
     // key) already a string — re-derive through the string form before
     // narrowing so every source shape lands on the identical float.
     "projection-read": (e) => `Decimal.to_float(Decimal.new(to_string(${e})))`,
+    // find-param: the SAME op-param coercion `money` uses — a `decimal` field
+    // also needs a bare wire string/number cast into `%Decimal{}` before
+    // `force_change` can dump it (see `coerceOpParam`'s doc comment).
+    "find-param": (e) => `Decimal.new(to_string(${e}))`,
   },
 };
