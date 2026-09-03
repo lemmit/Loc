@@ -417,6 +417,26 @@ app.UseStatusCodePages(async (StatusCodeContext statusCodeContext) =>
 app.UseCors();
 // Serve the spec at /openapi.json (documentName "openapi" → "{documentName}.json").
 app.UseSwagger(c => c.RouteTemplate = "{documentName}.json");
+// Static sub-paths that a sibling `{id}` route would otherwise swallow under a
+// verb they do not serve.  Answers 405 + Allow; the body is left to
+// UseStatusCodePages above, so this shares the framework 405's exact envelope.
+var staticSubpathMethods = new Dictionary<string, string[]>(StringComparer.Ordinal)
+{
+    ["/api/customers/by_email"] = new[] { "GET" },
+    ["/api/orders/by_customer"] = new[] { "GET" },
+    ["/api/products/by_sku"] = new[] { "GET" },
+};
+app.Use(async (HttpContext http, RequestDelegate next) =>
+{
+    if (staticSubpathMethods.TryGetValue(http.Request.Path.Value ?? string.Empty, out var allow)
+        && !allow.Contains(http.Request.Method, StringComparer.Ordinal))
+    {
+        http.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
+        http.Response.Headers["Allow"] = string.Join(", ", allow);
+        return;
+    }
+    await next(http);
+});
 app.MapControllers();
 
 

@@ -1346,3 +1346,77 @@ describe("angular generator — DestroyForm confirm-delete", () => {
     expect(api).toContain("mutationFn: (id: string) => firstValueFrom(service.delete(id)),");
   });
 });
+
+// ---------------------------------------------------------------------------
+// F2-CFE-2 (angular half) — two `CreateForm`s of the SAME aggregate on one
+// page.  The class members were keyed on the aggregate alone, so `itemCreate`,
+// `itemForm` and `onSubmitItem` were each declared twice in the same class:
+// three TS2300s, and the page did not compile.  Cross-aggregate was already
+// correct (the aggregate IS the key there), and stays byte-identical.
+// ---------------------------------------------------------------------------
+
+const TWO_FORM_SOURCE = (body: string) => `
+  system Smoke {
+    api SalesApi from Sales
+    subdomain Sales {
+      context Orders {
+        aggregate Item with crudish { name: string }
+        aggregate Note with crudish { text: string }
+        repository Items for Item { }
+        repository Notes for Note { }
+      }
+    }
+    ui WebApp {
+      api Sales: SalesApi
+      page Home { route: "/" body: ${body} }
+    }
+    storage primary { type: postgres }
+    resource ordersState { for: Orders, kind: state, use: primary }
+    deployable api {
+      platform: node
+      contexts: [Orders]
+      dataSources: [ordersState]
+      serves: SalesApi
+      port: 8080
+    }
+    deployable web { platform: angular, targets: api, ui: WebApp { Sales: api }, port: 3004 }
+  }
+`;
+
+async function twoFormPage(body: string): Promise<string> {
+  const all = await generateSystemFiles(TWO_FORM_SOURCE(body));
+  return all.get("web/src/app/pages/home.component.ts")!;
+}
+
+describe("angular generator — two CreateForms on one page", () => {
+  it("gives the second same-aggregate form its own class members", async () => {
+    const page = await twoFormPage(
+      'Stack { CreateForm { of: Item }, CreateForm { of: Item, testid: "second" } }',
+    );
+    // First form keeps the bare names — single-form pages stay byte-identical.
+    expect(page).toContain("readonly itemCreate = useCreateItem();");
+    expect(page).toContain("async onSubmitItem(): Promise<void> {");
+    // Second form is ordinal-suffixed, so nothing is declared twice.
+    expect(page).toContain("readonly itemCreate2 = useCreateItem();");
+    expect(page).toContain("async onSubmitItem2(): Promise<void> {");
+    expect(page).toContain('<form [formGroup]="itemForm2" (ngSubmit)="onSubmitItem2()"');
+    for (const decl of [
+      "readonly itemCreate =",
+      "readonly itemForm =",
+      "async onSubmitItem(",
+      "readonly itemCreate2 =",
+      "readonly itemForm2 =",
+      "async onSubmitItem2(",
+    ]) {
+      expect(page.split(decl).length - 1).toBe(1);
+    }
+  });
+
+  it("cross-aggregate forms keep their aggregate-derived names", async () => {
+    const page = await twoFormPage("Stack { CreateForm { of: Item }, CreateForm { of: Note } }");
+    expect(page).toContain("readonly itemCreate = useCreateItem();");
+    expect(page).toContain("readonly noteCreate = useCreateNote();");
+    expect(page).not.toContain("itemCreate2");
+    expect(page).not.toContain("noteCreate2");
+  });
+});

@@ -141,6 +141,37 @@ describe("entity history — negative authz", () => {
     expect(keyLoop).not.toContain('"version"');
     expect(keyLoop).not.toContain('"id"');
   });
+
+  // F2-W-05 residue.  The row's fix reached the aggregate `toWire` path and the
+  // query-time projection routes; the audit trail's own `at` — a `datetime` on
+  // the wire like any other — was still a bare `toISOString()`, which ALWAYS
+  // pads the fraction to exactly three digits.  That put node alone against the
+  // other four on this endpoint: .NET regex-trims (`Regex.Replace(…, @"\.?0+Z$",
+  // "Z")`), java renders `Instant.toString()` and python `iso()`, all three of
+  // which omit a zero fraction.
+  it("renders the trail's `at` in the canonical RS-4 form, not `.000Z`", async () => {
+    const routes = routesOf(await emitFiles(MASKED), "employee");
+    const mapper = routes.slice(routes.indexOf("function employeeAuditEntry"));
+    const atLine = mapper.split("\n").find((l) => l.trim().startsWith("at:"));
+    expect(atLine).toBeDefined();
+    expect(atLine).toContain('row.at.toISOString().replace(/\\.?0+Z$/, "Z")');
+    // The defect was a WRONG STRING, not a compile break, so evaluate the
+    // rendered expression: a whole-second instant must lose the fraction, and a
+    // sub-second one must keep every digit it has.
+    const evalAt = (iso: string): unknown =>
+      new Function(
+        "row",
+        `return ${atLine
+          ?.trim()
+          .replace(/^at:\s*/, "")
+          .replace(/,$/, "")};`,
+      )({
+        at: new Date(iso),
+      });
+    expect(evalAt("2026-01-01T00:00:00Z")).toBe("2026-01-01T00:00:00Z");
+    expect(evalAt("2026-01-01T00:00:00.120Z")).toBe("2026-01-01T00:00:00.12Z");
+    expect(evalAt("2026-01-01T00:00:00.123Z")).toBe("2026-01-01T00:00:00.123Z");
+  });
 });
 
 describe("entity history — aggregates that serve none", () => {

@@ -30,6 +30,7 @@
 import type { ActionIR, StateFieldIR, StoreIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { upperFirst } from "../../util/naming.js";
+import { storeFieldInitJs } from "../_frontend/store-field-init.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { defaultInitForJs } from "../_walker/js-target-helpers.js";
 import type { StateRef, WalkerTarget } from "../_walker/target.js";
@@ -91,38 +92,17 @@ function storeFieldTsType(type: TypeIR): string {
   }
 }
 
-/** Initial value for a store field — its declared `= init` (a literal), else
- *  the type's zero value (`[]` for arrays, `defaultInitForJs` for scalars). */
+/** Initial value for a store field — its declared `= init` literal, else the
+ *  type's zero value.  Shared with every other JS-family store builder
+ *  (`_frontend/store-field-init.ts`). */
 function storeFieldInit(field: StateFieldIR): string {
-  const lit = field.init !== undefined ? renderInitLiteral(field.init) : undefined;
-  if (lit !== undefined) {
-    // A money field lowers to `Decimal`, so a numeric `= 0.00` literal must be
-    // constructed, not assigned raw (a bare number would be a TS2322 against
-    // the `signal<Decimal>`).
-    if (field.type.kind === "primitive" && field.type.name === "money") {
-      return `new Decimal(${JSON.stringify(lit)})`;
-    }
-    return lit;
-  }
-  if (field.type.kind === "array") return "[]";
-  return defaultInitForJs(field.type);
+  return storeFieldInitJs(field);
 }
 
-/** Render a store-field `= <init>` literal (string / number / bool / null or a
- *  list of literals); undefined for anything non-literal (init expressions
- *  evaluate before the store exists, so they can't reference state). */
-function renderInitLiteral(e: StateFieldIR["init"]): string | undefined {
-  if (e === undefined) return undefined;
-  if (e.kind === "literal") {
-    if (e.lit === "string") return JSON.stringify(e.value);
-    if (e.lit === "null") return "null";
-    return e.value;
-  }
-  if (e.kind === "list") {
-    const els = e.elements.map(renderInitLiteral);
-    return els.every((x): x is string => x !== undefined) ? `[${els.join(", ")}]` : undefined;
-  }
-  return undefined;
+/** True when the field declares no non-zero default — the URL codec then keeps
+ *  its original type-zero shape byte-for-byte. */
+function initIsTypeZero(field: StateFieldIR): boolean {
+  return storeFieldInitJs(field) === defaultInitForJs(field.type);
 }
 
 /** An Angular-signal-flavoured `WalkerTarget` for rendering store-ACTION
@@ -202,16 +182,6 @@ function renderStoreActionMethod(action: ActionIR, fieldNames: ReadonlySet<strin
   return `  ${action.name}(${paramSig}) { ${stmts.join(" ")} }`;
 }
 
-/** Type zero for a store field — `[]` for arrays, `defaultInitForJs` otherwise.
- *  Mirrors React's TYPE-based `storeFieldInit` (distinct from this module's
- *  `storeFieldInit(field)`, which honours a declared `= init` literal).  The
- *  URL decoder defaults to the type zero, not the literal — byte-for-byte with
- *  React's `decodeFieldFromParam`. */
-function storeZeroForType(type: TypeIR): string {
-  if (type.kind === "array") return "[]";
-  return defaultInitForJs(type);
-}
-
 /** The money-typed **top-level** field names — the keys a persisted or
  *  URL-synced store must revive back into `Decimal` (JSON / query strings carry
  *  them as plain strings).  Byte-for-byte with React's `moneyFieldNames`.
@@ -230,27 +200,37 @@ function _moneyFieldNames(store: StoreIR): string[] {
 function decodeFieldFromParam(field: StateFieldIR): string {
   const key = JSON.stringify(field.name);
   const t = field.type;
+  // The fallback is the field's DECLARED default, not the type zero.  The
+  // constructor's `queryParamMap` subscription REPLAYS the current params the
+  // moment it subscribes, so a type-zero fallback here overwrote every
+  // declared initializer the signal was just constructed with (F2-FFE-1) —
+  // angular's memory tier honoured `= "dark"` and its url tier reset it to
+  // `""` one tick later.
+  const init = storeFieldInit(field);
+  const zero = initIsTypeZero(field);
   if (t.kind === "primitive") {
     switch (t.name) {
       case "int":
       case "long":
       case "decimal":
-        return `p.has(${key}) && Number.isFinite(Number(p.get(${key}))) ? Number(p.get(${key})) : ${storeZeroForType(t)}`;
+        return `p.has(${key}) && Number.isFinite(Number(p.get(${key}))) ? Number(p.get(${key})) : ${init}`;
       case "money":
-        return `p.has(${key}) && p.get(${key})!.match(/^-?\\d+(\\.\\d+)?$/) ? new Decimal(p.get(${key})!) : ${storeZeroForType(t)}`;
+        return `p.has(${key}) && p.get(${key})!.match(/^-?\\d+(\\.\\d+)?$/) ? new Decimal(p.get(${key})!) : ${init}`;
       case "bool":
-        return `p.get(${key}) === "true"`;
+        return zero
+          ? `p.get(${key}) === "true"`
+          : `p.has(${key}) ? p.get(${key}) === "true" : ${init}`;
       default:
-        return `p.get(${key}) ?? ${storeZeroForType(t)}`;
+        return `p.get(${key}) ?? ${init}`;
     }
   }
   // ids/enums decode as bare strings (enum membership is not re-checked here;
   // an off-set value is harmless client filter state, re-validated server-side).
-  if (t.kind === "id" || t.kind === "enum") return `p.get(${key}) ?? ${storeZeroForType(t)}`;
+  if (t.kind === "id" || t.kind === "enum") return `p.get(${key}) ?? ${init}`;
   // Arrays / entities / anything structural are not URL-encodable in v1 — the
   // validator (loom.store-url-field-invalid) blocks them, so this is a
   // defensive default only.
-  return storeZeroForType(t);
+  return init;
 }
 
 /** Render the full injectable signal-store module for a `StoreIR`, honouring
@@ -374,6 +354,11 @@ function encodeFieldToQueryParam(field: StateFieldIR): string {
   const key = field.name;
   const ref = `this.${field.name}()`;
   const t = field.type;
+  // A field with a declared default drops out of the URL when it EQUALS that
+  // default (the decoder restores it), not when it is type-zero.
+  if (!initIsTypeZero(field) && t.kind === "primitive" && t.name !== "money") {
+    return `${key}: ${ref} !== ${storeFieldInit(field)} ? String(${ref}) : null,`;
+  }
   if (t.kind === "primitive" && t.name === "money") {
     return `${key}: ${ref} != null ? ${ref}.toString() : null,`;
   }

@@ -150,3 +150,71 @@ export function realtimeRoomPlan(
     tenantClaimField: tenancyPrincipalClaim(sys),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Stream authentication — the cross-backend contract (M-T4.12(a), the 08-24
+// generator review §F4).
+//
+// §A4 (elixir's `:sse` pipeline had no Auth plug) and §A9 (.NET durable events
+// stopped reaching the SSE wire) were both "one backend re-decided a
+// cross-backend rule on its own".  This module is the shared realtime plan, so
+// the rule is STATED here once rather than re-derived by six frontend emitters
+// and five backend plugs:
+//
+//   RULE 1 — a realtime stream inherits its deployable's auth mode.  The SSE
+//   route is an ordinary authenticated route: it is NOT on any backend's bypass
+//   list, and a stream opened without credentials is answered 401 exactly like
+//   a domain read.
+//
+//   RULE 2 — the stream carries the SAME credential as an ordinary API call
+//   from the same frontend, and no other.  That credential is the HttpOnly
+//   `session` cookie the `/auth/callback` handshake issues (auth.md "Session
+//   depth": all access/refresh tokens ride HttpOnly cookies, the SPA never sees
+//   the raw token), sent cross-origin by `withCredentials: true` — the
+//   `EventSource` twin of the api client's `credentials: "include"`.
+//
+// Why the cookie and not a query-param token: `EventSource` cannot set an
+// `Authorization` header by construction, so the two honest candidates were the
+// cookie and a short-lived token in the query string.  The token loses on three
+// counts — the SPA cannot read the HttpOnly session, so a NEW mint endpoint and
+// a NEW token type would have to be emitted on all five backends; a URL-borne
+// credential lands in access logs, proxy logs and `Referer`; and four of the
+// five backends already accept the `session` cookie as an alternative to
+// `Authorization: Bearer` (.NET, Java, Python, Phoenix — node was the outlier
+// and is brought into line here), while every backend already emits
+// `Access-Control-Allow-Credentials: true` for its frontend origin.  The cookie
+// costs one constructor argument on the client and one cookie read on the
+// server.
+//
+// Gate: `withCredentials` is emitted iff the frontend deployable is `auth: ui`
+// against an `auth: required` target with a declared `user { }` — the SAME
+// predicate that gates the api client's `credentials: "include"`, so "the same
+// credential path" is literal.  An `auth: none` deployable emits the v1 bare
+// `new EventSource(url)`, byte-identical.
+// ---------------------------------------------------------------------------
+
+/** The credential a generated frontend puts on its realtime SSE stream. */
+export type RealtimeStreamCredential =
+  /** The HttpOnly `session` cookie — `withCredentials: true` on the client,
+   *  a cookie read on the backend's auth plug. */
+  | "session-cookie"
+  /** No credential — an `auth: none` deployable (v1 bare `EventSource`). */
+  | "none";
+
+/** Decide the stream credential for one frontend deployable (pure).  Mirrors
+ *  the api client's `credentials: "include"` gate exactly (RULE 2): the
+ *  frontend opted into `auth: ui`, its target backend enforces `auth:
+ *  required`, and the system declares the `user { }` claim shape the session
+ *  projects to.  Every frontend emitter calls THIS rather than re-deriving the
+ *  predicate, so a sixth frontend cannot quietly ship an uncredentialed
+ *  stream. */
+export function realtimeStreamCredential(
+  /** The frontend deployable emitting the subscription. */
+  deployable: { readonly auth?: { readonly ui: boolean } } | undefined,
+  /** Its `targets:` backend deployable, when it resolves. */
+  target: { readonly auth?: { readonly required: boolean } } | undefined,
+  /** The system's declared principal shape, when it has one. */
+  user: unknown,
+): RealtimeStreamCredential {
+  return deployable?.auth?.ui && target?.auth?.required && user ? "session-cookie" : "none";
+}

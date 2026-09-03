@@ -29,6 +29,10 @@ import { uiUsesDataGrid } from "../../ir/util/data-grid.js";
 import { typeIsFile } from "../../ir/util/file-field.js";
 import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { readableProjectionNames } from "../../ir/util/projection-read.js";
+import {
+  type RealtimeStreamCredential,
+  realtimeStreamCredential,
+} from "../../ir/util/realtime-rooms.js";
 import { DAISYUI_THEMES } from "../../util/builtin-formats.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../util/naming.js";
@@ -604,6 +608,37 @@ function caseArgs(names: readonly string[]): string {
   return ` (${names.join(", ")})`;
 }
 
+/** Pages in `parseUrl` MATCH order — F# takes the first arm that matches, and a
+ *  `:param` segment binds ANY segment, so a literal route declared after a
+ *  sibling parameterised route of the same length is a dead rule (`/things/new`
+ *  after `/things/:id` routes the create form to the detail view with
+ *  `id = "new"`; F# reports only warning FS0026, which the generated
+ *  `App.fsproj` does not escalate).  Only patterns of the SAME segment count can
+ *  shadow each other, so sort within a length group — more literal segments
+ *  first, declaration order breaking ties — and keep the groups themselves in
+ *  first-declaration order, which leaves every already-correct ui byte-identical.
+ */
+function routeMatchOrder(pages: readonly PageIR[]): readonly PageIR[] {
+  const segCount = (p: PageIR): number =>
+    (p.route ?? "/").split("/").filter((s) => s.length > 0).length;
+  const literals = (p: PageIR): number =>
+    (p.route ?? "/").split("/").filter((s) => s.length > 0 && !s.startsWith(":")).length;
+  const groupRank = new Map<number, number>();
+  pages.forEach((p, i) => {
+    const n = segCount(p);
+    if (!groupRank.has(n)) groupRank.set(n, i);
+  });
+  return pages
+    .map((p, i) => ({ p, i }))
+    .sort(
+      (a, b) =>
+        groupRank.get(segCount(a.p))! - groupRank.get(segCount(b.p))! ||
+        literals(b.p) - literals(a.p) ||
+        a.i - b.i,
+    )
+    .map((x) => x.p);
+}
+
 /** The `Page` union + `parseUrl` — URL segments → the active `Page`.  A detail
  *  page's case carries its route param (`| ProductDetail of string`); `parseUrl`
  *  binds the segment.  Arms are emitted in page order; the catch-all falls back
@@ -625,7 +660,7 @@ function renderRouting(
     `  | ${pageCase(p, nameCtx)}${caseFields(routeParamNames(p).length)}`;
   const ctor = (p: PageIR): string => `${pageCase(p, nameCtx)}${caseArgs(routeParamNames(p))}`;
   const union = `type Page =\n${pages.map(caseDecl).join("\n")}`;
-  const arms = pages.map((p) => `  | ${routePattern(p.route)} -> ${ctor(p)}`);
+  const arms = routeMatchOrder(pages).map((p) => `  | ${routePattern(p.route)} -> ${ctor(p)}`);
   const fallback = pages.find((p) => !hasRouteParam(p)) ?? pages[0]!;
   const fallbackCtor = `${pageCase(fallback, nameCtx)}${caseArgs(
     routeParamNames(fallback).map(() => `""`),
@@ -1085,6 +1120,12 @@ function renderAppFs(
    *  (`backendServesRealtime`).  Gates the `on <channel>.<Event>` handler
    *  subscription — a frontend pointed at a non-SSE backend emits none. */
   backendRealtime = false,
+  /** Stream credential from the shared realtime plan (`realtimeStreamCredential`,
+   *  `src/ir/util/realtime-rooms.ts` RULE 2).  Feliz's wire routes are already
+   *  relative + same-origin (`/api/...`), where a cookie flows either way, but
+   *  the subscription states the credential explicitly so the contract holds if
+   *  the base ever moves cross-origin. */
+  realtimeCredential: RealtimeStreamCredential = "none",
 ): string {
   const pages = ui.pages;
   if (pages.length === 0) {
@@ -1619,7 +1660,7 @@ function renderAppFs(
     // Realtime subscription module (channels.md Part I) — references `Msg`,
     // `Api`, and the reads' `Loaded` cases, so it sits after `update`.
     hasRealtime ? "" : false,
-    hasRealtime ? renderFelizRealtime(ui, reads) : false,
+    hasRealtime ? renderFelizRealtime(ui, reads, realtimeCredential) : false,
     // DataGrid (M-T1.1) — the `@tanstack/table-core` interop bindings, then one
     // `[<ReactComponent>]` child per grid.  BEFORE the page views: F# is
     // order-sensitive and the views call these.  After `update`, so nothing here
@@ -1932,7 +1973,16 @@ export function generateFelizForContexts(
     hasEffects ||
     hasFileUploads;
   const backendRealtime = backendServesRealtime(target?.platform);
-  const appFs = renderAppFs(ui, contexts, authUi, sys.user, backendRealtime);
+  const appFs = renderAppFs(
+    ui,
+    contexts,
+    authUi,
+    sys.user,
+    backendRealtime,
+    // Stream credential from the shared realtime plan (M-T4.12 RULE 2) — the
+    // SAME gate the app's other authenticated traffic rides.
+    realtimeStreamCredential(deployable, target, sys.user),
+  );
   out.set("src/App.fs", appFs);
   // The emitted source is the authority for its own package refs — see above.
   out.set("App.fsproj", fsproj(hasHttp, appFs.includes(ROUTER_OPEN), authUi, hasFileUploads));

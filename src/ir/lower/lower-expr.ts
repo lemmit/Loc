@@ -203,8 +203,8 @@ function promoteMoneyOperands(
   let outLeftT = leftType;
   let outRight = rightIR;
   let outRightT = rightType;
-  const lAnchor = literalPromotionAnchor(leftType);
-  const rAnchor = literalPromotionAnchor(rightType);
+  const lAnchor = literalPromotionAnchor(leftType, op);
+  const rAnchor = literalPromotionAnchor(rightType, op);
   if (lAnchor) {
     const promoted = tryPromoteNumericLit(rightExpr, lAnchor);
     if (promoted) {
@@ -2208,10 +2208,19 @@ export function lowerEmitFields(
  *  type is the "anchor" the other operand's bare numeric literal
  *  promotes against (the binary handler in `lowerExpr`).  Returns
  *  null for non-anchor types (int, string, bool, etc.) — int doesn't
- *  anchor anything because every IntLit already types as int. */
-function literalPromotionAnchor(t: TypeIR): "long" | "decimal" | "money" | null {
+ *  anchor anything because every IntLit already types as int.
+ *
+ *  `money` anchors only the operators money is CLOSED under (`+`, `-`,
+ *  comparisons).  Scaling is money × SCALAR, so under `*` / `/` the
+ *  scalar literal must KEEP its own type: promoting it would stamp a
+ *  `money × money` binary node the renderers have no leaf for.  Kept
+ *  byte-for-byte in step with the validator mirror
+ *  (`src/language/validators/_shared.ts`) — the two disagreeing is what
+ *  made `price / 2` a self-contradicting diagnostic. */
+function literalPromotionAnchor(t: TypeIR, op: string): "long" | "decimal" | "money" | null {
   if (t.kind !== "primitive") return null;
-  if (t.name === "long" || t.name === "decimal" || t.name === "money") return t.name;
+  if (t.name === "money") return op === "*" || op === "/" ? null : "money";
+  if (t.name === "long" || t.name === "decimal") return t.name;
   return null;
 }
 

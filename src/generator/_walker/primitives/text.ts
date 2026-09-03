@@ -18,12 +18,59 @@ import {
   emitExpr,
   navArgValue,
   navAttrFragment,
-  stringOrRefArgValue,
   styleAttr,
   styleWith,
   testidAttr,
   walk,
 } from "../walker-core.js";
+
+/** Read a named arg as an attribute VALUE — ANY expression, via `navArgValue`
+ *  (the A12 machinery `Anchor`/`Button`'s `to:` already rides), not the pre-A12
+ *  `stringOrRefArgValue` `Image`/`Avatar` were still on (M-T1.26): a computed
+ *  value (`src: "/img/" + slug`) came back `undefined` and was silently
+ *  dropped, and a route-param ref came back as a JS TEMPLATE LITERAL
+ *  (`` `${id}` ``) — invalid F#/Dart, AND invalid in a markup attribute
+ *  position on every JSX-family target too (confirmed against `tsc`: a bare
+ *  `` src=`${id}` `` fails to parse as JSX at all, braces or not).
+ *
+ *  Every `Image`/`Avatar` pack template hardcodes the attribute NAME and `=`
+ *  (` src={{{src}}}`, unlike `Anchor`'s `{{{navAttr "to"}}}`, which lets
+ *  `navAttrFragment` spell the WHOLE fragment including the name) — so unlike
+ *  `navArgValue`'s callers, this can only complete what the template already
+ *  started.  For the LITERAL case that's exactly `nav.expr` (byte-identical:
+ *  `ctx.target.exprLiteral("string", …)` is `JSON.stringify` on every
+ *  JSX-family target, the same output `stringOrRefArgValue` produced).  For a
+ *  DYNAMIC value, `src=` + a bare expression is invalid JSX/Svelte too — so
+ *  those two targets get the value brace-wrapped (`src=` + `{expr}` =
+ *  `src={expr}`, valid).  Feliz/Flutter consume `src`/`alt` as a raw
+ *  expression in their own language (their packs read the value directly, not
+ *  spliced markup), so the bare `nav.expr` is already correct there.
+ *
+ *  Vue and Angular remain UNFIXED for a dynamic value: they need a differently
+ *  SPELLED attribute (`:src="expr"` / `[src]="expr"`), which requires the `=`
+ *  the template hardcodes to not be there at all — an `{{{srcAttr}}}`-shaped
+ *  template change (mirroring `{{{navAttr "to"}}}`) across every pack's
+ *  `primitive-image.hbs`/`primitive-avatar.hbs`, out of this file's reach.
+ *  See the M-T1.26 hand-off note for the exact shape. */
+function attrArgValue(
+  call: ExprIR & { kind: "call" },
+  name: string,
+  ctx: WalkContext,
+): string | undefined {
+  const nav = navArgValue(call, name, ctx);
+  return nav && attrExprValue(nav, ctx);
+}
+
+/** The brace-wrap decision `attrArgValue` applies to a `NavTarget` — shared
+ *  with `emitImage`'s positional `src` shorthand (`Image { row.thumbnailUrl }`),
+ *  which reads a bare positional `ExprIR` rather than a named arg. */
+function attrExprValue(nav: { expr: string; dynamic: boolean }, ctx: WalkContext): string {
+  if (!nav.dynamic) return nav.expr;
+  if (ctx.target.framework === "react" || ctx.target.framework === "svelte") {
+    return `{${nav.expr}}`;
+  }
+  return nav.expr;
+}
 
 export function emitMoney(
   call: ExprIR & { kind: "call" },
@@ -159,23 +206,27 @@ export function emitImage(
   ctx: WalkContext,
   depth: number,
 ): string {
-  // Image(src: "...", alt: "...") — packs render a styled image
-  // tag.  Both attrs accept string literals or refs.  The first
-  // POSITIONAL arg is shorthand for `src` (`Image { "/logo.png" }`),
+  // Image(src: "...", alt: "...") — packs render a styled image tag.  Both
+  // attrs accept ANY expression (A12 semantics — `attrArgValue`), not just a
+  // string literal or a bare ref.  The first POSITIONAL arg is shorthand for
+  // `src` (`Image { "/logo.png" }`, or `Image { row.thumbnailUrl }`),
   // mirroring how Text/Money/EnumBadge read their primary value.
   void depth;
   const positional = positionalArgs(call)[0];
-  const positionalSrc =
-    positional?.kind === "literal" && positional.lit === "string"
-      ? JSON.stringify(positional.value)
-      : undefined;
-  const src = stringOrRefArgValue(call, "src", ctx) ?? positionalSrc;
+  const positionalSrc = positional
+    ? attrExprValue(
+        positional.kind === "literal" && positional.lit === "string"
+          ? { expr: ctx.target.exprLiteral("string", positional.value), dynamic: false }
+          : { expr: emitExpr(positional, ctx), dynamic: true },
+        ctx,
+      )
+    : undefined;
+  const src = attrArgValue(call, "src", ctx) ?? positionalSrc;
   // `decorative: true` (accessibility.md) renders an explicit empty
   // alt (`alt=""`), hiding a purely-decorative image from assistive tech; a
   // real `alt:` wins over it.  The validator guarantees one of the two is
   // present when the image has a src.
-  const alt =
-    stringOrRefArgValue(call, "alt", ctx) ?? (boolNamed(call, "decorative") ? '""' : undefined);
+  const alt = attrArgValue(call, "alt", ctx) ?? (boolNamed(call, "decorative") ? '""' : undefined);
   return renderPrimitive(ctx, "primitive-image", {
     src,
     alt,
@@ -191,13 +242,13 @@ export function emitAvatar(
   ctx: WalkContext,
   depth: number,
 ): string {
-  // Avatar(src: "...", alt: "...") — packs render a circle-cropped
-  // image.  Without src, packs render their user-icon fallback.
+  // Avatar(src: "...", alt: "...") — packs render a circle-cropped image.
+  // Both attrs accept ANY expression (A12 semantics — `attrArgValue`).
+  // Without src, packs render their user-icon fallback.
   void depth;
-  const src = stringOrRefArgValue(call, "src", ctx);
+  const src = attrArgValue(call, "src", ctx);
   // `decorative: true` → explicit empty alt (see emitImage); real `alt:` wins.
-  const alt =
-    stringOrRefArgValue(call, "alt", ctx) ?? (boolNamed(call, "decorative") ? '""' : undefined);
+  const alt = attrArgValue(call, "alt", ctx) ?? (boolNamed(call, "decorative") ? '""' : undefined);
   return renderPrimitive(ctx, "primitive-avatar", {
     src,
     alt,

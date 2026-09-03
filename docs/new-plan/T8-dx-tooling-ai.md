@@ -1,5 +1,7 @@
 # T8 — DX, tooling & the AI platform
 
+> **Completed missions for this track live in [`archive/T8-done.md`](archive/T8-done.md)** (2 closed as of 2026-09-02). This file lists only the live missions.
+
 *Diagnostics (123 stable codes + machine-applyable fix-hints) and the LSP are best-in-class; interactive debugging is essentially absent; the AI-platform loop (validate→repair→verify) is mostly built and needs its last mile + the wedge demo.*
 
 ## M-T8.1 — Delegating DAP debugger — `open` · **XL** · P2
@@ -58,14 +60,6 @@ The playground regenerates statelessly (keyed by a source hash) and holds no "pr
 - **Shipped (#2048):** the noted follow-ups — **multi-file / import baselines** (both trees now seed the worker VFS and lower via the project loader, so `import` graphs resolve; the single-file gate is gone), a **mobile Download-.zip** button, a **History → "Diff as baseline"** one-click pin (dock-tab state lifted to the ctx), and an edit-driven + multi-file Migrations e2e.
 - **Shipped (mobile parity):** the Migrations dock tab + the Agent chat tab, previously **desktop-only** (they lived in `DevToolsDock`, which the mobile shell has no equivalent of), are now bottom-nav tabs in `web/src/layout/MobileShell.tsx` — `MigrationsBody`/`ChatBody` are `ctx`-driven, so the evolution surface and the agent are reachable on a phone (visibility-gated async git reads, matching History/Tests). Remaining under this mission: nothing structural — the evolution-signals-**for-the-agent-loop** tie-in shipped under M-T8.3 (`loom_diff`/`loom_snapshot`).
 Sources: [playground.md](../playground.md), [source-map-and-debugging](../old/proposals/source-map-and-debugging.md) (provenance/`.loom` bundle), T2 track ([T2-data-evolution](T2-data-evolution.md) M-T2.1/M-T2.2/M-T2.3).
-
-## M-T8.12 — Playground multi-tab write coordination — `done` · **M** · P2
-Two-tab data loss on one workspace closed: per-workspace exclusive Web Lock + read-only loser tab with take-over, BroadcastChannel invalidations through the external-`epoch` machinery; Phase 3 (SharedWorker multi-writer) explicitly rejected. Per-PR gate `web/e2e/multi-tab.spec.ts`. (Body pruned 2026-08-05 per the done-body rule.)
-Design: [M-T8.12-multi-tab-coordination-design](missions/M-T8.12-multi-tab-coordination-design.md). Sources: [playground-file-mgmt-review-2026-07](../audits/playground-file-mgmt-review-2026-07.md) defect #8.
-
-## M-T8.13 — System-builder v1/v2 consolidation — `done` · **L** · P2
-One model pane ships: v2 is the single editing surface (owner-gated alternative 4), v1 retired; the shared `usePaneHarness` rails extracted first so both panes rode one source/rev/liveTick/externalTick machinery. (Body pruned 2026-08-05 per the done-body rule.)
-Design: [M-T8.13-system-builder-consolidation-design](missions/M-T8.13-system-builder-consolidation-design.md). Sources: [playground-file-mgmt-review-2026-07](../audits/playground-file-mgmt-review-2026-07.md) §2, [playground-modeller-audit-2026-07](../audits/playground-modeller-audit-2026-07.md), [playground.md](../playground.md).
 
 ## M-T8.14 — Playground crash reporting & diagnostics surfacing — `partial` · **M** · P2
 Both error boundaries (root + the per-pane one from #2287) already push every crash class into the 12-entry `loom.diag` ring, but `logDiagnostic` takes only a *reason* — the error message, stack and component stack go to `console.error` and die with the tab, so a user crash report is unfalsifiable even when the user cooperates. Three no-infrastructure slices: capture completeness (a `detail` argument on the ring + build SHA via a vite `define` + a `worker.onerror` class for the currently-unobservable build-worker death + a `lastCrash` flag), a report surface (redacted "Copy crash report" / prefilled `crash-report` GitHub issue form on both fallbacks + a next-boot notice; the BYOK key `localStorage["loom.agent.settings"].apiKey` must never enter a report), and the team-side triage shell (the repo has no `.github/ISSUE_TEMPLATE/` at all + a `docs/playground.md` diagnostics section). Slice 4 (opt-in beacon) is enumerated and **recommended deferred** — decision-gated on report volume. P2: not user-facing capability, but it gates the feedback loop for every crash class the audit could not falsify.
