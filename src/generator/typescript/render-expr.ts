@@ -78,6 +78,9 @@ export interface TsRenderContext {
 const DEFAULT: TsRenderContext = { thisName: "this" };
 
 const TS_TARGET: ExprTarget<TsRenderContext> = {
+  // TS double-quoted string literals don't interpolate — JSON's escaping
+  // (`"`, `\`, control chars) is already correct TS syntax (_expr/target.ts).
+  escapeStringLiteral: (value) => JSON.stringify(value),
   literal: renderLiteral,
   id: (ctx) => (ctx.thisName === "this" ? "this._id" : `${ctx.thisName}.id`),
   ref: renderRef,

@@ -37,20 +37,21 @@ import type {
   SeedRowIR,
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { snake, upperFirst } from "../../../util/naming.js";
+import { elixirString, snake, upperFirst } from "../../../util/naming.js";
 import { type Entry, groupByDataset, usedAggregates } from "../../_persistence/seed-datasets.js";
 import { renderSeedRowInsert } from "../../sql-pg.js";
 import { renderExpr } from "../render-expr.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 
-/** An Elixir double-quoted string literal for arbitrary emitted SQL.  JSON's
- *  escape rules are a subset of Elixir's — plus `#{`, which Elixir would treat
- *  as INTERPOLATION, so a `.ddd`-sourced value containing it must not be able
- *  to reach the compiler as code. */
-function exStr(s: string): string {
-  return JSON.stringify(s).replace(/#\{/g, "\\#{");
-}
+// A `.ddd`-sourced string reaching this file's emitted Elixir routes through
+// `elixirString` (src/util/naming.ts) — the ONE escape funnel every Elixir
+// emitter shares (F2-ELX-ESCAPE-FUNNEL, Wave 2 packet 2.2).  This module used
+// to carry its own copy (`exStr`, same `JSON.stringify(...).replace(/#\{/g,
+// "\\#{")` body under a different name) — a second implementation of the same
+// rule that would silently drift the next time the funnel's escaping grew a
+// case. Deleted in favour of the shared import; every call site below is
+// unchanged text.
 
 /** Migration schema for an aggregate — qualifies the `raw` INSERT. */
 export type SeedSchemaFor = (aggregateName: string) => string | undefined;
@@ -162,7 +163,7 @@ export function emitVanillaSeeds(
       `  @doc "Apply every enabled, not-yet-applied dataset.  Safe to call on every boot."`,
       `  def run do`,
       `    Repo.query!(`,
-      `      ${exStr(
+      `      ${elixirString(
         `CREATE TABLE IF NOT EXISTS "__loom_seed" ("dataset" text PRIMARY KEY, "applied_at" timestamptz NOT NULL DEFAULT now())`,
       )}`,
       `    )`,
@@ -186,12 +187,12 @@ export function emitVanillaSeeds(
       ``,
       `  defp already_seeded?(dataset) do`,
       `    %{rows: rows} =`,
-      `      Repo.query!(${exStr(`SELECT 1 FROM "__loom_seed" WHERE "dataset" = $1`)}, [dataset])`,
+      `      Repo.query!(${elixirString(`SELECT 1 FROM "__loom_seed" WHERE "dataset" = $1`)}, [dataset])`,
       `    rows != []`,
       `  end`,
       ``,
       `  defp mark_seeded(dataset) do`,
-      `    Repo.query!(${exStr(`INSERT INTO "__loom_seed" ("dataset") VALUES ($1)`)}, [dataset])`,
+      `    Repo.query!(${elixirString(`INSERT INTO "__loom_seed" ("dataset") VALUES ($1)`)}, [dataset])`,
       `  end`,
       ``,
       `  # A seed row that the domain refuses (a violated invariant) is a BUILD-TIME`,
@@ -220,7 +221,7 @@ function renderDatasetFn(
   const rowLines = entries.map((e) => {
     if (e.raw) {
       const sql = renderSeedRowInsert(e.row.aggregate, e.row.fields, schemaFor(e.row.aggregate));
-      return `    Repo.query!(${exStr(sql)})`;
+      return `    Repo.query!(${elixirString(sql)})`;
     }
     const agg = aggByName.get(e.row.aggregate);
     const attrs = renderAttrs(e.row, agg, ctxModule);

@@ -19,6 +19,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
+import { escapeHtmlAttr } from "../../_walker/a11y-emit.js";
 import type { DetectedApiCall } from "../../_walker/api-hook-detector.js";
 import { jsExprLeaves } from "../../_walker/js-expr-leaves.js";
 import {
@@ -426,6 +427,13 @@ export const svelteTarget: WalkerTarget = {
    *  harmless and keeps the two outputs aligned). */
   escapeText(text: string): string {
     return escapeJsFamilyText(text);
+  },
+
+  /** Svelte static-attribute escaping — same rule every real static-attr
+   *  emit site already shares (`_walker/a11y-emit.ts`'s `escapeHtmlAttr`),
+   *  declared on the contract (Wave 2 packet 2.2). */
+  escapeAttr(text: string): string {
+    return escapeHtmlAttr(text);
   },
 
   // --- Store seam (Stage 5) -----------------------------------------------

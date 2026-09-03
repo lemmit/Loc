@@ -129,6 +129,24 @@ export interface RenderedVariantMatch {
  * across backends and handled directly in `renderExprWith`.
  */
 export interface ExprTarget<Ctx extends ExprCtxBase> {
+  /** Escape and quote a `.ddd`-authored string for this backend's own
+   *  double-quoted string-literal syntax — the escape-funnel seam every site
+   *  that splices author text into generated source is meant to reach
+   *  (F2-ELX-ESCAPE-FUNNEL; Wave 2 packet 2.2, `test/system/escape-funnel-
+   *  census.test.ts`). `literal()`'s `"string"` arm uses the same underlying
+   *  function, so the dispatch and any OTHER emit site in the same backend
+   *  (a validator message, a config default, …) share one implementation
+   *  rather than each hand-rolling `JSON.stringify`.
+   *
+   *  `JSON.stringify` genuinely IS this function for four of the five
+   *  backends — C#/Java/Python/TS double-quoted string literals don't
+   *  interpolate, so re-quoting with JSON's escaping (`"`, `\`, control
+   *  chars) is already correct target syntax. Only Elixir's `"…"` string (and
+   *  its `~r/…/` regex sigil) interpolates `#{…}` / terminates early on `/`,
+   *  so its leaf additionally neutralizes those (`elixirString` /
+   *  `elixirRegexBody`, `src/util/naming.ts` — the funnel Wave 1 (packet 1d)
+   *  routed nine live injection sites through). */
+  escapeStringLiteral(value: string): string;
   literal(lit: LiteralKind, value: string): string;
   id(ctx: Ctx): string;
   ref(e: RefExpr, ctx: Ctx): string;

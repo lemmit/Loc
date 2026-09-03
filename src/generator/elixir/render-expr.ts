@@ -173,6 +173,10 @@ const isDecimalStruct = (name: string | undefined): boolean =>
   name === "money" || name === "decimal";
 
 const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
+  // The one backend whose double-quoted string literal interpolates (`#{…}`)
+  // — `elixirString` neutralizes that in addition to JSON's `"`/`\`/control-
+  // char escaping (src/util/naming.ts; F2-ELX-ESCAPE-FUNNEL).
+  escapeStringLiteral: elixirString,
   literal: renderLiteral,
   id: (ctx) => ctx.idLocal ?? `${ctx.thisName}.id`,
   ref: renderRef,

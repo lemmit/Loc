@@ -85,6 +85,10 @@ export interface PyRenderContext {
 const DEFAULT: PyRenderContext = { thisName: "self" };
 
 const PY_TARGET: ExprTarget<PyRenderContext> = {
+  // Python double-quoted string literals don't interpolate (that needs an
+  // `f"…"` prefix the emitter never uses for a splice) — JSON's escaping is
+  // already correct Python syntax (_expr/target.ts).
+  escapeStringLiteral: (value) => JSON.stringify(value),
   literal: renderLiteral,
   id: (ctx) => (ctx.thisName === "self" ? "self._id" : `${ctx.thisName}.id`),
   ref: renderRef,
