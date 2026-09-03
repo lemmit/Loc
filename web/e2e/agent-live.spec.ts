@@ -101,13 +101,23 @@ test("live chat: rejecting the plan writes nothing", async ({ page }) => {
   const before = await readEditorSource(page);
 
   await page.evaluate((model) => {
-    (window as unknown as { __loomAgentComplete: unknown }).__loomAgentComplete = async () => ({
-      stop_reason: "end_turn",
-      content: [
-        { type: "text", text: "Here is the model." },
-        { type: "tool_use", id: "v1", name: "loom_validate", input: { source: model } },
-      ],
-    });
+    // The loop re-calls `complete` after it runs a tool, so the script has to
+    // answer the tool-result turn with plain text or it spins to the step cap.
+    (window as unknown as { __loomAgentComplete: unknown }).__loomAgentComplete = async ({
+      messages,
+    }: { messages: { role: string; content: { type: string }[] }[] }) => {
+      const last = messages[messages.length - 1];
+      if (last?.content.some((b) => b.type === "tool_result")) {
+        return { stop_reason: "end_turn", content: [{ type: "text", text: "Done." }] };
+      }
+      return {
+        stop_reason: "tool_use",
+        content: [
+          { type: "text", text: "Here is the model." },
+          { type: "tool_use", id: "v1", name: "loom_validate", input: { source: model } },
+        ],
+      };
+    };
   }, MODEL);
 
   await page.getByTestId("devtools-tab-agent").click();
@@ -136,13 +146,21 @@ test("live chat: a line struck off the plan is left out of the write", async ({ 
 }
 `;
   await page.evaluate((model) => {
-    (window as unknown as { __loomAgentComplete: unknown }).__loomAgentComplete = async () => ({
-      stop_reason: "end_turn",
-      content: [
-        { type: "text", text: "Two aggregates." },
-        { type: "tool_use", id: "v1", name: "loom_validate", input: { source: model } },
-      ],
-    });
+    (window as unknown as { __loomAgentComplete: unknown }).__loomAgentComplete = async ({
+      messages,
+    }: { messages: { role: string; content: { type: string }[] }[] }) => {
+      const last = messages[messages.length - 1];
+      if (last?.content.some((b) => b.type === "tool_result")) {
+        return { stop_reason: "end_turn", content: [{ type: "text", text: "Done." }] };
+      }
+      return {
+        stop_reason: "tool_use",
+        content: [
+          { type: "text", text: "Two aggregates." },
+          { type: "tool_use", id: "v1", name: "loom_validate", input: { source: model } },
+        ],
+      };
+    };
   }, two);
 
   await page.getByTestId("devtools-tab-agent").click();
@@ -160,6 +178,110 @@ test("live chat: a line struck off the plan is left out of the write", async ({ 
     .poll(async () => await readEditorSource(page), { timeout: 20_000 })
     .toContain("aggregate Ticket");
   expect(await readEditorSource(page)).not.toContain("Incident");
+});
+
+test("live chat: the turn is a labelled commit, and Restore is itself undoable", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await waitForPlaygroundReady(page);
+
+  // Two turns: the first adds Ticket, the second adds Incident beside it.
+  // Restoring the FIRST turn's checkpoint must undo the second.
+  const second = `context Ops {
+  aggregate Ticket { subject: string }
+  aggregate Incident { severity: int }
+}
+`;
+  await page.evaluate(
+    ({ one, two }) => {
+      // Script by TURN, not by call: the loop re-calls `complete` with the
+      // tool results, and answering that with another tool_use would spend the
+      // second turn's script inside the first.
+      (window as unknown as { __loomAgentComplete: unknown }).__loomAgentComplete = async ({
+        messages,
+      }: { messages: { role: string; content: { type: string }[] }[] }) => {
+        const last = messages[messages.length - 1];
+        if (last?.content.some((b) => b.type === "tool_result")) {
+          return { stop_reason: "end_turn", content: [{ type: "text", text: "Done." }] };
+        }
+        const asked = messages.filter(
+          (m) => m.role === "user" && m.content.some((b) => b.type === "text"),
+        ).length;
+        return {
+          stop_reason: "tool_use",
+          content: [
+            { type: "text", text: `Turn ${asked}.` },
+            {
+              type: "tool_use",
+              id: `v${asked}`,
+              name: "loom_validate",
+              input: { source: asked === 1 ? one : two },
+            },
+          ],
+        };
+      };
+    },
+    { one: MODEL, two: second },
+  );
+
+  await page.getByTestId("devtools-tab-agent").click();
+  await page.getByTestId("agent-input").fill("Add a Ticket aggregate.");
+  await page.getByTestId("agent-send").click();
+  await expect(page.getByTestId("agent-plan")).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("agent-plan-approve").click();
+  await expect
+    .poll(async () => await readEditorSource(page), { timeout: 20_000 })
+    .toContain("aggregate Ticket");
+
+  // The turn produced a commit, and the message names the point it marks —
+  // the ambiguity the Cursor checkpoint threads are full of (research §2.4).
+  const firstCheckpoint = page.getByTestId("agent-checkpoint").first();
+  await expect(firstCheckpoint).toBeVisible({ timeout: 30_000 });
+  await expect(firstCheckpoint).toContainText("the end of turn 1");
+  const afterTurnOne = await readEditorSource(page);
+
+  // History shows it under its own label, not as an anonymous autosave.
+  await page.getByTestId("devtools-tab-history").click();
+  await expect(
+    page.getByTestId("history-row").filter({ hasText: "agent: Add a Ticket aggregate." }),
+  ).toBeVisible({ timeout: 30_000 });
+
+  // Second turn.
+  await page.getByTestId("devtools-tab-agent").click();
+  await page.getByTestId("agent-input").fill("Also add an Incident aggregate.");
+  await page.getByTestId("agent-send").click();
+  await expect(page.getByTestId("agent-plan").nth(1)).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("agent-plan-approve").click();
+  await expect
+    .poll(async () => await readEditorSource(page), { timeout: 20_000 })
+    .toContain("aggregate Incident");
+  await expect(page.getByTestId("agent-checkpoint").nth(1)).toContainText("the end of turn 2", {
+    timeout: 30_000,
+  });
+
+  await page.getByTestId("devtools-tab-history").click();
+  const rowsBefore = await page.getByTestId("history-row").count();
+
+  // Restore the FIRST turn: the second turn's work is undone, and the restore
+  // is itself a new commit — so it, too, can be walked back.
+  await page.getByTestId("devtools-tab-agent").click();
+  await firstCheckpoint.getByTestId("agent-restore").click();
+  await expect(page.getByTestId("agent-restore-note")).toContainText(
+    "Restored to the end of turn 1",
+    { timeout: 30_000 },
+  );
+  await expect
+    .poll(async () => await readEditorSource(page), { timeout: 30_000 })
+    .toBe(afterTurnOne);
+
+  await page.getByTestId("devtools-tab-history").click();
+  await expect
+    .poll(async () => await page.getByTestId("history-row").count(), { timeout: 30_000 })
+    .toBeGreaterThan(rowsBefore);
+  await expect(
+    page.getByTestId("history-row").filter({ hasText: "restore to the end of turn 1" }),
+  ).toBeVisible({ timeout: 30_000 });
 });
 
 test("live chat: settings gear configures a BYOK provider", async ({ page }) => {

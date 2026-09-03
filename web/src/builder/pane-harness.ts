@@ -37,7 +37,7 @@ import { useExternalSourceTick, useLiveSourceTick } from "./use-live-source-tick
 export interface PaneSourceCtx {
   /** The live editor source (reflects unsaved edits). */
   getSource: () => string;
-  onSourceChange: (text: string, origin?: "editor" | "builder") => void;
+  onSourceChange: (text: string, origin?: "editor" | "builder", label?: string) => void;
   /** Bumped on every editor keystroke; debounced into `liveTick`. */
   editorSourceTick: number;
   initialSource: string;
@@ -147,8 +147,11 @@ export function usePaneHarness<A extends unknown[] = []>(
 
   /** Hand a candidate to the editor and re-derive.  No gate — callers reach it
    *  through `apply` (or knowingly, via the returned `commit`). */
-  const commit = (next: string): void => {
-    ctx.onSourceChange(next, "builder");
+  const commit = (next: string, label: string = UNNAMED): void => {
+    // `label` names WHAT was applied ("page Board body", "unfold page Board").
+    // M-T8.19 slice 4 turns it into the commit message, so a visual Apply is a
+    // labelled checkpoint in History rather than an anonymous autosave.
+    ctx.onSourceChange(next, "builder", label);
     bumpRev();
   };
 
@@ -170,8 +173,9 @@ export function usePaneHarness<A extends unknown[] = []>(
         refusal.clear();
         // `next` is non-null on a "commit" decision by construction.
         const text = next as string;
-        if (options.onCommit) options.onCommit(text, commit, ...args);
-        else commit(text);
+        const labelled = (t: string): void => commit(t, what);
+        if (options.onCommit) options.onCommit(text, labelled, ...args);
+        else commit(text, what);
       }
     }
   };

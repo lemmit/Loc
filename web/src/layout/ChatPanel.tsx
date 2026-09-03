@@ -1,5 +1,6 @@
 import {
   ActionIcon,
+  Alert,
   Anchor,
   Badge,
   Box,
@@ -25,9 +26,9 @@ import { planSummary } from "../agent/plan";
 import { type AgentSettings, PROVIDER_PRESETS, presetById, settingsReady } from "../agent/provider";
 import type { TurnReceipt } from "../agent/receipt";
 import { fileDeltaIsEmpty } from "../agent/receipt";
-import type { PlanCard as PlanCardData } from "../agent/turn";
+import type { PlanCard as PlanCardData, TurnCheckpoint } from "../agent/turn";
 import type { LayoutCtx } from "./ctx";
-import { CHAT, PLAN, RECEIPT } from "./vocabulary";
+import { CHAT, CHECKPOINT, PLAN, RECEIPT } from "./vocabulary";
 
 // "Agent" dock tab — two modes over one shared transcript display:
 //   • the deterministic M-T8.3 wedge demo (prose → `.ddd` → generate → green),
@@ -141,6 +142,20 @@ export function ChatBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
         </Stack>
       </ScrollArea>
 
+      {ctx.agentRestoreNote && (
+        <Alert
+          color="blue"
+          variant="light"
+          mx="sm"
+          mb={4}
+          withCloseButton
+          onClose={() => ctx.dismissAgentRestoreNote()}
+          data-testid="agent-restore-note"
+          style={{ flexShrink: 0 }}
+        >
+          <Text size="xs">{ctx.agentRestoreNote}</Text>
+        </Alert>
+      )}
       <Box style={{ borderTop: "1px solid var(--mantine-color-dark-4)", flexShrink: 0 }} p="sm">
         <Group gap={8} align="flex-end" wrap="nowrap">
           <Textarea
@@ -326,6 +341,9 @@ function ChatMessage({ m, ctx }: { m: AgentMessage; ctx: LayoutCtx }): JSX.Eleme
         )}
         {m.extras?.plan && <PlanCard card={m.extras.plan} ctx={ctx} />}
         {m.extras?.receipt && <ReceiptCard receipt={m.extras.receipt} />}
+        {m.extras?.checkpoint && (
+          <CheckpointRow cp={m.extras.checkpoint} ctx={ctx} />
+        )}
       </Box>
     </Box>
   );
@@ -463,6 +481,39 @@ function PlanRow({
           {item.removedMembers.length > 0 ? `−${item.removedMembers.length}` : ""}
         </Text>
       )}
+    </Group>
+  );
+}
+
+/** The turn's commit, and the one-click way back to it (M-T8.19 slice 4).
+ *
+ *  The copy names the POINT rather than the hash, and says the restore is
+ *  itself recorded — the two things the Cursor checkpoint threads say users
+ *  could not tell (research §2.4): whether they land at the start or the end
+ *  of the turn, and whether they can get back. */
+function CheckpointRow({
+  cp,
+  ctx,
+}: {
+  cp: TurnCheckpoint;
+  ctx: LayoutCtx;
+}): JSX.Element {
+  return (
+    <Group gap={8} mt={6} wrap="nowrap" data-testid="agent-checkpoint" data-oid={cp.oid}>
+      <Code style={{ fontSize: 10 }}>{cp.oid.slice(0, 7)}</Code>
+      <Text size="xs" c="dimmed" style={{ flex: 1 }} truncate>
+        {cp.point}
+      </Text>
+      <Tooltip label={CHECKPOINT.restoreHint(cp.point)} withArrow multiline w={280}>
+        <Button
+          size="compact-xs"
+          variant="light"
+          onClick={() => ctx.restoreAgentCheckpoint(cp.oid, cp.point)}
+          data-testid="agent-restore"
+        >
+          {CHECKPOINT.restore}
+        </Button>
+      </Tooltip>
     </Group>
   );
 }

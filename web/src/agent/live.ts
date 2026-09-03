@@ -184,6 +184,11 @@ export interface LiveAgentDeps {
    *  `null` to write nothing at all.  Absent → today's behaviour, where each
    *  new source is reflected into the editor as it appears. */
   gateSource?: (candidate: string, base: string) => Promise<string | null>;
+  /** Called once, with the text that was actually written, AFTER `applySource`
+   *  and BEFORE the generate (M-T8.19 slice 4).  The host takes its labelled
+   *  checkpoint here; awaiting it is what keeps the turn's commit from being
+   *  swallowed by the regenerate commit that follows. */
+  onWrote?: (written: string) => Promise<void> | void;
   /** What the turn cost, when the provider reported it (M-T8.19 slice 3 —
    *  the receipt's token line).  Not called when nothing was reported. */
   onUsage?: (usage: TokenUsage) => void;
@@ -284,6 +289,7 @@ export async function runLiveAgent(deps: LiveAgentDeps): Promise<Message[]> {
   // the gate decides whether — and exactly what — to write.
   render(false, "");
   if (!gate) {
+    if (produced) await deps.onWrote?.(produced);
     if (lastSource) triggerGenerate();
     return messages;
   }
@@ -292,6 +298,10 @@ export async function runLiveAgent(deps: LiveAgentDeps): Promise<Message[]> {
     if (signal?.cancelled) return messages;
     if (approved !== null) {
       applySource(approved);
+      // The checkpoint is taken BEFORE the generate, so the turn's commit
+      // carries the source change under its own label instead of being
+      // swallowed by the regenerate commit that follows it.
+      await deps.onWrote?.(approved);
       triggerGenerate();
     }
   }

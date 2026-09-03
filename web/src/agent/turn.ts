@@ -31,11 +31,21 @@ export interface PlanCard {
 /** Everything the playground attaches to a turn.  Grows one field per slice
  *  (receipt, checkpoint, stuck) — each is optional, so a turn that produced
  *  none of them renders exactly as it did before. */
+/** The commit a turn produced, and the human name of the point it marks.
+ *  Restoring to it is itself a commit, so it is undoable (slice 4). */
+export interface TurnCheckpoint {
+  oid: string;
+  /** "the end of turn 2" — what a Restore from this message lands on. */
+  point: string;
+}
+
 export interface TurnExtras {
   plan?: PlanCard;
   /** What the turn actually did, computed by the playground rather than
    *  claimed by the model (slice 3). */
   receipt?: TurnReceipt;
+  /** The labelled commit this turn's write produced (slice 4). */
+  checkpoint?: TurnCheckpoint;
 }
 
 /** Graft `extras[n]` onto the LAST bubble of turn `n`.

@@ -282,7 +282,7 @@ export interface LayoutCtx {
    *  ("editor") from edits applied by the visual Builder ("builder"); the
    *  latter are pushed back into the Monaco model + LSP so all surfaces stay
    *  in sync.  Omitted origin is treated as external (Builder-like). */
-  onSourceChange: (text: string, origin?: "editor" | "builder") => void;
+  onSourceChange: (text: string, origin?: "editor" | "builder", label?: string) => void;
   /** Counter incremented on every editor-originated source change (i.e.
    *  the user typing in Monaco).  Drives the page-builder's debounced
    *  live re-seed; builder-originated edits do **not** bump this, so the
@@ -464,6 +464,13 @@ export interface LayoutCtx {
   /** Reject the pending plan — nothing is written, and the refusal rides the
    *  next prompt so the model knows what was refused. */
   rejectAgentPlan: (excluded: string[]) => void;
+  /** Restore the workspace to a turn's commit (M-T8.19 slice 4).  The restore
+   *  is itself committed, so it is undoable — the Cursor lesson from the
+   *  research §2.4 — and `point` names what it lands on. */
+  restoreAgentCheckpoint: (oid: string, point: string) => void;
+  /** One-line outcome of the last Restore from a chat message, or null. */
+  agentRestoreNote: string | null;
+  dismissAgentRestoreNote: () => void;
 
   // Actions
   runGenerate: () => void;

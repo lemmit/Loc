@@ -37,8 +37,14 @@ export interface WorkspaceSourcesApi extends WorkspaceSourcesState {
    *  touch the VFS. */
   setActivePath(path: string): void;
   /** Write a single file to the VFS.  Subscription will re-emit and
-   *  `files` will update on the next render. */
-  write(path: string, content: string): void;
+   *  `files` will update on the next render.
+   *
+   *  Returns the settled write so a caller that must sequence AFTER the store
+   *  has it can await — the agent's labelled checkpoint commit (M-T8.19 slice
+   *  4) stages the working tree, so committing before the write lands would
+   *  stage the previous content.  The promise never rejects (failures go to
+   *  the workspace error channel), so `void`-ing it stays correct. */
+  write(path: string, content: string): Promise<void>;
   /** Delete a file from the VFS.  If the active file was deleted,
    *  the hook re-points `activePath` to a fallback so the editor
    *  always has a valid target. */
@@ -85,9 +91,8 @@ export function useWorkspaceSources(store: GitStore | null): WorkspaceSourcesApi
     [controller],
   );
   const write = useCallback(
-    (path: string, content: string) => {
-      void controller.write(path, content).catch(reportWorkspaceError);
-    },
+    (path: string, content: string): Promise<void> =>
+      controller.write(path, content).catch(reportWorkspaceError),
     [controller],
   );
   const del = useCallback(

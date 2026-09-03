@@ -101,7 +101,13 @@ import { CommandPalette, openPalette } from "./layout/CommandPalette";
 import { ShortcutSheet } from "./layout/ShortcutSheet";
 import { hotkeyAction, isTextEntry } from "./util/hotkeys";
 import { inDocumentOrder, stepIndex, toEditorRange } from "./layout/problem-nav";
-import { PLAN, PROBLEMS } from "./layout/vocabulary";
+import { CHECKPOINT, PLAN, PROBLEMS } from "./layout/vocabulary";
+
+/** First non-empty line of a prompt, trimmed for a commit subject. */
+function firstLine(text: string, max = 60): string {
+  const line = text.split("\n").find((l) => l.trim().length > 0)?.trim() ?? "edit";
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
 import type { EditorRange } from "./editor/editor-handle";
 import type { AgentPromptRequest, CenterView, ExplorerMode } from "./layout/ctx";
 import { useStableFns } from "./util/useStableFns";
@@ -265,6 +271,11 @@ export default function App(): JSX.Element {
   const generatedConflicts = useGeneratedConflicts(workspace.store);
   const sourcesRef = useRef(sources);
   sourcesRef.current = sources;
+  // Same reason as `sourcesRef`: the checkpoint helpers (M-T8.19 slice 4) run
+  // inside async closures and must see the CURRENT store / writer-lock state,
+  // not the render that started the turn.
+  const workspaceRef = useRef(workspace);
+  workspaceRef.current = workspace;
   const [buildClientReady, setBuildClientReady] = useState(false);
   const userPickedExampleRef = useRef(false);
 
@@ -366,6 +377,11 @@ export default function App(): JSX.Element {
   // A rejection is fed back to the model on the NEXT prompt rather than as its
   // own transcript turn, so the turn indices stay aligned with the bubbles.
   const planRejectionRef = useRef<string | null>(null);
+  // The in-flight workspace write of an agent-applied source (slice 4).
+  const agentWriteRef = useRef<Promise<void> | null>(null);
+  // One-line feedback after a Restore from a chat message — which point it
+  // landed on, or why it could not.
+  const [agentRestoreNote, setAgentRestoreNote] = useState<string | null>(null);
   // Live agent chat (M-T8.3): BYOK provider settings (persisted) + the raw
   // Anthropic-shaped transcript carried across turns.  `agentMessages` above is
   // the shared DISPLAY list (the demo and the live chat both render into it).
@@ -1910,9 +1926,12 @@ export default function App(): JSX.Element {
   function applyAgentSource(text: string): void {
     sourceRef.current = text;
     hasUserEditedRef.current = true;
+    setUserEdited(true);
     const s = sourcesRef.current;
     if (s.activePath === "/workspace/main.ddd") scheduleHashSync(text);
-    s.write(s.activePath, text);
+    // Held so the turn's checkpoint commit (M-T8.19 slice 4) can wait for the
+    // write to land before staging the tree.
+    agentWriteRef.current = s.write(s.activePath, text);
     editorHandleRef.current?.setSource(text);
   }
 
@@ -2026,6 +2045,71 @@ export default function App(): JSX.Element {
   }
 
   // ---------------------------------------------------------------------
+  // TURN ↔ COMMIT (M-T8.19 slice 4; research §4 #5).
+  //
+  // Every AI builder makes each chat turn a restorable version.  Loom already
+  // has the versions — the git-backed workspace commits on a debounce — but
+  // they were ANONYMOUS ("autosave workspace") and disconnected from the turn
+  // that caused them.  These two helpers close that: a write the agent or a
+  // visual Apply produced is committed under its own label the moment it
+  // lands, and the chat message carries the oid it produced.
+  // ---------------------------------------------------------------------
+
+  /** Commit the working tree under `message` once `written` has landed.
+   *  Returns the new oid, or undefined when nothing was staged / the store is
+   *  read-only — a no-op commit is not an error. */
+  async function commitCheckpoint(
+    message: string,
+    written?: Promise<void>,
+  ): Promise<string | undefined> {
+    const store = workspaceRef.current.store;
+    if (!store || !workspaceRef.current.writable) return undefined;
+    try {
+      if (written) await written;
+      const { commitOnSave } = await import("./workspace/git");
+      return await commitOnSave(store, message);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("checkpoint commit failed:", err);
+      return undefined;
+    }
+  }
+
+  /** Restore the workspace to `oid` — AS A NEW COMMIT.
+   *
+   *  This is the one restore rule the Cursor forum threads say everyone gets
+   *  wrong (research §2.4): a restore that rewrites history "permanently
+   *  destroys change history", and users cannot tell which point they landed
+   *  on.  So the restore is itself committed (undoable from the same list),
+   *  and the caller passes the POINT it names ("the end of turn 2") so the
+   *  message can say it. */
+  function restoreAgentCheckpoint(oid: string, point: string): void {
+    const turn = agentTurnRef.current;
+    void (async () => {
+      const store = workspaceRef.current.store;
+      if (!store || !workspaceRef.current.writable) return;
+      try {
+        const { commitOnSave } = await import("./workspace/git");
+        await store.restoreCommit(oid);
+        await commitOnSave(store, `restore to ${point}`);
+        // The editor follows through the sources controller's external-content
+        // epoch; the generated tree only follows if something asks — a restore
+        // is exactly such a request.
+        scheduleAutoGenerate(200);
+        setAgentExtras((prev) => {
+          const cp = prev[turn]?.checkpoint;
+          return cp ? withTurnExtras(prev, turn, { checkpoint: { ...cp } }) : prev;
+        });
+        setAgentRestoreNote(CHECKPOINT.restored(point));
+      } catch (err) {
+        setAgentRestoreNote(
+          `${CHECKPOINT.restoreFailed}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    })();
+  }
+
+  // ---------------------------------------------------------------------
   // The per-turn RECEIPT (M-T8.19 slice 3).
   //
   // NN/g's sycophancy finding is why this is computed rather than quoted: the
@@ -2128,6 +2212,21 @@ export default function App(): JSX.Element {
         // only meaningful once this cycle has actually produced a tree.
         triggerGenerate: () => {
           generatePromise = runGenerate(true);
+        },
+        onWrote: async () => {
+          // One labelled commit per turn: `agent: <first line of the ask>`.
+          const oid = await commitCheckpoint(
+            CHECKPOINT.agentLabel(firstLine(text)),
+            agentWriteRef.current ?? undefined,
+          );
+          agentWriteRef.current = null;
+          if (oid) {
+            setAgentExtras((prev) =>
+              withTurnExtras(prev, turn, {
+                checkpoint: { oid, point: CHECKPOINT.endOfTurn(turn + 1) },
+              }),
+            );
+          }
         },
         onUsage: (u) => {
           usage = u;
@@ -2339,7 +2438,7 @@ export default function App(): JSX.Element {
     deleteEmptySourceFolder: sources.deleteEmptyFolder,
     clearSourceError: sources.clearError,
     setAuthStub,
-    onSourceChange: (text: string, origin?: "editor" | "builder"): void => {
+    onSourceChange: (text: string, origin?: "editor" | "builder", label?: string): void => {
       sourceRef.current = text;
       // A real source change (typing in Monaco or a Builder Apply) — from
       // here on, mobile auto-generate is allowed (see hasUserEditedRef).
@@ -2365,11 +2464,17 @@ export default function App(): JSX.Element {
       // so the workspace-sources state stays in sync.  Read through
       // the ref so the active path reflects the latest hook snapshot
       // if a Phase-2b2 tab switch lands mid-typing.
-      s.write(s.activePath, text);
+      const written = s.write(s.activePath, text);
       // Builder (and any non-editor) edits don't flow through Monaco's own
       // change path, so push them into the live model — which also re-runs the
       // LSP — keeping the source tab and Problems panel in sync.
       if (origin !== "editor") editorHandleRef.current?.setSource(text);
+      // M-T8.19 slice 4 — a visual Apply is a CHECKPOINT, not an anonymous
+      // autosave: commit it under its own label as soon as the write lands.
+      // Typing in Monaco keeps the debounced autosave (one commit per burst).
+      if (origin === "builder") {
+        void commitCheckpoint(CHECKPOINT.builderLabel(label ?? "apply"), written);
+      }
     },
     onDiagnosticsChange: setLspDiagnostics,
     scheduleAutoGenerate,
@@ -2398,6 +2503,8 @@ export default function App(): JSX.Element {
     setAgentPlanMode,
     approveAgentPlan,
     rejectAgentPlan,
+    restoreAgentCheckpoint,
+    dismissAgentRestoreNote: (): void => setAgentRestoreNote(null),
     sendAgentMessage: (text: string): void => void sendAgentMessage(text),
     clearAgentChat,
     runGenerate: (): void => void runGenerate(true),
@@ -2491,6 +2598,7 @@ export default function App(): JSX.Element {
       agentMessages: agentMessagesDisplay,
       agentRunning,
       agentPlanMode,
+      agentRestoreNote,
       agentSettings,
       evolution,
       evolutionRunning,
@@ -2575,6 +2683,7 @@ export default function App(): JSX.Element {
       agentMessagesDisplay,
       agentRunning,
       agentPlanMode,
+      agentRestoreNote,
       agentSettings,
       evolution,
       evolutionRunning,
