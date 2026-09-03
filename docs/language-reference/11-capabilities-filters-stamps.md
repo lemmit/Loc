@@ -77,13 +77,13 @@ row = (await self._session.execute(select(OrderRow).where(and_(OrderRow.id == id
 == elixir
 The principal is threaded as a `current_user` argument into every repository read:
 ```elixir
-# lib/d/sales/order_repository.ex
+# lib/api/sales/order_repository.ex
 def list(page \\ 1, page_size \\ 20, sort \\ "id", dir \\ "asc", current_user \\ nil) do
-  query = from(record in D.Sales.Order, where: record.tenant_id == ^(current_user && current_user.tenant_id))
+  query = from(record in Api.Sales.Order, where: record.tenant_id == ^(current_user && current_user.tenant_id))
   # …
 end
 def find_by_id(id, current_user \\ nil) when is_binary(id) do
-  case Repo.one(from(record in D.Sales.Order, where: record.id == ^id and (record.tenant_id == ^(current_user && current_user.tenant_id)))) do
+  case Repo.one(from(record in Api.Sales.Order, where: record.id == ^id and (record.tenant_id == ^(current_user && current_user.tenant_id)))) do
 ```
 ::: end
 
@@ -91,14 +91,24 @@ Every backend family wires capability filters on every persistence shape (relati
 
 ### Reifying a named `criterion`
 
-A filter that is *exactly* one named [`criterion`](../criterion.md) (`filter Active`, `filter InRegion("EU")`) **reifies** on node — a module-level `<name>Criterion` predicate function, shared with any find/retrieval consumer of the same criterion — while the other backends inline the predicate at each read (`where: (not record.archived) and (record.region == "EU")` on Ecto). Behaviour-identical to the inline form; only the code organisation differs.
+A filter that is *exactly* one named [`criterion`](../criterion.md) (`capability activeOnly { filter Active }`) **reifies** on node — a module-level `<name>Criterion` predicate function, shared with every find / retrieval consumer of the same criterion — while the other backends inline the predicate at each read. Behaviour-identical to the inline form; only the code organisation differs.
 
+::: tabs backend
+== node
 ```ts
-// db/repositories/order-repository.ts (node)
+// db/repositories/order-repository.ts — one shared predicate, called at every read
 const activeCriterion = () => not(eq(schema.orders.archived, true));
-const inRegionCriterion = (region: string) => eq(schema.orders.region, region);
-// …where(and(inArray(schema.orders.id, ids), and(activeCriterion(), inRegionCriterion("EU"))))
+// findById:  .where(and(eq(schema.orders.id, id), activeCriterion()))
+// byRegion:  .where(and(eq(schema.orders.region, r), activeCriterion()))
 ```
+== elixir
+```elixir
+# lib/api/sales/order_repository.ex — inlined into each query
+query = from(record in Api.Sales.Order, where: not record.archived)
+# byRegion:
+query = from(record in Api.Sales.Order, where: (record.region == ^r) and (not record.archived))
+```
+::: end
 
 ## `stamp onCreate|onUpdate { … }` — lifecycle assignments
 
@@ -159,7 +169,7 @@ def _stamp_on_update(self) -> None:
 == elixir
 `Ecto.Changeset.put_change` in the repository's `insert` / `update` (the insert also applies the `onUpdate` stamps); a principal stamp reads the threaded `current_user`:
 ```elixir
-# lib/d/sales/order_repository.ex
+# lib/api/sales/order_repository.ex
 |> Ecto.Changeset.put_change(:created_at, DateTime.utc_now() |> DateTime.truncate(:second))
 |> Ecto.Changeset.put_change(:touched_at, DateTime.utc_now() |> DateTime.truncate(:second))
 ```
@@ -280,8 +290,8 @@ rows = (await self._session.execute(select(ItemRow).where(not_(ItemRow.is_delete
 ```
 == elixir
 ```elixir
-# lib/d/inventory/item_repository.ex — Ecto where clause threaded onto every read
-query = from(record in D.Inventory.Item, where: not record.is_deleted)
+# lib/api/inventory/item_repository.ex — Ecto where clause threaded onto every read
+query = from(record in Api.Inventory.Item, where: not record.is_deleted)
 ```
 ::: end
 
@@ -326,7 +336,7 @@ def _stamp_on_update(self, current_user: User) -> None: …
 ```
 == elixir
 ```elixir
-# lib/d/inventory/item_repository.ex — insert applies both stamp sets
+# lib/api/inventory/item_repository.ex — insert applies both stamp sets
 |> Ecto.Changeset.put_change(:created_at, DateTime.utc_now() |> DateTime.truncate(:second))
 |> Ecto.Changeset.put_change(:created_by, current_user && current_user.id)
 |> Ecto.Changeset.put_change(:updated_at, DateTime.utc_now() |> DateTime.truncate(:second))

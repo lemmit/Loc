@@ -263,7 +263,7 @@ end
 
 ## `find all <Base>` — the polymorphic reader
 
-The abstract base owns no repository, but a polymorphic read home returning the **union of every concrete subtype** is emitted per backend as infrastructure — read-only; writes go through the per-concrete repos. Where a backend emits one, it **delegates to each concrete repository and concatenates** (so every aggregate loads its full tree and through its own capability filters); the exceptions are the backends whose ORM makes the shared TPH table natively polymorphic. Not every backend emits a reader — **Java emits none** (the base is a JPA `SINGLE_TABLE` entity or a `@MappedSuperclass`, nothing more), and **.NET emits none under TPH** (EF's `DbSet<Party>` is already polymorphic through `HasDiscriminator`).
+`find all <Base>` is a **name for the emitted reader, not surface syntax** — there is no `find all` production in the grammar, and a `repository … for <Base>` is rejected outright (`loom.abstract-repository`). The abstract base therefore owns no repository, but a polymorphic read home returning the **union of every concrete subtype** is emitted per backend as infrastructure — read-only; writes go through the per-concrete repos. Where a backend emits one, it **delegates to each concrete repository and concatenates** (so every aggregate loads its full tree and through its own capability filters); the exceptions are the backends whose ORM makes the shared TPH table natively polymorphic. Not every backend emits a reader — **Java emits none** (the base is a JPA `SINGLE_TABLE` entity or a `@MappedSuperclass`, nothing more), and **.NET emits none under TPH** (EF's `DbSet<Party>` is already polymorphic through `HasDiscriminator`).
 
 ::: tabs backend
 == node
@@ -346,6 +346,8 @@ def list do
 end
 ```
 ::: end
+
+**Only Phoenix exposes the base over HTTP.** The Elixir backend mounts a read-only base controller (`GET /parties`, `GET /parties/:id` → `ApiWeb.PartyController`, with its own `PartyResponse`/`PartyListResponse` OpenAPI schemas) and delegates it from the context module (`defdelegate list_partys(), to: D.Parties.PartyRepository, as: :list`). node, .NET, Python and Java emit **no routes and no controller** for the base — their readers are internal infrastructure only.
 
 ## `<Base> id` references — TPH only
 
