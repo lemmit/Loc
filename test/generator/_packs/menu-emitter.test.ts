@@ -46,7 +46,7 @@ describe("menu emitter", () => {
             repository Orders for Order { }
           }
         }
-        ui WebApp { scaffold aggregates: Order }
+        ui WebApp with scaffold(aggregates: [Order]) { }
       }
     `);
     const sidebar = deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom));
@@ -112,8 +112,8 @@ describe("menu emitter", () => {
     const loom = await buildLoom(`
       system S {
         ui WebApp {
-          page ProjectNew { route: "/projects/new", title: "New project", body: f() }
-          page Bare { route: "/bare", body: f() }
+          page ProjectNew { route: "/projects/new"  title: "New project"  body: f() }
+          page Bare { route: "/bare"  body: f() }
           menu {
             section "Main" {
               link ProjectNew,
@@ -193,7 +193,7 @@ describe("menu emitter", () => {
     // ref makes it through.
     const loom = await buildLoom(`
       system S {
-        ui A { page Home { route: "/", body: f() } }
+        ui A { page Home { route: "/"  body: f() } }
         ui B {
           menu { section "Main" { link Home } }
         }
@@ -221,7 +221,7 @@ describe("menu emitter", () => {
             repository Orders for Order { }
           }
         }
-        ui WebApp { scaffold aggregates: Order }
+        ui WebApp with scaffold(aggregates: [Order]) { }
       }
     `);
     expect(deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom))).toBeUndefined();

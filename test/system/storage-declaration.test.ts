@@ -218,18 +218,21 @@ describe.skip("storage declarations + module-storage map (legacy — superseded 
     it("multi-module deployable with separate storage allocations", async () => {
       const { errors } = await parse(`
         system S {
-          subdomain Sales { context C { } }
-          subdomain Marketing { context C { } }
+          subdomain Sales { context SalesOps { } }
+          subdomain Marketing { context MktgOps { } }
           api SalesApi from Sales
           api MktgApi from Marketing
           storage salesPg  { type: postgres }
           storage mktgPg   { type: postgres }
-          storage shared   { type: clickhouse }
+          storage shared   { type: postgres }
+          resource salesState { for: SalesOps, kind: state, use: salesPg }
+          resource mktgState  { for: MktgOps,  kind: state, use: mktgPg }
+          resource salesBi    { for: SalesOps, kind: replica, use: shared }
+          resource mktgBi     { for: MktgOps,  kind: replica, use: shared }
           deployable api {
             platform: node
-            modules:
-              Sales     { primary: salesPg, bi: shared },
-              Marketing { primary: mktgPg, bi: shared }
+            contexts: [SalesOps, MktgOps]
+            dataSources: [salesState, mktgState, salesBi, mktgBi]
             serves: SalesApi, MktgApi
             port: 3000
           }
