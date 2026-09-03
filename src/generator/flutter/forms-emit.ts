@@ -15,7 +15,9 @@
 // derived purely from the wire `TypeIR` (mirroring Feliz's `inputKindFor`):
 //   - string / guid / json        → `TextFormField`
 //   - int / long                  → `TextFormField` (numeric keyboard, int parse)
-//   - decimal / money             → `TextFormField` (numeric keyboard, double parse)
+//   - decimal                     → `TextFormField` (numeric keyboard, double parse)
+//   - money                       → `TextFormField` (numeric keyboard); the
+//                                   TEXT is submitted, never a parsed double
 //   - bool                        → `SwitchListTile`
 //   - enum (values resolvable)    → `DropdownButtonFormField`
 //   - datetime                    → a `showDatePicker` field
@@ -52,7 +54,6 @@ import type {
 import { lines } from "../../util/code-builder.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { STANDARD_AGG_OPS } from "../_walker/walker-core.js";
-import { MONEY_WIRE_SCALE } from "../money-scale.js";
 
 // ---------------------------------------------------------------------------
 // Widget-name helpers — the ONE place the view seam and the class emitter agree
@@ -190,8 +191,13 @@ function peel(t: TypeIR): TypeIR {
   return t.kind === "optional" ? t.inner : t;
 }
 
-/** `money` — a numeric input whose SUBMIT value is a fixed-scale decimal
- *  string, not a JSON number (`money-scale.ts`, RS-12). */
+/** The Dart `RegExp` a money input validates against — the exact grammar every
+ *  backend's money request schema accepts (`money-scale.ts`, RS-12), so what
+ *  passes here is what the wire accepts. */
+const MONEY_TEXT_PATTERN = String.raw`RegExp(r'^-?\d+(\.\d+)?$')`;
+
+/** `money` — a numeric input whose SUBMIT value is the decimal STRING the user
+ *  typed, not a JSON number (`money-scale.ts`, RS-12). */
 function isMoney(t: TypeIR): boolean {
   const b = peel(t);
   return b.kind === "primitive" && b.name === "money";
@@ -917,13 +923,18 @@ function fieldValueExpr(f: FlutterFormField): string {
         ? `int.tryParse(${ctrl})`
         : `${ctrl}.isEmpty ? null : int.tryParse(${ctrl})`;
     case "number-double": {
-      // `money` leaves as the fixed-scale decimal STRING the wire carries
-      // (`money-scale.ts`, RS-12) — the backend's request schema is
-      // `z.string()` over `^-?\d+(\.\d+)?$`, so a bare JSON number is
-      // rejected at the boundary.  `decimal` stays a JSON number.
-      const parsed = f.money
-        ? `double.tryParse(${ctrl})?.toStringAsFixed(${MONEY_WIRE_SCALE})`
-        : `double.tryParse(${ctrl})`;
+      // `money` submits THE TEXT THE USER TYPED, trimmed — the backend's
+      // request schema is `z.string()` over `^-?\d+(\.\d+)?$` and it
+      // quantizes at the `NUMERIC(19,4)` column, so the digits go out exactly
+      // as entered.  Routing them through `double.tryParse` first (what this
+      // did before M-T1.21) re-quantized every amount through a binary float
+      // on the way to a field that is precise by definition.  `decimal` is the
+      // control — it really is a JSON number, and stays one.
+      if (f.money) {
+        const trimmed = `${ctrl}.trim()`;
+        return f.required ? trimmed : `${ctrl}.trim().isEmpty ? null : ${trimmed}`;
+      }
+      const parsed = `double.tryParse(${ctrl})`;
       return f.required ? parsed : `${ctrl}.isEmpty ? null : ${parsed}`;
     }
     case "bool":
@@ -943,8 +954,10 @@ function fieldValueExpr(f: FlutterFormField): string {
         return `${ctrls}.map((c) => int.tryParse(c.text)).whereType<int>().toList()`;
       }
       if (f.elementKind === "number-double") {
+        // A `money[]` element carries the typed digits through unparsed, the
+        // same rule the scalar arm above follows; a blank row drops out.
         return f.elementMoney
-          ? `${ctrls}.map((c) => double.tryParse(c.text)?.toStringAsFixed(${MONEY_WIRE_SCALE})).whereType<String>().toList()`
+          ? `${ctrls}.map((c) => c.text.trim()).where((s) => s.isNotEmpty).toList()`
           : `${ctrls}.map((c) => double.tryParse(c.text)).whereType<double>().toList()`;
       }
       return `${ctrls}.map((c) => c.text).toList()`;
@@ -959,7 +972,7 @@ function fieldValueExpr(f: FlutterFormField): string {
               ? `int.tryParse(${cell})`
               : sf.kind === "number-double"
                 ? sf.money
-                  ? `double.tryParse(${cell})?.toStringAsFixed(${MONEY_WIRE_SCALE})`
+                  ? `${cell}.trim()`
                   : `double.tryParse(${cell})`
                 : cell;
           return `'${dartStr(sf.jsonKey)}': ${val}`;
@@ -1009,6 +1022,16 @@ function validatorArg(f: FlutterFormField): string {
     return f.required
       ? ", validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null"
       : "";
+  }
+  if (f.money) {
+    // Money submits the typed text verbatim, so the validator has to be the
+    // WIRE's own grammar rather than "does Dart parse this as a number":
+    // `double.tryParse` accepts `1e5`, which the backend's
+    // `^-?\d+(\.\d+)?$` schema rejects with a 422 the user cannot read.
+    const ok = `${MONEY_TEXT_PATTERN}.hasMatch(v.trim())`;
+    return f.required
+      ? `, validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : (${ok} ? null : 'Enter an amount')`
+      : `, validator: (v) => (v == null || v.trim().isEmpty) ? null : (${ok} ? null : 'Enter an amount')`;
   }
   const parse = f.kind === "number-int" ? "int.tryParse" : "double.tryParse";
   if (f.required) {

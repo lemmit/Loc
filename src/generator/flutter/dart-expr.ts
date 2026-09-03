@@ -14,6 +14,7 @@
 import type { ExprIR, LiteralKind, PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { DURATION_UNIT_MS } from "../../util/temporal.js";
+import { MONEY_WIRE_SCALE, MONEY_WIRE_ZERO } from "../money-scale.js";
 
 /** The constructor parameter a component widget's `Slot { }` reads, and the one
  *  a call site fills with the children it passed.  `child` is Flutter's own name
@@ -31,6 +32,30 @@ export function dartString(value: string): string {
     .replace(/\$/g, "\\$")
     .replace(/\n/g, "\\n")
     .replace(/\t/g, "\\t")}'`;
+}
+
+/** A `money` LITERAL as Dart source — a string literal carrying the wire's own
+ *  digits (M-T1.21), never a numeric one.
+ *
+ *  `money` is a Dart `String` on this target, so `price := 12.5` has to emit
+ *  `'12.5000'`: a bare `12.5` would not even type-check against the field, and
+ *  routing it through a `double` on the way in would defeat the whole point of
+ *  holding the string.  The scale is applied HERE, at compile time, by padding
+ *  the literal's own digits — no float hop, no runtime call.
+ *
+ *  A literal already carrying MORE than `MONEY_WIRE_SCALE` fractional digits is
+ *  passed through verbatim rather than rounded: the backend's request schema
+ *  accepts any scale and quantizes at the column, and silently dropping digits
+ *  the author wrote is the kind of loss this mission exists to remove. */
+export function dartMoneyLiteral(value: string): string {
+  const raw = value.trim();
+  const m = /^([+-]?)(\d*)(?:\.(\d*))?$/.exec(raw);
+  if (!m) return dartString(raw);
+  const sign = m[1] === "-" ? "-" : "";
+  const whole = m[2] === "" ? "0" : m[2];
+  const frac = m[3] ?? "";
+  const padded = frac.length >= MONEY_WIRE_SCALE ? frac : frac.padEnd(MONEY_WIRE_SCALE, "0");
+  return dartString(`${sign}${whole}.${padded}`);
 }
 
 /** Dart spelling of the `now()` literal — the current instant on the UTC clock.
@@ -55,7 +80,12 @@ export const DART_LEAVES = {
     // unbound Dart identifier, and the only literal kind on this target that is
     // not already valid Dart text.
     if (lit === "now") return DART_NOW;
-    // int / long / decimal / money → numeric literal verbatim.
+    // A MONEY literal (`money("12.50")`, and a money-typed `state` seed) is the
+    // wire STRING on this target — `dart-types.ts` spells `money` as `String`.
+    // Emitting the bare number here produced a `double` where a `String` was
+    // required (M-T1.21).
+    if (lit === "money") return dartMoneyLiteral(value);
+    // int / long / decimal → numeric literal verbatim.
     return value;
   },
   binary(left: string, right: string, op: string): string {
@@ -71,11 +101,22 @@ export const DART_LEAVES = {
     return `(${cond} ? ${then} : ${otherwise})`;
   },
   convert(value: string, target: string, from: string | undefined): string {
-    if (target === "string") return `${value}.toString()`;
+    // `money` is a Dart String holding the wire's digits, so every conversion
+    // that touches it goes through the runtime rather than through `double`
+    // (M-T1.21).  A money SOURCE is already a String — `.toString()` on it is
+    // a no-op, and `int.parse('12.5000')` would throw.
+    if (target === "string") return from === "money" ? value : `${value}.toString()`;
+    if (target === "money") {
+      return from === "string" || from === "money"
+        ? `LoomMoney.normalize(${value})`
+        : `LoomMoney.fromNum(${value})`;
+    }
     if (target === "int" || target === "long") {
+      if (from === "money") return `LoomMoney.toNum(${value}).toInt()`;
       return from === "string" ? `int.parse(${value})` : `(${value}).toInt()`;
     }
-    if (target === "decimal" || target === "money") {
+    if (target === "decimal") {
+      if (from === "money") return `LoomMoney.toNum(${value}).toDouble()`;
       return from === "string" ? `double.parse(${value})` : `(${value}).toDouble()`;
     }
     return value;
@@ -131,6 +172,57 @@ export function dartTemporalBinary(
     return `(${left}).difference(${right})`;
   }
   return null;
+}
+
+/** The money-involving binary arms, or `null` to fall through to the plain
+ *  operator leaf.
+ *
+ *  `money` is a Dart `String` on this target (`dart-types.ts` — it holds the
+ *  wire's own digits, M-T1.21), and Dart's operators on a `String` mean
+ *  something else entirely: `a + b` CONCATENATES (`'10.0000' + '2.0000'` →
+ *  `'10.00002.0000'`), `a < b` does not compile, and `==` is exact text
+ *  equality, so `'1.5'` and `'1.5000'` — the same amount — compare unequal.
+ *  Every one of those is silently wrong rather than loudly broken, which is
+ *  exactly why this dispatch exists.
+ *
+ *  Dispatch is type-driven off the lowering's `leftType`/`rightType` stamps,
+ *  the same way `dartTemporalBinary` above dispatches.  Either side being money
+ *  is enough: `LoomMoney` coerces both operands through `units`, so a
+ *  `money * int` and an `int * money` are both exact. */
+export function dartMoneyBinary(
+  left: string,
+  right: string,
+  e: Extract<ExprIR, { kind: "binary" }>,
+): string | null {
+  const prim = (t: TypeIR | undefined): string | undefined =>
+    t?.kind === "primitive"
+      ? t.name
+      : t?.kind === "optional" && t.inner.kind === "primitive"
+        ? t.inner.name
+        : undefined;
+  if (prim(e.leftType) !== "money" && prim(e.rightType) !== "money") return null;
+  switch (e.op) {
+    case "+":
+      return `LoomMoney.add(${left}, ${right})`;
+    case "-":
+      return `LoomMoney.sub(${left}, ${right})`;
+    case "*":
+      return `LoomMoney.mul(${left}, ${right})`;
+    case "/":
+      return `LoomMoney.div(${left}, ${right})`;
+    case "<":
+    case "<=":
+    case ">":
+    case ">=":
+      return `(LoomMoney.compare(${left}, ${right}) ${e.op} 0)`;
+    case "==":
+      return `(LoomMoney.compare(${left}, ${right}) == 0)`;
+    case "!=":
+      return `(LoomMoney.compare(${left}, ${right}) != 0)`;
+    default:
+      // Logical/other operators never take a money operand; fall through.
+      return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -197,7 +289,11 @@ export const DART_INTRINSIC_RENDERERS: Record<string, (recv: string, args: strin
   "int.abs": (recv) => `(${recv}.abs())`,
   "long.abs": (recv) => `(${recv}.abs())`,
   "decimal.abs": (recv) => `(${recv}.abs())`,
-  "money.abs": (recv) => `(${recv}.abs())`,
+  // ---- money: the wire STRING, so every arm routes through `LoomMoney`
+  // (`money-runtime.ts`) rather than through Dart's `num` methods, which a
+  // `String` does not have (M-T1.21).  The `decimal` arms above are untouched
+  // — `decimal` really is a Dart `double`.
+  "money.abs": (recv) => `LoomMoney.abs(${recv})`,
   // Dart's `~/` is documented as truncating TOWARD ZERO (num.operator~/),
   // matching the catalogue contract directly — unlike Python's floor-only `//`.
   "int.divTrunc": (recv, args) => `(${recv} ~/ ${args[0]})`,
@@ -206,11 +302,11 @@ export const DART_INTRINSIC_RENDERERS: Record<string, (recv: string, args: strin
   "int.min": (recv, args) => `(math.min(${recv}, ${args[0]}))`,
   "long.min": (recv, args) => `(math.min(${recv}, ${args[0]}))`,
   "decimal.min": (recv, args) => `(math.min(${recv}, ${args[0]}))`,
-  "money.min": (recv, args) => `(math.min(${recv}, ${args[0]}))`,
+  "money.min": (recv, args) => `LoomMoney.min(${recv}, ${args[0]})`,
   "int.max": (recv, args) => `(math.max(${recv}, ${args[0]}))`,
   "long.max": (recv, args) => `(math.max(${recv}, ${args[0]}))`,
   "decimal.max": (recv, args) => `(math.max(${recv}, ${args[0]}))`,
-  "money.max": (recv, args) => `(math.max(${recv}, ${args[0]}))`,
+  "money.max": (recv, args) => `LoomMoney.max(${recv}, ${args[0]})`,
   // HALF-AWAY-FROM-ZERO ("commercial") rounding per the catalogue — Dart's
   // native `.round()` rounds `.5` toward POSITIVE INFINITY (`-0.5` → `0`,
   // not `-1`), so the mode is forced via sign/abs, exactly as the JS and F#
@@ -219,17 +315,17 @@ export const DART_INTRINSIC_RENDERERS: Record<string, (recv: string, args: strin
     args.length > 0
       ? `(${recv}.sign * (((${recv}).abs() * math.pow(10, ${args[0]})).round() / math.pow(10, ${args[0]})))`
       : `(${recv}.sign * ((${recv}).abs()).round())`,
+  // HALF-AWAY-FROM-ZERO is the runtime's own rounding mode (BigInt units), so
+  // the sign/abs dance the `double` arms need does not apply here.
   "money.round": (recv, args) =>
-    args.length > 0
-      ? `(${recv}.sign * (((${recv}).abs() * math.pow(10, ${args[0]})).round() / math.pow(10, ${args[0]})))`
-      : `(${recv}.sign * ((${recv}).abs()).round())`,
+    args.length > 0 ? `LoomMoney.round(${recv}, ${args[0]})` : `LoomMoney.round(${recv})`,
   // floor/ceil KEEP the receiver type (a whole-valued double, not an int) —
   // `floorToDouble`/`ceilToDouble` do exactly that (bare `.floor()`/`.ceil()`
   // on a Dart `double` return `int`, which would silently narrow the type).
   "decimal.floor": (recv) => `(${recv}.floorToDouble())`,
-  "money.floor": (recv) => `(${recv}.floorToDouble())`,
+  "money.floor": (recv) => `LoomMoney.floor(${recv})`,
   "decimal.ceil": (recv) => `(${recv}.ceilToDouble())`,
-  "money.ceil": (recv) => `(${recv}.ceilToDouble())`,
+  "money.ceil": (recv) => `LoomMoney.ceil(${recv})`,
   // ---- datetime -------------------------------------------------------------
   // MIDNIGHT UTC of the receiver's day (the catalogue contract).  `DateTime`'s
   // plain constructor builds a LOCAL-time value even when every field is read
@@ -271,8 +367,12 @@ function dartPrimitiveZero(name: PrimitiveName): string {
     case "long":
       return "0";
     case "decimal":
-    case "money":
       return "0.0";
+    case "money":
+      // Money's zero is the WIRE zero — `'0.0000'`, a String at the fixed
+      // scale, not a `double` (M-T1.21).  A bare `0.0` here would not even
+      // type-check against the `String` cell the state class declares.
+      return `'${MONEY_WIRE_ZERO}'`;
     case "bool":
       return "false";
     case "datetime":
@@ -283,6 +383,29 @@ function dartPrimitiveZero(name: PrimitiveName): string {
     default:
       return "''"; // string, guid, json, duration → empty string default
   }
+}
+
+/** True when `t` is (optionally) the `money` primitive. */
+export function isMoneyType(t: TypeIR): boolean {
+  const base = t.kind === "optional" ? t.inner : t;
+  return base.kind === "primitive" && base.name === "money";
+}
+
+/** A `state {}` field's rendered initial value, coerced to the money WIRE
+ *  STRING when the field is money-typed and the init rendered as a number.
+ *
+ *  The Dart twin of `coerceMoneyStateInit` (`_expr/js-intrinsics.ts`), and it
+ *  exists for the same reason: `m: money = 1.50` lowers as a DECIMAL literal
+ *  (`lit: "decimal"`), which renders as the bare `1.50` — a `double` seeded
+ *  into a `String` cell, which does not compile.  Keyed on the DECLARED TYPE
+ *  rather than on the literal kind, because that is the fact that makes the
+ *  coercion necessary.  A `money(…)` conversion form already renders through
+ *  `LoomMoney`, and any other expression is already a money String, so both
+ *  pass through untouched. */
+export function coerceDartMoneyInit(t: TypeIR, rendered: string): string {
+  if (!isMoneyType(t)) return rendered;
+  const raw = rendered.trim();
+  return /^[+-]?\d+(\.\d+)?$/.test(raw) ? dartMoneyLiteral(raw) : rendered;
 }
 
 /** Dart initial value for a `state {}` field whose declaration omits `= <init>`.

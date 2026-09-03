@@ -46,6 +46,7 @@ import { emitExpr, testidAttr, walk } from "../_walker/walker-core.js";
 import { opActionGate } from "./auth-gate.js";
 import {
   DART_LEAVES,
+  dartMoneyBinary,
   dartString,
   dartTemporalBinary,
   dartZeroValue,
@@ -381,8 +382,17 @@ export const flutterTarget: WalkerTarget = {
     const k = `state.${spec.sortKey.name}`;
     const d = `state.${spec.sortDir.name}`;
     if (spec.columns.length === 0) return spec.rowsExpr;
+    // A money column is a Dart `String` holding the wire's digits (M-T1.21), so
+    // the `Comparable` arm below would order it as TEXT — `'10.0000'` before
+    // `'9.0000'`.  Those columns compare numerically through the money runtime
+    // instead; `decimal` is a real `double` here and keeps the plain arm.
+    const money = new Set(spec.moneyColumns);
     const arms = spec.columns
-      .map((f) => `${dartString(f)} => (a.${f} as Comparable).compareTo(b.${f} as Comparable)`)
+      .map((f) =>
+        money.has(f)
+          ? `${dartString(f)} => LoomMoney.compare(a.${f}, b.${f})`
+          : `${dartString(f)} => (a.${f} as Comparable).compareTo(b.${f} as Comparable)`,
+      )
       .join(", ");
     return (
       `(List.of(${spec.rowsExpr})..sort((a, b) { final c = switch (${k}) { ${arms}, ` +
@@ -1000,6 +1010,10 @@ export const flutterTarget: WalkerTarget = {
   // bodies reach, since Flutter has ONE dispatcher (the shared `emitExpr`).
   exprDuration: (unit, amount) => DART_LEAVES.duration(unit, amount),
   exprTemporalBinary: (left, right, e) => dartTemporalBinary(left, right, e),
+  // `money` is a Dart `String` here (the wire's own digits — M-T1.21), so the
+  // host's operators mean the wrong thing: `+` concatenates and `<` does not
+  // compile.  Every money-involving operator routes through `LoomMoney`.
+  exprMoneyBinary: (left, right, e) => dartMoneyBinary(left, right, e),
 
   // Scalar intrinsics — the ONE table both the page-view walk and the
   // Notifier/action-body walk consume (both route through the shared

@@ -61,6 +61,7 @@ import {
 import { flutterI18nEnabled, renderFlutterI18nModule } from "./i18n.js";
 import { collectBoundInputFields, uiUsesFileUpload } from "./inputs-emit.js";
 import { renderFlutterModalRuntime } from "./modal-runtime.js";
+import { renderFlutterMoneyRuntime, usesMoney } from "./money-runtime.js";
 import { flutterPack, usesIntl, usesMath } from "./pack.js";
 import { dartPackageName } from "./package-name.js";
 import { collectFlutterReads, renderAppConfig, renderReadProviders } from "./reads-emit.js";
@@ -301,7 +302,6 @@ export function generateFlutterForContexts(
   if (rendered.some((r) => r.source.includes("LoomChart("))) {
     out.set("lib/chart.dart", renderFlutterChartRuntime());
   }
-
   // `persist:` wiring for the app root: a web-storage tier must be loaded before
   // the first Notifier `build()` (so a seed can read synchronously), and a `url`
   // tier needs the back/forward observer around `MaterialApp`.
@@ -364,6 +364,18 @@ export function generateFlutterForContexts(
   // enabled and asserts Flutter's built-in WCAG guidelines on the first frame.
   // Runs under the same `flutter test` step (whole `test/` dir) as the smoke.
   out.set("test/a11y_test.dart", renderA11yTest(pkg));
+
+  // The money runtime (M-T1.21).  Same use-driven rule as the modal bridge and
+  // the chart painter above, but the scan is over EVERY emitted file and it
+  // runs LAST — `LoomMoney.` lands in the PAGES (written below those two), in
+  // `components.dart` (a component body doing money arithmetic) and in
+  // `stores.dart` (a store action doing the same).  Scanning before the pages
+  // were written emitted the per-page `import '../money.dart';` with no file
+  // behind it: `uri_does_not_exist` + `Undefined name 'LoomMoney'`, caught by
+  // `flutter analyze` on the generated showcase.
+  if ([...out.values()].some((content) => usesMoney(content))) {
+    out.set("lib/money.dart", renderFlutterMoneyRuntime());
+  }
 
   return out;
 }
@@ -806,6 +818,7 @@ function renderStatelessPage(
   // per-PR gate).  Same content-sniff as `apiUri(` below.
   if (bodyWidget.includes("LoomModalHost(")) imports.push("import '../modal.dart';");
   if (bodyWidget.includes("LoomChart(")) imports.push("import '../chart.dart';");
+  if (usesMoney(bodyWidget)) imports.push("import '../money.dart';");
   if (opts.usesComponent) imports.push("import '../components.dart';");
   // An `Action(<instance>.<op>)` button POSTs inline via `apiUri(` — the only
   // page-body reference to it — so import http + the base-URL helper on demand.
@@ -990,6 +1003,9 @@ function renderConsumerPage(
   // …and over the hoisted `derived` locals, which are expressions like any body
   // slot (a `round(…)` there pulls `dart:math` just the same).
   const scan = `${projSource}\n${bodyWidget}\n${b.derivedLines.join("\n")}`;
+  // The money runtime rides the SAME scan: an `action` body doing
+  // money arithmetic lands in the Notifier (projSource), not in the markup.
+  if (usesMoney(scan)) imports.push("import '../money.dart';");
   if (scan.includes("jsonDecode") || scan.includes("jsonEncode")) {
     imports.push("import 'dart:convert';");
   }

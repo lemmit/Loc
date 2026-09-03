@@ -121,9 +121,10 @@ describe("flutter projection read — the row model", () => {
     const models = file(await emitted(SINGLETON), "lib/models.dart");
     expect(models).toContain("class SalesTotalsRow {");
     expect(models).toContain("  final int orders;");
-    // `money` lowers to Dart `double`, the same as an aggregate's money column
+    // `money` lowers to a Dart `String` — the wire's own fixed-scale digits
+    // (M-T1.21) — the same as an aggregate's money column
     // — a projection row is not a special wire dialect.
-    expect(models).toContain("  final double revenue;");
+    expect(models).toContain("  final String revenue;");
   });
 
   it("gives the row a fromJson the provider decodes through", async () => {

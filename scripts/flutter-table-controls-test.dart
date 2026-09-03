@@ -30,7 +30,11 @@ void main() {
         // reason: a construction site that omits a count would report a wrong
         // one silently.
         (ref, q) async => const LoomPage<Product>(
-          items: <Product>[Product(id: 'p1', name: 'alpha', price: 1, version: 1)],
+          // `price` is a `money` field, which is the WIRE STRING in Dart
+          // (`'1.0000'` — the fixed-scale decimal every backend serves), not a
+          // number: money is `NUMERIC(19,4)` and a Dart `double` cannot hold
+          // that range exactly (M-T1.21).
+          items: <Product>[Product(id: 'p1', name: 'alpha', price: '1.0000', version: 1)],
           page: 1,
           pageSize: 1,
           total: 5,

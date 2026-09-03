@@ -58,7 +58,9 @@ describe("flutter optional display primitives", () => {
 
     // The model side is genuinely nullable — the premise of the whole row.
     const models = [...files.entries()].find(([k]) => k.endsWith("lib/models.dart"))![1];
-    expect(models).toContain("final double? total;");
+    // `total: money?` — a money value is the wire STRING end to end since
+    // M-T1.21, so the nullable model field is `String?`, not `double?`.
+    expect(models).toContain("final String? total;");
     expect(models).toContain("final DateTime? at;");
     expect(models).toContain("final String? kind;");
 
@@ -66,7 +68,7 @@ describe("flutter optional display primitives", () => {
     // not assignable to `num`.
     expect(page).not.toMatch(/NumberFormat\.decimalPattern\(\)\.format\(row\.total\)/);
     expect(page).toContain(
-      "((num? v) => v == null ? '—' : NumberFormat.decimalPattern().format(v))(row.total)",
+      "((num? v) => v == null ? '—' : NumberFormat.decimalPattern().format(v))(LoomMoney.toNum(row.total))",
     );
 
     // Pre-fix: `DateFormat.yMMMd().format(row.at)` — `DateTime?` vs `DateTime`.

@@ -451,7 +451,13 @@ function nullSafe(type: string, formatted: string, value: string, empty = "'\u20
  *  `Intl.NumberFormat`.  The `intl` import is added on demand by the file
  *  emitters (they scan the body for `NumberFormat`/`DateFormat`). */
 function primitiveMoney(c: Ctx): string {
-  const value = String(c.valueExpr ?? "0");
+  // The bound value is a money WIRE STRING (`dart-types.ts` — M-T1.21), and
+  // `NumberFormat.format` takes a `num`, so the parse happens HERE, at the
+  // display boundary, and only for formatting.  `LoomMoney.toNum` is total over
+  // both shapes it can meet (the string; a bare number from an ungenerated
+  // endpoint), so a `Money { }` never throws on the value it was handed.
+  const raw = String(c.valueExpr ?? "0");
+  const value = `LoomMoney.toNum(${raw})`;
   // `decimals` is only meaningful when explicitly given (`hasDecimals`); left off,
   // NumberFormat.currency uses the currency's own fraction digits (2 for most),
   // so an unspecified `decimals` must NOT collapse to `decimalDigits: 0`.
@@ -493,9 +499,9 @@ function primitiveEnumBadge(c: Ctx): string {
  *  The accessors are applied HERE because this is where the walker's `x:`/`y:`
  *  field names are in scope.  Both coercions are total over what a projection
  *  row can hold: `toString()` for the category label (a `group by` key is a
- *  string, an enum or an id), and `as num).toDouble()` for the series — the
- *  Dart spelling of the tsx leg's `Number(...)`, identity on a `double` and a
- *  widening on an `int`. */
+ *  string, an enum or an id), and `LoomMoney.toNum(...).toDouble()` for the
+ *  series — the Dart spelling of the tsx leg's `Number(...)`: identity on a
+ *  `double`, a widening on an `int`, and a parse on the money wire STRING. */
 function primitiveChart(c: Ctx): string {
   const isBar = c.isLine ? "false" : "true";
   // The name is DERIVED ("Bar chart of SalesByStatus: revenue by status"), not
@@ -506,7 +512,11 @@ function primitiveChart(c: Ctx): string {
   const rows = String(c.dataExpr ?? "const []");
   const x = String(c.dataKey ?? "");
   const y = String(c.seriesField ?? "");
-  const point = `LoomChartPoint(r.${x}.toString(), (r.${y} as num).toDouble())`;
+  // The series coercion is `LoomMoney.toNum`, not an `as num` cast: a money
+  // column reaches the row as the wire STRING (M-T1.21), and a projection row's
+  // `y:` has no usable static type here, so the coercion has to be total over
+  // BOTH a number and that string.  The cast threw on every money series.
+  const point = `LoomChartPoint(r.${x}.toString(), LoomMoney.toNum(r.${y}).toDouble())`;
   return `LoomChart(isBar: ${isBar}, label: ${label}, points: ${rows}.map((r) => ${point}).toList())`;
 }
 
