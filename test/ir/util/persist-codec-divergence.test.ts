@@ -30,9 +30,14 @@ const vo = (): TypeIR => ({ kind: "valueobject", name: "Money" });
 const entity = (): TypeIR => ({ kind: "entity", name: "Line" });
 
 describe("felizPersistCodec — the F# side", () => {
-  it("maps int and long to one `int` codec", () => {
+  it("keeps int and long as SEPARATE scalars", () => {
+    // They were one `int` codec until M-T1.22.  `type-fs.ts` spells a Loom
+    // `long` `int64`, so the `int` codec's `System.Int32.TryParse` silently
+    // refuses (and drops) any persisted value past 2^31 - the store path is
+    // total, so a failed parse reads as "absent", not as an error.  The `long`
+    // codec parses with `System.Int64.TryParse` instead.
     expect(felizPersistCodec(prim("int"))).toEqual({ kind: "scalar", scalar: "int" });
-    expect(felizPersistCodec(prim("long"))).toEqual({ kind: "scalar", scalar: "int" });
+    expect(felizPersistCodec(prim("long"))).toEqual({ kind: "scalar", scalar: "long" });
   });
 
   it("maps string and json to the verbatim `string` codec", () => {
