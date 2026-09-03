@@ -32,7 +32,7 @@ const ENABLED = process.env.LOOM_TENANCY_E2E_PYTHON === "1";
 
 function hasUv(): boolean {
   try {
-    execSync("uv --version", { stdio: "pipe", timeout: 5_000 });
+    execSync("uv --version", { stdio: "pipe", timeout: 15_000 });
     return true;
   } catch {
     return false;

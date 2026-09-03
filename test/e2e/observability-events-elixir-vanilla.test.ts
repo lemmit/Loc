@@ -33,7 +33,7 @@ const ENABLED = process.env.LOOM_OBS_E2E_PHOENIX_VANILLA === "1";
 
 function hasDocker(): boolean {
   try {
-    execSync("docker info", { stdio: "pipe", timeout: 5_000 });
+    execSync("docker info", { stdio: "pipe", timeout: 15_000 });
     return true;
   } catch {
     return false;
@@ -42,7 +42,7 @@ function hasDocker(): boolean {
 
 function hasElixir(): boolean {
   try {
-    execSync("mix --version", { stdio: "pipe", timeout: 5_000 });
+    execSync("mix --version", { stdio: "pipe", timeout: 15_000 });
     return true;
   } catch {
     return false;

@@ -34,7 +34,7 @@ const PG_URL_OVERRIDE = process.env.LOOM_OBS_PG_URL;
 
 function hasDocker(): boolean {
   try {
-    execSync("docker info", { stdio: "pipe", timeout: 5_000 });
+    execSync("docker info", { stdio: "pipe", timeout: 15_000 });
     return true;
   } catch {
     return false;
@@ -43,7 +43,7 @@ function hasDocker(): boolean {
 
 function hasUv(): boolean {
   try {
-    execSync("uv --version", { stdio: "pipe", timeout: 5_000 });
+    execSync("uv --version", { stdio: "pipe", timeout: 15_000 });
     return true;
   } catch {
     return false;

@@ -26,7 +26,7 @@ const pythonDriver: BackendDriver = {
     name: "uv",
     check: () => {
       try {
-        execSync("uv --version", { stdio: "pipe", timeout: 5_000 });
+        execSync("uv --version", { stdio: "pipe", timeout: 15_000 });
         return true;
       } catch {
         return false;

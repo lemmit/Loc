@@ -40,7 +40,7 @@ const ENABLED = process.env.LOOM_OBS_E2E_DOTNET === "1";
 
 function hasDocker(): boolean {
   try {
-    execSync("docker info", { stdio: "pipe", timeout: 5_000 });
+    execSync("docker info", { stdio: "pipe", timeout: 15_000 });
     return true;
   } catch {
     return false;

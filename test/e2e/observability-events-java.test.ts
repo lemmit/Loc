@@ -51,7 +51,7 @@ system ObsShop {
 
 function hasDocker(): boolean {
   try {
-    execSync("docker info", { stdio: "pipe", timeout: 5_000 });
+    execSync("docker info", { stdio: "pipe", timeout: 15_000 });
     return true;
   } catch {
     return false;
