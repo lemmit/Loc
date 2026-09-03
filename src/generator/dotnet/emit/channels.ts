@@ -1,7 +1,7 @@
 import type { EventIR, SystemIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { upperFirst } from "../../../util/naming.js";
-import { numericEncode } from "../../_numeric/target.js";
 import type { BrokerBinding } from "../../_channels/bindings.js";
+import { numericEncode } from "../../_numeric/target.js";
 import { CS_NUMERIC } from "../numeric-codec.js";
 
 // ---------------------------------------------------------------------------
