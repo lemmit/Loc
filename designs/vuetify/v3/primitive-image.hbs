@@ -1,1 +1,1 @@
-<v-img{{#if hasSrc}} src={{{src}}}{{/if}}{{#if hasAlt}} alt={{{alt}}}{{/if}}{{{testidAttr}}} />
+<v-img{{#if hasSrc}}{{{vueAttr "src" src}}}{{/if}}{{#if hasAlt}}{{{vueAttr "alt" alt}}}{{/if}}{{{testidAttr}}} />

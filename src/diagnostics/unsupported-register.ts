@@ -620,6 +620,23 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     mission: "M-T6.52",
     verified: true,
   },
+  {
+    code: "loom.sensitive-wire-unsupported",
+    kind: "gap",
+    site: "src/ir/validate/checks/sensitivity-checks.ts:84",
+    // Live, not latent: NO backend masks on the wire.  `sensitive(...)` reaches
+    // exactly one consequence — the synthesized `inspect` prints `<redacted>`
+    // (enrichments.ts) — and the response DTO carries the value in cleartext on
+    // all five.  Drains when the tags route through the same response-boundary
+    // seam `mask unless` already uses; delete this row and the check module in
+    // that PR.
+    what:
+      "a `sensitive(...)` field that a caller actually receives — no backend masks it on the " +
+      "wire, and none classifies it at a log / event / resource sink; only the debug " +
+      "`inspect` redaction ships",
+    mission: "M-T3.8",
+    verified: true,
+  },
 ];
 
 /** Rows that are actual work.  The sprint backlog; empty is the target state. */

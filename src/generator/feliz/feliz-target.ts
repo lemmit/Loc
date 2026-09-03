@@ -823,7 +823,16 @@ export const felizTarget: WalkerTarget = {
             : `React.fragment [ ${walked.join("; ")} ]`;
       fields.push(`${p.name} = ${value}`);
     }
-    return fields.length > 0 ? `${callee} {| ${fields.join("; ")} |}` : `${callee} ()`;
+    // PAREN-WRAPPED.  An F# function application is not self-delimiting, so a
+    // bare `Panel model dispatch {| … |}` spliced into a child slot is (a)
+    // ambiguous against its neighbours in an argument position and (b)
+    // indistinguishable, to the pack's `isRenderedElement` prefix test, from raw
+    // TEXT — which made the pack wrap the component's own F# SOURCE in a string
+    // literal whose inner `"` were unescaped, so `App.fs` did not parse (the
+    // `Column { …, r => Panel(…) }` cell was the reproducer).  The leading `(`
+    // is the element marker the ~20 `asChild` / `textOrChildren` slots key on.
+    const app = fields.length > 0 ? `${callee} {| ${fields.join("; ")} |}` : `${callee} ()`;
+    return `(${app})`;
   },
 
   /** A component body's `Slot { }` → the `children` field of the props record

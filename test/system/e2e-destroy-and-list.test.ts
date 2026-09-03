@@ -143,7 +143,7 @@ describe("e2e `destroy` — the canonical DELETE route", () => {
           context Orders {
             aggregate Order {
               code: string
-              create(code: string) { this.code := code }
+              create(newCode: string) { code := newCode }
               destroy archive { }
             }
             repository Orders for Order { }

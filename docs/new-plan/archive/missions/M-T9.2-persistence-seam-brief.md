@@ -1,6 +1,6 @@
 # M-T9.2 design brief — the persistence-emit seam (`PersistenceTarget`)
 
-*Kickoff brief for the implementing agent. This mission is **design-first**: the first deliverable is a divergence audit + seam design for maintainer sign-off, not code. Read this whole brief, then follow [`../RUNBOOK.md`](../RUNBOOK.md).*
+*Kickoff brief for the implementing agent. This mission is **design-first**: the first deliverable is a divergence audit + seam design for maintainer sign-off, not code. Read this whole brief, then follow [`../RUNBOOK.md`](../../RUNBOOK.md).*
 
 ## Problem — the last un-abstracted N
 
@@ -24,7 +24,7 @@ The two *declines* above are as important as the successes: this mission's succe
 
 1. **No target-backend IR.** The pipeline principle (CLAUDE.md §Architecture) stands: backends consume `LoomModel` directly; `MigrationsIR` stays the only secondary IR. The seam is a *dispatch + leaf-table* pattern over the existing IR, not a new intermediate representation.
 2. **Byte-identical extraction.** Every slice must produce byte-identical generated output, gated by the fixture suite — the exact protocol the walker extraction used (PRs #607–#627) and the `render-expr` unification used (#843). No behavior change rides along with an extraction slice, ever.
-3. **Pinned decisions:** [D-ADAPTER-HOME](../../decisions.md) (persistence/layout adapters live on the backend surface), [D-BACKEND-PKG](../../decisions.md) (per-version backend packages are canonical — the seam must work for `packages/backend-hono-v5/` too, so it lives where both in-tree and packaged backends can import it: `src/generator/_persistence/` or a sibling), D-REALIZATION-AXES (only `persistence:` and `directoryLayout:` are live axes — do not resurrect removed ones). While here, wire the orphaned `resolvePersistence()` (`src/platform/resolve-adapters.ts:102`, currently uninvoked — M-T6.10) or fold its removal into the design.
+3. **Pinned decisions:** [D-ADAPTER-HOME](../../../decisions.md) (persistence/layout adapters live on the backend surface), [D-BACKEND-PKG](../../../decisions.md) (per-version backend packages are canonical — the seam must work for `packages/backend-hono-v5/` too, so it lives where both in-tree and packaged backends can import it: `src/generator/_persistence/` or a sibling), D-REALIZATION-AXES (only `persistence:` and `directoryLayout:` are live axes — do not resurrect removed ones). While here, wire the orphaned `resolvePersistence()` (`src/platform/resolve-adapters.ts:102`, currently uninvoked — M-T6.10) or fold its removal into the design.
 4. **Layering:** the shared home obeys `test/platform/pipeline-layering.test.ts` and `backend-packages-layering.test.ts` — a shared helper lives at the layer its consumers live at.
 
 ## Phase 1 (the deliverable to sign off): divergence audit

@@ -1,6 +1,6 @@
 # M-T4.4 design — external broker transports for `channelSource`
 
-*Design deliverable for sign-off (per [M-T4.4-broker-eventing-brief.md](M-T4.4-broker-eventing-brief.md)). Grounded on `main` 58f3a40. Owning proposal: [channels.md](../../old/proposals/channels.md) Part I — this doc concretizes its §"IR, lowering, enrichment" and §"Generated code, per backend" against the code as it exists today, under the pinned broker decision (redis → rabbitmq → kafka; **no NATS**).*
+*Design deliverable for sign-off (per [M-T4.4-broker-eventing-brief.md](M-T4.4-broker-eventing-brief.md)). Grounded on `main` 58f3a40. Owning proposal: [channels.md](../../../old/proposals/channels.md) Part I — this doc concretizes its §"IR, lowering, enrichment" and §"Generated code, per backend" against the code as it exists today, under the pinned broker decision (redis → rabbitmq → kafka; **no NATS**).*
 
 ## 0. What exists today (the anchor points)
 

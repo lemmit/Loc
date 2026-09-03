@@ -19,7 +19,16 @@ const OUT  = join(HERE, '_site');
 // docs into the plan/audit corpus don't 404.  Nested paths are
 // supported (depth derived from the path).  old/proposals ships too
 // now that new-plan/ links into it as the archived design record.
-export const RENDERED_SUBDIRS = ['new-plan', 'old/plans', 'old/proposals', 'audits', 'language-reference'];
+export const RENDERED_SUBDIRS = [
+  'new-plan',
+  'new-plan/missions',
+  'new-plan/archive',
+  'new-plan/archive/missions',
+  'old/plans',
+  'old/proposals',
+  'audits',
+  'language-reference',
+];
 
 // Nav surfaces the top-level reading order — keep in sync with
 // docs/README.md's "Start here" table and docs/index.html's footer.
@@ -232,6 +241,11 @@ ${TAB_SCRIPT}
 // Keep in sync with the `docs/old/` link rule in
 // test/system/archived-docs-fence.test.ts.
 export const ARCHIVED = [
+  {
+    prefix: 'new-plan/archive/',
+    label: 'Completed missions',
+    note: 'Closed missions and superseded plan notes, moved out of the live track files on 2026-09-02. Kept for the PR/evidence trail; nothing here is open work.',
+  },
   {
     prefix: 'old/',
     label: 'Archived design record',

@@ -16,6 +16,7 @@ import { backendServesRealtime, realtimeEventTypes } from "../../ir/util/channel
 import { uiUsesChart } from "../../ir/util/chart.js";
 import { classifyPage, type PageNameCtx, pageConstructId } from "../../ir/util/page-kind.js";
 import { contextsHaveProvenancedField } from "../../ir/util/prov-id.js";
+import { realtimeStreamCredential } from "../../ir/util/realtime-rooms.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
@@ -24,6 +25,7 @@ import {
   buildExternFunctionShim,
   buildExternFunctionSignature,
 } from "../_frontend/extern-functions.js";
+import { renderGateExpr } from "../_frontend/gate-expr.js";
 // The i18n translation runtime (M-T1.11) is framework-AGNOSTIC — `t(key,
 // default, values?)` over `./locales/en.json` with `{name}` substitution — so
 // the Vue generator reuses the React module verbatim (same sharing pattern as
@@ -505,7 +507,18 @@ export function generateVueForContexts(
     ? [...new Set(contexts.flatMap((c) => [...realtimeEventTypes(c)]))].sort()
     : [];
   if (realtimeTypes.length > 0) {
-    out.set("src/api/realtime.ts", renderRealtimeClient(realtimeTypes, "API_BASE_URL"));
+    out.set(
+      "src/api/realtime.ts",
+      // Stream credential from the shared realtime plan (M-T4.12 RULE 2) — the
+      // SAME `auth: ui` / `auth: required` gate the api client's
+      // `credentials: "include"` rides, so the SSE stream authenticates exactly
+      // like an ordinary API call instead of 401-ing on an authenticated deployable.
+      renderRealtimeClient(
+        realtimeTypes,
+        "API_BASE_URL",
+        realtimeStreamCredential(deployable, target, sys.user),
+      ),
+    );
   }
   const hasRealtimeHandlers = realtimeTypes.length > 0 && (ui.notifications?.length ?? 0) > 0;
   if (hasRealtimeHandlers) {
@@ -571,7 +584,7 @@ export function generateVueForContexts(
           requiresJs: e.requiresJs,
         })),
       }))
-    : deriveNavSections(defaultPages, pageCtx);
+    : deriveNavSections(defaultPages, pageCtx, authUi);
   // Bind the session user in the app-shell only when a nav entry is actually
   // gated — an unused `currentUser` binding would be a vue-tsc error.
   const navUsesSession = navSections.some((s) =>
@@ -869,25 +882,44 @@ interface NavEntryVM {
   label: string;
   testId: string;
   exact?: boolean;
+  requiresJs?: string;
 }
 
 function deriveNavSections(
   pages: PageIR[],
   nameCtx: PageNameCtx,
+  /** `auth: ui` — the verified session user is available client-side, so a
+   *  gated entry can be `v-if`-hidden.  Without it every entry stays ungated
+   *  (there is no `currentUser` to test), byte-identical. */
+  authUi: boolean,
 ): Array<{ label: string; entries: NavEntryVM[] }> {
   const aggregates: NavEntryVM[] = [];
   const workflows: NavEntryVM[] = [];
+  // A DEFAULT entry inherits the gate of the page it links to, exactly as the
+  // menu-derived path does (`navEntryForLink`).  It is not true that scaffold
+  // pages carry no `requires`: the scaffolded List page CLONES the
+  // `find all … requires` gate guarding the very read it makes, so an ungated
+  // default sidebar advertised routes the backend refuses (M-T3.15-C3).
+  const gateOf = (page: PageIR): string | undefined =>
+    authUi && page.requires ? renderGateExpr(page.requires, "currentUser") : undefined;
   for (const page of pages) {
     if (!page.route) continue;
     const o = classifyPage(page, nameCtx);
+    const requiresJs = gateOf(page);
     if (o.kind === "aggregate-list") {
       const label = humanize(plural(o.aggregateName));
-      aggregates.push({ to: page.route, label, testId: `nav-${snake(plural(o.aggregateName))}` });
+      aggregates.push({
+        to: page.route,
+        label,
+        testId: `nav-${snake(plural(o.aggregateName))}`,
+        ...(requiresJs ? { requiresJs } : {}),
+      });
     } else if (o.kind === "workflow-form") {
       workflows.push({
         to: page.route,
         label: humanize(o.workflowName),
         testId: `nav-wf-${snake(o.workflowName)}`,
+        ...(requiresJs ? { requiresJs } : {}),
       });
     }
   }

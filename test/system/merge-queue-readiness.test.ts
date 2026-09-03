@@ -245,6 +245,6 @@ describe("merge-queue readiness", () => {
     const job = load("test.yml").jobs.find((j) => j.id === "tests-passed");
     expect(job).toBeDefined();
     expect(job?.name).toBe("tests passed");
-    expect(job?.needs).toEqual(["test", "coverage", "lint"]);
+    expect(job?.needs).toEqual(["test", "corpus", "lint"]);
   });
 });

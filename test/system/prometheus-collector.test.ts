@@ -33,7 +33,7 @@ system Shop {
   storage primary { type: postgres }
   resource st { for: Orders, kind: state, use: primary }
   deployable api { platform: node contexts: [Orders] serves: OrdersApi dataSources: [st] port: 8080 }
-  ui web { for: OrdersApi }
+  ui web { framework: react  api Orders: OrdersApi }
   deployable webApp { platform: react ui: web targets: api port: 3000 }
 }`;
 

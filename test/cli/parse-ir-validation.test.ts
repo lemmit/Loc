@@ -173,4 +173,70 @@ describe("IR warnings are visible, not discarded", () => {
     expect(out).toMatch(/warning: Deployable 'd' lists resource 'evtLog'/);
     expect(out).toContain("warning(s).");
   });
+
+  // ------------------------------------------------------------------------
+  // The residue.  FOUR commands run `validateLoomModel`; the fix above reached
+  // two of them, because the print was four copies of the same three lines
+  // rather than one function.  `snapshot` kept its copy inside the
+  // `if (loomErrors.length > 0)` branch, and `verify` filtered the diagnostics
+  // down to errors AT THE CALL SITE — discarding the warnings before anything
+  // could print them.  Both are commands whose whole job is to make a claim
+  // about the model (this is the provenance baseline / these requirements are
+  // met), which is the worst place to drop "validation accepts this but it is
+  // a no-op".  They share `printLoomWarnings` now.
+  // ------------------------------------------------------------------------
+
+  it("`ddd snapshot` prints IR warnings on the SUCCESS path", () => {
+    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-snap-"));
+    const r = spawnSync(
+      "node",
+      [cli, "snapshot", write("warned-snap.ddd", IR_WARNED), "-o", outDir, "--dry-run"],
+      { encoding: "utf8" },
+    );
+    const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+    expect(r.status ?? 1).toBe(0);
+    expect(out).toMatch(/warning: resource 'evtLog' sets 'every'/);
+    expect(out).toContain("warning(s).");
+  });
+
+  it("`ddd verify` prints IR warnings instead of filtering them away", () => {
+    // Same warned model, plus the requirement graph `verify` needs to reach a
+    // verdict at all — the warnings must survive to the author either way.
+    const source =
+      IR_WARNED.replace(
+        "system WarnSystem {",
+        'requirement US-001 { type: UserStory  title: "Ship it" }\n' +
+          'requirement AC-001 parent US-001 { type: AcceptanceCriteria  title: "code sticks" }\n' +
+          "system WarnSystem {",
+      ).replace(
+        "aggregate Order with crudish { code: string }",
+        "aggregate Order with crudish { code: string  operation touch() {}  " +
+          'test "code round-trips" verifies TC-001 {} }',
+      ) + "testCase TC-001 verifies AC-001 { covers [ D.Orders.Order.touch ] }\n";
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-verify-"));
+    const results = path.join(dir, "results.json");
+    fs.writeFileSync(
+      results,
+      JSON.stringify({
+        version: 1,
+        results: [{ name: "code round-trips", suite: "Order", status: "pass" }],
+      }),
+    );
+    const r = spawnSync(
+      "node",
+      [
+        cli,
+        "verify",
+        write("warned-verify.ddd", source),
+        "--results",
+        results,
+        "--out",
+        path.join(dir, "out"),
+      ],
+      { encoding: "utf8" },
+    );
+    const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+    expect(out, out).toMatch(/warning: resource 'evtLog' sets 'every'/);
+    expect(out).toContain("warning(s).");
+  });
 });

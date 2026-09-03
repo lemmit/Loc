@@ -722,32 +722,89 @@ curl -X POST http://host/api/products \
 contract rejects is accepted. F7's fix landed on the Hono emitter only
 (2026-08-16) — same defect, same declared schema, different answer.
 
-### F18 — python + java: F8 (wrong verb on a static sub-path) is still open
-**Waiver:** W23 (python), W33 (java), W36 (dotnet) · **Severity: low**
+### F18 — python + java + dotnet: a wrong verb on a static sub-path answers 422
+**Waiver:** none — fixed · **Severity: low** · **Status: FIXED (2026-09-03).**
 
 ```
 curl -X DELETE http://host/api/customers/by_email
 → 422 {"pointer":"/id","message":"Expected UUID."}      (honest answer: 405)
 ```
 
-F8's fix is a hono middleware (`emitStaticSubpathMethodGuard`,
-`src/platform/hono/v4/routes-builder.ts`) with no counterpart on the other
-backends: FastAPI and Spring both match `DELETE /api/customers/{id}` with
-`id="by_email"` and answer the identifier validator's 422.
+Every router here resolves (method, path). `DELETE /api/customers/by_email`
+finds no DELETE on the static find path, matches `DELETE /api/customers/{id}`
+with `id="by_email"`, and the `{id}` validator answers 422 for a path that has
+no DELETE at all. RFC 9110 §15.5.6 makes 405 the answer, and it is the only one
+that can carry an `Allow` the caller can act on. The dotnet response even
+carried `Allow: DELETE, GET` — naming the `{id}` template that swallowed it.
 
-**dotnet is the third (2026-09-01), and the route table says so out loud.**
-`DELETE /api/customers/by_email` answers 422 there too, and a `PUT` to the same
-path answers `405` with `Allow: DELETE, GET` — naming the `{id}` template that
-swallowed the DELETE.
+**The earlier "not fixable per backend" call was wrong, and worth recording
+why.** It was reached by evaluating exactly one candidate: the route constraint
+`[HttpDelete("{id:guid}")]`, which does stop the collision and does break the
+declared 422 that `test/generator/malformed-path-id-status.test.ts` pins across
+four backends. That trade-off is real — but it is a property of THAT fix, not of
+the problem. The node backend had already shipped a different one (a middleware
+that runs before the parameter binder), and a middleware has no such tension: it
+never sees `not-a-uuid`, because that path is not in its table. The conclusion
+generalised from a single rejected approach to the whole design space.
 
-**Why this is not fixable per backend.** The obvious .NET fix is a route
-constraint, `[HttpDelete("{id:guid}")]`: `by_email` then fails to match, no
-action accepts DELETE on that path, and ASP.NET answers the honest 405. But it
-also makes `GET /api/orders/not-a-uuid` a 404 instead of the declared 422 that
-`test/generator/malformed-path-id-status.test.ts` pins on four backends. The two
-wants are in direct tension — an unconstrained `{id}` swallows the static
-sibling; a constrained one loses the malformed-id tier — so disambiguating them
-is a cross-backend design decision, not a patch. Left waived on all three.
+**One derivation, four guards.** `staticSubpathMethods` /
+`staticSubpathRoutes` (`src/ir/util/api-surface.ts`) name the one-segment
+static sub-paths and the methods each serves, keyed by segment for a
+per-aggregate router and by absolute path for an application-pipeline guard.
+Same predicate, two spellings, so the backends cannot disagree about which
+paths are guarded. Hono now reads the shared table too (`GET /prepare` rides in
+as an `extra`, since it is deliberately not a lifted operation).
+
+Each backend mounts it wherever "before the parameter binder" happens to live:
+
+| | guard | body |
+|---|---|---|
+| node | middleware inside the aggregate router | its own `frameworkProblemBody` |
+| python | ASGI middleware, added first ⇒ innermost | the existing `problem()` helper |
+| dotnet | `app.Use` before `MapControllers`, inside `UseStatusCodePages` | **none** — the status-code responder fills it |
+| java | `OncePerRequestFilter` handing Spring `HttpRequestMethodNotSupportedException` | **none** — `@RestControllerAdvice` renders it |
+
+The two "none" rows are the point. .NET sets the status and `Allow` and writes
+nothing, so the existing `UseStatusCodePages` fills exactly the envelope a
+framework-detected 405 gets. Java raises Spring's own exception into the
+`handlerExceptionResolver` instead of rendering, so the body comes from the
+advice — which also means the `Allow` header arrives via the F26 fix below
+rather than a second implementation of it. Neither can drift from its
+framework-miss twin, because neither has a copy to drift from.
+
+Java's first cut DID write its own body, and failed on boot: Spring Boot 4 has
+no `com.fasterxml.jackson.databind.ObjectMapper` bean, and a hand-built one
+lacks `ProblemDetailJacksonMixin` — the suppression that stops `type` being
+emitted twice, once by the getter and once by the `setProperty` any-getter.
+
+**Measured on booted stacks** (postgres, `aggregate Customer with crudish` plus
+`find byEmail`), `DELETE /api/customers/by_email`:
+
+| | before | after | `Allow` |
+|---|---|---|---|
+| node | 405 | 405 | GET |
+| python | **422** | **405** | GET |
+| dotnet | **422** | **405** | GET |
+| java | **422** | **405** | GET |
+
+and the before column reproduces exactly when the guard is removed on each.
+`DELETE /api/customers/not-a-uuid` answers **422 before and after** on all
+four — the contract the route-constraint approach would have broken.
+
+Gated by `test/generator/static-subpath-method-guard.test.ts`; six mutations
+were each shown to fail exactly the assertion that names them (widened
+predicate, python guard registered outermost, dotnet guard after
+`MapControllers`, java `Allow` forwarding reverted, java filter writing its own
+body, java filter emitted unconditionally).
+
+**Elixir is NOT fixed and NOT gated.** `lib/<app>_web/router.ex` emits
+`delete "/customers/:id"` alongside `get "/customers/by_email"`, so Phoenix has
+the same collision; the elixir leg carries no waiver rules (it runs as a
+discovery cell, `continue-on-error`), so nothing observes it either way. It
+also has a second, separate divergence the others do not: the emitted catch-all
+comments say Phoenix "raises NoRouteError" for a wrong verb as well as an
+unmatched path, i.e. it answers **404 where the other four answer 405**. That
+is a design question of its own and deliberately out of this slice.
 
 ### F19 — dotnet + java: a malformed declared `date-time` reaches the domain layer
 **Waiver:** W24/W25 (dotnet), W29/W30 (java) · **Severity: high**
@@ -954,17 +1011,40 @@ low rate is what made W31 look permanently stale and got it wrongly retired —
 flagging it now is that lesson applied rather than repeated.
 
 ### F26 — java: every 405 omits the `Allow` header
-**Waiver:** W33 · **Severity: medium**
+**Waiver:** none — fixed · **Severity: medium** · **Status: FIXED (2026-09-03).**
 
 ```
-curl -X QUERY http://host/api/customers
+curl -X PATCH http://host/api/customers
 → 405 {"title":"Method Not Allowed",…}   with NO Allow header
 ```
 
-RFC 9110 makes `Allow` a MUST on 405. It fires on every operation, `/health` and
-`/ready` included, which is why W33's pattern is unscoped: the defect is in the
-one shared error mapper, not in any route. The #2500 class one layer over — that
-was a 401 without `WWW-Authenticate`.
+RFC 9110 makes `Allow` a MUST on 405. It fired on every operation, `/health`
+and `/ready` included — the defect was in the one shared error mapper, not in
+any route, which is why W33's pattern was unscoped. The #2500 class one layer
+over: that was a 401 without `WWW-Authenticate`.
+
+`ApiExceptionAdvice`'s catch-all recognises an `ErrorResponse` and re-wraps its
+body in a `ResponseEntity` of its own — dropping `er.getHeaders()`, which is
+where the framework puts the SEMANTICS of a refusal. One extra argument
+forwards them:
+
+```java
+return respond(problem(status, reason, detail, request), status, er.getHeaders());
+```
+
+Content-Type is applied after the forwarded headers, so a stray one can never
+displace `application/problem+json`. Measured on a booted app:
+
+| | before | after |
+|---|---|---|
+| `PATCH /health` | 405, no `Allow` | 405, `Allow: GET` |
+| `PATCH /ready` | 405, no `Allow` | 405, `Allow: GET` |
+| `PATCH /api/customers` | 405, no `Allow` | 405, `Allow: POST, GET` |
+
+Reverting the one argument reproduces the empty `Allow` on all three. This is
+also what makes F18's java guard body-free: it raises
+`HttpRequestMethodNotSupportedException`, whose `getHeaders()` carries the
+`Allow`, and this arm is what puts it on the wire.
 
 ### F27 — elixir: the generated LiveView does not compile, so the leg never boots
 **Waiver:** none — the leg fails before any request is sent · **Severity: high**
@@ -1041,43 +1121,66 @@ reproduces `column o0.UnitPrice_Amount does not exist` verbatim. Gated by
 `test/generator/dotnet/part-valueobject-columns.test.ts`, which also asserts the
 EF config and the migration DDL agree in the same emission.
 
-### F30 — dotnet: a required value-object member of a VALUE TYPE can be omitted
-**Waiver:** W37 · **Severity: medium** · **Status: OPEN — the obvious fix is wrong.**
+### F30 — dotnet: a required VALUE-TYPE member can be omitted and is accepted
+**Waiver:** none — fixed · **Severity: medium** · **Status: FIXED (2026-09-01).**
 
 ```
 POST /api/products -d '{"sku":"A","price":{"currency":"USD"}}'   → 201
 GET  /api/products                          → {"amount":0,"currency":"USD"}
 ```
 
-`ProductsMoneyRequest` publishes `required: [amount, currency]`. A zero-priced
-product is created from a body the contract forbids.
+A zero-priced product from a body the published `required: [amount, currency]`
+forbids.
 
-**The asymmetry is the diagnosis.** Measured on a booted app:
+**Wider than first recorded.** The initial entry framed this as a value-OBJECT
+problem. It is not: it is every REQUIRED member whose CLR type is a value type,
+in any request slot. Measured on a booted app, all four of these are in the
+schema's `required` set:
 
-| body | answer |
-|---|---|
-| `{"amount":1.5,"currency":"USD"}` | 201 |
-| `{"amount":1.5}` — string missing | **422**, correctly refused |
-| `{"currency":"USD"}` — decimal missing | **201**, accepted |
+| omitted | type | CLR kind | before | after |
+|---|---|---|---|---|
+| `name` | string | reference | 422 | 422 |
+| `price` | record | reference | 422 | 422 |
+| `qty` | int | **value** | **201** | **422** |
+| `ratio` | decimal | **value** | **201** | **422** |
+| `price.amount` | decimal | **value** | **201** | **422** |
+| `active` | bool | value, **not required** | 201 | 201 |
 
-Both members are equally required; only the VALUE TYPE slips through, because
-DataAnnotations `[Required]` tests for null and a missing `decimal` binds to `0`.
-This is exactly the hole `dtoParam` already documents for operation bodies
-(RS-26), in the one slot its `[property: JsonRequired]` guard does not cover —
-a VO's own members.
+`RequiredAttribute` tests for null; a missing value type binds to the CLR
+default, which is not null. Enforcement of the published contract therefore
+depended on nothing but whether a field happened to be a reference type.
+`active` is the control: RS-6 keeps a create-body `bool` optional and the schema
+agrees by omitting it from `required`, so it is correctly still accepted — the
+fix enforces what is claimed, no more.
 
-**Extending that guard was tried and rejected, on measurement.** With
-`[property: JsonRequired]` on VO members the omission IS refused — but the STJ
-failure lands in the `Malformed JSON in request body` **400** arm. That is wrong
-on its face (the JSON is well-formed; a member is absent), and it is a NEW
-divergence: the same endpoint answers 422 for an omitted `price`, and node and
-python answer 422 here too. It also moved the correctly-handled `currency` case
-from 422 to 400. Shipping it would have traded one contract bug for a parity bug.
+**The fix moves the guard AND the status arm together.** `[property:
+JsonRequired]` asks the right question ("was the member present"), and the
+emitter already used it for operation bodies. It could not simply be switched on
+because its failure landed in the `Malformed JSON in request body` **400** arm —
+wrong on its face, and it would have moved the already-correct reference-type
+cases from 422 to 400. So `FromModelState` now routes a missing-required-member
+error to the 422 tier with real pointers:
 
-The fix that keeps the 422 tier is a nullable request-DTO value type
-(`decimal? Amount` + `[Required]`), letting the existing model-validation path
-see the absence. That moves every VO construction site in the .NET emitter, so
-it is its own slice rather than a rider on this one.
+```json
+{"status":422,"title":"Validation failed",
+ "errors":[{"pointer":"/qty","message":"The qty field is required."},
+           {"pointer":"/ratio","message":"The ratio field is required."}]}
+```
+
+Matched on the message, because System.Text.Json raises no distinct exception
+type and — measured — hangs **no exception at all** on the model-state entry;
+the text is the entire signal (`$ => ErrorMessage: JSON deserialization for type
+'…' was missing required properties including: 'qty'.`). An earlier attempt read
+`error.Exception` and never fired. If a future runtime rewords it the match stops
+and the answer falls back to the 400 it gave before: today's behaviour, never a
+crash and never a laxer contract.
+
+**The published schema is byte-identical**, diffed live between two booted apps
+before and after. This changes what is ENFORCED, never what is ADVERTISED.
+Genuinely malformed bodies (truncated, non-JSON, wrong scalar type) still answer
+400. Gated by `test/generator/dotnet/required-value-type-members.test.ts`; each
+half is separately mutation-proved — revoking the guard fails 2 of 5 cases,
+revoking the status arm fails the 5th.
 
 
 ### The elixir leg

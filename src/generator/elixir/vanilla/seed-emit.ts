@@ -232,8 +232,19 @@ function renderDatasetFn(
     `  defp seed_${snake(dataset)}(requested) do`,
     `    if dataset_enabled?(${JSON.stringify(dataset)}, requested) and`,
     `         not already_seeded?(${JSON.stringify(dataset)}) do`,
-    ...rowLines.map((l) => `  ${l}`),
-    `      mark_seeded(${JSON.stringify(dataset)})`,
+    // ONE transaction per dataset: the rows and the ship-once marker commit
+    // together.  Committing per row and writing the marker last (the shape this
+    // replaced) meant a crash mid-dataset left rows behind with NO marker, so
+    // the next boot re-seeded them on top — duplicates on every restart until
+    // someone noticed.  Everything inside raises on failure (`insert!`,
+    // `Repo.query!`), so the transaction rolls back and the raise still
+    // propagates: the dataset is all-or-nothing, matching python's single-commit
+    // seeder.
+    `      {:ok, _} =`,
+    `        Repo.transaction(fn ->`,
+    ...rowLines.map((l) => `      ${l}`),
+    `          mark_seeded(${JSON.stringify(dataset)})`,
+    `        end)`,
     `    end`,
     ``,
     `    :ok`,
