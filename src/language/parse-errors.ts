@@ -201,7 +201,7 @@ function nameStartBefore(text: string, braceOffset: number): number | undefined 
  *  lookahead refused because something INSIDE it does not parse. */
 function swallowedBuilderCallHead(err: IRecognitionException, text: string): number | undefined {
   const token = err.token;
-  if (!token || token.image !== "{" || Number.isNaN(token.startOffset)) return undefined;
+  if (token?.image !== "{" || Number.isNaN(token.startOffset)) return undefined;
   return nameStartBefore(text, token.startOffset);
 }
 

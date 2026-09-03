@@ -71,11 +71,16 @@ describe("workflow body construction/emit/param-default types (M-T6.18 gap #3)",
     expect(errs.some((m) => /Field 'qty'.*expects 'int'.*got 'string'/.test(m))).toBe(true);
   });
 
-  it("flags a wrong-typed emit field nested in a `create` body if-block", async () => {
-    // Nested inside an `if`, exercising the stream-based emit search.
+  it("flags a wrong-typed emit field NESTED in a `create` body block", async () => {
+    // Nested inside a `for`, exercising the stream-based emit search rather
+    // than a scan of the body's top-level statements.  (`for` and `if let` are
+    // the block statements a workflow body has today — there is no plain
+    // `if <cond> { … }` statement in the grammar, so a fixture written with
+    // one never parsed and this test was reading a recovery fragment.)
     const errs = await errorMessages(`workflow W {
+      items: int[]
       create(label: string) {
-        if label == "x" { emit Placed { qty: "abc" } }
+        for n in items { emit Placed { qty: "abc" } }
       }
     }`);
     expect(errs.some((m) => /Field 'qty'.*expects 'int'.*got 'string'/.test(m))).toBe(true);

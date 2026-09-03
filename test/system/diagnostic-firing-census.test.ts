@@ -174,6 +174,40 @@ ${uiBody}
 }`;
 
 const FIRING_FIXTURES: Record<string, string> = {
+  // --- phase ① parse ------------------------------------------------------
+  // A mistyped design pack.  `loom.parse-error` is the code `src/api/report.ts`
+  // stamps on Langium's `parsing-error`, and the wording it carries is
+  // `src/language/parse-errors.ts`'s — the closed-set "did you mean" that
+  // replaced chevrotain's numbered token-sequence dump.
+  "loom.parse-error": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+    repository Things for Thing { }
+  } }
+  ui WebApp with scaffold(subdomains: [Sub]) { }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node, contexts: [C], dataSources: [st], port: 3000 }
+  deployable web { platform: react, targets: api, ui: WebApp, port: 3001, design: mantinee }
+}`,
+
+  // A criterion that shadows an enum case of the same name, so `status == Open`
+  // compares the enum against the criterion's BOOLEAN.  The hint half of
+  // `loom.compare-type-mismatch` (finding F13) — the bare mismatch text is the
+  // same code without a shadow in scope.
+  "loom.compare-type-mismatch": repoOnly(`    enum Status { Open, Done }
+    aggregate Task with crudish {
+      title: string
+      status: Status
+      operation finish() {
+        precondition status == Open
+        status := Done
+      }
+    }
+    criterion Open() of Task = this.status != Done
+    repository Tasks for Task { }`),
+
   // --- structural ---------------------------------------------------------
   "loom.duplicate-find": repoOnly(`    aggregate Thing with crudish { name: string }
     repository Things for Thing {

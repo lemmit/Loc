@@ -24,10 +24,15 @@ import type {
 } from "../generated/ast.js";
 import {
   isBinaryChain,
+  isBoundedContext,
+  isCriterion,
   isDerivedProp,
+  isFunctionDecl,
   isLambda,
   isLetStmt,
   isMemberSuffix,
+  isNameRef,
+  isPolicyDecl,
   isPostfixChain,
   isPreconditionStmt,
   isRequiresStmt,
@@ -398,6 +403,48 @@ export function checkIntrinsicCalls(model: Model, accept: ValidationAcceptor): v
   }
 }
 
+/** The bare identifier an operand is, or `undefined` when it is anything
+ *  more than one name.  A suffix-less chain is admitted too: the grammar
+ *  leaves a no-suffix head as a plain `NameRef`, but callers that build one
+ *  by hand may not. */
+function bareOperandName(e: Expression | undefined): string | undefined {
+  if (!e) return undefined;
+  if (isNameRef(e)) return e.name;
+  if (isPostfixChain(e) && e.suffixes.length === 0 && isNameRef(e.head)) return e.head.name;
+  return undefined;
+}
+
+/** When one operand is a bare name that IS a case of the other operand's
+ *  enum, the comparison failed because something in scope shadowed the case.
+ *  Returns the case and its enum so the diagnostic can spell the qualified
+ *  form (`Status.Open`) the author can always fall back to. */
+function shadowedEnumCase(
+  operand: Expression | undefined,
+  other: DddType,
+): { name: string; enumName: string } | undefined {
+  if (other.kind !== "enum") return undefined;
+  const name = bareOperandName(operand);
+  if (!name) return undefined;
+  return other.ref.values.some((v) => v.name === name)
+    ? { name, enumName: other.ref.name }
+    : undefined;
+}
+
+/** What kind of declaration won the name, for the hint's wording.  Searched
+ *  rather than resolved because the shadow is exactly the case where the
+ *  name did NOT resolve to the enum case — and this runs only on an error
+ *  path, so the walk costs nothing in the common case. */
+function shadowingDeclKind(node: AstNode, name: string): string {
+  const root = AstUtils.getContainerOfType(node, isBoundedContext) ?? AstUtils.findRootNode(node);
+  if (!root) return "declaration";
+  for (const n of AstUtils.streamAllContents(root)) {
+    if (isCriterion(n) && n.name === name) return "criterion";
+    if (isPolicyDecl(n) && n.name === name) return "policy function";
+    if (isFunctionDecl(n) && n.name === name) return "function";
+  }
+  return "declaration";
+}
+
 /** Validate each fold-step of a binary chain (`a + b + c` → `(a+b)+c`).
  *  Diagnostics attach with `property: "rest"` and the rhs index so
  *  the editor underlines the offending right-hand operand. */
@@ -447,12 +494,30 @@ export function checkSingleBinaryOperands(chain: BinaryChain, accept: Validation
     }
     if (op === "==" || op === "!=" || op === "<" || op === "<=" || op === ">" || op === ">=") {
       if (!comparable(lt, rt)) {
+        // The shadowed-enum-case case (finding F13).  `status == Open` reads
+        // as an enum comparison, but a same-named criterion / policy function
+        // / helper in scope resolves `Open` to a BOOLEAN and wins — so the
+        // author gets "cannot compare 'Status' with 'bool'" and no hint that
+        // the enum case they wrote is still reachable as `Status.Open`.
+        const shadowed =
+          shadowedEnumCase(rhsExpr, lt) ?? shadowedEnumCase(leftExprForPromotion, rt);
         accept(
           "error",
-          `Operator '${op}' cannot compare '${typeToString(lt)}' with '${typeToString(rt)}'. ` +
-            `Operands must be the same type, both numeric (int / long / decimal), both money, ` +
-            `or one a null literal against an optional.`,
-          info,
+          shadowed
+            ? diagMessage("loom.compare-type-mismatch#enum-case-shadowed", {
+                op,
+                lt: typeToString(lt),
+                rt: typeToString(rt),
+                name: shadowed.name,
+                enumName: shadowed.enumName,
+                kind: shadowingDeclKind(chain, shadowed.name),
+              })
+            : diagMessage("loom.compare-type-mismatch", {
+                op,
+                lt: typeToString(lt),
+                rt: typeToString(rt),
+              }),
+          { ...info, code: "loom.compare-type-mismatch" },
         );
       }
       lt = T.prim("bool");

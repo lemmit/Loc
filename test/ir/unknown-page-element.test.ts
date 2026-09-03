@@ -75,6 +75,34 @@ describe("loom.unknown-page-element — the gate", () => {
     ).toContain(CODE);
   });
 
+  // M-FT.4 / field finding F14 — the call form of a page ACTION.
+  //
+  // `onClick: pick("LOOM")` lowers to a call whose CALLEE is not a plain
+  // identifier (the head resolved to an `action-ref`), so `lower-expr.ts`
+  // stamps the internal placeholder `<expr>` as the call name.  The generic
+  // message then read:
+  //
+  //   `<expr>(…)` names no walker primitive … declare a `component <expr>(…)`
+  //
+  // — telling the author to rename an identifier they never wrote, and never
+  // mentioning the action.  The code is right; only the wording was wrong.
+  it("does not quote lowering's `<expr>` placeholder back at the author", async () => {
+    const { model } = await parseString(
+      wrap(`page X {
+              route: "/x"
+              state { picked: string = "" }
+              action pick(v: string) { picked := v }
+              body: Stack { Button { "Pick", onClick: pick("LOOM") } }
+            }`),
+    );
+    const d = validateLoomModel(enrichLoomModel(lowerModel(model))).find((x) => x.code === CODE);
+    expect(d, "the action-call form must still be gated").toBeDefined();
+    expect(d?.message).not.toContain("<expr>");
+    // …and it names the real cause and the real fix.
+    expect(d?.message).toContain("action");
+    expect(d?.message).toContain("onClick: save");
+  });
+
   it("reports ONE diagnostic per (host, name)", async () => {
     const { model } = await parseString(
       wrap(`page X { route: "/x"  body: Stack { Text(Fooo(1)), Text(Fooo(2)), Text(Barr(3)) } }`),

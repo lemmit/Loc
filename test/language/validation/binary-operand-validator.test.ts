@@ -311,3 +311,75 @@ describe("validator — cascade prevention", () => {
     expect(operandErrors).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// M-FT.4 / field finding F13 — a declaration that shadows an enum case.
+//
+// `status == Open` reads as an enum comparison.  A criterion (or policy
+// function, or helper) named `Open` in the same context resolves the bare name
+// to a BOOLEAN and wins, so the author gets
+//
+//     Operator '==' cannot compare 'Status' with 'bool'
+//
+// about a line that mentions neither a bool nor the criterion.  The type
+// verdict is correct; what was missing is that the enum case is still
+// reachable, spelled `Status.Open`.
+// ---------------------------------------------------------------------------
+describe("validator — a declaration shadowing an enum case", () => {
+  const shadowed = (decl: string) => `
+    context X {
+      enum Status { Open, Done }
+      aggregate Task {
+        title: string
+        status: Status
+        operation finish() {
+          precondition status == Open
+          status := Done
+        }
+      }
+      ${decl}
+      repository Tasks for Task { }
+    }
+  `;
+
+  it("names the shadow, the enum, and the qualified form that works", async () => {
+    const { errors } = await parseString(
+      shadowed(`criterion Open() of Task = this.status != Done`),
+    );
+    const cmp = errors.filter((e) => /cannot compare/.test(e));
+    expect(cmp).toHaveLength(1);
+    expect(cmp[0]).toContain("resolves to the criterion 'Open'");
+    expect(cmp[0]).toContain("Write 'Status.Open'");
+  });
+
+  it("qualifying the case makes it compile — the hint's advice is real", async () => {
+    const { errors } = await parseString(
+      shadowed(`criterion Open() of Task = this.status != Done`).replace(
+        "status == Open",
+        "status == Status.Open",
+      ),
+    );
+    expect(errors).toEqual([]);
+  });
+
+  it("keeps the plain wording when nothing shadows anything", async () => {
+    // The same mismatch reached a different way: no `Open` declaration, so the
+    // hint must NOT fire and invent a shadow.
+    const { errors } = await parseString(`
+      context X {
+        aggregate Foo { name: string  age: int  derived bad: bool = name == age }
+        repository Foos for Foo { }
+      }
+    `);
+    const cmp = errors.filter((e) => /cannot compare/.test(e));
+    expect(cmp).toHaveLength(1);
+    expect(cmp[0]).toContain("Operands must be the same type");
+    expect(cmp[0]).not.toContain("shadows");
+  });
+
+  it("fires for a policy function too — the hint is not criterion-specific", async () => {
+    const { errors } = await parseString(shadowed(`policy Open(): bool = true`));
+    const cmp = errors.filter((e) => /cannot compare/.test(e));
+    expect(cmp[0]).toContain("policy function");
+  });
+});

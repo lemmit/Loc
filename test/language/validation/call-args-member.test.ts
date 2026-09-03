@@ -23,9 +23,9 @@ system Demo {
         price: Coin
         qty: int
         contains lines: Line[]
+        entity Line { n: int }
         ${members}
       }
-      entity Line { n: int }
     }
   }
   storage primary { type: postgres }
@@ -63,8 +63,6 @@ describe("expression-position member-call args (M-T6.18 gap #2)", () => {
   });
 
   it("flags a wrong-typed member call in a let value inside an operation body", async () => {
-    expect(await codes('operation go() { let d := price.scaled("x")  qty := qty }')).toContain(
-      TYPE,
-    );
+    expect(await codes('operation go() { let d = price.scaled("x")  qty := qty }')).toContain(TYPE);
   });
 });

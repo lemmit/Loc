@@ -24,7 +24,12 @@
 // reference still reports itself.
 // ---------------------------------------------------------------------------
 
-import { type AstNodeDescription, DefaultLinker, type LinkingError, type ReferenceInfo } from "langium";
+import {
+  type AstNodeDescription,
+  DefaultLinker,
+  type LinkingError,
+  type ReferenceInfo,
+} from "langium";
 
 export class DddLinker extends DefaultLinker {
   protected override createLinkingError(
