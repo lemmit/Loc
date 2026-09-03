@@ -15,9 +15,28 @@ name: Elixir / Vanilla VO wire round-trip (runtime e2e)
 # Reverting the #1664 fallback (`Map.get(record, :amount, Map.get(record,
 # "amount"))` → `record.amount`) turns this job red.
 #
-# Triggers `push: main` + manual dispatch, plus a per-PR `run-e2e` label
-# (the serializer blast radius is small and CI-invisible otherwise, so a
-# labelled pre-merge run is the honest gate).  Cold path is ~3-5min.
+# WHEN IT RUNS — per-PR, path-scoped (packet 1.4 of wave G1,
+# `docs/new-plan/verification-waves-2026-09.md`).  A pull request that
+# touches the vanilla elixir emitter tree, the elixir expression
+# renderer, the shared IR, this leg's own test or this file gets a check
+# run BEFORE merge; `pr-gate` then makes that run binding, because a
+# check present on the head SHA is one it waits for.  `push: main` stays
+# exactly as it was — the post-merge regression net over the wider
+# generation path, and this leg's `ci-red-alarm` coverage.
+#
+# Why the PR paths are wider than `wire-serialize.ts`: the leg boots the
+# WHOLE generated app (`generate system` → `mix deps.get`/compile →
+# `ecto.migrate` → POST + GET), so any vanilla emitter — schema,
+# migration, controller, repo, shell — can turn it red.  Watching only
+# the serializer would be the "gate that never runs" shape.  It is still
+# narrower than the push block: `src/{language,macros,system,util}/**`
+# stay push-only, because a PR touching those already fires several
+# heavier legs and the ~20-slot runner pool is the binding constraint.
+#
+# The `run-e2e` label no longer drives this workflow (it still drives
+# `phoenix-ui-e2e` and `playground-e2e`); the label guard is replaced by
+# the canonical draft gate, so drafts keep the fast lane and the run
+# fires when the PR is marked ready for review.  Cold path is ~3-5min.
 on:
   push:
     branches: [main]
@@ -41,26 +60,37 @@ on:
       - 'package.json'
       - '.github/workflows/elixir-vanilla-vo-e2e.yml'
   workflow_dispatch:
-  # On-demand per-PR run: apply the `run-e2e` label to a PR to run this
-  # otherwise push:main-only suite against that branch before merge.
+  # The per-PR block.  Deliberately written out in full rather than shared
+  # with the push list via a YAML anchor: `workflow-path-coverage.test.ts`
+  # reads `paths:` textually and does not follow `&anchor`/`*alias`, so an
+  # aliased list would drop this file out of that gate silently.
   pull_request:
-    types: [labeled]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'src/ir/**'
+      - 'src/generator/elixir/render-expr.ts'
+      - 'src/generator/elixir/vanilla/wire-serialize.ts'
+      - 'src/generator/elixir/vanilla/**'
+      - 'test/e2e/vo-roundtrip-elixir-vanilla.test.ts'
+      - '.github/workflows/elixir-vanilla-vo-e2e.yml'
 
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PR runs (a push to the branch obsoletes the previous
+  # boot); never cancel a `push: main` run, whose value is per-commit
+  # attribution for `ci-red-alarm`.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   vanilla-vo-e2e:
     runs-on: ubuntu-latest
-    # Skip the labeled trigger unless it's specifically `run-e2e`; push
-    # and manual (`workflow_dispatch`) runs always proceed.
-    if: >-
-      github.event_name != 'pull_request' ||
-      github.event.label.name == 'run-e2e'
+    # The canonical draft gate: drafts get the fast lane, and the run
+    # fires when the PR is marked ready for review.  Pinned verbatim by
+    # test/system/draft-gate.test.ts.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     # Cold path: hex deps + plain Phoenix compile + postgres pull is
     # ~3-5min (plain Ecto dep set).  10min is comfortable.
     timeout-minutes: 10
