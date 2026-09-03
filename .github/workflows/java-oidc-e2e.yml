@@ -13,9 +13,26 @@ name: Java OIDC auth (runtime e2e)
 # ubuntu-latest ships docker + gradle; the backend runs natively, Keycloak +
 # postgres are pulled images (no build).
 #
-# Triggers `push: main` + manual dispatch only — NOT per-PR (sibling to the
-# *-obs-e2e jobs; same rationale: regression net, not a PR gate, and the
-# Gradle build + Keycloak boot are heavier than a unit suite).
+# TIER: per-PR, path-scoped, binding through `pr-gate` — with `push: main`
+# kept as the post-merge regression net.  Promoted out of push:main-only by
+# wave G1 packet 1.3 of docs/new-plan/verification-waves-2026-09.md: a
+# runtime gate that runs only after the merge can only ever report a red
+# `main`, so whatever it catches, it catches too late.  The `run-oidc` label
+# opt-in is removed; the draft guard on the job below is what keeps draft
+# PRs on the fast lane.
+#
+# The per-PR `paths:` block is the auth blast radius for THIS backend:
+# `src/ir/**`, the Java emission (`src/generator/java/**`,
+# `src/platform/java.ts`),
+# the shared auth emitters (`src/generator/_auth/**`,
+# `src/generator/_frontend/auth-ui.ts`), this leg's e2e test + fixture, and
+# this workflow file.  Nothing outside that list reaches this subject
+# per-PR; the broader generation path stays on the `push: main` block.
+#
+# COST.  Every run pulls the Keycloak + postgres images (unauthenticated
+# Docker Hub), once per leg.  That is exactly why the per-PR `paths:` list is
+# narrow: a typical PR fires ONE of the four native OIDC legs, not four.
+# On this leg it sits on top of a cold `gradle bootJar` (~2-3min) as well.
 on:
   push:
     branches: [main]
@@ -37,28 +54,56 @@ on:
       - 'test/e2e/fixtures/auth-oidc-e2e-java.ddd'
       - 'package.json'
       - '.github/workflows/java-oidc-e2e.yml'
+  # Per-PR, path-scoped: fires on this gate's real blast radius (below), and
+  # is binding because `pr-gate` fails on any non-passing check run present on
+  # the head SHA.  The `run-oidc` label opt-in is gone -- a labeled trigger is
+  # `false` on opened/synchronize and exempts the file from draft-gate
+  # enforcement.  `ready_for_review` is what re-fires the leg when a draft
+  # flips.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      # DUPLICATED list, never a YAML anchor: the reader in
+      # test/system/workflow-path-coverage.test.ts does not resolve
+      # `&paths` / `*paths`, so an anchored list is silently outside that
+      # gate.  Deliberately narrower than the `push:` block above -- that one
+      # carries the whole generation path (language/macros/ir/system/util) as
+      # the post-merge net, and the coverage test unions globs across
+      # triggers, so this block only needs the per-PR blast radius.
+      # The lowered, enriched IR every backend's auth emission reads.
+      - 'src/ir/**'
+      # The Spring Boot emission this test builds with `gradle bootJar` and runs.
+      - 'src/generator/java/**'
+      - 'src/platform/java.ts'
+      # The shared auth emitters both halves of the chain come from:
+      # `_auth/dev-claims.ts` (the dev-realm claim shapes the seeded token
+      # carries) and `_frontend/auth-ui.ts` (the login/callback surface the
+      # handshake entry exercises).
+      - 'src/generator/_auth/**'
+      - 'src/generator/_frontend/auth-ui.ts'
+      - 'test/e2e/auth-oidc-java-e2e.test.ts'
+      - 'test/e2e/fixtures/auth-oidc-e2e-java.ddd'
+      - '.github/workflows/java-oidc-e2e.yml'
   workflow_dispatch:
   merge_group:
-  # On-demand per-PR run: apply the `run-oidc` label to a PR to run this
-  # otherwise push:main-only suite against that branch before merge.  The
-  # job-level `if` below restricts the labeled trigger to that one label.
-  pull_request:
-    types: [labeled]
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  # Keyed on the PR number when there is one, so a superseded PR push cancels
+  # its own in-flight Keycloak boot instead of leaking a runner slot; `push:
+  # main` runs keep per-ref attribution and are never cancelled.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   java-oidc-e2e:
     runs-on: ubuntu-latest
-    # Skip the labeled trigger unless it's specifically `run-oidc`; push,
-    # merge-queue, and manual (`workflow_dispatch`) runs always proceed.
-    if: >-
-      github.event_name != 'pull_request' ||
-      github.event.label.name == 'run-oidc'
+    # Draft PRs run only the fast lane (test.yml, langium-generated,
+    # workflow-lint, pr-gate); this leg fires once the PR is marked ready for
+    # review -- see docs/ci-gating.md, "Draft PRs and the runner queue".
+    # Pinned verbatim by test/system/draft-gate.test.ts.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     # Keycloak boot (~25s) + the generated project's `gradle bootJar` (cold
     # ~2-3min) dominate.  20min cap.
     timeout-minutes: 20
