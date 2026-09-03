@@ -150,7 +150,7 @@ For a G2/G3 packet, replace the workflow list with the packet's rows and ADD set
 
 | metric | now | after G1 | after G3 |
 |---|---|---|---|
-| runtime legs producing a per-PR check run on their surface (of 23 post-merge/label workflows) | 0 | 20 (obs 5, oidc 4, SPA 4, VO 1, tenancy-flat 6) | 20 |
+| runtime legs producing a per-PR check run on their surface (of 23 post-merge/label workflows) | 0 | **14 landed** (obs 5, oidc-native 4, SPA 4, VO 1) — the 6 tenancy-flat legs were deferred to G1's second batch, so the "20" this row first promised was the plan's, not the wave's | 14 |
 | gate-discovered share of fixes (#2580 R11; audit origin 16% gate / 58% audit) | 40% → 0% (last two windows) | above the audit share in ≥1 of the next 4 windows | sustained |
 | open `flaky-gate` issues | 3 | 0 | 0 |
 | `generateHono` phase coverage | ①/④ on 12 of 37 files; ⑤⑥⑦ on none | — | ①④⑤⑥⑦ on all, ratcheted |
@@ -159,3 +159,28 @@ For a G2/G3 packet, replace the workflow list with the packet's rows and ADD set
 | Schemathesis waivers | 19 rules | — | ≤ 13, each deletion paired with its fix |
 
 The weekly delta on #2580 stays the pinned metric. If G1 lands and the gate share does not move within four windows, the promoted paths are too narrow — widen toward the sibling `behavioral-e2e-<backend>` block, one packet at a time.
+
+---
+
+## 7. Findings the waves surfaced, measured before they were sized
+
+Each row was found by a packet, handed off rather than raced, and then **measured by the coordinator** before being called small. The measurement is the point: three of these were reported as "a small follow-up" and one of them is not.
+
+### 7.1 `test/` is excluded from `tsconfig.json` and nothing else typechecks it — **mission-sized, not a follow-up**
+
+`tsconfig.json` carries `"exclude": ["node_modules", "out", "test"]`, and no other config covers `test/`. So none of the 1,993 `.ts` files under `test/` are typechecked by any gate: `npm run build` compiles `src/**` only, and `biome ci .` is a linter, not a type checker. Three Wave G3 packets discovered the consequence independently — a `Record<Union, …>` written in a test to prove exhaustiveness proves nothing, because the compiler never reads it.
+
+Measured, not estimated. A `tsconfig.test.json` extending the root config with `noEmit`, `rootDir: "."` and `include: ["test/**/*.ts", "src/**/*"]`:
+
+| config shape | errors | files |
+|---|---|---|
+| root config's `module`/`moduleResolution` (`Node16`) | 1,009 | — |
+| vitest-shaped (`module: ESNext`, `moduleResolution: bundler`, `lib: [ES2022, DOM]`), excluding `test/fixtures/**`, `test/e2e/fixtures/**`, `test/__snapshots__/**`, `test/**/*.pw.ts` | **811** | **327** |
+
+The first row is mostly config mismatch — 87 × TS2835 (`Node16` wants explicit `.js` on relative imports; vitest does not), 83 × TS2304/36 × TS2584 (no `DOM` lib, reached through `packages/ui-test-driver/dom-page.ts`), and TS2307 for `@playwright/test` and `@mantine/core` in files that are not part of the vitest surface. Those are exclusions and compiler options, not defects.
+
+The second row is the honest number, and its shape says what the mission is: **384 × TS2345 and 114 × TS2322** — argument- and assignment-type mismatches, i.e. partial fixture objects handed to full IR types through loose casts. That is exactly the class the G3 packets tripped over, and it is 61% of the total.
+
+**Why it is not landable as one change.** 811 errors over 327 files is a wave, not a commit, and a `--noEmit` step added to the fast lane before they are fixed makes every PR red. The landable shape is the one this repo already uses for waivers: a `tsconfig.test.json` plus a **per-file baseline that can only shrink**, gated like `test/system/unsupported-register.test.ts` — a file that drops to zero errors gets deleted from the baseline in the same PR, and a file that gains one fails the gate. That buys the invariant immediately (no *new* untypechecked test file, no new error in a clean one) and lets the 327 drain packet by packet.
+
+Mint as a T9 row when the wave has a coordinator free; the numbers above are the denominator, so it does not need re-measuring first. Do not re-open it as "add `--noEmit` to the lint lane" — that was the original framing and it is wrong by 811.
