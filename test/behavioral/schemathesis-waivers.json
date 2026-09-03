@@ -143,22 +143,7 @@
       "kind": "bug",
       "intermittent": true,
       "intermittentReason": "Whether the empty-string create is REACHED depends on whether the same generated body also carries the NUL byte of F20, which 500s first and is itself data-dependent — two runs of the same pinned seed produced the write half on one and only the read half (W28) on the other. Absence is therefore not evidence of a fix; it graduates with F21.",
-      "reason": "F21 — `name` publishes `minLength: 1` in BOTH the request and the response schema, and .NET enforces it in neither: the create accepts `\"\"` with 201."
-    },
-    {
-      "id": "W28",
-      "findings": [
-        "F21"
-      ],
-      "check": "response_schema_conformance",
-      "operations": "^GET /api/customers",
-      "backends": [
-        "dotnet"
-      ],
-      "kind": "bug",
-      "intermittent": true,
-      "intermittentReason": "The read half only fires once the write half (W27) has stored the offending row in the same run, so it inherits that data dependency exactly.",
-      "reason": "F21's read half — the row the unenforced `minLength` let in is then served by a response the API's OWN schema declares as `minLength: 1`, so the server violates its published contract on a plain `GET`. The two halves are one defect: enforce the declared bound on the write and the read conforms again."
+      "reason": "F21's WRITE half, RE-DIAGNOSED (2026-09-03) — the original reason said `name` publishes `minLength: 1` in the request schema and .NET enforces it in neither. Measured on a booted app, both halves of that are wrong: `CreateCustomerRequest` publishes NO length bound at all (the request DTO already carries `AllowEmptyStrings = true`), and the bound the model DOES declare (`invariant email.length > 0`) IS enforced — `{\"name\":\"n\",\"email\":\"\"}` answers 422 with `pointer: /email` from FluentValidation. `{\"name\":\"\",\"email\":\"x\"}` answering 201 is CORRECT: `name` carries no invariant. So whatever this rule is absorbing on `POST /api/customers`, it is not an unenforced `minLength`. The READ half (W28) was a real contract violation and is FIXED; this rule stays only because the leg cannot be run here to say what it is now catching, and retiring a rule on a guess is how W31 came back. Re-triage against a nightly before touching it."
     },
     {
       "id": "W29",
@@ -214,7 +199,7 @@
         "java"
       ],
       "kind": "bug",
-      "reason": "F21 on java — `name` publishes `minLength: 1` and the create accepts `\"\"` with 201, exactly as on .NET (W27). Two independent backends failing the same declared bound is the evidence that the bound is published but never emitted as an enforcement anywhere but node."
+      "reason": "F21 on java, RE-DIAGNOSED (2026-09-03) — the original reason said `name` publishes `minLength: 1` and the create accepts `\"\"` with 201, \"exactly as on .NET\". Measured on a booted Spring app: java publishes NO `minLength` anywhere — not on `CreateCustomerRequest`, not on `CustomerResponse` — so there is no published bound to go unenforced, and the bound the model does declare is enforced (`email: \"\"` answers 422 from the domain invariant). `name: \"\"` answering 201 is correct. Java under-publishes where .NET used to over-publish; neither is what this rule's text claimed. Kept, un-retired, for the same reason as W27: the leg is what has to say what it catches."
     }
   ]
 }

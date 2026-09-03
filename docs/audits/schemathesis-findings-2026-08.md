@@ -831,21 +831,72 @@ asyncpg/Npgsql: CharacterNotInRepertoireError (22021) — invalid byte sequence
 ` ` is a legal JSON string character and an illegal Postgres `text` byte.
 Nothing on the write path rejects it, so the driver's error escapes as a 500. The
 same generated body also reproduces F21 (see below) when the NUL half happens not
-to be generated, which is why W27/W28 are marked `intermittent`.
+to be generated, which is why W27 is marked `intermittent` (W28 was too, and is
+now retired).
 
-### F21 — dotnet + java: `minLength` is published and enforced nowhere
-**Waiver:** W27/W28 (dotnet), W34 (java) · **Severity: medium**
+### F21 — dotnet: the response schema claims a `minLength` nothing declared
+**Waiver:** W28 retired — fixed · W27 / W34 re-diagnosed, kept ·
+**Severity: medium** · **Status: the READ half is FIXED (2026-09-03); the write
+half was mis-diagnosed and is re-recorded below.**
 
 ```
-curl -X POST http://host/api/customers -d '{"name":"","email":"a@b.c"}'  → 201
+curl -X POST http://host/api/customers -d '{"name":"","email":"a@b.c"}'  → 201   (correct)
 curl     http://host/api/customers                                       → 200, and the
-  response violates the API's OWN schema: "" is shorter than 1 character
+  response violates the API's OWN schema: "" is shorter than the published minLength: 1
 ```
 
-One defect with two halves. `name` carries `minLength: 1` in both the request and
-the response schema; .NET and java enforce it in neither, so the write is
-accepted and the *read* then violates the published contract. Enforcing the
-declared bound on the write closes both.
+**The original entry got the cause wrong, and the wrong half of it.** It said
+`name` publishes `minLength: 1` in *both* the request and the response schema
+and that .NET and java enforce it in neither. Measured on booted apps of both,
+with the fixture's own model (`aggregate Customer with crudish { name, email,
+invariant email.length > 0 }`):
+
+| | request `email` | response `name` / `email` | `email: ""` | `name: ""` |
+|---|---|---|---|---|
+| node | `minLength: 1` | — | 422 | 201 |
+| dotnet | **nothing** | **`minLength: 1` on BOTH** | 422 | 201 |
+| java | **nothing** | **nothing** | 422 | 201 |
+
+So the *behaviour* is correct and identical on all three: the declared bound
+(`email`) is enforced — FluentValidation on .NET, the domain invariant on java —
+and `name`, which declares nothing, is correctly accepted empty. What is wrong
+is the CONTRACT, and only on .NET, and only on the response.
+
+**Cause: `RequiredAttribute` defaults `AllowEmptyStrings` to false**, and
+ASP.NET's schema generator renders that as `minLength: 1`. Response DTOs are
+serialized, never validated, so nothing enforces it, and `name: string` declares
+nothing, so nothing asked for it. A row the server itself accepted is then
+served by a document saying that row is impossible — the server breaking its own
+contract on a plain read. That is W28's `response_schema_conformance`, and it is
+the real finding.
+
+**Fix:** response string properties carry `[property: Required(AllowEmptyStrings
+= true)]`, mirroring what the request side has carried (for a different, still
+valid reason) all along. Measured before and after on the same booted app: the
+phantom `minLength` is gone from `CustomerResponse`, `required` still lists every
+field, and `email: ""` → 422 / `name: ""` → 201 / `name: null` → 422 /
+`name` omitted → 422 are all unmoved. Gated by
+`test/generator/dotnet/response-string-minlength.test.ts`, mutation-proved both
+ways (revert the fix → 2 cases fail; widen it to non-strings → the narrowness
+case fails).
+
+**What this deliberately does not do.** `email` DOES declare `length > 0`, so
+its `minLength: 1` was accidentally correct; it goes too, leaving .NET where
+java already is — publishing no length bound at all. Publishing the bounds a
+`len-*` invariant actually declares (node emits them from `openapiLengthMeta`)
+is a separate slice on both backends, and it has to go through the
+schema-document layer: the DataAnnotations / Bean Validation annotations that
+would publish them (`[MinLength]`, `@Size`) also ENFORCE them, counting UTF-16
+code units rather than the code points the bound is defined in
+(`src/generator/_expr/code-point.ts`). Trading a false claim for a wrong count
+is not an improvement.
+
+**W27 and W34 are kept, not retired.** Both claimed an unenforced `minLength` on
+`POST /api/customers`; the measurements above say that is not what is there. What
+those two rules are actually absorbing cannot be established without running the
+leg, and retiring a rule on a guess is exactly how W31 came back four-fold on the
+next nightly. Their reasons now record the measurement and say "re-triage against
+a nightly".
 
 ### F22 — dotnet: a bodyless operation POST answers 415 before the path parameter is looked at
 **Waiver:** W26 (widened 2026-09-01) · **Severity: low**

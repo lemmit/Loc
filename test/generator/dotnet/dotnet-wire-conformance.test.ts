@@ -146,7 +146,11 @@ describe("cross-platform wire-spec conformance (dotnet vs wire-spec.json)", () =
     expect(customerResponses, "CustomerResponses.cs must be emitted").toBeDefined();
     // .NET emits records as one-liners: `public sealed record CustomerResponse(...);`.
     const responseBlock =
-      customerResponses!.match(/public sealed record CustomerResponse\([^)]*\);/)?.[0] ?? "";
+      // Matched to the end of the line, not to the first `)`: an attribute
+      // argument list (`Required(AllowEmptyStrings = true)`) closes a paren
+      // inside the parameter list, and `[^)]*` truncated the record there —
+      // silently shrinking what this loop checks rather than failing loudly.
+      customerResponses!.match(/public sealed record CustomerResponse\(.*\);/)?.[0] ?? "";
     expect(responseBlock, "CustomerResponse record must be located").not.toEqual("");
     // .NET upper-cases parameter names via upperFirst; wire-spec uses
     // camelCase. Check for the Pascal form at a word boundary so a

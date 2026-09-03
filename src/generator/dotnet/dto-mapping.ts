@@ -346,13 +346,36 @@ export function dtoParam(
   // parity).  Null/omitted still fails `[Required]` (400), as before.  Stays
   // a `RequiredAttribute`, so Swashbuckle's `RequiredFromCtorParamFilter`
   // keeps the field in the OpenAPI required-set.
+  //
+  // A RESPONSE string carries `AllowEmptyStrings = true` for a different
+  // reason, and one that is about the CONTRACT rather than the pipeline:
+  // `RequiredAttribute` defaults `AllowEmptyStrings` to FALSE, and ASP.NET's
+  // schema generator translates that into `minLength: 1` on the published
+  // property.  Nothing enforces it — a response DTO is serialized, never
+  // validated — and nothing DECLARED it either: `name: string` carries no
+  // length invariant, so a customer created with `name: ""` (correctly 201)
+  // is then served by a `GET /api/customers` whose own published schema says
+  // that value is impossible (schemathesis F21 / W28 — the server breaking
+  // its own contract on a plain read).  Measured before and after on a booted
+  // app; the field stays in `required` either way, because this is still a
+  // RequiredAttribute.
+  //
+  // This makes .NET publish no length bound at all, which is what java
+  // already does.  Publishing the bounds a `len-*` invariant DOES declare
+  // (node emits them from `openapiLengthMeta`) is a separate slice: it has to
+  // go through the schema-document layer on both backends, because the
+  // DataAnnotations that would publish them — `[MinLength]` / `[MaxLength]` —
+  // also ENFORCE them, in UTF-16 code units rather than the code points the
+  // bound is defined in (src/generator/_expr/code-point.ts).
   const attr =
     jsonRequired +
-    (dir === "request"
-      ? csType === "string"
+    (csType === "string"
+      ? dir === "request"
         ? "[Required(AllowEmptyStrings = true)] "
-        : "[Required] "
-      : "[property: Required] ");
+        : "[property: Required(AllowEmptyStrings = true)] "
+      : dir === "request"
+        ? "[Required] "
+        : "[property: Required] ");
   return `${attr}${csType} ${name}`;
 }
 

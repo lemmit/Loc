@@ -81,7 +81,7 @@ describe("mask unless — .NET read redaction", () => {
     // float64 the other four backends send.  Masking makes it nullable.
     expect(resp).toMatch(/double\?\s+Salary/);
     // A non-masked field stays required.
-    expect(resp).toMatch(/\[property: Required\] string Name/);
+    expect(resp).toMatch(/\[property: Required\(AllowEmptyStrings = true\)\] string Name/);
   });
 
   it("projects the masked field through a fail-closed ambient-principal guard", async () => {
