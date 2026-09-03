@@ -16,7 +16,7 @@ import {
   aggregatesNeedConcurrency,
 } from "../../ir/util/aggregate-flags.js";
 import { apiResourceBindings } from "../../ir/util/api-resource-binding.js";
-import { deriveContextOperations } from "../../ir/util/api-surface.js";
+import { deriveContextOperations, staticSubpathRoutes } from "../../ir/util/api-surface.js";
 import { durableEventTypes, realtimeEventTypes } from "../../ir/util/channels.js";
 import { aggregateHasFileField } from "../../ir/util/file-field.js";
 import { foreignIdBrandNames, workflowIdTypeSources } from "../../ir/util/foreign-ids.js";
@@ -486,6 +486,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       hasChannelConsumers,
       hasRealtime,
       hasFileRoutes,
+      staticSubpathRoutes(args.contexts.flatMap(deriveContextOperations)),
     ),
   );
   if (hasEmbeddedSpa) {
@@ -987,6 +988,72 @@ class TransactionMiddleware:
                 request_session.reset(token)
 `;
 
+/** The guard that turns a wrong verb on a STATIC sub-path into the honest 405 +
+ *  `Allow`, instead of the `/{id}` route's `422 Invalid UUID`.
+ *
+ *  Starlette resolves (path, method) in registration order and returns the
+ *  FIRST full match, so `DELETE /api/customers/by_email` skips the GET-only
+ *  find (a PARTIAL match) and lands on `DELETE /api/customers/{id}` with
+ *  `id="by_email"` — whose path validator answers 422 for a path that has no
+ *  DELETE at all (schemathesis F18). The check has to run BEFORE routing, which
+ *  is why it is middleware rather than a dependency.
+ *
+ *  Added FIRST, so it is the INNERMOST middleware (Starlette runs later-added
+ *  outermost): auth, CORS and observability still see the request exactly as
+ *  they did, and the guard sits immediately in front of the router — the same
+ *  position hono's has inside its aggregate router.
+ *
+ *  The HEAD arm is defensive, not a fix: raw Starlette adds HEAD to a GET
+ *  route implicitly, FastAPI's `APIRoute` does not (measured — `HEAD
+ *  /api/customers` answers 405 on a path the table never sees). It costs a
+ *  branch to guarantee the guard is never STRICTER than the router behind it. */
+function staticSubpathGuardLines(statics: Record<string, string[]>): string[] {
+  const entries = Object.entries(statics).sort(([a], [b]) => a.localeCompare(b));
+  if (entries.length === 0) return [];
+  return [
+    "# A STATIC sub-path is swallowed by the sibling `/{id}` route under any verb",
+    "# it does not itself serve, and the `{id}` validator then answers 422 for a",
+    "# path that has no such method at all.  405 is the honest answer and the only",
+    "# one that can carry an `Allow` the caller can act on (RFC 9110 15.5.6).",
+    "_STATIC_SUBPATH_METHODS: dict[str, list[str]] = {",
+    ...entries.map(
+      ([path, methods]) =>
+        `    ${JSON.stringify(path)}: [${methods.map((m) => JSON.stringify(m)).join(", ")}],`,
+    ),
+    "}",
+    "",
+    "",
+    "# Added FIRST => innermost => runs immediately before routing, after auth.",
+    '@app.middleware("http")',
+    "async def _static_subpath_method_guard(",
+    "    request: Request,",
+    "    call_next: Callable[[Request], Awaitable[Response]],",
+    ") -> Response:",
+    "    allow = _STATIC_SUBPATH_METHODS.get(request.url.path)",
+    "    # Defensive: raw Starlette `Route` adds HEAD to any GET route implicitly.",
+    "    # FastAPI's `APIRoute` does NOT (measured: `HEAD /api/customers` answers 405,",
+    "    # on a path this table never sees), so today the arm changes nothing — it is",
+    "    # here so the guard can never be STRICTER than the router it fronts.",
+    "    served = allow is None or request.method in allow or (",
+    '        request.method == "HEAD" and "GET" in allow',
+    "    )",
+    "    if not served:",
+    "        # `served` is False only on the `allow is not None` branch, but mypy",
+    "        # cannot see through the local, so the list is re-read under a guard.",
+    "        methods = allow or []",
+    "        return problem(",
+    "            request,",
+    "            405,",
+    '            "Method Not Allowed",',
+    '            f"method {request.method} is not supported for {request.url.path}",',
+    '            headers={"Allow": ", ".join(methods)},',
+    "        )",
+    "    return await call_next(request)",
+    "",
+    "",
+  ];
+}
+
 function renderMain(
   systemName: string,
   routerAggs: string[],
@@ -1004,10 +1071,16 @@ function renderMain(
   hasChannelConsumers = false,
   hasRealtime = false,
   hasFileRoutes = false,
+  // Static one-segment sub-paths (`GET /api/customers/by_email`) keyed by
+  // ABSOLUTE path — the guard below needs the whole path because it sits in
+  // the application pipeline, not in a per-aggregate router.
+  staticSubpaths: Record<string, string[]> = {},
 ): string {
   // Every router mounts under the shared API base path (`/api/*`) so the
   // SPA's root path namespace stays free for client-side routing.
   const routerArgs = `, prefix="${API_BASE_PATH}"`;
+  const staticSubpathGuard = staticSubpathGuardLines(staticSubpaths);
+  const hasStaticSubpathGuard = staticSubpathGuard.length > 0;
   const authRequired = authUser != null;
   // Dev-stub verifier (Hono index.ts parity): accepts every request as
   // a built-in admin user with EMPTY permissions so the generated
@@ -1039,8 +1112,9 @@ function renderMain(
     stubKwargs.includes("datetime.") ? "from datetime import UTC, datetime" : null,
     stubKwargs.includes("Decimal(") ? "from decimal import Decimal" : null,
     pyDevClaims ? "from typing import Any" : null,
+    hasStaticSubpathGuard ? "from collections.abc import Awaitable, Callable" : null,
     "",
-    `from fastapi import FastAPI${authRequired && !oidc ? ", Request" : ""}`,
+    `from fastapi import FastAPI${(authRequired && !oidc) || hasStaticSubpathGuard ? ", Request" : ""}`,
     "from fastapi import Response",
     "from fastapi.middleware.cors import CORSMiddleware",
     hasEmbeddedSpa ? "from fastapi.responses import FileResponse" : null,
@@ -1072,7 +1146,7 @@ function renderMain(
     ...routerAggs.map(
       (name) => `from app.http.${snake(name)}_routes import router as ${snake(name)}_router`,
     ),
-    "from app.http.problem import install_error_handlers, install_openapi",
+    `from app.http.problem import install_error_handlers, install_openapi${hasStaticSubpathGuard ? ", problem" : ""}`,
     hasWorkflows ? "from app.http.workflows_routes import router as workflows_router" : null,
     hasProjections ? "from app.http.projections_routes import router as projections_router" : null,
     hasQueryProjections
@@ -1207,11 +1281,12 @@ function renderMain(
     "install_error_handlers(app)",
     "install_openapi(app)",
     "",
+    ...staticSubpathGuard,
     // Starlette runs later-added middleware first, so AuthMiddleware is
     // added BEFORE CORS to keep CORS outermost (auth after CORS — the
     // same ordering the Hono/.NET pipelines mount).
     authRequired ? "app.add_middleware(AuthMiddleware)" : null,
-    "# Innermost (added first): owns the per-request DB transaction and commits",
+    `# ${hasStaticSubpathGuard ? "Just outside the sub-path guard" : "Innermost (added first)"}: owns the per-request DB transaction and commits`,
     "# it BEFORE the response starts, so a client's read-after-create can't race",
     "# the commit (a FastAPI yield-dependency commit runs after the response is",
     "# sent).  Inside auth/CORS/obs so their teardown still brackets it.",

@@ -59,7 +59,8 @@ npm run prepare              # = langium:generate && build && build:web; runs on
 ### Tests
 
 ```bash
-npm test                                   # fast vitest suite (unit + IR + generator); excludes every slow suite
+npm test                                   # fast vitest suite (unit + IR + generator), ~6 min on 4 cores; excludes every slow suite
+npm run test:changed                       # opt-in affected-only run (vitest --changed origin/main) — ~90s to compute the import graph first, and a generator edit still selects ~2/3 of the suite (see experience_gathered.md §94)
 npm run test:watch                         # same, watch mode
 npx vitest run test/parsing.test.ts        # one suite
 npx vitest run -t "test name pattern"      # filter by name

@@ -79,6 +79,7 @@ import {
   findValidatesRequest,
   isAllFind,
   relativeOpPath,
+  staticSubpathMethods,
 } from "../../../ir/util/api-surface.js";
 import { partsChildrenFirst } from "../../../ir/util/containment-parent.js";
 import {
@@ -309,41 +310,27 @@ function problemResponseLines(entry: ApiOperationIR, pad: string): string[] {
   );
 }
 
-/** The STATIC one-segment sub-paths an aggregate router mounts, each mapped to
- *  the methods it actually serves — `{ by_email: ["GET"], prepare: ["GET"] }`.
+/** The STATIC one-segment sub-paths THIS aggregate router mounts, mapped to
+ *  the methods each serves — `{ by_email: ["GET"], prepare: ["GET"] }`.
  *
- *  These are exactly the paths the sibling `/{id}` route can swallow: hono keys
- *  its router on (method, path), so `DELETE /api/customers/by_email` finds no
- *  `delete /by_email` and matches `delete /{id}` with `id = "by_email"`.  The
- *  `{id}` param validator then answers `422 Invalid UUID` for a path that has
- *  no DELETE at all (schemathesis F8).  Registration order already fixes the
- *  same-verb case (a static find is registered BEFORE `/{id}`, see the comment
- *  at that loop); the WRONG-verb case needs the guard below.
- *
- *  Only one-segment statics are affected: `/{id}/history` and `/{id}/can_<op>`
- *  are two segments, so nothing shadows them and a wrong verb there already
- *  falls through to the root router's `app.notFound` 405 arm. */
-function staticSubpathMethods(
+ *  The derivation is shared (`staticSubpathMethods`, `src/ir/util/api-surface.ts`),
+ *  because the swallowed-verb defect it feeds is the router-resolution fact
+ *  every backend shares, not a Hono one — python, java and .NET carry the same
+ *  guard off the same table. `GET /prepare` is Hono's alone: it is deliberately
+ *  NOT a lifted operation (see the note at the top of `api-surface.ts`), so it
+ *  rides in as an `extra` rather than silently dropping out of the guard.
+ */
+function honoStaticSubpathMethods(
   agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
+  ctx: EnrichedBoundedContextIR,
   emitCreate: boolean,
 ): Record<string, string[]> {
-  const out: Record<string, string[]> = {};
-  const add = (segment: string, method: string): void => {
-    const methods = out[segment] ?? [];
-    methods.push(method);
-    out[segment] = methods;
-  };
-  // `GET /prepare` — emitted on the same condition its route arm below is.
-  if (emitCreate && serverSourcedDefaultFields(createInputFields(agg)).length > 0) {
-    add("prepare", "GET");
-  }
-  // `GET /<snake(find)>` — every named (non-`all`, non-synthesized) find.
-  for (const find of repo?.finds ?? []) {
-    if (find.name === "all" || find.synthesized) continue;
-    add(snake(find.name), "GET");
-  }
-  return out;
+  const prepare: [string, string][] =
+    emitCreate && serverSourcedDefaultFields(createInputFields(agg)).length > 0
+      ? [["prepare", "GET"]]
+      : [];
+  return staticSubpathMethods(deriveAggregateOperations(agg, repo, apiStatusContext(ctx)), prepare);
 }
 
 /** The router-level guard that turns a wrong verb on a static sub-path into the
@@ -863,7 +850,7 @@ export function buildRoutesFile(
   // 422 ProblemDetails with `errors[]` for the frontend ACL.
   lines.push(`  const app = newApp();`);
   lines.push("");
-  lines.push(...emitStaticSubpathMethodGuard(staticSubpathMethods(agg, repo, emitCreate)));
+  lines.push(...emitStaticSubpathMethodGuard(honoStaticSubpathMethods(agg, repo, ctx, emitCreate)));
 
   // Create — gated on `hasCreate` (no canonical create ⇒ no POST route).
   if (emitCreate && derivedCreate) {

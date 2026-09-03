@@ -224,8 +224,8 @@ describe("page metamodel — IR shape", () => {
     const loom = await buildLoom(`
       system Acme {
         ui WebApp {
-          page Home { route: "/", body: Heading { "Hi" } }
-          page Reports { route: "/reports", body: List { of: Report } }
+          page Home { route: "/"  body: Heading { "Hi" } }
+          page Reports { route: "/reports"  body: List { of: Report } }
           menu {
             section "Main" {
               link Home { label: "Start" },
@@ -287,7 +287,7 @@ describe("page metamodel — IR shape", () => {
     // error.  Lowering still produces a valid IR shape.
     const loom = await buildLoom(`
       system Acme {
-        ui WebApp { page X { route: "/x", body: match { } } }
+        ui WebApp { page X { route: "/x"  body: match { } } }
       }
     `);
     const page = uiByName(loom, "WebApp").pages[0]!;
@@ -421,9 +421,9 @@ describe("page metamodel — IR shape", () => {
     const loom = await buildLoom(`
       system Acme {
         ui WebApp {
-          page A { route: "/a", body: f(1, 2, 3) }
-          page B { route: "/b", body: g(of: Order, scope: source) }
-          page C { route: "/c", body: h(1, name: "x") }
+          page A { route: "/a"  body: f(1, 2, 3) }
+          page B { route: "/b"  body: g(of: Order, scope: source) }
+          page C { route: "/c"  body: h(1, name: "x") }
         }
       }
     `);
@@ -460,7 +460,7 @@ describe("page metamodel — IR shape", () => {
     const loom = await buildLoom(`
       system Acme {
         ui WebApp {
-          page Home { route: "/", body: Heading { "hi" } }
+          page Home { route: "/"  body: Heading { "hi" } }
           menu {
             section "Main" {
               link Home { label: "Start" }

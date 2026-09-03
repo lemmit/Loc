@@ -1346,6 +1346,30 @@ function emitMikroOutboxMachinery(): string[] {
     `      }`,
     `      await inner.dispatch(event);`,
     `    },`,
+    // The TRANSACTIONAL capture seam — the mikro twin of the drizzle
+    // `recordDurable` above.  The `dispatch` arm's `keepTransactionContext`
+    // fork only JOINS an AMBIENT transaction, and an ordinary mutation route
+    // opens none (only the audited / provenanced routes do), so the outbox row
+    // committed on its own: a crash between the aggregate's commit and that
+    // insert dropped a durable event with no trace, while the drizzle sibling
+    // has always written the row on the save transaction's own handle.  `tx` is
+    // the forked EntityManager `em.transactional(...)` hands its callback, so
+    // the insert lands in the same transaction as the aggregate rows.
+    `    async recordDurable(events: readonly Events.DomainEvent[], tx: unknown): Promise<Events.DomainEvent[]> {`,
+    `      const durable = events.filter((e) => DURABLE_EVENT_TYPES.has(e.type));`,
+    `      const txEm = tx as EntityManager;`,
+    `      for (const event of durable) {`,
+    `        await txEm.insert(${ROW}, {`,
+    `          id: randomUUID(),`,
+    `          occurredAt: new Date(),`,
+    `          type: event.type,`,
+    `          payload: event,`,
+    `          dispatchedAt: null,`,
+    `          attempts: 0,`,
+    `        });`,
+    `      }`,
+    `      return events.filter((e) => !DURABLE_EVENT_TYPES.has(e.type));`,
+    `    },`,
     `  };`,
     `}`,
     ``,
