@@ -42,7 +42,11 @@ describe("hono routes — audited lifecycle actions", () => {
     const r = await routes();
     expect(r).toContain("const created = Invoice.create({ total: body.total });");
     expect(r).toContain("await db.transaction(async (tx) => {");
-    expect(r).toContain("const repoTx = new InvoiceRepository(tx, events);");
+    // The repo built on the route's `tx` takes the DEFERRING dispatcher, not
+    // the root one: dispatching inside the caller's open transaction
+    // deadlocks an in-process subscriber on a single-connection driver
+    // (see audited-route-dispatch.test.ts).
+    expect(r).toContain("const repoTx = new InvoiceRepository(tx, __deferred);");
     expect(r).toContain("await repoTx.save(created);");
     expect(r).toContain("await tx.insert(schema.auditRecords).values({");
     expect(r).toContain('action: "create",');

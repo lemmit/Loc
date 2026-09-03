@@ -165,14 +165,28 @@ system LifecycleGuard {
     api.shipments.destroy(zeroed)
     expect(api.shipments.getById(zeroed)).toThrow(404)
 
+    // The WORKFLOW door.  `release` emits CrateReady, whose in-process
+    // subscriber creates a Shipment.  `Crate` is `audited`, so the route runs
+    // inside a transaction — and until the dispatch was deferred past that
+    // commit, this single call DEADLOCKED the backend (the subscriber queried
+    // the root `db` handle the open transaction held; on the node leg's single
+    // PGlite connection that never returns).  It is the reason this fixture
+    // carried `R.principalLessSubscriberCrash`.
+    api.crates.release(crate, { })
+
     // The ungated COLLECTION reads. Cheap, but they are the only assertion
     // that the list routes answer at all under a permission-gated system —
     // neither carries a `requires`, so a backend that gates every route (the
     // inverse of the #2446 defect) shows up here rather than nowhere.
     let crates = api.crates.all()
     expect(crates.total).toBe(1)
+    // TWO shipments now: the SH-1 created above, plus the one the CrateReady
+    // subscriber created.  That second row is the whole proof — the dispatch is
+    // flushed after the route's transaction commits and awaited before the 204,
+    // so by the time `release` returns the subscriber has run and committed.
+    // Before the fix this line was unreachable: the call never returned.
     let ships = api.shipments.all()
-    expect(ships.total).toBe(1)
+    expect(ships.total).toBe(2)
 
     // ── GATE 3: principal-ONLY destroy, on the audited aggregate ────────────
     // The gate never reads the loaded row, so this is the arm where a backend

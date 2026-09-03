@@ -338,55 +338,43 @@ export const R = {
   gateProbe:
     "unreachable: e2e has no can_<op> probe verb (the gate's 409 is exercised via the operation)",
   /**
-   * BLOCKED ON A LIVE DEFECT — an operation whose in-process subscriber kills
-   * the backend, so a caller cannot be written without turning the tier red on
-   * a bug that is not this fixture's.
+   * DRAINED — the defect it named is FIXED, so no pin carries this reason.
    *
-   * The one pin: `lifecycle-guard`'s `Crate.release`.  It emits `CrateReady`,
-   * whose workflow subscriber creates a `Shipment` from in-process code with no
-   * request principal.  On the node leg:
+   * Kept, like `autoFindAll` and `crudishUpdate`, because the class recurs the
+   * moment another route dispatches inside a caller-owned transaction.
    *
-   *     POST /api/crates/{id}/release  -> operation_invoked
-   *                                    -> event_dispatched
-   *                                    -> process exits 99, no verdict
+   * WHAT IT WAS.  `lifecycle-guard`'s `Crate.release` emits `CrateReady`, whose
+   * in-process subscriber creates a `Shipment`.  Calling it killed the node
+   * backend: the log stopped at `event_dispatched` and the process exited 99
+   * with no error, no `request_end` and no stack.
    *
-   * WHAT THIS IS NOT, corrected after reading the emitted code.  The first
-   * write-up of this pin said the fix was "the guarded-create seam split across
-   * five backends" — the divergence the fixture's own header describes.  That
-   * is wrong, and generating the fixture disproves it in one grep: node's
-   * `Shipment.create` takes `(input)` and carries NO gate at all (the `requires`
-   * is enforced in the ROUTE layer), so the subscriber never reaches a guard and
-   * never refuses.  Whatever kills the process, it is not a principal-less
-   * create being denied.
+   * HOW IT WAS FINALLY DIAGNOSED, after two wrong guesses recorded here.  The
+   * first write-up blamed "the guarded-create seam split across five backends";
+   * generating the fixture disproved that in one grep (node's
+   * `Shipment.create` carries no gate at all — the `requires` lives in the
+   * route). The second offered the transaction hypothesis but left it
+   * UNCONFIRMED, with three experiments listed. Experiment one settled it: a
+   * standalone driver with `unhandledRejection`/`uncaughtException` handlers
+   * and an 8s watchdog showed no throw at all — a DEADLOCK — and a log inside
+   * the subscriber showed it entered and never returned from its FIRST query.
    *
-   * LEADING HYPOTHESIS, stated as one because it is not yet instrumented: the
-   * dispatch happens while the CALLER'S transaction is still open, and the
-   * subscriber runs its own queries on the ROOT `db` handle.  In the emitted
-   * code the route does `await db.transaction(async (tx) => { … repoTx.save() … })`;
-   * `save()` dispatches at the END of its own body but still inside that outer
-   * callback, and `createInProcessDispatcher(db)` closed over the root handle,
-   * so the subscriber's `db.select()` runs on a connection the open transaction
-   * owns.  The node behavioural leg is a single PGlite instance
-   * (`test/behavioral/run.mjs`), where that is a self-deadlock rather than a
-   * second connection.  Consistent with the trace: the log stops exactly at
-   * dispatch, with no error, no `request_end`, and no stack.
+   * THE CAUSE.  `Crate` is `audited`, so its routes wrap the write in
+   * `db.transaction(async (tx) => …)` and hand the repository that `tx`.
+   * `save()` dispatches at the end of its own body — correct when it owns its
+   * handle, wrong here, because that line runs while the ROUTE's transaction is
+   * still open.  The in-process dispatcher closed over the ROOT `db`, so the
+   * subscriber queried the very connection the open transaction held: on the
+   * node leg's single PGlite connection, a self-deadlock.
    *
-   * TO CONFIRM OR KILL THAT HYPOTHESIS, in order of cheapness: log inside the
-   * subscriber before its first query and see whether that line is reached;
-   * pass `tx` to the dispatcher instead of `db` and see whether the hang
-   * clears; run the same fixture against a real multi-connection Postgres leg
-   * (dotnet / java / python) and see whether it survives.  Do not write a
-   * mechanism into this pin that has not passed one of those
-   * (`experience_gathered.md` §93).
-   *
-   * Same class as the two previous drains — a route no runtime caller had ever
-   * driven, hiding a real defect, observable only once the fixture gained a
-   * `test e2e` block. The second thing that trace showed, `"event_type":"Object"`
-   * on every dispatched event, WAS diagnosed and is fixed: the log read
-   * `constructor.name` off an object literal whose type is an interface.
+   * THE FIX.  `deferredDispatcher` buffers events raised inside a
+   * caller-owned transaction and flushes them after it commits — which is
+   * exactly what the WORKFLOW routes already did, and said so in a comment
+   * ("dispatches events after the callback returns successfully (so rollbacks
+   * discard them)").  The aggregate routes now match.  Rollback safety comes
+   * free: `flush()` only runs on the success path.
    */
   principalLessSubscriberCrash:
-    "blocked: the in-process subscriber kills the backend (cause not yet established; see the pin)",
+    "DRAINED (dispatch is deferred past the caller's transaction) — kept for recurrence",
   /**
    * UN-AUTHORED — `crudish`'s canonical `update` (`POST /api/<aggs>/{id}/update`).
    * Reachable today (`api.<aggs>.update(id, { … })`), simply never written.
@@ -490,13 +478,6 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
   // it.  Only the `can_<op>` endpoint a UI polls stays uncalled.
   "corpus/state-gate": {
     canCancelOrder: R.gateProbe,
-  },
-  // ── The workflow door that kills the runner ──────────────────────────────
-  // Found by draining this fixture: the two collection reads and all three
-  // gates are driven, and `release` is the one route that cannot be.  See
-  // `R.principalLessSubscriberCrash` for the trace.
-  "corpus/lifecycle-guard": {
-    releaseCrate: R.principalLessSubscriberCrash,
   },
 };
 
@@ -738,5 +719,4 @@ export const PIN_CLASS_CENSUS: Readonly<Record<string, number>> = {
   tenantRegistryRow: 20,
   seededListReadUnwritten: 2,
   gateProbe: 1,
-  principalLessSubscriberCrash: 1,
 };
