@@ -353,7 +353,7 @@ _No unknown results._
     "US-001": { "verdict": "VERIFIED", "testCaseIds": ["TC-001"], "failingTestCaseIds": [] },
     "AC-001": { "verdict": "VERIFIED", "testCaseIds": ["TC-001"], "failingTestCaseIds": [] }
   },
-  "summary": { "verified": 2, "failing": 0, "untested": 0, "unverified": 1, "total": 2 },
+  "summary": { "verified": 2, "failing": 0, "untested": 0, "unverified": 0, "total": 2 },
   "diagnostics": { "unknownTests": [], "unmappedTestCases": [] }
 }
 ```

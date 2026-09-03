@@ -1,8 +1,8 @@
 # 11. Capabilities, filters & stamps
 
-A `capability` is a **pure typed mixin** — a named bundle of *fields* + a query `filter` + lifecycle `stamp`s that an aggregate (or every aggregate in a context) opts into with `with <Cap>` / `implements <Cap>`. The two building blocks are also usable directly on an aggregate or context: `filter <expr>` AND-s a predicate into every read of the host, and `stamp onCreate|onUpdate { … }` runs assignments at the persistence boundary. Five capabilities ship built in — `auditable`, `softDeletable`, `tenantOwned`, `tenantRegistry`, `versioned` — alongside the `softDelete` / `softDeleteByDefault` / `crudish` operation macros. Reach for this chapter when you want a cross-cutting read rule, automatic audit/tenant stamping, or to bundle either into a reusable opt-in.
+A `capability` is a **pure typed mixin** — a named bundle of *fields* + a query `filter` + lifecycle `stamp`s that an aggregate (or every aggregate in a context) opts into with `with <Cap>` / `implements <Cap>`. The two building blocks are also usable directly on an aggregate or context: `filter <expr>` AND-s a predicate into every read of the host, and `stamp onCreate|onUpdate { … }` runs assignments at the persistence boundary. Five capabilities ship built in — `auditable`, `softDeletable`, `tenantOwned`, `tenantRegistry`, and `versioned` (applied to every aggregate by default) — alongside the `softDelete` / `softDeleteByDefault` / `crudish` operation macros. Reach for this chapter when you want a cross-cutting read rule, automatic audit/tenant stamping, or to bundle either into a reusable opt-in.
 
-> **Grammar:** `Capability`, `CapabilityMember`, `FilterDecl`, `StampDecl`, `StampEvent`, `ImplementsDecl`, `WithClause`, `SelfType` (`Self id`), `IgnoringClause` · **Validators:** `loom.unknown-capability`, `loom.capability-host-invalid`, `loom.self-outside-capability`, `loom.criterion-not-selectable`, `loom.context-filter-unsupported`, `loom.stamp-principal-without-auth`, `loom.stamp-on-event-sourced-invalid`, `loom.stamp-read-before-flush`, `loom.softdelete-field-collision`, `loom.version-field-collision`, `loom.filter-bypass-unknown-capability` / `-no-filter`, `loom.ignoring-clause-placement`, `loom.tph-filter-unsupported`, `loom.tenant-owned-without-tenancy` / `loom.tenant-registry-without-tenancy`, `loom.audit-history-ungated` · **Docs:** [`../capabilities.md`](../capabilities.md), [`../tenancy.md`](../tenancy.md), [`../scaffold-macros.md`](../scaffold-macros.md)
+> **Grammar:** `Capability`, `CapabilityMember`, `FilterDecl`, `StampDecl`, `StampEvent`, `ImplementsDecl`, `WithClause`, `SelfType` (`Self id`), `IgnoringClause` · **Validators:** `loom.unknown-capability`, `loom.unknown-macro`, `loom.capability-host-invalid`, `loom.self-outside-capability`, `loom.criterion-not-selectable`, `loom.context-filter-unsupported`, `loom.stamp-principal-without-auth`, `loom.stamp-on-event-sourced-invalid`, `loom.stamp-read-before-flush`, `loom.softdelete-field-collision`, `loom.version-field-collision`, `loom.filter-bypass-unknown-capability` / `-no-filter`, `loom.ignoring-clause-placement`, `loom.tph-filter-unsupported`, `loom.tenant-owned-without-tenancy` / `loom.tenant-owned-claim-type` / `loom.tenant-registry-without-tenancy`, `loom.audit-history-ungated` · **Docs:** [`../capabilities.md`](../capabilities.md), [`../tenancy.md`](../tenancy.md), [`../scaffold-macros.md`](../scaffold-macros.md)
 
 A `capability` is a *pure* mixin: its body is only `Property` / `FilterDecl` / `StampDecl` — never operations or structure (those stay macros, §[Relationship to macros](#relationship-to-macros)). Applying it is a pre-link, AST→AST splice in the macro expander, so everything downstream (scope, lower, enrich, validate, codegen) sees the spliced members as if hand-written. All examples are generated from one scratch `system` (`user { id  tenantId }`, `auth: required`, a `Sales.Order` and an `Inventory.Item`) once per backend pin; output is excerpted.
 
@@ -87,7 +87,7 @@ def find_by_id(id, current_user \\ nil) when is_binary(id) do
 ```
 ::: end
 
-Every backend family wires capability filters on every persistence shape (relational, `shape: document`, `shape: embedded`); there is no per-backend deferral table. The one gate is shape- and backend-independent: a principal-referencing filter needs a request principal, so a deployable **without** `auth: required` (and a system `user {}` block) hosting one is `loom.context-filter-unsupported`. The one *storage* restriction is .NET/EF under TPH inheritance (`loom.tph-filter-unsupported` — [chapter 8](08-inheritance-and-polymorphism.md#backend-gating--validation)).
+Every backend family wires capability filters on every persistence shape (relational, `shape: document`, `shape: embedded`); there is no per-backend deferral table. (The one shape-specific consequence: a query-time `projection` that aggregates *in SQL* over a filtered `shape: document` aggregate has no column to name — `loom.projection-document-source-capability-filtered`; per-row reads still apply the filter on hydration.) The one gate is shape- and backend-independent: a principal-referencing filter needs a request principal, so a deployable **without** `auth: required` (and a system `user {}` block) hosting one is `loom.context-filter-unsupported`. The one *storage* restriction is .NET/EF under TPH inheritance (`loom.tph-filter-unsupported` — [chapter 8](08-inheritance-and-polymorphism.md#backend-gating--validation)).
 
 ### Reifying a named `criterion`
 
@@ -167,11 +167,11 @@ def _stamp_on_update(self) -> None:
 
 ### Validator-gated stamp cases
 
-Two refusals, neither backend-specific (the check reads only the model — the old per-backend `loom.<plat>-stamp-unsupported` codes are gone):
+Three refusals, none backend-specific (each reads only the model — the old per-backend `loom.<plat>-stamp-unsupported` codes are gone):
 
 - `loom.stamp-principal-without-auth` — a `currentUser` stamp on a deployable **without** `auth: required` / a system `user {}` (no principal to stamp from; use `now()`-only stamps or add auth).
 - `loom.stamp-on-event-sourced-invalid` — **any** stamp on a `persistedAs: eventLog` aggregate (there is no row to stamp; the truth is the stream).
-- `loom.stamp-read-before-flush` — a `create` / `operation` body that *reads* a stamp field (`return updatedAt`): the value lands only when the unit of work flushes, so the body would observe the prior value.
+- `loom.stamp-read-before-flush` — on a stamping aggregate, a `create` body that *reads* any of the four audit columns (`createdAt` / `createdBy` / `updatedAt` / `updatedBy`), or an `operation` body that reads `updatedAt` / `updatedBy`: the value lands only when the unit of work flushes, so the body would observe the prior value (an operation may read `createdAt` / `createdBy` — the create flush already set them).
 
 ## `with <Cap>` / `implements <Cap>` — applying a capability
 
@@ -218,7 +218,7 @@ static create(input: { subject: string; /* … */ parent?: Ids.OrderId | null })
 
 ## `ignoring` — bypassing a filter at a read site
 
-A repository `find`, a query-time projection's `where` slot, or an inline `let x = Repo.findAll(...)` can bypass capability filters with a trailing `ignoring` clause — `ignoring *` drops every capability filter on the aggregate, `ignoring A, B` drops exactly those capabilities'. Written anywhere else (after a `group by` key, say) it binds to the wrong expression and is `loom.ignoring-clause-placement`; naming a capability the aggregate lacks is `loom.filter-bypass-unknown-capability`, naming one that contributes no filter (`ignoring auditable`) is `loom.filter-bypass-no-filter`. The per-backend output is in [chapter 10](10-repositories-and-queries.md#ignoring--capability-filter-bypass).
+A repository `find`, a query-time projection's `where` slot, or an inline `let x = Repo.findAll(...)` can bypass capability filters with a trailing `ignoring` clause — `ignoring *` drops every capability filter on the aggregate, `ignoring A, B` drops exactly those capabilities'. Written anywhere else (after a `group by` key, say) it binds to the wrong expression and is `loom.ignoring-clause-placement`; naming a capability the aggregate lacks is `loom.filter-bypass-unknown-capability`, naming one that contributes no filter (`ignoring auditable`) is `loom.filter-bypass-no-filter`. All five backends honour the bypass (EF `IgnoreQueryFilters`, a dropped Drizzle / SQLAlchemy / Ecto conjunct, a Hibernate `@FilterDef`/`@Filter` the read disables) — the per-backend output is in [chapter 10](10-repositories-and-queries.md#ignoring--capability-filter-bypass). One Java gap to know about: a *principal* filter (`currentUser` in the predicate) rides the JPQL `@Query`, and a declared `find … ignoring` currently keeps that conjunct (`select e from Order e where (e.tenantId = …)`) — only the non-principal, `@SQLRestriction`-resident filters are actually bypassed there.
 
 ```ddd
 repository Orders for Order {
@@ -236,19 +236,19 @@ async allRows(): Promise<Order[]> {
 
 ## The built-in capabilities
 
-Five capabilities ship in the toolchain prelude (`src/macros/prelude.ts`) — usable by name with nothing declared. A user `capability` of the same name wins (the prelude is a default, not an override).
+Five capabilities ship in the toolchain prelude (`src/macros/prelude.ts`) — usable by name with nothing declared. A user `capability` of the same name wins (the prelude is a default, not an override). Four are opt-in; `versioned` is default-on.
 
 | Capability | Fields it contributes | Filter / stamps |
 |---|---|---|
 | **`auditable`** | `createdAt` / `updatedAt` (`managed datetime`), `createdBy` / `updatedBy` (`managed User id`) | `stamp onCreate { createdAt := now()  createdBy := currentUser }`, `stamp onUpdate { updatedAt := now()  updatedBy := currentUser }` |
 | **`softDeletable`** | `isDeleted` (`internal bool`), `deletedAt` (`managed datetime?`) | `filter !this.isDeleted` — the `softDelete()` / `restore()` **operations** are the separate `softDelete` macro; compose `with softDeletable, softDelete`. A user field named `isDeleted` of another type is `loom.softdelete-field-collision` |
-| **`tenantOwned`** | `tenantId` (`internal string`), `dataKey` (`internal string?` — a persistence-only materialized path, dropped from the wire) | `stamp onCreate { tenantId := currentUser.<claim>  dataKey := currentUser.orgPath }`, `filter this.tenantId == currentUser.<claim>` — the principal side is rebound to the system's `tenancy by user.<claim>` declaration in enrichment; without one it is `loom.tenant-owned-without-tenancy` ([`../tenancy.md`](../tenancy.md)) |
+| **`tenantOwned`** | `tenantId` (`internal string`), `dataKey` (`internal string?` — a persistence-only materialized path, dropped from the wire) | `stamp onCreate { tenantId := currentUser.<claim>  dataKey := currentUser.orgPath }`, `filter this.tenantId == currentUser.<claim>` — the principal side is rebound to the system's `tenancy by user.<claim>` declaration in enrichment; without one it is `loom.tenant-owned-without-tenancy`, and a non-`string` claim is `loom.tenant-owned-claim-type` ([`../tenancy.md`](../tenancy.md)) |
 | **`tenantRegistry`** | `parent: Self id?` (`immutable`), `dataKey: string?` (`managed`) | none — the tree fields of the registry aggregate named by `tenancy by … of <Registry>`; the registry is self-scoped, never `tenantOwned` (`loom.tenant-registry-without-tenancy` outside a `tenancy by` system) |
-| **`versioned`** | `version: int token = 1` | none — the optimistic-concurrency marker: echoed by the client on update (`If-Match`), a mismatch is a 409 `ConcurrencyConflict`; a user field named `version` of another type is `loom.version-field-collision` |
+| **`versioned`** | `version: int token = 1` | none — the optimistic-concurrency marker, echoed by the client on update (`If-Match`; a mismatch is a 409). **Applied by default** to every aggregate that is not `persistedAs: eventLog` (the event stream is its own concurrency control) — the expander splices it last, so an explicit `with versioned` is an idempotent no-op. A user-declared `version: int` is accepted as the counter; `version` of any other type is `loom.version-field-collision` |
 
 ```ddd
 context Inventory {
-  aggregate Item with auditable, softDeletable, softDelete, versioned, crudish {
+  aggregate Item with auditable, softDeletable, softDelete, versioned, crudish {   // `versioned` is redundant — it is on by default
     name: string
   }
 }
@@ -352,7 +352,7 @@ public restore(): void {
 
 ## Relationship to macros
 
-A `capability` subsumes the field/filter/stamp surface; **operations and structure stay macros** — `softDelete` (the `softDelete()`/`restore()` ops), `softDeleteByDefault` (context-wide application), `crudish` (canonical `create(...)` / `destroy {}` plus an `update(...)`, built from the host's writable fields; `crudish(updateOnly: true)` leaves deletion to `softDelete`), and the `scaffold*` family. `crudish` excludes capability-contributed fields (`createdAt`, `isDeleted`, `tenantId`, …) and non-payload access modifiers (`managed`, `token`, `internal`) from its generated parameters. The aggregate-header `audited` modifier (an `audit_records` trail plus `GET /<aggs>/{id}/history`; under `denyByDefault` the history read inherits the list gate — `loom.audit-history-ungated`) is a sibling facility, not a capability — see [chapter 20](20-observability-provenance.md). See [`../scaffold-macros.md`](../scaffold-macros.md).
+A `capability` subsumes the field/filter/stamp surface; **operations and structure stay macros** — `softDelete` (the `softDelete()`/`restore()` ops), `softDeleteByDefault` (context-wide application), `crudish` (canonical `create(...)` / `destroy {}` plus an `update(...)`, built from the host's writable fields; `crudish(updateOnly: true)` leaves deletion to `softDelete`), and the `scaffold*` family. `crudish` builds its parameters from the host's fields minus three sets: fields another macro contributed (origin-tagged), fields a `stamp` assigns (`createdAt`, `touchedAt`), and fields whose access modifier keeps them off the payload (`managed`, `token`, `internal`; `update` also drops `immutable`) — so `auditable`'s columns, `softDeletable`'s `isDeleted`, `tenantOwned`'s `internal tenantId` and the default `version` token are all out. A plain field a user capability contributes is **in**: `tenantScoped`'s `tenantId: string` above lands in `create(input: { subject; total; tenantId; … })`. The aggregate-header `audited` modifier (an `audit_records` trail plus `GET /<aggs>/{id}/history`; under `denyByDefault` the history read inherits the list gate — `loom.audit-history-ungated`) is a sibling facility, not a capability — see [chapter 20](20-observability-provenance.md). See [`../scaffold-macros.md`](../scaffold-macros.md).
 
 ## Validation rules
 
@@ -361,5 +361,6 @@ A `capability` subsumes the field/filter/stamp surface; **operations and structu
 - A capability's `filter` / `stamp` body type-checks against **each** implementing aggregate — e.g. a `stamp onCreate { createdBy := currentUser }` requires every implementor to carry a `createdBy` field; a missing field is an IR-validation error. A `filter` outside the queryable subset → `loom.criterion-not-selectable`.
 - `Self id` outside a capability → `loom.self-outside-capability`.
 - A principal-referencing `filter` or `stamp` on a deployable with no auth → `loom.context-filter-unsupported` / `loom.stamp-principal-without-auth`; any stamp on an event-sourced aggregate → `loom.stamp-on-event-sourced-invalid`; reading a stamp field in the stamped body → `loom.stamp-read-before-flush`.
-- A user field colliding with a built-in's flag → `loom.softdelete-field-collision` (`isDeleted`), `loom.version-field-collision` (`version`).
+- A user field colliding with a built-in's flag → `loom.softdelete-field-collision` (a non-`bool` `isDeleted` under `softDeletable`), `loom.version-field-collision` (a non-`int` `version` on any non-event-sourced aggregate — `versioned` is default-on, so this fires without any `with`).
+- `tenantOwned` outside a `tenancy by` system → `loom.tenant-owned-without-tenancy`; a non-`string` tenancy claim → `loom.tenant-owned-claim-type`; `tenantRegistry` outside one → `loom.tenant-registry-without-tenancy`.
 - `ignoring` placement / target → `loom.ignoring-clause-placement`, `loom.filter-bypass-unknown-capability`, `loom.filter-bypass-no-filter`.

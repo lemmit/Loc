@@ -47,7 +47,7 @@ domainService Pricing {
 }
 ```
 
-The block lowers to one runnable spec per subject, emitted next to the domain class on **all five backends** (`domain/order.test.ts` on node, `Tests/<App>.Tests/Orders/OrderTests.cs` on .NET, `src/test/java/…/AccountTests.java` on Java, `tests/test_order.py` on Python, `test/<ctx>/order_test.exs` on Elixir). Enum literals resolve to the generated enum, id strings to the branded constructors, and `.count` becomes the backend-native length.
+The block lowers to one runnable spec per subject, emitted next to the domain class on **all five backends** (`domain/order.test.ts` on node, `Tests/<App>.Tests/Orders/OrderTests.cs` on .NET, `src/test/java/…/OrderTests.java` on Java, `tests/test_order.py` on Python, `test/<ctx>/order_test.exs` on Elixir). Enum literals resolve to the generated enum, id strings to the branded constructors, and `.count` becomes the backend-native length.
 
 ::: tabs backend
 == node
@@ -156,7 +156,8 @@ describe("Sales (integration)", () => {
   it("a saved order can be read back", async () => {
     const o = Order.create({ customerId: "c-3", status: OrderStatus.Draft });
     await repos.order.save(o);
-    // …
+    const read = (await repos.order.findById(o.id))!;
+    expect(read.customerId).toBe("c-3");
   });
 });
 ```
@@ -264,9 +265,10 @@ A bare `expect <bool>` is rejected: every `expect` **must** end in an intrinsic 
 | `toHaveText(s)` | 1 | locator | auto-retrying DOM-text assertion (ui) |
 | `toHaveCount(n)` | 1 | locator | auto-retrying row/element count (ui) |
 | `toBeVisible()` | 0 | locator | element is visible (ui) |
+| `toBeSameInstant(iso)` | 1 | value | two ISO-8601 timestamps compared as instants (forgives `…00.0000000Z` vs `…00Z`); **`test e2e` only** — in a unit test it is rejected (*"'toBeSameInstant' compares wire timestamps and is only valid in a 'test e2e' block"*) |
 | `toThrow()` / `toThrow(<status>)` | 0–1 | value | the throw assertion (below) |
 
-Each `on: "locator"` matcher is **web-first**: against a UI it asserts on the live, auto-retrying Playwright locator rather than a snapshotted value — `expect(read.status).toHaveText("Confirmed")` lowers to `await expect(read.field("status")).toHaveText("Confirmed")`, and `expect(read.lines).toHaveCount(1)` to `await expect(read.linesRows()).toHaveCount(1)`. A `not.` prefix negates any `negatable` matcher. Arity is enforced by `checkMatcherArity`; `toThrow` is exempt (variable arity) and validated separately.
+Each `on: "locator"` matcher is **web-first**: against a UI it asserts on the live, auto-retrying Playwright locator rather than a snapshotted value — `expect(read.status).toHaveText("Confirmed")` lowers to `await expect(read.field("status")).toHaveText("Confirmed")`, and `expect(read.lines).toHaveCount(1)` to `await expect(read.linesRows()).toHaveCount(1)`. A `not.` prefix negates any `negatable` matcher (every matcher except `toThrow`). Arity is enforced by `checkMatcherArity`; `toThrow` is exempt (variable arity) and validated separately.
 
 ### `toThrow()` — the throw assertion
 
@@ -284,8 +286,8 @@ expect(api.orders.getById(ord)).toThrow(404)
 ```ts
 // unit: the actual is wrapped in a thunk so vitest can catch the throw
 expect(() => { order.addLine("00000000-0000-0000-0000-000000000002", 0); }).toThrow();
-// e2e: the pinned status becomes a status-match against the fetch error
-await expect(__get(`${base}/api/orders/${ord.id}`)).rejects.toThrow(/→ 404/);
+// e2e: the pinned status becomes a status-match against the fetch helper's error message
+await expect(async () => { await __get(`${base}/api/orders/${ord.id}`); }).rejects.toThrow(/→ 404\b/);
 ```
 == dotnet
 ```csharp

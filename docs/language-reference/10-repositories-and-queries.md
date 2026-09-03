@@ -2,7 +2,7 @@
 
 Reading data: the `repository` container and its `find` operations, the restricted "queryable subset" a `where` clause admits, reusable `criterion` predicate specifications, `Repo.run(<Criterion>)` and `retrieval` query bundles with `sort`/`loads`, the `paged`/`envelope`/`option` return shapes, the `ignoring` capability-filter bypass, and — the read-model surface that replaced the removed `view` — `projection` in its two flavours: **query-time** (`from … where … join … group by … select …`, computed on every read) and **folded** (`keyed by` + `on(e: Event) { … }`, a materialized read-model table). Reach for it when you need to know exactly what SQL a read lowers to on each backend, why a `where` is rejected, or which read shape (find / criterion / retrieval / projection) to pick.
 
-> **Grammar:** `Repository`, `FindDecl`, `IgnoringClause`, `Criterion`, `Retrieval`, `RetrievalLiteral`, `SortItem`, `LoadPath`, `Projection`, `ProjectionMember`, `ProjectionOn`, `ProjectionJoin`, `ProjectionSelect`, `QueryHandler` · **Validators:** `loom.find-where-not-queryable` / `-unknown-field` / `-column-column`, `loom.find-reserved-name`, `loom.duplicate-find`, `loom.repository-find-deprecated`, `loom.find-gate-not-current-user`, `loom.index-suggestion`, `loom.criterion-*`, `loom.retrieval-*`, `loom.filter-bypass-*`, `loom.ignoring-clause-placement`, `loom.projection-*` (~35 codes), `loom.read-context-repo-write`, `loom.paged-query-handler-unsupported-backend` (queryable oracle: `firstNonQueryableNode` in `src/ir/validate/checks/shared.ts`) · **Docs:** [`../criterion.md`](../criterion.md), [`../scaffold-macros.md`](../scaffold-macros.md) (`scaffoldPaged`, `scaffoldDashboard`)
+> **Grammar:** `Repository`, `FindDecl`, `IgnoringClause` (fragment), `Criterion`, `Retrieval`, `RetrievalLiteral`, `SortItem`, `LoadPath`, `Projection`, `ProjectionMember`, `ProjectionOn`, `ProjectionJoin`, `ProjectionSelect`, `QueryHandler` · **Validators:** `loom.find-where-not-queryable` / `-unknown-field` / `-column-column`, `loom.find-reserved-name`, `loom.duplicate-find`, `loom.repository-find-deprecated`, `loom.find-gate-not-current-user`, `loom.index-suggestion`, `loom.find-predicate-unsupported`, `loom.findall-*`, `loom.criterion-*`, `loom.retrieval-*`, `loom.filter-bypass-*`, `loom.ignoring-clause-placement`, `loom.projection-*` (35 codes, plus two `#document` message variants), `loom.field-mask-projection-source`, `loom.read-context-repo-write`, `loom.paged-query-handler-unsupported-backend` (queryable oracle: `firstNonQueryableNode` in `src/ir/validate/checks/shared.ts`) · **Docs:** [`../criterion.md`](../criterion.md), [`../scaffold-macros.md`](../scaffold-macros.md) (`scaffoldPaged`, `scaffoldDashboard`)
 
 All multi-backend examples below are generated from one scratch `system` (`Catalog` context: `Product`, `Customer`, `Order with softDeletable`) once per backend pin; output is excerpted.
 
@@ -113,7 +113,7 @@ repository 'Orders' find 'busy': where-clause is not queryable (collection proje
 'this.<vo>.<sub>' refs, parameter refs, literals.
 ```
 
-Sibling codes for the same position: `loom.find-where-unknown-field` (a `this.<x>` that isn't a real column), `loom.find-where-column-column` (both sides of a comparison are columns — `eq()` needs one column and one value), and the `loom.retrieval-where-*` / `loom.projection-where-not-queryable` / `loom.criterion-not-selectable` twins for the other three positions. There is no per-backend escape hatch: rejecting at the IR layer means no backend silently emits broken SQL.
+Sibling codes for the same position: `loom.find-where-unknown-field` (a `this.<x>` that isn't a real column), `loom.find-where-column-column` (both sides of a comparison are columns — `eq()` needs one column and one value), and the `loom.retrieval-where-*` / `loom.projection-where-not-queryable` / `loom.criterion-not-selectable` twins for the other three positions. There is no per-backend escape hatch: rejecting at the IR layer means no backend silently emits broken SQL. One further gate keys off the deployable's explicit `persistence:` selector — EF Core and Drizzle (the defaults) lower the whole subset, but `persistence: dapper` / `persistence: mikroorm` lower a narrower one, and a predicate outside it is `loom.find-predicate-unsupported` at validation rather than a codegen throw (`src/ir/util/find-predicate-capability.ts`).
 
 ## Return shapes
 
@@ -210,7 +210,7 @@ find mine(c: string): Order? requires currentUser.role == "agent" where this.cod
 
 ## `criterion`
 
-A `criterion` is a named, parameterised, **pure boolean predicate** over a candidate type (the Specification pattern). `of <Agg>` names the candidate; inside the body, bare field names (and `this`) resolve against it — the same convention as `invariant`/`derived`. `of <Agg> as <alias>` binds an explicit candidate name instead (an alias that shadows a parameter is `loom.criterion-alias-collision`); `of bool` is an ambient predicate with no candidate. Criteria compose with `&& || !` (the boolean operators *are* the composition), must be pure (`loom.criterion-impure`), acyclic (`loom.criterion-cycle`), and called with the right arity (`loom.criterion-arity`).
+A `criterion` is a named, parameterised, **pure boolean predicate** over a candidate type (the Specification pattern). `of <Agg>` names the candidate; inside the body, bare field names (and `this`) resolve against it — the same convention as `invariant`/`derived`. `of <Agg> as <alias>` binds an explicit candidate name instead (an alias that shadows a parameter is `loom.criterion-alias-collision`); `of bool` is an ambient predicate with no candidate — those two are the only admitted targets (`loom.criterion-unsupported-target`), and a criterion may only filter the aggregate it is declared `of` (`loom.criterion-target-mismatch` when a `find`/`retrieval`/`filter` on another aggregate names it). Criteria compose with `&& || !` (the boolean operators *are* the composition), must be pure (`loom.criterion-impure`), acyclic (`loom.criterion-cycle`), and called with the right arity (`loom.criterion-arity`).
 
 ```ddd
 criterion ActiveOrder of Order = status != OrderStatus.Closed
@@ -392,11 +392,13 @@ end
 ```
 ::: end
 
-A read position (an api `GET` route, a `queryHandler`, a `reading` service) may not reach the mutating repository face — a `GET` route bound to a `commandHandler` is `loom.read-context-repo-write`. Domain-service reads have their own rules (`loom.domain-service-read-unsupported`, `-cross-context-read` — [chapter 23](23-domain-services-and-seeds.md)), and a repository read inside a test `expect(...)` must be `let`-bound first (`loom.integration-find-must-bind` — [chapter 18](18-testing.md)).
+The inline twin inside a handler / workflow body is `Repo.findAll(<Criterion>(args), page: { offset: 0, limit: N })` (optionally `… ignoring …`, see below): the criterion must exist on that aggregate with the right arity (`loom.findall-unknown-criterion` / `-criterion-mismatch` / `-criterion-arity`), and in a workflow body the `page:` bound is mandatory — an unbounded list read is `loom.findall-no-page`.
+
+A read position (an api `GET`/`HEAD` route, a `queryHandler`, a `reading` service) may not reach the mutating repository face — a read-method route bound to a mutating `commandHandler` or a workflow `handle` is `loom.read-context-repo-write`. Domain-service reads have their own rules (`loom.domain-service-read-unsupported`, `-cross-context-read` — [chapter 23](23-domain-services-and-seeds.md)), and a repository read inside a test `expect(...)` must be `let`-bound first (`loom.integration-find-must-bind` — [chapter 18](18-testing.md)).
 
 ## `ignoring` — capability-filter bypass
 
-A trailing `ignoring` clause on a read skips the query-filters a capability contributed (soft-delete row hiding, tenancy scoping, a `filter` capability), keyed on the **capability** name. `ignoring *` bypasses every capability filter on the aggregate; `ignoring A, B` bypasses exactly those. `ignoring` is a soft keyword (fields/params named `ignoring` keep parsing). All five backends honour it (`FILTER_BYPASS_FAMILIES`):
+A trailing `ignoring` clause on a read skips the query-filters a capability contributed (soft-delete row hiding, tenancy scoping, a `filter` capability), keyed on the **capability** name. `ignoring *` bypasses every capability filter on the aggregate; `ignoring A, B` bypasses exactly those. `ignoring` is a soft keyword (fields/params named `ignoring` keep parsing). All five backends honour it (`FILTER_BYPASS_FAMILIES`; `loom.filter-bypass-unsupported` is a dormant net):
 
 ```ddd
 repository Orders for Order {
@@ -638,20 +640,71 @@ The shape discipline (each its own diagnostic):
 - **Aggregate `from` source required** — workflow/projection sources and folded projections cannot be grouped (`loom.projection-groupby-source-invalid`).
 - **At least one aggregate `select`** — a `group by` with only per-row selects is just DISTINCT (`loom.projection-groupby-no-aggregate`).
 - **Per-row selects must be grouping columns** (`loom.projection-groupby-select-not-grouped`).
-- **Grouping keys are source columns** — optionally bucketed by a supported transform (`o.placedAt.startOfDay()`, `date_trunc('day', …)`); any other computed key is `loom.projection-groupby-key-not-columnar`, and a key `select` must repeat the grouping expression exactly.
+- **Grouping keys are source columns** — optionally bucketed by the one supported transform, `startOfDay()` on a `datetime` (`GroupKeyTransform` in `src/ir/util/projection-aggregate.ts`); any other computed key (arithmetic, another intrinsic) is `loom.projection-groupby-key-not-columnar`, and a key `select` must repeat the grouping expression exactly (`select day = o.placedAt` against `group by o.placedAt.startOfDay()` is per-row, not per-group).
 - **No `join`, no `keyed by`** — a join is an app-level by-id load after the query (`loom.projection-groupby-join-invalid`), and grouped rows are the groups, not id-keyed entities (`loom.projection-groupby-keyed-invalid`).
+
+The transform renders as the same `date_trunc('day', …)` in SELECT, GROUP BY and ORDER BY on every backend — a daily series:
+
+```ddd
+projection DailyRevenue {
+  day: datetime  revenue: money
+  from Order as o
+  group by o.placedAt.startOfDay()
+  select day = o.placedAt.startOfDay(), revenue = sum(o.total)
+}
+```
+
+::: tabs backend
+== node
+```ts
+const rows = await db.select({ day: sql`date_trunc('day', ${schema.orders.placedAt})`.mapWith(schema.orders.placedAt), revenue: sum(schema.orders.total) })
+  .from(schema.orders).where(not(eq(schema.orders.isDeleted, true)))
+  .groupBy(sql`date_trunc('day', ${schema.orders.placedAt})`).orderBy(sql`date_trunc('day', ${schema.orders.placedAt})`);
+```
+== elixir
+```elixir
+from(record in D.Catalog.Order, where: not record.is_deleted,
+  group_by: fragment("date_trunc('day', ?)", record.placed_at),
+  order_by: fragment("date_trunc('day', ?)", record.placed_at),
+  select: %{day: fragment("date_trunc('day', ?)", record.placed_at), revenue: sum(record.total)})
+```
+::: end
+
+**No paging, no `order by`.** A projection read returns the whole row list — there is no `paged` carrier or sort clause on a projection (the grammar reserves `order by` for a later slice; no `loom.projection-paged-*` code exists). Grouped reads are ordered by their grouping columns; for a paged list, use a paged `queryHandler` ([above](#reporun--the-paged-queryhandler)).
 
 ### Sources — aggregate, workflow, projection
 
 `from` may name an **aggregate** (read through its repository — the default and only source that supports `join`, `ignoring`, the shorthand, and the direct-table arms), a **workflow** (read through its persisted instance rows — it must be state-backed and observable, i.e. have a single id-shaped correlation field: `loom.projection-workflow-source-not-observable`, `-eventsourced-invalid`; no `join`: `-join-invalid`), or another **materialized projection** (a folded one with a table — a query-time source has nothing to read `from`: `loom.projection-source-not-materialized`; never itself: `-source-self`; no `join`: `-source-join-invalid`).
 
 ```ddd
+workflow Fulfil {
+  orderId: Order id
+  attempts: int
+  create(p: OrderConfirmed) by p.orderRef { attempts := 1 }
+}
 projection ActiveFulfils {
   orderId: Order id  attempts: int
   from Fulfil as f where f.attempts > 0
   select orderId = f.orderId, attempts = f.attempts
 }
 ```
+
+The read goes straight to the workflow's instance-state table (no repository, no capability filters):
+
+::: tabs backend
+== node
+```ts
+// http/query-projections.ts — GET /projections/active_fulfils
+const rows = await db.select().from(schema.fulfils).where(gt(schema.fulfils.attempts, 0));
+const projected = rows.map((r) => ({ orderId: r.orderId, attempts: r.attempts }));
+```
+== elixir
+```elixir
+# lib/d/catalog/query_projections/active_fulfils.ex — "Source workflow: Fulfil (saga instance state)"
+rows = from(record in D.Catalog.Workflows.FulfilState, where: record.attempts > 0) |> Repo.all()
+Enum.map(rows, fn record -> %{orderId: record.order_id, attempts: record.attempts} end)
+```
+::: end
 
 ### The source has to have columns
 
@@ -661,7 +714,7 @@ Two more conditions bite only the surviving document `count()`: a capability-fil
 
 ### Folded — `keyed by` + `on(e: Event)`
 
-A projection with no query clauses and one or more `on(e: <Event>) { … }` handlers is a **materialized read model**: a table with one row per `keyed by` key, updated by a pure fold on each event. `keyed by` is **required** and must name a declared id-shaped field (`loom.projection-key-unknown` / `-key-not-id`); the routing key is `e.<key>` unless `by <expr>` says otherwise (an event without the key field and no `by` is `loom.projection-event-unkeyed`). Each event type folds in exactly one handler (`loom.projection-duplicate-on`), and the body is a **pure fold** — `:=` assignments and `let` only; an `emit`, a call, a guard or a `return` is `loom.projection-fold-impure` (use a workflow `on(e)` reactor instead). In-process dispatch is channel-routed, so the event must be carried by a `channel` or the fold never runs (`loom.projection-event-uncarried`); folding an event that carries a `mask unless` field would launder the masked value into an unredacted row, so it is refused too (`loom.field-mask-projection-source` — see [chapter 17](17-auth.md)).
+A projection with no query clauses and one or more `on(e: <Event>) { … }` handlers is a **materialized read model**: a table with one row per `keyed by` key, updated by a pure fold on each event. `keyed by` must name a declared id-shaped field (`loom.projection-key-unknown` / `-key-not-id`); the routing key is `e.<key>` unless `by <expr>` says otherwise (an event without the key field and no `by` is `loom.projection-event-unkeyed`). The grammar makes `keyed by` optional — but a *fold* without it has no key to route by and is refused by that same `loom.projection-event-unkeyed`; the keyless ("singleton") projection is the query-time whole-table aggregation above, not a fold. Each event type folds in exactly one handler (`loom.projection-duplicate-on`), and the body is a **pure fold** — `:=` assignments and `let` only; an `emit`, a call, a guard or a `return` is `loom.projection-fold-impure` (use a workflow `on(e)` reactor instead). In-process dispatch is channel-routed, so the event must be carried by a `channel` or the fold never runs (`loom.projection-event-uncarried`); folding an event that carries a `mask unless` field would launder the masked value into an unredacted row, so it is refused too (`loom.field-mask-projection-source` — see [chapter 17](17-auth.md)).
 
 ```ddd
 event OrderConfirmed { orderRef: Order id, at: datetime }
@@ -719,4 +772,4 @@ The projection tracks **events, not rows**: an aggregate `update` that emits not
 
 ### Backend gates
 
-Every projection shape above emits on all five backends; the per-backend codes (`loom.projection-query-time-unsupported`, `-workflow-source-unsupported-backend`, `-source-unsupported-backend`, `-whole-table-aggregation-unsupported`, `-groupby-unsupported-backend`) are dormant nets for a future backend or persistence adapter, except the `#document` Java variants above.
+Every projection shape above emits on all five backends (`PROJECTION_QT_SUPPORTED` / `_AGG_` / `_GROUPBY_` / `_WF_SOURCE_` / `_PROJ_SOURCE_SUPPORTED` in `src/ir/validate/checks/system-checks.ts` all list node/dotnet/java/python/elixir); the per-backend codes (`loom.projection-query-time-unsupported`, `-workflow-source-unsupported-backend`, `-source-unsupported-backend`, `-whole-table-aggregation-unsupported`, `-groupby-unsupported-backend`) are dormant nets for a future backend or persistence adapter, except the `#document` Java variants above. There is no per-feature `docs/projections.md`; this chapter and [`../scaffold-macros.md`](../scaffold-macros.md) (`scaffoldDashboard`) are the reference.
