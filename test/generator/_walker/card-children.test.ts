@@ -76,7 +76,7 @@ const CHILDREN_SLOT: Record<string, string> = {
   vue: "<slot />",
   svelte: "{@render children?.()}",
   angular: "<ng-content></ng-content>",
-  feliz: "props.children",
+  feliz: "(props.children)",
   flutter: "(child ?? const SizedBox.shrink())",
 };
 
@@ -97,7 +97,7 @@ describe("Card keeps every body child", () => {
     const src = await panelSource("feliz", `Card { "T", Text { "a" }, Slot { } }`);
     // Both children on ONE `prop.children [ … ]` line, `;`-separated.  A
     // `\n`-joined pair inside this inline list is the §24 curry error.
-    expect(src).toMatch(/Html\.p \[[^\n]*\]; props\.children/);
+    expect(src).toMatch(/Html\.p \[[^\n]*\]; \(props\.children\)/);
   });
 
   it("flutter separates the card's children with `,` — a Dart list literal", async () => {
