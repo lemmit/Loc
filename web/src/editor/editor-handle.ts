@@ -11,8 +11,31 @@
  *  `App.tsx` holds the ref.  Declaring it in `LoomEditor.tsx` meant every
  *  consumer of the TYPE sat one careless `import` away from the 9.56 MB
  *  editor.  See M-T8.15. */
+/** A Monaco-shaped range — 1-based line numbers AND columns, end-exclusive.
+ *  Declared here (not imported from `fix-hint-actions.ts`) so the handle stays
+ *  free of any editor-implementation import. */
+export interface EditorRange {
+  startLineNumber: number;
+  startColumn: number;
+  endLineNumber: number;
+  endColumn: number;
+}
+
+export interface EditorTextEdit {
+  range: EditorRange;
+  text: string;
+}
+
 export interface EditorHandle {
   setSource: (text: string) => void;
+  /** Apply text edits as ONE undoable edit, dispatched like a keystroke — the
+   *  Problems panel's Fix action (M-T8.18) lands the fix-hint registry's
+   *  resolved edits through here, the same edits the editor's own quick-fix
+   *  lightbulb applies. */
+  applyEdits: (edits: readonly EditorTextEdit[]) => void;
+  /** Scroll `range` into view, put the cursor on it and focus the editor —
+   *  a Problems row click, `F8`, and the panes' *Go to line N*. */
+  revealRange: (range: EditorRange) => void;
   /** Revert the most recent edit on the editor's own undo stack.  The editor
    *  reports the change back through its normal `onChange` path, so the app
    *  (and every pane) follows it like a keystroke. */

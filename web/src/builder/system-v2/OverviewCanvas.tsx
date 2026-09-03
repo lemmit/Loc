@@ -28,12 +28,15 @@ import "@xyflow/react/dist/style.css";
 import { Box, Button, Group, MultiSelect, ScrollArea, Stack, Text, TextInput } from "@mantine/core";
 import type { AstNode } from "langium";
 import type { LayoutCtx } from "../../layout/ctx";
+import { MODEL_EMPTY, USED_BY } from "../../layout/vocabulary";
 import type { Diagnostic } from "../../lsp/protocol";
 import type { WireField } from "../../../../src/ir/types/loom-ir.js";
 import { enrichLoomModel } from "../../../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../../../src/ir/lower/lower.js";
 import { usePaneHarness } from "../pane-harness";
 import { RefusalLine } from "../refusal";
+import { ParseErrorState } from "../ParseErrorState";
+import { PARSE_ERROR } from "../../layout/vocabulary";
 import { groupedLayout } from "../system/grouped-layout";
 import { buildLinkedModel } from "../system/linked-doc";
 import {
@@ -513,11 +516,7 @@ export default function OverviewCanvas({ ctx, onClose, onOpen }: {
     return (
       <Box style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {toolbar}
-        <Box p="md">
-          <Text size="sm" c="dimmed">
-            Source has syntax errors — fix them in the editor to use the model builder.
-          </Text>
-        </Box>
+        <ParseErrorState ctx={ctx} purpose={PARSE_ERROR.purpose.model} testid="overview" />
       </Box>
     );
   }
@@ -556,7 +555,7 @@ export default function OverviewCanvas({ ctx, onClose, onOpen }: {
               style={{ position: "absolute", top: 12, left: 12, zIndex: 5 }}
               data-testid="c4system-v2-overview-empty"
             >
-              No structural model found. Declare a system with modules / aggregates to see the graph.
+              {MODEL_EMPTY.overview}
             </Text>
           )}
         </Box>
@@ -573,8 +572,7 @@ export default function OverviewCanvas({ ctx, onClose, onOpen }: {
         >
           {!selected ? (
             <Text size="xs" c="dimmed">
-              Select a construct to read its detail. Editing lives in the drill-down — `Open ↳` (or a
-              double-click) jumps there.
+              {MODEL_EMPTY.select}
             </Text>
           ) : (
             <Stack gap="xs" style={{ flex: 1, minHeight: 0 }}>
@@ -594,6 +592,21 @@ export default function OverviewCanvas({ ctx, onClose, onOpen }: {
               </Group>
               <Text size="sm" fw={600} data-testid="c4system-v2-overview-selected">
                 {selected.name}
+              </Text>
+              {/* The reverse references the graph already carries — every
+                  edge INTO the selected node, named by its source and the
+                  relation (M-T8.21 slice 4). */}
+              <Text size="xs" c="dimmed" data-testid="c4system-v2-overview-usedby">
+                {(() => {
+                  const refs = (graph?.edges ?? [])
+                    .filter((e) => e.target === selected.id)
+                    .map((e) => {
+                      const src = graph?.nodes.find((n) => n.id === e.source);
+                      return src ? `${src.kind} ${src.name} (${e.label})` : null;
+                    })
+                    .filter((s): s is string => s !== null);
+                  return refs.length > 0 ? `${USED_BY.label}: ${refs.join(", ")}` : USED_BY.none;
+                })()}
               </Text>
               {overlay && (
                 <Text size="xs" c="dimmed" data-testid="c4system-v2-overview-coverage">

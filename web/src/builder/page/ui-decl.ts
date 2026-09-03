@@ -13,6 +13,7 @@ import type {
 } from "../../../../src/language/generated/ast.js";
 import { isArea, isPage } from "../../../../src/language/generated/ast.js";
 import { parseDdd } from "../parse";
+import { addConstructSource } from "../system/add";
 import { applyEdits, nodeEditRange, type TextEdit } from "../edit-engine";
 import { baseLabel, baseSpecOf, typeText, type BaseSpec, type TypeSpec } from "../system/fields";
 
@@ -706,4 +707,53 @@ export function deleteMenuLink(
   const offset = prev ? prev.end : cst.offset;
   const end = prev ? cst.end : (next?.offset ?? cst.end);
   return ifParses(applyEdits(source, [{ offset, end, newText: "" }]));
+}
+
+// ===========================================================================
+// Pages (M-T8.21 — the Builder's "Add a page" empty state)
+// ===========================================================================
+
+/** A page name not yet declared anywhere in the model — `Home` when it is
+ *  free, else `Page1`, `Page2`, … */
+function freshPageName(ast: Model): string {
+  const taken = new Set<string>();
+  for (const n of AstUtils.streamAst(ast)) {
+    if (isPage(n)) taken.add(n.name);
+  }
+  if (!taken.has("Home")) return "Home";
+  for (let i = 1; ; i++) {
+    const candidate = `Page${i}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+/** Add a minimal editable page (`route:` + a one-heading `body:`) to the
+ *  named `ui` (the first one when unnamed).  With NO `ui` in the source at
+ *  all, the same `+ UI` entry the model builder's palette uses declares one
+ *  first (`addConstructSource(source, "ui")`), then the page goes into it —
+ *  so the Builder's empty state can always offer one click to a real page.
+ *  Returns the new page's name alongside the source so the caller can select
+ *  it; null when nothing could be spliced or the result would not parse. */
+export function addPage(source: string, uiName?: string): { source: string; page: string } | null {
+  let ui = locateUi(source, uiName);
+  let base = source;
+  if (!ui) {
+    if (uiName !== undefined) return null;
+    const withUi = addConstructSource(source, "ui");
+    if (withUi == null) return null;
+    base = withUi;
+    ui = locateUi(base);
+    if (!ui) return null;
+  }
+  const cst = ui.$cstNode;
+  if (!cst) return null;
+  const name = freshPageName(parseDdd(base).ast);
+  const route = name === "Home" ? "/" : `/${name.toLowerCase()}`;
+  const anchor = ui.members[ui.members.length - 1]?.$cstNode;
+  const edit = insertMemberEdit(base, cst, anchor, (i) =>
+    block(i, `page ${name} {`, [`route: ${JSON.stringify(route)}`, `body: Stack { Heading(${JSON.stringify(name)}) }`]),
+  );
+  if (!edit) return null;
+  const next = ifParses(applyEdits(base, [edit]));
+  return next == null ? null : { source: next, page: name };
 }

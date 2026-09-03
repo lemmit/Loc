@@ -8,6 +8,7 @@ import { Box, Button, Group, MultiSelect, Select, Stack, Text, TextInput } from 
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { InlineConfirm, confirmSites } from "../../util/confirm";
+import { DETAIL_TOGGLE, IconFx, IconPencil, IconX, type DetailToggleKind } from "../icons";
 import { IDENTIFIER, IDENTIFIER_RULE } from "../system/rename";
 import type { VBadge, ViewKind } from "./view-graph";
 
@@ -80,7 +81,7 @@ export interface ConstructNodeData {
    *  state is the PANE's (`detailsOpen` + `onToggleDetails`), not local: an
    *  expanded node is taller than its layout row, so the pane also has to lift
    *  it above the siblings it now overlaps. */
-  detailsLabel?: string;
+  detailsLabel?: DetailToggleKind;
   detailsOpen?: boolean;
   onToggleDetails?: () => void;
   /** Inline structured editor for the construct's expression (find filter,
@@ -150,13 +151,14 @@ function NodeInput({ spec }: { spec: NodeTextInput }): JSX.Element {
         variant="subtle"
         color="red"
         data-testid={`${spec.testid}-del`}
+        aria-label={`remove ${spec.label}`}
         styles={{ root: { paddingInline: 4, height: 22, minHeight: 22, color: "white" } }}
         onClick={(e) => {
           e.stopPropagation();
           spec.onDelete!();
         }}
       >
-        ×
+        <IconX />
       </Button>
     </Group>
   );
@@ -407,14 +409,19 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
               variant={d.detailsOpen ? "filled" : "subtle"}
               color="gray"
               data-testid="c4system-v2-details-toggle"
-              title="edit this member's clauses"
+              title={DETAIL_TOGGLE[d.detailsLabel].label}
+              aria-label={DETAIL_TOGGLE[d.detailsLabel].label}
+              aria-expanded={d.detailsOpen === true}
               styles={{ root: { paddingInline: 4, height: 18, minHeight: 18, color: "white" } }}
               onClick={(e) => {
                 e.stopPropagation();
                 d.onToggleDetails?.();
               }}
             >
-              {d.detailsLabel}
+              {(() => {
+                const Icon = DETAIL_TOGGLE[d.detailsLabel].Icon;
+                return <Icon />;
+              })()}
             </Button>
           )}
           {d.onToggleExpression && (
@@ -424,13 +431,15 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
               color="gray"
               data-testid="c4system-v2-expr-toggle"
               title="edit the expression structurally"
+              aria-label="edit the expression structurally"
+              aria-expanded={d.expressionEditor != null}
               styles={{ root: { paddingInline: 4, height: 18, minHeight: 18, color: "white" } }}
               onClick={(e) => {
                 e.stopPropagation();
                 d.onToggleExpression!();
               }}
             >
-              ƒx
+              <IconFx />
             </Button>
           )}
           {d.onRename && (
@@ -439,13 +448,15 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
               variant="subtle"
               color="gray"
               data-testid="c4system-v2-rename"
+              title={`rename ${d.kind} ${d.name}`}
+              aria-label={`rename ${d.kind} ${d.name}`}
               styles={{ root: { paddingInline: 4, height: 18, minHeight: 18, color: "white" } }}
               onClick={(e) => {
                 e.stopPropagation();
                 setEditing(true);
               }}
             >
-              ✎
+              <IconPencil />
             </Button>
           )}
           {d.onDelete && (
@@ -454,13 +465,15 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
               variant="subtle"
               color="red"
               data-testid="c4system-v2-delete"
+              title={`delete ${d.kind} ${d.name}`}
+              aria-label={`delete ${d.kind} ${d.name}`}
               styles={{ root: { paddingInline: 4, height: 18, minHeight: 18, color: "white" } }}
               onClick={(e) => {
                 e.stopPropagation();
                 setConfirmingDelete(true);
               }}
             >
-              ×
+              <IconX />
             </Button>
           )}
         </Group>
