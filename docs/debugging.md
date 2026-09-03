@@ -161,6 +161,23 @@ with the `.ddd` construct + source location it maps to. Unrecognized frames
 node bin/cli.js trace crash.log --map out/.loom/sourcemap.json
 ```
 
+The annotated log goes to **stdout** (pipeable, byte-identical for anything
+that didn't resolve); a one-line coverage verdict goes to **stderr** —
+`annotated 3 of 7 stack frame(s)`. When NOTHING matched, that verdict names
+the frame files it saw, what the map covers, and the usual cause:
+
+```
+ddd trace: no frame matched the sourcemap (0 of 3 stack frame(s)).
+  frame files: /app/dist/index.js
+  out/.loom/sourcemap.json covers 19 generated file(s), e.g. api/domain/issue.ts, …
+  A BUNDLED frame (dist/…, *.min.js, a single-file build) names the bundle, not the
+  generated file the map is keyed by. Run the process from the generated sources, or
+  resolve the bundle's own source map first (`node --enable-source-maps`), …
+```
+
+A bundled production stack is the common case: the map is keyed by the
+generated source paths, so a `dist/index.js` frame can never match one.
+
 This is the path for **Python and Elixir** (no native `#line`), and for any
 production stack trace you have as text but not a live process.
 
@@ -175,9 +192,17 @@ node bin/cli.js breakpoints app.ddd --line 42 --map out/.loom/sourcemap.json
 # hono_api/domain/order.ts:55:12
 ```
 
-A `.ddd` line that fans out to several generated files lists them all; a
-line with no mapping is reported as such (exit 0 — a valid answer, not a
-failure).
+A `.ddd` line that fans out to several generated files lists them all,
+narrowest mapping first; a line with no mapping is reported as such (exit 0 —
+a valid answer, not a failure).
+
+**Enclosing regions are dropped when the line maps something of its own.** A
+statement inside an operation is *also* covered by its aggregate's whole-file
+regions, so the raw fan-out answered `label := note` with the real
+`domain/order.ts:29:18` plus `order.test.ts:1`, `order.ts:1` and
+`order.routes.ts:1` — breakpoint sites on an import statement. Those coarse
+targets are listed only for a line that has no finer mapping (an
+`aggregate Order {` header, a plain property), where they are the answer.
 
 ## 4. The `ddd-dap` debug adapter
 

@@ -88,9 +88,7 @@ function discoverLocales(dir: string, filter?: string): { locale: string; file: 
 export async function runI18nExtract(file: string, options: { out?: string }): Promise<void> {
   const source = await extractCatalog(file);
   const out =
-    options.out !== undefined
-      ? path.resolve(options.out)
-      : path.dirname(path.resolve(file));
+    options.out !== undefined ? path.resolve(options.out) : path.dirname(path.resolve(file));
   const target = path.join(out, EXTRACT_REL);
   writeJson(target, source);
   console.log(

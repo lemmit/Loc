@@ -69,6 +69,81 @@ interface JsonDiagnostic {
 
 `GenerateReport` is `ValidateReport` minus `outline`, plus `deployables: GenerateDeployable[]` (`{ name, platform, port? }`). `Outline` is the node address book — `{ systems: OutlineSystem[]; contexts: OutlineContext[] }`, each context listing its aggregates / valueObjects (each an `OutlineDecl` of `{ node, members[] }`) plus workflows / enums / events / repositories, and each system additionally listing its `uis` (an `OutlineDecl` per `ui`, whose members are the pages / components / stores inside it) — the same address space `node` and `ModelPatch.target` use. An address qualifies a node by every named declaration enclosing it, so a page reads `page <Ui>.<Area>.<Page>` and an entity part's field reads `entity <Context>.<Aggregate>.<Part>.<field>`.
 
+## Addressing a node (`ModelPatch.target`)
+
+Every patch names its target by the SAME canonical address the outline lists and a
+diagnostic's `node` carries:
+
+```
+<keyword> <Context>.<Decl>[.<member>]
+```
+
+All three parts are load-bearing, and this is where hand-written patches go wrong:
+
+| Written | Result |
+|---|---|
+| `Order.total` | not found — no keyword |
+| `aggregate Order.total` | not found — no context qualifier |
+| `operation Sales.Order.total` | not found — `total` is a property, so it reads under `aggregate` |
+| `aggregate Sales.Order.total` | ✅ resolves |
+
+The keyword is the innermost enclosing DECLARATION's keyword, not the member's own
+kind: a property, a `derived`, a page `state` field and an `action` all read under the
+declaration that holds them (`aggregate Sales.Order.total`), while a declaration that
+has its own keyword uses it (`operation Sales.Order.bump`, `page Admin.Back.Board`,
+`entity Sales.Order.Line.qty`). A `payload` keeps the spelling the author used
+(`command Sales.PlaceOrder`).
+
+A member-level `replace`, end to end:
+
+```ddd
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate Order {
+        total: int
+      }
+      repository Orders for Order { }
+    }
+  }
+  // … storage / resource / deployable …
+}
+```
+
+```json
+[{ "op": "replace", "target": "aggregate Orders.Order.total", "source": "total: money" }]
+```
+
+```bash
+$ ddd patch shop.ddd --patches bump.json   # patched source on stdout
+```
+
+```ddd
+      aggregate Order {
+        total: money
+      }
+```
+
+When a target doesn't resolve, the error is the address book rather than a bare "not
+found" — it prints the accepted shape, the nearest matching addresses, and the
+addresses the model actually declares:
+
+```
+$ ddd patch shop.ddd --patches typo.json
+patch error [replace aggregate Order.total]: target 'aggregate Order.total' not found
+  addresses are `<keyword> <Context>.<Decl>[.<member>]` — the keyword and every
+  qualifying segment are required (`aggregate Sales.Order.total`, not `Order.total`);
+  `ddd parse <file> --json` prints the same address book as `outline`
+  did you mean: aggregate Orders.Order.total
+  address book (8):
+    aggregate Orders.Order
+    aggregate Orders.Order.total
+    …
+```
+
+`applyPatches` is atomic: if any patch in the batch fails to resolve (or two edits
+overlap), nothing is applied and `text` comes back as the original source.
+
 The contract also pins the navigational results: `FindSymbolResult = NavSymbol | NavError`, `ReferencesResult`, `HoverResult`, and the rewrite results `RenameResult | QuickfixResult | UnfoldMacroResult` (each an `EditResult { edits: NavTextEdit[]; title? }` or an `EditError`). An unresolved or ambiguous symbol returns `NavError` with candidate addresses — never a silent pick.
 
 ## A concrete round trip
