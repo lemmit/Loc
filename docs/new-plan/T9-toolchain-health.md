@@ -542,4 +542,6 @@ Claims accounted for rather than dropped: the phase-⑦ rejection gate is KEPT (
 
 Net: **−813 +1 fixture (171) +1 test (55) = −587 LOC**, three real bugs fixed across two backends, and 5 runtime cells where there were 5 string cells.
 
+**Verified on all five backends by a real boot, not by reasoning** — node on PGlite, and elixir / python / dotnet / java each against a live Postgres, all five matching ONE wire golden byte for byte. That mattered: both bugs are node-and-elixir only, so a promotion checked on whichever backends happened to be running would have reported a five-way claim it had half-verified. The other three were genuinely correct rather than merely unexercised, and booting them is the only thing that tells those two states apart. Toolchain recipes are in [`docs/tools.md`](../tools.md) — elixir's already existed; java (JDK 25 + Gradle 9.1) and dotnet (SDK 10, since the emitted TFM is `net10.0`) are host installs, and the shared-`app`-database collision between those two legs is now documented there beside the port one.
+
 Sources: [verification-architecture-2026-08-31](../audits/verification-architecture-2026-08-31.md) §1, §2, §5. Relates to M-T9.13 (the behavioural matrix that unblocks the compile-only cells), M-T9.29 (the driven-primitive census — the same "emitted but never exercised" question from the other side).

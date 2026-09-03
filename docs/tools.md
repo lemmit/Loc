@@ -583,6 +583,36 @@ is its own workflow, but two of them on one host produce spurious 404/401
 failures that look like wire divergences.  Override the port when running
 them concurrently.
 
+**The DATABASE collides too, and it fails differently.** `run-java.mjs` and
+`run-dotnet.mjs` both default to the **`app`** database, and each resets it
+(drop every schema, recreate `public`) at the START of its own case — so
+whichever leg boots second wipes the schema the first one is using, and
+whichever boots while the other has already migrated finds a `public` that
+is not its own.  On the Java leg that surfaces as a Flyway refusal that
+names neither the other backend nor the database:
+
+```
+FlywayException: Found non-empty schema(s) "public" but no schema history
+table.  Use baseline() or set baselineOnMigrate to true …
+```
+
+The giveaway is `\dt public.*` showing the OTHER backend's bookkeeping
+table — `__EFMigrationsHistory` (EF Core) under a Flyway error, or
+`flyway_schema_history` under an EF one.  Neither is a product bug and
+neither is a wire divergence: it is two legs sharing one database.  Run the
+legs SEQUENTIALLY, or give each its own database the way the port note
+above says to give each its own port — there is no dedicated knob, so
+override the whole connection setting:
+
+```bash
+SPRING_DATASOURCE_URL=jdbc:postgresql://127.0.0.1:5432/app_java \
+  node run-java.mjs [case…]
+ConnectionStrings__Default='Host=127.0.0.1;Port=5432;Database=app_dotnet;Username=postgres;Password=postgres' \
+  node run-dotnet.mjs [case…]
+```
+
+CI never sees this: every leg is its own workflow with its own sidecar.
+
 ### `LOOM_HEX_MIRROR` — Elixir builds behind a fingerprinting proxy
 
 Some egress proxies allowlist by the **client's TLS fingerprint**: the
