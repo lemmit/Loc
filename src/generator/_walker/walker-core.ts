@@ -1683,6 +1683,13 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
         const temporal = ctx.target.exprTemporalBinary?.(left, right, expr);
         if (temporal !== undefined && temporal !== null) return temporal;
       }
+      // Numeric operand adaptation: integer division widened to `decimal`
+      // (`5 / 2` is `2.5` in Loom's type system) and mixed-width operands
+      // (`int + long`, `int * decimal` — Loom widens implicitly, F# does not).
+      // JS and Dart get both from their host numeric tower, so they omit the
+      // seam and stay byte-identical.
+      const numeric = ctx.target.exprNumericBinary?.(left, right, expr);
+      if (numeric !== undefined && numeric !== null) return numeric;
       // Operator-spelling + strict-equality mapping lives in the target's leaf
       // (JS `===`/`!==`; F# `=`/`<>`).
       return ctx.target.exprBinary(left, right, expr.op);

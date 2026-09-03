@@ -101,6 +101,40 @@ describe("feliz UI auth gate", () => {
     expect(app).toContain('currentUser.Role <> "guest"');
   });
 
+  // A `long` claim is an F# `int64` (`claimFsType` → `typeToFs`), so the gate's
+  // comparand needs the int64 literal suffix — a bare `3` is an F# `int`, and
+  // `int64 > int` does not typecheck under Fable (M-T1.22 slice C).
+  it("suffixes a long comparand with L so the int64 claim gate typechecks", async () => {
+    const app = await appFs(`
+system Storefront {
+  user { id: string  role: string  seats: long }
+  api ShopApi from Catalog
+  subdomain Catalog {
+    context Cat {
+      aggregate Product { name: string  price: money }
+      repository Products for Product { }
+    }
+  }
+  storage db { type: postgres }
+  resource catState { for: Cat, kind: state, use: db }
+  ui WebApp {
+    api Shop: ShopApi
+    page Home { route: "/"  body: Heading { "Home", level: 1 } }
+    page Bulk {
+      route: "/bulk"
+      requires currentUser.seats > 3
+      body: Heading { "Bulk", level: 1 }
+    }
+  }
+  deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 auth: required }
+  deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 auth: ui }
+}
+`);
+    expect(app).toContain("    Seats: int64");
+    expect(app).toContain('Seats = get.Required.Field "seats" Decode.int64');
+    expect(app).toContain("currentUser.Seats > 3L");
+  });
+
   it("leaves a gate-free auth app on the status-only boolean probe", async () => {
     const app = await appFs(NO_GATE);
     expect(app).toContain("let checkSession () : Async<bool> =");

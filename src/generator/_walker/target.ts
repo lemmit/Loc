@@ -1457,6 +1457,33 @@ export interface WalkerTarget {
     e: Extract<ExprIR, { kind: "binary" }>,
   ): string | null;
 
+  /** NUMERIC binary-operand adaptation, for a target whose host language does
+   *  not follow Loom's numeric-widening rules by itself.  Two divergences:
+   *
+   *   - Integer division WIDENS to `decimal` (`a / b` with both operands
+   *     integral and the lowered `resultType` `decimal` —
+   *     `isIntDivWidenedToDecimal` in `_expr/target.ts`).  Loom says `5 / 2`
+   *     is `2.5`; a host whose integer `/` TRUNCATES (F#, like C# and Java)
+   *     has to convert the operands itself, or a page body silently computes
+   *     `2` where every backend computes `2.5`.
+   *   - MIXED numeric operands (`intField + longField`, `price * qty`).
+   *     Loom's type system widens along `int → long → decimal`; a host with
+   *     no implicit numeric conversions (F#) has to convert the narrower
+   *     operand up, or the emitted operator does not typecheck at all.
+   *
+   *  The four JS frontends and Flutter get both behaviours from their host's
+   *  single `number`/`double`-ish numeric tower for free, so they leave this
+   *  seam undefined and stay byte-identical.
+   *
+   *  Consulted by `emitExpr` for EVERY binary op, after `exprTemporalBinary`
+   *  and BEFORE `exprBinary`.  Return `null` to fall through to `exprBinary`,
+   *  so a target may implement it partially. */
+  exprNumericBinary?(
+    left: string,
+    right: string,
+    e: Extract<ExprIR, { kind: "binary" }>,
+  ): string | null;
+
   /** Scalar-intrinsic renderer (`src/util/intrinsics.ts` — `s.toUpper()`,
    *  `n.abs()`, `d.round(2)`, …).  Loom's intrinsic SPELLING is its own; every
    *  backend translates it through a per-language snippet table, and a target

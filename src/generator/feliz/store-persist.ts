@@ -112,6 +112,8 @@ function fromRaw(scalar: FelizPersistScalar, dflt: string): string {
   switch (scalar) {
     case "int":
       return `(match System.Int32.TryParse raw with | true, v -> v | _ -> ${dflt})`;
+    case "long":
+      return `(match System.Int64.TryParse raw with | true, v -> v | _ -> ${dflt})`;
     case "bool":
       return `raw = "true"`;
     case "decimal":
@@ -124,10 +126,12 @@ function fromRaw(scalar: FelizPersistScalar, dflt: string): string {
 
 /** The `string array` → `'T list` conversion in a list loader.  A string list
  *  is the identity (`List.ofArray`); the other two convert per cell. */
-function listFromCells(element: "string" | "int" | "bool"): string {
+function listFromCells(element: "string" | "int" | "long" | "bool"): string {
   switch (element) {
     case "int":
       return "cells |> Array.map (fun raw -> match System.Int32.TryParse raw with | true, v -> v | _ -> 0) |> List.ofArray";
+    case "long":
+      return "cells |> Array.map (fun raw -> match System.Int64.TryParse raw with | true, v -> v | _ -> 0L) |> List.ofArray";
     case "bool":
       return 'cells |> Array.map (fun raw -> raw = "true") |> List.ofArray';
     default:
@@ -148,6 +152,7 @@ function toJson(codec: FelizPersistCodec, access: string): string {
   }
   switch (codec.scalar) {
     case "int":
+    case "long":
     case "decimal":
       // A JSON NUMBER — matches `storeFieldTsType`'s `number` on the JS side.
       return `string ${access}`;
@@ -179,6 +184,7 @@ function urlParamJs(codec: FelizPersistCodec, key: string, arg: string): string 
     case "bool":
       return `if(${arg}){p.set(${k},'true');}else{p.delete(${k});}`;
     case "int":
+    case "long":
     case "decimal":
       // A number always serialises — `0` is a real value, not "empty".
       return `p.set(${k},String(${arg}));`;
@@ -347,6 +353,8 @@ function felizArgType(field: StateFieldIR): string {
   switch (codec.scalar) {
     case "int":
       return "int";
+    case "long":
+      return "int64";
     case "bool":
       return "bool";
     case "decimal":

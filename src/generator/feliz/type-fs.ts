@@ -7,8 +7,13 @@ import type { PrimitiveName, TypeIR } from "../../ir/types/loom-ir.js";
 function fsPrimitive(name: PrimitiveName): string {
   switch (name) {
     case "int":
-    case "long":
       return "int";
+    // A Loom `long` is a 64-bit integer.  It shared the `int` arm until
+    // M-T1.22, which is F#'s 32-bit `System.Int32` — so anything past 2^31
+    // was rejected by the record decoder (`Decode.int` bounds-checks) and a
+    // `long` state cell silently truncated.
+    case "long":
+      return "int64";
     case "decimal":
     case "money":
       return "decimal";
@@ -69,8 +74,11 @@ export function fsZeroValue(t: TypeIR): string {
     case "primitive":
       switch (t.name) {
         case "int":
-        case "long":
           return "0";
+        // `0L` — the int64 literal (`typeToFs` spells a `long` `int64`, and F#
+        // does not implicitly widen an `int` zero to it).
+        case "long":
+          return "0L";
         case "decimal":
         case "money":
           return "0m";

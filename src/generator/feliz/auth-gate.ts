@@ -175,8 +175,11 @@ function renderGateLiteral(lit: string, value: string): string {
       // F# bool literals are lowercase `true`/`false` — same spelling as source.
       return value;
     case "int":
-    case "long":
       return value;
+    // A `long` claim is an F# `int64` (`claimFsType` → `typeToFs`), so the
+    // comparand needs the int64 literal suffix.
+    case "long":
+      return `${value}L`;
     case "decimal":
       return `${value}m`;
     default:

@@ -19,7 +19,8 @@
 // the JS frontends' decoders):
 //
 //   string / json / id       → F# `string`   — the raw value, verbatim
-//   int / long               → F# `int`      — `System.Int32.TryParse`
+//   int                      → F# `int`      — `System.Int32.TryParse`
+//   long                     → F# `int64`    — `System.Int64.TryParse`
 //   bool                     → F# `bool`     — `= "true"`
 //   decimal / money          → F# `decimal`  — `System.Decimal.TryParse`
 //   arrays of the above minus decimal → F# `'T list`
@@ -37,6 +38,11 @@ export type FelizPersistScalar =
   | "string"
   /** F# `int` — `System.Int32.TryParse`, JSON number. */
   | "int"
+  /** F# `int64` — `System.Int64.TryParse`, JSON number.  Distinct from `int`
+   *  since M-T1.22: `type-fs.ts` spells a Loom `long` `int64`, so an `int`
+   *  codec would both truncate the value and fail to typecheck against the
+   *  Model field. */
+  | "long"
   /** F# `bool` — `"true"`, JSON boolean. */
   | "bool"
   /** F# `decimal` serialised as a JSON NUMBER (Loom `decimal`; the JS
@@ -58,8 +64,9 @@ function scalarCodec(t: TypeIR): FelizPersistScalar | undefined {
   if (t.kind !== "primitive") return undefined;
   switch (t.name) {
     case "int":
-    case "long":
       return "int";
+    case "long":
+      return "long";
     case "bool":
       return "bool";
     case "decimal":

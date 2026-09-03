@@ -19,6 +19,7 @@ import type { BinOp, ExprIR, LiteralKind, PrimitiveName, TypeIR } from "../../ir
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { upperFirst } from "../../util/naming.js";
 import { DURATION_UNIT_MS } from "../../util/temporal.js";
+import { isIntDivWidenedToDecimal } from "../_expr/target.js";
 
 /** F# spelling of a Loom binary operator. */
 function fsBinOp(op: BinOp): string {
@@ -79,7 +80,19 @@ export const FS_LEAVES = {
     // the current instant is `System.DateTime.UtcNow` — the same UTC-clock
     // spelling the .NET backend emits for the same literal.
     if (lit === "now") return FS_NOW;
-    // int / long / decimal / money → numeric literal verbatim
+    // A `long` literal needs the `L` suffix: lowering PROMOTES an int literal
+    // to `long` when it meets a long operand (`qty > 3` stamps `lit: "long"`),
+    // and a bare `3` is an F# `int` — an int-vs-int64 type error against the
+    // `int64` the operand now is.
+    if (lit === "long") return `${value}L`;
+    // A `decimal`/`money` literal needs the `m` suffix for the same reason as
+    // `L`: lowering promotes `price > 10`'s `10` to `lit: "decimal"`, and a
+    // bare `10` is an F# `int` — Fable has no implicit `int → decimal`.  The
+    // suffixed form is invisible to the two literal-shaped regex workarounds
+    // downstream (`update-emit.ts:decimalLit`, `store-persist.ts:fieldDefault`
+    // — both match only bare numerals), so it cannot double-suffix.
+    if (lit === "decimal" || lit === "money") return `${value}m`;
+    // int → numeric literal verbatim
     return value;
   },
   binary(left: string, right: string, op: BinOp): string {
@@ -94,7 +107,10 @@ export const FS_LEAVES = {
   convert(value: string, target: PrimitiveName, from: PrimitiveName | undefined): string {
     void from;
     if (target === "string") return `(string ${value})`;
-    if (target === "long" || target === "int") return `(int ${value})`;
+    if (target === "int") return `(int ${value})`;
+    // A `long` is an F# `int64` (`type-fs.ts`), so `long(x)` must convert to
+    // int64 — `int` would truncate to 32 bits.
+    if (target === "long") return `(int64 ${value})`;
     if (target === "decimal" || target === "money") return `(decimal ${value})`;
     return value;
   },
@@ -153,6 +169,48 @@ export function fsTemporalBinary(
   if (lt === "duration" && rt === "datetime" && e.op === "+") {
     return `((${right}).Add(${left}))`;
   }
+  return null;
+}
+
+/** The numeric binary-operand arms, or `null` to fall through to the plain
+ *  operator leaf.  F# performs NO implicit numeric conversion, but Loom's type
+ *  system widens along `int → long → decimal` — three cases diverge:
+ *
+ *   1. `/` on two integral operands widens to `decimal` (`5 / 2` is `2.5`) —
+ *      the same rule .NET, Java, Elixir and the SQL renderer already honour
+ *      through the shared `isIntDivWidenedToDecimal` predicate.  F# is in the
+ *      truncating family (`5 / 2 = 2`), so BOTH operands convert.
+ *   2. `int` meets `long` — the int side converts up (`int64 x`), else the
+ *      operator is a hard F# type error (the int64 spelling of `long` is what
+ *      created this pair; C# converts implicitly, F# does not).
+ *   3. an integral operand meets `decimal`/`money` — the integral side
+ *      converts up (`decimal x`), same reasoning.  `decimal` meets `money`
+ *      needs nothing: both are F# `decimal` (`type-fs.ts`).
+ *
+ *  Literal operands never reach cases 2-3: lowering's `tryPromoteNumericLit`
+ *  already stamps them the wider type, and the literal leaf spells the suffix
+ *  (`3L`, `9.99m`).  Shared by both feliz paths: the view walker reaches it
+ *  through `felizTarget.exprNumericBinary`, the MVU update path through
+ *  `renderFsExpr`'s binary arm — the same pairing `fsTemporalBinary` has. */
+export function fsNumericBinary(
+  left: string,
+  right: string,
+  e: Extract<ExprIR, { kind: "binary" }>,
+): string | null {
+  if (isIntDivWidenedToDecimal(e)) return `((decimal ${left}) / (decimal ${right}))`;
+  const prim = (t: typeof e.leftType): string | undefined =>
+    t?.kind === "primitive" ? t.name : undefined;
+  const l = prim(e.leftType);
+  const r = prim(e.rightType);
+  if (!l || !r || l === r) return null;
+  const integral = (n: string): boolean => n === "int" || n === "long";
+  const fractional = (n: string): boolean => n === "decimal" || n === "money";
+  // Case 2 — int vs long: the int side converts up to int64.
+  if (l === "int" && r === "long") return FS_LEAVES.binary(`(int64 ${left})`, right, e.op);
+  if (l === "long" && r === "int") return FS_LEAVES.binary(left, `(int64 ${right})`, e.op);
+  // Case 3 — integral vs decimal/money: the integral side converts up.
+  if (integral(l) && fractional(r)) return FS_LEAVES.binary(`(decimal ${left})`, right, e.op);
+  if (fractional(l) && integral(r)) return FS_LEAVES.binary(left, `(decimal ${right})`, e.op);
   return null;
 }
 
@@ -424,9 +482,14 @@ export function renderFsExpr(e: ExprIR, ctx: FsExprCtx): string {
     case "binary": {
       const left = r(e.left);
       const right = r(e.right);
-      // Datetime arithmetic is a method call in .NET, not an operator — the
-      // same seam the view path consults through `felizTarget`.
-      return fsTemporalBinary(left, right, e) ?? FS_LEAVES.binary(left, right, e.op);
+      // Datetime arithmetic is a method call in .NET, not an operator, and an
+      // integer `/` that widened to `decimal` needs both operands converted —
+      // the same two seams the view path consults through `felizTarget`.
+      return (
+        fsTemporalBinary(left, right, e) ??
+        fsNumericBinary(left, right, e) ??
+        FS_LEAVES.binary(left, right, e.op)
+      );
     }
     case "unary":
       return FS_LEAVES.unary(e.op, r(e.operand));

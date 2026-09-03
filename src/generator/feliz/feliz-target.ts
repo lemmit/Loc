@@ -22,6 +22,7 @@ import {
   FELIZ_DISPATCH_PARAM,
   FELIZ_MODEL_PARAM,
   FS_LEAVES,
+  fsNumericBinary,
   fsString,
   fsTemporalBinary,
   renderFsIntrinsic,
@@ -44,6 +45,7 @@ import {
   formTouchMsg,
   historyFieldName,
   idLabelsFrom,
+  isValidatedField,
   pageMetaFieldName,
   pageMetaMember,
   projectionFieldName,
@@ -137,7 +139,9 @@ function renderFormInput(formField: string, fld: FelizFormField, base: string): 
   // Message-bearing fields (required, non-checkbox) get a touched onBlur + an
   // inline error below the input — the Elmish mirror of react-hook-form's
   // per-field `errors.<f>.message`, shown once the field has been blurred.
-  const validated = fld.required;
+  // Required OR numeric — an optional numeric cell shows the same inline
+  // error, since its text has to parse before the encoder converts it.
+  const validated = isValidatedField(fld);
   const onBlur = validated
     ? `; prop.onBlur (fun _ -> dispatch (${formTouchMsg(formField)} "${fld.wireName}"))`
     : "";
@@ -1100,6 +1104,12 @@ export const felizTarget: WalkerTarget = {
   // action body.
   exprDuration: (unit, amount) => FS_LEAVES.duration(unit, amount),
   exprTemporalBinary: (left, right, e) => fsTemporalBinary(left, right, e),
+  // `5 / 2` is `2.5` in Loom's type system, but F#'s integer `/` truncates —
+  // and F# has NO implicit numeric conversion where Loom widens (`int + long`,
+  // `qty * price`).  The seam converts the operands; it forwards to the SAME
+  // shared function the MVU update path uses, so a numeric op cannot mean one
+  // thing in a page body and another in an action body.
+  exprNumericBinary: (left, right, e) => fsNumericBinary(left, right, e),
 
   // Scalar intrinsics — the SAME F# table the MVU update path uses
   // (`renderFsMethodCall`), so `s.replace(a, b)` cannot mean one thing in a

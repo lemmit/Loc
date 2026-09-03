@@ -115,6 +115,12 @@ async function main() {
   }
   await page.getByPlaceholder("name").fill("Widget");
   await page.getByPlaceholder("price").fill("9.99");
+  // M-T1.22 — the plain-`decimal` and `long` cells.  Both are REQUIRED and
+  // both are numeric, so the submit stays disabled until they hold text that
+  // parses: `weight` through `Decimal.TryParse`, `sold` through
+  // `Int64.TryParse` (a value past int32, the range `long` exists to carry).
+  await page.getByPlaceholder("weight").fill("1.2345");
+  await page.getByPlaceholder("sold").fill("4294967296");
   // Toggle the bool field's checkbox — proves the checkbox widget dispatches.
   await page.getByRole("checkbox").check();
   // Pick a non-default enum value — proves the <select> widget dispatches.
@@ -129,6 +135,18 @@ async function main() {
   await page.getByPlaceholder("tags (comma-separated)").fill("x, y, z");
   if (!(await create.isEnabled())) {
     throw new Error("create submit should be ENABLED once required fields are filled");
+  }
+  // M-T1.22 — the pre-encode numeric guard.  A `type=number` input still holds
+  // text, and the encoder converts with F#'s `int64`/`decimal`, which PARSE and
+  // THROW.  A fractional value in the `long` cell must therefore DISABLE the
+  // submit (an inline form error) rather than blow up in the Elmish loop.
+  await page.getByPlaceholder("sold").fill("2.5");
+  if (!(await create.isDisabled())) {
+    throw new Error("create submit should be DISABLED with a non-integral `long` value");
+  }
+  await page.getByPlaceholder("sold").fill("4294967296");
+  if (!(await create.isEnabled())) {
+    throw new Error("create submit should re-ENABLE once the `long` value parses again");
   }
 
   // 4. Back navigation works too (Cancel → Products → Back home).
