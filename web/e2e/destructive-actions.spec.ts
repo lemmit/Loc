@@ -96,8 +96,12 @@ test("deleting an aggregate on the model canvas requires the confirm", async ({ 
   const order = page.locator('[data-construct-kind="aggregate"][data-construct-name="Order"]');
   await expect(order).toBeVisible();
 
-  // × arms the inline confirm ON the node, naming the construct.
+  // × arms the inline confirm ON the node, naming the construct.  The
+  // MUTATION-PROOF assertion is the first one: with the confirm removed the
+  // × deletes synchronously (the source loses the aggregate before this line
+  // runs), so "still in the source after ×, before any confirm" is what fails.
   await order.getByTestId("c4system-v2-delete").click();
+  expect(await readEditorSource(page), "aggregate still present after ×").toContain("aggregate Order");
   const confirm = order.getByTestId("c4system-v2-delete-confirm");
   await expect(confirm).toBeVisible();
   await expect(confirm).toContainText("aggregate Order");
