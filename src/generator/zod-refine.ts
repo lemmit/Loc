@@ -8,7 +8,7 @@ import {
 } from "../ir/validate/invariant-classify.js";
 import { intrinsicKey } from "../util/intrinsics.js";
 import { messageCode } from "../util/message-code.js";
-import { escapeTsIdent } from "../util/naming.js";
+import { escapeTsIdent, humanize } from "../util/naming.js";
 import { tsCodePointLength as codePointLength } from "./_expr/code-point.js";
 import { JS_INTRINSIC_RENDERERS } from "./_expr/js-intrinsics.js";
 import { asRegexLiteral } from "./_expr/regex-literal.js";
@@ -139,9 +139,53 @@ export function refineRenderable(e: ExprIR): boolean {
   }
 }
 
+/** The human message a single-field constraint denies with, in terms of the
+ *  field's own display label.  A `len-*` check has NO zod message slot filled
+ *  by default, so before this existed a `code.length >= 2 && code.length <= 5`
+ *  violation reached the user as zod's `"Invalid input"` — under a field whose
+ *  bound the message never named (field-test finding D2).
+ *
+ *  This is the NATIVE-CHAIN carrier only, which is node-local: each backend's
+ *  own chain (`FluentValidation`, `Field(min_length=…)`, `validate_length`)
+ *  carries that framework's default text.  The message-LESS `.refine(…)`
+ *  clause default (`"Invariant violated: <src>"`, in `refineClauseFor` below)
+ *  is by contrast a CROSS-BACKEND string all five wire validators emit
+ *  verbatim, so it is deliberately left alone here. */
+function singleFieldMessage(field: string, pattern: SingleFieldPattern): string {
+  const label = humanize(field);
+  const chars = (n: number) => `${n} character${n === 1 ? "" : "s"}`;
+  switch (pattern.kind) {
+    case "min":
+      return pattern.exclusive
+        ? `${label} must be greater than ${pattern.n}`
+        : `${label} must be at least ${pattern.n}`;
+    case "max":
+      return pattern.exclusive
+        ? `${label} must be less than ${pattern.n}`
+        : `${label} must be at most ${pattern.n}`;
+    case "between":
+      return `${label} must be between ${pattern.lo} and ${pattern.hi}`;
+    case "len-min":
+      return `${label} must be at least ${chars(pattern.n)}`;
+    case "len-max":
+      return `${label} must be at most ${chars(pattern.n)}`;
+    case "len-eq":
+      return `${label} must be exactly ${chars(pattern.n)}`;
+    case "len-range":
+      return `${label} must be ${pattern.lo} to ${pattern.hi} characters`;
+    case "regex":
+      return `${label} is not in the expected format`;
+  }
+}
+
 /** Chain idiomatic native zod methods onto a base inner schema for a
  *  recognised single-field pattern.  Caller picks the base
  *  (`z.string()`, `z.number()`, etc.); we just chain.
+ *
+ *  `field` is the request-body field the pattern constrains.  It is no part of
+ *  the CHECK — only of the human message every chained constraint now carries
+ *  (`singleFieldMessage`) — and it is REQUIRED so a new call site cannot
+ *  silently re-emit a message-less `"Invalid input"` chain.
  *
  *  The `len-*` arms do NOT use zod's `.min`/`.max`/`.length`: those count
  *  UTF-16 code units, while the `minLength`/`maxLength` this same constraint
@@ -149,28 +193,37 @@ export function refineRenderable(e: ExprIR): boolean {
  *  `_expr/code-point.ts`).  They render an explicit code-point predicate
  *  instead; a caller that also PUBLISHES a schema re-attaches the declaration
  *  from `openapiLengthMeta` so the published bound survives the switch. */
-export function chainSingleFieldNative(inner: string, pattern: SingleFieldPattern): string {
+export function chainSingleFieldNative(
+  inner: string,
+  pattern: SingleFieldPattern,
+  field: string,
+): string {
+  // `{ message: … }` is the one options spelling BOTH pinned zod majors accept
+  // on `.min`/`.max`/`.gt`/`.lt`/`.regex`/`.refine` — zod 3 (`platform:
+  // node@v4` and the v1 react stack) and zod 4 (v5).  zod 4's `error` key does
+  // not exist in 3, and 3's bare-string overload is gone in 4.
+  const msg = `{ message: ${JSON.stringify(singleFieldMessage(field, pattern))} }`;
   switch (pattern.kind) {
     case "min":
       // Exclusive (`weight > 0.5` on a DECIMAL field) → zod's `.gt`; inclusive
-      // keeps `.min` byte-for-byte.  `singleFieldShape` also sets `exclusive`
-      // for a strict bound on a MONEY field, but that case cannot reach this
-      // chain: `classifyForWire` refuses both money literals and any binary
-      // with a money operand (`invariant-classify.ts`), so a money invariant
-      // never becomes a wire validator at all.
-      return `${inner}.${pattern.exclusive ? "gt" : "min"}(${pattern.n})`;
+      // keeps `.min`.  `singleFieldShape` also sets `exclusive` for a strict
+      // bound on a MONEY field, but that case cannot reach this chain:
+      // `classifyForWire` refuses both money literals and any binary with a
+      // money operand (`invariant-classify.ts`), so a money invariant never
+      // becomes a wire validator at all.
+      return `${inner}.${pattern.exclusive ? "gt" : "min"}(${pattern.n}, ${msg})`;
     case "max":
-      return `${inner}.${pattern.exclusive ? "lt" : "max"}(${pattern.n})`;
+      return `${inner}.${pattern.exclusive ? "lt" : "max"}(${pattern.n}, ${msg})`;
     case "between":
-      return `${inner}.min(${pattern.lo}).max(${pattern.hi})`;
+      return `${inner}.min(${pattern.lo}, ${msg}).max(${pattern.hi}, ${msg})`;
     case "len-min":
-      return `${inner}.refine((s) => ${codePointLength("s")} >= ${pattern.n})`;
+      return `${inner}.refine((s) => ${codePointLength("s")} >= ${pattern.n}, ${msg})`;
     case "len-max":
-      return `${inner}.refine((s) => ${codePointLength("s")} <= ${pattern.n})`;
+      return `${inner}.refine((s) => ${codePointLength("s")} <= ${pattern.n}, ${msg})`;
     case "len-eq":
-      return `${inner}.refine((s) => ${codePointLength("s")} === ${pattern.n})`;
+      return `${inner}.refine((s) => ${codePointLength("s")} === ${pattern.n}, ${msg})`;
     case "len-range":
-      return `${inner}.refine((s) => ${codePointLength("s")} >= ${pattern.lo} && ${codePointLength("s")} <= ${pattern.hi})`;
+      return `${inner}.refine((s) => ${codePointLength("s")} >= ${pattern.lo} && ${codePointLength("s")} <= ${pattern.hi}, ${msg})`;
     case "regex":
       // The pattern is a JavaScript-compatible regex source (validated at parse
       // time via `new RegExp(...)`).  `asRegexLiteral` renders the `/.../` form
@@ -179,7 +232,7 @@ export function chainSingleFieldNative(inner: string, pattern: SingleFieldPatter
       // would comment out the rest of the chain) and a dangling-backslash /
       // newline source.  Shared with the domain-layer renderer and Angular's
       // `Validators.pattern`.
-      return `${inner}.regex(${asRegexLiteral(pattern.pattern)})`;
+      return `${inner}.regex(${asRegexLiteral(pattern.pattern)}, ${msg})`;
   }
 }
 
@@ -473,7 +526,27 @@ function renderCollectionOp(recv: string, name: string, args: string[]): string 
   }
 }
 
+/** `null` on one side of an equality — the ONE place a wire refine must not
+ *  tighten `==` into `===`.  See `renderBinary`. */
+function isNullLiteral(e: ExprIR): boolean {
+  const inner = e.kind === "paren" ? e.inner : e;
+  return inner.kind === "literal" && inner.lit === "null";
+}
+
 function renderBinary(op: BinOp, left: ExprIR, right: ExprIR): string {
-  const opPrint = op === "==" ? "===" : op === "!=" ? "!==" : op;
+  // `x == null` / `x != null` render LOOSE, every other comparison strict.
+  //
+  // Loom has one absence value; JS has two.  A wire-optional field arrives as
+  // `undefined` when the key is OMITTED and as `null` when it is sent
+  // explicitly, and `nullish()` admits both — so `data.x === null` answered
+  // FALSE for the omitted key and an `invariant x == null || x >= 0` denied a
+  // request that left `x` out entirely (422).  The other four backends'
+  // deserializers materialize an absent field as their single null, so they
+  // answered 201: this renderer was the whole divergence (field-test A1).
+  // `== null` is the idiomatic JS spelling of "absent", true for both, and it
+  // is the same test the emitted route handlers already use to normalize the
+  // body (`body.x == null ? null : body.x`).
+  const looseNull = (op === "==" || op === "!=") && (isNullLiteral(left) || isNullLiteral(right));
+  const opPrint = looseNull ? op : op === "==" ? "===" : op === "!=" ? "!==" : op;
   return `${renderRefineExpr(left)} ${opPrint} ${renderRefineExpr(right)}`;
 }

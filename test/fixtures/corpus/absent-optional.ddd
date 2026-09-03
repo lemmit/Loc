@@ -1,0 +1,63 @@
+// A null-guard invariant over an OPTIONAL field — `estimate == null || …` —
+// with the create body that OMITS the field entirely (field-test A1).
+//
+// Loom has one absence value; the wire has two spellings of it.  A backend
+// that answers this create with 422 is reading "absent" as "present and not
+// null": node's zod refine rendered `==` as JS `===`, so `{ "title": "…" }`
+// (no `estimate` key at all) failed the guard and the whole create route was
+// unusable, while .NET and Python answered 201 on the same bytes.  Nothing in
+// the corpus omitted an optional field a rule then referenced, so no gate saw
+// the divergence.
+//
+// The rule carries an authored `message`, so the 422 the invalid case DOES
+// earn is the same text on all five backends (the message-LESS default is a
+// separate per-backend surface — see `validation-messages.ddd`).
+system AbsentOptional {
+  subdomain Work {
+    context Tracking {
+      aggregate Task with crudish {
+        title: string
+        estimate: int?
+        invariant estimate == null || estimate >= 0 message "Estimate cannot be negative"
+      }
+      repository Tasks for Task { }
+    }
+  }
+  api TrackingApi from Work
+  storage primary { type: postgres }
+  resource trackingState { for: Tracking, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Tracking]
+    dataSources: [trackingState]
+    serves: TrackingApi
+    port: 4000
+  }
+
+  test e2e "a null-guard rule admits a create that omits the optional field" against d {
+    // THE ROW THIS FIXTURE EXISTS FOR: no `estimate` key in the body.
+    let t = api.tasks.create({ title: "Ship it" })
+    let read = api.tasks.getById(t)
+    expect(read.title).toBe("Ship it")
+    // …and the absent value round-trips as the wire's null, not as 0.
+    expect(read.estimate).toBe(null)
+
+    // Present and satisfying the guarded half: unchanged behaviour.
+    let sized = api.tasks.create({ title: "Sized", estimate: 3 })
+    let readSized = api.tasks.getById(sized)
+    expect(readSized.estimate).toBe(3)
+
+    // Present and violating it: still denied, with the authored text — the
+    // rule is loosened for ABSENCE only, not switched off.
+    expect(api.tasks.create({ title: "Bad", estimate: -1 })).toThrow(422)
+
+    // The same rule on the UPDATE carrier, with the same omission.
+    api.tasks.update(t, { title: "Shipped" })
+    let updated = api.tasks.getById(t)
+    expect(updated.title).toBe("Shipped")
+    expect(updated.estimate).toBe(null)
+
+    let listed = api.tasks.all()
+    expect(listed.items.length).toBe(2)
+  }
+}
