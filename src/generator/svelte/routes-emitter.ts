@@ -38,7 +38,7 @@ import {
   pageConstructId,
   pageEmitName,
 } from "../../ir/util/page-kind.js";
-import { lowerFirst, plural, snake } from "../../util/naming.js";
+import { humanize, lowerFirst, plural, snake } from "../../util/naming.js";
 import {
   buildExternFunctionShim,
   buildExternFunctionSignature,
@@ -316,7 +316,12 @@ export function defaultNavSections(
       label: "Aggregates",
       entries: scaffoldedAggregates.map((a) => {
         const slug = snake(plural(a.name));
-        return entry(`/${slug}`, plural(a.name), `nav-${slug}`);
+        // Humanised, like every other frontend's default sidebar (react's
+        // `prepareAppShellVM`, vue's `defaultNavSections`): the sidebar showed
+        // the raw declaration identifiers — `closeProject`, `fileUrgent`,
+        // `WorkItems` — where the other packs read "Close project", "Work items".
+        // Routed through `entry` so the M-T3.15-C3 `requires` gate still rides along.
+        return entry(`/${slug}`, humanize(plural(a.name)), `nav-${slug}`);
       }),
     });
   }
@@ -326,7 +331,7 @@ export function defaultNavSections(
   }
   for (const wf of scaffoldedWorkflows) {
     wfEntries.push(
-      entry(`/workflows/${snake(wf.name)}`, wf.name, `nav-workflow-${snake(wf.name)}`),
+      entry(`/workflows/${snake(wf.name)}`, humanize(wf.name), `nav-workflow-${snake(wf.name)}`),
     );
   }
   if (wfEntries.length > 0) sections.push({ label: "Workflows", entries: wfEntries });
