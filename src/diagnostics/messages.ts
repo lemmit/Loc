@@ -1442,6 +1442,20 @@ export const DIAGNOSTIC_MESSAGES = {
     `transform over its OWN store's per-page assign and can't reach store ` +
     `'${p.store}'.  Move the cross-store coordination to the calling page's action ` +
     `(call \`${p.storeName}.${p.actionName}()\` then \`${p.store}.${p.name}()\` from the page).`,
+  "loom.elixir-if-stmt-unsupported": (p: { where: unknown; name: unknown }) =>
+    `An \`if\` statement is used in ${p.where}, whose context is hosted by the ` +
+    `Phoenix/Elixir deployable '${p.name}' — the Elixir emitters do not render it yet.  ` +
+    `Every Phoenix body threads its result through a rebound \`record\`, and an Elixir ` +
+    `\`if\` block's bindings do not escape the block, so a branch that assigns would ` +
+    `compile and then silently do nothing.  Express the branch as a conditional VALUE ` +
+    `instead (\`status := open ? Done : Draft\`), or host this context on a node / ` +
+    `dotnet / java / python backend, which render the statement.`,
+  "loom.if-stmt-page-body-unsupported": (p: { where: unknown; uiName: unknown }) =>
+    `An \`if\` statement is used in ${p.where} on ui '${p.uiName}'.  The \`if\` ` +
+    `STATEMENT is a backend-body form (aggregate / domain-service operations); no frontend ` +
+    `renders it.  A page expresses a condition as a VALUE — a ternary ` +
+    `(\`cond ? a : b\`) or a \`match { cond => …, else => … }\` — and discriminates a ` +
+    `union result with \`match await <op>() { … }\`.`,
   "loom.feliz-async-effect-unsupported": (p: {
     where: unknown;
     uiName: unknown;

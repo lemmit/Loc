@@ -4,6 +4,7 @@ import { validateApplicationHandlers, validateRoutes } from "./checks/api-checks
 import { validateStampReadsBeforeFlush } from "./checks/capability-checks.js";
 import type { LoomDiagnostic } from "./checks/diagnostic.js";
 import { validateDomainServices } from "./checks/domain-service-checks.js";
+import { validateIfStatementPlacement } from "./checks/if-stmt-checks.js";
 import { validateIndexSuggestions } from "./checks/index-suggestion-checks.js";
 import {
   validateMigrationAdapterSupport,
@@ -331,5 +332,9 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   // archetype slot.  IR-level so it covers every frontend at once.
   validateUiPageIdentity(loom, diags);
   validateStores(loom, diags);
+  // `if` STATEMENT placement (M-FT.11): the four spine backends render it; an
+  // elixir-hosted context and every ui body are refused here rather than
+  // silently dropped by an emitter.
+  validateIfStatementPlacement(loom, diags);
   return diags;
 }

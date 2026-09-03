@@ -2140,6 +2140,18 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
       // returning-op controller action produces (operation-returns-emit), here
       // re-shaped to a socket-piped `then/2` step so each arm threads assigns.
       return renderVariantMatchStmt(stmt, ctx);
+    case "if":
+      // A plain `if` statement is a BACKEND-body form (node/.NET/java/python).
+      // A LiveView handler is a socket pipe-chain, and a page body expresses a
+      // condition with `match` or a ternary, so the statement is refused for
+      // every frontend by `loom.if-stmt-page-body-unsupported`
+      // (ir/validate/checks/if-stmt-checks.ts).  Defensive fail-fast, not a
+      // silent drop — unreachable on validated `.ddd`.
+      throw new Error(
+        `platform: elixir — an \`if\` statement reached the LiveView handler emitter on page ` +
+          `'${ctx.page.name}'; it is refused at validation ` +
+          `(loom.if-stmt-page-body-unsupported).`,
+      );
   }
 }
 

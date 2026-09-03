@@ -1797,6 +1797,7 @@ function droppedStmtReason(kind: StmtIR["kind"], label: "create" | "destroy"): s
     case "expression":
       return "the call never runs — its side effects never happen";
     case "variant-match":
+    case "if":
       return "the branch never runs";
     case "assign":
       return label === "create"

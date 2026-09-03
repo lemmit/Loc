@@ -167,12 +167,7 @@ function renderStmtChunks(
   });
 }
 
-function renderStmt(
-  s: StmtIR,
-  target: StmtTarget,
-  ix: StmtIndex,
-  counter: StmtCounter,
-): string {
+function renderStmt(s: StmtIR, target: StmtTarget, ix: StmtIndex, counter: StmtCounter): string {
   switch (s.kind) {
     case "precondition":
       return target.precondition(s, ix);

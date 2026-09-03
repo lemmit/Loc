@@ -524,5 +524,17 @@ function renderStatement(
     case "emit":
     case "variant-match":
       return `    # unreachable: ${s.kind} rejected by the domain-service validator floor`;
+    case "if":
+      // The `if` STATEMENT is a node/.NET/java/python form today; on Phoenix
+      // every body renderer threads its result through a rebound `record` (or
+      // a tail expression), and an Elixir `if` block's bindings do not escape
+      // it — so a branch that assigns would compile and then silently do
+      // nothing.  Refused up front by `loom.elixir-if-stmt-unsupported`
+      // (ir/validate/checks/if-stmt-checks.ts); this arm is the defensive
+      // fail-fast, unreachable on validated `.ddd`.
+      throw new Error(
+        "platform: elixir — an `if` statement reached the domain-service emitter; it is " +
+          "refused at validation (loom.elixir-if-stmt-unsupported).",
+      );
   }
 }
