@@ -240,7 +240,7 @@ describe("persistence: mikroorm — the gates key on the ADAPTER, not the featur
 // included) into one jsonb blob, and an event-sourced aggregate has no state
 // table at all.
 // ---------------------------------------------------------------------------
-describe("persistence: mikroorm — root scalar-collection fields (the crash the gate closes)", () => {
+describe("persistence: mikroorm — root scalar-collection fields (the gap that was drained)", () => {
   /** A second aggregate carrying the field under test, appended to the shared
    *  context so the rest of the model is the suite's usual one. */
   const withField = (decl: string, shape = "") => `
@@ -251,26 +251,28 @@ describe("persistence: mikroorm — root scalar-collection fields (the crash the
       }
       repository Bags for Bag { }`;
 
-  it("rejects `tags: string[]` — the reported codegen crash", async () => {
-    const msgs = await mikroDiags(withField("tags: string[]"));
-    expect(msgs.length).toBe(1);
-    expect(msgs[0]).toContain("tags");
-    expect(msgs[0]).toContain("string[]");
-    // The message must not repeat the generic "no relational mapping anywhere"
-    // tail — drizzle maps this fine, and the fix hint says so.
-    expect(msgs[0]).toContain("persistence: drizzle");
+  // M-T6.23 drained this gap: `columnsForType` (typescript/emit/mikroorm.ts)
+  // grew an `"array"` arm emitting a native Postgres array column, mirroring
+  // drizzle's own (`emit/schema.ts`, `case "array"`).  That removed
+  // `validateMikroOrmSupport`'s last caller, so the validator is gone and
+  // these four shapes are simply ACCEPTED now.  The emitted column shape is
+  // pinned by test/generator/typescript/mikroorm-scalar-array.test.ts; what
+  // these keep proving is that no diagnostic is raised for any of the four
+  // spellings that used to be refused.
+  it("no longer rejects `tags: string[]` — the drained crash", async () => {
+    expect(await mikroDiags(withField("tags: string[]"))).toEqual([]);
   });
 
-  it("rejects an ENUM collection too (`kinds: Kind[]`)", async () => {
-    expect(await mikroDiags(withField("kinds: Kind[]"))).toHaveLength(1);
+  it("no longer rejects an ENUM collection (`kinds: Kind[]`)", async () => {
+    expect(await mikroDiags(withField("kinds: Kind[]"))).toEqual([]);
   });
 
-  it("rejects the OPTIONAL spelling (`tags: string[]?`)", async () => {
-    expect(await mikroDiags(withField("tags: string[]?"))).toHaveLength(1);
+  it("no longer rejects the OPTIONAL spelling (`tags: string[]?`)", async () => {
+    expect(await mikroDiags(withField("tags: string[]?"))).toEqual([]);
   });
 
-  it("rejects it under `shape: embedded` too — that shape uses the same root columns", async () => {
-    expect(await mikroDiags(withField("tags: string[]", "shape: embedded"))).toHaveLength(1);
+  it("no longer rejects it under `shape: embedded` — same root columns", async () => {
+    expect(await mikroDiags(withField("tags: string[]", "shape: embedded"))).toEqual([]);
   });
 
   it("does NOT fire under `shape: document` — the whole aggregate is one jsonb blob", async () => {
