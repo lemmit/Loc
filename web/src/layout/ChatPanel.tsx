@@ -30,12 +30,6 @@ import type { LayoutCtx } from "./ctx";
 // The composer + settings gear configure the live mode; the demo button stays
 // for the reproducible, key-free walkthrough (and the Playwright e2e).
 
-/** Green once the demo/chat has run to a concluding turn. */
-export function agentDot(ctx: LayoutCtx): "green" | null {
-  const last = ctx.agentMessages.at(-1);
-  return last && last.role === "assistant" && /Done|✅/.test(last.text) ? "green" : null;
-}
-
 export function ChatBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   const { agentMessages, agentRunning, runAgentDemo, agentSettings, sendAgentMessage, clearAgentChat } =
     ctx;

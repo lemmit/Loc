@@ -5,6 +5,8 @@ import { formatBytes, modeLabel, type LayoutCtx } from "./ctx";
 import { LOG_LEVELS, type LogLine, type StructuredLogPayload } from "../util/log-line";
 import { clearDiagnostics, isCrashReason, readDiagnostics, type DiagSnapshot } from "../util/diagnostics";
 import { CrashReportButtons } from "../CrashReportButtons";
+import { countOf, nextStepMid, PANE, STAGE, STREAM } from "./vocabulary";
+import { type Mark, StatusMark, testsMark, worstMark } from "./status-mark";
 
 // The playground used to scatter read-only status across sibling dock
 // tabs — LSP diagnostics, generator output, bundle errors — so a red dot
@@ -24,70 +26,68 @@ export type OutputStream =
   | "tests"
   | "diag";
 
-type DotColour = "red" | "yellow" | "green" | "gray" | null;
-
 const STREAMS: { value: OutputStream; label: string }[] = [
-  { value: "problems", label: "Problems" },
-  { value: "generator", label: "Generator" },
-  { value: "bundler", label: "Bundler" },
-  { value: "conflicts", label: "Conflicts" },
-  { value: "backend", label: "Backend logs" },
-  { value: "app", label: "App logs" },
-  { value: "tests", label: "Tests" },
-  { value: "diag", label: "Diagnostics" },
+  { value: "problems", label: STREAM.problems },
+  { value: "generator", label: STREAM.generator },
+  { value: "bundler", label: STREAM.bundler },
+  { value: "conflicts", label: STREAM.conflicts },
+  // The stream id stays `backend` (persisted + test ids); the label is
+  // the dock tab's name — one concept, one word (audit M7).
+  { value: "backend", label: STREAM.runtimeLogs },
+  { value: "app", label: STREAM.appLogs },
+  { value: "tests", label: STREAM.tests },
+  { value: "diag", label: STREAM.diagnostics },
 ];
 
-// Per-stream status dot.  Drives both the Select's option/trigger dots
-// and (rolled up) the Output tab indicator in each shell.
-export function streamDot(ctx: LayoutCtx, stream: OutputStream): DotColour {
+// Per-stream status mark — a count where one exists, a dot with a label
+// otherwise (audit M11).  Drives the Select's option/trigger marks and
+// (rolled up) the Output tab indicator in each shell.
+export function streamMark(ctx: LayoutCtx, stream: OutputStream): Mark | null {
   switch (stream) {
     case "problems":
-      return ctx.errorCount > 0 ? "red" : ctx.warningCount > 0 ? "yellow" : null;
+      if (ctx.errorCount > 0) {
+        return { colour: "red", count: ctx.errorCount, label: countOf(ctx.errorCount, "error") };
+      }
+      if (ctx.warningCount > 0) {
+        return { colour: "yellow", count: ctx.warningCount, label: countOf(ctx.warningCount, "warning") };
+      }
+      return null;
     case "generator":
-      return ctx.generateResult?.ok === false ? "red" : null;
+      return ctx.generateResult?.ok === false ? { colour: "red", label: "generation failed" } : null;
     case "bundler": {
       const failed =
         (ctx.honoBundleResult != null && !ctx.honoBundleResult.ok) ||
         (ctx.reactBundleResult != null && !ctx.reactBundleResult.ok);
-      return failed ? "red" : null;
+      return failed ? { colour: "red", label: "bundle failed" } : null;
     }
-    case "conflicts":
-      return ctx.generatedConflicts.length > 0 ? "red" : null;
-    case "backend":
-      return ctx.backendLog.some((l) => l.level === "error") ? "red" : null;
-    case "app":
-      return ctx.appLog.some((l) => l.level === "error") ? "red" : null;
+    case "conflicts": {
+      const n = ctx.generatedConflicts.length;
+      return n > 0 ? { colour: "red", count: n, label: countOf(n, "conflicting file") } : null;
+    }
+    case "backend": {
+      const n = ctx.backendLog.filter((l) => l.level === "error").length;
+      return n > 0 ? { colour: "red", count: n, label: countOf(n, "runtime error") } : null;
+    }
+    case "app": {
+      const n = ctx.appLog.filter((l) => l.level === "error").length;
+      return n > 0 ? { colour: "red", count: n, label: countOf(n, "app error") } : null;
+    }
     case "tests":
-      return Object.values(ctx.testResults).some((r) => r.status === "fail")
-        ? "red"
-        : null;
+      return testsMark(ctx);
     case "diag":
-      // Inspection-only stream; reading localStorage on every aggregate-dot
+      // Inspection-only stream; reading localStorage on every aggregate
       // pass would add a parse to the render hot path, so it never lights the
       // tab indicator. Pressure is surfaced inside the panel body instead.
       return null;
   }
 }
 
-// Worst-of dot across every stream — the always-visible Output tab
+// Worst-of mark across every stream — the always-visible Output tab
 // indicator, so a problem in a stream the user isn't viewing is still
-// flagged without auto-switching them to it.
-export function outputAggregateDot(ctx: LayoutCtx): DotColour {
-  const dots = STREAMS.map((s) => streamDot(ctx, s.value));
-  if (dots.includes("red")) return "red";
-  if (dots.includes("yellow")) return "yellow";
-  return null;
-}
-
-function Dot({ colour }: { colour: DotColour }): JSX.Element | null {
-  if (!colour) return null;
-  return (
-    <Box
-      w={7}
-      h={7}
-      style={{ borderRadius: "50%", background: `var(--mantine-color-${colour}-6)` }}
-    />
-  );
+// flagged without auto-switching them to it.  Problems comes first, so
+// its error count wins the tie against another stream's count.
+export function outputMark(ctx: LayoutCtx): Mark | null {
+  return worstMark(STREAMS.map((s) => streamMark(ctx, s.value)));
 }
 
 interface Props {
@@ -114,7 +114,7 @@ export function OutputPanel({ ctx, stream, setStream }: Props): JSX.Element {
           value={stream}
           onChange={(v) => v && setStream(v as OutputStream)}
           data={STREAMS}
-          leftSection={<Dot colour={streamDot(ctx, stream)} />}
+          leftSection={<StatusMark mark={streamMark(ctx, stream)} testid="output-stream-mark" />}
           data-testid="output-stream-select"
           comboboxProps={{ withinPortal: true }}
           renderOption={({ option }) => {
@@ -122,7 +122,7 @@ export function OutputPanel({ ctx, stream, setStream }: Props): JSX.Element {
             return (
               <Group gap={6} wrap="nowrap" justify="space-between" w="100%">
                 <Text size="xs">{option.label}</Text>
-                <Dot colour={streamDot(ctx, s)} />
+                <StatusMark mark={streamMark(ctx, s)} />
               </Group>
             );
           }}
@@ -151,7 +151,7 @@ export function OutputPanel({ ctx, stream, setStream }: Props): JSX.Element {
         {stream === "backend" && (
           <FilterableLogView
             lines={ctx.backendLog}
-            empty="No backend logs yet — boot the backend and hit an endpoint."
+            empty={`No runtime logs yet — ${nextStepMid("boot", ctx.isDesktop)}, then call an endpoint from the ${PANE.runtime} tab.`}
             testid="output-backend-log"
           />
         )}
@@ -508,9 +508,7 @@ function GeneratorBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   if (generateResult == null) {
     return (
       <Text c="dimmed" size="sm" p="sm">
-        {ctx.isDesktop
-          ? "Not generated yet — click Generate to build the project from your source."
-          : "Not generated yet — tap Run to build the project from your source."}
+        Not generated yet — {nextStepMid("generate", ctx.isDesktop)} to build the project from your source.
       </Text>
     );
   }
@@ -620,9 +618,7 @@ function BundlerBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   if (honoBundleResult == null && reactBundleResult == null) {
     return (
       <Text c="dimmed" size="sm" p="sm">
-        {ctx.isDesktop
-          ? "No bundle yet — click Bundle (after Generate) to compile the backend and frontend."
-          : "No bundle yet — tap Run to generate and bundle."}
+        No bundle yet — {nextStepMid("bundle", ctx.isDesktop)} to compile the backend and frontend.
       </Text>
     );
   }
@@ -665,7 +661,7 @@ function BundlerBody({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           <Text size="sm" mb="xs" data-testid="bundle-network-hint">
             The bundler could not download a dependency — this usually means the npm registry is
             unreachable (offline, a blocked network, or an ad/privacy blocker). Check your connection
-            and {ctx.isDesktop ? "click Bundle" : "tap Run"} again.
+            and {ctx.isDesktop ? `click ${STAGE.bundle}` : nextStepMid("bundle", false)} again.
           </Text>
         )}
         {honoFailed && (
@@ -712,7 +708,7 @@ function TestsLog({ ctx }: { ctx: LayoutCtx }): JSX.Element {
   if (results.length === 0) {
     return (
       <Text c="dimmed" size="sm" p="sm">
-        No test output yet — run tests from the Tests tab.
+        No test output yet — run tests from the {PANE.tests} tab.
       </Text>
     );
   }

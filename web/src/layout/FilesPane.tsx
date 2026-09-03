@@ -4,6 +4,7 @@ import { FileTree } from "../preview/FileTree";
 import { PlainFileViewer } from "../preview/PlainFileViewer";
 import { LazyFileViewer } from "./lazy-panels";
 import type { LayoutCtx } from "./ctx";
+import { nextStepMid } from "./vocabulary";
 
 interface Props {
   ctx: LayoutCtx;
@@ -158,9 +159,7 @@ export function FilesPane({ ctx }: Props): JSX.Element {
                     // auto-generate on load (see `scheduleAutoGenerate`) — so
                     // an empty Files pane is expected there, not a failure,
                     // and the copy has to say which tap fills it.
-                    isDesktop
-                    ? "Click Generate to emit a project from the source."
-                    : "Tap Run to generate a project from the source."}
+                    `${nextStepMid("generate", isDesktop)} to emit a project from the source.`}
               </Text>
               {!isDesktop && generateResult?.ok !== false && (
                 <Text size="xs" c="dimmed" mt="xs">

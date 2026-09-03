@@ -2178,7 +2178,8 @@ export default function App(): JSX.Element {
       // common laptop width); a fixed 48 px header then paints that row
       // over the Explorer / editor.  Give the wrapped layout its own
       // height instead of clipping it.
-      header={{ height: isDesktop ? { base: 88, lg: 48 } : 52 }}
+      // Mobile: the 48 px row plus the pipeline dots under it.
+      header={{ height: isDesktop ? { base: 88, lg: 48 } : 74 }}
       footer={{ height: isDesktop ? 28 : 0 }}
       padding={0}
     >
