@@ -85,20 +85,26 @@ const FELIZ_COLUMN_HEADER = "loomText (h?column?columnDef?header)";
  *  render function is not a label, so only a string header is used and anything
  *  else falls back to the column id.
  *
- *  `instanceof Function` rather than `typeof … === "string"` for two reasons:
- *  it needs no string literal, so the expression survives being spliced into a
- *  double-quoted Vue attribute (`:label="…"`), and `String(…)` swallows the
- *  union so no narrowing is required. */
+ *  `typeof … === 'string'`, SINGLE-quoted, is the one spelling that survives
+ *  all four template dialects this is spliced into:
+ *
+ *    - not `instanceof Function` — a Vue template resolves free identifiers
+ *      against the render context, and `Function` is not in Vue's allowed-globals
+ *      list (`Math`/`Date`/`String`/`Number`/`JSON`/… are), so `vue-tsc` reads it
+ *      as `_ctx.Function` and fails the SFC: `Property 'Function' does not exist
+ *      on type '{ table: Table<T>; … }'`;
+ *    - not `col.columnDef.header.charAt`-style duck-typing — the declared type is
+ *      the `string | ColumnDefTemplate` union, so a property probe does not
+ *      type-check at all;
+ *    - single quotes because vuetify splices this into a DOUBLE-quoted attribute
+ *      (`:label="…"`), which a double-quoted literal would close early;
+ *    - `typeof` itself reaches the Angular packs because Angular's template
+ *      parser has supported it since v20 and the Angular stack pins `^22`
+ *      (verified with `ngc -p tsconfig.app.json` under `strictTemplates`).
+ *
+ *  `String(…)` accepts the whole union, so no narrowing is required anywhere. */
 const GRID_VISIBILITY_LABEL =
-  "String(col.columnDef.header instanceof Function ? col.id : (col.columnDef.header ?? col.id))";
-
-/** The same guard for the Angular packs.  Angular template expressions have no
- *  `instanceof` (nor `typeof`) — the parser's only unary operators are `+`,
- *  `-` and `!` — so the function test goes through `.call`, which every
- *  function has and no string does, with `$any()` to get past the template
- *  type-checker on the `string | template` union. */
-const NG_VISIBILITY_LABEL =
-  "String($any(col.columnDef.header)?.call ? col.id : (col.columnDef.header ?? col.id))";
+  "String(typeof col.columnDef.header === 'string' ? col.columnDef.header : col.id)";
 
 export function emitDataGrid(
   call: ExprIR & { kind: "call" },
@@ -238,10 +244,8 @@ export function emitDataGrid(
           ]),
           // The visibility toggles' labels — the one per-column string that is
           // NOT chrome (it is the author's own column header), and the one the
-          // packs had each spelled by hand.  Angular gets the same guard in its
-          // own template dialect; see the two constants.
-          visibilityLabel:
-            ctx.target.framework === "angular" ? NG_VISIBILITY_LABEL : GRID_VISIBILITY_LABEL,
+          // packs had each spelled by hand.
+          visibilityLabel: GRID_VISIBILITY_LABEL,
           // …and as VALUES, for the procedural pack (Feliz reaches the same
           // header through Fable's dynamic access, so it passes its own hole).
           sortByAriaValue: localizedChromeIcuExpr(ctx, "sortBy", [

@@ -262,8 +262,19 @@ describe("DataGrid — the visibility toggle never stringifies a header function
     `);
     const page = files.get("web/src/pages/x.tsx");
     expect(page, "no page was generated").toBeDefined();
-    const label = /label=\{(String\(col\.columnDef\.header[^\n]*?)\}\n/.exec(page ?? "")?.[1];
+    const label = /label=\{(String\([^\n]*columnDef\.header[^\n]*?)\}\n/.exec(page ?? "")?.[1];
     expect(label, "no column-visibility label in the generated grid").toBeDefined();
+
+    // Two dialect hazards this one expression has to clear, both found the hard
+    // way by the vue and angular build lanes:
+    //   * a Vue template resolves bare identifiers against the render context
+    //     and its allowed-globals list has no `Function`, so `instanceof
+    //     Function` fails `vue-tsc` with "Property 'Function' does not exist on
+    //     type '{ table: Table<T>; … }'";
+    //   * vuetify splices this into a DOUBLE-quoted attribute (`:label="…"`),
+    //     which a double-quoted string literal would close early.
+    expect(label, "`Function` is not a Vue template global").not.toContain("Function");
+    expect(label, "a double quote would close vuetify's :label attribute").not.toContain('"');
 
     // Evaluate the expression the page actually ships, against the two header
     // shapes TanStack allows.  A function header is what the SELECTION column
