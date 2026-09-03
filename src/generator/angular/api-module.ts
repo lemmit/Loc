@@ -82,6 +82,16 @@ function wireTsType(t: TypeIR, precise = false): string {
         case "datetime":
         case "guid":
           return "string";
+        // A `File` field rides the wire as the object-store REF the api client
+        // already declares (`FileRef` = `{ url, key, contentType, size }`).
+        // `unknown` here is what made `FileLink`'s `row.blob.url` a TS2571 —
+        // the ONE frontend where that shows, since the others derive their
+        // response types from the zod schema, which spells the ref out.
+        // REQUEST-side stays `unknown`: the form's control is
+        // `FormControl<FileRef | null>` and `getRawValue()` has to stay
+        // assignable for a REQUIRED File field too.
+        case "File":
+          return precise ? "FileRef" : "unknown";
         default:
           return "unknown";
       }
@@ -105,6 +115,21 @@ function wireTsType(t: TypeIR, precise = false): string {
       if (precise && t.kind === "entity") return `${t.name}Response`;
       return "unknown";
   }
+}
+
+/** True iff a RESPONSE interface this module emits carries a `File` field —
+ *  the aggregate's own wire shape, a containment part's, or a value object
+ *  reached from either.  Gates the `FileRef` import, so an aggregate without a
+ *  File field keeps its import block byte-identical.
+ *
+ *  Takes the three field sets the emitter actually writes rather than the
+ *  aggregate, so the gate cannot drift from what it gates. */
+function emitsFileRef(...fieldSets: ReadonlyArray<ReadonlyArray<{ type: TypeIR }>>): boolean {
+  const isFile = (t: TypeIR): boolean => {
+    const base = baseType(t);
+    return base.kind === "primitive" && base.name === "File";
+  };
+  return fieldSets.some((fs) => fs.some((f) => isFile(f.type)));
 }
 
 /** Peel array/optional wrappers to the base type. */
@@ -493,6 +518,11 @@ export function buildAngularApiModule(
     'import { QueryClient, injectMutation, injectQuery } from "@tanstack/angular-query-experimental";',
     'import { firstValueFrom } from "rxjs";',
     'import { API_BASE_URL } from "./config";',
+    // The `File` field's response type — imported only when one is emitted, so
+    // an aggregate without a File field keeps its import block byte-identical.
+    ...(emitsFileRef(fields, ...responseVos.map((v) => v.fields), ...parts.map((p) => p.fields))
+      ? ['import type { FileRef } from "./client";']
+      : []),
     "",
     // Response-side value objects + enums, typed by name (nested interfaces /
     // enum unions) so a detail-page dereference compiles.

@@ -1,0 +1,68 @@
+// Optional fields end to end (M-FT.22).  Every optionality shape a scaffolded
+// page has to render without a null dereference, on one aggregate:
+//
+//   note / estimate / dueAt   nullable SCALARS — bound straight into a pack's
+//                             typed input, which rejects `T | null | undefined`
+//                             (flowbite's `InputValue`)
+//   budget: Budget?           an optional VALUE OBJECT — the detail page
+//                             flattens it into leaf rows (`p.budget.amount`),
+//                             a null dereference at runtime and a svelte-check
+//                             error at build; its op-form renders a nested
+//                             field group off `form.values.budget`
+//   attachment: File?         an optional FILE — the upload handler assigns the
+//                             returned ref back and clears to `null`
+//
+// The `fund` operation is what puts the optional value object on a form (an
+// op-modal seeds and binds every parameter), so the shard covers the READ side
+// (detail rows) and the WRITE side (op-form group) of the same field.
+system OptFields {
+  subdomain Core {
+    context Tracking {
+      valueobject Budget {
+        amount: decimal
+        currency: string
+      }
+
+      aggregate Project with crudish {
+        name: string
+        note: string?
+        estimate: int?
+        dueAt: datetime?
+        budget: Budget?
+        attachment: File?
+
+        derived display: string = name
+
+        operation fund(amount: decimal, currency: string) {
+          budget := Budget { amount: amount, currency: currency }
+        }
+      }
+    }
+  }
+
+  api TrackingApi from Core
+
+  ui WebApp with scaffold(subdomains: [Core]) {
+    api Tracking: TrackingApi
+  }
+
+  storage primary { type: postgres }
+  storage blobs { type: localDisk }
+  resource trackingState { for: Tracking, kind: state, use: primary }
+  resource trackingFiles { for: Tracking, kind: objectStore, use: blobs }
+
+  deployable api {
+    platform: node
+    contexts: [Tracking]
+    dataSources: [trackingState, trackingFiles]
+    serves: TrackingApi
+    port: 3000
+  }
+
+  deployable web {
+    platform: svelte
+    targets: api
+    ui: WebApp { Tracking: api }
+    port: 3001
+  }
+}

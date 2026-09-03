@@ -262,6 +262,16 @@ export function fieldInput(
   const testid = ` data-testid="${testidBase}"`;
   const cn = JSON.stringify(name);
   const style = formStyle(ctx);
+  // Dispatch on the UNWRAPPED type — an optional field (`attachment: File?`,
+  // `estimate: int?`, `resolvedAt: datetime?`) renders the same control as its
+  // required twin, exactly as the shared `prepareFormFieldVM` does for the JSX
+  // frontends.  Matching on the raw `t` instead sent every optional field to
+  // the plain-text fallback, and for a `File?` that silently skipped
+  // `registerFileUploadImports` while `flatControls` (which DOES unwrap) still
+  // typed the control `FormControl<FileRef | null>` — `ng build` then failed on
+  // an unimported `FileRef` and an unimported `api` in the emitted
+  // `onFileUpload` method.
+  const inner = unwrapOpt(t);
   // A `File` field renders a native file input that multipart-POSTs the chosen
   // file to `/files` (`api.upload`) and writes the returned `FileRef` back into
   // the reactive-form control — file inputs can't use `formControlName` (the
@@ -269,7 +279,7 @@ export function fieldInput(
   // the control off the form group and `setValue`s it via `onFileUpload`.  A
   // plain input across all packs (no design-system file component exists in
   // Material/PrimeNG/spartanNg); mirrors the JSX frontends' `field-input-file`.
-  if (t.kind === "primitive" && t.name === "File") {
+  if (inner.kind === "primitive" && inner.name === "File") {
     registerFileUploadImports(ctx);
     // The control name is single-quoted: it sits inside the double-quoted
     // `(change)="…"` attribute, so `JSON.stringify`'s double quotes would close
@@ -277,8 +287,8 @@ export function fieldInput(
     const change = formVar ? ` (change)="onFileUpload($event, ${formVar}.get('${name}'))"` : "";
     return `<label class="loom-field"><span class="loom-label">${label}</span><input type="file" class="loom-input"${testid}${change} /></label>`;
   }
-  if (t.kind === "enum") {
-    const en = bc.enums.find((e) => e.name === t.name);
+  if (inner.kind === "enum") {
+    const en = bc.enums.find((e) => e.name === inner.name);
     if (style === "material") {
       addNg(ctx, "@angular/material/form-field", "MatFormFieldModule");
       addNg(ctx, "@angular/material/select", "MatSelectModule");
@@ -297,7 +307,7 @@ export function fieldInput(
       .join("");
     return `<label class="loom-field"><span class="loom-label">${label}</span><select class="loom-input" formControlName=${cn}${testid}>${opts}</select></label>`;
   }
-  if (t.kind === "primitive" && t.name === "bool") {
+  if (inner.kind === "primitive" && inner.name === "bool") {
     if (style === "material") {
       addNg(ctx, "@angular/material/checkbox", "MatCheckboxModule");
       return `<mat-checkbox formControlName=${cn}${testid}>${label}</mat-checkbox>`;
@@ -336,10 +346,11 @@ export function fieldInput(
   // PrimeNG's `p-inputnumber` — would bind a JS number back into it, losing the
   // scale the wire carries.  A text input with `inputmode="decimal"` keeps the
   // numeric soft keyboard on mobile without the coercion.
-  const isMoney = t.kind === "primitive" && t.name === "money";
+  const isMoney = inner.kind === "primitive" && inner.name === "money";
   const moneyMode = isMoney ? ' inputmode="decimal"' : "";
   const isNumeric =
-    t.kind === "primitive" && (t.name === "int" || t.name === "long" || t.name === "decimal");
+    inner.kind === "primitive" &&
+    (inner.name === "int" || inner.name === "long" || inner.name === "decimal");
   if (style === "primeng") {
     if (isNumeric) {
       addNg(ctx, "primeng/inputnumber", "InputNumberModule");
@@ -347,16 +358,16 @@ export function fieldInput(
     }
     addNg(ctx, "primeng/inputtext", "InputTextModule");
     const inputType =
-      t.kind === "primitive" && t.name === "datetime" ? ' type="datetime-local"' : "";
+      inner.kind === "primitive" && inner.name === "datetime" ? ' type="datetime-local"' : "";
     return `<label class="loom-field"><span class="loom-label">${label}</span><input pInputText class="loom-input"${inputType}${moneyMode} formControlName=${cn}${testid} /></label>`;
   }
   let inputType = "";
-  if (t.kind === "primitive") {
+  if (inner.kind === "primitive") {
     if (isMoney) {
       inputType = ' type="text"';
     } else if (isNumeric) {
       inputType = ' type="number"';
-    } else if (t.name === "datetime") {
+    } else if (inner.name === "datetime") {
       inputType = ' type="datetime-local"';
     }
   }
