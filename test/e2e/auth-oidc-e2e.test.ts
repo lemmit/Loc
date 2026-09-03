@@ -88,7 +88,7 @@ describe.skipIf(!RUN)("auth OIDC e2e: real Keycloak token flow (LOOM_AUTH_E2E=1)
     outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-auth-e2e-"));
     execSync(`node ${cli} generate system ${fixture} -o ${outDir}`, { stdio: "inherit" });
     const apiDir = path.join(outDir, "api");
-    execSync("npm install --silent --no-audit --no-fund", {
+    execSync("npm install --loglevel=error --no-audit --no-fund", {
       cwd: apiDir,
       stdio: "inherit",
       timeout: 240_000,
