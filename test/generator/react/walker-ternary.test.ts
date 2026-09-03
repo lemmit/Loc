@@ -50,7 +50,7 @@ describe("ternary conditional rendering in walker pages", () => {
       /<Center mih=\{200\}><Text c="dimmed">\{t\("[^"]*", "Loading\.\.\."\)\}<\/Text><\/Center>/,
     );
     expect(content).toMatch(/\) : \(/);
-    expect(content).toMatch(/<Stack>/);
+    expect(content).toMatch(/<Stack gap="md">/);
     expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Done"\)\}<\/Title>/);
     expect(content).toMatch(/<\/Stack>/);
     // State usage detected → useState declaration.

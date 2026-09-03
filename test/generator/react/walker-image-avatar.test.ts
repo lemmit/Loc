@@ -159,7 +159,7 @@ describe("Image + Avatar in walker stdlib", () => {
     `);
     const content = files.get("web/src/pages/header.tsx")!;
     expect(content).toMatch(/import \{ Avatar, Group, Image \} from "@mantine\/core";/);
-    expect(content).toMatch(/<Group justify="space-between" role="toolbar" aria-label="Actions">/);
+    expect(content).toMatch(/<Group justify="space-between" align="center" gap="md" role="toolbar" aria-label="Actions">/);
     expect(content).toMatch(/<Image src="\/logo\.png"/);
     expect(content).toMatch(/<Avatar src="\/u\.png"/);
   });

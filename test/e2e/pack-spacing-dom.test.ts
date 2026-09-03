@@ -35,7 +35,7 @@ describe.skipIf(!enabled)("cross-pack spacing — measured in a real browser", (
     // that is off: say what is missing.
     expect(
       urls,
-      'LOOM_PACK_SPACING_DOM=1 needs LOOM_PACK_SPACING_URLS, e.g. \'{"react-mantine":4200}\' — a map of pack label to port or URL of an already-running generated app',
+      "LOOM_PACK_SPACING_DOM=1 needs LOOM_PACK_SPACING_URLS, e.g. '{\"react-mantine\":4200}' — a map of pack label to port or URL of an already-running generated app",
     ).toBeTruthy();
     const listPath = process.env.LOOM_PACK_SPACING_LIST ?? "/";
     const out = execFileSync(

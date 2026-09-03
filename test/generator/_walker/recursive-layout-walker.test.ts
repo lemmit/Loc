@@ -49,7 +49,7 @@ describe("recursive layout walker", () => {
     // Function component named after the page.
     expect(content).toMatch(/export default function Welcome\(\)/);
     // JSX shape: Stack > Title order={2} + Text.
-    expect(content).toMatch(/<Stack>/);
+    expect(content).toMatch(/<Stack gap="md">/);
     expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Welcome to Acme"\)\}<\/Title>/);
     expect(content).toMatch(/<Text>\{t\("[^"]*", "Pick a destination\."\)\}<\/Text>/);
     expect(content).toMatch(/<\/Stack>/);
@@ -128,7 +128,7 @@ describe("recursive layout walker", () => {
     // Card structure with title + nested Stack.
     expect(content).toMatch(/<Card withBorder padding="md">/);
     expect(content).toMatch(/<Title order=\{3\}>\{t\("[^"]*", "Stats"\)\}<\/Title>/);
-    expect(content).toMatch(/<Stack>/);
+    expect(content).toMatch(/<Stack gap="md">/);
     expect(content).toMatch(/<Text>\{t\("[^"]*", "a"\)\}<\/Text>/);
     expect(content).toMatch(/<Text>\{t\("[^"]*", "b"\)\}<\/Text>/);
   });

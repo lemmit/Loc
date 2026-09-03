@@ -23,7 +23,11 @@
 
 import { writeFileSync } from "node:fs";
 import { chromium } from "playwright";
-import { SPACING_CONTRACT, SPACING_SCALE, SPACING_TOLERANCE_PX } from "../out/generator/_packs/spacing-contract.js";
+import {
+  SPACING_CONTRACT,
+  SPACING_SCALE,
+  SPACING_TOLERANCE_PX,
+} from "../out/generator/_packs/spacing-contract.js";
 
 const targets = JSON.parse(process.argv[2] ?? "{}");
 const args = process.argv.slice(3);
@@ -37,7 +41,7 @@ const PHONE_WIDTH = Number(argOf("--phone", "390"));
 
 if (Object.keys(targets).length === 0) {
   console.error(
-    'usage: measure-pack-spacing.mjs \'{"<pack label>": <port or url>}\' [--list /issues] [--out measures.json]',
+    "usage: measure-pack-spacing.mjs '{\"<pack label>\": <port or url>}' [--list /issues] [--out measures.json]",
   );
   process.exit(2);
 }
@@ -60,7 +64,9 @@ const measure = (page) =>
     const stack =
       main?.querySelector(
         "[data-testid$='-list'], [data-testid$='-detail'], [data-testid$='-page'], [data-testid='home']",
-      ) ?? main?.firstElementChild ?? null;
+      ) ??
+      main?.firstElementChild ??
+      null;
     const toolbar = document.querySelector("[role=toolbar]");
     const table = document.querySelector("main table, main [role=table]");
     const scroller = (() => {
@@ -87,7 +93,11 @@ const measure = (page) =>
       "main.contained": mainCs ? mainCs.minWidth === "0px" || px(mainCs.minWidth) === 0 : null,
       "table.scrollContainer": table ? scroller !== null : null,
       "navSection.label": sectionCs
-        ? { size: px(sectionCs.fontSize), weight: sectionCs.fontWeight, transform: sectionCs.textTransform }
+        ? {
+            size: px(sectionCs.fontSize),
+            weight: sectionCs.fontWeight,
+            transform: sectionCs.textTransform,
+          }
         : null,
       toolbarAlign: toolbarCs ? toolbarCs.alignItems : null,
       documentScrollsSideways:

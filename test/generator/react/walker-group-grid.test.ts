@@ -37,7 +37,7 @@ describe("Group + Grid in walker stdlib", () => {
     const content = files.get("web/src/pages/toolbar.tsx")!;
     expect(content).toBeDefined();
     expect(content).toMatch(/import \{ Badge, Button, Group, Title \} from "@mantine\/core";/);
-    expect(content).toMatch(/<Group>/);
+    expect(content).toMatch(/<Group gap="xs">/);
     expect(content).toMatch(/<Title order=\{2\}>\{t\("[^"]*", "Title"\)\}<\/Title>/);
     expect(content).toMatch(/<Badge>\{t\("[^"]*", "Live"\)\}<\/Badge>/);
     expect(content).toMatch(/<Button>\{t\("[^"]*", "Save"\)\}<\/Button>/);
@@ -64,7 +64,7 @@ describe("Group + Grid in walker stdlib", () => {
       }
     `);
     const content = files.get("web/src/pages/empty.tsx")!;
-    expect(content).toMatch(/<Group \/>/);
+    expect(content).toMatch(/<Group gap="xs" \/>/);
   });
 
   it('Grid { ...children } wraps each child in <Grid.Col span="auto">', async () => {
@@ -154,8 +154,8 @@ describe("Group + Grid in walker stdlib", () => {
     expect(content).toMatch(
       /import \{ Badge, Grid, Group, Stack, Text, Title \} from "@mantine\/core";/,
     );
-    expect(content).toMatch(/<Stack>/);
-    expect(content).toMatch(/<Group>/);
+    expect(content).toMatch(/<Stack gap="md">/);
+    expect(content).toMatch(/<Group gap="xs">/);
     expect(content).toMatch(/<Grid>/);
   });
 });

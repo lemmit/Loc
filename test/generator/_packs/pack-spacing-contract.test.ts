@@ -33,11 +33,11 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { loadPack } from "../../../src/generator/_packs/loader-fs.js";
 import {
+  rulePx,
   SPACING_CONTRACT,
   SPACING_SCALE,
   SPACING_TOLERANCE_PX,
   type SpacingConcern,
-  rulePx,
 } from "../../../src/generator/_packs/spacing-contract.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -91,8 +91,7 @@ function resolveGap(dialect: Dialect, markup: string): number | null {
       const arb = /\bgap-\[(\d+)px\]/.exec(markup);
       return arb ? Number(arb[1]) : null;
     }
-    case "css":
-      // The Angular packs render a `loom-*` class; the distance lives in the
+    case "css": // The Angular packs render a `loom-*` class; the distance lives in the
       // pack's theme, so the caller passes the CSS RULE as the markup.
       {
         const m = /\bgap:\s*([\d.]+(?:px|rem))/.exec(markup);
@@ -159,7 +158,12 @@ const PACKS: readonly PackUnderTest[] = [
   { family: "shadcnSvelte", version: "v1", dialect: "tailwind", cssTemplates: ["globals-css"] },
   { family: "flowbite", version: "v1", dialect: "tailwind", cssTemplates: ["globals-css"] },
   { family: "vuetify", version: "v3", dialect: "vuetify", cssTemplates: ["app-shell"] },
-  { family: "angularMaterial", version: "v1", dialect: "css", cssTemplates: ["theme", "app-shell"] },
+  {
+    family: "angularMaterial",
+    version: "v1",
+    dialect: "css",
+    cssTemplates: ["theme", "app-shell"],
+  },
   { family: "primeng", version: "v1", dialect: "css", cssTemplates: ["theme", "app-shell"] },
   { family: "spartanNg", version: "v1", dialect: "css", cssTemplates: ["theme", "app-shell"] },
 ];
@@ -182,6 +186,16 @@ const KNOWN_STRUCTURAL_DEVIATIONS: readonly { pack: string; concern: string; own
   { pack: "chakra@v2", concern: "navSection.label", owner: "M-FT.18 (#2745)" },
   { pack: "chakra@v3", concern: "navSection.label", owner: "M-FT.18 (#2745)" },
   { pack: "flowbite@v1", concern: "container.size", owner: "M-FT.19 (#2750)" },
+  { pack: "mui@v5", concern: "main.padding", owner: "M-FT.20 (#2748)" },
+  { pack: "mui@v7", concern: "main.padding", owner: "M-FT.20 (#2748)" },
+  { pack: "chakra@v2", concern: "main.padding", owner: "M-FT.18 (#2745)" },
+  { pack: "chakra@v3", concern: "main.padding", owner: "M-FT.18 (#2745)" },
+  { pack: "flowbite@v1", concern: "main.padding", owner: "M-FT.19 (#2750)" },
+  { pack: "mui@v5", concern: "main.contained", owner: "M-FT.20 (#2748)" },
+  { pack: "mui@v7", concern: "main.contained", owner: "M-FT.20 (#2748)" },
+  { pack: "chakra@v2", concern: "main.contained", owner: "M-FT.18 (#2745)" },
+  { pack: "chakra@v3", concern: "main.contained", owner: "M-FT.18 (#2745)" },
+  { pack: "flowbite@v1", concern: "main.contained", owner: "M-FT.19 (#2750)" },
 ];
 
 function structuralDeviation(pack: string, concern: string): boolean {
@@ -206,7 +220,12 @@ const KNOWN_DEVIATIONS: readonly KnownDeviation[] = [
   { pack: "chakra@v3", concern: "stack.gap", actualPx: null, owner: "M-FT.18 (#2745)" },
   { pack: "flowbite@v1", concern: "group.gap", actualPx: 16, owner: "M-FT.19 (#2750)" },
   { pack: "flowbite@v1", concern: "keyValueRow.gap", actualPx: 16, owner: "M-FT.19 (#2750)" },
-  { pack: "flowbite@v1", concern: "formSubmitRow.marginTop", actualPx: null, owner: "M-FT.19 (#2750)" },
+  {
+    pack: "flowbite@v1",
+    concern: "formSubmitRow.marginTop",
+    actualPx: null,
+    owner: "M-FT.19 (#2750)",
+  },
   { pack: "flowbite@v1", concern: "card.padding", actualPx: null, owner: "M-FT.19 (#2750)" },
 ];
 
@@ -243,8 +262,20 @@ const layoutCtx = {
   styleWith: (style: string) => ` style="${style}"`,
 };
 
-const cardCtx = { ...layoutCtx, hasTitle: true, titleText: "T", hasContent: true, contentJsx: CHILD };
-const kvCtx = { label: "L", labelAttr: ' label="L"', childJsx: CHILD, testidAttr: "", styleAttr: "" };
+const cardCtx = {
+  ...layoutCtx,
+  hasTitle: true,
+  titleText: "T",
+  hasContent: true,
+  contentJsx: CHILD,
+};
+const kvCtx = {
+  label: "L",
+  labelAttr: ' label="L"',
+  childJsx: CHILD,
+  testidAttr: "",
+  styleAttr: "",
+};
 const formCtx = {
   ...layoutCtx,
   fieldHtmls: [CHILD],
@@ -265,11 +296,7 @@ const containerCtx = { ...layoutCtx, hasSize: true, size: "md" };
 
 /** Render one logical template, or return null when the pack has no such
  *  template (charts on the non-charting packs, forms on Angular). */
-function render(
-  pack: ReturnType<typeof loadPack>,
-  name: string,
-  ctx: unknown,
-): string | null {
+function render(pack: ReturnType<typeof loadPack>, name: string, ctx: unknown): string | null {
   if (!pack.templates.has(name)) return null;
   return pack.render(name, ctx);
 }
@@ -512,9 +539,10 @@ describe("cross-pack spacing contract", () => {
           ).toBe(false);
           return;
         }
-        expect(centred, `${packId(p)} toolbar is not cross-axis centred: ${markup.slice(0, 160)}`).toBe(
-          true,
-        );
+        expect(
+          centred,
+          `${packId(p)} toolbar is not cross-axis centred: ${markup.slice(0, 160)}`,
+        ).toBe(true);
         expect(
           between,
           `${packId(p)} toolbar is not main-axis space-between: ${markup.slice(0, 160)}`,
@@ -565,6 +593,60 @@ describe("cross-pack spacing contract", () => {
         expect(
           honoured,
           `${packId(p)} renders the same container with and without \`size:\` — the author's size is dropped`,
+        ).toBe(true);
+      });
+    }
+  });
+
+  describe("main.padding — md on a phone, lg from the `lg` breakpoint", () => {
+    for (const { p } of loaded) {
+      const id = packId(p);
+      const deviates = structuralDeviation(id, "main.padding");
+      it(deviates ? `${id} still deviates` : id, () => {
+        const shell = `${source(p, "app-shell")}\n${packCss(p)}`;
+        // Every dialect spells "one step wider at `lg`" differently; what the
+        // rule needs is that the shell states BOTH steps rather than one
+        // fixed inset for a phone and a 27-inch monitor alike.
+        const responsive =
+          /\bp-4\b[^"]*\blg:p-6\b/.test(shell) || // tailwind
+          /\bpa-4\b[^"]*\bpa-lg-6\b/.test(shell) || // vuetify
+          /padding=\\?\{\{\s*base:\s*"md",\s*lg:\s*"lg"\s*\}\}/.test(shell) || // mantine
+          /@media\s*\(min-width:\s*1024px\)[^}]*\{[^}]*padding:\s*(?:24px|1\.5rem)/.test(shell); // the loom-* CSS packs
+        if (deviates) {
+          expect(
+            responsive,
+            `${id} <main> now states both padding steps — delete its KNOWN_STRUCTURAL_DEVIATIONS entry`,
+          ).toBe(false);
+          return;
+        }
+        expect(
+          responsive,
+          `${id} <main> states one fixed padding — the contract is md below \`lg\` and lg above it`,
+        ).toBe(true);
+      });
+    }
+  });
+
+  describe("main.contained — <main> sets min-width: 0", () => {
+    for (const { p } of loaded) {
+      const id = packId(p);
+      const deviates = structuralDeviation(id, "main.contained");
+      it(deviates ? `${id} still deviates` : id, () => {
+        const shell = `${source(p, "app-shell")}\n${packCss(p)}`;
+        // Without this a <main> that is a flex child keeps `min-width: auto`,
+        // so a wide table widens the FLEX ITEM and the document scrolls
+        // sideways — the scroll container inside it never gets to do its job.
+        const contained = /\bmin-w-0\b/.test(shell) || /min-?[wW]idth:\s*0/.test(shell);
+        if (deviates) {
+          expect(
+            contained,
+            `${id} <main> is now contained — delete its KNOWN_STRUCTURAL_DEVIATIONS entry`,
+          ).toBe(false);
+          return;
+        }
+        expect(
+          contained,
+          `${id} <main> never sets min-width: 0, so a wide table widens the document instead of scrolling inside its container`,
         ).toBe(true);
       });
     }

@@ -421,7 +421,7 @@ async function navPage(): Promise<string> {
 describe("angular generator — navigation + format-helper primitives", () => {
   it("routes Anchor/IdLink/Breadcrumbs via [routerLink] + registers RouterLink", async () => {
     const page = await navPage();
-    expect(page).toContain('<nav class="loom-breadcrumbs">');
+    expect(page).toContain('class="loom-breadcrumbs">');
     // Anchor label walks through the i18n seam (M-T1.11); routerLink unchanged.
     expect(page).toContain(
       '<a class="loom-anchor" [routerLink]=\'"/about"\'>{{ t("page.Home.anchor.onrqou", "About") }}</a>',

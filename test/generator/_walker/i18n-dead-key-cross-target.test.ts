@@ -218,6 +218,6 @@ describe("a label with no catalog key stays raw", () => {
     expect(appSource(files)).toContain('"Welcome aboard"');
     // …but no nav label binds a `menu.*` key, because none exists.
     expect(shell).not.toContain('t("menu.');
-    expect(shell).toContain('label="Aggregates"');
+    expect(shell).toContain('<div className="loom-nav-section">Aggregates</div>');
   });
 });
