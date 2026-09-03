@@ -47,6 +47,8 @@ describe("playground headless tests stay React-free", () => {
         if (tsx) offenders.push(`${file.slice(DIR.length + 1)} → ${m[1]}`);
       }
     }
-    expect(offenders, "import the React-free core instead (see builder/refusal-text.ts)").toEqual([]);
+    expect(offenders, "import the React-free core instead (see builder/refusal-text.ts)").toEqual(
+      [],
+    );
   });
 });
