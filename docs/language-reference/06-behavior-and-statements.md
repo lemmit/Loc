@@ -201,7 +201,9 @@ with :ok <- ensure(is_staff, {:forbidden, "Forbidden: isStaff"}),
 The route layer turns each failure into RFC-7807 `application/problem+json`. On the Hono backend the `app.onError` handler checks `ForbiddenError` **before** `DomainError`; the same ladder is `DomainExceptionFilter` (.NET), `ApiExceptionAdvice` (Java), `app/http/problem.py` (Python), and the controller's `{:error, {:forbidden | :disallowed | :precondition_failed, detail}}` clauses (Elixir):
 
 ```ts
-// http/order.routes.ts — generated onError (node)
+// http/ledgerApi-routes.ts — the generated `app.onError` ladder (node).
+// Every routed sub-app carries the same ladder; the root `http/index.ts` copy
+// adds structured logging + a `recordDomainFault(...)` metric per arm.
 if (err instanceof ForbiddenError)         return problem(403, "Forbidden", err.message);
 if (err instanceof DisallowedError)        return problem(409, "Disallowed", err.message);
 if (err instanceof DomainError)            return problem(422, "Unprocessable Entity", err.message);
@@ -353,9 +355,9 @@ changeset =
 
 `create [name](params) [audited] { body }` is the factory marker: an **unnamed** `create(...)` makes the aggregate constructible over HTTP (`POST /<aggs>` + a static factory whose input is **derived from the field set**, not from the parameter list); `destroy [name][(params)] [audited] { body }` is the terminator (`DELETE /{id}`). Neither is ever `private` or `extern`. The `crudish` capability injects the canonical pair plus an `update`; an aggregate with no `create` and every required field defaulted gets a synthesised parameterless one.
 
-On a **state-based** aggregate the braces are a contract, not a body: no backend renders `canonicalCreate.statements` / `canonicalDestroy.statements`, so the validator refuses any statement that would silently vanish (`loom.lifecycle-body-dropped`, an error): a `precondition`, an `emit`, a `+=`/`-=`, a call, or an assignment whose value the emitted factory does not already reproduce. Two assignments *are* reproduced and therefore admitted — `field := <same-named param>` (the field-derived input supplies it) and `field := <literal>` when the field declares that same literal default. A **named** `create open(...)` / `destroy close(...)` reaches no emitter at all and is refused whole (`loom.named-lifecycle-dropped`). `id` is unreadable inside a `create` body (`loom.this-id-in-create`).
+On a **state-based** aggregate the braces are a contract, not a body: no backend renders `canonicalCreate.statements` / `canonicalDestroy.statements`, so the validator refuses any statement that would silently vanish (`loom.lifecycle-body-dropped`, an error): a `precondition`, an `emit`, a `+=`/`-=`, a call, or an assignment whose value the emitted factory does not already reproduce. Two assignments *are* reproduced and therefore admitted — `field := <same-named param>` (the field-derived input supplies it) and `field := <literal>` when the field declares that same literal default. A **named** `create open(...)` / `destroy close(...)` on a state-based aggregate reaches no emitter at all and is refused whole (`loom.named-lifecycle-dropped`) — with one exception: on an **event-sourced** aggregate the single `create` is canonical whether or not it is named, so `create open(owner: string) { emit Opened { … } }` is emitted and ungated. Reading the identity as the explicit `this.id` inside a `create` body is `loom.this-id-in-create`; a bare `id` is not gated, and is what the event-sourced `create` above emits.
 
-A `requires` **is** rendered for the canonical pair (every backend evaluates it at its own chokepoint and denies with 403), but what it may read is narrow: a `create` guard may read `currentUser` only; a `destroy` guard may read `currentUser` and `this` — never a parameter (`loom.lifecycle-guard-unreadable`). On an event-sourced aggregate a `create` guard cannot be enforced at all (`loom.lifecycle-guard-event-sourced`) — gate the operation that issues the create instead.
+A `requires` **is** rendered for the canonical pair (every backend evaluates it at its own chokepoint and denies with 403). Note the spelling: `Create`/`Destroy` have no header `requires` clause in the grammar — `create(name: string) requires … { }` is a parse error — so a lifecycle guard is written as the first *statement* of the body. What it may read is narrow: a `create` guard may read `currentUser` only; a `destroy` guard may read `currentUser` and `this` — never a parameter (`loom.lifecycle-guard-unreadable`). On an event-sourced aggregate a `create` guard cannot be enforced at all (`loom.lifecycle-guard-event-sourced`) — gate the operation that issues the create instead.
 
 ```ddd
 aggregate Wallet {
@@ -379,9 +381,12 @@ static create(input: { name: string; balance: number }): Wallet {
 const created = Wallet.create({ name: body.name, balance: body.balance });
 await repo.save(created);
 return c.json({ id: created.id as string }, 201);
-// … and DELETE /{id} (operationId destroyWallet)
+// … and DELETE /{id} (operationId destroyWallet) — the delete is wrapped in a
+// try/catch that turns a PG 23503 FK violation into a 409 problem+json
 await repo.getById(Ids.WalletId(id));
-await repo.delete(Ids.WalletId(id));
+try {
+  await repo.delete(Ids.WalletId(id));
+} catch (err) { /* … 23503 → 409 "Wallet is still referenced and cannot be deleted." */ }
 return c.body(null, 204);
 ```
 == dotnet
@@ -399,7 +404,7 @@ public async ValueTask<Unit> Handle(DestroyWalletCommand command, CancellationTo
 ```
 ::: end
 
-Java (`OrderService.create` + `@DeleteMapping`), Python (`Order.create(...)` classmethod + `DELETE /{id}`) and Elixir (`create_<agg>` / `delete_<agg>` context delegates) follow the same shape. The **event-sourced** `create` is the exception: its body is rendered — see `apply` next.
+Java (`Wallet.create(...)` behind `WalletService.createWallet` + a `@DeleteMapping` route), Python (a `Wallet.create(...)` classmethod + `DELETE /{id}`) and Elixir (`defdelegate create_wallet(attrs), to: WalletRepository, as: :insert`, plus `destroy_wallet!/1`) follow the same shape. The **event-sourced** `create` is the exception: its body is rendered — see `apply` next.
 
 ## `apply(e: Event)` — the event-sourcing fold
 

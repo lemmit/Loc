@@ -36,7 +36,7 @@ shape of the compiler pipeline that turns these features into code.
 | 14 | [APIs, storage, resources & channels](14-apis-storage-resources-channels.md) | `api`, `storage`, `resource`, `channel`, `channelSource`. |
 | 15 | [UI: pages & structure](15-ui-pages-structure.md) | `ui`, `page`, `component`, `area`, `state`, `derived`, `action`, `menu`, `layout`, `scaffold`. |
 | 16 | [UI: the walker primitive library](16-ui-walker-primitives.md) | Layout/display/input/action/formatter primitives, `Form`, `match`, `For`, `QueryView`. |
-| 17 | [Authentication & authorization](17-auth.md) | `user`, `auth`, `permissions`, `requires`, `currentUser`, `sensitive` fields.  (`policy { … }`, named policy functions, `implies`, and `mask unless` are documented in [`../auth.md`](../auth.md) until this chapter grows them.) |
+| 17 | [Authentication & authorization](17-auth.md) | `user`, `auth` (OIDC providers, PKCE, refresh rotation), `permissions … implies …`, `policy { allow / deny … }` and named policy functions, `requires` in all five positions, `mask unless`, `currentUser`, `sensitive` fields, tenancy stances, the dev-stub verifier. |
 | 18 | [Testing](18-testing.md) | `test`, `test e2e`, matchers, automatic api/ui dispatch. |
 | 19 | [Requirements & traceability](19-requirements-traceability.md) | `requirement`, `solution`, `testCase`, `verifies`/`covers`, `ddd verify`. |
 | 20 | [Observability & provenance](20-observability-provenance.md) | The catalog envelope, `provenanced`, `ddd snapshot`. |
@@ -51,9 +51,6 @@ per-feature doc is the reference for them until a chapter lands:
 
 | Surface | Reference |
 |---|---|
-| `tenancy by user.<claim> of <Registry>`, `tenantOwned` / `tenantRegistry` / `crossTenant`, the deep / deny / global / self stances, the `policy {}` read ladder | [`../tenancy.md`](../tenancy.md) |
-| `policy { allow / deny … }`, named `policy` functions, `permissions … implies …`, `mask unless` | [`../auth.md`](../auth.md) |
-| Folded (`on(e: Event)`) projections, `keyed by`, `join`, `from <Projection>` / workflow sources, paged projections, `GET /projections/<name>` | [`../scaffold-macros.md`](../scaffold-macros.md) (`scaffoldDashboard`), [`../language.md`](../language.md) → "Inside a context", `docs/old/proposals/projection.md` (design record) |
 | `migration "…" { sql / rename / backfill }` blocks, `unique (…)`, `index:` specs, destructive / rebaseline gating | [`../migrations.md`](../migrations.md) |
 | `commandHandler` / `queryHandler`, `api { route GET "/…" -> Handler }`, `httpStatus` mappings | [`../extern.md`](../extern.md), [`../architecture.md`](../architecture.md) |
 | `timerSource` (`cron:` / `every: 15s`) | [`../generators.md`](../generators.md), grammar `TimerSource` |

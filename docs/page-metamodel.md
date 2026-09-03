@@ -1186,7 +1186,7 @@ Pages carry `menu { … }` metadata; sidebar is derived. Optional `ui`-level
 ### Lowering
 
 ```
-1. Run scaffold → pages, each with default `menu { section, label }`
+1. Run the scaffold macro → pages, each with default `menu { section, label }`
    (defaults: aggregates → "Aggregates", workflows → "Workflows")
 2. Apply explicit `page X` overrides (by name)
 3. If `ui` has a `menu { … }` block:
@@ -1285,15 +1285,17 @@ Both fall out of existing primitives. Type safety on the final
 
 ---
 
-## 13. Migration
+## 13. Migration *(historical — completed)*
 
-**Explicit `ui` is required for every `react` deployable.** No implicit
-defaults — every existing `.ddd` file with a `platform: react` deployable
-gains an explicit `ui` block. The minimum is a one-liner that recovers
-today's behaviour verbatim:
+This section records the one-time migration off the pre-metamodel React
+generator.  It is done; kept for the rationale.
+
+**Explicit `ui` is required for every UI-mounting deployable.** No implicit
+defaults — every `.ddd` file with a frontend deployable declares a `ui` block.
+The minimum is a one-liner that recovers the old behaviour:
 
 ```ddd
-ui WebApp { scaffold subdomains: [Catalog, Sales, CustomerMgmt] }
+ui WebApp with scaffold(subdomains: [Catalog, Sales, CustomerMgmt]) { }
 
 deployable webApp {
     platform: react
@@ -1303,77 +1305,92 @@ deployable webApp {
 }
 ```
 
-The `examples/acme.ddd` `webApp` deployable is updated to this form.
-Validator rejects a `react` deployable without `ui:` (HTTP analogue: the
-deployable is missing its mount point).
+`examples/acme.ddd` uses this form.  The validator rejects a UI-mounting
+deployable without `ui:` (HTTP analogue: the deployable is missing its mount
+point).
 
-**Generator changes** (this refactor has shipped — described in
-present tense here is historical; current reality is below):
+**Generator changes** (all landed):
 
-- The legacy archetype renderer (`pages-builder.ts`) is **removed**.
-  Page bodies — both hand-written and scaffolded — now route through
-  `src/generator/react/body-walker.ts`, which dispatches every
-  walker-stdlib primitive into the active design pack.
-- `workflow-builder.ts` still exists for
-  per-aggregate plumbing the walker calls into.
-- `pages-emitter.ts` is the shell emitter that wraps the walker's
-  body output with `useForm` / mutation hook / `useParams` / imports.
+- The legacy archetype renderer (`pages-builder.ts`) is **removed**.  Page
+  bodies — hand-written and scaffolded alike — route through the shared body
+  walker (`src/generator/_walker/walker-core.ts`; `react/body-walker.ts` is now
+  a thin re-export), which dispatches every walker primitive into the active
+  design pack.
+- `pages-emitter.ts` is the shell emitter that wraps the walker's body output
+  with `useForm` / mutation hooks / `useParams` / imports.
 - `page-objects-builder.ts` stays — driven by route + testid metadata.
-- `theme-builder.ts` stays — theme is a system concern.
+- The per-aggregate `workflow-builder.ts` and `theme-builder.ts` files named by
+  the original plan no longer exist: workflow plumbing moved into the walker's
+  form primitives, and the theme is emitted from the pack layer
+  (`react/templating/preparers/theme.ts`).
 
 ---
 
-## 14. Open questions / non-goals (v0)
+## 14. Open questions / non-goals *(v0 list, re-dispositioned 2026-09-03)*
 
-- **Per-page theming.** Today `theme { … }` is system-wide. Per-page
-  overrides not in v0.
-- **Internationalisation.** Strings in `title:` etc. likely want a `t("…")`
-  form. Not in v0.
-- **URL-synced state.** Deferred. v0 state is in-memory only.
-- **Multi-step named flows.** Not in v0; block-body lambdas + custom
-  components cover realistic cases. Add a `flow` keyword later only if
-  forced.
-- **User-extensible component library.** v0 stdlib is closed.
-- **App-shell beyond menu.** Header, footer, breadcrumb stay hardcoded.
-  Add `header { … }` / `footer { … }` later only if real cases force them.
+- **Per-page theming.** *Still open.*  `theme { … }` is system-wide; a page
+  picks a `layout:`, not a palette.
+- **Internationalisation.** **Resolved.**  The string-catalog layer ships: user-visible
+  literals extract to `.loom/messages.en.json`, emit as `t("<key>", "<default>")`
+  on every frontend, backtick templates lower to ICU messages, and
+  `ddd i18n {extract,init,sync,status,check,prune}` is the translator workflow
+  (`check --strict` is the CI gate).  Concatenation in a user-visible slot is now
+  an error (`loom.user-visible-concat`, §5).
+- **URL-synced state.** **Resolved.**  `store X persist: url` syncs scalar store
+  fields to the query string (`loom.store-url-field-invalid` for non-scalars);
+  `persist: local` / `session` cover the storage cases (§6).
+- **Multi-step named flows.** *Still open, and still a non-goal.*  `state` +
+  `match` + named `action`s cover the wizard cases (§12); no `flow` keyword.
+- **User-extensible component library.** *Partly resolved.*  The 56 walker
+  primitives stay closed, but the extension points around them shipped: user
+  `component`s, `component X(…) extern from "<path>"` for hand-written render
+  code, `function … extern` for hand-written logic, and the macro-authoring API
+  ([`macro-api.md`](macro-api.md)) for source-level expansion.
+- **App-shell beyond menu.** **Resolved.**  A system-level
+  `layout <Name> { header { … } sidebar { … } footer { … } main }` declares the
+  shell slots (bodies are ordinary walker expressions), and a page opts in with
+  `layout: <Name>` (presets `default` / `none`).
 
 ---
 
 ## 15. Grammar sketch (appendix)
 
-Productions added or extended in `src/language/ddd.langium`. Reuses
-existing `TypeRef`, `Expression`, `Parameter`, `Statement`, `Property`.
+A faithful (but abridged) transcription of the UI productions in
+`src/language/ddd.langium` as of 2026-09-03 — cross-references, soft-keyword
+unions and unrelated members elided.  The grammar file is the authority.
 
 ```langium
-// 1. Add Ui to SystemMember
+// 1. `ui` is BOTH a SystemMember and a root-level ModelMember
 SystemMember:
-    Module | Deployable | BoundedContext | TestE2E | UserBlock | ThemeBlock | Ui;
+    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | AuthBlock
+  | TenancyDecl | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource
+  | TimerSource | Layout | Capability | FunctionDecl;
 
-// 2. Deployable gains optional ui reference
-Deployable:
-    'deployable' name=ID '{'
-        ...
-        ('ui' ':' ui=[Ui:ID] ','?)?           // new, react-only (validator)
-    '}';
+// 2. Deployable's ui binding — sugar or compose, plus `hosts:`
+UiSugarBinding:   'ui' ':' ref=[Ui:ID] ','?;
+UiComposeBinding: 'ui' ':' ref=[Ui:ID] '{' (bindings+=UiParamBinding (',' …)*)? '}' ','?;
+UiParamBinding:   name=LooseName ':' source=[Deployable:LooseName];
 
 // 3. Ui block
 Ui:
-    'ui' name=ID '{'
+    'ui' name=ID withClause=WithClause? '{'
+        ('framework' ':' framework=Framework ','?)?
         members+=UiMember*
     '}';
 
+Framework returns string:
+    'react' | 'svelte' | 'vue' | 'angular' | 'feliz' | 'flutter' | 'phoenixLiveView';
+
 UiMember:
-    UiApiParam | Page | Component | MenuBlock;
+    UiApiParam | UiChannelParam | UiNotification | UiFunction
+  | Page | Component | Store | Area | MenuBlock;
 
-// 3a. UI api parameter — local handle on a system-level `api` contract.
-UiApiParam:
-    'api' name=ID ':' contract=[Api:ID];
-
-// (An earlier draft also shipped `import helper <name> from "<path>"`
-//  (UiHelperImport) — a TS-function escape hatch.  It was removed
-//  (unused, untyped, and it overloaded the `import` keyword used for
-//  Loom-file imports); a future typed foreign-code hatch would live in
-//  the `extern` family, not under `import`.)
+UiApiParam:     'api' name=ID ':' apiRef=[Api:ID];
+UiChannelParam: 'channel' name=ID ':' context=[BoundedContext:ID] '.' channel=[Channel:ID];
+UiNotification: 'on' param=[UiChannelParam:ID] '.' event=[EventDecl:ID]
+                    '(' bind=ID ')' '{' body+=AssignOrCallStmt* '}';
+UiFunction:     'function' name=ID '(' params? ')' ':' returnType=TypeRef
+                    'extern' 'from' externPath=STRING;
 
 // 4. Page
 Page:
@@ -1382,94 +1399,92 @@ Page:
     '}';
 
 PageProp:
-      'route'    ':' route=STRING
-    | 'title'    ':' title=Expression
-    | 'requires'      auth=Expression
-    | StateBlock
-    | 'body'     ':' body=Expression
-    | PageMenuMeta;
+      RouteProp | TitleProp | RequiresProp | StateBlock | DerivedProp | ActionDecl
+    | BodyProp | PageMenuMeta | LayoutProp | DescriptionProp | OgImageProp | CanonicalProp;
 
-PageMenuMeta:
-    'menu' '{' (entries+=MenuMetaEntry (',' entries+=MenuMetaEntry)* ','?)? '}';
+RouteProp:  'route' ':' value=STRING;
+TitleProp:  'title' ':' value=Expression;
+BodyProp:   'body'  ':' expr=Expression;
+LayoutProp: 'layout' ':' value=ID;          // `default` | `none` | a Layout name
+RequiresProp: 'requires' expr=Expression;
 
-MenuMetaEntry:
-    name=('section' | 'label' | 'order' | 'hidden') ':' value=Expression;
+PageMenuMeta:  'menu' '{' (entries+=MenuMetaEntry (','? …)* ','?)? '}';
+MenuMetaEntry: name=LooseName ':' value=Expression;   // section|label|order|hidden (validator)
 
-// 5. Component
+// 5. Component — `extern from` replaces the body
 Component:
-    'component' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' '{'
-        decls+=ComponentDecl*
-        'body' ':' body=Expression
-    '}';
+    'component' name=ID '(' (params+=Parameter (',' …)*)? ')'
+        (extern?='extern' 'from' externPath=STRING)?
+        ('{' decls+=ComponentDecl* ('body' ':' body=Expression)? '}')?;
 
-ComponentDecl:
-    StateBlock;
+ComponentDecl: StateBlock | DerivedProp | ActionDecl;
 
-// 6. State block
-StateBlock:
-    'state' '{'
-        fields+=StateField*
-    '}';
+// 6. State / derived / action — shared by page, component and store
+StateBlock:  'state' '{' fields+=StateField* '}';
+StateField:  name=StateFieldName ':' type=TypeRef ('=' init=Expression)?;
+DerivedProp: 'derived' name=ID ':' type=TypeRef '=' expr=Expression;
+ActionDecl:  'action' name=(ID | 'write') '(' (params+=Parameter (',' …)*)? ')'
+                 '{' stmts+=Statement* '}';
 
-StateField:
-    name=ID ':' type=TypeRef ('=' init=Expression)?;
+// 7. Store — shared client state, referenced by dotted name
+Store:     'store' name=ID ('persist' ':' lifetime=LooseName)? '{' decls+=StoreDecl* '}';
+StoreDecl: StateBlock | ActionDecl;
 
-// 7. Scaffold — NOTE: no longer a grammar rule.  Earlier versions of
-// the page metamodel parsed `scaffold modules: A, B` as a first-class
-// UiMember.  The shipping grammar removes that production; scaffolding
-// is now an AST-phase macro applied via the universal `with` clause on
-// the host UI block:
-//
-//   ui WebApp with scaffold(subdomains: [Sales, Catalog]) { ... }
-//
-// The macro expands to the same set of Page nodes the old grammar rule
-// produced.  See docs/scaffold-macros.md for the full surface
-// (scaffold / scaffoldModule / scaffoldContext / scaffoldAggregate /
-// scaffoldWorkflow) and the `with` syntax in
-// docs/language.md.
+// 8. Area — page grouping by containment
+Area:       'area' name=ID '{' members+=AreaMember* '}';
+AreaMember: Page | Area;
 
-// 8. Menu
-MenuBlock:
-    'menu' '{'
-        sections+=MenuSection*
-    '}';
+// 9. Layout — a SYSTEM member, not a ui member
+Layout:          'layout' name=ID '{' slots+=LayoutSlot+ '}';
+LayoutSlot:      LayoutNamedSlot | LayoutMainSlot;
+LayoutNamedSlot: name=LayoutSlotName '{' body=Expression '}';
+LayoutMainSlot:  'main';
+LayoutSlotName returns string: 'header' | 'sidebar' | 'footer';
 
-MenuSection:
-    'section' name=STRING '{'
-        (links+=MenuLink (',' links+=MenuLink)* ','?)?
-    '}';
-
+// 10. Menu
+MenuBlock:   'menu' '{' sections+=MenuSection* '}';
+MenuSection: 'section' label=STRING '{' (links+=MenuLink (','? …)* ','?)? '}';
 MenuLink:
-      'link' page=[Page:ID] ('{' (props+=MenuLinkProp (',' props+=MenuLinkProp)* ','?)? '}')?
-    | 'link' label=STRING '->' url=STRING;
+      'link' page=[Page:QualifiedPageName] ('{' (props+=MenuLinkProp …)? '}')?
+    | 'link' externalLabel=STRING '->' externalUrl=STRING;
+MenuLinkProp: name=LooseName ':' value=Expression;      // label|order (validator)
 
-MenuLinkProp:
-    name=('label' | 'order') ':' value=Expression;
+// 11. Scaffolding is a MACRO, not a production
+WithClause: 'with' calls+=MacroCall (',' calls+=MacroCall)*;
+MacroCall:  name=ID ('(' (args+=MacroArg (',' args+=MacroArg)*)? ')')?;
+MacroArg:   name=LooseName ':' value=MacroArgValue;     // e.g. aggregates: [Order]
 
-// 9. Match expression — slots into the expression precedence ladder
-Expression:
-    MatchExpr | TernaryExpr;
+// 12. `match` — predicate arms OR variant arms, expression AND statement
+Expression: Lambda | MatchExpr | TernaryExpr;
 
 MatchExpr:
-    'match' '{'
-        arms+=MatchArm (','? arms+=MatchArm)* ','?
-        ('else' '=>' elseExpr=Expression)?
-    '}';
+    'match' (subject=MatchSubject '{' varArms+=VariantArm* ('else' '=>' elseExpr=Expression)? '}'
+           | '{' arms+=MatchArm* ('else' '=>' elseExpr=Expression)? '}');
 
-MatchArm:
-    cond=Expression '=>' value=Expression;
+MatchArm:     cond=Expression '=>' value=Expression;
+VariantArm:   varType=TypeAtom (binding=ID)? '=>' value=Expression;
+MatchSubject: {infer AwaitExpr} 'await' inner=MatchScrutinee | MatchScrutinee;
 
-// 10. Lambda gains block body — for multi-statement event handlers
-Lambda:
-    param=ID '=>' (body=Expression | block=BlockBody);
+MatchStmt:       'match' subject=MatchSubject '{' varArms+=VariantStmtArm* … '}';
+VariantStmtArm:  varType=TypeAtom (binding=ID)? '=>' ('{' body+=Statement* '}' | body+=Statement);
 
-BlockBody:
-    '{' stmts+=Statement* '}';
+// 13. Lambda — expression body or statement block
+Lambda: param=ID '=>' (body=Expression | '{' stmts+=Statement* '}');
+
+// 14. Primitive/component invocation — one brace-form builder call
+BuilderCall:  type=ID '{' (entries+=BuilderEntry (',' entries+=BuilderEntry)* ','?)? '}';
+BuilderEntry: name=LooseName ':' value=Expression | value=Expression;
+
+// 15. `slot` / `action` parameter types
+SlotType:   name='slot';
+ActionType: name='action' ('(' arg=TypeRef ')')?;
 ```
 
-`navigate(<Page>, { params })` and `toast(<msg>)` reuse the existing
-`CallExpr` rule — looked up in the page-language standard library at
-lowering time, lowered to typed router calls / notifications.
+`navigate(<Page>, { params })` and `toast(<msg>)` are ordinary calls — resolved
+in the page-language standard library at lowering time and lowered to typed
+router calls / notifications (the walker's `navigate` arm,
+`src/generator/_walker/walker-core.ts`).  A primitive call also parses in the
+paren form (`Action(order.confirm)`); the brace form is the documented spelling.
 
 ---
 

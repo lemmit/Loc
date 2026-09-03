@@ -236,7 +236,7 @@ resource ordersState {
 
 ### The kind ↔ storage matrix
 
-`checkDataSource` (`loom.kind-incompatible`) rejects a `kind` on a storage whose `type` can't serve it. The matrix (from the sourceType registry):
+`checkDataSource` rejects a `kind` on a storage whose `type` can't serve it (an uncoded validator error — the message is built inline in `src/language/validators/datasource.ts`, not from the `loom.*` catalog). The matrix (from the sourceType registry):
 
 | kind | role | compatible storage types |
 |---|---|---|
@@ -252,9 +252,9 @@ resource ordersState {
 
 ```ddd
 resource bad { for: Orders, kind: state, use: blobs }
-// error  loom: resource 'bad' kind 'state' is incompatible with storage 'blobs'
+// error  resource 'bad' kind 'state' is incompatible with storage 'blobs'
 //        of type 's3'.  kind 'state' requires a storage of type
-//        postgres, mysql, sqlite, or inMemory.
+//        inMemory, mysql, postgres, or sqlite.
 ```
 
 ### The knobs and their guards
@@ -318,7 +318,7 @@ async def orders_create_order(body: object) -> OrderCreated:
 
 ### `File` fields need an object store
 
-A `File`-typed aggregate field ([Type system](04-type-system.md)) stores its bytes in an object store and a `FileRef` (`{ url, key, contentType, size }`) in a JSONB column. A deployable hosting such an aggregate must wire an `objectStore` resource or it is `loom.file-field-needs-object-storage`. With one wired, the backend emits the store client plus multipart upload/download routes:
+The `File` primitive is [chapter 4](04-type-system.md#file--a-stored-object-reference); the binding it needs is here. A deployable hosting a `File`-bearing aggregate must wire a `kind: objectStore` resource or it is `loom.file-field-needs-object-storage`. With one wired, the backend emits the store client plus the root-mounted upload/download routes:
 
 ```ts
 // orders_svc/http/index.ts
@@ -336,16 +336,20 @@ The `state` resource above drives the schema-migration owner and the connection 
 `generate system` emits a derived routing table — every resource's context → storage mapping, plus an unused-storage audit:
 
 ```md
-### apiNode — `platform: node`
-| Context | Kind  | Resource     | Storage    | Storage type | Schema | TablePrefix |
-| ------- | ----- | ------------ | ---------- | ------------ | ------ | ----------- |
-| Orders  | state | ordersState  | primarySql | postgres     | orders | —           |
+### ordersSvc — `platform: node`
+
+| Context | Kind | Resource | Storage | Storage type | Schema | TablePrefix |
+| --- | --- | --- | --- | --- | --- | --- |
+| Orders | mailer | mail | mailer | smtp | n/a | — |
+| Orders | objectStore | ordersFiles | uploads | localDisk | n/a | — |
+| Orders | state | ordersState | primary | postgres | orders | — |
 
 ## Per storage
-| Storage    | Type     | Used by                       |
-| ---------- | -------- | ----------------------------- |
-| primarySql | postgres | apiNode → Orders (state)      |
-| bus        | redis    | _unused_                      |
+
+| Storage | Type | Used by |
+| --- | --- | --- |
+| primary | postgres | ordersSvc → Orders (state); shipSvc → Shipping (state) |
+| bus | rabbitmq | _unused_ |
 ```
 
 ## `channel` & `channelSource`
@@ -377,14 +381,49 @@ channelSource lifecycleBus { for: Lifecycle, use: bus }
 
 ### Transport compatibility
 
-`checkChannels` (`loom.channelsource-incompatible`) rejects a binding whose storage type can't realise the channel's `delivery / retention` profile:
+`checkChannels` rejects a binding whose storage type can't realise the channel's `delivery / retention` profile. Two matrices drive it — what a transport *could* realise, and what a shipped driver *does*:
 
-| delivery / retention | compatible storage types |
+| delivery / retention | compatible storage types (`CHANNEL_COMPATIBILITY`) | of those, shipped drivers (`SHIPPED_COMBOS`) |
+|---|---|---|
+| `broadcast` / `ephemeral` | inMemory, redis | redis (plus in-process `inMemory`) |
+| `broadcast` / `log` | kafka | kafka |
+| `queue` / `ephemeral` | redis, rabbitmq | rabbitmq |
+| `queue` / `work` | rabbitmq, kafka | rabbitmq, kafka |
+
+Three codes gate a binding, in order: a storage that is no transport at all is `loom.channelsource-transport-invalid`; a transport that can't realise the profile is `loom.channelsource-incompatible`; a combination the matrix allows but **no shipped driver realises** (e.g. `queue`/`ephemeral` on redis) is `loom.channelsource-not-yet-shipped` — without that gate the generator would silently fall back to in-process dispatch and quietly break the delivery guarantee.
+
+### Wiring a binding onto a deployable
+
+A `channelSource` is inert until a deployable lists it: `channels: [lifecycleBus]` provisions the broker, the per-deployable credentials, and the consumer group. The gates:
+
+| Code | Raised when |
 |---|---|
-| `broadcast` / `ephemeral` | inMemory, redis, nats |
-| `broadcast` / `log` | kafka, nats |
-| `queue` / `ephemeral` | redis, rabbitmq, nats |
-| `queue` / `work` | redis, rabbitmq, kafka, nats |
+| `loom.channelsource-unbound` | no deployable's `channels:` lists the binding — declared but inert, events stay on in-process dispatch |
+| `loom.deployable-channel-unrelated` | a deployable lists a binding whose channel it neither produces (it doesn't host the owning context) nor consumes — the wiring routes nothing |
+| `loom.channel-consumer-unwired` | a deployable *consumes* a carried event but doesn't list the binding another deployable put on the broker — once traffic rides the broker it would silently receive nothing |
+| `loom.relay-target-not-subscribed` | a ui subscribes to a channel whose relay backend neither hosts the owning context nor binds the channel |
+
+```ddd
+storage bus { type: rabbitmq }
+channelSource lifecycleBus { for: Lifecycle, use: bus }
+
+deployable ordersSvc { platform: node   contexts: [Orders]   channels: [lifecycleBus] … }
+deployable shipSvc   { platform: python contexts: [Shipping] channels: [lifecycleBus] … }
+```
+
+```yaml
+# docker-compose.yml — the wired rabbitmq storage becomes a provisioned broker
+  ordersSvc:  # (service `orders_svc`)
+    environment:
+      LOOM_CHANNEL_LIFECYCLE_BUS_URL: "amqp://orders_svc:loom-dev-bus-orders_svc@bus:5672/loom"
+  bus:
+    image: rabbitmq:4-management-alpine
+    volumes:
+      - ./broker-init/bus.conf:/etc/rabbitmq/conf.d/10-loom.conf:ro
+      - ./broker-init/bus-definitions.json:/etc/rabbitmq/loom-definitions.json:ro
+```
+
+See [`../channels.md`](../channels.md) for the CloudEvents envelope, the per-broker topology, the outbox relay and broker auth.
 
 A `delivery: broadcast` channel emits a **realtime SSE wire** on the backend — events carried by the channel stream to connected browsers at `GET /api/realtime/events`. This is platform-internal infra (the wire format, SSE vs WebSocket, is derived from the consumer's platform — never stated in the `.ddd`):
 
@@ -408,18 +447,22 @@ The channel surface is also published as an AsyncAPI 3.0 document — the messag
 
 ```yaml
 asyncapi: 3.0.0
-info: { title: "Shop channels", version: 0.0.0 }
+info:
+  title: "Shop channels"
+  version: 0.0.0
 channels:
   "Orders.Lifecycle":
     address: "Orders.Lifecycle"
     messages:
-      "OrderPlaced":  { name: "OrderPlaced" }
-      "OrderShipped": { name: "OrderShipped" }
+      "OrderPlaced":
+        name: "OrderPlaced"
     x-loom:
-      delivery: broadcast
-      retention: ephemeral
-      key: "orderId"
-      transport: "bus"     # the channelSource's bound storage
+      delivery: queue
+      retention: work
+      key: "order"
+      transport: "bus"                              # the channelSource's bound storage
+      transportStatus: "declared, not provisioned"  # until a deployable lists it in `channels:`
+      wiredBy: ["ordersSvc", "shipSvc"]
 ```
 
 A UI subscribes to a context's broadcast channel with a `channel <Handle>: <Context>.<Channel>` parameter on its `ui` block (`UiChannelParam`); the frontend then refetches through its authorised reads when an event arrives. See [`../resources.md`](../resources.md) for the broader infra model.

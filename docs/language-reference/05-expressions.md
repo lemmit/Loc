@@ -263,7 +263,7 @@ The leaf differences here: TS rewrites `==`→`===`, Python/Elixir spell `&&`→
 
 ## Ternary & `match`
 
-`cond ? a : b` is the inline conditional. The condition must be `bool` (`loom.ternary-condition`) and the branches must **join** — one assignable to the other, both numeric, an optional and its inner, or a `null` literal against an optional (`loom.ternary-branches`: `qty > 0 ? "a" : 1` has no join). A ternary whose condition is a null test **narrows** the tested name in the then-branch, so `note2 != null ? note2.toUpper() : "none"` is the sanctioned way to call an intrinsic on a `string?` (see [Scalar intrinsics](#scalar-intrinsics)).
+`cond ? a : b` is the inline conditional. The condition must be `bool` (`loom.ternary-condition`) and the branches must **join** — one assignable to the other, both numeric, an optional and its inner, or a `null` literal against an optional (`loom.ternary-branches`: `qty > 0 ? "a" : 1` has no join). A ternary whose condition is a null test **narrows** the tested name in the then-branch, which is how the validator admits an intrinsic call on a `T?` receiver — `note2 != null ? note2.toUpper() : "none"` passes where a bare `note2.toUpper()` is `loom.intrinsic-nullable-receiver`. **The narrowed call does not lower, though** (see [Scalar intrinsics](#scalar-intrinsics)).
 
 `match { c1 => v1, c2 => v2, else => f }` is the predicate-arm form — the first arm whose `cond` is `true` wins; the optional `else` is the fallthrough. `match subject { Variant b => v, … }` is the **variant-match** form over an `or`-union value: each arm names a variant type and optionally binds it (narrowed); the subject must be a simple name or member read, not a call (`loom.match-subject-not-simple` — bind it with `let` first), must be a union (`loom.match-non-union-subject`), and must cover every variant or carry `else` (`loom.match-non-exhaustive`, `loom.match-unknown-variant`, `loom.match-duplicate-variant`). See [Payloads & unions](09-payloads-and-unions.md) for unions and [UI primitives](16-ui-walker-primitives.md#match-in-markup--the-ternaryblock-split) for `match` in markup.
 
@@ -333,7 +333,7 @@ A call to a sibling `function` or `private operation` is a bare `recompute()` in
 
 ## Scalar intrinsics
 
-Primitive receivers carry a closed method catalogue ([`../stdlib.md`](../stdlib.md), regenerate with `npm run docs:stdlib`): `string` — `.length` (a member, not a call), `trim`, `toUpper`, `toLower`, `substring`, `startsWith`, `endsWith`, `contains`, `replace`, `split`, plus the regex test `matches(re)`; `int`/`long` — `abs`, `min`, `max`, `divTrunc`; `decimal`/`money` — `abs`, `min`, `max`, `round(places?)`, `floor`, `ceil`; `datetime` — `startOfDay`. The catalogue is validated at the call site: `toUpper("x")` → `loom.intrinsic-arity`, `note.shout()` → `loom.intrinsic-unknown` (the message lists what *is* available), a bare `note.toUpper` → `loom.intrinsic-bare`, `startsWith(s: "a")` → `loom.intrinsic-named-arg`, `startsWith(3)` → `loom.intrinsic-arg-type`, and any intrinsic on a `T?` receiver → `loom.intrinsic-nullable-receiver` (guard it with a null-narrowing ternary).
+Primitive receivers carry a closed method catalogue ([`../stdlib.md`](../stdlib.md), regenerate with `npm run docs:stdlib`): `string` — `.length` (a member, not a call), `trim`, `toUpper`, `toLower`, `substring`, `startsWith`, `endsWith`, `contains`, `replace`, `split`, plus the regex test `matches(re)`; `int`/`long` — `abs`, `min`, `max`, `divTrunc`; `decimal`/`money` — `abs`, `min`, `max`, `round(places?)`, `floor`, `ceil`; `datetime` — `startOfDay`. The catalogue is validated at the call site: `toUpper("x")` → `loom.intrinsic-arity`, `note.shout()` → `loom.intrinsic-unknown` (the message lists what *is* available), a bare `note.toUpper` → `loom.intrinsic-bare`, `startsWith(s: "a")` → `loom.intrinsic-named-arg`, `startsWith(3)` → `loom.intrinsic-arg-type`, and any intrinsic on a `T?` receiver → `loom.intrinsic-nullable-receiver`.
 
 ```ddd
 aggregate Order {
@@ -389,6 +389,14 @@ def is_code(self) -> bool:
 "isCode" => Regex.match?(~r/^[A-Z]{3}$/, record.note),
 ```
 ::: end
+
+**Known gap — a narrowed optional receiver loses the intrinsic mapping.** `loom.intrinsic-nullable-receiver` tells you to guard the call with a null-narrowing ternary, and the guarded form passes validation — but the guarded call is then emitted **verbatim**, not through the host idiom:
+
+```ddd
+derived safeNote: string = note2 != null ? note2.toUpper() : "none"   // note2: string?
+```
+
+emits `this._note2.toUpper()` (node), `this.note2.toUpper()` (java), `self._note2.to_upper()` (python), `record.note2.to_upper()` (elixir) — none of which compile (.NET is the accidental exception: `this.Note2.ToUpper()` compiles — as the culture-sensitive `ToUpper()`, not the `ToUpperInvariant()` an unguarded receiver emits). Until that is fixed, compute the value on a non-optional receiver instead — bind it through a non-nullable field, or a `derived` that supplies a default first.
 
 `string.length` counts **Unicode code points** on every backend (`[...s].length` / `EnumerateRunes().Count()` / `codePoints().count()` / `len(s)` / a charlist length) — see [Invariants](07-invariants-derived-functions.md#length-counts-code-points).
 
@@ -580,7 +588,7 @@ def due(self) -> datetime:
 
 A backtick template `` `Order {qty} x {note}` `` (`TemplateString`) interleaves literal segments with `{expr}` holes. It lowers to plain concatenation of the segments and the `string()`-converted holes, so no backend sees a new node. A hole must be a string or an implicitly stringifiable value — the same set as [concatenation](#string-concatenation); a bare `datetime` hole is `loom.interp-hole-type`. A literal brace is `\{` / `\}`, a literal backtick `` \` ``.
 
-A hole may carry an **ICU format suffix** (`TemplateHole.format`): `{total, number, ::currency/USD}`, `{n, plural, one {# item} other {# items}}`, `{kind, select, …}`, `{when, date, short}`. The suffix narrows the hole — `number`/`plural` need a numeric, `date`/`time` need a `datetime` (which *lifts* the datetime rejection), `select` takes any stringifiable value; an unknown format word is `loom.interp-format-unknown`. In a page slot the template extracts to the i18n catalog and renders through `t()`; in domain code it is concatenation:
+A hole may carry an **ICU format suffix** (`TemplateHole.format`): `{total, number, ::currency/USD}`, `{n, plural, one {# item} other {# items}}`, `{kind, select, …}`, `{when, date, short}`. The suffix narrows the hole — `number`/`plural` need a numeric, `date`/`time` need a `datetime` (which *lifts* the datetime rejection), `select` takes a string or enum; an unknown format word is `loom.interp-format-unknown`, whose message names the whole admitted set — `number` (incl. `::currency/USD`, `::percent`), `date`/`time`, `plural`/`selectordinal`, `select`. Each mismatch has its own slug of `loom.interp-hole-type` (`#number-format`, `#date-format`, `#select-format`, `#not-stringifiable`). In a page slot the template extracts to the i18n catalog and renders through `t()`; in domain code it is concatenation:
 
 ```ddd
 aggregate Order {
@@ -677,7 +685,7 @@ Three identifiers resolve specially in expression position, plus the implicit `t
 | Reference | Meaning | renders as |
 |---|---|---|
 | `this` | the aggregate/VO instance | the receiver name (`this` / `self` / `record`) |
-| `id` | the instance's identity | `this._id` (TS, inside) / `this.Id` / `record.id`; unreadable inside a `create` body (`loom.this-id-in-create`) |
+| `id` | the instance's identity | `this._id` (TS, inside) / `this.Id` / `record.id`; the explicit `this.id` spelling is rejected inside a `create` body (`loom.this-id-in-create` — the id is allocated at persistence, after the body runs). A bare `id` in a create body is *not* gated, and is the spelling an event-sourced `create` uses in its `emit` |
 | `currentUser` | the authenticated user-claim shape (`refKind: current-user`) | the per-request `currentUser` param/local each emitter materialises |
 | `permissions.<name>` | a permission from the module catalogue | rewritten at lowering to the **string literal** of its runtime name (`"Projects.manageProjects"`), so `currentUser.permissions.contains(permissions.x)` is a plain membership test |
 
