@@ -1047,8 +1047,8 @@ also what makes F18's java guard body-free: it raises
 `Allow`, and this arm is what puts it on the wire.
 
 ### F27 — elixir: the generated LiveView does not compile, so the leg never boots
-**Waiver:** none — the leg fails before any request is sent · **Severity: high**
-· **Status: OPEN, not yet diagnosed.**
+**Waiver:** none — the leg failed before any request was sent · **Severity: high**
+· **Status: FIXED (2026-09-01, [#2719](https://github.com/lemmit/Loc/pull/2719) / `d7c2df5`).**
 
 Observed on the 2026-08-31 nightly (run `33382822525`, `4466ab8`) while verifying
 an unrelated fix; recorded here so it is not lost. The elixir discovery cell
@@ -1074,9 +1074,33 @@ were found with the provided path` on its report upload is an *honest* empty —
 there is no work directory to upload, unlike the four legs whose uploads were
 silently dropped before the `include-hidden-files` fix.
 
-Not investigated further here — it belongs to the HEEx walker
-(`src/generator/elixir/heex-target.ts` / `heex-walker-core.ts`), not to the
-query-parameter path this session was working on.
+**Diagnosed and fixed by [#2719](https://github.com/lemmit/Loc/pull/2719).** It was
+the HEEx walker, as suspected. `renderMatch` only ever emitted HEEx's
+**expression** `cond` — but HEEx has two spellings that are not interchangeable:
+the expression form `<%= cond do  p -> term  end %>` takes Elixir TERMS as arms,
+the block form `<%= cond do %> … <% end %>` takes MARKUP. When an arm value was a
+page primitive — markup carrying its own `<%= … %>` / `<% end %>` — the two forms
+interleaved and the outer `cond do` was opened and never closed, because its `end`
+landed inside the arm's nested block. Hence the `TokenMissingError` above, with
+the unclosed delimiter reported at the `cond do` and the missing terminator 30
+lines later.
+
+The form is now chosen by what the arms actually render, per arm through
+`renderChild`, so a `match` MIXING markup and term arms stays valid
+(`armRendersMarkup` at `src/generator/elixir/heex-walker-core.ts:1235` + the `markupArms` branch at `:1269-1292`);
+a `true ->` fallback is always emitted, because `cond` raises `CondClauseError` at
+render time when no arm matches and no compile gate would see that. Pinned by
+`test/generator/elixir/heex-match-markup-arms.test.ts` (mutation-proved: 3 of 4
+cases fail on revert), and proved against the real toolchain — `mix compile` on the
+storefront-elixir fixture in a container returns "Generated phoenix_app app", exit
+0, and reverting the arm reproduces the CI error at the same file and the same
+line 158.
+
+**No waiver to retire** — this finding never had one (`test/behavioral/schemathesis-waivers.json`
+carries W8/W11/W12/W20–W30/W33–W36, none of them F27's), because the leg died
+before any request was sent. What is NOT proved here is the leg itself: a booted
+elixir schemathesis run has to confirm the cell now fuzzes rather than reporting
+`1 problem(s)`, and that belongs to a run of the leg, not to this docs pass.
 
 
 ### F29 — dotnet: a value object on a containment PART maps to columns the migration never created

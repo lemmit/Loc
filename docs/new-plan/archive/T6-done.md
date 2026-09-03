@@ -781,6 +781,36 @@ Sources: found by [#2544](https://github.com/lemmit/Loc/pull/2544) while adding 
 
 ---
 
+## M-T6.41 — a direct-table aggregation applies NO capability `contextFilters` — on BOTH adapters — `done` ([#2609](https://github.com/lemmit/Loc/pull/2609) drizzle / mikroorm / python; [#2667](https://github.com/lemmit/Loc/pull/2667) the dapper residue + the `shape: document` sibling) · **M** · P2 ⭐ silent wrong answer
+*(ID note: minted as M-T6.40 in #2533, renumbered here — #2551 claimed M-T6.40 for the Elixir list-page compile bug and merged first. Third dup-ID incident this week; M-T9.32's automation is the fix all three evidence.)*
+
+**DONE (verified 2026-09-03 on `main`).** The dapper residue below is closed: `aggregationCapabilityFilters` (`src/generator/dotnet/query-projection-emit.ts:388`) computes the source aggregate's capability `contextFilters` minus the `ignoring` bypass set (origin-keyed, so a bare hand-written `filter <expr>` always survives), and BOTH Dapper aggregation arms splice it through `dapperAggregationWhere` — the whole-table arm at `:661` and the grouped arm at `:857`. Its EF twin `efAggregationIgnoreClause` (`:404`) emits the inverse as `.IgnoreQueryFilters([…])`, so the two adapters cannot disagree. Pinned by `test/generator/dotnet/dapper-query-projection-capability-filters.test.ts` (6 cases: whole-table AND-ed into the same SELECT, unfiltered aggregation gets them as its entire WHERE, grouped arm before GROUP BY, the principal claim is bound, `ignoring softDeletable` drops that conjunct and keeps the tenant one, and the EF adapter stays untouched) — green on this head. The `shape: document` sibling named in the residue paragraph is the 2026-08-24 review's §A1, recorded as drained by #2667 in that audit's follow-up register (`docs/audits/generator-code-review-2026-08-24.md:221`). *(Status flipped 2026-09-03 by the G0.2 doc-drift pass — the work merged with the mission left at `partial`.)*
+
+
+Found 2026-08-12 by an owner review of M-T6.23 slice 4 (PR #2533), and it is **not** a mikroorm bug — the default drizzle path has it too, which is why no adapter-parity gate could see it.
+
+A query-time projection whose `select` is an aggregation reads the source table **directly** (that is the point of the shape — it pushes down to SQL and materialises no rows). Both adapters build that query from the projection's own `where` alone:
+
+- drizzle — `db.select({…}).from(schema.orders).where(<the projection's filter>)`
+- mikroorm — `createQueryBuilder(OrderRow, "src").select([raw(…)]).where(<the projection's filter>)`
+
+Neither one ANDs in the aggregate's capability `contextFilters` — the predicates that `softDeletable` / `tenantOwned` / any `filter` capability contributes to *every other* read of that table (`findById`, `findManyByIds`, `findAll`, named finds, retrievals all get them). So:
+
+- a `softDeletable` source counts **soft-deleted rows** in its totals;
+- a `tenantOwned` source counts **every tenant's rows** — a cross-tenant read, in the same class as the .NET document-shape hole fixed in #2530, and reachable by any dashboard `count`.
+
+It is a **silent wrong answer**, not a crash: the number looks plausible. The row-sourced shapes are unaffected (they read through the repository, which applies the filters), which is exactly why this hid — the aggregation is the one read path that bypasses the repository.
+
+*Scope.* AND the applicable `contextFilters` into both direct-table paths (drizzle `where` and the mikro FilterQuery), honouring `ignoring <Cap>` bypasses the way the find path does (`mikroContextFilters(agg, bypass)` already takes the bypass set; drizzle has the equivalent). Gate it on a fixture with a `softDeletable` + `tenantOwned` source: a soft-deleted row and a foreign-tenant row must not be counted, and `ignoring` must still bypass. Runtime proof belongs on the tenancy leg (a count that includes another tenant's rows is exactly what `tenancy-e2e` exists to catch) — a generator pin alone would not prove the predicate BINDS.
+
+**Three of four arms closed by [#2609](https://github.com/lemmit/Loc/pull/2609) (merged 2026-08-19).** The backends that build the direct-table WHERE themselves — node/drizzle, node/mikroorm (both through the shared hono v4 builder v5 reuses) and python — now AND in the source aggregate's capability filters, with `ignoring *` / `ignoring <Cap>` honoured exactly as on the repository arm and the ambient `requireCurrentUser()` / `require_current_user()` import body-scan-gated so an untenanted projection stays byte-identical. java and dotnet/efcore were **correct by construction** (`@SQLRestriction` on the entity / `HasQueryFilter`), and the new suite pins that too.
+
+**Residue — the dapper raw-Npgsql aggregation arm**, left as reported follow-up by that PR: `persistence: dapper` writes its aggregation SQL by hand and has the same omission, so a `tenantOwned` source still counts every tenant's rows there and a `softDeletable` one still counts deleted rows. Same fixture shape closes it. Sibling of the 2026-08-24 generator review's §A1, which is the same omission crossed with `shape: document` on all five backends.
+
+Sources: review thread on PR #2533; `src/platform/hono/v4/projection-query-routes-builder.ts` (`aggWheres` / the two `mikro` aggregation branches), `mikroContextFilters` in `src/generator/typescript/emit/mikroorm.ts`. Sibling of #2530 (dotnet document-shape tenant filter) — same class, different bypass.
+
+---
+
 ## M-T6.49 — `contains` on an abstract inheritance base fails six different silent ways — `done` (2026-08-18) · **S–M** · P1 ⭐ the re-verify changed the answer, again
 
 > **ID note (2026-08-24).** Minted and merged as **M-T6.43** ([#2623](https://github.com/lemmit/Loc/pull/2623)), which was already taken: the Java reserved-word-column mission above had claimed M-T6.43 on `main` five days earlier ([#2591](https://github.com/lemmit/Loc/pull/2591), then [#2627](https://github.com/lemmit/Loc/pull/2627)), and neither PR could see the other's ID. **First claim wins**, so this one renumbers — yet another dup-ID incident on this track, and every code reference to `M-T6.43` (`src/generator/java/sql-ident.ts`, `src/generator/dotnet/emit/dapper.ts`, the java reserved-identifier tests, `test/fixtures/corpus/manifest.ts`) means the Java mission and stays as written. M-T6.49 rather than M-T6.44 because open PR [#2644](https://github.com/lemmit/Loc/pull/2644) mints M-T6.44–48. This is the same failure [M-T9.32](../T9-toolchain-health.md) exists to automate away; until it lands, the next-free-ID check has to span open PR branches, not just `main`.

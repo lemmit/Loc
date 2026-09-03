@@ -50,31 +50,6 @@ Sources: this session's parameter-passing validation audit (repros under the aud
 ## M-T6.14 — Small parity leftovers — `open` · **S** · P3
 DEBT-12 Phoenix `verify_token` niche; DEBT-08 `envelope` carrier (deferred — no live use; signpost via M-T5.9a); saga/projection EF `HasColumnName` correlation-column bug (from S7 Slice C review); domain-seam log-catalog §3 residue ⚠ partly stale.
 
-## M-T6.41 — a direct-table aggregation applies NO capability `contextFilters` — on BOTH adapters · `partial` ([#2609](https://github.com/lemmit/Loc/pull/2609) — drizzle / mikroorm / python closed; the dapper raw-Npgsql arm is the residue) · **M** · P2 ⭐ silent wrong answer
-*(ID note: minted as M-T6.40 in #2533, renumbered here — #2551 claimed M-T6.40 for the Elixir list-page compile bug and merged first. Third dup-ID incident this week; M-T9.32's automation is the fix all three evidence.)*
-
-Found 2026-08-12 by an owner review of M-T6.23 slice 4 (PR #2533), and it is **not** a mikroorm bug — the default drizzle path has it too, which is why no adapter-parity gate could see it.
-
-A query-time projection whose `select` is an aggregation reads the source table **directly** (that is the point of the shape — it pushes down to SQL and materialises no rows). Both adapters build that query from the projection's own `where` alone:
-
-- drizzle — `db.select({…}).from(schema.orders).where(<the projection's filter>)`
-- mikroorm — `createQueryBuilder(OrderRow, "src").select([raw(…)]).where(<the projection's filter>)`
-
-Neither one ANDs in the aggregate's capability `contextFilters` — the predicates that `softDeletable` / `tenantOwned` / any `filter` capability contributes to *every other* read of that table (`findById`, `findManyByIds`, `findAll`, named finds, retrievals all get them). So:
-
-- a `softDeletable` source counts **soft-deleted rows** in its totals;
-- a `tenantOwned` source counts **every tenant's rows** — a cross-tenant read, in the same class as the .NET document-shape hole fixed in #2530, and reachable by any dashboard `count`.
-
-It is a **silent wrong answer**, not a crash: the number looks plausible. The row-sourced shapes are unaffected (they read through the repository, which applies the filters), which is exactly why this hid — the aggregation is the one read path that bypasses the repository.
-
-*Scope.* AND the applicable `contextFilters` into both direct-table paths (drizzle `where` and the mikro FilterQuery), honouring `ignoring <Cap>` bypasses the way the find path does (`mikroContextFilters(agg, bypass)` already takes the bypass set; drizzle has the equivalent). Gate it on a fixture with a `softDeletable` + `tenantOwned` source: a soft-deleted row and a foreign-tenant row must not be counted, and `ignoring` must still bypass. Runtime proof belongs on the tenancy leg (a count that includes another tenant's rows is exactly what `tenancy-e2e` exists to catch) — a generator pin alone would not prove the predicate BINDS.
-
-**Three of four arms closed by [#2609](https://github.com/lemmit/Loc/pull/2609) (merged 2026-08-19).** The backends that build the direct-table WHERE themselves — node/drizzle, node/mikroorm (both through the shared hono v4 builder v5 reuses) and python — now AND in the source aggregate's capability filters, with `ignoring *` / `ignoring <Cap>` honoured exactly as on the repository arm and the ambient `requireCurrentUser()` / `require_current_user()` import body-scan-gated so an untenanted projection stays byte-identical. java and dotnet/efcore were **correct by construction** (`@SQLRestriction` on the entity / `HasQueryFilter`), and the new suite pins that too.
-
-**Residue — the dapper raw-Npgsql aggregation arm**, left as reported follow-up by that PR: `persistence: dapper` writes its aggregation SQL by hand and has the same omission, so a `tenantOwned` source still counts every tenant's rows there and a `softDeletable` one still counts deleted rows. Same fixture shape closes it. Sibling of the 2026-08-24 generator review's §A1, which is the same omission crossed with `shape: document` on all five backends.
-
-Sources: review thread on PR #2533; `src/platform/hono/v4/projection-query-routes-builder.ts` (`aggWheres` / the two `mikro` aggregation branches), `mikroContextFilters` in `src/generator/typescript/emit/mikroorm.ts`. Sibling of #2530 (dotnet document-shape tenant filter) — same class, different bypass.
-
 ## M-T6.26 — `= default` / required-input parity across create & update paths — `partial` · **S** · P2
 *(Renumbered from the placeholder "M-T6.x" and re-statused 2026-08-05 — `landed` isn't a legend status. Create-path parity is done (below, #2377); the update-path halves landed via #2392 ("a default never relaxes an update" — Elixir enforced less than promised, Java rejected what it advertised); the remaining residue is fixed and awaiting merge as PR #2440 — Elixir accepts a PUT that omits a required field (presence is a deserialization question there too), with retro §80 (PR #2415, also awaiting merge) as its documentation twin.)*
 
