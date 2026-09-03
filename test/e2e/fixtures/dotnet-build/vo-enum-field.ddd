@@ -1,0 +1,59 @@
+// Value object with an ENUM-typed field — compile gate for the .NET
+// backend's `Domain/ValueObjects/<Vo>.cs` emitter.
+//
+// `renderValueObject` used to derive its `using` header ONLY from the
+// namespaces its rendered EXPRESSIONS reach into (invariants / derived /
+// functions), never from the FIELD types it declares.  An enum-typed field
+// renders as a bare `Country` in the property, the constructor parameter
+// list and the assignment — three references into `<Ns>.Domain.Enums`, a
+// namespace the file never imported (CS0246 ×3, and the whole project fails
+// to compile).  No corpus fixture declared a `valueobject` with an enum
+// field, so the shape was entirely uncovered.
+//
+// The `Priority` field additionally sits behind an `optional` and an array
+// so the type walk has to peel both wrappers to see the enum.
+context Catalog {
+
+  enum Country { US, DE, JP }
+  enum Priority { Low, Normal, High }
+
+  // Enum field DIRECTLY on the value object — the D-1 shape.
+  valueobject Address {
+    line1: string
+    city: string
+    country: Country
+    invariant line1.length > 0
+    derived label: string = line1 + ", " + city
+  }
+
+  // Optional + array enum fields — same namespace, reached through the
+  // `optional` / `array` type wrappers.
+  valueobject Routing {
+    preferred: Priority?
+    fallbacks: Priority[]
+  }
+
+  // A value object with no enum anywhere: the header must NOT grow an
+  // unused `Domain.Enums` using (CS8019 under /warnaserror).
+  valueobject Weight {
+    grams: int
+    invariant grams > 0
+  }
+
+  aggregate Parcel {
+    create(shipTo: Address, routing: Routing, weight: Weight) {
+      shipTo := shipTo
+      routing := routing
+      weight := weight
+    }
+    shipTo: Address
+    routing: Routing
+    weight: Weight
+    origin: Country
+    operation redirect(to: Address) {
+      shipTo := to
+    }
+  }
+
+  repository Parcels for Parcel { }
+}

@@ -1,4 +1,4 @@
-import { forCreateInput } from "../../ir/enrich/wire-projection.js";
+import { emitsRestCreate, forCreateInput } from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   ExprIR,
@@ -291,19 +291,35 @@ function voRequestFields(
 }
 
 /** The create-input + operation params of an aggregate, as `{name, type}`
- *  probes for VO detection.  Mirrors the command/validator param derivation. */
+ *  probes for VO detection.  Mirrors the command/validator param derivation.
+ *
+ *  The create arm must gate on — and derive from — EXACTLY what emits the
+ *  `Create<Agg>Request` RECORD (`cqrs-emit.ts` → `emitRequestDtos`), because a
+ *  validator is `AbstractValidator<CreateXRequest>`: name a record the DTO
+ *  emitter did not emit and the project stops compiling (CS0246).  This gate
+ *  used to read `persistedAs !== "eventLog"`, which is a different question
+ *  entirely — an aggregate with no canonical create (the ERP example's
+ *  `People.Employee`) is not constructible over HTTP, emits no create record,
+ *  and got a validator against it anyway.  Both halves are `emitsRestCreate`
+ *  now, and the params follow the same event-sourced create-action override
+ *  the record uses, so the rules can only name fields the record declares. */
 function requestParamSets(
   agg: AggregateIR,
 ): { name: string; params: { name: string; type: TypeIR; default?: ExprIR }[] }[] {
   const sets: { name: string; params: { name: string; type: TypeIR; default?: ExprIR }[] }[] = [];
-  if (agg.persistedAs !== "eventLog") {
+  if (emitsRestCreate(agg)) {
+    // Event sourcing (appliers A2.2b): the create record is built from the
+    // single `create` action's params, not the field set.
+    const esCreate = agg.persistedAs === "eventLog" ? agg.creates?.[0] : undefined;
     sets.push({
       name: `Create${agg.name}Request`,
-      params: forCreateInput(agg.fields).map((f) => ({
-        name: f.name,
-        type: f.type,
-        default: f.default,
-      })),
+      params: esCreate
+        ? esCreate.params.map((p) => ({ name: p.name, type: p.type }))
+        : forCreateInput(agg.fields).map((f) => ({
+            name: f.name,
+            type: f.type,
+            default: f.default,
+          })),
     });
   }
   for (const op of agg.operations) {

@@ -215,6 +215,45 @@ export function collectCsExprUsings(
   }
 }
 
+/** The TYPE-side twin of {@link collectCsExprUsings}: the non-implicit
+ *  namespaces a rendered `TypeIR` names.
+ *
+ *  `renderCsType` emits enum and id types UNQUALIFIED (`Country`,
+ *  `OrderId`) — they live in `<ns>.Domain.Enums` / `<ns>.Domain.Ids`, so a
+ *  file that renders one and does not import that namespace does not compile
+ *  (CS0246).  Most .NET emitters paper over this with an unconditional
+ *  `using <ns>.Domain.Enums;` header (safe because `Domain/Enums/_namespace.cs`
+ *  guarantees the namespace resolves), but the ones that cannot afford an
+ *  unused using — anything under `/warnaserror` where CS8019 bites — need the
+ *  precise set.  This computes it.
+ *
+ *  Value-object and entity type names are NOT collected: a value object's own
+ *  file already declares `namespace <ns>.Domain.ValueObjects`, and entities are
+ *  emitted per-aggregate into namespaces no shared type reaches. */
+export function collectCsTypeUsings(t: TypeIR, into: Set<string>, ns: string): Set<string> {
+  switch (t.kind) {
+    case "enum":
+      into.add(`${ns}.Domain.Enums`);
+      return into;
+    case "id":
+      into.add(`${ns}.Domain.Ids`);
+      return into;
+    case "array":
+      return collectCsTypeUsings(t.element, into, ns);
+    case "optional":
+      return collectCsTypeUsings(t.inner, into, ns);
+    case "genericInstance":
+      return collectCsTypeUsings(t.arg, into, ns);
+    case "union":
+      for (const v of t.variants) collectCsTypeUsings(v, into, ns);
+      return into;
+    default:
+      // primitive | valueobject | entity | none | slot | action — either
+      // rendered fully qualified, or resolved by the file's own namespace.
+      return into;
+  }
+}
+
 const CS_TARGET: ExprTarget<CsRenderContext> = {
   literal: renderLiteral,
   id: (ctx) => `${ctx.thisName}.${ctx.idAccessor ?? "Id"}`,

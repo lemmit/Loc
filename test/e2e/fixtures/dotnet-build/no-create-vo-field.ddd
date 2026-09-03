@@ -1,0 +1,59 @@
+// An aggregate with a VALUE-OBJECT-typed field and NO canonical create —
+// compile gate for the .NET request-validator emitter.
+//
+// `dtos.ts` gates the `Create<Agg>Request` RECORD on `emitsRestCreate(agg)`
+// (an aggregate that declares no canonical create is not constructible over
+// HTTP, so no create DTO is emitted).  `validator-emit.ts` used to gate the
+// `Create<Agg>RequestValidator` on the unrelated `persistedAs !== "eventLog"`
+// — so an aggregate with no create still got a validator, and that validator
+// names a record nobody emits: `AbstractValidator<CreateEmployeeRequest>` →
+// CS0246, project fails to compile.
+//
+// The shape only surfaces when the aggregate ALSO carries a VO field whose
+// value object has wire rules (that is what makes the validators FILE exist
+// at all); an aggregate without one escapes because no file is emitted.
+context Staffing {
+
+  // Wire rules (`length`) → a `<Vo>RequestValidator` is emitted, which is
+  // what forces `<Agg>RequestValidators.cs` into existence.
+  valueobject PersonName {
+    first: string
+    last: string
+    invariant first.length >= 1
+    invariant last.length >= 1
+    derived full: string = first + " " + last
+  }
+
+  // NO `create(...)` — this aggregate is mutated only through its named
+  // operations, exactly like the ERP example's `People.Employee`.
+  aggregate Employee {
+    name: PersonName
+    email: string
+    active: bool = true
+    derived display: string = name.full
+    operation rename(newName: PersonName) {
+      name := newName
+    }
+    operation deactivate() {
+      precondition active
+      active := false
+    }
+  }
+
+  // Control: an aggregate with a VO field that DOES declare a create keeps
+  // both the record and its validator.
+  aggregate Contractor {
+    create(name: PersonName, agency: string) {
+      name := name
+      agency := agency
+    }
+    name: PersonName
+    agency: string
+    derived display: string = name.full
+  }
+
+  repository Employees for Employee {
+    find byEmail(email: string): Employee? where this.email == email
+  }
+  repository Contractors for Contractor { }
+}

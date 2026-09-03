@@ -38,6 +38,9 @@ on:
       - 'src/platform/dotnet.ts'
       - 'src/platform/dotnet/**'
       - 'examples/**'
+      # The flagship multi-file example is a corpus member too (both its .NET
+      # deployables build here), so a change to it has to reach this gate.
+      - 'web/src/examples/**'
       - 'package.json'
       - '.github/workflows/dotnet-build.yml'
       - 'test/e2e/generated-dotnet-build.test.ts'
@@ -61,6 +64,9 @@ on:
       - 'src/platform/dotnet.ts'
       - 'src/platform/dotnet/**'
       - 'examples/**'
+      # The flagship multi-file example is a corpus member too (both its .NET
+      # deployables build here), so a change to it has to reach this gate.
+      - 'web/src/examples/**'
       - 'package.json'
       - '.github/workflows/dotnet-build.yml'
       - 'test/e2e/generated-dotnet-build.test.ts'
@@ -84,8 +90,9 @@ jobs:
     runs-on: ubuntu-latest
     # First-run cold restore is ~2min (NuGet pulls EF Core, Mediator,
     # Swashbuckle, FluentValidation).  Warm runs with the NuGet cache
-    # below are ~30s.  15min cap leaves headroom for three fixtures.
-    timeout-minutes: 15
+    # below are ~30s.  Raised from 15 when the ERP example joined the corpus:
+    # it alone restores + builds TWO projects.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
 

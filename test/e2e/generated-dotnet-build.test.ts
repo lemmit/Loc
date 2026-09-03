@@ -77,6 +77,23 @@ describe.skipIf(!ENABLED)(
       // the shadow FK column named for the direct parent (labels.shipment_id)
       // and the domain ParentId branded ShipmentId (nested-parts Phase 4 — .NET).
       "test/e2e/fixtures/dotnet-build/nested-parts.ddd",
+      // A `valueobject` with an ENUM-typed field.  The VO emitter derived its
+      // `using` header only from the namespaces its rendered EXPRESSIONS reach
+      // into, never from the FIELD types it declares — so an enum-typed field
+      // rendered a bare `Country` into a file that never imported
+      // `<Ns>.Domain.Enums` (CS0246 ×3).  No corpus fixture declared the shape,
+      // which is how the ERP example's two .NET services shipped uncompilable.
+      // Also pins the negative: a VO with no enum/id field must NOT grow an
+      // unused using (CS8019 is fatal here under /warnaserror).
+      "test/e2e/fixtures/dotnet-build/vo-enum-field.ddd",
+      // An aggregate with a VO-typed field and NO canonical create.  The
+      // `Create<Agg>Request` RECORD is gated on `emitsRestCreate(agg)`; its
+      // VALIDATOR used to be gated on the unrelated `persistedAs !== eventLog`,
+      // so a non-constructible aggregate emitted
+      // `AbstractValidator<CreateXRequest>` against a record nobody emits
+      // (CS0246).  Needs the VO field: without one no validators FILE is
+      // emitted at all, which is why every existing create-less fixture escaped.
+      "test/e2e/fixtures/dotnet-build/no-create-vo-field.ddd",
       // shape: document + part-in-part (Cart → Box → Slip/Item): the snapshot
       // fold recurses the part tree into the JSONB blob, and each nested part's
       // snapshot ParentId brands to its DIRECT parent's id class (Slip/Item →
@@ -1486,5 +1503,40 @@ describe.skipIf(!ENABLED)(
         }
       }
     }, 600_000);
+
+    // The flagship multi-file example (`web/src/examples/erp/`) — the repo's
+    // most feature-dense model, and the ONLY place two .NET deployables are
+    // composed out of one system alongside a Hono backend and a React app.  It
+    // shipped for a long time generating two services that did not compile
+    // (a value object with an enum field, and an orphan create validator),
+    // because the corpus above is `examples/*.ddd` + this fixtures dir and
+    // `web/src/examples/**` was in neither the corpus nor the trigger paths.
+    // Both .NET deployables must build; the Hono / React halves are gated by
+    // their own workflows.
+    it("web/src/examples/erp — both .NET deployables build under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-erp-"));
+      try {
+        execSync(`node ${cli} generate system web/src/examples/erp/main.ddd -o ${outDir}`, {
+          stdio: "inherit",
+          cwd: repoRoot,
+        });
+        for (const svc of ["finance_api", "people_api"]) {
+          const proj = path.join(outDir, svc);
+          expect(fs.existsSync(proj), `erp: .NET project '${svc}' emitted`).toBe(true);
+          execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 300_000 });
+          execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+            cwd: proj,
+            stdio: "inherit",
+            timeout: 300_000,
+          });
+        }
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 900_000);
   },
 );
