@@ -1,10 +1,12 @@
 # Coverage — disposition of every archived proposal & plan
 
+*Reorganized 2026-09-02: closed missions now live under [`archive/`](archive/) (`T<n>-done.md`), so a row that points at a closed mission links there. The proposals/plans corpus itself stays under `../old/`.*
+
 *Guarantee: every doc that lived in `docs/proposals/` and `docs/plans/` (now under [`../old/`](../old/)) is listed here. `shipped` / `done` / `superseded` / `historical` = no open work (the doc remains the design record). Anything with open work names the mission(s) that carry it. Classified 2026-07-13; a mission's first step is always re-verification against fresh `main`.*
 
 *Reconciled 2026-07-21 — added the 13 proposals/plans authored after the 2026-07-13 classification that the table had never picked up (the flutter set, read-path-architecture, test-placement/test-authoring, email-resource-kind, connection-secret-wiring, model-context-pack, loom-verify-tool, unit-tier-domain-test-coverage, playground-flutter-web-preview, nested-state-writes-copywith-frontends), so the guarantee holds again. Rows added this pass are tagged `(added 2026-07-21)`. Four of them describe features with no dedicated mission yet — see the enlarged "Known unmapped items" section.*
 
-***The guarantee is now TEST-ENFORCED (2026-07-30) — `test/system/coverage-guarantee.test.ts`.*** *It had drifted a second time: two proposals were missing (`integrity-audit-2026-07-residue.md` — carrying a **live** silent-codegen gap, R1, now [M-T6.23](T6-backend-parity.md) — and `realtime-tenant-room-parity.md`), and the Audits section listed 8 of 29 audits, collapsing the rest into an unchecked "others" row that hid the 25-bug `fleet-bug-hunt-2026-07-19` register. A promise only a human re-reads rots like any undocumented invariant, so a doc added under `docs/old/proposals/`, `docs/old/plans/`, or `docs/audits/` without a row here now fails CI. The gate checks a doc is MENTIONED, not that its disposition is right — that stays a judgement call. Rows added this pass are tagged `(added 2026-07-30)`.*
+***The guarantee is now TEST-ENFORCED (2026-07-30) — `test/system/coverage-guarantee.test.ts`.*** *It had drifted a second time: two proposals were missing (`integrity-audit-2026-07-residue.md` — carrying a **live** silent-codegen gap, R1, now [M-T6.23](archive/T6-done.md) — and `realtime-tenant-room-parity.md`), and the Audits section listed 8 of 29 audits, collapsing the rest into an unchecked "others" row that hid the 25-bug `fleet-bug-hunt-2026-07-19` register. A promise only a human re-reads rots like any undocumented invariant, so a doc added under `docs/old/proposals/`, `docs/old/plans/`, or `docs/audits/` without a row here now fails CI. The gate checks a doc is MENTIONED, not that its disposition is right — that stays a judgement call. Rows added this pass are tagged `(added 2026-07-30)`.*
 
 ## Proposals (`docs/old/proposals/`)
 
@@ -31,7 +33,7 @@
 | criterion.md | partial | M-T5.4 |
 | cross-stack-static-analysis.md | partial | M-T8.9 |
 | database-seeding.md | partial (1–4 shipped) | M-T2.7 |
-| dependency-upgrades.md | backlog | M-T9.1 |
+| dependency-upgrades.md | backlog — M-T9.1 `done` (bumps land through the `dependency-upgrade` skill; no open mission) | [M-T9.1](archive/T9-done.md) |
 | dependent-form-validation.md | resolved/shipped | — |
 | deployable-networking.md | proposed | M-T7.4 |
 | dispatch-delivery-semantics.md | partial | M-T4.3 |
@@ -48,9 +50,9 @@
 | exception-less.md | partial | M-T5.1 |
 | execution-context.md | partial (backbone complete) | M-T3.11 |
 | expressible-builtins.md | proposed | M-T3.4 (phases 1–2), M-T3.6 (phase 3) |
-| extern-component-escape-hatch.md | partial (React tier 1) | M-T1.4 |
+| extern-component-escape-hatch.md | shipped — M-T1.4 `done` | [M-T1.4](archive/T1-done.md) |
 | extern-domain-extension-point.md | shipped (Phase 2 verified 2026-07-13, all 5 backends) | — |
-| extern-function-hook-escape-hatch.md | partial | M-T1.4 |
+| extern-function-hook-escape-hatch.md | shipped — M-T1.4 `done` | [M-T1.4](archive/T1-done.md) |
 | fable-elmish-frontend.md | superseded by execution (feliz shipping) | polish → M-T1.16 |
 | failure-taxonomy.md | proposed (reframe) | M-T5.1, M-T5.2 |
 | flutter-mobile-frontend.md | largely shipped (2026-07-20) *(added 2026-07-21)* | residue → M-T1.18 |
@@ -111,7 +113,7 @@
 | resource-model-and-source-types.md | partial | M-T4.8 |
 | retrieval.md | partial | M-T5.4(e) |
 | scaffolded-navigation.md | proposed | M-T1.13 |
-| scheduling.md | proposed | M-T4.1 |
+| scheduling.md | shipped — `timerSource` `every:`/`cron:` on all five backends; M-T4.1 closed 2026-09-02 (its sugar tail is not open work) | [M-T4.1](archive/T4-done.md) |
 | sensitivity-and-compliance.md | partial (1+2-lite) | M-T3.8 |
 | server-side-generation.md | proposed (refactors shipped) | M-T8.7 (evaluate with packaging split) |
 | source-map-and-debugging.md | partial (§6E remap shipped) | M-T8.1, M-T8.2 |
@@ -154,12 +156,12 @@
 | auth-providers-implementation.md | in-progress (P4 reads remain) | M-T3.1, M-T3.5 |
 | authorization-phase3-2.md | done (#1746) | — |
 | authorization-phase3.md | done (#1742) | — |
-| authorization-phase4-deny.md | design, unbuilt | M-T3.3 |
+| authorization-phase4-deny.md | shipped — M-T3.3 `done` (P4 `deny` on all five backends + adapter arms) | [M-T3.3](archive/T3-done.md) |
 | backend-packages.md | in-progress (B3+) | M-T9.5, M-T8.7 |
 | backend-parity-plan.md | mostly drained ⚠ verify W2/W3/W5 | residue → M-T6.x |
 | builder-roadmap.md | living backlog | M-T1.17 |
 | capability-stamp-dedup-simulation.md | paper simulation | M-T5.12 |
-| codegen-gap-closure.md | wave 1 done; P3 buckets mostly moot (axes removed) | verify residue → M-T6.9 |
+| codegen-gap-closure.md | done — wave 1 shipped, P3 buckets moot (axes removed), residue closed by M-T6.9 `done` | [M-T6.9](archive/T6-done.md) |
 | conformance-parity-restoration.md | done | — |
 | dap-node-debug.md | milestones 18–27 done | frontier → M-T8.1 |
 | debt-02-principal-nonrelational-filters.md | done | — |
@@ -189,7 +191,7 @@
 | phase-a-platform-expansion-prereqs.md | done | — |
 | phoenix-event-delivery-s5a.md | done (M-T4.5, verified 2026-07-27) | M-T4.5 |
 | phoenix-op-guards-403-422.md | done (M-T4.5, verified 2026-07-27) | M-T4.5 |
-| phoenix-surface-generator-wiring.md | phases 1–5 done | Phase 6–7 → M-T6.1 |
+| phoenix-surface-generator-wiring.md | shipped — phases 1–7 (6–7 via M-T6.1 `done`) | [M-T6.1](archive/T6-done.md) |
 | platform-expansion-roadmap.md | superseded index | open phases → M-T10.x, M-T6.x |
 | playground-git-vfs-implementation.md | done | — |
 | playground-sandbox-redesign.md | phases 1–2 done | M-T8.6 |
@@ -227,6 +229,7 @@
 | Audit | Open findings → missions |
 |---|---|
 | language-gaps-2026-08.md | *(added 2026-08-23)* Six-auditor re-audit on `e98e3af`: classic backend gate sets confirmed fully converged; 24 fixes/gates landed in the audit's own session branch across two waves (wave 2 added: HEEx component state/action lifting, cross-context domainService gate, files-404 RFC 7807 parity, feliz user-find reads, elixir audit/ES/controller wire serialization, `loom.user-component-deferred-target`, `loom.toast-message-unsupported`, register refresh) (projection-`where` queryability + typing, enum-value refs in page bodies, feliz/flutter missing-`ui:` + store-op + async-effect + mikroorm-array gates, `page.requires` currentUser, Grid children, flutter `derived`/degradation rendering, feliz match/WorkflowForm). Still-open rows map to existing missions: named create/destroy drop → M-T3.16 G1 / M-T5.8 ph3; channel-less projection subscription divergence → B20 (behavioral-parity register); HEEx component state/action drop + `tap` no-ops → M-T6.2 residue; elixir audit-snapshot wire projection + precondition messages → M-T6.20; Feliz/Angular component-deferral gate → M-T1.20-adjacent (needs a code, noted in doc); collection-ops-in-page-bodies + files-route 7807 + `when`-gate bypass + register staleness → flagged in-doc, no new missions minted |
+| verification-architecture-2026-08-31.md | *(added 2026-08-31)* The cost side of [quality-audit-2026-08](../audits/quality-audit-2026-08.md): the suite is 302,948 LOC / 1,825 files (0.91x `src/`), 879 files / 126,741 LOC of it asserting only by substring on emitted text. C1 (the gate ledger) and B2 (generation's algebraic properties) **shipped in the audit's own PR** — 289 cells read as 220 behavioural / 69 compile-only / 0 generate-only, and the compile-only set is the 2026-08 audit's R6 list of seven plus seven it did not name. Open items are missioned: C2 (`--verify-ir` + the missing model-wide expression enumeration) → **M-T9.40**; C3 (universal IR proofs for tenancy/authz/masking) → **M-T9.41**; A5/A6/B5 (the string-tier drain, re-scoped by §5 as a corpus-PROMOTION campaign — only 3 of 42 duplicated scenarios have a corpus fixture) → **M-T9.42**; B3 (extend the goldens to the 14 compile-only features) → M-T9.13. Small enough to pick up directly, no mission: B7 is one flag (java is the only compile leg without `-Xlint:all -Werror`; the other four already run at max strictness), C4 (a cross-backend duplication detector over `generator/*/`), C6 (two metamorphic pins — `unfold` ≡ un-unfolded output, `byLayer` ≡ `byFeature` modulo paths), and C5's remaining half (a user edit surviving a model change; scaffold-once and `.loomignore` already have their own gates). **Deliberately not built:** a reference interpreter for Loom IR — `wire-differential.mjs` records the failure that motivates one (RS-11, three backends agreed and all three were wrong) and answers it more cheaply with a committed reviewed golden |
 | quality-audit-2026-08.md | *(row rewritten 2026-08-10 — the "needs missions" placeholders are minted)* R1/R2→ci-gating.md's queue plan (+ the pr-gate substitute, #2447/#2463/#2465/#2483); R3(b) **done** (#2447 — `ddd parse` surfaces IR errors, `src/cli/main.ts:205`), R3(a)→**M-T9.28** (the authz-surface census — see its ID note in [T9](./T9-toolchain-health.md); the `.ddd`/clause census shipped unlabelled in #2498); R4 **done** (CLAUDE.md "Mutation-prove a new gate" convention, cited in practice); R5 half-shipped untracked (`test/ir/api-caller-census.test.ts`, #2448/#2468, 216→13 pins — residue owned by M-T9.13) + walker-primitive driven census→**M-T9.29**; R6→M-T9.13/9.14/9.15; R7→M-T9.9 (done); R8→M-T4.8 endgame (+ route-derivation PRs 0–5, #2453–#2462); R9→M-T5.18/M-T9.21; R10→**M-T9.30** (ci-red-alarm #2434 covers only always-red); R11→**M-T9.31**; R12→**M-T9.32** |
 | test-coverage-audit-2026-08-13.md | Measured (not grepped) census of what the fast suite reaches. §3.1 diagnostic-firing gap (49 of 413 codes never raised in a full run; the static greps over-report 2.7×) → **M-T9.33**, which retires M-T9.8 item (d); §3.2 19% of `generateSystemFiles` generations run on a model the CLI refuses → **M-T9.34**; §3.3 72% of `src` has no direct test seam → M-T9.17 slice 2 (the two named modules) + a `dead-generator-exports` widening for bare `export *` shims; §3.4 assertion-free class **drained** (35/16,584, all benign) → graduate M-T9.8 (e) into a pinned ratchet and strike it from the recurring list; §3.5 `web/src/workspace/git/git-store.ts` (814 LOC, pure, Playwright-only gate) → no mission, small enough to pick up directly; §3.6 status-only (M-T9.13, claimed by #2517); §3.7 `CLAUDE.md` frontend-e2e tier drift **fixed in the audit's own PR**; the "M-T9.28–M-T9.32 have no mission bodies anywhere" item is **drained** (#2572 — bodies written in [T9](./T9-toolchain-health.md), and M-T9.28's README description corrected: the ID's only claim in code is the authz-surface census, not the `.ddd`/clause census that shipped unlabelled in #2498) |
 | schemathesis-findings-2026-08.md | Root-cause findings from spec-driven contract fuzzing → M-T9.21. F1–F13 from the node/Hono leg (4× 500, 1 self-schema violation, 3 contract gaps, 1 by-design); F14–F26 *(added 2026-08-24)* from the python / dotnet / java legs when the harness became a backend matrix — incl. three node-only fixes (F7, F8, the `minLength` bound) still open elsewhere, and two spec-availability defects (F14 .NET schemaId collision → `/openapi.json` 500s, F15 elixir emits no spec without `serves:`). Each written up as an all-five-backend follow-up; elixir is a `continue-on-error` discovery leg pending its first nightly |
@@ -240,7 +243,7 @@
 | completeness-audit-2026-07.md | stdlib→M-T5.5, reporting/money→M-T2.12, jobs/email→M-T4.1/M-T4.6, pagination→M-T1.1, metrics→M-T7.1, identity→M-T3.12, API versioning → no mission (needs proposal; note here) |
 | full-code-review-2026-07.md | #6→M-T5.6, #22→M-T5.16, C-mediums→M-T9.4 |
 | generated-code-ddd-review-2026-07.md | S5(d)→M-T4.3, S10 residue→M-T5.11, S4 default-on→M-T3.4, api-grouping→M-T6.13 |
-| generated-code-review-2026-06-30.md | SYS-1→M-T6.8 |
+| generated-code-review-2026-06-30.md | SYS-1 → M-T6.8 `done` — no open findings | [M-T6.8](archive/T6-done.md) |
 | showcase-coverage-bugs.md | BUG-003→M-T5.15 **done 2026-07-27** (`scalar-return-parity.test.ts` ships; this row said "open" for two weeks after the mission closed — the source audit's own "remains open" line is the stale one), BUG-004 done (M-T5.18 Track C), BUG-006 verify landed |
 | domain-seam-log-parity.md | §3 residue ⚠ stale → M-T6.14 |
 | **fleet-bug-hunt-2026-07-19.md** | **25 two-lens-verified bugs (+F1b), tracked by nothing until 2026-07-30 → M-T9.24.** All 26 re-verified against fresh `main` that day; the doc now carries a **scorecard** — **12 fixed, 13 live** — naming the code that closes or carries each row. Four fixes had landed *silently* (B5/D1/E1/E3: no inline note, no mission mention), which is why the state had to be re-derived rather than read. Live: A2/A3/A4/B3/B4/C2 (numeric), E2 (3 of 21 Jackson-2 refs left), F1b/F2 (frontend), G1/G2/I1/I2 (boot-break). A4 CLI-reproduced |
@@ -260,7 +263,7 @@
 | generated-code-review-2026-06.md | historical — superseded by `generated-code-review-2026-06-30` + the 07 passes |
 | execution-context-parity-2026-06-24.md | drained — the execution-context backbone shipped; tail → M-T3.11 |
 | gated-features-inventory.md | reference — superseded as a live inventory by `target-gate-inventory-2026-07-18` |
-| stack-versions-audit.md | reference — the dependency-currency snapshot; open bumps → M-T9.1 |
+| stack-versions-audit.md | reference — the dependency-currency snapshot; M-T9.1 `done`, later bumps go through the `dependency-upgrade` skill |
 | e2e-suite-review.md | reference — e2e suite shape; gate-tier questions → M-T9.3 / `docs/ci-gating.md` |
 | pack-equivalence-audit.md | reference — per-pack equivalence; open pack work → M-T9.5 / M-T1.x |
 | frontend-test-parity.md | reference — superseded by the behavioural UI tier (M-T9.3) |

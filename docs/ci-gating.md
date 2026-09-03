@@ -147,10 +147,25 @@ timeout fired and needed a manual label re-arm. v2 never waits:
   final two completions never arrived. Two defenses: the trigger carries
   `branches-ignore: [main, gh-readonly-queue/**]`, so the ~60 push-to-main
   completions per merge stop creating (skipped) eval runs at all — the storm
-  source; and a **15-minute scheduled sweep** re-derives the verdict for
-  every open PR and posts only where it differs from what's published,
-  capping any dropped-event outage at one sweep interval. Both are pinned by
+  source; and a **scheduled sweep** re-derives the verdict for every open PR
+  and posts only where it differs from what's published. Both are pinned by
   `test/system/pr-gate.test.ts`.
+- **The sweep is an hours-scale backstop, not the 15-minute cap the cron
+  suggests.** The workflow asks for `*/15`, and this doc, `pr-gate.yml` and
+  `scripts/pr-gate.mjs` all used to claim it therefore capped a dropped-event
+  outage at one interval. Measured, it does not: the 30 most recent
+  `schedule`-event runs of `pr-gate.yml` span **135 hours** — mean gap 4.7 h,
+  median 4.6 h, shortest gap anywhere in that window **110 min** — not one
+  15-minute gap in 29.
+  Actions cron is best-effort and a high-frequency schedule on a busy account
+  is heavily deprioritised. Re-measure before relying on either figure: list
+  the workflow's runs filtered to `event=schedule` and diff `created_at`.
+  Practical consequence: a dropped dispatch parks a green PR for **hours**. If
+  you are waiting on one, don't wait for the sweep — force a fresh evaluation
+  (a new SHA, or a re-run of any workflow on the branch; both fire
+  `workflow_run: completed`). Note that `workflow_dispatch` on `pr-gate.yml`
+  and `rerun_workflow_run` both return **403** to a GitHub-App token, so from
+  an agent session the only lever may be a genuine push.
 - The decision core is pure and pinned by `test/system/pr-gate.test.ts` —
   including the fail-closed arms (unknown conclusions, cancelled runs,
   pending-never-green) and the `workflow_run.workflows` list's completeness

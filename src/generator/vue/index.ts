@@ -24,6 +24,7 @@ import {
   buildExternFunctionShim,
   buildExternFunctionSignature,
 } from "../_frontend/extern-functions.js";
+import { renderGateExpr } from "../_frontend/gate-expr.js";
 // The i18n translation runtime (M-T1.11) is framework-AGNOSTIC — `t(key,
 // default, values?)` over `./locales/en.json` with `{name}` substitution — so
 // the Vue generator reuses the React module verbatim (same sharing pattern as
@@ -571,7 +572,7 @@ export function generateVueForContexts(
           requiresJs: e.requiresJs,
         })),
       }))
-    : deriveNavSections(defaultPages, pageCtx);
+    : deriveNavSections(defaultPages, pageCtx, authUi);
   // Bind the session user in the app-shell only when a nav entry is actually
   // gated — an unused `currentUser` binding would be a vue-tsc error.
   const navUsesSession = navSections.some((s) =>
@@ -869,25 +870,44 @@ interface NavEntryVM {
   label: string;
   testId: string;
   exact?: boolean;
+  requiresJs?: string;
 }
 
 function deriveNavSections(
   pages: PageIR[],
   nameCtx: PageNameCtx,
+  /** `auth: ui` — the verified session user is available client-side, so a
+   *  gated entry can be `v-if`-hidden.  Without it every entry stays ungated
+   *  (there is no `currentUser` to test), byte-identical. */
+  authUi: boolean,
 ): Array<{ label: string; entries: NavEntryVM[] }> {
   const aggregates: NavEntryVM[] = [];
   const workflows: NavEntryVM[] = [];
+  // A DEFAULT entry inherits the gate of the page it links to, exactly as the
+  // menu-derived path does (`navEntryForLink`).  It is not true that scaffold
+  // pages carry no `requires`: the scaffolded List page CLONES the
+  // `find all … requires` gate guarding the very read it makes, so an ungated
+  // default sidebar advertised routes the backend refuses (M-T3.15-C3).
+  const gateOf = (page: PageIR): string | undefined =>
+    authUi && page.requires ? renderGateExpr(page.requires, "currentUser") : undefined;
   for (const page of pages) {
     if (!page.route) continue;
     const o = classifyPage(page, nameCtx);
+    const requiresJs = gateOf(page);
     if (o.kind === "aggregate-list") {
       const label = humanize(plural(o.aggregateName));
-      aggregates.push({ to: page.route, label, testId: `nav-${snake(plural(o.aggregateName))}` });
+      aggregates.push({
+        to: page.route,
+        label,
+        testId: `nav-${snake(plural(o.aggregateName))}`,
+        ...(requiresJs ? { requiresJs } : {}),
+      });
     } else if (o.kind === "workflow-form") {
       workflows.push({
         to: page.route,
         label: humanize(o.workflowName),
         testId: `nav-wf-${snake(o.workflowName)}`,
+        ...(requiresJs ? { requiresJs } : {}),
       });
     }
   }

@@ -439,6 +439,12 @@ export function generateReactForContexts(
       // inside an `area { … }`, and the shell then imports the scaffolded
       // module while the author's page becomes a silently unreachable file.
       buildPageModuleIndex(ui, pageCtx),
+      // The ui's pages, so a DEFAULT sidebar entry inherits the `requires`
+      // gate of the page it links to (M-T3.15-C3): a scaffolded List page
+      // clones the `find all … requires` gate that guards the very read it
+      // makes, so an ungated default entry advertised a route the backend
+      // refuses.
+      ui.pages,
     ),
   );
   // Home is synthesised by the scaffold expander whenever the

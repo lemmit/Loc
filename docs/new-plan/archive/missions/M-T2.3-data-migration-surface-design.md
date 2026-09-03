@@ -13,7 +13,7 @@
 > the **workflow/projection rename** (tracker slice d) — both propose-first.
 > Verified against `main` @ #1981 — no in-flight PR touches this area.
 > Sources: `docs/new-plan/T2-data-evolution.md`,
-> [`M-T2.1-migration-surface-design.md`](M-T2.1-migration-surface-design.md),
+> [`M-T2.1-migration-surface-design.md`](../../missions/M-T2.1-migration-surface-design.md),
 > `docs/audits/architecture-weak-spots-2026-07.md` §2,
 > `src/system/migrations-builder.ts`, `src/generator/sql-pg.ts`,
 > `src/generator/elixir/migrations-emit.ts`, `docs/migrations.md`.

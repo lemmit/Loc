@@ -365,9 +365,20 @@ async function fetchOpenPrHeads(repo, token) {
  *  spawns a dozen more) GitHub demonstrably DROPS some dispatches, and an
  *  event-driven gate turns one dropped final event into a permanently parked
  *  PR (observed on #2464: last checks completed 08:40–08:42, no eval fired).
- *  Every 15 minutes this re-derives the verdict for every open PR and posts
- *  only where it differs, capping any dropped-event outage at one sweep
- *  interval. */
+ *  This re-derives the verdict for every open PR and posts only where it
+ *  differs.
+ *
+ *  It does NOT cap the outage at one sweep interval — that claim was here, in
+ *  `pr-gate.yml` and in `docs/ci-gating.md`, and none of the three had been
+ *  measured.  GitHub runs the every-15-minutes schedule far slower than
+ *  requested: the 30 most recent `schedule` runs span 135 HOURS (mean gap
+ *  4.7 h, median 4.6 h, shortest gap in that window 110 min).  Treat the sweep as
+ *  an eventual backstop on the order of hours, not a 15-minute cap; when a
+ *  green PR is parked, force a fresh evaluation instead of waiting for it.
+ *
+ *  (Spell that cadence out in words, never as the cron literal — the slash-star
+ *  sequence closes this block comment and breaks the file.  Which is how this
+ *  paragraph was first written, and what `test/system/pr-gate.test.ts` caught.) */
 async function sweep(repo, token) {
   const prs = await fetchOpenPrHeads(repo, token);
   console.log(`pr-gate sweep: ${prs.length} open PR(s)`);

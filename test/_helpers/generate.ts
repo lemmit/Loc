@@ -2,6 +2,7 @@ import { generateDotnet } from "../../src/generator/dotnet/index.js";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel, mergeLoomModels } from "../../src/ir/lower/lower.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
+import { assertLoomModelVerifies } from "../../src/ir/verify/verify-ir.js";
 import type { Model } from "../../src/language/generated/ast.js";
 import { generateTypeScript } from "../../src/platform/hono/v4/emit.js";
 import { BACKEND_PINS as HONO_V4_PINS } from "../../src/platform/hono/v4/pins.js";
@@ -51,10 +52,22 @@ async function assertGeneratable(source: string): Promise<Model> {
         astErrors.map((e) => `  ${e}`).join("\n"),
     );
   }
+  // Phases ⑤/⑥ — the IR the backends will consume must hold its own contract
+  // before phase ⑦ is asked whether the MODEL is valid.  Ordered first because
+  // the two answer different questions and a violation here invalidates the
+  // one below: `validateLoomModel` reads `refKind`, `receiverType` and
+  // `callKind` off the IR, so a check running on a malformed IR reports on
+  // something that was never built correctly.
+  //
+  // Free, or nearly: the enriched model is computed here anyway for phase ⑦,
+  // and this walks it once more.  That is the whole reason the verifier can
+  // ride the shared helper at all rather than living in one gate — every
+  // fixture in the tree checks the contract because the helper they all go
+  // through already had the model in hand.
+  const enriched = enrichLoomModel(mergeLoomModels([lowerModel(model)]));
+  assertLoomModelVerifies(enriched, ".ddd fixture");
   // Phase ⑦ — the same call the CLI and the api toolkit make.
-  const irErrors = validateLoomModel(enrichLoomModel(mergeLoomModels([lowerModel(model)]))).filter(
-    (d) => d.severity === "error",
-  );
+  const irErrors = validateLoomModel(enriched).filter((d) => d.severity === "error");
   if (irErrors.length) {
     throw new Error(
       `.ddd fixture has ${irErrors.length} IR-validation error(s) (phase ⑦) — ` +
