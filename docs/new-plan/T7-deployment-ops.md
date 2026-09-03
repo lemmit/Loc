@@ -1,9 +1,8 @@
 # T7 — Deployment & operations
 
-*Observability now ships the full trio on all five backends — a log catalog, Prometheus `/metrics` (with per-operation/domain-fault counters + a compose/k8s Prometheus collector), and OpenTelemetry tracing spans (with a bundled Jaeger collector); the Helm chart is a correct scaffold an ops team must finish; networking/proxy designs are approved but unbuilt.*
+> **Completed missions for this track live in [`archive/T7-done.md`](archive/T7-done.md)** (1 closed as of 2026-09-02). This file lists only the live missions.
 
-## M-T7.1 — Metrics + OpenTelemetry — `done` · **L** · P1
-Sources: [observability](../old/proposals/observability.md), [observability.md](../observability.md), weak-spots §3, [execution-context](../old/proposals/execution-context.md).
+*Observability now ships the full trio on all five backends — a log catalog, Prometheus `/metrics` (with per-operation/domain-fault counters + a compose/k8s Prometheus collector), and OpenTelemetry tracing spans (with a bundled Jaeger collector); the Helm chart is a correct scaffold an ops team must finish; networking/proxy designs are approved but unbuilt.*
 
 ## M-T7.2 — k8s production hardening — `partial` · **M** · P2
 v1 chart ships (probes, secret/config split, same-origin ingress). Deferred set: TLS/cert-manager, HPA, NetworkPolicy, securityContext, in-cluster postgres option, CI image build/push, Kustomize. Each is additive chart work.

@@ -30,7 +30,7 @@
 > `main` since the hoist, and parses again now.
 > Sources: language-surface review 2026-07-14 (finding #1 "aggregate-header modifier
 > zoo" + finding #3 "`httpStatus X N` space-triple"); `src/language/ddd.langium`
-> (`Aggregate` header, `ApiStatus`); [`docs/decisions.md`](../../decisions.md)
+> (`Aggregate` header, `ApiStatus`); [`docs/decisions.md`](../../../decisions.md)
 > D-DOCUMENT-AXIS §4 (all aggregate config on the header), D-RENAME.
 
 ## Problem
