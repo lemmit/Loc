@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { generateSystems } from "../../src/system/index.js";
 import type { SourceMap } from "../../src/trace/index.js";
 import {
   constructColor,
@@ -13,7 +12,7 @@ import {
   sourceBands,
   sourceSpanFor,
 } from "../../web/src/build/correspondence.js";
-import { parseString } from "../_helpers/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // Source ↔ output correspondence — the headless gate for M-T8.20 slice 3.
@@ -36,8 +35,9 @@ const SALES = path.resolve(__dirname, "../../web/src/examples/sales-system.ddd")
 
 interface Fixture {
   map: SourceMap;
-  /** The `.ddd` path the map's origins are keyed by — the parse helper mints
-   *  a synthetic URI per run, so it is read back, never hardcoded. */
+  /** The `.ddd` path the map's origins are keyed by.  Read back off the
+   *  artifact's own `sources` list, never hardcoded: the parse helper mints a
+   *  synthetic URI (`/1.ddd`, `/2.ddd`, …) per run. */
   dddPath: string;
   source: string;
   files: Map<string, string>;
@@ -45,12 +45,14 @@ interface Fixture {
 
 async function fixture(file: string): Promise<Fixture> {
   const source = readFileSync(file, "utf-8");
-  const { model, doc, errors } = await parseString(source, { validate: true });
-  expect(errors).toEqual([]);
-  const files = generateSystems(model, { sourcemap: true }).files;
+  // Through the shared helper, so the fixture is gated on phases ①/④/⑦ —
+  // asserting on output no `ddd generate` could produce would prove nothing.
+  const files = await generateSystemFiles(source, { sourcemap: true });
   const raw = files.get(".loom/sourcemap.json");
   expect(raw).toBeDefined();
-  return { map: JSON.parse(raw!) as SourceMap, dddPath: doc.uri.path, source, files };
+  const map = JSON.parse(raw!) as SourceMap;
+  expect(map.sources).toHaveLength(1);
+  return { map, dddPath: map.sources[0]!, source, files };
 }
 
 /** 1-based line of the first line CONTAINING `needle`. */

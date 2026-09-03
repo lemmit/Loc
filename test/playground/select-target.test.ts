@@ -2,11 +2,10 @@ import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { generateSystems } from "../../src/system/index.js";
 import type { SourceMap } from "../../src/trace/index.js";
 import type { VirtualFile } from "../../web/src/build/protocol.js";
 import { resolveTestId, selectNodePath } from "../../web/src/build/select-target.js";
-import { parseString } from "../_helpers/index.js";
+import { generateSystemFiles } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // Preview select mode (M-T8.20 slice 4) — the pure resolution half.
@@ -29,9 +28,8 @@ interface Fixture {
 
 async function fixture(): Promise<Fixture> {
   const source = readFileSync(SALES, "utf-8");
-  const { model, errors } = await parseString(source, { validate: true });
-  expect(errors).toEqual([]);
-  const emitted = generateSystems(model, { sourcemap: true }).files;
+  // Through the shared helper, so the fixture is gated on phases ①/④/⑦.
+  const emitted = await generateSystemFiles(source, { sourcemap: true });
   const files: VirtualFile[] = [...emitted].map(([p, content]) => ({
     path: p,
     content,
