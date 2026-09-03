@@ -82,7 +82,7 @@ Model: **Opus** for every packet unless marked *(Sonnet-capable)*. One draft PR 
 
 ### Wave G1 — promote the runtime gates (Opus ×4 + Sonnet ×1 + coordinator; **one PR**, lands before #2751 W3.7)
 
-Cost budget: packets 1.1 + 1.2 + 1.3 + 1.4 add **19 jobs** to a maximally broad PR on a ~20-slot pool that already fires 30–50 jobs per push. The narrow `paths:` are what make this survivable; a PR block broader than its sibling `behavioral-e2e-<backend>` leg's is the thing to reject in review. The hono obs header's anti-abuse note ("three concurrent docker runs … the shape anti-abuse heuristics watch for on public repos") is the one documented objection with teeth; the answer is paths narrow enough that a typical PR fires one or two of the five, plus the concurrency fix.
+Cost budget (re-priced — see §7.2: `pull_request` path filters match the PR's cumulative diff, so this is 19 jobs on *every* push to such a PR, not only on pushes that touch a listed path): packets 1.1 + 1.2 + 1.3 + 1.4 add **19 jobs** to a maximally broad PR on a ~20-slot pool that already fires 30–50 jobs per push. The narrow `paths:` are what make this survivable; a PR block broader than its sibling `behavioral-e2e-<backend>` leg's is the thing to reject in review. The hono obs header's anti-abuse note ("three concurrent docker runs … the shape anti-abuse heuristics watch for on public repos") is the one documented objection with teeth; the answer is paths narrow enough that a typical PR fires one or two of the five, plus the concurrency fix.
 
 | packet | workflows | jobs | docker | paths (PR block) | risk |
 |---|---|---|---|---|---|
@@ -184,3 +184,18 @@ The second row is the honest number, and its shape says what the mission is: **3
 **Why it is not landable as one change.** 811 errors over 327 files is a wave, not a commit, and a `--noEmit` step added to the fast lane before they are fixed makes every PR red. The landable shape is the one this repo already uses for waivers: a `tsconfig.test.json` plus a **per-file baseline that can only shrink**, gated like `test/system/unsupported-register.test.ts` — a file that drops to zero errors gets deleted from the baseline in the same PR, and a file that gains one fails the gate. That buys the invariant immediately (no *new* untypechecked test file, no new error in a clean one) and lets the 327 drain packet by packet.
 
 Mint as a T9 row when the wave has a coordinator free; the numbers above are the denominator, so it does not need re-measuring first. Do not re-open it as "add `--noEmit` to the lint lane" — that was the original framing and it is wrong by 811.
+
+### 7.2 `pull_request` path filters see the PR's cumulative diff, not the push — the §4 cost budget is written for the wrong denominator
+
+§4's budget sizes packets 1.1–1.4 as "**19 jobs** on a maximally broad PR", reasoning per push: a PR that touches one backend's emitters fires that backend's leg. That is right for the *first* push and wrong for every one after it.
+
+Observed on this wave's own PR. Commit `a3424bc` changed exactly one file, `docs/new-plan/verification-waves-2026-09.md` — and `java-obs-e2e` queued on it, along with the other thirteen promoted legs. `java-obs-e2e`'s `pull_request` block lists `src/ir/**`, `src/generator/java/**`, `src/platform/java.ts`, its e2e test, and `.github/workflows/java-obs-e2e.yml`. The docs file matches none of them. The leg fired because the **PR's diff against base** still contains that last entry — the workflow file this wave edited eight pushes earlier.
+
+So the rule is: once a PR's cumulative diff touches a listed path, **every subsequent push re-fires that leg**, whatever the push itself changed. A promoted gate is therefore priced per *PR*, not per push: a PR that touches `src/ir/**` once pays all five obs legs, all four native oidc legs and the VO leg on each of its remaining pushes, docs-only follow-ups included.
+
+**This does not change the promotion decision**, and it is not a defect in the packets — the PR-aware concurrency group every packet added (`group: …-${{ github.event.pull_request.number || github.ref }}`, `cancel-in-progress` on `pull_request`) is exactly the mitigation, and it worked: each superseded push cancelled its own in-flight legs rather than stacking them. What it changes is the budget's shape and one piece of coordinator discipline:
+
+- Re-price the budget as *19 jobs per push on any PR whose diff has ever touched a listed path*, not per matching push. The narrow `paths:` still buy the thing that matters — a PR that never touches a listed path never pays — but they do not decay over a PR's life.
+- **Batch prose-only follow-ups.** A one-line doc fix on a wave PR costs a full promoted fan-out. Fold corrections into the next code push instead of pushing them alone; this section was itself held back for that reason and rode in with the next commit.
+
+The `push: main` blocks are unaffected — those are per-commit, so the post-merge net keeps its original cost.
