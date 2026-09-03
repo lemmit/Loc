@@ -81,7 +81,9 @@ describe("auto-paged table", () => {
     // `{cond && ( … )}` slot (TS2657), so the pair is fragment-wrapped.
     // (the table itself now opens with its own horizontal-scroll container —
     // the cross-pack table rule in docs/design-packs.md)
-    expect(tsx).toMatch(/<><div className="loom-table-scroll"[\s\S]*<Table[\s\S]*data-testid="pager"[\s\S]*<\/>/);
+    expect(tsx).toMatch(
+      /<><div className="loom-table-scroll"[\s\S]*<Table[\s\S]*data-testid="pager"[\s\S]*<\/>/,
+    );
   });
 
   it("makes simple columns sortable, and leaves computed ones alone", async () => {
