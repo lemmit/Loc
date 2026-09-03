@@ -59,7 +59,12 @@ describe("react api-builder — paged finds (P3b)", () => {
 
   it("the find hook accepts the input shape and parses the paged envelope", async () => {
     const api = await apiModule();
-    expect(api).toContain("export function useRecentWarehouse(query: RecentQueryInput) {");
+    // `recent()` takes no parameters, so the query argument is DEFAULTED — a
+    // page reading it emits `useRecentWarehouse()` with nothing to put in the
+    // bag, which was "Expected 1 arguments, but got 0" until the default
+    // landed.  `{}` satisfies `RecentQueryInput` because the input alias makes
+    // every paged control optional (that is the assertion just above).
+    expect(api).toContain("export function useRecentWarehouse(query: RecentQueryInput = {}) {");
     expect(api).toContain("return WarehousePaged.parse(r);");
   });
 });
