@@ -66,10 +66,13 @@ test("requirement rows show a live verdict pill from the shared test-results sta
   await expect(page.getByTestId("requirements-pane")).toBeVisible({ timeout: 10_000 });
 
   // With no tests run yet, US-001 has a verifying TC-001 but no result,
-  // so the live overlay tags it UNVERIFIED (distinct from UNTESTED).
+  // so the live overlay tags it UNVERIFIED (distinct from UNTESTED).  The
+  // pill shows the verdict in sentence case (M-T8.21 / audit M9) with the
+  // one-line legend above the list.
   const verdict = page.getByTestId("req-verdict-US-001");
   await expect(verdict).toBeVisible({ timeout: 5_000 });
-  await expect(verdict).toHaveText(/UNVERIFIED|FAILING|VERIFIED|UNTESTED/);
+  await expect(verdict).toHaveText(/^(Unverified|Failing|Verified|Untested)$/);
+  await expect(page.getByTestId("req-verdict-legend")).toContainText("Untested = no test case covers it");
 });
 
 test("editing a requirement title saves it back to the source", async ({ page }) => {

@@ -4,6 +4,7 @@ import type { Page } from "../../../../src/language/generated/ast.js";
 import { addStateField, deleteStateField, listStateFields, retypeStateField, setStateDefault, type StateFieldInfo } from "./state-fields";
 import type { TypeOption, TypeSpec } from "../system/fields";
 import { InlineConfirm, confirmSites, useConfirm } from "../../util/confirm";
+import { IconX } from "../icons";
 
 // A small "State (N)" popover in the page-builder toolbar that lists the
 // selected page's `state {}` fields and lets you add / delete / retype / set a
@@ -98,8 +99,8 @@ function StateFieldRow({ field, index, pageName, getSource, types, enumCases, on
           onBlur={() => { if (def !== (field.init ?? "")) onApply(setStateDefault(getSource(), pageName, index, def)); }}
         />
       )}
-      <UnstyledButton data-testid="c4state-delete" aria-label={`Delete state field ${field.name}`} onClick={del.arm} style={{ color: "var(--mantine-color-red-5)", fontSize: 12 }}>
-        ✕
+      <UnstyledButton data-testid="c4state-delete" aria-label={`Delete state field ${field.name}`} title={`Delete state field ${field.name}`} onClick={del.arm} style={{ color: "var(--mantine-color-red-5)", display: "inline-flex", alignItems: "center" }}>
+        <IconX />
       </UnstyledButton>
     </Group>
     {del.armed && (

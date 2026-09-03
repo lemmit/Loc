@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Autocomplete, Box, Button, Group, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
+import { IconArrowDown, IconArrowUp, IconFx, IconX } from "../icons";
 import { ASSIGN_OPS } from "./expr-model";
 import {
   insertIntoList,
@@ -129,9 +130,11 @@ export function CallRow({ view, headCandidates, error, onCommit, onClearError, r
                 variant={structured ? "filled" : "subtle"}
                 data-testid="c4system-call-arg-structured"
                 title="edit the argument structurally"
+                aria-label="edit the argument structurally"
+                aria-expanded={structured}
                 onClick={() => onToggleArg(i)}
               >
-                ƒx
+                <IconFx />
               </Button>
             )}
             <Button
@@ -139,13 +142,15 @@ export function CallRow({ view, headCandidates, error, onCommit, onClearError, r
               variant="subtle"
               color="red"
               data-testid="c4system-call-arg-del"
+              aria-label="remove argument"
+              title="remove argument"
               onClick={() => {
                 const next = args.filter((_, j) => j !== i);
                 setArgs(next);
                 onCommit(reconstruct(head, next));
               }}
             >
-              ×
+              <IconX />
             </Button>
           </Group>
         );
@@ -219,9 +224,11 @@ export function AssignRow({ view, targets, valueEditor, onToggleEditor, error, o
             variant={structured ? "filled" : "subtle"}
             data-testid="c4system-stmt-structured"
             title="edit the value as a structured expression"
+            aria-label="edit the value as a structured expression"
+            aria-expanded={structured}
             onClick={onToggleEditor}
           >
-            ƒx
+            <IconFx />
           </Button>
         )}
       </Group>
@@ -320,9 +327,11 @@ export function EmitRow({ view, error, onCommit, onClearError, renderFieldEditor
                 variant={structured ? "filled" : "subtle"}
                 data-testid="c4system-emit-field-structured"
                 title="edit the field value structurally"
+                aria-label="edit the field value structurally"
+                aria-expanded={structured}
                 onClick={() => onToggleField(i)}
               >
-                ƒx
+                <IconFx />
               </Button>
             )}
             <Button
@@ -330,13 +339,15 @@ export function EmitRow({ view, error, onCommit, onClearError, renderFieldEditor
               variant="subtle"
               color="red"
               data-testid="c4system-emit-field-del"
+              aria-label="remove field"
+              title="remove field"
               onClick={() => {
                 const next = fields.filter((_, j) => j !== i);
                 setFields(next);
                 onCommit(reconstruct(next));
               }}
             >
-              ×
+              <IconX />
             </Button>
           </Group>
         );
@@ -385,9 +396,11 @@ export function OtherRow({ src, valueEditor, onToggleEditor, error, onCommit, on
             variant={structured ? "filled" : "subtle"}
             data-testid="c4system-stmt-structured"
             title="edit the expression structurally"
+            aria-label="edit the expression structurally"
+            aria-expanded={structured}
             onClick={onToggleEditor}
           >
-            ƒx
+            <IconFx />
           </Button>
         )}
       </Group>
@@ -461,9 +474,11 @@ export function SimpleStmtRow({ view, valueEditor, onToggleEditor, error, onComm
             variant={structured ? "filled" : "subtle"}
             data-testid="c4system-stmt-structured"
             title="edit the expression structurally"
+            aria-label="edit the expression structurally"
+            aria-expanded={structured}
             onClick={onToggleEditor}
           >
-            ƒx
+            <IconFx />
           </Button>
         )}
       </Group>
@@ -536,16 +551,19 @@ function NestedList({ label, src, list, step, path, nested, onSrc, error, onClea
               onToggleField={nested ? (f) => nested.toggle(p, f) : undefined}
             />
             <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-nested-up" disabled={i === 0}
+              aria-label="move statement up" title="move statement up"
               onClick={() => onSrc(swapSpans(src, list.spans[i]!, list.spans[i - 1]!))}>
-              ↑
+              <IconArrowUp />
             </Button>
             <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-nested-down" disabled={i === list.items.length - 1}
+              aria-label="move statement down" title="move statement down"
               onClick={() => onSrc(swapSpans(src, list.spans[i]!, list.spans[i + 1]!))}>
-              ↓
+              <IconArrowDown />
             </Button>
             <Button size="compact-xs" variant="subtle" color="red" data-testid="c4system-stmt-nested-delete"
+              aria-label="remove statement" title="remove statement"
               onClick={() => onSrc(removeSpan(src, list.spans[i]!))}>
-              ×
+              <IconX />
             </Button>
           </Group>
         );
@@ -677,8 +695,9 @@ export function MatchRow({ view, path, nested, error, onCommit, onClearError }: 
                 onCommit(replaceSpan(view.src, span, b ? (arm.binderAt ? b : ` ${b}`) : ""));
               }} />
             <Button size="compact-xs" variant="subtle" color="red" data-testid="c4system-stmt-match-arm-del"
+              aria-label="remove arm" title="remove arm"
               onClick={() => onCommit(removeSpan(view.src, view.armSpans[i]!))}>
-              ×
+              <IconX />
             </Button>
           </Group>
           <NestedList label="=>" src={view.src} list={arm.body} step={{ arm: i }} path={path} nested={nested}
@@ -818,14 +837,14 @@ export function BodyEditor({ statements, targets = [], onEdit, onDelete, onMove,
               onToggleField={onToggleValueEditor ? (f) => onToggleValueEditor(i, f) : undefined}
               nested={nested?.(i)}
             />
-            <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-up" disabled={i === 0} onClick={() => onMove(i, -1)}>
-              ↑
+            <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-up" aria-label="move statement up" title="move statement up" disabled={i === 0} onClick={() => onMove(i, -1)}>
+              <IconArrowUp />
             </Button>
-            <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-down" disabled={i === statements.length - 1} onClick={() => onMove(i, 1)}>
-              ↓
+            <Button size="compact-xs" variant="subtle" data-testid="c4system-stmt-down" aria-label="move statement down" title="move statement down" disabled={i === statements.length - 1} onClick={() => onMove(i, 1)}>
+              <IconArrowDown />
             </Button>
-            <Button size="compact-xs" variant="subtle" color="red" data-testid="c4system-stmt-delete" onClick={() => onDelete(i)}>
-              ×
+            <Button size="compact-xs" variant="subtle" color="red" data-testid="c4system-stmt-delete" aria-label="remove statement" title="remove statement" onClick={() => onDelete(i)}>
+              <IconX />
             </Button>
           </Group>
         );
