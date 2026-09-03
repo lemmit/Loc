@@ -24,8 +24,9 @@
 // builders byte-for-byte, so the same `localStorage` blob and the same URL
 // round-trip across frontends:
 //
-//   local/session → key `loom.store.<Name>`, value a JSON object keyed by the
-//                   BARE field name.  `money` serialises as a JSON string (the
+//   local/session → key `loom.store.<Name>`, value the zustand `persist`
+//                   envelope `{"state":{ … },"version":0}` whose `state` is a
+//                   JSON object keyed by the BARE field name.  `money` serialises as a JSON string (the
 //                   JS side holds a `Decimal`, whose `toJSON` is a string);
 //                   plain `decimal` as a JSON number.
 //   url           → one query param per BARE field name.  A string/id param is
@@ -197,8 +198,11 @@ function emitPrelude(needsWeb: boolean, needsUrl: boolean, needsArray: boolean):
     out.push(
       "    /// One field out of the `loom.store.<Name>` JSON blob, as a raw string",
       "    /// (`null` when absent / unparseable) — total, so a disabled Web Storage",
-      "    /// degrades to the declared defaults instead of throwing at init.",
-      `    [<Fable.Core.Emit("(function(){try{var r=($0==='session'?sessionStorage:localStorage).getItem($1);if(r==null)return null;var v=JSON.parse(r)[$2];if(v==null)return null;return typeof v==='string'?v:JSON.stringify(v);}catch(e){return null;}})()")>]`,
+      "    /// degrades to the declared defaults instead of throwing at init.  The",
+      "    /// blob is unwrapped from the `{state, version}` envelope zustand's",
+      "    /// `persist` writes; a bare object (what an older Feliz build wrote)",
+      "    /// still reads, so an upgrade keeps its state.",
+      `    [<Fable.Core.Emit("(function(){try{var r=($0==='session'?sessionStorage:localStorage).getItem($1);if(r==null)return null;var o=JSON.parse(r);if(o&&o.state&&typeof o.state==='object'&&!Array.isArray(o.state))o=o.state;var v=o[$2];if(v==null)return null;return typeof v==='string'?v:JSON.stringify(v);}catch(e){return null;}})()")>]`,
       "    let private webField (backing: string) (key: string) (field: string) : string = jsNative",
       "",
       `    [<Fable.Core.Emit("(function(){try{($0==='session'?sessionStorage:localStorage).setItem($1,$2);}catch(e){}})()")>]`,
@@ -210,7 +214,7 @@ function emitPrelude(needsWeb: boolean, needsUrl: boolean, needsArray: boolean):
     out.push(
       "    /// An ARRAY field out of the blob, flattened to raw strings (`null` when",
       "    /// absent or not an array) — the element conversion happens in F#.",
-      `    [<Fable.Core.Emit("(function(){try{var r=($0==='session'?sessionStorage:localStorage).getItem($1);if(r==null)return null;var v=JSON.parse(r)[$2];return Array.isArray(v)?v.map(String):null;}catch(e){return null;}})()")>]`,
+      `    [<Fable.Core.Emit("(function(){try{var r=($0==='session'?sessionStorage:localStorage).getItem($1);if(r==null)return null;var o=JSON.parse(r);if(o&&o.state&&typeof o.state==='object'&&!Array.isArray(o.state))o=o.state;var v=o[$2];return Array.isArray(v)?v.map(String):null;}catch(e){return null;}})()")>]`,
       "    let private webFieldArray (backing: string) (key: string) (field: string) : string array = jsNative",
       "",
     );
@@ -311,10 +315,14 @@ function writer(p: FelizPersistedStore): string[] {
       "",
     ];
   }
-  // One `"<field>":<value>` fragment per field, joined with `,` inside `{ }` —
-  // the same object `JSON.stringify(store)` produces on the JS side.  The key
-  // is double-encoded on purpose: the inner `JSON.stringify` makes the JSON
-  // key, the outer one makes the F# string literal carrying it.
+  // One `"<field>":<value>` fragment per field, joined with `,` inside the
+  // `{"state":{ … },"version":0}` ENVELOPE — zustand `persist`'s on-disk shape,
+  // which is what the four JS builders actually write under this same key.  The
+  // flat, envelope-less object this emitted before made the shared key a lie:
+  // each side read the other's blob, found none of its fields and fell back to
+  // defaults, then overwrote it.  The field key is double-encoded on purpose:
+  // the inner `JSON.stringify` makes the JSON key, the outer one makes the F#
+  // string literal carrying it.
   const parts = p.fields.map(
     ({ field, codec }) =>
       `${JSON.stringify(`${JSON.stringify(field.name)}:`)} + ${toJson(
@@ -325,7 +333,7 @@ function writer(p: FelizPersistedStore): string[] {
   return [
     `    let private ${fn} (model: Model) : unit =`,
     `      let json =`,
-    `        "{" + String.concat "," [ ${parts.join("; ")} ] + "}"`,
+    `        "{\\"state\\":{" + String.concat "," [ ${parts.join("; ")} ] + "},\\"version\\":0}"`,
     `      webWrite "${p.tier}" ${JSON.stringify(storageKey(p.store))} json`,
     "",
   ];

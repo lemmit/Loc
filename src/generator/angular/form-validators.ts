@@ -1,6 +1,7 @@
 import type { InvariantIR } from "../../ir/types/loom-ir.js";
 import type { SingleFieldPattern } from "../../ir/validate/invariant-classify.js";
 import { humanize } from "../../util/naming.js";
+import { tsCodePointLength } from "../_expr/code-point.js";
 import { asRegexLiteral } from "../_expr/regex-literal.js";
 import type { WalkContext } from "../_walker/walker-core.js";
 import { takeSingleFieldChain } from "../zod-refine.js";
@@ -49,6 +50,27 @@ export function angularValidatorMap(
   return out;
 }
 
+/** One `len-*` bound as an inline `ValidatorFn` that counts CODE POINTS.
+ *
+ *  NOT `Validators.minLength/maxLength`: those read `control.value.length` —
+ *  UTF-16 code units — while the `minLength`/`maxLength` this same constraint
+ *  publishes in the server's JSON Schema are defined in code points, and every
+ *  other emitter already counts code points (`src/generator/_expr/code-point.ts`).
+ *  Angular emits no zod schema, so this is the ONLY client-side length check on
+ *  that frontend: with the built-ins, `"😀😀😀😀😀"` (5 code points, 10 units)
+ *  was blocked by a `maxLength(8)` the server itself calls valid, and `"😀X"`
+ *  (2 code points, 3 units) sailed through a `minLength(3)` into a server 422.
+ *
+ *  The code-point count comes from {@link tsCodePointLength}, the same
+ *  definition the zod `.refine` chains use, so the two cannot drift.  Empty /
+ *  absent values short-circuit to `null`, matching the built-ins' own
+ *  empty-skip (emptiness is `Validators.required`'s job, not a length rule's). */
+function codePointLengthValidator(cmp: ">=" | "<=", n: number): string {
+  const key = cmp === ">=" ? "minlength" : "maxlength";
+  const len = tsCodePointLength("String(c.value)");
+  return `((c: AbstractControl) => c.value == null || c.value === "" || ${len} ${cmp} ${n} ? null : { ${key}: { requiredLength: ${n} } })`;
+}
+
 /** The subset of a partitioned form's flat fields this helper reads/writes. */
 interface FlatFields {
   flatControls: AngularFormControlSpec[];
@@ -72,7 +94,17 @@ export function applyAngularValidators(
 ): string[] {
   const validatorMap = angularValidatorMap(invariants, available);
   if (validatorMap.size > 0) {
-    addNg(ctx, "@angular/forms", "Validators");
+    // Register only what the emitted calls actually name: a form whose sole
+    // constraint is a `len-*` bound emits inline `ValidatorFn`s and never
+    // spells `Validators`, and an unused import is a `tsc` error under the
+    // generated project's `noUnusedLocals`.
+    const all = [...validatorMap.values()].flat();
+    if (all.some((v) => v.startsWith("Validators."))) {
+      addNg(ctx, "@angular/forms", "Validators");
+    }
+    if (all.some((v) => v.includes("AbstractControl"))) {
+      addNg(ctx, "@angular/forms", "AbstractControl");
+    }
     for (const c of parts.flatControls) {
       const v = validatorMap.get(c.name);
       if (v) c.validators = v;
@@ -102,13 +134,13 @@ function validatorsForPattern(p: SingleFieldPattern): string[] {
     case "between":
       return [`Validators.min(${p.lo})`, `Validators.max(${p.hi})`];
     case "len-min":
-      return [`Validators.minLength(${p.n})`];
+      return [codePointLengthValidator(">=", p.n)];
     case "len-max":
-      return [`Validators.maxLength(${p.n})`];
+      return [codePointLengthValidator("<=", p.n)];
     case "len-eq":
-      return [`Validators.minLength(${p.n})`, `Validators.maxLength(${p.n})`];
+      return [codePointLengthValidator(">=", p.n), codePointLengthValidator("<=", p.n)];
     case "len-range":
-      return [`Validators.minLength(${p.lo})`, `Validators.maxLength(${p.hi})`];
+      return [codePointLengthValidator(">=", p.lo), codePointLengthValidator("<=", p.hi)];
     case "regex":
       // The pattern is a JS-compatible regex source (parse-time validated via
       // `new RegExp`).  Rendered through the SAME `asRegexLiteral` hardening
