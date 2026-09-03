@@ -5,16 +5,16 @@ import { api } from "./client";
 
 
 export const CreateCustomerRequest = z.object({
-  username: z.string().refine((s) => [...s].length >= 3 && [...s].length <= 32),
+  username: z.string().refine((s) => [...s].length >= 3 && [...s].length <= 32, { message: "Username must be 3 to 32 characters" }),
   email: z.string(),
-  age: z.number().int().min(18).max(150),
+  age: z.number().int().min(18, { message: "Age must be between 18 and 150" }).max(150, { message: "Age must be between 18 and 150" }),
 }).refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && [...data.email].length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 export type CreateCustomerRequest = z.infer<typeof CreateCustomerRequest>;
 
 export const UpdateCustomerRequest = z.object({
-  username: z.string().refine((s) => [...s].length >= 3 && [...s].length <= 32),
+  username: z.string().refine((s) => [...s].length >= 3 && [...s].length <= 32, { message: "Username must be 3 to 32 characters" }),
   email: z.string(),
-  age: z.number().int().min(18).max(150),
+  age: z.number().int().min(18, { message: "Age must be between 18 and 150" }).max(150, { message: "Age must be between 18 and 150" }),
 }).refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && [...data.email].length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 export type UpdateCustomerRequest = z.infer<typeof UpdateCustomerRequest>;
 

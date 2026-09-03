@@ -14,7 +14,7 @@ export type CreateOrderRequest = z.infer<typeof CreateOrderRequest>;
 
 export const AddLineOrderRequest = z.object({
   productId: z.string().uuid(),
-  qty: z.number().int().min(1),
+  qty: z.number().int().min(1, { message: "Qty must be at least 1" }),
 });
 export type AddLineOrderRequest = z.infer<typeof AddLineOrderRequest>;
 export const ConfirmOrderRequest = z.object({

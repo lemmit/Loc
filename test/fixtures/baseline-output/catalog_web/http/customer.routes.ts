@@ -10,16 +10,16 @@ import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, E
 
 
 const CreateCustomerRequest = z.object({
-  username: z.string().refine((s) => [...s].length >= 3 && [...s].length <= 32).openapi({ minLength: 3, maxLength: 32 }),
+  username: z.string().refine((s) => [...s].length >= 3 && [...s].length <= 32, { message: "Username must be 3 to 32 characters" }).openapi({ minLength: 3, maxLength: 32 }),
   email: z.string(),
-  age: z.number().int().min(18).max(150),
+  age: z.number().int().min(18, { message: "Age must be between 18 and 150" }).max(150, { message: "Age must be between 18 and 150" }),
 }).openapi("CreateCustomerRequest").refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && [...data.email].length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 const CreateCustomerResponse = z.object({ id: z.string() }).openapi("CreateCustomerResponse");
 
 const UpdateCustomerRequest = z.object({
-  username: z.string().refine((s) => [...s].length >= 3 && [...s].length <= 32).openapi({ minLength: 3, maxLength: 32 }),
+  username: z.string().refine((s) => [...s].length >= 3 && [...s].length <= 32, { message: "Username must be 3 to 32 characters" }).openapi({ minLength: 3, maxLength: 32 }),
   email: z.string(),
-  age: z.number().int().min(18).max(150),
+  age: z.number().int().min(18, { message: "Age must be between 18 and 150" }).max(150, { message: "Age must be between 18 and 150" }),
 }).openapi("UpdateCustomerRequest").refine((data: any) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data: any) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && [...data.email].length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 
 const AllQuery = z.object({

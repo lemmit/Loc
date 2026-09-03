@@ -4,18 +4,18 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 
 export const MoneySchema = z.object({
-  amount: z.number().min(0),
-  currency: z.string().refine((s) => [...s].length === 3),
+  amount: z.number().min(0, { message: "Amount must be at least 0" }),
+  currency: z.string().refine((s) => [...s].length === 3, { message: "Currency must be exactly 3 characters" }),
 });
 
 export const CreateProductRequest = z.object({
-  sku: z.string().refine((s) => [...s].length >= 1),
+  sku: z.string().refine((s) => [...s].length >= 1, { message: "Sku must be at least 1 character" }),
   price: MoneySchema,
 });
 export type CreateProductRequest = z.infer<typeof CreateProductRequest>;
 
 export const UpdateProductRequest = z.object({
-  sku: z.string().refine((s) => [...s].length >= 1),
+  sku: z.string().refine((s) => [...s].length >= 1, { message: "Sku must be at least 1 character" }),
   price: MoneySchema,
 });
 export type UpdateProductRequest = z.infer<typeof UpdateProductRequest>;

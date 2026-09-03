@@ -50,12 +50,12 @@ describe("strict numeric bound on a decimal field emits an exclusive validator",
   it("zod (node/Hono): `.gt(0.5)` / `.lt(2)`, integer bound stays `.min(5)`", async () => {
     const files = await filesFor("node", 3000);
     const routes = findFile(files, /parcel\.routes\.ts$/i);
-    expect(routes).toContain(".gt(0.5)");
-    expect(routes).toContain(".lt(2)");
+    expect(routes).toContain('.gt(0.5, { message: "Weight must be greater than 0.5" })');
+    expect(routes).toContain('.lt(2, { message: "Weight must be less than 2" })');
     // No inclusive decimal fold leaked through.
     expect(routes).not.toContain(".min(1.5)");
     // Integer strict bound is byte-identical to the legacy inclusive fold.
-    expect(routes).toContain(".min(5)");
+    expect(routes).toContain('.min(5, { message: "Qty must be at least 5" })');
   });
 
   it("pydantic (python): `Field(gt=0.5, lt=2)`, integer bound stays `ge=5`", async () => {
