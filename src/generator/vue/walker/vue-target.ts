@@ -15,6 +15,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
+import { optionalChainedMemberRead } from "../../_frontend/optional-member.js";
 import type { DetectedApiCall } from "../../_walker/api-hook-detector.js";
 import { jsExprLeaves } from "../../_walker/js-expr-leaves.js";
 import {
@@ -391,6 +392,13 @@ export const vueTarget: WalkerTarget = {
   renderRouteId(): string {
     return "id";
   },
+
+  /** An OPTIONAL field's member read is null-safe (`p.budget?.amount`).  A
+   *  `Budget?` ships `null` on the wire, so the verbatim read is a runtime
+   *  `TypeError` on every record without one — invisible here until #2749 made
+   *  the generated `build` script type-check the pages it bundles.
+   *  Non-optional receivers fall through to the walker's verbatim emit. */
+  renderMemberRead: optionalChainedMemberRead,
 
   // --- Type-default seam --------------------------------------------------
 

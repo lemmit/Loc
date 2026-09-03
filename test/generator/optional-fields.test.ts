@@ -19,7 +19,7 @@
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../_helpers/generate.js";
 
-const SOURCE = (platform: "angular" | "svelte", design: string) => `
+const SOURCE = (platform: "angular" | "svelte" | "react" | "vue", design: string) => `
   system OptFields {
     subdomain Core {
       context Tracking {
@@ -108,6 +108,25 @@ describe.each([
     expect(create).toMatch(/import \{[^}]*\bapi\b[^}]*\} from "\.\.\/\.\.\/api\/client"/);
     expect(create).toMatch(/import \{[^}]*\bAbstractControl\b[^}]*\} from "@angular\/forms"/);
     expect(create).toContain('<input type="file"');
+  });
+});
+
+describe.each([
+  { platform: "react" as const, design: "shadcn", page: "web/src/pages/projects/detail.tsx" },
+  { platform: "vue" as const, design: "shadcnVue", page: "web/src/pages/projects/detail.vue" },
+])("$platform optional fields — the same read, where nothing type-checked it", ({
+  platform,
+  design,
+  page,
+}) => {
+  // React and Vue emitted the identical `p.budget.amount` and bundled green,
+  // because `vite build` type-checks nothing.  That is a runtime `TypeError`
+  // on every record without a budget — and once #2749 made the generated
+  // `build` script run tsc/vue-tsc first, a build failure too.
+  it("null-chains an optional value object's leaf reads", async () => {
+    const detail = (await generateSystemFiles(SOURCE(platform, design))).get(page)!;
+    expect(detail).toContain("budget?.amount");
+    expect(detail).not.toMatch(/data\.budget\.(amount|currency)/);
   });
 });
 

@@ -82,26 +82,33 @@ function allFiles(files: Map<string, string>): string {
 
 describe("FileLink — JSX/markup frontends render a null-guarded download anchor", () => {
   // React + Svelte share JSX's `href={…}`/`{…}`; Vue + Angular bind + interpolate.
+  //
+  // The ref reads are OPTIONAL-CHAINED (`blob?.url`).  They sit inside the
+  // anchor's own truthiness guard, so `?.` never changes what renders — but a
+  // type-checker has to be able to see that, and Angular cannot: a scaffolded
+  // page's file field is rooted at a signal CALL (`byId.data()!.blob`), which
+  // Angular narrows across no member chain.  `?.` is the one spelling that is
+  // correct for all four (M-FT.22 / finding S9).
   const JSX_FAMILY: ReadonlyArray<{ target: string; href: RegExp; label: RegExp }> = [
     {
       target: "react",
-      href: /<a href=\{[\w.]+\.blob\.url\} download>/,
-      label: /\{[\w.]+\.blob\.key\}<\/a>/,
+      href: /<a href=\{[\w.]+\.blob\?\.url\} download>/,
+      label: /\{[\w.]+\.blob\?\.key\}<\/a>/,
     },
     {
       target: "svelte",
-      href: /<a href=\{[\w.]+\.blob\.url\} download>/,
-      label: /\{[\w.]+\.blob\.key\}<\/a>/,
+      href: /<a href=\{[\w.]+\.blob\?\.url\} download>/,
+      label: /\{[\w.]+\.blob\?\.key\}<\/a>/,
     },
     {
       target: "vue",
-      href: /<a :href="[\w.]+\.blob\.url" download>/,
-      label: /\{\{ [\w.]+\.blob\.key \}\}<\/a>/,
+      href: /<a :href="[\w.]+\.blob\?\.url" download>/,
+      label: /\{\{ [\w.]+\.blob\?\.key \}\}<\/a>/,
     },
     {
       target: "angular",
-      href: /<a \[href\]="[\w.]+\.blob\.url" download>/,
-      label: /\{\{ [\w.]+\.blob\.key \}\}<\/a>/,
+      href: /<a \[href\]="[\w.]+\.blob\?\.url" download>/,
+      label: /\{\{ [\w.]+\.blob\?\.key \}\}<\/a>/,
     },
   ];
 
@@ -113,8 +120,8 @@ describe("FileLink — JSX/markup frontends render a null-guarded download ancho
       // The em-dash null placeholder rides a bare <span> (covers both fields).
       expect(out).toContain("<span>—</span>");
       // The optional File? cell is NOT skipped — it renders its own anchor.
-      expect(out).toContain("thumbnail.url");
-      expect(out).toContain("thumbnail.key");
+      expect(out).toContain("thumbnail?.url");
+      expect(out).toContain("thumbnail?.key");
     });
   }
 });
