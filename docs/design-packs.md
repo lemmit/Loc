@@ -662,6 +662,130 @@ The playground ships three storybook examples (`storybook-mantine.ddd`,
 against the storybook examples and visually compare against Mantine
 and shadcn output for the same DDL.
 
+## 8a. The spacing and chrome contract
+
+Loom's promise is "same model, same page, different skin".  Structurally
+that always held; visually it did not.  Rendering ONE `.ddd` (the four
+storybook examples differ by a single `design:` line) through the packs
+measured, in the DOM:
+
+| concern | what the packs actually did |
+|---|---|
+| root page `Stack` gap | **0** (mui) / **8** (chakra) / **12** (vuetify) / **16** px (mantine, shadcn, flowbite) |
+| `Group` gap | **4** / **8** / **12** / **16** px — mui and chakra both wrote `gap={1}`, but MUI's spacing unit is 8px and Chakra's token `1` is 4px |
+| form submit-row offset | `mt="sm"` 12px / `sx={{mt:1}}` 8px / `mt={1}` 4px / `pt-2` 8px-as-padding |
+| `Card` inner padding | 16 / 16+24 / 24 / 24 px |
+| `<main>` padding | 16 / 24 / 24 / 16→24 px |
+| wide table at 390px | **7 of 8 packs scrolled the DOCUMENT sideways**; two wrapped the table in a scroll container |
+
+Every one of those is a pack that never stated its intent and inherited
+whatever its library defaulted to.  So the contract below is not only a
+set of numbers — it is the rule that **a pack states its spacing
+explicitly**.  An unstated gap is what let four packs drift, and a
+library upgrade would move it again without a diff.
+
+The contract lives twice: as prose here, and as data in
+[`src/generator/_packs/spacing-contract.ts`](../src/generator/_packs/spacing-contract.ts).
+`test/generator/_packs/pack-spacing-contract.test.ts` is the gate — it
+reads every pack's governed templates, resolves each pack's own spelling
+back to pixels, and fails outside `SPACING_TOLERANCE_PX`.
+
+### The scale
+
+| token | px | what it separates |
+|---|--:|---|
+| `xs` | 4 | hairline offsets inside one control |
+| `sm` | 8 | ADJACENT CONTROLS — buttons in a row, a label from its value |
+| `md` | 16 | BLOCKS — the things stacked down a page, a surface's inner padding |
+| `lg` | 24 | the page from its chrome (the `<main>` inset on a wide screen) |
+| `xl` | 32 | reserved; no primitive uses it yet |
+
+Two rhythms, one page: `md` between blocks, `sm` between adjacent
+controls.  Anything else is a deviation, and the gate names it.
+
+### The governed concerns
+
+| concern | contract |
+|---|---|
+| `stack.gap` | `md` — the page's vertical rhythm |
+| `group.gap` | `sm` — adjacent controls |
+| `toolbar.gap` | `md`, cross-axis **centred**, main-axis **space-between** |
+| `paper.padding` | `md` |
+| `card.padding` | `md` — body AND header, when the pack splits them |
+| `keyValueRow.gap` | `sm`, with the label a **fixed 140px column** and the value adjacent to it — never `space-between`, which strands the value 1000px away on a wide screen |
+| `formSubmitRow.marginTop` | `md` (a margin, not padding) |
+| `formSubmitRow.gap` | `sm` |
+| `main.padding` | `md` below the `lg` breakpoint, `lg` at and above it |
+| `main.contained` | `<main>` sets `min-width: 0` |
+| `table.scrollContainer` | every table sits in a full-width `overflow-x: auto` container |
+| `container.size` | `Container { size: … }` reaches the rendered max-width |
+| `breadcrumbs.semantics` | a named `nav` with a separator between crumbs |
+| `navSection.label` | 12px / 600 / uppercase / 0.05em tracking / muted |
+| `chart.integerAxis` | an integral series draws integer ticks |
+
+Two of these are structural rather than numeric, and both were found the
+same way — by measuring a phone-width viewport:
+
+- **`main.contained` + `table.scrollContainer` are one bug, fixed in two
+  places.**  A `<main>` that is a flex child has `min-width: auto`, so a
+  wide table inside it widens the flex item rather than overflowing it,
+  and the DOCUMENT scrolls sideways.  Wrapping the table alone does not
+  help while `<main>` can still grow; setting `min-width: 0` alone does
+  not help while the table has no scroll container.  Both, and a phone
+  gets a table that scrolls under a page that does not.
+- The scroll container may be the pack's own element (`<div class="loom-table-scroll">`
+  on the Angular packs, the wrapper mantine now emits) or the library's
+  (`<TableContainer>` on mui, `<Table.ScrollArea>` on chakra, the
+  `.v-table__wrapper` vuetify's `<v-table>` renders, the `overflow-auto`
+  div inside shadcn's own `Table`).  The gate accepts either — what it
+  refuses is a bare `<table>`.
+
+### How each pack spells the scale
+
+The gate resolves these dialects back to pixels; a new pack declares
+which one it speaks.
+
+| dialect | packs | gap of `md` | padding of `md` | unit |
+|---|---|---|---|---|
+| mantine | mantine v7/v9 | `gap="md"` | `p="md"` / `padding="md"` | named scale (`md` = 16) |
+| mui | mui v5/v7 | `gap={2}` | `sx={{ p: 2 }}` | **8px** |
+| chakra | chakra v2/v3 | `gap={4}` | `p={4}` | **4px** |
+| tailwind | shadcn v3/v4, shadcnVue, shadcnSvelte, flowbite | `gap-4` | `p-4` | **4px** |
+| vuetify | vuetify v3 | `ga-4` | `pa-4` | **4px** |
+| css | angularMaterial, primeng, spartanNg | `gap: 16px` in the pack's `loom-*` rules | `padding: 16px` | literal |
+
+The 8-vs-4 unit split is exactly what produced the `gap={1}` divergence:
+copying a literal between two of these dialects silently halves or
+doubles it.  Copy the TOKEN, never the number.
+
+### The typography half
+
+One `heading level: 2` measured 14px on chakra, 24px on shadcn, 26px on
+mantine and 60px on mui.  `HEADING_SCALE_PX` in the same module is the
+ladder (h1 30 / h2 24 / h3 20 / h4 16 / h5 14 / h6 12), with a wider
+`HEADING_TOLERANCE_PX` band so a pack may keep its own rem steps
+(Mantine's 1.625rem h2 = 26px passes) while 14px and 60px do not.
+
+### Adding a primitive, or a pack
+
+- A new layout primitive that carries spacing gets a row in
+  `SPACING_CONTRACT`, a value in every pack, and a probe in the gate —
+  in the same PR.  A primitive whose spacing is unstated is a primitive
+  that will diverge.
+- A new pack declares its dialect in the gate's pack table.  If it
+  speaks a dialect no other pack speaks, add the resolver there; the
+  gate is the only place that knows how to turn `ga-4` into 16.
+
+### Measuring the real DOM
+
+The template-level gate proves the pack SAYS 16px.  What it cannot prove
+is that the library then RENDERS 16px.  `scripts/measure-pack-spacing.mjs`
+closes that gap: point it at running generated apps and it measures the
+computed styles of the same page across packs and asserts the same
+contract module.  It is opt-in (`LOOM_PACK_SPACING_DOM=1 npm run
+test:pack-spacing-dom`) because it needs a browser and a booted stack per
+pack — see [`testing.md`](./testing.md).
+
 ## 9. Architectural rules
 
 These rules constrain pack authorship and the shared-template layer

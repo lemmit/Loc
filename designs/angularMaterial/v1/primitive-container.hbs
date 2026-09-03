@@ -1,3 +1,5 @@
-{{#if hasChildren}}<div class="loom-container"{{{testidAttr}}}{{{styleAttr}}}>
+{{#if hasSize}}{{#if hasChildren}}<div class="loom-container"{{{testidAttr}}}{{#if (eq size "xs")}}{{{styleWith "max-width: 540px"}}}{{else}}{{#if (eq size "sm")}}{{{styleWith "max-width: 720px"}}}{{else}}{{#if (eq size "md")}}{{{styleWith "max-width: 960px"}}}{{else}}{{#if (eq size "lg")}}{{{styleWith "max-width: 1140px"}}}{{else}}{{{styleWith "max-width: 1320px"}}}{{/if}}{{/if}}{{/if}}{{/if}}>
 {{indent}}{{{childrenBlock}}}
-{{closeIndent}}</div>{{else}}<div class="loom-container"{{{testidAttr}}}{{{styleAttr}}}></div>{{/if}}
+{{closeIndent}}</div>{{else}}<div class="loom-container"{{{testidAttr}}}{{#if (eq size "xs")}}{{{styleWith "max-width: 540px"}}}{{else}}{{#if (eq size "sm")}}{{{styleWith "max-width: 720px"}}}{{else}}{{#if (eq size "md")}}{{{styleWith "max-width: 960px"}}}{{else}}{{#if (eq size "lg")}}{{{styleWith "max-width: 1140px"}}}{{else}}{{{styleWith "max-width: 1320px"}}}{{/if}}{{/if}}{{/if}}{{/if}}></div>{{/if}}{{else}}{{#if hasChildren}}<div class="loom-container"{{{testidAttr}}}{{{styleAttr}}}>
+{{indent}}{{{childrenBlock}}}
+{{closeIndent}}</div>{{else}}<div class="loom-container"{{{testidAttr}}}{{{styleAttr}}}></div>{{/if}}{{/if}}

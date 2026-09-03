@@ -33,7 +33,7 @@ function {{opPascal}}Form({ mut,{{#if recordVar}} record,{{/if}} onClose }: { mu
       <Stack>
         {{#if hasParams}}{{#each fieldHtmls}}{{{this}}}
         {{/each}}{{else}}<Text c="dimmed">{{{chrome "noParameters"}}}</Text>
-        {{/if}}<Group justify="flex-end" gap="sm" mt="md">
+        {{/if}}<Group justify="flex-end" gap="xs" mt="md">
           <Button variant="default" onClick={onClose}>{{{cancelLabel}}}</Button>
           <Button type="submit" loading={mut.isPending} data-testid="{{slug}}-op-{{opName}}-submit">{{humanOp}}</Button>
         </Group>
