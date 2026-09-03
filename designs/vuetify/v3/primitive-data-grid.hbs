@@ -17,7 +17,7 @@
           :key="col.id"
           density="compact"
           hide-details
-          :label="String(col.columnDef.header ?? col.id)"
+          :label="{{{visibilityLabel}}}"
           :model-value="col.getIsVisible()"
           @update:model-value="col.toggleVisibility()"
         />

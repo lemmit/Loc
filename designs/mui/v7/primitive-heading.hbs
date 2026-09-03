@@ -1,1 +1,8 @@
-<Typography variant="h{{level}}"{{{testidAttr}}}{{{styleAttr}}}>{{{text}}}</Typography>
+{{!-- Semantic level -> ELEMENT (`component`); display size -> a bounded
+      section scale (`variant`).  h1..h3 are this theme's 32/24/20px steps and
+      every level from 4 down shares its themed 16px h4.  Mapping the level
+      straight onto `variant="h{level}"` INVERTED the scale past level 4: MUI's
+      default h5 (24px) and h6 (20px) are both bigger than the themed h4 (16px),
+      and h5/h6 cannot be re-themed here because the app-bar brand and the card
+      title render through them.  The `~` keeps this comment from prefixing the
+      rendered element with a newline — `Heading` renders in inline position. --~}}<Typography variant="{{#if (eq level 1)}}h1{{else}}{{#if (eq level 2)}}h2{{else}}{{#if (eq level 3)}}h3{{else}}h4{{/if}}{{/if}}{{/if}}" component="h{{level}}"{{{testidAttr}}}{{{styleAttr}}}>{{{text}}}</Typography>

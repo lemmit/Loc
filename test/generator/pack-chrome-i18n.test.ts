@@ -630,6 +630,7 @@ describe("pager counter — every pack version renders it through the token", ()
       pageOfLabel: "«COUNTER»",
       sortByAria: "«SORT-ARIA»",
       filterByAria: "«FILTER-ARIA»",
+      visibilityLabel: "«VISIBILITY-LABEL»",
       headerBody: "",
       cellBody: "",
     });

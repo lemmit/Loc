@@ -14,7 +14,7 @@
     {#each table.getAllLeafColumns() as col (col.id)}
       <label class="flex items-center gap-1 text-sm">
         <input type="checkbox" checked={col.getIsVisible()} onchange={() => col.toggleVisibility()} />
-        {String(col.columnDef.header ?? col.id)}
+        {{expr visibilityLabel}}
       </label>
     {/each}
   </div>
