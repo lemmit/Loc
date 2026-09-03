@@ -152,7 +152,12 @@ system Plain {
     // A component is a Stateless/StatefulWidget — no `WidgetRef`, so no store
     // access.  It falls out of the emittable set and its call site renders the
     // shared diagnostic comment; the alternative is Dart that cannot compile.
-    const files = await generateSystemFiles(
+    //
+    // The drop is now REPORTED (`loom.user-component-deferred-target`, the
+    // flutter `usesStores` arm), so the checked helper correctly refuses this
+    // model — and this test's whole subject is what the emitter does with the
+    // model the gate rejects.
+    const files = await generateSystemFilesUnchecked(
       SYS()
         .replace(
           "page CartPage {",
@@ -160,6 +165,7 @@ system Plain {
     page CartPage {`,
         )
         .replace('Heading { "Cart", level: 1 },', 'Heading { "Cart", level: 1 }, CartSummary(),'),
+      "the store-reading component is rejected by loom.user-component-deferred-target on purpose; this test emits from it to prove the emitter still drops it rather than naming an unbound `Cart`",
     );
     const page = files.get("app/lib/pages/cart_page_page.dart")!;
     expect(page).toContain("unknown layout component: CartSummary");

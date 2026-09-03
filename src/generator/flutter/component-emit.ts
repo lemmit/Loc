@@ -30,11 +30,24 @@
 //
 // An `extern` component (hand-written Dart), an async-effect action
 // (`match await`), a STORE read (the binding is named by the page shell, not
-// here), a read keyed by the ROUTE id (`byId(id)` — no route on a component), a
+// here), ANY use of the ROUTE id (a bare `id`, a `byId(id)` read, and the
+// primitives whose Dart addresses the row by it — `OperationForm` /
+// `DestroyForm` / a `Modal` hosting one), a `currentUser` claim read, a
 // `derived` reaching for one of those same page-shell-only bindings, and a
 // stateful component that ALSO reads (that would need `ConsumerStatefulWidget`)
 // are NOT threaded into the walker's `userComponents`, so their calls fall back
 // to the shared "unknown component" comment (never broken Dart).
+//
+// The route-id and `currentUser` filters used to be NARROWER than the bindings
+// they protect: `usesRouteId` was tested only inside `isReadConsumer` (so it
+// only ran for a READ-BEARING component) and `usesCurrentUser` was not tested at
+// all.  Both leaks emitted a widget naming an undeclared local — `Text('${id}')`
+// / `Text('${currentUser.id}')`, i.e. `Undefined name` Dart that `flutter
+// analyze` rejects — which is worse than the drop it was meant to avoid.
+//
+// Every filter here is REPORTED by `loom.user-component-deferred-target`
+// (`src/ir/validate/checks/ui-checks.ts`, the flutter arms), so a dropped
+// component is a diagnostic rather than a silent vanish.
 
 import type {
   ComponentIR,
@@ -89,6 +102,11 @@ interface ComponentWalkResult {
    *  declares, such a component is dropped from the emittable set and its call
    *  site falls back to the shared "unknown component" comment. */
   usesStores: boolean;
+  /** True when the body reads `currentUser.<claim>`.  The session is bound by
+   *  the PAGE shell (`final currentUser = ref.watch(sessionProvider).value!`),
+   *  never by a component — so a component naming it emitted `Undefined name
+   *  'currentUser'` Dart.  Deferred instead. */
+  usesCurrentUser: boolean;
   /** True when the body contains `Slot { }` — the widget then takes an optional
    *  `child` constructor param for the caller's markup to land in. */
   usesChildren: boolean;
@@ -131,16 +149,43 @@ function walkComponent(
     apiHooks: r.usedApiHooks,
     usesRouteId: r.usesRouteId,
     usesStores: (r.usedStores?.size ?? 0) > 0,
+    usesCurrentUser: r.usesCurrentUser,
     usesChildren: r.usesChildren,
   };
 }
 
 /** True when this component's walk can ride the `ConsumerWidget` path — it
- *  issues reads, carries no `state {}` of its own (a stateful+reads component
- *  would need `ConsumerStatefulWidget`, still deferred), and its reads are not
- *  keyed by a route id it has no way to bind. */
+ *  issues reads and carries no `state {}` of its own (a stateful+reads component
+ *  would need `ConsumerStatefulWidget`, still deferred).  The route-id case is
+ *  handled one level up, by `needsRouteId`, because it disqualifies a component
+ *  whether or not it reads. */
 function isReadConsumer(c: ComponentIR, r: ComponentWalkResult): boolean {
-  return r.apiHooks.size > 0 && !isStateful(c) && !r.usesRouteId;
+  return r.apiHooks.size > 0 && !isStateful(c);
+}
+
+/** True when the walk bound the magic route `id` — a local ONLY a page shell
+ *  declares (`routeArgBindings` in `index.ts`).  No component shape binds it, so
+ *  emitting one that names it produces `Undefined name 'id'`.
+ *
+ *  This used to be tested only INSIDE `isReadConsumer`, i.e. only for a
+ *  READ-BEARING component.  A component whose body merely rendered `id`
+ *  (`component BareId() { body: Text { id } }`) issued no api read, so the guard
+ *  never ran and the widget emitted as `Text('${id}')` — uncompilable Dart in a
+ *  file `flutter analyze` would reject.  Deferring it instead keeps the
+ *  never-broken-output rule; the loss is reported by
+ *  `loom.user-component-deferred-target` (`ui-checks.ts`, the flutter arms). */
+function needsRouteId(r: ComponentWalkResult): boolean {
+  return r.usesRouteId;
+}
+
+/** True when the walk named a binding only a PAGE SHELL declares — the route
+ *  `id` or the session `currentUser`.  Both were previously tested only on the
+ *  read-bearing path (or not at all), so a component naming one emitted Dart
+ *  that referenced an undeclared local.  The body-side twin of
+ *  `derivedNeedsShell`, which already covers the same two (plus stores) on the
+ *  `derived` side. */
+function needsPageShell(r: ComponentWalkResult): boolean {
+  return needsRouteId(r) || r.usesCurrentUser;
 }
 
 /** True when a component carries its own reactive state — the `StatefulWidget`
@@ -241,6 +286,7 @@ export function emittableComponentParams(
   for (const c of candidates(components)) {
     const r = walkComponent(c, all, ctx);
     if (r.usesStores) continue;
+    if (needsPageShell(r)) continue;
     if (r.apiHooks.size === 0 || isReadConsumer(c, r)) out.set(c.name, c.params);
   }
   return out;

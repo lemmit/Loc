@@ -2584,21 +2584,31 @@ function slotLabel(slot: string): string {
 
 // -------------------------------------------------------------------------
 // `loom.user-component-deferred-target` — a user `component` whose SHAPE the
-// Feliz / Angular component emitter defers.
+// Feliz / Angular / Flutter component emitter defers.
 //
-// THE SILENT VANISH.  Both emitters build their emitted set by FILTERING:
-// `emitFelizUserComponents` / `emitAngularUserComponents` keep only the
-// components whose walked shape their shell can assemble, and a filtered
-// component is not merely degraded — it is not emitted AT ALL.  Its name never
-// enters the walker's `userComponents` map either, so every call site falls
-// through to `walk()`'s give-up comment (`(* unknown layout component: X *)` /
-// `<!-- unknown layout component: X -->`).  Declaration and use disappear
-// together: `ddd parse` clean, codegen clean, `dotnet fable` / `ng build`
-// clean, and the component is simply not in the app.
+// THE SILENT VANISH.  All three emitters build their emitted set by FILTERING:
+// `emitFelizUserComponents` / `emitAngularUserComponents` /
+// `emittableComponentParams` keep only the components whose walked shape their
+// shell can assemble, and a filtered component is not merely degraded — it is
+// not emitted AT ALL.  Its name never enters the walker's `userComponents` map
+// either, so every call site falls through to `walk()`'s give-up comment
+// (`(* unknown layout component: X *)` / `<!-- unknown layout component: X -->`
+// / `const SizedBox.shrink() /* unknown layout component: X */`).  Declaration
+// and use disappear together: `ddd parse` clean, codegen clean, `dotnet fable` /
+// `ng build` / `flutter analyze` clean, and the component is simply not in the
+// app.
 //
-// The two emitters gate their OWN async-effect shape honestly already
+// The three emitters gate their OWN async-effect shape honestly already
 // (`loom.feliz-async-effect-unsupported`, `loom.flutter-async-effect-
 // unsupported` for the Flutter twin) — every other filtered shape was silent.
+//
+// FLUTTER JOINED LATE, AND THAT IS THE LESSON.  This gate shipped covering two
+// frameworks while `src/generator/flutter/component-emit.ts` was already
+// filtering four shapes of its own — because the set below was a hand-written
+// literal and the completeness test derived its scope from a hand-written union
+// type, so nothing independent re-derived which emitters actually filter.  The
+// test now runs a probe battery through EVERY frontend and fails when a
+// framework drops one without appearing here.
 //
 // EACH ARM MIRRORS A FILTER, and says which.  The arms below were not read off
 // the emitter source alone: every one was MEASURED on this HEAD by generating
@@ -2621,8 +2631,23 @@ function slotLabel(slot: string): string {
 /** Frameworks whose component emitter FILTERS its emitted set.  Keyed by the
  *  resolved ui framework, which is what actually renders (`ui.framework` wins
  *  over the deployable's platform-derived default — a `platform: static` host
- *  serves whichever bundle the ui declares). */
-const COMPONENT_FILTERING_FRAMEWORKS = new Set(["feliz", "angular"]);
+ *  serves whichever bundle the ui declares).
+ *
+ *  THIS LITERAL CANNOT BE DERIVED HERE.  `src/ir/` may not import
+ *  `src/generator/` (the one-directional pipeline; `pipeline-layering.test.ts`
+ *  fails on the edge), so the set of filtering emitters cannot be read off the
+ *  emitters at validation time.  What ratchets it instead is a BEHAVIOURAL
+ *  derivation in the test: `user-component-deferred.test.ts` renders one probe
+ *  battery through EVERY frontend and asserts that a framework which drops a
+ *  probe (the walker's `unknown layout component:` give-up comment) appears
+ *  here.  That is the check this literal was missing when Flutter grew a
+ *  component filter without joining the set — a gate whose scope is a hand-kept
+ *  list only ratchets if something independent re-derives the list. */
+export const COMPONENT_FILTERING_FRAMEWORKS: ReadonlySet<string> = new Set([
+  "feliz",
+  "angular",
+  "flutter",
+]);
 
 /** One deferral: what the emitter filtered on, in the emitter's own terms. */
 interface ComponentDeferral {
@@ -2869,6 +2894,174 @@ function angularDeferrals(c: ComponentIR, ctx: DeferCtx): ComponentDeferral[] {
   return out;
 }
 
+/** True when the expression tree reads `currentUser.<claim>` — the shape
+ *  `walker-core.ts` sets `ctx.usesCurrentUser` on (a MEMBER access off a
+ *  `current-user` ref, on a target that defines `renderCurrentUserAccess`;
+ *  Flutter does). */
+function readsCurrentUser(e: ExprIR | undefined): boolean {
+  let found = false;
+  walkExprDeep(e, (x) => {
+    if (x.kind === "member" && x.receiver.kind === "ref" && x.receiver.refKind === "current-user")
+      found = true;
+  });
+  return found;
+}
+
+/** True when the expression tree names the session AT ALL — a bare
+ *  `current-user` ref, member access or not.  This is what
+ *  `component-emit.ts`'s `derivedNeedsShell` tests on the DERIVED side (it
+ *  matches the ref, not the access), so the derived arm mirrors it exactly
+ *  rather than borrowing the body arm's narrower member shape. */
+function namesCurrentUser(e: ExprIR | undefined): boolean {
+  let found = false;
+  walkExprDeep(e, (x) => {
+    if (x.kind === "ref" && x.refKind === "current-user") found = true;
+  });
+  return found;
+}
+
+/** The aggregate a form primitive's `of:` arg names, when it resolves — the
+ *  same lookup `flutterTarget`'s form seams do before they bind `id:`. */
+function formOfArg(e: ExprIR, ctx: DeferCtx): AggregateIR | undefined {
+  if (e.kind !== "call") return undefined;
+  const names = e.argNames ?? [];
+  const idx = names.indexOf("of");
+  const ofArg = idx >= 0 ? e.args[idx] : undefined;
+  return ofArg?.kind === "ref" ? ctx.aggByName.get(ofArg.name) : undefined;
+}
+
+/** The Flutter filters, in `component-emit.ts` order:
+ *  `candidates` → `derivedNeedsShell`, then `emittableComponentParams`'s
+ *  `usesStores` / `needsPageShell` / `isReadConsumer` guards.
+ *
+ *  Every arm was MEASURED on this HEAD (generate the shape, confirm the
+ *  `unknown layout component` sentinel), and the negative shapes were measured
+ *  too: Flutter has NO param filter at all — a `slot`, an `action(T)` and an
+ *  optional param each emit fine, and so does an api read whose argument feeds
+ *  on a component param (both the Feliz `propType` and the Angular
+ *  input-fed-read filters are Flutter non-issues). */
+function flutterDeferrals(c: ComponentIR, ctx: DeferCtx): ComponentDeferral[] {
+  const out: ComponentDeferral[] = [];
+
+  // `candidates` → `derivedNeedsShell`: a `derived` whose expression names a
+  // binding only a PAGE shell declares.  All three legs reproduce on Flutter
+  // (unlike Feliz, whose `currentUser` leg does not).
+  for (const d of c.derived) {
+    const causes: string[] = [];
+    if (readsRouteId(d.expr)) causes.push("the route `id`");
+    const stores = new Set<string>();
+    walkExprDeep(d.expr, (e) => {
+      if (e.kind === "ref" && e.refKind === "store-field" && e.storeName) stores.add(e.storeName);
+    });
+    for (const s of [...stores].sort()) causes.push(`store '${s}'`);
+    if (namesCurrentUser(d.expr)) causes.push("the session `currentUser`");
+    for (const cause of causes) {
+      out.push({
+        reason: `\`derived ${d.name}\` reads ${cause}, which only a PAGE shell binds`,
+        emitter: "src/generator/flutter/component-emit.ts `derivedNeedsShell`",
+      });
+    }
+  }
+
+  // `emittableComponentParams` → `r.usesStores`.  A store is a Riverpod
+  // provider, so reaching it needs the `WidgetRef` only the page path carries.
+  const stores = new Set<string>();
+  walkExprDeep(c.body, (e) => {
+    if (e.kind === "ref" && e.refKind === "store-field" && e.storeName) stores.add(e.storeName);
+    if (e.kind === "call" && e.storeAction) stores.add(e.storeAction.store);
+    if (e.kind === "action-ref" && e.storeName) stores.add(e.storeName);
+  });
+  for (const store of [...stores].sort()) {
+    out.push({
+      reason: `its body reads store '${store}'`,
+      emitter: "src/generator/flutter/component-emit.ts `emittableComponentParams` (`usesStores`)",
+    });
+  }
+
+  // `emittableComponentParams` → `needsPageShell` (`usesRouteId`).  FOUR body
+  // shapes set it on Flutter: an explicit `id` (which a `byId(id)` read carries
+  // too), and the three form primitives whose emitted Dart addresses the row by
+  // the page's route id (`flutterTarget.renderOperationForm` /
+  // `renderDestroyForm` / `renderModal`, each `ctx.usesRouteId = true`).
+  // NOT a cause, measured: `Action { inst.op }` — the Flutter seam resolves its
+  // receiver through `paramTypes`, which a component walk passes empty, so it
+  // renders its own comment and never touches `usesRouteId`.
+  const routeIdCauses: string[] = [];
+  walkExprDeep(c.body, (e) => {
+    if (e.kind === "id") routeIdCauses.push("reads the route `id`");
+    if (e.kind !== "call") return;
+    if (e.name === "DestroyForm" && formOfArg(e, ctx)) {
+      routeIdCauses.push("renders `DestroyForm`, which deletes the record at the route `id`");
+    }
+    if (e.name === "OperationForm") {
+      const agg = formOfArg(e, ctx);
+      const names = e.argNames ?? [];
+      const opIdx = names.indexOf("op");
+      const opArg = opIdx >= 0 ? e.args[opIdx] : undefined;
+      const op =
+        opArg?.kind === "ref"
+          ? agg?.operations.find((o) => o.name === opArg.name && o.visibility === "public")
+          : undefined;
+      if (agg && op) {
+        routeIdCauses.push(
+          `renders \`OperationForm { of: ${agg.name}, op: ${op.name} }\`, which posts to the record at the route \`id\``,
+        );
+      }
+    }
+  });
+  for (const cause of [...new Set(routeIdCauses)]) {
+    out.push({
+      reason: `its body ${cause} — a component has no route of its own`,
+      emitter:
+        "src/generator/flutter/component-emit.ts `needsPageShell` (`usesRouteId`); the route `id` is bound by `index.ts`'s `routeArgBindings`, on a PAGE",
+    });
+  }
+
+  // `emittableComponentParams` → `needsPageShell` (`usesCurrentUser`).
+  if (readsCurrentUser(c.body)) {
+    out.push({
+      reason:
+        "its body reads a `currentUser` claim — the session is bound by the page shell " +
+        "(`final currentUser = ref.watch(sessionProvider).value!`), never by a component",
+      emitter: "src/generator/flutter/component-emit.ts `needsPageShell` (`usesCurrentUser`)",
+    });
+  }
+
+  // `isReadConsumer` → `!isStateful(c)`.  A component that BOTH carries `state
+  // {}` and issues a read would need a `ConsumerStatefulWidget`; each half
+  // alone emits fine (a `StatefulWidget`, a `ConsumerWidget`), which is what
+  // makes the combination the arm.
+  if (c.state.length > 0) {
+    const reads = new Set<string>();
+    walkExprDeep(c.body, (e) => {
+      const read = detectAggregateRead(e, ctx);
+      if (read) reads.add(`${read.aggregate}.${read.operation}`);
+    });
+    for (const read of [...reads].sort()) {
+      out.push({
+        reason:
+          `it carries \`state {}\` AND issues a \`${read}(…)\` read — that pairing needs a ` +
+          "`ConsumerStatefulWidget`, which the emitter does not build (either half alone is fine)",
+        emitter: "src/generator/flutter/component-emit.ts `isReadConsumer` (`!isStateful`)",
+      });
+    }
+  }
+
+  return out;
+}
+
+/** Per-framework deferral analysers — one per member of
+ *  `COMPONENT_FILTERING_FRAMEWORKS`, and the two are pinned against each other
+ *  so a framework cannot join the set without an analyser (or vice versa). */
+export const COMPONENT_DEFERRALS: Record<
+  string,
+  (c: ComponentIR, ctx: DeferCtx) => ComponentDeferral[]
+> = {
+  feliz: felizDeferrals,
+  angular: angularDeferrals,
+  flutter: flutterDeferrals,
+};
+
 /** Raise one diagnostic per (component, deferred shape) for every ui rendered
  *  by a filtering frontend. */
 function checkUserComponentSupport(
@@ -2882,7 +3075,7 @@ function checkUserComponentSupport(
     // An `extern` component is a hand-written shim the emitter always wires,
     // and a bodyless one has nothing to walk.
     if (c.extern || c.body === undefined) continue;
-    const deferrals = framework === "feliz" ? felizDeferrals(c, ctx) : angularDeferrals(c, ctx);
+    const deferrals = COMPONENT_DEFERRALS[framework]?.(c, ctx) ?? [];
     for (const d of deferrals) {
       diags.push({
         severity: "error",
