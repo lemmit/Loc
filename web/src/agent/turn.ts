@@ -14,6 +14,7 @@
 
 import type { AgentMessage } from "./demo.js";
 import type { AgentPlan } from "./plan.js";
+import type { TurnReceipt } from "./receipt.js";
 
 /** The plan card's lifecycle.  `pending` is the only state that blocks the
  *  turn; the other two are the record of what the user decided. */
@@ -32,6 +33,9 @@ export interface PlanCard {
  *  none of them renders exactly as it did before. */
 export interface TurnExtras {
   plan?: PlanCard;
+  /** What the turn actually did, computed by the playground rather than
+   *  claimed by the model (slice 3). */
+  receipt?: TurnReceipt;
 }
 
 /** Graft `extras[n]` onto the LAST bubble of turn `n`.

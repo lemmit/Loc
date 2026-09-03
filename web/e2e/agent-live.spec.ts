@@ -81,6 +81,18 @@ test("live chat: injected transport drives the real tool loop and reflects sourc
   await expect
     .poll(async () => await readEditorSource(page), { timeout: 20_000 })
     .toContain("aggregate Ticket");
+
+  // M-T8.19 slice 3: the turn closes with a RECEIPT — the compiler's verdict,
+  // the real `.ddd` diff, and what moved in the generated tree.
+  const receipt = page.getByTestId("agent-receipt");
+  await expect(receipt).toBeVisible({ timeout: 30_000 });
+  await expect(receipt.getByTestId("receipt-validator")).toContainText("→");
+  await receipt.getByTestId("receipt-toggle-diff").click();
+  await expect(receipt.getByTestId("receipt-diff")).toContainText("+  aggregate Ticket");
+  await expect(receipt.getByTestId("receipt-filedelta")).toBeVisible();
+  // The turn's tool cards folded UNDER the receipt rather than staying loose.
+  await receipt.getByTestId("receipt-toggle-tools").click();
+  await expect(receipt.getByTestId("receipt-tools")).toContainText("loom_validate");
 });
 
 test("live chat: rejecting the plan writes nothing", async ({ page }) => {

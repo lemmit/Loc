@@ -23,9 +23,11 @@ import type { AgentMessage, AgentToolCall } from "../agent/demo";
 import type { PlanItem } from "../agent/plan";
 import { planSummary } from "../agent/plan";
 import { type AgentSettings, PROVIDER_PRESETS, presetById, settingsReady } from "../agent/provider";
+import type { TurnReceipt } from "../agent/receipt";
+import { fileDeltaIsEmpty } from "../agent/receipt";
 import type { PlanCard as PlanCardData } from "../agent/turn";
 import type { LayoutCtx } from "./ctx";
-import { CHAT, PLAN } from "./vocabulary";
+import { CHAT, PLAN, RECEIPT } from "./vocabulary";
 
 // "Agent" dock tab — two modes over one shared transcript display:
 //   • the deterministic M-T8.3 wedge demo (prose → `.ddd` → generate → green),
@@ -312,7 +314,10 @@ function ChatMessage({ m, ctx }: { m: AgentMessage; ctx: LayoutCtx }): JSX.Eleme
             {m.text}
           </Text>
         )}
-        {m.toolCalls && m.toolCalls.length > 0 && (
+        {/* The receipt folds the turn's tool calls under itself (research
+            §4 #4), so a turn that produced one does not also sprawl its cards
+            up the bubble. */}
+        {m.toolCalls && m.toolCalls.length > 0 && !m.extras?.receipt && (
           <Stack gap={4} mt={6}>
             {m.toolCalls.map((t, i) => (
               <ToolCallCard key={i} t={t} />
@@ -320,6 +325,7 @@ function ChatMessage({ m, ctx }: { m: AgentMessage; ctx: LayoutCtx }): JSX.Eleme
           </Stack>
         )}
         {m.extras?.plan && <PlanCard card={m.extras.plan} ctx={ctx} />}
+        {m.extras?.receipt && <ReceiptCard receipt={m.extras.receipt} />}
       </Box>
     </Box>
   );
@@ -458,6 +464,142 @@ function PlanRow({
         </Text>
       )}
     </Group>
+  );
+}
+
+/** The per-turn receipt (M-T8.19 slice 3).  Every number on it is computed by
+ *  the playground — the compiler's error counts either side of the write, the
+ *  real unified `.ddd` diff, what moved in the generated tree, the provider's
+ *  own token report.  None of it is the model's claim about itself, which is
+ *  the whole point (NN/g on sycophancy; research §2.4). */
+function ReceiptCard({ receipt }: { receipt: TurnReceipt }): JSX.Element {
+  const [showDiff, setShowDiff] = useState(false);
+  const [showPaths, setShowPaths] = useState(false);
+  const [showTools, setShowTools] = useState(false);
+  const files = receipt.files;
+  const filesMoved = !fileDeltaIsEmpty(files);
+  const paths = [...files.added, ...files.changed, ...files.removed];
+
+  return (
+    <Box
+      mt={6}
+      p={8}
+      data-testid="agent-receipt"
+      style={{
+        borderRadius: 6,
+        background: "var(--mantine-color-body)",
+        border: "1px solid var(--mantine-color-default-border)",
+      }}
+    >
+      <Group gap={8} wrap="wrap">
+        <Badge size="xs" variant="light" color="gray">
+          {RECEIPT.title}
+        </Badge>
+        <Badge
+          size="xs"
+          variant="light"
+          color={receipt.validator.after === 0 ? "green" : "red"}
+          data-testid="receipt-validator"
+        >
+          {RECEIPT.validatorDelta(receipt.validator.before, receipt.validator.after)}
+        </Badge>
+        {receipt.wrote ? (
+          <Text size="xs" c="dimmed" data-testid="receipt-diffstat">
+            {`+${receipt.added} −${receipt.removed}`}
+          </Text>
+        ) : (
+          <Text size="xs" c="dimmed" data-testid="receipt-nodiff">
+            {RECEIPT.noDiff}
+          </Text>
+        )}
+        {receipt.usage && (
+          <Text size="xs" c="dimmed" data-testid="receipt-tokens">
+            {RECEIPT.tokens}: {RECEIPT.tokenLine(receipt.usage.input, receipt.usage.output)}
+          </Text>
+        )}
+      </Group>
+
+      <Group gap={8} mt={4} wrap="wrap">
+        <Text size="xs" c="dimmed">
+          {RECEIPT.files}:
+        </Text>
+        {filesMoved ? (
+          <Code style={{ fontSize: 11 }} data-testid="receipt-filedelta">
+            {RECEIPT.fileDelta(files.added.length, files.removed.length, files.changed.length)}
+          </Code>
+        ) : (
+          <Text size="xs" c="dimmed" data-testid="receipt-filedelta">
+            {RECEIPT.filesNone}
+          </Text>
+        )}
+        {filesMoved && (
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            color="gray"
+            onClick={() => setShowPaths((v) => !v)}
+            data-testid="receipt-toggle-paths"
+          >
+            {showPaths ? RECEIPT.hidePaths : RECEIPT.showPaths}
+          </Button>
+        )}
+        {receipt.wrote && (
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            color="gray"
+            onClick={() => setShowDiff((v) => !v)}
+            data-testid="receipt-toggle-diff"
+          >
+            {showDiff ? RECEIPT.hideDiff : RECEIPT.showDiff}
+          </Button>
+        )}
+        {receipt.toolCalls.length > 0 && (
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            color="gray"
+            onClick={() => setShowTools((v) => !v)}
+            data-testid="receipt-toggle-tools"
+          >
+            {RECEIPT.toolCalls} ({receipt.toolCalls.length})
+          </Button>
+        )}
+      </Group>
+
+      {showPaths && (
+        <Stack gap={0} mt={4} data-testid="receipt-paths">
+          {paths.map((p) => (
+            <Text key={p} size="xs" c="dimmed" ff="monospace" truncate>
+              {p}
+            </Text>
+          ))}
+        </Stack>
+      )}
+      {showDiff && (
+        <Box
+          mt={4}
+          p={6}
+          data-testid="receipt-diff"
+          style={{
+            borderRadius: 4,
+            overflowX: "auto",
+            background: "var(--mantine-color-default-hover)",
+          }}
+        >
+          <Text component="pre" size="xs" ff="monospace" style={{ margin: 0 }}>
+            {receipt.diff}
+          </Text>
+        </Box>
+      )}
+      {showTools && (
+        <Stack gap={4} mt={4} data-testid="receipt-tools">
+          {receipt.toolCalls.map((t, i) => (
+            <ToolCallCard key={i} t={t} />
+          ))}
+        </Stack>
+      )}
+    </Box>
   );
 }
 

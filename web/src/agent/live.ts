@@ -16,6 +16,7 @@ import {
   type ContentBlock,
   type Message,
   runAgent,
+  type TokenUsage,
 } from "../../../src/tools/index.js";
 import type { AgentMessage, AgentToolCall, ToolStatus } from "./demo.js";
 
@@ -183,6 +184,9 @@ export interface LiveAgentDeps {
    *  `null` to write nothing at all.  Absent → today's behaviour, where each
    *  new source is reflected into the editor as it appears. */
   gateSource?: (candidate: string, base: string) => Promise<string | null>;
+  /** What the turn cost, when the provider reported it (M-T8.19 slice 3 —
+   *  the receipt's token line).  Not called when nothing was reported. */
+  onUsage?: (usage: TokenUsage) => void;
   /** Kick a real playground generate once the turn settles. */
   triggerGenerate: () => void;
   /** Cooperative cancellation. */
@@ -244,7 +248,7 @@ export async function runLiveAgent(deps: LiveAgentDeps): Promise<Message[]> {
   let produced: string | null = null;
   let streaming = "";
 
-  await runAgent({
+  const run = await runAgent({
     complete,
     messages,
     system,
@@ -270,6 +274,8 @@ export async function runLiveAgent(deps: LiveAgentDeps): Promise<Message[]> {
       }
     },
   });
+
+  if (run.usage) deps.onUsage?.(run.usage);
 
   if (signal?.cancelled) return messages;
 

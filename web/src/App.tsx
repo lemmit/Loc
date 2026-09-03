@@ -41,8 +41,12 @@ import {
   saveAgentSettings,
   settingsReady,
 } from "./agent/provider";
-import type { Complete, Message as AgentTranscriptMessage } from "../../src/tools/index.js";
-import type { Outline } from "../../src/diagnostics/contract.js";
+import type {
+  Complete,
+  Message as AgentTranscriptMessage,
+  TokenUsage,
+} from "../../src/tools/index.js";
+import type { Outline, ValidateReport } from "../../src/diagnostics/contract.js";
 import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
 import type {
@@ -330,6 +334,10 @@ export default function App(): JSX.Element {
   const [copied, setCopied] = useState(false);
   // Agent demo (the Agent dock tab) — the deterministic M-T8.3 wedge.
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
+  // Mirror, so the receipt's tool-call roll-up reads the turn's bubbles at the
+  // moment it is folded rather than the render that started the turn.
+  const agentMessagesRef = useRef<AgentMessage[]>([]);
+  agentMessagesRef.current = agentMessages;
   const [agentRunning, setAgentRunning] = useState(false);
   const agentSignalRef = useRef<{ cancelled: boolean }>({ cancelled: false });
   // M-T8.19 — per-turn attachments (the plan, and later the receipt / commit /
@@ -1161,6 +1169,8 @@ export default function App(): JSX.Element {
    *  running, so it always bundles the BEST available input instead of
    *  whichever one happened to be published when it arrived. */
   const generateInFlightRef = useRef<Promise<unknown> | null>(null);
+  /** The last successful generate's file tree (see `runGenerateInner`). */
+  const lastGeneratedFilesRef = useRef<VirtualFile[]>(EMPTY_FILES);
 
   /** Register `p` as the generate CYCLE currently in flight.
    *
@@ -1505,6 +1515,11 @@ export default function App(): JSX.Element {
     const epoch = generationEpochRef.current;
     const cycle = await runGenerateStep();
     const result = cycle?.result ?? null;
+    // The generated tree, recorded off the CYCLE rather than off React state —
+    // the agent receipt (M-T8.19 slice 3) compares this ref before and after a
+    // turn, and a render-derived value would still hold the previous tree at
+    // the moment the generate promise resolves.
+    if (result?.ok) lastGeneratedFilesRef.current = result.files;
     let bundleGen: GenerateResult | null = result;
     if (persist && result?.ok) {
       const merged = await persistGeneratedTree(result, cycle?.mapped ?? null);
@@ -2010,6 +2025,44 @@ export default function App(): JSX.Element {
     resolve(null);
   }
 
+  // ---------------------------------------------------------------------
+  // The per-turn RECEIPT (M-T8.19 slice 3).
+  //
+  // NN/g's sycophancy finding is why this is computed rather than quoted: the
+  // turn ends with the COMPILER's verdict on both sides of the write, the real
+  // `.ddd` diff, what moved in the generated tree, and the provider's own token
+  // count — none of it the model's claim about itself.
+  // ---------------------------------------------------------------------
+  async function recordTurnReceipt(args: {
+    turn: number;
+    sourceBefore: string;
+    filesBefore: VirtualFile[];
+    usage: TokenUsage | undefined;
+  }): Promise<void> {
+    const sourceAfter = sourceRef.current;
+    const { callTool } = await import("../../src/tools/index.js");
+    const countErrors = async (source: string): Promise<number> => {
+      const report = (await callTool("loom_validate", { source })) as ValidateReport;
+      return report.diagnostics.filter((d) => d.severity === "error").length;
+    };
+    // One validate when nothing was written — the same number on both sides is
+    // the honest reading of "this turn changed no source".
+    const before = await countErrors(args.sourceBefore);
+    const after = args.sourceBefore === sourceAfter ? before : await countErrors(sourceAfter);
+
+    const { foldReceipt } = await import("./agent/receipt");
+    const receipt = foldReceipt({
+      bubbles: agentMessagesRef.current,
+      before: args.sourceBefore,
+      after: sourceAfter,
+      filesBefore: args.filesBefore,
+      filesAfter: lastGeneratedFilesRef.current,
+      validator: { before, after },
+      usage: args.usage,
+    });
+    setAgentExtras((prev) => withTurnExtras(prev, args.turn, { receipt }));
+  }
+
   // Persist BYOK settings whenever they change.
   function setAgentSettings(s: AgentSettings): void {
     setAgentSettingsState(s);
@@ -2048,6 +2101,12 @@ export default function App(): JSX.Element {
         headers,
         stream: true,
       });
+    // Both sides of the receipt, captured BEFORE the turn can move anything.
+    const turn = agentTurnRef.current;
+    const sourceBefore = sourceRef.current;
+    const filesBefore = lastGeneratedFilesRef.current;
+    let generatePromise: Promise<void> | null = null;
+    let usage: TokenUsage | undefined;
     try {
       const [{ runLiveAgent }, { buildSystemPrompt }] = await Promise.all([
         import("./agent/live"),
@@ -2065,9 +2124,18 @@ export default function App(): JSX.Element {
         // entirely, which restores the M-T8.3 behaviour of streaming the
         // agent's source into the editor as it writes.
         gateSource: agentPlanModeRef.current ? gatePlan : undefined,
-        triggerGenerate: () => void runGenerate(true),
+        // Held, not fired-and-forgotten: the receipt's generated-file delta is
+        // only meaningful once this cycle has actually produced a tree.
+        triggerGenerate: () => {
+          generatePromise = runGenerate(true);
+        },
+        onUsage: (u) => {
+          usage = u;
+        },
         signal: agentSignalRef.current,
       });
+      if (generatePromise) await (generatePromise as Promise<void>).catch(() => undefined);
+      await recordTurnReceipt({ turn, sourceBefore, filesBefore, usage });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setAgentMessages((prev) => [

@@ -32,7 +32,7 @@ const BASE = `context Sales {
 const CANDIDATE = `context Sales {
   aggregate Order {
     total: int
-    placedAt: timestamp
+    placedAt: datetime
   }
 
   aggregate Invoice {
@@ -139,7 +139,7 @@ describe("exclusionPatches", () => {
     expect(applied.ok).toBe(true);
     expect(applied.text).not.toContain("Invoice");
     // The rest of the plan still landed.
-    expect(applied.text).toContain("placedAt: timestamp");
+    expect(applied.text).toContain("placedAt: datetime");
   });
 
   it("removes only the members an excluded CHANGE introduced", async () => {

@@ -16,6 +16,7 @@ import type {
   Completion,
   ContentBlock,
   Message,
+  TokenUsage,
   ToolSpec,
 } from "../../../src/tools/index.js";
 
@@ -58,6 +59,25 @@ interface OaiMessage {
 interface OaiTool {
   type: "function";
   function: { name: string; description: string; parameters: Record<string, unknown> };
+}
+/** The provider's token accounting.  Optional everywhere — plenty of
+ *  compatible endpoints omit it, and a stream only carries it when the server
+ *  honours `stream_options.include_usage`. */
+interface OaiUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+}
+
+/** `usage` → the loop's provider-neutral `TokenUsage`, or undefined when the
+ *  provider reported nothing usable (M-T8.19 slice 3: the receipt shows tokens
+ *  per turn WHEN the provider says, and stays silent when it does not — an
+ *  invented number would be worse than none). */
+export function toTokenUsage(usage: OaiUsage | undefined): TokenUsage | undefined {
+  if (!usage) return undefined;
+  const input = usage.prompt_tokens;
+  const output = usage.completion_tokens;
+  if (typeof input !== "number" && typeof output !== "number") return undefined;
+  return { input: input ?? 0, output: output ?? 0 };
 }
 
 // --- Conversions (exported so they're unit-testable in isolation) ----------
@@ -119,7 +139,7 @@ export function toOpenAiTools(tools: ToolSpec[]): OaiTool[] {
  *  `tool_use` blocks (arguments JSON-parsed defensively — a malformed string
  *  degrades to `{}` rather than throwing).  `stop_reason` is `tool_use` iff the
  *  model requested any tool; the loop keys off tool-call presence regardless. */
-export function fromOpenAiMessage(message: OaiMessage): Completion {
+export function fromOpenAiMessage(message: OaiMessage, usage?: OaiUsage): Completion {
   const content: ContentBlock[] = [];
   if (message.content) content.push({ type: "text", text: message.content });
   for (const tc of message.tool_calls ?? []) {
@@ -132,7 +152,8 @@ export function fromOpenAiMessage(message: OaiMessage): Completion {
     content.push({ type: "tool_use", id: tc.id, name: tc.function.name, input });
   }
   const stop_reason = (message.tool_calls?.length ?? 0) > 0 ? "tool_use" : "end_turn";
-  return { content, stop_reason };
+  const tokens = toTokenUsage(usage);
+  return tokens ? { content, stop_reason, usage: tokens } : { content, stop_reason };
 }
 
 /** One streamed `chat.completions.chunk` delta (only the fields we accumulate). */
@@ -157,16 +178,20 @@ export async function accumulateSseStream(
   const decoder = new TextDecoder();
   let buffer = "";
   let text = "";
+  let usage: OaiUsage | undefined;
   const toolAcc = new Map<number, { id: string; name: string; args: string }>();
 
   const handleData = (payload: string): void => {
     if (payload === "[DONE]") return;
-    let parsed: { choices?: { delta?: OaiStreamDelta }[] };
+    let parsed: { choices?: { delta?: OaiStreamDelta }[]; usage?: OaiUsage };
     try {
       parsed = JSON.parse(payload);
     } catch {
       return; // keep-alive / comment line
     }
+    // The usage chunk arrives LAST and carries no choices — keep it whichever
+    // chunk it rides on rather than assuming a shape.
+    if (parsed.usage) usage = parsed.usage;
     const delta = parsed.choices?.[0]?.delta;
     if (!delta) return;
     if (typeof delta.content === "string" && delta.content) {
@@ -211,7 +236,7 @@ export async function accumulateSseStream(
       function: { name: e.name, arguments: e.args },
     }));
   }
-  return fromOpenAiMessage(message);
+  return fromOpenAiMessage(message, usage);
 }
 
 /** Build a `Complete` bound to one BYOK provider config.  The returned closure
@@ -228,7 +253,12 @@ export function createOpenAiCompatibleComplete(config: OpenAiTransportConfig): C
       tools: toOpenAiTools(tools),
       tool_choice: "auto",
     };
-    if (config.stream) body.stream = true;
+    if (config.stream) {
+      body.stream = true;
+      // Ask for the trailing usage chunk; providers that do not know the
+      // option ignore it, so this costs nothing where it is unsupported.
+      body.stream_options = { include_usage: true };
+    }
     if (config.temperature !== undefined) body.temperature = config.temperature;
     if (config.maxTokens !== undefined) body.max_tokens = config.maxTokens;
 
@@ -246,9 +276,12 @@ export function createOpenAiCompatibleComplete(config: OpenAiTransportConfig): C
 
     if (config.stream && res.body) return accumulateSseStream(res.body, onTextDelta);
 
-    const data = (await res.json()) as { choices?: { message: OaiMessage }[] };
+    const data = (await res.json()) as {
+      choices?: { message: OaiMessage }[];
+      usage?: OaiUsage;
+    };
     const message = data.choices?.[0]?.message;
     if (!message) throw new Error("Provider returned no choices");
-    return fromOpenAiMessage(message);
+    return fromOpenAiMessage(message, data.usage);
   };
 }
