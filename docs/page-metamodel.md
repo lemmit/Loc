@@ -1537,7 +1537,7 @@ semantics.  Per-construct mapping:
 | `Sales.Customer.create(args)` | a direct context call `<App>.Sales.create_customer!(args)` — no hook hoisting, since LiveView reads in `mount/3` / `handle_event/3`. |
 | Page object emission | unchanged — Playwright drives any rendered HTML, including LiveView, via the same testid-keyed page objects. |
 
-**HEEx does not ride the shared walker.**  Five frontends (react, vue, svelte,
+**HEEx does not ride the shared walker.**  Six frontends (react, vue, svelte,
 angular, feliz, flutter) drive `walkBody` through the `WalkerTarget` seam
 (`src/generator/_walker/target.ts`); LiveView runs a **parallel engine**,
 `src/generator/elixir/heex-walker-core.ts` (+ `heex-primitives.ts`), because its
