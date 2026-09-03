@@ -44,6 +44,15 @@ test("Builder lists the Sales System's scaffolded pages; Unfold makes one real a
   await page.goto("/");
   await waitForPlaygroundReady(page);
   await selectExample(page, /Sales System \(Hono/);
+  // Wait for the REAL editor handle before writing through it.  `0 errors`
+  // comes from the LSP worker, not from Monaco, so it can be green while
+  // Monaco's 9.5 MB chunk is still loading — and until it lands, the handle is
+  // the queueing STAND-IN, whose writes reach the source but never touch an
+  // undo stack (`LoomEditor.tsx`: "No model yet, so no stack").  The undo
+  // assertion at the end of this test would then fail for a reason that has
+  // nothing to do with Unfold.  `readEditorSource` waits on the automation
+  // seam, which only the real handle publishes.
+  await readEditorSource(page);
 
   await page.getByTestId("doc-tab-builder").click();
   // The scaffolded list comes from an async build of the source.
@@ -150,6 +159,7 @@ test("no button in the Builder, Model or Requirements panes lacks an accessible 
   await page.goto("/");
   await waitForPlaygroundReady(page);
   await selectExample(page, /Sales System \(Hono/);
+  await readEditorSource(page); // real editor handle before writing (see above)
 
   // Builder — over the unfolded page, so the chrome, the palette, the
   // settings rail (with a selected node) and the scaffolded-pages popover all
@@ -160,7 +170,15 @@ test("no button in the Builder, Model or Requirements panes lacks an accessible 
   await expect(page.getByTestId("c4builder-canvas")).toBeVisible({ timeout: 15_000 });
   await page.getByTestId("c4builder-scaffold-list").click();
   await expect(page.getByTestId("c4builder-scaffold-row-Orders-Detail")).toBeVisible();
+  // The dropdown is portalled OUT of the pane, so the pane-scoped walk below
+  // would never see its rows — check it here, while it is open.
+  expect(await unnamedButtons(page, "body"), "scaffolded-pages popover").toEqual([]);
+  // Escape must dismiss it.  Mantine binds the Escape handler on the DROPDOWN,
+  // so without `trapFocus` on the Popover the key never reaches it, the portal
+  // stays open over the canvas and swallows every click — a keyboard user had
+  // no way out.  Asserting the dismissal here is what pins that.
   await page.keyboard.press("Escape");
+  await expect(page.getByTestId("c4builder-scaffold-row-Orders-Detail")).toBeHidden();
   // Select a node so the settings rail renders its Delete / + arm controls.
   await page.locator('[data-testid^="c4node-"]').first().click();
   expect(await unnamedButtons(page, '[data-testid="c4builder-pane"]'), "Builder pane").toEqual([]);
@@ -192,9 +210,14 @@ test("no button in the Builder, Model or Requirements panes lacks an accessible 
     }, modelRoot),
   ).toEqual([]);
   expect(await unnamedButtons(page, '[data-a11y-root="model"]'), "Model pane (aggregate view)").toEqual([]);
-  // The operation flow view has the statement rows (↑ ↓ ×).
-  await page.locator('.react-flow__node[data-id^="operation:"]').first().click();
-  await expect(page.locator(".react-flow__node[data-stmt-subkind]").first()).toBeVisible({ timeout: 10_000 });
+  // The operation flow view has the statement rows (↑ ↓ ×).  Address the
+  // operation by id (like `system-builder-v2.spec.ts` does) — `.first()` on
+  // the id prefix is DOM order, which is not declaration order — and wait on
+  // `c4system-v2-stmt`: `data-stmt-subkind` sits on the node's inner Box, not
+  // on the `.react-flow__node` wrapper, so `.react-flow__node[data-stmt-
+  // subkind]` matches nothing and this assertion could only ever time out.
+  await page.locator('.react-flow__node[data-id="operation:confirm"]').click();
+  await expect(page.getByTestId("c4system-v2-stmt").first()).toBeVisible({ timeout: 10_000 });
   expect(await unnamedButtons(page, '[data-a11y-root="model"]'), "Model pane (operation view)").toEqual([]);
 
   // Requirements — the master list and a selected requirement's detail.

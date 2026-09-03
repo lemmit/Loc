@@ -388,7 +388,11 @@ export default function BuilderPane({ ctx }: { ctx: LayoutCtx }): JSX.Element {
           // Real pages AND scaffolded ones: the generated pages sit behind one
           // button so the gradient stays one click away without crowding the
           // page select.
-          <Popover position="bottom-start" withArrow shadow="md">
+          // `trapFocus` like every other Popover in the builder: without it
+          // focus stays on the trigger, Mantine's Escape handler (bound on the
+          // DROPDOWN) never sees the key, and the portal is left open over the
+          // canvas swallowing clicks — keyboard users had no way to dismiss it.
+          <Popover position="bottom-start" withArrow shadow="md" trapFocus>
             <Popover.Target>
               <Button size="compact-xs" variant="default" data-testid="c4builder-scaffold-list">
                 {SCAFFOLD.listButton} ({scaffolded.length})
