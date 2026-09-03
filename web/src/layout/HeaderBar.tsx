@@ -53,25 +53,43 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
           reason={workspace.readOnlyReason}
           onTakeOver={workspace.takeOver}
         />
-        <Button
-          size="xs"
-          variant="default"
-          onClick={copyShareLink}
-          data-testid="btn-share"
-          title="Copy a link that loads the current source — works for any other user / browser."
-        >
-          {copied ? "✓ Copied" : "Share link"}
-        </Button>
-        <PackPicker
-          workspaceStore={workspace.store}
-          buildClient={buildClient}
-          onImported={() => scheduleAutoGenerate()}
-          onError={(err) => {
-            // eslint-disable-next-line no-console
-            console.warn("pack import:", err.message);
-          }}
-        />
-        <WorkspaceTree workspaceStore={workspace.store} buildClient={buildClient} />
+        {/* Share link, Import design pack and the imported-pack tree live
+            under one ⋯ menu so the header never needs a second row (audit
+            H2's follow-up, M3).  `closeOnItemClick={false}` keeps the menu
+            open across the async pack import so the tree's new badge is
+            visible where the user is looking. */}
+        <Menu shadow="md" position="bottom-start" withinPortal closeOnItemClick={false}>
+          <Menu.Target>
+            <ActionIcon size="sm" variant="default" aria-label="More actions" data-testid="header-menu">
+              ⋯
+            </ActionIcon>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Item
+              onClick={copyShareLink}
+              data-testid="btn-share"
+              title="Copy a link that loads the current source — works for any other user / browser."
+            >
+              {copied ? "✓ Copied share link" : "Copy share link"}
+            </Menu.Item>
+            <Menu.Divider />
+            <Menu.Label>Workspace</Menu.Label>
+            <Box px="sm" py={6}>
+              <PackPicker
+                workspaceStore={workspace.store}
+                buildClient={buildClient}
+                onImported={() => scheduleAutoGenerate()}
+                onError={(err) => {
+                  // eslint-disable-next-line no-console
+                  console.warn("pack import:", err.message);
+                }}
+              />
+            </Box>
+            <Box px="sm" py={6}>
+              <WorkspaceTree workspaceStore={workspace.store} buildClient={buildClient} />
+            </Box>
+          </Menu.Dropdown>
+        </Menu>
       </Group>
       {/* The pipeline strip IS the Generate / Bundle / Boot controls plus
           their state — one widget on both shells (audit H1). */}

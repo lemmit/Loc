@@ -148,9 +148,12 @@ test("pack picker → workspace tree → generate against custom design", async 
   // moved when storybook entries went to the top of the dropdown.
   await selectExample(page, /Sales System/);
 
-  // Click the Import button — should resolve via the stubbed
+  // Import design pack lives under the header's ⋯ menu (M-T8.16), which
+  // stays open across the import so the workspace tree's badge lands in
+  // view.  Click the Import button — should resolve via the stubbed
   // showDirectoryPicker, walk the synthetic handle, and write
   // every file into the workspace VFS + push to the build worker.
+  await page.getByTestId("header-menu").click();
   await page.getByTestId("btn-import-pack").click();
 
   // The WorkspaceTree component renders a Badge per imported pack;
