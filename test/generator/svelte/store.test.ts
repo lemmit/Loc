@@ -153,3 +153,51 @@ describe("Svelte store lifetime ladder", () => {
     expect(m).not.toContain("popstate");
   });
 });
+
+// ---------------------------------------------------------------------------
+// F2-FFE-1 — declared store defaults.  `storeFieldInit` took only the field's
+// TYPE on react/vue/svelte, so every non-zero `= init` was silently replaced by
+// the type zero (`mode: string = "dark"` booted as `""`, `pageSize: int = 25`
+// as `0`); angular honoured it on construction and then reset it in the `url`
+// tier's replayed `queryParamMap` decode.  Page `state {}` initializers were
+// honoured all along, so the divergence read as a runtime data bug.  Every
+// shipped example declares zero-equal defaults, which is why no fixture saw it.
+// ---------------------------------------------------------------------------
+
+const DEFAULTED = (life: string) => `
+    store Prefs ${life} {
+      state { mode: string = "dark"  pageSize: int = 25  compact: bool = true }
+    }
+    page P { route: "/p" body: Heading { Prefs.mode, level: 1 } }`;
+
+describe("Svelte store — declared state defaults", () => {
+  it("memory: the declared literals are the initial state, not the type zeros", async () => {
+    const mod = (await svelteFiles(DEFAULTED("persist: memory"))).get(
+      "web/src/lib/stores/prefs.svelte.ts",
+    )!;
+    expect(mod).toContain('mode: "dark"');
+    expect(mod).toContain("pageSize: 25");
+    expect(mod).toContain("compact: true");
+  });
+
+  it("persist: local seeds the same declared literals", async () => {
+    const mod = (await svelteFiles(DEFAULTED("persist: local"))).get(
+      "web/src/lib/stores/prefs.svelte.ts",
+    )!;
+    expect(mod).toContain('mode: "dark"');
+    expect(mod).toContain("pageSize: 25");
+  });
+
+  it("persist: url defaults an absent param to the declared literal, and drops it when equal", async () => {
+    const mod = (await svelteFiles(DEFAULTED("persist: url"))).get(
+      "web/src/lib/stores/prefs.svelte.ts",
+    )!;
+    expect(mod).toContain('p.get("mode") ?? "dark"');
+    expect(mod).toContain(": 25");
+    // A `= true` bool must not decode to `false` on an absent param.
+    expect(mod).toContain('p.has("compact") ? p.get("compact") === "true" : true');
+    // …and the encoder drops the param when it equals the declared default,
+    // so absent and default keep meaning the same thing.
+    expect(mod).toContain('s.mode !== "dark"');
+  });
+});

@@ -87,3 +87,49 @@ describe("template partial composition", () => {
     expect(pack.render("outer", {})).toBe("Hi Alice and Hi Bob");
   });
 });
+
+// ---------------------------------------------------------------------------
+// G2667-D8 — pack ISOLATION.  Partials and manifest helpers used to register
+// into the module-global Handlebars registry, safe only under the loader's own
+// (by then false) "one pack per generation" comment: a `react + vue + svelte +
+// angular` system loads FOUR packs into one process, and the last one to
+// register a given logical name won for everyone.  Each pack now compiles in
+// its own `Handlebars.create()` environment, so output cannot depend on load
+// order.
+// ---------------------------------------------------------------------------
+
+describe("pack isolation", () => {
+  const packWith = (button: string, helperTable: Record<string, string>) =>
+    compilePack(
+      "/fixture",
+      {
+        name: `fixture-${button.length}`,
+        version: "0.0.0",
+        emits: { "primitive-button": "primitive-button.hbs", outer: "outer.hbs" },
+        helpers: { icon: helperTable },
+      } as const,
+      {
+        "primitive-button": button,
+        outer: '<div>{{> primitive-button}}{{icon "plus"}}</div>',
+      },
+      (f) => `/fixture/${f}`,
+      {},
+      { validateRequired: false },
+    );
+
+  it("a later pack's same-named partial + helper does not leak into an earlier one", () => {
+    const a = packWith("<AButton />", { plus: "APlus" });
+    const b = packWith("<BButton />", { plus: "BPlus" });
+    // Rendered AFTER b was loaded — a must still see its own template + table.
+    expect(a.render("outer", {})).toBe("<div><AButton />APlus</div>");
+    expect(b.render("outer", {})).toBe("<div><BButton />BPlus</div>");
+  });
+
+  it("load order does not change either pack's output", () => {
+    const first = packWith("<AButton />", { plus: "APlus" }).render("outer", {});
+    const b = packWith("<BButton />", { plus: "BPlus" });
+    const reloadedA = packWith("<AButton />", { plus: "APlus" });
+    expect(reloadedA.render("outer", {})).toBe(first);
+    expect(b.render("outer", {})).toBe("<div><BButton />BPlus</div>");
+  });
+});

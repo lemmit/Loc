@@ -258,10 +258,15 @@ describe("WalkerTarget — TSX and HEEx diverge per seam (anti-collapse)", () =>
     expect(() => heexTarget.renderForEach()).toThrow(/renderFor/);
   });
 
-  it("renderForEach: nested depth brace-wraps the TSX `.map` (JSX child position)", () => {
+  it("renderForEach: nested depth returns a self-contained `<>{…}</>` (child AND expression position)", () => {
     const tsx = tsxTarget.renderForEach("orders", "o", "oIdx", "o.id", "<Card />", 1);
-    expect(tsx.startsWith("{")).toBe(true);
-    expect(tsx.endsWith("}")).toBe(true);
+    // A bare `{…}` is legal only in JSX CHILD position.  A nested `For` also
+    // lands in EXPRESSION position — a `QueryView { data: rows => For { … } }`
+    // body goes straight into the pack template's `{query.data && ( … )}` —
+    // where `{…}` parses as an object literal and the page never compiles
+    // (F2-CFE-3).  The fragment is valid in both.
+    expect(tsx.startsWith("<>{")).toBe(true);
+    expect(tsx.endsWith("}</>")).toBe(true);
     // Custom key not referencing the index → index binding dropped.
     expect(tsx).toContain("orders.map((o) =>");
     expect(tsx).toContain("<Fragment key={o.id}>");

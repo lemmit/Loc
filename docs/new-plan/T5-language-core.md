@@ -1,5 +1,7 @@
 # T5 — Language core & type system
 
+> **Completed missions for this track live in [`archive/T5-done.md`](archive/T5-done.md)** (6 closed as of 2026-09-02). This file lists only the live missions.
+
 *The expression language is deliberately small; these missions finish the in-flight type-system families (errors-as-data, criteria, payloads), close audited correctness bugs, and keep the surface honest.*
 
 ## M-T5.1 — Exception-less completion (A4/A5/A6 + VO→422) — `partial` · **L** · P1 ⚠ coordinated
@@ -22,9 +24,6 @@ Sources: [criterion](../old/proposals/criterion.md), [reified-criteria](../old/p
 A4 reductions verified complete 2026-07-13 (`src/util/collection-ops.ts:18-34` — count/sum/min/max/avg all registered). Remaining: block-form top-level functions (`loom.function-toplevel-block`), storable `duration`/PG interval columns, externalising the prelude to `std/*.ddd`.
 Sources: [stdlib plan](../old/plans/stdlib.md), completeness-audit Tier 1.
 
-## M-T5.6 — Strict decimal/money bounds bug — `done` (verified 2026-07-14) · **S** · P1 ⭐ correctness
-Sources: [full-code-review-2026-07](../audits/full-code-review-2026-07.md) #6.
-
 ## M-T5.7 — Inheritance tail — `partial` · **M** · P3
 I4 per-concrete storage override / mixed strategy (gated; UNION-ALL variant was dropped — re-justify before building); `<Concrete>Id → <Base>Id` threading across ~49 .NET application-layer sites (mechanical, `/warnaserror`-gated); polymorphic `<Base> id` refs.
 Sources: [aggregate-inheritance](../old/proposals/aggregate-inheritance.md), [dotnet-tph-emission](../old/proposals/dotnet-tph-emission.md) follow-on.
@@ -45,8 +44,6 @@ Sources: [reserved-surface-signposting](../old/proposals/reserved-surface-signpo
 - **Spun off:** the `wireShape` retirement (proposal steps 6–8) — 179 refs / 49+45 files, gated on the contract layer + entangled with the still-active auto-derivation mainstream; XL, deserves its own mission (not this M). Extern handler LSP/scaffold polish is a separate tail.
 Sources: [unfoldable-api-derivation](../old/proposals/unfoldable-api-derivation.md) + [coordination note](../old/proposals/unfoldable-api-derivation-coordination-note.md).
 
-## M-T5.11 — Extern domain extension — `done` (verified 2026-07-13) · —
-
 ## M-T5.12 — Typed-capabilities tail — `partial` · **M** · P3
 Phase 5 remainder: LSP tooling (go-to-capability, find-implementors, completion) + marker-interface emission `I<Capability>`; then the [capability-emission-dedup](../old/proposals/capability-emission-dedup.md) stamp-dedup ladder (deferred until a second stamping capability exists). Also the persist-time auditing simulations (node awaiting §7 sign-off; Java §5-vs-§6-ALT fork).
 Sources: [typed-capabilities-implementation](../old/plans/typed-capabilities-implementation.md) Phase 5, [node-persist-time-auditing-simulation](../old/plans/node-persist-time-auditing-simulation.md), [capability-stamp-dedup-simulation](../old/plans/capability-stamp-dedup-simulation.md).
@@ -59,18 +56,9 @@ Sources: [multi-file-source](../old/plans/multi-file-source.md), [implicit-syste
 The coordinator shape (Phase 2); Shape C stays deferred. Plus shipped-tier refinements (read-port shape, `audited` on service ops).
 Sources: [domain-services](../old/proposals/domain-services.md).
 
-## M-T5.15 — Scalar-return operation HTTP-contract convergence (BUG-003) — `done` (2026-07-27) · **S–M** · P2 ⭐ parity break
-Sources: [showcase-coverage-bugs](../audits/showcase-coverage-bugs.md) BUG-003.
-
 ## M-T5.16 — Compiler-internal fragility guards — `open` · **M** · P2
 From the weak-spot review §7: (a) exhaustiveness-check the type-system's parallel walkers (`stepInto` + `typeAfterSuffix`) so a new bindable type can't silently miss one; (b) revisit the `unknown`-cascade suppression (a placeholder type silently disables ALL downstream operand checks) — at minimum a lint that counts suppressed sites; (c) full-code-review #22: macro expansion under LSP incremental rebuilds (C5).
 Sources: [weak-spots §7](../audits/architecture-weak-spots-2026-07.md), `experience_gathered.md` §unknown, full-code-review #22.
-
-## M-T5.17 — Surface normalization: aggregate-header modifiers + `httpStatus` — `done` · **S–M** · P3
-Sources: language-surface review 2026-07-14, `src/language/ddd.langium` (`Aggregate`/`ApiStatus`), D-DOCUMENT-AXIS §4.
-
-## M-T5.18 — Soft-keyword sprawl: dedup, gate, root-cause reduction — `done` (Tracks B + A + C landed) · **M** · P3
-Sources: language-surface review 2026-07-14 #5, `src/language/ddd.langium` (the six identifier rules), M-T5.15 BUG-004.
 
 ## M-T5.19 — Test-placement & test-authoring DSL — `partial` (placement largely shipped; authoring unbuilt) · **M–L** · P2
 The back-fill of a feature that shipped **three phases with no mission tracking it** — flagged as a coverage bug in [`coverage.md`](coverage.md) on 2026-07-21 and resolved here 2026-07-30. Two source proposals: [`test-placement.md`](../old/proposals/test-placement.md) (where a `test` block may live) and [`test-authoring-language.md`](../old/proposals/test-authoring-language.md) (what may be written inside one).
@@ -87,32 +75,6 @@ The back-fill of a feature that shipped **three phases with no mission tracking 
 **Ordering:** (a) before (b) — the anchor is a one-PR completion of a shipped phase, while the authoring surface is a new grammar family that should not land half-built across five backends.
 
 Sources: [`test-placement.md`](../old/proposals/test-placement.md) (incl. its runtime-grounded Phase 3 design), [`test-authoring-language.md`](../old/proposals/test-authoring-language.md), PRs #2163 / #2179 / #2188. Related: M-T9.3 (per-PR boot gates — the integration rung runs there), `docs/testing.md` (tier placement guide).
-## M-T5.20 — Route the whole denial ladder through `resolveErrorStatus` — `done` · **M** · P2 ⭐ drift-prone
-**DONE (2026-08-18) — every rung of the ladder resolves on all five backends.** `DomainError` is in `STDLIB_ERROR_STATUS` at 422, and both rungs now resolve through `resolveErrorStatus` at the runtime arm *and* the declared OpenAPI response on node/.NET/java/python/elixir. Two shared seams had to move with them: the app-wide `structuralErrorStatuses` fold in `enrichments.ts` only iterated `STRUCTURAL_CONFLICT_ERRORS`, so an override could never reach a ladder rung; and `errorStatuses()` in `openapi-errors.ts` handed back the literals. Proven by `test/conformance/denial-ladder-override-parity.test.ts` — one `httpStatus DomainError -> 418` moves **all five**, asserted as a single cross-backend equality so a backend that silently ignores the clause fails even while its own per-leg suite is green.
-
-**A deliberate deviation from this mission's text, reached independently by both halves of the work.** The brief said to take the RFC 7807 `title` from `errorTitle`. That is wrong here: `errorTitle("DomainError")` is `"Domain Error"`, which breaks RS-15's pinned `"Unprocessable Entity"` *and* the committed `wire-contract` golden. The title instead derives from the **resolved status's IANA reason phrase**, which is strictly stronger against the drift this mission exists to remove — a title and a status read off the same number cannot disagree, which is exactly the elixir `"Precondition Failed"`-against-422 bug class #2300 had to fix by hand.
-
-**`NotFound` — the last rung — closed 2026-08-18.** It was parked because the aggregate-not-found 404 had **two producers, and which fired was backend-dependent**: hono's `getById` threw `AggregateNotFoundError` into `onError`, while .NET returned a bare `NotFound()`, java a `ResponseEntity.notFound()`, python a `None` check — and that bare-return pattern repeated across projection/workflow/find paths. Resolving only the declaration would then have published a status those paths never answered. **M-T6.31 removed the second producer** (every bare framework return became the shared not-found carrier — they were bypassing the app's problem filter and answering an empty-bodied 404 anyway), leaving ONE producer per backend, so `errorStatuses()` now resolves `NotFound` like its four siblings and each backend's handler arm plus its hand-rolled declared sets read the resolved value.
-
-Landing it also drained an intra-function split the `Forbidden` rung had had: `deriveContextOperations` spelled the `httpStatus` resolver inline at two call sites and **omitted it at both `errorStatuses("getById")` calls**, so an override moved a find's declared 404 while `GET /<aggs>/{id}` and its `can_<op>` probe kept publishing 404. Same shape on java's `openapi-customizer.ts`, which passed no resolver at three hand-rolled sites.
-
-Two 404s stay literal **on all five, elixir included**: the framework routing 404 (`no route for <verb> <path>`) and the objectStore blob-absence 404. Neither is the domain rung. Gated by `test/conformance/override-status-census.test.ts`, whose four ratcheting `NotFound` waivers were deleted in the same PR and whose sites now cover both the runtime arm and the declared set per backend.
-
-Original brief follows.
-**The ladder is half-routed today, and RS-15 is the proof.** `src/util/error-defaults.ts` already owns a status table plus the `httpStatus <Error> -> <Code>` per-api override path — and the table already names four of the five rungs (`NotFound` 404, `Forbidden` 403, `Disallowed` 409, `ValidationError` 422). But only the **structural-conflict** rung actually reads it: `resolveErrorStatus("Disallowed", …)` / `"UniquenessConflict"` / `"ConcurrencyConflict"` / `"ReferencedInUse"` resolve through the table on every backend, so a user can remap them and the runtime response + the OpenAPI declaration move together by construction. The other rungs — the **domain floor**, `Forbidden`, `NotFound` — are **hardcoded integer literals** at each backend's exception-handler arm (`problem(403, "Forbidden", …)`, `Problem(context, 404, …)`, `problem_response(conn, 422, …)`, …), and `DomainError` is not in the table at all.
-
-Two costs, both now measured rather than hypothetical:
-1. **Changing a rung is an N-place edit.** RS-15 moved the domain floor 400 → 422; that was five hardcoded runtime literals across five backends, plus four docs, plus a fixture rebaseline — and the only thing keeping the five in agreement afterwards is a test that asserts the same literal five times. The `Disallowed` rung would have been a one-line table edit.
-2. **A user cannot remap it.** `httpStatus DomainError -> 400` (say, for a client that can't handle 422) is inexpressible, even though the identical clause works for `Disallowed`. That asymmetry is invisible from the DSL — nothing tells an author which rungs are overridable.
-
-**The work:** add `DomainError` to `STDLIB_ERROR_STATUS` (422, post-RS-15), then convert each backend's exception-handler arm from a literal to `resolveErrorStatus(<name>, ctx.structuralErrorStatuses)` — the same call shape the conflict rung already uses, so the pattern is copy-paste per backend rather than invention. The RFC 7807 `title` should come from the existing `errorTitle` derivation at the same time (it is hardcoded next to each literal, so it drifts identically — elixir shipped a `"Precondition Failed"` title against a 422 status until #2300 fixed it). Also confirm the **OpenAPI declaration** side reads the resolved value: today the declared `responses` map is built separately from the runtime arm, which is exactly the runtime/declaration drift the override mechanism exists to prevent.
-
-**Verification:** `test/generator/domain-denial-detail-parity.test.ts` already pins the resolved default on all five, so a regression is caught; add one case per backend asserting an `httpStatus DomainError -> 400` override moves BOTH the runtime arm and the declared response. `conformance-parity` guards the cross-backend spec.
-
-Sources: found 2026-07-29 while landing RS-15 (#2300) — the five-place edit *was* the evidence. `src/util/error-defaults.ts`, `docs/old/proposals/exception-less.md` (A1, the table's origin), `docs/conformance-semantics.md` RS-15. Relates to M-T5.17 (which added the `httpStatus` surface this mission finishes wiring).
-
-**Regression + restoration (#2462 → #2340, recorded 2026-08-10):** main's route-derivation unification (#2462) re-derived the DECLARED response set but never re-threaded the `DomainError`/`Forbidden` `httpStatus` override into the four backends' runtime handlers — **silently reverting this mission's own feature** on four backends and elixir's per-op controller; #2340's rebase restored it. `denial-ladder-override-parity.test.ts` did not catch the revert — a default-emission census cannot distinguish "resolved to the default" from "hardcoded", which is exactly M-T9.25 round-2 item 1 (re-run the census UNDER AN OVERRIDE). Those bare returns were M-T6.30/M-T6.31's read-path envelope split, and draining them is what made the `NotFound` rung convertible (see above) — the mission is `done` as of 2026-08-18.
-
 ## M-T5.21 — Callable unification: one production for "a named body runs here" — `open` · **L** · P2 ⭐ cost-of-growth
 **Fifteen grammar rules mean the same thing.** `Operation`, `Create`, `Destroy`, `Apply`, `FunctionDecl`, `CommandHandler`, `QueryHandler`, `DomainServiceOperation`, `WorkflowCreateDecl`, `HandleDecl`, `OnDecl`, `ActionDecl`, `UiFunction`, `Component`, `Criterion` — each is "a name, params, an optional return type, a body", forked by *where it lives* and carrying an arbitrary modifier subset. The grammar records the arbitrariness itself: `DomainServiceOperation` "does NOT carry `private`/`extern`/`audited`/`when` — those are aggregate-operation-only" (no reason given, because it is where the rule was forked), and workflow `function` is validator-restricted to the expression form one layer away from the grammar that states it. `extern` has **four** spellings (prefix on handlers, infix on `operation`, suffix-with-path on `component`, and *as the body* on ui `function`); `function` means three different things depending on scope.
 
