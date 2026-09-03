@@ -32,6 +32,7 @@ import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { walkStmtExprsDeep } from "../../../ir/util/walk.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import { numericEncode } from "../../_numeric/target.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import { statementSubRegions } from "../../_trace/sourcemap.js";
 import { type ElixirChannelsCfg, opEmitsDurableEvent } from "../channels-emit.js";
@@ -59,6 +60,7 @@ import {
 import { externImplModule, externPersistForceChanges, isExternOp } from "./extern-emit.js";
 import { renderAggregateFunctions } from "./function-emit.js";
 import { isAbstractBase } from "./inheritance-emit.js";
+import { ELIXIR_NUMERIC } from "./numeric-codec.js";
 import {
   collectOpGuardClauses,
   isReturningOperation,
@@ -224,10 +226,11 @@ function coerceOpParam(varName: string, type: TypeIR | undefined): string {
   if (t?.kind !== "primitive") return varName;
   switch (t.name) {
     case "money":
-    case "decimal":
       // `to_string` first so a JSON number (`7.25`) and a JSON string (`"7.25"`)
       // both land on the same Decimal — the wire allows either.
-      return `(if is_nil(${varName}), do: nil, else: Decimal.new(to_string(${varName})))`;
+      return `(if is_nil(${varName}), do: nil, else: ${numericEncode(ELIXIR_NUMERIC, "money", "find-param", varName)})`;
+    case "decimal":
+      return `(if is_nil(${varName}), do: nil, else: ${numericEncode(ELIXIR_NUMERIC, "decimal", "find-param", varName)})`;
     case "datetime":
       // `:utc_datetime` wants a DateTime struct; the wire is ISO-8601 text.
       return `(case ${varName} do\n      nil -> nil\n      %DateTime{} = __dt -> __dt\n      __s when is_binary(__s) -> (case DateTime.from_iso8601(__s) do\n        {:ok, __d, _} -> DateTime.truncate(__d, :second)\n        _ -> __s\n      end)\n      __other -> __other\n    end)`;

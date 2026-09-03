@@ -29,9 +29,9 @@ import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
+import { numericEncode } from "../../_numeric/target.js";
 import { renderPhoenixDomainOperation, renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import { type SourceMapSubRegion, statementSubRegions } from "../../_trace/sourcemap.js";
-import { MONEY_WIRE_SCALE } from "../../money-scale.js";
 import {
   type ElixirChannelsCfg,
   elixirDispatchCall,
@@ -55,6 +55,7 @@ import {
   opHasWireDenial,
   wireValidationResponse,
 } from "./denial.js";
+import { ELIXIR_NUMERIC } from "./numeric-codec.js";
 import { collectVanillaLeaves, provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 import { isRefCollFieldName, refCollTargetModule } from "./ref-collection-emit.js";
 
@@ -1393,7 +1394,7 @@ export function renderReturningOpControllerAction(
   // node/.NET/java/python scalar-return path.
   const scalarMoneyReturn = op.returnType?.kind === "primitive" && op.returnType.name === "money";
   const okClause = scalarMoneyReturn
-    ? `  def ${resultFn}(conn, {:ok, success}), do: json(conn, Decimal.round(success, ${MONEY_WIRE_SCALE}))`
+    ? `  def ${resultFn}(conn, {:ok, success}), do: json(conn, ${numericEncode(ELIXIR_NUMERIC, "money", "dto-map", "success")})`
     : `  def ${resultFn}(conn, {:ok, success}), do: json(conn, success)`;
   const resultClauses = [
     okClause,

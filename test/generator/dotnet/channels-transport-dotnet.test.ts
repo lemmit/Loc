@@ -20,12 +20,12 @@ system Acme {
     context Orders {
       aggregate Order { customerId: string }
       repository Orders for Order {}
-      event OrderPlaced { orderId: Order id }
+      event OrderPlaced { orderId: Order id, total: money }
       channel Lifecycle { carries: OrderPlaced }
       workflow placeOrder {
         orderId: Order id
         handle place(orderId: Order id) {
-          emit OrderPlaced { orderId: orderId }
+          emit OrderPlaced { orderId: orderId, total: money("10.5") }
         }
       }
     }
@@ -63,6 +63,12 @@ describe("redis broker transport — dotnet leg (M-T4.4 slice 6a)", () => {
       expect(mod).toContain(
         "public sealed class ChannelPublishTeeDispatcher : IDomainEventDispatcher",
       );
+      // money on a channel payload pins the FIXED RS-12 wire scale — the SAME
+      // encoding the REST wire applies (`projectToResponse`) and NOT a bare
+      // `.ToString(culture)` echoing the domain `decimal`'s own scale
+      // (M-T9.36 seam; a bare `.ToString(CultureInfo.InvariantCulture)` here
+      // is the un-fixed shape).
+      expect(mod).toContain('["total"] = e.Total.ToString("F4", CultureInfo.InvariantCulture)');
       expect(files.get(`${dep}/${dep === "sales_api" ? "SalesApi" : "ShipApi"}.csproj`)).toContain(
         '"StackExchange.Redis"',
       );

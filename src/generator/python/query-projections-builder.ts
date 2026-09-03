@@ -20,6 +20,7 @@ import {
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { refuseOutOfVocabulary } from "../_expr/target.js";
+import { numericEncode } from "../_numeric/target.js";
 import { responsePyType } from "./emit/http-models.js";
 import {
   contextFilterPredicate,
@@ -29,6 +30,7 @@ import {
   type PyPredicate,
   SQLALCHEMY_INTRINSIC_SQL,
 } from "./find-predicate.js";
+import { PY_NUMERIC } from "./numeric-codec.js";
 import { rowClassName } from "./py-columns.js";
 import { renderPyExpr, renderPyNegatedGuard } from "./render-expr.js";
 import { authUserImport, wireValue } from "./repository-builder.js";
@@ -488,8 +490,8 @@ function pyCoerce(s: AggregateSelect, expr: string): string {
   // the same formatter, so it reads `"0.0000"` rather than a bare `"0"`.
   if (c.isMoney) {
     return c.optional
-      ? `None if ${expr} is None else money_str(${expr})`
-      : `money_str(Decimal(${expr} or 0))`;
+      ? `None if ${expr} is None else ${numericEncode(PY_NUMERIC, "money", "projection-read", expr)}`
+      : numericEncode(PY_NUMERIC, "money", "projection-read", `Decimal(${expr} or 0)`);
   }
   if (c.optional) return `None if ${expr} is None else ${c.asString ? "str" : "float"}(${expr})`;
   return c.asString ? `str(${expr} or "0")` : `float(${expr} or 0)`;

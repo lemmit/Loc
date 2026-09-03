@@ -2,6 +2,8 @@ import type { BoundedContextIR, EventIR, SystemIR, TypeIR } from "../../../ir/ty
 import { realtimeEventTypes } from "../../../ir/util/channels.js";
 import { type RealtimeRoomPlan, realtimeRoomPlan } from "../../../ir/util/realtime-rooms.js";
 import { lines } from "../../../util/code-builder.js";
+import { numericEncode } from "../../_numeric/target.js";
+import { JAVA_NUMERIC } from "../numeric-codec.js";
 
 // ---------------------------------------------------------------------------
 // Realtime SSE wire — `<base>/api/RealtimeController.java` (channels.md,
@@ -38,12 +40,18 @@ function javaRealtimeValue(access: string, t: TypeIR): string {
   let base = access;
   if (inner.kind === "id") base = `${access}.value()`;
   else if (inner.kind === "primitive" && inner.name === "datetime") base = `${access}.toString()`;
-  else if (inner.kind === "primitive" && inner.name === "money") base = `${access}.toPlainString()`;
+  // money pins the FIXED wire scale (RS-12) — a bare `toPlainString()` echoes
+  // whatever scale the domain `BigDecimal` happens to carry rather than the
+  // canonical 4dp every other read path (REST, channels) now applies (see
+  // `emit/channels.ts`'s `toDataExpr` — the same F-class fix, #2549's class).
+  else if (inner.kind === "primitive" && inner.name === "money")
+    base = numericEncode(JAVA_NUMERIC, "money", "dto-map", access);
   // decimal → a JSON NUMBER at double width (RS-24 / M-T6.46).  Handing Jackson
   // the raw `BigDecimal` shipped the domain value's full precision — up to the
   // 34 significant digits `MathContext.DECIMAL128` produces — on the SSE frame
   // while the REST response (and every other backend's frame) carries a double.
-  else if (inner.kind === "primitive" && inner.name === "decimal") base = `${access}.doubleValue()`;
+  else if (inner.kind === "primitive" && inner.name === "decimal")
+    base = numericEncode(JAVA_NUMERIC, "decimal", "dto-map", access);
   if (opt && base !== access) return `${access} == null ? null : ${base}`;
   return base;
 }

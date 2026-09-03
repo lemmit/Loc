@@ -45,9 +45,10 @@ import type {
   WireField,
 } from "../../../ir/types/loom-ir.js";
 import { snake } from "../../../util/naming.js";
+import { numericEncode } from "../../_numeric/target.js";
 import { provenancedEntries } from "../../_payload/provenanced-wire.js";
-import { MONEY_WIRE_SCALE } from "../../money-scale.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { ELIXIR_NUMERIC } from "./numeric-codec.js";
 import { provColumn } from "./provenance-emit.js";
 
 /** A derived wire field is projected only when its expression evaluates cleanly
@@ -422,7 +423,7 @@ export function renderWireSerialize(
     helpers.set(
       "__money_round",
       `  defp __money_round(nil), do: nil\n\n` +
-        `  defp __money_round(%Decimal{} = dec), do: Decimal.round(dec, ${MONEY_WIRE_SCALE})`,
+        `  defp __money_round(%Decimal{} = dec), do: ${numericEncode(ELIXIR_NUMERIC, "money", "dto-map", "dec")}`,
     );
   }
 
@@ -459,10 +460,10 @@ export function renderWireSerialize(
     helpers.set(
       "__decimal_num",
       `  defp __decimal_num(nil), do: nil\n\n` +
-        `  defp __decimal_num(%Decimal{} = dec), do: Decimal.to_float(dec)\n\n` +
+        `  defp __decimal_num(%Decimal{} = dec), do: ${numericEncode(ELIXIR_NUMERIC, "decimal", "dto-map", "dec")}\n\n` +
         `  defp __decimal_num(bin) when is_binary(bin) do\n` +
         `    case Decimal.parse(bin) do\n` +
-        `      {dec, ""} -> Decimal.to_float(dec)\n` +
+        `      {dec, ""} -> ${numericEncode(ELIXIR_NUMERIC, "decimal", "dto-map", "dec")}\n` +
         `      _ -> bin\n` +
         `    end\n` +
         `  end\n\n` +

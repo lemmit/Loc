@@ -4108,45 +4108,6 @@
       "P": 4
     },
     {
-      "id": "G2644-M-T9.36-wire-codec-seam",
-      "title": "#2644 root cause / M-T9.36 \u2014 the numeric wire-codec seam: one per-backend codec contract + a boundary-enumeration completeness gate",
-      "kind": "mission",
-      "class": null,
-      "confidence": "likely",
-      "targets": [
-        "node",
-        "dotnet",
-        "java",
-        "python",
-        "elixir"
-      ],
-      "fileTrees": [
-        "src/generator/_wire/",
-        "src/generator/",
-        "src/ir/util/projection-aggregate.ts",
-        "test/system/"
-      ],
-      "evidence": [
-        {
-          "fleet": 1,
-          "id": "G2644-M-T9.36-wire-codec-seam",
-          "text": "Documented by register-only PR #2644 as the ROOT CAUSE behind five instances in four days (#2545, #2560, #2575 \u00d73, #2631): the number wire contract (money = fixed-scale-4 string RS-12, decimal = float64 JSON number RS-24, int/long = JSON integer) is one cross-cutting decision implemented as many scattered per-backend, per-read-path coercions. Each new read path (per-row DTO, projection select, aggregate, group key, dapper raw SQL) re-makes the decision and no gate enumerates the boundaries."
-        }
-      ],
-      "repro": null,
-      "impact": null,
-      "fix": "BLOCKED on M-T6.46 + M-T6.47 (they finish the concrete divergences the seam generalizes). Lift the scattered per-path decisions into one per-backend numeric codec table (the generalization of `aggregateCoercion` + #2631's `aggregateLandsOnDouble`) under a new src/generator/_wire/, consumed at every boundary: per-row DTO, projection select, aggregate, group key, raw-SQL adapters. Gate: a completeness test enumerating the boundaries per backend, mutation-proved by adding a fake unregistered boundary. Byte-identical emission across the refactor.",
-      "size": "L",
-      "sources": [
-        "fleet1:pr-registers"
-      ],
-      "related_to": [
-        "root-cause seam for the whole G2644 numeric family (M-T1.22/1.23/1.24/1.25, T2.14, T5.22/5.23/5.24, T6.44-6.48)"
-      ],
-      "securityClass": false,
-      "P": 4
-    },
-    {
       "id": "G2646-open-python-no-realization-axes",
       "title": "#2646 documented, NOT fixed: python has no realization axes (no directoryLayout: menu, no second persistence adapter)",
       "kind": "mission",
@@ -7314,6 +7275,13 @@
       "title": "Provenanced<T> (#2653, merged 2026-08-24) changed the wire shape of a `provenanced` field under every page-body read; only the scaffold macro was taught `.value`, so a hand-written body reading the field bare now emits an object into a text slot with no gate",
       "pr": "#2770",
       "note": "already-done-verified on this base: src/generator/_walker/walker-core.ts's emitExpr `case \"member\"` already routes through emitMemberAccess's isProvenancedCarrierRead unwrap (the M-T6.12 provenanced-wire carrier hop, landed generally by #2734 -- a side effect, not a targeted fix for this row). Re-verified by RUNNING a hand-written (non-scaffold) page-body probe reading a provenanced field both bare and via `.value` on all SIX shared-walker targets (react/vue/svelte/angular/feliz/flutter) generated from source: bare reads gain the `.value` hop, explicit reads stay single-hop (no `.value.value`), a plain field is untouched. Newly pinned by test/generator/_walker/provenanced-bare-read-in-page-body.test.ts (react/vue/svelte), mutation-proven by disabling the unwrap arm (3 named assertions fail). HEEx's opposite-direction drop (heex-walker-core.ts's provenancedFieldNames) remains covered by its own existing test file, untouched here."
+    },
+    {
+      "id": "G2644-M-T9.36-wire-codec-seam",
+      "title": "#2644 root cause / M-T9.36 — the numeric wire-codec seam: one per-backend codec contract + a boundary-enumeration completeness gate",
+      "pr": "#2770",
+      "sha": "ed65cc458",
+      "note": "fixed: src/generator/_numeric/ (codec.ts's NUMERIC_WIRE_CODEC decision table + target.ts's NumericTarget contract over five read-boundary kinds) is the one per-backend numeric codec, consumed at every repo-read/projection-read/dto-map/find-param boundary across all five backends (per-backend numeric-codec.ts leaf tables) -- repository hydration, DTO/wire mappers, query-time projection reads, inbound param decode, channel/realtime payloads. test/generator/_numeric/boundary-census.test.ts enumerates every occurrence of the extracted literal signatures across the fenced trees and fails, naming file:line, on any outside the seam; mutation-proved three ways (unregistered boundary, deleted waiver, stale waiver -- see docs/new-plan/waves/handoffs/wave-2-numeric-codec.md). Byte-identical corpus/examples/web-examples diff verified across the refactor (55 fixtures, only pre-existing per-run random secrets differ); three genuinely-wrong boundaries found and fixed as separate commits (java channel/SSE money payload, dotnet channel envelope money payload, elixir channel envelope money payload -- all bare-scale-echo bugs of the #2549 class, each mutation-proved)."
     }
   ],
   "conflicts": [

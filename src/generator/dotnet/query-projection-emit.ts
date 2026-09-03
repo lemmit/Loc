@@ -20,15 +20,9 @@ import {
 import { queryProjectionArm } from "../../ir/util/query-projection-arm.js";
 import { escapeCsharpIdent, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { PG_INTRINSIC_SQL } from "../_expr/pg-intrinsics.js";
+import { numericEncode } from "../_numeric/target.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
-import { MONEY_WIRE_SCALE } from "../money-scale.js";
-import {
-  csDecimalToWireDouble,
-  dtoParam,
-  projectEntityArgs,
-  projectToResponse,
-  wireType,
-} from "./dto-mapping.js";
+import { dtoParam, projectEntityArgs, projectToResponse, wireType } from "./dto-mapping.js";
 import {
   collectFilterPrincipalRefs,
   type DapperColumn,
@@ -40,6 +34,7 @@ import {
 } from "./emit/dapper.js";
 import { dapperProjectionColumns, dapperWorkflowStateColumns } from "./emit/dapper-workflow.js";
 import { queryFilterNames } from "./emit/efcore.js";
+import { CS_NUMERIC } from "./numeric-codec.js";
 import {
   projectionRowClass,
   projectionRowDbSet,
@@ -1090,10 +1085,9 @@ function csCoerce(
   // where `projectToResponse` sends `"40.0000"` for the same declared field
   // (#2549).  `"F4"` also carries the empty-table `0m` default to `"0.0000"`.
   if (c.isMoney) {
-    const scaled = `ToString("F${MONEY_WIRE_SCALE}", CultureInfo.InvariantCulture)`;
     return c.optional
-      ? `${read} is null ? null : ${read}!.Value.${scaled}`
-      : `(${read} ?? 0m).${scaled}`;
+      ? `${read} is null ? null : ${numericEncode(CS_NUMERIC, "money", "projection-read", `${read}!.Value`)}`
+      : numericEncode(CS_NUMERIC, "money", "projection-read", `(${read} ?? 0m)`);
   }
   if (c.asString) {
     return c.optional
@@ -1108,13 +1102,15 @@ function csCoerce(
   // …except when the cast would be a LOSSY decimal→double narrowing: an EF
   // aggregate over a `decimal` column materialises as `System.Decimal`, and
   // `(double)` on it is not correctly rounded (F10 — the same class #2631 fixed
-  // for dapper at the SQL seam).  Route it through the shared
-  // `csDecimalToWireDouble` instead.  Safe here: both EF arms apply this AFTER
+  // for dapper at the SQL seam).  Route it through the shared codec's
+  // `decimal["projection-read"]` leaf instead (`csDecimalToWireDouble`,
+  // `./numeric-codec.js`).  Safe here: both EF arms apply this AFTER
   // materialisation (`FirstOrDefaultAsync` / `ToListAsync`, then an in-memory
   // `Select`), so it is LINQ-to-Objects — there is no expression tree for EF to
   // translate and no `double.Parse` ever reaches SQL.
   if (arrivesAsDecimal && (target === "double" || target === "double?")) {
-    if (!c.optional) return csDecimalToWireDouble(`(${read} ?? 0)`);
+    if (!c.optional)
+      return numericEncode(CS_NUMERIC, "decimal", "projection-read", `(${read} ?? 0)`);
     // Pattern-match the unwrap: `agg?.X is { } v` yields a NON-nullable
     // `decimal` for the Parse argument, so nullable analysis sees the
     // `ToString` result as non-null (a `agg?.X!.Value.ToString(…)` chain
@@ -1123,7 +1119,7 @@ function csCoerce(
     // decimal aggregates, and the `(double?)` keeps the conditional's type
     // explicit rather than leaning on target-typing.
     const v = `__dec${member}`;
-    return `(${read} is { } ${v} ? (double?)${csDecimalToWireDouble(v)} : null)`;
+    return `(${read} is { } ${v} ? (double?)${numericEncode(CS_NUMERIC, "decimal", "projection-read", v)} : null)`;
   }
   return c.optional ? `(${target})${read}` : `(${target})(${read} ?? 0)`;
 }

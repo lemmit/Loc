@@ -14,10 +14,12 @@ import type {
 import { durableEventTypes } from "../../ir/util/channels.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { numericEncode } from "../_numeric/target.js";
 import { statementSubRegions } from "../_trace/sourcemap.js";
 import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
 import type { OpFragment } from "./emit/aggregate.js";
 import { domainServiceImportLinesForWorkflow } from "./emit/domain-service.js";
+import { PY_NUMERIC, pyEventSourcedDecimalDecode } from "./numeric-codec.js";
 import { renderPyExpr } from "./render-expr.js";
 import { resourceImportLines } from "./resource-clients.js";
 import {
@@ -1151,12 +1153,13 @@ export function fromPayload(name: string, t: TypeIR): string {
     case "primitive":
       switch (inner.name) {
         case "int":
+          return numericEncode(PY_NUMERIC, "int", "repo-read", access);
         case "long":
-          return `cast(int, ${access})`;
+          return numericEncode(PY_NUMERIC, "long", "repo-read", access);
         case "decimal":
-          return `float(cast("int | float", ${access}))`;
+          return pyEventSourcedDecimalDecode(access);
         case "money":
-          return `Decimal(cast(str, ${access}))`;
+          return numericEncode(PY_NUMERIC, "money", "repo-read", access);
         case "bool":
           return `cast(bool, ${access})`;
         case "datetime":

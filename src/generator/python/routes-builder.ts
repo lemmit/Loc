@@ -66,6 +66,7 @@ import {
 } from "../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { isServerSourcedDefault, isValueObjectDefault } from "../_frontend/server-default.js";
+import { numericEncode } from "../_numeric/target.js";
 import { findUnionSpec } from "../_payload/union-wire.js";
 import { pyHistoryMapperName, renderPyHistoryMapper } from "./emit/audit-history.js";
 import { requestPyType, responsePyType, wireModelImport } from "./emit/http-models.js";
@@ -75,6 +76,7 @@ import {
   createModelValidator,
   withFieldConstraint,
 } from "./emit/wire-constraints.js";
+import { PY_NUMERIC } from "./numeric-codec.js";
 import { renderPyExpr, renderPyNegatedGuard } from "./render-expr.js";
 import { aggHasFieldMask, emittableFinds } from "./repository-builder.js";
 
@@ -1217,7 +1219,8 @@ function versionedSave(
 function pyScalarReturnToWire(expr: string, t: TypeIR): string {
   const inner = t.kind === "optional" ? t.inner : t;
   if (inner.kind === "primitive" && (inner.name === "money" || inner.name === "datetime")) {
-    const wire = inner.name === "money" ? `money_str(${expr})` : `iso(${expr})`;
+    const wire =
+      inner.name === "money" ? numericEncode(PY_NUMERIC, "money", "dto-map", expr) : `iso(${expr})`;
     return t.kind === "optional" ? `${wire} if ${expr} is not None else None` : wire;
   }
   return expr;

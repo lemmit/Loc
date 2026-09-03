@@ -10,20 +10,20 @@ Base: `main` @ 38580cd77 · built 2026-08-30 · claim map applied (PR #2667 = au
 
 | metric | value |
 |---|---|
-| open rows | **158** |
+| open rows | **157** |
 | P0 | 0 |
 | P1 | 9 |
 | P2 | 15 |
 | P3 | 32 |
-| P4 | 90 |
+| P4 | 89 |
 | P5 | 12 |
-| kind: silent / honest / breadth / mission / stale-prose | 24 / 32 / 26 / 64 / 12 |
-| confidence: proven / likely / suspected | 30 / 126 / 2 |
+| kind: silent / honest / breadth / mission / stale-prose | 24 / 32 / 26 / 63 / 12 |
+| confidence: proven / likely / suspected | 30 / 125 / 2 |
 | class: faulty-fix / regression | 1 / 0 |
-| size S / M / L | 43 / 68 / 47 |
-| provenance: fleet1-only / fleet2-only / corroborated by both | 141 / 16 / 1 |
+| size S / M / L | 43 / 68 / 46 |
+| provenance: fleet1-only / fleet2-only / corroborated by both | 140 / 16 / 1 |
 | claimed by an open PR | 61 |
-| done / merged | 134 |
+| done / merged | 135 |
 | conflicts | 10 |
 | checkedOk entries | 146 |
 | rows scheduled into waves | 134 across 13 packets |
@@ -152,7 +152,6 @@ Sorted P0 (security / data-integrity, silent, proven) → P1 (other silent prove
 | P4 | `override-parity-non-node-routers` | breadth | like | node, dotnet, java, python, elixir | M | M-T9.25 round-2 probe 5: 'one override moves EVERY router' is asserted per-file on node only; the workflow/extern/projection routers are uncensused on all five |
 | P4 | `timers-e2e-leg-missing` | breadth | like | node, dotnet, elixir, python, java | M | No standing runtime gate for timers — every fire / single-fire / catch-up proof to date is a per-PR hand-run (M-T4.1) |
 | P4 | `G2644-M-T5.22-decimal-arithmetic-rule` | mission | prov | node, dotnet, java, python, elixir | L | #2644 F11 / M-T5.22 — decimal arithmetic has no governing rule: 0.1+0.2 diverges on the wire AND in storage across backends |
-| P4 | `G2644-M-T9.36-wire-codec-seam` | mission | like | node, dotnet, java, python, elixir | L | #2644 root cause / M-T9.36 — the numeric wire-codec seam: one per-backend codec contract + a boundary-enumeration completeness gate |
 | P4 | `G2646-open-python-no-realization-axes` | mission | like | python | L | #2646 documented, NOT fixed: python has no realization axes (no directoryLayout: menu, no second persistence adapter) |
 | P4 | `G2667-C5-outbox-insert-outside-tx` | mission | like | node, dotnet | L | 08-17 register #5: workflow/extern/timer outbox inserts sit outside any transaction (node AND .NET) |
 | P4 | `M-T1.10-realtime-no-runtime-e2e` | breadth | prov | node, dotnet, java, python, elixir | L | M-T1.10 — the realtime SSE wire (incl. the security-relevant tenant-room routing) has NO runtime e2e on any backend; no cross-tenant isolation test exists |

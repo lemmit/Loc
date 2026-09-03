@@ -15,6 +15,8 @@ import type {
 import { directParentName } from "../../ir/util/containment-parent.js";
 import { isTphConcrete } from "../../ir/util/inheritance.js";
 import { isValueCollectionType, type ValueCollectionIR } from "../../ir/util/value-collections.js";
+import { numericEncode } from "../_numeric/target.js";
+import { TS_NUMERIC } from "./numeric-codec.js";
 import { isRefCollection } from "./repository-associations-builder.js";
 
 export function hydrateRootExpr(
@@ -176,8 +178,8 @@ function hydrateValueExpr(
     // existence).  Drizzle's `numeric()` column returns a string at
     // runtime, which `new Decimal(...)` consumes without precision
     // loss.
-    if (t.name === "decimal") return `Number(${colExpr})`;
-    if (t.name === "money") return `new Decimal(${colExpr})`;
+    if (t.name === "decimal") return numericEncode(TS_NUMERIC, "decimal", "repo-read", colExpr);
+    if (t.name === "money") return numericEncode(TS_NUMERIC, "money", "repo-read", colExpr);
     // File hydrates from a JSONB column (drizzle types it `unknown`) — cast to
     // the fixed FileRef shape the domain field declares.
     if (t.name === "File")
@@ -234,8 +236,8 @@ function hydrateValueExpr(
  *  (lossy JS `number`). */
 function arrayElementHydrate(t: TypeIR): ((v: string) => string) | null {
   if (t.kind !== "primitive") return null;
-  if (t.name === "money") return (v) => `new Decimal(${v})`;
-  if (t.name === "decimal") return (v) => `Number(${v})`;
+  if (t.name === "money") return (v) => numericEncode(TS_NUMERIC, "money", "repo-read", v);
+  if (t.name === "decimal") return (v) => numericEncode(TS_NUMERIC, "decimal", "repo-read", v);
   return null;
 }
 

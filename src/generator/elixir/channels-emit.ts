@@ -1,7 +1,9 @@
 import type { EventIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import type { BrokerBinding } from "../_channels/bindings.js";
+import { numericEncode } from "../_numeric/target.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
+import { ELIXIR_NUMERIC } from "./vanilla/numeric-codec.js";
 
 // ---------------------------------------------------------------------------
 // Broker transport for Phoenix/Elixir (M-T4.4 slices 6c + 7d — the Elixir
@@ -105,11 +107,22 @@ function encodeExpr(access: string, t: TypeIR): string {
       ? `${access} && DateTime.to_iso8601(${access})`
       : `DateTime.to_iso8601(${access})`;
   }
-  if (inner.kind === "primitive" && (inner.name === "money" || inner.name === "decimal")) {
-    // money rides as a decimal STRING (the cross-backend pin); plain decimal
-    // stays numeric on other backends, but Elixir's Decimal has no native
-    // JSON number form — Jason encodes Decimal via its String.Chars, which
-    // matches the string-tolerant decoders on every consumer.
+  if (inner.kind === "primitive" && inner.name === "money") {
+    // money pins the FIXED wire scale (RS-12) — a bare `Decimal.to_string`
+    // echoes whatever scale the domain value happens to carry rather than the
+    // canonical 4dp `domainToWire`'s cross-backend siblings apply (the java/
+    // .NET channel-envelope class this docstring's "wire parity" claims,
+    // M-T9.36).  `numericEncode`'s `projection-read` leaf is the shape that
+    // already spells "round then explicitly to_string" (`__money_wire/1`).
+    const encoded = numericEncode(ELIXIR_NUMERIC, "money", "projection-read", access);
+    return t.kind === "optional" ? `${access} && ${encoded}` : encoded;
+  }
+  if (inner.kind === "primitive" && inner.name === "decimal") {
+    // plain decimal stays numeric on other backends, but Elixir's Decimal has
+    // no native JSON number form — Jason encodes Decimal via its
+    // String.Chars, which matches the string-tolerant decoders on every
+    // consumer.  (No fixed-scale requirement here — RS-24 is float64, not a
+    // pinned scale — so this is a wire-FORM choice, not a codec boundary.)
     return t.kind === "optional"
       ? `${access} && Decimal.to_string(${access})`
       : `Decimal.to_string(${access})`;
