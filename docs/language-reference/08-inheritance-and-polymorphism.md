@@ -347,7 +347,7 @@ end
 ```
 ::: end
 
-**Only Phoenix exposes the base over HTTP.** The Elixir backend mounts a read-only base controller (`GET /parties`, `GET /parties/:id` → `ApiWeb.PartyController`, with its own `PartyResponse`/`PartyListResponse` OpenAPI schemas) and delegates it from the context module (`defdelegate list_partys(), to: D.Parties.PartyRepository, as: :list`). node, .NET, Python and Java emit **no routes and no controller** for the base — their readers are internal infrastructure only.
+**Only Phoenix exposes the base over HTTP.** The Elixir backend mounts a read-only base controller (`GET /parties`, `GET /parties/:id` → `DWeb.PartyController`, with its own `PartyResponse`/`PartyListResponse` OpenAPI schemas) and delegates it from the context module (`defdelegate list_partys(), to: D.Parties.PartyRepository, as: :list`). node, .NET, Python and Java emit **no routes and no controller** for the base — their readers are internal infrastructure only.
 
 ## `<Base> id` references — TPH only
 

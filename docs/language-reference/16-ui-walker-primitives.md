@@ -85,6 +85,7 @@ Image { "/a.png" }                   // loom.a11y-missing-alt — add alt: or de
 Button { icon: "trash" }             // loom.a11y-icon-only-no-name (warning) — add text or label:
 Heading { "Order " + n }             // loom.user-visible-concat — use `Order {n}` (translatable ICU)
 Stat { "n", rows.count }             // loom.frontend-collection-op-unsupported — compute it server-side
+Box { title: 3 }                     // loom.component-prop-type — the component's `title: string` prop got an int
 ```
 
 `Form { … }`, `scaffoldList { … }`, `Dashboard`, `Review`, `Select`, `Fieldset` are **not** primitives (`loom.unknown-page-element`) — the form family is the four named leaves below, and list/detail pages come from `scaffold` ([15](15-ui-pages-structure.md)).
