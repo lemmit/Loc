@@ -18,7 +18,8 @@ import type { LayoutCtx } from "./ctx";
 import { WorkspaceLockBanner } from "./WorkspaceLockBanner";
 import { HelpMenu, HelpMenuItems } from "./HelpMenu";
 import { PipelineDots, PipelineStrip } from "./PipelineStrip";
-import { AUTO_RUN, AUTO_RUN_HINT, RUN } from "./vocabulary";
+import { TargetsDrawer } from "./TargetsDrawer";
+import { AUTO_RUN, AUTO_RUN_HINT, RUN, TARGETS } from "./vocabulary";
 
 interface Props {
   ctx: LayoutCtx;
@@ -36,6 +37,7 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
     buildClient,
     scheduleAutoGenerate,
   } = ctx;
+  const [targetsOpen, setTargetsOpen] = useState(false);
   return (
     <Group h="100%" px="md" justify="space-between" wrap="wrap" gap="xs">
       <Group gap="md" wrap="wrap">
@@ -54,6 +56,20 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
           reason={workspace.readOnlyReason}
           onTakeOver={workspace.takeOver}
         />
+        {/* Targets — the stack this system generates against, as dropdowns
+            (M-T8.23, research §4 #21).  A quiet `default` button, not a
+            filled one: the loudest control in the header should be the
+            pipeline strip, never a settings surface (audit L6). */}
+        <Button
+          size="xs"
+          variant="default"
+          onClick={() => setTargetsOpen(true)}
+          data-testid="btn-targets"
+          title={TARGETS.intro}
+        >
+          {TARGETS.label}
+        </Button>
+        <TargetsDrawer ctx={ctx} opened={targetsOpen} onClose={() => setTargetsOpen(false)} />
         {/* Share link, Import design pack and the imported-pack tree live
             under one ⋯ menu so the header never needs a second row (audit
             H2's follow-up, M3).  `closeOnItemClick={false}` keeps the menu
@@ -128,6 +144,7 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
   // nothing" complaint.
   const runLoading = pipeline.generating || pipeline.bundling || pipeline.booting;
   const [wsDrawerOpen, setWsDrawerOpen] = useState(false);
+  const [targetsOpen, setTargetsOpen] = useState(false);
   return (
     <Stack h="100%" px="sm" gap={2} justify="center">
     <Group justify="space-between" gap="xs" wrap="nowrap">
@@ -192,6 +209,9 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
             >
               {copied ? "✓ Copied share link" : "Copy share link"}
             </Menu.Item>
+            <Menu.Item onClick={() => setTargetsOpen(true)} data-testid="btn-targets">
+              {TARGETS.label}
+            </Menu.Item>
             <Menu.Divider />
             <Box px="sm" py={6}>
               <Switch
@@ -236,6 +256,7 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
         examples={augmentedExamplesList}
         onCreateFromExample={createWorkspaceFromExample}
       />
+      <TargetsDrawer ctx={ctx} opened={targetsOpen} onClose={() => setTargetsOpen(false)} />
     </Group>
     <PipelineDots ctx={ctx} />
     </Stack>

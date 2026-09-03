@@ -440,3 +440,60 @@ export const USED_BY = {
   label: "Used by",
   none: "Nothing references this construct.",
 } as const;
+
+// ---------------------------------------------------------------------------
+// M-T8.23 — targets, sharing, export
+// ---------------------------------------------------------------------------
+
+/** The targets drawer — the deployables and the three axes it edits. */
+export const TARGETS = {
+  label: "Targets",
+  title: "Deployment targets",
+  intro:
+    "Every deployable this file declares, and the stack it generates against. Changing one rewrites its clause in the source and regenerates.",
+  platform: "Platform",
+  framework: "Framework",
+  design: "Design pack",
+  none: "This file declares no deployables. Open the file that holds your system, or add one from the Model pane.",
+  unsupported: "Files only — the playground cannot bundle or boot this target in the browser.",
+  readOnly: "This playground is read-only, so targets cannot be changed.",
+  noop: "Already set to that.",
+  failed: (reason: string) => `Could not rewrite the target: ${reason}`,
+} as const;
+
+/** The share dialog — what the link carries, and what it does not. */
+export const SHARE = {
+  label: "Share",
+  title: "Share this playground",
+  copy: "Copy link",
+  copied: "Copied",
+  carries: "The link carries your .ddd source, encoded in the URL itself.",
+  omits:
+    "It carries nothing the browser made: no database rows, no generated files, no saved versions, no settings. The recipient generates and boots their own.",
+  viewOnly: "Read-only link",
+  viewOnlyHint:
+    "Opens without the editing chrome and never takes the workspace writer lock — safe to paste into a doc or a chat.",
+  embed: "Embed link",
+  embedHint: "Read-only, and without the bottom dock — sized for an iframe.",
+  noShortener:
+    "There is no link shortener: the playground is a static site with no server, so the source travels in the URL.",
+} as const;
+
+/** Read-only mode, explained ONCE (audit L1 — three surfaces used to explain
+ *  it three ways).  Every surface renders `READ_ONLY.reason[...]` and appends
+ *  nothing of its own. */
+export const READ_ONLY = {
+  reason: {
+    view: "Read-only view — this link opens the source without an editor.",
+    "other-tab": "Another tab owns this workspace, so edits here would fight it.",
+    ephemeral: "This session has no workspace store, so edits cannot be saved.",
+  },
+  /** The short badge every pane shows instead of re-explaining. */
+  badge: "Read-only",
+} as const;
+
+/** The `README.md` the exported ZIP carries at its root. */
+export const EXPORT = {
+  readmeName: "README.md",
+  hint: "The ZIP carries the generated tree plus a README on running it with docker compose.",
+} as const;
