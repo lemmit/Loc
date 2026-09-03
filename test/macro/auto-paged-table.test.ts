@@ -79,7 +79,9 @@ describe("auto-paged table", () => {
     expect(tsx).toContain("taskAll.data.items.map((row) =>");
     // The table and the pager are adjacent siblings; JSX rejects that in a
     // `{cond && ( … )}` slot (TS2657), so the pair is fragment-wrapped.
-    expect(tsx).toMatch(/<><Table[\s\S]*data-testid="pager"[\s\S]*<\/>/);
+    // (the table itself now opens with its own horizontal-scroll container —
+    // the cross-pack table rule in docs/design-packs.md)
+    expect(tsx).toMatch(/<><div className="loom-table-scroll"[\s\S]*<Table[\s\S]*data-testid="pager"[\s\S]*<\/>/);
   });
 
   it("makes simple columns sortable, and leaves computed ones alone", async () => {
