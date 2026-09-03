@@ -37,7 +37,7 @@ const ENABLED = process.env.LOOM_EMBED_E2E_PHOENIX === "1";
 
 function hasDocker(): boolean {
   try {
-    execSync("docker info", { stdio: "pipe", timeout: 15_000 });
+    execSync("docker version --format \"{{.Server.Version}}\"", { stdio: "pipe", timeout: 15_000 });
     return true;
   } catch {
     return false;
