@@ -1,15 +1,14 @@
 import { useState } from "react";
 import {
   ActionIcon,
-  Badge,
   Box,
   Button,
   Group,
   Menu,
+  Stack,
   Switch,
   Text,
   Title,
-  Tooltip,
 } from "@mantine/core";
 import { PackPicker } from "../workspace/PackPicker";
 import { WorkspaceDrawer } from "../workspace/WorkspaceDrawer";
@@ -17,14 +16,15 @@ import { WorkspaceSwitcher } from "../workspace/WorkspaceSwitcher";
 import { WorkspaceTree } from "../workspace/WorkspaceTree";
 import type { LayoutCtx } from "./ctx";
 import { WorkspaceLockBanner } from "./WorkspaceLockBanner";
+import { PipelineDots, PipelineStrip } from "./PipelineStrip";
+import { AUTO_RUN, AUTO_RUN_HINT, RUN } from "./vocabulary";
 
 interface Props {
   ctx: LayoutCtx;
 }
 
-// Desktop header — full toolbar across two `Group`s.  Unchanged from
-// the pre-refactor layout (this is a 1:1 lift to keep desktop stable
-// while we focus on mobile).
+// Desktop header — workspace controls on the left, the pipeline strip on
+// the right.
 export function DesktopHeader({ ctx }: Props): JSX.Element {
   const {
     augmentedExamplesList,
@@ -34,14 +34,6 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
     workspace,
     buildClient,
     scheduleAutoGenerate,
-    runGenerate,
-    runBundle,
-    pipeline,
-    errorCount,
-    warningCount,
-    liveMode,
-    setLiveMode,
-    generateSuccess,
   } = ctx;
   return (
     <Group h="100%" px="md" justify="space-between" wrap="wrap" gap="xs">
@@ -81,72 +73,17 @@ export function DesktopHeader({ ctx }: Props): JSX.Element {
         />
         <WorkspaceTree workspaceStore={workspace.store} buildClient={buildClient} />
       </Group>
-      <Group gap="xs" wrap="wrap">
-        {/* Disabled buttons swallow pointer events, so the tooltip that
-            explains WHY they are disabled has to sit on a wrapper. */}
-        <Tooltip
-          label={`Fix the ${errorCount} error${errorCount === 1 ? "" : "s"} in your source first (Output → Problems).`}
-          disabled={errorCount === 0}
-          withArrow
-        >
-          <Box component="span">
-            <Button
-              size="xs"
-              onClick={runGenerate}
-              loading={pipeline.generating}
-              disabled={errorCount > 0}
-              variant="filled"
-              data-testid="btn-generate"
-            >
-              Generate
-            </Button>
-          </Box>
-        </Tooltip>
-        <Tooltip
-          label="Generate first — Bundle compiles the generated backend and frontend."
-          disabled={!!generateSuccess && generateSuccess.files.length > 0}
-          withArrow
-        >
-          <Box component="span">
-            <Button
-              size="xs"
-              onClick={runBundle}
-              loading={pipeline.bundling}
-              disabled={!generateSuccess || generateSuccess.files.length === 0}
-              variant="default"
-              data-testid="btn-bundle"
-            >
-              Bundle
-            </Button>
-          </Box>
-        </Tooltip>
-        {/* Neutral (grey) at zero: a red "0 errors" badge is a permanent
-            false alarm; colour should only appear when there is something
-            to look at. */}
-        <Badge color={errorCount > 0 ? "red" : "gray"} variant={errorCount > 0 ? "filled" : "light"} size="sm">
-          {errorCount} error{errorCount === 1 ? "" : "s"}
-        </Badge>
-        <Badge color={warningCount > 0 ? "yellow" : "gray"} variant={warningCount > 0 ? "filled" : "light"} size="sm">
-          {warningCount} warning{warningCount === 1 ? "" : "s"}
-        </Badge>
-        <Switch
-          size="xs"
-          checked={liveMode}
-          onChange={(e) => setLiveMode(e.currentTarget.checked)}
-          label="Live"
-          data-testid="live-mode"
-          title="When on, edits cascade Generate → Bundle → Boot automatically."
-        />
-      </Group>
+      {/* The pipeline strip IS the Generate / Bundle / Boot controls plus
+          their state — one widget on both shells (audit H1). */}
+      <PipelineStrip ctx={ctx} />
     </Group>
   );
 }
 
-// Mobile header — single 48 px row.  Logo + example picker on the
-// left, primary "Run" button + kebab menu on the right.  Everything
-// secondary (Bundle, Share, Pack import, Workspace, Live mode toggle,
-// error/warning counts) collapses into the menu so the row never
-// wraps to a second line.
+// Mobile header — a 48 px row (workspace button, primary **Run**, kebab)
+// plus the pipeline strip as four labelled dots under it.  Everything
+// secondary (Share, Pack import, Workspace tree, the auto-run toggle)
+// collapses into the menu so the top row never wraps.
 export function MobileHeader({ ctx }: Props): JSX.Element {
   const {
     augmentedExamplesList,
@@ -157,13 +94,10 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
     buildClient,
     scheduleAutoGenerate,
     runFull,
-    runBundle,
     pipeline,
     errorCount,
-    warningCount,
     liveMode,
     setLiveMode,
-    generateSuccess,
   } = ctx;
   // Spans Generate → Bundle → Boot.  Without it the spinner only
   // showed during the (often instant) Generate step, leaving the
@@ -173,7 +107,8 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
   const runLoading = pipeline.generating || pipeline.bundling || pipeline.booting;
   const [wsDrawerOpen, setWsDrawerOpen] = useState(false);
   return (
-    <Group h="100%" px="sm" justify="space-between" gap="xs" wrap="nowrap">
+    <Stack h="100%" px="sm" gap={2} justify="center">
+    <Group justify="space-between" gap="xs" wrap="nowrap">
       <Group gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
         <Title order={6} style={{ flexShrink: 0 }}>Loom</Title>
         {/* Workspaces are the primary concept on mobile too: a single
@@ -216,7 +151,7 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
           px={12}
           title="Generate → Bundle → Boot in one tap, then jump to Preview."
         >
-          Run
+          {RUN}
         </Button>
         <Menu shadow="md" position="bottom-end" withinPortal>
           <Menu.Target>
@@ -227,23 +162,8 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
             </ActionIcon>
           </Menu.Target>
           <Menu.Dropdown>
-            <Menu.Label>
-              <Group gap={6}>
-                <Badge color={errorCount > 0 ? "red" : "gray"} variant={errorCount > 0 ? "filled" : "light"} size="xs">
-                  {errorCount} error{errorCount === 1 ? "" : "s"}
-                </Badge>
-                <Badge color={warningCount > 0 ? "yellow" : "gray"} variant={warningCount > 0 ? "filled" : "light"} size="xs">
-                  {warningCount} warning{warningCount === 1 ? "" : "s"}
-                </Badge>
-              </Group>
-            </Menu.Label>
-            <Menu.Item
-              onClick={runBundle}
-              disabled={!generateSuccess || generateSuccess.files.length === 0}
-              data-testid="btn-bundle"
-            >
-              {pipeline.bundling ? "Bundling…" : "Bundle"}
-            </Menu.Item>
+            {/* Bundle is not offered here — Run covers it (audit M3); the
+                strip's dots under the row carry the per-stage state. */}
             <Menu.Item
               onClick={copyShareLink}
               data-testid="btn-share"
@@ -256,11 +176,11 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
                 size="sm"
                 checked={liveMode}
                 onChange={(e) => setLiveMode(e.currentTarget.checked)}
-                label="Live mode"
+                label={AUTO_RUN}
                 data-testid="live-mode"
               />
               <Text size="xs" c="dimmed" mt={4}>
-                Edits cascade Generate → Bundle → Boot automatically.
+                {AUTO_RUN_HINT}
               </Text>
             </Box>
             <Menu.Divider />
@@ -292,5 +212,7 @@ export function MobileHeader({ ctx }: Props): JSX.Element {
         onCreateFromExample={createWorkspaceFromExample}
       />
     </Group>
+    <PipelineDots ctx={ctx} />
+    </Stack>
   );
 }

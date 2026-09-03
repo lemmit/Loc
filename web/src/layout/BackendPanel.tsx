@@ -16,6 +16,7 @@ import { PlainJsonBody } from "../backend/PlainJsonBody";
 import { LazyJsonBodyEditor } from "./lazy-panels";
 import { SqlConsole } from "../backend/SqlConsole";
 import { CUSTOM_ENDPOINT, groupEndpointsByTag } from "../backend/openapi";
+import { nextStepMid, RUNTIME_STATUS, STAGE } from "./vocabulary";
 
 interface Props {
   ctx: LayoutCtx;
@@ -29,25 +30,34 @@ interface Props {
 // Lifted out so both shells can reuse it: desktop renders it inside
 // a Group beside the "Runtime" label, mobile renders it in a banner
 // above the form body (Mantine Tabs.List only holds the labels).
+// On desktop the Boot button lives on the header's pipeline strip
+// (`btn-boot` there — M-T8.16); mobile has no strip buttons, so the
+// banner keeps it.
 export function BackendHeader({ ctx }: Props): JSX.Element {
-  const { pipeline, ddl, honoBundle, runBoot } = ctx;
+  const { isDesktop, pipeline, ddl, honoBundle, runBoot } = ctx;
   return (
     <Group gap="xs" wrap="wrap" justify="flex-end">
       {ddl ? (
-        <Badge size="xs" color="green" variant="light" data-testid="backend-status">booted</Badge>
+        <Badge size="xs" color="green" variant="light" data-testid="backend-status">
+          {RUNTIME_STATUS.booted}
+        </Badge>
       ) : (
-        <Badge size="xs" color="gray" variant="light" data-testid="backend-status">offline</Badge>
+        <Badge size="xs" color="gray" variant="light" data-testid="backend-status">
+          {RUNTIME_STATUS.offline}
+        </Badge>
       )}
-      <Button
-        size="xs"
-        onClick={runBoot}
-        loading={pipeline.booting}
-        disabled={!honoBundle}
-        variant="default"
-        data-testid="btn-boot"
-      >
-        {ddl ? "Reboot" : "Boot"}
-      </Button>
+      {!isDesktop && (
+        <Button
+          size="xs"
+          onClick={runBoot}
+          loading={pipeline.booting}
+          disabled={!honoBundle}
+          variant="default"
+          data-testid="btn-boot"
+        >
+          {ddl ? "Reboot" : STAGE.boot}
+        </Button>
+      )}
     </Group>
   );
 }
@@ -310,10 +320,8 @@ export function BackendBody({ ctx }: Props): JSX.Element {
       ) : (
         <Text size="xs" c="dimmed">
           {honoBundle
-            ? "Click Boot to start the generated API and an in-browser Postgres. You can then call endpoints and run SQL here."
-            : isDesktop
-              ? "Generate, then Bundle, to enable Boot — the runtime runs the bundled backend."
-              : "Tap Run to generate, bundle and boot the backend."}
+            ? `${isDesktop ? `Click ${STAGE.boot}` : nextStepMid("boot", false)} to start the generated API and an in-browser Postgres. You can then call endpoints and run SQL here.`
+            : `${nextStepMid("boot", isDesktop)} to start the generated API and an in-browser Postgres.`}
         </Text>
       )}
     </Box>
