@@ -233,3 +233,63 @@ Found 2026-08-30 by the targets-completeness audit (`F2-SEED-EVENTSOURCED`), gat
 **Verification when it lands.** The `test/language/seed.test.ts` negative case flips to a positive one on all five; a behavioural leg that seeds a stream and reads the folded balance back; mutation-proved per backend.
 
 Sources: [targets-completeness-2026-08-30](../audits/targets-completeness-2026-08-30.md) `F2-SEED-EVENTSOURCED`, ledger.json. Touches the seed emitters only — sequence against any other seed-path work.
+
+## M-T6.53 — Two single-backend emitter bugs: non-importable python api-clients, non-compiling elixir block functions — `open` · **S** · P1 ⚠ verify-first
+
+Found 2026-09-03 by the language-docs audit ([F7](../audits/2026-09-03-language-docs-audit-findings.md), [F8](../audits/2026-09-03-language-docs-audit-findings.md), both P0). `src/generator/python/api-client.ts:88` appends `| None` to an already-optional rendered type and never imports `FileRef`, so a `File?` field through an api resource emits `spec: FileRef | None | None` inside a `pydantic.BaseModel` in `app/resources/api_clients.py` — an undefined name at import time. And `bodyUsesParam` (`src/generator/elixir/vanilla/function-emit.ts:162`) misses a parameter read only inside a `let`, underscoring the head (`def fee(%Order{} = record, _q)`) while the body reads `q`.
+
+**The fix:** one `| None` and a `FileRef` import on the python side; teach `bodyUsesParam` to see reads nested in `let` bindings on the elixir side. Independent files, one packet only because both are one-liners.
+
+**Verification when it lands.** Both generated projects compile (`ruff`/`mypy` and `mix compile --warnings-as-errors`); each fix mutation-proved by file-copy revert.
+
+Sources: [language-docs-audit-2026-09-03](../audits/2026-09-03-language-docs-audit-findings.md) F7/F8, [wave plan](../audits/2026-09-03-language-docs-audit-findings.waves.md) packet **W1.3**.
+
+## M-T6.54 — Java ignores `ignoring` for principal filters, and renders a guarded invariant on the wire without its guard — `open` · **M** · P1 ⚠ verify-first
+
+Found 2026-09-03 by the language-docs audit ([F18](../audits/2026-09-03-language-docs-audit-findings.md), [F19](../audits/2026-09-03-language-docs-audit-findings.md), both P2). `jpqlWhere` (`src/generator/java/emit/repository.ts:361-392`) ANDs `principalClause` unconditionally with no `bypassAll`/`bypassCaps` check (`bypassAll` appears only at `:637`, the impl-side Hibernate wrapper), so both `find allRows(): Order[] ignoring *` and `ignoring tenantScoped` still emit `where (e.tenantId = :#{@currentUserAccessor.user()?.tenantId()})` — node/python/elixir drop the conjunct and dotnet emits `IgnoreQueryFilters`. It contradicts the comment at `src/generator/java/capability-filter.ts:26-29`, which claims parity with node. The fail-direction is safe (Java over-restricts rather than leaking), which is why this is not a Wave-1 packet — but the same `.ddd` returns a different row set on Java, and an operator reading the docs would conclude the bypass took effect. Separately, `buildChecks` (`src/generator/java/emit/validator.ts:366-395`) calls `renderJavaExpr(inv.expr, …)` with no `!(guard) ||` implication, which node/.NET/python all emit: `invariant note.length > 0 when taxRate > 0` becomes unconditional, so Java 422-rejects a request that is legal when `taxRate == 0`.
+
+**The fix:** `jpqlWhere` honours the find's `bypassAll`/`bypassCaps`; the wire validator emits the implication the other backends emit. Correct the stale parity comment in `capability-filter.ts` in the same PR.
+
+**Verification when it lands.** Generator tests asserting the *absence* of the principal conjunct under each bypass spelling (a presence-only assertion cannot see a retained conjunct) and the presence of the guard implication; both mutation-proved by file-copy revert.
+
+Sources: [language-docs-audit-2026-09-03](../audits/2026-09-03-language-docs-audit-findings.md) F18/F19, [wave plan](../audits/2026-09-03-language-docs-audit-findings.waves.md) packet **W5.1** (first in its wave — the one row there with a behavioural consequence). Sibling of M-T6.51 (the node document-find twin of the same "bypass silently retained" shape).
+
+## M-T6.55 — Phoenix drops a part-level `check`, a guarded single-field invariant, and a private-operation call — `open` · **M** · P1 ⚠ verify-first
+
+Found 2026-09-03 by the language-docs audit ([F14](../audits/2026-09-03-language-docs-audit-findings.md), [F15](../audits/2026-09-03-language-docs-audit-findings.md), [F24](../audits/2026-09-03-language-docs-audit-findings.md); P1/P1/P2). Three silent under-enforcements on one backend: `entity Line { qty: int check qty > 0 }` produces a `changeset/2` that only `cast`s `[:sku, :qty]` with no `validate_number` (root-level `check`/`invariant` do emit one, and node/dotnet/java/python all enforce the part-level form); a guarded single-field invariant is excluded by both `residualInvariants` (`src/generator/elixir/vanilla/changeset-invariant-emit.ts`) and the native path in `changeset-emit.ts`, so nothing enforces it; and a private-operation call renders `_ = nil  # vanilla: bare call to 'recompute' (no callable target); record unchanged` — compile-clean, behaviourally absent, signalled only by a comment in generated code.
+
+**The fix:** each either enforces or raises a `loom.*` code. F24's comment-only degrade is not an acceptable resting state — a comment in emitted output is not a diagnostic.
+
+**Verification when it lands.** A changeset test per shape plus a behavioural leg that submits the value the rule should reject; each mutation-proved by file-copy revert.
+
+Sources: [language-docs-audit-2026-09-03](../audits/2026-09-03-language-docs-audit-findings.md) F14/F15/F24, [wave plan](../audits/2026-09-03-language-docs-audit-findings.waves.md) packet **W5.2**. Relates to M-T6.2 (the vanilla-Phoenix gap register — the same "silent fallthrough vs honest gate" discipline).
+
+## M-T6.56 — Phoenix wire and HEEx divergences: a dropped `derived`, a `:map` value-object column, `Image`/`Icon`/`WorkflowForm` — `open` · **M** · P2 ⚠ verify-first
+
+Found 2026-09-03 by the language-docs audit ([F16](../audits/2026-09-03-language-docs-audit-findings.md), [F20](../audits/2026-09-03-language-docs-audit-findings.md), [F22](../audits/2026-09-03-language-docs-audit-findings.md), [F23](../audits/2026-09-03-language-docs-audit-findings.md); P1/P2). `derivedRenderable` (`src/generator/elixir/vanilla/wire-serialize.ts`) omits a `derived` that reads another `derived` from `serialize/1` while the other four backends ship it — a wire-shape divergence with no gate. On the HEEx side, `renderImage` (`src/generator/elixir/heex-primitives.ts:1510`) and `renderIcon` (`:2151`) read only a named `src:` / a `svg:` literal, ignoring the positional spelling every other target renders (`Image { "/logo.png", alt: … }` emits `<img alt>` with no `src`; `Icon { name: "check" }` an empty span), and the HEEx `WorkflowForm` emits a single `<.input field={@form[:_placeholder]}>` (`heex-primitives.ts:388`) where React emits the real field set.
+
+**The fix:** wire parity for the derived-reading-derived case; the positional spellings and the real workflow param set on HEEx. **F20 may be a DECISION, not a defect** — `total: Money` produces `total_amount` + `total_currency` on node/dotnet/java/python and `add :total, :map` on Ecto, contradicting the "one DDL for everyone" invariant; establish which it is before touching the migration emitter, since the reference chapter already carries it as an honest gap.
+
+**Verification when it lands.** A wire-golden covering the derived chain; per-primitive HEEx tests for the positional spelling and the workflow field set; each mutation-proved by file-copy revert.
+
+Sources: [language-docs-audit-2026-09-03](../audits/2026-09-03-language-docs-audit-findings.md) F16/F20/F22/F23, [wave plan](../audits/2026-09-03-language-docs-audit-findings.waves.md) packet **W5.3**. Relates to M-T1.26 (the `Image`/`Avatar` `src:`/`alt:` slots on the JSX targets — same primitives, other side).
+
+## M-T6.57 — `envelope` means something different on each of the five backends — scope it before fixing it — `open` (scoping only) · **S** · P2 ⚠ verify-first
+
+Found 2026-09-03 by the language-docs audit ([F21](../audits/2026-09-03-language-docs-audit-findings.md), P2). The repository layer carries `Envelope<T>` on dotnet and java; node/dotnet/java/python routes return the bare response; elixir's controller returns a JSON array. Five targets, no agreed meaning.
+
+**This is NOT a fix mission.** "Five-way inconsistent" is a parity question, not a bug with a known answer: hand it to the `parity-auditor` skill for the who-emits-what matrix and a decision on what `envelope` *should* mean, then file the fix as its own mission. Do not let an agent guess the intended semantics.
+
+**Verification when it lands.** The matrix, the decision recorded where the carrier is documented, and a successor mission ID for the emitter work.
+
+Sources: [language-docs-audit-2026-09-03](../audits/2026-09-03-language-docs-audit-findings.md) F21, [wave plan](../audits/2026-09-03-language-docs-audit-findings.waves.md) packet **W5.4** (`fileTrees: []` — scoping only). Relates to M-T6.14 (DEBT-08 `envelope` carrier, deferred there for "no live use" — this is the evidence that the carrier is not inert).
+
+## M-T6.58 — `handle` and named `create` are lowered, test-pinned and promised by a diagnostic — but no backend emits an entry point — `open` · **L** · P1 ⚠ verify-first, route to `language-feature-developer`
+
+Found 2026-09-03 by the language-docs audit ([F13](../audits/2026-09-03-language-docs-audit-findings.md), P1) — the only finding in the register that is a *missing feature* rather than a defect. `src/ir/lower/lower-workflow.ts:124-174` fills `WorkflowIR.handlers`/`.creates`, `test/ir/workflow-handle.test.ts` pins the lowering, and `loom.duplicate-handler` (`src/diagnostics/messages.ts:310`) promises that a `route -> Ctx.<handle>` is meaningful — yet no emitter reads `wf.handlers`. A workflow with `handle retry(...)` plus `api { route POST "/fulfil/retry" -> C.retry }` produces no route on node or dotnet, and no routes file at all.
+
+**Two honest outcomes:** emit the entry points on all five backends, or gate the declaration and correct `loom.duplicate-handler`'s message. Which one is a design decision with user sign-off, not a fix an agent picks — route it through the `language-feature-developer` skill rather than into a drain wave.
+
+**Verification when it lands.** Whichever end: a route-emission test per backend plus a behavioural leg that POSTs the handler route, or a negative validator test with the corrected message; mutation-proved either way.
+
+Sources: [language-docs-audit-2026-09-03](../audits/2026-09-03-language-docs-audit-findings.md) F13, [wave plan](../audits/2026-09-03-language-docs-audit-findings.waves.md) packet **W6.1** (`route: language-feature-developer`). Relates to M-T5.8 (lifecycle-operation route emission — the same "declared entry point, no route" axis).

@@ -3,42 +3,97 @@
 Loom is a high-descriptive DSL for **Domain-Driven Design**.  A `.ddd`
 source describes one or more bounded contexts, each containing the
 familiar DDD primitives — aggregates, value objects, enums, events,
-repositories — with strongly-typed invariants, operations, and a small
-expression language.
+repositories, projections, workflows, policies — with strongly-typed
+invariants, operations, and a small expression language.
 
 This document defines the language formally.  For the architectural
-view (AST → IR → templates) see [`technical.md`](technical.md); for CLI
+view (AST → IR → emitters) see [`technical.md`](technical.md); for CLI
 and tooling see [`tools.md`](tools.md).
 
 ---
 
 ## Lexical structure
 
-- **Comments**: `// line` and `/* block */`.
-- **Identifiers**: `[A-Za-z_][A-Za-z0-9_]*`.  Case-sensitive.
-- **String literals**: double-quoted, standard backslash escapes.
+- **Comments**: `// line` and `/* block */` (hidden terminals — never reach
+  the AST).
+- **Identifiers**: `ID` is `/[_a-zA-Z][\w_]*/`.  Case-sensitive, ASCII-word.
+  One lexical gotcha: the `TRACE_ID` terminal (`US-001`, `AC-12` — used by
+  `requirement` / `testCase` / `verifies`) is tried before `ID`, so an
+  **unspaced** `x-1` lexes as a trace id, not a subtraction.  House style
+  spaces binary operators (`x - 1`), which sidesteps it.
+- **String literals**: `STRING` is `/"(\\.|[^"\\])*"/` — double-quoted,
+  standard backslash escapes.  Langium strips the delimiters (`"USD"`
+  arrives as the 3-char `USD`); emitters re-quote.
+- **Interpolated strings**: backtick-delimited `` `Order {n}` `` with `{expr}`
+  holes and an optional ICU format suffix per hole — see
+  [String interpolation](#string-interpolation).
 - **Number literals**: `INT` (`/[0-9]+/`) and `DECIMAL` (`/[0-9]+\.[0-9]+/`).
+  `money("10.50")` is the precise-decimal literal (a `STRING` argument).
+- **Duration literal** `DURATION` (`/[0-9]+(ms|s|m|h|d)/`, e.g. `15s`) is
+  accepted **only** as a `timerSource`'s `every:` cadence.  In expressions a
+  span is built by the `days(n)` / `hours(n)` / `minutes(n)` constructors
+  instead — see [Temporal arithmetic](#temporal-arithmetic).
 - **Whitespace** and comments are ignored between tokens.
-- **Member separators are not uniform** across constructs — a known wart
-  (tracked for grammar reconciliation):
-  - `aggregate` / `entity` members are **newline-separated**; a comma is
-    rejected (`Expecting token of type '}' but found ','`).
-  - `event` members accept **either** commas or newlines.
-  - `deployable` fields are normally comma-separated, but once a field uses
-    the **brace api-binding form** (`ui: Board { Work: api }`) the trailing
-    comma is rejected — switch that deployable to newline-separated fields.
+- **Member separators**: `aggregate` / `entity` / `valueobject` members are
+  **newline-separated** — a comma is rejected (`Expecting token of type '}'
+  but found ','`).  `event` fields, `enum` values, and every clause-style
+  block (`deployable`, `resource`, `storage`, `ui: X { … }` bindings, …)
+  accept commas **or** newlines.  When in doubt, **use newlines**: they are
+  accepted everywhere.
 
-  When in doubt, **use newlines**: they are accepted everywhere.
+#### Keywords — hard vs. soft
 
-Reserved keywords:
+Loom keeps the *hard*-reserved set to declaration heads, type names and
+expression keywords (`context`, `aggregate`, `entity`, `event`, `repository`,
+`find`, `where`, `derived`, `invariant`, `unique`, `function`, `operation`,
+`create`, `destroy`, `apply`, `precondition`, `requires`, `emit`, `let`,
+`return`, `for`, `in`, `if`, `match`, `else`, `expect`, `test`, `when`,
+`extends`, `abstract`, `private`, `extern`, `audited`, `mask`, `unless`,
+`true`, `false`, `null`, `this`, `now`, `id`, `Self`, and the primitive
+type names `int long decimal money string bool datetime guid json File`,
+plus the system-level heads — `system`, `subdomain`, `deployable`,
+`storage`, `api`, `ui`, `component`, `theme`, `user`,
+`auth`, `policy`, `projection`, `workflow`, `capability`, `seed`,
+`criterion`, `domainService`, `commandHandler`, `queryHandler`, `channel`,
+`channelSource`, `timerSource`, `requirement`, `solution`, `testCase`,
+`layout`, `import`).  None of these can name a **field**; a handful
+(`api`, `ui`, `component`, `policy`, `id`, `contains`, `permissions`,
+`create`, `destroy`) are nonetheless admitted as parameter / argument
+names or bare expression refs by the per-rule extras described next.
 
-```
-context  enum  valueobject  aggregate  entity  contains  ids
-event  repository  for  find  where
-derived  invariant  when  function  operation  private
-precondition  emit  let  expect  test  new
-true  false  null  this  id
-int  long  decimal  money  string  bool  datetime  guid  json
+Everything else that acts as a keyword *somewhere* is a **soft keyword** —
+reserved only where its own rule begins, and admitted as an ordinary
+identifier elsewhere.  The grammar factors the shared set into one rule,
+`CommonSoftKeywords` (`state`, `kind`, `payload`, `command`, `query`,
+`response`, `error`, `paged`, `envelope`, `option`, `or`, `money`,
+`parent`, `title`, `body`, `sort`, `select`, `join`, `group`, `filter`,
+`stamp`, `store`, `schema`, `ttl`, `use`, `write`, `migration`, `tenancy`,
+`immutable` / `managed` / `token` / `internal` / `secret`, …), composed
+into every *value* position: a field name (`Property.name`), a parameter /
+argument / clause name (`LooseName`), a bare reference in an expression
+(`NameRefIdent`), an assignment target (`LValueIdent`) and a member name
+after `.`.  Each of those rules adds a few position-specific extras — for
+example `await` is admissible as a **field** / parameter name but not as a
+bare expression ref (it is the `match await` marker there); `api`, `route`,
+`component`, `menu`, `section`, `link`, `targets`, `framework`, `design`,
+`ui`, `page` … are admissible as parameter / argument names and expression
+refs but — apart from `page` — **not** as field names (`aggregate Order {
+route: string }` is a parse error); `of`, `allow`, `deep`, `global`,
+`policy`, `persistence` are soft only as parameter / clause names.  The source of
+truth is the rule set in `src/language/ddd.langium`, pinned by
+`test/language/keyword-identifier-completeness.test.ts`.
+
+```ddd
+context Orders {
+  aggregate Order {
+    state: string        // page-DSL `state {}` keyword — soft as a field
+    kind: string         // resource clause key — soft as a field
+    payload: string      // context-level `payload` head — soft as a field
+    parent: Order id?    // requirement-hierarchy keyword — soft as a field
+    money: int           // even the primitive-type name is soft as a name
+    write: int           // the policy verb — soft as a field
+  }
+}
 ```
 
 ---
@@ -76,6 +131,17 @@ system Acme {
 
 The two forms can coexist in one file but typically you'd use one or
 the other.
+
+What may sit at the **file root** (grammar `ModelMember`): `system`,
+`subdomain`, `context`, the ambient shared-kernel types (`valueobject`,
+`enum`, `payload`-family records, `component`, expression-form `function`,
+`capability`), a `migration "…" { … }` ledger block, the traceability
+declarations (`requirement` / `solution` / `testCase`), a unit
+`test "…" for <Subject> { … }`, and every deployment-shape member
+(`deployable`, `storage`, `resource`, `channelSource`, `ui`, `layout`,
+`theme`, `user`, `auth`, `api`, `test e2e`) — root-level deployment members
+compose into the project's single `system`, so deployment can live in its
+own file.
 
 ### Multi-file projects: `import` and root-level shared types
 
@@ -126,14 +192,16 @@ Rules:
   `import`).
 - The import graph defines the project.  Files nobody imports are not
   part of the project (no autodiscovery).
-- **`valueobject`, `enum`, and `component` may appear at the model root.**
-  They form an implicit shared kernel — visible workspace-wide from every
-  importing file.  Value objects and enums resolve into every context's
-  type space; top-level `component` declarations resolve from every page
-  body in every ui in every system (ui-scope components shadow on name
-  collision).  See [`page-metamodel.md`](page-metamodel.md) §5.1.
-- Aggregates, events, repositories, and workflows stay inside
-  a context, as before.
+- **`valueobject`, `enum`, `payload`-family records, `capability`,
+  expression-form `function`, and `component` may appear at the model
+  root.**  They form an implicit shared kernel — visible workspace-wide
+  from every importing file.  Value objects, enums and payloads resolve
+  into every context's type space; top-level `component` declarations
+  resolve from every page body in every ui in every system (ui-scope
+  components shadow on name collision).  See
+  [`page-metamodel.md`](page-metamodel.md) §5.1.
+- Aggregates, events, repositories, projections, workflows, handlers and
+  policies stay inside a context.
 - Cross-context aggregate references are **not** changed by this
   feature.  Today's rule applies: `X id` only resolves to an
   aggregate in the same context.
@@ -154,19 +222,22 @@ preserved at [`plans/multi-file-source.md`](old/plans/multi-file-source.md).
 | Form | Purpose |
 | --- | --- |
 | `subdomain Name { … }` | Groups one or more bounded contexts under a name.  A subdomain is a logical unit; it doesn't directly produce code.  Was named `module` before the D-STORAGE-SPLIT rename. |
-| `deployable name { platform: dotnet\|node\|elixir\|python\|java\|phoenixLiveView, contexts: [A, B], dataSources: [X, Y], port: N, auth: required? }` | A concrete artefact: one project, one HTTP server, one DbContext, listening on `port`.  `contexts:` names which bounded contexts this deployable hosts; `dataSources:` lists the system-scope `resource` decls that route those contexts' persistence (every hosted aggregate must have a matching binding — see the `resource` row below; the clause keyword stays `dataSources:` for compatibility).  Optional `auth: required` enables JWT-decode middleware on this deployable; see [`auth.md`](auth.md). |
-| `deployable name { platform: react, targets: <other-deployable>, port: N }` | A frontend deployable: a Vite-built React + RQ + Zod + Mantine SPA whose API base URL is wired to `targets`'s port.  Hosted contexts are inherited from the target. |
-| `deployable name { platform: svelte, targets: <other-deployable>, port: N }` | The Svelte frontend deployable: a Svelte 5 / SvelteKit static SPA (adapter-static, ssr off) + svelte-query + Zod, rendered against a svelte design pack (`shadcnSvelte` default, or `flowbite`).  Same contract as `react` — `targets:` a backend, inherits its contexts. |
-| `deployable name { platform: vue, targets: <other-deployable>, port: N }` | A Vue 3 frontend deployable: a Vite-built vue-router + vue-query + Zod SPA (design packs `vuetify` / `shadcnVue`), same `targets:` contract as `react`. |
-| `deployable name { platform: angular, targets: <other-deployable>, port: N }` | An Angular SPA frontend deployable (angularMaterial design pack), same `targets:` contract as `react`. |
+| `deployable name { platform: dotnet\|node\|elixir\|python\|java, contexts: [A, B], dataSources: [X, Y], port: N, … }` | A **backend** deployable: one project, one HTTP server, one DbContext, listening on `port`.  `contexts:` names which bounded contexts this deployable hosts; `dataSources:` lists the system-scope `resource` decls that route those contexts' persistence (every hosted aggregate must have a matching binding — see the `resource` row below; the clause keyword stays `dataSources:` for compatibility).  Further clauses, all order-independent: `serves: <Api>` (which api contracts it exposes), `channels: [<channelSource>, …]` (broker bindings — [`channels.md`](channels.md)), `ui: <Ui>` / `ui: <Ui> { Param: <deployable>, … }` (mount a UI on a fullstack host — `elixir` renders it as HEEx, `dotnet` / `java` embed a SPA), `hosts: [...]`, `auth: required` (JWT-decode middleware + verifier seam — [`auth.md`](auth.md)), `design: <pack>`, `favicon: "…"`.  `platform:` accepts a bareword or a quoted `"family@version"` pin (`"node@v4"`), optionally followed by a **realization block** `{ persistence: …, directoryLayout: … }` — the only two axes that remain (see [Deployable platforms](#deployable-platforms)). |
+| `deployable name { platform: react\|vue\|svelte\|angular\|feliz\|flutter, targets: <backend>, ui: <Ui>, port: N }` | A **frontend** deployable.  `targets:` names the backend whose API base URL it is wired to and whose hosted contexts it inherits; a `ui:` binding is **required** (every page flows through the page metamodel — `ui Web with scaffold(subdomains: [...]) { }` is the bulk-CRUD shape).  The four static-bundle hosts (react / vue / svelte / angular) render a `ui` of any of those four `framework:`s; `feliz` (F#/Fable/Elmish) and `flutter` (Dart/Riverpod) host only their own.  Optional `auth: ui` mounts the login redirect + route guard under a system `auth { … }`. |
 | `context Name { … }` | Allowed directly inside a system; treated as if it were in an implicit `_default` subdomain. |
-| `test e2e "name" against <deployable> { … }` | End-to-end test that runs against the named deployable's HTTP API; lowers to a vitest file at the system output root. |
-| `user { id: string, role: string, … }` | System-wide JWT-claim shape decoded by the verifier hook.  At most one per system; required when any deployable opts in via `auth: required`.  The `currentUser` magic identifier in operation / workflow expressions is typed against this shape.  See [`auth.md`](auth.md). |
-| `theme { primary: "#…", radius: "md", … }` | System-wide visual identity — design tokens consumed by every frontend (react, vue, svelte, angular) and Phoenix LiveView deployable in this system.  At most one per system.  Colour properties (`primary`, `secondary`, `accent`, `success`, `warning`, `error`, `neutral`) accept CSS hex values (`#RGB` / `#RRGGBB` / `#RRGGBBAA`).  `radius` is one of `none / sm / md / lg / xl`.  `fontFamily` and `fontFamilyMono` are free-form strings.  `colorScheme` is `light / dark / auto`.  Unknown property names and invalid values are validator errors. |
-| `api Name from <Subdomain>` | First-class API contract derived from a subdomain's domain (aggregates expose `all / byId / create / update / delete`, repositories expose their finds, workflows expose mutations).  Backend deployables `serves:` an api; UIs reference one via `api X: <ApiName>` parameters.  See [`architecture.md`](architecture.md). |
-| `storage Name { type: postgres\|redis\|kafka\|s3\|rabbitmq\|restApi\|… }` | Typed physical store / service reusable across deployables.  `type:` names the built-in **sourceType** that realizes it.  v0 fully supports `postgres`; object-store / queue / external-api types (`s3`, `rabbitmq`, `restApi`) activate dev-compose sidecars + client emission; the rest parse but don't activate generator output.  Optional `config { k: v }` map for vendor parameters (region, bucket, vhost, …).  See [`resources.md`](resources.md). |
-| `resource Name { for: <Ctx>, kind: <k>, use: <storage>, … }` | The configured binding (renamed from `dataSource`) from a bounded context's data of kind `state` / `eventLog` / `snapshot` / `cache` / `replica` / `objectStore` / `queue` / `api` to a physical `storage`.  Optional knobs: `schema`, `tablePrefix`, `keyPrefix`, `ttl`, `every`, `retain`, `isolationLevel`, `readonly`, `shape`, `config { … }`.  Every backend deployable hosting an aggregate must list a matching `resource` under its `dataSources:` field.  See [`resources.md`](resources.md) for the full model (sourceTypes, kinds, capabilities, interfaces) and workflow-level consumption. |
-| `ui Name { … }` | Block of pages, components, menu, and api parameters that a deployable binds via `ui:`.  See [`page-metamodel.md`](page-metamodel.md). |
+| `test e2e "name" against <deployable> [verifies <TestCase>] { … }` | End-to-end test that runs against the named deployable — HTTP (vitest + fetch) for a backend, Playwright page objects for a frontend; lowers to `<system>/e2e/<System>.e2e.test.ts` / `<frontend>/e2e/<System>.ui.spec.ts`.  See [End-to-end tests](#end-to-end-tests-against-a-deployable). |
+| `user { id: string, role: string, … }` | System-wide JWT-claim shape decoded by the verifier hook.  At most one per system; required when any deployable opts in via `auth: required` and by an `auth { … }` block (`loom.auth-without-user`).  The `currentUser` magic identifier in operation / workflow / find / projection expressions is typed against this shape.  See [`auth.md`](auth.md). |
+| `auth { provider: …, oidc { issuer: …, clientId: … }, sessions: cookie\|jwt, claims: { … }, enforcement: denyByDefault\|opt }` | System-wide OIDC configuration: who issues the token and how its claims map onto the `user { … }` shape.  At most one per system; needs a `user` block.  Generates the token verifier + `/auth/*` handshake (PKCE, refresh rotation).  See [`auth.md`](auth.md). |
+| `tenancy by user.<claim> of <RegistryAggregate>` | Multi-tenant partitioning: names the claim that partitions data and the aggregate that is the tenant registry.  Pairs with the `tenantOwned` / `tenantRegistry` capabilities, the per-aggregate `crossTenant` marker and the `policy { allow deep\|global … }` ladder; every aggregate must take an explicit stance (`loom.tenancy-stance-unmarked`).  See [`tenancy.md`](tenancy.md). |
+| `theme { primary: "#…", radius: "md", … }` | System-wide visual identity — design tokens consumed by the react / vue / svelte / angular frontends and the Phoenix LiveView shell (feliz and flutter render their own toolkit defaults and ignore it).  At most one per system.  Colour properties (`primary`, `secondary`, `accent`, `success`, `warning`, `error`, `neutral`) accept CSS hex values (`#RGB` / `#RRGGBB` / `#RRGGBBAA`).  `radius` is one of `none / sm / md / lg / xl`.  `fontFamily` and `fontFamilyMono` are free-form strings.  `colorScheme` is `light / dark / auto`.  Unknown property names and invalid values are validator errors. |
+| `api Name [with …] from <Subdomain> [{ urlStyle: literal\|resource, <statuses>, <routes> }]` | First-class API contract derived from a subdomain's domain (aggregates expose `all / byId / create / update / delete`, repositories expose their finds, workflows expose mutations).  Backend deployables `serves:` an api; UIs reference one via `api X: <ApiName>` parameters; the optional body adds `httpStatus <Error> -> <code>` mappings and hand-written routes (`route GET\|POST\|PUT\|PATCH\|DELETE "/path" -> <handler>`) over `commandHandler` / `queryHandler` declarations.  See [`architecture.md`](architecture.md). |
+| `storage Name { type: <sourceType>, connection: env("…")\|service(x)\|secret(x)\|literal("…"), config: { k: v } }` | Typed physical store / service reusable across deployables.  `type:` names the built-in **sourceType**: relational `postgres` / `mysql` / `sqlite` / `inMemory`, `redis`, search `elastic` / `meilisearch`, `kafka`, `clickhouse` / `bigquery`, object stores `s3` / `localDisk`, queues `rabbitmq` / `nats`, `restApi`, mailers `smtp` / `ses` / `sendgrid`.  `postgres` is the fully-supported state store; the others activate dev-compose sidecars + client emission per the kind × sourceType matrix in [`resources.md`](resources.md). |
+| `resource Name { for: <Ctx>, kind: <k>, use: <storage>\|<api>, … }` | The configured binding (renamed from `dataSource`) from a bounded context's data of kind `state` / `eventLog` / `snapshot` / `cache` / `replica` / `objectStore` / `queue` / `api` / `mailer` to a physical `storage` (or, for `kind: api`, a sibling `api` served in the same system — a typed client).  Optional knobs: `schema`, `tablePrefix`, `keyPrefix`, `ttl`, `every`, `retain`, `isolationLevel`, `readonly`, `shape`, `index: [Entity.col, Entity.(a, b)]`, `config { … }`.  Every backend deployable hosting an aggregate must list a matching `resource` under its `dataSources:` field.  See [`resources.md`](resources.md) for the full model (sourceTypes, kinds, capabilities, interfaces) and workflow-level consumption. |
+| `channelSource Name { for: <channel>, use: <storage> }` / `timerSource Name { for: <Event>, cron: "…" \| every: 15s, in: "<tz>", overlap: allow }` | System-scope transports: a `channelSource` binds a context `channel` to a broker `storage` (redis / rabbitmq / kafka) and is attached to deployables via `channels:` ([`channels.md`](channels.md)); a `timerSource` is a cron / cadence tick that raises the named event into a context (`loom.timer-*`; the target aggregate must be state-based — `loom.timer-needs-state`). |
+| `ui Name [with scaffold(...)] { framework: react\|vue\|svelte\|angular\|feliz\|flutter\|phoenixLiveView, … }` | Block of pages, components, stores, areas, menu, and api / channel parameters that a deployable binds via `ui:`.  See [`page-metamodel.md`](page-metamodel.md). |
+| `layout Name { … }` | A reusable page shell (header / sidebar / footer slots) a `ui` renders through.  See [`page-metamodel.md`](page-metamodel.md). |
+| `capability Name { … }` | A pure mixin (fields — which may be typed `Self id` — plus `filter` / `stamp` contributions) applied to aggregates via `with Name` / `implements Name`; also declarable at file root.  See [`capabilities.md`](capabilities.md). |
+| `function name(params): T = Expr` | An ambient expression-form helper — same rule as at file root; see [Top-level helper functions](#top-level-helper-functions). |
 
 A subdomain (and the bounded contexts it groups) may appear in any
 number of deployables — its code is inlined into each.  For v1 there
@@ -182,34 +253,54 @@ file.
 
 A subdomain body may also include one or more
 `permissions { ... }` blocks declaring typed permission identifiers
-used in operation / workflow expression bodies.  The
-`permissions.<name>` magic identifier lowers to the runtime string
-`<lowercase-subdomain>.<name>`; see [`auth.md`](auth.md).
+used in operation / workflow expression bodies — optionally with an
+`implies` closure (`admin implies [read, write]`;
+`loom.permission-implies-*`).  The `permissions.<name>` magic identifier
+lowers to the runtime string `<lowercase-subdomain>.<name>`; see
+[`auth.md`](auth.md).
 
 #### Deployable platforms
 
 | `platform:` | Stack |
 | --- | --- |
 | `dotnet` | ASP.NET Core + EF Core + Mediator (martinothamar) + Swashbuckle.  Default port 8080. |
-| `node`   | Hono + Drizzle ORM + Zod with `@hono/zod-openapi`.  Default port 3000. |
-| `elixir` / `phoenixLiveView` | Phoenix + Ecto (plain Ecto/Phoenix — the Ash foundation and the `foundation:` axis were removed).  `phoenixLiveView` additionally mounts a HEEx UI (fullstack). |
-| `python` | FastAPI + SQLAlchemy + Pydantic. |
-| `java`   | Spring Boot + JPA + Hibernate. |
-| `react`  | Vite + React Router + React Query + Zod + Mantine + Playwright page objects.  Default port 3001. |
-| `vue`    | Vite + vue-router + vue-query + Zod (design packs `vuetify` / `shadcnVue`). |
-| `svelte` | Svelte 5 / SvelteKit static SPA + svelte-query + Zod (`shadcnSvelte` / `flowbite`). |
-| `angular` | Angular SPA (angularMaterial pack). |
+| `node`   | Hono + Drizzle ORM + Zod with `@hono/zod-openapi` (bareword resolves to the `hono@v5` package; `"node@v4"` pins the previous one).  Default port 3000. |
+| `elixir` | Phoenix + plain Ecto (the Ash foundation was removed).  A fullstack host: mounts a `framework: phoenixLiveView` ui as HEEx (`coreComponents` / `daisyui` packs).  The old `platform: phoenix` / `phoenixLiveView` aliases were retired — `elixir` is the only spelling.  Default port 4000. |
+| `python` | FastAPI + SQLAlchemy 2 + Pydantic.  Default port 8000. |
+| `java`   | Spring Boot + Spring Data JPA + Hibernate.  Default port 8081. |
+| `react`  | Vite + React Router + React Query + Zod + Playwright page objects; design packs `mantine` (default) / `shadcn` / `mui` / `chakra`.  Default port 3001. |
+| `vue`    | Vite + vue-router + vue-query + Zod (`vuetify` / `shadcnVue`).  Default port 3002. |
+| `svelte` | Svelte 5 / SvelteKit static SPA + svelte-query + Zod (`shadcnSvelte` / `flowbite`).  Default port 3003. |
+| `angular` | Angular SPA (`angularMaterial` / `primeng` / `spartanNg`).  Default port 3004. |
+| `feliz`  | F# / Fable / Elmish (MVU) SPA built by `dotnet fable` + vite, daisyUI styling.  Hosts only `framework: feliz`.  Default port 3005. |
+| `flutter` | Dart / Flutter + Riverpod; the web bundle is served by compose, and the same Dart source builds native Android / iOS via the project Makefile.  Hosts only `framework: flutter`.  Default port 3006. |
+| `static` | A UI-only static host — lowers through the `react` path. |
 
-Backend deployables (`dotnet`, `node`, `elixir`, `python`, `java`,
-`phoenixLiveView`) declare
+Backend deployables (`dotnet`, `node`, `elixir`, `python`, `java`) declare
 `contexts: [...]` (which bounded contexts they host) and
 `dataSources: [...]` (the system-scope `resource` decls that route
-those contexts' persistence).  React deployables declare
-`targets: <other-deployable>` instead — the frontend's API base URL
+those contexts' persistence).  Frontend deployables (`react`, `vue`,
+`svelte`, `angular`, `feliz`, `flutter`) declare
+`targets: <backend-deployable>` instead — the frontend's API base URL
 is wired to the target's port and its hosted contexts are inherited
-from the target so pages exactly cover the API surface.  See
-[`resources.md`](resources.md) for the storage/resource model
-and [`generators.md`](generators.md) for what each platform emits per
+from the target so pages exactly cover the API surface.
+
+The optional **realization block** after a backend `platform:` carries
+exactly two axes — `persistence:` (e.g. `efcore` / `dapper` on `dotnet`,
+`drizzle` / `mikroorm` on `node`) and `directoryLayout:`.  The former
+`foundation:` / `application:` / `transport:` / `runtime:` clauses were
+removed and no longer parse.
+
+```ddd
+deployable api {
+    platform: dotnet { persistence: dapper }
+    contexts: [Orders], dataSources: [ordersState], port: 8080
+}
+```
+
+See [`platforms.md`](platforms.md) for the registry and adapter menus,
+[`resources.md`](resources.md) for the storage/resource model, and
+[`generators.md`](generators.md) for what each platform emits per
 aggregate.
 
 ### Inside a context
@@ -221,9 +312,19 @@ order:
 | --- | --- |
 | `enum Name { A, B, C }` | Closed enumeration; values are referenced bare. |
 | `valueobject Name { … }` | Immutable record with optional invariants and derived members. |
-| `[abstract] [crossTenant] aggregate Name [extends Base] [persistedAs: eventLog\|state] [shape: relational\|embedded\|document] [inheritanceUsing: sharedTable\|ownTable] { … }` | Aggregate root with implicit `Name id` field (always a `guid` — there is no `ids` clause; see the identity note below).  The `abstract`/`crossTenant` adjectives **lead**, and the colon modifiers are **order-independent**.  Header modifiers (D-DOCUMENT-AXIS): `persistedAs: …` picks the primary truth kind (default `state`); `shape: …` picks the saving shape (default `relational`) — how the hierarchy is laid out physically: **`relational`** = table-per-entity; **`embedded`** = queryable root row + contained parts folded into one JSONB column (EF owned `.ToJson()` / Drizzle jsonb / Ecto embedded schemas); **`document`** = the whole aggregate as one opaque JSONB blob (`id, data, version`).  Emitted on all backends for `relational`/`embedded`; `document` on all five backends — `dotnet`, `node`, `python`, `java`, and `elixir` (Route A — plain Phoenix persists the aggregate as a typed `embeds_one` embed) (a `shape: …` a backend can't emit is a validation error — see `supportedShapes`). |
+| `[abstract] aggregate Name [extends Base] [persistedAs: eventLog\|state] [shape: relational\|embedded\|document] [inheritanceUsing: sharedTable\|ownTable] [crossTenant] [audited] [with Cap, Macro(...)] { … }` | Aggregate root with implicit `Name id` field (always a `guid` — there is no `ids` clause; see the identity note below).  `abstract` **leads** (what the declaration *is*); the header region after the name is **order-independent** (how it *participates*): `persistedAs: …` picks the primary truth kind (default `state`); `shape: …` picks the saving shape (default `relational`) — **`relational`** = table-per-entity; **`embedded`** = queryable root row + contained parts folded into one JSONB column; **`document`** = the whole aggregate as one opaque JSONB blob (`id, data, version`), emitted on all five backends (a `shape:` a backend can't emit is a validation error); `inheritanceUsing:` picks TPH vs TPC (below); `crossTenant` opts shared-reference data out of the tenant filter under a `tenancy by` system ([`tenancy.md`](tenancy.md)); `audited` records an `audit_records` row for every public command (the aggregate-wide form of the per-command `audited` flag).  A trailing `with …` clause mixes in capabilities and macros ([`capabilities.md`](capabilities.md), [`scaffold-macros.md`](scaffold-macros.md)). |
 | `event Name { field: Type, … }` | Flat record raised via `emit`. |
-| `repository Name for Aggregate { find … }` | Repository declaration with optional find queries. |
+| `payload Name { … }` / `command` / `query` / `response` / `error` / `payload U = A \| B` | Transport records and discriminated unions — the workflow / handler command surface and `or`-union return arms.  See [`payloads.md`](payloads.md). |
+| `repository Name for Aggregate { find … }` | Repository declaration with optional find queries (see [Repositories](#repositories)). |
+| `criterion Name(params) of Aggregate = Expr` / `retrieval Name of Aggregate { where: …, sort: […], loads: […] }` | Reusable, SQL-inlinable predicate specifications and the named list-read shapes `Repo.run(...)` consumes.  See [`criterion.md`](criterion.md). |
+| `projection Name[(params)] [keyed by <field>] [requires Expr] { <fields> from <Source> [as x] [where …] [ignoring …] [join Agg as a on …] [group by …] select f = …, … }` / `projection Name keyed by k { <fields> on(e: Event) [by e.key] { … } }` | A read model: **query-time** (a `select` over an aggregate / projection / workflow source — optional `where`, `join`, `group by`, whole-table aggregation, paged reads) or **folded** (`on(e: Event)` arms folding a stream into a keyed row).  Exposed as `GET /projections/<name>` and readable from pages.  ~50 `loom.projection-*` gates; see [`language-reference/10-repositories-and-queries.md`](language-reference/10-repositories-and-queries.md) and [`scaffold-macros.md`](scaffold-macros.md) (`scaffoldDashboard`). |
+| `workflow Name { create(...) …, handle …, on(e: Event) …, function … }` | Context-level orchestration across aggregates, with `create` / `handle` / `on` reactors and workflow-local state.  See [`workflow.md`](workflow.md). |
+| `[extern] commandHandler Name(cmd: Cmd)[: Response] { … }` / `[extern] queryHandler Name(q: Query): Response { … }` | Application-layer handlers — a single-aggregate `handle` lifted out of a workflow (load → mutate → save → `return`), routable from an `api { … }` body.  `queryHandler` must not save (`loom.query-handler-saves`); `commandHandler` touches one aggregate (`loom.command-handler-multi-aggregate`).  An `extern` handler is bodyless (`;`) — see [`extern.md`](extern.md). |
+| `domainService Name { operation calc(...): T { … } }` | A stateless, pure cross-aggregate calculator.  See [`domain-services.md`](domain-services.md). |
+| `channel Name { carries: [Event, …], delivery: broadcast\|queue, retention: ephemeral\|log\|work, key: field }` | Publisher-side contract for how a context's events are transported (paired with a system `channelSource`).  See [`channels.md`](channels.md). |
+| `seed [dataset] [raw] { Aggregate { field: value, … } … }` | Declarative first-boot rows (one `Aggregate { … }` object literal per row; `raw` writes table-level inserts).  `loom.seed-*`.  See [`language-reference/23-domain-services-and-seeds.md`](language-reference/23-domain-services-and-seeds.md). |
+| `filter … ` / `stamp … ` / `implements Cap` | Context-level capability contributions (a query filter, a write stamp, a typed capability application) propagated to every aggregate in the context.  See [`capabilities.md`](capabilities.md). |
+| `test "name" for <Aggregate\|ValueObject\|DomainService\|Context> { … }` | A unit test hoisted beside its subject (`for` names the home; a test nested inside its subject needs no `for` — `loom.test-redundant-for` / `loom.test-needs-target`). |
 | `policy [Name] { allow [write] local\|deep\|global on Aggregate … }` | Read/write-scope ladder for `tenantOwned` aggregates under a tenant hierarchy — widens the tenant floor to the caller's org subtree (`deep`) or root-org subtree (`global`); the optional `write` verb gates instance mutations. The name is optional; one rule per aggregate. See [tenancy.md](tenancy.md) → "The `policy {}` read ladder". |
 | `policy [Name] { deny [write] on Aggregate … }` | **Deny-wins carve-out** (Phase 4): removes access to an aggregate. `deny on X` denies READ (X becomes invisible → empty / 404; writes fail too since the write load reuses the read filter); `deny write on X` denies WRITE only (reads stay, mutations 404). All-or-nothing at the aggregate (no level word); applied after the `allow` passes, so deny wins. Not restricted to `tenantOwned`. Diagnostics: `loom.policy-deny-unknown-aggregate`, `loom.policy-deny-duplicate`, `loom.policy-deny-shadows-allow` (warning). See [auth.md](auth.md) → "Deny carve-outs". |
 | `policy Name(params): bool ( = Expr \| { Expr } )` | **Named policy function** (P3.2): a reusable, ambient boolean authorization predicate (sees `currentUser` + its own parameters), referenced from a `requires PolicyName(args)` gate and inlined there like a `criterion … of bool`. Parentheses are required (they distinguish it from the `policy {}` block form). See [auth.md](auth.md) → "Named policy functions". |
@@ -245,8 +346,8 @@ The underlying value type is always `guid`, and there is **no `ids` clause** —
 `ids int|long|string` were removed (no backend implemented id generation for a
 non-guid primary key, so declaring one produced an app that collided on the
 second insert), and the no-op `ids guid` spelling was removed with the rest of
-the header normalization (M-T5.17). `aggregate Order { … }` is a parse
-error; write `aggregate Order { … }`. See
+the header normalization (M-T5.17). `aggregate Order ids guid { … }` is a
+parse error; write `aggregate Order { … }`. See
 [`docs/old/plans/non-guid-id-http-params.md`](old/plans/non-guid-id-http-params.md).
 
 #### Reference collections — `X id[]`
@@ -315,7 +416,7 @@ Inside an aggregate or an `entity` part:
 
 | Form | Notes |
 | --- | --- |
-| `name: TypeRef [provenanced] [sensitive(tags)] [access] [= default] [check Expr]` | Property, with optional modifiers. `provenanced`, `sensitive(...)`, and `access` parse in **any order** relative to each other; `= default` and `check Expr` must come **after** all three (an unconsumed flag keyword after an in-progress default risks the expression greedily swallowing it — `access`'s keywords double as valid identifiers). `provenanced` records assignment lineage (below); `sensitive(...)` tags the field for log-redaction / inspect; `access` is one of `immutable / managed / token / internal / secret` (default: `editable` — see [Field access modifiers](#field-access-modifiers) below); `check Expr` is a per-field validation predicate. |
+| `name: TypeRef [provenanced] [sensitive(tags)] [access] [= default] [check Expr [message "…"]] [mask unless Expr]` | Property, with optional modifiers. `provenanced`, `sensitive(...)`, and `access` parse in **any order** relative to each other; `= default`, `check`, and `mask unless` must come **after** all three, in that order (an unconsumed flag keyword after an in-progress default risks the expression greedily swallowing it — `access`'s keywords double as valid identifiers). `provenanced` records assignment lineage (below); `sensitive(...)` tags the field for log-redaction / inspect; `access` is one of `immutable / managed / token / internal / secret` (default: `editable` — see [Field access modifiers](#field-access-modifiers) below); `check Expr` is a per-field validation predicate (optional author-written `message`); `mask unless <currentUser-predicate>` redacts the field to `null` on the wire unless the caller satisfies the predicate (`loom.field-mask-*`; see [`auth.md`](auth.md) → "Field masking"). |
 | `contains name: PartName[]` | Containment of a part declared within the same aggregate; collection. |
 | `contains name: PartName` | Containment, single (required). |
 | `contains name: PartName?` | Containment, single (optional) — the part may be absent at runtime; serialised as a nullable wire field.  `[]?` is rejected: an empty collection already encodes absence. |
@@ -323,19 +424,25 @@ Inside an aggregate or an `entity` part:
 | `derived name: TypeRef = Expression` | Computed read-only property. |
 | `derived display: string = Expression` | **Reserved** — declares the aggregate's user-facing label.  When present, `string(aggregate)` and implicit `"x " + aggregate` compile to a member access on this derived; React Select pickers use it for option text.  Without it, those expressions are compile errors. |
 | `derived inspect: string = Expression` | **Reserved** — declares the aggregate's developer-facing debug form.  Auto-generated when omitted (structural form, sensitive fields shown as `<redacted>`).  Backends emit it as `ToString()` / `[util.inspect.custom]` / `Inspect` so debugger watches, exceptions, and logger output get a useful representation. |
-| `invariant Expression [when Expression]` | `bool` predicate; checked after every mutation. Optional `when` is a guard. |
+| `[private] invariant Expression [when Expression] [message "…"]` | `bool` predicate; checked after every mutation. Optional `when` is a guard; `message` is the user-facing text (also the i18n key). `private` keeps the rule off the wire-layer schemas (Zod / FluentValidation / OpenAPI) — it runs only in the domain floor. |
+| `unique (a, b)` | Set-level natural-key invariant — derived into a DB unique index (partial under `softDeletable`) plus a per-backend 23505 → 409 mapping (`loom.unique-*`). |
 | `function name(params): TypeRef = Expression` | Pure helper (expression form); callable from any expression in the same aggregate. Stays SQL-inlinable like a `criterion`. |
-| `function name(params): TypeRef { … }` | Pure helper (block form); `let` + branch (ternary/`match`) + bug-regime `precondition`/`requires`, ending in `return`. Still **pure** — no mutation, no `emit`, no repository / operation / domain-service / extern call. **Not queryable** (a block-form call is rejected in a `where` / `criterion` filter). |
-| `operation name(params) { … }` | Public mutating method (root only). |
-| `private operation name(params) { … }` | Mutating method, only callable from within the same aggregate root. |
-| `operation name(params) extern { precondition … }` | Public op whose business decision lives in user code; body must contain only `precondition` statements. See `extern.md`. |
-| `operation name(params) when <pred> { … }` | **canCommand state gate** (criterion.md, use site 2): `<pred>` is a pure bool predicate over the aggregate's own state (op params are out of scope — `loom.when-references-op-param`), evaluated against the loaded instance before the body. False → 409 "Disallowed" ProblemDetails; a side-effect-free `GET /{id}/can_<op>` companion returns `{ allowed }` for UI enablement. Named criteria / aggregate functions inline like any bool position. Supported on all five backends (node, dotnet, python, elixir, java). Distinct from `requires` (auth, 403) and `precondition` (domain validity, 422). |
-| `apply(e: <Event>) { … }` | **Event-sourcing fold** (only on a `persistedAs: eventLog` aggregate).  Folds one emitted event type into state — a pure transition: assignments / collection mutations / `let` only, no `emit`, no side-effecting calls, no guards.  One `apply` per event type.  See the event-sourcing note below. |
+| `function name(params): TypeRef { … }` | Pure helper (block form); `let` + branch (ternary/`match`) + bug-regime `precondition`/`requires`, ending in `return` (`loom.function-block-no-return`). Still **pure** — no mutation, no `emit`, no repository / operation / domain-service / extern call (the IR validator rejects each). **Not queryable** (a block-form call is rejected in a `where` / `criterion` filter). |
+| `[private] operation name(params) [extern] [audited] [: ReturnType] [requires Expr] [when Expr] { … }` | Mutating method (root only). `private` = callable only from within the same aggregate root (no route). `audited` records an `audit_records` row per call. `: A or B` declares an exception-less outcome returned via `return` (an `error` variant maps to a ProblemDetails status — [`payloads.md`](payloads.md)). `requires` is the authorization gate (403; [`auth.md`](auth.md)). |
+| `operation name(params) extern { precondition … }` | Public op whose business decision lives in user code; body must contain only `precondition` statements. See [`extern.md`](extern.md). |
+| `operation name(params) when <pred> { … }` | **canCommand state gate** ([`criterion.md`](criterion.md), use site 2): `<pred>` is a pure bool predicate over the aggregate's own state — referencing an operation parameter is an error (move argument-aware checks into a `precondition`); evaluated against the loaded instance before the body. False → 409 "Disallowed" ProblemDetails; a side-effect-free `GET /{id}/can_<op>` companion returns `{ allowed }` for UI enablement (so `when` on a `private` operation is rejected — nothing could read it). Named criteria / aggregate functions inline like any bool position. Supported on all five backends. Distinct from `requires` (auth, 403) and `precondition` (domain validity, 422). |
+| `create [name](params) [audited] { … }` | Lifecycle factory — the body populates a fresh `this`; the unnamed form is the aggregate's canonical creator (the `POST /<plural>` route takes its params). See [`language-reference/06-behavior-and-statements.md`](language-reference/06-behavior-and-statements.md). |
+| `destroy [name][(params)] [audited] { … }` | Lifecycle terminator — loaded by id, the body runs (a throw aborts removal), then the framework removes the row; the unnamed `destroy { }` is the canonical `DELETE`. |
+| `apply(e: <Event>) { … }` | **Event-sourcing fold** (only on a `persistedAs: eventLog` aggregate).  Folds one emitted event type into state — a pure transition: assignments / collection mutations / `let` only, no `emit`, no side-effecting calls, no guards (`loom.applier-impure`).  One `apply` per event type.  See the event-sourcing note below. |
+| `filter …` / `stamp …` / `implements Cap` | Aggregate-level capability contributions — a read-side query filter, a write-side stamp, a typed capability application.  See [`capabilities.md`](capabilities.md). |
 | `entity Name { … }` | Nested part declaration (inside an aggregate). |
-| `test "name" { … }` | Test block; lowers to vitest / xUnit (root only). |
+| `test "name" { … }` | Unit test block nested in the aggregate; also declarable beside it as `test "…" for <Aggregate>` (root, context, or a `tests/*.ddd` file). Lowers per backend — see [Tests](#tests). |
 
-Entity parts may declare any of the above except `operation` and `test`
-(those live on the root).
+Entity parts may declare only `contains`, properties, `derived`,
+`invariant`, and `function` — no `operation` / `create` / `destroy` /
+`apply` / `unique` / `test` (those live on the root).  A `valueobject`
+admits properties, `derived`, `invariant`, `function`, and nested `test`
+blocks.
 
 ##### Constructing values vs. aggregates
 
@@ -442,9 +549,12 @@ ddd snapshot path/to/system.ddd -o out
 
 The TypeScript/Hono backend additionally emits a `domain/provenance.ts`
 runtime SDK and a `recordTrace(...)` call after each write, so a value can be
-traced back to the snapshot that produced it at runtime. Provenance trace code
-is emitted on the TypeScript/Hono, .NET, and elixir-vanilla backends; the
-remaining backends parse the keyword but emit no trace code. See `examples/provenance.ddd` for a runnable backend example and the
+traced back to the snapshot that produced it at runtime. The provenance
+runtime (co-located lineage column, per-write trace capture, transactional
+`provenance_records` flush) is emitted on all five backends — node, .NET,
+Java, Python, and elixir (plain Ecto/Phoenix); the frontends render a `?`
+disclosure over it (`ProvenanceInfo`). See [`provenance.md`](provenance.md),
+`examples/provenance.ddd` for a runnable backend example and the
 `Provenance System` playground example for the same domain as a Hono + React
 system.
 
@@ -549,14 +659,29 @@ opts out of redaction by writing their own debug form.
 ### Type references
 
 ```
-TypeRef       = BaseType ('[]')? ('?')?
-BaseType      = PrimitiveType | SlotType | IdType | NamedType
+TypeRef       = TypeAtom ('or' TypeAtom)*                  // anonymous union
+TypeAtom      = BaseType GenericCtor* ('[]')? ('?')?
+GenericCtor   = 'paged' | 'envelope' | 'option'             // ML-postfix carriers
+BaseType      = PrimitiveType | SlotType | ActionType | SelfType | IdType | NamedType
 IdType        = Identifier 'id'                // cross-aggregate FK
 NamedType     = Identifier                     // bare name
-PrimitiveType = 'int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid' | 'json'
+SelfType      = 'Self'                         // the host aggregate, inside a capability
+PrimitiveType = 'int' | 'long' | 'decimal' | 'money' | 'string' | 'bool' | 'datetime' | 'guid' | 'json' | 'File'
 SlotType      = 'slot'                         // element-shaped param marker — UI-only
+ActionType    = 'action' ('(' TypeRef ')')?    // callback-shaped param marker — UI-only
 MoneyLit      = 'money' '(' STRING ')'         // precise-decimal literal
 ```
+
+The postfix carriers fold left (`string envelope paged` is
+`paged(envelope(string))`) and bind tighter than `or`, as do `[]` / `?`:
+`string or int option` is `string or (int option)`.  `A or B` and the named
+`payload U = A | B` form are the discriminated-union surface (tagged `type`
+on the wire) — see [`payloads.md`](payloads.md).  `File` is the uploaded-file
+type backing `FileUpload` / `FileLink` (needs an `objectStore` resource —
+`loom.file-field-needs-object-storage`; see [`resources.md`](resources.md)).
+`Self id` is valid only inside a `capability` body, where it stands for a
+reference to the host aggregate (`parent: Self id?` in `tenantRegistry`) — the
+expander rewrites it to `<Host> id` when the capability is spliced in.
 
 `json` is an **opaque JSON blob** — Loom does not model its interior.
 It maps to Postgres `JSONB` (Drizzle `jsonb`, EF `System.Text.Json.JsonElement`,
@@ -638,8 +763,8 @@ Deliberately **not** narrowed — each is conservative, never unsound:
 - **A branch containing a call that could mutate the field.** A ternary branch
   is an expression and cannot assign, but it *can* call a sibling `operation`,
   whose body assigns freely — so a branch carrying any call other than a scalar
-  intrinsic or a collection op does not narrow.  (A `function` is pure by
-  `loom.function-block-impure`, but is still excluded for now.)
+  intrinsic or a collection op does not narrow.  (A block-form `function`
+  is gated pure by the IR validator, but is still excluded for now.)
 
 `slot` is a UI-only marker — valid **only** on a `component`'s parameter
 list, where the caller injects a JSX expression that the component body
@@ -746,6 +871,9 @@ Pragmatic core, similar to a subset of TypeScript / C# expressions.
 | Boolean | `true`, `false` |
 | Null | `null` |
 | Now | `now()` — current `datetime` |
+| Money | `money("10.50")` — precise decimal; see [`money`](#money--precise-decimal-distinct-from-decimal) |
+| Duration | `days(n)`, `hours(n)`, `minutes(n)` — an absolute span (`int` amount only — `loom.duration-arity` / `loom.duration-arg-type`; write `hours(36)`, not `days(1.5)`).  Ordinary free calls that lower to `duration` nodes unless a user `function` of that name shadows them.  See [Temporal arithmetic](#temporal-arithmetic). |
+| List | `[3, 2, 1]` — bracketed list literal (page-DSL argument values such as `Grid { cols: [3, 2, 1] }`) |
 
 ### References
 
@@ -767,10 +895,14 @@ Pragmatic core, similar to a subset of TypeScript / C# expressions.
 | `a + b`, `a - b`, `a * b`, `a / b`, `a % b` | Arithmetic. |
 | `a < b`, `a <= b`, `a > b`, `a >= b`, `a == b`, `a != b` | Comparison. |
 | `a && b`, `a \|\| b` | Logical. |
-| `cond ? a : b` | Ternary. A direct null test on `cond` narrows the proven branch — see [Null narrowing](#null-narrowing). |
-| `x => expr` | Lambda (only valid as a collection-op argument). |
+| `cond ? a : b` | Ternary (`loom.ternary-condition` / `loom.ternary-branches`). A direct null test on `cond` narrows the proven branch — see [Null narrowing](#null-narrowing). |
+| `match { cond => value, …, else => value }` | Predicate-arms expression — the first true arm wins; `else` is the fallthrough. |
+| `match subject { Variant [b] => value, …, else => value }` | Variant match over an `A or B` / `T option` union scrutinee, optionally binding the narrowed variant.  The subject must be a simple ref / member read, not a call — except `match await <call> { … }` in a page `action`, which awaits a remote command and matches its Result ([`actions.md`](actions.md)). |
+| `x => expr` / `(a, b) => expr` | Lambda (a collection-op argument or a page-DSL handler value). |
+| `f(name: value, …)` | Named call arguments (page primitives, macro-style calls). |
 | `PartName { field: expr, … }` | Construct a contained part; `id` and parent `parentId` are auto-injected. |
-| `Money { amount, currency }` | Value-object constructor. |
+| `Money { amount, currency }` / `Money { amount: 1, currency: "USD" }` | Value-object constructor (positional or named). |
+| `Repo.run(Criterion(args), page?)` / `Repo.run(retrieval { where: …, sort: […], loads: […] })` / `Repo.findAll(...) ignoring Cap` | Repository reads inside workflows / handlers — see [`criterion.md`](criterion.md) and [`capabilities.md`](capabilities.md) for `ignoring`. |
 
 ### String interpolation
 
@@ -798,10 +930,22 @@ get label(): string { return "Order #" + String(this._quantity) + " for " + this
   `decimal` / `money` / `bool` / an enum / an `X id` / an aggregate with a
   `derived display: string`). A `datetime`, `duration`, collection, or plain aggregate
   hole is rejected (`loom.interp-hole-type`) — format it first.
+- **Format specs** — a hole may carry an ICU format suffix after a comma at
+  hole-depth 0: `{total, number, ::currency/USD}`, `{n, number, ::percent}`,
+  `{at, date}` / `{at, time}`, `{n, plural, one {# item} other {# items}}`,
+  `{n, selectordinal, …}`, `{kind, select, a {…} other {…}}`.  An unknown
+  format is `loom.interp-format-unknown`; a format that doesn't fit the hole's
+  type (a `date` on a non-`datetime`, a `number` on a non-numeric, a `select`
+  on a non-string/enum) is `loom.interp-hole-type`.  These drive the i18n
+  string catalog — see [`new-plan/T1-ui-frontend.md`](new-plan/T1-ui-frontend.md) § M-T1.11.
 - **Escaping** — a literal brace or backtick in the text is `\{` / `\}` / `` \` ``;
   `\n` / `\t` / `\\` behave as in a string literal.
 - **Not queryable** — an interpolated string desugars to `+`/`convert`, so (like any
   concatenation) it cannot appear in a `find` `where:` clause.
+- **Prefer it over `+` in user-visible slots** — a `"Order " + order.id`
+  concatenation in a page title / label / message slot warns
+  (`loom.user-visible-concat`) because it won't translate; the template form
+  extracts as one catalog entry.
 
 ### Collection operators
 
@@ -817,6 +961,21 @@ When the receiver type is `T[]`:
 | `xs.first` | `T` | First element (assumes non-empty). |
 | `xs.firstOrNull` | `T?` | First or `null`. |
 | `xs.contains(x)` | `bool` | Membership.  Renders to `Array.includes` (TS) / `Enumerable.Contains` (.NET).  Also admitted in repository `where` clauses when `xs` is a `this`-rooted `X id[]` reference collection — see [Repositories](#repositories). |
+| `xs.map(x => expr)` | `U[]` | Projection. |
+| `xs.sortBy(x => expr, desc?)` | `T[]` | Ordering. |
+| `xs.distinct` | `T[]` | De-duplication (scalar elements — `loom.distinct-non-scalar`). |
+| `xs.take(n)` / `xs.skip(n)` | `T[]` | Slicing. |
+| `xs.join(sep)` | `string` | Concatenate string elements (`loom.join-non-string`). |
+| `xs.min(x => expr)` / `xs.max(x => expr)` | `T?` | Reductions over comparable elements (`loom.reduction-non-comparable`); `null` on empty. |
+| `xs.avg(x => expr)` | `decimal?` | Mean (`loom.avg-non-numeric`); `null` on empty. |
+
+A reduction spelled without its lambda (`xs.sum`, `xs.any`) is rejected
+(`loom.bare-collection-accessor`).  The full catalogue with per-backend
+queryability lives in [`stdlib.md`](stdlib.md) → "Collection operations";
+the scalar intrinsics (`s.trim()`, `n.abs()`, `d.round(2)`, `t.startOfDay()`,
+…) are in the same document — an unknown intrinsic, a wrong arity /
+argument type, or a call on a nullable receiver is rejected
+(`loom.intrinsic-unknown` / `-arity` / `-arg-type` / `-nullable-receiver`).
 
 ### Numeric widening
 
@@ -834,6 +993,35 @@ differently per host.  A consequence: `derived half: int = a / b` is a
 you deliberately want integer division (page counts, bucketing, …).  Money and
 `decimal` operands are unaffected (`money / int → money`, `decimal / int →
 decimal`).
+
+### Temporal arithmetic
+
+`datetime` and `duration` form a closed algebra, the temporal twin of the
+`money` rules below.  A `duration` is an **absolute** span (fixed millisecond
+width per unit — no calendar-relative `months` / `years`):
+
+- `datetime ± duration → datetime`, `duration + datetime → datetime`
+- `datetime - datetime → duration`
+- `duration ± duration → duration`, `duration × int → duration`
+- everything else (`duration ÷ x`, `datetime × …`, mixing with a
+  non-`int` numeric) is rejected.
+
+```ddd
+aggregate Invoice {
+  issuedAt: datetime
+  derived dueAt: datetime = issuedAt + days(30)
+  derived overdue: bool = now() > dueAt
+}
+```
+
+```typescript
+// generated TS (Hono)
+get dueAt(): Date { return new Date((this._issuedAt).getTime() + (((30) * 86400000))); }
+get overdue(): boolean { return new Date() > this.dueAt; }
+```
+
+There is no `duration` field type on the wire — it lives only in
+expressions (and as the `every:` cadence of a `timerSource`).
 
 ### `money` — precise decimal, distinct from `decimal`
 
@@ -885,19 +1073,29 @@ decimal`.
 
 | Form | Purpose |
 | --- | --- |
-| `precondition Expression` | Runtime check; failure throws a domain error (HTTP 422 — RS-15). |
-| `lhs := Expression` | Assignment to a property reachable from `this`.  Derived properties are not assignable. |
-| `coll += value` | Append to a contained collection. |
+| `precondition Expression [message "…"]` | Runtime check; failure throws a domain error (HTTP 422 — RS-15).  The optional `message` is the user-facing text. |
+| `requires Expression` | Authorization gate (HTTP 403) — `currentUser` / `permissions.<x>` predicate; distinct from `precondition` (validity) and the header `when` (state, 409).  Also a header clause on `operation` / `create` / `handle` / `find` / `projection`.  See [`auth.md`](auth.md). |
+| `lhs := Expression` | Assignment to a property reachable from `this`.  Derived properties are not assignable; under `persistedAs: eventLog` assignments live only in `apply` bodies. |
+| `coll += value` | Append to a contained collection (or an `X id[]` reference collection). |
 | `coll -= value` | Remove from a contained collection. |
 | `emit EventName { field: expr, … }` | Raise a domain event; drained by the repository on `save`. |
-| `let name = Expression` | Local binding for the rest of the operation body. |
-| `helperName(args)` | Call a helper `function` or `private operation` of the same aggregate. |
+| `let name = Expression` | Local binding for the rest of the body. |
+| `helperName(args)` / `this.op(args)` | Call a helper `function` or `private operation` of the same aggregate (`loom.call-arg-count` / `loom.call-arg-type`). |
+| `return Expression` | The designed-in outcome of an operation / handler declared with an `or`-union return type — an `error` variant maps to a ProblemDetails status, a success variant to 200.  See [`payloads.md`](payloads.md). |
+| `match subject { Variant [b] => { … }, else => { … } }` | Statement-form variant match — arms run statements (state writes, `navigate(...)`) rather than yield a value.  In a page `action`, `match await Agg.op(...) { Ok r => …, Err e => … }` is how a remote command is awaited and its Result handled — a remote mutating call *without* the marker is `loom.missing-effect-marker`; `loom.match-await*` gates the awaited call's shape ([`actions.md`](actions.md)). |
+| `for x in Repo.run(R(args)) { … }` | **Workflow / handler bodies only** — iterate an aggregate array, saving each element's mutations per iteration ([`workflow.md`](workflow.md)). |
+| `if let x = Repo.find(C(args)) { … } else { … }` | **Workflow / handler bodies only** — bind an optional repository result and branch on presence. |
 
 ---
 
 ## Tests
 
-Each aggregate may declare zero or more `test` blocks at the root level:
+Each aggregate may declare zero or more `test` blocks at the root level
+(a value object or `domainService` may nest them too, and a test may be
+hoisted beside its subject — or into a `tests/*.ddd` file — as
+`test "…" for <Subject> { … }`, where the subject is an aggregate, value
+object, domain service, or a bounded context for the in-process
+integration rung):
 
 ```ddd
 test "money literal builds" {
@@ -930,9 +1128,12 @@ operation statements are allowed plus:
 | `expect(<call>).toThrow()` | vitest `expect(() => <call>).toThrow()` / xUnit `Assert.Throws<DomainException>(() => <call>)`. |
 | `expect(<api-call>).toThrow(<status>)` | e2e only — `.rejects.toThrow(/→ <status>\b/)` (pins the rejected HTTP status). |
 
-Test blocks emit one file per aggregate:
+Test blocks emit one file per subject on every backend:
 - TS: `domain/<aggregate>.test.ts` (vitest).
-- .NET: `Tests/<Plural>/<Aggregate>Tests.cs` (xUnit).
+- .NET: `Tests/<Ns>.Tests/<Plural>/<Aggregate>Tests.cs` (xUnit; value objects under `ValueObjects/`, services under `Services/`).
+- Python: `tests/test_<aggregate>.py` (pytest).
+- Java: `<Aggregate>Tests.java` in the subject's test package (JUnit).
+- Elixir: `test/<context>/<aggregate>_test.exs` (ExUnit).
 
 ---
 
@@ -943,15 +1144,20 @@ deployable through HTTP:
 
 ```ddd
 test e2e "create then confirm an order" against api {
+    let cust = api.customers.create({ name: "Ada", email: "ada@example.com" })
     let prod = api.products.create({ sku: "WIDGET-1", price: { amount: 5.0, currency: "USD" } })
-    let ord = api.orders.create({ customerId: "cust-001", status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
-    api.orders.addLine(ord, { productId: prod.id, qty: 3 })
+    let ord = api.orders.create({ number: "A-1", customerId: cust.id, status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
+    api.orders.addLine(ord, { productId: prod.id, qty: 3, price: { amount: 5.0, currency: "USD" } })
     api.orders.confirm(ord)
     let read = api.orders.getById(ord)
-    expect read.status == "Confirmed"
-    expect read.lines.length == 1
+    expect(read.status).toBe("Confirmed")
+    expect(read.lines.length).toBe(1)
 }
 ```
+
+(The domain is the [complete example](#a-complete-example) at the end of
+this document.)  An optional `verifies <TestCase>` after the target links
+the test to a traceability `testCase` ([`traceability.md`](traceability.md)).
 
 The magic identifier `api` resolves to the named deployable's HTTP
 surface.  Member-access chains describe the call shape:
@@ -1026,28 +1232,31 @@ The generated vitest file lives at `<system>/e2e/<SystemName>.e2e.test.ts`
 in the output directory.  Endpoints default to the docker-compose ports;
 override per environment via `E2E_<DEPLOYABLE>_BASE` env vars.
 
-### UI e2e tests against a react deployable
+### UI e2e tests against a frontend deployable
 
 The same `test e2e` syntax targets a frontend deployable as long as
 the body uses the `ui` identifier instead of `api`:
 
 ```ddd
 test e2e "create then confirm an order via UI" against webApp {
+    let cust = ui.customers.create({ name: "Ada", email: "ada@example.com" })
     let prod = ui.products.create({ sku: "WIDGET-1", price: { amount: 5.0, currency: "USD" } })
-    let ord = ui.orders.create({ customerId: "cust-001", status: "Draft", placedAt: "2024-01-01T00:00" })
-    ui.orders.addLine(ord, { productId: prod.id, qty: 3 })
+    let ord = ui.orders.create({ number: "A-1", customerId: cust.id, status: "Draft", placedAt: "2024-01-01T00:00" })
+    ui.orders.addLine(ord, { productId: prod.id, qty: 3, price: { amount: 5.0, currency: "USD" } })
     ui.orders.confirm(ord)
     let read = ui.orders.getById(ord)
-    expect read.status == "Confirmed"
-    expect read.lines.length == 1
+    expect(read.status).toBe("Confirmed")
+    expect(read.lines.length).toBe(1)
 }
 ```
 
 The test kind is implied by the target deployable's platform —
-any frontend deployable (react, vue, svelte, angular) gets a Playwright
-spec routed through the auto-generated page objects
+any frontend deployable (react, vue, svelte, angular, feliz, flutter)
+gets a Playwright spec routed through the auto-generated page objects
 (`<frontend-deployable>/e2e/pages/<aggregate>.ts`); backend deployables get
-the vitest+fetch path described above.
+the vitest+fetch path described above.  The locator matchers
+(`toHaveText` / `toHaveCount` / `toBeVisible`) are the frontend-only half
+of the matcher catalogue.
 
 The DSL surface is identical to api e2e (`ui.<aggregate>.<verb>(...)`);
 only the lowering differs:
@@ -1059,16 +1268,16 @@ only the lowering differs:
 | `ui.<aggregate>.<operation>(idExpr, body?)` | `<Agg>DetailPage.goto(idExpr.id) → <opName>(body ?? {})` — opens the operation modal, fills it, submits. |
 
 The generated Playwright spec lives at
-`<react-deployable>/e2e/<SystemName>.ui.spec.ts`.  Run via the existing
+`<frontend-deployable>/e2e/<SystemName>.ui.spec.ts`.  Run via the existing
 Playwright config in that directory (`npx playwright test` from
-`<react-deployable>/e2e/`).
+`<frontend-deployable>/e2e/`).
 
 ## Repositories
 
 ```ddd
 repository Orders for Order {
-    // convention-based: parameter names match aggregate properties.
-    find byCustomer(customerId: Customer id): Order[]
+    // unique-key reconstitution: parameter names match aggregate properties.
+    find byNumber(number: string): Order?
 
     // explicit predicate; `this` refers to the aggregate root.
     find activeForCustomer(forCustomer: Customer id): Order[]
@@ -1076,8 +1285,19 @@ repository Orders for Order {
 }
 ```
 
-Each `find` declaration becomes a method on the generated repository
-plus a Mediator query in the .NET backend.
+The full form is `find name(params): T | T? | T[] | T paged [requires Expr]
+[where Expr] [ignoring Cap, … | ignoring *]` — `requires` is the read-side
+authorization gate, `ignoring` bypasses a capability's contributed query
+filter (e.g. `softDeletable`).  Each `find` declaration becomes a method
+on the generated repository plus a Mediator query in the .NET backend.
+
+> **List finds warn.**  A `find` returning a collection (`T[]` / `T paged`)
+> is flagged `loom.repository-find-deprecated`: the list read-path is
+> `Repo.run(<Criterion>(args))` / a named `retrieval` (composable, page-able,
+> SQL-inlined — see [`criterion.md`](criterion.md)), so a bespoke list finder
+> on the repository is discouraged.  A unique-key find returning `T` / `T?`
+> is the intended shape.  (The `activeForCustomer` find above still generates;
+> it just carries the warning.)
 
 - **TypeScript**: when no `where` is given, parameters are equality-
   matched against aggregate columns and lowered to a Drizzle
@@ -1103,8 +1323,9 @@ by the queryable-subset validator.
 (no need to declare them in the repository).  An auto-included
 `find all(): T[]` is also added to every aggregate's repository, so
 all five backends always expose `GET /<plural>` and every frontend
-(react, vue, svelte, angular) always has a list page to render.  Declaring your own `find all(...)`
-in the DSL overrides the implicit one.
+(react, vue, svelte, angular, feliz, flutter) always has a list page to
+render.  Declaring your own `find all(...)` in the DSL overrides the
+implicit one.
 
 ---
 
@@ -1145,12 +1366,44 @@ The validator runs after parsing and reports errors for:
   check. Bare-name arguments that don't resolve, and ergonomic numeric-literal
   promotions (`bump(5)` into a `money` / `decimal` param), are admitted exactly
   as elsewhere.
-- Unknown / out-of-scope `X id` targets.
+- Unknown / out-of-scope `X id` targets (`loom.bare-aggregate-in-type` for
+  a bare aggregate name in a storage / wire position).
 - `contains` referencing a part that belongs to a different aggregate.
-- Operations or `test` blocks declared outside an aggregate root.
-- A frontend deployable (`react`, `vue`, `svelte`, `angular`) without a
-  `targets:` field, or pointing `targets:` at another frontend deployable.
+- `operation` / `create` / `destroy` declared outside an aggregate root; a
+  `test` outside its subject without a `for <Subject>` head
+  (`loom.test-needs-target`), or with a redundant one (`loom.test-redundant-for`).
+- A frontend deployable (`react`, `vue`, `svelte`, `angular`, `feliz`,
+  `flutter`) without a `targets:` field, or pointing `targets:` at another
+  frontend deployable, or without a `ui:` binding.
 - A non-frontend deployable using `targets:` (only valid on frontends).
+
+The list above is the classic core.  The catalogue today carries ~460
+`loom.*` codes (`src/diagnostics/messages.ts` is the single source of the
+wording; `test/system/diagnostic-catalog.test.ts` pins that every code a
+validator raises is in it).  By family, with the doc that explains each:
+
+| Family (prefix) | What it gates | Reference |
+|---|---|---|
+| `loom.projection-*` (~35) | Projection sources / `select` / `group by` / `keyed` / folds / paging / per-backend support | [`language-reference/10-repositories-and-queries.md`](language-reference/10-repositories-and-queries.md) |
+| `loom.workflow-*` (~30), `loom.applier-*`, `loom.lifecycle-*` | Workflow bodies, reactors, `create`/`handle`, appliers, event-sourced lifecycle | [`workflow.md`](workflow.md) |
+| `loom.policy-*`, `loom.permission-*`, `loom.field-mask-*`, `loom.auth-*`, `loom.*-gate-not-current-user`, `loom.guard-principal-without-auth` | Policy ladder / deny carve-outs / named policy functions, `implies`, `mask unless`, OIDC config, `requires` gates | [`auth.md`](auth.md) |
+| `loom.tenancy-*`, `loom.tenant-*`, `loom.cross-tenant-without-tenancy`, `loom.orgpath-without-tenancy` | The explicit-stance rule, registry / claim wiring, `crossTenant` | [`tenancy.md`](tenancy.md) |
+| `loom.migration-*`, `loom.rename-*`, `loom.backfill-*`, `loom.unique-*` | `migration { … }` ledger steps, destructive / rebaseline gating, `unique (…)` | [`migrations.md`](migrations.md) |
+| `loom.handler-*`, `loom.command-handler-*`, `loom.query-handler-*`, `loom.route-handler-unresolved`, `loom.extern-*` | `commandHandler` / `queryHandler` contracts, `api` routes, extern pairing | [`extern.md`](extern.md), [`architecture.md`](architecture.md) |
+| `loom.criterion-*`, `loom.retrieval-*`, `loom.find-*`, `loom.findall-*`, `loom.repository-find-deprecated` | Criteria purity / arity / aliasing, retrievals, the queryable subset | [`criterion.md`](criterion.md) |
+| `loom.union-*`, `loom.payload-*`, `loom.generic-*`, `loom.match-*` | `A or B` unions, payload records, `paged` / `envelope` / `option` carriers, `match` exhaustiveness and subjects | [`payloads.md`](payloads.md) |
+| `loom.channel*`, `loom.reactor-*`, `loom.relay-*`, `loom.timer-*` | Channels, channelSources, reactors, timers | [`channels.md`](channels.md) |
+| `loom.resource-*`, `loom.datasource-*`, `loom.file-*`, `loom.config-*`, `loom.index-suggestion` | Resource bindings, storage kinds, `File` fields, vendor config, index advice | [`resources.md`](resources.md) |
+| `loom.seed-*` | Seed rows vs abstract / event-sourced / tenant-owned aggregates, `raw` columns | [`language-reference/23-domain-services-and-seeds.md`](language-reference/23-domain-services-and-seeds.md) |
+| `loom.macro-*`, `loom.unknown-macro`, `loom.scaffold-*`, `loom.softdelete-*`, `loom.capability-*`, `loom.stamp-*`, `loom.filter-*`, `loom.ignoring-clause-placement` | Macro args / targets, scaffold params, capability hosts, filters / stamps, `ignoring` placement | [`scaffold-macros.md`](scaffold-macros.md), [`capabilities.md`](capabilities.md) |
+| `loom.abstract-*`, `loom.extends-*`, `loom.tph-*`, `loom.polymorphic-*` | Inheritance, TPH / TPC layout | [`inheritance.md`](inheritance.md) |
+| `loom.intrinsic-*`, `loom.duration-*`, `loom.interp-*`, `loom.ternary-*`, `loom.call-arg-*`, `loom.construction-*`, `loom.unknown-*`, `loom.bare-collection-accessor`, `loom.user-visible-concat` | Expression typing — intrinsics, durations, interpolation formats, ternaries, calls, record construction, names / members | this document, [`stdlib.md`](stdlib.md) |
+| `loom.function-*`, `loom.when-unsupported`, `loom.blank-message`, `loom.entity-field-*`, `loom.duplicate-*` | Functions, `when` gates, messages, entity-typed fields, duplicate names / ports / tables | this document |
+| `loom.ui-*`, `loom.page-primitive*`, `loom.store-*`, `loom.datagrid-*`, `loom.chart-*`, `loom.table-*`, `loom.a11y-*`, `loom.slot-*`, `loom.component-*`, `loom.action-*`, `loom.missing-effect-marker`, `loom.match-await*`, `loom.feliz-*`, `loom.flutter-*`, `loom.heex-*`, `loom.frontend-*` | Page metamodel, primitive arity / args, stores and lifetimes, grids / charts, accessibility, slots, actions and effect markers, per-frontend support gaps | [`page-metamodel.md`](page-metamodel.md), [`actions.md`](actions.md) |
+| `loom.e2e-*`, `loom.test-*`, `loom.context-test-unsupported` | e2e bodies, test placement | this document, [`testing.md`](testing.md) |
+| `loom.domain-service-*` | Domain-service purity / read rules | [`domain-services.md`](domain-services.md) |
+| `loom.provenanced-*`, `loom.audit-*`, `loom.correlation-*` | Provenance, audit trails, correlation keys | [`provenance.md`](provenance.md), [`observability.md`](observability.md) |
+| `loom.platform-*`, `loom.java-*`, `loom.vanilla-*`, `loom.*-unsupported-backend`, `loom.*-unsupported` | Honest per-backend / per-adapter gaps — the feature parses but the selected target cannot emit it | [`generators.md`](generators.md), [`platforms.md`](platforms.md) |
 
 Warnings (non-fatal):
 
@@ -1190,10 +1443,19 @@ context Sales {
 
     event OrderConfirmed { order: Order id, at: datetime }
 
-    aggregate Customer { name: string, email: string }
-    aggregate Product  { sku: string, price: Money }
+    aggregate Customer {
+        name: string
+        email: string
+        derived display: string = name
+    }
+    aggregate Product {
+        sku: string
+        price: Money
+        derived display: string = sku
+    }
 
     aggregate Order {
+        number: string
         customerId: Customer id
         status: OrderStatus
         placedAt: datetime
@@ -1232,13 +1494,13 @@ context Sales {
 
         test "money literal builds" {
             let m = Money { 10.5, "USD" }
-            expect m.amount == 10.5
-            expect m.currency == "USD"
+            expect(m.amount).toBe(10.5)
+            expect(m.currency).toBe("USD")
         }
     }
 
     repository Orders for Order {
-        find byCustomer(customerId: Customer id): Order[]
+        find byNumber(number: string): Order?
     }
 }
 ```
