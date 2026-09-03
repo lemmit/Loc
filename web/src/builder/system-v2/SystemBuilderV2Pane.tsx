@@ -1453,10 +1453,10 @@ function Inner({ ctx, path, setPath, onOverview }: {
   );
 
   /** Reset the persisted layout for the current view and re-apply the pure
-   *  computed positions. Behind a `confirm` so a stray tap doesn't wipe the
-   *  user's arrangement. */
+   *  computed positions.  Deliberately NOT behind a confirm: positions are
+   *  cosmetic and re-draggable, and confirming this while declaration
+   *  deletes went unconfirmed was the audit's clearest inversion (H8). */
   const resetLayout = (): void => {
-    if (typeof window !== "undefined" && !window.confirm("Reset positions for this view?")) return;
     clearPersisted(path);
     persistedRef.current = {};
     setPersistedRev((r) => r + 1);

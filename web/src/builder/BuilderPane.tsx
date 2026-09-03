@@ -9,6 +9,7 @@ import { parseDdd } from "./parse";
 import { spliceNodeIfParses } from "./edit-engine";
 import { RefusalLine } from "./refusal";
 import { usePaneHarness } from "./pane-harness";
+import { ConfirmAction, confirmSites, type ConfirmSpec } from "../util/confirm";
 import { collectBodies } from "./page/bodies";
 import { seedFromBody, emitBody, enumStateFields, type BuilderNode } from "./page/model";
 import { toCraft, fromCraft } from "./page/serialize";
@@ -517,15 +518,11 @@ function UiStructurePanel({ uiName, structure, getSource, onApply }: {
             >
               + field
             </Button>
-            <Button
-              size="compact-xs"
-              variant="subtle"
-              color="red"
-              data-testid={`uidecl-store-delete-${s.name}`}
-              onClick={() => onApply(deleteStore(getSource(), uiName, s.name))}
-            >
-              ×
-            </Button>
+            <DeleteButton
+              spec={confirmSites.uiMemberDelete("store", s.name)}
+              testid={`uidecl-store-delete-${s.name}`}
+              onConfirm={() => onApply(deleteStore(getSource(), uiName, s.name))}
+            />
           </Group>
         ))}
         <Button
@@ -601,29 +598,22 @@ function UiStructurePanel({ uiName, structure, getSource, onApply }: {
                 data-testid={`uidecl-menu-addlink-${s.label}`}
                 onChange={(v) => v && onApply(addMenuLink(getSource(), uiName, s.label, { page: v }))}
               />
-              <Button
-                size="compact-xs"
-                variant="subtle"
-                color="red"
-                data-testid={`uidecl-menu-delsection-${s.label}`}
-                onClick={() => onApply(deleteMenuSection(getSource(), uiName, s.label))}
-              >
-                ×
-              </Button>
+              <DeleteButton
+                spec={confirmSites.uiMemberDelete("menu section", s.label)}
+                testid={`uidecl-menu-delsection-${s.label}`}
+                onConfirm={() => onApply(deleteMenuSection(getSource(), uiName, s.label))}
+              />
             </Group>
             {s.entries.map((e, i) => (
               <Group key={`${s.label}:${i}:${e.kind === "page" ? e.page : e.url}`} gap={6} pl={14} wrap="nowrap">
                 <Text size="xs" c="dimmed" style={{ flex: 1, fontFamily: "monospace" }} truncate>
                   {e.kind === "page" ? e.page : `${e.label} → ${e.url}`}
                 </Text>
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  color="red"
-                  onClick={() => onApply(deleteMenuLink(getSource(), uiName, s.label, i))}
-                >
-                  ×
-                </Button>
+                <DeleteButton
+                  spec={confirmSites.uiMemberDelete("menu link", e.kind === "page" ? e.page : e.label)}
+                  testid={`uidecl-menu-dellink-${s.label}-${i}`}
+                  onConfirm={() => onApply(deleteMenuLink(getSource(), uiName, s.label, i))}
+                />
               </Group>
             ))}
           </Box>
@@ -651,6 +641,26 @@ function UiStructurePanel({ uiName, structure, getSource, onApply }: {
         </Group>
       </Popover.Dropdown>
     </Popover>
+  );
+}
+
+// A red `×` that arms the shared inline confirm in place (M-T8.17): the row's
+// splice only runs from the confirm's Yes.  `testid` stays on the trigger so
+// the existing selectors still find it; the row derives `${testid}-yes` /
+// `${testid}-cancel`.
+function DeleteButton({ spec, testid, onConfirm }: { spec: ConfirmSpec; testid: string; onConfirm: () => void }): JSX.Element {
+  return (
+    <ConfirmAction
+      spec={spec}
+      onConfirm={onConfirm}
+      testids={{ base: testid }}
+      size="compact-xs"
+      trigger={(arm) => (
+        <Button size="compact-xs" variant="subtle" color="red" data-testid={testid} aria-label={spec.consequence} onClick={arm}>
+          ×
+        </Button>
+      )}
+    />
   );
 }
 

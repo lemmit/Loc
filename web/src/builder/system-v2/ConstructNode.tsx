@@ -7,6 +7,7 @@
 import { Box, Button, Group, MultiSelect, Select, Stack, Text, TextInput } from "@mantine/core";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { useEffect, useState, type ReactNode } from "react";
+import { InlineConfirm, confirmSites } from "../../util/confirm";
 import type { VBadge, ViewKind } from "./view-graph";
 
 /** A small inline multi-select on the node — used for multi-valued bindings
@@ -188,6 +189,10 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
   const d = data as unknown as ConstructNodeData;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(d.name);
+  // The `×` ARMS an inline confirm under the name (M-T8.17, audit H8: a
+  // whole aggregate used to vanish on one click while a cosmetic layout
+  // reset asked first).  `onDelete` only fires from the confirm's Yes.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const hasDetail =
     (d.inputs?.length ?? 0) > 0 || (d.selects?.length ?? 0) > 0 || (d.actions?.length ?? 0) > 0;
   const detailShown = hasDetail && (!d.detailsLabel || d.detailsOpen === true);
@@ -196,6 +201,7 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
   useEffect(() => {
     setDraft(d.name);
     setEditing(false);
+    setConfirmingDelete(false);
   }, [d.name]);
 
   const commit = (): void => {
@@ -433,13 +439,28 @@ export default function ConstructNode({ data }: NodeProps): JSX.Element {
               styles={{ root: { paddingInline: 4, height: 18, minHeight: 18, color: "white" } }}
               onClick={(e) => {
                 e.stopPropagation();
-                d.onDelete!();
+                setConfirmingDelete(true);
               }}
             >
               ×
             </Button>
           )}
         </Group>
+      )}
+      {confirmingDelete && d.onDelete && (
+        <Box mt={6} className="nodrag">
+          <InlineConfirm
+            spec={confirmSites.declarationDelete(d.kind, d.name)}
+            stacked
+            size="compact-xs"
+            onConfirm={() => {
+              setConfirmingDelete(false);
+              d.onDelete?.();
+            }}
+            onCancel={() => setConfirmingDelete(false)}
+            testids={{ base: "c4system-v2-delete" }}
+          />
+        </Box>
       )}
       {d.expressionEditor && (
         <Box mt={6} className="nodrag" data-testid="c4system-v2-expression-editor">

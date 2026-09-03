@@ -3,6 +3,7 @@ import { Button, Checkbox, Group, Popover, Select, Text, TextInput, UnstyledButt
 import type { Page } from "../../../../src/language/generated/ast.js";
 import { addStateField, deleteStateField, listStateFields, retypeStateField, setStateDefault, type StateFieldInfo } from "./state-fields";
 import type { TypeOption, TypeSpec } from "../system/fields";
+import { InlineConfirm, confirmSites, useConfirm } from "../../util/confirm";
 
 // A small "State (N)" popover in the page-builder toolbar that lists the
 // selected page's `state {}` fields and lets you add / delete / retype / set a
@@ -55,7 +56,12 @@ function StateFieldRow({ field, index, pageName, getSource, types, enumCases, on
   // dropdown (the current value is always selectable so a hand-written default
   // is never clobbered); other fields keep the free-text input.
   const cases = field.base.kind === "named" ? enumCases.get(field.base.target) : undefined;
+  // `✕` arms an inline confirm row under the field; the splice only runs
+  // from its Yes (M-T8.17 — the state panel deleted on one click).
+  const deleteSpec = confirmSites.uiMemberDelete("state field", field.name);
+  const del = useConfirm(deleteSpec, () => onApply(deleteStateField(getSource(), pageName, index)));
   return (
+    <>
     <Group gap={4} mb={4} wrap="nowrap" data-testid="c4state-field">
       <Text size="xs" style={{ width: 64, fontFamily: "monospace" }} truncate>{field.name}</Text>
       <Select
@@ -92,9 +98,13 @@ function StateFieldRow({ field, index, pageName, getSource, types, enumCases, on
           onBlur={() => { if (def !== (field.init ?? "")) onApply(setStateDefault(getSource(), pageName, index, def)); }}
         />
       )}
-      <UnstyledButton data-testid="c4state-delete" onClick={() => onApply(deleteStateField(getSource(), pageName, index))} style={{ color: "var(--mantine-color-red-5)", fontSize: 12 }}>
+      <UnstyledButton data-testid="c4state-delete" aria-label={`Delete state field ${field.name}`} onClick={del.arm} style={{ color: "var(--mantine-color-red-5)", fontSize: 12 }}>
         ✕
       </UnstyledButton>
     </Group>
+    {del.armed && (
+      <InlineConfirm spec={deleteSpec} size="compact-xs" onConfirm={del.confirm} onCancel={del.cancel} testids={{ base: "c4state-delete" }} />
+    )}
+    </>
   );
 }
