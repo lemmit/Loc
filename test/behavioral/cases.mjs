@@ -176,14 +176,28 @@ export function unauthorizedCredentials(authMode, unauthorizedToken) {
   return null;
 }
 
-/** Per-case authorization-ladder probes (M-T9.28 slice 1).
+/** Per-case authorization-ladder probes (M-T9.28).
  *
  *  Keyed by case name; the runner hands the matching entry to `__authzLadder`
- *  in the shared recorder preamble.  Slice 1 is deliberately a HAND-WRITTEN
- *  spec over one gated surface — slice 2 replaces this map with a census
- *  DERIVED from the enriched IR (every `requires` / `policy` / `mask unless` /
- *  tenancy stance), at which point this map goes away.  It is here to prove the
- *  harness seam carries a real ladder, not to be the census.
+ *  in the shared recorder preamble.
+ *
+ *  Slice 1 called this map a placeholder that slice 2 would "replace with a
+ *  census DERIVED from the enriched IR … at which point this map goes away".
+ *  Slice 2 landed and did the opposite, deliberately: the map STAYS and the
+ *  census (`test/ir/authz-gate-census.test.ts`) READS it.  Deriving the probes
+ *  would have made the instrument unable to fail — the same derivation that
+ *  found the gate would have written the arm that "proves" it, so a gate
+ *  emitted as a no-op would have produced a matching probe and a green ladder.
+ *  What the census derives instead is the QUESTION (every gated surface, from
+ *  `deriveContextOperations` ∪ `apiSurfaceCoverage.notLifted`); each ANSWER is
+ *  hand-written here or explicitly pinned with a reason, and the census fails
+ *  when a gate has neither.  Two consequences worth knowing before editing:
+ *  deleting an arm below fails the census, and adding a gate to any corpus
+ *  fixture fails it until an arm or a pin exists.
+ *
+ *  A probe may also be a CONTROL (`unauthorized` expecting a 2xx) — see
+ *  `field-mask` — which is what stops the refusal arms from passing for the
+ *  wrong reason.  The census does not count a control as a refusal.
  *
  *  Shape:
  *    seed    — what the AUTHORIZED principal performs first, so the gated
@@ -278,8 +292,110 @@ export const AUTHZ_LADDERS = {
    */
   "lifecycle-guard": {
     seed: { path: "/api/crates", body: { label: "authz ladder probe" } },
-    gated: { method: "DELETE", path: "/api/crates/{id}" },
+    gated: [
+      // The GUARDED CREATE — added by M-T9.28 slice 2's census, which found it
+      // was the one `requires` in this fixture with no refusal arm anywhere.
+      // It is also the literal #2446 shape and the reason the fixture exists
+      // ("a `requires` in a create parsed clean, emitted nothing, and left the
+      // route OPEN"): the gate runs BEFORE the factory, so it reads the request
+      // principal and nothing else, and a no-op emission is invisible to every
+      // authorized-side assertion.  It addresses no row, which is what lets it
+      // sit beside the crate destroy below despite a spec carrying exactly one
+      // `{id}`.
+      {
+        label: "guarded create (principal-only, no row yet)",
+        method: "POST",
+        path: "/api/shipments",
+        body: { reference: "authz ladder probe" },
+        arms: { anonymous: null, unauthorized: 403, authorized: 201 },
+      },
+      {
+        label: "guarded destroy (principal-only, audited row)",
+        method: "DELETE",
+        path: "/api/crates/{id}",
+      },
+    ],
     arms: { anonymous: null, unauthorized: 403, authorized: 204 },
+    anonymousNote: "dev-stub verifier accepts every request — no anonymous caller exists",
+  },
+
+  /** The CONTROL rung — the arm that keeps every 403 above honest (M-T9.28
+   *  slice 2).
+   *
+   *  Every other entry in this map asserts that the unauthorized principal is
+   *  REFUSED.  None of them can tell "the gate denied" from "this identity is
+   *  refused everywhere": if the dev-stub verifier ever began answering 403 for
+   *  an unrecognised role, every `unauthorized: 403` arm in `auth-simple`,
+   *  `auth-oidc`, `read-gates` and `lifecycle-guard` would stay green while
+   *  proving nothing about any gate.  Only an UNGATED surface answering 2xx to
+   *  that same identity closes it, and until this entry there was none.
+   *
+   *  `field-mask` is the right host: it declares `auth: required` (so the second
+   *  identity is expressible) and carries NO `requires`, `policy` or tenancy
+   *  predicate at all — its one authorization surface is the read mask, which
+   *  redacts a FIELD inside a 200 rather than refusing the request.  So the arm
+   *  doubles as that mask's second-identity witness: the RECORDED body must
+   *  still carry `salary` and `nationalId` as null, because neither harness
+   *  principal holds `people.unmask` (deliberate — see the fixture).  A backend
+   *  that keyed the mask on "is there a principal at all" instead of on the
+   *  permission leaks here and nowhere else. */
+  "field-mask": {
+    seed: {
+      path: "/api/employees",
+      body: { name: "Ladder", salary: 111, nationalId: "NID-L", grade: 1 },
+    },
+    gated: [
+      {
+        label: "control — ungated read, so the second identity must NOT be refused",
+        method: "GET",
+        path: "/api/employees/{id}",
+      },
+      { label: "control — ungated list read", method: "GET", path: "/api/employees" },
+    ],
+    arms: { anonymous: null, unauthorized: 200, authorized: 200 },
+    anonymousNote: "dev-stub verifier accepts every request — no anonymous caller exists",
+  },
+
+  /** `deny write on Account` — the write seam refused, the read seam open
+   *  (M-T9.28 slice 2).
+   *
+   *  What this adds over the fixture's own `test e2e`, which already drives the
+   *  whole deny matrix for the authorized principal: `deny` renders an
+   *  always-false filter through each backend's STATIC (principal-free) filter
+   *  path, so the split between a frozen write and an open read must hold for
+   *  ANY identity.  A backend that reused the write scope as a read filter, or
+   *  keyed either seam on the principal, passes the e2e and fails here.  It is
+   *  also the second half of the control above: one identity admitted on the
+   *  READ and refused on the WRITE of the SAME row, which no single surface can
+   *  show.
+   *
+   *  The read-DENIED aggregates (`Secret`, `Note`) deliberately get no arm:
+   *  they refuse both identities identically, so a second-identity 404 beside
+   *  the fixture's first-identity 404 asserts nothing.  Both are pinned in
+   *  `test/ir/authz-gate-census-pins.ts` under `R.principalFreeGate` with that
+   *  reason — the same call `policy-document.ddd` records at its own site. */
+  "policy-deny": {
+    seed: { path: "/api/accounts", body: { balance: 100 } },
+    gated: [
+      {
+        label: "write-denied aggregate — its READ seam stays open",
+        method: "GET",
+        path: "/api/accounts/{id}",
+        arms: { anonymous: null, unauthorized: 200, authorized: 200 },
+      },
+      {
+        label: "write-denied aggregate — the command load matches no row",
+        method: "POST",
+        path: "/api/accounts/{id}/update",
+        body: { balance: 999 },
+      },
+      {
+        label: "write-denied aggregate — destroy is refused the same way",
+        method: "DELETE",
+        path: "/api/accounts/{id}",
+      },
+    ],
+    arms: { anonymous: null, unauthorized: 404, authorized: 404 },
     anonymousNote: "dev-stub verifier accepts every request — no anonymous caller exists",
   },
 };

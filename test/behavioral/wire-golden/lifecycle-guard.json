@@ -223,6 +223,28 @@
     },
     {
       "seq": 19,
+      "method": "POST",
+      "path": "/api/shipments",
+      "status": 403,
+      "body": {
+        "detail": "Forbidden: currentUser.permissions.contains(permissions.manage)",
+        "instance": "/api/shipments",
+        "status": 403,
+        "title": "Forbidden",
+        "type": "about:blank"
+      }
+    },
+    {
+      "seq": 20,
+      "method": "POST",
+      "path": "/api/shipments",
+      "status": 201,
+      "body": {
+        "id": "<volatile:key>"
+      }
+    },
+    {
+      "seq": 21,
       "method": "DELETE",
       "path": "/api/crates/{id}",
       "status": 403,
@@ -235,7 +257,7 @@
       }
     },
     {
-      "seq": 20,
+      "seq": 22,
       "method": "DELETE",
       "path": "/api/crates/{id}",
       "status": 204,
