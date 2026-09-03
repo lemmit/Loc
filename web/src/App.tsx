@@ -46,6 +46,8 @@ import type {
   VirtualFile,
 } from "./build/protocol";
 import { inlineSourcemapArtifacts, overlaySourcemapArtifacts } from "./build/strip-sourcemap";
+import { correspondenceAt, sourceSpanFor } from "./build/correspondence";
+import { diffGenerated, type OutputDiff } from "./build/output-diff";
 import type { BundleOk } from "./bundle/protocol";
 import {
   engineRegistry,
@@ -111,6 +113,7 @@ import {
   type AuthStubConfig,
   DEFAULT_AUTH_STUB,
   devClaimsHeader,
+  EXPLORER_MODES,
   formatUnsupportedDeployables,
   type DockTab,
   type LayoutCtx,
@@ -422,8 +425,11 @@ export default function App(): JSX.Element {
     // the syllabus.
     "user",
   );
-  const explorerMode: ExplorerMode =
-    explorerModeRaw === "generated" || explorerModeRaw === "examples" ? explorerModeRaw : "user";
+  // Guarded against the persisted value: it can hold anything an older (or
+  // newer) build wrote, and M-T8.20 grew the set from three views to six.
+  const explorerMode: ExplorerMode = EXPLORER_MODES.includes(explorerModeRaw)
+    ? explorerModeRaw
+    : "user";
   const [examplesOpen, setExamplesOpen] = useState(false);
   const [agentPrompt, setAgentPrompt] = useState<AgentPromptRequest | null>(null);
   const agentPromptNonceRef = useRef(0);
@@ -1735,6 +1741,64 @@ export default function App(): JSX.Element {
     [files],
   );
 
+  // ---------------------------------------------------------------------
+  // M-T8.20 — the `.loom/` views, the output diff, the correspondence.
+  //
+  // Both derived views ride the SAME `generateSuccess` the file pane reads,
+  // so they can never describe a different generate than the tree beside
+  // them — the reason they are read straight off the result rather than
+  // mirrored into state of their own.
+  // ---------------------------------------------------------------------
+  const apiSurface = generateSuccess?.api ?? null;
+  const sourceMap = generateSuccess?.sourcemap ?? null;
+
+  // Added / changed / removed versus the PREVIOUS generate.  The baseline is
+  // a ref (not state): it must advance exactly once per generate, and doing
+  // that in the same effect that computes the diff is what keeps "changed"
+  // meaning "changed by the edit you just made" rather than accumulating.
+  const previousFilesRef = useRef<VirtualFile[] | null>(null);
+  const [outputDiff, setOutputDiff] = useState<OutputDiff>(() => diffGenerated([], null));
+  useEffect(() => {
+    if (!generateSuccess) return;
+    setOutputDiff(diffGenerated(files, previousFilesRef.current));
+    previousFilesRef.current = files;
+  }, [files, generateSuccess]);
+  // A different project is not a diff — switching workspace or example would
+  // otherwise mark the entire new tree as "changed" against the old one's.
+  useEffect(() => {
+    previousFilesRef.current = null;
+    setOutputDiff(diffGenerated([], null));
+  }, [workspace.activeId, exampleId]);
+
+  // Source ↔ output correspondence.  The editor reports the line under the
+  // pointer; everything else is derived, so a hover costs one walk of the
+  // recorded regions and no state beyond the line itself.
+  const [correspondenceLine, setCorrespondenceLine] = useState<number | null>(null);
+  const [reverseHover, setReverseHover] = useState<{ file: string; line: number } | null>(null);
+  const [colourMap, setColourMap] = usePersistedState<boolean>(
+    "loom.correspondence.colourMap",
+    false,
+  );
+  const correspondence = useMemo(() => {
+    if (!sourceMap || correspondenceLine === null) return null;
+    // `sourceRef` is the live editor text (ahead of the controller snapshot
+    // mid-typing); the line→offset index has to be built against exactly the
+    // text the user is pointing at, or every span is off by an edit.
+    return correspondenceAt(sourceMap, sources.activePath, correspondenceLine, sourceRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceMap, correspondenceLine, sources.activePath, editorSourceTick]);
+  const reverseSpan = useMemo(() => {
+    if (!sourceMap || !reverseHover) return null;
+    return sourceSpanFor(
+      sourceMap,
+      reverseHover.file,
+      reverseHover.line,
+      undefined,
+      sourceRef.current,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceMap, reverseHover, editorSourceTick]);
+
   // Derive the migration + wire-contract delta the live edit implies vs the
   // last-committed baseline.  The heavy lowering of BOTH source trees happens
   // in the build worker; here we assemble the two trees — the live workspace
@@ -2172,6 +2236,9 @@ export default function App(): JSX.Element {
     pinEvolutionBaseline,
     runCaptureSnapshot: (): void => void runCaptureSnapshot(),
     runDownloadZip,
+    setCorrespondenceLine,
+    setReverseHover,
+    setColourMap,
   });
 
   const buildClient = buildClientRef.current;
@@ -2231,6 +2298,12 @@ export default function App(): JSX.Element {
       selectedFile,
       selectedPath,
       unsupportedDeployables,
+      apiSurface,
+      sourceMap,
+      outputDiff,
+      correspondence,
+      reverseSpan,
+      colourMap,
       reqMethod,
       reqPath,
       reqBody,
@@ -2313,6 +2386,12 @@ export default function App(): JSX.Element {
       selectedFile,
       selectedPath,
       unsupportedDeployables,
+      apiSurface,
+      sourceMap,
+      outputDiff,
+      correspondence,
+      reverseSpan,
+      colourMap,
       reqMethod,
       reqPath,
       reqBody,

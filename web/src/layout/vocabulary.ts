@@ -440,3 +440,128 @@ export const USED_BY = {
   label: "Used by",
   none: "Nothing references this construct.",
 } as const;
+
+// ---------------------------------------------------------------------------
+// M-T8.20 — the `.loom/` bundle as views, the output diff, and the
+// source ↔ output correspondence.
+// ---------------------------------------------------------------------------
+
+/** The Explorer switcher's views, beyond the three M-T8.18 shipped. */
+export const EXPLORER_VIEW = {
+  user: "User code",
+  generated: PANE.generated,
+  examples: PANE.examples,
+  diagrams: "Diagrams",
+  api: "API",
+  traceability: "Traceability",
+} as const;
+
+/** The Diagrams view — the `.loom/*.mmd` files, rendered.  Labels are the
+ *  view's own names for artifacts whose filenames are terse; the blurb is one
+ *  sentence saying what the diagram answers. */
+export const DIAGRAMS = {
+  hint: "Rendered from the .loom/ bundle on every generate.",
+  empty: (isDesktop: boolean): string =>
+    `No diagrams yet — ${nextStepMid("generate", isDesktop)} to derive them from the model.`,
+  label: {
+    "domain.mmd": "Domain model",
+    "er.mmd": "Entity relationships",
+    "workflows.mmd": "Workflows",
+    "sequence.mmd": "Sequences",
+    "deployment.mmd": "Deployment",
+    "traceability.mmd": "Traceability graph",
+  } as Record<string, string>,
+  blurb: {
+    "domain.mmd": "Aggregates, value objects and events as a class diagram.",
+    "er.mmd": "The tables the backends persist, and their foreign keys.",
+    "workflows.mmd": "Each workflow's steps as a flowchart.",
+    "sequence.mmd": "Operation call flow across contexts.",
+    "deployment.mmd": "Deployables, their platforms and what they talk to.",
+    "traceability.mmd": "Requirements → solutions → test cases.",
+  } as Record<string, string>,
+} as const;
+
+/** The API view — the operations the generated backends serve, grouped by
+ *  aggregate, plus the channels `.loom/asyncapi.yaml` describes. */
+export const API_VIEW = {
+  operations: "Operations",
+  channels: "Channels",
+  hint: "Derived from the model — the same route set every backend emits.",
+  empty: (isDesktop: boolean): string =>
+    `No operations yet — ${nextStepMid("generate", isDesktop)}.`,
+  noChannels: "This system declares no channels.",
+  /** `carries(2)` → "carries 2 events". */
+  carries: (n: number): string => `carries ${countOf(n, "event")}`,
+} as const;
+
+/** The Traceability view — the rendered `.loom/` requirement reports. */
+export const TRACEABILITY_VIEW = {
+  hint: "Requirements, coverage and gaps, as the generator reports them.",
+  empty: (isDesktop: boolean): string =>
+    `No traceability report yet — ${nextStepMid("generate", isDesktop)}.`,
+  label: {
+    "traceability.md": "Traceability",
+    "coverage.md": "Coverage",
+    "gaps.md": "Gaps",
+    "traceability-matrix.md": "Matrix",
+    "datasources.md": "Data sources",
+  } as Record<string, string>,
+} as const;
+
+/** Changed-since-last-generate markers on the generated tree, and the
+ *  per-commit output diff. */
+export const OUTPUT_DIFF = {
+  added: "added",
+  changed: "changed",
+  removed: "removed",
+  /** The tree header's summary — "1 added, 3 changed". */
+  summary: (added: number, changed: number, removed: number): string =>
+    [
+      added > 0 ? `${added} added` : null,
+      changed > 0 ? `${changed} changed` : null,
+      removed > 0 ? `${removed} removed` : null,
+    ]
+      .filter(Boolean)
+      .join(", ") || "no output changes",
+  sinceLast: "since the last generate",
+  /** The History commit section. */
+  heading: "What changed in the output",
+  none: "This commit changed no generated files.",
+  /** A deployable group's row — "api · 6 files". */
+  group: (name: string, n: number): string => `${name} · ${countOf(n, "file")}`,
+  /** The group for files that belong to no deployable. */
+  rootGroup: "project root",
+} as const;
+
+/** Source ↔ output correspondence (the godbolt mapping). */
+export const CORRESPONDENCE = {
+  /** The switch in the Explorer chrome. */
+  colourMap: "Colour map",
+  colourMapHint:
+    "Tint every declaration and the generated regions it produced with the same colour.",
+  /** The banner above the generated tree while a declaration is hovered. */
+  from: (construct: string, files: number): string => `${construct} → ${countOf(files, "file")}`,
+  /** Hover copy on a marked row. */
+  producedBy: (construct: string): string => `Produced by ${construct}`,
+  /** The reverse direction's status line. */
+  backTo: (construct: string | undefined, line: number): string =>
+    construct ? `${construct} — line ${line}` : `line ${line}`,
+  none: "No mapping recorded for this line.",
+  /** Shown when the generate produced no map at all. */
+  unavailable: "Correspondence needs a system generate — this source produced no map.",
+} as const;
+
+/** The preview's element-select mode — click the running app, land on the
+ *  declaration that renders it. */
+export const SELECT_MODE = {
+  label: "Select",
+  hint: "Click an element in the preview to jump to the page that renders it.",
+  active: "Click an element in the preview…",
+  /** No `data-testid` on the clicked element. */
+  unidentified: "That element carries no test id, so it can't be traced back.",
+  /** Resolved, but no generated page claims it. */
+  unresolved: (testid: string): string => `No generated page claims “${testid}”.`,
+  found: (page: string): string => `Opened ${page}`,
+  openBuilder: "Open in Builder",
+  askAgent: "Ask the agent about it",
+} as const;

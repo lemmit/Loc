@@ -4,7 +4,14 @@ import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
 import { lowerModel, lowerProject, mergeLoomModels } from "../../../src/ir/lower/lower.js";
 import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
+import { allContexts } from "../../../src/ir/types/loom-ir.js";
 import type { EnrichedLoomModel, LoomModel } from "../../../src/ir/types/loom-ir.js";
+// The api's operation set as IR DATA — the single derivation all five backend
+// route builders render from (`src/ir/util/api-surface.ts`).  Reading it here
+// is what lets the playground's API view describe the generated backend's HTTP
+// surface without parsing generated source or booting anything, and keeps the
+// view correct for a .NET / Java / Phoenix / Python deployable too.
+import { deriveContextOperations } from "../../../src/ir/util/api-surface.js";
 import { validateLoomModel } from "../../../src/ir/validate/validate.js";
 // `system/index` (multi-backend system generation) is NOT imported statically:
 // it pulls the generation registry → every backend generator (.NET / Java /
@@ -24,18 +31,28 @@ import { runEvolution } from "./evolution.js";
 // backend and supplies that package's pins (B2.1).
 import { generateTypeScript } from "../../../src/platform/hono/v4/emit.js";
 import { BACKEND_PINS as HONO_V4_PINS } from "../../../src/platform/hono/v4/pins.js";
+import { fnv1a32 } from "../util/hash.js";
 import { MemoryVfs } from "../vfs/memory-vfs.js";
 import { loadProjectFromVfs } from "./project-loader.js";
 import { seedBuiltinPacks } from "./template-bundled.js";
 import { setWorkerVfs } from "./worker-vfs.js";
 import type {
+  ApiOperationView,
+  ApiSurfaceView,
   BuildDiagnostic,
   BuildRpcRequest,
   BuildRpcResponse,
+  ChannelView,
   GenerateResult,
+  LoomSourceMap,
   SnapshotResult,
   VirtualFile,
 } from "./protocol.js";
+
+/** The one artifact the always-on recorder adds to the emission.  Stripped
+ *  back out unless the caller passed `sourcemap: true` — see
+ *  `systemOptions`. */
+const SOURCEMAP_ARTIFACT = ".loom/sourcemap.json";
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -140,6 +157,11 @@ function filesFromMap(map: Map<string, string>): VirtualFile[] {
       path,
       content,
       size: content.length,
+      // FNV-1a, the playground's existing non-cryptographic hash: the diff
+      // only has to answer "did these bytes change", for ~100 files on every
+      // keystroke-driven regenerate — which rules out `crypto.subtle` (async,
+      // so the whole response would have to await it).
+      hash: fnv1a32(content),
     });
   }
   out.sort((a, b) => a.path.localeCompare(b.path));
@@ -202,18 +224,98 @@ async function generateFromAst(input: {
     // import-header note + the dynamic-import seam for future server-side gen).
     const { generateSystems } = await import("../../../src/system/index.js");
     return wrapGenerate("system", input.diagnostics, irDiags, () =>
-      generateSystems(input.model, {
-        sourcemap: input.sourcemap,
-        sourceTexts: input.sourceTexts,
-      }).files,
+      systemEmission(
+        generateSystems(input.model, systemOptions(input)).files,
+        loom,
+        input.sourcemap === true,
+      ),
     );
   }
   if (loom.contexts.length > 0) {
-    return wrapGenerate("ts", input.diagnostics, irDiags, () =>
-      generateTypeScript(input.model, HONO_V4_PINS),
-    );
+    return wrapGenerate("ts", input.diagnostics, irDiags, () => ({
+      files: generateTypeScript(input.model, HONO_V4_PINS),
+    }));
   }
   return emptyResult(input.diagnostics, irDiags);
+}
+
+/** `GenerateSystemOptions` for a worker generate.
+ *
+ *  `sourcemap` is now unconditionally ON: the correspondence view
+ *  (M-T8.20 slice 3) needs the construct→file map on EVERY generate, not
+ *  only on the `--sourcemap` pass that feeds the boot bundle.  Recording
+ *  it costs one extra `Map` of regions and — crucially — adds exactly ONE
+ *  file to the emission (`.loom/sourcemap.json`), which `systemEmission`
+ *  strips back out unless the caller asked for it.
+ *
+ *  `sourceTexts` stays gated on the caller's flag, and that gate is what
+ *  makes the strip sufficient: without it `src/system/index.ts` skips the
+ *  Source Map v3 / JSR-45 sidecar loops entirely, so no `.ts.map` is
+ *  emitted and no `.ts` gains a trailing `sourceMappingURL` directive.
+ *  Every other emitted byte is identical with the recorder on or off. */
+function systemOptions(input: { sourcemap?: boolean; sourceTexts?: Map<string, string> }): {
+  sourcemap: true;
+  sourceTexts?: ReadonlyMap<string, string>;
+} {
+  return {
+    sourcemap: true,
+    sourceTexts: input.sourcemap ? input.sourceTexts : undefined,
+  };
+}
+
+/** Split a system emission into the files the caller sees, the parsed
+ *  sourcemap it always gets back, and the API surface the API view renders. */
+function systemEmission(
+  files: Map<string, string>,
+  loom: EnrichedLoomModel,
+  keepArtifact: boolean,
+): EmissionParts {
+  const raw = files.get(SOURCEMAP_ARTIFACT);
+  if (!keepArtifact) files.delete(SOURCEMAP_ARTIFACT);
+  let sourcemap: LoomSourceMap | undefined;
+  if (raw !== undefined) {
+    try {
+      sourcemap = JSON.parse(raw) as LoomSourceMap;
+    } catch {
+      // A map we can't parse is a map we don't ship — the generate itself
+      // is unaffected, and the correspondence view degrades to "no
+      // correspondence recorded" rather than throwing on hover.
+      sourcemap = undefined;
+    }
+  }
+  return { files, sourcemap, api: deriveApiSurface(loom) };
+}
+
+/** Platform-neutral operation + channel inventory for the API view.
+ *  Reads `deriveContextOperations` — the derivation all five backend route
+ *  builders render from — so this describes what the generated backend
+ *  actually serves regardless of which platform emitted it. */
+function deriveApiSurface(loom: EnrichedLoomModel): ApiSurfaceView {
+  const operations: ApiOperationView[] = [];
+  const channels: ChannelView[] = [];
+  for (const ctx of allContexts(loom)) {
+    for (const op of deriveContextOperations(ctx)) {
+      operations.push({
+        context: ctx.name,
+        aggregate: op.aggregate,
+        method: op.method.toUpperCase(),
+        path: op.path,
+        id: op.id,
+        kind: op.kind,
+      });
+    }
+    for (const ch of ctx.channels ?? []) {
+      channels.push({
+        context: ctx.name,
+        name: ch.name,
+        carries: [...ch.carries],
+        delivery: ch.delivery,
+        retention: ch.retention,
+        ...(ch.key ? { key: ch.key } : {}),
+      });
+    }
+  }
+  return { operations, channels };
 }
 
 /** Multi-file generation path.  The merged `LoomModel` is already
@@ -240,10 +342,11 @@ async function generateFromLoom(input: {
   if (loom.systems.length > 0) {
     const { generateSystemsFromLoom } = await import("../../../src/system/index.js");
     return wrapGenerate("system", input.diagnostics, irDiags, () =>
-      generateSystemsFromLoom(loom, {
-        sourcemap: input.sourcemap,
-        sourceTexts: input.sourceTexts,
-      }).files,
+      systemEmission(
+        generateSystemsFromLoom(loom, systemOptions(input)).files,
+        loom,
+        input.sourcemap === true,
+      ),
     );
   }
   // Multi-file project with only loose contexts (no `system` block)
@@ -281,18 +384,30 @@ function hasError(diags: BuildDiagnostic[]): boolean {
   return diags.some((d) => d.severity === "error");
 }
 
+/** What one generate produced: the file map plus the two derived views the
+ *  playground reads back beside it (never as files — see
+ *  `GenerateOk.sourcemap`). */
+interface EmissionParts {
+  files: Map<string, string>;
+  sourcemap?: LoomSourceMap;
+  api?: ApiSurfaceView;
+}
+
 function wrapGenerate(
   mode: "system" | "ts",
   parseDiags: BuildDiagnostic[],
   irDiags: BuildDiagnostic[],
-  emit: () => Map<string, string>,
+  emit: () => EmissionParts,
 ): GenerateResult {
   try {
+    const parts = emit();
     return {
       ok: true,
       mode,
-      files: filesFromMap(emit()),
+      files: filesFromMap(parts.files),
       diagnostics: [...parseDiags, ...irDiags],
+      ...(parts.sourcemap ? { sourcemap: parts.sourcemap } : {}),
+      ...(parts.api ? { api: parts.api } : {}),
     };
   } catch (err) {
     return {

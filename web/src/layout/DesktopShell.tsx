@@ -24,7 +24,20 @@ import { PaneErrorBoundary } from "../PaneErrorBoundary";
 import { ExamplesPane } from "./ExamplesPane";
 import { FirstRunCard } from "./FirstRunCard";
 import { type CenterView, type ExplorerMode, modeLabel, type LayoutCtx } from "./ctx";
-import { nextStep, nextStepMid, PANE, STAGE } from "./vocabulary";
+import { ApiPane, DiagramsPane, TraceabilityPane } from "./LoomViewsPane";
+import { EXPLORER_VIEW, nextStep, nextStepMid, PANE, STAGE } from "./vocabulary";
+
+// The Explorer switcher, in the order a reader walks them: your source, the
+// emitted tree, the three `.loom/`-bundle views over it (M-T8.20), then the
+// examples syllabus.
+const EXPLORER_TABS: readonly ExplorerMode[] = [
+  "user",
+  "generated",
+  "diagrams",
+  "api",
+  "traceability",
+  "examples",
+];
 
 // The active non-source document in the center area — a file opened
 // from either Explorer view.  `source` (main.ddd) is the other tab.
@@ -172,21 +185,64 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                       {files.length} file{files.length === 1 ? "" : "s"} · {modeLabel(generateResult)}
                     </Text>
                   </RegionHeader>
-                  <Box px="xs" py={4} style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
-                    <SegmentedControl
-                      size="xs"
-                      fullWidth
-                      value={explorerMode}
-                      onChange={(v) => setExplorerMode(v as ExplorerMode)}
-                      data={[
-                        { label: "User code", value: "user" },
-                        { label: PANE.generated, value: "generated" },
-                        { label: PANE.examples, value: "examples" },
-                      ]}
-                      data-testid="explorer-mode"
-                    />
+                  {/* Six views in an 18 % column: a SegmentedControl would
+                      squeeze each label to two characters, so the switcher is
+                      a wrapping row of buttons instead.  It keeps the
+                      `explorer-mode` test id on the container and each label
+                      as plain text, which is what the ~6 specs that click
+                      `getByTestId("explorer-mode").getByText("Generated")`
+                      match on. */}
+                  <Box
+                    px={4}
+                    py={4}
+                    style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+                    data-testid="explorer-mode"
+                  >
+                    <Box style={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
+                      {EXPLORER_TABS.map((tab) => (
+                        <UnstyledButton
+                          key={tab}
+                          onClick={() => setExplorerMode(tab)}
+                          data-testid={`explorer-mode-${tab}`}
+                          data-active={explorerMode === tab || undefined}
+                          px={8}
+                          py={3}
+                          style={{
+                            borderRadius: 4,
+                            background:
+                              explorerMode === tab
+                                ? "var(--mantine-color-dark-5)"
+                                : "transparent",
+                          }}
+                        >
+                          <Text
+                            size="xs"
+                            fw={explorerMode === tab ? 600 : 400}
+                            c={explorerMode === tab ? undefined : "dimmed"}
+                          >
+                            {EXPLORER_VIEW[tab]}
+                          </Text>
+                        </UnstyledButton>
+                      ))}
+                    </Box>
                   </Box>
-                  {explorerMode === "examples" ? (
+                  {explorerMode === "diagrams" ? (
+                    <DiagramsPane
+                      files={files}
+                      activePath={generatedSelection}
+                      isDesktop={ctx.isDesktop}
+                      onOpen={(doc) => onPickGenerated(doc.path)}
+                    />
+                  ) : explorerMode === "traceability" ? (
+                    <TraceabilityPane
+                      files={files}
+                      activePath={generatedSelection}
+                      isDesktop={ctx.isDesktop}
+                      onOpen={(doc) => onPickGenerated(doc.path)}
+                    />
+                  ) : explorerMode === "api" ? (
+                    <ApiPane ctx={ctx} />
+                  ) : explorerMode === "examples" ? (
                     // Sample systems by concept, each opening in a NEW
                     // workspace (M-T8.18, audit H5).
                     <ExamplesPane ctx={ctx} />
