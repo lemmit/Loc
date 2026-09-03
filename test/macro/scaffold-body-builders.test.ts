@@ -242,6 +242,82 @@ describe("scaffoldOperations — per-operation modals", () => {
     const order = findNode(model, "Aggregate", "Order");
     expect(printExpr(scaffoldOperations(order))).toBe("Group()");
   });
+
+  // ── The soft-delete break-out ──────────────────────────────────────────────
+  // A soft delete puts the row behind the `softDeletable` capability's read
+  // filter, so the Detail page it was invoked from immediately re-reads its own
+  // record and gets a 404: the user is left on a page of stale fields under
+  // "Couldn't load <entity>", with the modal's success toast still fading.  Such
+  // an operation renders as an `Action` with `then: navigate("/<plural>")`
+  // instead — the same do-it-then-leave shape `DestroyForm` already uses for the
+  // hard delete.
+  //
+  // Detection is by BODY (`isDeleted := true`), never by name: the name belongs
+  // to the author, the assignment is what the read filter reacts to.  `restore`
+  // writes the same field with `false` and is the control that separates
+  // "reads the assignment" from "matches the field name".
+  //
+  // Mutation-proved: `s.value.value === "true"` → `!== "false"` in
+  // `removesRecordFromReads` makes `restore` break out too and fails the
+  // "restore keeps its modal" arm; dropping the `instanceVar &&` guard fails the
+  // "no in-scope record" arm.
+  describe("a record-removing operation leaves the page instead of opening a modal", () => {
+    const softDeletable = withOps(
+      "isDeleted: bool\n" +
+        "operation softDelete() { isDeleted := true }\n" +
+        "operation restore() { isDeleted := false }\n" +
+        "operation approve() { }",
+    );
+
+    it("renders the soft delete as an Action that navigates to the list", async () => {
+      const { model, errors } = await parseString(softDeletable);
+      expect(errors).toEqual([]);
+      const order = findNode(model, "Aggregate", "Order");
+      const src = flat(printExpr(scaffoldOperations(order, "data")));
+      expect(src).toContain(
+        'Action(data.softDelete, then: navigate("/orders"), testid: "orders-op-softDelete")',
+      );
+      // It must not ALSO keep a modal — that would leave the page mounted.
+      expect(src).not.toContain('testid: "orders-op-softDelete"),\n      title:');
+      expect(src).not.toMatch(/OperationForm\(data\.softDelete/);
+      expect(
+        parseRawResult(inPage(printExpr(scaffoldOperations(order, "data"))))
+          .parserErrors.map((e) => e.message)
+          .join("\n"),
+      ).toBe("");
+    });
+
+    it("`restore` writes the same field with false, and keeps its modal", async () => {
+      const { model } = await parseString(softDeletable);
+      const order = findNode(model, "Aggregate", "Order");
+      const src = flat(printExpr(scaffoldOperations(order, "data")));
+      expect(src).toContain("OperationForm(data.restore");
+      expect(src).not.toContain("Action(data.restore");
+      // …and an ordinary operation is untouched.
+      expect(src).toContain("OperationForm(data.approve");
+    });
+
+    it("keeps the modal when there is no in-scope record to read the id off", async () => {
+      const { model } = await parseString(softDeletable);
+      const order = findNode(model, "Aggregate", "Order");
+      // No `instanceVar` — `Action(<instance>.<op>)` has no receiver to resolve,
+      // so the by-name modal is the only shape that works.
+      const src = flat(printExpr(scaffoldOperations(order)));
+      expect(src).toContain("OperationForm(of: Order, op: softDelete");
+      expect(src).not.toContain("Action(");
+    });
+
+    it("an operation with parameters is never treated as a record removal", async () => {
+      const { model } = await parseString(
+        withOps("isDeleted: bool\noperation purge(reason: string) { isDeleted := true }"),
+      );
+      const order = findNode(model, "Aggregate", "Order");
+      const src = flat(printExpr(scaffoldOperations(order, "data")));
+      // It needs its form — an `Action` fires with no arguments.
+      expect(src).toContain("OperationForm(data.purge");
+      expect(src).not.toContain("Action(data.purge");
+    });
+  });
 });
 
 describe("scaffold list/detail — internal & secret fields stay off the page", () => {

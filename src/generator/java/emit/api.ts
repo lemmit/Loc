@@ -680,6 +680,14 @@ export function renderApiExceptionAdvice(
    *  422 handler then resolves each field error through `MessageSource` for the
    *  request locale.  False ⇒ byte-identical to pre-catalog output (M-T1.11). */
   localizeMessages = false,
+  /** True when a hard delete in this project can trip a Postgres
+   *  `foreign_key_violation` (a cross-aggregate `X id` FK is `ON DELETE
+   *  RESTRICT`).  The integrity handler below carries BOTH the 23503 and the
+   *  23505 arm, so it must be emitted when either can fire: gating it on
+   *  `hasUniqueKeys` alone left a reference-carrying, unique-free project
+   *  answering 500 on a still-referenced delete, where the other four backends
+   *  — and this project's own OpenAPI declaration — say `ReferencedInUse`. */
+  hasReferencedDelete = false,
 ): string {
   // Structural-conflict statuses resolved through the `httpStatus` mapper
   // (expressible-builtins.md §3 / M-T3.4a): a literal 409 by default, or the
@@ -698,6 +706,8 @@ export function renderApiExceptionAdvice(
   // arm further down (`no route for <verb> <path>`) is a different concern and
   // stays literal, on this backend and on the other four.
   const notFoundStatus = resolveErrorStatus("NotFound", structuralErrorStatuses);
+  // One handler, two integrity arms — emitted when EITHER can fire.
+  const hasIntegrityHandler = hasUniqueKeys || hasReferencedDelete;
   const domainTitle = problemTitle(domainStatus);
   const forbiddenTitle = problemTitle(forbiddenStatus);
   const notFoundTitle = problemTitle(notFoundStatus);
@@ -706,9 +716,10 @@ export function renderApiExceptionAdvice(
     ``,
     `import java.util.stream.Collectors;`,
     ``,
-    // The 23505 → 409 handler (+ its import) is emitted only when some aggregate
-    // declares a `unique (...)` key — a unique-free project stays byte-identical.
-    hasUniqueKeys && `import org.springframework.dao.DataIntegrityViolationException;`,
+    // The integrity handler (+ its import) is emitted when some aggregate declares
+    // a `unique (...)` key OR a hard delete here can trip a still-referenced FK — a
+    // project that can do neither stays byte-identical.
+    hasIntegrityHandler && `import org.springframework.dao.DataIntegrityViolationException;`,
     // The optimistic-lock → 409 handler (+ its import) is emitted only when some
     // aggregate is `versioned` — a version-free project stays byte-identical.
     hasVersioned && `import org.springframework.orm.ObjectOptimisticLockingFailureException;`,
@@ -828,7 +839,7 @@ export function renderApiExceptionAdvice(
     `        return respond(problem(${disallowedStatus}, "Disallowed", e.getMessage(), request), ${disallowedStatus});`,
     `    }`,
     ``,
-    hasUniqueKeys && [
+    hasIntegrityHandler && [
       `    @ExceptionHandler(DataIntegrityViolationException.class)`,
       `    public ResponseEntity<ProblemDetail> onConflict(DataIntegrityViolationException e, WebRequest request) {`,
       `        // A DB constraint tripped; Spring translates it to DataIntegrityViolationException.`,
@@ -1101,9 +1112,9 @@ export function renderApiExceptionAdvice(
     `    }`,
 
     // The SQLState reader is emitted only alongside the DataIntegrityViolation
-    // handler that calls it (gated on `hasUniqueKeys`), so a unique-free project
-    // stays byte-identical.
-    hasUniqueKeys && [
+    // handler that calls it, so a project with neither integrity arm stays
+    // byte-identical.
+    hasIntegrityHandler && [
       ``,
       `    /** First Postgres SQLState in a DataAccessException's cause chain, or null`,
       `     *  — 23503 = foreign_key_violation (still referenced), 23505 = unique. */`,

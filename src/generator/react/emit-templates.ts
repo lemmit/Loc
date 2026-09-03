@@ -107,6 +107,7 @@ import type { StrictFieldMap } from "./strict-field-map";
 
 interface ProblemDetails {
   title?: string;
+  detail?: string;
   errors?: { pointer: string; message: string }[];
 }
 
@@ -141,7 +142,12 @@ export function applyServerErrors<TPayload, TFormState extends FieldValues>({
     }
     return { kind: "applied" };
   }
-  return pd.title ? { kind: "global", title: pd.title } : { kind: "unhandled" };
+  // The domain sentence lives in RFC 7807 \`detail\` ("Precondition failed: …");
+  // \`title\` is only the reason phrase ("Unprocessable Entity").  Surfacing the
+  // phrase is what made every rejected form read as a status code, so prefer
+  // \`detail\` and fall back to \`title\`.
+  const globalMessage = pd.detail || pd.title;
+  return globalMessage ? { kind: "global", title: globalMessage } : { kind: "unhandled" };
 }
 
 const pointerToFlat = (p: string) =>

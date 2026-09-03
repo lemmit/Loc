@@ -1005,10 +1005,17 @@ export function tryRenderNavigateCall(
 ): string | undefined {
   if (name !== "navigate") return undefined;
   const pageRef = args[0];
+  // A STRING first argument is a literal route path (`navigate("/orders")`).
+  // `pageRoutes` is keyed by the page's bare name, and the scaffold names every
+  // aggregate's list page `List` inside its own `area` — so a page REF cannot
+  // address one list unambiguously, and a body that must reach a specific route
+  // spells the path.  Before this arm such a call silently resolved to `"/"`.
   const route =
-    pageRef && pageRef.kind === "ref"
-      ? (ctx.pageRoutes?.get(pageRef.name) ?? `/${snake(pageRef.name)}`)
-      : "/";
+    pageRef && pageRef.kind === "literal" && pageRef.lit === "string"
+      ? pageRef.value
+      : pageRef && pageRef.kind === "ref"
+        ? (ctx.pageRoutes?.get(pageRef.name) ?? `/${snake(pageRef.name)}`)
+        : "/";
   ctx.usesNavigate = true;
   // A second arg is an opaque route-state expression (`navigate(Page, sel)`);
   // the contract's `stateExpr` escape hatch embeds it verbatim.

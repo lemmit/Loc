@@ -54,8 +54,13 @@ export function buildExternSubclassFile(agg: AggregateIR, ctx: BoundedContextIR)
     const hookName = `${lowerFirst(op.name)}Extern`;
     const msg = `extern operation '${op.name}' on ${agg.name} is not implemented — write its body in src/domain/${slug}.ts`;
     methods.push(
+      // `NotImplementedError`, not a bare `Error`: an unfilled seam is an ABSENT
+      // implementation, not a server fault, and the router's ladder maps this
+      // class to 501 carrying the message above.  A bare `Error` fell through to
+      // the generic 500 `"internal"` arm — the same answer a real crash gives,
+      // with the file-to-fill-in hint discarded on the way out.
       `  protected override ${hookName}(${params}): ${ret} {\n` +
-        `    throw new Error(${JSON.stringify(msg)});\n` +
+        `    throw new NotImplementedError(${JSON.stringify(msg)});\n` +
         `  }`,
     );
   }
@@ -64,7 +69,12 @@ export function buildExternSubclassFile(agg: AggregateIR, ctx: BoundedContextIR)
   // string literals first so a name inside the throw message can't count).
   const scan = sigScanParts.join(" ").replace(/"(?:\\.|[^"\\])*"/g, '""');
   const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
-  const imports: string[] = [`import { ${agg.name}Base } from "./${slug}.base";`];
+  // Kept in the emitted file's ASCII import order (Biome's sorter) — `./errors`
+  // sorts before or after `./<agg>.base` depending on the aggregate's name.
+  const baseImport = `import { ${agg.name}Base } from "./${slug}.base";`;
+  const errorsImport = `import { NotImplementedError } from "./errors";`;
+  const imports: string[] =
+    `./${slug}.base` < "./errors" ? [baseImport, errorsImport] : [errorsImport, baseImport];
   // Re-export the entity-part classes (emitted in `<agg>.base.ts`) so
   // `domain/<agg>` stays the single import surface: consumers (repositories,
   // the wire mapper) import `<Agg>` + its parts from here regardless of the

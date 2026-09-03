@@ -97,7 +97,7 @@ export function createForm<S extends z.ZodType>(
     applyServerErrors(e: unknown) {
       const body = e instanceof ApiError ? e.body : e;
       if (body && typeof body === "object") {
-        const rec = body as { errors?: Record<string, string | string[]>; title?: string };
+        const rec = body as { errors?: Record<string, string | string[]>; title?: string; detail?: string };
         if (rec.errors && typeof rec.errors === "object") {
           const next: Record<string, string> = { ...errors };
           let any = false;
@@ -116,8 +116,16 @@ export function createForm<S extends z.ZodType>(
             return { kind: "fields" as const };
           }
         }
-        if (typeof rec.title === "string") {
-          return { kind: "global" as const, title: rec.title };
+        // RFC 7807 \`detail\` carries the domain sentence; \`title\` is only the
+        // reason phrase ("Unprocessable Entity"), so prefer the former.
+        const globalMessage =
+          typeof rec.detail === "string" && rec.detail.length > 0
+            ? rec.detail
+            : typeof rec.title === "string" && rec.title.length > 0
+              ? rec.title
+              : undefined;
+        if (globalMessage !== undefined) {
+          return { kind: "global" as const, title: globalMessage };
         }
       }
       return { kind: "unhandled" as const };

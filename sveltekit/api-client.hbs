@@ -20,6 +20,36 @@ export class ApiError extends Error {
   }
 }
 
+// The wire's error contract is RFC 7807 `application/problem+json`:
+// `{ type, title, status, detail, instance, errors[] }` — every Loom backend
+// emits exactly that and NONE emits an `error` key, so the message a user reads
+// is `detail` (the domain sentence: "Order is still referenced and cannot be
+// deleted.") falling back to `title` (the reason phrase) and only then to the
+// bare status text.  Reading a non-existent key instead is what made every
+// failure render as "Conflict" / "Unprocessable Entity".
+function problemMessage(body: unknown, fallback: string): string {
+  if (body && typeof body === "object") {
+    const pd = body as { detail?: unknown; title?: unknown };
+    if (typeof pd.detail === "string" && pd.detail.length > 0) return pd.detail;
+    if (typeof pd.title === "string" && pd.title.length > 0) return pd.title;
+  }
+  return fallback;
+}
+
+// An error response is not guaranteed to be JSON: a gateway 502/504 answers
+// HTML, a proxy 413 answers plain text.  Parsing before the `r.ok` check threw
+// a `SyntaxError` from inside the client, so the status was lost and nothing
+// downstream (`applyServerErrors`, every `instanceof ApiError` branch) could
+// classify the failure.  Parse leniently and let the caller decide.
+function parseBody(text: string): unknown {
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 async function rawFetch(path: string, init?: RequestInit): Promise<unknown> {
   const method = init?.method ?? "GET";
   const startedAt =
@@ -37,16 +67,13 @@ async function rawFetch(path: string, init?: RequestInit): Promise<unknown> {
     },
   });
   const text = await r.text();
-  const body: unknown = text ? JSON.parse(text) : null;
+  const body: unknown = parseBody(text);
   const ms = Math.round(
     (typeof performance !== "undefined" ? performance.now() : Date.now()) -
       startedAt,
   );
   if (!r.ok) {
-    const message =
-      body && typeof body === "object" && "error" in body
-        ? String((body as { error: unknown }).error)
-        : r.statusText;
+    const message = problemMessage(body, r.statusText);
     log.warn(`<- ${r.status} ${method} ${path} (${ms}ms): ${message}`);
     throw new ApiError(r.status, message, body);
   }
@@ -69,16 +96,13 @@ async function rawUpload(path: string, form: FormData): Promise<unknown> {
 {{/if}}
   });
   const text = await r.text();
-  const body: unknown = text ? JSON.parse(text) : null;
+  const body: unknown = parseBody(text);
   const ms = Math.round(
     (typeof performance !== "undefined" ? performance.now() : Date.now()) -
       startedAt,
   );
   if (!r.ok) {
-    const message =
-      body && typeof body === "object" && "error" in body
-        ? String((body as { error: unknown }).error)
-        : r.statusText;
+    const message = problemMessage(body, r.statusText);
     log.warn(`<- ${r.status} POST ${path} (${ms}ms): ${message}`);
     throw new ApiError(r.status, message, body);
   }

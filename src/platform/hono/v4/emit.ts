@@ -135,8 +135,10 @@ import { buildWorkflowsFile } from "./workflow-builder.js";
 /** `emitConcurrency` is true when some aggregate in scope declares the
  *  `versioned` capability (optimistic concurrency) — only then does the
  *  repository save's guarded write have anything to throw, so a
- *  concurrency-free project's `domain/errors.ts` stays byte-identical. */
-function errorsTs(emitConcurrency: boolean): string {
+ *  concurrency-free project's `domain/errors.ts` stays byte-identical.
+ *  `emitNotImplemented` is the same kind of gate for `NotImplementedError`:
+ *  only an `extern` OPERATION's scaffold-once stub raises it. */
+function errorsTs(emitConcurrency: boolean, emitNotImplemented: boolean): string {
   return `// Auto-generated.
 export class DomainError extends Error {
   constructor(message: string) { super(message); this.name = "DomainError"; }
@@ -159,7 +161,20 @@ export class ForbiddenError extends Error {
 export class DisallowedError extends Error {
   constructor(message: string) { super(message); this.name = "DisallowedError"; }
 }
-/** Wraps an exception thrown by a user-supplied extern handler.  The
+${
+  emitNotImplemented
+    ? `/** An \`extern\` seam whose hand-written body was never filled in — the
+ *  scaffold-once stub in \`domain/<agg>.ts\` still throws.  That is not a server
+ *  FAULT: the request was fine and the route exists, the implementation is
+ *  simply absent, which is exactly what RFC 9110 §15.6.2 reserves 501 for.  The
+ *  per-router catch maps it to 501 carrying this message (the file to fill in),
+ *  instead of the generic 500 \`"internal"\` that told the operator nothing. */
+export class NotImplementedError extends Error {
+  constructor(message: string) { super(message); this.name = "NotImplementedError"; }
+}
+`
+    : ""
+}/** Wraps an exception thrown by a user-supplied extern handler.  The
  *  per-router \`app.onError\` maps this to a 500 envelope that names
  *  the offending op + aggregate, instead of the bare
  *  \`{ "error": "internal" }\` operators see when the same throw
@@ -568,7 +583,11 @@ export function generateTypeScriptForContexts(
   // `ConcurrencyError` on a `(stream_id, version)` 23505 collision, so it needs
   // the same error class + 409 arm the `versioned` guarded write does.
   const emitConcurrency = aggregatesNeedConcurrency(merged.aggregates);
-  out.set("domain/errors.ts", errorsTs(emitConcurrency));
+  // The 501 arm + its error class ride on the presence of an `extern` OPERATION
+  // — the only seam whose generated stub throws it.  A project with none stays
+  // byte-identical.
+  const emitNotImplemented = merged.aggregates.some((a) => a.operations.some((o) => o.extern));
+  out.set("domain/errors.ts", errorsTs(emitConcurrency, emitNotImplemented));
   // Validation-message catalog (M-T1.11): a messaged rule's wire `code` resolves
   // SERVER-side against this project's catalog, so a localised client is no
   // longer the only way to see a translated rule.  No messaged rule ⇒ no catalog
