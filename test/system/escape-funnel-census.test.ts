@@ -97,7 +97,11 @@ function collectCallSites(): CallSite[] {
       const line = lines[i]!;
       let idx = line.indexOf("JSON.stringify(");
       while (idx !== -1) {
-        sites.push({ file: rel, line: i + 1, arg: extractArg(line, idx + "JSON.stringify(".length) });
+        sites.push({
+          file: rel,
+          line: i + 1,
+          arg: extractArg(line, idx + "JSON.stringify(".length),
+        });
         idx = line.indexOf("JSON.stringify(", idx + 1);
       }
     }
@@ -154,16 +158,18 @@ function isJsFamily(file: string): boolean {
 const SAFE_TARGET_DIRS: ReadonlyArray<{ prefix: string; reason: string }> = [
   {
     prefix: "src/generator/dotnet/",
-    reason: "C# double-quoted string literals don't interpolate; JSON.stringify's escaping is correct C# syntax.",
+    reason:
+      "C# double-quoted string literals don't interpolate; JSON.stringify's escaping is correct C# syntax.",
   },
   {
     prefix: "src/generator/java/",
-    reason: "Java double-quoted string literals don't interpolate; JSON.stringify's escaping is correct Java syntax.",
+    reason:
+      "Java double-quoted string literals don't interpolate; JSON.stringify's escaping is correct Java syntax.",
   },
   {
     prefix: "src/generator/python/",
     reason:
-      'Python double-quoted string literals don\'t interpolate (that needs an f"…" prefix, never used for a splice); JSON.stringify\'s escaping is correct Python syntax.',
+      "Python double-quoted string literals don't interpolate (that needs an f\"…\" prefix, never used for a splice); JSON.stringify's escaping is correct Python syntax.",
   },
 ];
 
@@ -258,7 +264,9 @@ const SUBTREE_LIKE_SAFE_ARGS = new Set([
 ]);
 
 function isSubtreeLikeSafe(site: CallSite): boolean {
-  return site.file === "src/generator/_expr/subtree-like.ts" && SUBTREE_LIKE_SAFE_ARGS.has(site.arg);
+  return (
+    site.file === "src/generator/_expr/subtree-like.ts" && SUBTREE_LIKE_SAFE_ARGS.has(site.arg)
+  );
 }
 
 /** `_walker/i18n-emit.ts` / `primitives/layout.ts` / `primitives/table.ts`
@@ -305,12 +313,14 @@ const DANGER_WAIVERS: ReadonlyArray<{ file: string; arg: string; reason: string 
   {
     file: "src/generator/elixir/vanilla/find-controller.ts",
     arg: "absent.title",
-    reason: "An RFC7807 `title` resolved through the fixed status→title map (problemTitle/errorTitle), never free author text.",
+    reason:
+      "An RFC7807 `title` resolved through the fixed status→title map (problemTitle/errorTitle), never free author text.",
   },
   {
     file: "src/generator/elixir/vanilla/operation-returns-emit.ts",
     arg: "v.title",
-    reason: "An RFC7807 `title` resolved through the fixed status→title map (problemTitle/errorTitle), never free author text.",
+    reason:
+      "An RFC7807 `title` resolved through the fixed status→title map (problemTitle/errorTitle), never free author text.",
   },
   // --- Two call sites split across lines (a multi-line `JSON.stringify(`
   //     argument) — the single-line scanner above extracts an EMPTY string
@@ -348,9 +358,10 @@ function classify(site: CallSite, fullLine: string): Classified {
 describe("escape-funnel census (F2-ELX-ESCAPE-FUNNEL class)", () => {
   it("every generator JSON.stringify( site is a documented JS/safe-target position, a safe compiler-derived pattern, or an individually waived splice", () => {
     const sites = collectCallSites();
-    expect(sites.length, "the census found zero JSON.stringify( sites — the scanner is broken").toBeGreaterThan(
-      100,
-    );
+    expect(
+      sites.length,
+      "the census found zero JSON.stringify( sites — the scanner is broken",
+    ).toBeGreaterThan(100);
 
     const byFile = new Map<string, string[]>();
     for (const site of sites) {
@@ -374,9 +385,10 @@ describe("escape-funnel census (F2-ELX-ESCAPE-FUNNEL class)", () => {
         );
       }
     }
-    expect(failures, `${failures.length} unclassified danger-bucket splice(s):\n${failures.join("\n")}`).toEqual(
-      [],
-    );
+    expect(
+      failures,
+      `${failures.length} unclassified danger-bucket splice(s):\n${failures.join("\n")}`,
+    ).toEqual([]);
 
     const staleWaivers = DANGER_WAIVERS.filter((w) => !usedWaivers.has(`${w.file}#${w.arg}`));
     expect(
