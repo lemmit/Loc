@@ -33,6 +33,19 @@ system Helpdesk {
         find adminScoped(): Ticket[] requires currentUser.roles.contains("admin")
         find agentScoped(): Ticket[] requires currentUser.roles.contains("agent")
       }
+
+      // A broadcast channel emits the realtime SSE wire at
+      // GET /api/realtime/events — an ordinary AUTHENTICATED route (on no
+      // bypass list).  The compose leg opens it both ways to prove M-T4.12's
+      // two rules at runtime: uncredentialed → 401, and the HttpOnly `session`
+      // cookie (the ONLY credential an `EventSource` can present — it cannot
+      // set an Authorization header) → 200 `text/event-stream`.
+      event TicketClosed { ticket: Ticket id }
+      channel Lifecycle {
+        carries: TicketClosed
+        delivery: broadcast
+        retention: ephemeral
+      }
     }
   }
 

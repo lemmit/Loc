@@ -249,3 +249,118 @@ describe("money literal promotion — IR carries the elaborated money literal", 
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Scaling (`*`, `/`) is money × SCALAR — the promotion must NOT apply there.
+//
+// The promotion above is what makes `subtotal + 0.50` ergonomic, and it was
+// applied at EVERY operator.  `moneyArithmetic` (type-system.ts) rejects
+// `money × money` and `money ÷ money` outright — money is closed under `±` and
+// the comparisons, not under scaling — so promoting the scalar literal to money
+// manufactured the exact combination the type-system refuses.  The result was a
+// diagnostic that contradicted itself:
+//
+//   derived half: money = price / 2
+//   -> Operator '/' has incompatible operand types: left is 'money', right is
+//      'money'.  Allowed for money: ... money / {int|long|decimal}.
+//
+// `price / decimal(2)` (an explicit conversion, not a literal) always worked,
+// but the message named no path to it.  `money` therefore anchors `+` / `-` and
+// the comparisons and nothing else; `long` / `decimal` anchor every operator as
+// before.  Both mirrors move together — `_shared.ts`'s `literalPromotionAnchor`
+// and `lower-expr.ts`'s — because the validator and the lowerer disagreeing
+// about the same expression is what turns a false rejection into a trap.
+// ---------------------------------------------------------------------------
+describe("money scaling by a literal — the scalar operand keeps its own type", () => {
+  const scaling = (body: string) => `
+      context X {
+        aggregate Foo {
+          price: money
+          qty: int
+          ${body}
+        }
+        repository Foos for Foo { }
+      }
+    `;
+
+  it("`price * 2` (money x int literal) validates", async () => {
+    const { errors } = await parseString(scaling("derived scaled: money = price * 2"));
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+
+  it("`price / 2` (money / int literal) validates", async () => {
+    const { errors } = await parseString(scaling("derived half: money = price / 2"));
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+
+  it("`price * 2.5` (money x decimal literal) validates", async () => {
+    const { errors } = await parseString(scaling("derived frac: money = price * 2.5"));
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+
+  it("`2 * price` (commutative) validates", async () => {
+    const { errors } = await parseString(scaling("derived rev: money = 2 * price"));
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+
+  it("`price + 1` still promotes — money IS closed under `+`", async () => {
+    const { errors } = await parseString(scaling("derived sum: money = price + 1"));
+    expect(errors, errors.join("\n")).toEqual([]);
+  });
+
+  it("money x money between two TYPED values is still rejected", async () => {
+    const { errors } = await parseString(`
+      context X {
+        aggregate Foo {
+          price: money
+          fee: money
+          derived bad: money = price * fee
+        }
+        repository Foos for Foo { }
+      }
+    `);
+    expect(
+      errors.some((e) => /Operator '\*' has incompatible operand types/.test(e)),
+      errors.join("\n"),
+    ).toBe(true);
+  });
+
+  it("the IR keeps the scalar literal scalar — money x int, not money x money", async () => {
+    const loom = await buildLoomModel(`
+      context X {
+        aggregate Foo {
+          price: money
+          derived half: money = price / 2
+        }
+        repository Foos for Foo { }
+      }
+    `);
+    const foo = allAggregates(loom).find((a) => a.name === "Foo")!;
+    const half = foo.derived.find((d) => d.name === "half")!;
+    const bin = half.expr as Extract<typeof half.expr, { kind: "binary" }>;
+    expect(bin.leftType).toEqual({ kind: "primitive", name: "money" });
+    expect(bin.rightType).toEqual({ kind: "primitive", name: "int" });
+    // `toMatchObject`, not `toEqual`: an UNpromoted literal keeps the span of
+    // the AST node it came from, while a promoted one is synthesized and has
+    // none.  The load-bearing part is `lit: "int"` — the promoted form would
+    // read `lit: "money"`, which is what made this expression uncompilable.
+    expect(bin.right).toMatchObject({ kind: "literal", lit: "int", value: "2" });
+    expect(bin.resultType).toEqual({ kind: "primitive", name: "money" });
+  });
+
+  it("a `decimal` anchor still promotes under `*` — only money is scaling-only", async () => {
+    const loom = await buildLoomModel(`
+      context X {
+        aggregate Foo {
+          rate: decimal
+          derived doubled: decimal = rate * 2
+        }
+        repository Foos for Foo { }
+      }
+    `);
+    const foo = allAggregates(loom).find((a) => a.name === "Foo")!;
+    const doubled = foo.derived.find((d) => d.name === "doubled")!;
+    const bin = doubled.expr as Extract<typeof doubled.expr, { kind: "binary" }>;
+    expect(bin.right).toEqual({ kind: "literal", lit: "decimal", value: "2" });
+  });
+});

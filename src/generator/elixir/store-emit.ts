@@ -40,7 +40,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ActionIR, ExprIR, StateFieldIR, StmtIR } from "../../ir/types/loom-ir.js";
-import { snake, upperFirst } from "../../util/naming.js";
+import { elixirString, snake, upperFirst } from "../../util/naming.js";
 import { defaultInitFor } from "./heex-walker.js";
 
 /** Render one `StoreIR` as its `lib/<app>_web/stores/<snake>.ex` content.
@@ -211,7 +211,9 @@ function renderStoreExpr(expr: ExprIR, fieldNames: ReadonlySet<string>): string 
 function renderStoreLiteral(kind: string, value: string): string {
   switch (kind) {
     case "string":
-      return JSON.stringify(value);
+      // Through the shared escaping funnel — a store initial value / action RHS
+      // is `.ddd` text, and a raw `#{` would interpolate as Elixir.
+      return elixirString(value);
     case "int":
       return value;
     case "decimal":

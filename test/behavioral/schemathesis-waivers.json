@@ -90,19 +90,6 @@
       "reason": "F17 — F7 (declared `type` not honoured: the wire validators coerce) is still OPEN on python. `Money.amount` publishes `{\"type\":\"number\",\"minimum\":0}`, and a JSON boolean is accepted for it: pydantic's lax mode treats `false` as `0.0` (bool is an int subclass in Python), so the create answers 201 for a body the published contract rejects. F7's fix landed on the Hono emitter only (2026-08-16) — the node leg is clean here and python is not, which is precisely the per-backend divergence this matrix exists to surface."
     },
     {
-      "id": "W23",
-      "findings": [
-        "F18"
-      ],
-      "check": "unsupported_method",
-      "operations": "^GET /api/[a-z_]+/[a-z_]+$",
-      "backends": [
-        "python"
-      ],
-      "kind": "bug",
-      "reason": "F18 — F8 (a wrong verb on a static sub-path is swallowed by the sibling `/{id}` route) is still OPEN on python. `DELETE /api/customers/by_email` matches `DELETE /api/customers/{id}` with `id=\"by_email\"` and answers 422 `Expected UUID`, where the honest answer is 405. F8's fix is a hono middleware (`emitStaticSubpathMethodGuard`, `src/platform/hono/v4/routes-builder.ts`) with no python counterpart. The pattern matches a two-segment LITERAL path only — `/{id}` carries braces, so the parameterised siblings cannot fall in here."
-    },
-    {
       "id": "W24",
       "findings": [
         "F19",
@@ -141,7 +128,7 @@
         "dotnet"
       ],
       "kind": "bug",
-      "reason": "F22 \u2014 a bodyless operation POST answers 415 before the path parameter is looked at. ASP.NET's media-type check fires before model binding, so a request with a malformed `{id}` AND no body is answered by the one thing the contract says least about; 415 is not in the set of statuses the fuzzer counts as a rejection. The honest answer is the declared 422 for the unparseable identifier. PATTERN WIDENED 2026-09-01: it was written from the two `orders` routes of the discovery run and matched only those, so the SAME finding on `POST /api/customers/{id}/update` and `POST /api/wallets/{id}/freeze` arrived unwaived on a later run. Measured on a booted app, the 415 does not depend on the id being malformed at all \u2014 a VALID uuid with no Content-Type answers 415 too \u2014 so the shape is every operation POST, which is what the pattern now says. node, python and java are clean on this check, so the 415 is a .NET-only divergence rather than a shared decision."
+      "reason": "F22 — a bodyless operation POST answers 415 before the path parameter is looked at. ASP.NET's media-type check fires before model binding, so a request with a malformed `{id}` AND no body is answered by the one thing the contract says least about; 415 is not in the set of statuses the fuzzer counts as a rejection. The honest answer is the declared 422 for the unparseable identifier. PATTERN WIDENED 2026-09-01: it was written from the two `orders` routes of the discovery run and matched only those, so the SAME finding on `POST /api/customers/{id}/update` and `POST /api/wallets/{id}/freeze` arrived unwaived on a later run. Measured on a booted app, the 415 does not depend on the id being malformed at all — a VALID uuid with no Content-Type answers 415 too — so the shape is every operation POST, which is what the pattern now says. node, python and java are clean on this check, so the 415 is a .NET-only divergence rather than a shared decision."
     },
     {
       "id": "W27",
@@ -172,19 +159,6 @@
       "intermittent": true,
       "intermittentReason": "The read half only fires once the write half (W27) has stored the offending row in the same run, so it inherits that data dependency exactly.",
       "reason": "F21's read half — the row the unenforced `minLength` let in is then served by a response the API's OWN schema declares as `minLength: 1`, so the server violates its published contract on a plain `GET`. The two halves are one defect: enforce the declared bound on the write and the read conforms again."
-    },
-    {
-      "id": "W36",
-      "findings": [
-        "F18"
-      ],
-      "check": "unsupported_method",
-      "operations": "^GET /api/[a-z_]+/[a-z_]+$",
-      "backends": [
-        "dotnet"
-      ],
-      "kind": "bug",
-      "reason": "F18 on a THIRD backend \u2014 the same static-sub-path finding already waived as W23 (python) and W33 (java), arriving unwaived on dotnet because no rule claimed that surface. Measured on a booted app: `DELETE /api/customers/by_email` answers 422, not 405, because the request matches `DELETE /api/customers/{id}` with `id=\"by_email\"` and the malformed-identifier arm answers first (the response even carries `Allow: DELETE, GET`, naming the template that swallowed it). F8's fix is a Hono middleware with no counterpart on the other four backends. It is NOT fixable per-backend here: constraining the route to `{id:guid}` would stop the collision but would also turn the malformed-path-id case into a 404, breaking the declared 422 that `test/generator/malformed-path-id-status.test.ts` pins across node/.NET/python/java. Disambiguating a static sub-path from `{id}` without losing that 422 is a cross-backend design decision, which is why this stays a waiver rather than a patch."
     },
     {
       "id": "W29",
@@ -226,22 +200,8 @@
       ],
       "kind": "bug",
       "intermittent": true,
-      "intermittentReason": "The finding needs the fuzzer to generate a MALFORMED query chunk (a parameter with an empty name, `?=%C3%A0`) against a read route. It did so \u00d74 on run 33382822525 and \u00d70 on the two runs before it \u2014 the same low rate that made W31 look permanently stale and got it wrongly retired (see F24). Declared intermittent so the staleness half cannot ask that question again on two samples.",
-      "reason": "F28 \u2014 java answers 400 for an UNPARSEABLE query string and no read route declares a 400. Replaces W32 (F25), which is FIXED: the paged `page`/`pageSize` bounds now answer the declared 422, matching the other four backends and java's own published set. What is left is narrower and java-only: Tomcat refuses to parse a malformed chunk and throws before any handler runs, so the request never reaches the wire-validation tier that would make it a 422. The other four backends IGNORE the junk parameter and answer 200 (the deliberate decision W8 records), and Tomcat 11 exposes no leniency knob \u2014 no `parameterParsing*` attribute on Connector or Parameters \u2014 so java cannot join them by configuration. 400 is therefore the honest answer, and declaring it on the SHARED read contract would publish a status the other four never produce. Clearing this means either a container-level parser change or a java-only declaration; neither is a fuzzer fix."
-    },
-    {
-      "id": "W33",
-      "findings": [
-        "F26",
-        "F18"
-      ],
-      "check": "unsupported_method",
-      "operations": ".",
-      "backends": [
-        "java"
-      ],
-      "kind": "bug",
-      "reason": "F26 + F18 on java — every 405 the Spring backend answers omits the `Allow` header, which RFC 9110 makes a MUST for 405 (the #2500 class, one layer over: that was a 401 missing `WWW-Authenticate`). It fires on EVERY operation, `/health` and `/ready` included, which is why the pattern is unscoped: the defect is in the one shared error mapper, not in any route. F18's static-sub-path 422 (`DELETE /api/customers/by_email`) rides the same check on java and lands with the same fix pass."
+      "intermittentReason": "The finding needs the fuzzer to generate a MALFORMED query chunk (a parameter with an empty name, `?=%C3%A0`) against a read route. It did so ×4 on run 33382822525 and ×0 on the two runs before it — the same low rate that made W31 look permanently stale and got it wrongly retired (see F24). Declared intermittent so the staleness half cannot ask that question again on two samples.",
+      "reason": "F28 — java answers 400 for an UNPARSEABLE query string and no read route declares a 400. Replaces W32 (F25), which is FIXED: the paged `page`/`pageSize` bounds now answer the declared 422, matching the other four backends and java's own published set. What is left is narrower and java-only: Tomcat refuses to parse a malformed chunk and throws before any handler runs, so the request never reaches the wire-validation tier that would make it a 422. The other four backends IGNORE the junk parameter and answer 200 (the deliberate decision W8 records), and Tomcat 11 exposes no leniency knob — no `parameterParsing*` attribute on Connector or Parameters — so java cannot join them by configuration. 400 is therefore the honest answer, and declaring it on the SHARED read contract would publish a status the other four never produce. Clearing this means either a container-level parser change or a java-only declaration; neither is a fuzzer fix."
     },
     {
       "id": "W34",

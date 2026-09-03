@@ -89,7 +89,10 @@ describe("flutter a11y — derived Semantics emission", () => {
 describe("flutter a11y — author-hint facts (Image / Avatar / Icon / Button)", () => {
   it("Image alt maps to semanticLabel", async () => {
     const dart = await pageDart(`Image { src: "/logo.png", alt: "Shop logo" }`);
-    expect(dart).toContain(`Image.network("/logo.png", semanticLabel: "Shop logo")`);
+    // Single-quoted (M-T1.26): `src`/`alt` now render through the Dart
+    // leaf table (`dartString`, the idiomatic quoting the rest of the Flutter
+    // backend uses — and $-escaping-safe, unlike the old JSON.stringify path).
+    expect(dart).toContain(`Image.network('/logo.png', semanticLabel: 'Shop logo')`);
   });
 
   it("a decorative Image is excluded from semantics, not empty-labelled", async () => {
@@ -100,7 +103,8 @@ describe("flutter a11y — author-hint facts (Image / Avatar / Icon / Button)", 
 
   it("Avatar alt becomes an accessible name via Semantics(image:)", async () => {
     const dart = await pageDart(`Avatar { src: "/u.png", alt: "Owner avatar" }`);
-    expect(dart).toContain(`Semantics(label: "Owner avatar", image: true, child: CircleAvatar(`);
+    // Single-quoted (M-T1.26) — see the Image case above.
+    expect(dart).toContain(`Semantics(label: 'Owner avatar', image: true, child: CircleAvatar(`);
   });
 
   it("a decorative Avatar is excluded from semantics", async () => {

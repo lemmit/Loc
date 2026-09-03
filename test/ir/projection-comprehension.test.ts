@@ -272,8 +272,11 @@ describe("projection comprehension — Hono emission", () => {
     expect(qp).toContain(
       "const customerById = new Map((await customerRepo.findManyByIds(rows.map((r) => r.customerId)))",
     );
-    // …and the `select customerName = c.name` reads through the loaded map.
-    expect(qp).toContain("customerName: customerById.get(r.customerId as string)!.name");
+    // …and the `select customerName = c.name` reads through the loaded map —
+    // LEFT-JOIN shape (wave 1, G2667-D3): the lookup is bound once per row and
+    // an absent join target fills the field with null instead of throwing.
+    expect(qp).toContain("const __j0 = customerById.get(r.customerId as string);");
+    expect(qp).toContain("customerName: __j0 === undefined ? null : __j0.name");
     // The synthesised find lands on the Order repository.
     const repo = [...files.entries()].find(([p]) => p.endsWith("order-repository.ts"))?.[1];
     expect(repo).toContain("async ordersView(): Promise<Order[]>");
@@ -290,7 +293,10 @@ describe("projection comprehension — Hono emission", () => {
     expect(qp).toContain(
       "customer_by_id = {str(a.id): a for a in await customer_repo.find_many_by_ids([r.customer_id for r in rows])}",
     );
-    expect(qp).toContain('"customerName": customer_by_id[str(r.customer_id)].name');
+    // LEFT-JOIN shape (wave 1, G2667-D3): a guarded walrus lookup, None when absent.
+    expect(qp).toContain(
+      '"customerName": (__j0.name if (__j0 := customer_by_id.get(str(r.customer_id))) is not None else None),',
+    );
     const repo = [...files.entries()].find(([p]) => p.endsWith("order_repository.py"))?.[1];
     expect(repo).toContain("async def orders_view(self) -> list[Order]:");
   });
@@ -311,8 +317,11 @@ describe("projection comprehension — Hono emission", () => {
       "from(row in D.Orders.Customer, where: row.id in ^Enum.map(rows, fn record -> record.customer_id end))",
     );
     expect(mod).toContain("|> Map.new(&{&1.id, &1})");
-    // …and the `select customerName = c.name` reads through the loaded map.
-    expect(mod).toContain("customerName: Map.get(customer_by_id, record.customer_id).name");
+    // …and the `select customerName = c.name` reads through the loaded map —
+    // LEFT-JOIN shape (wave 1, G2667-D3): the total `__joined/2` reader, nil when absent.
+    expect(mod).toContain(
+      "customerName: __joined(Map.get(customer_by_id, record.customer_id), :name)",
+    );
     // `select orderId = o.id` / `lineCount = o.lineCount` render off `record`.
     expect(mod).toContain("orderId: record.id");
     expect(mod).toContain("lineCount: record.line_count");
@@ -358,8 +367,13 @@ describe("projection comprehension — Hono emission", () => {
     expect(handler).toContain(
       "var customerById = (await _customerRepo.FindManyByIdsAsync(domain.Select(d => d.CustomerId).ToList(), cancellationToken)).ToDictionary(__a => __a.Id);",
     );
-    // …and `select customerName = c.name` reads through the loaded dictionary.
-    expect(handler).toContain("customerById[d.CustomerId].Name");
+    // …and `select customerName = c.name` reads through the loaded dictionary,
+    // via the TOTAL lookup (G2667-D3): a join target the joined aggregate's own
+    // capability filters exclude is absent from that dictionary, and indexing it
+    // directly was a `KeyNotFoundException` 500 on data the model permits.
+    expect(handler).toContain(
+      "(customerById.TryGetValue(d.CustomerId, out var __j0) ? __j0.Name : default!)",
+    );
     // The synthesised find lands on the Order repository impl with the inlined `where`.
     const repo = [...files.entries()].find(([p]) =>
       p.endsWith("Repositories/OrderRepository.cs"),
