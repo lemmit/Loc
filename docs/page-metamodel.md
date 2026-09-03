@@ -1,10 +1,18 @@
-# Page metamodel — final v0
+# Page metamodel
 
-> Supersedes the v22 React generator's hardcoded subdomain-to-CRUD scaffolder
-> with a declarative page metamodel: pages, components, scaffolding, state,
-> menus. Six declaration keywords, two expression-level reserved tokens,
-> one tiny grammar lift on `Lambda` and `Property`. No macro system, no
-> record algebra, no per-archetype keywords.
+> The UI half of the language: `ui` blocks holding pages, components, stores,
+> areas, layouts and menus, with the CRUD baseline recovered as a `scaffold`
+> macro that desugars into the same metamodel.
+>
+> **Status (audited 2026-09-03 against `main`).**  This began as the v0 RFC and
+> is now the shipped surface, so the "v0" scoping notes below are kept only
+> where they still describe today's behaviour; every §14 non-goal that has since
+> shipped is marked *resolved* in place.  The chaptered reference is
+> [`language-reference/15-ui-pages-structure.md`](language-reference/15-ui-pages-structure.md)
+> (declarations) and
+> [`language-reference/16-ui-walker-primitives.md`](language-reference/16-ui-walker-primitives.md)
+> (the primitive library, with generated output per primitive); this page is the
+> narrative rationale behind them.
 
 ---
 
@@ -32,27 +40,43 @@ Three rules:
 
 ## 2. New keywords
 
-**Declaration-level (6):**
+The original RFC promised "six declaration keywords".  The shipped surface is
+wider — these are the productions in `src/language/ddd.langium` today.
+
+**Declaration-level:**
 
 | Keyword | Role |
 |---|---|
-| `ui` | Top-level block; `SystemMember`, peer to `subdomain`, `deployable`, `theme`, `user`. |
-| `page` | Declares a route + body. |
-| `component` | Parameterised region tree — typed function from params (and optional state) to a body expression. |
-| `scaffold` | Single fixed multi-page rewrite from a domain selector to pages.  Mix it with hand-written pages via override-by-name / unfold — see [`customization-gradient.md`](customization-gradient.md). |
-| `state` | Block of reactive local fields. |
-| `menu` | Optional `ui`-level block declaring sidebar structure. |
+| `ui` | The block itself.  A `SystemMember` (peer to `subdomain`, `deployable`, `theme`, `user`, `api`, `layout`) *and* a root-level `ModelMember`, so a `.ddd` file can be a pure UI library. |
+| `framework:` | Optional first clause inside `ui` — `react`, `vue`, `svelte`, `angular`, `feliz`, `flutter`, `phoenixLiveView`.  The UI's own technical identity; omitted, it is derived from the hosting deployable's platform (§3). |
+| `page` | Route + params + body (§4). |
+| `component` | Parameterised region tree — typed function from params (and optional state / derived / actions) to a body expression (§5).  `extern from "<path>"` hands rendering to a hand-written file. |
+| `store` | Shared client-side state container: named `state {}` + `action`s, referenced by dotted name (`Cart.lines`).  Optional `persist: memory\|local\|session\|url` lifetime (§6). |
+| `area` | Groups pages (and nested areas); the path is half of a page's identity (§10b). |
+| `menu` | Two productions: the `ui`-level sidebar block (§11) and per-page metadata (`section`/`label`/`order`/`hidden`). |
+| `state` | Block of reactive local fields, in a `page`, `component` or `store` (§6). |
+| `derived` | Named computed binding over params / state / other deriveds — `derived label: string = …`. |
+| `action` | Named, typed effect handler — the only place a body may write state or call a mutation (§8). |
+| `api` / `channel` / `on` / `function` | `ui`-level members: a handle on a system `api`, a realtime `channel` subscription, its `on <chan>.<Event>(e) { … }` handler, and an `extern` frontend function. |
+| `layout` | A **system**-level declaration (not a `ui` member) with `header` / `sidebar` / `footer` slots plus exactly one `main`; a page opts in with `layout: <Name>` (presets `default` / `none`). |
 
-**Expression-level (2):**
+`scaffold` is **not** a keyword.  It is a macro applied through the universal
+`with` clause (`ui WebApp with scaffold(aggregates: [Order]) { … }`) — see §10
+and [`scaffold-macros.md`](scaffold-macros.md).  Mix it with hand-written pages
+via override-by-name / unfold — see
+[`customization-gradient.md`](customization-gradient.md).
+
+**Expression-level:**
 
 | Keyword | Role |
 |---|---|
-| `match` | Predicate-arms expression; first true arm wins; usable anywhere expressions appear. |
+| `match` | Two shapes: predicate arms (first true arm wins) and **variant** arms over a union subject.  An expression *and* a statement (§7). |
 | `else` | Fallthrough arm of `match`. |
+| `await` | Marks the awaited remote command in `match await <op>(…) { … }` (§8, [`actions.md`](actions.md)).  A soft keyword — a field named `await` still parses. |
 
-**Reused without change:** `requires` (auth gate), `let` (in flows / event-handler blocks), all existing operators, `:=` (state mutation, already in operations).
+**Reused without change:** `requires` (auth gate), `let`, all existing operators, `:=` / `+=` / `-=` (state mutation, already in operations).
 
-**Soft keywords inside their parent block:** `section`, `link` (inside `menu`).
+**Soft keywords inside their parent block:** `section`, `link` (inside `menu`), `framework` and `persist` (inside `ui` / `store`) — all still usable as ordinary identifiers elsewhere.
 
 **Channel subscription (channels.md Part I):** two further `ui` members —
 `channel <name>: <Ctx>.<Channel>` subscribes the UI to a context's

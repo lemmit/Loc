@@ -295,7 +295,7 @@ query = from(record in Api.Inventory.Item, where: not record.is_deleted)
 ```
 ::: end
 
-The `auditable` stamps thread `currentUser` — each backend through its own stamping seam (§[`stamp`](#stamp-oncreateonupdate----lifecycle-assignments)):
+The `auditable` stamps thread `currentUser` — each backend through its own stamping seam (§[`stamp`](#stamp-oncreateonupdate-----lifecycle-assignments)):
 
 ::: tabs backend
 == node

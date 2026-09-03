@@ -95,7 +95,7 @@ end
 
 `handle name(params) { body }` is a continuation command on the same workflow — a second entry that loads/creates aggregates and calls operations; multiple `handle`s make a multi-command saga. A workflow may declare at most one **unnamed** `create` (`loom.canonical-create-duplicate-workflow`); extra entry points must be named, and no two share a name (`loom.create-name-conflict-workflow`). A `handle` name must also not collide with a `commandHandler` / `queryHandler` in the same context (`loom.duplicate-handler`), because an `api` `route` addresses all three through the same `<Context>.<Name>` reference ([APIs](14-apis-storage-resources-channels.md#route--the-explicit-transport-binding)).
 
-> **Honest gap — only the canonical `create` gets an entry point today.** The unnamed `create` becomes the `POST /api/workflows/<snake>` route on every backend. A **named** `create expedite(…)` and a `handle retry(…)` lower to IR (`WorkflowIR.creates` / `.handlers`, `test/ir/workflow-handle.test.ts`) and their repository needs are collected, but no backend emits a route, a command, or any other callable for them — and an `api { route POST "/fulfil/retry" -> C.retry }` naming a handle validates clean while emitting nothing (checked on node + dotnet). Until that lands, model a second command as its own `workflow` (or a `commandHandler` bound by an explicit `route`).
+> **Honest gap — only the canonical `create` gets an entry point today.** The unnamed `create` becomes the `POST /api/workflows/<snake>` route on every backend. A **named** `create expedite(…)` and a `handle retry(…)` lower to IR (`WorkflowIR.creates` / `.handlers`, `test/ir/workflow-handle.test.ts`) and their repository needs are collected, but no backend emits a route, a command, or any other callable for them — and an `api { route POST "/fulfil/retry" -> C.retry }` naming a handle validates clean while emitting nothing (checked on node, dotnet and python). Until that lands, model a second command as its own `workflow` (or a `commandHandler` bound by an explicit `route`).
 
 ```ddd
 workflow placeOrder {
@@ -194,6 +194,61 @@ The workflow body draws from a narrowed statement set — distinct from an aggre
 | `emit Event { … }` | Workflow-level event; drains after all saves (after commit when `transactional`). |
 
 A loaded aggregate is saved **only if** an operation was invoked on it inside the body; fresh `Agg.create` results always save. See [`../workflow.md`](../workflow.md) §"Save + event drain semantics".
+
+## `function` — the private pure helper
+
+`function name(params): T = expr` (or a `{ … }` block) is the aggregate-parity helper member: a private, pure calculation over its **parameters**. Reading the workflow's own state from one is `loom.workflow-function-uses-state` — pass the value in as an argument. Each backend emits it as a workflow-scoped helper (not an inlined expression), and a call to it lowers to `callKind: "workflow-fn"`.
+
+```ddd
+workflow fulfil {
+  function slaDays(priority: int): int = priority > 5 ? 1 : 5
+  create(orderId: Order id) {
+    let order = Orders.getById(orderId)
+    order.scheduleShipment(slaDays(order.priority))
+  }
+}
+```
+
+::: tabs backend
+== node
+```ts
+// http/workflows.ts
+function fulfilSlaDays(priority: number): number { return priority > 5 ? 1 : 5; }
+// …
+order.scheduleShipment(fulfilSlaDays(order.priority));
+```
+== dotnet
+```csharp
+// Application/Workflows/FulfilFunctions.cs
+public static int SlaDays(int priority) => priority > 5 ? 1 : 5;
+// FulfilHandler.cs
+order.ScheduleShipment(FulfilFunctions.SlaDays(order.Priority));
+```
+== python
+```python
+# app/http/workflows_routes.py
+def fulfil_sla_days(priority: int) -> int:
+    return (1 if priority > 5 else 5)
+# …
+order.schedule_shipment(fulfil_sla_days(order.priority))
+```
+== java
+```java
+// application/workflows/CWorkflows.java
+private int fulfilSlaDays(int priority) { return priority > 5 ? 1 : 5; }
+// …
+order.scheduleShipment(this.fulfilSlaDays(order.priority()));
+```
+== elixir
+```elixir
+# lib/d_elixir/c/workflows/fulfil.ex
+defp sla_days(priority) do
+  if priority > 5, do: 1, else: 5
+end
+```
+::: end
+
+Both body forms ship: `= expr` and `{ return … }` emit the same helper on all five backends. (The grammar comment and `LoomIR.functions` still mention a `loom.workflow-function-block-body` gate restricting it to the expression form — that code does not exist in `src/diagnostics/messages.ts` and no validator raises it.)
 
 ## `on(e: Event)` — the event reactor
 

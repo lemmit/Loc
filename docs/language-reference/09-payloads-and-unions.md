@@ -90,11 +90,13 @@ end
 ```
 ::: end
 
-Do not write `Orders.save(o)` in the body — the exit save is derived (`computeSaves`), and an explicit repository write verb in a handler statement is lowered as a repository **delete** (see the note in [`../workflow.md`](../workflow.md)). A record parameter always binds to the JSON body, so bind record-param handlers to `POST`/`PUT`/`PATCH` routes.
+The record survives as a named type only where the host language has cheap records: node keeps the body schema plus a `cmd` object, .NET emits `PlaceCommand` as a Mediator `ICommand<OrderId>`, while Java, Python and Elixir **flatten the record into positional parameters** (`handle(String code, String region)`) and destructure the JSON at the edge.
+
+Do not write `Orders.save(o)` in the body — the exit save is derived (`computeSaves`), and a bare `<Repo>.<verb>(x)` statement naming any repository write verb (`save`, `insert`, `update`, `delete`, `add`, `remove`, `commit` — `src/ir/util/repo-methods.ts`) is lowered as a repository **delete** (`repo-delete`), whatever the verb reads like (see the note in [`../workflow.md`](../workflow.md)). A record parameter always binds to the JSON body, so bind record-param handlers to `POST`/`PUT`/`PATCH` routes.
 
 ### `<Agg>Wire` — the auto-synthesized record
 
-Every aggregate, part, and value object carries a canonical ordered `wireShape` (`id` → declared properties, including the spliced `version` token → containments → derived), synthesized once in enrichment (phase ⑥). Every backend's DTO emitter walks the *same* list, so the JSON an aggregate takes on the network is identical across all five backends by construction. This is the shape a union variant or a carrier argument projects through when it names an aggregate — `OrderResponse` below is the `Order` aggregate's wire record.
+Every aggregate, part, and value object carries a canonical ordered `wireShape` (`id` → the aggregate's field list in declaration order → containments → derived; the `version` token `crudish`/`versioned` splices in rides that field list, so it lands last in these examples), synthesized once in enrichment (phase ⑥). Every backend's DTO emitter walks the *same* list, so the JSON an aggregate takes on the network is identical across all five backends by construction. This is the shape a union variant or a carrier argument projects through when it names an aggregate — `OrderResponse` below is the `Order` aggregate's wire record.
 
 ## Anonymous union — `A or B`
 
@@ -277,15 +279,18 @@ A domain `error` record is **HTTP-blind** — it carries no status code. The api
 | `TransportFailure` / `UnexpectedStatus` / `DeserializeError` | 502 | | `UniquenessConflict` / `ConcurrencyConflict` / `Disallowed` / `ReferencedInUse` | 409 |
 | *(any other, user-declared)* | 500 → `loom.unmapped-error-status` | | | |
 
-The four 409 names are the **structural-conflict built-ins** the framework raises itself (a tripped `unique (…)`, an optimistic-lock miss, a `when` state gate, an FK `RESTRICT`); declaring an `error` with one of those names shadows the framework's status and is `loom.reserved-structural-error-name`.
+The four 409 names are the **structural-conflict built-ins** the framework raises itself (a tripped `unique (…)`, an optimistic-lock miss, a `when` state gate, an FK `RESTRICT`); declaring an `error` with one of those names shadows the framework's status and warns (`loom.reserved-structural-error-name` — a warning, not an error; the model still generates).
 
 The RFC-7807 fields are derived from the name: `title` is the prettified name (`OutOfStock` → `"Out Of Stock"`), `type` is `/errors/<kebab-name>` (`/errors/out-of-stock`), and the error record's own fields become problem extensions. A `httpStatus <Error> -> <Code>` clause on the `api` overrides the default; a user-declared error with no stdlib match and no override falls through to 500 and warns.
 
 ```ddd
 api A from D {
   httpStatus OutOfStock -> 409
+  route POST "/place" -> Orders.Place
 }
 ```
+
+The grammar fixes the clause order inside `api { … }` — `urlStyle`, then every `httpStatus`, then every `route`. A `httpStatus` line written *after* a `route` is a parse error ("Expecting token of type '}' but found `httpStatus`").
 
 For the `reserve(): string or OutOfStock` above, the error variant becomes a `409` ProblemDetails carrying `sku` as an extension — identical on every backend:
 
@@ -358,4 +363,6 @@ A union's *wire contract* — its DTO/schema and the tagged serialization — is
 - **Union finds** are fully derived — presence → the aggregate at `200`, absence → the `none`/`error` status. No stub.
 - **Operation returns** (`reserve(): string or OutOfStock`) are producer-selected: the domain body returns the variant it chose, and the route maps it to the tagged wire (success) or a ProblemDetails (error). Shipped on all five backends.
 
-Still deferred: `match` over a union with exhaustiveness narrowing on the consumer side, `option` PATCH semantics, user-declared generics beyond `paged` / `envelope` / `option` — see [`../payloads.md`](../payloads.md) § "What's deferred".
+Still deferred: consumer-side narrowing over a union, `option` PATCH semantics, user-declared generics beyond `paged` / `envelope` / `option` — see [`../payloads.md`](../payloads.md) § "What's deferred".
+
+> **Don't `match` a union in a domain body.** The `match` *statement* ([chapter 6](06-behavior-and-statements.md)) is a **frontend** construct — page bodies only. A `match` over a union value inside an `operation` / handler body parses and passes validation with zero diagnostics, then **crashes codegen on every backend** (`Error: variant-match statement is frontend-only; it must not reach the <X> backend`), because no `loom.*` gate covers it. Branch on the tag instead (`if result.type == "OutOfStock" { … }`), or return the union and let the route map it.
