@@ -5549,3 +5549,57 @@ Three things worth keeping:
    from the base ref, so the selection only bites once the config change
    itself has merged. A static reverse-import scanner (seconds, not 90 s)
    would lift the first cost but not the registry-hub one.
+
+## 95. A parked PR is not finished work waiting on a button — it is work that has to be re-reconciled by whoever picks it up (2026-09-03)
+
+**Context.** Five PRs sat open 9–15 days (#2671/#2672/#2673/#2674/#2675/#2678,
+the M-T1.21–25 + M-T6.47 tail of the numeric-types register). Every one was
+green on its own head, mutation-proved, with a written witness table. The read
+"finished, just needs merging" was wrong for all of them, and the cost of being
+wrong scales with how long they sit.
+
+**1. Characterization tests over untested seams freeze the defect, then block
+its fix.** Five instances, two PRs, one shape. `persist-codec-divergence.test.ts`
+arrived on main with the M-T9.17 "add direct tests for uncalled `src/ir/util`
+seams" drain and pinned `felizPersistCodec` as it then behaved — `int` and
+`long` collapsed onto one `int` codec. That collapse is exactly the defect
+M-T1.22 C exists to fix (audit F2): `type-fs.ts` spells a Loom `long` as F#
+`int64`, so the shared codec both truncated at 2^31 and failed to typecheck
+against the Model field it restored into. The test was green, correct about
+today's behaviour, and wrong about the contract. Four more in the flutter pair
+(`money.test.ts`, `optional-display-guard.test.ts` × 2, `intl-format.test.ts`),
+each pinning one side's pre-merge shape. **A test written to cover a seam pins
+whatever that seam currently does.** Coverage drives (M-T9.17, M-T9.29) generate
+these in bulk, so expect the next feature PR in that area to have to unfreeze
+one, and make it update the assertion WITH the reason at the call site rather
+than flipping it.
+
+**2. A textually clean merge can still be a semantic revert, and an orphaned
+import is the tell.** `flutter/forms-emit.ts` merged clean; the only conflict
+was an import block. Both sides targeted the same RS-12 contract (money leaves
+as a fixed-scale decimal string) by different mechanisms — main's #2734 via
+`double.tryParse(ctrl)?.toStringAsFixed(MONEY_WIRE_SCALE)`, #2678's M-T1.21 by
+submitting the typed text under a `^-?\d+(\.\d+)?$` validator. Taking main's
+side would have reinstated a binary-float round-trip on a `NUMERIC(19,4)` path
+— the identical defect #2673 had just removed from the JS frontends
+("`Number(value)` cannot carry 19 significant digits"). The signal was that
+`MONEY_WIRE_SCALE` had no remaining use on the other side: **an import that goes
+unused after a merge means the two sides disagree about MECHANISM, not that
+someone forgot a lint pass.** Read the callers before deleting it.
+
+**3. Two agents rebased the same branch, neither aware of the other.**
+`claude/numeric-flutter-money` was force-pushed mid-session: same four commits,
+new SHAs, author dates preserved, rebased onto the same base a merge had already
+reached. The push rejection was the only signal. Resolution is NOT a force-push
+back (CLAUDE.md: never rewrite history on someone else's branch) — merge their
+tip in, resolve each conflict to the side that accounts for current `main`, and
+verify `git merge-base --is-ancestor <their-tip> HEAD` before pushing, so the
+record shows nothing of theirs was dropped.
+
+**4. The measurable precursor is commits-behind, not days-idle.** `main` moved
+**10 commits under this one branch during a single session**, and the conflicts
+that appeared were all with wave PRs (#2734) that landed in the same files while
+it waited. R12 in `scripts/quality-delta.mjs` reports "no drafts idle >10d ✅"
+and saw none of it: these were non-draft, and idleness was never the variable.
+Distance from `main` is, it is already cheap to compute from the same git reads
+lane 2 uses, and it is the thing that predicts the reconciliation bill.
