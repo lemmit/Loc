@@ -94,7 +94,7 @@ ddd new acme --platform python                 # FastAPI backend + React (mantin
 | --- | --- | --- |
 | `--platform <node\|dotnet\|elixir\|java\|python>` | `node` | Backend platform (ports: node 3000, dotnet 8080, elixir 4000, java 8081, python 8000). Prints a hint listing the alternatives when defaulted. |
 | `--template <blank\|crud>` | `crud` | `blank` = one aggregate; `crud` = two aggregates with a repository `find`. |
-| `--design <mantine\|shadcn\|mui\|chakra\|coreComponents\|shadcnSvelte\|flowbite\|vuetify\|shadcnVue>` | `mantine` (`coreComponents` for elixir) | Frontend. A React pack scaffolds a separate React deployable; a Svelte pack (`shadcnSvelte`/`flowbite`) a `platform: svelte` frontend, a Vue pack (`vuetify`/`shadcnVue`) a `platform: vue` frontend; `coreComponents` makes Phoenix a single LiveView fullstack. `coreComponents` is only valid with `--platform elixir`. |
+| `--design <pack>` | `mantine` (`coreComponents` for elixir) | Frontend design pack — **every** built-in family (the list is derived from the pack registry, `src/util/builtin-formats.ts`, so `ddd new --help` and `designs/` cannot disagree): React `mantine`/`shadcn`/`mui`/`chakra`, Vue `vuetify`/`shadcnVue`, Svelte `shadcnSvelte`/`flowbite`, Angular `angularMaterial`/`primeng`/`spartanNg`, Phoenix LiveView `coreComponents`/`daisyui`. The pack's FORMAT picks the frontend deployable: a Vue pack scaffolds `platform: vue`, an Angular pack `platform: angular`, and a HEEx pack makes Phoenix a single LiveView fullstack (so it requires `--platform elixir`). |
 | `-o, --out <dir>` | `./<name>` | Output directory. |
 | `--force` | off | Scaffold into an existing, non-empty directory. |
 

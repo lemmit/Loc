@@ -56,6 +56,13 @@ const CONFIRM_SPAN: [number, number] = [
 const AGGREGATE_LINE = 4;
 const AGGREGATE_SPAN: [number, number] = [startOfLine(AGGREGATE_LINE), startOfLine(8)];
 
+// The whole of CONFIRM_LINE — wider than CONFIRM_SPAN but still ON that line,
+// so it is a line-local candidate rather than an enclosing fallback.
+const CONFIRM_LINE_SPAN: [number, number] = [
+  startOfLine(CONFIRM_LINE),
+  startOfLine(CONFIRM_LINE + 1),
+];
+
 const readSource = () => DDD_SOURCE;
 
 describe("translateBreakpoint", () => {
@@ -84,7 +91,14 @@ describe("translateBreakpoint", () => {
     ]);
   });
 
-  it("nested constructs on one line: a whole-aggregate region and a narrower operation region both covering the line -> both returned, narrowest-origin-span first", () => {
+  it("nested constructs on one line: the region that maps THE LINE wins; the enclosing whole-aggregate one is dropped", () => {
+    // M-FT.12.  Both regions cover CONFIRM_LINE, but only `confirm`'s span is
+    // ON that line — the aggregate's starts three lines earlier and ends two
+    // later.  Returning both made `ddd breakpoints` answer a statement line
+    // with the aggregate's whole-file sites (`order.ts:1`, `order.routes.ts:1`
+    // in a real map): breakpoints on an import statement, printed alongside
+    // the real one.  The enclosing region is kept only where nothing finer
+    // exists (see the next test).
     const map: SourceMap = {
       version: 1,
       sources: ["main.ddd"],
@@ -106,8 +120,32 @@ describe("translateBreakpoint", () => {
 
     const out = translateBreakpoint(map, "main.ddd", CONFIRM_LINE, readSource);
     expect(out.map((t) => ({ file: t.file, line: t.line }))).toEqual([
-      { file: "hono_api/domain/order.ts", line: 55 }, // narrowest span (confirm) first
-      { file: "hono_api/domain/order.ts", line: 40 }, // widest span (whole aggregate) last
+      { file: "hono_api/domain/order.ts", line: 55 }, // `confirm` — maps this line
+    ]);
+  });
+
+  it("a line with no region of its own still resolves to the enclosing construct", () => {
+    // `customerName: string` (line 5) is covered only by the whole-aggregate
+    // region.  Nothing finer exists, so the enclosing region IS the answer and
+    // must survive the drop above — otherwise the fix would trade noise for
+    // silence.
+    const map: SourceMap = {
+      version: 1,
+      sources: ["main.ddd"],
+      files: {
+        "hono_api/domain/order.ts": [
+          {
+            target: [40, 40],
+            origin: { kind: "source", path: "main.ddd", span: AGGREGATE_SPAN },
+            construct: "Orders.Order",
+          },
+        ],
+      },
+    };
+
+    const out = translateBreakpoint(map, "main.ddd", 5, readSource);
+    expect(out.map((t) => ({ file: t.file, line: t.line }))).toEqual([
+      { file: "hono_api/domain/order.ts", line: 40 },
     ]);
   });
 
@@ -266,10 +304,12 @@ describe("translateBreakpoint", () => {
   it("two fine regions on the SAME generated line at DIFFERENT columns both survive, narrowest-origin-span first", () => {
     // Two distinct sub-expressions inside `confirm`'s body, both emitted on
     // generated line 55 but at different columns — e.g. two operands of one
-    // rendered statement. `CONFIRM_SPAN` (narrower) and `AGGREGATE_SPAN`
-    // (wider) both cover CONFIRM_LINE, so both are candidates; distinct
-    // `targetCol` starts mean the widened `{file,line,column}` key must keep
-    // both instead of collapsing to one.
+    // rendered statement. `CONFIRM_SPAN` (narrower) and `CONFIRM_LINE_SPAN`
+    // (wider, but still ON the line) both cover CONFIRM_LINE, so both are
+    // candidates; distinct `targetCol` starts mean the widened
+    // `{file,line,column}` key must keep both instead of collapsing to one.
+    // Both spans are line-local on purpose: an ENCLOSING span would be dropped
+    // by the fallback rule above, which is a different question than de-dup.
     const map: SourceMap = {
       version: 1,
       sources: ["main.ddd"],
@@ -277,8 +317,8 @@ describe("translateBreakpoint", () => {
         "hono_api/domain/order.ts": [
           {
             target: [55, 55],
-            origin: { kind: "source", path: "main.ddd", span: AGGREGATE_SPAN },
-            construct: "Orders.Order (wide)",
+            origin: { kind: "source", path: "main.ddd", span: CONFIRM_LINE_SPAN },
+            construct: "Orders.Order.confirm (wide)",
             targetCol: [32, 39],
           },
           {

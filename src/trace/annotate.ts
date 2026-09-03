@@ -13,7 +13,7 @@
 
 import type { SourceRef } from "../ir/types/origin.js";
 import { parseFrames } from "./frames.js";
-import { type Resolution, resolveFrame, type SourceMap } from "./resolve.js";
+import { matchPath, type Resolution, resolveFrame, type SourceMap } from "./resolve.js";
 
 /** Maps a source offset to its 1-based line number (and, via `colOf`, its
  *  1-based column). Built once per distinct source text `annotateTrace`
@@ -135,6 +135,52 @@ function describe(res: Resolution, indexFor: (path: string) => LineIndex | undef
  * this function is pure best-effort: every frame it can't resolve is left
  * exactly as it appeared in `logText`.
  */
+/** What `annotateTrace` could and could not do with a log — the facts a
+ *  caller needs to SAY SOMETHING when the annotated output came back
+ *  identical to its input.
+ *
+ *  `annotateTrace` is deliberately best-effort and silent: an unresolved
+ *  frame passes through byte-identical.  That is right for the text, and
+ *  wrong for the run — a log full of `dist/index.js` frames echoed back
+ *  unchanged is indistinguishable from a log that had nothing to annotate,
+ *  and the CLI printed neither number.  This is the same walk `annotateTrace`
+ *  performs, reporting counts instead of text. */
+export interface TraceCoverage {
+  /** Stack-frame lines recognized in the log (any supported dialect). */
+  frames: number;
+  /** Frames that resolved to a `.ddd` construct. */
+  resolved: number;
+  /** Distinct frame file paths matching NO key in the map, first-seen order —
+   *  the bundled/foreign paths to show the user. */
+  unknownFiles: string[];
+  /** Frames whose FILE matched a map key but whose LINE fell in no region —
+   *  a different failure (stale map / edited output) worth separating. */
+  lineMisses: number;
+}
+
+/** Compute `TraceCoverage` for a log against a loaded source map. */
+export function traceCoverage(logText: string, map: SourceMap): TraceCoverage {
+  const keys = Object.keys(map.files);
+  const frames = parseFrames(logText);
+  const unknownFiles: string[] = [];
+  let resolved = 0;
+  let lineMisses = 0;
+  for (const frame of frames) {
+    if (resolveFrame(frame, map)) {
+      resolved++;
+      continue;
+    }
+    const file = frame.file;
+    if (file === undefined) continue;
+    if (matchPath(file, keys)) {
+      lineMisses++;
+      continue;
+    }
+    if (!unknownFiles.includes(file)) unknownFiles.push(file);
+  }
+  return { frames: frames.length, resolved, unknownFiles, lineMisses };
+}
+
 export function annotateTrace(
   logText: string,
   map: SourceMap,

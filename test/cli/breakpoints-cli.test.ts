@@ -68,9 +68,16 @@ interface WireRegionLike {
 }
 
 /** Read the emitted map + find the 1-based `.ddd` line hosting `needle`, and
- *  a region in `hono_api/domain/order.ts` whose origin span overlaps that
- *  line — mirroring `translateBreakpoint`'s own overlap test rather than
- *  hardcoding line numbers (the #1748 pattern). */
+ *  a region in `hono_api/domain/order.ts` that maps THAT LINE (its origin span
+ *  sits inside the line's byte range) — mirroring `translateBreakpoint`'s own
+ *  test rather than hardcoding line numbers (the #1748 pattern).
+ *
+ *  Containment, not mere overlap: a statement line is also overlapped by the
+ *  enclosing aggregate's whole-file region, and `translateBreakpoint` drops
+ *  those enclosing fallbacks once the line has a region of its own (M-FT.12 —
+ *  they answered `order.ts:1` / `order.routes.ts:1`, breakpoints on an import
+ *  statement). Asking for the overlapping region here picked exactly the
+ *  fallback that is no longer offered. */
 function findDddLineAndDomainTarget(needle: string): {
   dddLine: number;
   domainKey: string;
@@ -93,9 +100,9 @@ function findDddLineAndDomainTarget(needle: string): {
   const region = map.files[domainKey!]!.find((r) => {
     if (r.origin.kind !== "source" || !r.origin.span) return false;
     const [s, e] = r.origin.span;
-    return s < lineEnd && e > lineStart;
+    return s >= lineStart && e <= lineEnd;
   });
-  expect(region, `no region in ${domainKey} overlaps .ddd line ${dddLine}`).toBeDefined();
+  expect(region, `no region in ${domainKey} maps .ddd line ${dddLine}`).toBeDefined();
 
   return { dddLine, domainKey: domainKey!, targetLine: region!.target[0] };
 }
@@ -165,11 +172,10 @@ describe("ddd breakpoints", () => {
   });
 
   it("prints a count header + narrowest-first list when a line maps to >1 target", () => {
-    // `let note = customerName` maps to the fine statement region in
-    // domain/order.ts AND the coarser enclosing aggregate + route-file
-    // regions — so runBreakpoints takes its `targets.length > 1` branch
-    // (a count header, then every target). The single-region happy-path
-    // tests above never exercise it.
+    // `let note = customerName` maps to the fine expression region AND the
+    // coarser statement region in domain/order.ts — so runBreakpoints takes
+    // its `targets.length > 1` branch (a count header, then every target).
+    // The single-region happy-path tests above never exercise it.
     const { dddLine } = findDddLineAndDomainTarget("let note = customerName");
 
     const r = run(["breakpoints", ddd, "--line", String(dddLine), "--out", out]);
@@ -180,10 +186,26 @@ describe("ddd breakpoints", () => {
 
     const printed = r.stdout.trim().split("\n").slice(1); // drop the header line
     expect(printed.length).toBeGreaterThan(1);
-    // Narrowest-origin-span first: the fine domain statement region beats the
-    // whole-file aggregate/route regions, so the domain file leads the list.
+    // Narrowest-origin-span first: the fine expression region leads.
     expect(printed[0]).toContain("domain/order.ts:");
-    // Fan-out crosses files — a route-file target is also listed.
+    // …and every listed site maps THIS line — no whole-file `:1` fallback
+    // from the enclosing aggregate (M-FT.12).
+    for (const line of printed) {
+      expect(line, `whole-file fallback survived: ${line}`).not.toMatch(/:1$/);
+    }
+  });
+
+  it("a line with no region of its own still fans out to its declaration's files", () => {
+    // The fallback is dropped only where something better exists.  The
+    // aggregate declaration line has no statement region, so the whole-file
+    // targets ARE the answer — including the route file, which is what makes
+    // this the cross-file fan-out case.
+    const needle = "aggregate Order {";
+    const dddLine = DDL.slice(0, DDL.indexOf(needle)).split("\n").length;
+
+    const r = run(["breakpoints", ddd, "--line", String(dddLine), "--out", out]);
+    expect(r.status).toBe(0);
+    const printed = r.stdout.trim().split("\n").slice(1);
     expect(printed.some((l) => l.includes("order.routes.ts:"))).toBe(true);
   });
 

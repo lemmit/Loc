@@ -102,6 +102,101 @@ export function indexTargets(model: Model): { map: Map<string, AstNode>; ambiguo
   return { map, ambiguous };
 }
 
+// ---------------------------------------------------------------------------
+// Address help — what a failed patch says instead of "not found".
+//
+// Every address in this space is `<keyword> <Context>.<Decl>[.<member>]`, and
+// EVERY part of that is load-bearing: `Issue.estimate` (no keyword),
+// `aggregate Issue.estimate` (no context) and `operation Tracking.Issue.assign`
+// vs `aggregate Tracking.Issue.assign` (wrong keyword) all resolve to nothing.
+// The applier knows the whole address book — it just built it — so a bare
+// "target not found" withholds the one fact that fixes the patch.  These
+// helpers turn the index into the answer: the accepted shape, the nearest
+// addresses, and the book itself.
+// ---------------------------------------------------------------------------
+
+/** How many addresses the "address book" section prints before it truncates.
+ *  A real model has hundreds; the point is to show the SHAPE and let the
+ *  reader recognise their target, not to dump the outline. */
+const ADDRESS_BOOK_LIMIT = 40;
+/** How many "did you mean" candidates are worth printing. */
+const SUGGESTION_LIMIT = 5;
+
+/** Split `aggregate Sales.Order.total` into `{ keyword: "aggregate", path:
+ *  "Sales.Order.total" }`.  A target with no space (a bare `Order.total`) has
+ *  no keyword — which is itself one of the ways an address fails. */
+function splitAddress(address: string): { keyword?: string; path: string } {
+  const space = address.indexOf(" ");
+  if (space === -1) return { path: address };
+  return { keyword: address.slice(0, space), path: address.slice(space + 1) };
+}
+
+/** Addresses a mistyped target most plausibly meant, best first.
+ *
+ *  Three shapes, in confidence order — each is a real failure seen in the
+ *  field: the SAME path under a different keyword (`operation …` for a member
+ *  that reads under `aggregate …`), the same path missing its qualifying
+ *  segments (`Issue.estimate` for `Tracking.Issue.estimate`), and the same
+ *  leaf name somewhere else entirely. */
+function suggestAddresses(target: string, known: readonly string[]): string[] {
+  const want = splitAddress(target);
+  const wantSegs = want.path.split(".").filter(Boolean);
+  if (wantSegs.length === 0) return [];
+  const wantLeaf = wantSegs[wantSegs.length - 1]!;
+
+  const samePath: string[] = [];
+  const suffix: string[] = [];
+  const sameLeaf: string[] = [];
+  for (const address of known) {
+    const got = splitAddress(address);
+    const gotSegs = got.path.split(".").filter(Boolean);
+    if (got.path === want.path) {
+      samePath.push(address);
+      continue;
+    }
+    const isSuffix =
+      wantSegs.length < gotSegs.length &&
+      wantSegs.every((seg, i) => seg === gotSegs[gotSegs.length - wantSegs.length + i]);
+    if (isSuffix) {
+      suffix.push(address);
+      continue;
+    }
+    if (gotSegs[gotSegs.length - 1] === wantLeaf) sameLeaf.push(address);
+  }
+
+  const out: string[] = [];
+  for (const address of [...samePath, ...suffix, ...sameLeaf]) {
+    if (!out.includes(address)) out.push(address);
+    if (out.length === SUGGESTION_LIMIT) break;
+  }
+  return out;
+}
+
+/** The "not found" message: the accepted address shape, the nearest known
+ *  addresses, and the (bounded) address book. */
+function notFoundMessage(target: string, known: readonly string[]): string {
+  const lines = [
+    `target '${target}' not found`,
+    "  addresses are `<keyword> <Context>.<Decl>[.<member>]` — the keyword and every",
+    "  qualifying segment are required (`aggregate Sales.Order.total`, not `Order.total`);",
+    "  `ddd parse <file> --json` prints the same address book as `outline`",
+  ];
+  const suggestions = suggestAddresses(target, known);
+  if (suggestions.length > 0) {
+    lines.push(`  did you mean: ${suggestions.join(", ")}`);
+  }
+  if (known.length === 0) {
+    lines.push("  this model declares no addressable node");
+    return lines.join("\n");
+  }
+  lines.push(`  address book (${known.length}):`);
+  for (const address of known.slice(0, ADDRESS_BOOK_LIMIT)) lines.push(`    ${address}`);
+  if (known.length > ADDRESS_BOOK_LIMIT) {
+    lines.push(`    … and ${known.length - ADDRESS_BOOK_LIMIT} more`);
+  }
+  return lines.join("\n");
+}
+
 /** Offset of the start of the line containing `offset`. */
 function lineStart(text: string, offset: number): number {
   let i = offset;
@@ -161,7 +256,12 @@ function editFor(patch: ModelPatch, node: AstNode, text: string): Edit {
   // add — insert `source` as a new member just before the container's `}`.
   if (patch.source === undefined) throw new Error(`'add' requires 'source'`);
   if (!isContainer(node)) {
-    throw new Error(`'add' target '${patch.target}' is not a container (context/aggregate)`);
+    throw new Error(
+      `'add' target '${patch.target}' is not a container — 'add' appends a member to a ` +
+        "`context` / `aggregate` / `valueobject` / `deployable` body; to place a line next to " +
+        "an existing member use 'insert' with position before|after, and to rewrite a member " +
+        "in place use 'replace'",
+    );
   }
   let brace = end - 1;
   while (brace > start && text[brace] !== "}") brace--;
@@ -237,15 +337,22 @@ async function resolve(source: string, patches: ModelPatch[]): Promise<Resolved>
   const { map, ambiguous } = indexTargets(doc.parseResult.value);
   const errors: PatchError[] = [];
   const edits: { edit: Edit; patch: ModelPatch }[] = [];
+  // Sorted once — the address book every failed target prints.
+  const known = [...map.keys()].sort();
 
   for (const patch of patches) {
     if (ambiguous.has(patch.target)) {
-      errors.push({ patch, message: `target '${patch.target}' is ambiguous` });
+      errors.push({
+        patch,
+        message:
+          `target '${patch.target}' is ambiguous — two declarations share it, so the patch ` +
+          "cannot say which one it means; rename one, or address a narrower node inside it",
+      });
       continue;
     }
     const node = map.get(patch.target);
     if (!node) {
-      errors.push({ patch, message: `target '${patch.target}' not found` });
+      errors.push({ patch, message: notFoundMessage(patch.target, known) });
       continue;
     }
     try {
