@@ -235,6 +235,73 @@ const RELOAD_CONTROLLER = `
 })();
 `.trim();
 
+// Element-select mode (M-T8.20 slice 4) — "click the running app, land on the
+// declaration that renders it".
+//
+// It lives inside the preview document because that is the only place a click
+// on the generated app can be observed: the parent cannot see into the iframe
+// (and must not, once SANDBOX_ORIGIN is a distinct origin).  The parent turns
+// it on and off over the SAME port the runtime forwards ride, so no second
+// channel and no `postMessage` to the frame's window are introduced.
+//
+// Off by default and completely inert until switched on: the listener is
+// attached once, in capture phase, and returns immediately unless the mode is
+// active.  While active it swallows the click (`preventDefault` +
+// `stopPropagation`) — the point is to inspect the element, not to submit the
+// form it sits in — and walks up from the target for the nearest
+// `data-testid`, which is what the generated pages stamp on every primitive.
+const SELECT_CONTROLLER = `
+(function () {
+  var port = window.__LOOM_PORT__;
+  if (!port) return;
+  var active = false;
+  var HL = "loom-select-highlight";
+  var style = document.createElement("style");
+  style.textContent = "." + HL + "{outline:2px solid #f59e0b !important;outline-offset:-2px;cursor:crosshair !important;}";
+  document.head.appendChild(style);
+  var hovered = null;
+  function clear() {
+    if (hovered) { try { hovered.classList.remove(HL); } catch (e) {} }
+    hovered = null;
+  }
+  function nearestTestId(el) {
+    while (el && el !== document.documentElement) {
+      if (el.getAttribute) {
+        var id = el.getAttribute("data-testid");
+        if (id) return { id: id, el: el };
+      }
+      el = el.parentElement;
+    }
+    return null;
+  }
+  document.addEventListener("mousemove", function (e) {
+    if (!active) return;
+    var hit = nearestTestId(e.target);
+    if (!hit || hit.el === hovered) return;
+    clear();
+    hovered = hit.el;
+    try { hovered.classList.add(HL); } catch (err) {}
+  }, true);
+  document.addEventListener("click", function (e) {
+    if (!active) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var hit = nearestTestId(e.target);
+    clear();
+    active = false;
+    try {
+      port.postMessage({ kind: "selected", testid: hit ? hit.id : null });
+    } catch (err) {}
+  }, true);
+  port.addEventListener("message", function (ev) {
+    var r = ev.data;
+    if (!r || r.kind !== "select-mode") return;
+    active = r.on === true;
+    if (!active) clear();
+  });
+})();
+`.trim();
+
 // Content-Security-Policy for the preview document.
 //
 // This is the egress lock the cross-origin sandbox needs once
@@ -517,6 +584,7 @@ ${styleTagFor(args.css)}
 ${hostScript}
 <script type="module">${ESCAPE_END_SCRIPT(args.js)}</script>
 <script>${ESCAPE_END_SCRIPT(RELOAD_CONTROLLER)}</script>
+<script>${ESCAPE_END_SCRIPT(SELECT_CONTROLLER)}</script>
 ${args.driverUrl ? `<script type="module" src="${args.driverUrl}"></script>` : ""}
 </body>
 </html>`;

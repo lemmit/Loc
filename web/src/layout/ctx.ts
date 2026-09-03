@@ -28,6 +28,7 @@ import type {
 } from "../build/protocol";
 import type { Band, Correspondence, SourceSpan } from "../build/correspondence";
 import type { OutputDiff } from "../build/output-diff";
+import type { SelectTarget } from "../build/select-target";
 import type { BundleFail, BundleOk } from "../bundle/protocol";
 import type { LoomExample } from "../examples";
 import type { TreeFolder } from "../preview/file-tree";
@@ -168,6 +169,15 @@ export const EXPLORER_MODES: readonly ExplorerMode[] = [
   "api",
   "traceability",
 ];
+
+/** The outcome of one preview select-mode click (M-T8.20 slice 4).
+ *  Three shapes, because the three failures are genuinely different and the
+ *  copy has to say which: the element carried no test id, no generated page
+ *  claims that id, or it resolved. */
+export type SelectResult =
+  | { kind: "unidentified" }
+  | { kind: "unresolved"; testid: string }
+  | { kind: "found"; target: SelectTarget };
 
 /** A prompt handed to the Agent composer from elsewhere (a Problems row's
  *  *Ask the agent*, the first-run card).  `nonce` makes two identical
@@ -422,6 +432,16 @@ export interface LayoutCtx {
    *  Empty unless `colourMap` is on — the bands are derived from the live
    *  editor text, which only App can see. */
   sourceBands: readonly Band[];
+  /** Handle a preview select-mode click: resolve the element's
+   *  `data-testid` to the generated page and the `.ddd` declaration behind
+   *  it, reveal that declaration in the editor, and record the outcome in
+   *  `selectResult`.  `null` means the clicked element carried no id. */
+  resolveSelectedElement: (testid: string | null) => void;
+  /** What the last select-mode click resolved to — rendered as a one-line
+   *  result under the preview, with the two follow-ups (open the Builder,
+   *  hand the node path to the agent).  Null before the first click. */
+  selectResult: SelectResult | null;
+  dismissSelectResult: () => void;
 
   // Playground auth stub (Phase 7) — identity injected into dispatched
   // requests via the `x-loom-dev-claims` header.  Persisted by App.tsx.

@@ -48,6 +48,7 @@ import type {
 import { inlineSourcemapArtifacts, overlaySourcemapArtifacts } from "./build/strip-sourcemap";
 import { type Band, correspondenceAt, sourceBands, sourceSpanFor } from "./build/correspondence";
 import { diffGenerated, type OutputDiff } from "./build/output-diff";
+import { resolveTestId } from "./build/select-target";
 import type { BundleOk } from "./bundle/protocol";
 import {
   engineRegistry,
@@ -120,6 +121,7 @@ import {
   type MobileCodeView,
   type MobileTab,
   type ReactBundleStatus,
+  type SelectResult,
   type UnsupportedDeployable,
   type UnsupportedPlatform,
 } from "./layout/ctx";
@@ -1795,6 +1797,33 @@ export default function App(): JSX.Element {
     return sourceBands(sourceMap, sources.activePath, sourceRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceMap, colourMap, sources.activePath, editorSourceTick]);
+  // Preview select mode (M-T8.20 slice 4).  The click arrives as a bare
+  // `data-testid`; `resolveTestId` walks it back through the generated tree
+  // and the sourcemap to the page declaration, and the result is REVEALED in
+  // the editor immediately — landing on the source is the answer, the two
+  // follow-ups (Builder, agent) are offered beside it.
+  const [selectResult, setSelectResult] = useState<SelectResult | null>(null);
+  const resolveSelectedElement = (testid: string | null): void => {
+    if (!testid) {
+      setSelectResult({ kind: "unidentified" });
+      return;
+    }
+    const target = resolveTestId(files, sourceMap, testid, sourceRef.current);
+    if (!target) {
+      setSelectResult({ kind: "unresolved", testid });
+      return;
+    }
+    setSelectResult({ kind: "found", target });
+    if (target.sourceLine !== undefined) {
+      revealSourceRange({
+        startLineNumber: target.sourceLine,
+        startColumn: 1,
+        endLineNumber: target.sourceEndLine ?? target.sourceLine,
+        endColumn: 1,
+      });
+    }
+  };
+
   const reverseSpan = useMemo(() => {
     if (!sourceMap || !reverseHover) return null;
     return sourceSpanFor(
@@ -2247,6 +2276,8 @@ export default function App(): JSX.Element {
     setCorrespondenceLine,
     setReverseHover,
     setColourMap,
+    resolveSelectedElement,
+    dismissSelectResult: (): void => setSelectResult(null),
   });
 
   const buildClient = buildClientRef.current;
@@ -2313,6 +2344,7 @@ export default function App(): JSX.Element {
       reverseSpan,
       colourMap,
       sourceBands: correspondenceBands,
+      selectResult,
       reqMethod,
       reqPath,
       reqBody,
@@ -2402,6 +2434,7 @@ export default function App(): JSX.Element {
       reverseSpan,
       colourMap,
       correspondenceBands,
+      selectResult,
       reqMethod,
       reqPath,
       reqBody,
