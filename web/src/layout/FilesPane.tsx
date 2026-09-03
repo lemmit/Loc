@@ -4,7 +4,7 @@ import { FileTree } from "../preview/FileTree";
 import { PlainFileViewer } from "../preview/PlainFileViewer";
 import { LazyFileViewer } from "./lazy-panels";
 import type { LayoutCtx } from "./ctx";
-import { nextStepMid } from "./vocabulary";
+import { EXPORT, nextStepMid } from "./vocabulary";
 
 interface Props {
   ctx: LayoutCtx;
@@ -42,7 +42,7 @@ export function FilesPane({ ctx }: Props): JSX.Element {
           style={{
             width: 240,
             minWidth: 240,
-            borderRight: "1px solid var(--mantine-color-dark-4)",
+            borderRight: "1px solid var(--loom-border)",
             overflow: "hidden",
             display: "flex",
             flexDirection: "column",
@@ -61,8 +61,8 @@ export function FilesPane({ ctx }: Props): JSX.Element {
           component="details"
           data-testid="file-tree-mobile"
           style={{
-            borderBottom: "1px solid var(--mantine-color-dark-4)",
-            background: "var(--mantine-color-dark-7)",
+            borderBottom: "1px solid var(--loom-border)",
+            background: "var(--loom-bg)",
             flexShrink: 0,
           }}
         >
@@ -99,7 +99,7 @@ export function FilesPane({ ctx }: Props): JSX.Element {
         </Box>
       )}
       <Box style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        <Group px="sm" py={4} bg="dark.7" gap="xs" wrap="nowrap" justify="space-between">
+        <Group px="sm" py={4} bg="var(--loom-bg)" gap="xs" wrap="nowrap" justify="space-between">
           <Text size="xs" ff="monospace" c={selectedFile ? undefined : "dimmed"} truncate>
             {selectedFile?.path ?? "no file selected"}
           </Text>
@@ -114,6 +114,7 @@ export function FilesPane({ ctx }: Props): JSX.Element {
               onClick={() => runDownloadZip()}
               style={{ flexShrink: 0 }}
               data-testid="download-zip-mobile"
+              title={EXPORT.hint}
             >
               .zip
             </Button>
@@ -177,8 +178,8 @@ export function FilesPane({ ctx }: Props): JSX.Element {
             data-testid="bundle-errors"
             p="xs"
             style={{
-              borderTop: "1px solid var(--mantine-color-dark-4)",
-              background: "var(--mantine-color-dark-7)",
+              borderTop: "1px solid var(--loom-border)",
+              background: "var(--loom-bg)",
               maxHeight: 200,
               overflow: "auto",
             }}

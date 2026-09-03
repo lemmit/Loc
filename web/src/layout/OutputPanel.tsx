@@ -103,10 +103,10 @@ export function OutputPanel({ ctx, stream, setStream }: Props): JSX.Element {
       <Group
         px="sm"
         py={4}
-        bg="dark.6"
+        bg="var(--loom-bg-raised)"
         gap="xs"
         wrap="nowrap"
-        style={{ flexShrink: 0, borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+        style={{ flexShrink: 0, borderBottom: "1px solid var(--loom-border)" }}
       >
         <Select
           size="xs"
@@ -128,13 +128,30 @@ export function OutputPanel({ ctx, stream, setStream }: Props): JSX.Element {
             );
           }}
         />
-        {stream === "backend" && ctx.backendLog.length > 0 && (
-          <Button size="compact-xs" variant="subtle" color="gray" onClick={ctx.clearBackendLog} data-testid="output-clear-backend">
+        {/* DISABLED, not absent, while the stream is empty (audit L4): these
+            appeared the instant the first log line arrived, shifting the
+            select beside them out from under a cursor already on its way. */}
+        {stream === "backend" && (
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            color="gray"
+            disabled={ctx.backendLog.length === 0}
+            onClick={ctx.clearBackendLog}
+            data-testid="output-clear-backend"
+          >
             Clear
           </Button>
         )}
-        {stream === "app" && ctx.appLog.length > 0 && (
-          <Button size="compact-xs" variant="subtle" color="gray" onClick={ctx.clearAppLog} data-testid="output-clear-app">
+        {stream === "app" && (
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            color="gray"
+            disabled={ctx.appLog.length === 0}
+            onClick={ctx.clearAppLog}
+            data-testid="output-clear-app"
+          >
             Clear
           </Button>
         )}
@@ -192,7 +209,7 @@ function DiagBody(): JSX.Element {
         px="sm"
         py={4}
         wrap="nowrap"
-        style={{ flexShrink: 0, borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+        style={{ flexShrink: 0, borderBottom: "1px solid var(--loom-border)" }}
       >
         <Text size="xs" c="dimmed" style={{ flex: 1 }}>
           {rows.length} snapshot{rows.length === 1 ? "" : "s"} · captured on tab
@@ -201,11 +218,16 @@ function DiagBody(): JSX.Element {
         <Button size="compact-xs" variant="subtle" color="gray" onClick={refresh} data-testid="output-diag-refresh">
           Refresh
         </Button>
-        {rows.length > 0 && (
-          <Button size="compact-xs" variant="subtle" color="gray" onClick={clear} data-testid="output-diag-clear">
-            Clear
-          </Button>
-        )}
+        <Button
+          size="compact-xs"
+          variant="subtle"
+          color="gray"
+          disabled={rows.length === 0}
+          onClick={clear}
+          data-testid="output-diag-clear"
+        >
+          Clear
+        </Button>
       </Group>
       {/* The ring is only half the answer — without an exit, a maximally
           cooperative user still has to hand-transcribe it.  These are that
@@ -215,7 +237,7 @@ function DiagBody(): JSX.Element {
         px="sm"
         py={6}
         data-testid="output-diag-report"
-        style={{ flexShrink: 0, borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+        style={{ flexShrink: 0, borderBottom: "1px solid var(--loom-border)" }}
       >
         <CrashReportButtons size="xs" />
       </Box>
@@ -376,7 +398,7 @@ function FilterableLogView({
         px="sm"
         py={4}
         wrap="nowrap"
-        style={{ flexShrink: 0, borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+        style={{ flexShrink: 0, borderBottom: "1px solid var(--loom-border)" }}
         data-testid={`${testid}-filter`}
       >
         <Text size="xs" c="dimmed">

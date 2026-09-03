@@ -70,7 +70,7 @@ const CONTEXT_EXTRAS: { kind: ContextExtraKind; label: string }[] = [
   { kind: "policy", label: "+ Policy" },
 ];
 
-const ROW_STYLE = { borderBottom: "1px solid var(--mantine-color-dark-4)" } as const;
+const ROW_STYLE = { borderBottom: "1px solid var(--loom-border)" } as const;
 
 /** One palette button.  A blocked entry is disabled with the reason on a
  *  Tooltip around a WRAPPER span — a disabled button emits no pointer events,
@@ -113,7 +113,7 @@ export default function AddPalette({ path, source, onAdd, bodyMember }: Props): 
 
   if (last.kind === "system") {
     return (
-      <Group gap={4} px={6} py={4} bg="dark.6" wrap="wrap" style={ROW_STYLE} data-testid="c4system-v2-add-palette">
+      <Group gap={4} px={6} py={4} bg="var(--loom-bg-raised)" wrap="wrap" style={ROW_STYLE} data-testid="c4system-v2-add-palette">
         <Entry label="+ Subdomain" variant="light" testid="c4system-v2-add-subdomain"
           onClick={() => onAdd("+ Subdomain", addSubdomainSource(source))} />
         <Entry label="+ API" variant="default" testid="c4system-v2-add-api" blocked={blockers.get("api")}
@@ -135,7 +135,7 @@ export default function AddPalette({ path, source, onAdd, bodyMember }: Props): 
 
   if (last.kind === "subdomain") {
     return (
-      <Group gap={4} px={6} py={4} bg="dark.6" wrap="wrap" style={ROW_STYLE} data-testid="c4system-v2-add-palette">
+      <Group gap={4} px={6} py={4} bg="var(--loom-bg-raised)" wrap="wrap" style={ROW_STYLE} data-testid="c4system-v2-add-palette">
         <Entry label="+ Context" variant="light" testid="c4system-v2-add-context"
           onClick={() => onAdd("+ Context", addContextSource(source, last.name))} />
         <Entry label="+ Permissions" variant="default" testid="c4system-v2-add-permissions"
@@ -146,7 +146,7 @@ export default function AddPalette({ path, source, onAdd, bodyMember }: Props): 
 
   if (last.kind === "aggregate") {
     return (
-      <Group gap={4} px={6} py={4} bg="dark.6" wrap="wrap" style={ROW_STYLE} data-testid="c4system-v2-add-palette">
+      <Group gap={4} px={6} py={4} bg="var(--loom-bg-raised)" wrap="wrap" style={ROW_STYLE} data-testid="c4system-v2-add-palette">
         <Entry label="+ Operation" variant="light" testid="c4system-v2-add-operation"
           onClick={() => onAdd("+ Operation", addOperationSource(source, last.name))} />
         <Entry label="+ Field" variant="light" testid="c4system-v2-add-field"
@@ -182,7 +182,7 @@ export default function AddPalette({ path, source, onAdd, bodyMember }: Props): 
               : { kind: "operation", aggregate: agg?.name ?? "", op: last.name };
           })();
     return (
-      <Group gap={4} px={6} py={4} bg="dark.6" wrap="wrap" style={ROW_STYLE} data-testid="c4system-v2-add-palette">
+      <Group gap={4} px={6} py={4} bg="var(--loom-bg-raised)" wrap="wrap" style={ROW_STYLE} data-testid="c4system-v2-add-palette">
         <Entry label="+ Stmt" variant="light" testid="c4system-v2-add-stmt"
           onClick={() => onAdd("+ Stmt", addStatement(source, loc, "precondition true"))} />
       </Group>
@@ -192,7 +192,7 @@ export default function AddPalette({ path, source, onAdd, bodyMember }: Props): 
   if (last.kind === "context") {
     const ctxName = last.name;
     return (
-      <Group gap={4} px={6} py={4} bg="dark.6" wrap="wrap" style={ROW_STYLE} data-testid="c4system-v2-add-palette">
+      <Group gap={4} px={6} py={4} bg="var(--loom-bg-raised)" wrap="wrap" style={ROW_STYLE} data-testid="c4system-v2-add-palette">
         <Entry label="+ Aggregate" variant="light" testid="c4system-v2-add-aggregate"
           onClick={() => onAdd("+ Aggregate", addConstructSource(source, "aggregate", { context: ctxName }))} />
         <Entry label="+ Value object" variant="light" testid="c4system-v2-add-valueobject"

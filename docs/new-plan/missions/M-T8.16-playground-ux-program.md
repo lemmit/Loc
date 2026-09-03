@@ -453,6 +453,29 @@ Vue rewrites the deployable clause and regenerates; `#view=1` renders without
 the header and refuses edits; light scheme renders legibly (a screenshot spec
 with a contrast threshold).
 
+**Shipped 2026-09-03 — PR #2775**, four slices as written.  Two decisions were
+taken as the defaults above prescribe, and are recorded here so a later agent
+does not re-open them by accident:
+
+* **Short links: out of scope, confirmed.**  §5 rules out a server and the
+  site is static, so a shortener has nowhere to live.  The `#view=1` /
+  `#embed=1` flags ride the same hash as the payload, and the share dialog
+  states the absence (`SHARE.noShortener`) rather than leaving a long URL
+  looking like an oversight.  Revisit only on a field complaint about length,
+  and only together with §5.
+* **GitHub push: out of scope, confirmed.**  It needs a token story a static
+  site has nowhere to keep.  The two supported ways out of the tab stay the
+  ZIP — which now carries a root `README.md` on running the tree with
+  `docker compose`, derived from the emitted compose file — and the share link.
+
+**One residue is deliberately NOT closed here: L5** (the Agent demo button
+silently becoming *Replay demo*).  It lives in `layout/ChatPanel.tsx`, which
+**M-T8.19** owns while that mission is in flight; editing it from here would
+collide on the same lines.  That file also holds the single waiver in the theme
+ratchet (`test/playground/theme-tokens.test.ts`) — its six remaining raw shades
+migrate, and the waiver is deleted, under M-T8.19.  The waiver is a ratchet: it
+fails once the file is clean, so it cannot be forgotten.
+
 ---
 
 ## 4. Decisions the owner may override at draft-PR review

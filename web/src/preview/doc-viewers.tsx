@@ -48,7 +48,7 @@ export function MarkdownViewer({
 
   return (
     <Box style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column" }}>
-      <Group px="xs" py={4} bg="dark.6" gap="xs" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+      <Group px="xs" py={4} bg="var(--loom-bg-raised)" gap="xs" style={{ borderBottom: "1px solid var(--loom-border)" }}>
         <SegmentedControl
           size="xs"
           value={view}
@@ -99,6 +99,8 @@ function loadMermaid(): Promise<typeof import("mermaid").default> {
 let mermaidRenderSeq = 0;
 
 const ZOOM_STEP = 1.2;
+// The one place the wheel gesture is stated — the reset control's tooltip.
+const ZOOM_HINT = "Reset view. Ctrl (or ⌘) + wheel zooms; a plain wheel scrolls.";
 const ZOOM_MIN = 0.2;
 const ZOOM_MAX = 8;
 
@@ -173,13 +175,19 @@ export function MermaidViewer({ content }: { content: string }): JSX.Element {
     }
   };
   const onWheel = (e: React.WheelEvent): void => {
-    // Plain wheel zooms; the user then drags to reposition.
+    // Ctrl / ⌘ + wheel zooms; a PLAIN wheel scrolls the pane (audit L2).
+    // Hijacking the plain wheel meant a diagram taller than its pane could not
+    // be scrolled past at all — the page under the cursor just zoomed — which
+    // is the same trap map widgets learned to avoid.  Ctrl+wheel is also what
+    // the browser itself uses for zoom, so the gesture is already known.
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
     zoomBy(e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
   };
 
   return (
     <Box style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column" }}>
-      <Group px="xs" py={4} bg="dark.6" gap="xs" justify="space-between" wrap="nowrap" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+      <Group px="xs" py={4} bg="var(--loom-bg-raised)" gap="xs" justify="space-between" wrap="nowrap" style={{ borderBottom: "1px solid var(--loom-border)" }}>
         <SegmentedControl
           size="xs"
           value={view}
@@ -190,22 +198,31 @@ export function MermaidViewer({ content }: { content: string }): JSX.Element {
           ]}
           data-testid="mmd-view"
         />
-        {view === "diagram" && svg && !error && (
-          <Group gap={4} wrap="nowrap">
-            <ActionIcon size="sm" variant="default" onClick={() => zoomBy(1 / ZOOM_STEP)} data-testid="mmd-zoom-out" aria-label="Zoom out">
-              −
-            </ActionIcon>
-            <Text size="xs" c="dimmed" w={40} ta="center" data-testid="mmd-zoom-level">
-              {Math.round(zoom * 100)}%
-            </Text>
-            <ActionIcon size="sm" variant="default" onClick={() => zoomBy(ZOOM_STEP)} data-testid="mmd-zoom-in" aria-label="Zoom in">
-              +
-            </ActionIcon>
-            <ActionIcon size="sm" variant="default" onClick={resetView} data-testid="mmd-zoom-reset" aria-label="Reset view">
-              ⤢
-            </ActionIcon>
-          </Group>
-        )}
+        {/* Always mounted, DISABLED until there is a diagram to zoom (audit
+            L2 / L4): rendering the row only after mermaid resolved made the
+            toolbar grow under the cursor a beat after the pane appeared, so a
+            click aimed at Source landed on Zoom out. */}
+        <Group gap={4} wrap="nowrap" data-testid="mmd-zoom-controls">
+          {(() => {
+            const ready = view === "diagram" && !!svg && !error;
+            return (
+              <>
+                <ActionIcon size="sm" variant="default" disabled={!ready} onClick={() => zoomBy(1 / ZOOM_STEP)} data-testid="mmd-zoom-out" aria-label="Zoom out">
+                  −
+                </ActionIcon>
+                <Text size="xs" c="dimmed" w={40} ta="center" data-testid="mmd-zoom-level">
+                  {ready ? `${Math.round(zoom * 100)}%` : "—"}
+                </Text>
+                <ActionIcon size="sm" variant="default" disabled={!ready} onClick={() => zoomBy(ZOOM_STEP)} data-testid="mmd-zoom-in" aria-label="Zoom in">
+                  +
+                </ActionIcon>
+                <ActionIcon size="sm" variant="default" disabled={!ready} onClick={resetView} data-testid="mmd-zoom-reset" aria-label="Reset view" title={ZOOM_HINT}>
+                  ⤢
+                </ActionIcon>
+              </>
+            );
+          })()}
+        </Group>
       </Group>
       {view === "source" ? (
         <Box

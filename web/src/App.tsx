@@ -76,13 +76,17 @@ import type { WorkspaceSourcesController } from "./workspace/workspace-sources";
 import { applyGeneratedTree, readGeneratedTree, startAutoCommit } from "./workspace/git";
 import {
   buildShareUrl,
+  NO_VIEW_FLAGS,
   readHash,
+  readViewFlags,
+  type ViewFlags,
   writeHashProject,
   writeHashSource,
   type HashLoad,
 } from "./util/share";
 import { fnv1a32 } from "./util/hash";
 import { downloadBytes, makeZip } from "./util/zip";
+import { buildExportReadme, EXPORT_README_PATH } from "./util/export-readme";
 import { usePersistedState } from "./util/usePersistedState";
 // M-T8.18 — the palette, the shortcut sheet, app-level hotkeys, F8.
 import { CommandPalette, openPalette } from "./layout/CommandPalette";
@@ -221,6 +225,10 @@ export default function App(): JSX.Element {
   // imported into the active workspace on mount so a recipient lands
   // on the shared project (see the workspace-open effect below).
   const hashLoadOnMount = useMemo<HashLoad | null>(() => readHash(), []);
+  // How this link asks to be RENDERED (M-T8.23 slice 2), read once on mount
+  // alongside the payload: `#view=1` drops the editing chrome and opens no
+  // workspace store at all; `#embed=1` additionally drops the bottom dock.
+  const viewFlags = useMemo(() => readViewFlags(), []);
   // A shareable URL payload (single-file `s=` or multi-file `p=`),
   // normalised into an importable shape.  It's imported into the active
   // workspace once on mount (see the workspace-open effect below) so a
@@ -240,7 +248,7 @@ export default function App(): JSX.Element {
   // viewport on the desktop branch — no flicker for the e2e suite.
   const isDesktop = useMediaQuery("(min-width: 768px)", true) ?? true;
 
-  const workspace = useWorkspace();
+  const workspace = useWorkspace({ viewOnly: viewFlags.view });
   // Phase 2b1 of the multi-file work — the controller / hook landed
   // in Phase 2a; this is the wire-through.  `sources.activePath` is
   // locked to `/workspace/main.ddd` for now (no UI to change it
@@ -276,9 +284,16 @@ export default function App(): JSX.Element {
   // their content from `sources.files` (Phase 2b2).
   const exampleSource = useMemo(
     () =>
+      // `"shared"` is the non-example sentinel the shared-link seed flips to.
+      // It has no entry in the picker (deliberately — a shared link is not an
+      // example), so without this the seed falls through to the DEFAULT
+      // example whenever the controller cannot hold the payload: a `#view=1`
+      // link (no store at all, M-T8.23) and ephemeral mode (hostile storage).
+      // Both then showed the starter system instead of the shared source.
+      (exampleId === "shared" ? sharedImport?.source : undefined) ??
       augmentedExamplesList.find((e) => e.id === exampleId)?.source ??
       defaultExample.source,
-    [exampleId, augmentedExamplesList],
+    [exampleId, augmentedExamplesList, sharedImport],
   );
 
   // Editor's seed value for the active file — the precedence rule (and
@@ -996,23 +1011,22 @@ export default function App(): JSX.Element {
     };
   }, []);
 
-  async function copyShareLink(): Promise<void> {
+  // Build the smallest legal URL for the current workspace: single-file
+  // (`s=`, byte-compatible with pre-Stage-3 shared links) when only main.ddd
+  // is present, multi-file (`p=`) when the user has added other `.ddd` files
+  // via the tabs strip.  `flags` adds the read-only / embed render modes.
+  function buildShareLink(flags: ViewFlags = NO_VIEW_FLAGS): string {
+    const s = sourcesRef.current;
+    const onlyMain =
+      s.files.size === 0 || (s.files.size === 1 && s.files.has("/workspace/main.ddd"));
+    return onlyMain
+      ? buildShareUrl(sourceRef.current, flags)
+      : buildShareUrl({ files: Object.fromEntries(s.files), active: s.activePath }, flags);
+  }
+
+  async function copyShareLink(flags: ViewFlags = NO_VIEW_FLAGS): Promise<void> {
     try {
-      // Build the smallest legal URL for the current workspace:
-      // single-file (`s=`, byte-compatible with pre-Stage-3 shared
-      // links) when only main.ddd is present, multi-file (`p=`) when
-      // the user has added other `.ddd` files via the tabs strip.
-      const s = sourcesRef.current;
-      const onlyMain =
-        s.files.size === 0 ||
-        (s.files.size === 1 && s.files.has("/workspace/main.ddd"));
-      const url = onlyMain
-        ? buildShareUrl(sourceRef.current)
-        : buildShareUrl({
-            files: Object.fromEntries(s.files),
-            active: s.activePath,
-          });
-      await navigator.clipboard.writeText(url);
+      await navigator.clipboard.writeText(buildShareLink(flags));
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -1814,6 +1828,22 @@ export default function App(): JSX.Element {
     const base =
       workspace.activeName.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") ||
       "loom-project";
+    // A README at the archive root (M-T8.23 slice 3).  The ZIP is the bridge
+    // out of the browser for every target the playground cannot boot, and it
+    // used to ship a tree of projects plus a compose file with nothing saying
+    // what to do with them.  Derived from the tree itself, so it can't name a
+    // service or a port the emitted compose file doesn't have.  Never
+    // overwrites a README the generator itself emitted at the root.
+    if (!entries.some((e) => e.path === EXPORT_README_PATH)) {
+      entries.unshift({
+        path: EXPORT_README_PATH,
+        content: buildExportReadme({
+          name: base,
+          paths: entries.map((e) => e.path),
+          compose: entries.find((e) => e.path === "docker-compose.yml")?.content ?? null,
+        }),
+      });
+    }
     downloadBytes(makeZip(entries), `${base}.zip`);
   }
 
@@ -2156,7 +2186,8 @@ export default function App(): JSX.Element {
     getAppLog,
     clearBackendLog,
     clearAppLog,
-    copyShareLink,
+    copyShareLink: (flags?: ViewFlags): void => void copyShareLink(flags),
+    buildShareLink,
     runAgentDemo: (): void => void runAgentDemo(),
     setAgentSettings,
     sendAgentMessage: (text: string): void => void sendAgentMessage(text),
@@ -2181,8 +2212,11 @@ export default function App(): JSX.Element {
   const sourceFiles = sources.files;
   const sourceEpoch = sources.epoch;
   const emptySourceFolders = sources.emptyFolders;
-  const sourcesWritable = sources.writable;
-  const sourcesReadOnlyReason = sources.readOnlyReason;
+  // A view link is read-only for a reason of its own — it opened no store, so
+  // the controller would otherwise report "ephemeral" (a storage failure),
+  // which is a different thing and reads as a bug to the recipient.
+  const sourcesWritable = !viewFlags.view && sources.writable;
+  const sourcesReadOnlyReason = viewFlags.view ? "view" : sources.readOnlyReason;
   const sourceError = sources.lastError;
 
   const ctx: LayoutCtx = useMemo(
@@ -2249,6 +2283,8 @@ export default function App(): JSX.Element {
       backendLog,
       appLog,
       copied,
+      viewMode: viewFlags.view,
+      embedMode: viewFlags.embed,
       agentMessages,
       agentRunning,
       agentSettings,
@@ -2331,6 +2367,7 @@ export default function App(): JSX.Element {
       backendLog,
       appLog,
       copied,
+      viewFlags,
       agentMessages,
       agentRunning,
       agentSettings,

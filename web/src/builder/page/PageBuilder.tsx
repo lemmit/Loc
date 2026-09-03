@@ -215,7 +215,7 @@ function LiveSync({ nodes }: { nodes: SerializedNodes }): JSX.Element | null {
   }, [nodes]);
   if (!held) return null;
   return (
-    <Box px="xs" py={4} bg="dark.7" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+    <Box px="xs" py={4} bg="var(--loom-bg)" style={{ borderBottom: "1px solid var(--loom-border)" }}>
       <InlineConfirm
         spec={confirmSites.discardCanvasEdits("reseed")}
         size="compact-xs"
@@ -298,7 +298,7 @@ function Toolbar({ pages, pageName, onSelectPage, onApply, compact = false, onOp
   );
   return (
     <>
-      <Group px="xs" py={4} bg="dark.6" gap="xs" justify="space-between" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+      <Group px="xs" py={4} bg="var(--loom-bg-raised)" gap="xs" justify="space-between" style={{ borderBottom: "1px solid var(--loom-border)" }}>
         <Group gap="xs" wrap="nowrap">
           <Select size="xs" data={pages} value={pageName} onChange={(v) => v && pickPage(v)} data-testid="c4builder-page-select" allowDeselect={false} />
           {dirty && (
@@ -318,7 +318,7 @@ function Toolbar({ pages, pageName, onSelectPage, onApply, compact = false, onOp
         )}
       </Group>
       {pendingPage !== null && (
-        <Box px="xs" py={4} bg="dark.7" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+        <Box px="xs" py={4} bg="var(--loom-bg)" style={{ borderBottom: "1px solid var(--loom-border)" }}>
           <InlineConfirm
             spec={confirmSites.discardCanvasEdits("switch")}
             size="compact-xs"
@@ -387,7 +387,7 @@ function PaletteContent({ onAdded }: { onAdded?: () => void }): JSX.Element {
               if (dom) connectors.create(dom, <Comp {...defaultNode(name).props} />);
             }}
             onClick={() => add(name)}
-            style={{ fontSize: 12, padding: "3px 6px", borderRadius: 4, border: "1px solid var(--mantine-color-dark-4)", background: "var(--mantine-color-dark-6)", cursor: "grab" }}
+            style={{ fontSize: 12, padding: "3px 6px", borderRadius: 4, border: "1px solid var(--loom-border)", background: "var(--loom-bg-raised)", cursor: "grab" }}
           >
             {name}
           </UnstyledButton>
@@ -399,7 +399,7 @@ function PaletteContent({ onAdded }: { onAdded?: () => void }): JSX.Element {
 
 function Palette(): JSX.Element {
   return (
-    <Box style={{ width: 110, minWidth: 110, borderRight: "1px solid var(--mantine-color-dark-4)", padding: 6, overflow: "auto" }}>
+    <Box style={{ width: 110, minWidth: 110, borderRight: "1px solid var(--loom-border)", padding: 6, overflow: "auto" }}>
       <Text size="xs" tt="uppercase" c="dimmed" mb={6}>Add</Text>
       <PaletteContent />
     </Box>
@@ -687,7 +687,7 @@ function SettingsContent({ options, operations = {}, enumCases, pageEnumFields }
 
 function SettingsPanel({ options, operations = {}, enumCases, pageEnumFields }: { options: Record<string, string[]>; operations?: Record<string, string[]>; enumCases?: ReadonlyMap<string, readonly string[]>; pageEnumFields?: ReadonlyMap<string, string> }): JSX.Element {
   return (
-    <Box style={{ width: 240, minWidth: 240, borderLeft: "1px solid var(--mantine-color-dark-4)", padding: 8, overflow: "auto" }}>
+    <Box style={{ width: 240, minWidth: 240, borderLeft: "1px solid var(--loom-border)", padding: 8, overflow: "auto" }}>
       <SettingsContent options={options} operations={operations} enumCases={enumCases} pageEnumFields={pageEnumFields} />
     </Box>
   );

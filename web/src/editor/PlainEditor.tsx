@@ -9,6 +9,10 @@ export interface PlainEditorProps {
    *  (the agent, a history restore) work identically on both surfaces. */
   handleRef?: MutableRefObject<EditorHandle | null>;
   onChange?: (value: string) => void;
+  /** A `#view=1` render: the textarea refuses typing (M-T8.23 slice 2).  The
+   *  imperative `handleRef` writes still land — a read-only VIEW is about the
+   *  user not editing, not about the app being unable to show a restore. */
+  readOnly?: boolean;
 }
 
 /** The MOBILE `.ddd` editor: a textarea with a scroll-synced line-number
@@ -22,7 +26,12 @@ export interface PlainEditorProps {
  *
  *  Diagnostics still arrive — mobile gets them from `generate`, which reports
  *  `file:line`, and the gutter is what makes a line number actionable. */
-export function PlainEditor({ initialValue, handleRef, onChange }: PlainEditorProps): JSX.Element {
+export function PlainEditor({
+  initialValue,
+  handleRef,
+  onChange,
+  readOnly = false,
+}: PlainEditorProps): JSX.Element {
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
   const gutterRef = useRef<HTMLDivElement | null>(null);
   const onChangeRef = useRef(onChange);
@@ -128,7 +137,7 @@ export function PlainEditor({ initialValue, handleRef, onChange }: PlainEditorPr
         width: "100%",
         height: "100%",
         display: "flex",
-        background: "var(--mantine-color-dark-8)",
+        background: "var(--loom-bg-sunken)",
         overflow: "hidden",
       }}
       data-testid="plain-editor"
@@ -140,8 +149,8 @@ export function PlainEditor({ initialValue, handleRef, onChange }: PlainEditorPr
           overflow: "hidden",
           padding: `${PAD}px 6px ${PAD}px 8px`,
           textAlign: "right",
-          color: "var(--mantine-color-dark-2)",
-          background: "var(--mantine-color-dark-7)",
+          color: "var(--loom-edge)",
+          background: "var(--loom-bg)",
           fontFamily: MONO,
           fontSize: FONT,
           lineHeight: `${LINE_H}px`,
@@ -158,6 +167,7 @@ export function PlainEditor({ initialValue, handleRef, onChange }: PlainEditorPr
       <textarea
         ref={areaRef}
         defaultValue={initialValue}
+        readOnly={readOnly}
         spellCheck={false}
         autoCapitalize="off"
         autoCorrect="off"
@@ -174,7 +184,7 @@ export function PlainEditor({ initialValue, handleRef, onChange }: PlainEditorPr
           // Tab indents instead of leaving the field — without it the only way
           // to indent on a phone keyboard is spaces, and the only way to move
           // on is to tab out of the editor entirely.
-          if (e.key !== "Tab") return;
+          if (readOnly || e.key !== "Tab") return;
           e.preventDefault();
           const area = e.currentTarget;
           // Through the native edit path, so the indent is itself undoable.

@@ -232,7 +232,7 @@ export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Eleme
   switch (node.kind) {
     case "binary":
       return (
-        <Group gap={4} wrap="nowrap" align="center" style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }}>
+        <Group gap={4} wrap="nowrap" align="center" style={{ border: "1px solid var(--loom-border)", borderRadius: 4, padding: 2 }}>
           <ExpressionEditor node={node.left} path={`${path}L`} onChange={(n, c) => onChange({ ...node, left: n }, c)} />
           <Select
             size="xs"
@@ -291,7 +291,7 @@ export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Eleme
     }
     case "call":
       return (
-        <Group gap={1} wrap="nowrap" align="center" style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }}>
+        <Group gap={1} wrap="nowrap" align="center" style={{ border: "1px solid var(--loom-border)", borderRadius: 4, padding: 2 }}>
           <ExpressionEditor node={node.callee} path={`${path}c`} onChange={(n, c) => onChange({ ...node, callee: n }, c)} />
           <ArgsEditor args={node.args} path={path} onArgs={(args, c) => onChange({ ...node, args }, c)} />
         </Group>
@@ -344,7 +344,7 @@ export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Eleme
         setStmts(next, true);
       };
       return (
-        <Box style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }} data-testid="c4expr-block-lambda">
+        <Box style={{ border: "1px solid var(--loom-border)", borderRadius: 4, padding: 2 }} data-testid="c4expr-block-lambda">
           <Group gap={2} wrap="nowrap" align="center">
             <TextInput
               size="xs"
@@ -384,7 +384,7 @@ export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Eleme
     }
     case "ternary":
       return (
-        <Group gap={4} wrap="nowrap" align="center" style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }} data-testid="c4expr-ternary">
+        <Group gap={4} wrap="nowrap" align="center" style={{ border: "1px solid var(--loom-border)", borderRadius: 4, padding: 2 }} data-testid="c4expr-ternary">
           <ExpressionEditor node={node.cond} path={`${path}?c`} onChange={(n, c) => onChange({ ...node, cond: n }, c)} />
           <Text size="xs" c="dimmed">?</Text>
           <ExpressionEditor node={node.then} path={`${path}?t`} onChange={(n, c) => onChange({ ...node, then: n }, c)} />
@@ -396,7 +396,7 @@ export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Eleme
       const m = node;
       const setArm = (i: number, arm: EMatchArm, commit: boolean): void => onChange({ ...m, arms: m.arms.map((a, j) => (j === i ? arm : a)), }, commit);
       return (
-        <Box style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }} data-testid="c4expr-match">
+        <Box style={{ border: "1px solid var(--loom-border)", borderRadius: 4, padding: 2 }} data-testid="c4expr-match">
           <Text size="xs" c="dimmed">match</Text>
           {m.arms.map((arm, i) => (
             <Group key={i} gap={4} wrap="nowrap" align="center" pl={8}>
@@ -432,7 +432,7 @@ export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Eleme
     }
     case "builder":
       return (
-        <Group gap={2} wrap="nowrap" align="center" style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }}>
+        <Group gap={2} wrap="nowrap" align="center" style={{ border: "1px solid var(--loom-border)", borderRadius: 4, padding: 2 }}>
           <TextInput
             size="xs"
             w={90}
@@ -493,7 +493,7 @@ export function ExpressionEditor({ node, path, onChange }: NodeProps): JSX.Eleme
       // together, so the surrounding text survives either edit.
       const t = node;
       return (
-        <Group gap={1} wrap="nowrap" align="center" style={{ border: "1px solid var(--mantine-color-dark-4)", borderRadius: 4, padding: 2 }} data-testid="c4expr-template">
+        <Group gap={1} wrap="nowrap" align="center" style={{ border: "1px solid var(--loom-border)", borderRadius: 4, padding: 2 }} data-testid="c4expr-template">
           <Text size="xs" c="dimmed">`</Text>
           {t.segments.map((seg, i) => {
             const hole = t.holes[i];

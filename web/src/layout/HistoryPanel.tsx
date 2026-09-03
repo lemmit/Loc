@@ -14,9 +14,9 @@ import {
 } from "@mantine/core";
 import { useEffect, useMemo, useState } from "react";
 import { type CommitFileChange, type CommitInfo, commitOnSave } from "../workspace/git";
-import { readOnlyMessage } from "../workspace/workspace-sources";
 import { InlineConfirm, confirmSites } from "../util/confirm";
 import type { LayoutCtx } from "./ctx";
+import { ReadOnlyBadge } from "./ReadOnlyBadge";
 import { classifyCommit, formatRelativeTime, shortOid } from "./history-format";
 
 // "History" dock tab — a visible timeline of the git-backed workspace.
@@ -181,16 +181,13 @@ export function HistoryBody({
   return (
     <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       {!writable && (
-        <Group px="sm" py={6} gap={8} wrap="nowrap" style={{ flexShrink: 0 }}>
-          <Text size="xs" c="dimmed" style={{ flex: 1 }} data-testid="history-readonly">
-            {readOnlyMessage("other-tab")}
-          </Text>
-          {/* No "Take over" here on purpose — the header banner owns that one
-              action, so there is exactly one place to click and exactly one
-              `workspace-readonly-banner` in the DOM. */}
-          <Button size="compact-xs" variant="light" color="orange" onClick={ctx.workspace.takeOver}>
-            Take over
-          </Button>
+        // The SAME badge the header and the file tree show, with the reason
+        // this session actually has — this panel used to hard-code
+        // "another tab" and add a second *Take over*, which is two thirds of
+        // audit L1's "explained three ways, three affordances".  The header
+        // owns the action; here it is only an explanation.
+        <Group px="sm" py={6} gap={8} wrap="nowrap" style={{ flexShrink: 0 }} data-testid="history-readonly">
+          <ReadOnlyBadge reason={ctx.workspace.readOnlyReason} />
         </Group>
       )}
       <Group px="sm" py={4} justify="space-between" wrap="nowrap" style={{ flexShrink: 0 }}>

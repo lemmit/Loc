@@ -8,6 +8,7 @@ import {
   encodeSource,
   readHash,
   readHashSource,
+  readViewFlags,
   type SharedProject,
   writeHashProject,
   writeHashSource,
@@ -176,5 +177,50 @@ describe("share.ts — buildShareUrl", () => {
     const url = buildShareUrl(project);
     expect(url).toContain("#s=");
     expect(url).not.toContain("#p=");
+  });
+});
+
+// -- render flags (M-T8.23 slice 2) ------------------------------------------
+//
+// `view=1` / `embed=1` say how a link should be RENDERED, next to the `s=`/`p=`
+// payload that says what it carries.  Two invariants matter: `embed` implies
+// `view` (an embed you could type into would be a lie about the mode), and the
+// flags survive the debounced hash rewrite that follows the source.
+
+describe("view / embed render flags", () => {
+  it("reads nothing from a plain payload hash", () => {
+    expect(readViewFlags(`#s=${encodeSource("x")}`)).toEqual({ view: false, embed: false });
+    expect(readViewFlags("")).toEqual({ view: false, embed: false });
+    expect(readViewFlags("#")).toEqual({ view: false, embed: false });
+  });
+
+  it("reads view=1, and embed=1 implies view", () => {
+    expect(readViewFlags("#view=1&s=abc")).toEqual({ view: true, embed: false });
+    expect(readViewFlags("#embed=1&s=abc")).toEqual({ view: true, embed: true });
+  });
+
+  it("treats an explicit 0 / false as off", () => {
+    expect(readViewFlags("#view=0&s=abc")).toEqual({ view: false, embed: false });
+    expect(readViewFlags("#view=false&s=abc")).toEqual({ view: false, embed: false });
+  });
+
+  it("still finds the payload behind the flags", () => {
+    window.location.hash = `#view=1&s=${encodeSource("system S {}")}`;
+    expect(readHashSource()).toBe("system S {}");
+  });
+
+  it("builds a flagged URL with the flags before the payload", () => {
+    expect(buildShareUrl("x", { view: true, embed: false })).toContain("#view=1&s=");
+    expect(buildShareUrl("x", { view: true, embed: true })).toContain("#embed=1&s=");
+    expect(buildShareUrl("x")).toContain("#s=");
+  });
+
+  it("carries the flags across the debounced hash rewrite", () => {
+    // Without this a view link silently promoted itself to an editable one on
+    // the first source sync.
+    window.location.hash = `#view=1&s=${encodeSource("before")}`;
+    writeHashSource("after");
+    expect(readViewFlags()).toEqual({ view: true, embed: false });
+    expect(readHashSource()).toBe("after");
   });
 });

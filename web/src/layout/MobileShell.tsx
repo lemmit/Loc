@@ -119,7 +119,7 @@ export function MobileShell({ ctx }: Props): JSX.Element {
       styles={{
         root: { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 },
         panel: { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" },
-        list: { borderTop: "1px solid var(--mantine-color-dark-4)" },
+        list: { borderTop: "1px solid var(--loom-border)" },
         tab: {
           // ≥ 44 px tap target per iOS HIG.
           minHeight: 48,
@@ -136,7 +136,7 @@ export function MobileShell({ ctx }: Props): JSX.Element {
             mobile counterpart of the desktop center pane.  A SegmentedControl
             drives the three editable views; the "Generated" chip switches to
             the generated-file browser (and deselects the segments). */}
-        <Group px={6} py={6} bg="dark.6" gap={8} wrap="nowrap" style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+        <Group px={6} py={6} bg="var(--loom-bg-raised)" gap={8} wrap="nowrap" style={{ borderBottom: "1px solid var(--loom-border)" }}>
           <SegmentedControl
             size="xs"
             value={codeView === "generated" ? "" : codeView}
@@ -210,7 +210,7 @@ export function MobileShell({ ctx }: Props): JSX.Element {
             the form, since Tabs.List on a bottom-tab nav only holds
             short labels.  Wrapping it in a Group with wrap="wrap"
             keeps the layout sane on narrow screens. */}
-        <Group px="sm" py={6} bg="dark.6" justify="flex-end" gap="xs" wrap="wrap">
+        <Group px="sm" py={6} bg="var(--loom-bg-raised)" justify="flex-end" gap="xs" wrap="wrap">
           <BackendHeader ctx={ctx} />
         </Group>
         <BackendBody ctx={ctx} />

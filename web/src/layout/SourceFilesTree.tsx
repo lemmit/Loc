@@ -42,6 +42,7 @@ import {
   type WorkspaceReadOnlyReason,
   type WorkspaceSourcesError,
 } from "../workspace/workspace-sources";
+import { ReadOnlyBadge } from "./ReadOnlyBadge";
 import {
   fileInFolderPath,
   joinRel,
@@ -502,13 +503,14 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
     </Menu>
   );
 
-  // Why nothing the user does here will stick.  Same condition (and the
-  // same explanation) the History panel already shows for its own
-  // unavailability — before this the file UI just silently no-op'd.
+  // Why nothing the user does here will stick.  ONE component, one sentence,
+  // one shape — the audit found read-only explained three ways by three
+  // surfaces (L1); this and the History panel now render the same badge the
+  // header does, and only the header adds an action.
   const readOnlyNotice = !writable && (
-    <Text size="xs" c="dimmed" px="sm" py={6} data-testid="source-files-readonly">
-      {readOnlyNote}
-    </Text>
+    <Group px="sm" py={6} gap={6} data-testid="source-files-readonly">
+      <ReadOnlyBadge reason={props.readOnlyReason ?? "ephemeral"} />
+    </Group>
   );
 
   const errorAlert = props.error && (
@@ -659,8 +661,8 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
           flexShrink: 0,
           display: "flex",
           flexDirection: "column",
-          borderRight: "1px solid var(--mantine-color-dark-4)",
-          background: "var(--mantine-color-dark-7)",
+          borderRight: "1px solid var(--loom-border)",
+          background: "var(--loom-bg)",
         }}
       >
         <Group
@@ -668,7 +670,7 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
           wrap="nowrap"
           px="sm"
           py={6}
-          style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+          style={{ borderBottom: "1px solid var(--loom-border)" }}
         >
           <Text size="xs" c="dimmed" fw={600} tt="uppercase">
             Files
@@ -686,8 +688,8 @@ export function SourceFilesTree(props: SourceFilesTreeProps): JSX.Element {
       ref={detailsRef as React.Ref<HTMLDetailsElement>}
       data-testid="source-files-tree"
       style={{
-        borderBottom: "1px solid var(--mantine-color-dark-4)",
-        background: "var(--mantine-color-dark-7)",
+        borderBottom: "1px solid var(--loom-border)",
+        background: "var(--loom-bg)",
         flexShrink: 0,
       }}
     >

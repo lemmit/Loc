@@ -85,11 +85,11 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
       <Group
         px="sm"
         py={4}
-        bg="dark.6"
+        bg="var(--loom-bg-raised)"
         gap="xs"
         justify="space-between"
         wrap="nowrap"
-        style={{ flexShrink: 0, borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+        style={{ flexShrink: 0, borderBottom: "1px solid var(--loom-border)" }}
       >
         <Tabs.List data-testid="devtools-tabs" aria-label={PANE.devTools}>
           {tabs.map((t) => (

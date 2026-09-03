@@ -63,7 +63,7 @@ export function RefusalLine({ refusal }: { refusal: Refusal }): JSX.Element | nu
   const hasCandidate = detail?.candidate !== undefined && detail.before !== undefined;
   const hunk = hasCandidate && showCandidate ? lineDiff(detail.before ?? "", detail.candidate ?? "") : null;
   return (
-    <Box px="xs" py={2} bg="dark.7" data-testid="builder-refused">
+    <Box px="xs" py={2} bg="var(--loom-bg)" data-testid="builder-refused">
       <Group gap={8} wrap="nowrap" align="center">
         <Text size="xs" c="red" style={{ flex: 1, minWidth: 0 }} data-testid="builder-refused-message">
           {refusalMessage(detail)}
