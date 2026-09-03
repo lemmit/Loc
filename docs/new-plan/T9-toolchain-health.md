@@ -246,7 +246,7 @@ Sources: [test-coverage-audit-2026-08-13](../audits/test-coverage-audit-2026-08-
 
 > **ID note.** M-T9.36–M-T9.38 minted 2026-08-23 by the numeric-types audit. M-T9.35 was allocated to #2604's census drain (since landed above).
 
-## M-T9.36 — The numeric wire-codec seam: one decision per backend, enumerated boundaries — `blocked(M-T6.46, M-T6.47)` · **L** · P2 ⭐ the structural end of the #2545→#2631 series
+## M-T9.36 — The numeric wire-codec seam: one decision per backend, enumerated boundaries — `open (unblocked 2026-09-02 — #2677 / #2675 merged)` · **L** · P2 ⭐ the structural end of the #2545→#2631 series
 
 Minted 2026-08-23 by the numeric-types audit (the [root cause](../audits/numeric-types-audit-2026-08-23.md)). Five PRs in four days (#2545, #2560, #2575 ×3, #2631) fixed the same defect at five different read paths: the number wire contract (money = F4 string, decimal = float64 number, int/long = integer) is one cross-cutting decision implemented as scattered per-backend, per-path coercions — per-row DTO, projection `select`, aggregate, group key, dapper raw SQL. Each new path re-decides; some backends get it wrong; the diagnosis "no fixture exercised this path" was recorded per-bug five times and never made structural.
 
@@ -268,7 +268,7 @@ Found 2026-08-23 by the numeric-types audit ([F16](../audits/numeric-types-audit
 
 Sources: [numeric-types-audit-2026-08-23](../audits/numeric-types-audit-2026-08-23.md) F16, plan.json N16. Relates to M-T9.11 (the differential itself), M-T6.46.
 
-## M-T9.38 — Flutter and Feliz have no runtime leg: a money crash ships behind a green compile gate — `blocked(M-T1.21, M-T1.22)` · **L** · P2
+## M-T9.38 — Flutter and Feliz have no runtime leg: a money crash ships behind a green compile gate — `blocked(#2678, #2674 merge)` · **L** · P2
 
 Found 2026-08-23 by the numeric-types audit ([F17](../audits/numeric-types-audit-2026-08-23.md)). `generated-flutter-build.yml` / `generated-feliz-build.yml` are compile-only, and Dart's `(x as num)` on a wire string compiles clean — so F1's crash-on-first-read shipped green. React/Vue/Svelte/Angular have real e2e legs; the two self-hosting frontends (the pair M-T1.20 already flags as carrying most frontend residue) have none.
 

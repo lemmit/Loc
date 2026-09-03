@@ -15,6 +15,7 @@ import type {
   BaseType,
   BoundedContext,
   Criterion,
+  DomainService,
   EntityPart,
   EnumDecl,
   EventDecl,
@@ -48,6 +49,7 @@ import {
   isCriterion,
   isDecLit,
   isDerivedProp,
+  isDomainService,
   isEntityPart,
   isEnumDecl,
   isEventDecl,
@@ -972,6 +974,23 @@ function typeOfPostfixChain(expr: PostfixChain, env: Env): DddType {
       }
     }
   }
+  // `<DomainService>.<operation>(...)` — the AST twin of the arm
+  // `lower-expr.ts` already has (`findDomainServiceByName` +
+  // `lowerType(opDecl.returnType)`).  Without it the call types `unknown`,
+  // and the `requires` / `precondition` gate rejects it as "got 'unknown'"
+  // — while `<same call> && true` validates, because the binary arm returns
+  // bool for any `&&` and suppresses on an unknown operand (F2-CB-C9).
+  if (isNameRef(expr.head) && first && isMemberSuffix(first) && first.call) {
+    const svc = lookupDomainServiceByName(expr.head.name, env);
+    const op = svc?.operations.find((o) => o.name === first.member);
+    if (op?.returnType) {
+      curType = resolveTypeRef(op.returnType);
+      for (let i = 1; i < expr.suffixes.length; i++) {
+        curType = typeAfterSuffix(curType, expr.suffixes[i]!, env);
+      }
+      return curType;
+    }
+  }
   curType = typeOf(expr.head, env);
   for (const s of expr.suffixes) {
     curType = typeAfterSuffix(curType, s, env);
@@ -1416,6 +1435,19 @@ function lookupRepositoryByName(name: string, env: Env): Repository | undefined 
   if (!ctx) return undefined;
   for (const m of ctx.members) {
     if (isRepository(m) && m.name === name) return m;
+  }
+  return undefined;
+}
+
+/** Resolve a bare domain-service name against the enclosing bounded context —
+ *  a `requires`/operation body calls a stateless cross-aggregate calculator by
+ *  bare name (`Rules.isCancellable(this.qty)`), the domain-service twin of
+ *  `lookupRepositoryByName`. */
+function lookupDomainServiceByName(name: string, env: Env): DomainService | undefined {
+  const ctx = envContext(env);
+  if (!ctx) return undefined;
+  for (const m of ctx.members) {
+    if (isDomainService(m) && m.name === name) return m;
   }
   return undefined;
 }
