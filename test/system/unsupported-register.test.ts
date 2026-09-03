@@ -188,10 +188,14 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  design packs emit), only the honesty is.  It was a TS2300 in the GENERATED
  *  project on react/svelte and, on vue, no error at all: the shell deduped the
  *  declarations, so the second form silently posted the first form's mutation
- *  with the first form's schema.  Angular is the existence proof of the fix —
- *  its locals are already aggregate-scoped — so draining this means
- *  generalising that to a per-FORM prefix through the ~68 pack templates that
- *  hardcode the names, which deletes the row and lowers this back to 47.
+ *  with the first form's schema.  Scoped to react/vue/svelte: ANGULAR emits the
+ *  shape correctly (aggregate-scoped locals, plus #2734's ordinal suffix for a
+ *  second same-aggregate form), so it is the reference implementation and not a
+ *  gap — an earlier revision of this row listed it, which made the gate refuse
+ *  a shape that works and hid #2734's own test behind the refusal.  Draining
+ *  the remaining three means threading that same per-FORM ordinal through the
+ *  ~68 pack templates that hardcode the names, which deletes the row and lowers
+ *  this back to 47.
  *
  *  48 → 49: `loom.component-children-unsupported`.  Same trade — the drop is
  *  not new (angular's `renderUserComponent` has always dropped the children

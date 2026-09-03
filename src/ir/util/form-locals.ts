@@ -19,34 +19,43 @@
 //                     `CreateForm { of: Note }` posts an `Item`, announces
 //                     "Note created" and navigates to `/notes/…`.  The worst
 //                     of the four, because nothing fails.
-//   angular         — locals are already AGGREGATE-SCOPED (`itemCreate`,
-//                     `itemForm`, `renameItem`), so different aggregates are
-//                     fine; only two forms over the SAME aggregate+op collide.
+//   angular         — NOT COVERED, because it is FIXED.  Its locals were
+//                     already aggregate-scoped (`itemCreate`, `itemForm`,
+//                     `renameItem`), leaving only the same-aggregate+op case,
+//                     and #2734 closed that too: the second form takes an
+//                     ORDINAL SUFFIX (`itemCreate2`, `onSubmitItem2`,
+//                     `itemForm2`), so every declaration appears exactly once.
+//                     Two forms of any shape now emit correctly on angular.
 //
-// Angular is the existence proof that the fix is per-form-instance naming;
-// generalising it means threading a per-form prefix through the ~68 pack
-// templates that hardcode `create` / `register` / `handleSubmit` / `errors`.
-// Until that lands, this module is the single place that knows the rule, so
-// the gate (`loom.page-form-locals-unsupported`) and the eventual fix disagree
-// in exactly one file.
+// Angular is therefore the existence proof AND the reference implementation:
+// generalising the fix means threading the same per-form ordinal through the
+// ~68 react/vue/svelte pack templates that hardcode `create` / `register` /
+// `handleSubmit` / `errors`.  Until that lands, this module is the single place
+// that knows the rule, so the gate (`loom.page-form-locals-unsupported`) and
+// the eventual fix disagree in exactly one file.
+//
+// A NOTE ON WHY ANGULAR WAS EVER IN THE SET.  This gate was written against a
+// `main` where angular still collided on same-aggregate+op, and it modelled
+// that precisely.  #2734 then fixed it.  A gate that keeps refusing a shape the
+// emitter has learned to handle is not a conservative gate — it is a FALSE
+// refusal, and it hides the fix: main's own
+// `gives the second same-aggregate form its own class members` test could not
+// even reach generation while angular stayed listed here.  That is the ratchet
+// working in the direction it is supposed to: a drained arm deletes itself.
 //
 // Shapes deliberately NOT flagged, because they were probed and are CLEAN on
-// all four: `CreateForm` + `OperationForm` on one page, and two
-// `OperationForm`s over DIFFERENT ops.  A gate that fired on those would be a
-// false refusal.
+// all three covered frontends: `CreateForm` + `OperationForm` on one page, and
+// two `OperationForm`s over DIFFERENT ops.  A gate that fired on those would be
+// a false refusal.
 
 import type { ExprIR, UiIR } from "../types/loom-ir.js";
 import { walkExprDeep } from "./walk.js";
-
-/** The frontends whose form locals are aggregate-scoped already.  Everything
- *  else in the JS family emits bare names — see the module comment. */
-const AGGREGATE_SCOPED_FORM_LOCALS = new Set(["angular"]);
 
 /** The frontends this rule applies to at all.  Feliz / Flutter / HEEx build
  *  their forms through different machinery (Elmish messages, Riverpod
  *  notifiers, `handle_event` clauses) and are NOT covered here — a gate that
  *  named them would be a refusal nobody verified. */
-export const FORM_LOCAL_FRAMEWORKS = new Set(["react", "vue", "svelte", "angular"]);
+export const FORM_LOCAL_FRAMEWORKS = new Set(["react", "vue", "svelte"]);
 
 /** One form primitive found in a body, reduced to the identity that decides
  *  collisions.  `kind` separates the two naming families (a create form and an
@@ -120,26 +129,29 @@ function formSites(body: ExprIR | undefined): FormSite[] {
   return out;
 }
 
-/** The page-local binding family a form site claims on `framework`. */
-function localKey(site: FormSite, framework: string): string {
-  const scoped = AGGREGATE_SCOPED_FORM_LOCALS.has(framework);
-  if (site.kind === "create") {
-    // react/svelte/vue name it `create` flat out — no aggregate in the name —
-    // so ALL create forms on a page share one key there.
-    return scoped ? `create:${site.agg ?? "?"}` : "create";
-  }
-  return scoped ? `op:${site.agg ?? "?"}.${site.op ?? "?"}` : `op:${site.op ?? "?"}`;
+/** The page-local binding family a form site claims.
+ *
+ *  No `framework` parameter: all three covered frontends name these locals the
+ *  SAME way — bare, with no aggregate in the name — so the key is uniform.  The
+ *  function used to branch on an aggregate-scoped set that held only `angular`,
+ *  and angular is now out of scope entirely (it emits correctly), so the branch
+ *  had exactly one live arm left. Collapsing it removes the temptation to read
+ *  the dead arm as documentation of a frontend this gate still covers. */
+function localKey(site: FormSite): string {
+  // react/svelte/vue name it `create` flat out, so ALL create forms on a page
+  // share one key; an operation form is keyed by its OP name alone, which is
+  // likewise all these three put in the binding.
+  return site.kind === "create" ? "create" : `op:${site.op ?? "?"}`;
 }
 
 /** The form sites in one body that would emit a COLLIDING page-local, grouped
  *  by the local they collide on.  Empty when the body is fine. */
 export function collidingFormLocals(
   body: ExprIR | undefined,
-  framework: string,
 ): { local: string; labels: string[] }[] {
   const byKey = new Map<string, string[]>();
   for (const site of formSites(body)) {
-    const key = localKey(site, framework);
+    const key = localKey(site);
     const bucket = byKey.get(key);
     if (bucket) bucket.push(site.label);
     else byKey.set(key, [site.label]);
@@ -149,22 +161,24 @@ export function collidingFormLocals(
     .map(([local, labels]) => ({ local, labels }));
 }
 
-/** Every page/component of a ui whose forms would collide on `framework`,
- *  labelled for a diagnostic.  Components are scanned too — a form moved into
- *  a component collides inside THAT component's own shell for the same
- *  reason. */
+/** Every page/component of a ui whose forms would collide, labelled for a
+ *  diagnostic.  Components are scanned too — a form moved into a component
+ *  collides inside THAT component's own shell for the same reason.
+ *
+ *  Takes no `framework`: the naming rule is uniform across the three covered
+ *  frontends (see `localKey`), so the framework only decides WHETHER to run
+ *  this at all, which is the caller's `FORM_LOCAL_FRAMEWORKS` test. */
 export function formLocalCollisionHosts(
   ui: UiIR,
-  framework: string,
 ): { what: string; local: string; labels: string[] }[] {
   const out: { what: string; local: string; labels: string[] }[] = [];
   for (const p of ui.pages) {
-    for (const c of collidingFormLocals(p.body, framework)) {
+    for (const c of collidingFormLocals(p.body)) {
       out.push({ what: `page '${p.name}'`, ...c });
     }
   }
   for (const c of ui.components) {
-    for (const hit of collidingFormLocals(c.body, framework)) {
+    for (const hit of collidingFormLocals(c.body)) {
       out.push({ what: `component '${c.name}'`, ...hit });
     }
   }

@@ -1578,9 +1578,10 @@ export const DIAGNOSTIC_MESSAGES = {
     `form's mutation hook and form handle in as page-scope consts ('const create = …', ` +
     `'const { register, handleSubmit, … } = useForm(…)'), and those names come from the design ` +
     `pack's form templates, so a second form redeclares them. ${p.hint} Split the forms across ` +
-    `two pages, or move one into its own 'component'. (Angular already scopes these locals by ` +
-    `aggregate, which is the shape the fix generalises to a per-form prefix — it needs the ~68 ` +
-    `pack templates that hardcode 'create'/'register'/'handleSubmit' to take one.)`,
+    `two pages, or move one into its own 'component'. (Angular emits this shape correctly — its ` +
+    `locals are aggregate-scoped and a second same-aggregate form takes an ordinal suffix — so ` +
+    `the fix here is that same per-form ordinal, threaded through the ~68 pack templates that ` +
+    `hardcode 'create'/'register'/'handleSubmit'.)`,
   "loom.component-children-unsupported": (p: {
     what: unknown;
     component: unknown;

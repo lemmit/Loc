@@ -637,7 +637,17 @@ export function validateComponentChildrenSupport(sys: SystemIR, diags: LoomDiagn
       if (fw !== "angular") continue;
       for (const hit of componentChildrenHosts(ui)) {
         diags.push({
-          severity: "error",
+          // WARNING, not error, and the choice is deliberate.  #2734 made the
+          // same drop VISIBLE at the call site (a degradation comment in the
+          // emitted Angular) rather than blocking, and the two remedies are
+          // complementary rather than rival: the comment documents the loss in
+          // the output, this diagnostic tells the author at compile time, and
+          // between them nothing about the drop is silent any more.  Raising
+          // this to `error` would additionally REFUSE a model that has always
+          // generated — a breaking change, and one that would make #2734's
+          // comment path unreachable — so the non-blocking half of the pair is
+          // the one that belongs here.
+          severity: "warning",
           code: "loom.component-children-unsupported",
           message: diagMessage("loom.component-children-unsupported", {
             what: hit.what,
@@ -675,7 +685,7 @@ export function validateFormLocalCollisions(sys: SystemIR, diags: LoomDiagnostic
   for (const d of sys.deployables) {
     for (const { ui, fw } of mountedUis(sys, d)) {
       if (!FORM_LOCAL_FRAMEWORKS.has(fw)) continue;
-      for (const hit of formLocalCollisionHosts(ui, fw)) {
+      for (const hit of formLocalCollisionHosts(ui)) {
         diags.push({
           severity: "error",
           code: "loom.page-form-locals-unsupported",

@@ -154,7 +154,11 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
       "tag, so a call site is `<ng-container [ngComponentOutlet]=…>`, and `ngComponentOutlet` " +
       "cannot project content from a template — the extra positional arg was dropped and the " +
       "child markup appeared NOWHERE in the emitted project.  Every other JS frontend renders it " +
-      "into the component's `Slot { }`.  Drained by switching a WALKED component's call site to " +
+      "into the component's `Slot { }`.  Raised as a WARNING, not an error: #2734 made the same " +
+      "drop visible at the call site with a degradation comment in the emitted Angular, so the " +
+      "comment documents the loss in the output while this diagnostic tells the author at compile " +
+      "time — between them the drop is no longer silent anywhere, and neither half refuses a " +
+      "model that has always generated.  Drained by switching a WALKED component's call site to " +
       "its own kebab selector (`<app-x …>children</app-x>`; the selector and the `<ng-content>` " +
       "both already exist), which narrows this to `extern` components or deletes it.",
     mission: "M-T1.1",
@@ -169,10 +173,12 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
       "pack's `form-of-decls`/`form-op-decls` templates, and react/svelte/vue name them BARE " +
       "(`create`, `form`, `register`, `handleSubmit`), so a second form redeclares them — react " +
       "and svelte fail the generated build (TS2300), vue DEDUPES and silently submits the first " +
-      "form's mutation with the first form's schema.  Angular already scopes the locals by " +
-      "aggregate and only collides on a repeated aggregate(+op).  Drained by threading a " +
-      "per-FORM prefix through the ~68 pack templates that hardcode those names (Angular's " +
-      "aggregate prefix, generalised); that PR deletes this gate, this row, and lowers the pin.",
+      "form's mutation with the first form's schema.  ANGULAR IS NOT COVERED — it emits the " +
+      "shape correctly: its locals are aggregate-scoped, and #2734 gave a second same-aggregate " +
+      "form an ordinal suffix (`itemCreate2`, `onSubmitItem2`), so every declaration appears " +
+      "exactly once.  Drained by threading that same per-FORM ordinal through the ~68 " +
+      "react/vue/svelte pack templates that hardcode those names; that PR deletes this gate, " +
+      "this row, and lowers the pin.",
     mission: "M-T1.1",
   },
   {

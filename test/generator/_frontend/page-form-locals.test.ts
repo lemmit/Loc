@@ -71,7 +71,10 @@ const ONE_FORM = `Stack { CreateForm { of: Item } }`;
 
 describe("loom.page-form-locals-unsupported", () => {
   // --- fires -------------------------------------------------------------
-  for (const fw of ["react", "vue", "svelte", "angular"]) {
+  // ANGULAR IS ABSENT ON PURPOSE — it emits both shapes correctly (see the
+  // "must NOT fire" arms below), so listing it here would assert a refusal the
+  // emitter has no need of.
+  for (const fw of ["react", "vue", "svelte"]) {
     it(`${fw}: two CreateForms over the SAME aggregate collide`, async () => {
       const d = await formDiags(fw, TWO_CREATE_SAME);
       expect(d).toHaveLength(1);
@@ -108,8 +111,25 @@ describe("loom.page-form-locals-unsupported", () => {
   });
 
   // --- must NOT fire (a gate one axis too wide is a false refusal) --------
+  // ANGULAR IS FULLY DRAINED — and these three arms are the ratchet that keeps
+  // it out of the gate.  Its locals were always aggregate-scoped (so DIFFERENT
+  // aggregates never collided), and #2734 closed the same-aggregate case with
+  // an ordinal suffix (`itemCreate2` / `onSubmitItem2` / `itemForm2`).  An
+  // earlier revision of this gate still listed angular, which refused a shape
+  // that works AND hid #2734's own `gives the second same-aggregate form its
+  // own class members` test behind the refusal — the fixture could not reach
+  // generation.  If angular ever regresses, these three fail rather than the
+  // gate quietly re-widening.
   it("angular: two CreateForms over DIFFERENT aggregates are fine (locals are aggregate-scoped)", async () => {
     expect(await formDiags("angular", TWO_CREATE_DIFF)).toEqual([]);
+  });
+
+  it("angular: two CreateForms over the SAME aggregate are fine (#2734 ordinal suffix)", async () => {
+    expect(await formDiags("angular", TWO_CREATE_SAME)).toEqual([]);
+  });
+
+  it("angular: two OperationForms over the SAME op are fine (#2734 ordinal suffix)", async () => {
+    expect(await formDiags("angular", TWO_OPS_SAME)).toEqual([]);
   });
 
   for (const fw of ["react", "vue", "svelte", "angular"]) {

@@ -58,7 +58,6 @@ import {
 } from "./realtime-handlers-builder.js";
 import { type AngularRouteDesc, renderAngularRoutes, routePath } from "./routes-emitter.js";
 import { renderAngularStoreModule, storeFileSlug } from "./store-builder.js";
-import { buildAngularValidatorsHelper } from "./validators-helper.js";
 import { angularTarget } from "./walker/angular-target.js";
 import {
   pageComponentName,
@@ -166,7 +165,6 @@ export function generateAngularForContexts(
   // every other target, via the shared zod schema) counts code points.  Emitted
   // unconditionally, imported only by the components that carry a length
   // constraint.
-  out.set("src/lib/loom-validators.ts", buildAngularValidatorsHelper());
 
   // --- Pages — bodies walk through the SHARED markup walker with
   // `angularTarget`; the angularMaterial pack templates own the markup
