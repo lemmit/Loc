@@ -20,14 +20,15 @@ system Acme {
       aggregate Order with crudish {
         customerId: string
         status: string
+        total: money
         operation place() {
           precondition status == "Draft"
           status := "Placed"
-          emit OrderPlaced { order: id, at: now() }
+          emit OrderPlaced { order: id, at: now(), total: total }
         }
       }
       repository Orders for Order {}
-      event OrderPlaced { order: Order id, at: datetime }
+      event OrderPlaced { order: Order id, at: datetime, total: money }
       channel Lifecycle { carries: OrderPlaced }
     }
   }
@@ -67,6 +68,12 @@ describe("redis broker transport — elixir leg (M-T4.4 slice 6c)", () => {
       expect(channels, `${dep} channels.ex`).toContain(`defmodule ${app}.Channels do`);
       expect(channels).toContain('"OrderPlaced" => {"loom.Orders.Lifecycle"');
       expect(channels).toContain('"specversion" => "1.0"');
+      // money on a channel envelope payload pins the FIXED RS-12 wire scale —
+      // the SAME encoding the REST wire applies (domainToWire) and NOT a
+      // bare Decimal.to_string echoing the domain value's own scale
+      // (M-T9.36 seam; a bare `Decimal.to_string(event.total)` here is the
+      // un-fixed shape).
+      expect(channels).toContain('"total" => ev.total |> Decimal.round(4) |> to_string()');
       expect(files.get(`${dep}/mix.exs`)).toContain('{:redix, "~> 1.5"}');
       expect(files.get(`${dep}/lib/${dep}/application.ex`)).toContain(
         'System.fetch_env!("LOOM_CHANNEL_LIFECYCLE_BUS_URL")',
