@@ -659,3 +659,61 @@ function operationBodyParams(op: OperationIR): ApiOperationParamIR[] {
 function findParams(find: FindIR): ApiOperationParamIR[] {
   return find.params.map((p) => ({ name: p.name, type: p.type, location: "query" as const }));
 }
+
+/** The STATIC one-segment sub-paths a set of derived operations mounts, each
+ *  mapped to the methods it actually serves — `{ by_email: ["GET"] }`.
+ *
+ *  These are exactly the paths a sibling `/{id}` route can swallow. Every
+ *  router here resolves (method, path): `DELETE /api/customers/by_email` finds
+ *  no `DELETE /by_email`, matches `DELETE /{id}` with `id = "by_email"`, and
+ *  the `{id}` validator answers `422 Invalid UUID` for a path that has no
+ *  DELETE at all (schemathesis F8 on node, F18 on python / java / .NET). The
+ *  honest answer is 405, and it is the only one that can carry an `Allow` the
+ *  caller can act on (RFC 9110 §15.5.6).
+ *
+ *  Registration order already fixes the SAME-verb case (a static find path is
+ *  pushed before `/{id}` by `deriveAggregateOperations`, and every backend
+ *  renders that order); only the WRONG-verb case needs a guard.
+ *
+ *  Only ONE-segment statics are affected: `/{id}/history` and
+ *  `/{id}/can_<op>` are two segments with a param in front, so nothing
+ *  shadows them and a wrong verb there already reaches the framework's own
+ *  405. `extra` carries the static paths a backend mounts OUTSIDE this
+ *  derivation (hono's `GET /prepare`), so the one guard covers a router's
+ *  whole static surface rather than the lifted half of it.
+ *
+ *  Methods are UPPER-CASE — the spelling `Request.method` reports on every
+ *  runtime here, so a generated guard compares without re-casing. */
+export function staticSubpathMethods(
+  ops: readonly ApiOperationIR[],
+  extra: readonly (readonly [string, string])[] = [],
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const op of ops) {
+    const m = /^\/([^/{}]+)$/.exec(relativeOpPath(op));
+    if (m) addMethod(out, m[1] as string, op.method);
+  }
+  for (const [segment, method] of extra) addMethod(out, segment, method);
+  return out;
+}
+
+/** The same table keyed by ABSOLUTE path (`{ "/api/customers/by_email": ["GET"] }`),
+ *  for the backends whose guard sits in the application pipeline rather than in
+ *  a per-aggregate router: python's ASGI middleware, .NET's `app.Use`, and the
+ *  Spring servlet filter all see the whole request path and have no aggregate
+ *  scope to key on. Same predicate, same one-segment rule — only the key
+ *  differs, so the two tables cannot drift apart on which paths are guarded. */
+export function staticSubpathRoutes(ops: readonly ApiOperationIR[]): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const op of ops) {
+    if (/^\/[^/{}]+$/.test(relativeOpPath(op))) addMethod(out, op.path, op.method);
+  }
+  return out;
+}
+
+function addMethod(table: Record<string, string[]>, key: string, method: string): void {
+  const methods = table[key] ?? [];
+  const upper = method.toUpperCase();
+  if (!methods.includes(upper)) methods.push(upper);
+  table[key] = methods;
+}
