@@ -757,16 +757,14 @@ the table below is the map.
 | `For { each: T[], empty?: markup, item => markup }` | List comprehension — emits the item lambda's markup once per element. TSX lowers to a keyed `.map` + `<Fragment>`, Vue to `<template v-for :key>`, Svelte to a keyed `{#each}`, Angular to an `@for (… ; track …)` block, Phoenix LiveView to a `for … do … end` block. A child primitive (nest inside a layout container — it isn't a standalone page body); the list key is the loop index. The optional `empty:` arm is rendered when the collection is empty — Svelte's native `{:else}`, a TSX `length === 0 ? … : .map(…)` ternary, a Vue `v-if` sibling `<template>`, Angular's `@for`/`@empty` block, a HEEx `Enum.empty?/1` guard. |
 | `QueryView { of:, loading:, error:, empty:, data:, single?:, paged?: }` | 4-arm query-state branching (collection or single-record). The `data:` binding also exposes the paged envelope's page metadata — see §9.2. |
 
-The set is closed in v0. **Removed from earlier drafts:** `Wizard`, `Stage`,
-`Switch`, `Case`, `When`, `Sequence` — all subsumed by `match` plus the
-state/transition primitives. The polymorphic `Form { creates: | runs: |
-into: | <instance>.<op> }` dispatcher is also gone: it split into the four
-named-leaf forms above (`CreateForm` / `OperationForm` / `WorkflowForm` /
-`DestroyForm`), each a distinct primitive rather than one overloaded name.
-The narrative `Form { … }` snippets in §7 and the §12 wizard sketches
-predate that split — read them as the corresponding named-leaf form (the
-`into:` / `fields:` draft-binding shapes remain illustrative; multi-step
-draft forms are a §14 non-goal, not a shipped primitive).
+**Removed from earlier drafts:** `Wizard`, `Stage`, `Switch`, `Case`, `When`,
+`Sequence` — all subsumed by `match` plus the state/transition primitives.  The
+polymorphic `Form { creates: | runs: | into: | <instance>.<op> }` dispatcher is
+also gone: it split into the four named-leaf forms above.  The `Form { … }`
+snippets that remain in the §12 wizard sketches predate that split — read them
+as the corresponding named-leaf form (the `into:` / `fields:` draft-binding
+shapes are illustrative only; multi-step draft forms are a §14 non-goal, not a
+shipped primitive).
 
 **Containers vs fixed slots.** A layout primitive (`Stack`, `Group`, `Card`,
 `Tab`, `Section`, `Toolbar`, `Container`, …) renders *every* positional as a
@@ -795,22 +793,21 @@ rejected as `loom.unresolved-page-ref`, the ref-spelling twin of
 
 `List` / `Detail` / `MasterDetail` were also retired: they were legacy
 archetype names that never had walker renderers (they silently degraded to a
-`// not supported` comment), so they're gone as standalone primitives. The
-list / detail use case is served by `scaffoldList { of: T }` /
-`scaffoldDetails { of: T }` (the scaffold archetypes, usable as explicit
-bodies — `List { of: T }` is now spelled `scaffoldList { of: T }`) or by
-composing `QueryView` + `Table` directly. The `List`/`Detail`/`MasterDetail`
-snippets in §4, §5, and §12 predate that removal — read them as the
-`scaffold*` archetypes (`MasterDetail`'s split-pane has no built-in
-archetype; compose it from a list + selection `state {}` + a detail panel).
+`// not supported` comment), so they're gone as standalone primitives — see
+[decisions.md → D-NO-PAGE-ARCHETYPES](decisions.md#d-no-page-archetypes).  The
+list / detail use case is served by the `scaffold` macro (§10), or by composing
+`QueryView` + `Table` directly.  The **`scaffoldList { of: T }` /
+`scaffoldDetails { of: T }` body sentinels earlier drafts of this doc described
+never shipped either** — a page body naming one is a parse error (§4).
 
-Four further names from earlier drafts of this table never shipped as
-primitives at all: `Dashboard` and `Review` (composite read-only pages —
-express them as a `Stack`/`Grid` of the display primitives; the `Review(…)`
-calls in the §12 wizard sketches are illustrative, like the draft-form
-shapes above), `Select` (use `SelectField`), and `Fieldset` (an internal
-value-object render shape, not a hand-writable input). The closed set is
-exactly the rows above.
+Six further names from earlier drafts of this table are not primitives:
+`Dashboard` and `Review` (composite read-only pages — express them as a
+`Stack`/`Grid` of the display primitives; the `Review(…)` calls in the §12
+wizard sketches are illustrative, like the draft-form shapes above), `Select`
+(use `SelectField`), `Fieldset` (an internal value-object render shape, not a
+hand-writable input), and `Switch` (control flow is `match`; the boolean input
+is `Toggle`).  A body naming any of them raises `loom.unknown-page-element`.
+The closed set is exactly the rows above.
 
 Users freely define their own `component`s, which compose these builtins.
 
@@ -875,7 +872,7 @@ one thing a sibling ("Delete selected (3)") has a real need for, so it lives in
 field (which the walker would otherwise silently drop).
 
 The grid's **chrome** comes from the active design pack
-(`primitive-data-grid.hbs` — all eleven JS packs ship one); the TanStack wiring above it is framework-level. The checkbox column
+(`primitive-data-grid.hbs` — all 15 JS design packs ship one); the TanStack wiring above it is framework-level. The checkbox column
 is walker-emitted as a plain `<input type="checkbox">` rather than a pack
 component: it is the one cell whose *behaviour* is load-bearing, so keeping it
 out of the packs means selection needs no template change anywhere.
