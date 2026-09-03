@@ -25,7 +25,9 @@ function renderCell(value: unknown): string {
   return String(value);
 }
 
-function SqlResult({ result }: { result: QueryResult }): JSX.Element {
+/** Render one query result — a red block, an affected-rows line, or the
+ *  rows table.  Exported for the read-only Tables view (M-T8.22). */
+export function SqlResult({ result }: { result: QueryResult }): JSX.Element {
   if (!result.ok) {
     return (
       <Code
