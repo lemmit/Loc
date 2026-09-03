@@ -20,6 +20,7 @@ import { buildApiModule } from "../_frontend/api-module.js";
 import { AUTH_GATE_TSX, AUTH_SESSION_TS } from "../_frontend/auth-ui.js";
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
+import { MONEY_TEXT_SOURCE } from "../_frontend/money-format.js";
 import { buildPageModuleIndex } from "../_frontend/page-identity.js";
 import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
@@ -313,7 +314,10 @@ export function generateReactForContexts(
       pack,
     ),
   );
-  out.set("src/lib/format.tsx", renderShellFile("format-helpers", {}, pack));
+  out.set(
+    "src/lib/format.tsx",
+    renderShellFile("format-helpers", { moneySource: MONEY_TEXT_SOURCE }, pack),
+  );
   // Frontend ACL shared utilities — pack-agnostic, emitted into every
   // React project.  `strict-field-map.ts` is type-only (zero runtime
   // cost; erased at compile time).  `apply-server-errors.ts` decodes
@@ -435,6 +439,12 @@ export function generateReactForContexts(
       // inside an `area { … }`, and the shell then imports the scaffolded
       // module while the author's page becomes a silently unreachable file.
       buildPageModuleIndex(ui, pageCtx),
+      // The ui's pages, so a DEFAULT sidebar entry inherits the `requires`
+      // gate of the page it links to (M-T3.15-C3): a scaffolded List page
+      // clones the `find all … requires` gate that guards the very read it
+      // makes, so an ungated default entry advertised a route the backend
+      // refuses.
+      ui.pages,
     ),
   );
   // Home is synthesised by the scaffold expander whenever the

@@ -75,6 +75,11 @@ import { snake } from "../../util/naming.js";
 import { DURATION_UNIT_MS } from "../../util/temporal.js";
 import { WALKER_LAYOUT_PRIMITIVES } from "../../util/walker-primitive-names.js";
 import type { LoadedPack } from "../_packs/loader.js";
+import {
+  PROVENANCE_LINEAGE_FIELD,
+  PROVENANCE_VALUE_FIELD,
+  provenancedFieldNames,
+} from "../_payload/provenanced-wire.js";
 import { escapeHtmlAttr } from "./a11y-emit.js";
 import { tryDetectApiHook } from "./api-hook-detector.js";
 import { registerApiHook } from "./api-hook-register.js";
@@ -1401,10 +1406,12 @@ function stmtIsAwaited(s: StmtIR): boolean {
 }
 
 /** Money(value, currency?, decimals?, testid?).  Renders
- *  through the pack's `MoneyValue` runtime helper (Intl.NumberFormat
- *  with `style: "currency"`).  First positional or `value:` named
- *  arg is the numeric value; `currency:` and `decimals:` are
- *  optional named args. */
+ *  through the pack's `MoneyValue` runtime helper, which delegates to
+ *  the shared `moneyText` (src/generator/_frontend/money-format.ts):
+ *  the wire's own digits verbatim — no locale, no fabricated currency,
+ *  no rescale.  First positional or `value:` named arg is the value;
+ *  `decimals:` (half-away-from-zero digit-string rescale) and
+ *  `currency:` (verbatim code prefix) are optional named args. */
 // Leaf text & media primitives (Heading, Text, Money, DateDisplay,
 // EnumBadge, Anchor, Image, Avatar, Loader, Empty, KeyValueRow) live
 // in walker/primitives/text.ts.
@@ -1463,6 +1470,108 @@ function stmtIsAwaited(s: StmtIR): boolean {
 
 // Controlled input primitives (Field, Toggle, NumberField,
 // PasswordField) live in walker/primitives/inputs.ts.
+
+/** `<receiver>.<member>` — extracted from `emitExpr`'s `member` arm so the
+ *  `Provenanced<T>` carrier hop can recurse on the receiver WITHOUT
+ *  re-applying itself (`unwrapProvenanced: false`).  Everything else is the
+ *  arm verbatim. */
+function emitMemberAccess(
+  expr: Extract<ExprIR, { kind: "member" }>,
+  ctx: WalkContext,
+  unwrapProvenanced: boolean,
+): string {
+  // A `currentUser.<claim>` access — the receiver is the verified session
+  // user (D-AUTH-OIDC).  A target that can resolve the claims (Feliz binds
+  // `model.CurrentUser`) owns the WHOLE access via the seam, since the
+  // session user may be optionally bound; targets that leave the seam
+  // undefined fall through to the plain member emit below.
+  if (
+    expr.receiver.kind === "ref" &&
+    expr.receiver.refKind === "current-user" &&
+    ctx.target.renderCurrentUserAccess
+  ) {
+    ctx.usesCurrentUser = true;
+    return ctx.target.renderCurrentUserAccess(expr.member, expr.memberType);
+  }
+  // A member read off a PAGED query binding, on a target whose Model does
+  // not hold the envelope (Feliz decodes the rows and the page counts into
+  // separate fields).  `rows.items` there is a plain list and `rows.total`
+  // / `rows.totalPages` live elsewhere entirely, so the target resolves
+  // them; returning undefined falls through to the verbatim access.  Every
+  // JSX target keeps the envelope and omits the seam.
+  if (expr.receiver.kind === "ref" && ctx.target.renderPagedEnvelopeMember) {
+    const handle = ctx.pagedListBindings?.get(expr.receiver.name);
+    if (handle !== undefined) {
+      const resolved = ctx.target.renderPagedEnvelopeMember({
+        member: expr.member,
+        binding: emitExpr(expr.receiver, ctx),
+        handle,
+      });
+      if (resolved !== undefined) return resolved;
+    }
+  }
+  // Page METADATA read off an AUTO-paged binding (`rows.total`).  The
+  // binding was unwrapped to the envelope's row array so the body's
+  // `Table { rows: rows }` still iterates records — which puts `total` and
+  // its siblings one level too deep (`<hook>.data.items.total`: undefined
+  // at runtime, a type error at build).  Re-root them on the envelope.
+  // `items` is deliberately NOT re-rooted: on an unwrapped binding `rows`
+  // IS the array, so `rows.items` is the author's own mistake, not ours.
+  if (
+    expr.receiver.kind === "ref" &&
+    ctx.pagedEnvelopeBindings &&
+    PAGED_META_MEMBERS.has(expr.member)
+  ) {
+    const envelope = ctx.pagedEnvelopeBindings.get(expr.receiver.name);
+    if (envelope !== undefined) return `${envelope}.${expr.member}`;
+  }
+  // Plain JS member access: `<recv>.<member>`.  Recursive
+  // emit on the receiver — if it was a hook-eligible chain
+  //, tryDetectApiHook at the top has already
+  // returned the hook var; we just append `.<member>`.
+  const recv = emitExpr(expr.receiver, ctx);
+  // A target whose embedded language is not JavaScript spells some members
+  // differently (F#'s `.Length`); returning undefined keeps the JS form.
+  const spelled = ctx.target.renderMemberRead?.({
+    receiver: recv,
+    member: expr.member,
+    receiverType: expr.receiverType,
+    memberType: expr.memberType,
+  });
+  const plain = spelled ?? `${recv}.${expr.member}`;
+  return unwrapProvenanced && isProvenancedCarrierRead(expr, ctx)
+    ? `${plain}.${PROVENANCE_VALUE_FIELD}`
+    : plain;
+}
+
+/** True when `expr` reads a `provenanced` field — i.e. the emitted access
+ *  lands on the `{ value, lineage }` WIRE CARRIER, not on the scalar the
+ *  field's DECLARED type promises.
+ *
+ *  Keyed on the field NAME, not on the type: a page body carries unresolved
+ *  receiver types (every `receiverType`/`memberType` in a body lowers to the
+ *  `string` placeholder — see the `emitExpr` header), so there is nothing else
+ *  to key on.  The HEEx engine recognises the same carrier the same way, from
+ *  the same set, which is the point: the two edits are exact opposites and must
+ *  never disagree about WHICH fields are carriers.
+ *
+ *  The one name collision the walker can actually resolve is the paged
+ *  envelope's `total` / `totalPages` — those are page counts on the envelope,
+ *  not an aggregate field that happens to share the name. */
+function isProvenancedCarrierRead(
+  expr: Extract<ExprIR, { kind: "member" }>,
+  ctx: WalkContext,
+): boolean {
+  if (
+    PAGED_META_MEMBERS.has(expr.member) &&
+    expr.receiver.kind === "ref" &&
+    (ctx.pagedListBindings?.has(expr.receiver.name) === true ||
+      ctx.pagedEnvelopeBindings?.has(expr.receiver.name) === true)
+  ) {
+    return false;
+  }
+  return provenancedFieldNames(ctx.aggregatesByName).has(expr.member);
+}
 
 /** Render an `ExprIR` as a JS-expression string (NOT JSX).  Used
  *  for the right-hand side of state assignments (`count := count +
@@ -1702,65 +1811,29 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       return `${expr.name}(${args})`;
     }
     case "member": {
-      // A `currentUser.<claim>` access — the receiver is the verified session
-      // user (D-AUTH-OIDC).  A target that can resolve the claims (Feliz binds
-      // `model.CurrentUser`) owns the WHOLE access via the seam, since the
-      // session user may be optionally bound; targets that leave the seam
-      // undefined fall through to the plain member emit below.
+      // --- `Provenanced<T>` carrier hop (M-T6.12) ------------------------
+      //
+      // A `provenanced` field ships as `{ value, lineage }` on the wire
+      // (`wireTypeForField`), while its DECLARED type stays the scalar.  The
+      // scaffold macro spells the `.value` hop itself; a HAND-WRITTEN body
+      // must not have to, or `Text { o.total }` puts the whole carrier object
+      // into a text slot — a TS2322 on the JSX frontends and a stringified
+      // record on Feliz/Flutter, with no diagnostic anywhere.  So the walker
+      // appends the hop, keyed off the SAME provenanced-field set the HEEx
+      // engine uses to DROP it (`provenancedFieldNames`).
+      //
+      // The author may also write the hop explicitly (`o.total.value`, or
+      // `.lineage`).  That reaches this arm as the PARENT of the carrier read,
+      // so the carrier receiver is emitted with the auto-hop suppressed —
+      // otherwise the two spellings would diverge as `.value` vs `.value.value`.
       if (
-        expr.receiver.kind === "ref" &&
-        expr.receiver.refKind === "current-user" &&
-        ctx.target.renderCurrentUserAccess
+        (expr.member === PROVENANCE_VALUE_FIELD || expr.member === PROVENANCE_LINEAGE_FIELD) &&
+        expr.receiver.kind === "member" &&
+        isProvenancedCarrierRead(expr.receiver, ctx)
       ) {
-        ctx.usesCurrentUser = true;
-        return ctx.target.renderCurrentUserAccess(expr.member, expr.memberType);
+        return `${emitMemberAccess(expr.receiver, ctx, false)}.${expr.member}`;
       }
-      // A member read off a PAGED query binding, on a target whose Model does
-      // not hold the envelope (Feliz decodes the rows and the page counts into
-      // separate fields).  `rows.items` there is a plain list and `rows.total`
-      // / `rows.totalPages` live elsewhere entirely, so the target resolves
-      // them; returning undefined falls through to the verbatim access.  Every
-      // JSX target keeps the envelope and omits the seam.
-      if (expr.receiver.kind === "ref" && ctx.target.renderPagedEnvelopeMember) {
-        const handle = ctx.pagedListBindings?.get(expr.receiver.name);
-        if (handle !== undefined) {
-          const resolved = ctx.target.renderPagedEnvelopeMember({
-            member: expr.member,
-            binding: emitExpr(expr.receiver, ctx),
-            handle,
-          });
-          if (resolved !== undefined) return resolved;
-        }
-      }
-      // Page METADATA read off an AUTO-paged binding (`rows.total`).  The
-      // binding was unwrapped to the envelope's row array so the body's
-      // `Table { rows: rows }` still iterates records — which puts `total` and
-      // its siblings one level too deep (`<hook>.data.items.total`: undefined
-      // at runtime, a type error at build).  Re-root them on the envelope.
-      // `items` is deliberately NOT re-rooted: on an unwrapped binding `rows`
-      // IS the array, so `rows.items` is the author's own mistake, not ours.
-      if (
-        expr.receiver.kind === "ref" &&
-        ctx.pagedEnvelopeBindings &&
-        PAGED_META_MEMBERS.has(expr.member)
-      ) {
-        const envelope = ctx.pagedEnvelopeBindings.get(expr.receiver.name);
-        if (envelope !== undefined) return `${envelope}.${expr.member}`;
-      }
-      // Plain JS member access: `<recv>.<member>`.  Recursive
-      // emit on the receiver — if it was a hook-eligible chain
-      //, tryDetectApiHook at the top has already
-      // returned the hook var; we just append `.<member>`.
-      const recv = emitExpr(expr.receiver, ctx);
-      // A target whose embedded language is not JavaScript spells some members
-      // differently (F#'s `.Length`); returning undefined keeps the JS form.
-      const spelled = ctx.target.renderMemberRead?.({
-        receiver: recv,
-        member: expr.member,
-        receiverType: expr.receiverType,
-        memberType: expr.memberType,
-      });
-      return spelled ?? `${recv}.${expr.member}`;
+      return emitMemberAccess(expr, ctx, true);
     }
     case "lambda": {
       // Lambda in EXPRESSION position — the callback of a higher-order

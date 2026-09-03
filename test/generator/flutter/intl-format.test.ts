@@ -39,7 +39,10 @@ describe("flutter intl formatting", () => {
 
     // Money → NumberFormat.currency (grouping + the currency's own fraction
     // digits when `decimals` is omitted — NOT collapsed to decimalDigits: 0).
-    expect(page).toContain(`NumberFormat.currency(symbol: '\${"USD"} ').format(1234.5)`);
+    // The formatted value rides the null guard's closure param (`v`), and the
+    // authored expression is what the closure is APPLIED to — see `nullSafe`
+    // in `flutter/pack.ts`.
+    expect(page).toContain(`NumberFormat.currency(symbol: '\${"USD"} ').format(v))(1234.5)`);
     // Explicit `decimals` is honoured.
     expect(page).toContain(`NumberFormat.currency(decimalDigits: 0, symbol: '\${"JPY"} ')`);
     // DateDisplay → DateFormat, not DateTime.toString().

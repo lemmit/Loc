@@ -5423,8 +5423,20 @@ symptom.
 
 *First theory:* the one `pr-gate.yml`'s own header invites — `workflow_run`
 delivery is best-effort, a dispatch got dropped, the `*/15` sweep will fix it.
-Falsified by evidence already on screen: the sweep had had **eight hours and
-~32 passes** and changed nothing.
+Falsified by evidence already on screen: eight hours of sweeps changed nothing.
+
+> **Correction (2026-09-02).** This paragraph originally said the sweep had had
+> "eight hours and **~32 passes**". That number was never counted — it was
+> `8 h × 4/h` read off the cron, which is the same unverified-guarantee mistake
+> this entry is about. **Measured:** the 30 most recent `schedule` runs of
+> `pr-gate.yml` span **135 hours** (mean gap 4.7 h, median 4.6 h, shortest gap
+> in that window 110 min — not one 15-minute gap in 29). Eight hours is therefore **~2 sweeps, not ~32** —
+> which materially weakens this falsification: "2 passes changed nothing" is
+> thin evidence against a dropped dispatch where "32 passes" would have been
+> strong. The first theory is not re-opened (the second block below still
+> stands on its own evidence), but it was never as dead as this line implied.
+> The workflow, `scripts/pr-gate.mjs` and `docs/ci-gating.md` carried the same
+> uncounted claim; all three now state the measured cadence.
 
 *Second theory, which I wrote into this file as fact:* `main` had drifted 5
 commits, and under strict required-checks GitHub evaluates against the updated
@@ -5478,8 +5490,16 @@ fatal, more than one means look at the newest.
 And the cost rule underneath both: on a saturated runner pool (runs sat queued
 75+ min here), a fresh SHA restarts ~50 workflows. So establish *whether
 waiting can possibly work* before waiting. For block 1 the answer was no
-(absent, not stale); for block 2 the answer was no (the file says so). Both
-times, patience would have burned an hour to learn nothing.
+— *empirically*, because sweeps came and went without clearing it; **not**
+because the check was "absent, not stale", which is the mechanism this entry
+now declares undetermined (an earlier revision of this sentence asserted it,
+one paragraph after retracting it). For block 2 the answer was no (the file
+says so). Both times, patience would have burned an hour to learn nothing.
+
+A footnote on *how long* waiting costs, since the sweep is the thing you would
+be waiting for: on a later PR (#2722) the same parked-gate symptom cleared only
+after the next sweep, and at the measured 4.7 h cadence that is the scale to
+budget for — not the 15 minutes the cron implies.
 
 ## 94. A log line is a claim about the code, and nothing type-checks it (2026-09-01)
 

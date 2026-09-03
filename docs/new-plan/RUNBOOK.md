@@ -25,6 +25,7 @@ Missions marked *design-first* or touching grammar require the design pass first
 
 ## 5. Close the loop (as important as the code)
 - Update the mission's status line in its track file (and its `coverage.md` rows if a source doc is now fully drained). **No status flip without code evidence** — cite the file:line or gate in the commit.
+- When the mission is fully `done`, **move its `## M-Tx.y` section out of the track file into `archive/T<n>-done.md`** (verbatim; re-base relative links one level deeper). A track file lists only live missions; the archive keeps the evidence trail. Each mission id must appear as exactly one `## ` heading somewhere under `docs/new-plan/` (`test/system/unsupported-register.test.ts` checks the ids the unsupported register cites).
 - If you discovered the mission was bigger/smaller/different than written, edit the mission text so the next agent inherits reality.
 - If you found adjacent hollow work (claimed-done-but-fake — see M-T9.8's signal list), record it: correct the status, and add a mission if it needs real work.
 - Mark the PR ready only when built and green. Merged PR = done; do not stack unrelated follow-ups on the same branch.

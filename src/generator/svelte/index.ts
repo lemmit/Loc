@@ -29,6 +29,7 @@ import {
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import { MONEY_TEXT_SOURCE } from "../_frontend/money-format.js";
 import { JSX_NAV_LABELS, withNavLabelTokens } from "../_frontend/nav-labels.js";
 import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
@@ -254,7 +255,7 @@ export function generateSvelteForContexts(
   }
   out.set("src/lib/api/config.ts", pack.render("api-config", { apiBaseUrl }));
   out.set("src/lib/logger.ts", pack.render("logger", {}));
-  out.set("src/lib/format.ts", pack.render("format-helpers", {}));
+  out.set("src/lib/format.ts", pack.render("format-helpers", { moneySource: MONEY_TEXT_SOURCE }));
   // Interactive-table sort helper (M-T1.1) — imported by a page only when it
   // renders a sortable `Table`; emitted unconditionally (like format.ts).
   out.set("src/lib/table-sort.ts", buildTableSortHelper());
@@ -333,7 +334,14 @@ export function generateSvelteForContexts(
         // forbidden page's link.  Absent ⇒ link always shown.
         requiresJs: e.requiresJs,
       })),
-    })) ?? defaultNavSections(scaffoldedAggregates, scaffoldedWorkflows, hasWorkflowsIndex);
+    })) ??
+    defaultNavSections(
+      scaffoldedAggregates,
+      scaffoldedWorkflows,
+      hasWorkflowsIndex,
+      ui.pages,
+      authUi,
+    );
   // Bind the session user in the app-shell only when a nav entry is actually
   // gated — an unused binding would be a svelte-check error.
   const navUsesSession = navSections.some(

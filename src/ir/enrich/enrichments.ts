@@ -68,6 +68,7 @@ import {
   buildTenantFloorFilter,
   hasTenantOwned,
   hierarchyRegistry,
+  isDenyFilter,
   TENANCY_SELF_SCOPE_ORIGIN,
   TENANT_OWNED_CAPABILITY,
   TENANT_OWNED_TENANT_ID_FIELD,
@@ -700,7 +701,22 @@ function applyPolicyDenies(m: EnrichedSubdomainIR): EnrichedSubdomainIR {
           const writeHit = writeDenied.has(agg.name);
           if (!readHit && !writeHit) return agg;
           let next = agg;
-          if (readHit) {
+          // Idempotence: at most ONE deny term per aggregate.  `readDenied` is
+          // a Set of aggregate names, so a single pass can only ever add one —
+          // but the append below was unconditional, and enrichment re-run over
+          // an already-enriched model added a second identical term (and a
+          // second `contextFilterOrigins` slot with it).  Found by running the
+          // idempotence property over the CORPUS rather than the four examples
+          // `properties.test.ts` could afford: `policy-deny` and
+          // `policy-document` are the only fixtures carrying a `deny`, and
+          // neither example set has one.  Harmless in the pipeline (enrichment
+          // runs once) and harmless in meaning (an AND of a term with itself),
+          // but the contract it violated is the one every re-entrant caller —
+          // the playground re-enriching an edited model, a cached IR — is
+          // entitled to rely on.  `buildDenyFilter` has exactly one call site
+          // that touches `contextFilters` (this one), so the guard is a no-op
+          // on a first pass by construction.
+          if (readHit && !(next.contextFilters ?? []).some(isDenyFilter)) {
             // Append the always-false term to the read filter list (deny wins:
             // any widened allow scope earlier in the list is dominated).  Keep
             // `contextFilterOrigins` index-aligned (undefined origin ⇒ the deny

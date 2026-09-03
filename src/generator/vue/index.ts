@@ -24,6 +24,7 @@ import {
   buildExternFunctionShim,
   buildExternFunctionSignature,
 } from "../_frontend/extern-functions.js";
+import { renderGateExpr } from "../_frontend/gate-expr.js";
 // The i18n translation runtime (M-T1.11) is framework-AGNOSTIC — `t(key,
 // default, values?)` over `./locales/en.json` with `{name}` substitution — so
 // the Vue generator reuses the React module verbatim (same sharing pattern as
@@ -32,6 +33,7 @@ import {
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import { MONEY_TEXT_SOURCE } from "../_frontend/money-format.js";
 import { VUE_NAV_LABELS, withNavLabelTokens } from "../_frontend/nav-labels.js";
 import { pageEmitPath } from "../_frontend/page-identity.js";
 import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
@@ -481,7 +483,10 @@ export function generateVueForContexts(
     out.set("src/auth/AuthGate.vue", AUTH_GATE_VUE);
   }
   out.set("src/logger.ts", renderShell(pack, "logger", {}));
-  out.set("src/lib/format.ts", renderShell(pack, "format-helpers", {}));
+  out.set(
+    "src/lib/format.ts",
+    renderShell(pack, "format-helpers", { moneySource: MONEY_TEXT_SOURCE }),
+  );
   // Interactive-table sort helper (M-T1.1) — imported by a page only when it
   // renders a sortable `Table`; emitted unconditionally (like format.ts).
   out.set("src/lib/table-sort.ts", buildTableSortHelper());
@@ -567,7 +572,7 @@ export function generateVueForContexts(
           requiresJs: e.requiresJs,
         })),
       }))
-    : deriveNavSections(defaultPages, pageCtx);
+    : deriveNavSections(defaultPages, pageCtx, authUi);
   // Bind the session user in the app-shell only when a nav entry is actually
   // gated — an unused `currentUser` binding would be a vue-tsc error.
   const navUsesSession = navSections.some((s) =>
@@ -865,25 +870,44 @@ interface NavEntryVM {
   label: string;
   testId: string;
   exact?: boolean;
+  requiresJs?: string;
 }
 
 function deriveNavSections(
   pages: PageIR[],
   nameCtx: PageNameCtx,
+  /** `auth: ui` — the verified session user is available client-side, so a
+   *  gated entry can be `v-if`-hidden.  Without it every entry stays ungated
+   *  (there is no `currentUser` to test), byte-identical. */
+  authUi: boolean,
 ): Array<{ label: string; entries: NavEntryVM[] }> {
   const aggregates: NavEntryVM[] = [];
   const workflows: NavEntryVM[] = [];
+  // A DEFAULT entry inherits the gate of the page it links to, exactly as the
+  // menu-derived path does (`navEntryForLink`).  It is not true that scaffold
+  // pages carry no `requires`: the scaffolded List page CLONES the
+  // `find all … requires` gate guarding the very read it makes, so an ungated
+  // default sidebar advertised routes the backend refuses (M-T3.15-C3).
+  const gateOf = (page: PageIR): string | undefined =>
+    authUi && page.requires ? renderGateExpr(page.requires, "currentUser") : undefined;
   for (const page of pages) {
     if (!page.route) continue;
     const o = classifyPage(page, nameCtx);
+    const requiresJs = gateOf(page);
     if (o.kind === "aggregate-list") {
       const label = humanize(plural(o.aggregateName));
-      aggregates.push({ to: page.route, label, testId: `nav-${snake(plural(o.aggregateName))}` });
+      aggregates.push({
+        to: page.route,
+        label,
+        testId: `nav-${snake(plural(o.aggregateName))}`,
+        ...(requiresJs ? { requiresJs } : {}),
+      });
     } else if (o.kind === "workflow-form") {
       workflows.push({
         to: page.route,
         label: humanize(o.workflowName),
         testId: `nav-wf-${snake(o.workflowName)}`,
+        ...(requiresJs ? { requiresJs } : {}),
       });
     }
   }

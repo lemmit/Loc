@@ -80,21 +80,15 @@ export function NumberValue({ value, decimals = 0 }: { value: number | string | 
   return <Text component="span" style={{ fontVariantNumeric: "tabular-nums" }}>{fmt.format(n)}</Text>;
 }
 
-/** Currency-formatted numeric value.  Defaults to USD with two
- *  fractional digits; pass `currency` to switch (e.g. "EUR") and
- *  `decimals` to override scale.  Empty values render as the
- *  shared dimmed em-dash. */
-export function MoneyValue({ value, currency = "USD", decimals = 2 }: { value: number | string | { toString(): string } | null | undefined; currency?: string; decimals?: number }) {
+/** Money value, rendered VERBATIM (M-T1.25): the wire's own digits,
+ *  locale-neutral — no Number() coercion, no locale grouping, no
+ *  currency symbol, no re-scaling.  `currency` prefixes the CODE the
+ *  page source declared (`Money(x, currency: "EUR")`); `decimals`
+ *  re-scales the digit string.  Neither is invented here — Loom money
+ *  has no currency dimension.  Semantics live in `moneyText` below. */
+export function MoneyValue({ value, currency, decimals }: { value: number | string | { toString(): string } | null | undefined; currency?: string; decimals?: number }) {
   if (isEmpty(value)) return <EmptyValue />;
-  const n = typeof value === "number" ? value : Number(value);
-  if (Number.isNaN(n)) return <Text component="span">{String(value)}</Text>;
-  const fmt = new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency,
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
-  return <Text component="span" style={{ fontVariantNumeric: "tabular-nums" }}>{fmt.format(n)}</Text>;
+  return <Text component="span" style={{ fontVariantNumeric: "tabular-nums" }}>{moneyText(value as number | string | { toString(): string }, currency, decimals)}</Text>;
 }
 
 /** Generic value display with empty-state handling.  Used by
@@ -122,4 +116,76 @@ export function KeyValueRow({
       <Stack gap={2} data-testid={testid} style={{ flex: 1, minWidth: 0 }}>{children}</Stack>
     </Group>
   );
+}
+
+/** Render a money value's own digits, faithfully (generated — M-T1.25).
+ *
+ *  Loom money rides the wire as a fixed-scale decimal STRING ("12.3456") and
+ *  is a decimal.js instance in form state; both stringify to the same digits.
+ *  The default rendering is VERBATIM and locale-neutral — no Number()
+ *  coercion, no locale grouping, no currency symbol, no re-scaling — so what
+ *  the database stores is what the screen shows.
+ *
+ *  @param currency  Optional currency CODE, printed verbatim as a prefix
+ *                   ("EUR 12.3456").  Only ever what the page source declared.
+ *  @param decimals  Optional exact fraction-digit count; re-scales the digit
+ *                   string (half away from zero), never through a float.
+ */
+export function moneyText(
+  value: number | string | { toString(): string },
+  currency?: string,
+  decimals?: number,
+): string {
+  const raw = typeof value === "string" ? value : String(value);
+  const body = decimals === undefined ? raw : scaleDecimalString(raw, decimals);
+  return currency ? currency + " " + body : body;
+}
+
+/** Re-scale a decimal STRING to exactly `digits` fraction digits.
+ *
+ *  Operates on the digits themselves — pad with zeros when widening, and when
+ *  narrowing round half AWAY FROM ZERO by incrementing the retained digit
+ *  string.  This is the rounding family every Loom backend and Postgres itself
+ *  uses, and it keeps all 19 significant digits of NUMERIC(19,4) intact (a
+ *  float hop would not).  A value that is not a plain decimal literal, or a
+ *  negative `digits`, is returned untouched.
+ */
+export function scaleDecimalString(raw: string, digits: number): string {
+  const m = /^([+-]?)(\d+)(?:\.(\d*))?$/.exec(raw.trim());
+  const n = Math.trunc(digits);
+  if (!m || !Number.isFinite(n) || n < 0) {
+    return raw;
+  }
+  const sign = m[1] === "-" ? "-" : "";
+  const frac = m[3] ?? "";
+  let intPart = m[2];
+  let kept = frac.slice(0, n);
+  if (frac.length <= n) {
+    kept = frac + "0".repeat(n - frac.length);
+  } else if (frac.charCodeAt(n) >= 53 /* '5' */) {
+    const bumped = bumpDigits(intPart + kept);
+    intPart = bumped.slice(0, bumped.length - n);
+    kept = bumped.slice(bumped.length - n);
+  }
+  intPart = intPart.replace(/^0+(?=\d)/, "");
+  return sign + intPart + (n > 0 ? "." + kept : "");
+}
+
+/** Add one to a string of decimal digits, carrying left and growing a new
+ *  leading digit when the whole string was nines ("999" -> "1000"). */
+function bumpDigits(s: string): string {
+  const out = s.split("");
+  let i = out.length - 1;
+  for (; i >= 0; i--) {
+    if (out[i] === "9") {
+      out[i] = "0";
+      continue;
+    }
+    out[i] = String(Number(out[i]) + 1);
+    break;
+  }
+  if (i < 0) {
+    out.unshift("1");
+  }
+  return out.join("");
 }

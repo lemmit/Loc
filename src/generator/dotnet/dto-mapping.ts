@@ -133,6 +133,42 @@ function csCanonicalInstantWire(domainExpr: string): string {
   return `System.Text.RegularExpressions.Regex.Replace(${domainExpr}.ToUniversalTime().ToString("o"), @"\\.?0+Z$", "Z")`;
 }
 
+/** C# expression narrowing a `System.Decimal` to the `double` a declared
+ *  `decimal` crosses the wire as (#2563/RS-24) — **correctly rounded**, which
+ *  the language's own `(double)d` cast is not.
+ *
+ *  `(double)d` runs `DecCalc.VarR8FromDec`: `(double)mantissa / 10^scale`.  When
+ *  the mantissa exceeds 2^53 — every value whose shortest round-trip repr needs
+ *  17 significant digits — the NUMERATOR is rounded to a double first and the
+ *  quotient is then rounded again, so the result need not be the nearest double
+ *  to the stored decimal.  MEASURED on .NET 10.0.11 over 3M random doubles in
+ *  [0,100) written out as Postgres `numeric` and read back: 9.2% (275,923 of
+ *  3,000,000) do not
+ *  round-trip (`99.52989333734583` comes back `99.52989333734584`), while
+ *  `double.Parse` of the same digits misses zero times.  Every one
+ *  of the other four backends ships the true nearest double, so the .NET row is
+ *  the odd one out on the wire-golden differential.
+ *
+ *  `decimal.ToString` is exact (a base-10 type carries no hidden precision) and
+ *  `double.Parse` is correctly rounded on .NET Core 3.0+ (the generated TFM is
+ *  `net10.0`), so the pair is the nearest double to the stored value — the same
+ *  number node reads out of the same `numeric` column.  `InvariantCulture` on
+ *  BOTH halves pins the decimal separator, so a container locale cannot turn
+ *  `1.5` into `1,5` and then fail to parse it.
+ *
+ *  Cost is one string alloc + parse per decimal field per row, at a JSON
+ *  boundary that already allocates an order of magnitude more.  Both call sites
+ *  (`projectToResponse` here, `csCoerce`'s EF aggregate arm in
+ *  `query-projection-emit.ts`) render through this one helper so the two hops
+ *  cannot drift.  The type is fully qualified so no `using` wiring is needed at
+ *  either site. */
+export function csDecimalToWireDouble(domainExpr: string): string {
+  return (
+    `double.Parse(${domainExpr}.ToString(System.Globalization.CultureInfo.InvariantCulture), ` +
+    `System.Globalization.CultureInfo.InvariantCulture)`
+  );
+}
+
 /** C# DTO property type for a `TypeIR`.  `dir` selects the suffix for
  *  nested value-object DTOs (`Request` for inputs, `Response` for
  *  outputs); entities always nest as `<Name>Response`. */
@@ -246,6 +282,10 @@ export function dtoParam(
   /** Which request slot this DTO is.  `create` keeps the implicit-bool
    *  optionality (RS-6); `operation` requires every declared param (RS-26). */
   slot: "create" | "operation" = "create",
+  /** True when this member is a VALUE TYPE on the wire ({@link isWireValueType}).
+   *  Such a member needs `[property: JsonRequired]` in EVERY request slot, not
+   *  just `operation` — see below. */
+  wireValueType = false,
 ): string {
   if (defaultLiteral !== undefined && dir === "request") {
     return `${csType} ${name} = ${defaultLiteral}`;
@@ -266,7 +306,33 @@ export function dtoParam(
   // questions.  JsonRequired asks "was the member present"; Required asks "is
   // the bound value null".  Dropping Required here would let an explicit
   // `"name": null` reach the domain, which it does not today.
-  const jsonRequired = dir === "request" && slot === "operation" ? "[property: JsonRequired] " : "";
+  //
+  // The same hole exists in EVERY request slot, not only `operation` — the
+  // exemption above is about an omitted field being legitimately absent, which
+  // is a statement about the CREATE CONTRACT, not about whether `[Required]`
+  // can see the absence. It cannot, for any value type, anywhere.
+  //
+  // Measured on a booted .NET app (`POST /api/widgets`, every one of these
+  // marked `required` in the published schema):
+  //
+  //     omit name  (string)          422   ← reference type, [Required] sees null
+  //     omit price (record)          422   ← reference type
+  //     omit qty   (int)             201   ← VALUE TYPE, bound to 0
+  //     omit ratio (decimal)         201   ← VALUE TYPE, bound to 0
+  //     omit price.amount (decimal)  201   ← VALUE TYPE, bound to 0
+  //     omit active (bool)           201   ← correct: RS-6 keeps it OPTIONAL,
+  //                                          and the schema agrees (not in
+  //                                          `required`), so nothing is claimed
+  //                                          that is not enforced.
+  //
+  // A zero-priced product / a zero-quantity widget is written from a body the
+  // published contract forbids (schemathesis F30). So the guard follows the
+  // question it answers — "can `[Required]` see this absence?" — rather than
+  // the slot. Reference-typed members are deliberately NOT given it: their
+  // `[Required]` already answers 422, and adding JsonRequired would move them
+  // to the 400 arm.
+  const jsonRequired =
+    dir === "request" && (slot === "operation" || wireValueType) ? "[property: JsonRequired] " : "";
   // Request → parameter target (bare `[Required]`) so ASP.NET record
   // validation doesn't throw at model-binding time; response → property
   // target (`[property: Required]`).  See the doc comment above.
@@ -364,19 +430,7 @@ export function wireToCommandArgument(
     // On the .NET wire every id crosses as `Guid` (a value type), so a nullable
     // id ref is always `Guid?` → `.Value`.
     const innerT = peelNullable(t);
-    const inner = wireTypeInfo(innerT, "request");
-    const valueWire =
-      inner.refKind === "id" ||
-      inner.refKind === "enum" ||
-      (inner.refKind === "primitive" &&
-        inner.primitive !== "string" &&
-        inner.primitive !== "money" &&
-        inner.primitive !== "datetime" &&
-        // `File` crosses the wire as the `FileRef` RECORD, not a value type —
-        // `request.Doc!.Value` on it is CS1061 (M-T6.39; the sibling of the
-        // same omission in `csIsValueType` below).
-        inner.primitive !== "File");
-    const unwrap = valueWire ? `${expr}!.Value` : `${expr}!`;
+    const unwrap = isWireValueType(innerT) ? `${expr}!.Value` : `${expr}!`;
     return `(${expr} is null ? null : ${wireToCommandArgument(unwrap, innerT, ctx, site)})`;
   }
   if (info.isCollection) {
@@ -513,8 +567,13 @@ export function projectToResponse(
       if (info.primitive === "decimal") {
         // The domain keeps `System.Decimal`; the RESPONSE field is a `double`
         // (#2563 — see `wireType`), so the narrowing happens here, once, at the
-        // wire boundary.
-        return `(double)${domainExpr}`;
+        // wire boundary.  It must be CORRECTLY ROUNDED — a `(double)` cast is
+        // not (F10/M-T6.47); see `csDecimalToWireDouble`.  Reading the column
+        // as `double` at the provider seam (#2631's fix for the dapper
+        // aggregate) is not available here: the DOMAIN property has to stay
+        // `System.Decimal` for domain arithmetic, so the narrowing belongs at
+        // the wire boundary, once.
+        return csDecimalToWireDouble(domainExpr);
       }
       return domainExpr;
     case "id":
@@ -604,6 +663,33 @@ export function domainToRequestExpr(
  *  must be unwrapped with `.Value` before any method call.  `string`
  *  and `List<T>` are reference types; everything else (primitives, ids,
  *  enums) is a value type. */
+/** Is this type a VALUE TYPE **on the wire** — i.e. as it appears on a request
+ *  DTO member?
+ *
+ *  Distinct from {@link csIsValueType}, which asks about the DOMAIN
+ *  representation: `money` and `datetime` are `decimal` / `DateTime` in the
+ *  domain but cross the wire as STRINGS, so their DTO members are reference
+ *  types. `File` crosses as the `FileRef` record for the same reason.
+ *
+ *  Two consumers, and they must agree:
+ *    • `wireToCommandArgument` — a nullable wire value type unwraps `.Value`,
+ *      a reference one unwraps `!`.
+ *    • `dtoParam` — a REQUIRED wire value type needs `[property: JsonRequired]`,
+ *      because `[Required]` alone cannot see its absence (below). */
+export function isWireValueType(t: TypeIR): boolean {
+  const info = wireTypeInfo(t, "request");
+  if (info.isCollection || info.isNullable) return false;
+  return (
+    info.refKind === "id" ||
+    info.refKind === "enum" ||
+    (info.refKind === "primitive" &&
+      info.primitive !== "string" &&
+      info.primitive !== "money" &&
+      info.primitive !== "datetime" &&
+      info.primitive !== "File")
+  );
+}
+
 function csIsValueType(t: TypeIR): boolean {
   const info = wireTypeInfo(t, "response");
   if (info.isCollection) return false;

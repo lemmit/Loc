@@ -85,17 +85,15 @@ export function NumberValue({ value, decimals = 0 }: { value: number | string | 
   return <Text as="span" css=\{{ fontVariantNumeric: "tabular-nums" }}>{fmt.format(n)}</Text>;
 }
 
-export function MoneyValue({ value, currency = "USD", decimals = 2 }: { value: number | string | { toString(): string } | null | undefined; currency?: string; decimals?: number }) {
+/** Money value, rendered VERBATIM (M-T1.25): the wire's own digits,
+ *  locale-neutral — no Number() coercion, no locale grouping, no
+ *  currency symbol, no re-scaling.  `currency` prefixes the CODE the
+ *  page source declared (`Money(x, currency: "EUR")`); `decimals`
+ *  re-scales the digit string.  Neither is invented here — Loom money
+ *  has no currency dimension.  Semantics live in `moneyText` below. */
+export function MoneyValue({ value, currency, decimals }: { value: number | string | { toString(): string } | null | undefined; currency?: string; decimals?: number }) {
   if (isEmpty(value)) return <EmptyValue />;
-  const n = typeof value === "number" ? value : Number(value);
-  if (Number.isNaN(n)) return <Text as="span">{String(value)}</Text>;
-  const fmt = new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency,
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
-  return <Text as="span" css=\{{ fontVariantNumeric: "tabular-nums" }}>{fmt.format(n)}</Text>;
+  return <Text as="span" css=\{{ fontVariantNumeric: "tabular-nums" }}>{moneyText(value as number | string | { toString(): string }, currency, decimals)}</Text>;
 }
 
 export function PlainValue({ value }: { value: unknown }) {
@@ -119,3 +117,5 @@ export function KeyValueRow({
     </HStack>
   );
 }
+
+{{{moneySource}}}

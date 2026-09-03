@@ -90,9 +90,15 @@ describe("mask unless — .NET read redaction", () => {
     // fail-closed: null caller OR failed predicate → null.
     expect(handler).toMatch(/RequestContext\.Current\?\.CurrentUser is \{ \} __maskUser\d+/);
     expect(handler).toMatch(/\(__maskUser\d+\.Permissions\)\.Contains\("m\.unmask"\)/);
-    // `(double?)((double)found.Salary)` — the mask's nullable cast composing
-    // with the #2563 narrowing that makes a wire `decimal` a float64.
-    expect(handler).toMatch(/\?\s*\(double\?\)\(\(double\)found\.Salary\)\s*:\s*null/);
+    // `(double?)(double.Parse(found.Salary.ToString(…), …))` — the mask's
+    // nullable cast composing with the #2563 narrowing that makes a wire
+    // `decimal` a float64, correctly rounded since M-T6.47 (the raw `(double)`
+    // cast was a double rounding — see `csDecimalToWireDouble`).  This test is
+    // a fourth witness that `projectToResponse` is the single per-row funnel:
+    // the mask arm composes with whatever the decimal arm renders.
+    expect(handler).toMatch(
+      /\?\s*\(double\?\)\(double\.Parse\(found\.Salary\.ToString\(System\.Globalization\.CultureInfo\.InvariantCulture\), System\.Globalization\.CultureInfo\.InvariantCulture\)\)\s*:\s*null/,
+    );
     // the handler imports where RequestContext lives.
     expect(handler).toContain("using S.Domain.Common;");
   });

@@ -30,7 +30,7 @@
 // ---------------------------------------------------------------------------
 
 import { GENERIC_SHAPES } from "../../ir/stdlib/generics.js";
-import type { TypeIR } from "../../ir/types/loom-ir.js";
+import type { AggregateIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { PROVENANCE_LINEAGE_FIELD, PROVENANCE_VALUE_FIELD } from "../../util/provenance-carrier.js";
 
 export { PROVENANCE_LINEAGE_FIELD, PROVENANCE_VALUE_FIELD };
@@ -118,3 +118,34 @@ export function provenancedTypeMembers(
     { name: PROVENANCE_LINEAGE_FIELD, optional: PROVENANCED_LINEAGE_OPTIONAL },
   ];
 }
+
+/** Every `provenanced` field NAME declared by an aggregate (or one of its
+ *  entity parts) in scope.
+ *
+ *  Both page-body engines need this to decide where the carrier hop belongs:
+ *  the shared JSX/Feliz/Flutter walker APPENDS `.value` to a bare read, and the
+ *  HEEx walker DROPS an explicit `.value` (LiveView renders off the Ecto
+ *  struct, where the field is still the scalar column).  Two opposite edits
+ *  keyed on the same set — so the set lives here rather than once per engine,
+ *  and the two cannot disagree about which fields are carriers.
+ *
+ *  A page body carries unresolved receiver types (`walker-core.ts` documents
+ *  the limitation), so a carrier is recognised by field NAME rather than by
+ *  type.  The residual ambiguity — a value object that happens to declare a
+ *  field with the same name as a provenanced field — is narrow, and both
+ *  engines already accepted it. */
+export function provenancedFieldNames(
+  aggregatesByName: ReadonlyMap<string, AggregateIR>,
+): ReadonlySet<string> {
+  const cached = provNamesCache.get(aggregatesByName);
+  if (cached) return cached;
+  const names = new Set<string>();
+  for (const agg of aggregatesByName.values()) {
+    for (const f of agg.fields) if (f.provenanced) names.add(f.name);
+    for (const p of agg.parts) for (const f of p.fields) if (f.provenanced) names.add(f.name);
+  }
+  provNamesCache.set(aggregatesByName, names);
+  return names;
+}
+
+const provNamesCache = new WeakMap<ReadonlyMap<string, AggregateIR>, ReadonlySet<string>>();
