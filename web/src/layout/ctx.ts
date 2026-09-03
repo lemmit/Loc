@@ -139,7 +139,7 @@ export type DockTab =
 
 /** The desktop centre area's active document (lifted from DesktopShell in
  *  M-T8.18 so the palette and the panes' *Go to line N* can switch it). */
-export type CenterView = "source" | "secondary" | "builder" | "model" | "requirements";
+export type CenterView = "source" | "secondary" | "builder" | "model" | "requirements" | "chat";
 
 /** The desktop Explorer's switcher: your files, the generated tree, or the
  *  examples pane (M-T8.18). */
@@ -178,6 +178,14 @@ export interface LayoutCtx {
   problemAnnouncement: string;
   /** Open the Agent tab with `text` in the composer ("" just focuses it). */
   askAgent: (text: string) => void;
+  /** Focus the Chat surface — the centre tab on desktop, the full-screen
+   *  agent pane on mobile (M-T8.19 slice 1).  The dock's Agent tab and the
+   *  palette are both shortcuts to this. */
+  openChat: () => void;
+  /** Desktop only: render Chat and Source side by side.  Defaults on while a
+   *  turn is in flight, so the source streams next to the transcript. */
+  chatSplit: boolean;
+  setChatSplit: (v: boolean) => void;
   agentPrompt: AgentPromptRequest | null;
   consumeAgentPrompt: () => void;
   /** First-run card: shown until dismissed, on a workspace never edited

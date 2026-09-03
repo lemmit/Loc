@@ -370,8 +370,14 @@ export default function App(): JSX.Element {
   const [dockTabRaw, setDockTabRaw] = usePersistedState<
     DockTab | "problems" | "generator" | "bundler"
   >("loom.desktop.dockTab", "output");
+  // `agent` is coerced too: M-T8.19 moved the chat out of the dock into the
+  // centre switcher, so a browser that persisted it would otherwise land on a
+  // dock tab with no panel behind it.
   const dockTab: DockTab =
-    dockTabRaw === "problems" || dockTabRaw === "generator" || dockTabRaw === "bundler"
+    dockTabRaw === "problems" ||
+    dockTabRaw === "generator" ||
+    dockTabRaw === "bundler" ||
+    dockTabRaw === "agent"
       ? "output"
       : dockTabRaw;
   const setDockTab = (t: DockTab): void => setDockTabRaw(t);
@@ -415,6 +421,11 @@ export default function App(): JSX.Element {
   // first-run card, the shortcut sheet, and the F8 problem cursor.
   // ---------------------------------------------------------------------
   const [centerView, setCenterView] = useState<CenterView>("source");
+  // M-T8.19 slice 1 — Chat sits beside Source in the centre switcher, and
+  // **Split** shows both at once.  Persisted so the choice survives a reload;
+  // a turn starting turns it on (see the effect below) because watching the
+  // model change as the agent writes it IS the demo.
+  const [chatSplit, setChatSplit] = usePersistedState<boolean>("loom.desktop.chatSplit", true);
   const [explorerModeRaw, setExplorerMode] = usePersistedState<ExplorerMode>(
     "loom.desktop.explorerMode",
     // Default to your source files — the managed "User code" tree is the
@@ -2002,9 +2013,16 @@ export default function App(): JSX.Element {
     });
   }
 
-  function askAgent(text: string): void {
-    if (isDesktopRef.current) setDockTab("agent");
+  // Focus the chat: the centre tab on desktop (M-T8.19 slice 1), the
+  // full-screen agent pane on mobile.  One function, so the dock shortcut,
+  // the palette, the mobile switcher and `askAgent` cannot drift.
+  function openChat(): void {
+    if (isDesktopRef.current) setCenterView("chat");
     else setActiveTab("agent");
+  }
+
+  function askAgent(text: string): void {
+    openChat();
     agentPromptNonceRef.current++;
     setAgentPrompt({ text, nonce: agentPromptNonceRef.current });
   }
@@ -2075,6 +2093,8 @@ export default function App(): JSX.Element {
     revealSourceRange,
     stepProblem,
     askAgent,
+    openChat,
+    setChatSplit,
     consumeAgentPrompt: (): void => setAgentPrompt(null),
     dismissFirstRun,
     setShortcutSheetOpen,
@@ -2258,6 +2278,7 @@ export default function App(): JSX.Element {
       snapshotResult,
       snapshotRunning,
       centerView,
+      chatSplit,
       explorerMode,
       examplesOpen,
       agentPrompt,
@@ -2340,6 +2361,7 @@ export default function App(): JSX.Element {
       snapshotResult,
       snapshotRunning,
       centerView,
+      chatSplit,
       explorerMode,
       examplesOpen,
       agentPrompt,

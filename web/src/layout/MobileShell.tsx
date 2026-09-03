@@ -156,6 +156,17 @@ export function MobileShell({ ctx }: Props): JSX.Element {
           >
             {PANE.generated}
           </Button>
+          {/* Chat is a peer of Source on desktop (M-T8.19 slice 1); on a
+              phone it stays its own full-screen pane — this is the jump to
+              it, so the switcher reads the same on both. */}
+          <Button
+            size="xs"
+            variant="default"
+            onClick={() => ctx.openChat()}
+            data-testid="mobile-doc-tab-chat"
+          >
+            {PANE.chat}
+          </Button>
         </Group>
         {/* Editor stays mounted (display toggle) so Monaco keeps its model +
             undo history; Builder/Model mount only while active so they

@@ -1,4 +1,4 @@
-import { Box, Button, Group as MGroup, SegmentedControl, Text, UnstyledButton } from "@mantine/core";
+import { Box, Button, Group as MGroup, SegmentedControl, Switch, Text, Tooltip, UnstyledButton } from "@mantine/core";
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 
 // The visual Builder pulls in craft.js + a main-thread Langium parse; lazily
@@ -16,6 +16,7 @@ import {
 } from "react-resizable-panels";
 import { EditorPane } from "./EditorPane";
 import { PreviewPane } from "./PreviewPane";
+import { ChatBody } from "./ChatPanel";
 import { DevToolsDock } from "./DevToolsDock";
 import { ExplorerTree } from "../preview/ExplorerTree";
 import { LazyFileViewer } from "./lazy-panels";
@@ -24,7 +25,7 @@ import { PaneErrorBoundary } from "../PaneErrorBoundary";
 import { ExamplesPane } from "./ExamplesPane";
 import { FirstRunCard } from "./FirstRunCard";
 import { type CenterView, type ExplorerMode, modeLabel, type LayoutCtx } from "./ctx";
-import { nextStep, nextStepMid, PANE, STAGE } from "./vocabulary";
+import { CHAT, nextStep, nextStepMid, PANE, STAGE } from "./vocabulary";
 
 // The active non-source document in the center area — a file opened
 // from either Explorer view.  `source` (main.ddd) is the other tab.
@@ -252,6 +253,7 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                       onChange={(v) => setCenterView(v as CenterView)}
                       data={[
                         { value: "source", label: <span data-testid="doc-tab-source">{PANE.source}</span> },
+                        { value: "chat", label: <span data-testid="doc-tab-chat">{PANE.chat}</span> },
                         { value: "builder", label: <span data-testid="doc-tab-builder">{PANE.builder}</span> },
                         { value: "model", label: <span data-testid="doc-tab-model">{PANE.model}</span> },
                         { value: "requirements", label: <span data-testid="doc-tab-requirements">{PANE.requirements}</span> },
@@ -262,14 +264,65 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                         {secondaryDoc.path}
                       </DocTab>
                     )}
+                    {/* Chat's own companion control: the source it is editing,
+                        beside it.  On by default while a turn is in flight
+                        (App drives that), so the model's edits are visible as
+                        they land rather than after the fact. */}
+                    {centerView === "chat" && (
+                      <Tooltip label={CHAT.splitHint} withArrow position="bottom" multiline w={260}>
+                        <Switch
+                          size="xs"
+                          ml="auto"
+                          checked={ctx.chatSplit}
+                          onChange={(e) => ctx.setChatSplit(e.currentTarget.checked)}
+                          label={CHAT.split}
+                          data-testid="chat-split-toggle"
+                        />
+                      </Tooltip>
+                    )}
                   </MGroup>
-                  {/* Editor stays mounted (display toggle) so Monaco keeps
-                      its model + undo history; the read-only viewer
-                      remounts per file via its key. */}
-                  <Box style={{ flex: 1, minHeight: 0, display: centerView === "source" ? "flex" : "none", position: "relative" }}>
-                    <EditorPane ctx={ctx} />
-                    {/* Three doors over the never-edited editor (M-T8.18). */}
-                    {firstRunVisible && <FirstRunCard ctx={ctx} />}
+                  {/* Chat + Source share one row so **Split** is a layout
+                      toggle, not a second mount: both stay mounted behind a
+                      display switch, which is what keeps Monaco's model +
+                      undo history (and the chat composer's draft) alive
+                      across a tab change. */}
+                  <Box
+                    style={{
+                      flex: 1,
+                      minHeight: 0,
+                      display: centerView === "source" || centerView === "chat" ? "flex" : "none",
+                      flexDirection: "row",
+                    }}
+                  >
+                    <Box
+                      data-testid="center-chat"
+                      style={{
+                        display: centerView === "chat" ? "flex" : "none",
+                        flexDirection: "column",
+                        minWidth: 0,
+                        flex: ctx.chatSplit ? "0 0 44%" : 1,
+                        borderRight: ctx.chatSplit
+                          ? "1px solid var(--mantine-color-default-border)"
+                          : undefined,
+                      }}
+                    >
+                      <ChatBody ctx={ctx} />
+                    </Box>
+                    <Box
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        display:
+                          centerView === "source" || (centerView === "chat" && ctx.chatSplit)
+                            ? "flex"
+                            : "none",
+                        position: "relative",
+                      }}
+                    >
+                      <EditorPane ctx={ctx} />
+                      {/* Three doors over the never-edited editor (M-T8.18). */}
+                      {firstRunVisible && centerView === "source" && <FirstRunCard ctx={ctx} />}
+                    </Box>
                   </Box>
                   {/* Lazy-mounted on first activation, then kept mounted via
                       a display toggle (same pattern as the editor above) so

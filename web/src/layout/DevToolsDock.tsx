@@ -1,7 +1,6 @@
-import { Box, Group, Tabs } from "@mantine/core";
+import { Box, Group, Tabs, Tooltip, UnstyledButton } from "@mantine/core";
 import { AuthConfigPanel } from "./AuthConfigPanel";
 import { BackendBody, BackendHeader } from "./BackendPanel";
-import { ChatBody } from "./ChatPanel";
 import { TestsBody } from "./TestsPanel";
 import { HistoryBody } from "./HistoryPanel";
 import { MigrationsBody } from "./MigrationsPanel";
@@ -16,12 +15,18 @@ import {
   StatusMark,
   testsMark,
 } from "./status-mark";
-import { PANE } from "./vocabulary";
+import { CHAT, PANE } from "./vocabulary";
 
 // `DockTab` (the consolidated bottom-dock tab ids) is defined in ctx.ts so
 // LayoutCtx can carry the active-tab state; re-exported here so existing
-// importers (`DesktopShell`) keep resolving it from DevToolsDock.  The
-// `"agent"` tab (the deterministic demo) is part of that shared type.
+// importers (`DesktopShell`) keep resolving it from DevToolsDock.
+//
+// `"agent"` is STILL a member of that type — the mobile shell's tab bar and
+// the persisted desktop dock state both name it — but on desktop it is no
+// longer a dock PANEL.  M-T8.19 moved the chat into the centre switcher (it is
+// a peer of Source, not a log stream: research §4 #1), so what sits in the
+// tab strip here is a SHORTCUT carrying the same `devtools-tab-agent` id, and
+// clicking it focuses the centre tab instead of swapping the dock.
 export type { DockTab };
 
 interface Props {
@@ -32,7 +37,6 @@ interface Props {
 
 const DOCK_TABS: readonly DockTab[] = [
   "output",
-  "agent",
   "backend",
   "tests",
   "migrations",
@@ -52,7 +56,6 @@ function isDockTab(v: string | null): v is DockTab {
 export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
   const tabs: { id: DockTab; label: string; mark: Mark | null }[] = [
     { id: "output", label: PANE.output, mark: outputMark(ctx) },
-    { id: "agent", label: PANE.agent, mark: agentMark(ctx) },
     { id: "backend", label: PANE.runtime, mark: runtimeMark(ctx) },
     { id: "tests", label: PANE.tests, mark: testsMark(ctx) },
     { id: "migrations", label: PANE.migrations, mark: migrationsMark(ctx) },
@@ -102,6 +105,9 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
               {t.label}
             </Tabs.Tab>
           ))}
+          {/* Not a tab: a jump to the Chat centre tab, keeping the public
+              `devtools-tab-agent` id the specs and the palette use. */}
+          <AgentShortcut ctx={ctx} />
         </Tabs.List>
         {tab === "backend" && <BackendHeader ctx={ctx} />}
       </Group>
@@ -109,9 +115,6 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
       <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <Tabs.Panel value="output">
           <OutputPanel ctx={ctx} stream={ctx.outputStream} setStream={ctx.setOutputStream} />
-        </Tabs.Panel>
-        <Tabs.Panel value="agent">
-          <ChatBody ctx={ctx} />
         </Tabs.Panel>
         <Tabs.Panel value="backend">
           <BackendBody ctx={ctx} />
@@ -130,5 +133,39 @@ export function DevToolsDock({ ctx, tab, setTab }: Props): JSX.Element {
         </Tabs.Panel>
       </Box>
     </Tabs>
+  );
+}
+
+/** The Agent entry in the dock's tab strip.  It LOOKS like the tabs beside it
+ *  (same pill chrome, same status mark) but it is a plain button: chat is a
+ *  centre view now, so activating it moves focus there rather than filling the
+ *  dock.  `role="link"` keeps it out of the tablist's arrow-key rotation while
+ *  staying keyboard reachable. */
+function AgentShortcut({ ctx }: { ctx: LayoutCtx }): JSX.Element {
+  const mark = agentMark(ctx);
+  return (
+    <Tooltip label={CHAT.dockShortcut} withArrow position="top">
+      <UnstyledButton
+        role="link"
+        data-testid="devtools-tab-agent"
+        onClick={() => ctx.openChat()}
+        px={8}
+        py={2}
+        style={{
+          borderRadius: 4,
+          fontSize: 11,
+          fontWeight: 600,
+          textTransform: "uppercase",
+          color: "var(--mantine-color-dimmed)",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        {PANE.agent}
+        {mark && <StatusMark mark={mark} testid="devtools-mark-agent" />}
+        <span aria-hidden>↗</span>
+      </UnstyledButton>
+    </Tooltip>
   );
 }
