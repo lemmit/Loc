@@ -180,8 +180,29 @@ const REGISTER_FILE = path.join(srcRoot, "diagnostics", "unsupported-register.ts
  *  exposure only.  Draining it is M-T3.8 phases 2-4 -- route `sensitivity`
  *  through the same response-boundary seam `mask unless` already uses on all
  *  five backends -- which deletes the row, the check module, and lowers this
- *  back to 46. */
-const MAX_OPEN_GAPS = 47;
+ *  back to 46.
+ *
+ *  47 → 46: `loom.seed-event-sourced-unsupported` DRAINS (M-T6.52, Wave 2
+ *  packet 2.5).  A shared seeder model (`src/generator/_persistence/
+ *  seed-datasets.ts`'s `seederAggregate`/`seederAggregates`) now derives one
+ *  aggregate's create-call shape ONCE — the event-sourced `create` action's
+ *  OWN declared params, not `forCreateInput(agg.fields)` — and all five
+ *  backends read it: elixir appends the creation event through the SAME
+ *  `create_<agg>/1` command seam an ordinary create request uses (not a
+ *  repository `insert/1`, which an event-sourced aggregate never had); java
+ *  and .NET build the `create(...)` call from that shared param list instead
+ *  of the full field set, closing the param-count/name mismatch
+ *  (`Account.create("seeded-alice", null)` against `create(String owner)`).
+ *  The row does not merely drain to zero — it SPLITS into two permanent,
+ *  non-gap validation rules (sibling to `loom.seed-raw-document-shape` /
+ *  `loom.seed-abstract-aggregate`, so neither carries a register row of its
+ *  own): `loom.seed-raw-eventsourced` (an event-sourced aggregate's table is
+ *  its `<agg>_events` stream, which a raw column INSERT cannot target) and
+ *  `loom.seed-eventsourced-no-create` (zero `create` actions is a legitimate
+ *  event-sourced shape, but then there is no creation event for a seed row to
+ *  append — the same silent-shrink hazard the mission closed for every other
+ *  crossing). */
+const MAX_OPEN_GAPS = 46;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

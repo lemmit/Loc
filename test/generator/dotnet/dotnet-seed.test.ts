@@ -125,6 +125,39 @@ describe("dotnet database seeding (Phase 3a, domain path)", () => {
   });
 });
 
+describe("dotnet seeding — event-sourced aggregate (M-T6.52)", () => {
+  // `owner` is the create action's ONLY param; `balance` is a real aggregate
+  // FIELD folded by the applier, not a create param.  The OLD emitter built
+  // this call from `createInputFields(agg)` (the full field set: owner AND
+  // balance), positionally against `Create(string owner)` — CS1501 "no
+  // overload takes 2 arguments".
+  const ES = `system EsSeed {
+    subdomain Bank { context Bank {
+      event Opened { account: Account id, owner: string }
+      aggregate Account persistedAs: eventLog {
+        owner: string
+        balance: int
+        create open(owner: string) { emit Opened { account: id, owner: owner } }
+        apply(e: Opened) { owner := e.owner  balance := 0 }
+      }
+      repository Accounts for Account { }
+      seed default { Account { owner: "seeded-alice" } }
+    } }
+    api A from Bank
+    storage primary { type: postgres }
+    resource bankLog { for: Bank, kind: eventLog, use: primary }
+    deployable api { platform: dotnet contexts: [Bank] dataSources: [bankLog] serves: A port: 8080 }
+  }`;
+
+  it("builds the Create(...) call from the create action's OWN params, not every field", async () => {
+    const seed = find(await build(ES), /Seed\.cs$/);
+    expect(seed).toContain('Account.Create(owner: "seeded-alice")');
+    expect(seed).not.toContain("balance:");
+    expect(seed).toContain("sp.GetRequiredService<IAccountRepository>()");
+    expect(seed).toContain("await accountRepo.SaveAsync(");
+  });
+});
+
 describe("dotnet seeding — raw explicit-id path", () => {
   const RAW = `system S {
     subdomain Sales { context Sales {

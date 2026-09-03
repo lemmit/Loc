@@ -1129,11 +1129,18 @@ system P {
     repoOnly(`    aggregate Article shape: document, with crudish { title: string }
     repository Articles for Article { }
     seed wired raw { Article { id: "11111111-1111-1111-1111-111111111111", title: "Anchor" } }`),
-  "loom.seed-event-sourced-unsupported":
-    repoOnly(`    event Opened { account: Account id, owner: string }
+  "loom.seed-raw-eventsourced": repoOnly(`    event Opened { account: Account id, owner: string }
     aggregate Account persistedAs: eventLog {
       owner: string
       create open(owner: string) { emit Opened { account: id, owner: owner } }
+      apply(e: Opened) { owner := e.owner }
+    }
+    repository Accounts for Account { }
+    seed wired raw { Account { id: "11111111-1111-1111-1111-111111111111", owner: "seeded-alice" } }`),
+  "loom.seed-eventsourced-no-create":
+    repoOnly(`    event Opened { account: Account id, owner: string }
+    aggregate Account persistedAs: eventLog {
+      owner: string
       apply(e: Opened) { owner := e.owner }
     }
     repository Accounts for Account { }

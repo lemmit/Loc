@@ -278,3 +278,38 @@ describe("Hono seeding — the raw INSERT is schema-qualified", () => {
     expect(find(files, /migrations\/.*\.sql$/)).toContain('"sales"."customers"');
   });
 });
+
+describe("Hono seeding — event-sourced aggregate (M-T6.52)", () => {
+  // `owner` is the create action's ONLY param; `balance` is a real aggregate
+  // FIELD folded by the applier, not a create param — the shared seeder model
+  // must build the call from the former, not the latter.
+  const ES = `system EsSeed {
+    subdomain Bank { context Bank {
+      event Opened { account: Account id, owner: string }
+      aggregate Account persistedAs: eventLog {
+        owner: string
+        balance: int
+        create open(owner: string) { emit Opened { account: id, owner: owner } }
+        apply(e: Opened) { owner := e.owner  balance := 0 }
+      }
+      repository Accounts for Account { }
+      seed default { Account { owner: "seeded-alice" } }
+    } }
+    api A from Bank
+    storage primary { type: postgres }
+    resource bankLog { for: Bank, kind: eventLog, use: primary }
+    deployable api { platform: node contexts: [Bank] dataSources: [bankLog] serves: A port: 3000 }
+  }`;
+
+  it("appends the creation event through the domain create + repository save", async () => {
+    const { model, errors } = await parseString(ES);
+    if (errors.length) throw new Error(errors.join("\n"));
+    const seed = find(generateSystems(model).files, /\/db\/seed\.ts$/);
+    // The object-literal create call carries ONLY the create action's own
+    // param (`owner`) — never `balance`, which forCreateInput(agg.fields)
+    // would have included.
+    expect(seed).toContain('Account.create({ owner: "seeded-alice" })');
+    expect(seed).not.toContain("balance:");
+    expect(seed).toContain("await accountRepo.save(");
+  });
+});

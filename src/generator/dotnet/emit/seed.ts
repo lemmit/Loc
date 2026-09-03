@@ -23,16 +23,16 @@
 // Cross-row references use explicit ids per D-SEED-XREF (an `@handle`
 // indirection was considered and not adopted).
 
-import { createInputFields, createOmissionValue } from "../../../ir/enrich/wire-projection.js";
-import type {
-  EnrichedAggregateIR,
-  EnrichedBoundedContextIR,
-  SeedRowIR,
-  TypeIR,
-} from "../../../ir/types/loom-ir.js";
+import type { EnrichedBoundedContextIR, SeedRowIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../../util/naming.js";
-import { type Entry, groupByDataset } from "../../_persistence/seed-datasets.js";
+import {
+  type Entry,
+  groupByDataset,
+  type SeederAggregate,
+  type SeederCreateParam,
+  seederAggregates,
+} from "../../_persistence/seed-datasets.js";
 import { renderSeedRowInsert } from "../../sql-pg.js";
 import { renderCsExpr } from "../render-expr.js";
 
@@ -56,9 +56,12 @@ export function emitDotnetSeeds(
   const datasets = groupByDataset(ctx);
   if (datasets.length === 0) return;
 
-  const aggByName = new Map<string, EnrichedAggregateIR>(
-    ctx.aggregates.filter((a) => !a.isAbstract).map((a) => [a.name, a]),
-  );
+  // The shared seeder model (M-T6.52): which aggregates are seedable, and
+  // each one's ordered create-call parameters — the aggregate's full
+  // create-input set for a state aggregate, or the event-sourced `create`
+  // action's OWN declared params for an event-sourced one (`renderArgs`
+  // below no longer re-derives that distinction itself).
+  const aggByName = seederAggregates(ctx);
 
   const fnBlocks: string[] = [];
   const callLines: string[] = [];
@@ -84,7 +87,7 @@ export function emitDotnetSeeds(
 function renderDatasetFn(
   dataset: string,
   entries: Entry[],
-  aggByName: Map<string, EnrichedAggregateIR>,
+  aggByName: Map<string, SeederAggregate>,
   dapper: boolean,
   schemaFor: (aggName: string) => string | undefined,
 ): string {
@@ -129,22 +132,25 @@ function renderDatasetFn(
   );
 }
 
-/** Named `Create(…)` args over the aggregate's full create-input set (the
- *  factory's parameters).  A seed row typically specifies only a subset, so
- *  every create input the row omits is still supplied — provided fields from
- *  the row, omitted ones via their omission value (optional → `null`, bare
- *  bool → `false`, `= default` → the default literal).  Named args keep the
- *  call order-free and cover every required parameter (else CS7036).  Mirrors
- *  the workflow factory-let path in `workflow-emit.ts`. */
-function renderArgs(row: SeedRowIR, agg: EnrichedAggregateIR): string {
+/** Named `Create(…)` args over the aggregate's create-call parameters (the
+ *  shared seeder model's `createParams` — the full create-input set for a
+ *  state aggregate, or the event-sourced `create` action's OWN declared
+ *  params for an event-sourced one; M-T6.52).  A seed row typically
+ *  specifies only a subset, so every param the row omits is still supplied
+ *  — provided fields from the row, omitted ones via their omission value
+ *  (optional → `null`, bare bool → `false`, `= default` → the default
+ *  literal).  Named args keep the call order-free and cover every required
+ *  parameter (else CS7036).  Mirrors the workflow factory-let path in
+ *  `workflow-emit.ts`. */
+function renderArgs(row: SeedRowIR, agg: SeederAggregate): string {
   const byName = new Map(row.fields.map((f) => [f.name, f.value]));
-  const args = createInputFields(agg).map((f) => {
-    const provided = byName.get(f.name);
+  const args = agg.createParams.map((p) => {
+    const provided = byName.get(p.name);
     const value =
       provided !== undefined
-        ? coerceSeedValue(f.type, renderCsExpr(provided))
-        : renderCsOmission(createOmissionValue(f));
-    return `${f.name}: ${value}`;
+        ? coerceSeedValue(p.type, renderCsExpr(provided))
+        : renderCsOmission(p.omission);
+    return `${p.name}: ${value}`;
   });
   return args.join(", ");
 }
@@ -160,9 +166,9 @@ function coerceSeedValue(type: TypeIR, rendered: string): string {
   return rendered;
 }
 
-/** Render the omission value of a create-input field the seed row left unset
- *  into the C# its named `Create(...)` argument passes. */
-function renderCsOmission(v: ReturnType<typeof createOmissionValue>): string {
+/** Render the omission value of a create-call parameter the seed row left
+ *  unset into the C# its named `Create(...)` argument passes. */
+function renderCsOmission(v: SeederCreateParam["omission"]): string {
   switch (v.kind) {
     case "default":
       return renderCsExpr(v.expr);
