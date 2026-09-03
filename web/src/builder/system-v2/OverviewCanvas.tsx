@@ -28,6 +28,7 @@ import "@xyflow/react/dist/style.css";
 import { Box, Button, Group, MultiSelect, ScrollArea, Stack, Text, TextInput } from "@mantine/core";
 import type { AstNode } from "langium";
 import type { LayoutCtx } from "../../layout/ctx";
+import { MODEL_EMPTY } from "../../layout/vocabulary";
 import type { Diagnostic } from "../../lsp/protocol";
 import type { WireField } from "../../../../src/ir/types/loom-ir.js";
 import { enrichLoomModel } from "../../../../src/ir/enrich/enrichments.js";
@@ -556,7 +557,7 @@ export default function OverviewCanvas({ ctx, onClose, onOpen }: {
               style={{ position: "absolute", top: 12, left: 12, zIndex: 5 }}
               data-testid="c4system-v2-overview-empty"
             >
-              No structural model found. Declare a system with modules / aggregates to see the graph.
+              {MODEL_EMPTY.overview}
             </Text>
           )}
         </Box>
@@ -573,8 +574,7 @@ export default function OverviewCanvas({ ctx, onClose, onOpen }: {
         >
           {!selected ? (
             <Text size="xs" c="dimmed">
-              Select a construct to read its detail. Editing lives in the drill-down — `Open ↳` (or a
-              double-click) jumps there.
+              {MODEL_EMPTY.select}
             </Text>
           ) : (
             <Stack gap="xs" style={{ flex: 1, minHeight: 0 }}>
