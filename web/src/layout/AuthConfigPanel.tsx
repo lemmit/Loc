@@ -92,8 +92,3 @@ function validate(cfg: AuthStubConfig): ParseState {
   return { kind: "ok" };
 }
 
-/** A status dot for the dock tab — green when an identity is actively
- *  injected, gray otherwise. */
-export function authStubDot(ctx: LayoutCtx): "green" | null {
-  return devClaimsHeader(ctx.authStub) ? "green" : null;
-}

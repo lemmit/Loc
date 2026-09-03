@@ -28,15 +28,6 @@ import type { LayoutCtx } from "./ctx";
 // (c) an on-demand provenance snapshot capture (`ddd snapshot`).  Every diff
 // rides a shipped pure core in the build worker — the same ones the CLI runs.
 
-/** Dot for the dock tab strip: red on any breaking change, yellow when there
- *  are non-breaking changes, else none. */
-export function migrationsDot(ctx: LayoutCtx): "red" | "yellow" | null {
-  const e = ctx.evolution;
-  if (!e || !e.ok) return null;
-  if (e.breaking) return "red";
-  return e.migrations.length > 0 || e.wireChanges.length > 0 ? "yellow" : null;
-}
-
 export function MigrationsBody({
   ctx,
   active = true,
