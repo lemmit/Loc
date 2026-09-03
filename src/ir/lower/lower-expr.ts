@@ -72,6 +72,7 @@ import { durationUnitOf } from "../../util/temporal.js";
 import { findVerb, type ResourceVerbDef } from "../resource-verbs.js";
 import { variantTag } from "../stdlib/unions.js";
 import type {
+  BinOp,
   ExprIR,
   IdValueType,
   PathIR,
@@ -241,6 +242,9 @@ function promoteMoneyOperands(
  *  money / literal promotion (mirrors the validator) and produces a
  *  binary IR node with its metadata fully populated. */
 function lowerBinaryChain(chain: BinaryChain, env: Env): ExprIR {
+  // `??` is its own precedence band (`CoalesceExpr`), so a chain carrying it
+  // carries NOTHING else — desugar the whole chain before the arithmetic fold.
+  if (chain.ops[0] === "??") return lowerCoalesceChain(chain, env);
   let acc = lowerExpr(chain.head, env);
   let accType = inferExprType(chain.head, env);
   // Only the head operand corresponds to a single AST node usable for
@@ -249,7 +253,11 @@ function lowerBinaryChain(chain: BinaryChain, env: Env): ExprIR {
   // backing AST literal — so subsequent steps only promote the rhs.
   let headExprForPromotion: Expression | undefined = chain.head;
   for (let i = 0; i < chain.ops.length; i++) {
-    const op = chain.ops[i]!;
+    // Narrowing, not widening: `??` is the one grammar operator with no `BinOp`
+    // counterpart, and `lowerCoalesceChain` above has already claimed every
+    // chain that carries it (the band is homogeneous), so nothing reaching this
+    // fold can be `??`.
+    const op = chain.ops[i]! as BinOp;
     const rhsExpr = chain.rest[i]!;
     let rhsIR = lowerExpr(rhsExpr, env);
     let rhsType = inferExprType(rhsExpr, env);
@@ -281,6 +289,54 @@ function lowerBinaryChain(chain: BinaryChain, env: Env): ExprIR {
     // After the first fold-step the lhs is a synthetic node — no AST
     // literal to promote on the next step.
     headExprForPromotion = undefined;
+  }
+  return acc;
+}
+
+/**
+ * Desugar a nullish-coalescing chain (`a ?? b ?? c`) into the existing
+ * `ternary` IR — the whole reason `??` needs NO backend or frontend work:
+ *
+ *     a ?? b        →  a == null ? b : a
+ *     a ?? b ?? c   →  a == null ? (b == null ? c : b) : a
+ *
+ * RIGHT-associative, like every other language's `??`, so the fold runs from
+ * the tail inwards.  The `cond` is a real `binary "=="` against the `null`
+ * literal, which every backend's `ExprTarget` already renders with its own
+ * null spelling (`=== null` / `is null` / `is_nil` / `== nil` / `== null`),
+ * and each frontend renders it in a page body the same way.
+ *
+ * NOTE — the left operand is rendered TWICE (once in the test, once as the
+ * value).  That is invisible for the reads `??` is actually written on (a
+ * field, a param, a let-binding); it is why an effectful left operand — a
+ * repository read, an operation call — should be bound with `let` first.
+ * Documented in `docs/language.md`; deliberately not gated, since the IR has
+ * no expression-level binding form to lower into.
+ */
+function lowerCoalesceChain(chain: BinaryChain, env: Env): ExprIR {
+  const operands = [chain.head, ...chain.rest];
+  let acc = lowerExpr(operands[operands.length - 1]!, env);
+  for (let i = operands.length - 2; i >= 0; i--) {
+    const left = lowerExpr(operands[i]!, env);
+    const leftType = inferExprType(operands[i]!, env);
+    acc = {
+      kind: "ternary",
+      cond: {
+        kind: "binary",
+        op: "==",
+        left,
+        right: lit("null", "null"),
+        leftType,
+        // The null literal's own inferred type — `inferExprType` types a bare
+        // `null` as `string` (see its `isNullLit` arm), and an `x == null`
+        // written by hand lowers with exactly this pair.
+        rightType: { kind: "primitive", name: "string" },
+        resultType: { kind: "primitive", name: "bool" },
+      },
+      // biome-ignore lint/suspicious/noThenProperty: the ternary IR node's branch field is named `then` across the IR
+      then: acc,
+      otherwise: left,
+    };
   }
   return acc;
 }
@@ -1897,6 +1953,15 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     return inferExprType(expr.operand, env);
   }
   if (isBinaryChain(expr)) {
+    // `??` short-circuits the fold: the value is the LAST operand's type when
+    // every earlier one is optional, so take the first operand type with its
+    // `optional` wrapper stripped — `due ?? fallback` on a `datetime?` is a
+    // `datetime`.  Mirrors `lowerCoalesceChain`, which produces exactly that
+    // ternary.
+    if (expr.ops[0] === "??") {
+      const head = inferExprType(expr.head, env);
+      return head.kind === "optional" ? head.inner : head;
+    }
     // Left-fold the chain's operator types, mirroring lowerBinaryChain.
     // Any boolean-typed op short-circuits the whole chain — once you
     // see a logical / comparison op the result is bool regardless of

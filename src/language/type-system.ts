@@ -687,6 +687,16 @@ function typeOfExpr(expr: Expression | undefined, env: Env): DddType {
     // Left-fold: comparison / logical ops produce bool (short-circuit
     // the chain — the chain is homogeneous-op per precedence level, so
     // a single bool-result op makes the entire chain bool).
+    // `??` is its own band, so a chain carrying it carries nothing else: the
+    // result is the head's type with the `optional` stripped (the whole point
+    // of the operator), joined with the fallback so `x ?? 0` on an `int?`
+    // still types `int`.  Mirrors `lowerCoalesceChain` / `inferExprType`.
+    if (expr.ops[0] === "??") {
+      const head = typeOf(expr.head, env);
+      const bare = head.kind === "optional" ? head.inner : head;
+      const fallback = typeOf(expr.rest[expr.rest.length - 1]!, env);
+      return ternaryJoin(bare, fallback) ?? bare;
+    }
     let acc = typeOf(expr.head, env);
     for (let i = 0; i < expr.ops.length; i++) {
       const op = expr.ops[i]!;

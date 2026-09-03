@@ -7,7 +7,7 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { escapeTsIdent } from "../../util/naming.js";
-import { collectLeaves, provTempNames, wrapProvCapture } from "../_stmt/leaves.js";
+import { collectLeaves, indentNested, provTempNames, wrapProvCapture } from "../_stmt/leaves.js";
 import { renderStmtChunksWith, renderStmtsWith, type StmtTarget } from "../_stmt/target.js";
 import type { ChunkMark } from "../_trace/sourcemap.js";
 import { renderTsExpr, renderTsExprWithMarks } from "./render-expr.js";
@@ -216,6 +216,16 @@ function tsStmtTarget(emitProvenance: boolean, traceCtx: TraceCtx): StmtTarget {
     },
 
     expression: (s) => `${INDENT}${renderTsExpr(s.expr)};`,
+
+    // `if (<cond>) { … } else { … }` — the branch bodies arrive rendered at
+    // this table's own INDENT, so they shift one level here.  An empty branch
+    // still emits its braces (`if (c) {\n}`), which is valid TS and keeps the
+    // statement's line span honest for the sourcemap.
+    if: (s, _ix, thenSrc, elseSrc) => {
+      const head = `${INDENT}if (${renderTsExpr(s.cond)}) {\n${indentNested(thenSrc, "  ")}\n${INDENT}}`;
+      if (elseSrc === undefined) return head;
+      return `${head} else {\n${indentNested(elseSrc, "  ")}\n${INDENT}}`;
+    },
 
     return: (s) => {
       // Tag the returned value with its union variant on the wire (producer):

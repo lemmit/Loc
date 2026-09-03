@@ -1,6 +1,6 @@
 import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
 import { escapePythonIdent, snake } from "../../util/naming.js";
-import { collectLeaves, provTempNames, wrapProvCapture } from "../_stmt/leaves.js";
+import { collectLeaves, indentNested, provTempNames, wrapProvCapture } from "../_stmt/leaves.js";
 import { renderStmtChunksWith, renderStmtsWith, type StmtTarget } from "../_stmt/target.js";
 import { renderPyExpr, renderPyNegatedGuard } from "./render-expr.js";
 
@@ -214,6 +214,17 @@ function pyStmtTarget(i: string, ctx: PyStmtCtx): StmtTarget {
     },
 
     expression: (s) => `${i}${renderPyExpr(s.expr)}`,
+
+    // `if <cond>:` / `else:` — Python's indentation is STRUCTURAL, so the
+    // branch bodies (rendered by the spine at this table's own `i`) are shifted
+    // one level here.  An empty branch needs a `pass`: the grammar admits `if c
+    // { }`, and an empty suite is a syntax error.
+    if: (s, _ix, thenSrc, elseSrc) => {
+      const body = (src: string): string => (src === "" ? `${sub}pass` : indentNested(src, "    "));
+      const head = [`${i}if ${renderPyExpr(s.cond)}:`, body(thenSrc)].join("\n");
+      if (elseSrc === undefined) return head;
+      return [head, `${i}else:`, body(elseSrc)].join("\n");
+    },
 
     return: (s) => {
       // Tagged union returns get their proper variant classes in S12;

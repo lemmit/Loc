@@ -54,6 +54,15 @@ export function printStmt(node: Statement): string {
       if ((node.elseBody ?? []).length === 0) return head;
       return stmtBlock(`${head} else`, node.elseBody);
     }
+    case "IfStmt": {
+      const head = stmtBlock(`if ${printExpr(node.cond)}`, node.thenBody);
+      // `else if` prints as a chain, not as a nested block — the grammar's
+      // `elseIf` field IS the next `IfStmt`, so printing it recursively
+      // reproduces the source shape (`} else if c { … } else { … }`).
+      if (node.elseIf) return `${head} else ${printStmt(node.elseIf)}`;
+      if ((node.elseBody ?? []).length === 0) return head;
+      return stmtBlock(`${head} else`, node.elseBody);
+    }
     case "ReturnStmt":
       return `return ${printExpr(node.value)}`;
     case "MatchStmt": {

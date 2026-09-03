@@ -1949,7 +1949,7 @@ CommonSoftKeywords returns string:
       'action' | 'asc' | 'body' | 'by' | 'canonical' | 'channels' | 'command' | 'config' | 'connection'
       | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog'
       | 'every' | 'favicon' | 'filter' | 'group' | 'handle' | 'immutable' | 'implements' | 'instance' | 'internal'
-      | 'isolationLevel' | 'join' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'mailer' | 'managed' | 'message' | 'migration' | 'money'
+      | 'isolationLevel' | 'join' | 'key' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'mailer' | 'managed' | 'message' | 'migration' | 'money'
       | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query'
       | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema'
       | 'secret' | 'select' | 'service' | 'snapshot' | 'sort' | 'sql' | 'stamp' | 'state' | 'store' | 'tablePrefix'
@@ -2076,7 +2076,10 @@ Statement:
   | LetStmt
   | EmitStmt
   | ForStmt
+  // `if let` FIRST: both start with `if`, and only `if let` can have `let`
+  // (a hard keyword, never the start of an expression) as its second token.
   | IfLetStmt
+  | IfStmt
   | ReturnStmt
   // A `match SUBJECT { Variant b => <stmts> }` used for its EFFECTS — the
   // statement form of the match, whose arms run statements (`state := …`,
@@ -2115,6 +2118,24 @@ IfLetStmt:
     '}' ('else' '{'
         elseBody+=Statement*
     '}')?;
+
+// `if <cond> { … } else { … }` — the plain conditional statement.  Distinct
+// from `if let` (which BINDS an optional retrieval result) and from the
+// effect-form `match` (which discriminates a union): this one branches on a
+// boolean, the shape every imperative body needs and the one an author reaches
+// for first.  `else if` chains through `elseIf` (an `IfStmt` of its own), so
+// `if a { } else if b { } else { }` parses without parenthesising.
+//
+// `cond` is `CondExpr`, NOT the full `Expression` — see that rule: a full
+// expression would let `BuilderCall` (`Name { … }`) swallow the `if`'s own
+// body block, exactly as it would for `for`'s iterable and `match`'s subject.
+IfStmt:
+    'if' cond=CondExpr '{'
+        thenBody+=Statement*
+    '}' ('else' (
+        elseIf=IfStmt
+      | '{' elseBody+=Statement* '}'
+    ))?;
 
 // `return <expr>` — an operation's designed-in outcome.  Produces the
 // operation's declared `or`-union return value; the route translates an
@@ -2285,9 +2306,22 @@ RetrievalLiteral:
     '}';
 
 TernaryExpr infers Expression:
-    OrExpr (
+    CoalesceExpr (
         {infer TernaryExpr.cond=current} '?' thenExpr=Expression ':' elseExpr=Expression
     )?;
+
+// `a ?? b` — nullish coalescing: the left operand unless it is null, else the
+// right one.  Its own precedence band, binding LOOSER than `||` and TIGHTER
+// than `?:`, so `x ?? y || z` is `x ?? (y || z)` and `a ?? b ? c : d` is
+// `(a ?? b) ? c : d`.  It is pure SUGAR: `lowerBinaryChain` rewrites it to the
+// existing `ternary` IR (`a == null ? b : a`), right-associatively, so no
+// backend or frontend renderer learns a new node — the operator works
+// everywhere an expression does (operation bodies, page bodies, derived
+// props, …).  It reuses `BinaryChain` (rather than minting an AST type) for
+// the same reason every other band does: the printer, the round-trip and the
+// operand walkers already handle that shape.
+CoalesceExpr infers Expression:
+    OrExpr ({infer BinaryChain.head=current} (ops+='??' rest+=OrExpr)+)?;
 
 OrExpr infers Expression:
     AndExpr ({infer BinaryChain.head=current} (ops+='||' rest+=AndExpr)+)?;
@@ -2320,6 +2354,66 @@ PostfixExpr infers Expression:
     // discriminator/flat-list, not a recursive action) so it never alters the
     // existing PostfixChain shape for callers that ignore it.
     PrimaryExpr ({infer PostfixChain.head=current} suffixes+=PostfixSuffix+ IgnoringClause?)?;
+
+// ---------------------------------------------------------------------------
+// The `if`-condition ladder — the SAME precedence chain as `TernaryExpr` …
+// `PrimaryExpr` above, minus the three `{`-opening primaries (`BuilderCall`,
+// `ObjectLit`, `MatchExpr`) and the ternary / `??` bands.
+//
+// WHY a parallel ladder: the statement is `if <cond> '{' …`, and
+// `BuilderCall` is `ID '{' … '}'`.  With the full `Expression` the parser
+// commits to `BuilderCall` on `if isActive {` and swallows the `if`'s own
+// body block — the same trap `ForIterable`, `MatchScrutinee` and
+// `CorrelationExpr` each side-step by restricting their expression, and one
+// Langium's grammar language cannot express any other way (it has no
+// syntactic predicate — see `soft-keyword-colon-guard.ts` for the same
+// finding).  Every rule `infers Expression` and reuses the SAME inferred
+// action types (`BinaryChain` / `UnaryExpr` / `PostfixChain`) as the main
+// ladder, so this adds NO AST type: lowering, printing and every expression
+// walker see exactly the nodes they already handle.
+//
+// A `{`-opening or ternary form is still reachable in a condition — wrap it in
+// parentheses (`if (a ?? b) { … }`), since `ParenExpr` re-enters the full
+// `Expression`.
+CondExpr infers Expression:
+    CondOrExpr;
+
+CondOrExpr infers Expression:
+    CondAndExpr ({infer BinaryChain.head=current} (ops+='||' rest+=CondAndExpr)+)?;
+
+CondAndExpr infers Expression:
+    CondEqualityExpr ({infer BinaryChain.head=current} (ops+='&&' rest+=CondEqualityExpr)+)?;
+
+CondEqualityExpr infers Expression:
+    CondComparisonExpr ({infer BinaryChain.head=current} (ops+=('=='|'!=') rest+=CondComparisonExpr)+)?;
+
+CondComparisonExpr infers Expression:
+    CondAdditiveExpr ({infer BinaryChain.head=current} (ops+=('<='|'>='|'<'|'>') rest+=CondAdditiveExpr)+)?;
+
+CondAdditiveExpr infers Expression:
+    CondMultiplicativeExpr ({infer BinaryChain.head=current} (ops+=('+'|'-') rest+=CondMultiplicativeExpr)+)?;
+
+CondMultiplicativeExpr infers Expression:
+    CondUnaryExpr ({infer BinaryChain.head=current} (ops+=('*'|'/'|'%') rest+=CondUnaryExpr)+)?;
+
+CondUnaryExpr infers Expression:
+    {infer UnaryExpr} op=('!'|'-') operand=CondPostfixExpr
+  | CondPostfixExpr;
+
+CondPostfixExpr infers Expression:
+    CondPrimaryExpr ({infer PostfixChain.head=current} suffixes+=PostfixSuffix+ IgnoringClause?)?;
+
+CondPrimaryExpr infers Expression:
+      ParenExpr
+    | ListLit
+    | TemplateString
+    | LiteralExpr
+    | MoneyLit
+    | PrimitiveConversion
+    | NowExpr
+    | ThisRef
+    | IdRef
+    | NameRef;
 
 PostfixSuffix:
       {infer MemberSuffix} '.' member=MemberName

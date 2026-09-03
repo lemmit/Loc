@@ -147,8 +147,9 @@ export function walkExprChildren(e: ExprIR, v: ExprChildVisitor): void {
  * Visit the immediate child *expressions* of an operation-body statement — one
  * level only.  Almost every `StmtIR` kind carries only expression children (a
  * nested lambda block is reached by descending into the child expression, not
- * here); the exception is `variant-match`, whose arm/else bodies nest further
- * statements — those are delivered through the optional `nestedStmt` channel.
+ * here); the exceptions are `variant-match` (arm / else bodies) and `if`
+ * (then / else bodies), which nest further statements — those are delivered
+ * through the optional `nestedStmt` channel.
  * Exhaustive + `never`-checked.
  */
 export function walkStmtChildren(
@@ -178,6 +179,11 @@ export function walkStmtChildren(
     case "variant-match":
       visit(s.subject);
       for (const a of s.arms) for (const st of a.body) nestedStmt?.(st);
+      for (const st of s.elseBody ?? []) nestedStmt?.(st);
+      break;
+    case "if":
+      visit(s.cond);
+      for (const st of s.thenBody) nestedStmt?.(st);
       for (const st of s.elseBody ?? []) nestedStmt?.(st);
       break;
     default: {
