@@ -41,6 +41,7 @@ import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/nami
 import { PROVENANCE_LINEAGE_FIELD } from "../_payload/provenanced-wire.js";
 import { localizedNamedValue, localizedPositionalTranslation } from "../_walker/i18n-emit.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
+import type { WalkContext } from "../_walker/walker-core.js";
 import { emitExpr, testidAttr, walk } from "../_walker/walker-core.js";
 import { opActionGate } from "./auth-gate.js";
 import {
@@ -98,6 +99,50 @@ function formOfAggregate(
 ): AggregateIR | undefined {
   const ofArg = namedArg(call, "of");
   return ofArg?.kind === "ref" ? ctx.aggregatesByName.get(ofArg.name) : undefined;
+}
+
+/** The Dart expression addressing the record a by-name op form mutates: the
+ *  page's route `id`, which the shell binds under `usesRouteId`. */
+function routeIdArg(ctx: WalkContext): string {
+  ctx.usesRouteId = true;
+  return "id";
+}
+
+/** Resolve the INSTANCE-QUALIFIED `OperationForm(<instance>.<op>)` shape — the
+ *  one `scaffoldOperations` emits inside a Detail page's QueryView `data:`
+ *  lambda, and the one Flutter used to decline outright.
+ *
+ *  Same resolution the shared walker's `emitFormOfOperation` does: the receiver
+ *  is a `ref` bound in `ctx.paramTypes` (the page-body IR carries no usable
+ *  `receiverType`, so the lambda-param map is the only source of truth).  The id
+ *  mirrors it too — a FUNCTION-TOP param (a component prop) addresses itself
+ *  (`<instance>.id`); a render-lambda binding is not in scope where the widget
+ *  is constructed, so it falls back to the route id. */
+function instanceOperation(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+): { agg: AggregateIR; op: AggregateIR["operations"][number]; idExpr: string } | undefined {
+  const argNames = call.argNames ?? [];
+  const inst = (call.args ?? []).find((_, i) => !argNames[i]);
+  if (inst?.kind !== "member" || inst.receiver.kind !== "ref") return undefined;
+  const aggName = ctx.paramTypes?.get(inst.receiver.name);
+  const agg = aggName ? ctx.aggregatesByName.get(aggName) : undefined;
+  const op = agg?.operations.find((o) => o.name === inst.member && o.visibility === "public");
+  if (!agg || !op) return undefined;
+  const idExpr = ctx.paramNames.has(inst.receiver.name)
+    ? `${emitExpr(inst.receiver, ctx)}.id`
+    : routeIdArg(ctx);
+  return { agg, op, idExpr };
+}
+
+/** The op-form widget reference for an instance-qualified `OperationForm`, or
+ *  `undefined` when the instance does not resolve. */
+function instanceOpFormWidget(
+  call: ExprIR & { kind: "call" },
+  ctx: WalkContext,
+): string | undefined {
+  const r = instanceOperation(call, ctx);
+  return r ? `${operationFormWidgetName(r.agg.name, r.op.name)}(id: ${r.idExpr})` : undefined;
 }
 
 /** A route template (`/products/:id`) → a Dart string with `:param` segments
@@ -499,23 +544,25 @@ export const flutterTarget: WalkerTarget = {
     const ofArg = namedArg(call, "of");
     const opArg = namedArg(call, "op");
     if (ofArg?.kind !== "ref" || opArg?.kind !== "ref") {
-      // The INSTANCE-QUALIFIED shape (`OperationForm(<binding>.<op>)`) has no
-      // Flutter arm yet — `forms-emit.ts` builds an `<Op><Agg>Form` widget only
-      // for the by-name shape, so resolving it here would reference a widget
-      // nothing emits (`flutter-modal-instance-operationform`).
-      //
-      // DECLINE it explicitly rather than returning `null`: a null falls
-      // through to the SHARED walker, whose op-form path renders
-      // `primitive-modal`, which this procedural pack does not implement — and
-      // the pack's missing-renderer fallback is a Dart LINE comment, illegal in
-      // the expression position the slot occupies.  A `renderComment` is
-      // syntactically inert (`const SizedBox.shrink() /* … */`) and visible.
+      // The INSTANCE-QUALIFIED shape (`OperationForm(<binding>.<op>)`) — what
+      // `scaffoldOperations` emits inside a Detail page's QueryView `data:`
+      // lambda, i.e. EVERY scaffolded write action.
+      const inline = instanceOpFormWidget(call, ctx);
+      if (inline) return inline;
+      // Unresolvable instance shape → DECLINE explicitly rather than returning
+      // `null`: a null falls through to the SHARED walker, whose op-form path
+      // renders `primitive-modal`, which this procedural pack does not
+      // implement — and the pack's missing-renderer fallback is a Dart LINE
+      // comment, illegal in the expression position the slot occupies.  A
+      // `renderComment` is syntactically inert (`const SizedBox.shrink() /* … */`)
+      // and visible.
       const inst = (call.args ?? []).find((_, i) => !(call.argNames ?? [])[i]);
       if (inst?.kind === "member") {
         return flutterTarget.renderComment(
           `OperationForm(${inst.receiver.kind === "ref" ? inst.receiver.name : "?"}.${inst.member}): ` +
-            "the instance-qualified shape is not rendered on Flutter — use " +
-            "OperationForm { of: <Agg>, op: <op> }",
+            "'" +
+            (inst.receiver.kind === "ref" ? inst.receiver.name : "?") +
+            "' is not an in-scope aggregate instance",
         );
       }
       return null;
@@ -615,17 +662,26 @@ export const flutterTarget: WalkerTarget = {
     if (!formChild || trigger?.kind !== "call") return null;
     const ofArg = namedArg(formChild, "of");
     const opArg = namedArg(formChild, "op");
-    const agg = ofArg?.kind === "ref" ? ctx.aggregatesByName.get(ofArg.name) : undefined;
-    const op =
-      opArg?.kind === "ref"
-        ? agg?.operations.find((o) => o.name === opArg.name && o.visibility === "public")
+    // Two child shapes.  BY NAME (`of:`/`op:`) addresses the row through the
+    // page's route id.  INSTANCE-QUALIFIED (`OperationForm { data.<op> }`) is
+    // what `scaffoldOperations` emits inside the Detail QueryView's `data:`
+    // lambda — i.e. EVERY write action on every scaffolded Detail page, which
+    // this renderer used to drop whole as `const SizedBox.shrink() /* Modal: … */`.
+    const byName =
+      ofArg?.kind === "ref" && opArg?.kind === "ref"
+        ? (() => {
+            const a = ctx.aggregatesByName.get(ofArg.name);
+            const o = a?.operations.find((x) => x.name === opArg.name && x.visibility === "public");
+            return a && o ? { agg: a, op: o, idExpr: routeIdArg(ctx) } : undefined;
+          })()
         : undefined;
-    if (!agg || !op) {
+    const resolved = byName ?? instanceOperation(formChild, ctx);
+    if (!resolved) {
       return flutterTarget.renderComment(
         "Modal: OperationForm child must name of: <Agg> and op: <public op>",
       );
     }
-    ctx.usesRouteId = true;
+    const { agg, op } = resolved;
     const widget = operationFormWidgetName(agg.name, op.name);
     // Trigger label — the Button's first positional string literal, else the op.
     const triggerNames = trigger.argNames ?? [];
@@ -650,7 +706,7 @@ export const flutterTarget: WalkerTarget = {
     return (
       `ElevatedButton(onPressed: () => showDialog(context: context, ` +
       `builder: (dialogContext) => AlertDialog(title: Text(${title}), ` +
-      `content: SizedBox(width: double.maxFinite, child: SingleChildScrollView(child: ${widget}(id: id))))), ` +
+      `content: SizedBox(width: double.maxFinite, child: SingleChildScrollView(child: ${widget}(id: ${resolved.idExpr}))))), ` +
       `child: Text(${labelExpr}))`
     );
   },

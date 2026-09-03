@@ -534,19 +534,21 @@ system Shop {
 
   it("records the audit row INSIDE the persist transaction (atomic with the embed re-write)", async () => {
     const facade = file(await generateSystemFiles(DOC_AUDIT), "/shop.ex");
-    // before snapshot captured from the pre-mutation root row (document isDoc form).
-    expect(facade).toContain(
-      "audit_before = Map.merge(%{id: row.id}, (row.data && Map.from_struct(row.data)) || %{})",
-    );
+    // before snapshot captured from the pre-mutation root row, projected through
+    // the shared `Audit.Wire.wire/1` dispatcher — the same `wireShape` body
+    // `GET /carts/{id}` serves.  The old inline `Map.merge(%{id: row.id},
+    // Map.from_struct(row.data))` dumped the embed's SNAKE_CASE struct fields, so
+    // a document aggregate's history disagreed with its own wire and with the
+    // other four backends' snapshots (ledger M-T6.2-s14, document arm).
+    expect(facade).toContain("audit_before = Api.Audit.Wire.wire(row)");
+    expect(facade).not.toContain("Map.merge(%{id: row.id}");
     // persist + audit share one transaction; the embed re-write bumps version.
     expect(facade).toContain("Api.Repo.transaction(fn ->");
     expect(facade).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
     expect(facade).toContain("case Api.Shop.CartRepository.persist_change(changeset) do");
     expect(facade).toContain('operation_id: "touchCart"');
     expect(facade).toContain("before: audit_before");
-    expect(facade).toContain(
-      "after: Map.merge(%{id: saved.id}, (saved.data && Map.from_struct(saved.data)) || %{})",
-    );
+    expect(facade).toContain("after: Api.Audit.Wire.wire(saved)");
     expect(facade).toContain("Api.Repo.rollback(reason)");
   });
 
@@ -657,9 +659,7 @@ system Shop {
     const facade = file(await generateSystemFiles(DOC_AUDIT_RET), "/shop.ex");
     const body = facade.slice(facade.indexOf("def bump_cart(%"));
     // Pre-mutation snapshot, guard hoist, persist + audit in one transaction.
-    expect(body).toContain(
-      "audit_before = Map.merge(%{id: row.id}, (row.data && Map.from_struct(row.data)) || %{})",
-    );
+    expect(body).toContain("audit_before = Api.Audit.Wire.wire(row)");
     expect(body).toContain("with :ok <- ensure(record.total < 10, {:precondition_failed, ");
     expect(body).toContain("Api.Repo.transaction(fn ->");
     expect(body).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");

@@ -11,8 +11,9 @@
 // ---------------------------------------------------------------------------
 
 import { emitsRestCreate } from "../../../../ir/enrich/wire-projection.js";
-import type { AggregateIR, WorkflowIR } from "../../../../ir/types/loom-ir.js";
+import type { AggregateIR, PageIR, WorkflowIR } from "../../../../ir/types/loom-ir.js";
 import { humanize, plural, snake } from "../../../../util/naming.js";
+import { renderGateExpr } from "../../../_frontend/gate-expr.js";
 import { JSX_NAV_LABELS, withNavLabelTokens } from "../../../_frontend/nav-labels.js";
 import {
   jsxChromeAttr as shellChromeAttr,
@@ -103,9 +104,10 @@ export function prepareAppShellVM(
    *  available client-side.  Surfaced verbatim on the VM as `authUi` so the
    *  App-shell template can bind `currentUser = useSession().user` and wrap
    *  menu links that carry a `requiresJs` gate.  The default hardcoded sidebar
-   *  entries (aggregates/workflows) are scaffold pages with no
-   *  `requires`, so they never carry `requiresJs` and stay ungated; only the
-   *  `sidebarOverride` (menu-derived) entries can be gated. */
+   *  entries are gated too, resolved against `uiPages` by route: a scaffolded
+   *  List page CLONES the `find all … requires` gate that guards the very read
+   *  it makes, so "scaffold pages have no `requires`" stopped being true and
+   *  the default sidebar advertised routes the backend refuses (M-T3.15-C3). */
   authUi: boolean = false,
   /** Whether this UI is i18n-enabled (has authored translatable strings).  When
    *  true the shell's baked-in chrome (404 text, skip link) binds through `t()`
@@ -124,6 +126,11 @@ export function prepareAppShellVM(
    *  was actually emitted; the conventional string stays as the fallback for
    *  callers with no ui. */
   pageModules: ReadonlyMap<string, string> = new Map(),
+  /** The ui's ACTUAL pages, so a DEFAULT (non-menu-derived) sidebar entry can
+   *  pick up the `requires` gate of the page it links to.  Resolved by route,
+   *  which is what the entry carries.  Empty for callers with no ui — every
+   *  entry then stays ungated, byte-identical. */
+  uiPages: readonly PageIR[] = [],
 ): AppShellVM {
   /** Where the page filling `slot` actually landed, else the conventional
    *  path. */
@@ -255,15 +262,26 @@ export function prepareAppShellVM(
   // one section, omitted entirely when its entry list is empty.
   const navSections: NavSectionVM[] = [];
 
+  /** The `requiresJs` a default nav entry inherits from the page it links to.
+   *  Same derivation `navEntryForLink` uses for menu-declared links — the two
+   *  sidebar paths must not disagree about which links a principal may see. */
+  const gateForRoute = (route: string): string | undefined => {
+    if (!authUi) return undefined;
+    const page = uiPages.find((p) => p.route === route);
+    return page?.requires ? renderGateExpr(page.requires, "currentUser") : undefined;
+  };
+
   navSections.push({
     label: "Aggregates",
     entries: aggregates.map((a) => {
       const slug = snake(plural(a.name));
+      const requiresJs = gateForRoute(`/${slug}`);
       const entry: NavEntryVM = {
         to: `/${slug}`,
         label: humanize(plural(a.name)),
         testId: `nav-${slug}`,
         activeArgs: JSON.stringify(`/${slug}`),
+        ...(requiresJs ? { requiresJs } : {}),
       };
       return entry;
     }),
@@ -273,19 +291,23 @@ export function prepareAppShellVM(
     const entries: NavEntryVM[] = [];
     // Index link first, exact-match so /workflows/<slug> children
     // don't shadow the parent.
+    const indexGate = gateForRoute("/workflows");
     entries.push({
       to: "/workflows",
       label: "All workflows",
       testId: "nav-workflows",
       activeArgs: `"/workflows", { exact: true }`,
+      ...(indexGate ? { requiresJs: indexGate } : {}),
     });
     for (const wf of workflows) {
       const slug = snake(wf.name);
+      const wfGate = gateForRoute(`/workflows/${slug}`);
       entries.push({
         to: `/workflows/${slug}`,
         label: humanize(wf.name),
         testId: `nav-workflow-${slug}`,
         activeArgs: JSON.stringify(`/workflows/${slug}`),
+        ...(wfGate ? { requiresJs: wfGate } : {}),
       });
     }
     navSections.push({ label: "Workflows", entries });

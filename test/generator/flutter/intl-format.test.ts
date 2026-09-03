@@ -39,11 +39,16 @@ describe("flutter intl formatting", () => {
 
     // Money → NumberFormat.currency (grouping + the currency's own fraction
     // digits when `decimals` is omitted — NOT collapsed to decimalDigits: 0).
-    // The formatted value goes through `LoomMoney.toNum`: a money value is the
-    // wire STRING (M-T1.21) and `NumberFormat.format` takes a `num`, so the
-    // parse happens at the display boundary and only for formatting.
+    // Two things compose here, one from each side of this merge:
+    //  * the null guard (`nullSafe` in `flutter/pack.ts`): the formatted value
+    //    rides the closure param `v`, and the authored expression is what the
+    //    closure is APPLIED to — hence the `.format(v))(<expr>)` shape;
+    //  * M-T1.21: a money value IS the wire STRING, and `NumberFormat.format`
+    //    takes a `num`, so the parse happens at the display boundary only, via
+    //    the total `LoomMoney.toNum`.
+    // The applied expression is therefore the parse, not the bare literal.
     expect(page).toContain(
-      `NumberFormat.currency(symbol: '\${"USD"} ').format(LoomMoney.toNum(1234.5))`,
+      `NumberFormat.currency(symbol: '\${"USD"} ').format(v))(LoomMoney.toNum(1234.5))`,
     );
     // Explicit `decimals` is honoured.
     expect(page).toContain(`NumberFormat.currency(decimalDigits: 0, symbol: '\${"JPY"} ')`);

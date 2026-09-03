@@ -53,6 +53,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { STANDARD_AGG_OPS } from "../_walker/walker-core.js";
 
 // ---------------------------------------------------------------------------
 // Widget-name helpers — the ONE place the view seam and the class emitter agree
@@ -569,7 +570,21 @@ function collectBodyForms(
     seen.add(spec.widgetName);
     out.push(spec);
   };
-  const walk = (e: ExprIR): void => {
+  const pushOp = (agg: EnrichedAggregateIR, opName: string): void => {
+    const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
+    if (op) push(flutterOperationForm(agg.name, op, bcByAggregate.get(agg.name), aggregatesByName));
+  };
+  // Aggregate-typed bindings in scope, so the INSTANCE-QUALIFIED
+  // `OperationForm { data.<op> }` the Detail scaffold emits inside its QueryView
+  // `data:` lambda resolves to a widget here — without it the renderer resolved
+  // the form (through the walker's `paramTypes`) while this collector emitted
+  // nothing, and `lib/forms.dart` was missing the class the page names.
+  //
+  // Deliberately MORE permissive than the walker (it does not re-derive the
+  // query's single/paged shape): an over-collected widget is an unused class in
+  // a library file, a MISSING one is a Dart compile error.
+  const walk = (e: ExprIR, scope: ReadonlyMap<string, EnrichedAggregateIR>): void => {
+    let childScope = scope;
     if (e.kind === "call") {
       if (e.name === "CreateForm") {
         const ofArg = namedArg(e, "of");
@@ -581,19 +596,51 @@ function collectBodyForms(
         const opArg = namedArg(e, "op");
         const agg = ofArg?.kind === "ref" ? aggregatesByName.get(ofArg.name) : undefined;
         if (agg && opArg?.kind === "ref") {
-          const op = agg.operations.find((o) => o.name === opArg.name && o.visibility === "public");
-          if (op)
-            push(flutterOperationForm(agg.name, op, bcByAggregate.get(agg.name), aggregatesByName));
+          pushOp(agg, opArg.name);
+        } else {
+          const inst = (e.args ?? []).find((_, i) => !(e.argNames ?? [])[i]);
+          const recv =
+            inst?.kind === "member" && inst.receiver.kind === "ref"
+              ? scope.get(inst.receiver.name)
+              : undefined;
+          if (recv && inst?.kind === "member") pushOp(recv, inst.member);
         }
       } else if (e.name === "DestroyForm") {
         const ofArg = namedArg(e, "of");
         const agg = ofArg?.kind === "ref" ? aggregatesByName.get(ofArg.name) : undefined;
         if (agg) push(flutterDestroyForm(agg.name));
+      } else if (e.name === "QueryView") {
+        const agg = queryViewAggregate(namedArg(e, "of"), aggregatesByName);
+        const data = namedArg(e, "data");
+        if (agg && data?.kind === "lambda" && data.param) {
+          childScope = new Map([...scope, [data.param, agg]]);
+        }
       }
     }
-    for (const c of exprChildren(e)) walk(c);
+    for (const c of exprChildren(e)) walk(c, childScope);
   };
-  walk(body);
+  walk(body, new Map());
+}
+
+/** The aggregate a `QueryView { of: … }` reads, by the same peel the shared
+ *  walker's `singleAggregateOfQuery` uses: step past a method call's receiver
+ *  and past a standard verb (`all` / `byId` / …) that is not itself a declared
+ *  aggregate name. */
+function queryViewAggregate(
+  ofArg: ExprIR | undefined,
+  aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
+): EnrichedAggregateIR | undefined {
+  if (!ofArg) return undefined;
+  let recv = ofArg.kind === "method-call" ? ofArg.receiver : ofArg;
+  if (
+    recv.kind === "member" &&
+    STANDARD_AGG_OPS.has(recv.member) &&
+    !aggregatesByName.has(recv.member)
+  ) {
+    recv = recv.receiver;
+  }
+  const name = recv.kind === "member" ? recv.member : recv.kind === "ref" ? recv.name : undefined;
+  return name ? aggregatesByName.get(name) : undefined;
 }
 
 /** Collect every form a single page hosts (drives the page's forms import). */

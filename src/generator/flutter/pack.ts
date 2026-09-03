@@ -423,6 +423,28 @@ export function usesMath(dart: string): boolean {
   return dart.includes("math.");
 }
 
+/** Wrap a formatter call so an ABSENT value renders the shared em-dash instead
+ *  of breaking the build.  A `money?` / `datetime?` / `<Enum>?` field is
+ *  `double?` / `DateTime?` / `String?` in `models.dart`, and `intl`'s
+ *  `NumberFormat.format(num)` / `DateFormat.format(DateTime)` take NON-nullable
+ *  arguments — so the bare call was a Dart compile error on every optional
+ *  column (and `.toString()` printed the literal text "null").
+ *
+ *  The guard is an immediately-applied function literal with a NULLABLE
+ *  parameter rather than an inline `x == null ? … : …` because the pack has no
+ *  optionality signal to branch on: a scaffold-synthesized table accessor types
+ *  its `row.<field>` member as `string` for every field (see
+ *  `provableStringType`'s header).  `(<T>? v) => …` accepts a nullable AND a
+ *  non-nullable argument with no analyzer complaint, where `== null` /
+ *  `!` / `?? ` on a value that turns out to be non-nullable each raise a lint —
+ *  and `flutter analyze` is a per-PR gate that fails on lints.
+ *
+ *  The `—` matches what every JSX pack's `EmptyValue` renders for an absent
+ *  money / datetime, so the frontends agree on the empty cell. */
+function nullSafe(type: string, formatted: string, value: string, empty = "'\u2014'"): string {
+  return `((${type}? v) => v == null ? ${empty} : ${formatted})(${value})`;
+}
+
 /** Money(value, currency?, decimals?) — a currency-prefixed amount, formatted
  *  through `intl`'s `NumberFormat` (grouping separators + fixed fraction digits)
  *  rather than a bare `double.toString()` — the Dart twin of the JS frontends'
@@ -449,19 +471,21 @@ function primitiveMoney(c: Ctx): string {
   } else {
     fmt = `NumberFormat.decimalPattern()`;
   }
-  return `Text(${fmt}.format(${value}), style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()]))`;
+  return `Text(${nullSafe("num", `${fmt}.format(v)`, value)}, style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()]))`;
 }
 
 /** DateDisplay(value) — a locale-formatted date via `intl`'s `DateFormat`
  *  instead of `DateTime.toString()` (which prints the raw ISO-ish form). */
 function primitiveDateDisplay(c: Ctx): string {
   const value = String(c.valueExpr ?? "DateTime.now()");
-  return `Text(DateFormat.yMMMd().format(${value}), style: Theme.of(context).textTheme.bodySmall)`;
+  return `Text(${nullSafe("DateTime", "DateFormat.yMMMd().format(v)", value)}, style: Theme.of(context).textTheme.bodySmall)`;
 }
 
 function primitiveEnumBadge(c: Ctx): string {
   const value = String(c.valueExpr ?? "''");
-  return `Chip(label: Text(${value}.toString()), visualDensity: VisualDensity.compact)`;
+  // Empty label, not the word "null", for an absent enum — the JSX packs render
+  // `<Badge>{row.kind}</Badge>`, i.e. an empty badge.
+  return `Chip(label: Text(${nullSafe("Object", "v.toString()", value, "''")}), visualDensity: VisualDensity.compact)`;
 }
 
 /** Stat(label, value) — a labelled metric block. */

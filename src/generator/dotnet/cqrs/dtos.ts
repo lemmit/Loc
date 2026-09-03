@@ -21,6 +21,7 @@ import {
   dtoParam,
   entityExposesProvenance,
   entityResponseParams,
+  isWireValueType,
   responseParamsFromPayload,
   valueObjectsUsedBy,
   wireType,
@@ -292,7 +293,16 @@ export function emitRequestDtos(
     records.push({
       name: `${vo.name}Request`,
       params: vo.fields
-        .map((f) => dtoParam(wireType(f.type, ctx, "request"), upperFirst(f.name), "request"))
+        .map((f) =>
+          dtoParam(
+            wireType(f.type, ctx, "request"),
+            upperFirst(f.name),
+            "request",
+            undefined,
+            "create",
+            isWireValueType(f.type),
+          ),
+        )
         .join(", "),
     });
   }
@@ -343,6 +353,8 @@ export function emitRequestDtos(
           upperFirst(f.name),
           "request",
           d ? renderCsExpr(d) : undefined,
+          "create",
+          isWireValueType(f.type),
         ),
       };
     });

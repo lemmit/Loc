@@ -1166,13 +1166,85 @@ function renderMainWithRoutes(
     "      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),",
     authGateBuilder(boot),
     `      initialRoute: '${home.routePath}',`,
+    ...(paramRoutePages(pages).length > 0 ? ["      onGenerateRoute: _generateRoute,"] : []),
     "      routes: {",
-    pages.map((p) => `        '${p.routePath}': (context) => const ${p.className}(),`),
+    exactRoutePages(pages).map(
+      (p) => `        '${p.routePath}': (context) => const ${p.className}(),`,
+    ),
     "      },",
     `    )${appWrapClose(boot)});`,
     "  }",
     "}",
+    generateRouteFn(pages),
   )}\n`;
+}
+
+/** Pages whose `route:` carries a `:param` segment.  `MaterialApp.routes` is an
+ *  EXACT-string map with no pattern matching, so registering `'/things/:id'`
+ *  there matched nothing a link ever pushed — `dartRoute` interpolates the id
+ *  INTO the pushed name (`'/things/' + row.id`).  Every detail link on flutter
+ *  was therefore dead (`Navigator.onGenerateRoute was null, but the route named
+ *  "/things/<uuid>" was referenced`), including in `sales-system-flutter.ddd`.
+ *  These pages move to `onGenerateRoute` instead. */
+function paramRoutePages(pages: readonly RenderedPage[]): RenderedPage[] {
+  return pages.filter((p) => p.routePath.split("/").some((s) => s.startsWith(":")));
+}
+
+/** Pages that stay in the exact-match `routes:` map: the paramless ones, plus
+ *  the home page whatever its shape — `initialRoute` names it verbatim. */
+function exactRoutePages(pages: readonly RenderedPage[]): RenderedPage[] {
+  const param = new Set(paramRoutePages(pages));
+  return pages.filter((p, i) => i === 0 || !param.has(p));
+}
+
+/** `onGenerateRoute` — pattern matching for the `:param` routes `routes:` can't
+ *  express.  Each captured segment lands in the route's `arguments` MAP under
+ *  its param name, which is exactly what the page shell's `routeArgBindings`
+ *  already reads (`routeArgs['id']`), so both halves finally agree on how the id
+ *  travels.  Arguments the pusher supplied itself (`renderNavigate`'s leftover
+ *  arg map, a `state` payload) are merged in and the captured segments win.
+ *  Emitted only for a ui that HAS a parameterised route, so a paramless app's
+ *  `main.dart` stays byte-identical. */
+function generateRouteFn(pages: readonly RenderedPage[]): string[] {
+  const param = paramRoutePages(pages);
+  if (param.length === 0) return [];
+  const arms = param.flatMap((p) => {
+    const segs = p.routePath.split("/").filter((s) => s.length > 0);
+    const conds = [
+      `segments.length == ${segs.length}`,
+      ...segs.flatMap((seg, i) =>
+        seg.startsWith(":") ? [] : [`segments[${i}] == '${escapeDart(seg)}'`],
+      ),
+    ];
+    const caps = segs.flatMap((seg, i) =>
+      seg.startsWith(":") ? [`'${escapeDart(seg.slice(1))}': segments[${i}]`] : [],
+    );
+    return [
+      `  if (${conds.join(" && ")}) {`,
+      `    return _routeTo(settings, const ${p.className}(), <String, String>{${caps.join(", ")}});`,
+      "  }",
+    ];
+  });
+  return [
+    "",
+    "Route<dynamic>? _generateRoute(RouteSettings settings) {",
+    "  final segments = Uri.parse(settings.name ?? '/').pathSegments;",
+    ...arms,
+    "  return null;",
+    "}",
+    "",
+    "Route<dynamic> _routeTo(RouteSettings settings, Widget page, Map<String, String> params) {",
+    "  final passed = settings.arguments;",
+    "  final args = <String, dynamic>{",
+    "    if (passed is Map) ...passed.map((key, value) => MapEntry(key.toString(), value)),",
+    "    ...params,",
+    "  };",
+    "  return MaterialPageRoute<dynamic>(",
+    "    builder: (context) => page,",
+    "    settings: RouteSettings(name: settings.name, arguments: args),",
+    "  );",
+    "}",
+  ];
 }
 
 function renderPubspec(
