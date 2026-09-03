@@ -9,7 +9,7 @@ import { HTTPException } from "hono/http-exception";
  *  the runtime emits on 422 validation responses.  Consumed by the
  *  frontend ACL's `applyServerErrors` (see docs/old/proposals/frontend-acl.md).
  *  All fields nullable / optional — base 5 per the spec core; `errors` is
- *  only present on 422 validation responses.  Phase D of
+ *  only present on 422 validation responses.  See
  *  docs/old/proposals/validation-error-extension.md — all three backends
  *  (Hono / .NET / Phoenix) declare the same shape in lockstep so the
  *  cross-backend parity gate stays green. */
@@ -43,8 +43,8 @@ function pointerOf(path: ReadonlyArray<PropertyKey>): string {
  *
  *  Validation failures get 422 (Unprocessable Entity, RFC 7807 standard
  *  for input-shape errors).  Domain-rule violations carried by
- *  DomainError ALSO emit 422 via the router's `app.onError` catch-all
- *  (RS-15, owner decision 2026-07-29): both are well-formed requests the
+ *  DomainError ALSO emit 422 via the router's `app.onError` catch-all:
+ *  both are well-formed requests the
  *  server refuses on SEMANTIC grounds, which is what RFC 9110 reserves 422
  *  for, and it makes the denial ladder identical on all five backends.  400
  *  stays for a genuinely malformed/unparseable request. */
@@ -93,9 +93,8 @@ export function newApp(): OpenAPIHono {
  *  turning a fault into a problem document, so every 404/422/500 took the worker
  *  down instead of answering.
  *
- *  The values are node's verbatim, so the wire is unchanged.  A status outside
- *  this set falls back to "Error" — exactly what the old read did for a code
- *  node's own table didn't carry. */
+ *  The values are node's verbatim.  A status outside this set falls back to
+ *  "Error", as node's own table does for a code it doesn't carry. */
 const REASON_PHRASES: Record<number, string> = {
   400: "Bad Request",
   401: "Unauthorized",
@@ -109,7 +108,7 @@ const REASON_PHRASES: Record<number, string> = {
 
 /** RFC 7807 body for a fault the FRAMEWORK raised — one no domain error class
  *  describes: an unmatched route, a body hono itself refused to parse, an
- *  aborted request.  Before this, such a fault left the wire two ways: never
+ *  aborted request.  Without it such a fault leaves the wire two ways: never
  *  reaching a router (hono's default `text/plain` 404), or reaching one and
  *  falling past every domain arm into the generic 500 — reporting a CLIENT
  *  fault as a server fault.  Both are a second error contract on a wire that

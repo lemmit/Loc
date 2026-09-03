@@ -101,9 +101,14 @@ export function renderDtoFiles(
    *  `response <Agg>Response` is present it drives the aggregate response DTO
    *  (read-path replacement for the `wireShape` derivation). */
   payloads: readonly PayloadIR[] = [],
-  /** M-T2.6: the aggregate's implicit findAll is paged (plain relational) — emit
-   *  a concrete `<Agg>Paged` envelope record the controller returns, so springdoc
-   *  names + shapes the OpenAPI schema `<Agg>Paged` (matching every backend). */
+  /** M-T2.6 / F2-W-07: SOME route on this aggregate returns the paged wire —
+   *  the implicit findAll (plain relational), or an author-declared
+   *  `find … : T paged`.  Emit a concrete `<Agg>Paged` envelope record the
+   *  controller returns, so springdoc names + shapes the OpenAPI schema
+   *  `<Agg>Paged` (matching every backend).  Named for the auto-all case it was
+   *  introduced for; a DECLARED paged find needs the identical record, and
+   *  before F2-W-07 it got the raw generic instead (springdoc named that
+   *  component `Paged<Agg>Response` — a name no sibling backend publishes). */
   pagedAutoAll = false,
 ): DtoFile[] {
   const out: DtoFile[] = [];
@@ -178,7 +183,7 @@ export function renderDtoFiles(
         type: eff(f.type, !isRequiredCreateInput(f)),
       }))
     ).map((f) => {
-      collectWireImports(f.type, imports);
+      collectWireImports(f.type, imports, "Request");
       return `${wireJavaType(f.type, "Request")} ${f.name}`;
     });
     out.push({
@@ -193,7 +198,7 @@ export function renderDtoFiles(
     if (op.params.length === 0) continue;
     const imports = new Set<string>();
     const components = op.params.map((p) => {
-      collectWireImports(p.type, imports);
+      collectWireImports(p.type, imports, "Request");
       if (isOptionalType(p.type)) return `${wireJavaType(p.type, "Request")} ${p.name}`;
       // RS-26: an omitted operation param must be REJECTED, not silently
       // zero-valued.  A primitive component cannot express absence — Jackson
@@ -303,7 +308,7 @@ function voRecord(
   const imports = new Set<string>();
   const components = fields.map((f) => {
     const t = eff(f.type, f.optional);
-    collectWireImports(t, imports);
+    collectWireImports(t, imports, dir);
     return `${wireJavaType(t, dir)} ${f.name}`;
   });
   const body =
@@ -352,7 +357,7 @@ function wireRecord(
     const idW = forApiRead(wireFieldsFor(entity)).find((w) => w.source === "id");
     if (idW) {
       const t = wireFieldType(idW);
-      collectWireImports(t, imports);
+      collectWireImports(t, imports, "Response");
       components.push(`${wireJavaType(t, "Response")} ${idW.name}`);
       args.push(domainToWire(t, `value.${accessor(idW)}`));
     }
@@ -365,7 +370,7 @@ function wireRecord(
       if (provNames.has(f.name)) {
         imports.add(`${basePkg}.domain.common.${JAVA_PROVENANCED_RECORD}`);
         imports.add(`${basePkg}.domain.common.ProvLineage`);
-        collectWireImports(f.type, imports);
+        collectWireImports(f.type, imports, "Response");
         components.push(
           `${JAVA_PROVENANCED_RECORD}<${wireJavaType(f.type, "Response", true)}> ${f.name}`,
         );
@@ -387,7 +392,7 @@ function wireRecord(
       // component is shared by both mappers; `from` still projects the real value
       // (auto-boxed), only `fromMasked` may pass null.
       const t = masked ? eff(wireFieldType(w), true) : wireFieldType(w);
-      collectWireImports(t, imports);
+      collectWireImports(t, imports, "Response");
       const carried = provenancedCarrier(t);
       if (carried) {
         // The carrier is a generated `domain.common` record (M-T6.12); its
@@ -420,11 +425,11 @@ function wireRecord(
       }
     }
   }
-  // (M-T6.12) No trailing `<field>_provenance` component any more.  The lineage
-  // rides INSIDE the provenanced field's own component as the `Provenanced<T>`
-  // carrier, so the wire key is the field's own name and the `@JsonProperty`
-  // rename this used to need is gone — the carrier's `value` / `lineage`
-  // members already match every other target's spelling.
+  // No trailing `<field>_provenance` component: the lineage rides INSIDE the
+  // provenanced field's own component as the `Provenanced<T>` carrier, so the
+  // wire key is the field's own name and no `@JsonProperty` rename is needed —
+  // the carrier's `value` / `lineage` members match every other target's
+  // spelling.
   // A `mask unless` field redacts fail-closed on a RESPONSE via a SECOND mapper,
   // `fromMasked` — `from` stays unmasked for audit snapshots.  `fromMasked` binds
   // the ambient principal once off the STATIC accessor (a static mapper injects
@@ -495,7 +500,7 @@ function payloadFieldJavaType(
     }
     return base.name;
   }
-  collectWireImports(t, imports);
+  collectWireImports(t, imports, "Response");
   return wireJavaType(t, "Response");
 }
 

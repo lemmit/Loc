@@ -58,7 +58,7 @@ export function renderFelizI18nModule(ui: UiIR): string {
       (i === catalogEntries.length - 1 ? " ]" : ""),
   );
   return lines(
-    "/// Translation runtime (Loom i18n, M-T1.11).",
+    "/// Translation runtime (Loom i18n).",
     "///",
     "/// `I18n.t key default` looks the message key up in the active locale's",
     "/// catalog, falling back to the source-language default the call site",

@@ -6,10 +6,9 @@
 // into generated JS/TS as a `/…/` literal: the domain-layer expression
 // renderer (`typescript/render-expr.ts`), the wire-boundary zod refine +
 // `.regex(...)` chain (`zod-refine.ts`), and Angular's
-// `Validators.pattern(...)` (`angular/form-validators.ts`).  Each used to
-// hand-roll `source.replace(/\//g, "\\/")`, which silently produces broken
-// output for two inputs — hence this single home (generator-code-review
-// 2026-08-17, C4).
+// `Validators.pattern(...)` (`angular/form-validators.ts`).  Hand-rolling
+// `source.replace(/\//g, "\\/")` at each site silently produces broken output
+// for two inputs — hence this single home.
 //
 // Lives under `_expr/` because that is the shared seam every platform
 // generator may import (a plain `generator/typescript/` export would be a

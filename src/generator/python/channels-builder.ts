@@ -157,7 +157,7 @@ export function buildPyChannelsFile(
     transportNames.length > 1 ? `"${transportNames.join(" | ")}"` : (transportNames[0] ?? "");
 
   return lines(
-    `"""Broker channel transport (channels.md; M-T4.4).  Auto-generated.`,
+    `"""Broker channel transport (channels.md).  Auto-generated.`,
     "",
     hasRabbit && hasRedis && !hasKafka
       ? "Redis/Valkey pub/sub and RabbitMQ queues carry CloudEvents 1.0"
@@ -413,7 +413,7 @@ export function buildPyChannelsFile(
           "",
           "    def __init__(self, url: str) -> None:",
           "        # `kafka://user:pass@host:port[,host2]` — userinfo (when present)",
-          "        # becomes SASL/PLAIN (M-T4.4 §7); a credential-less URL stays on",
+          "        # becomes SASL/PLAIN; a credential-less URL stays on",
           "        # PLAINTEXT, the pre-auth contract.",
           '        bare = url.removeprefix("kafka://")',
           '        creds, _, hosts = bare.rpartition("@")',

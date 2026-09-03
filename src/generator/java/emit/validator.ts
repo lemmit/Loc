@@ -128,9 +128,8 @@ function commandSpecs(
   const createInputs = forCreateInput(agg.fields);
   // A create validator exists only when there's a field-derived Create<Agg>Request
   // to validate.  Skip when there's no REST create at all, and for event-sourced
-  // aggregates (whose create request is keyed by the `create` action's params,
-  // not the field set — the old service-floor create validator was skipped there
-  // too, `!ctx.esCreateParams`).
+  // aggregates, whose create request is keyed by the `create` action's params
+  // rather than the field set (`!ctx.esCreateParams`).
   if (emitsRestCreate(agg) && agg.persistedAs !== "eventLog") {
     specs.push({
       className: `Create${agg.name}Validator`,

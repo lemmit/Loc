@@ -169,7 +169,7 @@ export function renderFileRefRecord(basePkg: string): string {
     `package ${basePkg}.domain.common;`,
     ``,
     `/** The {url, key, contentType, size} an object-store upload returns for a`,
-    ` *  \`File\` field (M-T1.2). */`,
+    ` *  \`File\` field. */`,
     `public record FileRef(String url, String key, String contentType, long size) {`,
     `}`,
     ``,

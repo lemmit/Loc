@@ -10,7 +10,7 @@ export function renderDockerfile(
   embedReact = false,
   spaOutDir = "dist",
   /** kafka-wired projects pull brod, whose crc32cer NIF builds via cmake
-   *  (M-T4.4 slice 8d) — absent otherwise so the image stays lean. */
+   *  (M-T4.4) — absent otherwise so the image stays lean. */
   needsCmake = false,
   /** How the embedded SPA builds.  `"vite"` (React/Vue/Svelte/Angular) runs a
    *  node-only `npm run build`; `"feliz"` builds via `dotnet fable` + `vite

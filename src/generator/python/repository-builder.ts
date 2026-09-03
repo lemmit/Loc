@@ -49,9 +49,11 @@ import { PY_PROV_SUFFIX, provColumn, provenancedFieldsOf } from "./emit/provenan
 import {
   aggUsesPrincipalContextFilter,
   contextFilterPredicate,
+  documentWriteScopeBody,
   type FilterBypass,
   lowerToSqlAlchemy,
   type PyPredicate,
+  writeScopeDeniesAll,
   writeScopePredicate,
 } from "./find-predicate.js";
 import {
@@ -112,13 +114,21 @@ export function authUserImport(
 /** The `get_by_id_for_write` command-load method — a write-scope existence
  *  pre-guard then `get_by_id`.  Empty (byte-identical repo) when the aggregate
  *  carries no `writeScopeFilter`.  `root` is the SQLAlchemy row class of the
- *  aggregate's owning table; `writePred` the lowered write-scope predicate. */
-function writeGuardMethod(
+ *  aggregate's owning table; `writePred` the lowered write-scope predicate.
+ *
+ *  Shared by the relational and the EMBEDDED shapes — an embedded root is a
+ *  normal queryable row, so its write scope pushes into the same SQL `where`.
+ *  When the predicate has no SQL translation (`writePred` null on an aggregate
+ *  that DOES carry a write scope) the guard falls back to the in-app check
+ *  rather than silently vanishing — a dropped guard answers 200 to a denied
+ *  write. */
+export function writeGuardMethod(
   agg: EnrichedAggregateIR,
   root: string,
   writePred: PyPredicate | null,
 ): (string | null)[] {
-  if (!writePred) return [];
+  if (!agg.writeScopeFilter) return [];
+  if (!writePred) return writeGuardInApp(agg);
   return [
     "",
     `    async def get_by_id_for_write(self, id: ${agg.name}Id) -> ${agg.name}:`,
@@ -129,21 +139,52 @@ function writeGuardMethod(
   ];
 }
 
-/** For non-relational shapes (document / embedded / event-sourced) the P3.1
- *  write-scope guard is not yet enforced; emit `get_by_id_for_write` as an alias
- *  to `get_by_id` so a mutation route's command load resolves (the routes layer
- *  dispatches to it whenever `writeScopeFilter` is set, regardless of shape).
- *  Non-relational write-scope enforcement is a documented follow-up. Emitted
- *  only when the aggregate carries a `writeScopeFilter`. */
-export function writeGuardAlias(agg: EnrichedAggregateIR): (string | null)[] {
+/** The `get_by_id_for_write` command load for a BLOB shape (`shape: document`,
+ *  the event-sourced stream) — neither exposes the aggregate's fields as
+ *  queryable columns, so the write-scope guard is checked IN-APP over the
+ *  LOADED aggregate, exactly where those shapes already evaluate their
+ *  capability READ filters.  A row the caller may READ but not WRITE (or a
+ *  missing one) raises the same not-found the relational pre-guard does — no
+ *  existence leak, and no 200 on a denied write.
+ *
+ *  `policy { deny write on X }` desugars in-app to the constant `False`, so no
+ *  row is ever writable: answer not-found without loading (and without emitting
+ *  the `if not (False)` a constant-condition lint would flag).
+ *
+ *  Empty (byte-identical repo) when the aggregate carries no `writeScopeFilter`;
+ *  the routes layer only dispatches here when it is set. */
+export function writeGuardInApp(agg: EnrichedAggregateIR): (string | null)[] {
   if (!agg.writeScopeFilter) return [];
+  const notFound = `raise AggregateNotFoundError(f"${agg.name} {id} not found")`;
+  const sig = `    async def get_by_id_for_write(self, id: ${agg.name}Id) -> ${agg.name}:`;
+  if (writeScopeDeniesAll(agg)) {
+    return [
+      "",
+      sig,
+      `        # policy { deny write on ${agg.name} } — no row is in write scope.`,
+      `        ${notFound}`,
+    ];
+  }
+  const pred = documentWriteScopeBody(agg, "found");
   return [
     "",
-    `    async def get_by_id_for_write(self, id: ${agg.name}Id) -> ${agg.name}:`,
-    "        # P3.1 write-scope guard is enforced on relational shapes; the",
-    "        # non-relational command load falls back to the read-scoped load.",
-    "        return await self.get_by_id(id)",
+    sig,
+    pred?.usesPrincipal ? "        current_user = require_current_user()" : null,
+    "        found = await self.find_by_id(id)",
+    "        if found is None:",
+    `            ${notFound}`,
+    ...(pred ? [`        if not (${pred.expr}):`, `            ${notFound}`] : []),
+    "        return found",
   ];
+}
+
+/** True when {@link writeGuardInApp} binds `current_user` — the blob-shape
+ *  builders thread it into their `authUserImport` gating so the accessor is
+ *  imported exactly where the guard uses it (and nowhere else, or ruff fails
+ *  the build on F401). */
+export function writeGuardInAppUsesPrincipal(agg: EnrichedAggregateIR): boolean {
+  if (!agg.writeScopeFilter || writeScopeDeniesAll(agg)) return false;
+  return documentWriteScopeBody(agg, "found")?.usesPrincipal === true;
 }
 
 export function buildPyRepositoryFile(
@@ -164,7 +205,7 @@ export function buildPyRepositoryFile(
   // Principal-referencing filters are gated by the IR validator on python
   // (W1b), so only non-principal predicates reach here.
   const filterPred = contextFilterPredicate(agg, ctx);
-  // The WRITE-scope guard predicate (authorization Phase 3 P3.1) — null unless
+  // The WRITE-scope guard predicate (authorization) — null unless
   // the aggregate's write scope is narrower than its read scope.
   const writePred = writeScopePredicate(agg, ctx);
   // Inline `Repo.findAll(<Criterion>) ignoring …` / `Repo.run(…) ignoring …`
@@ -252,7 +293,7 @@ export function buildPyRepositoryFile(
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
-    // The command-load path (authorization Phase 3 P3.1): a mutation route
+    // The command-load path (authorization): a mutation route
     // loads through this when the aggregate's WRITE scope is narrower than its
     // READ scope.  A write-scope existence pre-guard runs first — a row the
     // caller may READ but not WRITE (or a missing one) → 404, no existence
@@ -379,7 +420,7 @@ export function buildPyRepositoryFile(
     authUserImport(
       emittableFinds(repo).some(findUsesCurrentUser),
       // Gate the `require_current_user` accessor import on ACTUAL principal usage,
-      // not mere `writeScopeFilter` presence: a `deny write` carve-out (Phase 4)
+      // not mere `writeScopeFilter` presence: a `deny write` carve-out
       // sets an always-false write scope that references NO principal, so an
       // unconditional import would be unused → ruff F401 on the generated project.
       aggUsesPrincipalContextFilter(agg) || exprUsesCurrentUser(agg.writeScopeFilter),
@@ -1413,7 +1454,11 @@ function syncValueCollection(
  *  either side of the mutation; the actor + correlation / scope / parent ids
  *  are the ambient RequestContext slices.  Parity with the .NET IAuditWriter
  *  staging + the Java service insert. */
-function recordAuditMethod(): string {
+/** `record_audit(...)` — the audit-trail insert.  Shape-INDEPENDENT: it writes an
+ *  `AuditRecordRow` and touches nothing about how the aggregate itself is
+ *  stored, so the document / embedded builders emit the identical method
+ *  (pairwise F7).  Exported for exactly that reuse. */
+export function recordAuditMethod(): string {
   return lines(
     "    async def record_audit(",
     "        self,",

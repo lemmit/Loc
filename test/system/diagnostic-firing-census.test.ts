@@ -1,6 +1,31 @@
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { validate } from "../../src/api/index.js";
 import { codeOfMessageKey, DIAGNOSTIC_MESSAGES } from "../../src/diagnostics/messages.js";
+import {
+  SUPPORTED_PAGED_BACKENDS,
+  SUPPORTED_RETURN_BACKENDS,
+} from "../../src/ir/validate/checks/structural-checks.js";
+import {
+  EVENT_SOURCING_WORKFLOW_BACKENDS,
+  FILTER_BYPASS_FAMILIES,
+  PAGED_QH_SUPPORTED,
+  PROJECTION_AGG_SUPPORTED,
+  PROJECTION_GROUPBY_SUPPORTED,
+  PROJECTION_PROJ_SOURCE_SUPPORTED,
+  PROJECTION_QT_SUPPORTED,
+  PROJECTION_WF_SOURCE_SUPPORTED,
+  REMOTE_API_OP_UNSUPPORTED,
+} from "../../src/ir/validate/checks/system-checks.js";
+import {
+  allAdapterNames,
+  hasAdapters,
+  styleSupportedLayouts,
+} from "../../src/platform/adapter-metadata.js";
+import { parseBuiltinPlatformRef } from "../../src/platform/metadata.js";
+import { FLUTTER_UNRENDERED_PRIMITIVES } from "../../src/util/flutter-deferred-primitives.js";
 import { COVERED_ELSEWHERE, UNCOVERED } from "./diagnostic-firing-census.data.js";
 
 // ---------------------------------------------------------------------------
@@ -34,10 +59,14 @@ import { COVERED_ELSEWHERE, UNCOVERED } from "./diagnostic-firing-census.data.js
 // That is deterministic, shard-safe (no whole-run state to union), and the
 // drain it asks for produces real negative tests rather than a report.
 //
-// FOUR BUCKETS, and every catalogue code is in exactly one:
+// FIVE BUCKETS, and every catalogue code is in exactly one:
 //
 //   FIRING_FIXTURES   — proven here, by running it.
 //   UNREACHABLE_PINS  — cannot fire from source; the reason is the entry.
+//   DRIVEN_ELSEWHERE  — reachable, but not from `.ddd`: a named test drives it,
+//                       and the pointer is CHECKED (file exists, names the
+//                       code).  Added for the macro-authoring trio, which needs
+//                       a misbehaving macro rather than a source defect.
 //   UNCOVERED         — no proof yet.  Shrink-only.  The drain list.
 //   COVERED_ELSEWHERE — raised by some other test per the 2026-08-13 census.
 //                       Frozen; a NEW code can never join it.
@@ -168,6 +197,21 @@ const FIRING_FIXTURES: Record<string, string> = {
     aggregate Customer extends Party with crudish { creditLimit: int }
     repository Customers for Customer { }`),
 
+  // M-T5.25 — an `ignoring` bypass written on a `group by` operand.  It parses
+  // (a postfix chain admits the trailing clause anywhere an expression is
+  // admissible), binds to the GROUPING expression, and is then dropped: the
+  // read keeps applying every capability filter the author asked it to skip.
+  "loom.ignoring-clause-placement":
+    repoOnly(`    aggregate Order with crudish, softDeletable { code: string  total: int }
+    repository Orders for Order { }
+    projection TotalsByCode {
+      code: string
+      orders: int
+      from Order as o
+      group by o.code ignoring softDeletable
+      select code = o.code, orders = count()
+    }`),
+
   // --- variant match (structural-checks + the AST-level subject rule) ------
   "loom.match-unknown-variant": unionMatch(
     `outcome { Order o => o.code, Other x => x.resource, else => "" }`,
@@ -207,6 +251,19 @@ const FIRING_FIXTURES: Record<string, string> = {
       where o.lineCount + 1 > 5
       select orders = count
     }`),
+
+  // --- scalar intrinsics on a NULLABLE receiver ---------------------------
+  // `checkIntrinsicCalls` used to test `recvType.kind === "primitive"`, which a
+  // `T?` receiver never satisfies, so the ENTIRE catalogue check was skipped on
+  // one.  A real intrinsic on a `T?` is an unguarded deref every backend emits
+  // bare (`this.path.trim()` over a `string | null`).  The guarded form —
+  // `this.path != null ? this.path.trim() : ""` — narrows and passes.
+  "loom.intrinsic-nullable-receiver": repoOnly(`    aggregate Thing with crudish {
+      path: string?
+      label: string
+      operation relabel() { label := this.path.trim() }
+    }
+    repository Things for Thing { }`),
 
   // --- macro expansion (phase ②) ------------------------------------------
   "loom.macro-arg-missing": uiWith("scaffoldAggregate()"),
@@ -322,6 +379,50 @@ system S {
   deployable d { platform: node contexts: [Orders] dataSources: [st] serves: Api port: 3000 auth: required }
 }`,
 
+  // --- inheritance × capability (the TPH cluster) --------------------------
+
+  // A TPH SUBTYPE whose capability `filter` reads a column only that subtype
+  // declares.  EF Core registers a query filter on the hierarchy ROOT entity
+  // type only, and a root-typed lambda has no such member — the one shape of
+  // TPH filter .NET structurally cannot express.  Before the gate the whole
+  // filter list was replaced by `[]` for every TPH participant, so the read
+  // restriction vanished from the emitted queries with no error at all.
+  "loom.tph-filter-unsupported": `
+system S {
+  subdomain Fleet { context Vehicles {
+    criterion Live of Car = this.doors > 0
+    abstract aggregate Vehicle { name: string }
+    aggregate Car extends Vehicle with crudish { doors: int  filter Live }
+    repository Cars for Car { }
+  } }
+  api Api from Fleet
+  storage pg { type: postgres }
+  resource st { for: Vehicles, kind: state, use: pg }
+  deployable d { platform: dotnet contexts: [Vehicles] dataSources: [st] serves: Api port: 8080 }
+}`,
+
+  // A subtype taking the OPPOSITE tenancy stance from the base it inherits its
+  // columns from.  The base capability still contributes `tenant_id NOT NULL`
+  // to the row; `crossTenant` means nothing stamps or filters it.  This parsed
+  // 0 errors on all five backends, and it is the exact spelling the old
+  // `loom.tenancy-stance-unmarked` message recommended.
+  "loom.tenancy-inherited-stance-conflict": `
+system S {
+  user { id: guid  tenantId: string }
+  tenancy by user.tenantId of Org
+  subdomain Fleet { context Vehicles {
+    aggregate Org with crudish { title: string }
+    abstract aggregate Vehicle with tenantOwned { name: string }
+    aggregate Car extends Vehicle crossTenant with crudish { doors: int }
+    repository Cars for Car { }
+    repository Orgs for Org { }
+  } }
+  api Api from Fleet
+  storage pg { type: postgres }
+  resource st { for: Vehicles, kind: state, use: pg }
+  deployable d { platform: node contexts: [Vehicles] dataSources: [st] serves: Api port: 3000 auth: required }
+}`,
+
   // A frontend deployable whose ui READS `currentUser` while the ui is not
   // served under auth (`auth: ui` absent) — arrived on `main` mid-PR, same as
   // the three above.
@@ -342,6 +443,43 @@ system S {
   deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 auth: required }
   deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
 }`,
+
+  // A repository read used as a MEMBER RECEIVER never lowers to a `repo-read`
+  // (the detector wants the whole chain), so no read port is threaded in and
+  // every backend emits the bare repository name.
+  "loom.domain-service-read-unsupported":
+    repoOnly(`    aggregate Customer with crudish { tier: string }
+    repository Customers for Customer {
+      find byTier(tier: string): Customer? where this.tier == tier
+    }
+    domainService Lookup {
+      operation tierOf(t: string): string { return Customers.byTier(t).tier }
+    }`),
+
+  // The parse-but-no-emit meta-warning (M-T5.9).  `connection:` reaches the IR
+  // and no generator reads it — the emitted compose / k8s wiring is derived
+  // heuristically from the compose host instead.
+  "loom.reserved-not-emitted": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+    repository Things for Thing { }
+  } }
+  storage pg { type: postgres, connection: env("DB_URL") }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] port: 3000 }
+}`,
+
+  // `shape:` is read nowhere on an event-sourced aggregate — every backend's
+  // schema emitter short-circuits on `persistedAs: eventLog` first — so the
+  // clause parsed clean and generated byte-identical output.
+  "loom.shape-on-event-sourced": repoOnly(`    event Opened { account: Account id, owner: string }
+    aggregate Account persistedAs: eventLog shape: document {
+      owner: string
+      create open(owner: string) { emit Opened { account: id, owner: owner } }
+      apply(e: Opened) { owner := e.owner }
+    }
+    repository Accounts for Account { }`),
 
   "loom.lifecycle-guard-event-sourced": deployed(`      event Made { order: Order id, code: string }
       aggregate Order persistedAs: eventLog {
@@ -367,6 +505,31 @@ system S {
   resource st { for: C, kind: state, use: pg }
   deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
   deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
+  // A form inside a `component` on Phoenix LiveView.  A HEEx function component
+  // is a pure render function, so the form's `@form` assign and its
+  // `handle_event` clause must come from the host page's LiveView — and only a
+  // component's `state`/`action`s are lifted there (#2646).  The emitted project
+  // compiled and then 500'd on page load; the gate refuses it instead.
+  "loom.heex-component-host-state-unsupported": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+    repository Things for Thing { }
+  } }
+  api Api from Sub
+  ui WebApp {
+    api C: Api
+    component NewThing() { body: CreateForm { of: Thing } }
+    page Home { route: "/"  body: NewThing() }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable app {
+    platform: elixir contexts: [C] dataSources: [st] serves: Api
+    ui: WebApp { C: app } port: 4000
+  }
 }`,
 
   // --- backend-capability gates, driven by their UNHOSTED arm --------------
@@ -403,8 +566,126 @@ system S {
           return this
         }
       }`),
-  // `Tab` / `Column` are `group: "sub"` primitives — the parent consumes them
-  // inline, so anywhere else they degrade to a comment on all seven targets.
+  // A FOURTH of the same shape, found by reading `validateFieldMask` for the
+  // `anyBackend` arm rather than trusting `FIELD_MASK_BACKENDS` (which does
+  // list all five families).  `mask unless` on a context nothing hosts is the
+  // drivable case, so this belongs here and not in the pins beside its
+  // set-shaped siblings — the distinction the pin block warns about, caught in
+  // the act.  The gate needs a `user {}` block for `currentUser` to resolve.
+  "loom.field-mask-unsupported": `
+system S {
+  user { id: string  role: string }
+  subdomain Sub { context C {
+    aggregate Order with crudish {
+      code: string
+      total: int mask unless currentUser.role == "admin"
+    }
+    repository Orders for Order { }
+  } }
+}`,
+  // Needs the DEPLOYMENT side, and specifically a JAVA one: the same field is
+  // legal on every other backend (`get case()` / `def case` / `field :case` /
+  // `@case`), so a declaration-only system — or a node one — raises nothing.
+  "loom.java-reserved-identifier-unsupported": `
+system P {
+  subdomain D { context Orders {
+    aggregate Order with crudish { case: string }
+    repository Orders for Order { }
+  } }
+  api A from D
+  storage pg { type: postgres }
+  resource st { for: Orders, kind: state, use: pg }
+  deployable d { platform: java, contexts: [Orders], dataSources: [st], serves: A, port: 4000 }
+}`,
+  // --- workflow-checks.ts --------------------------------------------------
+  // M-T9.19 recorded FOUR of this file's codes as unemittable from source.
+  // Driving each one instead of re-reading the note found that claim wrong for
+  // `loom.workflow-name-collision`: its stated preemption ("by
+  // `loom.duplicate-workflow`") does not hold, because the two gates test
+  // different things — `duplicate-workflow` fires on a REPEATED workflow name,
+  // `workflow-name-collision` on a clash with an aggregate / value object /
+  // enum / event / repository, and a workflow named after an aggregate trips
+  // only the second.  The other three are confirmed preempted and pinned below.
+  "loom.duplicate-workflow": repoOnly(`    aggregate Thing with crudish { name: string }
+    repository Things for Thing { }
+    workflow Dup { create(n: string) { precondition n.length > 0 } }
+    workflow Dup { create(n: string) { precondition n.length > 0 } }`),
+  "loom.workflow-name-collision": repoOnly(`    aggregate Thing with crudish { name: string }
+    repository Things for Thing { }
+    workflow Thing { create(n: string) { precondition n.length > 0 } }`),
+  // The code whose "covered by message in validation.test.ts" claim outlived
+  // the file it cited (M-T9.33's own opening finding).  It fires: an `emit`
+  // supplying a field the event does not declare.
+  "loom.workflow-emit-unknown-field": repoOnly(`    aggregate Thing with crudish { name: string }
+    repository Things for Thing { }
+    event Happened { thing: Thing id, label: string }
+    workflow W {
+      create(n: string) { emit Happened { thing: id, label: n, bogus: n } }
+    }`),
+  // `Repo.run(<Retrieval>(args))` naming a retrieval the context does not
+  // declare.  Its repository-side sibling is NOT drivable — an unknown
+  // repository name never lowers to a `repo-run` at all — so only this half
+  // gets a fixture.  Control: the same source with `ActiveOrders()` raises
+  // nothing, which is what makes the fixture's single diagnostic meaningful.
+  "loom.workflow-run-unknown-retrieval":
+    repoOnly(`    aggregate Order with crudish { code: string  archived: bool }
+    criterion Active of Order = !this.archived
+    retrieval ActiveOrders() of Order { where: Active  sort: [code asc] }
+    repository Orders for Order { }
+    workflow W {
+      create(n: string) { let batch = Orders.run(Nope()) }
+    }`),
+
+  // --- the last singletons, each DRIVEN before being classified -----------
+  // An applier body is a pure fold; a CALL statement in one is the impurity.
+  // (Raises several event-sourcing codes together — the assertion is
+  // containment, so a fixture may legitimately trip more than its own.)
+  "loom.applier-impure-call": repoOnly(`    event Opened { account: Account id }
+    aggregate Account persistedAs: eventLog {
+      owner: string
+      operation touch() { owner := "x" }
+      create open(owner: string) { emit Opened { account: id } }
+      apply(e: Opened) { touch() }
+    }
+    repository Accounts for Account { }`),
+
+  // A resource op whose capability the bound storage does not offer.
+  // `localDisk` offers objectStore{blob,list}; `signedUrl` is s3-only — so the
+  // SAME source on `type: s3` does not raise this code, which is what makes
+  // the fixture discriminating rather than incidental.
+  "loom.resource-missing-capability": `
+system S {
+  subdomain Sub { context C {
+    aggregate Doc with crudish { name: string }
+    repository Docs for Doc { }
+    workflow W {
+      create(k: string) { let u = Blobs.signedUrl(k) }
+    }
+  } }
+  storage pg { type: postgres }
+  storage files { type: localDisk }
+  resource st { for: C, kind: state, use: pg }
+  resource Blobs { for: C, kind: objectStore, use: files }
+  deployable api { platform: node contexts: [C] dataSources: [st, Blobs] port: 3000 }
+}`,
+
+  // A UI-mounting deployable whose form would need a Select picker for an
+  // `X id` naming no aggregate in the system.  Needs the ui + react deployable
+  // — a backend-only system never reaches the id-reference walk.
+  "loom.ui-id-ref-unknown-aggregate": `
+system S {
+  subdomain Sub { context C {
+    aggregate Order with crudish { code: string  buyer: Ghost id }
+    repository Orders for Order { }
+  } }
+  api A from Sub
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  ui W { api Sales: A }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: A port: 3000 }
+  deployable web { platform: react targets: api ui: W { Sales: api } port: 3001 }
+}`,
+
   "loom.sub-primitive-misplaced": `
 system S {
   subdomain Sub { context C {
@@ -523,6 +804,146 @@ system S {
     framework: react
     api C: Api
     page Home { route: "/"  body: Stat { "Revenue", "10", Text { "extra" } } }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
+  // A client-side `Table { filter: … }` over a SERVER-PAGED table narrows one
+  // server window, so the walker drops the arg.  The auto-paged rewrite makes
+  // this the shape the simplest hand-written paged table lands in (M-T1.1).
+  "loom.table-filter-server-paged": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: react
+    api C: Api
+    page Home {
+      route: "/"
+      state { q: string = "" }
+      body: QueryView {
+        of: C.Thing.all,
+        data: rows => Table { rows: rows, filter: q, Column { "Name", o => Text { o.name } } }
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
+  // HEEx's parallel engine never reads `filter:` at all (M-T1.1).
+  "loom.table-filter-unsupported": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: phoenixLiveView
+    api C: Api
+    page Home {
+      route: "/"
+      state { q: string = "" }
+      body: QueryView {
+        of: C.Thing.all,
+        data: rows => Table { rows: rows, filter: q, Column { "Name", o => Text { o.name } } }
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api {
+    platform: elixir contexts: [C] dataSources: [st] serves: Api
+    ui: WebApp { C: api } port: 4000
+  }
+}`,
+  // The state-controlled shell and the operation-form dialog do not combine on
+  // react / vue / svelte / flutter — the WHOLE modal becomes a comment
+  // (F2-CFE-12).  Angular, Feliz and HEEx render it, so the gate is per-target.
+  "loom.modal-controlled-op-form-unsupported": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish {
+      name: string
+      operation activate() { }
+    }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: react
+    api C: Api
+    page Home {
+      route: "/"
+      state { shown: bool = false }
+      body: Modal { open: shown, OperationForm { of: Thing, op: activate } }
+    }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+
+  // A named argument no emitter reads: `Card`'s caption is positional 0, so
+  // `title:` — and the content it carries — vanishes from every frontend
+  // without even reaching the message catalog (the named-arg half of A7).
+  "loom.page-primitive-unknown-arg": `
+system S {
+  subdomain Sub { context C {
+    aggregate Thing with crudish { name: string }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: react
+    api C: Api
+    page Home { route: "/"  body: Card { title: "Caption", Text { "body" } } }
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+  // The scaffolded list filter bar renders `string`/`guid`/`datetime`/`int`/
+  // `long`/`bool`/`<X> id` params; an `enum` one is dropped whole (the FRONTEND
+  // state emitters type an enum state as bare `string` while the query param is
+  // the zod enum union).
+  "loom.scaffold-filter-param-unsupported": `
+system S {
+  subdomain Sub { context C {
+    enum Status { Open, Closed }
+    aggregate Order with crudish { title: string  status: Status }
+    repository Orders for Order { find byStatus(s: Status): Order[] where this.status == s }
+  } }
+  api Api from Sub
+  ui WebApp with scaffold(aggregates: [Order]) {
+    framework: react
+    api C: Api
+  }
+  storage pg { type: postgres }
+  resource st { for: C, kind: state, use: pg }
+  deployable api { platform: node contexts: [C] dataSources: [st] serves: Api port: 3000 }
+  deployable web { platform: static targets: api ui: WebApp { C: api } port: 3001 }
+}`,
+  // `OperationForm { of:, op: }` names no record, so every frontend targets the
+  // page's route `:id` — on a route that declares none it submits an empty id.
+  "loom.op-form-needs-route-id": `
+system S {
+  subdomain Sub { context C {
+    aggregate Item with crudish { name: string  operation activate() { } }
+    repository Items for Item { }
+  } }
+  api Api from Sub
+  ui WebApp {
+    framework: react
+    api C: Api
+    page A { route: "/a"  body: Stack { OperationForm { of: Item, op: activate } } }
   }
   storage pg { type: postgres }
   resource st { for: C, kind: state, use: pg }
@@ -686,6 +1107,42 @@ system P {
       }
     }`,
   ),
+
+  // --- seed crossings (F2-SEED-*, validators/seed.ts rules 5-8) -------------
+  // Each of these parsed 0 errors / 0 warnings before the rule existed and
+  // then produced a DIFFERENT wrong artefact per backend.
+  "loom.seed-dataset-name-collision": repoOnly(`    aggregate Widget with crudish { name: string }
+    repository Widgets for Widget { }
+    seed default { Widget { name: "a" } }
+    seed Default { Widget { name: "b" } }`),
+  "loom.seed-raw-document-shape":
+    repoOnly(`    aggregate Article shape: document, with crudish { title: string }
+    repository Articles for Article { }
+    seed wired raw { Article { id: "11111111-1111-1111-1111-111111111111", title: "Anchor" } }`),
+  "loom.seed-event-sourced-unsupported":
+    repoOnly(`    event Opened { account: Account id, owner: string }
+    aggregate Account persistedAs: eventLog {
+      owner: string
+      create open(owner: string) { emit Opened { account: id, owner: owner } }
+      apply(e: Opened) { owner := e.owner }
+    }
+    repository Accounts for Account { }
+    seed default { Account { owner: "seeded-alice" } }`),
+  "loom.seed-abstract-aggregate": repoOnly(`    abstract aggregate Base { name: string }
+    aggregate Child extends Base with crudish { extra: int }
+    repository Children for Child { }
+    seed default { Base { name: "x" } }`),
+  "loom.seed-tenant-owned-needs-raw": `
+system S {
+  user { id: guid  tenantId: string }
+  tenancy by user.tenantId of Org
+  subdomain Sub { context C {
+    aggregate Invoice with tenantOwned, crudish { label: string }
+    aggregate Org with crudish { name: string }
+    repository Invoices for Invoice { }
+    seed default { Invoice { label: "Seeded" } }
+  } }
+}`,
 };
 
 /**
@@ -734,6 +1191,289 @@ const UNREACHABLE_PINS: Record<string, string> = {
     "on an empty `unsupported`.  Its own doc comment already calls the guard `latent`, kept as " +
     "the safety net for a future backend that lands before its `when` emitter; this pin records " +
     "that the net currently catches nothing.",
+
+  // --- the same latent-set shape, but CHECKED -------------------------------
+  // Each of the ten below is registered in `LATENT_GATES`, so the set it names
+  // is re-read on every run rather than trusted from this prose.  Each was
+  // read for an `anyBackend` second arm first — the arm that makes
+  // `loom.field-mask-unsupported` drivable and therefore a fixture, not a pin.
+  "loom.paged-query-handler-unsupported-backend":
+    "`PAGED_QH_SUPPORTED` covers every backend-owning platform, and " +
+    "`validatePagedQueryHandlerBackends` skips a deployable that is either not " +
+    "`platformOwnsBackend` or in that set.  Checked by `LATENT_GATES`.",
+  "loom.projection-whole-table-aggregation-unsupported":
+    "`PROJECTION_AGG_SUPPORTED` covers every backend-owning platform; the gate skips on " +
+    "`!platformOwnsBackend(d.platform) || SET.has(d.platform)`.  Checked by `LATENT_GATES`.",
+  "loom.projection-groupby-unsupported-backend":
+    "`PROJECTION_GROUPBY_SUPPORTED` covers every backend-owning platform, same skip shape as " +
+    "its whole-table sibling.  Checked by `LATENT_GATES`.",
+  "loom.projection-workflow-source-unsupported-backend":
+    "`PROJECTION_WF_SOURCE_SUPPORTED` covers every backend-owning platform, same skip shape.  " +
+    "Checked by `LATENT_GATES`.",
+  "loom.projection-source-unsupported-backend":
+    "`PROJECTION_PROJ_SOURCE_SUPPORTED` covers every backend-owning platform, same skip shape.  " +
+    "Checked by `LATENT_GATES`.",
+  "loom.filter-bypass-unsupported":
+    "`bypassSupported(dep)` is `FILTER_BYPASS_FAMILIES.has(family)` and that set covers every " +
+    "backend-owning platform; a frontend deployable `continue`s before reaching the check, so " +
+    "no deployable can reach the `!supported` push.  Checked by `LATENT_GATES`.",
+  "loom.event-sourced-workflow-unsupported":
+    "`EVENT_SOURCING_WORKFLOW_BACKENDS` covers every backend-owning platform and " +
+    "`validateEventSourcedWorkflowStorage` returns on an empty `unsupported`.  Unlike its " +
+    "event-sourced AGGREGATE sibling it has NO `anyBackend` arm — which is exactly why that " +
+    "sibling is driven by a fixture and this one is pinned.  Checked by `LATENT_GATES`.",
+  "loom.generic-carrier-unsupported":
+    "`SUPPORTED_PAGED_BACKENDS` (structural-checks.ts) covers every backend-owning platform and " +
+    "`validateGenericCarrierSupport` returns on an empty `unsupported`; its own comment records " +
+    "that a context served by no backend is emittable and stays quiet, so there is no second " +
+    "arm.  Checked by `LATENT_GATES`.",
+  "loom.operation-return-unsupported":
+    "`SUPPORTED_RETURN_BACKENDS` (structural-checks.ts) covers every backend-owning platform and " +
+    "the loop `continue`s on an empty `unsupported`; the no-backend case is documented as " +
+    "deliberately quiet.  A bare scalar return is not gated at all.  Checked by `LATENT_GATES`.",
+  "loom.remote-api-op-unsupported":
+    "`REMOTE_API_OP_UNSUPPORTED` is the EMPTY set and the gate fires only for its members " +
+    "(`if (!REMOTE_API_OP_UNSUPPORTED.has(dep.platform)) continue`), so every platform skips.  " +
+    "Checked by `LATENT_GATES`.",
+  "loom.flutter-primitive-unsupported":
+    "`FLUTTER_UNRENDERED_PRIMITIVES` is the EMPTY set — every page primitive has a Flutter " +
+    "renderer today — and the gate only rejects a primitive that is a member.  Its own source " +
+    "comment calls it a dormant safety net the gate re-arms from.  Checked by `LATENT_GATES`.",
+
+  // --- workflow-checks.ts, the three M-T9.19 claims that HELD ---------------
+  // Each was re-driven rather than inherited.  All three are preempted by
+  // SCOPE resolution: the unknown name is reported as `loom.unknown-name`
+  // during linking, and the statement never lowers to the `factory-let` /
+  // `repo-let` / `repo-run` kind whose arm carries these codes — so the arm
+  // switches on a shape that cannot exist.  Re-test by making the lowerer emit
+  // the typed statement kind for an unresolved name (it currently degrades to a
+  // generic `expr-let`), which is the change that would re-arm all three at once.
+  "loom.workflow-create-unknown-aggregate":
+    "`Nope.create({…})` in a workflow raises `loom.unknown-name` at link time and lowers to a " +
+    "generic `expr-let`, never the `factory-let` this arm switches on.  Driven and confirmed: " +
+    "the only code out of `validate()` is `loom.unknown-name`.",
+  "loom.workflow-unknown-repository":
+    "`Missing.getById(x)` in a workflow raises `loom.unknown-name` and lowers to a generic " +
+    "`expr-let`, never the `repo-let` this arm switches on.  Driven and confirmed.",
+  "loom.workflow-run-unknown-repository":
+    "`Missing.run(ActiveOrders())` raises `loom.unknown-name` and never lowers to a `repo-run`, " +
+    "so the repository half of that arm is unreachable — while its RETRIEVAL half is drivable " +
+    "(`Orders.run(Nope())`) and has a fixture.  Both halves driven; only this one is dead.",
+  "loom.isolation-requires-transactional":
+    "The gate calls itself defence-in-depth against a future grammar change, and the grammar " +
+    "still gates `isolation:` behind `transactional`: a workflow carrying `isolation:` alone is " +
+    "a PARSE error, so no model reaches the IR with `wf.isolation && !wf.transactional`.  " +
+    "Driven and confirmed: the only code out of `validate()` is `loom.parse-error`.  Re-test by " +
+    "ungating `isolation:` in `ddd.langium`.",
+
+  // --- the last three singletons -------------------------------------------
+  "loom.cross-aggregate-entity-part":
+    "The arm needs a RESOLVED entity-part owned by a different aggregate, and `ddd-scope.ts` " +
+    "restricts containment part types to entity parts declared in the SAME aggregate (the rule " +
+    "CLAUDE.md states as `cross-aggregate references must use X id`).  So the name never links " +
+    "and the source reports `loom.linking-error` instead.  Driven and confirmed.  Re-test by " +
+    "widening the containment part-type scope to sibling aggregates.",
+  "loom.platform-knob-style-layout-mismatch":
+    "Every platform's LAYOUT menu is a subset of what its style declares in `styleSupportedLayouts`, " +
+    "so a layout that would mismatch is already out-of-menu and `loom.platform-knob-out-of-menu` " +
+    "fires first (the gate's own comment says an unknown value 'already errored under R1').  " +
+    "Checked by `the style/layout menus cannot disagree` below — and note the gate's comment " +
+    "names elixir + `byLayer` as the way to reach it, which does NOT work for exactly this " +
+    "reason: `byLayer` is not in elixir's menu at all.  Driven and confirmed.",
+  "loom.ir-internal":
+    "A catch-all: `irDiagnosticsFor` wraps the whole lower/enrich/validate pipeline and converts " +
+    "a THROW into this code, so it fires only when the compiler crashes.  A `.ddd` that reaches " +
+    "it is a compiler bug to fix, not a fixture to keep — pinning a crashing source here would " +
+    "enshrine the crash as expected behaviour and make the fixture fail the day it is fixed.  " +
+    "Re-test by removing the try/catch: every source that reaches it should be a bug report.",
+
+  // The two `loom.java-{workflow-instance,projection}-field-unsupported` pins
+  // that sat here are GONE, because the codes are (M-T6.36).  This census
+  // reached the right diagnosis independently — "a part type never resolves in
+  // workflow / projection scope, so no source can put one there" — and pinning
+  // was the best available move while the codes existed.  Once that is true,
+  // though, the codes are not backstops but PHANTOMS: they name java in their
+  // identity for a shape the LANGUAGE refuses on every platform, so they made
+  // java read as uniquely limited and carried two rows in the M-T9.27 open-gap
+  // register that nothing could ever drain.  The emitters keep their
+  // `guardInstanceField` / `guardProjectionField` throws as internal
+  // invariants, and the unreachability is now pinned where it actually holds —
+  // at the SCOPE layer, in
+  // `test/generator/java/generator-java-readmodel-gates.test.ts`, which fails
+  // if part-type scope ever widens.  That is this pin's "re-test" turned into
+  // a test.
+};
+
+// ---------------------------------------------------------------------------
+// LATENT CAPABILITY GATES — pins whose reason is CHECKED, not just written.
+//
+// The pins above are prose: a reader has to re-derive the claim by reading the
+// validator.  That is the weak half of a pin, and it rots silently — the claim
+// "this set lists all five families" stops being true the moment a sixth
+// backend family lands, and nothing says so.
+//
+// These entries close that.  Each names the actual `Set` its gate consults, so
+// the pin's reason is re-evaluated on every run:
+//
+//   "covers-every-backend" — the gate computes `unsupported = hosting \ SET`
+//                            and returns/skips when that is empty.  Latent for
+//                            as long as SET ⊇ every backend-owning platform.
+//   "empty"                — the gate fires only for members of SET, and SET
+//                            has none.  Latent until something is added.
+//
+// The backend-owning roster is not hardcoded here either: it is derived from
+// `parseBuiltinPlatformRef`, the same predicate `platformOwnsBackend` uses, so
+// registering a sixth backend family fails these pins on the next run and
+// forces whoever added it to either port the feature or write a real fixture.
+//
+// WHAT THIS DOES NOT PROVE.  That a gate cannot fire *via this set* — not that
+// it cannot fire at all.  Several sibling gates carry a SECOND arm ("no
+// db-owning deployable hosts this context at all") which fires with the set
+// fully satisfied; `loom.field-mask-unsupported` is exactly that shape and is
+// therefore driven by a real fixture above, not pinned here.  Every entry below
+// was read for that arm first.  A pin added without that read is a TODO wearing
+// a pin's clothes — which is the failure mode the prose block above warns about
+// in its own words.
+// ---------------------------------------------------------------------------
+
+/** Platforms that own a backend — the roster `platformOwnsBackend` admits. */
+const BACKEND_OWNING = [
+  "node",
+  "dotnet",
+  "python",
+  "java",
+  "elixir",
+  "react",
+  "vue",
+  "svelte",
+  "angular",
+  "feliz",
+  "flutter",
+  "static",
+].filter((p) => parseBuiltinPlatformRef(p) !== null);
+
+const LATENT_GATES: ReadonlyArray<{
+  code: string;
+  setName: string;
+  set: ReadonlySet<string>;
+  kind: "covers-every-backend" | "empty";
+}> = [
+  // system-checks.ts — the `!platformOwnsBackend(d.platform) || SET.has(...)`
+  // skip shape.  No second arm: a context nothing hosts iterates zero
+  // deployables, so the push is unreachable rather than reachable-with-a-
+  // different-message.
+  // Already pinned in prose above; listed here so the claim is re-checked.
+  {
+    code: "loom.projection-query-time-unsupported",
+    setName: "PROJECTION_QT_SUPPORTED",
+    set: PROJECTION_QT_SUPPORTED,
+    kind: "covers-every-backend",
+  },
+  {
+    code: "loom.paged-query-handler-unsupported-backend",
+    setName: "PAGED_QH_SUPPORTED",
+    set: PAGED_QH_SUPPORTED,
+    kind: "covers-every-backend",
+  },
+  {
+    code: "loom.projection-whole-table-aggregation-unsupported",
+    setName: "PROJECTION_AGG_SUPPORTED",
+    set: PROJECTION_AGG_SUPPORTED,
+    kind: "covers-every-backend",
+  },
+  {
+    code: "loom.projection-groupby-unsupported-backend",
+    setName: "PROJECTION_GROUPBY_SUPPORTED",
+    set: PROJECTION_GROUPBY_SUPPORTED,
+    kind: "covers-every-backend",
+  },
+  {
+    code: "loom.projection-workflow-source-unsupported-backend",
+    setName: "PROJECTION_WF_SOURCE_SUPPORTED",
+    set: PROJECTION_WF_SOURCE_SUPPORTED,
+    kind: "covers-every-backend",
+  },
+  {
+    code: "loom.projection-source-unsupported-backend",
+    setName: "PROJECTION_PROJ_SOURCE_SUPPORTED",
+    set: PROJECTION_PROJ_SOURCE_SUPPORTED,
+    kind: "covers-every-backend",
+  },
+  // `bypassSupported(dep)` is `FILTER_BYPASS_FAMILIES.has(family)`, and a
+  // frontend deployable `continue`s before reaching it.
+  {
+    code: "loom.filter-bypass-unsupported",
+    setName: "FILTER_BYPASS_FAMILIES",
+    set: FILTER_BYPASS_FAMILIES,
+    kind: "covers-every-backend",
+  },
+  // `validateEventSourcedWorkflowStorage` returns on an empty `unsupported`
+  // and — unlike its event-sourced AGGREGATE sibling — carries no `anyBackend`
+  // arm, which is why that sibling is driven by a fixture and this is pinned.
+  {
+    code: "loom.event-sourced-workflow-unsupported",
+    setName: "EVENT_SOURCING_WORKFLOW_BACKENDS",
+    set: EVENT_SOURCING_WORKFLOW_BACKENDS,
+    kind: "covers-every-backend",
+  },
+  // structural-checks.ts — both return early on an empty `unsupported`, and
+  // both document the no-backend case as deliberately QUIET (the carrier / the
+  // union return is emittable when nothing hosts the context).
+  {
+    code: "loom.generic-carrier-unsupported",
+    setName: "SUPPORTED_PAGED_BACKENDS",
+    set: SUPPORTED_PAGED_BACKENDS,
+    kind: "covers-every-backend",
+  },
+  {
+    code: "loom.operation-return-unsupported",
+    setName: "SUPPORTED_RETURN_BACKENDS",
+    set: SUPPORTED_RETURN_BACKENDS,
+    kind: "covers-every-backend",
+  },
+  // The inverted polarity: these gates fire only for a MEMBER, and have none.
+  {
+    code: "loom.remote-api-op-unsupported",
+    setName: "REMOTE_API_OP_UNSUPPORTED",
+    set: REMOTE_API_OP_UNSUPPORTED as ReadonlySet<string>,
+    kind: "empty",
+  },
+  {
+    code: "loom.flutter-primitive-unsupported",
+    setName: "FLUTTER_UNRENDERED_PRIMITIVES",
+    set: FLUTTER_UNRENDERED_PRIMITIVES,
+    kind: "empty",
+  },
+];
+
+// ---------------------------------------------------------------------------
+// DRIVEN_ELSEWHERE — proven, but not from `.ddd` source.
+//
+// A code can be perfectly reachable and still have no fixture here, because
+// this census drives SOURCE TEXT and some gates are not defects in source at
+// all.  The macro-authoring trio is the clean example: `loom.macro-threw` and
+// its siblings fire when a registered MACRO misbehaves, so tripping them needs
+// a macro, not a `.ddd`.
+//
+// Neither existing bucket fits, and forcing one would be a lie:
+//   * UNREACHABLE_PINS says "cannot be driven from `.ddd` source at all" — true
+//     here, but the word `unreachable` would then cover codes a test DOES
+//     drive, which is precisely the confusion this census exists to remove.
+//   * COVERED_ELSEWHERE is frozen and, by its own header, credits coverage
+//     measured ONCE — if the test that raised a code is deleted, nothing
+//     notices.  That is the weakness; adding to it would inherit the weakness.
+//
+// So this bucket carries a POINTER, and the pointer is checked: the named file
+// must exist AND must name the code.  Delete the test, rename the file, or
+// remove the assertion, and this fails — which is the guarantee
+// COVERED_ELSEWHERE cannot make.
+// ---------------------------------------------------------------------------
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+const DRIVEN_ELSEWHERE: Record<string, string> = {
+  "loom.macro-threw": "test/macro/misbehaving-macro-diagnostics.test.ts",
+  "loom.macro-non-ast-result": "test/macro/misbehaving-macro-diagnostics.test.ts",
+  "loom.macro-escapes-host": "test/macro/misbehaving-macro-diagnostics.test.ts",
 };
 
 const catalogueCodes = (): string[] => [
@@ -754,14 +1494,130 @@ const catalogueCodes = (): string[] => [
  *  context` arm their pinned siblings lack.  That split is the point: "every
  *  backend supports it" is a reason to pin only when the gate has NO second
  *  arm, and reading for the second arm is what separates a real pin from a
- *  TODO. */
-const UNCOVERED_BASELINE = 31;
+ *  TODO.
+ *
+ *  31 -> 17: the backend-capability cluster.  Thirteen were latent — their
+ *  gate's capability set already lists every backend-owning platform (or, for
+ *  two, is empty) — and are pinned, but as CHECKED pins: `LATENT_GATES` reads
+ *  the real `Set` on every run, so a sixth backend family re-arms the gate and
+ *  fails the pin instead of leaving a stale claim in a comment.  The
+ *  fourteenth, `loom.field-mask-unsupported`, looked identical and is NOT
+ *  pinned: reading `validateFieldMask` for the `anyBackend` arm its siblings
+ *  have showed it fires on a context no backend hosts, so it got a fixture.
+ *  That one-in-fourteen split is the whole reason the pin block insists on
+ *  reading for the second arm.
+ *
+ *  17 -> 9: the workflow-checks cluster.  Four are drivable and get fixtures;
+ *  four are pinned after being DRIVEN rather than inherited — three preempted
+ *  by scope resolution (the unknown name reports `loom.unknown-name` and the
+ *  statement lowers to a generic `expr-let`, never the typed kind the arm
+ *  switches on) and one by the grammar (`isolation:` without `transactional`
+ *  is a parse error).  M-T9.19 had listed FOUR as unreachable; one of them,
+ *  `loom.workflow-name-collision`, fires cleanly — its recorded preemption was
+ *  simply wrong, which is the second false unreachability claim this census
+ *  has caught in that one file. */
+const UNCOVERED_BASELINE = 0;
 
 describe("diagnostic firing census", () => {
+  // Keeps the LATENT_GATES pins honest.  Without this the pin is prose and its
+  // truth decays silently the moment a sixth backend family registers.
+  describe("the latent capability gates are still latent", () => {
+    it("every entry names a code that is actually pinned", () => {
+      const notPinned = LATENT_GATES.filter((g) => !(g.code in UNREACHABLE_PINS)).map(
+        (g) => g.code,
+      );
+      expect(
+        notPinned,
+        "a LATENT_GATES row whose code is not in UNREACHABLE_PINS checks a claim nobody made",
+      ).toEqual([]);
+    });
+
+    // The guard against a vacuous pass: an empty roster would make the
+    // subset assertion below trivially true for every gate.
+    it("the backend-owning roster is non-empty", () => {
+      expect(BACKEND_OWNING.length).toBeGreaterThan(0);
+      expect(BACKEND_OWNING).toContain("node");
+    });
+
+    it.each(LATENT_GATES.map((g) => [g.code, g] as const))("%s", (_code, gate) => {
+      if (gate.kind === "empty") {
+        expect(
+          [...gate.set],
+          `${gate.setName} is no longer empty, so ${gate.code} can fire again — it needs a real ` +
+            `FIRING_FIXTURES entry, and its UNREACHABLE_PINS entry must go`,
+        ).toEqual([]);
+        return;
+      }
+      const uncovered = BACKEND_OWNING.filter((p) => !gate.set.has(p));
+      expect(
+        uncovered,
+        `${gate.setName} no longer covers every backend-owning platform (missing ` +
+          `${uncovered.join(", ")}), so ${gate.code} is reachable again — either port the ` +
+          `feature on those platforms or replace its pin with a FIRING_FIXTURES entry`,
+      ).toEqual([]);
+    });
+  });
+
+  // Backs the `loom.platform-knob-style-layout-mismatch` pin the same way
+  // LATENT_GATES backs the capability pins: by re-deriving the claim, not
+  // trusting the prose.  The gate can only fire for a layout that is IN the
+  // platform's menu (anything else trips the out-of-menu check first) but NOT
+  // in the style's supported set.  Today no platform has such a value.
+  describe("the style/layout menus cannot disagree", () => {
+    const platforms = ["node", "dotnet", "python", "java", "elixir"] as const;
+
+    it("at least one platform declares layout adapters", () => {
+      // Vacuous-pass guard: if every platform had an empty menu the loop below
+      // would assert nothing at all.
+      expect(platforms.some((p) => hasAdapters(p) && allAdapterNames(p, "layout").length > 0)).toBe(
+        true,
+      );
+    });
+
+    it.each(platforms)("%s", (platform) => {
+      if (!hasAdapters(platform)) return;
+      const layouts = allAdapterNames(platform, "layout");
+      const unreachable: string[] = [];
+      for (const style of allAdapterNames(platform, "style")) {
+        const supported = new Set(styleSupportedLayouts(platform, style) ?? []);
+        for (const layout of layouts) {
+          if (!supported.has(layout)) unreachable.push(`${style} does not support ${layout}`);
+        }
+      }
+      expect(
+        unreachable,
+        `${platform} now offers a layout its style refuses (${unreachable.join("; ")}), so ` +
+          `loom.platform-knob-style-layout-mismatch is reachable — replace its UNREACHABLE_PINS ` +
+          `entry with a FIRING_FIXTURES entry naming that combination`,
+      ).toEqual([]);
+    });
+  });
+
+  // The half that makes DRIVEN_ELSEWHERE a claim rather than a note.
+  describe("every DRIVEN_ELSEWHERE pointer still points at something", () => {
+    it.each(Object.entries(DRIVEN_ELSEWHERE))("%s", (code, relPath) => {
+      const abs = join(repoRoot, relPath);
+      expect(existsSync(abs), `${code} points at ${relPath}, which does not exist`).toBe(true);
+      // A BOUNDED match, not `toContain`.  A plain substring check passes for a
+      // RENAMED code — `loom.macro-escapes-host-RENAMED` contains
+      // `loom.macro-escapes-host` — so the first version of this assertion was
+      // vacuous, and the mutation that should have failed it did not.  The
+      // negative lookahead is what makes the pointer check real.
+      const named = new RegExp(`${code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z0-9-])`);
+      expect(
+        named.test(readFileSync(abs, "utf8")),
+        `${relPath} no longer names ${code} (as a whole code — a longer code that merely ` +
+          `starts with it does not count), so the pointer credits coverage that is gone.  ` +
+          `Restore the assertion, or move the code back to UNCOVERED.`,
+      ).toBe(true);
+    });
+  });
+
   describe("every catalogued code is in exactly one bucket", () => {
     const buckets = {
       FIRING_FIXTURES: Object.keys(FIRING_FIXTURES),
       UNREACHABLE_PINS: Object.keys(UNREACHABLE_PINS),
+      DRIVEN_ELSEWHERE: Object.keys(DRIVEN_ELSEWHERE),
       UNCOVERED: [...UNCOVERED],
       COVERED_ELSEWHERE: [...COVERED_ELSEWHERE],
     };

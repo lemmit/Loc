@@ -1,3 +1,4 @@
+import { forEachModelExpr } from "../../util/model-exprs.js";
 // -------------------------------------------------------------------------
 // Structural checks — workspace-scope uniqueness, find-name collisions,
 // unimplemented generics, extern ops, event-sourced discipline,
@@ -22,18 +23,24 @@ import type {
   FindIR,
   FunctionIR,
   StmtIR,
+  TestIR,
   TypeIR,
 } from "../../types/loom-ir.js";
 import { allContexts } from "../../types/loom-ir.js";
 import { isTphBase, isTphConcrete } from "../../util/inheritance.js";
 import { aggregateIsEventSourced, resolveDataSourceConfig } from "../../util/resolve-datasource.js";
-import {
-  walkExprDeep,
-  walkStmtExprsDeep as walkExprsInStmt,
-  walkWorkflowStmtExprsDeep as walkExprsInWorkflowStmt,
-} from "../../util/walk.js";
+import { walkExprDeep, walkStmtExprsDeep as walkExprsInStmt } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
+
+// Backend platforms that render the paged generic carrier / the `or`-union
+// operation return.  Both are EXPORTED so the diagnostic-firing census can
+// check the claim its UNREACHABLE_PIN makes: each set today contains every
+// backend-owning platform, so `unsupported` is always empty and the gate
+// cannot fire.  A sixth backend that has not ported either feature makes the
+// gate live again — and fails that pin, which is the point.
+export const SUPPORTED_PAGED_BACKENDS = new Set(["node", "dotnet", "elixir", "python", "java"]);
+export const SUPPORTED_RETURN_BACKENDS = new Set(["node", "dotnet", "python", "java", "elixir"]);
 
 // ---------------------------------------------------------------------------
 // Workspace uniqueness — multi-file (Stage A) makes it easy to declare
@@ -326,7 +333,6 @@ export function validateGenericInstancesUnimplemented(
   // (the legacy `phoenix` / `phoenixLiveView` platform aliases canonicalize
   // to `elixir` per D-ELIXIR-PLATFORM).  All four backends now emit
   // generic carriers.
-  const SUPPORTED_PAGED_BACKENDS = new Set(["node", "dotnet", "elixir", "python", "java"]);
   const unsupported = [...backendPlatforms].filter((p) => !SUPPORTED_PAGED_BACKENDS.has(p));
   if (unsupported.length === 0) return;
 
@@ -416,9 +422,9 @@ function containsUnion(type: TypeIR): boolean {
  * payload whose only permitted field is `resource: string` (filled with the
  * aggregate name; other fields can't be derived from absence).  Anything else
  * (aggregate-or-aggregate, three-plus variants, scalar variants, named payload
- * unions) has no derivable selection and is rejected here — previously these
- * shapes generated runtime stubs (`NotImplementedException` on .NET, an
- * untagged body on Hono).
+ * unions) has no derivable selection and is rejected here rather than left to
+ * generate a runtime stub (`NotImplementedException` on .NET, an untagged body
+ * on Hono).
  *
  * Backend scope: enforced for every backend host (node / dotnet / java /
  * python / elixir) and for the legacy no-deployable path (`generate ts` /
@@ -601,7 +607,6 @@ export function validateOperationReturnsUnimplemented(
   // and elixir (plain Ecto/Phoenix) followed — every backend emits it for any
   // returning op.  No backend (legacy single-context path) → emittable, gate
   // stays quiet.
-  const SUPPORTED_RETURN_BACKENDS = new Set(["node", "dotnet", "python", "java", "elixir"]);
 
   const isCapable = (p: string): boolean => SUPPORTED_RETURN_BACKENDS.has(p);
 
@@ -763,7 +768,7 @@ export function validateExternOperations(ctx: BoundedContextIR, diags: LoomDiagn
 }
 
 // ---------------------------------------------------------------------------
-// Event-sourcing body discipline (D-DOCUMENT-AXIS, appliers Phase A1).
+// Event-sourcing body discipline (D-DOCUMENT-AXIS, appliers).
 //
 // `persistedAs: eventLog` makes an aggregate event-sourced: its truth is
 // the event stream, and state is a fold of that stream.  That imposes a
@@ -1067,57 +1072,25 @@ export function validateExprIntegrity(loom: EnrichedLoomModel, diags: LoomDiagno
       }
     };
 
-  for (const sys of loom.systems) {
-    for (const ui of sys.uis) {
-      for (const page of ui.pages) {
-        const source = `${sys.name}/${ui.name}/${page.name}`;
-        const visit = visitor(source, true);
-        walkExpr(page.body, visit);
-        walkExpr(page.title, visit);
-        walkExpr(page.requires, visit);
-        for (const s of page.state) walkExpr(s.init, visit);
-      }
-    }
-  }
-
-  for (const c of allContexts(loom)) {
-    // Workflows — walk every expression-bearing statement.
-    for (const wf of c.workflows) {
-      const source = `${c.name}/${wf.name}`;
-      const visit = visitor(source);
-      for (const st of wf.statements) walkExprsInWorkflowStmt(st, visit);
-    }
-    // Aggregate operations + invariants.
-    for (const agg of c.aggregates) {
-      for (const op of agg.operations) {
-        const source = `${c.name}/${agg.name}/${op.name}`;
-        const visit = visitor(source);
-        for (const st of op.statements) walkExprsInStmt(st, visit);
-      }
-      for (const ap of agg.appliers ?? []) {
-        const source = `${c.name}/${agg.name}/apply(${ap.event})`;
-        const visit = visitor(source);
-        for (const st of ap.statements) walkExprsInStmt(st, visit);
-      }
-      for (const inv of agg.invariants) {
-        const source = `${c.name}/${agg.name}/invariant`;
-        const visit = visitor(source);
-        walkExpr(inv.expr, visit);
-        walkExpr(inv.guard, visit);
-      }
-      // Derived properties + function bodies — the canonical home for the
-      // collection transformation ops (`total = lines.map(...).sum()`), so the
-      // distinct/join correctness gates must reach them.
-      for (const d of agg.derived ?? []) {
-        walkExpr(d.expr, visitor(`${c.name}/${agg.name}/${d.name}`));
-      }
-      for (const fn of agg.functions ?? []) {
-        const visit = visitor(`${c.name}/${agg.name}/${fn.name}`);
-        if ("expr" in fn.body) walkExpr(fn.body.expr, visit);
-        else for (const st of fn.body.stmts) walkExprsInStmt(st, visit);
-      }
-    }
-  }
+  // ONE outer loop (M-T9.40).  This check used to carry its own — page
+  // body/title/requires/state plus the aggregate/workflow domain sites — and
+  // an A/B over five examples measured what that reached: 2,316 expressions
+  // against the 3,609 the model actually holds.  It silently skipped every
+  // find filter, criterion, retrieval, domain service, command/query handler,
+  // seed value, field default, context filter and stamp, every test, every
+  // value-object and entity-part member, and — on the UI side it partly
+  // covered — every component, store, action, named layout, menu and
+  // notification.
+  //
+  // `forEachModelExpr` hands over all of them, already deep, with the `ui` flag
+  // the render-scope arms need — a fact only the walk has, since `DerivedIR.expr`
+  // and `ActionIR.body` occur on both sides of that line.  Widening produced
+  // ZERO new diagnostics across six examples and all 59 corpus fixtures, so the
+  // rules were never being violated at the sites this could not see; the change
+  // is reach, not behaviour.
+  forEachModelExpr(loom, ({ expr, source, ui }) => {
+    visitor(source, ui)(expr);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1199,35 +1172,20 @@ export function validateVariantMatch(loom: EnrichedLoomModel, diags: LoomDiagnos
       }
     };
 
-  for (const c of allContexts(loom)) {
-    for (const wf of c.workflows) {
-      const v = visit(`${c.name}/${wf.name}`);
-      for (const st of wf.statements) walkExprsInWorkflowStmt(st, v);
-    }
-    for (const agg of c.aggregates) {
-      for (const op of agg.operations) {
-        const v = visit(`${c.name}/${agg.name}/${op.name}`);
-        for (const st of op.statements) walkExprsInStmt(st, v);
-      }
-      for (const ap of agg.appliers ?? []) {
-        const v = visit(`${c.name}/${agg.name}/apply(${ap.event})`);
-        for (const st of ap.statements) walkExprsInStmt(st, v);
-      }
-      for (const inv of agg.invariants) {
-        const v = visit(`${c.name}/${agg.name}/invariant`);
-        walkExpr(inv.expr, v);
-        walkExpr(inv.guard, v);
-      }
-      for (const d of agg.derived ?? []) {
-        walkExpr(d.expr, visit(`${c.name}/${agg.name}/${d.name}`));
-      }
-      for (const fn of agg.functions ?? []) {
-        const v = visit(`${c.name}/${agg.name}/${fn.name}`);
-        if ("expr" in fn.body) walkExpr(fn.body.expr, v);
-        else for (const st of fn.body.stmts) walkExprsInStmt(st, v);
-      }
-    }
-  }
+  // ONE outer loop (M-T9.40).  This check carried a straight copy of the
+  // outer loop `validateExprIntegrity` used to have, minus its ui half — so a
+  // `match` written anywhere the copy did not reach (a page or component body,
+  // a find filter, a handler, a criterion, a domain service, a test) was
+  // parsed, lowered and emitted with none of its four semantic gates run:
+  // non-union subject, unknown variant, duplicate variant, non-exhaustive.
+  //
+  // Widening produced ZERO new diagnostics across nine examples and all 59
+  // corpus fixtures, so no existing model was relying on the gap; the change
+  // is reach, not behaviour.  `ui` is ignored here — a variant match means the
+  // same thing on both sides of that line.
+  forEachModelExpr(loom, ({ expr, source }) => {
+    visit(source)(expr);
+  });
 }
 
 /** Flag every expression in a function body — the expression form walks the
@@ -1514,6 +1472,22 @@ export function validateResourceOpPlacement(ctx: BoundedContextIR, diags: LoomDi
   const flagStmts = (location: string, stmts: readonly StmtIR[]): void => {
     for (const s of stmts) walkExprsInStmt(s, (e) => flag(location, e));
   };
+  // A `test { }` body is the FOURTH statement-bearing surface (after
+  // operations, guards and function bodies), and it renders into ordinary
+  // target code — so a resource-op there fails exactly the five ways the gate
+  // exists to prevent: .NET and Java DIE mid-generation ("reached the renderer
+  // without a resource class mapping"), node and python emit `await` inside a
+  // non-async test fn against an unimported symbol, elixir alone degrades
+  // honestly.  `TestStmtIR` widens `StmtIR` with `expect` / `expect-throws`,
+  // whose `expr` is the most likely host of the call.
+  const flagTestStmts = (location: string, tests: readonly TestIR[]): void => {
+    for (const t of tests) {
+      for (const s of t.statements) {
+        if (s.kind === "expect" || s.kind === "expect-throws") flag(location, s.expr);
+        else walkExprsInStmt(s, (e) => flag(location, e));
+      }
+    }
+  };
   // An aggregate / part / value object — every member surface that renders into
   // domain (or route-gate) code.  `creates` / `destroys` are separate arrays
   // from `operations`, and a lifecycle `requires` guard is a statement inside
@@ -1529,6 +1503,7 @@ export function validateResourceOpPlacement(ctx: BoundedContextIR, diags: LoomDi
     }
     for (const d of agg.derived) flag(`${agg.name}.derived[${d.name}]`, d.expr);
     for (const fn of agg.functions) flagFunctionBody(`${agg.name}.function[${fn.name}]`, fn, flag);
+    flagTestStmts(`${agg.name}.test`, agg.tests);
     for (const part of agg.parts) {
       for (const inv of part.invariants) {
         flag(`${part.name}.invariant`, inv.expr);
@@ -1546,12 +1521,15 @@ export function validateResourceOpPlacement(ctx: BoundedContextIR, diags: LoomDi
     }
     for (const d of vo.derived) flag(`${vo.name}.derived[${d.name}]`, d.expr);
     for (const fn of vo.functions) flagFunctionBody(`${vo.name}.function[${fn.name}]`, fn, flag);
+    flagTestStmts(`${vo.name}.test`, vo.tests);
   }
   // Repository find filters lower to SQL / a query predicate; a resource-op
   // there has no renderable form on any backend either.
   for (const repo of ctx.repositories) {
     for (const f of repo.finds) flag(`repository[${repo.name}].find[${f.name}]`, f.filter);
   }
+  // Context-scoped integration tests — the fourth `TestIR[]` array.
+  flagTestStmts(`${ctx.name}.test`, ctx.tests);
   // Domain-service operation bodies — see the DOMAIN SERVICES header note: the
   // five emitters split 3 throws / 2 unimported-await-in-a-sync-function, so
   // this is the same class, not a per-backend gap.
@@ -1559,6 +1537,7 @@ export function validateResourceOpPlacement(ctx: BoundedContextIR, diags: LoomDi
     for (const op of svc.operations) {
       flagStmts(`domainService[${svc.name}].operation[${op.name}]`, op.body);
     }
+    flagTestStmts(`domainService[${svc.name}].test`, svc.tests);
   }
 }
 
@@ -2024,12 +2003,12 @@ export function validateLifecycleBodyDropped(ctx: BoundedContextIR, diags: LoomD
       ["destroy", agg.canonicalDestroy],
     ] as const) {
       // ── the guard's READABLE SURFACE ────────────────────────────────────
-      // Runs for EVERY lifecycle guard, event-sourced included.  It used to sit
-      // below the ES `continue` guarding the drop report, so an ES create's
-      // guard was never checked at all — and an ES create body IS rendered (into
-      // the domain `_init`), which makes it the one place where an unreadable
-      // guard reaches a compiler rather than a diagnostic.  The exemption below
-      // is about whether a body is DROPPED; it was never a statement about what
+      // Runs for EVERY lifecycle guard, event-sourced included — deliberately
+      // ABOVE the ES `continue` that guards the drop report.  An ES create body
+      // IS rendered (into the domain `_init`), which makes it the one place
+      // where an unreadable guard would reach a compiler rather than a
+      // diagnostic.  The exemption below is about whether a body is DROPPED;
+      // it is not a statement about what
       // a guard may read, and reusing it for both conflated two questions.
       //
       // WHICH LAYER OWNS THE ES CASE.  This check answers "what may a guard

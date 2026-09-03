@@ -265,7 +265,7 @@ export function renderJavaQueryProjections(
     // Row record from the projection's wire shape.
     const rowImports = new Set<string>();
     const components = shape.map((f) => {
-      collectWireImports(f.type, rowImports);
+      collectWireImports(f.type, rowImports, "Response");
       return `${wireJavaType(f.type, "Response")} ${f.name}`;
     });
     out.set(`${rowName}.java`, {
@@ -359,10 +359,7 @@ export function renderJavaQueryProjections(
             groupKeyOf(k.expr)?.transform !== undefined,
           ),
         ),
-        ...grouped.aggregates.map((a, i) => {
-          if (jpqlNeedsBigDecimal(a)) imports.add("java.math.BigDecimal");
-          return jpqlCoerce(a, groupedCol(grouped.keys.length + i));
-        }),
+        ...grouped.aggregates.map((a, i) => jpqlCoerce(a, groupedCol(grouped.keys.length + i))),
       ];
       // The raw `Query` list needs the one @SuppressWarnings the untyped JPA API
       // forces, whichever row element type it carries.
@@ -382,7 +379,7 @@ export function renderJavaQueryProjections(
       // NO `continue` — fall through to the shared `requires`-gate + list-route
       // block below, exactly like the per-row arms.
     } else if (aggregates) {
-      // WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0) — ONE JPQL query with
+      // WHOLE-TABLE AGGREGATION (M-T1.3) — ONE JPQL query with
       // `count`/`sum`/`avg`/`min`/`max`, no rows materialised.  The shape exists
       // precisely to avoid the naive read: a `findAll()` stream over the whole
       // table with every row hydrated into an entity to produce one integer.
@@ -405,10 +402,7 @@ export function renderJavaQueryProjections(
       // it through the SAME `jpqlCoerce` the multi-column arm uses for that
       // column — only the READ expression changes with the arity.
       const single = aggregates.length === 1;
-      const args = aggregates.map((a, i) => {
-        if (jpqlNeedsBigDecimal(a)) imports.add("java.math.BigDecimal");
-        return jpqlCoerce(a, single ? "r" : `r[${i}]`);
-      });
+      const args = aggregates.map((a, i) => jpqlCoerce(a, single ? "r" : `r[${i}]`));
       methods.push(
         `    public ${rowName} ${findName}() {`,
         ...aggregationPrelude(scope, qpctx.basePkg),
@@ -732,13 +726,6 @@ function jpqlAggregate(agg: ProjectionAggregateIR): string {
   return `${agg.op}(e.${arg.member})`;
 }
 
-/** Whether coercing this aggregate needs `java.math.BigDecimal` imported. */
-function jpqlNeedsBigDecimal(s: AggregateSelect): boolean {
-  const c = aggregateCoercion(s);
-  const inner = s.type.kind === "optional" ? s.type.inner : s.type;
-  return !c.isCount && !c.asString && inner.kind === "primitive" && inner.name === "decimal";
-}
-
 /** Coerce one JPQL aggregate result to the row's declared wire type.
  *
  *  JPQL hands back `Object`s whose runtime types are provider-chosen (`Long`
@@ -774,9 +761,16 @@ function jpqlCoerce(s: AggregateSelect, read: string): string {
       : `${read} == null ? "0" : ${read}.toString()`;
   }
   if (inner.kind === "primitive" && inner.name === "decimal") {
+    // decimal → the row's `double` component (RS-24 / M-T6.46).  The provider
+    // types an aggregate result by its own choice — `BigDecimal` for a `sum`
+    // over a numeric column, `Double` for an `avg` — so the read goes through
+    // `Number` rather than a cast, and lands on the SAME double every other
+    // backend ships.  Before this, only `avg` was double-parity, and only by
+    // the provider's accident; `sum`/`min`/`max` re-wrapped into a
+    // `BigDecimal` and serialized the stored column's full precision.
     return c.optional
-      ? `${read} == null ? null : new BigDecimal(${read}.toString())`
-      : `${read} == null ? BigDecimal.ZERO : new BigDecimal(${read}.toString())`;
+      ? `${read} == null ? null : ((Number) ${read}).doubleValue()`
+      : `${read} == null ? 0.0 : ((Number) ${read}).doubleValue()`;
   }
   const asLong = inner.kind === "primitive" && inner.name === "long";
   const num = `((Number) ${read}).${asLong ? "longValue" : "intValue"}()`;
@@ -815,8 +809,12 @@ function groupKeyCoerce(
       case "long":
         return `((Number) ${read}).longValue()`;
       case "decimal":
-        imports.add("java.math.BigDecimal");
-        return `new BigDecimal(${read}.toString())`;
+        // decimal → the row's `double` component (RS-24 / M-T6.46), the same
+        // narrowing `domainToWire` applies on a per-row read.  A key column
+        // comes back as the entity's own mapped `BigDecimal`, so it still goes
+        // through `Number` rather than a cast — but it lands on a double, not
+        // on a re-wrapped BigDecimal carrying the stored column's full scale.
+        return `((Number) ${read}).doubleValue()`;
       case "money":
         // money → wire STRING at the fixed money scale (RS-12), matching
         // `domainToWire`.

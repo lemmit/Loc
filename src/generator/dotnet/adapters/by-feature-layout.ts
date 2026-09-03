@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
-// byFeature — a real LayoutAdapter for the dotnet platform (D-REALIZATION-AXES
-// Phase 5a).  The sibling of `byLayer`: same artifacts, different on-disk
+// byFeature — a real LayoutAdapter for the dotnet platform
+// (D-REALIZATION-AXES).  The sibling of `byLayer`: same artifacts, different on-disk
 // arrangement.  Where `byLayer` groups by ARCHITECTURAL LAYER
 // (`Application/<Plural>/Commands`, `Api/<Agg>Controller.cs`, …), `byFeature`
 // colocates everything for ONE aggregate's application + API surface under a

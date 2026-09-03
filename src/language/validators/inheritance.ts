@@ -181,8 +181,7 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
         );
       }
     }
-    // (A `contains` part on a TPH concrete used to be gated here — Rule 4c,
-    // `loom.tph-contains-unsupported`.  It is now supported: the part emits its
+    // (A `contains` part on a TPH concrete is NOT gated: the part emits its
     // own table FK'd to the shared base table (Pattern 4, TPT-via-`contains`),
     // since a TPH concrete's id is the shared-table row id.  See
     // emit/schema.ts + migrations-builder.ts `tableForPart`.)

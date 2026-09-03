@@ -68,7 +68,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { mixDepsGetShell } from "./mix-retry.mjs";
+import { mixDepsGetShell, mixLocalInstallShell } from "./mix-retry.mjs";
 import { stopServer, waitForPort } from "./proc.mjs";
 import { outcomesFromPlaywrightJson } from "./ui-stack.mjs";
 
@@ -246,7 +246,7 @@ async function main() {
     // and blocks, so the process staying alive IS the "migrations applied"
     // signal, exactly as run-elixir.mjs relies on.
     const bootScript =
-      `${mirror?.shellPrefix ?? ""}mix local.hex --force && mix local.rebar --force && ` +
+      `${mirror?.shellPrefix ?? ""}${mixLocalInstallShell()} && ` +
       `${mixDepsGetShell()} && mix ecto.create && mix ecto.migrate && mix phx.server`;
     server = useMix
       ? spawn("bash", ["-c", bootScript], { cwd: projDir, env, stdio: "pipe", detached: true })

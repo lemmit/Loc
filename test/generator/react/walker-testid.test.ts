@@ -135,7 +135,7 @@ describe("testid: named-arg convention on every primitive", () => {
   });
 
   it("Stat: testid lands on the root <Stack>", async () => {
-    const tsx = await emit(`Stat { label: "Users", value: "10", testid: "s1" }`);
+    const tsx = await emit(`Stat { "Users", "10", testid: "s1" }`);
     expect(tsx).toMatch(/<Stack [^>]*\bdata-testid="s1"/);
   });
 
@@ -147,22 +147,22 @@ describe("testid: named-arg convention on every primitive", () => {
   });
 
   it("Field: testid lands on the underlying <TextInput>, not a surrounding wrapper", async () => {
-    const tsx = await emit(`Field { label: "Name", testid: "name" }`);
+    const tsx = await emit(`Field { "Name", testid: "name" }`);
     expect(tsx).toMatch(/<TextInput[^>]*\bdata-testid="name"/);
   });
 
   it("NumberField: testid lands on the underlying <NumberInput>", async () => {
-    const tsx = await emit(`NumberField { label: "Qty", testid: "qty" }`);
+    const tsx = await emit(`NumberField { "Qty", testid: "qty" }`);
     expect(tsx).toMatch(/<NumberInput[^>]*\bdata-testid="qty"/);
   });
 
   it("PasswordField: testid lands on the underlying <PasswordInput>", async () => {
-    const tsx = await emit(`PasswordField { label: "Password", testid: "pw" }`);
+    const tsx = await emit(`PasswordField { "Password", testid: "pw" }`);
     expect(tsx).toMatch(/<PasswordInput[^>]*\bdata-testid="pw"/);
   });
 
   it("Toggle: testid lands on the underlying <Switch>", async () => {
-    const tsx = await emit(`Toggle { label: "On", testid: "tgl" }`);
+    const tsx = await emit(`Toggle { "On", testid: "tgl" }`);
     expect(tsx).toMatch(/<Switch[^>]*\bdata-testid="tgl"/);
   });
 });

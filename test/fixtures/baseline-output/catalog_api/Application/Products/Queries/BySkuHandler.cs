@@ -22,6 +22,6 @@ public sealed class BySkuHandler : IQueryHandler<BySkuQuery, ProductResponse?>
     public async ValueTask<ProductResponse?> Handle(BySkuQuery query, CancellationToken cancellationToken)
     {
         var domain = await _repo.BySku(query.Sku, cancellationToken);
-        return domain is null ? null : new ProductResponse(domain.Id.Value, domain.Sku, new MoneyResponse((double)domain.Price.Amount, domain.Price.Currency), domain.Version, domain.Display);
+        return domain is null ? null : new ProductResponse(domain.Id.Value, domain.Sku, new MoneyResponse(double.Parse(domain.Price.Amount.ToString(System.Globalization.CultureInfo.InvariantCulture), System.Globalization.CultureInfo.InvariantCulture), domain.Price.Currency), domain.Version, domain.Display);
     }
 }

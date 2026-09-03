@@ -264,6 +264,30 @@ in `src/system/` composes the resulting per-deployable file maps into
 one tree and writes the cross-cutting `docker-compose.yml`,
 `db-init/`, and `.loom/` artefacts on top.
 
+### `platform: node` does not mount a UI — a settled non-goal
+
+`node` is the only backend with `mountsUi: false`, and that is **deliberate,
+not a gap**: the Hono emitter serves JSON only.  It emits no static-asset
+middleware (`serveStatic` appears nowhere in `src/platform/hono/`), so there is
+nothing for a `ui:` binding to be served *by*.  A React/Vue/Svelte/Angular UI
+against a node backend is its own deployable — an nginx-served bundle with
+`targets:` pointed at the API — which is the shape every shipped example uses.
+The four `mountsUi: true` backends (dotnet, java, python, elixir) each host a
+bundle from their own web server; node's runtime has no equivalent story that
+does not amount to reimplementing one.
+
+Re-open this only with the static-serving emission in hand, not the flag:
+flipping `mountsUi` alone would admit a `ui:` binding that generates a
+deployable serving 404s for every page.
+
+> **Known inconsistency (recorded, not fixed):** node's descriptor still
+> declares `hostableFrameworks: STATIC_BUNDLE_FRAMEWORKS`.  That field is
+> read only by the `loom.ui-framework-unhostable` rule, which is itself
+> guarded by `platformMountsUi(...)` — so on node it is unreachable data
+> that reads as a capability claim the emitter does not honour.  Emptying it
+> touches the `adapter-metadata.ts` mirror and its consistency test, so it is
+> a separate change.
+
 ## Cross-references
 
 - [`generators.md`](generators.md) — per-platform feature matrix

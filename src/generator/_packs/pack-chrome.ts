@@ -56,7 +56,7 @@
 //
 // i18n-OFF IS BYTE-IDENTICAL BY CONSTRUCTION, not by reconstruction: the
 // binding starts OFF, and OFF each helper returns exactly the bytes the
-// template used to spell inline (`chromeImport` returns nothing at all).  A
+// template spells inline (`chromeImport` returns nothing at all).  A
 // frontend opts in only for a UI that is already i18n-enabled by its authored
 // strings — the same gate `APP_SHELL_CHROME` / `FORM_CHROME` use, so pack
 // chrome never flips the translation runtime on for a string-less app.
@@ -239,7 +239,7 @@ const SPELLINGS: Record<PackFormat, ChromeSpelling> = {
 };
 
 /** Substitute a message's ICU holes with their literal values — the i18n-OFF
- *  rendering, which must reproduce the bytes the template used to spell. */
+ *  rendering, which must reproduce the bytes the template spells inline. */
 function fillHoles(message: string, holes: ReadonlyArray<[string, string]>): string {
   const byName = new Map(holes);
   return message.replace(HOLE, (whole, name: string) => byName.get(name) ?? whole);
@@ -255,7 +255,7 @@ function holesOf(options: Handlebars.HelperOptions): Array<[string, string]> {
 
 /** Every `.hbs` helper this module binds, for one pack in one i18n state.
  *  `i18n: false` (the default a pack loads in) yields the raw bytes the
- *  template previously spelled inline. */
+ *  template spells inline. */
 export function chromeHelpers(
   manifest: { name: string; chrome?: Record<string, string>; format?: PackFormat },
   i18n: boolean,

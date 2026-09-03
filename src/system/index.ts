@@ -119,7 +119,7 @@ export interface GenerateSystemOptions {
    *  the node/Hono backend's domain code, plus (M8) the React and Angular
    *  frontends' `.tsx` / `.component.ts` pages — the only files a JS/TS
    *  debugger can step through today.  Also feeds JSR-45 `.java.smap`
-   *  sidecar emission (M10 phase 6b, `src/system/smap.ts`) for every
+   * sidecar emission (`src/system/smap.ts`) for every
    *  recorded `.java` output, sharing this same gate.  `src/system/` stays
    *  browser-safe (no `fs`), so the CLI/playground supply the text; a
    *  mapped file with no entry here is skipped (no sidecar), never guessed.
@@ -207,7 +207,7 @@ export function generateSystemsFromLoom(
       out.set(path, `${content}//# sourceMappingURL=${basename}\n`);
     }
   }
-  // JSR-45 SMAP sidecars (Milestone 10 phase 6b) — the Java sibling of the
+  // JSR-45 SMAP sidecars — the Java sibling of the
   // v3 loop above, same `recorder && options.sourceTexts` gate.  Unlike v3,
   // the mapped `.java` file's own content is never touched: a compiled
   // class carries the SourceDebugExtension pointer at Gradle build time
@@ -294,7 +294,7 @@ function emitSystem(
     out.set("monitoring/prometheus.yml", renderPrometheusConfig(sys));
   }
   out.set("db-init/00-create-databases.sql", renderDbInit(sys));
-  // Broker auth provisioning (M-T4.4 slice 5, §7): each wired rabbitmq
+  // Broker auth provisioning (§7): each wired rabbitmq
   // storage mounts a definitions file (vhost + per-deployable users +
   // scoped permissions) plus the one-line conf that loads it.
   for (const storageName of channelTransportStorageNames(sys)) {
@@ -307,7 +307,7 @@ function emitSystem(
     );
     out.set(`broker-init/${slug}-definitions.json`, renderRabbitDefinitions(sys, storageName));
   }
-  // M18 phase 8 slice 1 (Node debug wiring) / M26 (.NET + Java): one VS Code
+  // (Node debug wiring) / M26 (.NET + Java): one VS Code
   // launch config per deployable whose platform implements `debugLaunch`,
   // sibling of docker-compose.yml, `--sourcemap`-gated.  Each surface owns
   // its own naming (assembly / main-class FQN); the system layer only
@@ -358,9 +358,9 @@ function emitSystem(
   out.set(".loom/architecture.c4", renderC4Model(sys));
   // DataSource routing — derived markdown view of how `dataSource`
   // declarations route domain contexts to physical storage.  Pairs
-  // with the Phase B / C / D validators.  See `datasources.ts`.
+  // with the dataSource validators.  See `datasources.ts`.
   out.set(".loom/datasources.md", renderDataSourcesMd(sys));
-  // AsyncAPI view of `channel` declarations (channels.md, Slice 1).
+  // AsyncAPI view of `channel` declarations (channels.md).
   // Realises the BC-model's "events as channels" placeholder.
   out.set(".loom/asyncapi.yaml", renderAsyncApi(sys));
 
@@ -514,7 +514,7 @@ function emitDeployable(
   // `d.platform` — they're version-independent.  (Before multiple node
   // versions existed, family→default coincided with the only version.)
   const platform = platformFor(d.platformRef as Platform);
-  // D-REALIZATION-AXES (Phase 4): resolve the deployable's `application:`
+  // D-REALIZATION-AXES: resolve the deployable's `application:`
   // (→ style) and `directoryLayout:` (→ layout) selections to concrete
   // adapters HERE — the system layer is the one allowed to import
   // `resolve-adapters` (generators must not reach into `src/platform/`).
@@ -871,7 +871,7 @@ function renderKeycloakRealm(sys: SystemIR): string {
 function renderStorageSidecars(sys: SystemIR): { services: string[][]; volumes: string[] } {
   const services: string[][] = [];
   const volumes: string[] = [];
-  // Broker transports (channels.md; M-T4.4 slice 2): a redis-type storage
+  // Broker transports (channels.md; M-T4.4): a redis-type storage
   // that backs a channelSource some deployable actually wires gets a Valkey
   // sidecar — valkey/valkey (BSD-3, redis-wire-compatible) rather than the
   // relicensed redis: images (design §6a).  Cache-only redis storages (no
@@ -880,7 +880,7 @@ function renderStorageSidecars(sys: SystemIR): { services: string[][]; volumes: 
   for (const s of sys.storages) {
     const slug = serviceSlug(s.name);
     if (s.type === "redis" && transportStorages.has(s.name)) {
-      // Broker auth (M-T4.4 slice 5, design §7): `requirepass` locks the
+      // Broker auth (design §7): `requirepass` locks the
       // sidecar to the single v1 credential the wired deployables carry in
       // their `redis://:<pass>@…` URL (ACL-per-service deferred).
       const pass = devPassword(s.name);
@@ -920,7 +920,7 @@ function renderStorageSidecars(sys: SystemIR): { services: string[][]; volumes: 
       // in-network advertised listener (the default config advertises
       // localhost, unreachable from sibling containers).
       //
-      // Broker auth (M-T4.4 slice 5, design §7): the CLIENT listener the
+      // Broker auth (design §7): the CLIENT listener the
       // deployables connect to runs SASL/PLAIN (one `user_<name>` per wired
       // deployable in the JAAS line, matching the `kafka://user:pass@…`
       // URLs); inter-broker + healthcheck stay on the loopback-reachable
@@ -1014,7 +1014,7 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
   // (D-AUTH-OIDC §4.2).  These env vars satisfy the OIDC verifier's
   // `env(...)`-bound issuer/client; production overrides them.
   const oidc = !!(d.auth?.required && bundlesKeycloak(sys));
-  // Broker bindings (channels.md; M-T4.4 slice 2): the deployable's wired
+  // Broker bindings (channels.md; M-T4.4): the deployable's wired
   // redis-bound channelSources — each injects its `LOOM_CHANNEL_<NAME>_URL`
   // env below and orders startup after the Valkey sidecar's healthcheck.
   const brokerBindings = brokerChannelBindings(d, sys);
@@ -1070,7 +1070,7 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
   lines.push(`  environment:`);
   for (const [k, v] of shape.env) lines.push(`    ${k}: ${JSON.stringify(v)}`);
   for (const b of brokerBindings) {
-    // Credentialed URL (M-T4.4 slice 5, §7): the deployable's own broker
+    // Credentialed URL (§7): the deployable's own broker
     // identity rides the URL — the one seam every driver already consumes,
     // and the value the k8s chart classifies as a secret.
     lines.push(

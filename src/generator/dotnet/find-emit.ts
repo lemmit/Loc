@@ -6,9 +6,10 @@ import type {
   RetrievalIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
+import type { AggPool } from "../../ir/util/inheritance.js";
 import { upperFirst } from "../../util/naming.js";
 import { canEmitToExpressionFor } from "./criteria-emit.js";
-import { bypassedFilterNames } from "./emit/efcore.js";
+import { bypassedFilterNames, hasNonBypassableFilter } from "./emit/efcore.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 
 /** The `.IgnoreQueryFilters(…)` clause for an `ignoring`-bearing read
@@ -16,13 +17,19 @@ import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
  *  the `.Where(...)`.  `ignoring *` → the parameterless overload (drop every
  *  query filter); `ignoring <Cap>` → `IgnoreQueryFilters(["Name1", …])` for the
  *  EF filters the bypassed capabilities contributed.  Returns "" when nothing
- *  is bypassed (a `*` on a filterless aggregate is a harmless no-op). */
+ *  is bypassed (a `*` on a filterless aggregate is a harmless no-op).
+ *
+ *  The parameterless overload drops EVERY query filter, so it is only safe
+ *  when the aggregate carries no NON-bypassable filter.  A `policy { deny on X }`
+ *  carve-out is exactly that: `ignoring *` must not lift the always-false
+ *  sentinel, so the bypassable filters are enumerated by name instead. */
 export function ignoreFiltersClause(
   agg: EnrichedAggregateIR,
+  pool: AggPool,
   bypass: { bypassAll?: boolean; bypassCaps?: string[] },
 ): string {
-  if (bypass.bypassAll) return ".IgnoreQueryFilters()";
-  const names = bypassedFilterNames(agg, bypass);
+  if (bypass.bypassAll && !hasNonBypassableFilter(agg)) return ".IgnoreQueryFilters()";
+  const names = bypassedFilterNames(agg, pool, bypass);
   if (names.length === 0) return "";
   return `.IgnoreQueryFilters([${names.map((n) => JSON.stringify(n)).join(", ")}])`;
 }
@@ -60,14 +67,14 @@ export function unionFindAsOptionalTwin(find: FindIR, aggName: string): FindIR {
 export function buildFindBodies(
   agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
-  ctx?: BoundedContextIR,
+  ctx: BoundedContextIR,
 ): Array<{ name: string; ignoreClause: string; filterClause: string; projectionClause: string }> {
   if (!repo) return [];
   return repo.finds.map((raw) => {
     const find = unionFindAsOptionalTwin(raw, agg.name);
     return {
       name: find.name,
-      ignoreClause: ignoreFiltersClause(agg, find),
+      ignoreClause: ignoreFiltersClause(agg, ctx.aggregates, find),
       filterClause: filterClauseFor(find, agg, ctx),
       projectionClause: projectionClauseFor(find.returnType),
     };
@@ -80,10 +87,13 @@ export function buildFindBodies(
  *  what `filterClauseFor` renders. */
 export function collectFindBodyUsings(
   repo: RepositoryIR | undefined,
-  into: Set<string> = new Set(),
+  into: Set<string>,
+  /** Project root namespace — a find `where` may call a `domainService`, which
+   *  needs `${ns}.Domain.Services` on the repository impl. */
+  ns: string,
 ): Set<string> {
   for (const find of repo?.finds ?? []) {
-    if (find.filter) collectCsExprUsings(find.filter, into);
+    if (find.filter) collectCsExprUsings(find.filter, into, ns);
   }
   return into;
 }
@@ -105,7 +115,7 @@ export function buildRetrievalBodies(
 }
 
 /** A retrieval's `.Where(...)` clause.  When the `where` is exactly a named
- *  criterion with an emitted reified class (Slice 2b), consume its
+ *  criterion with an emitted reified class, consume its
  *  `ToExpression()` — `.Where(new XCriterion(args).ToExpression())` — so the
  *  query is the reified Specification rather than an inlined predicate.
  *  Composed / anonymous / non-eligible `where`s fall back to the inline
@@ -149,15 +159,17 @@ function orderByClauseFor(r: RetrievalIR): string {
  *  `collectFindBodyUsings` for finds. */
 export function collectRetrievalBodyUsings(
   retrievals: RetrievalIR[],
-  into: Set<string> = new Set(),
+  into: Set<string>,
+  /** Project root namespace — see `collectFindBodyUsings`. */
+  ns: string,
 ): Set<string> {
-  for (const r of retrievals) collectCsExprUsings(r.where, into);
+  for (const r of retrievals) collectCsExprUsings(r.where, into, ns);
   return into;
 }
 
 function filterClauseFor(find: FindIR, agg: EnrichedAggregateIR, ctx?: BoundedContextIR): string {
   // A `where` that is exactly a named, eligible criterion consumes its
-  // reified `ToExpression()` (Slice 2b, symmetric to the retrieval path).
+  // reified `ToExpression` (symmetric to the retrieval path).
   if (ctx && find.criterionRef && canEmitToExpressionFor(find.criterionRef.name, ctx, agg.name)) {
     const args = find.criterionRef.args
       .map((a) => renderCsExpr(a, { thisName: "x", agg, efQuery: true }))
@@ -194,11 +206,11 @@ function projectionClauseFor(t: TypeIR): string {
   // `DomainExceptionFilter`'s `AggregateNotFoundException` arm and the 404 the
   // shared table declares for `findSingle`.
   //
-  // It used to be `.FirstAsync(cancellationToken)`, which throws EF's
+  // NOT `.FirstAsync(cancellationToken)`, which throws EF's
   // `InvalidOperationException("Sequence contains no elements")` — no filter arm
-  // matches it, so the route answered 500 where node/java/python answered 404
-  // and elixir answered `200 null`.  A four-way split on a route that all five
-  // agree about on the happy path, invisible to the wire differential (it GETs
+  // matches it, so the route answers 500 where node/java/python answer 404 and
+  // elixir answers `200 null`.  A four-way split on a route all five agree
+  // about on the happy path, invisible to the wire differential (it GETs
   // collections) and to the corpus (no case reads a single find that misses).
   // `"not_found"` is the canonical find-miss detail token on every backend
   // (RS-27 scopes the by-id sentence out of a find).

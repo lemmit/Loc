@@ -94,6 +94,9 @@ describe("vanilla — cross-field invariant enforcement", () => {
       }`),
     );
     expect(cs).not.toContain("validate_invariants");
-    expect(cs).toContain("|> validate_length(:handle, max: 40)");
+    // A length bound rides a `validate_change/3` closure over the shared
+    // CODE-POINT count, not Ecto's grapheme-counting `validate_length/3` (RS-31).
+    expect(cs).toContain("|> validate_change(:handle, fn _, value ->");
+    expect(cs).toContain("length(String.to_charlist(value)) <= 40");
   });
 });

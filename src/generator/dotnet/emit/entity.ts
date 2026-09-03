@@ -7,18 +7,21 @@ import {
   isRequiredCreateInput,
 } from "../../../ir/enrich/wire-projection.js";
 import type {
+  ContextStampIR,
   EnrichedAggregateIR,
   EnrichedEntityPartIR,
+  ExprIR,
   FieldIR,
   IdValueType,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import type { OriginRef } from "../../../ir/types/origin.js";
 import { resolveToSource } from "../../../ir/types/origin.js";
 import { typeIsFile } from "../../../ir/util/file-field.js";
 import { operationBody, operationBodyUsesCurrentUser } from "../../../ir/util/op-gates.js";
 import { lines } from "../../../util/code-builder.js";
-import { plural, upperFirst } from "../../../util/naming.js";
+import { escapeCsharpIdent, plural, upperFirst } from "../../../util/naming.js";
 import {
   constructionSeededDefaults,
   isServerSourcedDefault,
@@ -38,8 +41,8 @@ import {
  *  (`src/generator/dotnet/index.ts`'s `emitAggregate`/`place`), which
  *  anchors it via `SourceMapRecorder.fragment`.  Covers only the REGULAR
  *  (non-extern) named-operation body path — see the call site in
- *  `renderEntity` below; extern check bodies, event-sourced init, and
- *  appliers are out of scope for this slice. */
+ *  `renderEntity` below.  Extern check bodies, event-sourced init and
+ *  appliers are out of scope. */
 export interface OpFragment {
   fragmentText: string;
   subRegions: SourceMapSubRegion[];
@@ -77,7 +80,7 @@ function narrowedOrigin(stmt: NarrowableStmt): OriginRef | undefined {
   return stmt.origin;
 }
 
-/** M7 phase 6a: weave enhanced C#10 `#line (a,b)-(c,d) "path"` directives
+/** Weave enhanced C#10 `#line (a,b)-(c,d) "path"` directives
  *  (source-map-and-debugging.md §6.C) into a REGULAR named-operation's
  *  per-statement chunk list, one directive per statement whose origin
  *  resolves to a span in `sourceTexts`.  A statement with no usable origin
@@ -119,7 +122,7 @@ export function weaveLineDirectives(
 // used by repository hydration, and (for the root) a public `Create`
 // factory + `PullEvents()` drainage hook.
 //
-// Extern operations (extern (b) Phase 2): when an aggregate declares
+// Extern operations (extern (b)): when an aggregate declares
 // `operation X(...) extern { precondition ... }`, the generated `X(...)`
 // method runs the preconditions, then delegates the hand-written business
 // decision to a `private partial X Core(...)` HOOK the aggregate OWNS, then
@@ -155,6 +158,30 @@ export interface SuperTypeInfo {
   readonly idValueType?: IdValueType;
 }
 
+/** Claim-valued principal stamps (`tenantId := currentUser.tenantId`) for one
+ *  lifecycle event.  A BARE `currentUser` value is excluded — the interceptor
+ *  stamps that one as the actor id.
+ *
+ *  THE SINGLE SOURCE both halves of the document-stamp contract read: this file
+ *  emits `_StampOnCreate()` when it returns non-empty, and repository.ts emits
+ *  the call when it does.  A method with no caller stamps nothing; a caller with
+ *  no method does not compile — computing the predicate twice is how those two
+ *  halves drift (experience_gathered.md §89). */
+export function csClaimStampsFor(
+  agg: { contextStamps?: ContextStampIR[] },
+  event: "create" | "update",
+): { field: string; value: ExprIR }[] {
+  return (agg.contextStamps ?? [])
+    .filter((r) => r.event === event)
+    .flatMap((r) => r.assignments)
+    .filter(
+      (a) =>
+        exprUsesCurrentUser(a.value) &&
+        !(a.value.kind === "ref" && a.value.refKind === "current-user"),
+    )
+    .map((a) => ({ field: a.field, value: a.value }));
+}
+
 export function renderEntity(
   entity: EnrichedAggregateIR | EnrichedEntityPartIR,
   isRoot: boolean,
@@ -182,7 +209,7 @@ export function renderEntity(
    *  signature with the union type and threads `returnUnion` into the body's
    *  render context so tagged `return`s build the right variant record. */
   operationReturnUnions?: Map<string, { name: string; members: UnionMember[] }>,
-  /** Source-map Milestone 3 (statement regions) — when passed, the REGULAR
+  /** Source-map (statement regions) — when passed, the REGULAR
    *  named-operation body loop below pushes one `OpFragment` per operation.
    *  Only the root render call gets this (entity parts carry no
    *  operations); allocated by the caller ONLY when a recorder is present
@@ -194,7 +221,7 @@ export function renderEntity(
    *  `statementSubRegions` construct id `"Sales.Order.confirm"`.  Required
    *  whenever `opFragments` is passed. */
   constructPrefix?: string,
-  /** `.ddd` source text keyed by `OriginRef` source path (M7 phase 6a) —
+  /** `.ddd` source text keyed by `OriginRef` source path —
    *  present only alongside `opFragments` (same recorder-present gate).
    *  When set, the REGULAR named-operation body loop below weaves C#
    *  enhanced `#line` directives (see `weaveLineDirectives`) so the PDB
@@ -231,7 +258,7 @@ export function renderEntity(
   const appliers = isAgg(entity) ? (entity.appliers ?? []) : [];
   const esCreate = isAgg(entity) ? entity.creates?.[0] : undefined;
   const hasExtern = operations.some((o) => o.extern);
-  // Extern (b) Phase 2: an `extern` op never widens any setter.  The extern
+  // Extern (b): an `extern` op never widens any setter.  The extern
   // hook (`<Op>Core`) is a member of the aggregate, so it mutates the `private`
   // setters directly — no `internal`/`public` leak (finding S10 fixed by
   // construction).  Setters stay `private` for every aggregate.
@@ -395,7 +422,9 @@ export function renderEntity(
     derivedLines.push("    public override string ToString() => Inspect;");
   }
   const fnLines = entity.functions.flatMap((fn) => {
-    const params = fn.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
+    const params = fn.params
+      .map((p) => `${renderCsType(p.type)} ${escapeCsharpIdent(p.name)}`)
+      .join(", ");
     const head = `    private ${renderCsType(fn.returnType)} ${upperFirst(fn.name)}(${params})`;
     // Expression form keeps the expression-bodied `=> expr;` shape
     // (byte-identical); block form (domain-services.md rev. 4) emits a
@@ -408,7 +437,7 @@ export function renderEntity(
   });
 
   const opLines: string[] = [];
-  // Extern-operation domain hooks (extern (b) Phase 2): a `private partial`
+  // Extern-operation domain hooks (extern (b)): a `private partial`
   // method the aggregate OWNS, declared here and implemented by the user in a
   // co-located scaffold-once partial file (`renderExternHookImpl`).  Collected
   // here and appended to the (now `partial`) class body below.
@@ -436,10 +465,12 @@ export function renderEntity(
     // (op-gates.ts) — the entity renders only what remains.
     const opBody = operationBody(op);
     const userParam = usesUser ? "User currentUser" : "";
-    const baseParams = op.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
+    const baseParams = op.params
+      .map((p) => `${renderCsType(p.type)} ${escapeCsharpIdent(p.name)}`)
+      .join(", ");
     const params = [baseParams, userParam].filter(Boolean).join(", ");
     if (op.extern) {
-      // Extern op (extern (b) Phase 2): a REAL method that runs the
+      // Extern op (extern (b)): a REAL method that runs the
       // preconditions, delegates the hand-written business decision to a
       // partial-method HOOK the aggregate OWNS (`<Op>Core`), then re-asserts
       // invariants.  The framework flow (load → preconditions → hook →
@@ -452,9 +483,10 @@ export function renderEntity(
       // the co-located scaffold-once `<Agg>.Extern.cs` partial
       // (`renderExternHookImpl`).
       const hookName = `${upperFirst(op.name)}Core`;
-      const callArgs = [...op.params.map((p) => p.name), ...(usesUser ? ["currentUser"] : [])].join(
-        ", ",
-      );
+      const callArgs = [
+        ...op.params.map((p) => escapeCsharpIdent(p.name)),
+        ...(usesUser ? ["currentUser"] : []),
+      ].join(", ");
       const retType = op.returnType ? renderCsType(op.returnType) : "void";
       opLines.push(`    public ${retType} ${upperFirst(op.name)}(${params})`);
       opLines.push("    {");
@@ -498,8 +530,7 @@ export function renderEntity(
     // `renderCsStatements` here — `renderCsStatements` IS `chunks.join("\n")`
     // by construction, so `body` below is byte-identical either way, but the
     // per-chunk list lets us surface per-statement sub-regions to the caller
-    // that owns the recorder + this file's final content (source-map
-    // Milestone 3).
+    // that owns the recorder + this file's final content (source-map).
     const opRenderCtx = retUnion ? { ...renderCtx, returnUnion: retUnion } : renderCtx;
     const rawChunks = renderCsStatementChunks(opBody, opRenderCtx, {
       emitTrace,
@@ -507,7 +538,7 @@ export function renderEntity(
       op: op.name,
       eventSourced,
     });
-    // M7 phase 6a: weave enhanced `#line` directives BEFORE the join, so
+    // Weave enhanced `#line` directives BEFORE the join, so
     // `chunks`/`body`/`fragmentText` and the sub-region cursor walk below
     // all see the exact same (post-weave) text that lands in the file —
     // never post-process the joined `body`, that would desync
@@ -536,11 +567,11 @@ export function renderEntity(
     opLines.push("");
   }
 
-  // Extern (b) Phase 2: the extern write surface is no longer an injected
-  // `I<Agg>Mutator` — the `<Op>Core` partial hooks (collected in
-  // `partialHookLines`) are MEMBERS of the aggregate, so they reach its own
-  // `private` state natively.  Nothing here widens any setter (S10 fixed by
-  // construction); the hook declarations are appended to the class body below.
+  // The extern write surface is NOT an injected `I<Agg>Mutator`: the
+  // `<Op>Core` partial hooks (collected in `partialHookLines`) are MEMBERS of
+  // the aggregate, so they reach its own `private` state natively and nothing
+  // here widens a setter.  The hook declarations are appended to the class body
+  // below.
 
   const pullEventsLines = isRoot
     ? [
@@ -609,17 +640,17 @@ export function renderEntity(
     isRoot && eventSourced && esCreate
       ? [
           `    public static ${entity.name} Create(${esCreate.params
-            .map((p) => `${renderCsType(p.type)} ${p.name}`)
+            .map((p) => `${renderCsType(p.type)} ${escapeCsharpIdent(p.name)}`)
             .join(", ")})`,
           "    {",
           `        var e = new ${entity.name}();`,
           `        e.Id = new ${idClass}(${csNewIdValue(effIdValueType)});`,
-          `        e._Init(${esCreate.params.map((p) => p.name).join(", ")});`,
+          `        e._Init(${esCreate.params.map((p) => escapeCsharpIdent(p.name)).join(", ")});`,
           "        return e;",
           "    }",
           "",
           `    private void _Init(${esCreate.params
-            .map((p) => `${renderCsType(p.type)} ${p.name}`)
+            .map((p) => `${renderCsType(p.type)} ${escapeCsharpIdent(p.name)}`)
             .join(", ")})`,
           "    {",
           renderCsStatements(esCreate.statements, renderCtx, {
@@ -763,7 +794,8 @@ export function renderEntity(
   const createAssignments = createInputFieldList.map((f) => {
     const dflt = csFactoryDefault(f);
     // `??`, not a truthiness test: an explicit 0/""/false must survive.
-    return `        e.${upperFirst(f.name)} = ${dflt === undefined ? f.name : `${f.name} ?? ${dflt}`};`;
+    const arg = escapeCsharpIdent(f.name);
+    return `        e.${upperFirst(f.name)} = ${dflt === undefined ? arg : `${arg} ?? ${dflt}`};`;
   });
   // Server-seeded literal defaults (RS-11): fields outside the create-input set
   // (`token`/`managed`/`internal`) whose default is a plain constant — the
@@ -790,13 +822,13 @@ export function renderEntity(
           ]
             .map((f) => {
               const dflt = csFactoryDefault(f);
-              if (dflt === undefined) return `${renderCsType(f.type)} ${f.name}`;
+              if (dflt === undefined) return `${renderCsType(f.type)} ${escapeCsharpIdent(f.name)}`;
               // `T? x = null` rather than `T x = <default>`: a C# optional
               // parameter default must be a compile-time constant, which a
               // rendered default expression (a VO ctor, an enum member, a
               // decimal) need not be.  The body applies it instead.
               const t = renderCsType(f.type);
-              return `${t.endsWith("?") ? t : `${t}?`} ${f.name} = null`;
+              return `${t.endsWith("?") ? t : `${t}?`} ${escapeCsharpIdent(f.name)} = null`;
             })
             .join(", ")})`,
           "    {",
@@ -819,6 +851,37 @@ export function renderEntity(
   // `FromSnapshot` rebuilds it (running AssertInvariants once, AFTER
   // the contained parts are rehydrated, so part-dependent invariants
   // see the full tree — unlike `_Create`, which only knows fields).
+  // A DOCUMENT root persists as one jsonb column, so it is never an EF-tracked
+  // entity with mapped stamp COLUMNS — the AuditableInterceptor's
+  // `Entry(e).Property(x => x.TenantId)` write has nothing to bind to and the
+  // `tenantOwned` onCreate stamps never ran.  The row was written with an EMPTY
+  // TenantId and became invisible to every principal including its creator.
+  // Emit the stamps as an explicit method the document repository calls on its
+  // INSERT branch (mirroring node's `stampInsert` and python's
+  // `_stamp_on_create`); the update branch must NOT re-stamp, since the whole
+  // blob is rewritten from the rehydrated aggregate, which already carries them.
+  const docCreateStamps =
+    isRoot && document && isAgg(entity) ? csClaimStampsFor(entity, "create") : [];
+  const docStampLines =
+    docCreateStamps.length > 0
+      ? [
+          "    /// <summary>Applies the `onCreate` claim stamps from the ambient",
+          "    /// principal.  Called by the document repository on INSERT only —",
+          "    /// a jsonb aggregate is not EF-tracked, so the AuditableInterceptor",
+          "    /// never sees it.  A principal-less save (seed / system) is a no-op,",
+          "    /// matching the interceptor's null-safe behaviour.</summary>",
+          "    internal void _StampOnCreate()",
+          "    {",
+          "        var currentUser = RequestContext.Current?.CurrentUser;",
+          "        if (currentUser == null) return;",
+          ...docCreateStamps.map(
+            (st) => `        ${upperFirst(st.field)} = ${renderCsExpr(st.value, renderCtx)};`,
+          ),
+          "    }",
+          "",
+        ]
+      : [];
+
   const snapshotLines: string[] = [];
   if (document) {
     const toInit: string[] = [];
@@ -890,7 +953,7 @@ export function renderEntity(
       "",
       `namespace ${ns}.Domain.${plural(rootName)};`,
       "",
-      // Extern (b) Phase 2: an aggregate with an extern op is `partial` so the
+      // Extern (b): an aggregate with an extern op is `partial` so the
       // user's co-located scaffold-once file can supply the implementing half
       // of each `<Op>Core` hook.
       `public sealed ${isRoot && hasExtern ? "partial " : ""}class ${entity.name}${
@@ -925,6 +988,7 @@ export function renderEntity(
       ...createPublicLines,
       ...(applierLines.length > 0 ? ["", ...applierLines] : []),
       ...esCreateFactoryLines,
+      ...(docStampLines.length > 0 ? ["", ...docStampLines] : []),
       ...(snapshotLines.length > 0 ? ["", ...snapshotLines] : []),
       "}",
     ) + "\n"
@@ -961,7 +1025,7 @@ export function renderAbstractBaseEntity(
     ? { thisName: "this", agg: base }
     : { thisName: "this", agg: base, idAccessor: "IdBoxed" };
   const usings = new Set<string>();
-  for (const d of base.derived) collectCsExprUsings(d.expr, usings);
+  for (const d of base.derived) collectCsExprUsings(d.expr, usings, ns);
   // A `File` field's type is the shared `FileRef` record in Domain.Common (M-T1.2)
   // — the base header (unlike the concrete one) does not import it unconditionally.
   if (base.fields.some((f) => typeIsFile(f.type))) usings.add(`${ns}.Domain.Common`);

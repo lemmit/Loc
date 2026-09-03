@@ -1,4 +1,4 @@
-// Generated translation runtime (Loom i18n, M-T1.11).
+// Generated translation runtime (Loom i18n).
 // Source-language lookup with a per-key fallback and ICU message formatting via
 // `intl-messageformat`. To add a locale, drop a
 // `src/locales/<locale>.json` file, import it below, and register it in

@@ -498,7 +498,28 @@ export const flutterTarget: WalkerTarget = {
     if (call.kind !== "call") return null;
     const ofArg = namedArg(call, "of");
     const opArg = namedArg(call, "op");
-    if (ofArg?.kind !== "ref" || opArg?.kind !== "ref") return null;
+    if (ofArg?.kind !== "ref" || opArg?.kind !== "ref") {
+      // The INSTANCE-QUALIFIED shape (`OperationForm(<binding>.<op>)`) has no
+      // Flutter arm yet — `forms-emit.ts` builds an `<Op><Agg>Form` widget only
+      // for the by-name shape, so resolving it here would reference a widget
+      // nothing emits (`flutter-modal-instance-operationform`).
+      //
+      // DECLINE it explicitly rather than returning `null`: a null falls
+      // through to the SHARED walker, whose op-form path renders
+      // `primitive-modal`, which this procedural pack does not implement — and
+      // the pack's missing-renderer fallback is a Dart LINE comment, illegal in
+      // the expression position the slot occupies.  A `renderComment` is
+      // syntactically inert (`const SizedBox.shrink() /* … */`) and visible.
+      const inst = (call.args ?? []).find((_, i) => !(call.argNames ?? [])[i]);
+      if (inst?.kind === "member") {
+        return flutterTarget.renderComment(
+          `OperationForm(${inst.receiver.kind === "ref" ? inst.receiver.name : "?"}.${inst.member}): ` +
+            "the instance-qualified shape is not rendered on Flutter — use " +
+            "OperationForm { of: <Agg>, op: <op> }",
+        );
+      }
+      return null;
+    }
     const agg = ctx.aggregatesByName.get(ofArg.name);
     const op = agg?.operations.find((o) => o.name === opArg.name && o.visibility === "public");
     if (!agg || !op) return null;
@@ -586,11 +607,11 @@ export const flutterTarget: WalkerTarget = {
     const trigger = namedArg(call, "trigger");
     // Not the op-dialog shape → return null so the shared `emitModal` can try
     // the STATE-CONTROLLED one (`Modal { …, open: <state bool> }`), which
-    // Flutter now renders through `LoomModalHost`.  Claiming the primitive with
-    // a comment here is what made a controlled Modal degrade to `/* … */`,
-    // silently dropping the dialog AND its content — and the comment described a
-    // shape the author hadn't written.  `emitModal` still emits its own
-    // explanatory comment when neither shape matches.
+    // Flutter renders through `LoomModalHost`.  Claiming the primitive with a
+    // comment here would degrade a controlled Modal to `/* … */` — silently
+    // dropping the dialog AND its content, under a comment describing a shape
+    // the author never wrote.  `emitModal` emits its own explanatory comment
+    // when neither shape matches.
     if (!formChild || trigger?.kind !== "call") return null;
     const ofArg = namedArg(formChild, "of");
     const opArg = namedArg(formChild, "op");
@@ -774,8 +795,8 @@ export const flutterTarget: WalkerTarget = {
   // map to the component's declared params by position; named args by name (the
   // Angular precedent).  The component widget class is emitted by index.ts from
   // `ctx.userComponents`; the seam only NAMES it (returns null → the shared
-  // "unknown component" comment when the name isn't a threaded component, e.g. a
-  // stateful / extern one this slice defers).
+  // "unknown component" comment when the name isn't a threaded component, e.g.
+  // a stateful / extern one).
   renderUserComponent: (call, ctx) => {
     if (call.kind !== "call") return null;
     const params = ctx.userComponents.get(call.name);
@@ -941,9 +962,9 @@ export const flutterTarget: WalkerTarget = {
   // Scalar intrinsics — the ONE table both the page-view walk and the
   // Notifier/action-body walk consume (both route through the shared
   // `emitExpr`), so `s.replace(a, b)` cannot mean one thing in a page body
-  // and another in an action.  Before this seam was supplied, EITHER path
-  // fell through to `emitExpr`'s verbatim `recv.member(args)` — Loom's own
-  // spelling, which is not Dart.
+  // and another in an action.  Without this seam either path falls through to
+  // `emitExpr`'s verbatim `recv.member(args)` — Loom's own spelling, which is
+  // not Dart.
   renderIntrinsic: (receiverType, member, recv, args) =>
     renderDartIntrinsic(receiverType, member, recv, args),
 };

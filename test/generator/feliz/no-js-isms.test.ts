@@ -130,13 +130,13 @@ system Shop {
           error: Alert { "Failed" },
           empty: Text { "None" },
           data: rows => Table {
-            each: rows,
-            row: p => Stack {
+            rows: rows,
+            Column { "Product", p => Stack {
               Text { p.name },
               Money { p.price },
               EnumBadge { p.status },
               Button { "Open", to: "/p/:id" }
-            }
+            } }
           }
         }
       }

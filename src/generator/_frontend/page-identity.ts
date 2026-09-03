@@ -2,16 +2,16 @@
 // A page's EMIT IDENTITY — the one derivation every frontend keys its emitted
 // artefacts on.
 //
-// The bug this module exists to kill: page identity used to be *reconstructed
-// by convention* from `page.name` at each consumer (`./pages/${snake(name)}`,
-// `${snake(name)}_page.dart`, `e2e/pages/${snake(name)}.ts`, …) while lowering
-// had ALREADY computed the authoritative answer on the IR node (`page.area` →
-// `page.emitPath`).  `page.name` is unique only within ONE area scope, so every
-// such site diverged (React's router imported a module the page emitter never
-// wrote — TS2307) or collided (one Flutter `list_page.dart` for every
-// aggregate; one Angular `dashboard.component.ts` imported twice — TS2300) the
-// moment an `area { … }` existed.  Six copies of one convention is what caused
-// it, so the answer lives here once.
+// The failure this module exists to prevent: reconstructing page identity *by
+// convention* from `page.name` at each consumer (`./pages/${snake(name)}`,
+// `${snake(name)}_page.dart`, `e2e/pages/${snake(name)}.ts`, …) when lowering
+// has ALREADY computed the authoritative answer on the IR node (`page.area` →
+// `page.emitPath`).  `page.name` is unique only within ONE area scope, so as
+// soon as an `area { … }` exists every such site diverges (React's router
+// imports a module the page emitter never wrote — TS2307) or collides (one
+// Flutter `list_page.dart` per aggregate; one Angular
+// `dashboard.component.ts` imported twice — TS2300).  So the answer lives
+// here, once.
 //
 // Three questions, one source of truth each:
 //

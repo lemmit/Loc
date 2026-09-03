@@ -19,13 +19,12 @@
 // COVERAGE: this catches the LOUD fallbacks — three marker families:
 //   1. a `/* … */` block comment (`flutterTarget.renderComment` diagnostics),
 //   2. a `// TODO(flutter …): …` line (Notifier-projection deferrals AND, since
-//      M-A, every form-field drop `prepareFields` couldn't render), and
-//   3. the pack's `// flutter pack: no renderer for "X"` fallback (M-D) — the
+//      every form-field drop `prepareFields` couldn't render), and
+//   3. the pack's `// flutter pack: no renderer for "X"` fallback — the
 //      standalone input family (`Field`/`Toggle`/… → `primitive-field`, etc.)
 //      the walking-skeleton pack doesn't yet render.
-// After M-A + M-D the earlier "silently dropped form field" limitation is closed:
-// the drop sites now emit markers this pass reads, so `fullyRenders` no longer
-// reports `true` while content vanishes.
+// Every drop site emits one of these markers, so `fullyRenders` cannot report
+// `true` while content vanishes.
 
 /** One place the Flutter target fell back from a real widget to a diagnostic. */
 export interface FlutterParityFinding {

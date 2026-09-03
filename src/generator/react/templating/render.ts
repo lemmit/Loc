@@ -57,7 +57,7 @@ export function renderAppShell(
   pack: LoadedPack,
   hasScaffoldHome: boolean = true,
   outOfShellRoutes: import("./preparers/app-shell.js").ExtraPageRoute[] | undefined = undefined,
-  /** Phase 8 step 2: pre-built named-layout VMs (slot JSX + route
+  /** step 2: pre-built named-layout VMs (slot JSX + route
    *  buckets), and the deduped pack imports those slots need. */
   namedLayouts:
     | ReadonlyArray<{
@@ -137,7 +137,6 @@ export function renderMain(pack: LoadedPack, basename?: string, authUi = false):
   });
 }
 
-// BoundedContextIR is re-exported below for callers that import
-// it via this module — preserves the original import surface even
-// though render.ts no longer needs it directly.
+// BoundedContextIR is re-exported below for callers that import it via this
+// module; render.ts itself does not use it.
 export type { BoundedContextIR };

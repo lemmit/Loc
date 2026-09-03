@@ -24,7 +24,7 @@
 // of `renderMessageExpr` in `src/generator/_frontend/realtime.ts`.
 
 import type { ExprIR } from "../../ir/types/loom-ir.js";
-import { snake } from "../../util/naming.js";
+import { elixirString, snake } from "../../util/naming.js";
 
 /** The PubSub topic every domain `emit` broadcasts on.  A realtime LiveView
  *  subscribes to it; the choreography path uses direct `Dispatcher.dispatch/1`
@@ -61,9 +61,10 @@ export function renderMessageExprElixir(e: ExprIR, bind: string): string {
   const go = (x: ExprIR): string => {
     switch (x.kind) {
       case "literal":
-        // A string literal re-quotes with JSON.stringify (valid Elixir string
-        // syntax); numeric/bool literals carry their source text verbatim.
-        return x.lit === "string" ? JSON.stringify(x.value) : String(x.value);
+        // A string literal re-quotes through the shared escaping funnel (which
+        // also neutralizes `#{` interpolation); numeric/bool literals carry
+        // their source text verbatim.
+        return x.lit === "string" ? elixirString(x.value) : String(x.value);
       case "ref":
         if (x.name === bind) return bindVar;
         throw new Error(

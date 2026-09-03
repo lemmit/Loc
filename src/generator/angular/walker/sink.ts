@@ -34,7 +34,7 @@ export interface AngularWalkerSink {
  *  empty container on the root context (so child-context spreads share one
  *  object reference); this fills in any missing per-primitive list on first
  *  touch and returns the typed view.  A body with no Angular forms therefore
- *  reads empty lists — byte-identical to the old per-field `?? []` reads. */
+ *  reads empty lists. */
 export function angularSink(holder: { sink?: unknown }): AngularWalkerSink {
   const h = holder as { sink?: Partial<AngularWalkerSink> };
   h.sink ??= {};

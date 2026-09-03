@@ -8,6 +8,7 @@ import { validateIndexSuggestions } from "./checks/index-suggestion-checks.js";
 import {
   validateMigrationAdapterSupport,
   validateMigrationDataSteps,
+  validateSelfProvisioningSchemaSupport,
 } from "./checks/migration-checks.js";
 import { validateProjections } from "./checks/projection-checks.js";
 import {
@@ -18,6 +19,7 @@ import {
   validateRetrievals,
   validateWorkflowInstanceReadGates,
 } from "./checks/query-checks.js";
+import { validateReservedSurfaces } from "./checks/reserved-surfaces.js";
 import { validateStores } from "./checks/store-checks.js";
 import {
   validateCurrentUserScope,
@@ -73,8 +75,9 @@ import {
   validateFlutterPrimitiveSupport,
   validateGroupedProjectionBackend,
   validateGuardPrincipalWithoutAuth,
+  validateHeexComponentHostState,
   validateInheritanceStorage,
-  validateJavaReadModelShapes,
+  validateJavaReservedIdentifiers,
   validateMikroOrmSupport,
   validateNeedCapabilities,
   validatePagedQueryHandlerBackend,
@@ -89,6 +92,7 @@ import {
   validateSavingShapeSupport,
   validateStampSupport,
   validateSystem,
+  validateTphFilterExpressibility,
   validateUiProjectionReadFramework,
   validateUiRealtimeSupport,
   validateVanillaDocumentScope,
@@ -127,9 +131,8 @@ export { firstNonQueryableNode } from "./checks/shared.js";
 //
 // What this catches today: `test e2e` bodies referencing
 // `api.<unknown>.<verb>` or `ui.<unknown>.<verb>`, or invoking an
-// unknown verb on a known aggregate.  Previously these surfaced as
-// thrown Errors from the e2e renderers — useful messages, but
-// produced lazily during generation.  Doing it here means:
+// unknown verb on a known aggregate.  Catching them here, rather than
+// letting the e2e renderers throw lazily during generation, means:
 //
 //   - Errors are collected up-front (one pass over the model), not
 //     surfaced one-by-one as the renderer hits them.
@@ -168,10 +171,11 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateElixirOpSelfCallPosition(sys, diags);
     validateContextFilterSupport(sys, diags);
     validateFilterBypassSupport(sys, diags);
-    validateJavaReadModelShapes(sys, diags);
+    validateJavaReservedIdentifiers(sys, diags);
     validateStampSupport(sys, diags);
     validateGuardPrincipalWithoutAuth(sys, diags);
     validateDapperSupport(sys, diags);
+    validateTphFilterExpressibility(sys, diags);
     validateMikroOrmSupport(sys, diags);
     validateFindPredicateAdapterSupport(sys, diags);
     validateNeedCapabilities(sys, diags);
@@ -179,10 +183,12 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateApiResourceBindings(sys, diags);
     validateRemoteApiOpSupport(sys, diags);
     validateDataSourceUnwiredKnobs(sys, diags);
+    validateReservedSurfaces(sys, diags);
     validateReactIdReferences(sys, diags);
     validateAuthUiFramework(sys, diags);
     validateCurrentUserNeedsAuthUi(sys, diags);
     validateDataGridFramework(sys, diags);
+    validateHeexComponentHostState(sys, diags);
     validateChartSupport(sys, diags);
     validateUiRealtimeSupport(sys, diags);
     validateUiProjectionReadFramework(sys, diags);
@@ -203,7 +209,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDefaultDeny(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);
-    // Tenancy (multi-tenancy Phase 1a): registry existence, the explicit-
+    // Tenancy (tenancy.md): registry existence, the explicit-
     // stance lint, marker-without-declaration, conflicting markers.
     validateTenancy(sys, diags);
     // Timer sources (scheduling.md, M-T4.1): cadence well-formedness, the
@@ -305,6 +311,11 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   // (dapper / mikroorm): both skip the phase-⑨ chain entirely, so the step
   // would silently no-op (dapper) or drop+add the column (mikroorm).
   validateMigrationAdapterSupport(loom, diags);
+  // The other half of self-provisioning (F2-ADP-3): those adapters name every
+  // table UNQUALIFIED, so a context they share with a migration-chain deployable
+  // ends up with two physical tables — and an explicit `schema:` on the binding
+  // is silently dropped.
+  validateSelfProvisioningSchemaSupport(loom, diags);
   // Explicit transport bindings (unfoldable-api-derivation.md, Layer 4): every
   // `route ... -> Context.Handler` target must resolve.  Whole-model (routes are
   // system-level, their targets cross-context).

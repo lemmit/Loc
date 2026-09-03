@@ -50,7 +50,6 @@ import type {
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import {
-  aggregateUsesMoneyDeep,
   aggregateUsesPrincipalContextFilter,
   exprUsesCurrentUser,
   findUsesCurrentUser,
@@ -81,6 +80,7 @@ import { lines } from "../../../util/code-builder.js";
 import { intrinsicFor, intrinsicKey, isQueryableBoolIntrinsic } from "../../../util/intrinsics.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { SQL_LIKE_ESCAPE_CLAUSE, tsSubtreeLikePattern } from "../../_expr/subtree-like.js";
+import { isReservedIdent } from "../../sql-reserved.js";
 import { joinColumnName, joinTableConstName } from "../emit.js";
 import { synthProjectionFinds } from "../projection-finds.js";
 import { isRefCollection } from "../repository-associations-builder.js";
@@ -93,13 +93,15 @@ import {
   entityFromDocFn,
   entityToDocFn,
   findPredicate,
+  inMemoryPagedTailLines,
+  PAGED_TAIL_PARAMS,
+  pagedReturnType,
   serializeField,
   writeScopeDeniesAll,
 } from "../repository-document-builder.js";
-import { hydrateConcreteFromSharedRow, hydrateRootExpr } from "../repository-find-builder.js";
+import { hydrateRootExpr } from "../repository-find-builder.js";
 import { hydrateEntityExpr } from "../repository-find-hydrate.js";
 import { GUID_CLAIM_RE_LITERAL } from "../repository-find-predicate.js";
-import { collectEnums, collectValueObjects } from "../repository-imports-builder.js";
 import { repoPortImportLine, repoPortName } from "../repository-port-builder.js";
 import {
   projectFieldEntries,
@@ -827,7 +829,7 @@ export function renderMikroEntities(
         // MikroORM derives `RequiredEntityData` from the CLASS, not from the
         // `autoincrement` flag.  Declared required, `em.insert(<Ctx>EventRow, {…})`
         // fails `tsc` with "Property 'seq' is missing" on every event-sourced
-        // append.  Found by M-T6.23 slice 3's compile proof: no gate hid this
+        // append.  Found by's compile proof: no gate hid this
         // one, the tsc TIERS did — the corpus tsc gates run drizzle only, and the
         // mikro behavioural leg builds with esbuild (no typecheck), so an
         // event-sourced aggregate or workflow on `persistence: mikroorm` has
@@ -974,6 +976,35 @@ export function renderMikroConfig(): string {
 
 /** index.ts bootstrap lines — replaces the drizzle pool/db block. Initialises
  *  MikroORM, applies the schema (dev), exposes `db` as the EntityManager. */
+/** Wrap a repository `save`'s WRITE statements in one real database
+ *  transaction.
+ *
+ *  Every mikro save used to open only `this.em.fork({ keepTransactionContext:
+ *  true })`, and there is no `RequestContext` middleware in the generated
+ *  server (see `mikroConfig`'s `allowGlobalContext` comment), so on an ordinary
+ *  route that flag has nothing to keep: the root upsert, the association writes
+ *  and the containment writes each ran on their own implicit transaction.  A
+ *  multi-statement save that failed part-way therefore left the root row
+ *  written and its children not — while the drizzle sibling has always run the
+ *  same statements inside `this.db.transaction(...)` (G2667-C4).
+ *
+ *  `em.transactional` defaults to `TransactionPropagation.NESTED` (MikroORM 6
+ *  `TransactionManager.handle`), so this composes with the ambient
+ *  `db.transactional(...)` the audited / provenanced routes open: an existing
+ *  transaction context yields a SAVEPOINT rather than a competing transaction,
+ *  and the callback's forked EM is the handle its writes must go through —
+ *  which is why the callback parameter takes the name `em` and the fork is no
+ *  longer bound to a local.  The read half (the `findOne` behind the CAS
+ *  version guard) is inside the same transaction on purpose: a read-then-write
+ *  guard outside one is a race by construction. */
+function mikroSaveTxLines(writeLines: readonly (string | null)[]): (string | null)[] {
+  return [
+    `    await this.em.fork({ keepTransactionContext: true }).transactional(async (em) => {`,
+    ...writeLines.map((l) => (l === null || l === "" ? l : `  ${l}`)),
+    `    });`,
+  ];
+}
+
 export function mikroConnectionSetup(): readonly string[] {
   return [
     `const orm = await MikroORM.init(mikroConfig);`,
@@ -1108,6 +1139,13 @@ export const MIKRO_INTRINSIC_SQL: Record<string, (recv: string, args: string[]) 
   "datetime.startOfDay": (r) => `date_trunc('day', ${r})`,
 };
 
+/** A column name in a raw-SQL identifier position: quoted when the word cannot
+ *  appear bare in Postgres (`src/generator/sql-reserved.ts` owns the list),
+ *  bare otherwise so no existing fragment moves. */
+function mikroIdent(name: string): string {
+  return isReservedIdent(name) ? `"${name}"` : name;
+}
+
 /** A raw SQL fragment plus the TypeScript expressions its `?` placeholders
  *  bind, in placeholder order. */
 interface MikroRawFragment {
@@ -1120,11 +1158,17 @@ interface MikroRawFragment {
  *
  *  Column identifiers are inlined as DB column names (`snake`) rather than
  *  bound: a FilterQuery key names entity PROPERTIES, but a raw fragment is SQL
- *  and is past the mapping layer.  Only VALUES bind. */
+ *  and is past the mapping layer.  Only VALUES bind — which is why a RESERVED
+ *  name (`end`, `order`, `limit`, …) has to be quoted here: MikroORM's own
+ *  `updateSchema()` quotes it when it creates the column, so the table is fine
+ *  and only this fragment would be a runtime syntax error (F2-ADP-6).  The
+ *  escaping is trivial on this backend — the fragment is `JSON.stringify`d into
+ *  a TS string literal, so the `"` needs no further treatment (unlike Dapper's
+ *  regular/verbatim split). */
 function mikroColumnSql(e: ExprIR, params: string[], acc: string): string | null {
   const inner = e.kind === "paren" ? e.inner : e;
   const col = thisFieldColumn(inner);
-  if (col !== null) return snake(col);
+  if (col !== null) return mikroIdent(snake(col));
   if (inner.kind === "method-call" && inner.receiverType.kind === "primitive") {
     const sig = intrinsicFor(inner.receiverType.name, inner.member);
     const render = MIKRO_INTRINSIC_SQL[intrinsicKey(inner.receiverType.name, inner.member)];
@@ -1281,8 +1325,8 @@ function predicateEntry(e: ExprIR, acc: string): string {
   // Authorization/tenancy filter sentinels (M-T9.9).  A DISCRIMINATED node, so
   // a missing arm here is a `tsc` error rather than a fall-through to the
   // `unsupported find predicate` throw at the bottom of this function — which
-  // is exactly how the `deny` carve-out used to be unreachable on this adapter
-  // (the whole point of giving the sentinel its own `ExprIR.kind`).
+  // is how the `deny` carve-out becomes unreachable on this adapter.  That is
+  // the whole point of giving the sentinel its own `ExprIR.kind`.
   if (inner.kind === "authz-filter") return authzFilterEntry(inner, acc);
   const selfScope = guidFromStringSelfScope(inner);
   if (selfScope) {
@@ -1317,7 +1361,7 @@ function predicateEntry(e: ExprIR, acc: string): string {
  *  `and(isNull(id), isNotNull(id))`. */
 function authzFilterEntry(e: Extract<ExprIR, { kind: "authz-filter" }>, acc: string): string {
   switch (e.filter.kind) {
-    // DENY carve-out (authorization Phase 4 — deny-wins).  The always-false
+    // DENY carve-out (authorization — deny-wins).  The always-false
     // term, ANDed into every read FilterQuery (and into the write-scope
     // existence pre-guard).  A genuine CONTRADICTION on the always-present
     // primary key rather than the bare `{ id: null }` this file uses elsewhere:
@@ -1326,7 +1370,7 @@ function authzFilterEntry(e: Extract<ExprIR, { kind: "authz-filter" }>, acc: str
     // sibling entries `flattenAnd` merges into the same object literal.
     case "deny":
       return `$and: [{ id: null }, { id: { $ne: null } }]`;
-    // `deep`/`global` read level (hierarchical tenancy P2.4/P2.5) — the
+    // `deep`/`global` read level (hierarchical tenancy) — the
     // materialized-path descendant-or-self sentinel, DEEP_SCOPE_SEMANTICS:
     //
     //   (data_key IS NOT NULL
@@ -1358,7 +1402,7 @@ function authzFilterEntry(e: Extract<ExprIR, { kind: "authz-filter" }>, acc: str
     // two-term shape as the drizzle twin.
     //
     // The NULL branch is a deliberate OR-fallback, not fail-closed: a row
-    // stamped before P2.3 (or by a principal-less save) has no `data_key`, and
+    // stamped before (or by a principal-less save) has no `data_key`, and
     // a bare prefix test would hide it from its own tenant.  It degrades to
     // exactly the flat floor — never wider.
     //
@@ -1389,7 +1433,7 @@ function authzFilterEntry(e: Extract<ExprIR, { kind: "authz-filter" }>, acc: str
 /** Conjunctions merge into one object; `||` becomes `$or`.  Bare boolean
  *  columns and unary `!` are lowered via `predicateEntry`.
  *
- *  Exported for the query-time projection routes (M-T6.23 slice 4): an
+ *  Exported for the query-time projection routes (M-T6.23): an
  *  aggregation reads the source table directly through the QueryBuilder, and its
  *  `where` must lower through the SAME subset a find predicate does — a second
  *  lowering would be a second set of bugs.  Throws on a predicate outside the
@@ -1475,16 +1519,13 @@ function mikroContextFilters(agg: EnrichedAggregateIR, bypass?: FilterBypass): s
     // A principal filter takes the SAME path as any other: lower it, and let an
     // unlowerable one THROW.
     //
-    // This used to be wrapped in a `try { … } catch { /* drop */ }`, on the
-    // reasoning that a principal filter is not gated for FilterQuery-lowerability
-    // (`validateFindPredicateAdapterSupport` skips it) and the only shape that
-    // could fail — the deep-scope subtree predicate — "is not generated on the
-    // mikro adapter today".  That belief was load-bearing and wrong twice over:
-    // the deep-scope shape reached here for real (nothing stopped it until the
-    // capability gate was added), and DROPPING a tenancy predicate is not a
-    // degraded read — it is NO tenant predicate, i.e. every tenant's rows on
-    // every read.  A crash at generation is the strictly safer failure, and now
-    // that `authzFilterEntry` renders the subtree sentinel there is no known
+    // Deliberately NOT wrapped in a `try { … } catch { /* drop */ }`.  A
+    // principal filter is not gated for FilterQuery-lowerability
+    // (`validateFindPredicateAdapterSupport` skips it), so a shape that cannot
+    // lower reaches here — and DROPPING a tenancy predicate is not a degraded
+    // read, it is NO tenant predicate, i.e. every tenant's rows on every read.
+    // A crash at generation is the strictly safer failure.  With
+    // `authzFilterEntry` rendering the subtree sentinel there is no known
     // shape left to crash on.
     out.push(whereToMikroFilter(pred));
   });
@@ -1501,7 +1542,7 @@ function withContextFilters(base: string, caps: string[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// Write-scope pre-guard (authorization Phase 3 P3.1 / Phase 4 deny-write).
+// Write-scope pre-guard (authorization / deny-write).
 //
 // `agg.writeScopeFilter` is the predicate an INSTANCE mutation's command load
 // must satisfy when the write scope is strictly NARROWER than the read scope
@@ -2357,10 +2398,11 @@ export function renderMikroRepository(
     versioned
       ? `  async save(aggregate: ${agg.name}, expectedVersion?: number): Promise<void> {`
       : `  async save(aggregate: ${agg.name}): Promise<void> {`,
-    `    const em = this.em.fork({ keepTransactionContext: true });`,
-    ...(versioned ? versionedSaveLines : [upsertCall]),
-    ...(hasAssocs ? assocSaveLines(agg, "em", "    ") : []),
-    ...(hasContains ? containSaveLines(agg, ctx, "em", "    ") : []),
+    ...mikroSaveTxLines([
+      ...(versioned ? versionedSaveLines : [upsertCall]),
+      ...(hasAssocs ? assocSaveLines(agg, "em", "    ") : []),
+      ...(hasContains ? containSaveLines(agg, ctx, "em", "    ") : []),
+    ]),
     `    requestLog().debug({ event: "repository_save", aggregate: "${agg.name}", id: aggregate.id as string });`,
     "",
     `    for (const event of aggregate.pullEvents()) {`,
@@ -2698,8 +2740,9 @@ export function renderMikroEmbeddedRepository(
     versioned
       ? `  async save(aggregate: ${agg.name}, expectedVersion?: number): Promise<void> {`
       : `  async save(aggregate: ${agg.name}): Promise<void> {`,
-    `    const em = this.em.fork({ keepTransactionContext: true });`,
-    ...(versioned ? versionedSaveLines : [`    const rootRow = ${rootRow};`, upsertCall]),
+    ...mikroSaveTxLines(
+      versioned ? versionedSaveLines : [`    const rootRow = ${rootRow};`, upsertCall],
+    ),
     `    requestLog().debug({ event: "repository_save", aggregate: "${agg.name}", id: aggregate.id as string });`,
     "",
     `    for (const event of aggregate.pullEvents()) {`,
@@ -2832,7 +2875,17 @@ export function renderMikroDocumentRepository(
     const isArray = f.returnType.kind === "array";
     const isOptional = f.returnType.kind === "optional";
     const ret = isArray ? `${agg.name}[]` : isOptional ? `${agg.name} | null` : agg.name;
-    const allExpr = capX ? `all.filter((x) => ${capX})` : "all";
+    // Per-find capability predicate: the aggregate-wide `capX` above cannot see
+    // THIS find's `ignoring <Cap>` / `ignoring *`, so reusing it here silently
+    // re-applied a bypassed capability filter — the MikroORM twin of the
+    // drizzle document defect (M-T6.51).  The relational mikro path already
+    // threads the bypass (`mikroContextFilters(agg, { bypassAll, bypassCaps })`);
+    // the document path now does too.
+    const findCap = documentCapabilityBody(agg, "x", {
+      bypassAll: f.bypassAll,
+      bypassCaps: f.bypassCaps,
+    });
+    const allExpr = findCap ? `all.filter((x) => ${findCap})` : "all";
     const selector = isArray
       ? pred
         ? `${allExpr}.filter(${pred})`
@@ -2845,12 +2898,30 @@ export function renderMikroDocumentRepository(
     // other find under a principal filter binds the ambient accessor
     // (fail-closed), matching `documentFindMethod` on the drizzle side.
     const needsPrincipalBind = principalBind !== null && !findUsesCurrentUser(f);
-    return lines(
-      `  async ${f.name}(${params}): Promise<${ret}> {`,
+    const loadLines = [
       ...(needsPrincipalBind ? [principalBind] : []),
       `    const em = this.em.fork({ keepTransactionContext: true });`,
       `    const rows = await em.find(${row}, {});`,
       `    const all = rows.map((r) => ${fromDocOf("r")});`,
+    ];
+    // `find … paged` — no queryable columns on a document blob, so the page is
+    // taken in-memory over the rehydrated list, exactly as the drizzle document
+    // repository does.  Without this the route's paged contract met an unpaged
+    // single-get method (F2-CB-C1).
+    if (pagedReturn(f.returnType)) {
+      const pagedParams = [...baseParams, ...PAGED_TAIL_PARAMS];
+      const pagedAll = (usesUser ? [...pagedParams, "currentUser: User"] : pagedParams).join(", ");
+      return lines(
+        `  async ${f.name}(${pagedAll}): Promise<${pagedReturnType(agg.name)}> {`,
+        ...loadLines,
+        `    const matched = ${pred ? `${allExpr}.filter(${pred})` : allExpr};`,
+        ...inMemoryPagedTailLines(agg, "matched", f.name),
+        `  }`,
+      );
+    }
+    return lines(
+      `  async ${f.name}(${params}): Promise<${ret}> {`,
+      ...loadLines,
       `    const result = ${selector};`,
       `    requestLog().debug({ event: "find_executed", aggregate: "${agg.name}", find: "${f.name}", rows: ${rowsExpr} });`,
       `    return result;`,
@@ -2858,6 +2929,7 @@ export function renderMikroDocumentRepository(
     );
   });
 
+  const docAudited = aggregateIsAudited(agg);
   const deleteMethod = emitsDelete
     ? lines(
         `  async delete(id: ${idVar}): Promise<void> {`,
@@ -2866,12 +2938,31 @@ export function renderMikroDocumentRepository(
       )
     : "";
 
+  // The `onCreate` stamps land on the doc payload at INSERT, exactly as on the
+  // drizzle document path (repository-document-builder.ts) and the relational
+  // MikroORM path above (`em.upsert(row, stampInsert(...))`).  A document
+  // aggregate is one jsonb column, so the stamped fields live INSIDE `data` —
+  // same helper, same lifecycle.
+  //
+  // INSERT only.  `stampUpdate` STRIPS the create-only fields so a relational
+  // partial update cannot overwrite them; here the whole blob is rewritten, so
+  // stripping `tenantId`/`dataKey` would DELETE them from the document.  The
+  // rehydrated aggregate already carries both.
+  //
+  // This adapter was the SIXTH emission site of one bug: a `tenantOwned`
+  // document row written with an empty tenant is invisible to every principal
+  // including its creator.  It surfaced only when `policy-document` gained a
+  // `test e2e` — the caller runs on every behavioural leg, and the mikroorm leg
+  // failed while drizzle passed.
+  // Property SHORTHAND when unaudited (`data`, not `data: data`) so an
+  // aggregate with no lifecycle stamps emits byte-identically to before.
+  const docData = docAudited ? "data: stampInsert(data)" : "data";
   const saveLines = versioned
     ? [
         `    const expected = expectedVersion ?? aggregate.version;`,
         `    const existing = await em.findOne(${row}, { id: aggregate.id as string });`,
         `    if (existing === null) {`,
-        `      await em.insert(${row}, { id: aggregate.id as string, data, version: 1 });`,
+        `      await em.insert(${row}, { id: aggregate.id as string, ${docData}, version: 1 });`,
         `    } else {`,
         `      const affected = await em.nativeUpdate(${row}, { id: aggregate.id as string, version: expected }, { data, version: expected + 1 });`,
         `      if (affected === 0) throw new ConcurrencyError("${agg.name}", aggregate.id as string);`,
@@ -2880,7 +2971,7 @@ export function renderMikroDocumentRepository(
     : [
         `    const existing = await em.findOne(${row}, { id: aggregate.id as string });`,
         `    if (existing === null) {`,
-        `      await em.insert(${row}, { id: aggregate.id as string, data, version: 1 });`,
+        `      await em.insert(${row}, { id: aggregate.id as string, ${docData}, version: 1 });`,
         `    } else {`,
         `      await em.nativeUpdate(${row}, { id: aggregate.id as string }, { data, version: existing.version + 1 });`,
         `    }`,
@@ -2926,9 +3017,10 @@ export function renderMikroDocumentRepository(
     versioned
       ? `  async save(aggregate: ${agg.name}, expectedVersion?: number): Promise<void> {`
       : `  async save(aggregate: ${agg.name}): Promise<void> {`,
-    `    const em = this.em.fork({ keepTransactionContext: true });`,
-    `    const data = ${lowerFirst(agg.name)}ToDoc(aggregate);`,
-    ...saveLines,
+    ...mikroSaveTxLines([
+      `    const data = ${lowerFirst(agg.name)}ToDoc(aggregate);`,
+      ...saveLines,
+    ]),
     `    requestLog().debug({ event: "repository_save", aggregate: "${agg.name}", id: aggregate.id as string });`,
     "",
     `    for (const event of aggregate.pullEvents()) {`,
@@ -3002,6 +3094,7 @@ export function renderMikroDocumentRepository(
         ? `import { AggregateNotFoundError, ConcurrencyError } from "../../domain/errors";`
         : `import { AggregateNotFoundError } from "../../domain/errors";`,
       `import type { DomainEventDispatcher } from "../../domain/events";`,
+      docAudited && `import { stampInsert } from "../audit-stamp";`,
       `import { requestLog } from "../../obs/als";`,
       "",
       body,
@@ -3089,6 +3182,21 @@ export function renderMikroEventSourcedRepository(
         : isOptional
           ? `all.find(${pred ?? "() => true"}) ?? null`
           : `all.find(${pred ?? "() => true"})!`;
+      // `find … paged` over a stream — same in-memory page as the document blob
+      // above and as the drizzle event-sourced repository (F2-CB-C1).
+      if (pagedReturn(find.returnType)) {
+        const pagedParams = [...baseParams, ...PAGED_TAIL_PARAMS];
+        const pagedAll = (usesUser ? [...pagedParams, "currentUser: User"] : pagedParams).join(
+          ", ",
+        );
+        return lines(
+          `  async ${find.name}(${pagedAll}): Promise<${pagedReturnType(agg.name)}> {`,
+          "    const all = await this._loadAll();",
+          `    const matched = ${pred ? `all.filter(${pred})` : "all"};`,
+          ...inMemoryPagedTailLines(agg, "matched", find.name),
+          "  }",
+        );
+      }
       return lines(
         `  async ${find.name}(${params}): Promise<${ret}> {`,
         "    const all = await this._loadAll();",
@@ -3274,93 +3382,20 @@ export function renderMikroEventSourcedRepository(
 // a `<Base>Repository` returning the `Concrete | …` tagged union.
 // ---------------------------------------------------------------------------
 
-/** Narrow the VO/enum/Decimal imports a base-reader body actually references,
- *  matching the discipline the per-aggregate repository builder keeps. */
-function baseReaderImports(
-  bodyStr: string,
-  concretes: readonly EnrichedAggregateIR[],
-  ctx: EnrichedBoundedContextIR,
-): { voImportLine: string | false; usesMoney: boolean } {
-  const bodyScan = bodyStr
-    .replace(/"(?:\\.|[^"\\])*"/g, '""')
-    .replace(/'(?:\\.|[^'\\])*'/g, "''")
-    .replace(/`(?:\\.|[^`\\])*`/g, "``");
-  const voOrEnum = [
-    ...new Set(concretes.flatMap((c) => [...collectValueObjects(c, ctx), ...collectEnums(c, ctx)])),
-  ].filter((n) => new RegExp(`\\b${n}\\b`).test(bodyScan));
-  const isValueUsed = (n: string): boolean =>
-    new RegExp(`new\\s+${n}\\(|\\b${n}\\.\\w`).test(bodyScan);
-  let voImportLine: string | false = false;
-  if (voOrEnum.length > 0) {
-    voImportLine = voOrEnum.some(isValueUsed)
-      ? `import { ${voOrEnum.map((n) => (isValueUsed(n) ? n : `type ${n}`)).join(", ")} } from "../../domain/value-objects";`
-      : `import type { ${voOrEnum.join(", ")} } from "../../domain/value-objects";`;
-  }
-  // Deep check — a concrete with money only inside a VO field still hydrates
-  // via `new Decimal(...)`, so gate the import on the VO-aware predicate.
-  return {
-    voImportLine,
-    usesMoney: concretes.some((c) => aggregateUsesMoneyDeep(c, ctx.valueObjects)),
-  };
-}
-
-/** TPH (`sharedTable`) read-only `<Base>Repository` — scans the shared Row and
- *  dispatches on the `kind` discriminator to hydrate the right concrete. */
+/** TPH (`sharedTable`) read-only `<Base>Repository`.
+ *
+ *  DELEGATES to the per-concrete repositories, exactly like the TPC reader
+ *  below.  It used to scan the shared Row itself (`em.find(<Base>Row, {})`) and
+ *  hydrate by `kind`, which meant it saw that Row through NONE of the machinery
+ *  the concrete repositories apply to it — no capability `filter`, no tenancy
+ *  predicate, no contained parts.  That is a cross-tenant read the moment the
+ *  polymorphic reader is wired to a route (`F2-CB-C12`, the drizzle twin of
+ *  which `buildBaseReaderFile` fixes the same way). */
 export function renderMikroBaseReader(
   base: EnrichedAggregateIR,
   concretes: readonly EnrichedAggregateIR[],
-  ctx: EnrichedBoundedContextIR,
 ): string {
-  const row = rowClassOf(base.name);
-  const cases = concretes.flatMap((c) => [
-    `    case ${JSON.stringify(c.name)}:`,
-    `      return ${hydrateConcreteFromSharedRow(c, "row", ctx)};`,
-  ]);
-  const body = lines(
-    `export class ${base.name}Repository {`,
-    `  private readonly em: EntityManager;`,
-    `  constructor(em: EntityManager) {`,
-    `    this.em = em;`,
-    `  }`,
-    "",
-    `  async findById(id: Ids.${base.name}Id): Promise<${base.name} | null> {`,
-    `    const em = this.em.fork({ keepTransactionContext: true });`,
-    `    const row = await em.findOne(${row}, { id: id as string });`,
-    `    if (row === null) return null;`,
-    `    return hydrate${base.name}(row);`,
-    `  }`,
-    "",
-    `  async findAll(): Promise<${base.name}[]> {`,
-    `    const em = this.em.fork({ keepTransactionContext: true });`,
-    `    const rows = await em.find(${row}, {});`,
-    `    return rows.map(hydrate${base.name});`,
-    `  }`,
-    `}`,
-    "",
-    `function hydrate${base.name}(row: ${row}): ${base.name} {`,
-    `  switch (row.kind) {`,
-    ...cases,
-    `    default:`,
-    "      throw new Error(`unknown " + base.name + " kind: ${row.kind}`);",
-    `  }`,
-    `}`,
-  );
-  const { voImportLine, usesMoney } = baseReaderImports(body, concretes, ctx);
-  return (
-    lines(
-      "// Auto-generated.  Do not edit by hand.",
-      usesMoney && `import Decimal from "decimal.js";`,
-      `import { EntityManager } from "@mikro-orm/postgresql";`,
-      `import { ${row} } from "../entities";`,
-      `import * as Ids from "../../domain/ids";`,
-      ...concretes.map((c) => `import { ${c.name} } from "../../domain/${lowerFirst(c.name)}";`),
-      voImportLine,
-      `import type { ${base.name} } from "../../domain/${lowerFirst(base.name)}";`,
-      "",
-      body,
-      "",
-    ) + "\n"
-  );
+  return renderMikroDelegatingBaseReader(base, concretes, "sharedTable");
 }
 
 /** TPC (`ownTable`) read-only `<Base>Repository` — each concrete is its own
@@ -3371,6 +3406,18 @@ export function renderMikroBaseReader(
 export function renderMikroTpcBaseReader(
   base: EnrichedAggregateIR,
   concretes: readonly EnrichedAggregateIR[],
+): string {
+  return renderMikroDelegatingBaseReader(base, concretes, "ownTable");
+}
+
+/** The polymorphic base reader for either layout: `findAll` unions each
+ *  concrete's `all()`, `findById` tries each in turn.  N round-trips traded for
+ *  reuse — and for filter correctness, since each concrete's own read path
+ *  carries its capability predicates. */
+function renderMikroDelegatingBaseReader(
+  base: EnrichedAggregateIR,
+  concretes: readonly EnrichedAggregateIR[],
+  layout: "sharedTable" | "ownTable",
 ): string {
   const repoCtor = (c: EnrichedAggregateIR): string => `${c.name}Repository`;
   const repoField = (c: EnrichedAggregateIR): string => `${lowerFirst(c.name)}Repo`;
@@ -3385,9 +3432,10 @@ export function renderMikroTpcBaseReader(
       ),
       `import type { ${base.name} } from "../../domain/${lowerFirst(base.name)}";`,
       "",
-      `// Polymorphic ${base.name} reader (TPC / ownTable): delegates to each`,
-      `// concrete repository so every aggregate loads its full tree, then unions`,
-      `// the results.  Read-only — writes go through the per-concrete repos.`,
+      `// Polymorphic ${base.name} reader (${layout === "ownTable" ? "TPC / ownTable" : "TPH / sharedTable"}): delegates to`,
+      `// each concrete repository so every aggregate loads its full tree — and`,
+      `// through its own capability filters — then unions the results.`,
+      `// Read-only; writes go through the per-concrete repos.`,
       `export class ${base.name}Repository {`,
       ...concretes.map((c) => `  private readonly ${repoField(c)}: ${repoCtor(c)};`),
       `  constructor(em: EntityManager, events: DomainEventDispatcher) {`,

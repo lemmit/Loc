@@ -8,8 +8,8 @@
 // `LoomDebugSession` over it, and wires it to the stdio DAP transport via the
 // SDK's `ProtocolServer.start(inStream, outStream)`.
 //
-// NOTE — the map path is intentionally simple for this slice: `--map=<path>`
-// on argv, else the `LOOM_DAP_MAP` env var, else `.loom/sourcemap.json`
+// NOTE — the map path is deliberately simple: `--map=<path>` on argv, else the
+// `LOOM_DAP_MAP` env var, else `.loom/sourcemap.json`
 // relative to the current working directory (the same default
 // `src/cli/main.ts`'s `resolveMapPath` uses for `ddd trace`/`ddd
 // breakpoints`). A real editor launch config sets one of these explicitly.

@@ -40,9 +40,8 @@ function firstApiHandle(ui: Ui): string | undefined {
  *  scaffold returns this instead of loose pages so the generated page tree
  *  groups by aggregate.  The pages are named by *role* (`List`/`New`/`Detail`),
  *  scoped to the area, and the `area` is authoritative for `emitPath`
- *  (`src/pages/orders/list.tsx`) — origin no longer drives it (slice 3a).  The
- *  emitted component / module identifiers stay the aggregate-qualified
- *  `OrderList` form via `pageEmitName` (output byte-identical).  See
+ *  (`src/pages/orders/list.tsx`).  The emitted component / module identifiers
+ *  are the aggregate-qualified `OrderList` form via `pageEmitName`.  See
  *  docs/old/proposals/unfoldable-page-scaffolding.md. */
 export function areaForAggregate(agg: Aggregate, ui: Ui): Area {
   return area(plural(agg.name), pagesForAggregate(agg, ui));
@@ -130,7 +129,7 @@ export function pagesForAggregate(agg: Aggregate, ui: Ui): Page[] {
       // through `unfold`.  Left as `pageNum` because renaming it is emitted-
       // output churn across six frontends for no behavioural gain.
       state: [
-        ...filterStateFields(filters).map((f) => f.name),
+        ...filterStateFields(filters),
         "sortKey",
         "sortDir",
         { name: "pageNum", type: "int", init: 1 } as const,

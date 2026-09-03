@@ -20,8 +20,8 @@
 // A column rename's `aggregate` and a table rename's `toAggregate` are real
 // cross-references (`[Aggregate:ID]`), so an unknown live aggregate is already a
 // Langium linking error — not re-checked here.  A table rename's `fromTable` is
-// deliberately NOT a cross-reference (the old aggregate is gone), so it is only
-// checked structurally.
+// deliberately NOT a cross-reference (it names a table the model no longer
+// declares), so it is only checked structurally.
 
 import { AstUtils, type ValidationAcceptor } from "langium";
 import { diagMessage } from "../../diagnostics/messages.js";
@@ -70,8 +70,8 @@ function checkMigration(
   for (const step of m.steps) {
     if (isTableRename(step)) {
       // Table/aggregate rename (`OldName -> NewAggregate`).  Structural checks
-      // only: `fromTable` is a bare name (the old aggregate is gone), so it
-      // cannot be cross-referenced.
+      // only: `fromTable` is a bare name — it names a table the model no
+      // longer declares — so it cannot be cross-referenced.
       const to = step.toAggregate.ref?.name ?? step.toAggregate.$refText;
       if (step.fromTable === to) {
         accept(

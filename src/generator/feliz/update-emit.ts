@@ -5,7 +5,8 @@
 
 import type { ActionIR, StateFieldIR, StoreIR } from "../../ir/types/loom-ir.js";
 import { typeIsFile } from "../../ir/util/file-field.js";
-import { upperFirst } from "../../util/naming.js";
+import { snake, upperFirst } from "../../util/naming.js";
+import { felizRouteSegments } from "./feliz-target.js";
 import {
   type FsExprCtx,
   ROUTE_ID_FROM_MODEL,
@@ -619,6 +620,19 @@ function renderUpdateStmt(stmt: ActionIR["body"][number], ctx: FsExprCtx): Updat
         const head = storeMsgCase(stmt.store, stmt.name);
         return { cmd: `Cmd.ofMsg (${args.length === 0 ? head : `${head} ${args.join(" ")}`})` };
       }
+      // `navigate(<Page>)` — the DOCUMENTED navigation shape (docs/actions.md).
+      // It lowers as a `private-operation` call, so it used to reach the throw
+      // below and KILL `ddd generate system` outright for the whole system, not
+      // just this deployable.  Routed to Feliz.Router the same way the `then:`
+      // path already was (`felizTarget.renderNavigate`).
+      if (stmt.name === "navigate") {
+        const pageRef = stmt.args[0];
+        const route =
+          pageRef?.kind === "ref"
+            ? (ctx.pageRoutes?.get(pageRef.name) ?? `/${snake(pageRef.name)}`)
+            : "/";
+        return { cmd: `Cmd.navigatePath(${felizRouteSegments(route).join(", ")})` };
+      }
       // `private-operation`: a backend concept with no frontend arm.  Fail fast
       // rather than silently dropping it.
       throw new Error(
@@ -637,7 +651,7 @@ function renderUpdateStmt(stmt: ActionIR["body"][number], ctx: FsExprCtx): Updat
       throw new Error(
         "feliz: a `match await` (async effect) statement reached the per-statement update " +
           "renderer — a supported effect is projected at the update level, an unsupported one " +
-          "is gated at validation (loom.feliz-async-effect-unsupported). See M-T6.15.",
+          "is gated at validation (loom.feliz-async-effect-unsupported).",
       );
     default:
       // `precondition` / `requires` / `emit` / `return` are backend-only
@@ -675,6 +689,9 @@ export function renderUpdate(
    *  field from the query string (`store-persist.ts`); undefined when the app
    *  has no url store, so its `update` is byte-identical. */
   storeUrlArm?: string,
+  /** Page name -> declared `route:` — what a `navigate(<Page>)` statement in an
+   *  action body resolves against.  Empty on a non-routed ui. */
+  pageRoutes: ReadonlyMap<string, string> = new Map(),
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
   // An update arm runs outside every page view fn, so a body that reads the
@@ -760,7 +777,12 @@ export function renderUpdate(
   };
   const actionArms = actions.map((a) => {
     const p = a.params[0];
-    const ctx: FsExprCtx = { stateNames, locals: new Set(p ? [p.name] : []), ...armRouteId };
+    const ctx: FsExprCtx = {
+      stateNames,
+      locals: new Set(p ? [p.name] : []),
+      pageRoutes,
+      ...armRouteId,
+    };
     const head = p ? `  | ${msgCase(a.name)} ${p.name} ->` : `  | ${msgCase(a.name)} ->`;
     return assembleArm(head, a.body, ctx);
   });
@@ -775,6 +797,7 @@ export function renderUpdate(
         stateNames,
         locals: new Set(p ? [p.name] : []),
         storeScope: { store: store.name, fields },
+        pageRoutes,
         ...armRouteId,
       };
       const msg = storeMsgCase(store.name, a.name);

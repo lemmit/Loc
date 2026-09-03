@@ -6,9 +6,9 @@
 // to make them reachable in whatever file the markup lands in.  How differs:
 // Vue and Svelte import them; Angular re-exposes them as component members
 // (its templates evaluate against the instance).  WHAT is the same everywhere,
-// and it was previously spelled out as a literal in each emitter — which is how
-// a hoisted `DataGrid` child ended up calling `formatDateTime` with nothing
-// providing it on three frontends at once.
+// so it is declared once here rather than as a literal in each emitter — a
+// hoisted `DataGrid` child calling `formatDateTime` with nothing providing it
+// is the failure three copies of this list produce.
 
 /** Every symbol `src/lib/format` exports. */
 export const FORMAT_MODULE_EXPORTS = [

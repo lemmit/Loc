@@ -63,7 +63,7 @@ export function renderLocaleCatalog(ui: UiIR, packChrome: Record<string, string>
 
 /** `src/i18n.ts` — the `t(key, default, values?)` lookup + ICU-format shim. */
 export function renderI18nModule(): string {
-  return `// Generated translation runtime (Loom i18n, M-T1.11).
+  return `// Generated translation runtime (Loom i18n).
 // Source-language lookup with a per-key fallback and ICU message formatting via
 // \`intl-messageformat\`. To add a locale, drop a
 // \`src/locales/<locale>.json\` file, import it below, and register it in

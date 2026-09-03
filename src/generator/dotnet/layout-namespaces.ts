@@ -187,9 +187,9 @@ function rewriteUsings(
       // The old namespace survives only while something still declares it.
       if (declared.has(target)) targets.push(target);
       for (const move of moves) {
-        // A directive for the file's OWN namespace is redundant — the
-        // common case being a feature file that used to import its
-        // aggregate's Domain namespace and now shares a namespace with it.
+        // A directive for the file's OWN namespace is redundant — the common
+        // case being a feature file that imports its aggregate's Domain
+        // namespace and shares a namespace with it after the move.
         if (move.newNs === fileNs) continue;
         // Split expansion stays tight: only namespaces whose relocated
         // types this file actually mentions.

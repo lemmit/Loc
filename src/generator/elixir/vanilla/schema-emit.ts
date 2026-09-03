@@ -1,10 +1,10 @@
 // ---------------------------------------------------------------------------
 // Vanilla Ecto.Schema emit — per-aggregate `lib/<app>/<ctx>/<agg>.ex`.
-// Slices 1 + 3 of vanilla-foundation-tdd-plan.md.
+// Per vanilla-foundation-tdd-plan.md.  Field mapping:
 //
-//   Slice 1: primitives + array-of-primitive + system-field skip.
-//   Slice 3 (current): enum → `Ecto.Enum` with values list;
-//     valueobject → `:map` (JSONB) — sufficient for wire parity; an
+//   primitives + array-of-primitive map directly; system fields are skipped.
+//   enum → `Ecto.Enum` with a values list;
+//   valueobject → `:map` (JSONB) — sufficient for wire parity; an
 //     `embeds_one` rich-schema path can come later if richer typed
 //     query support is needed; id (foreign key reference) →
 //     `:binary_id` column; optional wrapper unwraps the inner type.
@@ -27,7 +27,7 @@ import {
   resolveDataSourceConfig,
 } from "../../../ir/util/resolve-datasource.js";
 import { isValueCollectionType } from "../../../ir/util/value-collections.js";
-import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { elixirString, plural, snake, upperFirst } from "../../../util/naming.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import { isVanillaDocAgg, renderDocSchema } from "./document-emit.js";
 import { renderAggregatePureCore } from "./domain-core-emit.js";
@@ -403,7 +403,10 @@ export function renderEctoDefault(e: ExprIR): string | null {
   if (e.kind !== "literal") return null;
   switch (e.lit) {
     case "string":
-      return JSON.stringify(e.value);
+      // Through the shared escaping funnel: an unescaped `#{` in a `.ddd`
+      // default would INTERPOLATE in the schema module body (evaluated at
+      // `mix compile` time), not read as text.
+      return elixirString(e.value);
     case "money":
     case "decimal":
       return `Decimal.new(${JSON.stringify(e.value)})`;

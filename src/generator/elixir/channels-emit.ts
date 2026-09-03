@@ -370,7 +370,7 @@ export function emitElixirChannelFiles(
   /** Carried event IRs paired with their owning-context module prefix. */
   carried: { ev: EventIR; ctxModule: string }[],
   routes: ElixirConsumerRoute[],
-  /** M-T4.4 slice 7d: hosted durable events ride a broker-bound
+  /** M-T4.4: hosted durable events ride a broker-bound
    *  `queue`/`work` channel — the tee records them in `__loom_outbox`
    *  (joining the caller's Repo transaction, which an aggregate-writing emit
    *  site opens around persist + dispatch) and the OutboxRelay publishes
@@ -432,7 +432,7 @@ export function emitElixirChannelFiles(
     { name: "id", valueExpr: "id" },
   ]);
 
-  // Kafka (slice 8d): the channel's `key:` field per address — the envelope
+  // Kafka: the channel's `key:` field per address — the envelope
   // stamps its value as `loomkey`, kafka's partition key (design §4).  A
   // separate map so the routing tuples keep their 4-tuple shape.
   const keyedBindings = unique.filter((b) => b.key !== undefined);
@@ -453,7 +453,7 @@ export function emitElixirChannelFiles(
   const files = new Map<string, string>();
   files.set(
     `lib/${appName}/channels.ex`,
-    `# Auto-generated.  Broker channel tee (channels.md; M-T4.4 design §4-5).
+    `# Auto-generated.  Broker channel tee (channels.md).
 #
 # \`dispatch/2\` replaces the per-context \`Dispatcher.dispatch/1\` at every
 # producer-side emit seam when channels are wired: a broker-routed event is
@@ -637,8 +637,8 @@ end
   if (hasKafka) {
     files.set(
       `lib/${appName}/kafka_broker.ex`,
-      `# Auto-generated.  Kafka publisher process (channels.md; M-T4.4
-# design §4) — holds one :brod client per broker URL, idempotently
+      `# Auto-generated.  Kafka publisher process (channels.md) — holds one
+# :brod client per broker URL, idempotently
 # creates each topic before the first publish (3 partitions / rf 1, the
 # compose sidecar's defaults; an existing topic keeps its own shape), and
 # publishes with the partition key (\`loomkey\` ?? envelope id) through
@@ -710,7 +710,7 @@ defmodule ${appModule}.KafkaBroker do
   @doc """
   kafka://user:pass@host:port[,host2] -> {endpoints, conn_config}.
 
-  Userinfo (when present) becomes SASL/PLAIN (M-T4.4 \u00a77); a
+  Userinfo (when present) becomes SASL/PLAIN; a
   credential-less URL keeps the empty config -- plain PLAINTEXT, the
   pre-auth contract.
   """
@@ -747,8 +747,8 @@ end
   if (hasRabbit) {
     files.set(
       `lib/${appName}/channel_broker.ex`,
-      `# Auto-generated.  RabbitMQ publisher process (channels.md; M-T4.4
-# design §4) — holds one AMQP connection + channel per broker URL and
+      `# Auto-generated.  RabbitMQ publisher process (channels.md) — holds one
+# AMQP connection + channel per broker URL and
 # publishes envelopes onto the durable per-address fanout exchange.  The
 # hex \`amqp\` client (MIT) wraps the official RabbitMQ Erlang client.
 defmodule ${appModule}.ChannelBroker do
@@ -806,7 +806,7 @@ end
 # written by \`${appModule}.Channels.dispatch/2\` inside the caller's Repo
 # transaction (an aggregate-writing emit site opens one around persist+dispatch,
 # so the row commits with the state change), drained by
-# \`${appModule}.OutboxRelay\` (M-T4.4 design §5).
+# \`${appModule}.OutboxRelay\`.
 # Maps the shared __loom_outbox table the module migrations own.
 defmodule ${appModule}.LoomOutbox do
   use Ecto.Schema
@@ -824,7 +824,7 @@ end
     );
     files.set(
       `lib/${appName}/outbox_relay.ex`,
-      `# Auto-generated.  Transactional-outbox relay (M-T4.4 design §5):
+      `# Auto-generated.  Transactional-outbox relay:
 # drains undispatched __loom_outbox rows in occurred_at order and publishes
 # them to the broker at-least-once — the envelope carries the row id, the
 # consumer-side idempotency key.  Rows that exhaust the attempt budget stay
@@ -1136,7 +1136,7 @@ ${markEvLine(4)}    route(ev)
       : "";
     files.set(
       `lib/${appName}/channel_consumer.ex`,
-      `# Auto-generated.  Broker channel consumer (channels.md; M-T4.4).
+      `# Auto-generated.  Broker channel consumer (channels.md).
 #
 ${headerDesc}
 # envelopes into the SAME local \`<Ctx>.Dispatcher\` reactors use for local
@@ -1187,8 +1187,8 @@ ${
       ]);
       files.set(
         `lib/${appName}/kafka_consumer.ex`,
-        `# Auto-generated.  Kafka group subscriber (channels.md; M-T4.4 design
-# §4) — one brod group subscriber per wired kafka binding.  The group id
+        `# Auto-generated.  Kafka group subscriber (channels.md) — one brod
+# group subscriber per wired kafka binding.  The group id
 # (\`<address>.<deployable>\`) realises broadcast ACROSS deployables (each
 # group replays the whole log) and competition WITHIN one (replicas share
 # it).  Offsets commit after the handler resolves.  Dead-letter v1: a

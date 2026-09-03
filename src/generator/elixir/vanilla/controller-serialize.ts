@@ -5,15 +5,15 @@
 // The WorkflowsController (one per deployable, over every hosted context's
 // command workflows) and each `<Api>RoutesController` (explicit
 // `route … -> <Ctx>.<Handler>` bindings) hand their result straight to Jason.
-// Both used to serialize an aggregate result with the legacy raw-struct dump:
+// Both project through the aggregate's `wireShape`, NOT a raw-struct dump:
 //
 //   defp serialize(%_{} = struct), do: struct |> Map.from_struct() |> Map.drop(…)
 //
-// which is exactly the divergence `wire-serialize.ts` exists to close — snake_case
-// keys and leaked `inserted_at`/`updated_at`, while node/.NET/Java/Python all
-// project the aggregate's `wireShape`.  A `POST /workflows/<wf>` returning a
-// created aggregate therefore shipped a DIFFERENT body from the `GET /<aggs>/{id}`
-// for the same row on the same backend.
+// is exactly the divergence `wire-serialize.ts` exists to close — snake_case
+// keys and leaked `inserted_at`/`updated_at`, where node/.NET/Java/Python
+// project the wire shape.  A `POST /workflows/<wf>` returning a created
+// aggregate would otherwise ship a DIFFERENT body from the
+// `GET /<aggs>/{id}` for the same row on the same backend.
 //
 // These controllers are not per-aggregate, so they dispatch: one struct-typed
 // `defp serialize(%<App>.<Ctx>.<Agg>{} = record)` clause per hosted aggregate
@@ -39,8 +39,8 @@ import { isVanillaDocAgg } from "./document-emit.js";
 import { renderWireSerialize } from "./wire-serialize.js";
 
 /** The `serialize/1` clause set + helper defs for a deployable-level controller.
- *  Both members are already module-indented; splice them where the old two-clause
- *  `serialize` block sat. */
+ *  Both members are already module-indented; splice them where the
+ *  controller's `serialize` block goes. */
 export interface ControllerSerialize {
   /** The contiguous `defp serialize(...)` clauses — per-aggregate struct heads,
    *  then the `%_{}` raw-struct fallback, then `serialize(other)`. */
@@ -165,12 +165,12 @@ export function renderControllerSerialize(
   // type at the call site, which lives in the per-route action, not here.
   if (declared.decimal) {
     scalarClauses.push(
-      `  # RS-24 — a plain \`decimal\` is a JSON NUMBER on every other backend.` +
+      `  # A plain \`decimal\` is a JSON NUMBER on every other backend.` +
         `\n  defp serialize(%Decimal{} = value), do: Decimal.to_float(value)`,
     );
   } else if (declared.money) {
     scalarClauses.push(
-      `  # RS-12 — money rides the wire at the fixed \`NUMERIC(19,4)\` scale (Jason` +
+      `  # Money rides the wire at the fixed \`NUMERIC(19,4)\` scale (Jason` +
         `\n  # encodes a \`%Decimal{}\` as the string the other backends send).` +
         `\n  defp serialize(%Decimal{} = value), do: Decimal.round(value, ${MONEY_WIRE_SCALE})`,
     );

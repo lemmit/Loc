@@ -152,8 +152,12 @@ const PROBES: readonly Probe[] = [
   },
   {
     primitive: "KeyValueRow",
-    body: `KeyValueRow { "SlotKeyValue", Text { "v" } }`,
-    sentinels: { keyValue: "SlotKeyValue" },
+    // BOTH halves.  A nested primitive in the value slot (the previous probe's
+    // `Text { "v" }`) is an ELEMENT and localizes itself, which is exactly why
+    // the row's own VALUE slot went unnoticed: a plain literal there shipped in
+    // English at every locale while the label beside it translated (G2667 §D9).
+    body: `KeyValueRow { "SlotKeyValue", "SlotKeyValueValue" }`,
+    sentinels: { keyValue: "SlotKeyValue", keyValueValue: "SlotKeyValueValue" },
   },
   { primitive: "Badge", body: `Badge { "SlotBadge" }`, sentinels: { badge: "SlotBadge" } },
   {

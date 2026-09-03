@@ -181,10 +181,10 @@ function factoryAggsIn(statements: WorkflowStmtIR[]): string[] {
 export function renderJavaDispatcher(
   ctx: EnrichedBoundedContextIR,
   dctx: DispatchCtx,
-  /** Source-map Milestone 12 — `<Ctx>Dispatcher.java` pools every reactor /
+  /** Source-map — `<Ctx>Dispatcher.java` pools every reactor /
    *  event-create handler, so it never gets a whole-file region — only these
    *  fragment-only statement regions (mirrors `renderJavaWorkflows`'
-   *  `opFragments` at Milestone 11).  Allocated by the caller ONLY when a
+   *  `opFragments` at).  Allocated by the caller ONLY when a
    *  recorder is present, so a no-`--sourcemap` run pays no per-statement
    *  bookkeeping cost. */
   opFragments?: OpFragment[],
@@ -453,7 +453,7 @@ function renderHandler(
   resolved: ResolvedHandler,
   imports: Set<string>,
   construct: string,
-  /** Source-map Milestone 12 — see `renderJavaDispatcher`'s `opFragments`. */
+  /** Source-map — see `renderJavaDispatcher`'s `opFragments`. */
   opFragments?: OpFragment[],
 ): string[] {
   const corr = wf.correlationField as string;
@@ -509,8 +509,7 @@ function renderHandler(
   // Handler body — emit appends to __events; the spine threads the 8-space base.
   // Chunked (one lines-array per top-level statement) rather than the
   // pre-flattened `renderWorkflowStmts` — byte-identical either way, but the
-  // per-chunk list lets us surface per-statement sub-regions (source-map
-  // Milestone 12).
+  // per-chunk list lets us surface per-statement sub-regions (source-map).
   const stmtChunks = renderWorkflowStmtChunks(
     resolved.statements,
     javaWorkflowStmtTarget(
@@ -575,7 +574,7 @@ function renderEsHandler(
   imports: Set<string>,
   construct: string,
   schema?: string,
-  /** Source-map Milestone 12 — see `renderJavaDispatcher`'s `opFragments`. */
+  /** Source-map — see `renderJavaDispatcher`'s `opFragments`. */
   opFragments?: OpFragment[],
 ): string[] {
   const corr = wf.correlationField as string;
@@ -604,7 +603,7 @@ function renderEsHandler(
   // that only emits constants never touches `state`) — folding is then a
   // pure no-op, so we skip the stream load + fold (parity with the python
   // port).  The chunk list also lets us surface per-statement sub-regions
-  // (source-map Milestone 12).
+  // (source-map).
   const stmtChunks = renderWorkflowStmtChunks(
     resolved.statements,
     javaWorkflowStmtTarget(
@@ -717,7 +716,7 @@ function esMergedBranchLines(
   branchParam: string,
   schema: string | undefined,
   construct: string,
-  /** Source-map Milestone 12 — this branch's own `OpFragment`, pushed here so
+  /** Source-map — this branch's own `OpFragment`, pushed here so
    *  the merged handler (create + on) records TWO fragments, one per branch.
    *  This branch's lines get re-indented TWICE before landing in the final
    *  file: once by the caller's if/else wrap (`renderEsMergedHandler`, +4)
@@ -797,7 +796,7 @@ function renderEsMergedHandler(
   imports: Set<string>,
   schema: string | undefined,
   construct: string,
-  /** Source-map Milestone 12 — forwarded to `esMergedBranchLines` for BOTH
+  /** Source-map — forwarded to `esMergedBranchLines` for BOTH
    *  branches, so a merged handler records two `OpFragment`s (create + on). */
   opFragments?: OpFragment[],
 ): string[] {

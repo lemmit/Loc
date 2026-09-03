@@ -120,7 +120,7 @@ function renderService(svc: DomainServiceIR, ctx: BoundedContextIR): string {
   const idImports = [...types.idNames].sort().map((n) => `${n}Id`);
   const voEnumNames = [...types.voNames, ...types.enumNames].sort();
 
-  // Read-port repository classes (domain-services.md rev. 4, Slice 1): a
+  // Read-port repository classes (domain-services.md rev. 4): a
   // `reading`-tier op takes an `<Aggregate>Repository` handle param, so THIS
   // service's module imports that class for the annotation.  Scoped to the
   // service's own operations (Python emits one module per service, unlike the
@@ -175,7 +175,7 @@ function renderService(svc: DomainServiceIR, ctx: BoundedContextIR): string {
 }
 
 function renderOperation(op: DomainServiceOperationIR): string {
-  // Read-port parameters (domain-services.md rev. 4, Slice 1): a `reading`-tier
+  // Read-port parameters (domain-services.md rev. 4): a `reading`-tier
   // op takes one repository handle per repo it reads, AHEAD of the user params —
   // `accounts: AccountRepository` — exactly the handle the body's `repo-read`
   // arms render against (`await accounts.by_holder(holder)`) and the

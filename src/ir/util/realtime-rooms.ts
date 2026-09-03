@@ -20,8 +20,8 @@
 // emitting site) and touches no tenant-owned one.  Everything else in such a
 // context is tenant-scoped: routed to the emitter's tenant room when the tenant
 // key is derivable, and degraded to the id-only refetch ticket when it is not.
-// An event carrying no id reference therefore no longer broadcasts its full
-// scalar payload to every tenant's clients.
+// So an event carrying no id reference never broadcasts its full scalar payload
+// to every tenant's clients.
 
 import type { AggregateIR, BoundedContextIR, EventIR, StmtIR, SystemIR } from "../types/loom-ir.js";
 import { realtimeEventTypes } from "./channels.js";

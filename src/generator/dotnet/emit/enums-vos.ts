@@ -30,13 +30,13 @@ export function renderValueObject(vo: ValueObjectIR, ns: string): string {
   // derived / function bodies rendered below.
   const usings = new Set<string>();
   for (const inv of vo.invariants) {
-    collectCsExprUsings(inv.expr, usings);
-    if (inv.guard) collectCsExprUsings(inv.guard, usings);
+    collectCsExprUsings(inv.expr, usings, ns);
+    if (inv.guard) collectCsExprUsings(inv.guard, usings, ns);
   }
-  for (const d of vo.derived) collectCsExprUsings(d.expr, usings);
+  for (const d of vo.derived) collectCsExprUsings(d.expr, usings, ns);
   for (const fn of vo.functions) {
-    if ("expr" in fn.body) collectCsExprUsings(fn.body.expr, usings);
-    else collectCsStmtUsings(fn.body.stmts, usings);
+    if ("expr" in fn.body) collectCsExprUsings(fn.body.expr, usings, ns);
+    else collectCsStmtUsings(fn.body.stmts, usings, ns);
   }
   const renderCtx = { thisName: "this" };
   const propLines = vo.fields.map(

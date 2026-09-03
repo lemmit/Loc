@@ -239,7 +239,7 @@ export function dartRecordForEvent(ev: EventIR): DartRecord {
   };
 }
 
-/** The Dart wire model for a query-time PROJECTION's row (M-T1.3 Phase 1).
+/** The Dart wire model for a query-time PROJECTION's row (M-T1.3).
  *
  *  `<Proj>Row`, off the SAME `wireShape` the backend's row DTO and every other
  *  frontend's row type are built from — which is the whole reason a projection
@@ -481,7 +481,7 @@ const PROV_LINEAGE_CLASSES = lines(
   "}",
   "",
   "// `Provenanced<T>` — a provenanced field's value and the lineage of the write",
-  "// that produced it, travelling together as one JSON object (M-T6.12).  The",
+  "// that produced it, travelling together as one JSON object.  The",
   "// same shape every other Loom backend and frontend uses.",
   `class ${DART_PROVENANCED}<T> {`,
   "  final T value;",

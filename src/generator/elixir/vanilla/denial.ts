@@ -2,18 +2,18 @@
 // failed `requires` / `precondition` short-circuits to, and the controller
 // clause that turns it into an RFC 7807 response.
 //
-// Why it exists.  A guard denial used to be a bare atom (`{:error, :forbidden}`
-// / `{:error, :precondition_failed}`), which carried the STATUS but not the
-// MESSAGE — so every controller answered with a hardcoded generic string
-// ("A precondition failed"), while node/dotnet/java/python all name the failed
-// predicate ("Precondition failed: status != \"cancelled\"").  RFC 7807 wants
-// `detail` specific to the OCCURRENCE, and the M-T9.11 wire-golden gate can't
-// carry an error-envelope assertion while one backend's `detail` is generic
-// (the golden is byte-exact — a waiver would only park the divergence).
+// Why it exists.  A bare atom (`{:error, :forbidden}` /
+// `{:error, :precondition_failed}`) carries the STATUS but not the MESSAGE, so
+// every controller answers with a hardcoded generic string ("A precondition
+// failed") where node/dotnet/java/python name the failed predicate
+// ("Precondition failed: status != \"cancelled\"").  RFC 7807 wants `detail`
+// specific to the OCCURRENCE, and the wire-golden gate is byte-exact — it
+// cannot carry an error-envelope assertion while one backend's `detail` is
+// generic.
 //
-// So a denial is now a 2-TUPLE — `{:precondition_failed, "<message>"}` — and
-// the reason term flows through `{:error, reason}` catch-alls exactly as the
-// bare atom did.  The message is built by the SAME rule the other four
+// So a denial is a 2-TUPLE — `{:precondition_failed, "<message>"}` — and the
+// reason term flows through `{:error, reason}` catch-alls exactly as a bare
+// atom would.  The message is built by the SAME rule the other four
 // backends use (the `raise(<App>.GuardError, …)` path below here, and the
 // `DomainError`/`DomainException` throws there): an explicit `message:` if the
 // statement declares one, else the derived `"<Prefix>: <source>"`.
@@ -37,6 +37,7 @@ import { problemTitle } from "../../../ir/util/openapi-errors.js";
 import { classifyForWire, pickErrorPath } from "../../../ir/validate/invariant-classify.js";
 import { errorTitle, resolveErrorStatus } from "../../../util/error-defaults.js";
 import { messageCode } from "../../../util/message-code.js";
+import { elixirString } from "../../../util/naming.js";
 
 type GuardStmt = Extract<StmtIR | WorkflowStmtIR, { kind: "requires" | "precondition" }>;
 
@@ -199,7 +200,7 @@ export function guardErrorModule(appModule: string): string {
  *  the `ensure` path puts in the same denial's `detail`. */
 export function guardRaise(s: GuardStmt, appModule: string): string {
   const kind = s.kind === "requires" ? ":forbidden" : ":precondition";
-  return `raise(${guardErrorModule(appModule)}, kind: ${kind}, message: ${JSON.stringify(
+  return `raise(${guardErrorModule(appModule)}, kind: ${kind}, message: ${elixirString(
     denialMessage(s),
   )})`;
 }
@@ -243,7 +244,7 @@ end
 export function denialTerm(s: GuardStmt, wireAvailable?: ReadonlySet<string>): string {
   if (deniesAtWire(s, wireAvailable)) return wireValidationTerm(s);
   const tag = s.kind === "requires" ? ":forbidden" : ":precondition_failed";
-  return `{${tag}, ${JSON.stringify(denialMessage(s))}}`;
+  return `{${tag}, ${elixirString(denialMessage(s))}}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -302,7 +303,9 @@ export function wireValidationTerm(s: GuardStmt): string {
   const text = denialMessage(s);
   const entry = [
     `pointer: ${JSON.stringify(pointer)}`,
-    `message: ${JSON.stringify(text)}`,
+    // The author's `message "…"` goes through the shared escaping funnel — a
+    // raw `#{` here would interpolate into the 422 body at request time.
+    `message: ${elixirString(text)}`,
     `code: ${JSON.stringify(messageCode(text))}`,
   ].join(", ");
   return `{:validation_failed, [%{${entry}}]}`;

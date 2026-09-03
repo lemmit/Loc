@@ -205,5 +205,12 @@ jobs:
             test/behavioral/.work-schemathesis*/*/server.log
             test/behavioral/.work-schemathesis*/*/openapi.json
             test/behavioral/.work-schemathesis*/*/report/*.ndjson
+          # `.work-schemathesis*` is a DOT-directory, and upload-artifact@v4
+          # skips hidden paths unless told otherwise — so every leg logged
+          # "No files were found with the provided path" and uploaded nothing.
+          # The globs were right the whole time; the reports simply never
+          # shipped, which is why a red leg could only ever be diagnosed from
+          # the console tail.  test.yml already sets this for `.vitest-reports`.
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14

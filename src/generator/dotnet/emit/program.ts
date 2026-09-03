@@ -111,7 +111,7 @@ export function renderProgram(
      *  rows stamp the per-dispatch frame's scope / parent ids, so it also
      *  forces the `ExecutionContextBehavior` frame-opener to be registered. */
     hasProvenance?: boolean;
-    /** Tenant hierarchy (multi-tenancy P2.2): the registry opts into
+    /** Tenant hierarchy (multi-tenancy): the registry opts into
      *  `tenantRegistry`, so register the scoped `IOrgPathResolver` →
      *  `EfOrgPathResolver` that UserMiddleware calls per request to materialize
      *  `currentUser.orgPath` from the registry's `data_key`.  Implies
@@ -122,18 +122,18 @@ export function renderProgram(
      *  `AddHostedService<…>()` per owned timer).  Empty ⇒ no registration, so
      *  a timer-free deployable's Program.cs stays byte-identical. */
     timerServices?: string[];
-    /** Broker channels (M-T4.4 slice 6a): the deployable wires a broker-bound
+    /** Broker channels (M-T4.4): the deployable wires a broker-bound
      *  channelSource — register the ChannelTransports singleton and wrap the
      *  dispatcher chain in the publish tee (design §4 delivery uniformity). */
     hasChannels?: boolean;
-    /** M-T4.4 slice 7b: the workflow-less durable-broker producer shape — the
+    /** M-T4.4: the workflow-less durable-broker producer shape — the
      *  outbox dispatcher wraps the Noop (no in-process dispatcher exists), so
      *  register the Noop concretely instead of the InProcess scoped line. */
     outboxNoopInner?: boolean;
     /** A hosted reactor subscribes to a carried event — start the consumer
      *  BackgroundService feeding envelopes into the in-process dispatch. */
     hasChannelConsumers?: boolean;
-    /** TimerSource durable scheduling (scheduling.md Phase 2): the deployable
+    /** TimerSource durable scheduling (scheduling.md): the deployable
      *  owns at least one `cron:` timer, so wire Hangfire (`AddHangfire` +
      *  `AddHangfireServer`, Hangfire.PostgreSql storage) + register its recurring
      *  jobs.  `every:`-only + timer-free deployables leave this false — no
@@ -168,8 +168,7 @@ export function renderProgram(
   // at all.  Only the genuinely colliding types are re-mapped (keyed by CLR
   // full name, computed at emit time in `schema-ids.ts`); every other type
   // keeps its short name so the component set stays comparable with the four
-  // other backends.  No collision ⇒ both fragments are empty and Program.cs is
-  // byte-identical to before this guard existed.
+  // other backends.  No collision ⇒ both fragments are empty.
   const schemaOverrides = options?.schemaIdOverrides ?? [];
   const schemaIdDictionary =
     schemaOverrides.length === 0
@@ -263,7 +262,7 @@ app.MapGet("/api/realtime/events", async (HttpContext http, ${ns}.Infrastructure
   // api-client (`api.upload("/files")`, `FileRef.url = "/files/<key>"`) and Hono.
   const fileUpload = options?.fileUpload;
   const fileRoutesEndpoint = fileUpload
-    ? `// File upload/download (M-T1.2) — root /files over the bound objectStore.
+    ? `// File upload/download — root /files over the bound objectStore.
 app.MapPost("/files", async (IFormFile file) =>
 {
     var key = Guid.NewGuid().ToString();
@@ -277,7 +276,7 @@ app.MapPost("/files", async (IFormFile file) =>
 app.MapGet("/files/{key}", async (string key, HttpContext http, ILogger<${ns}.Api.DomainExceptionFilter> log) =>
 {
     var obj = await ${fileUpload.getBytes}(key);
-    // M-T6.39 — an absent object answers the app's ONE 404 envelope.  A minimal
+    // An absent object answers the app's ONE 404 envelope.  A minimal
     // API is outside MVC, so a throw here would never reach
     // DomainExceptionFilter; NotFoundProblem is that filter's own responder,
     // called directly, so the body, the status (incl. the httpStatus NotFound
@@ -320,7 +319,7 @@ app.MapGet("/files/{key}", async (string key, HttpContext http, ILogger<${ns}.Ap
     : options?.hasSubscriptions
       ? `// Domain event dispatch — in-process Mediator-notification dispatcher, teed\n// to the realtime wire; the broker tee (below) is outermost.\nbuilder.Services.AddScoped<InProcessDomainEventDispatcher>();\nbuilder.Services.AddScoped<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<InProcessDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`
       : `// Domain event dispatch — no-op inner, teed to the realtime SSE wire; the\n// broker tee (below) is outermost.\nbuilder.Services.AddSingleton<NoopDomainEventDispatcher>();\nbuilder.Services.AddSingleton<RealtimeDomainEventDispatcher>(sp =>\n    new RealtimeDomainEventDispatcher(sp.GetRequiredService<NoopDomainEventDispatcher>(), sp.GetRequiredService<${ns}.Infrastructure.Realtime.RealtimeHub>()));`;
-  const channelTeeSuffix = `\n// Broker channel transport (channels.md; M-T4.4): the publish tee routes\n// broker-bound events to the broker (design §4 — co-located consumers\n// receive them via the subscription, not a local shortcut).\nbuilder.Services.AddSingleton<ChannelTransports>();\nbuilder.Services.AddScoped<IDomainEventDispatcher, ChannelPublishTeeDispatcher>();${
+  const channelTeeSuffix = `\n// Broker channel transport (channels.md): the publish tee routes\n// broker-bound events to the broker (design §4 — co-located consumers\n// receive them via the subscription, not a local shortcut).\nbuilder.Services.AddSingleton<ChannelTransports>();\nbuilder.Services.AddScoped<IDomainEventDispatcher, ChannelPublishTeeDispatcher>();${
     options?.hasChannelConsumers
       ? "\nbuilder.Services.AddHostedService<ChannelConsumerService>();"
       : ""
@@ -360,7 +359,7 @@ app.MapGet("/files/{key}", async (string key, HttpContext http, ILogger<${ns}.Ap
           .map((fqn) => `builder.Services.AddHostedService<${fqn}>();`)
           .join("\n")}`
       : "";
-  // TimerSource `cron:` schedulers (scheduling.md Phase 2) run on Hangfire with
+  // TimerSource `cron:` schedulers (scheduling.md) run on Hangfire with
   // Hangfire.PostgreSql storage: the recurring-job scheduler is store-coordinated
   // (single-fire across replicas), retries a failed job with backoff, and fires an
   // overdue recurring job on server start (native missed-run replay).
@@ -368,7 +367,7 @@ app.MapGet("/files/{key}", async (string key, HttpContext http, ILogger<${ns}.Ap
   const hangfireJobDiRegistrations = options?.hangfireJobDiRegistrations ?? [];
   const hangfireRecurringRegistrations = options?.hangfireRecurringRegistrations ?? [];
   const hangfireDiBlock = hangfireCronTimers
-    ? `\n// Durable cron timers (scheduling.md Phase 2) — Hangfire + Hangfire.PostgreSql.\n// The storage schema is created automatically on first use.\nbuilder.Services.AddHangfire(cfg => cfg\n    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)\n    .UseSimpleAssemblyNameTypeSerializer()\n    .UseRecommendedSerializerSettings()\n    .UsePostgreSqlStorage(o => o.UseNpgsqlConnection(builder.Configuration.GetConnectionString("Default"))));\nbuilder.Services.AddHangfireServer();\n${hangfireJobDiRegistrations.join("\n")}`
+    ? `\n// Durable cron timers (scheduling.md) — Hangfire + Hangfire.PostgreSql.\n// The storage schema is created automatically on first use.\nbuilder.Services.AddHangfire(cfg => cfg\n    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)\n    .UseSimpleAssemblyNameTypeSerializer()\n    .UseRecommendedSerializerSettings()\n    .UsePostgreSqlStorage(o => o.UseNpgsqlConnection(builder.Configuration.GetConnectionString("Default"))));\nbuilder.Services.AddHangfireServer();\n${hangfireJobDiRegistrations.join("\n")}`
     : "";
   const hangfireRecurringBlock = hangfireCronTimers
     ? `\n// Register the durable cron timerSources as Hangfire recurring jobs (standard\n// 5-field cron).  Uses the service-based IRecurringJobManager (the static\n// RecurringJob API needs JobStorage.Current, unset on the DI path).  AddOrUpdate\n// is idempotent per stable id — re-registers on boot.\nusing (var hangfireScope = app.Services.CreateScope())\n{\n    var recurring = hangfireScope.ServiceProvider.GetRequiredService<IRecurringJobManager>();\n${hangfireRecurringRegistrations.join("\n")}\n}\n`
@@ -412,7 +411,7 @@ using (var seedScope = app.Services.CreateScope())
     )
     .join("\n");
 
-  // Reading-tier domain services (domain-services.md rev. 4, Slice 1): a
+  // Reading-tier domain services (domain-services.md rev. 4): a
   // `reading` service is a DI'd `sealed class` (it injects an
   // I<Aggregate>Repository per read-port), so it must be registered as a scoped
   // service the orchestrating workflow handler can inject.  A `pure` service is
@@ -443,7 +442,7 @@ using (var seedScope = app.Services.CreateScope())
     ? `\n// Entity history — the read port over audit_records (GET /<agg>/{id}/history).\nbuilder.Services.AddScoped<${ns}.Application.Common.IAuditHistoryReader, ${ns}.Infrastructure.Persistence.AuditHistoryReader>();`
     : "";
 
-  // Domain persistence-port adapters (audit S7 Slice C): the orchestration
+  // Domain persistence-port adapters: the orchestration
   // handlers (transactional workflow command, saga reactors, projection fold)
   // depend on IUnitOfWork / IWorkflowEventStore / ISagaStateStore /
   // IReadModelStore instead of the concrete AppDbContext.  All scoped over the
@@ -458,15 +457,15 @@ using (var seedScope = app.Services.CreateScope())
   // stores key off) and threaded in.  The EF path keeps the open generics.
   const portsDi = usesPersistencePorts
     ? usingDapper
-      ? `\n// Domain persistence ports (M-T6.9) — Dapper adapters over NpgsqlDataSource (closed bindings).\n${(options?.dapperPortRegistrations ?? []).join("\n")}`
-      : `\n// Domain persistence ports (audit S7 Slice C) — EF adapters over the scoped AppDbContext.\nbuilder.Services.AddScoped<${ns}.Domain.Common.IUnitOfWork, ${ns}.Infrastructure.Persistence.EfUnitOfWork>();\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IWorkflowEventStore<>), typeof(${ns}.Infrastructure.Persistence.EfWorkflowEventStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.ISagaStateStore<>), typeof(${ns}.Infrastructure.Persistence.EfSagaStateStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IReadModelStore<>), typeof(${ns}.Infrastructure.Persistence.EfReadModelStore<>));`
+      ? `\n// Domain persistence ports — Dapper adapters over NpgsqlDataSource (closed bindings).\n${(options?.dapperPortRegistrations ?? []).join("\n")}`
+      : `\n// Domain persistence ports — EF adapters over the scoped AppDbContext.\nbuilder.Services.AddScoped<${ns}.Domain.Common.IUnitOfWork, ${ns}.Infrastructure.Persistence.EfUnitOfWork>();\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IWorkflowEventStore<>), typeof(${ns}.Infrastructure.Persistence.EfWorkflowEventStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.ISagaStateStore<>), typeof(${ns}.Infrastructure.Persistence.EfSagaStateStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IReadModelStore<>), typeof(${ns}.Infrastructure.Persistence.EfReadModelStore<>));`
     : "";
 
   // Extern application-layer handlers ([ExternHandler] scan targets).  Since
-  // extern (b) Phase 2, an extern aggregate OPERATION is a domain partial-method
+  // extern (b), an extern aggregate OPERATION is a domain partial-method
   // hook (no injected handler, no `[ExternHandler]`, no DI registration — a
   // missing implementation is a COMPILE error), so ONLY the extern
-  // commandHandler / queryHandler application members (Phase 1's case-2 home)
+  // commandHandler / queryHandler application members (case-2 home)
   // register through the Scrutor scan.  Their user impl carries `[ExternHandler]`;
   // the same scan registers it under `I<Name>Handler` and the startup verify
   // fails fast when the user hasn't supplied one.
@@ -526,7 +525,7 @@ ${externHandlers
 builder.Services.AddScoped<IUserVerifier, DevStubUserVerifier>();${
         oidc
           ? `
-// OIDC verifier (D-AUTH-OIDC) — validates the IdP's tokens against its
+// OIDC verifier — validates the IdP's tokens against its
 // JWKS and maps claims onto User.  Registered last so it wins over the
 // dev stub; configure the issuer / client via the env vars the
 // \`auth { oidc }\` block referenced.
@@ -537,7 +536,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserAccessor, HttpContextCurrentUserAccessor>();${
         orgPathResolver
           ? `
-// Tenant hierarchy (multi-tenancy P2.2): the per-request \`orgPath\` resolver —
+// Tenant hierarchy (multi-tenancy): the per-request \`orgPath\` resolver —
 // currentUser.orgPath = the caller org's materialized \`data_key\`, read once
 // per request by UserMiddleware and memoized on the principal (fail-safe to
 // the claim).  Scoped: it holds the request-scoped ${usingDapper ? "connection source" : "AppDbContext"}.
@@ -648,7 +647,7 @@ builder.Logging.SetMinimumLevel((System.Environment.GetEnvironmentVariable("LOG_
     _ => Microsoft.Extensions.Logging.LogLevel.Information,
 });
 
-// OpenTelemetry tracing (M-T7.1).  AspNetCore instrumentation gives a SERVER
+// OpenTelemetry tracing.  AspNetCore instrumentation gives a SERVER
 // span per request (so Activity.Current.TraceId is populated on every request
 // — RequestContextMiddleware stamps the loom.* ids onto it and threads
 // trace_id/span_id onto the log scope).  The span is EXPORTED via OTLP/HTTP
@@ -754,7 +753,7 @@ builder.Services.AddControllers(opts =>
     // converter and emits a named string-enum schema for each enum type.
     opts.JsonSerializerOptions.Converters.Add(
         new System.Text.Json.Serialization.JsonStringEnumConverter());
-    // Canonical ISO-8601 UTC instants (RS-4): trim trailing zero fractional
+    // Canonical ISO-8601 UTC instants: trim trailing zero fractional
     // seconds so an instant with no sub-second part serializes as "…00Z" (not
     // System.Text.Json's fixed 7-digit "…00.0000000Z"), matching the node /
     // Python / Java backends.  Business DTOs carry datetime as a pre-formatted
@@ -779,7 +778,7 @@ builder.Services.Configure<ApiBehaviorOptions>(opts =>
 
 // The framework produces ProblemDetails of its own for the faults it answers
 // without reaching a controller at all — 415 being the common one.  Those
-// carry the rfc9110 \`type\` URI (not \`about:blank\`, RS-9), no \`detail\`, no
+// carry the rfc9110 \`type\` URI (not \`about:blank\`), no \`detail\`, no
 // \`instance\`, and a \`traceId\` on the body that every backend here moved to
 // the x-request-id header.  Normalise them to the emitted envelope; the
 // customizer is a no-op on responses already built in that shape.
@@ -801,7 +800,7 @@ builder.Services.AddProblemDetails(opts =>
 // session probe when auth is on) and any raw datetime a minimal endpoint
 // returns serialize through ConfigureHttpJsonOptions rather than the MVC
 // AddJsonOptions above.  Register the canonical instant converters here too so
-// their wire matches the controllers' (RS-4 temporal round-trip parity).
+// their wire matches the controllers' (temporal round-trip parity).
 builder.Services.ConfigureHttpJsonOptions(opts =>
 {
     opts.SerializerOptions.Converters.Add(
@@ -875,7 +874,7 @@ builder.Services.AddSwaggerGen(c =>
             ? null
             : char.ToLowerInvariant(action[0]) + action.Substring(1);
     });
-${schemaIdDictionary}    // Schema-name parity for the paged carrier (M-T2.6): the generic
+${schemaIdDictionary}    // Schema-name parity for the paged carrier: the generic
     // Paged<XResponse> return would otherwise get Swashbuckle's default
     // "PagedXResponse" component name — but Hono/Phoenix/Java/Python all name
     // the envelope "<Agg>Paged" (e.g. EngineerPaged).  Map the generic back to
@@ -1167,13 +1166,13 @@ export function renderCsproj(
   // RabbitMQ.Client (Apache-2.0, §6a) speaks AMQP 0-9-1 to the rabbitmq
   // sidecar.  Per-transport wiring-gated.
   const redisChannelRef = channelTransports.redis
-    ? `\n    <!-- Redis channel transport (channels.md, M-T4.4) -->\n    <PackageReference Include="StackExchange.Redis" Version="2.8.16" />`
+    ? `\n    <!-- Redis channel transport (channels.md) -->\n    <PackageReference Include="StackExchange.Redis" Version="2.8.16" />`
     : "";
   const kafkaChannelRef = channelTransports.kafka
-    ? `\n    <!-- Kafka channel transport (channels.md, M-T4.4; Confluent.Kafka, Apache 2.0) -->\n    <PackageReference Include="Confluent.Kafka" Version="2.6.1" />`
+    ? `\n    <!-- Kafka channel transport (channels.md; Confluent.Kafka, Apache 2.0) -->\n    <PackageReference Include="Confluent.Kafka" Version="2.6.1" />`
     : "";
   const rabbitChannelRef = channelTransports.rabbit
-    ? `\n    <!-- RabbitMQ channel transport (channels.md, M-T4.4) -->\n    <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />`
+    ? `\n    <!-- RabbitMQ channel transport (channels.md) -->\n    <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />`
     : "";
   const oidcRefs = oidc
     ? `\n    <!-- OIDC token validation (generated OidcUserVerifier) -->\n    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.19.2" />\n    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.19.2" />`
@@ -1199,7 +1198,7 @@ export function renderCsproj(
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />`;
-  // Resource-client NuGet refs (Phase 4c) — AWSSDK.S3 / RabbitMQ.Client
+  // Resource-client NuGet refs — AWSSDK.S3 / RabbitMQ.Client
   // etc., one row per package the deployable's consumed resources need.
   const resourceRefs = Object.entries(resourceNugetDeps)
     .sort(([a], [b]) => a.localeCompare(b))
@@ -1224,7 +1223,7 @@ export function renderCsproj(
     usesSpecifications && !usingDapper
       ? `\n    <!-- Ardalis.Specification — reified retrieval/criterion query objects -->\n    <PackageReference Include="Ardalis.Specification" Version="9.3.1" />\n    <PackageReference Include="Ardalis.Specification.EntityFrameworkCore" Version="9.3.1" />`
       : "";
-  // Hangfire — durable `timerSource … cron:` scheduling (scheduling.md Phase 2)
+  // Hangfire — durable `timerSource … cron:` scheduling (scheduling.md)
   // on Hangfire.PostgreSql storage.  Ships only when an owned timer uses a real
   // cron cadence (an `every:`-only deployable uses PeriodicTimer and needs no
   // dep).  Newtonsoft.Json is pinned to 13.x to override the vulnerable 11.0.1
@@ -1316,7 +1315,7 @@ ${persistenceRefs}
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
     <!-- Prometheus metrics at /metrics (prometheus-net) -->
     <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />
-    <!-- OpenTelemetry tracing (M-T7.1): AspNetCore instrumentation gives a
+    <!-- OpenTelemetry tracing: AspNetCore instrumentation gives a
          SERVER span per request; exported via OTLP/HTTP only when a collector
          endpoint is set (Program.cs).  1.17.x clears the NU1902 advisories on
          the older 1.10/1.12 lines. -->

@@ -9,10 +9,11 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import type { AggPool } from "../../../ir/util/inheritance.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
-import { plural, upperFirst } from "../../../util/naming.js";
+import { escapeCsharpIdent, plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 import { unionFindAsOptionalTwin } from "../find-emit.js";
 import {
@@ -21,7 +22,8 @@ import {
   renderCsExpr,
   renderCsType,
 } from "../render-expr.js";
-import { queryFilterNames } from "./efcore.js";
+import { bypassableFilterNames, hasNonBypassableFilter, queryFilterNames } from "./efcore.js";
+import { csClaimStampsFor } from "./entity.js";
 import { eventDbSetName, eventRecordClass } from "./event-store.js";
 import { joinDbSetName, joinEntityName, joinFkPropName } from "./join-entities.js";
 
@@ -79,7 +81,7 @@ export function renderRepositoryInterface(
       `public interface I${agg.name}Repository`,
       "{",
       `    Task<${agg.name}?> GetByIdAsync(${idClass} id, CancellationToken cancellationToken = default);`,
-      // Command-load path (authorization Phase 3 P3.1): a write-scope-narrowed
+      // Command-load path (authorization): a write-scope-narrowed
       // GetById the mutation handlers load through.  Only when the aggregate's
       // write scope is narrower than its read scope.
       ...(agg.writeScopeFilter
@@ -107,6 +109,9 @@ export function renderRepositoryImpl(
   agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
   ns: string,
+  /** The context's aggregate pool — resolves this aggregate's EF named-filter
+   *  identity, which is TPH-dependent (`queryFilterNames`). */
+  pool: AggPool,
   findBodies: Array<{
     name: string;
     ignoreClause: string;
@@ -293,16 +298,33 @@ export function renderRepositoryImpl(
   // names never appear on the domain PORT; the adapter owns the mapping).  One
   // `(capability, filterName)` pair per named filter that has a capability
   // origin (a base filter with no origin can only be dropped via `bypass.All`).
-  const filterNames = queryFilterNames(agg);
+  const filterNames = queryFilterNames(agg, pool);
   const filterOrigins = agg.contextFilterOrigins ?? [];
   const bypassPairs = filterNames
     .map((filter, i) => ({ cap: filterOrigins[i], filter }))
     .filter((p): p is { cap: string; filter: string } => p.cap != null);
+  // `bypass.All` drops every BYPASSABLE filter.  The parameterless overload
+  // drops all of them, so it is only safe when nothing on this aggregate is
+  // non-bypassable; a `policy { deny on X }` always-false sentinel is (deny
+  // wins over an authored `ignoring *`), and then the droppable filters are
+  // enumerated by name instead — or the branch disappears entirely when the
+  // deny carve-out is the only filter.
+  const allBypassNames = hasNonBypassableFilter(agg) ? bypassableFilterNames(agg, pool) : null;
+  const bypassAllLines =
+    allBypassNames === null
+      ? ["        if (bypass.All) __q = __q.IgnoreQueryFilters();"]
+      : allBypassNames.length > 0
+        ? [
+            `        if (bypass.All) __q = __q.IgnoreQueryFilters([${allBypassNames
+              .map((n) => JSON.stringify(n))
+              .join(", ")}]);`,
+          ]
+        : [];
   const bypassBody = [
-    "        if (bypass.All) __q = __q.IgnoreQueryFilters();",
+    ...bypassAllLines,
     ...(bypassPairs.length > 0
       ? [
-          "        else if (bypass.Capabilities is { Count: > 0 })",
+          `        ${bypassAllLines.length > 0 ? "else if" : "if"} (bypass.Capabilities is { Count: > 0 })`,
           "        {",
           `            var __ignore = new (string Capability, string Filter)[] { ${bypassPairs
             .map((p) => `(${JSON.stringify(p.cap)}, ${JSON.stringify(p.filter)})`)
@@ -363,7 +385,7 @@ export function renderRepositoryImpl(
       "{",
       "    private readonly AppDbContext _db;",
       "    private readonly IDomainEventDispatcher _events;",
-      // Per-class ILogger injection — same idiom Phase 8 .NET v1 used
+      // Per-class ILogger injection — same idiom .NET v1 used
       // for the controllers + DomainExceptionFilter, so the entire
       // generated codebase keeps one logging pattern.
       `    private readonly ILogger<${agg.name}Repository> _log;`,
@@ -390,7 +412,7 @@ export function renderRepositoryImpl(
       "        return found;",
       "    }",
       "",
-      // Command-load path (authorization Phase 3 P3.1): a write-scope existence
+      // Command-load path (authorization): a write-scope existence
       // pre-guard (EF applies the read query-filter automatically; the extra
       // predicate narrows to the write scope, which is always ⊆ the read scope),
       // then the ordinary hydrating `GetByIdAsync`.  A row the caller may READ
@@ -432,9 +454,9 @@ export function renderRepositoryImpl(
       // events are drained and the DURABLE ones staged on the SAME change
       // tracker BEFORE the single SaveChangesAsync below, so their
       // __loom_outbox rows land in the same round trip — and therefore the same
-      // implicit transaction — as the aggregate write.  Previously the outbox
-      // insert ran from DispatchAsync AFTER the commit, on a second
-      // SaveChangesAsync: a crash in between silently lost an owed event.
+      // implicit transaction — as the aggregate write.  Inserting from
+      // DispatchAsync AFTER the commit, on a second SaveChangesAsync, loses an
+      // owed event to a crash in between.
       // `__deferred` is what still needs dispatching post-commit (everything,
       // when no durable channel is wired — the inline at-most-once path).
       "        var __pending = aggregate.PullEvents();",
@@ -592,7 +614,7 @@ function buildLoadManyByIdsLines(
  * detached-check Add and before `SaveChangesAsync`.  For every
  * reference collection on the aggregate: load existing join rows,
  * compare against the current `aggregate.<Prop>` set, delete pairs
- * that are no longer present, and insert new ones.  Set semantics —
+ * that are absent from it, and insert new ones.  Set semantics —
  * the wire contract for `Id<T>[]` is a set (membership only, no order),
  * so the join row carries no payload: it's added if missing, left as-is
  * otherwise.  Mirrors the TS Drizzle save diff-sync. */
@@ -648,11 +670,10 @@ function buildSaveDiffSyncLines(associations: AssociationIR[]): string[] {
 // aggregate's persistence record is `(Id, Data jsonb, Version)`, so the
 // filter's columns (`tenantId`, `dataKey`, `isDeleted`) live INSIDE the
 // blob and there is no mapped column for EF to attach a predicate to.
-// Before this was wired, a `tenantOwned` document aggregate read
-// UNFILTERED across tenants while `validateContextFilterSupport` claimed
-// .NET filters every shape — a silent cross-tenant read (#2527's
-// follow-up 1).  node/java/python already filter document reads in-app
-// this way; this is the .NET half of that parity.
+// Without it a `tenantOwned` document aggregate reads UNFILTERED across
+// tenants while `validateContextFilterSupport` claims .NET filters every
+// shape — a silent cross-tenant read.  node/java/python filter document reads
+// in-app the same way.
 // ---------------------------------------------------------------------------
 export function renderDocumentRepositoryImpl(
   agg: EnrichedAggregateIR,
@@ -675,6 +696,10 @@ export function renderDocumentRepositoryImpl(
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
   const setName = plural(upperFirst(agg.name));
   const snap = `${agg.name}Snapshot`;
+  // Both halves of the document-stamp contract read `csClaimStampsFor`: the
+  // entity emits `_StampOnCreate()` when it is non-empty, and the INSERT branch
+  // below emits the call.  Computing it twice is how the halves drift (§89).
+  const docCreateStamps = csClaimStampsFor(agg, "create").length > 0;
   const deser = `${agg.name}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snap}>(__d.Data, __json)!)`;
   // The aggregate's capability filters, AND-ed into ONE in-app predicate over
   // the rehydrated instance (see the header note).  Hoisted into a private
@@ -702,7 +727,7 @@ export function renderDocumentRepositoryImpl(
         `    private static bool _CapabilityVisible(${agg.name} x) => ${capPredicate};`,
       ]
     : [];
-  // Write-scope narrowing (authorization Phase 3 P3.1): the document twin of the
+  // Write-scope narrowing (authorization): the document twin of the
   // relational `AnyAsync(x => x.Id == id && (<scope>))` pre-guard.  `GetByIdAsync`
   // already applies the READ filter above (EF gets that for free on the
   // relational path via the query filter), so this only adds the write-scope
@@ -840,6 +865,13 @@ export function renderDocumentRepositoryImpl(
         ? [
             `        var __existing = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == aggregate.Id.Value, cancellationToken);`,
             "        var __nextVersion = __existing == null ? 1 : __existing.Version + 1;",
+            // INSERT only: a jsonb aggregate is not EF-tracked, so the
+            // AuditableInterceptor never stamps it.  Must run BEFORE the
+            // snapshot is serialized.  The update path rewrites the whole blob
+            // from the rehydrated aggregate, which already carries the stamps.
+            ...(docCreateStamps
+              ? ["        if (__existing == null) aggregate._StampOnCreate();"]
+              : []),
             "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot() with { Version = __nextVersion }, __json);",
             "        if (__existing == null)",
             "        {",
@@ -852,8 +884,15 @@ export function renderDocumentRepositoryImpl(
             "        }",
           ]
         : [
-            "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);",
+            // `__existing` is resolved BEFORE the snapshot here (it was the
+            // other way round) so the create-only stamps can be applied to the
+            // aggregate first — serializing an unstamped snapshot is what wrote
+            // rows with an empty tenant.
             `        var __existing = await _db.${setName}.FirstOrDefaultAsync(x => x.Id == aggregate.Id.Value, cancellationToken);`,
+            ...(docCreateStamps
+              ? ["        if (__existing == null) aggregate._StampOnCreate();"]
+              : []),
+            "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);",
             "        if (__existing == null)",
             "        {",
             `            _db.${setName}.Add(new ${agg.name}Document { Id = aggregate.Id.Value, Data = __data, Version = 1 });`,
@@ -964,6 +1003,39 @@ export function renderEventSourcedRepositoryImpl(
   );
   const recordCls = eventRecordClass(contextName);
 
+  // Write-scope narrowing (authorization): the EVENT-SOURCED twin
+  // of the document `writeScopeMethod` above.  A stream has no queryable row to
+  // pre-guard with `AnyAsync`, so — exactly like the document blob — fold the
+  // stream through `GetByIdAsync` and apply the scope predicate in-app.
+  // Without it, a narrowed write ladder (or `policy { deny write on X }`) on an
+  // event-sourced aggregate failed CS0535: the port declares
+  // `GetByIdForWriteAsync` whenever `agg.writeScopeFilter` is set (see the
+  // interface emitter), and this impl had no implementation.
+  //
+  // The pairwise compile oracle reported the same CS0535 independently as F9,
+  // and its provenance is worth keeping: #2527's follow-up 2 fixed this exact
+  // error for the DOCUMENT shape (the comment on the document
+  // `writeScopeMethod` above says so) and left the event-sourced impl behind.
+  // That is the SHAPE-axis twin of F2's TARGET-axis partial fix — one more
+  // instance of a fix being marked closed when it lands on the first shape or
+  // target it was reported against.
+  const writeScopeMethod = agg.writeScopeFilter
+    ? [
+        "",
+        `    public async Task<${agg.name}?> GetByIdForWriteAsync(${idClass} id, CancellationToken cancellationToken = default)`,
+        "    {",
+        "        var __found = await GetByIdAsync(id, cancellationToken);",
+        "        if (__found == null) return null;",
+        "        return _WriteScopeAllows(__found) ? __found : null;",
+        "    }",
+        "",
+        `    private static bool _WriteScopeAllows(${agg.name} x) => ${renderCsExpr(
+          agg.writeScopeFilter,
+          { thisName: "x", agg, currentUserExpr: AMBIENT_CURRENT_USER },
+        )};`,
+      ]
+    : [];
+
   const findMethodLines = finds.flatMap((f) => {
     const body = findBodies.find((b) => b.name === f.name);
     const filter = body?.filterClause ?? "";
@@ -1039,6 +1111,7 @@ export function renderEventSourcedRepositoryImpl(
       "        if (__rows.Count == 0) return null;",
       `        return ${agg.name}._FromEvents(id, __rows.Select(RowToEvent).ToList());`,
       "    }",
+      ...writeScopeMethod,
       "",
       `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${idClass}> ids, CancellationToken cancellationToken = default)`,
       "    {",
@@ -1155,7 +1228,7 @@ function renderParamsWithCt(
   extra: string[] = [],
 ): string {
   const head = [
-    ...params.map((p) => `${renderCsType(p.type)} ${p.name}`),
+    ...params.map((p) => `${renderCsType(p.type)} ${escapeCsharpIdent(p.name)}`),
     ...extra,
     usesUser ? "User currentUser" : null,
   ]
@@ -1172,7 +1245,7 @@ function renderParamsWithCt(
  *  the run method. */
 export function renderRetrievalParamsWithCt(params: ParamIR[]): string {
   const head = [
-    ...params.map((p) => `${renderCsType(p.type)} ${p.name}`),
+    ...params.map((p) => `${renderCsType(p.type)} ${escapeCsharpIdent(p.name)}`),
     "(int? offset, int? limit)? page = null",
   ].join(", ");
   // The `bypass` param carries an inline read's `ignoring` clause

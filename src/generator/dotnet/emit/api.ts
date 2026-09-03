@@ -218,14 +218,13 @@ function absentReturnLines(
   ns: string,
 ): string[] {
   // RS-22/RS-27 — a `none` absence THROWS, so `DomainExceptionFilter` renders
-  // the envelope.  This used to `return NotFound();`: ASP.NET's own bare 404,
-  // which never reaches the filter and is rendered by `ProblemDetailsFactory`
-  // instead — wrong `type` (rfc9110 §15.5.5, not `about:blank`), null `detail`,
-  // null `instance`, plus an injected `traceId` the envelope must not carry.
-  // The identical defect RS-27 fixed on the by-id read, at the arm that reads
-  // `null` and answers locally; it also made ONE controller emit two different
-  // wires for shapes `docs/payloads.md` declares wire-identical, since the
-  // `error`-variant branch below hand-builds a correct ProblemDetails.
+  // the envelope.  A bare `return NotFound();` never reaches the filter and is
+  // rendered by `ProblemDetailsFactory` instead: wrong `type` (rfc9110
+  // §15.5.5, not `about:blank`), null `detail`, null `instance`, plus an
+  // injected `traceId` the envelope must not carry.  It would also make ONE
+  // controller emit two different wires for shapes `docs/payloads.md` declares
+  // wire-identical, since the `error`-variant branch below hand-builds a
+  // correct ProblemDetails.
   if (ua.kind === "none") return [`            ${dotnetFindAbsenceThrow(ns)}`];
   const detail = JSON.stringify(ua.title);
   if (!ua.resource) {
@@ -576,9 +575,9 @@ export function renderOperationActionBlock(
   //      instead of trailing the 422 (same set, attribute order only);
   //   2. a union error arm declares `typeof(ProblemDetails)` — the arm really
   //      does answer a ProblemDetails body (see the dispatch below), so the
-  //      old bare `[ProducesResponseType(<s>)]` under-documented it;
-  //   3. a union arm sharing a status with the when-gate is declared once,
-  //      where the old groups declared it twice (typed + bare).
+  //      a bare `[ProducesResponseType(<s>)]` would under-document it;
+  //   3. a union arm sharing a status with the when-gate is declared ONCE,
+  //      not twice (typed + bare).
   const successDecl = ru
     ? `    [ProducesResponseType(typeof(${ru.appNs}.${ru.unionName}), 200)]`
     : rs
@@ -718,25 +717,23 @@ export function renderExceptionFilter(
   const disallowedStatus = resolveErrorStatus("Disallowed", options?.structuralStatuses);
   const uniquenessStatus = resolveErrorStatus("UniquenessConflict", options?.structuralStatuses);
   const concurrencyStatus = resolveErrorStatus("ConcurrencyConflict", options?.structuralStatuses);
-  // M-T5.20 — the domain floor and the `requires` denial resolve through the
-  // same `httpStatus` map as the structural conflicts above, instead of the
-  // hardcoded 422 / 403 literals they used to be. Defaults collapse to those
-  // same literals, so output is byte-identical with no override.
+  // The domain floor and the `requires` denial resolve through the same
+  // `httpStatus` map as the structural conflicts above; the defaults are the
+  // 422 / 403 literals.
   const domainStatus = resolveErrorStatus("DomainError", options?.structuralStatuses);
   const forbiddenStatus = resolveErrorStatus("Forbidden", options?.structuralStatuses);
-  // The last literal of the ladder — the domain not-found rung.  It stayed a
-  // hardcoded 404 while its four siblings resolved, so `httpStatus NotFound ->
-  // <code>` moved this filter's `Disallowed`/`DomainError`/`Forbidden` arms and
-  // silently not its `AggregateNotFoundException` one.  The FRAMEWORK 404 in
+  // The domain not-found rung resolves like its four siblings, so
+  // `httpStatus NotFound -> <code>` moves this filter's
+  // `AggregateNotFoundException` arm as well as its
+  // `Disallowed`/`DomainError`/`Forbidden` ones.  The FRAMEWORK 404 in
   // `Program.cs` (`no route for <verb> <path>`) is a different concern and
   // stays literal.
   const notFoundStatus = resolveErrorStatus("NotFound", options?.structuralStatuses);
-  // A project with no `unique (...)` key emits no 23505 → 409 arm, so a model
-  // without uniqueness is byte-identical to before the feature (the proposal's
-  // strict-additivity guarantee — only a `unique` index can raise 23505).
+  // A project with no `unique (...)` key emits no 23505 → 409 arm — only a
+  // `unique` index can raise 23505.
   const hasUniqueKeys = !!options?.hasUniqueKeys;
-  // A project with no `versioned` aggregate emits no concurrency-conflict arm,
-  // so a non-versioned model is byte-identical (strict additivity).
+  // A project with no `versioned` aggregate emits no concurrency-conflict
+  // arm.
   const hasVersioned = !!options?.hasVersioned;
   // Persistence selection (D-REALIZATION-AXES): the EF adapter surfaces a
   // Postgres unique-violation wrapped in `Microsoft.EntityFrameworkCore.
@@ -902,6 +899,43 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         }`
             : ""
         }
+        // Malformed WIRE value (M-T6.48) — money / datetime arrive as strings
+        // and the controller parses them before the command exists, so this is
+        // neither a FluentValidation failure (the validator runs on the COMMAND,
+        // downstream of the parse) nor a domain rule.  Same 422 + errors[]
+        // envelope as both, so a price of "12,50" reads identically on .NET
+        // and on Hono's zod moneySchema hook.
+        if (context.Exception is WireFormatException wfe)
+        {
+            var wireProblem = new ProblemDetails
+            {
+                Type = "about:blank",
+                Title = "Validation failed",
+                Status = 422,
+                Detail = "One or more fields are invalid.",
+                Instance = context.HttpContext.Request.Path,
+            };
+            // Anonymous type rather than Dictionary<,>: this arm is emitted
+            // unconditionally, and System.Collections.Generic is only imported
+            // when the project has validators.
+            wireProblem.Extensions["errors"] = new[]
+            {
+                new { pointer = wfe.FieldPointer, message = wfe.Message },
+            };
+            ${renderDotnetLogCall("domainError", [
+              { name: "message", valueExpr: `"Validation failed"` },
+              { name: "status", valueExpr: "422" },
+            ])}
+            global::${ns}.Observability.HttpMetrics.RecordDomainFault("domain_error");
+            context.HttpContext.Response.Headers["x-request-id"] = trace_id;
+            context.Result = new ObjectResult(wireProblem)
+            {
+                StatusCode = 422,
+                ContentTypes = { "application/problem+json" },
+            };
+            context.ExceptionHandled = true;
+            return;
+        }
         if (context.Exception is ForbiddenException fe)
         {
             ${renderDotnetLogCall("forbidden", [
@@ -924,7 +958,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             context.ExceptionHandled = true;
             return;
         }${uniqueConflictArm}${concurrencyConflictArm}
-        // RS-15: a domain-floor rejection (precondition / invariant) is 422 —
+        // A domain-floor rejection (precondition / invariant) is 422 —
         // the request is well-formed, the domain refuses it on semantic
         // grounds.  400 stays for a malformed request.
         if (context.Exception is DomainException de)
@@ -950,16 +984,15 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         {
             // 500 — the user handler threw, which is an internal
             // failure from the framework's POV, so the body is
-            // sanitized to "internal" like every other 500 arm (RS-28).
+            // sanitized to "internal" like every other 500 arm.
             //
-            // This previously sent xh.Message, whose intent was to name
-            // the offending op + aggregate so operators didn't have to grep
-            // logs.  But that message interpolates the INNER exception the
-            // user handler threw — driver text, URLs, connection strings —
-            // into a public, potentially unauthenticated response.  The
-            // operator-facing half is unaffected: aggregate, op and the full
-            // inner exception all reach the catalog's extern_handler_threw
-            // event below.  Same shape the Hono onError arm emits.
+            // Deliberately NOT xh.Message: it interpolates the INNER
+            // exception the user handler threw — driver text, URLs,
+            // connection strings — into a public, potentially
+            // unauthenticated response.  Operators lose nothing: aggregate,
+            // op and the full inner exception all reach the catalog's
+            // extern_handler_threw event below.  Same shape the Hono
+            // onError arm emits.
             ${renderDotnetLogCallWithException("externHandlerThrew", "xh", [
               { name: "aggregate", valueExpr: "xh.AggName" },
               { name: "op", valueExpr: "xh.OpName" },
@@ -1000,7 +1033,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         };
     }
 
-    // M-T6.39 — the same 404 envelope, for the routes MVC cannot reach.
+    // The same 404 envelope, for the routes MVC cannot reach.
     //
     // This class is an \`IExceptionFilter\`: it only ever sees exceptions raised
     // inside the MVC pipeline.  The root \`/files/{key}\` download is a MINIMAL
@@ -1205,7 +1238,7 @@ public sealed class ProblemDetailsResponsesFilter : IOperationFilter
     // of DomainExceptionFilter emits on 422 validation responses.
     // Consumed by the frontend ACL's \`applyServerErrors\`.  Idempotent;
     // safe to run per operation.  See
-    // docs/old/proposals/validation-error-extension.md (Phase D).
+    // docs/old/proposals/validation-error-extension.md.
     // Microsoft.OpenApi 2.0: schema type is the \`JsonSchemaType\` flags enum
     // (nullability folded in as \`| JsonSchemaType.Null\`, which the 3.0 writer
     // serializes back to \`nullable: true\`); property maps are keyed by the
@@ -1269,7 +1302,7 @@ public sealed class ListResponseWrapperFilter : IDocumentFilter
     {
         // Retarget inline array responses to the named wrapper $ref, adding the
         // wrapper component ONLY when an endpoint actually returns that array.
-        // A paged-by-default findAll (M-T2.6) returns <Agg>Paged, not a bare
+        // A paged-by-default findAll returns <Agg>Paged, not a bare
         // array, so a paged-only aggregate surfaces no <Agg>ListResponse — the
         // Hono / Phoenix backends omit it too (an unreferenced wrapper never
         // enters their spec), so adding it unconditionally would drift parity.
@@ -1365,7 +1398,7 @@ public sealed class RequiredFromCtorParamFilter : ISchemaFilter
         if (s.Properties is null || s.Properties.Count == 0) return;
         s.Required ??= new HashSet<string>();
 
-        // Paged carrier (M-T2.6): the generic Paged<T> record's members
+        // Paged carrier: the generic Paged<T> record's members
         // (items/page/pageSize/total/totalPages) are all non-optional, but
         // Swashbuckle's non-nullable detection can't read nullability off an
         // OPEN generic parameter, so it leaves the required set empty — while

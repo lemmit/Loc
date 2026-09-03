@@ -1,4 +1,4 @@
-// Permission `implies` transitive closure (authorization.md §6, M-T3.2 item 7).
+// Permission `implies` transitive closure (authorization.md §6).
 //
 // `X implies Y` declares that HOLDING permission `X` transitively GRANTS
 // permission `Y`.  The closure is precomputed here at lowering; the runtime

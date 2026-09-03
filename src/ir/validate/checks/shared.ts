@@ -37,7 +37,7 @@ export function firstUnknownColumnRef(
      *  the capability-filter selectability loop only: a filter predicate is
      *  always AGGREGATE-rooted, where `id` is a real stored column on every
      *  backend — the derived tenancy registry self-scope (`this.id ==
-     *  currentUser.<claim>`, Phase 1b) is the motivating shape.  Find /
+     *  currentUser.<claim>`) is the motivating shape.  Find /
      *  retrieval `where`s keep the strict field-list check (a
      *  workflow-instance read-model source has no `id` column, so admitting it
      *  there would emit SQL against a missing column). */
@@ -263,9 +263,9 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
       if (e.receiver.kind === "ref" && e.receiver.refKind === "current-user") return null;
       return "member access not rooted at 'this' or beyond a flattened value object";
     case "method-call":
-      // (The `deep` / DENY authorization filter sentinels are no longer
-      // `method-call` nodes — they moved to the discriminated `authz-filter`
-      // kind in M-T9.9, admitted in its own arm below.)
+      // (The `deep` / DENY authorization filter sentinels are NOT `method-call`
+      // nodes — they are the discriminated `authz-filter` kind, admitted in its
+      // own arm below.)
       // Membership over a reference collection — `this.<refColl>.contains(x)`
       // — is the one collection op we admit: it lowers to an EXISTS-style
       // subquery against the field's join table.  Everything else
@@ -381,14 +381,14 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
       // them to a native query fragment (see `DEEP_SCOPE_SEMANTICS` / the
       // always-false fragments), so they are queryable by construction — admit
       // them rather than have the tenant-floor rewrite trip the selectability
-      // gate.  (Formerly admitted in the `method-call` arm as the
-      // `__loomDeepScope__` / `__loomDeny__` markers.)
+      // gate.
       return null;
   }
 }
 
 /** Visit `e` and every sub-expression.  Thin alias over the shared, exhaustive
  *  {@link walkExprDeep} (`src/ir/util/walk.ts`) — kept as a named re-export so
- *  the many `checks/*` call sites need no churn.  The old hand-rolled copy here
- *  missed `convert.value`, `list.elements`, and block-body lambda statements. */
+ *  the many `checks/*` call sites need no churn.  A hand-rolled copy here would
+ *  drift on `convert.value`, `list.elements`, and block-body lambda
+ *  statements. */
 export const walkExpr = walkExprDeep;

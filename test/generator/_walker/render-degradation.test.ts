@@ -347,8 +347,47 @@ const SELF_HOSTED_DEPLOYABLE = (platform: string): string => `  deployable web_a
  * have.  The companion `validates cleanly` test below is what keeps this
  * honest from now on.
  */
+/** The fixture's read-bearing component, and where the HEEx leg has to put it.
+ *
+ *  `component RecentProducts` hosts a `QueryView` on purpose: it is the shape
+ *  that buys "an api read inside a component body" real per-frontend COMPILER
+ *  coverage (#2654), and it works on all six JSX/markup targets.
+ *
+ *  It does NOT work on Phoenix.  A HEEx function component is a pure render
+ *  function, so the read's `@items` assign has to come from the host page's
+ *  LiveView — and only a component's `state`/`action`s are lifted there (#2646).
+ *  The emitted component referenced an assign the host never made: output that
+ *  passes `mix compile --warnings-as-errors` and then 500s on page load.  That
+ *  is now `loom.heex-component-host-state-unsupported`, so the retargeted model
+ *  is REJECTED rather than silently emitted.
+ *
+ *  Generating it anyway (`generateSystemFilesUnchecked`) would put this leg back
+ *  to scanning output no user can obtain — the exact failure this function's own
+ *  header documents.  So the HEEx leg keeps the component and moves the READ up
+ *  into the page that already renders it: every other shape in the showcase
+ *  still reaches the HEEx emitter, and the six JSX legs keep the
+ *  read-in-component coverage unchanged.  Delete this transform when the
+ *  hoisting lands and the gate's register row drains. */
+const READ_IN_COMPONENT = `        QueryView { of: Catalog.Product.all, data: rows => Stack {
+          For { each: rows, p => Text { p.name } }
+        } }`;
+const READ_IN_COMPONENT_HEADING = `        Heading { title, level: 3 },\n${READ_IN_COMPONENT}`;
+const RECENT_PRODUCTS_CALL = `        RecentProducts { title: "Recent" }`;
+
+function liftReadOutOfComponent(base: string): string {
+  expect(
+    base.includes(READ_IN_COMPONENT_HEADING) && base.includes(RECENT_PRODUCTS_CALL),
+    "the fixture's read-bearing component changed — update READ_IN_COMPONENT, or the " +
+      "phoenixLiveView leg silently stops generating",
+  ).toBe(true);
+  return base
+    .replace(READ_IN_COMPONENT_HEADING, `        Heading { title, level: 3 }`)
+    .replace(RECENT_PRODUCTS_CALL, `${RECENT_PRODUCTS_CALL},\n${READ_IN_COMPONENT}`);
+}
+
 function retargetFixture(target: { framework: string; platform: string; hosting: string }): string {
-  const base = loadExample(FIXTURE).replace("framework: react", `framework: ${target.framework}`);
+  let base = loadExample(FIXTURE).replace("framework: react", `framework: ${target.framework}`);
+  if (target.framework === "phoenixLiveView") base = liftReadOutOfComponent(base);
   if (target.hosting === "self") {
     expect(
       base.includes(SPA_DEPLOYABLES),

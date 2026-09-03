@@ -1,5 +1,5 @@
 // Svelte's `DataGrid` child component — the `.svelte` half of the
-// `renderDataGridChild` seam (M-T1.1 slice 10).
+// `renderDataGridChild` seam (M-T1.1).
 //
 // WHY `table-core` AND NOT THE SVELTE ADAPTER
 // -------------------------------------------

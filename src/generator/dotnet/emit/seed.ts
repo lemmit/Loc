@@ -1,5 +1,5 @@
 // First-boot database seeding for the .NET/EF Core backend
-// (database-seeding.md, Phase 3a).  Emits `Infrastructure/Persistence/Seed.cs`
+// (database-seeding.md).  Emits `Infrastructure/Persistence/Seed.cs`
 // from the context's `SeedIR` list.
 //
 // Per D-SEED-PATH the default path is **through the domain `Create`**: each
@@ -286,7 +286,7 @@ function renderSeedFile(
       `namespace ${ns}.Infrastructure.Persistence;`,
       "",
       "/// <summary>First-boot seed data (database-seeding.md).  Ship-once per",
-      "/// dataset via the __loom_seed marker (D-SEED-IDEMPOTENCY); re-runs are",
+      "/// dataset via the __loom_seed marker; re-runs are",
       "/// no-ops.</summary>",
       "public static class Seed",
       "{",

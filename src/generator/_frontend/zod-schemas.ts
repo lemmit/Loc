@@ -160,7 +160,7 @@ export function emitResponseSchema(
       lines.push(`  ${wf.name}: ${zodForResponse(wf.type, wf.optional)},`);
     }
   }
-  // (M-T6.12) The lineage is no longer appended here as a trailing
+  // The lineage is NOT appended here as a trailing
   // `<field>_provenance` sibling — it rides INSIDE the provenanced field's own
   // entry as the `Provenanced<T>` carrier, emitted by `zodForResponse`'s
   // `provenanced` arm from the one shape definition.

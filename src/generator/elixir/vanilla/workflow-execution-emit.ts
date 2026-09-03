@@ -1,59 +1,59 @@
 // ---------------------------------------------------------------------------
 // Vanilla workflow execution emit — `lib/<app>/<ctx>/workflows/<wf>.ex` +
-// `lib/<app>_web/controllers/workflows_controller.ex`.  Slice 5c of
-// vanilla-foundation-tdd-plan.md.
+// `lib/<app>_web/controllers/workflows_controller.ex`
+// (vanilla-foundation-tdd-plan.md).
 //
 // Workflows are plain Elixir modules.  A workflow becomes a module with
 // `run/1` returning `{:ok, _} | {:error, _}`; `transactional`
 // workflows wrap their body in `Repo.transaction/1`.  Cross-aggregate
 // operation calls (`<aggregate>.<op>(args)` in the workflow body)
 // route through the per-context named-operation functions emitted
-// by `context-emit.ts` (Slice 5c prerequisite).
+// by `context-emit.ts`.
 //
-// Body lowering by WorkflowStmtIR kind (incremental):
-//   ✓ factory-let → `{:ok, <name>} <- Context.create_<agg>(%{...})`
-//   ✓ op-call     → `{:ok, _}      <- Context.<op>_<agg>(target, %{...})`
-//   ✓ precondition → `:ok <- (if <cond>, do: :ok, else: {:error, :precondition_failed})`
-//   ✓ requires     → `:ok <- (if <cond>, do: :ok, else: {:error, :forbidden})`
-//   ✓ expr-let     → `<name> <- (<expr>)` (always succeeds; binds `name`)
-//   ✓ repo-let     → `{:ok, <name>} <- Context.get_<agg>(id)` (getById)
-//                    OR `{:ok, <name>} <- Context.<find>_<agg>(args...)`
-//                    (custom find via the per-find defdelegate emitted by
-//                    `context-emit.ts` → `repository-emit.ts:renderFindFn`)
-//   ✓ emit         → `Phoenix.PubSub.broadcast(App.PubSub, "events",
-//                     %App.Ctx.Events.<Name>{...})` — rendered INSIDE the
-//                    with-chain's do-branch so a failed precondition / op
-//                    short-circuits and the broadcast is skipped.  The
-//                    `Events.<Name>` struct module is emitted by the
-//                    orchestrator's `emitVanillaEventModules` hook.
-//   ✓ resource-call → `_ = <App>.Resources.<Type>.<res>_<verb>(args)` —
-//                     bare side-effect call (Phase 4), rendered INSIDE
-//                     the with-chain's do-branch like `emit`.  The
-//                     adapter helper modules are emitted by the
-//                     orchestrator's `emitPhoenixResourceFiles` reuse.
-//   ✓ repo-run     → `{:ok, <name>} <- Context.run_<ret>_<agg>(args..., limit:, offset:)`
-//                     against the per-context retrieval defdelegate (the
-//                     vanilla retrieval `run/N` returns `{:ok, [_]}`).
-//                     Pagination opts ride as a trailing keyword list.
-//   ✓ for-each     → `{:ok, _} <- Enum.reduce_while(xs, {:ok, nil}, fn x, _acc ->
-//                                    case Context.<op>_<agg>(x, %{}) do ... end
-//                                  end)` — first body-op failure halts the
-//                     reduce and bubbles `{:error, _}` up the with-chain.  A
-//                     single op-call keeps the flat `case` shape; a broader
-//                     body (op-call + factory-let / emit / expr-let / guards)
-//                     lowers through a per-iteration `with`-chain whose first
-//                     failed clause halts the reduce.
-//   ✓ if-let       → `{:ok, _} <- (var = case ...run_<ret>...; if var != nil
-//                     do <thenBody> else <elseBody> end)`.  Both branches lower
-//                     the full statement set (op-call / factory-let / emit /
-//                     expr-let; a guard-bearing branch wraps in a `with`-chain
-//                     so a failed `precondition` / `requires` threads `{:error,
-//                     tag}` up the outer with-chain).
-// Every WorkflowStmtIR kind now lowers to real Elixir — there is no
-// `default:` / `# TODO` fallthrough remaining.  The switch over
-// `lowerStatement` is exhaustive over the IR union; if a new kind is
-// added to `WorkflowStmtIR`, TypeScript fails compile until a matching
-// arm is added here AND in `collectWorkflowStmtParamRefs`.
+// Body lowering by WorkflowStmtIR kind:
+//   factory-let  → `{:ok, <name>} <- Context.create_<agg>(%{...})`
+//   op-call      → `{:ok, _}      <- Context.<op>_<agg>(target, %{...})`
+//   precondition → `:ok <- (if <cond>, do: :ok, else: {:error, :precondition_failed})`
+//   requires     → `:ok <- (if <cond>, do: :ok, else: {:error, :forbidden})`
+//   expr-let     → `<name> <- (<expr>)` (always succeeds; binds `name`)
+//   repo-let     → `{:ok, <name>} <- Context.get_<agg>(id)` (getById)
+//                  OR `{:ok, <name>} <- Context.<find>_<agg>(args...)`
+//                  (custom find via the per-find defdelegate emitted by
+//                  `context-emit.ts` → `repository-emit.ts:renderFindFn`)
+//   emit         → `Phoenix.PubSub.broadcast(App.PubSub, "events",
+//                  %App.Ctx.Events.<Name>{...})` — rendered INSIDE the
+//                  with-chain's do-branch so a failed precondition / op
+//                  short-circuits and the broadcast is skipped.  The
+//                  `Events.<Name>` struct module is emitted by the
+//                  orchestrator's `emitVanillaEventModules` hook.
+//   resource-call → `_ = <App>.Resources.<Type>.<res>_<verb>(args)` — bare
+//                   side-effect call, rendered INSIDE the with-chain's
+//                   do-branch like `emit`.  The adapter helper modules are
+//                   emitted by the orchestrator's `emitPhoenixResourceFiles`
+//                   reuse.
+//   repo-run     → `{:ok, <name>} <- Context.run_<ret>_<agg>(args..., limit:, offset:)`
+//                   against the per-context retrieval defdelegate (the vanilla
+//                   retrieval `run/N` returns `{:ok, [_]}`).  Pagination opts
+//                   ride as a trailing keyword list.
+//   for-each     → `{:ok, _} <- Enum.reduce_while(xs, {:ok, nil}, fn x, _acc ->
+//                                  case Context.<op>_<agg>(x, %{}) do ... end
+//                                end)` — first body-op failure halts the reduce
+//                   and bubbles `{:error, _}` up the with-chain.  A single
+//                   op-call keeps the flat `case` shape; a broader body
+//                   (op-call + factory-let / emit / expr-let / guards) lowers
+//                   through a per-iteration `with`-chain whose first failed
+//                   clause halts the reduce.
+//   if-let       → `{:ok, _} <- (var = case ...run_<ret>...; if var != nil
+//                   do <thenBody> else <elseBody> end)`.  Both branches lower
+//                   the full statement set (op-call / factory-let / emit /
+//                   expr-let; a guard-bearing branch wraps in a `with`-chain
+//                   so a failed `precondition` / `requires` threads `{:error,
+//                   tag}` up the outer with-chain).
+//
+// The switch over `lowerStatement` is exhaustive over the IR union — there is
+// no `default:` / `# TODO` fallthrough.  Adding a kind to `WorkflowStmtIR`
+// fails the TypeScript compile until a matching arm is added here AND in
+// `collectWorkflowStmtParamRefs`.
 //
 // Param surfacing: a workflow body that references a declared
 // create-param (`create(initialTitle: string) { … initialTitle … }`)
@@ -64,10 +64,10 @@
 //
 // The KEY is the declared param name verbatim; only the BOUND LOCAL is
 // snake_cased.  `params` is Phoenix's decoded JSON map, so its keys are the
-// camelCase wire names every other backend also accepts — this used to
-// destructure `"initial_title"` and raise `MatchError` at runtime on any
-// multi-word param, on a workflow that compiled perfectly.  `mix compile`
-// cannot see it; only a booted request can, which is how it was found.
+// camelCase wire names every other backend also accepts.  Destructuring the
+// snake_cased key instead (`"initial_title"`) raises `MatchError` at runtime on
+// any multi-word param, on a workflow that compiles perfectly — `mix compile`
+// cannot see it, only a booted request can.
 // ---------------------------------------------------------------------------
 
 import {
@@ -474,7 +474,7 @@ function lowerStatement(
       // broadcast is skipped — listeners only see events for successful
       // workflows.  Inside `Repo.transaction(fn -> ...)` the broadcast
       // fires before commit; that matches the standard Phoenix pattern
-      // (a separate "after-commit" hook is out of scope for this slice).
+      // (there is no separate "after-commit" hook).
       const fields = st.fields
         .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
         .join(", ");
@@ -489,7 +489,7 @@ function lowerStatement(
     }
 
     case "resource-call": {
-      // `files.put(k, v)` (bare statement form, Phase 4) →
+      // `files.put(k, v)` (bare statement form) →
       // `<App>.Resources.<ResourceType>.<resource>_<verb>(args)`.
       // The expression renderer routes the call through `resourceModules`
       // (threaded into renderCtx by the orchestrator).  A bare resource-op
@@ -513,7 +513,7 @@ function lowerStatement(
 
     case "domain-service-call": {
       // `Transfer.run(s, d, amount)` — a bare orchestrator call into a
-      // `mutating` `domainService` (domain-services.md rev. 4, Slice 3).  On
+      // `mutating` `domainService` (domain-services.md rev. 4).  On
       // Elixir a mutating service is pure SUGAR for the `with`-chain of its
       // body's param-op calls, each routed through its aggregate's context
       // mutating fn (changeset + `Repo.update` via `persist_change`) — there is
@@ -747,7 +747,7 @@ function opCallSource(
 }
 
 /** Resolve a `mutating` `domain-service-call` to its inlined with-clauses
- *  (domain-services.md rev. 4, Slice 3).  Looks the service op up in `ctx`,
+ *  (domain-services.md rev. 4).  Looks the service op up in `ctx`,
  *  then delegates to `inlineMutatingServiceCall`, which expands the body's
  *  param-op calls into context mutating-fn with-clauses.  Returns `[]` when
  *  `ctx` is absent (legacy/test path) or the op isn't resolvable/mutating — the
@@ -1194,8 +1194,8 @@ function renderBranchStmt(
       // `renderBranch` routes guards + nested control flow / repo binds through
       // the with-chain path (they must short-circuit to `{:error, _}`), so the
       // flat path never sees them.  If that routing ever changes, fail loudly
-      // here — an Elixir `# TODO` comment compiles, so the old fallthrough
-      // shipped mutilated output that `mix compile` accepted.
+      // here.  A `# TODO` fallthrough would be worse than useless: an Elixir
+      // comment compiles, so `mix compile` accepts the mutilated output.
       throw new Error(
         `internal: if-let branch statement kind '${st.kind}' must lower through the ` +
           "with-chain path, not the flat branch renderer. Please file a bug.",
@@ -1302,9 +1302,9 @@ function collectParamRefsInStmt(s: StmtIR, acc: Set<string>): void {
   }
 }
 
-/** Collect referenced create-params from EVERY lowered statement kind —
- *  every kind now lowers to real code emitting its param refs, so the
- *  full WorkflowStmtIR union is covered.  Must stay in lock-step with
+/** Collect referenced create-params from EVERY lowered statement kind: each
+ *  lowers to real code emitting its param refs, so the full WorkflowStmtIR
+ *  union is covered.  Must stay in lock-step with
  *  `lowerStatement`; if a future kind is added without a matching arm
  *  here, an unused param destructure could trip `--warnings-as-errors`. */
 export function collectWorkflowStmtParamRefs(st: WorkflowStmtIR, acc: Set<string>): void {
@@ -1500,7 +1500,7 @@ function renderWorkflowModule(
     thisName: "record",
     contextModule: contextModuleFq,
     resourceModules,
-    // Domain-service call wiring (domain-services.md rev. 4, Slice 1; Elixir
+    // Domain-service call wiring (domain-services.md rev. 4, Elixir
     // decision B).  A workflow that calls a `reading`-tier service (e.g.
     // `precondition Registration.isEmailAvailable(holder)`) renders it as a
     // CONTEXT FUNCTION on this context module — `<Context>.is_email_available(…)`

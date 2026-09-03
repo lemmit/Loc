@@ -40,22 +40,30 @@ async function changeset() {
 describe("elixir/vanilla — messaged single-field rule → residual carrier + wire code", () => {
   it("routes a messaged single-field rule through validate_invariants with loom_code", async () => {
     const cs = await changeset();
-    // `.length` predicates render against the applied struct via String.length,
-    // add_error carries the author text + the content-hash wire code.
+    // `.length` predicates render against the applied struct via the shared
+    // CODE-POINT count (RS-31 — `String.length/1` counts graphemes); add_error
+    // carries the author text + the content-hash wire code.
     expect(cs).toContain(
-      'if String.length(data.name) >= 2 and String.length(data.name) <= 120, do: changeset, else: add_error(changeset, :name, "Name must be 2-120 characters", loom_code: "msg.j985f2")',
+      'if length(String.to_charlist(data.name)) >= 2 and length(String.to_charlist(data.name)) <= 120, do: changeset, else: add_error(changeset, :name, "Name must be 2-120 characters", loom_code: "msg.j985f2")',
     );
     expect(cs).toContain(
-      'if String.length(data.sku) > 0, do: changeset, else: add_error(changeset, :sku, "SKU is required", loom_code: "msg.u3w71r")',
+      'if length(String.to_charlist(data.sku)) > 0, do: changeset, else: add_error(changeset, :sku, "SKU is required", loom_code: "msg.u3w71r")',
     );
     // A messaged rule no longer emits a native validate_* line with `message:`.
     expect(cs).not.toContain('message: "Name must be 2-120 characters"');
     expect(cs).not.toContain('message: "SKU is required"');
   });
 
-  it("keeps a message-LESS single-field rule byte-identical on the native validator", async () => {
+  it("keeps a message-LESS single-field rule on the native validator chain", async () => {
     const cs = await changeset();
-    expect(cs).toContain("|> validate_length(:sku, min: 1)\n");
+    // A length bound is the one pattern that is NOT a native `validate_*` call:
+    // Ecto counts graphemes and offers no `:codepoints` option, so it rides a
+    // `validate_change/3` closure over the shared code-point count instead
+    // (RS-31).  Still the native chain — not the residual carrier.
+    expect(cs).toContain("|> validate_change(:sku, fn _, value ->");
+    expect(cs).toContain(
+      '[{:sku, {"should be at least %{count} character(s)", count: 1, validation: :length, kind: :min, type: :string}}]',
+    );
   });
 });
 

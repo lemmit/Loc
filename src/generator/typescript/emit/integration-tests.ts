@@ -1,4 +1,4 @@
-// Context-scoped INTEGRATION test emission (test-placement.md, Phase 3a) — the
+// Context-scoped INTEGRATION test emission (test-placement.md) — the
 // node/Hono backend.  A `test … for <Context>` (or a `context`-nested `test`)
 // runs cross-aggregate behaviour IN-PROCESS against live repositories, no HTTP:
 // a create persists via `repo.save(...)`, an operation mutates-then-saves, a

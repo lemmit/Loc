@@ -5239,3 +5239,264 @@ took "node has a name" to mean "node is addressed BY that name", which a
 address. It had been resolving on inherited addresses all along; the fix was to
 gate it on the same predicate. Expect a precision improvement to surface the
 places that were relying on the imprecision.
+
+## 90. Verifying that a mechanism EXISTS is not verifying it reaches the thing you named (2026-08-30)
+
+One session produced this mistake twice, in two unrelated layers. Both times the
+check I ran was real, passed honestly, and answered a question adjacent to the
+one that mattered.
+
+### The probe that could never see its target
+
+Watching a PR's CI, I armed a `Monitor` whose script `curl`ed
+`api.github.com/.../check-runs` and emitted on `pr-gate`'s conclusion. It ran 30
+minutes and said nothing. I diagnosed a filter bug — `pr-gate` does not exist
+until every other workflow finishes, so an empty match printed nothing — rewrote
+it with a heartbeat and failure arms, and armed it again. Another 30 minutes of
+silence.
+
+The filter was never the problem. **Direct GitHub API access is blocked in these
+sessions**: that `curl` returns `403 {"message":"GitHub access is not enabled for
+this session..."}`. Only the `mcp__github__*` tools are authorized, and a
+shell-based `Monitor` cannot call an MCP tool. Both probes were structurally
+incapable of reporting, and their silence was indistinguishable from "still
+queued" — which is exactly what I read it as, for an hour.
+
+One `curl -o /dev/null -w "%{http_code}"` before trusting either would have
+ended it in three seconds.
+
+### The waiver whose blocker I declared stale without reading the predicate
+
+`E2E_LESS_CORPUS_FIXTURES` waives corpus fixtures that carry no `test e2e`
+block. Two entries' waiver texts named blockers I believed had shipped:
+`lifecycle-guard` cited "a principal whose `permissions` claim the behavioural
+harness does not mint" plus "no negative-status assertion form", and
+`policy-document` cited the multi-principal harness (#2515).
+
+I confirmed `AUTHZ_LADDERS` (`test/behavioral/cases.mjs`) now carries
+`arms: { anonymous, unauthorized, authorized }` with 401/403 negative arms
+across all legs, and concluded both waivers were stale. Then I read what the
+fixtures actually gate on:
+
+- `read-gates.ddd` (the already-drained precedent) — `currentUser.role == "agent"`.
+- `policy-document.ddd` — `user { id, role, tenantId }`; role/tenant only.
+- `lifecycle-guard.ddd` — `currentUser.permissions.contains(permissions.manage)`.
+
+`DEV_CLAIMS` is `{ tenantId, orgId, role }`. There is **no `permissions` claim**,
+and the credential's own comment pins it to "strings only ... the non-node
+backends honour only string claims", so an array-valued claim is a five-leg
+harness extension, not a fixture edit. `lifecycle-guard`'s blocker (a) is fully
+alive; only its blocker (b) went stale. `policy-document` is genuinely drainable.
+
+The mechanism existed. It did not reach the named thing. Checking "is there a
+multi-principal harness" was the adjacent question; "does it mint the claim THIS
+predicate reads" was the real one.
+
+### The third instance, found only by running it
+
+`policy-document` looked genuinely drainable after all that: its predicate reads
+`role`/`tenantId`, both minted. So I wrote the `test e2e`, and booted the node
+behavioural leg to capture its wire golden. It failed on the second call:
+
+    POST /api/things            -> 201  (aggregate_created)
+    GET  /api/things/{that id}  -> 404
+
+The aggregate is invisible to the identity that just created it. `Thing` carries
+`allow deep`, which anchors at `ORG_PATH_CLAIM_FIELD` = `orgPath`
+(`src/ir/util/tenant-stance.ts`) — and `DEV_CLAIMS` mints
+`{ tenantId, orgId, role }`, no `orgPath`. Reading the aggregate's own fields
+was still not enough; the binding claim was one the POLICY introduced, not one
+the `user {}` block declared.
+
+So both waivers were accurate, for **one shared reason** neither text stated:
+the behavioural principal's claim set is `{ tenantId, orgId, role }`, and any
+fixture whose predicate reads another claim cannot be driven. Draining either is
+one piece of harness work, not two fixture edits.
+
+Note the near-miss: narrowing the caller to `Note`'s principal-free `deny` would
+have PASSED, removed the waiver, and left `allow deep` — the reason the fixture
+exists — undriven. A green e2e that drains a waiver while covering less than the
+waiver described is worse than the waiver.
+
+**Rule:** before declaring a blocker stale, resolve the blocker's own nouns down
+to the code that satisfies them — the claim, the route, the identifier — not to
+the subsystem that plausibly covers them. A waiver text names specifics on
+purpose; matching it against a capability's headline is how a stale-looking
+waiver survives being "drained". And when the nouns check out, RUN it: the third
+instance here was invisible to every amount of reading, because the binding
+claim was introduced by the policy rung, not by the fixture's own declarations.
+
+**Corollary for probes:** a monitoring probe deserves the same mutation proof as
+a test gate (§59, §63). Prove it can observe a KNOWN state before you trust its
+silence, because a probe that cannot reach its target and a target that has not
+moved produce byte-identical output.
+
+## 91. A count in prose is a cache with no invalidation — and my grep for it was wrong too (2026-09-01)
+
+`api-caller-census-pins.ts` opened with a hand-written tally of its own pins:
+`tenantRegistryRow (15)`, `seededListReadUnwritten (2)`, `gateProbe (1)`. It was
+**accurate on `main`**. Draining `policy-document` added five registry pins and
+the header went on saying 15, because nothing reads a comment. Same shape as
+§15's "derive, don't stamp", one layer up: the tally is a denormalized view of
+the pins below it, and the site that forgets to update it is the bug.
+
+Two things worth keeping from how it was found:
+
+**The doc was wrong in the *other* direction from what I assumed.** I opened this
+believing the file's self-count had rotted on `main` and my PR merely inherited
+it. It had not. I was the one who broke it. Writing "this PR is what broke them"
+into the header cost nothing and is the only version a later reader can act on;
+"drifted at some point" would have sent them looking upstream for a cause that
+was sitting in the diff.
+
+**My measurement of the staleness was itself stale-shaped.** I counted with
+`grep -c 'R\.tenantRegistryRow'` and got 22 — so I wrote 22 into the new gate.
+The gate failed against 20: the header prose and the `R.*` doc comments *mention*
+`R.tenantRegistryRow`, and grep counts prose. The number I would have shipped as
+the fix for a wrong number was itself wrong, by the same mechanism (counting
+text that describes the thing rather than the thing). Only writing the count as
+code that recomputes from `UNCALLED_PINS` caught it — a corrected constant would
+have been just as unverifiable as the comment it replaced.
+
+The rule: **when a number appears in prose, the fix is not a better number, it is
+to make the number code and gate it.** `PIN_CLASS_CENSUS` is recomputed from the
+pin entries and compared both ways (adding a pin without raising the count fails;
+draining one without lowering it fails; a reason that is not an `R.*` constant
+fails as an unknown class rather than as a silent zero) — mutation-proved all
+three ways. The same pass found the register's line-range citations
+(`:492-579`) had moved twice; the doc rows now say *grep the array*, because a
+line range is the same cache with the same missing invalidation.
+
+## 92. A waiver names a suspicion, not a diagnosis — and `basename` is not a unique key (2026-09-01)
+
+Three fixtures have now been drained from `E2E_LESS_CORPUS_FIXTURES`. All
+three were hiding a live defect no compile tier could see, which is the
+register's whole thesis. The newer and more useful finding is about the
+**waiver text itself**: in two of the three, the blocker the entry NAMED was
+not the blocker.
+
+| Fixture | The waiver said | What was true |
+|---|---|---|
+| `policy-deny` | no runtime caller | `deny` rendered correctly into the *wrong query site* |
+| `policy-document` | blocked on the multi-principal harness (which had landed) | the harness was fine; `tenantOwned` + `shape: document` never stamped the tenant on 4 of 7 write paths |
+| `lifecycle-guard` | blocked on "the harness claim set" | widening the harness changes nothing — **four emitters** dropped the array claim before it reached `currentUser` |
+
+`lifecycle-guard` is the sharpest. Its entry said `DEV_CLAIMS` "is pinned to
+STRING claims because the non-node backends honour only strings". Every word
+is true, and the conclusion a reader draws from it — *edit the constant* — is
+wrong. The string-pinning was a SYMPTOM of four hard-coded emitter filters, and
+a widened constant would have been silently discarded exactly as before. I
+wrote that framing into two plan rows myself, from #2696, before auditing the
+emitters; the audit falsified it in one pass.
+
+**So: re-derive a waiver's blocker against the code before believing it.** A
+waiver is written at the moment someone gave up, by someone who had a theory.
+The theory is the least-verified thing in the file.
+
+The structural cause was one contract with four independent implementations —
+§89 one layer up. The fix was to make it one classifier with four readers;
+the proof is that seeding a defect in the shared classifier now fails all four
+backends' tests at once, which no per-backend copy could ever do.
+
+**And a mechanical trap worth its own line.** Backing up files before a
+mutation, I used `$(basename $f)` as the backup name over
+`dotnet/auth-emit.ts` and `elixir/auth-emit.ts`. Both basename to `auth-emit`,
+so the second backup silently clobbered the first and the "revert" copied the
+ELIXIR file over the DOTNET one. §84 says revert by file copy rather than
+`git checkout --`; the corollary it did not say is that **the backup name must
+be as unique as the path is**. Use the full path with separators flattened
+(`dotnet-auth-emit.bak`), and verify the revert restored the file you meant —
+`grep -c` for a token only that file contains — rather than assuming `cp`
+succeeded because it printed nothing. I caught it in seconds because `git
+status` showed two modified auth files where I expected one; without that
+glance the dotnet fix would have vanished into a "successful" mutation proof.
+
+## 93. A cancelled CI run is a permanent red — and the merge-block I "explained" I had not actually diagnosed (2026-09-01)
+
+Two merge blocks on one PR, both mis-diagnosed on the first pass, both worth
+recognising by shape.
+
+**Block 1 — «Required status check "pr-gate" is expected», with a SUCCESSFUL
+pr-gate check already on the head.** I produced two confident explanations and
+BOTH were wrong. The lasting value of this entry is that failure, not the
+symptom.
+
+*First theory:* the one `pr-gate.yml`'s own header invites — `workflow_run`
+delivery is best-effort, a dispatch got dropped, the `*/15` sweep will fix it.
+Falsified by evidence already on screen: eight hours of sweeps changed nothing.
+
+> **Correction (2026-09-02).** This paragraph originally said the sweep had had
+> "eight hours and **~32 passes**". That number was never counted — it was
+> `8 h × 4/h` read off the cron, which is the same unverified-guarantee mistake
+> this entry is about. **Measured:** the 30 most recent `schedule` runs of
+> `pr-gate.yml` span **135 hours** (mean gap 4.7 h, median 4.6 h, shortest gap
+> in that window 110 min — not one 15-minute gap in 29). Eight hours is therefore **~2 sweeps, not ~32** —
+> which materially weakens this falsification: "2 passes changed nothing" is
+> thin evidence against a dropped dispatch where "32 passes" would have been
+> strong. The first theory is not re-opened (the second block below still
+> stands on its own evidence), but it was never as dead as this line implied.
+> The workflow, `scripts/pr-gate.mjs` and `docs/ci-gating.md` carried the same
+> uncounted claim; all three now state the measured cadence.
+
+*Second theory, which I wrote into this file as fact:* `main` had drifted 5
+commits, and under strict required-checks GitHub evaluates against the updated
+merge ref where no checks have run, so the check is ABSENT rather than stale.
+Plausible, tidy, and **false**. It was falsifiable from two commits of git
+history I already had: PR #2696 merged cleanly from base `b8de88919` while
+`main` was a commit ahead. This repo does not require an up-to-date branch —
+confirmed twice over when #2717 itself merged **4 commits behind** `main`.
+
+**What is actually known**, and all that should be claimed:
+- the merge 405'd while a `pr-gate` check run with `conclusion: success` sat on
+  the head SHA (posted 03:50:41Z on `df7196b03`);
+- the `*/15` sweep never cleared it;
+- what DID clear it: `update_pull_request_branch`, then a new commit (fresh
+  SHA), then a fresh `pr-gate` evaluation on that SHA. Which of those three was
+  load-bearing is **undetermined** — most likely the fresh evaluation, since
+  base drift is now ruled out.
+
+**The mechanism is unresolved. Do not invent one.** The evidence that would
+settle it: while a PR is in this state, compare the ruleset's required-check
+definition against the posted check run's `app` field — a required check pinned
+to a different integration identity than the one posting it would produce
+exactly this "expected" message. Until someone looks, the honest remedy is
+empirical: a fresh SHA and a fresh evaluation.
+
+**The meta-lesson, which is the real one.** §92 says a waiver names a suspicion,
+not a diagnosis. One entry later I did the same thing to myself: a plausible
+causal story, written down as mechanism, with a counter-example sitting in
+`git log`. A story that explains the symptom is not a diagnosis until you try
+to break it. When the fix is empirical and the mechanism is not established,
+**write down the fix and label the mechanism unknown** — a confident wrong
+cause in this file is worse than a blank, because the next reader stops
+looking.
+
+**Block 2 — a CANCELLED run is a permanent red.** `scripts/pr-gate.mjs:32-60`
+is explicit: a cancelled run counts as FAILED (`PASSING_CONCLUSIONS` is
+`success | neutral | skipped`), `latestPerName` keeps only the newest run per
+name, and — quoting the file — *"Nothing clears it: re-evaluation re-reads the
+same cancelled run and the sweep re-derives the same verdict, so the PR is
+unmergeable until it is force-pushed to a fresh SHA."* The comment describes the
+draft→ready double-suite case, where the newer suite supersedes the corpse. The
+case it does not cover is a **lone** cancelled run: nothing supersedes it, so
+the PR is stuck.
+
+So: after any CI cycle, don't only grep for `failure`. **`cancelled` on a run
+with no newer sibling of the same name is as fatal as a failure**, and it reads
+as innocuous ("superseded, normal") because on this repo it usually IS
+superseded. Distinguish by counting runs of that name on the head — one means
+fatal, more than one means look at the newest.
+
+And the cost rule underneath both: on a saturated runner pool (runs sat queued
+75+ min here), a fresh SHA restarts ~50 workflows. So establish *whether
+waiting can possibly work* before waiting. For block 1 the answer was no
+— *empirically*, because sweeps came and went without clearing it; **not**
+because the check was "absent, not stale", which is the mechanism this entry
+now declares undetermined (an earlier revision of this sentence asserted it,
+one paragraph after retracting it). For block 2 the answer was no (the file
+says so). Both times, patience would have burned an hour to learn nothing.
+
+A footnote on *how long* waiting costs, since the sweep is the thing you would
+be waiting for: on a later PR (#2722) the same parked-gate symptom cleared only
+after the next sweep, and at the measured 4.7 h cadence that is the scale to
+budget for — not the 15 minutes the cron implies.

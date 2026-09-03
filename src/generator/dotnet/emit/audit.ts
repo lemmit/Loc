@@ -14,12 +14,11 @@ import { lines } from "../../../util/code-builder.js";
 //     roll back together, mirroring the Hono transactional route).
 // ---------------------------------------------------------------------------
 
-// `auditedOpsOf` / `aggHasAuditedOp` used to live here (and in the Java and
-// Python siblings) but were never called by anything — the real gates are
-// `cqrs-emit.ts` / `cqrs/commands.ts` reading `op.audited` inline.  Removed
-// rather than centralized: this copy had drifted furthest (it folded lifecycle
-// actions in and skipped the visibility filter the siblings applied), so the
-// three of them were a trap for the next reader, not a shared seam.
+// NOTE: there is deliberately no `auditedOpsOf` / `aggHasAuditedOp` helper
+// here or in the Java / Python siblings.  The real gates are `cqrs-emit.ts` /
+// `cqrs/commands.ts` reading `op.audited` inline; a parallel helper nothing
+// calls drifts from them (one such copy folded lifecycle actions in and
+// skipped the visibility filter) and reads as a shared seam it is not.
 /** The append-only audit POCO (Infrastructure/Persistence/AuditRecord.cs).
  *  Mirrors the Hono `audit_records` Drizzle table column-for-column. */
 export function renderAuditRecord(ns: string): string {

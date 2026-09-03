@@ -602,6 +602,45 @@ and the type system tells you what it means.
 suffixes apply to the same `TypeRef`, in either order
 (`Customer id?`, `Pokemon id[]`, `Address?`).
 
+### Null narrowing
+
+A `T?` is not usable where a `T` is required — `+` needs two `string`s, and a
+scalar intrinsic needs a receiver that cannot be null (`loom.intrinsic-nullable-receiver`
+rejects `path.trim()` on a `string?`, because every backend emits a bare
+dereference).  The **ternary is the guard**: a direct null test on its own
+condition narrows the branch the test proves safe.
+
+```ddd
+// dataKey: string?  — a root tenant has no parent path
+dataKey := parent.dataKey != null ? parent.dataKey + "." + seg : seg
+```
+
+```typescript
+// generated TS (Hono) — the emitted expression is unchanged by narrowing;
+// the null test was always in the condition.
+org.setPath(loaded.dataKey !== null ? loaded.dataKey + "." + nm : nm);
+```
+
+Both directions narrow: `x != null ? …` narrows the **then**-branch,
+`x == null ? … : …` narrows the **else**-branch, and the `null` literal may sit
+on either side of the comparison.
+
+Deliberately **not** narrowed — each is conservative, never unsound:
+
+- **Anything but a direct null comparison on that ternary's own condition.**
+  `&&` chains, `!`-negated tests, `precondition x != null`, a `let` that copies
+  the optional, and early-return guards do not narrow.  There is no flow
+  analysis.
+- **A test and a use spelled differently.** Narrowing matches a *simple path*
+  syntactically, so `path != null ? this.path …` does not narrow — write the
+  same spelling on both sides.  A call anywhere in the path (`f().x`) never
+  narrows, since it names no stable location.
+- **A branch containing a call that could mutate the field.** A ternary branch
+  is an expression and cannot assign, but it *can* call a sibling `operation`,
+  whose body assigns freely — so a branch carrying any call other than a scalar
+  intrinsic or a collection op does not narrow.  (A `function` is pure by
+  `loom.function-block-impure`, but is still excluded for now.)
+
 `slot` is a UI-only marker — valid **only** on a `component`'s parameter
 list, where the caller injects a JSX expression that the component body
 renders via a bare ref.  The validator rejects `slot` in any other
@@ -728,7 +767,7 @@ Pragmatic core, similar to a subset of TypeScript / C# expressions.
 | `a + b`, `a - b`, `a * b`, `a / b`, `a % b` | Arithmetic. |
 | `a < b`, `a <= b`, `a > b`, `a >= b`, `a == b`, `a != b` | Comparison. |
 | `a && b`, `a \|\| b` | Logical. |
-| `cond ? a : b` | Ternary. |
+| `cond ? a : b` | Ternary. A direct null test on `cond` narrows the proven branch — see [Null narrowing](#null-narrowing). |
 | `x => expr` | Lambda (only valid as a collection-op argument). |
 | `PartName { field: expr, … }` | Construct a contained part; `id` and parent `parentId` are auto-injected. |
 | `Money { amount, currency }` | Value-object constructor. |

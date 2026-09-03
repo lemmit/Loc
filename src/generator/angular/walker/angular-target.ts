@@ -497,11 +497,11 @@ export const angularTarget: WalkerTarget = {
    *  An expression carrying BOTH quote kinds is ESCAPED, not rejected:
    *  Angular's template parser decodes HTML entities in an attribute value
    *  BEFORE compiling the expression, so `&quot;` inside a `"`-delimited
-   *  binding round-trips to a `"` in the expression.  This used to `throw`,
-   *  which aborted the WHOLE `ddd generate system` run with a stack trace —
-   *  and under i18n every bound label is `t("<key>", "<default>")`, so a
-   *  single apostrophe in authored text ("Bob's") was enough to reach it
-   *  (audit finding A15).  Vue hit the identical shape first and answered it
+   *  binding round-trips to a `"` in the expression.  Throwing here instead
+   *  aborts the WHOLE `ddd generate system` run with a stack trace — and under
+   *  i18n every bound label is `t("<key>", "<default>")`, so a single
+   *  apostrophe in authored text ("Bob's") reaches it.  Vue answers the
+   *  identical shape
    *  the same way (`quoteAttrExpr`, finding B21) — every valid `.ddd`
    *  expression must render on every frontend. */
   renderAttrBinding(name: string, jsExpr: string): string {
@@ -659,8 +659,8 @@ export const angularTarget: WalkerTarget = {
     return renderJsVariantMatch(spec, mutate);
   },
 
-  // The per-store MODULE is deliberately not a walker-target method here (or
-  // on any target — `WalkerTarget` no longer declares one): like React (which
+  // The per-store MODULE is deliberately not a walker-target method here, or
+  // on any target — `WalkerTarget` declares none.  Like React (which
   // emits its Zustand module directly in `react/index.ts`), the Angular
   // orchestrator (`angular/index.ts`) emits each store's `@Injectable` signal
   // service via `renderAngularStoreModule` — keeping the store-builder ↔

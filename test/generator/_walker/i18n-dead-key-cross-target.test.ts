@@ -39,8 +39,11 @@ const UI = `
           link "Docs" -> "https://example.com/docs"
         }
       }
-      page Home {
-        route: "/"
+      // A DETAIL route: the by-name \`OperationForm { of:, op: }\` targets the
+      // record the route \`:id\` names, and \`loom.op-form-needs-route-id\`
+      // rejects it on a page that declares none.
+      page Home(id: Doc id) {
+        route: "/docs/:id"
         body: Stack {
           Heading { "Home" },
           Modal {

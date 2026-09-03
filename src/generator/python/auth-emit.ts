@@ -33,11 +33,11 @@ export function emitPyAuthFiles(
   orgPathClaim?: string,
   orgPathRegistryTable?: string,
 ): void {
-  // Hierarchy (multi-tenancy P2.2): `orgPathRegistryTable` is the tenant
+  // Hierarchy (multi-tenancy): `orgPathRegistryTable` is the tenant
   // registry's schema-qualified table when it opts into `tenantRegistry` (a
   // `data_key` column exists).  Present → `currentUser.orgPath` becomes a
   // per-request memoized read of the caller org's materialized `data_key`
-  // (fail-safe fallback to the claim); absent (flat tenancy) → the P2.1
+  // (fail-safe fallback to the claim); absent (flat tenancy) → the
   // claim-copy `@property` stands.
   const orgPathReadsRegistry = !!orgPathRegistryTable;
   out.set("app/auth/__init__.py", "");
@@ -125,13 +125,13 @@ function renderUserModule(
     return `    ${snake(f.name)}: ${t}`;
   });
   // Derived `currentUser.orgPath` — the caller's tenant materialized path
-  // (multi-tenancy Phase 2).  Two shapes, both keeping it OFF `asdict()` /
+  // (multi-tenancy).  Two shapes, both keeping it OFF `asdict` /
   // the `/auth/me` wire (derived, not a claim) and untouched by every
   // construction site (the verifier never sets it):
   //
-  //  - flat tenancy (P2.1): a computed `@property` deriving the root-segment
+  //  - flat tenancy: a computed `@property` deriving the root-segment
   //    path from the tenancy claim, null-safely.
-  //  - hierarchy (P2.2): a bare class attribute (NOT a dataclass field, so
+  //  - hierarchy: a bare class attribute (NOT a dataclass field, so
   //    `asdict()` skips it) that the auth middleware resolves ONCE per request
   //    from the registry's `data_key` column and writes back via
   //    `object.__setattr__` (this dataclass is frozen).  The read is memoized
@@ -148,7 +148,7 @@ function renderUserModule(
           "    # registry's `data_key` column and stored here via",
           "    # object.__setattr__ (this dataclass is frozen).  A bare class",
           "    # attribute — NOT a dataclass field — so asdict()/the /auth/me wire",
-          "    # never serializes it (multi-tenancy Phase 2, P2.2).",
+          "    # never serializes it (multi-tenancy).",
           '    org_path = ""',
         ]
       : [
@@ -156,10 +156,10 @@ function renderUserModule(
           "    @property",
           "    def org_path(self) -> str:",
           '        """The caller\'s tenant materialized path (`currentUser.orgPath`) —',
-          '        derived per-request from the tenancy claim (multi-tenancy Phase 2, P2.1)."""',
+          '        derived per-request from the tenancy claim (multi-tenancy)."""',
           `        return "" if self.${snake(orgPathClaim)} is None else str(self.${snake(orgPathClaim)})`,
         ];
-  // `currentUser.rootOrg` (P2.5): the ROOT-org segment — the first segment of
+  // `currentUser.rootOrg`: the ROOT-org segment — the first segment of
   // `org_path` (up to the first `.`).  A read-only property off `org_path`
   // (pure, no extra read), correct under both flat and hierarchy tenancy;
   // anchors the `global` read level's root-subtree widening.  Not a dataclass
@@ -170,7 +170,7 @@ function renderUserModule(
         "    @property",
         "    def root_org(self) -> str:",
         '        """The caller\'s ROOT-org segment (`currentUser.rootOrg`) — the first',
-        '        segment of `org_path` (multi-tenancy Phase 2, P2.5)."""',
+        '        segment of `org_path` (multi-tenancy)."""',
         '        return self.org_path.split(".", 1)[0]',
       ]
     : [];
@@ -190,7 +190,7 @@ function renderUserModule(
     "    def guid_claim(self, name: str) -> str | None:",
     '        """The named claim parsed as a canonical UUID string, or None when it',
     "        is absent or malformed — a bad tenant claim scopes a read to nothing",
-    '        instead of raising (multi-tenancy; M-T3.7(c))."""',
+    '        instead of raising (multi-tenancy)."""',
     "        raw: object = getattr(self, name, None)",
     "        if raw is None:",
     "            return None",
@@ -331,7 +331,7 @@ function renderAuthMiddleware(
   orgPathRegistryTable?: string,
 ): string {
   const idAttr = actorIdAttr(user);
-  // Hierarchy (multi-tenancy P2.2): resolve `currentUser.orgPath` from the
+  // Hierarchy (multi-tenancy): resolve `currentUser.orgPath` from the
   // tenant registry's `data_key` once per request (fail-safe to the claim).
   // Unlike the Hono auth layer (which can't reach the db and registers a
   // boot-time resolver closure), the Starlette middleware can import the
@@ -357,7 +357,7 @@ function renderAuthMiddleware(
         '    """The caller org\'s materialized path (`currentUser.orgPath`): the tenant',
         "    registry's `data_key` for the tenancy claim, else the claim itself",
         "    (root-segment fallback).  Memoized — the middleware calls this once per",
-        '    request and stores the result on the principal (multi-tenancy P2.2)."""',
+        '    request and stores the result on the principal (multi-tenancy)."""',
         "    if not claim:",
         "        return claim",
         "    try:",
@@ -422,7 +422,7 @@ function renderAuthMiddleware(
     '                media_type="application/problem+json",',
     '                headers={"WWW-Authenticate": \'Bearer realm="api", error="invalid_token"\'},',
     "            )",
-    // Hierarchy (P2.2): resolve the caller's tenant materialized path once and
+    // Hierarchy: resolve the caller's tenant materialized path once and
     // store it on the (frozen) principal, so `currentUser.orgPath` reads a
     // memoized value rather than recomputing per access.
     ...(hierarchy && claimAttr
@@ -455,10 +455,10 @@ function renderAuthMiddleware(
 
 /** `app/auth/routes.py` — the `/auth/me` session probe.
  *
- *  The body is the DECLARED `user { … }` shape, BY DECLARED NAME (#2548).  It
- *  used to be `asdict(user)`, which spells every field the way the dataclass
- *  does — `tenantId` reached the wire as `tenant_id`, while the other four
- *  backends answered the declared name.  `/auth/me` is the one endpoint the
+ *  The body is the DECLARED `user { … }` shape, BY DECLARED NAME — NOT
+ *  `asdict(user)`, which spells every field the way the dataclass does, so
+ *  `tenantId` would reach the wire as `tenant_id` while the other four backends
+ *  answer the declared name.  `/auth/me` is the one endpoint the
  *  frontends' `auth: ui` guard reads, so its keys are a wire contract like any
  *  other; the per-request derived members (`org_path` / `root_org`) stay off it
  *  for the same reason they do on the other backends — they are scoping state,
@@ -552,7 +552,7 @@ function renderOidcModule(user: UserIR, auth: AuthIR): string {
   if (!scopeList.includes("offline_access")) scopeList.push("offline_access");
   const scopes = scopeList.join(" ");
   const buildUser = renderBuildUserKwargs(user, auth);
-  return `"""Generated OIDC verifier + redirect handshake (D-AUTH-OIDC).  Auto-generated.
+  return `"""Generated OIDC verifier + redirect handshake.  Auto-generated.
 
 Validates the inbound JWT against the issuer's JWKS and maps the configured
 claims onto User; the handshake router runs the authorization-code flow and

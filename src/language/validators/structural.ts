@@ -252,8 +252,8 @@ export function checkContext(ctx: BoundedContext, accept: ValidationAcceptor): v
   }
 }
 
-// `on(e: Event) [by <expr>] { … }` reactor discipline (workflow-and-applier.md
-// Phase A2, surface slice).  Each inbound event routes to exactly one reactor,
+// `on(e: Event) [by <expr>] { … }` reactor discipline
+// (workflow-and-applier.md).  Each inbound event routes to exactly one reactor,
 // so two `on(...)` members for the same event type are almost certainly a
 // mistake.  Until the `by` correlation clause is type-checked against the
 // workflow's correlation field (a later slice), this is a warning rather than
@@ -406,7 +406,7 @@ function checkWorkflowEventSourcedDiscipline(wf: Workflow, accept: ValidationAcc
   }
 }
 
-// Event-sourcing body discipline (D-DOCUMENT-AXIS, appliers Phase A1).
+// Event-sourcing body discipline (D-DOCUMENT-AXIS, appliers).
 // `persistedAs: eventLog` makes the event stream the source of truth, so
 // command bodies decide and `emit`, and state transitions live in
 // `apply(...)` folds.  This is the AST-level mirror of the IR validator
@@ -416,6 +416,25 @@ function checkWorkflowEventSourcedDiscipline(wf: Workflow, accept: ValidationAcc
 function checkEventSourcedDiscipline(agg: Aggregate, accept: ValidationAcceptor): void {
   const isEventSourced = agg.persistedAs === "eventLog";
   const appliers = agg.members.filter(isApply);
+
+  // Rule 0 — `shape:` is INERT on an event-sourced aggregate, so it may not be
+  // spelled.  Every backend's schema emitter short-circuits on `persistedAs ===
+  // "eventLog"` BEFORE it reads `effectiveSavingShape(...)` (the Hono one at
+  // `generator/typescript/emit/schema.ts`), so the knob is read nowhere: the
+  // same source with and without `shape: document` generates byte-identical
+  // output and `ddd parse --json` reports `errors: 0, warnings: 0`.  Snapshot
+  // rehydration in a document/embedded shape is a deferred feature
+  // (docs/new-plan/T2-data-evolution.md) — but a deferral that ACCEPTS the
+  // syntax and silently emits the OTHER shape is a silent gap, not a deferral,
+  // which is exactly the case the sibling `loom.unique-on-event-sourced` gate
+  // below already refuses.
+  if (isEventSourced && (agg.shape === "document" || agg.shape === "embedded")) {
+    accept(
+      "error",
+      diagMessage("loom.shape-on-event-sourced", { name: agg.name, shape: agg.shape }),
+      { node: agg, property: "shape", code: "loom.shape-on-event-sourced" },
+    );
+  }
 
   // Rule 1 — appliers require an event-sourced aggregate.
   if (!isEventSourced) {
@@ -507,9 +526,9 @@ function checkEventSourcedDiscipline(agg: Aggregate, accept: ValidationAcceptor)
   }
 }
 
-// Constructibility is no longer a defaults-based AST warning (Stage 4):
-// under the invariant gate an aggregate with required, undefaulted fields
-// is constructible — those fields just become required create params (see
+// Constructibility is NOT a defaults-based AST warning: under the invariant
+// gate an aggregate with required, undefaulted fields is constructible —
+// those fields just become required create params (see
 // `isConstructible`).  The remaining non-constructible case (an invariant
 // referencing state outside the create input) is an IR-level concern; a
 // dedicated diagnostic there is a follow-up.

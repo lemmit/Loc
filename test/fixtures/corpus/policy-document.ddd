@@ -111,4 +111,73 @@ system PolicyDocument {
     port: 4000
     auth: required
   }
+
+  // The compile tier proves the in-app predicate RENDERS and BUILDS on the four
+  // backends that filter a document read in-app.  It cannot tell whether the
+  // predicate went into the right reads, nor whether anything ever WROTE a row
+  // it could admit — and that second blind spot is what hid the defect this
+  // caller was written to find: the `tenantOwned` `onCreate` stamps never
+  // reached the document write path, so every row landed with an empty
+  // `tenantId` and was invisible to its own creator (201 then 404 forever).
+  // The relational path stamps in `db/audit-stamp.ts`; the document repository
+  // never imported it.
+  //
+  // Read as a matrix: `Thing` (`allow deep`) must round-trip COMPLETELY for the
+  // in-tenant principal through every read route including the author's own
+  // `where`; `Note` (`deny`) must answer NOTHING and refuse every mutation.  A
+  // backend that renders the sentinel into too few sites leaks on `Note`; one
+  // that renders it into too many — or that fails to stamp the create — 404s on
+  // `Thing`.
+  //
+  // NO ladder entry accompanies this (unlike `read-gates`): both stances are
+  // principal-free with respect to the arms a ladder varies — `deny` is
+  // always-false for every caller, and `allow deep` scopes by tenant, which
+  // `DEV_CLAIMS_UNAUTHORIZED` shares with `DEV_CLAIMS` by design.  There is no
+  // 403 arm to assert; the e2e is the whole proof, exactly as in `policy-deny`.
+  //
+  // STILL NOT PROVEN, stated rather than hidden: that the deep rung HIDES an
+  // out-of-subtree row.  Every write here is made by the one authenticated
+  // principal, and the behavioural tier has a single tenancy identity, so no
+  // out-of-tenant row can be minted through the api.  That half needs a second
+  // tenancy identity in the harness and belongs to `tenancy-e2e`.
+  test e2e "the deep ladder admits the in-tenant document row, and deny hides the carve-out" against d {
+    // ── `allow deep` on a document-shaped, tenant-owned aggregate ────────────
+    // The create must STAMP the row with the caller's tenant; a row written with
+    // an empty tenant is invisible to the very principal that made it, so this
+    // first read is the stamp's regression test as much as the filter's.
+    let t = api.things.create({ label: "T-1", amount: 5 })
+    let read = api.things.getById(t)
+    expect(read.label).toBe("T-1")
+    let listed = api.things.all()
+    expect(listed.length).toBe(1)
+    // The DECLARED find — the site where the scope term has to be AND-ed into
+    // the author's own `where this.label == l` rather than replacing it.
+    let found = api.things.byLabel({ l: "T-1" })
+    expect(found.length).toBe(1)
+    let other = api.things.byLabel({ l: "T-absent" })
+    expect(other.length).toBe(0)
+    // Mutations load through the read filter first, so an ADMITTED row writes —
+    // and the update must not lose the stamp (the doc is rewritten whole).
+    api.things.update(t, { label: "T-2", amount: 5 })
+    let updated = api.things.getById(t)
+    expect(updated.label).toBe("T-2")
+    api.things.destroy(t)
+    expect(api.things.getById(t)).toThrow(404)
+
+    // ── `deny` on the sibling document aggregate ─────────────────────────────
+    // The create still succeeds: a create loads nothing, so no read filter
+    // applies to it — the row is really in the table, which is what makes every
+    // empty read below a statement about the FILTER rather than about the data.
+    let n = api.notes.create({ body: "N-1" })
+    expect(api.notes.getById(n)).toThrow(404)
+    let notes = api.notes.all()
+    expect(notes.length).toBe(0)
+    expect(api.notes.update(n, { body: "N-2" })).toThrow(404)
+    expect(api.notes.destroy(n)).toThrow(404)
+
+    // NO `api.orgs.*` calls: `Org` is this system's TENANT REGISTRY, so
+    // enrichment appends the self-scope filter `this.id == currentUser.tenantId`
+    // to every read and the principal's claim is not a row id.  Its five routes
+    // are pinned `R.tenantRegistryRow` in test/ir/api-caller-census-pins.ts.
+  }
 }

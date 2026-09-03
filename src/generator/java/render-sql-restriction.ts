@@ -20,7 +20,7 @@ import { sqlRestrictionIdent } from "./sql-ident.js";
 export function renderSqlRestriction(e: ExprIR): string {
   switch (e.kind) {
     case "authz-filter":
-      // Only the DENY carve-out (authorization Phase 4 — deny-wins) reaches the
+      // Only the DENY carve-out (authorization — deny-wins) reaches the
       // static (no-principal) restriction path: the always-false `1 = 0`
       // appended to every SELECT for a read-denied entity.  A `scope` sentinel
       // is principal-referencing and is routed to the `tenantScope` Specification

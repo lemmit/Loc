@@ -19,6 +19,7 @@ import {
   upperFirst,
 } from "../../util/naming.js";
 import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
+import { elixirCodePointLength } from "../_expr/code-point.js";
 import { exSubtreeLikePattern } from "../_expr/subtree-like.js";
 import {
   type BinaryExpr,
@@ -81,7 +82,7 @@ export interface RenderCtx {
    *  membership form inside repository `where` clauses, so other
    *  emission contexts (derived, invariant) shouldn't reach it. */
   agg?: EnrichedAggregateIR;
-  /** Resource-op routing (Phase 4c): resourceName → fully-qualified
+  /** Resource-op routing: resourceName → fully-qualified
    *  Elixir helper module (e.g. `salesFiles` → `MyApp.Resources.S3`).
    *  A `resource-op` call renders `<Module>.<resource>_<verb>(args)`.
    *  Unset outside workflow rendering — a resource-op there throws. */
@@ -116,7 +117,7 @@ export interface RenderCtx {
    *  (so `s.order` → `event.order`); other refs are unaffected. */
   paramRenames?: Record<string, string>;
   /** Tier resolver for a `reading`-tier domain-service CALL (domain-services.md
-   *  rev. 4, Slice 1; Elixir decision B — ambient `Repo`).  On the
+   *  rev. 4; Elixir decision B — ambient `Repo`).  On the
    *  Elixir/vanilla backend a `reading` service op lowers to a CONTEXT FUNCTION
    *  on its aggregate's context module (so it has the ambient `Repo`), NOT a
    *  standalone `<App>.Domain.Services.<Name>` module — the latter is reserved
@@ -134,7 +135,7 @@ export interface RenderCtx {
    *  reading fn itself is emitted INTO this module by `domain-service-emit.ts`.
    *  Defaults to `contextModule` when unset. */
   readingServiceModule?: string;
-  /** Document-shape STRUCT rendering (Route A slice 2).  A `shape: document`
+  /** Document-shape STRUCT rendering (Route A).  A `shape: document`
    *  aggregate now rehydrates its blob into a typed `%<Agg>.Data{}` struct, so a
    *  `this.<field>` read is genuine struct access (`record.<field>`) — same as the
    *  relational path — NOT a `data["<field>"]` bracket.  But the blob keeps enums
@@ -263,7 +264,7 @@ const ELIXIR_FILTER_TARGET: ExprTarget<RenderCtx> = {
   duration: (_unit, amount) => `(${amount})`,
 };
 
-// Document-shape STRUCT rendering target (`docStruct` — Route A slice 2).
+// Document-shape STRUCT rendering target (`docStruct` — Route A).
 // Shares the FILTER target's native-value leaves (the jsonb blob keeps enums
 // as strings and money/decimal as native JSON numbers), but its predicates
 // run IN-MEMORY (`Enum.filter` over rehydrated `%<Agg>.Data{}` embeds), so
@@ -284,11 +285,11 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
   // `scope` sentinel first — this arm keeps `renderExpr` total for it too.)
   if (e.kind === "authz-filter") {
     switch (e.filter.kind) {
-      // DENY carve-out (authorization Phase 4 — deny-wins).  Ecto's always-false
+      // DENY carve-out (authorization — deny-wins).  Ecto's always-false
       // query fragment; no row satisfies it.
       case "deny":
         return 'fragment("false")';
-      // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) — the pinned
+      // `deep`/`global` read level (multi-tenancy) — the pinned
       // fail-closed materialized-path scope fragment.
       case "scope":
         return renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(e), deepScopeTenantClaim(e));
@@ -305,7 +306,7 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
   // — not `Decimal` structs — so it shares the native-operator filter target
   // (params still render as plain locals: the `^`-pin lives in `renderRef`'s
   // `filterArgs` arm, which `docMap` does NOT set).
-  // `docStruct` (Route A slice 2) reads struct fields off the rehydrated
+  // `docStruct` (Route A) reads struct fields off the rehydrated
   // `%<Agg>.Data{}` embed, but the embed keeps enums as `:string` + money/decimal
   // as native JSON numbers, so it shares the native-value leaves (without any
   // bracket projection — `this.<field>` renders as `record.<field>`).  Its
@@ -321,7 +322,7 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
 }
 
 /** The context-facade find fn that fronts a repository read in a `reading`
- *  domain-service body (domain-services.md rev. 4, Slice 1; Elixir decision B —
+ * domain-service body (domain-services.md rev. 4; Elixir decision B —
  *  ambient `Repo`).  Mirrors the workflow `repo-let` lowering exactly
  *  (`workflow-execution-emit.ts`): the built-in `getById` maps to the
  *  `get_<agg>/1` (`find_by_id`) facade; a custom find maps to the per-find
@@ -527,14 +528,14 @@ function renderMember(recv: string, e: MemberExpr, ctx: RenderCtx): string {
     e.receiverType.name === "string" &&
     e.member === "length"
   ) {
-    // GRAPHEMES, deliberately — the one backend that does not count code
-    // points (RS-31 / src/generator/_expr/code-point.ts).  Graphemes agree
-    // with code points on every astral character and diverge only on
-    // combining sequences; Ecto's `validate_length/3`, the changeset half of
-    // the same rule, offers no `:codepoints` count, so moving one without the
-    // other would make elixir disagree with ITSELF.  Signed residual, not an
-    // oversight — see docs/audits/schemathesis-findings-2026-08.md § F5.
-    return `String.length(${recv})`;
+    // CODE POINTS — the unit `.length` is defined in and the unit the emitted
+    // `minLength`/`maxLength` publish (RS-31 / src/generator/_expr/code-point.ts).
+    // `String.length/1` would count GRAPHEMES, which disagrees with the served
+    // OpenAPI (and with the other four backends) on every combining sequence.
+    // The changeset half moved with it — `changeset-validators.ts` hand-rolls
+    // `validate_change/3` closures over the same count, because Ecto's
+    // `validate_length/3` has no `:codepoints` option.
+    return elixirCodePointLength(recv);
   }
   // Value-object SUB-field read (`this.money.amount`) — issue #1660.  A value
   // object has THREE inconsistent runtime shapes on vanilla: a single VO field is
@@ -728,7 +729,7 @@ function renderMethodCall(recv: string, args: string[], e: MethodCallExpr, ctx: 
   return `${recv}.${snake(e.member)}(${args.join(", ")})`;
 }
 
-/** The `deep` read-level sentinel (multi-tenancy Phase 2 P2.4) as a raw Ecto
+/** The `deep` read-level sentinel (multi-tenancy) as a raw Ecto
  *  `fragment` inside a `where:` — descendant-or-self materialized-path scope
  *  with the NULL-dataKey fallback to the tenant floor (see
  *  `DEEP_SCOPE_SEMANTICS`).  A SQL `fragment` sidesteps Ecto's `is_nil`/`like`
@@ -1046,7 +1047,7 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
     }
     case "repo-read": {
       // Read-only repository query in a `reading` domain-service body
-      // (domain-services.md rev. 4, Slice 1; Elixir decision B — ambient
+      // (domain-services.md rev. 4; Elixir decision B — ambient
       // `Repo`).  The reading op is emitted as a CONTEXT FUNCTION (it has the
       // ambient `Repo`), so a repo read renders against the SAME context-facade
       // find fn the workflow `repo-let` lowering calls: `getById` → `get_<agg>`,
@@ -1097,7 +1098,7 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
       return `${app}.Resources.ApiClients.${snake(op.resourceName)}_${snake(op.operationId)}(${args.join(", ")})`;
     }
     case "resource-op": {
-      // Resource-op (Phase 4c) → `<Module>.<resource>_<verb>(args)`, a
+      // Resource-op → `<Module>.<resource>_<verb>(args)`, a
       // helper function the Phoenix ResourceAdapter emits.  Routed by
       // sourceType via `ctx.resourceModules`.
       const op = e.resourceOp!;
@@ -1111,7 +1112,7 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
     }
     case "domain-service": {
       // Two shapes, decided by the operation's TIER (domain-services.md rev. 4,
-      // Slice 1; Elixir decision B):
+      // Elixir decision B):
       //
       //   - `pure` (or no tier resolver) → `Shop.Domain.Services.Pricing.quote(…)`,
       //     a plain stateless module fully qualified under the app's
@@ -1554,7 +1555,7 @@ export function renderTypespec(t: TypeIR, contextModule: string, typesModule?: s
         case "duration":
           // A5 temporal — an absolute duration is plain integer milliseconds
           // on this backend (see the temporal section above).  Expression-only
-          // (never a field / wire type in this slice), so this arm serves
+          // (never a field / wire type), so this arm serves
           // inferred spec positions (e.g. a duration-typed `let` flowing into
           // a `function` signature) rather than stored attributes.
           return "integer()";

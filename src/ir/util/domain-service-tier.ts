@@ -30,7 +30,7 @@ import { walkStmtExprsDeep } from "./walk.js";
 export type DomainServiceTier = "pure" | "reading" | "mutating";
 
 /** The resolvers `computeSaves` needs to derive the aggregate ARGS a called
- *  `mutating` domain service writes (domain-services.md rev. 4, Slice 2): one to
+ *  `mutating` domain service writes (domain-services.md rev. 4): one to
  *  find a service operation by `(service, op)`, one to decide whether an
  *  aggregate op mutates its receiver ({@link aggregateOpResolver}).  Built once
  *  per workflow from the context's lowered aggregates + domain services. */
@@ -114,7 +114,7 @@ export function classifyDomainServiceTier(
     let mutates = false;
     walkStmtExprsDeep(stmt, (e: ExprIR) => {
       // A `repo-read` Call anywhere in the body marks the operation `reading`.
-      // (A repository WRITE has no dedicated callKind this slice — it is left
+      // (A repository WRITE has no dedicated callKind — it is left
       // unresolved at lowering and caught by the validator's repo-write gate
       // off the AST shape.)
       if (e.kind === "call" && e.callKind === "repo-read") reads = true;

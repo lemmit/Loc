@@ -4,7 +4,7 @@
 //
 // A document-shaped aggregate persists as ONE jsonb column — the canonical
 // `(id, data, version)` table the migrations-builder already emits — instead of
-// the normalised table-per-entity tree.  Route A (slice 1): the blob is a TYPED
+// the normalised table-per-entity tree.  Route A: the blob is a TYPED
 // `embeds_one :data, <Agg>.Data` embedded schema (`renderDocDataSchema`), so
 // `row.data` rehydrates into a `%<Agg>.Data{}` struct carrying every domain
 // field.  Validation lives on that embed's `changeset/2` (cast + `cast_embed` +
@@ -17,18 +17,18 @@
 // struct back through `serialize/1` (snake-cased jsonb keys → camelCase wire).
 //
 // Beyond CRUD, this module also emits custom finds, named + returning operations,
-// and pure functions.  Route A slice 2: these all render in STRUCT mode against
+// and pure functions.  Route A: these all render in STRUCT mode against
 // the rehydrated `%<Agg>.Data{}` embed (`record = row.data`) via the SHARED
 // relational body renderer (`renderReturningStmt`) — no `docMap` fork; an op
 // re-embeds the mutated struct + bumps version, a find filters in memory over the
-// struct.  Paged finds build the wire envelope in memory (slice 4c), union finds
-// return the single-get tuple the shared find controller tags (slice 4d), and an
-// AUDITED op — named (slice 4e) or returning (slice 4f) — records its audit row
-// inside the persist transaction.  A mutating RETURNING op re-embeds + persists its
-// write, projecting the wire off the saved embed (#1774 — it previously dropped the
-// write).  Collection READS over the aggregate's own in-memory lists work too —
-// Route A made a containment a real `embeds_many` and a scalar array an
-// `{:array, _}` field, so `lines.sum(l => l.qty)` renders through the shared
+// struct.  Paged finds build the wire envelope in memory, union finds
+// return the single-get tuple the shared find controller tags, and an
+// AUDITED op — named or returning — records its audit row
+// inside the persist transaction.  A mutating RETURNING op re-embeds + persists
+// its write, projecting the wire off the SAVED embed rather than the in-memory
+// struct.  Collection READS over the aggregate's own in-memory lists work too:
+// a containment is a real `embeds_many` and a scalar array an `{:array, _}`
+// field, so `lines.sum(l => l.qty)` renders through the shared
 // collection-op table verbatim.  Capability filters are applied IN-APP over the
 // same rehydrated embed (`vanillaDocCapabilityFilter`).  The residual the
 // document path can't express yet — provenanced ops (no per-field prov columns
@@ -39,6 +39,7 @@
 // `validateVanillaDocumentScope`.
 // ---------------------------------------------------------------------------
 
+import { isRequiredUpdateInput } from "../../../ir/enrich/wire-projection.js";
 import {
   PAGED_DEFAULT_PAGE,
   PAGED_DEFAULT_PAGE_SIZE,
@@ -58,11 +59,8 @@ import type {
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { isDocumentShaped, resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
-import {
-  type SingleFieldPattern,
-  singleFieldConstraints,
-} from "../../../ir/validate/invariant-classify.js";
-import { elixirRegexBody, plural, snake, upperFirst } from "../../../util/naming.js";
+import { singleFieldConstraints } from "../../../ir/validate/invariant-classify.js";
+import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { statementSubRegions } from "../../_trace/sourcemap.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
@@ -74,7 +72,8 @@ import {
   vanillaDocCapabilityFilter,
   vanillaDocWriteScopeFilter,
 } from "./capability-filter.js";
-import { NORMALIZE_KEYS_DEFP } from "./key-normalize.js";
+import { ectoValidator } from "./changeset-validators.js";
+import { isVoValuedType, NORMALIZE_KEYS_DEFP, NORMALIZE_VO_KEYS_DEFP } from "./key-normalize.js";
 import { managedTimestampNames } from "./managed-timestamps.js";
 import {
   collectOpGuardClauses,
@@ -264,6 +263,18 @@ function renderDocDataSchema(appModule: string, ctxModule: string, agg: Aggregat
   );
   const validatorBlock = validatorLines.length > 0 ? `\n${validatorLines.join("\n")}` : "";
   const requiredBlock = requiredCols ? `\n    |> validate_required([${requiredCols}])` : "";
+  // A VALUE-OBJECT field inside the embed is a `:map` cast verbatim, so neither
+  // `__normalize_keys/1` (top level) nor `cast_embed` reaches its sub-keys — the
+  // relational hole (F2-W-01) in the document shape.  Snake is the canonical
+  // stored key here too.
+  const voKeyFields = fields
+    .filter((f) => isVoValuedType(f.type))
+    .map((f) => JSON.stringify(snake(f.name)));
+  const voKeyLine =
+    voKeyFields.length > 0
+      ? `\n    attrs = __normalize_vo_keys(attrs, [${voKeyFields.join(", ")}])`
+      : "";
+  const voKeyHelper = voKeyFields.length > 0 ? `\n\n${NORMALIZE_VO_KEYS_DEFP}` : "";
   return `# Auto-generated.
 defmodule ${dataMod} do
   @moduledoc "Embedded domain shape for the document aggregate — the whole tree stored in the jsonb \`data\` column."
@@ -278,57 +289,26 @@ ${schemaBody}
 
   @doc false
   def changeset(struct, attrs) do
-    attrs = __normalize_keys(attrs)
+    attrs = __normalize_keys(attrs)${voKeyLine}
 
     struct
     |> cast(attrs, [${castCols}])${castEmbedBlock}${requiredBlock}${validatorBlock}
   end
 
-${NORMALIZE_KEYS_DEFP}
+${NORMALIZE_KEYS_DEFP}${voKeyHelper}
 end
 `;
 }
 
 // ---------------------------------------------------------------------------
 // Changeset — schemaless validation over the document fields.
+//
+// The per-pattern validator lines come from the SHARED `ectoValidator`
+// (`changeset-validators.ts`) — the same leaf the relational changeset and the
+// value-object emitter use — so a document embed can't drift from them (it
+// carried a byte-identical private copy until the code-point length rules
+// landed, which is exactly the drift a duplicate invites).
 // ---------------------------------------------------------------------------
-
-function ectoValidator(field: string, p: SingleFieldPattern, message?: string): string {
-  // A messaged single-field rule rides its author text on Ecto's own
-  // `message:` option (mirrors the shared `ectoValidator`); message-less is
-  // byte-identical.
-  const m = message ? `, message: ${JSON.stringify(message)}` : "";
-  switch (p.kind) {
-    case "min":
-      // Exclusive (`weight > 0.5` on a decimal/money field) → Ecto's strict
-      // `greater_than:`; inclusive keeps `greater_than_or_equal_to:`.
-      return p.exclusive
-        ? `    |> validate_number(:${field}, greater_than: ${p.n}${m})`
-        : `    |> validate_number(:${field}, greater_than_or_equal_to: ${p.n}${m})`;
-    case "max":
-      return p.exclusive
-        ? `    |> validate_number(:${field}, less_than: ${p.n}${m})`
-        : `    |> validate_number(:${field}, less_than_or_equal_to: ${p.n}${m})`;
-    case "between":
-      return `    |> validate_number(:${field}, greater_than_or_equal_to: ${p.lo}, less_than_or_equal_to: ${p.hi}${m})`;
-    // `validate_length/3` counts GRAPHEMES, where every other backend counts
-    // CODE POINTS (RS-31 / src/generator/_expr/code-point.ts).  The two agree on
-    // every astral character and differ only on combining sequences; Ecto has no
-    // `:codepoints` count, so closing the gap means hand-rolling Ecto's error
-    // tuples and default message text.  Signed residual — see
-    // docs/audits/schemathesis-findings-2026-08.md § F5.
-    case "len-min":
-      return `    |> validate_length(:${field}, min: ${p.n}${m})`;
-    case "len-max":
-      return `    |> validate_length(:${field}, max: ${p.n}${m})`;
-    case "len-eq":
-      return `    |> validate_length(:${field}, is: ${p.n}${m})`;
-    case "len-range":
-      return `    |> validate_length(:${field}, min: ${p.lo}, max: ${p.hi}${m})`;
-    case "regex":
-      return `    |> validate_format(:${field}, ~r/${elixirRegexBody(p.pattern)}/${m})`;
-  }
-}
 
 export function renderDocChangeset(appModule: string, ctxModule: string, agg: AggregateIR): string {
   const aggMod = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
@@ -338,6 +318,52 @@ export function renderDocChangeset(appModule: string, ctxModule: string, agg: Ag
   // changeset just casts the incoming attrs INTO the `:data` embed (so
   // `on_replace: :update` gives merge-on-update semantics for free) and stamps
   // the version.  `record` is `%<Agg>{}` on insert and the existing row on update.
+  //
+  // The UPDATE seam takes the second head (M-T6.26).  RS-26 says the update
+  // contract is full-replacement, so an ABSENT KEY is a missing field — but
+  // `on_replace: :update` merges the incoming attrs ONTO the stored embed, and
+  // the embed's own `validate_required/2` then reads the retained value and
+  // passes.  Elixir answered 204 where the other four backends answer 422.
+  // Presence is therefore checked against the RAW attrs on the root changeset,
+  // ahead of `cast_embed`, exactly as the relational `update_changeset/2` does
+  // (`changeset-emit.ts` `__require_keys/3`) — same helper, same error shape,
+  // so ProblemDetails renders the same `{"pointer":"/<field>"}` entry.
+  const updateRequired = docRequiredFields(agg).filter((f) => isRequiredUpdateInput(f));
+  // Emitted only where there IS a required field to check, so a document
+  // aggregate whose updatable fields are all optional stays byte-identical.
+  //
+  // The raw attrs carry the CAMELCASE wire keys — the document path snake-cases
+  // them inside `<Agg>.Data.changeset/2`, not here — so the presence check reads
+  // a normalized COPY (the attrs handed to `cast_embed` are untouched).  Without
+  // that, `Map.has_key?(attrs, "item_count")` is false for a body that DID carry
+  // `itemCount` and every multi-word field 422s.
+  const requireKeys =
+    updateRequired.length > 0
+      ? `
+    |> __require_keys(__normalize_keys(attrs), [${updateRequired
+      .map((f) => `:${snake(f.name)}`)
+      .join(", ")}])`
+      : "";
+  const requireKeysHelper =
+    updateRequired.length > 0
+      ? `
+
+  # A full-replacement PUT carries every required field, so an ABSENT KEY is a
+  # missing field even when the loaded document still holds a value.
+  # The embed's \`validate_required/2\` cannot see that — \`cast_embed\` merges
+  # onto the stored data first — so presence is checked here, against the raw
+  # attrs.  The error shape is \`validate_required/2\`'s own, on the ROOT
+  # changeset, so ProblemDetails still renders 422 with \`{"pointer":"/<field>"}\`.
+  defp __require_keys(changeset, attrs, fields) do
+    Enum.reduce(fields, changeset, fn field, cs ->
+      if Map.has_key?(attrs, Atom.to_string(field)) or Map.has_key?(attrs, field),
+        do: cs,
+        else: add_error(cs, field, "can't be blank", validation: :required)
+    end)
+  end
+
+${NORMALIZE_KEYS_DEFP}`
+      : "";
   return `# Auto-generated.
 defmodule ${changesetMod} do
   @moduledoc "Casts document attrs into the embedded \`:data\` schema + stamps the version."
@@ -350,6 +376,14 @@ defmodule ${changesetMod} do
     |> cast_embed(:data, with: &${aggMod}.Data.changeset/2, required: true)
     |> put_change(:version, version)
   end
+
+  @doc "The UPDATE seam — \`document_changeset/3\` plus the raw-attrs presence check."
+  def document_update_changeset(%${aggMod}{} = record, attrs, version) when is_map(attrs) do
+    record
+    |> cast(%{"data" => attrs}, [])${requireKeys}
+    |> cast_embed(:data, with: &${aggMod}.Data.changeset/2, required: true)
+    |> put_change(:version, version)
+  end${requireKeysHelper}
 end
 `;
 }
@@ -453,7 +487,7 @@ export function renderDocRepository(
   // to the pre-filter document repository.
   const principal = aggregateUsesPrincipalContextFilter(agg);
   const cap = vanillaDocCapabilityFilter(agg, contextModule, "row", { actor: principal });
-  // The WRITE-scope command-load filter (authorization Phase 3 P3.1): the
+  // The WRITE-scope command-load filter (authorization): the
   // context facade emits `get_<agg>_for_write` whenever `writeScopeFilter` is
   // set, regardless of saving shape, so the document repository must define the
   // `find_by_id_for_write` it delegates to.
@@ -533,7 +567,7 @@ ${docBindRecord(cap, "        ")}        if ${cap}, do: {:ok, row}, else: {:erro
 ${
   writeScope
     ? `
-  @doc "Command-load path (authorization Phase 3 P3.1): scope the by-id load to the WRITE scope; a readable-but-not-writable (or missing) row reads as :not_found → 404."
+  @doc "Command-load path (authorization): scope the by-id load to the WRITE scope; a readable-but-not-writable (or missing) row reads as :not_found → 404."
   @spec find_by_id_for_write(binary(), map() | nil) :: {:ok, ${aggModule}.t()} | {:error, :not_found}
   def find_by_id_for_write(id, ${writeScopeUsesPrincipal ? "current_user" : "_current_user"} \\\\ nil) when is_binary(id) do
     case Repo.get(${aggModule}, id) do
@@ -559,8 +593,8 @@ ${insertStamps}    %${aggModule}{}
 ${updateStamps}
     # cast_embed(:data, on_replace: :update) casts the incoming (possibly
     # partial) attrs ONTO the existing embedded document, so unspecified fields
-    # keep their stored values (the merge-on-update semantics the old manual
-    # Map.merge gave) and validate_required still sees the retained values.
+    # keep their stored values (merge-on-update semantics) and
+    # validate_required still sees the retained values.
 ${
   versioned
     ? `    # Optimistic concurrency (default-on \`versioned\`): override the loaded
@@ -573,14 +607,14 @@ ${
     record = %{record | version: expected_version || record.version}
 
     record
-    |> ${changesetMod}.document_changeset(attrs, record.version)
+    |> ${changesetMod}.document_update_changeset(attrs, record.version)
     |> Ecto.Changeset.optimistic_lock(:version)
     |> Repo.update()
   rescue
     Ecto.StaleEntryError -> {:error, :conflict}
   end`
     : `    record
-    |> ${changesetMod}.document_changeset(attrs, record.version + 1)
+    |> ${changesetMod}.document_update_changeset(attrs, record.version + 1)
     |> Repo.update()
   end`
 }
@@ -612,7 +646,7 @@ function isDocSingleReturn(t: TypeIR): boolean {
 }
 
 /** One document custom-find function — an IN-MEMORY filter over the loaded rows.
- *  Route A slice 2: the predicate renders in STRUCT mode (`docStruct`) against the
+ *  Route A: the predicate renders in STRUCT mode (`docStruct`) against the
  *  rehydrated `%<Agg>.Data{}` embed bound as `record` (`this.<field>` →
  *  `record.<snake>`, enums as their stored strings, money/decimal native) — the
  *  same relational renderer, no `docMap` fork.  A find with no `where` clause
@@ -762,7 +796,7 @@ function docOpStructBody(
   agg: AggregateIR,
   facadeMod: string,
   ctx: BoundedContextIR,
-  /** Source-map Milestone 3 collector (`--sourcemap`) — only allocated by the
+  /** Source-map collector (`--sourcemap`) — only allocated by the
    *  caller when a recorder is present (zero cost otherwise).  A document op's
    *  body is filtered only of its guards (no emit-hoisting restructuring here),
    *  so `bodyStmts` and `body` line up 1:1 for the sub-region zip. */
@@ -808,7 +842,7 @@ function docOpStructBody(
   return { params, body, guardClauses, trailingReturnLine };
 }
 
-/** `<op>_<agg>(row, params)` for a document aggregate (Route A slice 2) — bind
+/** `<op>_<agg>(row, params)` for a document aggregate (Route A) — bind
  *  the rehydrated embed as `record`, run the body in struct mode, then re-embed
  *  the mutated struct + bump the version.  `cast_embed` is skipped on the write
  *  back (the struct is already validated on read); `put_embed` stores it verbatim. */
@@ -826,7 +860,7 @@ export function renderDocNamedOpFunction(
   const repoMod = `${aggModule}Repository`;
   const { params, body, guardClauses } = docOpStructBody(op, agg, facadeMod, ctx, opFragments);
   const actorParam = opUsesCurrentUser(op) ? ", current_user \\\\ nil" : "";
-  // An AUDITED named op (Route A slice 4e) records a who/what/when + before/after
+  // An AUDITED named op (Route A) records a who/what/when + before/after
   // wire snapshot into `audit_records` INSIDE the persist transaction, so the
   // history row commits atomically with the embed re-write — parity with the
   // relational `renderNamedOpFunction` audit path.  The `before` snapshot is the
@@ -916,9 +950,9 @@ ${bodyContent}
  *  `<op>_<agg>_result/2` translates to HTTP (success → 200 + wire, error variant
  *  → RFC-7807).
  *
- *  #1774: a MUTATING returning op now PERSISTS its embed re-write (the relational
- *  sibling always did; the doc path previously projected the mutated struct in
- *  memory and silently dropped the write).  The persist gate is the SAME predicate
+ *  A MUTATING returning op PERSISTS its embed re-write, like the relational
+ *  sibling — projecting the mutated struct in memory instead would silently
+ *  drop the write.  The persist gate is the SAME predicate
  *  the shared returning-op controller uses for its `{:error, %Ecto.Changeset{}}`
  *  clause (`returningOpPersistsChangeset`), so the op fn + controller never
  *  disagree.  A non-committing body (pure read, or an unconditional error return)
@@ -953,9 +987,9 @@ export function renderDocReturningOpFunction(
     trailingReturn !== undefined &&
     (trailingReturn.value.kind === "this" || trailingReturn.variantTag === agg.name);
   const aggregateSuccess = persists && (fallThrough || trailingIsAggregate);
-  // An AUDITED returning op (slice 4f) records its audit row INSIDE the persist
+  // An AUDITED returning op records its audit row INSIDE the persist
   // transaction, so the history row commits atomically with the embed re-write —
-  // the same tail the named-op audit path (slice 4e) uses, wrapped around the
+  // the same tail the named-op audit path uses, wrapped around the
   // #1774 returning-op persist.  `audit_before` is the pre-mutation document.
   const hasAudit = op.audited === true;
 

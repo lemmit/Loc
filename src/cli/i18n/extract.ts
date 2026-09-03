@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Source-catalog extraction for the `ddd i18n` CLI (M-T1.11, i18n.md Phase 3).
+// Source-catalog extraction for the `ddd i18n` CLI (M-T1.11, i18n.md).
 //
 // Runs pipeline phases ①–⑥ over a `.ddd` project (parse → lower → enrich) and
 // returns the flat `{ key: message }` source catalog — the THEIRS input to the

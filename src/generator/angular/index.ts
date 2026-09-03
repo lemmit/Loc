@@ -29,6 +29,7 @@ import {
 import { renderGateExpr } from "../_frontend/gate-expr.js";
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
+import { MONEY_TEXT_SOURCE } from "../_frontend/money-format.js";
 import { ANGULAR_NAV_LABELS, withNavLabelTokens } from "../_frontend/nav-labels.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
 import { angularChromeAttr, angularChromeText } from "../_frontend/shell-chrome.js";
@@ -153,7 +154,7 @@ export function generateAngularForContexts(
   out.set("tsconfig.app.json", pack.render("tsconfig-app", {}));
   out.set("src/main.ts", pack.render("main", {}));
   out.set("src/styles.css", pack.render("theme", prepareThemeVM(sys.theme)));
-  out.set("src/lib/format.ts", pack.render("format-helpers", {}));
+  out.set("src/lib/format.ts", pack.render("format-helpers", { moneySource: MONEY_TEXT_SOURCE }));
   // Interactive-table sort helper (M-T1.1) — re-exposed as a component member
   // by any page rendering a sortable Table; emitted unconditionally.
   out.set("src/lib/table-sort.ts", buildTableSortHelper());
@@ -245,7 +246,7 @@ export function generateAngularForContexts(
   }
   const pageRoutes = new Map<string, string>();
   for (const page of pages) pageRoutes.set(page.name, page.route!);
-  // Name-context for the page's emitted identifier (slice 3c — replaces origin).
+  // Name-context for the page's emitted identifier (replaces origin).
   const pageCtx: PageNameCtx = {
     aggregateNames: contexts.flatMap((c) => c.aggregates.map((a) => a.name)),
     workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
@@ -352,6 +353,9 @@ export function generateAngularForContexts(
             bcByWorkflow,
             externFunctions: externFunctionNames,
             walkedComponents: walkedComponentNames,
+            // The route table an action body's `navigate(<Page>)` resolves
+            // against (the body walk above already receives it).
+            pageRoutes,
           });
     }
     const pagePath = `src/app/pages/${slug}.component.ts`;
@@ -547,7 +551,7 @@ export function generateAngularForContexts(
   out.set("src/api/config.ts", pack.render("api-config", { apiBaseUrl }));
 
   // Per-aggregate API modules — the idiomatic-Angular `@Injectable` service +
-  // signal-backed `use<Op><Agg>` read factory (data-path sub-slice A; the
+  // signal-backed `use<Op><Agg>` read factory (the
   // QueryView read path that consumes them lands in the next sub-slice).
   for (const { agg } of aggregates) {
     out.set(
@@ -563,7 +567,7 @@ export function generateAngularForContexts(
     out.set("src/api/workflows.ts", buildAngularWorkflowsModule(contexts));
   }
 
-  // Query-time projection clients (M-T1.3 Phase 1).  Angular FORKS the shared
+  // Query-time projection clients (M-T1.3).  Angular FORKS the shared
   // `_frontend/projections-module.ts` rather than widening its options — the
   // emitted unit is an interface + an @Injectable service method + an
   // `injectQuery` factory, not a zod schema plus a hook (see that module's
@@ -574,7 +578,7 @@ export function generateAngularForContexts(
     out.set("src/api/projections.ts", buildAngularProjectionsModule(contexts));
   }
 
-  // --- Playwright e2e harness (angular-frontend-plan.md Slice 6) -------
+  // --- Playwright e2e harness (angular-frontend-plan.md) -------
   // Page objects + smoke spec are framework-neutral — they drive the
   // browser through the SAME testid-keyed runtime React/Vue/Svelte use, so
   // the SHARED `_frontend/` emitters produce them verbatim.  Angular

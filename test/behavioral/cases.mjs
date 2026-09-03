@@ -98,8 +98,12 @@ export async function featureCases(backendKey, platformClause, workDir) {
  *  Injected via `E2E_DEV_CLAIMS` → the emitted `__authHeaders` base64-encodes it
  *  into the `x-loom-dev-claims` header that each backend's dev-stub auth verifier
  *  merges over its built-in identity (the exact mechanism tenancy-e2e uses).
- *  Only STRING claims are honoured on the non-node backends, so keep it to
- *  strings keyed by the declared `user` field name.  Inert for auth-less systems
+ *  Claim TYPES: `string` and `string[]` are carried on all five backends (the
+ *  shared `devClaimKind` classifier — the four non-node stubs used to filter to
+ *  strings alone and silently drop an array, which is why `lifecycle-guard` sat
+ *  in `E2E_LESS_CORPUS_FIXTURES`).  Anything else still keeps its built-in stub
+ *  value, so keep this to those two shapes, keyed by the declared `user` field
+ *  name.  Inert for auth-less systems
  *  (no middleware reads it).  Fixtures in the tenancy/auth cluster assert against
  *  THIS principal — an in-tenant row uses `tenantId: "acme"`, an out-of-tenant
  *  row any other value; a `requires currentUser.role == "agent"` op is satisfied.
@@ -107,7 +111,17 @@ export async function featureCases(backendKey, platformClause, workDir) {
  *  tenancy claim is deliberately NOT called `tenantId` (tenancy-claim-name):
  *  each backend maps only the claims its own `user { … }` block declares, so an
  *  extra key is inert everywhere else. */
-export const DEV_CLAIMS = JSON.stringify({ tenantId: "acme", orgId: "acme", role: "agent" });
+export const DEV_CLAIMS = JSON.stringify({
+  tenantId: "acme",
+  orgId: "acme",
+  role: "agent",
+  // `lifecycle-guard`'s gates read `currentUser.permissions.contains(...)`.
+  // The value is the lowered runtime string for `permissions { manage }` under
+  // `subdomain Ops` — `<subdomain lowercased>.<name>` (`lower.ts`), NOT the
+  // source spelling.  Inert on every fixture that declares no `permissions`
+  // field, since each backend maps only its own declared claims.
+  permissions: ["ops.manage"],
+});
 
 /** The SECOND dev-stub principal: **authenticated but not authorized** (M-T9.28).
  *
@@ -123,8 +137,8 @@ export const DEV_CLAIMS = JSON.stringify({ tenantId: "acme", orgId: "acme", role
  *  predicate — but `role` is deliberately a value no fixture's `requires`
  *  accepts.  Keep it that way: a fixture that starts granting `"visitor"`
  *  silently turns every 403 arm into a 2xx and the ladder stops proving
- *  anything.  Strings only, for the same reason `DEV_CLAIMS` is strings only
- *  (the non-node backends honour only string claims).
+ *  anything.  Strings and string LISTS only, for the same reason `DEV_CLAIMS`
+ *  is — see the claim-type note there.
  *
  *  The OIDC twin is `oidc.unauthorizedToken` (oidc-mock.mjs) — same issuer, same
  *  signing key, `realm_access.roles` set to the same non-granting value. */
@@ -132,6 +146,11 @@ export const DEV_CLAIMS_UNAUTHORIZED = JSON.stringify({
   tenantId: "acme",
   orgId: "acme",
   role: "visitor",
+  // Present but GRANTING NOTHING — the array twin of `role: "visitor"`.  An
+  // absent key would also deny, but it would deny by having no claim at all;
+  // this denies through the predicate itself, which is what the 403 arm is
+  // supposed to prove.  Never add a permission a fixture's `requires` accepts.
+  permissions: ["ops.none"],
 });
 
 /** The authenticated-but-unauthorized credential for one case, in that system's
@@ -234,6 +253,33 @@ export const AUTHZ_LADDERS = {
       { label: "query-time projection", method: "GET", path: "/api/projections/open_orders" },
     ],
     arms: { anonymous: null, unauthorized: 403, authorized: 200 },
+    anonymousNote: "dev-stub verifier accepts every request — no anonymous caller exists",
+  },
+
+  /** The WRITE side (lifecycle-guard.ddd) — the denial half of the `test e2e`
+   *  in that fixture.  Its three `requires` sit on CANONICAL lifecycle
+   *  operations rather than declared ones, which is the shape #2446 shipped
+   *  ungated: `Shipment.create` (principal-only, no `this` yet),
+   *  `Shipment.destroy` (principal AND row) and `Crate.destroy`
+   *  (principal-only, on an `audited` aggregate, where a denial can land on the
+   *  wrong side of the staged row).
+   *
+   *  This ladder could not run at all until the dev-stub claim mapper carried
+   *  a `string[]`: the gate reads `currentUser.permissions.contains(...)`, and
+   *  four of five backends dropped the array claim, so the AUTHORIZED principal
+   *  was indistinguishable from the unauthorized one and every arm returned
+   *  403.  A gate emitted as a no-op would have passed that just as well —
+   *  which is exactly the vacuous pass the fixture's waiver named.
+   *
+   *  `unauthorized` carries `permissions: ["ops.none"]`: a claim that is
+   *  PRESENT and grants nothing, so the 403 comes from the predicate rather
+   *  than from an absent claim. Keep it that way — a fixture that starts
+   *  granting `ops.none` turns every arm below into a 2xx silently.
+   */
+  "lifecycle-guard": {
+    seed: { path: "/api/crates", body: { label: "authz ladder probe" } },
+    gated: { method: "DELETE", path: "/api/crates/{id}" },
+    arms: { anonymous: null, unauthorized: 403, authorized: 204 },
     anonymousNote: "dev-stub verifier accepts every request — no anonymous caller exists",
   },
 };

@@ -1,5 +1,5 @@
 // Feliz's `DataGrid` child component — the F# half of the `renderDataGridChild`
-// seam (M-T1.1 slice 10e).
+// seam (M-T1.1).
 //
 // WHY FELIZ CAN HAVE A REAL DataGrid AND FLUTTER CANNOT
 // -----------------------------------------------------

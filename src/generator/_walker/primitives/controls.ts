@@ -29,9 +29,11 @@ import {
   navArgValue,
   propagateChildFlags,
   recordStoreUse,
+  STANDARD_AGG_OPS,
   storeLocalFor,
   styleAttr,
   testidAttr,
+  tryRenderNavigateCall,
   walk,
 } from "../walker-core.js";
 
@@ -111,9 +113,9 @@ export function emitButton(
   } else {
     // `to:` named arg wires the button to a React
     // Router navigate call.  Accepts ANY expression — a literal path, a route
-    // param, or a computed one (`to: "/greet/" + who`).  It used to accept only
-    // the first two and silently drop everything else, leaving a button that
-    // rendered but navigated nowhere (A12).
+    // param, or a computed one (`to: "/greet/" + who`).  Accepting only the
+    // literal and param forms would leave a button that renders but navigates
+    // nowhere.
     const to = navArgValue(call, "to", ctx)?.expr;
     if (to) {
       ctx.usesNavigate = true;
@@ -133,7 +135,7 @@ export function emitButton(
   // injection so the local hook var is available at page-top).
   const disabled = anyNamedArgExpr(call, "disabled", ctx);
   const loading = anyNamedArgExpr(call, "loading", ctx);
-  // Phase 5 — variant + icon slot.  `variant: "primary" | "secondary"
+  // Variant + icon slot.  `variant: "primary" | "secondary"
   // | "ghost"` maps to each pack's idiomatic rank ("filled" / "outline"
   // / "subtle" on Mantine, "default" / "outline" / "ghost" on shadcn).
   // `icon:` + `iconPosition:` lets a button display an SVG glyph from
@@ -294,21 +296,13 @@ export function emitAction(
  *  side-effect (drives the shell's `useNavigate` import) also stays
  *  walker-local. */
 export function emitActionThen(then: ExprIR, ctx: WalkContext): string {
-  if (then.kind === "call" && then.name === "navigate") {
-    const pageRef = then.args[0];
-    const route =
-      pageRef && pageRef.kind === "ref"
-        ? (ctx.pageRoutes?.get(pageRef.name) ?? `/${snake(pageRef.name)}`)
-        : "/";
-    ctx.usesNavigate = true;
-    const stateArg = then.args[1];
-    // Source's second arg is rendered as an opaque expression
-    // (`navigate(Page, someRef)` / `navigate(Page, computeState())`).
-    // The contract's `stateExpr` escape hatch wraps it as the
-    // `state:` value verbatim; the args[] path is reserved for the
-    // future kv-decomposed shape.
-    const stateExpr = stateArg ? emitExpr(stateArg, ctx) : undefined;
-    return ctx.target.renderNavigate(route, [], stateExpr);
+  if (then.kind === "call") {
+    // ONE resolver, shared with the action-BODY statement arm in walker-core:
+    // the two spellings of `navigate(<Page>)` diverged (this one worked, the
+    // statement one emitted an unresolved sentinel), and a single call site is
+    // what keeps them from diverging again.
+    const nav = tryRenderNavigateCall(then.name, then.args, ctx);
+    if (nav !== undefined) return nav;
   }
   return emitExpr(then, ctx);
 }
@@ -353,7 +347,23 @@ function emitLambdaBody(lam: ExprIR & { kind: "lambda" }, ctx: WalkContext): str
  *  with no api handle.  Returns the aggregate name when it's known to
  *  this UI, else undefined. */
 function singleAggregateOfQuery(ofArg: ExprIR, ctx: WalkContext): string | undefined {
-  const recv = ofArg.kind === "method-call" ? ofArg.receiver : ofArg;
+  let recv = ofArg.kind === "method-call" ? ofArg.receiver : ofArg;
+  // `<handle>.<Agg>.all` is a plain MEMBER chain, not a method call, so one hop
+  // down lands on the VERB (`all`), not the aggregate — and the lookup below
+  // silently returned undefined, leaving the data-lambda binding untyped so
+  // every `OperationForm { row.<op> }` inside it degraded to a comment on
+  // react / vue / svelte / feliz / flutter, and to NOTHING at all on Angular
+  // (its forked resolver returned undefined).  `byId(id)` never hit it,
+  // because a method call's NAME is not part
+  // of the receiver chain.  Only step past a verb that is not itself a declared
+  // aggregate, so an aggregate legitimately named after one still resolves.
+  if (
+    recv.kind === "member" &&
+    STANDARD_AGG_OPS.has(recv.member) &&
+    !ctx.aggregatesByName.has(recv.member)
+  ) {
+    recv = recv.receiver;
+  }
   const name = recv.kind === "member" ? recv.member : recv.kind === "ref" ? recv.name : undefined;
   return name && ctx.aggregatesByName.has(name) ? name : undefined;
 }
@@ -402,12 +412,12 @@ export function emitQueryView(
   // loading completes; `data` branch fires when `data` is truthy.
   // Without the flag, the default collection semantics apply
   // (`data && data.length === 0` / `data && data.length > 0`).
-  // DERIVED, with the flag as an opt-in on top.  `single: true` was originally
-  // the only source, which made a byId read written WITHOUT it emit the
-  // collection arms — `.length` of one record: `undefined`, so neither the
-  // empty branch nor the data branch fires and the page renders blank (a raise
-  // on HEEx, where `Enum.empty?` of a struct has no Enumerable).  The IR knows
-  // the read yields one record; asking the author to restate it only creates a
+  // DERIVED, with the flag as an opt-in on top.  Taking `single: true` as the
+  // ONLY source makes a byId read written without it emit the collection arms
+  // — `.length` of one record is `undefined`, so neither the empty branch nor
+  // the data branch fires and the page renders blank (a raise on HEEx, where
+  // `Enum.empty?` of a struct has no Enumerable).  The IR knows the read yields
+  // one record; asking the author to restate it only creates a
   // way for the two to disagree.  Covers the singleton PROJECTION read too —
   // its response is one object, not a list — so both read kinds get their
   // answer from the same place (`_walker/paged-query.ts`).

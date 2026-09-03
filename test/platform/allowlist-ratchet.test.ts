@@ -194,11 +194,25 @@ const REGISTERED: Ratchet[] = [
   // literal already names every backend family, and they have no second arm),
   // three driven by real fixtures through the `no db-owning deployable hosts
   // this context` arm the pinned four lack.
+  //
+  // 31 -> 17: the rest of the backend-capability cluster.  Eleven more latent
+  // gates plus the two java entity-field backstops are pinned — this time as
+  // CHECKED pins (`LATENT_GATES` re-reads each gate's real capability `Set` on
+  // every run, so a sixth backend family fails the pin instead of leaving a
+  // stale claim in prose).  `loom.field-mask-unsupported` was the one in the
+  // cluster that turned out drivable, through the same `anyBackend` arm.
+  //
+  // …and of those, the two java entity-field backstops are now GONE
+  // ENTIRELY rather than pinned (M-T6.36): a backend-named code for a shape
+  // the LANGUAGE refuses on every platform is a phantom, not a backstop, and
+  // it carried two undrainable rows in the M-T9.27 register.  The
+  // unreachability moved to a scope-layer test that fails if part-type scope
+  // widens.
   {
     file: "test/system/diagnostic-firing-census.data.ts",
     name: "UNCOVERED",
     kind: "set",
-    max: 31,
+    max: 0,
   },
   // The MikroORM behavioural leg's skip register.  It was NOT registered here
   // until `projection-join` (a query-time projection the adapter refuses) had to
@@ -281,6 +295,24 @@ const REGISTERED: Ratchet[] = [
     name: "ELIXIR_COMPILE_SKIP",
     kind: "record",
     max: 0,
+  },
+  // The corpus features whose cells stop at the COMPILE tier — nothing boots
+  // them, so no gate observes their runtime behaviour.  Signed with a reason
+  // each; M-T9.13 owns the drain.  Unlike the skip maps above this register is
+  // asserted set-EQUAL to the derived ledger, so it cannot go stale in the
+  // other direction either — but it can still GROW, which is what this pins.
+  {
+    file: "test/system/gate-ledger.test.ts",
+    name: "BEHAVIOURAL_ABSENT",
+    kind: "record",
+    // 14 -> 13 -> 12, on two consecutive rebases: #2696 gave `policy-document`
+    // a `test e2e` block and a golden, then #2717 did the same for
+    // `lifecycle-guard` (its dev-stub array-claim fix is what made a permission
+    // gate testable at all).  Both times the ledger's set-equality caught the
+    // stale entry the moment `main` moved under this branch — the drain
+    // direction working in the field rather than in a mutation, twice in two
+    // days, which is the rate a hand-maintained matrix would have rotted at.
+    max: 12,
   },
 ];
 

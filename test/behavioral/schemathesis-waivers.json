@@ -136,12 +136,12 @@
         "F22"
       ],
       "check": "negative_data_rejection",
-      "operations": "^POST /api/orders/\\{id\\}/(confirm|update)$",
+      "operations": "^POST /api/[a-z_]+/\\{id\\}/[a-z_]+$",
       "backends": [
         "dotnet"
       ],
       "kind": "bug",
-      "reason": "F22 — an operation route sent with NO body at all answers 415 (ASP.NET's media-type check fires before model binding), and 415 is not in the set of statuses that count as a rejection, so the check reads it as \"schema-violating request accepted\". The malformed `{id}` in the same request is never reached. The honest answer is the declared 422 for the unparseable identifier, or 400 for the absent required body — the point is that the FIRST thing checked is the one the contract says least about."
+      "reason": "F22 \u2014 a bodyless operation POST answers 415 before the path parameter is looked at. ASP.NET's media-type check fires before model binding, so a request with a malformed `{id}` AND no body is answered by the one thing the contract says least about; 415 is not in the set of statuses the fuzzer counts as a rejection. The honest answer is the declared 422 for the unparseable identifier. PATTERN WIDENED 2026-09-01: it was written from the two `orders` routes of the discovery run and matched only those, so the SAME finding on `POST /api/customers/{id}/update` and `POST /api/wallets/{id}/freeze` arrived unwaived on a later run. Measured on a booted app, the 415 does not depend on the id being malformed at all \u2014 a VALID uuid with no Content-Type answers 415 too \u2014 so the shape is every operation POST, which is what the pattern now says. node, python and java are clean on this check, so the 415 is a .NET-only divergence rather than a shared decision."
     },
     {
       "id": "W27",
@@ -174,6 +174,32 @@
       "reason": "F21's read half — the row the unenforced `minLength` let in is then served by a response the API's OWN schema declares as `minLength: 1`, so the server violates its published contract on a plain `GET`. The two halves are one defect: enforce the declared bound on the write and the read conforms again."
     },
     {
+      "id": "W36",
+      "findings": [
+        "F18"
+      ],
+      "check": "unsupported_method",
+      "operations": "^GET /api/[a-z_]+/[a-z_]+$",
+      "backends": [
+        "dotnet"
+      ],
+      "kind": "bug",
+      "reason": "F18 on a THIRD backend \u2014 the same static-sub-path finding already waived as W23 (python) and W33 (java), arriving unwaived on dotnet because no rule claimed that surface. Measured on a booted app: `DELETE /api/customers/by_email` answers 422, not 405, because the request matches `DELETE /api/customers/{id}` with `id=\"by_email\"` and the malformed-identifier arm answers first (the response even carries `Allow: DELETE, GET`, naming the template that swallowed it). F8's fix is a Hono middleware with no counterpart on the other four backends. It is NOT fixable per-backend here: constraining the route to `{id:guid}` would stop the collision but would also turn the malformed-path-id case into a 404, breaking the declared 422 that `test/generator/malformed-path-id-status.test.ts` pins across node/.NET/python/java. Disambiguating a static sub-path from `{id}` without losing that 422 is a cross-backend design decision, which is why this stays a waiver rather than a patch."
+    },
+    {
+      "id": "W37",
+      "findings": [
+        "F30"
+      ],
+      "check": "negative_data_rejection",
+      "operations": "^POST /api/products$",
+      "backends": [
+        "dotnet"
+      ],
+      "kind": "bug",
+      "reason": "F30 \u2014 a required VALUE-OBJECT member of a VALUE TYPE can be omitted and is accepted, storing the CLR default. `POST /api/products -d '{\"sku\":\"A\",\"price\":{\"currency\":\"USD\"}}'` answers 201 and the row reads `{\"amount\":0,\"currency\":\"USD\"}` \u2014 a zero-priced product the published `ProductsMoneyRequest` (`required: [amount, currency]`) forbids. The tell is the asymmetry: omitting `currency` (a string \u2192 null) is correctly refused 422, omitting `amount` (a decimal \u2192 0) is not, because DataAnnotations `[Required]` tests for null and 0 is not null. This is the exact hole `dtoParam` already documents for operation bodies, in the one slot its `[property: JsonRequired]` guard does not cover. NOT fixed by extending that guard: measured on a booted app, JsonRequired does reject the omission, but the STJ failure lands in the `Malformed JSON in request body` 400 arm \u2014 wrong on its face (the JSON is well-formed) and a NEW divergence, since the same endpoint answers 422 for an omitted `price` and node/python answer 422 here too. The fix that keeps the 422 tier is a nullable request-DTO value type (`decimal? Amount` + `[Required]`), which moves every VO construction site in the .NET emitter and is its own slice."
+    },
+    {
       "id": "W29",
       "findings": [
         "F23",
@@ -202,22 +228,9 @@
       "reason": "The consequence half of W29: 500 is not a declared response on any route. Clears with W29."
     },
     {
-      "id": "W31",
+      "id": "W35",
       "findings": [
-        "F24"
-      ],
-      "check": "not_a_server_error",
-      "operations": "^GET /api/",
-      "backends": [
-        "java"
-      ],
-      "kind": "bug",
-      "reason": "F24 — a paged find with an adversarial query string 500s on java: the same NPE family as W29 reached through the query-parameter binder rather than the body (and Tomcat additionally rejects some of the fuzzer's chunks before the app sees them). Kept separate from W29 because the FIX is separate — the query side has its own binder — even though the shape is the same."
-    },
-    {
-      "id": "W32",
-      "findings": [
-        "F25"
+        "F28"
       ],
       "check": "status_code_conformance",
       "operations": "^GET /api/",
@@ -225,7 +238,9 @@
         "java"
       ],
       "kind": "bug",
-      "reason": "F25 — `GET /api/products?pageSize=0` answers 400, and no read route declares a 400: the paged `page`/`pageSize` bounds that #2555 gave declared, enforced limits are enforced on java with a status the contract does not publish (the shared matrix declares 422). Also absorbs the 500s of W31 reaching this check."
+      "intermittent": true,
+      "intermittentReason": "The finding needs the fuzzer to generate a MALFORMED query chunk (a parameter with an empty name, `?=%C3%A0`) against a read route. It did so \u00d74 on run 33382822525 and \u00d70 on the two runs before it \u2014 the same low rate that made W31 look permanently stale and got it wrongly retired (see F24). Declared intermittent so the staleness half cannot ask that question again on two samples.",
+      "reason": "F28 \u2014 java answers 400 for an UNPARSEABLE query string and no read route declares a 400. Replaces W32 (F25), which is FIXED: the paged `page`/`pageSize` bounds now answer the declared 422, matching the other four backends and java's own published set. What is left is narrower and java-only: Tomcat refuses to parse a malformed chunk and throws before any handler runs, so the request never reaches the wire-validation tier that would make it a 422. The other four backends IGNORE the junk parameter and answer 200 (the deliberate decision W8 records), and Tomcat 11 exposes no leniency knob \u2014 no `parameterParsing*` attribute on Connector or Parameters \u2014 so java cannot join them by configuration. 400 is therefore the honest answer, and declaring it on the SHARED read contract would publish a status the other four never produce. Clearing this means either a container-level parser change or a java-only declaration; neither is a fuzzer fix."
     },
     {
       "id": "W33",

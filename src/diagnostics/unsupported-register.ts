@@ -3,34 +3,29 @@
 //
 // Every diagnostic code in `src/` carrying an `-unsupported` / `-backend`
 // suffix is WORK — either now (`gap`) or later (`scope`).  That invariant is
-// the point of this file, and slice 2 is what made it true.
+// the point of this file.
 //
 //   gap    — a target hasn't implemented it yet.  A TODO.  DRAINS TO ZERO.
 //   scope  — a declared v1 limit with a named successor.  Owned by a mission;
 //            becomes a `gap` when that mission starts, or is renamed out (as
 //            below) if the limit is re-justified as permanent.
 //
-// HOW IT GOT THIS WAY.  The suffix originally spanned 69 codes and LOOKED like
-// one family — "this target can't do this yet" — which is what made them
-// ossify: a permanent-shaped artifact (a stable `loom.*` identity, documented
-// beside real rules, matched in tests like real rules) standing in for a
-// temporary condition.  Classifying all 69 against their emission sites split
-// them FOUR ways, and 27 turned out not to be work at all:
+// WHAT DOES NOT BELONG HERE.  The suffix reads like one family — "this target
+// can't do this yet" — which is exactly how a permanent-shaped artifact (a
+// stable `loom.*` identity, documented beside real rules, matched in tests like
+// real rules) comes to stand in for a temporary condition.  A code that is NOT
+// work does not carry the suffix and does not get a row:
 //
-//   * 13 were semantically impossible or deliberately refused
+//   * semantically impossible or deliberately refused — `-invalid`
 //     (`projection-groupby-join`: a join is a by-id load AFTER the query, so it
 //     cannot compose with `group by`; `policy-write-global`, a documented
-//     deliberate never).  Those never drain.
-//   * 6 were not gaps in any sense — a closed vocabulary or a misuse error the
-//     suffix regex swept in (`auth-ui-on-backend` was a misuse error;
-//     `ui-handler-unsupported` a closed statement vocabulary).
+//     deliberate never);
+//   * parses and does nothing — `-no-effect`;
+//   * not in a closed vocabulary, or a plain misuse error — `-unknown`
+//     (`auth-ui-on-backend` is a misuse error; `ui-handler-unsupported` a closed
+//     statement vocabulary).
 //
-// Slice 2 RENAMED all 19 out of the suffix — `-invalid` (impossible/refused),
-// `-no-effect` (parses, does nothing), `-unknown` (not in a closed vocabulary)
-// — so they no longer read as parity debt and no longer land in this register.
-// That is why the two kinds below are the only two left: a third of the
-// apparent debt was permanent by design, and leaving it here would have stalled
-// any drain sprint at 19 rows nothing could close.
+// Leaving those here would stall any drain sprint on rows nothing can close.
 //
 // The lasting lesson: NO NAMING CONVENTION separates these.  The classification
 // is a reviewed field, not something derivable from the code name — which is
@@ -39,19 +34,15 @@
 // `verified` marks rows whose classification a human has confirmed against the
 // emission site.  Rows land `false` and are promoted on review.
 //
-// LATENT ROWS — why a `gap` can be a gate nothing can trip.  The 2026-08 prose
-// audit re-read every row against the set / emitter it names and found the
-// register describing a THREE-BACKEND world that had since converged: ~20 rows
-// claimed "missing on some backends" while their gate's Set (EVENT_SOURCING_
-// BACKENDS, PROJECTION_*_SUPPORTED, SUPPORTED_UNION_BACKENDS, FIELD_MASK_
-// BACKENDS, CHART_FRAMEWORKS, PROJECTION_READ_FRAMEWORKS, …) already named
-// every shipping target.  Those gates are deliberately KEPT — they are the seam
-// the NEXT backend/frontend gates on until it ports, the pattern CHART_FRAMEWORKS
-// documents at system-checks.ts (`the gate no longer fires for anything that
-// exists — it is the seam a NEW frontend gates on, not dead code`).  Their rows
-// stay too, because the code IS still emitted in `src/` and the still-emitted
-// invariant demands a row; what changed is the PROSE, which now says "ships on
-// all five; latent seam for a NEW target" instead of pretending to be a TODO.
+// LATENT ROWS — why a `gap` can be a gate nothing can trip.  Many gates' Sets
+// (EVENT_SOURCING_BACKENDS, PROJECTION_*_SUPPORTED, SUPPORTED_UNION_BACKENDS,
+// FIELD_MASK_BACKENDS, CHART_FRAMEWORKS, PROJECTION_READ_FRAMEWORKS, …) name
+// every shipping target, so the gate fires for nothing that exists.  Those
+// gates are deliberately KEPT — they are the seam the NEXT backend/frontend
+// gates on until it ports, the pattern CHART_FRAMEWORKS documents at
+// system-checks.ts.  Their rows stay too, because the code IS still emitted in
+// `src/` and that invariant demands a row; such a row's `what` says "ships on
+// all five; latent seam for a NEW target" rather than reading as a TODO.
 //
 // So the `gap` count is NOT a backlog depth: a latent row drains only when the
 // gate itself is deleted (a decision about the seam), while a live row drains
@@ -69,7 +60,7 @@
 
 /** How a `*-unsupported` code relates to work — now or later.  See the header.
  *  A code that is NEITHER (impossible, refused, or a plain rule) does not
- *  belong in the suffix at all; rename it, per slice 2. */
+ *  belong in the suffix at all — rename it, per the header. */
 export type UnsupportedKind = "gap" | "scope";
 
 export interface UnsupportedEntry {
@@ -148,8 +139,10 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     site: "src/ir/validate/checks/system-checks.ts:2629",
     what:
       "the .NET Dapper residue after full EF parity: an AGGREGATING query-time projection over a " +
-      "document/event-sourced source, a hierarchical (deep/global) tenancy scope filter, and " +
-      "declared migration steps (self-provisioning adapter, migration-checks.ts:247)",
+      "document/event-sourced source, a hierarchical (deep/global) tenancy scope filter, and the " +
+      "two self-provisioning limits — declared migration steps and Postgres schema placement " +
+      "(migration-checks.ts, `validateMigrationAdapterSupport` / " +
+      "`validateSelfProvisioningSchemaSupport`)",
     mission: "M-T6.35",
   },
   {
@@ -160,6 +153,18 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
       "`DataGrid` (a TanStack row model) outside DATA_GRID_FRAMEWORKS — phoenixLiveView is the " +
       "open leg; flutter is a settled never (native build, no JS runtime — D-DATAGRID-TARGETS)",
     mission: "M-T1.1",
+  },
+  {
+    code: "loom.heex-component-host-state-unsupported",
+    kind: "gap",
+    site: "src/ir/validate/checks/system-checks.ts:597",
+    what:
+      "a form / QueryView / Table / FileUpload / Chart inside a `component` on phoenixLiveView — " +
+      "#2646 lifted a component's `state` and `action`s into the host LiveView but not the " +
+      "walker's form / query / upload / table-control accumulators, so the markup emitted " +
+      "against an assign the host never makes (compiles clean, then raises at render time)",
+    mission: "M-T1.27",
+    verified: true,
   },
   {
     code: "loom.event-sourced-workflow-unsupported",
@@ -250,22 +255,18 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     mission: "M-T5.3",
   },
   {
-    code: "loom.java-projection-field-unsupported",
+    code: "loom.java-reserved-identifier-unsupported",
     kind: "gap",
-    site: "src/ir/validate/checks/system-checks.ts:2336",
+    site: "src/ir/validate/checks/system-checks.ts:2560",
     what:
-      "an ENTITY-typed projection row field on Java — an unreachable defensive backstop: a part " +
-      "type never resolves in projection scope (VO-typed fields emit)",
+      "a `.ddd` field / param / operation named after a JAVA reserved word (`case`, `do`, " +
+      '`new`, …). The SQL half is quoted (`@Column(name = "`case`")`); the host-identifier ' +
+      "half emits `String case;` / `public String case() {`, which javac rejects. Refused " +
+      "rather than escaped because Java has no verbatim identifier and a rename would move " +
+      "the JSON property on java alone — drained by emitting a mangled field plus an explicit " +
+      "`@JsonProperty` at every wire site",
     mission: "M-T6.36",
-  },
-  {
-    code: "loom.java-workflow-instance-field-unsupported",
-    kind: "gap",
-    site: "src/ir/validate/checks/system-checks.ts:2318",
-    what:
-      "an ENTITY-typed workflow instance field on Java — the same unreachable backstop as the " +
-      "projection twin; a part type never resolves in workflow scope",
-    mission: "M-T6.36",
+    verified: true,
   },
   {
     code: "loom.mikroorm-unsupported",
@@ -274,7 +275,8 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     what:
       "on MikroORM: a primitive/enum SCALAR-ARRAY root field under relational/embedded " +
       "(#scalar-array — drizzle stores it natively), an abstract inheritance base owning " +
-      "`contains`, and declared migration steps (migration-checks.ts:254).  All five ONCE-gated " +
+      "`contains`, and the two self-provisioning limits — declared migration steps and Postgres " +
+      "schema placement (migration-checks.ts).  All five ONCE-gated " +
       "non-persistence features (query-time projections, SSE, outbox, timers, brokers) closed",
     mission: "M-T6.23",
   },
@@ -387,11 +389,49 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     mission: "M-T6.35",
   },
   {
+    code: "loom.scaffold-filter-param-unsupported",
+    kind: "gap",
+    site: "src/ir/validate/checks/ui-checks.ts:898",
+    what:
+      "a scaffolded list page's filter bar drops a repository `find` whose param it cannot " +
+      "render an input for.  M-T1.15 landed `string`/`guid`/`datetime`/`int`/`long`/`bool`/`<X> id`; " +
+      "`enum` waits on the " +
+      "frontend state emitters (an enum `state {}` field is typed as bare `string` while the " +
+      "query param is the zod enum union) and `decimal`/`money` on a per-target zero-literal " +
+      "seam (Feliz types the bar's `0` sentinel as `decimal <> int`)",
+    mission: "M-T1.15",
+  },
+  {
     code: "loom.store-lifetime-target-unsupported",
     kind: "gap",
     site: "src/ir/validate/checks/store-checks.ts:327",
     what: "a persisted store field with no total F# (feliz) or Dart (flutter) codec",
     mission: "M-T1.20",
+  },
+  {
+    code: "loom.table-filter-unsupported",
+    kind: "gap",
+    site: "src/ir/validate/checks/ui-checks.ts:840",
+    what:
+      "`Table { filter: <state> }` on a framework with no filter seam.  The six `walkBody` " +
+      "targets all declare `renderFilteredRows` + `renderFilterInput`; phoenixLiveView runs the " +
+      "parallel HEEx engine, whose `renderTable` `else if` chain handles rows/testid/sort/page " +
+      "and lets `filter:` fall through into nothing.  Drains when the generated `list/4` takes a " +
+      "filter param and the LiveView grows the matching `handle_event` + `<.input>`",
+    mission: "M-T1.1",
+  },
+  {
+    code: "loom.modal-controlled-op-form-unsupported",
+    kind: "gap",
+    site: "src/ir/validate/checks/ui-checks.ts:913",
+    what:
+      "`Modal { open: <stateBool>, OperationForm { … } }` on react / vue / svelte / flutter, " +
+      "where `emitModal` only reaches the state-controlled path when there is NO form child and " +
+      "otherwise degrades the WHOLE modal to a comment.  Angular and Feliz fork the primitive " +
+      "and render the form, and HEEx's `renderModal` handles it, so this is a per-target gap, " +
+      "not a rejected shape.  Drains when the four render the controlled shell around the " +
+      "recorded OperationFormState",
+    mission: "M-T1.6",
   },
   {
     code: "loom.toast-message-unsupported",
@@ -414,6 +454,25 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     what:
       "sharedTable (TPH) storage ships on all five backends (TPH_CAPABLE) — fires only when no " +
       "backend deployable hosts the context",
+    mission: "M-T5.7",
+  },
+  {
+    code: "loom.tph-filter-unsupported",
+    kind: "gap",
+    site: "src/ir/validate/checks/system-checks.ts:3651",
+    what:
+      "a TPH SUBTYPE's capability `filter` reading a column the hierarchy ROOT does not declare, " +
+      "on the .NET EF adapter only — Dapper splices the same predicate into raw SQL, where a " +
+      "subtype column is just a column, so it is NOT gated.  EF Core registers every query " +
+      "filter in an inheritance hierarchy on the " +
+      "root entity type, and a root-hosted filter cannot reach a subtype-only column (verified " +
+      'against EF Core 10.0.10: a CLR downcast raises "No coercion operator is defined between ' +
+      "types 'Truck' and 'Car'\" and EF.Property raises \"the specified property does not exist " +
+      'on the entity type" as soon as the query source is a SIBLING subtype).  Filters reading ' +
+      "ROOT columns — the common `tenantOwned`-on-the-base case — are emitted, discriminator-" +
+      "guarded, and are NOT gated.  Replaces a silent drop (`tph ? [] :`, F2-CB-C2).  Drains if " +
+      "the .NET read path moves capability filters off HasQueryFilter onto the per-read LINQ " +
+      "`.Where(...)`, which is per-DbSet and therefore subtype-typed",
     mission: "M-T5.7",
   },
   {
@@ -529,10 +588,36 @@ export const UNSUPPORTED_REGISTER: readonly UnsupportedEntry[] = [
     verified: true,
   },
   {
+    // Same SHAPE bound as the two rows above, on the third body kind: the
+    // `reading` tier recognises a repository read only when it is the WHOLE
+    // expression (`matchRepoRead` requires `suffixes.length === 1`).  A read in
+    // MEMBER-RECEIVER position (`Accounts.byHolder(h).balance`) therefore never
+    // becomes a `repo-read`: the service is typed `pure`, no read port is
+    // threaded, and every backend emits the bare repository name.  Widening the
+    // detector (and re-applying the remaining suffixes in
+    // `lower-domain-service.ts`) retires this row.
+    code: "loom.domain-service-read-unsupported",
+    kind: "scope",
+    site: "src/ir/validate/checks/domain-service-checks.ts:233",
+    what: "a repository read used as a MEMBER RECEIVER in a domainService body — v1 binds it first",
+    verified: true,
+  },
+  {
     code: "loom.workflow-load-nullable-unsupported",
     kind: "scope",
     site: "src/ir/validate/checks/workflow-checks.ts:656",
     what: "workflow load of a nullable result — v1 is single non-nullable",
+    verified: true,
+  },
+  {
+    code: "loom.seed-event-sourced-unsupported",
+    kind: "gap",
+    site: "src/language/validators/seed.ts:101",
+    // Live, not latent: no backend HAS an event-append seed path.  It drains
+    // when one exists on all five (elixir appends the creation event; java/.NET
+    // build the call from the declared `create` params, not `forCreateInput`).
+    what: "a `seed` row on an event-sourced aggregate — no backend can append its creation event",
+    mission: "M-T6.52",
     verified: true,
   },
 ];

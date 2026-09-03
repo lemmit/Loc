@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Vanilla event-sourced emit — `persistedAs: eventLog` aggregates on the
-// plain Phoenix + Ecto foundation (D-VANILLA-ES-HOME).  Slice P4.1/P4.2 of
+// plain Phoenix + Ecto foundation (D-VANILLA-ES-HOME).  See
 // docs/old/plans/elixir-eventsourcing-vanilla-plan.md.
 //
 // This mirrors the cross-backend ES contract the Python/node/dotnet/java
@@ -40,11 +40,13 @@ import type {
 import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { type ElixirChannelsCfg, elixirDispatchCall } from "../channels-emit.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
+import { opUsesCurrentUser } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { denialOverrides, denialResponse, denialTerm, disallowedTerm } from "./denial.js";
 import { renderFindActions } from "./find-controller.js";
 import { foldStmtsUseParam, renderFoldStatement } from "./fold-stmt-emit.js";
 import { renderProblemVariantHelper } from "./operation-returns-emit.js";
+import { renderPathIdCastPlug } from "./problem-details-emit.js";
 import { renderWireSerialize } from "./wire-serialize.js";
 
 /** Truth-kind predicate — an aggregate whose persistence is its event log. */
@@ -518,11 +520,17 @@ export function renderEsController(
   // RS-13 — the 201 body is the ID ENVELOPE, not the serialized aggregate; see
   // the matching note in api-emit.ts.  The event-sourced controller shares the
   // divergence (and the fix) with the relational one.
+  // Same principal pass-through as the operation actions below (F10): a
+  // `create` whose guard reads `currentUser.<claim>` gets the parameter, and
+  // must therefore also be HANDED it — the default `nil` would compile and
+  // then deny every create at runtime on `nil.<claim>`.
+  const createOp = (agg.creates ?? [])[0];
+  const esCreateActor = createOp !== undefined && opUsesCurrentUser(createOp);
   const create =
     (agg.creates ?? []).length > 0
       ? `
   def create(conn, params) do
-    create_result(conn, ${ctxModule}.create_${aggSnake}(params))
+${esCreateActor ? "    current_user = Map.get(conn.assigns, :current_user)\n" : ""}    create_result(conn, ${ctxModule}.create_${aggSnake}(params${esCreateActor ? ", current_user" : ""}))
   end
 
   def create_result(conn, {:ok, record}) do
@@ -547,12 +555,19 @@ export function renderEsController(
       // "never match" under Elixir 1.18's --warnings-as-errors.  A public fn
       // keeps both arms at their full clause domain.
       const opResultFn = `${opSnake}_${aggSnake}_result`;
+      // Pass the principal when the command reads it — the controller half of
+      // F10.  Emitting the parameter without passing it would compile (the arg
+      // defaults to nil) and then deny every request at runtime on `nil.role`,
+      // which is worse than the compile error it replaced.
+      const esOpActor = opUsesCurrentUser(op);
+      const esCuBind = esOpActor ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
+      const esCallActor = esOpActor ? ", current_user" : "";
       return `
   def ${opSnake}(conn, %{"id" => id} = params) do
-    attrs = Map.drop(params, ["id"])
+${esCuBind}    attrs = Map.drop(params, ["id"])
 
     with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id) do
-      ${opResultFn}(conn, ${ctxModule}.${opSnake}_${aggSnake}(record, attrs))
+      ${opResultFn}(conn, ${ctxModule}.${opSnake}_${aggSnake}(record, attrs${esCallActor}))
     else
       {:error, :not_found} ->
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
@@ -588,7 +603,7 @@ ${disallowedClause}  defp command_error(conn, {:forbidden, detail}) do
     ${denialResponse("forbidden", "detail", esOverrides)}
   end
 
-  # RS-15 — a tripped precondition names the predicate that failed, matching
+  # A tripped precondition names the predicate that failed, matching
   # node/dotnet/java/python byte-for-byte.  The catch-all below stays for an
   # untagged reason (a raise the domain core didn't type).
   defp command_error(conn, {:precondition_failed, detail}) do
@@ -657,6 +672,8 @@ defmodule ${appModule}Web.${aggPascal}Controller do
   use ${appModule}Web, :controller
   alias ${facadeMod}
   alias ${appModule}Web.ProblemDetails
+
+${renderPathIdCastPlug()}
 
   def index(conn, _params) do
     with {:ok, records} <- ${ctxModule}.list_${aggSnake}s() do
@@ -766,10 +783,17 @@ function renderCommandRunner(c: CommandCtx): string {
   // a param-less command (e.g. `create open()` / `operation close()`) leaves it
   // unused, which fails `--warnings-as-errors` — bind `_attrs` there.
   const attrsArg = c.op.params.length > 0 ? "attrs" : "_attrs";
+  // A `requires currentUser.…` guard renders `current_user.<claim>` into the
+  // `with` chain, so the function must BIND it — same `current_user \\ nil`
+  // trailing arg the relational (`context-emit.ts`) and document paths take.
+  // Without it the emitted module failed `undefined variable "current_user"`
+  // on the crossing `versioned` x `eventLog` x `requires` (pairwise F10): the
+  // ES command emitter was the one command path that never grew the parameter.
+  const actorArg = opUsesCurrentUser(c.op) ? ", current_user \\\\ nil" : "";
   const head =
     c.kind === "create"
-      ? `  def ${fnName}(${attrsArg}) do`
-      : `  def ${fnName}(%${c.aggModule}{} = state, ${attrsArg}) do`;
+      ? `  def ${fnName}(${attrsArg}${actorArg}) do`
+      : `  def ${fnName}(%${c.aggModule}{} = state, ${attrsArg}${actorArg}) do`;
 
   const preamble = [...paramReads, ...lets].join("\n");
   return `${head}

@@ -26,7 +26,7 @@ import { javaLogEvent } from "../../_obs/render-java.js";
 // reactor subscribes — the `ChannelConsumerService` invoking the SAME
 // dispatcher handler methods local events would reach.
 //
-// Producer path split (design §5, slice 7c): the tee publishes EPHEMERAL
+// Producer path split (design §5): the tee publishes EPHEMERAL
 // broker-routed events inline; DURABLE (`work`) events land in
 // `__loom_outbox` inside the caller's @Transactional write (the tee IS the
 // outbox recorder on java) and are published by the `OutboxRelayService` on
@@ -172,7 +172,7 @@ export function renderJavaChannelFiles(
    *  ChannelConsumerService (a pure producer ships publish-only). */
   consumerHandlers: ChannelConsumerHandler[],
   sys: SystemIR,
-  /** M-T4.4 slice 7c: hosted durable events ride a broker-bound
+  /** M-T4.4: hosted durable events ride a broker-bound
    *  `queue`/`work` channel — the tee records them in `__loom_outbox` and
    *  the relay publishes on drain (design §5).  False on consumers that
    *  don't host the durable channel's context (their module migrations
@@ -243,7 +243,19 @@ export function renderJavaChannelFiles(
         : []),
       `        Map<String, Object> data) {`,
       ``,
-      `    private static final JsonMapper JSON = JsonMapper.builder().build();`,
+      // WRITE_BIGDECIMAL_AS_PLAIN (M-T6.46): the REST response path no longer
+      // hands Jackson a `BigDecimal` (a response `decimal` is a `double`), but
+      // the CloudEvents `data` map still does — `toDataExpr` converts
+      // datetime/money/id/enum and passes a plain `decimal` through raw.  Left
+      // at the default, a negative-scale value serializes in SCIENTIFIC
+      // notation (`1E+40`), which a consumer on another backend reads as a
+      // different literal than the one java holds.  This pins PLAIN notation;
+      // it does not change the value, and it deliberately does NOT redefine the
+      // broker's numeric precision contract (that gap is cross-backend — .NET's
+      // channel codec has the identical raw-decimal shape).
+      `    private static final JsonMapper JSON = JsonMapper.builder()`,
+      `        .enable(tools.jackson.core.StreamWriteFeature.WRITE_BIGDECIMAL_AS_PLAIN)`,
+      `        .build();`,
       ``,
       `    public String toJson() {`,
       `        var m = new LinkedHashMap<String, Object>();`,
@@ -287,8 +299,8 @@ export function renderJavaChannelFiles(
       ``,
       `import java.util.function.Consumer;`,
       ``,
-      `/** The publish/subscribe seam every broker driver implements (M-T4.4;`,
-      ` *  shared with the realtime relay).  A null group is broadcast; a group`,
+      `/** The publish/subscribe seam every broker driver implements, shared`,
+      ` *  with the realtime relay.  A null group is broadcast; a group`,
       ` *  name makes replicas competing consumers. */`,
       `public interface ChannelTransport {`,
       `    void publish(String address, LoomEventEnvelope envelope);`,
@@ -577,7 +589,7 @@ export function renderJavaChannelFiles(
         ``,
         `    public KafkaChannelTransport(String url) {`,
         `        // kafka://user:pass@host:port[,host2] — userinfo (when present)`,
-        `        // becomes SASL/PLAIN (M-T4.4 \u00a77); a credential-less URL stays`,
+        `        // becomes SASL/PLAIN; a credential-less URL stays`,
         `        // on PLAINTEXT, the pre-auth contract.`,
         `        var bare = url.startsWith("kafka://") ? url.substring("kafka://".length()) : url;`,
         `        var at = bare.lastIndexOf('@');`,
@@ -1314,7 +1326,7 @@ export function renderJavaOutboxDelivery(basePkg: string): string {
   );
 }
 
-/** The transactional-outbox tier (M-T4.4 slice 7c — dispatch-delivery-
+/** The transactional-outbox tier (dispatch-delivery-
  *  semantics.md on java): the JPA entity mapped onto the MigrationsIR-owned
  *  `__loom_outbox` table, its Spring Data repository, and the polling relay
  *  that publishes drained rows to the broker (design §5; the tee in
@@ -1354,7 +1366,7 @@ export function renderJavaOutboxFiles(pkgs: {
         ``,
         `/** One owed durable event (dispatch-delivery-semantics.md): written by`,
         ` *  the ChannelPublishTee inside the caller's transaction, drained by`,
-        ` *  the OutboxRelayService (M-T4.4 design §5).  Maps the shared`,
+        ` *  the OutboxRelayService.  Maps the shared`,
         ` *  __loom_outbox table the module migrations own. */`,
         `@Entity`,
         `@Table(name = "__loom_outbox")`,

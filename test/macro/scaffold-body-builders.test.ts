@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { printExpr } from "../../src/language/print/print-expr.js";
-import type { ScaffoldColumn } from "../../src/macros/stdlib/scaffold/_body-builders.js";
+import type {
+  FilterParam,
+  ScaffoldColumn,
+} from "../../src/macros/stdlib/scaffold/_body-builders.js";
 import {
   filterFindsForAggregate,
   filterStateFields,
@@ -429,11 +432,35 @@ describe("scaffold instance builders — observable workflow pages", () => {
   });
 });
 
+/** A `FilterParam` for the builder tests.  `type` is only consulted for the
+ *  `number` arm (it is cloned onto the state field), so a bare TypeRef stub is
+ *  enough for the string/id arms. */
+const PRIM_FOR_KIND: Record<FilterParam["kind"], string> = {
+  string: "string",
+  ref: "string",
+  number: "int",
+  bool: "bool",
+};
+
+const fp = (name: string, kind: FilterParam["kind"] = "string"): FilterParam =>
+  ({
+    name,
+    kind,
+    // `cloneTypeRef` reads `.base.$type` / `.base.name`, so the stub needs a
+    // real `base` node — not just a bare TypeRef shell.
+    type: {
+      $type: "TypeRef",
+      array: false,
+      optional: false,
+      base: { $type: "PrimitiveType", name: PRIM_FOR_KIND[kind] },
+    },
+  }) as unknown as FilterParam;
+
 describe("scaffoldList filter-bar — find inputs + match switch", () => {
   it("emits a Group of bound inputs and a match that switches the list per find", () => {
     const src = printExpr(
       scaffoldList("Order", [text("status")], {
-        filters: [{ name: "byStatus", params: ["status"] }],
+        filters: [{ name: "byStatus", params: [fp("status")] }],
       }),
     );
     // one bound text input per param, testid keyed by the snake state name
@@ -452,10 +479,40 @@ describe("scaffoldList filter-bar — find inputs + match switch", () => {
     ).toBe("");
   });
 
+  // M-T1.15: a `bool` param is the one kind whose NATURAL input is WRONG rather
+  // than missing — a `Toggle` binds a bool state whose zero value is `false`,
+  // which collapses "filter for false" and "no filter" into one page state and
+  // puts half the domain out of reach.  The bar binds a three-state string
+  // select instead, and passes the comparison as the find argument.
+  it("a bool param binds a three-state SelectField and passes the comparison as the argument", () => {
+    const src = flat(
+      printExpr(
+        scaffoldList("Order", [text("status")], {
+          filters: [{ name: "byActive", params: [fp("active", "bool")] }],
+        }),
+      ),
+    );
+    expect(src).toContain(
+      'SelectField("Active", bind: byActiveActive, options: ["true", "false"], ' +
+        'testid: "orders-filter-by_active_active")',
+    );
+    // "unset" is `""` — NOT one of the two options, so both `true` and `false`
+    // stay reachable (the whole point of not using a Toggle here).
+    expect(src).toContain('byActiveActive != "" => QueryView(');
+    // the find takes a `bool`, so the comparison IS the argument
+    expect(src).toContain('of: Order.byActive(byActiveActive == "true"),');
+    expect(src).not.toContain("Toggle(");
+    expect(
+      parseRawResult(inPage(src))
+        .parserErrors.map((e) => e.message)
+        .join("\n"),
+    ).toBe("");
+  });
+
   it("ANDs a multi-param find's inputs into one arm condition", () => {
     const src = printExpr(
       scaffoldList("Order", [text("name")], {
-        filters: [{ name: "search", params: ["name", "city"] }],
+        filters: [{ name: "search", params: [fp("name"), fp("city")] }],
       }),
     );
     expect(src).toContain('Field("Name", bind: searchName');
@@ -476,18 +533,25 @@ describe("scaffoldList filter-bar — find inputs + match switch", () => {
     expect(src).toContain("of: Order.all(pageNum, 10, sortKey, sortDir),");
   });
 
-  it("filterStateFields names one string field per find param", () => {
+  it("filterStateFields: a bare string field per string/id param, a typed spec per number", () => {
+    // string and `X id` params keep the bare-name spelling (byte-identical
+    // emission); a numeric param carries the find param's own type onto the
+    // state field so the state and the find ARGUMENT agree by construction.
     expect(
       filterStateFields([
-        { name: "byStatus", params: ["status"] },
-        { name: "search", params: ["name", "city"] },
+        { name: "byStatus", params: [fp("status")] },
+        { name: "search", params: [fp("name"), fp("city")] },
       ]),
-    ).toEqual([{ name: "byStatusStatus" }, { name: "searchName" }, { name: "searchCity" }]);
+    ).toEqual(["byStatusStatus", "searchName", "searchCity"]);
+
+    const withNumber = filterStateFields([{ name: "byTotal", params: [fp("total", "number")] }]);
+    expect(withNumber).toHaveLength(1);
+    expect(withNumber[0]).toMatchObject({ name: "byTotalTotal", type: "string" });
   });
 });
 
 describe("filterFindsForAggregate — resolves filter finds from the repository AST", () => {
-  it("keeps string-param list finds, drops all / scalar / non-array / non-string", async () => {
+  it("keeps string- and numeric-param list finds, drops all / scalar / non-array", async () => {
     const { model, errors } = await parseString(`
       system S {
         context C {
@@ -504,9 +568,65 @@ describe("filterFindsForAggregate — resolves filter finds from the repository 
     `);
     expect(errors).toEqual([]);
     const order = findNode(model, "Aggregate", "Order");
-    expect(filterFindsForAggregate(order)).toEqual([
-      { name: "byStatus", params: ["status"] },
-      { name: "search", params: ["name", "city"] },
+    // `byTotal(total: int)` is offered too since M-T1.15 — an int/long/`X id`
+    // param renders a NumberField rather than being silently dropped.
+    // `params` carries a live `TypeRef` since M-T1.15; project to the fields
+    // under test rather than deep-comparing AST nodes.
+    expect(
+      filterFindsForAggregate(order).map((f) => ({
+        name: f.name,
+        params: f.params.map((x) => [x.name, x.kind]),
+      })),
+    ).toEqual([
+      { name: "byStatus", params: [["status", "string"]] },
+      {
+        name: "search",
+        params: [
+          ["name", "string"],
+          ["city", "string"],
+        ],
+      },
+      { name: "byTotal", params: [["total", "number"]] },
+    ]);
+  });
+
+  // M-T1.15: the per-param-type verdict, in ONE place — every renderable type
+  // is offered, every held-back one is dropped, and the reason each is on the
+  // side it is on is a fact about the FRONTENDS (see `filterParamKind`), not a
+  // preference.  `guid`/`datetime` are `z.string()` on the request wire and
+  // `string` in every frontend's state emitter, so a text box over them agrees
+  // by construction; `enum` is the `z.enum([...])` union against a `string`
+  // state (TS2322) and `decimal`/`money` have no type-checking zero sentinel.
+  it("offers guid / datetime / bool params, and still drops enum, decimal, money, arrays and optionals", async () => {
+    const { model, errors } = await parseString(`
+      system S {
+        context C {
+          enum Status { Draft, Confirmed }
+          aggregate Customer { name: string }
+          aggregate Order { reference: string }
+          repository Orders for Order {
+            find byCorr(corr: guid): Order[]
+            find byPlacedAt(at: datetime): Order[]
+            find byActive(a: bool): Order[]
+            find byBuyer(b: Customer id): Order[]
+            find byStatus(s: Status): Order[]
+            find byTotal(t: decimal): Order[]
+            find byPrice(p: money): Order[]
+            find byRefs(rs: string[]): Order[]
+            find byMaybe(m: string?): Order[]
+          }
+        }
+      }
+    `);
+    expect(errors).toEqual([]);
+    const order = findNode(model, "Aggregate", "Order");
+    expect(
+      filterFindsForAggregate(order).map((f) => [f.name, f.params.map((p) => p.kind)]),
+    ).toEqual([
+      ["byCorr", ["string"]],
+      ["byPlacedAt", ["string"]],
+      ["byActive", ["bool"]],
+      ["byBuyer", ["ref"]],
     ]);
   });
 });

@@ -12,9 +12,30 @@
 // #2380 — "a transient hiccup costs seconds, not the cell"); `mix deps.get` is
 // the same failure class one step later and had no retry at all.
 //
-// Scope — deliberately ONLY `mix deps.get`.  `mix compile` (and every other mix
-// task) must keep failing fast: a compile error is the signal these gates
-// exist to deliver, and retrying it would only triple the time to a red X.
+// Scope — the two TOOLCHAIN-FETCH steps only: `mix deps.get` and the
+// `mix local.hex` / `mix local.rebar` install that precedes it.  `mix compile`
+// (and every other mix task) must keep failing fast: a compile error is the
+// signal these gates exist to deliver, and retrying it would only triple the
+// time to a red X.  Neither fetch step can ever produce that signal — both fail
+// with a network message and no emitted code is even read — so retrying them
+// costs nothing a green run would have paid anyway.
+//
+// `local.hex` was added to that scope after the pairwise elixir leg's first full
+// run: 17 of 25 cases failed with BYTE-IDENTICAL text —
+//
+//   ** (Mix) request timed out after 60000ms
+//   Could not install Hex because Mix could not download metadata at
+//     https://builds.hex.pm/installs/hex.csv
+//
+// — under concurrent load from sibling docker builds sharing one egress proxy.
+// One of those exact cases then compiled clean in 67s when re-run alone.  Every
+// case is a fresh `docker run --rm`, and `--force` re-fetches `hex.csv` however
+// warm the mounted `~/.hex` cache is, so this is one un-retried network call per
+// case — the single most-repeated remote fetch in the elixir gates, and until
+// now the only one with no backoff at all.  The header below already noted that
+// a `local.hex` failure falls through into the fetch's retry groups; that made
+// it a correctness hazard for the CHAIN, and it was also the step most likely to
+// fail.
 //
 // ── The quote-free invariant ────────────────────────────────────────────────
 // The returned snippet is spliced into command lines with three different
@@ -50,6 +71,22 @@ export const MIX_DEPS_GET_ATTEMPTS = 3;
 /** Seconds to sleep before attempt 2, before attempt 3, … */
 export const MIX_DEPS_GET_BACKOFF_S = [5, 20] as const;
 
+/**
+ * Build a bounded-retry `||` chain for one quote-free command, brace-grouped so
+ * it composes into an `&&` chain exactly like the bare command it replaces.
+ * Shared by {@link mixDepsGet} and {@link mixLocalInstall} — the two differ only
+ * in which command they wrap.
+ */
+function retryChain(cmd: string, backoff: readonly number[], attempts: number): string {
+  const chain = backoff.reduce(
+    (acc, wait, i) =>
+      `${acc} || { echo loom-retry: ${cmd} failed, attempt ${i + 2} of ${attempts} after ${wait}s; sleep ${wait}; ${cmd}; }`,
+    cmd,
+  );
+  // Brace-grouped — see "Why the whole thing is brace-grouped" above.
+  return `{ ${chain}; }`;
+}
+
 function assertQuoteFree(args: string): void {
   if (/["'$`\\]/.test(args)) {
     throw new Error(
@@ -74,11 +111,35 @@ function assertQuoteFree(args: string): void {
 export function mixDepsGet(args = ""): string {
   assertQuoteFree(args);
   const cmd = ["mix", "deps.get", args.trim()].filter(Boolean).join(" ");
-  const chain = MIX_DEPS_GET_BACKOFF_S.reduce(
-    (acc, wait, i) =>
-      `${acc} || { echo loom-retry: ${cmd} failed, attempt ${i + 2} of ${MIX_DEPS_GET_ATTEMPTS} after ${wait}s; sleep ${wait}; ${cmd}; }`,
-    cmd,
-  );
-  // Brace-grouped — see "Why the whole thing is brace-grouped" above.
-  return `{ ${chain}; }`;
+  return retryChain(cmd, MIX_DEPS_GET_BACKOFF_S, MIX_DEPS_GET_ATTEMPTS);
+}
+
+/**
+ * `mix local.hex --force && mix local.rebar --force`, each wrapped in the same
+ * bounded retry — the Hex/rebar INSTALL that every containerised elixir gate
+ * runs before its fetch.
+ *
+ * Each is retried independently so a flaky `local.hex` does not drag a
+ * successful `local.rebar` through a needless sleep, and the pair composes into
+ * the caller's `&&` chain exactly like the two bare commands it replaces.
+ *
+ * Same quote-free, brace-grouped invariants as {@link mixDepsGet} — it is
+ * spliced into the same single-quoted `docker run … bash -c '…'` lines.
+ */
+export function mixLocalInstall(opts: { ifMissing?: boolean } = {}): string {
+  // `--if-missing` turns the install into a no-op once the archive is already
+  // in `~/.mix/archives`, so a caller that MOUNTS that dir across cases pays
+  // one network fetch for a whole run instead of one per container.  Callers
+  // that do not mount it must keep `--force`: a stale archive in a fresh
+  // container is not a thing `--if-missing` can detect.
+  //
+  // This matters more than the retry beside it.  builds.hex.pm throttles the
+  // same archive fetched 25 times in a row, and a bounded retry against a rate
+  // limit only spends its attempts — the pairwise elixir leg lost 17 of 25
+  // cases that way while a single case passed in 81s.
+  const flags = opts.ifMissing ? "--if-missing" : "--force";
+  return [
+    retryChain(`mix local.hex ${flags}`, MIX_DEPS_GET_BACKOFF_S, MIX_DEPS_GET_ATTEMPTS),
+    retryChain(`mix local.rebar ${flags}`, MIX_DEPS_GET_BACKOFF_S, MIX_DEPS_GET_ATTEMPTS),
+  ].join(" && ");
 }

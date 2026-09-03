@@ -8,7 +8,10 @@ import {
   type FilterBypass,
   lowerToDrizzle,
 } from "../../../generator/typescript/repository-find-predicate.js";
-import { wireProjectionValue } from "../../../generator/typescript/repository-wire-builder.js";
+import {
+  canonicalIsoExpr,
+  wireProjectionValue,
+} from "../../../generator/typescript/repository-wire-builder.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -56,7 +59,7 @@ import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// The persistence-adapter seam (M-T6.23 slice 4).
+// The persistence-adapter seam (M-T6.23).
 //
 // Three of the four query-projection shapes read the SOURCE TABLE directly
 // rather than through a repository — a whole-table aggregation, a grouped
@@ -78,13 +81,10 @@ import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 // synthesises the very same projection find (`synthProjectionFinds`), so those
 // route bodies are byte-identical between adapters and are not part of the seam.
 //
-// All four are ported.  The raw-table arm was missing in the first version of
-// this slice while its gate was already deleted, so the shape fell through to
-// the drizzle branch and emitted `db.select().from(schema.…)` into an
-// EntityManager file with no `schema` import (an owner review caught it).  If a
-// FIFTH shape is ever added, add its mikro arm in the same change as the emit —
-// a fall-through here is a generate-then-broken-build, which is worse than the
-// gate that used to stand in its place.
+// All four are ported.  A FIFTH shape needs its mikro arm added in the SAME
+// change as the emit: a fall-through here lands the drizzle branch's
+// `db.select().from(schema.…)` in an EntityManager file with no `schema`
+// import — a generate-then-broken-build, which is worse than an honest gate.
 //
 // One MikroORM constraint shapes the emission: a `raw()` fragment is
 // SINGLE-USE per query ("Trying to modify a raw query fragment that was already
@@ -108,7 +108,7 @@ function unloweredWhere(projName: string): string {
 export function buildQueryProjectionsFile(
   ctx: EnrichedBoundedContextIR,
   /** `persistence: mikroorm` — read the direct-table shapes through the
-   *  EntityManager's QueryBuilder instead of Drizzle (M-T6.23 slice 4).  Default
+   *  EntityManager's QueryBuilder instead of Drizzle (M-T6.23).  Default
    *  false keeps the Drizzle output byte-identical. */
   usingMikro = false,
 ): string {
@@ -330,9 +330,8 @@ export function buildQueryProjectionsFile(
   // BACKEND disagreeing with itself, so `httpStatus DomainError -> N` moved a
   // system's operation routes and silently not its projection routes.
   //
-  // Found by censusing the emitted statuses per backend and noticing node still
-  // had literals after the sweep; no test caught it because the override
-  // fixtures carry no projection.  `denial-ladder-override-parity` now does.
+  // `denial-ladder-override-parity` is the fixture that covers it — an
+  // override fixture with no projection cannot.
   const projDomainStatus = resolveErrorStatus("DomainError", ctx.structuralErrorStatuses);
   const projForbiddenStatus = resolveErrorStatus("Forbidden", ctx.structuralErrorStatuses);
   const projNotFoundStatus = resolveErrorStatus("NotFound", ctx.structuralErrorStatuses);
@@ -499,7 +498,7 @@ function emitQueryProjectionRoute(
     // back to ENTITY PROPERTY names, which silently rewrites any select alias
     // that happens to be a real column: a `customer_id` grouping key came back
     // as `customerId`, so reading `r.customer_id` yielded undefined and the wire
-    // carried the string "undefined" (M-T6.23 slice 4 — found by the
+    // carried the string "undefined" (found by the
     // `projection-groupby` behavioural case; the aggregate aliases were
     // unaffected precisely because `avg_lines` is not a column).  Verbatim
     // aliases keep the read keyed by what the SELECT actually asked for.
@@ -598,7 +597,7 @@ function emitQueryProjectionRoute(
   // alias → { mapVar, idRow } — the loaded-map var and the source-row expression
   // that yields this alias's key (the join's `on <idRef>`, rendered off `r`).
   const aliasMap = new Map<string, { mapVar: string; idRow: string }>();
-  // RAW-TABLE source on the mikro adapter (M-T6.23 slice 4, completed after an
+  // RAW-TABLE source on the mikro adapter (completed after an
   // owner review): a WORKFLOW source reads its saga-state Row, a PROJECTION
   // source the folded read-model Row.  `em.find` hands back ENTITIES whose
   // property names are exactly what the shared `select` projection reads off
@@ -988,7 +987,7 @@ function coerceGroupKey(
   //             `date_trunc(...)` arrives as the wire STRING
   //             ("2026-08-01 00:00:00+00").  `as Date` compiles and then
   //             `.toISOString()` throws `is not a function` at runtime — which
-  //             is exactly how this was found (M-T6.23 slice 4, the
+  //             is exactly how this was found (the
   //             `projection-groupby` behavioural case 500'd on the computed
   //             `startOfDay` key while every other shape passed).
   const tsType = key.transform ? GROUP_KEY_TRANSFORM_TS_TYPE[key.transform] : undefined;
@@ -1022,7 +1021,9 @@ function groupKeyWireExpr(inner: TypeIR, expr: string): string {
       // three.
       return `new Decimal(${expr}).toFixed(${MONEY_WIRE_SCALE})`;
     case "datetime":
-      return `${expr}.toISOString()`;
+      // Same canonical trim the aggregate wire applies (RS-4) — a projection
+      // row and an aggregate read must spell the same instant identically.
+      return canonicalIsoExpr(expr);
     default:
       return expr;
   }

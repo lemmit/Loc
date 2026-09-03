@@ -31,8 +31,8 @@ import { lowerExpr } from "./lower-expr.js";
 import { lowerStatement } from "./lower-stmt.js";
 import { cstText, type Env } from "./lower-types.js";
 
-/** The declaration kinds a `test` may anchor to (Phase 1 aggregate + Phase 2
- *  value object / domain service + Phase 3 bounded context). */
+/** The declaration kinds a `test` may anchor to (aggregate, value object,
+ *  domain service, bounded context). */
 export type TestSubjectNode = Aggregate | ValueObject | DomainService | BoundedContext;
 
 // Hoisted unit tests (`test "…" for <Subject> { … }` written at context or file

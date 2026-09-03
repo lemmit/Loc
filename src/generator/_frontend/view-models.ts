@@ -111,7 +111,7 @@ export interface AppShellVM {
    *  no page opted out, in which case the template emits zero
    *  out-of-shell route entries. */
   outOfShellRoutes: RouteVM[];
-  /** Phase 8 step 2: one entry per declared named `layout` SystemMember
+  /** step 2: one entry per declared named `layout` SystemMember
    *  that's actually referenced by at least one page in this ui.  Each
    *  emits a `function <Name>Layout() { … <Outlet /> … }` component
    *  in App.tsx plus a matching `<Route element={<Name>Layout />}>`

@@ -40,8 +40,12 @@ describe("mask unless — Java read redaction", () => {
   it("keeps `from` unmasked and adds a fail-closed `fromMasked` on the response record", async () => {
     const out = await files();
     const resp = [...out.entries()].find(([k]) => k.endsWith("PResponse.java"))?.[1] ?? "";
-    // The masked component admits null (boxed / reference type).
-    expect(resp).toMatch(/BigDecimal salary/);
+    // The masked component admits null (boxed / reference type).  BOXED
+    // `Double`, not `BigDecimal`: a response `decimal` narrows to the wire's
+    // `double` (RS-24 / #2563; #2575 on .NET, M-T6.46 here), and `mask unless`
+    // forces the boxed form so the redacted arm can pass null.
+    expect(resp).toMatch(/Double salary/);
+    expect(resp).not.toContain("BigDecimal");
     // `from` stays unmasked (audit before/after snapshots project through it).
     expect(resp).toMatch(
       /public static PResponse from\(P value\) \{\s*\n\s*return new PResponse\(/,
@@ -51,7 +55,10 @@ describe("mask unless — Java read redaction", () => {
     expect(resp).toContain("User __maskUser = CurrentUserAccessor.currentOrNull();");
     expect(resp).toContain("__maskUser != null &&");
     expect(resp).toContain('__maskUser.permissions().contains("m.unmask")');
-    expect(resp).toContain("? value.salary() : null");
+    // The projected arm narrows before the mask guard chooses it.
+    expect(resp).toContain(
+      "? value.salary() == null ? null : (value.salary()).doubleValue() : null",
+    );
     // imports where the static accessor + principal type live.
     expect(resp).toMatch(/import \S+\.auth\.CurrentUserAccessor;/);
     expect(resp).toMatch(/import \S+\.auth\.User;/);

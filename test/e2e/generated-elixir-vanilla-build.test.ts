@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type HexMirror, startHexMirror } from "./support/hex-mirror";
-import { mixDepsGet } from "./support/mix-retry";
+import { mixDepsGet, mixLocalInstall } from "./support/mix-retry";
 
 // ---------------------------------------------------------------------------
 // Slice 6 of docs/old/plans/vanilla-foundation-tdd-plan.md — CI gate for
@@ -42,7 +42,7 @@ function runMixCompile(projDir: string, mirror: HexMirror | undefined): void {
   const shellPrefix = mirror?.shellPrefix ?? "";
   execSync(
     `docker run --rm ${dockerArgs}-v ${projDir}:/app -w /app -e MIX_ENV=prod ${IMAGE} ` +
-      `bash -c '${shellPrefix}mix local.hex --force && mix local.rebar --force && ` +
+      `bash -c '${shellPrefix}${mixLocalInstall()} && ` +
       `${mixDepsGet("--only prod")} && mix compile --warnings-as-errors'`,
     { stdio: "inherit", timeout: 600_000 },
   );
@@ -59,7 +59,7 @@ function runMixTest(projDir: string, mirror: HexMirror | undefined): void {
   const shellPrefix = mirror?.shellPrefix ?? "";
   execSync(
     `docker run --rm ${dockerArgs}-v ${projDir}:/app -w /app ${IMAGE} ` +
-      `bash -c '${shellPrefix}mix local.hex --force && mix local.rebar --force && ` +
+      `bash -c '${shellPrefix}${mixLocalInstall()} && ` +
       `${mixDepsGet()} && mix test'`,
     { stdio: "inherit", timeout: 600_000 },
   );

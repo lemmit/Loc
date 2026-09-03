@@ -35,6 +35,7 @@ import {
   isCriterion,
   isDerivedProp,
   isEmitStmt,
+  isFilterDecl,
   isFindDecl,
   isFunctionDecl,
   isLetStmt,
@@ -45,6 +46,7 @@ import {
   isPolicyDecl,
   isPostfixChain,
   isPreconditionStmt,
+  isProjection,
   isRequiresStmt,
   isRetrieval,
   isRetrievalLiteral,
@@ -363,10 +365,14 @@ export function checkAssignOrCall(
  *  lambda-bound refs as `unknown` under this body env → suppressed (skipped, not
  *  false-flagged). */
 export function checkConstructionArgTypes(
-  node: AstNode,
+  node: AstNode | undefined,
   env: Env,
   accept: ValidationAcceptor,
 ): void {
+  // Parse recovery leaves grammar-required expression slots undefined; the
+  // Langium stream throws ("Root node must be an AstNode") on one, which would
+  // abort the enclosing check and swallow its sibling diagnostics.
+  if (!node) return;
   for (const n of AstUtils.streamAst(node)) {
     if (n.$type !== "BuilderCall") continue;
     const bc = n as BuilderCall;
@@ -426,7 +432,13 @@ export function checkConstructionArgTypes(
  *  `unknown`-suppression + numeric-literal promotion).  Bare call STATEMENTS
  *  (`fee(5)` / `o.f(5)` alone) are an `LValue`, not a `PostfixChain`, so they
  *  stay `checkCallStmt`'s job with no double report. */
-export function checkExprCallArgs(node: AstNode, env: Env, accept: ValidationAcceptor): void {
+export function checkExprCallArgs(
+  node: AstNode | undefined,
+  env: Env,
+  accept: ValidationAcceptor,
+): void {
+  // Same parse-recovery guard as `checkConstructionArgTypes` above.
+  if (!node) return;
   for (const n of AstUtils.streamAst(node)) {
     if (!isPostfixChain(n)) continue;
     const first = n.suffixes[0];
@@ -518,6 +530,22 @@ export function checkPredicateSlotArgs(model: Model, accept: ValidationAcceptor)
     } else if (isOperation(node)) {
       visit((node as Operation).gate);
       visit((node as Operation).when);
+    } else if (isFilterDecl(node)) {
+      // M-T6.18 gap #3, last live piece — a capability `filter` is a
+      // DECLARATION site, not a body: `filter InRegion(42)` against `criterion
+      // InRegion(region: string)` carries no lexical `Env` of its own, so the
+      // predicate call was arity-checked (`loom.criterion-arity`, model-wide)
+      // and never TYPE-checked.  `envForNode` binds the host aggregate as
+      // `this` + its members, which is all a filter predicate can reference.
+      visit(node.expr);
+    } else if (isProjection(node)) {
+      // The projection query clauses are declaration sites too — `where`, the
+      // `group by` keys, each `select` expression and each `join … on` id ref
+      // can all nest a criterion / policy-fn call.
+      visit(node.filter);
+      for (const g of node.groupBys) visit(g);
+      for (const sel of node.selects) visit(sel.expr);
+      for (const j of node.joins) visit(j.idRef);
     }
   }
 }
@@ -821,7 +849,7 @@ export function checkEmit(stmt: EmitStmt, env: Env, accept: ValidationAcceptor):
  *  per-arg `isAssignable` with `unknown`-suppression (a typo'd bare arg is
  *  reported once at its source) + numeric-literal promotion (`bump(5)` into a
  *  `money`/`decimal` param).  On an arity mismatch we stop before the per-arg
- *  loop — the positions no longer line up, so per-arg type errors would be
+ *  loop — the positions do not line up, so per-arg type errors would be
  *  noise. */
 /** Per-argument type check (positional, over the overlap of params/args), shared
  *  by the arity-and-type `checkCallArgs` and the type-ONLY predicate path.  Same

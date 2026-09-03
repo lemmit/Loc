@@ -19,13 +19,13 @@
 // SCOPE — the WIRE boundary, deliberately.  A messaged rule surfaces in two
 // places: the wire validator (422 `errors[]`) and the domain floor (the
 // `DomainError` / `DomainException` a tripped rule throws inside the aggregate).
-// This slice localises the WIRE half only — the five wire-validator emitters
+// Only the WIRE half is localised — the five wire-validator emitters
 // (`zod-refine.ts`, `dotnet/validator-emit.ts`, `java/emit/validator.ts`,
 // `python/emit/wire-constraints.ts`, `elixir/vanilla/changeset-invariant-emit.ts`)
 // attach the code, and each backend's 422 serializer resolves it.  The domain
-// floor still renders the authored default at every locale; localising it means
-// carrying the code THROUGH the thrown error on all five backends, which is its
-// own slice.  The catalog is scoped to match, so it holds no entry the runtime
+// floor renders the authored default at every locale; localising that would
+// mean carrying the code THROUGH the thrown error on all five backends.  The
+// catalog is scoped to match, so it holds no entry the runtime
 // cannot resolve (the dead-catalog class `user-visible-slot-coverage.test.ts`
 // gates on the UI side).
 //

@@ -32,7 +32,7 @@ export const MESSAGES_MODULE_PATH = "http/messages.ts";
  *  lookup `defaultHook` resolves each `errors[].code` through. */
 export function renderMessagesModule(messages: readonly ValidationMessage[]): string {
   return lines(
-    "// Auto-generated.  Validation-message catalog (Loom i18n, M-T1.11).",
+    "// Auto-generated.  Validation-message catalog (Loom i18n).",
     "//",
     "// Keys are the stable content-hash codes the wire validators attach to a",
     "// messaged `invariant` / `check` / `precondition` (`errors[].code`), identical",
@@ -50,7 +50,7 @@ export function renderMessagesModule(messages: readonly ValidationMessage[]): st
     "",
     "/** Normalise an Accept-Language header value to a lookup tag: the first",
     " *  listed language, without its `;q=` weight, lowercased.  The ambient",
-    " *  RequestContext carries the header VERBATIM (D-CTX-SHAPE — it is the",
+    " *  RequestContext carries the header VERBATIM (it is the",
     " *  request-stable input, not a catalog-shaped one), so the normalisation",
     " *  belongs here rather than at the boundary that sets it. */",
     "function lookupTags(locale: string): string[] {",

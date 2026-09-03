@@ -100,6 +100,7 @@ const SLOT_EMITTERS: Readonly<Record<string, readonly string[]>> = {
   empty: ["text.ts"],
   anchor: ["text.ts"],
   keyValue: ["text.ts"],
+  keyValueValue: ["text.ts"],
   badge: ["display.ts"],
   statLabel: ["display.ts"],
   statValue: ["display.ts"],

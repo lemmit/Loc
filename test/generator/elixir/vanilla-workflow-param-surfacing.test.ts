@@ -11,7 +11,7 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 //
 //   def run(params) when is_map(params) do
 //     %{"initial_title" => initial_title} = params
-//     with :ok <- (if String.length(initial_title) > 0, ...), ...
+//     with :ok <- (if length(String.to_charlist(initial_title)) > 0, ...), ...
 //
 // Keys are snake_case (the wire shape).  Only *referenced* params are
 // bound — an unused binding would trip `mix compile --warnings-as-errors`.
@@ -83,7 +83,7 @@ describe("vanilla — workflow create-param surfacing", () => {
     );
     // The precondition's lowered guard reads the destructured local, not
     // a camelCase or map-access form.
-    expect(wf).toMatch(/if String\.length\(initial_title\) > 0/);
+    expect(wf).toMatch(/if length\(String\.to_charlist\(initial_title\)\) > 0/);
     expect(wf).toContain("title: initial_title");
   });
 

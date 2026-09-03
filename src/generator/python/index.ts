@@ -32,6 +32,7 @@ import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
 import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { plural, snake } from "../../util/naming.js";
+import { devClaimFields } from "../_auth/dev-claims.js";
 import { brokerChannelBindings } from "../_channels/bindings.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { collectWireValidationMessages } from "../_i18n/validation-catalog.js";
@@ -68,7 +69,7 @@ import {
   emitPythonProvenanceMigration,
   MIGRATE_PY,
 } from "./emit/migrations.js";
-import { wireTruncModHelper } from "./emit/numeric.js";
+import { wireNumericHelpers } from "./emit/numeric.js";
 import { OBS_LOG_PY, OBS_MIDDLEWARE_PY, renderPythonTracingFile } from "./emit/obs.js";
 import { emitPyProvenance } from "./emit/provenance.js";
 import { renderPySchema } from "./emit/schema.js";
@@ -204,7 +205,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // Consumer side only when a hosted WORKFLOW reactor subscribes (slice-2
   // scope: projection folds stay on the in-process path).
   const hasChannelConsumers = hasChannels && mergedSubscriptions.some((s) => !s.projection);
-  // Durable broker-bound events (M-T4.4 slice 7a): carried by a wired
+  // Durable broker-bound events (M-T4.4): carried by a wired
   // `queue`/`work` (or future `log`) channel — the producer path for these
   // rides the outbox relay (design §5), never the inline tee.  Intersected
   // with the HOSTED durable set: only a producer that hosts the channel's
@@ -222,7 +223,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // the main.py router mount; a broadcast-free deployable stays byte-identical.
   const hasRealtime = realtimeEventTypes(merged).size > 0;
 
-  // TimerSource scheduling (scheduling.md, M-T4.1 Phase 2).  A timer's emit
+  // TimerSource scheduling (scheduling.md, M-T4.1).  A timer's emit
   // owner is DERIVED (no stamp): the deployable whose subdomain
   // `migrationsOwner` owns the for-event's context — the single-fire lock owner
   // == the DB owner.  Filter the system's timers to the ones THIS deployable
@@ -417,11 +418,11 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // An `auth { oidc }` block drives the generated OIDC verifier + handshake;
   // absent it, the dev stub keeps a fresh stack callable out of the box.
   const oidc = authRequired ? args.sys.auth : undefined;
-  // Hierarchy (multi-tenancy P2.2): when the tenant registry opts into
+  // Hierarchy (multi-tenancy): when the tenant registry opts into
   // `tenantRegistry` (a `data_key` column exists), `currentUser.orgPath`
   // resolves from that registry's table.  Pass the schema-qualified table so
   // the auth middleware can `SELECT data_key … WHERE id = <claim>`; `undefined`
-  // for flat tenancy keeps the P2.1 claim-copy.
+  // for flat tenancy keeps the claim-copy.
   const orgPathRegistryTable = authRequired
     ? (() => {
         const reg = hierarchyRegistry(args.sys);
@@ -447,7 +448,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // Durable-channel outbox relay (dispatch-delivery-semantics.md): when a
   // durable channel carries a *subscribed* event, `app/dispatch.py` ships
   // `start_outbox_relay`, which the lifespan kicks off as a background
-  // task.  M-T4.4 slice 7a adds the workflow-less durable-broker PRODUCER
+  // task. adds the workflow-less durable-broker PRODUCER
   // (design §5): no subscription, but the relay must still drain the outbox
   // to publish.  No durable channel → byte-identical boot.
   const startsRelay =
@@ -572,10 +573,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // repository constructed by routes/workflows takes the live
   // dispatcher instead of the Noop (mirrors Hono's createApp default).
   // Only collected when a recorder is actually threaded in — a
-  // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 12:
+  // no-sourcemap run pays no per-statement bookkeeping cost.
   // `app/dispatch.py` pools every reactor / event-create handler, so it
   // never gets a whole-file region — only these fragment-only statement
-  // regions (mirrors `workflows_routes.py` at Milestone 11).
+  // regions (mirrors `workflows_routes.py` at).
   const dispatchOpFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
   const dispatchFile = buildPyDispatchFile(
     merged,
@@ -615,7 +616,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     }
   }
 
-  // TimerSource scheduler (scheduling.md, M-T4.1 Phase 2): one APScheduler job
+  // TimerSource scheduler (scheduling.md, M-T4.1): one APScheduler job
   // per owned timer, dispatching each tick through the same in-process
   // dispatcher the sagas use.  Emitted only when this deployable owns a timer
   // (see `ownedTimers` above); the lifespan wiring in `renderMain` is gated on
@@ -654,7 +655,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   if (queryProjectionsFile != null)
     out.set("app/http/query_projections_routes.py", queryProjectionsFile);
   // Only collected when a recorder is actually threaded in — a
-  // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 11:
+  // no-sourcemap run pays no per-statement bookkeeping cost.
   // `app/http/workflows_routes.py` pools every command workflow, so it
   // never gets a whole-file region — only these fragment-only statement
   // regions.
@@ -688,7 +689,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     for (const f of serviceFiles) out.set(f.path, f.content);
   }
 
-  // Value-object / domain-service unit tests (test-placement.md, Phase 2) —
+  // Value-object / domain-service unit tests (test-placement.md) —
   // colocated pytest modules under tests/, emitted off the merged context like
   // the service modules above; only when the subject declares a `test`.
   for (const vo of merged.valueObjects) {
@@ -700,7 +701,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     if (svcTests) out.set(`tests/test_${snake(svc.name)}.py`, svcTests);
   }
 
-  // Context INTEGRATION test (test-placement.md, Phase 3b) — an in-process,
+  // Context INTEGRATION test (test-placement.md) — an in-process,
   // repository-backed cross-aggregate test module reading LOOM_PG_URL, no HTTP.
   // Python merges the deployable's contexts into one app, so this is one
   // combined module (`merged.tests` carries every context's integration tests).
@@ -744,7 +745,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       );
       out.set(domainPath, domainContent);
       sourcemap?.file(domainPath, domainContent, agg.origin, construct);
-      // Statement-granular sub-regions (source-map Milestone 3) — layered
+      // Statement-granular sub-regions (source-map) — layered
       // onto the whole-file region just recorded above, anchored by
       // exact-text search against this SAME final content.
       if (sourcemap && opFragments) {
@@ -752,7 +753,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
           sourcemap.fragment(domainPath, domainContent, frag.fragmentText, frag.subRegions);
         }
       }
-      // Extern (b) Phase 2 (docs/extern.md): the scaffold-once, user-owned hook
+      // Extern (b) (docs/extern.md): the scaffold-once, user-owned hook
       // module the aggregate's extern-op bodies delegate to.  It carries the
       // `loom:scaffold-once` marker, so the CLI writer PRESERVES the filled-in
       // copy on regen (the sourcemap deliberately does NOT anchor it — it is
@@ -798,7 +799,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // LAST — cross-backend `%` semantics (see emit/numeric.ts).  Runs over the
   // finished map so every module that rendered a `trunc_mod(` call gets the
   // import, whichever emitter produced it.
-  wireTruncModHelper(out);
+  wireNumericHelpers(out);
   return out;
 }
 
@@ -1017,12 +1018,11 @@ function renderMain(
   // Dev-claims override (x-loom-dev-claims): keyed by the DECLARED field name
   // (e.g. `tenantId`), written onto the User's snake_case attribute
   // (`tenant_id`) — the header contract is the declared name, matching the
-  // node/java (camelCase) and dotnet/elixir (explicit-map) stubs.  String
-  // claims only; skipped entirely when the user has no string field.
-  const pyClaimStringFields = (authUser?.fields ?? []).filter(
-    (f) => f.type.kind === "primitive" && f.type.name === "string",
-  );
-  const pyDevClaims = authRequired && !oidc && pyClaimStringFields.length > 0;
+  // node/java (camelCase) and dotnet/elixir (explicit-map) stubs.  Carryable
+  // shapes come from the shared classifier, not a local filter; skipped
+  // entirely when the user declares no carryable field.
+  const pyClaimFields = devClaimFields(authUser?.fields);
+  const pyDevClaims = authRequired && !oidc && pyClaimFields.length > 0;
   return lines(
     `"""FastAPI application entrypoint.`,
     "",
@@ -1091,7 +1091,7 @@ function renderMain(
     "",
     ...(oidc
       ? [
-          "# OIDC verifier (D-AUTH-OIDC) — validates the IdP's tokens against its",
+          "# OIDC verifier — validates the IdP's tokens against its",
           "# JWKS and maps the configured claims onto User.  Auto-registered here.",
           "register_oidc_verifier()",
           'log("info", "auth_oidc_verifier_registered")',
@@ -1120,10 +1120,21 @@ function renderMain(
                   "        return user",
                   "    overrides: dict[str, Any] = {}",
                   // Header key = declared field name; attr = its snake_case form.
-                  ...pyClaimStringFields.flatMap((f) => [
-                    `    if isinstance((_v := claims.get("${f.name}")), str):`,
-                    `        overrides["${snake(f.name)}"] = _v`,
-                  ]),
+                  // A list claim is element-checked too: a mixed array would
+                  // otherwise land non-str items in a `list[str]` field.
+                  ...pyClaimFields.flatMap(({ field: f, kind }) =>
+                    kind === "stringList"
+                      ? [
+                          `    if isinstance((_v := claims.get("${f.name}")), list) and all(`,
+                          "        isinstance(_e, str) for _e in _v",
+                          "    ):",
+                          `        overrides["${snake(f.name)}"] = list(_v)`,
+                        ]
+                      : [
+                          `    if isinstance((_v := claims.get("${f.name}")), str):`,
+                          `        overrides["${snake(f.name)}"] = _v`,
+                        ],
+                  ),
                   "    return replace(user, **overrides) if overrides else user",
                 ]
               : [
@@ -1408,7 +1419,7 @@ def iso(dt: datetime) -> str:
 
 
 def money_str(amount: Decimal) -> str:
-    """Money → wire string at the FIXED NUMERIC(19,4) scale (RS-12): the same
+    """Money → wire string at the FIXED NUMERIC(19,4) scale: the same
     canonical scale every backend serializes money at (node \`.toFixed(4)\`,
     .NET \`ToString("F4")\`, Java \`setScale(4)\`, Elixir \`Decimal.round(_, 4)\`).
     \`quantize\` pins the scale (a value/derived money carries its own scale
@@ -1698,7 +1709,7 @@ def install_error_handlers(app: FastAPI) -> None:
         record_domain_fault("forbidden")
         return problem(request, ${forbiddenStatus}, "${problemTitle(forbiddenStatus)}", str(err))
 
-    # RS-17 - the 7807 title on the when-gate rung is the ERROR NAME
+    # The 7807 title on the when-gate rung is the ERROR NAME
     # (errorTitle humanises Disallowed), not the 409 reason phrase.  The
     # sibling 409 rungs (UniquenessConflict / ConcurrencyConflict) keep
     # "Conflict"; this one does not.
@@ -1722,7 +1733,7 @@ ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFou
 
     @app.exception_handler(RequestValidationError)
     async def _validation(request: Request, err: RequestValidationError) -> JSONResponse:
-        # RS-9's 400/422 split: an UNREADABLE body is malformed, not invalid —
+        # The 400/422 split: an UNREADABLE body is malformed, not invalid —
         # no field-level pointer describes it, and hono/.NET/Spring all answer
         # 400.  FastAPI funnels it into RequestValidationError anyway (pydantic
         # tags it \`json_invalid\`), which is why python was the one backend
@@ -1743,7 +1754,7 @@ ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFou
             if code.startswith("msg."):
                 entry["code"] = code${localizeLine}
             errors.append(entry)
-        # RS-29 — the WIRE-VALIDATION rung's title/detail, byte-identical to the
+        # The WIRE-VALIDATION rung's title/detail, byte-identical to the
         # other four backends.  Deliberately NOT the status reason phrase: the
         # domain floor above already answers 422 with "Unprocessable Entity", and
         # a client that sees only a status + reason phrase cannot tell a malformed
@@ -1798,10 +1809,9 @@ ${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFou
         # wire.  The specific handlers above still win via the exception MRO
         # (Starlette looks each exception's type up most-specific-first).
         #
-        # The detail is the literal "internal" (RS-28), not a prose sentence:
-        # this arm's body must be byte-identical to the other four backends'
-        # for the M-T9.11 wire golden, and python was the one sending its own
-        # wording.  Nothing about the fault may reach the wire, so the string
+        # The detail is the literal "internal", not a prose sentence:
+        # this arm's body is byte-identical to the other four backends'.
+        # Nothing about the fault may reach the wire, so the string
         # carries no information and there is no cost to matching.
         log("error", "internal_error", error=str(err), status=500)
         return problem(request, 500, "Internal Server Error", "internal")

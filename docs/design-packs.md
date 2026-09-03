@@ -326,9 +326,37 @@ to fulfill the contract.
 | `package-json` | `package.json` for the generated app.  Declares pack-specific dependencies. |
 | `tsconfig` | `tsconfig.json`.  shadcn adds path mappings for `@/*`. |
 | `vite-config` | `vite.config.ts`.  shadcn adds Vite resolver alias for `@/*`. |
-| `format-helpers` | Per-pack runtime helpers (`IdValue`, `DateTimeValue`, `BoolValue`, `NumberValue`, `EmptyValue`, `KeyValueRow`).  Output written to `src/lib/format.tsx`. |
+| `format-helpers` | Per-pack runtime helpers (`IdValue`, `DateTimeValue`, `BoolValue`, `NumberValue`, `EmptyValue`, `KeyValueRow`, and the money helper — see the money-display contract below).  Output written to `src/lib/format.tsx` (`src/lib/format.ts` on Vue/Svelte/Angular). |
 | `app-shell` | App-shell layout: navbar/sidebar/main outlet. |
 | `home` | Home/dashboard page. |
+
+#### The money-display contract (a pack does not own it)
+
+Loom `money` has **no currency dimension** and rides the wire as the RS-12
+fixed-scale decimal **string** (`"12.3456"`, scale 4).  A pack must therefore not
+invent a symbol or a fraction-digit count of its own: money display is one
+toolchain-wide contract, not fifteen pack opinions.
+
+The algorithm lives in **`src/generator/_frontend/money-format.ts`** as the
+`MONEY_TEXT_SOURCE` constant, spliced into every pack's `format-helpers` emit
+through the `{{{moneySource}}}` variable the React / Vue / Svelte / Angular
+emitters always pass.  A pack's own helper (`MoneyValue` on React, `formatMoney`
+elsewhere) keeps its markup wrapper and **delegates** to `moneyText(value,
+currency?, decimals?)`:
+
+- **default = verbatim, locale-neutral** — the value's own digits, with no
+  `Number()` coercion, no locale grouping, no currency, no re-scaling, so the
+  stored 4th decimal is visible on screen;
+- **`decimals: n`** re-scales the digit string to exactly *n* fraction digits,
+  half away from zero (the backends' and Postgres' rounding family), never
+  through a float;
+- **`currency: "EUR"`** prefixes the code the page source passed, verbatim
+  (`EUR 12.3456`) — never a symbol the toolchain guessed.
+
+Both knobs are pre-existing, user-declared `Money(…)` arguments; there is no
+pack-manifest knob.  A new pack that hand-rolls its own money formatter fails
+`test/generator/_packs/money-display-cross-pack.test.ts`, which bans `"USD"`,
+`style: "currency"` and `Number(` on the money path across every pack at once.
 
 ### Page templates (4)
 

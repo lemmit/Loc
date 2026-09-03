@@ -60,7 +60,7 @@ export function validateAggregateTestBodies(ctx: BoundedContextIR, diags: LoomDi
 }
 
 // ---------------------------------------------------------------------------
-// Context-scoped INTEGRATION test bodies (test-placement.md, Phase 3a).
+// Context-scoped INTEGRATION test bodies (test-placement.md).
 //
 // The node integration renderer awaits a repository read at STATEMENT level
 // (`const x = await repos.<agg>.<find>(...)`), so a find must be let-bound before

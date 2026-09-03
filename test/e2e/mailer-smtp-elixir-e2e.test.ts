@@ -12,7 +12,7 @@ import {
   startPostgres,
   waitForHealth,
 } from "./support/mailpit-harness.js";
-import { mixDepsGet } from "./support/mix-retry.js";
+import { mixDepsGet, mixLocalInstall } from "./support/mix-retry.js";
 
 // ---------------------------------------------------------------------------
 // Mailer (smtp) runtime e2e — ELIXIR/Phoenix (vanilla Ecto).  Sibling of
@@ -75,7 +75,7 @@ describe.skipIf(!ENABLED)(
         });
         const apiDir = path.join(outDir, "api");
 
-        execSync(`mix local.hex --force && mix local.rebar --force && ${mixDepsGet()}`, {
+        execSync(`${mixLocalInstall()} && ${mixDepsGet()}`, {
           cwd: apiDir,
           stdio: "pipe",
           timeout: 600_000,

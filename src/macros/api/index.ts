@@ -107,6 +107,7 @@ export {
   callExpr,
   intLit,
   lambda,
+  listLit,
   matchExpr,
   nameRefExpr,
   nowExpr,

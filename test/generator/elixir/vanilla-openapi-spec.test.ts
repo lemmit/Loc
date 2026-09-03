@@ -363,3 +363,80 @@ describe("vanilla OpenAPI spec — workflow instance routes", () => {
     expect(listResp).toContain("OrderFulfillmentInstanceResponse");
   });
 });
+
+// ---------------------------------------------------------------------------
+// F2-W-12 (elixir arm) — an OPTIONAL wire field was published NON-nullable.
+//
+// Absence from `required[]` says the key may be OMITTED; it does not say the
+// value may be `null`.  The emitted serializer builds `"sku" => record.sku` for
+// every row, nil included, so the key is always present and the value is `null`
+// — a response body this app's own published schema forbade, which a generated
+// client or a Schemathesis run rejects.  The three backends that declare it:
+// node `z.string().nullish()`, .NET `string?` under
+// `SupportNonNullableReferenceTypes()`, python `str | None`.
+// ---------------------------------------------------------------------------
+
+const NULLABLE_SOURCE = `
+system Nul {
+  subdomain Cat {
+    context Cat {
+      enum Grade { a, b }
+      aggregate Widget with crudish {
+        name: string
+        sku: string?
+        discount: money?
+        expiresAt: datetime?
+        grade: Grade?
+      }
+      repository Widgets for Widget { }
+    }
+  }
+  api CatApi from Cat
+  storage primary { type: postgres }
+  resource st { for: Cat, kind: state, use: primary }
+  deployable api {
+    platform: elixir
+    contexts: [Cat]
+    dataSources: [st]
+    serves: CatApi
+    port: 4000
+  }
+}
+`;
+
+describe("vanilla OpenAPI spec — an optional field is declared nullable", () => {
+  it("marks every optional PRIMITIVE property nullable, leaving required ones alone", async () => {
+    const files = await generateSystemFiles(NULLABLE_SOURCE);
+    const resp = file(files, "widget_response.ex");
+
+    // The serializer emits these keys unconditionally, `nil` included.
+    expect(resp).toContain("sku: %OpenApiSpex.Schema{type: :string, nullable: true}");
+    expect(resp).toContain(
+      "discount: %OpenApiSpex.Schema{type: :string, format: :decimal, nullable: true}",
+    );
+    expect(resp).toContain(
+      "expiresAt: %OpenApiSpex.Schema{type: :string, format: :'date-time', nullable: true}",
+    );
+    // A REQUIRED field is untouched — the flag rides on nullability, not on
+    // required-ness, and adding it everywhere would be a different lie.
+    expect(resp).toContain("name: %OpenApiSpex.Schema{type: :string}");
+    expect(resp).toContain("id: %OpenApiSpex.Schema{type: :string, format: :uuid}");
+    expect(resp).toContain("required: [:id, :name");
+
+    // The request side declares it too — a client may SEND null for an optional
+    // field, exactly as node's `.nullish()` and .NET's `string?` accept.
+    const create = file(files, "create_widget_request.ex");
+    expect(create).toContain("sku: %OpenApiSpex.Schema{type: :string, nullable: true}");
+  });
+
+  it("leaves a nullable $ref property alone rather than inventing a parity divergence", async () => {
+    const resp = file(await generateSystemFiles(NULLABLE_SOURCE), "widget_response.ex");
+    // OpenAPI 3.0 forbids a sibling keyword beside `$ref`, so the valid spelling
+    // would be `allOf: [$ref] + nullable: true` — and the parity normalizer's
+    // `propTypeSig` does not fold `allOf`, so it would read as `object` where
+    // the other backends read `ref:Grade`.  A documentation fix must not invent
+    // a cross-backend divergence; the bare module ref stays.
+    expect(resp).toMatch(/grade: \w[\w.]*\.Grade\b/);
+    expect(resp).not.toContain("allOf:");
+  });
+});

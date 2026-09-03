@@ -2,7 +2,7 @@
 
 Two smaller context-level declarations that sit *beside* the aggregates rather than inside them. A `domainService` is a stateless, named container of non-mutating `operation`s — the pure-calculator floor for a cross-aggregate computation that belongs to the domain layer but to no single aggregate, with a strict no-infrastructure contract. A `seed` is declarative first-boot data: typed records that lower through each aggregate's canonical `create` (so invariants hold), plus a `raw` opt-out for table-level inserts the domain model does not own. Reach for the first when a calculation spans aggregates and has no `this`; reach for the second when the app must boot with rows instead of empty lists.
 
-> **Grammar:** `DomainService`, `DomainServiceOperation`, `Seed`, `SeedRow` · **Validators:** `loom.domain-service-no-emit`, `loom.domain-service-no-mutation`, `loom.domain-service-no-repo`, `loom.domain-service-no-workflow-start`, `loom.domain-service-single-aggregate`, `loom.seed-foreign-aggregate`, `loom.seed-duplicate-field` · **Docs:** [`../domain-services.md`](../domain-services.md) · [`../proposals/database-seeding.md`](../old/proposals/database-seeding.md)
+> **Grammar:** `DomainService`, `DomainServiceOperation`, `Seed`, `SeedRow` · **Validators:** `loom.domain-service-no-emit`, `loom.domain-service-no-mutation`, `loom.domain-service-no-repo`, `loom.domain-service-no-workflow-start`, `loom.domain-service-single-aggregate`, `loom.seed-foreign-aggregate`, `loom.seed-duplicate-field`, `loom.seed-dataset-name-collision`, `loom.seed-raw-document-shape`, `loom.seed-event-sourced-unsupported`, `loom.seed-abstract-aggregate`, `loom.seed-tenant-owned-needs-raw` · **Docs:** [`../domain-services.md`](../domain-services.md) · [`../proposals/database-seeding.md`](../old/proposals/database-seeding.md)
 
 ## `domainService` — a stateless pure calculator
 
@@ -234,3 +234,21 @@ Ecto.Adapters.SQL.query!(repo, ~s(INSERT INTO "gadgets" ("id", "widget_id", "lab
 ::: end
 
 > The imperative (workflow-shaped) seed body, per-row natural-key upsert, and create-shape validation of seed rows are later slices. Honest gap.
+
+### What a seed row may not be
+
+Five crossings parsed clean and then produced a *different* wrong artefact on each backend (`F2-SEED-*`, [targets-completeness-2026-08-30](../audits/targets-completeness-2026-08-30.md)). Each is now one AST-tier rule all five backends inherit, raised before any emitter runs.
+
+| Crossing | Code | Why, and what to write instead |
+|---|---|---|
+| Two datasets in one context whose names collide once cased into a seeder function (`default` + `Default`, `demoSet` + `demo_set`) | `loom.seed-dataset-name-collision` | Each backend derives the function name by casing (`snake` on elixir/python, PascalCase on node/java/.NET) with no uniquifier, so the two datasets emitted one duplicated function — a compile error on three backends, a silently-dropped dataset on the other two. Rename one, or merge them into a single block (same-named blocks already merge). |
+| `raw` row on a `shape: document` aggregate | `loom.seed-raw-document-shape` | The table is `(id, data, version)` — there are no per-field columns for the INSERT to target, so first boot answers `42703`, and on elixir the supervision-tree seeder takes the application down with it. Use the **domain** path, which writes a document aggregate correctly everywhere. |
+| Row on an aggregate `persistedAs: eventLog` | `loom.seed-event-sourced-unsupported` | Its truth is the append-only stream and no backend has a seed path that appends one — elixir dropped the row *and still wrote the ship-once marker*; java/.NET emitted a `create(...)` call that does not match the declared factory. Tracked by **M-T6.52**. |
+| Row on an `abstract` inheritance base | `loom.seed-abstract-aggregate` | A base has no create factory and no repository, so every backend drops the row (elixir again keeping the marker). Seed a concrete subtype. |
+| Domain-path row on a `tenantOwned` aggregate | `loom.seed-tenant-owned-needs-raw` | The capability keeps `tenantId`/`dataKey` `internal` and stamps them **from the principal**; a first-boot seeder has none, so the row lands with an empty/NULL tenant against a `NOT NULL` column and the capability's own read filter (`tenant_id = NULL`) can never match it. Use the `raw` path and spell the tenant columns: |
+
+```ddd
+seed wired raw {
+  Invoice { id: "11111111-1111-1111-1111-111111111111", tenantId: "acme", dataKey: "acme", label: "Seeded", amount: 5 }
+}
+```

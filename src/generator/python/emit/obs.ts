@@ -10,7 +10,7 @@
 //   app/obs/log.py        — CatalogFormatter + the `log(level, event,
 //                           **fields)` facade + the RequestContext carrier
 //                           (a ContextVar usable from any layer).  The
-//                           carrier SUBSUMES the old request-id contextvar:
+//                           carrier SUBSUMES the request-id contextvar:
 //                           one ambient channel, not two (request-context.md
 //                           "subsume, don't add a second channel") — the
 //                           log line's `request_id` is the carrier's

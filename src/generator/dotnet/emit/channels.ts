@@ -103,7 +103,7 @@ export function renderDotnetChannels(
    *  (Outbox where durable channels exist, InProcess where any reactor
    *  lives, else the Noop). */
   innerDispatcherType = "NoopDomainEventDispatcher",
-  /** M-T4.4 slice 7b knobs.  `hasOutbox`: the outbox tier exists on THIS
+  /** knobs.  `hasOutbox`: the outbox tier exists on THIS
    *  deployable (the `OutboxDelivery` marker class is emitted), so the
    *  consumer stamps each envelope id for the saga handlers' idempotent
    *  no-op.  `durableBroker`: hosted durable events ride a broker-bound
@@ -201,7 +201,7 @@ public sealed class RedisChannelTransport : IChannelTransport
         _log = log;
         // redis://[:pass@]host:port URLs come from LOOM_CHANNEL_*_URL; the
         // client wants host:port configuration strings, with the requirepass
-        // credential (M-T4.4 \u00a77) as a password= option.
+        // credential as a password= option.
         var config = url.StartsWith("redis://", StringComparison.Ordinal) ? url["redis://".Length..] : url;
         var at = config.LastIndexOf('@');
         if (at >= 0)
@@ -461,7 +461,7 @@ public sealed class KafkaChannelTransport : IChannelTransport, IDisposable
     {
         _log = log;
         // kafka://user:pass@host:port[,host2] — userinfo (when present)
-        // becomes SASL/PLAIN (M-T4.4 §7); a credential-less URL stays on
+        // becomes SASL/PLAIN; a credential-less URL stays on
         // PLAINTEXT, the pre-auth contract.
         var bare = url.StartsWith("kafka://", StringComparison.Ordinal) ? url["kafka://".Length..] : url;
         var at = bare.LastIndexOf('@');
@@ -741,8 +741,8 @@ ${consumerMarkedDispatch}
     : "";
 
   return `// Auto-generated.
-// Broker transport for the deployable's wired channels (channels.md;
-// M-T4.4 design §4-5).  CloudEvents 1.0 envelopes between deployables; the
+// Broker transport for the deployable's wired channels (channels.md).
+// CloudEvents 1.0 envelopes between deployables; the
 // consumer loop feeds received events into the same in-process dispatcher
 // local reactors use.  Ephemeral events publish inline in the tee; durable
 // (work) events ride the outbox relay (design §5).
@@ -783,7 +783,7 @@ public sealed record LoomEventEnvelope(
 
 /// <summary>The publish/subscribe seam every transport implements — the
 /// in-process dispatcher, every broker driver, and the realtime relay
-/// (M-T1.10) all sit on this contract.  A null group is broadcast; a group
+/// all sit on this contract.  A null group is broadcast; a group
 /// name makes replicas competing consumers.</summary>
 public interface IChannelTransport
 {

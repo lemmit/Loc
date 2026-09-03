@@ -212,10 +212,19 @@ describe("java generator — paged finds", () => {
     expect(impl).toContain(
       "return new Paged<>(result.getContent(), page, pageSize, (int) result.getTotalElements(), result.getTotalPages());",
     );
+    // The CONTROLLER returns the concrete `<Agg>Paged` record, not the raw
+    // generic (F2-W-07): springdoc names a generic component by flattening it
+    // (`PagedOrderResponse`), which is a name no sibling backend publishes for
+    // the same route. The service/repository layers keep `Paged<T>` — asserted
+    // above — and the controller wraps at the boundary.
     const ctrl = f.get(`${ROOT}/features/orders/OrdersController.java`)!;
     expect(ctrl).toContain(
-      'public Paged<OrderResponse> recentOrder(@RequestParam(defaultValue = "1") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(1000000) int page, @RequestParam(defaultValue = "20") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(500) int pageSize, @RequestParam(defaultValue = "id") String sort, @RequestParam(defaultValue = "asc") String dir) {',
+      'public OrderPaged recentOrder(@RequestParam(defaultValue = "1") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(1000000) int page, @RequestParam(defaultValue = "20") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(500) int pageSize, @RequestParam(defaultValue = "id") String sort, @RequestParam(defaultValue = "asc") String dir) {',
     );
+    expect(ctrl).toContain(
+      "return new OrderPaged(result.items(), result.page(), result.pageSize(), result.total(), result.totalPages());",
+    );
+    expect(ctrl).not.toContain("Paged<OrderResponse>");
   });
 });
 
@@ -242,7 +251,9 @@ describe("java generator — wire validators + advice (S5)", () => {
     );
     const advice = files_.get(`${ROOT}/api/ApiExceptionAdvice.java`)!;
     expect(advice).toContain("@ExceptionHandler(MethodArgumentNotValidException.class)");
-    expect(advice).toContain('entry.put("pointer", "/" + err.getField());');
+    // The pointer is built by `pointerOf` since the RFC-6901 fix — a nested
+    // path is `/lineTotals/0/unitPrice`, not `/lineTotals[0].unitPrice`.
+    expect(advice).toContain('entry.put("pointer", pointerOf(err.getField()));');
     expect(advice).toContain(
       'if (code != null && code.startsWith("msg.")) entry.put("code", code);',
     );

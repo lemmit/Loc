@@ -34,7 +34,7 @@ function pyStr(value: string): string {
  *  422 handler resolves each `errors[].code` through. */
 export function renderPyMessagesModule(messages: readonly ValidationMessage[]): string {
   return lines(
-    '"""Validation-message catalog (Loom i18n, M-T1.11).',
+    '"""Validation-message catalog (Loom i18n).',
     "",
     "Keys are the stable content-hash codes the wire validators attach to a",
     "messaged ``invariant`` / ``check`` / ``precondition`` (``errors[].code``),",
@@ -55,7 +55,7 @@ export function renderPyMessagesModule(messages: readonly ValidationMessage[]): 
     "def _lookup_tags(tag: str) -> list[str]:",
     '    """Normalise an Accept-Language header value to lookup tags: the first',
     "    listed language without its ``;q=`` weight, then its primary subtag.  The",
-    "    ambient RequestContext carries the header VERBATIM (D-CTX-SHAPE — it is the",
+    "    ambient RequestContext carries the header VERBATIM (it is the",
     "    request-stable input, not a catalog-shaped one), so the normalisation lives",
     '    here rather than at the boundary that sets it."""',
     '    first = tag.split(",")[0].split(";")[0].strip().lower()',

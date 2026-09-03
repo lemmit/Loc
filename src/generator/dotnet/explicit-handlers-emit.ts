@@ -50,10 +50,10 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { wireTypeInfo } from "../../ir/types/wire-types.js";
 import { normalizeHandlerReturn, requestRecordFor } from "../../ir/util/handler-contracts.js";
-import { plural, upperFirst } from "../../util/naming.js";
+import { escapeCsharpIdent, plural, upperFirst } from "../../util/naming.js";
 import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
 import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
-import { projectEntityExpr, projectToResponse } from "./dto-mapping.js";
+import { csIdValueClrType, projectEntityExpr, projectToResponse } from "./dto-mapping.js";
 import { CS_PAGED_QUERY_PARAMS } from "./emit/common.js";
 import { API_CLIENT_CLASS, renderCsType } from "./render-expr.js";
 import {
@@ -415,7 +415,7 @@ const EXTERN_HANDLERS_NS = (ns: string): string => `${ns}.Application.Handlers`;
 /** The port method's C# param list + trailing CancellationToken. */
 function externPortParams(h: Handler): string {
   return [
-    ...h.params.map((p) => `${renderCsType(p.type)} ${p.name}`),
+    ...h.params.map((p) => `${renderCsType(p.type)} ${escapeCsharpIdent(p.name)}`),
     "CancellationToken cancellationToken",
   ].join(", ");
 }
@@ -615,28 +615,35 @@ function pathParamNames(path: string): Set<string> {
  *  wrapped in `new <Agg>Id`; scalar → direct. */
 function pathActionParam(p: ParamIR): { actionParam: string; commandArg: string } {
   const t: TypeIR = p.type;
+  const n = escapeCsharpIdent(p.name);
   if (t.kind === "id") {
-    const wire = t.valueType === "guid" ? "Guid" : t.valueType === "int" ? "long" : "string";
+    // The SHARED derivation (`csIdValueClrType`), not a local switch: the copy
+    // that used to live here mapped `int` to `long`, so an `int`-keyed
+    // aggregate bound a `long` route token and handed it to a ctor taking
+    // `int` — CS1503 (G2667-D4).  Latent only because ids are guid by default.
+    const wire = csIdValueClrType(t.valueType);
     return {
-      actionParam: `${wire} ${p.name}`,
-      commandArg: `new ${t.targetName}Id(${p.name})`,
+      actionParam: `${wire} ${n}`,
+      commandArg: `new ${t.targetName}Id(${n})`,
     };
   }
-  return { actionParam: `${renderCsType(t)} ${p.name}`, commandArg: p.name };
+  return { actionParam: `${renderCsType(t)} ${n}`, commandArg: n };
 }
 
 /** A `[FromQuery]` criterion param of a paged-run queryHandler: id → wire type
  *  coerced with `new <Agg>Id(...)`; scalar → the rendered domain type verbatim. */
 function queryActionParam(p: ParamIR): { actionParam: string; commandArg: string } {
   const t: TypeIR = p.type;
+  const n = escapeCsharpIdent(p.name);
   if (t.kind === "id") {
-    const wire = t.valueType === "guid" ? "Guid" : t.valueType === "int" ? "long" : "string";
+    // Same shared derivation as `pathActionParam` — see the note there.
+    const wire = csIdValueClrType(t.valueType);
     return {
-      actionParam: `[FromQuery] ${wire} ${p.name}`,
-      commandArg: `new ${t.targetName}Id(${p.name})`,
+      actionParam: `[FromQuery] ${wire} ${n}`,
+      commandArg: `new ${t.targetName}Id(${n})`,
     };
   }
-  return { actionParam: `[FromQuery] ${renderCsType(t)} ${p.name}`, commandArg: p.name };
+  return { actionParam: `[FromQuery] ${renderCsType(t)} ${n}`, commandArg: n };
 }
 
 const HTTP_ATTR: Record<string, string> = {

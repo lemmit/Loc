@@ -354,7 +354,7 @@ ${
 `;
   }
 
-  // WHOLE-TABLE AGGREGATION (M-T1.3 Phase 0) — ONE Ecto query with
+  // WHOLE-TABLE AGGREGATION (M-T1.3) — ONE Ecto query with
   // `count`/`sum`/`avg`/`min`/`max` in the `select`, no rows loaded.  The shape
   // exists precisely to avoid the naive read: `Repo.all/1` over the whole table
   // with every row hydrated into a struct to produce one integer.
@@ -591,7 +591,7 @@ function moneyWireHelper(
   )
     return "";
   return `
-  # RS-12 money scale: a SQL aggregate echoes the scale its rows were STORED
+  # Money scale: a SQL aggregate echoes the scale its rows were STORED
   # at, and a grouping KEY echoes the scale its row was WRITTEN at, so pin the
   # wire value to the canonical scale every other read uses.
   defp __money_wire(%Decimal{} = dec), do: dec |> Decimal.round(${MONEY_WIRE_SCALE}) |> to_string()

@@ -40,11 +40,11 @@ import { isAbstractBase } from "./inheritance-emit.js";
  */
 export function emitsRestDelete(agg: AggregateIR): boolean {
   if (isAbstractBase(agg)) return false;
-  // NAMED FIX (unification): the core gate is the shared `emitsRestDestroy`
-  // (canonical destroy) — this used to be `destroys.length > 0`, so a
-  // NAMED-only destroy (`destroy archive()`, a domain command) mounted a
-  // generic hard-DELETE that this backend's own OpenAPI spec refused to
-  // document (the spec always gated on `canonicalDestroy`).  The
+  // The core gate is the shared `emitsRestDestroy` (canonical destroy), NOT
+  // `destroys.length > 0` — that mounts a generic hard-DELETE for a NAMED-only
+  // destroy (`destroy archive()`, a domain command), which this backend's own
+  // OpenAPI spec refuses to document since it gates on `canonicalDestroy`.
+  // The
   // event-sourced exclusion stays an elixir-local stance on TOP of the
   // shared predicate: an ES aggregate's only mutations are its per-op
   // commands, and whether an ES canonical destroy should emit DELETE

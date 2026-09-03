@@ -420,8 +420,7 @@ export const tsxTarget: WalkerTarget = {
     return depth === 0 ? inner : `{${inner}}`;
   },
 
-  /** JSX object-literal style attribute with camelCased CSS keys.
-   *  Verbatim lift of the old body-walker styleAttr body. */
+  /** JSX object-literal style attribute with camelCased CSS keys. */
   renderStyleAttr(
     entries: ReadonlyArray<{ key: string; rendered: string; literal?: string }>,
   ): string {

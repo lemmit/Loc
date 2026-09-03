@@ -9,6 +9,11 @@ import { JAVA_PROVENANCED_RECORD } from "./provenance.js";
 //
 //   money    → STRING on the wire (precise-decimal string; parsed with
 //              `new BigDecimal(s)` inbound, `toPlainString()` outbound)
+//   decimal  → JSON NUMBER (RS-24), and — RESPONSE ONLY — a `double`.  The
+//              domain keeps `BigDecimal` (a `/` runs at
+//              `MathContext.DECIMAL128`), so an un-narrowed response shipped
+//              34 significant digits where the other four backends ship a
+//              double's ≤17.  See `wireJavaType` for the full note.
 //   datetime → STRING (ISO-8601; `Instant.parse` / `toString`)
 //   id       → the bare id value (uuid string / int / long)
 //   enum     → the enum (serialises by name — DSL casing IS the wire)
@@ -32,6 +37,23 @@ export function wireJavaType(t: TypeIR, dir: WireDir, boxed = false): string {
         case "bool":
           return boxed ? "Boolean" : "boolean";
         case "decimal":
+          // RS-24 narrowing, RESPONSE ONLY (#2563 on node, #2575 on .NET,
+          // M-T6.46 here).  A plain `decimal` is a JSON NUMBER, and the other
+          // four backends all carry that number through an IEEE-754 double —
+          // node `Number(...)`, python `float(...)`, elixir `Decimal.to_float`,
+          // .NET's response-side `double`.  Java's domain type is `BigDecimal`
+          // and a `derived` division renders through `MathContext.DECIMAL128`,
+          // so an un-narrowed response record serialized all 34 significant
+          // digits: `0.3333333333333333333333333333333333` against everyone
+          // else's `0.3333333333333333`.
+          //
+          // The REQUEST side deliberately stays `BigDecimal` (the same
+          // asymmetry #2575 chose): a `double` request component would accept a
+          // JSON number outside `BigDecimal`'s useful range and then fail
+          // converting it to the domain type — a 500 where the current parse
+          // gives a 400.  A client may send more precision than it reads back,
+          // which is already true of every other backend.
+          if (dir === "Response") return boxed ? "Double" : "double";
           return "BigDecimal";
         case "money":
         case "datetime":
@@ -76,11 +98,16 @@ export function wireJavaType(t: TypeIR, dir: WireDir, boxed = false): string {
 }
 
 /** Imports the wire type needs (java.* only; generated records are
- *  package-local or wildcard-imported). */
-export function collectWireImports(t: TypeIR, into: Set<string>): Set<string> {
+ *  package-local or wildcard-imported).
+ *
+ *  Direction-aware for the same reason `wireJavaType` is: a RESPONSE `decimal`
+ *  is a `double`/`Double`, so the record must not import a `BigDecimal` it no
+ *  longer names (javac warns on nothing, but an unused import is noise the
+ *  emitter has never shipped elsewhere).  A REQUEST `decimal` still needs it. */
+export function collectWireImports(t: TypeIR, into: Set<string>, dir: WireDir): Set<string> {
   switch (t.kind) {
     case "primitive":
-      if (t.name === "decimal") into.add("java.math.BigDecimal");
+      if (t.name === "decimal" && dir === "Request") into.add("java.math.BigDecimal");
       if (t.name === "guid") into.add("java.util.UUID");
       if (t.name === "json") into.add("tools.jackson.databind.JsonNode");
       return into;
@@ -89,14 +116,14 @@ export function collectWireImports(t: TypeIR, into: Set<string>): Set<string> {
       return into;
     case "array":
       into.add("java.util.List");
-      return collectWireImports(t.element, into);
+      return collectWireImports(t.element, into, dir);
     case "optional":
-      return collectWireImports(t.inner, into);
+      return collectWireImports(t.inner, into, dir);
     case "genericInstance":
       // The carrier itself is a generated `domain.common` record — imported by
       // the DTO emitter, which knows the base package.  Only its ARGUMENT can
       // pull in a java.* import.
-      return collectWireImports(t.arg, into);
+      return collectWireImports(t.arg, into, dir);
     default:
       return into;
   }
@@ -114,6 +141,10 @@ export function domainToWire(t: TypeIR, expr: string): string {
       if (t.name === "money")
         return `${expr}.setScale(${MONEY_WIRE_SCALE}, java.math.RoundingMode.HALF_UP).toPlainString()`;
       if (t.name === "datetime") return `${expr}.toString()`;
+      // decimal → the response's `double` component (RS-24 / M-T6.46).  The
+      // narrowing is the wire boundary's job, exactly as on .NET (#2575): the
+      // DOMAIN value keeps every digit `MathContext.DECIMAL128` produced.
+      if (t.name === "decimal") return `${expr}.doubleValue()`;
       return expr;
     case "id":
       return `${expr}.value()`;
@@ -142,6 +173,9 @@ function elementMapper(element: TypeIR): string | null {
       if (element.name === "money")
         return `__x -> __x.setScale(${MONEY_WIRE_SCALE}, java.math.RoundingMode.HALF_UP).toPlainString()`;
       if (element.name === "datetime") return "__x -> __x.toString()";
+      // `decimal[]` → `List<Double>` (RS-24 / M-T6.46): the element narrows on
+      // the response exactly as a scalar decimal component does.
+      if (element.name === "decimal") return "__x -> __x.doubleValue()";
       return null;
     case "id":
       return "__x -> __x.value()";

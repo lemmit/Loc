@@ -339,7 +339,7 @@ export function generateFlutterForContexts(
   out.set("web/index.html", renderWebIndexHtml(title));
   out.set("web/manifest.json", renderWebManifest(pkg, title));
   out.set("Dockerfile", DOCKERFILE);
-  // Native mobile surface (Phase 3).  The emitted project is a plain Flutter app
+  // Native mobile surface.  The emitted project is a plain Flutter app
   // — it builds for web (served by the Dockerfile above) AND, with the platform
   // folders materialised, for Android/iOS.  We deliberately do NOT vendor the
   // large `android/`/`ios/` scaffolds (Gradle wrappers, manifests, Xcode
@@ -350,15 +350,16 @@ export function generateFlutterForContexts(
   // target, not a modelling mode — both are always available.
   out.set("Makefile", renderMakefile(pkg, usesFileUpload));
   out.set("README.md", renderReadme(title, pkg));
-  // Runtime e2e (Phase 4) — a headless `flutter_test` widget smoke that boots
+  // Runtime e2e — a headless `flutter_test` widget smoke that boots
   // the real app and asserts it renders.  Unlike an `integration_test` (needs a
   // device/emulator) this runs under plain `flutter test` on any host, so it
   // gates "does the app actually RUN", not just compile.  Data reads fire on
   // mount and settle to their loading/error branch with no backend — the tree
   // still builds, which is exactly what the smoke proves.
   out.set("test/widget_test.dart", renderWidgetSmokeTest(pkg));
-  // A11y runtime gate (accessibility.md; docs/audits/flutter-a11y-audit-2026-07.md
-  // Phase C) — the Flutter analogue of the axe-core tripwire, which can't scan a
+  // A11y runtime gate (accessibility.md;
+  // docs/audits/flutter-a11y-audit-2026-07.md) — the Flutter analogue of the
+  // axe-core tripwire, which can't scan a
   // canvas-rendered Flutter build.  Boots the real app with the semantics tree
   // enabled and asserts Flutter's built-in WCAG guidelines on the first frame.
   // Runs under the same `flutter test` step (whole `test/` dir) as the smoke.
@@ -650,8 +651,8 @@ function renderPage(
 
   // A page becomes a Riverpod `ConsumerWidget` (bound to `ref`) when it either
   // projects reactive state / actions (Track D) OR issues a QueryView read
-  // (this slice — `ref.watch(<var>Provider)`).  Display-only pages with neither
-  // stay plain `StatelessWidget`s (Track A/B/C skeleton).
+  // (`ref.watch(<var>Provider)`).  Display-only pages with neither stay plain
+  // `StatelessWidget`s.
   const stateful = hasRiverpodState(page) && (usesState || usedActions.size > 0);
   // A store read/call needs a `WidgetRef` too (`ref.watch(cartProvider…)`), so a
   // page whose only reactive input is a store is still a `ConsumerWidget` — the
@@ -722,8 +723,8 @@ function routeArgBindings(paramNames: readonly string[], needsId: boolean): stri
   return out;
 }
 
-/** What a `ConsumerWidget` page's `build` binds — reactive state/actions (Track
- *  D) and/or QueryView read hoists (this slice). */
+/** What a `ConsumerWidget` page's `build` binds — reactive state/actions
+ *  and/or QueryView read hoists. */
 interface ConsumerBindings {
   usesState: boolean;
   usedActions: ReadonlySet<string>;
@@ -1299,8 +1300,8 @@ void main() {
 `;
 }
 
-/** `test/a11y_test.dart` — the runtime accessibility gate (Phase C of the
- *  Flutter a11y audit).  Flutter web renders to a canvas, so axe-core (the
+/** `test/a11y_test.dart` — the runtime accessibility gate (see the Flutter
+ *  a11y audit).  Flutter web renders to a canvas, so axe-core (the
  *  web frontends' a11y tripwire) can't traverse it; Flutter's own
  *  `flutter_test` `meetsGuideline(...)` matchers are the equivalent.  Enables
  *  the semantics tree, pumps the real `App` once (a single `pump`, not

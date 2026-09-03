@@ -206,7 +206,7 @@ describe("MikroORM query-time projections", () => {
     expect(src).toContain(`qb.orderBy([{ [raw("${trunc}")]: "asc" }]);`);
     // The key comes back as the wire STRING (no per-column decoder on a raw
     // QueryBuilder select), so it is DECODED, not cast.
-    expect(src).toContain("day: new Date(r.day as string).toISOString(),");
+    expect(src).toContain('day: new Date(r.day as string).toISOString().replace(/\\.?0+Z$/, "Z"),');
     expect(src).not.toContain("(r.day as Date)");
   });
 

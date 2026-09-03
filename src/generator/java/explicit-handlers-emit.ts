@@ -635,9 +635,10 @@ function emitPagedRunAction(
  *  of .NET C1 #1830).  An entity return (aggregate or part) is projected to its
  *  `<Agg>Response` — the SAME static factory the auto-derived read endpoints use
  *  (`emit/wire.ts` domainToWire; `service.ts` `<Agg>Response::from`) — so the
- *  route serialises the wire contract, not the raw JPA entity.  Id / scalar / VO
- *  returns serialise as-is (`result`).  Records the owning aggregate's response
- *  DTO package into `responsePkgs` so the controller header can import it. */
+ *  route serialises the wire contract, not the raw JPA entity.  Id / VO returns
+ *  serialise as-is (`result`); a plain `decimal` narrows (see below).  Records
+ *  the owning aggregate's response DTO package into `responsePkgs` so the
+ *  controller header can import it. */
 function projectReturn(
   retType: TypeIR,
   ctx: EnrichedBoundedContextIR,
@@ -645,6 +646,20 @@ function projectReturn(
   responsePkgs: Set<string>,
 ): string {
   const info = wireTypeInfo(retType, "response");
+  // A plain `decimal` narrows to the response wire's `double` (RS-24 /
+  // M-T6.46) — an explicit handler returning `decimal` is the same response
+  // direction as an aggregate read, so it cannot ship the domain BigDecimal's
+  // full `MathContext.DECIMAL128` precision where the REST DTO ships a double.
+  // `domainToWire` carries the optional / `decimal[]` arms.
+  //
+  // NOTE (reported, not fixed here): the `return "result"` below still passes
+  // `id` / `money` / `datetime` scalar returns through UN-projected, so an
+  // explicit handler returning one of those diverges from the DTO wire. That is
+  // a separate, pre-existing explicit-handler gap; only the decimal arm is in
+  // M-T6.46's scope.
+  if (info.refKind === "primitive" && info.primitive === "decimal") {
+    return domainToWire(retType, "result");
+  }
   if (info.refKind !== "entity") return "result";
   const owning =
     ctx.aggregates.find((a) => a.name === info.base) ??

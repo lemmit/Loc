@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // dapper — minimal-real persistence emitters for the .NET backend
-// (D-REALIZATION-AXES Phase 5c).  An ALTERNATE persistence implementation
+// (D-REALIZATION-AXES).  An ALTERNATE persistence implementation
 // selected by `persistence: dapper`: the generated Domain layer (entities, ids,
 // value objects, enums, events, commands/handlers/controllers) is
 // persistence-agnostic and reused as-is; Dapper only replaces the Infrastructure
@@ -44,10 +44,11 @@ import {
 } from "../../../ir/util/inheritance.js";
 import { refCollectionFieldName } from "../../../ir/util/ref-collection.js";
 import { sortableFields } from "../../../ir/util/sortable-fields.js";
+import { isDenyFilter } from "../../../ir/util/tenant-stance.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { intrinsicFor, intrinsicKey } from "../../../util/intrinsics.js";
-import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { escapeCsharpIdent, plural, snake, upperFirst } from "../../../util/naming.js";
 import { PG_INTRINSIC_SQL } from "../../_expr/pg-intrinsics.js";
 import { renderCreateTableIfNotExists } from "../../sql-pg.js";
 import { isReservedIdent } from "../../sql-reserved.js";
@@ -58,6 +59,7 @@ import {
   renderCsExpr,
   renderCsType,
 } from "../render-expr.js";
+import { csClaimStampsFor } from "./entity.js";
 import { renderRetrievalParamsWithCt } from "./repository.js";
 
 // ---------------------------------------------------------------------------
@@ -234,8 +236,8 @@ export function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
             : `System.Text.Json.JsonSerializer.Serialize(${acc})`,
           stateProp: prop,
           hydrate: nullable
-            ? `r.${col} is null ? (FileRef?)null : System.Text.Json.JsonSerializer.Deserialize<FileRef>(r.${col})!`
-            : `System.Text.Json.JsonSerializer.Deserialize<FileRef>(r.${col})!`,
+            ? `r.${escapeCsharpIdent(col)} is null ? (FileRef?)null : System.Text.Json.JsonSerializer.Deserialize<FileRef>(r.${escapeCsharpIdent(col)})!`
+            : `System.Text.Json.JsonSerializer.Deserialize<FileRef>(r.${escapeCsharpIdent(col)})!`,
         };
       }
       const { sql, cs } = primTypes(type.name);
@@ -247,7 +249,7 @@ export function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
         cast: "",
         save: acc,
         stateProp: prop,
-        hydrate: `r.${col}`,
+        hydrate: `r.${escapeCsharpIdent(col)}`,
       };
     }
     case "enum":
@@ -260,8 +262,8 @@ export function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
         save: nullable ? `${acc}?.ToString()` : `${acc}.ToString()`,
         stateProp: prop,
         hydrate: nullable
-          ? `r.${col} is null ? (${type.name}?)null : Enum.Parse<${type.name}>(r.${col})`
-          : `Enum.Parse<${type.name}>(r.${col})`,
+          ? `r.${escapeCsharpIdent(col)} is null ? (${type.name}?)null : Enum.Parse<${type.name}>(r.${escapeCsharpIdent(col)})`
+          : `Enum.Parse<${type.name}>(r.${escapeCsharpIdent(col)})`,
       };
     case "valueobject":
       return {
@@ -275,8 +277,8 @@ export function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
           : `System.Text.Json.JsonSerializer.Serialize(${acc})`,
         stateProp: prop,
         hydrate: nullable
-          ? `r.${col} is null ? (${type.name}?)null : System.Text.Json.JsonSerializer.Deserialize<${type.name}>(r.${col})!`
-          : `System.Text.Json.JsonSerializer.Deserialize<${type.name}>(r.${col})!`,
+          ? `r.${escapeCsharpIdent(col)} is null ? (${type.name}?)null : System.Text.Json.JsonSerializer.Deserialize<${type.name}>(r.${escapeCsharpIdent(col)})!`
+          : `System.Text.Json.JsonSerializer.Deserialize<${type.name}>(r.${escapeCsharpIdent(col)})!`,
       };
     case "id": {
       const { sql, cs } = idTypes(type.valueType);
@@ -289,8 +291,8 @@ export function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
         save: nullable ? `${acc}?.Value` : `${acc}.Value`,
         stateProp: prop,
         hydrate: nullable
-          ? `r.${col} is null ? (${type.targetName}Id?)null : new ${type.targetName}Id(r.${col}${cs === "Guid" ? ".Value" : ""})`
-          : `new ${type.targetName}Id(r.${col})`,
+          ? `r.${escapeCsharpIdent(col)} is null ? (${type.targetName}Id?)null : new ${type.targetName}Id(r.${escapeCsharpIdent(col)}${cs === "Guid" ? ".Value" : ""})`
+          : `new ${type.targetName}Id(r.${escapeCsharpIdent(col)})`,
       };
     }
     case "array": {
@@ -321,8 +323,8 @@ export function fieldColumn(f: FieldIR, accBase = "aggregate"): DapperColumn {
         // reached the wire as `null` on this adapter alone.  Coalescing on the
         // READ (not the write) also repairs rows already written as NULL.
         hydrate: nullable
-          ? `r.${col} is null ? new ${listCs}() : System.Text.Json.JsonSerializer.Deserialize<${listCs}>(r.${col})!`
-          : `System.Text.Json.JsonSerializer.Deserialize<${listCs}>(r.${col})!`,
+          ? `r.${escapeCsharpIdent(col)} is null ? new ${listCs}() : System.Text.Json.JsonSerializer.Deserialize<${listCs}>(r.${escapeCsharpIdent(col)})!`
+          : `System.Text.Json.JsonSerializer.Deserialize<${listCs}>(r.${escapeCsharpIdent(col)})!`,
       };
     }
     default:
@@ -365,7 +367,7 @@ function provColumn(f: FieldIR): DapperColumn {
     cast: "::jsonb",
     save: `aggregate.${prop} is null ? null : System.Text.Json.JsonSerializer.Serialize(aggregate.${prop}, ProvJson.Options)`,
     stateProp: prop,
-    hydrate: `r.${col} is null ? null : System.Text.Json.JsonSerializer.Deserialize<ProvLineage>(r.${col}, ProvJson.Options)`,
+    hydrate: `r.${escapeCsharpIdent(col)} is null ? null : System.Text.Json.JsonSerializer.Deserialize<ProvLineage>(r.${escapeCsharpIdent(col)}, ProvJson.Options)`,
   };
 }
 
@@ -391,7 +393,7 @@ function embeddedContainmentColumn(cont: ContainmentIR): DapperColumn {
       cast: "::jsonb",
       save: `System.Text.Json.JsonSerializer.Serialize(aggregate.${prop}.Select(__x => __x.ToSnapshot()).ToList(), __json)`,
       stateProp: prop,
-      hydrate: `System.Text.Json.JsonSerializer.Deserialize<List<${snapT}>>(r.${col}, __json)!.Select(${cont.partName}.FromSnapshot).ToList()`,
+      hydrate: `System.Text.Json.JsonSerializer.Deserialize<List<${snapT}>>(r.${escapeCsharpIdent(col)}, __json)!.Select(${cont.partName}.FromSnapshot).ToList()`,
     };
   }
   if (cont.optional) {
@@ -403,7 +405,7 @@ function embeddedContainmentColumn(cont: ContainmentIR): DapperColumn {
       cast: "::jsonb",
       save: `aggregate.${prop} is null ? null : System.Text.Json.JsonSerializer.Serialize(aggregate.${prop}.ToSnapshot(), __json)`,
       stateProp: prop,
-      hydrate: `r.${col} is null ? null : ${cont.partName}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snapT}>(r.${col}, __json)!)`,
+      hydrate: `r.${escapeCsharpIdent(col)} is null ? null : ${cont.partName}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snapT}>(r.${escapeCsharpIdent(col)}, __json)!)`,
     };
   }
   return {
@@ -414,7 +416,7 @@ function embeddedContainmentColumn(cont: ContainmentIR): DapperColumn {
     cast: "::jsonb",
     save: `System.Text.Json.JsonSerializer.Serialize(aggregate.${prop}.ToSnapshot(), __json)`,
     stateProp: prop,
-    hydrate: `${cont.partName}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snapT}>(r.${col}, __json)!)`,
+    hydrate: `${cont.partName}.FromSnapshot(System.Text.Json.JsonSerializer.Deserialize<${snapT}>(r.${escapeCsharpIdent(col)}, __json)!)`,
   };
 }
 
@@ -547,10 +549,10 @@ function containmentValueType(pc: PartChild): string {
 function partRowAndMap(pc: PartChild): string {
   const rowCols = [
     `        public ${pc.partIdCs} id { get; set; }`,
-    `        public ${pc.parentIdCs} ${pc.parentFk} { get; set; }`,
+    `        public ${pc.parentIdCs} ${escapeCsharpIdent(pc.parentFk)} { get; set; }`,
     ...pc.fieldCols.map(
       (c) =>
-        `        public ${c.rowCs} ${c.col} { get; set; }${c.rowCs === "string" ? " = default!;" : ""}`,
+        `        public ${c.rowCs} ${escapeCsharpIdent(c.col)} { get; set; }${c.rowCs === "string" ? " = default!;" : ""}`,
     ),
   ];
   // The grandchild dictionaries are the concrete `Dictionary<…>` that
@@ -570,7 +572,7 @@ function partRowAndMap(pc: PartChild): string {
     `        ${pc.part.name}._Create(new ${pc.part.name}.State`,
     "        {",
     `            Id = new ${pc.part.name}Id(r.id),`,
-    `            ParentId = new ${pc.parentEntityId}Id(r.${pc.parentFk}),`,
+    `            ParentId = new ${pc.parentEntityId}Id(r.${escapeCsharpIdent(pc.parentFk)}),`,
     ...pc.fieldCols.map((c) => `            ${c.stateProp} = ${c.hydrate},`),
     ...childSlots,
     "        });",
@@ -795,12 +797,12 @@ export function whereToSql(e: ExprIR, sqlCtx?: WhereSqlCtx): string {
 
 /** The `authz-filter` sentinels as raw Postgres SQL (M-T9.9 / M-T6.29).  A
  *  discriminated node, so a missing arm is a `tsc` error here rather than a
- *  fall-through to `whereToSql`'s `default:` — which is exactly how the `deny`
- *  carve-out used to reach the generic dispatcher and CRASH codegen on this
- *  adapter (the whole point of giving the sentinel its own `ExprIR.kind`). */
+ *  fall-through to `whereToSql`'s `default:`, where the `deny` carve-out would
+ *  reach the generic dispatcher and CRASH codegen on this adapter.  That is the
+ *  whole point of giving the sentinel its own `ExprIR.kind`. */
 function authzFilterToSql(e: Extract<ExprIR, { kind: "authz-filter" }>): string {
   switch (e.filter.kind) {
-    // DENY carve-out (authorization Phase 4 — deny-wins).  The always-false
+    // DENY carve-out (deny-wins).  The always-false
     // term, ANDed into every read SELECT (and into the write-scope existence
     // pre-guard).  `1 = 0` rather than `FALSE` to match the JPQL/Java rendering
     // and stay a valid standalone predicate in every SQL position.
@@ -895,7 +897,7 @@ function dedupPrincipalRefs(refs: readonly FilterPrincipalRef[]): FilterPrincipa
  *  CancellationToken) — the SAME position the shared `I<Agg>Repository`
  *  interface renders (`renderParamsWithCt`), so the Dapper impl matches it. */
 function renderParams(params: ParamIR[], extra: readonly string[] = [], usesUser = false): string {
-  const ps = params.map((p) => `${renderCsType(p.type)} ${p.name}`);
+  const ps = params.map((p) => `${renderCsType(p.type)} ${escapeCsharpIdent(p.name)}`);
   return [
     ...ps,
     ...extra,
@@ -1034,7 +1036,9 @@ export function renderDapperRepository(
   const updateLocal = (col: string): string => `__stamp_${col}`;
   const stampParam = (col: string): string | null =>
     onCreateCols.has(col) ? createLocal(col) : onUpdateCols.has(col) ? updateLocal(col) : null;
-  const saveParams = cols.map((c) => `${c.col} = ${stampParam(c.col) ?? c.save}`).join(", ");
+  const saveParams = cols
+    .map((c) => `${escapeCsharpIdent(c.col)} = ${stampParam(c.col) ?? c.save}`)
+    .join(", ");
   // A stamp value referencing the request principal resolves through the same
   // ambient accessor the EF AuditableInterceptor uses: `currentUser.<claim>` →
   // `RequestContext.Current!.CurrentUser!.<Claim>` (via `currentUserExpr`), and
@@ -1142,31 +1146,66 @@ export function renderDapperRepository(
   // The origin is what an `ignoring <Cap>` clause resolves against; a filter
   // with no origin (a plain context filter) can only be dropped by `ignoring *`.
   const filterOrigins = agg.contextFilterOrigins ?? [];
-  const capabilityFilterParts: { sql: string; origin: string | undefined }[] =
-    capabilityFilters.map((p, i) => {
-      try {
-        return { sql: whereToSql(p, sqlCtx), origin: filterOrigins[i] };
-      } catch {
-        throw new Error(
-          `dapper: capability filter on '${agg.name}' is outside the Dapper SQL subset; ` +
-            `use 'persistence: efcore' or simplify the predicate.`,
-        );
-      }
-    });
-  /** The capability predicates a read carrying `bypass` still applies
-   *  (named-filter-bypass.md §11).  `ignoring *` drops every one; `ignoring A,
-   *  B` drops the ones those capabilities contributed.  Dapper has no EF
-   *  `IgnoreQueryFilters`, so the bypass is expressed by OMITTING the conjunct
-   *  from the generated WHERE — the raw-SQL equivalent. */
+  const capabilityFilterParts: {
+    sql: string;
+    /** The predicate the `sql` was rendered from — kept so the principal-param
+     *  collection can be taken over the SURVIVING conjuncts (see
+     *  `filterPrincipalRefsFor`), not over the declared set. */
+    expr: ExprIR;
+    origin: string | undefined;
+    bypassable: boolean;
+  }[] = capabilityFilters.map((p, i) => {
+    try {
+      // A `policy { deny on X }` always-false sentinel is a CARVE-OUT, not a
+      // capability filter: deny wins over an authored `ignoring *`, so this
+      // conjunct is never dropped (the raw-SQL twin of the EF rule in
+      // `find-emit.ts` — and of the TPH discriminator rule just below).
+      return {
+        sql: whereToSql(p, sqlCtx),
+        expr: p,
+        origin: filterOrigins[i],
+        bypassable: !isDenyFilter(p),
+      };
+    } catch {
+      throw new Error(
+        `dapper: capability filter on '${agg.name}' is outside the Dapper SQL subset; ` +
+          `use 'persistence: efcore' or simplify the predicate.`,
+      );
+    }
+  });
+  /** The capability filter parts a read carrying `bypass` still applies
+   *  (named-filter-bypass.md §11).  `ignoring *` drops every BYPASSABLE one;
+   *  `ignoring A, B` drops the ones those capabilities contributed.  Dapper has
+   *  no EF `IgnoreQueryFilters`, so the bypass is expressed by OMITTING the
+   *  conjunct from the generated WHERE — the raw-SQL equivalent.
+   *
+   *  THE decision that both the SQL and its parameter binding must agree on
+   *  (F2-ADP-9): they used to disagree, because only the SQL consulted the
+   *  bypass. */
+  const keptFilterParts = (bypass?: { bypassAll?: boolean; bypassCaps?: string[] }) => {
+    const caps = new Set(bypass?.bypassCaps ?? []);
+    return capabilityFilterParts.filter(
+      (p) =>
+        !p.bypassable || !(bypass?.bypassAll === true || (p.origin != null && caps.has(p.origin))),
+    );
+  };
   const capabilityFilterSqlFor = (bypass?: {
     bypassAll?: boolean;
     bypassCaps?: string[];
   }): string | null => {
-    if (bypass?.bypassAll) return null;
-    const caps = new Set(bypass?.bypassCaps ?? []);
-    const kept = capabilityFilterParts.filter((p) => !(p.origin != null && caps.has(p.origin)));
+    const kept = keptFilterParts(bypass);
     return kept.length > 0 ? kept.map((p) => p.sql).join(" AND ") : null;
   };
+  /** `currentUser.<claim>` refs the SURVIVING capability conjuncts read.
+   *
+   *  A read that bypasses every principal-bearing filter names no claim in its
+   *  SQL, so it must bind none.  Binding them anyway was two bugs at once: an
+   *  `@__cu_tenantId` parameter the statement never references, and — the one
+   *  that actually 500s — a `RequestContext.Current!.CurrentUser!` dereference
+   *  evaluated on a read whose whole point is that it runs without the
+   *  principal scope.  `ignoring *` on an unauthenticated call NREs. */
+  const filterPrincipalRefsFor = (bypass?: { bypassAll?: boolean; bypassCaps?: string[] }) =>
+    collectFilterPrincipalRefs(keptFilterParts(bypass).map((p) => p.expr));
   /** The full spliced WHERE fragment (TPH discriminator + surviving capability
    *  predicates).  The TPH discriminator is NEVER bypassable: it is a type
    *  mapping, not a query filter — EF's `IgnoreQueryFilters()` leaves it in
@@ -1187,13 +1226,13 @@ export function renderDapperRepository(
   // for a non-principal (or no) filter, so those SELECTs stay byte-identical.
   // GetById / FindManyByIds have no `currentUser` method param, so they bind
   // from the ambient accessor.
-  const filterPrincipalRefs = collectFilterPrincipalRefs(capabilityFilters);
+  const filterPrincipalRefs = filterPrincipalRefsFor();
   const princFields = principalFields(filterPrincipalRefs, AMBIENT_CURRENT_USER);
   // Comma-prefixed suffix appended inside a `new { … }` that already has fields
   // (GetById / FindManyByIds).
   const princSuffix = princFields.length > 0 ? `, ${princFields.join(", ")}` : "";
 
-  // Command-load path (authorization Phase 3 P3.1 / M-T6.29): the write-scope
+  // Command-load path (authorization.md): the write-scope
   // existence pre-guard behind `GetByIdForWriteAsync`, the raw-SQL twin of the
   // EF `AnyAsync(x => x.Id == id && (<scope>))` in `emit/repository.ts`.  EF
   // gets the READ query-filter applied to that `Any` for free; Dapper has no
@@ -1286,7 +1325,7 @@ export function renderDapperRepository(
   // root through `HydrateAsync` (loads each child table + reconstructs the root
   // with its children in State); saves full-list-replace each child table;
   // deletes cascade the children first.  `hasContains` and reference-collection
-  // associations COMPOSE (wave 4): when both are present a read hydrates the
+  // associations COMPOSE: when both are present a read hydrates the
   // child tables first, then `LoadRefsAsync` post-sets the writable
   // ref-collection list on the reconstructed roots (the two hydrate passes run
   // in sequence — columnsOf excludes the assoc field, so HydrateAsync's
@@ -1318,7 +1357,7 @@ export function renderDapperRepository(
     const insertParams = [
       `id = ${pc.childVar}.Id.Value`,
       `${pc.parentFk} = ${ownerIdExpr}`,
-      ...pc.fieldCols.map((c) => `${c.col} = ${c.save}`),
+      ...pc.fieldCols.map((c) => `${escapeCsharpIdent(c.col)} = ${c.save}`),
     ].join(", ");
     const iter = pc.cont.collection
       ? `        foreach (var ${pc.childVar} in ${ownerAccessor})`
@@ -1405,24 +1444,18 @@ export function renderDapperRepository(
     // maps a C# enum PARAMETER to its integer ordinal, so the predicate reaches
     // Postgres as `WHERE status = 1` against a text column — `operator does not
     // exist: text = integer`, a 500 at the route.  The SAVE path in this same
-    // file already spells `.ToString()`; only the find binder had been written
-    // without it, so an enum-keyed find was broken on Dapper for as long as it
-    // has shipped, on every fixture that has one.
-    //
-    // Found 2026-08-05 by the caller-census drain: `core-domain`'s `byStatus`
-    // (a new caller) and `payments`' `byNetwork` (a caller from the preceding
-    // update-route drain) were the first enum-keyed finds ever driven at
-    // runtime, and both were ✗ on the dapper leg — the leg's only two case
-    // failures, one bug.
+    // file spells `.ToString()` for the same reason.
     const paramFields = f.params.map((p) => {
       const pt = p.type.kind === "optional" ? p.type.inner : p.type;
-      if (pt.kind === "id") return `${p.name} = ${p.name}.Value`;
+      // The anon-object member name stays the DECLARED name (Dapper binds it to
+      // the `@<name>` SQL parameter); the verbatim `@` prefix is only the C#
+      // identifier escape, so both halves take it (F2-ADP-7).
+      const n = escapeCsharpIdent(p.name);
+      if (pt.kind === "id") return `${n} = ${n}.Value`;
       if (pt.kind === "enum") {
-        return p.type.kind === "optional"
-          ? `${p.name} = ${p.name}?.ToString()`
-          : `${p.name} = ${p.name}.ToString()`;
+        return p.type.kind === "optional" ? `${n} = ${n}?.ToString()` : `${n} = ${n}.ToString()`;
       }
-      return p.name;
+      return n;
     });
     // Bind the find's own params + every `currentUser.<claim>` param the SELECT
     // references — both the capability-filter refs spliced into every WHERE AND
@@ -1434,8 +1467,10 @@ export function renderDapperRepository(
     // from the ambient accessor.
     const usesUser = findUsesCurrentUser(f);
     const principalBase = usesUser ? "currentUser" : AMBIENT_CURRENT_USER;
+    // Bypass-AWARE (F2-ADP-9): the same `f` that steers `andFilter` steers the
+    // claim set, so the parameter object binds exactly what the SELECT names.
     const findPrincipalRefs = dedupPrincipalRefs([
-      ...filterPrincipalRefs,
+      ...filterPrincipalRefsFor(f),
       ...collectFilterPrincipalRefs(f.filter ? [f.filter] : []),
     ]);
     const findPrincFields = principalFields(findPrincipalRefs, principalBase);
@@ -1611,11 +1646,14 @@ export function renderDapperRepository(
         ? [
             `        var __caps = new List<string>();`,
             ...capabilityFilterParts.map((part) => {
-              const guard =
-                part.origin != null
-                  ? `if (!bypass.All && bypass.Capabilities?.Contains(${JSON.stringify(part.origin)}) != true)`
-                  : `if (!bypass.All)`;
-              return `        ${guard} __caps.Add("${part.sql}");`;
+              // A non-bypassable conjunct (the `policy { deny }` sentinel) is
+              // added unconditionally — no runtime `bypass` can drop it.
+              const guard = !part.bypassable
+                ? ""
+                : part.origin != null
+                  ? `if (!bypass.All && bypass.Capabilities?.Contains(${JSON.stringify(part.origin)}) != true) `
+                  : `if (!bypass.All) `;
+              return `        ${guard}__caps.Add("${part.sql}");`;
             }),
             `        var sql = "${headSql}" + (__caps.Count > 0 ? " AND " + string.Join(" AND ", __caps) : "")${orderSql ? ` + "${orderSql}"` : ""};`,
           ]
@@ -1623,7 +1661,8 @@ export function renderDapperRepository(
     const paramAdds = [
       ...r.params.map((p) => {
         const pt = p.type.kind === "optional" ? p.type.inner : p.type;
-        const val = pt.kind === "id" ? `${p.name}.Value` : p.name;
+        const n = escapeCsharpIdent(p.name);
+        const val = pt.kind === "id" ? `${n}.Value` : n;
         return `        p.Add("${p.name}", ${val});`;
       }),
       // Principal params (`__cu_<claim>`) — the spliced capability filter's refs
@@ -1732,7 +1771,7 @@ export function renderDapperRepository(
       // is a CS1597 error, so the no-initializer arm ends at `}`.
       ...cols.map(
         (c) =>
-          `        public ${c.rowCs} ${c.col} { get; set; }${c.rowCs === "string" ? " = default!;" : ""}`,
+          `        public ${c.rowCs} ${escapeCsharpIdent(c.col)} { get; set; }${c.rowCs === "string" ? " = default!;" : ""}`,
       ),
       "    }",
       "",
@@ -1807,9 +1846,9 @@ export function renderDapperRepository(
       // Transactional outbox (dispatch-delivery-semantics.md §1): the durable
       // events' __loom_outbox rows are INSERTed on `__tx` — the same
       // transaction the write set rides — so the commit below records them
-      // atomically with the state change.  Before this the outbox insert ran
-      // from DispatchAsync AFTER the commit, on its own pooled connection: a
-      // crash in between silently lost an owed event.  `__deferred` is what
+      // atomically with the state change.  Inserting from DispatchAsync AFTER
+      // the commit, on its own pooled connection, loses an owed event to a
+      // crash in between.  `__deferred` is what
       // still needs dispatching post-commit (everything, when no durable
       // channel is wired).
       "        var __pending = aggregate.PullEvents();",
@@ -1932,11 +1971,42 @@ export function renderDapperDocumentRepository(
   // SaveAsync upsert — CAS-guarded on `version` when the aggregate is
   // `versioned` (the same optimistic-concurrency shape the relational Dapper
   // repository uses), a blind version-bumping upsert otherwise.
+  // Create-only claim stamps (`tenantOwned`'s tenantId/dataKey) on the DOCUMENT
+  // write path.  A jsonb aggregate is not EF-tracked, so the AuditableInterceptor
+  // never sees it, and unlike the EF document repository this save is a single
+  // `INSERT … ON CONFLICT DO UPDATE` with no insert branch to hang the stamp on.
+  //
+  // So when — and ONLY when — the aggregate carries such stamps, resolve
+  // existence first and stamp a genuinely new row before serializing.  It costs
+  // one extra round-trip on writes to stamped document aggregates; an unstamped
+  // one keeps the single-statement upsert, in its original line order, emitting
+  // byte-identically to before.
+  //
+  // Unconditional stamping is NOT safe: `csClaimStampsFor` returns create-event
+  // claim stamps, and re-applying one on update would rewrite a field the model
+  // says is set once.
+  //
+  // This adapter was the SEVENTH document write path of one bug (drizzle,
+  // mikroorm, EF, dapper, java, python, elixir).  Four needed the fix; python
+  // and elixir already stamped.
+  const docCreateStamps = csClaimStampsFor(agg, "create").length > 0;
+  const stampPrelude = [
+    `        var __isNew = await conn.ExecuteScalarAsync<int?>(new CommandDefinition("SELECT 1 FROM ${table} WHERE id = @id", new { id = aggregate.Id.Value }, ${audit.txArg}cancellationToken: cancellationToken)) is null;`,
+    "        if (__isNew) aggregate._StampOnCreate();",
+  ];
+  const serializeLine =
+    "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);";
+  const openLine =
+    "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);";
+  // Stamped: open → begin → probe → stamp → serialize (the stamp must precede
+  // the snapshot).  Unstamped: the original serialize → open → begin order.
+  const savePrelude = docCreateStamps
+    ? [openLine, audit.begin, ...stampPrelude, serializeLine]
+    : [serializeLine, openLine, audit.begin];
+
   const saveLines = versioned
     ? [
-        "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);",
-        "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
-        audit.begin,
+        ...savePrelude,
         "        var __expected = RequestContext.Current?.ExpectedVersion ?? aggregate.Version;",
         `        var __affected = await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (id, data, version) VALUES (@id, CAST(@data AS jsonb), 1) ON CONFLICT (id) DO UPDATE SET data = excluded.data, version = ${table}.version + 1 WHERE ${table}.version = @ExpectedVersion", new { id = aggregate.Id.Value, data = __data, ExpectedVersion = __expected }, ${audit.txArg}cancellationToken: cancellationToken));`,
         `        if (__affected == 0) throw new ConcurrencyConflictException("The resource was modified by another request; reload and retry.");`,
@@ -1944,9 +2014,7 @@ export function renderDapperDocumentRepository(
         audit.commit,
       ].filter((l): l is string => l !== null)
     : [
-        "        var __data = System.Text.Json.JsonSerializer.Serialize(aggregate.ToSnapshot(), __json);",
-        "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
-        audit.begin,
+        ...savePrelude,
         `        await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (id, data, version) VALUES (@id, CAST(@data AS jsonb), 1) ON CONFLICT (id) DO UPDATE SET data = excluded.data, version = ${table}.version + 1", new { id = aggregate.Id.Value, data = __data }, ${audit.txArg}cancellationToken: cancellationToken));`,
         ...audit.flush,
         audit.commit,
@@ -2116,13 +2184,36 @@ export function renderDapperEventSourcedRepository(
   );
   // A `currentUser`-referencing find takes the trailing `User currentUser`
   // param the INTERFACE declares (emit/repository.ts) — the relational and
-  // document Dapper repos both thread it, and this one used to drop it: the
-  // class then failed to implement its own interface (CS0535) and the body's
-  // `currentUser` bound to nothing (CS0103).  `User` is a named type, so the
+  // document Dapper repos both thread it, and so must this one — dropping it
+  // fails to implement the class's own interface (CS0535) and leaves the
+  // body's `currentUser` bound to nothing (CS0103).  `User` is a named type, so
+  // the
   // file also needs `using <ns>.Auth`.
   const anyFindUsesUser = (repo?.finds ?? []).some((raw) =>
     findUsesCurrentUser(unionFindAsOptionalTwin(raw, agg.name)),
   );
+  // Write-scope narrowing (authorization): the EVENT-SOURCED twin
+  // of the document `writeScopeMethod` above — a stream has no queryable row to
+  // pre-guard in SQL, so fold it through `GetByIdAsync` and apply the scope
+  // predicate in-app.  Without it, a narrowed write ladder (or `policy { deny
+  // write on X }`) on an event-sourced aggregate failed CS0535: the port
+  // declares `GetByIdForWriteAsync` whenever `agg.writeScopeFilter` is set.
+  const writeScopeMethod = agg.writeScopeFilter
+    ? [
+        "",
+        `    public async Task<${agg.name}?> GetByIdForWriteAsync(${agg.name}Id id, CancellationToken cancellationToken = default)`,
+        "    {",
+        "        var __found = await GetByIdAsync(id, cancellationToken);",
+        "        if (__found == null) return null;",
+        "        return _WriteScopeAllows(__found) ? __found : null;",
+        "    }",
+        "",
+        `    private static bool _WriteScopeAllows(${agg.name} x) => ${renderCsExpr(
+          agg.writeScopeFilter,
+          { thisName: "x", agg, currentUserExpr: AMBIENT_CURRENT_USER },
+        )};`,
+      ]
+    : [];
   const findMethods = (repo?.finds ?? []).flatMap((raw) => {
     const f = unionFindAsOptionalTwin(raw, agg.name);
     const body = findBodies.find((b) => b.name === f.name);
@@ -2191,6 +2282,7 @@ export function renderDapperEventSourcedRepository(
       "        if (__rows.Count == 0) return null;",
       `        return ${agg.name}._FromEvents(id, __rows.Select(RowToEvent).ToList());`,
       "    }",
+      ...writeScopeMethod,
       "",
       `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${agg.name}Id> ids, CancellationToken cancellationToken = default)`,
       "    {",
@@ -2423,11 +2515,11 @@ export function renderDapperSchema(
       `CREATE UNIQUE INDEX IF NOT EXISTS ${t}_seq_key ON ${t} (seq);`,
     ].join("\n");
   });
-  // The append-only provenance history table (provenance.md).  This used to be
-  // a hand-written CREATE TABLE — the second of two .NET copies.  It now
-  // renders the SHARED MigrationsIR shape (`provenanceTableShape`), reaching
-  // this emitter as DATA off the snapshot rather than as an import (generator
-  // may not import system).  `IF NOT EXISTS` because DbSchema re-runs on every
+  // The append-only provenance history table (provenance.md), rendered from
+  // the SHARED MigrationsIR shape (`provenanceTableShape`) rather than a
+  // hand-written CREATE TABLE.  It reaches this emitter as DATA off the
+  // snapshot, not as an import (generator may not import system).
+  // `IF NOT EXISTS` because DbSchema re-runs on every
   // startup, where a migration would run once.  The co-located
   // `<field>_provenance` columns ride on each aggregate's CREATE TABLE via
   // `columnsOf` — that half is per-aggregate and stays here.

@@ -63,24 +63,25 @@ const GAPS: Record<string, string> = {
 
   // FINDING F1 — `Kitchen`'s
   //     QueryView { of: …, single: true, data: row => OperationForm { row.rename } }
-  // The instance-qualified operation form resolves its aggregate through
-  // `ctx.paramTypes.get("row")` (`_walker/primitives/forms.ts` →
-  // `emitFormOfOperation`).  A `QueryView { data: … }` render-lambda binding is
-  // not registered there, so the form degrades to
+  // The RESOLUTION half is FIXED (`queryview-single-lambda-paramtypes`):
+  // `singleAggregateOfQuery` took one hop off the `of:` receiver chain, which
+  // lands on the VERB for `<handle>.<Agg>.all`, so the lambda binding never
+  // reached `paramTypes` and the form degraded to
   //     Form(row.rename): 'row' is not an in-scope aggregate instance
-  // and the operation form vanishes from the page.
+  // on react / vue / svelte / feliz / flutter (and to nothing at all on
+  // Angular).  It now descends past a `STANDARD_AGG_OPS` verb, and the five
+  // other frontends render the form.
   //
-  // NOT Flutter-specific — measured on this same cell, react / vue / svelte /
-  // feliz emit the byte-equivalent comment in their own syntax
-  // (`{/* … */}` / `<!-- … -->` / `(* … *)`), and Angular emits neither the form
-  // NOR a comment.  They stay green here only because `FALLBACK_MARKERS` cannot
-  // see that wording; the Flutter row sees it because `analyzeFlutterParity`
-  // treats ANY `/* … */` in emitted Dart as a diagnostic.  Widening the shared
-  // marker list flips five currently-green cells amber, so it is its own slice —
-  // filed, not smuggled in here.
+  // What KEEPS this cell amber is Flutter-specific and narrower: its pack ships
+  // no `primitive-modal` template and its forked `renderOperationForm` matches
+  // only the by-name (`of:`/`op:`) shape, so the resolved instance-qualified
+  // form still has nothing to render and emits a visible, syntactically inert
+  // marker.  Tracked as `flutter-modal-instance-operationform` — the same root
+  // as F2 below.
   "flutter:Console":
-    "F1 — QueryView `data:` lambda binding is not in `paramTypes`, so " +
-    "`OperationForm { row.rename }` degrades (shared walker; react/vue/svelte/feliz same, unseen)",
+    "F1 — Flutter has no `primitive-modal` renderer and its `renderOperationForm` " +
+    "matches only `OperationForm { of:, op: }`, so a resolved `OperationForm { row.<op> }` " +
+    "renders a marker (the paramTypes resolution itself is fixed)",
 
   // FINDING F2 — every scaffolded Detail page's operation surface.
   // `scaffoldOperations` (macros/stdlib/scaffold/_body-builders.ts) emits the

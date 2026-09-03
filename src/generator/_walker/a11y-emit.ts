@@ -41,11 +41,11 @@ export function ariaLabelAttr(label: string | undefined): string {
  *  question 1 — derive-from-default, explicit `label:` for the exception).
  *  `decorative: true` forces hidden even when a stray `label:` is present.
  *
- *  The shared walker no longer routes through this for the NAMED arm: an
+ *  The shared walker does NOT route through this for the NAMED arm: an
  *  accessible name is a user-visible slot (`iconLabel`), so `primitives/icon.ts`
  *  composes ` role="img"` with `localizedAriaLabelAttr` to get the translated
- *  form (D-I18N-ATTR).  The two agree byte-for-byte with i18n off — the name
- *  goes through `ariaLabelAttr` either way.  HEEx still calls this directly for
+ *  form (D-I18N-ATTR).  With i18n off the two agree byte-for-byte — the name
+ *  goes through `ariaLabelAttr` either way.  HEEx calls this directly for
  *  its static arm, where the `escapeHtmlAttr` above (which covers `<`/`>`) is
  *  stricter than HEEx's own attribute funnel. */
 export function iconA11yAttr(opts: { label?: string; decorative?: boolean }): string {

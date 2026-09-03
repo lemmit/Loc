@@ -84,8 +84,8 @@ export interface JavaRenderContext {
    *  aggregate read from OUTSIDE its package (query-projection reads in the
    *  view-service package) — package-private fields are unreachable there. */
   accessorProps?: boolean;
-  /** Tier resolver for a `domain-service` call (domain-services.md rev. 4,
-   *  Slice 1 — the `reading` tier).  Returns `true` when `<service>.<op>` is a
+  /** Tier resolver for a `domain-service` call (domain-services.md rev. 4 —
+   *  the `reading` tier).  Returns `true` when `<service>.<op>` is a
    *  READING-tier operation (it runs read-only repository queries, so on Java it
    *  is a `@Service` bean), in which case the call renders as an INSTANCE call
    *  against the injected field (`registration.isEmailAvailable(holder)`).  A
@@ -780,7 +780,7 @@ function renderCall(args: string[], e: CallExpr, ctx: JavaRenderContext): string
     }
     case "domain-service": {
       // A `domainService` operation call (domain-services.md).  TIER decides the
-      // call shape on Java (rev. 4, Slice 1):
+      // call shape on Java (rev. 4):
       //  - PURE op → STATIC call into the generated utility class
       //    (`Pricing.quote(cart, customer)`); byte-identical to pre-rev.4.
       //  - READING op → INSTANCE call against the injected `@Service` bean field
@@ -797,7 +797,7 @@ function renderCall(args: string[], e: CallExpr, ctx: JavaRenderContext): string
     }
     case "repo-read": {
       // A read-only repository query in a `reading` domain-service body
-      // (domain-services.md rev. 4, Slice 1).  Renders an INSTANCE call against
+      // (domain-services.md rev. 4).  Renders an INSTANCE call against
       // the bean's injected repository field — `accountsRepository.byHolder(holder)`
       // — mirroring how the workflow `@Service` reads repos (`getById`/named
       // finds).  `method` is the resolved repository method (the declared find,
@@ -1061,7 +1061,7 @@ const JAVA_TYPE_TARGET: TypeTarget = {
         return "FileRef";
       case "duration":
         // A5 temporal — absolute duration as java.time.Duration.
-        // Expression-only (never a field / wire type in this slice).
+        // Expression-only (never a field / wire type).
         return "Duration";
     }
   },

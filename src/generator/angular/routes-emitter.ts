@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Angular route-table emitter (angular-frontend-plan.md Slice 4b).
+// Angular route-table emitter (angular-frontend-plan.md).
 //
 // Hand-renders `src/app/app.routes.ts` — the standalone `Routes` array
 // `provideRouter` consumes: one entry per declared ui page (importing its

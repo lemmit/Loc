@@ -179,8 +179,8 @@ export interface LoadedPack {
    *  `t()` / `pgettext()` bindings for the rest of this generation.
    *
    *  Off by default, which is what makes an i18n-OFF app byte-identical BY
-   *  CONSTRUCTION: the helpers return the literal bytes the template used to
-   *  spell inline until a frontend opts in, and a frontend opts in only for a
+   *  CONSTRUCTION: the helpers return the literal bytes the template spells
+   *  inline until a frontend opts in, and a frontend opts in only for a
    *  UI that is ALREADY i18n-enabled by its authored strings (the same gate
    *  `APP_SHELL_CHROME` / `FORM_CHROME` use).  Pack chrome therefore never
    *  flips the translation runtime on for a string-less app.

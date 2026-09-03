@@ -1,13 +1,11 @@
 // Shared leaf helpers for the JS-family `WalkerTarget` implementations
 // (tsx / svelte / vue).  These targets speak the same surface JS — the
 // TanStack Query hook-name family, the decimal.js money convention,
-// JSX-style `{}`-significant text — so their private helper tails were
-// three byte-identical copies before this module.  HEEx stays apart
-// (Elixir spellings throughout).
+// JSX-style `{}`-significant text — so one helper tail serves all three rather
+// than three copies of it.  HEEx stays apart (Elixir spellings throughout).
 //
-// Behaviour contract: every function here must keep the exact output
-// of the per-target copies it replaced — the per-frontend
-// byte-identity gates pin this.
+// Behaviour contract: every function here emits identically for all three
+// targets — the per-frontend byte-identity gates pin this.
 
 import type { TypeIR } from "../../ir/types/loom-ir.js";
 import type { VariantMatchSpec } from "./target.js";

@@ -98,9 +98,8 @@ function testidProp(c: Ctx): string {
  *  (`ariaLabelExpr`, D-I18N-ATTR in `_walker/i18n-emit.ts`).  That value is
  *  ALREADY translated where the ui has strings — `(I18n.t "<key>" "<default>")`,
  *  keyed to `.loom/messages.en.json` — and a plain F# `"…"` literal otherwise,
- *  which is byte-identical to the pre-i18n emission.  Before this seam the pack
- *  read the RAW `label:` text, which is why a Feliz Button/Toolbar shipped its
- *  accessible name in English no matter the locale.
+ *  otherwise.  Reading the RAW `label:` text here instead ships a Feliz
+ *  Button/Toolbar's accessible name in English no matter the locale.
  *
  *  `fallback` is the pack's own default for a primitive whose contract requires
  *  a name (Toolbar's `"Actions"`); it is already an F# literal. */
@@ -231,8 +230,8 @@ function primitiveSkeleton(_c: Ctx): string {
 function primitiveKeyValueRow(c: Ctx): string {
   // The label is a user-visible slot: raw text normally, an already-rendered
   // `Html.text (I18n.t …)` ELEMENT under i18n (M-T1.11).  `textOrChildren` takes
-  // either form — splicing the element into the F# string literal this used to
-  // build would have rendered the whole call as visible text.
+  // either form — splicing the element into an F# string literal would render
+  // the whole call as visible text.
   const label = `Html.dt [ prop.className "text-sm font-medium text-base-content/70 sm:w-40 sm:flex-shrink-0"; ${textOrChildren(String(c.label ?? ""))} ]`;
   // The `data-testid` rides the VALUE cell, not the whole row — the detail page
   // object reads `field(name).innerText()` expecting just the value ("Confirmed"),
@@ -256,9 +255,8 @@ function primitiveAnchor(c: Ctx): string {
   if (!c.hasTo) return `Html.span [ ${asChild(label)} ]`;
   // `to` arrives as an F# EXPRESSION (the walker renders it through the target's
   // own leaf table): `"/products"` for a literal path, `"/greet/" + who` for a
-  // computed one.  Used verbatim — it used to be unwrapped from a JS-quoted
-  // literal, which meant a computed destination arrived as JS and was spliced
-  // into F# source (finding A12).
+  // computed one.  Used verbatim: unwrapping it from a JS-quoted literal
+  // splices a computed destination into F# source as JS.
   const href = String(c.to ?? '"/"');
   const inner = textOrChildren(label);
   // Plain daisyUI `link` (underlined, inherits `base-content`) — NOT
@@ -319,7 +317,7 @@ function primitiveTable(c: Ctx): string {
 }
 
 /** DataGrid — daisyUI chrome around a TanStack `table-core` instance
- *  (M-T1.1 slice 10e).
+ *  (M-T1.1).
  *
  *  The `table` binding, the column defs and every state slice come from the
  *  walker-emitted `[<ReactComponent>]` child that wraps this markup
@@ -373,7 +371,7 @@ function primitiveDataGrid(c: Ctx): string {
     : "";
 
   // `aria-sort` on the header cell is the a11y contract the JSX packs already
-  // ship (M-T1.1 slice 5); a sortable header without it is a WCAG gap.
+  // ship (M-T1.1); a sortable header without it is a WCAG gap.
   const head =
     `Html.thead [ prop.children [\n` +
     `        yield! unbox<obj array> (table?getHeaderGroups()) |> Array.map (fun hg ->\n` +
@@ -569,7 +567,7 @@ function primitiveEnumBadge(c: Ctx): string {
 }
 /** Stat(label, value) — a daisyUI stat card.  `label`/`value` are raw text. */
 /** Chart(kind:, of:, x:, y:) — a line/bar chart as INLINE SVG, computed by the
- *  `View.chart` helper from the rows already in the Model (M-T1.3 Phase 4).
+ *  `View.chart` helper from the rows already in the Model (M-T1.3).
  *
  *  No charting library, and no dependency added to the emitted `.fsproj` — the
  *  same conclusion the HEEx leg reached, and for the same reason: the rows are

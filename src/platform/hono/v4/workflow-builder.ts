@@ -97,9 +97,9 @@ export function buildWorkflowsFile(
   ctx: EnrichedBoundedContextIR,
   aggsByName: Map<string, AggregateIR>,
   /** resourceName → sourceType, so resource-op verb helpers can be
-   *  imported from `../resources/<sourceType>` (Phase 4). */
+   *  imported from `../resources/<sourceType>`. */
   resourceSourceTypes: Map<string, string> = new Map(),
-  /** Source-map Milestone 11 (workflow-body statement regions) — allocated by
+  /** Source-map (workflow-body statement regions) — allocated by
    *  the caller (`src/platform/hono/v4/emit.ts`) ONLY when a recorder is
    *  present, so a no-`--sourcemap` run pays no per-statement bookkeeping
    *  cost.  `http/workflows.ts` pools every workflow's command route AND its
@@ -469,7 +469,7 @@ export function buildWorkflowsFile(
     .filter((n, i, a) => a.indexOf(n) === i)
     .filter((n) => new RegExp(`\\b${n}\\b`).test(bodyStr));
   // The mikro outbox tier's capture + drain read/write the `__loom_outbox` Row
-  // entity (M-T6.23 slice 1); same body-scan gate.
+  // entity (M-T6.23); same body-scan gate.
   const outboxRowReferenced = new RegExp(`\\b${MIKRO_OUTBOX_ROW_CLASS}\\b`).test(bodyStr)
     ? [MIKRO_OUTBOX_ROW_CLASS]
     : [];
@@ -531,7 +531,7 @@ export function buildWorkflowsFile(
   if (servicesReferenced.length > 0) {
     imports.push(`import { ${servicesReferenced.sort().join(", ")} } from "../domain/services";`);
   }
-  // Resource-op verb helpers (Phase 4): `<resource>$<verb>` exported by
+  // Resource-op verb helpers: `<resource>$<verb>` exported by
   // the client module at `../resources/<sourceType>`.  Group the
   // imports by sourceType module; one named import per (resource, verb)
   // pair the body uses.
@@ -659,7 +659,7 @@ function emitWorkflowRoute(
   wf: WorkflowIR,
   ctx: BoundedContextIR,
   aggsByName: Map<string, AggregateIR>,
-  /** Source-map Milestone 11 (workflow-body statement regions) — when passed,
+  /** Source-map (workflow-body statement regions) — when passed,
    *  pushes ONE `OpFragment` covering this route's workflow-body chunk list.
    *  `http/workflows.ts` is a POOLED file (every workflow + reactor shares
    *  it), so it never gets a whole-file region — only these fragment-only
@@ -683,7 +683,7 @@ function emitWorkflowRoute(
   out.push(`      204: { description: "No content" },`);
   // workflow → 400 (domain) + 422 (validation, ProblemDetails with §3.2
   // `errors[]` extension emitted by the shared defaultHook), per the
-  // openapi-errors matrix.  Phase D of
+  // openapi-errors matrix.  See
   // docs/old/proposals/validation-error-extension.md.
   out.push(
     `      400: { description: "Bad Request", content: { "application/problem+json": { schema: ProblemDetails } } },`,
@@ -828,8 +828,8 @@ function emitWorkflowRoute(
   // pre-flattened `renderWorkflowStmts` — byte-identical either way
   // (`renderWorkflowStmts` IS `chunks.flat()` by construction), but the
   // per-chunk list lets us surface per-statement sub-regions to the caller
-  // that owns the recorder + this file's final content (source-map
-  // Milestone 11).  Both branches render directly at their final indent (no
+  // that owns the recorder + this file's final content (source-map).
+  // Both branches render directly at their final indent (no
   // post-hoc re-indent transform like the .NET transactional path), so the
   // chunk texts collected here are already the exact text that lands in
   // `http/workflows.ts`.
@@ -1095,7 +1095,7 @@ function emitSubscriptionHandlers(
   helperDone: Set<string> = new Set<string>(),
   /** Whether the stream (de)serialisers were already emitted by the prelude. */
   serializersDone = false,
-  /** Source-map Milestone 11 — forwarded into each reactor/starter handler
+  /** Source-map — forwarded into each reactor/starter handler
    *  body (see `emitHandlerFn` / `emitEventSourcedHandlerFn`). */
   opFragments?: OpFragment[],
   /** Owning-context resolver for the shared `<ctx>_events` log const — see
@@ -1209,7 +1209,7 @@ function emitSubscriptionHandlers(
  *  log `event_dead_lettered` once.
  *
  *  `usingMikro` swaps the store for the EntityManager + `LoomOutboxRow`
- *  EntitySchema (M-T6.23 slice 1) — same table, same at-least-once contract,
+ *  EntitySchema (M-T6.23) — same table, same at-least-once contract,
  *  same `__loomEventId` marker threaded onto the redelivered event. */
 function emitOutboxMachinery(durable: ReadonlySet<string>, usingMikro = false): string[] {
   const types = [...durable].sort().map((t) => JSON.stringify(t));
@@ -1311,7 +1311,7 @@ function emitOutboxMachinery(durable: ReadonlySet<string>, usingMikro = false): 
   return out;
 }
 
-/** The `persistence: mikroorm` half of the outbox tier (M-T6.23 slice 1).
+/** The `persistence: mikroorm` half of the outbox tier (M-T6.23).
  *
  *  Same two exports, same signatures modulo the `db` handle (EntityManager),
  *  same wire contract — only the store differs:
@@ -1511,7 +1511,7 @@ function emitHandlerFn(
    *  no-ops when the saga row already records the inbound outbox event id
    *  and stamps it before save.  Ephemeral contexts stay byte-identical. */
   durable = false,
-  /** Source-map Milestone 11 — see `emitWorkflowRoute`'s `opFragments`; same
+  /** Source-map — see `emitWorkflowRoute`'s `opFragments`; same
    *  fragment-only discipline, keyed off the SAME `${ctx.name}.${wf.name}`
    *  construct as the workflow's command-route body (a reactor/starter body
    *  belongs to the same workflow). */
@@ -1647,7 +1647,7 @@ function emitEventSourcedHandlerFn(
    *  append and the workflow event folds twice.  A create with no paired `on`
    *  stays byte-identical (guard omitted). */
   guardStreamExists = false,
-  /** Source-map Milestone 11 — see `emitWorkflowRoute`'s `opFragments`; same
+  /** Source-map — see `emitWorkflowRoute`'s `opFragments`; same
    *  fragment-only discipline and construct id. */
   opFragments?: OpFragment[],
   /** `persistence: mikroorm` — the `db` handle is the EntityManager. */
@@ -1743,7 +1743,7 @@ function emitEventSourcedHandlerFn(
  *  switches on `event.type` and fans each event out to its handlers, passing
  *  itself so a handler's own emits re-enter.  `createApp` installs this as the
  *  default dispatcher (replacing Noop) when the context has subscriptions. */
-/** Workflow-less durable-broker PRODUCER shape (M-T4.4 slice 3): the
+/** Workflow-less durable-broker PRODUCER shape (M-T4.4): the
  *  deployable hosts no reactor, but its durable events ride a broker-bound
  *  `queue`/`work` channel — the outbox must capture them (routes wire
  *  `createOutboxDispatcher`) and the relay publishes them on drain
@@ -1843,13 +1843,13 @@ export function honoWorkflowStmtTarget(
    *  row for an inline `audited` op-call (the reactor path passes none). */
   audit?: { dbHandle: string; repoVarByAgg: Map<string, string> },
 ): WorkflowStmtTarget {
-  // Read-port wiring (domain-services.md rev. 4, Slice 1): a `reading`-tier
+  // Read-port wiring (domain-services.md rev. 4): a `reading`-tier
   // domain-service call is supplied its repository handle(s) ahead of the user
   // args.  The handle var is `lowerFirst(repo)` — the SAME var the workflow
   // constructs for that repo (`collectReposForWorkflow` includes service ports),
   // so a service reading `Accounts` is passed the workflow's `accounts` repo.
   // PURE services resolve to `[]` → byte-identical.
-  const readPortArgs = workflowReadPortResolver(ctx);
+  const readPortArgs = readPortResolver(ctx);
   const renderArg = (e: ExprIR): string =>
     renderExprWithParams(e, paramExprs, thisName, readPortArgs);
   // Unique suffix per in-body audit capture so multiple audited op-calls in one
@@ -1884,7 +1884,7 @@ export function honoWorkflowStmtTarget(
       const renderedArgs = st.args.map(renderArg);
       const args = renderedArgs.join(", ");
       const op = lookupOp(ctx, st.aggName, st.op);
-      // Extern operations (extern (b) Phase 2) re-home to an aggregate-owned
+      // Extern operations (extern (b)) re-home to an aggregate-owned
       // hook, so a workflow calls `<target>.<op>(...)` like any other op — the
       // method runs preconditions → hook → invariants internally.
       // A currentUser-gated op takes a trailing `currentUser` argument
@@ -2019,7 +2019,7 @@ export function honoWorkflowStmtTarget(
       return out;
     },
     // Bare resource-op statement (`files.put(k, v)`).  `renderArg` renders
-    // the call as `(await files$put(...))`; emit it as a statement (Phase 4).
+    // the call as `(await files$put(...))`; emit it as a statement.
     resourceCall: (st, indent) => [`${indent}${renderArg(st.call)};`],
     // Bare `Transfer.run(src, dst, amount)` domain-service call
     // (domain-services.md rev. 4, the `mutating` tier).  `renderArg` produces
@@ -2061,14 +2061,12 @@ export function renderExprWithParams(
 }
 
 /** Build the read-port resolver for a workflow's `reading`-tier domain-service
- *  calls (domain-services.md rev. 4, Slice 1).  Given a `<service>.<op>` call,
+ *  calls (domain-services.md rev. 4).  Given a `<service>.<op>` call,
  *  returns the repository handle var names (`lowerFirst(repo)`) to prepend — the
  *  read-ports the service operation consumes (derived from its body), in order.
  *  A pure service op has no ports, so the resolver returns `[]` and the call
  *  renders byte-identically. */
-function workflowReadPortResolver(
-  ctx: BoundedContextIR,
-): (service: string, op: string) => string[] {
+export function readPortResolver(ctx: BoundedContextIR): (service: string, op: string) => string[] {
   return (service, op) => {
     const svc = ctx.domainServices.find((s) => s.name === service);
     const operation = svc?.operations.find((o) => o.name === op);
@@ -2083,6 +2081,25 @@ function workflowReadPortResolver(
  *  that repository directly.  De-duplicated by repository name across all
  *  service calls in the body. */
 function collectServiceReadPorts(wf: WorkflowIR, ctx: BoundedContextIR): ReadPort[] {
+  return serviceReadPorts(wf.statements, [], ctx);
+}
+
+/** The read ports every `reading`-tier domain-service call inside `statements`
+ *  (plus any loose `extraExprs`, e.g. a handler's `return` expression) needs.
+ *  De-duplicated by repository name.
+ *
+ *  Split out of `collectServiceReadPorts` so the EXPLICIT-HANDLER route builder
+ *  can reuse it: a `commandHandler` / `queryHandler` orchestrates services
+ *  exactly as a workflow does, but constructed none of their ports and rendered
+ *  its `return` expression without the resolver — so
+ *  `return Registration.isHolderFree(holder)` emitted a call that was both
+ *  arity-short and un-awaited against an `async isHolderFree(accounts, holder)`
+ *  (M-T5.14). */
+function serviceReadPorts(
+  statements: WorkflowStmtIR[],
+  extraExprs: readonly ExprIR[],
+  ctx: BoundedContextIR,
+): ReadPort[] {
   const byRepo = new Map<string, ReadPort>();
   const visit = (e: ExprIR): void => {
     if (e.kind === "call" && e.callKind === "domain-service" && e.serviceRef) {
@@ -2106,7 +2123,8 @@ function collectServiceReadPorts(wf: WorkflowIR, ctx: BoundedContextIR): ReadPor
       }
     }
   };
-  walkStmts(wf.statements);
+  walkStmts(statements);
+  for (const e of extraExprs) visit(e);
   return [...byRepo.values()];
 }
 
@@ -2120,9 +2138,27 @@ function mergeReadPortRepos(
   wf: WorkflowIR,
   ctx: BoundedContextIR,
 ): { repoName: string; aggName: string }[] {
+  return mergeServiceReadPortRepos(own, collectServiceReadPorts(wf, ctx));
+}
+
+/** The statements-and-expressions form of {@link mergeReadPortRepos}, for the
+ *  explicit-handler builder. */
+export function mergeHandlerReadPortRepos(
+  own: { repoName: string; aggName: string }[],
+  statements: WorkflowStmtIR[],
+  extraExprs: readonly ExprIR[],
+  ctx: BoundedContextIR,
+): { repoName: string; aggName: string }[] {
+  return mergeServiceReadPortRepos(own, serviceReadPorts(statements, extraExprs, ctx));
+}
+
+function mergeServiceReadPortRepos(
+  own: { repoName: string; aggName: string }[],
+  ports: readonly ReadPort[],
+): { repoName: string; aggName: string }[] {
   const seen = new Set(own.map((r) => r.repoName));
   const out = [...own];
-  for (const port of collectServiceReadPorts(wf, ctx)) {
+  for (const port of ports) {
     if (seen.has(port.repo)) continue;
     seen.add(port.repo);
     out.push({ repoName: port.repo, aggName: port.aggregate });

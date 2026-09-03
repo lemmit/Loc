@@ -33,6 +33,10 @@ const wrap = (uiBody: string) => `
 system Demo {
   subdomain S {
     context C {
+      valueobject Money {
+        amount: decimal
+        currency: string
+      }
       aggregate Customer {
         name: string
         operation archive() { }
@@ -92,8 +96,35 @@ describe("loom.page-primitive-extra-children — the gate", () => {
       await diagnostics(`page X { route: "/x"  body: Stat { "R", "10", Text { "extra" } } }`)
     ).find((x) => x.code === CODE);
     expect(d?.severity).toBe("error");
-    expect(d?.message).toMatch(/page 'X'/);
+    // The HOST lives in `source` (the CLI prints `${code} ${source}: …`); the
+    // message must not repeat it — see F2-FFE-9.
+    expect(d?.source).toBe("page 'X'");
     expect(d?.message).toMatch(/Stat/);
+  });
+
+  // MEMBERSHIP (`fixed-slot-arity-membership-incomplete`).  The gate's own
+  // header described the class, but the table listed exactly `Stat` /
+  // `KeyValueRow` / the op-form `Modal` — every OTHER fixed-arity read in the
+  // primitive table stayed unguarded, so `EnumBadge { "x", "dropped" }` and
+  // `Image { "/a.png", "/dropped.png", alt: "a" }` both parsed `0 error(s)`
+  // and both emitted only positional 0.  Membership now comes from
+  // `WALKER_PRIMITIVE_ARGS`, one declaration per primitive.
+  it.each([
+    ['EnumBadge { "x", "dropped" }', "EnumBadge"],
+    ['Image { "/a.png", "/dropped.png", alt: "a" }', "Image"],
+    ['Text { "keep", "dropped" }', "Text"],
+    ['Money { 10, "dropped" }', "Money"],
+    ['Heading { "H", "dropped" }', "Heading"],
+    ['Anchor { "L", "dropped", to: "/x" }', "Anchor"],
+    ['Alert { "msg", "dropped" }', "Alert"],
+    ['Badge { "b", "dropped" }', "Badge"],
+    ['Loader { "dropped" }', "Loader"],
+    ['Icon { "dropped", name: "star" }', "Icon"],
+  ])("flags the extra positional on %s", async (body, name) => {
+    const d = await diagnostics(`page X { route: "/x"  body: ${body} }`);
+    const hit = d.find((x) => x.code === CODE);
+    expect(hit, `${name}: no ${CODE} raised`).toBeDefined();
+    expect(hit?.message).toMatch(new RegExp(name));
   });
 
   it("reports ONE diagnostic per primitive, however often the page repeats it", async () => {
@@ -155,6 +186,39 @@ describe("loom.page-primitive-extra-children — what it must NOT flag", () => {
         page X {
           route: "/x"
           body: Card { "T", Text { "a" }, Text { "b" }, Text { "c" } }
+        }
+      `),
+    ).not.toContain(CODE);
+  });
+
+  it("POSITIVE CONTROL: a `Column`'s header AND accessor lambda are both slots", async () => {
+    // Two positionals, both read (`emitColumn`: `positionals[0]` header,
+    // `positionals[1]` accessor).  Capping `Column` at one rejected 342 shipped
+    // scaffolded pages across the corpus — the reason this gate's membership is
+    // pinned to the emitters rather than eyeballed.
+    expect(
+      await codes(`
+        page X {
+          route: "/x"
+          body: QueryView {
+            of: Shop.Customer.all,
+            data: rows => Table { rows: rows, Column { "Name", o => Text { o.name } } }
+          }
+        }
+      `),
+    ).not.toContain(CODE);
+  });
+
+  it("POSITIVE CONTROL: a value object sharing a primitive's NAME is not the primitive", async () => {
+    // `Money(9.99, "USD").currency` in `web/src/examples/expression-showcase.ddd`
+    // constructs the VO `Money`; the walker hands the whole member access to
+    // `emitExpr` and never dispatches the `Money` PRIMITIVE.  Reading it as one
+    // rejected shipped source over an arity that does not apply to it.
+    expect(
+      await codes(`
+        page X {
+          route: "/x"
+          body: Stat { "vo", Money(9.99, "USD").currency }
         }
       `),
     ).not.toContain(CODE);

@@ -15,10 +15,19 @@
 //
 // UNREACHABLE from the `test e2e` surface as it stands — no amount of test
 // writing drains these; each needs a change to the harness, an emitter, or the
-// DSL: `tenantRegistryRow` (15) and `gateProbe` (1).
+// DSL: `tenantRegistryRow` and `gateProbe`.
 //
 // UN-AUTHORED — writable today, nobody has written them:
-// `seededListReadUnwritten` (2).
+// `seededListReadUnwritten`.
+//
+// The per-class COUNTS are not written here any more.  They used to be, and
+// this PR is what broke them: draining `policy-document` added five
+// `tenantRegistryRow` pins, the header still said 15, and nothing noticed —
+// a comment is not reachable from the thing it describes, so it cannot be
+// contradicted.  The counts live in `PIN_CLASS_CENSUS` at the foot of this file
+// instead, recomputed from the pins and gated by `api-caller-census.test.ts`,
+// so the next agent to add a pin gets a failing test rather than prose that has
+// quietly gone wrong.
 //
 // That second class was empty until M-T6.37 and is the interesting movement
 // here.  `unseededListRead` exited by having its HARNESS fixed (#2517): the node
@@ -113,7 +122,7 @@
 //      (a representation decision); the two sorted reads that hit it now sort by
 //      a timestamp instead, with the finding written down at both sites.
 //
-// WHAT IS LEFT, by class: tenantRegistryRow 15, seededListReadUnwritten 2, gateProbe 1.
+// WHAT IS LEFT, by class: see `PIN_CLASS_CENSUS` (gated; counts are not repeated in prose).
 
 /** Why an operation is pinned.  Grouped by CLASS — see the header. */
 export const R = {
@@ -329,6 +338,34 @@ export const R = {
   gateProbe:
     "unreachable: e2e has no can_<op> probe verb (the gate's 409 is exercised via the operation)",
   /**
+   * BLOCKED ON A LIVE DEFECT — an operation whose in-process subscriber CRASHES
+   * the backend, so a caller cannot be written without turning the tier red on
+   * a bug this PR does not own.
+   *
+   * The one pin: `lifecycle-guard`'s `Crate.release`.  It emits `CrateReady`,
+   * whose workflow subscriber creates a GUARDED `Shipment` from in-process code
+   * that has no request principal.  Calling it on the node leg kills the
+   * runner:
+   *
+   *     POST /api/crates/{id}/release  -> operation_invoked
+   *                                    -> event_dispatched
+   *                                    -> process exits 99, no verdict
+   *
+   * Two things are visible in that trace and both look wrong: the dispatched
+   * event is logged as `"event_type":"Object"` rather than `CrateReady`, and
+   * nothing handles the guarded create's refusal for a principal-less caller.
+   *
+   * This is the SAME class `policy-document` turned out to be — a route no
+   * runtime caller had ever driven, hiding a real defect — and it was only
+   * observable once this fixture gained a `test e2e` block at all.  It is NOT
+   * pinned to avoid work: it is pinned because the fix is the guarded-create
+   * seam split across five backends (the fixture's own header describes the
+   * Phoenix half), which is a mission, not a line.  Drain this by fixing that,
+   * and the caller is three lines.
+   */
+  principalLessSubscriberCrash:
+    "blocked: the in-process subscriber crashes the backend (guarded create, no request principal)",
+  /**
    * UN-AUTHORED — `crudish`'s canonical `update` (`POST /api/<aggs>/{id}/update`).
    * Reachable today (`api.<aggs>.update(id, { … })`), simply never written.
    * This is the exact route #2342 found carrying TWO contract bugs (a PATCH the
@@ -365,8 +402,8 @@ export const R = {
 /** `<case key> → { <derived operationId>: reason }`.  Case keys match
  *  `POPULATION` in `api-caller-census.test.ts`. */
 export const UNCALLED_PINS: Record<string, Record<string, string>> = {
-  // ── The THREE TENANT REGISTRIES ──────────────────────────────────────────
-  // Fifteen pins, one cause: the derived self-scope filter narrows every read
+  // ── THE TENANT REGISTRIES ────────────────────────────────────────────────
+  // Many pins, one cause: the derived self-scope filter narrows every read
   // (and every write's load-before-save) to the row whose id IS the principal's
   // claim, and the harness principal's claim is not a row id.  See
   // `R.tenantRegistryRow` — draining them needs a harness change, not a test.
@@ -411,6 +448,19 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
     updateOrg: R.tenantRegistryRow,
     allOrg: R.tenantRegistryRow,
   },
+  // ── The DOCUMENT-crossing fixture's tenant registry ──────────────────────
+  // `policy-document` declares `tenancy by user.tenantId of Org` too, so its
+  // `Org` is a fourth tenant registry joining the same one cause as `policy-deny`
+  // directly above: the deny/deep stances are fully driven by the fixture's own
+  // caller, and asserting the 404s these five routes DO answer would pin the
+  // harness artefact rather than the feature.
+  "corpus/policy-document": {
+    createOrg: R.tenantRegistryRow,
+    getOrgById: R.tenantRegistryRow,
+    destroyOrg: R.tenantRegistryRow,
+    updateOrg: R.tenantRegistryRow,
+    allOrg: R.tenantRegistryRow,
+  },
   // ── The `when`-gate probe ────────────────────────────────────────────────
   // The one route with no `test e2e` verb at all.  The gate itself is
   // exercised: the 409 on the gated operation, and — added by this drain — the
@@ -418,6 +468,13 @@ export const UNCALLED_PINS: Record<string, Record<string, string>> = {
   // it.  Only the `can_<op>` endpoint a UI polls stays uncalled.
   "corpus/state-gate": {
     canCancelOrder: R.gateProbe,
+  },
+  // ── The workflow door that kills the runner ──────────────────────────────
+  // Found by draining this fixture: the two collection reads and all three
+  // gates are driven, and `release` is the one route that cannot be.  See
+  // `R.principalLessSubscriberCrash` for the trace.
+  "corpus/lifecycle-guard": {
+    releaseCrate: R.principalLessSubscriberCrash,
   },
 };
 
@@ -565,18 +622,26 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // mutation-proven).  Drain: give `Order` a create, then drive `Echo` / `Sum`
   // — the two pure-computation routes need no data at all.
   "handler-triad",
-  // The lifecycle `requires` gate.  ENFORCEMENT is pinned structurally per
-  // backend in `test/generator/lifecycle-guard-render.test.ts` (mutation-proven
-  // against ten seeded emitter defects), but no RUNTIME caller exercises it, and
-  // the two reasons are worth stating rather than hiding: an e2e proving the 403
-  // needs a principal whose `permissions` claim the behavioural harness does not
-  // mint (the OIDC fixture's mock issuer supplies `realm_access.roles` and
-  // nothing else), and the e2e DSL has no negative-status assertion form to
-  // spell a denial with — every emitted block asserts a SUCCESSFUL path.  The
-  // runtime negative-authz proof for `requires` lives in the M-T3.13 OIDC e2e
-  // legs; extending it to the lifecycle gate is M-T9.13's drain, not this
-  // slice's.
-  "lifecycle-guard",
+  // `lifecycle-guard` DRAINED — and, like `policy-document` before it, only
+  // after the thing it was hiding was FIXED.  Its two named blockers both fell,
+  // but not in the way the entry predicted:
+  //
+  //   • "the e2e DSL has no negative-status assertion form" was already STALE —
+  //     `expect(<call>).toThrow(404)` is the form.
+  //   • the CLAIM-SET blocker was real, and was NOT a harness problem.  The
+  //     entry said `DEV_CLAIMS` "is pinned to STRING claims because the
+  //     non-node backends honour only strings", which reads as "widen the
+  //     constant".  Widening it would have changed nothing: dotnet, python,
+  //     java and elixir each built their `x-loom-dev-claims` mapper over
+  //     string-typed fields alone, so the array was dropped by the EMITTER
+  //     before it ever reached `currentUser`.  Four emitters, one shared
+  //     classifier (`src/generator/_auth/dev-claims.ts`), then the drain.
+  //
+  // The fixture now carries both halves, which is the point: the `test e2e`
+  // drives the AUTHORIZED side of all three gates plus the ungated control, and
+  // the `AUTHZ_LADDERS` entry drives the denial. Mutation-proved that neither
+  // half suffices — a NO-OP gate passes the e2e and fails the ladder, an
+  // ALWAYS-DENY gate passes the ladder's 403 and fails the e2e.
   // BROKER SIDECAR (the outbox relay's delivery half). Same home as
   // `channels-broker`.
   "outbox",
@@ -585,16 +650,35 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // and the undenied control), so "a denied read 404s / lists empty" is proven
   // rather than assumed.  Its five registry routes are pinned above.
   //
-  // The `shape: document` × authz crossing (pairwise F1) is a DIFFERENT fixture
-  // and stays: codegen CRASHED on node/java/python until the in-app desugar
-  // landed, so its first job is the compile tier — but "the deep ladder actually
-  // hides an out-of-subtree document row over HTTP" is still unproven at runtime.
-  // A runtime caller there needs an AUTHENTICATED, UNAUTHORIZED principal (the
-  // ladder is meaningless with one identity), which is the multi-principal
-  // harness work (#2515), not that fixture's.  The emitted predicate IS executed
-  // against fabricated rows in `test/generator/policy-document-inapp.test.ts`, so
-  // the filtering semantics are proven — just not end-to-end over the wire.
-  "policy-document",
+  // `policy-document` DRAINED — but only after the defect it was hiding was
+  // FIXED, which is the whole argument for this register.  Writing the caller
+  // and booting it (node leg) produced:
+  //
+  //     POST /api/things            -> 201  (aggregate_created)
+  //     GET  /api/things/{that id}  -> 404
+  //
+  // `tenantOwned`'s `onCreate` stamps (`tenantId := currentUser.tenantId`,
+  // `dataKey := currentUser.orgPath`) never reached the `shape: document` write
+  // path: the relational repository lands them via `db/audit-stamp.ts`
+  // `stampInsert(row)`, and the document repository never imported it.  So every
+  // tenant-owned document row was written with an EMPTY tenant and was invisible
+  // to every principal INCLUDING ITS CREATOR — read, update and destroy all 404,
+  // silently, behind a 201.  The read filter was correct the whole time; nothing
+  // had ever written a real row through the real create path for it to filter,
+  // which is exactly why `test/generator/policy-document-inapp.test.ts` (which
+  // runs the predicate over FABRICATED rows) stayed green through it.
+  //
+  // The fix stamps the doc payload on the INSERT branch only — the update writes
+  // the whole blob, so `stampUpdate`'s create-field STRIP would delete the
+  // tenant.  The caller now drives `allow deep` (admit, incl. the author's own
+  // `where`) and `deny` (nothing, and 404 on both mutations) over HTTP, and its
+  // first read is the stamp's regression test.
+  //
+  // What the caller still does NOT prove is stated in the fixture beside it: the
+  // deep rung HIDING an out-of-subtree row needs a second tenancy identity the
+  // behavioural tier does not have (`DEV_CLAIMS_UNAUTHORIZED` shares the tenant
+  // by design).  That half belongs to `tenancy-e2e`.  Its five registry routes
+  // are pinned below.
   // SIDECARS — `objectStore` (S3/minio), `queue`, an http `api` peer and a
   // `mailer` (mailpit).  A put→get round-trip needs them standing up, which is
   // `email-e2e.yml`'s and `channels-e2e.yml`'s shape, not this leg's.
@@ -606,3 +690,31 @@ export const E2E_LESS_CORPUS_FIXTURES: readonly string[] = [
   // `tenancy-e2e.yml`'s hierarchy legs (label/post-merge).
   "tenancy-hierarchy",
 ];
+
+/**
+ * How many pins each reason class currently carries — the header's old
+ * hand-written tallies, moved into code so they can be checked.
+ *
+ * The prose version was ACCURATE until this PR and then silently was not: the
+ * `policy-document` drain added five `tenantRegistryRow` pins (15 → 20) and the
+ * header went on saying 15, because nothing read it.  This constant IS read —
+ * `api-caller-census.test.ts` recomputes the census from `UNCALLED_PINS` and
+ * fails on any divergence, in either direction.  So it ratchets like the rest
+ * of this file: draining a pin without lowering its count is as loud as adding
+ * one without raising it.
+ *
+ * Counted from the pin ENTRIES, not by grepping the reason name — the header
+ * prose and the `R.*` doc comments mention `R.tenantRegistryRow` too, and a
+ * grep that includes them over-reports (it read 22 here, and 17 on the
+ * pre-drain tree where the true figure was the header's own 15).
+ *
+ * Only classes with at least one pin appear.  A class that drains to zero is
+ * deleted from here (its `R.*` reason stays, documenting the class for when it
+ * recurs — see `autoFindAll` and `crudishUpdate`).
+ */
+export const PIN_CLASS_CENSUS: Readonly<Record<string, number>> = {
+  tenantRegistryRow: 20,
+  seededListReadUnwritten: 2,
+  gateProbe: 1,
+  principalLessSubscriberCrash: 1,
+};

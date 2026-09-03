@@ -106,10 +106,14 @@ describe("server-sourced create-path defaults — .NET", () => {
     // Nullable optional param (`= null`) — NOT a non-constant record default.
     expect(dto).toMatch(/record CreateOrderRequest\([\s\S]*string\? CreatedAt = null[\s\S]*\)/);
     const ctrl = fileEndingWith(files, "OrdersController.cs");
-    // Per-request coalesce at the create command construction.
+    // Per-request coalesce at the create command construction.  The parse half
+    // is the GUARDED form since M-T6.48 (a malformed datetime is a 422, not the
+    // FormatException 500 a bare `DateTime.Parse` threw), so the coalesce reads
+    // `is null ? DateTime.UtcNow : (TryParse ? v : throw …)`.
     expect(ctrl).toMatch(
-      /request\.CreatedAt is null \? DateTime\.UtcNow : DateTime\.Parse\(request\.CreatedAt/,
+      /request\.CreatedAt is null \? DateTime\.UtcNow : DateTime\.TryParse\(request\.CreatedAt/,
     );
+    expect(ctrl).toContain('WireFormatException("/createdAt"');
   });
 
   it("a currentUser.* default coalesces to the ambient principal", async () => {

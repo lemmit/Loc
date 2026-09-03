@@ -20,6 +20,7 @@ import { buildApiModule } from "../_frontend/api-module.js";
 import { AUTH_GATE_TSX, AUTH_SESSION_TS } from "../_frontend/auth-ui.js";
 import { renderI18nModule, renderLocaleCatalog } from "../_frontend/i18n-runtime.js";
 import { LIB_SCHEMAS_PROV_TS, PROV_LINEAGE_SCHEMA_BLOCK } from "../_frontend/lib-schemas.js";
+import { MONEY_TEXT_SOURCE } from "../_frontend/money-format.js";
 import { buildPageModuleIndex } from "../_frontend/page-identity.js";
 import { buildProjectionsApiModule, readableProjections } from "../_frontend/projections-module.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
@@ -182,7 +183,7 @@ export function generateReactForContexts(
   }
 
   const workflows = allWorkflows(contexts);
-  // Name-context for `classifyPage` (slice 3c): a page's kind is derived from
+  // Name-context for `classifyPage`: a page's kind is derived from
   // its role-scoped name + area against the served decls, not a stamped origin.
   const pageCtx: PageNameCtx = {
     aggregateNames: aggregates.map(({ agg }) => agg.name),
@@ -245,7 +246,7 @@ export function generateReactForContexts(
     out.set("src/api/workflows.ts", buildWorkflowsApiModule(contexts));
   }
 
-  // Query-time projection clients (M-T1.3 Phase 1) — one shared module, 1:1
+  // Query-time projection clients (M-T1.3) — one shared module, 1:1
   // with the frontend-readable projection inventory.  Emitted only when the
   // deployable actually serves one, so a projection-free app stays
   // byte-identical.
@@ -313,7 +314,10 @@ export function generateReactForContexts(
       pack,
     ),
   );
-  out.set("src/lib/format.tsx", renderShellFile("format-helpers", {}, pack));
+  out.set(
+    "src/lib/format.tsx",
+    renderShellFile("format-helpers", { moneySource: MONEY_TEXT_SOURCE }, pack),
+  );
   // Frontend ACL shared utilities — pack-agnostic, emitted into every
   // React project.  `strict-field-map.ts` is type-only (zero runtime
   // cost; erased at compile time).  `apply-server-errors.ts` decodes
@@ -353,7 +357,7 @@ export function generateReactForContexts(
   const extraRouteSplit = deriveExtraRoutesFromUi(ui, options.topLevelComponents ?? [], pageCtx);
   const extraRoutes = extraRouteSplit.inShell;
   const outOfShellRoutes = extraRouteSplit.outOfShell;
-  // Phase 8 step 2: walk each declared `layout <Name>` referenced by
+  // step 2: walk each declared `layout <Name>` referenced by
   // a page in this ui into pre-built `NamedLayoutVM`s (slot JSX +
   // route bucket + the imports the slot JSX needs).  The shell
   // template renders one `<XLayout>` component + matching
@@ -429,11 +433,11 @@ export function generateReactForContexts(
       authUi,
       i18nEnabled,
       // Where each conventional page ACTUALLY landed.  The shell's
-      // per-aggregate / -workflow loops used to rebuild `./pages/<plural>/list`
-      // by convention, which diverges from `page.emitPath` the moment the
-      // author re-declares a scaffold page inside an `area { … }` — the shell
-      // then imported the scaffolded module and the author's page became a
-      // silently unreachable file.
+      // per-aggregate / -workflow loops must NOT rebuild
+      // `./pages/<plural>/list` by convention: that diverges from
+      // `page.emitPath` the moment the author re-declares a scaffold page
+      // inside an `area { … }`, and the shell then imports the scaffolded
+      // module while the author's page becomes a silently unreachable file.
       buildPageModuleIndex(ui, pageCtx),
     ),
   );

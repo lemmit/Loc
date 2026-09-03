@@ -456,7 +456,7 @@ export function renderUpdateProvenanceCapture(agg: AggregateIR, contextModule: s
     );
   });
   return `
-  # RS-18 — the generic update persists through \`update_changeset/2\`, so the
+  # The generic update persists through \`update_changeset/2\`, so the
   # synthesized \`operation update(...)\` body (and the inline lineage capture the
   # NAMED-operation path emits) never runs.  Re-capture it here against the
   # proposed row, so a provenanced field's lineage names the write that actually

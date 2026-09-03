@@ -52,7 +52,7 @@ import { appModuleOf, guardRaiseLine } from "./vanilla/denial.js";
 import { opCallParamFields } from "./vanilla/workflow-execution-emit.js";
 
 // ---------------------------------------------------------------------------
-// Tier-driven placement (domain-services.md rev. 4, Slice 1; Elixir decision B)
+// Tier-driven placement (domain-services.md rev. 4; Elixir decision B)
 //
 // Elixir is the structural OUTLIER among the five backends.  Where the others
 // thread a read-port HANDLE (param / injected repo) into a service that stays a
@@ -70,14 +70,14 @@ import { opCallParamFields } from "./vanilla/workflow-execution-emit.js";
 // emitter SKIPS a reading op from the `Domain.Services` module (and skips the
 // whole module when every op is reading), and `context-emit.ts` ADDS the reading
 // op as a context fn via `renderReadingServiceContextFn`.  A reading op whose
-// read-ports span MORE THAN ONE context is OUT OF SCOPE for Slice 1 — it would
+// read-ports span MORE THAN ONE context is OUT OF SCOPE for — it would
 // need a standalone module taking explicit `Repo`/context args; we keep it in
 // the `Domain.Services` module (so it still emits *something*) and flag it with a
 // `# loom.domain-service-multi-context-reading` note rather than crashing.
 // ---------------------------------------------------------------------------
 
 /** True when a reading op's read-ports all resolve to ONE context (this
- *  service's own) — the single-context case Slice 1 emits as a context fn.  A
+ *  service's own) — the single-context case, emitted as a context fn.  A
  *  port whose repository is not declared in `ctx` means the read spans another
  *  context (out of scope) — then we keep the standalone module form.
  *
@@ -123,7 +123,7 @@ export function placeMutatingInline(op: DomainServiceOperationIR, ctx: BoundedCo
 }
 
 // ---------------------------------------------------------------------------
-// Mutating-tier inlining (domain-services.md rev. 4, Slice 3 — Elixir vanilla).
+// Mutating-tier inlining (domain-services.md rev. 4 — Elixir vanilla).
 //
 // A `mutating` `Transfer.run(s, d, amount)` call in a workflow body lowers to
 // the `with`-chain of the SERVICE BODY's param-op calls, each rebound through
@@ -405,7 +405,7 @@ function renderOperation(
   // Out-of-scope guard: a `reading` op whose read-ports span MORE THAN ONE
   // context can't be a single-context fn, so it stays in the `Domain.Services`
   // module — but the module has no ambient `Repo`/context to resolve its repo
-  // reads.  Slice 1 does not emit that shape; flag it (a reviewed limitation,
+  // reads.  That shape is not emitted; flag it (a reviewed limitation,
   // not a crash) and emit a guard `raise` rather than a body that references a
   // non-existent context fn.
   const multiContextReading =
@@ -439,18 +439,18 @@ function renderOperation(
     .map((n) => `    _ = ${n}`);
 
   if (multiContextReading) {
-    // OUT OF SCOPE (Slice 1): a cross-context reading service.  Emit a guard
+    // OUT OF SCOPE: a cross-context reading service.  Emit a guard
     // raise + a visible flag note rather than a body whose repo reads name
     // context fns that don't exist in this module.
     const allDiscards = paramNames.map((n) => `    _ = ${n}`);
     return `${specLine}
   # loom.domain-service-multi-context-reading: '${op.name}' reads repositories
-  # across more than one context — out of scope for domain-services rev. 4 Slice 1
-  # (single-context reading only).  A cross-context reading service needs a
+  # across more than one context — only single-context reading is supported
+  # (domain-services.md rev. 4).  A cross-context reading service needs a
   # standalone module taking explicit Repo/context args; not emitted here.
   def ${fnName}(${paramNames.join(", ")}) do
 ${allDiscards.join("\n")}
-    raise "domain service '${op.name}': cross-context reading not yet supported (domain-services.md rev. 4 Slice 1)"
+    raise "domain service '${op.name}': cross-context reading not yet supported (domain-services.md rev. 4)"
   end`;
   }
 

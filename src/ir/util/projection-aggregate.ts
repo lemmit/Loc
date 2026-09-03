@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // WHOLE-TABLE AGGREGATION in a query-time projection's `select`
 // (read-path-architecture.md rev. 8's singleton read model — a dashboard total
-// / running count).  M-T1.3 Phase 0.
+// / running count).
 //
 // One detector, shared by every backend's projection emitter.  Each backend
 // renders the aggregation in its own SQL dialect, but WHICH selects are an

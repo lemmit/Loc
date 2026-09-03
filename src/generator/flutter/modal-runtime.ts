@@ -5,9 +5,9 @@
 // because a dialog there is just an element you do or don't put in the tree.
 // Flutter's dialogs are IMPERATIVE — `showDialog(...)` pushes a route and
 // returns a future — so there is no widget to conditionally render, and that
-// mismatch is why the primitive had no Dart renderer at all (a `Modal { open: }`
-// used to degrade to a comment, silently dropping the dialog and everything in
-// it).
+// mismatch is why the primitive needs a runtime of its own: without one a
+// `Modal { open: }` degrades to a comment, silently dropping the dialog and
+// everything in it.
 //
 // `LoomModalHost` is the bridge, and it is the standard one: a zero-size widget
 // that watches the flag and drives `showDialog` on the edge, then reports the

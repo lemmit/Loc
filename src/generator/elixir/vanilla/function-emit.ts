@@ -101,9 +101,8 @@ function renderPureBlock(stmts: StmtIR[], rc: RenderCtx): string[] {
 // site renders `this.passed()` (TS) / `record.Passed()` (.NET).  Vanilla has no
 // class, so the call lowers (render-expr `callKind: "function"`) to
 // `passed(record, <args>)` — a module-level function taking the aggregate
-// struct as its first argument.  This module emits that function so the call
-// resolves; before this it was emitted nowhere, so `mix compile` failed on the
-// undefined reference (gap §11b).
+// struct as its first argument.  This module emits that function, without which
+// `mix compile` fails on the undefined reference.
 //
 // It is emitted into the SAME module the referencing op bodies render into — the
 // context-facade module (`<App>.<Ctx>`), where `<op>_<agg>(record, params)`
@@ -124,7 +123,7 @@ export function aggHasFunctions(agg: AggregateIR): boolean {
  *  context-facade module body.  Returns `[]` for a function-less aggregate, so
  *  such an aggregate emits byte-identical output.
  *
- *  `doc` (Route A slice 2): a `shape: document` aggregate rehydrates its blob into
+ *  `doc` (Route A): a `shape: document` aggregate rehydrates its blob into
  *  a `%<Agg>.Data{}` embedded struct, so its functions take THAT struct (guarded
  *  `%<Agg>.Data{} = record`) and read fields off it (`record.<field>`) in struct
  *  mode — same relational renderer, no `docMap` fork.  The op bodies call them as

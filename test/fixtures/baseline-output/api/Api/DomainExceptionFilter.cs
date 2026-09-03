@@ -80,6 +80,40 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             context.ExceptionHandled = true;
             return;
         }
+        // Malformed WIRE value (M-T6.48) — money / datetime arrive as strings
+        // and the controller parses them before the command exists, so this is
+        // neither a FluentValidation failure (the validator runs on the COMMAND,
+        // downstream of the parse) nor a domain rule.  Same 422 + errors[]
+        // envelope as both, so a price of "12,50" reads identically on .NET
+        // and on Hono's zod moneySchema hook.
+        if (context.Exception is WireFormatException wfe)
+        {
+            var wireProblem = new ProblemDetails
+            {
+                Type = "about:blank",
+                Title = "Validation failed",
+                Status = 422,
+                Detail = "One or more fields are invalid.",
+                Instance = context.HttpContext.Request.Path,
+            };
+            // Anonymous type rather than Dictionary<,>: this arm is emitted
+            // unconditionally, and System.Collections.Generic is only imported
+            // when the project has validators.
+            wireProblem.Extensions["errors"] = new[]
+            {
+                new { pointer = wfe.FieldPointer, message = wfe.Message },
+            };
+            _log.LogWarning("{Event} message={Message} status={Status}", "domain_error", "Validation failed", 422);
+            global::Api.Observability.HttpMetrics.RecordDomainFault("domain_error");
+            context.HttpContext.Response.Headers["x-request-id"] = trace_id;
+            context.Result = new ObjectResult(wireProblem)
+            {
+                StatusCode = 422,
+                ContentTypes = { "application/problem+json" },
+            };
+            context.ExceptionHandled = true;
+            return;
+        }
         if (context.Exception is ForbiddenException fe)
         {
             _log.LogWarning("{Event} message={Message} status={Status}", "forbidden", fe.Message, 403);
@@ -104,7 +138,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             context.ExceptionHandled = true;
             return;
         }
-        // RS-15: a domain-floor rejection (precondition / invariant) is 422 —
+        // A domain-floor rejection (precondition / invariant) is 422 —
         // the request is well-formed, the domain refuses it on semantic
         // grounds.  400 stays for a malformed request.
         if (context.Exception is DomainException de)
@@ -127,16 +161,15 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         {
             // 500 — the user handler threw, which is an internal
             // failure from the framework's POV, so the body is
-            // sanitized to "internal" like every other 500 arm (RS-28).
+            // sanitized to "internal" like every other 500 arm.
             //
-            // This previously sent xh.Message, whose intent was to name
-            // the offending op + aggregate so operators didn't have to grep
-            // logs.  But that message interpolates the INNER exception the
-            // user handler threw — driver text, URLs, connection strings —
-            // into a public, potentially unauthenticated response.  The
-            // operator-facing half is unaffected: aggregate, op and the full
-            // inner exception all reach the catalog's extern_handler_threw
-            // event below.  Same shape the Hono onError arm emits.
+            // Deliberately NOT xh.Message: it interpolates the INNER
+            // exception the user handler threw — driver text, URLs,
+            // connection strings — into a public, potentially
+            // unauthenticated response.  Operators lose nothing: aggregate,
+            // op and the full inner exception all reach the catalog's
+            // extern_handler_threw event below.  Same shape the Hono
+            // onError arm emits.
             _log.LogError(xh, "{Event} aggregate={Aggregate} op={Op} error={Error}", "extern_handler_threw", xh.AggName, xh.OpName, xh.Message);
             context.Result = Problem(context, 500, "Internal Server Error", "internal", trace_id);
             context.ExceptionHandled = true;
@@ -170,7 +203,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         };
     }
 
-    // M-T6.39 — the same 404 envelope, for the routes MVC cannot reach.
+    // The same 404 envelope, for the routes MVC cannot reach.
     //
     // This class is an `IExceptionFilter`: it only ever sees exceptions raised
     // inside the MVC pipeline.  The root `/files/{key}` download is a MINIMAL

@@ -118,8 +118,8 @@ export interface WalkResult {
    *  component emitter declares `slot :inner_block` for it. */
   usesSlot: boolean;
   /** True when the body renders a `Chart { … }` — the deployable then emits the
-   *  shared `LoomChart` function component the call site invokes (M-T1.3
-   *  Phase 4, HEEx leg).  False ⇒ no component file, byte-identical output. */
+   *  shared `LoomChart` function component the call site invokes (the HEEx
+   *  leg).  False ⇒ no component file. */
   usesChart: boolean;
   /** Aggregate names (PascalCase) referenced by `X id` form fields in
    *  this page's body — the LiveView emitter loads each target's
@@ -194,7 +194,7 @@ export interface QueryBinding {
    *  read resolves to `<Ctx>.QueryProjections.<Proj>.run/1`. */
   aggregate: string;
   /** Which declaration `aggregate` names, and therefore which load the emitter
-   *  builds (M-T1.3 Phase 1, HEEx leg).  `"aggregate"` (the default, and every
+   *  builds (M-T1.3, HEEx leg).  `"aggregate"` (the default, and every
    *  binding before projections were readable) → the repository read;
    *  `"projection"` → the query-time projection's `run/1`, an IN-PROCESS call:
    *  a LiveView deployable hosts its contexts in the SAME OTP app, so the
@@ -270,12 +270,11 @@ export interface WalkContext {
   /** Aggregate PascalCase name → its owning bounded context, so a `QueryView`
    *  `of:` read can be resolved to the repository find behind it.  That is what
    *  `queryShape` needs to DERIVE whether the read is paged and whether it
-   *  yields one record — facts the LiveView renderer previously took from the
-   *  author's `paged:` / `single:` flags alone, and got wrong whenever they
-   *  were absent.  Empty default ⇒ the collection shape, i.e. the old
-   *  behaviour. */
+   *  yields one record.  Taking those from the author's `paged:` / `single:`
+   *  flags alone gets them wrong whenever the flags are absent.  Empty
+   *  default ⇒ the collection shape. */
   bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
-  /** Frontend-readable projection names (M-T1.3 Phase 1) — the detector's
+  /** Frontend-readable projection names (M-T1.3) — the detector's
    *  Pattern H set, so `QueryView { of: <api>.<Projection> }` resolves to the
    *  projection's own read instead of falling through to the aggregate arms.
    *  Derived at walker entry from `bcByAggregate`, the same single predicate
@@ -315,9 +314,9 @@ export interface WalkContext {
   stateNames: Set<string>;
   /** Per-field StateFieldIR keyed by snake-cased name.  Drives
    *  `heexTarget.renderStateRead` delegation — the contract's
-   *  `StateRef` carries the full field, but the walker historically
-   *  carried only the name set.  Built once at walker entry next
-   *  to `stateNames` so lookups stay symmetric. */
+   *  `StateRef` carries the full field, which the bare `stateNames` set
+   *  cannot supply.  Built once at walker entry next to `stateNames` so
+   *  lookups stay symmetric. */
   stateFields: Map<string, StateFieldIR>;
   /** Accumulated handle_event clauses. */
   handlers: HandleEventClause[];
@@ -418,7 +417,7 @@ export interface WalkContext {
   authEnabled?: boolean;
   /** Section/Card nesting depth, so a `Heading` with no explicit `level:`
    *  derives its rank from structure — `min(6, 2 + headingDepth)`, matching
-   *  the JSX frontends' `WalkEnv.headingDepth` (accessibility.md Phase 2, so
+   *  the JSX frontends' `WalkEnv.headingDepth` (accessibility.md, so
    *  ranks never skip).  Incremented by `renderSection` / `renderCard` for
    *  their children; undefined at page top ⇒ depth 0 ⇒ `<h2>` (the app shell
    *  owns the single `<h1>`). */
@@ -1078,7 +1077,7 @@ function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): 
   }
   // navigate(<Page>, { … }) — Loom's cross-page navigation primitive.
   if (expr.name === "navigate") {
-    return renderNavigate(expr, ctx);
+    return renderNavigate(expr.args, ctx);
   }
   // toast(<msg>) — flash message.
   if (expr.name === "toast") {
@@ -1142,7 +1141,7 @@ function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): 
   // here through an expression position would be wrapped as `<%= <!-- … --> %>`
   // — a syntax error `mix compile` rejects.  `<%!-- … --%>` is inert in both
   // positions (`isHEExCall` also keeps every registered primitive in markup
-  // position, so the wrap no longer happens either).
+  // position, so the wrap does not arise).
   if (def) {
     return `<%!-- ${expr.name}: not supported by Phoenix LiveView target --%>`;
   }
@@ -1158,11 +1157,13 @@ function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): 
 function renderBinary(expr: Extract<ExprIR, { kind: "binary" }>, ctx: WalkContext): string {
   const l = renderExpr(expr.left, ctx);
   const r = renderExpr(expr.right, ctx);
-  // String concatenation: Elixir uses `<>`.  Detect by left operand
-  // type — but in v0 we don't carry type tags on raw binary nodes
-  // ubiquitously, so assume `+` on strings if either side is a string
-  // literal.  This matches dotnet/render-expr.ts's heuristic.
-  if (expr.op === "+" && (isStringLit(expr.left) || isStringLit(expr.right))) {
+  // String concatenation: Elixir uses `<>`.  Decide on the IR TYPE stamps the
+  // way the domain renderer does (`render-expr.ts` `elixirOp(op, leftIsString)`)
+  // — `who + other` between two string state cells carries no string LITERAL
+  // on either side, and `+` on two binaries raises `ArithmeticError` at render.
+  // The literal probe stays as the fallback for synthetic binary nodes (the
+  // walker-primitive expander and friends leave the type stamps undefined).
+  if (expr.op === "+" && isStringConcat(expr)) {
     return `${l} <> ${r}`;
   }
   // A5 temporal — datetime ± duration / datetime − datetime in a page body.
@@ -1184,6 +1185,24 @@ function renderBinary(expr: Extract<ExprIR, { kind: "binary" }>, ctx: WalkContex
 
 function isStringLit(e: ExprIR): boolean {
   return e.kind === "literal" && e.lit === "string";
+}
+
+function isStringPrim(t: TypeIR | undefined): boolean {
+  return t?.kind === "primitive" && t.name === "string";
+}
+
+/** A `+` binary that is really Elixir string CONCATENATION (`<>`).  The IR type
+ *  stamps (`leftType` / `rightType` / `resultType`, populated during lowering)
+ *  are authoritative; the string-literal probe is only the fallback for
+ *  synthetic nodes that carry no stamps. */
+function isStringConcat(expr: Extract<ExprIR, { kind: "binary" }>): boolean {
+  return (
+    isStringPrim(expr.leftType) ||
+    isStringPrim(expr.rightType) ||
+    isStringPrim(expr.resultType) ||
+    isStringLit(expr.left) ||
+    isStringLit(expr.right)
+  );
 }
 
 // A5 temporal (page bodies) — the same in-memory representation as the
@@ -1229,8 +1248,70 @@ function renderTemporalBinary(
   return null;
 }
 
+/** True when an arm VALUE renders HEEx MARKUP rather than an Elixir term.
+ *
+ *  A registered primitive / authored component emits markup (`isHEExCall`),
+ *  and a nested `match` in template position emits a `<%= cond do %>` block of
+ *  its own — both of which are markup for this decision. */
+function armRendersMarkup(value: ExprIR, ctx: WalkContext): boolean {
+  if (value.kind === "call" && isHEExCall(value.name, ctx)) return true;
+  return value.kind === "match";
+}
+
 function renderMatch(expr: Extract<ExprIR, { kind: "match" }>, ctx: WalkContext): string {
   // `match { p => v; … else => f }` → Elixir `cond do … end`.
+  //
+  // HEEx has TWO `cond` spellings and they are not interchangeable:
+  //
+  //   EXPRESSION form   `<%= cond do  p -> term  end %>`   — arms are Elixir terms
+  //   BLOCK form        `<%= cond do %>`                   — arms are MARKUP
+  //                     `  <% p -> %>`
+  //                     `    <div>…</div>`
+  //                     `<% end %>`
+  //
+  // Rendering markup arms in the expression form emits a `<%= cond do` that is
+  // never closed — the arm bodies carry their own `<%= … %>` / `<% end %>`, so
+  // the outer `end` lands inside a nested block and Elixir reports the
+  // unclosed delimiter pages later:
+  //
+  //   ** (TokenMissingError) missing terminator: end
+  //    128 │           cond do      ← unclosed delimiter
+  //
+  // That is a WHOLE-PROJECT compile failure, not a bad render: `mix compile`
+  // fails, so the app never boots (schemathesis F27, found on the elixir leg,
+  // which could not fuzz at all). It reproduces on any page whose `match` arms
+  // are primitives — a list page with two filter-driven finds is the shape in
+  // `web/src/examples/storefront-elixir.ddd`.
+  //
+  // So pick the form by what the arms actually render. The block form is the
+  // same one the QueryView loading/error/empty/data ladder already emits
+  // (`heex-primitives.ts`), which is why nesting one inside the other is
+  // exactly the case that broke.
+  const markupArms =
+    ctx.position === "template" &&
+    (expr.arms.some((a) => armRendersMarkup(a.value, ctx)) ||
+      (expr.otherwise !== undefined && armRendersMarkup(expr.otherwise, ctx)));
+
+  if (markupArms) {
+    // `renderChild` gives each arm the right treatment individually: markup
+    // passes through, a plain term still gets its own `<%= … %>`. So a match
+    // that MIXES markup and term arms stays valid.
+    const lines: string[] = ["<%= cond do %>"];
+    for (const a of expr.arms) {
+      lines.push(`  <% ${renderExpr(a.cond, ctx)} -> %>`);
+      lines.push(`    ${renderChild(a.value, ctx)}`);
+    }
+    // `cond` raises CondClauseError when no arm matches, so the fallback is
+    // not cosmetic. Without an authored `else` the page renders nothing rather
+    // than crashing at request time.
+    lines.push(`  <% true -> %>`);
+    lines.push(
+      expr.otherwise !== undefined ? `    ${renderChild(expr.otherwise, ctx)}` : `    <%= nil %>`,
+    );
+    lines.push(`<% end %>`);
+    return lines.join("\n");
+  }
+
   // Delegates the bare `cond do … end` shape to `heexTarget.renderMatch`
   // (cross-framework contract — see src/generator/_walker/target.ts).
   // The `<%= … %>` template-position wrap stays here because it's
@@ -1385,7 +1466,7 @@ function renderApiCall(call: ApiCallSite, ctx: WalkContext): string {
 // Navigation + toast.
 // ---------------------------------------------------------------------------
 
-function renderNavigate(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+function renderNavigate(navArgs: readonly ExprIR[], ctx: WalkContext): string {
   // navigate(<Page>, { customerId: x }) — first arg is the page
   // reference, second is the params object.  The router uses
   // `live "<route>", <Page>Live`; lowers to `push_navigate(socket,
@@ -1398,8 +1479,8 @@ function renderNavigate(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContex
   // src/generator/_walker/target.ts).  The `args[0].kind !== "ref"`
   // fallback stays walker-local because it's a parse-time invariant
   // failure, not a per-target rendering decision.
-  const target = expr.args[0];
-  const params = expr.args[1];
+  const target = navArgs[0];
+  const params = navArgs[1];
   if (target?.kind !== "ref") {
     return `push_navigate(socket, to: "/")`;
   }
@@ -2034,6 +2115,15 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
         };
         return callee.body.map((s) => renderStmt(s, innerCtx)).join("\n      ");
       }
+      // `navigate(<Page>)` — the DOCUMENTED navigation shape (docs/actions.md).
+      // It is a `private-operation` call, so it fell into the bare-call line
+      // below and emitted `|> tap(fn _ -> navigate(other) end)`: an undefined
+      // function AND an unbound `other`, i.e. an Elixir CompileError.  Routed
+      // through the SAME resolver the expression position uses; `then/2` gives
+      // the mid-pipe socket the `push_navigate(socket, …)` shape needs.
+      if (stmt.name === "navigate" && stmt.target === "private-operation") {
+        return `|> then(fn socket -> ${renderNavigate(stmt.args, ctx)} end)`;
+      }
       // Bare function / private-operation call statement.  Evaluated for
       // its effect; the socket flows through unchanged via `tap`.
       const args = stmt.args.map((a) => renderExpr(a, { ...ctx, position: "handler" })).join(", ");
@@ -2402,8 +2492,8 @@ export function defaultInitFor(t: TypeIR): string {
 // Helpers.
 // ---------------------------------------------------------------------------
 
-// the target through the cross-framework contract above; this file
-// no longer carries the path → module name derivation.
+// the target through the cross-framework contract above; the path → module
+// name derivation does not live in this file.
 
 export function indent(s: string, n: number): string {
   const pad = " ".repeat(n);

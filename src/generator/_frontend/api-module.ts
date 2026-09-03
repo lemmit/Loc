@@ -85,9 +85,9 @@ export function historyHookName(aggName: string): string {
  *  gate for importing `provLineageSchema` into the api module, since the
  *  `Provenanced<T>` carrier's `lineage` member references it.
  *
- *  No longer an opt-in: the carrier is part of `wireShape` (M-T6.12), so EVERY
- *  frontend's response schema carries the lineage the moment the field is
- *  declared `provenanced`.  Exported so the Svelte api-builder (which emits its
+ *  Not an opt-in: the carrier is part of `wireShape`, so EVERY frontend's
+ *  response schema carries the lineage the moment the field is declared
+ *  `provenanced`.  Exported so the Svelte api-builder (which emits its
  *  response schema through the sibling `zod-schemas.ts` copy) shares the gate. */
 export function aggregateHasProvenanced(agg: EnrichedAggregateIR): boolean {
   return (
@@ -183,7 +183,7 @@ export function buildApiModule(
         `export type Prepare${agg.name}Response = z.infer<typeof Prepare${agg.name}Response>;`,
       );
     }
-    // Dual FormState/Payload aliases (frontend-acl.md Phase 3) — only when
+    // Dual FormState/Payload aliases (frontend-acl.md) — only when
     // the schema carries a real transform (a money field somewhere in the
     // create input), so `z.input` ≠ `z.output`.
     if (requiredFields.some((f) => typeReachesMoney(f.type, ctx))) {
@@ -717,7 +717,7 @@ function emitResponseSchema(
       lines.push(`  ${wf.name}: ${zodForResponse(wf.type, wf.optional)},`);
     }
   }
-  // (M-T6.12) The lineage is no longer appended here as a trailing
+  // The lineage is NOT appended here as a trailing
   // `<field>_provenance` sibling — it rides INSIDE the provenanced field's own
   // entry as the `Provenanced<T>` carrier, emitted by `zodForResponse`'s
   // `provenanced` arm from the one shape definition.
@@ -774,7 +774,7 @@ const RESPONSE_PRIMITIVE: Record<WirePrimitive, string> = {
  *  directly, through array/optional wrappers, or inside a value object.
  *  Money is the one wire type whose schema TRANSFORMS on parse
  *  (`moneySchema`: decimal string → Decimal), so it gates the dual
- *  FormState/Payload aliases (frontend-acl.md Phase 3 — emitted only
+ *  FormState/Payload aliases (frontend-acl.md — emitted only
  *  where `z.input` and `z.output` genuinely diverge; structurally
  *  identical aliases would be noise). */
 export function typeReachesMoney(t: TypeIR, ctx: BoundedContextIR): boolean {
@@ -789,7 +789,7 @@ export function typeReachesMoney(t: TypeIR, ctx: BoundedContextIR): boolean {
 }
 
 /** The dual-type aliases for a transform-bearing action schema
- *  (frontend-acl.md Phase 3): `FormState` is what a form holds
+ *  (frontend-acl.md): `FormState` is what a form holds
  *  (`z.input` — money fields are decimal strings pre-parse), `Payload`
  *  what the API client sends after parse (`z.output` — Decimal). */
 function dualTypeAliases(name: string): string[] {

@@ -38,9 +38,8 @@ const vuePlatform: PlatformSurface = {
   emitProject({ contexts, sys, deployable, topLevelComponents, sourcemap }): Map<string, string> {
     // Frontend hosts dispatch by the UI's framework, not the platform keyword —
     // a vue host can serve a `framework: react|svelte|angular` ui (any static
-    // bundle runs on a static host).  Previously vue had NO dispatch and
-    // silently emitted Vue for every framework (B19).  `vue` is the native
-    // fallback.
+    // bundle runs on a static host).  Without the dispatch a vue host emits
+    // Vue for every framework, silently.  `vue` is the native fallback.
     return dispatchFrontendProject(deployable.uiFramework, "vue", {
       contexts,
       sys,

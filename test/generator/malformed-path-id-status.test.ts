@@ -81,7 +81,8 @@ describe("a malformed path {id} answers the DECLARED 422, not a framework defaul
     );
     // The same `errors[]` pointer shape the body tier emits — `/id`, the field,
     // not the whole document — so one client ACL handles both tiers.
-    expect(advice).toContain('entry.put("pointer", "/" + e.getName());');
+    // RFC 6901: the pointer goes through `pointerOf`, not a raw "/" + name.
+    expect(advice).toContain('entry.put("pointer", pointerOf(e.getName()));');
     expect(advice).toContain("return respond(problem, 422);");
     // The arm must sit BEFORE the catch-all in the file; Spring picks the most
     // specific handler, but ordering keeps the emitted file readable and makes
@@ -104,6 +105,51 @@ describe("a malformed path {id} answers the DECLARED 422, not a framework defaul
     // …and the published `format` is unchanged, so the cross-backend
     // path-param parity dimension (type + format) still compares equal.
     expect(routes).toContain('json_schema_extra={"format": "uuid"}');
+  });
+
+  // elixir — the fifth backend, never measured when the four above were
+  // aligned.  It PUBLISHED the 422 (`openapi-emit.ts` `idParamSchema` declares
+  // the path `{id}` `format: :uuid`, and `errorStatuses("getById")` puts 422 on
+  // the operation) but could not ANSWER it: the controller bound the raw string
+  // and handed it to `Repo.get/2`, where a malformed `:binary_id` raises
+  // `Ecto.Query.CastError` out of Ecto, leaving only the app-global fault floor.
+  //
+  // MEASURED on a booted app (postgres + `mix phx.server` + `curl`), not assumed
+  // — and the measurement CORRECTED the ledger, which said 500:
+  //
+  //   without the plug   GET /api/orders/not-a-uuid
+  //                      → 400 {"title":"Bad Request","detail":"Bad Request"}
+  //                        (`Plug.Exception.status/1` maps CastError to 400)
+  //                        no `errors[]`, no pointer
+  //   with the plug      → 422 {"errors":[{"pointer":"/id",
+  //                                        "message":"Expected UUID."}]}
+  //
+  // Either way it is the wrong rung for a failure this app's own spec declares
+  // 422, answered with a body naming no field.
+  it("elixir: the aggregate controller refuses a non-uuid {id} at its edge", async () => {
+    const files = await generateSystemFiles(src("elixir"));
+    const ctrl = fileEndingWith(files, "controllers/order_controller.ex");
+    // A controller PLUG, not a per-action `case`: `show` / `delete` / `update` /
+    // each named op / each `can_<op>` / `history` all bind `{id}`, and a
+    // per-action guard is the one the next action's emitter forgets.
+    expect(ctrl).toContain("plug :__cast_path_id");
+    expect(ctrl).toContain(
+      'defp __cast_path_id(%Plug.Conn{path_params: %{"id" => id}} = conn, _opts) when is_binary(id) do',
+    );
+    expect(ctrl).toContain("case Ecto.UUID.cast(id) do");
+    // …and it must HALT, or the action runs anyway after the response is sent.
+    expect(ctrl).toContain(':error -> halt(ProblemDetails.invalid_path_id_response(conn, "id"))');
+    // The fall-through clause keeps `index` / `create` / every repository find
+    // (no `{id}` in the route) untouched.
+    expect(ctrl).toContain("defp __cast_path_id(conn, _opts), do: conn");
+
+    // The responder answers the SAME §3.2 envelope the body tier does — the
+    // shared 422 sender, `pointer: "/id"`, the java arm's message text.
+    const pd = fileEndingWith(files, "problem_details.ex");
+    expect(pd).toContain("def invalid_path_id_response(conn, param) do");
+    expect(pd).toContain(
+      'send_validation_problem(conn, [%{pointer: pointer_of([param]), message: "Expected UUID."}])',
+    );
   });
 
   it("node / .NET: the two that already answered 422 keep their mechanism", async () => {

@@ -170,7 +170,7 @@ export function emitImage(
       ? JSON.stringify(positional.value)
       : undefined;
   const src = stringOrRefArgValue(call, "src", ctx) ?? positionalSrc;
-  // `decorative: true` (accessibility.md Phase 3) renders an explicit empty
+  // `decorative: true` (accessibility.md) renders an explicit empty
   // alt (`alt=""`), hiding a purely-decorative image from assistive tech; a
   // real `alt:` wins over it.  The validator guarantees one of the two is
   // present when the image has a src.
@@ -217,13 +217,13 @@ export function emitHeading(
   // literal OR a ref (e.g. a route-param name).  Optional `level:`
   // named arg controls the heading rank (1..6); when absent the rank is
   // DERIVED from the `Section`/`Card` nesting depth (accessibility.md
-  // Phase 2 — `min(6, 2 + headingDepth)`, so levels never skip) rather
+  // `min(6, 2 + headingDepth)`, so levels never skip) rather
   // than a flat default.  At page top (depth 0) this is `<h2>`; the page
   // chrome owns the single `<h1>`.
   const text = localizedText(call, ctx, "heading", '"Heading"');
   const level = numericNamed(call, "level") ?? Math.min(6, 2 + (ctx.headingDepth ?? 0));
   void depth;
-  // Phase 5 — explicit typography control decoupled from semantic level.
+  // Explicit typography control, decoupled from the semantic level.
   // `size:` overrides the level's default size; `weight:` sets the
   // font weight; `gradient:` applies a CSS gradient as the text fill
   // via `background: <gradient>; background-clip: text; color:
@@ -304,8 +304,23 @@ export function emitKeyValueRow(
   const positionals = positionalArgs(call);
   const labelArg = positionals[0];
   const childArg = positionals[1];
+  // The VALUE slot splits two ways.  A nested primitive (`KeyValueRow { "Total",
+  // Money { o.total } }`) is an ELEMENT and walks; a plain string LITERAL is
+  // authored PROSE and must translate — `Stat { "Status", "Open" }` t()-wraps
+  // both halves, and the visually identical `KeyValueRow { "Status", "Open" }`
+  // shipped `"Open"` raw and absent from `.loom/messages.en.json` (G2667 §D9:
+  // two rows that render the same, one translatable and one not, with nothing
+  // in the DSL to tell the author which they wrote).  Routed through the same
+  // `localizedText` the label uses, under its own `keyValueValue` role so the
+  // two halves of a row keep distinct catalog keys — exactly the
+  // `statLabel`/`statValue` split.  With i18n off `localizedRawOf` falls
+  // through to `renderTextContent`, which spells a string literal the same way
+  // `walk` does, so non-i18n output is byte-identical.
+  const childIsLiteral = childArg?.kind === "literal" && childArg.lit === "string";
   const childJsx = childArg
-    ? walk(childArg, ctx, depth + 2)
+    ? childIsLiteral
+      ? localizedText(call, ctx, "keyValueValue", '""', 1)
+      : walk(childArg, ctx, depth + 2)
     : ctx.target.renderComment("missing value");
   return renderPrimitive(ctx, "primitive-key-value-row", {
     // The label is a user-visible slot (`keyValue`), and the packs split on how
@@ -314,11 +329,8 @@ export function emitKeyValueRow(
     // of the one name are supplied, from the same `messageKey()`:
     //   `label`     — the text/children token, for `<span>{{{label}}}</span>`;
     //   `labelAttr` — the complete bound attribute, for `<KeyValueRow{{{labelAttr}}}>`.
-    // Before this the emitter read the raw literal and escaped it, so the slot
-    // was extracted into the catalog and rendered in English on every target.
     label: localizedText(call, ctx, "keyValue", '""'),
-    // A missing label kept its pre-change `label=""` rather than dropping the
-    // attribute — the degenerate case is not what this change is about.
+    // A missing label emits `label=""` rather than dropping the attribute.
     labelAttr: labelArg ? localizedPositionalAttr(call, ctx, "keyValue", "label") : ' label=""',
     childJsx,
     testidAttr: testidAttr(call, ctx),

@@ -72,7 +72,7 @@ function ectoIndexOpts(i: IndexShape, prefix: string): string {
 }
 
 /** The bracketed column list for a `create index(...)` call.  A column with a
- *  per-column opclass (P2.5 materialized-path prefix index) uses Ecto's raw
+ *  per-column opclass (materialized-path prefix index) uses Ecto's raw
  *  fragment string form (`"data_key text_pattern_ops"`) so the opclass reaches
  *  the DDL; plain columns stay `:atom`s. */
 function ectoIndexColumns(i: IndexShape): string {
@@ -137,11 +137,11 @@ export function emitMigrations(
     if (m.steps.length === 0) continue;
     // Both paths take their version straight from the builder, which owns the
     // per-module block arithmetic (`MODULE_VERSION_STRIDE` /
-    // `INITIAL_SUBBLOCK_SPAN` in migrations-builder.ts).  The emitter used to
-    // apply its OWN offset, derived from the module's position in this array
-    // and computed only for INITIAL migrations — so every module's first delta
-    // came out at the same version (Ecto aborts on the duplicate) and module
-    // 1's delta sorted BEFORE its own create-table ("relation does not
+    // `INITIAL_SUBBLOCK_SPAN` in migrations-builder.ts).  The emitter must NOT
+    // apply an offset of its own: one derived from the module's position in
+    // this array and computed only for INITIAL migrations gives every module's
+    // first delta the same version (Ecto aborts on the duplicate) and sorts
+    // module 1's delta BEFORE its own create-table ("relation does not
     // exist").  Deriving it here also made the snapshot's recorded version
     // disagree with the emitted FILENAME, which the migration-baseline guard
     // compares.
@@ -414,11 +414,11 @@ function renderInitialStateFile(
   const ts = timestampsMacro(table);
   if (ts) colLines.push(`      ${ts}`);
   // Indexes, same as the id-carrying `renderInitialFile` and the DELTA path's
-  // `renderCreateTableInline`.  This branch used to drop them silently, which
-  // was invisible while every id-less table (outbox, saga state, projection
-  // read model) declared none — until `audit_records` and `provenance_records`
-  // arrived through the shared MigrationsIR carrying two each.  A fresh Phoenix
-  // project then got the table with NO indexes while the same table added later
+  // `renderCreateTableInline`.  Dropping them here is invisible while every
+  // id-less table (outbox, saga state, projection read model) declares none,
+  // but `audit_records` and `provenance_records` arrive through the shared
+  // MigrationsIR carrying two each.  A fresh Phoenix project would get the
+  // table with NO indexes while the same table added later
   // as a delta got both, so fresh-create and migrate-chain schemas disagreed.
   const indexLines = table.indexes.map(
     (i) => `    create index(:${i.table}, [${ectoIndexColumns(i)}]${ectoIndexOpts(i, prefix)})`,

@@ -24,13 +24,11 @@
 //                               fields live inside the `data` jsonb blob;
 //   * TPC abstract base       — no table of its own, one per concrete leaf.
 //
-// The gate was originally written as a Dapper-only boundary (M-T6.25) on the
-// premise that "EF Core hides that difference behind its own JSON translation".
-// That premise was false: Loom maps a document-shaped aggregate to a hand-
-// rolled `<Agg>Document` row type, so EF's `o.Total` is a `CS1061`, drizzle's
-// `schema.orders.total` a `TS2339`, and the event-sourced case does not even
-// have a `DbSet`/table to name.  All five backends miscompiled silently; the
-// gate is therefore universal.
+// The gate is UNIVERSAL, not per-adapter: EF Core does not hide the difference
+// behind its own JSON translation.  Loom maps a document-shaped aggregate to a
+// hand-rolled `<Agg>Document` row type, so EF's `o.Total` is a `CS1061`,
+// drizzle's `schema.orders.total` a `TS2339`, and the event-sourced case has no
+// `DbSet`/table to name at all — every backend would miscompile silently.
 //
 // The classifier lives at IR level because BOTH halves need it and they may not
 // import each other: `ir/validate` raises the diagnostic, `generator/dotnet`

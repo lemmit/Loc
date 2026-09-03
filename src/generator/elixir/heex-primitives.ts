@@ -20,7 +20,7 @@ import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
 import { isEntityHistoryRead } from "../_walker/history-read.js";
 import { queryShape } from "../_walker/paged-query.js";
 import { simpleAccessorField } from "../_walker/primitives/data-grid-shape.js";
-import { gridCols } from "../_walker/shared/args.js";
+import { gridCols, slugify } from "../_walker/shared/args.js";
 import {
   escapeHeexAttr,
   escapeHeexText,
@@ -126,12 +126,11 @@ export function renderAnchor(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
     return `<a href="${toLiteral}"${testidAttr}>${label}</a>`;
   }
   // NO `to:` at all — a breadcrumb leaf / plain label, exactly what the JSX
-  // family renders as a bare `<Anchor>`/`<a>` and Feliz as `Html.span`.  This
-  // used to fall into the dynamic branch below with an EMPTY expression,
-  // emitting `<.link navigate={}>` — an empty HEEx expression attribute, which
-  // is a tokenizer ParseError at `mix compile`: one linkless Anchor took the
-  // whole LiveView app out (audit finding A21).  `renderIdLink` already spells
-  // the same no-destination case as a `<span>`.
+  // family renders as a bare `<Anchor>`/`<a>` and Feliz as `Html.span`.  Routed
+  // into the dynamic branch below it would emit `<.link navigate={}>` with an
+  // EMPTY expression attribute — a tokenizer ParseError at `mix compile`, so
+  // one linkless Anchor takes the whole LiveView app out.  `renderIdLink`
+  // spells the same no-destination case as a `<span>`.
   if (toExpr === undefined) return `<span${testidAttr}>${label}</span>`;
   // Dynamic route expression — emit it as a HEEx expression attribute.
   return `<.link navigate={${toExpr}}${testidAttr}>${label}</.link>`;
@@ -299,8 +298,25 @@ export function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   // directly).  This guard makes the function total if a stray
   // op-form is ever reached without its Modal wrapper: bail before
   // pushing a bogus `kind:"aggregate"` create binding.
+  //
+  // It is REACHED, and it used to `return ""`.  `QueryView { of: X.Agg.all,
+  // single: true, data: row => OperationForm { row.<op> } }` hands the op-form
+  // straight here with no Modal, and the emitted `kitchen_live.ex` rendered an
+  // EMPTY `true ->` arm: no form, no marker, no diagnostic — a blank panel that
+  // reads as "there is nothing here".  Every other target that cannot render
+  // this shape at least says so in the output (Flutter emits
+  // `const SizedBox.shrink() /* OperationForm(row.<op>): … */`); HEEx alone
+  // said nothing.  The marker is the honest minimum until the standalone
+  // instance op-form is rendered on LiveView (it needs the `handle_event` +
+  // form-binding half `renderModal` owns, so it is a feature, not a seam fix).
   const positional0 = expr.args.find((_, i) => !expr.argNames?.[i]);
-  if (positional0 && positional0.kind === "member") return "";
+  if (positional0 && positional0.kind === "member") {
+    const opName = positional0.member;
+    return (
+      `<%!-- OperationForm(<instance>.${opName}): the instance-qualified shape is only rendered ` +
+      `inside a Modal on Phoenix LiveView — use OperationForm { of: <Agg>, op: ${opName} } --%>`
+    );
+  }
   let ofTarget = "";
   let runsTarget = "";
   for (let i = 0; i < expr.args.length; i++) {
@@ -639,9 +655,19 @@ export function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   // and the hoisted `handle_event` clauses (liveview-emit.ts) re-run
   // `list_<agg>s/4` with the new arguments.  Absent args ⇒ every branch below
   // is skipped and the emitted table is byte-identical to before.
-  const sortKey = stateRefArg(expr, "sortKey", ctx);
-  const sortDir = stateRefArg(expr, "sortDir", ctx);
-  const pageRef = stateRefArg(expr, "page", ctx);
+  //
+  // They are ALSO skipped for a CLIENT-paged table (`serverPaged:` absent —
+  // the shape a document/embedded/event-sourced/inheritance aggregate's
+  // non-paged `find all` produces).  The JSX targets slice and sort such a list
+  // in the browser; HEEx has no client-side sort, so the refetch the hoisted
+  // clause performs calls the argument-less `list_<agg>s/0` and returns the
+  // very same rows — clickable headers that flip an arrow and change nothing
+  // (F2-MT640-SORT-DEAD).  Emitting no affordance is the honest rendering: the
+  // UI stops advertising a capability the repository does not expose.
+  const serverPaged = isTrueLit(namedArg(expr, "serverPaged"));
+  const sortKey = serverPaged ? stateRefArg(expr, "sortKey", ctx) : undefined;
+  const sortDir = serverPaged ? stateRefArg(expr, "sortDir", ctx) : undefined;
+  const pageRef = serverPaged ? stateRefArg(expr, "page", ctx) : undefined;
   const sortActive = sortKey !== undefined && sortDir !== undefined;
   if (sortActive || pageRef !== undefined) {
     ctx.tableControls.push({ sortKey, sortDir, page: pageRef });
@@ -668,8 +694,7 @@ export function renderTable(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
   // `totalPages`; a client-side (non-server-paged) list has no count to show
   // without slicing in the template, so the pager is server-only here.
   const totalPagesArg = namedArg(expr, "totalPages");
-  const serverPaged = isTrueLit(namedArg(expr, "serverPaged"));
-  if (pageRef !== undefined && serverPaged && totalPagesArg) {
+  if (pageRef !== undefined && totalPagesArg) {
     const totalPages = renderPagedEnvelopeRead(totalPagesArg, ctx);
     return `${table}\n<.pager page={@${pageRef}} total_pages={${totalPages}} />`;
   }
@@ -736,12 +761,12 @@ export function renderTableColumn(
   // Second positional arg: accessor lambda `fn cell -> renderCell(cell) end`
   //
   // The header is a STATIC attribute on the `<:col>` slot, so only a string
-  // LITERAL can supply it, and it must be entity-escaped: a label carrying a
-  // `"` used to close the attribute mid-word (`label="Na"me"`) and the whole
-  // template failed to parse.  A non-literal header (a state ref, a
-  // concatenation) has no attribute spelling at all — it used to splice the
-  // rendered Elixir expression inside the quotes (`label="@q"`), so the column
-  // was headed with a variable name.  Both now degrade to the JSX side's
+  // LITERAL can supply it, and it must be entity-escaped: an unescaped label
+  // carrying a `"` closes the attribute mid-word (`label="Na"me"`) and the
+  // whole template fails to parse.  A non-literal header (a state ref, a
+  // concatenation) has no attribute spelling at all — splicing the rendered
+  // Elixir expression inside the quotes (`label="@q"`) heads the column with a
+  // variable name.  Both degrade to the JSX side's
   // `Column N` fallback (`_walker/primitives/table.ts`'s `emitColumn`), so the
   // two frontends show the same header for the same source.
   let cellHeex = "<%= row %>";
@@ -887,7 +912,7 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
     listShapedProjections: ctx.listShapedProjections,
   };
   const shape = ofNode ? queryShape(ofNode, detectCtx) : { paged: false, single: false };
-  // Pattern H — `QueryView { of: <api>.<Projection> }` (M-T1.3 Phase 1).  The
+  // Pattern H — `QueryView { of: <api>.<Projection> }` (M-T1.3).  The
   // read resolves to the query-time projection's own `run/1`, in-process: a
   // LiveView deployable hosts its contexts in the SAME OTP app, so what the SPA
   // frontends reach over `GET /projections/<slug>` is one function call here.
@@ -909,8 +934,8 @@ export function renderQueryView(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
   // a name any hand-written read could also pick — and a detail page carrying
   // both would have the two loads fight over one assign.
   if (historyRead) assignName = `${snake(historyRead)}_history`;
-  // Flag OR fact: an author may still opt in explicitly (the scaffold does),
-  // but omitting the flag no longer means "not paged" / "not single".
+  // Flag OR fact: an author may opt in explicitly (the scaffold does), but
+  // omitting the flag does NOT mean "not paged" / "not single".
   const isSingle = litTrue(names.indexOf("single")) || shape.single;
   const explicitPaged = litTrue(names.indexOf("paged"));
   const isPaged = explicitPaged || shape.paged;
@@ -1061,7 +1086,14 @@ export function renderKeyValueRow(
   // The row label is a user-visible slot (`keyValue`), so a plain literal rides
   // the translation runtime under i18n (M-T1.11) and stays raw otherwise.
   const label = positionals[0] ? renderInTemplate(positionals[0], ctx, "keyValue") : "Field";
-  const value = positionals[1] ? renderInTemplate(positionals[1], ctx) : "";
+  // The VALUE is authored prose too, and it rode NO role — so the row's two
+  // halves diverged: the label translated and the value shipped in English at
+  // every locale (G2667 §D9).  `keyValueValue` is the same role the JSX walker
+  // uses, so the key the extraction pass writes and the key HEEx reads are one
+  // by construction.  Non-literals are unaffected (`localizedHeex` returns
+  // undefined for them), so this is byte-identical wherever the value is an
+  // expression or a nested primitive.
+  const value = positionals[1] ? renderInTemplate(positionals[1], ctx, "keyValueValue") : "";
   // The testid identifies the VALUE cell, not the row — the same placement the
   // React/Vue/Svelte packs use (`<div … data-testid={testid}>{children}</div>`
   // inside `KeyValueRow`), and what the emitted page objects assume: a detail
@@ -1536,8 +1568,9 @@ export function renderLoader(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
  *      raises FunctionClauseError on a binary;
  *    - a LITERAL (`Money(value: 9.99)`) is a float, which raises the same way.
  *
- *  So the narrower cast was wrong for two of the three, and identical for the
- *  third.  The TYPED money cast (`string(x: money)` in `render-expr.ts`) keeps
+ *  So a narrower `Decimal.to_string/1` cast is wrong for two of the three and
+ *  identical for the third.  The TYPED money cast (`string(x: money)` in
+ *  `render-expr.ts`) keeps
  *  `Decimal.to_string/1` — there the operand's type is known. */
 export function renderMoney(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   let currency: string | undefined;
@@ -1629,7 +1662,13 @@ export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
     idx++;
     if (arg.kind === "call" && arg.name === "Tab") {
       const pos = arg.args.filter((_, j) => !arg.argNames?.[j]);
-      const labelArg = pos[0];
+      // Positional 0 is the CAPTION only when it is text-like.  Consuming a
+      // CALL there swallowed the panel: `Tab { title: "One", Text { "first" } }`
+      // leaves only the `Text` positional, which became the label (rendered
+      // through the tabLabel slot!) while `slice(1)` emptied the panel.  Mirror
+      // of the shared walker's `emitTabs` rule.
+      const labelIsTextLike = pos[0] !== undefined && pos[0].kind !== "call";
+      const labelArg = labelIsTextLike ? pos[0] : undefined;
       const label = labelArg && labelArg.kind === "literal" ? labelArg.value : `Tab ${idx}`;
       tabs.push({
         label,
@@ -1638,8 +1677,17 @@ export function renderTabs(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
         // stays derived from the source literal — a per-locale anchor would
         // break every `JS.show` selector this switcher is built on.
         labelHeex: labelArg ? renderInTemplate(labelArg, ctx, "tabLabel") : undefined,
-        slug: snake(label) || `tab-${idx}`,
-        body: pos.slice(1),
+        // `slugify`, not `snake` — the SAME derivation the six JSX/markup
+        // targets use (`_walker/primitives/layout.ts`).  `snake/1` only splits
+        // camelCase and downcases, so a caption with a space came out as
+        // `order details` and went straight into an HTML `id` and the
+        // `JS.show(to: "#tabs-1-panel-order details")` selector this switcher is
+        // built on — a broken anchor, and a DIFFERENT id than every other target
+        // derives from the same caption, which splits cross-target e2e
+        // selectors.  The `|| tab-<idx>` fallback and the 1-based `idx` already
+        // match the shared walker's.
+        slug: slugify(label) || `tab-${idx}`,
+        body: labelIsTextLike ? pos.slice(1) : pos,
       });
     } else {
       // Bare positional (e.g. `Tabs(Card(...), Card(...))`) — its own panel.
@@ -1888,7 +1936,7 @@ function renderCardLike(
   }
   const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
   // A Card is a heading-nesting level (like the JSX `emitCard`): a `Heading`
-  // inside it derives a rank one deeper (accessibility.md Phase 2).
+  // inside it derives a rank one deeper (accessibility.md).
   const childCtx: WalkContext = { ...ctx, headingDepth: (ctx.headingDepth ?? 0) + 1 };
   const children = bodyExprs.map((c) => renderChild(c, childCtx)).join("\n");
   const testidAttr = testIdAttr(expr, ctx);
@@ -1923,8 +1971,8 @@ export function renderPaper(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
  *
  *  `cols:` is read through the SHARED `gridCols` reader the JSX walker uses, so
  *  `cols: [3, 2, 1]` means `[desktop, tablet, mobile]` on Phoenix exactly as it
- *  does on React — and it is CONSUMED into the class list.  It used to fall
- *  through the generic named-attr path as `cols={[3, 2, 1]}`: a LIST reaching
+ *  does on React — and it is CONSUMED into the class list.  Left to the
+ *  generic named-attr path it emits `cols={[3, 2, 1]}`: a LIST reaching
  *  Phoenix's attribute escaper, i.e. a page that compiles and then raises on
  *  first render.
  *
@@ -1946,7 +1994,8 @@ export function renderGrid(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
 /** `Container(size: "md", …children)` → a centred max-width wrapper.
  *
  *  `size:` is CONSUMED into a `max-w-*` utility (see {@link CONTAINER_MAX_W});
- *  it used to leak as `size="md"`, an attribute no `<div>` has. */
+ *  left to the generic named-attr path it leaks as `size="md"`, an attribute
+ *  no `<div>` has. */
 export function renderContainer(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   const size = stringNamedLit(expr, "size");
   const maxW = size ? CONTAINER_MAX_W[size] : undefined;
@@ -1975,7 +2024,7 @@ export function renderSection(expr: Extract<ExprIR, { kind: "call" }>, ctx: Walk
   const idAttr = id ? ` id="${id}"` : "";
   const testidAttr = testIdAttr(expr, ctx);
   // A Section is a heading-nesting level (like the JSX `emitSection`): a
-  // `Heading` in its body derives a rank one deeper (accessibility.md Phase 2).
+  // `Heading` in its body derives a rank one deeper (accessibility.md).
   const childCtx: WalkContext = { ...ctx, headingDepth: (ctx.headingDepth ?? 0) + 1 };
   const childrenHeex = positional.map((c) => renderChild(c, childCtx)).join("\n");
   if (childrenHeex.length === 0) {
@@ -2110,7 +2159,7 @@ export function renderIcon(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
 }
 
 // ---------------------------------------------------------------------------
-// Chart (M-T1.3 Phase 4, HEEx leg).
+// Chart (M-T1.3, HEEx leg).
 // ---------------------------------------------------------------------------
 
 /** `Chart { kind: "bar"|"line", of: <api>.<Projection>, x: r => …, y: r => … }`

@@ -1,4 +1,4 @@
-// Named layouts — SvelteKit route-group flavour (Phase 8, svelte).
+// Named layouts — SvelteKit route-group flavour (svelte).
 //
 // A `layout <Name> { header: …, sidebar: …, footer: … }` SystemMember
 // wraps every page that selects it via `layout: <Name>`.  React weaves

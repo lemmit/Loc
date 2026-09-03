@@ -728,7 +728,9 @@ the conforming backends, and the fix that established it.
   set reached the dapper + mikroorm legs. Tier: **behavioral**.
 
 ### RS-24 · A plain `decimal` is a JSON **number**; only `money` is a string
-- **Guarantee.** A `decimal` field serializes as a JSON number (`9.99`, `5`).
+- **Guarantee.** A `decimal` field serializes as a JSON number (`9.99`, `5`) —
+  and as the **same** number every other backend sends: the wire width is an
+  IEEE-754 double (≤17 significant digits), whatever the backend computes in.
   This is the deliberate counterpart to [RS-12](#rs-12--money-wire-scale-is-consistent-across-backends),
   where `money` is a fixed-scale **string** (`"19.5000"`) so no float rounding can
   touch a monetary amount. The two types differ on the wire, and a backend must
@@ -747,9 +749,36 @@ the conforming backends, and the fix that established it.
   plain-decimal wire entries — property, *derived*, and `decimal[]` element
   alike. `to_float` reproduces the **oracle** exactly rather than merely
   narrowing the gap: node's value is a float64 to begin with.
+- **The narrowing half.** "A JSON number" was never the whole rule — it is the
+  *same* number. A backend whose domain type is wider than a double has to
+  narrow at the **wire boundary**, response direction only:
+  - **.NET** (#2563 / #2575): a response `decimal` is a `double`. `System.Decimal`
+    carries ~15 significant digits, so a non-terminating `avg` shipped
+    `2.33333333333333` where the oracle shipped `2.3333333333333335`.
+  - **Java** (M-T6.46, amending this rule): the domain type is `BigDecimal` and a
+    `derived` division renders through `MathContext.DECIMAL128`, so an
+    un-narrowed response shipped up to **34** significant digits. Java's
+    conformance here was **partial** until then — the wire *was* a JSON number,
+    but only the projection `avg` arm was double-parity, and only by the
+    provider's accident of typing an average as a `Double`; sums, per-row and
+    derived reads all shipped exact digits.
+  - The **request** direction deliberately stays on the wide type in both:
+    a `double` request field turns an out-of-range **400** into a conversion
+    **500**. A client may send more precision than it reads back.
+- **Why the differential could not see the java half.** The wire-golden
+  comparator JSON-parses both bodies before diffing (`test/_helpers/wire-record.ts`),
+  which collapses every JSON number to a JS double. *Deficient* precision changes
+  the parsed double and fails; **excess** precision parses to the identical double
+  and can never fail. `WIRE_WAIVERS` is empty, and no golden moved when java was
+  fixed. See the audit's F16 → **M-T9.37**.
 - **Conforms.** node, dotnet, java, python, elixir.
 - **Provenance.** Found 2026-08-01 by the M-T9.11 gate on the elixir leg
-  (`value-collections` `$.lineItems[*].amount`). Tier: **behavioral**.
+  (`value-collections` `$.lineItems[*].amount`); extended to .NET by #2563/#2575;
+  amended 2026-08-24 for java by the numeric-types audit
+  ([F9](audits/numeric-types-audit-2026-08-23.md), register #2644) → M-T6.46.
+  Tier: **behavioral** (the java half is pinned statically by
+  `test/generator/java/java-decimal-wire.test.ts`, since the behavioral gate is
+  blind to it).
 
 ### RS-25 · `internal` / `secret` fields never reach the read wire
 - **Guarantee.** A field declared `internal` (domain-only state) or `secret`
@@ -1296,3 +1325,86 @@ nothing and the test passes vacuously.
   round-tripped — verified to fail with each half of the fix reverted
   independently. Statically pinned per backend by
   `test/generator/string-length-code-points.test.ts`. Tier: **behavioral**.
+
+### RS-32 · A malformed path `{id}` answers the declared 422, not a framework default
+- **Guarantee.** `GET /api/orders/not-a-uuid` — a path `{id}` that will not
+  parse — answers **422** with the same §3.2 `errors[]` envelope the body tier
+  emits (`pointer: "/id"`), on every backend. It is a **client** fault, and
+  reporting it as a 500 tells the caller to retry a request that can never
+  succeed.
+- **Why it is not a judgement call.** Every backend already *publishes* the 422:
+  the per-operation error matrix (`src/ir/util/openapi-errors.ts`) says "a path
+  `{id}` is parsed as a uuid and a query parameter is parsed against its
+  declared type, and a failure at either answers the same 422 the body tier
+  does", and each emitted spec declares the parameter `format: uuid`. What
+  differed was what they *answered*.
+- **Trigger.** Any route binding `{id}` — `getById`, `destroy`, the canonical
+  `update`, each named operation, each `can_<op>` probe, the entity-history read,
+  the workflow-instance read.
+- **The split.** 2-vs-3 when first measured (#2652): node's
+  `z.string().uuid()` param → `defaultHook`, and .NET's `[FromRoute] Guid` →
+  `InvalidModelStateResponseFactory`, both answered 422. Java raised
+  `MethodArgumentTypeMismatchException`, which does not implement
+  `ErrorResponse`, so the catch-all reported **500**; python bound the param as a
+  bare `str` carrying a documentation-only `format: uuid`, so nothing rejected
+  it and the malformed value reached the repository. **Elixir was never
+  measured** in that pass: it handed the raw string to `Repo.get/2`, where a
+  malformed `:binary_id` raises `Ecto.Query.CastError` out of Ecto, leaving only
+  the app-global fault floor — which answers whatever `Plug.Exception.status/1`
+  says. Measured on a booted app: **`400 "Bad Request"`**, no `errors[]`, no
+  pointer. (The ledger row that raised this said 500; the boot corrected it. It
+  is the wrong rung either way — the app refused a request its own spec says
+  answers 422, on a rung with nothing a client can bind to.)
+- **Where the guard belongs is part of the rule.** On Phoenix it is a controller
+  **`plug`**, not a per-action `case`: a controller gains actions over time and a
+  per-action guard is the one the next action's emitter forgets. It is opt-in per
+  controller rather than living in the shared `<App>Web` `controller` quote,
+  because an api's explicit `route` list may declare a `{id}` of its own that is
+  not an aggregate id.
+- **Conforms.** node, dotnet, java, python, elixir.
+- **Provenance.** Four backends aligned by #2652 and pinned in
+  `test/generator/malformed-path-id-status.test.ts`; elixir added there in the
+  W1b elixir packet (`renderPathIdCastPlug` +
+  `ProblemDetails.invalid_path_id_response/2`). **Runtime-proven, not inferred**:
+  a generated Phoenix app booted against Postgres answers
+  `422 {"errors":[{"pointer":"/id","message":"Expected UUID."}]}`, and with the
+  plug reverted (file-copy, regenerate, recompile, re-boot) the same request
+  answers `400 {"title":"Bad Request"}` with no `errors[]`. Tier: **generator**,
+  with the runtime half measured per backend.
+
+### RS-33 · An `errors[]` pointer names the whole path to the offending field
+- **Guarantee.** A 422 `errors[]` entry carries an **RFC 6901** JSON pointer to
+  the field that failed, however deeply nested — `/lines/0/qty`, `/sku/code` —
+  never just the top-level container it sits under, and never an empty array. It
+  is what lets a frontend ACL (`applyServerErrors`) bind the denial to the form
+  control that caused it.
+- **Trigger.** A violation inside a containment part, a value-object collection
+  row, or a value-object field.
+- **The split.** 3-vs-1-vs-1. .NET's `PointerOf` converts `Items[0].Qty` to
+  `/items/0/qty`, node joins the whole zod `issue.path`, python keeps every
+  pydantic `loc` segment. **Java** emits `/lineTotals[0].unitPrice` — a field
+  path, not a pointer. **Elixir was structurally depth-1**: the body was built
+  from a flat `changeset.errors` walk into `pointer_of([field])`, and
+  `Ecto.Changeset.errors` holds only the top level, so a `cast_embed` /
+  `cast_assoc` child violation answered `errors: []` — a 422 naming no field at
+  all.
+- **A value object is a third carrier, not a nested changeset.** On Phoenix a VO
+  persists as one jsonb `:map` column and is checked by `validate_change/3`, so
+  there is no child changeset for the walk to find. It has to forward its own
+  errors explicitly — with the inner field path *and* the authored message *and*
+  the `loom_code` the i18n catalog is keyed by. Collapsing it to
+  `[{field, "is invalid"}]` discarded all three.
+- **Conforms.** node, dotnet, python, elixir. **Open:** java (the bracket
+  spelling; `src/generator/java/emit/api.ts:678` and `:802`).
+- **Provenance.** Recorded as ledger rows `F2-W-03` and
+  `nested-errors-pointer-shape`; the elixir arm fixed in the W1b elixir packet
+  (`collect_changeset_errors/2` + the `loom_path` opt on `validate_vo/3`),
+  mutation-proven by deleting the recursion's call site — which the first version
+  of the gate did **not** catch, because it asserted the helper clauses existed
+  rather than that they were called. **Runtime-proven**: a booted Phoenix app
+  answers a `{"sku":{"code":"ab"}}` create with
+  `422 {"errors":[{"pointer":"/sku/code","message":"SKU code needs at least 3 characters"}]}`,
+  and with `validate_vo/3` reverted the same request answers
+  `{"pointer":"/sku","message":"is invalid"}` — the inner field, the authored
+  text and the wire code all gone. Tier: **generator**; a wire golden carrying a
+  VO-collection violation is still wanted (only 4 of 31 record any error body).

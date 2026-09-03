@@ -2,7 +2,7 @@ import type { SystemIR } from "../ir/types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // `.loom/asyncapi.yaml` — a derived AsyncAPI 3.0 view of the system's
-// `channel` declarations (channels.md, Slice 1).  Realises the
+// `channel` declarations (channels.md).  Realises the
 // bounded-context-model's "events as channels" placeholder: one AsyncAPI
 // channel object per `channel`, its carried events as messages, the
 // `delivery`/`retention`/`key` knobs and the `channelSource` binding under
@@ -24,7 +24,7 @@ export function renderAsyncApi(sys: SystemIR): string {
   out.push(`  title: ${yamlStr(`${sys.name} channels`)}`);
   out.push("  version: 0.0.0");
 
-  // channelSource bindings, indexed by channel name (Slice 1: bare names).
+  // channelSource bindings, indexed by channel name (bare names).
   const bindingByChannel = new Map<string, string>();
   const csNameByChannel = new Map<string, string>();
   for (const cs of sys.channelSources) {
@@ -33,7 +33,7 @@ export function renderAsyncApi(sys: SystemIR): string {
       csNameByChannel.set(cs.channelName, cs.name);
     }
   }
-  // Deployables wiring each channel's binding via `channels:` (M-T4.4 slice 1).
+  // Deployables wiring each channel's binding via `channels:` (M-T4.4).
   const wiredByChannel = new Map<string, string[]>();
   for (const dep of sys.deployables ?? []) {
     for (const csName of dep.channelSourceNames ?? []) {
@@ -90,7 +90,7 @@ export function renderAsyncApi(sys: SystemIR): string {
     // transport is DECLARED, not wired.  Say so until brokers actually land,
     // rather than implying `transport: hotCache` is a live redis hop.
     if (storage) out.push('      transportStatus: "declared, not provisioned"');
-    // Deployables that wire the binding via `channels:` (M-T4.4 slice 1) — a
+    // Deployables that wire the binding via `channels:` (M-T4.4) — a
     // reviewer sees who joins/leaves a channel's transport in the PR diff.
     const wired = wiredByChannel.get(ch.name);
     if (wired && wired.length > 0) {

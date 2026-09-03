@@ -70,6 +70,8 @@ import { corpusSource } from "../fixtures/corpus/harness.js";
 import { CORPUS } from "../fixtures/corpus/manifest.js";
 import {
   E2E_LESS_CORPUS_FIXTURES,
+  PIN_CLASS_CENSUS,
+  R,
   UNATTRIBUTED_CALLS,
   UNCALLED_PINS,
 } from "./api-caller-census-pins.js";
@@ -327,6 +329,31 @@ describe("api caller census — every derived operation has a runtime caller or 
     // A silently-empty population is the classic way a census gate passes
     // without reaching anything (`experience_gathered.md` §63).
     expect(POPULATION.length).toBeGreaterThanOrEqual(30);
+  });
+
+  it("keeps the per-class pin census honest", () => {
+    // The counts used to live in a header comment and drifted to 15/2/1 against
+    // 17/3/1 actual — prose nothing reads cannot be contradicted.  Recompute
+    // from the pins themselves and compare both ways: an added pin whose count
+    // was not raised fails, and so does a drained one whose count was not
+    // lowered.  Reasons are matched by their `R.*` STRING (the pins store the
+    // value, not the key), so a renamed class shows up here as an unknown
+    // reason rather than as a silently-zero count.
+    const byReason = new Map<string, string>(Object.entries(R).map(([k, v]) => [v, k]));
+    const actual: Record<string, number> = {};
+    for (const ops of Object.values(UNCALLED_PINS)) {
+      for (const reason of Object.values(ops)) {
+        const cls = byReason.get(reason);
+        expect(cls, `pin reason is not one of the R.* constants: ${reason}`).toBeDefined();
+        actual[cls as string] = (actual[cls as string] ?? 0) + 1;
+      }
+    }
+    expect(
+      actual,
+      "PIN_CLASS_CENSUS (test/ir/api-caller-census-pins.ts) disagrees with the pins " +
+        "below it. Adding a pin raises its count; draining one lowers it; a class at " +
+        "zero is deleted from the census.",
+    ).toEqual(PIN_CLASS_CENSUS);
   });
 
   it("pins no case that left the population", () => {

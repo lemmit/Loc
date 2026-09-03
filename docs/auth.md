@@ -697,14 +697,13 @@ redacts). The masked field is nullable in the response schema. Internal
 audit/provenance snapshots stay unmasked (they record the real value). A
 mask-free aggregate is byte-identical.
 
-> **Known divergence — .NET audit snapshots.** node, Java, Python and Elixir all
-> project audit `before`/`after` through the UNMASKED serializer, as the previous
-> paragraph says. .NET does not: its audited command handlers reuse the ordinary
-> (masked) wire projection, so a masked field is recorded as `null` whenever the
-> acting principal fails the predicate — the stored trail then depends on *who*
-> performed the write, and the entity-history read has nothing left to redact.
-> Not fixed here (it changes what .NET writes, and overlaps the in-flight
-> history-read work); tracked as a follow-up.
+All five backends do this the same way. (.NET used to diverge — its audited
+command handlers reused the ordinary, masked wire projection, so a masked field
+was recorded as `null` whenever the acting principal failed the predicate, and
+the stored trail depended on *who* performed the write. Closed 2026-08-31: the
+four .NET audit projection sites pass `unmasked` (M-T3.9). The redaction did not
+vanish — reading the trail back through `GET /<agg>/{id}/history` still drops a
+masked field's `FieldChange`, which is where it belongs.)
 
 ```ts
 // generated (Hono) — the aggregate's read serializer
@@ -974,11 +973,22 @@ for a `guid`, `0` for a number, `false` for a `bool`, the epoch for a
 `datetime`, the EMPTY list for an array (so a permission-guarded surface denies
 by default), and `null` where the field is declared optional. The identity is
 derived from the declared shape, so a non-optional field is never null and the
-same `.ddd` yields the same principal on every backend. This is emitted
-uniformly across all five backends — Hono, .NET, Python, Java, and Elixir — so
-the same header drives every generated backend identically. It is a **dev
+same `.ddd` yields the same principal on every backend. It is a **dev
 convenience, not a production path**: register a real verifier (above) before
 shipping.
+
+> **The header does NOT carry every claim type on every backend.** Only
+> **string**-typed `user { … }` fields are honoured on .NET, Python, Java and
+> Elixir: each emits its claim mapper over the string fields alone, so a
+> non-string claim in the header is silently discarded and the field keeps its
+> built-in value. For an array that value is the EMPTY list — so a
+> `requires currentUser.permissions.contains(…)` gate fails closed no matter
+> what you send. Only Hono spreads the decoded JSON wholesale and therefore
+> carries an array through. The **OIDC** path has no such limit: all five map
+> `string[]` claims (a `realm_access.roles`-shaped list) from the verified
+> token. This asymmetry is dev-stub-only, it is not surfaced by any `loom.*`
+> diagnostic, and it is why a permission-gated fixture cannot be driven from
+> the behavioural harness on four of the five backends.
 
 ## Auth routes
 

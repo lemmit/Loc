@@ -136,6 +136,14 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   // projects `<Agg>Response` via `repo.to_wire(...)` (collection reads
   // comprehend each element).  Must stay ruff- + mypy --strict-clean.
   ["test/e2e/fixtures/python-build/scaffold-handlers.ddd", "api"],
+  // Mixed `money × decimal` arithmetic (M-T6.45 / numeric-types audit F8).
+  // This backend holds `money` as `decimal.Decimal` and `decimal` as `float`;
+  // `Decimal.__mul__` refuses a `float`, so `money * rate` off a wire param
+  // was a static `mypy --strict` error AND a runtime `TypeError`.  The DSL
+  // `test` blocks make BOTH checks reach it — mypy on the operation bodies,
+  // `uv run pytest -q` on the emitted pytest module.  Python-only on purpose:
+  // a single-backend representation bug, not a cross-backend wire contract.
+  ["test/e2e/fixtures/python-build/money-scaling.ddd", "api"],
   // `--trace` domain instrumentation: precondition_evaluated /
   // value_computed / invariant_evaluated trace lines must stay
   // ruff-/mypy-clean (the domain fixture exercises all three).

@@ -11,6 +11,7 @@
 // Pure leaf — the find method builders depend on these, never the reverse.
 
 import type {
+  BoundedContextIR,
   CriterionIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -19,6 +20,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { orientComparison } from "../../ir/util/comparison-operands.js";
+import { tableOwnerName } from "../../ir/util/inheritance.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
 import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
@@ -155,7 +157,7 @@ export function lowerToDrizzle(
     // a missing arm is a `tsc` error here, not a silent authorization bypass.
     if (e.kind === "authz-filter") {
       switch (e.filter.kind) {
-        // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false
+        // DENY carve-out (authorization — deny-wins).  An always-false
         // term: a column can't be both NULL and NOT NULL, so
         // `and(isNull(id), isNotNull(id))` matches no row.  Self-contained (uses
         // the always-present `id` column and standard Drizzle ops), so it needs
@@ -165,7 +167,7 @@ export function lowerToDrizzle(
           const idCol = `schema.${tableName}.id`;
           return `and(isNull(${idCol}), isNotNull(${idCol}))`;
         }
-        // `deep`/`global` read level (multi-tenancy Phase 2 P2.4) — the
+        // `deep`/`global` read level (multi-tenancy) — the
         // materialized-path descendant-or-self scope with the NULL-dataKey
         // fallback to the tenant floor (see `DEEP_SCOPE_SEMANTICS`).  Renders as
         // a Drizzle operator tree.
@@ -641,20 +643,36 @@ export function renderCriterionArg(e: ExprIR): string {
   return "undefined as never";
 }
 
+/** The Drizzle table const a repository reads `agg` from — the shared TPH base
+ *  table for a TPH concrete, otherwise the aggregate's own table.  Lives here
+ *  (rather than beside the find builders) so the predicate lowerer can derive
+ *  it itself: every read a capability filter AND-s into targets this table, and
+ *  a caller that passed the subtype's own plural instead emitted
+ *  `schema.cars.tenantId` against `select().from(schema.vehicles)` — a table
+ *  object that does not exist under TPH (`F2-CB-C3`, 7 × TS2339). */
+export function repoTableName(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string {
+  return lowerFirst(plural(tableOwnerName(agg, ctx.aggregates)));
+}
+
 /** Lower an aggregate's capability filters to a single Drizzle predicate
  *  string (conjoined with `and(...)` when there is more than one), or
  *  null when the aggregate has none.  Adds the Drizzle ops it uses to
  *  `ops` so the import-narrowing in the repository builders pulls them
- *  in.  Returns null (rather than throwing) on a non-lowerable predicate
- *  — the validator guarantees selectability, so that path is unreachable
- *  for valid models. */
+ *  in.
+ *
+ *  The table is DERIVED (`repoTableName`), never passed in — see that
+ *  function.  Throws on a non-lowerable predicate: the validator guarantees
+ *  every capability filter is selectable, so reaching that path means an IR
+ *  shape got past the gate, and returning null there silently dropped the
+ *  WHOLE conjunction — a declared read restriction absent from the emitted SQL
+ *  with no compile error and no diagnostic (`F2-CB-C4`). */
 export function contextFilterPredicate(
   agg: EnrichedAggregateIR,
-  tableName: string,
   ctx: EnrichedBoundedContextIR,
   ops: Set<string>,
   bypass?: FilterBypass,
 ): string | null {
+  const tableName = repoTableName(agg, ctx);
   const entries = allContextFilterEntries(agg, bypass);
   if (entries.length === 0) return null;
   const lowered: string[] = [];
@@ -683,7 +701,15 @@ export function contextFilterPredicate(
     const l = lowerToDrizzle(e.predicate, tableName, ctx, {
       principalAccessor: "requireCurrentUser()",
     });
-    if (!l) return null;
+    if (!l) {
+      throw new Error(
+        `Loom internal: capability \`filter\` on aggregate '${agg.name}' is not lowerable to ` +
+          `a Drizzle predicate, so the read restriction it declares cannot be emitted. ` +
+          `The IR validator is supposed to reject a non-selectable filter before codegen ` +
+          `(loom.criterion-not-selectable) — this shape reached the emitter instead. ` +
+          `Dropping it would ship unfiltered reads, so this is a hard stop.`,
+      );
+    }
     for (const op of l.ops) ops.add(op);
     lowered.push(l.expr);
   }
@@ -692,7 +718,7 @@ export function contextFilterPredicate(
   return `and(${lowered.join(", ")})`;
 }
 
-/** Lower an aggregate's `writeScopeFilter` (authorization Phase 3 P3.1 — the
+/** Lower an aggregate's `writeScopeFilter` (authorization — the
  *  WRITE-ladder guard) to a single Drizzle predicate string, or null when the
  *  aggregate has no write-scope narrowing.  Renders `currentUser.<field>`
  *  against the ambient `requireCurrentUser()` accessor, exactly like the read
@@ -710,6 +736,31 @@ export function writeScopePredicate(
   if (!l) return null;
   for (const op of l.ops) ops.add(op);
   return l.expr;
+}
+
+/** The write-scope existence PRE-GUARD lines for a QUERYABLE-COLUMN shape
+ *  (relational / `shape: embedded`): a one-row probe matching BOTH the id and
+ *  the write scope, ahead of the ordinary `findById` load.  Every mutation
+ *  route loads through `getById`, so that is where a narrowing write scope is
+ *  enforced — a row the caller may READ but not WRITE is indistinguishable
+ *  from a missing one (404), and the read filter still hydrates it afterwards.
+ *  Empty (byte-identical emission) when nothing narrows.  Shared by the
+ *  relational and embedded builders — the MikroORM adapter's twin is
+ *  `mikroGetByIdLines` (emit/mikroorm.ts). */
+export function writeScopeGuardLines(
+  agg: EnrichedAggregateIR,
+  tableName: string,
+  ctx: EnrichedBoundedContextIR,
+  ops: Set<string>,
+): string[] {
+  const pred = writeScopePredicate(agg, tableName, ctx, ops);
+  if (!pred) return [];
+  ops.add("and");
+  ops.add("eq");
+  return [
+    `    const inScope = await this.db.select({ id: schema.${tableName}.id }).from(schema.${tableName}).where(and(eq(schema.${tableName}.id, id), ${pred})).limit(1);`,
+    `    if (inScope.length === 0) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
+  ];
 }
 
 /** Combine a capability-filter predicate with an existing read predicate.

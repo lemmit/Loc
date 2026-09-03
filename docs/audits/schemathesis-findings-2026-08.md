@@ -563,6 +563,21 @@ not existing. The fix is to declare and enforce int32 for `int` (int64 for
 `long`) — a spec change, so all five backends together, and `.NET`/`Java`
 already type-bound their side while python/elixir do not.
 
+**Re-verified 2026-08-31 (Wave 1b `wire-openapi` packet) and deliberately NOT
+taken there — with the size measured rather than asserted.** The premise holds:
+`int` still publishes an unbounded `{"type":"integer"}`. What the re-check adds
+is why this keeps being deferred (#2648, #2664, and now a third time), so the
+next agent does not re-discover it: **there is no shared choke point.** Each
+backend derives its integer schema separately — elixir from its own literal
+table (`elixir/vanilla/openapi-emit.ts:849/865`), .NET/java/python by
+REFLECTION over the annotated wire types (Swashbuckle / springdoc / FastAPI, so
+the bound has to come from a `[Range]` / `@Min@Max` / `Field(ge=,le=)` the
+validator emitters attach), node from zod via `_frontend/zod-schemas.ts`. So
+"declare int32" is five emitter changes plus the shared zod one, and the two
+waivers can only be DELETED once a booted schemathesis leg passes — a runtime
+tier, not a unit one. That is a mission, and it should be claimed as one rather
+than ridden along with a contract-shaped packet.
+
 ---
 
 ## Class: by design (recorded, not filtered)
@@ -708,7 +723,7 @@ contract rejects is accepted. F7's fix landed on the Hono emitter only
 (2026-08-16) — same defect, same declared schema, different answer.
 
 ### F18 — python + java: F8 (wrong verb on a static sub-path) is still open
-**Waiver:** W23 (python), W33 (java) · **Severity: low**
+**Waiver:** W23 (python), W33 (java), W36 (dotnet) · **Severity: low**
 
 ```
 curl -X DELETE http://host/api/customers/by_email
@@ -719,6 +734,20 @@ F8's fix is a hono middleware (`emitStaticSubpathMethodGuard`,
 `src/platform/hono/v4/routes-builder.ts`) with no counterpart on the other
 backends: FastAPI and Spring both match `DELETE /api/customers/{id}` with
 `id="by_email"` and answer the identifier validator's 422.
+
+**dotnet is the third (2026-09-01), and the route table says so out loud.**
+`DELETE /api/customers/by_email` answers 422 there too, and a `PUT` to the same
+path answers `405` with `Allow: DELETE, GET` — naming the `{id}` template that
+swallowed the DELETE.
+
+**Why this is not fixable per backend.** The obvious .NET fix is a route
+constraint, `[HttpDelete("{id:guid}")]`: `by_email` then fails to match, no
+action accepts DELETE on that path, and ASP.NET answers the honest 405. But it
+also makes `GET /api/orders/not-a-uuid` a 404 instead of the declared 422 that
+`test/generator/malformed-path-id-status.test.ts` pins on four backends. The two
+wants are in direct tension — an unconstrained `{id}` swallows the static
+sibling; a constrained one loses the malformed-id tier — so disambiguating them
+is a cross-backend design decision, not a patch. Left waived on all three.
 
 ### F19 — dotnet + java: a malformed declared `date-time` reaches the domain layer
 **Waiver:** W24/W25 (dotnet), W29/W30 (java) · **Severity: high**
@@ -762,7 +791,7 @@ accepted and the *read* then violates the published contract. Enforcing the
 declared bound on the write closes both.
 
 ### F22 — dotnet: a bodyless operation POST answers 415 before the path parameter is looked at
-**Waiver:** W26 · **Severity: low**
+**Waiver:** W26 (widened 2026-09-01) · **Severity: low**
 
 ```
 curl -X POST 'http://host/api/orders/%C2%A8/confirm'   → 415
@@ -773,6 +802,16 @@ malformed `{id}` AND no body is answered by the one thing the contract says leas
 about. 415 is not in the set of statuses that count as a rejection, so the fuzzer
 reads it as "schema-violating request accepted". The honest answer is the
 declared 422 for the unparseable identifier (or 400 for the absent body).
+
+**The rule was too narrow, and a later run proved it.** W26's pattern was written
+from the two `orders` routes of the discovery run, so the identical finding on
+`POST /api/customers/{id}/update` and `POST /api/wallets/{id}/freeze` arrived
+unwaived. Measured on a booted app, the 415 does not depend on the id being
+malformed at all — a VALID uuid with no `Content-Type` answers 415 too — so the
+shape is *every* operation POST, and the pattern now says that
+(`^POST /api/[a-z_]+/\{id\}/[a-z_]+$`). node, python and java are clean on this
+check in the same run, which is what makes the 415 a .NET divergence rather than
+a shared decision.
 
 ### F23 — java: a required body field arriving as JSON `null` NPEs in the domain layer
 **Waiver:** W29/W30 · **Severity: high**
@@ -788,26 +827,131 @@ in the published request schema; the Spring binder maps a JSON `null` to a Java
 declared shape is published and never enforced.
 
 ### F24 — java: an adversarial query string 500s a paged find
-**Waiver:** W31 · **Severity: medium**
+**Waiver:** none — fixed · **Severity: medium**
+
+**Status: FIXED (2026-08-31).** `ApiExceptionAdvice` now carries a dedicated
+`org.apache.tomcat.util.http.InvalidParameterException` arm that answers Tomcat's own
+`getErrorCode()` (400), floored at 400. Gated by `test/generator/malformed-query-status.test.ts`;
+mutation-proved — deleting the emitter arm fails 3 of its 5 cases.
+
+**The root cause is not the one this entry previously named.** It is *not* `sort`/`dir`:
+measured on a booted backend, both answer 200 with any value. It is *not* the `pageSize`
+bound either — `?pageSize=467` is under the published `@Max(500)` and answers 200 on its
+own. It is the **empty parameter name**. Tomcat refuses to parse the chunk and throws out
+of the first `getParameter()` call, which on a paged read is Spring's own argument
+resolution; the exception extends `IllegalStateException` and implements nothing, so it
+fell past the `ErrorResponse` branch of `onUnhandled` and the catch-all answered
+`500 "internal"`. That makes it the **third** instance of one recurring bug in this file —
+a client fault reported as a server fault — after the framework exceptions and the
+malformed path `{id}` (F-series twin: `malformed-path-id-status.test.ts`).
 
 ```
-curl 'http://host/api/products?sort=%22&dir=%C3%9D5%03&…' → 500
+GET /api/customers?=%C3%A0&pageSize=467 → 500
+org.apache.tomcat.util.http.InvalidParameterException:
+  Invalid chunk starting at byte [0] and ending at byte [7] with a value of [=%C3%A0] ignored
 ```
 
-The query-parameter binder's twin of F23 (Tomcat additionally rejects some
-chunks before the app sees them). Kept as its own rule because the fix is on the
-other side of the request — the query binder, not the body binder.
+Measured on the storefront-system fixture the leg itself uses (postgres + `gradle bootJar`):
+
+| request | before | after |
+|---|---|---|
+| `GET /api/{customers,orders,products,wallets}?=%C3%A0&pageSize=467` | 500 | **400** |
+| `GET /api/customers` | 200 | 200 |
+| `GET /api/customers?pageSize=467` | 200 | 200 |
+| `GET /api/customers?pageSize=0` / `?page=0` | 400 | 400 |
+
+(The bounds row reads 400/400 because this fix did not touch it — F25, fixed
+separately below, later moved both to the declared 422.)
+
+The resulting 400 is still **undocumented** on read routes. That was first recorded here
+as F25/W32; F25 turned out to be a different (and now fixed) bug, so the residue is tracked
+as **F28/W35**.
+
+#### The W31 retirement was wrong, and how
+
+On 2026-08-30 (PR #2693) W31 was retired on the reasoning that it had matched **nothing on
+every java run since the leg landed** — `38580cd` and `20a6745` produce byte-identical
+attribution tables with `— W31` in both, while W32 on the same `^GET /api/` route class
+matched ×10 in both. The conclusion drawn was "the leg never generates this case."
+
+The next nightly (`33382822525`, `4466ab8`, 2026-08-31) generated it **×4**, one per paged
+collection read, and the leg failed on four *unwaived* `not_a_server_error` findings that
+W31's pattern would have matched exactly.
+
+The measurement was right; the inference was not. Two runs of a randomized fuzzer showing
+zero matches is evidence of a **low rate**, not of an impossible case — the register has an
+`intermittent` flag for precisely this, and that was the correct response to the staleness
+signal. This is the W10 lesson (#2648) recurring with the opposite sign: there, staleness
+was misread as "fixed"; here, as "unreachable". **A stale rule asks a question. It does not
+answer one** — and "the fuzzer cannot produce this" is an answer that needs its own evidence,
+which two samples cannot supply.
+
+Retiring W31 did not turn a green leg red (java was already failing on the staleness), but
+it did remove the one rule that would have absorbed these findings, and it recorded a wrong
+root cause that a later reader would have acted on. The fix above is the right resolution
+either way: the bug is closed rather than re-waived.
 
 ### F25 — java: the paged bounds answer 400, and no read route declares one
-**Waiver:** W32 · **Severity: low**
+**Waiver:** none — fixed · **Severity: low**
+
+**Status: FIXED (2026-08-31).** `ApiExceptionAdvice` gained a dedicated
+`HandlerMethodValidationException` arm answering the wire-validation tier's 422
+with the same `errors[]` pointer envelope the body tier emits.
 
 ```
-curl 'http://host/api/products?pageSize=0' → 400   (the shared matrix declares 422)
+curl 'http://host/api/customers?pageSize=0'
+  before → 400 {"title":"Bad Request","detail":"Validation failure"}
+  after  → 422 {"title":"Validation failed","errors":[{"pointer":"/pageSize",
+                "message":"must be greater than or equal to 1"}]}
 ```
 
-#2555 gave `page`/`pageSize` declared, enforced upper bounds on every backend.
-Java enforces them with a status its own spec does not publish — the F6 shape,
-one route family over.
+**Java was the outlier, not the matrix.** The register's earlier note read this
+as "the shared matrix declares 422" and left it open as a contract question. It
+is not one — all four other backends already answer 422 for the identical
+request (`z.coerce.number().int().min(1)` → Hono's `defaultHook`;
+`Query(ge=1, le=…)` → FastAPI's `RequestValidationError`; `[Range(1, …)]` →
+.NET's `InvalidModelStateResponseFactory`), and java's OWN published set for
+these routes is `[200, 422]` with no 400. Only the runtime answer diverged.
+
+The cause is that `HandlerMethodValidationException` — unlike the two arms
+beside it — DOES implement Spring's `ErrorResponse`, so the `instanceof`
+branch in `onUnhandled` answered its self-declared 400. The 4xx branch that
+exists to stop client faults being reported as 500s was, for this one
+exception, reporting the wrong 4xx.
+
+Verified on a booted backend (storefront-system, postgres): `pageSize=0`,
+`pageSize=99999`, `page=0` and `page=99999999` all answer 422 with a real
+pointer (`/pageSize`, `/page`); `pageSize=467`, no params, and `sort=bogus`
+still answer 200. Gated by `test/generator/java/paged-bounds-422.test.ts`.
+
+### F28 — java: an UNPARSEABLE query string answers an undeclared 400
+**Waiver:** W35 (intermittent) · **Severity: low** · **Status: OPEN, by
+constraint rather than by choice.**
+
+The residue of F24's fix, and narrower than the F25 it replaces in W32's slot.
+`GET /api/customers?=%C3%A0` now answers 400 instead of 500 — correct, and
+Tomcat's own `getErrorCode()` — but no read route declares a 400, so the
+`status_code_conformance` check still reports it.
+
+Three ways out, and none is free:
+
+1. **Answer 200, like the other four.** They ignore the junk parameter, which
+   W8 records as the deliberate cross-backend decision. Java cannot: Tomcat
+   refuses the malformed chunk in the container's own parser, before any
+   handler runs, and Tomcat 11.0.22 exposes no leniency knob — there is no
+   `parameterParsing*` attribute on `Connector` or on `Parameters` (checked
+   against the shipped jar, not the docs). It would take replacing the parser.
+2. **Answer 422.** Contradicts this repo's own split, stated in both the java
+   advice and the python handler: 422 is for a well-formed request that is
+   invalid, 400 for one that cannot be parsed. This one genuinely cannot.
+3. **Declare the 400.** On the SHARED read contract that publishes a status the
+   other four backends never produce — the exact failure the `errorStatuses`
+   table warns about. A java-only declaration would break spec parity instead.
+
+So it stays waived with an honest reason, and W35 carries `intermittent: true`:
+the case appeared ×4 on run 33382822525 and ×0 on the two runs before it. That
+low rate is what made W31 look permanently stale and got it wrongly retired —
+flagging it now is that lesson applied rather than repeated.
 
 ### F26 — java: every 405 omits the `Allow` header
 **Waiver:** W33 · **Severity: medium**
@@ -821,6 +965,120 @@ RFC 9110 makes `Allow` a MUST on 405. It fires on every operation, `/health` and
 `/ready` included, which is why W33's pattern is unscoped: the defect is in the
 one shared error mapper, not in any route. The #2500 class one layer over — that
 was a 401 without `WWW-Authenticate`.
+
+### F27 — elixir: the generated LiveView does not compile, so the leg never boots
+**Waiver:** none — the leg fails before any request is sent · **Severity: high**
+· **Status: OPEN, not yet diagnosed.**
+
+Observed on the 2026-08-31 nightly (run `33382822525`, `4466ab8`) while verifying
+an unrelated fix; recorded here so it is not lost. The elixir discovery cell
+reports `1 problem(s)`, and the cause is upstream of schemathesis entirely — the
+emitted Phoenix project fails `mix compile`:
+
+```
+ERROR: Command failed: mix ecto.create
+== Compilation error in file lib/phoenix_app_web/live/wallet_list_live.ex ==
+** (TokenMissingError) token missing on lib/phoenix_app_web/live/wallet_list_live.ex:158:16:
+     error: missing terminator: end
+     │
+ 128 │           cond do
+     │                └ unclosed delimiter
+ ...
+ 158 │            end
+     │                └ missing closing delimiter (expected "end")
+```
+
+So the HEEx walker emits a `cond do` whose arms do not close. This is a codegen
+defect, not a contract defect: no fuzzing happens at all, and the leg's `No files
+were found with the provided path` on its report upload is an *honest* empty —
+there is no work directory to upload, unlike the four legs whose uploads were
+silently dropped before the `include-hidden-files` fix.
+
+Not investigated further here — it belongs to the HEEx walker
+(`src/generator/elixir/heex-target.ts` / `heex-walker-core.ts`), not to the
+query-parameter path this session was working on.
+
+
+### F29 — dotnet: a value object on a containment PART maps to columns the migration never created
+**Waiver:** none — fixed · **Severity: high** · the whole `Order` route family 500s.
+
+**Status: FIXED (2026-09-01).**
+
+```
+GET /api/orders  →  500
+Npgsql.PostgresException: column o0.UnitPrice_Amount does not exist
+```
+
+The aggregate-root path threads the system's value objects into
+`fieldConfigLines`, which names the owned type's columns to the migration's
+convention. `containmentConfigLines` never received them, so a PART's VO field
+took the unnamed fallback — `o.OwnsOne<Money>(x => x.UnitPrice);` — EF applied
+its own default owned-type naming (`UnitPrice_Amount`), and the migration had
+written `unit_price_amount`.
+
+**Every compile gate was blind to it.** The C# compiles; the app boots (EF
+validates the *model*, not the database); it dies on the first query that reads
+the part. So `Order` — whose `Money` sits on a line — 500s on list, detail and
+destroy alike, while `Product` and `Wallet`, whose `Money` sits on the root, are
+fine. That asymmetry is the signature, and it accounted for **6 of the dotnet
+leg's 13 unwaived findings** (three routes × `not_a_server_error` +
+`status_code_conformance`).
+
+Measured on a booted stack (storefront-system + postgres + `dotnet run`):
+
+| request | before | after |
+|---|---|---|
+| `GET /api/orders` | 500 | **200** |
+| `GET /api/orders/{id}` | 500 | **404** (absent id) |
+| `DELETE /api/orders/{id}` | 500 | **404** |
+| `GET /api/{products,customers,wallets}` | 200 | 200 |
+
+plus a full round-trip — `POST /api/orders/{id}/add_line` with a `unitPrice`
+(204), then reading the order back returns
+`"unitPrice":{"amount":9.99,"currency":"USD"}`. An empty list would not have
+proved the column is genuinely written and read. Reverting the emitter
+reproduces `column o0.UnitPrice_Amount does not exist` verbatim. Gated by
+`test/generator/dotnet/part-valueobject-columns.test.ts`, which also asserts the
+EF config and the migration DDL agree in the same emission.
+
+### F30 — dotnet: a required value-object member of a VALUE TYPE can be omitted
+**Waiver:** W37 · **Severity: medium** · **Status: OPEN — the obvious fix is wrong.**
+
+```
+POST /api/products -d '{"sku":"A","price":{"currency":"USD"}}'   → 201
+GET  /api/products                          → {"amount":0,"currency":"USD"}
+```
+
+`ProductsMoneyRequest` publishes `required: [amount, currency]`. A zero-priced
+product is created from a body the contract forbids.
+
+**The asymmetry is the diagnosis.** Measured on a booted app:
+
+| body | answer |
+|---|---|
+| `{"amount":1.5,"currency":"USD"}` | 201 |
+| `{"amount":1.5}` — string missing | **422**, correctly refused |
+| `{"currency":"USD"}` — decimal missing | **201**, accepted |
+
+Both members are equally required; only the VALUE TYPE slips through, because
+DataAnnotations `[Required]` tests for null and a missing `decimal` binds to `0`.
+This is exactly the hole `dtoParam` already documents for operation bodies
+(RS-26), in the one slot its `[property: JsonRequired]` guard does not cover —
+a VO's own members.
+
+**Extending that guard was tried and rejected, on measurement.** With
+`[property: JsonRequired]` on VO members the omission IS refused — but the STJ
+failure lands in the `Malformed JSON in request body` **400** arm. That is wrong
+on its face (the JSON is well-formed; a member is absent), and it is a NEW
+divergence: the same endpoint answers 422 for an omitted `price`, and node and
+python answer 422 here too. It also moved the correctly-handled `currency` case
+from 422 to 400. Shipping it would have traded one contract bug for a parity bug.
+
+The fix that keeps the 422 tier is a nullable request-DTO value type
+(`decimal? Amount` + `[Required]`), letting the existing model-validation path
+see the absence. That moves every VO construction site in the .NET emitter, so
+it is its own slice rather than a rider on this one.
+
 
 ### The elixir leg
 It ships as a **discovery cell**: the matrix runs it, but `continue-on-error`

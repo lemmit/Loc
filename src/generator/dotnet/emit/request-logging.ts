@@ -86,7 +86,7 @@ public sealed class RequestLoggingMiddleware
             global::${ns}.Observability.HttpMetrics.Record(
                 ctx.Request.Method, metricRoute, ctx.Response.StatusCode, sw.Elapsed.TotalMilliseconds);
             // Reflect the principal id (attached by auth mid-request) onto the
-            // request's OTel SERVER span (M-T7.1) — the loom.* attr the
+            // request's OTel SERVER span — the loom.* attr the
             // AspNetCore instrumentation doesn't know; http.* + span name it
             // sets itself.
             var actorId = global::${ns}.Domain.Common.RequestContext.Current?.ActorId;

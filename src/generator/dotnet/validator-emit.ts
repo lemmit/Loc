@@ -110,6 +110,13 @@ export function renderOperationValidator(
   });
 }
 
+/** Namespace passed by the two call sites that only ask `ruleLines.length > 0`
+ *  and throw the collected `usings` away.  It never reaches emitted source —
+ *  `buildFluentRules`' third argument is required so a real emitter cannot
+ *  silently drop a `using`, and this names the one case where there is no
+ *  namespace to give. */
+const RULE_COUNT_ONLY_NS = "<rule-count-only>";
+
 /** Build the FluentValidation `RuleFor(...)` lines (single-field chains +
  *  cross-field `.Must` carriers) for a set of invariants over `available`.
  *  Shared by the command validators (root `x` = the command) AND the
@@ -119,6 +126,9 @@ export function renderOperationValidator(
 function buildFluentRules(
   invariants: InvariantIR[],
   available: ReadonlySet<string>,
+  /** Project root namespace, for the `usings` half of the return — see
+   *  `RULE_COUNT_ONLY_NS` for the callers that have none. */
+  ns: string,
 ): { ruleLines: string[]; usings: Set<string> } {
   const ctx: ClassifyContext = { available };
   const ruleLines: string[] = [];
@@ -153,8 +163,8 @@ function buildFluentRules(
   // predicates rendered below contribute.
   const usings = new Set<string>();
   for (const inv of remaining) {
-    collectCsExprUsings(inv.expr, usings);
-    if (inv.guard) collectCsExprUsings(inv.guard, usings);
+    collectCsExprUsings(inv.expr, usings, ns);
+    if (inv.guard) collectCsExprUsings(inv.guard, usings, ns);
     const predicate = renderFluentPredicate(inv.expr);
     const guarded = inv.guard
       ? `!(${renderFluentPredicate(inv.guard)}) || (${predicate})`
@@ -186,7 +196,7 @@ function renderValidatorFile(args: {
   available: ReadonlySet<string>;
 }): ValidatorEmission {
   const { ns, aggName, commandName, invariants, available } = args;
-  const { ruleLines, usings } = buildFluentRules(invariants, available);
+  const { ruleLines, usings } = buildFluentRules(invariants, available, ns);
 
   if (ruleLines.length === 0) {
     return { content: null, nonEmpty: false };
@@ -249,7 +259,8 @@ function voBorne(type: TypeIR): { name: string; each: boolean } | null {
  *  `<VO>RequestValidator` is emitted and SetValidator-referenced). */
 export function voHasWireRules(vo: ValueObjectIR): boolean {
   return (
-    buildFluentRules(vo.invariants, new Set(vo.fields.map((f) => f.name))).ruleLines.length > 0
+    buildFluentRules(vo.invariants, new Set(vo.fields.map((f) => f.name)), RULE_COUNT_ONLY_NS)
+      .ruleLines.length > 0
   );
 }
 
@@ -335,7 +346,11 @@ export function renderRequestValidators(
       emittedVo.add(voName);
       const vo = voByName.get(voName);
       if (!vo) continue;
-      const { ruleLines } = buildFluentRules(vo.invariants, new Set(vo.fields.map((x) => x.name)));
+      const { ruleLines } = buildFluentRules(
+        vo.invariants,
+        new Set(vo.fields.map((x) => x.name)),
+        ns,
+      );
       classes.push(
         `public sealed class ${voName}RequestValidator : AbstractValidator<${voName}Request>\n` +
           `{\n    public ${voName}RequestValidator()\n    {\n${ruleLines.join("\n")}\n    }\n}`,

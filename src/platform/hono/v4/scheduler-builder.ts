@@ -1,4 +1,4 @@
-// Timer scheduler emission (scheduling.md) — the Hono backend, Phase 2 (durable).
+// Timer scheduler emission (scheduling.md) — the Hono backend (durable).
 //
 // A `timerSource` fires a plain domain event on a wall-clock cadence.  This
 // builder renders `scheduler.ts`, splitting the owned timers by cadence:
@@ -97,7 +97,7 @@ export function anyTimerUsesCron(timers: readonly TimerSourceIR[]): boolean {
   return timers.some((ts) => ts.cadence.kind === "cron");
 }
 
-/** The raw-SQL seam between the two node persistence adapters (M-T6.23 slice 3).
+/** The raw-SQL seam between the two node persistence adapters (M-T6.23).
  *
  *  `scheduler.ts` is the one emitted module whose database access is NOT domain
  *  persistence: a self-owned `loom_timer_runs` watermark table and a
@@ -342,7 +342,7 @@ export function renderTimerScheduler(
   timers: readonly TimerSourceIR[],
   eventByName: Map<string, EventIR>,
   /** `persistence: mikroorm` — run the watermark + advisory lock on the
-   *  EntityManager instead of Drizzle (M-T6.23 slice 3).  Default false keeps
+   *  EntityManager instead of Drizzle (M-T6.23).  Default false keeps
    *  the Drizzle output byte-identical. */
   usingMikro = false,
 ): string {
@@ -351,7 +351,7 @@ export function renderTimerScheduler(
   const store = usingMikro ? MIKRO_TIMER_STORE : DRIZZLE_TIMER_STORE;
 
   return lines(
-    "// Auto-generated — durable timer scheduler (scheduling.md Phase 2).",
+    "// Auto-generated — durable timer scheduler (scheduling.md).",
     "// cron: → pg-boss (durable, retried, single-fire); every: → in-process.",
     "// Emitted only when this deployable owns timerSources.",
     cron.length > 0 ? `import { PgBoss } from "pg-boss";` : false,

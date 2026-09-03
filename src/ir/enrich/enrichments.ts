@@ -68,6 +68,7 @@ import {
   buildTenantFloorFilter,
   hasTenantOwned,
   hierarchyRegistry,
+  isDenyFilter,
   TENANCY_SELF_SCOPE_ORIGIN,
   TENANT_OWNED_CAPABILITY,
   TENANT_OWNED_TENANT_ID_FIELD,
@@ -83,12 +84,12 @@ import { buildCreateInput, wireFieldsForAggregate } from "./wire-projection.js";
 // projection; this module computes the cross-cutting derivations
 // every backend needs.
 //
-// Why not in lowering: lowering used to mutate the IR in two places
-// (auto-`findAll` injection, react deployable's `moduleNames` copy
-// from its target).  Hidden side-effects on a structure callers
-// think is faithful.  Pulling the derivations out makes the IR
-// read-only after lowering and gives downstream layers a single
-// "fully computed" entry point: `enrichLoomModel(lowerModel(ast))`.
+// Why not in lowering: a derivation done there (auto-`findAll` injection,
+// the react deployable's `moduleNames` copy from its target) is a hidden
+// side-effect on a structure callers think is a faithful AST projection.
+// Keeping them here makes the IR read-only after lowering and gives
+// downstream layers a single "fully computed" entry point:
+// `enrichLoomModel(lowerModel(ast))`.
 //
 // Derivations applied (in order):
 //
@@ -172,10 +173,10 @@ function enrichSystem(
   // resolved once across EVERY api (first-declared api wins on a conflicting
   // code, mirroring urlStyle / errorStatuses), defaulting to 409. Consumed
   // uniformly by every backend at both the runtime arm and the OpenAPI
-  // declaration so the two can no longer drift.
+  // declaration so the two cannot drift.
   //
-  // M-T5.20 widened the fold beyond the four structural conflicts: the rest of
-  // the denial ladder (`DomainError` domain floor, `Forbidden`, `NotFound`)
+  // The fold covers more than the four structural conflicts: the rest of the
+  // denial ladder (`DomainError` domain floor, `Forbidden`, `NotFound`)
   // surfaces in the SAME app-global handlers, so its status has to resolve the
   // same app-wide way. Rather than enumerate a second name list here, fold
   // EVERY name any api maps — a name nobody overrides simply isn't in the map
@@ -211,9 +212,8 @@ function enrichSystem(
       structuralErrorStatuses,
     })),
   }));
-  // Multi-tenancy Phase 1b (capstone decision 4): derive the registry's
-  // self-scope filter from the `tenancy by` declaration.  See
-  // `applyRegistrySelfScope` below.
+  // Derive the registry's self-scope filter from the `tenancy by`
+  // declaration.  See `applyRegistrySelfScope` below.
   const subdomainsScoped = subdomains
     .map((m) => applyRegistrySelfScope(m, sys))
     // Bind the `tenantOwned` capability's hardcoded principal claim to the
@@ -222,7 +222,7 @@ function enrichSystem(
     .map((m) => bindTenancyClaim(m, sys))
     .map((m) => applyPolicyReadLevels(m, sys))
     .map((m) => applyPolicyWriteLevels(m, sys))
-    // Phase 4 — DENY WINS: runs AFTER the allow read/write-level passes, so an
+    // DENY WINS: runs AFTER the allow read/write-level passes, so an
     // always-false carve-out dominates any widened allow scope on the same target.
     .map((m) => applyPolicyDenies(m));
   // Then propagate react deployables' context sets from their targets.
@@ -238,7 +238,7 @@ function enrichSystem(
   const needs = deriveNeeds(subdomainsWithOwner);
   // Resolve each resource's default access interface (RFC §3.5) from
   // its sourceType + kind.  Per-operation overrides land with the
-  // consumption surface (Phase 4).
+  // consumption surface.
   const resourceInterfaces = deriveResourceInterfaces(sys);
   // Scaffold expansion now runs at the AST
   // level via `src/language/ddd-scaffold-ast-expander.ts` (a
@@ -307,7 +307,7 @@ function deriveNeeds(subdomains: EnrichedSubdomainIR[]): NeedIR[] {
           needs.push({ contextName: ctx.name, kind: "eventLog", capabilities: ["append", "read"] });
         }
       }
-      // Usage-derived needs (Phase 4): a resource-op `files.put(...)` means the
+      // Usage-derived needs: a resource-op `files.put(...)` means the
       // context requires the verb's capability of its `(context, kind)` resource.
       // Union per kind so a context using several verbs of one resource needs all
       // their capabilities.  Scan every place a resource-op can appear, walking
@@ -386,7 +386,7 @@ function assignMigrationsOwner(
 }
 
 // ---------------------------------------------------------------------------
-// Registry self-scope — multi-tenancy Phase 1b (capstone decision 4).
+// Registry self-scope (tenancy.md).
 //
 // Under `tenancy by user.<claim> of <Registry>`, the registry aggregate is
 // self-keyed: its "tenant" IS its own primary key (`tenantId ≡ <Registry>.id`).
@@ -531,7 +531,7 @@ function bindTenancyClaim(m: EnrichedSubdomainIR, sys: SystemIR): EnrichedSubdom
 }
 
 // ---------------------------------------------------------------------------
-// Policy read-reachability levels — multi-tenancy Phase 2 P2.4 / P2.5.
+// Policy read-reachability levels (tenancy.md).
 //
 // A `policy { allow <level> on <Agg> }` block selects an aggregate's read
 // scope.  `local` (the default) keeps the flat `tenantId ==` tenant floor the
@@ -544,7 +544,7 @@ function bindTenancyClaim(m: EnrichedSubdomainIR, sys: SystemIR): EnrichedSubdom
 // claim:
 //   - `deep`   → `buildDeepScopeFilter`   (anchor `orgPath`: caller's node + descendants).
 //   - `global` → `buildGlobalScopeFilter` (anchor `rootOrg`: caller's ROOT subtree) —
-//                ONLY under a hierarchy registry (P2.5).  Without a hierarchy
+//                ONLY under a hierarchy registry.  Without a hierarchy
 //                `global` keeps the flat floor (fail-closed; and `deep`/`global`
 //                without a hierarchy is a phase-⑦ error anyway), and under flat
 //                tenancy `rootOrg == orgPath == the tenant floor` so the levels
@@ -600,8 +600,8 @@ function applyPolicyReadLevels(m: EnrichedSubdomainIR, sys: SystemIR): EnrichedS
 }
 
 // ---------------------------------------------------------------------------
-// `policy { allow write <level> on X }` — the WRITE ladder (authorization
-// Phase 3 P3.1, docs/old/plans/authorization-phase3.md).  Derives each tenant-owned
+// `policy { allow write <level> on X }` — the WRITE ladder
+// (docs/old/plans/authorization-phase3.md).  Derives each tenant-owned
 // aggregate's `writeScopeFilter`: the predicate an INSTANCE mutation's command
 // load must satisfy, set ONLY when the write scope is strictly narrower than
 // the read scope (so the mutation load — which reuses the read filter on every
@@ -666,8 +666,8 @@ function applyPolicyWriteLevels(m: EnrichedSubdomainIR, sys: SystemIR): Enriched
 }
 
 // ---------------------------------------------------------------------------
-// `policy { deny [write] on X }` — the DENY-WINS carve-out (authorization Phase 4,
-// docs/old/plans/authorization-phase4-deny.md).  For each denied aggregate:
+// `policy { deny [write] on X }` — the DENY-WINS carve-out
+// (docs/old/plans/authorization-phase4-deny.md).  For each denied aggregate:
 //   - deny READ  → append the always-false `buildDenyFilter` sentinel to the
 //     aggregate's read `contextFilters` (every backend ANDs these into every
 //     read, so the read set is empty → findAll `[]`, findById 404; and because
@@ -701,7 +701,22 @@ function applyPolicyDenies(m: EnrichedSubdomainIR): EnrichedSubdomainIR {
           const writeHit = writeDenied.has(agg.name);
           if (!readHit && !writeHit) return agg;
           let next = agg;
-          if (readHit) {
+          // Idempotence: at most ONE deny term per aggregate.  `readDenied` is
+          // a Set of aggregate names, so a single pass can only ever add one —
+          // but the append below was unconditional, and enrichment re-run over
+          // an already-enriched model added a second identical term (and a
+          // second `contextFilterOrigins` slot with it).  Found by running the
+          // idempotence property over the CORPUS rather than the four examples
+          // `properties.test.ts` could afford: `policy-deny` and
+          // `policy-document` are the only fixtures carrying a `deny`, and
+          // neither example set has one.  Harmless in the pipeline (enrichment
+          // runs once) and harmless in meaning (an AND of a term with itself),
+          // but the contract it violated is the one every re-entrant caller —
+          // the playground re-enriching an edited model, a cached IR — is
+          // entitled to rely on.  `buildDenyFilter` has exactly one call site
+          // that touches `contextFilters` (this one), so the guard is a no-op
+          // on a first pass by construction.
+          if (readHit && !(next.contextFilters ?? []).some(isDenyFilter)) {
             // Append the always-false term to the read filter list (deny wins:
             // any widened allow scope earlier in the list is dominated).  Keep
             // `contextFilterOrigins` index-aligned (undefined origin ⇒ the deny
@@ -851,9 +866,9 @@ export function enrichContext(
   // lowering, so they pass through `withGenerics` and are skipped here by name.
   const unions = monomorphizeUnions(aggregates, valueObjects, repositories, withGenerics);
   const payloads = [...withGenerics, ...unions];
-  // Slice 4 (static-analysis-followups.md): derive each workflow's tail-
-  // position success type once, so the backends can narrow `{:ok, term()}`
-  // to a concrete `{:ok, T}` instead of re-walking the body per emitter.
+  // Derive each workflow's tail-position success type once, so the backends
+  // can narrow `{:ok, term()}` to a concrete `{:ok, T}` instead of re-walking
+  // the body per emitter (static-analysis-followups.md).
   const workflows = ctx.workflows.map(enrichWorkflowReturnType).map(enrichWorkflowInstanceShape);
   // In-process dispatch slice: the channel-routed subscription join.
   const eventSubscriptions = deriveEventSubscriptions(ctx.channels, workflows);
@@ -1492,7 +1507,7 @@ function enrichAggregate(
   // agg so enrichment is idempotent (second enrichment finds the synthesized
   // inspect already in `derived` and doesn't double-add, and
   // `resolveFieldAccess` skips fields that already carry access).  The canonical
-  // wire shape is no longer stamped — every consumer recomputes it on demand via
+  // wire shape is NOT stamped — every consumer recomputes it on demand via
   // `wireFieldsForAggregate` (see CLAUDE.md "Derive, don't stamp").
   // Stamp routeSlug on every lifecycle action.  New objects (don't
   // mutate shared refs); canonicalCreate/Destroy are re-pointed at the

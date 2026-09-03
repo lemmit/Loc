@@ -13,17 +13,16 @@
 // Flutter into a Riverpod `FutureProvider` the page watches.  Both therefore
 // walk the page body up front, collecting the reads to materialise.
 //
-// Both collectors used to spell that walk as `e.name === "QueryView"`.  When
-// `Chart` — the second read-bearing primitive ever added — arrived, both were
-// duly missed, and the failure was not subtle: a chart-only page emitted
-// `View.chart … model.<Field>` against a Model field nothing declared (Feliz),
-// and imported `reads.dart` while watching a provider the emitter never wrote
-// (Flutter: `uri_does_not_exist` + `undefined_identifier`).  Two hand-kept
-// copies of the same list, and one new primitive was enough to break both.
+// Spelling that walk as `e.name === "QueryView"` in each collector is two
+// hand-kept copies of one list, and one new read-bearing primitive breaks both:
+// a chart-only page emits `View.chart … model.<Field>` against a Model field
+// nothing declared (Feliz), and imports `reads.dart` while watching a provider
+// the emitter never wrote (Flutter: `uri_does_not_exist` +
+// `undefined_identifier`).
 //
 // So the fact lives on the registry entry (`readsOf`), where primitives are
-// declared, and both collectors ask here.  Adding a third read-bearing
-// primitive is that one flag — there is no second place left to forget.
+// declared, and both collectors ask here.  Adding a read-bearing primitive is
+// that one flag — there is no second place to forget.
 //
 // The lookup is LAZY (a registry read per call, not a Set built at module
 // load) so the answer cannot go stale relative to the registry, and so a test

@@ -1,4 +1,4 @@
-// Timer scheduler emission (scheduling.md) — the Java/Spring backend, Phase 2.
+// Timer scheduler emission (scheduling.md) — the Java/Spring backend.
 //
 // A `timerSource` fires a plain domain event on a wall-clock cadence.  The two
 // cadences split by where durability matters:
@@ -332,7 +332,7 @@ export function renderJobRunrConfig(timers: readonly TimerSourceIR[], basePkg: s
     ``,
     `import ${basePkg}.*;`,
     ``,
-    `/** Durable cron timerSources (scheduling.md Phase 2) on JobRunr core.`,
+    `/** Durable cron timerSources (scheduling.md) on JobRunr core.`,
     ` *`,
     ` *  JobRunr has no Spring-Boot-4 starter yet, so we wire its core directly`,
     ` *  (the documented "without Spring Boot starter" path): a SQL StorageProvider`,

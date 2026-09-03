@@ -1,4 +1,4 @@
-// Accessibility validators (accessibility.md Phase 3) — the compile-time
+// Accessibility validators (accessibility.md) — the compile-time
 // enforcement of the few a11y facts Loom genuinely cannot derive.  The
 // per-primitive contract lives in the generator's walker registry
 // (src/generator/_walker/a11y.ts, `A11yObligation`); these checks are the

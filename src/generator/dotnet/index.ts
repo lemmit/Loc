@@ -257,7 +257,7 @@ export function generateDotnetForContexts(
   options: {
     emitTrace?: boolean;
     sourcemap?: SourceMapRecorder;
-    /** `.ddd` source text keyed by `OriginRef` source path (M7 phase 6a) —
+    /** `.ddd` source text keyed by `OriginRef` source path —
      *  forwarded verbatim into the root `renderEntity` call so the REGULAR
      *  named-operation body loop can weave `#line` directives.  Gated on
      *  `sourcemap` also being present (same honest-skip convention as the
@@ -352,7 +352,7 @@ function emitProjectFromContexts(
   const hasSubscriptions =
     contexts.some((c) => c.eventSubscriptions.length > 0 || (c.projections?.length ?? 0) > 0) ||
     hasChannelConsumers;
-  // Durable broker-bound events (M-T4.4 slice 7b): HOSTED durable events
+  // Durable broker-bound events (M-T4.4): HOSTED durable events
   // carried by a wired `queue`/`work` (or future `log`) channel — their
   // producer path rides the outbox relay (design §5), never the inline tee.
   const hostedDurable = new Set(contexts.flatMap((c) => [...durableEventTypes(c)]));
@@ -448,7 +448,7 @@ function emitProjectFromContexts(
     // Domain services (domain-services.md) — stateless pure calculators, one
     // `public static class` per `domainService` + its `or`-union return records.
     emitDomainServices(ctx, ns, out);
-    // Value-object / domain-service unit tests (test-placement.md, Phase 2) —
+    // Value-object / domain-service unit tests (test-placement.md) —
     // colocated xUnit classes, emitted only when the subject declares a `test`.
     for (const vo of ctx.valueObjects) {
       const voTests = renderVoTestsFile(vo, ctx, ns);
@@ -458,7 +458,7 @@ function emitProjectFromContexts(
       const svcTests = renderServiceTestsFile(svc, ctx, ns);
       if (svcTests) out.set(`Tests/${ns}.Tests/Services/${svc.name}Tests.cs`, svcTests);
     }
-    // Context INTEGRATION test (test-placement.md, Phase 3b) — an in-process,
+    // Context INTEGRATION test (test-placement.md) — an in-process,
     // EF-repository-backed cross-aggregate xUnit class reading LOOM_PG_URL,
     // applying the EF migrations, wiring the repos, and persisting→reading.
     const integrationTests = renderContextIntegrationTest(ctx, ns);
@@ -561,7 +561,7 @@ function emitProjectFromContexts(
       out.set(`Domain/Ids/${name}Id.cs`, renderId(name, idValueType, ns));
     }
   }
-  // Broker transport module (M-T4.4 slice 6a) — channel-less projects stay
+  // Broker transport module (M-T4.4) — channel-less projects stay
   // byte-identical.
   // Realtime SSE wire (channels.md Part I): computed before the broker
   // channels emit because the channel tee's typed inner becomes the realtime
@@ -620,7 +620,7 @@ function emitProjectFromContexts(
   if (hasOutbox) {
     // The workflow-less durable-broker producer wraps the Noop (no in-process
     // dispatcher exists); the relay publishes broker-bound rows on drain
-    // (M-T4.4 slice 7b, design §5) instead of redelivering them locally.
+    // (design §5) instead of redelivering them locally.
     const outboxInner = hasSubscriptions
       ? "InProcessDomainEventDispatcher"
       : "NoopDomainEventDispatcher";
@@ -708,11 +708,11 @@ function emitProjectFromContexts(
   // adapters — the shared ProvLineage SDK + the co-located `<field>_provenance`
   // columns + the append-only `provenance_records` flush; the Dapper repository
   // flushes via raw Npgsql (DbSchema owns the history table's DDL) instead of
-  // the EF ProvenanceRecord POCO/configuration.  Audit now follows exactly that
-  // shape.  It used to be EF-only (`!usingDapper && …`), but the handler
-  // emitters kept referencing `IAuditWriter` under Dapper while the runtime went
-  // unemitted — a dangling CS0246 on every audited operation, and create/destroy
-  // audit silently dropped.  It is emitted on both adapters now: Dapper stages
+  // the EF ProvenanceRecord POCO/configuration.  Audit follows exactly that
+  // shape, on BOTH adapters — gating it EF-only (`!usingDapper && …`) leaves
+  // the handler emitters referencing `IAuditWriter` under Dapper with no
+  // runtime emitted: a dangling CS0246 on every audited operation, and
+  // create/destroy audit silently dropped.  Dapper stages
   // into a request-scoped buffer the repository drains onto its open
   // transaction, so the atomicity guarantee is the same on both.
   const hasProvenance = contextsHaveProvenance(contexts);
@@ -887,7 +887,7 @@ function emitProjectFromContexts(
     // `EventRecord` POCO + `<Ctx>EventRecordConfiguration`, emitted once per
     // context above), so no per-workflow POCO/config here.
     emitEventSourcedWorkflowFiles(merged.workflows, ns, out, ownerOf);
-    // Domain persistence-port adapters (audit S7 Slice C): the EF
+    // Domain persistence-port adapters: the EF
     // implementations of IUnitOfWork / IWorkflowEventStore / ISagaStateStore /
     // IReadModelStore the orchestration handlers depend on INSTEAD of the
     // concrete AppDbContext.  Emitted when the deployable hosts a workflow or a
@@ -1001,7 +1001,7 @@ function emitProjectFromContexts(
       });
     }
   }
-  // First-boot seed data (database-seeding.md, Phase 3a) — emits
+  // First-boot seed data (database-seeding.md) — emits
   // Infrastructure/Persistence/Seed.cs when the served contexts declare any
   // `seed` block.  Through the domain `Create` (D-SEED-PATH), ship-once per
   // dataset (D-SEED-IDEMPOTENCY).  Program.cs gets `hasSeeds` below so it
@@ -1010,7 +1010,16 @@ function emitProjectFromContexts(
     // RAW seed rows are hand-built SQL, so they need the same dataSource schema
     // the EF model routes the tables into (the DOMAIN path is qualified by the
     // model mapping itself).
+    //
+    // …EXCEPT under `persistence: dapper`, which is a SELF-PROVISIONING adapter:
+    // it emits no migration chain, its DDL is `DbSchema.EnsureAsync`, and that
+    // DDL (like every Dapper statement) names tables UNQUALIFIED — so the raw
+    // seed has to target the same unqualified tables `EnsureAsync` created.
+    // Qualifying them off the per-context dataSource schema instead made
+    // `RunSeeds` throw `3F000 schema "catalog" does not exist` on first boot,
+    // because nothing in the Dapper emission ever creates that schema (F2-ADP-2).
     emitDotnetSeeds(merged, ns, out, usingDapper, (aggName) => {
+      if (usingDapper) return undefined;
       // Resolve through the aggregate's OWNING context, not `merged`: the
       // dataSource bindings name the real contexts, so a merged pseudo-context
       // resolves to nothing and the qualifier would silently go missing again.
@@ -1023,7 +1032,7 @@ function emitProjectFromContexts(
   }
   const hasSeeds = out.has("Infrastructure/Persistence/Seed.cs");
   // Resource client classes (objectStore / queue / api) + their NuGet
-  // deps (Phase 4c).  Empty when the deployable wires no consumable
+  // deps.  Empty when the deployable wires no consumable
   // resources — the csproj stays byte-identical.
   const resourceEmission = emitDotnetResourceFiles(system?.sys, ns);
   for (const [path, content] of resourceEmission.files) out.set(path, content);
@@ -1115,7 +1124,7 @@ function emitProjectFromContexts(
     resourceNugetDeps: resourceEmission.nugetDeps,
     fileUpload,
     oidc: !!(authRequired && system?.sys.auth),
-    // Tenant hierarchy (multi-tenancy P2.2): the registry opts into
+    // Tenant hierarchy (multi-tenancy): the registry opts into
     // `tenantRegistry` (a `dataKey` column), so Program.cs registers the scoped
     // `IOrgPathResolver` → `EfOrgPathResolver` the auth middleware calls to
     // materialize `currentUser.orgPath`.  Undefined (flat tenancy) ⇒ omitted.
@@ -1298,7 +1307,7 @@ function emitAggregate(
    *  only in system-mode emit, same discipline as `emitCtx`.  No-op when
    *  absent (legacy single-context path), so output stays byte-identical. */
   sourcemap?: SourceMapRecorder,
-  /** `.ddd` source text keyed by `OriginRef` source path (M7 phase 6a) —
+  /** `.ddd` source text keyed by `OriginRef` source path —
    *  forwarded into the root `renderEntity` call only (entity parts carry
    *  no operations, so weaving would be a no-op there anyway). */
   sourceTexts?: ReadonlyMap<string, string>,
@@ -1330,7 +1339,7 @@ function emitAggregate(
     );
     out.set(path, content);
     sourcemap?.file(path, content, origin, construct);
-    // Statement-granular sub-regions (source-map Milestone 3) — layered onto
+    // Statement-granular sub-regions (source-map) — layered onto
     // the whole-file region just recorded above, anchored by exact-text
     // search against this SAME final content, so they land at the right
     // absolute lines regardless of what the layout adapter did to the path.
@@ -1491,7 +1500,7 @@ function emitAggregate(
     agg.origin,
     opFragments,
   );
-  // Extern (b) Phase 2: an aggregate with any `extern` op is emitted `partial`;
+  // Extern (b): an aggregate with any `extern` op is emitted `partial`;
   // the user supplies the implementing half of each `<Op>Core` hook in a
   // co-located SCAFFOLD-ONCE partial (`<Agg>.Extern.cs`) that regeneration
   // preserves (the `loom:scaffold-once` marker → CLI writer keeps the on-disk
@@ -1537,10 +1546,10 @@ function emitAggregate(
   // declares its System.Text.RegularExpressions dependency; the
   // repository impl emitter then adds the using.  Retrieval `where`
   // predicates contribute the same way.
-  const repoImplUsings = collectFindBodyUsings(repoWithViews);
-  collectRetrievalBodyUsings(aggRetrievals, repoImplUsings);
+  const repoImplUsings = collectFindBodyUsings(repoWithViews, new Set<string>(), ns);
+  collectRetrievalBodyUsings(aggRetrievals, repoImplUsings, ns);
   // A retrieval/find whose `where` is a reified criterion consumes its
-  // `Criterion` class's `ToExpression()` (Slice 2b) → needs Domain.Criteria.
+  // `Criterion` class's `ToExpression` → needs Domain.Criteria.
   const consumesCriterion =
     aggRetrievals.some(
       (r) => r.criterionRef && canEmitToExpressionFor(r.criterionRef.name, ctx, agg.name),
@@ -1627,7 +1636,7 @@ function emitAggregate(
             extraUsings: [...repoImplUsings].sort(),
             idClass,
           })
-        : renderRepositoryImpl(agg, repoWithViews, ns, findBodies, {
+        : renderRepositoryImpl(agg, repoWithViews, ns, ctx.aggregates, findBodies, {
             extraUsings: [...repoImplUsings].sort(),
             emitTrace,
             retrievals: aggRetrievals,
@@ -1769,7 +1778,7 @@ function emitInfrastructure(
   emitWorkflowStatePersistence(ctx.workflows, ns, out, durableEventTypes(ctx).size > 0);
   emitProjectionRowPersistence(ctx.projections.filter(isMaterializedProjection), ns, out);
   emitEventSourcedWorkflowFiles(ctx.workflows, ns, out, makeOwnerOf([ctx]));
-  // Domain persistence-port adapters (audit S7 Slice C) — the LEGACY
+  // Domain persistence-port adapters — the LEGACY
   // single-context (`generate dotnet`) sibling of the system path's emission.
   // Gated on the SAME condition renderProgram registers the ports under
   // (ctx.workflows / ctx.projections), so a project that uses none of these
@@ -1820,14 +1829,14 @@ function emitProject(
     emitTrace?: boolean;
     usingDapper?: boolean;
     hasSubscriptions?: boolean;
-    /** Broker channels (M-T4.4 slice 6a) — see renderProgram/renderCsproj. */
+    /** Broker channels (M-T4.4) — see renderProgram/renderCsproj. */
     hasChannels?: boolean;
     hasChannelConsumers?: boolean;
-    /** M-T4.4 slice 7b: which broker drivers the wired bindings need — drives
+    /** M-T4.4: which broker drivers the wired bindings need — drives
      *  the per-transport csproj package refs (StackExchange.Redis /
      *  RabbitMQ.Client). */
     channelTransports?: { redis: boolean; rabbit: boolean; kafka?: boolean };
-    /** M-T4.4 slice 7b: the workflow-less durable-broker producer shape — the
+    /** M-T4.4: the workflow-less durable-broker producer shape — the
      *  outbox dispatcher wraps the Noop, so Program.cs registers it concretely
      *  instead of the InProcess scoped line. */
     outboxNoopInner?: boolean;
@@ -1870,7 +1879,7 @@ function emitProject(
     /** OIDC turnkey auth (D-AUTH-OIDC): the system declares `auth { oidc }`,
      *  so emit the generated verifier registration + its NuGet refs. */
     oidc?: boolean;
-    /** Tenant hierarchy (multi-tenancy P2.2): register the scoped
+    /** Tenant hierarchy (multi-tenancy): register the scoped
      *  `IOrgPathResolver` → `EfOrgPathResolver` for the per-request
      *  `currentUser.orgPath` registry `data_key` read. */
     orgPathResolver?: boolean;
@@ -1886,10 +1895,10 @@ function emitProject(
   },
 ): void {
   // Scrutor scan (+ package ref) is needed when the project emits any
-  // `[ExternHandler]` class.  Since extern (b) Phase 2 an extern aggregate
+  // `[ExternHandler]` class.  For an extern (b) aggregate, an extern aggregate
   // OPERATION is a domain partial-method hook (no injected handler, no
   // `[ExternHandler]`), so only the extern application-layer commandHandler /
-  // queryHandler (Phase 1's case-2 home) still registers through the scan.
+  // queryHandler (case-2 home) still registers through the scan.
   const hasExtern = [...(ctx.commandHandlers ?? []), ...(ctx.queryHandlers ?? [])].some(
     (h) => h.extern,
   );

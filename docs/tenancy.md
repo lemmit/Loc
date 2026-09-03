@@ -195,8 +195,23 @@ bases are exempt). An unmarked aggregate is a hard error:
 | `loom.tenant-owned-without-tenancy` | `with tenantOwned` but no `tenancy by` | error |
 | `loom.cross-tenant-without-tenancy` | `crossTenant` but no `tenancy by` | warning |
 | `loom.tenancy-conflicting-stance` | both markers on one aggregate (or a marker on the registry) | error |
+| `loom.tenancy-inherited-stance-conflict` | a subtype declares the OPPOSITE stance from the abstract base it `extends` | error |
 | `loom.tenancy-claim-type-mismatch` | the claim's type can't bind against the registry's `ids` type (see the id-vs-claim rule above) | error |
 | `loom.tenant-owned-claim-type` | a `tenantOwned` aggregate exists but the claim isn't `string` (the capability's field is `tenantId: string`; a `guid` claim mis-compiles typed backends — declare the claim `string`, guid values round-trip as text) | error |
+
+### Inheritance: the stance is declared per CONCRETE
+
+An abstract base is exempt from the rule, and its stance does **not** propagate
+to its subtypes: only the base's *fields* are inherited. So `abstract aggregate
+Vehicle with tenantOwned` gives every subtype the `tenant_id` column while
+nothing stamps or filters it — which is why an unmarked subtype is still
+`loom.tenancy-stance-unmarked` (with a message that names this, rather than
+telling you to add a marker you already wrote on the base), and why writing
+`crossTenant` on the subtype instead is rejected outright: the column is NOT
+NULL either way, so the two halves disagree at runtime — node/python persist
+every row under an empty tenant with no isolation, java/.NET/elixir cannot
+insert at all. Repeat `with tenantOwned` on each concrete, or move the
+capability off the base onto the subtypes that want it.
 
 There is deliberately **no severity knob**: the escape hatch is writing
 `crossTenant` — one keyword, intent declared. This is fail-closed without

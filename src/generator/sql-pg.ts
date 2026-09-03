@@ -185,7 +185,7 @@ function renderAddIndex(idx: IndexShape, schema?: string, ifNotExists = false): 
   // Partial index (`WHERE …`) — set on a `unique` index derived for a
   // softDeletable aggregate so re-create after soft-delete is allowed.
   const where = idx.predicate ? ` WHERE ${idx.predicate}` : "";
-  // Per-column opclass (P2.5 materialized-path prefix index): `text_pattern_ops`
+  // Per-column opclass (materialized-path prefix index): `text_pattern_ops`
   // after the column makes `LIKE 'prefix.%'` index-usable under any collation.
   const cols = idx.columns
     .map((c) => {
@@ -255,7 +255,14 @@ function ident(name: string): string {
  *  columns.  Value objects / containment columns are unsupported in v1 (the
  *  validator reports them before this runs).  `schema` qualifies the table
  *  for backends whose tables live outside the connection's search_path
- *  (java's per-module schemas); omitted, the SQL is unchanged. */
+ *  (java's per-module schemas); omitted, the SQL is unchanged.
+ *
+ *  Column-per-field by construction: this knows nothing of the aggregate's
+ *  SAVING SHAPE, so a `shape: document` aggregate — one `(id, data, version)`
+ *  jsonb table — has no column here to target (`F2-SEED-RAW-DOCUMENT`, five
+ *  backends emitting the same `42703` INSERT).  `loom.seed-raw-document-shape`
+ *  (src/language/validators/seed.ts) rejects that crossing upstream; teaching
+ *  this renderer the document shape is the alternative, and is not done. */
 export function renderSeedRowInsert(
   aggregate: string,
   fields: { name: string; value: ExprIR }[],

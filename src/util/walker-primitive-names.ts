@@ -42,7 +42,7 @@ export const WALKER_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set([
   "Paper",
   "Breadcrumbs",
   "KeyValueRow",
-  // Phase 6 — semantic anchor target + sticky-position wrapper.
+  // Semantic anchor target + sticky-position wrapper.
   "Section",
   "Sticky",
   // Inputs.  (`Switch` is deliberately absent: page-metamodel.md removed it —
@@ -125,3 +125,101 @@ export const WALKER_SUB_PRIMITIVE_PARENTS: ReadonlyMap<string, ReadonlySet<strin
 export function isWalkerPrimitive(name: string): boolean {
   return WALKER_LAYOUT_PRIMITIVES.has(name) || WALKER_SUB_PRIMITIVES.has(name);
 }
+
+// ---------------------------------------------------------------------------
+// The POSITIONAL SLOT COUNT of each primitive — how many positional arguments
+// any target actually renders.
+//
+// A container (`Stack`, `Card`, `Tab`, `Toolbar`, `Section`, `Modal`'s
+// state-controlled shape, …) renders EVERY positional as a child and has no
+// entry here.  Everything else is a fixed SLOT shape: its pack templates
+// interpolate a known number of positions and have nowhere to put an extra one,
+// so a positional past the count is read by NOBODY — the content vanishes from
+// every frontend while a string literal inside it still lands in
+// `.loom/messages.en.json`, handing translators a key nothing renders.
+//
+// This is the MEMBERSHIP the `loom.page-primitive-extra-children` gate reads
+// (`src/ir/validate/checks/ui-checks.ts`).  It used to be hand-listed inside
+// that check at exactly `Stat` / `KeyValueRow` / the op-form `Modal`, while
+// every other fixed-arity read in the primitive table stayed unguarded:
+// `EnumBadge { "x", "dropped" }` and `Image { "/a.png", "/dropped.png",
+// alt: "a" }` both parsed `0 error(s)` and both emitted only positional 0.
+// Declaring it per primitive, beside the name sets, is what makes a NEW
+// primitive fail the completeness test rather than land silently outside the
+// gate.
+//
+// Homed here for the same layering reason as the name sets: the IR validator
+// reads it and `src/ir/` may not import `src/generator/`.  The NAMED-argument
+// vocabulary is the sibling half and lives in `walker-primitive-args.ts`.
+// ---------------------------------------------------------------------------
+
+/** The rendered positional surface of one walker primitive. */
+export interface WalkerPrimitiveSlots {
+  /** How many positionals any target renders.  `0` means the primitive is
+   *  configured entirely through its named arguments. */
+  readonly max: number;
+  /** Human-readable naming of the rendered slots, for the arity diagnostic
+   *  ("label and value").  Omitted only when `max` is 0. */
+  readonly slots?: string;
+}
+
+/** Primitive → its rendered positional slots.  ABSENT means "children
+ *  container": every positional is walked, so there is no extra one. */
+export const WALKER_PRIMITIVE_SLOTS: ReadonlyMap<string, WalkerPrimitiveSlots> = new Map<
+  string,
+  WalkerPrimitiveSlots
+>([
+  // --- Two-slot value shapes ----------------------------------------------
+  ["Stat", { max: 2, slots: "label and value" }],
+  ["KeyValueRow", { max: 2, slots: "label and value" }],
+  // `Column(header, accessor)` — `emitColumn` reads `positionals[0]` as the
+  // header and `positionals[1]` as the cell lambda, and nothing else.
+  ["Column", { max: 2, slots: "header and cell accessor" }],
+  // `For` takes the collection and the item lambda positionally (either order
+  // — `emitFor` finds the lambda by kind).
+  ["For", { max: 2, slots: "collection and item lambda" }],
+
+  // --- One-slot value shapes ----------------------------------------------
+  ["Text", { max: 1, slots: "text" }],
+  ["Bold", { max: 1, slots: "text" }],
+  ["Italic", { max: 1, slots: "text" }],
+  ["InlineCode", { max: 1, slots: "text" }],
+  ["Badge", { max: 1, slots: "label" }],
+  ["Empty", { max: 1, slots: "message" }],
+  ["Heading", { max: 1, slots: "text" }],
+  ["Anchor", { max: 1, slots: "label" }],
+  ["Money", { max: 1, slots: "value" }],
+  ["DateDisplay", { max: 1, slots: "value" }],
+  ["EnumBadge", { max: 1, slots: "value" }],
+  ["FileLink", { max: 1, slots: "value" }],
+  ["Image", { max: 1, slots: "src" }],
+  ["Alert", { max: 1, slots: "message" }],
+  ["CodeBlock", { max: 1, slots: "source" }],
+  ["IdLink", { max: 1, slots: "id" }],
+  ["Timeline", { max: 1, slots: "entries" }],
+  ["ProvenanceInfo", { max: 1, slots: "record" }],
+  ["Button", { max: 1, slots: "label" }],
+  ["Action", { max: 1, slots: "the operation reference" }],
+  ["CreateForm", { max: 1, slots: "the aggregate" }],
+  ["OperationForm", { max: 1, slots: "the operation reference" }],
+  ["WorkflowForm", { max: 1, slots: "the workflow" }],
+  ["DestroyForm", { max: 1, slots: "the record" }],
+  // The seven controlled inputs read positional 0 as the field LABEL.
+  ["Field", { max: 1, slots: "label" }],
+  ["NumberField", { max: 1, slots: "label" }],
+  ["PasswordField", { max: 1, slots: "label" }],
+  ["Toggle", { max: 1, slots: "label" }],
+  ["MultilineField", { max: 1, slots: "label" }],
+  ["SelectField", { max: 1, slots: "label" }],
+  ["FileUpload", { max: 1, slots: "label" }],
+
+  // --- Named-argument-only shapes -----------------------------------------
+  ["Avatar", { max: 0 }],
+  ["Loader", { max: 0 }],
+  ["Divider", { max: 0 }],
+  ["Skeleton", { max: 0 }],
+  ["Slot", { max: 0 }],
+  ["Icon", { max: 0 }],
+  ["Chart", { max: 0 }],
+  ["QueryView", { max: 0 }],
+]);

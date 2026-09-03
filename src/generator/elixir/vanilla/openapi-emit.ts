@@ -175,8 +175,9 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
   // declaration.  So a deployable declared with `contexts:` alone falls back to
   // the app name and still publishes the same route-derived document the other
   // four backends publish either way (F15,
-  // `docs/audits/schemathesis-findings-2026-08.md`) — previously it emitted no
-  // spec module, no OpenapiController and no `/openapi.json` route at all.
+  // `docs/audits/schemathesis-findings-2026-08.md`).  Without the fallback such
+  // a deployable emits no spec module, no OpenapiController and no
+  // `/openapi.json` route at all.
   const servedApi = deployable.serves?.[0];
   const apiSnake = servedApi ? snake(servedApi) : appName;
   const apiPascal = servedApi ? upperFirst(servedApi) : appModule;
@@ -668,9 +669,9 @@ ${pagingQueryParams()}
       );
     }
 
-    // Per-operation paths — the SERVED entries (router parity by
-    // construction; the spec used to document every public op, including the
-    // CRUD-verb-named ones the router never mounts and the ES `update`).
+    // Per-operation paths — the SERVED entries, so router parity holds by
+    // construction.  Documenting every public op instead would publish the
+    // CRUD-verb-named ones the router never mounts, and the ES `update`.
     for (const entry of served.opEntries) {
       const op = entry.operation!;
       const opReqMod = `${schemasModule}.${upperFirst(op.name)}${agg.name}Request`;
@@ -781,9 +782,9 @@ ${pagingQueryParams()}
               description: "OK",
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${findRespMod}}}
             }${
-              // The declared set (gated 403 included, union-absent status
-              // resolved) is the derived one — the union arm here used to
-              // omit the 403 a gated union find answers.
+              // The declared set is the DERIVED one, so it carries the 403 a
+              // gated union find answers and the resolved union-absent
+              // status.
               statusResponseEntries(
                 withResolvedNotFound(entry.errorStatuses, notFoundStatus),
                 schemasModule,
@@ -917,6 +918,34 @@ function openApiType(t: TypeIR, schemasModule: string): string {
   }
 }
 
+/** Declare a nullable property `nullable: true` (F2-W-12).
+ *
+ *  Absence from `required[]` says the key may be OMITTED; it does not say the
+ *  value may be `null`.  The emitted serializer builds `"sku" => record.sku` for
+ *  every row, nil included, so an optional field's key is ALWAYS present and its
+ *  value is `null` — a body this app's own published schema forbade.  The three
+ *  backends that declare it: node `z.string().nullish()` (a null union), .NET
+ *  `string?` under `SupportNonNullableReferenceTypes()` (`nullable: true`), and
+ *  python `str | None` (a pydantic anyOf-with-null).
+ *
+ *  `nullable: true` is the OpenAPI 3.0 spelling, which is the dialect
+ *  `OpenApiSpex` emits — and the parity normalizer's `propTypeSig` already folds
+ *  it out (`{type: "string", nullable: true}` and `{type: "string"}` sign the
+ *  same), so this is documentation-only as far as the cross-backend diff is
+ *  concerned.
+ *
+ *  DELIBERATELY NOT applied to a `$ref`-shaped property (a nullable enum, value
+ *  object or containment part).  3.0 forbids a sibling keyword beside `$ref`, so
+ *  the valid spelling is `allOf: [$ref] + nullable: true` — and `propTypeSig`
+ *  does not fold `allOf`, so it would read as `object` where the other backends
+ *  read `ref:<Name>` and the parity gate would report a divergence this change
+ *  invented.  Those properties keep the pre-existing bare `$ref`. */
+function nullableSchema(schema: string, isNullable: boolean): string {
+  if (!isNullable) return schema;
+  if (!schema.startsWith("%OpenApiSpex.Schema{") || !schema.endsWith("}")) return schema;
+  return `${schema.slice(0, -1)}, nullable: true}`;
+}
+
 /** Render a list of fields into OpenApiSpex properties + required list.
  *  The `create` slot drops non-nullable `bool` fields from the `required`
  *  list: Phoenix's controller (like Hono's `z.boolean().default(false)` and
@@ -947,9 +976,10 @@ function renderProperties(
   // as `only-phoenix=[created_at,...]`.
   for (const f of fields) {
     const key = f.name;
-    const schema = openApiType(f.type, schemasModule);
-    propsLines.push(`      ${key}: ${schema}`);
     const info = wireTypeInfo(f.type, slot === "response" ? "response" : "request");
+    propsLines.push(
+      `      ${key}: ${nullableSchema(openApiType(f.type, schemasModule), info.isNullable)}`,
+    );
     // RS-26: scoped to CREATE.  An omitted create bool is well-defined
     // (`hasImplicitDefault`), but on an OPERATION body — `update` included —
     // there is nothing to construct, so an omitted field is a missing required
@@ -1011,7 +1041,7 @@ end
  *  message }` array) that the runtime emits on 422 validation responses.
  *  All fields optional — base 5 per the spec core; `errors` is only
  *  present on 422 validation responses (consumed by the frontend ACL's
- *  `applyServerErrors`).  Phase D of validation-error-extension.md —
+ * `applyServerErrors`).  validation-error-extension.md —
  *  all three backends (Hono / .NET / Phoenix) declare the same shape in
  *  lockstep so the cross-backend parity gate stays green. */
 function renderProblemDetailsSchema(webModule: string): string {
@@ -1260,9 +1290,8 @@ function pagedFindName(ctx: EnrichedBoundedContextIR, agg: EnrichedAggregateIR):
  *
  *  `page` / `pageSize` publish the same declared `minimum` / `maximum` the
  *  other four backends do (`PAGED_MAX_PAGE` / `PAGED_MAX_PAGE_SIZE`); the
- *  controller's `page_param/4` clamps to the same ceiling, so an unbounded
- *  `page * pageSize` can no longer overflow the SQL `OFFSET` (schemathesis
- *  F4). */
+ *  controller's `page_param/4` bounds to the same ceiling, so an unbounded
+ *  `page * pageSize` cannot overflow the SQL `OFFSET` (schemathesis F4). */
 function pagingQueryParams(): string {
   return [
     `            %OpenApiSpex.Parameter{name: :page, in: :query, required: false, schema: %OpenApiSpex.Schema{type: :integer, minimum: 1, maximum: ${PAGED_MAX_PAGE}}}`,
