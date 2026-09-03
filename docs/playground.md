@@ -182,6 +182,44 @@ The **Migrations** tab compares the live source with a baseline (*Last save* by 
 
 The **Tests** tab's requirement verdicts read *Verified / Failing / Untested / Unverified* with a one-line legend; a discovery failure (in a sandbox with no registry: `Failed to resolve module specifier "uuidv7"`) shows one line of interpretation with the raw text folded behind *Show details*, and discovery reports per-suite progress with a *Cancel*.
 
+## The `.loom/` bundle as views, and source ↔ output correspondence
+
+`generate system` emits a documentation bundle beside the code
+([`loom-artifacts.md`](loom-artifacts.md)). The Explorer switcher renders it
+rather than only listing it: **Diagrams** opens the `.loom/*.mmd` files in the
+mermaid viewer, **Traceability** renders the `.loom/*.md` reports, and **API**
+lists every HTTP operation grouped by aggregate plus the system's channels.
+The API view is derived from the IR (`deriveContextOperations` — the same
+derivation all five backend route builders render from), not parsed out of
+generated source, so it describes a .NET / Java / Phoenix / Python deployable's
+surface just as accurately, with nothing booted. The files stay browsable under
+**Generated**.
+
+The generated tree also marks what **changed since the last generate** (the
+build worker returns a per-file content hash), and each History commit carries
+a *What changed in the output* section grouped by deployable.
+
+**Source ↔ output correspondence** is the Compiler-Explorer feature over
+`.loom/sourcemap.json`, which the build worker now records on every system
+generate (the artifact itself is still only written into the tree under
+`--sourcemap`, so the emitted output is unchanged). Hovering a `.ddd`
+declaration names it, marks the generated files it produced and decorates
+their lines when one is open; hovering generated code flashes the `.ddd` span
+it came from; a **Colour map** toggle tints every declaration and every region
+it owns with one hue on both sides. Because the map is construct-granular
+rather than language-specific, one hover lights up files across every
+deployable at once. Which lines get painted follows the map: a region whose
+origin *begins* on the hovered line is a declaration you are pointing at (its
+whole file lights up), one that merely covers the line is a declaration you
+are inside (only that construct's lines light up). The mapping logic is pure
+in `web/src/build/correspondence.ts`.
+
+Finally, a **Select** toggle in the preview footer arms the running app: the
+next click is swallowed and its element's `data-testid` is resolved — through
+the generated page that emits it, then the sourcemap — to the `.ddd`
+declaration, which is revealed in the editor with *Open in Builder* and *Ask
+the agent* beside it.
+
 ## Crash reporting & diagnostics
 
 The playground is a static GitHub Pages site: **there is no telemetry and no

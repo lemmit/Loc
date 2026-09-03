@@ -113,6 +113,15 @@ backend, it rewrites each frame to point at the originating `.ddd` source line, 
 failure in the generated code reads against the model the author actually wrote.  See
 [`tools.md`](tools.md) for the CLI.
 
+Note that "opt-in" is about the **artifact**, not the recorder.  The web playground
+records the map on every system generate and reads it in memory — that is what powers
+its source ↔ output correspondence ([`playground.md`](playground.md)) — while still
+passing the flag off, so the emitted tree it shows and downloads stays byte-identical.
+The distinction is possible because the Source Map v3 / JSR-45 sidecars (and the
+trailing `sourceMappingURL` directives they add to the emitted `.ts`) are gated on
+`sourceTexts`, not on the recorder: with a recorder and no `sourceTexts`, the only
+addition to the emission is `sourcemap.json` itself.
+
 ## What `.loom/` is NOT
 
 - **Not deployed.**  Production projects don't read anything from

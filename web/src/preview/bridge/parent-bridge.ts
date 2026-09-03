@@ -38,6 +38,13 @@ interface AppLogForward {
   text: string;
 }
 
+/** The element the user clicked while select mode was armed — its nearest
+ *  `data-testid`, or `null` when nothing up the tree carried one. */
+interface SelectedForward {
+  kind: "selected";
+  testid: string | null;
+}
+
 /** Reply posted back over the port for a `RuntimeForward`. */
 type RuntimeReply =
   | {
@@ -77,6 +84,9 @@ export class SandboxBridge {
     /** Notified for each `console.*` / uncaught-error line the preview's
      *  console bridge forwards — feeds the Output panel's "App" stream. */
     private readonly onAppLog?: (line: LogLine) => void,
+    /** Notified with the clicked element's `data-testid` (or null) when
+     *  select mode fires — M-T8.20 slice 4. */
+    private readonly onSelected?: (testid: string | null) => void,
   ) {}
 
   /** The parent-side port, available after the handshake; null before
@@ -121,6 +131,14 @@ export class SandboxBridge {
     }
   }
 
+  /** Turn the preview's element-select mode on or off (M-T8.20 slice 4).
+   *  A no-op before the handshake — select mode is a deliberate user
+   *  action, so there is nothing worth queueing: the toggle is only
+   *  reachable once the preview is up. */
+  setSelectMode(on: boolean): void {
+    this.port?.postMessage({ kind: "select-mode", on });
+  }
+
   /** Hot-swap the running preview's bundle in place (no iframe remount,
    *  no document rewrite — the route and page shell survive).  Queued
    *  if the stub handshake hasn't completed yet. */
@@ -137,9 +155,17 @@ export class SandboxBridge {
     const data = ev.data as
       | RuntimeForward
       | AppLogForward
+      | SelectedForward
       | undefined;
     if (data && (data.kind === "console" || data.kind === "error")) {
       this.onAppLog?.({ level: data.level, text: data.text });
+      return;
+    }
+    if (data && data.kind === "selected") {
+      // The in-frame controller disarms itself on the click, so the parent's
+      // toggle has to follow — `null` means "clicked something with no test
+      // id", which the caller reports rather than silently ignoring.
+      this.onSelected?.(data.testid);
       return;
     }
     const m = data as RuntimeForward | undefined;

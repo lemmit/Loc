@@ -1,7 +1,8 @@
-import { Box, Text } from "@mantine/core";
+import { Box, Button, Group, Text } from "@mantine/core";
+import { selectNodePath } from "../build/select-target";
 import { Preview } from "../preview/Preview";
 import { formatUnsupportedDeployables, type LayoutCtx } from "./ctx";
-import { nextStepMid, STAGE } from "./vocabulary";
+import { nextStepMid, SELECT_MODE, STAGE } from "./vocabulary";
 
 interface Props {
   ctx: LayoutCtx;
@@ -50,7 +51,9 @@ export function PreviewPane({ ctx }: Props): JSX.Element {
             vendorCssUrl={previewBundle.vendorCssUrl}
             runtime={authedRuntime}
             onAppLog={ctx.appendAppLog}
+            onSelectElement={ctx.resolveSelectedElement}
           />
+          <SelectResultBar ctx={ctx} />
           {previewProblem && (
             <Box
               style={{
@@ -99,6 +102,68 @@ export function PreviewPane({ ctx }: Props): JSX.Element {
           </Text>
         </Box>
       )}
+    </Box>
+  );
+}
+
+/** What the last preview select-mode click resolved to (M-T8.20 slice 4).
+ *
+ *  A one-line result under the preview rather than a modal: the resolution
+ *  already REVEALED the declaration in the editor, so this says what was
+ *  found and offers the two follow-ups the mission names — open it in the
+ *  Builder, or hand the node path to the agent. */
+function SelectResultBar({ ctx }: { ctx: LayoutCtx }): JSX.Element | null {
+  const result = ctx.selectResult;
+  if (!result) return null;
+  const message =
+    result.kind === "unidentified"
+      ? SELECT_MODE.unidentified
+      : result.kind === "unresolved"
+        ? SELECT_MODE.unresolved(result.testid)
+        : SELECT_MODE.found(selectNodePath(result.target));
+  return (
+    <Box
+      px="sm"
+      py={4}
+      bg="dark.6"
+      style={{ borderTop: "1px solid var(--mantine-color-dark-4)" }}
+      data-testid="select-result"
+      data-kind={result.kind}
+    >
+      <Group gap={8} wrap="nowrap" justify="space-between">
+        <Text size="xs" truncate style={{ flex: 1, minWidth: 0 }}>
+          {message}
+        </Text>
+        {result.kind === "found" && (
+          <Group gap={4} wrap="nowrap">
+            <Button
+              size="compact-xs"
+              variant="light"
+              onClick={() => ctx.setCenterView("builder")}
+              data-testid="select-open-builder"
+            >
+              {SELECT_MODE.openBuilder}
+            </Button>
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              onClick={() => ctx.askAgent(`Change ${selectNodePath(result.target)}: `)}
+              data-testid="select-ask-agent"
+            >
+              {SELECT_MODE.askAgent}
+            </Button>
+          </Group>
+        )}
+        <Button
+          size="compact-xs"
+          variant="subtle"
+          color="gray"
+          onClick={ctx.dismissSelectResult}
+          data-testid="select-result-dismiss"
+        >
+          Dismiss
+        </Button>
+      </Group>
     </Box>
   );
 }

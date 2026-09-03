@@ -1,5 +1,5 @@
-import { Box, Button, Group as MGroup, SegmentedControl, Text, UnstyledButton } from "@mantine/core";
-import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import { Box, Button, Group as MGroup, SegmentedControl, Switch, Text, UnstyledButton } from "@mantine/core";
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 
 // The visual Builder pulls in craft.js + a main-thread Langium parse; lazily
 // loaded so neither lands in the main chunk until the Builder tab is opened.
@@ -17,14 +17,37 @@ import {
 import { EditorPane } from "./EditorPane";
 import { PreviewPane } from "./PreviewPane";
 import { DevToolsDock } from "./DevToolsDock";
-import { ExplorerTree } from "../preview/ExplorerTree";
+import { ExplorerTree, type RowMark } from "../preview/ExplorerTree";
+import { constructBand, constructHue, generatedBands } from "../build/correspondence";
+import type { ViewerHighlight } from "../editor/correspondence-decorations";
 import { LazyFileViewer } from "./lazy-panels";
 import { SourceFilesTree } from "./SourceFilesTree";
 import { PaneErrorBoundary } from "../PaneErrorBoundary";
 import { ExamplesPane } from "./ExamplesPane";
 import { FirstRunCard } from "./FirstRunCard";
 import { type CenterView, type ExplorerMode, modeLabel, type LayoutCtx } from "./ctx";
-import { nextStep, nextStepMid, PANE, STAGE } from "./vocabulary";
+import { ApiPane, DiagramsPane, TraceabilityPane } from "./LoomViewsPane";
+import {
+  CORRESPONDENCE,
+  EXPLORER_VIEW,
+  nextStep,
+  nextStepMid,
+  OUTPUT_DIFF,
+  PANE,
+  STAGE,
+} from "./vocabulary";
+
+// The Explorer switcher, in the order a reader walks them: your source, the
+// emitted tree, the three `.loom/`-bundle views over it (M-T8.20), then the
+// examples syllabus.
+const EXPLORER_TABS: readonly ExplorerMode[] = [
+  "user",
+  "generated",
+  "diagrams",
+  "api",
+  "traceability",
+  "examples",
+];
 
 // The active non-source document in the center area — a file opened
 // from either Explorer view.  `source` (main.ddd) is the other tab.
@@ -72,6 +95,27 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
   // (Migrations) with context.  The legacy-alias coercion moved to App.
   const { dockTab, setDockTab } = ctx;
 
+  // Per-row decoration for the generated tree: what CHANGED in this generate
+  // (slice 2) and what the declaration under the cursor PRODUCED (slice 3).
+  // One map so a row can carry both — a file can be freshly changed AND part
+  // of the hovered declaration's output, and that combination is exactly what
+  // a reader wants to see.
+  const { outputDiff, correspondence } = ctx;
+  const rowMarks = useMemo(() => {
+    const out = new Map<string, RowMark>();
+    for (const [path, status] of outputDiff.byPath) {
+      // A removed file has no row to mark — it is gone from the tree.  The
+      // count still reaches the reader through the banner's summary.
+      if (status === "removed") continue;
+      out.set(path, { status });
+    }
+    const hue = correspondence?.construct ? constructHue(correspondence.construct) : undefined;
+    for (const file of correspondence?.files ?? []) {
+      out.set(file.file, { ...out.get(file.file), corresponds: true, hue });
+    }
+    return out;
+  }, [outputDiff, correspondence]);
+
   const onPickGenerated = (path: string): void => {
     const file = files.find((f) => f.path === path);
     if (!file) return;
@@ -83,6 +127,35 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
   // Which row the generated Explorer view highlights as active.
   const generatedSelection =
     secondaryDoc?.source === "generated" ? secondaryDoc.path : null;
+
+  // Correspondence tinting for the OPEN generated file: the standing colour
+  // map (every construct's regions in this file) plus the "hit" lines the
+  // declaration under the editor cursor produced.
+  const openPath = secondaryDoc?.source === "generated" ? secondaryDoc.path : null;
+  const viewerHighlights = useMemo<ViewerHighlight[]>(() => {
+    if (!openPath) return [];
+    const out: ViewerHighlight[] = [];
+    if (ctx.colourMap && ctx.sourceMap) {
+      for (const band of generatedBands(ctx.sourceMap, openPath)) {
+        out.push({
+          startLine: band.startLine,
+          endLine: band.endLine,
+          band: constructBand(band.construct),
+          kind: "band",
+        });
+      }
+    }
+    const match = correspondence?.files.find((f) => f.file === openPath);
+    for (const span of match?.highlights ?? []) {
+      out.push({
+        startLine: span.startLine,
+        endLine: span.endLine,
+        band: constructBand(span.construct ?? correspondence?.construct ?? ""),
+        kind: "hit",
+      });
+    }
+    return out;
+  }, [openPath, ctx.colourMap, ctx.sourceMap, correspondence]);
 
   const leftRef = usePanelRef();
   const rightRef = usePanelRef();
@@ -172,21 +245,64 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                       {files.length} file{files.length === 1 ? "" : "s"} · {modeLabel(generateResult)}
                     </Text>
                   </RegionHeader>
-                  <Box px="xs" py={4} style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
-                    <SegmentedControl
-                      size="xs"
-                      fullWidth
-                      value={explorerMode}
-                      onChange={(v) => setExplorerMode(v as ExplorerMode)}
-                      data={[
-                        { label: "User code", value: "user" },
-                        { label: PANE.generated, value: "generated" },
-                        { label: PANE.examples, value: "examples" },
-                      ]}
-                      data-testid="explorer-mode"
-                    />
+                  {/* Six views in an 18 % column: a SegmentedControl would
+                      squeeze each label to two characters, so the switcher is
+                      a wrapping row of buttons instead.  It keeps the
+                      `explorer-mode` test id on the container and each label
+                      as plain text, which is what the ~6 specs that click
+                      `getByTestId("explorer-mode").getByText("Generated")`
+                      match on. */}
+                  <Box
+                    px={4}
+                    py={4}
+                    style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+                    data-testid="explorer-mode"
+                  >
+                    <Box style={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
+                      {EXPLORER_TABS.map((tab) => (
+                        <UnstyledButton
+                          key={tab}
+                          onClick={() => setExplorerMode(tab)}
+                          data-testid={`explorer-mode-${tab}`}
+                          data-active={explorerMode === tab || undefined}
+                          px={8}
+                          py={3}
+                          style={{
+                            borderRadius: 4,
+                            background:
+                              explorerMode === tab
+                                ? "var(--mantine-color-dark-5)"
+                                : "transparent",
+                          }}
+                        >
+                          <Text
+                            size="xs"
+                            fw={explorerMode === tab ? 600 : 400}
+                            c={explorerMode === tab ? undefined : "dimmed"}
+                          >
+                            {EXPLORER_VIEW[tab]}
+                          </Text>
+                        </UnstyledButton>
+                      ))}
+                    </Box>
                   </Box>
-                  {explorerMode === "examples" ? (
+                  {explorerMode === "diagrams" ? (
+                    <DiagramsPane
+                      files={files}
+                      activePath={generatedSelection}
+                      isDesktop={ctx.isDesktop}
+                      onOpen={(doc) => onPickGenerated(doc.path)}
+                    />
+                  ) : explorerMode === "traceability" ? (
+                    <TraceabilityPane
+                      files={files}
+                      activePath={generatedSelection}
+                      isDesktop={ctx.isDesktop}
+                      onOpen={(doc) => onPickGenerated(doc.path)}
+                    />
+                  ) : explorerMode === "api" ? (
+                    <ApiPane ctx={ctx} />
+                  ) : explorerMode === "examples" ? (
                     // Sample systems by concept, each opening in a NEW
                     // workspace (M-T8.18, audit H5).
                     <ExamplesPane ctx={ctx} />
@@ -206,11 +322,18 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                           </Button>
                         </Box>
                       )}
+                      <ExplorerBanner ctx={ctx} />
                       <ExplorerTree
                         nodes={tree.children}
                         selectedPath={generatedSelection}
                         onActivateFile={onPickGenerated}
                         emptyHint={`No files yet — ${nextStepMid("generate", true)}.`}
+                        marks={rowMarks}
+                        onHoverFile={(path) =>
+                          ctx.setReverseHover(
+                            path === null ? null : { file: path, line: 1 },
+                          )
+                        }
                       />
                     </Box>
                   ) : (
@@ -311,7 +434,17 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
                   {secondaryDoc && (
                     <Box style={{ flex: 1, minHeight: 0, display: centerView === "secondary" ? "flex" : "none" }}>
                       <Suspense fallback={<Box p="md"><Text size="sm" c="dimmed">Loading viewer…</Text></Box>}>
-                        <LazyFileViewer key={secondaryDoc.path} path={secondaryDoc.path} content={secondaryDoc.content} />
+                        <LazyFileViewer
+                          key={secondaryDoc.path}
+                          path={secondaryDoc.path}
+                          content={secondaryDoc.content}
+                          highlights={viewerHighlights}
+                          onHoverLine={(line) =>
+                            ctx.setReverseHover(
+                              line === null ? null : { file: secondaryDoc.path, line },
+                            )
+                          }
+                        />
                       </Suspense>
                     </Box>
                   )}
@@ -374,6 +507,77 @@ export function DesktopShell({ ctx }: Props): JSX.Element {
         )}
       </Panel>
     </Group>
+  );
+}
+
+/** The one line above the generated tree.
+ *
+ *  It answers whichever question is live: while a declaration is hovered in
+ *  the editor it names that declaration and how many files it produced (the
+ *  correspondence banner); otherwise it summarises what the last generate
+ *  changed.  Both are transient state the tree rows also carry — the banner
+ *  exists because a virtualized tree only mounts the rows in view, so a match
+ *  (or a change) further down would otherwise be invisible. */
+function ExplorerBanner({ ctx }: { ctx: LayoutCtx }): JSX.Element | null {
+  const { correspondence, outputDiff, colourMap, setColourMap } = ctx;
+  const hasDiff = outputDiff.any;
+  if (!correspondence && !hasDiff) {
+    return (
+      <Box px="xs" py={2} style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}>
+        <ColourMapSwitch on={colourMap} onChange={setColourMap} />
+      </Box>
+    );
+  }
+  return (
+    <Box
+      px="xs"
+      py={2}
+      style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
+      data-testid="explorer-banner"
+    >
+      {correspondence ? (
+        <Text
+          size="xs"
+          truncate
+          data-testid="correspondence-banner"
+          data-files={correspondence.files.length}
+          data-construct={correspondence.construct}
+          style={{
+            color: correspondence.construct
+              ? `hsl(${constructHue(correspondence.construct)}, 70%, 70%)`
+              : undefined,
+          }}
+        >
+          {CORRESPONDENCE.from(correspondence.construct ?? "?", correspondence.files.length)}
+        </Text>
+      ) : (
+        <Text size="xs" c="dimmed" truncate data-testid="output-diff-summary">
+          {OUTPUT_DIFF.summary(outputDiff.added, outputDiff.changed, outputDiff.removed)}{" "}
+          {OUTPUT_DIFF.sinceLast}
+        </Text>
+      )}
+      <ColourMapSwitch on={colourMap} onChange={setColourMap} />
+    </Box>
+  );
+}
+
+function ColourMapSwitch({
+  on,
+  onChange,
+}: {
+  on: boolean;
+  onChange: (v: boolean) => void;
+}): JSX.Element {
+  return (
+    <Switch
+      size="xs"
+      checked={on}
+      onChange={(e) => onChange(e.currentTarget.checked)}
+      label={CORRESPONDENCE.colourMap}
+      title={CORRESPONDENCE.colourMapHint}
+      data-testid="colour-map-toggle"
+      styles={{ label: { fontSize: 11, color: "var(--mantine-color-dimmed)" } }}
+    />
   );
 }
 

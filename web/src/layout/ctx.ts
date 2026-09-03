@@ -18,12 +18,17 @@ import type { LoomBuildClient } from "../build/client";
 import type { RuntimeDispatcher, RuntimeEngine } from "../engine";
 import type { Diagnostic } from "../lsp/protocol";
 import type {
+  ApiSurfaceView,
   EvolutionResult,
   GenerateOk,
   GenerateResult,
+  LoomSourceMap,
   SnapshotResult,
   VirtualFile,
 } from "../build/protocol";
+import type { Band, Correspondence, SourceSpan } from "../build/correspondence";
+import type { OutputDiff } from "../build/output-diff";
+import type { SelectTarget } from "../build/select-target";
 import type { BundleFail, BundleOk } from "../bundle/protocol";
 import type { LoomExample } from "../examples";
 import type { TreeFolder } from "../preview/file-tree";
@@ -141,9 +146,38 @@ export type DockTab =
  *  M-T8.18 so the palette and the panes' *Go to line N* can switch it). */
 export type CenterView = "source" | "secondary" | "builder" | "model" | "requirements";
 
-/** The desktop Explorer's switcher: your files, the generated tree, or the
- *  examples pane (M-T8.18). */
-export type ExplorerMode = "user" | "generated" | "examples";
+/** The desktop Explorer's switcher: your files, the generated tree, the
+ *  examples pane (M-T8.18), or one of the three `.loom/`-bundle views
+ *  M-T8.20 added — Diagrams, API, Traceability.  The bundle's FILES stay
+ *  browsable under `generated`; these are the same artifacts rendered. */
+export type ExplorerMode =
+  | "user"
+  | "generated"
+  | "examples"
+  | "diagrams"
+  | "api"
+  | "traceability";
+
+/** Every value the switcher accepts — the runtime guard for the persisted
+ *  `loom.desktop.explorerMode`, which can hold a value written by an older
+ *  (or newer) build. */
+export const EXPLORER_MODES: readonly ExplorerMode[] = [
+  "user",
+  "generated",
+  "examples",
+  "diagrams",
+  "api",
+  "traceability",
+];
+
+/** The outcome of one preview select-mode click (M-T8.20 slice 4).
+ *  Three shapes, because the three failures are genuinely different and the
+ *  copy has to say which: the element carried no test id, no generated page
+ *  claims that id, or it resolved. */
+export type SelectResult =
+  | { kind: "unidentified" }
+  | { kind: "unresolved"; testid: string }
+  | { kind: "found"; target: SelectTarget };
 
 /** A prompt handed to the Agent composer from elsewhere (a Problems row's
  *  *Ask the agent*, the first-run card).  `nonce` makes two identical
@@ -363,6 +397,51 @@ export interface LayoutCtx {
    *  systems; the FooterBar + PreviewPane reference this to explain
    *  why those deployables are file-pane-only. */
   unsupportedDeployables: ReadonlyArray<UnsupportedDeployable>;
+
+  // ---------------------------------------------------------------------
+  // M-T8.20 — the `.loom/` bundle as views, the output diff, and the
+  // source ↔ output correspondence.
+  // ---------------------------------------------------------------------
+  /** The generated backends' HTTP surface + channels, derived from the IR
+   *  by the build worker (never parsed out of generated source, and
+   *  available without booting).  Null before the first system generate. */
+  apiSurface: ApiSurfaceView | null;
+  /** The parsed `.loom/sourcemap.json` of the latest generate — recorded on
+   *  every generate now, not just the `--sourcemap` boot pass.  Null when
+   *  the source produced no system. */
+  sourceMap: LoomSourceMap | null;
+  /** Added / changed / removed files versus the PREVIOUS generate; empty on
+   *  the first one (see `diffGenerated`). */
+  outputDiff: OutputDiff;
+  /** The declaration the user is pointing at in the source editor, and
+   *  everything it produced.  Null when the cursor is over a line no
+   *  generated region came from. */
+  correspondence: Correspondence | null;
+  /** Report the source line under the pointer (`null` on leave).  Wired to
+   *  Monaco's `onMouseMove` by `LoomEditor`. */
+  setCorrespondenceLine: (line: number | null) => void;
+  /** The `.ddd` span the reverse direction resolved from a hovered
+   *  generated line — what the source editor flashes. */
+  reverseSpan: SourceSpan | null;
+  /** Report a hovered generated line (`file` + 1-based line), or null. */
+  setReverseHover: (at: { file: string; line: number } | null) => void;
+  /** The godbolt colour-mapping toggle. */
+  colourMap: boolean;
+  setColourMap: (v: boolean) => void;
+  /** One band per declaration in the active `.ddd`, for the colour overlay.
+   *  Empty unless `colourMap` is on — the bands are derived from the live
+   *  editor text, which only App can see. */
+  sourceBands: readonly Band[];
+  /** Handle a preview select-mode click: resolve the element's
+   *  `data-testid` to the generated page and the `.ddd` declaration behind
+   *  it, reveal that declaration in the editor, and record the outcome in
+   *  `selectResult`.  `null` means the clicked element carried no id. */
+  resolveSelectedElement: (testid: string | null) => void;
+  /** What the last select-mode click resolved to — rendered as a one-line
+   *  result under the preview, with the two follow-ups (open the Builder,
+   *  hand the node path to the agent).  Null before the first click. */
+  selectResult: SelectResult | null;
+  dismissSelectResult: () => void;
 
   // Playground auth stub (Phase 7) — identity injected into dispatched
   // requests via the `x-loom-dev-claims` header.  Persisted by App.tsx.

@@ -5,7 +5,7 @@ import { defaultExample } from "../examples";
 import { confirmSites, requestConfirm } from "../util/confirm";
 import { MOD_LABEL } from "../util/hotkeys";
 import type { DockTab, LayoutCtx, MobileTab } from "./ctx";
-import { HELP, PALETTE, PANE, RUN, STAGE } from "./vocabulary";
+import { EXPLORER_VIEW, HELP, PALETTE, PANE, RUN, STAGE } from "./vocabulary";
 
 // The ⌘K command palette (M-T8.18 slice 2, audit M14): `@mantine/spotlight`
 // over every action the ctx exposes — run stages, centre views, dock tabs,
@@ -93,6 +93,22 @@ export function CommandPalette({ ctx }: Props): JSX.Element {
           ctx.setCodeView("generated");
         }),
         showPane("preview", () => undefined, () => ctx.setActiveTab("preview")),
+        // The three `.loom/`-bundle views (M-T8.20).  Desktop-only: they
+        // live in the Explorer switcher, which mobile has no room for — so
+        // on mobile the palette row falls back to the generated file list,
+        // where the same artifacts are browsable.
+        ...(["diagrams", "api", "traceability"] as const).map((view) => ({
+          id: `view-${view}`,
+          label: PALETTE.show(EXPLORER_VIEW[view]),
+          group: PALETTE.group.view,
+          onClick: () => {
+            if (isDesktop) ctx.setExplorerMode(view);
+            else {
+              ctx.setActiveTab("code");
+              ctx.setCodeView("generated");
+            }
+          },
+        })),
         { id: "view-examples", label: PALETTE.show(PANE.examples), group: PALETTE.group.view, onClick: () => ctx.openExamples() },
       ],
     },
