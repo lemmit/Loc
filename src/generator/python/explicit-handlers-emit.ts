@@ -49,6 +49,7 @@ import type {
 import { wireTypeInfo } from "../../ir/types/wire-types.js";
 import { normalizeHandlerReturn, requestRecordFor } from "../../ir/util/handler-contracts.js";
 import { operationBodyUsesCurrentUser } from "../../ir/util/op-gates.js";
+import { walkWorkflowStmtChildren, walkWorkflowStmtsDeep } from "../../ir/util/walk.js";
 import { walkExpr } from "../../ir/validate/checks/shared.js";
 import { lines } from "../../util/code-builder.js";
 import { plural, snake } from "../../util/naming.js";
@@ -182,43 +183,51 @@ function renderPyExternImpl(h: Handler, ctx: EnrichedBoundedContextIR): string {
 /** Aggregate names a handler body constructs via `<Agg>.create(...)` (a
  *  `factory-let` — the scaffolded `create` handler's shape).  Their domain
  *  module must be imported (`from app.domain.<snake> import <Agg>`), mirroring
- *  the workflow builder's factory-let import derivation. */
+ *  the workflow builder's factory-let import derivation.
+ *
+ *  Rides `walkWorkflowStmtsDeep` (wave-2 packet 2.3): the hand-rolled
+ *  if/else-if recursion this replaced re-derived the "which kinds nest
+ *  further bodies" fact `walk.ts` already owns exhaustively. */
 function collectFactoryAggs(
   stmts: readonly WorkflowStmtIR[],
   into: Set<string> = new Set(),
 ): Set<string> {
   for (const s of stmts) {
-    if (s.kind === "factory-let") into.add(s.aggName);
-    else if (s.kind === "for-each") collectFactoryAggs(s.body, into);
-    else if (s.kind === "if-let") {
-      collectFactoryAggs(s.thenBody, into);
-      collectFactoryAggs(s.elseBody ?? [], into);
-    }
+    walkWorkflowStmtsDeep(s, (st) => {
+      if (st.kind === "factory-let") into.add(st.aggName);
+    });
   }
   return into;
 }
 
 /** The repos a handler body references (repo loads + exit-saves), keyed by
  *  repo name → aggregate name.  The handler constructs `<Agg>Repository(...)`
- *  for each and the workflow stmt target names the handle `snake(repoName)`. */
+ *  for each and the workflow stmt target names the handle `snake(repoName)`.
+ *  INSERTION ORDER is load-bearing (two call sites iterate `repos` directly
+ *  to emit per-repo lines/params), so this keeps the original per-kind
+ *  ordering exactly — `walkWorkflowStmtsDeep`'s uniform pre-order visits a
+ *  `for-each`'s `savesPerIteration` too early relative to it.
+ *
+ *  Rides `walkWorkflowStmtChildren` (wave-2 packet 2.3) for the RECURSION
+ *  step only (the exhaustive, `never`-checked "which kinds nest further
+ *  bodies" fact `walk.ts` owns) while keeping this function's own ordering
+ *  around it. */
 function collectRepos(h: Handler): Map<string, string> {
   const repos = new Map<string, string>();
-  const walk = (stmts: readonly WorkflowStmtIR[]): void => {
-    for (const s of stmts) {
-      if (s.kind === "repo-let" || s.kind === "repo-run" || s.kind === "repo-delete")
-        repos.set(s.repoName, s.aggName);
-      else if (s.kind === "for-each") {
-        walk(s.body);
-        for (const sv of s.savesPerIteration) repos.set(sv.repoName, sv.aggName);
-      } else if (s.kind === "if-let") {
-        repos.set(s.repoName, s.aggName);
-        walk(s.thenBody);
-        walk(s.elseBody ?? []);
-        for (const sv of [...s.savesInThen, ...s.savesInElse]) repos.set(sv.repoName, sv.aggName);
-      }
+  const walk = (s: WorkflowStmtIR): void => {
+    if (s.kind === "repo-let" || s.kind === "repo-run" || s.kind === "repo-delete") {
+      repos.set(s.repoName, s.aggName);
+      return;
+    }
+    if (s.kind === "if-let") repos.set(s.repoName, s.aggName);
+    walkWorkflowStmtChildren(s, { workflowStmt: walk });
+    if (s.kind === "for-each") {
+      for (const sv of s.savesPerIteration) repos.set(sv.repoName, sv.aggName);
+    } else if (s.kind === "if-let") {
+      for (const sv of [...s.savesInThen, ...s.savesInElse]) repos.set(sv.repoName, sv.aggName);
     }
   };
-  walk(h.statements);
+  for (const s of h.statements) walk(s);
   for (const save of h.savesAtExit) repos.set(save.repoName, save.aggName);
   return repos;
 }
@@ -235,14 +244,14 @@ function lookupGatedOp(ctx: EnrichedBoundedContextIR, aggName: string, opName: s
  *  route) must bind the actor.  v1 handlers are ids/scalars, so this is inert
  *  for the common case (byte-identical to a no-user handler). */
 function handlerUsesUser(h: Handler, ctx: EnrichedBoundedContextIR): boolean {
-  const walk = (sts: readonly WorkflowStmtIR[]): boolean =>
-    sts.some((s) => {
-      if (s.kind === "op-call") return lookupGatedOp(ctx, s.aggName, s.op);
-      if (s.kind === "for-each") return walk(s.body);
-      if (s.kind === "if-let") return walk(s.thenBody) || walk(s.elseBody ?? []);
-      return false;
+  for (const s of h.statements) {
+    let hit = false;
+    walkWorkflowStmtsDeep(s, (st) => {
+      if (st.kind === "op-call" && lookupGatedOp(ctx, st.aggName, st.op)) hit = true;
     });
-  return walk(h.statements);
+    if (hit) return true;
+  }
+  return false;
 }
 
 /** Recover the synthesized `repo-run` statement of a paged-run queryHandler
