@@ -388,6 +388,8 @@ or change 'Asset' to inheritanceUsing: sharedTable (TPH) to allow polymorphic re
 
 Both strategies emit on **all five backends** (node/Hono, .NET, Phoenix, Python, Java). The one storage gate (`loom.tph-backend-unsupported`) fires only when a `sharedTable` hierarchy's context is hosted on **no DB backend** — there is no emission target — and suggests a DB host or `inheritanceUsing: ownTable`.
 
+**Tenancy stance is per concrete.** A base's `with tenantOwned` contributes the `tenant_id NOT NULL` column to every subtype's row, but the *stance* is read off each aggregate's own capability list: nothing stamps or filters until the concrete says `with tenantOwned` too (a silent subtype is `loom.tenancy-stance-unmarked`; one that says `crossTenant` against a `tenantOwned` base is `loom.tenancy-inherited-stance-conflict`, an error — the column would be NOT NULL with nothing writing it).
+
 **One .NET restriction.** EF Core registers a query filter on the **root** entity type only, so under TPH the .NET backend hosts every capability `filter` in the hierarchy on the root config (discriminator-guarded, name-prefixed). A subtype `filter` that reads a column the root does not declare cannot be hosted that way and is rejected (`loom.tph-filter-unsupported`): move the field to the base, switch to `ownTable`, or host the context off .NET.
 
 | Code | Fires when |
@@ -403,8 +405,8 @@ Both strategies emit on **all five backends** (node/Hono, .NET, Phoenix, Python,
 | `loom.polymorphic-id-ref-mixed-strategy` | a `<Base> id` reference into a hierarchy with an `ownTable` override concrete |
 | `loom.es-tph-forced-own-table` | a `persistedAs: eventLog` / `shape: document` concrete under a TPH base must declare `inheritanceUsing: ownTable` explicitly |
 | `loom.tph-own-override-unsupported` | a *voluntary* per-concrete `ownTable` override under a TPH base (mixed strategy) |
-| `loom.tph-filter-unsupported` | **.NET/EF only** — a TPH subtype `filter` reads a column the hierarchy root lacks |
+| `loom.tph-filter-unsupported` | **.NET/EF only** (not the Dapper adapter — it splices predicates into raw SQL) — a TPH subtype `filter` reads a column the hierarchy root lacks |
 | `loom.tenancy-inherited-stance-conflict` | a subtype takes the opposite tenancy stance (`crossTenant`) from its `tenantOwned` base |
-| `loom.tph-backend-unsupported` | a TPH hierarchy whose context no DB backend hosts |
+| `loom.tph-backend-unsupported` | a TPH hierarchy whose context no TPH-capable backend deployable hosts (all five backends are TPH-capable, so in practice: no backend host at all) |
 
 Mixed-strategy hierarchies (a per-concrete `ownTable` override of a TPH base and the `UNION ALL` reader it would need) are deferred; `contains` on a TPH **concrete** is supported (the part table FKs the shared row). See [`../inheritance.md`](../inheritance.md) for the full strategy comparison and the deferred patterns.

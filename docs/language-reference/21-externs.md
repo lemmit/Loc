@@ -256,7 +256,7 @@ end
 ```
 ::: end
 
-The impl file's path is deterministic and stable, so a rename never orphans your code. The bodied handler forms and the `route` binding are covered in [APIs, storage, resources & channels](14-apis-storage-resources-channels.md#commandhandler--queryhandler--explicit-handlers).
+The impl file's path is deterministic and stable, so a rename never orphans your code. The bodied handler forms are covered in [Behavior & statements](06-behavior-and-statements.md#handler-bodies--commandhandler--queryhandler) (declaration surface: [Domain modeling](03-domain-modeling.md#commandhandler--queryhandler)); the `route … -> Ctx.Handler` binding is in [APIs, storage, resources & channels](14-apis-storage-resources-channels.md).
 
 ## `extern` component
 
@@ -304,7 +304,7 @@ import RiskBadge from "../components/RiskBadge";
 `src/components/RiskBadge.props.ts` + `src/components/RiskBadge.ts`; the page renders the user's component class through `NgComponentOutlet` (Angular has no JSX-family tag).
 ::: end
 
-Feliz binds the component by **module** (segments of the `from` path PascalCased; the page renders `RiskBadge {| score = 42; label = "Sample" |}` and `open`s the module) and Phoenix/HEEx renders `<.live_component module={Widgets.RiskBadge} …>` from a `from "widgets/risk_badge"` path — neither emits a props/shim file, so a missing module fails `dotnet fable` / `mix compile`. Flutter has **no** extern component hatch yet (it carries the function hatch only). A `body:` on an `extern` component is `loom.extern-component-has-body`; a non-extern component with no `body:` is `loom.component-missing-body`.
+Feliz binds the component by **module** (segments of the `from` path PascalCased; the page renders `RiskBadge {| score = 42; label = "Sample" |}` and `open`s the module) and Phoenix/HEEx renders `<.live_component module={Widgets.RiskBadge} …>` from a `from "widgets/risk_badge"` path — neither emits a props/shim file, so a missing module fails `dotnet fable` / `mix compile`. Flutter has **no** extern component hatch yet (it carries the function hatch only) — and the gap is silent, not gated: the call renders as `const SizedBox.shrink() /* unknown layout component: RiskBadge */`, so the page compiles with the region missing. A `body:` on an `extern` component is `loom.extern-component-has-body`; a non-extern component with no `body:` is `loom.component-missing-body`.
 
 ## `extern` function
 

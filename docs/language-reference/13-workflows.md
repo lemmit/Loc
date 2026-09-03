@@ -1,12 +1,12 @@
 # 13. Workflows
 
-Context-level orchestration: a `workflow` loads or creates several aggregates, calls their operations, raises orchestration-level events, and (optionally) wraps the lot in one DB transaction. The aggregate stays the single mutation + invariant gate — a workflow only wires those gates together. The body is **members-only**: state fields (`Property`), `create` starters, `handle` continuation commands, `on(e: Event)` event reactors, and (for `eventSourced` workflows) `apply` folds. Reach for it when a use-case touches more than one aggregate, when you want a saga driven by inbound events, or when ACID across a few aggregates is genuinely the right semantic.
+Context-level orchestration: a `workflow` loads or creates several aggregates, calls their operations, raises orchestration-level events, and (optionally) wraps the lot in one DB transaction. The aggregate stays the single mutation + invariant gate — a workflow only wires those gates together. The body is **members-only**: state fields (`Property`), `create` starters, `handle` continuation commands, `on(e: Event)` event reactors, `function` pure helpers, and (for `eventSourced` workflows) `apply` folds. A `timerSource` fires an event on a wall-clock cadence into that same `on` / `create … by` surface. Reach for it when a use-case touches more than one aggregate, when you want a saga driven by inbound events, or when ACID across a few aggregates is genuinely the right semantic.
 
-> **Grammar:** `Workflow`, `WorkflowCreateDecl`, `HandleDecl`, `OnDecl`, `Apply`, `IsolationLevel` · **Validators:** `loom.workflow-*`, `loom.transactional-no-effect`, `loom.resource-op-in-transaction`, `loom.workflow-correlation-required`, `loom.correlation-*` (`src/ir/validate/checks/workflow-checks.ts`) · **Docs:** [`../workflow.md`](../workflow.md), [`../resources.md`](../resources.md)
+> **Grammar:** `Workflow`, `WorkflowCreateDecl`, `HandleDecl`, `OnDecl`, `Apply`, `FunctionDecl`, `IsolationLevel`, `TimerSource` · **Validators:** `loom.workflow-*`, `loom.transactional-no-effect`, `loom.isolation-requires-transactional`, `loom.resource-op-in-transaction`, `loom.resource-op-outside-workflow`, `loom.workflow-correlation-required`, `loom.correlation-*`, `loom.workflow-gate-not-current-user`, `loom.timer-*` (`src/ir/validate/checks/workflow-checks.ts` + `timer-checks.ts`, `src/language/validators/timer.ts`) · **Docs:** [`../workflow.md`](../workflow.md), [`../resources.md`](../resources.md)
 
 A workflow shares its context's namespace (a workflow named like an aggregate / event / repository is a `loom.workflow-name-collision`). Bodies reuse the operation [statement vocabulary](06-behavior-and-statements.md) but the validator narrows it to the orchestration subset: factory-`let`, repo-`let`, op-call, `precondition` / `requires`, `emit`, plus the workflow-only `for` / `if let`. Mutation forms (`:=` / `+=` / `-=`) are rejected in a workflow body (they belong in an aggregate op) — except inside an `eventSourced` workflow's `apply` fold.
 
-> **Output sourcing.** Every tab below is excerpted from a single generated tree: `generate system` over a `Sales` context with one deployable per backend (`node` / `dotnet` / `python` / `java`). The handlers are deterministic string output from each backend's workflow builder — no Elixir tab on the per-feature blocks here because the Phoenix LiveView sample wasn't in this generation run (see the honest-gap notes), but its shape is documented in [`../workflow.md`](../workflow.md) §"Phoenix LiveView".
+> **Output sourcing.** Every tab below is excerpted from one generated tree: `generate system` over a `Sales` context with one deployable per backend (`node` / `dotnet` / `python` / `java` / `elixir`). Tabs are elided, never invented — where a block shows fewer than five backends the others emit the same shape and are left out for length, and a genuine gap is called out in prose.
 
 ## `workflow` & state
 
@@ -21,7 +21,67 @@ workflow fulfillment {
 }
 ```
 
-A workflow with event consumers but no id-shaped state field is `loom.workflow-correlation-required`; two id-shaped fields is `loom.correlation-field-ambiguous`. The correlation field surfaces a read model — each backend emits a `GET /workflows/<wf>/instances` + `/{id}` route returning the instance state (`FulfillmentInstanceResponse { orderId }`), which clients read to inspect in-flight workflow instances.
+A workflow with event consumers but no id-shaped state field is `loom.workflow-correlation-required`; two id-shaped fields is `loom.correlation-field-ambiguous`. The correlation field surfaces a read model — each backend emits `GET /api/workflows/<wf>/instances` + `/{id}` returning the instance state (`FulfillmentInstanceResponse { orderId, attempts }`), which clients read to inspect in-flight instances.
+
+### `requires` on the header — the instance-read gate
+
+`workflow Name … requires <expr> { … }` guards **those two reads only**, not the commands. It runs before any instance is loaded, so it may reference `currentUser` and constants and nothing else — an instance field or repository call is `loom.workflow-gate-not-current-user`. To gate a *command*, put a `requires` in the `create` / `handle` body (or on the entry header), where the instance is bound.
+
+```ddd
+workflow fulfillment requires currentUser.role == "supervisor" {
+  orderId: Order id
+  attempts: int
+  …
+}
+```
+
+::: tabs backend
+== node
+```ts
+// http/workflows.ts — GET /api/workflows/fulfillment/instances
+const currentUser = (httpCtx as unknown as { get(k: "currentUser"): User }).get("currentUser");
+if (!(currentUser.role === "supervisor")) throw new ForbiddenError("Forbidden: workflow fulfillment instances");
+const rows = await db.select().from(schema.fulfillments);
+return httpCtx.json(rows as unknown as z.infer<typeof FulfillmentInstanceListResponse>, 200);
+```
+== dotnet
+```csharp
+// Api/SalesWorkflowInstancesController.cs
+[HttpGet("fulfillment/instances")]
+public async Task<IActionResult> AllFulfillmentInstances()
+{
+    var currentUser = _currentUser.User;
+    if (!(currentUser.Role == "supervisor")) throw new ForbiddenException("Forbidden: workflow fulfillment instances");
+    var rows = await _db.Fulfillments.AsNoTracking().ToListAsync();
+    return Ok(rows.Select(x => new FulfillmentInstanceResponse(x.OrderId.Value, x.Attempts)));
+}
+```
+== java
+```java
+// api/SalesWorkflowInstancesController.java
+@GetMapping("/fulfillment/instances")
+public List<FulfillmentInstanceResponse> allFulfillmentInstances() {
+    var currentUser = currentUserAccessor.user();
+    if (!(Objects.equals(currentUser.role(), "supervisor"))) throw new ForbiddenException("Forbidden: workflow fulfillment instances");
+    return fulfillmentStateRepository.findAll().stream()
+        .map(x -> new FulfillmentInstanceResponse(x.orderId().value(), x.attempts()))
+        .toList();
+}
+```
+== elixir
+```elixir
+# lib/api_elixir_web/controllers/workflow_instances_controller.ex
+def fulfillment_instances(conn, _params) do
+  current_user = Map.get(conn.assigns, :current_user)
+  if not (current_user.role == "supervisor") do
+    ProblemDetails.problem_response(conn, 403, "Forbidden", "Forbidden: workflow fulfillment instances")
+  else
+    data = Enum.map(ApiElixir.Repo.all(ApiElixir.Sales.Workflows.FulfillmentState), fn row -> %{orderId: row.order_id, attempts: row.attempts} end)
+    json(conn, data)
+  end
+end
+```
+::: end
 
 ## `create` / `handle` — starters & continuations
 
@@ -29,11 +89,13 @@ A workflow with event consumers but no id-shaped state field is `loom.workflow-c
 
 | Form | Trigger | Route |
 |---|---|---|
-| `create(p1: T1, p2: T2, …)` | implicit command (positional domain params) | `POST /workflows/<snake>` |
-| `create(c: SomeCommand)` | explicit command (single payload param) | `POST /workflows/<snake>` |
+| `create(p1: T1, p2: T2, …)` | implicit command (positional domain params) | `POST /api/workflows/<snake>` |
+| `create(c: SomeCommand)` | explicit command (single payload param) | `POST /api/workflows/<snake>` |
 | `create(e: SomeEvent) by e.field` | event-triggered starter (single event param + `by`) | in-process dispatch only |
 
-`handle name(params) { body }` is a continuation command on the same workflow — a second HTTP-callable entry that loads/creates aggregates and calls operations; multiple `handle`s make a multi-command saga. A workflow may declare at most one **unnamed** `create` (`loom.canonical-create-duplicate-workflow`); extra entry points must be named, and no two share a name (`loom.create-name-conflict-workflow`).
+`handle name(params) { body }` is a continuation command on the same workflow — a second entry that loads/creates aggregates and calls operations; multiple `handle`s make a multi-command saga. A workflow may declare at most one **unnamed** `create` (`loom.canonical-create-duplicate-workflow`); extra entry points must be named, and no two share a name (`loom.create-name-conflict-workflow`). A `handle` name must also not collide with a `commandHandler` / `queryHandler` in the same context (`loom.duplicate-handler`), because an `api` `route` addresses all three through the same `<Context>.<Name>` reference ([APIs](14-apis-storage-resources-channels.md#route--the-explicit-transport-binding)).
+
+> **Honest gap — only the canonical `create` gets an entry point today.** The unnamed `create` becomes the `POST /api/workflows/<snake>` route on every backend. A **named** `create expedite(…)` and a `handle retry(…)` lower to IR (`WorkflowIR.creates` / `.handlers`, `test/ir/workflow-handle.test.ts`) and their repository needs are collected, but no backend emits a route, a command, or any other callable for them — and an `api { route POST "/fulfil/retry" -> C.retry }` naming a handle validates clean while emitting nothing (checked on node + dotnet). Until that lands, model a second command as its own `workflow` (or a `commandHandler` bound by an explicit `route`).
 
 ```ddd
 workflow placeOrder {

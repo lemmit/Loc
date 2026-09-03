@@ -2,7 +2,7 @@
 
 Two smaller context-level declarations that sit *beside* the aggregates rather than inside them. A `domainService` is a stateless, named container of `operation`s for a cross-aggregate computation or decision that belongs to the domain layer but to no single aggregate — pure by default, with an opt-in *reading* tier (read-only repository queries) and a *mutating* tier (calling operations on the aggregates passed in), never a repository write. A `seed` is declarative first-boot data: typed records that lower through each aggregate's canonical `create` (so invariants hold), plus a `raw` opt-out for table-level inserts the domain model does not own. Reach for the first when a calculation spans aggregates and has no `this`; reach for the second when the app must boot with rows instead of empty lists.
 
-> **Grammar:** `DomainService`, `DomainServiceOperation`, `Seed`, `SeedRow` · **Validators:** `loom.domain-service-no-emit`, `loom.domain-service-no-mutation`, `loom.domain-service-no-repo-write`, `loom.domain-service-no-workflow-start`, `loom.domain-service-cross-context-read`, `loom.domain-service-read-unsupported`, `loom.domain-service-infra-call-from-aggregate`, `loom.domain-service-single-aggregate`, `loom.resource-op-outside-workflow` (`src/ir/validate/checks/domain-service-checks.ts`); `loom.seed-foreign-aggregate`, `loom.seed-duplicate-field`, `loom.seed-id-needs-raw`, `loom.seed-raw-column-invalid`, `loom.seed-raw-non-literal-column`, `loom.seed-dataset-name-collision`, `loom.seed-raw-document-shape`, `loom.seed-event-sourced-unsupported`, `loom.seed-abstract-aggregate`, `loom.seed-tenant-owned-needs-raw` (`src/language/validators/seed.ts`) · **Docs:** [`../domain-services.md`](../domain-services.md) · [`../old/proposals/database-seeding.md`](../old/proposals/database-seeding.md)
+> **Grammar:** `DomainService`, `DomainServiceOperation`, `Seed`, `SeedRow` · **Validators:** `loom.domain-service-no-emit`, `loom.domain-service-no-mutation`, `loom.domain-service-no-repo-write`, `loom.domain-service-no-workflow-start`, `loom.domain-service-cross-context-read`, `loom.domain-service-read-unsupported`, `loom.domain-service-infra-call-from-aggregate`, `loom.domain-service-single-aggregate`, `loom.resource-op-outside-workflow` (`src/ir/validate/checks/domain-service-checks.ts`); `loom.seed-foreign-aggregate`, `loom.seed-duplicate-field`, `loom.seed-id-needs-raw`, `loom.seed-raw-column-invalid`, `loom.seed-dataset-name-collision`, `loom.seed-raw-document-shape`, `loom.seed-event-sourced-unsupported`, `loom.seed-abstract-aggregate`, `loom.seed-tenant-owned-needs-raw` ([`src/language/validators/seed.ts`](../../src/language/validators/seed.ts)), plus `loom.seed-raw-column-invalid` / `loom.seed-raw-non-literal-column` again at IR level (`src/ir/validate/checks/`) · **Docs:** [`../domain-services.md`](../domain-services.md) · [`../old/proposals/database-seeding.md`](../old/proposals/database-seeding.md)
 
 Every tab below is from one five-deployable generation (node / dotnet / python / java / elixir) of the corpus fixtures `test/fixtures/corpus/domain-services.ddd` and `test/fixtures/corpus/seeding.ddd`.
 
@@ -281,7 +281,7 @@ seed wired raw {
 }
 ```
 
-The shared `renderSeedRowInsert` (Postgres SQL, schema-qualified) produces the same `INSERT` text on every backend; only the execution call differs.
+The shared `renderSeedRowInsert` ([`src/generator/sql-pg.ts`](../../src/generator/sql-pg.ts) — Postgres SQL, schema-qualified) produces the same `INSERT` text on every backend; only the execution call differs.
 
 ::: tabs backend
 == node
@@ -332,3 +332,5 @@ seed wired raw {
   Invoice { id: "11111111-1111-1111-1111-111111111111", tenantId: "acme", dataKey: "acme", label: "Seeded", amount: 5 }
 }
 ```
+
+The tenant columns a `tenantOwned` aggregate carries (and the hierarchical `dataKey`) are described in [`../tenancy.md`](../tenancy.md).
