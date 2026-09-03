@@ -110,7 +110,7 @@ describe("cross-file scaffold ref-list resolution", () => {
     // Page uses `Banner`, declared in a sibling that hasn't loaded yet.
     await open(
       "main.ddd",
-      `system S { }\nui Web {\n  page Home { route: "/", body: Stack { Banner { } } }\n}\n`,
+      `system S { }\nui Web {\n  page Home { route: "/"  body: Stack { Banner { } } }\n}\n`,
     );
     expect(errors("main.ddd", UNKNOWN_BUILDER)).toHaveLength(1);
 

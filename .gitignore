@@ -45,3 +45,10 @@ scratchpad/
 # local build cache — ~1.1k files of fetched hex packages — that a `git add -A`
 # after a local run will otherwise sweep into the commit.
 test/behavioral/.warm/
+
+# The local-only Playwright config `web/e2e/README.md` tells you to write when
+# running the playground specs in a sandbox (it pins `executablePath` to the
+# Chromium that is actually installed).  Per-machine by construction — the
+# README says "local only, do not commit", and every agent that follows it
+# leaves this file untracked in the tree.
+web/playwright.local.config.ts

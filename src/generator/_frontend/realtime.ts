@@ -20,6 +20,7 @@
 // Anything deeper fails loud here rather than emitting broken markup.
 
 import type { ExprIR, UiIR, UiNotificationIR } from "../../ir/types/loom-ir.js";
+import type { RealtimeStreamCredential } from "../../ir/util/realtime-rooms.js";
 import type { LoadedPack } from "../_packs/loader.js";
 
 /** The realtime SSE client — one EventSource against the backend's
@@ -33,15 +34,41 @@ export function renderRealtimeClient(
    *  frontend now emits `API_BASE_URL` (the shared `src/util/api-base.ts`
    *  emitter), so all callers pass it explicitly; the default matches. */
   apiBaseSymbol = "API_BASE_URL",
+  /** The stream credential from the shared realtime plan
+   *  (`realtimeStreamCredential`, `src/ir/util/realtime-rooms.ts` RULE 2).
+   *  `"session-cookie"` emits `withCredentials: true` — the `EventSource`
+   *  twin of the api client's `credentials: "include"`, so the stream rides
+   *  the SAME HttpOnly `session` cookie an ordinary API call does and reaches
+   *  the backend cross-origin (the compose default points the bundle at the
+   *  backend's own port, where a bare `EventSource` sends no cookie and the
+   *  auth middleware answers 401).  `"none"` keeps the v1 bare constructor
+   *  byte-identical for an `auth: none` deployable. */
+  credential: RealtimeStreamCredential = "none",
 ): string {
   const typeList = eventTypes.map((t) => JSON.stringify(t)).join(", ");
+  const withCredentials = credential === "session-cookie";
+  // The `withCredentials` init is emitted ONLY under the credentialed gate:
+  // it is a no-op same-origin, but emitting it unconditionally would change
+  // every `auth: none` fixture's bytes for nothing.
+  const sourceArgs = withCredentials
+    ? `\`\${${apiBaseSymbol}}/realtime/events\`, { withCredentials: true }`
+    : `\`\${${apiBaseSymbol}}/realtime/events\``;
+  const credentialNote = withCredentials
+    ? `//
+// The stream is an ordinary AUTHENTICATED route (it is on no backend's auth
+// bypass list), and \`EventSource\` cannot set an \`Authorization\` header — so it
+// carries the same HttpOnly \`session\` cookie every other API call does, via
+// \`withCredentials: true\`.  Without it the browser omits the cookie on the
+// cross-origin stream and the backend answers 401.
+`
+    : "";
   return `// Auto-generated.  Do not edit by hand.
 // Realtime SSE client (channels.md Part I) — subscribes to the backend's
 // GET /realtime/events stream.  Events carried by a \`delivery: broadcast\`
 // channel arrive as \`{ type, ...fields }\`; the connection auto-reconnects
 // (EventSource semantics).  The authorized read remains the gate — refetch
 // through the API for anything privileged.
-import { ${apiBaseSymbol} } from "./config";
+${credentialNote}import { ${apiBaseSymbol} } from "./config";
 
 export type RealtimeEvent = { type: string } & Record<string, unknown>;
 
@@ -51,7 +78,7 @@ export const REALTIME_EVENT_TYPES = [${typeList}] as const;
 /** Subscribe to the realtime stream.  Returns an unsubscribe fn that
  *  closes the EventSource.  \`onEvent\` fires once per carried event. */
 export function subscribeRealtime(onEvent: (event: RealtimeEvent) => void): () => void {
-  const source = new EventSource(\`\${${apiBaseSymbol}}/realtime/events\`);
+  const source = new EventSource(${sourceArgs});
   const handler = (m: MessageEvent) => {
     try {
       onEvent(JSON.parse(m.data as string) as RealtimeEvent);

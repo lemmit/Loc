@@ -1481,7 +1481,7 @@ describe(".NET generator", () => {
     // 403 at runtime; the controller must DECLARE 403 in [ProducesResponseType].
     const SRC_GUARDED = `
       system Acme {
-        user { id: string, role: string }
+        user { id: string  role: string }
         subdomain Sales {
           context Orders {
             aggregate Order {

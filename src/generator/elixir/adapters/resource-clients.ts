@@ -9,7 +9,7 @@
 // → Elixir emission.  S3 via :ex_aws_s3, queue via :amqp, api via :req.
 
 import type { DataSourceIR, StorageIR } from "../../../ir/types/loom-ir.js";
-import { snake, upperFirst } from "../../../util/naming.js";
+import { elixirString, snake, upperFirst } from "../../../util/naming.js";
 import { resourceEnvUrlVar } from "../../../util/resource-env.js";
 import { supportsSurfaceKind } from "../../../util/source-types.js";
 
@@ -57,7 +57,7 @@ const s3PhoenixAdapter: PhoenixResourceAdapter = {
       const fn = snake(r.name);
       lines.push(
         `  defp ${fn}_bucket do`,
-        `    System.get_env("${envVar(r.name)}_BUCKET") || ${JSON.stringify(bucket)}`,
+        `    System.get_env("${envVar(r.name)}_BUCKET") || ${elixirString(bucket)}`,
         "  end",
         "",
         `  def ${fn}_put(key, body) do`,
@@ -177,7 +177,7 @@ const restApiPhoenixAdapter: PhoenixResourceAdapter = {
       const fn = snake(r.name);
       lines.push(
         `  defp ${fn}_base_url do`,
-        `    System.get_env("${envVar(r.name)}") || ${JSON.stringify(baseUrl)}`,
+        `    System.get_env("${envVar(r.name)}") || ${elixirString(baseUrl)}`,
         "  end",
         "",
         `  def ${fn}_get(path) do`,
@@ -214,7 +214,7 @@ function mailerEmailBuilders(
     const fn = snake(r.name);
     return [
       `  defp ${fn}_from do`,
-      `    System.get_env("${envStem(r.name)}_FROM") || ${JSON.stringify(mailFrom(r, stores))}`,
+      `    System.get_env("${envStem(r.name)}_FROM") || ${elixirString(mailFrom(r, stores))}`,
       "  end",
       "",
       `  defp ${fn}_email(to, subject, body) do`,
@@ -297,7 +297,7 @@ const sesPhoenixAdapter: PhoenixResourceAdapter = {
       const region = cfg(storeOf(r, stores), "region") ?? "us-east-1";
       lines.push(
         `  defp ${fn}_region do`,
-        `    System.get_env("${envStem(r.name)}_REGION") || ${JSON.stringify(region)}`,
+        `    System.get_env("${envStem(r.name)}_REGION") || ${elixirString(region)}`,
         "  end",
         "",
         `  def ${fn}_send(to, subject, body) do`,

@@ -1963,6 +1963,26 @@ export function renderEmpty(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
 export function renderBadge(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Badge!, expr, ctx);
 }
+/** `Button("Save", icon: "plus", iconPosition: "left", loading: <expr>)`.
+ *
+ *  `icon:` / `iconSvg:` / `iconPosition:` / `loading:` used to be DROPPED here
+ *  (G2667-C7): the four are not attrs `<.button>` declares, and an undeclared
+ *  attribute on a Phoenix function component is a compile WARNING — a build
+ *  failure under `mix compile --warnings-as-errors`.  Both shipping HEEx packs'
+ *  buttons do, however, carry an `inner_block` slot and `attr :rest, :global`,
+ *  and that is enough to render all four without touching the pack:
+ *
+ *    - the glyph goes in the CHILDREN slot as a `<span class="loom-icon">`
+ *      sibling of the label — the exact shape the shadcn / flowbite /
+ *      shadcnSvelte templates emit — positioned by `iconPosition:`
+ *      (default `"right"`, matching `_walker/primitives/controls.ts`);
+ *    - `loading:` becomes `aria-busy={…}` (the `aria-` prefix is one of
+ *      Phoenix's global prefixes, so `:global` accepts it) AND disables the
+ *      button, since a busy button that still fires is the defect the drop was
+ *      hiding.  With an author `disabled:` the two OR together.
+ *
+ *  A builtin `icon:` name resolves through the SAME `lookupBuiltinIcon`
+ *  registry the JSX walker uses, so the two targets ship the same glyph. */
 export function renderButton(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   const spec = CLOSED_PRIMITIVE_SPECS.Button!;
   // `icon:` / `iconSvg:` / `iconPosition:` and `loading:` — the four knobs the
