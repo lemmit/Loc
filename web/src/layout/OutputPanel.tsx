@@ -5,6 +5,7 @@ import { formatBytes, modeLabel, type LayoutCtx } from "./ctx";
 import { LOG_LEVELS, type LogLine, type StructuredLogPayload } from "../util/log-line";
 import { clearDiagnostics, isCrashReason, readDiagnostics, type DiagSnapshot } from "../util/diagnostics";
 import { CrashReportButtons } from "../CrashReportButtons";
+import { diagBadgeText, humanizeDiagReason, humanizeHashLen } from "../util/diag-humanize";
 import { countOf, nextStepMid, PANE, STAGE, STREAM } from "./vocabulary";
 import { type Mark, StatusMark, testsMark, worstMark } from "./status-mark";
 
@@ -247,15 +248,26 @@ function reasonColour(reason: string): "red" | "gray" {
   return isCrashReason(reason) ? "red" : "gray";
 }
 
+// One ring entry.  The reason is rendered as a SENTENCE (audit M10 — the
+// raw `react-error` / `unhandledrejection` keys read as internals); the key
+// itself stays on the row as a dimmed chip, and untouched in the copied
+// crash report, because it is what a maintainer greps for.
 function DiagRow({ snap }: { snap: DiagSnapshot }): JSX.Element {
   const when = snap.t.replace("T", " ").replace(/\.\d+Z$/, "");
+  const crash = isCrashReason(snap.reason);
   return (
-    <Box data-testid="output-diag-row">
+    <Box data-testid="output-diag-row" data-reason={snap.reason}>
       <Group gap={8} wrap="nowrap">
-        <Badge size="xs" variant="light" color={reasonColour(snap.reason)}>
-          {snap.reason}
+        <Badge size="xs" variant="light" color={reasonColour(snap.reason)} style={{ flexShrink: 0 }}>
+          {diagBadgeText(crash)}
         </Badge>
-        <Text size="xs" c="dimmed" ff="monospace" style={{ flex: 1 }}>
+        <Text size="xs" style={{ flex: 1 }} data-testid="output-diag-sentence">
+          {humanizeDiagReason(snap.reason)}
+        </Text>
+        <Code style={{ fontSize: 10, flexShrink: 0 }} c="dimmed" title="the ring key, as it appears in the crash report">
+          {snap.reason}
+        </Code>
+        <Text size="xs" c="dimmed" ff="monospace" style={{ flexShrink: 0 }}>
           {when}
         </Text>
         {snap.build && (
@@ -303,8 +315,8 @@ function DiagRow({ snap }: { snap: DiagSnapshot }): JSX.Element {
           {snap.vw}×{snap.vh}
         </Text>
         {snap.hashLen > 0 && (
-          <Text size="xs" ff="monospace" c="dimmed">
-            hash {snap.hashLen}b
+          <Text size="xs" c="dimmed" data-testid="output-diag-hash">
+            {humanizeHashLen(snap.hashLen)}
           </Text>
         )}
       </Group>

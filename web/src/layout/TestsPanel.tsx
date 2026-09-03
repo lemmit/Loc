@@ -126,6 +126,15 @@ export function TestsBody({
   const [apiCases, setApiCases] = useState<TestCase[] | null>(null);
   const [uiCases, setUiCases] = useState<UiTestCase[] | null>(null);
   const [discovering, setDiscovering] = useState(false);
+  // Per-suite progress + cancel for discovery (audit M18): esbuild runs
+  // once per suite, so "Discovering tests…" could sit for a long time with
+  // no sign of life and no way out.  `discoveryRef` is the cancel token the
+  // running discovery checks between suites; Cancel also disposes the
+  // transform client so the in-flight build rejects at once.
+  const [progress, setProgress] = useState<string | null>(null);
+  const [discoveryNote, setDiscoveryNote] = useState<string | null>(null);
+  const [discoveryAttempt, setDiscoveryAttempt] = useState(0);
+  const discoveryRef = useRef<{ cancelled: boolean } | null>(null);
   // `kind` picks the one line of interpretation above the raw text (audit
   // M19): a discovery failure is almost always the generated project's
   // dependencies not being resolvable from the browser; a run failure is a
@@ -178,9 +187,17 @@ export function TestsBody({
       setUiCases(null);
       return;
     }
-    let cancelled = false;
+    const token = { cancelled: false };
+    discoveryRef.current = token;
     setDiscovering(true);
     setError(null);
+    setDiscoveryNote(null);
+    const total = unitFiles.length + (uiFile ? 1 : 0) + (apiFile && engine ? 1 : 0);
+    let n = 0;
+    const step = (label: string): void => {
+      n++;
+      setProgress(TEST_DISCOVERY.progress(n, total, label));
+    };
     void (async () => {
       try {
         const c = client();
@@ -188,17 +205,23 @@ export function TestsBody({
           c.build(e, f, a);
         const units: UnitSuite[] = [];
         for (const f of unitFiles) {
+          if (token.cancelled) return;
+          const base = f.path.split("/").pop()!.replace(/\.test\.ts$/, "");
+          step(base);
           const cases = await loadUnitSuite({
             entry: f.path,
             files: unitSuiteFiles(files, f),
             build,
           });
-          const base = f.path.split("/").pop()!.replace(/\.test\.ts$/, "");
           units.push({ id: `unit\0${f.path}`, label: base, cases });
         }
+        if (token.cancelled) return;
+        if (uiFile) step("UI");
         const ui = uiFile
           ? await loadUiSuite({ entry: uiFile.path, files: uiSuiteFiles(files, uiFile), build })
           : null;
+        if (token.cancelled) return;
+        if (apiFile && engine) step("API");
         const api = apiFile && engine
           ? await loadApiTests({
               source: apiFile.content,
@@ -206,23 +229,38 @@ export function TestsBody({
               dispatch: (req) => engine.dispatch(req),
             })
           : null;
-        if (cancelled) return;
+        if (token.cancelled) return;
         setUnitSuites(units);
         setUiCases(ui);
         setApiCases(api);
       } catch (e) {
-        if (!cancelled) {
+        if (!token.cancelled) {
           setError({ kind: "discovery", message: e instanceof Error ? e.message : String(e) });
         }
       } finally {
-        if (!cancelled) setDiscovering(false);
+        if (!token.cancelled) {
+          setDiscovering(false);
+          setProgress(null);
+        }
       }
     })();
     return () => {
-      cancelled = true;
+      token.cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [generateSuccess, engine, active]);
+  }, [generateSuccess, engine, active, discoveryAttempt]);
+
+  const cancelDiscovery = (): void => {
+    const token = discoveryRef.current;
+    if (token) token.cancelled = true;
+    // Reject the in-flight esbuild build now rather than after it finishes;
+    // the next discovery gets a fresh worker.
+    clientRef.current?.dispose();
+    clientRef.current = null;
+    setDiscovering(false);
+    setProgress(null);
+    setDiscoveryNote(TEST_DISCOVERY.cancelled);
+  };
 
   const merge = (group: string, res: TestResult[]): void => {
     setResults((prev) => {
@@ -292,11 +330,32 @@ export function TestsBody({
   return (
     <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       {discovering && (
-        <Group gap="xs" px="sm" py={6}>
+        <Group gap="xs" px="sm" py={6} wrap="nowrap">
           <Loader size="xs" />
-          <Text size="sm" c="dimmed">
-            Discovering tests…
+          <Text size="sm" c="dimmed" style={{ flex: 1 }} data-testid="test-discovery-progress">
+            {progress ?? "Discovering tests…"}
           </Text>
+          <Button size="compact-xs" variant="subtle" color="gray" onClick={cancelDiscovery} data-testid="test-discovery-cancel">
+            {TEST_DISCOVERY.cancel}
+          </Button>
+        </Group>
+      )}
+      {discoveryNote && !discovering && (
+        <Group gap="xs" px="sm" py={6} wrap="nowrap" data-testid="test-discovery-note">
+          <Text size="sm" c="dimmed" style={{ flex: 1 }}>
+            {discoveryNote}
+          </Text>
+          <Button
+            size="compact-xs"
+            variant="light"
+            onClick={() => {
+              setDiscoveryNote(null);
+              setDiscoveryAttempt((a) => a + 1);
+            }}
+            data-testid="test-discovery-retry"
+          >
+            {TEST_DISCOVERY.retry}
+          </Button>
         </Group>
       )}
       {error && <TestError error={error} ctx={ctx} />}
