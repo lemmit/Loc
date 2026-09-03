@@ -187,19 +187,6 @@
       "reason": "F18 on a THIRD backend \u2014 the same static-sub-path finding already waived as W23 (python) and W33 (java), arriving unwaived on dotnet because no rule claimed that surface. Measured on a booted app: `DELETE /api/customers/by_email` answers 422, not 405, because the request matches `DELETE /api/customers/{id}` with `id=\"by_email\"` and the malformed-identifier arm answers first (the response even carries `Allow: DELETE, GET`, naming the template that swallowed it). F8's fix is a Hono middleware with no counterpart on the other four backends. It is NOT fixable per-backend here: constraining the route to `{id:guid}` would stop the collision but would also turn the malformed-path-id case into a 404, breaking the declared 422 that `test/generator/malformed-path-id-status.test.ts` pins across node/.NET/python/java. Disambiguating a static sub-path from `{id}` without losing that 422 is a cross-backend design decision, which is why this stays a waiver rather than a patch."
     },
     {
-      "id": "W37",
-      "findings": [
-        "F30"
-      ],
-      "check": "negative_data_rejection",
-      "operations": "^POST /api/products$",
-      "backends": [
-        "dotnet"
-      ],
-      "kind": "bug",
-      "reason": "F30 \u2014 a required VALUE-OBJECT member of a VALUE TYPE can be omitted and is accepted, storing the CLR default. `POST /api/products -d '{\"sku\":\"A\",\"price\":{\"currency\":\"USD\"}}'` answers 201 and the row reads `{\"amount\":0,\"currency\":\"USD\"}` \u2014 a zero-priced product the published `ProductsMoneyRequest` (`required: [amount, currency]`) forbids. The tell is the asymmetry: omitting `currency` (a string \u2192 null) is correctly refused 422, omitting `amount` (a decimal \u2192 0) is not, because DataAnnotations `[Required]` tests for null and 0 is not null. This is the exact hole `dtoParam` already documents for operation bodies, in the one slot its `[property: JsonRequired]` guard does not cover. NOT fixed by extending that guard: measured on a booted app, JsonRequired does reject the omission, but the STJ failure lands in the `Malformed JSON in request body` 400 arm \u2014 wrong on its face (the JSON is well-formed) and a NEW divergence, since the same endpoint answers 422 for an omitted `price` and node/python answer 422 here too. The fix that keeps the 422 tier is a nullable request-DTO value type (`decimal? Amount` + `[Required]`), which moves every VO construction site in the .NET emitter and is its own slice."
-    },
-    {
       "id": "W29",
       "findings": [
         "F23",

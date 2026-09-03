@@ -673,7 +673,7 @@ system DevPlatform {
                         Italic { "italic" },
                         InlineCode { "code" },
                         CodeBlock { "const x = 1" },
-                        Icon { name: "star" }
+                        Icon { name: "arrow-right" }
                     }
                 },
                 MultilineField { "Notes", bind: notes },

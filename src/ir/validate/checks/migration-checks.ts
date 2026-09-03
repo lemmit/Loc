@@ -288,12 +288,42 @@ export function validateMigrationAdapterSupport(
 //   simply ignored by the self-provisioning adapter, so a model that asks for
 //   `schema: "legacy"` silently gets `public`.
 //
+// ONE EXEMPTION, and it is the case both messages above describe as impossible:
+// `schema: "public"` with no `tablePrefix:`.  There the two namings CONVERGE —
+// the migration chain emits `CREATE TABLE "public"."as"` / `ToTable("as",
+// "public")`, and the self-provisioning adapter's UNQUALIFIED `CREATE TABLE
+// "as"` resolves through Postgres's default `search_path` (`"$user", public`;
+// no emitted connection string overrides it) to that same `public.as`.  So the
+// split-brain arm's "would start against DIFFERENT physical tables" is untrue,
+// and the dropped-request arm's own words give the game away: it says the
+// tables "land in 'public'", which is exactly what was asked for.  A request an
+// adapter happens to satisfy is not a request it dropped.
+//
+// `tablePrefix:` is NOT exempt even alongside `schema: "public"` — that one is
+// genuinely dropped, and it renames the table rather than placing it.
+//
 // Both are gated here rather than in an emitter for the same reason the
 // migration gate above is: the offending fact is a property of the SYSTEM's
 // deployable/binding graph, which no single backend emitter can see.  Scoped to
 // the ADAPTER, not the platform — `persistence: efcore` on the same `platform:
 // dotnet` deployable is fine, and that is the fix the message names.
 // ---------------------------------------------------------------------------
+/** The one Postgres schema an UNQUALIFIED table name resolves to, so naming it
+ *  explicitly asks for the placement a self-provisioning adapter already gives.
+ *  Postgres's default `search_path` is `"$user", public` and no emitted
+ *  connection string overrides it, so an unqualified `CREATE TABLE "as"` lands
+ *  in `public` unless a schema named after the connecting role exists. */
+const UNQUALIFIED_SCHEMA = "public";
+
+/** Does this binding ask for a table PLACEMENT the self-provisioning adapter
+ *  cannot give?  An explicit `schema: "public"` does not (see the exemption in
+ *  the block comment above); a `tablePrefix:` always does, on its own or
+ *  alongside one. */
+function asksUnhonourablePlacement(d: { schema?: string; tablePrefix?: string }): boolean {
+  if (d.tablePrefix !== undefined) return true;
+  return d.schema !== undefined && d.schema !== UNQUALIFIED_SCHEMA;
+}
+
 export function validateSelfProvisioningSchemaSupport(
   loom: EnrichedLoomModel,
   diags: LoomDiagnostic[],
@@ -332,8 +362,20 @@ export function validateSelfProvisioningSchemaSupport(
       for (const dep of selfProv) {
         const source = `${sys.name}/${dep.name}`;
         const isDapper = dep.persistence === "dapper";
+        // The bindings this deployable actually wires for `ctxName`.  When
+        // EVERY one of them places its tables where an unqualified name already
+        // resolves, the two adapters name the SAME physical table and neither
+        // arm below has anything to report (see the exemption in the block
+        // comment above).  `.every` over a non-empty list: `selfProv`
+        // membership came from `provisioners`, which required at least one.
+        const wired = tableBindings.filter(
+          (d) => d.contextName === ctxName && dep.dataSourceNames.includes(d.name),
+        );
+        const converges = wired.every(
+          (d) => d.schema === UNQUALIFIED_SCHEMA && d.tablePrefix === undefined,
+        );
         // (1) split-brain — a sibling adapter qualifies the same context.
-        if (qualifying.length > 0) {
+        if (qualifying.length > 0 && !converges) {
           const params = {
             name: dep.name,
             adapter: dep.persistence,
@@ -370,15 +412,19 @@ export function validateSelfProvisioningSchemaSupport(
           (d) =>
             d.contextName === ctxName &&
             dep.dataSourceNames.includes(d.name) &&
-            (d.schema !== undefined || d.tablePrefix !== undefined),
+            asksUnhonourablePlacement(d),
         );
         if (!asking) continue;
         const params = {
           name: dep.name,
           adapter: dep.persistence,
           binding: asking.name,
+          // Name the clause that is actually unhonourable, not merely the
+          // first one present: `schema: "public"` alongside a `tablePrefix:`
+          // is satisfied (see the exemption above), so quoting it here would
+          // point the author at the one clause they may keep.
           asked:
-            asking.schema !== undefined
+            asking.schema !== undefined && asking.schema !== UNQUALIFIED_SCHEMA
               ? `schema: "${asking.schema}"`
               : `tablePrefix: "${asking.tablePrefix}"`,
         };

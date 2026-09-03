@@ -335,7 +335,13 @@ export const angularTarget: WalkerTarget = {
    *  outlet reads it against the instance), and registers `NgComponentOutlet`.
    *  Positional + named args map to param names exactly as `emitUserComponent`
    *  does; an extra positional arg (a JSX child on the other frontends) has no
-   *  `ngComponentOutlet` analogue in v0 and is dropped. */
+   *  `ngComponentOutlet` analogue in v0 — `ngComponentOutletInputs` sets
+   *  INPUTS, and the outlet has no content-projection channel, so a
+   *  `Slot {}` the component declares has nowhere to land.  Such an arg is
+   *  still dropped, but NOT silently: each one leaves a degradation comment
+   *  next to the outlet, so the drop is visible in the emitted template and to
+   *  a marker-scanning parity gate (F2-CFE-8).  Every other frontend projects
+   *  the child (`<Panel item={r}><Text>…</Text></Panel>` on React). */
   renderUserComponent(call: ExprIR, ctx: WalkContext, _depth: number): string | null {
     if (call.kind !== "call") return null;
     const params = ctx.userComponents.get(call.name) ?? [];
@@ -343,6 +349,7 @@ export const angularTarget: WalkerTarget = {
     const argNames = call.argNames ?? [];
     const filledByName = new Set(argNames.filter((n): n is string => n !== undefined));
     const entries: string[] = [];
+    let droppedChildren = 0;
     let cursor = 0;
     for (let i = 0; i < call.args.length; i++) {
       const arg = call.args[i]!;
@@ -355,7 +362,10 @@ export const angularTarget: WalkerTarget = {
         paramName = params[cursor]?.name;
         if (paramName !== undefined) cursor += 1;
       }
-      if (paramName === undefined) continue;
+      if (paramName === undefined) {
+        droppedChildren += 1;
+        continue;
+      }
       entries.push(`${paramName}: ${emitExpr(arg, ctx)}`);
     }
     const outlet = ` [ngComponentOutlet]="${call.name}"`;
@@ -365,7 +375,11 @@ export const angularTarget: WalkerTarget = {
     // quote choice is always safe.
     const inputs =
       entries.length > 0 ? ` [ngComponentOutletInputs]='{ ${entries.join(", ")} }'` : "";
-    return `<ng-container${outlet}${inputs}></ng-container>`;
+    const dropped =
+      droppedChildren > 0
+        ? `<!-- ${call.name}: ${droppedChildren} projected child${droppedChildren === 1 ? "" : "ren"} dropped — ngComponentOutlet has no content-projection channel -->`
+        : "";
+    return `<ng-container${outlet}${inputs}></ng-container>${dropped}`;
   },
 
   /** `Button(to:)` → `router.navigateByUrl(<to>)` (bound as a statement by

@@ -83,9 +83,22 @@ export function renderAngularCreateForm(
   const importFrom = `../../api/${lowerFirst(agg.name)}`;
   const requestType = `Create${agg.name}Request`;
   const mutationFn = `useCreate${agg.name}`;
-  const mutationVar = `${lowerFirst(agg.name)}Create`;
-  const formVar = `${lowerFirst(agg.name)}Form`;
-  const submitMethod = `onSubmit${agg.name}`;
+  // Per-form class-member names.  The aggregate alone is NOT a unique key: a
+  // page may host two `CreateForm { of: Item }`s (a dashboard offering the same
+  // "new" affordance twice), and emitting `itemCreate` / `itemForm` /
+  // `onSubmitItem` twice in one class is three TS2300s — the page does not
+  // compile (F2-CFE-2).  So the second and later forms of the SAME aggregate on
+  // one page take an ordinal suffix; the first keeps the bare name, so every
+  // single-form page stays byte-identical.
+  const ordinal = angularSink(ctx).forms.filter(
+    (f) =>
+      f.formVar === `${lowerFirst(agg.name)}Form` ||
+      f.formVar.startsWith(`${lowerFirst(agg.name)}Form`),
+  ).length;
+  const dedupe = ordinal === 0 ? "" : String(ordinal + 1);
+  const mutationVar = `${lowerFirst(agg.name)}Create${dedupe}`;
+  const formVar = `${lowerFirst(agg.name)}Form${dedupe}`;
+  const submitMethod = `onSubmit${agg.name}${dedupe}`;
 
   // Form-shell + per-field imports.
   addNg(ctx, "@angular/forms", "FormControl", "FormGroup", "ReactiveFormsModule");

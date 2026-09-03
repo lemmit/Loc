@@ -328,12 +328,20 @@ export const tsxTarget: WalkerTarget = {
   /** `coll.map((item, idx) => (<Fragment key={key}>body</Fragment>))`.
    *  The keyed Fragment satisfies `useJsxKeyInIterable` without
    *  introducing a wrapper DOM node; the index binding is emitted only
-   *  when referenced (else `noUnusedFunctionParameters` fires).  Brace-
-   *  wrapped below depth 0, mirroring the ternary/match-child arms.
+   *  when referenced (else `noUnusedFunctionParameters` fires).
    *
    *  With an `empty:` arm the `.map` becomes the false branch of a
-   *  `coll.length === 0 ? (empty) : (.map(…))` ternary (the same
-   *  brace-wrap rule applies). */
+   *  `coll.length === 0 ? (empty) : (.map(…))` ternary.
+   *
+   *  Below depth 0 the result is wrapped as `<>{…}</>`, NOT as a bare
+   *  `{…}`: a nested `For` lands in two different kinds of slot and the
+   *  brace-only form is legal in just one of them.  In JSX CHILD position
+   *  (`<Stack> … </Stack>`) both spellings work; in EXPRESSION position —
+   *  a `QueryView { data: rows => For { … } }` body, which the pack
+   *  template drops straight into `{query.data && ( … )}` — a bare `{…}`
+   *  parses as an OBJECT LITERAL with an invalid property and the page
+   *  never compiles (F2-CFE-3).  The fragment is self-contained, so it is
+   *  valid in both. */
   renderForEach(
     coll: string,
     itemVar: string,
@@ -364,7 +372,7 @@ export const tsxTarget: WalkerTarget = {
             `${inner}${mapExpr}`,
             `${close})`,
           ].join("\n");
-    return depth === 0 ? expr : `{${expr}}`;
+    return depth === 0 ? expr : `<>{${expr}}</>`;
   },
 
   // --- Navigation seam ----------------------------------------------------

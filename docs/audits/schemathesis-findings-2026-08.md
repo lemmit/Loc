@@ -1041,43 +1041,66 @@ reproduces `column o0.UnitPrice_Amount does not exist` verbatim. Gated by
 `test/generator/dotnet/part-valueobject-columns.test.ts`, which also asserts the
 EF config and the migration DDL agree in the same emission.
 
-### F30 — dotnet: a required value-object member of a VALUE TYPE can be omitted
-**Waiver:** W37 · **Severity: medium** · **Status: OPEN — the obvious fix is wrong.**
+### F30 — dotnet: a required VALUE-TYPE member can be omitted and is accepted
+**Waiver:** none — fixed · **Severity: medium** · **Status: FIXED (2026-09-01).**
 
 ```
 POST /api/products -d '{"sku":"A","price":{"currency":"USD"}}'   → 201
 GET  /api/products                          → {"amount":0,"currency":"USD"}
 ```
 
-`ProductsMoneyRequest` publishes `required: [amount, currency]`. A zero-priced
-product is created from a body the contract forbids.
+A zero-priced product from a body the published `required: [amount, currency]`
+forbids.
 
-**The asymmetry is the diagnosis.** Measured on a booted app:
+**Wider than first recorded.** The initial entry framed this as a value-OBJECT
+problem. It is not: it is every REQUIRED member whose CLR type is a value type,
+in any request slot. Measured on a booted app, all four of these are in the
+schema's `required` set:
 
-| body | answer |
-|---|---|
-| `{"amount":1.5,"currency":"USD"}` | 201 |
-| `{"amount":1.5}` — string missing | **422**, correctly refused |
-| `{"currency":"USD"}` — decimal missing | **201**, accepted |
+| omitted | type | CLR kind | before | after |
+|---|---|---|---|---|
+| `name` | string | reference | 422 | 422 |
+| `price` | record | reference | 422 | 422 |
+| `qty` | int | **value** | **201** | **422** |
+| `ratio` | decimal | **value** | **201** | **422** |
+| `price.amount` | decimal | **value** | **201** | **422** |
+| `active` | bool | value, **not required** | 201 | 201 |
 
-Both members are equally required; only the VALUE TYPE slips through, because
-DataAnnotations `[Required]` tests for null and a missing `decimal` binds to `0`.
-This is exactly the hole `dtoParam` already documents for operation bodies
-(RS-26), in the one slot its `[property: JsonRequired]` guard does not cover —
-a VO's own members.
+`RequiredAttribute` tests for null; a missing value type binds to the CLR
+default, which is not null. Enforcement of the published contract therefore
+depended on nothing but whether a field happened to be a reference type.
+`active` is the control: RS-6 keeps a create-body `bool` optional and the schema
+agrees by omitting it from `required`, so it is correctly still accepted — the
+fix enforces what is claimed, no more.
 
-**Extending that guard was tried and rejected, on measurement.** With
-`[property: JsonRequired]` on VO members the omission IS refused — but the STJ
-failure lands in the `Malformed JSON in request body` **400** arm. That is wrong
-on its face (the JSON is well-formed; a member is absent), and it is a NEW
-divergence: the same endpoint answers 422 for an omitted `price`, and node and
-python answer 422 here too. It also moved the correctly-handled `currency` case
-from 422 to 400. Shipping it would have traded one contract bug for a parity bug.
+**The fix moves the guard AND the status arm together.** `[property:
+JsonRequired]` asks the right question ("was the member present"), and the
+emitter already used it for operation bodies. It could not simply be switched on
+because its failure landed in the `Malformed JSON in request body` **400** arm —
+wrong on its face, and it would have moved the already-correct reference-type
+cases from 422 to 400. So `FromModelState` now routes a missing-required-member
+error to the 422 tier with real pointers:
 
-The fix that keeps the 422 tier is a nullable request-DTO value type
-(`decimal? Amount` + `[Required]`), letting the existing model-validation path
-see the absence. That moves every VO construction site in the .NET emitter, so
-it is its own slice rather than a rider on this one.
+```json
+{"status":422,"title":"Validation failed",
+ "errors":[{"pointer":"/qty","message":"The qty field is required."},
+           {"pointer":"/ratio","message":"The ratio field is required."}]}
+```
+
+Matched on the message, because System.Text.Json raises no distinct exception
+type and — measured — hangs **no exception at all** on the model-state entry;
+the text is the entire signal (`$ => ErrorMessage: JSON deserialization for type
+'…' was missing required properties including: 'qty'.`). An earlier attempt read
+`error.Exception` and never fired. If a future runtime rewords it the match stops
+and the answer falls back to the 400 it gave before: today's behaviour, never a
+crash and never a laxer contract.
+
+**The published schema is byte-identical**, diffed live between two booted apps
+before and after. This changes what is ENFORCED, never what is ADVERTISED.
+Genuinely malformed bodies (truncated, non-JSON, wrong scalar type) still answer
+400. Gated by `test/generator/dotnet/required-value-type-members.test.ts`; each
+half is separately mutation-proved — revoking the guard fails 2 of 5 cases,
+revoking the status arm fails the 5th.
 
 
 ### The elixir leg

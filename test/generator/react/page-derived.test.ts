@@ -65,4 +65,53 @@ describe("React page/component `derived` bindings", () => {
     expect(comp).toContain("<Text>{label}</Text>");
     expect(comp).not.toContain("ref: label");
   });
+
+  // F2-FFE-2 — the deps array used to come from a four-arm hand-rolled
+  // walker (`ref`/`binary`/`unary`/`call` ARGS only).  Every ref reached
+  // through a ternary, a member receiver or an intrinsic receiver dropped
+  // out, so the memo froze at its first-render value while the state it
+  // read kept changing.  `tsc` cannot see a stale dep array.
+  it("deps include refs reached through a ternary and through an intrinsic receiver", async () => {
+    const files = await reactFiles(`
+      page P {
+        route: "/p"
+        state { n: int = 0  b: bool = false  c: string = "x" }
+        derived tern: string = (b ? "on" : "off")
+        derived nested: string = (b ? c : "z")
+        derived cal: int = n.abs()
+        body: Stack { Text { tern } }
+      }
+    `);
+    const tsx = files.get("web/src/pages/p.tsx")!;
+    expect(tsx).toContain('const tern = useMemo(() => ((b ? "on" : "off")), [b]);');
+    expect(tsx).toContain('const nested = useMemo(() => ((b ? c : "z")), [b, c]);');
+    expect(tsx).toContain("const cal = useMemo(() => Math.abs(n), [n]);");
+  });
+
+  it("the page `title:` useEffect deps see a ternary's refs too", async () => {
+    const files = await reactFiles(`
+      page P {
+        route: "/p"
+        state { b: bool = false }
+        title: (b ? "A" : "B")
+        body: Stack { Text { "x" } }
+      }
+    `);
+    const tsx = files.get("web/src/pages/p.tsx")!;
+    expect(tsx).toContain('useEffect(() => { document.title = ((b ? "A" : "B")); }, [b]);');
+  });
+
+  it("component derived deps see a ternary over state and a param", async () => {
+    const files = await reactFiles(`
+      component Panel(heading: string) {
+        state { open: bool = false }
+        derived caption: string = heading + (open ? " (open)" : " (closed)")
+        body: Stack { Text { caption } }
+      }
+      page P { route: "/p" body: Stack { Panel("h") } }
+    `);
+    let comp = "";
+    for (const [p, v] of files) if (p.endsWith("components/Panel.tsx")) comp = v;
+    expect(comp).toContain("[heading, open]");
+  });
 });

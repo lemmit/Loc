@@ -25,6 +25,16 @@
 // per target language, used by both the domain rule renderer and the
 // wire-boundary validator emitter, so the two can never drift.
 //
+// The inventory above is the HOST BACKEND languages, but the same definition
+// binds the CLIENT-side validators the frontends derive from the identical
+// `SingleFieldPattern` table.  React/Vue/Svelte fold `len-*` into a zod
+// `.refine` built on `tsCodePointLength`; **Angular** emits no zod schema at
+// all, so its Reactive-Forms `ValidatorFn`s
+// (`src/generator/angular/form-validators.ts`) are the only client check on
+// that frontend and call `tsCodePointLength` too — `Validators.minLength` /
+// `maxLength` read `control.value.length`, UTF-16 code units, and would put
+// the form and the server it posts to in disagreement in both directions.
+//
 // **Elixir used to count GRAPHEMES** — `String.length/1` and Ecto's
 // `validate_length/3` both count grapheme clusters — and was signed off as a
 // residual on the theory that the two only diverge on combining sequences.

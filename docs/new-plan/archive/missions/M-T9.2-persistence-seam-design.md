@@ -1,6 +1,6 @@
 # M-T9.2 — persistence-emit seam: divergence audit + seam design
 
-*Phase 1 (divergence audit) + Phase 2 (seam contract + slicing plan). This is the **design-first deliverable for maintainer sign-off**, per [`M-T9.2-persistence-seam-brief.md`](./M-T9.2-persistence-seam-brief.md) and [`../RUNBOOK.md`](../RUNBOOK.md) step 3. **No extraction code lands until this is signed off.***
+*Phase 1 (divergence audit) + Phase 2 (seam contract + slicing plan). This is the **design-first deliverable for maintainer sign-off**, per [`M-T9.2-persistence-seam-brief.md`](./M-T9.2-persistence-seam-brief.md) and [`../RUNBOOK.md`](../../RUNBOOK.md) step 3. **No extraction code lands until this is signed off.***
 
 > **STATUS: IMPLEMENTED + CONCLUDED.** Audit complete (all 5 backends). **Seed spine extracted (#1876, byte-identical, merged).** Then, on byte-level scoping, every other candidate fragment declined (§0.4 events/ids/enum; §0.6 wire; **§0.7 QueryTarget** — the flagship). **Net conclusion in §0.7:** the persistence surface's *byte-identical-realizable* shared content is the seed spine + the already-shared substrate; "regular-shaped" (parallel decision tree) turned out to be a weaker property than "byte-identical-extractable" (shared *composition*), which almost nothing outside seed has. Go/no-go history in §0.5; open questions in §2.7.
 

@@ -90,3 +90,54 @@ describe("vue menu-link gate", () => {
     expect(shell.match(/v-if='\(/g)?.length ?? 0).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// M-T3.15-C3 — the DEFAULT sidebar (no explicit `menu { … }`) must gate its
+// entries too.  The default entries were assumed to be scaffold pages with no
+// `requires`; `scaffold/_pages.ts` now CLONES the aggregate's
+// `find all … requires` gate onto the scaffolded List page — the gate that
+// guards the very read that page makes — so the ungated sidebar advertised a
+// route the backend answers with 403.  Angular's default branch was already
+// the reference implementation.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_NAV_SYS = (authUi: boolean, gated: boolean) => `
+system Helpdesk {
+  user { id: string role: string }
+  auth { provider: keycloak  oidc { issuer: env("OIDC_ISSUER") clientId: env("OIDC_CLIENT_ID") } }
+  subdomain Support {
+    context Tickets {
+      aggregate Ticket with crudish { subject: string }
+      repository Tickets for Ticket { ${gated ? 'find all(): Ticket[] requires currentUser.role == "agent"' : ""} }
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: Tickets, kind: state, use: primary }
+  api SupportApi from Support
+  deployable api { platform: node contexts: [Tickets] serves: SupportApi dataSources: [st] port: 8080 auth: required }
+  ui WebApp with scaffold(subdomains: [Support]) { api Support: SupportApi }
+  deployable web { platform: vue targets: api ui: WebApp { Support: api } port: 3001${authUi ? " auth: ui" : ""} }
+}
+`;
+
+describe("Vue default sidebar honours the list page's requires gate", () => {
+  it("wraps the default aggregate nav entry in the gate when auth: ui", async () => {
+    const files = await generateSystemFiles(DEFAULT_NAV_SYS(true, true));
+    const shell = find(files, "web/src/App.vue");
+    expect(shell).toContain('currentUser.role === "agent"');
+    expect(shell).toContain('data-testid="nav-tickets"');
+    expect(shell).toContain(`<template v-if='(currentUser.role === "agent")'>`);
+  });
+
+  it("an ungated aggregate leaves the entry (and the session binding) alone", async () => {
+    const files = await generateSystemFiles(DEFAULT_NAV_SYS(true, false));
+    const shell = find(files, "web/src/App.vue");
+    expect(shell).toContain('data-testid="nav-tickets"');
+    expect(shell).not.toContain("currentUser");
+  });
+
+  // The `auth: ui`-less counterpart is unreachable by construction: a page
+  // whose `requires` reads `currentUser` on a deployable that binds no session
+  // is refused at phase ⑦ by `loom.current-user-needs-auth-ui`.  So the gate
+  // can never dangle — the model that would produce it does not compile.
+});
