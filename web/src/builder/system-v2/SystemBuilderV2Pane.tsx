@@ -9,7 +9,17 @@
 // filter, wire shape); opening a node there jumps the drill-down to it.
 
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment, type ReactNode } from "react";
-import { Box, Button, Checkbox, Group, Stack, Text, TextInput } from "@mantine/core";
+import { Box, Button, Checkbox, Group, SegmentedControl, Stack, Text, TextInput, Tooltip } from "@mantine/core";
+import { DETAIL_LEVEL, DETAIL_LEVEL_HINT, MODEL_EMPTY } from "../../layout/vocabulary";
+import { IconX } from "../icons";
+import {
+  applyDetailLevelToAll,
+  DETAIL_LEVELS,
+  isDetailLevel,
+  loadDetailLevel,
+  saveDetailLevel,
+  type DetailLevel,
+} from "./detail-level";
 import {
   Background,
   BaseEdge,
@@ -1116,8 +1126,8 @@ function Inner({ ctx, path, setPath, onOverview }: {
           inputs,
           selects,
           // Six clauses would turn every field node into a form — they live
-          // behind the node's own `ƒ` toggle, as they did in v1's inspector.
-          detailsLabel: "ƒ",
+          // behind the node's own clauses toggle, as they did in v1's inspector.
+          detailsLabel: "clauses",
           ...detailToggle(n.id),
           compact,
           // A `mask unless` chip rides along on the field leaf.
@@ -1215,7 +1225,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
       if (isRebindKind(n.kind) && astNode) {
         const owner = n.name;
         const kind = n.kind;
-        detailsLabel = "⇄";
+        detailsLabel = "rebind";
         selects = [
           {
             label: targetKindOf(kind) === "subdomain" ? "from" : "for",
@@ -1278,7 +1288,7 @@ function Inner({ ctx, path, setPath, onOverview }: {
           // Collapsed: the header clauses plus the signature are five-plus
           // fields, and a repository view stacks its finds — expanded by
           // default they overlap the next find's node.
-          detailsLabel = "⋯";
+          detailsLabel = "clauses";
           inputs = [
             {
               label: "requires",
@@ -1399,6 +1409,20 @@ function Inner({ ctx, path, setPath, onOverview }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph, parsed, path, rev, compact, structuredKey, exprMode, detailsKey]);
 
+  // Detail level — Names / Fields / Everything (M-T8.21 slice 4).  Persisted
+  // per view path like the positions; re-read when the path changes.  A pure
+  // filter over `constructData`, applied here so the derivation above stays
+  // the single source and the level never touches the editing handlers.
+  const [detail, setDetail] = useState<DetailLevel>(() => loadDetailLevel(path));
+  useEffect(() => {
+    setDetail(loadDetailLevel(path));
+  }, [path]);
+  const pickDetail = (level: DetailLevel): void => {
+    setDetail(level);
+    saveDetailLevel(path, level);
+  };
+  const shownData = useMemo(() => applyDetailLevelToAll(constructData, detail), [constructData, detail]);
+
   // Per-view persisted positions. The ref mirrors localStorage for the
   // current view and is re-read whenever `path` changes (drilling into a new
   // node, popping the breadcrumb, etc.). `persistedRev` bumps after every
@@ -1411,15 +1435,15 @@ function Inner({ ctx, path, setPath, onOverview }: {
     setPersistedRev((r) => r + 1);
   }, [path]);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(toRfNodes(graph, stmtData, constructData, persistedRef.current));
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(toRfNodes(graph, stmtData, shownData, persistedRef.current));
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(toRfEdges(graph));
   useEffect(() => {
-    setNodes(toRfNodes(graph, stmtData, constructData, persistedRef.current));
+    setNodes(toRfNodes(graph, stmtData, shownData, persistedRef.current));
     setEdges(toRfEdges(graph));
     // persistedRev triggers a re-spread after a reset / cross-view restore;
     // persistedRef.current is otherwise read by reference inside toRfNodes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph, stmtData, constructData, persistedRev, setNodes, setEdges]);
+  }, [graph, stmtData, shownData, persistedRev, setNodes, setEdges]);
 
   const rf = useReactFlow();
   const nodesInitialized = useNodesInitialized();
@@ -1589,9 +1613,11 @@ function Inner({ ctx, path, setPath, onOverview }: {
                 variant="subtle"
                 color="red"
                 data-testid="c4system-v2-op-param-del"
+                aria-label={`remove parameter ${p.name}`}
+                title={`remove parameter ${p.name}`}
                 onClick={() => commit(deleteOpParam(ctx.getSource(), agg, op, i))}
               >
-                ×
+                <IconX />
               </Button>
             </Group>
           ))}
@@ -1696,7 +1722,23 @@ function Inner({ ctx, path, setPath, onOverview }: {
         path={path}
         onJump={jumpTo}
         onOverview={path.length === 0 ? onOverview : undefined}
-        trailing={<UndoRedo handleRef={ctx.editorHandleRef} testidPrefix="c4system-v2" />}
+        trailing={
+          <Group gap={6} wrap="nowrap">
+            <Tooltip label={DETAIL_LEVEL_HINT[detail]} withArrow openDelay={400}>
+              <SegmentedControl
+                size="xs"
+                value={detail}
+                data={DETAIL_LEVELS.map((l) => ({ value: l, label: DETAIL_LEVEL[l] }))}
+                aria-label="Detail level"
+                data-testid="c4system-v2-detail-level"
+                onChange={(v) => {
+                  if (isDetailLevel(v)) pickDetail(v);
+                }}
+              />
+            </Tooltip>
+            <UndoRedo handleRef={ctx.editorHandleRef} testidPrefix="c4system-v2" />
+          </Group>
+        }
       />
       {bodyMembers.length > 0 && (
         <BodyPicker
@@ -1746,14 +1788,47 @@ function Inner({ ctx, path, setPath, onOverview }: {
           </Button>
         )}
         {graph.nodes.length === 0 && (
-          <Text
-            size="xs"
-            c="dimmed"
-            style={{ position: "absolute", top: 12, left: 12, zIndex: 5 }}
+          // A drilled-into construct with no members (a fresh `+ Context`, an
+          // aggregate with no operations yet): a centred card that says where
+          // you are and offers the way back — not a line in the corner that
+          // reads like a caption (M-T8.21, audit H6/H7 panes).
+          <Box
             data-testid="c4system-v2-empty"
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 5,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              pointerEvents: "none",
+            }}
           >
-            Nothing to show at {graph.title}. Use the breadcrumb to go back.
-          </Text>
+            <Stack
+              gap={6}
+              align="center"
+              p="md"
+              style={{
+                pointerEvents: "auto",
+                maxWidth: 360,
+                textAlign: "center",
+                borderRadius: 8,
+                border: "1px solid var(--mantine-color-default-border)",
+                background: "var(--mantine-color-body)",
+              }}
+            >
+              <Text size="sm" fw={600}>{MODEL_EMPTY.drill(graph.title)}</Text>
+              <Text size="xs" c="dimmed">{MODEL_EMPTY.drillHint}</Text>
+              <Button
+                size="xs"
+                variant="default"
+                data-testid="c4system-v2-empty-back"
+                onClick={() => jumpTo(path.length - 1)}
+              >
+                {MODEL_EMPTY.backTo(path.length > 1 ? path[path.length - 2]!.name : MODEL_EMPTY.root)}
+              </Button>
+            </Stack>
+          </Box>
         )}
       </Box>
     </Box>

@@ -30,9 +30,12 @@ import {
   TextInput,
   Title,
   Tooltip,
+  UnstyledButton,
 } from "@mantine/core";
 import { AstUtils, type AstNode } from "langium";
 import type { LayoutCtx } from "../../layout/ctx";
+import { VERDICT_LABEL, VERDICT_LEGEND } from "../../layout/vocabulary";
+import { middleEllipsis, needsEllipsis } from "../../util/middle-ellipsis";
 import { spliceNodeIfParses } from "../edit-engine";
 import { RefusalLine } from "../refusal";
 import { ParseErrorState } from "../ParseErrorState";
@@ -397,6 +400,13 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
               onNew={() => setWizard("requirement")}
               newTestid="req-new-requirement"
             />
+            {verification && (
+              // One line that decodes the verdict pills (M9) — the same
+              // wording the Tests panel uses (`VERDICT_LEGEND`).
+              <Text size="xs" c="dimmed" mb={6} data-testid="req-verdict-legend">
+                {VERDICT_LEGEND}
+              </Text>
+            )}
             <Stack gap={2}>
               {roots.flatMap((r) =>
                 renderReqRow(r.name, 0, reqById, trace, verification, selected, select),
@@ -424,7 +434,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
                 >
                   <Group gap={6} wrap="nowrap">
                     <Text size="sm" fw={500}>{t.name}</Text>
-                    <Text size="sm" c="dimmed" truncate>{t.title ?? ""}</Text>
+                    <EllipsisText text={t.title ?? ""} />
                   </Group>
                 </Row>
               ))}
@@ -452,7 +462,7 @@ export default function RequirementsPane({ ctx }: { ctx: LayoutCtx }): JSX.Eleme
                   >
                     <Group gap={6} wrap="nowrap">
                       <Text size="sm" fw={500}>{s.name}</Text>
-                      <Text size="sm" c="dimmed" truncate>{s.title ?? ""}</Text>
+                      <EllipsisText text={s.title ?? ""} />
                     </Group>
                   </Row>
                 ))}
@@ -624,7 +634,9 @@ function renderReqRow(
       active={selected?.kind === "requirement" && selected.id === r.name}
       onClick={() => setSelected({ kind: "requirement", id: r.name })}
     >
-      <Group gap={6} wrap="nowrap" style={{ paddingLeft: depth * 12 }}>
+      {/* `wrap`: in a narrow list the badge cluster wraps onto a second
+          line instead of clipping (M-T8.21 / M9). */}
+      <Group gap={6} wrap="wrap" style={{ paddingLeft: depth * 12, rowGap: 2 }}>
         {type && (
           <Badge size="xs" color={REQUIREMENT_TYPE_COLOR[type] ?? "gray"} variant="light">
             {type.replace("AcceptanceCriteria", "AC")}
@@ -634,9 +646,7 @@ function renderReqRow(
             first thing flex squeezed, leaving "INPRO…" / "UNT…" / "0…"
             stubs while the (truncatable) title kept its width. */}
         <Text size="sm" fw={500} style={{ whiteSpace: "nowrap", flexShrink: 0 }}>{r.name}</Text>
-        <Text size="sm" c="dimmed" truncate style={{ flex: 1, minWidth: 0 }}>
-          {title ?? ""}
-        </Text>
+        <EllipsisText text={title ?? ""} style={{ flex: 1, minWidth: 0 }} />
         {status && (
           <Badge size="xs" color={STATUS_COLOR[status] ?? "gray"} variant="outline" style={{ flexShrink: 0 }} title={`Status: ${status}`}>
             {status}
@@ -645,13 +655,14 @@ function renderReqRow(
         {verdict && (
           <Badge
             size="xs"
+            tt="none"
             color={VERDICT_COLOR[verdict]}
             variant="filled"
             style={{ flexShrink: 0 }}
             title={VERDICT_HINT[verdict]}
             data-testid={`req-verdict-${r.name}`}
           >
-            {verdict}
+            {VERDICT_LABEL[verdict]}
           </Badge>
         )}
         <Badge
@@ -732,11 +743,17 @@ function Row({
   onClick: () => void;
   children: React.ReactNode;
 }): JSX.Element {
+  // A real button (M-T8.21 / audit M15): Tab reaches it, Enter / Space
+  // activate it, and `aria-pressed` says which row is open.
   return (
-    <Box
+    <UnstyledButton
       data-testid={testid}
       onClick={onClick}
+      aria-pressed={active}
       style={{
+        display: "block",
+        width: "100%",
+        textAlign: "left",
         padding: "4px 6px",
         borderRadius: 4,
         cursor: "pointer",
@@ -744,7 +761,24 @@ function Row({
       }}
     >
       {children}
-    </Box>
+    </UnstyledButton>
+  );
+}
+
+/** A title / path that truncates in the MIDDLE with the full value on hover
+ *  (M-T8.21 / audit M17) — the end of a title is the part that tells
+ *  siblings apart. */
+function EllipsisText({ text, max = 56, style }: { text: string; max?: number; style?: React.CSSProperties }): JSX.Element {
+  return (
+    <Text
+      size="sm"
+      c="dimmed"
+      component="span"
+      title={needsEllipsis(text, max) ? text : undefined}
+      style={{ whiteSpace: "nowrap", ...style }}
+    >
+      {middleEllipsis(text, max)}
+    </Text>
   );
 }
 
@@ -867,8 +901,10 @@ function RequirementForm({
                 color={VERDICT_COLOR[verification.requirements[req.name]!.verdict]}
                 variant="filled"
                 data-testid={`req-verdict-detail-${req.name}`}
+                tt="none"
+                title={VERDICT_HINT[verification.requirements[req.name]!.verdict]}
               >
-                {verification.requirements[req.name]!.verdict}
+                {VERDICT_LABEL[verification.requirements[req.name]!.verdict]}
               </Badge>
             )}
           </>
@@ -900,6 +936,7 @@ function RequirementForm({
           onChange={(v) => setForm({ ...form, status: (v as RequirementStatus | null) ?? "" })}
           clearable
           placeholder="(unset)"
+          clearButtonProps={{ "aria-label": "Clear status" }}
           data-testid="req-form-status"
         />
         <NumberInput
@@ -920,6 +957,7 @@ function RequirementForm({
           clearable
           placeholder="(no parent)"
           searchable
+          clearButtonProps={{ "aria-label": "Clear parent" }}
           data-testid="req-form-parent"
         />
       </SimpleGrid>
@@ -957,10 +995,11 @@ function RequirementForm({
                 {status && (
                   <Badge
                     size="xs"
+                    tt="none"
                     color={TESTCASE_STATUS_COLOR[status]}
                     variant="light"
                   >
-                    {status}
+                    {VERDICT_LABEL[status]}
                   </Badge>
                 )}
                 {inherited && (
@@ -1124,8 +1163,9 @@ function TestCaseForm({
                 color={TESTCASE_STATUS_COLOR[verification.testCases[tc.name]!.status]}
                 variant="filled"
                 data-testid={`tc-verdict-detail-${tc.name}`}
+                tt="none"
               >
-                {verification.testCases[tc.name]!.status}
+                {VERDICT_LABEL[verification.testCases[tc.name]!.status]}
               </Badge>
             )}
           </>
@@ -1226,6 +1266,7 @@ function CodeRefPicker({
         onChange={onChange}
         searchable
         clearable
+        clearButtonProps={{ "aria-label": "Clear selection" }}
         nothingFoundMessage="No matching code symbol"
         data-testid={testid}
       />
@@ -1263,15 +1304,21 @@ function Link({
   onClick: () => void;
   children: React.ReactNode;
 }): JSX.Element {
+  // A real button styled as a link (M15) — keyboard-activatable, in the tab
+  // order, still reads as a cross-reference.
   return (
-    <Text
-      size="sm"
-      c="blue.4"
-      style={{ cursor: "pointer", textDecoration: "underline" }}
+    <UnstyledButton
       onClick={onClick}
+      style={{
+        cursor: "pointer",
+        textDecoration: "underline",
+        color: "var(--mantine-color-blue-4)",
+        fontSize: "var(--mantine-font-size-sm)",
+        lineHeight: "var(--mantine-line-height-sm)",
+      }}
     >
       {children}
-    </Text>
+    </UnstyledButton>
   );
 }
 
@@ -1395,6 +1442,7 @@ function NewRequirementWizard({
         value={parent || null}
         onChange={(v) => setParent(v ?? "")}
         clearable
+        clearButtonProps={{ "aria-label": "Clear parent" }}
         searchable
         placeholder="(no parent)"
         data-testid="req-wizard-parent"

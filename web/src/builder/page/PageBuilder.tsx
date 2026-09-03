@@ -11,6 +11,7 @@ import { PALETTE_PRIMITIVES, SINGLE_CHILD_NODES, defaultForItemLambda, defaultNo
 import { parseDdd } from "../parse";
 import type { Diagnostic } from "../../lsp/protocol";
 import { InlineConfirm, confirmSites } from "../../util/confirm";
+import { PAGE_SETTINGS } from "../../layout/vocabulary";
 
 // A compact problems bar shown above the canvas when the current body has LSP
 // diagnostics, so the builder flags errors/warnings in place.
@@ -480,31 +481,51 @@ function SettingsContent({ options, operations = {}, enumCases, pageEnumFields }
   return (
     <>
       <Group justify="space-between" mb="xs">
-        <Text size="xs" tt="uppercase" c="dimmed">{id ? name : "Select a node"}</Text>
+        <Text size="xs" tt="uppercase" c="dimmed">{id ? name : PAGE_SETTINGS.selectNode}</Text>
         {id && name !== "Root" && (
           <Button size="compact-xs" variant="subtle" color="red" data-testid="c4builder-delete" onClick={() => id && actions.delete(id)}>
             Delete
           </Button>
         )}
       </Group>
+      {!id && (
+        // One sentence of guidance under the heading (M-T8.21) — the rail
+        // used to sit empty with nothing that said what fills it.
+        <Text size="xs" c="dimmed" mb="xs" data-testid="c4builder-settings-hint">{PAGE_SETTINGS.selectNodeHint}</Text>
+      )}
       {id && name === "Match" && (
-        <Group gap={4} mb="xs">
-          <Button size="compact-xs" variant="light" data-testid="c4builder-add-arm" onClick={() => addArm("MatchArm")}>+ arm</Button>
-          {!childNames.includes("MatchElse") && (
-            <Button size="compact-xs" variant="light" data-testid="c4builder-add-else" onClick={() => addArm("MatchElse")}>+ else</Button>
+        <Stack gap={4} mb="xs">
+          {!childNames.includes("MatchArm") && (
+            // A palette-added Match is armless until `+ arm` — say so, or the
+            // empty node on the canvas reads as broken.
+            <Text size="xs" c="dimmed" data-testid="c4builder-hint-match">{PAGE_SETTINGS.matchHint}</Text>
           )}
-        </Group>
+          <Group gap={4}>
+            <Button size="compact-xs" variant="light" data-testid="c4builder-add-arm" onClick={() => addArm("MatchArm")}>+ arm</Button>
+            {!childNames.includes("MatchElse") && (
+              <Button size="compact-xs" variant="light" data-testid="c4builder-add-else" onClick={() => addArm("MatchElse")}>+ else</Button>
+            )}
+          </Group>
+        </Stack>
       )}
       {id && name === "For" && !hasItemLambda && (
-        <Group gap={4} mb="xs">
-          <Button size="compact-xs" variant="light" data-testid="c4builder-add-item" onClick={addForItem}>+ item</Button>
-        </Group>
+        <Stack gap={4} mb="xs">
+          <Text size="xs" c="dimmed" data-testid="c4builder-hint-for">{PAGE_SETTINGS.forHint}</Text>
+          <Group gap={4}>
+            <Button size="compact-xs" variant="light" data-testid="c4builder-add-item" onClick={addForItem}>+ item</Button>
+          </Group>
+        </Stack>
       )}
       {id && isBlockLambda && (
-        <Group gap={4} mb="xs">
-          <Text size="xs" c="dimmed">Handler statements:</Text>
-          <Button size="compact-xs" variant="light" data-testid="c4builder-add-stmt" onClick={addStmt}>+ statement</Button>
-        </Group>
+        <Stack gap={4} mb="xs">
+          {childNames.length === 0 && (
+            <Text size="xs" c="dimmed" data-testid="c4builder-hint-lambda">{PAGE_SETTINGS.lambdaHint}</Text>
+          )}
+          <Group gap={4}>
+            <Text size="xs" c="dimmed">Handler statements:</Text>
+            <Button size="compact-xs" variant="light" data-testid="c4builder-add-stmt" onClick={addStmt}>+ statement</Button>
+          </Group>
+        </Stack>
       )}
       {id && name === "Stmt" && props.kind === "assign" && (
         // Assignment statement: target / op / value as separate controls.
