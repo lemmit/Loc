@@ -35,9 +35,9 @@ A `SchemaSnapshot` is an alphabetically-sorted list of `TableShape`s
 (`{ name, schema?, columns, primaryKey, foreignKeys, indexes }`). `MigrationStep`
 is a closed union of `createTable` / `dropTable` / `renameTable` / `addColumn` /
 `dropColumn` / `renameColumn` / `alterColumnNullable` / `alterColumnType` /
-`addIndex` / `dropIndex` / `renameIndex` / `sqlComment` / `backfillColumn` /
-`sqlExec`. Backends only translate steps to native syntax — they
-never re-derive the schema from the IR.
+`alterColumnDefault` / `addIndex` / `dropIndex` / `renameIndex` / `sqlComment` /
+`backfillColumn` / `sqlExec`. Backends only translate steps to native syntax —
+they never re-derive the schema from the IR.
 
 **Every delta step carries a `schema?`** — the owning bounded context's Postgres
 schema, exactly as `createTable` carries it on the nested `TableShape`. Without it
@@ -179,6 +179,11 @@ and, unless the generate run passes `--allow-destructive`, **aborts** with a
   fails at apply time on any row holding NULL, so the flip is classified
   destructive too — unless a backfill step covers the column, in which case
   it becomes `UPDATE … WHERE … IS NULL` → `SET NOT NULL`, non-destructive.
+- **Default changes.** An `alterColumnDefault` (G2.5) — a column's default
+  literal added, removed, or edited with its type/nullability unchanged — is
+  **never destructive**: it only changes what future `INSERT`s without an
+  explicit value pick up (`SET DEFAULT <expr>` / `DROP DEFAULT`), so it needs
+  no flag and touches no existing row.
 
 ```bash
 ddd generate system app.ddd -o out                       # aborts on a destructive delta

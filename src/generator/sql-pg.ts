@@ -43,6 +43,8 @@ export function renderPgStep(step: MigrationStep): string {
       };`;
     case "alterColumnType":
       return `${renderAlterColumnTypeSql(step)};`;
+    case "alterColumnDefault":
+      return `${renderAlterColumnDefaultSql(step)};`;
     case "addIndex":
       // The index carries no schema of its own; the step's `schema` is the
       // owning table's schema (indexes live in the table's schema).
@@ -101,6 +103,22 @@ export function renderAlterColumnTypeSql(step: {
     `ALTER TABLE ${qualified(step.schema, step.table)} ALTER COLUMN ${ident(step.name)} ` +
     `TYPE ${renderPgType(step.to)} USING ${ident(step.name)}::${renderPgType(step.to)}`
   );
+}
+
+/** `ALTER TABLE … ALTER COLUMN … SET DEFAULT …` / `… DROP DEFAULT` — the
+ *  semicolon-less form, shared with the Ecto emitter (`execute/1`, the same
+ *  bit-identical-DDL precedent as {@link renderAlterColumnTypeSql}).
+ *  `to === undefined` means the new schema has no default — the honest
+ *  rendering is `DROP DEFAULT`, not `SET DEFAULT NULL` (a real NULL default
+ *  vs. no default at all are different things in Postgres). */
+export function renderAlterColumnDefaultSql(step: {
+  table: string;
+  name: string;
+  to: string | undefined;
+  schema?: string;
+}): string {
+  const target = `ALTER TABLE ${qualified(step.schema, step.table)} ALTER COLUMN ${ident(step.name)}`;
+  return step.to === undefined ? `${target} DROP DEFAULT` : `${target} SET DEFAULT ${step.to}`;
 }
 
 export function renderRenameIndexSql(step: { from: string; to: string; schema?: string }): string {
