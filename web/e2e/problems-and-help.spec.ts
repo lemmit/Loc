@@ -44,6 +44,14 @@ async function openProblems(page: Page): Promise<void> {
   }
 }
 
+/** Whether the keyboard focus is inside the Monaco editor.  Containment,
+ *  not a concrete input element: Monaco moved its hidden input from
+ *  `textarea.inputarea` to `div.native-edit-context` with the EditContext
+ *  API, and the version is a dependency, not a contract. */
+async function focusIsInEditor(page: Page): Promise<boolean> {
+  return page.evaluate(() => !!document.activeElement?.closest(".monaco-editor"));
+}
+
 /** Monaco's active line number, read off the gutter. */
 async function activeLine(page: Page): Promise<number> {
   const text = await page.locator(".monaco-editor .active-line-number").first().innerText();
@@ -94,10 +102,13 @@ test("F8 moves the cursor to the problem's line and announces it", async ({ page
 test("⌘K opens the palette and Generate runs generate", async ({ page }) => {
   await page.goto("/");
   await waitForPlaygroundReady(page);
-  // A fresh model so the generate the palette triggers is observable as a
-  // new file count (auto-generate is 5 s behind an edit; the palette is not).
-  await setSource(page, BARE);
+  // The starter source auto-generates once on load; let that settle first,
+  // so the SECOND run — the segment going `running` again with nothing
+  // edited since — is the palette's doing and nothing else's.
   await expect(page.getByTestId("pipeline-count-validate")).toHaveText("0 errors", { timeout: 30_000 });
+  await expect(page.getByTestId("btn-generate")).toHaveAttribute("data-state", "ok", {
+    timeout: 60_000,
+  });
 
   await page.getByRole("heading", { name: /Loom Playground/i }).click();
   await page.keyboard.press("Control+k");
@@ -108,6 +119,11 @@ test("⌘K opens the palette and Generate runs generate", async ({ page }) => {
   await page.keyboard.press("Enter");
   await expect(search).toBeHidden();
 
+  // The palette's action reached `runGenerate`: the segment leaves `ok` for
+  // `running` and comes back with a file count.
+  await expect(page.getByTestId("btn-generate")).toHaveAttribute("data-state", "running", {
+    timeout: 30_000,
+  });
   await expect(page.getByTestId("btn-generate")).toHaveAttribute("data-state", "ok", { timeout: 60_000 });
   await expect(page.getByTestId("pipeline-count-generate")).toHaveText(/^\d+ files?$/);
 });
@@ -125,7 +141,7 @@ test("the first-run card shows on a fresh profile and not after dismissal", asyn
   // The *Write .ddd* door dismisses and lands in the editor.
   await card.getByTestId("first-run-write").click();
   await expect(card).toBeHidden();
-  await expect(page.locator(".monaco-editor textarea.inputarea")).toBeFocused();
+  await expect.poll(() => focusIsInEditor(page), { timeout: 30_000 }).toBe(true);
 
   await page.reload();
   await expect(page.getByText(/^0 errors$/)).toBeVisible({ timeout: 30_000 });

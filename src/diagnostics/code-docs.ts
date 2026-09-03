@@ -151,6 +151,7 @@ export const CODE_DOCS_ANCHORS: Readonly<Record<string, string>> = {
   "loom.duplicate-permission": "17-auth.md#permissions--a-typed-catalogue",
   "loom.unknown-permission": "17-auth.md#permissions--a-typed-catalogue",
   "loom.default-deny-ungated": "17-auth.md#requires--the-authorization-gate-http-403",
+  "loom.sensitive-wire-unsupported": "17-auth.md#sensitive--field-tagging",
   "loom.duplicate-user-block": "17-auth.md#user--the-jwt-claim-shape",
   "loom.user-duplicate-field": "17-auth.md#user--the-jwt-claim-shape",
   "loom.aggregate-test-context": "18-testing.md#test---an-in-process-unit-test",

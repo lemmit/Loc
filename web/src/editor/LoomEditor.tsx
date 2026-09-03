@@ -5,7 +5,7 @@ import type { LoomLspClient } from "../lsp/client";
 import type { Diagnostic } from "../lsp/protocol";
 import { modelUriFor } from "../lsp/workspace-lsp-sync";
 import { installMonacoEnvironment } from "./monaco-env";
-import type { EditorHandle } from "./editor-handle";
+import type { EditorHandle, EditorRange } from "./editor-handle";
 import { loomQuickFixes, quickFixesAt } from "./fix-hint-actions";
 import { applyTextEdits } from "./apply-edits";
 
@@ -136,6 +136,9 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
   // mount seed: it is a real user edit, whereas the prop can still be the
   // pre-edit content when the write hasn't round-tripped the workspace store.
   const pendingSourceRef = useRef<string | null>(null);
+  // A `revealRange` that arrived before Monaco existed (M-T8.18) — replayed
+  // once the editor is created, so the reveal + focus is deferred, not lost.
+  const pendingRevealRef = useRef<EditorRange | null>(null);
   const clientRef = useRef(props.client);
   clientRef.current = props.client;
   const onChangeRef = useRef(props.onChange);
@@ -191,7 +194,12 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
             edits,
           );
         },
-        revealRange: () => {},
+        // No editor yet — queue it.  The first-run card's *Write .ddd* door
+        // fires before Monaco has finished loading (it is a 9.5 MB chunk),
+        // and dropping the reveal there left the click doing nothing at all.
+        revealRange: (range) => {
+          pendingRevealRef.current = range;
+        },
         // No model yet, so no stack: the chrome renders Undo / Redo disabled
         // rather than swallowing a click.
         undo: () => {},
@@ -248,6 +256,13 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
       revealLatestEdit(editor, model, e.changes);
     });
 
+    const revealRange = (r: EditorRange): void => {
+      const range = new monaco.Range(r.startLineNumber, r.startColumn, r.endLineNumber, r.endColumn);
+      editor.setSelection(range);
+      editor.revealRangeInCenter(range, monaco.editor.ScrollType.Smooth);
+      editor.focus();
+    };
+
     if (handleRef.current) {
       handleRef.current.current = {
         setSource: (text: string) => {
@@ -267,12 +282,7 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
             () => null,
           );
         },
-        revealRange: (r) => {
-          const range = new monaco.Range(r.startLineNumber, r.startColumn, r.endLineNumber, r.endColumn);
-          editor.setSelection(range);
-          editor.revealRangeInCenter(range, monaco.editor.ScrollType.Smooth);
-          editor.focus();
-        },
+        revealRange,
         // The model's own stack — `pushEditOperations` above already put every
         // pane write on it.  Undo/redo are NOT suppressed: the resulting
         // content change is dispatched like a keystroke, which is how the app
@@ -286,6 +296,13 @@ export function LoomEditor(props: LoomEditorProps): JSX.Element {
         canUndo: () => model.canUndo(),
         canRedo: () => model.canRedo(),
       };
+    }
+
+    // Replay a reveal that arrived while the stand-in handle was in place.
+    if (pendingRevealRef.current) {
+      const queued = pendingRevealRef.current;
+      pendingRevealRef.current = null;
+      revealRange(queued);
     }
 
     // Automation seam: lets e2e set/read the document text directly (set

@@ -15,8 +15,11 @@ interface Props {
 
 export function ShortcutSheet({ opened, onClose }: Props): JSX.Element {
   return (
-    <Modal opened={opened} onClose={onClose} title={SHORTCUTS.title} centered size="md" data-testid="shortcut-sheet">
-      <Stack gap="sm">
+    <Modal opened={opened} onClose={onClose} title={SHORTCUTS.title} centered size="md">
+      {/* The test id sits on the CONTENT, not the Modal root: Mantine keeps
+          the root div mounted with a zero-size box when the modal is closed,
+          so a root-level id resolves to a permanently "hidden" element. */}
+      <Stack gap="sm" data-testid="shortcut-sheet">
         <Table verticalSpacing={4} withRowBorders={false}>
           <Table.Tbody>
             {SHORTCUT_ROWS.map((r) => (
