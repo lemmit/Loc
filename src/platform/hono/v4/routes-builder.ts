@@ -2,6 +2,7 @@ import {
   isServerSourcedDefault,
   serverSourcedDefaultFields,
 } from "../../../generator/_frontend/server-default.js";
+import { numericEncode } from "../../../generator/_numeric/target.js";
 import { renderHonoLogCall } from "../../../generator/_obs/render-hono.js";
 import {
   PROVENANCED_REQUEST_ERROR,
@@ -14,7 +15,6 @@ import {
   unionMemberObjects,
   unionMembers,
 } from "../../../generator/_payload/union-wire.js";
-import { MONEY_WIRE_SCALE } from "../../../generator/money-scale.js";
 import {
   historyMapperArgs,
   historyMapperName,
@@ -22,6 +22,7 @@ import {
   historySelectStatement,
   renderHistoryEntryMapper,
 } from "../../../generator/typescript/emit/audit-history.js";
+import { TS_NUMERIC } from "../../../generator/typescript/numeric-codec.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import { aggHasFieldMask } from "../../../generator/typescript/repository-wire-builder.js";
 import {
@@ -1934,7 +1935,7 @@ function emitReturningOperationRoute(
     op.returnType?.kind === "primitive" &&
     (op.returnType as { name?: string }).name === "money";
   const successResult = scalarMoneyReturn
-    ? `result === null ? null : result.toFixed(${MONEY_WIRE_SCALE})`
+    ? `result === null ? null : ${numericEncode(TS_NUMERIC, "money", "dto-map", "result")}`
     : "result";
   out.push(`    return c.json(${successResult}, 200);`);
   out.push(`  },`);

@@ -53,8 +53,8 @@ import {
   wholeTableAggregates,
 } from "../../../ir/util/projection-aggregate.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import { numericEncode } from "../../_numeric/target.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
-import { MONEY_WIRE_SCALE } from "../../money-scale.js";
 import type { ApiRoute } from "../api-emit.js";
 import { projectionRowModule, stateModule } from "../dispatch-emit.js";
 import { ECTO_INTRINSIC_FRAGMENTS, type RenderCtx, renderExpr } from "../render-expr.js";
@@ -69,6 +69,7 @@ import {
 } from "./capability-filter.js";
 import { denialOverrides, denialResponse } from "./denial.js";
 import { docFilterLambdaArg, docPredReadsRecord, isVanillaDocAgg } from "./document-emit.js";
+import { ELIXIR_NUMERIC } from "./numeric-codec.js";
 import { hasRefColls, preloadSuffix } from "./ref-collection-emit.js";
 import { renderWireSerialize } from "./wire-serialize.js";
 
@@ -557,7 +558,7 @@ ${ectoQueryImport}  alias ${appModule}.Repo
 ${body}
   end${projectionHelpers}${denyHelper}${
     usesMoneyRound
-      ? `\n\n  defp __money_round(nil), do: nil\n\n  defp __money_round(%Decimal{} = dec), do: Decimal.round(dec, ${MONEY_WIRE_SCALE})`
+      ? `\n\n  defp __money_round(nil), do: nil\n\n  defp __money_round(%Decimal{} = dec), do: ${numericEncode(ELIXIR_NUMERIC, "money", "dto-map", "dec")}`
       : ""
   }${joinedHelper(body)}
 end
@@ -594,7 +595,7 @@ function moneyWireHelper(
   # Money scale: a SQL aggregate echoes the scale its rows were STORED
   # at, and a grouping KEY echoes the scale its row was WRITTEN at, so pin the
   # wire value to the canonical scale every other read uses.
-  defp __money_wire(%Decimal{} = dec), do: dec |> Decimal.round(${MONEY_WIRE_SCALE}) |> to_string()
+  defp __money_wire(%Decimal{} = dec), do: ${numericEncode(ELIXIR_NUMERIC, "money", "projection-read", "dec")}
 
   defp __money_wire(value), do: value |> Decimal.new() |> __money_wire()
 `;
@@ -641,7 +642,7 @@ function ectoCoerce(s: AggregateSelect, read: string): string {
       : `to_string(${read} || 0)`;
   }
   if (inner.kind === "primitive" && inner.name === "decimal") {
-    const num = `Decimal.to_float(Decimal.new(to_string(${read})))`;
+    const num = numericEncode(ELIXIR_NUMERIC, "decimal", "projection-read", read);
     return c.optional
       ? `if(is_nil(${read}), do: nil, else: ${num})`
       : `if(is_nil(${read}), do: 0.0, else: ${num})`;
@@ -681,7 +682,7 @@ function ectoKeyCoerce(k: GroupKeySelect, read: string, viaFragment = false): st
       : `__money_wire(${read})`;
   }
   if (inner.kind === "primitive" && inner.name === "decimal") {
-    const num = `Decimal.to_float(Decimal.new(to_string(${read})))`;
+    const num = numericEncode(ELIXIR_NUMERIC, "decimal", "projection-read", read);
     return optional ? `if(is_nil(${read}), do: nil, else: ${num})` : num;
   }
   return read;

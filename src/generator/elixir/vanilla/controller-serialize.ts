@@ -34,8 +34,9 @@
 import type { BoundedContextIR, SystemIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { isTpcBase } from "../../../ir/util/inheritance.js";
 import { snake, upperFirst } from "../../../util/naming.js";
-import { MONEY_WIRE_SCALE } from "../../money-scale.js";
+import { numericEncode } from "../../_numeric/target.js";
 import { isVanillaDocAgg } from "./document-emit.js";
+import { ELIXIR_NUMERIC } from "./numeric-codec.js";
 import { renderWireSerialize } from "./wire-serialize.js";
 
 /** The `serialize/1` clause set + helper defs for a deployable-level controller.
@@ -166,13 +167,13 @@ export function renderControllerSerialize(
   if (declared.decimal) {
     scalarClauses.push(
       `  # A plain \`decimal\` is a JSON NUMBER on every other backend.` +
-        `\n  defp serialize(%Decimal{} = value), do: Decimal.to_float(value)`,
+        `\n  defp serialize(%Decimal{} = value), do: ${numericEncode(ELIXIR_NUMERIC, "decimal", "dto-map", "value")}`,
     );
   } else if (declared.money) {
     scalarClauses.push(
       `  # Money rides the wire at the fixed \`NUMERIC(19,4)\` scale (Jason` +
         `\n  # encodes a \`%Decimal{}\` as the string the other backends send).` +
-        `\n  defp serialize(%Decimal{} = value), do: Decimal.round(value, ${MONEY_WIRE_SCALE})`,
+        `\n  defp serialize(%Decimal{} = value), do: ${numericEncode(ELIXIR_NUMERIC, "money", "dto-map", "value")}`,
     );
   }
   clauses.push(...scalarClauses);

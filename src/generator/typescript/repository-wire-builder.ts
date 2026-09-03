@@ -15,8 +15,9 @@ import type {
   WireField,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
+import { numericEncode } from "../_numeric/target.js";
 import { provenancedEntries } from "../_payload/provenanced-wire.js";
-import { MONEY_WIRE_SCALE } from "../money-scale.js";
+import { TS_NUMERIC } from "./numeric-codec.js";
 import { tsProvSibling } from "./prov-names.js";
 import { renderTsExpr } from "./render-expr.js";
 
@@ -163,8 +164,8 @@ export function wireProjectionValue(
     // wire value is byte-consistent with the other backends' 4-dp money.
     if (t.name === "money")
       return optional
-        ? `(${expr} == null ? null : ${expr}.toFixed(${MONEY_WIRE_SCALE}))`
-        : `${expr}.toFixed(${MONEY_WIRE_SCALE})`;
+        ? `(${expr} == null ? null : ${numericEncode(TS_NUMERIC, "money", "dto-map", expr)})`
+        : numericEncode(TS_NUMERIC, "money", "dto-map", expr);
     // decimal: JSON number — .NET serializes decimal the same way, so
     // both backends round-trip identically.
     return expr;

@@ -21,8 +21,10 @@ import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { desugarAuthzFilterInApp } from "../_expr/authz-filter-inapp.js";
+import { numericEncode } from "../_numeric/target.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { aggregateIsAudited } from "./emit/audit-stamp.js";
+import { TS_NUMERIC } from "./numeric-codec.js";
 import { synthProjectionFinds } from "./projection-finds.js";
 import { renderTsExpr } from "./render-expr.js";
 import type { FilterBypass } from "./repository-find-predicate.js";
@@ -686,9 +688,9 @@ export function deserializeField(
     return `(${accessor} == null ? null : ${deserializeField(t.inner, accessor, ctx)})`;
   }
   if (t.kind === "primitive") {
-    if (t.name === "money") return `new Decimal(${accessor})`;
+    if (t.name === "money") return numericEncode(TS_NUMERIC, "money", "repo-read", accessor);
     if (t.name === "datetime") return `new Date(${accessor})`;
-    if (t.name === "decimal") return `Number(${accessor})`;
+    if (t.name === "decimal") return numericEncode(TS_NUMERIC, "decimal", "repo-read", accessor);
     return accessor;
   }
   if (t.kind === "id") return `Ids.${t.targetName}Id(${accessor})`;

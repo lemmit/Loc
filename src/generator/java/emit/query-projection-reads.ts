@@ -19,13 +19,15 @@ import {
 } from "../../../ir/util/projection-aggregate.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
-import { MONEY_WIRE_SCALE, MONEY_WIRE_ZERO } from "../../money-scale.js";
+import { numericEncode } from "../../_numeric/target.js";
+import { MONEY_WIRE_ZERO } from "../../money-scale.js";
 import {
   bypassDrops,
   bypassedPromotedCaps,
   type FilterBypass,
   promotedCapabilities,
 } from "../capability-filter.js";
+import { JAVA_NUMERIC, javaMoneyProjectionKeyEncode } from "../numeric-codec.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
 import {
   JPQL_INTRINSIC_SQL,
@@ -750,7 +752,7 @@ function jpqlCoerce(s: AggregateSelect, read: string): string {
   // Via `new BigDecimal(toString())` because JPQL types an aggregate result by
   // provider choice — a `BigDecimal` for one, a `Double` for another.
   if (c.isMoney) {
-    const scaled = `new java.math.BigDecimal(${read}.toString()).setScale(${MONEY_WIRE_SCALE}, java.math.RoundingMode.HALF_UP).toPlainString()`;
+    const scaled = numericEncode(JAVA_NUMERIC, "money", "projection-read", read);
     return c.optional
       ? `${read} == null ? null : ${scaled}`
       : `${read} == null ? "${MONEY_WIRE_ZERO}" : ${scaled}`;
@@ -768,12 +770,13 @@ function jpqlCoerce(s: AggregateSelect, read: string): string {
     // backend ships.  Before this, only `avg` was double-parity, and only by
     // the provider's accident; `sum`/`min`/`max` re-wrapped into a
     // `BigDecimal` and serialized the stored column's full precision.
+    const decoded = numericEncode(JAVA_NUMERIC, "decimal", "projection-read", read);
     return c.optional
-      ? `${read} == null ? null : ((Number) ${read}).doubleValue()`
-      : `${read} == null ? 0.0 : ((Number) ${read}).doubleValue()`;
+      ? `${read} == null ? null : ${decoded}`
+      : `${read} == null ? 0.0 : ${decoded}`;
   }
   const asLong = inner.kind === "primitive" && inner.name === "long";
-  const num = `((Number) ${read}).${asLong ? "longValue" : "intValue"}()`;
+  const num = numericEncode(JAVA_NUMERIC, asLong ? "long" : "int", "projection-read", read);
   return c.optional ? `${read} == null ? null : ${num}` : `${read} == null ? 0 : ${num}`;
 }
 
@@ -805,21 +808,23 @@ function groupKeyCoerce(
   if (t.kind === "primitive") {
     switch (t.name) {
       case "int":
-        return `((Number) ${read}).intValue()`;
+        return numericEncode(JAVA_NUMERIC, "int", "projection-read", read);
       case "long":
-        return `((Number) ${read}).longValue()`;
+        return numericEncode(JAVA_NUMERIC, "long", "projection-read", read);
       case "decimal":
         // decimal → the row's `double` component (RS-24 / M-T6.46), the same
         // narrowing `domainToWire` applies on a per-row read.  A key column
         // comes back as the entity's own mapped `BigDecimal`, so it still goes
         // through `Number` rather than a cast — but it lands on a double, not
         // on a re-wrapped BigDecimal carrying the stored column's full scale.
-        return `((Number) ${read}).doubleValue()`;
+        return numericEncode(JAVA_NUMERIC, "decimal", "projection-read", read);
       case "money":
         // money → wire STRING at the fixed money scale (RS-12), matching
-        // `domainToWire`.
+        // `domainToWire` — the SAME `projection-read` transform
+        // `jpqlCoerce`'s aggregate arm applies, spelled with the short
+        // `BigDecimal` name this file already imports.
         imports.add("java.math.BigDecimal");
-        return `new BigDecimal(${read}.toString()).setScale(${MONEY_WIRE_SCALE}, java.math.RoundingMode.HALF_UP).toPlainString()`;
+        return javaMoneyProjectionKeyEncode(read);
       case "datetime":
         // Instant → ISO-8601 wire string.  Through HQL's `function(…)` escape
         // Hibernate has no static return type, so normalise first.

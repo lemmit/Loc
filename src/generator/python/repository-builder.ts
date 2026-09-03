@@ -43,6 +43,7 @@ import { type ValueCollectionIR, valueCollectionsFor } from "../../ir/util/value
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { numericEncode } from "../_numeric/target.js";
 import { provenancedEntries } from "../_payload/provenanced-wire.js";
 import { renderPyHistoryRepoMethod } from "./emit/audit-history.js";
 import { PY_PROV_SUFFIX, provColumn, provenancedFieldsOf } from "./emit/provenance.js";
@@ -56,6 +57,7 @@ import {
   writeScopeDeniesAll,
   writeScopePredicate,
 } from "./find-predicate.js";
+import { PY_NUMERIC } from "./numeric-codec.js";
 import {
   columnsForFields,
   isRefCollectionField,
@@ -757,7 +759,8 @@ function hydrateScalar(expr: string, t: TypeIR, optional: boolean): string {
   const opt = optional || t.kind === "optional";
   const wrap = (conv: string): string =>
     opt ? `(${conv} if ${expr} is not None else None)` : conv;
-  if (inner.kind === "primitive" && inner.name === "decimal") return wrap(`float(${expr})`);
+  if (inner.kind === "primitive" && inner.name === "decimal")
+    return wrap(numericEncode(PY_NUMERIC, "decimal", "repo-read", expr));
   if (inner.kind === "enum") return wrap(`${inner.name}(${expr})`);
   if (inner.kind === "id") return wrap(`${inner.targetName}Id(${expr})`);
   if (inner.kind === "array") {
@@ -765,7 +768,9 @@ function hydrateScalar(expr: string, t: TypeIR, optional: boolean): string {
       return wrap(`[${inner.element.name}(__v) for __v in ${expr}]`);
     }
     if (inner.element.kind === "primitive" && inner.element.name === "decimal") {
-      return wrap(`[float(__v) for __v in ${expr}]`);
+      return wrap(
+        `[${numericEncode(PY_NUMERIC, "decimal", "repo-read", "__v")} for __v in ${expr}]`,
+      );
     }
     return wrap(`list(${expr})`);
   }
@@ -1545,7 +1550,8 @@ export function wireValue(
     // JSON-encode as a number and diverge both the payload and the OpenAPI
     // type; a plain `str(...)` would leak a derived money's own scale
     // (`money("0.00")` → `"0.00"`).
-    return optional ? `(None if ${expr} is None else money_str(${expr}))` : `money_str(${expr})`;
+    const wire = numericEncode(PY_NUMERIC, "money", "dto-map", expr);
+    return optional ? `(None if ${expr} is None else ${wire})` : wire;
   }
   if (t.kind === "valueobject") {
     const vo = ctx.valueObjects.find((v) => v.name === t.name);

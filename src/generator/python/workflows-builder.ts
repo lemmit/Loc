@@ -31,6 +31,7 @@ import { workflowCorrIdValueType } from "../../ir/util/workflow-instances.js";
 import { type LinesPart, lines } from "../../util/code-builder.js";
 import { resolveErrorStatus } from "../../util/error-defaults.js";
 import { snake, upperFirst, workflowFnSnake } from "../../util/naming.js";
+import { numericEncode } from "../_numeric/target.js";
 import { LogEvents } from "../_obs/log-events.js";
 import { statementSubRegions } from "../_trace/sourcemap.js";
 import { renderWorkflowStmtChunks, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
@@ -38,6 +39,7 @@ import { zeroFor } from "./dispatch-builder.js";
 import type { OpFragment } from "./emit/aggregate.js";
 import { domainServiceImportLinesForWorkflow } from "./emit/domain-service.js";
 import { responsePyType, wireModelImport } from "./emit/http-models.js";
+import { PY_NUMERIC } from "./numeric-codec.js";
 import { wireHelperImport } from "./py-type-imports.js";
 import {
   type PyRenderContext,
@@ -801,9 +803,10 @@ export function instanceFieldValue(rowVar: string, f: WireField): string {
   }
   if (t.kind === "primitive" && t.name === "money") {
     // Precise-decimal string on the wire (parity with the other backends).
+    const wire = numericEncode(PY_NUMERIC, "money", "dto-map", attr);
     return f.optional || f.type.kind === "optional"
-      ? `(None if ${attr} is None else money_str(${attr}))`
-      : `money_str(${attr})`;
+      ? `(None if ${attr} is None else ${wire})`
+      : wire;
   }
   return attr;
 }
