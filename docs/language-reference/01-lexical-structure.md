@@ -2,9 +2,9 @@
 
 The tokens and file-level structure beneath every other chapter: comments, identifiers, literals and how their delimiters are stripped, the soft-keyword rule that lets reserved words double as field names, and multi-file source via `import`. Reach for it when a name won't parse, a string survives onto the wire differently than you wrote it, or you're splitting a project across files.
 
-> **Grammar:** `ID`, `STRING`, `INT`, `DECIMAL` (terminals), `WS`/`SL_COMMENT`/`ML_COMMENT` (hidden), `Model`, `ImportStmt`, `Property.name`, `LooseName` · **Validators:** — · **Docs:** [`../language.md`](../language.md)
+> **Grammar:** `ID`, `STRING`, `INT`, `DECIMAL`, `DURATION`, `TRACE_ID`, `TEMPLATE_FULL`/`_START`/`_MIDDLE`/`_END`/`_FORMAT` (terminals), `WS`/`SL_COMMENT`/`ML_COMMENT` (hidden), `Model`, `ImportStmt`, `CommonSoftKeywords`, `Property.name`, `LooseName`, `NameRefIdent` · **Validators:** — · **Docs:** [`../language.md`](../language.md)
 
-Whitespace and comments are hidden terminals — ignored between tokens — so layout is free. Two number terminals are distinguished by the dot: `INT` is `/[0-9]+/`, `DECIMAL` is `/[0-9]+\.[0-9]+/`.
+Whitespace and comments are hidden terminals — ignored between tokens — so layout is free. Two number terminals are distinguished by the dot: `INT` is `/[0-9]+/`, `DECIMAL` is `/[0-9]+\.[0-9]+/`. A third, `DURATION` (`/[0-9]+(ms|s|m|h|d)/` — `15s`, `5m`), is declared before `INT` so `15s` lexes as one token; it is accepted only as a `timerSource`'s `every:` cadence — in expressions a span is spelled `days(n)` / `hours(n)` / `minutes(n)` (see [Expressions](05-expressions.md)).
 
 ## Comments
 
@@ -26,6 +26,8 @@ No generated tab: comments are discarded at the lexer, so no platform emits anyt
 ## Identifiers
 
 `ID` is `/[_a-zA-Z][\w_]*/` — a letter or underscore, then letters, digits, or underscores. Case-sensitive: `Order` and `order` are distinct. There is no separate Unicode-identifier rule; identifiers are ASCII-word.
+
+One neighbour to know about: `TRACE_ID` (`/[A-Za-z][A-Za-z0-9]*(-[A-Za-z0-9]+)*-[0-9]+/` — `US-001`, `AC-12`, the ids of `requirement` / `testCase` / `verifies`) is declared before `ID` for longest-match priority. It must end in `-<digits>`, so ordinary identifiers fall through to `ID`; the only collision is an **unspaced** subtraction ending in a number (`x-1`), which lexes as one trace id. House style spaces binary operators (`x - 1`).
 
 ```ddd
 context Orders {
@@ -71,11 +73,11 @@ public sealed record OrderResponse(
 ```
 ::: end
 
-The DB column is identical on both (`order_total DECIMAL NOT NULL` in each migration); only the host-language member name differs. House style is to write `camelCase` fields so the divergence never bites — but the rule above is what governs anything you do write.
+The DB column is identical on both (`"order_total" DECIMAL(19, 4) NOT NULL` in each migration — `money` is `numeric(19, 4)`); only the host-language member name differs. House style is to write `camelCase` fields so the divergence never bites — but the rule above is what governs anything you do write.
 
 ## Literals
 
-String, integer, decimal, boolean, and `null`. The `STRING` terminal is `/"(\\.|[^"\\])*"/` — double-quoted, standard backslash escapes.
+String, integer, decimal, boolean, `null`, plus the backtick **template string** and the `money("…")` literal. The `STRING` terminal is `/"(\\.|[^"\\])*"/` — double-quoted, standard backslash escapes.
 
 ```ddd
 context Orders {
@@ -114,11 +116,13 @@ public enum Currency
 
 Money has its own literal form, `money("10.50")` — see [Type system](04-type-system.md) — whose argument is a `STRING` (precise-decimal, never a float). It is distinct from `DECIMAL`; `1.5` is a lossy `decimal`, `money("1.50")` is precise.
 
+**Template strings** are backtick-delimited with `{expr}` holes: `` `Order {n} for {customer.name}` ``. The lexer splits one into `TEMPLATE_FULL` (no holes) or a `TEMPLATE_START … TEMPLATE_MIDDLE* … TEMPLATE_END` sequence with an expression between each pair; a dedicated `interpolation` lexer mode keeps a hole's `}` from closing the enclosing block (which is why a hole may not itself contain a `{ }` literal). A comma at hole-paren-depth 0 begins an optional ICU format suffix (`TEMPLATE_FORMAT`): `{total, number, ::currency/USD}`. Literal braces / backticks in the text are `\{` / `\}` / `` \` ``. See [Expressions](05-expressions.md) and [`../language.md`](../language.md) → "String interpolation".
+
 ## Soft keywords
 
-Loom keeps the hard-reserved set small. Many words that act as keywords in one position are **soft keywords** — reserved only in the rule that uses them, and admitted as ordinary identifiers everywhere else. This is what lets a domain field be named `state`, `kind`, `payload`, `route`, `query`, `body`, `parent`, `money`, `action`, `paged`, `option`, `or`, … without colliding with the page DSL, the storage-clause keys, the payload-family declarations, or the type-carrier syntax.
+Loom keeps the hard-reserved set to declaration heads, type names and expression keywords. Many words that act as keywords in one position are **soft keywords** — reserved only in the rule that uses them, and admitted as ordinary identifiers everywhere else. This is what lets a domain field be named `state`, `kind`, `payload`, `query`, `body`, `parent`, `money`, `action`, `paged`, `option`, `or`, `write`, `migration`, … without colliding with the page DSL, the storage-clause keys, the payload-family declarations, the policy verbs, or the type-carrier syntax.
 
-Mechanically: `Property.name` and the shared `LooseName` rule list those words as alternatives to `ID`, so they parse as names in field / parameter / property / argument position. They bind as keywords only where their owning rule begins.
+Mechanically: the grammar factors the shared set into one rule, `CommonSoftKeywords`, and composes it into every *value* position — `Property.name` (field names), `LooseName` (parameter / argument / clause names), `NameRefIdent` (bare references in expressions), `LValueIdent` (assignment targets) and `MemberName` (after `.`). Each of those rules then adds a few position-specific extras, so the soft set is **not identical across positions**: `await` is soft as a *field* / parameter name but not as an expression ref (it is the `match await` marker there); `api`, `route`, `component`, `menu`, `section`, `link`, `targets`, `framework`, `design`, `ui`, `contains` are soft as parameter names and expression refs but **not** as field names (`aggregate Order { route: string }` is a parse error — pick another name); `create` / `destroy` are soft only as expression refs; `of`, `allow`, `deep`, `global`, `policy`, `persistence` are soft only as `LooseName`. They bind as keywords only where their owning rule begins. A word with a *hard* position in one of these rules stays a per-rule extra rather than joining the common set; `test/language/keyword-identifier-completeness.test.ts` pins the factoring.
 
 ```ddd
 context Orders {
@@ -128,6 +132,8 @@ context Orders {
     payload: string    // `payload` begins a PayloadDecl at context level — soft as a field
     parent: Order id?  // `parent` is the requirement-hierarchy keyword — soft as a field
     money: int         // even `money` (a primitive type / MoneyLit) is soft as a name
+    write: int         // the `policy` verb — soft as a field
+    migration: int     // the top-level ledger-block head — soft as a field
   }
 }
 ```
@@ -145,13 +151,13 @@ ui Web {
 }
 ```
 
-Representative soft-keyword set (each soft in identifier position, hard only in its own rule): `state`, `title`, `body`, `kind`, `schema`, `tablePrefix`, `keyPrefix`, `ttl`, `every`, `use`, `readonly`, `payload`, `command`, `query`, `response`, `error`, `paged`, `envelope`, `option`, `or`, `route`, `page`, `component`, `menu`, `section`, `link`, `framework`, `static`, `design`, `targets`, `bind`, `api`, `by`, `handle`, `of`, `parent`, `action`, `money`, `immutable`, `managed`, `token`, `internal`, `secret`, `sort`, `loads`, `asc`, `desc`. The grammar's `LooseName` rule and the `Property.name` alternation are the source of truth — they carry inline comments naming the one rule each word is hard in.
+The `CommonSoftKeywords` set today (soft in **every** value position, hard only in its own rule): `action`, `asc`, `body`, `by`, `canonical`, `channels`, `command`, `config`, `connection`, `crossTenant`, `dataSources`, `desc`, `description`, `env`, `envelope`, `error`, `eventLog`, `every`, `favicon`, `filter`, `group`, `handle`, `immutable`, `implements`, `instance`, `internal`, `isolationLevel`, `join`, `keyPrefix`, `kind`, `literal`, `loads`, `mailer`, `managed`, `message`, `migration`, `money`, `objectStore`, `ogImage`, `option`, `or`, `paged`, `parent`, `payload`, `query`, `queue`, `readonly`, `replica`, `resource`, `response`, `retain`, `retrieval`, `schema`, `secret`, `select`, `service`, `snapshot`, `sort`, `sql`, `stamp`, `state`, `store`, `tablePrefix`, `tenancy`, `title`, `token`, `ttl`, `use`, `write`. The grammar rules are the source of truth — `CommonSoftKeywords` plus the per-rule extras on `Property`, `LooseName`, `NameRefIdent`, `LValueIdent` and `MemberName` in `src/language/ddd.langium`.
 
 No generated tab: soft-keyword admission is a parse-time concern; the resulting field/enum/declaration emits exactly as its non-keyword-named sibling would.
 
 ## `import` & multi-file source
 
-`ImportStmt` is `'import' path=STRING ';'?` — a path-based include of another `.ddd` file, resolved **relative to the importing file** (`"./shared/money.ddd"` against that file's directory). Imports may only appear at the top of a file, before the model members.
+`ImportStmt` is `'import' path=STRING ';'?` — a path-based include of another `.ddd` file, resolved **relative to the importing file** (`"./shared/money.ddd"` against that file's directory). Imports may only appear at the top of a file, before the model members. `import` is a hard keyword.
 
 ```ddd
 // main.ddd
@@ -182,7 +188,7 @@ context Orders {
 Semantics:
 
 - **Imports are file-loading, not visibility.** The CLI's project loader walks the import graph transitively from the entry file (conventionally `main.ddd`) and registers every reachable document with one shared global scope; the rest of the pipeline sees one merged model. There is no autodiscovery — a `.ddd` file nobody imports is not part of the project.
-- **Ambient (model-root) vs context-local.** `valueobject`, `enum`, and `component` may be declared at the model root. Those form an implicit shared kernel, visible workspace-wide: root VOs/enums resolve into every context's type space, root components into every page body. Aggregates, events, repositories, workflows, and views stay inside their `context`.
+- **Ambient (model-root) vs context-local.** `valueobject`, `enum`, the `payload` family, `capability`, expression-form `function`, and `component` may be declared at the model root. Those form an implicit shared kernel, visible workspace-wide: root VOs / enums / payloads resolve into every context's type space, root components into every page body. Aggregates, events, repositories, projections, workflows, handlers and policies stay inside their `context`. The deployment-shape members (`deployable`, `storage`, `resource`, `channelSource`, `ui`, `layout`, `theme`, `user`, `auth`, `api`, `test e2e`), a `migration "…" { … }` block, the traceability declarations and a `test "…" for <Subject>` are root-admissible too — root deployment members compose into the project's single `system`, so deployment can live in its own file.
 - **Cross-context aggregate references are unchanged** by imports — a `X id` reference still resolves only to an aggregate in the *same* context; `import` does not relax that. A context-local VO/enum that shadows a root-level one of the same name is a hard error, and root-level VO/enum, system, and context names must each be unique across the whole project.
 - `generate system <main.ddd>` is the multi-file-aware entry point; legacy `generate ts` / `generate dotnet` keep single-file semantics.
 
