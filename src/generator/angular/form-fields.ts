@@ -220,7 +220,14 @@ export function addNg(ctx: WalkContext, from: string, ...names: string[]): void 
 export function controlInit(t: TypeIR): string {
   if (t.kind === "primitive") {
     if (t.name === "bool") return "false";
-    if (t.name === "int" || t.name === "long" || t.name === "decimal" || t.name === "money") {
+    // `money` is a STRING on the wire (`wireTsType` maps it to `string`), so the
+    // control must seed a string too — a `FormControl(0)` types as
+    // `FormControl<number>` and fails `TS2345` when `getRawValue()` is handed to
+    // the request DTO, and if suppressed it would POST a JSON number the
+    // backends reject.  `"0"` (not `""`) so an untouched required control is a
+    // parseable decimal.
+    if (t.name === "money") return '"0"';
+    if (t.name === "int" || t.name === "long" || t.name === "decimal") {
       return "0";
     }
     return '""';
@@ -324,9 +331,15 @@ export function fieldInput(
     }
     return `<label class="loom-field"><span class="loom-label">${label}</span><select class="loom-input" formControlName=${cn}${testid}>@for (__o of ${hookVar}.data()?.items ?? []; track __o.id) {<option [value]="__o.id" [attr.data-testid]="'${optionTestid}-' + __o.id">{{ __o.display }}</option>}</select></label>`;
   }
+  // `money` is deliberately NOT numeric input: its control holds a decimal
+  // STRING (see `controlInit`), and a numeric widget — `type="number"` or
+  // PrimeNG's `p-inputnumber` — would bind a JS number back into it, losing the
+  // scale the wire carries.  A text input with `inputmode="decimal"` keeps the
+  // numeric soft keyboard on mobile without the coercion.
+  const isMoney = t.kind === "primitive" && t.name === "money";
+  const moneyMode = isMoney ? ' inputmode="decimal"' : "";
   const isNumeric =
-    t.kind === "primitive" &&
-    (t.name === "int" || t.name === "long" || t.name === "decimal" || t.name === "money");
+    t.kind === "primitive" && (t.name === "int" || t.name === "long" || t.name === "decimal");
   if (style === "primeng") {
     if (isNumeric) {
       addNg(ctx, "primeng/inputnumber", "InputNumberModule");
@@ -335,11 +348,13 @@ export function fieldInput(
     addNg(ctx, "primeng/inputtext", "InputTextModule");
     const inputType =
       t.kind === "primitive" && t.name === "datetime" ? ' type="datetime-local"' : "";
-    return `<label class="loom-field"><span class="loom-label">${label}</span><input pInputText class="loom-input"${inputType} formControlName=${cn}${testid} /></label>`;
+    return `<label class="loom-field"><span class="loom-label">${label}</span><input pInputText class="loom-input"${inputType}${moneyMode} formControlName=${cn}${testid} /></label>`;
   }
   let inputType = "";
   if (t.kind === "primitive") {
-    if (isNumeric) {
+    if (isMoney) {
+      inputType = ' type="text"';
+    } else if (isNumeric) {
       inputType = ' type="number"';
     } else if (t.name === "datetime") {
       inputType = ' type="datetime-local"';
@@ -348,9 +363,9 @@ export function fieldInput(
   if (style === "material") {
     addNg(ctx, "@angular/material/form-field", "MatFormFieldModule");
     addNg(ctx, "@angular/material/input", "MatInputModule");
-    return `<mat-form-field class="loom-field"><mat-label>${label}</mat-label><input matInput${inputType} formControlName=${cn}${testid}></mat-form-field>`;
+    return `<mat-form-field class="loom-field"><mat-label>${label}</mat-label><input matInput${inputType}${moneyMode} formControlName=${cn}${testid}></mat-form-field>`;
   }
-  return `<label class="loom-field"><span class="loom-label">${label}</span><input class="loom-input"${inputType} formControlName=${cn}${testid} /></label>`;
+  return `<label class="loom-field"><span class="loom-label">${label}</span><input class="loom-input"${inputType}${moneyMode} formControlName=${cn}${testid} /></label>`;
 }
 
 // ---------------------------------------------------------------------------
